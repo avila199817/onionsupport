@@ -1,12 +1,9 @@
 <div class="panel-content incidencias">
 
-  <div class="panel-container">
+  <div class="container">
 
-    <!-- =========================
-         HEADER
-    ========================= -->
-    <div class="dashboard-header clean">
-
+    <!-- HEADER -->
+    <div class="dashboard-header">
       <div class="header-left">
         <h1 class="page-title">Incidencias</h1>
         <p class="page-subtitle">
@@ -19,13 +16,36 @@
           + Nueva incidencia
         </button>
       </div>
+    </div>
+
+
+    <!-- KPI -->
+    <div class="grid-cards">
+
+      <div class="card">
+        <span class="card-title">Abiertas</span>
+        <span id="inc-open" class="card-value">--</span>
+      </div>
+
+      <div class="card">
+        <span class="card-title">En progreso</span>
+        <span id="inc-progress" class="card-value">--</span>
+      </div>
+
+      <div class="card">
+        <span class="card-title">Cerradas hoy</span>
+        <span id="inc-closed" class="card-value">--</span>
+      </div>
+
+      <div class="card">
+        <span class="card-title">Tiempo medio</span>
+        <span id="inc-time" class="card-value">--</span>
+      </div>
 
     </div>
 
 
-    <!-- =========================
-         FILTROS
-    ========================= -->
+    <!-- FILTROS -->
     <div class="panel-block filters">
 
       <div class="filters-row">
@@ -56,100 +76,72 @@
     </div>
 
 
-    <!-- =========================
-         KPIs
-    ========================= -->
-    <div class="grid-cards pro" id="incidencias-kpis">
+    <!-- GRID PRINCIPAL -->
+    <div class="dashboard-grid">
 
-      <div class="card">
-        <span class="card-title">Abiertas</span>
-        <span id="inc-open" class="card-value">--</span>
-      </div>
+      <!-- TABLA -->
+      <div class="panel-block table-block">
 
-      <div class="card">
-        <span class="card-title">En progreso</span>
-        <span id="inc-progress" class="card-value">--</span>
-      </div>
+        <div class="block-header minimal">
+          <h2 class="section-title">Listado de incidencias</h2>
+        </div>
 
-      <div class="card">
-        <span class="card-title">Cerradas hoy</span>
-        <span id="inc-closed" class="card-value">--</span>
-      </div>
+        <div class="table-container">
 
-      <div class="card">
-        <span class="card-title">Tiempo medio</span>
-        <span id="inc-time" class="card-value">--</span>
-      </div>
+          <table class="incidencias-table">
 
-    </div>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Título</th>
+                <th>Cliente</th>
+                <th>Estado</th>
+                <th>Prioridad</th>
+                <th>Fecha</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
 
+            <tbody id="incidencias-body">
+              <tr class="table-loading">
+                <td colspan="7">Cargando incidencias...</td>
+              </tr>
+            </tbody>
 
-    <!-- =========================
-         TABLA
-    ========================= -->
-    <div class="panel-block table-block">
+          </table>
 
-      <div class="block-header minimal">
-        <h2 class="section-title">Listado de incidencias</h2>
-      </div>
-
-      <div class="table-container">
-
-        <table class="incidencias-table">
-
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Título</th>
-              <th>Cliente</th>
-              <th>Estado</th>
-              <th>Prioridad</th>
-              <th>Fecha</th>
-              <th>Acciones</th>
-            </tr>
-          </thead>
-
-          <tbody id="incidencias-body">
-            <tr class="table-loading">
-              <td colspan="7">Cargando incidencias...</td>
-            </tr>
-          </tbody>
-
-        </table>
+        </div>
 
       </div>
 
-    </div>
 
+      <!-- DETALLE -->
+      <div 
+        class="panel-block detalle"
+        id="detalle-incidencia"
+        style="display:none;"
+      >
 
-    <!-- =========================
-         DETALLE
-    ========================= -->
-    <div 
-      class="panel-block detalle"
-      id="detalle-incidencia"
-      style="display:none;"
-    >
+        <div class="block-header minimal">
+          <h2 class="section-title">Detalle</h2>
+        </div>
 
-      <div class="block-header minimal">
-        <h2 class="section-title">Detalle de incidencia</h2>
-      </div>
+        <div class="detalle-content">
 
-      <div class="detalle-content">
+          <h3 id="detalle-titulo">--</h3>
+          <p id="detalle-desc">--</p>
 
-        <h3 id="detalle-titulo">--</h3>
-        <p id="detalle-desc">--</p>
+          <div class="detalle-meta">
+            <span id="detalle-estado">Estado: --</span>
+            <span id="detalle-prioridad">Prioridad: --</span>
+            <span id="detalle-fecha">Fecha: --</span>
+          </div>
 
-        <div class="detalle-meta">
-          <span id="detalle-estado">Estado: --</span>
-          <span id="detalle-prioridad">Prioridad: --</span>
-          <span id="detalle-fecha">Fecha: --</span>
         </div>
 
       </div>
 
     </div>
-
 
   </div>
 

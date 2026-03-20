@@ -1,22 +1,19 @@
 /* =========================
-   HOME (FINAL SAAS PRO)
+   HOME (FINAL PRO ALIGNED)
 ========================= */
 
 .home{
   width:100%;
 }
 
-/* =========================
-   CONTAINER
-========================= */
-
 .home .container{
   padding-top:0;
-  padding-bottom:var(--space-xl);
+  padding-bottom:50px;
 }
 
+
 /* =========================
-   HEADER (ALINEADO CON SEARCH)
+   HEADER (ALINEADO REAL)
 ========================= */
 
 .home .dashboard-header{
@@ -28,7 +25,7 @@
   margin-top:calc(-1 * var(--topbar-height) + var(--header-offset-y));
   padding-top:var(--topbar-height);
 
-  margin-bottom:var(--space-xl);
+  margin-bottom:40px;
 }
 
 .home .dashboard-header .header-left{
@@ -44,9 +41,9 @@
 .home .page-title{
   margin:0;
 
-  font-size:26px;
+  font-size:24px;
   font-weight:600;
-  letter-spacing:-0.4px;
+  letter-spacing:-0.3px;
 
   line-height:1.1;
   color:var(--text);
@@ -65,7 +62,7 @@
 .home .grid-cards{
   display:grid;
   grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
-  gap:var(--space-lg);
+  gap:22px;
 }
 
 /* =========================
@@ -75,17 +72,17 @@
 .home .card{
   background:var(--card-bg);
   border:1px solid var(--card-border);
-  border-radius:var(--radius-lg);
+  border-radius:18px;
 
-  padding:var(--space-lg);
+  padding:20px;
 
-  box-shadow:var(--shadow-md);
-  transition:var(--transition-base);
+  box-shadow:var(--card-shadow);
+  transition:.25s ease;
 }
 
 .home .card:hover{
   transform:translateY(-4px);
-  box-shadow:var(--shadow-lg);
+  box-shadow:var(--card-shadow-hover);
 }
 
 .home .card-title{
@@ -95,9 +92,9 @@
 
 .home .card-value{
   display:block;
-  margin-top:var(--space-sm);
+  margin-top:12px;
 
-  font-size:32px;
+  font-size:30px;
   font-weight:600;
 
   color:var(--text);
@@ -105,9 +102,9 @@
 
 .home .card-meta{
   display:flex;
-  gap:var(--space-xs);
+  gap:8px;
   align-items:center;
-  margin-top:var(--space-sm);
+  margin-top:10px;
 }
 
 .home .card-extra{
@@ -123,8 +120,8 @@
   display:grid;
   grid-template-columns:repeat(auto-fit, minmax(300px, 1fr));
 
-  gap:var(--space-lg);
-  margin-top:var(--space-xl);
+  gap:22px;
+  margin-top:30px;
 }
 
 /* =========================
@@ -134,11 +131,11 @@
 .home .panel-block{
   background:var(--panel-bg);
   border:1px solid var(--panel-border);
-  border-radius:var(--radius-lg);
+  border-radius:18px;
 
-  padding:var(--space-lg);
+  padding:20px;
 
-  box-shadow:var(--shadow-md);
+  box-shadow:var(--panel-shadow);
 }
 
 .home .section-title{
@@ -155,9 +152,9 @@
 .home .status-list{
   display:flex;
   flex-direction:column;
-  gap:var(--space-sm);
+  gap:12px;
 
-  margin-top:var(--space-sm);
+  margin-top:10px;
 }
 
 /* =========================
@@ -168,16 +165,16 @@
   display:grid;
   grid-template-columns:repeat(3,1fr);
 
-  gap:var(--space-sm);
-  margin-top:var(--space-sm);
+  gap:12px;
+  margin-top:10px;
 }
 
 .home .summary-item{
   background:var(--card-bg);
   border:1px solid var(--card-border);
 
-  padding:var(--space-md);
-  border-radius:var(--radius-md);
+  padding:14px;
+  border-radius:14px;
 
   text-align:center;
 }
@@ -200,14 +197,14 @@
 .home .alert-list{
   display:flex;
   flex-direction:column;
-  gap:var(--space-sm);
+  gap:10px;
 
-  margin-top:var(--space-sm);
+  margin-top:10px;
 }
 
 .home .alert-item{
-  padding:var(--space-md);
-  border-radius:var(--radius-md);
+  padding:12px;
+  border-radius:12px;
   font-size:13px;
 }
 
@@ -218,7 +215,7 @@
 @media (max-width:1024px){
 
   .home .container{
-    padding:var(--space-lg);
+    padding:20px;
   }
 
 }
@@ -226,14 +223,14 @@
 @media (max-width:768px){
 
   .home .container{
-    padding:var(--space-md);
+    padding:16px;
   }
 
   .home .dashboard-header{
     height:auto;
     flex-direction:column;
     align-items:flex-start;
-    gap:var(--space-sm);
+    gap:10px;
 
     margin-top:0;
     padding-top:0;
@@ -250,12 +247,15 @@
 @media (max-width:480px){
 
   .home .container{
-    padding:var(--space-sm);
+    padding:12px;
   }
 
-  .home .card,
+  .home .card{
+    padding:16px;
+  }
+
   .home .panel-block{
-    padding:var(--space-md);
+    padding:16px;
   }
 
   .home .card-value{

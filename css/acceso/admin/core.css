@@ -594,57 +594,7 @@ body{
 }
 
 /* =========================
-   GLOBAL TOPBAR (GRID ALIGNED)
-========================= */
-
-.global-topbar{
-  position: fixed;
-  top: 0;
-  right: 0;
-  left: 260px; /* sidebar */
-
-  z-index: 50;
-
-  height: 64px;
-
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-
-  padding-right: var(--content-x);
-
-  pointer-events: none;
-}
-
-/* SIDEBAR COLLAPSED */
-.sidebar.collapsed ~ .main-content .global-topbar{
-  left: 72px;
-}
-
-/* =========================
-   CONTENEDOR INTERNO (CLAVE)
-   🔥 esto alinea con las cards
-========================= */
-
-.topbar-inner{
-  width: 100%;
-  max-width: 1200px; /* 🔥 MISMO ancho que tus cards */
-  margin: 0 auto;
-
-  display: flex;
-  justify-content: flex-end;
-}
-
-/* =========================
-   MAIN CONTENT FIX (REAL)
-========================= */
-
-.main-content{
-  padding-top: 0; /* 🔥 el H1 vuelve a su sitio */
-}
-
-/* =========================
-   GLOBAL TOPBAR (REAL ALIGN HOME)
+   GLOBAL TOPBAR (FINAL FIX REAL)
 ========================= */
 
 .global-topbar{
@@ -656,9 +606,6 @@ body{
   height: 64px;
   z-index: 50;
 
-  display: flex;
-  align-items: center;
-
   pointer-events: none;
 }
 
@@ -668,16 +615,15 @@ body{
 }
 
 /* =========================
-   INNER (CLAVE TOTAL)
-   🔥 MISMO SISTEMA QUE .panel-container
+   INNER ALINEADO 100% A HOME
 ========================= */
 
 .topbar-inner{
   width: 100%;
-  max-width: 1300px; /* 🔥 EXACTO COMO HOME */
+  max-width: 1300px; /* 🔥 EXACTO MISMO QUE panel-container */
   margin: 0 auto;
 
-  padding: 0 40px; /* 🔥 MISMO padding que .home */
+  padding: 14px 40px 0; /* 🔥 MISMO padding que .home */
 
   display: flex;
   justify-content: flex-end;
@@ -685,7 +631,7 @@ body{
 }
 
 /* =========================
-   SEARCH BOX (SAAS CLEAN)
+   SEARCH BOX
 ========================= */
 
 .search-box{
@@ -710,41 +656,18 @@ body{
   transition: all .2s ease;
 }
 
-/* HOVER */
-
 .search-box:hover{
   background: rgba(40,40,40,0.75);
-  border-color: rgba(255,255,255,0.08);
 }
-
-/* FOCUS */
 
 .search-box:focus-within{
   border-color: var(--info);
-
   box-shadow:
     0 0 0 2px var(--info-bg),
     0 8px 25px rgba(0,0,0,0.35);
-
-  transform: translateY(-1px);
 }
 
-/* =========================
-   ICON
-========================= */
-
-.search-icon{
-  opacity: 0.7;
-  flex-shrink: 0;
-}
-
-.search-box:focus-within .search-icon{
-  opacity: 1;
-}
-
-/* =========================
-   INPUT
-========================= */
+/* INPUT */
 
 .search-box input{
   background: transparent;
@@ -757,20 +680,18 @@ body{
   width: 100%;
 }
 
-/* PLACEHOLDER */
-
 .search-box input::placeholder{
   color: var(--dim);
 }
 
 /* =========================
-   RESPONSIVE (SYNC HOME)
+   RESPONSIVE
 ========================= */
 
 @media (max-width:1024px){
 
   .topbar-inner{
-    padding: 0 20px; /* 🔥 mismo que home tablet */
+    padding: 14px 20px 0;
   }
 
 }
@@ -779,16 +700,19 @@ body{
 
   .global-topbar{
     left: 0;
-    justify-content: center;
   }
 
   .topbar-inner{
-    padding: 0 16px;
+    padding: 10px 16px;
     justify-content: center;
   }
 
   .search-box{
     width: 100%;
+    max-width: 420px;
+  }
+
+}
     max-width: 420px;
   }
 

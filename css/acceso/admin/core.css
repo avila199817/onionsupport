@@ -594,12 +594,12 @@ body{
 }
 
 /* =========================
-   SEARCH GLOBAL (PRO FINAL)
+   SEARCH GLOBAL (ALIGNED WITH HOME)
 ========================= */
 
-/* 🔥 VARIABLE GLOBAL DE ALINEACIÓN (CLAVE PRO) */
+/* 🔥 MISMO PADDING QUE .home */
 :root{
-  --content-x: 24px; /* mismo padding que tus cards */
+  --content-x: 40px;
 }
 
 /* SIN PADDING GLOBAL */
@@ -607,7 +607,7 @@ body{
   padding: 0;
 }
 
-/* 🔥 TOPBAR FLOTANTE PERFECTAMENTE ALINEADA */
+/* 🔥 TOPBAR FLOTANTE ALINEADA PERFECTA */
 .global-topbar{
   position: fixed;
   top: 0;
@@ -657,22 +657,25 @@ body{
   transition: all .2s ease;
 }
 
-/* 🔥 HOVER */
+/* HOVER */
+
 .search-box:hover{
   background: var(--sb-hover);
   border-color: var(--panel-border);
   color: var(--muted);
 }
 
-/* 🔥 FOCUS (FEEL PREMIUM) */
+/* FOCUS */
+
 .search-box:focus-within{
   border-color: var(--info);
   box-shadow:
     0 0 0 2px var(--info-bg),
-    0 6px 20px rgba(0,0,0,0.25); /* 🔥 profundidad */
+    0 6px 20px rgba(0,0,0,0.25);
+
   color: var(--text);
 
-  transform: translateY(-1px); /* micro efecto */
+  transform: translateY(-1px);
 }
 
 /* =========================
@@ -711,9 +714,9 @@ body{
 }
 
 /* =========================
-   MICRO AJUSTE VISUAL PRO
+   MICRO AJUSTE VISUAL
 ========================= */
 
 .search-box{
-  margin-right: 2px; /* 🔥 pixel perfect */
+  margin-right: 4px; /* 🔥 ajustado a 40px spacing */
 }

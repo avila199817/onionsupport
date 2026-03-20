@@ -510,9 +510,16 @@ Onion.render = async function(){
     Onion.setUser(user);
     Onion.slug.apply(user.slug);
 
-    await Onion.render();
-
+    // 🔥 listeners ANTES del primer render
     window.addEventListener("onion:navigate", Onion.render);
+
+    // 🔥 soporte botón atrás/adelante
+    window.addEventListener("popstate", () => {
+      Onion.render();
+    });
+
+    // 🔥 primer render
+    await Onion.render();
 
     Onion.ui.hideLoader();
 
@@ -522,10 +529,22 @@ Onion.render = async function(){
 
     if(e.message === "401" || e.message === "NO_TOKEN"){
       redirectLogin();
+      return;
+    }
+
+    // 🔥 fallback visual
+    const app = document.getElementById("app-content");
+    if(app){
+      app.innerHTML = `
+        <div style="padding:20px">
+          <h2>Error inicializando</h2>
+          <p>Intenta recargar la página.</p>
+        </div>
+      `;
     }
 
   }
 
 })();
-
+   
 })();

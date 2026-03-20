@@ -322,9 +322,9 @@ Onion.render = async function(){
     const url = Onion.router.resolve();
 
     // STYLE
-    const style = Onion.styles[route];
+    const style = Onion.styles[route] || Onion.styles["/"];
     if(style){
-      await Onion.loadStyle(style);
+    await Onion.loadStyle(style);
     }
 
     // HTML
@@ -355,10 +355,10 @@ Onion.render = async function(){
     }
 
     // SCRIPT
-    const script = Onion.scripts[route];
-    if(script){
-      await Onion.loadScript(script);
-    }
+   const script = Onion.scripts[route] || Onion.scripts["/"];
+   if(script){
+     await Onion.loadScript(script);
+   }
 
     document.body.classList.remove("loading");
 

@@ -156,15 +156,15 @@ html, body{
   -webkit-font-smoothing:antialiased;
   -moz-osx-font-smoothing:grayscale;
 
-  overscroll-behavior:none;
+  overscroll-behavior: none;
 }
 
 html{
-  scroll-behavior:smooth;
+  scroll-behavior: smooth;
 }
 
 body{
-  overflow-x:hidden;
+  overflow-x: hidden;
 }
 
 /* =========================
@@ -801,7 +801,7 @@ body{
 
 
 /* =========================
-   GLOBAL SEARCH (CORE GOD)
+   GLOBAL TOPBAR (CORE REAL)
 ========================= */
 
 .global-topbar{
@@ -810,93 +810,41 @@ body{
   left: 0;
   right: 0;
 
-  height: var(--topbar-height);
-
-  z-index: 2000; /* 🔥 por encima de TODO */
+  height: 64px;
+  z-index: 1000;
 
   pointer-events: none;
 }
 
 /* =========================
-   SEARCH POSITION
+   SEARCH CORE (EL JEFE)
 ========================= */
 
 .search-box{
-  position: absolute;
+  position: fixed;
 
-  top: 50%;
-  right: var(--content-padding);
+  top: 14px;
 
-  transform: translateY(-50%);
+  /* 🔥 RESPETA SIDEBAR */
+  left: calc(260px + 40px);
+  right: 40px;
 
-  pointer-events: auto;
+  max-width: 1300px;
+  margin: 0 auto;
 
+  /* 🔥 ALINEACIÓN DERECHA REAL */
   display: flex;
-  align-items: center;
-  gap: 10px;
+  justify-content: flex-end;
 
-  width: 340px; /* 🔥 MÁS ANCHO = PRO */
-
-  padding: 10px 14px;
-
-  border-radius: 14px;
-  border: 1px solid var(--panel-border);
-
-  background: rgba(30,30,30,0.7);
-  backdrop-filter: blur(10px);
-
-  color: var(--dim);
-
-  transition: all .2s ease;
+  pointer-events: none;
 }
 
-/* SIDEBAR OFFSET AUTOMÁTICO */
-
-.sidebar.collapsed ~ .global-topbar .search-box{
-  right: var(--content-padding);
+/* 🔥 EL INPUT REAL */
+.search-box > *{
+  pointer-events: auto;
 }
 
-/* =========================
-   HOVER + FOCUS
-========================= */
-
-.search-box:hover{
-  background: rgba(40,40,40,0.85);
-}
-
-.search-box:focus-within{
-  border-color: var(--info);
-  box-shadow:
-    0 0 0 2px var(--info-bg),
-    0 10px 30px rgba(0,0,0,0.4);
-}
-
-/* =========================
-   ICON
-========================= */
-
-.search-icon{
-  opacity: 0.7;
-}
-
-.search-box:focus-within .search-icon{
-  opacity: 1;
-}
-
-/* =========================
-   INPUT
-========================= */
-
+/* 🔥 CAJA VISUAL */
 .search-box input{
-  width: 100%;
-  background: transparent;
-  border: none;
-  outline: none;
-
-  color: var(--text);
-  font-size: 14px;
-}
-
-.search-box input::placeholder{
-  color: var(--dim);
+  width: 320px;
 }

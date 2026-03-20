@@ -608,14 +608,14 @@ body{
 
 
 /* =========================
-   GLOBAL TOPBAR (FINAL REAL)
+   GLOBAL TOPBAR (REAL SIMPLE)
 ========================= */
 
 .global-topbar{
   position: fixed;
   top: 0;
-  left: 260px;
   right: 0;
+  left: 0;
 
   height: 64px;
   z-index: 1000;
@@ -623,33 +623,39 @@ body{
   pointer-events: none;
 }
 
-/* SIDEBAR COLLAPSED */
-.sidebar.collapsed ~ .global-topbar{
-  left: 72px;
-}
-
 /* =========================
-   ESTRUCTURA IGUAL QUE HOME
+   ALINEACIÓN REAL (MISMO SISTEMA QUE HOME)
 ========================= */
 
-/* padding externo (igual que .home) */
 .topbar-inner{
-  width: 100%;
-  padding: 14px 40px 0;
+  height: 100%;
+
+  /* 🔥 CLAVE */
+  margin-left: 260px;
+
+  display: flex;
+  align-items: flex-start;
 }
 
-/* contenedor real (igual que .panel-container) */
+/* sidebar collapsed */
+.sidebar.collapsed ~ .global-topbar .topbar-inner{
+  margin-left: 72px;
+}
+
+/* CONTENEDOR IGUAL QUE HOME */
 .topbar-content{
+  width: 100%;
   max-width: 1300px;
   margin: 0 auto;
 
+  padding: 14px 40px 0;
+
   display: flex;
   justify-content: flex-end;
-  align-items: center;
 }
 
 /* =========================
-   SEARCH BOX (PRO SAAS)
+   SEARCH BOX
 ========================= */
 
 .search-box{
@@ -674,13 +680,9 @@ body{
   transition: all .2s ease;
 }
 
-/* HOVER */
-
 .search-box:hover{
   background: rgba(40,40,40,0.75);
 }
-
-/* FOCUS */
 
 .search-box:focus-within{
   border-color: var(--info);
@@ -689,26 +691,20 @@ body{
     0 8px 25px rgba(0,0,0,0.35);
 }
 
-/* =========================
-   ICON
-========================= */
+/* ICON */
 
 .search-icon{
   opacity: 0.7;
-  flex-shrink: 0;
 }
 
 .search-box:focus-within .search-icon{
   opacity: 1;
 }
 
-/* =========================
-   INPUT
-========================= */
+/* INPUT */
 
 .search-box input{
   width: 100%;
-
   background: transparent;
   border: none;
   outline: none;
@@ -722,29 +718,26 @@ body{
 }
 
 /* =========================
-   RESPONSIVE (SYNC HOME)
+   FIX CONTENIDO (CLAVE)
 ========================= */
 
-@media (max-width:1024px){
-
-  .topbar-inner{
-    padding: 14px 20px 0;
-  }
-
+.main-content{
+  padding-top: 64px;
 }
+
+/* =========================
+   RESPONSIVE
+========================= */
 
 @media (max-width:768px){
 
-  .global-topbar{
-    left: 0;
-  }
-
   .topbar-inner{
-    padding: 10px 16px;
+    margin-left: 0;
   }
 
   .topbar-content{
     justify-content: center;
+    padding: 10px 16px;
   }
 
   .search-box{

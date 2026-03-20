@@ -230,9 +230,9 @@ Onion.router.get = function(){
 
   let path = window.location.pathname || "/";
 
-  if(path.startsWith("/es/acceso/admin")){
-    path = path.replace("/es/acceso/admin", "");
-  }
+   if(path.startsWith("/es")){
+     path = path.replace("/es", "");
+   }
 
   path = path.split("?")[0];
   path = path.split("#")[0];
@@ -420,16 +420,10 @@ Onion.render = async function(){
     const username = (user.username || user.name || "usuario").toLowerCase();
 
     // 🔥 SIEMPRE normaliza URL tras login
-   const current = window.location.pathname;
-   
-   // 🔥 normalizar cualquier mierda de ruta
-   if(
-     !current.startsWith("/@") ||
-     current.startsWith("/es") ||
-     current.startsWith("/index")
-   ){
-     window.history.replaceState({}, "", "/@" + username);
-   }
+      if(!window.location.pathname.startsWith("/@")){
+        Onion.go("/");
+        return;
+      }
 
     await Onion.render();
 

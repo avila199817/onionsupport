@@ -800,8 +800,11 @@ body{
 
 
 
+
+
+
 /* =========================
-   GLOBAL TOPBAR (CORE REAL)
+   GLOBAL SEARCH (CORE GOD FINAL)
 ========================= */
 
 .global-topbar{
@@ -810,41 +813,96 @@ body{
   left: 0;
   right: 0;
 
-  height: 64px;
-  z-index: 1000;
+  height: var(--topbar-height);
+
+  z-index: 2000; /* 🔥 por encima de TODO */
 
   pointer-events: none;
 }
 
 /* =========================
-   SEARCH CORE (EL JEFE)
+   SEARCH POSITION (FIXED REAL)
 ========================= */
 
 .search-box{
-  position: fixed;
+  position: fixed; /* 🔥 LA CLAVE ABSOLUTA */
 
   top: 14px;
+  right: var(--content-padding);
 
-  /* 🔥 RESPETA SIDEBAR */
-  left: calc(260px + 40px);
-  right: 40px;
+  z-index: 3000;
 
-  max-width: 1300px;
-  margin: 0 auto;
-
-  /* 🔥 ALINEACIÓN DERECHA REAL */
-  display: flex;
-  justify-content: flex-end;
-
-  pointer-events: none;
-}
-
-/* 🔥 EL INPUT REAL */
-.search-box > *{
   pointer-events: auto;
+
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  width: 340px;
+
+  padding: 10px 14px;
+
+  border-radius: 14px;
+  border: 1px solid var(--panel-border);
+
+  background: rgba(30,30,30,0.7);
+  backdrop-filter: blur(10px);
+
+  color: var(--dim);
+
+  transition: all .2s ease;
 }
 
-/* 🔥 CAJA VISUAL */
+/* =========================
+   HOVER + FOCUS
+========================= */
+
+.search-box:hover{
+  background: rgba(40,40,40,0.85);
+}
+
+.search-box:focus-within{
+  border-color: var(--info);
+  box-shadow:
+    0 0 0 2px var(--info-bg),
+    0 10px 30px rgba(0,0,0,0.4);
+}
+
+/* =========================
+   ICON
+========================= */
+
+.search-icon{
+  opacity: 0.7;
+}
+
+.search-box:focus-within .search-icon{
+  opacity: 1;
+}
+
+/* =========================
+   INPUT
+========================= */
+
 .search-box input{
-  width: 320px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+
+  color: var(--text);
+  font-size: 14px;
+}
+
+.search-box input::placeholder{
+  color: var(--dim);
+}
+
+/* =========================
+   🔥 ANTI-BUG (BLINDADO)
+========================= */
+
+.layout,
+.main-content{
+  transform: none !important;
 }

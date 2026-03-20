@@ -194,8 +194,22 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 /* =========================
-   RESET + BASE (CLEAN PRO)
+   RESET + BASE (FINAL PRO)
 ========================= */
 
 *,
@@ -208,8 +222,6 @@ html, body{
   margin:0;
   padding:0;
 
-  /* ❌ quitamos height:100% (rompe scroll en algunos casos) */
-
   background:var(--main-bg);
   color:var(--text);
 
@@ -219,12 +231,13 @@ html, body{
   -moz-osx-font-smoothing:grayscale;
 }
 
-/* scroll suave */
+/* scroll comportamiento */
 html{
   scroll-behavior:smooth;
+  overscroll-behavior-y:none; /* 🔥 bloquea rebote al final */
 }
 
-/* solo control horizontal */
+/* control horizontal */
 body{
   overflow-x:hidden;
 }
@@ -236,7 +249,7 @@ body{
 
 .layout{
   position:relative;
-  min-height:100vh;
+  min-height:100dvh; /* 🔥 fix mobile */
 }
 
 
@@ -258,7 +271,7 @@ body{
 
 .main-content{
   margin-left:var(--sidebar-width);
-  min-height:100vh;
+  min-height:100dvh;
 
   padding-top:var(--topbar-height);
 
@@ -283,14 +296,14 @@ body{
   width:10px;
 }
 
-/* track (fondo) */
+/* track */
 ::-webkit-scrollbar-track{
   background:transparent;
 }
 
-/* thumb (barra) */
+/* thumb */
 ::-webkit-scrollbar-thumb{
-  background:rgba(255,255,255,0.18); /* 🔥 más visible */
+  background:var(--scrollbar-thumb);
   border-radius:10px;
   border:2px solid transparent;
   background-clip:padding-box;
@@ -301,7 +314,7 @@ body{
   background:rgba(255,255,255,0.35);
 }
 
-/* active (cuando haces click) */
+/* active */
 ::-webkit-scrollbar-thumb:active{
   background:rgba(255,255,255,0.5);
 }
@@ -313,9 +326,8 @@ body{
 
 *{
   scrollbar-width:thin;
-  scrollbar-color:rgba(255,255,255,0.3) transparent;
+  scrollbar-color:var(--scrollbar-thumb) transparent;
 }
-
 
 
 

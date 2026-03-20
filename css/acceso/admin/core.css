@@ -594,27 +594,24 @@ body{
 }
 
 /* =========================
-   SEARCH GLOBAL (ALIGNED WITH HOME)
+   SEARCH GLOBAL (FINAL PRO SAFE)
 ========================= */
 
-/* 🔥 MISMO PADDING QUE .home */
+/* 🔥 MISMO PADDING QUE HOME */
 :root{
   --content-x: 40px;
 }
 
-/* SIN PADDING GLOBAL */
+/* ❌ NO TOCAMOS EL LAYOUT GLOBAL */
 #app-content{
   padding: 0;
 }
 
-/* 🔥 TOPBAR FLOTANTE ALINEADA PERFECTA */
+/* 🔥 TOPBAR STICKY SIN ROMPER FLUJO */
 .global-topbar{
   position: sticky;
   top: 0;
-  right: 0;
-  left: 260px;
-
-  z-index: 50;
+  z-index: 40;
 
   display: flex;
   justify-content: flex-end;
@@ -623,16 +620,11 @@ body{
   height: 64px;
 
   padding-right: var(--content-x);
-  padding-left: 0;
+  padding-left: var(--content-x);
 
+  /* 🔥 IMPORTANTE: SIN BLOQUE VISUAL */
   background: transparent;
   border: none;
-  backdrop-filter: none;
-}
-
-/* 🔥 SIDEBAR COLLAPSED */
-.sidebar.collapsed ~ .main-content .global-topbar{
-  left: 72px;
 }
 
 /* =========================
@@ -714,9 +706,37 @@ body{
 }
 
 /* =========================
-   MICRO AJUSTE VISUAL
+   RESPONSIVE (FINO)
 ========================= */
 
-.search-box{
-  margin-right: 4px; /* 🔥 ajustado a 40px spacing */
+@media (max-width:1024px){
+
+  .global-topbar{
+    padding-right: 20px;
+    padding-left: 20px;
+  }
+
+  .search-box input{
+    width: 180px;
+  }
+
+}
+
+@media (max-width:768px){
+
+  .global-topbar{
+    justify-content: center;
+    padding: 10px 16px;
+    height: auto;
+  }
+
+  .search-box{
+    width: 100%;
+    max-width: 400px;
+  }
+
+  .search-box input{
+    width: 100%;
+  }
+
 }

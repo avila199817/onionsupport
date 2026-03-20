@@ -1,0 +1,136 @@
+<div class="panel-content incidencias">
+
+  <div class="panel-container">
+
+    <!-- HEADER -->
+    <div class="dashboard-header clean">
+      <div>
+        <h1 class="page-title">Incidencias</h1>
+        <p class="page-subtitle">Gestión y seguimiento de tickets en tiempo real</p>
+      </div>
+
+      <div class="header-actions">
+        <button class="btn primary" id="crear-incidencia">
+          + Nueva incidencia
+        </button>
+      </div>
+    </div>
+
+
+    <!-- FILTROS -->
+    <div class="panel-block filters">
+
+      <div class="filters-row">
+
+        <input 
+          type="text" 
+          placeholder="Buscar incidencia..." 
+          id="search-incidencia"
+        >
+
+        <select id="filter-status">
+          <option value="">Estado</option>
+          <option value="abierta">Abierta</option>
+          <option value="progreso">En progreso</option>
+          <option value="cerrada">Cerrada</option>
+        </select>
+
+        <select id="filter-priority">
+          <option value="">Prioridad</option>
+          <option value="alta">Alta</option>
+          <option value="media">Media</option>
+          <option value="baja">Baja</option>
+        </select>
+
+      </div>
+
+    </div>
+
+
+    <!-- KPIs -->
+    <div class="grid-cards pro">
+
+      <div class="card">
+        <span class="card-title">Abiertas</span>
+        <span id="inc-open" class="card-value">--</span>
+      </div>
+
+      <div class="card">
+        <span class="card-title">En progreso</span>
+        <span id="inc-progress" class="card-value">--</span>
+      </div>
+
+      <div class="card">
+        <span class="card-title">Cerradas hoy</span>
+        <span id="inc-closed" class="card-value">--</span>
+      </div>
+
+      <div class="card">
+        <span class="card-title">Tiempo medio</span>
+        <span id="inc-time" class="card-value">--</span>
+      </div>
+
+    </div>
+
+
+    <!-- TABLA -->
+    <div class="panel-block table-block">
+
+      <div class="block-header minimal">
+        <h2 class="section-title">Listado de incidencias</h2>
+      </div>
+
+      <div class="table-container">
+
+        <table class="incidencias-table">
+
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Título</th>
+              <th>Cliente</th>
+              <th>Estado</th>
+              <th>Prioridad</th>
+              <th>Fecha</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+
+          <tbody id="incidencias-body">
+            <tr>
+              <td colspan="7">Cargando incidencias...</td>
+            </tr>
+          </tbody>
+
+        </table>
+
+      </div>
+
+    </div>
+
+
+    <!-- DETALLE -->
+    <div class="panel-block detalle" id="detalle-incidencia" style="display:none;">
+
+      <div class="block-header minimal">
+        <h2 class="section-title">Detalle de incidencia</h2>
+      </div>
+
+      <div class="detalle-content">
+
+        <h3 id="detalle-titulo">--</h3>
+        <p id="detalle-desc">--</p>
+
+        <div class="detalle-meta">
+          <span id="detalle-estado">Estado: --</span>
+          <span id="detalle-prioridad">Prioridad: --</span>
+          <span id="detalle-fecha">Fecha: --</span>
+        </div>
+
+      </div>
+
+    </div>
+
+  </div>
+
+</div>

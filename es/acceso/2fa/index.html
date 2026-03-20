@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+
+<meta charset="UTF-8">
+<title>Verificación 2FA · Onion Support</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- 🚫 NO INDEXAR -->
+<meta name="robots" content="noindex, nofollow">
+
+<!-- Canonical -->
+<link rel="canonical" href="https://onionsupport.com/es/acceso/2fa/" />
+
+<!-- FAVICON -->
+<link rel="icon" type="image/png" href="https://onionassets.z43.web.core.windows.net/media/img/favicon_support.png">
+<link rel="apple-touch-icon" href="https://onionassets.z43.web.core.windows.net/media/img/Favicon/favicon_support.ico">
+
+<!-- CSS -->
+<link rel="stylesheet" href="/css/acceso/2fa/2fa.css">
+
+</head>
+
+<body>
+
+<a href="/es/acceso/" class="back-arrow" aria-label="Volver al acceso"></a>
+
+<div class="login-card">
+
+<div class="login-header">
+
+<img
+src="https://onionassets.z43.web.core.windows.net/media/img/Favicon/favicon_support.ico"
+alt="Onion Support"
+width="48"
+height="48"
+>
+
+<h2>Verificación en dos pasos</h2>
+<p>Introduce el código de tu aplicación de autenticación</p>
+
+</div>
+
+<form id="form2FA" novalidate autocomplete="one-time-code">
+
+<div class="login-error" style="display:none;" role="alert"></div>
+
+<div class="login-field code-grid" aria-label="Código de verificación">
+
+<input
+type="text"
+inputmode="numeric"
+pattern="[0-9]*"
+maxlength="1"
+class="code-box"
+autocomplete="one-time-code"
+aria-label="Dígito 1"
+>
+
+<input
+type="text"
+inputmode="numeric"
+pattern="[0-9]*"
+maxlength="1"
+class="code-box"
+aria-label="Dígito 2"
+>
+
+<input
+type="text"
+inputmode="numeric"
+pattern="[0-9]*"
+maxlength="1"
+class="code-box"
+aria-label="Dígito 3"
+>
+
+<span class="code-separator">-</span>
+
+<input
+type="text"
+inputmode="numeric"
+pattern="[0-9]*"
+maxlength="1"
+class="code-box"
+aria-label="Dígito 4"
+>
+
+<input
+type="text"
+inputmode="numeric"
+pattern="[0-9]*"
+maxlength="1"
+class="code-box"
+aria-label="Dígito 5"
+>
+
+<input
+type="text"
+inputmode="numeric"
+pattern="[0-9]*"
+maxlength="1"
+class="code-box"
+aria-label="Dígito 6"
+>
+
+</div>
+
+<input
+type="hidden"
+id="code"
+name="code"
+required
+>
+
+<button
+type="submit"
+class="login-button"
+aria-label="Verificar código"
+>
+Verificar
+</button>
+
+<div class="login-reset">
+<a href="/es/acceso/">
+Volver al acceso
+</a>
+</div>
+
+</form>
+
+<div class="login-footer">
+© 2026 Onion Support
+</div>
+
+</div>
+
+<script src="/js/acceso/2fa/acceso_2fa.js" defer></script>
+
+</body>
+</html>

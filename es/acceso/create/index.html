@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Activar cuenta · Onion Support</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- 🚫 NO INDEXAR -->
+  <meta name="robots" content="noindex, nofollow">
+
+  <!-- Canonical -->
+  <link rel="canonical" href="https://onionsupport.com/es/acceso/create/" />
+
+  <!-- FAVICON -->
+  <link rel="icon"
+        type="image/png"
+        href="https://onionassets.z43.web.core.windows.net/media/img/favicon_support.png">
+
+  <!-- CSS -->
+  <link rel="stylesheet" href="/css/nav/acceso.css">
+  <link rel="stylesheet" href="/css/acceso/password/password.css">
+</head>
+
+<body>
+
+<div class="login-card">
+
+  <div class="login-header">
+    <img
+      src="https://onionassets.z43.web.core.windows.net/media/img/Favicon/favicon_support.ico"
+      alt="Onion Support"
+      width="48"
+      height="48"
+    >
+    <h2>Activar cuenta</h2>
+    <p>Establece tu contraseña para completar el acceso</p>
+  </div>
+
+  <form id="activateForm" novalidate>
+
+    <div class="login-error"></div>
+
+    <!-- PASSWORD 1 -->
+    <div class="login-field">
+
+      <label for="password">Nueva contraseña</label>
+
+      <div class="password-wrapper">
+        <input
+          type="password"
+          id="password"
+          autocomplete="new-password"
+          required
+        >
+
+        <button
+          type="button"
+          class="password-toggle"
+          data-target="password"
+          aria-label="Mostrar contraseña"
+          aria-pressed="false">
+          <svg viewBox="0 0 24 24">
+            <path fill="currentColor"
+              d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7Zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8Z"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="caps-warning"
+           data-caps="password"
+           aria-live="polite">
+        Bloq Mayús activado
+      </div>
+
+    </div>
+
+    <!-- PASSWORD 2 -->
+    <div class="login-field">
+
+      <label for="password2">Repetir contraseña</label>
+
+      <div class="password-wrapper">
+        <input
+          type="password"
+          id="password2"
+          autocomplete="new-password"
+          required
+        >
+
+        <button
+          type="button"
+          class="password-toggle"
+          data-target="password2"
+          aria-label="Mostrar contraseña"
+          aria-pressed="false">
+          <svg viewBox="0 0 24 24">
+            <path fill="currentColor"
+              d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7Zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8Z"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="caps-warning"
+           data-caps="password2"
+           aria-live="polite">
+        Bloq Mayús activado
+      </div>
+
+    </div>
+
+    <button class="login-button" type="submit">
+      Activar cuenta
+    </button>
+
+  </form>
+
+  <div class="login-footer">
+    © 2026 Onion Support
+  </div>
+
+</div>
+
+<!-- TOAST -->
+<div id="toastContainer" class="toast-container"></div>
+
+<!-- CORE PASSWORD (si lo usas global) -->
+<!-- <script src="/js/core/ui-password.js"></script> -->
+
+<script src="/js/acceso/create/create.js"></script>
+
+</body>
+</html>

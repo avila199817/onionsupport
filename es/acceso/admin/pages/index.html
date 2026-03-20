@@ -1,0 +1,167 @@
+<div class="panel-content home">
+
+  <div class="panel-container">
+
+    <!-- HEADER -->
+    <div class="dashboard-header clean">
+      <div>
+        <h1 class="page-title">Onion Support</h1>
+        <p class="page-subtitle">Estado general del sistema y actividad en tiempo real</p>
+      </div>
+    </div>
+
+
+    <!-- KPI -->
+    <div class="grid-cards pro">
+
+      <div class="card highlight">
+        <span class="card-title">Incidencias activas</span>
+        <span id="home-incidencias" class="card-value">--</span>
+        <div class="card-meta">
+          <span class="trend up">+12%</span>
+          <span class="card-extra">vs última semana</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <span class="card-title">Clientes</span>
+        <span id="home-clientes" class="card-value">--</span>
+        <div class="card-meta">
+          <span class="trend up">+4%</span>
+          <span class="card-extra">crecimiento</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <span class="card-title">Facturación mensual</span>
+        <span id="home-facturas" class="card-value">--</span>
+        <div class="card-meta">
+          <span class="trend up">+8%</span>
+          <span class="card-extra">este mes</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <span class="card-title">Usuarios activos</span>
+        <span id="home-usuarios" class="card-value">--</span>
+        <div class="card-meta">
+          <span class="trend down">-2%</span>
+          <span class="card-extra">últimas 24h</span>
+        </div>
+      </div>
+
+    </div>
+
+
+    <!-- GRID PRINCIPAL -->
+    <div class="dashboard-grid pro">
+
+      <!-- ACTIVIDAD -->
+      <div class="panel-block activity">
+
+        <div class="block-header minimal">
+          <h2 class="section-title">Actividad reciente</h2>
+        </div>
+
+        <div id="activity-list" class="activity-list modern"></div>
+
+      </div>
+
+
+      <!-- SISTEMA -->
+      <div class="panel-block system">
+
+        <div class="block-header minimal">
+          <h2 class="section-title">Sistema</h2>
+        </div>
+
+        <div class="status-list modern">
+
+          <div class="status-item" id="status-api">
+            <span class="status-dot"></span>
+            API operativa
+          </div>
+
+          <div class="status-item" id="status-db">
+            <span class="status-dot"></span>
+            Base de datos activa
+          </div>
+
+          <div class="status-item" id="status-uptime">
+            <span class="status-dot"></span>
+            Uptime --
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+
+
+    <!-- SEGUNDO BLOQUE -->
+    <div class="dashboard-grid pro secondary">
+
+      <!-- RESUMEN -->
+      <div class="panel-block summary">
+
+        <div class="block-header minimal">
+          <h2 class="section-title">Rendimiento hoy</h2>
+        </div>
+
+        <div class="summary-grid modern">
+
+          <div class="summary-item">
+            <span class="summary-value">--</span>
+            <span class="summary-label">Tickets</span>
+          </div>
+
+          <div class="summary-item">
+            <span class="summary-value">--</span>
+            <span class="summary-label">Resueltos</span>
+          </div>
+
+          <div class="summary-item">
+            <span class="summary-value">--</span>
+            <span class="summary-label">Pendientes</span>
+          </div>
+
+        </div>
+
+      </div>
+
+
+      <!-- ALERTAS + SISTEMA 🔥 -->
+      <div class="panel-block alerts">
+
+        <div class="block-header minimal">
+          <h2 class="section-title">Sistema / Rendimiento</h2>
+        </div>
+
+        <div class="alert-list modern">
+
+          <div class="alert-item info" id="cpu-usage">
+            CPU: --
+          </div>
+
+          <div class="alert-item info" id="ram-usage">
+            RAM: --
+          </div>
+
+					<div class="alert-item info" id="disk-usage">
+            RAM: --
+          </div>
+
+          <div class="alert-item warn" id="system-warning" style="display:none;">
+            Uso elevado del sistema
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+
+  </div>
+
+</div>

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Restablecer contraseña · Onion Support</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- 🚫 NO INDEXAR -->
+  <meta name="robots" content="noindex, nofollow">
+
+  <!-- Canonical -->
+  <link rel="canonical" href="https://onionsupport.com/es/reset/" />
+
+  <!-- FAVICON -->
+  <link
+    rel="icon"
+    type="image/png"
+    href="https://onionassets.z43.web.core.windows.net/media/img/favicon_support.png"
+  >
+  <link
+    rel="apple-touch-icon"
+    href="https://onionassets.z43.web.core.windows.net/media/img/Favicon/favicon_support.ico"
+  >
+
+  <!-- CSS -->
+  <link rel="stylesheet" href="/css/nav/acceso.css">
+  <link rel="stylesheet" href="/css/acceso/password/password.css">
+</head>
+
+<body>
+
+  <!-- Flecha volver al login -->
+  <a href="/es/acceso/" class="back-arrow" aria-label="Volver al acceso"></a>
+
+  <div class="login-card">
+
+    <!-- Header -->
+    <div class="login-header">
+      <img
+        src="https://onionassets.z43.web.core.windows.net/media/img/Favicon/favicon_support.ico"
+        alt="Onion Support"
+        width="48"
+        height="48"
+      >
+      <h2>Recuperar contraseña</h2>
+      <p>Te enviaremos un enlace de restablecimiento</p>
+    </div>
+
+    <!-- Formulario -->
+    <form id="resetForm" novalidate>
+
+      <!-- Error / info -->
+      <div class="login-error" style="display:none;"></div>
+
+     <div class="login-field">
+       <input
+          type="email"
+          id="email"
+          name="email"
+          placeholder="Introduce tu email"
+          autocomplete="email"
+          required
+         >
+      </div>
+
+
+      <button type="submit" class="login-button">
+        Enviar enlace de recuperación
+      </button>
+
+      <!-- Texto auxiliar -->
+      <div class="login-reset">
+        <a href="/es/acceso/">
+          Volver al acceso
+        </a>
+      </div>
+
+    </form>
+
+    <!-- Footer -->
+    <div class="login-footer">
+      © 2026 Onion Support
+    </div>
+
+  </div>
+
+
+<!-- TOAST -->
+
+ <div id="toastContainer" class="toast-container"></div>
+
+  <!-- JS -->
+  <script src="/js/acceso/reset/reset.js"></script>
+
+
+</body>
+</html>

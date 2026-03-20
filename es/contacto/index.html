@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>Contacto · Soporte técnico Onion Support España</title>
+  <meta name="description" content="Contacta con Onion Support España. Abre una incidencia, solicita asistencia técnica o recibe soporte personalizado.">
+
+  <!-- Canonical -->
+  <link rel="canonical" href="https://onionsupport.com/es/contacto/" />
+
+  <!-- Hreflang -->
+  <link rel="alternate" hreflang="es" href="https://onionsupport.com/es/contacto/" />
+  <link rel="alternate" hreflang="x-default" href="https://onionsupport.com/es/contacto/" />
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Contacto · Onion Support España">
+  <meta property="og:description" content="Solicita soporte técnico o abre una incidencia con nuestro equipo.">
+  <meta property="og:url" content="https://onionsupport.com/es/contacto/">
+  <meta property="og:image" content="https://onionassets.blob.core.windows.net/$web/media/img/favicon_black_circle.png">
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Contacto · Onion Support España">
+  <meta name="twitter:description" content="Abre una incidencia o contacta con soporte técnico.">
+  <meta name="twitter:image" content="https://onionassets.blob.core.windows.net/$web/media/img/favicon_black_circle.png">
+
+  <!-- Favicon -->
+  <link rel="icon" href="https://onionassets.blob.core.windows.net/$web/media/img/favicon_black_circle.png">
+
+  <!-- GA -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-RQ77310QBH"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-RQ77310QBH');
+  </script>
+
+  <!-- CSS BASE -->
+  <link rel="stylesheet" href="/css/nav/core/nav_core.css">
+  <link rel="stylesheet" href="/css/nav/contacto.css">
+  <link rel="stylesheet" href="/css/nav/core/footer_core.css">
+</head>
+
+<body>
+
+  <!-- NAV DINÁMICO -->
+  <div id="nav-container"></div>
+
+  <!-- MAIN -->
+  <main id="contacto" class="page">
+
+    <!-- HERO -->
+    <section class="contact-hero">
+      <h1>Contactar con el soporte de <br>Onion</h1>
+    </section>
+
+    <!-- CONTENT -->
+    <section class="contact-content">
+      <div class="contact-grid">
+
+        <!-- TEXTO -->
+        <div class="contact-text">
+          <h2>Estamos aquí para ayudarte</h2>
+
+          <p>
+            Soporte técnico y consultas comerciales gestionadas por nuestro equipo especializado.
+            Ofrecemos respuestas claras, ágiles y orientadas a resolver.
+          </p>
+
+          <ul>
+            <li>🧑‍🤝‍🧑 Atención directa con nuestro equipo</li>
+            <li>💬 Consultas orientadas</li>
+            <li>🤝 Atención personalizada</li>
+            <li>🕒 Tiempo medio de respuesta: menos de 24h</li>
+            <li>📨 Email · Formulario web · Soporte directo</li>
+          </ul>
+        </div>
+
+        <!-- VISUAL -->
+        <div class="contact-visual">
+
+          <img
+            src="/media/img/favicon_black.png"
+            alt=""
+            class="contact-logo-bg"
+            aria-hidden="true"
+          >
+
+          <img
+            src="/media/img/Call_Support.png"
+            alt="Soporte Onion"
+            class="contact-image"
+          >
+
+          <button class="contact-open" aria-haspopup="dialog">
+            Contactar
+          </button>
+
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- FOOTER DINÁMICO -->
+  <div id="footer-container"></div>
+
+  <!-- MODAL CONTACTO -->
+  <div class="contact-modal" id="contactModal" role="dialog" aria-modal="true">
+
+    <div class="contact-modal-backdrop"></div>
+
+    <div class="contact-modal-panel">
+      <button class="contact-modal-close" aria-label="Cerrar">✕</button>
+
+      <h2>Contactar con Onion</h2>
+
+      <form class="contact-form" id="contactForm">
+
+        <div class="form-group">
+          <label for="name">Nombre</label>
+          <input type="text" id="name" name="name" required>
+        </div>
+
+        <div class="form-group">
+          <label for="email">Correo electrónico</label>
+          <input type="email" id="email" name="email" required>
+        </div>
+
+        <div class="form-group">
+          <label for="phone">Teléfono (opcional)</label>
+          <input type="tel" id="phone" name="phone" placeholder="+34 600 000 000">
+        </div>
+
+        <!-- TIPO -->
+        <div class="form-group">
+          <label>¿Eres empresa?</label>
+
+          <div class="form-radio-group">
+            <label>
+              <input type="radio" name="tipo" value="particular" checked>
+              No
+            </label>
+
+            <label>
+              <input type="radio" name="tipo" value="empresa">
+              Sí
+            </label>
+          </div>
+        </div>
+
+        <!-- CIF -->
+        <div class="form-group" id="cifGroup">
+          <label for="cif">CIF / NIF</label>
+          <input type="text" id="cif" name="cif" placeholder="B12345678">
+        </div>
+
+        <div class="form-group">
+          <label for="subject">Asunto</label>
+          <input type="text" id="subject" name="subject">
+        </div>
+
+        <div class="form-group">
+          <label for="message">Mensaje</label>
+          <textarea id="message" name="message" required></textarea>
+        </div>
+
+        <button type="submit" class="form-submit">
+          Enviar mensaje
+        </button>
+
+      </form>
+    </div>
+
+  </div>
+
+  <!-- JS -->
+  <script src="/js/nav/nav.js"></script>
+  <script src="/js/nav/footer.js"></script>
+  <script src="/js/nav/contacto.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Activar verificación en dos pasos · Onion Support</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- 🚫 NO INDEXAR -->
+<meta name="robots" content="noindex, nofollow">
+
+<!-- Canonical -->
+<link rel="canonical" href="https://onionsupport.com/es/acceso/2fa/setup/" />
+
+<!-- FAVICON -->
+<link rel="icon" type="image/png" href="https://onionassets.z43.web.core.windows.net/media/img/favicon_support.png">
+<link rel="apple-touch-icon" href="https://onionassets.z43.web.core.windows.net/media/img/Favicon/favicon_support.ico">
+
+<!-- CSS GLOBAL -->
+<link rel="stylesheet" href="/css/nav/acceso.css">
+<link rel="stylesheet" href="/css/acceso/password/password.css">
+
+<style>
+
+/* =========================
+   TOP LOADER
+========================= */
+
+#topLoader{
+position:fixed;
+top:0;
+left:0;
+width:100%;
+height:3px;
+background:rgba(255,255,255,.08);
+z-index:9999;
+overflow:hidden;
+}
+
+.loader-bar{
+width:40%;
+height:100%;
+background:#0071e3;
+animation:loaderMove 1s linear infinite;
+}
+
+@keyframes loaderMove{
+0%{transform:translateX(-100%);}
+100%{transform:translateX(300%);}
+}
+
+/* ocultar contenido hasta cargar QR */
+
+#pageContent{
+visibility:hidden;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<!-- BARRA DE CARGA -->
+<div id="topLoader">
+<div class="loader-bar"></div>
+</div>
+
+<div id="pageContent">
+
+<!-- Flecha volver -->
+<a href="/es/acceso/admin/cuenta/seguridad/" class="back-arrow" aria-label="Volver a seguridad"></a>
+
+<div class="login-card">
+
+<!-- Header -->
+<div class="login-header">
+<img
+src="https://onionassets.z43.web.core.windows.net/media/img/Favicon/favicon_support.ico"
+alt="Onion Support"
+width="48"
+height="48"
+>
+<h2>Activar verificación en dos pasos</h2>
+<p>Escanea el código QR con tu app de autenticación</p>
+</div>
+
+<!-- QR -->
+<div class="login-field" style="text-align:center;">
+<img id="qrImage" alt="QR 2FA" style="width:160px;height:160px;border-radius:12px;">
+</div>
+
+<!-- Código manual -->
+<div class="login-field" style="text-align:center;">
+<p style="font-size:13px;color:rgba(255,255,255,.6);margin-bottom:6px;">
+¿No puedes escanear? Usa este código:
+</p>
+<p id="manualCode" style="font-family:monospace;font-size:14px;letter-spacing:2px;"></p>
+</div>
+
+<!-- Formulario -->
+<form id="verify2faForm" novalidate>
+
+<div class="login-error" style="display:none;"></div>
+
+<div class="login-field code-grid">
+
+<input type="text" inputmode="numeric" maxlength="1" class="code-box" autocomplete="one-time-code">
+<input type="text" inputmode="numeric" maxlength="1" class="code-box">
+<input type="text" inputmode="numeric" maxlength="1" class="code-box">
+
+<span class="code-separator">-</span>
+
+<input type="text" inputmode="numeric" maxlength="1" class="code-box">
+<input type="text" inputmode="numeric" maxlength="1" class="code-box">
+<input type="text" inputmode="numeric" maxlength="1" class="code-box">
+
+</div>
+
+<input type="hidden" id="code" name="code" required>
+
+<button type="submit" class="login-button">
+Verificar y activar
+</button>
+
+<div class="login-reset">
+<a href="/es/acceso/admin/seguridad/">
+Cancelar
+</a>
+</div>
+
+</form>
+
+<div class="login-footer">
+© 2026 Onion Support
+</div>
+
+</div>
+
+</div>
+
+<script src="/js/acceso/admin/core/slug.js"></script>
+<script src="/js/acceso/2fa/setup.js"></script>
+
+<div class="toast-container"></div>
+
+</body>
+</html>

@@ -1,0 +1,90 @@
+<div class="panel-content facturas">
+
+  <div class="panel-container">
+
+    <!-- HEADER -->
+    <div class="facturas-header">
+
+      <div class="header-left">
+        <h1 class="page-title">Facturas</h1>
+        <p class="page-subtitle">Gestión y control de facturación</p>
+      </div>
+
+      <div class="header-right">
+        <button class="btn-primary">+ Nueva factura</button>
+      </div>
+
+    </div>
+
+
+    <!-- KPI -->
+    <div class="facturas-stats">
+
+      <div class="facturas-card">
+        <span class="facturas-label">Total facturado</span>
+        <span class="facturas-value" id="facturas-total">-- €</span>
+      </div>
+
+      <div class="facturas-card">
+        <span class="facturas-label">Pendientes</span>
+        <span class="facturas-value" id="facturas-pendientes">--</span>
+      </div>
+
+      <div class="facturas-card">
+        <span class="facturas-label">Pagadas</span>
+        <span class="facturas-value" id="facturas-pagadas">--</span>
+      </div>
+
+    </div>
+
+
+    <!-- TABLE -->
+    <div class="facturas-table-block">
+
+      <div class="table-header">
+        <h2 class="section-title">Listado de facturas</h2>
+      </div>
+
+      <div class="table-container">
+
+        <table class="facturas-table">
+
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Cliente</th>
+              <th>Fecha</th>
+              <th>Importe</th>
+              <th>Estado</th>
+            </tr>
+          </thead>
+
+          <tbody id="facturas-body">
+
+            <tr>
+              <td>#0001</td>
+              <td>Cliente Demo</td>
+              <td>01/03/2026</td>
+              <td>120€</td>
+              <td><span class="badge paid">Pagada</span></td>
+            </tr>
+
+            <tr>
+              <td>#0002</td>
+              <td>Empresa X</td>
+              <td>05/03/2026</td>
+              <td>300€</td>
+              <td><span class="badge pending">Pendiente</span></td>
+            </tr>
+
+          </tbody>
+
+        </table>
+
+      </div>
+
+    </div>
+
+  </div>
+
+</div>

@@ -278,9 +278,7 @@ body{
 
   padding-top:var(--topbar-height);
 
-    background:
-    var(--gradient-overlay),
-    var(--gradient-main);
+  background: transparent;
 
   transition: margin-left 1s cubic-bezier(.22,1,.36,1);
   will-change: margin-left;

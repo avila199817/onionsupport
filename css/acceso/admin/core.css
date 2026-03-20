@@ -594,20 +594,25 @@ body{
 }
 
 /* =========================
-   SEARCH GLOBAL (ONION STYLE)
+   SEARCH GLOBAL (PRO FINAL)
 ========================= */
+
+/* 🔥 VARIABLE GLOBAL DE ALINEACIÓN (CLAVE PRO) */
+:root{
+  --content-x: 24px; /* mismo padding que tus cards */
+}
 
 /* SIN PADDING GLOBAL */
 #app-content{
   padding: 0;
 }
 
-/* 🔥 TOPBAR FLOTANTE (NO EMPUJA CONTENIDO) */
+/* 🔥 TOPBAR FLOTANTE PERFECTAMENTE ALINEADA */
 .global-topbar{
   position: fixed;
   top: 0;
   right: 0;
-  left: 260px; /* ancho sidebar */
+  left: 260px;
 
   z-index: 50;
 
@@ -616,24 +621,30 @@ body{
   align-items: center;
 
   height: 64px;
-  padding: 0 24px;
 
-  background: transparent; /* 🔥 clave */
+  padding-right: var(--content-x);
+  padding-left: 0;
+
+  background: transparent;
   border: none;
   backdrop-filter: none;
 }
 
-/* 🔥 AJUSTE CUANDO SIDEBAR ESTÁ COLLAPSED */
+/* 🔥 SIDEBAR COLLAPSED */
 .sidebar.collapsed ~ .main-content .global-topbar{
   left: 72px;
 }
 
-/* BOX */
+/* =========================
+   SEARCH BOX
+========================= */
 
 .search-box{
   display: flex;
   align-items: center;
   gap: 10px;
+
+  min-width: 260px;
 
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
@@ -646,30 +657,41 @@ body{
   transition: all .2s ease;
 }
 
-/* HOVER */
-
+/* 🔥 HOVER */
 .search-box:hover{
   background: var(--sb-hover);
   border-color: var(--panel-border);
   color: var(--muted);
 }
 
-/* FOCUS */
-
+/* 🔥 FOCUS (FEEL PREMIUM) */
 .search-box:focus-within{
   border-color: var(--info);
-  box-shadow: 0 0 0 2px var(--info-bg);
+  box-shadow:
+    0 0 0 2px var(--info-bg),
+    0 6px 20px rgba(0,0,0,0.25); /* 🔥 profundidad */
   color: var(--text);
+
+  transform: translateY(-1px); /* micro efecto */
 }
 
-/* ICON */
+/* =========================
+   ICON
+========================= */
 
 .search-icon{
   opacity: 0.8;
   flex-shrink: 0;
+  transition: opacity .2s;
 }
 
-/* INPUT */
+.search-box:focus-within .search-icon{
+  opacity: 1;
+}
+
+/* =========================
+   INPUT
+========================= */
 
 .search-box input{
   background: transparent;
@@ -686,4 +708,12 @@ body{
 
 .search-box input::placeholder{
   color: var(--dim);
+}
+
+/* =========================
+   MICRO AJUSTE VISUAL PRO
+========================= */
+
+.search-box{
+  margin-right: 2px; /* 🔥 pixel perfect */
 }

@@ -27,6 +27,7 @@
   padding-top:var(--topbar-height);
 
   margin-bottom:40px;
+  transform: translateY(var(--header-offset-y));
 }
 
 .home .dashboard-header .header-left{

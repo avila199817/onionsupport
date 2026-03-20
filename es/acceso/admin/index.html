@@ -506,42 +506,33 @@ document.addEventListener("DOMContentLoaded", () => {
   initMenuTooltips();
 
 
-  /* =========================
-     SIDEBAR TOGGLE
-  ========================= */
+/* =========================
+   SIDEBAR TOGGLE
+========================= */
 
-  if(toggleSidebar && sidebar){
+if(toggleSidebar && sidebar){
 
-    toggleSidebar.addEventListener("click", ()=>{
+  toggleSidebar.addEventListener("click", ()=>{
 
-      const isCollapsed = sidebar.classList.contains("collapsed");
+    const isCollapsed = sidebar.classList.contains("collapsed");
 
-      if(dropdown){
-        dropdown.classList.remove("active");
-      }
+    // cerrar dropdown si está abierto
+    if(dropdown){
+      dropdown.classList.remove("active");
+    }
 
-      if(!isCollapsed){
+    // toggle limpio
+    sidebar.classList.toggle("collapsed");
 
-        sidebar.classList.add("closing");
+    // guardar estado
+    localStorage.setItem("sidebar-collapsed", !isCollapsed);
 
-        setTimeout(()=>{
-          sidebar.classList.add("collapsed");
-          sidebar.classList.remove("closing");
-          localStorage.setItem("sidebar-collapsed", true);
-          updateToggleTooltip();
-        }, 150);
+    // actualizar tooltip
+    updateToggleTooltip();
 
-      } else {
+  });
 
-        sidebar.classList.remove("collapsed");
-        localStorage.setItem("sidebar-collapsed", false);
-        updateToggleTooltip();
-
-      }
-
-    });
-
-  }
+}
 
 
   /* =========================

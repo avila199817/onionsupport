@@ -239,6 +239,11 @@ Onion.router.get = function(){
 
   path = path.replace(/\/+/g, "/");
 
+  // 🔥 soporte /@usuario
+  if(path.startsWith("/@")){
+    return "/";
+  }
+
   if(path.length > 1 && path.endsWith("/")){
     path = path.slice(0, -1);
   }
@@ -246,9 +251,6 @@ Onion.router.get = function(){
   if(!path || path === ""){
     path = "/";
   }
-
-  console.log("🌐 PATH:", window.location.pathname);
-  console.log("🧭 ROUTE:", path);
 
   return path;
 };
@@ -258,13 +260,10 @@ Onion.router.resolve = function(){
 
   const route = Onion.router.get();
 
-  console.log("🧭 RESOLVING:", route);
-
   if(Onion.routes[route]){
     return Onion.routes[route];
   }
 
-  console.warn("⚠️ Route not found:", route);
   return Onion.routes["/"];
 };
 
@@ -275,7 +274,13 @@ Onion.router.resolve = function(){
 
 Onion.go = function(path){
 
-  const clean = path.startsWith("/") ? path : "/" + path;
+  let clean = path.startsWith("/") ? path : "/" + path;
+
+  // 🔥 home → /@usuario
+  if(clean === "/" && Onion.state.user){
+    const username = (Onion.state.user.username || "usuario").toLowerCase();
+    clean = "/@" + username;
+  }
 
   window.history.pushState({}, "", clean);
   window.dispatchEvent(new Event("onion:navigate"));
@@ -355,6 +360,9 @@ Onion.render = async function(){
     app.innerHTML = "";
     app.appendChild(content || container);
 
+    // 🔥 cargar sidebar siempre
+    await Onion.loadScript("/js/acceso/admin/pages/components/sidebar.js");
+
     if(window.renderSidebar){
       window.renderSidebar();
     }
@@ -404,6 +412,13 @@ Onion.render = async function(){
     const user = res.user || res;
 
     Onion.setUser(user);
+
+    // 🔥 cambiar URL a /@usuario
+    const username = (user.username || user.name || "usuario").toLowerCase();
+
+    if(window.location.pathname === "/"){
+      window.history.replaceState({}, "", "/@" + username);
+    }
 
     await Onion.render();
 

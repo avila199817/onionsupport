@@ -429,8 +429,8 @@ body{
 
   background:var(--sb-bg);
   overflow:visible;
-
-  transition:width .25s cubic-bezier(.4,0,.2,1);
+	
+  transition:width .35s cubic-bezier(.25,.8,.25,1);
   box-shadow: inset -1px 0 0 var(--sb-border);
 
   z-index:100;

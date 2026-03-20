@@ -279,7 +279,7 @@ body{
     var(--gradient-overlay),
     var(--gradient-main);
 
-  transition: margin-left .35s cubic-bezier(.4,0,.2,1);
+  transition: margin-left 1s cubic-bezier(.22,1,.36,1);
   will-change: margin-left;
 }
 
@@ -584,16 +584,16 @@ body{
   transform:translateX(0) scale(1);
 
   transition:
-    opacity .25s ease,
-    transform .35s cubic-bezier(.4,0,.2,1);
+    opacity .4s ease,
+    transform 1s cubic-bezier(.22,1,.36,1); /* 🔥 easing cinematic */
 
-  transition-delay: .08s;
+  transition-delay: .15s; /* aparece tarde */
 }
 
 .sidebar.collapsed .menu-item span:last-child,
 .sidebar.collapsed .user-info{
   opacity:0;
-  transform:translateX(-14px) scale(.96);
+  transform:translateX(-18px) scale(.94);
 
   pointer-events:none;
 

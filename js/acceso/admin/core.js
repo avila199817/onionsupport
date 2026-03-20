@@ -420,10 +420,10 @@ Onion.render = async function(){
     const username = (user.username || user.name || "usuario").toLowerCase();
 
     // 🔥 SIEMPRE normaliza URL tras login
-      if(!window.location.pathname.startsWith("/@")){
-        Onion.go("/");
-        return;
-      }
+    if(!window.location.pathname.startsWith("/@")){
+      Onion.go("/");
+      return;
+    }
 
     await Onion.render();
 

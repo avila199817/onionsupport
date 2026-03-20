@@ -575,21 +575,29 @@ body{
 }
 
 /* =========================
-   TEXTO (FIX ANIMACIÓN)
+   CINEMATIC TEXT ANIMATION
 ========================= */
 
 .menu-item span:last-child,
 .user-info{
   opacity:1;
-  transform:translateX(0);
-  transition:opacity .15s ease, transform .15s ease;
+  transform:translateX(0) scale(1);
+
+  transition:
+    opacity .25s ease,
+    transform .35s cubic-bezier(.4,0,.2,1);
+
+  transition-delay: .08s;
 }
 
 .sidebar.collapsed .menu-item span:last-child,
 .sidebar.collapsed .user-info{
   opacity:0;
-  transform:translateX(-6px);
+  transform:translateX(-14px) scale(.96);
+
   pointer-events:none;
+
+  transition-delay: 0s;
 }
 
 /* =========================

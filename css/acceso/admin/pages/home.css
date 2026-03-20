@@ -22,8 +22,8 @@
 
   height:var(--topbar-height);
 
-  /* 🔥 CLAVE: ocupar espacio del search */
-  margin-top:calc(-10 * var(--topbar-height) + var(--header-offset-y));
+  /* 🔥 SUBE EXACTAMENTE LO QUE BAJA EL CORE */
+  margin-top:calc(-1 * var(--topbar-height) + var(--header-offset-y));
   padding-top:var(--topbar-height);
 
   margin-bottom:40px;

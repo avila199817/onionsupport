@@ -6,13 +6,27 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Onion Support</title>
 
-</head>
-<body>
-
 <script>
-  // 👉 solo redirige al panel, SIN lógica
-  window.location.replace("/es/acceso/admin/");
+
+(function(){
+
+  const path = window.location.pathname;
+
+  // 👉 si ya estás en /es o panel → no tocar
+  if(
+    path.startsWith("/es/") ||
+    path.startsWith("/es")
+  ){
+    return;
+  }
+
+  // 👉 si entras a raíz → te manda a /es/
+  window.location.replace("/es/");
+
+})();
+
 </script>
 
-</body>
+</head>
+<body></body>
 </html>

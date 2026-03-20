@@ -284,6 +284,8 @@ body{
 
   transition: margin-left 1s cubic-bezier(.22,1,.36,1);
   will-change: margin-left;
+  position:relative;
+  z-index:1;
 }
 
 .sidebar.collapsed ~ .main-content{

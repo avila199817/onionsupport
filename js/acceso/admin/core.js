@@ -333,10 +333,19 @@ document.addEventListener("click",(e)=>{
     if(el.tagName === "A" && el.hasAttribute("data-link")){
 
       const href = el.getAttribute("href");
+      const force = el.hasAttribute("data-force");
 
       if(!href || href.startsWith("http")) return;
 
       e.preventDefault();
+
+      // 🔥 FORZAR recarga total si tiene data-force
+      if(force){
+        Onion.state.currentScript = null;
+        Onion.state.currentStyle = null;
+        Onion.cache.html = {};
+      }
+
       Onion.go(href);
       return;
     }

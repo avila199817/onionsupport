@@ -1,15 +1,14 @@
 /* =========================
-   INCIDENCIAS (ALIGNED PRO)
+   INCIDENCIAS (FINAL PRO ALIGNED)
 ========================= */
 
 .incidencias{
   width:100%;
 }
 
-.incidencias .panel-container{
-  max-width:1300px;
-  width:100%;
-  margin:0 auto;
+.incidencias .container{
+  padding-top:0;
+  padding-bottom:50px;
 }
 
 
@@ -31,6 +30,11 @@
   flex-direction:column;
   justify-content:center;
 }
+
+
+/* =========================
+   TITULO
+========================= */
 
 .incidencias .page-title{
   margin:0;
@@ -80,56 +84,18 @@
 
 
 /* =========================
-   FILTERS
-========================= */
-
-.incidencias .filters{
-  margin-top:20px;
-}
-
-.incidencias .filters-row{
-  display:flex;
-  gap:10px;
-  flex-wrap:wrap;
-}
-
-.incidencias .filters input,
-.incidencias .filters select{
-  background:var(--card-bg);
-  border:1px solid var(--card-border);
-  color:var(--text);
-
-  padding:10px 12px;
-  border-radius:10px;
-  outline:none;
-  font-size:14px;
-}
-
-.incidencias .filters input{
-  flex:1;
-  min-width:200px;
-}
-
-.incidencias .filters select{
-  min-width:150px;
-}
-
-
-/* =========================
-   GRID CARDS
+   GRID CARDS (IGUAL HOME)
 ========================= */
 
 .incidencias .grid-cards{
   display:grid;
   grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
   gap:22px;
-
-  margin-top:20px;
 }
 
 
 /* =========================
-   CARDS (MISMO ESTILO HOME)
+   CARDS (MISMO SISTEMA)
 ========================= */
 
 .incidencias .card{
@@ -165,7 +131,56 @@
 
 
 /* =========================
-   BLOCK
+   FILTROS (INTEGRADO)
+========================= */
+
+.incidencias .filters{
+  margin-top:30px;
+}
+
+.incidencias .filters-row{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+.incidencias .filters input,
+.incidencias .filters select{
+  background:var(--card-bg);
+  border:1px solid var(--card-border);
+  color:var(--text);
+
+  padding:10px 12px;
+  border-radius:10px;
+  outline:none;
+  font-size:14px;
+}
+
+.incidencias .filters input{
+  flex:1;
+  min-width:200px;
+}
+
+.incidencias .filters select{
+  min-width:150px;
+}
+
+
+/* =========================
+   GRID PRINCIPAL (CLAVE)
+========================= */
+
+.incidencias .dashboard-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(300px, 1fr));
+
+  gap:22px;
+  margin-top:30px;
+}
+
+
+/* =========================
+   BLOCKS (MISMO QUE HOME)
 ========================= */
 
 .incidencias .panel-block{
@@ -188,10 +203,6 @@
 /* =========================
    TABLE
 ========================= */
-
-.incidencias .table-block{
-  margin-top:20px;
-}
 
 .incidencias .table-container{
   width:100%;
@@ -275,10 +286,6 @@
    DETALLE
 ========================= */
 
-.incidencias .detalle{
-  margin-top:20px;
-}
-
 .incidencias .detalle-content{
   display:flex;
   flex-direction:column;
@@ -295,12 +302,12 @@
 
 
 /* =========================
-   RESPONSIVE
+   RESPONSIVE (CLON HOME)
 ========================= */
 
 @media (max-width:1024px){
 
-  .incidencias .panel-container{
+  .incidencias .container{
     padding:20px;
   }
 
@@ -308,7 +315,7 @@
 
 @media (max-width:768px){
 
-  .incidencias .panel-container{
+  .incidencias .container{
     padding:16px;
   }
 
@@ -317,6 +324,14 @@
     flex-direction:column;
     align-items:flex-start;
     gap:10px;
+
+    margin-top:0;
+    padding-top:0;
+  }
+
+  .incidencias .dashboard-grid,
+  .incidencias .grid-cards{
+    grid-template-columns:1fr;
   }
 
   .incidencias .filters-row{
@@ -328,15 +343,11 @@
     width:100%;
   }
 
-  .incidencias .grid-cards{
-    grid-template-columns:1fr;
-  }
-
 }
 
 @media (max-width:480px){
 
-  .incidencias .panel-container{
+  .incidencias .container{
     padding:12px;
   }
 

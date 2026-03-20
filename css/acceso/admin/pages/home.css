@@ -1,19 +1,22 @@
 /* =========================
-   HOME (FINAL PRO ALIGNED)
+   HOME (FINAL SAAS PRO)
 ========================= */
 
 .home{
   width:100%;
 }
 
-/* 🔥 NO DUPLICAR OFFSET DEL CORE */
+/* =========================
+   CONTAINER
+========================= */
+
 .home .container{
   padding-top:0;
-  padding-bottom:50px;
+  padding-bottom:var(--space-xl);
 }
 
 /* =========================
-   HEADER (ALINEADO CON SEARCH REAL)
+   HEADER (ALINEADO CON SEARCH)
 ========================= */
 
 .home .dashboard-header{
@@ -22,11 +25,10 @@
 
   height:var(--topbar-height);
 
-  /* 🔥 SUBE EXACTAMENTE LO QUE BAJA EL CORE */
   margin-top:calc(-1 * var(--topbar-height) + var(--header-offset-y));
   padding-top:var(--topbar-height);
 
-  margin-bottom:40px;
+  margin-bottom:var(--space-xl);
 }
 
 .home .dashboard-header .header-left{
@@ -42,9 +44,9 @@
 .home .page-title{
   margin:0;
 
-  font-size:24px;
+  font-size:26px;
   font-weight:600;
-  letter-spacing:-0.3px;
+  letter-spacing:-0.4px;
 
   line-height:1.1;
   color:var(--text);
@@ -63,7 +65,7 @@
 .home .grid-cards{
   display:grid;
   grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
-  gap:22px;
+  gap:var(--space-lg);
 }
 
 /* =========================
@@ -73,17 +75,17 @@
 .home .card{
   background:var(--card-bg);
   border:1px solid var(--card-border);
-  border-radius:18px;
+  border-radius:var(--radius-lg);
 
-  padding:20px;
+  padding:var(--space-lg);
 
-  box-shadow:var(--card-shadow);
-  transition:.25s ease;
+  box-shadow:var(--shadow-md);
+  transition:var(--transition-base);
 }
 
 .home .card:hover{
   transform:translateY(-4px);
-  box-shadow:var(--card-shadow-hover);
+  box-shadow:var(--shadow-lg);
 }
 
 .home .card-title{
@@ -93,9 +95,9 @@
 
 .home .card-value{
   display:block;
-  margin-top:12px;
+  margin-top:var(--space-sm);
 
-  font-size:30px;
+  font-size:32px;
   font-weight:600;
 
   color:var(--text);
@@ -103,9 +105,9 @@
 
 .home .card-meta{
   display:flex;
-  gap:8px;
+  gap:var(--space-xs);
   align-items:center;
-  margin-top:10px;
+  margin-top:var(--space-sm);
 }
 
 .home .card-extra{
@@ -121,8 +123,8 @@
   display:grid;
   grid-template-columns:repeat(auto-fit, minmax(300px, 1fr));
 
-  gap:22px;
-  margin-top:30px;
+  gap:var(--space-lg);
+  margin-top:var(--space-xl);
 }
 
 /* =========================
@@ -132,11 +134,11 @@
 .home .panel-block{
   background:var(--panel-bg);
   border:1px solid var(--panel-border);
-  border-radius:18px;
+  border-radius:var(--radius-lg);
 
-  padding:20px;
+  padding:var(--space-lg);
 
-  box-shadow:var(--panel-shadow);
+  box-shadow:var(--shadow-md);
 }
 
 .home .section-title{
@@ -153,9 +155,9 @@
 .home .status-list{
   display:flex;
   flex-direction:column;
-  gap:12px;
+  gap:var(--space-sm);
 
-  margin-top:10px;
+  margin-top:var(--space-sm);
 }
 
 /* =========================
@@ -166,16 +168,16 @@
   display:grid;
   grid-template-columns:repeat(3,1fr);
 
-  gap:12px;
-  margin-top:10px;
+  gap:var(--space-sm);
+  margin-top:var(--space-sm);
 }
 
 .home .summary-item{
   background:var(--card-bg);
   border:1px solid var(--card-border);
 
-  padding:14px;
-  border-radius:14px;
+  padding:var(--space-md);
+  border-radius:var(--radius-md);
 
   text-align:center;
 }
@@ -198,14 +200,14 @@
 .home .alert-list{
   display:flex;
   flex-direction:column;
-  gap:10px;
+  gap:var(--space-sm);
 
-  margin-top:10px;
+  margin-top:var(--space-sm);
 }
 
 .home .alert-item{
-  padding:12px;
-  border-radius:12px;
+  padding:var(--space-md);
+  border-radius:var(--radius-md);
   font-size:13px;
 }
 
@@ -216,7 +218,7 @@
 @media (max-width:1024px){
 
   .home .container{
-    padding:20px;
+    padding:var(--space-lg);
   }
 
 }
@@ -224,14 +226,14 @@
 @media (max-width:768px){
 
   .home .container{
-    padding:16px;
+    padding:var(--space-md);
   }
 
   .home .dashboard-header{
     height:auto;
     flex-direction:column;
     align-items:flex-start;
-    gap:10px;
+    gap:var(--space-sm);
 
     margin-top:0;
     padding-top:0;
@@ -248,15 +250,12 @@
 @media (max-width:480px){
 
   .home .container{
-    padding:12px;
+    padding:var(--space-sm);
   }
 
-  .home .card{
-    padding:16px;
-  }
-
+  .home .card,
   .home .panel-block{
-    padding:16px;
+    padding:var(--space-md);
   }
 
   .home .card-value{

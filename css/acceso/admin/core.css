@@ -250,6 +250,9 @@ body{
   position:relative;
   min-height:100dvh;
   overflow:hidden;
+  background:
+    var(--gradient-overlay),
+    var(--gradient-main);
 }
 
 

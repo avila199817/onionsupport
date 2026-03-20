@@ -2,6 +2,24 @@
 
 "use strict";
 
+console.log("✅ Facturas JS cargado");
+
+
+/* =========================
+   HELPERS ROOT
+========================= */
+
+function getRoot(){
+  return document.querySelector(".panel-content.facturas");
+}
+
+function getTable(){
+  const root = getRoot();
+  if(!root) return null;
+  return root.querySelector("#facturas-body");
+}
+
+
 /* =========================
    INIT
 ========================= */
@@ -27,13 +45,15 @@ init();
 
 async function loadFacturas(){
 
-  const tbody = document.getElementById("facturas-body");
+  const tbody = getTable();
   if(!tbody) return;
 
   try{
 
     tbody.innerHTML = `
-      <tr><td colspan="5">Cargando facturas...</td></tr>
+      <tr class="table-loading">
+        <td colspan="5">Cargando facturas...</td>
+      </tr>
     `;
 
     const res = await Onion.fetch(Onion.config.API + "/facturas");
@@ -42,7 +62,9 @@ async function loadFacturas(){
 
     if(!facturas.length){
       tbody.innerHTML = `
-        <tr><td colspan="5">No hay facturas</td></tr>
+        <tr>
+          <td colspan="5">No hay facturas</td>
+        </tr>
       `;
       return;
     }
@@ -55,7 +77,9 @@ async function loadFacturas(){
     console.error("💥 FACTURAS ERROR:", e);
 
     tbody.innerHTML = `
-      <tr><td colspan="5">Error cargando facturas</td></tr>
+      <tr>
+        <td colspan="5">Error cargando facturas</td>
+      </tr>
     `;
 
   }
@@ -69,7 +93,8 @@ async function loadFacturas(){
 
 function renderFacturas(facturas){
 
-  const tbody = document.getElementById("facturas-body");
+  const tbody = getTable();
+  if(!tbody) return;
 
   tbody.innerHTML = facturas.map(f => {
 
@@ -77,11 +102,21 @@ function renderFacturas(facturas){
 
     return `
       <tr>
+
         <td>#${f.id || f.facturaId || "--"}</td>
+
         <td>${f.cliente || f.clienteNombre || "Cliente"}</td>
+
         <td>${formatFecha(f.fecha || f.createdAt)}</td>
+
         <td>${formatImporte(f.total || f.importe)}</td>
-        <td><span class="badge ${estado.class}">${estado.label}</span></td>
+
+        <td>
+          <span class="badge ${estado.class}">
+            ${estado.label}
+          </span>
+        </td>
+
       </tr>
     `;
 
@@ -96,9 +131,12 @@ function renderFacturas(facturas){
 
 function renderStats(facturas){
 
-  const totalEl = document.getElementById("facturas-total");
-  const pendientesEl = document.getElementById("facturas-pendientes");
-  const pagadasEl = document.getElementById("facturas-pagadas");
+  const root = getRoot();
+  if(!root) return;
+
+  const totalEl = root.querySelector("#facturas-total");
+  const pendientesEl = root.querySelector("#facturas-pendientes");
+  const pagadasEl = root.querySelector("#facturas-pagadas");
 
   let total = 0;
   let pendientes = 0;
@@ -135,10 +173,10 @@ function isPagada(f){
 function getEstado(f){
 
   if(isPagada(f)){
-    return { label: "Pagada", class: "paid" };
+    return { label: "Pagada", class: "pagada" };
   }
 
-  return { label: "Pendiente", class: "pending" };
+  return { label: "Pendiente", class: "pendiente" };
 
 }
 
@@ -147,16 +185,14 @@ function formatFecha(date){
   if(!date) return "--";
 
   const d = new Date(date);
-
   return d.toLocaleDateString("es-ES");
 
 }
 
 function formatImporte(n){
 
-  if(!n) return "0€";
-
-  return Number(n).toFixed(2) + "€";
+  const num = Number(n || 0);
+  return num.toFixed(2) + "€";
 
 }
 

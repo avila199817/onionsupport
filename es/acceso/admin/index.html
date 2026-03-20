@@ -346,219 +346,324 @@ body.loading {
 <script>
 (function(){
 
-  "use strict";
+"use strict";
 
-  document.addEventListener("DOMContentLoaded", () => {
+/* =========================
+   INIT GUARD
+========================= */
 
-    const userToggle = document.getElementById("userToggle");
-    const dropdown = document.getElementById("userDropdown");
-    const logoutBtn = document.getElementById("logoutBtn");
+if(window.__sidebarInit) return;
+window.__sidebarInit = true;
 
-    const toggleSidebar = document.getElementById("toggleSidebar");
-    const sidebar = document.querySelector(".sidebar");
 
-    const menuItems = document.querySelectorAll(".menu-item");
+/* =========================
+   RENDER SIDEBAR (GLOBAL)
+========================= */
 
-    /* =========================
-       🔥 FORCE NAV (FIX HOME BUG)
-    ========================= */
+window.renderSidebar = function(){
 
-    document.addEventListener("click",(e)=>{
+  const Onion = window.Onion;
+  const user = Onion?.state?.user;
 
-      let el = e.target;
+  if(!user) return;
 
-      while(el && el !== document){
+  const nameEl = document.getElementById("sidebar-name");
+  const avatarEl = document.getElementById("sidebar-avatar");
 
-        if(el.tagName === "A" && el.hasAttribute("data-link")){
+  if(!nameEl || !avatarEl) return;
 
-          const href = el.getAttribute("href");
+  /* =========================
+     NAME
+  ========================= */
 
-          if(!href || href.startsWith("http")) return;
+  const name =
+    user.name ||
+    user.username ||
+    user.email ||
+    "Usuario";
 
-          e.preventDefault();
+  nameEl.textContent = name;
 
-          // 🔥 FORZAR recarga SIEMPRE
-          if(window.Onion){
-            Onion.state.currentScript = null;
-          }
+  /* =========================
+     AVATAR
+  ========================= */
 
-          Onion.go(href);
-          return;
-        }
+  avatarEl.innerHTML = "";
 
-        el = el.parentNode;
-      }
+  if(user.avatar){
 
-    });
+    const img = document.createElement("img");
+    img.src = user.avatar;
+    img.alt = "avatar";
 
-    /* =========================
-       TOOLTIP TOGGLE BUTTON
-    ========================= */
+    img.style.width = "100%";
+    img.style.height = "100%";
+    img.style.borderRadius = "50%";
+    img.style.objectFit = "cover";
 
-    const updateToggleTooltip = () => {
-      if(!toggleSidebar || !sidebar) return;
+    avatarEl.appendChild(img);
 
-      const isCollapsed = sidebar.classList.contains("collapsed");
+  }else{
 
-      toggleSidebar.setAttribute(
-        "data-tooltip",
-        isCollapsed ? "Abrir barra lateral" : "Cerrar barra lateral"
-      );
-    };
+    const initials = name
+      .split(" ")
+      .map(n => n[0])
+      .join("")
+      .substring(0,2)
+      .toUpperCase();
 
-    /* =========================
-       TOOLTIP MENU AUTO
-    ========================= */
+    avatarEl.textContent = initials;
 
-    const initMenuTooltips = () => {
-      menuItems.forEach(item => {
-        const textEl = item.querySelector("span:last-child");
+  }
 
-        if(textEl){
-          const text = textEl.textContent.trim();
-          item.setAttribute("data-tooltip", text);
-        }
-      });
-    };
+  console.log("✅ SIDEBAR OK");
+};
 
-    /* =========================
-       SIDEBAR INIT (STATE)
-    ========================= */
 
-    if(sidebar){
-      const saved = localStorage.getItem("sidebar-collapsed");
+/* =========================
+   ACTIVE LINK
+========================= */
 
-      if(saved === "true"){
-        sidebar.classList.add("collapsed");
-      }
+window.updateSidebarActive = function(){
+
+  const links = document.querySelectorAll(".sidebar a[data-link]");
+  const route = window.Onion?.router?.get?.();
+
+  links.forEach(a => {
+    const href = a.getAttribute("href");
+
+    if(href === route){
+      a.classList.add("active");
+    }else{
+      a.classList.remove("active");
     }
+  });
 
-    updateToggleTooltip();
-    initMenuTooltips();
+};
 
-    /* =========================
-       SIDEBAR TOGGLE (PRO)
-    ========================= */
 
-    if(toggleSidebar && sidebar){
+/* =========================
+   DOM READY
+========================= */
 
-      toggleSidebar.addEventListener("click", ()=>{
+document.addEventListener("DOMContentLoaded", () => {
 
-        const isCollapsed = sidebar.classList.contains("collapsed");
+  const userToggle = document.getElementById("userToggle");
+  const dropdown = document.getElementById("userDropdown");
+  const logoutBtn = document.getElementById("logoutBtn");
 
-        if(dropdown){
-          dropdown.classList.remove("active");
-        }
+  const toggleSidebar = document.getElementById("toggleSidebar");
+  const sidebar = document.querySelector(".sidebar");
 
-        if(!isCollapsed){
+  const menuItems = document.querySelectorAll(".menu-item");
 
-          sidebar.classList.add("closing");
 
-          setTimeout(()=>{
-            sidebar.classList.add("collapsed");
-            sidebar.classList.remove("closing");
-            localStorage.setItem("sidebar-collapsed", true);
-            updateToggleTooltip();
-          }, 150);
+  /* =========================
+     FORCE NAV (FIX HOME BUG)
+  ========================= */
 
-        } else {
+  document.addEventListener("click",(e)=>{
 
-          sidebar.classList.remove("collapsed");
-          localStorage.setItem("sidebar-collapsed", false);
-          updateToggleTooltip();
+    let el = e.target;
 
-        }
+    while(el && el !== document){
 
-      });
+      if(el.tagName === "A" && el.hasAttribute("data-link")){
 
-    }
+        const href = el.getAttribute("href");
 
-    /* =========================
-       DROPDOWN + AVATAR
-    ========================= */
+        if(!href || href.startsWith("http")) return;
 
-    if(userToggle && dropdown && sidebar){
-
-      userToggle.addEventListener("click", (e)=>{
-        e.stopPropagation();
-
-        const isCollapsed = sidebar.classList.contains("collapsed");
-
-        if(isCollapsed){
-          sidebar.classList.remove("collapsed");
-          localStorage.setItem("sidebar-collapsed", false);
-          updateToggleTooltip();
-
-          setTimeout(()=>{
-            dropdown.classList.add("active");
-          }, 180);
-
-          return;
-        }
-
-        dropdown.classList.toggle("active");
-      });
-
-      dropdown.addEventListener("click", (e)=>{
-        e.stopPropagation();
-      });
-
-      document.addEventListener("click", ()=>{
-        dropdown.classList.remove("active");
-      });
-
-    }
-
-    /* =========================
-       LOGOUT (REAL FIX)
-    ========================= */
-
-    if(logoutBtn){
-      logoutBtn.addEventListener("click", async (e)=>{
         e.preventDefault();
 
-        try{
-          localStorage.removeItem("onion_token");
-          sessionStorage.clear();
-
-          document.cookie.split(";").forEach(c => {
-            document.cookie = c
-              .replace(/^ +/, "")
-              .replace(/=.*/, "=;expires=" + new Date(0).toUTCString() + ";path=/");
-          });
-
-          try{
-            await fetch("/api/logout", {
-              method: "POST",
-              credentials: "include"
-            });
-          }catch(err){}
-
-        } finally {
-          window.location.replace("/login");
+        if(window.Onion){
+          Onion.state.currentScript = null;
         }
 
-      });
+        Onion.go(href);
+        return;
+      }
+
+      el = el.parentNode;
     }
 
   });
 
+
   /* =========================
-     LOADER FALLBACK
+     TOOLTIP TOGGLE BUTTON
   ========================= */
 
-  setTimeout(() => {
+  const updateToggleTooltip = () => {
+    if(!toggleSidebar || !sidebar) return;
 
-    const loader = document.getElementById("app-loader");
+    const isCollapsed = sidebar.classList.contains("collapsed");
 
-    if(loader){
-      loader.classList.add("hide");
-      setTimeout(()=> loader.remove(), 350);
+    toggleSidebar.setAttribute(
+      "data-tooltip",
+      isCollapsed ? "Abrir barra lateral" : "Cerrar barra lateral"
+    );
+  };
+
+
+  /* =========================
+     TOOLTIP MENU AUTO
+  ========================= */
+
+  const initMenuTooltips = () => {
+    menuItems.forEach(item => {
+      const textEl = item.querySelector("span:last-child");
+
+      if(textEl){
+        const text = textEl.textContent.trim();
+        item.setAttribute("data-tooltip", text);
+      }
+    });
+  };
+
+
+  /* =========================
+     SIDEBAR INIT STATE
+  ========================= */
+
+  if(sidebar){
+    const saved = localStorage.getItem("sidebar-collapsed");
+
+    if(saved === "true"){
+      sidebar.classList.add("collapsed");
     }
+  }
 
-    document.body.classList.remove("loading");
+  updateToggleTooltip();
+  initMenuTooltips();
 
-  }, 4000);
+
+  /* =========================
+     SIDEBAR TOGGLE
+  ========================= */
+
+  if(toggleSidebar && sidebar){
+
+    toggleSidebar.addEventListener("click", ()=>{
+
+      const isCollapsed = sidebar.classList.contains("collapsed");
+
+      if(dropdown){
+        dropdown.classList.remove("active");
+      }
+
+      if(!isCollapsed){
+
+        sidebar.classList.add("closing");
+
+        setTimeout(()=>{
+          sidebar.classList.add("collapsed");
+          sidebar.classList.remove("closing");
+          localStorage.setItem("sidebar-collapsed", true);
+          updateToggleTooltip();
+        }, 150);
+
+      } else {
+
+        sidebar.classList.remove("collapsed");
+        localStorage.setItem("sidebar-collapsed", false);
+        updateToggleTooltip();
+
+      }
+
+    });
+
+  }
+
+
+  /* =========================
+     DROPDOWN + AVATAR
+  ========================= */
+
+  if(userToggle && dropdown && sidebar){
+
+    userToggle.addEventListener("click", (e)=>{
+      e.stopPropagation();
+
+      const isCollapsed = sidebar.classList.contains("collapsed");
+
+      if(isCollapsed){
+        sidebar.classList.remove("collapsed");
+        localStorage.setItem("sidebar-collapsed", false);
+        updateToggleTooltip();
+
+        setTimeout(()=>{
+          dropdown.classList.add("active");
+        }, 180);
+
+        return;
+      }
+
+      dropdown.classList.toggle("active");
+    });
+
+    dropdown.addEventListener("click", (e)=>{
+      e.stopPropagation();
+    });
+
+    document.addEventListener("click", ()=>{
+      dropdown.classList.remove("active");
+    });
+
+  }
+
+
+  /* =========================
+     LOGOUT
+  ========================= */
+
+  if(logoutBtn){
+    logoutBtn.addEventListener("click", async (e)=>{
+      e.preventDefault();
+
+      try{
+        localStorage.removeItem("onion_token");
+        sessionStorage.clear();
+
+        document.cookie.split(";").forEach(c => {
+          document.cookie = c
+            .replace(/^ +/, "")
+            .replace(/=.*/, "=;expires=" + new Date(0).toUTCString() + ";path=/");
+        });
+
+        try{
+          await fetch("/api/logout", {
+            method: "POST",
+            credentials: "include"
+          });
+        }catch(err){}
+
+      } finally {
+        window.location.replace("/login");
+      }
+
+    });
+  }
+
+});
+
+
+/* =========================
+   LOADER FALLBACK
+========================= */
+
+setTimeout(() => {
+
+  const loader = document.getElementById("app-loader");
+
+  if(loader){
+    loader.classList.add("hide");
+    setTimeout(()=> loader.remove(), 350);
+  }
+
+  document.body.classList.remove("loading");
+
+}, 4000);
 
 })();
 </script>

@@ -303,13 +303,16 @@ Onion.go = function(path){
   const clean = path.startsWith("/") ? path : "/" + path;
   const url = "/@" + Onion.state.slug + clean;
 
+  const current = window.location.pathname;
+
+  if(current === url){
+    window.dispatchEvent(new Event("onion:navigate"));
+    return;
+  }
+
   window.history.pushState({}, "", url);
   window.dispatchEvent(new Event("onion:navigate"));
 };
-
-window.addEventListener("popstate", ()=>{
-  window.dispatchEvent(new Event("onion:navigate"));
-});
 
 
 /* =========================

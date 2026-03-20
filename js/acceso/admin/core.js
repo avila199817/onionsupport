@@ -27,7 +27,8 @@ Onion.state = {
   slug: localStorage.getItem("onion_slug") || null,
   rendering: false,
   currentScript: null,
-  currentStyle: null
+  currentStyle: null,
+  renderId: 0
 };
 
 Onion.cache = {

@@ -178,7 +178,7 @@ Onion.fetch = async function(url){
 Onion.ui = {};
 
 Onion.ui.loading = function(){
-  const app = document.getElementById("app-view");
+  const app = document.getElementById("app-content");
   if(app) app.innerHTML = "<div style='padding:20px'>Cargando...</div>";
 };
 
@@ -353,7 +353,7 @@ Onion.render = async function(){
 
   try{
 
-    const app = document.getElementById("app-view");
+    const app = document.getElementById("app-content");
     if(!app) return;
 
     Onion.ui.loading();
@@ -422,7 +422,7 @@ if(route === "/"){
 
     console.error("💥 RENDER ERROR:", e);
 
-    const app = document.getElementById("app-view");
+    const app = document.getElementById("app-content");
     if(app){
       app.innerHTML = `
         <div style="padding:20px">

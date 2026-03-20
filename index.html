@@ -2,10 +2,24 @@
 (function(){
 
   const path = window.location.pathname;
+  const search = window.location.search;
 
-  // solo raíz → panel
+  // 🔥 si ya estás en el panel limpio → OK
+  if(path === "/es/acceso/admin/" || path === "/es/acceso/admin"){
+    return;
+  }
+
+  // 🔥 si vienes con slug (/@usuario...)
+  if(path.startsWith("/@")){
+    const sub = path.replace(/^\/@[^/]+/, "") || "/";
+    window.location.replace("/es/acceso/admin/" + (sub !== "/" ? "#" + sub : ""));
+    return;
+  }
+
+  // 🔥 raíz
   if(path === "/" || path === ""){
     window.location.replace("/es/acceso/admin/");
+    return;
   }
 
 })();

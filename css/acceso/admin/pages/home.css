@@ -23,7 +23,7 @@
   height:var(--topbar-height);
 
   /* 🔥 CLAVE: ocupar espacio del search */
-  margin-top:calc(-6 * var(--topbar-height) + var(--header-offset-y));
+  margin-top:calc(-10 * var(--topbar-height) + var(--header-offset-y));
   padding-top:var(--topbar-height);
 
   margin-bottom:40px;

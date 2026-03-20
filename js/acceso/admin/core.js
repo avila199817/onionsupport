@@ -24,6 +24,7 @@ Onion.config = {
 
 Onion.state = {
   user: null,
+  slug: localStorage.getItem("onion_slug") || null,
   rendering: false,
   currentScript: null,
   currentStyle: null
@@ -69,7 +70,10 @@ Onion.loadScript = function(src){
       resolve();
     };
 
-    s.onerror = reject;
+    s.onerror = ()=>{
+      console.warn("Script load fail:", finalSrc);
+      resolve(); // 🔥 NO ROMPE RENDER
+    };
 
     document.body.appendChild(s);
 
@@ -194,6 +198,37 @@ Onion.ui.hideLoader = function(){
 
 Onion.setUser = function(user){
   Onion.state.user = user;
+  Onion.state.slug = user.slug;
+
+  if(user.slug){
+    localStorage.setItem("onion_slug", user.slug);
+  }
+};
+
+
+/* =========================
+   SLUG (LIMPIO)
+========================= */
+
+Onion.slug = {};
+
+Onion.slug.apply = function(slug){
+
+  if(!slug) return;
+
+  let path = window.location.pathname || "/";
+
+  // si ya tiene slug → no tocar
+  if(path.startsWith("/@")) return;
+
+  // limpiar base
+  if(path.startsWith("/es/acceso/admin")){
+    path = path.replace("/es/acceso/admin", "") || "/";
+  }
+
+  const final = "/@" + slug + (path === "/" ? "" : path);
+
+  window.history.replaceState({}, "", final);
 };
 
 
@@ -230,42 +265,30 @@ Onion.router.get = function(){
 
   let path = window.location.pathname || "/";
 
-   if(path.startsWith("/es")){
-     path = path.replace("/es", "");
-   }
+  // quitar slug
+  if(path.startsWith("/@")){
+    const parts = path.split("/").filter(Boolean);
+    path = "/" + (parts.slice(1).join("/") || "");
+  }
 
-  path = path.split("?")[0];
-  path = path.split("#")[0];
+  // quitar base
+  if(path.startsWith("/es/acceso/admin")){
+    path = path.replace("/es/acceso/admin", "") || "/";
+  }
 
   path = path.replace(/\/+/g, "/");
-
-  // 🔥 soporte /@usuario y /@usuario/subruta
-  if(path.startsWith("/@")){
-    const parts = path.split("/");
-    return parts[2] ? "/" + parts[2] : "/";
-  }
 
   if(path.length > 1 && path.endsWith("/")){
     path = path.slice(0, -1);
   }
 
-  if(!path || path === ""){
-    path = "/";
-  }
-
-  return path;
+  return path || "/";
 };
 
 
 Onion.router.resolve = function(){
-
   const route = Onion.router.get();
-
-  if(Onion.routes[route]){
-    return Onion.routes[route];
-  }
-
-  return Onion.routes["/"];
+  return Onion.routes[route] || Onion.routes["/"];
 };
 
 
@@ -275,21 +298,13 @@ Onion.router.resolve = function(){
 
 Onion.go = function(path){
 
-  let clean = path.startsWith("/") ? path : "/" + path;
+  if(!Onion.state.slug) return;
 
-  if(Onion.state.user){
-    const username = (Onion.state.user.username || "usuario").toLowerCase();
+  const clean = path.startsWith("/") ? path : "/" + path;
+  const url = "/@" + Onion.state.slug + clean;
 
-    if(clean === "/"){
-      clean = "/@" + username;
-    } else {
-      clean = "/@" + username + clean;
-    }
-  }
-
-  window.history.pushState({}, "", clean);
+  window.history.pushState({}, "", url);
   window.dispatchEvent(new Event("onion:navigate"));
-
 };
 
 window.addEventListener("popstate", ()=>{
@@ -365,8 +380,6 @@ Onion.render = async function(){
     app.innerHTML = "";
     app.appendChild(content || container);
 
-    await Onion.loadScript("/js/acceso/admin/pages/components/sidebar.js");
-
     if(window.renderSidebar){
       window.renderSidebar();
     }
@@ -408,37 +421,23 @@ Onion.render = async function(){
 
 (async function(){
 
-  console.log("🔥 START");
-
   try{
 
     const res = await Onion.fetch(Onion.config.API + "/auth/me");
     const user = res.user || res;
 
     Onion.setUser(user);
+    Onion.slug.apply(user.slug);
 
-    const username = (user.username || user.name || "usuario").toLowerCase();
+    await Onion.render();
 
-    // 🔥 SIEMPRE normaliza URL tras login
-// 🔥 primero activas el router
-window.addEventListener("onion:navigate", Onion.render);
-
-// 🔥 luego normalizas URL
-if(!window.location.pathname.startsWith("/@")){
-  Onion.go("/");
-  return;
-}
-
-// 🔥 render normal
-await Onion.render();
+    window.addEventListener("onion:navigate", Onion.render);
 
     Onion.ui.hideLoader();
 
-    console.log("✅ READY");
-
   }catch(e){
 
-    console.error("💥 INIT ERROR:", e);
+    console.error("INIT ERROR:", e);
 
     if(e.message === "401" || e.message === "NO_TOKEN"){
       redirectLogin();

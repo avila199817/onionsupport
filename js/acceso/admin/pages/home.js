@@ -2,10 +2,6 @@
 
 "use strict";
 
-if(window.__homeLoaded) return;
-window.__homeLoaded = true;
-
-
 /* =========================
    CONFIG
 ========================= */

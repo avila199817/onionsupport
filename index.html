@@ -1,31 +1,12 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Onion Support</title>
-
 <script>
-
 (function(){
 
   const path = window.location.pathname;
 
-  if(
-    path.startsWith("/es/") ||
-    path.startsWith("/es")
-  ){
-    return;
+  // solo raíz → panel
+  if(path === "/" || path === ""){
+    window.location.replace("/es/acceso/admin/");
   }
 
-  // 👉 si entras a raíz → te manda a /es/
-  window.location.replace("/es/");
-
 })();
-
 </script>
-
-</head>
-<body></body>
-</html>

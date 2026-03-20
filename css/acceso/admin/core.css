@@ -248,7 +248,8 @@ body{
 
 .layout{
   position:relative;
-  min-height:100dvh; /* 🔥 fix mobile */
+  min-height:100dvh;
+  overflow:hidden;
 }
 
 
@@ -278,7 +279,8 @@ body{
     var(--gradient-overlay),
     var(--gradient-main);
 
-  transition:margin-left .35s cubic-bezier(.25,.8,.25,1);
+  transition: margin-left .35s cubic-bezier(.4,0,.2,1);
+  will-change: margin-left;
 }
 
 .sidebar.collapsed ~ .main-content{
@@ -433,6 +435,9 @@ body{
   box-shadow: inset -1px 0 0 var(--sb-border);
 
   z-index:100;
+
+  will-change: width;
+  backface-visibility: hidden;
 }
 
 .sidebar.collapsed{

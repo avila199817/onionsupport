@@ -391,10 +391,15 @@ Onion.render = async function(){
       window.updateSidebarActive();
     }
 
-    const script = Onion.scripts[route] || Onion.scripts["/"];
-    if(script){
-      await Onion.loadScript(script);
-    }
+   const script = Onion.scripts[route] || Onion.scripts["/"];
+   
+   if(script){
+   
+     // 🔥 FORZAR recarga del script SIEMPRE
+     Onion.state.currentScript = null;
+   
+     await Onion.loadScript(script);
+   }
 
     document.body.classList.remove("loading");
 

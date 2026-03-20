@@ -1,21 +1,11 @@
 {
-  "routes": [
-    {
-      "route": "/@*",
-      "rewrite": "/es/acceso/admin/index.html"
-    }
-  ],
   "navigationFallback": {
-    "rewrite": "/es/acceso/admin/index.html",
+    "rewrite": "/index.html",
     "exclude": [
+      "/api/*",
       "/css/*",
       "/js/*",
-      "/media/*",
-      "/api/*",
-      "/pages/*",
-      "/robots.txt",
-      "/sitemap.xml",
-      "/favicon.ico"
+      "/media/*"
     ]
   }
 }

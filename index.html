@@ -6,48 +6,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Onion Support</title>
 
+</head>
+<body>
+
 <script>
-
-(function(){
-
-const path = window.location.pathname;
-
-/* =========================
-   SLUG PANEL
-========================= */
-
-if(path.startsWith("/@")){
-
-  const subpath = path.replace(/^\/@[^/]+/, "");
-
-  window.location.replace(
-    "/es/acceso/admin" +
-    subpath +
-    window.location.search
-  );
-
-  return;
-
-}
-
-/* =========================
-   PANEL DIRECTO
-========================= */
-
-if(path.startsWith("/es/acceso/admin")){
-  return;
-}
-
-/* =========================
-   WEB NORMAL
-========================= */
-
-window.location.replace("/es/");
-
-})();
-
+  // 👉 solo redirige al panel, SIN lógica
+  window.location.replace("/es/acceso/admin/");
 </script>
 
-</head>
-<body></body>
+</body>
 </html>

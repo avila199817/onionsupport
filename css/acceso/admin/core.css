@@ -881,16 +881,6 @@ a,
 
 
 
-
-
-
-
-
-
-
-
-
-
 /* =========================
    GLOBAL TOPBAR
 ========================= */
@@ -898,43 +888,37 @@ a,
 .global-topbar{
   position: fixed;
   top: 0;
-  left: var(--sidebar-width);
+  left: 0;
   right: 0;
 
   height: var(--topbar-height);
 
   z-index: 2000;
-
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-
-  padding: 0 var(--content-padding);
-
   pointer-events: none;
-
-  transition: left .35s cubic-bezier(.25,.8,.25,1);
-}
-
-/* cuando sidebar colapsa */
-.sidebar.collapsed ~ .global-topbar{
-  left: var(--sidebar-collapsed);
 }
 
 
 /* =========================
-   SEARCH BOX (INTEGRADO)
+   SEARCH BOX (ALINEADO AL PAGE)
 ========================= */
 
 .search-box{
+  position: fixed;
+
+  top: calc((var(--topbar-height) - 44px) / 2);
+
+  /* 🔥 CLAVE: offset del sidebar + padding */
+  left: calc(var(--sidebar-width) + var(--content-padding));
+
+  z-index: 3000;
+
   pointer-events: auto;
 
   display: flex;
   align-items: center;
   gap: 10px;
 
-  width: 100%;
-  max-width: 340px;
+  width: 340px;
   height: 44px;
 
   padding: 0 14px;
@@ -948,10 +932,20 @@ a,
   color: var(--dim);
 
   transition: 
+    left .35s cubic-bezier(.25,.8,.25,1),
     background .2s ease,
     border-color .2s ease,
     box-shadow .2s ease,
     transform .15s ease;
+}
+
+
+/* =========================
+   CUANDO SIDEBAR COLAPSA
+========================= */
+
+.sidebar.collapsed ~ .search-box{
+  left: calc(var(--sidebar-collapsed) + var(--content-padding));
 }
 
 
@@ -1017,13 +1011,10 @@ a,
 
 @media (max-width:768px){
 
-  .global-topbar{
-    left: 0;
-    padding: 0 16px;
-  }
-
   .search-box{
-    max-width: 100%;
+    left: 16px;
+    right: 16px;
+    width: auto;
   }
 
 }

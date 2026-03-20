@@ -594,66 +594,36 @@ body{
 }
 
 /* =========================
-   SEARCH GLOBAL (FINAL PRO SAFE)
-========================= */
-
-/* 🔥 MISMO PADDING QUE HOME */
-:root{
-  --content-x: 40px;
-}
-
-/* ❌ NO TOCAMOS EL LAYOUT GLOBAL */
-#app-content{
-  padding: 0;
-}
-
-/* 🔥 TOPBAR STICKY SIN ROMPER FLUJO */
-.global-topbar{
-  position: sticky;
-  top: 0;
-  z-index: 40;
-
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-
-  height: 64px;
-
-  padding-right: var(--content-x);
-  padding-left: var(--content-x);
-
-  /* 🔥 IMPORTANTE: SIN BLOQUE VISUAL */
-  background: transparent;
-  border: none;
-}
-
-/* =========================
-   SEARCH BOX
+   SEARCH BOX (PRO SAAS)
 ========================= */
 
 .search-box{
+  pointer-events: auto;
+
   display: flex;
   align-items: center;
   gap: 10px;
 
-  min-width: 260px;
+  width: clamp(220px, 30vw, 420px);
 
-  background: var(--panel-bg);
+  background: rgba(30,30,30,0.65);
+  backdrop-filter: blur(10px);
+
   border: 1px solid var(--panel-border);
 
   padding: 10px 14px;
-  border-radius: 12px;
+  border-radius: 14px;
 
   color: var(--dim);
 
-  transition: all .2s ease;
+  transition: all .25s cubic-bezier(.4,0,.2,1);
 }
 
 /* HOVER */
 
 .search-box:hover{
-  background: var(--sb-hover);
-  border-color: var(--panel-border);
+  background: rgba(40,40,40,0.75);
+  border-color: rgba(255,255,255,0.08);
   color: var(--muted);
 }
 
@@ -661,13 +631,14 @@ body{
 
 .search-box:focus-within{
   border-color: var(--info);
+
   box-shadow:
     0 0 0 2px var(--info-bg),
-    0 6px 20px rgba(0,0,0,0.25);
+    0 10px 30px rgba(0,0,0,0.35);
 
   color: var(--text);
 
-  transform: translateY(-1px);
+  transform: translateY(-2px) scale(1.01);
 }
 
 /* =========================
@@ -675,13 +646,14 @@ body{
 ========================= */
 
 .search-icon{
-  opacity: 0.8;
+  opacity: 0.7;
   flex-shrink: 0;
-  transition: opacity .2s;
+  transition: all .2s ease;
 }
 
 .search-box:focus-within .search-icon{
   opacity: 1;
+  transform: scale(1.05);
 }
 
 /* =========================
@@ -696,7 +668,8 @@ body{
   color: var(--text);
   font-size: 14px;
 
-  width: 240px;
+  width: 100%;
+  min-width: 0;
 }
 
 /* PLACEHOLDER */
@@ -706,7 +679,7 @@ body{
 }
 
 /* =========================
-   RESPONSIVE (FINO)
+   RESPONSIVE
 ========================= */
 
 @media (max-width:1024px){
@@ -716,27 +689,20 @@ body{
     padding-left: 20px;
   }
 
-  .search-box input{
-    width: 180px;
-  }
-
 }
 
 @media (max-width:768px){
 
   .global-topbar{
+    left: 0;
     justify-content: center;
     padding: 10px 16px;
-    height: auto;
+    height: 64px;
   }
 
   .search-box{
     width: 100%;
-    max-width: 400px;
-  }
-
-  .search-box input{
-    width: 100%;
+    max-width: 420px;
   }
 
 }

@@ -301,23 +301,45 @@ Onion.go = function(path){
 
   if(!Onion.state.slug) return;
 
+  // 🔥 normalizar path entrada
   const clean = path.startsWith("/") ? path : "/" + path;
   const url = "/@" + Onion.state.slug + clean;
 
-  const current = window.location.pathname;
+  // 🔥 función interna para normalizar
+  function normalize(p){
+    p = p.replace(/\/+/g, "/");
+    if(p.length > 1 && p.endsWith("/")){
+      p = p.slice(0, -1);
+    }
+    return p || "/";
+  }
 
-   if(current === url){
-   
-     // 🔥 FORZAR RESET REAL
-     Onion.state.currentScript = null;
-     Onion.state.currentStyle = null;
-   
-     Onion.render();
-     return;
-   }
+  const current = normalize(window.location.pathname);
+  const target = normalize(url);
 
+  // 🔥 misma ruta → forzar render limpio
+  if(current === target){
+
+    Onion.state.currentScript = null;
+    Onion.state.currentStyle = null;
+    Onion.cache.html = {};
+
+    const app = document.getElementById("app-content");
+    if(app) app.innerHTML = "";
+
+    if(Onion.state.rendering){
+      setTimeout(()=> Onion.render(), 50);
+    } else {
+      Onion.render();
+    }
+
+    return;
+  }
+
+  // 🔥 navegación normal
   window.history.pushState({}, "", url);
   window.dispatchEvent(new Event("onion:navigate"));
+
 };
 
 

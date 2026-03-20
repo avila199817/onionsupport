@@ -492,7 +492,7 @@ body{
 
   background:var(--tooltip-bg);
   color:var(--tooltip-text);
-  padding:6px 10px;
+  padding:var(--space-xs) var(--space-sm);
   border-radius:6px;
   font-size:12px;
   white-space:nowrap;

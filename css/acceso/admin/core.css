@@ -597,16 +597,19 @@ body{
    SEARCH GLOBAL (ONION STYLE)
 ========================= */
 
+/* SIN PADDING GLOBAL */
 #app-content{
   padding: 0;
 }
 
-/* TOPBAR */
-
+/* 🔥 TOPBAR FLOTANTE (NO EMPUJA CONTENIDO) */
 .global-topbar{
-  position: sticky;
+  position: fixed;
   top: 0;
-  z-index: 20;
+  right: 0;
+  left: 260px; /* ancho sidebar */
+
+  z-index: 50;
 
   display: flex;
   justify-content: flex-end;
@@ -615,10 +618,14 @@ body{
   height: 64px;
   padding: 0 24px;
 
-  background: var(--sb-bg);
-  border-bottom: 1px solid var(--sb-border);
+  background: transparent; /* 🔥 clave */
+  border: none;
+  backdrop-filter: none;
+}
 
-  backdrop-filter: blur(10px);
+/* 🔥 AJUSTE CUANDO SIDEBAR ESTÁ COLLAPSED */
+.sidebar.collapsed ~ .main-content .global-topbar{
+  left: 72px;
 }
 
 /* BOX */
@@ -676,10 +683,6 @@ body{
 }
 
 /* PLACEHOLDER */
-
-.search-box input::placeholder{
-  color: var(--dim);
-}
 
 .search-box input::placeholder{
   color: var(--dim);

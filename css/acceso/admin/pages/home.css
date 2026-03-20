@@ -22,7 +22,7 @@
 
   height:var(--topbar-height);
   margin-bottom:40px;
-  padding-top:2px;
+  padding-top:15px;
 }
 
 .home .dashboard-header .header-left{

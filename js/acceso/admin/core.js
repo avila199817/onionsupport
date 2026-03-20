@@ -28,7 +28,8 @@ Onion.state = {
   rendering: false,
   currentScript: null,
   currentStyle: null,
-  renderId: 0
+  renderId: 0,
+  abortController: null,
 };
 
 Onion.cache = {

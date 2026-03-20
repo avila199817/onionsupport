@@ -592,3 +592,61 @@ body{
     color .2s ease,
     border-color .2s ease;
 }
+
+/* =========================
+   SEARCH GLOBAL
+========================= */
+
+.global-topbar{
+  position: sticky;
+  top: 0;
+  z-index: 20;
+
+  display: flex;
+  justify-content: flex-end;
+
+  padding: 16px 24px;
+  background: rgba(20,20,20,0.6);
+  backdrop-filter: blur(10px);
+}
+
+.search-box{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+
+  padding: 10px 14px;
+  border-radius: 12px;
+
+  transition: all .25s ease;
+}
+
+.search-box:hover{
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.12);
+}
+
+.search-box:focus-within{
+  border-color: #4da3ff;
+  box-shadow: 0 0 0 2px rgba(77,163,255,0.15);
+}
+
+.search-icon{
+  opacity: 0.7;
+}
+
+.search-box input{
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #fff;
+  font-size: 14px;
+  width: 240px;
+}
+
+.search-box input::placeholder{
+  color: rgba(255,255,255,0.4);
+}

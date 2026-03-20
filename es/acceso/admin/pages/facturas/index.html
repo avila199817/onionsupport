@@ -1,85 +1,78 @@
 <div class="panel-content facturas">
 
-  <div class="panel-container">
+  <div class="container">
 
     <!-- HEADER -->
-    <div class="facturas-header">
-
+    <div class="dashboard-header">
       <div class="header-left">
         <h1 class="page-title">Facturas</h1>
-        <p class="page-subtitle">Gestión y control de facturación</p>
+        <p class="page-subtitle">
+          Gestión y control de facturación
+        </p>
       </div>
 
-      <div class="header-right">
-        <button class="btn-primary">+ Nueva factura</button>
+      <div class="header-actions">
+        <button class="btn primary" id="crear-factura">
+          + Nueva factura
+        </button>
       </div>
-
     </div>
 
 
     <!-- KPI -->
-    <div class="facturas-stats">
+    <div class="grid-cards">
 
-      <div class="facturas-card">
-        <span class="facturas-label">Total facturado</span>
-        <span class="facturas-value" id="facturas-total">-- €</span>
+      <div class="card">
+        <span class="card-title">Total facturado</span>
+        <span class="card-value" id="facturas-total">-- €</span>
       </div>
 
-      <div class="facturas-card">
-        <span class="facturas-label">Pendientes</span>
-        <span class="facturas-value" id="facturas-pendientes">--</span>
+      <div class="card">
+        <span class="card-title">Pendientes</span>
+        <span class="card-value" id="facturas-pendientes">--</span>
       </div>
 
-      <div class="facturas-card">
-        <span class="facturas-label">Pagadas</span>
-        <span class="facturas-value" id="facturas-pagadas">--</span>
+      <div class="card">
+        <span class="card-title">Pagadas</span>
+        <span class="card-value" id="facturas-pagadas">--</span>
       </div>
 
     </div>
 
 
-    <!-- TABLE -->
-    <div class="facturas-table-block">
+    <!-- GRID PRINCIPAL -->
+    <div class="dashboard-grid">
 
-      <div class="table-header">
-        <h2 class="section-title">Listado de facturas</h2>
-      </div>
+      <!-- TABLA -->
+      <div class="panel-block">
 
-      <div class="table-container">
+        <div class="block-header minimal">
+          <h2 class="section-title">Listado de facturas</h2>
+        </div>
 
-        <table class="facturas-table">
+        <div class="table-container">
 
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Cliente</th>
-              <th>Fecha</th>
-              <th>Importe</th>
-              <th>Estado</th>
-            </tr>
-          </thead>
+          <table class="facturas-table">
 
-          <tbody id="facturas-body">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Cliente</th>
+                <th>Fecha</th>
+                <th>Importe</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
 
-            <tr>
-              <td>#0001</td>
-              <td>Cliente Demo</td>
-              <td>01/03/2026</td>
-              <td>120€</td>
-              <td><span class="badge paid">Pagada</span></td>
-            </tr>
+            <tbody id="facturas-body">
+              <tr class="table-loading">
+                <td colspan="5">Cargando facturas...</td>
+              </tr>
+            </tbody>
 
-            <tr>
-              <td>#0002</td>
-              <td>Empresa X</td>
-              <td>05/03/2026</td>
-              <td>300€</td>
-              <td><span class="badge pending">Pendiente</span></td>
-            </tr>
+          </table>
 
-          </tbody>
-
-        </table>
+        </div>
 
       </div>
 

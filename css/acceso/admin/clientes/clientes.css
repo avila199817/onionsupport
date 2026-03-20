@@ -1,0 +1,338 @@
+/* =====================================================
+   CLIENTES · PAGE STYLES
+   MISMO SISTEMA QUE USUARIOS
+===================================================== */
+
+
+/* =====================================================
+   WRAPPER
+===================================================== */
+
+.clientes-wrapper{
+margin-bottom:var(--space-xl);
+}
+
+
+/* =====================================================
+   CLIENT CELL
+===================================================== */
+
+.cliente-cell{
+
+display:flex;
+align-items:center;
+
+gap:12px;
+
+}
+
+.cliente-avatar{
+
+width:36px;
+height:36px;
+
+border-radius:50%;
+
+object-fit:cover;
+
+background:#e5e5ea;
+
+flex-shrink:0;
+
+}
+
+.cliente-avatar-fallback{
+
+display:flex;
+align-items:center;
+justify-content:center;
+
+width:36px;
+height:36px;
+
+border-radius:50%;
+
+background:#e5e5ea;
+
+font-size:13px;
+font-weight:600;
+
+color:#444;
+
+}
+
+.cliente-empresa{
+
+font-weight:600;
+
+letter-spacing:-0.01em;
+
+color:var(--color-text-main);
+
+}
+
+
+/* =====================================================
+   NOMBRE CLIENTE
+===================================================== */
+
+.cliente-nombre{
+
+font-weight:500;
+
+color:var(--color-text-main);
+
+}
+
+
+/* =====================================================
+   EMAIL
+===================================================== */
+
+.cliente-email a{
+
+color:var(--color-primary);
+
+text-decoration:none;
+
+font-weight:500;
+
+}
+
+.cliente-email a:hover{
+
+text-decoration:underline;
+
+}
+
+
+/* =====================================================
+   NIF
+===================================================== */
+
+.cliente-nif{
+
+color:var(--color-text-secondary);
+
+font-weight:500;
+
+}
+
+
+/* =====================================================
+   ACTIONS
+===================================================== */
+
+.cliente-actions{
+
+display:flex;
+
+align-items:center;
+justify-content:flex-end;
+
+gap:12px;
+
+}
+
+
+/* =====================================================
+   BOTÓN EDITAR
+===================================================== */
+
+.btn-editar{
+
+width:36px;
+height:36px;
+
+border-radius:50%;
+
+border:none;
+
+background:#f2f2f7;
+
+display:flex;
+align-items:center;
+justify-content:center;
+
+font-size:14px;
+
+cursor:pointer;
+
+transition:all var(--transition-fast);
+
+}
+
+.btn-editar:hover{
+
+background:#e5e5ea;
+
+transform:translateY(-1px);
+
+}
+
+.btn-editar:active{
+
+transform:scale(.92);
+
+}
+
+
+/* =====================================================
+   LINK NOMBRE CLIENTE
+===================================================== */
+
+a.cliente-nombre-link{
+color:var(--color-text-main) !important;
+text-decoration:none;
+font-weight:600;
+letter-spacing:-0.01em;
+}
+
+a.cliente-nombre-link:visited{
+color:var(--color-text-main) !important;
+}
+
+a.cliente-nombre-link:hover{
+color:var(--color-text-main) !important;
+text-decoration:underline;
+}
+
+a.cliente-nombre-link:active{
+color:var(--color-text-main) !important;
+}
+
+
+/* =====================================================
+   LINK CLIENTE
+===================================================== */
+
+.cliente-cell a,
+.cliente-cell a:visited,
+.cliente-cell a:active{
+color:var(--color-text-main);
+text-decoration:none;
+}
+
+.cliente-cell a:hover{
+color:var(--color-text-main);
+text-decoration:underline;
+text-decoration-thickness:1px;
+text-underline-offset:3px;
+}
+
+
+
+/* =====================================================
+   MOBILE · CLIENTES (TABLE → CARDS)
+===================================================== */
+
+@media (max-width:720px){
+
+.clientes-table thead{
+display:none;
+}
+
+.clientes-table,
+.clientes-table tbody,
+.clientes-table tr{
+display:block;
+width:100%;
+}
+
+.clientes-table tr{
+
+background:var(--color-bg-card);
+
+border-radius:var(--radius-lg);
+
+border:1px solid var(--border-soft);
+
+box-shadow:var(--shadow-soft);
+
+padding:20px;
+
+margin-bottom:18px;
+
+}
+
+.clientes-table td{
+
+display:grid;
+
+grid-template-columns:100px 1fr;
+
+align-items:center;
+
+gap:12px;
+
+padding:6px 0;
+
+border:none;
+
+font-size:14px;
+
+}
+
+.clientes-table td::before{
+
+font-size:12px;
+
+font-weight:500;
+
+color:var(--color-text-secondary);
+
+}
+
+.clientes-table td:nth-child(1)::before{content:"Cliente";}
+.clientes-table td:nth-child(2)::before{content:"Nombre";}
+.clientes-table td:nth-child(3)::before{content:"Email";}
+.clientes-table td:nth-child(4)::before{content:"NIF";}
+.clientes-table td:nth-child(5)::before{content:"Tipo";}
+.clientes-table td:nth-child(6)::before{content:"Acciones";}
+
+/* evitar que el contenido se estire */
+
+.clientes-table td > *{
+justify-self:start;
+}
+
+/* badges */
+
+.clientes-table .badge{
+display:inline-flex;
+align-items:center;
+white-space:nowrap;
+}
+
+/* avatar */
+
+.cliente-avatar,
+.cliente-avatar-fallback{
+width:32px;
+height:32px;
+}
+
+/* email */
+
+.cliente-email{
+word-break:break-word;
+}
+
+/* acciones */
+
+.cliente-actions{
+margin-top:10px;
+display:flex;
+gap:8px;
+flex-wrap:wrap;
+}
+
+.clientes-table{
+min-width:0;
+}
+
+.clientes-table td{
+white-space:normal;
+}
+
+}

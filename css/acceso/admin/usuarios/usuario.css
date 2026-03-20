@@ -1,0 +1,40 @@
+/* =====================================================
+   USER NAME
+===================================================== */
+
+.user-name{
+
+font-size:40px;
+font-weight:700;
+
+letter-spacing:-0.03em;
+
+color:#1d1d1f;
+
+line-height:1.1;
+
+}
+
+
+/* =====================================================
+   USER ROLE
+===================================================== */
+
+.user-role{
+
+font-size:12px;
+font-weight:700;
+
+color:#007AFF;
+
+background:#e7f3ff;
+
+padding:4px 10px;
+
+border-radius:12px;
+
+display:inline-block;
+
+margin-top:4px;
+
+}

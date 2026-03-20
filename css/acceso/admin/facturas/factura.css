@@ -1,0 +1,354 @@
+/* =====================================================
+   FACTURA HEADER
+===================================================== */
+
+.factura-header{
+
+display:flex;
+align-items:center;
+gap:26px;
+
+margin-bottom:42px;
+
+}
+
+.factura-info{
+display:flex;
+flex-direction:column;
+gap:8px;
+}
+
+
+/* =====================================================
+   TITULO FACTURA
+===================================================== */
+
+.factura-title{
+
+font-size:36px;
+font-weight:700;
+
+letter-spacing:-0.02em;
+
+color:#1d1d1f;
+
+line-height:1.1;
+
+}
+
+
+/* =====================================================
+   AVATAR FACTURA
+===================================================== */
+
+#clienteAvatar{
+
+width:90px;
+height:90px;
+
+border-radius:24px;
+
+background:linear-gradient(
+135deg,
+#f2f2f7,
+#e9e9ee
+);
+
+display:flex;
+align-items:center;
+justify-content:center;
+
+font-weight:700;
+font-size:24px;
+
+color:#6e6e73;
+
+box-shadow:
+0 8px 20px rgba(0,0,0,.08),
+inset 0 1px 0 rgba(255,255,255,.5);
+
+}
+
+
+/* =====================================================
+   ESTADO FACTURA
+===================================================== */
+
+.factura-status{
+
+display:inline-flex;
+align-items:center;
+gap:6px;
+
+font-size:13px;
+font-weight:700;
+
+padding:6px 12px;
+
+border-radius:20px;
+
+margin-top:6px;
+
+width:fit-content;
+
+}
+
+/* PAGADA */
+
+.status-paid{
+
+background:#e6f9ed;
+color:#34c759;
+
+}
+
+/* PENDIENTE */
+
+.status-pending{
+
+background:#fff4e6;
+color:#ff9500;
+
+}
+
+/* CANCELADA */
+
+.status-cancelled{
+
+background:#ffeaea;
+color:#ff3b30;
+
+}
+
+
+/* =====================================================
+   GRID FACTURA
+===================================================== */
+
+.factura-grid{
+
+display:grid;
+
+grid-template-columns:1fr 1fr;
+
+gap:26px;
+
+margin-bottom:26px;
+
+}
+
+
+/* =====================================================
+   CARDS FACTURA
+===================================================== */
+
+.factura-card{
+
+background:#fff;
+
+border-radius:18px;
+
+padding:28px;
+
+border:1px solid rgba(0,0,0,0.05);
+
+box-shadow:
+0 8px 24px rgba(0,0,0,0.05),
+0 2px 6px rgba(0,0,0,0.03);
+
+display:flex;
+flex-direction:column;
+
+gap:14px;
+
+}
+
+/* separación extra última card */
+
+.factura-card:last-child{
+margin-bottom:36px;
+}
+
+
+/* =====================================================
+   TITULOS CARD
+===================================================== */
+
+.factura-card-title{
+
+font-size:12px;
+
+letter-spacing:.12em;
+
+text-transform:uppercase;
+
+color:#007AFF;
+
+font-weight:800;
+
+margin-bottom:8px;
+
+}
+
+
+/* =====================================================
+   FILAS DATOS
+===================================================== */
+
+.factura-row{
+
+display:flex;
+
+justify-content:space-between;
+align-items:flex-start;
+
+padding:10px 0;
+
+border-bottom:1px solid rgba(0,0,0,0.05);
+
+}
+
+.factura-row:last-child{
+border-bottom:none;
+}
+
+.factura-label{
+
+color:#8e8e93;
+font-size:13px;
+
+}
+
+.factura-value{
+
+font-weight:600;
+color:#1d1d1f;
+
+text-align:right;
+
+}
+
+
+/* =====================================================
+   IMPUESTOS LISTA
+===================================================== */
+
+.factura-impuestos{
+
+display:flex;
+flex-direction:column;
+gap:6px;
+
+}
+
+.factura-impuestos div{
+
+display:flex;
+
+justify-content:space-between;
+
+font-size:13px;
+
+color:#6e6e73;
+
+}
+
+
+/* =====================================================
+   TOTAL DESTACADO
+===================================================== */
+
+#totalFactura{
+
+font-size:20px;
+font-weight:800;
+
+color:#1d1d1f;
+
+margin-top:6px;
+
+}
+
+
+/* =====================================================
+   TABLA CONCEPTOS
+===================================================== */
+
+.factura-table{
+
+width:100%;
+
+border-collapse:collapse;
+
+font-size:14px;
+
+margin-top:10px;
+
+}
+
+.factura-table thead th{
+
+text-align:left;
+
+font-weight:700;
+
+color:#8e8e93;
+
+font-size:12px;
+
+letter-spacing:.06em;
+
+text-transform:uppercase;
+
+padding-bottom:14px;
+
+border-bottom:1px solid rgba(0,0,0,0.06);
+
+}
+
+.factura-table tbody td{
+
+padding:14px 0;
+
+border-bottom:1px solid rgba(0,0,0,0.04);
+
+color:#1d1d1f;
+
+}
+
+.factura-table tbody tr:last-child td{
+border-bottom:none;
+}
+
+/* columnas numéricas */
+
+.factura-table td:nth-child(3),
+.factura-table td:nth-child(4),
+.factura-table td:nth-child(5){
+
+text-align:right;
+
+white-space:nowrap;
+
+font-weight:600;
+
+}
+
+
+/* =====================================================
+   RESPONSIVE
+===================================================== */
+
+@media (max-width:900px){
+
+.factura-grid{
+grid-template-columns:1fr;
+}
+
+.factura-header{
+flex-direction:column;
+align-items:flex-start;
+gap:16px;
+}
+
+}

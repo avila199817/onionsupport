@@ -1,0 +1,143 @@
+/* =====================================================
+   DESIGN SYSTEM · GLOBAL VARIABLES
+===================================================== */
+
+:root{
+
+
+/* =====================================================
+   TYPOGRAPHY
+===================================================== */
+
+--font-family-base:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+
+--font-size-base:16px;
+
+
+/* =====================================================
+   COLORS · BRAND
+===================================================== */
+
+--color-primary:#007AFF;
+--color-primary-hover:#0066d6;
+
+--color-success:#34c759;
+--color-success-hover:#28a745;
+
+--color-danger:#ff3b30;
+--color-danger-hover:#d92c23;
+
+--color-warning:#ff9500;
+
+
+/* =====================================================
+   TEXT COLORS
+===================================================== */
+
+--color-text-main:#1d1d1f;
+--color-text-secondary:#86868b;
+--color-text-muted:#6e6e73;
+
+
+/* =====================================================
+   BACKGROUNDS
+===================================================== */
+
+--color-bg-page:#f5f5f7;
+--color-bg-card:#ffffff;
+--color-bg-input:#ffffff;
+
+--color-bg-subtle:#f7f7f9;
+
+--color-hover:rgba(0,0,0,0.04);
+--color-hover-strong:rgba(0,0,0,0.08);
+
+
+/* =====================================================
+   GLASS SYSTEM
+===================================================== */
+
+--glass-nav:rgba(255,255,255,.6);
+--glass-nav-strong:rgba(255,255,255,.85);
+
+--glass-layer-soft:rgba(255,255,255,.45);
+--glass-layer-medium:rgba(255,255,255,.28);
+--glass-layer-light:rgba(255,255,255,.12);
+
+--glass-clear:rgba(255,255,255,0);
+
+
+/* =====================================================
+   BORDERS
+===================================================== */
+
+--border-soft:rgba(0,0,0,0.05);
+--border-medium:rgba(0,0,0,0.08);
+--border-strong:rgba(0,0,0,0.12);
+
+
+/* =====================================================
+   SHADOW SYSTEM
+===================================================== */
+
+--shadow-xs:0 2px 6px rgba(0,0,0,0.04);
+--shadow-soft:0 10px 30px rgba(0,0,0,0.05);
+
+--shadow-card:0 6px 18px rgba(0,0,0,0.06);
+
+--shadow-medium:0 16px 32px rgba(0,0,0,0.08);
+--shadow-strong:0 20px 40px rgba(0,0,0,0.10);
+
+
+/* =====================================================
+   BORDER RADIUS
+===================================================== */
+
+--radius-sm:8px;
+--radius-md:12px;
+--radius-lg:16px;
+--radius-xl:20px;
+--radius-pill:999px;
+
+
+/* =====================================================
+   SPACING SYSTEM
+===================================================== */
+
+--space-xs:6px;
+--space-sm:10px;
+--space-md:16px;
+--space-lg:24px;
+--space-xl:32px;
+--space-xxl:48px;
+
+
+/* =====================================================
+   TRANSITIONS
+===================================================== */
+
+--transition-fast:0.15s ease;
+--transition-base:0.2s ease;
+--transition-slow:0.3s ease;
+
+
+/* =====================================================
+   LAYOUT WIDTH
+===================================================== */
+
+--layout-max-width:1080px;
+--layout-padding:clamp(24px,4vw,48px);
+
+
+/* =====================================================
+   Z-INDEX SYSTEM
+===================================================== */
+
+--z-nav:1000;
+--z-dropdown:2000;
+--z-overlay:3000;
+--z-modal:3500;
+--z-toast:4000;
+--z-loader:5000;
+
+}

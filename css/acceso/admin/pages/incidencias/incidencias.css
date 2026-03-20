@@ -1,0 +1,229 @@
+/* =========================
+   INCIDENCIAS PAGE
+========================= */
+
+.incidencias{
+  width:100%;
+}
+
+.incidencias .panel-container{
+  max-width:1300px;
+  width:100%;
+  margin:0 auto;
+}
+
+
+/* =========================
+   HEADER
+========================= */
+
+.header-actions{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+.btn{
+  border:none;
+  padding:10px 14px;
+  border-radius:10px;
+  cursor:pointer;
+  font-size:14px;
+  font-weight:500;
+}
+
+.btn.primary{
+  background:var(--text);
+  color:var(--main-bg);
+}
+
+.btn.primary:hover{
+  opacity:.85;
+}
+
+
+/* =========================
+   FILTERS
+========================= */
+
+.filters{
+  margin-top:20px;
+}
+
+.filters-row{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+.filters input,
+.filters select{
+  background:var(--card-bg);
+  border:1px solid var(--card-border);
+  color:var(--text);
+
+  padding:10px 12px;
+  border-radius:10px;
+  outline:none;
+  font-size:14px;
+}
+
+.filters input{
+  flex:1;
+  min-width:200px;
+}
+
+.filters select{
+  min-width:150px;
+}
+
+
+/* =========================
+   GRID CARDS
+========================= */
+
+.incidencias .grid-cards{
+  margin-top:20px;
+}
+
+
+/* =========================
+   TABLE
+========================= */
+
+.table-block{
+  margin-top:20px;
+}
+
+.table-container{
+  width:100%;
+  overflow-x:auto;
+}
+
+.incidencias-table{
+  width:100%;
+  border-collapse:collapse;
+  font-size:14px;
+}
+
+.incidencias-table th{
+  text-align:left;
+  padding:12px;
+  color:var(--dim);
+  font-weight:500;
+  border-bottom:1px solid var(--card-border);
+}
+
+.incidencias-table td{
+  padding:12px;
+  border-bottom:1px solid var(--card-border);
+  color:var(--text);
+}
+
+.incidencias-table tr:hover{
+  background:var(--sb-hover);
+}
+
+
+/* =========================
+   STATUS BADGE
+========================= */
+
+.badge{
+  padding:4px 8px;
+  border-radius:8px;
+  font-size:12px;
+  font-weight:500;
+}
+
+.badge.abierta{
+  background:rgba(59,130,246,0.15);
+  color:#60a5fa;
+}
+
+.badge.progreso{
+  background:rgba(245,158,11,0.15);
+  color:#f59e0b;
+}
+
+.badge.cerrada{
+  background:rgba(34,197,94,0.15);
+  color:#22c55e;
+}
+
+
+/* =========================
+   ACTIONS
+========================= */
+
+.table-actions{
+  display:flex;
+  gap:8px;
+}
+
+.action-btn{
+  background:transparent;
+  border:none;
+  cursor:pointer;
+  color:var(--dim);
+}
+
+.action-btn:hover{
+  color:var(--text);
+}
+
+
+/* =========================
+   DETALLE
+========================= */
+
+.detalle{
+  margin-top:20px;
+}
+
+.detalle-content{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+
+.detalle-meta{
+  display:flex;
+  gap:20px;
+  flex-wrap:wrap;
+  font-size:13px;
+  color:var(--dim);
+}
+
+
+/* =========================
+   RESPONSIVE
+========================= */
+
+@media (max-width:768px){
+
+  .filters-row{
+    flex-direction:column;
+  }
+
+  .filters input,
+  .filters select{
+    width:100%;
+  }
+
+  .header-actions{
+    width:100%;
+    justify-content:flex-start;
+  }
+
+}
+
+@media (max-width:480px){
+
+  .incidencias-table th,
+  .incidencias-table td{
+    padding:10px;
+    font-size:13px;
+  }
+
+}

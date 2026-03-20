@@ -1,0 +1,205 @@
+/* =====================================================
+   BADGES · STATUS LABELS
+   Sistema reutilizable de etiquetas
+===================================================== */
+
+
+/* =====================================================
+   BASE BADGE
+===================================================== */
+
+.badge{
+
+display:inline-flex;
+align-items:center;
+justify-content:center;
+
+gap:6px;
+
+padding:6px 12px;
+
+font-size:12px;
+font-weight:600;
+
+line-height:1;
+
+border-radius:var(--radius-pill);
+
+white-space:nowrap;
+
+user-select:none;
+
+flex-shrink:0;
+
+transition:
+background var(--transition-fast),
+color var(--transition-fast);
+
+}
+
+
+/* =====================================================
+   BADGE COLORS (GENERIC SYSTEM)
+===================================================== */
+
+.badge-success{
+
+background:rgba(52,199,89,.12);
+color:var(--color-success);
+
+}
+
+.badge-warning{
+
+background:rgba(255,149,0,.15);
+color:var(--color-warning);
+
+}
+
+.badge-danger{
+
+background:rgba(255,59,48,.12);
+color:var(--color-danger);
+
+}
+
+.badge-info{
+
+background:rgba(0,122,255,.12);
+color:var(--color-primary);
+
+}
+
+.badge-neutral{
+
+background:rgba(0,0,0,.06);
+color:var(--color-text-secondary);
+
+}
+
+
+/* =====================================================
+   BADGE DOT
+===================================================== */
+
+.badge-dot{
+
+padding-left:10px;
+
+}
+
+.badge-dot::before{
+
+content:"";
+
+width:6px;
+height:6px;
+
+border-radius:50%;
+
+background:currentColor;
+
+display:inline-block;
+
+}
+
+
+/* =====================================================
+   BADGE SIZES
+===================================================== */
+
+.badge-sm{
+
+padding:4px 8px;
+font-size:11px;
+
+}
+
+.badge-lg{
+
+padding:8px 14px;
+font-size:13px;
+
+}
+
+
+/* =====================================================
+   STATUS BADGES
+===================================================== */
+
+.badge-activo{
+
+background:rgba(52,199,89,.12);
+color:var(--color-success);
+
+}
+
+.badge-inactivo{
+
+background:rgba(255,59,48,.12);
+color:var(--color-danger);
+
+}
+
+
+/* =====================================================
+   USER ROLE BADGES
+===================================================== */
+
+.badge-admin{
+
+background:rgba(255,87,34,.12);
+color:#ff5722;
+
+}
+
+.badge-user{
+
+background:rgba(0,122,255,.12);
+color:var(--color-primary);
+
+}
+
+
+/* =====================================================
+   USER TYPE BADGES
+===================================================== */
+
+.badge-empresa{
+
+background:rgba(155,89,182,.12);
+color:#9b59b6;
+
+}
+
+.badge-particular{
+
+background:rgba(243,156,18,.14);
+color:#f39c12;
+
+}
+
+/* =====================================================
+   BADGE STATES
+===================================================== */
+
+.badge-open{
+
+background:rgba(0,122,255,.12);
+color:var(--color-primary);
+
+}
+
+.badge-pending{
+
+background:rgba(255,149,0,.15);
+color:var(--color-warning);
+
+}
+
+.badge-closed{
+
+background:rgba(52,199,89,.12);
+color:var(--color-success);
+
+}

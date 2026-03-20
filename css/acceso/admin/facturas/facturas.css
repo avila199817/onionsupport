@@ -1,0 +1,271 @@
+/* =====================================================
+   FACTURAS · PAGE STYLES (FINAL PRO)
+===================================================== */
+
+
+/* =====================================================
+   WRAPPER
+===================================================== */
+
+.facturas-wrapper{
+margin-bottom:var(--space-xl);
+}
+
+
+/* =====================================================
+   LINK FACTURA
+===================================================== */
+
+.factura-link{
+
+font-weight:600;
+letter-spacing:-0.01em;
+color:var(--color-text-main);
+cursor:pointer;
+
+}
+
+.factura-link:hover{
+
+text-decoration:underline;
+text-underline-offset:3px;
+
+}
+
+
+/* =====================================================
+   ALIGN BASE (NO ROMPE NADA EXISTENTE)
+===================================================== */
+
+.facturas-table th,
+.facturas-table td{
+vertical-align:middle;
+}
+
+
+/* =====================================================
+   COLUMN ALIGN (FINO PRO)
+===================================================== */
+
+/* Nº factura */
+.facturas-table td:nth-child(1),
+.facturas-table th:nth-child(1){
+text-align:left;
+}
+
+/* fecha */
+.facturas-table td:nth-child(2),
+.facturas-table th:nth-child(2){
+text-align:left;
+}
+
+/* cliente */
+.facturas-table td:nth-child(3),
+.facturas-table th:nth-child(3){
+text-align:left;
+}
+
+/* 💰 importe */
+.facturas-table td:nth-child(4),
+.facturas-table th:nth-child(4){
+text-align:right;
+font-weight:600;
+letter-spacing:-0.01em;
+}
+
+/* 📊 estado */
+.facturas-table td:nth-child(5),
+.facturas-table th:nth-child(5){
+text-align:center;
+}
+
+/* 💳 pago */
+.facturas-table td:nth-child(6),
+.facturas-table th:nth-child(6){
+text-align:center;
+}
+
+/* ⚙️ acciones */
+.facturas-table td:nth-child(7),
+.facturas-table th:nth-child(7){
+text-align:right;
+}
+
+
+/* =====================================================
+   CENTRADO REAL (BADGE + BOTÓN)
+===================================================== */
+
+.facturas-table td:nth-child(5) .badge,
+.facturas-table td:nth-child(6) button{
+display:inline-flex;
+margin:0 auto;
+}
+
+
+/* =====================================================
+   ACCIONES
+===================================================== */
+
+.factura-actions{
+
+display:flex;
+align-items:center;
+justify-content:flex-end;
+gap:10px;
+
+}
+
+
+/* =====================================================
+   BOTONES
+===================================================== */
+
+.btn-pagar,
+.btn-pagada{
+
+height:32px;
+padding:0 12px;
+border-radius:8px;
+font-size:13px;
+border:none;
+cursor:pointer;
+transition:all var(--transition-fast);
+
+}
+
+.btn-pagar{
+
+background:var(--color-primary);
+color:#fff;
+
+}
+
+.btn-pagar:hover{
+
+opacity:.9;
+transform:translateY(-1px);
+
+}
+
+.btn-pagar:active{
+
+transform:scale(.96);
+
+}
+
+.btn-pagada{
+
+background:#e5e5ea;
+color:#8e8e93;
+cursor:not-allowed;
+
+}
+
+
+/* =====================================================
+   ROW HOVER
+===================================================== */
+
+.facturas-table tbody tr{
+
+transition:background var(--transition-fast), transform var(--transition-fast);
+
+}
+
+.facturas-table tbody tr:hover{
+
+background:var(--color-bg-hover);
+
+}
+
+.facturas-table tbody tr:active{
+
+transform:scale(.995);
+
+}
+
+
+/* =====================================================
+   SPACING FINO (NO INTRUSIVO)
+===================================================== */
+
+.facturas-table td{
+padding-top:14px;
+padding-bottom:14px;
+}
+
+
+/* =====================================================
+   MOBILE · TABLE → CARDS
+===================================================== */
+
+@media (max-width:720px){
+
+.facturas-table thead{
+display:none;
+}
+
+.facturas-table,
+.facturas-table tbody,
+.facturas-table tr{
+display:block;
+width:100%;
+}
+
+.facturas-table tr{
+
+background:var(--color-bg-card);
+border-radius:var(--radius-lg);
+border:1px solid var(--border-soft);
+box-shadow:var(--shadow-soft);
+
+padding:20px;
+margin-bottom:18px;
+
+}
+
+.facturas-table td{
+
+display:flex;
+justify-content:space-between;
+align-items:center;
+gap:16px;
+
+padding:6px 0;
+
+border:none;
+font-size:14px;
+
+}
+
+.facturas-table td::before{
+
+font-size:12px;
+font-weight:500;
+color:var(--color-text-secondary);
+flex-shrink:0;
+
+}
+
+/* labels dinámicos */
+
+.facturas-table td:nth-child(1)::before{content:"Factura";}
+.facturas-table td:nth-child(2)::before{content:"Fecha";}
+.facturas-table td:nth-child(3)::before{content:"Cliente";}
+.facturas-table td:nth-child(4)::before{content:"Importe";}
+.facturas-table td:nth-child(5)::before{content:"Estado";}
+.facturas-table td:nth-child(6)::before{content:"Pago";}
+.facturas-table td:nth-child(7)::before{content:"Acciones";}
+
+/* acciones mobile */
+
+.factura-actions{
+
+margin-top:8px;
+justify-content:flex-start;
+flex-wrap:wrap;
+
+}
+
+}

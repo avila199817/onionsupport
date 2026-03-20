@@ -1,0 +1,148 @@
+/* =====================================================
+   INCIDENCIAS · PAGE STYLES
+===================================================== */
+
+
+/* =====================================================
+   WRAPPER
+===================================================== */
+
+.incidencias-wrapper{
+margin-bottom:var(--space-xl);
+}
+
+
+/* =====================================================
+   ID CELL
+===================================================== */
+
+.ticket-id{
+
+font-weight:600;
+
+letter-spacing:-0.01em;
+
+color:var(--color-text-main);
+
+}
+
+
+/* =====================================================
+   ESTADO (opcional badge fallback)
+===================================================== */
+
+.ticket-estado{
+
+font-weight:500;
+
+}
+
+
+/* =====================================================
+   ROW HOVER (SENSACIÓN APPLE)
+===================================================== */
+
+.incidencias-table tbody tr{
+
+cursor:pointer;
+
+transition:background var(--transition-fast), transform var(--transition-fast);
+
+}
+
+.incidencias-table tbody tr:hover{
+
+background:var(--color-bg-hover);
+
+}
+
+.incidencias-table tbody tr:active{
+
+transform:scale(.995);
+
+}
+
+
+/* =====================================================
+   MOBILE · TABLE → CARDS
+===================================================== */
+
+@media (max-width:720px){
+
+/* ocultar encabezado */
+
+.incidencias-table thead{
+display:none;
+}
+
+/* reset tabla */
+
+.incidencias-table,
+.incidencias-table tbody,
+.incidencias-table tr{
+display:block;
+width:100%;
+}
+
+/* fila = card */
+
+.incidencias-table tr{
+
+background:var(--color-bg-card);
+
+border-radius:var(--radius-lg);
+
+border:1px solid var(--border-soft);
+
+box-shadow:var(--shadow-soft);
+
+padding:20px;
+
+margin-bottom:18px;
+
+}
+
+/* filas internas */
+
+.incidencias-table td{
+
+display:flex;
+
+justify-content:space-between;
+
+align-items:center;
+
+gap:16px;
+
+padding:6px 0;
+
+border:none;
+
+font-size:14px;
+
+}
+
+/* labels */
+
+.incidencias-table td::before{
+
+font-size:12px;
+
+font-weight:500;
+
+color:var(--color-text-secondary);
+
+flex-shrink:0;
+
+}
+
+
+/* labels dinámicos */
+
+.incidencias-table td:nth-child(1)::before{content:"Cliente";}
+.incidencias-table td:nth-child(2)::before{content:"ID";}
+.incidencias-table td:nth-child(3)::before{content:"Tipo";}
+.incidencias-table td:nth-child(4)::before{content:"Estado";}
+.incidencias-table td:nth-child(5)::before{content:"Fecha";}
+
+}

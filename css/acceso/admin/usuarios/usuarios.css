@@ -1,0 +1,293 @@
+/* =====================================================
+   USUARIOS · PAGE STYLES
+===================================================== */
+
+
+/* =====================================================
+   WRAPPER
+===================================================== */
+
+.usuarios-wrapper{
+margin-bottom:var(--space-xl);
+}
+
+
+/* =====================================================
+   USER CELL
+===================================================== */
+
+.usuario-cell{
+
+display:flex;
+align-items:center;
+
+gap:12px;
+
+}
+
+.usuario-avatar{
+
+width:36px;
+height:36px;
+
+border-radius:50%;
+
+object-fit:cover;
+
+background:#e5e5ea;
+
+flex-shrink:0;
+
+}
+
+.usuario-username{
+
+font-weight:600;
+
+letter-spacing:-0.01em;
+
+color:var(--color-text-main);
+
+}
+
+
+/* =====================================================
+   EMAIL
+===================================================== */
+
+.usuario-email a{
+
+color:var(--color-primary);
+
+text-decoration:none;
+
+font-weight:500;
+
+}
+
+.usuario-email a:hover{
+
+text-decoration:underline;
+
+}
+
+
+/* =====================================================
+   ACTIONS
+===================================================== */
+
+.usuario-actions{
+
+display:flex;
+
+align-items:center;
+
+justify-content:flex-end;
+
+gap:12px;
+
+}
+
+
+/* =====================================================
+   BOTÓN EDITAR
+===================================================== */
+
+.btn-editar{
+
+width:36px;
+height:36px;
+
+border-radius:50%;
+
+border:none;
+
+background:#f2f2f7;
+
+display:flex;
+align-items:center;
+justify-content:center;
+
+font-size:14px;
+
+cursor:pointer;
+
+transition:all var(--transition-fast);
+
+}
+
+.btn-editar:hover{
+
+background:#e5e5ea;
+
+transform:translateY(-1px);
+
+}
+
+.btn-editar:active{
+
+transform:scale(.92);
+
+}
+
+
+/* =====================================================
+   LINKS
+===================================================== */
+
+.usuario-link{
+
+text-decoration:none;
+
+color:inherit;
+
+}
+
+.usuario-link:hover{
+
+color:var(--color-primary);
+
+text-decoration:underline;
+
+}
+
+
+/* =====================================================
+   LINK USUARIO
+===================================================== */
+
+.usuario-cell a,
+.usuario-cell a:visited,
+.usuario-cell a:active{
+color:var(--color-text-main);
+text-decoration:none;
+}
+
+.usuario-cell a:hover{
+color:var(--color-text-main);
+text-decoration:underline;
+text-decoration-thickness:1px;
+text-underline-offset:3px;
+}
+
+
+
+/* =====================================================
+   MOBILE · USERS → TABLE TO CARDS
+===================================================== */
+
+@media (max-width:720px){
+
+/* ocultar encabezado */
+
+.usuarios-table thead{
+display:none;
+}
+
+/* reset tabla */
+
+.usuarios-table,
+.usuarios-table tbody,
+.usuarios-table tr{
+display:block;
+width:100%;
+}
+
+/* fila = card */
+
+.usuarios-table tr{
+
+background:var(--color-bg-card);
+
+border-radius:var(--radius-lg);
+
+border:1px solid var(--border-soft);
+
+box-shadow:var(--shadow-soft);
+
+padding:20px;
+
+margin-bottom:18px;
+
+}
+
+/* filas internas */
+
+.usuarios-table td{
+
+display:flex;
+
+justify-content:space-between;
+
+align-items:center;
+
+gap:16px;
+
+padding:6px 0;
+
+border:none;
+
+font-size:14px;
+
+}
+
+/* labels */
+
+.usuarios-table td::before{
+
+font-size:12px;
+
+font-weight:500;
+
+color:var(--color-text-secondary);
+
+flex-shrink:0;
+
+}
+
+
+/* labels */
+
+.usuarios-table td:nth-child(1)::before{content:"Usuario";}
+.usuarios-table td:nth-child(2)::before{content:"Nombre";}
+.usuarios-table td:nth-child(3)::before{content:"Email";}
+.usuarios-table td:nth-child(4)::before{content:"Rol";}
+.usuarios-table td:nth-child(5)::before{content:"Tipo";}
+.usuarios-table td:nth-child(6)::before{content:"Estado";}
+.usuarios-table td:nth-child(7)::before{content:"Acciones";}
+
+
+/* avatar */
+
+.usuario-avatar{
+width:32px;
+height:32px;
+}
+
+/* username */
+
+.usuario-username{
+font-weight:600;
+}
+
+/* email wrap */
+
+.usuario-email{
+word-break:break-word;
+}
+
+/* acciones */
+
+.usuario-actions{
+
+margin-top:8px;
+
+display:flex;
+
+gap:8px;
+
+flex-wrap:wrap;
+
+}
+
+}

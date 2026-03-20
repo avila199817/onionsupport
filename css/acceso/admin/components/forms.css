@@ -1,0 +1,393 @@
+/* =====================================================
+   FORMS · INPUT SYSTEM
+===================================================== */
+
+
+/* =====================================================
+   FORM GROUP
+===================================================== */
+
+.form-group{
+
+display:flex;
+flex-direction:column;
+
+gap:6px;
+
+margin-bottom:18px;
+
+}
+
+
+/* =====================================================
+   LABEL
+===================================================== */
+
+.form-label{
+
+font-size:13px;
+font-weight:600;
+
+color:var(--color-text-secondary);
+
+}
+
+
+/* =====================================================
+   BASE INPUT
+===================================================== */
+
+.input{
+
+width:100%;
+
+height:42px;
+
+padding:10px 12px;
+
+font-size:14px;
+
+border-radius:var(--radius-md);
+
+border:1px solid var(--border-soft);
+
+background:var(--color-bg-input);
+
+color:var(--color-text-main);
+
+flex-shrink:0;
+
+transition:
+border var(--transition-fast),
+box-shadow var(--transition-fast),
+background var(--transition-fast);
+
+}
+
+
+/* =====================================================
+   INPUT HOVER
+===================================================== */
+
+.input:hover{
+
+border-color:var(--border-medium);
+
+}
+
+
+/* =====================================================
+   INPUT FOCUS
+===================================================== */
+
+.input:focus{
+
+border-color:var(--color-primary);
+
+box-shadow:0 0 0 2px rgba(0,122,255,0.15);
+
+}
+
+
+/* =====================================================
+   INPUT DISABLED
+===================================================== */
+
+.input:disabled{
+
+opacity:.6;
+
+cursor:not-allowed;
+
+background:rgba(0,0,0,0.03);
+
+}
+
+
+/* =====================================================
+   TEXTAREA
+===================================================== */
+
+.textarea{
+
+min-height:90px;
+
+resize:vertical;
+
+height:auto;
+
+}
+
+
+/* =====================================================
+   SELECT
+===================================================== */
+
+.select{
+
+appearance:none;
+
+background:var(--color-bg-input);
+
+cursor:pointer;
+
+}
+
+
+/* =====================================================
+   INPUT STATES
+===================================================== */
+
+.input-success{
+
+border-color:var(--color-success);
+
+}
+
+.input-error{
+
+border-color:var(--color-danger);
+
+}
+
+
+/* =====================================================
+   HELP TEXT
+===================================================== */
+
+.form-help{
+
+font-size:12px;
+
+color:var(--color-text-secondary);
+
+}
+
+
+/* =====================================================
+   ERROR TEXT
+===================================================== */
+
+.form-error{
+
+font-size:12px;
+
+color:var(--color-danger);
+
+}
+
+
+/* =====================================================
+   PASSWORD INPUT WRAPPER
+===================================================== */
+
+.input-password{
+
+position:relative;
+
+display:flex;
+
+align-items:center;
+
+}
+
+.input-password .input{
+
+padding-right:40px;
+
+}
+
+
+/* =====================================================
+   PASSWORD TOGGLE
+===================================================== */
+
+.password-toggle{
+
+position:absolute;
+
+right:10px;
+
+background:none;
+border:none;
+
+cursor:pointer;
+
+font-size:16px;
+
+line-height:1;
+
+opacity:.65;
+
+transition:
+opacity var(--transition-fast),
+transform var(--transition-fast);
+
+}
+
+.password-toggle:hover{
+opacity:1;
+}
+
+.password-toggle.active{
+transform:scale(1.1);
+}
+
+
+/* =====================================================
+   CAPS WARNING
+===================================================== */
+
+.caps-warning{
+
+display:none;
+
+margin-top:6px;
+
+font-size:12px;
+
+color:var(--color-danger);
+
+font-weight:500;
+
+}
+
+
+/* =====================================================
+   PASSWORD REQUIREMENTS
+===================================================== */
+
+.password-requirements{
+
+list-style:none;
+
+margin-top:10px;
+
+padding:10px 12px;
+
+border-radius:var(--radius-md);
+
+background:rgba(0,0,0,0.04);
+
+font-size:12.5px;
+
+line-height:1.6;
+
+}
+
+.password-requirements li{
+
+display:flex;
+align-items:center;
+
+gap:6px;
+
+color:var(--color-text-secondary);
+
+transition:color var(--transition-fast);
+
+}
+
+
+/* INVALID */
+
+.password-requirements li.invalid{
+
+color:var(--color-danger);
+
+}
+
+
+/* VALID */
+
+.password-requirements li.valid{
+
+color:var(--color-success);
+
+font-weight:600;
+
+}
+
+
+/* =====================================================
+   PASSWORD MATCH TEXT
+===================================================== */
+
+.password-match{
+
+margin-top:8px;
+
+font-size:13px;
+
+font-weight:500;
+
+min-height:18px;
+
+color:var(--color-text-secondary);
+
+}
+
+.password-match.valid{
+
+color:var(--color-success);
+
+}
+
+.password-match.invalid{
+
+color:var(--color-danger);
+
+}
+
+
+/* =====================================================
+   FORM ROW
+===================================================== */
+
+.form-row{
+
+display:flex;
+
+gap:16px;
+
+flex-wrap:wrap;
+
+}
+
+.form-row .form-group{
+
+flex:1;
+
+}
+
+
+/* =====================================================
+   FORM ACTIONS
+===================================================== */
+
+.form-actions{
+
+display:flex;
+
+justify-content:flex-end;
+
+gap:10px;
+
+margin-top:18px;
+
+}
+
+
+/* =====================================================
+   RESPONSIVE
+===================================================== */
+
+@media (max-width:640px){
+
+.form-row{
+
+flex-direction:column;
+
+}
+
+}

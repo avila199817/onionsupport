@@ -305,10 +305,15 @@ Onion.go = function(path){
 
   const current = window.location.pathname;
 
-  if(current === url){
-    window.dispatchEvent(new Event("onion:navigate"));
-    return;
-  }
+   if(current === url){
+   
+     // 🔥 FORZAR RESET REAL
+     Onion.state.currentScript = null;
+     Onion.state.currentStyle = null;
+   
+     Onion.render();
+     return;
+   }
 
   window.history.pushState({}, "", url);
   window.dispatchEvent(new Event("onion:navigate"));

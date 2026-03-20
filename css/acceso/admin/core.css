@@ -593,41 +593,70 @@ body{
     border-color .2s ease;
 }
 
+
+
+
+
+
+
+
+
+
+
+
 /* =========================
-   GLOBAL TOPBAR (FINAL FIX REAL)
+   GLOBAL TOPBAR (FIXED REAL PRO)
 ========================= */
 
 .global-topbar{
   position: fixed;
   top: 0;
-  left: 260px;
+  left: 0;
   right: 0;
 
   height: 64px;
-  z-index: 50;
+  z-index: 1000;
 
   pointer-events: none;
 }
 
-/* SIDEBAR COLLAPSED */
-.sidebar.collapsed ~ .main-content .global-topbar{
-  left: 72px;
-}
-
 /* =========================
-   INNER ALINEADO 100% A HOME
+   INNER (MISMO SISTEMA QUE HOME)
 ========================= */
 
 .topbar-inner{
   width: 100%;
-  max-width: 1300px; /* 🔥 EXACTO MISMO QUE panel-container */
+  max-width: 1300px;
   margin: 0 auto;
 
-  padding: 14px 40px 0; /* 🔥 MISMO padding que .home */
+  padding: 14px 40px 0;
 
   display: flex;
   justify-content: flex-end;
   align-items: center;
+}
+
+/* =========================
+   OFFSET SIDEBAR (CLAVE)
+========================= */
+
+/* normal */
+.main-content{
+  margin-left: 260px;
+}
+
+/* collapsed */
+.sidebar.collapsed ~ .main-content{
+  margin-left: 72px;
+}
+
+/* 🔥 compensamos el topbar con transform */
+.global-topbar{
+  transform: translateX(260px);
+}
+
+.sidebar.collapsed ~ .main-content .global-topbar{
+  transform: translateX(72px);
 }
 
 /* =========================
@@ -682,38 +711,4 @@ body{
 
 .search-box input::placeholder{
   color: var(--dim);
-}
-
-/* =========================
-   RESPONSIVE
-========================= */
-
-@media (max-width:1024px){
-
-  .topbar-inner{
-    padding: 14px 20px 0;
-  }
-
-}
-
-@media (max-width:768px){
-
-  .global-topbar{
-    left: 0;
-  }
-
-  .topbar-inner{
-    padding: 10px 16px;
-    justify-content: center;
-  }
-
-  .search-box{
-    width: 100%;
-    max-width: 420px;
-  }
-
-}
-    max-width: 420px;
-  }
-
 }

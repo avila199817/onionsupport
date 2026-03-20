@@ -1,59 +1,95 @@
 /* =========================
-   THEME SYSTEM (CORE PRO FINAL)
+   CORE DESIGN SYSTEM (FINAL PRO)
 ========================= */
 
 :root{
 
-  /* SIDEBAR */
+  /* =========================
+     LAYOUT TOKENS (🔥 CLAVE)
+  ========================= */
+
+  --content-max:1300px;
+  --content-padding:40px;
+
+  --topbar-height:64px;
+  --sidebar-width:260px;
+  --sidebar-collapsed:72px;
+
+  /* =========================
+     SIDEBAR
+  ========================= */
+
   --sb-bg:#1b1b1b;
   --sb-hover:#121212;
   --sb-active:#151515;
   --sb-border:rgba(255,255,255,0.04);
 
-  /* TEXT */
+  /* =========================
+     TEXT
+  ========================= */
+
   --text:#ffffff;
   --muted:rgba(255,255,255,0.92);
   --dim:rgba(255,255,255,0.6);
 
-  /* BASE */
+  /* =========================
+     BASE
+  ========================= */
+
   --main-bg:#0d0d0d;
   --dropdown-bg:#333333;
 
-  /* CARDS */
+  /* =========================
+     CARDS
+  ========================= */
+
   --card-bg:#1e1e1e;
   --card-border:#2a2a2a;
   --card-shadow:0 10px 30px rgba(0,0,0,0.35);
   --card-shadow-hover:0 20px 40px rgba(0,0,0,0.45);
 
-  /* PANELS */
+  /* =========================
+     PANELS
+  ========================= */
+
   --panel-bg:#1b1b1b;
   --panel-border:#2a2a2a;
   --panel-shadow:0 10px 30px rgba(0,0,0,0.4);
 
-  /* STATUS COLORS */
+  /* =========================
+     STATUS COLORS
+  ========================= */
+
   --success:#22c55e;
   --warning:#f59e0b;
   --error:#ef4444;
   --info:#60a5fa;
 
-  /* STATUS BACKGROUNDS */
+  /* =========================
+     STATUS BACKGROUNDS
+  ========================= */
+
   --warning-bg:rgba(245,158,11,0.12);
   --info-bg:rgba(59,130,246,0.12);
 
-  /* GRADIENT BACKGROUND */
+  /* =========================
+     BACKGROUND SYSTEM
+  ========================= */
+
   --gradient-main: linear-gradient(180deg, #2a2a2a 0%, #232323 60%, #1d1d1d 100%);
   --gradient-overlay: radial-gradient(circle at 40% 0%, rgba(255,255,255,0.025), transparent 70%);
 
-  /* TOOLTIP */
+  /* =========================
+     UI
+  ========================= */
+
   --tooltip-bg:#111;
   --tooltip-text:#fff;
 
-  /* AVATAR */
   --avatar-bg:#ec4899;
   --avatar-text:#fff;
 
-   /* SCROLL */
-	--scrollbar-thumb:rgba(255,255,255,0.1);
+  --scrollbar-thumb:rgba(255,255,255,0.1);
 
 }
 
@@ -63,53 +99,42 @@
 
 [data-theme="light"]{
 
-  /* SIDEBAR */
   --sb-bg:#ffffff;
   --sb-hover:#f3f4f6;
   --sb-active:#e5e7eb;
   --sb-border:#e5e7eb;
 
-  /* TEXT */
   --text:#111827;
   --muted:#374151;
   --dim:#6b7280;
 
-  /* BASE */
   --main-bg:#f6f8fb;
   --dropdown-bg:#ffffff;
 
-  /* CARDS */
   --card-bg:#ffffff;
   --card-border:#e5e7eb;
   --card-shadow:0 10px 25px rgba(0,0,0,0.06);
   --card-shadow-hover:0 15px 35px rgba(0,0,0,0.08);
 
-  /* PANELS */
   --panel-bg:#ffffff;
   --panel-border:#e5e7eb;
   --panel-shadow:0 10px 25px rgba(0,0,0,0.05);
 
-  /* STATUS (se mantienen colores base) */
-
-  /* STATUS BACKGROUNDS */
   --warning-bg:rgba(245,158,11,0.12);
   --info-bg:rgba(59,130,246,0.12);
 
-  /* GRADIENT BACKGROUND */
   --gradient-main: linear-gradient(180deg, #f6f8fb 0%, #eef2f7 100%);
   --gradient-overlay: radial-gradient(circle at 40% 0%, rgba(0,0,0,0.03), transparent 70%);
 
-  /* TOOLTIP */
   --tooltip-bg:#111827;
   --tooltip-text:#ffffff;
 
-	/* SCROLL */
-	--scrollbar-thumb:rgba(0,0,0,0.15);
+  --scrollbar-thumb:rgba(0,0,0,0.15);
 
 }
 
 /* =========================
-   GLOBAL (CORE PRO)
+   RESET + BASE
 ========================= */
 
 *,
@@ -118,7 +143,6 @@
   box-sizing:border-box;
 }
 
-/* RESET BASE */
 html, body{
   margin:0;
   padding:0;
@@ -131,22 +155,156 @@ html, body{
 
   -webkit-font-smoothing:antialiased;
   -moz-osx-font-smoothing:grayscale;
+
+  overscroll-behavior:none;
 }
 
-/* SCROLL SUAVE */
 html{
   scroll-behavior:smooth;
-}
-
-/* LAYOUT ROOT */
-.layout{
-  position:relative;
-  min-height:100vh;
 }
 
 body{
   overflow-x:hidden;
 }
+
+/* =========================
+   LAYOUT ROOT
+========================= */
+
+.layout{
+  position:relative;
+  min-height:100vh;
+}
+
+/* =========================
+   GLOBAL CONTAINER (🔥 DIOS)
+========================= */
+
+.container{
+  width:100%;
+  max-width:var(--content-max);
+  margin:0 auto;
+  padding:0 var(--content-padding);
+}
+
+/* =========================
+   MAIN CONTENT BASE
+========================= */
+
+.main-content{
+  margin-left:var(--sidebar-width);
+  min-height:100vh;
+
+  padding-top:var(--topbar-height);
+
+  background:
+    var(--gradient-overlay),
+    var(--gradient-main);
+
+  transition:.25s ease;
+}
+
+.sidebar.collapsed ~ .main-content{
+  margin-left:var(--sidebar-collapsed);
+}
+
+/* =========================
+   SCROLLBAR
+========================= */
+
+::-webkit-scrollbar{
+  width:6px;
+}
+
+::-webkit-scrollbar-thumb{
+  background:var(--scrollbar-thumb);
+  border-radius:10px;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 /* =========================
    SIDEBAR
@@ -592,6 +750,20 @@ body{
     color .2s ease,
     border-color .2s ease;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

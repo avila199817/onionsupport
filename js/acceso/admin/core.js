@@ -221,28 +221,24 @@ Onion.scripts = {
 
 
 /* =========================
-   ROUTER (FINAL)
+   ROUTER
 ========================= */
+
+Onion.router = {};
 
 Onion.router.get = function(){
 
   let path = window.location.pathname || "/";
 
-  // quitar base
   if(path.startsWith("/es/acceso/admin")){
     path = path.replace("/es/acceso/admin", "");
   }
 
-  // quitar query
   path = path.split("?")[0];
-
-  // quitar hash
   path = path.split("#")[0];
 
-  // normalizar barras
   path = path.replace(/\/+/g, "/");
 
-  // quitar trailing slash
   if(path.length > 1 && path.endsWith("/")){
     path = path.slice(0, -1);
   }
@@ -256,6 +252,22 @@ Onion.router.get = function(){
 
   return path;
 };
+
+
+Onion.router.resolve = function(){
+
+  const route = Onion.router.get();
+
+  console.log("🧭 RESOLVING:", route);
+
+  if(Onion.routes[route]){
+    return Onion.routes[route];
+  }
+
+  console.warn("⚠️ Route not found:", route);
+  return Onion.routes["/"];
+};
+
 
 /* =========================
    NAV
@@ -321,13 +333,11 @@ Onion.render = async function(){
     const route = Onion.router.get();
     const url = Onion.router.resolve();
 
-    // STYLE
     const style = Onion.styles[route] || Onion.styles["/"];
     if(style){
-    await Onion.loadStyle(style);
+      await Onion.loadStyle(style);
     }
 
-    // HTML
     let html = Onion.cache.html[url];
 
     if(!html){
@@ -345,7 +355,6 @@ Onion.render = async function(){
     app.innerHTML = "";
     app.appendChild(content || container);
 
-    // SIDEBAR
     if(window.renderSidebar){
       window.renderSidebar();
     }
@@ -354,11 +363,10 @@ Onion.render = async function(){
       window.updateSidebarActive();
     }
 
-    // SCRIPT
-   const script = Onion.scripts[route] || Onion.scripts["/"];
-   if(script){
-     await Onion.loadScript(script);
-   }
+    const script = Onion.scripts[route] || Onion.scripts["/"];
+    if(script){
+      await Onion.loadScript(script);
+    }
 
     document.body.classList.remove("loading");
 

@@ -874,12 +874,6 @@ a,
 
 
 
-
-
-
-
-
-
 /* =========================
    GLOBAL TOPBAR
 ========================= */
@@ -896,7 +890,6 @@ a,
 
   display: flex;
   align-items: center;
-  justify-content: center;
 
   pointer-events: none;
 
@@ -904,7 +897,7 @@ a,
               width .35s cubic-bezier(.25,.8,.25,1);
 }
 
-/* cuando colapsa */
+/* sidebar colapsado */
 .sidebar.collapsed ~ .global-topbar{
   left: var(--sidebar-collapsed);
   width: calc(100% - var(--sidebar-collapsed));
@@ -912,16 +905,17 @@ a,
 
 
 /* =========================
-   INNER CONTAINER (CLAVE)
+   INNER (ALINEACIÓN REAL)
 ========================= */
 
 .global-topbar-inner{
   width: 100%;
   max-width: var(--content-max);
+  margin: 0 auto; /* 🔥 CLAVE */
   padding: 0 var(--content-padding);
 
   display: flex;
-  justify-content: flex-end; /* 🔥 lo manda a la derecha */
+  justify-content: flex-end;
 
   pointer-events: none;
 }
@@ -976,6 +970,28 @@ a,
     0 12px 30px rgba(0,0,0,0.45);
 
   transform: translateY(-1px);
+}
+
+
+/* =========================
+   INPUT
+========================= */
+
+.search-box input{
+  width: 100%;
+  height: 100%;
+
+  background: transparent;
+  border: none;
+  outline: none;
+
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.search-box input::placeholder{
+  color: var(--dim);
 }
 
 

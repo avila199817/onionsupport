@@ -224,52 +224,38 @@ Onion.scripts = {
    ROUTER (FINAL)
 ========================= */
 
-Onion.router = {};
-
 Onion.router.get = function(){
 
   let path = window.location.pathname || "/";
 
-  // 🔥 quitar base si alguna vez aparece
+  // quitar base
   if(path.startsWith("/es/acceso/admin")){
     path = path.replace("/es/acceso/admin", "");
   }
 
-  // 🔥 normalizar barras
+  // quitar query
+  path = path.split("?")[0];
+
+  // quitar hash
+  path = path.split("#")[0];
+
+  // normalizar barras
   path = path.replace(/\/+/g, "/");
 
-  // 🔥 quitar trailing slash (excepto raíz)
+  // quitar trailing slash
   if(path.length > 1 && path.endsWith("/")){
     path = path.slice(0, -1);
   }
 
-  // 🔥 seguridad: vacío → "/"
   if(!path || path === ""){
     path = "/";
   }
 
-  // 🔥 DEBUG (puedes quitar luego)
   console.log("🌐 PATH:", window.location.pathname);
   console.log("🧭 ROUTE:", path);
 
   return path;
 };
-
-
-Onion.router.resolve = function(){
-
-  const route = Onion.router.get();
-
-  // 🔥 match exacto
-  if(Onion.routes[route]){
-    return Onion.routes[route];
-  }
-
-  // 🔥 fallback controlado
-  console.warn("⚠️ Route not found:", route);
-  return Onion.routes["/"];
-};
-
 
 /* =========================
    NAV

@@ -891,49 +891,51 @@ a,
 
 
 
-
-
-
-
-
-
-
 /* =========================
-   GLOBAL SEARCH (CORE GOD FINAL PRO)
+   GLOBAL TOPBAR
 ========================= */
 
 .global-topbar{
   position: fixed;
   top: 0;
-  left: 0;
+  left: var(--sidebar-width);
   right: 0;
 
   height: var(--topbar-height);
 
   z-index: 2000;
+
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+
+  padding: 0 var(--content-padding);
+
   pointer-events: none;
+
+  transition: left .35s cubic-bezier(.25,.8,.25,1);
 }
 
+/* cuando sidebar colapsa */
+.sidebar.collapsed ~ .global-topbar{
+  left: var(--sidebar-collapsed);
+}
+
+
 /* =========================
-   SEARCH POSITION (PERFECT ALIGN)
+   SEARCH BOX (INTEGRADO)
 ========================= */
 
 .search-box{
-  position: fixed;
-
-  top: calc((var(--topbar-height) - 44px) / 2); /* 🔥 centrado real vertical */
-  right: var(--content-padding);
-
-  z-index: 3000;
-
   pointer-events: auto;
 
   display: flex;
   align-items: center;
   gap: 10px;
 
-  width: 340px;
-  height: 44px; /* 🔥 altura consistente */
+  width: 100%;
+  max-width: 340px;
+  height: 44px;
 
   padding: 0 14px;
 
@@ -952,8 +954,9 @@ a,
     transform .15s ease;
 }
 
+
 /* =========================
-   HOVER + FOCUS (UX PRO)
+   HOVER + FOCUS
 ========================= */
 
 .search-box:hover{
@@ -967,8 +970,9 @@ a,
     0 0 0 2px var(--info-bg),
     0 12px 30px rgba(0,0,0,0.45);
 
-  transform: translateY(-1px); /* 🔥 efecto premium */
+  transform: translateY(-1px);
 }
+
 
 /* =========================
    ICON
@@ -983,6 +987,7 @@ a,
 .search-box:focus-within .search-icon{
   opacity: 1;
 }
+
 
 /* =========================
    INPUT
@@ -1005,25 +1010,20 @@ a,
   color: var(--dim);
 }
 
+
 /* =========================
-   RESPONSIVE (FINO)
+   RESPONSIVE
 ========================= */
 
 @media (max-width:768px){
 
-  .search-box{
-    right: 16px;
-    width: calc(100% - 32px);
-    max-width: 420px;
+  .global-topbar{
+    left: 0;
+    padding: 0 16px;
   }
 
-}
+  .search-box{
+    max-width: 100%;
+  }
 
-/* =========================
-   🔥 ANTI-BUG (BLINDADO)
-========================= */
-
-.layout,
-.main-content{
-  transform: none !important;
 }

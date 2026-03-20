@@ -383,6 +383,18 @@ Onion.render = async function(){
     app.innerHTML = "";
     app.appendChild(content || container);
 
+    // 🔥 1. CARGAR SCRIPT PRIMERO
+    const script = Onion.scripts[route] || Onion.scripts["/"];
+    
+    if(script){
+
+      // 🔥 FORZAR recarga del script SIEMPRE
+      Onion.state.currentScript = null;
+
+      await Onion.loadScript(script);
+    }
+
+    // 🔥 2. DESPUÉS ejecutar lógica dependiente del JS
     if(window.renderSidebar){
       window.renderSidebar();
     }
@@ -390,16 +402,6 @@ Onion.render = async function(){
     if(window.updateSidebarActive){
       window.updateSidebarActive();
     }
-
-   const script = Onion.scripts[route] || Onion.scripts["/"];
-   
-   if(script){
-   
-     // 🔥 FORZAR recarga del script SIEMPRE
-     Onion.state.currentScript = null;
-   
-     await Onion.loadScript(script);
-   }
 
     document.body.classList.remove("loading");
 

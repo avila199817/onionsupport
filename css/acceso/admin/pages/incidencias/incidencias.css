@@ -1,5 +1,5 @@
 /* =========================
-   INCIDENCIAS PAGE
+   INCIDENCIAS (ALIGNED PRO)
 ========================= */
 
 .incidencias{
@@ -14,16 +14,53 @@
 
 
 /* =========================
-   HEADER
+   HEADER (ALINEADO REAL)
 ========================= */
 
-.header-actions{
+.incidencias .dashboard-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+
+  height:var(--topbar-height);
+  margin-bottom:40px;
+}
+
+.incidencias .dashboard-header .header-left{
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+}
+
+.incidencias .page-title{
+  margin:0;
+
+  font-size:24px;
+  font-weight:600;
+  letter-spacing:-0.3px;
+
+  line-height:1.1;
+  color:var(--text);
+}
+
+.incidencias .page-subtitle{
+  font-size:14px;
+  color:var(--dim);
+  margin-top:4px;
+}
+
+
+/* =========================
+   HEADER ACTIONS
+========================= */
+
+.incidencias .header-actions{
   display:flex;
   align-items:center;
   gap:10px;
 }
 
-.btn{
+.incidencias .btn{
   border:none;
   padding:10px 14px;
   border-radius:10px;
@@ -32,12 +69,12 @@
   font-weight:500;
 }
 
-.btn.primary{
+.incidencias .btn.primary{
   background:var(--text);
   color:var(--main-bg);
 }
 
-.btn.primary:hover{
+.incidencias .btn.primary:hover{
   opacity:.85;
 }
 
@@ -46,18 +83,18 @@
    FILTERS
 ========================= */
 
-.filters{
+.incidencias .filters{
   margin-top:20px;
 }
 
-.filters-row{
+.incidencias .filters-row{
   display:flex;
   gap:10px;
   flex-wrap:wrap;
 }
 
-.filters input,
-.filters select{
+.incidencias .filters input,
+.incidencias .filters select{
   background:var(--card-bg);
   border:1px solid var(--card-border);
   color:var(--text);
@@ -68,12 +105,12 @@
   font-size:14px;
 }
 
-.filters input{
+.incidencias .filters input{
   flex:1;
   min-width:200px;
 }
 
-.filters select{
+.incidencias .filters select{
   min-width:150px;
 }
 
@@ -83,7 +120,68 @@
 ========================= */
 
 .incidencias .grid-cards{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+  gap:22px;
+
   margin-top:20px;
+}
+
+
+/* =========================
+   CARDS (MISMO ESTILO HOME)
+========================= */
+
+.incidencias .card{
+  background:var(--card-bg);
+  border:1px solid var(--card-border);
+  border-radius:18px;
+
+  padding:20px;
+
+  box-shadow:var(--card-shadow);
+  transition:.25s ease;
+}
+
+.incidencias .card:hover{
+  transform:translateY(-4px);
+  box-shadow:var(--card-shadow-hover);
+}
+
+.incidencias .card-title{
+  font-size:12px;
+  color:var(--dim);
+}
+
+.incidencias .card-value{
+  display:block;
+  margin-top:12px;
+
+  font-size:30px;
+  font-weight:600;
+
+  color:var(--text);
+}
+
+
+/* =========================
+   BLOCK
+========================= */
+
+.incidencias .panel-block{
+  background:var(--panel-bg);
+  border:1px solid var(--panel-border);
+  border-radius:18px;
+
+  padding:20px;
+
+  box-shadow:var(--panel-shadow);
+}
+
+.incidencias .section-title{
+  font-size:15px;
+  font-weight:600;
+  color:var(--text);
 }
 
 
@@ -91,22 +189,22 @@
    TABLE
 ========================= */
 
-.table-block{
+.incidencias .table-block{
   margin-top:20px;
 }
 
-.table-container{
+.incidencias .table-container{
   width:100%;
   overflow-x:auto;
 }
 
-.incidencias-table{
+.incidencias .incidencias-table{
   width:100%;
   border-collapse:collapse;
   font-size:14px;
 }
 
-.incidencias-table th{
+.incidencias .incidencias-table th{
   text-align:left;
   padding:12px;
   color:var(--dim);
@@ -114,13 +212,13 @@
   border-bottom:1px solid var(--card-border);
 }
 
-.incidencias-table td{
+.incidencias .incidencias-table td{
   padding:12px;
   border-bottom:1px solid var(--card-border);
   color:var(--text);
 }
 
-.incidencias-table tr:hover{
+.incidencias .incidencias-table tr:hover{
   background:var(--sb-hover);
 }
 
@@ -129,24 +227,24 @@
    STATUS BADGE
 ========================= */
 
-.badge{
+.incidencias .badge{
   padding:4px 8px;
   border-radius:8px;
   font-size:12px;
   font-weight:500;
 }
 
-.badge.abierta{
+.incidencias .badge.abierta{
   background:rgba(59,130,246,0.15);
   color:#60a5fa;
 }
 
-.badge.progreso{
+.incidencias .badge.progreso{
   background:rgba(245,158,11,0.15);
   color:#f59e0b;
 }
 
-.badge.cerrada{
+.incidencias .badge.cerrada{
   background:rgba(34,197,94,0.15);
   color:#22c55e;
 }
@@ -156,19 +254,19 @@
    ACTIONS
 ========================= */
 
-.table-actions{
+.incidencias .table-actions{
   display:flex;
   gap:8px;
 }
 
-.action-btn{
+.incidencias .action-btn{
   background:transparent;
   border:none;
   cursor:pointer;
   color:var(--dim);
 }
 
-.action-btn:hover{
+.incidencias .action-btn:hover{
   color:var(--text);
 }
 
@@ -177,17 +275,17 @@
    DETALLE
 ========================= */
 
-.detalle{
+.incidencias .detalle{
   margin-top:20px;
 }
 
-.detalle-content{
+.incidencias .detalle-content{
   display:flex;
   flex-direction:column;
   gap:10px;
 }
 
-.detalle-meta{
+.incidencias .detalle-meta{
   display:flex;
   gap:20px;
   flex-wrap:wrap;
@@ -200,28 +298,66 @@
    RESPONSIVE
 ========================= */
 
+@media (max-width:1024px){
+
+  .incidencias .panel-container{
+    padding:20px;
+  }
+
+}
+
 @media (max-width:768px){
 
-  .filters-row{
+  .incidencias .panel-container{
+    padding:16px;
+  }
+
+  .incidencias .dashboard-header{
+    height:auto;
+    flex-direction:column;
+    align-items:flex-start;
+    gap:10px;
+  }
+
+  .incidencias .filters-row{
     flex-direction:column;
   }
 
-  .filters input,
-  .filters select{
+  .incidencias .filters input,
+  .incidencias .filters select{
     width:100%;
   }
 
-  .header-actions{
-    width:100%;
-    justify-content:flex-start;
+  .incidencias .grid-cards{
+    grid-template-columns:1fr;
   }
 
 }
 
 @media (max-width:480px){
 
-  .incidencias-table th,
-  .incidencias-table td{
+  .incidencias .panel-container{
+    padding:12px;
+  }
+
+  .incidencias .card{
+    padding:16px;
+  }
+
+  .incidencias .panel-block{
+    padding:16px;
+  }
+
+  .incidencias .card-value{
+    font-size:24px;
+  }
+
+  .incidencias .page-title{
+    font-size:20px;
+  }
+
+  .incidencias .incidencias-table th,
+  .incidencias .incidencias-table td{
     padding:10px;
     font-size:13px;
   }

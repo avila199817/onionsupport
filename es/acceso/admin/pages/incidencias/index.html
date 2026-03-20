@@ -2,11 +2,16 @@
 
   <div class="panel-container">
 
-    <!-- HEADER -->
+    <!-- =========================
+         HEADER
+    ========================= -->
     <div class="dashboard-header clean">
-      <div>
+
+      <div class="header-left">
         <h1 class="page-title">Incidencias</h1>
-        <p class="page-subtitle">Gestión y seguimiento de tickets en tiempo real</p>
+        <p class="page-subtitle">
+          Gestión y seguimiento de tickets en tiempo real
+        </p>
       </div>
 
       <div class="header-actions">
@@ -14,18 +19,22 @@
           + Nueva incidencia
         </button>
       </div>
+
     </div>
 
 
-    <!-- FILTROS -->
+    <!-- =========================
+         FILTROS
+    ========================= -->
     <div class="panel-block filters">
 
       <div class="filters-row">
 
         <input 
-          type="text" 
-          placeholder="Buscar incidencia..." 
+          type="text"
           id="search-incidencia"
+          placeholder="Buscar incidencia..."
+          autocomplete="off"
         >
 
         <select id="filter-status">
@@ -47,8 +56,10 @@
     </div>
 
 
-    <!-- KPIs -->
-    <div class="grid-cards pro">
+    <!-- =========================
+         KPIs
+    ========================= -->
+    <div class="grid-cards pro" id="incidencias-kpis">
 
       <div class="card">
         <span class="card-title">Abiertas</span>
@@ -73,7 +84,9 @@
     </div>
 
 
-    <!-- TABLA -->
+    <!-- =========================
+         TABLA
+    ========================= -->
     <div class="panel-block table-block">
 
       <div class="block-header minimal">
@@ -97,7 +110,7 @@
           </thead>
 
           <tbody id="incidencias-body">
-            <tr>
+            <tr class="table-loading">
               <td colspan="7">Cargando incidencias...</td>
             </tr>
           </tbody>
@@ -109,8 +122,14 @@
     </div>
 
 
-    <!-- DETALLE -->
-    <div class="panel-block detalle" id="detalle-incidencia" style="display:none;">
+    <!-- =========================
+         DETALLE
+    ========================= -->
+    <div 
+      class="panel-block detalle"
+      id="detalle-incidencia"
+      style="display:none;"
+    >
 
       <div class="block-header minimal">
         <h2 class="section-title">Detalle de incidencia</h2>
@@ -130,6 +149,7 @@
       </div>
 
     </div>
+
 
   </div>
 

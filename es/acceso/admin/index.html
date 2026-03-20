@@ -297,12 +297,79 @@ body.loading {
 
 </aside>
 
-<!-- 🔥 CONTENIDO DINÁMICO -->
-<main id="app-view" class="main-content" role="main"></main>
 
+
+
+
+
+
+
+
+
+
+  
+<!-- 🔥 CONTENIDO DINÁMICO -->
+<main id="app-view" class="main-content" role="main">
+
+  <!-- 🔍 GLOBAL SEARCH -->
+  <div class="global-topbar">
+    <div class="top-search">
+      <div class="search-box">
+
+        <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none">
+          <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/>
+          <path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+
+        <input 
+          type="text" 
+          placeholder="Buscar..." 
+          id="globalSearch"
+        >
+
+      </div>
+    </div>
+  </div>
+
+  <!-- 🔥 AQUÍ se pinta TODO -->
+  <div id="app-content"></div>
+
+</main>
+  
 </div>
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
 <!-- CORE JS -->
 <script src="/js/acceso/admin/core.js" defer></script>
 

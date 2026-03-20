@@ -632,32 +632,6 @@ body{
 }
 
 /* =========================
-   CINEMATIC TEXT ANIMATION
-========================= */
-
-.menu-item span:last-child,
-.user-info{
-  opacity:1;
-  transform:translateX(0) scale(1);
-
-  transition:
-    opacity .4s ease,
-    transform 1s cubic-bezier(.22,1,.36,1); /* 🔥 easing cinematic */
-
-  transition-delay: .15s; /* aparece tarde */
-}
-
-.sidebar.collapsed .menu-item span:last-child,
-.sidebar.collapsed .user-info{
-  opacity:0;
-  transform:translateX(-18px) scale(.94);
-
-  pointer-events:none;
-
-  transition-delay: 0s;
-}
-
-/* =========================
    SECTION
 ========================= */
 

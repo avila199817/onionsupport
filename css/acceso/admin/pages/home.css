@@ -21,10 +21,6 @@
   align-items:center;
 
   height:var(--topbar-height);
-
-  margin-top:var(--topbar-height);
-  padding-top:var(--topbar-height);
-
   margin-bottom:40px;
 }
 

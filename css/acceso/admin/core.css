@@ -796,25 +796,96 @@ body{
 
 
 
+
+
+
+
+/* =========================
+   GLOBAL SEARCH (CORE GOD)
+========================= */
+
+.global-topbar{
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+
+  height: var(--topbar-height);
+
+  z-index: 2000; /* 🔥 por encima de TODO */
+
+  pointer-events: none;
+}
+
+/* =========================
+   SEARCH POSITION
+========================= */
+
 .search-box{
+  position: absolute;
+
+  top: 50%;
+  right: var(--content-padding);
+
+  transform: translateY(-50%);
+
   pointer-events: auto;
 
   display: flex;
   align-items: center;
   gap: 10px;
 
-  width: 320px;
+  width: 340px; /* 🔥 MÁS ANCHO = PRO */
 
   padding: 10px 14px;
 
   border-radius: 14px;
   border: 1px solid var(--panel-border);
 
-  background: rgba(30,30,30,0.6);
-  backdrop-filter: blur(8px);
+  background: rgba(30,30,30,0.7);
+  backdrop-filter: blur(10px);
 
   color: var(--dim);
+
+  transition: all .2s ease;
 }
+
+/* SIDEBAR OFFSET AUTOMÁTICO */
+
+.sidebar.collapsed ~ .global-topbar .search-box{
+  right: var(--content-padding);
+}
+
+/* =========================
+   HOVER + FOCUS
+========================= */
+
+.search-box:hover{
+  background: rgba(40,40,40,0.85);
+}
+
+.search-box:focus-within{
+  border-color: var(--info);
+  box-shadow:
+    0 0 0 2px var(--info-bg),
+    0 10px 30px rgba(0,0,0,0.4);
+}
+
+/* =========================
+   ICON
+========================= */
+
+.search-icon{
+  opacity: 0.7;
+}
+
+.search-box:focus-within .search-icon{
+  opacity: 1;
+}
+
+/* =========================
+   INPUT
+========================= */
 
 .search-box input{
   width: 100%;
@@ -823,4 +894,9 @@ body{
   outline: none;
 
   color: var(--text);
+  font-size: 14px;
+}
+
+.search-box input::placeholder{
+  color: var(--dim);
 }

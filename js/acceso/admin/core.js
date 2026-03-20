@@ -54,9 +54,9 @@ Onion.loadScript = function(src){
       finalSrc = window.location.origin + "/" + src.replace(/^\/+/,"");
     }
 
-    if(Onion.state.currentScript === finalSrc){
-      return resolve();
-    }
+     if(Onion.state.currentScript === finalSrc && !finalSrc.includes("?v=")){
+     return resolve();
+   }
 
     const old = document.querySelector(`script[data-onion-page]`);
     if(old) old.remove();

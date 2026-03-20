@@ -133,8 +133,54 @@
 
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 /* =========================
-   RESET + BASE
+   RESET + BASE (CLEAN PRO)
 ========================= */
 
 *,
@@ -146,7 +192,8 @@
 html, body{
   margin:0;
   padding:0;
-  height:100%;
+
+  /* ❌ quitamos height:100% (rompe scroll en algunos casos) */
 
   background:var(--main-bg);
   color:var(--text);
@@ -155,17 +202,18 @@ html, body{
 
   -webkit-font-smoothing:antialiased;
   -moz-osx-font-smoothing:grayscale;
-
-  overscroll-behavior: none;
 }
 
+/* scroll suave */
 html{
-  scroll-behavior: smooth;
+  scroll-behavior:smooth;
 }
 
+/* solo control horizontal */
 body{
-  overflow-x: hidden;
+  overflow-x:hidden;
 }
+
 
 /* =========================
    LAYOUT ROOT
@@ -176,8 +224,9 @@ body{
   min-height:100vh;
 }
 
+
 /* =========================
-   GLOBAL CONTAINER (🔥 DIOS)
+   GLOBAL CONTAINER
 ========================= */
 
 .container{
@@ -187,14 +236,15 @@ body{
   padding:0 var(--content-padding);
 }
 
+
 /* =========================
    MAIN CONTENT BASE
 ========================= */
 
 .main-content{
   margin-left:var(--sidebar-width);
-  min-height:100vh;
 
+  min-height:100vh;
   padding-top:var(--topbar-height);
 
   background:
@@ -208,17 +258,47 @@ body{
   margin-left:var(--sidebar-collapsed);
 }
 
+
 /* =========================
-   SCROLLBAR
+   SCROLLBAR (VISIBLE PRO)
 ========================= */
 
+/* ancho */
 ::-webkit-scrollbar{
-  width:6px;
+  width:10px;
 }
 
+/* track (fondo) */
+::-webkit-scrollbar-track{
+  background:transparent;
+}
+
+/* thumb (barra) */
 ::-webkit-scrollbar-thumb{
-  background:var(--scrollbar-thumb);
+  background:rgba(255,255,255,0.18); /* 🔥 más visible */
   border-radius:10px;
+  border:2px solid transparent;
+  background-clip:padding-box;
+}
+
+/* hover */
+::-webkit-scrollbar-thumb:hover{
+  background:rgba(255,255,255,0.35);
+}
+
+/* active (cuando haces click) */
+::-webkit-scrollbar-thumb:active{
+  background:rgba(255,255,255,0.5);
+}
+
+
+/* =========================
+   FIREFOX SCROLL
+========================= */
+
+*{
+  scrollbar-width:thin;
+  scrollbar-color:rgba(255,255,255,0.3) transparent;
 }
 
 

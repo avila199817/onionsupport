@@ -310,10 +310,13 @@ body.loading {
   
 
 
-  <!-- 🔥 TOPBAR AQUÍ (FUERA) -->
-  <div class="global-topbar">
-    <div class="topbar-inner">
-      
+<!-- 🔥 TOPBAR FUERA DEL MAIN -->
+<div class="global-topbar">
+
+  <div class="topbar-inner">
+
+    <div class="topbar-content"> <!-- 🔥 IMPORTANTE -->
+
       <div class="search-box">
 
         <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none">
@@ -331,12 +334,15 @@ body.loading {
       </div>
 
     </div>
+
   </div>
 
-  <!-- 🔥 MAIN LIMPIO -->
-  <main id="app-view" class="main-content" role="main">
-    <div id="app-content"></div>
-  </main>
+</div>
+
+<!-- 🔥 MAIN LIMPIO -->
+<main id="app-view" class="main-content" role="main">
+  <div id="app-content"></div>
+</main>
 
 </div>
 

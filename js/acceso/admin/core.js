@@ -420,14 +420,17 @@ Onion.render = async function(){
     const username = (user.username || user.name || "usuario").toLowerCase();
 
     // 🔥 SIEMPRE normaliza URL tras login
-    if(!window.location.pathname.startsWith("/@")){
-      Onion.go("/");
-      return;
-    }
+// 🔥 primero activas el router
+window.addEventListener("onion:navigate", Onion.render);
 
-    await Onion.render();
+// 🔥 luego normalizas URL
+if(!window.location.pathname.startsWith("/@")){
+  Onion.go("/");
+  return;
+}
 
-    window.addEventListener("onion:navigate", Onion.render);
+// 🔥 render normal
+await Onion.render();
 
     Onion.ui.hideLoader();
 

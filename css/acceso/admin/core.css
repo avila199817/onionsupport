@@ -564,23 +564,66 @@ body{
   font-size:15px;
   font-weight:600;
 
-  transition:.15s;
+  position:relative;
+  overflow:hidden;
+
+  transition:
+    background-color .25s ease,
+    color .25s ease,
+    transform .4s cubic-bezier(.22,1,.36,1);
 }
 
+/* 🔥 HOVER PREMIUM */
 .menu-item:hover{
   background:var(--sb-hover);
   color:var(--text);
+  transform:translateX(4px);
 }
 
+/* 🔥 ACTIVE */
 .menu-item.active{
   background:var(--sb-active);
   color:var(--text);
 }
 
+/* 🔥 ICONO */
 .menu-item span:first-child{
   width:22px;
   display:flex;
   justify-content:center;
+
+  transition: transform .4s cubic-bezier(.22,1,.36,1);
+}
+
+/* 🔥 MICRO MOVIMIENTO ICONO */
+.menu-item:hover span:first-child{
+  transform:translateX(2px);
+}
+
+/* 🔥 TEXTO CINEMÁTICO */
+.menu-item span:last-child{
+  opacity:1;
+  transform:translateX(0) scale(1);
+
+  transition:
+    opacity .4s ease,
+    transform .9s cubic-bezier(.22,1,.36,1);
+
+  transition-delay:.15s;
+}
+
+/* 🔥 COLLAPSED */
+.sidebar.collapsed .menu-item span:last-child{
+  opacity:0;
+  transform:translateX(-18px) scale(.94);
+
+  pointer-events:none;
+  transition-delay:0s;
+}
+
+/* 🔥 APARICIÓN PRO */
+.sidebar:not(.collapsed) .menu-item span:last-child{
+  transition-delay:.25s;
 }
 
 /* =========================

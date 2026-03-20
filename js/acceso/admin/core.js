@@ -221,7 +221,7 @@ Onion.scripts = {
 
 
 /* =========================
-   ROUTER
+   ROUTER (FINAL)
 ========================= */
 
 Onion.router = {};
@@ -230,24 +230,44 @@ Onion.router.get = function(){
 
   let path = window.location.pathname || "/";
 
-  // quitar base del panel
+  // 🔥 quitar base si alguna vez aparece
   if(path.startsWith("/es/acceso/admin")){
-    path = path.replace("/es/acceso/admin", "") || "/";
+    path = path.replace("/es/acceso/admin", "");
   }
 
-  // limpiar
+  // 🔥 normalizar barras
   path = path.replace(/\/+/g, "/");
 
+  // 🔥 quitar trailing slash (excepto raíz)
   if(path.length > 1 && path.endsWith("/")){
     path = path.slice(0, -1);
   }
 
-  return path || "/";
+  // 🔥 seguridad: vacío → "/"
+  if(!path || path === ""){
+    path = "/";
+  }
+
+  // 🔥 DEBUG (puedes quitar luego)
+  console.log("🌐 PATH:", window.location.pathname);
+  console.log("🧭 ROUTE:", path);
+
+  return path;
 };
 
+
 Onion.router.resolve = function(){
+
   const route = Onion.router.get();
-  return Onion.routes[route] || Onion.routes["/"];
+
+  // 🔥 match exacto
+  if(Onion.routes[route]){
+    return Onion.routes[route];
+  }
+
+  // 🔥 fallback controlado
+  console.warn("⚠️ Route not found:", route);
+  return Onion.routes["/"];
 };
 
 

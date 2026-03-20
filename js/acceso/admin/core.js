@@ -362,7 +362,15 @@ document.addEventListener("click",(e)=>{
 
 Onion.render = async function(){
 
-  if(Onion.state.rendering) return;
+  // 🔥 anti race condition
+  const renderId = ++Onion.state.renderId;
+
+  if(Onion.state.rendering){
+    console.warn("⛔ Render en curso, reintentando...");
+    setTimeout(()=> Onion.render(), 50);
+    return;
+  }
+
   Onion.state.rendering = true;
 
   try{
@@ -375,53 +383,86 @@ Onion.render = async function(){
     const route = Onion.router.get();
     const url = Onion.router.resolve();
 
+    console.log("🚀 RENDER:", { route, url });
+
+    /* =========================
+       STYLE
+    ========================= */
+
     const style = Onion.styles[route] || Onion.styles["/"];
+
     if(style){
       await Onion.loadStyle(style);
     }
 
-let html;
+    /* =========================
+       HTML
+    ========================= */
 
-// 🔥 SI ES HOME → NO CACHEAR NUNCA
-if(route === "/"){
+    let html;
 
-  const res = await fetch(url + "?v=" + Date.now());
-  if(!res.ok) throw new Error("PAGE_LOAD_ERROR " + res.status);
-  html = await res.text();
+    // 🔥 HOME sin cache
+    if(route === "/"){
 
-}else{
+      const res = await fetch(url + "?v=" + Date.now());
+      if(!res.ok) throw new Error("PAGE_LOAD_ERROR " + res.status);
+      html = await res.text();
 
-  html = Onion.cache.html[url];
+    }else{
 
-  if(!html){
-    const res = await fetch(url);
-    if(!res.ok) throw new Error("PAGE_LOAD_ERROR " + res.status);
-    html = await res.text();
-    Onion.cache.html[url] = html;
-  }
+      html = Onion.cache.html[url];
 
-}
+      if(!html){
+        const res = await fetch(url);
+        if(!res.ok) throw new Error("PAGE_LOAD_ERROR " + res.status);
+        html = await res.text();
+        Onion.cache.html[url] = html;
+      }
+
+    }
+
+    // 🔥 si este render ya no es el actual → abortar
+    if(renderId !== Onion.state.renderId){
+      console.warn("⚠️ Render obsoleto cancelado");
+      return;
+    }
+
+    /* =========================
+       DOM
+    ========================= */
 
     const container = document.createElement("div");
     container.innerHTML = html;
 
     const content = container.querySelector(".panel-content");
 
+    // 🔥 limpieza REAL antes de pintar
     app.innerHTML = "";
     app.appendChild(content || container);
 
-    // 🔥 1. CARGAR SCRIPT PRIMERO
+    /* =========================
+       SCRIPT
+    ========================= */
+
     const script = Onion.scripts[route] || Onion.scripts["/"];
-    
+
     if(script){
 
-      // 🔥 FORZAR recarga del script SIEMPRE
-      Onion.state.currentScript = null;
+      Onion.state.currentScript = null; // 🔥 fuerza reload
 
       await Onion.loadScript(script);
     }
 
-    // 🔥 2. DESPUÉS ejecutar lógica dependiente del JS
+    // 🔥 comprobar otra vez (por si tardó el script)
+    if(renderId !== Onion.state.renderId){
+      console.warn("⚠️ Render cancelado tras script");
+      return;
+    }
+
+    /* =========================
+       UI POST RENDER
+    ========================= */
+
     if(window.renderSidebar){
       window.renderSidebar();
     }
@@ -446,9 +487,12 @@ if(route === "/"){
       `;
     }
 
+  }finally{
+
+    Onion.state.rendering = false;
+
   }
 
-  Onion.state.rendering = false;
 };
 
 

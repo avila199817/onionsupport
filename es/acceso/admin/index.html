@@ -457,39 +457,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const menuItems = document.querySelectorAll(".menu-item");
 
-
-  /* =========================
-     FORCE NAV (FIX HOME BUG)
-  ========================= */
-
-  document.addEventListener("click",(e)=>{
-
-    let el = e.target;
-
-    while(el && el !== document){
-
-      if(el.tagName === "A" && el.hasAttribute("data-link")){
-
-        const href = el.getAttribute("href");
-
-        if(!href || href.startsWith("http")) return;
-
-        e.preventDefault();
-
-        if(window.Onion){
-          Onion.state.currentScript = null;
-        }
-
-        Onion.go(href);
-        return;
-      }
-
-      el = el.parentNode;
-    }
-
-  });
-
-
+  
   /* =========================
      TOOLTIP TOGGLE BUTTON
   ========================= */

@@ -237,8 +237,8 @@ body{
 
 .main-content{
   margin-left:var(--sidebar-width);
-
   min-height:100vh;
+
   padding-top:var(--topbar-height);
 
   background:
@@ -738,28 +738,6 @@ body{
 .dropdown-divider{
   height:1px;
   background:var(--sb-border);
-}
-
-/* =========================
-   MAIN CONTENT
-========================= */
-
-.main-content{
-  margin-left:260px;
-  min-height:100vh;
-
-  background:
-    var(--gradient-overlay),
-    var(--gradient-main);
-
-  color:var(--text);
-
-  transition:all .25s cubic-bezier(.4,0,.2,1);
-}
-
-.sidebar.collapsed ~ .main-content{
-  margin-left:72px;
-  width:calc(100% - 72px);
 }
 
 /* =========================

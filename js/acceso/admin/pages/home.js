@@ -316,6 +316,8 @@ async function loadSystem(){
    INIT
 ========================= */
 
+let interval;
+
 async function init(){
   await Promise.all([
     loadDashboard(),
@@ -330,13 +332,22 @@ init(); // 🔥 CLAVE
    AUTO REFRESH
 ========================= */
 
-setInterval(init, 60000);
+interval = setInterval(init, 60000);
 
-
+   
 /* =========================
-   EVENTS
+   DESTROY
 ========================= */
 
-window.addEventListener("onion:rendered", init);
+window.onPageDestroy = function(){
+
+  console.log("💣 DESTROY HOME");
+
+  if(interval){
+    clearInterval(interval);
+    interval = null;
+  }
+
+};
 
 })();

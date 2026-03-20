@@ -14,8 +14,6 @@ window.Onion = Onion;
 
 Onion.config = {
   API: "https://api.onionit.net/api",
-  BASE: "/",          
-  BASE_PAGES: "/pages",
   TIMEOUT: 10000
 };
 
@@ -26,7 +24,6 @@ Onion.config = {
 
 Onion.state = {
   user: null,
-  slug: localStorage.getItem("onion_slug") || null,
   rendering: false,
   currentScript: null,
   currentStyle: null
@@ -197,36 +194,6 @@ Onion.ui.hideLoader = function(){
 
 Onion.setUser = function(user){
   Onion.state.user = user;
-  Onion.state.slug = user.slug;
-
-  if(user.slug){
-    localStorage.setItem("onion_slug", user.slug);
-  }
-};
-
-
-/* =========================
-   SLUG (🔥 FIX REAL)
-========================= */
-
-Onion.slug = {};
-
-Onion.slug.apply = function(slug){
-
-  if(!slug) return;
-
-  let path = window.location.pathname;
-
-  if(path.startsWith("/@")) return;
-
-  // quitar base si existe
-  if(path.startsWith("/es/acceso/admin")){
-    path = path.replace("/es/acceso/admin", "") || "/";
-  }
-
-  const final = "/@" + slug + (path === "/" ? "" : path);
-
-  window.history.replaceState({}, "", final);
 };
 
 
@@ -263,35 +230,23 @@ Onion.router.get = function(){
 
   let path = window.location.pathname || "/";
 
-  // quitar slug
-  if(path.startsWith("/@")){
-    const parts = path.split("/").filter(Boolean);
-    path = "/" + (parts.slice(1).join("/") || "");
-  }
-
-  // quitar base REAL
+  // quitar base del panel
   if(path.startsWith("/es/acceso/admin")){
     path = path.replace("/es/acceso/admin", "") || "/";
   }
 
-  // limpiar basura
+  // limpiar
   path = path.replace(/\/+/g, "/");
 
   if(path.length > 1 && path.endsWith("/")){
     path = path.slice(0, -1);
   }
 
-  if(!path || path === ""){
-    return "/";
-  }
-
-  return path;
+  return path || "/";
 };
-
 
 Onion.router.resolve = function(){
   const route = Onion.router.get();
-  console.log("ROUTE:", route);
   return Onion.routes[route] || Onion.routes["/"];
 };
 
@@ -302,13 +257,11 @@ Onion.router.resolve = function(){
 
 Onion.go = function(path){
 
-  if(!Onion.state.slug) return;
-
   const clean = path.startsWith("/") ? path : "/" + path;
-  const url = "/@" + Onion.state.slug + clean;
 
-  window.history.pushState({}, "", url);
+  window.history.pushState({}, "", clean);
   window.dispatchEvent(new Event("onion:navigate"));
+
 };
 
 window.addEventListener("popstate", ()=>{
@@ -362,13 +315,13 @@ Onion.render = async function(){
     const route = Onion.router.get();
     const url = Onion.router.resolve();
 
-    // 👉 STYLE
+    // STYLE
     const style = Onion.styles[route];
     if(style){
       await Onion.loadStyle(style);
     }
 
-    // 👉 HTML
+    // HTML
     let html = Onion.cache.html[url];
 
     if(!html){
@@ -386,23 +339,21 @@ Onion.render = async function(){
     app.innerHTML = "";
     app.appendChild(content || container);
 
-    // 🔥 2. RENDER SIDEBAR
+    // SIDEBAR
     if(window.renderSidebar){
       window.renderSidebar();
     }
 
-    // 🔥 3. ACTIVE LINK (opcional pero recomendado)
     if(window.updateSidebarActive){
       window.updateSidebarActive();
     }
 
-    // 🔥 4. SCRIPT DE LA PÁGINA (DESPUÉS)
+    // SCRIPT
     const script = Onion.scripts[route];
     if(script){
       await Onion.loadScript(script);
     }
 
-    // 👉 quitar loading
     document.body.classList.remove("loading");
 
   }catch(e){
@@ -439,11 +390,10 @@ Onion.render = async function(){
     const user = res.user || res;
 
     Onion.setUser(user);
-    Onion.slug.apply(user.slug);
 
-		await Onion.render();
+    await Onion.render();
 
-    window.addEventListener("onion:navigate", () => Onion.render());
+    window.addEventListener("onion:navigate", Onion.render);
 
     Onion.ui.hideLoader();
 

@@ -431,7 +431,6 @@ body{
   display:flex;
   flex-direction:column;
 
-  /* 🔥 mantiene tu color + añade profundidad */
   background:
     linear-gradient(180deg, rgba(255,255,255,0.02), transparent 40%),
     var(--sb-bg);
@@ -440,15 +439,13 @@ body{
 
   transition: width 1s cubic-bezier(.22,1,.36,1);
 
-  /* 🔥 sombra pro (no invasiva) */
-  box-shadow:
+  border-right:1px solid var(--sb-border);
 
-  z-index:100;
+  z-index:2;
 
   will-change: width;
   backface-visibility: hidden;
-  transform: translateZ(0); /* 🔥 suaviza animación */
-  z-index:2;
+  transform: translateZ(0);
 }
 
 .sidebar.collapsed{

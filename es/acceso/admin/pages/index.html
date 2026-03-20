@@ -1,18 +1,17 @@
 <div class="panel-content home">
 
-  <div class="panel-container">
+  <div class="container">
 
     <!-- HEADER -->
-    <div class="dashboard-header clean">
-      <div>
+    <div class="dashboard-header">
+      <div class="header-left">
         <h1 class="page-title">Onion Support</h1>
         <p class="page-subtitle">Estado general del sistema y actividad en tiempo real</p>
       </div>
     </div>
 
-
     <!-- KPI -->
-    <div class="grid-cards pro">
+    <div class="grid-cards">
 
       <div class="card highlight">
         <span class="card-title">Incidencias activas</span>
@@ -52,30 +51,24 @@
 
     </div>
 
-
     <!-- GRID PRINCIPAL -->
-    <div class="dashboard-grid pro">
+    <div class="dashboard-grid">
 
       <!-- ACTIVIDAD -->
       <div class="panel-block activity">
-
         <div class="block-header minimal">
           <h2 class="section-title">Actividad reciente</h2>
         </div>
-
-        <div id="activity-list" class="activity-list modern"></div>
-
+        <div id="activity-list" class="activity-list"></div>
       </div>
-
 
       <!-- SISTEMA -->
       <div class="panel-block system">
-
         <div class="block-header minimal">
           <h2 class="section-title">Sistema</h2>
         </div>
 
-        <div class="status-list modern">
+        <div class="status-list">
 
           <div class="status-item" id="status-api">
             <span class="status-dot"></span>
@@ -98,18 +91,16 @@
 
     </div>
 
-
     <!-- SEGUNDO BLOQUE -->
-    <div class="dashboard-grid pro secondary">
+    <div class="dashboard-grid secondary">
 
       <!-- RESUMEN -->
       <div class="panel-block summary">
-
         <div class="block-header minimal">
           <h2 class="section-title">Rendimiento hoy</h2>
         </div>
 
-        <div class="summary-grid modern">
+        <div class="summary-grid">
 
           <div class="summary-item">
             <span class="summary-value">--</span>
@@ -127,18 +118,15 @@
           </div>
 
         </div>
-
       </div>
 
-
-      <!-- ALERTAS + SISTEMA 🔥 -->
+      <!-- ALERTAS -->
       <div class="panel-block alerts">
-
         <div class="block-header minimal">
           <h2 class="section-title">Sistema / Rendimiento</h2>
         </div>
 
-        <div class="alert-list modern">
+        <div class="alert-list">
 
           <div class="alert-item info" id="cpu-usage">
             CPU: --
@@ -148,8 +136,8 @@
             RAM: --
           </div>
 
-					<div class="alert-item info" id="disk-usage">
-            RAM: --
+          <div class="alert-item info" id="disk-usage">
+            Disco: --
           </div>
 
           <div class="alert-item warn" id="system-warning" style="display:none;">

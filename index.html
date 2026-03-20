@@ -2,23 +2,20 @@
 (function(){
 
   const path = window.location.pathname;
-  const search = window.location.search;
 
-  // 🔥 si ya estás en el panel limpio → OK
-  if(path === "/es/acceso/admin/" || path === "/es/acceso/admin"){
+  // 🔥 si ya estás en /es → OK
+  if(path.startsWith("/es")){
     return;
   }
 
-  // 🔥 si vienes con slug (/@usuario...)
+  // 🔥 si es ruta SPA del panel → NO tocar
   if(path.startsWith("/@")){
-    const sub = path.replace(/^\/@[^/]+/, "") || "/";
-    window.location.replace("/es/acceso/admin/" + (sub !== "/" ? "#" + sub : ""));
     return;
   }
 
-  // 🔥 raíz
+  // 🔥 raíz → web pública
   if(path === "/" || path === ""){
-    window.location.replace("/es/acceso/admin/");
+    window.location.replace("/es/");
     return;
   }
 

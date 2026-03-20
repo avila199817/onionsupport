@@ -452,6 +452,7 @@ body{
   will-change: width;
   backface-visibility: hidden;
   transform: translateZ(0); /* 🔥 suaviza animación */
+  z-index:2;
 }
 
 .sidebar.collapsed{

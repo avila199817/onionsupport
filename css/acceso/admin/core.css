@@ -1,12 +1,4 @@
-/* =========================
-   CORE DESIGN SYSTEM (FINAL PRO)
-========================= */
-
 :root{
-
-  /* =========================
-     LAYOUT TOKENS (🔥 CLAVE)
-  ========================= */
 
   --content-max:1300px;
   --content-padding:40px;
@@ -14,8 +6,8 @@
   --topbar-height:64px;
   --sidebar-width:260px;
   --sidebar-collapsed:72px;
-	
-  --header-offset-y:-15px;
+
+  --header-offset-y:-2px; /* 🔥 AJUSTE REAL */
 
   /* =========================
      SIDEBAR

@@ -239,9 +239,10 @@ Onion.router.get = function(){
 
   path = path.replace(/\/+/g, "/");
 
-  // 🔥 soporte /@usuario
+  // 🔥 soporte /@usuario y /@usuario/subruta
   if(path.startsWith("/@")){
-    return "/";
+    const parts = path.split("/");
+    return parts[2] ? "/" + parts[2] : "/";
   }
 
   if(path.length > 1 && path.endsWith("/")){
@@ -276,10 +277,14 @@ Onion.go = function(path){
 
   let clean = path.startsWith("/") ? path : "/" + path;
 
-  // 🔥 home → /@usuario
-  if(clean === "/" && Onion.state.user){
+  if(Onion.state.user){
     const username = (Onion.state.user.username || "usuario").toLowerCase();
-    clean = "/@" + username;
+
+    if(clean === "/"){
+      clean = "/@" + username;
+    } else {
+      clean = "/@" + username + clean;
+    }
   }
 
   window.history.pushState({}, "", clean);
@@ -360,7 +365,6 @@ Onion.render = async function(){
     app.innerHTML = "";
     app.appendChild(content || container);
 
-    // 🔥 cargar sidebar siempre
     await Onion.loadScript("/js/acceso/admin/pages/components/sidebar.js");
 
     if(window.renderSidebar){
@@ -413,10 +417,10 @@ Onion.render = async function(){
 
     Onion.setUser(user);
 
-    // 🔥 cambiar URL a /@usuario
     const username = (user.username || user.name || "usuario").toLowerCase();
 
-    if(window.location.pathname === "/"){
+    // 🔥 SIEMPRE normaliza URL tras login
+    if(!window.location.pathname.startsWith("/@")){
       window.history.replaceState({}, "", "/@" + username);
     }
 

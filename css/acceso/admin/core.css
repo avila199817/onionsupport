@@ -442,7 +442,6 @@ body{
 
   /* 🔥 sombra pro (no invasiva) */
   box-shadow:
-    inset -1px 0 0 var(--sb-border),
 
   z-index:100;
 

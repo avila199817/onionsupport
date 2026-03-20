@@ -279,7 +279,7 @@ body{
     var(--gradient-overlay),
     var(--gradient-main);
 
-  transition:.25s ease;
+  transition:margin-left .35s cubic-bezier(.25,.8,.25,1);
 }
 
 .sidebar.collapsed ~ .main-content{

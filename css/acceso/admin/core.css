@@ -597,6 +597,10 @@ body{
    SEARCH GLOBAL (ONION STYLE)
 ========================= */
 
+#app-content{
+  padding: 20px 24px;
+}
+
 .global-topbar{
   position: sticky;
   top: 0;
@@ -604,8 +608,10 @@ body{
 
   display: flex;
   justify-content: flex-end;
+  align-items: center;
 
-  padding: 16px 24px;
+  height: 64px; /* 🔥 CLAVE */
+  padding: 0 24px;
 
   background: var(--sb-bg);
   border-bottom: 1px solid var(--sb-border);

@@ -366,14 +366,27 @@ Onion.render = async function(){
       await Onion.loadStyle(style);
     }
 
-    let html = Onion.cache.html[url];
+let html;
 
-    if(!html){
-      const res = await fetch(url);
-      if(!res.ok) throw new Error("PAGE_LOAD_ERROR " + res.status);
-      html = await res.text();
-      Onion.cache.html[url] = html;
-    }
+// 🔥 SI ES HOME → NO CACHEAR NUNCA
+if(route === "/"){
+
+  const res = await fetch(url + "?v=" + Date.now());
+  if(!res.ok) throw new Error("PAGE_LOAD_ERROR " + res.status);
+  html = await res.text();
+
+}else{
+
+  html = Onion.cache.html[url];
+
+  if(!html){
+    const res = await fetch(url);
+    if(!res.ok) throw new Error("PAGE_LOAD_ERROR " + res.status);
+    html = await res.text();
+    Onion.cache.html[url] = html;
+  }
+
+}
 
     const container = document.createElement("div");
     container.innerHTML = html;

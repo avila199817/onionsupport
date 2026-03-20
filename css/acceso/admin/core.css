@@ -594,7 +594,57 @@ body{
 }
 
 /* =========================
-   SEARCH BOX (PRO SAAS)
+   GLOBAL TOPBAR (GRID ALIGNED)
+========================= */
+
+.global-topbar{
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 260px; /* sidebar */
+
+  z-index: 50;
+
+  height: 64px;
+
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+
+  padding-right: var(--content-x);
+
+  pointer-events: none;
+}
+
+/* SIDEBAR COLLAPSED */
+.sidebar.collapsed ~ .main-content .global-topbar{
+  left: 72px;
+}
+
+/* =========================
+   CONTENEDOR INTERNO (CLAVE)
+   🔥 esto alinea con las cards
+========================= */
+
+.topbar-inner{
+  width: 100%;
+  max-width: 1200px; /* 🔥 MISMO ancho que tus cards */
+  margin: 0 auto;
+
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* =========================
+   MAIN CONTENT FIX (REAL)
+========================= */
+
+.main-content{
+  padding-top: 0; /* 🔥 el H1 vuelve a su sitio */
+}
+
+/* =========================
+   SEARCH BOX (SAAS PRO)
 ========================= */
 
 .search-box{
@@ -604,7 +654,7 @@ body{
   align-items: center;
   gap: 10px;
 
-  width: clamp(220px, 30vw, 420px);
+  width: 320px; /* 🔥 tamaño estable tipo SaaS */
 
   background: rgba(30,30,30,0.65);
   backdrop-filter: blur(10px);
@@ -638,7 +688,7 @@ body{
 
   color: var(--text);
 
-  transform: translateY(-2px) scale(1.01);
+  transform: translateY(-2px);
 }
 
 /* =========================
@@ -653,7 +703,6 @@ body{
 
 .search-box:focus-within .search-icon{
   opacity: 1;
-  transform: scale(1.05);
 }
 
 /* =========================
@@ -669,7 +718,6 @@ body{
   font-size: 14px;
 
   width: 100%;
-  min-width: 0;
 }
 
 /* PLACEHOLDER */
@@ -684,9 +732,9 @@ body{
 
 @media (max-width:1024px){
 
-  .global-topbar{
-    padding-right: 20px;
-    padding-left: 20px;
+  .topbar-inner{
+    max-width: 100%;
+    padding: 0 20px;
   }
 
 }
@@ -697,7 +745,10 @@ body{
     left: 0;
     justify-content: center;
     padding: 10px 16px;
-    height: 64px;
+  }
+
+  .topbar-inner{
+    justify-content: center;
   }
 
   .search-box{

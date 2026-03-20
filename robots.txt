@@ -1,0 +1,26 @@
+# =====================================================
+# ONION SUPPORT · ROBOTS.TXT
+# =====================================================
+
+User-agent: *
+
+# 🔒 PANEL PRIVADO
+Disallow: /es/acceso/
+Disallow: /es/acceso/admin/
+
+# 🔒 FLUJOS SENSIBLES
+Disallow: /es/create/
+Disallow: /es/reset-password/
+
+# 🔒 API
+Disallow: /api/
+
+# 🔒 OTROS
+Disallow: /private/
+Disallow: /auth/
+
+# =====================================================
+# SITEMAP
+# =====================================================
+
+Sitemap: https://onionsupport.com/sitemap.xml

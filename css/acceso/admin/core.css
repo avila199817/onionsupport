@@ -605,13 +605,13 @@ body{
 
 
 /* =========================
-   GLOBAL TOPBAR (FIXED REAL PRO)
+   GLOBAL TOPBAR (FIXED REAL)
 ========================= */
 
 .global-topbar{
   position: fixed;
   top: 0;
-  left: 0;
+  left: 260px;
   right: 0;
 
   height: 64px;
@@ -620,8 +620,13 @@ body{
   pointer-events: none;
 }
 
+/* SIDEBAR COLLAPSED */
+.sidebar.collapsed ~ .main-content .global-topbar{
+  left: 72px;
+}
+
 /* =========================
-   INNER (MISMO SISTEMA QUE HOME)
+   INNER (CLON REAL DE HOME)
 ========================= */
 
 .topbar-inner{
@@ -629,34 +634,9 @@ body{
   max-width: 1300px;
   margin: 0 auto;
 
-  padding: 14px 40px 0;
-
   display: flex;
   justify-content: flex-end;
   align-items: center;
-}
-
-/* =========================
-   OFFSET SIDEBAR (CLAVE)
-========================= */
-
-/* normal */
-.main-content{
-  margin-left: 260px;
-}
-
-/* collapsed */
-.sidebar.collapsed ~ .main-content{
-  margin-left: 72px;
-}
-
-/* 🔥 compensamos el topbar con transform */
-.global-topbar{
-  transform: translateX(260px);
-}
-
-.sidebar.collapsed ~ .main-content .global-topbar{
-  transform: translateX(72px);
 }
 
 /* =========================
@@ -679,36 +659,14 @@ body{
   border-radius: 14px;
 
   padding: 10px 14px;
-
-  color: var(--dim);
-
-  transition: all .2s ease;
-}
-
-.search-box:hover{
-  background: rgba(40,40,40,0.75);
-}
-
-.search-box:focus-within{
-  border-color: var(--info);
-  box-shadow:
-    0 0 0 2px var(--info-bg),
-    0 8px 25px rgba(0,0,0,0.35);
 }
 
 /* INPUT */
 
 .search-box input{
+  width: 100%;
   background: transparent;
   border: none;
   outline: none;
-
   color: var(--text);
-  font-size: 14px;
-
-  width: 100%;
-}
-
-.search-box input::placeholder{
-  color: var(--dim);
 }

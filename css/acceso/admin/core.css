@@ -604,14 +604,17 @@ body{
 
 
 
+
+
+
 /* =========================
-   GLOBAL TOPBAR (FIXED REAL)
+   GLOBAL TOPBAR FINAL FIX
 ========================= */
 
 .global-topbar{
   position: fixed;
   top: 0;
-  left: 260px;
+  left: 260px; /* 🔥 igual que sidebar */
   right: 0;
 
   height: 64px;
@@ -620,53 +623,22 @@ body{
   pointer-events: none;
 }
 
-/* SIDEBAR COLLAPSED */
-.sidebar.collapsed ~ .main-content .global-topbar{
+/* sidebar collapsed */
+.sidebar.collapsed ~ .global-topbar{
   left: 72px;
 }
 
 /* =========================
-   INNER (CLON REAL DE HOME)
+   ALINEACIÓN EXACTA CON HOME
 ========================= */
 
 .topbar-inner{
-  width: 100%;
-  max-width: 1300px;
+  max-width: 1300px; /* 🔥 mismo que panel-container */
   margin: 0 auto;
 
   display: flex;
   justify-content: flex-end;
   align-items: center;
-}
 
-/* =========================
-   SEARCH BOX
-========================= */
-
-.search-box{
-  pointer-events: auto;
-
-  display: flex;
-  align-items: center;
-  gap: 10px;
-
-  width: 320px;
-
-  background: rgba(30,30,30,0.6);
-  backdrop-filter: blur(8px);
-
-  border: 1px solid var(--panel-border);
-  border-radius: 14px;
-
-  padding: 10px 14px;
-}
-
-/* INPUT */
-
-.search-box input{
-  width: 100%;
-  background: transparent;
-  border: none;
-  outline: none;
-  color: var(--text);
+  padding: 14px 40px 0; /* 🔥 MISMO padding que .home */
 }

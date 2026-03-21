@@ -299,6 +299,9 @@ body{
 .menu-item:hover{
   background:var(--sb-hover);
   color:var(--text);
+}
+
+.sidebar:not(.collapsed) .menu-item:hover{
   transform:translateX(4px);
 }
 
@@ -382,7 +385,6 @@ body{
 }
 
 .sidebar.collapsed .user:hover{
-  background:var(--sb-hover);
   transform:translateX(4px);
 }
 

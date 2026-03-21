@@ -533,11 +533,6 @@ body{
 
 
 
-
-
-
-
-
 /* =========================
    TOPBAR
 ========================= */
@@ -560,67 +555,22 @@ body{
 
   z-index:5;
 
-  transition: left .35s cubic-bezier(.22,1,.36,1);
+  transition:left .35s cubic-bezier(.22,1,.36,1);
 }
 
-/* cuando sidebar colapsado */
 .sidebar.collapsed ~ .main-content .topbar{
   left:var(--sidebar-collapsed);
 }
 
 
 /* =========================
-   LEFT
+   TITLE
 ========================= */
-
-.topbar-left{
-  display:flex;
-  align-items:center;
-}
 
 .topbar-title{
   font-size:16px;
   font-weight:600;
   color:var(--text);
-}
-
-
-/* =========================
-   CENTER (SEARCH)
-========================= */
-
-.topbar-center{
-  flex:1;
-  display:flex;
-  justify-content:center;
-}
-
-.topbar-search{
-  width:100%;
-  max-width:420px;
-
-  background:var(--card-bg);
-  border:1px solid var(--card-border);
-
-  color:var(--text);
-
-  padding:10px 14px;
-  border-radius:10px;
-
-  font-size:14px;
-
-  outline:none;
-
-  transition:.2s;
-}
-
-.topbar-search::placeholder{
-  color:var(--dim);
-}
-
-.topbar-search:focus{
-  border-color:var(--info);
-  background:var(--panel-bg);
 }
 
 
@@ -634,33 +584,63 @@ body{
   gap:var(--space-md);
 }
 
-.topbar-avatar{
-  width:34px;
-  height:34px;
-  border-radius:50%;
 
-  background:var(--avatar-bg);
-  color:var(--avatar-text);
+/* =========================
+   SEARCH WRAP
+========================= */
 
-  display:flex;
-  align-items:center;
-  justify-content:center;
-
-  font-size:12px;
-  font-weight:600;
-
-  overflow:hidden;
-  cursor:pointer;
-
-  transition: transform .15s ease;
+.topbar-search-wrap{
+  position:relative;
+  width:260px;
 }
 
-.topbar-avatar:hover{
-  transform:scale(1.05);
-}
 
-.topbar-avatar img{
+/* =========================
+   INPUT
+========================= */
+
+.topbar-search{
   width:100%;
-  height:100%;
-  object-fit:cover;
+
+  padding:10px 14px;
+  padding-left:36px;
+
+  border-radius:12px;
+  border:1px solid var(--card-border);
+
+  background:var(--card-bg);
+  color:var(--text);
+
+  font-size:14px;
+  outline:none;
+
+  transition:.2s;
+}
+
+.topbar-search::placeholder{
+  color:var(--dim);
+}
+
+.topbar-search:focus{
+  border-color:var(--info);
+  background:var(--panel-bg);
+  box-shadow:0 0 0 2px rgba(96,165,250,0.15);
+}
+
+
+/* =========================
+   ICON
+========================= */
+
+.topbar-search-icon{
+  position:absolute;
+  left:10px;
+  top:50%;
+  transform:translateY(-50%);
+
+  width:16px;
+  height:16px;
+
+  color:var(--dim);
+  pointer-events:none;
 }

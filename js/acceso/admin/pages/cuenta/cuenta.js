@@ -2,19 +2,19 @@
 
 "use strict";
 
-console.log("✅ Cuenta JS cargado");
+console.log("✅ Cuenta JS PRO cargado");
 
 
 /* =========================
-   ROOT / DOM
+   ROOT
 ========================= */
 
-function getRoot(){
+function root(){
   return document.querySelector(".panel-content.cuenta");
 }
 
-function $(selector){
-  return getRoot()?.querySelector(selector);
+function $(sel){
+  return root()?.querySelector(sel);
 }
 
 
@@ -30,7 +30,7 @@ function init(){
     return setTimeout(init, 100);
   }
 
-  loadCuenta();
+  load();
 
 }
 
@@ -41,7 +41,7 @@ init();
    LOAD
 ========================= */
 
-async function loadCuenta(){
+async function load(){
 
   try{
 
@@ -49,18 +49,14 @@ async function loadCuenta(){
     const user = Onion.state.user;
 
     if(!user?.userId){
-      throw new Error("User no disponible");
+      throw new Error("NO_USER");
     }
 
-    const res = await Onion.fetch(
+    const data = await Onion.fetch(
       Onion.config.API + "/users/" + user.userId
     );
 
-    if(!res){
-      throw new Error("Respuesta inválida");
-    }
-
-    render(res);
+    render(data);
 
   }catch(e){
 
@@ -79,51 +75,69 @@ function render(u){
 
   if(!u) return;
 
-  /* KPI */
-
-  $("#cuenta-plan") &&
-    ($("#cuenta-plan").textContent = u.plan || "Go Plan");
-
-  $("#cuenta-email") &&
-    ($("#cuenta-email").textContent = u.email || "--");
-
-  $("#cuenta-fecha") &&
-    ($("#cuenta-fecha").textContent = formatFecha(u.createdAt));
+  // 🔥 NORMALIZACIÓN (por si backend cambia nombres)
+  const id = u.id || u.userId;
+  const nombre = u.nombre || u.name || "Usuario";
+  const email = u.email || "--";
+  const rol = u.role || "user";
+  const created = u.createdAt || u.created || null;
+  const plan = u.plan || "Go Plan";
+  const avatar = u.avatar || null;
 
 
-  /* PERFIL */
+  /* =========================
+     KPI
+  ========================= */
 
-  $("#cuenta-nombre") &&
-    ($("#cuenta-nombre").textContent = u.nombre || u.name || "Usuario");
-
-  $("#cuenta-rol") &&
-    ($("#cuenta-rol").textContent = u.role || "user");
-
-  $("#cuenta-id") &&
-    ($("#cuenta-id").textContent = "ID: " + (u.id || u.userId));
+  setText("#cuenta-plan", plan);
+  setText("#cuenta-email", email);
+  setText("#cuenta-fecha", formatFecha(created));
 
 
-  /* SUMMARY (si luego quieres métricas reales, aquí se conectan) */
+  /* =========================
+     PERFIL
+  ========================= */
 
-  setSummary();
+  setText("#cuenta-nombre", nombre);
+  setText("#cuenta-rol", formatRol(rol));
+  setText("#cuenta-id", "ID: " + id);
 
 
-}
+  /* =========================
+     AVATAR (si tienes img en HTML)
+  ========================= */
+
+  const img = $("#cuenta-avatar");
+  if(img && avatar){
+    img.src = avatar;
+  }
 
 
-/* =========================
-   SUMMARY MOCK (EXTENSIBLE)
-========================= */
+  /* =========================
+     ESTADO CUENTA
+  ========================= */
 
-function setSummary(){
+  const statusBox = root()?.querySelector(".alert-list");
 
-  const summary = document.querySelectorAll(".summary-value");
+  if(statusBox){
 
-  if(!summary.length) return;
+    statusBox.innerHTML = `
+      <div class="alert-item info">
+        Cuenta activa
+      </div>
 
-  summary[0].textContent = "--"; // incidencias
-  summary[1].textContent = "--"; // facturas
-  summary[2].textContent = "--"; // accesos
+      <div class="alert-item info">
+        Email verificado: ${u.emailVerified ? "Sí" : "No"}
+      </div>
+
+      ${u.hasAvatar ? `
+        <div class="alert-item info">
+          Avatar configurado
+        </div>
+      ` : ``}
+    `;
+
+  }
 
 }
 
@@ -132,9 +146,29 @@ function setSummary(){
    HELPERS
 ========================= */
 
+function setText(selector, value){
+  const el = document.querySelector(selector);
+  if(el) el.textContent = value ?? "--";
+}
+
 function formatFecha(f){
   if(!f) return "--";
-  return new Date(f).toLocaleDateString("es-ES");
+
+  const d = new Date(f);
+
+  return d.toLocaleDateString("es-ES", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric"
+  });
+}
+
+function formatRol(r){
+
+  if(r === "admin") return "Administrador";
+  if(r === "user") return "Usuario";
+
+  return r;
 }
 
 })();

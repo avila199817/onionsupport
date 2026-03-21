@@ -18,17 +18,21 @@ if(!window.Onion) return;
 
 Onion.events.on("nav:ready", init);
 
+let initialized = false;
 
 function init(){
 
-/* ================= DOM ================= */
+  /* ================= DOM ================= */
 
-const btn     = document.getElementById("navSearchBtn");
-const overlay = document.getElementById("searchOverlay");
-const input   = document.getElementById("globalSearch");
-const clear   = document.getElementById("searchClear");
+  const btn     = document.getElementById("navSearchBtn");
+  const overlay = document.getElementById("searchOverlay");
+  const input   = document.getElementById("globalSearch");
+  const clear   = document.getElementById("searchClear");
 
-if(!overlay || !input) return;
+  if(!overlay || !input) return;
+
+  if(initialized) return;
+  initialized = true;
 
 
 /* =====================================================

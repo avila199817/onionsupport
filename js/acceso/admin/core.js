@@ -255,6 +255,13 @@ Onion.scripts = {
   "/cuenta": "/js/acceso/admin/pages/cuenta/cuenta.js"
 };
 
+Onion.titles = {
+  "/": "Panel",
+  "/incidencias": "Incidencias",
+  "/facturas": "Facturas",
+  "/cuenta": "Cuenta"
+};
+
 
 /* =========================
    ROUTER

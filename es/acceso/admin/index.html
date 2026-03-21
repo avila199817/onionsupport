@@ -691,38 +691,179 @@ if(logoutBtn){
 
 
 /* =========================
-   🔎 SEARCH TRIGGER (HOOK NAV.JS)
+   🔎 GLOBAL SEARCH (SPA READY)
 ========================= */
 
-const searchInput = document.getElementById("topbar-search");
+function initTopbarSearch(){
 
-if(searchInput){
+  const input = document.getElementById("topbar-search");
+  const container = document.getElementById("topbar-search-results");
 
-  const openSearch = ()=>{
-    Onion.events.emit("nav:search:open");
-  };
+  if(!input || !container) return;
 
-  // focus → abre search global
-  searchInput.addEventListener("focus", openSearch);
+  // 🔥 evitar doble bind
+  if(input.dataset.searchBound === "true") return;
+  input.dataset.searchBound = "true";
 
-  // escribir → abre también (por si escriben directo)
-  searchInput.addEventListener("input", openSearch);
+  console.log("🔥 SEARCH INIT OK");
 
-  // click → abre
-  searchInput.addEventListener("click", openSearch);
+  let timer;
+  let activeIndex = -1;
 
-  // CTRL + K → focus + abrir
-  document.addEventListener("keydown",(e)=>{
-    if((e.ctrlKey || e.metaKey) && e.key === "k"){
-      e.preventDefault();
-      searchInput.focus();
-      openSearch();
+  function show(){
+    container.classList.add("active");
+  }
+
+  function hide(){
+    container.classList.remove("active");
+    container.innerHTML = "";
+    activeIndex = -1;
+  }
+
+  function highlight(text,q){
+    if(!q) return text;
+
+    const i = text.toLowerCase().indexOf(q.toLowerCase());
+    if(i === -1) return text;
+
+    return text.substring(0,i)
+      + "<mark>" + text.substring(i,i+q.length) + "</mark>"
+      + text.substring(i+q.length);
+  }
+
+  function render(results, query=""){
+
+    container.innerHTML = "";
+    activeIndex = -1;
+
+    if(!results.length){
+      container.innerHTML = '<div class="search-empty">Sin resultados</div>';
+      show();
+      return;
     }
+
+    results.slice(0,20).forEach((r)=>{
+
+      const el = document.createElement("div");
+      el.className = "search-result";
+
+      el.innerHTML = `
+        <div class="search-text">
+          <div class="search-title">${highlight(r.title || "", query)}</div>
+          ${r.subtitle ? `<div class="search-subtitle">${highlight(r.subtitle, query)}</div>`:""}
+        </div>
+      `;
+
+      el.addEventListener("click", ()=>{
+        hide();
+        if(r.url) Onion.go(r.url);
+      });
+
+      container.appendChild(el);
+
+    });
+
+    show();
+  }
+
+  async function search(q){
+
+    const url = Onion.config.API + "/search?q=" + encodeURIComponent(q);
+
+    console.log("🔎 SEARCH:", url);
+
+    try{
+      const data = await Onion.fetch(url);
+      return data?.results || [];
+    }catch(e){
+      console.error("💥 SEARCH ERROR:", e);
+      return [];
+    }
+
+  }
+
+/* =========================
+   INPUT EVENTS
+========================= */
+
+input.addEventListener("input", ()=>{
+
+  const v = input.value.trim();
+
+  clearTimeout(timer);
+
+  if(!v){
+    hide();
+    return;
+  }
+
+  timer = setTimeout(async ()=>{
+    const results = await search(v);
+    render(results, v);
+  }, 200);
+
+});
+
+
+input.addEventListener("focus", async ()=>{
+
+  const v = input.value.trim();
+  if(!v) return;
+
+  const results = await search(v);
+  render(results, v);
+
+});
+
+
+/* =========================
+   GLOBAL CLICK (SAFE)
+========================= */
+
+if(!window.__searchClickBound){
+
+  window.__searchClickBound = true;
+
+  document.addEventListener("click",(e)=>{
+
+    if(!e.target.closest(".topbar-search-wrap")){
+      
+      const container = document.getElementById("topbar-search-results");
+
+      if(container){
+        container.classList.remove("active");
+        container.innerHTML = "";
+      }
+
+    }
+
   });
 
 }
+  
+  /* =========================
+     NAV.JS INTEGRATION
+  ========================= */
 
-});
+  // 🔥 cerrar cuando navegas (usa tu nav.js)
+  Onion.events.on("nav:search:close", hide);
+
+}
+
+
+/* =========================
+   🔥 ENGANCHE SPA
+========================= */
+
+// cada render SPA
+Onion.events.on("nav:ready", initTopbarSearch);
+
+// fallback primera carga
+if(document.readyState !== "loading"){
+  initTopbarSearch();
+}else{
+  document.addEventListener("DOMContentLoaded", initTopbarSearch);
+}
 
 
 /* =========================

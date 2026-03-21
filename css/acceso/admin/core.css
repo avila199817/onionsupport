@@ -550,7 +550,9 @@ body{
 
   padding:0 var(--space-lg);
 
-  background:var(--panel-bg);
+  background:
+  linear-gradient(180deg, rgba(255,255,255,0.02), transparent 40%),
+  var(--sb-bg);
   border-bottom:1px solid var(--panel-border);
 
   z-index:5;

@@ -209,10 +209,14 @@ body{
   align-items:center;
   justify-content:center;
   border-radius:10px;
+  transition: transform .2s ease, background .2s ease;
+  cursor:pointer;
 }
 
-.logo img{ width:20px; }
-
+.logo:hover{
+  background:var(--sb-hover);
+  transform:scale(1.05);
+}
 
 /* TOGGLE */
 .sidebar-toggle{

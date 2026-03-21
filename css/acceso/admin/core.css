@@ -1,7 +1,3 @@
-/* =========================
-   ROOT
-========================= */
-
 :root{
 
   --content-max:1300px;
@@ -69,10 +65,7 @@
 }
 
 
-/* =========================
-   LIGHT MODE
-========================= */
-
+/* LIGHT MODE */
 [data-theme="light"]{
   --sb-bg:#ffffff;
   --sb-hover:#f3f4f6;
@@ -105,10 +98,7 @@
 }
 
 
-/* =========================
-   RESET
-========================= */
-
+/* RESET */
 *,
 *::before,
 *::after{
@@ -135,10 +125,7 @@ body{
 }
 
 
-/* =========================
-   LAYOUT
-========================= */
-
+/* LAYOUT */
 .layout{
   position:relative;
   min-height:100dvh;
@@ -149,10 +136,7 @@ body{
 }
 
 
-/* =========================
-   CONTAINER
-========================= */
-
+/* CONTAINER */
 .container{
   width:100%;
   max-width:var(--content-max);
@@ -161,10 +145,7 @@ body{
 }
 
 
-/* =========================
-   MAIN
-========================= */
-
+/* MAIN */
 .main-content{
   margin-left:var(--sidebar-width);
   min-height:100dvh;
@@ -179,20 +160,13 @@ body{
 }
 
 
-/* =========================
-   SCROLLBAR
-========================= */
-
+/* SCROLLBAR */
 ::-webkit-scrollbar{ width:10px; }
-
 ::-webkit-scrollbar-thumb{
   background:var(--scrollbar-thumb);
   border-radius:10px;
 }
-
-::-webkit-scrollbar-thumb:hover{
-  background:rgba(255,255,255,0.35);
-}
+::-webkit-scrollbar-thumb:hover{ background:rgba(255,255,255,0.35); }
 
 *{
   scrollbar-width:thin;
@@ -200,39 +174,27 @@ body{
 }
 
 
-/* =========================
-   SIDEBAR
-========================= */
-
+/* SIDEBAR */
 .sidebar{
   width:260px;
   height:100vh;
   position:fixed;
   top:0;
   left:0;
-
   display:flex;
   flex-direction:column;
-
   background:
     linear-gradient(180deg, rgba(255,255,255,0.02), transparent 40%),
     var(--sb-bg);
-
   transition: width .35s cubic-bezier(.22,1,.36,1);
-
   border-right:1px solid var(--sb-border);
   z-index:2;
 }
 
-.sidebar.collapsed{
-  width:72px;
-}
+.sidebar.collapsed{ width:72px; }
 
 
-/* =========================
-   TOP
-========================= */
-
+/* TOP */
 .sidebar-top{
   display:flex;
   align-items:center;
@@ -241,10 +203,7 @@ body{
 }
 
 
-/* =========================
-   LOGO
-========================= */
-
+/* LOGO */
 .logo{
   width:32px;
   height:32px;
@@ -253,6 +212,7 @@ body{
   justify-content:center;
   border-radius:10px;
   cursor:pointer;
+  transition: transform .15s ease, background-color .2s ease;
 }
 
 .logo img{
@@ -263,11 +223,17 @@ body{
   pointer-events:none;
 }
 
+.logo:hover{
+  background-color:transparent;
+  transform:scale(1.05);
+}
 
-/* =========================
-   TOGGLE
-========================= */
+.logo:active{
+  transform:scale(0.98);
+}
 
+
+/* TOGGLE */
 .sidebar-toggle{
   width:32px;
   height:32px;
@@ -299,6 +265,7 @@ body{
   border-radius:6px;
   font-size:12px;
   opacity:0;
+  transition:.15s;
 }
 
 /* FIX tooltip */
@@ -307,10 +274,7 @@ body{
 }
 
 
-/* =========================
-   MENU
-========================= */
-
+/* MENU */
 .sidebar-menu{
   display:flex;
   flex-direction:column;
@@ -356,10 +320,7 @@ body{
 }
 
 
-/* =========================
-   SECTION
-========================= */
-
+/* SECTION */
 .sidebar-section{
   flex:1;
   overflow-y:auto;
@@ -390,10 +351,7 @@ body{
 }
 
 
-/* =========================
-   FOOTER
-========================= */
-
+/* FOOTER */
 .sidebar-footer{
   padding:10px;
   border-top:1px solid var(--sb-border);
@@ -433,10 +391,7 @@ body{
 }
 
 
-/* =========================
-   AVATAR
-========================= */
-
+/* AVATAR */
 .avatar{
   width:28px;
   height:28px;
@@ -456,10 +411,7 @@ body{
 }
 
 
-/* =========================
-   DROPDOWN
-========================= */
-
+/* DROPDOWN */
 .user-dropdown{
   position:absolute;
   bottom:70px;
@@ -495,4 +447,8 @@ body{
 
 .dropdown-item:hover{
   background:var(--sb-hover);
+}
+
+.sidebar.collapsed .sidebar-footer{
+  padding:10px;
 }

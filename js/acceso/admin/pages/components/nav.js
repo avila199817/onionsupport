@@ -104,7 +104,6 @@ loading = true;
 try{
 
 const data = await Onion.fetch(Onion.config.API + "/search");
-
 const results = data?.results || data || [];
 
 index = results.map(i=>({
@@ -119,13 +118,9 @@ k: (i.keywords||[]).map(normalize)
 loaded = true;
 
 }catch(err){
-
-console.error("SEARCH LOAD ERROR:",err);
-
+console.error("SEARCH LOAD ERROR:", err);
 }finally{
-
 loading = false;
-
 }
 
 }
@@ -168,12 +163,13 @@ settings:"⚙️"
 ===================================================== */
 
 function show(){
-container.style.display = "block";
+container.classList.add("active");
 }
 
 function hide(){
-container.style.display = "none";
+container.classList.remove("active");
 container.innerHTML = "";
+activeIndex = -1;
 }
 
 
@@ -184,7 +180,6 @@ container.innerHTML = "";
 function render(results, query=""){
 
 container.innerHTML = "";
-
 currentResults = results;
 activeIndex = -1;
 

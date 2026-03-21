@@ -483,7 +483,6 @@ Onion.render = async function(){
       await Onion.loadScript(script);
     }
 
-    // 🔥 comprobar otra vez (por si tardó el script)
     if(renderId !== Onion.state.renderId){
       console.warn("⚠️ Render cancelado tras script");
       return;
@@ -493,26 +492,40 @@ Onion.render = async function(){
       UI POST RENDER
    ========================= */
    
-   if(window.renderSidebar){
-     window.renderSidebar();
+   try {
+   
+     if (typeof window.renderSidebar === "function") {
+       window.renderSidebar();
+     }
+   
+     if (typeof window.updateSidebarActive === "function") {
+       window.updateSidebarActive();
+     }
+   
+     if (typeof window.renderTopbar === "function") {
+       window.renderTopbar();
+     }
+   
+     document.body.classList.remove("loading");
+   
+   } catch (uiError) {
+   
+     console.error("⚠️ UI POST RENDER ERROR:", uiError);
+   
    }
    
-   if(window.updateSidebarActive){
-     window.updateSidebarActive();
-   }
    
-   if(window.renderTopbar){
-     window.renderTopbar();
-   }
+   /* =========================
+      ERROR HANDLING (RENDER)
+   ========================= */
    
-   document.body.classList.remove("loading");
-   
-   } catch(e){
+   } catch (e) {
    
      console.error("💥 RENDER ERROR:", e);
    
      const app = document.getElementById("app-content");
-     if(app){
+   
+     if (app) {
        app.innerHTML = `
          <div style="padding:20px">
            <h2>Error cargando página</h2>
@@ -526,56 +539,59 @@ Onion.render = async function(){
      Onion.state.rendering = false;
    
    };
-
-/* =========================
-   INIT
-========================= */
-
-(async function(){
-
-  try{
-
-    const res = await Onion.fetch(Onion.config.API + "/auth/me");
-    const user = res.user || res;
-
-    Onion.setUser(user);
-    Onion.slug.apply(user.slug);
-
-    // 🔥 listeners ANTES del primer render
-    window.addEventListener("onion:navigate", Onion.render);
-
-    // 🔥 soporte botón atrás/adelante
-    window.addEventListener("popstate", () => {
-      Onion.render();
-    });
-
-    // 🔥 primer render
-    await Onion.render();
-
-    Onion.ui.hideLoader();
-
-  }catch(e){
-
-    console.error("INIT ERROR:", e);
-
-    if(e.message === "401" || e.message === "NO_TOKEN"){
-      redirectLogin();
-      return;
-    }
-
-    // 🔥 fallback visual
-    const app = document.getElementById("app-content");
-    if(app){
-      app.innerHTML = `
-        <div style="padding:20px">
-          <h2>Error inicializando</h2>
-          <p>Intenta recargar la página.</p>
-        </div>
-      `;
-    }
-
-  }
-
-})();
    
-})();
+         
+      /* =========================
+         INIT
+      ========================= */
+      
+      Onion.init = async function () {
+      
+        try {
+      
+          const res = await Onion.fetch(Onion.config.API + "/auth/me");
+          const user = res.user || res;
+      
+          Onion.setUser(user);
+          Onion.slug.apply(user.slug);
+      
+          window.addEventListener("onion:navigate", Onion.render);
+      
+          window.addEventListener("popstate", () => {
+            Onion.render();
+          });
+      
+          await Onion.render();
+      
+          Onion.ui.hideLoader();
+      
+        } catch (e) {
+      
+          console.error("💥 INIT ERROR:", e);
+      
+          if (e.message === "401" || e.message === "NO_TOKEN") {
+            redirectLogin();
+            return;
+          }
+      
+          const app = document.getElementById("app-content");
+      
+          if (app) {
+            app.innerHTML = `
+              <div style="padding:20px">
+                <h2>Error inicializando</h2>
+                <p>Intenta recargar.</p>
+              </div>
+            `;
+          }
+      
+        }
+      
+      };
+      
+      
+      /* =========================
+         BOOT
+      ========================= */
+      
+      Onion.init();

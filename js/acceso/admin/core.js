@@ -489,42 +489,43 @@ Onion.render = async function(){
       return;
     }
 
-    /* =========================
-       UI POST RENDER
-    ========================= */
-
-    if(window.renderSidebar){
-      window.renderSidebar();
-    }
-
-    if(window.updateSidebarActive){
-      window.updateSidebarActive();
-    }
-
-    document.body.classList.remove("loading");
-
-  }catch(e){
-
-    console.error("💥 RENDER ERROR:", e);
-
-    const app = document.getElementById("app-content");
-    if(app){
-      app.innerHTML = `
-        <div style="padding:20px">
-          <h2>Error cargando página</h2>
-          <p>Intenta recargar.</p>
-        </div>
-      `;
-    }
-
-  }finally{
-
-    Onion.state.rendering = false;
-
-  }
-
-};
-
+   /* =========================
+      UI POST RENDER
+   ========================= */
+   
+   if(window.renderSidebar){
+     window.renderSidebar();
+   }
+   
+   if(window.updateSidebarActive){
+     window.updateSidebarActive();
+   }
+   
+   if(window.renderTopbar){
+     window.renderTopbar();
+   }
+   
+   document.body.classList.remove("loading");
+   
+   } catch(e){
+   
+     console.error("💥 RENDER ERROR:", e);
+   
+     const app = document.getElementById("app-content");
+     if(app){
+       app.innerHTML = `
+         <div style="padding:20px">
+           <h2>Error cargando página</h2>
+           <p>Intenta recargar.</p>
+         </div>
+       `;
+     }
+   
+   } finally {
+   
+     Onion.state.rendering = false;
+   
+   }
 
 /* =========================
    INIT

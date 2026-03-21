@@ -22,26 +22,14 @@ let initialized = false;
 
 function init(){
 
-   
 /* ================= DOM ================= */
 
 const input     = document.getElementById("topbar-search");
 const container = document.getElementById("topbar-search-results");
 
 if(!input || !container) return;
-
 if(initialized) return;
 initialized = true;
-   
-
-/* =====================================================
-   RESET
-===================================================== */
-
-overlay.classList.remove("open");
-overlay.style.pointerEvents = "none";
-document.body.classList.remove("search-open");
-clear && (clear.style.display = "none");
 
 
 /* =====================================================
@@ -104,7 +92,7 @@ return text.substring(0,i)
 
 
 /* =====================================================
-   LOAD INDEX (API NUEVA)
+   LOAD INDEX
 ===================================================== */
 
 async function loadIndex(){
@@ -176,19 +164,16 @@ settings:"⚙️"
 
 
 /* =====================================================
-   CONTAINER
+   SHOW / HIDE
 ===================================================== */
 
-let container = document.getElementById("searchResults");
+function show(){
+container.style.display = "block";
+}
 
-if(!container){
-
-container = document.createElement("div");
-container.id = "searchResults";
-container.className = "search-results";
-
-overlay.appendChild(container);
-
+function hide(){
+container.style.display = "none";
+container.innerHTML = "";
 }
 
 
@@ -234,7 +219,7 @@ el.innerHTML = `
 
 el.addEventListener("click",(e)=>{
 e.preventDefault();
-close();
+hide();
 Onion.go(r.url);
 });
 
@@ -287,81 +272,37 @@ render(results, q);
 
 
 /* =====================================================
-   OPEN / CLOSE
-===================================================== */
-
-async function open(){
-
-if(overlay.classList.contains("open")) return;
-
-overlay.classList.add("open");
-overlay.style.pointerEvents="auto";
-
-document.body.classList.add("search-open");
-
-await loadIndex();
-
-setTimeout(()=> input.focus(), 40);
-
-}
-
-function close(){
-
-overlay.classList.remove("open");
-overlay.style.pointerEvents="none";
-
-document.body.classList.remove("search-open");
-
-input.value="";
-render([]);
-
-clear && (clear.style.display="none");
-
-}
-
-
-/* =====================================================
-   EVENT BUS (🔥 CLAVE)
-===================================================== */
-
-Onion.events.on("nav:search:open", open);
-Onion.events.on("nav:search:close", close);
-
-
-/* =====================================================
    EVENTS
 ===================================================== */
-
-btn?.addEventListener("click",(e)=>{
-e.stopPropagation();
-overlay.classList.contains("open") ? close() : open();
-});
-
-overlay.addEventListener("click",(e)=>{
-if(e.target===overlay) close();
-});
 
 input.addEventListener("input",()=>{
 
 const v = input.value;
 
-clear && (clear.style.display = v ? "flex":"none");
-
 clearTimeout(timer);
 
-timer = setTimeout(()=> run(v), 120);
+if(!v){
+hide();
+return;
+}
+
+show();
+
+timer = setTimeout(async ()=>{
+await loadIndex();
+run(v);
+}, 120);
 
 });
 
-clear?.addEventListener("click",()=>{
+input.addEventListener("focus", ()=>{
+if(input.value) show();
+});
 
-input.value="";
-input.focus();
-
-clear.style.display="none";
-
-render([]);
-
+document.addEventListener("click",(e)=>{
+if(!e.target.closest(".topbar-search-wrap")){
+hide();
+}
 });
 
 
@@ -370,17 +311,6 @@ render([]);
 ===================================================== */
 
 document.addEventListener("keydown",(e)=>{
-
-if((e.ctrlKey||e.metaKey) && e.key==="k"){
-e.preventDefault();
-Onion.events.emit("nav:search:open");
-}
-
-if(e.key==="Escape"){
-close();
-}
-
-if(!overlay.classList.contains("open")) return;
 
 const items = container.querySelectorAll(".search-result");
 

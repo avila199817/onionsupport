@@ -36,6 +36,25 @@ Onion.cache = {
   html: {}
 };
 
+   /* =========================
+   EVENTS (GLOBAL BUS)
+========================= */
+
+Onion.events = {
+
+  emit(name, detail = {}){
+    window.dispatchEvent(new CustomEvent(name, { detail }));
+  },
+
+  on(name, handler){
+    window.addEventListener(name, handler);
+  },
+
+  off(name, handler){
+    window.removeEventListener(name, handler);
+  }
+
+};
 
 /* =========================
    LOAD SCRIPT

@@ -228,7 +228,7 @@ body{
 
 /* hover limpio */
 .logo:hover{
-  background-color:var(--sb-hover);
+  background-color:transparent;
   transform:scale(1.05);
 }
 

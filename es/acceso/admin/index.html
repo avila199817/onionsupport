@@ -393,6 +393,30 @@ body.loading {
 <script src="/js/acceso/admin/core.js" defer></script>
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
 <script>
 (function(){
 
@@ -486,6 +510,7 @@ window.renderTopbar = function(){
   console.log("✅ TOPBAR OK");
 };
 
+
 /* =========================
    ACTIVE LINK
 ========================= */
@@ -523,7 +548,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const menuItems = document.querySelectorAll(".menu-item");
 
-  
+
   /* =========================
      TOOLTIP TOGGLE BUTTON
   ========================= */
@@ -582,18 +607,12 @@ if(toggleSidebar && sidebar){
 
     const isCollapsed = sidebar.classList.contains("collapsed");
 
-    // cerrar dropdown si está abierto
     if(dropdown){
       dropdown.classList.remove("active");
     }
 
-    // toggle limpio
     sidebar.classList.toggle("collapsed");
-
-    // guardar estado
     localStorage.setItem("sidebar-collapsed", !isCollapsed);
-
-    // actualizar tooltip
     updateToggleTooltip();
 
   });
@@ -601,74 +620,107 @@ if(toggleSidebar && sidebar){
 }
 
 
-  /* =========================
-     DROPDOWN + AVATAR
-  ========================= */
+/* =========================
+   DROPDOWN + AVATAR
+========================= */
 
-  if(userToggle && dropdown && sidebar){
+if(userToggle && dropdown && sidebar){
 
-    userToggle.addEventListener("click", (e)=>{
-      e.stopPropagation();
+  userToggle.addEventListener("click", (e)=>{
+    e.stopPropagation();
 
-      const isCollapsed = sidebar.classList.contains("collapsed");
+    const isCollapsed = sidebar.classList.contains("collapsed");
 
-      if(isCollapsed){
-        sidebar.classList.remove("collapsed");
-        localStorage.setItem("sidebar-collapsed", false);
-        updateToggleTooltip();
+    if(isCollapsed){
+      sidebar.classList.remove("collapsed");
+      localStorage.setItem("sidebar-collapsed", false);
+      updateToggleTooltip();
 
-        setTimeout(()=>{
-          dropdown.classList.add("active");
-        }, 180);
+      setTimeout(()=>{
+        dropdown.classList.add("active");
+      }, 180);
 
-        return;
-      }
+      return;
+    }
 
-      dropdown.classList.toggle("active");
-    });
+    dropdown.classList.toggle("active");
+  });
 
-    dropdown.addEventListener("click", (e)=>{
-      e.stopPropagation();
-    });
+  dropdown.addEventListener("click", (e)=>{
+    e.stopPropagation();
+  });
 
-    document.addEventListener("click", ()=>{
-      dropdown.classList.remove("active");
-    });
+  document.addEventListener("click", ()=>{
+    dropdown.classList.remove("active");
+  });
 
-  }
+}
 
 
-  /* =========================
-     LOGOUT
-  ========================= */
+/* =========================
+   LOGOUT
+========================= */
 
-  if(logoutBtn){
-    logoutBtn.addEventListener("click", async (e)=>{
-      e.preventDefault();
+if(logoutBtn){
+  logoutBtn.addEventListener("click", async (e)=>{
+    e.preventDefault();
+
+    try{
+      localStorage.removeItem("onion_token");
+      sessionStorage.clear();
+
+      document.cookie.split(";").forEach(c => {
+        document.cookie = c
+          .replace(/^ +/, "")
+          .replace(/=.*/, "=;expires=" + new Date(0).toUTCString() + ";path=/");
+      });
 
       try{
-        localStorage.removeItem("onion_token");
-        sessionStorage.clear();
-
-        document.cookie.split(";").forEach(c => {
-          document.cookie = c
-            .replace(/^ +/, "")
-            .replace(/=.*/, "=;expires=" + new Date(0).toUTCString() + ";path=/");
+        await fetch("/api/logout", {
+          method: "POST",
+          credentials: "include"
         });
+      }catch(err){}
 
-        try{
-          await fetch("/api/logout", {
-            method: "POST",
-            credentials: "include"
-          });
-        }catch(err){}
+    } finally {
+      window.location.replace("/login");
+    }
 
-      } finally {
-        window.location.replace("/login");
-      }
+  });
+}
 
-    });
-  }
+
+/* =========================
+   🔎 SEARCH TRIGGER (HOOK NAV.JS)
+========================= */
+
+const searchInput = document.getElementById("topbar-search");
+
+if(searchInput){
+
+  const openSearch = ()=>{
+    window.dispatchEvent(new Event("onion:nav-search-open"));
+  };
+
+  // focus → abre search global
+  searchInput.addEventListener("focus", openSearch);
+
+  // escribir → abre también (por si escriben directo)
+  searchInput.addEventListener("input", openSearch);
+
+  // click → abre
+  searchInput.addEventListener("click", openSearch);
+
+  // CTRL + K → focus + abrir
+  document.addEventListener("keydown",(e)=>{
+    if((e.ctrlKey || e.metaKey) && e.key === "k"){
+      e.preventDefault();
+      searchInput.focus();
+      openSearch();
+    }
+  });
+
+}
 
 });
 
@@ -693,5 +745,22 @@ setTimeout(() => {
 })();
 </script>
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
 </body>
 </html>

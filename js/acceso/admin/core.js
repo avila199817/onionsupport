@@ -409,6 +409,8 @@ Onion.render = async function(){
     if(script){
       await Onion.loadScript(script);
     }
+     
+    Onion.events.emit("nav:ready");
 
     if(typeof window.renderSidebar === "function"){
       window.renderSidebar();

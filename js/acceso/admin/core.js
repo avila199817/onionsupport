@@ -237,21 +237,21 @@ Onion.slug.apply = function(slug){
 Onion.routes = {
   "/": "/es/acceso/admin/pages/index.html",
   "/incidencias": "/es/acceso/admin/pages/incidencias/index.html",
-  "/facturas": "/es/acceso/admin/pages/facturas/index.html"
+  "/facturas": "/es/acceso/admin/pages/facturas/index.html",
   "/cuenta": "/es/acceso/admin/pages/cuenta/index.html"
 };
 
 Onion.styles = {
   "/": "/css/acceso/admin/pages/home.css",
   "/incidencias": "/css/acceso/admin/pages/incidencias/incidencias.css",
-  "/facturas": "/css/acceso/admin/pages/facturas/facturas.css"
+  "/facturas": "/css/acceso/admin/pages/facturas/facturas.css",
   "/cuenta": "/css/acceso/admin/pages/cuenta/cuenta.css"
 };
 
 Onion.scripts = {
   "/": "/js/acceso/admin/pages/home.js",
   "/incidencias": "/js/acceso/admin/pages/incidencias/incidencias.js",
-  "/facturas": "/js/acceso/admin/pages/facturas/facturas.js"
+  "/facturas": "/js/acceso/admin/pages/facturas/facturas.js",
   "/cuenta": "/js/acceso/admin/pages/cuenta/cuenta.js"
 };
 

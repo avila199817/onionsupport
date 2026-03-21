@@ -643,4 +643,5 @@ body{
 
   color:var(--dim);
   pointer-events:none;
+  display:block;
 }

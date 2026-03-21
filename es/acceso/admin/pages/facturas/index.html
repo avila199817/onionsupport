@@ -22,19 +22,31 @@
     <!-- KPI -->
     <div class="grid-cards">
 
-      <div class="card">
+      <div class="card highlight">
         <span class="card-title">Total facturado</span>
         <span class="card-value" id="facturas-total">-- €</span>
+        <div class="card-meta">
+          <span class="trend up">+6%</span>
+          <span class="card-extra">este mes</span>
+        </div>
       </div>
 
       <div class="card">
         <span class="card-title">Pendientes</span>
         <span class="card-value" id="facturas-pendientes">--</span>
+        <div class="card-meta">
+          <span class="trend down">-2%</span>
+          <span class="card-extra">por cobrar</span>
+        </div>
       </div>
 
       <div class="card">
         <span class="card-title">Pagadas</span>
         <span class="card-value" id="facturas-pagadas">--</span>
+        <div class="card-meta">
+          <span class="trend up">+4%</span>
+          <span class="card-extra">cobradas</span>
+        </div>
       </div>
 
     </div>
@@ -44,7 +56,7 @@
     <div class="dashboard-grid">
 
       <!-- TABLA -->
-      <div class="panel-block">
+      <div class="panel-block table-block">
 
         <div class="block-header minimal">
           <h2 class="section-title">Listado de facturas</h2>
@@ -71,6 +83,58 @@
             </tbody>
 
           </table>
+
+        </div>
+
+      </div>
+
+    </div>
+
+
+    <!-- SEGUNDO BLOQUE (COMO HOME) -->
+    <div class="dashboard-grid secondary">
+
+      <!-- RESUMEN -->
+      <div class="panel-block summary">
+        <div class="block-header minimal">
+          <h2 class="section-title">Resumen del día</h2>
+        </div>
+
+        <div class="summary-grid">
+
+          <div class="summary-item">
+            <span class="summary-value">--</span>
+            <span class="summary-label">Facturas</span>
+          </div>
+
+          <div class="summary-item">
+            <span class="summary-value">--</span>
+            <span class="summary-label">Pagadas</span>
+          </div>
+
+          <div class="summary-item">
+            <span class="summary-value">--</span>
+            <span class="summary-label">Pendientes</span>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ALERTAS -->
+      <div class="panel-block alerts">
+        <div class="block-header minimal">
+          <h2 class="section-title">Facturación</h2>
+        </div>
+
+        <div class="alert-list">
+
+          <div class="alert-item info">
+            Flujo de pagos estable
+          </div>
+
+          <div class="alert-item warn" style="display:none;">
+            Retrasos en pagos detectados
+          </div>
 
         </div>
 

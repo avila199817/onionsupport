@@ -213,6 +213,8 @@ body{
   cursor:pointer;
 }
 
+.logo img{ width:20px; }
+
 .logo:hover{
   background:var(--sb-hover);
   transform:scale(1.05);

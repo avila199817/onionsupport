@@ -699,7 +699,7 @@ const searchInput = document.getElementById("topbar-search");
 if(searchInput){
 
   const openSearch = ()=>{
-    window.dispatchEvent(new Event("onion:nav-search-open"));
+    Onion.events.emit("nav:search:open");
   };
 
   // focus → abre search global

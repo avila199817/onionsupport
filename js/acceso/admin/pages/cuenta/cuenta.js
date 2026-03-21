@@ -2,19 +2,32 @@
 
 "use strict";
 
-console.log("✅ Cuenta JS PRO cargado");
+console.log("✅ Cuenta JS PRO REAL");
 
 
 /* =========================
-   ROOT
+   SINGLETON
 ========================= */
 
-function root(){
+if(window.__onionCuentaLoaded) return;
+window.__onionCuentaLoaded = true;
+
+
+/* =========================
+   ROOT / DOM
+========================= */
+
+function getRoot(){
   return document.querySelector(".panel-content.cuenta");
 }
 
-function $(sel){
-  return root()?.querySelector(sel);
+function $(selector){
+  return getRoot()?.querySelector(selector);
+}
+
+function set(selector, value){
+  const el = $(selector);
+  if(el) el.textContent = value;
 }
 
 
@@ -25,23 +38,28 @@ function $(sel){
 function init(){
 
   const Onion = window.Onion;
+  const root = getRoot();
 
-  if(!Onion || !Onion.state?.user){
-    return setTimeout(init, 100);
+  if(!root){
+    return setTimeout(init, 50);
   }
 
-  load();
+  if(!Onion || !Onion.state?.user){
+    return setTimeout(init, 50);
+  }
+
+  loadCuenta();
 
 }
 
-init();
+setTimeout(init, 0);
 
 
 /* =========================
    LOAD
 ========================= */
 
-async function load(){
+async function loadCuenta(){
 
   try{
 
@@ -49,18 +67,21 @@ async function load(){
     const user = Onion.state.user;
 
     if(!user?.userId){
-      throw new Error("NO_USER");
+      throw new Error("UserId no disponible");
     }
 
-    const data = await Onion.fetch(
+    const res = await Onion.fetch(
       Onion.config.API + "/users/" + user.userId
     );
 
-    render(data);
+    const u = res.user || res;
+
+    render(u);
 
   }catch(e){
 
     console.error("💥 CUENTA ERROR:", e);
+    fallback();
 
   }
 
@@ -75,69 +96,120 @@ function render(u){
 
   if(!u) return;
 
-  // 🔥 NORMALIZACIÓN (por si backend cambia nombres)
-  const id = u.id || u.userId;
-  const nombre = u.nombre || u.name || "Usuario";
-  const email = u.email || "--";
-  const rol = u.role || "user";
-  const created = u.createdAt || u.created || null;
-  const plan = u.plan || "Go Plan";
-  const avatar = u.avatar || null;
+  console.log("🔥 RENDER CUENTA REAL");
 
 
   /* =========================
      KPI
   ========================= */
 
-  setText("#cuenta-plan", plan);
-  setText("#cuenta-email", email);
-  setText("#cuenta-fecha", formatFecha(created));
+  set("#cuenta-plan", "Go Plan"); // aún no tienes plan en backend
+
+  set("#cuenta-email", u.email || "--");
+
+  set("#cuenta-fecha", formatFecha(u.createdAt));
 
 
   /* =========================
      PERFIL
   ========================= */
 
-  setText("#cuenta-nombre", nombre);
-  setText("#cuenta-rol", formatRol(rol));
-  setText("#cuenta-id", "ID: " + id);
+  set("#cuenta-nombre", u.name || u.username || "Usuario");
+
+  set("#cuenta-rol", (u.role || "user").toUpperCase());
+
+  set("#cuenta-id", "ID: " + (u.userId || "--"));
 
 
   /* =========================
-     AVATAR (si tienes img en HTML)
+     SUMMARY (REAL BASE)
   ========================= */
 
-  const img = $("#cuenta-avatar");
-  if(img && avatar){
-    img.src = avatar;
-  }
+  setSummary();
 
 
   /* =========================
-     ESTADO CUENTA
+     ESTADO REAL
   ========================= */
 
-  const statusBox = root()?.querySelector(".alert-list");
+  renderEstado(u);
 
-  if(statusBox){
 
-    statusBox.innerHTML = `
-      <div class="alert-item info">
-        Cuenta activa
-      </div>
+  /* =========================
+     EXTRA (DEBUG PRO)
+  ========================= */
 
-      <div class="alert-item info">
-        Email verificado: ${u.emailVerified ? "Sí" : "No"}
-      </div>
+  console.log("📦 USER FULL:", u);
 
-      ${u.hasAvatar ? `
-        <div class="alert-item info">
-          Avatar configurado
-        </div>
-      ` : ``}
-    `;
+}
 
-  }
+
+/* =========================
+   ESTADO (REAL DATA)
+========================= */
+
+function renderEstado(u){
+
+  const root = getRoot();
+  if(!root) return;
+
+  const list = root.querySelector(".alerts .alert-list");
+  if(!list) return;
+
+  const twoFA = u.twofa_enabled === true;
+  const emailOK = u.emailVerified === true;
+  const active = u.active === true;
+
+  list.innerHTML = `
+    <div class="alert-item ${active ? "info" : "warn"}">
+      Cuenta ${active ? "operativa" : "desactivada"}
+    </div>
+
+    <div class="alert-item ${twoFA ? "info" : "warn"}">
+      2FA: ${twoFA ? "Activado" : "No activado"}
+    </div>
+
+    <div class="alert-item ${emailOK ? "info" : "warn"}">
+      Email: ${emailOK ? "Verificado" : "No verificado"}
+    </div>
+  `;
+
+}
+
+
+/* =========================
+   SUMMARY (PREPARADO)
+========================= */
+
+function setSummary(){
+
+  const root = getRoot();
+  if(!root) return;
+
+  const items = root.querySelectorAll(".summary-value");
+
+  if(!items.length) return;
+
+  items[0].textContent = "0"; // incidencias
+  items[1].textContent = "0"; // facturas
+  items[2].textContent = "1"; // sesiones
+
+}
+
+
+/* =========================
+   FALLBACK
+========================= */
+
+function fallback(){
+
+  set("#cuenta-plan", "Go Plan");
+  set("#cuenta-email", "--");
+  set("#cuenta-fecha", "--");
+
+  set("#cuenta-nombre", "Usuario");
+  set("#cuenta-rol", "USER");
+  set("#cuenta-id", "ID: --");
 
 }
 
@@ -146,29 +218,9 @@ function render(u){
    HELPERS
 ========================= */
 
-function setText(selector, value){
-  const el = document.querySelector(selector);
-  if(el) el.textContent = value ?? "--";
-}
-
 function formatFecha(f){
   if(!f) return "--";
-
-  const d = new Date(f);
-
-  return d.toLocaleDateString("es-ES", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric"
-  });
-}
-
-function formatRol(r){
-
-  if(r === "admin") return "Administrador";
-  if(r === "user") return "Usuario";
-
-  return r;
+  return new Date(f).toLocaleDateString("es-ES");
 }
 
 })();

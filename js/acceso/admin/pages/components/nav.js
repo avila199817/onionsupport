@@ -132,23 +132,27 @@ show();
 
 
 /* =====================================================
-   SEARCH (🔥 CLAVE)
+   SEARCH (SIN SILENCIOS 💥)
 ===================================================== */
 
 async function search(q){
 
+const url = Onion.config.API + "/search?q=" + encodeURIComponent(q);
+
+console.log("🔎 SEARCH URL:", url);
+
 try{
 
-const data = await Onion.fetch(
-  Onion.config.API + "/search?q=" + encodeURIComponent(q)
-);
+const data = await Onion.fetch(url);
+
+console.log("✅ SEARCH DATA:", data);
 
 return data?.results || [];
 
 }catch(err){
 
-console.error("SEARCH ERROR:", err);
-return [];
+console.error("💥 SEARCH ERROR REAL:", err);
+throw err; // 👈 CLAVE: no ocultar errores
 
 }
 
@@ -172,8 +176,13 @@ return;
 
 timer = setTimeout(async ()=>{
 
+try{
 const results = await search(v);
 render(results, v);
+}catch(e){
+console.error("❌ INPUT SEARCH FAIL:", e);
+hide();
+}
 
 }, 150);
 
@@ -185,8 +194,12 @@ input.addEventListener("focus", async ()=>{
 const v = input.value.trim();
 if(!v) return;
 
+try{
 const results = await search(v);
 render(results, v);
+}catch(e){
+console.error("❌ FOCUS SEARCH FAIL:", e);
+}
 
 });
 
@@ -241,6 +254,13 @@ items[activeIndex].scrollIntoView({ block:"nearest" });
 }
 
 }
+
+
+/* =====================================================
+   🔥 LISTEN CLOSE EVENT (ANTES FALTABA)
+===================================================== */
+
+Onion.events.on("nav:search:close", hide);
 
 }
 

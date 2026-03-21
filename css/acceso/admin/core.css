@@ -117,7 +117,7 @@ html, body{
 
 html{
   scroll-behavior:smooth;
-  overscroll-behavior-y:contain;
+  overscroll-behavior-y:none;
 }
 
 body{

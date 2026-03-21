@@ -2,7 +2,7 @@
 
 "use strict";
 
-console.log("✅ Cuenta JS cargado");
+console.log("✅ Cuenta JS PRO cargado");
 
 
 /* =========================
@@ -25,24 +25,38 @@ function $(selector){
   return getRoot()?.querySelector(selector);
 }
 
+function set(selector, value){
+  const el = $(selector);
+  if(el) el.textContent = value;
+}
+
 
 /* =========================
-   INIT
+   INIT (ANTI-ROTURAS)
 ========================= */
 
 function init(){
 
   const Onion = window.Onion;
+  const root = getRoot();
+
+  if(!root){
+    console.warn("⏳ Esperando DOM cuenta...");
+    return setTimeout(init, 50);
+  }
 
   if(!Onion || !Onion.state?.user){
-    return setTimeout(init, 100);
+    console.warn("⏳ Esperando usuario...");
+    return setTimeout(init, 50);
   }
+
+  console.log("🔥 INIT CUENTA OK");
 
   loadCuenta();
 
 }
 
-init();
+setTimeout(init, 0);
 
 
 /* =========================
@@ -56,13 +70,17 @@ async function loadCuenta(){
     const Onion = window.Onion;
     const user = Onion.state.user;
 
+    console.log("👤 USER STATE:", user);
+
     if(!user?.userId){
-      throw new Error("User no disponible");
+      throw new Error("UserId no disponible");
     }
 
     const res = await Onion.fetch(
       Onion.config.API + "/users/" + user.userId
     );
+
+    console.log("📡 API RESPONSE:", res);
 
     const u = res.user || res;
 
@@ -75,6 +93,8 @@ async function loadCuenta(){
   }catch(e){
 
     console.error("💥 CUENTA ERROR:", e);
+
+    fallback(); // 👈 nunca deja la pantalla vacía
 
   }
 
@@ -118,23 +138,64 @@ function render(u){
   );
 
 
-  /* SUMMARY (base simple) */
+  /* SUMMARY */
 
   setSummary();
+
+
+  /* ESTADO DINÁMICO (2FA + EMAIL) */
+
+  renderEstado(u);
 
 }
 
 
 /* =========================
-   SUMMARY (BASE)
+   ESTADO CUENTA (PRO)
+========================= */
+
+function renderEstado(u){
+
+  const root = getRoot();
+  if(!root) return;
+
+  const list = root.querySelector(".alerts .alert-list");
+  if(!list) return;
+
+  const twoFA = u.twofa_enabled === true;
+  const emailOK = u.emailVerified === true;
+
+  list.innerHTML = `
+    <div class="alert-item info">
+      Cuenta operativa
+    </div>
+
+    <div class="alert-item ${twoFA ? "info" : "warn"}">
+      2FA: ${twoFA ? "Activado" : "No activado"}
+    </div>
+
+    <div class="alert-item ${emailOK ? "info" : "warn"}">
+      Email: ${emailOK ? "Verificado" : "No verificado"}
+    </div>
+  `;
+
+}
+
+
+/* =========================
+   SUMMARY (BASE PREPARADA)
 ========================= */
 
 function setSummary(){
 
-  const items = document.querySelectorAll(".summary-value");
+  const root = getRoot();
+  if(!root) return;
+
+  const items = root.querySelectorAll(".summary-value");
 
   if(!items.length) return;
 
+  // 🔥 preparado para conectar API real
   items[0].textContent = "0"; // incidencias
   items[1].textContent = "0"; // facturas
   items[2].textContent = "1"; // sesiones
@@ -143,13 +204,25 @@ function setSummary(){
 
 
 /* =========================
-   HELPERS
+   FALLBACK (NO PANTALLA VACÍA)
 ========================= */
 
-function set(selector, value){
-  const el = $(selector);
-  if(el) el.textContent = value;
+function fallback(){
+
+  set("#cuenta-plan", "Go Plan");
+  set("#cuenta-email", "--");
+  set("#cuenta-fecha", "--");
+
+  set("#cuenta-nombre", "Usuario");
+  set("#cuenta-rol", "USER");
+  set("#cuenta-id", "ID: --");
+
 }
+
+
+/* =========================
+   HELPERS
+========================= */
 
 function formatFecha(f){
   if(!f) return "--";

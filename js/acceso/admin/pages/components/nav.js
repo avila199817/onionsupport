@@ -74,7 +74,7 @@ return text.substring(0,i)
 
 
 /* =====================================================
-   LOAD INDEX
+   LOAD INDEX (🔥 FIX CLAVE AQUÍ)
 ===================================================== */
 
 async function loadIndex(){
@@ -86,13 +86,17 @@ loading = true;
 try{
 
 const data = await Onion.fetch(Onion.config.API + "/search");
-const results = data?.results || data || [];
+
+// 🔥 FIX DEFINITIVO
+const results = Array.isArray(data)
+  ? data
+  : (data?.results || []);
 
 index = results.map(i=>({
 ...i,
 t: normalize(i.title),
 s: normalize(i.subtitle),
-k: (i.keywords||[]).map(normalize)
+k: (i.keywords || []).map(normalize)
 }));
 
 loaded = true;
@@ -168,7 +172,7 @@ el.innerHTML = `
 el.addEventListener("click",(e)=>{
 e.preventDefault();
 hide();
-Onion.go(r.url);
+if(r.url) Onion.go(r.url);
 });
 
 container.appendChild(el);
@@ -196,18 +200,23 @@ const results = index
 
 .map(i=>{
 
-let score=1; // 👈 fallback para que SIEMPRE haya resultados
+let score = 0;
 
-if(i.t.includes(q)) score+=10;
-else if(fuzzy(i.t,q)) score+=6;
+// 🔥 MATCH REAL
+if(i.t.includes(q)) score += 10;
+else if(fuzzy(i.t,q)) score += 6;
 
-if(i.s?.includes(q)) score+=4;
-if(i.k?.some(k=>k.includes(q))) score+=8;
+if(i.s?.includes(q)) score += 4;
+if(i.k?.some(k=>k.includes(q))) score += 8;
+
+// 🔥 DESCARTA basura real
+if(score === 0) return null;
 
 return {i,score};
 
 })
 
+.filter(Boolean)
 .sort((a,b)=>b.score-a.score)
 .map(r=>r.i);
 
@@ -238,7 +247,9 @@ run(v);
 });
 
 input.addEventListener("focus", ()=>{
-if(input.value) run(input.value);
+if(input.value){
+run(input.value);
+}
 });
 
 document.addEventListener("click",(e)=>{
@@ -297,7 +308,7 @@ items[activeIndex].scrollIntoView({ block:"nearest" });
    PRELOAD
 ===================================================== */
 
-setTimeout(loadIndex, 1000);
+setTimeout(loadIndex, 800);
 
 }
 

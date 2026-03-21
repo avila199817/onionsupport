@@ -252,7 +252,7 @@ body{
   position:relative;
 }
 
-.sidebar-toggle:hover{
+.sidebar:not(.collapsed) .sidebar-toggle:hover{
   background:var(--sb-hover);
   color:var(--text);
 }

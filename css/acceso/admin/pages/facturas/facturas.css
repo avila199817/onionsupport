@@ -1,5 +1,5 @@
 /* =========================
-   FACTURAS (FINAL PRO ALIGNED)
+   FACTURAS (CLON HOME)
 ========================= */
 
 .facturas{
@@ -13,22 +13,29 @@
 
 
 /* =========================
-   HEADER (ALINEADO REAL)
+   HEADER (MISMO HOME)
 ========================= */
 
 .facturas .dashboard-header{
   display:flex;
   align-items:center;
-  justify-content:space-between;
 
   height:var(--topbar-height);
   margin-bottom:40px;
+  padding-top:15px;
 }
 
 .facturas .dashboard-header .header-left{
   display:flex;
   flex-direction:column;
   justify-content:center;
+}
+
+.facturas .header-actions{
+  margin-left:auto;
+  display:flex;
+  align-items:center;
+  gap:10px;
 }
 
 
@@ -55,14 +62,8 @@
 
 
 /* =========================
-   HEADER ACTIONS
+   BOTONES
 ========================= */
-
-.facturas .header-actions{
-  display:flex;
-  align-items:center;
-  gap:10px;
-}
 
 .facturas .btn{
   border:none;
@@ -84,7 +85,7 @@
 
 
 /* =========================
-   GRID CARDS (MISMO SISTEMA)
+   GRID CARDS (CLON)
 ========================= */
 
 .facturas .grid-cards{
@@ -95,7 +96,7 @@
 
 
 /* =========================
-   CARDS
+   CARDS (CLON EXACTO)
 ========================= */
 
 .facturas .card{
@@ -129,6 +130,18 @@
   color:var(--text);
 }
 
+.facturas .card-meta{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  margin-top:10px;
+}
+
+.facturas .card-extra{
+  font-size:12px;
+  color:var(--dim);
+}
+
 
 /* =========================
    GRID PRINCIPAL
@@ -144,7 +157,7 @@
 
 
 /* =========================
-   BLOCKS
+   BLOCKS (CLON)
 ========================= */
 
 .facturas .panel-block{
@@ -171,6 +184,7 @@
 .facturas .table-container{
   width:100%;
   overflow-x:auto;
+  margin-top:10px;
 }
 
 .facturas .facturas-table{
@@ -219,6 +233,64 @@
   color:#f59e0b;
 }
 
+.facturas .badge.borrador{
+  background:rgba(59,130,246,0.15);
+  color:#60a5fa;
+}
+
+
+/* =========================
+   SUMMARY (CLON HOME)
+========================= */
+
+.facturas .summary-grid{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+
+  gap:12px;
+  margin-top:10px;
+}
+
+.facturas .summary-item{
+  background:var(--card-bg);
+  border:1px solid var(--card-border);
+
+  padding:14px;
+  border-radius:14px;
+
+  text-align:center;
+}
+
+.facturas .summary-value{
+  font-size:20px;
+  font-weight:600;
+  color:var(--text);
+}
+
+.facturas .summary-label{
+  font-size:12px;
+  color:var(--dim);
+}
+
+
+/* =========================
+   ALERTS (CLON HOME)
+========================= */
+
+.facturas .alert-list{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+
+  margin-top:10px;
+}
+
+.facturas .alert-item{
+  padding:12px;
+  border-radius:12px;
+  font-size:13px;
+}
+
 
 /* =========================
    RESPONSIVE (CLON HOME)
@@ -249,7 +321,8 @@
   }
 
   .facturas .dashboard-grid,
-  .facturas .grid-cards{
+  .facturas .grid-cards,
+  .facturas .summary-grid{
     grid-template-columns:1fr;
   }
 

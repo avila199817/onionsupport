@@ -323,12 +323,25 @@ body.loading {
   </div>
 
   <div class="topbar-right">
-    <input 
-      type="text" 
-      id="topbar-search" 
-      placeholder="Buscar..." 
-      autocomplete="off"
-    >
+
+    <!-- SEARCH -->
+    <div class="topbar-search-wrap">
+
+      <svg class="topbar-search-icon" viewBox="0 0 24 24" fill="none">
+        <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>
+        <path d="M20 20l-3-3" stroke="currentColor" stroke-width="2"/>
+      </svg>
+
+      <input 
+        type="text"
+        id="topbar-search"
+        class="topbar-search"
+        placeholder="Buscar..."
+        autocomplete="off"
+      >
+
+    </div>
+
   </div>
 
 </header>

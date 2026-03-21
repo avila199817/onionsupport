@@ -202,22 +202,39 @@ body{
   padding:14px;
 }
 
+/* LOGO */
 .logo{
   width:32px;
   height:32px;
+
   display:flex;
   align-items:center;
   justify-content:center;
+
   border-radius:10px;
-  transition: transform .2s ease, background .2s ease;
   cursor:pointer;
+
+  transition: transform .15s ease, background-color .2s ease;
 }
 
-.logo img{ width:20px; }
+/* imagen controlada correctamente */
+.logo img{
+  width:18px;
+  height:18px;
+  object-fit:contain;
+  display:block;
+  pointer-events:none; /* 🔥 evita bugs al hacer click */
+}
 
+/* hover limpio */
 .logo:hover{
-  background:var(--sb-hover);
+  background-color:var(--sb-hover);
   transform:scale(1.05);
+}
+
+/* evitar “salto” al hacer click */
+.logo:active{
+  transform:scale(0.98);
 }
 
 /* TOGGLE */

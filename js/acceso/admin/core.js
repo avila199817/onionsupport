@@ -525,7 +525,7 @@ Onion.render = async function(){
    
      Onion.state.rendering = false;
    
-   }
+   };
 
 /* =========================
    INIT

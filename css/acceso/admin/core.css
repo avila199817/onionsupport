@@ -377,6 +377,15 @@ body{
   gap:0;
 }
 
+.sidebar.collapsed .user-info{
+  display:none;
+}
+
+.sidebar.collapsed .user:hover{
+  background:var(--sb-hover);
+  transform:translateX(4px);
+}
+
 .avatar{
   width:28px;
   height:28px;
@@ -386,6 +395,13 @@ body{
   align-items:center;
   justify-content:center;
   color:var(--avatar-text);
+  flex-shrink:0;
+}
+
+.sidebar.collapsed .avatar{
+  width:20px;
+  height:20px;
+  font-size:10px;
 }
 
 
@@ -425,4 +441,8 @@ body{
 
 .dropdown-item:hover{
   background:var(--sb-hover);
+}
+
+.sidebar.collapsed .sidebar-footer{
+  padding:10px;
 }

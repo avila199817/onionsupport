@@ -324,12 +324,18 @@ Onion.go = function(path){
     return;
   }
 
-  Onion.cache.html = {}; // 🔥 limpiar cache
+  // 🔥 cerrar search global si está abierto
+  Onion.events.emit("nav:search:close");
+
+  // 🔥 limpiar cache SPA
+  Onion.cache.html = {};
 
   const clean = path.startsWith("/") ? path : "/" + path;
   const url = "/@" + Onion.state.slug + clean;
 
   window.history.pushState({}, "", url);
+
+  // 🔥 navegación interna
   window.dispatchEvent(new Event("onion:navigate"));
 
 };

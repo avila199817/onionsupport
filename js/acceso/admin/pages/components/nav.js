@@ -16,7 +16,7 @@ if(!window.Onion) return;
    INIT
 ===================================================== */
 
-window.addEventListener("onion:nav-ready", init, { once:true });
+Onion.events.on("nav:ready", init);
 
 
 function init(){

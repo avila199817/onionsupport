@@ -28,7 +28,7 @@ const overlay = document.getElementById("searchOverlay");
 const input   = document.getElementById("globalSearch");
 const clear   = document.getElementById("searchClear");
 
-if(!btn || !overlay || !input) return;
+if(!overlay || !input) return;
 
 
 /* =====================================================
@@ -101,7 +101,7 @@ return text.substring(0,i)
 
 
 /* =====================================================
-   LOAD INDEX
+   LOAD INDEX (API NUEVA)
 ===================================================== */
 
 async function loadIndex(){
@@ -112,17 +112,9 @@ loading = true;
 
 try{
 
-const cached = window.cache?.get?.("search_index");
+const data = await Onion.fetch(Onion.config.API + "/search");
 
-if(cached){
-index = cached;
-loaded = true;
-return;
-}
-
-const data = await Onion.fetch(Onion.config.API + "/admin/search/index");
-
-const results = data?.results || [];
+const results = data?.results || data || [];
 
 index = results.map(i=>({
 
@@ -132,8 +124,6 @@ s: normalize(i.subtitle),
 k: (i.keywords||[]).map(normalize)
 
 }));
-
-window.cache?.set?.("search_index", index);
 
 loaded = true;
 
@@ -225,7 +215,7 @@ header.textContent = type;
 
 container.appendChild(header);
 
-groups[type].slice(0,6).forEach((r,i)=>{
+groups[type].slice(0,6).forEach((r)=>{
 
 const el = document.createElement("a");
 el.className = "search-result";
@@ -239,7 +229,11 @@ el.innerHTML = `
 </div>
 `;
 
-el.addEventListener("click", close);
+el.addEventListener("click",(e)=>{
+e.preventDefault();
+close();
+Onion.go(r.url);
+});
 
 container.appendChild(el);
 
@@ -324,10 +318,18 @@ clear && (clear.style.display="none");
 
 
 /* =====================================================
+   EVENT BUS (🔥 CLAVE)
+===================================================== */
+
+Onion.events.on("nav:search:open", open);
+Onion.events.on("nav:search:close", close);
+
+
+/* =====================================================
    EVENTS
 ===================================================== */
 
-btn.addEventListener("click",(e)=>{
+btn?.addEventListener("click",(e)=>{
 e.stopPropagation();
 overlay.classList.contains("open") ? close() : open();
 });
@@ -368,7 +370,7 @@ document.addEventListener("keydown",(e)=>{
 
 if((e.ctrlKey||e.metaKey) && e.key==="k"){
 e.preventDefault();
-open();
+Onion.events.emit("nav:search:open");
 }
 
 if(e.key==="Escape"){
@@ -411,7 +413,7 @@ items[activeIndex].scrollIntoView({ block:"nearest" });
 
 
 /* =====================================================
-   PRELOAD (UX PRO)
+   PRELOAD
 ===================================================== */
 
 setTimeout(loadIndex, 1200);

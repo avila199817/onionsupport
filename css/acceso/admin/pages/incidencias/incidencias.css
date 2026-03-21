@@ -1,5 +1,5 @@
 /* =========================
-   INCIDENCIAS (FINAL PRO ALIGNED)
+   INCIDENCIAS (CLON HOME)
 ========================= */
 
 .incidencias{
@@ -13,16 +13,16 @@
 
 
 /* =========================
-   HEADER (ALINEADO REAL)
+   HEADER (MISMO HOME)
 ========================= */
 
 .incidencias .dashboard-header{
   display:flex;
   align-items:center;
-  justify-content:space-between;
 
   height:var(--topbar-height);
   margin-bottom:40px;
+  padding-top:15px;
 }
 
 .incidencias .dashboard-header .header-left{
@@ -31,9 +31,16 @@
   justify-content:center;
 }
 
+.incidencias .header-actions{
+  margin-left:auto;
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
 
 /* =========================
-   TITULO
+   TITULO (MISMO HOME)
 ========================= */
 
 .incidencias .page-title{
@@ -55,14 +62,8 @@
 
 
 /* =========================
-   HEADER ACTIONS
+   BOTONES
 ========================= */
-
-.incidencias .header-actions{
-  display:flex;
-  align-items:center;
-  gap:10px;
-}
 
 .incidencias .btn{
   border:none;
@@ -84,7 +85,7 @@
 
 
 /* =========================
-   GRID CARDS (IGUAL HOME)
+   GRID CARDS (CLON HOME)
 ========================= */
 
 .incidencias .grid-cards{
@@ -95,7 +96,7 @@
 
 
 /* =========================
-   CARDS (MISMO SISTEMA)
+   CARDS (CLON EXACTO)
 ========================= */
 
 .incidencias .card{
@@ -129,45 +130,21 @@
   color:var(--text);
 }
 
-
-/* =========================
-   FILTROS (INTEGRADO)
-========================= */
-
-.incidencias .filters{
-  margin-top:30px;
-}
-
-.incidencias .filters-row{
+.incidencias .card-meta{
   display:flex;
-  gap:10px;
-  flex-wrap:wrap;
+  gap:8px;
+  align-items:center;
+  margin-top:10px;
 }
 
-.incidencias .filters input,
-.incidencias .filters select{
-  background:var(--card-bg);
-  border:1px solid var(--card-border);
-  color:var(--text);
-
-  padding:10px 12px;
-  border-radius:10px;
-  outline:none;
-  font-size:14px;
-}
-
-.incidencias .filters input{
-  flex:1;
-  min-width:200px;
-}
-
-.incidencias .filters select{
-  min-width:150px;
+.incidencias .card-extra{
+  font-size:12px;
+  color:var(--dim);
 }
 
 
 /* =========================
-   GRID PRINCIPAL (CLAVE)
+   GRID PRINCIPAL (CLON)
 ========================= */
 
 .incidencias .dashboard-grid{
@@ -180,7 +157,7 @@
 
 
 /* =========================
-   BLOCKS (MISMO QUE HOME)
+   BLOCKS (CLON HOME)
 ========================= */
 
 .incidencias .panel-block{
@@ -201,12 +178,47 @@
 
 
 /* =========================
+   FILTROS (INTEGRADOS LIMPIO)
+========================= */
+
+.incidencias .filters-row{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+
+  margin-top:10px;
+}
+
+.incidencias .filters-row input,
+.incidencias .filters-row select{
+  background:var(--card-bg);
+  border:1px solid var(--card-border);
+  color:var(--text);
+
+  padding:10px 12px;
+  border-radius:10px;
+  outline:none;
+  font-size:14px;
+}
+
+.incidencias .filters-row input{
+  flex:1;
+  min-width:200px;
+}
+
+.incidencias .filters-row select{
+  min-width:150px;
+}
+
+
+/* =========================
    TABLE
 ========================= */
 
 .incidencias .table-container{
   width:100%;
   overflow-x:auto;
+  margin-top:10px;
 }
 
 .incidencias .incidencias-table{
@@ -235,7 +247,7 @@
 
 
 /* =========================
-   STATUS BADGE
+   BADGES
 ========================= */
 
 .incidencias .badge{
@@ -302,6 +314,59 @@
 
 
 /* =========================
+   SUMMARY (CLON HOME)
+========================= */
+
+.incidencias .summary-grid{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+
+  gap:12px;
+  margin-top:10px;
+}
+
+.incidencias .summary-item{
+  background:var(--card-bg);
+  border:1px solid var(--card-border);
+
+  padding:14px;
+  border-radius:14px;
+
+  text-align:center;
+}
+
+.incidencias .summary-value{
+  font-size:20px;
+  font-weight:600;
+  color:var(--text);
+}
+
+.incidencias .summary-label{
+  font-size:12px;
+  color:var(--dim);
+}
+
+
+/* =========================
+   ALERTS (CLON HOME)
+========================= */
+
+.incidencias .alert-list{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+
+  margin-top:10px;
+}
+
+.incidencias .alert-item{
+  padding:12px;
+  border-radius:12px;
+  font-size:13px;
+}
+
+
+/* =========================
    RESPONSIVE (CLON HOME)
 ========================= */
 
@@ -330,7 +395,8 @@
   }
 
   .incidencias .dashboard-grid,
-  .incidencias .grid-cards{
+  .incidencias .grid-cards,
+  .incidencias .summary-grid{
     grid-template-columns:1fr;
   }
 
@@ -338,8 +404,8 @@
     flex-direction:column;
   }
 
-  .incidencias .filters input,
-  .incidencias .filters select{
+  .incidencias .filters-row input,
+  .incidencias .filters-row select{
     width:100%;
   }
 

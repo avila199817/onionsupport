@@ -2,21 +2,19 @@
 
 "use strict";
 
-console.log("✅ Facturas JS cargado");
+console.log("✅ Facturas FULL PRO cargado");
 
 
 /* =========================
-   HELPERS ROOT
+   ROOT / DOM
 ========================= */
 
 function getRoot(){
   return document.querySelector(".panel-content.facturas");
 }
 
-function getTable(){
-  const root = getRoot();
-  if(!root) return null;
-  return root.querySelector("#facturas-body");
+function $(selector){
+  return getRoot()?.querySelector(selector);
 }
 
 
@@ -40,47 +38,40 @@ init();
 
 
 /* =========================
-   LOAD FACTURAS
+   LOAD
 ========================= */
 
 async function loadFacturas(){
 
-  const tbody = getTable();
+  const tbody = $("#facturas-body");
   if(!tbody) return;
+
+  setLoading();
 
   try{
 
-    tbody.innerHTML = `
-      <tr class="table-loading">
-        <td colspan="5">Cargando facturas...</td>
-      </tr>
-    `;
-
     const res = await Onion.fetch(Onion.config.API + "/facturas");
 
-    const facturas = res.facturas || res || [];
+    if(!res || !res.ok){
+      throw new Error("Respuesta inválida");
+    }
+
+    const facturas = res.facturas || [];
+    const resumen = res.resumen || {};
 
     if(!facturas.length){
-      tbody.innerHTML = `
-        <tr>
-          <td colspan="5">No hay facturas</td>
-        </tr>
-      `;
+      setEmpty();
+      updateKPIs([], resumen);
       return;
     }
 
-    renderFacturas(facturas);
-    renderStats(facturas);
+    render(facturas);
+    updateKPIs(facturas, resumen);
 
   }catch(e){
 
-    console.error("💥 FACTURAS ERROR:", e);
-
-    tbody.innerHTML = `
-      <tr>
-        <td colspan="5">Error cargando facturas</td>
-      </tr>
-    `;
+    console.error("💥 ERROR FACTURAS:", e);
+    setError();
 
   }
 
@@ -88,28 +79,57 @@ async function loadFacturas(){
 
 
 /* =========================
-   RENDER TABLE
+   STATES
 ========================= */
 
-function renderFacturas(facturas){
+function setLoading(){
+  $("#facturas-body").innerHTML = `
+    <tr class="table-loading">
+      <td colspan="5">Cargando facturas...</td>
+    </tr>
+  `;
+}
 
-  const tbody = getTable();
+function setEmpty(){
+  $("#facturas-body").innerHTML = `
+    <tr>
+      <td colspan="5">No hay facturas</td>
+    </tr>
+  `;
+}
+
+function setError(){
+  $("#facturas-body").innerHTML = `
+    <tr>
+      <td colspan="5">Error cargando facturas</td>
+    </tr>
+  `;
+}
+
+
+/* =========================
+   RENDER
+========================= */
+
+function render(items){
+
+  const tbody = $("#facturas-body");
   if(!tbody) return;
 
-  tbody.innerHTML = facturas.map(f => {
+  tbody.innerHTML = items.map(f => {
 
-    const estado = getEstado(f);
+    const estado = getEstado(f.estadoPago);
 
     return `
       <tr>
 
-        <td>#${f.id || f.facturaId || "--"}</td>
+        <td>#${f.numero || f.id}</td>
 
-        <td>${f.cliente || f.clienteNombre || "Cliente"}</td>
+        <td>${escapeHTML(f.cliente || "-")}</td>
 
-        <td>${formatFecha(f.fecha || f.createdAt)}</td>
+        <td>${formatFecha(f.fecha)}</td>
 
-        <td>${formatImporte(f.total || f.importe)}</td>
+        <td>${formatMoney(f.total)}</td>
 
         <td>
           <span class="badge ${estado.class}">
@@ -126,38 +146,26 @@ function renderFacturas(facturas){
 
 
 /* =========================
-   STATS
+   KPIs (USANDO BACKEND)
 ========================= */
 
-function renderStats(facturas){
+function updateKPIs(items, resumen){
 
-  const root = getRoot();
-  if(!root) return;
+  const totalPagado = resumen.totalPagado || 0;
+  const totalPendiente = resumen.totalPendiente || 0;
+  const totalFacturado = totalPagado + totalPendiente;
 
-  const totalEl = root.querySelector("#facturas-total");
-  const pendientesEl = root.querySelector("#facturas-pendientes");
-  const pagadasEl = root.querySelector("#facturas-pagadas");
+  const pagadas = items.filter(f => f.estadoPago === "pagada").length;
+  const pendientes = items.filter(f => f.estadoPago !== "pagada").length;
 
-  let total = 0;
-  let pendientes = 0;
-  let pagadas = 0;
+  $("#facturas-total") &&
+    ($("#facturas-total").textContent = formatMoney(totalFacturado));
 
-  facturas.forEach(f => {
+  $("#facturas-pagadas") &&
+    ($("#facturas-pagadas").textContent = pagadas);
 
-    const importe = Number(f.total || f.importe || 0);
-    total += importe;
-
-    if(isPagada(f)){
-      pagadas++;
-    }else{
-      pendientes++;
-    }
-
-  });
-
-  if(totalEl) totalEl.textContent = formatImporte(total);
-  if(pendientesEl) pendientesEl.textContent = pendientes;
-  if(pagadasEl) pagadasEl.textContent = pagadas;
+  $("#facturas-pendientes") &&
+    ($("#facturas-pendientes").textContent = pendientes);
 
 }
 
@@ -166,34 +174,35 @@ function renderStats(facturas){
    HELPERS
 ========================= */
 
-function isPagada(f){
-  return f.estado === "pagada" || f.pagada === true;
-}
+function getEstado(estado){
 
-function getEstado(f){
+  const e = (estado || "").toLowerCase();
 
-  if(isPagada(f)){
-    return { label: "Pagada", class: "pagada" };
+  if(e === "pagada"){
+    return { label:"Pagada", class:"pagada" };
   }
 
-  return { label: "Pendiente", class: "pendiente" };
+  if(e === "pendiente"){
+    return { label:"Pendiente", class:"pendiente" };
+  }
 
+  return { label:"Borrador", class:"borrador" };
 }
 
-function formatFecha(date){
-
-  if(!date) return "--";
-
-  const d = new Date(date);
-  return d.toLocaleDateString("es-ES");
-
+function formatFecha(f){
+  if(!f) return "--";
+  return new Date(f).toLocaleDateString("es-ES");
 }
 
-function formatImporte(n){
+function formatMoney(n){
+  return Number(n || 0).toLocaleString("es-ES") + " €";
+}
 
-  const num = Number(n || 0);
-  return num.toFixed(2) + "€";
-
+function escapeHTML(str){
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 })();

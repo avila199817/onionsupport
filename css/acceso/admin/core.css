@@ -365,6 +365,18 @@ body{
 
 .user:hover{ background:var(--sb-hover); }
 
+.sidebar.collapsed .user{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  width:100%;
+  padding:11px 12px;
+  border-radius:10px;
+
+  gap:0;
+}
+
 .avatar{
   width:28px;
   height:28px;

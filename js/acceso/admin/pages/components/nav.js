@@ -2,15 +2,7 @@
 
 "use strict";
 
-/* =====================================================
-   SINGLETON
-===================================================== */
-
-if(window.__onionNavSearchLoaded) return;
-window.__onionNavSearchLoaded = true;
-
 if(!window.Onion) return;
-
 
 /* =====================================================
    INIT
@@ -18,19 +10,18 @@ if(!window.Onion) return;
 
 Onion.events.on("nav:ready", init);
 
-let initialized = false;
-
 function init(){
-
-/* ================= DOM ================= */
 
 const input     = document.getElementById("topbar-search");
 const container = document.getElementById("topbar-search-results");
 
 if(!input || !container) return;
-if(initialized) return;
-initialized = true;
 
+/* 🔥 EVITAR DUPLICADOS (CLAVE) */
+if(input.dataset.searchBound === "true") return;
+input.dataset.searchBound = "true";
+
+console.log("🔥 SEARCH INIT OK");
 
 /* =====================================================
    STATE
@@ -38,7 +29,6 @@ initialized = true;
 
 let timer;
 let activeIndex = -1;
-
 
 /* =====================================================
    UTILS
@@ -57,22 +47,6 @@ return text.substring(0,i)
 
 }
 
-
-/* =====================================================
-   ICONS
-===================================================== */
-
-const icons = {
-cliente:"🏢",
-user:"👤",
-factura:"🧾",
-incidencia:"🎫",
-nav:"📂",
-action:"🛠️",
-settings:"⚙️"
-};
-
-
 /* =====================================================
    SHOW / HIDE
 ===================================================== */
@@ -86,7 +60,6 @@ container.classList.remove("active");
 container.innerHTML = "";
 activeIndex = -1;
 }
-
 
 /* =====================================================
    RENDER
@@ -110,7 +83,7 @@ el.className = "search-result";
 el.href = r.url || "#";
 
 el.innerHTML = `
-<span class="search-icon">${icons[r.type] || "🔎"}</span>
+<span class="search-icon">🔎</span>
 <div class="search-text">
   <div class="search-title">${highlight(r.title || "", query)}</div>
   ${r.subtitle ? `<div class="search-subtitle">${highlight(r.subtitle, query)}</div>`:""}
@@ -130,34 +103,23 @@ container.appendChild(el);
 show();
 }
 
-
 /* =====================================================
-   SEARCH (SIN SILENCIOS 💥)
+   SEARCH
 ===================================================== */
 
 async function search(q){
 
 const url = Onion.config.API + "/search?q=" + encodeURIComponent(q);
 
-console.log("🔎 SEARCH URL:", url);
-
 try{
-
 const data = await Onion.fetch(url);
-
-console.log("✅ SEARCH DATA:", data);
-
 return data?.results || [];
-
 }catch(err){
-
-console.error("💥 SEARCH ERROR REAL:", err);
-throw err; // 👈 CLAVE: no ocultar errores
-
+console.error("SEARCH ERROR:", err);
+return [];
 }
 
 }
-
 
 /* =====================================================
    EVENTS
@@ -175,34 +137,21 @@ return;
 }
 
 timer = setTimeout(async ()=>{
-
-try{
 const results = await search(v);
 render(results, v);
-}catch(e){
-console.error("❌ INPUT SEARCH FAIL:", e);
-hide();
-}
-
 }, 150);
 
 });
-
 
 input.addEventListener("focus", async ()=>{
 
 const v = input.value.trim();
 if(!v) return;
 
-try{
 const results = await search(v);
 render(results, v);
-}catch(e){
-console.error("❌ FOCUS SEARCH FAIL:", e);
-}
 
 });
-
 
 document.addEventListener("click",(e)=>{
 if(!e.target.closest(".topbar-search-wrap")){
@@ -210,54 +159,8 @@ hide();
 }
 });
 
-
 /* =====================================================
-   KEYBOARD NAV
-===================================================== */
-
-document.addEventListener("keydown",(e)=>{
-
-const items = container.querySelectorAll(".search-result");
-
-if(!items.length) return;
-
-if(e.key==="ArrowDown"){
-e.preventDefault();
-activeIndex = Math.min(activeIndex+1, items.length-1);
-updateActive(items);
-}
-
-if(e.key==="ArrowUp"){
-e.preventDefault();
-activeIndex = Math.max(activeIndex-1, 0);
-updateActive(items);
-}
-
-if(e.key==="Enter" && activeIndex>=0){
-items[activeIndex]?.click();
-}
-
-if(e.key==="Escape"){
-hide();
-}
-
-});
-
-
-function updateActive(items){
-
-items.forEach(el=>el.classList.remove("active"));
-
-if(items[activeIndex]){
-items[activeIndex].classList.add("active");
-items[activeIndex].scrollIntoView({ block:"nearest" });
-}
-
-}
-
-
-/* =====================================================
-   🔥 LISTEN CLOSE EVENT (ANTES FALTABA)
+   CLOSE EVENT
 ===================================================== */
 
 Onion.events.on("nav:search:close", hide);

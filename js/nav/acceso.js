@@ -22,6 +22,13 @@ let passwordFocused = false;
 
 if (capsIcon) capsIcon.style.display = "none";
 
+/* =========================
+   API CONFIG 🔥
+========================= */
+
+const API = window.location.origin.includes("localhost")
+  ? "http://localhost:8080"
+  : "https://api.onionit.net";
 
 /* =========================
    AUTOFOCUS USERNAME
@@ -30,7 +37,6 @@ if (capsIcon) capsIcon.style.display = "none";
 if (usernameInput) {
   usernameInput.focus();
 }
-
 
 /* =========================
    SLUGIFY USER
@@ -43,7 +49,6 @@ function slugify(name){
     .replace(/\s+/g,"-")
     .toLowerCase();
 }
-
 
 /* =========================
    LOGO FADE
@@ -72,7 +77,6 @@ if (logos.length > 1){
       });
 
       return;
-
     }
 
     current.style.opacity = "0";
@@ -83,7 +87,6 @@ if (logos.length > 1){
   },3000);
 
 }
-
 
 /* =========================
    SHAKE LOGIN
@@ -98,7 +101,6 @@ function shakeLogin(){
   card.classList.add("shake");
 
 }
-
 
 /* =========================
    PASSWORD TOGGLE
@@ -124,7 +126,6 @@ if (toggleBtn && passwordInput){
   });
 
 }
-
 
 /* =========================
    CAPS LOCK
@@ -172,7 +173,6 @@ if(passwordInput){
 
 }
 
-
 /* =========================
    ERROR HELPERS
 ========================= */
@@ -201,7 +201,6 @@ function hideError(){
 
 }
 
-
 /* =========================
    LOGIN SUBMIT (JWT 🔥)
 ========================= */
@@ -226,7 +225,7 @@ form.addEventListener("submit", async (e)=>{
   try{
 
     const res = await fetch(
-      "https://api.onionit.net/api/auth/login",
+      `${API}/api/auth/login`,
       {
         method:"POST",
         headers:{
@@ -249,24 +248,12 @@ form.addEventListener("submit", async (e)=>{
 
     const user = json.user || {};
 
-    const slug = slugify(
+    const slug = user.slug || slugify(
       user.username || user.name || identifier
     );
 
     /* =========================
-       🔥 GUARDAR TOKEN
-    ========================== */
-
-    if(json.token){
-      localStorage.setItem("onion_token", json.token);
-    }
-
-    localStorage.setItem("onion_user_slug", slug);
-    localStorage.setItem("onion_user_name", user.name || "");
-    localStorage.setItem("onion_role", user.role || "user");
-
-    /* =========================
-       2FA
+       2FA PRIMERO 🔥
     ========================== */
 
     if(json.requires2FA && json.tempToken){
@@ -279,6 +266,18 @@ form.addEventListener("submit", async (e)=>{
       window.location.href = "/es/acceso/2fa/";
       return;
     }
+
+    /* =========================
+       TOKEN NORMAL
+    ========================== */
+
+    if(json.token){
+      localStorage.setItem("onion_token", json.token);
+    }
+
+    localStorage.setItem("onion_user_slug", slug);
+    localStorage.setItem("onion_user_name", user.name || "");
+    localStorage.setItem("onion_role", user.role || "user");
 
     /* =========================
        LOGIN OK

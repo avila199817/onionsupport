@@ -2,21 +2,19 @@
 
 "use strict";
 
-console.log("✅ Incidencias JS cargado");
+console.log("✅ Incidencias PRO cargado");
 
 
 /* =========================
-   HELPERS
+   ROOT / DOM
 ========================= */
 
 function getRoot(){
   return document.querySelector(".panel-content.incidencias");
 }
 
-function getTable(){
-  const root = getRoot();
-  if(!root) return null;
-  return root.querySelector("#incidencias-body");
+function $(selector){
+  return getRoot()?.querySelector(selector);
 }
 
 
@@ -45,44 +43,79 @@ init();
 
 async function loadIncidencias(){
 
-  const tbody = getTable();
+  const tbody = $("#incidencias-body");
   if(!tbody) return;
+
+  setLoading();
 
   try{
 
-    tbody.innerHTML = `
-      <tr class="table-loading">
-        <td colspan="7">Cargando incidencias...</td>
-      </tr>
-    `;
-
     const res = await Onion.fetch(Onion.config.API + "/tickets");
 
-    const items = res.tickets || res || [];
+    const items = normalize(res);
 
     if(!items.length){
-      tbody.innerHTML = `
-        <tr>
-          <td colspan="7">No hay incidencias</td>
-        </tr>
-      `;
+      setEmpty();
+      updateKPIs([]);
       return;
     }
 
     render(items);
+    updateKPIs(items);
 
   }catch(e){
 
-    console.error("💥 INCIDENCIAS ERROR:", e);
-
-    tbody.innerHTML = `
-      <tr>
-        <td colspan="7">Error cargando incidencias</td>
-      </tr>
-    `;
+    console.error("💥 ERROR INCIDENCIAS:", e);
+    setError();
 
   }
 
+}
+
+
+/* =========================
+   NORMALIZE
+========================= */
+
+function normalize(res){
+
+  if(!res) return [];
+
+  if(Array.isArray(res)) return res;
+
+  if(res.tickets) return res.tickets;
+
+  return [];
+
+}
+
+
+/* =========================
+   STATES
+========================= */
+
+function setLoading(){
+  $("#incidencias-body").innerHTML = `
+    <tr class="table-loading">
+      <td colspan="7">Cargando incidencias...</td>
+    </tr>
+  `;
+}
+
+function setEmpty(){
+  $("#incidencias-body").innerHTML = `
+    <tr>
+      <td colspan="7">No hay incidencias</td>
+    </tr>
+  `;
+}
+
+function setError(){
+  $("#incidencias-body").innerHTML = `
+    <tr>
+      <td colspan="7">Error cargando incidencias</td>
+    </tr>
+  `;
 }
 
 
@@ -92,40 +125,39 @@ async function loadIncidencias(){
 
 function render(items){
 
-  const tbody = getTable();
+  const tbody = $("#incidencias-body");
   if(!tbody) return;
 
   tbody.innerHTML = items.map(i => {
 
-    const estado = getEstado(i);
-    const prioridad = getPrioridad(i);
+    const data = mapItem(i);
 
     return `
-      <tr>
+      <tr data-id="${data.id}">
 
-        <td>#${i.id || i.ticketId || "--"}</td>
+        <td>#${data.id}</td>
 
-        <td>${i.titulo || i.title || "Sin título"}</td>
+        <td>${escapeHTML(data.title)}</td>
 
-        <td>${i.cliente || i.clienteNombre || "-"}</td>
+        <td>${escapeHTML(data.cliente)}</td>
 
         <td>
-          <span class="badge ${estado.class}">
-            ${estado.label}
+          <span class="badge ${data.estado.class}">
+            ${data.estado.label}
           </span>
         </td>
 
         <td>
-          <span class="badge ${prioridad.class}">
-            ${prioridad.label}
+          <span class="badge ${data.prioridad.class}">
+            ${data.prioridad.label}
           </span>
         </td>
 
-        <td>${formatFecha(i.createdAt)}</td>
+        <td>${data.fecha}</td>
 
         <td>
           <div class="table-actions">
-            <button class="action-btn">👁</button>
+            <button class="action-btn view-btn">👁</button>
           </div>
         </td>
 
@@ -134,6 +166,104 @@ function render(items){
 
   }).join("");
 
+  bindEvents(items);
+
+}
+
+
+/* =========================
+   MAP DATA
+========================= */
+
+function mapItem(i){
+
+  const id = i.id || i.ticketId || "--";
+
+  return {
+    id,
+    title: i.titulo || i.title || "Sin título",
+    cliente: i.cliente || i.clienteNombre || "-",
+    estado: getEstado(i),
+    prioridad: getPrioridad(i),
+    fecha: formatFecha(i.createdAt),
+    raw: i
+  };
+
+}
+
+
+/* =========================
+   EVENTS
+========================= */
+
+function bindEvents(items){
+
+  document.querySelectorAll(".view-btn").forEach((btn, index) => {
+
+    btn.addEventListener("click", () => {
+      showDetalle(items[index]);
+    });
+
+  });
+
+}
+
+
+/* =========================
+   DETALLE
+========================= */
+
+function showDetalle(item){
+
+  const box = $("#detalle-incidencia");
+  if(!box) return;
+
+  box.style.display = "block";
+
+  $("#detalle-titulo").textContent = item.titulo || item.title || "--";
+  $("#detalle-desc").textContent = item.descripcion || item.desc || "--";
+
+  const estado = getEstado(item);
+  const prioridad = getPrioridad(item);
+
+  $("#detalle-estado").textContent = "Estado: " + estado.label;
+  $("#detalle-prioridad").textContent = "Prioridad: " + prioridad.label;
+  $("#detalle-fecha").textContent = "Fecha: " + formatFecha(item.createdAt);
+
+}
+
+
+/* =========================
+   KPIs
+========================= */
+
+function updateKPIs(items){
+
+  const open = items.filter(i => i.status === "open").length;
+  const progress = items.filter(i => i.status === "in_progress").length;
+  const closed = items.filter(i => i.status === "closed").length;
+
+  $("#inc-open") && ($("#inc-open").textContent = open);
+  $("#inc-progress") && ($("#inc-progress").textContent = progress);
+  $("#inc-closed") && ($("#inc-closed").textContent = closed);
+
+  $("#inc-time") && ($("#inc-time").textContent = calcAvgTime(items));
+
+}
+
+function calcAvgTime(items){
+
+  const closed = items.filter(i => i.closedAt && i.createdAt);
+
+  if(!closed.length) return "--";
+
+  const avg = closed.reduce((acc, i) => {
+    return acc + (new Date(i.closedAt) - new Date(i.createdAt));
+  }, 0) / closed.length;
+
+  const hours = Math.round(avg / (1000 * 60 * 60));
+
+  return hours + "h";
 }
 
 
@@ -164,6 +294,13 @@ function getPrioridad(i){
 function formatFecha(f){
   if(!f) return "--";
   return new Date(f).toLocaleDateString("es-ES");
+}
+
+function escapeHTML(str){
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 })();

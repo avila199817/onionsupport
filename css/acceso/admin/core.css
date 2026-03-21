@@ -647,3 +647,169 @@ body{
   pointer-events:none;
   display:block;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* =========================
+   SEARCH DROPDOWN
+========================= */
+
+.topbar-search-results{
+  position:absolute;
+  top:calc(100% + 8px);
+  left:0;
+  width:100%;
+
+  background:var(--panel-bg);
+  border:1px solid var(--panel-border);
+  border-radius:14px;
+
+  box-shadow:var(--panel-shadow);
+
+  max-height:320px;
+  overflow-y:auto;
+
+  opacity:0;
+  transform:translateY(6px) scale(.98);
+  pointer-events:none;
+
+  transition:
+    opacity .18s ease,
+    transform .18s cubic-bezier(.22,1,.36,1);
+
+  z-index:20;
+}
+
+/* OPEN STATE */
+.topbar-search-results.active{
+  opacity:1;
+  transform:translateY(0) scale(1);
+  pointer-events:auto;
+}
+
+
+/* =========================
+   ITEM
+========================= */
+
+.topbar-search-results .item{
+  display:flex;
+  align-items:center;
+  gap:10px;
+
+  padding:10px 12px;
+
+  font-size:13.5px;
+  color:var(--text);
+
+  cursor:pointer;
+
+  border-radius:10px;
+
+  transition:
+    background .15s ease,
+    transform .15s ease;
+}
+
+/* hover fino */
+.topbar-search-results .item:hover{
+  background:var(--sb-hover);
+  transform:translateX(4px);
+}
+
+/* active (teclado) */
+.topbar-search-results .item.active{
+  background:var(--sb-active);
+}
+
+
+/* =========================
+   TEXT BLOCK
+========================= */
+
+.topbar-search-results .item-text{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  line-height:1.2;
+}
+
+.topbar-search-results .item-title{
+  font-weight:600;
+  font-size:13.5px;
+  color:var(--text);
+}
+
+.topbar-search-results .item-sub{
+  font-size:12px;
+  color:var(--dim);
+}
+
+
+/* =========================
+   ICON
+========================= */
+
+.topbar-search-results .item-icon{
+  width:18px;
+  height:18px;
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  font-size:14px;
+
+  opacity:.8;
+}
+
+
+/* =========================
+   EMPTY STATE
+========================= */
+
+.topbar-search-results .empty{
+  padding:14px;
+  font-size:13px;
+  color:var(--dim);
+  text-align:center;
+}
+
+
+/* =========================
+   SCROLL INSIDE DROPDOWN
+========================= */
+
+.topbar-search-results::-webkit-scrollbar{
+  width:6px;
+}
+
+.topbar-search-results::-webkit-scrollbar-thumb{
+  background:var(--scrollbar-thumb);
+  border-radius:6px;
+}
+
+
+/* =========================
+   FOCUS STATE (pro)
+========================= */
+
+.topbar-search-wrap:focus-within .topbar-search{
+  border-color:var(--info);
+  background:var(--panel-bg);
+  box-shadow:0 0 0 2px rgba(96,165,250,0.12);
+}

@@ -443,6 +443,10 @@ body{
   background:var(--sb-hover);
 }
 
+.sidebar-footer{
+  margin-top:auto;
+}
+
 .sidebar.collapsed .sidebar-footer{
   padding:10px;
 }

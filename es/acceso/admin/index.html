@@ -420,10 +420,6 @@ window.renderSidebar = function(){
 
   if(!nameEl || !avatarEl) return;
 
-  /* =========================
-     NAME
-  ========================= */
-
   const name =
     user.name ||
     user.username ||
@@ -431,10 +427,6 @@ window.renderSidebar = function(){
     "Usuario";
 
   nameEl.textContent = name;
-
-  /* =========================
-     AVATAR
-  ========================= */
 
   avatarEl.innerHTML = "";
 
@@ -467,6 +459,30 @@ window.renderSidebar = function(){
   console.log("✅ SIDEBAR OK");
 };
 
+
+/* =========================
+   RENDER TOPBAR (GLOBAL)
+========================= */
+
+window.renderTopbar = function(){
+
+  const Onion = window.Onion;
+  const route = Onion?.router?.get?.();
+
+  const titleEl = document.getElementById("topbar-title");
+  if(!titleEl) return;
+
+  const titles = {
+    "/": "Panel",
+    "/incidencias": "Incidencias",
+    "/facturas": "Facturas",
+    "/cuenta": "Cuenta"
+  };
+
+  titleEl.textContent = titles[route] || "Panel";
+
+  console.log("✅ TOPBAR OK");
+};
 
 /* =========================
    ACTIVE LINK

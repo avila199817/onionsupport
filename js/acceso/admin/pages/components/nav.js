@@ -22,18 +22,17 @@ let initialized = false;
 
 function init(){
 
-  /* ================= DOM ================= */
+   
+/* ================= DOM ================= */
 
-  const btn     = document.getElementById("navSearchBtn");
-  const overlay = document.getElementById("searchOverlay");
-  const input   = document.getElementById("globalSearch");
-  const clear   = document.getElementById("searchClear");
+const input     = document.getElementById("topbar-search");
+const container = document.getElementById("topbar-search-results");
 
-  if(!overlay || !input) return;
+if(!input || !container) return;
 
-  if(initialized) return;
-  initialized = true;
-
+if(initialized) return;
+initialized = true;
+   
 
 /* =====================================================
    RESET

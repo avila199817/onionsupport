@@ -36,9 +36,6 @@ initialized = true;
    STATE
 ===================================================== */
 
-let index = [];
-let loaded = false;
-let loading = false;
 let timer;
 let activeIndex = -1;
 
@@ -47,65 +44,16 @@ let activeIndex = -1;
    UTILS
 ===================================================== */
 
-const normalize = v =>
-String(v || "")
-.toLowerCase()
-.normalize("NFD")
-.replace(/[\u0300-\u036f]/g,"");
-
-
-function fuzzy(text,q){
-let t=0,qc=0;
-while(t<text.length && qc<q.length){
-if(text[t]===q[qc]) qc++;
-t++;
-}
-return qc===q.length;
-}
-
 function highlight(text,q){
+
 if(!q) return text;
+
 const i = text.toLowerCase().indexOf(q.toLowerCase());
 if(i === -1) return text;
+
 return text.substring(0,i)
 + "<mark>" + text.substring(i,i+q.length) + "</mark>"
 + text.substring(i+q.length);
-}
-
-
-/* =====================================================
-   LOAD INDEX (🔥 FIX CLAVE AQUÍ)
-===================================================== */
-
-async function loadIndex(){
-
-if(loaded || loading) return;
-
-loading = true;
-
-try{
-
-const data = await Onion.fetch(Onion.config.API + "/search");
-
-// 🔥 FIX DEFINITIVO
-const results = Array.isArray(data)
-  ? data
-  : (data?.results || []);
-
-index = results.map(i=>({
-...i,
-t: normalize(i.title),
-s: normalize(i.subtitle),
-k: (i.keywords || []).map(normalize)
-}));
-
-loaded = true;
-
-}catch(err){
-console.error("SEARCH LOAD ERROR:", err);
-}finally{
-loading = false;
-}
 
 }
 
@@ -184,43 +132,25 @@ show();
 
 
 /* =====================================================
-   SEARCH
+   SEARCH (🔥 CLAVE)
 ===================================================== */
 
-function run(q){
+async function search(q){
 
-q = normalize(q.trim());
+try{
 
-if(!q){
-hide();
-return;
+const data = await Onion.fetch(
+  Onion.config.API + "/search?q=" + encodeURIComponent(q)
+);
+
+return data?.results || [];
+
+}catch(err){
+
+console.error("SEARCH ERROR:", err);
+return [];
+
 }
-
-const results = index
-
-.map(i=>{
-
-let score = 0;
-
-// 🔥 MATCH REAL
-if(i.t.includes(q)) score += 10;
-else if(fuzzy(i.t,q)) score += 6;
-
-if(i.s?.includes(q)) score += 4;
-if(i.k?.some(k=>k.includes(q))) score += 8;
-
-// 🔥 DESCARTA basura real
-if(score === 0) return null;
-
-return {i,score};
-
-})
-
-.filter(Boolean)
-.sort((a,b)=>b.score-a.score)
-.map(r=>r.i);
-
-render(results, q);
 
 }
 
@@ -231,7 +161,8 @@ render(results, q);
 
 input.addEventListener("input",()=>{
 
-const v = input.value;
+const v = input.value.trim();
+
 clearTimeout(timer);
 
 if(!v){
@@ -240,17 +171,25 @@ return;
 }
 
 timer = setTimeout(async ()=>{
-await loadIndex();
-run(v);
-}, 120);
+
+const results = await search(v);
+render(results, v);
+
+}, 150);
 
 });
 
-input.addEventListener("focus", ()=>{
-if(input.value){
-run(input.value);
-}
+
+input.addEventListener("focus", async ()=>{
+
+const v = input.value.trim();
+if(!v) return;
+
+const results = await search(v);
+render(results, v);
+
 });
+
 
 document.addEventListener("click",(e)=>{
 if(!e.target.closest(".topbar-search-wrap")){
@@ -302,13 +241,6 @@ items[activeIndex].scrollIntoView({ block:"nearest" });
 }
 
 }
-
-
-/* =====================================================
-   PRELOAD
-===================================================== */
-
-setTimeout(loadIndex, 800);
 
 }
 

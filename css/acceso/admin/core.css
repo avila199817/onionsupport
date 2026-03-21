@@ -219,8 +219,8 @@ body{
 
 /* imagen controlada correctamente */
 .logo img{
-  width:18px;
-  height:18px;
+  width:22px;
+  height:22px;
   object-fit:contain;
   display:block;
   pointer-events:none; /* 🔥 evita bugs al hacer click */

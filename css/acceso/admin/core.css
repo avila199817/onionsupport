@@ -470,3 +470,187 @@ body{
 .sidebar.collapsed .sidebar-footer{
   padding:10px;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* =========================
+   TOPBAR
+========================= */
+
+.topbar{
+  position:fixed;
+  top:0;
+  left:var(--sidebar-width);
+  right:0;
+  height:var(--topbar-height);
+
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+
+  padding:0 var(--space-lg);
+
+  background:var(--panel-bg);
+  border-bottom:1px solid var(--panel-border);
+
+  z-index:5;
+
+  transition: left .35s cubic-bezier(.22,1,.36,1);
+}
+
+/* cuando sidebar colapsado */
+.sidebar.collapsed ~ .main-content .topbar{
+  left:var(--sidebar-collapsed);
+}
+
+
+/* =========================
+   LEFT
+========================= */
+
+.topbar-left{
+  display:flex;
+  align-items:center;
+}
+
+.topbar-title{
+  font-size:16px;
+  font-weight:600;
+  color:var(--text);
+}
+
+
+/* =========================
+   CENTER (SEARCH)
+========================= */
+
+.topbar-center{
+  flex:1;
+  display:flex;
+  justify-content:center;
+}
+
+.topbar-search{
+  width:100%;
+  max-width:420px;
+
+  background:var(--card-bg);
+  border:1px solid var(--card-border);
+
+  color:var(--text);
+
+  padding:10px 14px;
+  border-radius:10px;
+
+  font-size:14px;
+
+  outline:none;
+
+  transition:.2s;
+}
+
+.topbar-search::placeholder{
+  color:var(--dim);
+}
+
+.topbar-search:focus{
+  border-color:var(--info);
+  background:var(--panel-bg);
+}
+
+
+/* =========================
+   RIGHT
+========================= */
+
+.topbar-right{
+  display:flex;
+  align-items:center;
+  gap:var(--space-md);
+}
+
+.topbar-avatar{
+  width:34px;
+  height:34px;
+  border-radius:50%;
+
+  background:var(--avatar-bg);
+  color:var(--avatar-text);
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  font-size:12px;
+  font-weight:600;
+
+  overflow:hidden;
+  cursor:pointer;
+
+  transition: transform .15s ease;
+}
+
+.topbar-avatar:hover{
+  transform:scale(1.05);
+}
+
+.topbar-avatar img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+}

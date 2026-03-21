@@ -324,6 +324,10 @@ body{
   padding:var(--space-sm);
 }
 
+.sidebar.collapsed .sidebar-section{
+  display:none;
+}
+
 .section-title{
   font-size:11px;
   color:var(--dim);

@@ -595,3 +595,5 @@ Onion.render = async function(){
       ========================= */
       
       Onion.init();
+   
+   })();

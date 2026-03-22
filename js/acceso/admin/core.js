@@ -263,23 +263,118 @@ Onion.fetchHTML = async function(url, useCache = true){
    
 
 /* =========================
-   UI
+   UI (PRO)
 ========================= */
 
 Onion.ui = {};
 
+/* =========================
+   OVERLAY LOADING (SUAVE)
+========================= */
+
 Onion.ui.loading = function(){
-  const app = document.getElementById("app-content");
-  if(app) app.innerHTML = "<div style='padding:20px'>Cargando...</div>";
+
+  let overlay = document.getElementById("onion-overlay");
+
+  // 🔥 ya existe → no duplicar
+  if(overlay) return;
+
+  overlay = document.createElement("div");
+  overlay.id = "onion-overlay";
+
+  overlay.style.position = "fixed";
+  overlay.style.top = "0";
+  overlay.style.left = "0";
+  overlay.style.width = "100%";
+  overlay.style.height = "100%";
+  overlay.style.background = "rgba(255,255,255,0.35)";
+  overlay.style.backdropFilter = "blur(4px)";
+  overlay.style.zIndex = "9999";
+  overlay.style.opacity = "0";
+  overlay.style.transition = "opacity 0.2s ease";
+
+  document.body.appendChild(overlay);
+
+  // 🔥 forzar repaint + fade in
+  requestAnimationFrame(()=>{
+    overlay.style.opacity = "1";
+  });
+
 };
 
+/* =========================
+   HIDE OVERLAY
+========================= */
+
+Onion.ui.hideOverlay = function(){
+
+  const overlay = document.getElementById("onion-overlay");
+
+  if(!overlay) return;
+
+  overlay.style.opacity = "0";
+
+  setTimeout(()=>{
+    if(overlay.parentNode){
+      overlay.remove();
+    }
+  }, 200);
+
+};
+
+/* =========================
+   FADE CONTENT (TRANSICIÓN)
+========================= */
+
+Onion.ui.swapContent = function(newContent){
+
+  const app = document.getElementById("app-content");
+  if(!app) return;
+
+  // 🔥 preparar transición
+  app.style.transition = "opacity 0.15s ease";
+  app.style.opacity = "0";
+
+  setTimeout(()=>{
+
+    app.innerHTML = "";
+
+    try{
+      app.appendChild(newContent);
+    }catch(e){
+      console.error("💥 swapContent error:", e);
+      app.innerHTML = "<div style='padding:20px'>Error renderizando contenido</div>";
+    }
+
+    // 🔥 fade in
+    requestAnimationFrame(()=>{
+      app.style.opacity = "1";
+    });
+
+  }, 150);
+
+};
+
+/* =========================
+   HIDE INITIAL LOADER
+========================= */
+
 Onion.ui.hideLoader = function(){
+
   const el = document.getElementById("app-loader");
+
   if(el){
     el.classList.add("hide");
-    setTimeout(()=>el.remove(),300);
+
+    setTimeout(()=>{
+      if(el.parentNode){
+        el.remove();
+      }
+    }, 300);
   }
+
   document.body.classList.remove("loading");
+
 };
 
 
@@ -502,8 +597,7 @@ Onion.render = async function(){
     }
 
     // 🔥 pintar
-    app.innerHTML = "";
-    app.appendChild(content);
+    Onion.ui.swapContent(content);
 
     // 🔥 cargar script sin romper UI
     const script = Onion.scripts[route];

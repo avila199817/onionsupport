@@ -21,8 +21,8 @@
 
     "/": {
       page: "/es/acceso/admin/pages/index.html",
-      style: "/css/acceso/admin/pages/home.css",
-      script: "/js/acceso/admin/pages/home.js"
+      style: "/css/acceso/admin/pages/dashboard.css",
+      script: "/js/acceso/admin/pages/dashboard.js"
     },
 
     "/incidencias": {

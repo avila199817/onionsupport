@@ -385,66 +385,116 @@ document.addEventListener("click",(e)=>{
 
 
 /* =========================
-   RENDER
+   RENDER (PRO)
 ========================= */
 
 Onion.render = async function(){
 
-  if(Onion.state.rendering){
-    console.warn("Render en curso ignorado");
-    return;
+  const renderId = ++Onion.state.renderId;
+
+  // 🔥 cancelar render anterior si sigue vivo
+  if(Onion.state.abortController){
+    Onion.state.abortController.abort();
   }
 
   Onion.state.rendering = true;
-  const renderId = ++Onion.state.renderId;
 
   try{
 
     const app = document.getElementById("app-content");
-    if(!app) return;
+    if(!app){
+      console.warn("No #app-content");
+      return;
+    }
 
     Onion.ui.loading();
 
     const route = Onion.router.get();
     const url = Onion.router.resolve();
 
+    // 🔥 cargar CSS (no bloqueante duro)
     const style = Onion.styles[route];
-    if(style) await Onion.loadStyle(style);
+    if(style){
+      try{
+        await Onion.loadStyle(style);
+      }catch(e){
+        console.error("💥 STYLE ERROR:", e);
+      }
+    }
 
-    const html = await Onion.fetchHTML(url, route !== "/");
-    if(!html) return;
+    // 🔥 fetch HTML
+    let html;
+    try{
+      html = await Onion.fetchHTML(url, route !== "/");
+    }catch(e){
+      throw new Error("Error cargando HTML: " + e.message);
+    }
 
-    if(renderId !== Onion.state.renderId) return;
+    if(!html){
+      throw new Error("HTML vacío");
+    }
+
+    // 🔥 evitar race condition
+    if(renderId !== Onion.state.renderId){
+      console.warn("Render obsoleto ignorado");
+      return;
+    }
 
     const container = document.createElement("div");
     container.innerHTML = html;
 
-    const content = container.querySelector(".panel-content");
+    // 🔥 fallback si falta .panel-content
+    let content = container.querySelector(".panel-content");
 
     if(!content){
-      throw new Error("Missing .panel-content in HTML");
+      console.warn("⚠️ .panel-content no encontrado, usando fallback");
+      content = container;
     }
 
+    // 🔥 pintar
     app.innerHTML = "";
     app.appendChild(content);
 
+    // 🔥 cargar script sin romper UI
     const script = Onion.scripts[route];
     if(script){
-      await Onion.loadScript(script);
-    }
-     
-    Onion.events.emit("nav:ready");
-
-    if(typeof window.renderSidebar === "function"){
-      window.renderSidebar();
+      try{
+        await Onion.loadScript(script);
+      }catch(err){
+        console.error("💥 SCRIPT ERROR:", err);
+      }
     }
 
-    if(typeof window.updateSidebarActive === "function"){
-      window.updateSidebarActive();
+    // 🔥 evento ready
+    try{
+      Onion.events.emit("nav:ready");
+    }catch(e){
+      console.error("nav:ready error", e);
     }
 
-    if(typeof window.renderTopbar === "function"){
-      window.renderTopbar();
+    // 🔥 UI global protegida
+    try{
+      if(typeof window.renderSidebar === "function"){
+        window.renderSidebar();
+      }
+    }catch(e){
+      console.error("Sidebar error", e);
+    }
+
+    try{
+      if(typeof window.updateSidebarActive === "function"){
+        window.updateSidebarActive();
+      }
+    }catch(e){
+      console.error("Sidebar active error", e);
+    }
+
+    try{
+      if(typeof window.renderTopbar === "function"){
+        window.renderTopbar();
+      }
+    }catch(e){
+      console.error("Topbar error", e);
     }
 
   }catch(e){
@@ -452,19 +502,24 @@ Onion.render = async function(){
     console.error("💥 RENDER ERROR:", e);
 
     const app = document.getElementById("app-content");
+
     if(app){
-      app.innerHTML = `<div style="padding:20px">
-        <h2>Error cargando página</h2>
-        <p>${e.message}</p>
-      </div>`;
+      app.innerHTML = `
+        <div style="padding:20px">
+          <h2>Error cargando página</h2>
+          <p>${e.message}</p>
+          <button onclick="Onion.render()">Reintentar</button>
+        </div>
+      `;
     }
 
   } finally {
+
     Onion.state.rendering = false;
+
   }
 
 };
-
 
 /* =========================
    INIT

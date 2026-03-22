@@ -2,6 +2,12 @@
 
 "use strict";
 
+/* =========================
+   GLOBAL
+========================= */
+
+const Onion = window.Onion;
+
 console.log("✅ Incidencias PRO cargado");
 
 
@@ -14,7 +20,9 @@ function getRoot(){
 }
 
 function $(selector){
-  return getRoot()?.querySelector(selector);
+  const root = getRoot();
+  if(!root) return null;
+  return root.querySelector(selector);
 }
 
 
@@ -23,8 +31,6 @@ function $(selector){
 ========================= */
 
 function init(){
-
-  const Onion = window.Onion;
 
   if(!Onion || !Onion.state?.user){
     return setTimeout(init, 100);
@@ -95,7 +101,10 @@ function normalize(res){
 ========================= */
 
 function setLoading(){
-  $("#incidencias-body").innerHTML = `
+  const el = $("#incidencias-body");
+  if(!el) return;
+
+  el.innerHTML = `
     <tr class="table-loading">
       <td colspan="7">Cargando incidencias...</td>
     </tr>
@@ -103,7 +112,10 @@ function setLoading(){
 }
 
 function setEmpty(){
-  $("#incidencias-body").innerHTML = `
+  const el = $("#incidencias-body");
+  if(!el) return;
+
+  el.innerHTML = `
     <tr>
       <td colspan="7">No hay incidencias</td>
     </tr>
@@ -111,7 +123,10 @@ function setEmpty(){
 }
 
 function setError(){
-  $("#incidencias-body").innerHTML = `
+  const el = $("#incidencias-body");
+  if(!el) return;
+
+  el.innerHTML = `
     <tr>
       <td colspan="7">Error cargando incidencias</td>
     </tr>
@@ -220,15 +235,21 @@ function showDetalle(item){
 
   box.style.display = "block";
 
-  $("#detalle-titulo").textContent = item.titulo || item.title || "--";
-  $("#detalle-desc").textContent = item.descripcion || item.desc || "--";
+  const titulo = $("#detalle-titulo");
+  const desc = $("#detalle-desc");
+  const estadoEl = $("#detalle-estado");
+  const prioridadEl = $("#detalle-prioridad");
+  const fechaEl = $("#detalle-fecha");
+
+  if(titulo) titulo.textContent = item.titulo || item.title || "--";
+  if(desc) desc.textContent = item.descripcion || item.desc || "--";
 
   const estado = getEstado(item);
   const prioridad = getPrioridad(item);
 
-  $("#detalle-estado").textContent = "Estado: " + estado.label;
-  $("#detalle-prioridad").textContent = "Prioridad: " + prioridad.label;
-  $("#detalle-fecha").textContent = "Fecha: " + formatFecha(item.createdAt);
+  if(estadoEl) estadoEl.textContent = "Estado: " + estado.label;
+  if(prioridadEl) prioridadEl.textContent = "Prioridad: " + prioridad.label;
+  if(fechaEl) fechaEl.textContent = "Fecha: " + formatFecha(item.createdAt);
 
 }
 
@@ -243,11 +264,11 @@ function updateKPIs(items){
   const progress = items.filter(i => i.status === "in_progress").length;
   const closed = items.filter(i => i.status === "closed").length;
 
-  $("#inc-open") && ($("#inc-open").textContent = open);
-  $("#inc-progress") && ($("#inc-progress").textContent = progress);
-  $("#inc-closed") && ($("#inc-closed").textContent = closed);
+  if($("#inc-open")) $("#inc-open").textContent = open;
+  if($("#inc-progress")) $("#inc-progress").textContent = progress;
+  if($("#inc-closed")) $("#inc-closed").textContent = closed;
 
-  $("#inc-time") && ($("#inc-time").textContent = calcAvgTime(items));
+  if($("#inc-time")) $("#inc-time").textContent = calcAvgTime(items);
 
 }
 

@@ -206,40 +206,88 @@ Onion.events = {
    
 
 /* =========================
-   LOAD SCRIPT
+   LOAD SCRIPT (PRO)
 ========================= */
 
 Onion.loadScript = function(src){
 
   return new Promise((resolve, reject)=>{
 
-    let finalSrc;
-
-    if(src.startsWith("/")){
-      finalSrc = window.location.origin + src;
-    }else if(src.startsWith("http")){
-      finalSrc = src;
-    }else{
-      finalSrc = window.location.origin + "/" + src.replace(/^\/+/,"");
+    if(!src){
+      Onion.warn("loadScript sin src");
+      return resolve();
     }
 
-    const old = document.querySelector(`script[data-onion-page]`);
-    if(old) old.remove();
+    let finalSrc;
+
+    try{
+
+      if(src.startsWith("/")){
+        finalSrc = window.location.origin + src;
+      }else if(src.startsWith("http")){
+        finalSrc = src;
+      }else{
+        finalSrc = window.location.origin + "/" + src.replace(/^\/+/,"");
+      }
+
+    }catch(e){
+      Onion.error("URL parse error:", src);
+      return reject(e);
+    }
+
+    // 🔥 evitar recargar mismo script
+    if(Onion.state.currentScript === finalSrc){
+      Onion.log("⚡ Script ya cargado:", finalSrc);
+      return resolve();
+    }
+
+    // 🔥 eliminar script anterior
+    const old = document.querySelector("script[data-onion-page]");
+    if(old){
+      try{
+        old.remove();
+      }catch(e){
+        Onion.warn("Error eliminando script anterior");
+      }
+    }
 
     const s = document.createElement("script");
+
     s.src = finalSrc + "?v=" + Date.now();
     s.defer = true;
-
     s.async = false;
+
     s.setAttribute("data-onion-page","true");
 
+    // 🔥 timeout protección
+    const timeout = setTimeout(()=>{
+      Onion.error("⏱️ Script timeout:", finalSrc);
+      s.remove();
+      reject(new Error("SCRIPT_TIMEOUT"));
+    }, Onion.config.TIMEOUT);
+
     s.onload = ()=>{
+
+      clearTimeout(timeout);
+
       Onion.state.currentScript = finalSrc;
+
+      Onion.log("✅ Script cargado:", finalSrc);
+
       resolve();
+
     };
 
     s.onerror = ()=>{
-      reject(new Error("Script load fail: " + finalSrc));
+
+      clearTimeout(timeout);
+
+      Onion.error("💥 Script load fail:", finalSrc);
+
+      s.remove();
+
+      reject(new Error("SCRIPT_LOAD_FAIL"));
+
     };
 
     document.body.appendChild(s);
@@ -249,29 +297,91 @@ Onion.loadScript = function(src){
 };
 
 
-/* =========================
-   LOAD STYLE
+
+
+
+
+
+
+   /* =========================
+   LOAD STYLE (PRO)
 ========================= */
 
 Onion.loadStyle = function(href){
 
   return new Promise((resolve)=>{
 
-    if(Onion.state.currentStyle === href){
+    if(!href){
+      Onion.warn("loadStyle sin href");
       return resolve();
     }
 
-    const old = document.querySelector("link[data-onion-style]");
-    if(old) old.remove();
+    // 🔥 evitar recargar mismo estilo
+    if(Onion.state.currentStyle === href){
+      Onion.log("⚡ Style ya cargado:", href);
+      return resolve();
+    }
+
+    let finalHref;
+
+    try{
+
+      if(href.startsWith("/")){
+        finalHref = window.location.origin + href;
+      }else if(href.startsWith("http")){
+        finalHref = href;
+      }else{
+        finalHref = window.location.origin + "/" + href.replace(/^\/+/,"");
+      }
+
+    }catch(e){
+      Onion.error("Style URL error:", href);
+      return resolve(); // no romper render
+    }
 
     const link = document.createElement("link");
     link.rel = "stylesheet";
-    link.href = href + "?v=" + Date.now();
+    link.href = finalHref + "?v=" + Date.now();
     link.setAttribute("data-onion-style","true");
 
+    // 🔥 timeout protección
+    const timeout = setTimeout(()=>{
+      Onion.warn("⏱️ Style timeout:", finalHref);
+      resolve(); // no romper app
+    }, Onion.config.TIMEOUT);
+
     link.onload = ()=>{
+
+      clearTimeout(timeout);
+
+      // 🔥 eliminar estilo anterior SOLO cuando el nuevo está listo
+      const old = document.querySelector("link[data-onion-style]");
+      if(old && old !== link){
+        try{
+          old.remove();
+        }catch(e){
+          Onion.warn("Error eliminando style anterior");
+        }
+      }
+
       Onion.state.currentStyle = href;
+
+      Onion.log("🎨 Style cargado:", href);
+
       resolve();
+
+    };
+
+    link.onerror = ()=>{
+
+      clearTimeout(timeout);
+
+      Onion.error("💥 Style load fail:", finalHref);
+
+      link.remove();
+
+      resolve(); // 🔥 no romper render por CSS
+
     };
 
     document.head.appendChild(link);
@@ -281,20 +391,93 @@ Onion.loadStyle = function(href){
 };
 
 
-/* =========================
-   AUTH
+
+
+   /* =========================
+   AUTH (PRO)
 ========================= */
 
-function getToken(){
-  const t = localStorage.getItem("onion_token");
-  if(!t) throw new Error("NO_TOKEN");
-  return t;
-}
+Onion.auth = {};
 
-function redirectLogin(){
-  window.location.href = "/es/acceso/";
-}
+/* =========================
+   GET TOKEN
+========================= */
 
+Onion.auth.getToken = function(){
+
+  try{
+
+    const token = localStorage.getItem("onion_token");
+
+    if(!token){
+      throw new Error("NO_TOKEN");
+    }
+
+    return token;
+
+  }catch(e){
+
+    Onion.warn("Token no disponible");
+
+    throw e;
+
+  }
+
+};
+
+
+/* =========================
+   SET TOKEN
+========================= */
+
+Onion.auth.setToken = function(token){
+
+  if(!token){
+    Onion.warn("Intento de guardar token vacío");
+    return;
+  }
+
+  localStorage.setItem("onion_token", token);
+
+  Onion.log("🔐 Token guardado");
+
+};
+
+
+/* =========================
+   CLEAR TOKEN
+========================= */
+
+Onion.auth.clearToken = function(){
+
+  localStorage.removeItem("onion_token");
+
+  Onion.log("🧹 Token eliminado");
+
+};
+
+
+/* =========================
+   REDIRECT LOGIN
+========================= */
+
+Onion.auth.redirectLogin = function(){
+
+  Onion.warn("🔐 Redirigiendo a login");
+
+  window.location.replace("/es/acceso/");
+
+};
+
+
+
+
+
+
+
+
+
+   
 
 /* =========================
    FETCH JSON

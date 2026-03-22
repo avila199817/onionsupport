@@ -20,27 +20,27 @@
   Onion.routes = {
 
     "/": {
-      page: "/es/acceso/admin/pages/index.html",
+      page: "/pages/index.html",
       style: "/css/acceso/admin/pages/dashboard.css",
       script: "/js/acceso/admin/pages/dashboard.js"
     },
 
     "/incidencias": {
-      page: "/es/acceso/admin/pages/incidencias/index.html",
-      style: "/css/acceso/admin/pages/incidencias/incidencias.css",
-      script: "/js/acceso/admin/pages/incidencias/incidencias.js"
+      page: "/pages/incidencias/index.html",
+      style: "/css/pages/incidencias/incidencias.css",
+      script: "/js/pages/incidencias/incidencias.js"
     },
 
     "/facturas": {
-      page: "/es/acceso/admin/pages/facturas/index.html",
-      style: "/css/acceso/admin/pages/facturas/facturas.css",
-      script: "/js/acceso/admin/pages/facturas/facturas.js"
+      page: "/pages/facturas/index.html",
+      style: "/css/pages/facturas/facturas.css",
+      script: "/js/pages/facturas/facturas.js"
     },
 
     "/cuenta": {
-      page: "/es/acceso/admin/pages/cuenta/index.html",
-      style: "/css/acceso/admin/pages/cuenta/cuenta.css",
-      script: "/js/acceso/admin/pages/cuenta/cuenta.js"
+      page: "/pages/cuenta/index.html",
+      style: "/css/pages/cuenta/cuenta.css",
+      script: "/js/pages/cuenta/cuenta.js"
     }
 
   };

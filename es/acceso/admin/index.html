@@ -806,12 +806,6 @@ function init(){
    SPA HOOKS
 ========================= */
 
-window.Onion?.events?.on("nav:ready", () => {
-  renderTopbar();
-  updateSidebarActive();
-  initSearch();
-});
-
 // 🔥 CUANDO LLEGA EL USER
 window.Onion?.events?.on("user:changed", () => {
   renderSidebar();

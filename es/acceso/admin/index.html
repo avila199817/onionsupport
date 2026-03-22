@@ -377,37 +377,12 @@ body.loading {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
   
-<!-- CORE JS -->
+
+
+
+<!-- CORE JS (SIEMPRE PRIMERO) -->
 <script src="/js/acceso/admin/core.js" defer></script>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -423,28 +398,34 @@ body.loading {
 "use strict";
 
 /* =========================
-   INIT GUARD
+   INIT GUARD (ANTI-DUPLICADOS)
 ========================= */
 
-if(window.__sidebarInit) return;
-window.__sidebarInit = true;
+if (window.__appInit) return;
+window.__appInit = true;
 
 
 /* =========================
-   RENDER SIDEBAR (GLOBAL)
+   HELPERS
 ========================= */
 
-window.renderSidebar = function(){
+const $ = (sel, ctx = document) => ctx.querySelector(sel);
+const $$ = (sel, ctx = document) => ctx.querySelectorAll(sel);
 
-  const Onion = window.Onion;
-  const user = Onion?.state?.user;
 
-  if(!user) return;
+/* =========================
+   SIDEBAR RENDER
+========================= */
 
-  const nameEl = document.getElementById("sidebar-name");
-  const avatarEl = document.getElementById("sidebar-avatar");
+function renderSidebar(){
 
-  if(!nameEl || !avatarEl) return;
+  const user = window.Onion?.state?.user;
+  if (!user) return;
+
+  const nameEl = $("#sidebar-name");
+  const avatarEl = $("#sidebar-avatar");
+
+  if (!nameEl || !avatarEl) return;
 
   const name =
     user.name ||
@@ -456,20 +437,22 @@ window.renderSidebar = function(){
 
   avatarEl.innerHTML = "";
 
-  if(user.avatar){
+  if (user.avatar){
 
     const img = document.createElement("img");
     img.src = user.avatar;
     img.alt = "avatar";
 
-    img.style.width = "100%";
-    img.style.height = "100%";
-    img.style.borderRadius = "50%";
-    img.style.objectFit = "cover";
+    Object.assign(img.style, {
+      width: "100%",
+      height: "100%",
+      borderRadius: "50%",
+      objectFit: "cover"
+    });
 
     avatarEl.appendChild(img);
 
-  }else{
+  } else {
 
     const initials = name
       .split(" ")
@@ -483,20 +466,19 @@ window.renderSidebar = function(){
   }
 
   console.log("✅ SIDEBAR OK");
-};
+}
 
 
 /* =========================
-   RENDER TOPBAR (GLOBAL)
+   TOPBAR RENDER
 ========================= */
 
-window.renderTopbar = function(){
+function renderTopbar(){
 
-  const Onion = window.Onion;
-  const route = Onion?.router?.get?.();
+  const route = window.Onion?.router?.get?.();
+  const titleEl = $("#topbar-title");
 
-  const titleEl = document.getElementById("topbar-title");
-  if(!titleEl) return;
+  if (!titleEl) return;
 
   const titles = {
     "/": "Onion Support",
@@ -508,147 +490,108 @@ window.renderTopbar = function(){
   titleEl.textContent = titles[route] || "Panel";
 
   console.log("✅ TOPBAR OK");
-};
+}
 
 
 /* =========================
-   ACTIVE LINK
+   SIDEBAR ACTIVE LINK
 ========================= */
 
-window.updateSidebarActive = function(){
+function updateSidebarActive(){
 
-  const links = document.querySelectorAll(".sidebar a[data-link]");
   const route = window.Onion?.router?.get?.();
 
-  links.forEach(a => {
+  $$(".sidebar a[data-link]").forEach(a => {
     const href = a.getAttribute("href");
-
-    if(href === route){
-      a.classList.add("active");
-    }else{
-      a.classList.remove("active");
-    }
-  });
-
-};
-
-
-/* =========================
-   DOM READY
-========================= */
-
-document.addEventListener("DOMContentLoaded", () => {
-
-  const userToggle = document.getElementById("userToggle");
-  const dropdown = document.getElementById("userDropdown");
-  const logoutBtn = document.getElementById("logoutBtn");
-
-  const toggleSidebar = document.getElementById("toggleSidebar");
-  const sidebar = document.querySelector(".sidebar");
-
-  const menuItems = document.querySelectorAll(".menu-item");
-
-
-  /* =========================
-     TOOLTIP TOGGLE BUTTON
-  ========================= */
-
-  const updateToggleTooltip = () => {
-    if(!toggleSidebar || !sidebar) return;
-
-    const isCollapsed = sidebar.classList.contains("collapsed");
-
-    toggleSidebar.setAttribute(
-      "data-tooltip",
-      isCollapsed ? "Abrir barra lateral" : "Cerrar barra lateral"
-    );
-  };
-
-
-  /* =========================
-     TOOLTIP MENU AUTO
-  ========================= */
-
-  const initMenuTooltips = () => {
-    menuItems.forEach(item => {
-      const textEl = item.querySelector("span:last-child");
-
-      if(textEl){
-        const text = textEl.textContent.trim();
-        item.setAttribute("data-tooltip", text);
-      }
-    });
-  };
-
-
-  /* =========================
-     SIDEBAR INIT STATE
-  ========================= */
-
-  if(sidebar){
-    const saved = localStorage.getItem("sidebar-collapsed");
-
-    if(saved === "true"){
-      sidebar.classList.add("collapsed");
-    }
-  }
-
-  updateToggleTooltip();
-  initMenuTooltips();
-
-
-/* =========================
-   SIDEBAR TOGGLE
-========================= */
-
-if(toggleSidebar && sidebar){
-
-  toggleSidebar.addEventListener("click", ()=>{
-
-    const isCollapsed = sidebar.classList.contains("collapsed");
-
-    if(dropdown){
-      dropdown.classList.remove("active");
-    }
-
-    sidebar.classList.toggle("collapsed");
-    localStorage.setItem("sidebar-collapsed", !isCollapsed);
-    updateToggleTooltip();
-
+    a.classList.toggle("active", href === route);
   });
 
 }
 
 
 /* =========================
-   DROPDOWN + AVATAR
+   SIDEBAR TOGGLE + TOOLTIP
 ========================= */
 
-if(userToggle && dropdown && sidebar){
+function initSidebar(){
 
-  userToggle.addEventListener("click", (e)=>{
+  const sidebar = $(".sidebar");
+  const toggleBtn = $("#toggleSidebar");
+
+  if (!sidebar) return;
+
+  const updateTooltip = () => {
+    if (!toggleBtn) return;
+
+    const collapsed = sidebar.classList.contains("collapsed");
+
+    toggleBtn.setAttribute(
+      "data-tooltip",
+      collapsed ? "Abrir barra lateral" : "Cerrar barra lateral"
+    );
+  };
+
+  // estado guardado
+  const saved = localStorage.getItem("sidebar-collapsed");
+  if (saved === "true"){
+    sidebar.classList.add("collapsed");
+  }
+
+  updateTooltip();
+
+  if (toggleBtn){
+
+    toggleBtn.addEventListener("click", () => {
+
+      const collapsed = sidebar.classList.contains("collapsed");
+
+      sidebar.classList.toggle("collapsed");
+      localStorage.setItem("sidebar-collapsed", !collapsed);
+
+      updateTooltip();
+
+      // cerrar dropdown si existe
+      $("#userDropdown")?.classList.remove("active");
+
+    });
+
+  }
+
+}
+
+
+/* =========================
+   DROPDOWN USUARIO
+========================= */
+
+function initUserDropdown(){
+
+  const toggle = $("#userToggle");
+  const dropdown = $("#userDropdown");
+  const sidebar = $(".sidebar");
+
+  if (!toggle || !dropdown || !sidebar) return;
+
+  toggle.addEventListener("click", (e)=>{
+
     e.stopPropagation();
 
-    const isCollapsed = sidebar.classList.contains("collapsed");
+    const collapsed = sidebar.classList.contains("collapsed");
 
-    if(isCollapsed){
+    if (collapsed){
+
       sidebar.classList.remove("collapsed");
       localStorage.setItem("sidebar-collapsed", false);
-      updateToggleTooltip();
 
-      setTimeout(()=>{
-        dropdown.classList.add("active");
-      }, 180);
+      setTimeout(()=> dropdown.classList.add("active"), 180);
 
-      return;
+    } else {
+      dropdown.classList.toggle("active");
     }
 
-    dropdown.classList.toggle("active");
   });
 
-  dropdown.addEventListener("click", (e)=>{
-    e.stopPropagation();
-  });
+  dropdown.addEventListener("click", e => e.stopPropagation());
 
   document.addEventListener("click", ()=>{
     dropdown.classList.remove("active");
@@ -661,11 +604,17 @@ if(userToggle && dropdown && sidebar){
    LOGOUT
 ========================= */
 
-if(logoutBtn){
-  logoutBtn.addEventListener("click", async (e)=>{
+function initLogout(){
+
+  const btn = $("#logoutBtn");
+  if (!btn) return;
+
+  btn.addEventListener("click", async (e)=>{
+
     e.preventDefault();
 
-    try{
+    try {
+
       localStorage.removeItem("onion_token");
       sessionStorage.clear();
 
@@ -680,82 +629,75 @@ if(logoutBtn){
           method: "POST",
           credentials: "include"
         });
-      }catch(err){}
+      } catch {}
 
     } finally {
       window.location.replace("/login");
     }
 
   });
+
 }
 
 
 /* =========================
-   🔎 GLOBAL SEARCH (SPA READY)
+   🔎 SEARCH (SPA READY)
 ========================= */
 
-function initTopbarSearch(){
+function initSearch(){
 
-  const input = document.getElementById("topbar-search");
-  const container = document.getElementById("topbar-search-results");
+  const input = $("#topbar-search");
+  const container = $("#topbar-search-results");
 
-  if(!input || !container) return;
+  if (!input || !container) return;
+  if (input.__init) return;
 
-  if(input.__searchInitialized) return;
-  input.__searchInitialized = true;
-
-  console.log("🔥 SEARCH INIT OK");
+  input.__init = true;
 
   let timer;
   let activeIndex = -1;
 
-  function show(){
-    container.classList.add("active");
-  }
-
-  function hide(){
+  const show = () => container.classList.add("active");
+  const hide = () => {
     container.classList.remove("active");
     container.innerHTML = "";
     activeIndex = -1;
-  }
+  };
 
-  function highlight(text,q){
-    if(!q) return text;
-
+  const highlight = (text, q) => {
+    if (!q) return text;
     const i = text.toLowerCase().indexOf(q.toLowerCase());
-    if(i === -1) return text;
+    if (i === -1) return text;
 
-    return text.substring(0,i)
-      + "<mark>" + text.substring(i,i+q.length) + "</mark>"
-      + text.substring(i+q.length);
-  }
+    return text.slice(0,i) +
+      "<mark>" + text.slice(i,i+q.length) + "</mark>" +
+      text.slice(i+q.length);
+  };
 
-  function render(results, query=""){
+  const render = (results, q="") => {
 
     container.innerHTML = "";
-    activeIndex = -1;
 
-    if(!results.length){
+    if (!results.length){
       container.innerHTML = '<div class="search-empty">Sin resultados</div>';
-      show();
-      return;
+      return show();
     }
 
-    results.slice(0,20).forEach((r)=>{
+    results.slice(0,20).forEach(r => {
 
       const el = document.createElement("div");
       el.className = "search-result";
 
       el.innerHTML = `
         <div class="search-text">
-          <div class="search-title">${highlight(r.title || "", query)}</div>
-          ${r.subtitle ? `<div class="search-subtitle">${highlight(r.subtitle, query)}</div>`:""}
+          <div class="search-title">${highlight(r.title || "", q)}</div>
+          ${r.subtitle ? `<div class="search-subtitle">${highlight(r.subtitle, q)}</div>` : ""}
         </div>
       `;
 
       el.addEventListener("click", ()=>{
         hide();
-        if(r.url) Onion.go(r.url);
+        if (r.url) window.Onion.go(r.url);
       });
 
       container.appendChild(el);
@@ -763,124 +705,115 @@ function initTopbarSearch(){
     });
 
     show();
-  }
 
-  async function search(q){
+  };
 
-    const url = Onion.config.API + "/search?q=" + encodeURIComponent(q);
-
-    console.log("🔎 SEARCH:", url);
+  const search = async (q) => {
 
     try{
-      const data = await Onion.fetch(url);
+      const url = window.Onion.config.API + "/search?q=" + encodeURIComponent(q);
+      const data = await window.Onion.fetch(url);
       return data?.results || [];
     }catch(e){
-      console.error("💥 SEARCH ERROR:", e);
+      console.error("SEARCH ERROR", e);
       return [];
     }
 
-  }
+  };
 
-/* =========================
-   INPUT EVENTS
-========================= */
+  input.addEventListener("input", ()=>{
 
-input.addEventListener("input", ()=>{
+    const v = input.value.trim();
+    clearTimeout(timer);
 
-  const v = input.value.trim();
+    if (!v) return hide();
 
-  clearTimeout(timer);
-
-  if(!v){
-    hide();
-    return;
-  }
-
-  timer = setTimeout(async ()=>{
-    const results = await search(v);
-    render(results, v);
-  }, 200);
-
-});
-
-
-input.addEventListener("focus", async ()=>{
-
-  const v = input.value.trim();
-  if(!v) return;
-
-  const results = await search(v);
-  render(results, v);
-
-});
-
-
-/* =========================
-   GLOBAL CLICK (SAFE)
-========================= */
-
-if(!window.__searchClickBound){
-
-  window.__searchClickBound = true;
-
-  document.addEventListener("click",(e)=>{
-
-    if(!e.target.closest(".topbar-search-wrap")){
-      
-      const container = document.getElementById("topbar-search-results");
-
-      if(container){
-        container.classList.remove("active");
-        container.innerHTML = "";
-      }
-
-    }
+    timer = setTimeout(async ()=>{
+      const res = await search(v);
+      render(res, v);
+    }, 200);
 
   });
 
-}
-  
-  /* =========================
-     NAV.JS INTEGRATION
-  ========================= */
+  input.addEventListener("focus", async ()=>{
+    const v = input.value.trim();
+    if (!v) return;
 
-  // 🔥 cerrar cuando navegas (usa tu nav.js)
-  Onion.events.on("nav:search:close", hide);
+    const res = await search(v);
+    render(res, v);
+  });
 
-}
+  // cerrar fuera
+  if (!window.__searchClick){
+    window.__searchClick = true;
 
+    document.addEventListener("click", e=>{
+      if (!e.target.closest(".topbar-search-wrap")){
+        hide();
+      }
+    });
+  }
 
-/* =========================
-   🔥 ENGANCHE SPA
-========================= */
+  // integración SPA
+  window.Onion?.events?.on("nav:search:close", hide);
 
-// cada render SPA
-Onion.events.on("nav:ready", initTopbarSearch);
-
-// fallback primera carga
-if(document.readyState !== "loading"){
-  initTopbarSearch();
-}else{
-  document.addEventListener("DOMContentLoaded", initTopbarSearch);
 }
 
 
 /* =========================
-   LOADER FALLBACK
+   LOADER
 ========================= */
 
-setTimeout(() => {
+function hideLoader(){
 
-  const loader = document.getElementById("app-loader");
+  const loader = $("#app-loader");
 
-  if(loader){
+  if (loader){
     loader.classList.add("hide");
     setTimeout(()=> loader.remove(), 350);
   }
 
   document.body.classList.remove("loading");
 
-}, 4000);
+}
+
+
+/* =========================
+   INIT APP
+========================= */
+
+function init(){
+
+  renderSidebar();
+  renderTopbar();
+  updateSidebarActive();
+
+  initSidebar();
+  initUserDropdown();
+  initLogout();
+  initSearch();
+
+  setTimeout(hideLoader, 4000);
+
+}
+
+
+/* =========================
+   SPA HOOKS
+========================= */
+
+window.Onion?.events?.on("nav:ready", init);
+
+
+/* =========================
+   FIRST LOAD
+========================= */
+
+if (document.readyState !== "loading"){
+  init();
+} else {
+  document.addEventListener("DOMContentLoaded", init);
+}
 
 })();
 </script>
@@ -891,16 +824,10 @@ setTimeout(() => {
 
 
 
-
-
-
-
-
-
-
-
-
-
   
+
 </body>
+
+
+
 </html>

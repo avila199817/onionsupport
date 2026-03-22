@@ -478,27 +478,46 @@ Onion.init = async function(){
     const res = await Onion.fetch(Onion.config.API + "/auth/me");
     const user = res.user || res;
 
-    // 🔥 2. Guardar + emitir evento automáticamente
-    Onion.setUser(user); // ← ahora emite "user:ready"
+    // 🔥 2. Guardar usuario
+    Onion.setUser(user);
 
-    // 🔥 3. Eventos SPA
+    // 🔥 3. Evitar duplicar eventos (MUY IMPORTANTE)
+    Onion.events.off("nav:change", Onion.render);
+    window.removeEventListener("popstate", Onion.render);
+
     Onion.events.on("nav:change", Onion.render);
     window.addEventListener("popstate", Onion.render);
 
     // 🔥 4. Primer render
     await Onion.render();
 
-    // 🔥 5. Ocultar loader
-    Onion.ui.hideLoader();
-
-  }catch(e){
+  } catch(e){
 
     console.error("💥 INIT ERROR:", e);
 
+    // 🔐 Auth fallback
     if(e.message === "401" || e.message === "NO_TOKEN"){
       redirectLogin();
       return;
     }
+
+    // 💥 UI error visible
+    const app = document.getElementById("app-content");
+
+    if(app){
+      app.innerHTML = `
+        <div style="padding:20px">
+          <h2>Error inicializando</h2>
+          <p>${e.message}</p>
+          <button onclick="location.reload()">Reintentar</button>
+        </div>
+      `;
+    }
+
+  } finally {
+
+    // 🔥 SIEMPRE quitar loader pase lo que pase
+    Onion.ui.hideLoader();
 
   }
 

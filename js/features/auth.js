@@ -108,22 +108,28 @@
 
   };
 
-  /* =========================
-     REDIRECT LOGIN
-  ========================= */
+/* =========================
+   REDIRECT LOGIN
+========================= */
 
-  Onion.auth.redirectLogin = function(){
+Onion.auth.redirectLogin = function(){
 
-    Onion.warn("🔐 Redirigiendo a login");
+  Onion.warn("🔐 Redirigiendo a login");
 
-    // 🔥 evita loops si ya estás en login
-    if(window.location.pathname.includes("/login") || window.location.pathname.includes("/acceso")){
-      return;
-    }
+  const path = window.location.pathname;
 
-    window.location.replace("/login");
+  // 🔥 evitar bucle si ya estás en auth
+  if (path.startsWith("/auth")) return;
 
-  };
+  // 🧹 limpiar token (recomendado)
+  try{
+    localStorage.removeItem("onion_token");
+  }catch(e){}
+
+  // 🚀 redirect correcto
+  window.location.replace("/auth");
+
+};
 
   /* =========================
      REQUIRE AUTH (GUARD)

@@ -718,7 +718,8 @@ Onion.init = async function(){
 
     // 🔥 SIEMPRE quitar loader pase lo que pase
     Onion.ui.hideLoader();
-
+    Onion.state.navigating = false;
+    Onion.ui.hideOverlay();
   }
 
 };

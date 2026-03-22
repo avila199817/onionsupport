@@ -1,0 +1,23 @@
+<script>
+(function(){
+
+  const path = window.location.pathname;
+
+  // 🔥 si ya estás en /es → OK
+  if(path.startsWith("/es")){
+    return;
+  }
+
+  // 🔥 si es ruta SPA del panel → NO tocar
+  if(path.startsWith("/@")){
+    return;
+  }
+
+  // 🔥 raíz → web pública
+  if(path === "/" || path === ""){
+    window.location.replace("/es/");
+    return;
+  }
+
+})();
+</script>

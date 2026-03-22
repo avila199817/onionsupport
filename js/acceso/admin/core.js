@@ -250,12 +250,22 @@ Onion.ui.hideLoader = function(){
 ========================= */
 
 Onion.setUser = function(user){
+
+  if(!user){
+    console.warn("setUser llamado sin user");
+    return;
+  }
+
   Onion.state.user = user;
-  Onion.state.slug = user.slug;
+  Onion.state.slug = user.slug || null;
 
   if(user.slug){
     localStorage.setItem("onion_slug", user.slug);
   }
+
+  // 🔥 CLAVE: hacer reactivo el cambio
+  Onion.events.emit("user:ready", user);
+
 };
 
 

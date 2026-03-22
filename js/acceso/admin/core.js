@@ -1037,7 +1037,7 @@ Onion.router.resolve = function(){
 
 
 /* =========================
-   NAV (PRO)
+   NAV (PRO FINAL)
 ========================= */
 
 Onion.go = function(path){
@@ -1071,7 +1071,7 @@ Onion.go = function(path){
       return;
     }
 
-    // 🔥 bloquear navegación si render activo
+    // 🔥 bloquear navegación si estado activo
     if(Onion.state.navigating || Onion.state.rendering){
       Onion.warn("⛔ Navegación bloqueada (estado activo)");
       return;
@@ -1081,32 +1081,38 @@ Onion.go = function(path){
 
     Onion.log("🚀 NAV →", clean);
 
-    // 🔥 cerrar cosas UI
+    /* =========================
+       UI CLOSE
+    ========================= */
+
     Onion.events.emit("nav:search:close");
 
-    // 🔥 cleanup REAL (ejecutar funciones registradas)
-    try{
-      Onion.state.cleanup.forEach(fn => {
-        try{ fn(); } catch(e){ Onion.error("Cleanup error", e); }
-      });
-    }catch(e){
-      Onion.error("Cleanup global error", e);
-    }
+    /* =========================
+       CLEANUP (PRO)
+    ========================= */
 
-    Onion.state.cleanup = [];
+    Onion.runCleanup();
 
-    // 🔥 evento cleanup adicional
+    // 🔥 evento adicional por si algo externo escucha
     Onion.events.emit("nav:cleanup");
 
-    // 🔥 construir URL final
+    /* =========================
+       BUILD URL
+    ========================= */
+
     const url = "/@" + Onion.state.slug + clean;
 
-    // 🔥 evitar pushState duplicado
-    if(window.location.pathname !== url){
+    // 🔥 evitar push duplicado (incluye query params)
+    const currentUrl = window.location.pathname + window.location.search;
+
+    if(currentUrl !== url){
       window.history.pushState({}, "", url);
     }
 
-    // 🔥 trigger render
+    /* =========================
+       RENDER TRIGGER
+    ========================= */
+
     Onion.events.emit("nav:change");
 
   }catch(e){
@@ -1118,7 +1124,6 @@ Onion.go = function(path){
   }
 
 };
-
 
 
 

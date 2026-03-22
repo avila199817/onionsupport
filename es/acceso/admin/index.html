@@ -701,9 +701,8 @@ function initTopbarSearch(){
 
   if(!input || !container) return;
 
-  // 🔥 evitar doble bind
-  if(input.dataset.searchBound === "true") return;
-  input.dataset.searchBound = "true";
+  if(input.__searchInitialized) return;
+  input.__searchInitialized = true;
 
   console.log("🔥 SEARCH INIT OK");
 

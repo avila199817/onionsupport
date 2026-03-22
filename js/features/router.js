@@ -21,26 +21,26 @@
 
     "/": {
       page: "/pages/index.html",
-      style: "/css/acceso/admin/pages/dashboard.css",
-      script: "/js/acceso/admin/pages/dashboard.js"
+      style: "/css/core/core.css",
+      script: "/js/features/dashboard/index.js"
     },
 
     "/incidencias": {
       page: "/pages/incidencias/index.html",
-      style: "/css/pages/incidencias/incidencias.css",
-      script: "/js/pages/incidencias/incidencias.js"
+      style: "/css/core/core.css",
+      script: "/js/features/"
     },
 
     "/facturas": {
       page: "/pages/facturas/index.html",
-      style: "/css/pages/facturas/facturas.css",
-      script: "/js/pages/facturas/facturas.js"
+      style: "/css/core/core.css",
+      script: "/js/features/"
     },
 
     "/cuenta": {
       page: "/pages/cuenta/index.html",
-      style: "/css/pages/cuenta/cuenta.css",
-      script: "/js/pages/cuenta/cuenta.js"
+      style: "/css/core/core.css",
+      script: "/js/features/"
     }
 
   };

@@ -191,39 +191,76 @@ Onion.fetch = async function(url){
 
 
 /* =========================
-   FETCH HTML
+   FETCH HTML (PRO)
 ========================= */
 
 Onion.fetchHTML = async function(url, useCache = true){
 
+  // 🔥 cache hit
   if(useCache && Onion.cache.html[url]){
     return Onion.cache.html[url];
   }
 
+  // 🔥 abort request anterior
   if(Onion.state.abortController){
-    Onion.state.abortController.abort();
+    try{
+      Onion.state.abortController.abort();
+    }catch(e){
+      console.warn("Abort error ignorado");
+    }
   }
 
-  Onion.state.abortController = new AbortController();
+  const controller = new AbortController();
+  Onion.state.abortController = controller;
 
-  const res = await fetch(url, {
-    signal: Onion.state.abortController.signal
-  });
+  // 🔥 timeout manual
+  const timeout = setTimeout(()=>{
+    controller.abort();
+  }, Onion.config.TIMEOUT);
 
-  if(!res.ok){
-    throw new Error("PAGE_LOAD_ERROR " + res.status);
+  try{
+
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "X-Requested-With": "XMLHttpRequest" // 🔥 útil para backend
+      }
+    });
+
+    if(!res.ok){
+      throw new Error("PAGE_LOAD_ERROR " + res.status);
+    }
+
+    const html = await res.text();
+
+    if(!html || html.trim().length === 0){
+      throw new Error("EMPTY_HTML");
+    }
+
+    // 🔥 guardar en cache
+    if(useCache){
+      Onion.cache.html[url] = html;
+    }
+
+    return html;
+
+  }catch(e){
+
+    // 🔥 abort normal (no error real)
+    if(e.name === "AbortError"){
+      console.warn("⚠️ Fetch abortado (normal en SPA)");
+      return null;
+    }
+
+    console.error("💥 FETCH HTML ERROR:", e);
+    throw e;
+
+  }finally{
+    clearTimeout(timeout);
   }
-
-  const html = await res.text();
-
-  if(useCache){
-    Onion.cache.html[url] = html;
-  }
-
-  return html;
 
 };
-
+   
 
 /* =========================
    UI

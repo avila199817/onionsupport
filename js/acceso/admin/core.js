@@ -26,6 +26,7 @@ Onion.state = {
   user: null,
   slug: localStorage.getItem("onion_slug") || null,
   rendering: false,
+  navigating: false,
   currentScript: null,
   currentStyle: null,
   renderId: 0,

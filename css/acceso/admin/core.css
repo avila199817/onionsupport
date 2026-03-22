@@ -118,6 +118,7 @@ html, body{
 html{
   scroll-behavior:smooth;
   overscroll-behavior-y:none;
+  scrollbar-gutter: stable;
 }
 
 body{

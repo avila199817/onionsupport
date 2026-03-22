@@ -85,12 +85,55 @@ Onion.state = {
   // 🧹 cleanup de páginas (MUY IMPORTANTE)
   cleanup: [],
 
-  // ⚡ estado interno (futuro)
+  // ⚡ estado interno
   ready: false,
 
 };
 
 
+/* =========================
+   CLEANUP (PRO)
+========================= */
+
+Onion.onCleanup = function(fn){
+
+  if(typeof fn !== "function"){
+    Onion.warn("cleanup inválido");
+    return;
+  }
+
+  Onion.state.cleanup.push(fn);
+
+};
+
+
+/* =========================
+   RUN CLEANUP (CLAVE)
+========================= */
+
+Onion.runCleanup = function(){
+
+  try{
+
+    Onion.state.cleanup.forEach(fn => {
+      try{
+        fn();
+      }catch(e){
+        Onion.error("💥 cleanup fn error:", e);
+      }
+    });
+
+  }catch(e){
+    Onion.error("💥 cleanup global error:", e);
+  }
+
+  Onion.state.cleanup = [];
+
+};
+
+
+   
+   
 /* =========================
    CACHE (PRO)
 ========================= */

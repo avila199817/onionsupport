@@ -722,11 +722,77 @@ Onion.fetchHTML = async function(url, useCache = true){
 
 
 
-   /* =========================
+
+
+
+
+
+
+
+
+   
+
+
+/* =========================
    UI (PRO)
 ========================= */
 
 Onion.ui = {};
+
+
+/* =========================
+   SIDEBAR (UI)
+========================= */
+
+Onion.ui.renderSidebar = function(){
+
+  const user = Onion.state.user;
+  if (!user) return;
+
+  const nameEl = document.querySelector("#sidebar-name");
+  const avatarEl = document.querySelector("#sidebar-avatar");
+
+  if (!nameEl || !avatarEl) return;
+
+  const name =
+    user.name ||
+    user.username ||
+    user.email ||
+    "Usuario";
+
+  nameEl.textContent = name;
+
+  avatarEl.innerHTML = "";
+
+  if (user.avatar){
+
+    const img = document.createElement("img");
+    img.src = user.avatar;
+    img.alt = "avatar";
+
+    Object.assign(img.style, {
+      width: "100%",
+      height: "100%",
+      borderRadius: "50%",
+      objectFit: "cover"
+    });
+
+    avatarEl.appendChild(img);
+
+  } else {
+
+    const initials = name
+      .split(" ")
+      .map(n => n[0])
+      .join("")
+      .substring(0,2)
+      .toUpperCase();
+
+    avatarEl.textContent = initials;
+
+  }
+
+};
 
 /* =========================
    OVERLAY LOADING (SUAVE)

@@ -1,17 +1,40 @@
 "use strict";
 
 /* =========================
-   RENDER (PRO SaaS - ONION)
+   RENDER (ONION FULL PRO)
 ========================= */
 
 (function(){
 
   if(!window.Onion){
-    console.error("💥 Onion no está definido (render.js)");
+    console.error("💥 Onion no definido (render.js)");
     return;
   }
 
   const Onion = window.Onion;
+
+  /* =========================
+     HELPERS URL
+  ========================= */
+
+  function normalizeUrl(src){
+
+    if(!src) return null;
+
+    try{
+      if(src.startsWith("/")){
+        return window.location.origin + src;
+      }
+      if(src.startsWith("http")){
+        return src;
+      }
+      return window.location.origin + "/" + src.replace(/^\/+/,"");
+    }catch(e){
+      Onion.error("URL error:", src);
+      return null;
+    }
+
+  }
 
   /* =========================
      LOAD SCRIPT
@@ -21,35 +44,18 @@
 
     return new Promise((resolve, reject)=>{
 
-      if(!src){
-        Onion.warn("loadScript sin src");
-        return resolve();
-      }
-
-      let finalSrc;
-
-      try{
-        if(src.startsWith("/")){
-          finalSrc = window.location.origin + src;
-        }else if(src.startsWith("http")){
-          finalSrc = src;
-        }else{
-          finalSrc = window.location.origin + "/" + src.replace(/^\/+/,"");
-        }
-      }catch(e){
-        Onion.error("URL parse error:", src);
-        return reject(e);
-      }
+      const finalSrc = normalizeUrl(src);
+      if(!finalSrc) return resolve();
 
       if(Onion.state.currentScript === finalSrc){
         Onion.log("⚡ Script ya cargado:", finalSrc);
         return resolve();
       }
 
-      const old = document.querySelector("script[data-onion-page]");
-      if(old){
-        try{ old.remove(); }catch{}
-      }
+      // 🧹 eliminar anterior
+      document.querySelectorAll("script[data-onion-page]").forEach(s=>{
+        try{ s.remove(); }catch{}
+      });
 
       const s = document.createElement("script");
 
@@ -73,7 +79,7 @@
 
       s.onerror = ()=>{
         clearTimeout(timeout);
-        Onion.error("💥 Script load fail:", finalSrc);
+        Onion.error("💥 Script fail:", finalSrc);
         s.remove();
         reject(new Error("SCRIPT_LOAD_FAIL"));
       };
@@ -92,25 +98,8 @@
 
     return new Promise((resolve)=>{
 
-      if(!href){
-        Onion.warn("loadStyle sin href");
-        return resolve();
-      }
-
-      let finalHref;
-
-      try{
-        if(href.startsWith("/")){
-          finalHref = window.location.origin + href;
-        }else if(href.startsWith("http")){
-          finalHref = href;
-        }else{
-          finalHref = window.location.origin + "/" + href.replace(/^\/+/,"");
-        }
-      }catch(e){
-        Onion.error("Style URL error:", href);
-        return resolve();
-      }
+      const finalHref = normalizeUrl(href);
+      if(!finalHref) return resolve();
 
       if(Onion.state.currentStyle === finalHref){
         Onion.log("⚡ Style ya cargado:", finalHref);
@@ -128,16 +117,15 @@
       }, Onion.config.TIMEOUT);
 
       link.onload = ()=>{
-
         clearTimeout(timeout);
 
-        const old = document.querySelector("link[data-onion-style]");
-        if(old && old !== link){
-          try{ old.remove(); }catch{}
-        }
+        document.querySelectorAll("link[data-onion-style]").forEach(l=>{
+          if(l !== link){
+            try{ l.remove(); }catch{}
+          }
+        });
 
         Onion.state.currentStyle = finalHref;
-
         Onion.log("🎨 Style cargado:", finalHref);
 
         resolve();
@@ -145,7 +133,7 @@
 
       link.onerror = ()=>{
         clearTimeout(timeout);
-        Onion.error("💥 Style load fail:", finalHref);
+        Onion.error("💥 Style fail:", finalHref);
         link.remove();
         resolve();
       };
@@ -162,31 +150,15 @@
 
   Onion.fetchHTML = async function(url, useCache = true){
 
-    if(!url){
-      Onion.warn("fetchHTML sin URL");
-      return null;
-    }
-
-    let finalUrl;
-
-    try{
-      if(url.startsWith("/")){
-        finalUrl = window.location.origin + url;
-      }else if(url.startsWith("http")){
-        finalUrl = url;
-      }else{
-        finalUrl = window.location.origin + "/" + url.replace(/^\/+/,"");
-      }
-    }catch(e){
-      Onion.error("URL HTML inválida:", url);
-      return null;
-    }
+    const finalUrl = normalizeUrl(url);
+    if(!finalUrl) return null;
 
     if(useCache && Onion.cache.html[finalUrl]){
       Onion.log("⚡ HTML cache:", finalUrl);
       return Onion.cache.html[finalUrl];
     }
 
+    // 🧨 abort anterior
     if(Onion.state.abortController){
       try{ Onion.state.abortController.abort(); }catch{}
     }
@@ -213,12 +185,12 @@
       }
 
       if(!res.ok){
-        throw new Error("PAGE_LOAD_ERROR " + res.status);
+        throw new Error("HTTP " + res.status);
       }
 
       const html = await res.text();
 
-      if(!html || html.trim().length === 0){
+      if(!html.trim()){
         throw new Error("EMPTY_HTML");
       }
 
@@ -237,7 +209,7 @@
         return null;
       }
 
-      Onion.error("💥 FETCH HTML ERROR:", finalUrl, e.message);
+      Onion.error("💥 FETCH HTML:", finalUrl, e.message);
       throw e;
 
     }finally{
@@ -250,7 +222,7 @@
      SWAP CONTENT
   ========================= */
 
-  Onion.swapContent = function(newContent){
+  Onion.swapContent = function(node){
 
     const app = document.getElementById("app-content");
     if(!app) return;
@@ -258,27 +230,22 @@
     if(app.__swapping) return;
     app.__swapping = true;
 
-    app.style.transition = "opacity 0.15s ease";
     app.style.opacity = "0";
 
     setTimeout(()=>{
 
       try{
-
         app.innerHTML = "";
 
-        if(newContent){
-          app.appendChild(newContent);
+        if(node){
+          app.appendChild(node);
         }else{
-          app.innerHTML = "<div style='padding:20px'>Contenido vacío</div>";
+          app.innerHTML = "<div style='padding:20px'>Vacío</div>";
         }
 
       }catch(e){
-
-        Onion.error("💥 swapContent error:", e);
-
-        app.innerHTML = "<div style='padding:20px'>Error renderizando contenido</div>";
-
+        Onion.error("💥 swap error:", e);
+        app.innerHTML = "<div style='padding:20px'>Error</div>";
       }
 
       requestAnimationFrame(()=>{
@@ -286,7 +253,7 @@
         app.__swapping = false;
       });
 
-    }, 150);
+    }, 120);
 
   };
 
@@ -298,64 +265,57 @@
 
     const renderId = ++Onion.state.renderId;
 
-    if(Onion.state.abortController){
-      try{ Onion.state.abortController.abort(); }catch{}
-    }
-
     Onion.state.rendering = true;
 
     try{
 
-      const routeConfig = Onion.router.resolve();
+      const route = Onion.router.resolve();
 
-      const { page, style, script } = routeConfig;
-
-      Onion.log("🎯 Render:", page);
+      Onion.log("🎯 Render:", route.page);
 
       // 🎨 STYLE
-      if(style){
-        try{ await Onion.loadStyle(style); }catch{}
+      if(route.style){
+        await Onion.loadStyle(route.style);
       }
 
       // 📄 HTML
-      const html = await Onion.fetchHTML(page, true);
+      const html = await Onion.fetchHTML(route.page, true);
 
       if(html === null){
-        Onion.state.rendering = false;
-        Onion.state.navigating = false;
         return;
       }
 
+      // 🧠 race condition
       if(renderId !== Onion.state.renderId){
-        Onion.warn("Render obsoleto ignorado");
+        Onion.warn("Render viejo ignorado");
         return;
       }
 
-      const container = document.createElement("div");
-      container.innerHTML = html;
+      const wrapper = document.createElement("div");
+      wrapper.innerHTML = html;
 
-      let content = container.querySelector(".panel-content") || container;
+      const content = wrapper.querySelector(".panel-content") || wrapper;
 
       Onion.swapContent(content);
 
       // 📜 SCRIPT
-      if(script){
-        try{ await Onion.loadScript(script); }catch{}
+      if(route.script){
+        await Onion.loadScript(route.script);
       }
 
-      // 📡 READY EVENT
+      // 📡 READY
       Onion.events.emit("nav:ready");
 
     }catch(e){
 
-      Onion.error("💥 RENDER ERROR:", e);
+      Onion.error("💥 RENDER:", e);
 
       const app = document.getElementById("app-content");
 
       if(app){
         app.innerHTML = `
           <div style="padding:20px">
-            <h2>Error cargando página</h2>
+            <h2>Error</h2>
             <p>${e.message}</p>
             <button onclick="Onion.render()">Reintentar</button>
           </div>

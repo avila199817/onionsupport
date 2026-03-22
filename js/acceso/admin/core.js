@@ -337,25 +337,37 @@ Onion.go = function(path){
     return;
   }
 
+  const clean = path.startsWith("/") ? path : "/" + path;
+  const current = Onion.router.get();
+
+  // 🔥 evitar navegación inútil
+  if(current === clean){
+    console.warn("🔁 Ya estás en esta ruta");
+    return;
+  }
+
+  // 🔥 bloquear navegación múltiple
+  if(Onion.state.navigating){
+    console.warn("⛔ Navegación en curso");
+    return;
+  }
+
+  Onion.state.navigating = true;
+
   // 🔥 cerrar search
   Onion.events.emit("nav:search:close");
 
-  // 🔥 limpiar cosas globales (clave)
+  // 🔥 limpiar cosas globales
   Onion.events.emit("nav:cleanup");
 
-  // 🔥 limpiar cache SPA
-  Onion.cache.html = {};
-
-  const clean = path.startsWith("/") ? path : "/" + path;
   const url = "/@" + Onion.state.slug + clean;
 
   window.history.pushState({}, "", url);
 
-  // 🔥 evento unificado
+  // 🔥 trigger render
   Onion.events.emit("nav:change");
 
 };
-
 
 /* =========================
    LINKS

@@ -115,25 +115,95 @@ Onion.cache = {
 
    
 
-   /* =========================
-   EVENTS (GLOBAL BUS)
+/* =========================
+   EVENTS (GLOBAL BUS PRO)
 ========================= */
 
 Onion.events = {
 
+  /* =========================
+     EMIT
+  ========================= */
+
   emit(name, detail = {}){
-    window.dispatchEvent(new CustomEvent(name, { detail }));
+
+    try{
+
+      if(!name){
+        Onion.warn("Evento sin nombre");
+        return;
+      }
+
+      const event = new CustomEvent(name, { detail });
+
+      window.dispatchEvent(event);
+
+      Onion.log("📡 emit:", name, detail);
+
+    }catch(e){
+      Onion.error("emit error:", name, e);
+    }
+
   },
+
+  /* =========================
+     ON
+  ========================= */
 
   on(name, handler){
-    window.addEventListener(name, handler);
+
+    if(!name || typeof handler !== "function"){
+      Onion.warn("on inválido:", name);
+      return;
+    }
+
+    const wrapped = (e) => {
+      try{
+        handler(e.detail, e);
+      }catch(err){
+        Onion.error("event handler error:", name, err);
+      }
+    };
+
+    // 🔥 guardar referencia para poder limpiar luego
+    handler.__onionWrapped = wrapped;
+
+    window.addEventListener(name, wrapped);
+
+    // 🔥 auto cleanup (CLAVE)
+    Onion.onCleanup(()=>{
+      window.removeEventListener(name, wrapped);
+    });
+
   },
 
+  /* =========================
+     OFF
+  ========================= */
+
   off(name, handler){
-    window.removeEventListener(name, handler);
+
+    if(!name || !handler) return;
+
+    const wrapped = handler.__onionWrapped || handler;
+
+    window.removeEventListener(name, wrapped);
+
   }
 
 };
+
+
+
+
+
+
+
+
+
+
+
+   
 
 /* =========================
    LOAD SCRIPT

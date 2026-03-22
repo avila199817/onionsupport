@@ -463,16 +463,21 @@ Onion.init = async function(){
 
   try{
 
+    // 🔥 1. Obtener usuario
     const res = await Onion.fetch(Onion.config.API + "/auth/me");
     const user = res.user || res;
 
-    Onion.setUser(user);
+    // 🔥 2. Guardar + emitir evento automáticamente
+    Onion.setUser(user); // ← ahora emite "user:ready"
 
+    // 🔥 3. Eventos SPA
     Onion.events.on("nav:change", Onion.render);
     window.addEventListener("popstate", Onion.render);
 
+    // 🔥 4. Primer render
     await Onion.render();
 
+    // 🔥 5. Ocultar loader
     Onion.ui.hideLoader();
 
   }catch(e){

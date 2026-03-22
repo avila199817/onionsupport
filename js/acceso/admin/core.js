@@ -2,40 +2,118 @@
 
 "use strict";
 
-if(window.Onion) return;
+/* =========================
+   INIT GUARD (ANTI DUPLICADO)
+========================= */
+
+if(window.Onion){
+  console.warn("⚠️ Onion ya inicializado");
+  return;
+}
+
+/* =========================
+   CORE OBJECT
+========================= */
 
 const Onion = {};
 window.Onion = Onion;
 
+/* =========================
+   VERSION (DEBUG PRO)
+========================= */
+
+Onion.version = "1.0.0";
 
 /* =========================
    CONFIG
 ========================= */
 
 Onion.config = {
+
   API: "https://api.onionit.net/api",
-  TIMEOUT: 10000
+  TIMEOUT: 10000,
+
+  DEBUG: true, // 🔥 luego podrás apagar logs
+  ENV: "production" // 🔥 preparado para futuro
+
+};
+
+/* =========================
+   LOGGER (PRO)
+========================= */
+
+Onion.log = function(...args){
+  if(Onion.config.DEBUG){
+    console.log("🧅", ...args);
+  }
+};
+
+Onion.warn = function(...args){
+  if(Onion.config.DEBUG){
+    console.warn("⚠️", ...args);
+  }
+};
+
+Onion.error = function(...args){
+  console.error("💥", ...args);
+};
+
+/* =========================
+   STATE (PRO)
+========================= */
+
+Onion.state = {
+
+  // 🔐 usuario
+  user: null,
+
+  // 🔗 slug persistente
+  slug: localStorage.getItem("onion_slug") || null,
+
+  // 🔄 control de render
+  rendering: false,
+  navigating: false,
+  renderId: 0,
+
+  // 📦 recursos actuales
+  currentScript: null,
+  currentStyle: null,
+
+  // 🌐 control de requests
+  abortController: null,
+
+  // 🧹 cleanup de páginas (MUY IMPORTANTE)
+  cleanup: [],
+
+  // ⚡ estado interno (futuro)
+  ready: false,
+
 };
 
 
 /* =========================
-   STATE
+   CACHE (PRO)
 ========================= */
 
-Onion.state = {
-  user: null,
-  slug: localStorage.getItem("onion_slug") || null,
-  rendering: false,
-  navigating: false,
-  currentScript: null,
-  currentStyle: null,
-  renderId: 0,
-  abortController: null,
+Onion.cache = {
+
+  html: Object.create(null), // 🔥 sin prototype (más seguro)
+
 };
 
-Onion.cache = {
-  html: {}
-};
+
+
+
+
+
+
+
+
+
+
+
+
+   
 
    /* =========================
    EVENTS (GLOBAL BUS)

@@ -1,71 +1,92 @@
-/* =====================================================
-   ONION LOADER · PRO
-===================================================== */
+"use strict";
+
+/* =========================
+   LOADER (PRO SaaS - ONION)
+========================= */
 
 (function(){
 
-"use strict";
+  if(!window.Onion){
+    console.error("💥 Onion no está definido (loader.js)");
+    return;
+  }
 
-function getLoader(){
-return document.getElementById("app-loader");
-}
+  const Onion = window.Onion;
 
-let loaderStartTime = 0;
+  let visible = false;
+  let timer = null;
 
+  /* =========================
+     SHOW LOADER
+  ========================= */
 
-/* =====================================================
-   START (manual)
-===================================================== */
+  Onion.ui.showLoader = function(){
 
-window.loaderStart = function(){
+    // 🔥 evitar flicker (solo aparece si tarda)
+    if(timer) return;
 
-const loader = getLoader();
-if(!loader) return;
+    timer = setTimeout(()=>{
 
-loader.style.display = "flex";
-loader.classList.remove("hide");
+      const el = document.getElementById("app-loader");
+      if(!el) return;
 
-loaderStartTime = performance.now();
+      el.classList.remove("hide");
+      document.body.classList.add("loading");
 
-};
+      visible = true;
 
+      Onion.log("⏳ Loader show");
 
-/* =====================================================
-   END (manual)
-===================================================== */
+    }, 120); // delay anti flicker
 
-window.loaderEnd = function(){
+  };
 
-const loader = getLoader();
-if(!loader) return;
+  /* =========================
+     HIDE LOADER
+  ========================= */
 
-const elapsed = performance.now() - loaderStartTime;
-const minTime = 500;
+  Onion.ui.hideLoader = function(){
 
-const delay = Math.max(minTime - elapsed,0);
+    clearTimeout(timer);
+    timer = null;
 
-setTimeout(()=>{
+    const el = document.getElementById("app-loader");
+    if(!el) return;
 
-loader.classList.add("hide");
+    if(!visible){
+      // nunca llegó a mostrarse
+      document.body.classList.remove("loading");
+      return;
+    }
 
-setTimeout(()=>{
-loader.style.display = "none";
-},350);
+    el.classList.add("hide");
 
-},delay);
+    setTimeout(()=>{
+      if(el.parentNode){
+        el.remove();
+      }
+    }, 350);
 
-};
+    document.body.classList.remove("loading");
 
+    visible = false;
 
-/* =====================================================
-   CORE READY (AUTOMÁTICO)
-===================================================== */
+    Onion.log("✅ Loader hide");
 
-window.addEventListener("onion:app-ready",()=>{
+  };
 
-window.loaderEnd();
+  /* =========================
+     AUTO INTEGRATION (SPA)
+  ========================= */
 
-});
+  // 🔥 cuando empieza navegación/render
+  Onion.events.on("nav:change", ()=>{
+    Onion.ui.showLoader();
+  });
 
+  // 🔥 cuando termina render
+  Onion.events.on("nav:ready", ()=>{
+    Onion.ui.hideLoader();
+  });
 
 })();

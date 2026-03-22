@@ -324,8 +324,11 @@ Onion.go = function(path){
     return;
   }
 
-  // 🔥 cerrar search global si está abierto
+  // 🔥 cerrar search
   Onion.events.emit("nav:search:close");
+
+  // 🔥 limpiar cosas globales (clave)
+  Onion.events.emit("nav:cleanup");
 
   // 🔥 limpiar cache SPA
   Onion.cache.html = {};
@@ -335,8 +338,8 @@ Onion.go = function(path){
 
   window.history.pushState({}, "", url);
 
-  // 🔥 navegación interna
-  window.dispatchEvent(new Event("onion:navigate"));
+  // 🔥 evento unificado
+  Onion.events.emit("nav:change");
 
 };
 
@@ -396,6 +399,7 @@ Onion.render = async function(){
     if(style) await Onion.loadStyle(style);
 
     const html = await Onion.fetchHTML(url, route !== "/");
+    if(!html) return;
 
     if(renderId !== Onion.state.renderId) return;
 
@@ -462,7 +466,7 @@ Onion.init = async function(){
 
     Onion.setUser(user);
 
-    window.addEventListener("onion:navigate", Onion.render);
+    Onion.events.on("nav:change", Onion.render);
     window.addEventListener("popstate", Onion.render);
 
     await Onion.render();

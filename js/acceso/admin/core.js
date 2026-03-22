@@ -80,6 +80,8 @@ Onion.loadScript = function(src){
     const s = document.createElement("script");
     s.src = finalSrc + "?v=" + Date.now();
     s.defer = true;
+
+    s.async = false;
     s.setAttribute("data-onion-page","true");
 
     s.onload = ()=>{

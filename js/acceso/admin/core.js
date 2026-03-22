@@ -529,6 +529,7 @@ Onion.render = async function(){
   } finally {
 
     Onion.state.rendering = false;
+    Onion.state.navigating = false;
 
   }
 

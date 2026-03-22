@@ -1294,9 +1294,8 @@ document.addEventListener("click",(e)=>{
 
 
 
-   
 /* =========================
-   RENDER (PRO FINAL)
+   RENDER (PRO FINAL - INDESTRUCTIBLE)
 ========================= */
 
 Onion.render = async function(){
@@ -1323,7 +1322,10 @@ Onion.render = async function(){
 
     Onion.ui.loading();
 
-    // 🔥 obtener config de ruta
+    /* =========================
+       ROUTE CONFIG
+    ========================= */
+
     const routeConfig = Onion.router.resolve();
 
     const url = routeConfig.page;
@@ -1333,7 +1335,7 @@ Onion.render = async function(){
     Onion.log("🎯 Render:", url);
 
     /* =========================
-       STYLE
+       STYLE (NO BLOQUEANTE DURO)
     ========================= */
 
     if(style){
@@ -1356,9 +1358,19 @@ Onion.render = async function(){
       throw new Error("Error cargando HTML: " + e.message);
     }
 
-    if(!html){
-      Onion.warn("HTML vacío o abortado");
+    // 🔥 abort normal → no error
+    if(html === null){
+      Onion.warn("⚡ Render cancelado (abort)");
+
+      Onion.state.rendering = false;
+      Onion.state.navigating = false;
+      Onion.ui.hideOverlay();
+
       return;
+    }
+
+    if(!html){
+      throw new Error("HTML vacío");
     }
 
     // 🔥 evitar race condition
@@ -1377,15 +1389,20 @@ Onion.render = async function(){
     let content = container.querySelector(".panel-content");
 
     if(!content){
-      Onion.warn(".panel-content no encontrado, usando fallback");
+      Onion.warn("⚠️ .panel-content no encontrado, fallback");
       content = container;
     }
 
     /* =========================
-       SWAP CONTENT
+       SWAP CONTENT (SIN FLICKER)
     ========================= */
 
-    Onion.ui.swapContent(content);
+    try{
+      Onion.ui.swapContent(content);
+    }catch(e){
+      Onion.error("💥 swapContent error:", e);
+      app.innerHTML = "<div style='padding:20px'>Error renderizando contenido</div>";
+    }
 
     /* =========================
        SCRIPT
@@ -1395,15 +1412,9 @@ Onion.render = async function(){
       try{
         await Onion.loadScript(script);
       }catch(err){
-        Onion.error("SCRIPT ERROR:", err);
+        Onion.error("💥 SCRIPT ERROR:", err);
       }
     }
-
-    /* =========================
-       EVENT READY
-    ========================= */
-
-    Onion.events.emit("nav:ready");
 
     /* =========================
        UI GLOBAL
@@ -1427,6 +1438,16 @@ Onion.render = async function(){
       Onion.error("Topbar error", e);
     }
 
+    /* =========================
+       EVENT READY
+    ========================= */
+
+    try{
+      Onion.events.emit("nav:ready");
+    }catch(e){
+      Onion.error("nav:ready error", e);
+    }
+
   }catch(e){
 
     Onion.error("💥 RENDER ERROR:", e);
@@ -1445,17 +1466,16 @@ Onion.render = async function(){
 
   } finally {
 
+    // 🔥 estado SIEMPRE consistente
     Onion.state.rendering = false;
     Onion.state.navigating = false;
 
-    // 🔥 CLAVE → evitar overlay stuck
+    // 🔥 nunca overlay colgado
     Onion.ui.hideOverlay();
 
   }
 
 };
-
-
 
 
 

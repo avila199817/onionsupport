@@ -46,7 +46,7 @@
   });
 
   /* =========================
-     GET PATH (NORMALIZADO)
+     GET PATH (MULTI-TENANT)
   ========================= */
 
   Onion.router.get = function(){
@@ -55,30 +55,37 @@
 
       let path = window.location.pathname || "/";
 
-      // 🔥 quitar base /app
-      if(path.startsWith("/app")){
-        path = path.slice(4) || "/";
-      }
-
-      // 🔥 quitar slug tipo /@user
-      if(path.startsWith("/@")){
-        const parts = path.split("/").filter(Boolean);
-        path = "/" + (parts.slice(1).join("/") || "");
-      }
-
-      // 🔥 normalizar barras
+      // 🔥 normalizar
       path = path.replace(/\/+/g, "/");
 
-      // 🔥 quitar slash final
       if(path.length > 1 && path.endsWith("/")){
         path = path.slice(0, -1);
       }
 
-      // 🔥 asegurar formato
-      if(!path.startsWith("/")){
-        path = "/" + path;
+      // 🔥 detectar @usuario
+      if(path.startsWith("/@")){
+
+        const parts = path.split("/").filter(Boolean);
+
+        const userSlug = parts[0]; // "@cristian"
+        const cleanUser = userSlug.replace("@","");
+
+        // 🔥 guardar usuario en estado (pro)
+        Onion.state.user = Onion.state.user || {};
+        Onion.state.user.username = cleanUser;
+
+        // 🔥 guardar slug real
+        Onion.state.slug = cleanUser;
+
+        // 👉 decidir ruta interna
+        if(parts.length === 1){
+          return "/"; // dashboard
+        }
+
+        return "/" + parts.slice(1).join("/");
       }
 
+      // 🔥 ruta normal (fallback)
       return path || "/";
 
     }catch(e){
@@ -100,9 +107,6 @@
 
       const route = Onion.router.get();
 
-      // 🔥 sincronizar estado (clave)
-      Onion.state.slug = route === "/" ? "index" : route.slice(1);
-
       const config = Onion.routes[route];
 
       if(config){
@@ -110,7 +114,6 @@
         return config;
       }
 
-      // 🔥 fallback elegante
       Onion.warn("Ruta no encontrada:", route);
 
       return Onion.routes["/"];
@@ -137,8 +140,8 @@
     const href = link.getAttribute("href");
     if(!href) return;
 
-    // 🔥 solo rutas internas de app
-    if(!href.startsWith("/app")) return;
+    // 🔥 SOLO rutas internas (soporta @usuario)
+    if(!href.startsWith("/@")) return;
 
     e.preventDefault();
 

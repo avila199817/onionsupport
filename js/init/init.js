@@ -49,7 +49,13 @@ Onion.init = async function(){
     }
 
     /* =========================
-       FIRST RENDER 🔥
+       UI INIT 🔥 (ANTES DE RENDER)
+    ========================= */
+
+    Onion.ui?.init?.();
+
+    /* =========================
+       FIRST RENDER
     ========================= */
 
     await Onion.render();

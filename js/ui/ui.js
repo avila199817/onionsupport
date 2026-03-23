@@ -1,11 +1,10 @@
 "use strict";
 
 /* =========================
-   UI (GLOBAL LAYER - ONION PRO)
-   - Delegación de eventos (NO leaks)
-   - Sidebar siempre funcional
-   - Avatar / nombre sincronizados
-   - Dropdown robusto
+   UI (ONION PRO FINAL)
+   - Alineado con /auth/me
+   - Sin leaks (delegation)
+   - Sidebar siempre estable
 ========================= */
 
 (function(){
@@ -34,7 +33,12 @@
       const avatar = localStorage.getItem("onion_user_avatar");
 
       if(username || name || avatar){
-        user = { username, name, avatar };
+        user = {
+          username,
+          name,
+          avatar,
+          hasAvatar: !!avatar
+        };
       }
 
     }
@@ -45,7 +49,6 @@
   function getDisplayName(user){
     return (
       user?.name ||
-      user?.fullName ||
       user?.username ||
       user?.email ||
       "Usuario"
@@ -58,7 +61,8 @@
 
     el.innerHTML = "";
 
-    if(user?.avatar){
+    // 🔥 alineado con backend
+    if(user?.hasAvatar && user?.avatar){
 
       const img = document.createElement("img");
       img.src = user.avatar;
@@ -76,8 +80,10 @@
       return;
     }
 
+    // fallback iniciales
     const initials = (name || "U")
       .split(" ")
+      .filter(Boolean)
       .map(n => n[0])
       .join("")
       .substring(0,2)
@@ -88,7 +94,7 @@
   }
 
   /* =========================
-     RENDER SIDEBAR
+     SIDEBAR RENDER
   ========================= */
 
   Onion.ui.renderSidebar = function(){
@@ -99,7 +105,6 @@
     if(!nameEl || !avatarEl) return;
 
     const user = getUserSafe();
-
     const name = getDisplayName(user);
 
     nameEl.textContent = name;
@@ -153,7 +158,7 @@
   };
 
   /* =========================
-     SIDEBAR STATE (PERSIST)
+     SIDEBAR STATE
   ========================= */
 
   function initSidebarState(){
@@ -183,9 +188,7 @@
       const sidebar = document.querySelector(".sidebar");
       const dropdown = document.querySelector("#userDropdown");
 
-      /* =========================
-         TOGGLE SIDEBAR
-      ========================= */
+      /* TOGGLE SIDEBAR */
 
       const toggleBtn = e.target.closest("#toggleSidebar");
 
@@ -200,9 +203,7 @@
         return;
       }
 
-      /* =========================
-         USER DROPDOWN
-      ========================= */
+      /* USER DROPDOWN */
 
       const userToggle = e.target.closest("#userToggle");
 
@@ -224,17 +225,13 @@
         return;
       }
 
-      /* =========================
-         CLICK DENTRO DROPDOWN
-      ========================= */
+      /* CLICK DENTRO DROPDOWN */
 
       if(e.target.closest("#userDropdown")){
         return;
       }
 
-      /* =========================
-         LOGOUT
-      ========================= */
+      /* LOGOUT */
 
       const logout = e.target.closest("#logoutBtn");
 
@@ -275,9 +272,7 @@
         return;
       }
 
-      /* =========================
-         CLOSE DROPDOWN
-      ========================= */
+      /* CLOSE DROPDOWN */
 
       dropdown?.classList.remove("active");
 

@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================
-   AUTH (PRO SaaS - ONION)
+   AUTH (ONION PRO MAX)
 ========================= */
 
 (function(){
@@ -20,7 +20,7 @@
   function safeSet(key, value){
     try{
       localStorage.setItem(key, value);
-    }catch(e){
+    }catch{
       Onion.warn("⚠️ localStorage bloqueado (set)");
     }
   }
@@ -28,7 +28,7 @@
   function safeGet(key){
     try{
       return localStorage.getItem(key);
-    }catch(e){
+    }catch{
       Onion.warn("⚠️ localStorage bloqueado (get)");
       return null;
     }
@@ -37,7 +37,7 @@
   function safeRemove(key){
     try{
       localStorage.removeItem(key);
-    }catch(e){
+    }catch{
       Onion.warn("⚠️ localStorage bloqueado (remove)");
     }
   }
@@ -86,12 +86,12 @@
 
       Onion.auth.clearToken();
 
-      // 🔥 limpiar sessionStorage
-      try{
-        sessionStorage.clear();
-      }catch{}
+      Onion.clearUser?.();
 
-      // 🔥 limpiar cookies (best effort)
+      // session
+      try{ sessionStorage.clear(); }catch{}
+
+      // cookies (best effort)
       try{
         document.cookie.split(";").forEach(c => {
           document.cookie = c
@@ -108,28 +108,25 @@
 
   };
 
-/* =========================
-   REDIRECT LOGIN
-========================= */
+  /* =========================
+     REDIRECT LOGIN
+  ========================= */
 
-Onion.auth.redirectLogin = function(){
+  Onion.auth.redirectLogin = function(){
 
-  Onion.warn("🔐 Redirigiendo a login");
+    Onion.warn("🔐 Redirigiendo a login");
 
-  const path = window.location.pathname;
+    const path = window.location.pathname;
 
-  // 🔥 evitar bucle si ya estás en auth
-  if (path.startsWith("/auth")) return;
+    // evitar bucle
+    if(path.startsWith("/auth")) return;
 
-  // 🧹 limpiar token (recomendado)
-  try{
-    localStorage.removeItem("onion_token");
-  }catch(e){}
+    Onion.auth.resetSession();
 
-  // 🚀 redirect correcto
-  window.location.replace("/auth");
+    // puedes cambiar esto a /login si quieres
+    window.location.replace("/auth");
 
-};
+  };
 
   /* =========================
      REQUIRE AUTH (GUARD)
@@ -140,63 +137,16 @@ Onion.auth.redirectLogin = function(){
     try{
 
       Onion.auth.getToken();
-
       return true;
 
-    }catch(e){
+    }catch{
 
       Onion.warn("🔐 Acceso bloqueado");
 
       Onion.auth.redirectLogin();
-
       return false;
 
     }
-
-  };
-
-  /* =========================
-     OPTIONAL: SET USER
-  ========================= */
-
-  Onion.setUser = function(user){
-
-    const prev = Onion.state.user || null;
-    const next = user || null;
-
-    const same = JSON.stringify(prev) === JSON.stringify(next);
-
-    if(same){
-      Onion.log("👤 User sin cambios");
-      return;
-    }
-
-    Onion.state.user = next;
-
-    // 🔗 gestionar slug
-    const slug = next?.slug || null;
-    Onion.state.slug = slug;
-
-    try{
-      if(slug){
-        localStorage.setItem("onion_slug", slug);
-      }else{
-        localStorage.removeItem("onion_slug");
-      }
-    }catch(e){
-      Onion.warn("Error guardando slug");
-    }
-
-    if(next){
-      Onion.state.ready = true;
-    }
-
-    Onion.log("👤 User actualizado:", next);
-
-    Onion.events?.emit?.("user:changed", {
-      prev,
-      current: next
-    });
 
   };
 

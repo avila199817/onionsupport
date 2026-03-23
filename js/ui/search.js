@@ -1,10 +1,9 @@
 "use strict";
 
 /* =========================
-   SEARCH (ONION PRO FINAL)
+   SEARCH (ONION PRO FINAL CLEAN)
    - Sin leaks
-   - Abort seguro
-   - Delegación limpia
+   - Usa router (no navega manual)
 ========================= */
 
 (function(){
@@ -15,10 +14,6 @@
   }
 
   const Onion = window.Onion;
-
-  /* =========================
-     INIT SEARCH
-  ========================= */
 
   Onion.ui.initSearch = function(){
 
@@ -32,10 +27,6 @@
 
     let timer = null;
     let controller = null;
-
-    /* =========================
-       HELPERS
-    ========================= */
 
     const show = () => container.classList.add("active");
 
@@ -84,25 +75,8 @@
 
           if (!r.url) return;
 
-          const username =
-            Onion.state.user?.username ||
-            localStorage.getItem("onion_user_slug");
-
-          if(!username){
-            Onion.warn("No username para navegación");
-            return;
-          }
-
-          let finalUrl;
-
-          if(r.url.startsWith("/@")){
-            finalUrl = r.url;
-          }else{
-            finalUrl = "/@" + username + r.url;
-          }
-
-          history.pushState({}, "", finalUrl);
-          Onion.render();
+          // 🔥 USAR ROUTER (NO MANUAL)
+          Onion.router?.navigate?.(r.url);
 
         });
 
@@ -152,10 +126,6 @@
 
     };
 
-    /* =========================
-       INPUT
-    ========================= */
-
     const onInput = ()=>{
 
       const value = input.value.trim();
@@ -178,10 +148,6 @@
 
     input.addEventListener("input", onInput);
 
-    /* =========================
-       FOCUS
-    ========================= */
-
     const onFocus = async ()=>{
 
       const value = input.value.trim();
@@ -194,10 +160,6 @@
 
     input.addEventListener("focus", onFocus);
 
-    /* =========================
-       OUTSIDE CLICK
-    ========================= */
-
     const outsideClick = (e)=>{
       if (!e.target.closest(".topbar-search-wrap")){
         hide();
@@ -205,10 +167,6 @@
     };
 
     document.addEventListener("click", outsideClick);
-
-    /* =========================
-       CLEANUP
-    ========================= */
 
     Onion.onCleanup(()=>{
 
@@ -227,10 +185,6 @@
     });
 
   };
-
-  /* =========================
-     AUTO INIT
-  ========================= */
 
   Onion.events.on("nav:ready", ()=>{
     Onion.ui.initSearch();

@@ -2,6 +2,9 @@
 
 /* =========================
    UI (GLOBAL LAYER - ONION)
+   - Robusto contra timing SPA
+   - Avatar + nombre SIEMPRE
+   - Logout limpio → "/"
 ========================= */
 
 (function(){
@@ -12,6 +15,81 @@
   }
 
   const Onion = window.Onion;
+
+  /* =========================
+     HELPERS
+  ========================= */
+
+  function getUserSafe(){
+    // 1) estado
+    let user = Onion.state.user;
+
+    // 2) fallback localStorage
+    if(!user || !Object.keys(user).length){
+      const username = localStorage.getItem("onion_user_slug");
+      const name = localStorage.getItem("onion_user_name");
+      const avatar = localStorage.getItem("onion_user_avatar"); // opcional
+
+      if(username || name || avatar){
+        user = {
+          username: username || "",
+          name: name || "",
+          avatar: avatar || ""
+        };
+      }
+    }
+
+    return user || null;
+  }
+
+  function getDisplayName(user){
+    // prioridad: nombre completo → username → email → fallback
+    return (
+      user?.name ||
+      user?.fullName ||
+      user?.username ||
+      user?.email ||
+      "Usuario"
+    );
+  }
+
+  function setText(el, txt){
+    if(el && typeof txt === "string"){
+      el.textContent = txt;
+    }
+  }
+
+  function setAvatar(el, user, name){
+    if(!el) return;
+
+    el.innerHTML = "";
+
+    if(user?.avatar){
+      const img = document.createElement("img");
+      img.src = user.avatar;
+      img.alt = "avatar";
+      img.referrerPolicy = "no-referrer";
+      Object.assign(img.style, {
+        width: "100%",
+        height: "100%",
+        borderRadius: "50%",
+        objectFit: "cover"
+      });
+      el.appendChild(img);
+      return;
+    }
+
+    // fallback iniciales
+    const initials = (name || "U")
+      .split(" ")
+      .filter(Boolean)
+      .map(n => n[0])
+      .join("")
+      .substring(0,2)
+      .toUpperCase();
+
+    el.textContent = initials;
+  }
 
   /* =========================
      UI INIT
@@ -30,7 +108,7 @@
   };
 
   /* =========================
-     SIDEBAR RENDER (FIXED)
+     SIDEBAR RENDER (ROBUSTO)
   ========================= */
 
   Onion.ui.renderSidebar = function(){
@@ -43,57 +121,24 @@
       return;
     }
 
-    // 🔥 coger user SIEMPRE
-    const user =
-      Onion.state.user ||
-      {
-        username: localStorage.getItem("onion_user_slug"),
-        name: localStorage.getItem("onion_user_name")
-      };
+    const user = getUserSafe();
 
     if(!user){
-      Onion.warn("No user disponible");
+      Onion.warn("No user disponible para sidebar");
+      setText(nameEl, "Usuario");
+      setAvatar(avatarEl, null, "Usuario");
       return;
     }
 
-    const name =
-      user.name ||
-      user.username ||
-      user.email ||
-      "Usuario";
-
-    nameEl.textContent = name;
-
-    avatarEl.innerHTML = "";
-
-    if(user.avatar){
-
-      const img = document.createElement("img");
-
-      img.src = user.avatar;
-      img.alt = "avatar";
-
-      Object.assign(img.style, {
-        width: "100%",
-        height: "100%",
-        borderRadius: "50%",
-        objectFit: "cover"
-      });
-
-      avatarEl.appendChild(img);
-
-    }else{
-
-      const initials = name
-        .split(" ")
-        .map(n => n[0])
-        .join("")
-        .substring(0,2)
-        .toUpperCase();
-
-      avatarEl.textContent = initials;
-
+    // mantener sincronía de estado (por si vino de localStorage)
+    if(!Onion.state.user){
+      Onion.state.user = user;
     }
+
+    const name = getDisplayName(user);
+
+    setText(nameEl, name);
+    setAvatar(avatarEl, user, name);
 
   };
 
@@ -120,7 +165,7 @@
   };
 
   /* =========================
-     ACTIVE LINK (FIXED)
+     ACTIVE LINK (SOPORTA /@user)
   ========================= */
 
   Onion.ui.updateSidebarActive = function(){
@@ -129,11 +174,11 @@
 
     document.querySelectorAll(".sidebar a[data-link]").forEach(a => {
 
-      const href = a.getAttribute("href");
+      const href = a.getAttribute("href") || "";
 
-      // 🔥 quitar /@usuario del href si existe
       let cleanHref = href;
 
+      // si alguien mete /@user/... lo limpiamos
       if(href.startsWith("/@")){
         const parts = href.split("/").slice(2);
         cleanHref = "/" + (parts.join("/") || "");
@@ -169,7 +214,7 @@
         const collapsed = sidebar.classList.contains("collapsed");
 
         sidebar.classList.toggle("collapsed");
-        localStorage.setItem("sidebar-collapsed", !collapsed);
+        localStorage.setItem("sidebar-collapsed", String(!collapsed));
 
         document.querySelector("#userDropdown")?.classList.remove("active");
 
@@ -200,7 +245,7 @@
       if(collapsed){
 
         sidebar.classList.remove("collapsed");
-        localStorage.setItem("sidebar-collapsed", false);
+        localStorage.setItem("sidebar-collapsed", "false");
 
         setTimeout(()=> dropdown.classList.add("active"), 150);
 
@@ -219,7 +264,7 @@
   };
 
   /* =========================
-     LOGOUT
+     LOGOUT (PERFECTO → "/")
   ========================= */
 
   Onion.ui.initLogout = function(){
@@ -233,24 +278,36 @@
 
       try{
 
+        // 🔥 limpiar tokens y estado
         Onion.auth?.clearToken?.();
+
+        localStorage.removeItem("onion_token");
+        localStorage.removeItem("onion_user_slug");
+        localStorage.removeItem("onion_user_name");
+        localStorage.removeItem("onion_user_avatar");
+
         sessionStorage.clear();
 
+        // 🔥 limpiar cookies
         document.cookie.split(";").forEach(c => {
           document.cookie = c
             .replace(/^ +/, "")
             .replace(/=.*/, "=;expires=" + new Date(0).toUTCString() + ";path=/");
         });
 
+        // 🔥 backend logout (opcional)
         try{
-          await fetch("/api/logout", {
+          await fetch(Onion.config.API + "/auth/logout", {
             method: "POST",
             credentials: "include"
           });
         }catch{}
 
       }finally{
-        window.location.replace("/login");
+
+        // 🔥 salir del SPA → raíz (index.html)
+        window.location.replace("/");
+
       }
 
     };

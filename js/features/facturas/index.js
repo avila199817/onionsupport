@@ -24,7 +24,7 @@ function $(selector){
 }
 
 /* =========================
-   INIT (ANTI DUPLICADO)
+   INIT
 ========================= */
 
 function init(){
@@ -52,7 +52,7 @@ function init(){
 }
 
 /* =========================
-   EVENTS
+   EVENTS (CLICK FILA)
 ========================= */
 
 function bindEvents(){
@@ -75,7 +75,7 @@ function bindEvents(){
 }
 
 /* =========================
-   LOAD DATA
+   LOAD LISTADO
 ========================= */
 
 async function loadFacturas(){
@@ -148,7 +148,7 @@ function setError(){
 }
 
 /* =========================
-   RENDER
+   RENDER LISTADO
 ========================= */
 
 function render(items){
@@ -185,27 +185,23 @@ function render(items){
 }
 
 /* =========================
-   KPIs (FIX IMPORTANTE)
+   KPIs (SOLO PAGADAS)
 ========================= */
 
-function updateKPIs(items, resumen){
+function updateKPIs(items){
 
-  // 🔥 SOLO facturado = lo cobrado (pagadas)
-  const totalPagado = items
-    .filter(f => f.estadoPago === "pagada")
-    .reduce((acc, f) => acc + Number(f.total || 0), 0);
+  const pagadas = items.filter(f => f.estadoPago === "pagada");
+  const pendientes = items.filter(f => f.estadoPago === "pendiente");
 
-  const totalPendiente = items
-    .filter(f => f.estadoPago === "pendiente")
-    .reduce((acc, f) => acc + Number(f.total || 0), 0);
+  const totalPagado = pagadas.reduce((acc, f) => acc + Number(f.total || 0), 0);
 
   const totalEl = $("#facturas-total");
   const pagadasEl = $("#facturas-pagadas");
   const pendientesEl = $("#facturas-pendientes");
 
   if(totalEl) totalEl.textContent = formatMoney(totalPagado);
-  if(pagadasEl) pagadasEl.textContent = items.filter(f => f.estadoPago === "pagada").length;
-  if(pendientesEl) pendientesEl.textContent = items.filter(f => f.estadoPago === "pendiente").length;
+  if(pagadasEl) pagadasEl.textContent = pagadas.length;
+  if(pendientesEl) pendientesEl.textContent = pendientes.length;
 
 }
 
@@ -214,17 +210,83 @@ function updateKPIs(items, resumen){
 ========================= */
 
 function openFactura(id){
+  loadFacturaDetalle(id);
+}
 
-  Onion.log("📄 Abrir factura:", id);
+/* =========================
+   LOAD DETALLE
+========================= */
 
-  // 👉 OPCIÓN 1: navegación interna
-  if(Onion.router){
-    Onion.router.go(`/facturas/${id}`);
-    return;
+async function loadFacturaDetalle(id){
+
+  const root = getRoot();
+  if(!root) return;
+
+  root.innerHTML = `<div class="table-loading">Cargando factura...</div>`;
+
+  try{
+
+    const res = await Onion.fetch(Onion.config.API + "/facturas/" + id);
+    const f = res?.factura || res;
+
+    if(!f){
+      root.innerHTML = `<div>Error cargando factura</div>`;
+      return;
+    }
+
+    renderFacturaDetalle(f);
+
+  }catch(e){
+
+    Onion.error("💥 ERROR FACTURA DETALLE:", e);
+    root.innerHTML = `<div>Error cargando factura</div>`;
+
   }
 
-  // 👉 OPCIÓN 2: fallback
-  window.location.href = `/facturas/${id}`;
+}
+
+/* =========================
+   RENDER DETALLE
+========================= */
+
+function renderFacturaDetalle(f){
+
+  const root = getRoot();
+
+  root.innerHTML = `
+    <div class="factura-detalle">
+
+      <button id="volver-facturas">← Volver</button>
+
+      <h2>Factura #${escapeHTML(f.numero || f.id)}</h2>
+
+      <p><strong>Cliente:</strong> ${escapeHTML(f.cliente || "-")}</p>
+      <p><strong>Fecha:</strong> ${formatFecha(f.fecha)}</p>
+      <p><strong>Estado:</strong> ${escapeHTML(f.estadoPago)}</p>
+
+      <h3>Total</h3>
+      <p>${formatMoney(f.total)}</p>
+
+      ${
+        f.items?.length ? `
+          <h3>Conceptos</h3>
+          <ul>
+            ${f.items.map(i => `
+              <li>
+                ${escapeHTML(i.descripcion)} - ${formatMoney(i.precio)}
+              </li>
+            `).join("")}
+          </ul>
+        ` : ""
+      }
+
+    </div>
+  `;
+
+  document.getElementById("volver-facturas")?.addEventListener("click", ()=>{
+    initialized = false;
+    init();
+  });
 
 }
 

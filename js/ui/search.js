@@ -1,7 +1,10 @@
 "use strict";
 
 /* =========================
-   SEARCH (PRO SaaS - ONION)
+   SEARCH (ONION PRO FINAL)
+   - Sin leaks
+   - Abort seguro
+   - Delegación limpia
 ========================= */
 
 (function(){
@@ -86,7 +89,7 @@
             localStorage.getItem("onion_user_slug");
 
           if(!username){
-            console.warn("No username para navegación");
+            Onion.warn("No username para navegación");
             return;
           }
 
@@ -153,7 +156,7 @@
        INPUT
     ========================= */
 
-    input.addEventListener("input", ()=>{
+    const onInput = ()=>{
 
       const value = input.value.trim();
 
@@ -167,20 +170,19 @@
       timer = setTimeout(async ()=>{
 
         const results = await doSearch(value);
-
-        Onion.log("🔍 RESULTS:", results);
-
         render(results, value);
 
       }, 200);
 
-    });
+    };
+
+    input.addEventListener("input", onInput);
 
     /* =========================
-       FOCUS (REOPEN)
+       FOCUS
     ========================= */
 
-    input.addEventListener("focus", async ()=>{
+    const onFocus = async ()=>{
 
       const value = input.value.trim();
       if (!value) return;
@@ -188,7 +190,9 @@
       const results = await doSearch(value);
       render(results, value);
 
-    });
+    };
+
+    input.addEventListener("focus", onFocus);
 
     /* =========================
        OUTSIDE CLICK
@@ -214,14 +218,18 @@
         try{ controller.abort(); }catch{}
       }
 
+      input.removeEventListener("input", onInput);
+      input.removeEventListener("focus", onFocus);
       document.removeEventListener("click", outsideClick);
+
+      input.__onionSearchInit = false;
 
     });
 
   };
 
   /* =========================
-     AUTO INIT ON RENDER
+     AUTO INIT
   ========================= */
 
   Onion.events.on("nav:ready", ()=>{

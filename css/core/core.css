@@ -274,6 +274,11 @@ html{
 
 body{
   overflow-x:hidden;
+
+  /* 🔥 TRANSICIÓN DE TEMA */
+  transition:
+    background-color .3s ease,
+    color .3s ease;
 }
 
 

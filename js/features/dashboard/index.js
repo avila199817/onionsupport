@@ -1,134 +1,303 @@
-<div class="panel-content dashboard">
+"use strict";
 
-  <div class="container">
+/* =========================
+   DASHBOARD (ONION FINAL PRO)
+   - Compatible SPA
+   - Espera DOM + user
+   - Sin leaks
+   - Limpio y estable
+========================= */
 
-    <!-- HEADER -->
-    <div class="dashboard-header">
-      <div class="header-left">
-        <p class="page-subtitle">Estado general del sistema y actividad en tiempo real</p>
-      </div>
-    </div>
+(function(){
 
-    <!-- KPI -->
-    <div class="grid-cards">
+  const Onion = window.Onion;
 
-      <div class="card highlight">
-        <span class="card-title">Incidencias activas</span>
-        <span id="home-incidencias" class="card-value">--</span>
-        <div class="card-meta"></div>
-      </div>
+  if(!Onion){
+    console.error("💥 Onion no disponible (dashboard)");
+    return;
+  }
 
-      <div class="card">
-        <span class="card-title">Clientes</span>
-        <span id="home-clientes" class="card-value">--</span>
-        <div class="card-meta"></div>
-      </div>
+  let initialized = false;
+  let interval = null;
 
-      <div class="card">
-        <span class="card-title">Facturación mensual</span>
-        <span id="home-facturas" class="card-value">--</span>
-        <div class="card-meta"></div>
-      </div>
+  /* =========================
+     ROOT
+  ========================= */
 
-      <div class="card">
-        <span class="card-title">Usuarios activos</span>
-        <span id="home-usuarios" class="card-value">--</span>
-        <div class="card-meta"></div>
-      </div>
+  function getRoot(){
+    return document.querySelector(".panel-content.dashboard");
+  }
 
-    </div>
+  function $(id){
+    return getRoot()?.querySelector("#" + id);
+  }
 
-    <!-- GRID PRINCIPAL -->
-    <div class="dashboard-grid">
+  /* =========================
+     HELPERS
+  ========================= */
 
-      <!-- ACTIVIDAD -->
-      <div class="panel-block activity">
-        <div class="block-header minimal">
-          <h2 class="section-title">Actividad reciente</h2>
+  function safe(n){
+    return (n === 0 || n) ? n : 0;
+  }
+
+  function formatMoney(n){
+    return new Intl.NumberFormat("es-ES", {
+      style: "currency",
+      currency: "EUR",
+      maximumFractionDigits: 0
+    }).format(safe(n));
+  }
+
+  function timeAgo(date){
+    if(!date) return "Ahora";
+
+    const diff = Math.floor((Date.now() - new Date(date)) / 1000);
+
+    if(diff < 60) return "Hace " + diff + "s";
+    if(diff < 3600) return "Hace " + Math.floor(diff/60) + " min";
+    if(diff < 86400) return "Hace " + Math.floor(diff/3600) + " h";
+
+    return "Hace " + Math.floor(diff/86400) + " d";
+  }
+
+  function animate(el, value){
+    if(!el) return;
+
+    value = safe(value);
+
+    const duration = 400;
+    const start = performance.now();
+
+    function frame(t){
+      const p = Math.min((t - start)/duration, 1);
+      el.textContent = Math.floor(value * p);
+      if(p < 1) requestAnimationFrame(frame);
+    }
+
+    requestAnimationFrame(frame);
+  }
+
+  function calcTrend(current, prev){
+    current = safe(current);
+    prev = safe(prev);
+    if(prev === 0) return 0;
+    return Math.round(((current - prev) / prev) * 100);
+  }
+
+  function setTrend(el, value, label){
+    if(!el) return;
+
+    const trend = value >= 0 ? "up" : "down";
+    const sign = value >= 0 ? "+" : "";
+
+    el.innerHTML = `
+      <span class="trend ${trend}">${sign}${value}%</span>
+      <span class="card-extra">${label}</span>
+    `;
+  }
+
+  function escapeHTML(str){
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  /* =========================
+     DASHBOARD DATA
+  ========================= */
+
+  async function loadDashboard(){
+
+    try{
+
+      const data = await Onion.fetch(Onion.config.API + "/dashboard");
+
+      if(!data || !data.kpis){
+        Onion.warn("Dashboard vacío");
+        return;
+      }
+
+      const k = data.kpis;
+
+      const tickets = safe(k.tickets);
+      const clientes = safe(k.clientes);
+      const usuarios = safe(k.usuarios);
+
+      const facturacion = safe(
+        k.facturacionMensual ??
+        k.facturacionMes ??
+        k.facturacion ?? 0
+      );
+
+      animate($("home-incidencias"), tickets);
+      animate($("home-clientes"), clientes);
+      animate($("home-usuarios"), usuarios);
+
+      const f = $("home-facturas");
+      if(f) f.textContent = formatMoney(facturacion);
+
+      const cards = getRoot()?.querySelectorAll(".card") || [];
+
+      if(cards.length >= 4){
+
+        setTrend(cards[0].querySelector(".card-meta"),
+          calcTrend(tickets, k.ticketsPrev),
+          "vs mes anterior"
+        );
+
+        setTrend(cards[1].querySelector(".card-meta"),
+          calcTrend(clientes, k.clientesPrev),
+          "crecimiento"
+        );
+
+        setTrend(cards[2].querySelector(".card-meta"),
+          calcTrend(facturacion, k.facturacionPrev),
+          "este mes"
+        );
+
+        setTrend(cards[3].querySelector(".card-meta"),
+          calcTrend(usuarios, k.usuariosPrev),
+          "usuarios"
+        );
+
+      }
+
+      /* SUMMARY */
+
+      const summary = getRoot()?.querySelectorAll(".summary-value") || [];
+
+      if(summary.length >= 3){
+        summary[0].textContent = safe(k.ticketsToday);
+        summary[1].textContent = safe(k.resueltosToday);
+        summary[2].textContent = safe(k.pendientesToday);
+      }
+
+      renderActivity(data.activity || []);
+
+    }catch(e){
+      Onion.error("💥 Dashboard error:", e);
+    }
+
+  }
+
+  /* =========================
+     ACTIVITY
+  ========================= */
+
+  function renderActivity(items){
+
+    const list = $("activity-list");
+    if(!list) return;
+
+    list.innerHTML = "";
+
+    if(!items.length){
+      list.innerHTML = "<div class='activity-empty'>Sin actividad</div>";
+      return;
+    }
+
+    items.slice(0,5).forEach(i => {
+
+      const el = document.createElement("div");
+      el.className = "activity-item";
+
+      const desc = escapeHTML(i.desc || "Actividad");
+
+      el.innerHTML = `
+        <div class="activity-content">
+          <span class="activity-desc">${desc}</span>
+          <span class="activity-time">${timeAgo(i.time)}</span>
         </div>
-        <div id="activity-list" class="activity-list"></div>
-      </div>
+      `;
 
-      <!-- SISTEMA -->
-      <div class="panel-block system">
-        <div class="block-header minimal">
-          <h2 class="section-title">Sistema</h2>
-        </div>
+      list.appendChild(el);
 
-        <div class="status-list">
+    });
 
-          <div class="status-item" id="status-api">
-            <span class="status-dot"></span>
-            API operativa
-          </div>
+  }
 
-          <div class="status-item" id="status-db">
-            <span class="status-dot"></span>
-            Base de datos activa
-          </div>
+  /* =========================
+     SYSTEM
+  ========================= */
 
-          <div class="status-item" id="status-uptime">
-            <span class="status-dot"></span>
-            Uptime --
-          </div>
+  async function loadSystem(){
 
-        </div>
+    try{
 
-      </div>
+      const start = performance.now();
+      const data = await Onion.fetch(Onion.config.API + "/health");
+      const latency = Math.floor(performance.now() - start);
 
-    </div>
+      const api = $("status-api");
+      if(api){
+        api.textContent = "API · " + latency + "ms";
+      }
 
-    <!-- SEGUNDO BLOQUE -->
-    <div class="dashboard-grid secondary">
+      const db = $("status-db");
+      if(db){
+        const ok = data?.db?.status === "up";
+        db.textContent = ok ? "DB activa" : "DB error";
+      }
 
-      <!-- RESUMEN -->
-      <div class="panel-block summary">
-        <div class="block-header minimal">
-          <h2 class="section-title">Rendimiento hoy</h2>
-        </div>
+      const up = $("status-uptime");
+      if(up){
+        up.textContent = "Uptime · " + (data?.uptime || "--");
+      }
 
-        <div class="summary-grid">
+    }catch(e){
+      Onion.warn("Health error");
+    }
 
-          <div class="summary-item">
-            <span class="summary-value">--</span>
-            <span class="summary-label">Tickets</span>
-          </div>
+  }
 
-          <div class="summary-item">
-            <span class="summary-value">--</span>
-            <span class="summary-label">Resueltos</span>
-          </div>
+  /* =========================
+     INIT
+  ========================= */
 
-          <div class="summary-item">
-            <span class="summary-value">--</span>
-            <span class="summary-label">Pendientes</span>
-          </div>
+  async function init(){
 
-        </div>
-      </div>
+    if(initialized) return;
 
-      <!-- ALERTAS -->
-      <div class="panel-block alerts">
-        <div class="block-header minimal">
-          <h2 class="section-title">Sistema / Rendimiento</h2>
-        </div>
+    const root = getRoot();
+    if(!root){
+      return setTimeout(init, 100);
+    }
 
-        <div class="alert-list">
+    if(!Onion.state?.user){
+      return setTimeout(init, 100);
+    }
 
-          <div class="alert-item info" id="cpu-usage">CPU: --</div>
-          <div class="alert-item info" id="ram-usage">RAM: --</div>
-          <div class="alert-item info" id="disk-usage">Disco: --</div>
+    initialized = true;
 
-          <div class="alert-item warn" id="system-warning" style="display:none;">
-            Uso elevado del sistema
-          </div>
+    Onion.log("📊 Dashboard init");
 
-        </div>
+    await run();
 
-      </div>
+    interval = setInterval(run, 60000);
 
-    </div>
+    Onion.onCleanup(()=>{
+      initialized = false;
 
-  </div>
+      if(interval){
+        clearInterval(interval);
+        interval = null;
+      }
+    });
 
-</div>
+  }
+
+  async function run(){
+    await Promise.all([
+      loadDashboard(),
+      loadSystem()
+    ]);
+  }
+
+  /* =========================
+     START
+  ========================= */
+
+  init();
+
+})();

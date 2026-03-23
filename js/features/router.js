@@ -55,14 +55,14 @@
 
       let path = window.location.pathname || "/";
 
-      // 🔥 normalizar
+      // normalizar
       path = path.replace(/\/+/g, "/");
 
       if(path.length > 1 && path.endsWith("/")){
         path = path.slice(0, -1);
       }
 
-      // 🔥 detectar @usuario
+      // 🔥 detectar /@usuario
       if(path.startsWith("/@")){
 
         const parts = path.split("/").filter(Boolean);
@@ -70,22 +70,19 @@
         const userSlug = parts[0]; // "@cristian"
         const cleanUser = userSlug.replace("@","");
 
-        // 🔥 guardar usuario en estado (pro)
+        // guardar en estado
         Onion.state.user = Onion.state.user || {};
         Onion.state.user.username = cleanUser;
-
-        // 🔥 guardar slug real
         Onion.state.slug = cleanUser;
 
-        // 👉 decidir ruta interna
+        // decidir ruta interna
         if(parts.length === 1){
-          return "/"; // dashboard
+          return "/";
         }
 
         return "/" + parts.slice(1).join("/");
       }
 
-      // 🔥 ruta normal (fallback)
       return path || "/";
 
     }catch(e){
@@ -115,13 +112,11 @@
       }
 
       Onion.warn("Ruta no encontrada:", route);
-
       return Onion.routes["/"];
 
     }catch(e){
 
       Onion.error("💥 Router resolve error:", e);
-
       return Onion.routes["/"];
 
     }
@@ -129,7 +124,7 @@
   };
 
   /* =========================
-     NAVIGATION (SPA)
+     NAVIGATION (SPA CORE)
   ========================= */
 
   document.addEventListener("click", function(e){
@@ -137,18 +132,38 @@
     const link = e.target.closest("[data-link]");
     if(!link) return;
 
-    const href = link.getAttribute("href");
+    let href = link.getAttribute("href");
     if(!href) return;
 
-    // 🔥 SOLO rutas internas (soporta @usuario)
-    if(!href.startsWith("/@")) return;
+    // 🔥 usuario actual
+    const username =
+      Onion.state.user?.username ||
+      localStorage.getItem("onion_user_slug");
+
+    if(!username){
+      Onion.warn("No username para navegación");
+      return;
+    }
+
+    // 🔥 construir URL final
+    let finalHref;
+
+    if(href === "/"){
+      finalHref = "/@" + username;
+    }
+    else if(href.startsWith("/@")){
+      finalHref = href;
+    }
+    else{
+      finalHref = "/@" + username + href;
+    }
 
     e.preventDefault();
 
     if(Onion.state.navigating) return;
     Onion.state.navigating = true;
 
-    history.pushState({}, "", href);
+    history.pushState({}, "", finalHref);
 
     Onion.render();
 

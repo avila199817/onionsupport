@@ -1,5 +1,5 @@
 /* =========================
-   HOME (STRUCTURE CLEAN)
+   HOME (CLEAN + PRO STRUCTURE)
 ========================= */
 
 .home{
@@ -9,26 +9,20 @@
 .home .container{
   padding-top:20px;
   padding-bottom:40px;
-
-  display:flex;
-  flex-direction:column;
-  gap:22px;
-
-  margin-top:10px;
 }
 
 
 /* =========================
-   HEADER (ELIMINADO)
+   HEADER (VACÍO CONTROLADO)
 ========================= */
 
 .home .dashboard-header{
-  display:none;
+  height:20px;
 }
 
 
 /* =========================
-   KPI (PRIMER NIVEL)
+   GRID CARDS (KPI)
 ========================= */
 
 .home .grid-cards{
@@ -47,19 +41,15 @@
   border:1px solid var(--card-border);
   border-radius:18px;
 
-  padding:20px;
+  padding:18px;
 
   box-shadow:var(--card-shadow);
-  transition:
-    transform .25s ease,
-    box-shadow .25s ease,
-    border-color .2s ease;
+  transition:.25s ease;
 }
 
 .home .card:hover{
   transform:translateY(-4px);
   box-shadow:var(--card-shadow-hover);
-  border-color:color-mix(in srgb, var(--accent), var(--card-border) 70%);
 }
 
 .home .card-title{
@@ -77,51 +67,37 @@
   color:var(--text);
 }
 
-
-/* =========================
-   SUMMARY
-========================= */
-
-.home .summary-grid{
-  display:grid;
-  grid-template-columns:repeat(3,1fr);
-
-  gap:12px;
-
-  max-width:600px;
-  margin:0 auto;
+.home .card-meta{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  margin-top:6px;
 }
 
-.home .summary-item{
-  background:var(--card-bg);
-  border:1px solid var(--card-border);
-
-  padding:14px;
-  border-radius:14px;
-
-  text-align:center;
-}
-
-.home .summary-value{
-  font-size:20px;
-  font-weight:600;
-  color:var(--text);
-}
-
-.home .summary-label{
+.home .card-extra{
   font-size:12px;
   color:var(--dim);
 }
 
 
 /* =========================
-   GRID PRINCIPAL
+   GRID PRINCIPAL (CLAVE)
 ========================= */
 
 .home .dashboard-grid{
   display:grid;
   grid-template-columns:2fr 1fr;
   gap:22px;
+  margin-top:24px;
+}
+
+
+/* =========================
+   SEGUNDO BLOQUE
+========================= */
+
+.home .dashboard-grid + .dashboard-grid{
+  margin-top:12px;
 }
 
 
@@ -157,6 +133,59 @@
   gap:12px;
 
   margin-top:10px;
+}
+
+
+/* =========================
+   SUMMARY
+========================= */
+
+.home .summary-grid{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+
+  gap:12px;
+  margin-top:10px;
+}
+
+.home .summary-item{
+  background:var(--card-bg);
+  border:1px solid var(--card-border);
+
+  padding:14px;
+  border-radius:14px;
+
+  text-align:center;
+}
+
+.home .summary-value{
+  font-size:20px;
+  font-weight:600;
+  color:var(--text);
+}
+
+.home .summary-label{
+  font-size:12px;
+  color:var(--dim);
+}
+
+
+/* =========================
+   ALERTS
+========================= */
+
+.home .alert-list{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+
+  margin-top:10px;
+}
+
+.home .alert-item{
+  padding:12px;
+  border-radius:12px;
+  font-size:13px;
 }
 
 

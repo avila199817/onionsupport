@@ -2,16 +2,14 @@
 
 "use strict";
 
-console.log("✅ Cuenta JS PRO REAL");
+const Onion = window.Onion;
 
+if(!Onion){
+  console.error("💥 Onion no disponible (cuenta)");
+  return;
+}
 
-/* =========================
-   SINGLETON
-========================= */
-
-if(window.__onionCuentaLoaded) return;
-window.__onionCuentaLoaded = true;
-
+let initialized = false;
 
 /* =========================
    ROOT / DOM
@@ -30,30 +28,35 @@ function set(selector, value){
   if(el) el.textContent = value;
 }
 
-
 /* =========================
-   INIT
+   INIT (ANTI DUPLICADO REAL)
 ========================= */
 
 function init(){
 
-  const Onion = window.Onion;
+  if(initialized) return;
+
   const root = getRoot();
+  if(!root) return;
 
-  if(!root){
-    return setTimeout(init, 50);
+  if(!Onion.state?.user){
+    return setTimeout(init, 100);
   }
 
-  if(!Onion || !Onion.state?.user){
-    return setTimeout(init, 50);
-  }
+  initialized = true;
+
+  Onion.log("👤 Cuenta init");
 
   loadCuenta();
 
+  // 🔥 cleanup SPA
+  Onion.onCleanup(()=>{
+    initialized = false;
+  });
+
 }
 
-setTimeout(init, 0);
-
+init();
 
 /* =========================
    LOAD
@@ -63,30 +66,34 @@ async function loadCuenta(){
 
   try{
 
-    const Onion = window.Onion;
     const user = Onion.state.user;
 
-    if(!user?.userId){
+    if(!user?.userId && !user?.id){
       throw new Error("UserId no disponible");
     }
 
+    const id = user.userId || user.id;
+
     const res = await Onion.fetch(
-      Onion.config.API + "/users/" + user.userId
+      Onion.config.API + "/users/" + id
     );
 
-    const u = res.user || res;
+    const u = res?.user || res;
+
+    if(!u){
+      throw new Error("Usuario vacío");
+    }
 
     render(u);
 
   }catch(e){
 
-    console.error("💥 CUENTA ERROR:", e);
+    Onion.error("💥 CUENTA ERROR:", e);
     fallback();
 
   }
 
 }
-
 
 /* =========================
    RENDER
@@ -94,58 +101,49 @@ async function loadCuenta(){
 
 function render(u){
 
-  if(!u) return;
+  const root = getRoot();
+  if(!root) return;
 
-  console.log("🔥 RENDER CUENTA REAL");
-
+  Onion.log("🔥 Render cuenta");
 
   /* =========================
      KPI
   ========================= */
 
-  set("#cuenta-plan", "Go Plan"); // aún no tienes plan en backend
-
+  set("#cuenta-plan", u.plan || "Go Plan");
   set("#cuenta-email", u.email || "--");
-
   set("#cuenta-fecha", formatFecha(u.createdAt));
-
 
   /* =========================
      PERFIL
   ========================= */
 
-  set("#cuenta-nombre", u.name || u.username || "Usuario");
+  const name =
+    u.name ||
+    u.username ||
+    u.email ||
+    "Usuario";
 
+  set("#cuenta-nombre", name);
   set("#cuenta-rol", (u.role || "user").toUpperCase());
-
-  set("#cuenta-id", "ID: " + (u.userId || "--"));
-
+  set("#cuenta-id", "ID: " + (u.userId || u.id || "--"));
 
   /* =========================
-     SUMMARY (REAL BASE)
+     SUMMARY
   ========================= */
 
-  setSummary();
-
+  setSummary(u);
 
   /* =========================
-     ESTADO REAL
+     ESTADO
   ========================= */
 
   renderEstado(u);
 
-
-  /* =========================
-     EXTRA (DEBUG PRO)
-  ========================= */
-
-  console.log("📦 USER FULL:", u);
-
 }
 
-
 /* =========================
-   ESTADO (REAL DATA)
+   ESTADO (REAL)
 ========================= */
 
 function renderEstado(u){
@@ -158,7 +156,7 @@ function renderEstado(u){
 
   const twoFA = u.twofa_enabled === true;
   const emailOK = u.emailVerified === true;
-  const active = u.active === true;
+  const active = u.active !== false;
 
   list.innerHTML = `
     <div class="alert-item ${active ? "info" : "warn"}">
@@ -176,26 +174,24 @@ function renderEstado(u){
 
 }
 
-
 /* =========================
-   SUMMARY (PREPARADO)
+   SUMMARY (ESCALABLE)
 ========================= */
 
-function setSummary(){
+function setSummary(u){
 
   const root = getRoot();
   if(!root) return;
 
   const items = root.querySelectorAll(".summary-value");
-
   if(!items.length) return;
 
-  items[0].textContent = "0"; // incidencias
-  items[1].textContent = "0"; // facturas
-  items[2].textContent = "1"; // sesiones
+  // 🔥 preparado para backend real
+  items[0].textContent = u.totalTickets ?? "0";
+  items[1].textContent = u.totalFacturas ?? "0";
+  items[2].textContent = u.activeSessions ?? "1";
 
 }
-
 
 /* =========================
    FALLBACK
@@ -213,14 +209,18 @@ function fallback(){
 
 }
 
-
 /* =========================
    HELPERS
 ========================= */
 
 function formatFecha(f){
   if(!f) return "--";
-  return new Date(f).toLocaleDateString("es-ES");
+
+  try{
+    return new Date(f).toLocaleDateString("es-ES");
+  }catch{
+    return "--";
+  }
 }
 
 })();

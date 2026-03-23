@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================
-   EVENTS (ONION CORE BUS)
+   EVENTS (ONION CORE BUS PRO)
 ========================= */
 
 (function(){
@@ -13,7 +13,11 @@
 
   const Onion = window.Onion;
 
+  // registro interno
   const events = Object.create(null);
+
+  // debug flag (opcional)
+  const DEBUG = false;
 
   /* =========================
      ON (SUBSCRIBE)
@@ -29,9 +33,17 @@
 
     events[name].add(handler);
 
-    // 🔥 auto-cleanup si estás en SPA render
+    if(DEBUG){
+      Onion.log?.("📡 ON:", name, "total:", events[name].size);
+    }
+
+    // auto-cleanup SPA
     Onion.onCleanup?.(()=>{
       events[name]?.delete(handler);
+
+      if(events[name]?.size === 0){
+        delete events[name];
+      }
     });
 
   };
@@ -46,8 +58,17 @@
 
     if(handler){
       events[name].delete(handler);
+
+      if(events[name].size === 0){
+        delete events[name];
+      }
+
     }else{
       delete events[name];
+    }
+
+    if(DEBUG){
+      Onion.log?.("🧹 OFF:", name);
     }
 
   };
@@ -63,6 +84,8 @@
     const wrapper = function(...args){
       try{
         handler(...args);
+      }catch(e){
+        Onion.error?.("💥 Event once error:", name, e);
       }finally{
         Onion.events.off(name, wrapper);
       }
@@ -80,13 +103,20 @@
 
     if(!name || !events[name]) return;
 
-    events[name].forEach(handler=>{
+    if(DEBUG){
+      Onion.log?.("🚀 EMIT:", name, payload);
+    }
+
+    // copiar handlers (evita problemas si se modifica durante iteración)
+    const handlers = Array.from(events[name]);
+
+    for(const handler of handlers){
       try{
         handler(payload);
       }catch(e){
-        Onion.error("💥 Event error:", name, e);
+        Onion.error?.("💥 Event error:", name, e);
       }
-    });
+    }
 
   };
 
@@ -100,7 +130,7 @@
       delete events[k];
     });
 
-    Onion.log("🧹 Events limpiados");
+    Onion.log?.("🧹 Events limpiados");
 
   };
 

@@ -42,11 +42,34 @@ function init(){
 
   Onion.log("📄 Facturas init");
 
+  bindEvents();
   loadFacturas();
 
-  // 🔥 cleanup al salir de la vista
   Onion.onCleanup(()=>{
     initialized = false;
+  });
+
+}
+
+/* =========================
+   EVENTS
+========================= */
+
+function bindEvents(){
+
+  const root = getRoot();
+  if(!root) return;
+
+  root.addEventListener("click", (e)=>{
+
+    const row = e.target.closest("tr[data-id]");
+    if(!row) return;
+
+    const id = row.dataset.id;
+    if(!id) return;
+
+    openFactura(id);
+
   });
 
 }
@@ -66,7 +89,6 @@ async function loadFacturas(){
 
     const res = await Onion.fetch(Onion.config.API + "/facturas");
 
-    // 🔥 soporte flexible backend
     const facturas = res?.facturas || res?.data || [];
     const resumen = res?.resumen || {};
 
@@ -139,7 +161,7 @@ function render(items){
     const estado = getEstado(f.estadoPago);
 
     return `
-      <tr>
+      <tr data-id="${f.id || f.numero}" style="cursor:pointer">
 
         <td>#${escapeHTML(f.numero || f.id || "--")}</td>
 
@@ -163,25 +185,46 @@ function render(items){
 }
 
 /* =========================
-   KPIs
+   KPIs (FIX IMPORTANTE)
 ========================= */
 
 function updateKPIs(items, resumen){
 
-  const totalPagado = Number(resumen.totalPagado || 0);
-  const totalPendiente = Number(resumen.totalPendiente || 0);
-  const totalFacturado = totalPagado + totalPendiente;
+  // 🔥 SOLO facturado = lo cobrado (pagadas)
+  const totalPagado = items
+    .filter(f => f.estadoPago === "pagada")
+    .reduce((acc, f) => acc + Number(f.total || 0), 0);
 
-  const pagadas = items.filter(f => f.estadoPago === "pagada").length;
-  const pendientes = items.length - pagadas;
+  const totalPendiente = items
+    .filter(f => f.estadoPago === "pendiente")
+    .reduce((acc, f) => acc + Number(f.total || 0), 0);
 
   const totalEl = $("#facturas-total");
   const pagadasEl = $("#facturas-pagadas");
   const pendientesEl = $("#facturas-pendientes");
 
-  if(totalEl) totalEl.textContent = formatMoney(totalFacturado);
-  if(pagadasEl) pagadasEl.textContent = pagadas;
-  if(pendientesEl) pendientesEl.textContent = pendientes;
+  if(totalEl) totalEl.textContent = formatMoney(totalPagado);
+  if(pagadasEl) pagadasEl.textContent = items.filter(f => f.estadoPago === "pagada").length;
+  if(pendientesEl) pendientesEl.textContent = items.filter(f => f.estadoPago === "pendiente").length;
+
+}
+
+/* =========================
+   OPEN FACTURA
+========================= */
+
+function openFactura(id){
+
+  Onion.log("📄 Abrir factura:", id);
+
+  // 👉 OPCIÓN 1: navegación interna
+  if(Onion.router){
+    Onion.router.go(`/facturas/${id}`);
+    return;
+  }
+
+  // 👉 OPCIÓN 2: fallback
+  window.location.href = `/facturas/${id}`;
 
 }
 

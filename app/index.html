@@ -80,7 +80,6 @@ body.loading .layout{
   position:fixed;
   inset:0;
 
-  /* CAPAS GLASS (esto es lo importante) */
   background:
     radial-gradient(circle at 30% 20%, rgba(255,255,255,0.15), transparent 50%),
     radial-gradient(circle at 70% 80%, rgba(255,255,255,0.1), transparent 50%),
@@ -94,10 +93,13 @@ body.loading .layout{
   justify-content:center;
 
   z-index:9999;
-  transition:opacity .4s ease, visibility .4s ease;
+
+  transition:
+    opacity .6s ease,
+    visibility .6s ease;
 }
 
-/* Fade out */
+/* fade out */
 body:not(.loading) #app-loader{
   opacity:0;
   visibility:hidden;
@@ -125,21 +127,13 @@ body:not(.loading) #app-loader{
 ========================= */
 
 @keyframes bounce{
-  0%,100%{
-    transform:translateY(0);
-  }
-  50%{
-    transform:translateY(-14px);
-  }
+  0%,100%{ transform:translateY(0); }
+  50%{ transform:translateY(-14px); }
 }
 
 @keyframes pulse{
-  0%,100%{
-    opacity:1;
-  }
-  50%{
-    opacity:.55;
-  }
+  0%,100%{ opacity:1; }
+  50%{ opacity:.55; }
 }
 
 </style>

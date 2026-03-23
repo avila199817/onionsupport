@@ -57,7 +57,7 @@
 
 
   
-  <style>
+<style>
 html,body{
   margin:0;
   padding:0;
@@ -73,17 +73,21 @@ body.loading .layout{
 }
 
 /* =========================
-   FULL GLASS BACKGROUND
+   FULL GLASS BACKGROUND PRO
 ========================= */
 
 #app-loader{
   position:fixed;
   inset:0;
 
-  /* glass real */
-  background:rgba(255,255,255,0.35);
-  backdrop-filter:blur(20px) saturate(180%);
-  -webkit-backdrop-filter:blur(20px) saturate(180%);
+  /* CAPAS GLASS (esto es lo importante) */
+  background:
+    radial-gradient(circle at 30% 20%, rgba(255,255,255,0.15), transparent 50%),
+    radial-gradient(circle at 70% 80%, rgba(255,255,255,0.1), transparent 50%),
+    rgba(20,20,20,0.25);
+
+  backdrop-filter:blur(28px) saturate(200%);
+  -webkit-backdrop-filter:blur(28px) saturate(200%);
 
   display:flex;
   align-items:center;
@@ -93,7 +97,7 @@ body.loading .layout{
   transition:opacity .4s ease, visibility .4s ease;
 }
 
-/* fade out */
+/* Fade out */
 body:not(.loading) #app-loader{
   opacity:0;
   visibility:hidden;
@@ -108,36 +112,33 @@ body:not(.loading) #app-loader{
   height:64px;
   object-fit:contain;
 
-  /* rebote + pulso */
   animation:
     bounce 1.2s ease-in-out infinite,
     pulse 1.6s ease-in-out infinite;
 
   filter:
-    drop-shadow(0 10px 30px rgba(0,0,0,0.15));
+    drop-shadow(0 12px 40px rgba(0,0,0,0.4));
 }
 
 /* =========================
    ANIMACIONES
 ========================= */
 
-/* rebote tipo Apple */
 @keyframes bounce{
   0%,100%{
     transform:translateY(0);
   }
   50%{
-    transform:translateY(-12px);
+    transform:translateY(-14px);
   }
 }
 
-/* parpadeo suave */
 @keyframes pulse{
   0%,100%{
     opacity:1;
   }
   50%{
-    opacity:.5;
+    opacity:.55;
   }
 }
 

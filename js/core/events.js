@@ -1,95 +1,106 @@
 "use strict";
 
 /* =========================
-   EVENTS (GLOBAL BUS PRO)
+   EVENTS (ONION CORE BUS)
 ========================= */
 
 (function(){
 
   if(!window.Onion){
-    console.error("💥 Onion no está definido (events.js)");
+    console.error("💥 Onion no definido (events.js)");
     return;
   }
 
   const Onion = window.Onion;
 
+  const events = Object.create(null);
+
   /* =========================
-     EVENTS OBJECT
+     ON (SUBSCRIBE)
   ========================= */
 
-  Onion.events = {
+  Onion.events.on = function(name, handler){
 
-    /* =========================
-       EMIT
-    ========================= */
+    if(!name || typeof handler !== "function") return;
 
-    emit(name, detail = {}){
-
-      try{
-
-        if(!name){
-          Onion.warn("Evento sin nombre");
-          return;
-        }
-
-        const event = new CustomEvent(name, { detail });
-
-        window.dispatchEvent(event);
-
-        Onion.log("📡 emit:", name, detail);
-
-      }catch(e){
-        Onion.error("emit error:", name, e);
-      }
-
-    },
-
-    /* =========================
-       ON
-    ========================= */
-
-    on(name, handler){
-
-      if(!name || typeof handler !== "function"){
-        Onion.warn("on inválido:", name);
-        return;
-      }
-
-      const wrapped = (e) => {
-        try{
-          handler(e.detail, e);
-        }catch(err){
-          Onion.error("event handler error:", name, err);
-        }
-      };
-
-      // 🔥 guardar referencia para OFF
-      handler.__onionWrapped = wrapped;
-
-      window.addEventListener(name, wrapped);
-
-      // 🔥 AUTO CLEANUP (si existe el sistema)
-      if(typeof Onion.onCleanup === "function"){
-        Onion.onCleanup(()=>{
-          window.removeEventListener(name, wrapped);
-        });
-      }
-
-    },
-
-    /* =========================
-       OFF
-    ========================= */
-
-    off(name, handler){
-
-      if(!name || !handler) return;
-
-      const wrapped = handler.__onionWrapped || handler;
-
-      window.removeEventListener(name, wrapped);
-
+    if(!events[name]){
+      events[name] = new Set();
     }
+
+    events[name].add(handler);
+
+    // 🔥 auto-cleanup si estás en SPA render
+    Onion.onCleanup?.(()=>{
+      events[name]?.delete(handler);
+    });
+
+  };
+
+  /* =========================
+     OFF (UNSUBSCRIBE)
+  ========================= */
+
+  Onion.events.off = function(name, handler){
+
+    if(!name || !events[name]) return;
+
+    if(handler){
+      events[name].delete(handler);
+    }else{
+      delete events[name];
+    }
+
+  };
+
+  /* =========================
+     ONCE (RUN 1 TIME)
+  ========================= */
+
+  Onion.events.once = function(name, handler){
+
+    if(!name || typeof handler !== "function") return;
+
+    const wrapper = function(...args){
+      try{
+        handler(...args);
+      }finally{
+        Onion.events.off(name, wrapper);
+      }
+    };
+
+    Onion.events.on(name, wrapper);
+
+  };
+
+  /* =========================
+     EMIT (TRIGGER)
+  ========================= */
+
+  Onion.events.emit = function(name, payload){
+
+    if(!name || !events[name]) return;
+
+    events[name].forEach(handler=>{
+      try{
+        handler(payload);
+      }catch(e){
+        Onion.error("💥 Event error:", name, e);
+      }
+    });
+
+  };
+
+  /* =========================
+     CLEAR ALL (DEBUG)
+  ========================= */
+
+  Onion.events.clear = function(){
+
+    Object.keys(events).forEach(k=>{
+      delete events[k];
+    });
+
+    Onion.log("🧹 Events limpiados");
 
   };
 

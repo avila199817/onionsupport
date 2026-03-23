@@ -1,17 +1,32 @@
-<!DOCTYPE html>
-<html lang="es">
 <head>
 
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 
 <title>Onion Support · Panel</title>
+
+<!-- BASE (CRÍTICO PARA SPA) -->
+<base href="/">
+
+<!-- SEO CONTROL -->
 <meta name="robots" content="noindex, nofollow">
 
+<!-- THEME -->
+<meta name="theme-color" content="#ffffff">
+
+<!-- FAVICON -->
 <link rel="icon" href="/favicon.ico">
+
+<!-- PRECONNECT (MEJORA RENDIMIENTO) -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 
 <!-- FONTS -->
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+
+<!-- PRELOAD CRÍTICO -->
+<link rel="preload" href="/css/core/core.css" as="style">
 
 <!-- CSS BASE -->
 <link rel="stylesheet" href="/css/core/core.css">
@@ -20,6 +35,10 @@
 <style>
 html,body{margin:0;padding:0}
 body.loading{overflow:hidden}
+
+body.loading .layout{
+  visibility:hidden;
+}
 
 #app-loader{
   position:fixed;
@@ -31,6 +50,13 @@ body.loading{overflow:hidden}
   z-index:9999;
 }
 </style>
+
+<!-- NOSCRIPT FALLBACK -->
+<noscript>
+  <style>
+    #app-loader{display:none}
+  </style>
+</noscript>
 
 </head>
 

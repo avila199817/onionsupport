@@ -455,13 +455,6 @@ body.loading .layout{
 
 
 
-<!-- =========================
-     PRELOAD JS CRÍTICO
-========================= -->
-
-<link rel="preload" href="/js/init/boot.js" as="script">
-<link rel="preload" href="/js/features/router.js" as="script">
-<link rel="preload" href="/js/features/render.js" as="script">
 
 <!-- =========================
      SCRIPTS (ORDEN CRÍTICO)
@@ -476,13 +469,13 @@ body.loading .layout{
 <script defer src="/js/features/fetch.js"></script>
 <script defer src="/js/features/auth.js"></script>
 <script defer src="/js/features/router.js"></script>
-<script defer src="/js/features/prefetch.js"></script>
 <script defer src="/js/features/render.js"></script>
+<script defer src="/js/features/prefetch.js"></script>
 
 <!-- UI -->
 <script defer src="/js/ui/ui.js"></script>
-<script defer src="/js/ui/search.js"></script>
 <script defer src="/js/ui/loader.js"></script>
+<script defer src="/js/ui/search.js"></script>
 
 <!-- INIT -->
 <script defer src="/js/init/init.js"></script>

@@ -451,9 +451,27 @@ body{
   display:flex;
   align-items:center;
   justify-content:space-between;
-  padding:14px 24px; /* 🔥 más aire lateral real */
+  padding:14px;
 }
 
+/* 🔥 SOLO COLLAPSED → GRID PERFECTO */
+.sidebar.collapsed .sidebar-top{
+  display:grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items:center;
+}
+
+/* logo centrado */
+.sidebar.collapsed .sidebar-top .logo{
+  justify-self:center;
+  transform:translateX(-10px);
+}
+
+/* botón a la derecha */
+.sidebar.collapsed .sidebar-top .sidebar-toggle{
+  justify-self:end;
+  transform:translateX(-10px);
+}
 
 
 /* =========================

@@ -9,6 +9,16 @@
 
   const Onion = window.Onion;
 
+  /* =========================
+     🔥 THEME INIT (ANTES DE TODO)
+  ========================= */
+
+  const savedTheme = localStorage.getItem("theme");
+
+  if(savedTheme === "light"){
+    document.documentElement.setAttribute("data-theme", "light");
+  }
+
   document.addEventListener("DOMContentLoaded", async () => {
 
     Onion.log("🚀 BOOT INIT");

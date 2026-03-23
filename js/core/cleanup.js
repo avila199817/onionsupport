@@ -1,10 +1,10 @@
 "use strict";
 
 /* =========================
-   CLEANUP (ONION PRO FINAL)
-   - Compatible con core.js
+   CLEANUP (ONION PRO FINAL CLEAN)
+   - No sobrescribe core
+   - Solo extiende
    - Sin duplicados
-   - Sin conflictos
 ========================= */
 
 (function(){
@@ -16,72 +16,65 @@
 
   const Onion = window.Onion;
 
-  // 🔥 asegurar estructura correcta (ARRAY)
+  /* =========================
+     ENSURE BASE (NO PISAR)
+  ========================= */
+
   if(!Array.isArray(Onion.state.cleanup)){
     Onion.state.cleanup = [];
   }
 
-  /* =========================
-     REGISTER CLEANUP
-  ========================= */
+  if(typeof Onion.onCleanup !== "function"){
 
-  Onion.onCleanup = function(fn){
+    Onion.onCleanup = function(fn){
 
-    if(typeof fn !== "function"){
-      Onion.warn?.("⚠️ cleanup inválido");
-      return;
-    }
+      if(typeof fn !== "function") return;
 
-    // evitar duplicados
-    if(Onion.state.cleanup.includes(fn)){
-      return;
-    }
-
-    Onion.state.cleanup.push(fn);
-
-  };
-
-  /* =========================
-     RUN CLEANUP
-  ========================= */
-
-  Onion.runCleanup = function(){
-
-    const list = Onion.state.cleanup;
-
-    if(!list || list.length === 0){
-      Onion.log?.("🧹 cleanup vacío");
-      return;
-    }
-
-    Onion.log?.("🧹 Ejecutando cleanup:", list.length);
-
-    // reset antes de ejecutar
-    Onion.state.cleanup = [];
-
-    for(let i = 0; i < list.length; i++){
-
-      try{
-        list[i]();
-      }catch(e){
-        Onion.error?.("💥 cleanup error:", e);
+      if(!Array.isArray(Onion.state.cleanup)){
+        Onion.state.cleanup = [];
       }
 
-    }
+      if(Onion.state.cleanup.includes(fn)) return;
 
-  };
+      Onion.state.cleanup.push(fn);
+
+    };
+
+  }
+
+  if(typeof Onion.runCleanup !== "function"){
+
+    Onion.runCleanup = function(){
+
+      const list = Onion.state.cleanup;
+
+      if(!Array.isArray(list) || list.length === 0){
+        return;
+      }
+
+      Onion.state.cleanup = [];
+
+      for(let i = 0; i < list.length; i++){
+        try{
+          list[i]();
+        }catch(e){
+          Onion.error?.("Cleanup error:", e);
+        }
+      }
+
+    };
+
+  }
 
   /* =========================
-     HELPERS
+     HELPERS (SOLO AÑADIR)
   ========================= */
 
   Onion.cleanupInterval = function(id){
 
     if(!id) return;
 
-    Onion.onCleanup(()=>{
-      try{ clearInterval(id); }catch{}
-    });
+    Onion.onCleanup(()=> clearInterval(id));
 
   };
 
@@ -89,9 +82,7 @@
 
     if(!id) return;
 
-    Onion.onCleanup(()=>{
-      try{ clearTimeout(id); }catch{}
-    });
+    Onion.onCleanup(()=> clearTimeout(id));
 
   };
 
@@ -102,9 +93,7 @@
     target.addEventListener(name, handler, options);
 
     Onion.onCleanup(()=>{
-      try{
-        target.removeEventListener(name, handler, options);
-      }catch{}
+      target.removeEventListener(name, handler, options);
     });
 
   };
@@ -113,9 +102,7 @@
 
     if(!observer) return;
 
-    Onion.onCleanup(()=>{
-      try{ observer.disconnect(); }catch{}
-    });
+    Onion.onCleanup(()=> observer.disconnect());
 
   };
 
@@ -123,15 +110,11 @@
 
     if(!id) return;
 
-    Onion.onCleanup(()=>{
-      try{ cancelAnimationFrame(id); }catch{}
-    });
+    Onion.onCleanup(()=> cancelAnimationFrame(id));
 
   };
 
   Onion.cleanupAll = function(){
-
-    Onion.log?.("🧹 cleanup manual");
 
     Onion.runCleanup();
 

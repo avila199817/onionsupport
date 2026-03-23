@@ -1,9 +1,9 @@
 "use strict";
 
 /* =========================
-   RENDER (ONION PRO FINAL FIXED)
-   - Siempre emite nav:ready
-   - No rompe flujo UI
+   RENDER (ONION FINAL REAL)
+   - nav:ready en el momento correcto
+   - DOM asegurado
 ========================= */
 
 (function(){
@@ -227,25 +227,26 @@
 
       const html = await Onion.fetchHTML(route.page);
 
-      // 🔥 FIX CLAVE
-      if(html === null){
+      if(renderId !== Onion.state.renderId) return;
+
+      if(html !== null){
+
+        const content = extractContent(html);
+
+        Onion.swapContent(content);
+
+        if(route.script){
+          await Onion.loadScript(route.script);
+        }
+
+      }
+
+      if(renderId !== Onion.state.renderId) return;
+
+      // 🔥 CLAVE ABSOLUTA: esperar al DOM REAL
+      requestAnimationFrame(()=>{
         Onion.events.emit?.("nav:ready");
-        return;
-      }
-
-      if(renderId !== Onion.state.renderId) return;
-
-      const content = extractContent(html);
-
-      Onion.swapContent(content);
-
-      if(route.script){
-        await Onion.loadScript(route.script);
-      }
-
-      if(renderId !== Onion.state.renderId) return;
-
-      Onion.events.emit?.("nav:ready");
+      });
 
     }catch(e){
 

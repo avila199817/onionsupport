@@ -51,15 +51,9 @@ function timeAgo(date){
   return "Hace " + Math.floor(diff/86400) + " d";
 }
 
-/* =========================
-   SET TEXT SAFE (🔥 CLAVE)
-========================= */
-
 function setText(id, value){
   const el = $(id);
-  if(el){
-    el.textContent = value;
-  }
+  if(el) el.textContent = value;
 }
 
 /* =========================
@@ -75,15 +69,22 @@ async function loadDashboard(){
 
     const k = data.kpis || {};
 
+    // KPIs
     setText("home-incidencias", safe(k.tickets));
     setText("home-clientes", safe(k.clientes));
     setText("home-usuarios", safe(k.usuarios));
 
     const f = $("home-facturas");
     if(f){
-      f.textContent = formatMoney(
-        k.facturacionMensual ?? 0
-      );
+      f.textContent = formatMoney(k.facturacionMensual);
+    }
+
+    // SUMMARY (HOY)
+    const summary = getRoot()?.querySelectorAll(".summary-item .summary-value");
+    if(summary && summary.length >= 3){
+      summary[0].textContent = safe(k.ticketsToday);
+      summary[1].textContent = safe(k.resueltosToday);
+      summary[2].textContent = safe(k.pendientesToday);
     }
 
     renderActivity(data.activity || []);
@@ -129,7 +130,7 @@ function renderActivity(items){
 }
 
 /* =========================
-   SYSTEM
+   SYSTEM (HEALTH)
 ========================= */
 
 async function loadSystem(){
@@ -139,6 +140,7 @@ async function loadSystem(){
     const base = Onion.config.API.replace("/api","");
     const data = await Onion.fetch(base + "/health");
 
+    // STATUS TEXTOS
     setText("status-api", "API OK");
 
     const db = $("status-db");
@@ -149,6 +151,44 @@ async function loadSystem(){
     const up = $("status-uptime");
     if(up){
       up.textContent = data?.uptime || "--";
+    }
+
+    // CPU
+    const cpu = $("cpu-usage");
+    if(cpu){
+      const val = data?.system?.cpu?.usage ?? 0;
+      cpu.textContent = "CPU: " + val + "%";
+    }
+
+    // RAM
+    const ram = $("ram-usage");
+    if(ram){
+      const val = data?.system?.ram?.usage ?? 0;
+      ram.textContent = "RAM: " + val + "%";
+    }
+
+    // DISK
+    const disk = $("disk-usage");
+    if(disk){
+      const val = data?.system?.disk?.percent ?? 0;
+      disk.textContent = "Disco: " + val + "%";
+    }
+
+    // WARNING
+    const warn = $("system-warning");
+    if(warn){
+
+      const cpuVal = data?.system?.cpu?.usage ?? 0;
+      const ramVal = data?.system?.ram?.usage ?? 0;
+      const diskVal = data?.system?.disk?.percent ?? 0;
+
+      const high =
+        cpuVal > 85 ||
+        ramVal > 85 ||
+        diskVal > 90 ||
+        data?.status === "degraded";
+
+      warn.style.display = high ? "block" : "none";
     }
 
   }catch(e){

@@ -57,6 +57,26 @@ function setText(id, value){
 }
 
 /* =========================
+   MES DINÁMICO
+========================= */
+
+function setMonthLabel(){
+
+  const el = $("facturacion-mes-label");
+  if(!el) return;
+
+  const now = new Date();
+
+  const meses = [
+    "Enero","Febrero","Marzo","Abril","Mayo","Junio",
+    "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"
+  ];
+
+  el.textContent = meses[now.getMonth()] + " " + now.getFullYear();
+
+}
+
+/* =========================
    DASHBOARD DATA
 ========================= */
 
@@ -71,23 +91,23 @@ async function loadDashboard(){
 
     const k = data.kpis || {};
 
-    // KPIs
-    setText("home-incidencias", safe(k.tickets));
-    setText("home-clientes", safe(k.clientes));
-    setText("home-usuarios", safe(k.usuarios));
+    /* ===== USUARIOS ===== */
+    setText("home-usuarios", safe(k.usuariosActivos || k.usuarios));
+    setText("home-usuarios-inactivos", safe(k.usuariosInactivos));
 
-    const f = $("home-facturas");
-    if(f){
-      f.textContent = formatMoney(k.facturacionMensual);
-    }
+    /* ===== CLIENTES ===== */
+    setText("home-clientes", safe(k.clientesActivos || k.clientes));
+    setText("home-clientes-inactivos", safe(k.clientesInactivos));
 
-    // SUMMARY (HOY)
-    const summary = getRoot()?.querySelectorAll(".summary-item .summary-value");
-    if(summary && summary.length >= 3){
-      summary[0].textContent = safe(k.ticketsToday);
-      summary[1].textContent = safe(k.resueltosToday);
-      summary[2].textContent = safe(k.pendientesToday);
-    }
+    /* ===== FACTURACIÓN ===== */
+    setText("home-facturas", formatMoney(k.facturacionTotal));
+    setText("home-facturas-pendiente", formatMoney(k.facturacionPendiente));
+    setText("home-facturacion-mes", formatMoney(k.facturacionMensual));
+
+    /* ===== SUMMARY HOY ===== */
+    setText("tickets-hoy", safe(k.ticketsToday));
+    setText("resueltos-hoy", safe(k.resueltosToday));
+    setText("pendientes-hoy", safe(k.pendientesToday));
 
     renderActivity(data.activity || []);
 
@@ -98,7 +118,7 @@ async function loadDashboard(){
 }
 
 /* =========================
-   ACTIVITY
+   ACTIVITY (PRO)
 ========================= */
 
 function renderActivity(items){
@@ -113,13 +133,15 @@ function renderActivity(items){
     return;
   }
 
-  items.slice(0,5).forEach(i => {
+  items.slice(0,8).forEach(i => {
 
     const el = document.createElement("div");
 
+    el.className = "activity-item";
+
     el.innerHTML = `
       <div>
-        <strong>${i.type}</strong>
+        <strong>${escapeHTML(i.type)}</strong>
         <p>${escapeHTML(i.desc)}</p>
         <small>${timeAgo(i.time)}</small>
       </div>
@@ -132,7 +154,7 @@ function renderActivity(items){
 }
 
 /* =========================
-   SYSTEM (HEALTH)
+   SYSTEM (PRO)
 ========================= */
 
 async function loadSystem(){
@@ -144,45 +166,46 @@ async function loadSystem(){
     const res = await Onion.fetch(base + "/health");
     const data = res?.data || res;
 
-    // STATUS
-    setText("status-api", "API OK");
+    /* ===== API ===== */
+    setText("status-api", "API · " + (data?.latency || "--") + " ms");
 
+    /* ===== DB ===== */
     const db = $("status-db");
     if(db){
-      db.textContent = "DB " + (data?.db?.status || "--");
+      db.textContent = "DB · " + (data?.db?.status || "--");
     }
 
-    const up = $("status-uptime");
-    if(up){
-      up.textContent = data?.uptime || "--";
-    }
+    /* ===== UPTIME ===== */
+    setText("status-uptime", "Uptime · " + (data?.uptime || "--"));
 
-    // CPU
+    /* ===== CPU ===== */
     const cpu = $("cpu-usage");
-    if(cpu){
-      cpu.textContent = data?.system?.cpu
-        ? "CPU: " + data.system.cpu.usage + "%"
-        : "CPU: --";
+    if(cpu && data?.system?.cpu){
+      cpu.textContent =
+        "CPU: " + data.system.cpu.usage + "% · " +
+        (data.system.cpu.model || "CPU desconocida");
     }
 
-    // RAM
+    /* ===== RAM ===== */
     const ram = $("ram-usage");
-    if(ram){
-      ram.textContent = data?.system?.ram
-        ? "RAM: " + data.system.ram.usage + "%"
-        : "RAM: --";
+    if(ram && data?.system?.ram){
+      ram.textContent =
+        "RAM: " + data.system.ram.usage + "% · " +
+        (data.system.ram.used || "--") + " / " +
+        (data.system.ram.total || "--");
     }
 
-    // DISK
+    /* ===== DISCO ===== */
     const disk = $("disk-usage");
-    if(disk){
-      disk.textContent = data?.system?.disk
-        ? "Disco: " + data.system.disk.percent + "%"
-        : "Disco: --";
+    if(disk && data?.system?.disk){
+      disk.textContent =
+        "Disco: " + data.system.disk.percent + "% · " +
+        (data.system.disk.free || "--") + " libres";
     }
 
-    // WARNING
+    /* ===== WARNING ===== */
     const warn = $("system-warning");
+
     if(warn){
 
       const cpuVal = data?.system?.cpu?.usage;
@@ -213,7 +236,9 @@ async function init(){
   const root = getRoot();
   if(!root) return;
 
-  Onion.log("📊 Dashboard init");
+  Onion.log("📊 Dashboard PRO init");
+
+  setMonthLabel();
 
   await loadDashboard();
   loadSystem();

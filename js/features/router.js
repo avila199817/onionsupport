@@ -1,9 +1,9 @@
 "use strict";
 
 /* =========================
-   ROUTER (ONION PRO FINAL)
-   - Navegación sin bloqueos
-   - SPA estable
+   ROUTER (ONION PRO FINAL + META)
+   - Navegación estable
+   - Metadata centralizada (title)
 ========================= */
 
 (function(){
@@ -16,7 +16,7 @@
   const Onion = window.Onion;
 
   /* =========================
-     ROUTES
+     ROUTES (🔥 CON META)
   ========================= */
 
   Onion.routes = Object.freeze({
@@ -24,25 +24,29 @@
     "/": {
       page: "/app/views/index.html",
       style: "/css/app/dashboard.css",
-      script: "/js/features/dashboard/index.js"
+      script: "/js/features/dashboard/index.js",
+      title: "Panel"
     },
 
     "/incidencias": {
       page: "/app/views/incidencias/index.html",
       style: "/css/app/incidencias.css",
-      script: "/js/features/incidencias/index.js"
+      script: "/js/features/incidencias/index.js",
+      title: "Incidencias"
     },
 
     "/facturas": {
       page: "/app/views/facturas/index.html",
       style: "/css/app/facturas.css",
-      script: "/js/features/facturas/index.js"
+      script: "/js/features/facturas/index.js",
+      title: "Facturas"
     },
 
     "/cuenta": {
       page: "/app/views/cuenta/index.html",
       style: "/css/app/cuenta.css",
-      script: "/js/features/cuenta/index.js"
+      script: "/js/features/cuenta/index.js",
+      title: "Cuenta"
     }
 
   });
@@ -96,6 +100,7 @@
         }
 
         return "/" + parts.slice(1).join("/");
+
       }
 
       return path;
@@ -110,7 +115,7 @@
   };
 
   /* =========================
-     RESOLVE
+     RESOLVE (🔥 DEVUELVE META)
   ========================= */
 
   Onion.router.resolve = function(){
@@ -118,7 +123,9 @@
     try{
 
       const route = Onion.router.get();
-      return Onion.routes[route] || Onion.routes["/"];
+      const config = Onion.routes[route];
+
+      return config || Onion.routes["/"];
 
     }catch(e){
 
@@ -130,7 +137,7 @@
   };
 
   /* =========================
-     NAVIGATE (🔥 FIX CLAVE)
+     NAVIGATE
   ========================= */
 
   Onion.router.navigate = function(href){
@@ -162,12 +169,10 @@
 
     if(window.location.pathname === finalHref) return;
 
-    // 🔥 SIN BLOQUEO
     Onion.state.navigating = true;
 
     history.pushState({}, "", finalHref);
 
-    // 🔥 FORZAR RENDER SIEMPRE
     Promise.resolve().then(()=>{
       Onion.render();
     });

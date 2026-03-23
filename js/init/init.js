@@ -1,7 +1,10 @@
 "use strict";
 
 /* =========================
-   INIT (PRO SaaS - ONION)
+   INIT (ONION PRO STABLE)
+   - Sin duplicados
+   - Sin conflictos con router
+   - Auth robusta
 ========================= */
 
 (function(){
@@ -20,16 +23,16 @@
   Onion.init = async function(){
 
     if(Onion.state.ready){
-      Onion.warn("INIT ya ejecutado");
+      Onion.warn?.("⚠️ INIT ya ejecutado");
       return;
     }
 
-    Onion.log("🚀 INIT START");
+    Onion.log?.("🚀 INIT START");
 
     try{
 
       /* =========================
-         AUTH / USER (ROBUSTO)
+         AUTH / USER
       ========================= */
 
       let user = null;
@@ -40,11 +43,11 @@
 
         user = res?.user || res || null;
 
-        if(user){
-          Onion.setUser(user);
-        }else{
+        if(!user){
           throw new Error("NO_USER");
         }
+
+        Onion.setUser?.(user);
 
       }catch(e){
 
@@ -55,7 +58,7 @@
           msg.includes("NO_TOKEN") ||
           msg.includes("NO_USER")
         ){
-          Onion.warn("🔐 No autenticado → redirect");
+          Onion.warn?.("🔐 No autenticado → redirect");
 
           Onion.clearUser?.();
           Onion.auth?.redirectLogin?.();
@@ -63,32 +66,15 @@
           return;
         }
 
-        Onion.error("💥 AUTH ERROR:", e);
         throw e;
 
       }
 
       /* =========================
-         SPA EVENTS (ANTI DUPLICADO)
+         IMPORTANTE
+         NO registrar eventos aquí
+         (router ya controla navegación)
       ========================= */
-
-      // limpiar antes de volver a registrar
-      Onion.events.off?.("nav:change", Onion.render);
-      Onion.events.off?.("app:refresh", Onion.render);
-
-      window.removeEventListener("popstate", Onion.render);
-
-      // registrar limpio
-      Onion.events.on?.("nav:change", Onion.render);
-      Onion.events.on?.("app:refresh", Onion.render);
-
-      window.addEventListener("popstate", Onion.render);
-
-      /* =========================
-         FIRST RENDER (SEGURO)
-      ========================= */
-
-      await Onion.render();
 
       /* =========================
          READY STATE
@@ -100,11 +86,11 @@
         user: Onion.state.user
       });
 
-      Onion.log("✅ INIT READY");
+      Onion.log?.("✅ INIT READY");
 
     }catch(e){
 
-      Onion.error("💥 INIT ERROR:", e);
+      Onion.error?.("💥 INIT ERROR:", e);
 
       const app = document.getElementById("app-content");
 
@@ -121,7 +107,7 @@
     }finally{
 
       /* =========================
-         STATE CLEANUP (CRÍTICO)
+         STATE CLEANUP
       ========================= */
 
       Onion.state.navigating = false;

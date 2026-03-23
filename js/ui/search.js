@@ -76,8 +76,31 @@
         `;
 
         el.addEventListener("click", ()=>{
+
           hide();
-          if (r.url) Onion.go(r.url);
+
+          if (!r.url) return;
+
+          const username =
+            Onion.state.user?.username ||
+            localStorage.getItem("onion_user_slug");
+
+          if(!username){
+            console.warn("No username para navegación");
+            return;
+          }
+
+          let finalUrl;
+
+          if(r.url.startsWith("/@")){
+            finalUrl = r.url;
+          }else{
+            finalUrl = "/@" + username + r.url;
+          }
+
+          history.pushState({}, "", finalUrl);
+          Onion.render();
+
         });
 
         container.appendChild(el);
@@ -92,7 +115,6 @@
 
       try{
 
-        // 🔥 abort request anterior
         if(controller){
           controller.abort();
         }
@@ -105,6 +127,10 @@
           signal: controller.signal,
           credentials: "include"
         });
+
+        if(!res.ok){
+          throw new Error("HTTP " + res.status);
+        }
 
         const data = await res.json();
 
@@ -139,9 +165,14 @@
       }
 
       timer = setTimeout(async ()=>{
+
         const results = await doSearch(value);
+
+        Onion.log("🔍 RESULTS:", results);
+
         render(results, value);
-      }, 180);
+
+      }, 200);
 
     });
 
@@ -170,12 +201,6 @@
     };
 
     document.addEventListener("click", outsideClick);
-
-    /* =========================
-       SPA INTEGRATION
-    ========================= */
-
-    Onion.events.on("nav:search:close", hide);
 
     /* =========================
        CLEANUP

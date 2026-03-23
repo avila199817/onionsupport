@@ -1,5 +1,5 @@
 /* =========================
-   HOME (FINAL PRO ALIGNED)
+   HOME (STRUCTURE FIX)
 ========================= */
 
 .home{
@@ -8,12 +8,16 @@
 
 .home .container{
   padding-top:0;
-  padding-bottom:50px;
+  padding-bottom:40px;
+
+  display:flex;
+  flex-direction:column;
+  gap:28px; /* clave: separación consistente */
 }
 
 
 /* =========================
-   HEADER (ALINEADO REAL)
+   HEADER
 ========================= */
 
 .home .dashboard-header{
@@ -21,8 +25,7 @@
   align-items:center;
 
   height:var(--topbar-height);
-  margin-bottom:40px;
-  padding-top:15px;
+  padding-top:10px;
 }
 
 .home .dashboard-header .header-left{
@@ -55,13 +58,13 @@
 
 
 /* =========================
-   GRID CARDS
+   KPI (PRIMER NIVEL)
 ========================= */
 
 .home .grid-cards{
   display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
-  gap:22px;
+  grid-template-columns:repeat(4,1fr); /* fijo → más jerarquía */
+  gap:20px;
 }
 
 
@@ -96,7 +99,7 @@
 
 .home .card-value{
   display:block;
-  margin-top:12px;
+  margin-top:10px;
 
   font-size:30px;
   font-weight:600;
@@ -118,15 +121,54 @@
 
 
 /* =========================
-   GRID PRINCIPAL
+   SUMMARY (SEGUNDO NIVEL)
+========================= */
+
+.home .summary-grid{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+
+  gap:12px;
+
+  max-width:600px;   /* clave */
+  margin:0 auto;     /* centrado real */
+}
+
+.home .summary-item{
+  background:var(--card-bg);
+  border:1px solid var(--card-border);
+
+  padding:14px;
+  border-radius:14px;
+
+  text-align:center;
+  transition:border-color .2s ease;
+}
+
+.home .summary-item:hover{
+  border-color:color-mix(in srgb, var(--accent), var(--card-border) 70%);
+}
+
+.home .summary-value{
+  font-size:20px;
+  font-weight:600;
+  color:var(--text);
+}
+
+.home .summary-label{
+  font-size:12px;
+  color:var(--dim);
+}
+
+
+/* =========================
+   GRID PRINCIPAL (TERCER NIVEL)
 ========================= */
 
 .home .dashboard-grid{
   display:grid;
-  grid-template-columns:repeat(auto-fit, minmax(300px, 1fr));
-
+  grid-template-columns:2fr 1fr; /* clave: jerarquía */
   gap:22px;
-  margin-top:30px;
 }
 
 
@@ -171,45 +213,6 @@
 
 
 /* =========================
-   SUMMARY
-========================= */
-
-.home .summary-grid{
-  display:grid;
-  grid-template-columns:repeat(3,1fr);
-
-  gap:12px;
-  margin-top:10px;
-}
-
-.home .summary-item{
-  background:var(--card-bg);
-  border:1px solid var(--card-border);
-
-  padding:14px;
-  border-radius:14px;
-
-  text-align:center;
-  transition:border-color .2s ease;
-}
-
-.home .summary-item:hover{
-  border-color:color-mix(in srgb, var(--accent), var(--card-border) 70%);
-}
-
-.home .summary-value{
-  font-size:20px;
-  font-weight:600;
-  color:var(--text);
-}
-
-.home .summary-label{
-  font-size:12px;
-  color:var(--dim);
-}
-
-
-/* =========================
    ALERTS
 ========================= */
 
@@ -238,6 +241,14 @@
     padding:20px;
   }
 
+  .home .grid-cards{
+    grid-template-columns:repeat(2,1fr);
+  }
+
+  .home .dashboard-grid{
+    grid-template-columns:1fr;
+  }
+
 }
 
 @media (max-width:768px){
@@ -252,11 +263,9 @@
     align-items:flex-start;
     gap:10px;
 
-    margin-top:0;
     padding-top:0;
   }
 
-  .home .dashboard-grid,
   .home .grid-cards,
   .home .summary-grid{
     grid-template-columns:1fr;

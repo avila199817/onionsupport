@@ -454,27 +454,6 @@ body{
   padding:14px;
 }
 
-/* 🔥 COLLAPSED CORRECTO */
-.sidebar.collapsed .sidebar-top{
-  justify-content:center;
-  position:relative;
-  padding-left:0;
-  padding-right:0;
-}
-
-/* logo centrado REAL */
-.sidebar.collapsed .sidebar-top .logo{
-  position:absolute;
-  left:50%;
-  transform:translateX(-50%);
-}
-
-/* botón a la derecha */
-.sidebar.collapsed .sidebar-top .sidebar-toggle{
-  position:absolute;
-  right:14px;
-}
-
 
 
 

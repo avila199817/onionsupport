@@ -1,7 +1,10 @@
 "use strict";
 
 /* =========================
-   PREFETCH (ONION PRO STABLE)
+   PREFETCH (ONION PRO FIXED)
+   - Seguro
+   - No invade render
+   - Sin duplicación
 ========================= */
 
 (function(){
@@ -16,7 +19,7 @@
   const prefetched = new Set();
 
   /* =========================
-     NORMALIZE PATH (SYNC ROUTER)
+     NORMALIZE PATH
   ========================= */
 
   function normalizePath(path){
@@ -31,7 +34,6 @@
 
     clean = clean.replace(/\/+/g, "/");
 
-    // quitar /@usuario
     if(clean.startsWith("/@")){
       const parts = clean.split("/").slice(2);
       clean = "/" + (parts.join("/") || "");
@@ -62,16 +64,16 @@
 
       prefetched.add(clean);
 
-      Onion.log?.("⚡ Prefetch:", clean);
-
       /* =========================
-         HTML (CACHE REAL)
+         HTML (LIGHT PREFETCH)
       ========================= */
 
-      Onion.fetchHTML(route.page, true).catch(()=>{});
+      if(route.page){
+        fetch(route.page, { credentials: "include" }).catch(()=>{});
+      }
 
       /* =========================
-         CSS PREFETCH
+         CSS
       ========================= */
 
       if(route.style){
@@ -94,7 +96,7 @@
       }
 
       /* =========================
-         JS PREFETCH
+         JS
       ========================= */
 
       if(route.script){
@@ -123,46 +125,45 @@
   };
 
   /* =========================
-     HOVER PREFETCH (DESKTOP)
+     EVENTS (SAFE)
   ========================= */
 
-  function handleHover(e){
+  if(!window.__ONION_PREFETCH_BOUND__){
 
-    const link = e.target.closest("a[data-spa]");
-    if(!link) return;
+    window.__ONION_PREFETCH_BOUND__ = true;
 
-    const href = link.getAttribute("href");
-    if(!href) return;
+    document.addEventListener("mouseover", function(e){
 
-    // ignorar externos
-    if(
-      href.startsWith("http") ||
-      href.startsWith("mailto:") ||
-      href.startsWith("tel:")
-    ){
-      return;
-    }
+      const link = e.target.closest("a[data-spa]");
+      if(!link) return;
 
-    Onion.prefetch(href);
+      const href = link.getAttribute("href");
+      if(!href) return;
+
+      if(
+        href.startsWith("http") ||
+        href.startsWith("mailto:") ||
+        href.startsWith("tel:")
+      ){
+        return;
+      }
+
+      Onion.prefetch(href);
+
+    });
+
+    document.addEventListener("touchstart", function(e){
+
+      const link = e.target.closest("a[data-spa]");
+      if(!link) return;
+
+      const href = link.getAttribute("href");
+      if(!href) return;
+
+      Onion.prefetch(href);
+
+    }, { passive: true });
 
   }
-
-  document.addEventListener("mouseover", handleHover);
-
-  /* =========================
-     TOUCH PREFETCH (MÓVIL)
-  ========================= */
-
-  document.addEventListener("touchstart", function(e){
-
-    const link = e.target.closest("a[data-spa]");
-    if(!link) return;
-
-    const href = link.getAttribute("href");
-    if(!href) return;
-
-    Onion.prefetch(href);
-
-  }, { passive: true });
 
 })();

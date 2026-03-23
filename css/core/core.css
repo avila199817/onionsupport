@@ -454,7 +454,7 @@ body{
   padding:14px;
 }
 
-/* 🔥 FIX REAL COLLAPSED */
+
 .sidebar.collapsed .sidebar-top{
   justify-content:center;
 }
@@ -465,7 +465,7 @@ body{
 
 .sidebar.collapsed .sidebar-top .sidebar-toggle{
   position:absolute;
-  right:10px;
+  right:14px;
 }
 
 

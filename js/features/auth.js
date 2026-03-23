@@ -1,7 +1,9 @@
 "use strict";
 
 /* =========================
-   AUTH (ONION PRO MAX)
+   AUTH (ONION PRO FIXED)
+   - Sin excepciones innecesarias
+   - Sin dobles redirects
 ========================= */
 
 (function(){
@@ -12,6 +14,8 @@
   }
 
   const Onion = window.Onion;
+
+  let redirecting = false;
 
   /* =========================
      STORAGE SAFE
@@ -43,18 +47,11 @@
   }
 
   /* =========================
-     TOKEN MANAGEMENT
+     TOKEN
   ========================= */
 
   Onion.auth.getToken = function(){
-
-    const token = safeGet("onion_token");
-
-    if(!token){
-      throw new Error("NO_TOKEN");
-    }
-
-    return token;
+    return safeGet("onion_token"); // 🔥 ya no lanza error
   };
 
   Onion.auth.setToken = function(token){
@@ -77,7 +74,7 @@
   };
 
   /* =========================
-     SESSION RESET (FULL CLEAN)
+     RESET SESSION
   ========================= */
 
   Onion.auth.resetSession = function(){
@@ -85,13 +82,10 @@
     try{
 
       Onion.auth.clearToken();
-
       Onion.clearUser?.();
 
-      // session
       try{ sessionStorage.clear(); }catch{}
 
-      // cookies (best effort)
       try{
         document.cookie.split(";").forEach(c => {
           document.cookie = c
@@ -100,7 +94,7 @@
         });
       }catch{}
 
-      Onion.log("🧹 Sesión completamente limpiada");
+      Onion.log("🧹 Sesión limpiada");
 
     }catch(e){
       Onion.error("💥 resetSession error:", e);
@@ -109,44 +103,40 @@
   };
 
   /* =========================
-     REDIRECT LOGIN
+     REDIRECT LOGIN (SAFE)
   ========================= */
 
   Onion.auth.redirectLogin = function(){
+
+    if(redirecting) return;
+    redirecting = true;
 
     Onion.warn("🔐 Redirigiendo a login");
 
     const path = window.location.pathname;
 
-    // evitar bucle
     if(path.startsWith("/auth")) return;
 
     Onion.auth.resetSession();
 
-    // puedes cambiar esto a /login si quieres
     window.location.replace("/auth");
 
   };
 
   /* =========================
-     REQUIRE AUTH (GUARD)
+     REQUIRE AUTH
   ========================= */
 
   Onion.auth.require = function(){
 
-    try{
+    const token = Onion.auth.getToken();
 
-      Onion.auth.getToken();
-      return true;
+    if(token) return true;
 
-    }catch{
+    Onion.warn("🔐 Acceso bloqueado");
 
-      Onion.warn("🔐 Acceso bloqueado");
-
-      Onion.auth.redirectLogin();
-      return false;
-
-    }
+    Onion.auth.redirectLogin();
+    return false;
 
   };
 

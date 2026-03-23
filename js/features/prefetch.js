@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================
-   PREFETCH (PRO SaaS - ONION)
+   PREFETCH (ONION PRO MAX)
 ========================= */
 
 (function(){
@@ -13,7 +13,36 @@
 
   const Onion = window.Onion;
 
-  let prefetched = new Set();
+  const prefetched = new Set();
+
+  /* =========================
+     NORMALIZE PATH (MISMO QUE ROUTER)
+  ========================= */
+
+  function normalizePath(path){
+
+    if(!path) return null;
+
+    let clean = path;
+
+    if(!clean.startsWith("/")){
+      clean = "/" + clean;
+    }
+
+    clean = clean.replace(/\/+/g, "/");
+
+    // 🔥 quitar /@usuario
+    if(clean.startsWith("/@")){
+      const parts = clean.split("/").slice(2);
+      clean = "/" + (parts.join("/") || "");
+    }
+
+    if(clean.length > 1 && clean.endsWith("/")){
+      clean = clean.slice(0, -1);
+    }
+
+    return clean || "/";
+  }
 
   /* =========================
      PREFETCH CORE
@@ -23,14 +52,11 @@
 
     try{
 
-      if(!path) return;
-
-      // 🔥 normalizar
-      let clean = path.startsWith("/") ? path : "/" + path;
-      clean = clean.replace(/\/+/g, "/");
+      const clean = normalizePath(path);
+      if(!clean) return;
 
       if(prefetched.has(clean)){
-        Onion.log("⚡ Prefetch ya hecho:", clean);
+        Onion.log("⚡ Prefetch cache:", clean);
         return;
       }
 
@@ -41,23 +67,50 @@
 
       Onion.log("🚀 Prefetch:", clean);
 
-      // 🔥 precargar HTML
+      /* =========================
+         HTML (CACHE REAL)
+      ========================= */
+
       Onion.fetchHTML(route.page, true).catch(()=>{});
 
-      // 🔥 precargar CSS
+      /* =========================
+         CSS PREFETCH (NO DUPLICAR)
+      ========================= */
+
       if(route.style){
-        const link = document.createElement("link");
-        link.rel = "prefetch";
-        link.href = route.style;
-        document.head.appendChild(link);
+
+        const exists = document.querySelector(
+          `link[href^="${route.style}"]`
+        );
+
+        if(!exists){
+          const link = document.createElement("link");
+          link.rel = "prefetch";
+          link.as = "style";
+          link.href = route.style;
+          document.head.appendChild(link);
+        }
+
       }
 
-      // 🔥 precargar JS
+      /* =========================
+         JS PREFETCH (NO DUPLICAR)
+      ========================= */
+
       if(route.script){
-        const script = document.createElement("link");
-        script.rel = "prefetch";
-        script.href = route.script;
-        document.head.appendChild(script);
+
+        const exists = document.querySelector(
+          `link[href^="${route.script}"]`
+        );
+
+        if(!exists){
+          const link = document.createElement("link");
+          link.rel = "prefetch";
+          link.as = "script";
+          link.href = route.script;
+          document.head.appendChild(link);
+        }
+
       }
 
     }catch(e){
@@ -72,32 +125,22 @@
 
   function handleHover(e){
 
-    let el = e.target;
+    const link = e.target.closest("a[data-link]");
+    if(!link) return;
 
-    while(el && el !== document){
+    const href = link.getAttribute("href");
+    if(!href) return;
 
-      if(el.tagName === "A" && el.hasAttribute("data-link")){
-
-        const href = el.getAttribute("href");
-
-        if(!href) return;
-
-        // 🔥 ignorar externos
-        if(
-          href.startsWith("http") ||
-          href.startsWith("mailto:") ||
-          href.startsWith("tel:")
-        ){
-          return;
-        }
-
-        Onion.prefetch(href);
-
-        return;
-      }
-
-      el = el.parentNode;
+    // ignorar externos
+    if(
+      href.startsWith("http") ||
+      href.startsWith("mailto:") ||
+      href.startsWith("tel:")
+    ){
+      return;
     }
+
+    Onion.prefetch(href);
 
   }
 
@@ -109,18 +152,13 @@
 
   document.addEventListener("touchstart", function(e){
 
-    let el = e.target;
+    const link = e.target.closest("a[data-link]");
+    if(!link) return;
 
-    while(el && el !== document){
+    const href = link.getAttribute("href");
+    if(!href) return;
 
-      if(el.tagName === "A" && el.hasAttribute("data-link")){
-        const href = el.getAttribute("href");
-        Onion.prefetch(href);
-        return;
-      }
-
-      el = el.parentNode;
-    }
+    Onion.prefetch(href);
 
   }, { passive: true });
 

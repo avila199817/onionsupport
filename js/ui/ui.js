@@ -1,10 +1,10 @@
 "use strict";
 
 /* =========================
-   UI (ONION PRO FIXED FINAL)
+   UI (ONION PRO FINAL)
    - INIT una sola vez
-   - REFRESH en navegación
-   - Render robusto (avatar + nombre)
+   - REFRESH estable (fix timing)
+   - Avatar + nombre OK
 ========================= */
 
 (function(){
@@ -115,10 +115,8 @@
       return true;
     };
 
-    // intento inmediato
     if(tryRender()) return;
 
-    // retry si el DOM aún no está listo
     requestAnimationFrame(()=> tryRender());
 
   };
@@ -178,7 +176,7 @@
   }
 
   /* =========================
-     EVENTS (UNA SOLA VEZ)
+     EVENTS
   ========================= */
 
   function bindGlobalEvents(){
@@ -283,14 +281,16 @@
   };
 
   /* =========================
-     REFRESH
+     REFRESH (FIX CLAVE)
   ========================= */
 
   Onion.ui.refresh = function(){
 
-    Onion.ui.renderSidebar();
-    Onion.ui.renderTopbar();
-    Onion.ui.updateSidebarActive();
+    requestAnimationFrame(()=>{
+      Onion.ui.renderSidebar();
+      Onion.ui.renderTopbar();
+      Onion.ui.updateSidebarActive();
+    });
 
   };
 

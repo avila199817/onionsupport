@@ -74,17 +74,24 @@ body.loading .layout{
 }
 
 /* =========================
-   LOADER WRAPPER
+   LOADER WRAPPER (GLASS BG)
 ========================= */
 
 #app-loader{
   position:fixed;
   inset:0;
-  background:linear-gradient(180deg,#ffffff 0%, #f6f7f9 100%);
+
+  /* Fondo con profundidad */
+  background:
+    radial-gradient(circle at 30% 20%, rgba(255,255,255,0.6), transparent 60%),
+    radial-gradient(circle at 70% 80%, rgba(0,0,0,0.04), transparent 60%),
+    linear-gradient(180deg,#f8f9fb 0%, #eef1f5 100%);
+
   display:flex;
   align-items:center;
   justify-content:center;
   z-index:9999;
+
   transition:opacity .5s ease, visibility .5s ease;
 }
 
@@ -95,7 +102,7 @@ body:not(.loading) #app-loader{
 }
 
 /* =========================
-   CONTAINER
+   GLASS BOX (CLAVE)
 ========================= */
 
 .loader-box{
@@ -103,7 +110,40 @@ body:not(.loading) #app-loader{
   flex-direction:column;
   align-items:center;
   gap:18px;
+
+  padding:28px 34px;
+  border-radius:22px;
+
+  /* GLASS */
+  background:rgba(255,255,255,0.55);
+  backdrop-filter:blur(18px) saturate(160%);
+  -webkit-backdrop-filter:blur(18px) saturate(160%);
+
+  border:1px solid rgba(255,255,255,0.6);
+
+  /* profundidad */
+  box-shadow:
+    0 10px 40px rgba(0,0,0,0.08),
+    inset 0 1px 0 rgba(255,255,255,0.7);
+
   animation:fadeIn .6s ease;
+}
+
+/* Glow sutil dinámico */
+.loader-box::before{
+  content:"";
+  position:absolute;
+  inset:-1px;
+  border-radius:22px;
+
+  background:linear-gradient(120deg,
+    rgba(255,255,255,0.4),
+    rgba(255,255,255,0.1),
+    rgba(255,255,255,0.4)
+  );
+
+  opacity:.6;
+  pointer-events:none;
 }
 
 /* =========================
@@ -111,11 +151,15 @@ body:not(.loading) #app-loader{
 ========================= */
 
 .loader-logo{
-  width:48px;
-  height:48px;
+  width:52px;
+  height:52px;
   object-fit:contain;
+
   animation:pulse 1.6s ease-in-out infinite;
-  filter:drop-shadow(0 4px 12px rgba(0,0,0,0.08));
+
+  filter:
+    drop-shadow(0 6px 18px rgba(0,0,0,0.12))
+    contrast(1.05);
 }
 
 /* =========================
@@ -124,35 +168,39 @@ body:not(.loading) #app-loader{
 
 .loader-title{
   font-family:'Inter', sans-serif;
-  font-size:15px;
+  font-size:14px;
   font-weight:500;
-  color:#222;
+
+  color:rgba(0,0,0,0.75);
   letter-spacing:.2px;
-  opacity:.75;
+
   animation:fadeSoft 2s ease-in-out infinite;
 }
 
 /* =========================
-   SPINNER PRO
+   SPINNER (GLASS STYLE)
 ========================= */
 
 .loader-spinner{
-  width:38px;
-  height:38px;
+  width:34px;
+  height:34px;
   border-radius:50%;
-  border:2.5px solid rgba(0,0,0,0.08);
-  border-top:2.5px solid #111;
+
+  border:2px solid rgba(0,0,0,0.08);
+  border-top:2px solid rgba(0,0,0,0.7);
+
   animation:spin .7s linear infinite;
 }
 
 /* =========================
-   PROGRESS BAR (FLUIDA)
+   PROGRESS BAR (PREMIUM)
 ========================= */
 
 .loader-bar{
-  width:150px;
+  width:140px;
   height:3px;
-  background:rgba(0,0,0,0.05);
+
+  background:rgba(0,0,0,0.06);
   border-radius:10px;
   overflow:hidden;
   position:relative;
@@ -162,9 +210,17 @@ body:not(.loading) #app-loader{
   content:"";
   position:absolute;
   inset:0;
+
   width:35%;
-  background:linear-gradient(90deg, transparent, #111, transparent);
   border-radius:10px;
+
+  background:linear-gradient(
+    90deg,
+    transparent,
+    rgba(0,0,0,0.7),
+    transparent
+  );
+
   animation:loadBar 1.4s ease-in-out infinite;
 }
 
@@ -182,22 +238,19 @@ body:not(.loading) #app-loader{
   100%{ transform:translateX(140%); }
 }
 
-/* Pulso suave (NO parpadeo feo) */
 @keyframes pulse{
   0%,100%{ opacity:1; transform:scale(1); }
-  50%{ opacity:.55; transform:scale(0.96); }
+  50%{ opacity:.6; transform:scale(0.96); }
 }
 
-/* Fade entrada */
 @keyframes fadeIn{
-  from{ opacity:0; transform:translateY(6px); }
+  from{ opacity:0; transform:translateY(8px); }
   to{ opacity:1; transform:translateY(0); }
 }
 
-/* Texto breathing */
 @keyframes fadeSoft{
   0%,100%{ opacity:.6; }
-  50%{ opacity:.9; }
+  50%{ opacity:.95; }
 }
 
 </style>

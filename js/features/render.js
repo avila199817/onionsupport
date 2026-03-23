@@ -1,9 +1,9 @@
 "use strict";
 
 /* =========================
-   RENDER (ONION PRO FIXED)
+   RENDER (ONION PRO FINAL CLEAN)
    - Aislado
-   - Sin interferencias con UI/router
+   - Sin interferencias con UI/router/auth
    - Sin leaks
 ========================= */
 
@@ -155,9 +155,8 @@
         credentials: "include"
       });
 
+      // 🔥 NO redirige (eso es de auth/init)
       if(res.status === 401){
-        Onion.clearUser?.();
-        Onion.auth?.redirectLogin?.();
         return null;
       }
 
@@ -204,8 +203,7 @@
       node = wrapper;
     }
 
-    // 🔥 CLONAR para evitar referencias raras
-    return node.cloneNode(true);
+    return node.cloneNode(true); // 🔥 clave
   }
 
   /* =========================
@@ -272,7 +270,7 @@
 
       if(renderId !== Onion.state.renderId) return;
 
-      // 🔥 AQUÍ SOLO NOTIFICAMOS → UI reacciona
+      // 🔥 SOLO evento → UI reacciona
       Onion.events.emit?.("nav:ready");
 
     }catch(e){

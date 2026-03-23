@@ -106,18 +106,12 @@
   Onion.ui.renderTopbar = function(){
 
     const route = Onion.router.get();
-    const el = document.querySelector("#topbar-title");
+    const config = Onion.routes[route];
 
+    const el = document.querySelector("#topbar-title");
     if(!el) return;
 
-    const titles = {
-      "/": "Onion Support",
-      "/incidencias": "Incidencias",
-      "/facturas": "Facturas",
-      "/cuenta": "Cuenta"
-    };
-
-    el.textContent = titles[route] || "Panel";
+    el.textContent = config?.title || "Panel";
 
   };
 
@@ -157,8 +151,6 @@
       const logout = e.target.closest("#logoutBtn");
 
       if(logout){
-
-        console.log("🔥 LOGOUT REAL");
 
         e.preventDefault();
 

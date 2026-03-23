@@ -52,6 +52,17 @@ function timeAgo(date){
 }
 
 /* =========================
+   SET TEXT SAFE (🔥 CLAVE)
+========================= */
+
+function setText(id, value){
+  const el = $(id);
+  if(el){
+    el.textContent = value;
+  }
+}
+
+/* =========================
    DASHBOARD DATA
 ========================= */
 
@@ -64,9 +75,9 @@ async function loadDashboard(){
 
     const k = data.kpis || {};
 
-    $("home-incidencias").textContent = safe(k.tickets);
-    $("home-clientes").textContent = safe(k.clientes);
-    $("home-usuarios").textContent = safe(k.usuarios);
+    setText("home-incidencias", safe(k.tickets));
+    setText("home-clientes", safe(k.clientes));
+    setText("home-usuarios", safe(k.usuarios));
 
     const f = $("home-facturas");
     if(f){
@@ -118,7 +129,7 @@ function renderActivity(items){
 }
 
 /* =========================
-   SYSTEM (FIXED 🔥)
+   SYSTEM
 ========================= */
 
 async function loadSystem(){
@@ -128,10 +139,7 @@ async function loadSystem(){
     const base = Onion.config.API.replace("/api","");
     const data = await Onion.fetch(base + "/health");
 
-    const api = $("status-api");
-    if(api){
-      api.textContent = "API OK";
-    }
+    setText("status-api", "API OK");
 
     const db = $("status-db");
     if(db){
@@ -169,10 +177,12 @@ async function init(){
   }, 60000);
 
   Onion.onCleanup(()=>{
+
     if(interval){
       clearInterval(interval);
       interval = null;
     }
+
   });
 
 }

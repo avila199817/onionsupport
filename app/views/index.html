@@ -2,9 +2,7 @@
 
   <div class="container">
 
-    <!-- =========================
-         HEADER
-    ========================= -->
+    <!-- HEADER -->
     <div class="dashboard-header">
       <div class="header-left">
         <h1 class="page-title">Dashboard</h1>
@@ -12,63 +10,81 @@
       </div>
     </div>
 
-    <!-- =========================
-         KPI CARDS
-    ========================= -->
+    <!-- KPI CARDS -->
     <div class="grid-cards">
 
       <div class="card">
-        <span class="card-title">Incidencias</span>
+        <span class="card-title">
+          Incidencias 
+          <span class="badge info sm">Live</span>
+        </span>
         <strong id="home-incidencias" class="card-value">0</strong>
       </div>
 
       <div class="card">
-        <span class="card-title">Clientes</span>
+        <span class="card-title">
+          Clientes 
+          <span class="badge success sm">Activos</span>
+        </span>
         <strong id="home-clientes" class="card-value">0</strong>
       </div>
 
       <div class="card">
-        <span class="card-title">Usuarios</span>
+        <span class="card-title">
+          Usuarios 
+          <span class="badge neutral sm">Total</span>
+        </span>
         <strong id="home-usuarios" class="card-value">0</strong>
       </div>
 
       <div class="card">
-        <span class="card-title">Facturación</span>
+        <span class="card-title">
+          Facturación 
+          <span class="badge warning sm">Mensual</span>
+        </span>
         <strong id="home-facturas" class="card-value">€0</strong>
       </div>
 
     </div>
 
-    <!-- =========================
-         SUMMARY
-    ========================= -->
+    <!-- SUMMARY -->
     <div class="summary-grid">
 
       <div class="summary-item">
         <div class="summary-value">0</div>
-        <div class="summary-label">Tickets hoy</div>
+        <div class="summary-label">
+          Tickets hoy 
+          <span class="badge info sm dot">Hoy</span>
+        </div>
       </div>
 
       <div class="summary-item">
         <div class="summary-value">0</div>
-        <div class="summary-label">Resueltos</div>
+        <div class="summary-label">
+          Resueltos 
+          <span class="badge success sm dot">OK</span>
+        </div>
       </div>
 
       <div class="summary-item">
         <div class="summary-value">0</div>
-        <div class="summary-label">Pendientes</div>
+        <div class="summary-label">
+          Pendientes 
+          <span class="badge error sm dot">Alerta</span>
+        </div>
       </div>
 
     </div>
 
-    <!-- =========================
-         MAIN GRID
-    ========================= -->
+    <!-- GRID -->
     <div class="dashboard-grid">
 
       <!-- ACTIVITY -->
       <div class="panel-block">
-        <div class="section-title">Actividad reciente</div>
+        <div class="section-title">
+          Actividad reciente 
+          <span class="badge info sm">Realtime</span>
+        </div>
 
         <div id="activity-list" class="activity-list">
           <div>Cargando...</div>
@@ -77,20 +93,31 @@
 
       <!-- SYSTEM -->
       <div class="panel-block">
-        <div class="section-title">Estado del sistema</div>
+        <div class="section-title">
+          Estado del sistema 
+          <span class="badge success sm dot">Operativo</span>
+        </div>
 
         <div class="status-list">
 
-          <div id="status-api">API --</div>
-          <div id="status-db">DB --</div>
+          <div id="status-api">
+            API 
+            <span class="badge success sm dot">OK</span>
+          </div>
+
+          <div id="status-db">
+            DB 
+            <span class="badge neutral sm">--</span>
+          </div>
+
           <div id="status-uptime">Uptime --</div>
 
           <div id="cpu-usage">CPU: --</div>
           <div id="ram-usage">RAM: --</div>
           <div id="disk-usage">Disco: --</div>
 
-          <div id="system-warning" class="alert-item" style="display:none; color:#c00;">
-            ⚠️ Alta carga del sistema
+          <div id="system-warning" class="alert-item" style="display:none;">
+            <span class="badge error sm dot">Alta carga</span>
           </div>
 
         </div>

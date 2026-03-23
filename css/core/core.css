@@ -937,11 +937,13 @@ body{
 }
 
 
-/* 🔥 FOCUS PRO (usa accent, no info) */
+/* 🔥 FOCUS PRO */
 .topbar-search:focus{
   border-color:var(--accent);
   background:var(--panel-bg);
-  box-shadow:0 0 0 2px color-mix(in srgb, var(--accent), transparent 85%);
+
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--accent), transparent 85%);
 }
 
 
@@ -965,11 +967,10 @@ body{
 }
 
 
-/* ICON REACCIONA AL FOCUS */
-.topbar-search:focus + .topbar-search-icon{
+/* 🔥 ICON REACTIVO (CORRECTO PARA TU HTML) */
+.topbar-search-wrap:focus-within .topbar-search-icon{
   color:var(--accent);
 }
-
 
 
 

@@ -135,6 +135,14 @@
 
 
 
+
+
+
+
+
+
+
+
 /* =========================
    LIGHT MODE
 ========================= */
@@ -187,26 +195,32 @@
    LOGO SWITCH
 ========================= */
 
-/* base */
+/* contenedor */
 .logo{
   position:relative;
+  width:32px;
+  height:32px;
 }
 
+/* ambos logos ocupan el mismo sitio */
 .logo img{
   position:absolute;
   inset:0;
+  width:100%;
+  height:100%;
+  object-fit:contain;
 }
 
-/* dark (default) */
-.logo-light{
-  display:none;
-}
-
+/* DEFAULT (DARK MODE) */
 .logo-dark{
   display:block;
 }
 
-/* light mode */
+.logo-light{
+  display:none;
+}
+
+/* LIGHT MODE SWITCH */
 [data-theme="light"] .logo-dark{
   display:none;
 }
@@ -214,8 +228,6 @@
 [data-theme="light"] .logo-light{
   display:block;
 }
-
-
 
 
 

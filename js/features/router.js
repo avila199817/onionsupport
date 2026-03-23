@@ -21,7 +21,7 @@
 
     "/": {
       page: "/app/views/index.html",
-      style: "/css/core/core.css",
+      style: "/css/app/dashboard.css",
       script: "/js/features/dashboard/index.js"
     },
 

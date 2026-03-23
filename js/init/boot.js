@@ -23,16 +23,10 @@
         return;
       }
 
-      // 🔥 INIT (esto ya hace render)
+      // 🔥 INIT (incluye UI.init + render)
       await Onion.init();
 
-    }catch(e){
-
-      Onion.error("💥 BOOT ERROR:", e);
-
-    }finally{
-
-      // 🔥 ESTO ES LO QUE TE FALTABA
+      // ✅ SOLO SI TODO HA IDO BIEN
       document.body.classList.remove("loading");
 
       const loader = document.getElementById("app-loader");
@@ -41,6 +35,24 @@
       }
 
       Onion.log("✅ APP READY");
+
+    }catch(e){
+
+      Onion.error("💥 BOOT ERROR:", e);
+
+      const app = document.getElementById("app-content");
+
+      if(app){
+        app.innerHTML = `
+          <div style="padding:20px">
+            <h2>Error crítico</h2>
+            <p>${e.message}</p>
+            <button onclick="location.reload()">Reintentar</button>
+          </div>
+        `;
+      }
+
+      document.body.classList.remove("loading");
 
     }
 

@@ -46,7 +46,7 @@
   });
 
   /* =========================
-     GET PATH (MULTI-TENANT)
+     GET PATH (MULTI-TENANT PRO)
   ========================= */
 
   Onion.router.get = function(){
@@ -70,12 +70,18 @@
         const userSlug = parts[0]; // "@cristian"
         const cleanUser = userSlug.replace("@","");
 
-        // guardar en estado
-        Onion.state.user = Onion.state.user || {};
-        Onion.state.user.username = cleanUser;
+        // 🔥 guardar SOLO si no existe (no pisar datos reales)
+        if(!Onion.state.user){
+          Onion.state.user = {};
+        }
+
+        if(!Onion.state.user.username){
+          Onion.state.user.username = cleanUser;
+        }
+
         Onion.state.slug = cleanUser;
 
-        // decidir ruta interna
+        // ruta interna
         if(parts.length === 1){
           return "/";
         }
@@ -112,11 +118,13 @@
       }
 
       Onion.warn("Ruta no encontrada:", route);
+
       return Onion.routes["/"];
 
     }catch(e){
 
       Onion.error("💥 Router resolve error:", e);
+
       return Onion.routes["/"];
 
     }
@@ -124,7 +132,7 @@
   };
 
   /* =========================
-     NAVIGATION (SPA CORE)
+     NAVIGATION (SPA PRO)
   ========================= */
 
   document.addEventListener("click", function(e){
@@ -134,6 +142,9 @@
 
     let href = link.getAttribute("href");
     if(!href) return;
+
+    // permitir enlaces externos
+    if(href.startsWith("http")) return;
 
     // 🔥 usuario actual
     const username =
@@ -145,15 +156,17 @@
       return;
     }
 
-    // 🔥 construir URL final
     let finalHref;
 
+    // HOME
     if(href === "/"){
       finalHref = "/@" + username;
     }
+    // YA TIENE USER
     else if(href.startsWith("/@")){
       finalHref = href;
     }
+    // RUTA NORMAL
     else{
       finalHref = "/@" + username + href;
     }

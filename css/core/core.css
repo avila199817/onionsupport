@@ -596,8 +596,9 @@ body{
 }
 
 .menu-item.active{
-  background:var(--sb-active);
+  background:color-mix(in srgb, var(--accent), transparent 85%);
   color:var(--text);
+  border:1px solid color-mix(in srgb, var(--accent), transparent 70%);
 }
 
 

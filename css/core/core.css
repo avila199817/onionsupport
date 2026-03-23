@@ -452,13 +452,21 @@ body{
   align-items:center;
   justify-content:space-between;
   padding:14px;
-  gap:10px;
-}
-.sidebar.collapsed .sidebar-top{
-  justify-content:center;
-  gap:10px;
 }
 
+/* 🔥 FIX REAL COLLAPSED */
+.sidebar.collapsed .sidebar-top{
+  justify-content:center;
+}
+
+.sidebar.collapsed .sidebar-top .logo{
+  margin:0 auto;
+}
+
+.sidebar.collapsed .sidebar-top .sidebar-toggle{
+  position:absolute;
+  right:10px;
+}
 
 
 

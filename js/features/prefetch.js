@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================
-   PREFETCH (ONION PRO MAX)
+   PREFETCH (ONION PRO STABLE)
 ========================= */
 
 (function(){
@@ -16,7 +16,7 @@
   const prefetched = new Set();
 
   /* =========================
-     NORMALIZE PATH (MISMO QUE ROUTER)
+     NORMALIZE PATH (SYNC ROUTER)
   ========================= */
 
   function normalizePath(path){
@@ -31,7 +31,7 @@
 
     clean = clean.replace(/\/+/g, "/");
 
-    // 🔥 quitar /@usuario
+    // quitar /@usuario
     if(clean.startsWith("/@")){
       const parts = clean.split("/").slice(2);
       clean = "/" + (parts.join("/") || "");
@@ -48,24 +48,21 @@
      PREFETCH CORE
   ========================= */
 
-  Onion.prefetch = async function(path){
+  Onion.prefetch = function(path){
 
     try{
 
       const clean = normalizePath(path);
       if(!clean) return;
 
-      if(prefetched.has(clean)){
-        Onion.log("⚡ Prefetch cache:", clean);
-        return;
-      }
+      if(prefetched.has(clean)) return;
 
       const route = Onion.routes[clean];
       if(!route) return;
 
       prefetched.add(clean);
 
-      Onion.log("🚀 Prefetch:", clean);
+      Onion.log?.("⚡ Prefetch:", clean);
 
       /* =========================
          HTML (CACHE REAL)
@@ -74,7 +71,7 @@
       Onion.fetchHTML(route.page, true).catch(()=>{});
 
       /* =========================
-         CSS PREFETCH (NO DUPLICAR)
+         CSS PREFETCH
       ========================= */
 
       if(route.style){
@@ -84,17 +81,20 @@
         );
 
         if(!exists){
+
           const link = document.createElement("link");
           link.rel = "prefetch";
           link.as = "style";
           link.href = route.style;
+
           document.head.appendChild(link);
+
         }
 
       }
 
       /* =========================
-         JS PREFETCH (NO DUPLICAR)
+         JS PREFETCH
       ========================= */
 
       if(route.script){
@@ -104,28 +104,31 @@
         );
 
         if(!exists){
+
           const link = document.createElement("link");
           link.rel = "prefetch";
           link.as = "script";
           link.href = route.script;
+
           document.head.appendChild(link);
+
         }
 
       }
 
     }catch(e){
-      Onion.error("💥 Prefetch error:", e);
+      Onion.error?.("💥 Prefetch error:", e);
     }
 
   };
 
   /* =========================
-     HOVER PREFETCH
+     HOVER PREFETCH (DESKTOP)
   ========================= */
 
   function handleHover(e){
 
-    const link = e.target.closest("a[data-link]");
+    const link = e.target.closest("a[data-spa]");
     if(!link) return;
 
     const href = link.getAttribute("href");
@@ -152,7 +155,7 @@
 
   document.addEventListener("touchstart", function(e){
 
-    const link = e.target.closest("a[data-link]");
+    const link = e.target.closest("a[data-spa]");
     if(!link) return;
 
     const href = link.getAttribute("href");

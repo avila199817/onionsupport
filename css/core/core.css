@@ -454,6 +454,10 @@ body{
   padding:14px;
   gap:10px;
 }
+.sidebar.collapsed .sidebar-top{
+  justify-content:center;
+  gap:10px;
+}
 
 
 

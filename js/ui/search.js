@@ -1,9 +1,11 @@
 "use strict";
 
 /* =========================
-   SEARCH (ONION PRO FINAL CLEAN)
+   SEARCH (ONION FINAL)
+   - Auth OK (Onion.fetch)
    - Sin leaks
-   - Usa router (no navega manual)
+   - Router integrado
+   - Abort + debounce
 ========================= */
 
 (function(){
@@ -28,6 +30,10 @@
     let timer = null;
     let controller = null;
 
+    /* =========================
+       UI
+    ========================= */
+
     const show = () => container.classList.add("active");
 
     const hide = () => {
@@ -47,6 +53,10 @@
         text.slice(i + q.length)
       );
     };
+
+    /* =========================
+       RENDER
+    ========================= */
 
     const render = (results, q = "") => {
 
@@ -75,7 +85,6 @@
 
           if (!r.url) return;
 
-          // 🔥 USAR ROUTER (NO MANUAL)
           Onion.router?.navigate?.(r.url);
 
         });
@@ -87,6 +96,10 @@
       show();
 
     };
+
+    /* =========================
+       SEARCH (🔥 FIX AUTH)
+    ========================= */
 
     const doSearch = async (q) => {
 
@@ -100,16 +113,9 @@
 
         const url = Onion.config.API + "/search?q=" + encodeURIComponent(q);
 
-        const res = await fetch(url, {
-          signal: controller.signal,
-          credentials: "include"
+        const data = await Onion.fetch(url, {
+          signal: controller.signal
         });
-
-        if(!res.ok){
-          throw new Error("HTTP " + res.status);
-        }
-
-        const data = await res.json();
 
         return data?.results || [];
 
@@ -125,6 +131,10 @@
       }
 
     };
+
+    /* =========================
+       INPUT
+    ========================= */
 
     const onInput = ()=>{
 
@@ -148,6 +158,10 @@
 
     input.addEventListener("input", onInput);
 
+    /* =========================
+       FOCUS
+    ========================= */
+
     const onFocus = async ()=>{
 
       const value = input.value.trim();
@@ -160,6 +174,10 @@
 
     input.addEventListener("focus", onFocus);
 
+    /* =========================
+       OUTSIDE CLICK
+    ========================= */
+
     const outsideClick = (e)=>{
       if (!e.target.closest(".topbar-search-wrap")){
         hide();
@@ -167,6 +185,10 @@
     };
 
     document.addEventListener("click", outsideClick);
+
+    /* =========================
+       CLEANUP
+    ========================= */
 
     Onion.onCleanup(()=>{
 
@@ -186,8 +208,10 @@
 
   };
 
-  Onion.events.on("nav:ready", ()=>{
-    Onion.ui.initSearch();
-  });
+  /* =========================
+     INIT DIRECTO (🔥 SIN EVENTOS)
+  ========================= */
+
+  Onion.ui.initSearch();
 
 })();

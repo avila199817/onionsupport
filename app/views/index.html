@@ -1,101 +1,101 @@
-<div class="panel-content dashboard">
+<div class="panel-content dashboard home">
 
-  <!-- =========================
-       HEADER
-  ========================= -->
-  <div class="dashboard-header">
-    <h1>Dashboard</h1>
-    <p>Resumen general del sistema</p>
-  </div>
+  <div class="container">
 
-  <!-- =========================
-       KPIs
-  ========================= -->
-  <div class="kpi-grid">
-
-    <div class="kpi-card">
-      <span>Incidencias</span>
-      <strong id="home-incidencias">0</strong>
-    </div>
-
-    <div class="kpi-card">
-      <span>Clientes</span>
-      <strong id="home-clientes">0</strong>
-    </div>
-
-    <div class="kpi-card">
-      <span>Usuarios</span>
-      <strong id="home-usuarios">0</strong>
-    </div>
-
-    <div class="kpi-card">
-      <span>Facturación</span>
-      <strong id="home-facturas">€0</strong>
-    </div>
-
-  </div>
-
-  <!-- =========================
-       SUMMARY HOY
-  ========================= -->
-  <div class="summary">
-
-    <div class="summary-item">
-      <span>Tickets hoy</span>
-      <strong class="summary-value">0</strong>
-    </div>
-
-    <div class="summary-item">
-      <span>Resueltos</span>
-      <strong class="summary-value">0</strong>
-    </div>
-
-    <div class="summary-item">
-      <span>Pendientes</span>
-      <strong class="summary-value">0</strong>
-    </div>
-
-  </div>
-
-  <!-- =========================
-       MAIN GRID
-  ========================= -->
-  <div class="dashboard-grid">
-
-    <!-- ACTIVITY -->
-    <div class="card">
-      <div class="card-header">
-        <h3>Actividad reciente</h3>
-      </div>
-
-      <div id="activity-list" class="activity-list">
-        <div>Cargando...</div>
+    <!-- =========================
+         HEADER
+    ========================= -->
+    <div class="dashboard-header">
+      <div class="header-left">
+        <h1 class="page-title">Dashboard</h1>
+        <p class="page-subtitle">Resumen general del sistema</p>
       </div>
     </div>
 
-    <!-- SYSTEM -->
-    <div class="card">
-      <div class="card-header">
-        <h3>Estado del sistema</h3>
+    <!-- =========================
+         KPI CARDS
+    ========================= -->
+    <div class="grid-cards">
+
+      <div class="card">
+        <span class="card-title">Incidencias</span>
+        <strong id="home-incidencias" class="card-value">0</strong>
       </div>
 
-      <div class="system-status">
+      <div class="card">
+        <span class="card-title">Clientes</span>
+        <strong id="home-clientes" class="card-value">0</strong>
+      </div>
 
-        <div id="status-api">API --</div>
-        <div id="status-db">DB --</div>
-        <div id="status-uptime">Uptime --</div>
+      <div class="card">
+        <span class="card-title">Usuarios</span>
+        <strong id="home-usuarios" class="card-value">0</strong>
+      </div>
 
-        <hr>
+      <div class="card">
+        <span class="card-title">Facturación</span>
+        <strong id="home-facturas" class="card-value">€0</strong>
+      </div>
 
-        <div id="cpu-usage">CPU: --</div>
-        <div id="ram-usage">RAM: --</div>
-        <div id="disk-usage">Disco: --</div>
+    </div>
 
-        <div id="system-warning" style="display:none; color:#c00; margin-top:10px;">
-          ⚠️ Alta carga del sistema
+    <!-- =========================
+         SUMMARY
+    ========================= -->
+    <div class="summary-grid">
+
+      <div class="summary-item">
+        <div class="summary-value">0</div>
+        <div class="summary-label">Tickets hoy</div>
+      </div>
+
+      <div class="summary-item">
+        <div class="summary-value">0</div>
+        <div class="summary-label">Resueltos</div>
+      </div>
+
+      <div class="summary-item">
+        <div class="summary-value">0</div>
+        <div class="summary-label">Pendientes</div>
+      </div>
+
+    </div>
+
+    <!-- =========================
+         MAIN GRID
+    ========================= -->
+    <div class="dashboard-grid">
+
+      <!-- ACTIVITY -->
+      <div class="panel-block">
+        <div class="section-title">Actividad reciente</div>
+
+        <div id="activity-list" class="activity-list">
+          <div>Cargando...</div>
         </div>
-
       </div>
+
+      <!-- SYSTEM -->
+      <div class="panel-block">
+        <div class="section-title">Estado del sistema</div>
+
+        <div class="status-list">
+
+          <div id="status-api">API --</div>
+          <div id="status-db">DB --</div>
+          <div id="status-uptime">Uptime --</div>
+
+          <div id="cpu-usage">CPU: --</div>
+          <div id="ram-usage">RAM: --</div>
+          <div id="disk-usage">Disco: --</div>
+
+          <div id="system-warning" class="alert-item" style="display:none; color:#c00;">
+            ⚠️ Alta carga del sistema
+          </div>
+
+        </div>
+      </div>
+
     </div>
 
   </div>

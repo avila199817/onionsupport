@@ -8,10 +8,6 @@ if (window.Onion) {
   console.warn("⚠️ Onion ya inicializado");
 } else {
 
-  /* =========================
-     CORE OBJECT (LOCKED)
-  ========================= */
-
   const Onion = {};
   Object.defineProperty(window, "Onion", {
     value: Onion,
@@ -23,10 +19,10 @@ if (window.Onion) {
      VERSION
   ========================= */
 
-  Onion.version = "1.0.0";
+  Onion.version = "1.1.0";
 
   /* =========================
-     CONFIG (FREEZED)
+     CONFIG
   ========================= */
 
   Onion.config = Object.freeze({
@@ -37,54 +33,72 @@ if (window.Onion) {
   });
 
   /* =========================
-     LOGGER (SAFE)
+     LOGGER
   ========================= */
 
-  const format = (type, args) => [type, ...args];
+  function logWrap(icon, args){
+    return [icon, ...args];
+  }
 
-  Onion.log = function (...args) {
-    if (Onion.config.DEBUG) {
-      console.log(...format("🧅", args));
+  Onion.log = (...args)=>{
+    if(Onion.config.DEBUG){
+      console.log(...logWrap("🧅", args));
     }
   };
 
-  Onion.warn = function (...args) {
-    if (Onion.config.DEBUG) {
-      console.warn(...format("⚠️", args));
+  Onion.warn = (...args)=>{
+    if(Onion.config.DEBUG){
+      console.warn(...logWrap("⚠️", args));
     }
   };
 
-  Onion.error = function (...args) {
-    console.error(...format("💥", args));
+  Onion.error = (...args)=>{
+    console.error(...logWrap("💥", args));
   };
 
   /* =========================
      SAFE STORAGE
   ========================= */
 
-  function safeStorage(key) {
-    try {
+  function safeStorage(key){
+    try{
       return localStorage.getItem(key);
-    } catch (e) {
-      console.warn("⚠️ localStorage bloqueado");
+    }catch{
       return null;
     }
   }
 
+  function safeSet(key, val){
+    try{
+      localStorage.setItem(key, val);
+    }catch{}
+  }
+
+  function safeRemove(key){
+    try{
+      localStorage.removeItem(key);
+    }catch{}
+  }
+
   /* =========================
-     STATE (CENTRAL SOURCE)
+     STATE (CLAVE 🔥)
   ========================= */
 
   Onion.state = {
     user: null,
     slug: safeStorage("onion_user_slug"),
+
     rendering: false,
     navigating: false,
     renderId: 0,
+
     currentScript: null,
     currentStyle: null,
+
     abortController: null,
-    cleanup: [],
+
+    cleanup: [], // 🔥 CRÍTICO (array SIEMPRE)
+
     ready: false
   };
 
@@ -98,36 +112,42 @@ if (window.Onion) {
   };
 
   /* =========================
-     BASE NAMESPACES (SAFE)
+     NAMESPACES
   ========================= */
 
-  Onion.events = Onion.events || {};
-  Onion.ui = Onion.ui || {};
-  Onion.auth = Onion.auth || {};
-  Onion.router = Onion.router || {};
+  Onion.events = {};
+  Onion.ui = {};
+  Onion.auth = {};
+  Onion.router = {};
 
   /* =========================
-     USER MANAGEMENT (CLAVE 🔥)
+     USER MANAGEMENT (ALINEADO /ME)
   ========================= */
 
   Onion.setUser = function(user){
 
-    if(!user){
-      Onion.warn("setUser sin datos");
+    if(!user || typeof user !== "object"){
+      Onion.warn("⚠️ setUser inválido");
       return;
     }
 
-    Onion.state.user = user;
+    // 🔥 normalización pro
+    const cleanUser = {
+      id: user.id || user.userId || null,
+      username: user.username || "",
+      name: user.name || user.username || user.email || "Usuario",
+      email: user.email || "",
+      avatar: user.avatar || null,
+      hasAvatar: user.hasAvatar === true
+    };
 
-    try{
-      localStorage.setItem("onion_user_slug", user.username || "");
-      localStorage.setItem("onion_user_name", user.name || "");
-      localStorage.setItem("onion_user_avatar", user.avatar || "");
-    }catch(e){
-      Onion.warn("No se pudo guardar user");
-    }
+    Onion.state.user = cleanUser;
 
-    Onion.log("👤 User set:", user);
+    safeSet("onion_user_slug", cleanUser.username);
+    safeSet("onion_user_name", cleanUser.name);
+    safeSet("onion_user_avatar", cleanUser.avatar || "");
+
+    Onion.log("👤 User set:", cleanUser);
 
   };
 
@@ -145,7 +165,8 @@ if (window.Onion) {
       return {
         username,
         name,
-        avatar
+        avatar,
+        hasAvatar: !!avatar
       };
     }
 
@@ -157,16 +178,16 @@ if (window.Onion) {
 
     Onion.state.user = null;
 
-    try{
-      localStorage.removeItem("onion_user_slug");
-      localStorage.removeItem("onion_user_name");
-      localStorage.removeItem("onion_user_avatar");
-    }catch{}
+    safeRemove("onion_user_slug");
+    safeRemove("onion_user_name");
+    safeRemove("onion_user_avatar");
+
+    Onion.log("🧹 User cleared");
 
   };
 
   /* =========================
-     NAVIGATION (SPA CORE)
+     NAVIGATION
   ========================= */
 
   Onion.go = function(path){
@@ -174,6 +195,7 @@ if (window.Onion) {
     if(!path) return;
 
     if(Onion.state.navigating) return;
+
     Onion.state.navigating = true;
 
     history.pushState({}, "", path);
@@ -183,12 +205,19 @@ if (window.Onion) {
   };
 
   /* =========================
-     CLEANUP SYSTEM
+     CLEANUP SYSTEM (ROBUSTO)
   ========================= */
 
   Onion.onCleanup = function(fn){
 
     if(typeof fn !== "function") return;
+
+    if(!Array.isArray(Onion.state.cleanup)){
+      Onion.state.cleanup = [];
+    }
+
+    // evitar duplicados
+    if(Onion.state.cleanup.includes(fn)) return;
 
     Onion.state.cleanup.push(fn);
 
@@ -196,18 +225,29 @@ if (window.Onion) {
 
   Onion.runCleanup = function(){
 
-    Onion.state.cleanup.forEach(fn=>{
-      try{ fn(); }catch(e){
-        Onion.warn("Cleanup error:", e);
-      }
-    });
+    const list = Onion.state.cleanup;
+
+    if(!Array.isArray(list) || list.length === 0){
+      Onion.log("🧹 cleanup vacío");
+      return;
+    }
+
+    Onion.log("🧹 Ejecutando cleanup:", list.length);
 
     Onion.state.cleanup = [];
+
+    for(let i = 0; i < list.length; i++){
+      try{
+        list[i]();
+      }catch(e){
+        Onion.error("Cleanup error:", e);
+      }
+    }
 
   };
 
   /* =========================
-     SIMPLE DATA CACHE (PRO)
+     CACHE HELPERS
   ========================= */
 
   Onion.setCache = function(key, value){
@@ -216,7 +256,7 @@ if (window.Onion) {
   };
 
   Onion.getCache = function(key){
-    return Onion.cache.data[key] || null;
+    return Onion.cache.data[key] ?? null;
   };
 
   Onion.clearCache = function(key){

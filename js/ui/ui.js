@@ -1,10 +1,10 @@
 "use strict";
 
 /* =========================
-   UI (ONION PRO FIXED)
+   UI (ONION PRO FIXED FINAL)
    - INIT una sola vez
    - REFRESH en navegación
-   - Sin conflictos
+   - Render robusto (avatar + nombre)
 ========================= */
 
 (function(){
@@ -61,7 +61,7 @@
 
     el.innerHTML = "";
 
-    if(user?.hasAvatar && user?.avatar){
+    if(user?.avatar){
 
       const img = document.createElement("img");
       img.src = user.avatar;
@@ -97,16 +97,29 @@
 
   Onion.ui.renderSidebar = function(){
 
-    const nameEl = document.querySelector("#sidebar-name");
-    const avatarEl = document.querySelector("#sidebar-avatar");
+    const tryRender = () => {
 
-    if(!nameEl || !avatarEl) return;
+      const nameEl = document.querySelector("#sidebar-name");
+      const avatarEl = document.querySelector("#sidebar-avatar");
 
-    const user = getUserSafe();
-    const name = getDisplayName(user);
+      if(!nameEl || !avatarEl){
+        return false;
+      }
 
-    nameEl.textContent = name;
-    setAvatar(avatarEl, user, name);
+      const user = getUserSafe();
+      const name = getDisplayName(user);
+
+      nameEl.textContent = name;
+      setAvatar(avatarEl, user, name);
+
+      return true;
+    };
+
+    // intento inmediato
+    if(tryRender()) return;
+
+    // retry si el DOM aún no está listo
+    requestAnimationFrame(()=> tryRender());
 
   };
 
@@ -175,8 +188,6 @@
       const sidebar = document.querySelector(".sidebar");
       const dropdown = document.querySelector("#userDropdown");
 
-      /* TOGGLE SIDEBAR */
-
       const toggleBtn = e.target.closest("#toggleSidebar");
 
       if(toggleBtn && sidebar){
@@ -189,8 +200,6 @@
         dropdown?.classList.remove("active");
         return;
       }
-
-      /* USER DROPDOWN */
 
       const userToggle = e.target.closest("#userToggle");
 
@@ -212,13 +221,9 @@
         return;
       }
 
-      /* CLICK DENTRO DROPDOWN */
-
       if(e.target.closest("#userDropdown")){
         return;
       }
-
-      /* LOGOUT */
 
       const logout = e.target.closest("#logoutBtn");
 
@@ -257,8 +262,6 @@
         return;
       }
 
-      /* CLOSE DROPDOWN */
-
       dropdown?.classList.remove("active");
 
     });
@@ -266,7 +269,7 @@
   }
 
   /* =========================
-     INIT (UNA VEZ)
+     INIT
   ========================= */
 
   Onion.ui.init = function(){
@@ -280,7 +283,7 @@
   };
 
   /* =========================
-     REFRESH (CADA NAV)
+     REFRESH
   ========================= */
 
   Onion.ui.refresh = function(){
@@ -295,10 +298,6 @@
      HOOKS
   ========================= */
 
-  // 👉 INIT SOLO UNA VEZ (boot.js debería llamarlo)
-  // Onion.ui.init();
-
-  // 👉 REFRESH EN CADA NAVEGACIÓN
   Onion.events.on("nav:ready", ()=>{
     Onion.ui.refresh();
   });

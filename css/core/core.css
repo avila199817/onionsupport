@@ -170,10 +170,10 @@
   --card-shadow:0 10px 25px rgba(0,0,0,0.06);
   --card-shadow-hover:0 15px 35px rgba(0,0,0,0.08);
 
-  /* PANELS */
+  /* PANELS (🔥 mejor contraste) */
   --panel-bg:#ffffff;
-  --panel-border:#e5e7eb;
-  --panel-shadow:0 10px 25px rgba(0,0,0,0.05);
+  --panel-border:#d1d5db; /* 🔥 antes #e5e7eb */
+  --panel-shadow:0 10px 30px rgba(0,0,0,0.08); /* 🔥 más visible */
 
   /* BACKGROUND */
   --gradient-main: linear-gradient(180deg, #f6f8fb 0%, #eef2f7 100%);
@@ -188,18 +188,30 @@
 
 
 /* =========================
-   LOGO SWITCH (CORRECTO)
+   DROPDOWN FIX (LIGHT)
 ========================= */
 
-/* ⚠️ NO redefinimos .logo aquí (ya lo tienes bien arriba) */
+[data-theme="light"] .user-dropdown{
+  border:1px solid rgba(0,0,0,0.08);
+  box-shadow:
+    0 10px 30px rgba(0,0,0,0.08),
+    0 2px 6px rgba(0,0,0,0.05);
+}
 
-/* ambos logos ocupan el mismo sitio SIN romper tamaños */
+
+/* =========================
+   LOGO SWITCH
+========================= */
+
+/* NO redefinimos .logo */
+
+/* ambos logos superpuestos */
 .logo img{
   position:absolute;
   inset:0;
 }
 
-/* DEFAULT (DARK MODE) */
+/* DEFAULT (DARK) */
 .logo-dark{
   display:block;
 }
@@ -208,7 +220,7 @@
   display:none;
 }
 
-/* LIGHT MODE SWITCH */
+/* LIGHT MODE */
 [data-theme="light"] .logo-dark{
   display:none;
 }
@@ -216,7 +228,6 @@
 [data-theme="light"] .logo-light{
   display:block;
 }
-
 
 
 

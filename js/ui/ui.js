@@ -1,10 +1,11 @@
 "use strict";
 
 /* =========================
-   UI (ONION PRO FINAL)
+   UI (ONION FINAL CLEAN)
    - INIT una sola vez
-   - REFRESH estable (fix timing)
+   - REFRESH estable
    - Avatar + nombre OK
+   - Logout centralizado (auth.js)
 ========================= */
 
 (function(){
@@ -186,6 +187,8 @@
       const sidebar = document.querySelector(".sidebar");
       const dropdown = document.querySelector("#userDropdown");
 
+      /* TOGGLE SIDEBAR */
+
       const toggleBtn = e.target.closest("#toggleSidebar");
 
       if(toggleBtn && sidebar){
@@ -198,6 +201,8 @@
         dropdown?.classList.remove("active");
         return;
       }
+
+      /* USER DROPDOWN */
 
       const userToggle = e.target.closest("#userToggle");
 
@@ -219,9 +224,13 @@
         return;
       }
 
+      /* CLICK DENTRO DROPDOWN */
+
       if(e.target.closest("#userDropdown")){
         return;
       }
+
+      /* LOGOUT (🔥 LIMPIO) */
 
       const logout = e.target.closest("#logoutBtn");
 
@@ -230,35 +239,19 @@
         e.preventDefault();
 
         try{
-
-          Onion.auth?.clearToken?.();
-
-          localStorage.removeItem("onion_token");
-          localStorage.removeItem("onion_user_slug");
-          localStorage.removeItem("onion_user_name");
-          localStorage.removeItem("onion_user_avatar");
-
-          sessionStorage.clear();
-
-          document.cookie.split(";").forEach(c=>{
-            document.cookie = c
-              .replace(/^ +/, "")
-              .replace(/=.*/, "=;expires=" + new Date(0).toUTCString() + ";path=/");
+          await fetch(Onion.config.API + "/auth/logout", {
+            method: "POST",
+            credentials: "include"
           });
+        }catch{}
 
-          try{
-            await fetch(Onion.config.API + "/auth/logout", {
-              method: "POST",
-              credentials: "include"
-            });
-          }catch{}
-
-        }finally{
-          window.location.replace("/");
-        }
+        Onion.auth.resetSession();
+        Onion.auth.redirectLogin();
 
         return;
       }
+
+      /* CLOSE DROPDOWN */
 
       dropdown?.classList.remove("active");
 
@@ -281,7 +274,7 @@
   };
 
   /* =========================
-     REFRESH (FIX CLAVE)
+     REFRESH
   ========================= */
 
   Onion.ui.refresh = function(){

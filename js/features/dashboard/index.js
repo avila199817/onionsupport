@@ -1,278 +1,134 @@
-"use strict";
+<div class="panel-content dashboard">
 
-/* =========================
-   DASHBOARD (ONION PRO FINAL)
-   - Espera a DOM real
-   - Espera a usuario
-   - Sin fallos silenciosos
-   - Cleanup correcto
-========================= */
+  <div class="container">
 
-(function(){
+    <!-- HEADER -->
+    <div class="dashboard-header">
+      <div class="header-left">
+        <p class="page-subtitle">Estado general del sistema y actividad en tiempo real</p>
+      </div>
+    </div>
 
-  const Onion = window.Onion;
+    <!-- KPI -->
+    <div class="grid-cards">
 
-  if(!Onion){
-    console.error("💥 Onion no disponible (dashboard)");
-    return;
-  }
+      <div class="card highlight">
+        <span class="card-title">Incidencias activas</span>
+        <span id="home-incidencias" class="card-value">--</span>
+        <div class="card-meta"></div>
+      </div>
 
-  let initialized = false;
-  let interval = null;
+      <div class="card">
+        <span class="card-title">Clientes</span>
+        <span id="home-clientes" class="card-value">--</span>
+        <div class="card-meta"></div>
+      </div>
 
-  /* =========================
-     ROOT
-  ========================= */
+      <div class="card">
+        <span class="card-title">Facturación mensual</span>
+        <span id="home-facturas" class="card-value">--</span>
+        <div class="card-meta"></div>
+      </div>
 
-  function getRoot(){
-    return document.querySelector(".panel-content.dashboard");
-  }
+      <div class="card">
+        <span class="card-title">Usuarios activos</span>
+        <span id="home-usuarios" class="card-value">--</span>
+        <div class="card-meta"></div>
+      </div>
 
-  function $(id){
-    return getRoot()?.querySelector("#" + id);
-  }
+    </div>
 
-  /* =========================
-     HELPERS
-  ========================= */
+    <!-- GRID PRINCIPAL -->
+    <div class="dashboard-grid">
 
-  function safe(n){
-    return (n === 0 || n) ? n : 0;
-  }
-
-  function formatMoney(n){
-    return new Intl.NumberFormat("es-ES", {
-      style:"currency",
-      currency:"EUR",
-      maximumFractionDigits:0
-    }).format(safe(n));
-  }
-
-  function timeAgo(date){
-    if(!date) return "Ahora";
-
-    const diff = Math.floor((Date.now() - new Date(date)) / 1000);
-
-    if(diff < 60) return "Hace " + diff + "s";
-    if(diff < 3600) return "Hace " + Math.floor(diff/60) + " min";
-    if(diff < 86400) return "Hace " + Math.floor(diff/3600) + " h";
-
-    return "Hace " + Math.floor(diff/86400) + " d";
-  }
-
-  function animate(el, value){
-    if(!el) return;
-
-    value = safe(value);
-
-    const duration = 400;
-    const t0 = performance.now();
-
-    function frame(t){
-      const p = Math.min((t - t0)/duration, 1);
-      el.textContent = Math.floor(value * p);
-      if(p < 1) requestAnimationFrame(frame);
-    }
-
-    requestAnimationFrame(frame);
-  }
-
-  function calcTrend(current, prev){
-    current = safe(current);
-    prev = safe(prev);
-    if(prev === 0) return 0;
-    return Math.round(((current - prev) / prev) * 100);
-  }
-
-  function setTrend(el, value, label){
-    if(!el) return;
-
-    const trend = value >= 0 ? "up" : "down";
-    const sign = value >= 0 ? "+" : "";
-
-    el.innerHTML = `
-      <span class="trend ${trend}">${sign}${value}%</span>
-      <span class="card-extra">${label}</span>
-    `;
-  }
-
-  function escapeHTML(str){
-    return String(str)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
-  }
-
-  /* =========================
-     DASHBOARD DATA
-  ========================= */
-
-  async function loadDashboard(){
-
-    try{
-
-      const data = await Onion.fetch(Onion.config.API + "/dashboard");
-
-      if(!data || !data.kpis){
-        Onion.warn("Dashboard vacío");
-        return;
-      }
-
-      const k = data.kpis;
-
-      const tickets = safe(k.tickets);
-      const clientes = safe(k.clientes);
-      const usuarios = safe(k.usuarios);
-
-      const facturacion = safe(
-        k.facturacionMensual ??
-        k.facturacionMes ??
-        k.facturacion ?? 0
-      );
-
-      animate($("home-incidencias"), tickets);
-      animate($("home-clientes"), clientes);
-      animate($("home-usuarios"), usuarios);
-
-      const f = $("home-facturas");
-      if(f) f.textContent = formatMoney(facturacion);
-
-      const cards = getRoot()?.querySelectorAll(".card") || [];
-
-      if(cards.length >= 4){
-
-        setTrend(cards[0].querySelector(".card-meta"),
-          calcTrend(tickets, k.ticketsPrev),
-          "vs mes anterior"
-        );
-
-        setTrend(cards[1].querySelector(".card-meta"),
-          calcTrend(clientes, k.clientesPrev),
-          "crecimiento"
-        );
-
-        setTrend(cards[2].querySelector(".card-meta"),
-          calcTrend(facturacion, k.facturacionPrev),
-          "este mes"
-        );
-
-        setTrend(cards[3].querySelector(".card-meta"),
-          calcTrend(usuarios, k.usuariosPrev),
-          "usuarios"
-        );
-      }
-
-      renderActivity(data.activity || []);
-
-    }catch(e){
-      Onion.error("💥 Dashboard error:", e);
-    }
-
-  }
-
-  /* =========================
-     ACTIVITY
-  ========================= */
-
-  function renderActivity(items){
-
-    const list = $("activity-list");
-    if(!list) return;
-
-    list.innerHTML = "";
-
-    if(!items.length){
-      list.innerHTML = "<div class='activity-empty'>Sin actividad</div>";
-      return;
-    }
-
-    items.slice(0,5).forEach(i => {
-
-      const el = document.createElement("div");
-      el.className = "activity-item";
-
-      const desc = escapeHTML(i.desc || "Actividad");
-
-      el.innerHTML = `
-        <div class="activity-content">
-          <span class="activity-desc">${desc}</span>
-          <span class="activity-time">${timeAgo(i.time)}</span>
+      <!-- ACTIVIDAD -->
+      <div class="panel-block activity">
+        <div class="block-header minimal">
+          <h2 class="section-title">Actividad reciente</h2>
         </div>
-      `;
+        <div id="activity-list" class="activity-list"></div>
+      </div>
 
-      list.appendChild(el);
-    });
-  }
+      <!-- SISTEMA -->
+      <div class="panel-block system">
+        <div class="block-header minimal">
+          <h2 class="section-title">Sistema</h2>
+        </div>
 
-  /* =========================
-     SYSTEM
-  ========================= */
+        <div class="status-list">
 
-  async function loadSystem(){
+          <div class="status-item" id="status-api">
+            <span class="status-dot"></span>
+            API operativa
+          </div>
 
-    try{
+          <div class="status-item" id="status-db">
+            <span class="status-dot"></span>
+            Base de datos activa
+          </div>
 
-      const start = performance.now();
-      const data = await Onion.fetch(Onion.config.API + "/health");
-      const latency = Math.floor(performance.now() - start);
+          <div class="status-item" id="status-uptime">
+            <span class="status-dot"></span>
+            Uptime --
+          </div>
 
-      const api = $("status-api");
-      if(api){
-        api.textContent = `API · ${latency}ms`;
-      }
+        </div>
 
-    }catch(e){
-      Onion.warn("Health error");
-    }
+      </div>
 
-  }
+    </div>
 
-  /* =========================
-     INIT
-  ========================= */
+    <!-- SEGUNDO BLOQUE -->
+    <div class="dashboard-grid secondary">
 
-  async function init(){
+      <!-- RESUMEN -->
+      <div class="panel-block summary">
+        <div class="block-header minimal">
+          <h2 class="section-title">Rendimiento hoy</h2>
+        </div>
 
-    if(initialized) return;
+        <div class="summary-grid">
 
-    const root = getRoot();
-    if(!root){
-      return setTimeout(init, 100);
-    }
+          <div class="summary-item">
+            <span class="summary-value">--</span>
+            <span class="summary-label">Tickets</span>
+          </div>
 
-    if(!Onion.state?.user){
-      return setTimeout(init, 100);
-    }
+          <div class="summary-item">
+            <span class="summary-value">--</span>
+            <span class="summary-label">Resueltos</span>
+          </div>
 
-    initialized = true;
+          <div class="summary-item">
+            <span class="summary-value">--</span>
+            <span class="summary-label">Pendientes</span>
+          </div>
 
-    Onion.log("📊 Dashboard init");
+        </div>
+      </div>
 
-    await run();
+      <!-- ALERTAS -->
+      <div class="panel-block alerts">
+        <div class="block-header minimal">
+          <h2 class="section-title">Sistema / Rendimiento</h2>
+        </div>
 
-    interval = setInterval(run, 60000);
+        <div class="alert-list">
 
-    Onion.onCleanup(()=>{
-      initialized = false;
-      if(interval){
-        clearInterval(interval);
-        interval = null;
-      }
-    });
+          <div class="alert-item info" id="cpu-usage">CPU: --</div>
+          <div class="alert-item info" id="ram-usage">RAM: --</div>
+          <div class="alert-item info" id="disk-usage">Disco: --</div>
 
-  }
+          <div class="alert-item warn" id="system-warning" style="display:none;">
+            Uso elevado del sistema
+          </div>
 
-  async function run(){
-    await Promise.all([
-      loadDashboard(),
-      loadSystem()
-    ]);
-  }
+        </div>
 
-  /* =========================
-     START
-  ========================= */
+      </div>
 
-  init();
+    </div>
 
-})();
+  </div>
+
+</div>

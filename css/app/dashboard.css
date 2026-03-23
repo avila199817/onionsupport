@@ -1,5 +1,5 @@
 /* =========================
-   HOME (CLEAN + PRO STRUCTURE)
+   HOME (PRO SAAS UPGRADE)
 ========================= */
 
 .home{
@@ -7,50 +7,88 @@
 }
 
 .home .container{
-  padding-top:20px;
-  padding-bottom:40px;
+  padding-top:10px;
+  padding-bottom:50px;
+
+  display:flex;
+  flex-direction:column;
+  gap:28px;
 }
 
 
 /* =========================
-   HEADER (VACÍO CONTROLADO)
+   HEADER (SOLO ESPACIADO)
 ========================= */
 
 .home .dashboard-header{
-  height:20px;
+  height:var(--topbar-height);
 }
 
 
 /* =========================
-   GRID CARDS (KPI)
+   KPI GRID
 ========================= */
 
 .home .grid-cards{
   display:grid;
-  grid-template-columns:repeat(4,1fr);
+  grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
   gap:20px;
 }
 
 
 /* =========================
-   CARDS
+   CARDS (MEJORADAS)
 ========================= */
 
 .home .card{
+  position:relative;
+
   background:var(--card-bg);
   border:1px solid var(--card-border);
   border-radius:18px;
 
-  padding:18px;
+  padding:20px;
 
   box-shadow:var(--card-shadow);
-  transition:.25s ease;
+
+  transition:
+    transform .25s ease,
+    box-shadow .25s ease,
+    border-color .2s ease;
+}
+
+/* glow sutil */
+.home .card::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  border-radius:18px;
+
+  background:linear-gradient(
+    120deg,
+    transparent,
+    color-mix(in srgb, var(--accent), transparent 85%),
+    transparent
+  );
+
+  opacity:0;
+  transition:opacity .25s ease;
 }
 
 .home .card:hover{
-  transform:translateY(-4px);
+  transform:translateY(-6px);
   box-shadow:var(--card-shadow-hover);
+  border-color:color-mix(in srgb, var(--accent), var(--card-border) 70%);
 }
+
+.home .card:hover::after{
+  opacity:.6;
+}
+
+
+/* =========================
+   TEXTOS CARD
+========================= */
 
 .home .card-title{
   font-size:12px;
@@ -59,7 +97,7 @@
 
 .home .card-value{
   display:block;
-  margin-top:8px;
+  margin-top:10px;
 
   font-size:30px;
   font-weight:600;
@@ -71,7 +109,7 @@
   display:flex;
   gap:8px;
   align-items:center;
-  margin-top:6px;
+  margin-top:8px;
 }
 
 .home .card-extra{
@@ -81,31 +119,27 @@
 
 
 /* =========================
-   GRID PRINCIPAL (CLAVE)
+   GRID PRINCIPAL
 ========================= */
 
 .home .dashboard-grid{
   display:grid;
   grid-template-columns:2fr 1fr;
   gap:22px;
-  margin-top:24px;
+}
+
+.home .dashboard-grid.secondary{
+  grid-template-columns:1fr 1fr;
 }
 
 
 /* =========================
-   SEGUNDO BLOQUE
-========================= */
-
-.home .dashboard-grid + .dashboard-grid{
-  margin-top:12px;
-}
-
-
-/* =========================
-   BLOCKS
+   PANEL BLOCK
 ========================= */
 
 .home .panel-block{
+  position:relative;
+
   background:var(--panel-bg);
   border:1px solid var(--panel-border);
   border-radius:18px;
@@ -113,12 +147,29 @@
   padding:20px;
 
   box-shadow:var(--panel-shadow);
+
+  transition:
+    border-color .2s ease,
+    transform .2s ease;
 }
 
+.home .panel-block:hover{
+  border-color:color-mix(in srgb, var(--accent), var(--panel-border) 70%);
+  transform:translateY(-3px);
+}
+
+
+/* =========================
+   SECTION TITLE
+========================= */
+
 .home .section-title{
-  font-size:15px;
+  font-size:14px;
   font-weight:600;
+  letter-spacing:.2px;
+
   color:var(--text);
+  margin-bottom:10px;
 }
 
 
@@ -126,26 +177,50 @@
    LISTAS
 ========================= */
 
-.home .activity-list,
+.home .activity-list{
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+}
+
 .home .status-list{
   display:flex;
   flex-direction:column;
-  gap:12px;
-
-  margin-top:10px;
+  gap:10px;
 }
 
 
 /* =========================
-   SUMMARY
+   STATUS ITEM (PRO)
+========================= */
+
+.home .status-list div{
+  display:flex;
+  align-items:center;
+  gap:8px;
+
+  font-size:13px;
+  color:var(--muted);
+}
+
+/* puntito */
+.home .status-list div::before{
+  content:"";
+  width:6px;
+  height:6px;
+  border-radius:50%;
+  background:var(--success);
+}
+
+
+/* =========================
+   SUMMARY GRID
 ========================= */
 
 .home .summary-grid{
   display:grid;
   grid-template-columns:repeat(3,1fr);
-
   gap:12px;
-  margin-top:10px;
 }
 
 .home .summary-item{
@@ -156,6 +231,12 @@
   border-radius:14px;
 
   text-align:center;
+
+  transition:border-color .2s ease;
+}
+
+.home .summary-item:hover{
+  border-color:color-mix(in srgb, var(--accent), var(--card-border) 70%);
 }
 
 .home .summary-value{
@@ -171,21 +252,33 @@
 
 
 /* =========================
-   ALERTS
+   ALERTS (SISTEMA)
 ========================= */
 
 .home .alert-list{
   display:flex;
   flex-direction:column;
   gap:10px;
-
-  margin-top:10px;
 }
 
 .home .alert-item{
+  background:color-mix(in srgb, var(--card-bg), transparent 10%);
+  border:1px solid var(--card-border);
+
   padding:12px;
   border-radius:12px;
+
   font-size:13px;
+  color:var(--muted);
+
+  transition:
+    border-color .2s ease,
+    transform .2s ease;
+}
+
+.home .alert-item:hover{
+  transform:translateX(4px);
+  border-color:color-mix(in srgb, var(--accent), var(--card-border) 70%);
 }
 
 
@@ -197,10 +290,6 @@
 
   .home .container{
     padding:20px;
-  }
-
-  .home .grid-cards{
-    grid-template-columns:repeat(2,1fr);
   }
 
   .home .dashboard-grid{
@@ -215,7 +304,10 @@
     padding:16px;
   }
 
-  .home .grid-cards,
+  .home .grid-cards{
+    grid-template-columns:1fr;
+  }
+
   .home .summary-grid{
     grid-template-columns:1fr;
   }

@@ -30,18 +30,31 @@
   };
 
   /* =========================
-     SIDEBAR RENDER
+     SIDEBAR RENDER (FIXED)
   ========================= */
 
   Onion.ui.renderSidebar = function(){
 
-    const user = Onion.state.user;
-    if(!user) return;
-
     const nameEl = document.querySelector("#sidebar-name");
     const avatarEl = document.querySelector("#sidebar-avatar");
 
-    if(!nameEl || !avatarEl) return;
+    if(!nameEl || !avatarEl){
+      Onion.warn("Sidebar elementos no encontrados");
+      return;
+    }
+
+    // 🔥 coger user SIEMPRE
+    const user =
+      Onion.state.user ||
+      {
+        username: localStorage.getItem("onion_user_slug"),
+        name: localStorage.getItem("onion_user_name")
+      };
+
+    if(!user){
+      Onion.warn("No user disponible");
+      return;
+    }
 
     const name =
       user.name ||
@@ -96,7 +109,7 @@
     if(!titleEl) return;
 
     const titles = {
-      "/": "Onion Support",
+      "/": "Panel",
       "/incidencias": "Incidencias",
       "/facturas": "Facturas",
       "/cuenta": "Cuenta"
@@ -107,7 +120,7 @@
   };
 
   /* =========================
-     ACTIVE LINK
+     ACTIVE LINK (FIXED)
   ========================= */
 
   Onion.ui.updateSidebarActive = function(){
@@ -115,8 +128,19 @@
     const route = Onion.router.get();
 
     document.querySelectorAll(".sidebar a[data-link]").forEach(a => {
+
       const href = a.getAttribute("href");
-      a.classList.toggle("active", href === route);
+
+      // 🔥 quitar /@usuario del href si existe
+      let cleanHref = href;
+
+      if(href.startsWith("/@")){
+        const parts = href.split("/").slice(2);
+        cleanHref = "/" + (parts.join("/") || "");
+      }
+
+      a.classList.toggle("active", cleanHref === route);
+
     });
 
   };

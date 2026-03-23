@@ -57,8 +57,7 @@
 
 
   
-  
-<style>
+  <style>
 html,body{
   margin:0;
   padding:0;
@@ -68,189 +67,78 @@ body.loading{
   overflow:hidden;
 }
 
-/* Oculta app mientras carga */
+/* Oculta app */
 body.loading .layout{
   visibility:hidden;
 }
 
 /* =========================
-   LOADER WRAPPER (GLASS BG)
+   FULL GLASS BACKGROUND
 ========================= */
 
 #app-loader{
   position:fixed;
   inset:0;
 
-  /* Fondo con profundidad */
-  background:
-    radial-gradient(circle at 30% 20%, rgba(255,255,255,0.6), transparent 60%),
-    radial-gradient(circle at 70% 80%, rgba(0,0,0,0.04), transparent 60%),
-    linear-gradient(180deg,#f8f9fb 0%, #eef1f5 100%);
+  /* glass real */
+  background:rgba(255,255,255,0.35);
+  backdrop-filter:blur(20px) saturate(180%);
+  -webkit-backdrop-filter:blur(20px) saturate(180%);
 
   display:flex;
   align-items:center;
   justify-content:center;
-  z-index:9999;
 
-  transition:opacity .5s ease, visibility .5s ease;
+  z-index:9999;
+  transition:opacity .4s ease, visibility .4s ease;
 }
 
-/* Fade out */
+/* fade out */
 body:not(.loading) #app-loader{
   opacity:0;
   visibility:hidden;
 }
 
 /* =========================
-   GLASS BOX (CLAVE)
-========================= */
-
-.loader-box{
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  gap:18px;
-
-  padding:28px 34px;
-  border-radius:22px;
-
-  /* GLASS */
-  background:rgba(255,255,255,0.55);
-  backdrop-filter:blur(18px) saturate(160%);
-  -webkit-backdrop-filter:blur(18px) saturate(160%);
-
-  border:1px solid rgba(255,255,255,0.6);
-
-  /* profundidad */
-  box-shadow:
-    0 10px 40px rgba(0,0,0,0.08),
-    inset 0 1px 0 rgba(255,255,255,0.7);
-
-  animation:fadeIn .6s ease;
-}
-
-/* Glow sutil dinámico */
-.loader-box::before{
-  content:"";
-  position:absolute;
-  inset:-1px;
-  border-radius:22px;
-
-  background:linear-gradient(120deg,
-    rgba(255,255,255,0.4),
-    rgba(255,255,255,0.1),
-    rgba(255,255,255,0.4)
-  );
-
-  opacity:.6;
-  pointer-events:none;
-}
-
-/* =========================
-   LOGO
+   LOGO ONLY
 ========================= */
 
 .loader-logo{
-  width:52px;
-  height:52px;
+  width:64px;
+  height:64px;
   object-fit:contain;
 
-  animation:pulse 1.6s ease-in-out infinite;
+  /* rebote + pulso */
+  animation:
+    bounce 1.2s ease-in-out infinite,
+    pulse 1.6s ease-in-out infinite;
 
   filter:
-    drop-shadow(0 6px 18px rgba(0,0,0,0.12))
-    contrast(1.05);
-}
-
-/* =========================
-   TEXTO
-========================= */
-
-.loader-title{
-  font-family:'Inter', sans-serif;
-  font-size:14px;
-  font-weight:500;
-
-  color:rgba(0,0,0,0.75);
-  letter-spacing:.2px;
-
-  animation:fadeSoft 2s ease-in-out infinite;
-}
-
-/* =========================
-   SPINNER (GLASS STYLE)
-========================= */
-
-.loader-spinner{
-  width:34px;
-  height:34px;
-  border-radius:50%;
-
-  border:2px solid rgba(0,0,0,0.08);
-  border-top:2px solid rgba(0,0,0,0.7);
-
-  animation:spin .7s linear infinite;
-}
-
-/* =========================
-   PROGRESS BAR (PREMIUM)
-========================= */
-
-.loader-bar{
-  width:140px;
-  height:3px;
-
-  background:rgba(0,0,0,0.06);
-  border-radius:10px;
-  overflow:hidden;
-  position:relative;
-}
-
-.loader-bar::after{
-  content:"";
-  position:absolute;
-  inset:0;
-
-  width:35%;
-  border-radius:10px;
-
-  background:linear-gradient(
-    90deg,
-    transparent,
-    rgba(0,0,0,0.7),
-    transparent
-  );
-
-  animation:loadBar 1.4s ease-in-out infinite;
+    drop-shadow(0 10px 30px rgba(0,0,0,0.15));
 }
 
 /* =========================
    ANIMACIONES
 ========================= */
 
-@keyframes spin{
-  to{ transform:rotate(360deg); }
+/* rebote tipo Apple */
+@keyframes bounce{
+  0%,100%{
+    transform:translateY(0);
+  }
+  50%{
+    transform:translateY(-12px);
+  }
 }
 
-@keyframes loadBar{
-  0%{ transform:translateX(-120%); }
-  50%{ transform:translateX(60%); }
-  100%{ transform:translateX(140%); }
-}
-
+/* parpadeo suave */
 @keyframes pulse{
-  0%,100%{ opacity:1; transform:scale(1); }
-  50%{ opacity:.6; transform:scale(0.96); }
-}
-
-@keyframes fadeIn{
-  from{ opacity:0; transform:translateY(8px); }
-  to{ opacity:1; transform:translateY(0); }
-}
-
-@keyframes fadeSoft{
-  0%,100%{ opacity:.6; }
-  50%{ opacity:.95; }
+  0%,100%{
+    opacity:1;
+  }
+  50%{
+    opacity:.5;
+  }
 }
 
 </style>
@@ -357,23 +245,11 @@ body:not(.loading) #app-loader{
   
 <!-- LOADER -->
 <div id="app-loader">
-  <div class="loader-box">
-
-    <img 
-      src="/media/img/favicon_black.png" 
-      class="loader-logo"
-      draggable="false"
-    >
-
-    <div class="loader-spinner"></div>
-
-    <div class="loader-bar"></div>
-
-    <div class="loader-title">
-      Cargando panel...
-    </div>
-
-  </div>
+  <img 
+    src="/media/img/favicon_black.png"
+    class="loader-logo"
+    draggable="false"
+  >
 </div>
 
 

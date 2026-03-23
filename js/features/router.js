@@ -1,9 +1,9 @@
 "use strict";
 
 /* =========================
-   ROUTER (ONION PRO SPA FIXED)
-   - Sin duplicación de eventos
-   - Navegación estable
+   ROUTER (ONION PRO FINAL)
+   - Navegación sin bloqueos
+   - SPA estable
 ========================= */
 
 (function(){
@@ -16,7 +16,7 @@
   const Onion = window.Onion;
 
   /* =========================
-     ROUTES REGISTRY
+     ROUTES
   ========================= */
 
   Onion.routes = Object.freeze({
@@ -48,7 +48,7 @@
   });
 
   /* =========================
-     NORMALIZE PATH
+     NORMALIZE
   ========================= */
 
   function normalize(path){
@@ -65,7 +65,7 @@
   }
 
   /* =========================
-     GET PATH
+     GET ROUTE
   ========================= */
 
   Onion.router.get = function(){
@@ -96,7 +96,6 @@
         }
 
         return "/" + parts.slice(1).join("/");
-
       }
 
       return path;
@@ -119,13 +118,7 @@
     try{
 
       const route = Onion.router.get();
-      const config = Onion.routes[route];
-
-      if(config){
-        return config;
-      }
-
-      return Onion.routes["/"];
+      return Onion.routes[route] || Onion.routes["/"];
 
     }catch(e){
 
@@ -137,7 +130,7 @@
   };
 
   /* =========================
-     NAVIGATE
+     NAVIGATE (🔥 FIX CLAVE)
   ========================= */
 
   Onion.router.navigate = function(href){
@@ -150,7 +143,10 @@
       Onion.state.user?.username ||
       localStorage.getItem("onion_user_slug");
 
-    if(!username) return;
+    if(!username){
+      Onion.warn?.("⚠️ No username");
+      return;
+    }
 
     let finalHref;
 
@@ -166,17 +162,20 @@
 
     if(window.location.pathname === finalHref) return;
 
-    if(Onion.state.navigating) return;
+    // 🔥 SIN BLOQUEO
     Onion.state.navigating = true;
 
     history.pushState({}, "", finalHref);
 
-    Onion.render();
+    // 🔥 FORZAR RENDER SIEMPRE
+    Promise.resolve().then(()=>{
+      Onion.render();
+    });
 
   };
 
   /* =========================
-     CLICK INTERCEPT (SAFE)
+     CLICK INTERCEPT
   ========================= */
 
   if(!window.__ONION_ROUTER_BOUND__){

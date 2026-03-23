@@ -1,10 +1,9 @@
 "use strict";
 
 /* =========================
-   RENDER (ONION PRO FINAL CLEAN)
-   - Aislado
-   - Sin interferencias con UI/router/auth
-   - Sin leaks
+   RENDER (ONION PRO FINAL FIXED)
+   - Siempre emite nav:ready
+   - No rompe flujo UI
 ========================= */
 
 (function(){
@@ -15,10 +14,6 @@
   }
 
   const Onion = window.Onion;
-
-  /* =========================
-     HELPERS URL
-  ========================= */
 
   function normalizeUrl(src){
 
@@ -38,10 +33,6 @@
     }
 
   }
-
-  /* =========================
-     LOAD SCRIPT
-  ========================= */
 
   Onion.loadScript = function(src){
 
@@ -88,10 +79,6 @@
 
   };
 
-  /* =========================
-     LOAD STYLE
-  ========================= */
-
   Onion.loadStyle = function(href){
 
     return new Promise((resolve)=>{
@@ -131,10 +118,6 @@
 
   };
 
-  /* =========================
-     FETCH HTML
-  ========================= */
-
   Onion.fetchHTML = async function(url){
 
     const finalUrl = normalizeUrl(url);
@@ -155,7 +138,6 @@
         credentials: "include"
       });
 
-      // 🔥 NO redirige (eso es de auth/init)
       if(res.status === 401){
         return null;
       }
@@ -184,10 +166,6 @@
 
   };
 
-  /* =========================
-     EXTRACT CONTENT
-  ========================= */
-
   function extractContent(html){
 
     const wrapper = document.createElement("div");
@@ -203,12 +181,8 @@
       node = wrapper;
     }
 
-    return node.cloneNode(true); // 🔥 clave
+    return node.cloneNode(true);
   }
-
-  /* =========================
-     SWAP CONTENT
-  ========================= */
 
   Onion.swapContent = function(node){
 
@@ -235,10 +209,6 @@
 
   };
 
-  /* =========================
-     MAIN RENDER
-  ========================= */
-
   Onion.render = async function(){
 
     const renderId = ++Onion.state.renderId;
@@ -256,7 +226,12 @@
       }
 
       const html = await Onion.fetchHTML(route.page);
-      if(html === null) return;
+
+      // 🔥 FIX CLAVE
+      if(html === null){
+        Onion.events.emit?.("nav:ready");
+        return;
+      }
 
       if(renderId !== Onion.state.renderId) return;
 
@@ -270,7 +245,6 @@
 
       if(renderId !== Onion.state.renderId) return;
 
-      // 🔥 SOLO evento → UI reacciona
       Onion.events.emit?.("nav:ready");
 
     }catch(e){

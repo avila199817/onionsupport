@@ -61,7 +61,6 @@ function setText(id, value){
 ========================= */
 
 function setMonthLabel(){
-
   const el = $("facturacion-mes-label");
   if(!el) return;
 
@@ -73,11 +72,10 @@ function setMonthLabel(){
   ];
 
   el.textContent = meses[now.getMonth()] + " " + now.getFullYear();
-
 }
 
 /* =========================
-   DASHBOARD DATA
+   DASHBOARD
 ========================= */
 
 async function loadDashboard(){
@@ -104,7 +102,7 @@ async function loadDashboard(){
     setText("home-facturas-pendiente", formatMoney(k.facturacionPendiente));
     setText("home-facturacion-mes", formatMoney(k.facturacionMensual));
 
-    /* ===== SUMMARY HOY ===== */
+    /* ===== HOY ===== */
     setText("tickets-hoy", safe(k.ticketsToday));
     setText("resueltos-hoy", safe(k.resueltosToday));
     setText("pendientes-hoy", safe(k.pendientesToday));
@@ -118,7 +116,7 @@ async function loadDashboard(){
 }
 
 /* =========================
-   ACTIVITY (PRO)
+   ACTIVITY PRO
 ========================= */
 
 function renderActivity(items){
@@ -154,7 +152,7 @@ function renderActivity(items){
 }
 
 /* =========================
-   SYSTEM (PRO)
+   SYSTEM (FULL PRO)
 ========================= */
 
 async function loadSystem(){
@@ -167,13 +165,10 @@ async function loadSystem(){
     const data = res?.data || res;
 
     /* ===== API ===== */
-    setText("status-api", "API · " + (data?.latency || "--") + " ms");
+    setText("status-api", "API · " + data?.api?.latency + " ms");
 
     /* ===== DB ===== */
-    const db = $("status-db");
-    if(db){
-      db.textContent = "DB · " + (data?.db?.status || "--");
-    }
+    setText("status-db", "DB · " + (data?.db?.status || "--"));
 
     /* ===== UPTIME ===== */
     setText("status-uptime", "Uptime · " + (data?.uptime || "--"));
@@ -183,7 +178,8 @@ async function loadSystem(){
     if(cpu && data?.system?.cpu){
       cpu.textContent =
         "CPU: " + data.system.cpu.usage + "% · " +
-        (data.system.cpu.model || "CPU desconocida");
+        data.system.cpu.cores + " cores · load " +
+        data.system.cpu.load;
     }
 
     /* ===== RAM ===== */
@@ -191,8 +187,8 @@ async function loadSystem(){
     if(ram && data?.system?.ram){
       ram.textContent =
         "RAM: " + data.system.ram.usage + "% · " +
-        (data.system.ram.used || "--") + " / " +
-        (data.system.ram.total || "--");
+        data.system.ram.usedMB + "MB / " +
+        data.system.ram.totalMB + "MB";
     }
 
     /* ===== DISCO ===== */
@@ -200,7 +196,8 @@ async function loadSystem(){
     if(disk && data?.system?.disk){
       disk.textContent =
         "Disco: " + data.system.disk.percent + "% · " +
-        (data.system.disk.free || "--") + " libres";
+        data.system.disk.used + "GB / " +
+        data.system.disk.total + "GB";
     }
 
     /* ===== WARNING ===== */
@@ -236,7 +233,7 @@ async function init(){
   const root = getRoot();
   if(!root) return;
 
-  Onion.log("📊 Dashboard PRO init");
+  Onion.log("📊 Dashboard PRO MAX init");
 
   setMonthLabel();
 

@@ -1,10 +1,10 @@
 "use strict";
 
 /* =========================
-   UI (ONION PRO FINAL)
-   - Alineado con /auth/me
-   - Sin leaks (delegation)
-   - Sidebar siempre estable
+   UI (ONION PRO FIXED)
+   - INIT una sola vez
+   - REFRESH en navegación
+   - Sin conflictos
 ========================= */
 
 (function(){
@@ -61,7 +61,6 @@
 
     el.innerHTML = "";
 
-    // 🔥 alineado con backend
     if(user?.hasAvatar && user?.avatar){
 
       const img = document.createElement("img");
@@ -80,7 +79,6 @@
       return;
     }
 
-    // fallback iniciales
     const initials = (name || "U")
       .split(" ")
       .filter(Boolean)
@@ -94,7 +92,7 @@
   }
 
   /* =========================
-     SIDEBAR RENDER
+     RENDER
   ========================= */
 
   Onion.ui.renderSidebar = function(){
@@ -111,10 +109,6 @@
     setAvatar(avatarEl, user, name);
 
   };
-
-  /* =========================
-     TOPBAR
-  ========================= */
 
   Onion.ui.renderTopbar = function(){
 
@@ -133,10 +127,6 @@
     el.textContent = titles[route] || "Panel";
 
   };
-
-  /* =========================
-     ACTIVE LINK
-  ========================= */
 
   Onion.ui.updateSidebarActive = function(){
 
@@ -175,13 +165,10 @@
   }
 
   /* =========================
-     GLOBAL EVENTS (DELEGATION)
+     EVENTS (UNA SOLA VEZ)
   ========================= */
 
   function bindGlobalEvents(){
-
-    if(initialized) return;
-    initialized = true;
 
     document.addEventListener("click", async (e)=>{
 
@@ -264,9 +251,7 @@
           }catch{}
 
         }finally{
-
           window.location.replace("/");
-
         }
 
         return;
@@ -281,27 +266,41 @@
   }
 
   /* =========================
-     INIT UI
+     INIT (UNA VEZ)
   ========================= */
 
   Onion.ui.init = function(){
 
+    if(initialized) return;
+
     initSidebarState();
+    bindGlobalEvents();
+
+    initialized = true;
+  };
+
+  /* =========================
+     REFRESH (CADA NAV)
+  ========================= */
+
+  Onion.ui.refresh = function(){
 
     Onion.ui.renderSidebar();
     Onion.ui.renderTopbar();
     Onion.ui.updateSidebarActive();
 
-    bindGlobalEvents();
-
   };
 
   /* =========================
-     AUTO INIT
+     HOOKS
   ========================= */
 
+  // 👉 INIT SOLO UNA VEZ (boot.js debería llamarlo)
+  // Onion.ui.init();
+
+  // 👉 REFRESH EN CADA NAVEGACIÓN
   Onion.events.on("nav:ready", ()=>{
-    Onion.ui.init();
+    Onion.ui.refresh();
   });
 
 })();

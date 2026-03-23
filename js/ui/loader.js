@@ -2,8 +2,7 @@
 
 /* =========================
    LOADER (ONION PRO SAFE)
-   - Autónomo
-   - Tolerante a interferencias externas
+   - Con tiempo mínimo (2.5s)
 ========================= */
 
 (function(){
@@ -17,6 +16,9 @@
 
   let timer = null;
   let active = false;
+  let startTime = 0;
+
+  const MIN_TIME = 2500; // 🔥 2.5s
 
   /* =========================
      SHOW
@@ -25,6 +27,8 @@
   Onion.ui.showLoader = function(){
 
     if(active || timer) return;
+
+    startTime = Date.now();
 
     timer = setTimeout(()=>{
 
@@ -39,7 +43,7 @@
   };
 
   /* =========================
-     HIDE
+     HIDE (CON TIEMPO MÍNIMO)
   ========================= */
 
   Onion.ui.hideLoader = function(){
@@ -49,16 +53,15 @@
       timer = null;
     }
 
-    // 🔥 aunque otro script ya lo haya quitado, sincronizamos estado
-    if(active){
+    const elapsed = Date.now() - startTime;
+    const remaining = Math.max(0, MIN_TIME - elapsed);
+
+    setTimeout(()=>{
+
       document.body.classList.remove("loading");
       active = false;
-    }else{
-      // asegurar coherencia (por si otro script lo quitó)
-      if(document.body.classList.contains("loading")){
-        document.body.classList.remove("loading");
-      }
-    }
+
+    }, remaining);
 
   };
 

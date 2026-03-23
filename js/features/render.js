@@ -1,7 +1,11 @@
 "use strict";
 
 /* =========================
-   RENDER (ONION PRO STABLE)
+   RENDER (ONION FINAL PRO)
+   - Anti HTML completo
+   - Anti race conditions
+   - Loader siempre desbloquea
+   - Limpio y robusto
 ========================= */
 
 (function(){
@@ -37,7 +41,7 @@
   }
 
   /* =========================
-     LOAD SCRIPT (SAFE)
+     LOAD SCRIPT
   ========================= */
 
   Onion.loadScript = function(src){
@@ -183,6 +187,31 @@
   };
 
   /* =========================
+     EXTRACT CONTENT (CLAVE 🔥)
+  ========================= */
+
+  function extractContent(html){
+
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = html;
+
+    // 🔥 PRIORIDAD: panel-content
+    let node = wrapper.querySelector(".panel-content");
+
+    // 🔥 fallback si viene HTML completo
+    if(!node && wrapper.querySelector("body")){
+      node = wrapper.querySelector("body");
+    }
+
+    // 🔥 último fallback
+    if(!node){
+      node = wrapper;
+    }
+
+    return node;
+  }
+
+  /* =========================
      SWAP CONTENT
   ========================= */
 
@@ -198,7 +227,8 @@
       try{
         app.innerHTML = "";
         app.appendChild(node);
-      }catch{
+      }catch(e){
+        Onion.error("Swap error:", e);
         app.innerHTML = "<div style='padding:20px'>Error</div>";
       }
 
@@ -224,7 +254,6 @@
 
       const route = Onion.router.resolve();
 
-      // 🔥 CLEANUP SOLO AQUÍ (CORRECTO)
       Onion.runCleanup?.();
 
       if(route.style){
@@ -237,10 +266,7 @@
 
       if(renderId !== Onion.state.renderId) return;
 
-      const wrapper = document.createElement("div");
-      wrapper.innerHTML = html;
-
-      const content = wrapper.querySelector(".panel-content") || wrapper;
+      const content = extractContent(html);
 
       Onion.swapContent(content);
 
@@ -273,7 +299,7 @@
       Onion.state.rendering = false;
       Onion.state.navigating = false;
 
-      // 🔥 CLAVE
+      // 🔥 SIEMPRE quitar loader pase lo que pase
       document.body.classList.remove("loading");
 
     }

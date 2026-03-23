@@ -20,25 +20,25 @@
   Onion.routes = {
 
     "/": {
-      page: "/pages/index.html",
+      page: "/app/views/index.html",
       style: "/css/core/core.css",
       script: "/js/features/dashboard/index.js"
     },
 
     "/incidencias": {
-      page: "/pages/incidencias/index.html",
+      page: "/app/views/incidencias/index.html",
       style: "/css/core/core.css",
       script: "/js/features/"
     },
 
     "/facturas": {
-      page: "/pages/facturas/index.html",
+      page: "/app/views/facturas/index.html",
       style: "/css/core/core.css",
       script: "/js/features/"
     },
 
     "/cuenta": {
-      page: "/pages/cuenta/index.html",
+      page: "/app/views/cuenta/index.html",
       style: "/css/core/core.css",
       script: "/js/features/"
     }

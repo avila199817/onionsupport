@@ -135,39 +135,47 @@
 
 
 
-  /* =========================
-     LIGHT-MODE
-  ========================= */
+/* =========================
+   LIGHT MODE
+========================= */
 
 [data-theme="light"]{
 
+  /* BRAND */
   --accent:#6366f1;
   --accent-hover:#4f46e5;
 
+  /* SIDEBAR */
   --sb-bg:#ffffff;
   --sb-hover:#f3f4f6;
   --sb-active:#e5e7eb;
   --sb-border:#e5e7eb;
 
+  /* TEXT */
   --text:#111827;
   --muted:#374151;
   --dim:#6b7280;
 
+  /* BASE */
   --main-bg:#f6f8fb;
   --dropdown-bg:#ffffff;
 
+  /* CARDS */
   --card-bg:#ffffff;
   --card-border:#e5e7eb;
   --card-shadow:0 10px 25px rgba(0,0,0,0.06);
   --card-shadow-hover:0 15px 35px rgba(0,0,0,0.08);
 
+  /* PANELS */
   --panel-bg:#ffffff;
   --panel-border:#e5e7eb;
   --panel-shadow:0 10px 25px rgba(0,0,0,0.05);
 
+  /* BACKGROUND */
   --gradient-main: linear-gradient(180deg, #f6f8fb 0%, #eef2f7 100%);
   --gradient-overlay: radial-gradient(circle at 40% 0%, rgba(0,0,0,0.03), transparent 70%);
 
+  /* UI */
   --tooltip-bg:#111827;
   --tooltip-text:#ffffff;
 
@@ -175,10 +183,37 @@
 }
 
 
+/* =========================
+   LOGO SWITCH
+========================= */
 
+/* base */
+.logo{
+  position:relative;
+}
 
+.logo img{
+  position:absolute;
+  inset:0;
+}
 
+/* dark (default) */
+.logo-light{
+  display:none;
+}
 
+.logo-dark{
+  display:block;
+}
+
+/* light mode */
+[data-theme="light"] .logo-dark{
+  display:none;
+}
+
+[data-theme="light"] .logo-light{
+  display:block;
+}
 
 
 

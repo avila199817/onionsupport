@@ -1,13 +1,5 @@
 "use strict";
 
-/* =========================
-   UI (ONION FINAL CLEAN)
-   - INIT una sola vez
-   - REFRESH estable
-   - Avatar + nombre OK
-   - Logout centralizado (auth.js)
-========================= */
-
 (function(){
 
   if(!window.Onion){
@@ -98,27 +90,16 @@
 
   Onion.ui.renderSidebar = function(){
 
-    const tryRender = () => {
+    const nameEl = document.querySelector("#sidebar-name");
+    const avatarEl = document.querySelector("#sidebar-avatar");
 
-      const nameEl = document.querySelector("#sidebar-name");
-      const avatarEl = document.querySelector("#sidebar-avatar");
+    if(!nameEl || !avatarEl) return;
 
-      if(!nameEl || !avatarEl){
-        return false;
-      }
+    const user = getUserSafe();
+    const name = getDisplayName(user);
 
-      const user = getUserSafe();
-      const name = getDisplayName(user);
-
-      nameEl.textContent = name;
-      setAvatar(avatarEl, user, name);
-
-      return true;
-    };
-
-    if(tryRender()) return;
-
-    requestAnimationFrame(()=> tryRender());
+    nameEl.textContent = name;
+    setAvatar(avatarEl, user, name);
 
   };
 
@@ -160,34 +141,38 @@
   };
 
   /* =========================
-     SIDEBAR STATE
-  ========================= */
-
-  function initSidebarState(){
-
-    const sidebar = document.querySelector(".sidebar");
-    if(!sidebar) return;
-
-    const saved = localStorage.getItem("sidebar-collapsed");
-
-    if(saved === "true"){
-      sidebar.classList.add("collapsed");
-    }
-
-  }
-
-  /* =========================
-     EVENTS
+     EVENTS (🔥 SIN BLOQUEO)
   ========================= */
 
   function bindGlobalEvents(){
+
+    if(window.__ONION_UI_BOUND__) return;
+    window.__ONION_UI_BOUND__ = true;
 
     document.addEventListener("click", async (e)=>{
 
       const sidebar = document.querySelector(".sidebar");
       const dropdown = document.querySelector("#userDropdown");
 
-      /* TOGGLE SIDEBAR */
+      const logout = e.target.closest("#logoutBtn");
+
+      if(logout){
+
+        console.log("🔥 LOGOUT REAL");
+
+        e.preventDefault();
+
+        try{
+          await fetch(Onion.config.API + "/auth/logout", {
+            method: "POST",
+            credentials: "include"
+          });
+        }catch{}
+
+        Onion.auth.resetSession();
+        Onion.auth.redirectLogin();
+        return;
+      }
 
       const toggleBtn = e.target.closest("#toggleSidebar");
 
@@ -201,8 +186,6 @@
         dropdown?.classList.remove("active");
         return;
       }
-
-      /* USER DROPDOWN */
 
       const userToggle = e.target.closest("#userToggle");
 
@@ -224,34 +207,9 @@
         return;
       }
 
-      /* CLICK DENTRO DROPDOWN */
-
       if(e.target.closest("#userDropdown")){
         return;
       }
-
-      /* LOGOUT (🔥 LIMPIO) */
-
-      const logout = e.target.closest("#logoutBtn");
-
-      if(logout){
-
-        e.preventDefault();
-
-        try{
-          await fetch(Onion.config.API + "/auth/logout", {
-            method: "POST",
-            credentials: "include"
-          });
-        }catch{}
-
-        Onion.auth.resetSession();
-        Onion.auth.redirectLogin();
-
-        return;
-      }
-
-      /* CLOSE DROPDOWN */
 
       dropdown?.classList.remove("active");
 
@@ -267,7 +225,6 @@
 
     if(initialized) return;
 
-    initSidebarState();
     bindGlobalEvents();
 
     initialized = true;
@@ -288,7 +245,7 @@
   };
 
   /* =========================
-     HOOKS
+     HOOK
   ========================= */
 
   Onion.events.on("nav:ready", ()=>{

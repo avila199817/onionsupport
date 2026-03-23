@@ -64,7 +64,9 @@ async function loadDashboard(){
 
   try{
 
-    const data = await Onion.fetch(Onion.config.API + "/dashboard");
+    const res = await Onion.fetch(Onion.config.API + "/dashboard");
+    const data = res?.data || res;
+
     if(!data) return;
 
     const k = data.kpis || {};
@@ -137,15 +139,17 @@ async function loadSystem(){
 
   try{
 
-    const base = Onion.config.API.replace("/api","");
-    const data = await Onion.fetch(base + "/health");
+    const base = new URL(Onion.config.API).origin;
 
-    // STATUS TEXTOS
+    const res = await Onion.fetch(base + "/health");
+    const data = res?.data || res;
+
+    // STATUS
     setText("status-api", "API OK");
 
     const db = $("status-db");
     if(db){
-      db.textContent = "DB " + (data?.db?.status || "unknown");
+      db.textContent = "DB " + (data?.db?.status || "--");
     }
 
     const up = $("status-uptime");
@@ -156,31 +160,34 @@ async function loadSystem(){
     // CPU
     const cpu = $("cpu-usage");
     if(cpu){
-      const val = data?.system?.cpu?.usage ?? 0;
-      cpu.textContent = "CPU: " + val + "%";
+      cpu.textContent = data?.system?.cpu
+        ? "CPU: " + data.system.cpu.usage + "%"
+        : "CPU: --";
     }
 
     // RAM
     const ram = $("ram-usage");
     if(ram){
-      const val = data?.system?.ram?.usage ?? 0;
-      ram.textContent = "RAM: " + val + "%";
+      ram.textContent = data?.system?.ram
+        ? "RAM: " + data.system.ram.usage + "%"
+        : "RAM: --";
     }
 
     // DISK
     const disk = $("disk-usage");
     if(disk){
-      const val = data?.system?.disk?.percent ?? 0;
-      disk.textContent = "Disco: " + val + "%";
+      disk.textContent = data?.system?.disk
+        ? "Disco: " + data.system.disk.percent + "%"
+        : "Disco: --";
     }
 
     // WARNING
     const warn = $("system-warning");
     if(warn){
 
-      const cpuVal = data?.system?.cpu?.usage ?? 0;
-      const ramVal = data?.system?.ram?.usage ?? 0;
-      const diskVal = data?.system?.disk?.percent ?? 0;
+      const cpuVal = data?.system?.cpu?.usage;
+      const ramVal = data?.system?.ram?.usage;
+      const diskVal = data?.system?.disk?.percent;
 
       const high =
         cpuVal > 85 ||
@@ -192,7 +199,7 @@ async function loadSystem(){
     }
 
   }catch(e){
-    Onion.warn("⚠️ Health error");
+    console.error("💥 HEALTH FAIL:", e);
   }
 
 }

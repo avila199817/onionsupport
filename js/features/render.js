@@ -1,11 +1,10 @@
 "use strict";
 
 /* =========================
-   RENDER (ONION FINAL PRO)
-   - Anti HTML completo
-   - Anti race conditions
-   - Loader siempre desbloquea
-   - Limpio y robusto
+   RENDER (ONION PRO FIXED)
+   - Aislado
+   - Sin interferencias con UI/router
+   - Sin leaks
 ========================= */
 
 (function(){
@@ -187,7 +186,7 @@
   };
 
   /* =========================
-     EXTRACT CONTENT (CLAVE 🔥)
+     EXTRACT CONTENT
   ========================= */
 
   function extractContent(html){
@@ -195,20 +194,18 @@
     const wrapper = document.createElement("div");
     wrapper.innerHTML = html;
 
-    // 🔥 PRIORIDAD: panel-content
     let node = wrapper.querySelector(".panel-content");
 
-    // 🔥 fallback si viene HTML completo
     if(!node && wrapper.querySelector("body")){
       node = wrapper.querySelector("body");
     }
 
-    // 🔥 último fallback
     if(!node){
       node = wrapper;
     }
 
-    return node;
+    // 🔥 CLONAR para evitar referencias raras
+    return node.cloneNode(true);
   }
 
   /* =========================
@@ -261,7 +258,6 @@
       }
 
       const html = await Onion.fetchHTML(route.page);
-
       if(html === null) return;
 
       if(renderId !== Onion.state.renderId) return;
@@ -276,6 +272,7 @@
 
       if(renderId !== Onion.state.renderId) return;
 
+      // 🔥 AQUÍ SOLO NOTIFICAMOS → UI reacciona
       Onion.events.emit?.("nav:ready");
 
     }catch(e){
@@ -299,7 +296,6 @@
       Onion.state.rendering = false;
       Onion.state.navigating = false;
 
-      // 🔥 SIEMPRE quitar loader pase lo que pase
       document.body.classList.remove("loading");
 
     }

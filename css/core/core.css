@@ -581,6 +581,13 @@ body{
     transform .2s ease;
 }
 
+.menu-item:focus-visible{
+  outline:none;
+  background:var(--sb-hover);
+  color:var(--text);
+  transform:translateX(4px);
+}
+
 /* hover SOLO cuando no está colapsado */
 .sidebar:not(.collapsed) .menu-item:hover{
   background:var(--sb-hover);

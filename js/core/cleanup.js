@@ -1,10 +1,10 @@
 "use strict";
 
 /* =========================
-   CLEANUP (ONION LIFECYCLE CORE PRO)
-   - Sin duplicados (Set)
-   - Seguro contra loops
-   - No rompe global UI
+   CLEANUP (ONION PRO FINAL)
+   - Compatible con core.js
+   - Sin duplicados
+   - Sin conflictos
 ========================= */
 
 (function(){
@@ -16,13 +16,9 @@
 
   const Onion = window.Onion;
 
-  // 🔥 asegurar estructura
-  if(!Onion.state){
-    Onion.state = {};
-  }
-
-  if(!Onion.state.cleanup){
-    Onion.state.cleanup = new Set();
+  // 🔥 asegurar estructura correcta (ARRAY)
+  if(!Array.isArray(Onion.state.cleanup)){
+    Onion.state.cleanup = [];
   }
 
   /* =========================
@@ -36,32 +32,37 @@
       return;
     }
 
-    Onion.state.cleanup.add(fn);
+    // evitar duplicados
+    if(Onion.state.cleanup.includes(fn)){
+      return;
+    }
+
+    Onion.state.cleanup.push(fn);
 
   };
 
   /* =========================
-     RUN CLEANUP (SAFE)
+     RUN CLEANUP
   ========================= */
 
   Onion.runCleanup = function(){
 
     const list = Onion.state.cleanup;
 
-    if(!list || list.size === 0){
+    if(!list || list.length === 0){
       Onion.log?.("🧹 cleanup vacío");
       return;
     }
 
-    Onion.log?.("🧹 Ejecutando cleanup:", list.size);
+    Onion.log?.("🧹 Ejecutando cleanup:", list.length);
 
-    // 🔥 reset antes de ejecutar (evita loops)
-    Onion.state.cleanup = new Set();
+    // reset antes de ejecutar
+    Onion.state.cleanup = [];
 
-    for(const fn of list){
+    for(let i = 0; i < list.length; i++){
 
       try{
-        fn();
+        list[i]();
       }catch(e){
         Onion.error?.("💥 cleanup error:", e);
       }
@@ -71,7 +72,7 @@
   };
 
   /* =========================
-     INTERVAL / TIMEOUT HELPERS
+     HELPERS
   ========================= */
 
   Onion.cleanupInterval = function(id){
@@ -94,10 +95,6 @@
 
   };
 
-  /* =========================
-     EVENT LISTENER CLEANUP
-  ========================= */
-
   Onion.cleanupEvent = function(target, name, handler, options){
 
     if(!target || !name || !handler) return;
@@ -112,10 +109,6 @@
 
   };
 
-  /* =========================
-     OBSERVER CLEANUP
-  ========================= */
-
   Onion.cleanupObserver = function(observer){
 
     if(!observer) return;
@@ -126,10 +119,6 @@
 
   };
 
-  /* =========================
-     RAF CLEANUP
-  ========================= */
-
   Onion.cleanupRAF = function(id){
 
     if(!id) return;
@@ -139,10 +128,6 @@
     });
 
   };
-
-  /* =========================
-     FULL CLEAR (DEBUG / RESET)
-  ========================= */
 
   Onion.cleanupAll = function(){
 

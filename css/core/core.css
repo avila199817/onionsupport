@@ -464,6 +464,7 @@ body{
 /* logo centrado */
 .sidebar.collapsed .sidebar-top .logo{
   justify-self:center;
+  transform:translateX(-4px);
 }
 
 /* botón a la derecha */

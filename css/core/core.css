@@ -1104,15 +1104,15 @@ body{
 
 
 /* =========================
-   SEARCH WRAP (YOUTUBE STYLE)
+   SEARCH WRAP (RIGHT ALIGNED PRO)
 ========================= */
 .topbar-search-wrap{
   position:relative;
 
   width:100%;
-  max-width:520px; /* 🔥 ancho tipo YouTube */
+  max-width:520px;
 
-  margin:0 auto; /* 🔥 centrado visual */
+  margin-left:auto;   /* 🔥 lo empuja a la derecha */
 }
 
 
@@ -1125,7 +1125,7 @@ body{
   padding:10px 14px;
   padding-left:38px;
 
-  border-radius:999px; /* 🔥 estilo pill */
+  border-radius:999px;
   border:1px solid var(--card-border);
 
   background:var(--card-bg);
@@ -1145,7 +1145,9 @@ body{
 }
 
 
-/* 🔥 FOCUS PRO */
+/* =========================
+   FOCUS PRO
+========================= */
 .topbar-search:focus{
   border-color:var(--accent);
   background:var(--panel-bg);
@@ -1174,12 +1176,12 @@ body{
 }
 
 
-/* ICON REACTIVO */
+/* =========================
+   ICON ACTIVE
+========================= */
 .topbar-search-wrap:focus-within .topbar-search-icon{
   color:var(--accent);
 }
-
-
 
 
 

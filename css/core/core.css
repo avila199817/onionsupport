@@ -470,7 +470,7 @@ body{
 /* botón a la derecha */
 .sidebar.collapsed .sidebar-top .sidebar-toggle{
   justify-self:end;
-  transform:translateX(-8px);
+  transform:translateX(-10px);
 }
 
 

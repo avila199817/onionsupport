@@ -23,10 +23,22 @@
         return;
       }
 
-      // 🔥 INIT (incluye UI.init + render)
+      /* =========================
+         🔥 UI INIT (CLAVE)
+      ========================= */
+
+      Onion.ui?.init?.();
+
+      /* =========================
+         INIT APP
+      ========================= */
+
       await Onion.init();
 
-      // ✅ SOLO SI TODO HA IDO BIEN
+      /* =========================
+         READY
+      ========================= */
+
       document.body.classList.remove("loading");
 
       const loader = document.getElementById("app-loader");

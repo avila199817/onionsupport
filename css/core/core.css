@@ -452,9 +452,10 @@ body{
   align-items:center;
   justify-content:space-between;
   padding:14px;
+  position:relative; /* 🔥 CLAVE */
 }
 
-
+/* 🔥 FIX COLLAPSED */
 .sidebar.collapsed .sidebar-top{
   justify-content:center;
 }

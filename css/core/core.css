@@ -454,23 +454,10 @@ body{
   padding:14px;
 }
 
-/* 🔥 SOLO COLLAPSED → GRID PERFECTO */
+/* 🔥 COLLAPSED LIMPIO */
 .sidebar.collapsed .sidebar-top{
-  display:grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items:center;
-}
-
-/* logo centrado */
-.sidebar.collapsed .sidebar-top .logo{
-  justify-self:center;
-  transform:translateX(-10px);
-}
-
-/* botón a la derecha */
-.sidebar.collapsed .sidebar-top .sidebar-toggle{
-  justify-self:end;
-  transform:translateX(-10px);
+  justify-content:center;
+  gap:12px;
 }
 
 

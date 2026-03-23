@@ -2,6 +2,9 @@
 
 /* =========================
    CLEANUP (ONION LIFECYCLE CORE PRO)
+   - Sin duplicados (Set)
+   - Seguro contra loops
+   - No rompe global UI
 ========================= */
 
 (function(){
@@ -13,6 +16,15 @@
 
   const Onion = window.Onion;
 
+  // 🔥 asegurar estructura
+  if(!Onion.state){
+    Onion.state = {};
+  }
+
+  if(!Onion.state.cleanup){
+    Onion.state.cleanup = new Set();
+  }
+
   /* =========================
      REGISTER CLEANUP
   ========================= */
@@ -20,16 +32,11 @@
   Onion.onCleanup = function(fn){
 
     if(typeof fn !== "function"){
-      Onion.warn("⚠️ cleanup inválido");
+      Onion.warn?.("⚠️ cleanup inválido");
       return;
     }
 
-    // 🔥 evitar duplicados
-    if(Onion.state.cleanup.includes(fn)){
-      return;
-    }
-
-    Onion.state.cleanup.push(fn);
+    Onion.state.cleanup.add(fn);
 
   };
 
@@ -41,24 +48,22 @@
 
     const list = Onion.state.cleanup;
 
-    if(!list || list.length === 0){
-      Onion.log("🧹 cleanup vacío");
+    if(!list || list.size === 0){
+      Onion.log?.("🧹 cleanup vacío");
       return;
     }
 
-    Onion.log("🧹 Ejecutando cleanup:", list.length);
+    Onion.log?.("🧹 Ejecutando cleanup:", list.size);
 
     // 🔥 reset antes de ejecutar (evita loops)
-    Onion.state.cleanup = [];
+    Onion.state.cleanup = new Set();
 
-    for(let i = 0; i < list.length; i++){
-
-      const fn = list[i];
+    for(const fn of list){
 
       try{
         fn();
       }catch(e){
-        Onion.error("💥 cleanup error:", e);
+        Onion.error?.("💥 cleanup error:", e);
       }
 
     }
@@ -108,7 +113,7 @@
   };
 
   /* =========================
-     OBSERVER CLEANUP (PRO)
+     OBSERVER CLEANUP
   ========================= */
 
   Onion.cleanupObserver = function(observer){
@@ -141,7 +146,7 @@
 
   Onion.cleanupAll = function(){
 
-    Onion.log("🧹 cleanup manual");
+    Onion.log?.("🧹 cleanup manual");
 
     Onion.runCleanup();
 

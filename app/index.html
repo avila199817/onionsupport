@@ -47,8 +47,17 @@
 
 
 
+
+
+
+
+
+
+
+
+
   
-<!-- LOADER PRO SAAS -->
+  
 <style>
 html,body{
   margin:0;
@@ -71,15 +80,15 @@ body.loading .layout{
 #app-loader{
   position:fixed;
   inset:0;
-  background:linear-gradient(180deg,#ffffff 0%, #f7f8fa 100%);
+  background:linear-gradient(180deg,#ffffff 0%, #f6f7f9 100%);
   display:flex;
   align-items:center;
   justify-content:center;
   z-index:9999;
-  transition:opacity .4s ease, visibility .4s ease;
+  transition:opacity .5s ease, visibility .5s ease;
 }
 
-/* Fade out cuando termina */
+/* Fade out */
 body:not(.loading) #app-loader{
   opacity:0;
   visibility:hidden;
@@ -93,20 +102,34 @@ body:not(.loading) #app-loader{
   display:flex;
   flex-direction:column;
   align-items:center;
-  gap:20px;
+  gap:18px;
+  animation:fadeIn .6s ease;
 }
 
 /* =========================
-   LOGO / TEXTO
+   LOGO
+========================= */
+
+.loader-logo{
+  width:48px;
+  height:48px;
+  object-fit:contain;
+  animation:pulse 1.6s ease-in-out infinite;
+  filter:drop-shadow(0 4px 12px rgba(0,0,0,0.08));
+}
+
+/* =========================
+   TEXTO
 ========================= */
 
 .loader-title{
-  font-family: 'Inter', sans-serif;
-  font-size:18px;
-  font-weight:600;
-  color:#111;
-  letter-spacing:.3px;
-  opacity:.9;
+  font-family:'Inter', sans-serif;
+  font-size:15px;
+  font-weight:500;
+  color:#222;
+  letter-spacing:.2px;
+  opacity:.75;
+  animation:fadeSoft 2s ease-in-out infinite;
 }
 
 /* =========================
@@ -114,22 +137,22 @@ body:not(.loading) #app-loader{
 ========================= */
 
 .loader-spinner{
-  width:42px;
-  height:42px;
+  width:38px;
+  height:38px;
   border-radius:50%;
-  border:3px solid rgba(0,0,0,0.08);
-  border-top:3px solid #111;
-  animation:spin .8s linear infinite;
+  border:2.5px solid rgba(0,0,0,0.08);
+  border-top:2.5px solid #111;
+  animation:spin .7s linear infinite;
 }
 
 /* =========================
-   PROGRESS BAR
+   PROGRESS BAR (FLUIDA)
 ========================= */
 
 .loader-bar{
-  width:160px;
-  height:4px;
-  background:rgba(0,0,0,0.06);
+  width:150px;
+  height:3px;
+  background:rgba(0,0,0,0.05);
   border-radius:10px;
   overflow:hidden;
   position:relative;
@@ -139,10 +162,10 @@ body:not(.loading) #app-loader{
   content:"";
   position:absolute;
   inset:0;
-  width:40%;
-  background:#111;
+  width:35%;
+  background:linear-gradient(90deg, transparent, #111, transparent);
   border-radius:10px;
-  animation:loadBar 1.2s ease-in-out infinite;
+  animation:loadBar 1.4s ease-in-out infinite;
 }
 
 /* =========================
@@ -154,9 +177,27 @@ body:not(.loading) #app-loader{
 }
 
 @keyframes loadBar{
-  0%{ transform:translateX(-100%); }
+  0%{ transform:translateX(-120%); }
   50%{ transform:translateX(60%); }
-  100%{ transform:translateX(120%); }
+  100%{ transform:translateX(140%); }
+}
+
+/* Pulso suave (NO parpadeo feo) */
+@keyframes pulse{
+  0%,100%{ opacity:1; transform:scale(1); }
+  50%{ opacity:.55; transform:scale(0.96); }
+}
+
+/* Fade entrada */
+@keyframes fadeIn{
+  from{ opacity:0; transform:translateY(6px); }
+  to{ opacity:1; transform:translateY(0); }
+}
+
+/* Texto breathing */
+@keyframes fadeSoft{
+  0%,100%{ opacity:.6; }
+  50%{ opacity:.9; }
 }
 
 </style>
@@ -172,12 +213,25 @@ body:not(.loading) #app-loader{
 
   
 
-<!-- NOSCRIPT FALLBACK -->
 <noscript>
   <style>
     #app-loader{display:none}
+    .layout{visibility:visible !important}
   </style>
+
+  <div style="padding:20px; font-family:sans-serif;">
+    ⚠️ Esta aplicación requiere JavaScript para funcionar.
+  </div>
 </noscript>
+
+
+
+
+
+
+
+
+  
 
 </head>
 

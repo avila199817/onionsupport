@@ -192,23 +192,15 @@
 
 
 /* =========================
-   LOGO SWITCH
+   LOGO SWITCH (CORRECTO)
 ========================= */
 
-/* contenedor */
-.logo{
-  position:relative;
-  width:32px;
-  height:32px;
-}
+/* ⚠️ NO redefinimos .logo aquí (ya lo tienes bien arriba) */
 
-/* ambos logos ocupan el mismo sitio */
+/* ambos logos ocupan el mismo sitio SIN romper tamaños */
 .logo img{
   position:absolute;
   inset:0;
-  width:100%;
-  height:100%;
-  object-fit:contain;
 }
 
 /* DEFAULT (DARK MODE) */
@@ -228,8 +220,6 @@
 [data-theme="light"] .logo-light{
   display:block;
 }
-
-
 
 
 
@@ -453,10 +443,14 @@ body{
 }
 
 
+
+
+
 /* =========================
    LOGO
 ========================= */
 .logo{
+  position:relative;
   width:32px;
   height:32px;
 
@@ -472,11 +466,15 @@ body{
     background-color .2s ease;
 }
 
+/* ambos logos superpuestos */
 .logo img{
+  position:absolute;
+  inset:0;
+
   width:20px;
   height:20px;
+
   object-fit:contain;
-  display:block;
   pointer-events:none;
 }
 
@@ -487,6 +485,9 @@ body{
 .logo:active{
   transform:scale(0.98);
 }
+
+
+
 
 
 /* =========================

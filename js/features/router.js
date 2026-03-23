@@ -27,19 +27,19 @@
 
     "/incidencias": {
       page: "/app/views/incidencias/index.html",
-      style: "/css/core/core.css",
+      style: "/css/app/incidencias.css",
       script: "/js/features/incidencias/index.js"
     },
 
     "/facturas": {
       page: "/app/views/facturas/index.html",
-      style: "/css/core/core.css",
+      style: "/css/app/facturas.css",
       script: "/js/features/facturas/index.js"
     },
 
     "/cuenta": {
       page: "/app/views/cuenta/index.html",
-      style: "/css/core/core.css",
+      style: "/css/app/cuenta.css",
       script: "/js/features/cuenta/index.js"
     }
 

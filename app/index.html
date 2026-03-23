@@ -31,25 +31,146 @@
 <!-- CSS BASE -->
 <link rel="stylesheet" href="/css/core/core.css">
 
-<!-- LOADER BASE -->
-<style>
-html,body{margin:0;padding:0}
-body.loading{overflow:hidden}
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+<!-- LOADER PRO SAAS -->
+<style>
+html,body{
+  margin:0;
+  padding:0;
+}
+
+body.loading{
+  overflow:hidden;
+}
+
+/* Oculta app mientras carga */
 body.loading .layout{
   visibility:hidden;
 }
 
+/* =========================
+   LOADER WRAPPER
+========================= */
+
 #app-loader{
   position:fixed;
   inset:0;
-  background:#fff;
+  background:linear-gradient(180deg,#ffffff 0%, #f7f8fa 100%);
   display:flex;
   align-items:center;
   justify-content:center;
   z-index:9999;
+  transition:opacity .4s ease, visibility .4s ease;
 }
+
+/* Fade out cuando termina */
+body:not(.loading) #app-loader{
+  opacity:0;
+  visibility:hidden;
+}
+
+/* =========================
+   CONTAINER
+========================= */
+
+.loader-box{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:20px;
+}
+
+/* =========================
+   LOGO / TEXTO
+========================= */
+
+.loader-title{
+  font-family: 'Inter', sans-serif;
+  font-size:18px;
+  font-weight:600;
+  color:#111;
+  letter-spacing:.3px;
+  opacity:.9;
+}
+
+/* =========================
+   SPINNER PRO
+========================= */
+
+.loader-spinner{
+  width:42px;
+  height:42px;
+  border-radius:50%;
+  border:3px solid rgba(0,0,0,0.08);
+  border-top:3px solid #111;
+  animation:spin .8s linear infinite;
+}
+
+/* =========================
+   PROGRESS BAR
+========================= */
+
+.loader-bar{
+  width:160px;
+  height:4px;
+  background:rgba(0,0,0,0.06);
+  border-radius:10px;
+  overflow:hidden;
+  position:relative;
+}
+
+.loader-bar::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  width:40%;
+  background:#111;
+  border-radius:10px;
+  animation:loadBar 1.2s ease-in-out infinite;
+}
+
+/* =========================
+   ANIMACIONES
+========================= */
+
+@keyframes spin{
+  to{ transform:rotate(360deg); }
+}
+
+@keyframes loadBar{
+  0%{ transform:translateX(-100%); }
+  50%{ transform:translateX(60%); }
+  100%{ transform:translateX(120%); }
+}
+
 </style>
+
+
+
+
+
+
+
+
+
+
+  
 
 <!-- NOSCRIPT FALLBACK -->
 <noscript>

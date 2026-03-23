@@ -1343,14 +1343,14 @@ body{
 }
 
 
-/* HOVER SOLO visual (no liarla en teclado) */
+/* HOVER */
 .search-result:hover{
   background:var(--sb-hover);
   transform:translateX(4px);
 }
 
 
-/* ACTIVE (teclado / selección) */
+/* ACTIVE */
 .search-result.active{
   background:var(--sb-active);
   color:var(--text);
@@ -1396,9 +1396,44 @@ body{
   transition:color .2s ease;
 }
 
-/* ICON REACCIONA EN ACTIVE */
 .search-result.active .search-icon{
   color:var(--accent);
+}
+
+
+/* =========================
+   HIGHLIGHT (FIX PRO)
+========================= */
+
+/* reset default amarillo */
+mark{
+  background:none;
+  color:inherit;
+}
+
+/* highlight fino */
+.search-result mark,
+.search-result .highlight{
+  background:color-mix(in srgb, var(--accent), transparent 85%);
+  color:var(--accent);
+
+  padding:1px 5px;
+  border-radius:6px;
+
+  font-weight:600;
+
+  backdrop-filter:blur(4px);
+  transition:all .15s ease;
+}
+
+/* hover */
+.search-result:hover mark{
+  background:color-mix(in srgb, var(--accent), transparent 80%);
+}
+
+/* active */
+.search-result.active mark{
+  background:color-mix(in srgb, var(--accent), transparent 75%);
 }
 
 

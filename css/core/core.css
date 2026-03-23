@@ -454,10 +454,23 @@ body{
   padding:14px;
 }
 
-/* 🔥 COLLAPSED LIMPIO */
+/* 🔥 COLLAPSED CORRECTO */
 .sidebar.collapsed .sidebar-top{
   justify-content:center;
-  gap:12px;
+  position:relative;
+}
+
+/* logo centrado REAL */
+.sidebar.collapsed .sidebar-top .logo{
+  position:absolute;
+  left:50%;
+  transform:translateX(-50%);
+}
+
+/* botón a la derecha */
+.sidebar.collapsed .sidebar-top .sidebar-toggle{
+  position:absolute;
+  right:14px;
 }
 
 

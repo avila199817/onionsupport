@@ -1,7 +1,10 @@
 "use strict";
 
 /* =========================
-   EVENTS (ONION CORE BUS PRO)
+   EVENTS (ONION CORE BUS FINAL)
+   - Sin leaks
+   - Sin duplicados
+   - Cleanup seguro
 ========================= */
 
 (function(){
@@ -13,14 +16,11 @@
 
   const Onion = window.Onion;
 
-  // registro interno
   const events = Object.create(null);
-
-  // debug flag (opcional)
   const DEBUG = false;
 
   /* =========================
-     ON (SUBSCRIBE)
+     ON
   ========================= */
 
   Onion.events.on = function(name, handler){
@@ -31,25 +31,29 @@
       events[name] = new Set();
     }
 
+    if(events[name].has(handler)) return;
+
     events[name].add(handler);
 
     if(DEBUG){
       Onion.log?.("📡 ON:", name, "total:", events[name].size);
     }
 
-    // auto-cleanup SPA
+    // 🔥 cleanup seguro (sin duplicar)
     Onion.onCleanup?.(()=>{
-      events[name]?.delete(handler);
+      if(events[name]){
+        events[name].delete(handler);
 
-      if(events[name]?.size === 0){
-        delete events[name];
+        if(events[name].size === 0){
+          delete events[name];
+        }
       }
     });
 
   };
 
   /* =========================
-     OFF (UNSUBSCRIBE)
+     OFF
   ========================= */
 
   Onion.events.off = function(name, handler){
@@ -74,7 +78,7 @@
   };
 
   /* =========================
-     ONCE (RUN 1 TIME)
+     ONCE
   ========================= */
 
   Onion.events.once = function(name, handler){
@@ -96,7 +100,7 @@
   };
 
   /* =========================
-     EMIT (TRIGGER)
+     EMIT
   ========================= */
 
   Onion.events.emit = function(name, payload){
@@ -107,7 +111,6 @@
       Onion.log?.("🚀 EMIT:", name, payload);
     }
 
-    // copiar handlers (evita problemas si se modifica durante iteración)
     const handlers = Array.from(events[name]);
 
     for(const handler of handlers){
@@ -121,7 +124,7 @@
   };
 
   /* =========================
-     CLEAR ALL (DEBUG)
+     CLEAR (DEBUG)
   ========================= */
 
   Onion.events.clear = function(){

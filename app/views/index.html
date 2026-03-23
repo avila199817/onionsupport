@@ -1,48 +1,50 @@
-<div class="panel-content home dashboard">
-
+<div class="home">
   <div class="container">
 
     <!-- HEADER -->
     <div class="dashboard-header">
       <div class="header-left">
-        <p class="page-subtitle">
-          Estado general del sistema y actividad en tiempo real
-        </p>
+        <h1 class="page-title">Dashboard</h1>
+        <div class="page-subtitle">Resumen general del sistema</div>
       </div>
     </div>
 
-    <!-- KPI -->
+    <!-- CARDS -->
     <div class="grid-cards">
 
-      <div class="card highlight">
-        <span class="card-title">Incidencias activas</span>
-        <span id="home-incidencias" class="card-value">--</span>
+      <div class="card">
+        <div class="card-title">Usuarios activos</div>
+        <span class="card-value">1,284</span>
         <div class="card-meta">
-          <span class="card-extra">vs última semana</span>
+          <span class="badge success sm">+12%</span>
+          <span class="card-extra">Últimas 24h</span>
         </div>
       </div>
 
       <div class="card">
-        <span class="card-title">Clientes</span>
-        <span id="home-clientes" class="card-value">--</span>
+        <div class="card-title">Errores</div>
+        <span class="card-value">23</span>
         <div class="card-meta">
-          <span class="card-extra">crecimiento</span>
+          <span class="badge error sm">-5%</span>
+          <span class="card-extra">Sistema estable</span>
         </div>
       </div>
 
       <div class="card">
-        <span class="card-title">Facturación mensual</span>
-        <span id="home-facturas" class="card-value">--</span>
+        <div class="card-title">Pendientes</div>
+        <span class="card-value">89</span>
         <div class="card-meta">
-          <span class="card-extra">este mes</span>
+          <span class="badge warning sm">Revisión</span>
+          <span class="card-extra">Tareas abiertas</span>
         </div>
       </div>
 
       <div class="card">
-        <span class="card-title">Usuarios activos</span>
-        <span id="home-usuarios" class="card-value">--</span>
+        <div class="card-title">Estado API</div>
+        <span class="card-value">Online</span>
         <div class="card-meta">
-          <span class="card-extra">últimas 24h</span>
+          <span class="badge info dot sm">Activo</span>
+          <span class="card-extra">Latencia normal</span>
         </div>
       </div>
 
@@ -52,101 +54,78 @@
     <div class="dashboard-grid">
 
       <!-- ACTIVIDAD -->
-      <div class="panel-block activity">
-        <div class="block-header minimal">
-          <h2 class="section-title">Actividad reciente</h2>
+      <div class="panel-block">
+        <div class="section-title">Actividad reciente</div>
+
+        <div class="activity-list">
+
+          <div class="alert-item">
+            Usuario nuevo registrado
+            <span class="badge success sm">Nuevo</span>
+          </div>
+
+          <div class="alert-item">
+            Error en servidor
+            <span class="badge error sm">Crítico</span>
+          </div>
+
+          <div class="alert-item">
+            Backup completado
+            <span class="badge info sm">Info</span>
+          </div>
+
         </div>
-        <div id="activity-list" class="activity-list"></div>
       </div>
 
-      <!-- SISTEMA -->
-      <div class="panel-block system">
-        <div class="block-header minimal">
-          <h2 class="section-title">Sistema</h2>
-        </div>
+      <!-- ESTADOS -->
+      <div class="panel-block">
+        <div class="section-title">Estado servicios</div>
 
         <div class="status-list">
 
-          <div class="status-item" id="status-api">
-            <span class="status-dot"></span>
-            API --
+          <div class="alert-item">
+            Base de datos
+            <span class="badge success dot sm">Online</span>
           </div>
 
-          <div class="status-item" id="status-db">
-            <span class="status-dot"></span>
-            DB --
+          <div class="alert-item">
+            API externa
+            <span class="badge warning dot sm">Lento</span>
           </div>
 
-          <div class="status-item" id="status-uptime">
-            <span class="status-dot"></span>
-            Uptime --
+          <div class="alert-item">
+            Sistema pagos
+            <span class="badge error dot sm">Caído</span>
           </div>
 
         </div>
-
       </div>
 
-    </div>
-
-    <!-- SEGUNDO BLOQUE -->
-    <div class="dashboard-grid secondary">
-
       <!-- RESUMEN -->
-      <div class="panel-block summary">
-        <div class="block-header minimal">
-          <h2 class="section-title">Rendimiento hoy</h2>
-        </div>
+      <div class="panel-block">
+        <div class="section-title">Resumen</div>
 
         <div class="summary-grid">
 
           <div class="summary-item">
-            <span class="summary-value">--</span>
-            <span class="summary-label">Tickets</span>
+            <div class="summary-value">€12,340</div>
+            <div class="summary-label">Ingresos</div>
           </div>
 
           <div class="summary-item">
-            <span class="summary-value">--</span>
-            <span class="summary-label">Resueltos</span>
+            <div class="summary-value">324</div>
+            <div class="summary-label">Pedidos</div>
           </div>
 
           <div class="summary-item">
-            <span class="summary-value">--</span>
-            <span class="summary-label">Pendientes</span>
+            <div class="summary-value">87%</div>
+            <div class="summary-label">Conversión</div>
           </div>
 
         </div>
-      </div>
-
-      <!-- ALERTAS -->
-      <div class="panel-block alerts">
-        <div class="block-header minimal">
-          <h2 class="section-title">Sistema / Rendimiento</h2>
-        </div>
-
-        <div class="alert-list">
-
-          <div class="alert-item info" id="cpu-usage">
-            CPU: --
-          </div>
-
-          <div class="alert-item info" id="ram-usage">
-            RAM: --
-          </div>
-
-          <div class="alert-item info" id="disk-usage">
-            Disco: --
-          </div>
-
-          <div class="alert-item warn" id="system-warning" style="display:none;">
-            Uso elevado del sistema
-          </div>
-
-        </div>
-
       </div>
 
     </div>
 
   </div>
-
 </div>

@@ -1,7 +1,9 @@
 "use strict";
 
 /* =========================
-   ROUTER (ONION PRO SPA)
+   ROUTER (ONION PRO SPA FIXED)
+   - Sin duplicación de eventos
+   - Navegación estable
 ========================= */
 
 (function(){
@@ -63,7 +65,7 @@
   }
 
   /* =========================
-     GET PATH (MULTI-TENANT)
+     GET PATH
   ========================= */
 
   Onion.router.get = function(){
@@ -72,12 +74,11 @@
 
       let path = normalize(window.location.pathname);
 
-      // detectar /@usuario
       if(path.startsWith("/@")){
 
         const parts = path.split("/").filter(Boolean);
 
-        const userSlug = parts[0]; // "@avila"
+        const userSlug = parts[0];
         const cleanUser = userSlug.replace("@","");
 
         if(!Onion.state.user){
@@ -95,6 +96,7 @@
         }
 
         return "/" + parts.slice(1).join("/");
+
       }
 
       return path;
@@ -109,7 +111,7 @@
   };
 
   /* =========================
-     RESOLVE ROUTE
+     RESOLVE
   ========================= */
 
   Onion.router.resolve = function(){
@@ -120,11 +122,8 @@
       const config = Onion.routes[route];
 
       if(config){
-        Onion.log?.("🧭 Route:", route);
         return config;
       }
-
-      Onion.warn?.("⚠️ Ruta no encontrada:", route);
 
       return Onion.routes["/"];
 
@@ -138,24 +137,20 @@
   };
 
   /* =========================
-     NAVIGATE (CORE)
+     NAVIGATE
   ========================= */
 
   Onion.router.navigate = function(href){
 
     if(!href) return;
 
-    // evitar externas
     if(href.startsWith("http")) return;
 
     const username =
       Onion.state.user?.username ||
       localStorage.getItem("onion_user_slug");
 
-    if(!username){
-      Onion.warn?.("⚠️ No username para navegación");
-      return;
-    }
+    if(!username) return;
 
     let finalHref;
 
@@ -169,7 +164,6 @@
       finalHref = "/@" + username + href;
     }
 
-    // evitar navegación duplicada
     if(window.location.pathname === finalHref) return;
 
     if(Onion.state.navigating) return;
@@ -182,39 +176,46 @@
   };
 
   /* =========================
-     CLICK INTERCEPT (SPA)
+     CLICK INTERCEPT (SAFE)
   ========================= */
 
-  document.addEventListener("click", function(e){
+  if(!window.__ONION_ROUTER_BOUND__){
 
-    const link = e.target.closest("a[data-spa]");
-    if(!link) return;
+    window.__ONION_ROUTER_BOUND__ = true;
 
-    const href = link.getAttribute("href");
-    if(!href) return;
+    document.addEventListener("click", function(e){
 
-    // nueva pestaña
-    if(link.target === "_blank") return;
+      const link = e.target.closest("a[data-spa]");
+      if(!link) return;
 
-    // ctrl / cmd click
-    if(e.metaKey || e.ctrlKey) return;
+      const href = link.getAttribute("href");
+      if(!href) return;
 
-    // descarga
-    if(link.hasAttribute("download")) return;
+      if(link.target === "_blank") return;
+      if(e.metaKey || e.ctrlKey) return;
+      if(link.hasAttribute("download")) return;
 
-    e.preventDefault();
+      e.preventDefault();
 
-    Onion.router.navigate(href);
+      Onion.router.navigate(href);
 
-  });
+    });
+
+  }
 
   /* =========================
      BACK / FORWARD
   ========================= */
 
-  window.addEventListener("popstate", function(){
-    Onion.render();
-  });
+  if(!window.__ONION_POPSTATE_BOUND__){
+
+    window.__ONION_POPSTATE_BOUND__ = true;
+
+    window.addEventListener("popstate", function(){
+      Onion.render();
+    });
+
+  }
 
   /* =========================
      HAS ROUTE

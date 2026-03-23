@@ -1,7 +1,9 @@
 "use strict";
 
 /* =========================
-   FETCH (ONION PRO MAX)
+   FETCH (ONION PRO FIXED)
+   - No navega
+   - No invade router
 ========================= */
 
 (function(){
@@ -37,7 +39,7 @@
   }
 
   /* =========================
-     FETCH JSON (CORE PRO)
+     FETCH JSON
   ========================= */
 
   Onion.fetch = async function(url, options = {}){
@@ -45,7 +47,6 @@
     const finalUrl = normalizeUrl(url);
 
     if(!finalUrl){
-      Onion.warn("fetch sin URL válida");
       throw new Error("NO_URL");
     }
 
@@ -61,12 +62,10 @@
         ...(options.headers || {})
       };
 
-      // 🔐 JSON automático
       if(options.body && !headers["Content-Type"]){
         headers["Content-Type"] = "application/json";
       }
 
-      // 🔐 AUTH automática
       try{
         const token = Onion.auth?.getToken?.();
         if(token){
@@ -91,18 +90,17 @@
       ========================= */
 
       if(res.status === 401){
-
         Onion.warn("🔐 401 no autorizado");
 
+        // 🔥 SOLO limpiamos estado
         Onion.clearUser?.();
         Onion.auth?.clearToken?.();
-        Onion.auth?.redirectLogin?.();
 
         throw new Error("401");
       }
 
       /* =========================
-         RESPONSE PARSE
+         PARSE
       ========================= */
 
       let data;
@@ -119,10 +117,6 @@
         data = await res.text();
       }
 
-      /* =========================
-         ERROR HANDLING
-      ========================= */
-
       if(!res.ok){
 
         const msg =
@@ -132,18 +126,13 @@
         throw new Error(msg);
       }
 
-      Onion.log("🌐 FETCH OK:", finalUrl);
-
       return data;
 
     }catch(e){
 
       if(e.name === "AbortError"){
-        Onion.error("⏱️ TIMEOUT:", finalUrl);
         throw new Error("TIMEOUT");
       }
-
-      Onion.error("💥 FETCH ERROR:", finalUrl, e.message);
 
       throw e;
 

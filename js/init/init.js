@@ -19,12 +19,17 @@
 
   Onion.init = async function(){
 
+    if(Onion.state.ready){
+      Onion.warn("INIT ya ejecutado");
+      return;
+    }
+
+    Onion.log("🚀 INIT START");
+
     try{
 
-      Onion.log("🚀 INIT START");
-
       /* =========================
-         AUTH / USER
+         AUTH / USER (ROBUSTO)
       ========================= */
 
       let user = null;
@@ -36,35 +41,51 @@
         user = res?.user || res || null;
 
         if(user){
-          Onion.setUser?.(user);
+          Onion.setUser(user);
+        }else{
+          throw new Error("NO_USER");
         }
 
       }catch(e){
 
-        if(e.message === "401" || e.message === "NO_TOKEN"){
-          Onion.warn("No autenticado");
+        const msg = e?.message || "";
+
+        if(
+          msg.includes("401") ||
+          msg.includes("NO_TOKEN") ||
+          msg.includes("NO_USER")
+        ){
+          Onion.warn("🔐 No autenticado → redirect");
+
+          Onion.clearUser?.();
           Onion.auth?.redirectLogin?.();
+
           return;
         }
 
-        Onion.error("Error obteniendo usuario:", e);
+        Onion.error("💥 AUTH ERROR:", e);
         throw e;
 
       }
 
       /* =========================
-         SPA EVENTS (SAFE)
+         SPA EVENTS (ANTI DUPLICADO)
       ========================= */
 
-      // 🔥 evitar duplicados
+      // limpiar antes de volver a registrar
       Onion.events.off?.("nav:change", Onion.render);
+      Onion.events.off?.("app:refresh", Onion.render);
+
       window.removeEventListener("popstate", Onion.render);
 
+      // registrar limpio
       Onion.events.on?.("nav:change", Onion.render);
+      Onion.events.on?.("app:refresh", Onion.render);
+
       window.addEventListener("popstate", Onion.render);
 
       /* =========================
-         FIRST RENDER
+         FIRST RENDER (SEGURO)
       ========================= */
 
       await Onion.render();
@@ -75,7 +96,7 @@
 
       Onion.state.ready = true;
 
-      Onion.events.emit("app:ready", {
+      Onion.events.emit?.("app:ready", {
         user: Onion.state.user
       });
 
@@ -99,7 +120,10 @@
 
     }finally{
 
-      // 🔥 estado SIEMPRE consistente
+      /* =========================
+         STATE CLEANUP (CRÍTICO)
+      ========================= */
+
       Onion.state.navigating = false;
       Onion.state.rendering = false;
 

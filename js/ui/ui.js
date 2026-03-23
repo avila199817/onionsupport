@@ -111,7 +111,7 @@
     if(!el) return;
 
     const titles = {
-      "/": "Panel",
+      "/": "Onion Support",
       "/incidencias": "Incidencias",
       "/facturas": "Facturas",
       "/cuenta": "Cuenta"

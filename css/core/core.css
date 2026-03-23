@@ -1074,7 +1074,6 @@ body{
   will-change:left;
 }
 
-
 /* COLLAPSED */
 .sidebar.collapsed ~ .main-content .topbar{
   left:var(--sidebar-collapsed);
@@ -1098,15 +1097,22 @@ body{
   display:flex;
   align-items:center;
   gap:var(--space-md);
+
+  flex:1;
+  justify-content:flex-end;
 }
 
 
 /* =========================
-   SEARCH WRAP
+   SEARCH WRAP (YOUTUBE STYLE)
 ========================= */
 .topbar-search-wrap{
   position:relative;
-  width:260px;
+
+  width:100%;
+  max-width:520px; /* 🔥 ancho tipo YouTube */
+
+  margin:0 auto; /* 🔥 centrado visual */
 }
 
 
@@ -1117,9 +1123,9 @@ body{
   width:100%;
 
   padding:10px 14px;
-  padding-left:36px;
+  padding-left:38px;
 
-  border-radius:12px;
+  border-radius:999px; /* 🔥 estilo pill */
   border:1px solid var(--card-border);
 
   background:var(--card-bg);
@@ -1154,7 +1160,7 @@ body{
 ========================= */
 .topbar-search-icon{
   position:absolute;
-  left:10px;
+  left:12px;
   top:50%;
   transform:translateY(-50%);
 
@@ -1163,17 +1169,15 @@ body{
 
   color:var(--dim);
   pointer-events:none;
-  display:block;
 
   transition:color .2s ease;
 }
 
 
-/* 🔥 ICON REACTIVO (CORRECTO PARA TU HTML) */
+/* ICON REACTIVO */
 .topbar-search-wrap:focus-within .topbar-search-icon{
   color:var(--accent);
 }
-
 
 
 

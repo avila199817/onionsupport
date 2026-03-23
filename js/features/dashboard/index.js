@@ -1,333 +1,278 @@
-(function(){
-
 "use strict";
 
-const Onion = window.Onion;
-
-if(!Onion){
-  console.error("💥 Onion no disponible (dashboard)");
-  return;
-}
-
-let initialized = false;
-let interval = null;
-
 /* =========================
-   ROOT
+   DASHBOARD (ONION PRO FINAL)
+   - Espera a DOM real
+   - Espera a usuario
+   - Sin fallos silenciosos
+   - Cleanup correcto
 ========================= */
 
-function getRoot(){
-  return document.querySelector(".panel-content.dashboard");
-}
+(function(){
 
-function $(id){
-  return getRoot()?.querySelector("#" + id);
-}
+  const Onion = window.Onion;
 
-/* =========================
-   HELPERS
-========================= */
-
-function safe(n){
-  return (n === 0 || n) ? n : 0;
-}
-
-function formatMoney(n){
-  return new Intl.NumberFormat("es-ES", {
-    style:"currency",
-    currency:"EUR",
-    maximumFractionDigits:0
-  }).format(safe(n));
-}
-
-function timeAgo(date){
-  if(!date) return "Ahora";
-
-  const diff = Math.floor((Date.now() - new Date(date)) / 1000);
-
-  if(diff < 60) return "Hace " + diff + "s";
-  if(diff < 3600) return "Hace " + Math.floor(diff/60) + " min";
-  if(diff < 86400) return "Hace " + Math.floor(diff/3600) + " h";
-
-  return "Hace " + Math.floor(diff/86400) + " d";
-}
-
-function animate(el, value){
-  if(!el) return;
-
-  value = safe(value);
-
-  const start = 0;
-  const duration = 400;
-  const t0 = performance.now();
-
-  function frame(t){
-    const p = Math.min((t - t0)/duration, 1);
-    el.textContent = Math.floor(start + (value - start)*p);
-    if(p < 1) requestAnimationFrame(frame);
-  }
-
-  requestAnimationFrame(frame);
-}
-
-function calcTrend(current, prev){
-  current = safe(current);
-  prev = safe(prev);
-
-  if(prev === 0) return 0;
-
-  return Math.round(((current - prev) / prev) * 100);
-}
-
-function setTrend(el, value, label){
-  if(!el) return;
-
-  const trend = value >= 0 ? "up" : "down";
-  const sign = value >= 0 ? "+" : "";
-
-  el.innerHTML = `
-    <span class="trend ${trend}">${sign}${value}%</span>
-    <span class="card-extra">${label}</span>
-  `;
-}
-
-/* =========================
-   DASHBOARD DATA
-========================= */
-
-async function loadDashboard(){
-
-  try{
-
-    const data = await Onion.fetch(Onion.config.API + "/dashboard");
-    if(!data) return;
-
-    const k = data.kpis || {};
-
-    const tickets = safe(k.tickets);
-    const clientes = safe(k.clientes);
-    const usuarios = safe(k.usuarios);
-
-    const facturacion = safe(
-      k.facturacionMensual ??
-      k.facturacionMes ??
-      k.facturacion ?? 0
-    );
-
-    animate($("home-incidencias"), tickets);
-    animate($("home-clientes"), clientes);
-    animate($("home-usuarios"), usuarios);
-
-    const f = $("home-facturas");
-    if(f) f.textContent = formatMoney(facturacion);
-
-    const cards = getRoot()?.querySelectorAll(".card") || [];
-
-    if(cards.length >= 4){
-
-      setTrend(cards[0].querySelector(".card-meta"),
-        calcTrend(tickets, k.ticketsPrev || 0),
-        "vs última semana"
-      );
-
-      setTrend(cards[1].querySelector(".card-meta"),
-        calcTrend(clientes, k.clientesPrev || 0),
-        "crecimiento"
-      );
-
-      setTrend(cards[2].querySelector(".card-meta"),
-        calcTrend(facturacion, k.facturacionPrev || 0),
-        "este mes"
-      );
-
-      setTrend(cards[3].querySelector(".card-meta"),
-        calcTrend(usuarios, k.usuariosPrev || 0),
-        "últimas 24h"
-      );
-
-    }
-
-    const summary = getRoot()?.querySelectorAll(".summary-value") || [];
-
-    if(summary.length >= 3){
-      summary[0].textContent = safe(k.ticketsToday);
-      summary[1].textContent = safe(k.resueltosToday);
-      summary[2].textContent = safe(k.pendientesToday);
-    }
-
-    renderActivity(data.activity || []);
-
-  }catch(e){
-
-    Onion.error("💥 Dashboard error:", e);
-
-  }
-
-}
-
-/* =========================
-   ACTIVITY
-========================= */
-
-function renderActivity(items){
-
-  const list = $("activity-list");
-  if(!list) return;
-
-  list.innerHTML = "";
-
-  if(!items.length){
-    list.innerHTML = "<div class='activity-empty'>Sin actividad reciente</div>";
+  if(!Onion){
+    console.error("💥 Onion no disponible (dashboard)");
     return;
   }
 
-  items.slice(0,5).forEach(i => {
+  let initialized = false;
+  let interval = null;
 
-    const el = document.createElement("div");
-    el.className = "activity-item";
+  /* =========================
+     ROOT
+  ========================= */
 
-    const title =
-      i.type === "ticket" ? "Nueva incidencia creada" :
-      i.type === "factura" ? "Factura generada" :
-      i.type === "cliente" ? "Cliente creado" :
-      "Actividad";
+  function getRoot(){
+    return document.querySelector(".panel-content.dashboard");
+  }
 
-    const desc = escapeHTML(i.desc || i.id || "Sin datos");
+  function $(id){
+    return getRoot()?.querySelector("#" + id);
+  }
+
+  /* =========================
+     HELPERS
+  ========================= */
+
+  function safe(n){
+    return (n === 0 || n) ? n : 0;
+  }
+
+  function formatMoney(n){
+    return new Intl.NumberFormat("es-ES", {
+      style:"currency",
+      currency:"EUR",
+      maximumFractionDigits:0
+    }).format(safe(n));
+  }
+
+  function timeAgo(date){
+    if(!date) return "Ahora";
+
+    const diff = Math.floor((Date.now() - new Date(date)) / 1000);
+
+    if(diff < 60) return "Hace " + diff + "s";
+    if(diff < 3600) return "Hace " + Math.floor(diff/60) + " min";
+    if(diff < 86400) return "Hace " + Math.floor(diff/3600) + " h";
+
+    return "Hace " + Math.floor(diff/86400) + " d";
+  }
+
+  function animate(el, value){
+    if(!el) return;
+
+    value = safe(value);
+
+    const duration = 400;
+    const t0 = performance.now();
+
+    function frame(t){
+      const p = Math.min((t - t0)/duration, 1);
+      el.textContent = Math.floor(value * p);
+      if(p < 1) requestAnimationFrame(frame);
+    }
+
+    requestAnimationFrame(frame);
+  }
+
+  function calcTrend(current, prev){
+    current = safe(current);
+    prev = safe(prev);
+    if(prev === 0) return 0;
+    return Math.round(((current - prev) / prev) * 100);
+  }
+
+  function setTrend(el, value, label){
+    if(!el) return;
+
+    const trend = value >= 0 ? "up" : "down";
+    const sign = value >= 0 ? "+" : "";
 
     el.innerHTML = `
-      <div class="activity-line"></div>
-      <div class="activity-content">
-        <span class="activity-title">${title}</span>
-        <span class="activity-desc">${desc}</span>
-        <span class="activity-time">${timeAgo(i.time)}</span>
-      </div>
+      <span class="trend ${trend}">${sign}${value}%</span>
+      <span class="card-extra">${label}</span>
     `;
+  }
 
-    list.appendChild(el);
+  function escapeHTML(str){
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
 
-  });
+  /* =========================
+     DASHBOARD DATA
+  ========================= */
 
-}
+  async function loadDashboard(){
 
-/* =========================
-   SYSTEM
-========================= */
+    try{
 
-async function loadSystem(){
+      const data = await Onion.fetch(Onion.config.API + "/dashboard");
 
-  try{
+      if(!data || !data.kpis){
+        Onion.warn("Dashboard vacío");
+        return;
+      }
 
-    const start = performance.now();
+      const k = data.kpis;
 
-    const data = await Onion.fetch(Onion.config.API + "/health");
+      const tickets = safe(k.tickets);
+      const clientes = safe(k.clientes);
+      const usuarios = safe(k.usuarios);
 
-    const latency = Math.floor(performance.now() - start);
+      const facturacion = safe(
+        k.facturacionMensual ??
+        k.facturacionMes ??
+        k.facturacion ?? 0
+      );
 
-    const api = $("status-api");
-    if(api){
-      api.innerHTML = `<span class="status-dot"></span> API · ${latency}ms`;
-      api.className = "status-item ok";
-    }
+      animate($("home-incidencias"), tickets);
+      animate($("home-clientes"), clientes);
+      animate($("home-usuarios"), usuarios);
 
-    const db = $("status-db");
-    if(db){
-      const ok = data?.db?.status === "up";
-      db.innerHTML = `<span class="status-dot"></span> Base de datos ${ok ? "activa" : "error"}`;
-      db.className = "status-item " + (ok ? "ok" : "warn");
-    }
+      const f = $("home-facturas");
+      if(f) f.textContent = formatMoney(facturacion);
 
-    const up = $("status-uptime");
-    if(up){
-      const uptime = data?.uptime || "--";
-      up.innerHTML = `<span class="status-dot"></span> TIME · ${uptime}`;
-      up.className = "status-item ok";
-    }
+      const cards = getRoot()?.querySelectorAll(".card") || [];
 
-    const cpu = safe(data?.system?.cpu?.usage);
-    const ram = safe(data?.system?.ram?.usage);
-    const diskUsed = safe(data?.system?.disk?.used);
-    const diskTotal = safe(data?.system?.disk?.total);
+      if(cards.length >= 4){
 
-    const diskPercent = diskTotal
-      ? Math.round((diskUsed / diskTotal) * 100)
-      : 0;
+        setTrend(cards[0].querySelector(".card-meta"),
+          calcTrend(tickets, k.ticketsPrev),
+          "vs mes anterior"
+        );
 
-    const warn = $("system-warning");
+        setTrend(cards[1].querySelector(".card-meta"),
+          calcTrend(clientes, k.clientesPrev),
+          "crecimiento"
+        );
 
-    if(warn){
-      warn.style.display =
-        (cpu > 80 || ram > 85 || diskPercent > 90) ? "block" : "none";
-    }
+        setTrend(cards[2].querySelector(".card-meta"),
+          calcTrend(facturacion, k.facturacionPrev),
+          "este mes"
+        );
 
-  }catch(e){
+        setTrend(cards[3].querySelector(".card-meta"),
+          calcTrend(usuarios, k.usuariosPrev),
+          "usuarios"
+        );
+      }
 
-    const api = $("status-api");
-    if(api){
-      api.innerHTML = `<span class="status-dot"></span> API caída`;
-      api.className = "status-item warn";
+      renderActivity(data.activity || []);
+
+    }catch(e){
+      Onion.error("💥 Dashboard error:", e);
     }
 
   }
 
-}
+  /* =========================
+     ACTIVITY
+  ========================= */
 
-/* =========================
-   INIT
-========================= */
+  function renderActivity(items){
 
-async function init(){
+    const list = $("activity-list");
+    if(!list) return;
 
-  if(initialized) return;
+    list.innerHTML = "";
 
-  const root = getRoot();
-  if(!root) return;
+    if(!items.length){
+      list.innerHTML = "<div class='activity-empty'>Sin actividad</div>";
+      return;
+    }
 
-  if(!Onion.state?.user){
-    return setTimeout(init, 100);
+    items.slice(0,5).forEach(i => {
+
+      const el = document.createElement("div");
+      el.className = "activity-item";
+
+      const desc = escapeHTML(i.desc || "Actividad");
+
+      el.innerHTML = `
+        <div class="activity-content">
+          <span class="activity-desc">${desc}</span>
+          <span class="activity-time">${timeAgo(i.time)}</span>
+        </div>
+      `;
+
+      list.appendChild(el);
+    });
   }
 
-  initialized = true;
+  /* =========================
+     SYSTEM
+  ========================= */
 
-  Onion.log("📊 Dashboard init");
+  async function loadSystem(){
 
-  await run();
+    try{
 
-  interval = setInterval(run, 60000);
+      const start = performance.now();
+      const data = await Onion.fetch(Onion.config.API + "/health");
+      const latency = Math.floor(performance.now() - start);
 
-  // 🔥 cleanup real SPA
-  Onion.onCleanup(()=>{
-    initialized = false;
+      const api = $("status-api");
+      if(api){
+        api.textContent = `API · ${latency}ms`;
+      }
 
-    if(interval){
-      clearInterval(interval);
-      interval = null;
+    }catch(e){
+      Onion.warn("Health error");
     }
-  });
 
-}
+  }
 
-async function run(){
-  await Promise.all([
-    loadDashboard(),
-    loadSystem()
-  ]);
-}
+  /* =========================
+     INIT
+  ========================= */
 
-/* =========================
-   START
-========================= */
+  async function init(){
 
-init();
+    if(initialized) return;
 
-/* =========================
-   HELPERS
-========================= */
+    const root = getRoot();
+    if(!root){
+      return setTimeout(init, 100);
+    }
 
-function escapeHTML(str){
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
+    if(!Onion.state?.user){
+      return setTimeout(init, 100);
+    }
+
+    initialized = true;
+
+    Onion.log("📊 Dashboard init");
+
+    await run();
+
+    interval = setInterval(run, 60000);
+
+    Onion.onCleanup(()=>{
+      initialized = false;
+      if(interval){
+        clearInterval(interval);
+        interval = null;
+      }
+    });
+
+  }
+
+  async function run(){
+    await Promise.all([
+      loadDashboard(),
+      loadSystem()
+    ]);
+  }
+
+  /* =========================
+     START
+  ========================= */
+
+  init();
 
 })();

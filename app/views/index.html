@@ -2,70 +2,102 @@
 
   <div class="container">
 
-    <!-- HEADER (VACÍO PARA ESPACIADO) -->
+    <!-- HEADER VACÍO (ESPACIADO) -->
     <div class="dashboard-header"></div>
 
-    <!-- KPI -->
+    <!-- =========================
+         KPI PRINCIPAL (4 CARDS)
+    ========================= -->
     <div class="grid-cards">
 
+      <!-- USUARIOS -->
       <div class="card">
-        <span class="card-title">Incidencias activas</span>
-        <strong id="home-incidencias" class="card-value">0</strong>
+        <span class="card-title">Usuarios</span>
 
-        <div class="card-meta">
-          <span class="card-extra">vs última semana</span>
-        </div>
-      </div>
-
-      <div class="card">
-        <span class="card-title">Clientes</span>
-        <strong id="home-clientes" class="card-value">0</strong>
-
-        <div class="card-meta">
-          <span class="card-extra">crecimiento</span>
-        </div>
-      </div>
-
-      <div class="card">
-        <span class="card-title">Facturación mensual</span>
-        <strong id="home-facturas" class="card-value">€0</strong>
-
-        <div class="card-meta">
-          <span class="card-extra">este mes</span>
-        </div>
-      </div>
-
-      <div class="card">
-        <span class="card-title">Usuarios activos</span>
         <strong id="home-usuarios" class="card-value">0</strong>
 
         <div class="card-meta">
-          <span class="card-extra">últimas 24h</span>
+          <span class="card-extra">Activos</span>
+        </div>
+
+        <div class="card-meta">
+          <strong id="home-usuarios-inactivos">0</strong>
+          <span class="card-extra">Inactivos</span>
+        </div>
+      </div>
+
+      <!-- CLIENTES -->
+      <div class="card">
+        <span class="card-title">Clientes</span>
+
+        <strong id="home-clientes" class="card-value">0</strong>
+
+        <div class="card-meta">
+          <span class="card-extra">Activos</span>
+        </div>
+
+        <div class="card-meta">
+          <strong id="home-clientes-inactivos">0</strong>
+          <span class="card-extra">Inactivos</span>
+        </div>
+      </div>
+
+      <!-- FACTURACIÓN GLOBAL -->
+      <div class="card">
+        <span class="card-title">Facturación total</span>
+
+        <strong id="home-facturas" class="card-value">€0</strong>
+
+        <div class="card-meta">
+          <span class="card-extra">Pagado</span>
+        </div>
+
+        <div class="card-meta">
+          <strong id="home-facturas-pendiente">€0</strong>
+          <span class="card-extra">Pendiente</span>
+        </div>
+      </div>
+
+      <!-- FACTURACIÓN MES -->
+      <div class="card">
+        <span class="card-title" id="facturacion-mes-label">
+          Marzo 2026
+        </span>
+
+        <strong id="home-facturacion-mes" class="card-value">€0</strong>
+
+        <div class="card-meta">
+          <span class="card-extra">Facturado este mes</span>
         </div>
       </div>
 
     </div>
 
-    <!-- GRID PRINCIPAL -->
+    <!-- =========================
+         GRID PRINCIPAL
+    ========================= -->
     <div class="dashboard-grid">
 
       <!-- ACTIVIDAD -->
       <div class="panel-block">
+
         <div class="section-title">Actividad reciente</div>
 
         <div id="activity-list" class="activity-list">
-          <div>Cargando...</div>
+          <div>Cargando actividad...</div>
         </div>
+
       </div>
 
       <!-- SISTEMA -->
       <div class="panel-block">
+
         <div class="section-title">Sistema</div>
 
         <div class="status-list">
 
-          <div id="status-api">API --</div>
-          <div id="status-db">DB --</div>
+          <div id="status-api">API -- ms</div>
+          <div id="status-db">Base de datos --</div>
           <div id="status-uptime">Uptime --</div>
 
         </div>
@@ -74,45 +106,58 @@
 
     </div>
 
-    <!-- SEGUNDO BLOQUE -->
+    <!-- =========================
+         RENDIMIENTO SISTEMA
+    ========================= -->
     <div class="dashboard-grid">
 
-      <!-- RESUMEN -->
+      <!-- HARDWARE -->
       <div class="panel-block">
+
+        <div class="section-title">Sistema / Rendimiento</div>
+
+        <div class="alert-list">
+
+          <div id="cpu-usage" class="alert-item">
+            CPU: -- % (Procesador --)
+          </div>
+
+          <div id="ram-usage" class="alert-item">
+            RAM: -- % (-- GB / -- GB)
+          </div>
+
+          <div id="disk-usage" class="alert-item">
+            Disco: -- % (-- GB libres)
+          </div>
+
+          <div id="system-warning" class="alert-item" style="display:none;">
+            ⚠️ Alta carga del sistema
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- RENDIMIENTO HOY -->
+      <div class="panel-block">
+
         <div class="section-title">Rendimiento hoy</div>
 
         <div class="summary-grid">
 
           <div class="summary-item">
-            <div class="summary-value">0</div>
+            <div id="tickets-hoy" class="summary-value">0</div>
             <div class="summary-label">Tickets</div>
           </div>
 
           <div class="summary-item">
-            <div class="summary-value">0</div>
+            <div id="resueltos-hoy" class="summary-value">0</div>
             <div class="summary-label">Resueltos</div>
           </div>
 
           <div class="summary-item">
-            <div class="summary-value">0</div>
+            <div id="pendientes-hoy" class="summary-value">0</div>
             <div class="summary-label">Pendientes</div>
-          </div>
-
-        </div>
-      </div>
-
-      <!-- SISTEMA DETALLE -->
-      <div class="panel-block">
-        <div class="section-title">Sistema / Rendimiento</div>
-
-        <div class="alert-list">
-
-          <div id="cpu-usage" class="alert-item">CPU: --</div>
-          <div id="ram-usage" class="alert-item">RAM: --</div>
-          <div id="disk-usage" class="alert-item">Disco: --</div>
-
-          <div id="system-warning" class="alert-item" style="display:none;">
-            ⚠️ Alta carga del sistema
           </div>
 
         </div>

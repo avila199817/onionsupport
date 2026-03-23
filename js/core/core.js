@@ -19,7 +19,7 @@ if (window.Onion) {
      VERSION
   ========================= */
 
-  Onion.version = "1.1.0";
+  Onion.version = "1.1.1";
 
   /* =========================
      CONFIG
@@ -60,7 +60,7 @@ if (window.Onion) {
      SAFE STORAGE
   ========================= */
 
-  function safeStorage(key){
+  function safeGet(key){
     try{
       return localStorage.getItem(key);
     }catch{
@@ -81,12 +81,12 @@ if (window.Onion) {
   }
 
   /* =========================
-     STATE (CLAVE 🔥)
+     STATE
   ========================= */
 
   Onion.state = {
     user: null,
-    slug: safeStorage("onion_user_slug"),
+    slug: safeGet("onion_user_slug"),
 
     rendering: false,
     navigating: false,
@@ -97,7 +97,7 @@ if (window.Onion) {
 
     abortController: null,
 
-    cleanup: [], // 🔥 CRÍTICO (array SIEMPRE)
+    cleanup: [],
 
     ready: false
   };
@@ -121,7 +121,7 @@ if (window.Onion) {
   Onion.router = {};
 
   /* =========================
-     USER MANAGEMENT (ALINEADO /ME)
+     USER MANAGEMENT
   ========================= */
 
   Onion.setUser = function(user){
@@ -131,7 +131,6 @@ if (window.Onion) {
       return;
     }
 
-    // 🔥 normalización pro
     const cleanUser = {
       id: user.id || user.userId || null,
       username: user.username || "",
@@ -157,9 +156,9 @@ if (window.Onion) {
       return Onion.state.user;
     }
 
-    const username = safeStorage("onion_user_slug");
-    const name = safeStorage("onion_user_name");
-    const avatar = safeStorage("onion_user_avatar");
+    const username = safeGet("onion_user_slug");
+    const name = safeGet("onion_user_name");
+    const avatar = safeGet("onion_user_avatar");
 
     if(username || name || avatar){
       return {
@@ -187,25 +186,20 @@ if (window.Onion) {
   };
 
   /* =========================
-     NAVIGATION
+     NAVIGATION (FIX)
   ========================= */
 
   Onion.go = function(path){
 
     if(!path) return;
 
-    if(Onion.state.navigating) return;
-
-    Onion.state.navigating = true;
-
-    history.pushState({}, "", path);
-
-    Onion.render?.();
+    // 🔥 SIEMPRE usar router
+    Onion.router?.navigate?.(path);
 
   };
 
   /* =========================
-     CLEANUP SYSTEM (ROBUSTO)
+     CLEANUP SYSTEM
   ========================= */
 
   Onion.onCleanup = function(fn){
@@ -216,7 +210,6 @@ if (window.Onion) {
       Onion.state.cleanup = [];
     }
 
-    // evitar duplicados
     if(Onion.state.cleanup.includes(fn)) return;
 
     Onion.state.cleanup.push(fn);
@@ -228,11 +221,8 @@ if (window.Onion) {
     const list = Onion.state.cleanup;
 
     if(!Array.isArray(list) || list.length === 0){
-      Onion.log("🧹 cleanup vacío");
       return;
     }
-
-    Onion.log("🧹 Ejecutando cleanup:", list.length);
 
     Onion.state.cleanup = [];
 

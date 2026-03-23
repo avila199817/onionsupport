@@ -1,5 +1,5 @@
 /* =========================
-   FACTURAS (CLON HOME)
+   FACTURAS (PRO SAAS)
 ========================= */
 
 .facturas{
@@ -7,99 +7,42 @@
 }
 
 .facturas .container{
-  padding-top:0;
+  padding-top:10px;
   padding-bottom:50px;
+
+  display:flex;
+  flex-direction:column;
+  gap:28px;
 }
 
 
 /* =========================
-   HEADER (MISMO HOME)
+   HEADER (SOLO ESPACIADO)
 ========================= */
 
 .facturas .dashboard-header{
-  display:flex;
-  align-items:center;
-
   height:var(--topbar-height);
-  margin-bottom:40px;
-  padding-top:15px;
-}
-
-.facturas .dashboard-header .header-left{
-  display:flex;
-  flex-direction:column;
-  justify-content:center;
-}
-
-.facturas .header-actions{
-  margin-left:auto;
-  display:flex;
-  align-items:center;
-  gap:10px;
 }
 
 
 /* =========================
-   TITULO
-========================= */
-
-.facturas .page-title{
-  margin:0;
-
-  font-size:24px;
-  font-weight:600;
-  letter-spacing:-0.3px;
-
-  line-height:1.1;
-  color:var(--text);
-}
-
-.facturas .page-subtitle{
-  font-size:14px;
-  color:var(--dim);
-  margin-top:4px;
-}
-
-
-/* =========================
-   BOTONES
-========================= */
-
-.facturas .btn{
-  border:none;
-  padding:10px 14px;
-  border-radius:10px;
-  cursor:pointer;
-  font-size:14px;
-  font-weight:500;
-}
-
-.facturas .btn.primary{
-  background:var(--text);
-  color:var(--main-bg);
-}
-
-.facturas .btn.primary:hover{
-  opacity:.85;
-}
-
-
-/* =========================
-   GRID CARDS (CLON)
+   GRID CARDS
 ========================= */
 
 .facturas .grid-cards{
   display:grid;
   grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
-  gap:22px;
+  gap:20px;
 }
 
 
 /* =========================
-   CARDS (CLON EXACTO)
+   CARDS
 ========================= */
 
 .facturas .card{
+  position:relative;
+
   background:var(--card-bg);
   border:1px solid var(--card-border);
   border-radius:18px;
@@ -107,13 +50,28 @@
   padding:20px;
 
   box-shadow:var(--card-shadow);
-  transition:.25s ease;
+
+  transition:
+    transform .25s ease,
+    box-shadow .25s ease,
+    border-color .2s ease;
 }
 
 .facturas .card:hover{
-  transform:translateY(-4px);
+  transform:translateY(-5px);
   box-shadow:var(--card-shadow-hover);
+  border-color:color-mix(in srgb, var(--accent), var(--card-border) 70%);
 }
+
+/* highlight */
+.facturas .card.highlight{
+  border-color:color-mix(in srgb, var(--accent), transparent 60%);
+}
+
+
+/* =========================
+   TEXTOS
+========================= */
 
 .facturas .card-title{
   font-size:12px;
@@ -122,7 +80,7 @@
 
 .facturas .card-value{
   display:block;
-  margin-top:12px;
+  margin-top:10px;
 
   font-size:30px;
   font-weight:600;
@@ -134,7 +92,7 @@
   display:flex;
   gap:8px;
   align-items:center;
-  margin-top:10px;
+  margin-top:8px;
 }
 
 .facturas .card-extra{
@@ -144,20 +102,38 @@
 
 
 /* =========================
+   ACTION CARD
+========================= */
+
+.facturas .action-card{
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  gap:12px;
+}
+
+.facturas .btn.full{
+  width:100%;
+}
+
+
+/* =========================
    GRID PRINCIPAL
 ========================= */
 
 .facturas .dashboard-grid{
   display:grid;
-  grid-template-columns:repeat(auto-fit, minmax(300px, 1fr));
-
+  grid-template-columns:1fr;
   gap:22px;
-  margin-top:30px;
+}
+
+.facturas .dashboard-grid.secondary{
+  grid-template-columns:1fr 1fr;
 }
 
 
 /* =========================
-   BLOCKS (CLON)
+   PANEL BLOCK
 ========================= */
 
 .facturas .panel-block{
@@ -168,87 +144,126 @@
   padding:20px;
 
   box-shadow:var(--panel-shadow);
+
+  transition:border-color .2s ease;
+}
+
+.facturas .panel-block:hover{
+  border-color:color-mix(in srgb, var(--accent), var(--panel-border) 70%);
 }
 
 .facturas .section-title{
-  font-size:15px;
+  font-size:14px;
   font-weight:600;
+  letter-spacing:.2px;
+
   color:var(--text);
+  margin-bottom:10px;
 }
 
 
 /* =========================
-   TABLE
+   TABLE (PRO)
 ========================= */
 
 .facturas .table-container{
   width:100%;
   overflow-x:auto;
-  margin-top:10px;
 }
 
 .facturas .facturas-table{
   width:100%;
-  border-collapse:collapse;
+  border-collapse:separate;
+  border-spacing:0 6px; /* separación tipo SaaS */
   font-size:14px;
 }
 
-.facturas .facturas-table th{
+/* header */
+.facturas .facturas-table thead th{
   text-align:left;
-  padding:12px;
-  color:var(--dim);
+  padding:10px 12px;
+
+  font-size:12px;
   font-weight:500;
+  color:var(--dim);
+
   border-bottom:1px solid var(--card-border);
 }
 
+/* filas tipo card */
+.facturas .facturas-table tbody tr{
+  background:var(--card-bg);
+  border:1px solid var(--card-border);
+
+  transition:
+    transform .15s ease,
+    box-shadow .15s ease;
+}
+
+.facturas .facturas-table tbody tr:hover{
+  transform:translateY(-2px);
+  box-shadow:var(--card-shadow);
+}
+
+/* celdas */
 .facturas .facturas-table td{
   padding:12px;
-  border-bottom:1px solid var(--card-border);
   color:var(--text);
 }
 
-.facturas .facturas-table tr:hover{
-  background:var(--sb-hover);
+/* bordes redondeados fila */
+.facturas .facturas-table td:first-child{
+  border-top-left-radius:10px;
+  border-bottom-left-radius:10px;
+}
+
+.facturas .facturas-table td:last-child{
+  border-top-right-radius:10px;
+  border-bottom-right-radius:10px;
 }
 
 
 /* =========================
-   BADGES
+   BADGES (MEJORADOS)
 ========================= */
 
 .facturas .badge{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+
   padding:4px 10px;
-  border-radius:20px;
-  font-size:12px;
-  font-weight:500;
+  border-radius:999px;
+
+  font-size:11px;
+  font-weight:600;
 }
 
+/* usa tu sistema pero refinado */
 .facturas .badge.pagada{
-  background:rgba(34,197,94,0.15);
-  color:#22c55e;
+  background:color-mix(in srgb, var(--success), transparent 85%);
+  color:var(--success);
 }
 
 .facturas .badge.pendiente{
-  background:rgba(245,158,11,0.15);
-  color:#f59e0b;
+  background:var(--warning-bg);
+  color:var(--warning);
 }
 
 .facturas .badge.borrador{
-  background:rgba(59,130,246,0.15);
-  color:#60a5fa;
+  background:var(--info-bg);
+  color:var(--info);
 }
 
 
 /* =========================
-   SUMMARY (CLON HOME)
+   SUMMARY
 ========================= */
 
 .facturas .summary-grid{
   display:grid;
   grid-template-columns:repeat(3,1fr);
-
   gap:12px;
-  margin-top:10px;
 }
 
 .facturas .summary-item{
@@ -259,6 +274,12 @@
   border-radius:14px;
 
   text-align:center;
+
+  transition:border-color .2s ease;
+}
+
+.facturas .summary-item:hover{
+  border-color:color-mix(in srgb, var(--accent), var(--card-border) 70%);
 }
 
 .facturas .summary-value{
@@ -274,32 +295,39 @@
 
 
 /* =========================
-   ALERTS (CLON HOME)
+   ALERTS
 ========================= */
 
 .facturas .alert-list{
   display:flex;
   flex-direction:column;
   gap:10px;
-
-  margin-top:10px;
 }
 
 .facturas .alert-item{
+  background:color-mix(in srgb, var(--card-bg), transparent 10%);
+  border:1px solid var(--card-border);
+
   padding:12px;
   border-radius:12px;
+
   font-size:13px;
+  color:var(--muted);
 }
 
 
 /* =========================
-   RESPONSIVE (CLON HOME)
+   RESPONSIVE
 ========================= */
 
 @media (max-width:1024px){
 
   .facturas .container{
     padding:20px;
+  }
+
+  .facturas .dashboard-grid.secondary{
+    grid-template-columns:1fr;
   }
 
 }
@@ -310,17 +338,6 @@
     padding:16px;
   }
 
-  .facturas .dashboard-header{
-    height:auto;
-    flex-direction:column;
-    align-items:flex-start;
-    gap:10px;
-
-    margin-top:0;
-    padding-top:0;
-  }
-
-  .facturas .dashboard-grid,
   .facturas .grid-cards,
   .facturas .summary-grid{
     grid-template-columns:1fr;
@@ -346,11 +363,6 @@
     font-size:24px;
   }
 
-  .facturas .page-title{
-    font-size:20px;
-  }
-
-  .facturas .facturas-table th,
   .facturas .facturas-table td{
     padding:10px;
     font-size:13px;

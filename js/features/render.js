@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================
-   RENDER (ONION FULL PRO)
+   RENDER (ONION FULL PRO MAX)
 ========================= */
 
 (function(){
@@ -37,7 +37,7 @@
   }
 
   /* =========================
-     LOAD SCRIPT
+     LOAD SCRIPT (SAFE)
   ========================= */
 
   Onion.loadScript = function(src){
@@ -48,11 +48,13 @@
       if(!finalSrc) return resolve();
 
       if(Onion.state.currentScript === finalSrc){
-        Onion.log("⚡ Script ya cargado:", finalSrc);
+        Onion.log("⚡ Script cache:", finalSrc);
         return resolve();
       }
 
-      // 🧹 eliminar anterior
+      // 🔥 cleanup antes de cargar nuevo script
+      Onion.runCleanup?.();
+
       document.querySelectorAll("script[data-onion-page]").forEach(s=>{
         try{ s.remove(); }catch{}
       });
@@ -91,7 +93,7 @@
   };
 
   /* =========================
-     LOAD STYLE
+     LOAD STYLE (SMART)
   ========================= */
 
   Onion.loadStyle = function(href){
@@ -102,7 +104,7 @@
       if(!finalHref) return resolve();
 
       if(Onion.state.currentStyle === finalHref){
-        Onion.log("⚡ Style ya cargado:", finalHref);
+        Onion.log("⚡ Style cache:", finalHref);
         return resolve();
       }
 
@@ -145,7 +147,7 @@
   };
 
   /* =========================
-     FETCH HTML
+     FETCH HTML (ROBUSTO)
   ========================= */
 
   Onion.fetchHTML = async function(url, useCache = true){
@@ -158,7 +160,6 @@
       return Onion.cache.html[finalUrl];
     }
 
-    // 🧨 abort anterior
     if(Onion.state.abortController){
       try{ Onion.state.abortController.abort(); }catch{}
     }
@@ -179,7 +180,7 @@
       });
 
       if(res.status === 401){
-        Onion.auth?.clearToken?.();
+        Onion.clearUser?.();
         Onion.auth?.redirectLogin?.();
         return null;
       }
@@ -219,7 +220,7 @@
   };
 
   /* =========================
-     SWAP CONTENT
+     SWAP CONTENT (SMOOTH)
   ========================= */
 
   Onion.swapContent = function(node){
@@ -258,12 +259,16 @@
   };
 
   /* =========================
-     MAIN RENDER
+     MAIN RENDER (ANTI-RACE)
   ========================= */
 
   Onion.render = async function(){
 
     const renderId = ++Onion.state.renderId;
+
+    if(Onion.state.rendering){
+      Onion.warn("⚠️ Render en curso, se encadena");
+    }
 
     Onion.state.rendering = true;
 
@@ -273,19 +278,18 @@
 
       Onion.log("🎯 Render:", route.page);
 
-      // 🎨 STYLE
+      // STYLE
       if(route.style){
         await Onion.loadStyle(route.style);
       }
 
-      // 📄 HTML
+      // HTML
       const html = await Onion.fetchHTML(route.page, true);
 
       if(html === null){
         return;
       }
 
-      // 🧠 race condition
       if(renderId !== Onion.state.renderId){
         Onion.warn("Render viejo ignorado");
         return;
@@ -298,13 +302,13 @@
 
       Onion.swapContent(content);
 
-      // 📜 SCRIPT
+      // SCRIPT
       if(route.script){
         await Onion.loadScript(route.script);
       }
 
-      // 📡 READY
-      Onion.events.emit("nav:ready");
+      // READY
+      Onion.events.emit?.("nav:ready");
 
     }catch(e){
 

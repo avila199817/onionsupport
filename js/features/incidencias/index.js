@@ -2,14 +2,14 @@
 
 "use strict";
 
-/* =========================
-   GLOBAL
-========================= */
-
 const Onion = window.Onion;
 
-console.log("✅ Incidencias PRO cargado");
+if(!Onion){
+  console.error("💥 Onion no disponible (incidencias)");
+  return;
+}
 
+let initialized = false;
 
 /* =========================
    ROOT / DOM
@@ -20,28 +20,38 @@ function getRoot(){
 }
 
 function $(selector){
-  const root = getRoot();
-  if(!root) return null;
-  return root.querySelector(selector);
+  return getRoot()?.querySelector(selector);
 }
 
-
 /* =========================
-   INIT
+   INIT (ANTI DUPLICADO)
 ========================= */
 
 function init(){
 
-  if(!Onion || !Onion.state?.user){
+  if(initialized) return;
+
+  const root = getRoot();
+  if(!root) return;
+
+  if(!Onion.state?.user){
     return setTimeout(init, 100);
   }
 
+  initialized = true;
+
+  Onion.log("📄 Incidencias init");
+
   loadIncidencias();
+
+  // 🔥 cleanup al salir
+  Onion.onCleanup(()=>{
+    initialized = false;
+  });
 
 }
 
 init();
-
 
 /* =========================
    LOAD
@@ -71,13 +81,12 @@ async function loadIncidencias(){
 
   }catch(e){
 
-    console.error("💥 ERROR INCIDENCIAS:", e);
+    Onion.error("💥 ERROR INCIDENCIAS:", e);
     setError();
 
   }
 
 }
-
 
 /* =========================
    NORMALIZE
@@ -91,10 +100,11 @@ function normalize(res){
 
   if(res.tickets) return res.tickets;
 
+  if(res.data) return res.data;
+
   return [];
 
 }
-
 
 /* =========================
    STATES
@@ -132,7 +142,6 @@ function setError(){
     </tr>
   `;
 }
-
 
 /* =========================
    RENDER
@@ -172,7 +181,7 @@ function render(items){
 
         <td>
           <div class="table-actions">
-            <button class="action-btn view-btn">👁</button>
+            <button class="action-btn view-btn" data-id="${data.id}">👁</button>
           </div>
         </td>
 
@@ -184,7 +193,6 @@ function render(items){
   bindEvents(items);
 
 }
-
 
 /* =========================
    MAP DATA
@@ -206,23 +214,40 @@ function mapItem(i){
 
 }
 
-
 /* =========================
-   EVENTS
+   EVENTS (FIX ROOT SCOPED)
 ========================= */
 
 function bindEvents(items){
 
-  document.querySelectorAll(".view-btn").forEach((btn, index) => {
+  const root = getRoot();
+  if(!root) return;
 
-    btn.addEventListener("click", () => {
-      showDetalle(items[index]);
-    });
+  const handler = (e)=>{
 
+    const btn = e.target.closest(".view-btn");
+    if(!btn) return;
+
+    const id = btn.dataset.id;
+
+    const item = items.find(i =>
+      String(i.id || i.ticketId) === String(id)
+    );
+
+    if(item){
+      showDetalle(item);
+    }
+
+  };
+
+  root.addEventListener("click", handler);
+
+  // 🔥 cleanup automático
+  Onion.onCleanup(()=>{
+    root.removeEventListener("click", handler);
   });
 
 }
-
 
 /* =========================
    DETALLE
@@ -252,7 +277,6 @@ function showDetalle(item){
   if(fechaEl) fechaEl.textContent = "Fecha: " + formatFecha(item.createdAt);
 
 }
-
 
 /* =========================
    KPIs
@@ -287,7 +311,6 @@ function calcAvgTime(items){
   return hours + "h";
 }
 
-
 /* =========================
    HELPERS
 ========================= */
@@ -314,7 +337,12 @@ function getPrioridad(i){
 
 function formatFecha(f){
   if(!f) return "--";
-  return new Date(f).toLocaleDateString("es-ES");
+
+  try{
+    return new Date(f).toLocaleDateString("es-ES");
+  }catch{
+    return "--";
+  }
 }
 
 function escapeHTML(str){

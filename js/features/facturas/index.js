@@ -2,8 +2,14 @@
 
 "use strict";
 
-console.log("✅ Facturas FULL PRO cargado");
+const Onion = window.Onion;
 
+if(!Onion){
+  console.error("💥 Onion no disponible (facturas)");
+  return;
+}
+
+let initialized = false;
 
 /* =========================
    ROOT / DOM
@@ -17,28 +23,36 @@ function $(selector){
   return getRoot()?.querySelector(selector);
 }
 
-
 /* =========================
-   INIT
+   INIT (ANTI DUPLICADO)
 ========================= */
 
 function init(){
 
-  const Onion = window.Onion;
+  if(initialized) return;
 
-  if(!Onion || !Onion.state?.user){
+  const root = getRoot();
+  if(!root) return;
+
+  if(!Onion.state?.user){
     return setTimeout(init, 100);
   }
 
+  initialized = true;
+
+  Onion.log("📄 Facturas init");
+
   loadFacturas();
+
+  // 🔥 cleanup al salir de la vista
+  Onion.onCleanup(()=>{
+    initialized = false;
+  });
 
 }
 
-init();
-
-
 /* =========================
-   LOAD
+   LOAD DATA
 ========================= */
 
 async function loadFacturas(){
@@ -52,14 +66,11 @@ async function loadFacturas(){
 
     const res = await Onion.fetch(Onion.config.API + "/facturas");
 
-    if(!res || !res.ok){
-      throw new Error("Respuesta inválida");
-    }
+    // 🔥 soporte flexible backend
+    const facturas = res?.facturas || res?.data || [];
+    const resumen = res?.resumen || {};
 
-    const facturas = res.facturas || [];
-    const resumen = res.resumen || {};
-
-    if(!facturas.length){
+    if(!Array.isArray(facturas) || facturas.length === 0){
       setEmpty();
       updateKPIs([], resumen);
       return;
@@ -70,20 +81,22 @@ async function loadFacturas(){
 
   }catch(e){
 
-    console.error("💥 ERROR FACTURAS:", e);
+    Onion.error("💥 ERROR FACTURAS:", e);
     setError();
 
   }
 
 }
 
-
 /* =========================
    STATES
 ========================= */
 
 function setLoading(){
-  $("#facturas-body").innerHTML = `
+  const el = $("#facturas-body");
+  if(!el) return;
+
+  el.innerHTML = `
     <tr class="table-loading">
       <td colspan="5">Cargando facturas...</td>
     </tr>
@@ -91,7 +104,10 @@ function setLoading(){
 }
 
 function setEmpty(){
-  $("#facturas-body").innerHTML = `
+  const el = $("#facturas-body");
+  if(!el) return;
+
+  el.innerHTML = `
     <tr>
       <td colspan="5">No hay facturas</td>
     </tr>
@@ -99,13 +115,15 @@ function setEmpty(){
 }
 
 function setError(){
-  $("#facturas-body").innerHTML = `
+  const el = $("#facturas-body");
+  if(!el) return;
+
+  el.innerHTML = `
     <tr>
       <td colspan="5">Error cargando facturas</td>
     </tr>
   `;
 }
-
 
 /* =========================
    RENDER
@@ -123,7 +141,7 @@ function render(items){
     return `
       <tr>
 
-        <td>#${f.numero || f.id}</td>
+        <td>#${escapeHTML(f.numero || f.id || "--")}</td>
 
         <td>${escapeHTML(f.cliente || "-")}</td>
 
@@ -144,31 +162,28 @@ function render(items){
 
 }
 
-
 /* =========================
-   KPIs (USANDO BACKEND)
+   KPIs
 ========================= */
 
 function updateKPIs(items, resumen){
 
-  const totalPagado = resumen.totalPagado || 0;
-  const totalPendiente = resumen.totalPendiente || 0;
+  const totalPagado = Number(resumen.totalPagado || 0);
+  const totalPendiente = Number(resumen.totalPendiente || 0);
   const totalFacturado = totalPagado + totalPendiente;
 
   const pagadas = items.filter(f => f.estadoPago === "pagada").length;
-  const pendientes = items.filter(f => f.estadoPago !== "pagada").length;
+  const pendientes = items.length - pagadas;
 
-  $("#facturas-total") &&
-    ($("#facturas-total").textContent = formatMoney(totalFacturado));
+  const totalEl = $("#facturas-total");
+  const pagadasEl = $("#facturas-pagadas");
+  const pendientesEl = $("#facturas-pendientes");
 
-  $("#facturas-pagadas") &&
-    ($("#facturas-pagadas").textContent = pagadas);
-
-  $("#facturas-pendientes") &&
-    ($("#facturas-pendientes").textContent = pendientes);
+  if(totalEl) totalEl.textContent = formatMoney(totalFacturado);
+  if(pagadasEl) pagadasEl.textContent = pagadas;
+  if(pendientesEl) pendientesEl.textContent = pendientes;
 
 }
-
 
 /* =========================
    HELPERS
@@ -191,11 +206,19 @@ function getEstado(estado){
 
 function formatFecha(f){
   if(!f) return "--";
-  return new Date(f).toLocaleDateString("es-ES");
+
+  try{
+    return new Date(f).toLocaleDateString("es-ES");
+  }catch{
+    return "--";
+  }
 }
 
 function formatMoney(n){
-  return Number(n || 0).toLocaleString("es-ES") + " €";
+  return Number(n || 0).toLocaleString("es-ES", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }) + " €";
 }
 
 function escapeHTML(str){
@@ -204,5 +227,11 @@ function escapeHTML(str){
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
 }
+
+/* =========================
+   START
+========================= */
+
+init();
 
 })();

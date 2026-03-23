@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================
-   ROUTER (PRO SaaS - ONION)
+   ROUTER (ONION PRO SPA)
 ========================= */
 
 (function(){
@@ -46,31 +46,40 @@
   });
 
   /* =========================
-     GET PATH (MULTI-TENANT PRO)
+     NORMALIZE PATH
+  ========================= */
+
+  function normalize(path){
+
+    if(!path) return "/";
+
+    path = path.replace(/\/+/g, "/");
+
+    if(path.length > 1 && path.endsWith("/")){
+      path = path.slice(0, -1);
+    }
+
+    return path || "/";
+  }
+
+  /* =========================
+     GET PATH (MULTI-TENANT)
   ========================= */
 
   Onion.router.get = function(){
 
     try{
 
-      let path = window.location.pathname || "/";
+      let path = normalize(window.location.pathname);
 
-      // normalizar
-      path = path.replace(/\/+/g, "/");
-
-      if(path.length > 1 && path.endsWith("/")){
-        path = path.slice(0, -1);
-      }
-
-      // 🔥 detectar /@usuario
+      // detectar /@usuario
       if(path.startsWith("/@")){
 
         const parts = path.split("/").filter(Boolean);
 
-        const userSlug = parts[0]; // "@cristian"
+        const userSlug = parts[0]; // "@avila"
         const cleanUser = userSlug.replace("@","");
 
-        // 🔥 guardar SOLO si no existe (no pisar datos reales)
         if(!Onion.state.user){
           Onion.state.user = {};
         }
@@ -81,7 +90,6 @@
 
         Onion.state.slug = cleanUser;
 
-        // ruta interna
         if(parts.length === 1){
           return "/";
         }
@@ -89,11 +97,11 @@
         return "/" + parts.slice(1).join("/");
       }
 
-      return path || "/";
+      return path;
 
     }catch(e){
 
-      Onion.error("💥 Router get error:", e);
+      Onion.error?.("💥 Router get error:", e);
       return "/";
 
     }
@@ -109,22 +117,20 @@
     try{
 
       const route = Onion.router.get();
-
       const config = Onion.routes[route];
 
       if(config){
-        Onion.log("🧭 Route:", route);
+        Onion.log?.("🧭 Route:", route);
         return config;
       }
 
-      Onion.warn("Ruta no encontrada:", route);
+      Onion.warn?.("⚠️ Ruta no encontrada:", route);
 
       return Onion.routes["/"];
 
     }catch(e){
 
-      Onion.error("💥 Router resolve error:", e);
-
+      Onion.error?.("💥 Router resolve error:", e);
       return Onion.routes["/"];
 
     }
@@ -132,46 +138,39 @@
   };
 
   /* =========================
-     NAVIGATION (SPA PRO)
+     NAVIGATE (CORE)
   ========================= */
 
-  document.addEventListener("click", function(e){
+  Onion.router.navigate = function(href){
 
-    const link = e.target.closest("[data-link]");
-    if(!link) return;
-
-    let href = link.getAttribute("href");
     if(!href) return;
 
-    // permitir enlaces externos
+    // evitar externas
     if(href.startsWith("http")) return;
 
-    // 🔥 usuario actual
     const username =
       Onion.state.user?.username ||
       localStorage.getItem("onion_user_slug");
 
     if(!username){
-      Onion.warn("No username para navegación");
+      Onion.warn?.("⚠️ No username para navegación");
       return;
     }
 
     let finalHref;
 
-    // HOME
     if(href === "/"){
       finalHref = "/@" + username;
     }
-    // YA TIENE USER
     else if(href.startsWith("/@")){
       finalHref = href;
     }
-    // RUTA NORMAL
     else{
       finalHref = "/@" + username + href;
     }
 
-    e.preventDefault();
+    // evitar navegación duplicada
+    if(window.location.pathname === finalHref) return;
 
     if(Onion.state.navigating) return;
     Onion.state.navigating = true;
@@ -179,6 +178,33 @@
     history.pushState({}, "", finalHref);
 
     Onion.render();
+
+  };
+
+  /* =========================
+     CLICK INTERCEPT (SPA)
+  ========================= */
+
+  document.addEventListener("click", function(e){
+
+    const link = e.target.closest("a[data-spa]");
+    if(!link) return;
+
+    const href = link.getAttribute("href");
+    if(!href) return;
+
+    // nueva pestaña
+    if(link.target === "_blank") return;
+
+    // ctrl / cmd click
+    if(e.metaKey || e.ctrlKey) return;
+
+    // descarga
+    if(link.hasAttribute("download")) return;
+
+    e.preventDefault();
+
+    Onion.router.navigate(href);
 
   });
 
@@ -198,7 +224,7 @@
 
     if(!path) return false;
 
-    const clean = path.replace(/\/+$/,"") || "/";
+    const clean = normalize(path);
 
     return !!Onion.routes[clean];
 

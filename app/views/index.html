@@ -2,117 +2,121 @@
 
   <div class="container">
 
-    <!-- KPI CARDS -->
+    <!-- HEADER (VACÍO PARA ESPACIADO) -->
+    <div class="dashboard-header"></div>
+
+    <!-- KPI -->
     <div class="grid-cards">
 
       <div class="card">
-        <span class="card-title">
-          Incidencias 
-          <span class="badge info sm">Live</span>
-        </span>
+        <span class="card-title">Incidencias activas</span>
         <strong id="home-incidencias" class="card-value">0</strong>
+
+        <div class="card-meta">
+          <span class="card-extra">vs última semana</span>
+        </div>
       </div>
 
       <div class="card">
-        <span class="card-title">
-          Clientes 
-          <span class="badge success sm">Activos</span>
-        </span>
+        <span class="card-title">Clientes</span>
         <strong id="home-clientes" class="card-value">0</strong>
+
+        <div class="card-meta">
+          <span class="card-extra">crecimiento</span>
+        </div>
       </div>
 
       <div class="card">
-        <span class="card-title">
-          Usuarios 
-          <span class="badge neutral sm">Total</span>
-        </span>
-        <strong id="home-usuarios" class="card-value">0</strong>
-      </div>
-
-      <div class="card">
-        <span class="card-title">
-          Facturación 
-          <span class="badge warning sm">Mensual</span>
-        </span>
+        <span class="card-title">Facturación mensual</span>
         <strong id="home-facturas" class="card-value">€0</strong>
-      </div>
 
-    </div>
-
-    <!-- SUMMARY -->
-    <div class="summary-grid">
-
-      <div class="summary-item">
-        <div class="summary-value">0</div>
-        <div class="summary-label">
-          Tickets hoy 
-          <span class="badge info sm dot">Hoy</span>
+        <div class="card-meta">
+          <span class="card-extra">este mes</span>
         </div>
       </div>
 
-      <div class="summary-item">
-        <div class="summary-value">0</div>
-        <div class="summary-label">
-          Resueltos 
-          <span class="badge success sm dot">OK</span>
-        </div>
-      </div>
+      <div class="card">
+        <span class="card-title">Usuarios activos</span>
+        <strong id="home-usuarios" class="card-value">0</strong>
 
-      <div class="summary-item">
-        <div class="summary-value">0</div>
-        <div class="summary-label">
-          Pendientes 
-          <span class="badge error sm dot">Alerta</span>
+        <div class="card-meta">
+          <span class="card-extra">últimas 24h</span>
         </div>
       </div>
 
     </div>
 
-    <!-- GRID -->
+    <!-- GRID PRINCIPAL -->
     <div class="dashboard-grid">
 
-      <!-- ACTIVITY -->
+      <!-- ACTIVIDAD -->
       <div class="panel-block">
-        <div class="section-title">
-          Actividad reciente 
-          <span class="badge info sm">Realtime</span>
-        </div>
+        <div class="section-title">Actividad reciente</div>
 
         <div id="activity-list" class="activity-list">
           <div>Cargando...</div>
         </div>
       </div>
 
-      <!-- SYSTEM -->
+      <!-- SISTEMA -->
       <div class="panel-block">
-        <div class="section-title">
-          Estado del sistema 
-          <span class="badge success sm dot">Operativo</span>
-        </div>
+        <div class="section-title">Sistema</div>
 
         <div class="status-list">
 
-          <div id="status-api">
-            API 
-            <span class="badge success sm dot">OK</span>
-          </div>
-
-          <div id="status-db">
-            DB 
-            <span class="badge neutral sm">--</span>
-          </div>
-
+          <div id="status-api">API --</div>
+          <div id="status-db">DB --</div>
           <div id="status-uptime">Uptime --</div>
 
-          <div id="cpu-usage">CPU: --</div>
-          <div id="ram-usage">RAM: --</div>
-          <div id="disk-usage">Disco: --</div>
+        </div>
 
-          <div id="system-warning" class="alert-item" style="display:none;">
-            <span class="badge error sm dot">Alta carga</span>
+      </div>
+
+    </div>
+
+    <!-- SEGUNDO BLOQUE -->
+    <div class="dashboard-grid">
+
+      <!-- RESUMEN -->
+      <div class="panel-block">
+        <div class="section-title">Rendimiento hoy</div>
+
+        <div class="summary-grid">
+
+          <div class="summary-item">
+            <div class="summary-value">0</div>
+            <div class="summary-label">Tickets</div>
+          </div>
+
+          <div class="summary-item">
+            <div class="summary-value">0</div>
+            <div class="summary-label">Resueltos</div>
+          </div>
+
+          <div class="summary-item">
+            <div class="summary-value">0</div>
+            <div class="summary-label">Pendientes</div>
           </div>
 
         </div>
+      </div>
+
+      <!-- SISTEMA DETALLE -->
+      <div class="panel-block">
+        <div class="section-title">Sistema / Rendimiento</div>
+
+        <div class="alert-list">
+
+          <div id="cpu-usage" class="alert-item">CPU: --</div>
+          <div id="ram-usage" class="alert-item">RAM: --</div>
+          <div id="disk-usage" class="alert-item">Disco: --</div>
+
+          <div id="system-warning" class="alert-item" style="display:none;">
+            ⚠️ Alta carga del sistema
+          </div>
+
+        </div>
+
       </div>
 
     </div>

@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================
-   CLEANUP (LIFECYCLE CORE)
+   CLEANUP (ONION LIFECYCLE CORE PRO)
 ========================= */
 
 (function(){
@@ -20,7 +20,12 @@
   Onion.onCleanup = function(fn){
 
     if(typeof fn !== "function"){
-      Onion.warn("cleanup inválido");
+      Onion.warn("⚠️ cleanup inválido");
+      return;
+    }
+
+    // 🔥 evitar duplicados
+    if(Onion.state.cleanup.includes(fn)){
       return;
     }
 
@@ -29,7 +34,7 @@
   };
 
   /* =========================
-     RUN CLEANUP (SAFE + ISOLATED)
+     RUN CLEANUP (SAFE)
   ========================= */
 
   Onion.runCleanup = function(){
@@ -43,7 +48,7 @@
 
     Onion.log("🧹 Ejecutando cleanup:", list.length);
 
-    // 🔥 vaciar primero para evitar loops/reentradas
+    // 🔥 reset antes de ejecutar (evita loops)
     Onion.state.cleanup = [];
 
     for(let i = 0; i < list.length; i++){
@@ -53,7 +58,7 @@
       try{
         fn();
       }catch(e){
-        Onion.error("💥 cleanup fn error:", e);
+        Onion.error("💥 cleanup error:", e);
       }
 
     }
@@ -61,30 +66,85 @@
   };
 
   /* =========================
-     OPTIONAL HELPERS (PRO)
+     INTERVAL / TIMEOUT HELPERS
   ========================= */
 
-  // 🔥 limpiar interval automáticamente
   Onion.cleanupInterval = function(id){
+
     if(!id) return;
-    Onion.onCleanup(()=> clearInterval(id));
-  };
-
-  // 🔥 limpiar timeout automáticamente
-  Onion.cleanupTimeout = function(id){
-    if(!id) return;
-    Onion.onCleanup(()=> clearTimeout(id));
-  };
-
-  // 🔥 limpiar eventListener manual (por si no usas Onion.events)
-  Onion.cleanupEvent = function(target, name, handler){
-    if(!target || !name || !handler) return;
-
-    target.addEventListener(name, handler);
 
     Onion.onCleanup(()=>{
-      target.removeEventListener(name, handler);
+      try{ clearInterval(id); }catch{}
     });
+
+  };
+
+  Onion.cleanupTimeout = function(id){
+
+    if(!id) return;
+
+    Onion.onCleanup(()=>{
+      try{ clearTimeout(id); }catch{}
+    });
+
+  };
+
+  /* =========================
+     EVENT LISTENER CLEANUP
+  ========================= */
+
+  Onion.cleanupEvent = function(target, name, handler, options){
+
+    if(!target || !name || !handler) return;
+
+    target.addEventListener(name, handler, options);
+
+    Onion.onCleanup(()=>{
+      try{
+        target.removeEventListener(name, handler, options);
+      }catch{}
+    });
+
+  };
+
+  /* =========================
+     OBSERVER CLEANUP (PRO)
+  ========================= */
+
+  Onion.cleanupObserver = function(observer){
+
+    if(!observer) return;
+
+    Onion.onCleanup(()=>{
+      try{ observer.disconnect(); }catch{}
+    });
+
+  };
+
+  /* =========================
+     RAF CLEANUP
+  ========================= */
+
+  Onion.cleanupRAF = function(id){
+
+    if(!id) return;
+
+    Onion.onCleanup(()=>{
+      try{ cancelAnimationFrame(id); }catch{}
+    });
+
+  };
+
+  /* =========================
+     FULL CLEAR (DEBUG / RESET)
+  ========================= */
+
+  Onion.cleanupAll = function(){
+
+    Onion.log("🧹 cleanup manual");
+
+    Onion.runCleanup();
+
   };
 
 })();

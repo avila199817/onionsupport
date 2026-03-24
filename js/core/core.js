@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================
-   INIT GUARD (ANTI DUPLICADO)
+   INIT GUARD
 ========================= */
 
 if (window.Onion) {
@@ -9,17 +9,13 @@ if (window.Onion) {
 } else {
 
   const Onion = {};
-  Object.defineProperty(window, "Onion", {
-    value: Onion,
-    writable: false,
-    configurable: false
-  });
+  window.Onion = Onion; // 🔥 FIX: sin defineProperty
 
   /* =========================
      VERSION
   ========================= */
 
-  Onion.version = "1.1.1";
+  Onion.version = "2.0.0";
 
   /* =========================
      CONFIG
@@ -36,24 +32,24 @@ if (window.Onion) {
      LOGGER
   ========================= */
 
-  function logWrap(icon, args){
+  function wrap(icon, args){
     return [icon, ...args];
   }
 
   Onion.log = (...args)=>{
     if(Onion.config.DEBUG){
-      console.log(...logWrap("🧅", args));
+      console.log(...wrap("🧅", args));
     }
   };
 
   Onion.warn = (...args)=>{
     if(Onion.config.DEBUG){
-      console.warn(...logWrap("⚠️", args));
+      console.warn(...wrap("⚠️", args));
     }
   };
 
   Onion.error = (...args)=>{
-    console.error(...logWrap("💥", args));
+    console.error(...wrap("💥", args));
   };
 
   /* =========================
@@ -97,7 +93,7 @@ if (window.Onion) {
 
     abortController: null,
 
-    cleanup: [],
+    cleanup: [], // 🔥 usado por cleanup.js
 
     ready: false
   };
@@ -127,7 +123,7 @@ if (window.Onion) {
   Onion.setUser = function(user){
 
     if(!user || typeof user !== "object"){
-      Onion.warn("⚠️ setUser inválido");
+      Onion.warn("setUser inválido");
       return;
     }
 
@@ -186,53 +182,19 @@ if (window.Onion) {
   };
 
   /* =========================
-     NAVIGATION (FIX)
+     NAVIGATION (SAFE)
   ========================= */
 
   Onion.go = function(path){
 
     if(!path) return;
 
-    // 🔥 SIEMPRE usar router
-    Onion.router?.navigate?.(path);
-
-  };
-
-  /* =========================
-     CLEANUP SYSTEM
-  ========================= */
-
-  Onion.onCleanup = function(fn){
-
-    if(typeof fn !== "function") return;
-
-    if(!Array.isArray(Onion.state.cleanup)){
-      Onion.state.cleanup = [];
-    }
-
-    if(Onion.state.cleanup.includes(fn)) return;
-
-    Onion.state.cleanup.push(fn);
-
-  };
-
-  Onion.runCleanup = function(){
-
-    const list = Onion.state.cleanup;
-
-    if(!Array.isArray(list) || list.length === 0){
+    if(typeof Onion.router?.navigate !== "function"){
+      Onion.warn("Router no disponible");
       return;
     }
 
-    Onion.state.cleanup = [];
-
-    for(let i = 0; i < list.length; i++){
-      try{
-        list[i]();
-      }catch(e){
-        Onion.error("Cleanup error:", e);
-      }
-    }
+    Onion.router.navigate(path);
 
   };
 
@@ -256,5 +218,13 @@ if (window.Onion) {
       Onion.cache.data = Object.create(null);
     }
   };
+
+  /* =========================
+     READY FLAG
+  ========================= */
+
+  Onion.state.ready = true;
+
+  Onion.log("🚀 Onion Core listo");
 
 }

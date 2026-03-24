@@ -9,7 +9,7 @@ if (window.Onion) {
 } else {
 
   const Onion = {};
-  window.Onion = Onion; // 🔥 FIX: sin defineProperty
+  window.Onion = Onion;
 
   /* =========================
      VERSION
@@ -93,7 +93,7 @@ if (window.Onion) {
 
     abortController: null,
 
-    cleanup: [], // 🔥 usado por cleanup.js
+    cleanup: [],
 
     ready: false
   };
@@ -220,9 +220,71 @@ if (window.Onion) {
   };
 
   /* =========================
+     GLOBAL LOADER HOOK
+========================= */
+
+  (function(){
+
+    function hookFetch(){
+
+      if(!Onion.fetch){
+        return setTimeout(hookFetch, 50);
+      }
+
+      const originalFetch = Onion.fetch;
+
+      Onion.fetch = async function(...args){
+
+        const loader = document.getElementById("global-loader");
+
+        // START
+        if(loader){
+          loader.classList.add("active");
+          loader.style.width = "30%";
+        }
+
+        try{
+
+          const res = await originalFetch.apply(this, args);
+
+          if(loader){
+            loader.style.width = "80%";
+          }
+
+          return res;
+
+        }finally{
+
+          if(loader){
+            loader.style.width = "100%";
+
+            setTimeout(()=>{
+              loader.style.opacity = "0";
+
+              setTimeout(()=>{
+                loader.style.width = "0%";
+                loader.classList.remove("active");
+                loader.style.opacity = "";
+              }, 300);
+
+            }, 200);
+          }
+
+        }
+
+      };
+
+      Onion.log("🔥 Loader hook activado");
+
+    }
+
+    hookFetch();
+
+  })();
+
+  /* =========================
      READY FLAG
   ========================= */
-
 
   Onion.log("🚀 Onion Core listo");
 

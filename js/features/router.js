@@ -73,7 +73,7 @@
 
     "/ajustes": {
       page: "/app/views/ajustes/index.html",
-      style: "/css/app/ajustes.css",
+      style: "/css/app/cuenta.css",
       script: "/js/features/ajustes/index.js",
       title: "Ajustes"
     }

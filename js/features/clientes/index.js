@@ -48,7 +48,7 @@ function safe(v){
 }
 
 /* =====================================================
-   AVATAR PRO
+   AVATAR
 ===================================================== */
 
 function avatar(c){
@@ -119,7 +119,7 @@ function isClientesRoute(path){
 }
 
 /* =====================================================
-   BOOT SPA
+   BOOT
 ===================================================== */
 
 function boot(){
@@ -141,12 +141,12 @@ function boot(){
 boot();
 
 /* =====================================================
-   RUN (CON CLEANUP 🔥)
+   RUN (CLEANUP)
 ===================================================== */
 
 function run(){
 
-  Onion.cleanupAll(); // 🔥 LIMPIA TODO
+  Onion.cleanupAll();
 
   initialized = false;
   tbody = null;
@@ -228,15 +228,11 @@ function renderClientes(list = []){
   <td>
     <div class="table-actions">
 
-      <button
-        class="action-btn btn-ver"
-        data-id="${c.id}">
+      <button class="action-btn btn-ver" data-id="${c.id}">
         👁
       </button>
 
-      <button
-        class="action-btn btn-editar"
-        data-id="${c.id}">
+      <button class="action-btn btn-editar" data-id="${c.id}">
         ✏️
       </button>
 
@@ -272,7 +268,7 @@ function renderState(message,cls="loading"){
 }
 
 /* =====================================================
-   FILTROS (CON CLEANUP)
+   FILTROS
 ===================================================== */
 
 function initFilters(){
@@ -316,7 +312,7 @@ function applyFilters(){
 }
 
 /* =====================================================
-   EVENTS (SIN CLONENODE 🔥)
+   EVENTS
 ===================================================== */
 
 function initTableActions(){
@@ -344,10 +340,16 @@ function initTableActions(){
 }
 
 /* =====================================================
-   LOAD
+   LOAD (🔥 PANEL READY)
 ===================================================== */
 
 async function loadClientes(){
+
+  const panel = document.querySelector(".panel-content");
+
+  if(panel){
+    panel.classList.remove("ready");
+  }
 
   renderState("Cargando clientes…");
 
@@ -361,6 +363,10 @@ async function loadClientes(){
 
     renderClientes(clientes);
 
+    requestAnimationFrame(()=>{
+      panel?.classList.add("ready");
+    });
+
   }
   catch(err){
 
@@ -369,6 +375,8 @@ async function loadClientes(){
     renderState("Error cargando clientes.","error");
 
     window.toast?.error?.("Error cargando clientes");
+
+    panel?.classList.add("ready");
 
   }
 

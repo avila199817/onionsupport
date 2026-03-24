@@ -2,22 +2,18 @@
 
 "use strict";
 
-/* =====================================================
-   SINGLETON
-===================================================== */
+const Onion = window.Onion;
 
-if(window.__onionCuentaLoaded) return;
-window.__onionCuentaLoaded = true;
-
-/* =====================================================
-   STATE
-===================================================== */
+if(!Onion){
+  console.error("💥 Onion no disponible (cuenta)");
+  return;
+}
 
 let initialized = false;
 
-/* =====================================================
-   ROOT / DOM
-===================================================== */
+/* =========================
+   ROOT
+========================= */
 
 function getRoot(){
   return document.querySelector(".panel-content.cuenta");
@@ -37,9 +33,9 @@ function setAttr(selector, attr, value){
   if(el) el.setAttribute(attr, value);
 }
 
-/* =====================================================
+/* =========================
    HELPERS
-===================================================== */
+========================= */
 
 function safe(v){
   return v && String(v).trim() !== "" ? v : "--";
@@ -71,13 +67,12 @@ function avatar(u){
 
 }
 
-/* =====================================================
+/* =========================
    THEME
-===================================================== */
+========================= */
 
 function applyTheme(darkMode){
 
-  // 🔥 DARK = default
   if(darkMode){
     document.documentElement.removeAttribute("data-theme");
   }else{
@@ -89,95 +84,32 @@ function applyTheme(darkMode){
 async function saveTheme(darkMode){
 
   try{
-
     await Onion.fetch("/user/preferences/privacy", {
       method: "PATCH",
-      body: {
-        darkMode: darkMode
-      }
+      body: { darkMode }
     });
-
   }catch(e){
     console.error("💥 ERROR GUARDANDO TEMA:", e);
   }
 
 }
 
-/* =====================================================
-   ROUTE CHECK
-===================================================== */
+/* =========================
+   INIT
+========================= */
 
-function isCuentaRoute(path){
-  return path === "/cuenta" || path.startsWith("/cuenta/");
-}
-
-/* =====================================================
-   BOOT
-===================================================== */
-
-function boot(){
-
-  if(!window.Onion){
-    return setTimeout(boot, 50);
-  }
-
-  run();
-
-  window.addEventListener("onion:route-change", (e)=>{
-    if(isCuentaRoute(e.detail)){
-      run();
-    }
-  });
-
-}
-
-boot();
-
-/* =====================================================
-   RUN
-===================================================== */
-
-function run(){
-
-  Onion.cleanupAll();
-
-  initialized = false;
-
-  requestAnimationFrame(()=>{
-    safeInit();
-  });
-
-}
-
-/* =====================================================
-   SAFE INIT
-===================================================== */
-
-function safeInit(){
+function init(){
 
   const root = getRoot();
-
   if(!root) return;
 
   if(initialized) return;
 
   if(!Onion.state?.user){
-    return setTimeout(safeInit, 100);
+    return setTimeout(init, 100);
   }
 
   initialized = true;
-
-  init();
-
-}
-
-/* =====================================================
-   INIT
-===================================================== */
-
-function init(){
-
-  Onion.log("👤 CUENTA INIT OK");
 
   loadCuenta();
   initThemeToggle();
@@ -188,22 +120,22 @@ function init(){
 
 }
 
-/* =====================================================
+init();
+
+/* =========================
    LOAD
-===================================================== */
+========================= */
 
 async function loadCuenta(){
 
   const panel = getRoot();
 
-  if(panel){
-    panel.classList.remove("ready");
-  }
+  panel?.classList.remove("ready");
 
   try{
 
     const userState = Onion.state.user;
-    const id = userState.userId || userState.id;
+    const id = userState?.userId || userState?.id;
 
     if(!id){
       throw new Error("UserId no disponible");
@@ -219,7 +151,6 @@ async function loadCuenta(){
 
     render(u);
 
-    // 🔥 DARK por defecto
     const isDark = u.darkMode !== false;
     applyTheme(isDark);
 
@@ -239,9 +170,9 @@ async function loadCuenta(){
 
 }
 
-/* =====================================================
+/* =========================
    RENDER
-===================================================== */
+========================= */
 
 function render(u){
 
@@ -280,9 +211,9 @@ function render(u){
 
 }
 
-/* =====================================================
+/* =========================
    TOGGLE
-===================================================== */
+========================= */
 
 function initThemeToggle(){
 
@@ -291,7 +222,7 @@ function initThemeToggle(){
 
   if(!toggle || toggle.__bound) return;
 
-  toggle.__bound = true; // 🔥 evita duplicados
+  toggle.__bound = true;
 
   Onion.cleanupEvent(toggle, "change", async ()=>{
 
@@ -309,9 +240,9 @@ function initThemeToggle(){
 
 }
 
-/* =====================================================
+/* =========================
    FALLBACK
-===================================================== */
+========================= */
 
 function fallback(){
 
@@ -327,7 +258,6 @@ function fallback(){
 
   setAttr("#cuenta-avatar", "src", "/media/img/Usuario.png");
 
-  // 🔥 asegura tema correcto
   applyTheme(true);
 
 }

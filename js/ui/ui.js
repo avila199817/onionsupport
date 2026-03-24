@@ -130,16 +130,20 @@
   };
 
   /* =========================
-     EVENTS GLOBAL
+     EVENTS GLOBAL (DELEGACIÓN)
   ========================= */
 
   function bindGlobalEvents(){
+
+    // evitar doble binding
+    if(initialized) return;
 
     Onion.cleanupEvent(document, "click", async (e)=>{
 
       const sidebar = document.querySelector(".sidebar");
       const dropdown = document.querySelector("#userDropdown");
 
+      /* LOGOUT */
       const logout = e.target.closest("#logoutBtn");
 
       if(logout){
@@ -158,6 +162,7 @@
         return;
       }
 
+      /* SIDEBAR TOGGLE */
       const toggleBtn = e.target.closest("#toggleSidebar");
 
       if(toggleBtn && sidebar){
@@ -171,6 +176,7 @@
         return;
       }
 
+      /* USER DROPDOWN */
       const userToggle = e.target.closest("#userToggle");
 
       if(userToggle && sidebar && dropdown){
@@ -191,10 +197,12 @@
         return;
       }
 
+      /* CLICK DENTRO DEL DROPDOWN */
       if(e.target.closest("#userDropdown")){
         return;
       }
 
+      /* CLICK FUERA → CERRAR */
       dropdown?.classList.remove("active");
 
     });
@@ -209,11 +217,9 @@
 
     bindGlobalEvents();
 
-    initialized = true;
+    Onion.ui.refresh();
 
-    Onion.onCleanup(()=>{
-      initialized = false;
-    });
+    initialized = true;
 
   };
 

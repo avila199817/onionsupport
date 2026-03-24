@@ -77,6 +77,7 @@ function avatar(u){
 
 function applyTheme(darkMode){
 
+  // 🔥 DARK = default
   if(darkMode){
     document.documentElement.removeAttribute("data-theme");
   }else{
@@ -89,10 +90,11 @@ async function saveTheme(darkMode){
 
   try{
 
-    await Onion.fetch("/user/preferences/privacy", {
+    await Onion.fetch(Onion.config.API + "/user/preferences/privacy", {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ darkMode })
+      body: {
+        darkMode: darkMode
+      }
     });
 
   }catch(e){
@@ -110,7 +112,7 @@ function isCuentaRoute(path){
 }
 
 /* =====================================================
-   BOOT (SPA)
+   BOOT
 ===================================================== */
 
 function boot(){
@@ -219,8 +221,8 @@ async function loadCuenta(){
 
     render(u);
 
-    /* 🔥 APLICAR TEMA DESDE BD */
-    applyTheme(u.darkMode === true);
+    // 🔥 default = DARK
+    applyTheme(u.darkMode !== false);
 
     requestAnimationFrame(()=>{
       panel?.classList.add("ready");
@@ -264,22 +266,23 @@ function render(u){
 
   setAttr("#cuenta-avatar", "src", avatar(u));
 
-  /* 🔥 SET TOGGLE */
   const toggle = $("#toggle-darkmode");
   const label = $("#cuenta-darkmode");
 
+  const isDark = u.darkMode !== false;
+
   if(toggle){
-    toggle.checked = u.darkMode === true;
+    toggle.checked = isDark;
   }
 
   if(label){
-    label.textContent = u.darkMode ? "Activado" : "Desactivado";
+    label.textContent = isDark ? "Activado" : "Desactivado";
   }
 
 }
 
 /* =====================================================
-   THEME TOGGLE
+   TOGGLE
 ===================================================== */
 
 function initThemeToggle(){

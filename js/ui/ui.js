@@ -11,6 +11,10 @@
 
   let initialized = false;
 
+  /* =========================
+     HELPERS
+  ========================= */
+
   function getUserSafe(){
 
     let user = Onion.state.user;
@@ -126,15 +130,13 @@
   };
 
   /* =========================
-     EVENTS GLOBAL
+     EVENTS GLOBAL (🔥 FIX)
   ========================= */
 
   function bindGlobalEvents(){
 
-    if(window.__ONION_UI_BOUND__) return;
-    window.__ONION_UI_BOUND__ = true;
-
-    document.addEventListener("click", async (e)=>{
+    // 🔥 usar sistema Onion (NO addEventListener directo)
+    Onion.cleanupEvent(document, "click", async (e)=>{
 
       const sidebar = document.querySelector(".sidebar");
       const dropdown = document.querySelector("#userDropdown");
@@ -201,16 +203,20 @@
   }
 
   /* =========================
-     INIT
+     INIT (🔥 FIX)
   ========================= */
 
   Onion.ui.init = function(){
 
-    if(initialized) return;
-
+    // 🔥 SIEMPRE rebind en SPA
     bindGlobalEvents();
 
     initialized = true;
+
+    Onion.onCleanup(()=>{
+      initialized = false;
+    });
+
   };
 
   /* =========================

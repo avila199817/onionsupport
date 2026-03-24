@@ -15,7 +15,7 @@ if (window.Onion) {
      VERSION
   ========================= */
 
-  Onion.version = "2.0.0";
+  Onion.version = "2.1.0";
 
   /* =========================
      CONFIG
@@ -94,6 +94,7 @@ if (window.Onion) {
     abortController: null,
 
     cleanup: [],
+    globalEvents: [], // 🔥 NUEVO
 
     ready: false
   };
@@ -182,7 +183,47 @@ if (window.Onion) {
   };
 
   /* =========================
-     NAVIGATION (SAFE)
+     CLEANUP CORE (🔥 FIX)
+  ========================= */
+
+  Onion.runCleanup = function(){
+
+    const list = Onion.state.cleanup;
+
+    if(Array.isArray(list)){
+      for(const fn of list){
+        try{ fn(); }
+        catch(e){ Onion.error("Cleanup error:", e); }
+      }
+    }
+
+    Onion.state.cleanup = [];
+
+    // 🔥 limpiar eventos globales
+    if(Array.isArray(Onion.state.globalEvents)){
+      for(const ev of Onion.state.globalEvents){
+        try{
+          ev.target.removeEventListener(ev.name, ev.handler, ev.options);
+        }catch{}
+      }
+      Onion.state.globalEvents = [];
+    }
+
+    // 🔥 reset estado crítico
+    Onion.state.rendering = false;
+    Onion.state.navigating = false;
+
+    if(Onion.state.abortController){
+      try{
+        Onion.state.abortController.abort();
+      }catch{}
+      Onion.state.abortController = null;
+    }
+
+  };
+
+  /* =========================
+     NAVIGATION (🔥 FIX)
   ========================= */
 
   Onion.go = function(path){
@@ -193,6 +234,9 @@ if (window.Onion) {
       Onion.warn("Router no disponible");
       return;
     }
+
+    // 🔥 LIMPIEZA TOTAL ANTES DE NAVEGAR
+    Onion.runCleanup();
 
     Onion.router.navigate(path);
 
@@ -237,7 +281,6 @@ if (window.Onion) {
 
         const loader = document.getElementById("global-loader");
 
-        // START
         if(loader){
           loader.classList.add("active");
           loader.style.width = "30%";

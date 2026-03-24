@@ -1,5 +1,5 @@
 /* =========================
-   INCIDENCIAS (CLON HOME)
+   INCIDENCIAS (PRO SAAS CLON HOME)
 ========================= */
 
 .incidencias{
@@ -7,99 +7,38 @@
 }
 
 .incidencias .container{
-  padding-top:0;
+  padding-top:var(--page-offset);
   padding-bottom:50px;
-}
 
-
-/* =========================
-   HEADER (MISMO HOME)
-========================= */
-
-.incidencias .dashboard-header{
-  display:flex;
-  align-items:center;
-
-  height:var(--topbar-height);
-  margin-bottom:40px;
-  padding-top:15px;
-}
-
-.incidencias .dashboard-header .header-left{
   display:flex;
   flex-direction:column;
-  justify-content:center;
+  gap:var(--section-gap, 28px);
 }
 
-.incidencias .header-actions{
-  margin-left:auto;
-  display:flex;
-  align-items:center;
-  gap:10px;
-}
-
-
-/* =========================
-   TITULO (MISMO HOME)
-========================= */
-
-.incidencias .page-title{
-  margin:0;
-
-  font-size:24px;
-  font-weight:600;
-  letter-spacing:-0.3px;
-
-  line-height:1.1;
-  color:var(--text);
-}
-
-.incidencias .page-subtitle{
-  font-size:14px;
-  color:var(--dim);
-  margin-top:4px;
+/* header oculto como HOME */
+.incidencias .dashboard-header{
+  display:none;
 }
 
 
 /* =========================
-   BOTONES
-========================= */
-
-.incidencias .btn{
-  border:none;
-  padding:10px 14px;
-  border-radius:10px;
-  cursor:pointer;
-  font-size:14px;
-  font-weight:500;
-}
-
-.incidencias .btn.primary{
-  background:var(--text);
-  color:var(--main-bg);
-}
-
-.incidencias .btn.primary:hover{
-  opacity:.85;
-}
-
-
-/* =========================
-   GRID CARDS (CLON HOME)
+   KPI GRID
 ========================= */
 
 .incidencias .grid-cards{
   display:grid;
   grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
-  gap:22px;
+  gap:20px;
 }
 
 
 /* =========================
-   CARDS (CLON EXACTO)
+   CARDS (CLON EXACTO HOME)
 ========================= */
 
 .incidencias .card{
+  position:relative;
+
   background:var(--card-bg);
   border:1px solid var(--card-border);
   border-radius:18px;
@@ -107,13 +46,45 @@
   padding:20px;
 
   box-shadow:var(--card-shadow);
-  transition:.25s ease;
+
+  transition:
+    transform .25s ease,
+    box-shadow .25s ease,
+    border-color .2s ease;
+}
+
+/* glow */
+.incidencias .card::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  border-radius:18px;
+
+  background:linear-gradient(
+    120deg,
+    transparent,
+    color-mix(in srgb, var(--accent), transparent 85%),
+    transparent
+  );
+
+  opacity:0;
+  transition:opacity .25s ease;
 }
 
 .incidencias .card:hover{
-  transform:translateY(-4px);
+  transform:translateY(-6px);
   box-shadow:var(--card-shadow-hover);
+  border-color:color-mix(in srgb, var(--accent), var(--card-border) 70%);
 }
+
+.incidencias .card:hover::after{
+  opacity:.6;
+}
+
+
+/* =========================
+   TEXTOS CARD
+========================= */
 
 .incidencias .card-title{
   font-size:12px;
@@ -122,7 +93,7 @@
 
 .incidencias .card-value{
   display:block;
-  margin-top:12px;
+  margin-top:10px;
 
   font-size:30px;
   font-weight:600;
@@ -134,7 +105,7 @@
   display:flex;
   gap:8px;
   align-items:center;
-  margin-top:10px;
+  margin-top:8px;
 }
 
 .incidencias .card-extra{
@@ -144,23 +115,27 @@
 
 
 /* =========================
-   GRID PRINCIPAL (CLON)
+   GRID PRINCIPAL (CLON REAL)
 ========================= */
 
 .incidencias .dashboard-grid{
   display:grid;
-  grid-template-columns:repeat(auto-fit, minmax(300px, 1fr));
-
+  grid-template-columns:2fr 1fr;
   gap:22px;
-  margin-top:30px;
+}
+
+.incidencias .dashboard-grid.secondary{
+  grid-template-columns:1fr 1fr;
 }
 
 
 /* =========================
-   BLOCKS (CLON HOME)
+   PANEL BLOCK (CLON)
 ========================= */
 
 .incidencias .panel-block{
+  position:relative;
+
   background:var(--panel-bg);
   border:1px solid var(--panel-border);
   border-radius:18px;
@@ -168,25 +143,41 @@
   padding:20px;
 
   box-shadow:var(--panel-shadow);
+
+  transition:
+    border-color .2s ease,
+    transform .2s ease;
 }
 
-.incidencias .section-title{
-  font-size:15px;
-  font-weight:600;
-  color:var(--text);
+.incidencias .panel-block:hover{
+  border-color:color-mix(in srgb, var(--accent), var(--panel-border) 70%);
+  transform:translateY(-3px);
 }
 
 
 /* =========================
-   FILTROS (INTEGRADOS LIMPIO)
+   SECTION TITLE
+========================= */
+
+.incidencias .section-title{
+  font-size:14px;
+  font-weight:600;
+  letter-spacing:.2px;
+
+  color:var(--text);
+  margin-bottom:10px;
+}
+
+
+/* =========================
+   FILTROS
 ========================= */
 
 .incidencias .filters-row{
   display:flex;
   gap:10px;
   flex-wrap:wrap;
-
-  margin-top:10px;
+  margin-bottom:10px;
 }
 
 .incidencias .filters-row input,
@@ -218,7 +209,6 @@
 .incidencias .table-container{
   width:100%;
   overflow-x:auto;
-  margin-top:10px;
 }
 
 .incidencias .incidencias-table{
@@ -274,27 +264,6 @@
 
 
 /* =========================
-   ACTIONS
-========================= */
-
-.incidencias .table-actions{
-  display:flex;
-  gap:8px;
-}
-
-.incidencias .action-btn{
-  background:transparent;
-  border:none;
-  cursor:pointer;
-  color:var(--dim);
-}
-
-.incidencias .action-btn:hover{
-  color:var(--text);
-}
-
-
-/* =========================
    DETALLE
 ========================= */
 
@@ -314,15 +283,13 @@
 
 
 /* =========================
-   SUMMARY (CLON HOME)
+   SUMMARY
 ========================= */
 
 .incidencias .summary-grid{
   display:grid;
   grid-template-columns:repeat(3,1fr);
-
   gap:12px;
-  margin-top:10px;
 }
 
 .incidencias .summary-item{
@@ -333,6 +300,12 @@
   border-radius:14px;
 
   text-align:center;
+
+  transition:border-color .2s ease;
+}
+
+.incidencias .summary-item:hover{
+  border-color:color-mix(in srgb, var(--accent), var(--card-border) 70%);
 }
 
 .incidencias .summary-value{
@@ -348,32 +321,48 @@
 
 
 /* =========================
-   ALERTS (CLON HOME)
+   ALERTS
 ========================= */
 
 .incidencias .alert-list{
   display:flex;
   flex-direction:column;
   gap:10px;
-
-  margin-top:10px;
 }
 
 .incidencias .alert-item{
+  background:color-mix(in srgb, var(--card-bg), transparent 10%);
+  border:1px solid var(--card-border);
+
   padding:12px;
   border-radius:12px;
+
   font-size:13px;
+  color:var(--muted);
+
+  transition:
+    border-color .2s ease,
+    transform .2s ease;
+}
+
+.incidencias .alert-item:hover{
+  transform:translateX(4px);
+  border-color:color-mix(in srgb, var(--accent), var(--card-border) 70%);
 }
 
 
 /* =========================
-   RESPONSIVE (CLON HOME)
+   RESPONSIVE
 ========================= */
 
 @media (max-width:1024px){
 
   .incidencias .container{
     padding:20px;
+  }
+
+  .incidencias .dashboard-grid{
+    grid-template-columns:1fr;
   }
 
 }
@@ -384,29 +373,9 @@
     padding:16px;
   }
 
-  .incidencias .dashboard-header{
-    height:auto;
-    flex-direction:column;
-    align-items:flex-start;
-    gap:10px;
-
-    margin-top:0;
-    padding-top:0;
-  }
-
-  .incidencias .dashboard-grid,
   .incidencias .grid-cards,
   .incidencias .summary-grid{
     grid-template-columns:1fr;
-  }
-
-  .incidencias .filters-row{
-    flex-direction:column;
-  }
-
-  .incidencias .filters-row input,
-  .incidencias .filters-row select{
-    width:100%;
   }
 
 }
@@ -427,16 +396,6 @@
 
   .incidencias .card-value{
     font-size:24px;
-  }
-
-  .incidencias .page-title{
-    font-size:20px;
-  }
-
-  .incidencias .incidencias-table th,
-  .incidencias .incidencias-table td{
-    padding:10px;
-    font-size:13px;
   }
 
 }

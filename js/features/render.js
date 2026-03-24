@@ -9,9 +9,9 @@
 
   const Onion = window.Onion;
 
-  /* =====================================================
+  /* =========================
      NORMALIZE URL
-  ===================================================== */
+  ========================= */
 
   function normalizeUrl(src){
     if(!src) return null;
@@ -27,9 +27,9 @@
     return window.location.origin + "/" + src.replace(/^\/+/,"");
   }
 
-  /* =====================================================
+  /* =========================
      LOAD SCRIPT
-  ===================================================== */
+  ========================= */
 
   Onion.loadScript = function(src){
     return new Promise((resolve, reject)=>{
@@ -37,7 +37,7 @@
       const finalSrc = normalizeUrl(src);
       if(!finalSrc) return resolve();
 
-      // 🔥 eliminar scripts anteriores de página
+      // 🔥 eliminar scripts anteriores
       document.querySelectorAll("script[data-onion-page]").forEach(s=>{
         try{ s.remove(); }catch{}
       });
@@ -56,9 +56,9 @@
     });
   };
 
-  /* =====================================================
+  /* =========================
      LOAD STYLE
-  ===================================================== */
+  ========================= */
 
   Onion.loadStyle = function(href){
     return new Promise((resolve)=>{
@@ -78,9 +78,9 @@
     });
   };
 
-  /* =====================================================
+  /* =========================
      FETCH HTML
-  ===================================================== */
+  ========================= */
 
   Onion.fetchHTML = async function(url){
 
@@ -98,9 +98,9 @@
     return await res.text();
   };
 
-  /* =====================================================
+  /* =========================
      EXTRACT CONTENT
-  ===================================================== */
+  ========================= */
 
   function extractContent(html){
 
@@ -113,9 +113,9 @@
     );
   }
 
-  /* =====================================================
+  /* =========================
      SWAP CONTENT
-  ===================================================== */
+  ========================= */
 
   Onion.swapContent = function(node){
 
@@ -127,9 +127,9 @@
 
   };
 
-  /* =====================================================
-     RENDER (FIX CLAVE)
-  ===================================================== */
+  /* =========================
+     RENDER (FINAL)
+  ========================= */
 
   Onion.render = async function(){
 
@@ -146,6 +146,10 @@
       const html = await Onion.fetchHTML(route.page);
       const content = extractContent(html);
 
+      // 🔥 LIMPIAR VISTA ANTERIOR
+      Onion.runCleanup?.();
+
+      // 🔥 CAMBIAR CONTENIDO
       Onion.swapContent(content);
 
       // JS
@@ -153,7 +157,7 @@
         await Onion.loadScript(route.script);
       }
 
-      // 🔥🔥🔥 CLAVE: avisar a todos los scripts
+      // 🔥 EVENTO GLOBAL DE RUTA (CLAVE)
       window.dispatchEvent(new CustomEvent("onion:route-change", {
         detail: location.pathname
       }));

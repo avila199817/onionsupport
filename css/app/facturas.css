@@ -1,5 +1,5 @@
 /* =========================
-   FACTURAS (PRO SAAS)
+   FACTURAS (PRO SAAS CLON HOME)
 ========================= */
 
 .facturas{
@@ -7,26 +7,22 @@
 }
 
 .facturas .container{
-  padding-top:10px;
+  padding-top:var(--page-offset);
   padding-bottom:50px;
 
   display:flex;
   flex-direction:column;
-  gap:28px;
+  gap:var(--section-gap, 28px);
 }
 
-
-/* =========================
-   HEADER (SOLO ESPACIADO)
-========================= */
-
+/* header oculto como HOME */
 .facturas .dashboard-header{
-  height:var(--topbar-height);
+  display:none;
 }
 
 
 /* =========================
-   GRID CARDS
+   KPI GRID
 ========================= */
 
 .facturas .grid-cards{
@@ -37,7 +33,7 @@
 
 
 /* =========================
-   CARDS
+   CARDS (CLON HOME REAL)
 ========================= */
 
 .facturas .card{
@@ -57,10 +53,32 @@
     border-color .2s ease;
 }
 
+/* glow */
+.facturas .card::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  border-radius:18px;
+
+  background:linear-gradient(
+    120deg,
+    transparent,
+    color-mix(in srgb, var(--accent), transparent 85%),
+    transparent
+  );
+
+  opacity:0;
+  transition:opacity .25s ease;
+}
+
 .facturas .card:hover{
-  transform:translateY(-5px);
+  transform:translateY(-6px);
   box-shadow:var(--card-shadow-hover);
   border-color:color-mix(in srgb, var(--accent), var(--card-border) 70%);
+}
+
+.facturas .card:hover::after{
+  opacity:.6;
 }
 
 /* highlight */
@@ -70,7 +88,7 @@
 
 
 /* =========================
-   TEXTOS
+   TEXTOS CARD
 ========================= */
 
 .facturas .card-title{
@@ -118,12 +136,12 @@
 
 
 /* =========================
-   GRID PRINCIPAL
+   GRID PRINCIPAL (MISMA LÓGICA)
 ========================= */
 
 .facturas .dashboard-grid{
   display:grid;
-  grid-template-columns:1fr;
+  grid-template-columns:2fr 1fr;
   gap:22px;
 }
 
@@ -137,6 +155,8 @@
 ========================= */
 
 .facturas .panel-block{
+  position:relative;
+
   background:var(--panel-bg);
   border:1px solid var(--panel-border);
   border-radius:18px;
@@ -145,12 +165,20 @@
 
   box-shadow:var(--panel-shadow);
 
-  transition:border-color .2s ease;
+  transition:
+    border-color .2s ease,
+    transform .2s ease;
 }
 
 .facturas .panel-block:hover{
   border-color:color-mix(in srgb, var(--accent), var(--panel-border) 70%);
+  transform:translateY(-3px);
 }
+
+
+/* =========================
+   SECTION TITLE
+========================= */
 
 .facturas .section-title{
   font-size:14px;
@@ -163,7 +191,7 @@
 
 
 /* =========================
-   TABLE (PRO)
+   TABLE (PRO SAAS)
 ========================= */
 
 .facturas .table-container{
@@ -174,11 +202,10 @@
 .facturas .facturas-table{
   width:100%;
   border-collapse:separate;
-  border-spacing:0 6px; /* separación tipo SaaS */
+  border-spacing:0 6px;
   font-size:14px;
 }
 
-/* header */
 .facturas .facturas-table thead th{
   text-align:left;
   padding:10px 12px;
@@ -190,7 +217,6 @@
   border-bottom:1px solid var(--card-border);
 }
 
-/* filas tipo card */
 .facturas .facturas-table tbody tr{
   background:var(--card-bg);
   border:1px solid var(--card-border);
@@ -205,13 +231,11 @@
   box-shadow:var(--card-shadow);
 }
 
-/* celdas */
 .facturas .facturas-table td{
   padding:12px;
   color:var(--text);
 }
 
-/* bordes redondeados fila */
 .facturas .facturas-table td:first-child{
   border-top-left-radius:10px;
   border-bottom-left-radius:10px;
@@ -224,7 +248,7 @@
 
 
 /* =========================
-   BADGES (MEJORADOS)
+   BADGES
 ========================= */
 
 .facturas .badge{
@@ -239,7 +263,6 @@
   font-weight:600;
 }
 
-/* usa tu sistema pero refinado */
 .facturas .badge.pagada{
   background:color-mix(in srgb, var(--success), transparent 85%);
   color:var(--success);
@@ -313,6 +336,15 @@
 
   font-size:13px;
   color:var(--muted);
+
+  transition:
+    border-color .2s ease,
+    transform .2s ease;
+}
+
+.facturas .alert-item:hover{
+  transform:translateX(4px);
+  border-color:color-mix(in srgb, var(--accent), var(--card-border) 70%);
 }
 
 
@@ -326,7 +358,7 @@
     padding:20px;
   }
 
-  .facturas .dashboard-grid.secondary{
+  .facturas .dashboard-grid{
     grid-template-columns:1fr;
   }
 

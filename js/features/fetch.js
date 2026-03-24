@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================
-   FETCH (ONION PRO FINAL FIX)
+   FETCH (ONION PRO FINAL STABLE)
 ========================= */
 
 (function(){
@@ -14,7 +14,7 @@
   const Onion = window.Onion;
 
   /* =========================
-     NORMALIZE URL (🔥 FIX)
+     NORMALIZE URL (🔥 FIX REAL)
   ========================= */
 
   function normalizeUrl(url){
@@ -23,17 +23,20 @@
 
     try{
 
-      // 🔥 FULL URL
+      // FULL URL
       if(url.startsWith("http")){
         return url;
       }
 
-      // 🔥 API ROUTES
+      // 🔥 BASE API limpia (sin duplicar /api)
+      const API = Onion.config.API.replace(/\/api$/, "");
+
+      // /api/... → ya viene completa
       if(url.startsWith("/api/")){
-        return Onion.config.API.replace(/\/api$/, "") + url;
+        return API + url;
       }
 
-      // 🔥 RELATIVE API
+      // /user/... → añadir /api
       if(url.startsWith("/")){
         return Onion.config.API + url;
       }
@@ -74,11 +77,18 @@
         ...(options.headers || {})
       };
 
+      /* =========================
+         CONTENT TYPE AUTO
+      ========================= */
+
       if(options.body && !headers["Content-Type"]){
         headers["Content-Type"] = "application/json";
       }
 
-      // 🔥 TOKEN
+      /* =========================
+         TOKEN (🔥 CLAVE)
+      ========================= */
+
       try{
         const token = Onion.auth?.getToken?.();
         if(token){
@@ -86,37 +96,35 @@
         }
       }catch{}
 
+      /* =========================
+         BODY NORMALIZATION
+      ========================= */
+
+      let body = options.body;
+
+      if(body && headers["Content-Type"] === "application/json" && typeof body !== "string"){
+        body = JSON.stringify(body);
+      }
+
       const res = await fetch(finalUrl, {
         method: options.method || "GET",
-        body: options.body
-          ? (headers["Content-Type"] === "application/json"
-            ? JSON.stringify(options.body)
-            : options.body)
-          : undefined,
         headers,
+        body,
         signal,
-        credentials: "include" // 🔥 CLAVE
+        credentials: "include"
       });
 
       /* =========================
-         AUTH CONTROL (🔥 SUAVIZADO)
+         AUTH CONTROL
       ========================= */
 
       if(res.status === 401){
-
         Onion.warn("🔐 401 no autorizado");
-
-        // ❌ antes rompía todo
-        // Onion.clearUser();
-        // Onion.auth?.clearToken?.();
-
-        // 🔥 SOLO avisamos
         throw new Error("401");
-
       }
 
       /* =========================
-         PARSE
+         PARSE RESPONSE
       ========================= */
 
       let data;
@@ -131,6 +139,10 @@
       }else{
         data = await res.text();
       }
+
+      /* =========================
+         ERROR CONTROL
+      ========================= */
 
       if(!res.ok){
 

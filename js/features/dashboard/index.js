@@ -28,7 +28,7 @@ function $(id){
 ========================= */
 
 function safe(n){
-  return (n === 0 || n) ? n : 0;
+  return (n === 0 || n) ? Number(n) : 0;
 }
 
 function pick(...vals){
@@ -43,25 +43,13 @@ function formatMoney(n){
   }).format(safe(n));
 }
 
-function timeAgo(date){
-  if(!date) return "Ahora";
-
-  const diff = Math.floor((Date.now() - new Date(date)) / 1000);
-
-  if(diff < 60) return "Hace " + diff + "s";
-  if(diff < 3600) return "Hace " + Math.floor(diff/60) + " min";
-  if(diff < 86400) return "Hace " + Math.floor(diff/3600) + " h";
-
-  return "Hace " + Math.floor(diff/86400) + " d";
-}
-
 function setText(id, value){
   const el = $(id);
   if(el) el.textContent = value;
 }
 
 /* =========================
-   MES DINÁMICO
+   MES
 ========================= */
 
 function setMonthLabel(){
@@ -114,26 +102,32 @@ async function loadDashboard(){
     ));
 
     /* =========================
-       FACTURACIÓN (ARREGLADA)
-       🔥 SOLO PAGADAS SUMAN
+       FACTURACIÓN (ULTRA ROBUSTA)
     ========================= */
 
-    const totalPagado = safe(pick(
-      k.facturacionPagada,   // 👈 backend correcto
-      k.facturacionTotal     // fallback
+    const pagado = safe(pick(
+      k.facturacionPagada,
+      k.totalPagado,
+      k.facturadoTotal,
+      k.facturacionTotal
     ));
 
     const pendiente = safe(pick(
       k.facturacionPendiente,
-      0
+      k.totalPendiente,
+      k.pendiente
     ));
 
     const mensual = safe(pick(
-      k.facturacionMensual,  // 👈 debe ser SOLO pagadas del mes
-      0
+      k.facturacionMensual,
+      k.facturadoMes,
+      k.totalMes
     ));
 
-    setText("home-facturas", formatMoney(totalPagado));
+    // 🔥 fallback automático SI backend no separa bien
+    const totalReal = pagado || (pagado + pendiente);
+
+    setText("home-facturas", formatMoney(totalReal));
     setText("home-facturas-pendiente", formatMoney(pendiente));
     setText("home-facturacion-mes", formatMoney(mensual));
 
@@ -186,7 +180,7 @@ function renderActivity(items){
 }
 
 /* =========================
-   SYSTEM (MEJORADO + CPU MODEL)
+   SYSTEM
 ========================= */
 
 async function loadSystem(){
@@ -198,18 +192,16 @@ async function loadSystem(){
     const res = await Onion.fetch(base + "/health");
     const data = res?.data || res;
 
-    /* ===== STATUS ===== */
     setText("status-api", "API · " + (data?.api?.latency || "--") + " ms");
     setText("status-db", "DB · " + (data?.db?.status || "--"));
     setText("status-uptime", "Uptime · " + (data?.uptime || "--"));
 
-    /* ===== CPU ===== */
     const cpu = $("cpu-usage");
     if(cpu && data?.system?.cpu){
 
       const model =
-        data.system.cpu.model ||   // 👈 si lo metes en backend
-        navigator.hardwareConcurrency + " cores";
+        data.system.cpu.model ||
+        (data.system.cpu.cores + " cores");
 
       cpu.textContent =
         "CPU: " + data.system.cpu.usage + "% · " +
@@ -217,7 +209,6 @@ async function loadSystem(){
         data.system.cpu.load;
     }
 
-    /* ===== RAM ===== */
     const ram = $("ram-usage");
     if(ram && data?.system?.ram){
       ram.textContent =
@@ -226,7 +217,6 @@ async function loadSystem(){
         data.system.ram.totalMB + "MB";
     }
 
-    /* ===== DISCO ===== */
     const disk = $("disk-usage");
     if(disk && data?.system?.disk){
       disk.textContent =
@@ -250,8 +240,6 @@ async function init(){
   const root = getRoot();
   if(!root) return;
 
-  Onion.log("📊 Dashboard PRO INIT");
-
   setMonthLabel();
 
   await loadDashboard();
@@ -261,13 +249,6 @@ async function init(){
     loadDashboard();
     loadSystem();
   }, 60000);
-
-  Onion.onCleanup(()=>{
-    if(interval){
-      clearInterval(interval);
-      interval = null;
-    }
-  });
 
 }
 
@@ -280,6 +261,18 @@ init();
 /* =========================
    HELPERS
 ========================= */
+
+function timeAgo(date){
+  if(!date) return "Ahora";
+
+  const diff = Math.floor((Date.now() - new Date(date)) / 1000);
+
+  if(diff < 60) return "Hace " + diff + "s";
+  if(diff < 3600) return "Hace " + Math.floor(diff/60) + " min";
+  if(diff < 86400) return "Hace " + Math.floor(diff/3600) + " h";
+
+  return "Hace " + Math.floor(diff/86400) + " d";
+}
 
 function escapeHTML(str){
   return String(str)

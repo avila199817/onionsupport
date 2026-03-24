@@ -68,33 +68,6 @@ function avatar(u){
 }
 
 /* =========================
-   THEME
-========================= */
-
-function applyTheme(darkMode){
-
-  if(darkMode){
-    document.documentElement.removeAttribute("data-theme");
-  }else{
-    document.documentElement.setAttribute("data-theme","light");
-  }
-
-}
-
-async function saveTheme(darkMode){
-
-  try{
-    await Onion.fetch("/user/preferences/privacy", {
-      method: "PATCH",
-      body: { darkMode }
-    });
-  }catch(e){
-    console.error("💥 ERROR GUARDANDO TEMA:", e);
-  }
-
-}
-
-/* =========================
    INIT
 ========================= */
 
@@ -151,8 +124,12 @@ async function loadCuenta(){
 
     render(u);
 
-    const isDark = u.darkMode !== false;
-    applyTheme(isDark);
+    // 🔥 prioridad: localStorage > backend
+    const saved = Onion.userConfig?.get("darkMode");
+    const isDark = saved !== null ? saved : (u.darkMode !== false);
+
+    Onion.userConfig?.set("darkMode", isDark);
+    Onion.userConfig?.apply();
 
     requestAnimationFrame(()=>{
       panel?.classList.add("ready");
@@ -199,7 +176,8 @@ function render(u){
   const toggle = $("#toggle-darkmode");
   const label = $("#cuenta-darkmode");
 
-  const isDark = u.darkMode !== false;
+  const saved = Onion.userConfig?.get("darkMode");
+  const isDark = saved !== null ? saved : (u.darkMode !== false);
 
   if(toggle){
     toggle.checked = isDark;
@@ -228,13 +206,25 @@ function initThemeToggle(){
 
     const darkMode = toggle.checked;
 
-    applyTheme(darkMode);
+    // 🔥 guarda en config local
+    Onion.userConfig?.set("darkMode", darkMode);
+
+    // 🔥 aplica instantáneo
+    Onion.userConfig?.apply();
 
     if(label){
       label.textContent = darkMode ? "Activado" : "Desactivado";
     }
 
-    await saveTheme(darkMode);
+    // 🔥 guarda en backend
+    try{
+      await Onion.fetch("/user/preferences/privacy", {
+        method: "PATCH",
+        body: { darkMode }
+      });
+    }catch(e){
+      console.error("💥 ERROR GUARDANDO TEMA:", e);
+    }
 
   });
 
@@ -258,7 +248,7 @@ function fallback(){
 
   setAttr("#cuenta-avatar", "src", "/media/img/Usuario.png");
 
-  applyTheme(true);
+  Onion.userConfig?.apply();
 
 }
 

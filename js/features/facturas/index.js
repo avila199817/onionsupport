@@ -24,7 +24,7 @@ function $(selector){
 }
 
 /* =========================
-   INIT (SPA SAFE)
+   INIT
 ========================= */
 
 function init(){
@@ -40,8 +40,6 @@ function init(){
 
   initialized = true;
 
-  Onion.log("📄 Facturas init");
-
   bindEvents();
   loadFacturas();
 
@@ -52,7 +50,7 @@ function init(){
 }
 
 /* =========================
-   EVENTS (CON CLEANUP)
+   EVENTS
 ========================= */
 
 function bindEvents(){
@@ -75,7 +73,7 @@ function bindEvents(){
 }
 
 /* =========================
-   LOAD (🔥 PANEL READY)
+   LOAD
 ========================= */
 
 async function loadFacturas(){
@@ -96,17 +94,16 @@ async function loadFacturas(){
     const res = await Onion.fetch(Onion.config.API + "/facturas");
 
     const facturas = res?.facturas || res?.data || [];
-    const resumen = res?.resumen || {};
 
     if(!Array.isArray(facturas) || facturas.length === 0){
       setEmpty();
-      updateKPIs([], resumen);
+      updateKPIs([]);
       panel?.classList.add("ready");
       return;
     }
 
     render(facturas);
-    updateKPIs(facturas, resumen);
+    updateKPIs(facturas);
 
     requestAnimationFrame(()=>{
       panel?.classList.add("ready");
@@ -114,7 +111,7 @@ async function loadFacturas(){
 
   }catch(e){
 
-    Onion.error("💥 ERROR FACTURAS:", e);
+    console.error("💥 ERROR FACTURAS:", e);
 
     setError();
     panel?.classList.add("ready");
@@ -175,21 +172,15 @@ function render(items){
 
     return `
       <tr data-id="${f.id || f.numero}" style="cursor:pointer">
-
         <td>#${escapeHTML(f.numero || f.id || "--")}</td>
-
         <td>${escapeHTML(f.cliente || "-")}</td>
-
         <td>${formatFecha(f.fecha)}</td>
-
         <td>${formatMoney(f.total)}</td>
-
         <td>
           <span class="badge ${estado.class}">
             ${estado.label}
           </span>
         </td>
-
       </tr>
     `;
 
@@ -208,13 +199,9 @@ function updateKPIs(items){
 
   const totalPagado = pagadas.reduce((acc, f) => acc + Number(f.total || 0), 0);
 
-  const totalEl = $("#facturas-total");
-  const pagadasEl = $("#facturas-pagadas");
-  const pendientesEl = $("#facturas-pendientes");
-
-  if(totalEl) totalEl.textContent = formatMoney(totalPagado);
-  if(pagadasEl) pagadasEl.textContent = pagadas.length;
-  if(pendientesEl) pendientesEl.textContent = pendientes.length;
+  if($("#facturas-total")) $("#facturas-total").textContent = formatMoney(totalPagado);
+  if($("#facturas-pagadas")) $("#facturas-pagadas").textContent = pagadas.length;
+  if($("#facturas-pendientes")) $("#facturas-pendientes").textContent = pendientes.length;
 
 }
 
@@ -232,7 +219,6 @@ async function loadFacturaDetalle(id){
   if(!root) return;
 
   root.classList.remove("ready");
-
   root.innerHTML = `<div class="table-loading">Cargando factura...</div>`;
 
   try{
@@ -254,7 +240,7 @@ async function loadFacturaDetalle(id){
 
   }catch(e){
 
-    Onion.error("💥 ERROR FACTURA DETALLE:", e);
+    console.error("💥 ERROR FACTURA DETALLE:", e);
 
     root.innerHTML = `<div>Error cargando factura</div>`;
     root.classList.add("ready");
@@ -286,9 +272,7 @@ function renderFacturaDetalle(f){
           <h3>Conceptos</h3>
           <ul>
             ${f.items.map(i => `
-              <li>
-                ${escapeHTML(i.descripcion)} - ${formatMoney(i.precio)}
-              </li>
+              <li>${escapeHTML(i.descripcion)} - ${formatMoney(i.precio)}</li>
             `).join("")}
           </ul>
         ` : ""
@@ -316,13 +300,8 @@ function getEstado(estado){
 
   const e = (estado || "").toLowerCase();
 
-  if(e === "pagada"){
-    return { label:"Pagada", class:"pagada" };
-  }
-
-  if(e === "pendiente"){
-    return { label:"Pendiente", class:"pendiente" };
-  }
+  if(e === "pagada") return { label:"Pagada", class:"pagada" };
+  if(e === "pendiente") return { label:"Pendiente", class:"pendiente" };
 
   return { label:"Borrador", class:"borrador" };
 }

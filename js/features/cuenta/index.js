@@ -102,12 +102,12 @@ function boot(){
 boot();
 
 /* =====================================================
-   RUN (CLEANUP)
+   RUN (🔥 CLAVE)
 ===================================================== */
 
 function run(){
 
-  Onion.cleanupAll();
+  Onion.cleanupAll(); // 🔥 limpia eventos
 
   initialized = false;
 
@@ -149,10 +149,15 @@ function init(){
 
   loadCuenta();
 
+  // 🔥🔥🔥 ESTA ES LA PUTA CLAVE
+  Onion.onCleanup(()=>{
+    initialized = false;
+  });
+
 }
 
 /* =====================================================
-   LOAD (PANEL READY CONTROL)
+   LOAD
 ===================================================== */
 
 async function loadCuenta(){
@@ -212,10 +217,6 @@ function render(u){
 
   Onion.log("🔥 Render cuenta");
 
-  /* =========================
-     NOMBRE
-  ========================= */
-
   const name =
     u.name ||
     u.username ||
@@ -225,31 +226,14 @@ function render(u){
   set("#cuenta-nombre", name);
   set("#cuenta-nombre-main", name);
 
-  /* =========================
-     EMAIL
-  ========================= */
-
   set("#cuenta-email", safe(u.email));
 
-  /* =========================
-     2FA
-  ========================= */
-
   const twoFA = u.twofa_enabled === true;
-
   set("#cuenta-2fa", twoFA ? "Activado" : "Desactivado");
-
-  /* =========================
-     KPI
-  ========================= */
 
   set("#cuenta-plan", safe(u.plan || "Go Plan"));
   set("#cuenta-fecha", formatFecha(u.createdAt));
   set("#cuenta-id", safe(u.userId || u.id));
-
-  /* =========================
-     AVATAR
-  ========================= */
 
   setAttr("#cuenta-avatar", "src", avatar(u));
 

@@ -57,7 +57,7 @@
   };
 
   /* =========================
-     LOAD STYLE
+     LOAD STYLE (🔥 FIX CSS)
   ========================= */
 
   Onion.loadStyle = function(href){
@@ -66,9 +66,19 @@
       const finalHref = normalizeUrl(href);
       if(!finalHref) return resolve();
 
+      // 🔥 limpiar estilos anteriores de página
+      document
+        .querySelectorAll('link[data-onion-page-style]')
+        .forEach(l=>{
+          try{ l.remove(); }catch{}
+        });
+
       const link = document.createElement("link");
       link.rel = "stylesheet";
       link.href = finalHref + "?v=" + Date.now();
+
+      // 🔥 marcar como estilo de página
+      link.setAttribute("data-onion-page-style", "true");
 
       link.onload = resolve;
       link.onerror = resolve;
@@ -157,7 +167,7 @@
         await Onion.loadScript(route.script);
       }
 
-      // 🔥 EVENTO GLOBAL DE RUTA (CLAVE)
+      // 🔥 EVENTO GLOBAL DE RUTA
       window.dispatchEvent(new CustomEvent("onion:route-change", {
         detail: location.pathname
       }));

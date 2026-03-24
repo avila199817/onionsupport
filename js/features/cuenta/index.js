@@ -2,18 +2,22 @@
 
 "use strict";
 
-const Onion = window.Onion;
+/* =====================================================
+   SINGLETON
+===================================================== */
 
-if(!Onion){
-  console.error("💥 Onion no disponible (cuenta)");
-  return;
-}
+if(window.__onionCuentaLoaded) return;
+window.__onionCuentaLoaded = true;
+
+/* =====================================================
+   STATE
+===================================================== */
 
 let initialized = false;
 
-/* =========================
+/* =====================================================
    ROOT / DOM
-========================= */
+===================================================== */
 
 function getRoot(){
   return document.querySelector(".panel-content.cuenta");
@@ -25,60 +29,149 @@ function $(selector){
 
 function set(selector, value){
   const el = $(selector);
-  if(el) el.textContent = value;
+  if(el) el.textContent = value ?? "--";
 }
 
-/* =========================
-   INIT (SPA SAFE)
-========================= */
+function setAttr(selector, attr, value){
+  const el = $(selector);
+  if(el) el.setAttribute(attr, value);
+}
 
-function init(){
+/* =====================================================
+   HELPERS
+===================================================== */
+
+function safe(v){
+  return v && String(v).trim() !== "" ? v : "--";
+}
+
+function formatFecha(f){
+  if(!f) return "--";
+
+  try{
+    return new Date(f).toLocaleDateString("es-ES");
+  }catch{
+    return "--";
+  }
+}
+
+function avatar(u){
+
+  const fallback = "/media/img/Usuario.png";
+
+  if(!u) return fallback;
+
+  let src = u.avatar;
+
+  if(!src || typeof src !== "string") return fallback;
+
+  if(src.startsWith("http")) return src;
+
+  return Onion.config.API.replace("/api","") + src;
+
+}
+
+/* =====================================================
+   ROUTE CHECK
+===================================================== */
+
+function isCuentaRoute(path){
+  return path === "/cuenta" || path.startsWith("/cuenta/");
+}
+
+/* =====================================================
+   BOOT (SPA)
+===================================================== */
+
+function boot(){
+
+  if(!window.Onion){
+    return setTimeout(boot, 50);
+  }
+
+  run();
+
+  window.addEventListener("onion:route-change", (e)=>{
+    if(isCuentaRoute(e.detail)){
+      run();
+    }
+  });
+
+}
+
+boot();
+
+/* =====================================================
+   RUN (CLEANUP)
+===================================================== */
+
+function run(){
+
+  Onion.cleanupAll();
+
+  initialized = false;
+
+  requestAnimationFrame(()=>{
+    safeInit();
+  });
+
+}
+
+/* =====================================================
+   SAFE INIT
+===================================================== */
+
+function safeInit(){
 
   const root = getRoot();
+
   if(!root) return;
 
   if(initialized) return;
 
   if(!Onion.state?.user){
-    return setTimeout(init, 100);
+    return setTimeout(safeInit, 100);
   }
 
   initialized = true;
 
-  Onion.log("👤 Cuenta init");
-
-  loadCuenta();
-
-  // 🔥 cleanup SPA
-  Onion.onCleanup(()=>{
-    initialized = false;
-  });
+  init();
 
 }
 
-init();
+/* =====================================================
+   INIT
+===================================================== */
 
-/* =========================
-   LOAD (🔥 PANEL READY)
-========================= */
+function init(){
+
+  Onion.log("👤 CUENTA INIT OK");
+
+  loadCuenta();
+
+}
+
+/* =====================================================
+   LOAD (PANEL READY CONTROL)
+===================================================== */
 
 async function loadCuenta(){
 
   const panel = getRoot();
 
   if(panel){
-    panel.classList.remove("ready"); // 🔥 ocultar UI
+    panel.classList.remove("ready");
   }
 
   try{
 
-    const user = Onion.state.user;
+    const userState = Onion.state.user;
 
-    if(!user?.userId && !user?.id){
+    const id = userState.userId || userState.id;
+
+    if(!id){
       throw new Error("UserId no disponible");
     }
-
-    const id = user.userId || user.id;
 
     const res = await Onion.fetch(
       Onion.config.API + "/users/" + id
@@ -92,27 +185,25 @@ async function loadCuenta(){
 
     render(u);
 
-    // 🔥 mostrar SOLO cuando ya hay datos
     requestAnimationFrame(()=>{
       panel?.classList.add("ready");
     });
 
-  }catch(e){
+  }catch(err){
 
-    Onion.error("💥 CUENTA ERROR:", e);
+    console.error("💥 CUENTA ERROR:", err);
 
     fallback();
 
-    // 🔥 incluso en error mostramos
     panel?.classList.add("ready");
 
   }
 
 }
 
-/* =========================
+/* =====================================================
    RENDER
-========================= */
+===================================================== */
 
 function render(u){
 
@@ -122,15 +213,7 @@ function render(u){
   Onion.log("🔥 Render cuenta");
 
   /* =========================
-     KPI
-  ========================= */
-
-  set("#cuenta-plan", u.plan || "Go Plan");
-  set("#cuenta-email", u.email || "--");
-  set("#cuenta-fecha", formatFecha(u.createdAt));
-
-  /* =========================
-     PERFIL
+     NOMBRE
   ========================= */
 
   const name =
@@ -140,101 +223,56 @@ function render(u){
     "Usuario";
 
   set("#cuenta-nombre", name);
-  set("#cuenta-rol", (u.role || "user").toUpperCase());
-  set("#cuenta-id", "ID: " + (u.userId || u.id || "--"));
+  set("#cuenta-nombre-main", name);
 
   /* =========================
-     SUMMARY
+     EMAIL
   ========================= */
 
-  setSummary(u);
+  set("#cuenta-email", safe(u.email));
 
   /* =========================
-     ESTADO
+     2FA
   ========================= */
-
-  renderEstado(u);
-
-}
-
-/* =========================
-   ESTADO
-========================= */
-
-function renderEstado(u){
-
-  const root = getRoot();
-  if(!root) return;
-
-  const list = root.querySelector(".alerts .alert-list");
-  if(!list) return;
 
   const twoFA = u.twofa_enabled === true;
-  const emailOK = u.emailVerified === true;
-  const active = u.active !== false;
 
-  list.innerHTML = `
-    <div class="alert-item ${active ? "info" : "warn"}">
-      Cuenta ${active ? "operativa" : "desactivada"}
-    </div>
+  set("#cuenta-2fa", twoFA ? "Activado" : "Desactivado");
 
-    <div class="alert-item ${twoFA ? "info" : "warn"}">
-      2FA: ${twoFA ? "Activado" : "No activado"}
-    </div>
+  /* =========================
+     KPI
+  ========================= */
 
-    <div class="alert-item ${emailOK ? "info" : "warn"}">
-      Email: ${emailOK ? "Verificado" : "No verificado"}
-    </div>
-  `;
+  set("#cuenta-plan", safe(u.plan || "Go Plan"));
+  set("#cuenta-fecha", formatFecha(u.createdAt));
+  set("#cuenta-id", safe(u.userId || u.id));
 
-}
+  /* =========================
+     AVATAR
+  ========================= */
 
-/* =========================
-   SUMMARY
-========================= */
-
-function setSummary(u){
-
-  const root = getRoot();
-  if(!root) return;
-
-  const items = root.querySelectorAll(".summary-value");
-  if(!items.length) return;
-
-  items[0].textContent = u.totalTickets ?? "0";
-  items[1].textContent = u.totalFacturas ?? "0";
-  items[2].textContent = u.activeSessions ?? "1";
+  setAttr("#cuenta-avatar", "src", avatar(u));
 
 }
 
-/* =========================
+/* =====================================================
    FALLBACK
-========================= */
+===================================================== */
 
 function fallback(){
 
-  set("#cuenta-plan", "Go Plan");
-  set("#cuenta-email", "--");
-  set("#cuenta-fecha", "--");
-
   set("#cuenta-nombre", "Usuario");
-  set("#cuenta-rol", "USER");
-  set("#cuenta-id", "ID: --");
+  set("#cuenta-nombre-main", "Usuario");
 
-}
+  set("#cuenta-email", "--");
+  set("#cuenta-2fa", "Desactivado");
 
-/* =========================
-   HELPERS
-========================= */
+  set("#cuenta-plan", "Go Plan");
+  set("#cuenta-fecha", "--");
+  set("#cuenta-id", "--");
 
-function formatFecha(f){
-  if(!f) return "--";
+  setAttr("#cuenta-avatar", "src", "/media/img/Usuario.png");
 
-  try{
-    return new Date(f).toLocaleDateString("es-ES");
-  }catch{
-    return "--";
-  }
 }
 
 })();

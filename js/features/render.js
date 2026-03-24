@@ -28,35 +28,6 @@
   }
 
   /* =========================
-     THEME (🔥 CLAVE)
-  ========================= */
-
-  function applyThemeSafe(){
-
-    try{
-
-      const user = Onion.state.user;
-
-      let isDark = true;
-
-      if(user && typeof user.darkMode === "boolean"){
-        isDark = user.darkMode;
-      }else{
-        const saved = localStorage.getItem("darkMode");
-        if(saved === "false") isDark = false;
-      }
-
-      if(isDark){
-        document.documentElement.removeAttribute("data-theme");
-      }else{
-        document.documentElement.setAttribute("data-theme","light");
-      }
-
-    }catch{}
-
-  }
-
-  /* =========================
      LOAD SCRIPT
   ========================= */
 
@@ -180,9 +151,6 @@
         document.title = "Onion Support · " + route.title;
       }
 
-      // 🔥 aplicar tema ANTES de todo
-      applyThemeSafe();
-
       const html = await Onion.fetchHTML(route.page);
 
       if(currentRenderId !== Onion.state.renderId) return;
@@ -191,29 +159,36 @@
 
       content.classList.remove("ready");
 
+      // 🔥 limpieza total
       Onion.events.clear?.();
       Onion.runCleanup?.();
 
+      // 🔥 montar contenido
       Onion.swapContent(content);
 
+      // 🔥 cargar estilos
       if(route.style){
         await Onion.loadStyle(route.style);
       }
 
+      // 🔥 cargar scripts
       if(route.script){
         await Onion.loadScript(route.script);
       }
 
       if(currentRenderId !== Onion.state.renderId) return;
 
+      // 🔥 frame sync (evita glitch visual)
       await new Promise(r => requestAnimationFrame(r));
 
       content.classList.add("ready");
 
+      // 🔥 evento SPA
       window.dispatchEvent(new CustomEvent("onion:route-change", {
         detail: location.pathname
       }));
 
+      // 🔥 UI refresh
       Onion.ui.refresh();
       Onion.ui.initSearch?.();
 

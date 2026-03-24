@@ -1896,49 +1896,13 @@ mark{
 
 
 
-/* =========================
-   GLOBAL LOADER (TOP BAR)
-========================= */
-
-#global-loader{
-  position:fixed;
-  top:0;
-  left:0;
-
-  width:0%;
-  height:4px;
-
-  background:linear-gradient(90deg, var(--accent), var(--success));
-  box-shadow:0 0 8px color-mix(in srgb, var(--accent), transparent 60%);
-
-  z-index:999999;
-
-  opacity:0;
-  pointer-events:none;
-
-  transition:
-    width .3s ease,
-    opacity .2s ease;
-}
-
-#global-loader.active{
-  opacity:1;
-}
-
-
-/* =========================
-   PANEL LOAD (ANTI GLITCH PRO)
-========================= */
-
-/* estado base → oculto TOTAL */
 .panel-content{
   opacity:0;
-  visibility:hidden;          /* 🔥 evita flash visual */
+  visibility:hidden;
   pointer-events:none;
-  transform:translateY(4px);  /* 🔥 micro animación */
+  transform:translateY(4px);
 }
 
-/* cuando está listo */
 .panel-content.ready{
   opacity:1;
   visibility:visible;
@@ -1949,8 +1913,6 @@ mark{
     opacity .18s ease,
     transform .18s ease;
 }
-
-
 
 
 

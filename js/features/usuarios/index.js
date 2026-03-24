@@ -94,24 +94,37 @@ function boot(){
 boot();
 
 /* =====================================================
-   RUN
+   RUN (FIX SPA)
 ===================================================== */
 
 function run(){
 
+  // 🔥 reset total SIEMPRE
   initialized = false;
+  tbody = null;
 
-  if(document.readyState === "loading"){
-    document.addEventListener("DOMContentLoaded", safeInit, { once:true });
-  }else{
+  // esperar a que el DOM esté montado
+  requestAnimationFrame(() => {
     safeInit();
-  }
+  });
 
 }
 
+/* =====================================================
+   SAFE INIT (FIX DOM DINÁMICO)
+===================================================== */
+
 function safeInit(){
 
-  if(initialized) return;
+  const el = qs("usuarios-body");
+
+  // si no existe, salir
+  if(!el) return;
+
+  // si ya está inicializado y es el mismo nodo → no hacer nada
+  if(initialized && tbody === el) return;
+
+  tbody = el;
   initialized = true;
 
   init();
@@ -252,14 +265,17 @@ function initFilters(){
 }
 
 /* =====================================================
-   EVENTS
+   EVENTS (FIX LISTENERS)
 ===================================================== */
 
 function initTableActions(){
 
   if(!tbody) return;
 
-  tbody.onclick = null;
+  // 🔥 limpiar listeners antiguos
+  const newTbody = tbody.cloneNode(true);
+  tbody.parentNode.replaceChild(newTbody, tbody);
+  tbody = newTbody;
 
   tbody.addEventListener("click",(e)=>{
 
@@ -317,15 +333,6 @@ async function loadUsers(){
 ===================================================== */
 
 function init(){
-
-  tbody = qs("usuarios-body");
-
-  if(!tbody){
-    console.warn("❌ usuarios-body no encontrado");
-    return;
-  }
-
-  tbody.innerHTML = "";
 
   console.log("✅ USUARIOS INIT OK");
 

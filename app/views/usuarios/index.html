@@ -2,7 +2,7 @@
 
   <div class="container">
 
-    <!-- HEADER VACÍO (ESPACIADO COMO HOME) -->
+    <!-- HEADER VACÍO -->
     <div class="dashboard-header"></div>
 
     <!-- =========================
@@ -12,10 +12,12 @@
 
       <div class="panel-block table-block">
 
-        <div class="section-title">Listado de usuarios</div>
+        <div class="section-title">Usuarios</div>
 
-        <!-- FILTROS -->
-        <div class="filters-row" style="margin-bottom:16px;">
+        <!-- =========================
+             FILTROS
+        ========================= -->
+        <div class="filters-row">
 
           <input 
             type="text"
@@ -32,15 +34,17 @@
 
         </div>
 
-        <!-- TABLA -->
+        <!-- =========================
+             TABLA
+        ========================= -->
         <div class="table-container">
 
-          <table class="usuarios-table">
+          <table>
 
             <thead>
               <tr>
                 <th>ID</th>
-                <th>Nombre</th>
+                <th>Usuario</th>
                 <th>Email</th>
                 <th>Rol</th>
                 <th>Estado</th>
@@ -50,7 +54,7 @@
             </thead>
 
             <tbody id="usuarios-body">
-              <tr class="table-loading">
+              <tr class="loading">
                 <td colspan="7">Cargando usuarios...</td>
               </tr>
             </tbody>

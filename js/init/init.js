@@ -1,19 +1,10 @@
 Onion.init = async function(){
 
-  // 🔥 LOCK REAL
-  if(Onion.state._initializing){
-    Onion.warn?.("⚠️ INIT en curso");
-    return;
-  }
-
-  if(Onion.state.ready){
-    Onion.warn?.("⚠️ INIT ya ejecutado");
-    return;
-  }
+  // LOCK
+  if(Onion.state._initializing) return;
+  if(Onion.state.ready) return;
 
   Onion.state._initializing = true;
-
-  Onion.log?.("🚀 INIT START");
 
   try{
 
@@ -25,7 +16,7 @@ Onion.init = async function(){
 
     try{
 
-      const res = await Onion.fetch?.(Onion.config.API + "/auth/me");
+      const res = await Onion.fetch(Onion.config.API + "/auth/me");
 
       user = res?.user || res || null;
 
@@ -44,23 +35,14 @@ Onion.init = async function(){
         msg.includes("NO_TOKEN") ||
         msg.includes("NO_USER")
       ){
-        Onion.warn?.("🔐 No autenticado → redirect");
-
         Onion.clearUser?.();
         Onion.auth?.redirectLogin?.();
-
         return;
       }
 
       throw e;
 
     }
-
-    /* =========================
-       UI INIT
-    ========================= */
-
-    Onion.ui?.init?.();
 
     /* =========================
        FIRST RENDER
@@ -78,11 +60,9 @@ Onion.init = async function(){
       user: Onion.state.user
     });
 
-    Onion.log?.("✅ INIT READY");
-
   }catch(e){
 
-    Onion.error?.("💥 INIT ERROR:", e);
+    console.error("💥 INIT ERROR:", e);
 
     const app = document.getElementById("app-content");
 
@@ -98,7 +78,6 @@ Onion.init = async function(){
 
   }finally{
 
-    // 🔥 liberar lock SIEMPRE
     Onion.state._initializing = false;
 
     Onion.state.navigating = false;

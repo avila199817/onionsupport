@@ -130,20 +130,15 @@
   };
 
   /* =========================
-     EVENTS GLOBAL (DELEGACIÓN)
+     EVENTOS GLOBALES (SOLO LOGOUT)
   ========================= */
 
   function bindGlobalEvents(){
 
-    // evitar doble binding
     if(initialized) return;
 
     Onion.cleanupEvent(document, "click", async (e)=>{
 
-      const sidebar = document.querySelector(".sidebar");
-      const dropdown = document.querySelector("#userDropdown");
-
-      /* LOGOUT */
       const logout = e.target.closest("#logoutBtn");
 
       if(logout){
@@ -159,51 +154,7 @@
 
         Onion.auth.resetSession();
         Onion.auth.redirectLogin();
-        return;
       }
-
-      /* SIDEBAR TOGGLE */
-      const toggleBtn = e.target.closest("#toggleSidebar");
-
-      if(toggleBtn && sidebar){
-
-        const collapsed = sidebar.classList.contains("collapsed");
-
-        sidebar.classList.toggle("collapsed");
-        localStorage.setItem("sidebar-collapsed", String(!collapsed));
-
-        dropdown?.classList.remove("active");
-        return;
-      }
-
-      /* USER DROPDOWN */
-      const userToggle = e.target.closest("#userToggle");
-
-      if(userToggle && sidebar && dropdown){
-
-        const collapsed = sidebar.classList.contains("collapsed");
-
-        if(collapsed){
-
-          sidebar.classList.remove("collapsed");
-          localStorage.setItem("sidebar-collapsed", "false");
-
-          setTimeout(()=> dropdown.classList.add("active"), 120);
-
-        }else{
-          dropdown.classList.toggle("active");
-        }
-
-        return;
-      }
-
-      /* CLICK DENTRO DEL DROPDOWN */
-      if(e.target.closest("#userDropdown")){
-        return;
-      }
-
-      /* CLICK FUERA → CERRAR */
-      dropdown?.classList.remove("active");
 
     });
 
@@ -216,6 +167,11 @@
   Onion.ui.init = function(){
 
     bindGlobalEvents();
+
+    // 🔥 módulos separados (CLAVE)
+    Onion.ui.sidebar?.init?.();
+    Onion.ui.dropdown?.init?.();
+    Onion.ui.search?.init?.();
 
     Onion.ui.refresh();
 

@@ -94,15 +94,16 @@ function boot(){
 boot();
 
 /* =====================================================
-   RUN (CON CLEANUP)
+   RUN (🔥 CLAVE)
 ===================================================== */
 
 function run(){
 
-  Onion.cleanupAll(); // 🔥 limpia listeners anteriores
+  Onion.cleanupAll();
 
   initialized = false;
   tbody = null;
+  usersCache = [];
 
   requestAnimationFrame(() => {
     safeInit();
@@ -120,7 +121,12 @@ function safeInit(){
 
   if(!el) return;
 
-  if(initialized && tbody === el) return;
+  // 🔥 si cambia el DOM, reinit SIEMPRE
+  if(tbody !== el){
+    initialized = false;
+  }
+
+  if(initialized) return;
 
   tbody = el;
   initialized = true;
@@ -227,7 +233,7 @@ function renderState(message,cls="loading"){
 }
 
 /* =====================================================
-   FILTROS (CON CLEANUP)
+   FILTROS
 ===================================================== */
 
 function initFilters(){
@@ -299,7 +305,7 @@ function initTableActions(){
 }
 
 /* =====================================================
-   LOAD (🔥 PANEL READY CONTROL)
+   LOAD
 ===================================================== */
 
 async function loadUsers(){
@@ -307,7 +313,7 @@ async function loadUsers(){
   const panel = document.querySelector(".panel-content.usuarios");
 
   if(panel){
-    panel.classList.remove("ready"); // 🔥 ocultar UI
+    panel.classList.remove("ready");
   }
 
   renderState("Cargando usuarios…");
@@ -316,13 +322,10 @@ async function loadUsers(){
 
     const users = await API.getUsers();
 
-    console.log("📡 USERS:", users);
-
     usersCache = users;
 
     renderUsers(users);
 
-    // 🔥 mostrar SOLO cuando ya hay datos
     requestAnimationFrame(()=>{
       panel?.classList.add("ready");
     });
@@ -336,7 +339,6 @@ async function loadUsers(){
 
     window.toast?.error?.("Error cargando usuarios");
 
-    // 🔥 incluso en error mostramos panel
     panel?.classList.add("ready");
 
   }
@@ -354,6 +356,13 @@ function init(){
   initFilters();
   initTableActions();
   loadUsers();
+
+  // 🔥🔥🔥 CLAVE TOTAL
+  Onion.onCleanup(()=>{
+    initialized = false;
+    tbody = null;
+    usersCache = [];
+  });
 
 }
 

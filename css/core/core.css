@@ -1941,21 +1941,19 @@ mark{
 }
 
 /* =========================
-   PANEL LOAD VISIBILITY (PRO)
+   PANEL LOAD (BLANCO PRO)
 ========================= */
 
 .panel-content{
   opacity:0;
-  transition:opacity .2s ease;
+  pointer-events:none;
 }
 
 .panel-content.ready{
   opacity:1;
+  pointer-events:auto;
+  transition:opacity .2s ease;
 }
-
-
-
-
 
 
 

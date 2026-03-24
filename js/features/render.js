@@ -37,6 +37,7 @@
       const finalSrc = normalizeUrl(src);
       if(!finalSrc) return resolve();
 
+      // 🔥 eliminar scripts anteriores
       document.querySelectorAll("script[data-onion-page]").forEach(s=>{
         try{ s.remove(); }catch{}
       });
@@ -65,6 +66,7 @@
       const finalHref = normalizeUrl(href);
       if(!finalHref) return resolve();
 
+      // 🔥 limpiar CSS de página anterior
       document
         .querySelectorAll('link[data-onion-page-style]')
         .forEach(l=>{
@@ -134,12 +136,12 @@
   };
 
   /* =========================
-     RENDER (🔥 PROTECTED)
+     RENDER (🔥 FINAL PRO)
   ========================= */
 
   Onion.render = async function(){
 
-    // 🔥 ID único de render
+    // 🔥 control de renders concurrentes
     const currentRenderId = ++Onion.state.renderId;
 
     try{
@@ -154,17 +156,20 @@
       // HTML
       const html = await Onion.fetchHTML(route.page);
 
-      // ❌ si ya hay otro render más nuevo → cancelar
+      // ❌ cancelar si hay render más nuevo
       if(currentRenderId !== Onion.state.renderId){
         return;
       }
 
       const content = extractContent(html);
 
+      // 🔥 limpiar eventos antes
+      Onion.events.clear?.();
+
       // 🔥 limpiar vista anterior
       Onion.runCleanup?.();
 
-      // ❌ check otra vez antes de pintar
+      // ❌ check otra vez
       if(currentRenderId !== Onion.state.renderId){
         return;
       }
@@ -176,15 +181,17 @@
         await Onion.loadScript(route.script);
       }
 
-      // ❌ último check (por seguridad total)
+      // ❌ último check
       if(currentRenderId !== Onion.state.renderId){
         return;
       }
 
+      // evento global
       window.dispatchEvent(new CustomEvent("onion:route-change", {
         detail: location.pathname
       }));
 
+      // UI
       Onion.ui.refresh();
       Onion.ui.initSearch?.();
 

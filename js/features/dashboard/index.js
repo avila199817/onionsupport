@@ -43,25 +43,13 @@ function formatMoney(n){
   }).format(safe(n));
 }
 
-function timeAgo(date){
-  if(!date) return "Ahora";
-
-  const diff = Math.floor((Date.now() - new Date(date)) / 1000);
-
-  if(diff < 60) return "Hace " + diff + "s";
-  if(diff < 3600) return "Hace " + Math.floor(diff/60) + " min";
-  if(diff < 86400) return "Hace " + Math.floor(diff/3600) + " h";
-
-  return "Hace " + Math.floor(diff/86400) + " d";
-}
-
 function setText(id, value){
   const el = $(id);
   if(el) el.textContent = value;
 }
 
 /* =========================
-   MES DINÁMICO
+   MES
 ========================= */
 
 function setMonthLabel(){
@@ -93,45 +81,57 @@ async function loadDashboard(){
 
     const k = data.kpis || data || {};
 
-    /* ===== USUARIOS ===== */
+    /* =========================
+       USUARIOS
+    ========================= */
+
     setText("home-usuarios", safe(pick(
-      k.usuariosActivos,
       k.usuarios,
-      k.usersActive
+      k.usuariosActivos
     )));
 
-    setText("home-usuarios-inactivos", safe(pick(
-      k.usuariosInactivos,
-      k.usersInactive
-    )));
+    setText("home-usuarios-inactivos", safe(
+      k.usuariosInactivos
+    ));
 
-    /* ===== CLIENTES ===== */
+    /* =========================
+       CLIENTES
+    ========================= */
+
     setText("home-clientes", safe(pick(
-      k.clientesActivos,
-      k.clientes
+      k.clientes,
+      k.clientesActivos
     )));
 
-    setText("home-clientes-inactivos", safe(pick(
+    setText("home-clientes-inactivos", safe(
       k.clientesInactivos
-    )));
+    ));
 
-    /* ===== FACTURACIÓN ===== */
-    setText("home-facturas", formatMoney(pick(
-      k.facturacionTotal,
-      k.facturadoTotal
-    )));
+    /* =========================
+       FACTURACIÓN (CORRECTA)
+    ========================= */
 
-    setText("home-facturas-pendiente", formatMoney(pick(
-      k.facturacionPendiente,
-      k.pendienteFacturar
-    )));
+    const totalPagado = pick(
+      k.facturacionPagada,
+      k.facturacionTotal
+    );
 
-    setText("home-facturacion-mes", formatMoney(pick(
-      k.facturacionMensual,
-      k.facturacionMes
-    )));
+    const pendiente = pick(
+      k.facturacionPendiente
+    );
 
-    /* ===== HOY ===== */
+    const mensual = pick(
+      k.facturacionMensual
+    );
+
+    setText("home-facturas", formatMoney(totalPagado));
+    setText("home-facturas-pendiente", formatMoney(pendiente));
+    setText("home-facturacion-mes", formatMoney(mensual));
+
+    /* =========================
+       HOY
+    ========================= */
+
     setText("tickets-hoy", safe(k.ticketsToday));
     setText("resueltos-hoy", safe(k.resueltosToday));
     setText("pendientes-hoy", safe(k.pendientesToday));
@@ -163,6 +163,7 @@ function renderActivity(items){
   items.slice(0,8).forEach(i => {
 
     const el = document.createElement("div");
+
     el.className = "activity-item";
 
     el.innerHTML = `
@@ -196,47 +197,6 @@ async function loadSystem(){
     setText("status-db", "DB · " + (data?.db?.status || "--"));
     setText("status-uptime", "Uptime · " + (data?.uptime || "--"));
 
-    const cpu = $("cpu-usage");
-    if(cpu && data?.system?.cpu){
-      cpu.textContent =
-        "CPU: " + data.system.cpu.usage + "% · " +
-        data.system.cpu.cores + " cores · load " +
-        data.system.cpu.load;
-    }
-
-    const ram = $("ram-usage");
-    if(ram && data?.system?.ram){
-      ram.textContent =
-        "RAM: " + data.system.ram.usage + "% · " +
-        data.system.ram.usedMB + "MB / " +
-        data.system.ram.totalMB + "MB";
-    }
-
-    const disk = $("disk-usage");
-    if(disk && data?.system?.disk){
-      disk.textContent =
-        "Disco: " + data.system.disk.percent + "% · " +
-        data.system.disk.used + "GB / " +
-        data.system.disk.total + "GB";
-    }
-
-    const warn = $("system-warning");
-
-    if(warn){
-
-      const cpuVal = data?.system?.cpu?.usage;
-      const ramVal = data?.system?.ram?.usage;
-      const diskVal = data?.system?.disk?.percent;
-
-      const high =
-        cpuVal > 85 ||
-        ramVal > 85 ||
-        diskVal > 90 ||
-        data?.status === "degraded";
-
-      warn.style.display = high ? "block" : "none";
-    }
-
   }catch(e){
     console.error("💥 HEALTH FAIL:", e);
   }
@@ -252,8 +212,6 @@ async function init(){
   const root = getRoot();
   if(!root) return;
 
-  Onion.log("📊 Dashboard PRO init");
-
   setMonthLabel();
 
   await loadDashboard();
@@ -263,13 +221,6 @@ async function init(){
     loadDashboard();
     loadSystem();
   }, 60000);
-
-  Onion.onCleanup(()=>{
-    if(interval){
-      clearInterval(interval);
-      interval = null;
-    }
-  });
 
 }
 
@@ -282,6 +233,18 @@ init();
 /* =========================
    HELPERS
 ========================= */
+
+function timeAgo(date){
+  if(!date) return "Ahora";
+
+  const diff = Math.floor((Date.now() - new Date(date)) / 1000);
+
+  if(diff < 60) return "Hace " + diff + "s";
+  if(diff < 3600) return "Hace " + Math.floor(diff/60) + " min";
+  if(diff < 86400) return "Hace " + Math.floor(diff/3600) + " h";
+
+  return "Hace " + Math.floor(diff/86400) + " d";
+}
 
 function escapeHTML(str){
   return String(str)

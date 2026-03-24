@@ -1,11 +1,5 @@
 "use strict";
 
-/* =========================
-   AUTH (ONION PRO FIXED)
-   - Sin excepciones innecesarias
-   - Sin dobles redirects
-========================= */
-
 (function(){
 
   if(!window.Onion){
@@ -24,16 +18,13 @@
   function safeSet(key, value){
     try{
       localStorage.setItem(key, value);
-    }catch{
-      Onion.warn("⚠️ localStorage bloqueado (set)");
-    }
+    }catch{}
   }
 
   function safeGet(key){
     try{
       return localStorage.getItem(key);
     }catch{
-      Onion.warn("⚠️ localStorage bloqueado (get)");
       return null;
     }
   }
@@ -41,9 +32,7 @@
   function safeRemove(key){
     try{
       localStorage.removeItem(key);
-    }catch{
-      Onion.warn("⚠️ localStorage bloqueado (remove)");
-    }
+    }catch{}
   }
 
   /* =========================
@@ -51,26 +40,18 @@
   ========================= */
 
   Onion.auth.getToken = function(){
-    return safeGet("onion_token"); // 🔥 ya no lanza error
+    return safeGet("onion_token");
   };
 
   Onion.auth.setToken = function(token){
 
-    if(!token){
-      Onion.warn("Intento de guardar token vacío");
-      return;
-    }
+    if(!token) return;
 
     safeSet("onion_token", token);
-
-    Onion.log("🔐 Token guardado");
   };
 
   Onion.auth.clearToken = function(){
-
     safeRemove("onion_token");
-
-    Onion.log("🧹 Token eliminado");
   };
 
   /* =========================
@@ -94,24 +75,20 @@
         });
       }catch{}
 
-      Onion.log("🧹 Sesión limpiada");
-
     }catch(e){
-      Onion.error("💥 resetSession error:", e);
+      console.error("💥 resetSession error:", e);
     }
 
   };
 
   /* =========================
-     REDIRECT LOGIN (SAFE)
+     REDIRECT LOGIN
   ========================= */
 
   Onion.auth.redirectLogin = function(){
 
     if(redirecting) return;
     redirecting = true;
-
-    Onion.warn("🔐 Redirigiendo a login");
 
     const path = window.location.pathname;
 
@@ -132,8 +109,6 @@
     const token = Onion.auth.getToken();
 
     if(token) return true;
-
-    Onion.warn("🔐 Acceso bloqueado");
 
     Onion.auth.redirectLogin();
     return false;

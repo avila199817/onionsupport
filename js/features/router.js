@@ -47,6 +47,13 @@
       style: "/css/app/cuenta.css",
       script: "/js/features/cuenta/index.js",
       title: "Cuenta"
+    },
+     
+     "/usuarios": {
+         page: "/app/views/usuarios/index.html",
+         style: "/css/app/usuarios.css",
+         script: "/js/features/usuarios/index.js",
+         title: "Usuarios"
     }
 
   });

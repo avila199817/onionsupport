@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================
-   CLEANUP (ONION PRO FINAL CLEAN)
+   CLEANUP (ONION PRO FIXED)
 ========================= */
 
 (function(){
@@ -13,58 +13,56 @@
 
   const Onion = window.Onion;
 
-  // 🔥 asegurar state SIEMPRE
   Onion.state = Onion.state || {};
 
   /* =========================
-     BASE
+     STORAGE
   ========================= */
 
   if(!Array.isArray(Onion.state.cleanup)){
     Onion.state.cleanup = [];
   }
 
-  if(typeof Onion.onCleanup !== "function"){
-
-    Onion.onCleanup = function(fn){
-
-      if(typeof fn !== "function") return;
-
-      if(!Array.isArray(Onion.state.cleanup)){
-        Onion.state.cleanup = [];
-      }
-
-      if(Onion.state.cleanup.includes(fn)) return;
-
-      Onion.state.cleanup.push(fn);
-
-    };
-
+  if(!Array.isArray(Onion.state.globalEvents)){
+    Onion.state.globalEvents = [];
   }
 
-  if(typeof Onion.runCleanup !== "function"){
+  /* =========================
+     CORE CLEANUP
+  ========================= */
 
-    Onion.runCleanup = function(){
+  Onion.onCleanup = function(fn){
+    if(typeof fn !== "function") return;
+    Onion.state.cleanup.push(fn);
+  };
 
-      const list = Onion.state.cleanup;
+  Onion.runCleanup = function(){
 
-      if(!Array.isArray(list) || list.length === 0){
-        return;
+    const list = Onion.state.cleanup;
+
+    if(Array.isArray(list)){
+      for(const fn of list){
+        try{ fn(); }
+        catch(e){ console.error("Cleanup error:", e); }
       }
+    }
 
-      Onion.state.cleanup = [];
+    Onion.state.cleanup = [];
 
-      for(let i = 0; i < list.length; i++){
+    // 🔥 limpiar eventos globales también
+    if(Array.isArray(Onion.state.globalEvents)){
+
+      for(const ev of Onion.state.globalEvents){
         try{
-          list[i]();
-        }catch(e){
-          Onion.error?.("Cleanup error:", e);
-        }
+          ev.target.removeEventListener(ev.name, ev.handler, ev.options);
+        }catch(e){}
       }
 
-    };
+      Onion.state.globalEvents = [];
 
-  }
+    }
+
+  };
 
   /* =========================
      HELPERS
@@ -80,16 +78,9 @@
     Onion.onCleanup(()=> clearTimeout(id));
   };
 
-  Onion.cleanupEvent = function(target, name, handler, options){
-
-    if(!target || !name || !handler) return;
-
-    target.addEventListener(name, handler, options);
-
-    Onion.onCleanup(()=>{
-      target.removeEventListener(name, handler, options);
-    });
-
+  Onion.cleanupRAF = function(id){
+    if(!id) return;
+    Onion.onCleanup(()=> cancelAnimationFrame(id));
   };
 
   Onion.cleanupObserver = function(observer){
@@ -97,10 +88,52 @@
     Onion.onCleanup(()=> observer.disconnect());
   };
 
-  Onion.cleanupRAF = function(id){
-    if(!id) return;
-    Onion.onCleanup(()=> cancelAnimationFrame(id));
+  /* =========================
+     EVENTOS (🔥 FIX REAL)
+  ========================= */
+
+  Onion.cleanupEvent = function(target, name, handler, options){
+
+    if(!target || !name || !handler) return;
+
+    target.addEventListener(name, handler, options);
+
+    // guardar para cleanup total
+    Onion.state.globalEvents.push({
+      target,
+      name,
+      handler,
+      options
+    });
+
+    Onion.onCleanup(()=>{
+      target.removeEventListener(name, handler, options);
+    });
+
   };
+
+  /* =========================
+     GLOBAL EVENT (🔥 NUEVO)
+  ========================= */
+
+  Onion.onGlobalEvent = function(target, name, handler, options){
+
+    if(!target || !name || !handler) return;
+
+    target.addEventListener(name, handler, options);
+
+    Onion.state.globalEvents.push({
+      target,
+      name,
+      handler,
+      options
+    });
+
+  };
+
+  /* =========================
+     CLEAN ALL
+  ========================= */
 
   Onion.cleanupAll = function(){
     Onion.runCleanup();

@@ -6,13 +6,13 @@
   Onion.i18n = Onion.i18n || {};
   Onion.i18n.es = {
 
-    panel: "Panel",
-    incidencias: "Incidencias",
-    clientes: "Clientes",
-    cuenta: "Cuenta",
-    ajustes: "Ajustes",
-    buscar: "Buscar...",
-    cerrarSesion: "Cerrar sesión"
+    Panel: "Panel",
+    Incidencias: "Incidencias",
+    Clientes: "Clientes",
+    Cuenta: "Cuenta",
+    Ajustes: "Ajustes",
+    Buscar: "Buscar...",
+    CerrarSesion: "Cerrar sesión"
 
   };
 

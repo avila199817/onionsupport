@@ -14,10 +14,32 @@
 
         <div class="section-title">Facturas</div>
 
-        <!-- TABLA -->
+        <!-- =========================
+             FILTROS (OPCIONAL PERO PRO)
+        ========================= -->
+        <div class="filters-row">
+
+          <input 
+            type="text"
+            id="search-factura"
+            placeholder="Buscar factura..."
+            autocomplete="off"
+          >
+
+          <select id="filter-estado-factura">
+            <option value="">Estado</option>
+            <option value="pagada">Pagada</option>
+            <option value="pendiente">Pendiente</option>
+          </select>
+
+        </div>
+
+        <!-- =========================
+             TABLA
+        ========================= -->
         <div class="table-container">
 
-          <table class="facturas-table">
+          <table>
 
             <thead>
               <tr>
@@ -31,7 +53,7 @@
             </thead>
 
             <tbody id="facturas-body">
-              <tr class="table-loading">
+              <tr class="loading">
                 <td colspan="6">Cargando facturas...</td>
               </tr>
             </tbody>

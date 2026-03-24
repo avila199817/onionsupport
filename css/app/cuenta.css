@@ -1,5 +1,5 @@
 /* =========================
-   CUENTA (CLON HOME)
+   CUENTA (BASE)
 ========================= */
 
 .cuenta{
@@ -9,11 +9,13 @@
 .cuenta .container{
   padding-top:0;
   padding-bottom:50px;
+  max-width:1000px;
+  margin:0 auto;
 }
 
 
 /* =========================
-   HEADER (MISMO HOME)
+   HEADER
 ========================= */
 
 .cuenta .dashboard-header{
@@ -21,7 +23,7 @@
   align-items:center;
 
   height:var(--topbar-height);
-  margin-bottom:40px;
+  margin-bottom:30px;
   padding-top:15px;
 }
 
@@ -38,11 +40,9 @@
 
 .cuenta .page-title{
   margin:0;
-
   font-size:24px;
   font-weight:600;
   letter-spacing:-0.3px;
-
   line-height:1.1;
   color:var(--text);
 }
@@ -55,18 +55,76 @@
 
 
 /* =========================
-   GRID CARDS (CLON)
+   AVATAR SECTION (🔥 PRO)
+========================= */
+
+.cuenta-avatar-section{
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  margin:30px 0 10px 0;
+}
+
+.avatar-wrapper{
+  width:130px;
+  height:130px;
+  border-radius:50%;
+  overflow:hidden;
+
+  border:2px solid var(--card-border);
+  background:var(--card-bg);
+
+  box-shadow:0 10px 30px rgba(0,0,0,0.25);
+  transition:.3s ease;
+}
+
+.avatar-wrapper:hover{
+  transform:scale(1.05);
+  box-shadow:0 15px 40px rgba(0,0,0,0.35);
+}
+
+.avatar-wrapper img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+}
+
+
+/* =========================
+   NOMBRE CENTRADO
+========================= */
+
+.cuenta-main-name{
+  text-align:center;
+  margin-top:12px;
+
+  font-size:22px;
+  font-weight:600;
+  color:var(--text);
+}
+
+.cuenta-sub{
+  text-align:center;
+  font-size:13px;
+  color:var(--dim);
+  margin-bottom:20px;
+}
+
+
+/* =========================
+   GRID CARDS
 ========================= */
 
 .cuenta .grid-cards{
   display:grid;
   grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
-  gap:22px;
+  gap:18px;
+  margin-top:15px;
 }
 
 
 /* =========================
-   CARDS (CLON EXACTO)
+   CARDS
 ========================= */
 
 .cuenta .card{
@@ -78,6 +136,10 @@
 
   box-shadow:var(--card-shadow);
   transition:.25s ease;
+
+  display:flex;
+  flex-direction:column;
+  gap:10px;
 }
 
 .cuenta .card:hover{
@@ -91,14 +153,58 @@
 }
 
 .cuenta .card-value{
-  display:block;
-  margin-top:12px;
-
-  font-size:30px;
+  font-size:18px;
   font-weight:600;
-
   color:var(--text);
 }
+
+
+/* =========================
+   ROW (BOTÓN + TEXTO)
+========================= */
+
+.card-row{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+}
+
+
+/* =========================
+   BOTONES (🔥 CLAVE)
+========================= */
+
+.btn-edit{
+  padding:6px 14px;
+
+  border-radius:8px;
+  border:1px solid var(--card-border);
+
+  background:transparent;
+  color:var(--text);
+
+  font-size:12px;
+  font-weight:500;
+
+  cursor:pointer;
+  transition:.2s ease;
+}
+
+.btn-edit:hover{
+  background:var(--card-bg);
+  transform:translateY(-1px);
+  box-shadow:0 4px 10px rgba(0,0,0,0.2);
+}
+
+.btn-edit:active{
+  transform:scale(0.97);
+}
+
+
+/* =========================
+   META / EXTRA
+========================= */
 
 .cuenta .card-meta{
   display:flex;
@@ -120,14 +226,13 @@
 .cuenta .dashboard-grid{
   display:grid;
   grid-template-columns:repeat(auto-fit, minmax(300px, 1fr));
-
   gap:22px;
   margin-top:30px;
 }
 
 
 /* =========================
-   BLOCKS (CLON)
+   BLOCKS
 ========================= */
 
 .cuenta .panel-block{
@@ -148,7 +253,7 @@
 
 
 /* =========================
-   DETALLE (PERFIL)
+   DETALLE
 ========================= */
 
 .cuenta .detalle-content{
@@ -167,7 +272,7 @@
 
 
 /* =========================
-   SUMMARY (CLON HOME)
+   SUMMARY
 ========================= */
 
 .cuenta .summary-grid{
@@ -201,7 +306,7 @@
 
 
 /* =========================
-   ALERTS (CLON HOME)
+   ALERTS
 ========================= */
 
 .cuenta .alert-list{
@@ -220,7 +325,7 @@
 
 
 /* =========================
-   RESPONSIVE (CLON HOME)
+   RESPONSIVE
 ========================= */
 
 @media (max-width:1024px){
@@ -270,7 +375,7 @@
   }
 
   .cuenta .card-value{
-    font-size:24px;
+    font-size:16px;
   }
 
   .cuenta .page-title{

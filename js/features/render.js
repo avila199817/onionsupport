@@ -37,7 +37,6 @@
       const finalSrc = normalizeUrl(src);
       if(!finalSrc) return resolve();
 
-      // 🔥 eliminar scripts anteriores
       document.querySelectorAll("script[data-onion-page]").forEach(s=>{
         try{ s.remove(); }catch{}
       });
@@ -57,7 +56,7 @@
   };
 
   /* =========================
-     LOAD STYLE (🔥 FIX CSS)
+     LOAD STYLE
   ========================= */
 
   Onion.loadStyle = function(href){
@@ -66,7 +65,6 @@
       const finalHref = normalizeUrl(href);
       if(!finalHref) return resolve();
 
-      // 🔥 limpiar estilos anteriores de página
       document
         .querySelectorAll('link[data-onion-page-style]')
         .forEach(l=>{
@@ -76,8 +74,6 @@
       const link = document.createElement("link");
       link.rel = "stylesheet";
       link.href = finalHref + "?v=" + Date.now();
-
-      // 🔥 marcar como estilo de página
       link.setAttribute("data-onion-page-style", "true");
 
       link.onload = resolve;
@@ -138,10 +134,13 @@
   };
 
   /* =========================
-     RENDER (FINAL)
+     RENDER (🔥 PROTECTED)
   ========================= */
 
   Onion.render = async function(){
+
+    // 🔥 ID único de render
+    const currentRenderId = ++Onion.state.renderId;
 
     try{
 
@@ -154,12 +153,22 @@
 
       // HTML
       const html = await Onion.fetchHTML(route.page);
+
+      // ❌ si ya hay otro render más nuevo → cancelar
+      if(currentRenderId !== Onion.state.renderId){
+        return;
+      }
+
       const content = extractContent(html);
 
-      // 🔥 LIMPIAR VISTA ANTERIOR
+      // 🔥 limpiar vista anterior
       Onion.runCleanup?.();
 
-      // 🔥 CAMBIAR CONTENIDO
+      // ❌ check otra vez antes de pintar
+      if(currentRenderId !== Onion.state.renderId){
+        return;
+      }
+
       Onion.swapContent(content);
 
       // JS
@@ -167,12 +176,15 @@
         await Onion.loadScript(route.script);
       }
 
-      // 🔥 EVENTO GLOBAL DE RUTA
+      // ❌ último check (por seguridad total)
+      if(currentRenderId !== Onion.state.renderId){
+        return;
+      }
+
       window.dispatchEvent(new CustomEvent("onion:route-change", {
         detail: location.pathname
       }));
 
-      // UI
       Onion.ui.refresh();
       Onion.ui.initSearch?.();
 

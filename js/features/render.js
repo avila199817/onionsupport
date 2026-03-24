@@ -28,6 +28,35 @@
   }
 
   /* =========================
+     THEME (🔥 CLAVE)
+  ========================= */
+
+  function applyThemeSafe(){
+
+    try{
+
+      const user = Onion.state.user;
+
+      let isDark = true;
+
+      if(user && typeof user.darkMode === "boolean"){
+        isDark = user.darkMode;
+      }else{
+        const saved = localStorage.getItem("darkMode");
+        if(saved === "false") isDark = false;
+      }
+
+      if(isDark){
+        document.documentElement.removeAttribute("data-theme");
+      }else{
+        document.documentElement.setAttribute("data-theme","light");
+      }
+
+    }catch{}
+
+  }
+
+  /* =========================
      LOAD SCRIPT
   ========================= */
 
@@ -134,7 +163,7 @@
   };
 
   /* =========================
-     RENDER (🔥 PRO SIN GLITCH)
+     RENDER
   ========================= */
 
   Onion.render = async function(){
@@ -147,47 +176,40 @@
 
       const route = Onion.router.resolve();
 
-      // 🔥 title limpio
       if(route.title){
         document.title = "Onion Support · " + route.title;
       }
 
-      // 🔥 HTML primero (pero oculto)
+      // 🔥 aplicar tema ANTES de todo
+      applyThemeSafe();
+
       const html = await Onion.fetchHTML(route.page);
 
       if(currentRenderId !== Onion.state.renderId) return;
 
       const content = extractContent(html);
 
-      // 🔥 CLAVE: ocultar antes de pintar
       content.classList.remove("ready");
 
-      // 🔥 limpiar antes de pintar
       Onion.events.clear?.();
       Onion.runCleanup?.();
 
-      // 🔥 pintar pero oculto
       Onion.swapContent(content);
 
-      // 🔥 CSS después
       if(route.style){
         await Onion.loadStyle(route.style);
       }
 
-      // 🔥 JS después
       if(route.script){
         await Onion.loadScript(route.script);
       }
 
       if(currentRenderId !== Onion.state.renderId) return;
 
-      // 🔥 ESPERAR UN FRAME → evita FOUC
       await new Promise(r => requestAnimationFrame(r));
 
-      // 🔥 mostrar limpio
       content.classList.add("ready");
 
-      // evento global
       window.dispatchEvent(new CustomEvent("onion:route-change", {
         detail: location.pathname
       }));

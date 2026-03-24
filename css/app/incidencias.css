@@ -1,5 +1,5 @@
 /* =========================
-   INCIDENCIAS (MINIMAL SAAS)
+   INCIDENCIAS (MINIMAL SAAS FIX WIDTH)
 ========================= */
 
 .incidencias{
@@ -66,7 +66,6 @@
   font-size:14px;
   font-weight:600;
   letter-spacing:.2px;
-
   color:var(--text);
   margin-bottom:10px;
 }
@@ -106,7 +105,7 @@
 
 
 /* =========================
-   TABLE
+   TABLE (FIX REAL)
 ========================= */
 
 .incidencias .table-container{
@@ -114,29 +113,81 @@
   overflow-x:auto;
 }
 
+/* 🔥 clave: ancho mínimo controlado */
 .incidencias .incidencias-table{
   width:100%;
+  min-width:900px; /* 👈 controla layout tipo SaaS */
   border-collapse:collapse;
+  table-layout:fixed; /* 👈 columnas estables */
   font-size:14px;
 }
 
+/* HEADER */
 .incidencias .incidencias-table th{
   text-align:left;
   padding:12px;
   color:var(--dim);
   font-weight:500;
   border-bottom:1px solid var(--card-border);
+
+  white-space:nowrap;
 }
 
+/* CELDAS */
 .incidencias .incidencias-table td{
   padding:12px;
   border-bottom:1px solid var(--card-border);
   color:var(--text);
   vertical-align:middle;
+
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
 }
 
+/* HOVER */
 .incidencias .incidencias-table tr:hover{
   background:var(--sb-hover);
+}
+
+
+/* =========================
+   WIDTH POR COLUMNAS (CLAVE)
+========================= */
+
+.incidencias .incidencias-table th:nth-child(1),
+.incidencias .incidencias-table td:nth-child(1){
+  width:70px; /* ID */
+}
+
+.incidencias .incidencias-table th:nth-child(2),
+.incidencias .incidencias-table td:nth-child(2){
+  width:260px; /* Título */
+}
+
+.incidencias .incidencias-table th:nth-child(3),
+.incidencias .incidencias-table td:nth-child(3){
+  width:180px; /* Cliente */
+}
+
+.incidencias .incidencias-table th:nth-child(4),
+.incidencias .incidencias-table td:nth-child(4){
+  width:140px; /* Estado */
+}
+
+.incidencias .incidencias-table th:nth-child(5),
+.incidencias .incidencias-table td:nth-child(5){
+  width:120px; /* Prioridad */
+}
+
+.incidencias .incidencias-table th:nth-child(6),
+.incidencias .incidencias-table td:nth-child(6){
+  width:160px; /* Fecha */
+}
+
+.incidencias .incidencias-table th:nth-child(7),
+.incidencias .incidencias-table td:nth-child(7){
+  width:120px; /* Acciones */
 }
 
 
@@ -238,12 +289,6 @@
 
   .incidencias .panel-block{
     padding:16px;
-  }
-
-  .incidencias .incidencias-table th,
-  .incidencias .incidencias-table td{
-    padding:10px;
-    font-size:13px;
   }
 
 }

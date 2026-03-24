@@ -1,10 +1,5 @@
 "use strict";
 
-/* =========================
-   LOADER (SOLO FULLSCREEN)
-   - Para cargas pesadas
-========================= */
-
 (function(){
 
   if(!window.Onion){
@@ -18,7 +13,7 @@
   let active = false;
 
   /* =========================
-     SHOW (SOLO MANUAL)
+     SHOW
   ========================= */
 
   Onion.ui.showLoader = function(){
@@ -33,7 +28,7 @@
       document.body.classList.add("loading");
       active = true;
 
-    }, 200); // pequeño delay anti parpadeo
+    }, 200);
 
   };
 

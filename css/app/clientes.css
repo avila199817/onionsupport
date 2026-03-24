@@ -1,0 +1,293 @@
+/* =========================
+   CLIENTES (PRO SAAS CLON HOME)
+========================= */
+
+.clientes{
+  width:100%;
+}
+
+.clientes .container{
+  padding-top:var(--page-offset);
+  padding-bottom:50px;
+
+  display:flex;
+  flex-direction:column;
+  gap:var(--section-gap, 28px);
+}
+
+/* header oculto */
+.clientes .dashboard-header{
+  display:none;
+}
+
+
+/* =========================
+   GRID
+========================= */
+
+.clientes .dashboard-grid{
+  display:grid;
+  grid-template-columns:1fr;
+  gap:22px;
+}
+
+
+/* =========================
+   PANEL
+========================= */
+
+.clientes .panel-block{
+  position:relative;
+
+  background:var(--panel-bg);
+  border:1px solid var(--panel-border);
+  border-radius:18px;
+
+  padding:20px;
+
+  box-shadow:var(--panel-shadow);
+
+  transition:
+    border-color .2s ease,
+    transform .2s ease;
+}
+
+.clientes .panel-block:hover{
+  border-color:color-mix(in srgb, var(--accent), var(--panel-border) 70%);
+  transform:translateY(-3px);
+}
+
+
+/* =========================
+   TITULO
+========================= */
+
+.clientes .section-title{
+  font-size:14px;
+  font-weight:600;
+  letter-spacing:.2px;
+  color:var(--text);
+  margin-bottom:10px;
+}
+
+
+/* =========================
+   FILTROS
+========================= */
+
+.clientes .filters-row{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-bottom:10px;
+}
+
+.clientes .filters-row input,
+.clientes .filters-row select{
+  background:var(--card-bg);
+  border:1px solid var(--card-border);
+  color:var(--text);
+
+  padding:10px 12px;
+  border-radius:10px;
+  outline:none;
+  font-size:14px;
+}
+
+.clientes .filters-row input{
+  flex:1;
+  min-width:200px;
+}
+
+.clientes .filters-row select{
+  min-width:150px;
+}
+
+
+/* =========================
+   TABLE
+========================= */
+
+.clientes .table-container{
+  width:100%;
+  overflow-x:auto;
+}
+
+.clientes .clientes-table{
+  width:100%;
+  border-collapse:collapse;
+  font-size:14px;
+}
+
+.clientes .clientes-table th{
+  text-align:left;
+  padding:12px;
+  color:var(--dim);
+  font-weight:500;
+  border-bottom:1px solid var(--card-border);
+}
+
+.clientes .clientes-table td{
+  padding:12px;
+  border-bottom:1px solid var(--card-border);
+  color:var(--text);
+  vertical-align:middle;
+}
+
+.clientes .clientes-table tr:hover{
+  background:var(--sb-hover);
+}
+
+
+/* =========================
+   CLIENT CELL (igual que user)
+========================= */
+
+.clientes .cliente-cell{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  min-width:180px;
+}
+
+.clientes .cliente-avatar{
+  width:34px;
+  height:34px;
+
+  border-radius:50%;
+  object-fit:cover;
+
+  background:var(--card-bg);
+  border:1px solid var(--card-border);
+
+  flex-shrink:0;
+}
+
+.clientes .cliente-nombre{
+  font-weight:500;
+  color:var(--text);
+  font-size:14px;
+}
+
+
+/* =========================
+   EMAIL
+========================= */
+
+.clientes .cliente-email a{
+  color:var(--text);
+  text-decoration:none;
+}
+
+.clientes .cliente-email a:hover{
+  text-decoration:underline;
+}
+
+
+/* =========================
+   BADGES
+========================= */
+
+.clientes .badge{
+  padding:4px 8px;
+  border-radius:8px;
+  font-size:12px;
+  font-weight:500;
+}
+
+.clientes .badge.activo{
+  background:rgba(34,197,94,0.15);
+  color:#22c55e;
+}
+
+.clientes .badge.inactivo{
+  background:rgba(239,68,68,0.15);
+  color:#ef4444;
+}
+
+
+/* =========================
+   ACTIONS
+========================= */
+
+.clientes .table-actions{
+  display:flex;
+  gap:6px;
+}
+
+.clientes .action-btn{
+  width:28px;
+  height:28px;
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  border-radius:6px;
+
+  background:transparent;
+  border:none;
+  cursor:pointer;
+
+  color:var(--dim);
+
+  transition:.15s ease;
+}
+
+.clientes .action-btn:hover{
+  background:var(--card-bg);
+  color:var(--text);
+}
+
+
+/* =========================
+   RESPONSIVE
+========================= */
+
+@media (max-width:1024px){
+
+  .clientes .container{
+    padding:20px;
+  }
+
+}
+
+@media (max-width:768px){
+
+  .clientes .container{
+    padding:16px;
+  }
+
+  .clientes .filters-row{
+    flex-direction:column;
+  }
+
+  .clientes .filters-row input,
+  .clientes .filters-row select{
+    width:100%;
+  }
+
+}
+
+@media (max-width:480px){
+
+  .clientes .container{
+    padding:12px;
+  }
+
+  .clientes .panel-block{
+    padding:16px;
+  }
+
+  .clientes .clientes-table th,
+  .clientes .clientes-table td{
+    padding:10px;
+    font-size:13px;
+  }
+
+  .clientes .cliente-avatar{
+    width:28px;
+    height:28px;
+  }
+
+}

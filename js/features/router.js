@@ -27,28 +27,28 @@ Onion.routes = Object.freeze({
     page: "/app/views/index.html",
     style: "/css/app/dashboard.css",
     script: "/js/features/dashboard/index.js",
-    title: "Dashboard"
+    title: "Onion Support · Dashboard"
   },
 
   "/incidencias": {
     page: "/app/views/incidencias/index.html",
     style: "/css/app/incidencias.css",
     script: "/js/features/incidencias/index.js",
-    title: "Incidencias"
+    title: "Onion Support · Incidencias"
   },
 
   "/facturas": {
     page: "/app/views/facturas/index.html",
     style: "/css/app/facturas.css",
     script: "/js/features/facturas/index.js",
-    title: "Facturas"
+    title: "Onion Support · Facturas"
   },
 
   "/cuenta": {
     page: "/app/views/cuenta/index.html",
     style: "/css/app/cuenta.css",
     script: "/js/features/cuenta/index.js",
-    title: "Cuenta"
+    title: "Onion Support · Cuenta"
   },
 
   /* =========================
@@ -59,14 +59,14 @@ Onion.routes = Object.freeze({
     page: "/app/views/usuarios/index.html",
     style: "/css/app/usuarios.css",
     script: "/js/features/usuarios/index.js",
-    title: "Usuarios"
+    title: "Onion Support · Usuarios"
   },
 
   "/usuarios/usuario": {
     page: "/app/views/usuarios/usuario.html",
     style: "/css/app/usuarios.css",
     script: "/js/features/usuarios/usuario.js",
-    title: "Usuario"
+    title: "Onion Support · Usuario"
   },
 
   /* =========================
@@ -77,14 +77,14 @@ Onion.routes = Object.freeze({
     page: "/app/views/clientes/index.html",
     style: "/css/app/clientes.css",
     script: "/js/features/clientes/index.js",
-    title: "Clientes"
+    title: "Onion Support · Clientes"
   },
 
   "/clientes/cliente": {
     page: "/app/views/clientes/cliente.html",
     style: "/css/app/clientes.css",
     script: "/js/features/clientes/cliente.js",
-    title: "Cliente"
+    title: "Onion Support · Cliente"
   },
      
   /* =========================
@@ -95,7 +95,7 @@ Onion.routes = Object.freeze({
        page: "/app/views/ajustes/index.html",
        style: "/css/app/ajustes.css",
        script: "/js/features/ajustes/index.js",
-       title: "Ajustes"
+       title: "Onion Support · Ajustes"
   }
 
 });

@@ -1921,40 +1921,49 @@ mark{
   left:0;
 
   width:0%;
-  height:4px; /* 🔥 un poco más visible */
+  height:4px;
 
   background:linear-gradient(90deg, var(--accent), var(--success));
-  box-shadow:0 0 8px color-mix(in srgb, var(--accent), transparent 60%); /* 🔥 glow pro */
+  box-shadow:0 0 8px color-mix(in srgb, var(--accent), transparent 60%);
 
-  z-index:999999; /* 🔥 aseguras que esté por encima */
+  z-index:999999;
 
   opacity:0;
   pointer-events:none;
 
   transition:
     width .3s ease,
-    opacity .3s ease;
+    opacity .2s ease;
 }
 
 #global-loader.active{
   opacity:1;
 }
 
+
 /* =========================
-   PANEL LOAD (BLANCO PRO)
+   PANEL LOAD (ANTI GLITCH PRO)
 ========================= */
 
+/* estado base → oculto TOTAL */
 .panel-content{
   opacity:0;
+  visibility:hidden;          /* 🔥 evita flash visual */
   pointer-events:none;
+  transform:translateY(4px);  /* 🔥 micro animación */
 }
 
+/* cuando está listo */
 .panel-content.ready{
   opacity:1;
+  visibility:visible;
   pointer-events:auto;
-  transition:opacity .2s ease;
-}
+  transform:translateY(0);
 
+  transition:
+    opacity .18s ease,
+    transform .18s ease;
+}
 
 
 

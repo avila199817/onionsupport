@@ -103,9 +103,7 @@ function adaptCliente(c){
     email: c.email || "-",
     telefono: c.telefono || c.phone || "-",
     activo: c.active ?? true,
-    fecha: c.created_at || c.fecha || "-",
-    avatar: c.avatar || null,
-    logo: c.logo || null
+    fecha: c.created_at || c.fecha || "-"
   };
 
 }
@@ -141,7 +139,7 @@ function boot(){
 boot();
 
 /* =====================================================
-   RUN (CLEANUP)
+   RUN (🔥 CLAVE)
 ===================================================== */
 
 function run(){
@@ -150,6 +148,7 @@ function run(){
 
   initialized = false;
   tbody = null;
+  clientesCache = [];
 
   requestAnimationFrame(() => {
     safeInit();
@@ -167,7 +166,12 @@ function safeInit(){
 
   if(!el) return;
 
-  if(initialized && tbody === el) return;
+  // 🔥 si cambia el DOM, reinit SIEMPRE
+  if(tbody !== el){
+    initialized = false;
+  }
+
+  if(initialized) return;
 
   tbody = el;
   initialized = true;
@@ -207,13 +211,10 @@ function renderClientes(list = []){
 
   <td>
     <div class="cliente-cell">
-
       ${avatar(c)}
-
       <span class="cliente-nombre">
         ${safe(c.empresa)}
       </span>
-
     </div>
   </td>
 
@@ -303,7 +304,7 @@ function applyFilters(){
 
   if(estado){
     filtered = filtered.filter(c =>
-      estado === "activo" ? c.active : !c.active
+      estado === "activo" ? c.activo : !c.activo
     );
   }
 
@@ -340,12 +341,12 @@ function initTableActions(){
 }
 
 /* =====================================================
-   LOAD (🔥 PANEL READY)
+   LOAD
 ===================================================== */
 
 async function loadClientes(){
 
-  const panel = document.querySelector(".panel-content");
+  const panel = document.querySelector(".panel-content.clientes");
 
   if(panel){
     panel.classList.remove("ready");
@@ -356,8 +357,6 @@ async function loadClientes(){
   try{
 
     const clientes = await API.getClientes();
-
-    console.log("📡 CLIENTES:", clientes);
 
     clientesCache = clientes;
 
@@ -393,6 +392,13 @@ function init(){
   initFilters();
   initTableActions();
   loadClientes();
+
+  // 🔥🔥🔥 CLAVE
+  Onion.onCleanup(()=>{
+    initialized = false;
+    tbody = null;
+    clientesCache = [];
+  });
 
 }
 

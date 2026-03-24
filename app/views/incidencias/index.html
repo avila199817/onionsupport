@@ -2,27 +2,18 @@
 
   <div class="container">
 
-    <!-- HEADER -->
-    <div class="dashboard-header">
-      <div class="header-left">
-        <p class="page-subtitle">
-          Gestión y seguimiento de tickets en tiempo real
-        </p>
-      </div>
+    <!-- HEADER VACÍO (ESPACIADO COMO HOME) -->
+    <div class="dashboard-header"></div>
 
-      <div class="header-actions">
-        <button class="btn primary" id="crear-incidencia">
-          + Nueva incidencia
-        </button>
-      </div>
-    </div>
-
-    <!-- KPI -->
+    <!-- =========================
+         KPI
+    ========================= -->
     <div class="grid-cards">
 
       <div class="card highlight">
         <span class="card-title">Abiertas</span>
-        <span id="inc-open" class="card-value">--</span>
+        <strong id="inc-open" class="card-value">0</strong>
+
         <div class="card-meta">
           <span class="trend up">+5%</span>
           <span class="card-extra">vs ayer</span>
@@ -31,7 +22,8 @@
 
       <div class="card">
         <span class="card-title">En progreso</span>
-        <span id="inc-progress" class="card-value">--</span>
+        <strong id="inc-progress" class="card-value">0</strong>
+
         <div class="card-meta">
           <span class="trend up">+2%</span>
           <span class="card-extra">actividad</span>
@@ -40,7 +32,8 @@
 
       <div class="card">
         <span class="card-title">Cerradas hoy</span>
-        <span id="inc-closed" class="card-value">--</span>
+        <strong id="inc-closed" class="card-value">0</strong>
+
         <div class="card-meta">
           <span class="trend up">+8%</span>
           <span class="card-extra">resueltas</span>
@@ -49,7 +42,8 @@
 
       <div class="card">
         <span class="card-title">Tiempo medio</span>
-        <span id="inc-time" class="card-value">--</span>
+        <strong id="inc-time" class="card-value">0h</strong>
+
         <div class="card-meta">
           <span class="trend down">-3%</span>
           <span class="card-extra">rendimiento</span>
@@ -58,18 +52,18 @@
 
     </div>
 
-    <!-- GRID PRINCIPAL -->
+    <!-- =========================
+         GRID PRINCIPAL
+    ========================= -->
     <div class="dashboard-grid">
 
       <!-- TABLA -->
       <div class="panel-block table-block">
 
-        <div class="block-header minimal">
-          <h2 class="section-title">Listado de incidencias</h2>
-        </div>
+        <div class="section-title">Listado de incidencias</div>
 
-        <!-- FILTROS (integrados como en HOME bloques internos) -->
-        <div class="filters-row" style="margin-bottom: 16px;">
+        <!-- FILTROS -->
+        <div class="filters-row" style="margin-bottom:16px;">
 
           <input 
             type="text"
@@ -91,6 +85,10 @@
             <option value="media">Media</option>
             <option value="baja">Baja</option>
           </select>
+
+          <button class="btn primary" id="crear-incidencia">
+            + Nueva
+          </button>
 
         </div>
 
@@ -124,14 +122,12 @@
 
       <!-- DETALLE -->
       <div 
-        class="panel-block detalle"
+        class="panel-block"
         id="detalle-incidencia"
         style="display:none;"
       >
 
-        <div class="block-header minimal">
-          <h2 class="section-title">Detalle</h2>
-        </div>
+        <div class="section-title">Detalle</div>
 
         <div class="detalle-content">
 
@@ -150,49 +146,50 @@
 
     </div>
 
-    <!-- SEGUNDO BLOQUE (como HOME) -->
-    <div class="dashboard-grid secondary">
+    <!-- =========================
+         SEGUNDO BLOQUE
+    ========================= -->
+    <div class="dashboard-grid">
 
       <!-- RESUMEN -->
-      <div class="panel-block summary">
-        <div class="block-header minimal">
-          <h2 class="section-title">Resumen del día</h2>
-        </div>
+      <div class="panel-block">
+
+        <div class="section-title">Resumen del día</div>
 
         <div class="summary-grid">
 
           <div class="summary-item">
-            <span class="summary-value">--</span>
-            <span class="summary-label">Tickets</span>
+            <div id="inc-total" class="summary-value">0</div>
+            <div class="summary-label">Tickets</div>
           </div>
 
           <div class="summary-item">
-            <span class="summary-value">--</span>
-            <span class="summary-label">Resueltos</span>
+            <div id="inc-resueltos" class="summary-value">0</div>
+            <div class="summary-label">Resueltos</div>
           </div>
 
           <div class="summary-item">
-            <span class="summary-value">--</span>
-            <span class="summary-label">Pendientes</span>
+            <div id="inc-pendientes" class="summary-value">0</div>
+            <div class="summary-label">Pendientes</div>
           </div>
 
         </div>
+
       </div>
 
       <!-- ALERTAS -->
-      <div class="panel-block alerts">
-        <div class="block-header minimal">
-          <h2 class="section-title">Alertas</h2>
-        </div>
+      <div class="panel-block">
+
+        <div class="section-title">Alertas</div>
 
         <div class="alert-list">
 
-          <div class="alert-item info">
+          <div id="alert-ok" class="alert-item">
             Sistema estable
           </div>
 
-          <div class="alert-item warn" style="display:none;">
-            Alta carga de incidencias
+          <div id="alert-load" class="alert-item" style="display:none;">
+            ⚠️ Alta carga de incidencias
           </div>
 
         </div>

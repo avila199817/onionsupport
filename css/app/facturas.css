@@ -1,5 +1,5 @@
 /* =========================
-   FACTURAS (PRO SAAS CLON HOME)
+   FACTURAS (MINIMAL SAAS FIX WIDTH)
 ========================= */
 
 .facturas{
@@ -15,143 +15,25 @@
   gap:var(--section-gap, 28px);
 }
 
-/* header oculto como HOME */
+/* header oculto */
 .facturas .dashboard-header{
   display:none;
 }
 
 
 /* =========================
-   KPI GRID
-========================= */
-
-.facturas .grid-cards{
-  display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
-  gap:20px;
-}
-
-
-/* =========================
-   CARDS (CLON HOME REAL)
-========================= */
-
-.facturas .card{
-  position:relative;
-
-  background:var(--card-bg);
-  border:1px solid var(--card-border);
-  border-radius:18px;
-
-  padding:20px;
-
-  box-shadow:var(--card-shadow);
-
-  transition:
-    transform .25s ease,
-    box-shadow .25s ease,
-    border-color .2s ease;
-}
-
-/* glow */
-.facturas .card::after{
-  content:"";
-  position:absolute;
-  inset:0;
-  border-radius:18px;
-
-  background:linear-gradient(
-    120deg,
-    transparent,
-    color-mix(in srgb, var(--accent), transparent 85%),
-    transparent
-  );
-
-  opacity:0;
-  transition:opacity .25s ease;
-}
-
-.facturas .card:hover{
-  transform:translateY(-6px);
-  box-shadow:var(--card-shadow-hover);
-  border-color:color-mix(in srgb, var(--accent), var(--card-border) 70%);
-}
-
-.facturas .card:hover::after{
-  opacity:.6;
-}
-
-/* highlight */
-.facturas .card.highlight{
-  border-color:color-mix(in srgb, var(--accent), transparent 60%);
-}
-
-
-/* =========================
-   TEXTOS CARD
-========================= */
-
-.facturas .card-title{
-  font-size:12px;
-  color:var(--dim);
-}
-
-.facturas .card-value{
-  display:block;
-  margin-top:10px;
-
-  font-size:30px;
-  font-weight:600;
-
-  color:var(--text);
-}
-
-.facturas .card-meta{
-  display:flex;
-  gap:8px;
-  align-items:center;
-  margin-top:8px;
-}
-
-.facturas .card-extra{
-  font-size:12px;
-  color:var(--dim);
-}
-
-
-/* =========================
-   ACTION CARD
-========================= */
-
-.facturas .action-card{
-  display:flex;
-  flex-direction:column;
-  justify-content:center;
-  gap:12px;
-}
-
-.facturas .btn.full{
-  width:100%;
-}
-
-
-/* =========================
-   GRID PRINCIPAL (MISMA LÓGICA)
+   GRID
 ========================= */
 
 .facturas .dashboard-grid{
   display:grid;
-  grid-template-columns:2fr 1fr;
+  grid-template-columns:1fr;
   gap:22px;
-}
-
-.facturas .dashboard-grid.secondary{
-  grid-template-columns:1fr 1fr;
 }
 
 
 /* =========================
-   PANEL BLOCK
+   PANEL
 ========================= */
 
 .facturas .panel-block{
@@ -177,21 +59,20 @@
 
 
 /* =========================
-   SECTION TITLE
+   TITLE
 ========================= */
 
 .facturas .section-title{
   font-size:14px;
   font-weight:600;
   letter-spacing:.2px;
-
   color:var(--text);
   margin-bottom:10px;
 }
 
 
 /* =========================
-   TABLE (PRO SAAS)
+   TABLE (FIX REAL)
 ========================= */
 
 .facturas .table-container{
@@ -199,51 +80,76 @@
   overflow-x:auto;
 }
 
+/* 🔥 clave */
 .facturas .facturas-table{
   width:100%;
-  border-collapse:separate;
-  border-spacing:0 6px;
+  min-width:800px;
+  border-collapse:collapse;
+  table-layout:fixed;
   font-size:14px;
 }
 
-.facturas .facturas-table thead th{
+/* HEADER */
+.facturas .facturas-table th{
   text-align:left;
-  padding:10px 12px;
-
-  font-size:12px;
-  font-weight:500;
+  padding:12px;
   color:var(--dim);
-
+  font-weight:500;
   border-bottom:1px solid var(--card-border);
+
+  white-space:nowrap;
 }
 
-.facturas .facturas-table tbody tr{
-  background:var(--card-bg);
-  border:1px solid var(--card-border);
-
-  transition:
-    transform .15s ease,
-    box-shadow .15s ease;
-}
-
-.facturas .facturas-table tbody tr:hover{
-  transform:translateY(-2px);
-  box-shadow:var(--card-shadow);
-}
-
+/* CELDAS */
 .facturas .facturas-table td{
   padding:12px;
+  border-bottom:1px solid var(--card-border);
   color:var(--text);
+  vertical-align:middle;
+
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
 }
 
-.facturas .facturas-table td:first-child{
-  border-top-left-radius:10px;
-  border-bottom-left-radius:10px;
+/* HOVER */
+.facturas .facturas-table tr:hover{
+  background:var(--sb-hover);
 }
 
-.facturas .facturas-table td:last-child{
-  border-top-right-radius:10px;
-  border-bottom-right-radius:10px;
+
+/* =========================
+   WIDTH COLUMNAS (CLAVE)
+========================= */
+
+.facturas .facturas-table th:nth-child(1),
+.facturas .facturas-table td:nth-child(1){
+  width:80px; /* ID */
+}
+
+.facturas .facturas-table th:nth-child(2),
+.facturas .facturas-table td:nth-child(2){
+  width:260px; /* Cliente */
+}
+
+.facturas .facturas-table th:nth-child(3),
+.facturas .facturas-table td:nth-child(3){
+  width:160px; /* Fecha */
+}
+
+.facturas .facturas-table th:nth-child(4),
+.facturas .facturas-table td:nth-child(4){
+  width:140px; /* Importe */
+}
+
+.facturas .facturas-table th:nth-child(5),
+.facturas .facturas-table td:nth-child(5){
+  width:140px; /* Estado */
+}
+
+.facturas .facturas-table th:nth-child(6),
+.facturas .facturas-table td:nth-child(6){
+  width:120px; /* Acciones */
 }
 
 
@@ -280,71 +186,36 @@
 
 
 /* =========================
-   SUMMARY
+   ACTIONS
 ========================= */
 
-.facturas .summary-grid{
-  display:grid;
-  grid-template-columns:repeat(3,1fr);
-  gap:12px;
-}
-
-.facturas .summary-item{
-  background:var(--card-bg);
-  border:1px solid var(--card-border);
-
-  padding:14px;
-  border-radius:14px;
-
-  text-align:center;
-
-  transition:border-color .2s ease;
-}
-
-.facturas .summary-item:hover{
-  border-color:color-mix(in srgb, var(--accent), var(--card-border) 70%);
-}
-
-.facturas .summary-value{
-  font-size:20px;
-  font-weight:600;
-  color:var(--text);
-}
-
-.facturas .summary-label{
-  font-size:12px;
-  color:var(--dim);
-}
-
-
-/* =========================
-   ALERTS
-========================= */
-
-.facturas .alert-list{
+.facturas .table-actions{
   display:flex;
-  flex-direction:column;
-  gap:10px;
+  gap:6px;
 }
 
-.facturas .alert-item{
-  background:color-mix(in srgb, var(--card-bg), transparent 10%);
-  border:1px solid var(--card-border);
+.facturas .action-btn{
+  width:28px;
+  height:28px;
 
-  padding:12px;
-  border-radius:12px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
 
-  font-size:13px;
-  color:var(--muted);
+  border-radius:6px;
 
-  transition:
-    border-color .2s ease,
-    transform .2s ease;
+  background:transparent;
+  border:none;
+  cursor:pointer;
+
+  color:var(--dim);
+
+  transition:.15s ease;
 }
 
-.facturas .alert-item:hover{
-  transform:translateX(4px);
-  border-color:color-mix(in srgb, var(--accent), var(--card-border) 70%);
+.facturas .action-btn:hover{
+  background:var(--card-bg);
+  color:var(--text);
 }
 
 
@@ -358,21 +229,12 @@
     padding:20px;
   }
 
-  .facturas .dashboard-grid{
-    grid-template-columns:1fr;
-  }
-
 }
 
 @media (max-width:768px){
 
   .facturas .container{
     padding:16px;
-  }
-
-  .facturas .grid-cards,
-  .facturas .summary-grid{
-    grid-template-columns:1fr;
   }
 
 }
@@ -383,21 +245,8 @@
     padding:12px;
   }
 
-  .facturas .card{
-    padding:16px;
-  }
-
   .facturas .panel-block{
     padding:16px;
-  }
-
-  .facturas .card-value{
-    font-size:24px;
-  }
-
-  .facturas .facturas-table td{
-    padding:10px;
-    font-size:13px;
   }
 
 }

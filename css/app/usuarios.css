@@ -1,0 +1,230 @@
+/* =========================
+   USUARIOS (PRO SAAS CLON HOME)
+========================= */
+
+.usuarios{
+  width:100%;
+}
+
+.usuarios .container{
+  padding-top:var(--page-offset);
+  padding-bottom:50px;
+
+  display:flex;
+  flex-direction:column;
+  gap:var(--section-gap, 28px);
+}
+
+/* header oculto como HOME */
+.usuarios .dashboard-header{
+  display:none;
+}
+
+
+/* =========================
+   GRID PRINCIPAL
+========================= */
+
+.usuarios .dashboard-grid{
+  display:grid;
+  grid-template-columns:1fr;
+  gap:22px;
+}
+
+
+/* =========================
+   PANEL BLOCK
+========================= */
+
+.usuarios .panel-block{
+  position:relative;
+
+  background:var(--panel-bg);
+  border:1px solid var(--panel-border);
+  border-radius:18px;
+
+  padding:20px;
+
+  box-shadow:var(--panel-shadow);
+
+  transition:
+    border-color .2s ease,
+    transform .2s ease;
+}
+
+.usuarios .panel-block:hover{
+  border-color:color-mix(in srgb, var(--accent), var(--panel-border) 70%);
+  transform:translateY(-3px);
+}
+
+
+/* =========================
+   SECTION TITLE
+========================= */
+
+.usuarios .section-title{
+  font-size:14px;
+  font-weight:600;
+  letter-spacing:.2px;
+
+  color:var(--text);
+  margin-bottom:10px;
+}
+
+
+/* =========================
+   FILTROS
+========================= */
+
+.usuarios .filters-row{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-bottom:10px;
+}
+
+.usuarios .filters-row input,
+.usuarios .filters-row select{
+  background:var(--card-bg);
+  border:1px solid var(--card-border);
+  color:var(--text);
+
+  padding:10px 12px;
+  border-radius:10px;
+  outline:none;
+  font-size:14px;
+}
+
+.usuarios .filters-row input{
+  flex:1;
+  min-width:200px;
+}
+
+.usuarios .filters-row select{
+  min-width:150px;
+}
+
+
+/* =========================
+   TABLE
+========================= */
+
+.usuarios .table-container{
+  width:100%;
+  overflow-x:auto;
+}
+
+.usuarios .usuarios-table{
+  width:100%;
+  border-collapse:collapse;
+  font-size:14px;
+}
+
+.usuarios .usuarios-table th{
+  text-align:left;
+  padding:12px;
+  color:var(--dim);
+  font-weight:500;
+  border-bottom:1px solid var(--card-border);
+}
+
+.usuarios .usuarios-table td{
+  padding:12px;
+  border-bottom:1px solid var(--card-border);
+  color:var(--text);
+}
+
+.usuarios .usuarios-table tr:hover{
+  background:var(--sb-hover);
+}
+
+
+/* =========================
+   BADGES
+========================= */
+
+.usuarios .badge{
+  padding:4px 8px;
+  border-radius:8px;
+  font-size:12px;
+  font-weight:500;
+}
+
+.usuarios .badge.activo{
+  background:rgba(34,197,94,0.15);
+  color:#22c55e;
+}
+
+.usuarios .badge.inactivo{
+  background:rgba(239,68,68,0.15);
+  color:#ef4444;
+}
+
+
+/* =========================
+   ACTIONS
+========================= */
+
+.usuarios .table-actions{
+  display:flex;
+  gap:8px;
+}
+
+.usuarios .action-btn{
+  background:transparent;
+  border:none;
+  cursor:pointer;
+  color:var(--dim);
+}
+
+.usuarios .action-btn:hover{
+  color:var(--text);
+}
+
+
+/* =========================
+   RESPONSIVE
+========================= */
+
+@media (max-width:1024px){
+
+  .usuarios .container{
+    padding:20px;
+  }
+
+}
+
+@media (max-width:768px){
+
+  .usuarios .container{
+    padding:16px;
+  }
+
+  .usuarios .filters-row{
+    flex-direction:column;
+  }
+
+  .usuarios .filters-row input,
+  .usuarios .filters-row select{
+    width:100%;
+  }
+
+}
+
+@media (max-width:480px){
+
+  .usuarios .container{
+    padding:12px;
+  }
+
+  .usuarios .panel-block{
+    padding:16px;
+  }
+
+  .usuarios .usuarios-table th,
+  .usuarios .usuarios-table td{
+    padding:10px;
+    font-size:13px;
+  }
+
+}

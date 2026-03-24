@@ -55,7 +55,7 @@
     },
 
     "/clientes": {
-      page: "/app/views/usuarios/index.html",
+      page: "/app/views/clientes/index.html",
       style: "/css/app/clientes.css",
       script: "/js/features/clientes/index.js",
       title: "Clientes" // 🔥 FIX

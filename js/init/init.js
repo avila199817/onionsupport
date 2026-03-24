@@ -1,9 +1,17 @@
 Onion.init = async function(){
 
+  // 🔥 LOCK REAL
+  if(Onion.state._initializing){
+    Onion.warn?.("⚠️ INIT en curso");
+    return;
+  }
+
   if(Onion.state.ready){
     Onion.warn?.("⚠️ INIT ya ejecutado");
     return;
   }
+
+  Onion.state._initializing = true;
 
   Onion.log?.("🚀 INIT START");
 
@@ -49,7 +57,7 @@ Onion.init = async function(){
     }
 
     /* =========================
-       UI INIT 🔥 (ANTES DE RENDER)
+       UI INIT
     ========================= */
 
     Onion.ui?.init?.();
@@ -89,6 +97,9 @@ Onion.init = async function(){
     }
 
   }finally{
+
+    // 🔥 liberar lock SIEMPRE
+    Onion.state._initializing = false;
 
     Onion.state.navigating = false;
     Onion.state.rendering = false;

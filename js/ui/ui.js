@@ -11,10 +11,6 @@
 
   let initialized = false;
 
-  /* =========================
-     HELPERS
-  ========================= */
-
   function getUserSafe(){
 
     let user = Onion.state.user;
@@ -40,12 +36,7 @@
   }
 
   function getDisplayName(user){
-    return (
-      user?.name ||
-      user?.username ||
-      user?.email ||
-      "Usuario"
-    );
+    return user?.name || user?.username || user?.email || "Usuario";
   }
 
   function setAvatar(el, user, name){
@@ -135,7 +126,7 @@
   };
 
   /* =========================
-     EVENTS (🔥 SIN BLOQUEO)
+     EVENTS GLOBAL
   ========================= */
 
   function bindGlobalEvents(){
@@ -235,13 +226,5 @@
     });
 
   };
-
-  /* =========================
-     HOOK
-  ========================= */
-
-  Onion.events.on("nav:ready", ()=>{
-    Onion.ui.refresh();
-  });
 
 })();

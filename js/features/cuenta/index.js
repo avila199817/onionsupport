@@ -77,7 +77,7 @@ function avatar(u){
 
 function applyTheme(darkMode){
 
-  // DARK = default
+  // 🔥 DARK = default
   if(darkMode){
     document.documentElement.removeAttribute("data-theme");
   }else{
@@ -289,7 +289,9 @@ function initThemeToggle(){
   const toggle = $("#toggle-darkmode");
   const label = $("#cuenta-darkmode");
 
-  if(!toggle) return;
+  if(!toggle || toggle.__bound) return;
+
+  toggle.__bound = true; // 🔥 evita duplicados
 
   Onion.cleanupEvent(toggle, "change", async ()=>{
 
@@ -324,6 +326,9 @@ function fallback(){
   set("#cuenta-id", "--");
 
   setAttr("#cuenta-avatar", "src", "/media/img/Usuario.png");
+
+  // 🔥 asegura tema correcto
+  applyTheme(true);
 
 }
 

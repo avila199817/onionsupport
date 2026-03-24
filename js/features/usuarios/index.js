@@ -2,46 +2,44 @@
 
 "use strict";
 
-/* =====================================================
-   SINGLETON
-===================================================== */
+const Onion = window.Onion;
 
-if(window.__onionUsuariosLoaded) return;
-window.__onionUsuariosLoaded = true;
+if(!Onion){
+  console.error("💥 Onion no disponible (usuarios)");
+  return;
+}
 
-/* =====================================================
-   STATE
-===================================================== */
-
+let initialized = false;
 let tbody = null;
 let usersCache = [];
-let initialized = false;
 
-/* =====================================================
-   API
-===================================================== */
+/* =========================
+   ROOT
+========================= */
 
-const API = {
-
-  async getUsers(){
-
-    const res = await Onion.fetch(
-      Onion.config.API + "/users"
-    );
-
-    return res?.users || res?.usuarios || res || [];
-
-  }
-
-};
-
-/* =====================================================
-   HELPERS
-===================================================== */
-
-function qs(id){
-  return document.getElementById(id);
+function getRoot(){
+  return document.querySelector(".panel-content.usuarios");
 }
+
+function $(id){
+  return getRoot()?.querySelector("#" + id);
+}
+
+/* =========================
+   API
+========================= */
+
+async function getUsers(){
+
+  const res = await Onion.fetch(Onion.config.API + "/users");
+
+  return res?.users || res?.usuarios || res || [];
+
+}
+
+/* =========================
+   HELPERS
+========================= */
 
 function safe(v){
   return v && String(v).trim() !== "" ? v : "-";
@@ -63,183 +61,77 @@ function avatar(u){
 
 }
 
-/* =====================================================
-   ROUTE CHECK
-===================================================== */
+/* =========================
+   INIT
+========================= */
 
-function isUsuariosRoute(path){
-  return path === "/usuarios" || path.startsWith("/usuarios/");
-}
+function init(){
 
-/* =====================================================
-   BOOT (SPA)
-===================================================== */
-
-function boot(){
-
-  if(!window.Onion){
-    return setTimeout(boot, 50);
-  }
-
-  run();
-
-  window.addEventListener("onion:route-change", (e)=>{
-    if(isUsuariosRoute(e.detail)){
-      run();
-    }
-  });
-
-}
-
-boot();
-
-/* =====================================================
-   RUN (🔥 CLAVE)
-===================================================== */
-
-function run(){
-
-  Onion.cleanupAll();
-
-  initialized = false;
-  tbody = null;
-  usersCache = [];
-
-  requestAnimationFrame(() => {
-    safeInit();
-  });
-
-}
-
-/* =====================================================
-   SAFE INIT
-===================================================== */
-
-function safeInit(){
-
-  const el = qs("usuarios-body");
-
-  if(!el) return;
-
-  // 🔥 si cambia el DOM, reinit SIEMPRE
-  if(tbody !== el){
-    initialized = false;
-  }
+  const root = getRoot();
+  if(!root) return;
 
   if(initialized) return;
 
-  tbody = el;
-  initialized = true;
-
-  init();
-
-}
-
-/* =====================================================
-   RENDER
-===================================================== */
-
-function renderUsers(users = []){
-
-  if(!Array.isArray(users) || users.length === 0){
-    renderState("No hay usuarios.","empty");
-    return;
+  if(!Onion.state?.user){
+    return setTimeout(init, 100);
   }
 
-  const html = users.map(u => {
+  initialized = true;
 
-    const email = safe(u.email) !== "-"
-      ? `<a href="mailto:${u.email}">${u.email}</a>`
-      : "-";
-
-    const estado = u.active
-      ? `<span class="badge activo">Activo</span>`
-      : `<span class="badge inactivo">Inactivo</span>`;
-
-    return `
-
-<tr data-id="${u.id}">
-
-  <td>${safe(u.id)}</td>
-
-  <td>
-    <div class="usuario-cell">
-
-      <img
-        src="${avatar(u)}"
-        class="usuario-avatar"
-        loading="lazy"
-        onerror="this.src='/media/img/Usuario.png'">
-
-      <span class="usuario-username">
-        ${safe(u.username)}
-      </span>
-
-    </div>
-  </td>
-
-  <td class="usuario-email">${email}</td>
-
-  <td>${safe(u.role || u.tipo)}</td>
-
-  <td>${estado}</td>
-
-  <td>${safe(u.created_at || u.fecha)}</td>
-
-  <td>
-    <div class="table-actions">
-
-      <button
-        class="action-btn btn-ver"
-        data-id="${u.id}">
-        👁
-      </button>
-
-      <button
-        class="action-btn btn-editar"
-        data-id="${u.id}">
-        ✏️
-      </button>
-
-    </div>
-  </td>
-
-</tr>
-
-`;
-
-  }).join("");
-
-  tbody.innerHTML = html;
-
-}
-
-/* =====================================================
-   STATES
-===================================================== */
-
-function renderState(message,cls="loading"){
+  tbody = $("usuarios-body");
 
   if(!tbody) return;
 
-  tbody.innerHTML = `
-<tr>
-  <td colspan="7" class="${cls}">
-    ${message}
-  </td>
-</tr>
-`;
+  bindEvents();
+  initFilters();
+  loadUsers();
+
+  Onion.onCleanup(()=>{
+    initialized = false;
+    tbody = null;
+    usersCache = [];
+  });
 
 }
 
-/* =====================================================
+init();
+
+/* =========================
+   EVENTS
+========================= */
+
+function bindEvents(){
+
+  if(!tbody) return;
+
+  Onion.cleanupEvent(tbody, "click", (e)=>{
+
+    const btn = e.target.closest("button");
+    if(!btn) return;
+
+    const id = btn.dataset.id;
+    if(!id) return;
+
+    if(btn.classList.contains("btn-ver")){
+      Onion.router.navigate(`/usuarios/usuario?id=${id}`);
+    }
+
+    if(btn.classList.contains("btn-editar")){
+      Onion.router.navigate(`/usuarios/usuario?id=${id}&edit=true`);
+    }
+
+  });
+
+}
+
+/* =========================
    FILTROS
-===================================================== */
+========================= */
 
 function initFilters(){
 
-  const search = qs("search-usuario");
-  const estado = qs("filter-estado-usuario");
+  const search = $("search-usuario");
+  const estado = $("filter-estado-usuario");
 
   if(search){
     Onion.cleanupEvent(search, "input", applyFilters);
@@ -253,8 +145,8 @@ function initFilters(){
 
 function applyFilters(){
 
-  const search = qs("search-usuario")?.value.toLowerCase() || "";
-  const estado = qs("filter-estado-usuario")?.value || "";
+  const search = $("search-usuario")?.value.toLowerCase() || "";
+  const estado = $("filter-estado-usuario")?.value || "";
 
   let filtered = usersCache;
 
@@ -276,51 +168,21 @@ function applyFilters(){
 
 }
 
-/* =====================================================
-   EVENTS
-===================================================== */
-
-function initTableActions(){
-
-  if(!tbody) return;
-
-  Onion.cleanupEvent(tbody, "click", (e)=>{
-
-    const btn = e.target.closest("button");
-    if(!btn) return;
-
-    const id = btn.dataset.id;
-    if(!id) return;
-
-    if(btn.classList.contains("btn-ver")){
-      Onion.go(`/usuarios/usuario?id=${id}`);
-    }
-
-    if(btn.classList.contains("btn-editar")){
-      Onion.go(`/usuarios/usuario?id=${id}&edit=true`);
-    }
-
-  });
-
-}
-
-/* =====================================================
+/* =========================
    LOAD
-===================================================== */
+========================= */
 
 async function loadUsers(){
 
-  const panel = document.querySelector(".panel-content.usuarios");
+  const panel = getRoot();
 
-  if(panel){
-    panel.classList.remove("ready");
-  }
+  panel?.classList.remove("ready");
 
   renderState("Cargando usuarios…");
 
   try{
 
-    const users = await API.getUsers();
+    const users = await getUsers();
 
     usersCache = users;
 
@@ -330,14 +192,11 @@ async function loadUsers(){
       panel?.classList.add("ready");
     });
 
-  }
-  catch(err){
+  }catch(err){
 
     console.error("💥 USERS ERROR:", err);
 
-    renderState("Error cargando usuarios.","error");
-
-    window.toast?.error?.("Error cargando usuarios");
+    renderState("Error cargando usuarios","error");
 
     panel?.classList.add("ready");
 
@@ -345,24 +204,69 @@ async function loadUsers(){
 
 }
 
-/* =====================================================
-   INIT
-===================================================== */
+/* =========================
+   RENDER
+========================= */
 
-function init(){
+function renderUsers(users = []){
 
-  console.log("✅ USUARIOS INIT OK");
+  if(!tbody) return;
 
-  initFilters();
-  initTableActions();
-  loadUsers();
+  if(!Array.isArray(users) || users.length === 0){
+    return renderState("No hay usuarios","empty");
+  }
 
-  // 🔥🔥🔥 CLAVE TOTAL
-  Onion.onCleanup(()=>{
-    initialized = false;
-    tbody = null;
-    usersCache = [];
-  });
+  tbody.innerHTML = users.map(u => {
+
+    const email = safe(u.email) !== "-"
+      ? `<a href="mailto:${u.email}">${u.email}</a>`
+      : "-";
+
+    const estado = u.active
+      ? `<span class="badge activo">Activo</span>`
+      : `<span class="badge inactivo">Inactivo</span>`;
+
+    return `
+<tr data-id="${u.id}">
+  <td>${safe(u.id)}</td>
+  <td>
+    <div class="usuario-cell">
+      <img src="${avatar(u)}" class="usuario-avatar" loading="lazy">
+      <span class="usuario-username">${safe(u.username)}</span>
+    </div>
+  </td>
+  <td class="usuario-email">${email}</td>
+  <td>${safe(u.role || u.tipo)}</td>
+  <td>${estado}</td>
+  <td>${safe(u.created_at || u.fecha)}</td>
+  <td>
+    <div class="table-actions">
+      <button class="action-btn btn-ver" data-id="${u.id}">👁</button>
+      <button class="action-btn btn-editar" data-id="${u.id}">✏️</button>
+    </div>
+  </td>
+</tr>
+`;
+
+  }).join("");
+
+}
+
+/* =========================
+   STATES
+========================= */
+
+function renderState(message, cls="loading"){
+
+  if(!tbody) return;
+
+  tbody.innerHTML = `
+<tr>
+  <td colspan="7" class="${cls}">
+    ${message}
+  </td>
+</tr>
+`;
 
 }
 

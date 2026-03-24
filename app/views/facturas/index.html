@@ -2,63 +2,11 @@
 
   <div class="container">
 
-    <!-- ESPACIADO SUPERIOR -->
+    <!-- HEADER VACÍO -->
     <div class="dashboard-header"></div>
 
-
     <!-- =========================
-         KPI FACTURACIÓN
-    ========================= -->
-    <div class="grid-cards">
-
-      <!-- TOTAL -->
-      <div class="card highlight">
-        <span class="card-title">Total facturado</span>
-        <strong class="card-value" id="facturas-total">-- €</strong>
-
-        <div class="card-meta">
-          <span class="card-extra">Ingresos acumulados</span>
-        </div>
-      </div>
-
-      <!-- PENDIENTE -->
-      <div class="card">
-        <span class="card-title">Pendiente de cobro</span>
-        <strong class="card-value" id="facturas-pendientes">--</strong>
-
-        <div class="card-meta">
-          <span class="card-extra">Importe pendiente</span>
-        </div>
-      </div>
-
-      <!-- PAGADAS -->
-      <div class="card">
-        <span class="card-title">Pagadas</span>
-        <strong class="card-value" id="facturas-pagadas">--</strong>
-
-        <div class="card-meta">
-          <span class="card-extra">Facturas cobradas</span>
-        </div>
-      </div>
-
-      <!-- ACCIÓN -->
-      <div class="card action-card">
-        <span class="card-title">Acción rápida</span>
-
-        <button class="btn primary full" id="crear-factura">
-          + Nueva factura
-        </button>
-
-        <div class="card-meta">
-          <span class="card-extra">Crear nueva factura</span>
-        </div>
-      </div>
-
-    </div>
-
-
-    <!-- =========================
-         TABLA PRINCIPAL
+         GRID PRINCIPAL
     ========================= -->
     <div class="dashboard-grid">
 
@@ -66,6 +14,7 @@
 
         <div class="section-title">Facturas</div>
 
+        <!-- TABLA -->
         <div class="table-container">
 
           <table class="facturas-table">
@@ -77,69 +26,17 @@
                 <th>Fecha</th>
                 <th>Importe</th>
                 <th>Estado</th>
+                <th>Acciones</th>
               </tr>
             </thead>
 
             <tbody id="facturas-body">
               <tr class="table-loading">
-                <td colspan="5">Cargando facturas...</td>
+                <td colspan="6">Cargando facturas...</td>
               </tr>
             </tbody>
 
           </table>
-
-        </div>
-
-      </div>
-
-    </div>
-
-
-    <!-- =========================
-         SEGUNDO NIVEL
-    ========================= -->
-    <div class="dashboard-grid secondary">
-
-      <!-- RESUMEN -->
-      <div class="panel-block">
-
-        <div class="section-title">Resumen del día</div>
-
-        <div class="summary-grid">
-
-          <div class="summary-item">
-            <div id="facturas-hoy" class="summary-value">--</div>
-            <div class="summary-label">Emitidas</div>
-          </div>
-
-          <div class="summary-item">
-            <div id="facturas-hoy-pagadas" class="summary-value">--</div>
-            <div class="summary-label">Pagadas</div>
-          </div>
-
-          <div class="summary-item">
-            <div id="facturas-hoy-pendientes" class="summary-value">--</div>
-            <div class="summary-label">Pendientes</div>
-          </div>
-
-        </div>
-
-      </div>
-
-      <!-- ESTADO FACTURACIÓN -->
-      <div class="panel-block">
-
-        <div class="section-title">Estado</div>
-
-        <div class="alert-list">
-
-          <div id="facturas-status-ok" class="alert-item info">
-            Flujo de pagos estable
-          </div>
-
-          <div id="facturas-status-warning" class="alert-item warn" style="display:none;">
-            Retrasos en pagos detectados
-          </div>
 
         </div>
 

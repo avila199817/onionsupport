@@ -34,14 +34,14 @@ Onion.routes = Object.freeze({
     page: "/app/views/incidencias/index.html",
     style: "/css/app/generic.css",
     script: "/js/features/incidencias/index.js",
-    title: "Incidencias"
+    title: ""
   },
 
   "/facturas": {
     page: "/app/views/facturas/index.html",
     style: "/css/app/generic.css",
     script: "/js/features/facturas/index.js",
-    title: "Facturas"
+    title: ""
   },
 
   "/cuenta": {
@@ -59,7 +59,7 @@ Onion.routes = Object.freeze({
     page: "/app/views/usuarios/index.html",
     style: "/css/app/generic.css",
     script: "/js/features/usuarios/index.js",
-    title: "Usuarios"
+    title: ""
   },
 
   "/usuarios/usuario": {
@@ -77,7 +77,7 @@ Onion.routes = Object.freeze({
     page: "/app/views/clientes/index.html",
     style: "/css/app/generic.css",
     script: "/js/features/clientes/index.js",
-    title: "Clientes"
+    title: ""
   },
 
   "/clientes/cliente": {

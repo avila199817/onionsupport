@@ -24,15 +24,15 @@ function $(selector){
 }
 
 /* =========================
-   INIT
+   INIT (SPA SAFE)
 ========================= */
 
 function init(){
 
-  if(initialized) return;
-
   const root = getRoot();
   if(!root) return;
+
+  if(initialized) return;
 
   if(!Onion.state?.user){
     return setTimeout(init, 100);
@@ -52,7 +52,7 @@ function init(){
 }
 
 /* =========================
-   EVENTS (CLICK FILA)
+   EVENTS (CON CLEANUP)
 ========================= */
 
 function bindEvents(){
@@ -60,7 +60,7 @@ function bindEvents(){
   const root = getRoot();
   if(!root) return;
 
-  root.addEventListener("click", (e)=>{
+  Onion.cleanupEvent(root, "click", (e)=>{
 
     const row = e.target.closest("tr[data-id]");
     if(!row) return;
@@ -75,12 +75,18 @@ function bindEvents(){
 }
 
 /* =========================
-   LOAD LISTADO
+   LOAD (🔥 PANEL READY)
 ========================= */
 
 async function loadFacturas(){
 
+  const panel = getRoot();
   const tbody = $("#facturas-body");
+
+  if(panel){
+    panel.classList.remove("ready");
+  }
+
   if(!tbody) return;
 
   setLoading();
@@ -95,16 +101,23 @@ async function loadFacturas(){
     if(!Array.isArray(facturas) || facturas.length === 0){
       setEmpty();
       updateKPIs([], resumen);
+      panel?.classList.add("ready");
       return;
     }
 
     render(facturas);
     updateKPIs(facturas, resumen);
 
+    requestAnimationFrame(()=>{
+      panel?.classList.add("ready");
+    });
+
   }catch(e){
 
     Onion.error("💥 ERROR FACTURAS:", e);
+
     setError();
+    panel?.classList.add("ready");
 
   }
 
@@ -185,7 +198,7 @@ function render(items){
 }
 
 /* =========================
-   KPIs (SOLO PAGADAS)
+   KPIs
 ========================= */
 
 function updateKPIs(items){
@@ -206,21 +219,19 @@ function updateKPIs(items){
 }
 
 /* =========================
-   OPEN FACTURA
+   DETALLE
 ========================= */
 
 function openFactura(id){
   loadFacturaDetalle(id);
 }
 
-/* =========================
-   LOAD DETALLE
-========================= */
-
 async function loadFacturaDetalle(id){
 
   const root = getRoot();
   if(!root) return;
+
+  root.classList.remove("ready");
 
   root.innerHTML = `<div class="table-loading">Cargando factura...</div>`;
 
@@ -231,23 +242,26 @@ async function loadFacturaDetalle(id){
 
     if(!f){
       root.innerHTML = `<div>Error cargando factura</div>`;
+      root.classList.add("ready");
       return;
     }
 
     renderFacturaDetalle(f);
 
+    requestAnimationFrame(()=>{
+      root.classList.add("ready");
+    });
+
   }catch(e){
 
     Onion.error("💥 ERROR FACTURA DETALLE:", e);
+
     root.innerHTML = `<div>Error cargando factura</div>`;
+    root.classList.add("ready");
 
   }
 
 }
-
-/* =========================
-   RENDER DETALLE
-========================= */
 
 function renderFacturaDetalle(f){
 
@@ -283,10 +297,14 @@ function renderFacturaDetalle(f){
     </div>
   `;
 
-  document.getElementById("volver-facturas")?.addEventListener("click", ()=>{
-    initialized = false;
-    init();
-  });
+  const btn = document.getElementById("volver-facturas");
+
+  if(btn){
+    Onion.cleanupEvent(btn, "click", ()=>{
+      initialized = false;
+      init();
+    });
+  }
 
 }
 

@@ -1,9 +1,5 @@
 "use strict";
 
-/* =====================================================
-   ONION TOAST · PRO INTEGRATED
-===================================================== */
-
 (function(){
 
   if(!window.Onion){
@@ -47,7 +43,7 @@
   }
 
   /* =========================
-     CLEAR ALL (🔥 CLEANUP)
+     CLEAR ALL
   ========================= */
 
   function clearAll(){
@@ -94,14 +90,20 @@
       removeToast(toast);
     }, duration);
 
-    btn.addEventListener("click", ()=>{
+    const onClose = ()=>{
       clearTimeout(timeout);
       removeToast(toast);
-    });
+    };
 
-    // 🔥 integrar con cleanup de Onion
+    btn.addEventListener("click", onClose);
+
+    /* =========================
+       CLEANUP
+    ========================= */
+
     Onion.onCleanup(()=>{
       clearTimeout(timeout);
+      btn.removeEventListener("click", onClose);
       removeToast(toast);
     });
 

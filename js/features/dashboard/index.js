@@ -28,11 +28,7 @@ function $(id){
 ========================= */
 
 function safe(n){
-  return (n === 0 || n) ? Number(n) : 0;
-}
-
-function pick(...vals){
-  return vals.find(v => v !== undefined && v !== null);
+  return Number(n || 0);
 }
 
 function formatMoney(n){
@@ -74,64 +70,52 @@ async function loadDashboard(){
 
   try{
 
-    const res = await Onion.fetch(Onion.config.API + "/dashboard");
-    const data = res?.data || res;
-
-    if(!data) return;
-
-    const k = data.kpis || data || {};
-
-    /* ===== USUARIOS ===== */
-    setText("home-usuarios", safe(pick(
-      k.usuariosActivos,
-      k.usuarios
-    )));
-
-    setText("home-usuarios-inactivos", safe(
-      k.usuariosInactivos
-    ));
-
-    /* ===== CLIENTES ===== */
-    setText("home-clientes", safe(pick(
-      k.clientesActivos,
-      k.clientes
-    )));
-
-    setText("home-clientes-inactivos", safe(
-      k.clientesInactivos
-    ));
-
     /* =========================
-       FACTURACIÓN (ULTRA ROBUSTA)
+       FACTURAS (FUENTE REAL)
     ========================= */
 
-    const pagado = safe(pick(
-      k.facturacionPagada,
-      k.totalPagado,
-      k.facturadoTotal,
-      k.facturacionTotal
-    ));
+    const resFacturas = await Onion.fetch(Onion.config.API + "/facturas");
+    const facturas = resFacturas?.facturas || resFacturas?.data || [];
 
-    const pendiente = safe(pick(
-      k.facturacionPendiente,
-      k.totalPendiente,
-      k.pendiente
-    ));
+    const pagadas = facturas.filter(f => f.estadoPago === "pagada");
+    const pendientes = facturas.filter(f => f.estadoPago === "pendiente");
 
-    const mensual = safe(pick(
-      k.facturacionMensual,
-      k.facturadoMes,
-      k.totalMes
-    ));
+    const totalPagado = pagadas.reduce((acc, f) => acc + safe(f.total), 0);
+    const totalPendiente = pendientes.reduce((acc, f) => acc + safe(f.total), 0);
 
-    // 🔥 fallback automático SI backend no separa bien
-    const totalReal = pagado || (pagado + pendiente);
+    /* =========================
+       MES ACTUAL (SOLO PAGADAS)
+    ========================= */
 
-    setText("home-facturas", formatMoney(totalReal));
-    setText("home-facturas-pendiente", formatMoney(pendiente));
-    setText("home-facturacion-mes", formatMoney(mensual));
+    const now = new Date();
+    const startMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    /* ===== HOY ===== */
+    const mensualPagado = pagadas
+      .filter(f => new Date(f.fecha || f.createdAt) >= startMonth)
+      .reduce((acc, f) => acc + safe(f.total), 0);
+
+    /* =========================
+       PINTAR FACTURACIÓN
+    ========================= */
+
+    setText("home-facturas", formatMoney(totalPagado));
+    setText("home-facturas-pendiente", formatMoney(totalPendiente));
+    setText("home-facturacion-mes", formatMoney(mensualPagado));
+
+    /* =========================
+       DASHBOARD NORMAL
+    ========================= */
+
+    const res = await Onion.fetch(Onion.config.API + "/dashboard");
+    const data = res?.data || res;
+    const k = data?.kpis || {};
+
+    setText("home-usuarios", safe(k.usuarios));
+    setText("home-usuarios-inactivos", safe(k.usuariosInactivos));
+
+    setText("home-clientes", safe(k.clientes));
+    setText("home-clientes-inactivos", safe(k.clientesInactivos));
+
     setText("tickets-hoy", safe(k.ticketsToday));
     setText("resueltos-hoy", safe(k.resueltosToday));
     setText("pendientes-hoy", safe(k.pendientesToday));

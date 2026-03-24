@@ -29,15 +29,15 @@ function set(selector, value){
 }
 
 /* =========================
-   INIT (ANTI DUPLICADO REAL)
+   INIT (SPA SAFE)
 ========================= */
 
 function init(){
 
-  if(initialized) return;
-
   const root = getRoot();
   if(!root) return;
+
+  if(initialized) return;
 
   if(!Onion.state?.user){
     return setTimeout(init, 100);
@@ -59,10 +59,16 @@ function init(){
 init();
 
 /* =========================
-   LOAD
+   LOAD (🔥 PANEL READY)
 ========================= */
 
 async function loadCuenta(){
+
+  const panel = getRoot();
+
+  if(panel){
+    panel.classList.remove("ready"); // 🔥 ocultar UI
+  }
 
   try{
 
@@ -86,10 +92,19 @@ async function loadCuenta(){
 
     render(u);
 
+    // 🔥 mostrar SOLO cuando ya hay datos
+    requestAnimationFrame(()=>{
+      panel?.classList.add("ready");
+    });
+
   }catch(e){
 
     Onion.error("💥 CUENTA ERROR:", e);
+
     fallback();
+
+    // 🔥 incluso en error mostramos
+    panel?.classList.add("ready");
 
   }
 
@@ -143,7 +158,7 @@ function render(u){
 }
 
 /* =========================
-   ESTADO (REAL)
+   ESTADO
 ========================= */
 
 function renderEstado(u){
@@ -175,7 +190,7 @@ function renderEstado(u){
 }
 
 /* =========================
-   SUMMARY (ESCALABLE)
+   SUMMARY
 ========================= */
 
 function setSummary(u){
@@ -186,7 +201,6 @@ function setSummary(u){
   const items = root.querySelectorAll(".summary-value");
   if(!items.length) return;
 
-  // 🔥 preparado para backend real
   items[0].textContent = u.totalTickets ?? "0";
   items[1].textContent = u.totalFacturas ?? "0";
   items[2].textContent = u.activeSessions ?? "1";

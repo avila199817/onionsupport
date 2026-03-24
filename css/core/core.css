@@ -2065,7 +2065,8 @@ body.loading{
 }
 
 body.loading .layout{
-  visibility:hidden;
+  opacity:0;
+  pointer-events:none;
 }
 
 #app-loader{

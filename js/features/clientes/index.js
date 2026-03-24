@@ -29,7 +29,6 @@ const API = {
       Onion.config.API + "/clientes"
     );
 
-    // 🔥 NORMALIZACIÓN
     return res?.clientes || res?.data || res || [];
 
   }
@@ -74,7 +73,6 @@ function avatar(c){
 `;
   }
 
-  // 🔥 INICIALES
   const nombre = (c?.empresa || "CL").trim();
 
   const iniciales = nombre
@@ -143,10 +141,12 @@ function boot(){
 boot();
 
 /* =====================================================
-   RUN
+   RUN (CON CLEANUP 🔥)
 ===================================================== */
 
 function run(){
+
+  Onion.cleanupAll(); // 🔥 LIMPIA TODO
 
   initialized = false;
   tbody = null;
@@ -272,8 +272,23 @@ function renderState(message,cls="loading"){
 }
 
 /* =====================================================
-   FILTROS
+   FILTROS (CON CLEANUP)
 ===================================================== */
+
+function initFilters(){
+
+  const search = qs("search-cliente");
+  const estado = qs("filter-estado-cliente");
+
+  if(search){
+    Onion.cleanupEvent(search, "input", applyFilters);
+  }
+
+  if(estado){
+    Onion.cleanupEvent(estado, "change", applyFilters);
+  }
+
+}
 
 function applyFilters(){
 
@@ -300,26 +315,15 @@ function applyFilters(){
 
 }
 
-function initFilters(){
-
-  qs("search-cliente")?.addEventListener("input", applyFilters);
-  qs("filter-estado-cliente")?.addEventListener("change", applyFilters);
-
-}
-
 /* =====================================================
-   EVENTS
+   EVENTS (SIN CLONENODE 🔥)
 ===================================================== */
 
 function initTableActions(){
 
   if(!tbody) return;
 
-  const newTbody = tbody.cloneNode(true);
-  tbody.parentNode.replaceChild(newTbody, tbody);
-  tbody = newTbody;
-
-  tbody.addEventListener("click",(e)=>{
+  Onion.cleanupEvent(tbody, "click", (e)=>{
 
     const btn = e.target.closest("button");
     if(!btn) return;

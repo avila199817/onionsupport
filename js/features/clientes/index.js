@@ -29,7 +29,8 @@ const API = {
       Onion.config.API + "/clientes"
     );
 
-    return res?.clientes || res || [];
+    // 🔥 NORMALIZACIÓN
+    return res?.clientes || res?.data || res || [];
 
   }
 
@@ -47,19 +48,67 @@ function safe(v){
   return v && String(v).trim() !== "" ? v : "-";
 }
 
+/* =====================================================
+   AVATAR PRO
+===================================================== */
+
 function avatar(c){
 
   const fallback = "/media/img/Usuario.png";
+  let src = c?.logo || c?.avatar;
 
-  if(!c) return fallback;
+  if(src){
 
-  let src = c.avatar;
+    if(typeof src !== "string") return fallback;
 
-  if(!src || typeof src !== "string") return fallback;
+    if(!src.startsWith("http")){
+      src = Onion.config.API.replace("/api","") + src;
+    }
 
-  if(src.startsWith("http")) return src;
+    return `
+<img
+  src="${src}"
+  class="cliente-avatar"
+  loading="lazy"
+  onerror="this.src='${fallback}'">
+`;
+  }
 
-  return Onion.config.API.replace("/api","") + src;
+  // 🔥 INICIALES
+  const nombre = (c?.empresa || "CL").trim();
+
+  const iniciales = nombre
+    .split(" ")
+    .slice(0,2)
+    .map(p => p[0])
+    .join("")
+    .toUpperCase();
+
+  return `
+<div class="cliente-avatar cliente-avatar-fallback">
+${iniciales}
+</div>
+`;
+
+}
+
+/* =====================================================
+   ADAPTER
+===================================================== */
+
+function adaptCliente(c){
+
+  return {
+    id: c.id || "-",
+    empresa: c.nombreFiscal || c.empresa || "-",
+    nombre: c.nombreContacto || c.nombre || c.name || "-",
+    email: c.email || "-",
+    telefono: c.telefono || c.phone || "-",
+    activo: c.active ?? true,
+    fecha: c.created_at || c.fecha || "-",
+    avatar: c.avatar || null,
+    logo: c.logo || null
+  };
 
 }
 
@@ -72,7 +121,7 @@ function isClientesRoute(path){
 }
 
 /* =====================================================
-   BOOT (SPA)
+   BOOT SPA
 ===================================================== */
 
 function boot(){
@@ -128,23 +177,25 @@ function safeInit(){
 }
 
 /* =====================================================
-   RENDER CLIENTES
+   RENDER
 ===================================================== */
 
-function renderClientes(clientes = []){
+function renderClientes(list = []){
 
-  if(!Array.isArray(clientes) || clientes.length === 0){
+  if(!Array.isArray(list) || list.length === 0){
     renderState("No hay clientes.","empty");
     return;
   }
 
-  const html = clientes.map(c => {
+  const html = list.map(raw => {
+
+    const c = adaptCliente(raw);
 
     const email = safe(c.email) !== "-"
       ? `<a href="mailto:${c.email}">${c.email}</a>`
       : "-";
 
-    const estado = c.active
+    const estado = c.activo
       ? `<span class="badge activo">Activo</span>`
       : `<span class="badge inactivo">Inactivo</span>`;
 
@@ -157,14 +208,10 @@ function renderClientes(clientes = []){
   <td>
     <div class="cliente-cell">
 
-      <img
-        src="${avatar(c)}"
-        class="cliente-avatar"
-        loading="lazy"
-        onerror="this.src='/media/img/Usuario.png'">
+      ${avatar(c)}
 
       <span class="cliente-nombre">
-        ${safe(c.nombre || c.name)}
+        ${safe(c.empresa)}
       </span>
 
     </div>
@@ -172,11 +219,11 @@ function renderClientes(clientes = []){
 
   <td class="cliente-email">${email}</td>
 
-  <td>${safe(c.telefono || c.phone)}</td>
+  <td>${safe(c.telefono)}</td>
 
   <td>${estado}</td>
 
-  <td>${safe(c.created_at || c.fecha)}</td>
+  <td>${safe(c.fecha)}</td>
 
   <td>
     <div class="table-actions">
@@ -207,7 +254,7 @@ function renderClientes(clientes = []){
 }
 
 /* =====================================================
-   STATE RENDER
+   STATES
 ===================================================== */
 
 function renderState(message,cls="loading"){
@@ -238,7 +285,7 @@ function applyFilters(){
   if(search){
     filtered = filtered.filter(c =>
       (c.nombre || "").toLowerCase().includes(search) ||
-      (c.name || "").toLowerCase().includes(search) ||
+      (c.empresa || "").toLowerCase().includes(search) ||
       (c.email || "").toLowerCase().includes(search)
     );
   }
@@ -293,7 +340,7 @@ function initTableActions(){
 }
 
 /* =====================================================
-   LOAD CLIENTES
+   LOAD
 ===================================================== */
 
 async function loadClientes(){

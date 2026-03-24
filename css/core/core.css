@@ -1277,9 +1277,6 @@ body{
 /* =========================
    SEARCH DROPDOWN
 ========================= */
-.topbar-search-wrap{
-  position:relative;
-}
 
 .topbar-search-results{
   position:absolute;

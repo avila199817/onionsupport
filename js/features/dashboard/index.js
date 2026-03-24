@@ -69,10 +69,6 @@ function setMonthLabel(){
 
 async function loadDashboardData(){
 
-  /* =========================
-     FACTURAS
-  ========================= */
-
   const resFacturas = await Onion.fetch(Onion.config.API + "/facturas");
   const facturas = resFacturas?.facturas || resFacturas?.data || [];
 
@@ -92,10 +88,6 @@ async function loadDashboardData(){
   setText("home-facturas", formatMoney(totalPagado));
   setText("home-facturas-pendiente", formatMoney(totalPendiente));
   setText("home-facturacion-mes", formatMoney(mensualPagado));
-
-  /* =========================
-     KPIs
-  ========================= */
 
   const res = await Onion.fetch(Onion.config.API + "/dashboard");
   const data = res?.data || res;
@@ -203,7 +195,7 @@ function renderActivity(items){
 }
 
 /* =========================
-   LOAD (🔥 PANEL READY)
+   LOAD
 ========================= */
 
 async function loadDashboard(){
@@ -225,7 +217,7 @@ async function loadDashboard(){
 
   }catch(e){
 
-    Onion.error("💥 Dashboard error:", e);
+    console.error("💥 Dashboard error:", e);
 
     panel?.classList.add("ready");
 
@@ -234,7 +226,7 @@ async function loadDashboard(){
 }
 
 /* =========================
-   INIT (SPA SAFE)
+   INIT
 ========================= */
 
 function init(){

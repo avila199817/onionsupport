@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================
-   EVENTS (ONION CORE BUS PRO+)
+   EVENTS (ONION CORE BUS PRO FIXED)
 ========================= */
 
 (function(){
@@ -42,7 +42,7 @@
       Onion.log?.("📡 ON:", name, "total:", events[name].size);
     }
 
-    // 🔥 SIEMPRE cleanup automático
+    // 🔥 cleanup automático por módulo
     safeCleanup(()=>{
       if(events[name]){
         events[name].delete(handler);
@@ -65,6 +65,7 @@
 
     if(handler){
       events[name].delete(handler);
+
       if(events[name].size === 0){
         delete events[name];
       }
@@ -117,7 +118,7 @@
   };
 
   /* =========================
-     CLEAR (🔥 PRO)
+     CLEAR (🔥 GLOBAL FIX)
   ========================= */
 
   Onion.events.clear = function(){
@@ -126,6 +127,22 @@
       delete events[k];
     });
 
+    if(DEBUG){
+      Onion.log?.("🧹 Events cleared");
+    }
+
   };
+
+  /* =========================
+     AUTO CLEANUP GLOBAL (🔥 CLAVE)
+  ========================= */
+
+  if(typeof Onion.onCleanup === "function"){
+
+    Onion.onCleanup(()=>{
+      Onion.events.clear();
+    });
+
+  }
 
 })();

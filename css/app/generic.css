@@ -1,0 +1,339 @@
+/* =========================
+   PANEL GENERIC (SAAS BASE)
+========================= */
+
+.panel-content{
+  width:100%;
+}
+
+.panel-content .container{
+  padding-top:var(--page-offset);
+  padding-bottom:50px;
+
+  display:flex;
+  flex-direction:column;
+  gap:var(--section-gap, 28px);
+}
+
+/* ocultar headers legacy */
+.panel-content .dashboard-header{
+  display:none;
+}
+
+
+/* =========================
+   GRID
+========================= */
+
+.panel-content .dashboard-grid{
+  display:grid;
+  grid-template-columns:1fr;
+  gap:22px;
+}
+
+
+/* =========================
+   PANEL CARD
+========================= */
+
+.panel-content .panel-block{
+  position:relative;
+
+  background:var(--panel-bg);
+  border:1px solid var(--panel-border);
+  border-radius:18px;
+
+  padding:20px;
+
+  box-shadow:var(--panel-shadow);
+
+  transition:
+    border-color .2s ease,
+    transform .2s ease;
+}
+
+.panel-content .panel-block:hover{
+  border-color:color-mix(in srgb, var(--accent), var(--panel-border) 70%);
+  transform:translateY(-3px);
+}
+
+
+/* =========================
+   TITLE
+========================= */
+
+.panel-content .section-title{
+  font-size:14px;
+  font-weight:600;
+  letter-spacing:.2px;
+  color:var(--text);
+  margin-bottom:10px;
+}
+
+
+/* =========================
+   FILTROS
+========================= */
+
+.panel-content .filters-row{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-bottom:10px;
+}
+
+.panel-content .filters-row input,
+.panel-content .filters-row select{
+  background:var(--card-bg);
+  border:1px solid var(--card-border);
+  color:var(--text);
+
+  padding:10px 12px;
+  border-radius:10px;
+  outline:none;
+  font-size:14px;
+}
+
+.panel-content .filters-row input{
+  flex:1;
+  min-width:200px;
+}
+
+.panel-content .filters-row select{
+  min-width:150px;
+}
+
+
+/* =========================
+   TABLE CONTAINER
+========================= */
+
+.panel-content .table-container{
+  width:100%;
+  overflow-x:auto;
+}
+
+
+/* =========================
+   TABLE BASE (🔥 CORE)
+========================= */
+
+.panel-content table{
+  width:100%;
+  min-width:900px;
+
+  border-collapse:collapse;
+  table-layout:fixed;
+
+  font-size:14px;
+}
+
+
+/* HEADER */
+.panel-content table th{
+  text-align:left;
+  padding:12px;
+  color:var(--dim);
+  font-weight:500;
+  border-bottom:1px solid var(--card-border);
+
+  white-space:nowrap;
+}
+
+
+/* CELLS */
+.panel-content table td{
+  padding:12px;
+  border-bottom:1px solid var(--card-border);
+  color:var(--text);
+  vertical-align:middle;
+
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+
+/* HOVER */
+.panel-content table tr:hover{
+  background:var(--sb-hover);
+}
+
+
+/* =========================
+   COLUMN WIDTH SYSTEM
+========================= */
+
+/* ID */
+.panel-content table th:nth-child(1),
+.panel-content table td:nth-child(1){
+  width:70px;
+}
+
+/* NOMBRE / TITULO */
+.panel-content table th:nth-child(2),
+.panel-content table td:nth-child(2){
+  width:260px;
+}
+
+/* EMAIL / CLIENTE */
+.panel-content table th:nth-child(3),
+.panel-content table td:nth-child(3){
+  width:200px;
+}
+
+/* EXTRA */
+.panel-content table th:nth-child(4),
+.panel-content table td:nth-child(4){
+  width:160px;
+}
+
+.panel-content table th:nth-child(5),
+.panel-content table td:nth-child(5){
+  width:140px;
+}
+
+.panel-content table th:nth-child(6),
+.panel-content table td:nth-child(6){
+  width:160px;
+}
+
+/* ACCIONES */
+.panel-content table th:nth-child(7),
+.panel-content table td:nth-child(7){
+  width:120px;
+}
+
+
+/* =========================
+   BADGES GENERIC
+========================= */
+
+.panel-content .badge{
+  padding:4px 8px;
+  border-radius:8px;
+  font-size:12px;
+  font-weight:500;
+}
+
+/* estados comunes */
+.badge.activo{
+  background:rgba(34,197,94,0.15);
+  color:#22c55e;
+}
+
+.badge.inactivo{
+  background:rgba(239,68,68,0.15);
+  color:#ef4444;
+}
+
+.badge.abierta{
+  background:rgba(59,130,246,0.15);
+  color:#60a5fa;
+}
+
+.badge.progreso{
+  background:rgba(245,158,11,0.15);
+  color:#f59e0b;
+}
+
+.badge.cerrada{
+  background:rgba(34,197,94,0.15);
+  color:#22c55e;
+}
+
+
+/* =========================
+   ACTIONS
+========================= */
+
+.panel-content .table-actions{
+  display:flex;
+  gap:6px;
+}
+
+.panel-content .action-btn{
+  width:28px;
+  height:28px;
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  border-radius:6px;
+
+  background:transparent;
+  border:none;
+  cursor:pointer;
+
+  color:var(--dim);
+
+  transition:.15s ease;
+}
+
+.panel-content .action-btn:hover{
+  background:var(--card-bg);
+  color:var(--text);
+}
+
+
+/* =========================
+   STATES (LOADING / EMPTY)
+========================= */
+
+.panel-content .loading{
+  color:var(--dim);
+  text-align:center;
+}
+
+.panel-content .empty{
+  color:var(--dim);
+  text-align:center;
+}
+
+.panel-content .error{
+  color:var(--error);
+  text-align:center;
+}
+
+
+/* =========================
+   RESPONSIVE
+========================= */
+
+@media (max-width:1024px){
+
+  .panel-content .container{
+    padding:20px;
+  }
+
+}
+
+@media (max-width:768px){
+
+  .panel-content .container{
+    padding:16px;
+  }
+
+  .panel-content .filters-row{
+    flex-direction:column;
+  }
+
+  .panel-content .filters-row input,
+  .panel-content .filters-row select{
+    width:100%;
+  }
+
+}
+
+@media (max-width:480px){
+
+  .panel-content .container{
+    padding:12px;
+  }
+
+  .panel-content .panel-block{
+    padding:16px;
+  }
+
+}

@@ -9,73 +9,36 @@
 
   const Onion = window.Onion;
 
-  /* =========================
-     🔥 THEME INIT (ANTES DE TODO)
-  ========================= */
-
+  // THEME (antes de todo)
   const savedTheme = localStorage.getItem("theme");
-
   if(savedTheme === "light"){
     document.documentElement.setAttribute("data-theme", "light");
   }
 
   document.addEventListener("DOMContentLoaded", async () => {
 
-    Onion.log("🚀 BOOT INIT");
-
     try{
 
+      // Estado base
       Onion.state.slug = localStorage.getItem("onion_user_slug");
 
       if(!Onion.state.slug){
-        Onion.warn("No slug → redirect login");
         Onion.auth.redirectLogin();
         return;
       }
 
-      /* =========================
-         🔥 UI INIT (CLAVE)
-      ========================= */
-
-      Onion.ui?.init?.();
-
-      /* =========================
-         INIT APP
-      ========================= */
-
+      // INIT APP (lógica + render)
       await Onion.init();
 
-      /* =========================
-         READY
-      ========================= */
+      // INIT UI (sobre DOM final)
+      Onion.ui?.init?.();
 
+      // READY
       document.body.classList.remove("loading");
-
-      const loader = document.getElementById("app-loader");
-      if(loader){
-        loader.remove();
-      }
-
-      Onion.log("✅ APP READY");
+      document.getElementById("app-loader")?.remove();
 
     }catch(e){
-
-      Onion.error("💥 BOOT ERROR:", e);
-
-      const app = document.getElementById("app-content");
-
-      if(app){
-        app.innerHTML = `
-          <div style="padding:20px">
-            <h2>Error crítico</h2>
-            <p>${e.message}</p>
-            <button onclick="location.reload()">Reintentar</button>
-          </div>
-        `;
-      }
-
-      document.body.classList.remove("loading");
-
+      console.error("💥 BOOT ERROR:", e);
     }
 
   });

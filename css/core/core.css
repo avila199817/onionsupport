@@ -1921,12 +1921,16 @@ mark{
   left:0;
 
   width:0%;
-  height:3px;
+  height:4px; /* 🔥 un poco más visible */
 
   background:linear-gradient(90deg, var(--accent), var(--success));
-  z-index:9999;
+  box-shadow:0 0 8px color-mix(in srgb, var(--accent), transparent 60%); /* 🔥 glow pro */
+
+  z-index:999999; /* 🔥 aseguras que esté por encima */
 
   opacity:0;
+  pointer-events:none;
+
   transition:
     width .3s ease,
     opacity .3s ease;

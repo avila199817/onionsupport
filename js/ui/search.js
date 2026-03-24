@@ -9,7 +9,10 @@
 
   const Onion = window.Onion;
 
-  Onion.ui.initSearch = function(){
+  Onion.ui = Onion.ui || {};
+  Onion.ui.search = Onion.ui.search || {};
+
+  Onion.ui.search.init = function(){
 
     const input = document.querySelector("#topbar-search");
     const container = document.querySelector("#topbar-search-results");
@@ -26,10 +29,14 @@
        UI
     ========================= */
 
-    const show = () => container.classList.add("active");
+    const show = () => {
+      container.hidden = false; // 🔥 FIX
+      container.classList.add("active");
+    };
 
     const hide = () => {
       container.classList.remove("active");
+      container.hidden = true; // 🔥 FIX
       container.innerHTML = "";
     };
 

@@ -77,7 +77,7 @@ function avatar(u){
 
 function applyTheme(darkMode){
 
-  // 🔥 DARK = default
+  // DARK = default
   if(darkMode){
     document.documentElement.removeAttribute("data-theme");
   }else{
@@ -90,7 +90,7 @@ async function saveTheme(darkMode){
 
   try{
 
-    await Onion.fetch(Onion.config.API + "/user/preferences/privacy", {
+    await Onion.fetch("/user/preferences/privacy", {
       method: "PATCH",
       body: {
         darkMode: darkMode
@@ -123,7 +123,7 @@ function boot(){
 
   run();
 
-  Onion.onGlobalEvent(window, "onion:route-change", (e)=>{
+  window.addEventListener("onion:route-change", (e)=>{
     if(isCuentaRoute(e.detail)){
       run();
     }
@@ -209,9 +209,7 @@ async function loadCuenta(){
       throw new Error("UserId no disponible");
     }
 
-    const res = await Onion.fetch(
-      Onion.config.API + "/users/" + id
-    );
+    const res = await Onion.fetch("/users/" + id);
 
     const u = res?.user || res;
 
@@ -221,8 +219,9 @@ async function loadCuenta(){
 
     render(u);
 
-    // 🔥 default = DARK
-    applyTheme(u.darkMode !== false);
+    // 🔥 DARK por defecto
+    const isDark = u.darkMode !== false;
+    applyTheme(isDark);
 
     requestAnimationFrame(()=>{
       panel?.classList.add("ready");

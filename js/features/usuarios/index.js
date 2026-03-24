@@ -94,16 +94,16 @@ function boot(){
 boot();
 
 /* =====================================================
-   RUN (FIX SPA)
+   RUN (CON CLEANUP 🔥)
 ===================================================== */
 
 function run(){
 
-  // 🔥 reset total SIEMPRE
+  Onion.cleanupAll(); // 🔥 LIMPIA TODO
+
   initialized = false;
   tbody = null;
 
-  // esperar a que el DOM esté montado
   requestAnimationFrame(() => {
     safeInit();
   });
@@ -111,17 +111,15 @@ function run(){
 }
 
 /* =====================================================
-   SAFE INIT (FIX DOM DINÁMICO)
+   SAFE INIT
 ===================================================== */
 
 function safeInit(){
 
   const el = qs("usuarios-body");
 
-  // si no existe, salir
   if(!el) return;
 
-  // si ya está inicializado y es el mismo nodo → no hacer nada
   if(initialized && tbody === el) return;
 
   tbody = el;
@@ -132,7 +130,7 @@ function safeInit(){
 }
 
 /* =====================================================
-   RENDER USERS
+   RENDER
 ===================================================== */
 
 function renderUsers(users = []){
@@ -211,7 +209,7 @@ function renderUsers(users = []){
 }
 
 /* =====================================================
-   STATE RENDER
+   STATES
 ===================================================== */
 
 function renderState(message,cls="loading"){
@@ -229,8 +227,23 @@ function renderState(message,cls="loading"){
 }
 
 /* =====================================================
-   FILTROS
+   FILTROS (CON CLEANUP)
 ===================================================== */
+
+function initFilters(){
+
+  const search = qs("search-usuario");
+  const estado = qs("filter-estado-usuario");
+
+  if(search){
+    Onion.cleanupEvent(search, "input", applyFilters);
+  }
+
+  if(estado){
+    Onion.cleanupEvent(estado, "change", applyFilters);
+  }
+
+}
 
 function applyFilters(){
 
@@ -257,27 +270,15 @@ function applyFilters(){
 
 }
 
-function initFilters(){
-
-  qs("search-usuario")?.addEventListener("input", applyFilters);
-  qs("filter-estado-usuario")?.addEventListener("change", applyFilters);
-
-}
-
 /* =====================================================
-   EVENTS (FIX LISTENERS)
+   EVENTS (SIN CLONENODE 🔥)
 ===================================================== */
 
 function initTableActions(){
 
   if(!tbody) return;
 
-  // 🔥 limpiar listeners antiguos
-  const newTbody = tbody.cloneNode(true);
-  tbody.parentNode.replaceChild(newTbody, tbody);
-  tbody = newTbody;
-
-  tbody.addEventListener("click",(e)=>{
+  Onion.cleanupEvent(tbody, "click", (e)=>{
 
     const btn = e.target.closest("button");
     if(!btn) return;
@@ -298,7 +299,7 @@ function initTableActions(){
 }
 
 /* =====================================================
-   LOAD USERS
+   LOAD
 ===================================================== */
 
 async function loadUsers(){

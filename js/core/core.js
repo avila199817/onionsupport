@@ -223,7 +223,6 @@ if (window.Onion) {
      READY FLAG
   ========================= */
 
-  Onion.state.ready = true;
 
   Onion.log("🚀 Onion Core listo");
 

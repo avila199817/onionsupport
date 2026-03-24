@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================
-   CLEANUP (ONION PRO FIXED)
+   CLEANUP (ONION CORE CLEAN)
 ========================= */
 
 (function(){
@@ -43,19 +43,19 @@
     if(Array.isArray(list)){
       for(const fn of list){
         try{ fn(); }
-        catch(e){ console.error("Cleanup error:", e); }
+        catch(e){ Onion.error?.("Cleanup error:", e); }
       }
     }
 
     Onion.state.cleanup = [];
 
-    // 🔥 limpiar eventos globales también
+    // 🔥 limpiar eventos registrados
     if(Array.isArray(Onion.state.globalEvents)){
 
       for(const ev of Onion.state.globalEvents){
         try{
           ev.target.removeEventListener(ev.name, ev.handler, ev.options);
-        }catch(e){}
+        }catch{}
       }
 
       Onion.state.globalEvents = [];
@@ -89,7 +89,7 @@
   };
 
   /* =========================
-     EVENTOS (🔥 FIX REAL)
+     EVENTOS
   ========================= */
 
   Onion.cleanupEvent = function(target, name, handler, options){
@@ -98,35 +98,14 @@
 
     target.addEventListener(name, handler, options);
 
-    // guardar para cleanup total
-    Onion.state.globalEvents.push({
-      target,
-      name,
-      handler,
-      options
-    });
+    // registrar para limpieza
+    const ref = { target, name, handler, options };
+    Onion.state.globalEvents.push(ref);
 
     Onion.onCleanup(()=>{
-      target.removeEventListener(name, handler, options);
-    });
-
-  };
-
-  /* =========================
-     GLOBAL EVENT (🔥 NUEVO)
-  ========================= */
-
-  Onion.onGlobalEvent = function(target, name, handler, options){
-
-    if(!target || !name || !handler) return;
-
-    target.addEventListener(name, handler, options);
-
-    Onion.state.globalEvents.push({
-      target,
-      name,
-      handler,
-      options
+      try{
+        target.removeEventListener(name, handler, options);
+      }catch{}
     });
 
   };

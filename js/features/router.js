@@ -1,9 +1,7 @@
 "use strict";
 
 /* =========================
-   ROUTER (ONION PRO FINAL + META)
-   - Navegación estable
-   - Metadata centralizada (title)
+   ROUTER (ONION PRO FINAL + SAFE)
 ========================= */
 
 (function(){
@@ -16,7 +14,7 @@
   const Onion = window.Onion;
 
   /* =========================
-     ROUTES (🔥 CON META)
+     ROUTES
   ========================= */
 
   Onion.routes = Object.freeze({
@@ -49,11 +47,11 @@
       title: "Cuenta"
     },
      
-     "/usuarios": {
-         page: "/app/views/usuarios/index.html",
-         style: "/css/app/usuarios.css",
-         script: "/js/features/usuarios/index.js",
-         title: "Usuarios"
+    "/usuarios": {
+      page: "/app/views/usuarios/index.html",
+      style: "/css/app/usuarios.css",
+      script: "/js/features/usuarios/index.js",
+      title: "Usuarios"
     }
 
   });
@@ -92,9 +90,7 @@
         const userSlug = parts[0];
         const cleanUser = userSlug.replace("@","");
 
-        if(!Onion.state.user){
-          Onion.state.user = {};
-        }
+        Onion.state.user = Onion.state.user || {};
 
         if(!Onion.state.user.username){
           Onion.state.user.username = cleanUser;
@@ -122,7 +118,7 @@
   };
 
   /* =========================
-     RESOLVE (🔥 DEVUELVE META)
+     RESOLVE
   ========================= */
 
   Onion.router.resolve = function(){
@@ -144,27 +140,30 @@
   };
 
   /* =========================
-     NAVIGATE
+     NAVIGATE (🔥 FIX)
   ========================= */
 
   Onion.router.navigate = function(href){
 
     if(!href) return;
 
-    if(href.startsWith("http")) return;
+    // external → normal browser
+    if(href.startsWith("http")){
+      window.location.href = href;
+      return;
+    }
 
     const username =
       Onion.state.user?.username ||
       localStorage.getItem("onion_user_slug");
 
-    if(!username){
-      Onion.warn?.("⚠️ No username");
-      return;
-    }
-
     let finalHref;
 
-    if(href === "/"){
+    if(!username){
+      // 🔥 fallback sin bloquear
+      finalHref = href;
+    }
+    else if(href === "/"){
       finalHref = "/@" + username;
     }
     else if(href.startsWith("/@")){

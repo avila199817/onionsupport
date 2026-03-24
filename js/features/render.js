@@ -9,6 +9,10 @@
 
   const Onion = window.Onion;
 
+  /* =====================================================
+     NORMALIZE URL
+  ===================================================== */
+
   function normalizeUrl(src){
     if(!src) return null;
 
@@ -23,12 +27,17 @@
     return window.location.origin + "/" + src.replace(/^\/+/,"");
   }
 
+  /* =====================================================
+     LOAD SCRIPT
+  ===================================================== */
+
   Onion.loadScript = function(src){
     return new Promise((resolve, reject)=>{
 
       const finalSrc = normalizeUrl(src);
       if(!finalSrc) return resolve();
 
+      // 🔥 eliminar scripts anteriores de página
       document.querySelectorAll("script[data-onion-page]").forEach(s=>{
         try{ s.remove(); }catch{}
       });
@@ -46,6 +55,10 @@
 
     });
   };
+
+  /* =====================================================
+     LOAD STYLE
+  ===================================================== */
 
   Onion.loadStyle = function(href){
     return new Promise((resolve)=>{
@@ -65,6 +78,10 @@
     });
   };
 
+  /* =====================================================
+     FETCH HTML
+  ===================================================== */
+
   Onion.fetchHTML = async function(url){
 
     const finalUrl = normalizeUrl(url);
@@ -81,6 +98,10 @@
     return await res.text();
   };
 
+  /* =====================================================
+     EXTRACT CONTENT
+  ===================================================== */
+
   function extractContent(html){
 
     const wrapper = document.createElement("div");
@@ -92,6 +113,10 @@
     );
   }
 
+  /* =====================================================
+     SWAP CONTENT
+  ===================================================== */
+
   Onion.swapContent = function(node){
 
     const app = document.getElementById("app-content");
@@ -102,27 +127,38 @@
 
   };
 
+  /* =====================================================
+     RENDER (FIX CLAVE)
+  ===================================================== */
+
   Onion.render = async function(){
 
     try{
 
       const route = Onion.router.resolve();
 
+      // CSS
       if(route.style){
         await Onion.loadStyle(route.style);
       }
 
+      // HTML
       const html = await Onion.fetchHTML(route.page);
-
       const content = extractContent(html);
 
       Onion.swapContent(content);
 
+      // JS
       if(route.script){
         await Onion.loadScript(route.script);
       }
 
-      // 🔥 UI DIRECTA (SIN EVENTOS)
+      // 🔥🔥🔥 CLAVE: avisar a todos los scripts
+      window.dispatchEvent(new CustomEvent("onion:route-change", {
+        detail: location.pathname
+      }));
+
+      // UI
       Onion.ui.refresh();
       Onion.ui.initSearch?.();
 

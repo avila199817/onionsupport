@@ -1,5 +1,5 @@
 /* =========================
-   FACTURAS (MINIMAL SAAS FIX WIDTH)
+   FACTURAS (MINIMAL SAAS PRO WIDTH REAL)
 ========================= */
 
 .facturas{
@@ -72,7 +72,7 @@
 
 
 /* =========================
-   TABLE (FIX REAL)
+   TABLE (WIDTH FIX REAL PRO)
 ========================= */
 
 .facturas .table-container{
@@ -80,10 +80,10 @@
   overflow-x:auto;
 }
 
-/* 🔥 clave */
+/* 🔥 ahora sí correcto */
 .facturas .facturas-table{
   width:100%;
-  min-width:800px;
+  min-width:1000px; /* 👈 clave real */
   border-collapse:collapse;
   table-layout:fixed;
   font-size:14px;
@@ -96,7 +96,6 @@
   color:var(--dim);
   font-weight:500;
   border-bottom:1px solid var(--card-border);
-
   white-space:nowrap;
 }
 
@@ -119,37 +118,43 @@
 
 
 /* =========================
-   WIDTH COLUMNAS (CLAVE)
+   COLUMNAS (PROPORCIONES REALES)
 ========================= */
 
+/* ID */
 .facturas .facturas-table th:nth-child(1),
 .facturas .facturas-table td:nth-child(1){
-  width:80px; /* ID */
+  width:80px;
 }
 
+/* CLIENTE (más ancho) */
 .facturas .facturas-table th:nth-child(2),
 .facturas .facturas-table td:nth-child(2){
-  width:260px; /* Cliente */
+  width:320px;
 }
 
+/* FECHA */
 .facturas .facturas-table th:nth-child(3),
 .facturas .facturas-table td:nth-child(3){
-  width:160px; /* Fecha */
+  width:180px;
 }
 
+/* IMPORTE */
 .facturas .facturas-table th:nth-child(4),
 .facturas .facturas-table td:nth-child(4){
-  width:140px; /* Importe */
+  width:160px;
 }
 
+/* ESTADO */
 .facturas .facturas-table th:nth-child(5),
 .facturas .facturas-table td:nth-child(5){
-  width:140px; /* Estado */
+  width:160px;
 }
 
+/* ACCIONES */
 .facturas .facturas-table th:nth-child(6),
 .facturas .facturas-table td:nth-child(6){
-  width:120px; /* Acciones */
+  width:120px;
 }
 
 

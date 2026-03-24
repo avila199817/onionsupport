@@ -1,13 +1,5 @@
 "use strict";
 
-/* =========================
-   SEARCH (ONION FINAL)
-   - Auth OK (Onion.fetch)
-   - Sin leaks
-   - Router integrado
-   - Abort + debounce
-========================= */
-
 (function(){
 
   if(!window.Onion){
@@ -80,13 +72,10 @@
         `;
 
         el.addEventListener("click", ()=>{
-
           hide();
-
-          if (!r.url) return;
-
-          Onion.router?.navigate?.(r.url);
-
+          if (r.url){
+            Onion.router?.navigate?.(r.url);
+          }
         });
 
         container.appendChild(el);
@@ -98,7 +87,7 @@
     };
 
     /* =========================
-       SEARCH (🔥 FIX AUTH)
+       SEARCH
     ========================= */
 
     const doSearch = async (q) => {
@@ -125,7 +114,7 @@
           return [];
         }
 
-        Onion.error("💥 SEARCH ERROR:", e);
+        console.error("💥 SEARCH ERROR:", e);
         return [];
 
       }
@@ -207,11 +196,5 @@
     });
 
   };
-
-  /* =========================
-     INIT DIRECTO (🔥 SIN EVENTOS)
-  ========================= */
-
-  Onion.ui.initSearch();
 
 })();

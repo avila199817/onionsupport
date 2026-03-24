@@ -1,10 +1,7 @@
 "use strict";
 
 /* =========================
-   EVENTS (ONION CORE BUS FINAL)
-   - Sin leaks
-   - Sin duplicados
-   - Cleanup seguro
+   EVENTS (ONION CORE BUS PRO)
 ========================= */
 
 (function(){
@@ -18,6 +15,18 @@
 
   const events = Object.create(null);
   const DEBUG = false;
+
+  /* =========================
+     SAFE CLEANUP
+  ========================= */
+
+  function safeCleanup(fn){
+
+    if(typeof Onion.onCleanup === "function"){
+      Onion.onCleanup(fn);
+    }
+
+  }
 
   /* =========================
      ON
@@ -39,8 +48,8 @@
       Onion.log?.("📡 ON:", name, "total:", events[name].size);
     }
 
-    // 🔥 cleanup seguro (sin duplicar)
-    Onion.onCleanup?.(()=>{
+    // 🔥 cleanup seguro SIEMPRE
+    safeCleanup(()=>{
       if(events[name]){
         events[name].delete(handler);
 
@@ -124,7 +133,7 @@
   };
 
   /* =========================
-     CLEAR (DEBUG)
+     CLEAR (USADO POR ROUTER)
   ========================= */
 
   Onion.events.clear = function(){
@@ -133,7 +142,9 @@
       delete events[k];
     });
 
-    Onion.log?.("🧹 Events limpiados");
+    if(DEBUG){
+      Onion.log?.("🧹 Events limpiados");
+    }
 
   };
 

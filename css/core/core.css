@@ -1911,6 +1911,87 @@ mark{
 
 
 
+/* =========================
+   GLOBAL LOADER (TOP BAR)
+========================= */
+
+#global-loader{
+  position:fixed;
+  top:0;
+  left:0;
+
+  width:0%;
+  height:3px;
+
+  background:linear-gradient(90deg, var(--accent), var(--success));
+  z-index:9999;
+
+  opacity:0;
+  transition:
+    width .3s ease,
+    opacity .3s ease;
+}
+
+#global-loader.active{
+  opacity:1;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -66,7 +66,7 @@
       const finalHref = normalizeUrl(href);
       if(!finalHref) return resolve();
 
-      // 🔥 limpiar CSS de página anterior
+      // 🔥 limpiar CSS anterior
       document
         .querySelectorAll('link[data-onion-page-style]')
         .forEach(l=>{
@@ -136,17 +136,22 @@
   };
 
   /* =========================
-     RENDER (🔥 FINAL PRO)
+     RENDER (🔥 FINAL PRO + DATA AWAIT)
   ========================= */
 
   Onion.render = async function(){
 
-    // 🔥 control de renders concurrentes
     const currentRenderId = ++Onion.state.renderId;
 
     try{
 
+      // 🔥 LOADER ON
+      Onion.ui.showLoader?.();
+
       const route = Onion.router.resolve();
+
+      // 🔥 actualizar título
+      document.title = route.title || "Onion";
 
       // CSS
       if(route.style){
@@ -156,24 +161,21 @@
       // HTML
       const html = await Onion.fetchHTML(route.page);
 
-      // ❌ cancelar si hay render más nuevo
       if(currentRenderId !== Onion.state.renderId){
         return;
       }
 
       const content = extractContent(html);
 
-      // 🔥 limpiar eventos antes
+      // 🔥 limpiar eventos + vista anterior
       Onion.events.clear?.();
-
-      // 🔥 limpiar vista anterior
       Onion.runCleanup?.();
 
-      // ❌ check otra vez
       if(currentRenderId !== Onion.state.renderId){
         return;
       }
 
+      // 🔥 pintar layout vacío (estructura)
       Onion.swapContent(content);
 
       // JS
@@ -181,7 +183,19 @@
         await Onion.loadScript(route.script);
       }
 
-      // ❌ último check
+      if(currentRenderId !== Onion.state.renderId){
+        return;
+      }
+
+      // 🔥 ESPERAR A LOS DATOS DE LA VISTA
+      if(typeof Onion.page === "function"){
+        try{
+          await Onion.page();
+        }catch(e){
+          console.error("💥 PAGE ERROR:", e);
+        }
+      }
+
       if(currentRenderId !== Onion.state.renderId){
         return;
       }
@@ -198,6 +212,11 @@
     }catch(e){
 
       console.error("💥 RENDER ERROR:", e);
+
+    }finally{
+
+      // 🔥 LOADER OFF SIEMPRE
+      Onion.ui.hideLoader?.();
 
     }
 

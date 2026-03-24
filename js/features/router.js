@@ -1,9 +1,5 @@
 "use strict";
 
-/* =========================
-   ROUTER (ONION PRO FINAL FIXED)
-========================= */
-
 (function(){
 
   if(!window.Onion){
@@ -47,10 +43,6 @@
       title: "Cuenta"
     },
 
-    /* =========================
-       USUARIOS
-    ========================= */
-
     "/usuarios": {
       page: "/app/views/usuarios/index.html",
       style: "/css/app/generic.css",
@@ -65,10 +57,6 @@
       title: "Usuario"
     },
 
-    /* =========================
-       CLIENTES
-    ========================= */
-
     "/clientes": {
       page: "/app/views/clientes/index.html",
       style: "/css/app/generic.css",
@@ -82,10 +70,6 @@
       script: "/js/features/clientes/cliente.js",
       title: "Cliente"
     },
-
-    /* =========================
-       AJUSTES
-    ========================= */
 
     "/ajustes": {
       page: "/app/views/ajustes/index.html",
@@ -119,11 +103,10 @@
     }
 
     return path || "/";
-
   }
 
   /* =========================
-     GET ROUTE
+     GET
   ========================= */
 
   Onion.router.get = function(){
@@ -139,12 +122,6 @@
         const userSlug = parts[0];
         const cleanUser = userSlug.replace("@","");
 
-        Onion.state.user = Onion.state.user || {};
-
-        if(!Onion.state.user.username){
-          Onion.state.user.username = cleanUser;
-        }
-
         Onion.state.slug = cleanUser;
 
         if(parts.length === 1){
@@ -152,14 +129,13 @@
         }
 
         return "/" + parts.slice(1).join("/");
-
       }
 
       return path;
 
     }catch(e){
 
-      Onion.error?.("💥 Router get error:", e);
+      console.error("💥 Router get error:", e);
       return "/";
 
     }
@@ -183,8 +159,7 @@
 
     }catch(e){
 
-      Onion.error?.("💥 Router resolve error:", e);
-
+      console.error("💥 Router resolve error:", e);
       Onion.setTitle("Panel");
 
       return Onion.routes["/"];
@@ -194,7 +169,7 @@
   };
 
   /* =========================
-     NAVIGATE (🔥 FIX)
+     NAVIGATE
   ========================= */
 
   Onion.router.navigate = function(href){
@@ -207,7 +182,7 @@
     }
 
     const username =
-      Onion.state.user?.username ||
+      Onion.state.slug ||
       localStorage.getItem("onion_user_slug");
 
     let finalHref;
@@ -227,21 +202,12 @@
 
     if(window.location.pathname === finalHref) return;
 
-    Onion.state.navigating = true;
-
     history.pushState({}, "", finalHref);
 
-    Promise.resolve().then(()=>{
-
-      Onion.render();
-
-      // 🔥 EVENTO CLAVE
-      window.dispatchEvent(
-        new CustomEvent("onion:route-change", {
-          detail: Onion.router.get()
-        })
-      );
-
+    // 🔥 flujo limpio
+    Onion.runCleanup();
+    Onion.render().then(()=>{
+      Onion.ui?.init?.();
     });
 
   };
@@ -275,7 +241,7 @@
   }
 
   /* =========================
-     POPSTATE (🔥 FIX)
+     POPSTATE
   ========================= */
 
   if(!window.__ONION_POPSTATE_BOUND__){
@@ -284,14 +250,10 @@
 
     window.addEventListener("popstate", function(){
 
-      Onion.render();
-
-      // 🔥 EVENTO CLAVE
-      window.dispatchEvent(
-        new CustomEvent("onion:route-change", {
-          detail: Onion.router.get()
-        })
-      );
+      Onion.runCleanup();
+      Onion.render().then(()=>{
+        Onion.ui?.init?.();
+      });
 
     });
 

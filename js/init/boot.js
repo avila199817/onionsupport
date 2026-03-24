@@ -28,8 +28,18 @@
 
     try{
 
-      // 🔥 aplicar config correctamente (CLAVE)
+      /* =========================
+         CONFIG GLOBAL
+      ========================= */
+
       Onion.userConfig?.apply();
+
+      /* =========================
+         IDIOMA (🔥 NUEVO)
+      ========================= */
+
+      const lang = Onion.userConfig?.get("lang") || "es";
+      Onion.i18n?.setLang?.(lang);
 
       /* =========================
          ESTADO BASE

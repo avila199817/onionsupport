@@ -7,23 +7,22 @@
 }
 
 .home .container{
-  padding-top:10px;
+  padding-top:var(--page-offset);
   padding-bottom:50px;
 
   display:flex;
   flex-direction:column;
-  gap:28px;
+  gap:var(--section-gap, 28px); /* fallback por si no la defines */
 }
 
 
 /* =========================
-   HEADER (SOLO ESPACIADO)
+   HEADER (SPACING CONTROLADO)
 ========================= */
 
 .home .dashboard-header{
-  height:var(--topbar-height);
+  height:var(--page-offset);
 }
-
 
 /* =========================
    KPI GRID

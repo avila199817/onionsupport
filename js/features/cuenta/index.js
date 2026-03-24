@@ -72,6 +72,36 @@ function avatar(u){
 }
 
 /* =====================================================
+   THEME
+===================================================== */
+
+function applyTheme(darkMode){
+
+  if(darkMode){
+    document.documentElement.removeAttribute("data-theme");
+  }else{
+    document.documentElement.setAttribute("data-theme","light");
+  }
+
+}
+
+async function saveTheme(darkMode){
+
+  try{
+
+    await Onion.fetch("/user/preferences/privacy", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ darkMode })
+    });
+
+  }catch(e){
+    console.error("💥 ERROR GUARDANDO TEMA:", e);
+  }
+
+}
+
+/* =====================================================
    ROUTE CHECK
 ===================================================== */
 
@@ -91,7 +121,7 @@ function boot(){
 
   run();
 
-  window.addEventListener("onion:route-change", (e)=>{
+  Onion.onGlobalEvent(window, "onion:route-change", (e)=>{
     if(isCuentaRoute(e.detail)){
       run();
     }
@@ -102,12 +132,12 @@ function boot(){
 boot();
 
 /* =====================================================
-   RUN (🔥 CLAVE)
+   RUN
 ===================================================== */
 
 function run(){
 
-  Onion.cleanupAll(); // 🔥 limpia eventos
+  Onion.cleanupAll();
 
   initialized = false;
 
@@ -148,8 +178,8 @@ function init(){
   Onion.log("👤 CUENTA INIT OK");
 
   loadCuenta();
+  initThemeToggle();
 
-  // 🔥🔥🔥 ESTA ES LA PUTA CLAVE
   Onion.onCleanup(()=>{
     initialized = false;
   });
@@ -171,7 +201,6 @@ async function loadCuenta(){
   try{
 
     const userState = Onion.state.user;
-
     const id = userState.userId || userState.id;
 
     if(!id){
@@ -189,6 +218,9 @@ async function loadCuenta(){
     }
 
     render(u);
+
+    /* 🔥 APLICAR TEMA DESDE BD */
+    applyTheme(u.darkMode === true);
 
     requestAnimationFrame(()=>{
       panel?.classList.add("ready");
@@ -212,11 +244,6 @@ async function loadCuenta(){
 
 function render(u){
 
-  const root = getRoot();
-  if(!root) return;
-
-  Onion.log("🔥 Render cuenta");
-
   const name =
     u.name ||
     u.username ||
@@ -236,6 +263,45 @@ function render(u){
   set("#cuenta-id", safe(u.userId || u.id));
 
   setAttr("#cuenta-avatar", "src", avatar(u));
+
+  /* 🔥 SET TOGGLE */
+  const toggle = $("#toggle-darkmode");
+  const label = $("#cuenta-darkmode");
+
+  if(toggle){
+    toggle.checked = u.darkMode === true;
+  }
+
+  if(label){
+    label.textContent = u.darkMode ? "Activado" : "Desactivado";
+  }
+
+}
+
+/* =====================================================
+   THEME TOGGLE
+===================================================== */
+
+function initThemeToggle(){
+
+  const toggle = $("#toggle-darkmode");
+  const label = $("#cuenta-darkmode");
+
+  if(!toggle) return;
+
+  Onion.cleanupEvent(toggle, "change", async ()=>{
+
+    const darkMode = toggle.checked;
+
+    applyTheme(darkMode);
+
+    if(label){
+      label.textContent = darkMode ? "Activado" : "Desactivado";
+    }
+
+    await saveTheme(darkMode);
+
+  });
 
 }
 

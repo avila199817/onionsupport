@@ -24,15 +24,15 @@ function $(selector){
 }
 
 /* =========================
-   INIT (ANTI DUPLICADO)
+   INIT (SPA SAFE)
 ========================= */
 
 function init(){
 
-  if(initialized) return;
-
   const root = getRoot();
   if(!root) return;
+
+  if(initialized) return;
 
   if(!Onion.state?.user){
     return setTimeout(init, 100);
@@ -42,9 +42,9 @@ function init(){
 
   Onion.log("📄 Incidencias init");
 
+  bindEvents();
   loadIncidencias();
 
-  // 🔥 cleanup al salir
   Onion.onCleanup(()=>{
     initialized = false;
   });
@@ -54,12 +54,53 @@ function init(){
 init();
 
 /* =========================
-   LOAD
+   EVENTS (CLEAN)
+========================= */
+
+function bindEvents(){
+
+  const root = getRoot();
+  if(!root) return;
+
+  Onion.cleanupEvent(root, "click", (e)=>{
+
+    const btn = e.target.closest(".view-btn");
+    if(!btn) return;
+
+    const id = btn.dataset.id;
+    if(!id) return;
+
+    const item = currentItems.find(i =>
+      String(i.id || i.ticketId) === String(id)
+    );
+
+    if(item){
+      showDetalle(item);
+    }
+
+  });
+
+}
+
+/* =========================
+   STATE
+========================= */
+
+let currentItems = [];
+
+/* =========================
+   LOAD (🔥 PANEL READY)
 ========================= */
 
 async function loadIncidencias(){
 
+  const panel = getRoot();
   const tbody = $("#incidencias-body");
+
+  if(panel){
+    panel.classList.remove("ready");
+  }
+
   if(!tbody) return;
 
   setLoading();
@@ -69,20 +110,28 @@ async function loadIncidencias(){
     const res = await Onion.fetch(Onion.config.API + "/tickets");
 
     const items = normalize(res);
+    currentItems = items;
 
     if(!items.length){
       setEmpty();
       updateKPIs([]);
+      panel?.classList.add("ready");
       return;
     }
 
     render(items);
     updateKPIs(items);
 
+    requestAnimationFrame(()=>{
+      panel?.classList.add("ready");
+    });
+
   }catch(e){
 
     Onion.error("💥 ERROR INCIDENCIAS:", e);
+
     setError();
+    panel?.classList.add("ready");
 
   }
 
@@ -97,9 +146,7 @@ function normalize(res){
   if(!res) return [];
 
   if(Array.isArray(res)) return res;
-
   if(res.tickets) return res.tickets;
-
   if(res.data) return res.data;
 
   return [];
@@ -190,12 +237,10 @@ function render(items){
 
   }).join("");
 
-  bindEvents(items);
-
 }
 
 /* =========================
-   MAP DATA
+   MAP
 ========================= */
 
 function mapItem(i){
@@ -211,41 +256,6 @@ function mapItem(i){
     fecha: formatFecha(i.createdAt),
     raw: i
   };
-
-}
-
-/* =========================
-   EVENTS (FIX ROOT SCOPED)
-========================= */
-
-function bindEvents(items){
-
-  const root = getRoot();
-  if(!root) return;
-
-  const handler = (e)=>{
-
-    const btn = e.target.closest(".view-btn");
-    if(!btn) return;
-
-    const id = btn.dataset.id;
-
-    const item = items.find(i =>
-      String(i.id || i.ticketId) === String(id)
-    );
-
-    if(item){
-      showDetalle(item);
-    }
-
-  };
-
-  root.addEventListener("click", handler);
-
-  // 🔥 cleanup automático
-  Onion.onCleanup(()=>{
-    root.removeEventListener("click", handler);
-  });
 
 }
 

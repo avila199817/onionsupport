@@ -1,10 +1,7 @@
 "use strict";
 
 /* =========================
-   FETCH (ONION PRO FIXED V2)
-   - Respeta AbortController externo
-   - Timeout interno seguro
-   - No rompe router
+   FETCH (ONION PRO FINAL FIX)
 ========================= */
 
 (function(){
@@ -17,7 +14,7 @@
   const Onion = window.Onion;
 
   /* =========================
-     NORMALIZE URL
+     NORMALIZE URL (🔥 FIX)
   ========================= */
 
   function normalizeUrl(url){
@@ -25,13 +22,24 @@
     if(!url) return null;
 
     try{
+
+      // 🔥 FULL URL
       if(url.startsWith("http")){
         return url;
       }
-      if(url.startsWith("/")){
-        return window.location.origin + url;
+
+      // 🔥 API ROUTES
+      if(url.startsWith("/api/")){
+        return Onion.config.API.replace(/\/api$/, "") + url;
       }
-      return window.location.origin + "/" + url.replace(/^\/+/,"");
+
+      // 🔥 RELATIVE API
+      if(url.startsWith("/")){
+        return Onion.config.API + url;
+      }
+
+      return Onion.config.API + "/" + url;
+
     }catch(e){
       Onion.error("URL inválida:", url);
       return null;
@@ -40,7 +48,7 @@
   }
 
   /* =========================
-     FETCH JSON
+     FETCH
   ========================= */
 
   Onion.fetch = async function(url, options = {}){
@@ -51,12 +59,10 @@
       throw new Error("NO_URL");
     }
 
-    // 🔥 FIX CLAVE
     const internalController = new AbortController();
     const signal = options.signal || internalController.signal;
 
     const timeout = setTimeout(()=>{
-      // solo abortamos si NO hay signal externo
       if(!options.signal){
         internalController.abort();
       }
@@ -72,6 +78,7 @@
         headers["Content-Type"] = "application/json";
       }
 
+      // 🔥 TOKEN
       try{
         const token = Onion.auth?.getToken?.();
         if(token){
@@ -88,20 +95,24 @@
           : undefined,
         headers,
         signal,
-        credentials: "include"
+        credentials: "include" // 🔥 CLAVE
       });
 
       /* =========================
-         AUTH CONTROL
+         AUTH CONTROL (🔥 SUAVIZADO)
       ========================= */
 
       if(res.status === 401){
+
         Onion.warn("🔐 401 no autorizado");
 
-        Onion.clearUser?.();
-        Onion.auth?.clearToken?.();
+        // ❌ antes rompía todo
+        // Onion.clearUser();
+        // Onion.auth?.clearToken?.();
 
+        // 🔥 SOLO avisamos
         throw new Error("401");
+
       }
 
       /* =========================
@@ -109,7 +120,6 @@
       ========================= */
 
       let data;
-
       const contentType = res.headers.get("content-type") || "";
 
       if(contentType.includes("application/json")){

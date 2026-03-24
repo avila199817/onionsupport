@@ -2,9 +2,6 @@
 
 /* =========================
    CLEANUP (ONION PRO FINAL CLEAN)
-   - No sobrescribe core
-   - Solo extiende
-   - Sin duplicados
 ========================= */
 
 (function(){
@@ -16,8 +13,11 @@
 
   const Onion = window.Onion;
 
+  // 🔥 asegurar state SIEMPRE
+  Onion.state = Onion.state || {};
+
   /* =========================
-     ENSURE BASE (NO PISAR)
+     BASE
   ========================= */
 
   if(!Array.isArray(Onion.state.cleanup)){
@@ -67,23 +67,17 @@
   }
 
   /* =========================
-     HELPERS (SOLO AÑADIR)
+     HELPERS
   ========================= */
 
   Onion.cleanupInterval = function(id){
-
     if(!id) return;
-
     Onion.onCleanup(()=> clearInterval(id));
-
   };
 
   Onion.cleanupTimeout = function(id){
-
     if(!id) return;
-
     Onion.onCleanup(()=> clearTimeout(id));
-
   };
 
   Onion.cleanupEvent = function(target, name, handler, options){
@@ -99,25 +93,17 @@
   };
 
   Onion.cleanupObserver = function(observer){
-
     if(!observer) return;
-
     Onion.onCleanup(()=> observer.disconnect());
-
   };
 
   Onion.cleanupRAF = function(id){
-
     if(!id) return;
-
     Onion.onCleanup(()=> cancelAnimationFrame(id));
-
   };
 
   Onion.cleanupAll = function(){
-
     Onion.runCleanup();
-
   };
 
 })();

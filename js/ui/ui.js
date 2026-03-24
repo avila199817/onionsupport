@@ -24,13 +24,15 @@
       const username = localStorage.getItem("onion_user_slug");
       const name = localStorage.getItem("onion_user_name");
       const avatar = localStorage.getItem("onion_user_avatar");
+      const darkMode = localStorage.getItem("darkMode");
 
       if(username || name || avatar){
         user = {
           username,
           name,
           avatar,
-          hasAvatar: !!avatar
+          hasAvatar: !!avatar,
+          darkMode: darkMode !== "false" // 🔥 default true
         };
       }
 
@@ -76,6 +78,24 @@
       .toUpperCase();
 
     el.textContent = initials;
+
+  }
+
+  /* =========================
+     THEME (🔥 AÑADIDO)
+  ========================= */
+
+  function applyThemeFromState(){
+
+    const user = getUserSafe();
+
+    const isDark = user?.darkMode !== false;
+
+    if(isDark){
+      document.documentElement.removeAttribute("data-theme");
+    }else{
+      document.documentElement.setAttribute("data-theme","light");
+    }
 
   }
 
@@ -130,12 +150,11 @@
   };
 
   /* =========================
-     EVENTS GLOBAL (🔥 FIX)
+     EVENTS GLOBAL
   ========================= */
 
   function bindGlobalEvents(){
 
-    // 🔥 usar sistema Onion (NO addEventListener directo)
     Onion.cleanupEvent(document, "click", async (e)=>{
 
       const sidebar = document.querySelector(".sidebar");
@@ -203,12 +222,11 @@
   }
 
   /* =========================
-     INIT (🔥 FIX)
+     INIT
   ========================= */
 
   Onion.ui.init = function(){
 
-    // 🔥 SIEMPRE rebind en SPA
     bindGlobalEvents();
 
     initialized = true;
@@ -220,15 +238,19 @@
   };
 
   /* =========================
-     REFRESH
+     REFRESH (🔥 CLAVE)
   ========================= */
 
   Onion.ui.refresh = function(){
 
     requestAnimationFrame(()=>{
+
+      applyThemeFromState(); // 🔥 APLICA TEMA SIEMPRE
+
       Onion.ui.renderSidebar();
       Onion.ui.renderTopbar();
       Onion.ui.updateSidebarActive();
+
     });
 
   };

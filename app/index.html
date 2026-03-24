@@ -34,120 +34,6 @@
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  
-<style>
-html,body{
-  margin:0;
-  padding:0;
-}
-
-body.loading{
-  overflow:hidden;
-}
-
-/* Oculta app */
-body.loading .layout{
-  visibility:hidden;
-}
-
-/* =========================
-   FULL GLASS BACKGROUND PRO
-========================= */
-
-#app-loader{
-  position:fixed;
-  inset:0;
-
-  background:
-    radial-gradient(circle at 30% 20%, rgba(255,255,255,0.15), transparent 50%),
-    radial-gradient(circle at 70% 80%, rgba(255,255,255,0.1), transparent 50%),
-    rgba(20,20,20,0.25);
-
-  backdrop-filter:blur(28px) saturate(200%);
-  -webkit-backdrop-filter:blur(28px) saturate(200%);
-
-  display:flex;
-  align-items:center;
-  justify-content:center;
-
-  z-index:9999;
-
-  transition:
-    opacity .6s ease,
-    visibility .6s ease;
-}
-
-/* fade out */
-body:not(.loading) #app-loader{
-  opacity:0;
-  visibility:hidden;
-}
-
-/* =========================
-   LOGO ONLY
-========================= */
-
-.loader-logo{
-  width:64px;
-  height:64px;
-  object-fit:contain;
-
-  animation:
-    bounce 1.2s ease-in-out infinite,
-    pulse 1.6s ease-in-out infinite;
-
-  filter:
-    drop-shadow(0 12px 40px rgba(0,0,0,0.4));
-}
-
-/* =========================
-   ANIMACIONES
-========================= */
-
-@keyframes bounce{
-  0%,100%{ transform:translateY(0); }
-  50%{ transform:translateY(-14px); }
-}
-
-@keyframes pulse{
-  0%,100%{ opacity:1; }
-  50%{ opacity:.55; }
-}
-
-</style>
-
-
-
-
-
-
-
-
-
-
   
 
 <noscript>
@@ -160,12 +46,6 @@ body:not(.loading) #app-loader{
     ⚠️ Esta aplicación requiere JavaScript para funcionar.
   </div>
 </noscript>
-
-
-
-
-
-
 
 
   

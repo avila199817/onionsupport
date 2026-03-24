@@ -1,9 +1,10 @@
 "use strict";
 
 /* =========================
-   FETCH (ONION PRO FIXED)
-   - No navega
-   - No invade router
+   FETCH (ONION PRO FIXED V2)
+   - Respeta AbortController externo
+   - Timeout interno seguro
+   - No rompe router
 ========================= */
 
 (function(){
@@ -50,10 +51,15 @@
       throw new Error("NO_URL");
     }
 
-    const controller = new AbortController();
+    // 🔥 FIX CLAVE
+    const internalController = new AbortController();
+    const signal = options.signal || internalController.signal;
 
     const timeout = setTimeout(()=>{
-      controller.abort();
+      // solo abortamos si NO hay signal externo
+      if(!options.signal){
+        internalController.abort();
+      }
     }, Onion.config.TIMEOUT);
 
     try{
@@ -81,7 +87,7 @@
             : options.body)
           : undefined,
         headers,
-        signal: controller.signal,
+        signal,
         credentials: "include"
       });
 
@@ -92,7 +98,6 @@
       if(res.status === 401){
         Onion.warn("🔐 401 no autorizado");
 
-        // 🔥 SOLO limpiamos estado
         Onion.clearUser?.();
         Onion.auth?.clearToken?.();
 

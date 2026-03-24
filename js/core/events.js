@@ -1,9 +1,5 @@
 "use strict";
 
-/* =========================
-   EVENTS (ONION CORE BUS PRO FIXED)
-========================= */
-
 (function(){
 
   if(!window.Onion){
@@ -14,13 +10,6 @@
   const Onion = window.Onion;
 
   const events = Object.create(null);
-  const DEBUG = false;
-
-  function safeCleanup(fn){
-    if(typeof Onion.onCleanup === "function"){
-      Onion.onCleanup(fn);
-    }
-  }
 
   /* =========================
      ON
@@ -34,24 +23,7 @@
       events[name] = new Set();
     }
 
-    if(events[name].has(handler)) return;
-
     events[name].add(handler);
-
-    if(DEBUG){
-      Onion.log?.("📡 ON:", name, "total:", events[name].size);
-    }
-
-    // 🔥 cleanup automático por módulo
-    safeCleanup(()=>{
-      if(events[name]){
-        events[name].delete(handler);
-
-        if(events[name].size === 0){
-          delete events[name];
-        }
-      }
-    });
 
   };
 
@@ -83,11 +55,11 @@
 
     if(!name || typeof handler !== "function") return;
 
-    const wrapper = function(...args){
+    const wrapper = function(payload){
       try{
-        handler(...args);
+        handler(payload);
       }catch(e){
-        Onion.error?.("💥 Event once error:", name, e);
+        console.error("💥 Event once error:", name, e);
       }finally{
         Onion.events.off(name, wrapper);
       }
@@ -111,38 +83,18 @@
       try{
         handler(payload);
       }catch(e){
-        Onion.error?.("💥 Event error:", name, e);
+        console.error("💥 Event error:", name, e);
       }
     }
 
   };
 
   /* =========================
-     CLEAR (🔥 GLOBAL FIX)
+     CLEAR (manual)
   ========================= */
 
   Onion.events.clear = function(){
-
-    Object.keys(events).forEach(k=>{
-      delete events[k];
-    });
-
-    if(DEBUG){
-      Onion.log?.("🧹 Events cleared");
-    }
-
+    Object.keys(events).forEach(k => delete events[k]);
   };
-
-  /* =========================
-     AUTO CLEANUP GLOBAL (🔥 CLAVE)
-  ========================= */
-
-  if(typeof Onion.onCleanup === "function"){
-
-    Onion.onCleanup(()=>{
-      Onion.events.clear();
-    });
-
-  }
 
 })();

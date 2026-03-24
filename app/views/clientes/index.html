@@ -1,1 +1,68 @@
+<div class="panel-content clientes">
 
+  <div class="container">
+
+    <!-- HEADER VACÍO (ESPACIADO COMO HOME) -->
+    <div class="dashboard-header"></div>
+
+    <!-- =========================
+         GRID PRINCIPAL
+    ========================= -->
+    <div class="dashboard-grid">
+
+      <div class="panel-block table-block">
+
+        <div class="section-title">Listado de clientes</div>
+
+        <!-- FILTROS -->
+        <div class="filters-row" style="margin-bottom:16px;">
+
+          <input 
+            type="text"
+            id="search-cliente"
+            placeholder="Buscar cliente..."
+            autocomplete="off"
+          >
+
+          <select id="filter-estado-cliente">
+            <option value="">Estado</option>
+            <option value="activo">Activo</option>
+            <option value="inactivo">Inactivo</option>
+          </select>
+
+        </div>
+
+        <!-- TABLA -->
+        <div class="table-container">
+
+          <table class="clientes-table">
+
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Nombre</th>
+                <th>Email</th>
+                <th>Teléfono</th>
+                <th>Estado</th>
+                <th>Fecha</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+
+            <tbody id="clientes-body">
+              <tr class="table-loading">
+                <td colspan="7">Cargando clientes...</td>
+              </tr>
+            </tbody>
+
+          </table>
+
+        </div>
+
+      </div>
+
+    </div>
+
+  </div>
+
+</div>

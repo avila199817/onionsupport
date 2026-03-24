@@ -88,13 +88,10 @@ if (window.Onion) {
     navigating: false,
     renderId: 0,
 
-    currentScript: null,
-    currentStyle: null,
-
     abortController: null,
 
     cleanup: [],
-    globalEvents: [], // 🔥 NUEVO
+    globalEvents: [],
 
     ready: false
   };
@@ -183,7 +180,7 @@ if (window.Onion) {
   };
 
   /* =========================
-     CLEANUP CORE (🔥 FIX)
+     CLEANUP CORE
   ========================= */
 
   Onion.runCleanup = function(){
@@ -199,7 +196,7 @@ if (window.Onion) {
 
     Onion.state.cleanup = [];
 
-    // 🔥 limpiar eventos globales
+    // limpiar eventos globales
     if(Array.isArray(Onion.state.globalEvents)){
       for(const ev of Onion.state.globalEvents){
         try{
@@ -209,7 +206,7 @@ if (window.Onion) {
       Onion.state.globalEvents = [];
     }
 
-    // 🔥 reset estado crítico
+    // reset estado
     Onion.state.rendering = false;
     Onion.state.navigating = false;
 
@@ -223,7 +220,7 @@ if (window.Onion) {
   };
 
   /* =========================
-     NAVIGATION (🔥 FIX)
+     NAVIGATION
   ========================= */
 
   Onion.go = function(path){
@@ -235,7 +232,6 @@ if (window.Onion) {
       return;
     }
 
-    // 🔥 LIMPIEZA TOTAL ANTES DE NAVEGAR
     Onion.runCleanup();
 
     Onion.router.navigate(path);
@@ -264,69 +260,7 @@ if (window.Onion) {
   };
 
   /* =========================
-     GLOBAL LOADER HOOK
-========================= */
-
-  (function(){
-
-    function hookFetch(){
-
-      if(!Onion.fetch){
-        return setTimeout(hookFetch, 50);
-      }
-
-      const originalFetch = Onion.fetch;
-
-      Onion.fetch = async function(...args){
-
-        const loader = document.getElementById("global-loader");
-
-        if(loader){
-          loader.classList.add("active");
-          loader.style.width = "30%";
-        }
-
-        try{
-
-          const res = await originalFetch.apply(this, args);
-
-          if(loader){
-            loader.style.width = "80%";
-          }
-
-          return res;
-
-        }finally{
-
-          if(loader){
-            loader.style.width = "100%";
-
-            setTimeout(()=>{
-              loader.style.opacity = "0";
-
-              setTimeout(()=>{
-                loader.style.width = "0%";
-                loader.classList.remove("active");
-                loader.style.opacity = "";
-              }, 300);
-
-            }, 200);
-          }
-
-        }
-
-      };
-
-      Onion.log("🔥 Loader hook activado");
-
-    }
-
-    hookFetch();
-
-  })();
-
-  /* =========================
-     READY FLAG
+     READY
   ========================= */
 
   Onion.log("🚀 Onion Core listo");

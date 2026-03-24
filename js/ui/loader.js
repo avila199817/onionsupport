@@ -1,8 +1,8 @@
 "use strict";
 
 /* =========================
-   LOADER (ONION PRO SAFE)
-   - Con tiempo mínimo (2.5s)
+   LOADER (SOLO FULLSCREEN)
+   - Para cargas pesadas
 ========================= */
 
 (function(){
@@ -16,19 +16,14 @@
 
   let timer = null;
   let active = false;
-  let startTime = 0;
-
-  const MIN_TIME = 2500; // 🔥 2.5s
 
   /* =========================
-     SHOW
+     SHOW (SOLO MANUAL)
   ========================= */
 
   Onion.ui.showLoader = function(){
 
     if(active || timer) return;
-
-    startTime = Date.now();
 
     timer = setTimeout(()=>{
 
@@ -38,12 +33,12 @@
       document.body.classList.add("loading");
       active = true;
 
-    }, 120);
+    }, 200); // pequeño delay anti parpadeo
 
   };
 
   /* =========================
-     HIDE (CON TIEMPO MÍNIMO)
+     HIDE
   ========================= */
 
   Onion.ui.hideLoader = function(){
@@ -53,15 +48,8 @@
       timer = null;
     }
 
-    const elapsed = Date.now() - startTime;
-    const remaining = Math.max(0, MIN_TIME - elapsed);
-
-    setTimeout(()=>{
-
-      document.body.classList.remove("loading");
-      active = false;
-
-    }, remaining);
+    document.body.classList.remove("loading");
+    active = false;
 
   };
 

@@ -37,7 +37,6 @@
       const finalSrc = normalizeUrl(src);
       if(!finalSrc) return resolve();
 
-      // 🔥 eliminar scripts anteriores
       document.querySelectorAll("script[data-onion-page]").forEach(s=>{
         try{ s.remove(); }catch{}
       });
@@ -66,7 +65,6 @@
       const finalHref = normalizeUrl(href);
       if(!finalHref) return resolve();
 
-      // 🔥 limpiar CSS anterior
       document
         .querySelectorAll('link[data-onion-page-style]')
         .forEach(l=>{
@@ -136,7 +134,7 @@
   };
 
   /* =========================
-     RENDER (🔥 FINAL PRO + DATA AWAIT)
+     RENDER (🔥 PRO SIN GLITCH)
   ========================= */
 
   Onion.render = async function(){
@@ -145,67 +143,55 @@
 
     try{
 
-      // 🔥 LOADER ON
       Onion.ui.showLoader?.();
 
       const route = Onion.router.resolve();
 
-      // 🔥 actualizar título
-      document.title = route.title || "Onion";
+      // 🔥 title limpio
+      if(route.title){
+        document.title = "Onion Support · " + route.title;
+      }
 
-      // CSS
+      // 🔥 HTML primero (pero oculto)
+      const html = await Onion.fetchHTML(route.page);
+
+      if(currentRenderId !== Onion.state.renderId) return;
+
+      const content = extractContent(html);
+
+      // 🔥 CLAVE: ocultar antes de pintar
+      content.classList.remove("ready");
+
+      // 🔥 limpiar antes de pintar
+      Onion.events.clear?.();
+      Onion.runCleanup?.();
+
+      // 🔥 pintar pero oculto
+      Onion.swapContent(content);
+
+      // 🔥 CSS después
       if(route.style){
         await Onion.loadStyle(route.style);
       }
 
-      // HTML
-      const html = await Onion.fetchHTML(route.page);
-
-      if(currentRenderId !== Onion.state.renderId){
-        return;
-      }
-
-      const content = extractContent(html);
-
-      // 🔥 limpiar eventos + vista anterior
-      Onion.events.clear?.();
-      Onion.runCleanup?.();
-
-      if(currentRenderId !== Onion.state.renderId){
-        return;
-      }
-
-      // 🔥 pintar layout vacío (estructura)
-      Onion.swapContent(content);
-
-      // JS
+      // 🔥 JS después
       if(route.script){
         await Onion.loadScript(route.script);
       }
 
-      if(currentRenderId !== Onion.state.renderId){
-        return;
-      }
+      if(currentRenderId !== Onion.state.renderId) return;
 
-      // 🔥 ESPERAR A LOS DATOS DE LA VISTA
-      if(typeof Onion.page === "function"){
-        try{
-          await Onion.page();
-        }catch(e){
-          console.error("💥 PAGE ERROR:", e);
-        }
-      }
+      // 🔥 ESPERAR UN FRAME → evita FOUC
+      await new Promise(r => requestAnimationFrame(r));
 
-      if(currentRenderId !== Onion.state.renderId){
-        return;
-      }
+      // 🔥 mostrar limpio
+      content.classList.add("ready");
 
       // evento global
       window.dispatchEvent(new CustomEvent("onion:route-change", {
         detail: location.pathname
       }));
 
-      // UI
       Onion.ui.refresh();
       Onion.ui.initSearch?.();
 
@@ -215,7 +201,6 @@
 
     }finally{
 
-      // 🔥 LOADER OFF SIEMPRE
       Onion.ui.hideLoader?.();
 
     }

@@ -24,15 +24,13 @@
       const username = localStorage.getItem("onion_user_slug");
       const name = localStorage.getItem("onion_user_name");
       const avatar = localStorage.getItem("onion_user_avatar");
-      const darkMode = localStorage.getItem("darkMode");
 
       if(username || name || avatar){
         user = {
           username,
           name,
           avatar,
-          hasAvatar: !!avatar,
-          darkMode: darkMode !== "false" // 🔥 default true
+          hasAvatar: !!avatar
         };
       }
 
@@ -78,24 +76,6 @@
       .toUpperCase();
 
     el.textContent = initials;
-
-  }
-
-  /* =========================
-     THEME (🔥 AÑADIDO)
-  ========================= */
-
-  function applyThemeFromState(){
-
-    const user = getUserSafe();
-
-    const isDark = user?.darkMode !== false;
-
-    if(isDark){
-      document.documentElement.removeAttribute("data-theme");
-    }else{
-      document.documentElement.setAttribute("data-theme","light");
-    }
 
   }
 
@@ -238,14 +218,12 @@
   };
 
   /* =========================
-     REFRESH (🔥 CLAVE)
+     REFRESH
   ========================= */
 
   Onion.ui.refresh = function(){
 
     requestAnimationFrame(()=>{
-
-      applyThemeFromState(); // 🔥 APLICA TEMA SIEMPRE
 
       Onion.ui.renderSidebar();
       Onion.ui.renderTopbar();

@@ -1,9 +1,5 @@
 "use strict";
 
-/* =========================
-   PREFETCH (ONION PRO SAFE)
-========================= */
-
 (function(){
 
   if(!window.Onion){
@@ -44,14 +40,14 @@
   }
 
   /* =========================
-     PREFETCH CORE
+     PREFETCH
   ========================= */
 
   Onion.prefetch = function(path){
 
     try{
 
-      if(!Onion.routes) return; // 🔥 FIX CLAVE
+      if(!Onion.routes) return;
 
       const clean = normalizePath(path);
       if(!clean) return;
@@ -63,53 +59,35 @@
 
       prefetched.add(clean);
 
-      /* HTML */
+      // HTML
       if(route.page){
         fetch(route.page, { credentials: "include" }).catch(()=>{});
       }
 
-      /* CSS */
+      // CSS
       if(route.style){
 
-        const exists = document.querySelector(
-          `link[href^="${route.style}"]`
-        );
+        const link = document.createElement("link");
+        link.rel = "prefetch";
+        link.as = "style";
+        link.href = route.style;
 
-        if(!exists){
-
-          const link = document.createElement("link");
-          link.rel = "prefetch";
-          link.as = "style";
-          link.href = route.style;
-
-          document.head.appendChild(link);
-
-        }
-
+        document.head.appendChild(link);
       }
 
-      /* JS */
+      // JS
       if(route.script){
 
-        const exists = document.querySelector(
-          `link[href^="${route.script}"]`
-        );
+        const link = document.createElement("link");
+        link.rel = "prefetch";
+        link.as = "script";
+        link.href = route.script;
 
-        if(!exists){
-
-          const link = document.createElement("link");
-          link.rel = "prefetch";
-          link.as = "script";
-          link.href = route.script;
-
-          document.head.appendChild(link);
-
-        }
-
+        document.head.appendChild(link);
       }
 
     }catch(e){
-      Onion.error?.("💥 Prefetch error:", e);
+      console.error("💥 Prefetch error:", e);
     }
 
   };

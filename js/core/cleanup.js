@@ -1,9 +1,5 @@
 "use strict";
 
-/* =========================
-   CLEANUP (ONION CORE CLEAN)
-========================= */
-
 (function(){
 
   if(!window.Onion){
@@ -14,10 +10,6 @@
   const Onion = window.Onion;
 
   Onion.state = Onion.state || {};
-
-  /* =========================
-     STORAGE
-  ========================= */
 
   if(!Array.isArray(Onion.state.cleanup)){
     Onion.state.cleanup = [];
@@ -32,61 +24,39 @@
   ========================= */
 
   Onion.onCleanup = function(fn){
-    if(typeof fn !== "function") return;
-    Onion.state.cleanup.push(fn);
+    if(typeof fn === "function"){
+      Onion.state.cleanup.push(fn);
+    }
   };
 
   Onion.runCleanup = function(){
 
-    const list = Onion.state.cleanup;
-
-    if(Array.isArray(list)){
-      for(const fn of list){
-        try{ fn(); }
-        catch(e){ Onion.error?.("Cleanup error:", e); }
-      }
+    // ejecutar funciones
+    for(const fn of Onion.state.cleanup){
+      try{ fn(); }
+      catch(e){ console.error("Cleanup error:", e); }
     }
 
     Onion.state.cleanup = [];
 
-    // 🔥 limpiar eventos registrados
-    if(Array.isArray(Onion.state.globalEvents)){
-
-      for(const ev of Onion.state.globalEvents){
-        try{
-          ev.target.removeEventListener(ev.name, ev.handler, ev.options);
-        }catch{}
-      }
-
-      Onion.state.globalEvents = [];
-
+    // eliminar eventos
+    for(const ev of Onion.state.globalEvents){
+      try{
+        ev.target.removeEventListener(ev.name, ev.handler, ev.options);
+      }catch{}
     }
 
+    Onion.state.globalEvents = [];
   };
 
   /* =========================
      HELPERS
   ========================= */
 
-  Onion.cleanupInterval = function(id){
-    if(!id) return;
-    Onion.onCleanup(()=> clearInterval(id));
-  };
-
-  Onion.cleanupTimeout = function(id){
-    if(!id) return;
-    Onion.onCleanup(()=> clearTimeout(id));
-  };
-
-  Onion.cleanupRAF = function(id){
-    if(!id) return;
-    Onion.onCleanup(()=> cancelAnimationFrame(id));
-  };
-
-  Onion.cleanupObserver = function(observer){
-    if(!observer) return;
-    Onion.onCleanup(()=> observer.disconnect());
-  };
+  Onion.cleanupInterval = id => id && Onion.onCleanup(()=> clearInterval(id));
+  Onion.cleanupTimeout = id => id && Onion.onCleanup(()=> clearTimeout(id));
+  Onion.cleanupRAF = id => id && Onion.onCleanup(()=> cancelAnimationFrame(id));
+  Onion.cleanupObserver = obs => obs && Onion.onCleanup(()=> obs.disconnect());
 
   /* =========================
      EVENTOS
@@ -98,14 +68,8 @@
 
     target.addEventListener(name, handler, options);
 
-    // registrar para limpieza
-    const ref = { target, name, handler, options };
-    Onion.state.globalEvents.push(ref);
-
-    Onion.onCleanup(()=>{
-      try{
-        target.removeEventListener(name, handler, options);
-      }catch{}
+    Onion.state.globalEvents.push({
+      target, name, handler, options
     });
 
   };

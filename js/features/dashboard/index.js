@@ -10,6 +10,7 @@ if(!Onion){
 }
 
 let interval = null;
+let initialized = false;
 
 /* =========================
    ROOT
@@ -63,103 +64,54 @@ function setMonthLabel(){
 }
 
 /* =========================
-   DASHBOARD
+   DASHBOARD DATA
 ========================= */
 
-async function loadDashboard(){
+async function loadDashboardData(){
 
-  try{
+  /* =========================
+     FACTURAS
+  ========================= */
 
-    /* =========================
-       FACTURAS (FUENTE REAL)
-    ========================= */
+  const resFacturas = await Onion.fetch(Onion.config.API + "/facturas");
+  const facturas = resFacturas?.facturas || resFacturas?.data || [];
 
-    const resFacturas = await Onion.fetch(Onion.config.API + "/facturas");
-    const facturas = resFacturas?.facturas || resFacturas?.data || [];
+  const pagadas = facturas.filter(f => f.estadoPago === "pagada");
+  const pendientes = facturas.filter(f => f.estadoPago === "pendiente");
 
-    const pagadas = facturas.filter(f => f.estadoPago === "pagada");
-    const pendientes = facturas.filter(f => f.estadoPago === "pendiente");
+  const totalPagado = pagadas.reduce((acc, f) => acc + safe(f.total), 0);
+  const totalPendiente = pendientes.reduce((acc, f) => acc + safe(f.total), 0);
 
-    const totalPagado = pagadas.reduce((acc, f) => acc + safe(f.total), 0);
-    const totalPendiente = pendientes.reduce((acc, f) => acc + safe(f.total), 0);
+  const now = new Date();
+  const startMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    /* =========================
-       MES ACTUAL (SOLO PAGADAS)
-    ========================= */
+  const mensualPagado = pagadas
+    .filter(f => new Date(f.fecha || f.createdAt) >= startMonth)
+    .reduce((acc, f) => acc + safe(f.total), 0);
 
-    const now = new Date();
-    const startMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  setText("home-facturas", formatMoney(totalPagado));
+  setText("home-facturas-pendiente", formatMoney(totalPendiente));
+  setText("home-facturacion-mes", formatMoney(mensualPagado));
 
-    const mensualPagado = pagadas
-      .filter(f => new Date(f.fecha || f.createdAt) >= startMonth)
-      .reduce((acc, f) => acc + safe(f.total), 0);
+  /* =========================
+     KPIs
+  ========================= */
 
-    /* =========================
-       PINTAR FACTURACIÓN
-    ========================= */
+  const res = await Onion.fetch(Onion.config.API + "/dashboard");
+  const data = res?.data || res;
+  const k = data?.kpis || {};
 
-    setText("home-facturas", formatMoney(totalPagado));
-    setText("home-facturas-pendiente", formatMoney(totalPendiente));
-    setText("home-facturacion-mes", formatMoney(mensualPagado));
+  setText("home-usuarios", safe(k.usuarios));
+  setText("home-usuarios-inactivos", safe(k.usuariosInactivos));
 
-    /* =========================
-       DASHBOARD NORMAL
-    ========================= */
+  setText("home-clientes", safe(k.clientes));
+  setText("home-clientes-inactivos", safe(k.clientesInactivos));
 
-    const res = await Onion.fetch(Onion.config.API + "/dashboard");
-    const data = res?.data || res;
-    const k = data?.kpis || {};
+  setText("tickets-hoy", safe(k.ticketsToday));
+  setText("resueltos-hoy", safe(k.resueltosToday));
+  setText("pendientes-hoy", safe(k.pendientesToday));
 
-    setText("home-usuarios", safe(k.usuarios));
-    setText("home-usuarios-inactivos", safe(k.usuariosInactivos));
-
-    setText("home-clientes", safe(k.clientes));
-    setText("home-clientes-inactivos", safe(k.clientesInactivos));
-
-    setText("tickets-hoy", safe(k.ticketsToday));
-    setText("resueltos-hoy", safe(k.resueltosToday));
-    setText("pendientes-hoy", safe(k.pendientesToday));
-
-    renderActivity(data.activity || []);
-
-  }catch(e){
-    Onion.error("💥 Dashboard error:", e);
-  }
-
-}
-
-/* =========================
-   ACTIVITY
-========================= */
-
-function renderActivity(items){
-
-  const list = $("activity-list");
-  if(!list) return;
-
-  list.innerHTML = "";
-
-  if(!items.length){
-    list.innerHTML = "<div>Sin actividad</div>";
-    return;
-  }
-
-  items.slice(0,8).forEach(i => {
-
-    const el = document.createElement("div");
-    el.className = "activity-item";
-
-    el.innerHTML = `
-      <div>
-        <strong>${escapeHTML(i.type)}</strong>
-        <p>${escapeHTML(i.desc)}</p>
-        <small>${timeAgo(i.time)}</small>
-      </div>
-    `;
-
-    list.appendChild(el);
-
-  });
+  renderActivity(data.activity || []);
 
 }
 
@@ -216,23 +168,96 @@ async function loadSystem(){
 }
 
 /* =========================
-   INIT
+   ACTIVITY
 ========================= */
 
-async function init(){
+function renderActivity(items){
+
+  const list = $("activity-list");
+  if(!list) return;
+
+  list.innerHTML = "";
+
+  if(!items.length){
+    list.innerHTML = "<div>Sin actividad</div>";
+    return;
+  }
+
+  items.slice(0,8).forEach(i => {
+
+    const el = document.createElement("div");
+    el.className = "activity-item";
+
+    el.innerHTML = `
+      <div>
+        <strong>${escapeHTML(i.type)}</strong>
+        <p>${escapeHTML(i.desc)}</p>
+        <small>${timeAgo(i.time)}</small>
+      </div>
+    `;
+
+    list.appendChild(el);
+
+  });
+
+}
+
+/* =========================
+   LOAD (🔥 PANEL READY)
+========================= */
+
+async function loadDashboard(){
+
+  const panel = getRoot();
+
+  if(panel){
+    panel.classList.remove("ready");
+  }
+
+  try{
+
+    await loadDashboardData();
+    await loadSystem();
+
+    requestAnimationFrame(()=>{
+      panel?.classList.add("ready");
+    });
+
+  }catch(e){
+
+    Onion.error("💥 Dashboard error:", e);
+
+    panel?.classList.add("ready");
+
+  }
+
+}
+
+/* =========================
+   INIT (SPA SAFE)
+========================= */
+
+function init(){
 
   const root = getRoot();
   if(!root) return;
 
+  if(initialized) return;
+  initialized = true;
+
   setMonthLabel();
 
-  await loadDashboard();
-  loadSystem();
+  loadDashboard();
 
   interval = setInterval(()=>{
-    loadDashboard();
+    loadDashboardData();
     loadSystem();
   }, 60000);
+
+  Onion.onCleanup(()=>{
+    initialized = false;
+    if(interval) clearInterval(interval);
+  });
 
 }
 

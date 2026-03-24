@@ -1,115 +1,123 @@
+"use strict";
+
 /* =====================================================
-   ONION TOAST · PRO
+   ONION TOAST · PRO INTEGRATED
 ===================================================== */
 
 (function(){
 
-"use strict";
+  if(!window.Onion){
+    console.error("💥 Onion no definido (toast.js)");
+    return;
+  }
 
-const MAX_TOASTS = 5;
+  const Onion = window.Onion;
 
-function getContainer(){
+  const MAX_TOASTS = 5;
 
-let container = document.querySelector(".toast-container");
+  function getContainer(){
 
-if(!container){
+    let container = document.querySelector(".toast-container");
 
-container = document.createElement("div");
-container.className = "toast-container";
+    if(!container){
+      container = document.createElement("div");
+      container.className = "toast-container";
+      document.body.appendChild(container);
+    }
 
-document.body.appendChild(container);
+    return container;
 
-}
+  }
 
-return container;
+  /* =========================
+     REMOVE
+  ========================= */
 
-}
+  function removeToast(toast){
 
+    if(!toast) return;
 
-/* =====================================================
-   CREATE
-===================================================== */
+    toast.classList.remove("show");
+    toast.classList.add("hide");
 
-function showToast(message,type="info",duration=3000){
+    setTimeout(()=>{
+      toast.remove();
+    },250);
 
-const container = getContainer();
+  }
 
-/* limitar cantidad */
-if(container.children.length >= MAX_TOASTS){
-container.firstChild.remove();
-}
+  /* =========================
+     CLEAR ALL (🔥 CLEANUP)
+  ========================= */
 
-const toast = document.createElement("div");
-toast.className = `toast toast-${type}`;
+  function clearAll(){
 
-/* contenido seguro */
-const msg = document.createElement("div");
-msg.className = "toast-message";
-msg.textContent = message;
+    const container = document.querySelector(".toast-container");
+    if(!container) return;
 
-const btn = document.createElement("button");
-btn.className = "toast-close";
-btn.textContent = "✕";
+    container.innerHTML = "";
 
-toast.appendChild(msg);
-toast.appendChild(btn);
+  }
 
-container.appendChild(toast);
+  /* =========================
+     CREATE
+  ========================= */
 
+  function showToast(message, type="info", duration=3000){
 
-/* ANIMACIÓN ENTRADA */
-requestAnimationFrame(()=>{
-toast.classList.add("show");
-});
+    const container = getContainer();
 
+    if(container.children.length >= MAX_TOASTS){
+      container.firstChild.remove();
+    }
 
-/* CLOSE */
+    const toast = document.createElement("div");
+    toast.className = `toast toast-${type}`;
 
-let timeout = setTimeout(()=>{
-removeToast(toast);
-},duration);
+    const msg = document.createElement("div");
+    msg.className = "toast-message";
+    msg.textContent = message;
 
-btn.addEventListener("click",()=>{
+    const btn = document.createElement("button");
+    btn.className = "toast-close";
+    btn.textContent = "✕";
 
-clearTimeout(timeout);
-removeToast(toast);
+    toast.appendChild(msg);
+    toast.appendChild(btn);
+    container.appendChild(toast);
 
-});
+    requestAnimationFrame(()=>{
+      toast.classList.add("show");
+    });
 
-}
+    let timeout = setTimeout(()=>{
+      removeToast(toast);
+    }, duration);
 
+    btn.addEventListener("click", ()=>{
+      clearTimeout(timeout);
+      removeToast(toast);
+    });
 
-/* =====================================================
-   REMOVE
-===================================================== */
+    // 🔥 integrar con cleanup de Onion
+    Onion.onCleanup(()=>{
+      clearTimeout(timeout);
+      removeToast(toast);
+    });
 
-function removeToast(toast){
+  }
 
-if(!toast) return;
+  /* =========================
+     API
+  ========================= */
 
-toast.classList.remove("show");
-toast.classList.add("hide");
-
-setTimeout(()=>{
-toast.remove();
-},250);
-
-}
-
-
-/* =====================================================
-   API
-===================================================== */
-
-window.toast = {
-
-success:(msg,d)=>showToast(msg,"success",d),
-error:(msg,d)=>showToast(msg,"error",d),
-warning:(msg,d)=>showToast(msg,"warning",d),
-info:(msg,d)=>showToast(msg,"info",d),
-
-show:showToast
-
-};
+  Onion.ui.toast = {
+    success:(msg,d)=>showToast(msg,"success",d),
+    error:(msg,d)=>showToast(msg,"error",d),
+    warning:(msg,d)=>showToast(msg,"warning",d),
+    info:(msg,d)=>showToast(msg,"info",d),
+    show:showToast,
+    clear:clearAll
+  };
 
 })();

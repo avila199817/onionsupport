@@ -15,7 +15,6 @@
   gap:var(--section-gap, 28px);
 }
 
-/* ocultar headers legacy */
 .panel-content .dashboard-header{
   display:none;
 }
@@ -115,7 +114,7 @@
 
 
 /* =========================
-   TABLE BASE (🔥 CORE)
+   TABLE BASE
 ========================= */
 
 .panel-content table{
@@ -128,8 +127,6 @@
   font-size:14px;
 }
 
-
-/* HEADER */
 .panel-content table th{
   text-align:left;
   padding:12px;
@@ -140,8 +137,6 @@
   white-space:nowrap;
 }
 
-
-/* CELLS */
 .panel-content table td{
   padding:12px;
   border-bottom:1px solid var(--card-border);
@@ -153,8 +148,6 @@
   white-space:nowrap;
 }
 
-
-/* HOVER */
 .panel-content table tr:hover{
   background:var(--sb-hover);
 }
@@ -164,25 +157,21 @@
    COLUMN WIDTH SYSTEM
 ========================= */
 
-/* ID */
 .panel-content table th:nth-child(1),
 .panel-content table td:nth-child(1){
   width:70px;
 }
 
-/* NOMBRE / TITULO */
 .panel-content table th:nth-child(2),
 .panel-content table td:nth-child(2){
   width:260px;
 }
 
-/* EMAIL / CLIENTE */
 .panel-content table th:nth-child(3),
 .panel-content table td:nth-child(3){
   width:200px;
 }
 
-/* EXTRA */
 .panel-content table th:nth-child(4),
 .panel-content table td:nth-child(4){
   width:160px;
@@ -198,7 +187,6 @@
   width:160px;
 }
 
-/* ACCIONES */
 .panel-content table th:nth-child(7),
 .panel-content table td:nth-child(7){
   width:120px;
@@ -206,7 +194,80 @@
 
 
 /* =========================
-   BADGES GENERIC
+   USER / CLIENT CELL 🔥
+========================= */
+
+.panel-content .usuario-cell,
+.panel-content .cliente-cell{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  min-width:180px;
+}
+
+
+/* =========================
+   AVATAR GLOBAL 🔥
+========================= */
+
+.panel-content .usuario-avatar,
+.panel-content .cliente-avatar{
+  width:34px;
+  height:34px;
+
+  border-radius:50%;
+  object-fit:cover;
+
+  background:var(--card-bg);
+  border:1px solid var(--card-border);
+
+  flex-shrink:0;
+}
+
+/* fallback letras */
+.panel-content .cliente-avatar-fallback{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  font-size:12px;
+  font-weight:600;
+  color:#fff;
+
+  background:var(--accent);
+}
+
+
+/* =========================
+   TEXTOS CELDA
+========================= */
+
+.panel-content .usuario-username,
+.panel-content .cliente-nombre{
+  font-weight:500;
+  color:var(--text);
+  font-size:14px;
+}
+
+
+/* =========================
+   EMAIL
+========================= */
+
+.panel-content .usuario-email a,
+.panel-content .cliente-email a{
+  color:var(--text);
+  text-decoration:none;
+}
+
+.panel-content .usuario-email a:hover,
+.panel-content .cliente-email a:hover{
+  text-decoration:underline;
+}
+
+
+/* =========================
+   BADGES
 ========================= */
 
 .panel-content .badge{
@@ -216,7 +277,6 @@
   font-weight:500;
 }
 
-/* estados comunes */
 .badge.activo{
   background:rgba(34,197,94,0.15);
   color:#22c55e;
@@ -278,7 +338,7 @@
 
 
 /* =========================
-   STATES (LOADING / EMPTY)
+   STATES
 ========================= */
 
 .panel-content .loading{
@@ -334,6 +394,18 @@
 
   .panel-content .panel-block{
     padding:16px;
+  }
+
+  .panel-content table th,
+  .panel-content table td{
+    padding:10px;
+    font-size:13px;
+  }
+
+  .panel-content .usuario-avatar,
+  .panel-content .cliente-avatar{
+    width:28px;
+    height:28px;
   }
 
 }

@@ -159,38 +159,39 @@
 
       content.classList.remove("ready");
 
-      // 🔥 limpieza total
-      Onion.events.clear?.();
+      /* =========================
+         CLEANUP
+      ========================= */
+
       Onion.runCleanup?.();
 
-      // 🔥 montar contenido
+      /* =========================
+         SWAP
+      ========================= */
+
       Onion.swapContent(content);
 
-      // 🔥 cargar estilos
+      /* =========================
+         STYLE
+      ========================= */
+
       if(route.style){
         await Onion.loadStyle(route.style);
       }
 
-      // 🔥 cargar scripts
+      /* =========================
+         SCRIPT
+      ========================= */
+
       if(route.script){
         await Onion.loadScript(route.script);
       }
 
       if(currentRenderId !== Onion.state.renderId) return;
 
-      // 🔥 frame sync (evita glitch visual)
       await new Promise(r => requestAnimationFrame(r));
 
       content.classList.add("ready");
-
-      // 🔥 evento SPA
-      window.dispatchEvent(new CustomEvent("onion:route-change", {
-        detail: location.pathname
-      }));
-
-      // 🔥 UI refresh
-      Onion.ui.refresh();
-      Onion.ui.initSearch?.();
 
     }catch(e){
 

@@ -10,6 +10,7 @@ if(!Onion){
 }
 
 let initialized = false;
+let currentItems = [];
 
 /* =========================
    ROOT / DOM
@@ -24,7 +25,7 @@ function $(selector){
 }
 
 /* =========================
-   INIT (SPA SAFE)
+   INIT
 ========================= */
 
 function init(){
@@ -40,8 +41,6 @@ function init(){
 
   initialized = true;
 
-  Onion.log("📄 Incidencias init");
-
   bindEvents();
   loadIncidencias();
 
@@ -54,7 +53,7 @@ function init(){
 init();
 
 /* =========================
-   EVENTS (CLEAN)
+   EVENTS
 ========================= */
 
 function bindEvents(){
@@ -83,13 +82,7 @@ function bindEvents(){
 }
 
 /* =========================
-   STATE
-========================= */
-
-let currentItems = [];
-
-/* =========================
-   LOAD (🔥 PANEL READY)
+   LOAD
 ========================= */
 
 async function loadIncidencias(){
@@ -128,7 +121,7 @@ async function loadIncidencias(){
 
   }catch(e){
 
-    Onion.error("💥 ERROR INCIDENCIAS:", e);
+    console.error("💥 ERROR INCIDENCIAS:", e);
 
     setError();
     panel?.classList.add("ready");
@@ -205,33 +198,25 @@ function render(items){
 
     return `
       <tr data-id="${data.id}">
-
         <td>#${data.id}</td>
-
         <td>${escapeHTML(data.title)}</td>
-
         <td>${escapeHTML(data.cliente)}</td>
-
         <td>
           <span class="badge ${data.estado.class}">
             ${data.estado.label}
           </span>
         </td>
-
         <td>
           <span class="badge ${data.prioridad.class}">
             ${data.prioridad.label}
           </span>
         </td>
-
         <td>${data.fecha}</td>
-
         <td>
           <div class="table-actions">
             <button class="action-btn view-btn" data-id="${data.id}">👁</button>
           </div>
         </td>
-
       </tr>
     `;
 

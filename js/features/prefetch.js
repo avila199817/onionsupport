@@ -1,10 +1,7 @@
 "use strict";
 
 /* =========================
-   PREFETCH (ONION PRO FIXED)
-   - Seguro
-   - No invade render
-   - Sin duplicación
+   PREFETCH (ONION PRO SAFE)
 ========================= */
 
 (function(){
@@ -54,6 +51,8 @@
 
     try{
 
+      if(!Onion.routes) return; // 🔥 FIX CLAVE
+
       const clean = normalizePath(path);
       if(!clean) return;
 
@@ -64,18 +63,12 @@
 
       prefetched.add(clean);
 
-      /* =========================
-         HTML (LIGHT PREFETCH)
-      ========================= */
-
+      /* HTML */
       if(route.page){
         fetch(route.page, { credentials: "include" }).catch(()=>{});
       }
 
-      /* =========================
-         CSS
-      ========================= */
-
+      /* CSS */
       if(route.style){
 
         const exists = document.querySelector(
@@ -95,10 +88,7 @@
 
       }
 
-      /* =========================
-         JS
-      ========================= */
-
+      /* JS */
       if(route.script){
 
         const exists = document.querySelector(
@@ -125,7 +115,7 @@
   };
 
   /* =========================
-     EVENTS (SAFE)
+     EVENTS
   ========================= */
 
   if(!window.__ONION_PREFETCH_BOUND__){

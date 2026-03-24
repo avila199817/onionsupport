@@ -17,51 +17,88 @@
      ROUTES
   ========================= */
 
-  Onion.routes = Object.freeze({
+/* =========================
+   ROUTES (ONION PRO)
+========================= */
 
-    "/": {
-      page: "/app/views/index.html",
-      style: "/css/app/dashboard.css",
-      script: "/js/features/dashboard/index.js",
-      title: "Dashboard"
-    },
+Onion.routes = Object.freeze({
 
-    "/incidencias": {
-      page: "/app/views/incidencias/index.html",
-      style: "/css/app/incidencias.css",
-      script: "/js/features/incidencias/index.js",
-      title: "Incidencias"
-    },
+  "/": {
+    page: "/app/views/index.html",
+    style: "/css/app/dashboard.css",
+    script: "/js/features/dashboard/index.js",
+    title: "Dashboard"
+  },
 
-    "/facturas": {
-      page: "/app/views/facturas/index.html",
-      style: "/css/app/facturas.css",
-      script: "/js/features/facturas/index.js",
-      title: "Facturas"
-    },
+  "/incidencias": {
+    page: "/app/views/incidencias/index.html",
+    style: "/css/app/incidencias.css",
+    script: "/js/features/incidencias/index.js",
+    title: "Incidencias"
+  },
 
-    "/cuenta": {
-      page: "/app/views/cuenta/index.html",
-      style: "/css/app/cuenta.css",
-      script: "/js/features/cuenta/index.js",
-      title: "Cuenta"
-    },
+  "/facturas": {
+    page: "/app/views/facturas/index.html",
+    style: "/css/app/facturas.css",
+    script: "/js/features/facturas/index.js",
+    title: "Facturas"
+  },
+
+  "/cuenta": {
+    page: "/app/views/cuenta/index.html",
+    style: "/css/app/cuenta.css",
+    script: "/js/features/cuenta/index.js",
+    title: "Cuenta"
+  },
+
+  /* =========================
+     USUARIOS
+  ========================= */
+
+  "/usuarios": {
+    page: "/app/views/usuarios/index.html",
+    style: "/css/app/usuarios.css",
+    script: "/js/features/usuarios/index.js",
+    title: "Usuarios"
+  },
+
+  "/usuarios/usuario": {
+    page: "/app/views/usuarios/usuario.html",
+    style: "/css/app/usuarios.css",
+    script: "/js/features/usuarios/usuario.js",
+    title: "Usuario"
+  },
+
+  /* =========================
+     CLIENTES
+  ========================= */
+
+  "/clientes": {
+    page: "/app/views/clientes/index.html",
+    style: "/css/app/clientes.css",
+    script: "/js/features/clientes/index.js",
+    title: "Clientes"
+  },
+
+  "/clientes/cliente": {
+    page: "/app/views/clientes/cliente.html",
+    style: "/css/app/clientes.css",
+    script: "/js/features/clientes/cliente.js",
+    title: "Cliente"
+  },
      
-    "/usuarios": {
-      page: "/app/views/usuarios/index.html",
-      style: "/css/app/usuarios.css",
-      script: "/js/features/usuarios/index.js",
-      title: "Usuarios"
-    },
+  /* =========================
+     AJUSTES
+  ========================= */
+   
+   "/ajustes": {
+       page: "/app/views/ajustes/index.html",
+       style: "/css/app/ajustes.css",
+       script: "/js/features/ajustes/index.js",
+       title: "Ajustes"
+  }
 
-    "/clientes": {
-      page: "/app/views/clientes/index.html",
-      style: "/css/app/clientes.css",
-      script: "/js/features/clientes/index.js",
-      title: "Clientes" // 🔥 FIX
-    }
-
-  });
+});
 
   /* =========================
      TITLE HELPER

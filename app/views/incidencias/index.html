@@ -2,62 +2,14 @@
 
   <div class="container">
 
-    <!-- HEADER VACÍO (ESPACIADO COMO HOME) -->
+    <!-- HEADER VACÍO -->
     <div class="dashboard-header"></div>
-
-    <!-- =========================
-         KPI
-    ========================= -->
-    <div class="grid-cards">
-
-      <div class="card highlight">
-        <span class="card-title">Abiertas</span>
-        <strong id="inc-open" class="card-value">0</strong>
-
-        <div class="card-meta">
-          <span class="trend up">+5%</span>
-          <span class="card-extra">vs ayer</span>
-        </div>
-      </div>
-
-      <div class="card">
-        <span class="card-title">En progreso</span>
-        <strong id="inc-progress" class="card-value">0</strong>
-
-        <div class="card-meta">
-          <span class="trend up">+2%</span>
-          <span class="card-extra">actividad</span>
-        </div>
-      </div>
-
-      <div class="card">
-        <span class="card-title">Cerradas hoy</span>
-        <strong id="inc-closed" class="card-value">0</strong>
-
-        <div class="card-meta">
-          <span class="trend up">+8%</span>
-          <span class="card-extra">resueltas</span>
-        </div>
-      </div>
-
-      <div class="card">
-        <span class="card-title">Tiempo medio</span>
-        <strong id="inc-time" class="card-value">0h</strong>
-
-        <div class="card-meta">
-          <span class="trend down">-3%</span>
-          <span class="card-extra">rendimiento</span>
-        </div>
-      </div>
-
-    </div>
 
     <!-- =========================
          GRID PRINCIPAL
     ========================= -->
     <div class="dashboard-grid">
 
-      <!-- TABLA -->
       <div class="panel-block table-block">
 
         <div class="section-title">Listado de incidencias</div>
@@ -86,12 +38,9 @@
             <option value="baja">Baja</option>
           </select>
 
-          <button class="btn primary" id="crear-incidencia">
-            + Nueva
-          </button>
-
         </div>
 
+        <!-- TABLA -->
         <div class="table-container">
 
           <table class="incidencias-table">
@@ -115,82 +64,6 @@
             </tbody>
 
           </table>
-
-        </div>
-
-      </div>
-
-      <!-- DETALLE -->
-      <div 
-        class="panel-block"
-        id="detalle-incidencia"
-        style="display:none;"
-      >
-
-        <div class="section-title">Detalle</div>
-
-        <div class="detalle-content">
-
-          <h3 id="detalle-titulo">--</h3>
-          <p id="detalle-desc">--</p>
-
-          <div class="detalle-meta">
-            <span id="detalle-estado">Estado: --</span>
-            <span id="detalle-prioridad">Prioridad: --</span>
-            <span id="detalle-fecha">Fecha: --</span>
-          </div>
-
-        </div>
-
-      </div>
-
-    </div>
-
-    <!-- =========================
-         SEGUNDO BLOQUE
-    ========================= -->
-    <div class="dashboard-grid">
-
-      <!-- RESUMEN -->
-      <div class="panel-block">
-
-        <div class="section-title">Resumen del día</div>
-
-        <div class="summary-grid">
-
-          <div class="summary-item">
-            <div id="inc-total" class="summary-value">0</div>
-            <div class="summary-label">Tickets</div>
-          </div>
-
-          <div class="summary-item">
-            <div id="inc-resueltos" class="summary-value">0</div>
-            <div class="summary-label">Resueltos</div>
-          </div>
-
-          <div class="summary-item">
-            <div id="inc-pendientes" class="summary-value">0</div>
-            <div class="summary-label">Pendientes</div>
-          </div>
-
-        </div>
-
-      </div>
-
-      <!-- ALERTAS -->
-      <div class="panel-block">
-
-        <div class="section-title">Alertas</div>
-
-        <div class="alert-list">
-
-          <div id="alert-ok" class="alert-item">
-            Sistema estable
-          </div>
-
-          <div id="alert-load" class="alert-item" style="display:none;">
-            ⚠️ Alta carga de incidencias
-          </div>
 
         </div>
 

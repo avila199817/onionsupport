@@ -94,12 +94,12 @@ function boot(){
 boot();
 
 /* =====================================================
-   RUN (CON CLEANUP 🔥)
+   RUN (CON CLEANUP)
 ===================================================== */
 
 function run(){
 
-  Onion.cleanupAll(); // 🔥 LIMPIA TODO
+  Onion.cleanupAll(); // 🔥 limpia listeners anteriores
 
   initialized = false;
   tbody = null;
@@ -271,7 +271,7 @@ function applyFilters(){
 }
 
 /* =====================================================
-   EVENTS (SIN CLONENODE 🔥)
+   EVENTS
 ===================================================== */
 
 function initTableActions(){
@@ -299,10 +299,16 @@ function initTableActions(){
 }
 
 /* =====================================================
-   LOAD
+   LOAD (🔥 PANEL READY CONTROL)
 ===================================================== */
 
 async function loadUsers(){
+
+  const panel = document.querySelector(".panel-content.usuarios");
+
+  if(panel){
+    panel.classList.remove("ready"); // 🔥 ocultar UI
+  }
 
   renderState("Cargando usuarios…");
 
@@ -316,6 +322,11 @@ async function loadUsers(){
 
     renderUsers(users);
 
+    // 🔥 mostrar SOLO cuando ya hay datos
+    requestAnimationFrame(()=>{
+      panel?.classList.add("ready");
+    });
+
   }
   catch(err){
 
@@ -324,6 +335,9 @@ async function loadUsers(){
     renderState("Error cargando usuarios.","error");
 
     window.toast?.error?.("Error cargando usuarios");
+
+    // 🔥 incluso en error mostramos panel
+    panel?.classList.add("ready");
 
   }
 

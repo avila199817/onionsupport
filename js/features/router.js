@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================
-   ROUTER (ONION PRO FINAL + SAFE)
+   ROUTER (ONION PRO FINAL + TITLE AUTO)
 ========================= */
 
 (function(){
@@ -23,7 +23,7 @@
       page: "/app/views/index.html",
       style: "/css/app/dashboard.css",
       script: "/js/features/dashboard/index.js",
-      title: "Onion Support"
+      title: "Dashboard"
     },
 
     "/incidencias": {
@@ -53,15 +53,23 @@
       script: "/js/features/usuarios/index.js",
       title: "Usuarios"
     },
-         "/clientes": {
+
+    "/clientes": {
       page: "/app/views/usuarios/index.html",
       style: "/css/app/clientes.css",
       script: "/js/features/clientes/index.js",
-      title: "Usuarios"
+      title: "Clientes" // 🔥 FIX
     }
 
-
   });
+
+  /* =========================
+     TITLE HELPER
+  ========================= */
+
+  Onion.setTitle = function(title){
+    document.title = title ? `${title} · Onion` : "Onion Panel";
+  };
 
   /* =========================
      NORMALIZE
@@ -125,7 +133,7 @@
   };
 
   /* =========================
-     RESOLVE
+     RESOLVE + TITLE 🔥
   ========================= */
 
   Onion.router.resolve = function(){
@@ -133,13 +141,19 @@
     try{
 
       const route = Onion.router.get();
-      const config = Onion.routes[route];
+      const config = Onion.routes[route] || Onion.routes["/"];
 
-      return config || Onion.routes["/"];
+      // 🔥 AUTO TITLE
+      Onion.setTitle(config.title);
+
+      return config;
 
     }catch(e){
 
       Onion.error?.("💥 Router resolve error:", e);
+
+      Onion.setTitle("Panel");
+
       return Onion.routes["/"];
 
     }
@@ -147,14 +161,13 @@
   };
 
   /* =========================
-     NAVIGATE (🔥 FIX)
+     NAVIGATE
   ========================= */
 
   Onion.router.navigate = function(href){
 
     if(!href) return;
 
-    // external → normal browser
     if(href.startsWith("http")){
       window.location.href = href;
       return;
@@ -167,7 +180,6 @@
     let finalHref;
 
     if(!username){
-      // 🔥 fallback sin bloquear
       finalHref = href;
     }
     else if(href === "/"){

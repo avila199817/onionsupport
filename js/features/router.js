@@ -52,7 +52,14 @@
       style: "/css/app/usuarios.css",
       script: "/js/features/usuarios/index.js",
       title: "Usuarios"
+    },
+         "/clientes": {
+      page: "/app/views/usuarios/index.html",
+      style: "/css/app/clientes.css",
+      script: "/js/features/clientes/index.js",
+      title: "Usuarios"
     }
+
 
   });
 

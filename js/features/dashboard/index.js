@@ -31,6 +31,10 @@ function safe(n){
   return (n === 0 || n) ? n : 0;
 }
 
+function pick(...vals){
+  return vals.find(v => v !== undefined && v !== null);
+}
+
 function formatMoney(n){
   return new Intl.NumberFormat("es-ES", {
     style:"currency",
@@ -87,20 +91,45 @@ async function loadDashboard(){
 
     if(!data) return;
 
-    const k = data.kpis || {};
+    const k = data.kpis || data || {};
 
     /* ===== USUARIOS ===== */
-    setText("home-usuarios", safe(k.usuariosActivos || k.usuarios));
-    setText("home-usuarios-inactivos", safe(k.usuariosInactivos));
+    setText("home-usuarios", safe(pick(
+      k.usuariosActivos,
+      k.usuarios,
+      k.usersActive
+    )));
+
+    setText("home-usuarios-inactivos", safe(pick(
+      k.usuariosInactivos,
+      k.usersInactive
+    )));
 
     /* ===== CLIENTES ===== */
-    setText("home-clientes", safe(k.clientesActivos || k.clientes));
-    setText("home-clientes-inactivos", safe(k.clientesInactivos));
+    setText("home-clientes", safe(pick(
+      k.clientesActivos,
+      k.clientes
+    )));
+
+    setText("home-clientes-inactivos", safe(pick(
+      k.clientesInactivos
+    )));
 
     /* ===== FACTURACIÓN ===== */
-    setText("home-facturas", formatMoney(k.facturacionTotal));
-    setText("home-facturas-pendiente", formatMoney(k.facturacionPendiente));
-    setText("home-facturacion-mes", formatMoney(k.facturacionMensual));
+    setText("home-facturas", formatMoney(pick(
+      k.facturacionTotal,
+      k.facturadoTotal
+    )));
+
+    setText("home-facturas-pendiente", formatMoney(pick(
+      k.facturacionPendiente,
+      k.pendienteFacturar
+    )));
+
+    setText("home-facturacion-mes", formatMoney(pick(
+      k.facturacionMensual,
+      k.facturacionMes
+    )));
 
     /* ===== HOY ===== */
     setText("tickets-hoy", safe(k.ticketsToday));
@@ -116,7 +145,7 @@ async function loadDashboard(){
 }
 
 /* =========================
-   ACTIVITY PRO
+   ACTIVITY
 ========================= */
 
 function renderActivity(items){
@@ -134,7 +163,6 @@ function renderActivity(items){
   items.slice(0,8).forEach(i => {
 
     const el = document.createElement("div");
-
     el.className = "activity-item";
 
     el.innerHTML = `
@@ -152,7 +180,7 @@ function renderActivity(items){
 }
 
 /* =========================
-   SYSTEM (FULL PRO)
+   SYSTEM
 ========================= */
 
 async function loadSystem(){
@@ -164,16 +192,10 @@ async function loadSystem(){
     const res = await Onion.fetch(base + "/health");
     const data = res?.data || res;
 
-    /* ===== API ===== */
-    setText("status-api", "API · " + data?.api?.latency + " ms");
-
-    /* ===== DB ===== */
+    setText("status-api", "API · " + (data?.api?.latency || "--") + " ms");
     setText("status-db", "DB · " + (data?.db?.status || "--"));
-
-    /* ===== UPTIME ===== */
     setText("status-uptime", "Uptime · " + (data?.uptime || "--"));
 
-    /* ===== CPU ===== */
     const cpu = $("cpu-usage");
     if(cpu && data?.system?.cpu){
       cpu.textContent =
@@ -182,7 +204,6 @@ async function loadSystem(){
         data.system.cpu.load;
     }
 
-    /* ===== RAM ===== */
     const ram = $("ram-usage");
     if(ram && data?.system?.ram){
       ram.textContent =
@@ -191,7 +212,6 @@ async function loadSystem(){
         data.system.ram.totalMB + "MB";
     }
 
-    /* ===== DISCO ===== */
     const disk = $("disk-usage");
     if(disk && data?.system?.disk){
       disk.textContent =
@@ -200,7 +220,6 @@ async function loadSystem(){
         data.system.disk.total + "GB";
     }
 
-    /* ===== WARNING ===== */
     const warn = $("system-warning");
 
     if(warn){
@@ -233,7 +252,7 @@ async function init(){
   const root = getRoot();
   if(!root) return;
 
-  Onion.log("📊 Dashboard PRO MAX init");
+  Onion.log("📊 Dashboard PRO init");
 
   setMonthLabel();
 
@@ -246,12 +265,10 @@ async function init(){
   }, 60000);
 
   Onion.onCleanup(()=>{
-
     if(interval){
       clearInterval(interval);
       interval = null;
     }
-
   });
 
 }

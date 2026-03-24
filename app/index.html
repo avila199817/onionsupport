@@ -26,15 +26,25 @@
 <!-- FONTS -->
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 
+<!-- 🔥 THEME INIT (ANTI-FLASH PRO) -->
+<script>
+  try {
+    const config = JSON.parse(localStorage.getItem("onion_config") || "{}");
+    const dark = config.darkMode;
+
+    if(dark === false){
+      document.documentElement.setAttribute("data-theme","light");
+    } else {
+      document.documentElement.removeAttribute("data-theme");
+    }
+  } catch {}
+</script>
+
 <!-- PRELOAD CRÍTICO -->
 <link rel="preload" href="/css/core/core.css" as="style">
 
 <!-- CSS BASE -->
 <link rel="stylesheet" href="/css/core/core.css">
-
-
-
-  
 
 <noscript>
   <style>
@@ -47,15 +57,7 @@
   </div>
 </noscript>
 
-
-  
-
 </head>
-
-
-
-
-
 
 
 

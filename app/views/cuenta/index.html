@@ -2,17 +2,53 @@
 
   <div class="container">
 
-    <!-- HEADER -->
-    <div class="dashboard-header">
-      <div class="header-left">
-        <p class="page-subtitle">
-          Información personal y configuración del usuario
-        </p>
+    <!-- =========================
+         AVATAR CENTRADO
+    ========================= -->
+    <div class="cuenta-avatar-section">
+
+      <div class="avatar-wrapper">
+        <img id="cuenta-avatar" src="https://via.placeholder.com/120" alt="avatar">
       </div>
+
     </div>
 
+    <!-- =========================
+         CARDS USUARIO
+    ========================= -->
+    <div class="grid-cards">
 
-    <!-- KPI -->
+      <!-- NOMBRE -->
+      <div class="card highlight">
+        <span class="card-title">Nombre completo</span>
+
+        <div class="card-row">
+          <span class="card-value" id="cuenta-nombre">--</span>
+          <button class="btn-edit">Cambiar</button>
+        </div>
+      </div>
+
+      <!-- EMAIL -->
+      <div class="card">
+        <span class="card-title">Correo</span>
+        <span class="card-value" id="cuenta-email">--</span>
+      </div>
+
+      <!-- 2FA -->
+      <div class="card">
+        <span class="card-title">2FA</span>
+
+        <div class="card-row">
+          <span class="card-value" id="cuenta-2fa">Desactivado</span>
+          <button class="btn-edit">Configurar</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- =========================
+         KPI (LO MANTENEMOS)
+    ========================= -->
     <div class="grid-cards">
 
       <div class="card highlight">
@@ -25,14 +61,6 @@
       </div>
 
       <div class="card">
-        <span class="card-title">Email</span>
-        <span class="card-value" id="cuenta-email">--</span>
-        <div class="card-meta">
-          <span class="card-extra">usuario</span>
-        </div>
-      </div>
-
-      <div class="card">
         <span class="card-title">Miembro desde</span>
         <span class="card-value" id="cuenta-fecha">--</span>
         <div class="card-meta">
@@ -40,114 +68,9 @@
         </div>
       </div>
 
-    </div>
-
-
-    <!-- GRID PRINCIPAL -->
-    <div class="dashboard-grid">
-
-      <!-- PERFIL -->
-      <div class="panel-block">
-
-        <div class="block-header minimal">
-          <h2 class="section-title">Perfil</h2>
-        </div>
-
-        <div class="detalle-content">
-
-          <h3 id="cuenta-nombre">--</h3>
-          <p id="cuenta-rol">--</p>
-
-          <div class="detalle-meta">
-            <span id="cuenta-id">ID: --</span>
-          </div>
-
-        </div>
-
-      </div>
-
-
-      <!-- ACCIONES -->
-      <div class="panel-block">
-
-        <div class="block-header minimal">
-          <h2 class="section-title">Acciones</h2>
-        </div>
-
-        <div class="alert-list">
-
-          <div class="alert-item info">
-            Actualizar datos personales
-          </div>
-
-          <div class="alert-item info">
-            Cambiar contraseña
-          </div>
-
-          <div class="alert-item warn">
-            Cerrar sesión en todos los dispositivos
-          </div>
-
-        </div>
-
-      </div>
-
-    </div>
-
-
-    <!-- SEGUNDO BLOQUE -->
-    <div class="dashboard-grid secondary">
-
-      <!-- RESUMEN -->
-      <div class="panel-block summary">
-        <div class="block-header minimal">
-          <h2 class="section-title">Actividad</h2>
-        </div>
-
-        <div class="summary-grid">
-
-          <div class="summary-item">
-            <span class="summary-value">--</span>
-            <span class="summary-label">Incidencias</span>
-          </div>
-
-          <div class="summary-item">
-            <span class="summary-value">--</span>
-            <span class="summary-label">Facturas</span>
-          </div>
-
-          <div class="summary-item">
-            <span class="summary-value">--</span>
-            <span class="summary-label">Accesos</span>
-          </div>
-
-        </div>
-
-      </div>
-
-
-      <!-- ESTADO -->
-      <div class="panel-block alerts">
-        <div class="block-header minimal">
-          <h2 class="section-title">Estado de cuenta</h2>
-        </div>
-
-        <div class="alert-list">
-
-          <div class="alert-item info">
-            Cuenta operativa
-          </div>
-
-          <div class="alert-item info">
-            Sin incidencias de seguridad
-          </div>
-
-          <div class="alert-item warn" style="display:none;">
-            Acción requerida
-          </div>
-
-        </div>
-
+      <div class="card">
+        <span class="card-title">ID Usuario</span>
+        <span class="card-value" id="cuenta-id">--</span>
       </div>
 
     </div>

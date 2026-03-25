@@ -14,7 +14,7 @@ let currentItems = [];
 let filteredItems = [];
 
 /* =========================
-   ROOT / DOM
+   ROOT
 ========================= */
 
 function getRoot(){
@@ -32,9 +32,7 @@ function $(selector){
 function init(){
 
   const root = getRoot();
-  if(!root) return;
-
-  if(initialized) return;
+  if(!root || initialized) return;
 
   if(!Onion.state?.user){
     return setTimeout(init, 100);
@@ -45,9 +43,7 @@ function init(){
   bindEvents();
   loadIncidencias();
 
-  Onion.onCleanup(()=>{
-    initialized = false;
-  });
+  Onion.onCleanup(()=> initialized = false);
 
 }
 
@@ -62,7 +58,6 @@ function bindEvents(){
   const root = getRoot();
   if(!root) return;
 
-  // VIEW
   Onion.cleanupEvent(root, "click", (e)=>{
 
     const btn = e.target.closest(".view-btn");
@@ -78,17 +73,14 @@ function bindEvents(){
 
   });
 
-  // SEARCH
   $("#search-incidencia")?.addEventListener("input", applyFilters);
-
-  // FILTERS
   $("#filter-status")?.addEventListener("change", applyFilters);
   $("#filter-priority")?.addEventListener("change", applyFilters);
 
 }
 
 /* =========================
-   FILTER SYSTEM
+   FILTERS
 ========================= */
 
 function applyFilters(){
@@ -105,19 +97,11 @@ function applyFilters(){
     const itemStatus = mapStatus(i.status);
     const itemPriority = mapPriority(i.priority);
 
-    const matchSearch =
-      !search ||
-      title.includes(search) ||
-      cliente.includes(search) ||
-      String(i.id).includes(search);
-
-    const matchStatus =
-      !status || itemStatus === status;
-
-    const matchPriority =
-      !priority || itemPriority === priority;
-
-    return matchSearch && matchStatus && matchPriority;
+    return (
+      (!search || title.includes(search) || cliente.includes(search) || String(i.id).includes(search)) &&
+      (!status || itemStatus === status) &&
+      (!priority || itemPriority === priority)
+    );
 
   });
 
@@ -126,7 +110,7 @@ function applyFilters(){
 }
 
 /* =========================
-   RESIZE TABLE
+   RESIZE
 ========================= */
 
 function initTableResize(){
@@ -134,9 +118,7 @@ function initTableResize(){
   const root = getRoot();
   if(!root) return;
 
-  const resizers = root.querySelectorAll(".resizer");
-
-  resizers.forEach(resizer => {
+  root.querySelectorAll(".resizer").forEach(resizer => {
 
     let startX, startWidth, index;
 
@@ -149,15 +131,12 @@ function initTableResize(){
 
       index = Array.from(th.parentNode.children).indexOf(th);
 
-      function onMouseMove(e){
-
-        const min = 60;
-        const max = 500;
+      function move(e){
 
         let newWidth = startWidth + (e.pageX - startX);
 
-        if(newWidth < min) newWidth = min;
-        if(newWidth > max) newWidth = max;
+        if(newWidth < 60) newWidth = 60;
+        if(newWidth > 500) newWidth = 500;
 
         root.querySelectorAll("tr").forEach(row => {
           if(row.children[index]){
@@ -167,13 +146,13 @@ function initTableResize(){
 
       }
 
-      function onMouseUp(){
-        document.removeEventListener("mousemove", onMouseMove);
-        document.removeEventListener("mouseup", onMouseUp);
+      function stop(){
+        document.removeEventListener("mousemove", move);
+        document.removeEventListener("mouseup", stop);
       }
 
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
+      document.addEventListener("mousemove", move);
+      document.addEventListener("mouseup", stop);
 
     });
 
@@ -199,7 +178,6 @@ async function loadIncidencias(){
   try{
 
     const res = await Onion.fetch(Onion.config.API + "/tickets");
-
     const items = normalize(res);
 
     currentItems = items;
@@ -207,14 +185,11 @@ async function loadIncidencias(){
 
     if(!items.length){
       setEmpty();
-      updateKPIs([]);
       panel?.classList.add("ready");
       return;
     }
 
     render(items);
-    updateKPIs(items);
-
     initTableResize();
 
     requestAnimationFrame(()=>{
@@ -224,7 +199,6 @@ async function loadIncidencias(){
   }catch(e){
 
     console.error("💥 ERROR INCIDENCIAS:", e);
-
     setError();
     panel?.classList.add("ready");
 
@@ -237,15 +211,11 @@ async function loadIncidencias(){
 ========================= */
 
 function normalize(res){
-
   if(!res) return [];
-
   if(Array.isArray(res)) return res;
   if(res.tickets) return res.tickets;
   if(res.data) return res.data;
-
   return [];
-
 }
 
 /* =========================
@@ -278,20 +248,18 @@ function render(items){
 
   tbody.innerHTML = items.map(i => {
 
-    const data = mapItem(i);
+    const d = mapItem(i);
 
     return `
       <tr>
-        <td>#${data.id}</td>
-        <td>${escapeHTML(data.title)}</td>
-        <td>${escapeHTML(data.cliente)}</td>
-        <td><span class="badge ${data.estado.class}">${data.estado.label}</span></td>
-        <td><span class="badge ${data.prioridad.class}">${data.prioridad.label}</span></td>
-        <td>${data.fecha}</td>
+        <td>#${d.id}</td>
+        <td>${escapeHTML(d.title)}</td>
+        <td>${escapeHTML(d.cliente)}</td>
+        <td><span class="badge ${d.estado.class}">${d.estado.label}</span></td>
+        <td><span class="badge ${d.prioridad.class}">${d.prioridad.label}</span></td>
+        <td>${d.fecha}</td>
         <td>
-          <div class="table-actions">
-            <button class="action-btn view-btn" data-id="${data.id}">👁</button>
-          </div>
+          <button class="action-btn view-btn" data-id="${d.id}">👁</button>
         </td>
       </tr>
     `;
@@ -305,7 +273,6 @@ function render(items){
 ========================= */
 
 function mapItem(i){
-
   return {
     id: i.id || i.ticketId || "--",
     title: i.titulo || i.title || "Sin título",
@@ -314,7 +281,6 @@ function mapItem(i){
     prioridad: getPrioridad(i),
     fecha: formatFecha(i.createdAt)
   };
-
 }
 
 /* =========================
@@ -359,6 +325,14 @@ function escapeHTML(str){
     .replace(/&/g,"&amp;")
     .replace(/</g,"&lt;")
     .replace(/>/g,"&gt;");
+}
+
+/* =========================
+   DETALLE
+========================= */
+
+function showDetalle(item){
+  console.log("👁 Detalle:", item);
 }
 
 })();

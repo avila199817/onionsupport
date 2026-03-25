@@ -2018,6 +2018,38 @@ mark{
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 /* =========================
    LOADER
 ========================= */
@@ -2043,9 +2075,8 @@ body.loading .layout{
   backdrop-filter:blur(28px) saturate(200%);
   -webkit-backdrop-filter:blur(28px) saturate(200%);
 
-  display:flex;
-  align-items:center;
-  justify-content:center;
+  display:grid;
+  place-items:center;
 
   z-index:9999;
 
@@ -2059,26 +2090,21 @@ body:not(.loading) #app-loader{
   visibility:hidden;
 }
 
+/* LOGO */
 .loader-logo{
   width:64px;
   height:64px;
   object-fit:contain;
 
   animation:
-    bounce 1.2s ease-in-out infinite,
+    bounce 1.2s cubic-bezier(.34,1.56,.64,1) infinite,
     pulse 1.6s ease-in-out infinite;
 
   filter:
     drop-shadow(0 12px 40px rgba(0,0,0,0.4));
 }
 
-
-/* 🔥 AÑADE ESTO AQUÍ */
-#app-loader img{
-  position:absolute;
-}
-
-/* DEFAULT (DARK) */
+/* SWITCH LOGO (DARK / LIGHT) */
 .loader-dark{
   display:block;
 }
@@ -2087,11 +2113,28 @@ body:not(.loading) #app-loader{
   display:none;
 }
 
-/* LIGHT MODE */
 [data-theme="light"] .loader-dark{
   display:none;
 }
 
 [data-theme="light"] .loader-light{
   display:block;
+}
+
+/* ANIMACIONES */
+@keyframes bounce{
+  0%,100%{
+    transform:translateY(0) scale(1);
+  }
+  30%{
+    transform:translateY(-18px) scale(1.05);
+  }
+  60%{
+    transform:translateY(-6px) scale(0.98);
+  }
+}
+
+@keyframes pulse{
+  0%,100%{ opacity:1; }
+  50%{ opacity:.6; }
 }

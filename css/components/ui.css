@@ -1,15 +1,16 @@
-
 /* =========================
-   8. UI ELEMENTS
+   UI ELEMENTS
 ========================= */
+
+
 /* =========================
    BADGES
 ========================= */
-
 .badge{
   display:inline-flex;
   align-items:center;
   justify-content:center;
+  gap:6px;
 
   padding:4px 10px;
   border-radius:999px;
@@ -24,16 +25,26 @@
   border:1px solid transparent;
 
   transition:
-    background-color .2s ease,
-    color .2s ease,
-    border-color .2s ease;
+    background-color var(--duration-normal) ease,
+    color var(--duration-normal) ease,
+    border-color var(--duration-normal) ease,
+    transform var(--duration-fast) ease;
+}
+
+/* hover sutil pro */
+.badge.clickable:hover{
+  transform:translateY(-1px);
+  filter:brightness(1.05);
+}
+
+.badge.clickable:active{
+  transform:scale(.96);
 }
 
 
 /* =========================
-   VARIANTS (STATUS)
+   VARIANTS
 ========================= */
-
 .badge.success{
   background:color-mix(in srgb, var(--success), transparent 85%);
   color:var(--success);
@@ -58,11 +69,6 @@
   border-color:color-mix(in srgb, var(--info), transparent 65%);
 }
 
-
-/* =========================
-   NEUTRAL
-========================= */
-
 .badge.neutral{
   background:var(--card-bg);
   color:var(--dim);
@@ -73,7 +79,6 @@
 /* =========================
    SIZES
 ========================= */
-
 .badge.sm{
   padding:2px 8px;
   font-size:10px;
@@ -88,42 +93,19 @@
 /* =========================
    OUTLINE
 ========================= */
-
 .badge.outline{
   background:transparent;
 }
 
-.badge.outline.success{
-  color:var(--success);
-  border-color:var(--success);
-}
-
-.badge.outline.warning{
-  color:var(--warning);
-  border-color:var(--warning);
-}
-
-.badge.outline.error{
-  color:var(--error);
-  border-color:var(--error);
-}
-
-.badge.outline.info{
-  color:var(--info);
-  border-color:var(--info);
-}
+.badge.outline.success{ color:var(--success); border-color:var(--success); }
+.badge.outline.warning{ color:var(--warning); border-color:var(--warning); }
+.badge.outline.error{ color:var(--error); border-color:var(--error); }
+.badge.outline.info{ color:var(--info); border-color:var(--info); }
 
 
 /* =========================
-   DOT (estado tipo indicador)
+   DOT
 ========================= */
-
-.badge.dot{
-  padding-left:8px;
-  padding-right:10px;
-  gap:6px;
-}
-
 .badge.dot::before{
   content:"";
   width:6px;
@@ -134,44 +116,27 @@
 
 
 /* =========================
-   INTERACTIVE (opcional)
-========================= */
-
-.badge.clickable{
-  cursor:pointer;
-}
-
-.badge.clickable:hover{
-  filter:brightness(1.1);
-}
-
-.badge.clickable:active{
-  transform:scale(.96);
-}
-
-/* =========================
    TOAST
 ========================= */
-
 .toast{
   position:fixed;
   bottom:20px;
   right:20px;
 
   display:flex;
-  align-items:center;
+  align-items:flex-start;
   gap:10px;
 
-  min-width:220px;
-  max-width:320px;
+  min-width:240px;
+  max-width:340px;
 
   padding:12px 14px;
-  border-radius:14px;
+  border-radius:var(--radius-lg);
 
   background:var(--panel-bg);
   border:1px solid var(--panel-border);
 
-  box-shadow:var(--panel-shadow);
+  box-shadow:var(--shadow-md);
 
   font-size:13px;
   color:var(--text);
@@ -179,19 +144,14 @@
   z-index:var(--z-overlay);
 
   opacity:0;
-  transform:translateY(12px) scale(.98);
+  transform:translateY(12px) scale(.96);
 
   pointer-events:none;
 
   transition:
-    opacity .2s ease,
-    transform .2s cubic-bezier(.22,1,.36,1);
+    opacity var(--duration-normal) ease,
+    transform var(--duration-slow) var(--ease-out);
 }
-
-
-/* =========================
-   SHOW
-========================= */
 
 .toast.show{
   opacity:1;
@@ -201,30 +161,25 @@
 
 
 /* =========================
-   VARIANTS
+   TOAST VARIANTS
 ========================= */
-
 .toast.success{
   border-color:color-mix(in srgb, var(--success), var(--panel-border) 70%);
 }
-
 .toast.warning{
   border-color:color-mix(in srgb, var(--warning), var(--panel-border) 70%);
 }
-
 .toast.error{
   border-color:color-mix(in srgb, var(--error), var(--panel-border) 70%);
 }
-
 .toast.info{
   border-color:color-mix(in srgb, var(--info), var(--panel-border) 70%);
 }
 
 
 /* =========================
-   ICON
+   TOAST ICON
 ========================= */
-
 .toast-icon{
   width:18px;
   height:18px;
@@ -246,14 +201,13 @@
 
 
 /* =========================
-   CONTENT
+   TOAST CONTENT
 ========================= */
-
 .toast-content{
   display:flex;
   flex-direction:column;
   gap:2px;
-  line-height:1.2;
+  line-height:1.3;
 }
 
 .toast-title{
@@ -271,7 +225,6 @@
 /* =========================
    CLOSE
 ========================= */
-
 .toast-close{
   margin-left:auto;
 
@@ -288,19 +241,21 @@
   color:var(--dim);
 
   transition:
-    background .15s ease,
-    color .15s ease;
+    background var(--duration-fast) ease,
+    color var(--duration-fast) ease,
+    transform var(--duration-fast) ease;
 }
 
 .toast-close:hover{
   background:var(--sb-hover);
   color:var(--text);
+  transform:scale(1.05);
 }
+
 
 /* =========================
    PANEL CONTENT (LOAD UX)
 ========================= */
-
 .panel-content{
   opacity:0;
   visibility:hidden;
@@ -315,12 +270,13 @@
   transform:translateY(0);
 
   transition:
-    opacity .18s ease,
-    transform .18s ease;
+    opacity var(--duration-normal) ease,
+    transform var(--duration-normal) ease;
 }
 
+
 /* =========================
-   THEME TRANSITIONS (PRO)
+   THEME TRANSITIONS
 ========================= */
 .layout,
 .sidebar,
@@ -336,10 +292,10 @@
     box-shadow .3s ease;
 }
 
+
 /* =========================
    LOADER
 ========================= */
-
 body.loading{
   overflow:hidden;
 }
@@ -376,7 +332,10 @@ body:not(.loading) #app-loader{
   visibility:hidden;
 }
 
-/* LOGO */
+
+/* =========================
+   LOADER LOGO
+========================= */
 .loader-logo{
   width:64px;
   height:64px;
@@ -386,38 +345,23 @@ body:not(.loading) #app-loader{
     bounce 1.2s cubic-bezier(.34,1.56,.64,1) infinite,
     pulse 1.6s ease-in-out infinite;
 
-  filter:
-    drop-shadow(0 12px 40px rgba(0,0,0,0.4));
+  filter:drop-shadow(0 12px 40px rgba(0,0,0,0.4));
 }
 
-/* SWITCH LOGO (DARK / LIGHT) */
-.loader-dark{
-  display:block;
-}
+.loader-dark{ display:block; }
+.loader-light{ display:none; }
 
-.loader-light{
-  display:none;
-}
+[data-theme="light"] .loader-dark{ display:none; }
+[data-theme="light"] .loader-light{ display:block; }
 
-[data-theme="light"] .loader-dark{
-  display:none;
-}
 
-[data-theme="light"] .loader-light{
-  display:block;
-}
-
-/* ANIMACIONES */
+/* =========================
+   ANIMATIONS
+========================= */
 @keyframes bounce{
-  0%,100%{
-    transform:translateY(0) scale(1);
-  }
-  30%{
-    transform:translateY(-18px) scale(1.05);
-  }
-  60%{
-    transform:translateY(-6px) scale(0.98);
-  }
+  0%,100%{ transform:translateY(0) scale(1); }
+  30%{ transform:translateY(-18px) scale(1.05); }
+  60%{ transform:translateY(-6px) scale(0.98); }
 }
 
 @keyframes pulse{

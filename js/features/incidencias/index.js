@@ -60,10 +60,10 @@ function bindEvents(){
 
   Onion.cleanupEvent(root, "click", (e)=>{
 
-    const btn = e.target.closest(".view-btn");
-    if(!btn) return;
+    const row = e.target.closest("tr[data-id]");
+    if(!row) return;
 
-    const id = btn.dataset.id;
+    const id = row.dataset.id;
 
     const item = currentItems.find(i =>
       String(i.id || i.ticketId) === String(id)
@@ -224,17 +224,17 @@ function normalize(res){
 
 function setLoading(){
   $("#incidencias-body").innerHTML =
-    `<tr><td colspan="7">Cargando incidencias...</td></tr>`;
+    `<tr><td colspan="6">Cargando incidencias...</td></tr>`;
 }
 
 function setEmpty(){
   $("#incidencias-body").innerHTML =
-    `<tr><td colspan="7">No hay incidencias</td></tr>`;
+    `<tr><td colspan="6">No hay incidencias</td></tr>`;
 }
 
 function setError(){
   $("#incidencias-body").innerHTML =
-    `<tr><td colspan="7">Error cargando incidencias</td></tr>`;
+    `<tr><td colspan="6">Error cargando incidencias</td></tr>`;
 }
 
 /* =========================
@@ -251,16 +251,13 @@ function render(items){
     const d = mapItem(i);
 
     return `
-      <tr>
-        <td>#${d.id}</td>
+      <tr data-id="${d.id}" style="cursor:pointer;">
+        <td>${d.id}</td>
         <td>${escapeHTML(d.title)}</td>
         <td>${escapeHTML(d.cliente)}</td>
         <td><span class="badge ${d.estado.class}">${d.estado.label}</span></td>
         <td><span class="badge ${d.prioridad.class}">${d.prioridad.label}</span></td>
         <td>${d.fecha}</td>
-        <td>
-          <button class="action-btn view-btn" data-id="${d.id}">👁</button>
-        </td>
       </tr>
     `;
 

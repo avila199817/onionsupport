@@ -288,6 +288,16 @@
 
 
 /* =========================
+   FOOTER
+========================= */
+.sidebar-footer{
+  margin-top:auto;
+  padding:var(--space-sm);
+  border-top:1px solid var(--sb-border);
+}
+
+
+/* =========================
    USER
 ========================= */
 .user{

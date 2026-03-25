@@ -2072,12 +2072,26 @@ body:not(.loading) #app-loader{
     drop-shadow(0 12px 40px rgba(0,0,0,0.4));
 }
 
-@keyframes bounce{
-  0%,100%{ transform:translateY(0); }
-  50%{ transform:translateY(-14px); }
+
+/* 🔥 AÑADE ESTO AQUÍ */
+#app-loader img{
+  position:absolute;
 }
 
-@keyframes pulse{
-  0%,100%{ opacity:1; }
-  50%{ opacity:.55; }
+/* DEFAULT (DARK) */
+.loader-dark{
+  display:block;
+}
+
+.loader-light{
+  display:none;
+}
+
+/* LIGHT MODE */
+[data-theme="light"] .loader-dark{
+  display:none;
+}
+
+[data-theme="light"] .loader-light{
+  display:block;
 }

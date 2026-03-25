@@ -160,7 +160,7 @@ async function loadSystem(){
 }
 
 /* =========================
-   ACTIVITY
+   ACTIVITY (🔥 LIMPIO)
 ========================= */
 
 function renderActivity(items){
@@ -175,17 +175,14 @@ function renderActivity(items){
     return;
   }
 
-  items.slice(0,8).forEach(i => {
+  items.slice(0,3).forEach(i => {
 
     const el = document.createElement("div");
     el.className = "activity-item";
 
     el.innerHTML = `
-      <div>
-        <strong>${escapeHTML(i.type)}</strong>
-        <p>${escapeHTML(i.desc)}</p>
-        <small>${timeAgo(i.time)}</small>
-      </div>
+      <div class="activity-title">${escapeHTML(i.desc)}</div>
+      <div class="activity-meta">${timeAgo(i.time)}</div>
     `;
 
     list.appendChild(el);

@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================
-   SIDEBAR (ONION PRO FINAL)
+   SIDEBAR (ONION PRO FINAL++)
 ========================= */
 
 (function(){
@@ -15,10 +15,6 @@
 
   Onion.ui = Onion.ui || {};
   Onion.ui.sidebar = Onion.ui.sidebar || {};
-
-  /* =========================
-     INIT
-  ========================= */
 
   Onion.ui.sidebar.init = function(){
 
@@ -61,27 +57,43 @@
 
       dropdown?.classList.remove("active");
 
-      // 🔥 actualizar tooltip dinámico
       requestAnimationFrame(updateTooltip);
     });
 
 
     /* =========================
-       USER DROPDOWN TOGGLE
+       USER CLICK (SMART)
     ========================= */
 
     if(user && dropdown){
 
       Onion.cleanupEvent(user, "click", (e)=>{
         e.stopPropagation();
-        dropdown.classList.toggle("active");
+
+        const collapsed = sidebar.classList.contains("collapsed");
+
+        if(collapsed){
+          // 🔥 abre sidebar primero
+          sidebar.classList.remove("collapsed");
+          localStorage.setItem("sidebar-collapsed", "false");
+
+          requestAnimationFrame(updateTooltip);
+
+          // 🔥 espera animación antes de dropdown
+          setTimeout(()=>{
+            dropdown.classList.add("active");
+          }, 220);
+
+        }else{
+          dropdown.classList.toggle("active");
+        }
       });
 
     }
 
 
     /* =========================
-       CLICK FUERA (CLOSE)
+       CLICK FUERA
     ========================= */
 
     Onion.cleanupEvent(document, "click", (e)=>{
@@ -99,7 +111,18 @@
 
 
     /* =========================
-       DROPDOWN ACTIONS (DELEGATION)
+       ESCAPE KEY
+    ========================= */
+
+    Onion.cleanupEvent(document, "keydown", (e)=>{
+      if(e.key === "Escape"){
+        dropdown?.classList.remove("active");
+      }
+    });
+
+
+    /* =========================
+       DROPDOWN ACTIONS
     ========================= */
 
     if(dropdown){
@@ -111,13 +134,19 @@
         const item = e.target.closest(".dropdown-item");
         if(!item) return;
 
-        // 🔥 SOPORTE DOBLE: dataset o id (tu caso logout)
         const action =
           item.dataset.action ||
           (item.id === "logoutBtn" ? "logout" : null);
 
         if(action){
-          Onion.emit?.("dropdown:" + action);
+
+          // 🔥 caso especial logout
+          if(action === "logout"){
+            Onion.emit?.("auth:logout");
+          }else{
+            Onion.emit?.("dropdown:" + action);
+          }
+
         }
 
         dropdown.classList.remove("active");
@@ -146,14 +175,11 @@
 
 
     /* =========================
-       CLEANUP SPA SAFE
+       CLEANUP (SPA SAFE)
     ========================= */
 
     Onion.onCleanup(()=>{
-
-      // no necesitamos __bound hacks
       // Onion.cleanupEvent ya limpia todo
-
     });
 
   };

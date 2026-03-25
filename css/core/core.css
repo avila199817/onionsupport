@@ -1,47 +1,3 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /* =========================
    DROPDOWN FIX (LIGHT)
 ========================= */
@@ -58,15 +14,11 @@
    LOGO SWITCH
 ========================= */
 
-/* NO redefinimos .logo */
-
-/* ambos logos superpuestos */
 .logo img{
   position:absolute;
   inset:0;
 }
 
-/* DEFAULT (DARK) */
 .logo-dark{
   display:block;
 }
@@ -75,7 +27,6 @@
   display:none;
 }
 
-/* LIGHT MODE */
 [data-theme="light"] .logo-dark{
   display:none;
 }
@@ -83,208 +34,6 @@
 [data-theme="light"] .logo-light{
   display:block;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-/* =========================
-   RESET
-========================= */
-*,
-*::before,
-*::after{
-  box-sizing:border-box;
-}
-
-html, body{
-  margin:0;
-  padding:0;
-  background:var(--main-bg);
-  color:var(--text);
-  font-family:'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  -webkit-font-smoothing:antialiased;
-  -moz-osx-font-smoothing:grayscale;
-}
-
-html{
-  scroll-behavior:smooth;
-  overscroll-behavior-y:none;
-  scrollbar-gutter: stable;
-}
-
-body{
-  overflow-x:hidden;
-
-  /* 🔥 TRANSICIÓN DE TEMA */
-  transition:
-    background-color .3s ease,
-    color .3s ease;
-}
-
-
-/* =========================
-   APP LAYOUT ROOT
-========================= */
-.layout{
-  position:relative;
-  min-height:100dvh;
-  isolation:isolate; /* 🔥 evita guerras de z-index futuras */
-
-  background:
-    var(--gradient-overlay),
-    var(--gradient-main);
-}
-
-
-/* =========================
-   CONTAINER
-========================= */
-.container{
-  width:100%;
-  max-width:var(--content-max);
-  margin:0 auto;
-  padding-inline:var(--content-padding); /* 🔥 mejor que padding left/right */
-}
-
-
-/* =========================
-   MAIN CONTENT
-========================= */
-.main-content{
-  position:relative;
-  z-index:1;
-
-  min-height:100dvh;
-
-  margin-left:var(--sidebar-width);
-  padding-top:var(--topbar-height);
-
-  transition:
-    margin-left .35s cubic-bezier(.22,1,.36,1);
-
-  will-change:margin-left; /* 🔥 micro performance boost */
-}
-
-
-/* COLLAPSED STATE */
-.sidebar.collapsed ~ .main-content{
-  margin-left:var(--sidebar-collapsed);
-}
-
-
-/* =========================
-   SCROLLBAR (GLOBAL)
-========================= */
-::-webkit-scrollbar{
-  width:10px;
-}
-
-::-webkit-scrollbar-thumb{
-  background:var(--scrollbar-thumb);
-  border-radius:10px;
-}
-
-::-webkit-scrollbar-thumb:hover{
-  background:color-mix(in srgb, var(--scrollbar-thumb), #fff 25%);
-}
-
-/* Firefox */
-*{
-  scrollbar-width:thin;
-  scrollbar-color:var(--scrollbar-thumb) transparent;
-}
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

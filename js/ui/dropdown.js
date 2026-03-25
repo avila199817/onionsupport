@@ -1,93 +1,40 @@
 "use strict";
 
 /* =========================
-   DROPDOWN (ONION PRO)
+   DROPDOWN GENERIC (SAFE)
 ========================= */
 
 (function(){
 
-  if(!window.Onion){
-    console.error("💥 Onion no está definido (dropdown.js)");
-    return;
-  }
+  if(!window.Onion) return;
 
   const Onion = window.Onion;
 
   Onion.ui = Onion.ui || {};
   Onion.ui.dropdown = Onion.ui.dropdown || {};
 
-  /* =========================
-     INIT
-  ========================= */
-
   Onion.ui.dropdown.init = function(){
 
-    const toggle = document.getElementById("userToggle");
-    const dropdown = document.getElementById("userDropdown");
-    const sidebar = document.querySelector(".sidebar");
+    const dropdowns = document.querySelectorAll("[data-dropdown]");
 
-    if(!toggle || !dropdown || !sidebar) return;
+    dropdowns.forEach((wrapper)=>{
 
-    // 🔥 evita duplicados
-    if(toggle.__bound) return;
-    toggle.__bound = true;
+      const toggle = wrapper.querySelector("[data-dropdown-toggle]");
+      const menu   = wrapper.querySelector("[data-dropdown-menu]");
 
-    /* =========================
-       TOGGLE CLICK
-    ========================= */
+      if(!toggle || !menu) return;
 
-    Onion.cleanupEvent(toggle, "click", (e)=>{
+      Onion.cleanupEvent(toggle, "click", (e)=>{
+        e.stopPropagation();
+        menu.classList.toggle("active");
+      });
 
-      e.stopPropagation(); // 🔥 CLAVE
+      Onion.cleanupEvent(document, "click", (e)=>{
+        if(!wrapper.contains(e.target)){
+          menu.classList.remove("active");
+        }
+      });
 
-      const collapsed = sidebar.classList.contains("collapsed");
-
-      if(collapsed){
-        sidebar.classList.remove("collapsed");
-        localStorage.setItem("sidebar-collapsed", "false");
-
-        setTimeout(()=>{
-          dropdown.classList.add("active");
-        }, 120);
-      }else{
-        dropdown.classList.toggle("active");
-      }
-
-    });
-
-    /* =========================
-       CLICK FUERA
-    ========================= */
-
-    Onion.cleanupEvent(document, "click", (e)=>{
-
-      if(
-        e.target.closest("#userToggle") ||
-        e.target.closest("#userDropdown")
-      ){
-        return;
-      }
-
-      dropdown.classList.remove("active");
-
-    });
-
-    /* =========================
-       ESC KEY (PRO)
-    ========================= */
-
-    Onion.cleanupEvent(document, "keydown", (e)=>{
-      if(e.key === "Escape"){
-        dropdown.classList.remove("active");
-      }
-    });
-
-    /* =========================
-       CLEANUP
-    ========================= */
-
-    Onion.onCleanup(()=>{
-      toggle.__bound = false;
     });
 
   };

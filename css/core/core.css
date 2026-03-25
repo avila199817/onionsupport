@@ -1,9 +1,17 @@
 /* =========================
-   DROPDOWN FIX (LIGHT)
+   CORE SYSTEM (SAFE)
+   👉 No overrides globales
+   👉 No pisa componentes
 ========================= */
 
+
+/* =========================
+   DROPDOWN FIX (LIGHT)
+   (específico → seguro)
+========================= */
 [data-theme="light"] .user-dropdown{
   border:1px solid rgba(0,0,0,0.08);
+
   box-shadow:
     0 10px 30px rgba(0,0,0,0.08),
     0 2px 6px rgba(0,0,0,0.05);
@@ -12,27 +20,124 @@
 
 /* =========================
    LOGO SWITCH
+   (solo visibilidad)
+========================= */
+.logo-dark{ display:block; }
+.logo-light{ display:none; }
+
+[data-theme="light"] .logo-dark{ display:none; }
+[data-theme="light"] .logo-light{ display:block; }
+
+
+/* =========================
+   THEME TRANSITION (SAFE)
+   👉 SOLO si tú añades la clase
+========================= */
+.theme-transition{
+  transition:
+    background-color var(--duration-slow) ease,
+    color var(--duration-slow) ease,
+    border-color var(--duration-slow) ease,
+    box-shadow var(--duration-slow) ease;
+}
+
+
+/* =========================
+   UTILIDADES INTERACCIÓN
+   (opt-in → no afectan nada si no se usan)
 ========================= */
 
-.logo img{
-  position:absolute;
-  inset:0;
+/* hover lift */
+.hover-lift{
+  transition:
+    transform var(--duration-fast) ease,
+    box-shadow var(--duration-normal) ease;
 }
 
-.logo-dark{
-  display:block;
-}
-
-.logo-light{
-  display:none;
-}
-
-[data-theme="light"] .logo-dark{
-  display:none;
-}
-
-[data-theme="light"] .logo-light{
-  display:block;
+.hover-lift:hover{
+  transform:translateY(-2px);
+  box-shadow:var(--shadow-sm);
 }
 
 
+/* press (click feedback) */
+.press{
+  transition:transform var(--duration-fast) ease;
+}
+
+.press:active{
+  transform:scale(.96);
+}
+
+
+/* clickable helper */
+.clickable{
+  cursor:pointer;
+}
+
+
+/* =========================
+   DISABLED STATE
+========================= */
+.disabled,
+[disabled]{
+  opacity:.5;
+  pointer-events:none;
+}
+
+
+/* =========================
+   SCROLL AREA
+========================= */
+.scroll-area{
+  overflow:auto;
+  -webkit-overflow-scrolling:touch;
+}
+
+
+/* =========================
+   GLASS EFFECT (OPT-IN)
+========================= */
+.glass{
+  background:rgba(255,255,255,0.04);
+  backdrop-filter:blur(12px) saturate(160%);
+  -webkit-backdrop-filter:blur(12px) saturate(160%);
+}
+
+[data-theme="light"] .glass{
+  background:rgba(255,255,255,0.6);
+}
+
+
+/* =========================
+   HAIRLINE BORDER
+========================= */
+.hairline{
+  border:1px solid rgba(255,255,255,0.06);
+}
+
+[data-theme="light"] .hairline{
+  border:1px solid rgba(0,0,0,0.08);
+}
+
+
+/* =========================
+   SAFE AREA (MOBILE)
+========================= */
+.safe-top{
+  padding-top:env(safe-area-inset-top);
+}
+
+.safe-bottom{
+  padding-bottom:env(safe-area-inset-bottom);
+}
+
+
+/* =========================
+   Z-INDEX HELPERS
+========================= */
+.z-sidebar{ z-index:var(--z-sidebar); }
+.z-topbar{ z-index:var(--z-topbar); }
+.z-dropdown{ z-index:var(--z-dropdown); }
+.z-overlay{ z-index:var(--z-overlay); }
+.z-modal{ z-index:var(--z-modal); }

@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================
-   SIDEBAR (ONION PRO FIX)
+   SIDEBAR (ONION PRO FINAL)
 ========================= */
 
 (function(){
@@ -22,17 +22,12 @@
 
   Onion.ui.sidebar.init = function(){
 
-    const sidebar = document.querySelector(".sidebar");
-    const toggle = document.getElementById("toggleSidebar");
-
-    const user = document.querySelector(".user");
+    const sidebar  = document.querySelector(".sidebar");
+    const toggle   = document.getElementById("toggleSidebar");
+    const user     = document.getElementById("userToggle");
     const dropdown = document.getElementById("userDropdown");
 
     if(!sidebar || !toggle) return;
-
-    // 🔥 evita doble binding
-    if(toggle.__bound) return;
-    toggle.__bound = true;
 
     /* =========================
        RESTORE STATE
@@ -42,9 +37,11 @@
 
     if(saved === "true"){
       sidebar.classList.add("collapsed");
-    }else{
+    } else {
       sidebar.classList.remove("collapsed");
     }
+
+    updateTooltip();
 
     /* =========================
        SIDEBAR TOGGLE
@@ -53,41 +50,42 @@
     Onion.cleanupEvent(toggle, "click", (e)=>{
       e.stopPropagation();
 
-      const collapsed = sidebar.classList.contains("collapsed");
+      const isCollapsed = sidebar.classList.contains("collapsed");
 
       sidebar.classList.toggle("collapsed");
 
       localStorage.setItem(
         "sidebar-collapsed",
-        String(!collapsed)
+        String(!isCollapsed)
       );
 
-      // cerrar dropdown siempre
       dropdown?.classList.remove("active");
+
+      // 🔥 actualizar tooltip dinámico
+      requestAnimationFrame(updateTooltip);
     });
 
 
     /* =========================
-       DROPDOWN TOGGLE
+       USER DROPDOWN TOGGLE
     ========================= */
 
-    if(user && dropdown && !user.__bound){
-
-      user.__bound = true;
+    if(user && dropdown){
 
       Onion.cleanupEvent(user, "click", (e)=>{
         e.stopPropagation();
-
         dropdown.classList.toggle("active");
       });
+
     }
 
 
     /* =========================
-       CLICK FUERA (CERRAR)
+       CLICK FUERA (CLOSE)
     ========================= */
 
-    const closeDropdown = (e)=>{
+    Onion.cleanupEvent(document, "click", (e)=>{
+
       if(!dropdown) return;
 
       if(
@@ -96,47 +94,66 @@
       ){
         dropdown.classList.remove("active");
       }
-    };
 
-    Onion.cleanupEvent(document, "click", closeDropdown);
+    });
 
 
     /* =========================
-       FIX: ITEMS DROPDOWN
-       (🔥 clave para logout)
+       DROPDOWN ACTIONS (DELEGATION)
     ========================= */
 
-    if(dropdown && !dropdown.__bound){
-
-      dropdown.__bound = true;
+    if(dropdown){
 
       Onion.cleanupEvent(dropdown, "click", (e)=>{
-        // 🔥 evita que se cierre antes de ejecutar acción
+
         e.stopPropagation();
 
         const item = e.target.closest(".dropdown-item");
         if(!item) return;
 
-        const action = item.dataset.action;
+        // 🔥 SOPORTE DOBLE: dataset o id (tu caso logout)
+        const action =
+          item.dataset.action ||
+          (item.id === "logoutBtn" ? "logout" : null);
 
         if(action){
           Onion.emit?.("dropdown:" + action);
         }
 
-        // cerrar después de click
         dropdown.classList.remove("active");
+
       });
+
     }
 
 
     /* =========================
-       CLEANUP
+       TOOLTIP DINÁMICO
+    ========================= */
+
+    function updateTooltip(){
+
+      const collapsed = sidebar.classList.contains("collapsed");
+
+      toggle.setAttribute(
+        "data-tooltip",
+        collapsed
+          ? "Abrir barra lateral"
+          : "Cerrar barra lateral"
+      );
+
+    }
+
+
+    /* =========================
+       CLEANUP SPA SAFE
     ========================= */
 
     Onion.onCleanup(()=>{
-      toggle.__bound = false;
-      if(user) user.__bound = false;
-      if(dropdown) dropdown.__bound = false;
+
+      // no necesitamos __bound hacks
+      // Onion.cleanupEvent ya limpia todo
+
     });
 
   };

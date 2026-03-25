@@ -260,6 +260,52 @@
   color:#22c55e;
 }
 
+/* =========================
+   FIX BOTÓN NUEVO (KILL CORE)
+========================= */
+
+.panel-content.incidencias .filters-row .btn-new-incidencia{
+  all:unset; /* 💣 resetea TODO lo que lo esté rompiendo */
+
+  margin-left:auto;
+
+  background:var(--card-bg);
+  border:1px solid var(--card-border);
+  color:var(--text);
+
+  padding:10px 12px;
+  border-radius:10px;
+
+  font-size:14px;
+  font-weight:400;
+  font-family:inherit;
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+
+  cursor:pointer;
+
+  transition:all .15s ease;
+}
+
+/* hover */
+.panel-content.incidencias .filters-row .btn-new-incidencia:hover{
+  border-color:var(--accent);
+  background:color-mix(in srgb, var(--card-bg), var(--accent) 8%);
+}
+
+/* focus */
+.panel-content.incidencias .filters-row .btn-new-incidencia:focus{
+  outline:none;
+  box-shadow:0 0 0 2px rgba(59,130,246,0.15);
+}
+
+/* active */
+.panel-content.incidencias .filters-row .btn-new-incidencia:active{
+  transform:scale(.98);
+}
 
 /* =========================
    RESPONSIVE

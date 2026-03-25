@@ -103,21 +103,25 @@
 
 
 /* =========================
-   BOTÓN NUEVO (100% CONSISTENTE)
+   BOTÓN NUEVO (CLON EXACTO)
 ========================= */
 
-.incidencias .btn-new-incidencia{
+.panel-content.incidencias .btn-new-incidencia{
   margin-left:auto;
 
-  background:var(--card-bg);
-  border:1px solid var(--card-border);
-  color:var(--text);
+  /* 🔥 FORZAMOS MISMO LOOK */
+  background:var(--card-bg) !important;
+  border:1px solid var(--card-border) !important;
+  color:var(--text) !important;
 
-  padding:10px 12px; /* igual que inputs */
-  border-radius:10px;
+  padding:10px 12px !important;
+  border-radius:10px !important;
 
-  font-size:14px;
-  font-weight:400; /* igual que inputs */
+  font-size:14px !important;
+  font-weight:400 !important;
+
+  appearance:none;
+  -webkit-appearance:none;
 
   cursor:pointer;
 
@@ -128,18 +132,18 @@
   transition:all .15s ease;
 }
 
-.incidencias .btn-new-incidencia:hover{
-  border-color:var(--accent);
-  background:color-mix(in srgb, var(--card-bg), var(--accent) 8%);
+.panel-content.incidencias .btn-new-incidencia:hover{
+  border-color:var(--accent) !important;
+  background:color-mix(in srgb, var(--card-bg), var(--accent) 8%) !important;
 }
 
-.incidencias .btn-new-incidencia:focus{
+.panel-content.incidencias .btn-new-incidencia:focus{
   outline:none;
-  border-color:var(--accent);
+  border-color:var(--accent) !important;
   box-shadow:0 0 0 2px rgba(59,130,246,0.15);
 }
 
-.incidencias .btn-new-incidencia:active{
+.panel-content.incidencias .btn-new-incidencia:active{
   transform:scale(.98);
 }
 

@@ -1,21 +1,26 @@
 /* =========================
-   HOME (COMPACT PRO SAAS)
+   HOME (SAAS HIGH LEVEL)
+   👉 Scoped: .home
+   👉 No pisa nada global
 ========================= */
 
 .home{
   width:100%;
 }
 
-/* 🔥 MENOS AIRE GLOBAL */
+/* =========================
+   CONTAINER
+========================= */
 .home .container{
   padding-top:var(--page-offset);
   padding-bottom:30px;
 
   display:flex;
   flex-direction:column;
-  gap:20px;
+  gap:var(--space-lg);
 }
 
+/* ocultamos header si no se usa */
 .home .dashboard-header{
   display:none;
 }
@@ -24,33 +29,31 @@
 /* =========================
    KPI GRID
 ========================= */
-
 .home .grid-cards{
   display:grid;
   grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
-  gap:14px;
+  gap:var(--space-md);
 }
 
 
 /* =========================
-   CARDS
+   KPI CARD
 ========================= */
-
 .home .card{
   position:relative;
 
   background:var(--card-bg);
   border:1px solid var(--card-border);
-  border-radius:16px;
+  border-radius:var(--radius-lg);
 
   padding:16px;
 
   box-shadow:var(--card-shadow);
 
   transition:
-    transform .2s ease,
-    box-shadow .2s ease,
-    border-color .2s ease;
+    transform var(--duration-normal) ease,
+    box-shadow var(--duration-normal) ease,
+    border-color var(--duration-normal) ease;
 }
 
 .home .card:hover{
@@ -58,11 +61,7 @@
   box-shadow:var(--card-shadow-hover);
 }
 
-
-/* =========================
-   TEXTOS CARD
-========================= */
-
+/* contenido */
 .home .card-title{
   font-size:11px;
   color:var(--dim);
@@ -74,14 +73,13 @@
 
   font-size:24px;
   font-weight:600;
-
   color:var(--text);
 }
 
 .home .card-meta{
   display:flex;
-  gap:6px;
   align-items:center;
+  gap:6px;
   margin-top:6px;
 }
 
@@ -92,34 +90,32 @@
 
 
 /* =========================
-   GRID PRINCIPAL
+   MAIN GRID
 ========================= */
-
 .home .dashboard-grid{
   display:grid;
   grid-template-columns:2fr 1fr;
-  gap:16px;
+  gap:var(--space-lg);
 }
 
 
 /* =========================
    PANEL BLOCK
 ========================= */
-
 .home .panel-block{
   position:relative;
 
   background:var(--panel-bg);
   border:1px solid var(--panel-border);
-  border-radius:16px;
+  border-radius:var(--radius-lg);
 
   padding:16px;
 
   box-shadow:var(--panel-shadow);
 
   transition:
-    border-color .2s ease,
-    transform .2s ease;
+    transform var(--duration-fast) ease,
+    border-color var(--duration-normal) ease;
 }
 
 .home .panel-block:hover{
@@ -130,30 +126,25 @@
 /* =========================
    SECTION TITLE
 ========================= */
-
 .home .section-title{
   font-size:13px;
   font-weight:600;
-
   color:var(--text);
-  margin-bottom:8px;
+
+  margin-bottom:10px;
 }
 
 
 /* =========================
-   ACTIVITY (🔥 PRO FIX)
+   ACTIVITY
 ========================= */
-
 .home .activity-list{
   display:flex;
   flex-direction:column;
   gap:6px;
-
-  max-height:unset;       /* 🔥 quitamos scroll */
-  overflow:hidden;
 }
 
-/* 🔥 SOLO 3 ITEMS */
+/* limitar a 3 items */
 .home .activity-item:nth-child(n+4){
   display:none;
 }
@@ -164,13 +155,13 @@
   gap:2px;
 
   padding:8px 10px;
+  border-radius:var(--radius-sm);
 
-  border-radius:8px;
-
-  background:transparent;
   border:1px solid transparent;
 
-  transition:.15s ease;
+  transition:
+    background var(--duration-fast) ease,
+    border-color var(--duration-fast) ease;
 }
 
 .home .activity-item:hover{
@@ -178,7 +169,6 @@
   border-color:var(--card-border);
 }
 
-/* 🔥 MISMO TAMAÑO QUE SISTEMA */
 .home .activity-title{
   font-size:11px;
   font-weight:500;
@@ -192,9 +182,8 @@
 
 
 /* =========================
-   STATUS (REFERENCIA)
+   STATUS LIST
 ========================= */
-
 .home .status-list{
   display:flex;
   flex-direction:column;
@@ -222,7 +211,6 @@
 /* =========================
    SUMMARY
 ========================= */
-
 .home .summary-grid{
   display:grid;
   grid-template-columns:repeat(3,1fr);
@@ -234,14 +222,21 @@
   border:1px solid var(--card-border);
 
   padding:10px;
-  border-radius:10px;
+  border-radius:var(--radius-md);
 
   text-align:center;
+
+  transition:transform var(--duration-fast) ease;
+}
+
+.home .summary-item:hover{
+  transform:translateY(-2px);
 }
 
 .home .summary-value{
   font-size:16px;
   font-weight:600;
+  color:var(--text);
 }
 
 .home .summary-label{
@@ -253,7 +248,6 @@
 /* =========================
    ALERTS
 ========================= */
-
 .home .alert-list{
   display:flex;
   flex-direction:column;
@@ -265,23 +259,33 @@
   border:1px solid var(--card-border);
 
   padding:8px 10px;
-  border-radius:10px;
+  border-radius:var(--radius-md);
 
   font-size:11px;
   color:var(--muted);
 
-  transition:.15s ease;
+  transition:
+    transform var(--duration-fast) ease,
+    background var(--duration-fast) ease;
 }
 
 .home .alert-item:hover{
   transform:translateX(3px);
+  background:var(--panel-bg);
+}
+
+
+/* =========================
+   BADGE ALIGN (INTEGRACIÓN)
+========================= */
+.home .card-meta .badge{
+  transform:translateY(-1px);
 }
 
 
 /* =========================
    RESPONSIVE
 ========================= */
-
 @media (max-width:1024px){
 
   .home .container{

@@ -1,4 +1,3 @@
-<html>
 <head>
 
 <meta charset="UTF-8">
@@ -7,33 +6,36 @@
 
 <title>Onion Support · Panel</title>
 
-<!-- BASE (CRÍTICO PARA SPA) -->
+<!-- BASE (SPA) -->
 <base href="/">
 
 <!-- SEO CONTROL -->
 <meta name="robots" content="noindex, nofollow">
 
-<!-- THEME -->
-<meta name="theme-color" content="#ffffff">
+<!-- COLOR SCHEME -->
+<meta name="color-scheme" content="dark light">
+
+<!-- THEME COLOR (DARK FIRST) -->
+<meta name="theme-color" content="#0d0d0d">
 
 <!-- FAVICON -->
 <link rel="icon" href="/favicon.ico">
 
-<!-- PRECONNECT (MEJORA RENDIMIENTO) -->
+<!-- PERFORMANCE -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 
 <!-- FONTS -->
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 
+<!-- THEME INIT (EVITA FLASH) -->
 <script defer src="/js/init/theme-init.js"></script>
 
-<!-- PRELOAD CRÍTICO -->
-<link rel="preload" href="/css/core/core.css" as="style">
-
-<!-- CSS BASE -->
+<!-- CSS TOKENS -->
 <link rel="stylesheet" href="/css/tokens/variables.css">
 <link rel="stylesheet" href="/css/tokens/light.css">
+
+<!-- CSS CORE -->
 <link rel="stylesheet" href="/css/core/core.css">
 
 <noscript>

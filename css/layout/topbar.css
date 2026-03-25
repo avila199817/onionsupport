@@ -1,0 +1,341 @@
+/* =========================
+   TOPBAR
+========================= */
+.topbar{
+  position:fixed;
+  top:0;
+  left:var(--sidebar-width);
+  right:0;
+
+  height:var(--topbar-height);
+
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+
+  padding:0 var(--space-lg);
+
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.02), transparent 40%),
+    var(--sb-bg);
+
+  border-bottom:1px solid var(--panel-border);
+
+  z-index:var(--z-topbar);
+
+  transition:left .35s cubic-bezier(.22,1,.36,1);
+  will-change:left;
+}
+
+/* COLLAPSED */
+.sidebar.collapsed ~ .main-content .topbar{
+  left:var(--sidebar-collapsed);
+}
+
+
+/* =========================
+   TITLE
+========================= */
+.topbar-title{
+  font-size:16px;
+  font-weight:600;
+  color:var(--text);
+}
+
+
+/* =========================
+   RIGHT
+========================= */
+.topbar-right{
+  display:flex;
+  align-items:center;
+  gap:var(--space-md);
+
+  flex:1;
+  justify-content:flex-end;
+}
+
+
+/* =========================
+   SEARCH WRAP (RIGHT ALIGNED PRO)
+========================= */
+.topbar-search-wrap{
+  position:relative;
+
+  width:100%;
+  max-width:520px;
+
+  margin-left:auto;   /* 🔥 lo empuja a la derecha */
+}
+
+
+/* =========================
+   INPUT
+========================= */
+.topbar-search{
+  width:100%;
+
+  padding:10px 14px;
+  padding-left:38px;
+
+  border-radius:999px;
+  border:1px solid var(--card-border);
+
+  background:var(--card-bg);
+  color:var(--text);
+
+  font-size:14px;
+  outline:none;
+
+  transition:
+    border-color .2s ease,
+    background .2s ease,
+    box-shadow .2s ease;
+}
+
+.topbar-search::placeholder{
+  color:var(--dim);
+}
+
+
+/* =========================
+   FOCUS PRO
+========================= */
+.topbar-search:focus{
+  border-color:var(--accent);
+  background:var(--panel-bg);
+
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--accent), transparent 85%);
+}
+
+
+/* =========================
+   ICON
+========================= */
+.topbar-search-icon{
+  position:absolute;
+  left:12px;
+  top:50%;
+  transform:translateY(-50%);
+
+  width:16px;
+  height:16px;
+
+  color:var(--dim);
+  pointer-events:none;
+
+  transition:color .2s ease;
+}
+
+
+/* =========================
+   ICON ACTIVE
+========================= */
+.topbar-search-wrap:focus-within .topbar-search-icon{
+  color:var(--accent);
+}
+
+/* =========================
+   SEARCH DROPDOWN
+========================= */
+
+.topbar-search-results{
+  position:absolute;
+  top:calc(100% + 8px);
+  left:0;
+  width:100%;
+
+  background:var(--panel-bg);
+  border:1px solid var(--panel-border);
+  border-radius:14px;
+
+  box-shadow:var(--panel-shadow);
+
+  max-height:320px;
+  overflow-y:auto;
+
+  opacity:0;
+  transform:translateY(6px) scale(.98);
+  pointer-events:none;
+
+  transition:
+    opacity .18s ease,
+    transform .18s cubic-bezier(.22,1,.36,1);
+
+  z-index:var(--z-dropdown);
+}
+
+
+/* OPEN */
+.topbar-search-results.active{
+  opacity:1;
+  transform:translateY(0) scale(1);
+  pointer-events:auto;
+}
+
+
+/* =========================
+   GROUP HEADER
+========================= */
+.search-group{
+  padding:8px 12px;
+  font-size:11.5px;
+  font-weight:600;
+  color:var(--dim);
+  text-transform:uppercase;
+}
+
+
+/* =========================
+   ITEM
+========================= */
+.search-result{
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+
+  padding:10px 12px;
+  border-radius:10px;
+
+  font-size:13.5px;
+  color:var(--text);
+
+  cursor:pointer;
+
+  transition:
+    background .15s ease,
+    transform .15s ease;
+}
+
+
+/* HOVER */
+.search-result:hover{
+  background:var(--sb-hover);
+  transform:translateX(4px);
+}
+
+
+/* ACTIVE */
+.search-result.active{
+  background:var(--sb-active);
+  color:var(--text);
+}
+
+
+/* =========================
+   TEXT
+========================= */
+.search-text{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  line-height:1.2;
+}
+
+.search-title{
+  font-weight:600;
+  font-size:13.5px;
+  color:var(--text);
+}
+
+.search-subtitle{
+  font-size:12px;
+  color:var(--dim);
+}
+
+
+/* =========================
+   ICON
+========================= */
+.search-icon{
+  width:18px;
+  height:18px;
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  font-size:14px;
+  opacity:.8;
+
+  transition:color .2s ease;
+}
+
+.search-result.active .search-icon{
+  color:var(--accent);
+}
+
+
+/* =========================
+   HIGHLIGHT (FIX PRO)
+========================= */
+
+/* reset default amarillo */
+mark{
+  background:none;
+  color:inherit;
+}
+
+/* highlight fino */
+.search-result mark,
+.search-result .highlight{
+  background:color-mix(in srgb, var(--accent), transparent 85%);
+  color:var(--accent);
+
+  padding:1px 5px;
+  border-radius:6px;
+
+  font-weight:600;
+
+  backdrop-filter:blur(4px);
+  transition:all .15s ease;
+}
+
+/* hover */
+.search-result:hover mark{
+  background:color-mix(in srgb, var(--accent), transparent 80%);
+}
+
+/* active */
+.search-result.active mark{
+  background:color-mix(in srgb, var(--accent), transparent 75%);
+}
+
+
+/* =========================
+   EMPTY
+========================= */
+.search-empty{
+  padding:14px;
+  font-size:13px;
+  color:var(--dim);
+  text-align:center;
+}
+
+
+/* =========================
+   SCROLL
+========================= */
+.topbar-search-results::-webkit-scrollbar{
+  width:6px;
+}
+
+.topbar-search-results::-webkit-scrollbar-thumb{
+  background:var(--scrollbar-thumb);
+  border-radius:6px;
+}
+
+.topbar-search-results::-webkit-scrollbar-thumb:hover{
+  background:color-mix(in srgb, var(--scrollbar-thumb), #fff 25%);
+}
+
+
+/* =========================
+   INPUT FOCUS (PRO)
+========================= */
+.topbar-search-wrap:focus-within .topbar-search{
+  border-color:var(--accent);
+  background:var(--panel-bg);
+  box-shadow:0 0 0 2px color-mix(in srgb, var(--accent), transparent 85%);
+}

@@ -267,6 +267,51 @@
   color:#22c55e;
 }
 
+/* =========================
+   BOTÓN NUEVO (SAAS CONSISTENTE)
+========================= */
+
+.incidencias .btn-new-incidencia{
+  margin-left:auto;
+
+  background:var(--card-bg);
+  border:1px solid var(--card-border);
+  color:var(--text);
+
+  padding:10px 14px;
+  border-radius:10px;
+
+  font-size:14px;
+  font-weight:500;
+
+  cursor:pointer;
+
+  display:flex;
+  align-items:center;
+  gap:6px;
+
+  transition:all .15s ease;
+}
+
+/* hover igual que inputs/select */
+.incidencias .btn-new-incidencia:hover{
+  border-color:var(--accent);
+  background:color-mix(in srgb, var(--card-bg), var(--accent) 8%);
+  color:var(--text);
+}
+
+/* focus accesible */
+.incidencias .btn-new-incidencia:focus{
+  outline:none;
+  border-color:var(--accent);
+  box-shadow:0 0 0 2px rgba(59,130,246,0.15);
+}
+
+/* active sutil */
+.incidencias .btn-new-incidencia:active{
+  transform:scale(.98);
+}
+
 
 /* =========================
    RESPONSIVE

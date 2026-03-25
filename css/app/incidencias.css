@@ -1,5 +1,5 @@
 /* =========================
-   INCIDENCIAS (PRO FIX WIDTH + RESIZE SAFE)
+   INCIDENCIAS (SAAS PRO CLEAN)
 ========================= */
 
 .incidencias{
@@ -12,7 +12,7 @@
 
   display:flex;
   flex-direction:column;
-  gap:var(--section-gap, 28px);
+  gap:28px;
 }
 
 /* header oculto */
@@ -33,7 +33,7 @@
 
 
 /* =========================
-   PANEL (🔥 FIX CLAVE)
+   PANEL
 ========================= */
 
 .incidencias .panel-block{
@@ -47,7 +47,7 @@
 
   box-shadow:var(--panel-shadow);
 
-  overflow:hidden; /* 🔥 EVITA QUE ROMPA EL LAYOUT */
+  overflow:hidden;
 
   transition:
     border-color .2s ease,
@@ -61,19 +61,6 @@
 
 
 /* =========================
-   TITLE
-========================= */
-
-.incidencias .section-title{
-  font-size:14px;
-  font-weight:600;
-  letter-spacing:.2px;
-  color:var(--text);
-  margin-bottom:10px;
-}
-
-
-/* =========================
    FILTROS
 ========================= */
 
@@ -81,7 +68,8 @@
   display:flex;
   gap:10px;
   flex-wrap:wrap;
-  margin-bottom:10px;
+  align-items:center;
+  margin-bottom:12px;
 }
 
 .incidencias .filters-row input,
@@ -94,11 +82,19 @@
   border-radius:10px;
   outline:none;
   font-size:14px;
+
+  transition:all .15s ease;
+}
+
+.incidencias .filters-row input:focus,
+.incidencias .filters-row select:focus{
+  border-color:var(--accent);
+  box-shadow:0 0 0 2px rgba(59,130,246,0.15);
 }
 
 .incidencias .filters-row input{
   flex:1;
-  min-width:200px;
+  min-width:220px;
 }
 
 .incidencias .filters-row select{
@@ -107,7 +103,44 @@
 
 
 /* =========================
-   TABLE CONTAINER (🔥 SCROLL REAL)
+   BOTÓN NUEVO 🔥
+========================= */
+
+.incidencias .btn-new-incidencia{
+  margin-left:auto;
+
+  background:var(--accent);
+  color:#fff;
+
+  border:none;
+  border-radius:10px;
+
+  padding:10px 16px;
+
+  font-size:14px;
+  font-weight:600;
+
+  cursor:pointer;
+
+  display:flex;
+  align-items:center;
+  gap:6px;
+
+  transition:all .2s ease;
+}
+
+.incidencias .btn-new-incidencia:hover{
+  transform:translateY(-1px);
+  filter:brightness(1.1);
+}
+
+.incidencias .btn-new-incidencia:active{
+  transform:scale(.96);
+}
+
+
+/* =========================
+   TABLE CONTAINER
 ========================= */
 
 .incidencias .table-container{
@@ -121,10 +154,9 @@
    TABLE BASE
 ========================= */
 
-.incidencias .incidencias-table{
+.incidencias table{
   width:100%;
-  min-width:900px;
-  max-width:100%; /* 🔥 evita overflow loco */
+  min-width:850px;
 
   border-collapse:collapse;
   table-layout:fixed;
@@ -134,7 +166,7 @@
 
 
 /* HEADER */
-.incidencias .incidencias-table th{
+.incidencias th{
   position:relative;
 
   text-align:left;
@@ -146,8 +178,9 @@
   white-space:nowrap;
 }
 
+
 /* CELDAS */
-.incidencias .incidencias-table td{
+.incidencias td{
   padding:12px;
   border-bottom:1px solid var(--card-border);
   color:var(--text);
@@ -158,40 +191,38 @@
   white-space:nowrap;
 }
 
+
 /* HOVER */
-.incidencias .incidencias-table tr:hover{
+.incidencias tr:hover{
   background:var(--sb-hover);
 }
 
 
 /* =========================
-   COLUMN WIDTH
+   COLUMN WIDTH (UPDATED)
 ========================= */
 
-.incidencias .incidencias-table th:nth-child(1),
-.incidencias .incidencias-table td:nth-child(1){ width:80px; }
+.incidencias th:nth-child(1),
+.incidencias td:nth-child(1){ width:80px; }
 
-.incidencias .incidencias-table th:nth-child(2),
-.incidencias .incidencias-table td:nth-child(2){ width:260px; }
+.incidencias th:nth-child(2),
+.incidencias td:nth-child(2){ width:280px; }
 
-.incidencias .incidencias-table th:nth-child(3),
-.incidencias .incidencias-table td:nth-child(3){ width:200px; }
+.incidencias th:nth-child(3),
+.incidencias td:nth-child(3){ width:220px; }
 
-.incidencias .incidencias-table th:nth-child(4),
-.incidencias .incidencias-table td:nth-child(4){ width:150px; }
+.incidencias th:nth-child(4),
+.incidencias td:nth-child(4){ width:150px; }
 
-.incidencias .incidencias-table th:nth-child(5),
-.incidencias .incidencias-table td:nth-child(5){ width:130px; }
+.incidencias th:nth-child(5),
+.incidencias td:nth-child(5){ width:140px; }
 
-.incidencias .incidencias-table th:nth-child(6),
-.incidencias .incidencias-table td:nth-child(6){ width:160px; }
-
-.incidencias .incidencias-table th:nth-child(7),
-.incidencias .incidencias-table td:nth-child(7){ width:120px; }
+.incidencias th:nth-child(6),
+.incidencias td:nth-child(6){ width:160px; }
 
 
 /* =========================
-   RESIZER (🔥)
+   RESIZER
 ========================= */
 
 .incidencias .resizer{
@@ -215,8 +246,8 @@
 ========================= */
 
 .incidencias .badge{
-  padding:4px 8px;
-  border-radius:8px;
+  padding:4px 10px;
+  border-radius:999px;
   font-size:12px;
   font-weight:500;
 }
@@ -234,40 +265,6 @@
 .incidencias .badge.cerrada{
   background:rgba(34,197,94,0.15);
   color:#22c55e;
-}
-
-
-/* =========================
-   ACTIONS
-========================= */
-
-.incidencias .table-actions{
-  display:flex;
-  gap:6px;
-}
-
-.incidencias .action-btn{
-  width:28px;
-  height:28px;
-
-  display:flex;
-  align-items:center;
-  justify-content:center;
-
-  border-radius:6px;
-
-  background:transparent;
-  border:none;
-  cursor:pointer;
-
-  color:var(--dim);
-
-  transition:.15s ease;
-}
-
-.incidencias .action-btn:hover{
-  background:var(--card-bg);
-  color:var(--text);
 }
 
 
@@ -291,11 +288,17 @@
 
   .incidencias .filters-row{
     flex-direction:column;
+    align-items:stretch;
   }
 
   .incidencias .filters-row input,
-  .incidencias .filters-row select{
+  .incidencias .filters-row select,
+  .incidencias .btn-new-incidencia{
     width:100%;
+  }
+
+  .incidencias .btn-new-incidencia{
+    justify-content:center;
   }
 
 }

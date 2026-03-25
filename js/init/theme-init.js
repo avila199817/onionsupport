@@ -1,12 +1,14 @@
 "use strict";
 
-try {
-  const config = JSON.parse(localStorage.getItem("onion_config") || "{}");
-  const dark = config.darkMode;
+(function(){
+  try{
+    const config = JSON.parse(localStorage.getItem("onion_config") || "{}");
 
-  if(dark === false){
-    document.documentElement.setAttribute("data-theme","light");
-  } else {
-    document.documentElement.removeAttribute("data-theme");
+    const theme = config.darkMode === false ? "light" : "dark";
+
+    document.documentElement.setAttribute("data-theme", theme);
+
+  }catch(e){
+    document.documentElement.setAttribute("data-theme", "dark");
   }
-} catch {}
+})();

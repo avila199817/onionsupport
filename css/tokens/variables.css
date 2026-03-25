@@ -1,6 +1,8 @@
 :root{
 
-  /* LAYOUT */
+  /* =========================
+     LAYOUT
+  ========================= */
   --content-max:1300px;
   --content-padding:40px;
 
@@ -10,44 +12,82 @@
   --topbar-height:56px;
   --page-offset:28px;
 
-  /* Z */
+
+  /* =========================
+     SIDEBAR SYSTEM
+  ========================= */
+  --sidebar-icon-size:20px;
+  --sidebar-item-padding-x:12px;
+
+  /* eje vertical perfecto */
+  --sidebar-icon-offset:calc(
+    var(--sidebar-item-padding-x) + (var(--sidebar-icon-size) / 2)
+  );
+
+
+  /* =========================
+     Z-INDEX
+  ========================= */
   --z-sidebar:10;
   --z-topbar:20;
   --z-dropdown:30;
   --z-overlay:40;
   --z-modal:50;
 
-  /* BRAND */
+
+  /* =========================
+     BRAND
+  ========================= */
   --accent:#6366f1;
   --accent-hover:#4f46e5;
 
-  /* SIDEBAR */
+
+  /* =========================
+     SIDEBAR COLORS
+  ========================= */
   --sb-bg:#1b1b1b;
   --sb-hover:#121212;
   --sb-active:#151515;
   --sb-border:rgba(255,255,255,0.04);
 
-  /* TEXT */
+
+  /* =========================
+     TEXT
+  ========================= */
   --text:#ffffff;
   --muted:rgba(255,255,255,0.92);
   --dim:rgba(255,255,255,0.6);
 
-  /* BASE */
+
+  /* =========================
+     BASE
+  ========================= */
   --main-bg:#0d0d0d;
   --dropdown-bg:#333333;
 
-  /* CARDS */
+
+  /* =========================
+     CARDS
+  ========================= */
   --card-bg:#1e1e1e;
   --card-border:#2a2a2a;
+
   --card-shadow:0 10px 30px rgba(0,0,0,0.35);
   --card-shadow-hover:0 20px 40px rgba(0,0,0,0.45);
 
-  /* PANELS */
+
+  /* =========================
+     PANELS
+  ========================= */
   --panel-bg:#1b1b1b;
   --panel-border:#2a2a2a;
+
   --panel-shadow:0 10px 30px rgba(0,0,0,0.4);
 
-  /* STATUS */
+
+  /* =========================
+     STATUS
+  ========================= */
   --success:#22c55e;
   --warning:#f59e0b;
   --error:#ef4444;
@@ -56,11 +96,27 @@
   --warning-bg:rgba(245,158,11,0.12);
   --info-bg:rgba(59,130,246,0.12);
 
-  /* BG */
-  --gradient-main: linear-gradient(180deg, #2a2a2a 0%, #232323 60%, #1d1d1d 100%);
-  --gradient-overlay: radial-gradient(circle at 40% 0%, rgba(255,255,255,0.025), transparent 70%);
 
-  /* UI */
+  /* =========================
+     BACKGROUNDS
+  ========================= */
+  --gradient-main:linear-gradient(
+    180deg,
+    #2a2a2a 0%,
+    #232323 60%,
+    #1d1d1d 100%
+  );
+
+  --gradient-overlay:radial-gradient(
+    circle at 40% 0%,
+    rgba(255,255,255,0.025),
+    transparent 70%
+  );
+
+
+  /* =========================
+     UI ELEMENTS
+  ========================= */
   --tooltip-bg:#111;
   --tooltip-text:#fff;
 
@@ -69,10 +125,40 @@
 
   --scrollbar-thumb:rgba(255,255,255,0.1);
 
-  /* SPACING */
+
+  /* =========================
+     SPACING SYSTEM
+  ========================= */
   --space-xs:6px;
   --space-sm:10px;
   --space-md:14px;
   --space-lg:20px;
   --space-xl:32px;
+
+
+  /* =========================
+     MOTION
+  ========================= */
+  --ease-out:cubic-bezier(.22,1,.36,1);
+  --ease-in:cubic-bezier(.4,0,1,1);
+
+  --duration-fast:.1s;
+  --duration-normal:.25s;
+  --duration-slow:.32s;
+
+
+  /* =========================
+     RADIUS SYSTEM
+  ========================= */
+  --radius-sm:6px;
+  --radius-md:10px;
+  --radius-lg:12px;
+
+
+  /* =========================
+     SHADOW SYSTEM
+  ========================= */
+  --shadow-sm:0 4px 12px rgba(0,0,0,0.2);
+  --shadow-md:0 10px 30px rgba(0,0,0,0.35);
+  --shadow-lg:0 20px 50px rgba(0,0,0,0.45);
 }

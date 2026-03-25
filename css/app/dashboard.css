@@ -1,23 +1,25 @@
 /* =========================
-   HOME (PRO SAAS UPGRADE)
+   HOME (COMPACT PRO SAAS)
 ========================= */
 
 .home{
   width:100%;
 }
 
+/* 🔥 MENOS AIRE GLOBAL */
 .home .container{
   padding-top:var(--page-offset);
-  padding-bottom:50px;
+  padding-bottom:30px;
 
   display:flex;
   flex-direction:column;
-  gap:var(--section-gap, 28px);
+  gap:20px; /* 🔥 antes 28px */
 }
 
 .home .dashboard-header{
   display:none;
 }
+
 
 /* =========================
    KPI GRID
@@ -25,13 +27,13 @@
 
 .home .grid-cards{
   display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
-  gap:20px;
+  grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+  gap:14px; /* 🔥 más compacto */
 }
 
 
 /* =========================
-   CARDS (MEJORADAS)
+   CARDS
 ========================= */
 
 .home .card{
@@ -39,44 +41,21 @@
 
   background:var(--card-bg);
   border:1px solid var(--card-border);
-  border-radius:18px;
+  border-radius:16px;
 
-  padding:20px;
+  padding:16px; /* 🔥 antes 20 */
 
   box-shadow:var(--card-shadow);
 
   transition:
-    transform .25s ease,
-    box-shadow .25s ease,
+    transform .2s ease,
+    box-shadow .2s ease,
     border-color .2s ease;
 }
 
-/* glow sutil */
-.home .card::after{
-  content:"";
-  position:absolute;
-  inset:0;
-  border-radius:18px;
-
-  background:linear-gradient(
-    120deg,
-    transparent,
-    color-mix(in srgb, var(--accent), transparent 85%),
-    transparent
-  );
-
-  opacity:0;
-  transition:opacity .25s ease;
-}
-
 .home .card:hover{
-  transform:translateY(-6px);
+  transform:translateY(-4px);
   box-shadow:var(--card-shadow-hover);
-  border-color:color-mix(in srgb, var(--accent), var(--card-border) 70%);
-}
-
-.home .card:hover::after{
-  opacity:.6;
 }
 
 
@@ -85,15 +64,15 @@
 ========================= */
 
 .home .card-title{
-  font-size:12px;
+  font-size:11px; /* 🔥 más pequeño */
   color:var(--dim);
 }
 
 .home .card-value{
   display:block;
-  margin-top:10px;
+  margin-top:6px;
 
-  font-size:30px;
+  font-size:24px; /* 🔥 antes 30 */
   font-weight:600;
 
   color:var(--text);
@@ -101,13 +80,13 @@
 
 .home .card-meta{
   display:flex;
-  gap:8px;
+  gap:6px;
   align-items:center;
-  margin-top:8px;
+  margin-top:6px;
 }
 
 .home .card-extra{
-  font-size:12px;
+  font-size:11px;
   color:var(--dim);
 }
 
@@ -119,11 +98,7 @@
 .home .dashboard-grid{
   display:grid;
   grid-template-columns:2fr 1fr;
-  gap:22px;
-}
-
-.home .dashboard-grid.secondary{
-  grid-template-columns:1fr 1fr;
+  gap:16px; /* 🔥 antes 22 */
 }
 
 
@@ -136,9 +111,9 @@
 
   background:var(--panel-bg);
   border:1px solid var(--panel-border);
-  border-radius:18px;
+  border-radius:16px;
 
-  padding:20px;
+  padding:16px; /* 🔥 antes 20 */
 
   box-shadow:var(--panel-shadow);
 
@@ -148,8 +123,7 @@
 }
 
 .home .panel-block:hover{
-  border-color:color-mix(in srgb, var(--accent), var(--panel-border) 70%);
-  transform:translateY(-3px);
+  transform:translateY(-2px);
 }
 
 
@@ -158,156 +132,143 @@
 ========================= */
 
 .home .section-title{
-  font-size:14px;
+  font-size:13px; /* 🔥 antes 14 */
   font-weight:600;
-  letter-spacing:.2px;
 
   color:var(--text);
-  margin-bottom:10px;
+  margin-bottom:8px;
 }
 
 
 /* =========================
-   LISTAS
+   ACTIVITY (🔥 CLAVE)
 ========================= */
 
 .home .activity-list{
   display:flex;
   flex-direction:column;
-  gap:10px; /* 🔥 más compacto */
+  gap:6px; /* 🔥 MUY compacto */
 }
 
-/* ITEM ACTIVIDAD 🔥 NUEVO */
+/* item */
 .home .activity-item{
   display:flex;
   flex-direction:column;
-  gap:2px;
+  gap:1px;
 
-  padding:10px 12px;
-  border-radius:10px;
+  padding:8px 10px; /* 🔥 reducido */
 
-  background:color-mix(in srgb, var(--card-bg), transparent 20%);
+  border-radius:8px;
+
+  background:transparent;
   border:1px solid transparent;
 
   transition:.15s ease;
 }
 
 .home .activity-item:hover{
-  border-color:var(--card-border);
   background:var(--card-bg);
-  transform:translateX(3px);
+  border-color:var(--card-border);
 }
 
-/* título actividad */
+/* texto principal */
 .home .activity-title{
-  font-size:13px;
+  font-size:12px; /* 🔥 MÁS pequeño */
   font-weight:500;
   color:var(--text);
 }
 
-/* meta (fecha / usuario) 🔥 MÁS PEQUEÑO */
+/* meta */
 .home .activity-meta{
-  font-size:11px;
+  font-size:10px; /* 🔥 ULTRA compacto */
   color:var(--dim);
 }
 
 
+/* =========================
+   STATUS
+========================= */
+
 .home .status-list{
   display:flex;
   flex-direction:column;
-  gap:10px;
+  gap:6px;
 }
-
-
-/* =========================
-   STATUS ITEM (PRO)
-========================= */
 
 .home .status-list div{
   display:flex;
   align-items:center;
-  gap:8px;
+  gap:6px;
 
-  font-size:12px; /* 🔥 bajado */
+  font-size:11px;
   color:var(--muted);
 }
 
-/* puntito */
 .home .status-list div::before{
   content:"";
-  width:6px;
-  height:6px;
+  width:5px;
+  height:5px;
   border-radius:50%;
   background:var(--success);
 }
 
 
 /* =========================
-   SUMMARY GRID
+   SUMMARY
 ========================= */
 
 .home .summary-grid{
   display:grid;
   grid-template-columns:repeat(3,1fr);
-  gap:12px;
+  gap:8px; /* 🔥 reducido */
 }
 
 .home .summary-item{
   background:var(--card-bg);
   border:1px solid var(--card-border);
 
-  padding:14px;
-  border-radius:14px;
+  padding:10px; /* 🔥 antes 14 */
+  border-radius:10px;
 
   text-align:center;
-
-  transition:border-color .2s ease;
-}
-
-.home .summary-item:hover{
-  border-color:color-mix(in srgb, var(--accent), var(--card-border) 70%);
 }
 
 .home .summary-value{
-  font-size:20px;
+  font-size:16px; /* 🔥 antes 20 */
   font-weight:600;
-  color:var(--text);
 }
 
 .home .summary-label{
-  font-size:11px; /* 🔥 más fino */
+  font-size:10px;
   color:var(--dim);
 }
 
 
 /* =========================
-   ALERTS (SISTEMA)
+   ALERTS
 ========================= */
 
 .home .alert-list{
   display:flex;
   flex-direction:column;
-  gap:10px;
+  gap:6px;
 }
 
 .home .alert-item{
   background:color-mix(in srgb, var(--card-bg), transparent 10%);
   border:1px solid var(--card-border);
 
-  padding:12px;
-  border-radius:12px;
+  padding:8px 10px; /* 🔥 reducido */
+  border-radius:10px;
 
-  font-size:12px; /* 🔥 bajado */
+  font-size:11px;
   color:var(--muted);
 
-  transition:
-    border-color .2s ease,
-    transform .2s ease;
+  transition:.15s ease;
 }
 
 .home .alert-item:hover{
-  transform:translateX(4px);
-  border-color:color-mix(in srgb, var(--accent), var(--card-border) 70%);
+  transform:translateX(3px);
 }
 
 
@@ -318,7 +279,7 @@
 @media (max-width:1024px){
 
   .home .container{
-    padding:20px;
+    padding:16px;
   }
 
   .home .dashboard-grid{
@@ -329,36 +290,12 @@
 
 @media (max-width:768px){
 
-  .home .container{
-    padding:16px;
-  }
-
   .home .grid-cards{
     grid-template-columns:1fr;
   }
 
   .home .summary-grid{
     grid-template-columns:1fr;
-  }
-
-}
-
-@media (max-width:480px){
-
-  .home .container{
-    padding:12px;
-  }
-
-  .home .card{
-    padding:16px;
-  }
-
-  .home .panel-block{
-    padding:16px;
-  }
-
-  .home .card-value{
-    font-size:24px;
   }
 
 }

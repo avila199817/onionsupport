@@ -82,6 +82,54 @@ function bindEvents(){
 }
 
 /* =========================
+   🔥 RESIZE TABLE
+========================= */
+
+function initTableResize(){
+
+  const root = getRoot();
+  if(!root) return;
+
+  const resizers = root.querySelectorAll(".resizer");
+
+  resizers.forEach(resizer => {
+
+    let startX, startWidth, index;
+
+    resizer.addEventListener("mousedown", e => {
+
+      const th = e.target.parentElement;
+
+      startX = e.pageX;
+      startWidth = th.offsetWidth;
+
+      index = Array.from(th.parentNode.children).indexOf(th);
+
+      function onMouseMove(e){
+        const newWidth = startWidth + (e.pageX - startX);
+
+        root.querySelectorAll("tr").forEach(row => {
+          if(row.children[index]){
+            row.children[index].style.width = newWidth + "px";
+          }
+        });
+      }
+
+      function onMouseUp(){
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+      }
+
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+
+    });
+
+  });
+
+}
+
+/* =========================
    LOAD
 ========================= */
 
@@ -114,6 +162,9 @@ async function loadIncidencias(){
 
     render(items);
     updateKPIs(items);
+
+    /* 🔥 ACTIVAMOS RESIZE DESPUÉS DEL RENDER */
+    initTableResize();
 
     requestAnimationFrame(()=>{
       panel?.classList.add("ready");
@@ -242,68 +293,6 @@ function mapItem(i){
     raw: i
   };
 
-}
-
-/* =========================
-   DETALLE
-========================= */
-
-function showDetalle(item){
-
-  const box = $("#detalle-incidencia");
-  if(!box) return;
-
-  box.style.display = "block";
-
-  const titulo = $("#detalle-titulo");
-  const desc = $("#detalle-desc");
-  const estadoEl = $("#detalle-estado");
-  const prioridadEl = $("#detalle-prioridad");
-  const fechaEl = $("#detalle-fecha");
-
-  if(titulo) titulo.textContent = item.titulo || item.title || "--";
-  if(desc) desc.textContent = item.descripcion || item.desc || "--";
-
-  const estado = getEstado(item);
-  const prioridad = getPrioridad(item);
-
-  if(estadoEl) estadoEl.textContent = "Estado: " + estado.label;
-  if(prioridadEl) prioridadEl.textContent = "Prioridad: " + prioridad.label;
-  if(fechaEl) fechaEl.textContent = "Fecha: " + formatFecha(item.createdAt);
-
-}
-
-/* =========================
-   KPIs
-========================= */
-
-function updateKPIs(items){
-
-  const open = items.filter(i => i.status === "open").length;
-  const progress = items.filter(i => i.status === "in_progress").length;
-  const closed = items.filter(i => i.status === "closed").length;
-
-  if($("#inc-open")) $("#inc-open").textContent = open;
-  if($("#inc-progress")) $("#inc-progress").textContent = progress;
-  if($("#inc-closed")) $("#inc-closed").textContent = closed;
-
-  if($("#inc-time")) $("#inc-time").textContent = calcAvgTime(items);
-
-}
-
-function calcAvgTime(items){
-
-  const closed = items.filter(i => i.closedAt && i.createdAt);
-
-  if(!closed.length) return "--";
-
-  const avg = closed.reduce((acc, i) => {
-    return acc + (new Date(i.closedAt) - new Date(i.createdAt));
-  }, 0) / closed.length;
-
-  const hours = Math.round(avg / (1000 * 60 * 60));
-
-  return hours + "h";
 }
 
 /* =========================

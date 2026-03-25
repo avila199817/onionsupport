@@ -20,7 +20,7 @@
   transition:width var(--duration-slow) var(--ease-out);
   will-change:width;
 
-  overflow:hidden;
+  overflow:visible;
 
   z-index:var(--z-sidebar);
 }

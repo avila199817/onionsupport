@@ -2,11 +2,10 @@
 
   <div class="container">
 
-    <!-- HEADER VACÍO (ESPACIADO) -->
     <div class="dashboard-header"></div>
 
     <!-- =========================
-         KPI PRINCIPAL (4 CARDS)
+         KPI PRINCIPAL
     ========================= -->
     <div class="grid-cards">
 
@@ -21,8 +20,8 @@
         </div>
 
         <div class="card-meta">
+          <span class="card-extra">Inactivos:</span>
           <strong id="home-usuarios-inactivos">0</strong>
-          <span class="card-extra">Inactivos</span>
         </div>
       </div>
 
@@ -37,8 +36,8 @@
         </div>
 
         <div class="card-meta">
+          <span class="card-extra">Inactivos:</span>
           <strong id="home-clientes-inactivos">0</strong>
-          <span class="card-extra">Inactivos</span>
         </div>
       </div>
 
@@ -53,8 +52,8 @@
         </div>
 
         <div class="card-meta">
+          <span class="card-extra">Pendiente:</span>
           <strong id="home-facturas-pendiente">€0</strong>
-          <span class="card-extra">Pendiente</span>
         </div>
       </div>
 
@@ -84,7 +83,13 @@
         <div class="section-title">Actividad reciente</div>
 
         <div id="activity-list" class="activity-list">
-          <div>Cargando actividad...</div>
+
+          <!-- EJEMPLO CORRECTO -->
+          <div class="activity-item">
+            <div class="activity-title">Cargando actividad...</div>
+            <div class="activity-meta">Esperando datos</div>
+          </div>
+
         </div>
 
       </div>
@@ -95,11 +100,9 @@
         <div class="section-title">Sistema</div>
 
         <div class="status-list">
-
           <div id="status-api">API -- ms</div>
           <div id="status-db">Base de datos --</div>
           <div id="status-uptime">Uptime --</div>
-
         </div>
 
       </div>

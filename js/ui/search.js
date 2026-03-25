@@ -9,13 +9,8 @@ if(!window.Onion){
 
 const Onion = window.Onion;
 
-/* =========================
-   SINGLETON
-========================= */
-
 if(window.__onionSearchLoaded) return;
 window.__onionSearchLoaded = true;
-
 
 /* =========================
    INIT
@@ -34,7 +29,6 @@ if(input.__searchInit) return;
 
 input.__searchInit = true;
 
-
 /* =========================
    STATE
 ========================= */
@@ -42,12 +36,8 @@ input.__searchInit = true;
 let timer = null;
 let controller = null;
 
-let index = [];
-let indexLoaded = false;
-
 let activeIndex = -1;
 let currentResults = [];
-
 
 /* =========================
    UTILS
@@ -58,16 +48,6 @@ String(v || "")
 .toLowerCase()
 .normalize("NFD")
 .replace(/[\u0300-\u036f]/g,"");
-
-function fuzzy(text,q){
-let t=0,qc=0;
-while(t<text.length && qc<q.length){
-if(text[t]===q[qc]) qc++;
-t++;
-}
-return qc===q.length;
-}
-
 
 /* =========================
    UI
@@ -85,7 +65,6 @@ container.innerHTML = "";
 activeIndex = -1;
 }
 
-
 /* =========================
    HIGHLIGHT
 ========================= */
@@ -101,7 +80,6 @@ return text.slice(0,i)
 + text.slice(i+q.length);
 }
 
-
 /* =========================
    ICONS
 ========================= */
@@ -111,11 +89,8 @@ cliente:"🏢",
 user:"👤",
 factura:"🧾",
 incidencia:"🎫",
-nav:"📂",
-action:"🛠️",
-settings:"⚙️"
+nav:"📂"
 };
-
 
 /* =========================
    GROUP
@@ -128,7 +103,6 @@ results.forEach(r=>{
 });
 return g;
 }
-
 
 /* =========================
    RENDER
@@ -185,9 +159,8 @@ show();
 
 }
 
-
 /* =========================
-   API SEARCH
+   API SEARCH (SIN ROMPER)
 ========================= */
 
 async function searchAPI(q){
@@ -202,79 +175,19 @@ const url = Onion.config.API + "/search?q=" + encodeURIComponent(q);
 
 const data = await Onion.fetch(url,{ signal:controller.signal });
 
-return data?.results || [];
+return data?.results || data || [];
 
 }catch(e){
 
 if(e.name === "AbortError") return [];
 
-console.error("💥 SEARCH API ERROR:", e);
+/* 🔥 NO SPAM DE ERRORES */
+console.warn("Search API no disponible");
 return [];
 
 }
 
 }
-
-
-/* =========================
-   INDEX LOAD
-========================= */
-
-async function loadIndex(){
-
-if(indexLoaded) return;
-
-try{
-
-const data = await Onion.fetch(Onion.config.API + "/admin/search/index");
-
-index = (data?.results || []).map(i=>({
-
-...i,
-t: normalize(i.title),
-s: normalize(i.subtitle),
-k: (i.keywords||[]).map(normalize)
-
-}));
-
-indexLoaded = true;
-
-}catch(e){
-console.error("💥 INDEX ERROR:", e);
-}
-
-}
-
-
-/* =========================
-   LOCAL SEARCH
-========================= */
-
-function searchLocal(q){
-
-q = normalize(q);
-
-return index
-.map(i=>{
-
-let score=0;
-
-if(i.t.includes(q)) score+=10;
-else if(fuzzy(i.t,q)) score+=6;
-
-if(i.s?.includes(q)) score+=4;
-if(i.k?.some(k=>k.includes(q))) score+=8;
-
-return {i,score};
-
-})
-.filter(r=>r.score>0)
-.sort((a,b)=>b.score-a.score)
-.slice(0,20)
-.map(r=>r.i);
-
-}
-
 
 /* =========================
    MAIN SEARCH
@@ -282,19 +195,10 @@ return {i,score};
 
 async function runSearch(q){
 
-// 1. instant local
-const local = searchLocal(q);
-render(local, q);
-
-// 2. async API mejora resultados
-const api = await searchAPI(q);
-
-if(api.length){
-render(api, q);
-}
+const results = await searchAPI(q);
+render(results, q);
 
 }
-
 
 /* =========================
    INPUT
@@ -311,26 +215,11 @@ hide();
 return;
 }
 
-timer = setTimeout(()=> runSearch(value), 150);
+timer = setTimeout(()=> runSearch(value), 200);
 
 }
 
 input.addEventListener("input", onInput);
-
-
-/* =========================
-   FOCUS
-========================= */
-
-input.addEventListener("focus", async ()=>{
-
-if(!input.value.trim()) return;
-
-await loadIndex();
-runSearch(input.value);
-
-});
-
 
 /* =========================
    CLICK OUTSIDE
@@ -341,7 +230,6 @@ if(!e.target.closest(".topbar-search-wrap")){
 hide();
 }
 });
-
 
 /* =========================
    KEYBOARD NAV
@@ -375,7 +263,6 @@ hide();
 
 });
 
-
 function updateActive(items){
 
 items.forEach(el=>el.classList.remove("active"));
@@ -386,14 +273,6 @@ items[activeIndex].scrollIntoView({block:"nearest"});
 }
 
 }
-
-
-/* =========================
-   PRELOAD
-========================= */
-
-setTimeout(loadIndex, 1000);
-
 
 /* =========================
    CLEANUP
@@ -408,7 +287,6 @@ try{ controller.abort(); }catch{}
 }
 
 input.removeEventListener("input", onInput);
-
 input.__searchInit = false;
 
 });

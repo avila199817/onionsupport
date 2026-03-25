@@ -1,0 +1,31 @@
+[data-theme="light"]{
+
+  --sb-bg:#ffffff;
+  --sb-hover:#f3f4f6;
+  --sb-active:#e5e7eb;
+  --sb-border:#e5e7eb;
+
+  --text:#111827;
+  --muted:#374151;
+  --dim:#6b7280;
+
+  --main-bg:#f6f8fb;
+  --dropdown-bg:#ffffff;
+
+  --card-bg:#ffffff;
+  --card-border:#e5e7eb;
+  --card-shadow:0 10px 25px rgba(0,0,0,0.06);
+  --card-shadow-hover:0 15px 35px rgba(0,0,0,0.08);
+
+  --panel-bg:#ffffff;
+  --panel-border:#d1d5db;
+  --panel-shadow:0 10px 30px rgba(0,0,0,0.08);
+
+  --gradient-main: linear-gradient(180deg, #f6f8fb 0%, #eef2f7 100%);
+  --gradient-overlay: radial-gradient(circle at 40% 0%, rgba(0,0,0,0.03), transparent 70%);
+
+  --tooltip-bg:#111827;
+  --tooltip-text:#ffffff;
+
+  --scrollbar-thumb:rgba(0,0,0,0.15);
+}

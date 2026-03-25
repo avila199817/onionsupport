@@ -13,7 +13,7 @@
 
   display:flex;
   flex-direction:column;
-  gap:20px; /* 🔥 antes 28px */
+  gap:20px;
 }
 
 .home .dashboard-header{
@@ -28,7 +28,7 @@
 .home .grid-cards{
   display:grid;
   grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
-  gap:14px; /* 🔥 más compacto */
+  gap:14px;
 }
 
 
@@ -43,7 +43,7 @@
   border:1px solid var(--card-border);
   border-radius:16px;
 
-  padding:16px; /* 🔥 antes 20 */
+  padding:16px;
 
   box-shadow:var(--card-shadow);
 
@@ -64,7 +64,7 @@
 ========================= */
 
 .home .card-title{
-  font-size:11px; /* 🔥 más pequeño */
+  font-size:11px;
   color:var(--dim);
 }
 
@@ -72,7 +72,7 @@
   display:block;
   margin-top:6px;
 
-  font-size:24px; /* 🔥 antes 30 */
+  font-size:24px;
   font-weight:600;
 
   color:var(--text);
@@ -98,7 +98,7 @@
 .home .dashboard-grid{
   display:grid;
   grid-template-columns:2fr 1fr;
-  gap:16px; /* 🔥 antes 22 */
+  gap:16px;
 }
 
 
@@ -113,7 +113,7 @@
   border:1px solid var(--panel-border);
   border-radius:16px;
 
-  padding:16px; /* 🔥 antes 20 */
+  padding:16px;
 
   box-shadow:var(--panel-shadow);
 
@@ -132,7 +132,7 @@
 ========================= */
 
 .home .section-title{
-  font-size:13px; /* 🔥 antes 14 */
+  font-size:13px;
   font-weight:600;
 
   color:var(--text);
@@ -141,22 +141,21 @@
 
 
 /* =========================
-   ACTIVITY (🔥 CLAVE)
+   ACTIVITY (🔥 IGUALADO)
 ========================= */
 
 .home .activity-list{
   display:flex;
   flex-direction:column;
-  gap:6px; /* 🔥 MUY compacto */
+  gap:6px;
 }
 
-/* item */
 .home .activity-item{
   display:flex;
   flex-direction:column;
-  gap:1px;
+  gap:2px;
 
-  padding:8px 10px; /* 🔥 reducido */
+  padding:8px 10px;
 
   border-radius:8px;
 
@@ -171,22 +170,21 @@
   border-color:var(--card-border);
 }
 
-/* texto principal */
+/* 🔥 TEXTO IGUAL QUE SISTEMA */
 .home .activity-title{
-  font-size:12px; /* 🔥 MÁS pequeño */
+  font-size:11px;
   font-weight:500;
   color:var(--text);
 }
 
-/* meta */
 .home .activity-meta{
-  font-size:10px; /* 🔥 ULTRA compacto */
+  font-size:11px;
   color:var(--dim);
 }
 
 
 /* =========================
-   STATUS
+   STATUS (REFERENCIA)
 ========================= */
 
 .home .status-list{
@@ -220,21 +218,21 @@
 .home .summary-grid{
   display:grid;
   grid-template-columns:repeat(3,1fr);
-  gap:8px; /* 🔥 reducido */
+  gap:8px;
 }
 
 .home .summary-item{
   background:var(--card-bg);
   border:1px solid var(--card-border);
 
-  padding:10px; /* 🔥 antes 14 */
+  padding:10px;
   border-radius:10px;
 
   text-align:center;
 }
 
 .home .summary-value{
-  font-size:16px; /* 🔥 antes 20 */
+  font-size:16px;
   font-weight:600;
 }
 
@@ -258,7 +256,7 @@
   background:color-mix(in srgb, var(--card-bg), transparent 10%);
   border:1px solid var(--card-border);
 
-  padding:8px 10px; /* 🔥 reducido */
+  padding:8px 10px;
   border-radius:10px;
 
   font-size:11px;

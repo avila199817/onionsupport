@@ -1,0 +1,48 @@
+/* =========================
+   APP ROOT
+========================= */
+
+.layout{
+  position:relative;
+  min-height:100dvh;
+  isolation:isolate;
+
+  background:
+    var(--gradient-overlay),
+    var(--gradient-main);
+}
+
+/* =========================
+   CONTAINER
+========================= */
+
+.container{
+  width:100%;
+  max-width:var(--content-max);
+  margin:0 auto;
+  padding-inline:var(--content-padding);
+}
+
+/* =========================
+   MAIN CONTENT
+========================= */
+
+.main-content{
+  position:relative;
+  z-index:1;
+
+  min-height:100dvh;
+
+  margin-left:var(--sidebar-width);
+  padding-top:var(--topbar-height);
+
+  transition:
+    margin-left .35s cubic-bezier(.22,1,.36,1);
+
+  will-change:margin-left;
+}
+
+/* COLLAPSED */
+.sidebar.collapsed ~ .main-content{
+  margin-left:var(--sidebar-collapsed);
+}

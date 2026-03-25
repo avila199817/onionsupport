@@ -1,31 +1,95 @@
 [data-theme="light"]{
 
+  /* =========================
+     SIDEBAR
+  ========================= */
   --sb-bg:#ffffff;
   --sb-hover:#f3f4f6;
   --sb-active:#e5e7eb;
   --sb-border:#e5e7eb;
 
+
+  /* =========================
+     TEXT
+  ========================= */
   --text:#111827;
   --muted:#374151;
   --dim:#6b7280;
 
+
+  /* =========================
+     BASE
+  ========================= */
   --main-bg:#f6f8fb;
   --dropdown-bg:#ffffff;
 
+
+  /* =========================
+     CARDS
+  ========================= */
   --card-bg:#ffffff;
   --card-border:#e5e7eb;
-  --card-shadow:0 10px 25px rgba(0,0,0,0.06);
-  --card-shadow-hover:0 15px 35px rgba(0,0,0,0.08);
 
+  --card-shadow:0 8px 24px rgba(0,0,0,0.06);
+  --card-shadow-hover:0 14px 34px rgba(0,0,0,0.08);
+
+
+  /* =========================
+     PANELS
+  ========================= */
   --panel-bg:#ffffff;
   --panel-border:#d1d5db;
+
   --panel-shadow:0 10px 30px rgba(0,0,0,0.08);
 
-  --gradient-main: linear-gradient(180deg, #f6f8fb 0%, #eef2f7 100%);
-  --gradient-overlay: radial-gradient(circle at 40% 0%, rgba(0,0,0,0.03), transparent 70%);
 
+  /* =========================
+     BACKGROUNDS
+  ========================= */
+  --gradient-main:linear-gradient(
+    180deg,
+    #f6f8fb 0%,
+    #eef2f7 100%
+  );
+
+  --gradient-overlay:radial-gradient(
+    circle at 40% 0%,
+    rgba(0,0,0,0.03),
+    transparent 70%
+  );
+
+
+  /* =========================
+     UI ELEMENTS
+  ========================= */
   --tooltip-bg:#111827;
   --tooltip-text:#ffffff;
 
   --scrollbar-thumb:rgba(0,0,0,0.15);
+
+
+  /* =========================
+     AVATAR (ajuste visual light)
+  ========================= */
+  --avatar-bg:#6366f1;
+  --avatar-text:#ffffff;
+
+
+  /* =========================
+     STATUS (light tuned)
+  ========================= */
+  --warning-bg:rgba(245,158,11,0.15);
+  --info-bg:rgba(59,130,246,0.15);
+
+
+  /* =========================
+     MICRO AJUSTES PRO
+  ========================= */
+
+  /* contraste hover más suave */
+  --sb-hover:color-mix(in srgb, #000000 4%, #ffffff);
+
+  /* borde más fino visualmente */
+  --sb-border:rgba(0,0,0,0.06);
+
 }

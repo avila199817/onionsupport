@@ -1,6 +1,6 @@
-(function(){
-
 "use strict";
+
+(function(){
 
 const Onion = window.Onion;
 
@@ -43,7 +43,9 @@ function init(){
   bindEvents();
   loadIncidencias();
 
-  Onion.onCleanup(()=> initialized = false);
+  Onion.onCleanup(()=>{
+    initialized = false;
+  });
 
 }
 
@@ -73,7 +75,7 @@ function bindEvents(){
 
   });
 
-  $("#search-incidencia")?.addEventListener("input", applyFilters);
+  $("#search-incidencia")?.addEventListener("input", debounce(applyFilters, 250));
   $("#filter-status")?.addEventListener("change", applyFilters);
   $("#filter-priority")?.addEventListener("change", applyFilters);
 
@@ -110,7 +112,7 @@ function applyFilters(){
 }
 
 /* =========================
-   RESIZE
+   RESIZE (OPTIMIZADO)
 ========================= */
 
 function initTableResize(){
@@ -190,9 +192,9 @@ async function loadIncidencias(){
     }
 
     render(items);
-    initTableResize();
 
     requestAnimationFrame(()=>{
+      initTableResize();
       panel?.classList.add("ready");
     });
 
@@ -238,7 +240,7 @@ function setError(){
 }
 
 /* =========================
-   RENDER
+   RENDER (MÁS LIMPIO)
 ========================= */
 
 function render(items){
@@ -246,12 +248,12 @@ function render(items){
   const tbody = $("#incidencias-body");
   if(!tbody) return;
 
-  tbody.innerHTML = items.map(i => {
+  const html = items.map(i => {
 
     const d = mapItem(i);
 
     return `
-      <tr data-id="${d.id}" style="cursor:pointer;">
+      <tr data-id="${d.id}">
         <td>${d.id}</td>
         <td>${escapeHTML(d.title)}</td>
         <td>${escapeHTML(d.cliente)}</td>
@@ -262,6 +264,8 @@ function render(items){
     `;
 
   }).join("");
+
+  tbody.innerHTML = html;
 
 }
 
@@ -330,6 +334,18 @@ function escapeHTML(str){
 
 function showDetalle(item){
   console.log("👁 Detalle:", item);
+}
+
+/* =========================
+   UTILS
+========================= */
+
+function debounce(fn, delay){
+  let t;
+  return function(...args){
+    clearTimeout(t);
+    t = setTimeout(()=> fn.apply(this, args), delay);
+  };
 }
 
 })();

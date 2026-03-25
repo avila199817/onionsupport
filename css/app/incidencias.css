@@ -1,5 +1,5 @@
 /* =========================
-   INCIDENCIAS (MINIMAL SAAS FIX WIDTH)
+   INCIDENCIAS (PRO FIX WIDTH + RESIZE SAFE)
 ========================= */
 
 .incidencias{
@@ -33,7 +33,7 @@
 
 
 /* =========================
-   PANEL
+   PANEL (🔥 FIX CLAVE)
 ========================= */
 
 .incidencias .panel-block{
@@ -46,6 +46,8 @@
   padding:20px;
 
   box-shadow:var(--panel-shadow);
+
+  overflow:hidden; /* 🔥 EVITA QUE ROMPA EL LAYOUT */
 
   transition:
     border-color .2s ease,
@@ -105,25 +107,36 @@
 
 
 /* =========================
-   TABLE (FIX REAL)
+   TABLE CONTAINER (🔥 SCROLL REAL)
 ========================= */
 
 .incidencias .table-container{
   width:100%;
   overflow-x:auto;
+  overflow-y:hidden;
 }
 
-/* 🔥 clave: ancho mínimo controlado */
+
+/* =========================
+   TABLE BASE
+========================= */
+
 .incidencias .incidencias-table{
   width:100%;
-  min-width:900px; /* 👈 controla layout tipo SaaS */
+  min-width:900px;
+  max-width:100%; /* 🔥 evita overflow loco */
+
   border-collapse:collapse;
-  table-layout:fixed; /* 👈 columnas estables */
+  table-layout:fixed;
+
   font-size:14px;
 }
 
+
 /* HEADER */
 .incidencias .incidencias-table th{
+  position:relative;
+
   text-align:left;
   padding:12px;
   color:var(--dim);
@@ -152,42 +165,48 @@
 
 
 /* =========================
-   WIDTH POR COLUMNAS (CLAVE)
+   COLUMN WIDTH
 ========================= */
 
 .incidencias .incidencias-table th:nth-child(1),
-.incidencias .incidencias-table td:nth-child(1){
-  width:70px; /* ID */
-}
+.incidencias .incidencias-table td:nth-child(1){ width:80px; }
 
 .incidencias .incidencias-table th:nth-child(2),
-.incidencias .incidencias-table td:nth-child(2){
-  width:260px; /* Título */
-}
+.incidencias .incidencias-table td:nth-child(2){ width:260px; }
 
 .incidencias .incidencias-table th:nth-child(3),
-.incidencias .incidencias-table td:nth-child(3){
-  width:180px; /* Cliente */
-}
+.incidencias .incidencias-table td:nth-child(3){ width:200px; }
 
 .incidencias .incidencias-table th:nth-child(4),
-.incidencias .incidencias-table td:nth-child(4){
-  width:140px; /* Estado */
-}
+.incidencias .incidencias-table td:nth-child(4){ width:150px; }
 
 .incidencias .incidencias-table th:nth-child(5),
-.incidencias .incidencias-table td:nth-child(5){
-  width:120px; /* Prioridad */
-}
+.incidencias .incidencias-table td:nth-child(5){ width:130px; }
 
 .incidencias .incidencias-table th:nth-child(6),
-.incidencias .incidencias-table td:nth-child(6){
-  width:160px; /* Fecha */
-}
+.incidencias .incidencias-table td:nth-child(6){ width:160px; }
 
 .incidencias .incidencias-table th:nth-child(7),
-.incidencias .incidencias-table td:nth-child(7){
-  width:120px; /* Acciones */
+.incidencias .incidencias-table td:nth-child(7){ width:120px; }
+
+
+/* =========================
+   RESIZER (🔥)
+========================= */
+
+.incidencias .resizer{
+  position:absolute;
+  right:0;
+  top:0;
+  width:6px;
+  height:100%;
+
+  cursor:col-resize;
+  user-select:none;
+}
+
+.incidencias .resizer:hover{
+  background:rgba(255,255,255,0.15);
 }
 
 

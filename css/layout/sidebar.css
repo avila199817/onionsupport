@@ -20,7 +20,7 @@
   transition:width .32s cubic-bezier(.22,1,.36,1);
   will-change:width;
 
-  overflow:hidden; /* 🔥 clave para evitar ghosting */
+  overflow:hidden;
 
   z-index:var(--z-sidebar);
 }
@@ -40,7 +40,6 @@
   padding:14px;
 }
 
-/* collapsed layout limpio */
 .sidebar.collapsed .sidebar-top{
   display:grid;
   grid-template-columns: 1fr auto 1fr;
@@ -121,7 +120,6 @@
   color:var(--text);
 }
 
-/* tooltip */
 .sidebar-toggle::after{
   content:attr(data-tooltip);
   position:absolute;
@@ -180,7 +178,6 @@
     transform .18s ease;
 }
 
-/* hover solo expandido */
 .sidebar:not(.collapsed) .menu-item:hover{
   background:var(--sb-hover);
   color:var(--text);
@@ -195,10 +192,8 @@
 
 
 /* =========================
-   TEXTO (🔥 CLAVE PRO)
+   TEXTO (PRO)
 ========================= */
-
-/* estado visible */
 .sidebar:not(.collapsed) .menu-item span:last-child{
   opacity:1;
   transform:translateX(0);
@@ -208,7 +203,6 @@
     transform .25s ease .08s;
 }
 
-/* estado oculto (cierre rápido) */
 .sidebar.collapsed .menu-item span:last-child{
   opacity:0;
   transform:translateX(-12px);
@@ -228,33 +222,10 @@
   padding:var(--space-sm);
 }
 
-/* desaparición limpia */
 .sidebar.collapsed .sidebar-section{
   opacity:0;
   pointer-events:none;
   transition:opacity .1s ease;
-}
-
-.section-title{
-  font-size:11px;
-  color:var(--dim);
-  margin:10px 0;
-}
-
-.chat-item{
-  display:block;
-  padding:8px;
-  border-radius:6px;
-
-  color:var(--text);
-  text-decoration:none;
-  font-size:12.5px;
-
-  transition:background .2s ease;
-}
-
-.chat-item:hover{
-  background:var(--sb-hover);
 }
 
 
@@ -267,14 +238,18 @@
   border-top:1px solid var(--sb-border);
 }
 
+
+/* =========================
+   USER (🔥 ARREGLADO)
+========================= */
 .user{
   display:flex;
   align-items:center;
   gap:10px;
 
-  padding:8px;
-  border-radius:10px;
+  padding:8px 12px; /* 🔥 MISMO OFFSET QUE MENU */
 
+  border-radius:10px;
   cursor:pointer;
 
   transition:
@@ -286,20 +261,21 @@
   background:var(--sb-hover);
 }
 
-/* collapsed user */
+/* 🔥 CLAVE: alineación REAL */
 .sidebar.collapsed .user{
-  justify-content:center;
-  padding:11px 12px;
+  justify-content:flex-start;   /* ❌ antes center */
+  padding-left:12px;            /* 🔥 igual que menu */
   gap:0;
 }
 
+/* ocultar info */
 .sidebar.collapsed .user-info{
   opacity:0;
   transform:translateX(-10px);
   pointer-events:none;
 }
 
-/* animación apertura user */
+/* animación apertura */
 .sidebar:not(.collapsed) .user-info{
   opacity:1;
   transform:translateX(0);
@@ -309,6 +285,7 @@
     transform .25s ease .08s;
 }
 
+/* hover limpio */
 .sidebar.collapsed .user:hover{
   transform:translateX(4px);
   background:transparent;
@@ -358,10 +335,13 @@
   transition:transform .2s ease;
 }
 
+/* 🔥 ajuste fino visual */
 .sidebar.collapsed .avatar{
   width:22px;
   height:22px;
   font-size:11px;
+
+  transform:translateX(1px); /* 🔥 micro ajuste óptico */
 }
 
 

@@ -1,0 +1,78 @@
+:root{
+
+  /* LAYOUT */
+  --content-max:1300px;
+  --content-padding:40px;
+
+  --sidebar-width:260px;
+  --sidebar-collapsed:72px;
+
+  --topbar-height:56px;
+  --page-offset:28px;
+
+  /* Z */
+  --z-sidebar:10;
+  --z-topbar:20;
+  --z-dropdown:30;
+  --z-overlay:40;
+  --z-modal:50;
+
+  /* BRAND */
+  --accent:#6366f1;
+  --accent-hover:#4f46e5;
+
+  /* SIDEBAR */
+  --sb-bg:#1b1b1b;
+  --sb-hover:#121212;
+  --sb-active:#151515;
+  --sb-border:rgba(255,255,255,0.04);
+
+  /* TEXT */
+  --text:#ffffff;
+  --muted:rgba(255,255,255,0.92);
+  --dim:rgba(255,255,255,0.6);
+
+  /* BASE */
+  --main-bg:#0d0d0d;
+  --dropdown-bg:#333333;
+
+  /* CARDS */
+  --card-bg:#1e1e1e;
+  --card-border:#2a2a2a;
+  --card-shadow:0 10px 30px rgba(0,0,0,0.35);
+  --card-shadow-hover:0 20px 40px rgba(0,0,0,0.45);
+
+  /* PANELS */
+  --panel-bg:#1b1b1b;
+  --panel-border:#2a2a2a;
+  --panel-shadow:0 10px 30px rgba(0,0,0,0.4);
+
+  /* STATUS */
+  --success:#22c55e;
+  --warning:#f59e0b;
+  --error:#ef4444;
+  --info:#60a5fa;
+
+  --warning-bg:rgba(245,158,11,0.12);
+  --info-bg:rgba(59,130,246,0.12);
+
+  /* BG */
+  --gradient-main: linear-gradient(180deg, #2a2a2a 0%, #232323 60%, #1d1d1d 100%);
+  --gradient-overlay: radial-gradient(circle at 40% 0%, rgba(255,255,255,0.025), transparent 70%);
+
+  /* UI */
+  --tooltip-bg:#111;
+  --tooltip-text:#fff;
+
+  --avatar-bg:#ec4899;
+  --avatar-text:#fff;
+
+  --scrollbar-thumb:rgba(255,255,255,0.1);
+
+  /* SPACING */
+  --space-xs:6px;
+  --space-sm:10px;
+  --space-md:14px;
+  --space-lg:20px;
+  --space-xl:32px;
+}

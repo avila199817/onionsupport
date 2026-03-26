@@ -412,3 +412,150 @@
   font-weight:600;
   letter-spacing:.3px;
 }
+
+
+/* =========================
+   USUARIOS — ESTILOS PRO
+========================= */
+
+/* 🎯 BADGES USUARIOS */
+.panel-content.usuarios .badge.activo{
+  background:rgba(34,197,94,0.15);
+  color:#22c55e;
+  font-weight:500;
+}
+
+.panel-content.usuarios .badge.inactivo{
+  background:rgba(239,68,68,0.15);
+  color:#ef4444;
+  font-weight:500;
+}
+
+
+/* =========================
+   USER CELL (NOMBRE + SUB)
+========================= */
+
+.panel-content.usuarios .user-info{
+  display:flex;
+  flex-direction:column;
+  line-height:1.2;
+}
+
+.panel-content.usuarios .user-name{
+  font-weight:600;
+  color:var(--text);
+}
+
+.panel-content.usuarios .user-sub{
+  font-size:11px;
+  color:var(--dim);
+}
+
+
+/* =========================
+   EMAIL MÁS LIMPIO
+========================= */
+
+.panel-content.usuarios td:nth-child(3){
+  color:var(--dim);
+  font-size:13px;
+}
+
+
+/* =========================
+   ROL DESTACADO
+========================= */
+
+.panel-content.usuarios td:nth-child(4){
+  font-weight:500;
+  color:#c7d2fe;
+}
+
+
+/* =========================
+   ACCIONES
+========================= */
+
+.panel-content.usuarios td.acciones{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+
+.panel-content.usuarios td.acciones button{
+  border:none;
+  outline:none;
+
+  padding:6px 10px;
+  border-radius:6px;
+
+  font-size:11px;
+  cursor:pointer;
+
+  transition:.15s ease;
+
+  background:rgba(255,255,255,0.04);
+  color:var(--text);
+}
+
+/* hover general */
+.panel-content.usuarios td.acciones button:hover{
+  background:rgba(255,255,255,0.08);
+}
+
+
+/* ✏️ EDITAR */
+.panel-content.usuarios td.acciones button[data-action="edit"]{
+  background:rgba(59,130,246,0.12);
+  color:#60a5fa;
+}
+
+.panel-content.usuarios td.acciones button[data-action="edit"]:hover{
+  background:rgba(59,130,246,0.25);
+}
+
+
+/* 🗑️ ELIMINAR */
+.panel-content.usuarios td.acciones button[data-action="delete"]{
+  background:rgba(239,68,68,0.12);
+  color:#f87171;
+}
+
+.panel-content.usuarios td.acciones button[data-action="delete"]:hover{
+  background:rgba(239,68,68,0.25);
+}
+
+
+/* =========================
+   HOVER MÁS PRO
+========================= */
+
+.panel-content.usuarios tbody tr{
+  transition:all .15s ease;
+}
+
+.panel-content.usuarios tbody tr:hover{
+  transform:translateX(2px);
+}
+
+
+/* =========================
+   HEADER MÁS LIMPIO
+========================= */
+
+.panel-content.usuarios th{
+  font-size:12px;
+  letter-spacing:.3px;
+  text-transform:uppercase;
+}
+
+
+/* =========================
+   BOTÓN NUEVO
+========================= */
+
+.panel-content.usuarios .btn-new-usuario{
+  font-weight:600;
+  letter-spacing:.3px;
+}

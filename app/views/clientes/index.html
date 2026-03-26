@@ -2,64 +2,59 @@
 
   <div class="container">
 
-    <!-- HEADER VACÍO -->
-    <div class="dashboard-header"></div>
+    <div class="panel-block">
 
-    <!-- =========================
-         GRID PRINCIPAL
-    ========================= -->
-    <div class="dashboard-grid">
+      <!-- =========================
+           FILTROS
+      ========================= -->
+      <div class="filters-row">
 
-      <div class="panel-block table-block">
+        <input 
+          type="text"
+          id="search-cliente"
+          placeholder="Buscar cliente..."
+          autocomplete="off"
+        >
 
-        <!-- =========================
-             FILTROS
-        ========================= -->
-        <div class="filters-row">
+        <select id="filter-estado-cliente">
+          <option value="">Estado</option>
+          <option value="activo">Activo</option>
+          <option value="inactivo">Inactivo</option>
+        </select>
 
-          <input 
-            type="text"
-            id="search-cliente"
-            placeholder="Buscar cliente..."
-            autocomplete="off"
-          >
+        <!-- CTA -->
+        <button id="btn-new-cliente">
+          + Nuevo
+        </button>
 
-          <select id="filter-estado-cliente">
-            <option value="">Estado</option>
-            <option value="activo">Activo</option>
-            <option value="inactivo">Inactivo</option>
-          </select>
+      </div>
 
-        </div>
+      <!-- =========================
+           TABLA
+      ========================= -->
+      <div class="table-container">
 
-        <!-- =========================
-             TABLA
-        ========================= -->
-        <div class="table-container">
+        <table>
 
-          <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Empresa</th>
+              <th>Email</th>
+              <th>Teléfono</th>
+              <th>Estado</th>
+              <th>Fecha</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
 
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Empresa</th>
-                <th>Email</th>
-                <th>Teléfono</th>
-                <th>Estado</th>
-                <th>Fecha</th>
-                <th>Acciones</th>
-              </tr>
-            </thead>
+          <tbody id="clientes-body">
+            <tr class="loading">
+              <td colspan="7">Cargando clientes...</td>
+            </tr>
+          </tbody>
 
-            <tbody id="clientes-body">
-              <tr class="loading">
-                <td colspan="7">Cargando clientes...</td>
-              </tr>
-            </tbody>
-
-          </table>
-
-        </div>
+        </table>
 
       </div>
 

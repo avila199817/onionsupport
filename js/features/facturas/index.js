@@ -197,7 +197,7 @@ function render(items){
 
     return `
       <tr data-id="${id}" style="cursor:pointer">
-        <td>#${escapeHTML(f.numero || f.id || "--")}</td>
+        <td>${escapeHTML(f.numero || f.id || "--")}</td>
         <td>${escapeHTML(f.cliente || "-")}</td>
         <td>${formatFecha(f.fecha)}</td>
         <td>${formatMoney(f.total)}</td>

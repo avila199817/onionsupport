@@ -22,7 +22,7 @@
           <option value="inactivo">Inactivo</option>
         </select>
 
-        <button id="btn-new-usuario">
+        <button id="btn-new-usuario" class="btn-new-usuario">
           + Nuevo
         </button>
 
@@ -49,7 +49,7 @@
 
           <tbody id="usuarios-body">
 
-            <!-- EJEMPLO FILA (PUEDES BORRARLA) -->
+            <!-- EJEMPLO FILA -->
             <tr>
               <td>USR-001</td>
 
@@ -67,12 +67,15 @@
               <td>Admin</td>
 
               <td>
-                <span class="badge abierta">Activo</span>
+                <span class="badge activo">Activo</span>
               </td>
 
               <td>26/03/2026</td>
 
-              <td>⋯</td>
+              <td class="acciones">
+                <button data-action="edit">Editar</button>
+                <button data-action="delete">Eliminar</button>
+              </td>
             </tr>
 
             <!-- LOADING -->

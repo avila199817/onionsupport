@@ -589,3 +589,29 @@
 .panel-content.usuarios td{
   vertical-align:middle;
 }
+/* =========================
+   FIX AVATAR USUARIOS REAL
+========================= */
+
+.panel-content.usuarios .usuario-cell{
+  display:flex;
+  align-items:center;
+  gap:12px;
+}
+
+.panel-content.usuarios .usuario-avatar{
+  width:36px;
+  height:36px;
+  min-width:36px;
+
+  border-radius:50%;
+  object-fit:cover;
+
+  display:block;
+}
+
+/* nombre */
+.panel-content.usuarios .usuario-username{
+  font-weight:500;
+  color:var(--text);
+}

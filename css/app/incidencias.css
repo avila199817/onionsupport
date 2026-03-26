@@ -1,5 +1,5 @@
 /* =========================
-   INCIDENCIAS (SAAS PRO CLEAN)
+   INCIDENCIAS (SAAS PRO MAX)
 ========================= */
 
 .incidencias{
@@ -8,28 +8,12 @@
 
 .incidencias .container{
   padding-top:var(--page-offset);
-  padding-bottom:50px;
+  padding-bottom:40px;
 
   display:flex;
   flex-direction:column;
-  gap:28px;
+  gap:24px;
 }
-
-.incidencias .dashboard-header{
-  display:none;
-}
-
-
-/* =========================
-   GRID
-========================= */
-
-.incidencias .dashboard-grid{
-  display:grid;
-  grid-template-columns:1fr;
-  gap:22px;
-}
-
 
 /* =========================
    PANEL
@@ -38,24 +22,29 @@
 .incidencias .panel-block{
   position:relative;
 
-  background:var(--panel-bg);
+  background:linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--panel-bg), #fff 2%),
+    var(--panel-bg)
+  );
+
   border:1px solid var(--panel-border);
   border-radius:18px;
 
-  padding:20px;
+  padding:18px;
 
-  box-shadow:var(--panel-shadow);
+  box-shadow:
+    0 10px 30px rgba(0,0,0,0.25),
+    inset 0 1px 0 rgba(255,255,255,0.03);
 
   overflow:hidden;
 
-  transition:
-    border-color .2s ease,
-    transform .2s ease;
+  transition:all .2s ease;
 }
 
 .incidencias .panel-block:hover{
-  border-color:color-mix(in srgb, var(--accent), var(--panel-border) 70%);
-  transform:translateY(-3px);
+  transform:translateY(-2px);
+  border-color:color-mix(in srgb, var(--accent), var(--panel-border) 65%);
 }
 
 
@@ -68,17 +57,12 @@
   gap:10px;
   flex-wrap:wrap;
   align-items:center;
-  margin-bottom:12px;
+  margin-bottom:14px;
 }
 
-/* 🔥 MISMO BASE PARA TODOS */
+/* base */
 .incidencias .filters-row input,
-.incidencias .filters-row select,
-.incidencias .filters-row button{
-
-  appearance:none;
-  -webkit-appearance:none;
-
+.incidencias .filters-row select{
   background:var(--card-bg);
   border:1px solid var(--card-border);
   color:var(--text);
@@ -87,48 +71,69 @@
   border-radius:10px;
 
   font-size:14px;
-  font-weight:400;
-
-  outline:none;
 
   transition:all .15s ease;
 }
 
-/* comportamiento input */
 .incidencias .filters-row input{
   flex:1;
-  min-width:220px;
+  min-width:240px;
 }
 
-/* comportamiento select */
 .incidencias .filters-row select{
   min-width:150px;
   cursor:pointer;
 }
 
-/* 🔥 BOTÓN = MISMO SISTEMA */
-.incidencias .filters-row button{
-  margin-left:auto;
-  cursor:pointer;
-}
-
-/* focus unificado */
+/* focus */
 .incidencias .filters-row input:focus,
-.incidencias .filters-row select:focus,
-.incidencias .filters-row button:focus{
+.incidencias .filters-row select:focus{
   border-color:var(--accent);
   box-shadow:0 0 0 2px rgba(59,130,246,0.15);
 }
 
-/* hover fino */
-.incidencias .filters-row button:hover{
-  border-color:var(--accent);
-  background:color-mix(in srgb, var(--card-bg), var(--accent) 8%);
+/* =========================
+   BOTÓN NUEVO PRO
+========================= */
+
+.panel-content.incidencias .btn-new-incidencia{
+  margin-left:auto;
+
+  background:linear-gradient(
+    135deg,
+    var(--accent),
+    color-mix(in srgb, var(--accent), #fff 20%)
+  );
+
+  border:none;
+  color:#fff;
+
+  padding:10px 14px;
+  border-radius:10px;
+
+  font-size:14px;
+  font-weight:500;
+
+  display:flex;
+  align-items:center;
+  gap:6px;
+
+  cursor:pointer;
+
+  box-shadow:
+    0 6px 14px rgba(59,130,246,0.25);
+
+  transition:all .15s ease;
 }
 
-/* click */
-.incidencias .filters-row button:active{
-  transform:scale(.98);
+.panel-content.incidencias .btn-new-incidencia:hover{
+  transform:translateY(-1px);
+  box-shadow:
+    0 10px 20px rgba(59,130,246,0.35);
+}
+
+.panel-content.incidencias .btn-new-incidencia:active{
+  transform:scale(.97);
 }
 
 
@@ -139,80 +144,150 @@
 .incidencias .table-container{
   width:100%;
   overflow-x:auto;
-  overflow-y:hidden;
+}
+
+/* scrollbar pro */
+.incidencias .table-container::-webkit-scrollbar{
+  height:6px;
+}
+
+.incidencias .table-container::-webkit-scrollbar-thumb{
+  background:rgba(255,255,255,0.08);
+  border-radius:10px;
 }
 
 
 /* =========================
-   TABLE BASE
+   TABLE
 ========================= */
 
 .incidencias table{
   width:100%;
-  min-width:850px;
-
+  min-width:1000px;
   border-collapse:collapse;
   table-layout:fixed;
-
   font-size:14px;
 }
 
+/* HEADER STICKY */
+.incidencias thead{
+  position:sticky;
+  top:0;
+  z-index:2;
+  background:var(--panel-bg);
+}
 
 /* HEADER */
 .incidencias th{
-  position:relative;
-
-  text-align:left;
   padding:12px;
+  text-align:left;
+
   color:var(--dim);
   font-weight:500;
+
   border-bottom:1px solid var(--card-border);
 
-  white-space:nowrap;
+  backdrop-filter:blur(6px);
 }
-
 
 /* CELDAS */
 .incidencias td{
   padding:12px;
   border-bottom:1px solid var(--card-border);
-  color:var(--text);
-  vertical-align:middle;
 
   overflow:hidden;
   text-overflow:ellipsis;
   white-space:nowrap;
 }
 
+/* fila */
+.incidencias tbody tr{
+  transition:all .15s ease;
+}
 
-/* HOVER */
-.incidencias tr:hover{
-  background:var(--sb-hover);
+/* hover elegante */
+.incidencias tbody tr:hover{
+  background:color-mix(in srgb, var(--sb-hover), transparent 20%);
+}
+
+/* =========================
+   JERARQUÍA VISUAL
+========================= */
+
+/* ID más sutil */
+.incidencias td:nth-child(1){
+  color:var(--dim);
+  font-size:12px;
+}
+
+/* ASUNTO destacado */
+.incidencias td:nth-child(2){
+  font-weight:500;
+  color:#e5e7eb;
+}
+
+/* técnico más suave */
+.incidencias td:nth-child(4){
+  color:#cbd5f5;
+  font-size:13px;
 }
 
 
 /* =========================
-   COLUMN WIDTH
+   COLUMN WIDTH (MEJORADO)
 ========================= */
 
 .incidencias th:nth-child(1),
-.incidencias td:nth-child(1){ width:80px; }
+.incidencias td:nth-child(1){ width:90px; }
 
 .incidencias th:nth-child(2),
-.incidencias td:nth-child(2){ width:280px; }
+.incidencias td:nth-child(2){ width:320px; }
 
 .incidencias th:nth-child(3),
 .incidencias td:nth-child(3){ width:220px; }
 
 .incidencias th:nth-child(4),
-.incidencias td:nth-child(4){ width:150px; }
+.incidencias td:nth-child(4){ width:180px; }
 
 .incidencias th:nth-child(5),
 .incidencias td:nth-child(5){ width:140px; }
 
 .incidencias th:nth-child(6),
-.incidencias td:nth-child(6){ width:160px; }
+.incidencias td:nth-child(6){ width:120px; }
 
+.incidencias th:nth-child(7),
+.incidencias td:nth-child(7){ width:140px; }
+
+.incidencias th:nth-child(8),
+.incidencias td:nth-child(8){ width:160px; }
+
+
+/* =========================
+   BADGES PRO
+========================= */
+
+.incidencias .badge{
+  padding:4px 10px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:500;
+}
+
+/* estados */
+.incidencias .badge.abierta{
+  background:rgba(59,130,246,0.12);
+  color:#60a5fa;
+}
+
+.incidencias .badge.progreso{
+  background:rgba(245,158,11,0.12);
+  color:#f59e0b;
+}
+
+.incidencias .badge.cerrada{
+  background:rgba(34,197,94,0.12);
+  color:#22c55e;
+}
 
 /* =========================
    RESIZER
@@ -224,106 +299,19 @@
   top:0;
   width:6px;
   height:100%;
-
   cursor:col-resize;
-  user-select:none;
 }
 
 .incidencias .resizer:hover{
-  background:rgba(255,255,255,0.15);
+  background:rgba(255,255,255,0.12);
 }
 
-
-/* =========================
-   BADGES
-========================= */
-
-.incidencias .badge{
-  padding:4px 10px;
-  border-radius:999px;
-  font-size:12px;
-  font-weight:500;
-}
-
-.incidencias .badge.abierta{
-  background:rgba(59,130,246,0.15);
-  color:#60a5fa;
-}
-
-.incidencias .badge.progreso{
-  background:rgba(245,158,11,0.15);
-  color:#f59e0b;
-}
-
-.incidencias .badge.cerrada{
-  background:rgba(34,197,94,0.15);
-  color:#22c55e;
-}
-
-/* =========================
-   FIX BOTÓN NUEVO (KILL CORE)
-========================= */
-
-.panel-content.incidencias .filters-row .btn-new-incidencia{
-  all:unset; /* 💣 resetea TODO lo que lo esté rompiendo */
-
-  margin-left:auto;
-
-  background:var(--card-bg);
-  border:1px solid var(--card-border);
-  color:var(--text);
-
-  padding:10px 12px;
-  border-radius:10px;
-
-  font-size:14px;
-  font-weight:400;
-  font-family:inherit;
-
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  gap:6px;
-
-  cursor:pointer;
-
-  transition:all .15s ease;
-}
-
-/* hover */
-.panel-content.incidencias .filters-row .btn-new-incidencia:hover{
-  border-color:var(--accent);
-  background:color-mix(in srgb, var(--card-bg), var(--accent) 8%);
-}
-
-/* focus */
-.panel-content.incidencias .filters-row .btn-new-incidencia:focus{
-  outline:none;
-  box-shadow:0 0 0 2px rgba(59,130,246,0.15);
-}
-
-/* active */
-.panel-content.incidencias .filters-row .btn-new-incidencia:active{
-  transform:scale(.98);
-}
 
 /* =========================
    RESPONSIVE
 ========================= */
 
-@media (max-width:1024px){
-
-  .incidencias .container{
-    padding:20px;
-  }
-
-}
-
 @media (max-width:768px){
-
-  .incidencias .container{
-    padding:16px;
-  }
 
   .incidencias .filters-row{
     flex-direction:column;
@@ -331,25 +319,13 @@
   }
 
   .incidencias .filters-row input,
-  .incidencias .filters-row select,
-  .incidencias .filters-row button{
+  .incidencias .filters-row select{
     width:100%;
   }
 
-  .incidencias .filters-row button{
+  .panel-content.incidencias .btn-new-incidencia{
+    width:100%;
     justify-content:center;
-  }
-
-}
-
-@media (max-width:480px){
-
-  .incidencias .container{
-    padding:12px;
-  }
-
-  .incidencias .panel-block{
-    padding:16px;
   }
 
 }

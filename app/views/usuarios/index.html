@@ -22,7 +22,6 @@
           <option value="inactivo">Inactivo</option>
         </select>
 
-        <!-- CTA -->
         <button id="btn-new-usuario">
           + Nuevo
         </button>
@@ -49,9 +48,38 @@
           </thead>
 
           <tbody id="usuarios-body">
+
+            <!-- EJEMPLO FILA (PUEDES BORRARLA) -->
+            <tr>
+              <td>USR-001</td>
+
+              <td>
+                <div class="cell-user">
+                  <div class="avatar">AV</div>
+                  <div class="user-info">
+                    <span class="user-name">Ávila</span>
+                    <span class="user-sub">Administrador</span>
+                  </div>
+                </div>
+              </td>
+
+              <td>avila@onion.com</td>
+              <td>Admin</td>
+
+              <td>
+                <span class="badge abierta">Activo</span>
+              </td>
+
+              <td>26/03/2026</td>
+
+              <td>⋯</td>
+            </tr>
+
+            <!-- LOADING -->
             <tr class="loading">
               <td colspan="7">Cargando usuarios...</td>
             </tr>
+
           </tbody>
 
         </table>

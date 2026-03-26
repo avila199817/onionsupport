@@ -60,6 +60,7 @@ function bindEvents(){
   const root = getRoot();
   if(!root) return;
 
+  // CLICK EN FILA → DETALLE
   Onion.cleanupEvent(root, "click", (e)=>{
 
     const row = e.target.closest("tr[data-id]");
@@ -75,10 +76,23 @@ function bindEvents(){
 
   });
 
+  // BOTÓN NUEVO
+  $("#btn-new")?.addEventListener("click", ()=>{
+    crearIncidencia();
+  });
+
   $("#search-incidencia")?.addEventListener("input", debounce(applyFilters, 250));
   $("#filter-status")?.addEventListener("change", applyFilters);
   $("#filter-priority")?.addEventListener("change", applyFilters);
 
+}
+
+/* =========================
+   NUEVA INCIDENCIA
+========================= */
+
+function crearIncidencia(){
+  alert("🚀 Aquí abrirías el modal o formulario de nueva incidencia");
 }
 
 /* =========================
@@ -93,8 +107,8 @@ function applyFilters(){
 
   filteredItems = currentItems.filter(i => {
 
-    const title = (i.titulo || i.title || "").toLowerCase();
-    const cliente = (i.cliente || i.clienteNombre || "").toLowerCase();
+    const title = (i.message || i.subject || "").toLowerCase();
+    const cliente = (i.name || "").toLowerCase();
 
     const itemStatus = mapStatus(i.status);
     const itemPriority = mapPriority(i.priority);
@@ -108,57 +122,6 @@ function applyFilters(){
   });
 
   render(filteredItems);
-
-}
-
-/* =========================
-   RESIZE (OPTIMIZADO)
-========================= */
-
-function initTableResize(){
-
-  const root = getRoot();
-  if(!root) return;
-
-  root.querySelectorAll(".resizer").forEach(resizer => {
-
-    let startX, startWidth, index;
-
-    resizer.addEventListener("mousedown", e => {
-
-      const th = e.target.parentElement;
-
-      startX = e.pageX;
-      startWidth = th.offsetWidth;
-
-      index = Array.from(th.parentNode.children).indexOf(th);
-
-      function move(e){
-
-        let newWidth = startWidth + (e.pageX - startX);
-
-        if(newWidth < 60) newWidth = 60;
-        if(newWidth > 500) newWidth = 500;
-
-        root.querySelectorAll("tr").forEach(row => {
-          if(row.children[index]){
-            row.children[index].style.width = newWidth + "px";
-          }
-        });
-
-      }
-
-      function stop(){
-        document.removeEventListener("mousemove", move);
-        document.removeEventListener("mouseup", stop);
-      }
-
-      document.addEventListener("mousemove", move);
-      document.addEventListener("mouseup", stop);
-
-    });
-
-  });
 
 }
 
@@ -193,10 +156,7 @@ async function loadIncidencias(){
 
     render(items);
 
-    requestAnimationFrame(()=>{
-      initTableResize();
-      panel?.classList.add("ready");
-    });
+    panel?.classList.add("ready");
 
   }catch(e){
 
@@ -226,21 +186,21 @@ function normalize(res){
 
 function setLoading(){
   $("#incidencias-body").innerHTML =
-    `<tr><td colspan="6">Cargando incidencias...</td></tr>`;
+    `<tr><td colspan="8">Cargando incidencias...</td></tr>`;
 }
 
 function setEmpty(){
   $("#incidencias-body").innerHTML =
-    `<tr><td colspan="6">No hay incidencias</td></tr>`;
+    `<tr><td colspan="8">No hay incidencias</td></tr>`;
 }
 
 function setError(){
   $("#incidencias-body").innerHTML =
-    `<tr><td colspan="6">Error cargando incidencias</td></tr>`;
+    `<tr><td colspan="8">Error cargando incidencias</td></tr>`;
 }
 
 /* =========================
-   RENDER (MÁS LIMPIO)
+   RENDER
 ========================= */
 
 function render(items){
@@ -253,13 +213,15 @@ function render(items){
     const d = mapItem(i);
 
     return `
-      <tr data-id="${d.id}">
+      <tr data-id="${d.id}" style="cursor:pointer">
         <td>${d.id}</td>
         <td>${escapeHTML(d.title)}</td>
         <td>${escapeHTML(d.cliente)}</td>
+        <td>${escapeHTML(d.tecnico)}</td>
         <td><span class="badge ${d.estado.class}">${d.estado.label}</span></td>
         <td><span class="badge ${d.prioridad.class}">${d.prioridad.label}</span></td>
         <td>${d.fecha}</td>
+        <td>${d.fechaCierre}</td>
       </tr>
     `;
 
@@ -276,11 +238,22 @@ function render(items){
 function mapItem(i){
   return {
     id: i.id || i.ticketId || "--",
-    title: i.titulo || i.title || "Sin título",
-    cliente: i.cliente || i.clienteNombre || "-",
+
+    // 🔥 AQUÍ CAMBIAMOS → message
+    title: i.message || i.subject || "Sin título",
+
+    cliente: i.name || "-",
+
+    tecnico: i.tecnico?.name || "-",
+
     estado: getEstado(i),
     prioridad: getPrioridad(i),
-    fecha: formatFecha(i.createdAt)
+
+    fecha: formatFecha(i.createdAt),
+
+    fechaCierre: i.status === "closed"
+      ? formatFecha(i._ts ? i._ts * 1000 : i.closedAt)
+      : "-"
   };
 }
 
@@ -333,7 +306,15 @@ function escapeHTML(str){
 ========================= */
 
 function showDetalle(item){
-  console.log("👁 Detalle:", item);
+  console.log("👁 DETALLE COMPLETO:", item);
+
+  alert(`
+ID: ${item.id}
+Cliente: ${item.name}
+Mensaje: ${item.message}
+Técnico: ${item.tecnico?.name || "-"}
+Estado: ${item.status}
+  `);
 }
 
 /* =========================

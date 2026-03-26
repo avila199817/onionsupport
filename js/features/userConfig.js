@@ -47,18 +47,22 @@
 
     apply(){
 
-      const dark = this.get("darkMode");
+      let config = {};
 
-      // 🔥 fallback a sistema
+      try{
+        config = JSON.parse(localStorage.getItem("onion_config")) || {};
+      }catch{}
+
+      const dark = config.darkMode;
+
+      // fallback a sistema
       const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
 
-      const isDark = dark !== null ? dark : prefersDark;
+      const isDark = typeof dark === "boolean" ? dark : prefersDark;
 
-      if(isDark){
-        document.documentElement.removeAttribute("data-theme");
-      }else{
-        document.documentElement.setAttribute("data-theme","light");
-      }
+      const theme = isDark ? "dark" : "light";
+
+      document.documentElement.setAttribute("data-theme", theme);
 
     }
 

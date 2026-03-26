@@ -2,7 +2,7 @@
 
   <div class="container">
 
-    <!-- HEADER VACÍO -->
+    <!-- HEADER -->
     <div class="dashboard-header"></div>
 
     <!-- =========================
@@ -38,8 +38,8 @@
             <option value="baja">Baja</option>
           </select>
 
-          <!-- BOTÓN NUEVO -->
-          <button type="button" class="btn-new-incidencia">
+          <!-- 🔥 BOTÓN NUEVO (IMPORTANTE ID) -->
+          <button type="button" id="btn-new" class="btn-new-incidencia">
             + Nuevo
           </button>
 
@@ -57,15 +57,17 @@
                 <th>ID<div class="resizer"></div></th>
                 <th>Asunto<div class="resizer"></div></th>
                 <th>Cliente<div class="resizer"></div></th>
+                <th>Técnico<div class="resizer"></div></th>
                 <th>Estado<div class="resizer"></div></th>
                 <th>Prioridad<div class="resizer"></div></th>
                 <th>Fecha<div class="resizer"></div></th>
+                <th>Fecha cierre<div class="resizer"></div></th>
               </tr>
             </thead>
 
             <tbody id="incidencias-body">
               <tr class="loading">
-                <td colspan="6">Cargando incidencias...</td>
+                <td colspan="8">Cargando incidencias...</td>
               </tr>
             </tbody>
 

@@ -2,63 +2,58 @@
 
   <div class="container">
 
-    <!-- HEADER VACÍO -->
-    <div class="dashboard-header"></div>
+    <div class="panel-block">
 
-    <!-- =========================
-         GRID PRINCIPAL
-    ========================= -->
-    <div class="dashboard-grid">
+      <!-- =========================
+           FILTROS
+      ========================= -->
+      <div class="filters-row">
 
-      <div class="panel-block table-block">
+        <input 
+          type="text"
+          id="search-factura"
+          placeholder="Buscar factura..."
+          autocomplete="off"
+        >
 
-        <!-- =========================
-             FILTROS (OPCIONAL PERO PRO)
-        ========================= -->
-        <div class="filters-row">
+        <select id="filter-estado-factura">
+          <option value="">Estado</option>
+          <option value="pagada">Pagada</option>
+          <option value="pendiente">Pendiente</option>
+        </select>
 
-          <input 
-            type="text"
-            id="search-factura"
-            placeholder="Buscar factura..."
-            autocomplete="off"
-          >
+        <!-- CTA -->
+        <button id="btn-new-factura" class="btn-new-factura">
+          + Nueva
+        </button>
 
-          <select id="filter-estado-factura">
-            <option value="">Estado</option>
-            <option value="pagada">Pagada</option>
-            <option value="pendiente">Pendiente</option>
-          </select>
+      </div>
 
-        </div>
+      <!-- =========================
+           TABLA
+      ========================= -->
+      <div class="table-container">
 
-        <!-- =========================
-             TABLA
-        ========================= -->
-        <div class="table-container">
+        <table>
 
-          <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Cliente</th>
+              <th>Fecha</th>
+              <th>Importe</th>
+              <th>Estado</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
 
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Cliente</th>
-                <th>Fecha</th>
-                <th>Importe</th>
-                <th>Estado</th>
-                <th>Acciones</th>
-              </tr>
-            </thead>
+          <tbody id="facturas-body">
+            <tr class="loading">
+              <td colspan="6">Cargando facturas...</td>
+            </tr>
+          </tbody>
 
-            <tbody id="facturas-body">
-              <tr class="loading">
-                <td colspan="6">Cargando facturas...</td>
-              </tr>
-            </tbody>
-
-          </table>
-
-        </div>
+        </table>
 
       </div>
 

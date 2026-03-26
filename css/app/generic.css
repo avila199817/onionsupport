@@ -1,10 +1,11 @@
 /* =========================
-   SAAS TABLE SYSTEM (GLOBAL PRO)
+   SAAS TABLE SYSTEM — FINAL PRO V2
 ========================= */
 
-/* 🔥 FONDO GLOBAL CORRECTO */
+/* 🔥 FONDO GLOBAL */
 .main-content:has(.panel-content){
   background:
+    radial-gradient(circle at 20% 0%, rgba(255,255,255,0.04), transparent 60%),
     var(--gradient-overlay),
     var(--main-bg);
 }
@@ -24,77 +25,52 @@
 .panel-content{
   flex:1;
   min-height:0;
-
   display:flex;
   flex-direction:column;
-
   height:calc(100dvh - var(--topbar-height));
 }
 
 
 /* =========================
-   PAGE ROOT
+   STRUCTURE
 ========================= */
 
 .panel-content > div{
   flex:1;
-  min-height:0;
-
   display:flex;
   flex-direction:column;
 }
-
-
-/* =========================
-   CONTAINER
-========================= */
 
 .panel-content .container{
   flex:1;
-  min-height:0;
-
-  width:100%;
-  max-width:none;
-
-  padding:0;
-  margin:0;
-
   display:flex;
   flex-direction:column;
+  padding:0;
+  margin:0;
 }
-
-
-/* =========================
-   PANEL BLOCK
-========================= */
 
 .panel-content .panel-block{
   flex:1;
-  min-height:0;
-
   display:flex;
   flex-direction:column;
-
-  background:transparent;
-  border:none;
-  box-shadow:none;
 }
 
 
 /* =========================
-   FILTROS
+   FILTROS (MEJORADOS)
 ========================= */
 
 .panel-content .filters-row{
-  flex-shrink:0;
-
   display:flex;
   align-items:center;
-  gap:8px;
+  gap:10px;
 
-  padding:10px 14px;
+  padding:12px 16px;
 
-  background:var(--panel-bg);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.02), transparent),
+    var(--panel-bg);
+
   border-bottom:1px solid var(--panel-border);
 }
 
@@ -105,10 +81,18 @@
   border:1px solid var(--card-border);
   color:var(--text);
 
-  padding:8px 10px;
-  border-radius:6px;
+  padding:9px 12px;
+  border-radius:8px;
 
   font-size:13px;
+
+  transition:all .15s ease;
+}
+
+.panel-content .filters-row input:focus,
+.panel-content .filters-row select:focus{
+  border-color:var(--accent);
+  box-shadow:0 0 0 2px rgba(99,102,241,0.15);
 }
 
 .panel-content .filters-row input{
@@ -117,27 +101,29 @@
 
 
 /* =========================
-   BOTÓN NUEVO
+   BOTÓN
 ========================= */
 
 .panel-content .filters-row button{
   margin-left:auto;
 
-  background:var(--accent);
+  background:linear-gradient(135deg, var(--accent), var(--accent-hover));
   color:#fff;
 
-  padding:8px 14px;
+  padding:9px 16px;
   border-radius:999px;
 
   font-size:13px;
   font-weight:500;
 
-  transition:.15s ease;
+  box-shadow:0 6px 18px rgba(99,102,241,0.35);
+
+  transition:all .15s ease;
 }
 
 .panel-content .filters-row button:hover{
-  background:var(--accent-hover);
   transform:translateY(-1px);
+  box-shadow:0 10px 24px rgba(99,102,241,0.45);
 }
 
 
@@ -147,12 +133,7 @@
 
 .panel-content .table-container{
   flex:1;
-  min-height:0;
-
-  width:100%;
-
   background:var(--panel-bg);
-
   overflow:auto;
 }
 
@@ -164,10 +145,9 @@
 .panel-content table{
   width:100%;
   min-width:1000px;
-  height:100%;
 
-  border-collapse:collapse;
-  table-layout:fixed;
+  border-collapse:separate;
+  border-spacing:0;
 
   font-size:13px;
 }
@@ -180,13 +160,13 @@
 .panel-content thead{
   position:sticky;
   top:0;
-  z-index:5;
+  z-index:10;
 
   background:var(--panel-bg);
 }
 
 .panel-content th{
-  padding:10px 12px;
+  padding:12px 14px;
 
   text-align:left;
   font-weight:500;
@@ -197,41 +177,66 @@
 
 
 /* =========================
-   CELDAS
+   FILAS (🔥 AQUÍ ESTÁ LA MAGIA)
 ========================= */
 
-.panel-content td{
-  padding:10px 12px;
+.panel-content tbody tr{
+  position:relative;
 
-  border-bottom:1px solid var(--card-border);
+  transition:all .15s ease;
 
-  overflow:hidden;
-  text-overflow:ellipsis;
-  white-space:nowrap;
+  background:transparent;
+}
 
-  line-height:1.4;
-  vertical-align:middle;
+/* 💥 FILAS MÁS CLARAS (NO TAN PLANAS) */
+.panel-content tbody tr:nth-child(even){
+  background:rgba(255,255,255,0.015);
+}
+
+/* hover PRO */
+.panel-content tbody tr:hover{
+  background:rgba(255,255,255,0.06);
+
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.05),
+    inset 0 -1px 0 rgba(255,255,255,0.05);
+
+  transform:scale(1.002);
+}
+
+/* línea lateral */
+.panel-content tbody tr::before{
+  content:"";
+  position:absolute;
+  left:0;
+  top:0;
+  bottom:0;
+
+  width:3px;
+  background:transparent;
+
+  transition:.15s ease;
+}
+
+.panel-content tbody tr:hover::before{
+  background:var(--accent);
 }
 
 
 /* =========================
-   ROW UX
+   CELDAS
 ========================= */
 
-.panel-content tbody tr{
-  cursor:pointer;
-  transition:all .12s ease;
+.panel-content td{
+  padding:14px 14px;
 
-  border-left:2px solid transparent;
-}
+  border-bottom:1px solid rgba(255,255,255,0.04);
 
-.panel-content tbody tr:hover{
-  background:rgba(255,255,255,0.04);
-  border-left:2px solid var(--accent);
-}
+  vertical-align:middle;
 
-.panel-content tbody tr:active{
-  transform:scale(.998);
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
 }
 
 
@@ -242,7 +247,6 @@
 .panel-content td:first-child{
   color:#6b7280;
   font-size:11px;
-  letter-spacing:.3px;
 }
 
 .panel-content td:nth-child(2){
@@ -252,57 +256,56 @@
 
 
 /* =========================
-   AVATAR SYSTEM (🔥 PRO)
+   AVATAR PRO (ARREGLADO)
 ========================= */
 
 .panel-content .cell-user{
   display:flex;
   align-items:center;
-  gap:10px;
-  min-width:0;
+  gap:12px;
 }
 
 .panel-content .avatar{
-  width:28px;
-  height:28px;
+  width:34px;
+  height:34px;
   border-radius:50%;
 
-  background:var(--avatar-bg);
-  color:var(--avatar-text);
+  background:linear-gradient(135deg, #6366f1, #8b5cf6);
+  color:#fff;
 
   display:flex;
   align-items:center;
   justify-content:center;
 
-  font-size:12px;
+  font-size:13px;
   font-weight:600;
 
-  flex-shrink:0;
+  overflow:hidden;
 
-  box-shadow:0 2px 6px rgba(0,0,0,0.3);
+  box-shadow:0 4px 10px rgba(0,0,0,0.35);
+}
+
+/* 🔥 imagen dentro del avatar */
+.panel-content .avatar img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  border-radius:50%;
 }
 
 .panel-content .user-info{
   display:flex;
   flex-direction:column;
-  min-width:0;
 }
 
 .panel-content .user-name{
   font-size:13px;
-  color:var(--text);
   font-weight:500;
-
-  overflow:hidden;
-  text-overflow:ellipsis;
 }
 
 .panel-content .user-sub{
   font-size:11px;
   color:var(--dim);
-
-  overflow:hidden;
-  text-overflow:ellipsis;
 }
 
 
@@ -311,7 +314,7 @@
 ========================= */
 
 .panel-content .badge{
-  padding:3px 10px;
+  padding:4px 10px;
   border-radius:999px;
   font-size:11px;
   font-weight:500;

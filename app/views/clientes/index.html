@@ -22,7 +22,6 @@
           <option value="inactivo">Inactivo</option>
         </select>
 
-        <!-- CTA -->
         <button id="btn-new-cliente">
           + Nuevo
         </button>
@@ -49,9 +48,38 @@
           </thead>
 
           <tbody id="clientes-body">
+
+            <!-- EJEMPLO FILA (PUEDES BORRARLA) -->
+            <tr>
+              <td>CLI-001</td>
+
+              <td>
+                <div class="cell-user">
+                  <div class="avatar">ON</div>
+                  <div class="user-info">
+                    <span class="user-name">Onion Solutions</span>
+                    <span class="user-sub">Cliente Premium</span>
+                  </div>
+                </div>
+              </td>
+
+              <td>contacto@onion.com</td>
+              <td>+34 600 123 456</td>
+
+              <td>
+                <span class="badge abierta">Activo</span>
+              </td>
+
+              <td>26/03/2026</td>
+
+              <td>⋯</td>
+            </tr>
+
+            <!-- LOADING -->
             <tr class="loading">
               <td colspan="7">Cargando clientes...</td>
             </tr>
+
           </tbody>
 
         </table>

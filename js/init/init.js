@@ -26,6 +26,38 @@ Onion.init = async function(){
 
       Onion.setUser?.(user);
 
+      /* =========================
+         THEME SYNC (BD → UI)
+      ========================= */
+
+      try{
+
+        const dbConfig = user?.config || {};
+
+        if(dbConfig){
+
+          // Guardar en cache
+          localStorage.setItem("onion_config", JSON.stringify(dbConfig));
+
+          // Aplicar tema real
+          let darkMode;
+
+          if(typeof dbConfig.darkMode === "boolean"){
+            darkMode = dbConfig.darkMode;
+          }else{
+            darkMode = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          }
+
+          const theme = darkMode ? "dark" : "light";
+
+          document.documentElement.setAttribute("data-theme", theme);
+
+        }
+
+      }catch(e){
+        console.warn("⚠️ Theme sync error:", e);
+      }
+
     }catch(e){
 
       const msg = e?.message || "";

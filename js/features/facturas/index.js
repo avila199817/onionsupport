@@ -60,6 +60,30 @@ function bindEvents(){
 
   Onion.cleanupEvent(root, "click", (e)=>{
 
+    // 🔥 ACCIONES
+    const action = e.target.closest("[data-action]");
+    if(action){
+      e.stopPropagation();
+
+      const row = action.closest("tr[data-id]");
+      const id = row?.dataset.id;
+
+      if(!id) return;
+
+      const type = action.dataset.action;
+
+      if(type === "download"){
+        downloadFactura(id);
+      }
+
+      if(type === "send"){
+        sendFactura(id);
+      }
+
+      return;
+    }
+
+    // 🔥 CLICK EN FILA
     const row = e.target.closest("tr[data-id]");
     if(!row) return;
 
@@ -130,7 +154,7 @@ function setLoading(){
 
   el.innerHTML = `
     <tr class="table-loading">
-      <td colspan="5">Cargando facturas...</td>
+      <td colspan="6">Cargando facturas...</td>
     </tr>
   `;
 }
@@ -141,7 +165,7 @@ function setEmpty(){
 
   el.innerHTML = `
     <tr>
-      <td colspan="5">No hay facturas</td>
+      <td colspan="6">No hay facturas</td>
     </tr>
   `;
 }
@@ -152,7 +176,7 @@ function setError(){
 
   el.innerHTML = `
     <tr>
-      <td colspan="5">Error cargando facturas</td>
+      <td colspan="6">Error cargando facturas</td>
     </tr>
   `;
 }
@@ -169,9 +193,10 @@ function render(items){
   tbody.innerHTML = items.map(f => {
 
     const estado = getEstado(f.estadoPago);
+    const id = f.id || f.numero;
 
     return `
-      <tr data-id="${f.id || f.numero}" style="cursor:pointer">
+      <tr data-id="${id}" style="cursor:pointer">
         <td>#${escapeHTML(f.numero || f.id || "--")}</td>
         <td>${escapeHTML(f.cliente || "-")}</td>
         <td>${formatFecha(f.fecha)}</td>
@@ -181,11 +206,28 @@ function render(items){
             ${estado.label}
           </span>
         </td>
+        <td class="acciones">
+          <button data-action="download">Descargar</button>
+          <button data-action="send">Enviar</button>
+        </td>
       </tr>
     `;
 
   }).join("");
 
+}
+
+/* =========================
+   ACCIONES
+========================= */
+
+function downloadFactura(id){
+  window.open(Onion.config.API + "/facturas/" + id + "/pdf", "_blank");
+}
+
+function sendFactura(id){
+  alert("Enviar factura " + id);
+  // aquí luego metes API real
 }
 
 /* =========================

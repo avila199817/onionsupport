@@ -14,15 +14,26 @@
   ========================= */
 
   try{
-    const config = JSON.parse(localStorage.getItem("onion_config") || "{}");
-    const dark = config.darkMode;
 
-    if(dark === false){
-      document.documentElement.setAttribute("data-theme","light");
+    const config = JSON.parse(localStorage.getItem("onion_config") || "{}");
+
+    let darkMode;
+
+    if(typeof config.darkMode === "boolean"){
+      darkMode = config.darkMode;
     }else{
-      document.documentElement.removeAttribute("data-theme");
+      // fallback → sistema operativo
+      darkMode = window.matchMedia("(prefers-color-scheme: dark)").matches;
     }
-  }catch{}
+
+    const theme = darkMode ? "dark" : "light";
+
+    document.documentElement.setAttribute("data-theme", theme);
+
+  }catch{
+    // fallback seguro
+    document.documentElement.setAttribute("data-theme", "dark");
+  }
 
   document.addEventListener("DOMContentLoaded", async () => {
 

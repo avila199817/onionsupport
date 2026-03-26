@@ -24,7 +24,7 @@
 
     "/incidencias": {
       page: "/app/views/incidencias/index.html",
-      style: "/css/app/generic.css",
+      style: "/css/app/incidecias.css",
       script: "/js/features/incidencias/index.js",
       title: "Incidencias"
     },

@@ -1,8 +1,8 @@
 /* =========================
-   SAAS TABLE SYSTEM — FINAL PRO V2
+   SAAS TABLE SYSTEM — FINAL FIXED 10/10
 ========================= */
 
-/* 🔥 FONDO GLOBAL */
+/* 🔥 FONDO */
 .main-content:has(.panel-content){
   background:
     radial-gradient(circle at 20% 0%, rgba(255,255,255,0.04), transparent 60%),
@@ -11,7 +11,7 @@
 }
 
 
-/* 🔥 WRAPPER FULL */
+/* 🔥 WRAPPER */
 .content-wrapper:has(.panel-content){
   padding:0 !important;
   gap:0 !important;
@@ -24,7 +24,6 @@
 
 .panel-content{
   flex:1;
-  min-height:0;
   display:flex;
   flex-direction:column;
   height:calc(100dvh - var(--topbar-height));
@@ -35,20 +34,7 @@
    STRUCTURE
 ========================= */
 
-.panel-content > div{
-  flex:1;
-  display:flex;
-  flex-direction:column;
-}
-
-.panel-content .container{
-  flex:1;
-  display:flex;
-  flex-direction:column;
-  padding:0;
-  margin:0;
-}
-
+.panel-content .container,
 .panel-content .panel-block{
   flex:1;
   display:flex;
@@ -57,7 +43,7 @@
 
 
 /* =========================
-   FILTROS (MEJORADOS)
+   FILTROS
 ========================= */
 
 .panel-content .filters-row{
@@ -67,42 +53,24 @@
 
   padding:12px 16px;
 
-  background:
-    linear-gradient(180deg, rgba(255,255,255,0.02), transparent),
-    var(--panel-bg);
-
+  background:var(--panel-bg);
   border-bottom:1px solid var(--panel-border);
 }
 
-/* inputs */
 .panel-content .filters-row input,
 .panel-content .filters-row select{
   background:var(--card-bg);
   border:1px solid var(--card-border);
-  color:var(--text);
 
   padding:9px 12px;
   border-radius:8px;
 
   font-size:13px;
-
-  transition:all .15s ease;
-}
-
-.panel-content .filters-row input:focus,
-.panel-content .filters-row select:focus{
-  border-color:var(--accent);
-  box-shadow:0 0 0 2px rgba(99,102,241,0.15);
 }
 
 .panel-content .filters-row input{
   flex:1;
 }
-
-
-/* =========================
-   BOTÓN
-========================= */
 
 .panel-content .filters-row button{
   margin-left:auto;
@@ -113,17 +81,7 @@
   padding:9px 16px;
   border-radius:999px;
 
-  font-size:13px;
-  font-weight:500;
-
   box-shadow:0 6px 18px rgba(99,102,241,0.35);
-
-  transition:all .15s ease;
-}
-
-.panel-content .filters-row button:hover{
-  transform:translateY(-1px);
-  box-shadow:0 10px 24px rgba(99,102,241,0.45);
 }
 
 
@@ -133,23 +91,22 @@
 
 .panel-content .table-container{
   flex:1;
-  background:var(--panel-bg);
+  width:100%;
   overflow:auto;
+  background:var(--panel-bg);
 }
 
 
 /* =========================
-   TABLE
+   TABLE (🔥 CLAVE)
 ========================= */
 
 .panel-content table{
   width:100%;
-  min-width:1000px;
+  border-collapse:collapse;
 
-  border-collapse:separate;
-  border-spacing:0;
-
-  font-size:13px;
+  /* 🔥 ESTO ARREGLA TODO */
+  table-layout:auto; 
 }
 
 
@@ -161,65 +118,17 @@
   position:sticky;
   top:0;
   z-index:10;
-
   background:var(--panel-bg);
 }
 
 .panel-content th{
   padding:12px 14px;
-
   text-align:left;
-  font-weight:500;
   color:var(--dim);
 
   border-bottom:1px solid var(--panel-border);
-}
 
-
-/* =========================
-   FILAS (🔥 AQUÍ ESTÁ LA MAGIA)
-========================= */
-
-.panel-content tbody tr{
-  position:relative;
-
-  transition:all .15s ease;
-
-  background:transparent;
-}
-
-/* 💥 FILAS MÁS CLARAS (NO TAN PLANAS) */
-.panel-content tbody tr:nth-child(even){
-  background:rgba(255,255,255,0.015);
-}
-
-/* hover PRO */
-.panel-content tbody tr:hover{
-  background:rgba(255,255,255,0.06);
-
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.05),
-    inset 0 -1px 0 rgba(255,255,255,0.05);
-
-  transform:scale(1.002);
-}
-
-/* línea lateral */
-.panel-content tbody tr::before{
-  content:"";
-  position:absolute;
-  left:0;
-  top:0;
-  bottom:0;
-
-  width:3px;
-  background:transparent;
-
-  transition:.15s ease;
-}
-
-.panel-content tbody tr:hover::before{
-  background:var(--accent);
+  white-space:nowrap;
 }
 
 
@@ -229,34 +138,83 @@
 
 .panel-content td{
   padding:14px 14px;
+  border-bottom:1px solid rgba(255,255,255,0.03);
 
-  border-bottom:1px solid rgba(255,255,255,0.04);
-
-  vertical-align:middle;
-
-  overflow:hidden;
-  text-overflow:ellipsis;
   white-space:nowrap;
 }
 
 
 /* =========================
-   JERARQUÍA
+   FILAS
 ========================= */
 
-.panel-content td:first-child{
-  color:#6b7280;
-  font-size:11px;
+.panel-content tbody tr{
+  transition:all .15s ease;
 }
 
-.panel-content td:nth-child(2){
-  font-weight:500;
-  color:#e5e7eb;
+/* zebra suave */
+.panel-content tbody tr:nth-child(even){
+  background:rgba(255,255,255,0.02);
+}
+
+/* hover */
+.panel-content tbody tr:hover{
+  background:rgba(255,255,255,0.045);
 }
 
 
 /* =========================
-   AVATAR PRO (ARREGLADO)
+   AJUSTE COLUMNAS (🔥 PRO)
+========================= */
+
+/* ID */
+.panel-content th:nth-child(1),
+.panel-content td:nth-child(1){
+  width:140px;
+  color:#6b7280;
+  font-size:11px;
+}
+
+/* TEXTO PRINCIPAL */
+.panel-content th:nth-child(2),
+.panel-content td:nth-child(2){
+  min-width:260px;
+  font-weight:500;
+}
+
+/* CLIENTE / USER */
+.panel-content th:nth-child(3),
+.panel-content td:nth-child(3){
+  min-width:180px;
+}
+
+/* TÉCNICO / ROL */
+.panel-content th:nth-child(4),
+.panel-content td:nth-child(4){
+  min-width:160px;
+}
+
+/* ESTADO */
+.panel-content th:nth-child(5),
+.panel-content td:nth-child(5){
+  width:120px;
+}
+
+/* PRIORIDAD / FECHA */
+.panel-content th:nth-child(6),
+.panel-content td:nth-child(6){
+  width:120px;
+}
+
+/* FECHA EXTRA */
+.panel-content th:nth-child(7),
+.panel-content td:nth-child(7){
+  width:140px;
+}
+
+
+/* =========================
+   AVATAR
 ========================= */
 
 .panel-content .cell-user{
@@ -266,11 +224,13 @@
 }
 
 .panel-content .avatar{
-  width:34px;
-  height:34px;
+  width:36px;
+  height:36px;
   border-radius:50%;
 
-  background:linear-gradient(135deg, #6366f1, #8b5cf6);
+  overflow:hidden;
+
+  background:linear-gradient(135deg,#6366f1,#8b5cf6);
   color:#fff;
 
   display:flex;
@@ -279,33 +239,12 @@
 
   font-size:13px;
   font-weight:600;
-
-  overflow:hidden;
-
-  box-shadow:0 4px 10px rgba(0,0,0,0.35);
 }
 
-/* 🔥 imagen dentro del avatar */
 .panel-content .avatar img{
   width:100%;
   height:100%;
   object-fit:cover;
-  border-radius:50%;
-}
-
-.panel-content .user-info{
-  display:flex;
-  flex-direction:column;
-}
-
-.panel-content .user-name{
-  font-size:13px;
-  font-weight:500;
-}
-
-.panel-content .user-sub{
-  font-size:11px;
-  color:var(--dim);
 }
 
 
@@ -317,26 +256,14 @@
   padding:4px 10px;
   border-radius:999px;
   font-size:11px;
-  font-weight:500;
+}
+
+.panel-content .badge.cerrada{
+  background:rgba(34,197,94,0.12);
+  color:#22c55e;
 }
 
 .panel-content .badge.abierta{
-  background:var(--info-bg);
-  color:var(--info);
-}
-
-.panel-content .badge.progreso{
-  background:var(--warning-bg);
-  color:var(--warning);
-}
-
-.panel-content .badge.cerrada,
-.panel-content .badge.pagada{
-  background:rgba(34,197,94,0.12);
-  color:var(--success);
-}
-
-.panel-content .badge.pendiente{
-  background:rgba(245,158,11,0.12);
-  color:var(--warning);
+  background:rgba(59,130,246,0.12);
+  color:#60a5fa;
 }

@@ -1,19 +1,24 @@
 /* =========================
-   INCIDENCIAS — FINAL FULL PRO
+   SAAS TABLE SYSTEM (GLOBAL)
+   FUNCIONA PARA:
+   - incidencias
+   - facturas
+   - usuarios
+   - clientes
 ========================= */
 
-/* 🔥 ROMPE WRAPPER GLOBAL */
-.content-wrapper:has(.incidencias){
+/* 🔥 ROMPE WRAPPER GLOBAL PARA TODAS */
+.content-wrapper:has(.panel-content){
   padding:0 !important;
   gap:0 !important;
 }
 
 
 /* =========================
-   ROOT
+   ROOT GLOBAL
 ========================= */
 
-.panel-content.incidencias{
+.panel-content{
   flex:1;
   min-height:0;
 
@@ -25,10 +30,10 @@
 
 
 /* =========================
-   INCIDENCIAS ROOT
+   PAGE ROOT
 ========================= */
 
-.incidencias{
+.panel-content > div{
   flex:1;
   min-height:0;
 
@@ -41,10 +46,10 @@
 
 
 /* =========================
-   CONTAINER
+   CONTAINER GLOBAL
 ========================= */
 
-.incidencias .container{
+.panel-content .container{
   flex:1;
   min-height:0;
 
@@ -64,7 +69,7 @@
    PANEL BLOCK
 ========================= */
 
-.incidencias .panel-block{
+.panel-content .panel-block{
   flex:1;
   min-height:0;
 
@@ -80,10 +85,10 @@
 
 
 /* =========================
-   FILTROS
+   FILTROS GLOBAL
 ========================= */
 
-.incidencias .filters-row{
+.panel-content .filters-row{
   flex-shrink:0;
 
   display:flex;
@@ -97,8 +102,8 @@
 }
 
 /* inputs */
-.incidencias .filters-row input,
-.incidencias .filters-row select{
+.panel-content .filters-row input,
+.panel-content .filters-row select{
   background:var(--card-bg);
   border:1px solid var(--card-border);
   color:var(--text);
@@ -109,16 +114,16 @@
   font-size:13px;
 }
 
-.incidencias .filters-row input{
+.panel-content .filters-row input{
   flex:1;
 }
 
 
 /* =========================
-   BOTÓN NUEVO
+   BOTÓN NUEVO GLOBAL
 ========================= */
 
-.panel-content.incidencias .btn-new-incidencia{
+.panel-content .filters-row button{
   margin-left:auto;
 
   background:var(--accent);
@@ -133,17 +138,17 @@
   transition:.15s ease;
 }
 
-.panel-content.incidencias .btn-new-incidencia:hover{
+.panel-content .filters-row button:hover{
   background:var(--accent-hover);
   transform:translateY(-1px);
 }
 
 
 /* =========================
-   TABLA CONTENEDOR
+   TABLE CONTAINER GLOBAL
 ========================= */
 
-.incidencias .table-container{
+.panel-content .table-container{
   flex:1;
   min-height:0;
 
@@ -156,13 +161,13 @@
 
 
 /* =========================
-   TABLE
+   TABLE GLOBAL
 ========================= */
 
-.incidencias table{
+.panel-content table{
   width:100%;
-  min-width:1100px;
-  height:100%; /* 🔥 evita espacio muerto */
+  min-width:1000px;
+  height:100%;
 
   border-collapse:collapse;
   table-layout:fixed;
@@ -172,10 +177,10 @@
 
 
 /* =========================
-   HEADER
+   HEADER GLOBAL
 ========================= */
 
-.incidencias thead{
+.panel-content thead{
   position:sticky;
   top:0;
   z-index:5;
@@ -183,7 +188,7 @@
   background:var(--panel-bg);
 }
 
-.incidencias th{
+.panel-content th{
   padding:10px 12px;
 
   text-align:left;
@@ -195,10 +200,10 @@
 
 
 /* =========================
-   CELDAS
+   CELDAS GLOBAL
 ========================= */
 
-.incidencias td{
+.panel-content td{
   padding:10px 12px;
 
   border-bottom:1px solid var(--card-border);
@@ -212,75 +217,73 @@
 
 
 /* =========================
-   ROW UX PRO
+   ROW UX GLOBAL
 ========================= */
 
-.incidencias tbody tr{
+.panel-content tbody tr{
   cursor:pointer;
   transition:all .12s ease;
 
   border-left:2px solid transparent;
 }
 
-.incidencias tbody tr:hover{
+.panel-content tbody tr:hover{
   background:rgba(255,255,255,0.04);
   border-left:2px solid var(--accent);
 }
 
-.incidencias tbody tr:active{
+.panel-content tbody tr:active{
   transform:scale(.998);
 }
 
 
 /* =========================
-   JERARQUÍA VISUAL
+   JERARQUÍA BASE
 ========================= */
 
-.incidencias td:nth-child(1){
+/* ID */
+.panel-content td:first-child{
   color:#6b7280;
   font-size:11px;
   letter-spacing:.3px;
 }
 
-.incidencias td:nth-child(2){
+/* columna principal (2ª) */
+.panel-content td:nth-child(2){
   font-weight:500;
   color:#e5e7eb;
 }
 
-.incidencias td:nth-child(4){
-  color:#a5b4fc;
-  font-size:12px;
-}
-
-.incidencias td:nth-child(7),
-.incidencias td:nth-child(8){
-  color:var(--dim);
-  font-size:12px;
-}
-
 
 /* =========================
-   BADGES
+   BADGES GLOBAL
 ========================= */
 
-.incidencias .badge{
+.panel-content .badge{
   padding:3px 10px;
   border-radius:999px;
   font-size:11px;
   font-weight:500;
 }
 
-.incidencias .badge.abierta{
+/* estados comunes */
+.panel-content .badge.abierta{
   background:var(--info-bg);
   color:var(--info);
 }
 
-.incidencias .badge.progreso{
+.panel-content .badge.progreso{
   background:var(--warning-bg);
   color:var(--warning);
 }
 
-.incidencias .badge.cerrada{
+.panel-content .badge.cerrada,
+.panel-content .badge.pagada{
   background:rgba(34,197,94,0.12);
   color:var(--success);
+}
+
+.panel-content .badge.pendiente{
+  background:rgba(245,158,11,0.12);
+  color:var(--warning);
 }

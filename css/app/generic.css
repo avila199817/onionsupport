@@ -1,6 +1,5 @@
 /* =========================
-   INCIDENCIAS — SAAS PRO FINAL
-   (INTEGRADO CON TU LAYOUT)
+   INCIDENCIAS — FINAL PRO INTEGRADO
 ========================= */
 
 /* ROOT */
@@ -14,6 +13,22 @@
 
 
 /* =========================
+   FIX TOPBAR OFFSET REAL
+========================= */
+
+.incidencias{
+  flex:1;
+  min-height:0;
+
+  display:flex;
+  flex-direction:column;
+
+  /* 🔥 ESTO ES LA CLAVE */
+  height:calc(100dvh - var(--topbar-height));
+}
+
+
+/* =========================
    CONTAINER FULL WIDTH REAL
 ========================= */
 
@@ -21,18 +36,21 @@
   flex:1;
   min-height:0;
 
+  width:100%;
   max-width:100%;
-  padding-inline:0; /* 🔥 rompe el centrado */
+
+  padding:12px 18px 14px 18px;
+
   margin:0;
 
   display:flex;
   flex-direction:column;
-  gap:var(--space-md);
+  gap:10px;
 }
 
 
 /* =========================
-   ELIMINAMOS CARD
+   ELIMINAR CARD
 ========================= */
 
 .incidencias .panel-block{
@@ -51,7 +69,7 @@
 
 
 /* =========================
-   FILTROS (BARRA PRO)
+   FILTROS (INTEGRADOS)
 ========================= */
 
 .incidencias .filters-row{
@@ -59,13 +77,15 @@
 
   display:flex;
   align-items:center;
-  gap:var(--space-sm);
+  gap:8px;
 
-  padding:var(--space-sm);
+  padding:8px;
 
   background:var(--panel-bg);
   border:1px solid var(--panel-border);
-  border-radius:var(--radius-lg);
+
+  /* 🔥 más integrado que card */
+  border-radius:8px;
 
   box-shadow:var(--shadow-sm);
 }
@@ -77,8 +97,8 @@
   border:1px solid var(--card-border);
   color:var(--text);
 
-  padding:8px 12px;
-  border-radius:var(--radius-md);
+  padding:8px 10px;
+  border-radius:6px;
 
   font-size:13px;
 
@@ -87,40 +107,34 @@
 
 .incidencias .filters-row input{
   flex:1;
-  min-width:240px;
+  min-width:220px;
 }
 
 .incidencias .filters-row select{
-  min-width:140px;
+  min-width:130px;
   cursor:pointer;
 }
 
-/* focus */
 .incidencias .filters-row input:focus,
 .incidencias .filters-row select:focus{
   border-color:var(--accent);
-  box-shadow:0 0 0 2px color-mix(in srgb, var(--accent), transparent 75%);
+  box-shadow:0 0 0 2px color-mix(in srgb, var(--accent), transparent 80%);
 }
 
 
 /* =========================
-   BOTÓN NUEVO (CTA PRO)
+   BOTÓN NUEVO (MISMO SISTEMA QUE TOPBAR)
 ========================= */
 
 .panel-content.incidencias .btn-new-incidencia{
   margin-left:auto;
 
-  background:linear-gradient(
-    135deg,
-    var(--accent),
-    var(--accent-hover)
-  );
-
+  background:var(--accent);
   color:#fff;
-  border:none;
+
+  border-radius:999px; /* 🔥 igual que search */
 
   padding:8px 14px;
-  border-radius:var(--radius-md);
 
   font-size:13px;
   font-weight:500;
@@ -129,14 +143,14 @@
   align-items:center;
   gap:6px;
 
-  box-shadow:0 6px 16px rgba(99,102,241,0.35);
+  box-shadow:0 4px 14px rgba(99,102,241,0.35);
 
   transition:all var(--duration-fast) var(--ease-out);
 }
 
 .panel-content.incidencias .btn-new-incidencia:hover{
+  background:var(--accent-hover);
   transform:translateY(-1px);
-  box-shadow:0 10px 22px rgba(99,102,241,0.45);
 }
 
 .panel-content.incidencias .btn-new-incidencia:active{
@@ -145,7 +159,7 @@
 
 
 /* =========================
-   TABLA FULL HEIGHT
+   TABLA CONTENEDOR FULL
 ========================= */
 
 .incidencias .table-container{
@@ -157,7 +171,9 @@
 
   background:var(--panel-bg);
   border:1px solid var(--panel-border);
-  border-radius:var(--radius-lg);
+
+  /* 🔥 MENOS REDONDEO */
+  border-radius:10px;
 
   overflow:auto;
 
@@ -181,7 +197,7 @@
 
 
 /* =========================
-   HEADER STICKY
+   HEADER (TOPBAR STYLE)
 ========================= */
 
 .incidencias thead{
@@ -192,7 +208,7 @@
   background:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--panel-bg), #fff 3%),
+      rgba(255,255,255,0.02),
       var(--panel-bg)
     );
 }
@@ -204,7 +220,7 @@
   font-weight:500;
   color:var(--dim);
 
-  border-bottom:1px solid var(--card-border);
+  border-bottom:1px solid var(--panel-border);
 }
 
 
@@ -220,13 +236,11 @@
   overflow:hidden;
   text-overflow:ellipsis;
   white-space:nowrap;
-
-  color:var(--text);
 }
 
 
 /* =========================
-   ROW UX
+   ROW UX (FINO)
 ========================= */
 
 .incidencias tbody tr{
@@ -235,7 +249,7 @@
 }
 
 .incidencias tbody tr:hover{
-  background:color-mix(in srgb, var(--sb-hover), transparent 20%);
+  background:rgba(255,255,255,0.03);
 }
 
 
@@ -253,12 +267,8 @@
   color:#e5e7eb;
 }
 
-.incidencias td:nth-child(3){
-  color:#d1d5db;
-}
-
 .incidencias td:nth-child(4){
-  color:#cbd5f5;
+  color:#a5b4fc;
   font-size:12px;
 }
 
@@ -299,7 +309,7 @@
 
 
 /* =========================
-   BADGES
+   BADGES (TOKEN BASED)
 ========================= */
 
 .incidencias .badge{
@@ -310,12 +320,12 @@
 }
 
 .incidencias .badge.abierta{
-  background:rgba(59,130,246,0.12);
+  background:var(--info-bg);
   color:var(--info);
 }
 
 .incidencias .badge.progreso{
-  background:rgba(245,158,11,0.12);
+  background:var(--warning-bg);
   color:var(--warning);
 }
 
@@ -339,29 +349,5 @@
 }
 
 .incidencias .resizer:hover{
-  background:rgba(255,255,255,0.12);
-}
-
-
-/* =========================
-   RESPONSIVE
-========================= */
-
-@media (max-width:768px){
-
-  .incidencias .filters-row{
-    flex-direction:column;
-    align-items:stretch;
-  }
-
-  .incidencias .filters-row input,
-  .incidencias .filters-row select{
-    width:100%;
-  }
-
-  .panel-content.incidencias .btn-new-incidencia{
-    width:100%;
-    justify-content:center;
-  }
-
+  background:rgba(255,255,255,0.1);
 }

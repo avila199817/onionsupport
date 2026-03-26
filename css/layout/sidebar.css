@@ -326,6 +326,24 @@
 
 
 /* =========================
+   USER INFO (PRO TEXT SCALE)
+========================= */
+.user-info .name{
+  font-size:14px;
+  font-weight:600;
+  color:var(--text);
+}
+
+/* 🔥 PLAN (más pequeño y elegante) */
+.user-info .plan{
+  font-size:11px;        /* 🔥 como recientes */
+  color:var(--dim);      /* 🔥 menos protagonismo */
+  margin-top:2px;
+  font-weight:500;
+}
+
+
+/* =========================
    AVATAR
 ========================= */
 .avatar{

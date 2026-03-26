@@ -559,3 +559,33 @@
   font-weight:600;
   letter-spacing:.3px;
 }
+
+/* =========================
+   FIX AVATAR USUARIOS
+========================= */
+
+.panel-content.usuarios .avatar{
+  width:36px;
+  height:36px;
+  min-width:36px;
+
+  border-radius:50%;
+  overflow:hidden;
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+/* 🔥 CLAVE */
+.panel-content.usuarios .avatar img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  display:block;
+}
+
+/* evitar filas gigantes */
+.panel-content.usuarios td{
+  vertical-align:middle;
+}

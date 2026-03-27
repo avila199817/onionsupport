@@ -26,6 +26,20 @@ function $(selector){
 }
 
 /* =========================
+   SPA NAV
+========================= */
+
+function showView(viewClass){
+
+  document.querySelectorAll(".panel-content")
+    .forEach(v => v.style.display = "none");
+
+  const view = document.querySelector(`.panel-content.${viewClass}`);
+  if(view) view.style.display = "flex";
+
+}
+
+/* =========================
    INIT
 ========================= */
 
@@ -60,7 +74,7 @@ function bindEvents(){
   const root = getRoot();
   if(!root) return;
 
-  // CLICK EN FILA → DETALLE
+  // CLICK FILA → DETALLE
   Onion.cleanupEvent(root, "click", (e)=>{
 
     const row = e.target.closest("tr[data-id]");
@@ -76,23 +90,85 @@ function bindEvents(){
 
   });
 
-  // BOTÓN NUEVO
+  // NUEVA INCIDENCIA
   $("#btn-new")?.addEventListener("click", ()=>{
     crearIncidencia();
   });
 
+  // FILTROS
   $("#search-incidencia")?.addEventListener("input", debounce(applyFilters, 250));
   $("#filter-status")?.addEventListener("change", applyFilters);
   $("#filter-priority")?.addEventListener("change", applyFilters);
 
+  // GLOBAL EVENTS (SPA)
+  document.addEventListener("click", globalEvents);
+
 }
 
 /* =========================
-   NUEVA INCIDENCIA
+   GLOBAL EVENTS
+========================= */
+
+function globalEvents(e){
+
+  // VOLVER
+  if(e.target.id === "btn-back"){
+    showView("incidencias");
+  }
+
+  // GUARDAR
+  if(e.target.id === "btn-save-incidencia"){
+    saveIncidencia();
+  }
+
+}
+
+/* =========================
+   NUEVA INCIDENCIA VIEW
 ========================= */
 
 function crearIncidencia(){
-  alert("🚀 Aquí abrirías el modal o formulario de nueva incidencia");
+  showView("incidencia-create");
+}
+
+/* =========================
+   SAVE
+========================= */
+
+async function saveIncidencia(){
+
+  const data = {
+    message: document.getElementById("inc-message")?.value || "",
+    subject: document.getElementById("inc-title")?.value || "",
+    name: document.getElementById("inc-cliente")?.value || "",
+    priority: document.getElementById("inc-priority")?.value || "low"
+  };
+
+  if(!data.message.trim()){
+    alert("⚠️ El mensaje es obligatorio");
+    return;
+  }
+
+  try{
+
+    await Onion.fetch(Onion.config.API + "/tickets", {
+      method: "POST",
+      body: JSON.stringify(data)
+    });
+
+    // 🔥 volver a listado
+    showView("incidencias");
+
+    // 🔥 recargar sin reload
+    loadIncidencias();
+
+  }catch(err){
+
+    console.error("💥 Error creando incidencia:", err);
+    alert("❌ Error creando incidencia");
+
+  }
+
 }
 
 /* =========================
@@ -238,19 +314,12 @@ function render(items){
 function mapItem(i){
   return {
     id: i.id || i.ticketId || "--",
-
-    // 🔥 AQUÍ CAMBIAMOS → message
     title: i.message || i.subject || "Sin título",
-
     cliente: i.name || "-",
-
     tecnico: i.tecnico?.name || "-",
-
     estado: getEstado(i),
     prioridad: getPrioridad(i),
-
     fecha: formatFecha(i.createdAt),
-
     fechaCierre: i.status === "closed"
       ? formatFecha(i._ts ? i._ts * 1000 : i.closedAt)
       : "-"

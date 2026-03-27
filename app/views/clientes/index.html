@@ -49,35 +49,67 @@
 
           <tbody id="clientes-body">
 
-            <!-- EJEMPLO FILA (PUEDES BORRARLA) -->
+            <!-- =========================
+                 EJEMPLO FILA
+            ========================= -->
             <tr>
+
+              <!-- ID -->
               <td>CLI-001</td>
 
+              <!-- EMPRESA -->
               <td>
                 <div class="cell-user">
-                  <div class="avatar">ON</div>
+
+                  <div class="avatar">
+                    ON
+                  </div>
+
                   <div class="user-info">
                     <span class="user-name">Onion Solutions</span>
                     <span class="user-sub">Cliente Premium</span>
                   </div>
+
                 </div>
               </td>
 
+              <!-- EMAIL -->
               <td>contacto@onion.com</td>
+
+              <!-- TEL -->
               <td>+34 600 123 456</td>
 
+              <!-- ESTADO -->
               <td>
-                <span class="badge abierta">Activo</span>
+                <span class="badge activo">Activo</span>
               </td>
 
+              <!-- FECHA -->
               <td>26/03/2026</td>
 
-              <td>⋯</td>
+              <!-- ACCIONES -->
+              <td class="acciones">
+
+                <button data-action="edit">
+                  Editar
+                </button>
+
+                <button data-action="delete">
+                  Eliminar
+                </button>
+
+              </td>
+
             </tr>
 
-            <!-- LOADING -->
+
+            <!-- =========================
+                 LOADING STATE
+            ========================= -->
             <tr class="loading">
-              <td colspan="7">Cargando clientes...</td>
+              <td colspan="7" style="text-align:center; padding:20px; color:var(--dim);">
+                Cargando clientes...
+              </td>
             </tr>
 
           </tbody>

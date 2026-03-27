@@ -28,6 +28,13 @@
       script: "/js/features/incidencias/index.js",
       title: "Incidencias"
     },
+
+    "/incidencias/detalle": {
+      page: "/app/views/incidencias/detalle.html",
+      style: "/css/app/generic.css",
+      script: "/js/features/incidencias/detalle.js",
+      title: "Detalle incidencia"
+    },
     
     "/incidencias/nueva": {
       page: "/app/views/incidencias/incidencia.html",

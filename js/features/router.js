@@ -57,6 +57,13 @@
       title: "Detalle factura"
     },
 
+    "/facturas/nueva": {
+      page: "/app/views/facturas/factura.html",
+      style: "/css/app/generic.css",
+      script: "/js/features/facturas/factura.js",
+      title: "Nueva incidencia"
+    },
+
     "/cuenta": {
       page: "/app/views/cuenta/index.html",
       style: "/css/app/cuenta.css",

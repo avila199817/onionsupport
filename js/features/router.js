@@ -50,6 +50,13 @@
       title: "Facturas"
     },
 
+    "/facturas/detalle": {
+      page: "/app/views/facturas/detalle.html",
+      style: "/css/app/generic.css",
+      script: "/js/features/facturas/detalle.js",
+      title: "Detalle factura"
+    },
+
     "/cuenta": {
       page: "/app/views/cuenta/index.html",
       style: "/css/app/cuenta.css",

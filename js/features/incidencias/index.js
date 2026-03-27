@@ -77,23 +77,21 @@ function bindEvents(){
   // CLICK FILA → DETALLE
   Onion.cleanupEvent(root, "click", (e)=>{
 
+    // evitar conflicto con botones dentro de la fila
+    if(e.target.closest("button")) return;
+
     const row = e.target.closest("tr[data-id]");
     if(!row) return;
 
     const id = row.dataset.id;
+    if(!id) return;
 
-    const item = currentItems.find(i =>
-      String(i.id || i.ticketId) === String(id)
-    );
-
-    if(item) showDetalle(item);
+    Onion.router.navigate(`/incidencias/detalle?id=${id}`);
 
   });
 
   // NUEVA INCIDENCIA
-  $("#btn-new")?.addEventListener("click", ()=>{
-    crearIncidencia();
-  });
+  $("#btn-new")?.addEventListener("click", crearIncidencia);
 
   // FILTROS
   $("#search-incidencia")?.addEventListener("input", debounce(applyFilters, 250));

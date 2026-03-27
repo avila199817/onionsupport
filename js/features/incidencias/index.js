@@ -128,7 +128,7 @@ function globalEvents(e){
 ========================= */
 
 function crearIncidencia(){
-  showView("incidencia-create");
+  Onion.router.navigate("/incidencias/nueva");
 }
 
 /* =========================

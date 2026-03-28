@@ -1,40 +1,6 @@
 /* =========================================================
-   INCIDENCIA CREATE — FINAL DEFINITIVO (CIERRA TODO)
+   INCIDENCIA CREATE — FINAL DEFINITIVO (SIN TOCAR LAYOUT)
 ========================================================= */
-
-/* =========================
-   BASE
-========================= */
-html, body{
-  height:100%;
-  margin:0;
-}
-
-#app,
-.main-layout,
-.main-content{
-  height:100%;
-  min-height:0;
-  display:flex;
-  flex-direction:column;
-}
-
-
-/* =========================================================
-   🔥 FIX REAL DEL LAYOUT (ESTO ERA LO QUE FALTABA)
-========================================================= */
-.content-wrapper{
-  flex:1;
-  min-height:0;
-  display:flex;
-  flex-direction:column;
-}
-
-/* SOLO ESTA VISTA */
-.content-wrapper:has(.incidencia-create){
-  padding:0 !important;
-  background:var(--panel-bg); /* 🔥 ADIÓS HUECO */
-}
 
 
 /* =========================
@@ -43,6 +9,7 @@ html, body{
 .panel-content.incidencia-create{
   display:flex;
   flex-direction:column;
+
   flex:1;
   min-height:0;
   width:100%;
@@ -60,7 +27,9 @@ html, body{
 }
 
 
-/* LEFT */
+/* =========================
+   LEFT
+========================= */
 .incidencia-left{
   flex:1;
   min-width:0;
@@ -90,7 +59,9 @@ html, body{
 }
 
 
-/* CONTENIDO DERECHO */
+/* =========================
+   RIGHT CONTENT
+========================= */
 .incidencia-history{
   flex:1;
   min-height:0;
@@ -115,8 +86,8 @@ html, body{
 .history-list{
   flex:1;
   min-height:0;
-  overflow:auto;
 
+  overflow:auto;
   background:var(--panel-bg);
 }
 
@@ -164,7 +135,7 @@ html, body{
 
 
 /* =========================================================
-   BODY
+   BODY (SCROLL REAL)
 ========================================================= */
 .incidencia-body{
   flex:1;
@@ -173,7 +144,7 @@ html, body{
   display:flex;
   padding:30px 40px;
 
-  overflow:auto;
+  overflow:auto; /* 🔥 AQUÍ VA EL SCROLL */
 }
 
 
@@ -190,7 +161,9 @@ html, body{
 }
 
 
-/* INPUTS */
+/* =========================
+   INPUTS
+========================= */
 .incidencia-form input,
 .incidencia-form textarea{
   width:100%;
@@ -205,6 +178,7 @@ html, body{
 
 .incidencia-form textarea{
   min-height:180px;
+  resize:vertical;
 }
 
 
@@ -230,6 +204,11 @@ html, body{
   text-decoration:underline;
 }
 
+#file-list{
+  font-size:12px;
+  color:var(--dim);
+}
+
 
 /* =========================================================
    FOOTER
@@ -246,7 +225,9 @@ html, body{
 }
 
 
-/* BOTÓN */
+/* =========================
+   BOTÓN
+========================= */
 #btn-save-incidencia{
   padding:13px 26px;
   border-radius:12px;
@@ -258,6 +239,11 @@ html, body{
   cursor:pointer;
 
   box-shadow:0 10px 24px rgba(99,102,241,0.35);
+  transition:all .15s ease;
+}
+
+#btn-save-incidencia:hover{
+  transform:translateY(-1px);
 }
 
 

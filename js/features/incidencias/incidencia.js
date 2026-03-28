@@ -29,7 +29,7 @@ function init(){
 
   setGreeting();
   bindEvents();
-  loadUserIncidencias(); // 🔥 PANEL DERECHO
+  loadUserIncidencias();
 
   Onion.onCleanup(()=>{
     initialized = false;
@@ -61,8 +61,7 @@ function setGreeting(){
   if(!user) return;
 
   const name = user.name || user.username || "Usuario";
-
-  const title = getRoot()?.querySelector(".page-title");
+  const title = $(".page-title");
 
   if(title){
     title.innerText = `Hola, ${name} 👋`;
@@ -79,17 +78,14 @@ function bindEvents(){
   const root = getRoot();
   if(!root) return;
 
-  // VOLVER
   Onion.cleanupEvent(root, "click", (e)=>{
     if(e.target.id === "btn-back"){
       Onion.router.navigate("/incidencias");
     }
   });
 
-  // CREAR
   $("#btn-save-incidencia")?.addEventListener("click", saveIncidencia);
 
-  // FILES
   $("#btn-attach")?.addEventListener("click", ()=>{
     $("#inc-files")?.click();
   });
@@ -167,24 +163,19 @@ async function loadUserIncidencias(){
 
     container.innerHTML = data.map(i => `
       <div class="history-item" data-id="${i.id}">
-        
         <div class="history-title">
           ${escapeHTML(i.subject || "Sin asunto")}
         </div>
-
         <div class="history-meta">
           <span>${formatEstado(i.status)}</span>
           <span>${formatFecha(i.createdAt)}</span>
         </div>
-
       </div>
     `).join("");
 
-    // NAV
     container.querySelectorAll(".history-item").forEach(el=>{
       el.addEventListener("click", ()=>{
-        const id = el.dataset.id;
-        Onion.router.navigate("/incidencias/detalle?id=" + id);
+        Onion.router.navigate("/incidencias/detalle?id=" + el.dataset.id);
       });
     });
 
@@ -196,7 +187,7 @@ async function loadUserIncidencias(){
 }
 
 /* =========================
-   SAVE
+   SAVE (PRO)
 ========================= */
 
 async function saveIncidencia(){
@@ -239,10 +230,20 @@ async function saveIncidencia(){
       formData.append("files", file);
     });
 
-    await fetch(Onion.config.API + "/tickets", {
+    const response = await fetch(Onion.config.API + "/tickets", {
       method: "POST",
       body: formData
     });
+
+    let data = null;
+
+    try{
+      data = await response.json();
+    }catch{}
+
+    if(!response.ok || !data?.ok){
+      throw new Error("API_ERROR");
+    }
 
     showToast("Incidencia enviada correctamente", "success");
 
@@ -357,8 +358,7 @@ function escapeHTML(str){
 
 document.addEventListener("keydown", (e)=>{
   if(e.key === "Enter" && e.ctrlKey){
-    const root = getRoot();
-    if(root){
+    if(getRoot()){
       saveIncidencia();
     }
   }

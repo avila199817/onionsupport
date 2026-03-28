@@ -19,7 +19,7 @@
       page: "/app/views/index.html",
       style: "/css/app/dashboard.css",
       script: "/js/features/dashboard/index.js",
-      title: "Panel de control"
+      title: "Dashboard"
     },
 
     "/incidencias": {

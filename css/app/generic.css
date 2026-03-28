@@ -1,70 +1,21 @@
 /* =========================================================
-   SAAS TABLE SYSTEM — CLEAN VERSION
-   Estructurado | Escalable | Sin romper nada
+   TABLE SYSTEM — PRO (AISLADO Y LIMPIO)
+   NO pisa UI.css | 100% modular
 ========================================================= */
 
-
-/* =========================================================
-   LAYOUT BASE
-========================================================= */
-
-.main-content{
-  width:100%;
-  max-width:none;
-  margin-left:var(--sidebar-width);
-  width:calc(100% - var(--sidebar-width));
-}
-
-.sidebar.collapsed ~ .main-content{
-  margin-left:var(--sidebar-collapsed);
-  width:calc(100% - var(--sidebar-collapsed));
-}
-
-
-/* =========================================================
-   CONTAINER RESET
-========================================================= */
-
-.container{
-  width:100% !important;
-  max-width:none !important;
-  margin:0 !important;
-  padding-inline:0 !important;
-}
-
-.content-wrapper:has(.panel-content){
-  padding:0 !important;
-  gap:0 !important;
-}
-
-
-/* =========================================================
-   PANEL ROOT
-========================================================= */
-
-.panel-content{
+.table-system{
   display:flex;
   flex-direction:column;
-  flex:1;
-
   width:100%;
-  height:calc(100dvh - var(--topbar-height));
-}
-
-.panel-content .container,
-.panel-content .panel-block{
-  display:flex;
-  flex-direction:column;
-  flex:1;
-  width:100%;
+  height:100%;
 }
 
 
 /* =========================================================
-   FILTROS
+   FILTERS
 ========================================================= */
 
-.filters-row{
+.table-system .filters-row{
   display:flex;
   align-items:center;
   gap:10px;
@@ -76,12 +27,12 @@
   border-bottom:1px solid var(--panel-border);
 }
 
-.filters-row input{
+.table-system .filters-row input{
   flex:1;
 }
 
-.filters-row input,
-.filters-row select{
+.table-system .filters-row input,
+.table-system .filters-row select{
   padding:10px 12px;
   border-radius:8px;
 
@@ -89,7 +40,7 @@
   border:1px solid var(--card-border);
 }
 
-.filters-row button{
+.table-system .filters-row button{
   margin-left:auto;
 
   padding:10px 16px;
@@ -106,7 +57,7 @@
    TABLE CONTAINER
 ========================================================= */
 
-.table-container{
+.table-system .table-container{
   flex:1;
   width:100%;
   overflow:auto;
@@ -119,7 +70,7 @@
    TABLE BASE
 ========================================================= */
 
-table{
+.table-system table{
   width:100%;
   min-width:100%;
   border-collapse:collapse;
@@ -131,15 +82,15 @@ table{
    HEADER
 ========================================================= */
 
-thead{
+.table-system thead{
   position:sticky;
   top:0;
-  z-index:10;
+  z-index:5;
 
   background:var(--panel-bg);
 }
 
-th{
+.table-system th{
   padding:12px 16px;
   text-align:left;
 
@@ -158,7 +109,7 @@ th{
    CELLS
 ========================================================= */
 
-td{
+.table-system td{
   padding:16px;
   border-bottom:1px solid rgba(255,255,255,0.025);
 
@@ -171,65 +122,64 @@ td{
    ROWS
 ========================================================= */
 
-tbody tr{
+.table-system tbody tr{
   transition:.15s ease;
 }
 
-tbody tr:nth-child(even){
+.table-system tbody tr:nth-child(even){
   background:rgba(255,255,255,0.02);
 }
 
-tbody tr:hover{
+.table-system tbody tr:hover{
   background:rgba(255,255,255,0.045);
 }
 
 
 /* =========================================================
-   COLUMN SIZING
+   COLUMN SYSTEM (SIN nth-child)
 ========================================================= */
 
-td:first-child{
+/* usa estas clases en HTML */
+
+.table-system .col-id{
   width:140px;
   font-size:11px;
   color:#6b7280;
 }
 
-td:nth-child(2){
+.table-system .col-main{
   min-width:260px;
   font-weight:500;
 }
 
-td:nth-child(3){
+.table-system .col-secondary{
   min-width:180px;
 }
 
-td:nth-child(4){
+.table-system .col-date{
   min-width:160px;
 }
 
-td:nth-child(5){
+.table-system .col-status{
   width:120px;
 }
 
-td:nth-child(6),
-td:nth-child(7){
+.table-system .col-actions{
   width:140px;
 }
 
 
 /* =========================================================
-   USER / AVATAR
+   USER CELL
 ========================================================= */
 
-.cell-user,
-.usuario-cell{
+.table-system .cell-user{
   display:flex;
   align-items:center;
   gap:12px;
 }
 
-.avatar,
-.usuario-avatar{
+.table-system .table-avatar{
   width:36px;
   height:36px;
   min-width:36px;
@@ -247,68 +197,70 @@ td:nth-child(7){
   font-weight:600;
 }
 
-.avatar img,
-.usuario-avatar{
+.table-system .table-avatar img{
   width:100%;
   height:100%;
   object-fit:cover;
   display:block;
 }
 
-.usuario-username{
-  font-weight:500;
-  color:var(--text);
-}
-
-.user-info{
+.table-system .user-info{
   display:flex;
   flex-direction:column;
   line-height:1.2;
 }
 
-.user-name{
+.table-system .user-name{
   font-weight:600;
 }
 
-.user-sub{
+.table-system .user-sub{
   font-size:11px;
   color:var(--dim);
 }
 
 
 /* =========================================================
-   BADGES
+   BADGE VARIANTS (NO pisa UI.css)
 ========================================================= */
 
-.badge{
-  padding:4px 10px;
-  border-radius:999px;
-  font-size:11px;
-  font-weight:500;
+.table-system .badge.factura-abierta{
+  background:rgba(59,130,246,0.12);
+  color:#60a5fa;
 }
 
-.badge.abierta{ background:rgba(59,130,246,0.12); color:#60a5fa; }
-.badge.cerrada{ background:rgba(34,197,94,0.12); color:#22c55e; }
+.table-system .badge.factura-cerrada{
+  background:rgba(34,197,94,0.12);
+  color:#22c55e;
+}
 
-.badge.pagada{ background:rgba(34,197,94,0.15); color:#22c55e; }
-.badge.pendiente{ background:rgba(251,191,36,0.15); color:#f59e0b; }
-.badge.borrador{ background:rgba(107,114,128,0.15); color:#9ca3af; }
+.table-system .badge.estado-pagada{
+  background:rgba(34,197,94,0.15);
+  color:#22c55e;
+}
 
-.badge.activo{ background:rgba(34,197,94,0.15); color:#22c55e; }
-.badge.inactivo{ background:rgba(239,68,68,0.15); color:#ef4444; }
+.table-system .badge.estado-pendiente{
+  background:rgba(251,191,36,0.15);
+  color:#f59e0b;
+}
+
+.table-system .badge.estado-borrador{
+  background:rgba(107,114,128,0.15);
+  color:#9ca3af;
+}
 
 
 /* =========================================================
-   ACTION BUTTONS
+   ACTIONS
 ========================================================= */
 
-td.acciones{
+.table-system .actions{
   display:flex;
   align-items:center;
   gap:8px;
 }
 
-td.acciones button{
+.table-system .actions button{
   padding:6px 10px;
   border-radius:6px;
 
@@ -316,7 +268,6 @@ td.acciones button{
   cursor:pointer;
 
   border:none;
-  outline:none;
 
   background:rgba(255,255,255,0.04);
   color:var(--text);
@@ -324,42 +275,42 @@ td.acciones button{
   transition:.15s ease;
 }
 
-td.acciones button:hover{
+.table-system .actions button:hover{
   background:rgba(255,255,255,0.08);
 }
 
 
-/* acciones específicas */
+/* botones específicos */
 
-button[data-action="download"]{
+.table-system button[data-action="download"]{
   background:rgba(59,130,246,0.12);
   color:#60a5fa;
 }
-button[data-action="download"]:hover{
+.table-system button[data-action="download"]:hover{
   background:rgba(59,130,246,0.25);
 }
 
-button[data-action="send"]{
+.table-system button[data-action="send"]{
   background:rgba(139,92,246,0.12);
   color:#a78bfa;
 }
-button[data-action="send"]:hover{
+.table-system button[data-action="send"]:hover{
   background:rgba(139,92,246,0.25);
 }
 
-button[data-action="edit"]{
+.table-system button[data-action="edit"]{
   background:rgba(59,130,246,0.12);
   color:#60a5fa;
 }
-button[data-action="edit"]:hover{
+.table-system button[data-action="edit"]:hover{
   background:rgba(59,130,246,0.25);
 }
 
-button[data-action="delete"]{
+.table-system button[data-action="delete"]{
   background:rgba(239,68,68,0.12);
   color:#f87171;
 }
-button[data-action="delete"]:hover{
+.table-system button[data-action="delete"]:hover{
   background:rgba(239,68,68,0.25);
 }
 
@@ -368,12 +319,12 @@ button[data-action="delete"]:hover{
    SPECIAL TOUCHES
 ========================================================= */
 
-.panel-content.facturas td:nth-child(4){
+.table-system.facturas .col-date{
   font-weight:600;
   color:#e5e7eb;
 }
 
-.panel-content.facturas tbody tr:hover,
-.panel-content.usuarios tbody tr:hover{
+.table-system.facturas tbody tr:hover,
+.table-system.usuarios tbody tr:hover{
   transform:translateX(2px);
 }

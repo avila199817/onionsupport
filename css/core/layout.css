@@ -27,7 +27,7 @@ html, body{
   flex-direction:column;
 
   min-height:100dvh;
-  height:100dvh;
+  height:100dvh; /* 🔥 CLAVE */
 
   isolation:isolate;
 
@@ -97,6 +97,18 @@ html, body{
 
 
 /* =========================================================
+   🔥 APP CONTENT (CLAVE ABSOLUTA)
+========================================================= */
+#app-content{
+  flex:1;
+  min-height:0;
+
+  display:flex;
+  flex-direction:column;
+}
+
+
+/* =========================================================
    🔥 CONTENT WRAPPER (NO MÁS BUGS)
 ========================================================= */
 .content-wrapper{
@@ -109,7 +121,7 @@ html, body{
   padding:var(--space-lg);
   gap:var(--space-lg);
 
-  overflow:hidden; /* 🔥 CLAVE FINAL — NUNCA AUTO */
+  overflow:hidden; /* 🔥 NUNCA AUTO */
 
   background:transparent;
 }
@@ -125,7 +137,7 @@ html, body{
   display:flex;
   flex-direction:column;
 
-  background:var(--panel-bg); /* 🔥 ESTO TAPA TODO */
+  background:var(--panel-bg);
 }
 
 

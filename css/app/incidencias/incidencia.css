@@ -1,5 +1,5 @@
 /* =========================================================
-   INCIDENCIA CREATE — FINAL DEFINITIVO (SIN TOCAR LAYOUT)
+   INCIDENCIA CREATE — FINAL DEFINITIVO (PRO SAAS CLEAN)
 ========================================================= */
 
 
@@ -41,7 +41,7 @@
 
 
 /* =========================================================
-   RIGHT (PANEL PERFECTO)
+   RIGHT (SIDEBAR)
 ========================================================= */
 .incidencia-right{
   width:360px;
@@ -86,7 +86,6 @@
 .history-list{
   flex:1;
   min-height:0;
-
   overflow:auto;
   background:var(--panel-bg);
 }
@@ -135,7 +134,7 @@
 
 
 /* =========================================================
-   BODY (SCROLL REAL)
+   BODY (SCROLL)
 ========================================================= */
 .incidencia-body{
   flex:1;
@@ -144,7 +143,7 @@
   display:flex;
   padding:30px 40px;
 
-  overflow:auto; /* 🔥 AQUÍ VA EL SCROLL */
+  overflow:auto;
 }
 
 

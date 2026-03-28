@@ -1,76 +1,99 @@
-<div class="panel-content incidencia-create">
+<div class="panel-content incidencia-create layout-split">
 
   <!-- =========================
-       HEADER
+       LEFT (FORM)
   ========================= -->
-  <div class="filters-row">
+  <div class="incidencia-left">
 
-    <button id="btn-back">
-      ← Volver
-    </button>
+    <!-- HEADER -->
+    <div class="filters-row">
 
-    <div style="margin-left:10px;">
-      <div class="page-title">
-        Hola, Javier 👋
+      <button id="btn-back">
+        ← Volver
+      </button>
+
+      <div style="margin-left:10px;">
+        <div class="page-title">
+          Hola, Javier 👋
+        </div>
+        <div class="page-subtitle">
+          ¿En qué te podemos ayudar?
+        </div>
       </div>
-      <div class="page-subtitle">
-        ¿En qué te podemos ayudar?
+
+    </div>
+
+
+    <!-- BODY -->
+    <div class="incidencia-body">
+
+      <div class="incidencia-form">
+
+        <!-- ASUNTO -->
+        <input 
+          type="text"
+          id="inc-title"
+          placeholder="Asunto — Ej: No puedo acceder a mi cuenta"
+        >
+
+        <!-- MENSAJE -->
+        <textarea 
+          id="inc-message"
+          placeholder="Cuéntanos qué está pasando..."
+          rows="8"
+        ></textarea>
+
+        <!-- ADJUNTOS -->
+        <div class="incidencia-files">
+
+          <button type="button" id="btn-attach">
+            + Añadir archivos
+          </button>
+
+          <input 
+            type="file"
+            id="inc-files"
+            multiple
+            style="display:none"
+          >
+
+          <div id="file-list"></div>
+
+        </div>
+
+        <!-- FOOTER -->
+        <div class="incidencia-footer">
+
+          <div class="incidencia-hint">
+            Puedes añadir capturas, PDFs o lo que necesites
+          </div>
+
+          <button id="btn-save-incidencia">
+            Enviar incidencia
+          </button>
+
+        </div>
+
       </div>
+
     </div>
 
   </div>
 
 
   <!-- =========================
-       BODY FULL WIDTH
+       RIGHT (HISTÓRICO USER)
   ========================= -->
-  <div class="incidencia-body">
+  <div class="incidencia-right">
 
-    <div class="incidencia-form">
+    <div class="incidencia-history">
 
-      <!-- ASUNTO -->
-      <input 
-        type="text"
-        id="inc-title"
-        placeholder="Asunto — Ej: No puedo acceder a mi cuenta"
-      >
-
-      <!-- MENSAJE -->
-      <textarea 
-        id="inc-message"
-        placeholder="Cuéntanos qué está pasando..."
-        rows="8"
-      ></textarea>
-
-      <!-- ADJUNTOS -->
-      <div class="incidencia-files">
-
-        <button type="button" id="btn-attach">
-          + Añadir archivos
-        </button>
-
-        <input 
-          type="file"
-          id="inc-files"
-          multiple
-          style="display:none"
-        >
-
-        <div id="file-list"></div>
-
+      <div class="history-header">
+        Tus incidencias abiertas
       </div>
 
-      <!-- FOOTER -->
-      <div class="incidencia-footer">
-
-        <div class="incidencia-hint">
-          Puedes añadir capturas, PDFs o lo que necesites
-        </div>
-
-        <button id="btn-save-incidencia">
-          Enviar incidencia
-        </button>
-
+      <div id="incidencias-user-list" class="history-list">
+        Cargando...
       </div>
 
     </div>

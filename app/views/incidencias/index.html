@@ -1,76 +1,68 @@
-<div class="panel-content incidencias">
+<div class="panel-content incidencias table-mode">
 
-  <div class="container-fluid">
+  <!-- 🔥 TABLE SYSTEM (FULL WIDTH REAL) -->
+  <div class="table-system incidencias">
 
-    <div class="panel-block">
+    <!-- =========================
+         FILTROS
+    ========================= -->
+    <div class="filters-row">
 
-      <!-- 🔥 TABLE SYSTEM WRAPPER -->
-      <div class="table-system incidencias">
+      <input 
+        type="text"
+        id="search-incidencia"
+        placeholder="Buscar incidencia..."
+        autocomplete="off"
+      >
 
-        <!-- =========================
-             FILTROS
-        ========================= -->
-        <div class="filters-row">
+      <select id="filter-status">
+        <option value="">Estado</option>
+        <option value="abierta">Abierta</option>
+        <option value="progreso">En progreso</option>
+        <option value="cerrada">Cerrada</option>
+      </select>
 
-          <input 
-            type="text"
-            id="search-incidencia"
-            placeholder="Buscar incidencia..."
-            autocomplete="off"
-          >
+      <select id="filter-priority">
+        <option value="">Prioridad</option>
+        <option value="alta">Alta</option>
+        <option value="media">Media</option>
+        <option value="baja">Baja</option>
+      </select>
 
-          <select id="filter-status">
-            <option value="">Estado</option>
-            <option value="abierta">Abierta</option>
-            <option value="progreso">En progreso</option>
-            <option value="cerrada">Cerrada</option>
-          </select>
+      <button id="btn-new-incidencia" class="btn-new-incidencia">
+        + Nueva
+      </button>
 
-          <select id="filter-priority">
-            <option value="">Prioridad</option>
-            <option value="alta">Alta</option>
-            <option value="media">Media</option>
-            <option value="baja">Baja</option>
-          </select>
-
-          <button id="btn-new-incidencia" class="btn-new-incidencia">
-            + Nueva
-          </button>
-
-        </div>
+    </div>
 
 
-        <!-- =========================
-             TABLA
-        ========================= -->
-        <div class="table-container">
+    <!-- =========================
+         TABLA
+    ========================= -->
+    <div class="table-container">
 
-          <table>
+      <table>
 
-            <thead>
-              <tr>
-                <th class="col-id">ID</th>
-                <th class="col-main">Asunto</th>
-                <th class="col-secondary">Cliente</th>
-                <th class="col-secondary">Técnico</th>
-                <th class="col-status">Estado</th>
-                <th class="col-status">Prioridad</th>
-                <th class="col-date">Fecha</th>
-                <th class="col-date">Cierre</th>
-              </tr>
-            </thead>
+        <thead>
+          <tr>
+            <th class="col-id">ID</th>
+            <th class="col-main">Asunto</th>
+            <th class="col-secondary">Cliente</th>
+            <th class="col-secondary">Técnico</th>
+            <th class="col-status">Estado</th>
+            <th class="col-status">Prioridad</th>
+            <th class="col-date">Fecha</th>
+            <th class="col-date">Cierre</th>
+          </tr>
+        </thead>
 
-            <tbody id="incidencias-body">
-              <tr class="loading">
-                <td colspan="8">Cargando incidencias...</td>
-              </tr>
-            </tbody>
+        <tbody id="incidencias-body">
+          <tr class="loading">
+            <td colspan="8">Cargando incidencias...</td>
+          </tr>
+        </tbody>
 
-          </table>
-
-        </div>
-
-      </div> <!-- END table-system -->
+      </table>
 
     </div>
 

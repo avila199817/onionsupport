@@ -2,21 +2,6 @@
    UI ELEMENTS
 ========================= */
 
-
-/* =========================
-   CONTAINER SYSTEM (🔥 FIX LAYOUT)
-========================= */
-
-.container{
-  width:100%;
-  max-width:var(--content-max);
-
-  margin-inline:auto;
-  padding-inline:var(--content-padding);
-
-  position:relative;
-}
-
 /* 🔥 FULL WIDTH PARA TABLAS / VISTAS GRANDES */
 .container-fluid{
   width:100%;

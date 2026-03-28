@@ -1,5 +1,5 @@
 /* =========================================================
-   INCIDENCIA CREATE — FULL PRO SAAS (FINAL 10/10)
+   INCIDENCIA CREATE — FULL PRO SAAS (ALIGN FIX FINAL)
 ========================================================= */
 
 /* =========================
@@ -43,13 +43,12 @@ html, body{
 .incidencia-left{
   flex:1;
   min-width:0;
-
   display:flex;
   flex-direction:column;
   min-height:0;
 }
 
-/* RIGHT (🔥 PANEL PERFECTO) */
+/* RIGHT */
 .incidencia-right{
   width:360px;
   min-width:360px;
@@ -68,14 +67,15 @@ html, body{
 
 
 /* =========================================================
-   HEADER
+   HEADER (🔥 ALINEADO PERFECTO)
 ========================================================= */
 .panel-content.incidencia-create .filters-row{
   display:flex;
   align-items:center;
   gap:12px;
 
-  padding:14px 18px;
+  /* 🔥 MISMO HORIZONTAL QUE BODY */
+  padding:14px 40px;
 
   background:var(--panel-bg);
   border-bottom:1px solid var(--panel-border);
@@ -90,6 +90,10 @@ html, body{
   font-size:13px;
   cursor:pointer;
   opacity:.8;
+
+  /* 🔥 RESET */
+  margin:0;
+  padding:0;
 }
 
 #btn-back:hover{
@@ -99,31 +103,34 @@ html, body{
 .page-title{
   font-size:20px;
   font-weight:600;
+  margin:0; /* 🔥 evita desplazamiento */
 }
 
 .page-subtitle{
   font-size:13px;
   color:var(--dim);
+  margin:0;
 }
 
 
 /* =========================================================
-   BODY
+   BODY (BASE DE ALINEACIÓN)
 ========================================================= */
 .incidencia-body{
   flex:1;
   display:flex;
 
+  /* 🔥 referencia base */
   padding:30px 40px;
-  width:100%;
 
+  width:100%;
   overflow:auto;
   min-height:0;
 }
 
 
 /* =========================================================
-   FORM (🔥 CARD PRO)
+   FORM
 ========================================================= */
 .incidencia-form{
   width:100%;
@@ -141,7 +148,6 @@ html, body{
 .incidencia-form input,
 .incidencia-form textarea{
   width:100%;
-
   padding:14px 16px;
 
   border-radius:12px;
@@ -168,12 +174,12 @@ html, body{
 
 
 /* =========================================================
-   FILES (🔥 IZQUIERDA REAL)
+   FILES
 ========================================================= */
 .incidencia-files{
   display:flex;
   flex-direction:column;
-  align-items:flex-start; /* 🔥 CLAVE */
+  align-items:flex-start;
   gap:6px;
   margin-top:4px;
 }
@@ -182,10 +188,8 @@ html, body{
   background:none;
   border:none;
   color:var(--accent);
-
   font-size:13px;
   cursor:pointer;
-
   padding:0;
 }
 
@@ -219,7 +223,7 @@ html, body{
 
 
 /* =========================================================
-   CTA BUTTON
+   CTA BUTTON (🔥 SIN DESPLAZES RAROS)
 ========================================================= */
 #btn-save-incidencia{
   padding:13px 26px;
@@ -235,6 +239,9 @@ html, body{
   cursor:pointer;
 
   box-shadow:0 10px 24px rgba(99,102,241,0.35);
+
+  /* 🔥 CLAVE: evita que se "vaya" */
+  position:relative;
 }
 
 #btn-save-incidencia:hover{
@@ -247,7 +254,7 @@ html, body{
 
 
 /* =========================================================
-   HISTORY PANEL (🔥 FULL HEIGHT REAL)
+   HISTORY PANEL
 ========================================================= */
 .incidencia-history{
   flex:1;
@@ -262,7 +269,6 @@ html, body{
   background:var(--panel-bg);
 }
 
-/* HEADER */
 .history-header{
   font-size:13px;
   font-weight:600;
@@ -272,7 +278,6 @@ html, body{
   flex-shrink:0;
 }
 
-/* LIST (🔥 SCROLL CONTROLADO) */
 .history-list{
   flex:1;
   min-height:0;
@@ -284,7 +289,6 @@ html, body{
   overflow:auto;
 }
 
-/* ITEM */
 .history-item{
   padding:12px;
   border-radius:10px;
@@ -340,6 +344,10 @@ html, body{
 
   .incidencia-body{
     padding:20px;
+  }
+
+  .panel-content.incidencia-create .filters-row{
+    padding:14px 20px; /* 🔥 mantiene alineación */
   }
 
   .incidencia-footer{

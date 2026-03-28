@@ -37,6 +37,7 @@ function init(){
 
 init();
 
+
 /* =========================
    ROOT
 ========================= */
@@ -48,6 +49,7 @@ function getRoot(){
 function $(selector){
   return getRoot()?.querySelector(selector);
 }
+
 
 /* =========================
    EVENTS
@@ -68,14 +70,12 @@ function bindEvents(){
 
 }
 
+
 /* =========================
    LOAD
 ========================= */
 
 async function loadDetalle(){
-
-  const container = $("#detalle-content");
-  if(!container) return;
 
   const id = getId();
 
@@ -106,6 +106,7 @@ async function loadDetalle(){
 
 }
 
+
 /* =========================
    GET ID
 ========================= */
@@ -115,92 +116,88 @@ function getId(){
   return params.get("id");
 }
 
+
 /* =========================
-   STATES
+   STATES (SOFT UI)
 ========================= */
 
 function setLoading(){
-  $("#detalle-content").innerHTML = `
-    <div class="form-grid">
-      <div class="user-sub">Cargando incidencia...</div>
-    </div>
-  `;
+
+  const grid = $(".form-grid");
+  if(!grid) return;
+
+  grid.innerHTML = `<div class="user-sub">Cargando incidencia...</div>`;
 }
 
 function setEmpty(){
-  $("#detalle-content").innerHTML = `
-    <div class="form-grid">
-      <div class="user-sub">No se encontró la incidencia</div>
-    </div>
-  `;
+
+  const grid = $(".form-grid");
+  if(!grid) return;
+
+  grid.innerHTML = `<div class="user-sub">No se encontró la incidencia</div>`;
 }
 
 function setError(msg){
-  $("#detalle-content").innerHTML = `
-    <div class="form-grid">
-      <div class="badge error">❌ ${msg}</div>
-    </div>
-  `;
+
+  const grid = $(".form-grid");
+  if(!grid) return;
+
+  grid.innerHTML = `<div class="badge error">❌ ${msg}</div>`;
 }
 
+
 /* =========================
-   RENDER
+   RENDER (🔥 LIMPIO)
 ========================= */
 
 function render(i){
 
+  // básicos
+  setText("#detalle-id", i.id || "--");
+  setText("#detalle-usuario", i.name || "Usuario");
+  setText("#detalle-titulo", i.subject || "-");
+  setText("#detalle-mensaje", i.message || "-");
+  setText("#detalle-fecha", formatFecha(i.createdAt));
+
+  // badges
   const estado = formatEstado(i.status);
   const prioridad = formatPrioridad(i.priority);
 
-  $("#detalle-content").innerHTML = `
-    <div class="form-grid">
-
-      <!-- HEADER INFO -->
-      <div class="cell-user">
-        <div class="table-avatar">
-          ${getInitials(i.name)}
-        </div>
-        <div class="user-info">
-          <span class="user-name">${escapeHTML(i.name || "Usuario")}</span>
-          <span class="user-sub">Ticket #${escapeHTML(i.id || "--")}</span>
-        </div>
-      </div>
-
-      <!-- TÍTULO -->
-      <div>
-        <div class="user-sub">Título</div>
-        <div class="user-name">${escapeHTML(i.subject || "-")}</div>
-      </div>
-
-      <!-- MENSAJE -->
-      <div>
-        <div class="user-sub">Mensaje</div>
-        <div class="col-main">${escapeHTML(i.message || "-")}</div>
-      </div>
-
-      <!-- ESTADO + PRIORIDAD -->
-      <div style="display:flex; gap:10px; flex-wrap:wrap;">
-
-        <span class="badge ${estado.class}">
-          ${estado.label}
-        </span>
-
-        <span class="badge ${prioridad.class}">
-          ${prioridad.label}
-        </span>
-
-      </div>
-
-      <!-- FECHA -->
-      <div>
-        <div class="user-sub">Fecha</div>
-        <div>${formatFecha(i.createdAt)}</div>
-      </div>
-
-    </div>
-  `;
+  setBadge("#detalle-estado", estado);
+  setBadge("#detalle-prioridad", prioridad);
 
 }
+
+
+/* =========================
+   BADGES
+========================= */
+
+function setBadge(selector, data){
+
+  const el = $(selector);
+  if(!el) return;
+
+  el.innerHTML = `
+    <span class="badge ${data.class}">
+      ${data.label}
+    </span>
+  `;
+}
+
+
+/* =========================
+   TEXT
+========================= */
+
+function setText(selector, value){
+
+  const el = $(selector);
+  if(!el) return;
+
+  el.textContent = value;
+}
+
 
 /* =========================
    FORMAT
@@ -229,14 +226,10 @@ function formatFecha(f){
   return new Date(f).toLocaleDateString("es-ES");
 }
 
-/* =========================
-   HELPERS
-========================= */
 
-function getInitials(name){
-  if(!name) return "?";
-  return name.split(" ").map(n => n[0]).join("").slice(0,2).toUpperCase();
-}
+/* =========================
+   SECURITY
+========================= */
 
 function escapeHTML(str){
   return String(str)

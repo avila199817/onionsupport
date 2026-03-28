@@ -353,3 +353,99 @@
   background:var(--scrollbar-thumb);
   border-radius:6px;
 }
+
+/* =========================================================
+   FACTURAS — AJUSTE PRO (EXTENSION TABLE SYSTEM)
+========================================================= */
+
+.table-system.facturas table{
+  table-layout:fixed;
+}
+
+
+/* =========================
+   COLUMNAS
+========================= */
+
+/* ID compacto */
+.table-system.facturas .col-id{
+  width:130px;
+}
+
+/* CLIENTE dominante */
+.table-system.facturas .col-main{
+  width:40%;
+}
+
+/* FECHA */
+.table-system.facturas .col-date{
+  width:140px;
+}
+
+/* IMPORTE (🔥 importante) */
+.table-system.facturas td:nth-child(4){
+  width:140px;
+  font-weight:600;
+  color:var(--text);
+}
+
+/* ESTADO */
+.table-system.facturas .col-status{
+  width:120px;
+}
+
+/* ACCIONES */
+.table-system.facturas .col-actions{
+  width:160px;
+}
+
+
+/* =========================
+   CLIENTE CELL (🔥 PRO)
+========================= */
+
+.table-system.facturas .cell-user{
+  gap:12px;
+}
+
+.table-system.facturas .user-name{
+  font-size:13.5px;
+}
+
+.table-system.facturas .user-sub{
+  font-size:11px;
+  color:var(--dim);
+}
+
+
+/* =========================
+   IMPORTE (VISUAL PRO)
+========================= */
+
+.table-system.facturas td:nth-child(4){
+  letter-spacing:.2px;
+}
+
+
+/* =========================
+   ACCIONES PRO
+========================= */
+
+.table-system.facturas .actions{
+  justify-content:flex-start;
+}
+
+.table-system.facturas .actions button{
+  padding:5px 10px;
+  font-size:11px;
+}
+
+
+/* =========================
+   BADGE MEJORADO
+========================= */
+
+.table-system.facturas .badge{
+  font-size:10px;
+  padding:3px 8px;
+}

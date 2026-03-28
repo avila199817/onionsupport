@@ -142,15 +142,34 @@
    COLLAPSED (INTEGRACIÓN REAL)
 ========================= */
 .sidebar.collapsed .sidebar-toggle{
-  right:50%;
+  position:absolute;
+
+  /* centrado exacto sobre el logo */
   top:50%;
+  right:50%;
   transform:translate(50%, -50%);
-  opacity:1;
-  pointer-events:auto;
+
+  /* tamaño SOLO del icono → sin caja */
+  width:24px;
+  height:24px;
+  padding:0;
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  /* 🔥 clave: sin identidad visual propia */
+  background:transparent;
+  border:none;
+  box-shadow:none;
+
+  color:var(--muted);
 }
 
+/* hover limpio (sin recuadro) */
 .sidebar.collapsed .sidebar-toggle:hover{
-  background:var(--sb-hover);
+  background:transparent;
+  color:var(--text);
 }
 
 

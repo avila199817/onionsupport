@@ -23,18 +23,44 @@
 
     <div class="form-grid">
 
+      <!-- ASUNTO -->
       <input 
         type="text"
         id="inc-title"
         placeholder="Asunto — Ej: No puedo acceder a mi cuenta"
       >
 
+      <!-- MENSAJE -->
       <textarea 
         id="inc-message"
         placeholder="Cuéntanos qué está pasando..."
         rows="6"
       ></textarea>
 
+      <!-- =========================
+           ADJUNTOS
+      ========================= -->
+      <div>
+
+        <!-- botón -->
+        <button type="button" id="btn-attach">
+          + Añadir archivos
+        </button>
+
+        <!-- input oculto -->
+        <input 
+          type="file"
+          id="inc-files"
+          multiple
+          style="display:none"
+        >
+
+        <!-- lista de archivos -->
+        <div id="file-list" style="margin-top:8px; font-size:12px; color:var(--dim);"></div>
+
+      </div>
+
+      <!-- CTA -->
       <div class="form-actions">
         <button id="btn-save-incidencia">
           Enviar incidencia

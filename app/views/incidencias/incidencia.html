@@ -1,74 +1,63 @@
-<div class="panel-content incidencia-create user-mode">
+<div class="panel-content incidencia-create">
 
-  <!-- =========================
-       WRAPPER CENTRADO
-  ========================= -->
-  <div class="form-center">
+  <div class="container">
 
-    <!-- HEADER -->
-    <div class="form-header">
+    <div class="panel-block">
 
-      <button id="btn-back" class="btn-back">
-        ← Volver
-      </button>
+      <!-- HEADER -->
+      <div class="filters-row">
 
-      <div class="form-title">
-        <h2>Nueva incidencia</h2>
-        <p>Cuéntanos qué problema estás teniendo</p>
+        <button id="btn-back">
+          ← Volver
+        </button>
+
+        <div style="margin-left:10px;">
+          <div class="page-title">Nueva incidencia</div>
+          <div class="page-subtitle">Cuéntanos qué problema estás teniendo</div>
+        </div>
+
       </div>
 
-    </div>
+      <!-- FORM -->
+      <div class="form-wrapper">
 
-    <!-- FORM CARD -->
-    <div class="form-card">
+        <div class="form-grid">
 
-      <div class="form-grid">
-
-        <!-- TÍTULO -->
-        <div class="form-group">
-          <label>Título</label>
+          <!-- TÍTULO -->
           <input 
             type="text"
             id="inc-title"
             placeholder="Ej: No puedo acceder a mi cuenta"
           >
-        </div>
 
-        <!-- MENSAJE -->
-        <div class="form-group">
-          <label>Descripción</label>
+          <!-- MENSAJE -->
           <textarea 
             id="inc-message"
             placeholder="Explícanos el problema con detalle..."
-            rows="6"
+            rows="5"
           ></textarea>
-        </div>
 
-        <!-- USUARIO -->
-        <div class="form-group">
-          <label>Usuario</label>
+          <!-- USUARIO -->
           <input 
             type="text"
             id="inc-cliente"
             placeholder="Tu nombre o usuario"
           >
-        </div>
 
-        <!-- PRIORIDAD -->
-        <div class="form-group">
-          <label>Prioridad</label>
+          <!-- PRIORIDAD -->
           <select id="inc-priority">
             <option value="low">Baja (no urgente)</option>
             <option value="medium">Media</option>
             <option value="high">Alta (urgente)</option>
           </select>
-        </div>
 
-        <!-- CTA -->
-        <div class="form-actions">
-          <button id="btn-save-incidencia" class="btn-primary">
-            Enviar incidencia
-          </button>
+          <!-- BOTÓN -->
+          <div class="form-actions">
+            <button id="btn-save-incidencia">
+              Enviar incidencia
+            </button>
+          </div>
+
         </div>
 
       </div>

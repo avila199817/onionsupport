@@ -1,6 +1,8 @@
 <div class="panel-content incidencia-create">
 
-  <!-- HEADER -->
+  <!-- =========================
+       HEADER
+  ========================= -->
   <div class="filters-row">
 
     <button id="btn-back">
@@ -18,10 +20,13 @@
 
   </div>
 
-  <!-- FORM -->
-  <div class="form-wrapper">
 
-    <div class="form-grid">
+  <!-- =========================
+       BODY FULL WIDTH
+  ========================= -->
+  <div class="incidencia-body">
+
+    <div class="incidencia-form">
 
       <!-- ASUNTO -->
       <input 
@@ -34,20 +39,16 @@
       <textarea 
         id="inc-message"
         placeholder="Cuéntanos qué está pasando..."
-        rows="6"
+        rows="8"
       ></textarea>
 
-      <!-- =========================
-           ADJUNTOS
-      ========================= -->
-      <div>
+      <!-- ADJUNTOS -->
+      <div class="incidencia-files">
 
-        <!-- botón -->
         <button type="button" id="btn-attach">
           + Añadir archivos
         </button>
 
-        <!-- input oculto -->
         <input 
           type="file"
           id="inc-files"
@@ -55,16 +56,21 @@
           style="display:none"
         >
 
-        <!-- lista de archivos -->
-        <div id="file-list" style="margin-top:8px; font-size:12px; color:var(--dim);"></div>
+        <div id="file-list"></div>
 
       </div>
 
-      <!-- CTA -->
-      <div class="form-actions">
+      <!-- FOOTER -->
+      <div class="incidencia-footer">
+
+        <div class="incidencia-hint">
+          Puedes añadir capturas, PDFs o lo que necesites
+        </div>
+
         <button id="btn-save-incidencia">
           Enviar incidencia
         </button>
+
       </div>
 
     </div>

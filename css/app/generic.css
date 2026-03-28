@@ -1,5 +1,5 @@
 /* =========================================================
-   TABLE SYSTEM — FINAL 10/10 CLEAN
+   TABLE SYSTEM — FINAL 10/10 FIXED
 ========================================================= */
 
 
@@ -91,7 +91,8 @@
   min-height:0;
 
   width:100%;
-  overflow:auto;
+  overflow-x:hidden; /* 🔥 FIX SCROLL FALSO */
+  overflow-y:auto;
 
   background:var(--panel-bg);
 }
@@ -103,8 +104,9 @@
 
 .table-system table{
   width:100%;
+  min-width:0; /* 🔥 CLAVE */
   border-collapse:collapse;
-  table-layout:auto;
+  table-layout:fixed; /* 🔥 CLAVE */
 }
 
 
@@ -142,6 +144,12 @@
    CELLS
 ========================================================= */
 
+.table-system th,
+.table-system td{
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
 .table-system td{
   padding:calc(12px * var(--density-factor));
 
@@ -158,6 +166,11 @@
 .table-system .col-status,
 .table-system .col-actions{
   white-space:nowrap;
+}
+
+/* 🔥 TEXTO LARGO CONTROLADO */
+.table-system .col-main{
+  white-space:normal;
 }
 
 

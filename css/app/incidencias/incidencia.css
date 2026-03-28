@@ -1,23 +1,27 @@
 /* =========================================================
-   INCIDENCIA CREATE — FULL PRO SAAS (FINAL)
+   INCIDENCIA CREATE — FULL PRO SAAS (FINAL FIXED)
 ========================================================= */
 
 /* =========================
-   BASE GLOBAL
+   BASE GLOBAL (OBLIGATORIO)
 ========================= */
-
 html, body{
   height:100%;
+}
+
+#app,
+.main-layout,
+.panel-content{
+  height:100%;
+  min-height:100vh;
 }
 
 
 /* =========================
    ROOT
 ========================= */
-
 .panel-content.incidencia-create{
   display:flex;
-  height:100%;
   min-height:100vh;
   width:100%;
   overflow:hidden;
@@ -27,12 +31,10 @@ html, body{
 /* =========================================================
    LAYOUT SPLIT
 ========================================================= */
-
 .layout-split{
   display:flex;
   width:100%;
-  height:100%;
-  min-height:0;
+  min-height:100vh;
 }
 
 /* LEFT */
@@ -42,10 +44,9 @@ html, body{
 
   display:flex;
   flex-direction:column;
-  height:100%;
 }
 
-/* RIGHT */
+/* RIGHT (🔥 FIX REAL AQUÍ) */
 .incidencia-right{
   width:360px;
   min-width:360px;
@@ -53,9 +54,8 @@ html, body{
   display:flex;
   flex-direction:column;
 
-  height:100%;
-  min-height:100%;
-
+  align-self:stretch; /* 🔥 CLAVE */
+  
   background:var(--panel-bg);
   border-left:1px solid var(--panel-border);
 
@@ -66,7 +66,6 @@ html, body{
 /* =========================================================
    HEADER
 ========================================================= */
-
 .panel-content.incidencia-create .filters-row{
   display:flex;
   align-items:center;
@@ -109,7 +108,6 @@ html, body{
 /* =========================================================
    BODY
 ========================================================= */
-
 .incidencia-body{
   flex:1;
   display:flex;
@@ -125,7 +123,6 @@ html, body{
 /* =========================================================
    FORM
 ========================================================= */
-
 .incidencia-form{
   width:100%;
   max-width:880px;
@@ -139,7 +136,6 @@ html, body{
 /* =========================================================
    INPUTS
 ========================================================= */
-
 .incidencia-form input,
 .incidencia-form textarea{
   width:100%;
@@ -156,8 +152,7 @@ html, body{
 
   transition:
     border-color .2s ease,
-    box-shadow .2s ease,
-    background .2s ease;
+    box-shadow .2s ease;
 }
 
 .incidencia-form textarea{
@@ -168,16 +163,13 @@ html, body{
 .incidencia-form input:focus,
 .incidencia-form textarea:focus{
   border-color:var(--accent);
-
-  box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--accent), transparent 85%);
+  box-shadow:0 0 0 2px color-mix(in srgb, var(--accent), transparent 85%);
 }
 
 
 /* =========================================================
    FILES
 ========================================================= */
-
 .incidencia-files{
   display:flex;
   flex-direction:column;
@@ -188,11 +180,8 @@ html, body{
   background:none;
   border:none;
   color:var(--accent);
-
   font-size:13px;
   cursor:pointer;
-
-  width:fit-content;
 }
 
 #btn-attach:hover{
@@ -209,12 +198,10 @@ html, body{
 /* =========================================================
    FOOTER
 ========================================================= */
-
 .incidencia-footer{
   display:flex;
   align-items:center;
   justify-content:space-between;
-
   margin-top:10px;
   gap:20px;
 }
@@ -228,10 +215,8 @@ html, body{
 /* =========================================================
    CTA BUTTON
 ========================================================= */
-
 #btn-save-incidencia{
   padding:13px 26px;
-
   border-radius:12px;
 
   background:linear-gradient(135deg,var(--accent),var(--accent-hover));
@@ -244,65 +229,42 @@ html, body{
   cursor:pointer;
 
   box-shadow:0 10px 24px rgba(99,102,241,0.35);
-
-  transition:
-    transform .15s ease,
-    box-shadow .2s ease;
 }
 
 #btn-save-incidencia:hover{
   transform:translateY(-1px);
-  box-shadow:0 14px 32px rgba(99,102,241,0.45);
-}
-
-#btn-save-incidencia:active{
-  transform:translateY(0);
-  box-shadow:0 6px 14px rgba(99,102,241,0.3);
 }
 
 
 /* =========================================================
-   HISTORY PANEL
+   HISTORY PANEL (🔥 YA PINTA HASTA ABAJO)
 ========================================================= */
-
 .incidencia-history{
   flex:1;
   display:flex;
   flex-direction:column;
 
-  height:100%;
-  min-height:0;
+  min-height:100%; /* 🔥 clave visual */
+  background:var(--panel-bg);
 
   padding:16px;
-
-  background:var(--panel-bg);
 }
 
 .history-header{
   font-size:13px;
   font-weight:600;
   color:var(--dim);
-
   margin-bottom:12px;
-
-  flex-shrink:0;
 }
 
-/* LIST */
 .history-list{
   flex:1;
-  min-height:0;
-
   display:flex;
   flex-direction:column;
   gap:8px;
-
-  overflow-y:auto;
-
-  padding-right:4px;
+  overflow:auto;
 }
 
-/* ITEM */
 .history-item{
   padding:12px;
   border-radius:10px;
@@ -311,8 +273,6 @@ html, body{
   border:1px solid var(--card-border);
 
   cursor:pointer;
-
-  transition:all .15s ease;
 }
 
 .history-item:hover{
@@ -322,7 +282,6 @@ html, body{
 .history-title{
   font-size:13px;
   font-weight:500;
-  margin-bottom:4px;
 }
 
 .history-meta{
@@ -334,23 +293,8 @@ html, body{
 
 
 /* =========================================================
-   SCROLLBAR
-========================================================= */
-
-.history-list::-webkit-scrollbar{
-  width:6px;
-}
-
-.history-list::-webkit-scrollbar-thumb{
-  background:var(--scrollbar-thumb);
-  border-radius:6px;
-}
-
-
-/* =========================================================
    RESPONSIVE
 ========================================================= */
-
 @media (max-width:1100px){
   .incidencia-right{
     display:none;
@@ -358,7 +302,6 @@ html, body{
 }
 
 @media (max-width:900px){
-
   .incidencia-body{
     padding:20px;
   }
@@ -371,5 +314,4 @@ html, body{
   #btn-save-incidencia{
     width:100%;
   }
-
 }

@@ -1,13 +1,11 @@
 /* =========================
-   CORE SYSTEM (SAFE)
-   👉 No overrides globales
-   👉 No pisa componentes
+   CORE SYSTEM (FINAL PRO)
+   SAFE | MODULAR | SAAS READY
 ========================= */
 
 
 /* =========================
    DROPDOWN FIX (LIGHT)
-   (específico → seguro)
 ========================= */
 [data-theme="light"] .user-dropdown{
   border:1px solid rgba(0,0,0,0.08);
@@ -20,7 +18,6 @@
 
 /* =========================
    LOGO SWITCH
-   (solo visibilidad)
 ========================= */
 .logo-dark{ display:block; }
 .logo-light{ display:none; }
@@ -30,8 +27,7 @@
 
 
 /* =========================
-   THEME TRANSITION (SAFE)
-   👉 SOLO si tú añades la clase
+   THEME TRANSITION (OPT-IN)
 ========================= */
 .theme-transition{
   transition:
@@ -43,9 +39,25 @@
 
 
 /* =========================
-   UTILIDADES INTERACCIÓN
-   (opt-in → no afectan nada si no se usan)
+   INTERACTION UTILITIES
 ========================= */
+
+/* 🔥 base interactiva */
+.interactive{
+  transition:
+    transform var(--duration-fast) ease,
+    box-shadow var(--duration-normal) ease,
+    background var(--duration-fast) ease;
+}
+
+.interactive:hover{
+  transform:translateY(-1px);
+}
+
+.interactive:active{
+  transform:scale(.97);
+}
+
 
 /* hover lift */
 .hover-lift{
@@ -73,6 +85,50 @@
 /* clickable helper */
 .clickable{
   cursor:pointer;
+}
+
+
+/* =========================
+   BUTTON GLOBAL FEEDBACK
+========================= */
+button{
+  transition:
+    transform var(--duration-fast) ease,
+    box-shadow var(--duration-normal) ease,
+    background var(--duration-fast) ease;
+}
+
+button:hover{
+  transform:translateY(-1px);
+}
+
+button:active{
+  transform:scale(.96);
+}
+
+
+/* =========================
+   INPUT FOCUS PRO
+========================= */
+input:focus,
+select:focus,
+textarea:focus{
+  border-color:var(--accent);
+
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--accent), transparent 85%);
+}
+
+
+/* =========================
+   LINKS / ITEMS
+========================= */
+a,
+.menu-item,
+.search-result{
+  transition:
+    color var(--duration-fast) ease,
+    transform var(--duration-fast) ease;
 }
 
 

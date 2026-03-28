@@ -32,9 +32,20 @@
   position:relative;
 }
 
+/* 🔥 FULL WIDTH */
+.container-fluid{
+  width:100%;
+  max-width:none;
+
+  margin:0;
+  padding-inline:var(--space-lg);
+
+  position:relative;
+}
+
 
 /* =========================
-   MAIN CONTENT
+   MAIN CONTENT (🔥 FIX REAL)
 ========================= */
 .main-content{
   position:relative;
@@ -43,23 +54,24 @@
   min-height:100dvh;
 
   margin-left:var(--sidebar-width);
+  width:calc(100% - var(--sidebar-width)); /* 🔥 CLAVE */
+
   padding-top:var(--topbar-height);
 
   display:flex;
   flex-direction:column;
 
   transition:
-    margin-left var(--duration-slow) var(--ease-out);
+    margin-left var(--duration-slow) var(--ease-out),
+    width var(--duration-slow) var(--ease-out);
 
-  will-change:margin-left;
+  will-change:margin-left, width;
 }
 
-
-/* =========================
-   SIDEBAR COLLAPSED
-========================= */
+/* SIDEBAR COLLAPSED */
 .sidebar.collapsed ~ .main-content{
   margin-left:var(--sidebar-collapsed);
+  width:calc(100% - var(--sidebar-collapsed));
 }
 
 
@@ -68,11 +80,27 @@
 ========================= */
 .content-wrapper{
   flex:1;
+
   padding-block:var(--space-lg);
 
   display:flex;
   flex-direction:column;
   gap:var(--space-lg);
+}
+
+
+/* =========================
+   🔥 TABLE MODE (AUTO)
+========================= */
+
+/* elimina aire cuando hay tablas */
+.panel-content:has(.table-system){
+  padding:0;
+}
+
+.panel-content:has(.table-system) .content-wrapper{
+  padding:0;
+  gap:0;
 }
 
 
@@ -138,6 +166,7 @@
 }
 
 @media (max-width:600px){
+
   .grid.cols-2,
   .grid.cols-3,
   .grid.cols-4{
@@ -146,6 +175,7 @@
 
   .main-content{
     margin-left:0;
+    width:100%;
   }
 
   .sidebar{

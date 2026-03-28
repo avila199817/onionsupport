@@ -4,8 +4,35 @@
 
 
 /* =========================
+   CONTAINER SYSTEM (🔥 FIX LAYOUT)
+========================= */
+
+.container{
+  width:100%;
+  max-width:var(--content-max);
+
+  margin-inline:auto;
+  padding-inline:var(--content-padding);
+
+  position:relative;
+}
+
+/* 🔥 FULL WIDTH PARA TABLAS / VISTAS GRANDES */
+.container-fluid{
+  width:100%;
+  max-width:none;
+
+  margin:0;
+  padding-inline:var(--space-lg);
+
+  position:relative;
+}
+
+
+/* =========================
    BADGES
 ========================= */
+
 .badge{
   display:inline-flex;
   align-items:center;
@@ -45,6 +72,7 @@
 /* =========================
    VARIANTS
 ========================= */
+
 .badge.success{
   background:color-mix(in srgb, var(--success), transparent 85%);
   color:var(--success);
@@ -79,6 +107,7 @@
 /* =========================
    SIZES
 ========================= */
+
 .badge.sm{
   padding:2px 8px;
   font-size:10px;
@@ -93,6 +122,7 @@
 /* =========================
    OUTLINE
 ========================= */
+
 .badge.outline{
   background:transparent;
 }
@@ -106,6 +136,7 @@
 /* =========================
    DOT
 ========================= */
+
 .badge.dot::before{
   content:"";
   width:6px;
@@ -118,6 +149,7 @@
 /* =========================
    TOAST
 ========================= */
+
 .toast{
   position:fixed;
   bottom:20px;
@@ -163,15 +195,19 @@
 /* =========================
    TOAST VARIANTS
 ========================= */
+
 .toast.success{
   border-color:color-mix(in srgb, var(--success), var(--panel-border) 70%);
 }
+
 .toast.warning{
   border-color:color-mix(in srgb, var(--warning), var(--panel-border) 70%);
 }
+
 .toast.error{
   border-color:color-mix(in srgb, var(--error), var(--panel-border) 70%);
 }
+
 .toast.info{
   border-color:color-mix(in srgb, var(--info), var(--panel-border) 70%);
 }
@@ -180,6 +216,7 @@
 /* =========================
    TOAST ICON
 ========================= */
+
 .toast-icon{
   width:18px;
   height:18px;
@@ -203,6 +240,7 @@
 /* =========================
    TOAST CONTENT
 ========================= */
+
 .toast-content{
   display:flex;
   flex-direction:column;
@@ -225,6 +263,7 @@
 /* =========================
    CLOSE
 ========================= */
+
 .toast-close{
   margin-left:auto;
 
@@ -256,6 +295,7 @@
 /* =========================
    PANEL CONTENT (LOAD UX)
 ========================= */
+
 .panel-content{
   opacity:0;
   visibility:hidden;
@@ -278,6 +318,7 @@
 /* =========================
    THEME TRANSITIONS
 ========================= */
+
 .layout,
 .sidebar,
 .topbar,
@@ -296,6 +337,7 @@
 /* =========================
    LOADER
 ========================= */
+
 body.loading{
   overflow:hidden;
 }
@@ -336,6 +378,7 @@ body:not(.loading) #app-loader{
 /* =========================
    LOADER LOGO
 ========================= */
+
 .loader-logo{
   width:64px;
   height:64px;
@@ -358,6 +401,7 @@ body:not(.loading) #app-loader{
 /* =========================
    ANIMATIONS
 ========================= */
+
 @keyframes bounce{
   0%,100%{ transform:translateY(0) scale(1); }
   30%{ transform:translateY(-18px) scale(1.05); }

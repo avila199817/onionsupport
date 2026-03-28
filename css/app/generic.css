@@ -1,6 +1,5 @@
 /* =========================================================
-   TABLE SYSTEM — PRO FINAL (SAAS READY)
-   AISLADO | DENSITY | SIN CONFLICTOS
+   TABLE SYSTEM — FINAL 10/10 CLEAN
 ========================================================= */
 
 
@@ -14,7 +13,7 @@
   width:100%;
   flex:1;
 
-  min-height:0; /* 🔥 scroll fix */
+  min-height:0;
 }
 
 
@@ -36,16 +35,16 @@
   background:var(--panel-bg);
   border-bottom:1px solid var(--panel-border);
 
-  flex-wrap:wrap; /* 🔥 responsive */
+  flex-wrap:wrap;
 }
 
 /* INPUT FLEX */
 .table-system .filters-row input{
   flex:1;
-  min-width:180px;
+  min-width:160px;
 }
 
-/* INPUTS BASE */
+/* INPUTS */
 .table-system .filters-row input,
 .table-system .filters-row select{
   padding:
@@ -59,22 +58,6 @@
   color:var(--text);
 
   font-size:13px;
-
-  transition:
-    border-color var(--duration-normal) ease,
-    box-shadow var(--duration-normal) ease,
-    background var(--duration-normal) ease;
-}
-
-/* FOCUS PRO */
-.table-system .filters-row input:focus,
-.table-system .filters-row select:focus{
-  outline:none;
-
-  border-color:var(--accent);
-
-  box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--accent), transparent 85%);
 }
 
 /* BUTTON */
@@ -96,19 +79,6 @@
   cursor:pointer;
 
   box-shadow:0 6px 18px rgba(99,102,241,0.35);
-
-  transition:
-    transform var(--duration-fast) ease,
-    box-shadow var(--duration-normal) ease;
-}
-
-.table-system .filters-row button:hover{
-  transform:translateY(-1px);
-  box-shadow:0 10px 24px rgba(99,102,241,0.45);
-}
-
-.table-system .filters-row button:active{
-  transform:scale(.97);
 }
 
 
@@ -133,11 +103,7 @@
 
 .table-system table{
   width:100%;
-  min-width:100%;
-
   border-collapse:collapse;
-  border-spacing:0;
-
   table-layout:auto;
 }
 
@@ -164,7 +130,7 @@
   border-bottom:1px solid var(--panel-border);
 
   color:var(--dim);
-  font-size:12px;
+  font-size:11px;
   text-transform:uppercase;
   letter-spacing:.3px;
 
@@ -179,10 +145,19 @@
 .table-system td{
   padding:calc(12px * var(--density-factor));
 
-  border-bottom:1px solid rgba(255,255,255,0.025);
+  border-bottom:1px solid var(--panel-border);
 
-  white-space:nowrap;
   vertical-align:middle;
+
+  font-size:13px;
+  color:var(--text);
+}
+
+/* 🔥 SOLO nowrap DONDE IMPORTA */
+.table-system .col-id,
+.table-system .col-status,
+.table-system .col-actions{
+  white-space:nowrap;
 }
 
 
@@ -191,15 +166,19 @@
 ========================================================= */
 
 .table-system tbody tr{
-  transition:background .15s ease, transform .15s ease;
+  transition:
+    background var(--duration-fast) ease,
+    transform var(--duration-fast) ease;
 }
 
+/* zebra suave */
 .table-system tbody tr:nth-child(even){
-  background:rgba(255,255,255,0.02);
+  background:color-mix(in srgb, var(--panel-bg), #fff 2%);
 }
 
 .table-system tbody tr:hover{
-  background:rgba(255,255,255,0.045);
+  background:color-mix(in srgb, var(--panel-bg), #fff 6%);
+  transform:translateX(2px);
 }
 
 
@@ -208,30 +187,30 @@
 ========================================================= */
 
 .table-system .col-id{
-  width:140px;
+  width:120px;
   font-size:11px;
-  color:#6b7280;
+  color:var(--dim);
 }
 
 .table-system .col-main{
-  min-width:260px;
+  min-width:220px;
   font-weight:500;
 }
 
 .table-system .col-secondary{
-  min-width:180px;
-}
-
-.table-system .col-date{
   min-width:160px;
 }
 
+.table-system .col-date{
+  min-width:140px;
+}
+
 .table-system .col-status{
-  width:120px;
+  width:110px;
 }
 
 .table-system .col-actions{
-  width:140px;
+  width:130px;
 }
 
 
@@ -242,13 +221,13 @@
 .table-system .cell-user{
   display:flex;
   align-items:center;
-  gap:12px;
+  gap:10px;
 }
 
 .table-system .table-avatar{
-  width:36px;
-  height:36px;
-  min-width:36px;
+  width:34px;
+  height:34px;
+  min-width:34px;
 
   border-radius:50%;
   overflow:hidden;
@@ -257,18 +236,11 @@
   align-items:center;
   justify-content:center;
 
-  background:linear-gradient(135deg,#6366f1,#8b5cf6);
+  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
   color:#fff;
 
-  font-size:13px;
+  font-size:12px;
   font-weight:600;
-}
-
-.table-system .table-avatar img{
-  width:100%;
-  height:100%;
-  object-fit:cover;
-  display:block;
 }
 
 .table-system .user-info{
@@ -291,29 +263,33 @@
    BADGE VARIANTS
 ========================================================= */
 
+.table-system .badge{
+  font-size:10.5px;
+}
+
 .table-system .badge.factura-abierta{
-  background:rgba(59,130,246,0.12);
-  color:#60a5fa;
+  background:color-mix(in srgb, var(--info), transparent 88%);
+  color:var(--info);
 }
 
 .table-system .badge.factura-cerrada{
-  background:rgba(34,197,94,0.12);
-  color:#22c55e;
+  background:color-mix(in srgb, var(--success), transparent 88%);
+  color:var(--success);
 }
 
 .table-system .badge.estado-pagada{
-  background:rgba(34,197,94,0.15);
-  color:#22c55e;
+  background:color-mix(in srgb, var(--success), transparent 85%);
+  color:var(--success);
 }
 
 .table-system .badge.estado-pendiente{
-  background:rgba(251,191,36,0.15);
-  color:#f59e0b;
+  background:color-mix(in srgb, var(--warning), transparent 85%);
+  color:var(--warning);
 }
 
 .table-system .badge.estado-borrador{
-  background:rgba(107,114,128,0.15);
-  color:#9ca3af;
+  background:color-mix(in srgb, var(--dim), transparent 85%);
+  color:var(--dim);
 }
 
 
@@ -324,7 +300,7 @@
 .table-system .actions{
   display:flex;
   align-items:center;
-  gap:8px;
+  gap:6px;
 }
 
 .table-system .actions button{
@@ -333,73 +309,33 @@
 
   font-size:11px;
 
-  cursor:pointer;
   border:none;
+  cursor:pointer;
 
-  background:rgba(255,255,255,0.04);
+  background:var(--card-bg);
   color:var(--text);
 
-  transition:background .15s ease, transform .1s ease;
+  border:1px solid var(--card-border);
 }
-
-.table-system .actions button:hover{
-  background:rgba(255,255,255,0.08);
-  transform:translateY(-1px);
-}
-
 
 /* ACTION TYPES */
 
 .table-system button[data-action="download"]{
-  background:rgba(59,130,246,0.12);
-  color:#60a5fa;
+  color:var(--info);
 }
-.table-system button[data-action="download"]:hover{
-  background:rgba(59,130,246,0.25);
-}
-
 .table-system button[data-action="send"]{
-  background:rgba(139,92,246,0.12);
   color:#a78bfa;
 }
-.table-system button[data-action="send"]:hover{
-  background:rgba(139,92,246,0.25);
-}
-
 .table-system button[data-action="edit"]{
-  background:rgba(59,130,246,0.12);
-  color:#60a5fa;
+  color:var(--info);
 }
-.table-system button[data-action="edit"]:hover{
-  background:rgba(59,130,246,0.25);
-}
-
 .table-system button[data-action="delete"]{
-  background:rgba(239,68,68,0.12);
-  color:#f87171;
-}
-.table-system button[data-action="delete"]:hover{
-  background:rgba(239,68,68,0.25);
+  color:var(--error);
 }
 
 
 /* =========================================================
-   SPECIAL TOUCHES
-========================================================= */
-
-.table-system.facturas .col-date{
-  font-weight:600;
-  color:#e5e7eb;
-}
-
-.table-system.facturas tbody tr:hover,
-.table-system.usuarios tbody tr:hover{
-  transform:translateX(2px);
-}
-
-
-/* =========================================================
-   SCROLLBAR (PRO)
+   SCROLLBAR
 ========================================================= */
 
 .table-system .table-container::-webkit-scrollbar{

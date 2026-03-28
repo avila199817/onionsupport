@@ -1,46 +1,27 @@
 /* =========================
-   UI ELEMENTS — FINAL PRO 10/10
+   UI ELEMENTS — FINAL CLEAN 10/10
 ========================= */
 
 
 /* =========================
-   CONTAINER FLUID
-========================= */
-.container-fluid{
-  width:100%;
-  max-width:none;
-
-  margin:0;
-  padding-inline:var(--space-lg);
-
-  position:relative;
-}
-
-
-/* =========================
-   PANEL BLOCK (DEPTH PRO)
+   PANEL BLOCK (CLEAN DEPTH)
 ========================= */
 .panel-block{
   background:var(--panel-bg);
   border:1px solid var(--panel-border);
   border-radius:var(--radius-lg);
 
-  box-shadow:
-    0 6px 18px rgba(0,0,0,0.25),
-    0 1px 2px rgba(0,0,0,0.2);
+  box-shadow:var(--panel-shadow);
 
   transition:
     box-shadow var(--duration-normal) ease,
-    transform var(--duration-fast) ease,
-    border-color var(--duration-normal) ease;
+    border-color var(--duration-normal) ease,
+    transform var(--duration-fast) ease;
 }
 
 .panel-block:hover{
-  box-shadow:
-    0 14px 40px rgba(0,0,0,0.45),
-    0 4px 10px rgba(0,0,0,0.25);
-
   transform:translateY(-2px);
+  box-shadow:var(--shadow-md);
   border-color:color-mix(in srgb, var(--panel-border), #fff 6%);
 }
 
@@ -69,16 +50,19 @@
   border:1px solid transparent;
 
   transition:
-    background-color var(--duration-normal) ease,
-    color var(--duration-normal) ease,
-    border-color var(--duration-normal) ease,
-    transform var(--duration-fast) ease,
-    filter var(--duration-fast) ease;
+    background-color var(--duration-fast) ease,
+    color var(--duration-fast) ease,
+    border-color var(--duration-fast) ease,
+    transform var(--duration-fast) ease;
+}
+
+/* CLICKABLE */
+.badge.clickable{
+  cursor:pointer;
 }
 
 .badge.clickable:hover{
   transform:translateY(-1px);
-  filter:brightness(1.05);
 }
 
 .badge.clickable:active{
@@ -87,30 +71,30 @@
 
 
 /* =========================
-   VARIANTS
+   VARIANTS (TOKEN SAFE)
 ========================= */
 .badge.success{
-  background:color-mix(in srgb, var(--success), transparent 85%);
+  background:color-mix(in srgb, var(--success), transparent 88%);
   color:var(--success);
-  border-color:color-mix(in srgb, var(--success), transparent 65%);
+  border-color:color-mix(in srgb, var(--success), transparent 70%);
 }
 
 .badge.warning{
-  background:var(--warning-bg);
+  background:color-mix(in srgb, var(--warning), transparent 88%);
   color:var(--warning);
-  border-color:color-mix(in srgb, var(--warning), transparent 65%);
+  border-color:color-mix(in srgb, var(--warning), transparent 70%);
 }
 
 .badge.error{
-  background:color-mix(in srgb, var(--error), transparent 85%);
+  background:color-mix(in srgb, var(--error), transparent 88%);
   color:var(--error);
-  border-color:color-mix(in srgb, var(--error), transparent 65%);
+  border-color:color-mix(in srgb, var(--error), transparent 70%);
 }
 
 .badge.info{
-  background:var(--info-bg);
+  background:color-mix(in srgb, var(--info), transparent 88%);
   color:var(--info);
-  border-color:color-mix(in srgb, var(--info), transparent 65%);
+  border-color:color-mix(in srgb, var(--info), transparent 70%);
 }
 
 .badge.neutral{
@@ -160,7 +144,7 @@
 
 
 /* =========================
-   TOAST
+   TOAST (PREMIUM CLEAN)
 ========================= */
 .toast{
   position:fixed;
@@ -180,9 +164,7 @@
   background:var(--panel-bg);
   border:1px solid var(--panel-border);
 
-  box-shadow:
-    0 10px 30px rgba(0,0,0,0.35),
-    0 4px 10px rgba(0,0,0,0.2);
+  box-shadow:var(--shadow-lg);
 
   font-size:13px;
   color:var(--text);
@@ -190,25 +172,23 @@
   z-index:var(--z-overlay);
 
   opacity:0;
-  transform:translateY(12px) scale(.96);
+  transform:translateY(10px);
 
   pointer-events:none;
 
   transition:
     opacity var(--duration-normal) ease,
-    transform var(--duration-slow) var(--ease-out);
+    transform var(--duration-normal) var(--ease-out);
 }
 
 .toast.show{
   opacity:1;
-  transform:translateY(0) scale(1);
+  transform:translateY(0);
   pointer-events:auto;
 }
 
 
-/* =========================
-   TOAST VARIANTS
-========================= */
+/* VARIANTS */
 .toast.success{
   border-color:color-mix(in srgb, var(--success), var(--panel-border) 70%);
 }
@@ -247,7 +227,7 @@
 
 
 /* =========================
-   TOAST CONTENT
+   CONTENT
 ========================= */
 .toast-content{
   display:flex;
@@ -259,7 +239,6 @@
 .toast-title{
   font-weight:600;
   font-size:13px;
-  color:var(--text);
 }
 
 .toast-message{
@@ -288,14 +267,12 @@
 
   transition:
     background var(--duration-fast) ease,
-    color var(--duration-fast) ease,
-    transform var(--duration-fast) ease;
+    color var(--duration-fast) ease;
 }
 
 .toast-close:hover{
   background:var(--sb-hover);
   color:var(--text);
-  transform:scale(1.05);
 }
 
 
@@ -307,6 +284,10 @@
   visibility:hidden;
   pointer-events:none;
   transform:translateY(4px);
+
+  transition:
+    opacity var(--duration-normal) ease,
+    transform var(--duration-normal) ease;
 }
 
 .panel-content.ready{
@@ -314,23 +295,17 @@
   visibility:visible;
   pointer-events:auto;
   transform:translateY(0);
-
-  transition:
-    opacity var(--duration-normal) ease,
-    transform var(--duration-normal) ease;
 }
 
 
 /* =========================
-   THEME TRANSITIONS
+   THEME TRANSITIONS (CLEAN)
 ========================= */
 .layout,
 .sidebar,
 .topbar,
 .card,
-.panel-block,
-.menu-item,
-.topbar-search{
+.panel-block{
   transition:
     background-color .3s ease,
     border-color .3s ease,
@@ -356,12 +331,12 @@ body.loading .layout{
   inset:0;
 
   background:
-    radial-gradient(circle at 30% 20%, rgba(255,255,255,0.15), transparent 50%),
-    radial-gradient(circle at 70% 80%, rgba(255,255,255,0.1), transparent 50%),
+    radial-gradient(circle at 30% 20%, rgba(255,255,255,0.12), transparent 50%),
+    radial-gradient(circle at 70% 80%, rgba(255,255,255,0.08), transparent 50%),
     rgba(20,20,20,0.25);
 
-  backdrop-filter:blur(28px) saturate(200%);
-  -webkit-backdrop-filter:blur(28px) saturate(200%);
+  backdrop-filter:blur(24px) saturate(180%);
+  -webkit-backdrop-filter:blur(24px) saturate(180%);
 
   display:grid;
   place-items:center;
@@ -369,8 +344,8 @@ body.loading .layout{
   z-index:9999;
 
   transition:
-    opacity .6s ease,
-    visibility .6s ease;
+    opacity .5s ease,
+    visibility .5s ease;
 }
 
 body:not(.loading) #app-loader{
@@ -383,15 +358,13 @@ body:not(.loading) #app-loader{
    LOADER LOGO
 ========================= */
 .loader-logo{
-  width:64px;
-  height:64px;
+  width:60px;
+  height:60px;
   object-fit:contain;
 
   animation:
     bounce 1.2s cubic-bezier(.34,1.56,.64,1) infinite,
     pulse 1.6s ease-in-out infinite;
-
-  filter:drop-shadow(0 12px 40px rgba(0,0,0,0.4));
 }
 
 .loader-dark{ display:block; }
@@ -405,9 +378,9 @@ body:not(.loading) #app-loader{
    ANIMATIONS
 ========================= */
 @keyframes bounce{
-  0%,100%{ transform:translateY(0) scale(1); }
-  30%{ transform:translateY(-18px) scale(1.05); }
-  60%{ transform:translateY(-6px) scale(0.98); }
+  0%,100%{ transform:translateY(0); }
+  30%{ transform:translateY(-14px); }
+  60%{ transform:translateY(-4px); }
 }
 
 @keyframes pulse{

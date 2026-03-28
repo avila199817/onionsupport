@@ -1,9 +1,9 @@
 /* =========================================================
-   INCIDENCIA CREATE — FULL PRO SAAS (FINAL DEFINITIVO)
+   INCIDENCIA CREATE — FINAL REAL (SIN ROTURAS)
 ========================================================= */
 
 /* =========================
-   BASE GLOBAL
+   BASE
 ========================= */
 html, body{
   height:100%;
@@ -11,33 +11,33 @@ html, body{
 }
 
 #app,
-.main-layout,
-.panel-content{
+.main-layout{
   height:100%;
   min-height:0;
 }
 
 
 /* =========================
-   ROOT
+   PANEL ROOT
 ========================= */
 .panel-content.incidencia-create{
   display:flex;
-  height:100%;
+  flex-direction:column;
+  flex:1;
+  min-height:0;
   width:100%;
   overflow:hidden;
 }
 
 
 /* =========================================================
-   LAYOUT SPLIT (FIX REAL)
+   LAYOUT
 ========================================================= */
 .layout-split{
   display:flex;
-  width:100%;
-  height:100%;
-  min-height:0;
   flex:1;
+  min-height:0;
+  width:100%;
 }
 
 
@@ -45,13 +45,14 @@ html, body{
 .incidencia-left{
   flex:1;
   min-width:0;
+
   display:flex;
   flex-direction:column;
   min-height:0;
 }
 
 
-/* RIGHT (🔥 PANEL SOLIDO REAL) */
+/* RIGHT (🔥 SIEMPRE PINTADO ENTERO) */
 .incidencia-right{
   width:360px;
   min-width:360px;
@@ -59,31 +60,19 @@ html, body{
   display:flex;
   flex-direction:column;
 
-  align-self:stretch;
-
   background:var(--panel-bg);
   border-left:1px solid var(--panel-border);
 
-  min-height:0;
+  /* 🔥 CLAVE REAL */
   height:100%;
-
-  position:relative;
-}
-
-/* 🔥 BLINDAJE TOTAL CONTRA CORTES */
-.incidencia-right::before{
-  content:"";
-  position:absolute;
-  inset:0;
-  background:var(--panel-bg);
-  z-index:-1;
+  flex-shrink:0;
 }
 
 
 /* =========================================================
-   HEADER (SIN TOCAR)
+   HEADER (NO TOCAR MÁS)
 ========================================================= */
-.panel-content.incidencia-create .filters-row{
+.filters-row{
   display:flex;
   align-items:center;
 
@@ -91,27 +80,20 @@ html, body{
 
   background:var(--panel-bg);
   border-bottom:1px solid var(--panel-border);
-
-  flex-shrink:0;
 }
 
 .header-left{
   display:flex;
   flex-direction:column;
-  gap:2px;
 }
 
 #btn-back{
   margin-left:auto;
-
   background:none;
   border:none;
   color:var(--text);
-  font-size:13px;
   cursor:pointer;
-
   opacity:.8;
-  padding:0;
 }
 
 #btn-back:hover{
@@ -121,13 +103,11 @@ html, body{
 .page-title{
   font-size:20px;
   font-weight:600;
-  margin:0;
 }
 
 .page-subtitle{
   font-size:13px;
   color:var(--dim);
-  margin:0;
 }
 
 
@@ -136,13 +116,12 @@ html, body{
 ========================================================= */
 .incidencia-body{
   flex:1;
-  display:flex;
+  min-height:0;
 
+  display:flex;
   padding:30px 40px;
 
-  width:100%;
   overflow:auto;
-  min-height:0;
 }
 
 
@@ -159,9 +138,7 @@ html, body{
 }
 
 
-/* =========================================================
-   INPUTS
-========================================================= */
+/* INPUTS */
 .incidencia-form input,
 .incidencia-form textarea{
   width:100%;
@@ -172,52 +149,6 @@ html, body{
 
   background:color-mix(in srgb, var(--card-bg), #000 10%);
   color:var(--text);
-
-  font-size:14px;
-
-  transition:border-color .2s ease, box-shadow .2s ease;
-}
-
-.incidencia-form textarea{
-  resize:vertical;
-  min-height:180px;
-}
-
-.incidencia-form input:focus,
-.incidencia-form textarea:focus{
-  border-color:var(--accent);
-  box-shadow:0 0 0 2px color-mix(in srgb, var(--accent), transparent 85%);
-}
-
-
-/* =========================================================
-   FILES
-========================================================= */
-.incidencia-files{
-  display:flex;
-  flex-direction:column;
-  align-items:flex-start;
-  gap:6px;
-  margin-top:4px;
-}
-
-#btn-attach{
-  background:none;
-  border:none;
-  color:var(--accent);
-  font-size:13px;
-  cursor:pointer;
-  padding:0;
-}
-
-#btn-attach:hover{
-  opacity:.8;
-  text-decoration:underline;
-}
-
-#file-list{
-  font-size:12px;
-  color:var(--dim);
 }
 
 
@@ -226,152 +157,54 @@ html, body{
 ========================================================= */
 .incidencia-footer{
   display:flex;
-  align-items:center;
   justify-content:space-between;
-
+  align-items:center;
   margin-top:10px;
-  gap:20px;
-}
-
-.incidencia-hint{
-  font-size:12px;
-  color:var(--dim);
 }
 
 
-/* =========================================================
-   CTA BUTTON
-========================================================= */
+/* BOTÓN */
 #btn-save-incidencia{
   padding:13px 26px;
   border-radius:12px;
 
   background:linear-gradient(135deg,var(--accent),var(--accent-hover));
   color:#fff;
-
-  font-weight:600;
-  font-size:14px;
-
   border:none;
   cursor:pointer;
-
-  box-shadow:0 10px 24px rgba(99,102,241,0.35);
-}
-
-#btn-save-incidencia:hover{
-  transform:translateY(-1px);
-}
-
-#btn-save-incidencia:active{
-  transform:translateY(0);
 }
 
 
 /* =========================================================
-   HISTORY PANEL
+   PANEL DERECHO CONTENIDO
 ========================================================= */
 .incidencia-history{
   flex:1;
+  min-height:0;
+
   display:flex;
   flex-direction:column;
 
-  min-height:0;
-  height:100%;
-
   padding:16px;
 
+  /* 🔥 ESTO EVITA EL CORTE */
   background:var(--panel-bg);
-}
-
-.history-header{
-  font-size:13px;
-  font-weight:600;
-  color:var(--dim);
-
-  margin-bottom:12px;
-  flex-shrink:0;
 }
 
 .history-list{
   flex:1;
-  min-height:0;
-
-  display:flex;
-  flex-direction:column;
-  gap:8px;
-
   overflow:auto;
-  background:var(--panel-bg); /* 🔥 evita cortes */
-}
 
-.history-item{
-  padding:12px;
-  border-radius:10px;
-
-  background:var(--card-bg);
-  border:1px solid var(--card-border);
-
-  cursor:pointer;
-  transition:all .15s ease;
-}
-
-.history-item:hover{
-  background:color-mix(in srgb, var(--card-bg), #fff 6%);
-}
-
-.history-title{
-  font-size:13px;
-  font-weight:500;
-  margin-bottom:4px;
-}
-
-.history-meta{
-  font-size:11px;
-  color:var(--dim);
-  display:flex;
-  justify-content:space-between;
+  /* 🔥 TAMBIÉN AQUÍ */
+  background:var(--panel-bg);
 }
 
 
 /* =========================================================
-   SCROLLBAR
-========================================================= */
-.history-list::-webkit-scrollbar{
-  width:6px;
-}
-
-.history-list::-webkit-scrollbar-thumb{
-  background:var(--scrollbar-thumb);
-  border-radius:6px;
-}
-
-
-/* =========================================================
-   RESPONSIVE (SIDEBAR COMPATIBLE)
+   RESPONSIVE
 ========================================================= */
 @media (max-width:1100px){
   .incidencia-right{
     display:none;
   }
-}
-
-@media (max-width:900px){
-
-  .incidencia-body{
-    padding:20px;
-  }
-
-  .panel-content.incidencia-create .filters-row{
-    padding:14px 20px;
-  }
-
-  .incidencia-footer{
-    flex-direction:column;
-    align-items:flex-start;
-  }
-
-  #btn-save-incidencia{
-    width:100%;
-  }
-
 }

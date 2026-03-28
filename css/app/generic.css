@@ -405,3 +405,104 @@
 .form-actions{
   margin-top:10px;
 }
+
+/* =========================================================
+   INCIDENCIA CREATE — PRO SAAS
+========================================================= */
+
+.panel-content.incidencia-create{
+  display:flex;
+  flex-direction:column;
+  height:100%;
+}
+
+/* centrar contenido */
+.panel-content.incidencia-create .form-wrapper{
+  width:100%;
+  max-width:720px;
+  margin:40px auto;
+  padding:0;
+}
+
+/* card real */
+.panel-content.incidencia-create .form-grid{
+  background:var(--panel-bg);
+  border:1px solid var(--panel-border);
+  border-radius:14px;
+
+  padding:20px;
+
+  box-shadow:
+    0 10px 30px rgba(0,0,0,0.25);
+}
+
+/* inputs más finos */
+.panel-content.incidencia-create .form-grid input,
+.panel-content.incidencia-create .form-grid textarea{
+  background:color-mix(in srgb, var(--card-bg), #000 10%);
+}
+
+/* focus PRO */
+.panel-content.incidencia-create input:focus,
+.panel-content.incidencia-create textarea:focus{
+  border-color:var(--accent);
+  box-shadow:0 0 0 2px color-mix(in srgb, var(--accent), transparent 85%);
+}
+
+/* botón principal */
+.panel-content.incidencia-create #btn-save-incidencia{
+  width:100%;
+
+  padding:12px;
+
+  border-radius:10px;
+
+  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
+  color:#fff;
+
+  font-weight:600;
+
+  border:none;
+  cursor:pointer;
+
+  box-shadow:0 8px 20px rgba(99,102,241,0.35);
+
+  transition:
+    transform .15s ease,
+    box-shadow .2s ease;
+}
+
+.panel-content.incidencia-create #btn-save-incidencia:hover{
+  transform:translateY(-1px);
+  box-shadow:0 12px 28px rgba(99,102,241,0.45);
+}
+
+/* botón adjuntos */
+#btn-attach{
+  background:none;
+  border:none;
+  color:var(--accent);
+  cursor:pointer;
+  font-size:13px;
+  padding:0;
+}
+
+#btn-attach:hover{
+  text-decoration:underline;
+}
+
+/* header más limpio */
+.panel-content.incidencia-create .filters-row{
+  border-bottom:1px solid var(--panel-border);
+}
+
+/* título */
+.page-title{
+  font-size:20px;
+  font-weight:600;
+}
+
+.page-subtitle{
+  font-size:13px;
+  color:var(--dim);
+}

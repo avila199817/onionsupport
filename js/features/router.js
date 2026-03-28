@@ -38,7 +38,7 @@
     
     "/incidencias/nueva": {
       page: "/app/views/incidencias/incidencia.html",
-      style: "/css/app/generic.css",
+      style: "/css/app/incidencias/incidencia.css",
       script: "/js/features/incidencias/incidencia.js",
       title: "Nueva incidencia"
     },

@@ -31,7 +31,7 @@
 
 
 /* =========================
-   TOP
+   TOP (FUSIÓN PRO)
 ========================= */
 .sidebar-top{
   display:flex;
@@ -78,7 +78,7 @@
 
 
 /* =========================
-   TOGGLE (FUSIÓN PRO)
+   TOGGLE (SUPERPUESTO)
 ========================= */
 .sidebar-toggle{
   width:32px;
@@ -104,7 +104,10 @@
   transition:
     opacity .2s ease,
     transform .2s ease,
-    background var(--duration-fast) ease;
+    background var(--duration-fast) ease,
+    filter .2s ease;
+
+  backdrop-filter: blur(6px);
 }
 
 /* NORMAL */
@@ -115,7 +118,7 @@
 
 
 /* =========================
-   MODO COLLAPSED (MAGIA)
+   COLLAPSED (MAGIA CHATGPT)
 ========================= */
 .sidebar.collapsed .sidebar-toggle{
   right:50%;
@@ -123,16 +126,17 @@
   transform:translate(50%, -50%);
   opacity:0;
   pointer-events:none;
+  filter:blur(4px);
 }
 
-/* cuando haces hover en el logo → aparece el botón */
-.sidebar.collapsed .logo:hover + .sidebar-toggle,
-.sidebar.collapsed .sidebar-toggle:hover{
+/* HOVER GLOBAL (ROBUSTO) */
+.sidebar.collapsed .sidebar-top:hover .sidebar-toggle{
   opacity:1;
   pointer-events:auto;
   transform:translate(50%, -50%) scale(1.05);
   background:var(--sb-hover);
   color:var(--text);
+  filter:blur(0);
   z-index:3;
 }
 

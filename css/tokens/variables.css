@@ -19,7 +19,6 @@
   --sidebar-icon-size:20px;
   --sidebar-item-padding-x:12px;
 
-  /* eje vertical perfecto */
   --sidebar-icon-offset:calc(
     var(--sidebar-item-padding-x) + (var(--sidebar-icon-size) / 2)
   );
@@ -64,6 +63,14 @@
   ========================= */
   --main-bg:#0d0d0d;
   --dropdown-bg:#333333;
+
+
+  /* =========================
+     SURFACE SYSTEM
+  ========================= */
+  --surface-1:var(--main-bg);
+  --surface-2:var(--panel-bg);
+  --surface-3:var(--card-bg);
 
 
   /* =========================
@@ -134,6 +141,17 @@
   --space-md:14px;
   --space-lg:20px;
   --space-xl:32px;
+
+
+  /* =========================
+     🔥 DENSITY SYSTEM (NEW)
+  ========================= */
+  --density-factor:1;
+
+  --space-dynamic-xs:calc(var(--space-xs) * var(--density-factor));
+  --space-dynamic-sm:calc(var(--space-sm) * var(--density-factor));
+  --space-dynamic-md:calc(var(--space-md) * var(--density-factor));
+  --space-dynamic-lg:calc(var(--space-lg) * var(--density-factor));
 
 
   /* =========================

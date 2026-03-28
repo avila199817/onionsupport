@@ -3,19 +3,6 @@
   <div class="container-fluid">
 
     <!-- =========================
-         HEADER
-    ========================= -->
-    <div class="dashboard-header">
-      <div class="page-header">
-        <div>
-          <h1 class="page-title">Incidencias</h1>
-          <p class="page-subtitle">Gestión y seguimiento de incidencias</p>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- =========================
          GRID PRINCIPAL
     ========================= -->
     <div class="dashboard-grid">
@@ -26,7 +13,6 @@
              TABLE SYSTEM
         ========================= -->
         <div class="table-system incidencias">
-
 
           <!-- =========================
                FILTROS
@@ -46,7 +32,7 @@
 
             <!-- STATUS -->
             <div class="filter-group">
-              <label for="filter-status" class="sr-only">Filtrar por estado</label>
+              <label for="filter-status" class="sr-only">Estado</label>
               <select id="filter-status">
                 <option value="">Estado</option>
                 <option value="abierta">Abierta</option>
@@ -57,7 +43,7 @@
 
             <!-- PRIORITY -->
             <div class="filter-group">
-              <label for="filter-priority" class="sr-only">Filtrar por prioridad</label>
+              <label for="filter-priority" class="sr-only">Prioridad</label>
               <select id="filter-priority">
                 <option value="">Prioridad</option>
                 <option value="alta">Alta</option>
@@ -87,7 +73,6 @@
 
             <table>
 
-              <!-- HEADER -->
               <thead>
                 <tr>
                   <th class="col-id">ID<div class="resizer"></div></th>
@@ -97,14 +82,13 @@
                   <th class="col-status">Estado<div class="resizer"></div></th>
                   <th class="col-status">Prioridad<div class="resizer"></div></th>
                   <th class="col-date">Fecha<div class="resizer"></div></th>
-                  <th class="col-date">Fecha cierre<div class="resizer"></div></th>
+                  <th class="col-date">Cierre<div class="resizer"></div></th>
                 </tr>
               </thead>
 
-              <!-- BODY -->
               <tbody id="incidencias-body">
 
-                <!-- LOADING STATE -->
+                <!-- LOADING -->
                 <tr class="loading">
                   <td colspan="8">
                     <span class="loading-text">Cargando incidencias...</span>

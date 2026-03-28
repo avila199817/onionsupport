@@ -1,5 +1,5 @@
 /* =========================================================
-   INCIDENCIA CREATE — FINAL DEFINITIVO (PRO SAAS CLEAN)
+   INCIDENCIA CREATE — FINAL DEFINITIVO (PRO SAAS 10/10)
 ========================================================= */
 
 /* =========================
@@ -11,14 +11,30 @@ html, body{
 }
 
 #app,
-.main-layout{
+.main-layout,
+.main-content{
   height:100%;
   min-height:0;
+  display:flex;
+  flex-direction:column;
 }
 
 
 /* =========================
-   PANEL ROOT (FULL WIDTH FIX)
+   🔥 WRAPPER FIX (CLAVE REAL)
+   Elimina el padding SOLO en esta vista
+========================= */
+.content-wrapper:has(.incidencia-create){
+  padding:0 !important;
+  flex:1;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+}
+
+
+/* =========================
+   PANEL ROOT
 ========================= */
 .panel-content.incidencia-create{
   display:flex;
@@ -26,9 +42,6 @@ html, body{
   flex:1;
   min-height:0;
   width:100%;
-
-  /* 🔥 CLAVE: rompe el padding del layout */
-  margin:calc(var(--space-lg) * -1);
 }
 
 
@@ -54,7 +67,7 @@ html, body{
 }
 
 
-/* RIGHT (PANEL FIJO Y COMPLETO) */
+/* RIGHT (PANEL PERFECTO) */
 .incidencia-right{
   width:360px;
   min-width:360px;
@@ -159,12 +172,12 @@ html, body{
 
 
 /* =========================================================
-   FILES (BOTÓN A LA IZQUIERDA)
+   FILES (IZQUIERDA)
 ========================================================= */
 .incidencia-files{
   display:flex;
   flex-direction:column;
-  align-items:flex-start; /* 🔥 FIX */
+  align-items:flex-start;
   gap:6px;
   margin-top:4px;
 }
@@ -175,7 +188,7 @@ html, body{
   color:var(--accent);
   cursor:pointer;
   font-size:13px;
-  align-self:flex-start; /* 🔥 EXTRA FIX */
+  align-self:flex-start;
 }
 
 #btn-attach:hover{
@@ -225,7 +238,7 @@ html, body{
 
 
 /* =========================================================
-   PANEL DERECHO (FONDO CONTINUO REAL)
+   PANEL DERECHO (FONDO PERFECTO)
 ========================================================= */
 .incidencia-history{
   flex:1;

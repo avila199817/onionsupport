@@ -200,16 +200,17 @@
 
 
 /* =========================
-   TOOLTIP (PRO)
+   TOOLTIP (PRO · DERECHA)
 ========================= */
 .sidebar-toggle::after{
   content:attr(data-tooltip);
   position:absolute;
 
-  top:calc(100% + 8px);
-  left:50%;
+  /* 🔥 POSICIÓN A LA DERECHA */
+  top:50%;
+  left:calc(100% + 10px);
 
-  transform:translateX(-50%) translateY(4px);
+  transform:translateY(-50%) translateX(4px);
 
   background:var(--tooltip-bg);
   color:var(--tooltip-text);
@@ -233,19 +234,19 @@
 /* tooltip normal */
 .sidebar:not(.collapsed) .sidebar-toggle:hover::after{
   opacity:1;
-  transform:translateX(-50%) translateY(0);
+  transform:translateY(-50%) translateX(0);
 }
 
-/* tooltip collapsed */
+/* tooltip collapsed (mismo comportamiento) */
 .sidebar.collapsed .sidebar-toggle::after{
-  top:calc(100% + 10px);
-  left:50%;
-  transform:translateX(-50%) translateY(4px);
+  top:50%;
+  left:calc(100% + 10px);
+  transform:translateY(-50%) translateX(4px);
 }
 
 .sidebar.collapsed .sidebar-toggle:hover::after{
   opacity:1;
-  transform:translateX(-50%) translateY(0);
+  transform:translateY(-50%) translateX(0);
 }
 
 

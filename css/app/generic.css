@@ -1,5 +1,5 @@
 /* =========================================================
-   TABLE SYSTEM — FINAL 10/10 FIXED
+   TABLE SYSTEM — FINAL PRO SAAS (NO CONFLICTS)
 ========================================================= */
 
 
@@ -79,6 +79,15 @@
   cursor:pointer;
 
   box-shadow:0 6px 18px rgba(99,102,241,0.35);
+
+  transition:
+    transform var(--duration-fast) ease,
+    box-shadow var(--duration-normal) ease;
+}
+
+.table-system .filters-row button:hover{
+  transform:translateY(-1px);
+  box-shadow:0 10px 24px rgba(99,102,241,0.45);
 }
 
 
@@ -91,7 +100,8 @@
   min-height:0;
 
   width:100%;
-  overflow-x:hidden; /* 🔥 FIX SCROLL FALSO */
+
+  overflow-x:hidden; /* 🔥 evita scroll falso */
   overflow-y:auto;
 
   background:var(--panel-bg);
@@ -104,9 +114,10 @@
 
 .table-system table{
   width:100%;
-  min-width:0; /* 🔥 CLAVE */
+  min-width:0;
   border-collapse:collapse;
-  table-layout:fixed; /* 🔥 CLAVE */
+
+  table-layout:fixed; /* 🔥 CLAVE PRO */
 }
 
 
@@ -151,26 +162,72 @@
 }
 
 .table-system td{
-  padding:calc(12px * var(--density-factor));
+  padding:
+    calc(10px * var(--density-factor))
+    calc(12px * var(--density-factor));
 
   border-bottom:1px solid var(--panel-border);
 
   vertical-align:middle;
 
-  font-size:13px;
+  font-size:13.5px;
   color:var(--text);
 }
 
-/* 🔥 SOLO nowrap DONDE IMPORTA */
+
+/* =========================
+   COLUMN BEHAVIOR (🔥 PRO)
+========================= */
+
+/* compactos */
 .table-system .col-id,
 .table-system .col-status,
-.table-system .col-actions{
+.table-system .col-actions,
+.table-system .col-date{
+  white-space:nowrap;
+  font-size:12px;
+  color:var(--dim);
+}
+
+/* dominante */
+.table-system .col-main{
+  white-space:normal;
+  font-weight:500;
+  line-height:1.4;
+}
+
+/* secundario */
+.table-system .col-secondary{
   white-space:nowrap;
 }
 
-/* 🔥 TEXTO LARGO CONTROLADO */
+
+/* =========================================================
+   COLUMN SIZES (🔥 JERARQUÍA REAL)
+========================================================= */
+
+.table-system .col-id{
+  width:110px;
+}
+
 .table-system .col-main{
-  white-space:normal;
+  width:35%;
+}
+
+.table-system .col-secondary{
+  width:180px;
+}
+
+.table-system .col-status{
+  width:100px;
+}
+
+.table-system .col-date{
+  width:120px;
+}
+
+.table-system .col-actions{
+  width:120px;
 }
 
 
@@ -184,7 +241,6 @@
     transform var(--duration-fast) ease;
 }
 
-/* zebra suave */
 .table-system tbody tr:nth-child(even){
   background:color-mix(in srgb, var(--panel-bg), #fff 2%);
 }
@@ -192,38 +248,6 @@
 .table-system tbody tr:hover{
   background:color-mix(in srgb, var(--panel-bg), #fff 6%);
   transform:translateX(2px);
-}
-
-
-/* =========================================================
-   COLUMN SYSTEM
-========================================================= */
-
-.table-system .col-id{
-  width:120px;
-  font-size:11px;
-  color:var(--dim);
-}
-
-.table-system .col-main{
-  min-width:220px;
-  font-weight:500;
-}
-
-.table-system .col-secondary{
-  min-width:160px;
-}
-
-.table-system .col-date{
-  min-width:140px;
-}
-
-.table-system .col-status{
-  width:110px;
-}
-
-.table-system .col-actions{
-  width:130px;
 }
 
 
@@ -280,31 +304,6 @@
   font-size:10.5px;
 }
 
-.table-system .badge.factura-abierta{
-  background:color-mix(in srgb, var(--info), transparent 88%);
-  color:var(--info);
-}
-
-.table-system .badge.factura-cerrada{
-  background:color-mix(in srgb, var(--success), transparent 88%);
-  color:var(--success);
-}
-
-.table-system .badge.estado-pagada{
-  background:color-mix(in srgb, var(--success), transparent 85%);
-  color:var(--success);
-}
-
-.table-system .badge.estado-pendiente{
-  background:color-mix(in srgb, var(--warning), transparent 85%);
-  color:var(--warning);
-}
-
-.table-system .badge.estado-borrador{
-  background:color-mix(in srgb, var(--dim), transparent 85%);
-  color:var(--dim);
-}
-
 
 /* =========================================================
    ACTIONS
@@ -329,21 +328,15 @@
   color:var(--text);
 
   border:1px solid var(--card-border);
+
+  transition:
+    background var(--duration-fast) ease,
+    transform var(--duration-fast) ease;
 }
 
-/* ACTION TYPES */
-
-.table-system button[data-action="download"]{
-  color:var(--info);
-}
-.table-system button[data-action="send"]{
-  color:#a78bfa;
-}
-.table-system button[data-action="edit"]{
-  color:var(--info);
-}
-.table-system button[data-action="delete"]{
-  color:var(--error);
+.table-system .actions button:hover{
+  transform:translateY(-1px);
+  background:color-mix(in srgb, var(--card-bg), #fff 6%);
 }
 
 

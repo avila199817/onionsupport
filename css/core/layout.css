@@ -93,7 +93,7 @@
   flex-direction:column;
   gap:var(--space-lg);
 
-  overflow:hidden; /* 🔥 evita doble scroll */
+  overflow:auto;
 }
 
 

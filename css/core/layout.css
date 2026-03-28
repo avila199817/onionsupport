@@ -32,7 +32,7 @@
   position:relative;
 }
 
-/* 🔥 FULL WIDTH */
+/* 🔥 FULL WIDTH (TABLAS / VISTAS GRANDES) */
 .container-fluid{
   width:100%;
   max-width:none;
@@ -45,7 +45,7 @@
 
 
 /* =========================
-   MAIN CONTENT (🔥 FIX REAL)
+   MAIN CONTENT (🔥 CORE FIX)
 ========================= */
 .main-content{
   position:relative;
@@ -54,7 +54,7 @@
   min-height:100dvh;
 
   margin-left:var(--sidebar-width);
-  width:calc(100% - var(--sidebar-width)); /* 🔥 CLAVE */
+  width:calc(100% - var(--sidebar-width));
 
   padding-top:var(--topbar-height);
 
@@ -64,8 +64,6 @@
   transition:
     margin-left var(--duration-slow) var(--ease-out),
     width var(--duration-slow) var(--ease-out);
-
-  will-change:margin-left, width;
 }
 
 /* SIDEBAR COLLAPSED */
@@ -80,6 +78,7 @@
 ========================= */
 .content-wrapper{
   flex:1;
+  min-height:0; /* 🔥 evita bugs de overflow */
 
   padding-block:var(--space-lg);
 
@@ -93,12 +92,18 @@
    🔥 TABLE MODE (AUTO)
 ========================= */
 
-/* elimina aire cuando hay tablas */
+/* elimina aire */
 .panel-content:has(.table-system){
+  display:flex;
+  flex-direction:column;
   padding:0;
 }
 
+/* elimina padding interno */
 .panel-content:has(.table-system) .content-wrapper{
+  flex:1;
+  min-height:0;
+
   padding:0;
   gap:0;
 }

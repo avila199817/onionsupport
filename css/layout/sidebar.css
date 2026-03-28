@@ -38,22 +38,11 @@
   align-items:center;
   justify-content:space-between;
   padding:var(--space-md);
+  position:relative;
 }
 
 .sidebar.collapsed .sidebar-top{
-  display:grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items:center;
-}
-
-.sidebar.collapsed .logo{
-  justify-self:center;
-  transform:translateX(-2px) scale(1.05);
-}
-
-.sidebar.collapsed .sidebar-toggle{
-  justify-self:end;
-  transform:translateX(-4px);
+  justify-content:center;
 }
 
 
@@ -75,6 +64,7 @@
   transition:
     transform var(--duration-fast) ease,
     background-color var(--duration-normal) ease;
+  z-index:2;
 }
 
 .logo img{
@@ -88,7 +78,7 @@
 
 
 /* =========================
-   TOGGLE
+   TOGGLE (FUSIÓN PRO)
 ========================= */
 .sidebar-toggle{
   width:32px;
@@ -105,12 +95,45 @@
   color:var(--muted);
 
   cursor:pointer;
-  position:relative;
+  position:absolute;
+
+  right:var(--space-md);
+  top:50%;
+  transform:translateY(-50%);
+
+  transition:
+    opacity .2s ease,
+    transform .2s ease,
+    background var(--duration-fast) ease;
 }
 
+/* NORMAL */
 .sidebar:not(.collapsed) .sidebar-toggle:hover{
   background:var(--sb-hover);
   color:var(--text);
+}
+
+
+/* =========================
+   MODO COLLAPSED (MAGIA)
+========================= */
+.sidebar.collapsed .sidebar-toggle{
+  right:50%;
+  top:50%;
+  transform:translate(50%, -50%);
+  opacity:0;
+  pointer-events:none;
+}
+
+/* cuando haces hover en el logo → aparece el botón */
+.sidebar.collapsed .logo:hover + .sidebar-toggle,
+.sidebar.collapsed .sidebar-toggle:hover{
+  opacity:1;
+  pointer-events:auto;
+  transform:translate(50%, -50%) scale(1.05);
+  background:var(--sb-hover);
+  color:var(--text);
+  z-index:3;
 }
 
 
@@ -201,17 +224,17 @@
 
 
 /* =========================
-   HOVER (TU ESTILO PERO FINO)
+   HOVER
 ========================= */
 .sidebar:not(.collapsed) .menu-item:hover{
   background:var(--sb-hover);
   color:var(--text);
-  transform:translateX(3px); /* 🔥 antes 4 → ahora más fino */
+  transform:translateX(3px);
 }
 
 
 /* =========================
-   ACTIVE (MEJORADO)
+   ACTIVE
 ========================= */
 .menu-item.active{
   background:color-mix(in srgb, var(--accent), transparent 85%);
@@ -314,7 +337,7 @@
 .chat-item:hover{
   background:var(--sb-hover);
   color:var(--text);
-  transform:translateX(2px); /* 🔥 antes 3 */
+  transform:translateX(2px);
 }
 
 .sidebar.collapsed .sidebar-section{

@@ -1,3 +1,7 @@
+/* =========================================================
+   LAYOUT — FULL PRO SAAS (FINAL SIN BUGS)
+========================================================= */
+
 /* =========================
    APP ROOT
 ========================= */
@@ -32,7 +36,7 @@
   position:relative;
 }
 
-/* 🔥 SINGLE SOURCE OF TRUTH */
+/* 🔥 FULL WIDTH */
 .container-fluid{
   width:100%;
   max-width:none;
@@ -45,13 +49,14 @@
 
 
 /* =========================
-   MAIN CONTENT (FIX CLEAN)
+   MAIN CONTENT (FIX REAL)
 ========================= */
 .main-content{
   position:relative;
   z-index:1;
 
-  min-height:100dvh;
+  flex:1;              /* 🔥 CLAVE */
+  min-height:0;        /* 🔥 CLAVE */
 
   margin-left:var(--sidebar-width);
   width:calc(100% - var(--sidebar-width));
@@ -87,18 +92,21 @@
   display:flex;
   flex-direction:column;
   gap:var(--space-lg);
+
+  overflow:hidden; /* 🔥 evita doble scroll */
 }
 
 
 /* =========================
-   🔥 TABLE MODE (SAFE)
+   TABLE MODE (SAFE)
 ========================= */
-
-/* SIN :has → clase explícita */
 .panel-content.table-mode{
   display:flex;
   flex-direction:column;
   padding:0;
+
+  flex:1;
+  min-height:0;
 }
 
 .panel-content.table-mode .content-wrapper{
@@ -165,18 +173,10 @@
 }
 
 @media (max-width:900px){
+
   .grid.cols-3,
   .grid.cols-4{
     grid-template-columns:repeat(2,1fr);
-  }
-}
-
-@media (max-width:600px){
-
-  .grid.cols-2,
-  .grid.cols-3,
-  .grid.cols-4{
-    grid-template-columns:1fr;
   }
 
   .main-content{
@@ -192,6 +192,16 @@
   .sidebar.open{
     transform:translateX(0);
   }
+}
+
+@media (max-width:600px){
+
+  .grid.cols-2,
+  .grid.cols-3,
+  .grid.cols-4{
+    grid-template-columns:1fr;
+  }
+
 }
 
 
@@ -234,7 +244,7 @@
 
 
 /* =========================
-   LOADING STATE (PAGE)
+   LOADING STATE
 ========================= */
 .page-loading{
   opacity:.6;

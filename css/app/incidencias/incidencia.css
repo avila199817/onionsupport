@@ -1,5 +1,5 @@
 /* =========================================================
-   INCIDENCIA CREATE — FULL PRO SAAS (ALIGN FIX FINAL)
+   INCIDENCIA CREATE — FULL PRO SAAS (HEADER FIX FINAL PRO)
 ========================================================= */
 
 /* =========================
@@ -67,14 +67,13 @@ html, body{
 
 
 /* =========================================================
-   HEADER (🔥 ALINEADO PERFECTO)
+   HEADER (🔥 FIX PRO)
 ========================================================= */
 .panel-content.incidencia-create .filters-row{
   display:flex;
   align-items:center;
-  gap:12px;
 
-  /* 🔥 MISMO HORIZONTAL QUE BODY */
+  /* 🔥 CLAVE: alineación con body */
   padding:14px 40px;
 
   background:var(--panel-bg);
@@ -83,16 +82,24 @@ html, body{
   flex-shrink:0;
 }
 
+/* 🔥 BLOQUE IZQUIERDO (greeting alineado) */
+.header-left{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+}
+
+/* 🔥 BOTÓN A LA DERECHA */
 #btn-back{
+  margin-left:auto;
+
   background:none;
   border:none;
   color:var(--text);
   font-size:13px;
   cursor:pointer;
-  opacity:.8;
 
-  /* 🔥 RESET */
-  margin:0;
+  opacity:.8;
   padding:0;
 }
 
@@ -103,7 +110,7 @@ html, body{
 .page-title{
   font-size:20px;
   font-weight:600;
-  margin:0; /* 🔥 evita desplazamiento */
+  margin:0;
 }
 
 .page-subtitle{
@@ -114,13 +121,12 @@ html, body{
 
 
 /* =========================================================
-   BODY (BASE DE ALINEACIÓN)
+   BODY
 ========================================================= */
 .incidencia-body{
   flex:1;
   display:flex;
 
-  /* 🔥 referencia base */
   padding:30px 40px;
 
   width:100%;
@@ -223,7 +229,7 @@ html, body{
 
 
 /* =========================================================
-   CTA BUTTON (🔥 SIN DESPLAZES RAROS)
+   CTA BUTTON
 ========================================================= */
 #btn-save-incidencia{
   padding:13px 26px;
@@ -239,8 +245,6 @@ html, body{
   cursor:pointer;
 
   box-shadow:0 10px 24px rgba(99,102,241,0.35);
-
-  /* 🔥 CLAVE: evita que se "vaya" */
   position:relative;
 }
 
@@ -347,7 +351,7 @@ html, body{
   }
 
   .panel-content.incidencia-create .filters-row{
-    padding:14px 20px; /* 🔥 mantiene alineación */
+    padding:14px 20px;
   }
 
   .incidencia-footer{

@@ -4,58 +4,62 @@
 
     <div class="panel-block">
 
-      <!-- =========================
-           FILTROS
-      ========================= -->
-      <div class="filters-row">
+      <!-- 🔥 TABLE SYSTEM WRAPPER -->
+      <div class="table-system facturas">
 
-        <input 
-          type="text"
-          id="search-factura"
-          placeholder="Buscar factura..."
-          autocomplete="off"
-        >
+        <!-- =========================
+             FILTROS
+        ========================= -->
+        <div class="filters-row">
 
-        <select id="filter-estado-factura">
-          <option value="">Estado</option>
-          <option value="pagada">Pagada</option>
-          <option value="pendiente">Pendiente</option>
-        </select>
+          <input 
+            type="text"
+            id="search-factura"
+            placeholder="Buscar factura..."
+            autocomplete="off"
+          >
 
-        <!-- CTA -->
-        <button id="btn-new-factura" class="btn-new-factura">
-          + Nueva
-        </button>
+          <select id="filter-estado-factura">
+            <option value="">Estado</option>
+            <option value="pagada">Pagada</option>
+            <option value="pendiente">Pendiente</option>
+          </select>
 
-      </div>
+          <button id="btn-new-factura" class="btn-new-factura">
+            + Nueva
+          </button>
 
-      <!-- =========================
-           TABLA
-      ========================= -->
-      <div class="table-container">
+        </div>
 
-        <table>
+        <!-- =========================
+             TABLA
+        ========================= -->
+        <div class="table-container">
 
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Cliente</th>
-              <th>Fecha</th>
-              <th>Importe</th>
-              <th>Estado</th>
-              <th>Acciones</th>
-            </tr>
-          </thead>
+          <table>
 
-          <tbody id="facturas-body">
-            <tr class="loading">
-              <td colspan="6">Cargando facturas...</td>
-            </tr>
-          </tbody>
+            <thead>
+              <tr>
+                <th class="col-id">ID</th>
+                <th class="col-main">Cliente</th>
+                <th class="col-date">Fecha</th>
+                <th class="col-main">Importe</th>
+                <th class="col-status">Estado</th>
+                <th class="col-actions">Acciones</th>
+              </tr>
+            </thead>
 
-        </table>
+            <tbody id="facturas-body">
+              <tr class="loading">
+                <td colspan="6">Cargando facturas...</td>
+              </tr>
+            </tbody>
 
-      </div>
+          </table>
+
+        </div>
+
+      </div> <!-- END table-system -->
 
     </div>
 

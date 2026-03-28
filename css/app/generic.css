@@ -1,7 +1,6 @@
 /* =========================================================
-   TABLE SYSTEM — FINAL PRO SAAS (NO CONFLICTS)
+   TABLE SYSTEM — FINAL PRO SAAS (CLEAN & STABLE)
 ========================================================= */
-
 
 /* =========================
    BASE
@@ -12,7 +11,6 @@
 
   width:100%;
   flex:1;
-
   min-height:0;
 }
 
@@ -101,7 +99,7 @@
 
   width:100%;
 
-  overflow-x:hidden; /* 🔥 evita scroll falso */
+  overflow-x:hidden;
   overflow-y:auto;
 
   background:var(--panel-bg);
@@ -116,8 +114,7 @@
   width:100%;
   min-width:0;
   border-collapse:collapse;
-
-  table-layout:fixed; /* 🔥 CLAVE PRO */
+  table-layout:fixed;
 }
 
 
@@ -176,10 +173,9 @@
 
 
 /* =========================
-   COLUMN BEHAVIOR (🔥 PRO)
+   COLUMN BEHAVIOR
 ========================= */
 
-/* compactos */
 .table-system .col-id,
 .table-system .col-status,
 .table-system .col-actions,
@@ -189,46 +185,27 @@
   color:var(--dim);
 }
 
-/* dominante */
 .table-system .col-main{
   white-space:normal;
   font-weight:500;
   line-height:1.4;
 }
 
-/* secundario */
 .table-system .col-secondary{
   white-space:nowrap;
 }
 
 
 /* =========================================================
-   COLUMN SIZES (🔥 JERARQUÍA REAL)
+   COLUMN SIZES
 ========================================================= */
 
-.table-system .col-id{
-  width:110px;
-}
-
-.table-system .col-main{
-  width:35%;
-}
-
-.table-system .col-secondary{
-  width:180px;
-}
-
-.table-system .col-status{
-  width:100px;
-}
-
-.table-system .col-date{
-  width:120px;
-}
-
-.table-system .col-actions{
-  width:120px;
-}
+.table-system .col-id{ width:110px; }
+.table-system .col-main{ width:35%; }
+.table-system .col-secondary{ width:180px; }
+.table-system .col-status{ width:100px; }
+.table-system .col-date{ width:120px; }
+.table-system .col-actions{ width:120px; }
 
 
 /* =========================================================
@@ -267,7 +244,6 @@
   min-width:34px;
 
   border-radius:50%;
-  overflow:hidden;
 
   display:flex;
   align-items:center;
@@ -283,7 +259,6 @@
 .table-system .user-info{
   display:flex;
   flex-direction:column;
-  line-height:1.2;
 }
 
 .table-system .user-name{
@@ -297,11 +272,41 @@
 
 
 /* =========================================================
-   BADGE VARIANTS
+   BADGES (🔥 UNIFICADO)
 ========================================================= */
 
-.table-system .badge{
-  font-size:10.5px;
+.badge{
+  display:inline-block;
+  padding:3px 8px;
+  border-radius:999px;
+  font-size:10px;
+  font-weight:500;
+}
+
+/* estados */
+.badge.success{
+  background:color-mix(in srgb, var(--success), transparent 85%);
+  color:var(--success);
+}
+
+.badge.warning{
+  background:color-mix(in srgb, var(--warning), transparent 85%);
+  color:var(--warning);
+}
+
+.badge.error{
+  background:color-mix(in srgb, var(--error), transparent 85%);
+  color:var(--error);
+}
+
+.badge.info{
+  background:color-mix(in srgb, var(--info), transparent 85%);
+  color:var(--info);
+}
+
+.badge.neutral{
+  background:color-mix(in srgb, var(--dim), transparent 85%);
+  color:var(--dim);
 }
 
 
@@ -311,7 +316,6 @@
 
 .table-system .actions{
   display:flex;
-  align-items:center;
   gap:6px;
 }
 
@@ -321,17 +325,15 @@
 
   font-size:11px;
 
-  border:none;
-  cursor:pointer;
-
+  border:1px solid var(--card-border);
   background:var(--card-bg);
   color:var(--text);
 
-  border:1px solid var(--card-border);
+  cursor:pointer;
 
   transition:
-    background var(--duration-fast) ease,
-    transform var(--duration-fast) ease;
+    transform var(--duration-fast),
+    background var(--duration-fast);
 }
 
 .table-system .actions button:hover{
@@ -345,8 +347,8 @@
 ========================================================= */
 
 .table-system .table-container::-webkit-scrollbar{
-  height:8px;
   width:8px;
+  height:8px;
 }
 
 .table-system .table-container::-webkit-scrollbar-thumb{
@@ -354,122 +356,36 @@
   border-radius:6px;
 }
 
+
 /* =========================================================
-   FACTURAS — AJUSTE PRO (EXTENSION TABLE SYSTEM)
+   FACTURAS (EXTENSIÓN)
 ========================================================= */
 
-.table-system.facturas table{
-  table-layout:fixed;
-}
+.table-system.facturas .col-main{ width:40%; }
+.table-system.facturas .col-date{ width:140px; }
+.table-system.facturas .col-status{ width:120px; }
+.table-system.facturas .col-actions{ width:160px; }
 
-
-/* =========================
-   COLUMNAS
-========================= */
-
-/* ID compacto */
-.table-system.facturas .col-id{
-  width:130px;
-}
-
-/* CLIENTE dominante */
-.table-system.facturas .col-main{
-  width:40%;
-}
-
-/* FECHA */
-.table-system.facturas .col-date{
-  width:140px;
-}
-
-/* IMPORTE (🔥 importante) */
 .table-system.facturas td:nth-child(4){
-  width:140px;
   font-weight:600;
-  color:var(--text);
-}
-
-/* ESTADO */
-.table-system.facturas .col-status{
-  width:120px;
-}
-
-/* ACCIONES */
-.table-system.facturas .col-actions{
-  width:160px;
 }
 
 
-/* =========================
-   CLIENTE CELL (🔥 PRO)
-========================= */
-
-.table-system.facturas .cell-user{
-  gap:12px;
-}
-
-.table-system.facturas .user-name{
-  font-size:13.5px;
-}
-
-.table-system.facturas .user-sub{
-  font-size:11px;
-  color:var(--dim);
-}
-
-
-/* =========================
-   IMPORTE (VISUAL PRO)
-========================= */
-
-.table-system.facturas td:nth-child(4){
-  letter-spacing:.2px;
-}
-
-
-/* =========================
-   ACCIONES PRO
-========================= */
-
-.table-system.facturas .actions{
-  justify-content:flex-start;
-}
-
-.table-system.facturas .actions button{
-  padding:5px 10px;
-  font-size:11px;
-}
-
-
-/* =========================
-   BADGE MEJORADO
-========================= */
-
-.table-system.facturas .badge{
-  font-size:10px;
-  padding:3px 8px;
-}
-
-/* =========================
-   FORM SYSTEM
-========================= */
+/* =========================================================
+   FORM SYSTEM (LIGERO, NO INVASIVO)
+========================================================= */
 
 .form-wrapper{
-  padding:var(--space-lg);
-  max-width:720px;
+  padding:20px;
+  max-width:700px;
 }
 
 .form-grid{
   display:flex;
   flex-direction:column;
-  gap:var(--space-md);
+  gap:14px;
 }
 
-.form-actions{
-  margin-top:var(--space-sm);
-}
-
-/* inputs consistentes */
 .form-grid input,
 .form-grid textarea,
 .form-grid select{
@@ -480,23 +396,12 @@
 
   background:var(--card-bg);
   color:var(--text);
-
-  font-size:14px;
-
-  transition:
-    border-color var(--duration-normal) ease,
-    box-shadow var(--duration-normal) ease;
 }
 
 .form-grid textarea{
   resize:vertical;
 }
 
-.form-grid input:focus,
-.form-grid textarea:focus,
-.form-grid select:focus{
-  border-color:var(--accent);
-
-  box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--accent), transparent 85%);
+.form-actions{
+  margin-top:10px;
 }

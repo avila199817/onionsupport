@@ -2,8 +2,18 @@
 
   <div class="container-fluid">
 
-    <!-- HEADER -->
-    <div class="dashboard-header"></div>
+    <!-- =========================
+         HEADER
+    ========================= -->
+    <div class="dashboard-header">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Incidencias</h1>
+          <p class="page-subtitle">Gestión y seguimiento de incidencias</p>
+        </div>
+      </div>
+    </div>
+
 
     <!-- =========================
          GRID PRINCIPAL
@@ -12,40 +22,63 @@
 
       <div class="panel-block table-block">
 
-        <!-- 🔥 TABLE SYSTEM WRAPPER -->
+        <!-- =========================
+             TABLE SYSTEM
+        ========================= -->
         <div class="table-system incidencias">
+
 
           <!-- =========================
                FILTROS
           ========================= -->
           <div class="filters-row">
 
-            <input 
-              type="text"
-              id="search-incidencia"
-              placeholder="Buscar incidencia..."
-              autocomplete="off"
-            >
+            <!-- SEARCH -->
+            <div class="filter-group">
+              <label for="search-incidencia" class="sr-only">Buscar incidencia</label>
+              <input 
+                type="text"
+                id="search-incidencia"
+                placeholder="Buscar incidencia..."
+                autocomplete="off"
+              >
+            </div>
 
-            <select id="filter-status">
-              <option value="">Estado</option>
-              <option value="abierta">Abierta</option>
-              <option value="progreso">En progreso</option>
-              <option value="cerrada">Cerrada</option>
-            </select>
+            <!-- STATUS -->
+            <div class="filter-group">
+              <label for="filter-status" class="sr-only">Filtrar por estado</label>
+              <select id="filter-status">
+                <option value="">Estado</option>
+                <option value="abierta">Abierta</option>
+                <option value="progreso">En progreso</option>
+                <option value="cerrada">Cerrada</option>
+              </select>
+            </div>
 
-            <select id="filter-priority">
-              <option value="">Prioridad</option>
-              <option value="alta">Alta</option>
-              <option value="media">Media</option>
-              <option value="baja">Baja</option>
-            </select>
+            <!-- PRIORITY -->
+            <div class="filter-group">
+              <label for="filter-priority" class="sr-only">Filtrar por prioridad</label>
+              <select id="filter-priority">
+                <option value="">Prioridad</option>
+                <option value="alta">Alta</option>
+                <option value="media">Media</option>
+                <option value="baja">Baja</option>
+              </select>
+            </div>
 
-            <button type="button" id="btn-new" class="btn-new-incidencia">
-              + Nuevo
-            </button>
+            <!-- ACTION -->
+            <div class="filter-actions">
+              <button 
+                type="button" 
+                id="btn-new" 
+                class="btn-new-incidencia interactive"
+              >
+                + Nueva incidencia
+              </button>
+            </div>
 
           </div>
+
 
           <!-- =========================
                TABLA
@@ -54,6 +87,7 @@
 
             <table>
 
+              <!-- HEADER -->
               <thead>
                 <tr>
                   <th class="col-id">ID<div class="resizer"></div></th>
@@ -67,17 +101,24 @@
                 </tr>
               </thead>
 
+              <!-- BODY -->
               <tbody id="incidencias-body">
+
+                <!-- LOADING STATE -->
                 <tr class="loading">
-                  <td colspan="8">Cargando incidencias...</td>
+                  <td colspan="8">
+                    <span class="loading-text">Cargando incidencias...</span>
+                  </td>
                 </tr>
+
               </tbody>
 
             </table>
 
           </div>
 
-        </div> <!-- END table-system -->
+        </div>
+        <!-- END table-system -->
 
       </div>
 

@@ -29,6 +29,7 @@ function init(){
 
   setGreeting();
   bindEvents();
+  loadUserIncidencias(); // 🔥 PANEL DERECHO
 
   Onion.onCleanup(()=>{
     initialized = false;
@@ -104,11 +105,9 @@ function bindEvents(){
 function handleFiles(e){
 
   const files = Array.from(e.target.files || []);
-
   if(!files.length) return;
 
   selectedFiles = [...selectedFiles, ...files];
-
   renderFiles();
 
 }
@@ -125,12 +124,11 @@ function renderFiles(){
 
   list.innerHTML = selectedFiles.map((f, i)=>`
     <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
-      <span>📎 ${f.name}</span>
+      <span>📎 ${escapeHTML(f.name)}</span>
       <button data-remove="${i}" style="background:none;border:none;color:var(--error);cursor:pointer;">✕</button>
     </div>
   `).join("");
 
-  // remove file
   list.querySelectorAll("[data-remove]").forEach(btn=>{
     btn.addEventListener("click", ()=>{
       const index = Number(btn.dataset.remove);
@@ -138,6 +136,62 @@ function renderFiles(){
       renderFiles();
     });
   });
+
+}
+
+/* =========================
+   LOAD USER TICKETS
+========================= */
+
+async function loadUserIncidencias(){
+
+  const container = $("#incidencias-user-list");
+  if(!container) return;
+
+  container.innerHTML = `<div style="color:var(--dim); font-size:12px;">Cargando...</div>`;
+
+  try{
+
+    const data = await Onion.fetch(
+      Onion.config.API + "/tickets?mine=true&status=open"
+    );
+
+    if(!data || !data.length){
+      container.innerHTML = `
+        <div style="color:var(--dim); font-size:12px;">
+          No tienes incidencias abiertas
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = data.map(i => `
+      <div class="history-item" data-id="${i.id}">
+        
+        <div class="history-title">
+          ${escapeHTML(i.subject || "Sin asunto")}
+        </div>
+
+        <div class="history-meta">
+          <span>${formatEstado(i.status)}</span>
+          <span>${formatFecha(i.createdAt)}</span>
+        </div>
+
+      </div>
+    `).join("");
+
+    // NAV
+    container.querySelectorAll(".history-item").forEach(el=>{
+      el.addEventListener("click", ()=>{
+        const id = el.dataset.id;
+        Onion.router.navigate("/incidencias/detalle?id=" + id);
+      });
+    });
+
+  }catch(err){
+    console.error("💥 Error cargando incidencias:", err);
+    container.innerHTML = "Error cargando incidencias";
+  }
 
 }
 
@@ -215,7 +269,7 @@ async function saveIncidencia(){
 }
 
 /* =========================
-   FORM HELPERS
+   HELPERS
 ========================= */
 
 function resetForm(){
@@ -264,10 +318,6 @@ function clearErrors(){
 
 }
 
-/* =========================
-   TOAST
-========================= */
-
 function showToast(message, type){
 
   const el = document.createElement("div");
@@ -281,6 +331,24 @@ function showToast(message, type){
     setTimeout(()=> el.remove(), 300);
   }, 2200);
 
+}
+
+function formatEstado(s){
+  if(s === "closed") return "Cerrada";
+  if(s === "in_progress") return "En progreso";
+  return "Abierta";
+}
+
+function formatFecha(f){
+  if(!f) return "--";
+  return new Date(f).toLocaleDateString("es-ES");
+}
+
+function escapeHTML(str){
+  return String(str)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;");
 }
 
 /* =========================

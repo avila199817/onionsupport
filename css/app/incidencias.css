@@ -1,0 +1,294 @@
+/* =========================================================
+   INCIDENCIAS — PRO SAAS PANEL (AISLADO)
+========================================================= */
+
+.panel-content.incidencias{
+  display:flex;
+  flex-direction:column;
+  height:100%;
+  width:100%;
+}
+
+
+/* =========================================================
+   TABLE WRAPPER
+========================================================= */
+
+.panel-content.incidencias .table-system{
+  display:flex;
+  flex-direction:column;
+  flex:1;
+  min-height:0;
+  width:100%;
+}
+
+
+/* =========================================================
+   FILTERS (HEADER)
+========================================================= */
+
+.panel-content.incidencias .filters-row{
+  display:flex;
+  align-items:center;
+  gap:10px;
+
+  padding:12px 16px;
+
+  background:var(--panel-bg);
+  border-bottom:1px solid var(--panel-border);
+}
+
+.panel-content.incidencias .filters-row input{
+  flex:1;
+  min-width:220px;
+}
+
+.panel-content.incidencias .filters-row input,
+.panel-content.incidencias .filters-row select{
+  padding:10px 12px;
+
+  border-radius:8px;
+  border:1px solid var(--card-border);
+
+  background:var(--card-bg);
+  color:var(--text);
+
+  font-size:13px;
+}
+
+.panel-content.incidencias .filters-row select{
+  min-width:140px;
+}
+
+.panel-content.incidencias .btn-new-incidencia{
+  margin-left:auto;
+
+  padding:10px 18px;
+  border-radius:999px;
+
+  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
+  color:#fff;
+
+  font-weight:600;
+
+  border:none;
+  cursor:pointer;
+
+  box-shadow:0 6px 18px rgba(99,102,241,0.35);
+  transition:all .2s ease;
+}
+
+.panel-content.incidencias .btn-new-incidencia:hover{
+  transform:translateY(-1px);
+  box-shadow:0 10px 26px rgba(99,102,241,0.45);
+}
+
+
+/* =========================================================
+   TABLE CONTAINER
+========================================================= */
+
+.panel-content.incidencias .table-container{
+  flex:1;
+  min-height:0;
+  overflow-y:auto;
+  overflow-x:hidden;
+
+  background:var(--panel-bg);
+}
+
+
+/* =========================================================
+   TABLE BASE
+========================================================= */
+
+.panel-content.incidencias table{
+  width:100%;
+  border-collapse:collapse;
+  table-layout:fixed;
+}
+
+.panel-content.incidencias thead{
+  position:sticky;
+  top:0;
+  z-index:3;
+  background:var(--panel-bg);
+}
+
+.panel-content.incidencias th{
+  padding:10px 14px;
+
+  text-align:left;
+
+  border-bottom:1px solid var(--panel-border);
+
+  color:var(--dim);
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:.3px;
+
+  white-space:nowrap;
+}
+
+.panel-content.incidencias td{
+  padding:12px 14px;
+
+  border-bottom:1px solid var(--panel-border);
+
+  font-size:13.5px;
+  color:var(--text);
+
+  vertical-align:middle;
+
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+
+/* =========================================================
+   COLUMN SYSTEM (PRECISO)
+========================================================= */
+
+.panel-content.incidencias .col-id{
+  width:140px;
+  font-size:11px;
+  color:var(--dim);
+}
+
+.panel-content.incidencias .col-main{
+  width:36%;
+  font-weight:500;
+  white-space:normal;
+  line-height:1.4;
+}
+
+.panel-content.incidencias .col-secondary{
+  width:180px;
+}
+
+.panel-content.incidencias .col-status{
+  width:110px;
+}
+
+.panel-content.incidencias .col-date{
+  width:130px;
+}
+
+
+/* =========================================================
+   ROWS
+========================================================= */
+
+.panel-content.incidencias tbody tr{
+  transition:all .15s ease;
+}
+
+.panel-content.incidencias tbody tr:nth-child(even){
+  background:color-mix(in srgb, var(--panel-bg), #fff 2%);
+}
+
+.panel-content.incidencias tbody tr:hover{
+  background:color-mix(in srgb, var(--panel-bg), #fff 6%);
+  transform:translateX(2px);
+}
+
+
+/* =========================================================
+   USER CELL
+========================================================= */
+
+.panel-content.incidencias .cell-user{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+.panel-content.incidencias .table-avatar{
+  width:34px;
+  height:34px;
+  min-width:34px;
+
+  border-radius:50%;
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
+  color:#fff;
+
+  font-size:12px;
+  font-weight:600;
+}
+
+.panel-content.incidencias .user-info{
+  display:flex;
+  flex-direction:column;
+}
+
+.panel-content.incidencias .user-name{
+  font-weight:600;
+}
+
+.panel-content.incidencias .user-sub{
+  font-size:11px;
+  color:var(--dim);
+}
+
+
+/* =========================================================
+   BADGES (PRECISOS)
+========================================================= */
+
+.panel-content.incidencias .badge{
+  padding:3px 9px;
+  border-radius:999px;
+  font-size:10px;
+  font-weight:500;
+}
+
+/* estados */
+.panel-content.incidencias .badge.cerrada{
+  color:var(--success);
+  background:color-mix(in srgb, var(--success), transparent 85%);
+}
+
+.panel-content.incidencias .badge.abierta{
+  color:var(--info);
+  background:color-mix(in srgb, var(--info), transparent 85%);
+}
+
+.panel-content.incidencias .badge.progreso{
+  color:var(--warning);
+  background:color-mix(in srgb, var(--warning), transparent 85%);
+}
+
+/* prioridad */
+.panel-content.incidencias .badge.alta{
+  color:var(--error);
+  background:color-mix(in srgb, var(--error), transparent 85%);
+}
+
+.panel-content.incidencias .badge.media{
+  color:var(--warning);
+  background:color-mix(in srgb, var(--warning), transparent 85%);
+}
+
+.panel-content.incidencias .badge.baja{
+  color:var(--dim);
+  background:color-mix(in srgb, var(--dim), transparent 85%);
+}
+
+
+/* =========================================================
+   SCROLLBAR
+========================================================= */
+
+.panel-content.incidencias .table-container::-webkit-scrollbar{
+  width:8px;
+}
+
+.panel-content.incidencias .table-container::-webkit-scrollbar-thumb{
+  background:var(--scrollbar-thumb);
+  border-radius:6px;
+}

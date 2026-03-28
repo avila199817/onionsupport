@@ -32,20 +32,20 @@
   position:relative;
 }
 
-/* 🔥 FULL WIDTH (TABLAS / VISTAS GRANDES) */
+/* 🔥 FULL WIDTH */
 .container-fluid{
   width:100%;
   max-width:none;
 
   margin:0;
-  padding-inline:var(--space-lg);
+  padding-inline:16px; /* 🔥 control real */
 
   position:relative;
 }
 
 
 /* =========================
-   MAIN CONTENT (🔥 CORE FIX)
+   MAIN CONTENT (🔥 FIX REAL)
 ========================= */
 .main-content{
   position:relative;
@@ -54,7 +54,7 @@
   min-height:100dvh;
 
   margin-left:var(--sidebar-width);
-  width:calc(100% - var(--sidebar-width));
+  width:100%; /* ✅ FIX CLAVE */
 
   padding-top:var(--topbar-height);
 
@@ -62,14 +62,14 @@
   flex-direction:column;
 
   transition:
-    margin-left var(--duration-slow) var(--ease-out),
-    width var(--duration-slow) var(--ease-out);
+    margin-left var(--duration-slow) var(--ease-out);
+
+  min-width:0; /* 🔥 evita bugs flex */
 }
 
 /* SIDEBAR COLLAPSED */
 .sidebar.collapsed ~ .main-content{
   margin-left:var(--sidebar-collapsed);
-  width:calc(100% - var(--sidebar-collapsed));
 }
 
 
@@ -78,7 +78,7 @@
 ========================= */
 .content-wrapper{
   flex:1;
-  min-height:0; /* 🔥 evita bugs de overflow */
+  min-height:0;
 
   padding-block:var(--space-lg);
 
@@ -180,7 +180,6 @@
 
   .main-content{
     margin-left:0;
-    width:100%;
   }
 
   .sidebar{

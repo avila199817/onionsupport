@@ -1,86 +1,75 @@
 /* =========================================================
-   TABLE SYSTEM — FINAL PRO SAAS (CLEAN & STABLE)
+   CORE LAYOUT
 ========================================================= */
 
-/* =========================
-   BASE
-========================= */
+.panel-content{
+  display:flex;
+  flex-direction:column;
+  height:100%;
+  width:100%;
+}
+
+
+/* =========================================================
+   TABLE SYSTEM — PRO SAAS
+========================================================= */
+
 .table-system{
   display:flex;
   flex-direction:column;
-
   width:100%;
   flex:1;
   min-height:0;
 }
 
-
-/* =========================================================
+/* =========================
    FILTERS
-========================================================= */
-
+========================= */
 .table-system .filters-row{
   display:flex;
   align-items:center;
   gap:10px;
-
   width:100%;
 
-  padding:
-    calc(10px * var(--density-factor))
-    calc(14px * var(--density-factor));
+  padding:10px 14px;
 
   background:var(--panel-bg);
   border-bottom:1px solid var(--panel-border);
-
   flex-wrap:wrap;
 }
 
-/* INPUT FLEX */
 .table-system .filters-row input{
   flex:1;
   min-width:160px;
 }
 
-/* INPUTS */
 .table-system .filters-row input,
 .table-system .filters-row select{
-  padding:
-    calc(10px * var(--density-factor))
-    calc(12px * var(--density-factor));
+  padding:10px 12px;
 
   border-radius:8px;
-
   background:var(--card-bg);
   border:1px solid var(--card-border);
   color:var(--text);
-
   font-size:13px;
 }
 
-/* BUTTON */
 .table-system .filters-row button{
   margin-left:auto;
 
-  padding:
-    calc(10px * var(--density-factor))
-    calc(16px * var(--density-factor));
-
+  padding:10px 16px;
   border-radius:999px;
 
   background:linear-gradient(135deg,var(--accent),var(--accent-hover));
   color:#fff;
 
   font-weight:500;
-
   border:none;
   cursor:pointer;
 
   box-shadow:0 6px 18px rgba(99,102,241,0.35);
 
-  transition:
-    transform var(--duration-fast) ease,
-    box-shadow var(--duration-normal) ease;
+  transition:all .2s ease;
 }
 
 .table-system .filters-row button:hover{
@@ -88,134 +77,67 @@
   box-shadow:0 10px 24px rgba(99,102,241,0.45);
 }
 
-
-/* =========================================================
-   TABLE CONTAINER
-========================================================= */
+/* =========================
+   TABLE
+========================= */
 
 .table-system .table-container{
   flex:1;
   min-height:0;
-
   width:100%;
-
-  overflow-x:hidden;
   overflow-y:auto;
-
+  overflow-x:hidden;
   background:var(--panel-bg);
 }
 
-
-/* =========================================================
-   TABLE BASE
-========================================================= */
-
 .table-system table{
   width:100%;
-  min-width:0;
   border-collapse:collapse;
   table-layout:fixed;
 }
-
-
-/* =========================================================
-   HEADER
-========================================================= */
 
 .table-system thead{
   position:sticky;
   top:0;
   z-index:5;
-
   background:var(--panel-bg);
 }
 
 .table-system th{
-  padding:
-    calc(10px * var(--density-factor))
-    calc(14px * var(--density-factor));
-
+  padding:10px 14px;
   text-align:left;
-
   border-bottom:1px solid var(--panel-border);
 
   color:var(--dim);
   font-size:11px;
   text-transform:uppercase;
-  letter-spacing:.3px;
-
   white-space:nowrap;
 }
 
-
-/* =========================================================
-   CELLS
-========================================================= */
-
-.table-system th,
 .table-system td{
-  overflow:hidden;
-  text-overflow:ellipsis;
-}
-
-.table-system td{
-  padding:
-    calc(10px * var(--density-factor))
-    calc(12px * var(--density-factor));
-
+  padding:12px;
   border-bottom:1px solid var(--panel-border);
-
-  vertical-align:middle;
-
   font-size:13.5px;
   color:var(--text);
 }
 
-
 /* =========================
-   COLUMN BEHAVIOR
+   COLUMN SYSTEM
 ========================= */
 
-.table-system .col-id,
-.table-system .col-status,
-.table-system .col-actions,
-.table-system .col-date{
-  white-space:nowrap;
-  font-size:12px;
-  color:var(--dim);
-}
+.col-id{ width:110px; white-space:nowrap; }
+.col-main{ width:35%; white-space:normal; font-weight:500; }
+.col-secondary{ width:180px; white-space:nowrap; }
+.col-status{ width:110px; white-space:nowrap; }
+.col-date{ width:130px; white-space:nowrap; }
+.col-actions{ width:140px; white-space:nowrap; }
 
-.table-system .col-main{
-  white-space:normal;
-  font-weight:500;
-  line-height:1.4;
-}
-
-.table-system .col-secondary{
-  white-space:nowrap;
-}
-
-
-/* =========================================================
-   COLUMN SIZES
-========================================================= */
-
-.table-system .col-id{ width:110px; }
-.table-system .col-main{ width:35%; }
-.table-system .col-secondary{ width:180px; }
-.table-system .col-status{ width:100px; }
-.table-system .col-date{ width:120px; }
-.table-system .col-actions{ width:120px; }
-
-
-/* =========================================================
+/* =========================
    ROWS
-========================================================= */
+========================= */
 
 .table-system tbody tr{
-  transition:
-    background var(--duration-fast) ease,
-    transform var(--duration-fast) ease;
+  transition:all .15s ease;
 }
 
 .table-system tbody tr:nth-child(even){
@@ -227,24 +149,22 @@
   transform:translateX(2px);
 }
 
-
-/* =========================================================
+/* =========================
    USER CELL
-========================================================= */
+========================= */
 
-.table-system .cell-user{
+.cell-user{
   display:flex;
   align-items:center;
   gap:10px;
 }
 
-.table-system .table-avatar{
+.table-avatar{
   width:34px;
   height:34px;
   min-width:34px;
 
   border-radius:50%;
-
   display:flex;
   align-items:center;
   justify-content:center;
@@ -256,73 +176,49 @@
   font-weight:600;
 }
 
-.table-system .user-info{
+.user-info{
   display:flex;
   flex-direction:column;
 }
 
-.table-system .user-name{
+.user-name{
   font-weight:600;
 }
 
-.table-system .user-sub{
+.user-sub{
   font-size:11px;
   color:var(--dim);
 }
 
-
-/* =========================================================
-   BADGES (🔥 UNIFICADO)
-========================================================= */
+/* =========================
+   BADGES
+========================= */
 
 .badge{
-  display:inline-block;
   padding:3px 8px;
   border-radius:999px;
   font-size:10px;
   font-weight:500;
 }
 
-/* estados */
-.badge.success{
-  background:color-mix(in srgb, var(--success), transparent 85%);
-  color:var(--success);
-}
+.badge.success{ color:var(--success); background:color-mix(in srgb,var(--success),transparent 85%); }
+.badge.warning{ color:var(--warning); background:color-mix(in srgb,var(--warning),transparent 85%); }
+.badge.error{ color:var(--error); background:color-mix(in srgb,var(--error),transparent 85%); }
+.badge.info{ color:var(--info); background:color-mix(in srgb,var(--info),transparent 85%); }
+.badge.neutral{ color:var(--dim); background:color-mix(in srgb,var(--dim),transparent 85%); }
 
-.badge.warning{
-  background:color-mix(in srgb, var(--warning), transparent 85%);
-  color:var(--warning);
-}
-
-.badge.error{
-  background:color-mix(in srgb, var(--error), transparent 85%);
-  color:var(--error);
-}
-
-.badge.info{
-  background:color-mix(in srgb, var(--info), transparent 85%);
-  color:var(--info);
-}
-
-.badge.neutral{
-  background:color-mix(in srgb, var(--dim), transparent 85%);
-  color:var(--dim);
-}
-
-
-/* =========================================================
+/* =========================
    ACTIONS
-========================================================= */
+========================= */
 
-.table-system .actions{
+.actions{
   display:flex;
   gap:6px;
 }
 
-.table-system .actions button{
+.actions button{
   padding:6px 10px;
   border-radius:6px;
-
   font-size:11px;
 
   border:1px solid var(--card-border);
@@ -330,54 +226,34 @@
   color:var(--text);
 
   cursor:pointer;
-
-  transition:
-    transform var(--duration-fast),
-    background var(--duration-fast);
+  transition:all .15s ease;
 }
 
-.table-system .actions button:hover{
+.actions button:hover{
   transform:translateY(-1px);
-  background:color-mix(in srgb, var(--card-bg), #fff 6%);
+  background:color-mix(in srgb,var(--card-bg),#fff 6%);
 }
 
-
-/* =========================================================
+/* =========================
    SCROLLBAR
-========================================================= */
+========================= */
 
-.table-system .table-container::-webkit-scrollbar{
+.table-container::-webkit-scrollbar{
   width:8px;
-  height:8px;
 }
 
-.table-system .table-container::-webkit-scrollbar-thumb{
+.table-container::-webkit-scrollbar-thumb{
   background:var(--scrollbar-thumb);
   border-radius:6px;
 }
 
 
 /* =========================================================
-   FACTURAS (EXTENSIÓN)
-========================================================= */
-
-.table-system.facturas .col-main{ width:40%; }
-.table-system.facturas .col-date{ width:140px; }
-.table-system.facturas .col-status{ width:120px; }
-.table-system.facturas .col-actions{ width:160px; }
-
-.table-system.facturas td:nth-child(4){
-  font-weight:600;
-}
-
-
-/* =========================================================
-   FORM SYSTEM (LIGERO, NO INVASIVO)
+   FORM SYSTEM
 ========================================================= */
 
 .form-wrapper{
-  padding:20px;
-  max-width:700px;
+  width:100%;
 }
 
 .form-grid{
@@ -387,8 +263,8 @@
 }
 
 .form-grid input,
-.form-grid textarea,
-.form-grid select{
+.form-grid textarea{
+  width:100%;
   padding:12px 14px;
 
   border-radius:10px;
@@ -396,107 +272,94 @@
 
   background:var(--card-bg);
   color:var(--text);
+
+  transition:all .2s ease;
 }
 
 .form-grid textarea{
   resize:vertical;
 }
 
-.form-actions{
-  margin-top:10px;
+.form-grid input:focus,
+.form-grid textarea:focus{
+  border-color:var(--accent);
+  box-shadow:0 0 0 2px color-mix(in srgb,var(--accent),transparent 85%);
 }
+
 
 /* =========================================================
-   INCIDENCIA CREATE — PRO SAAS
+   INCIDENCIA — FULL WIDTH PRO
 ========================================================= */
 
-.panel-content.incidencia-create{
-  display:flex;
-  flex-direction:column;
-  height:100%;
-}
-
-/* centrar contenido */
-.panel-content.incidencia-create .form-wrapper{
+.incidencia-body{
+  padding:30px 40px;
   width:100%;
-  max-width:720px;
-  margin:40px auto;
-  padding:0;
 }
 
-/* card real */
-.panel-content.incidencia-create .form-grid{
-  background:var(--panel-bg);
-  border:1px solid var(--panel-border);
-  border-radius:14px;
-
-  padding:20px;
-
-  box-shadow:
-    0 10px 30px rgba(0,0,0,0.25);
-}
-
-/* inputs más finos */
-.panel-content.incidencia-create .form-grid input,
-.panel-content.incidencia-create .form-grid textarea{
-  background:color-mix(in srgb, var(--card-bg), #000 10%);
-}
-
-/* focus PRO */
-.panel-content.incidencia-create input:focus,
-.panel-content.incidencia-create textarea:focus{
-  border-color:var(--accent);
-  box-shadow:0 0 0 2px color-mix(in srgb, var(--accent), transparent 85%);
-}
-
-/* botón principal */
-.panel-content.incidencia-create #btn-save-incidencia{
+.incidencia-form{
   width:100%;
-
-  padding:12px;
-
-  border-radius:10px;
-
-  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
-  color:#fff;
-
-  font-weight:600;
-
-  border:none;
-  cursor:pointer;
-
-  box-shadow:0 8px 20px rgba(99,102,241,0.35);
-
-  transition:
-    transform .15s ease,
-    box-shadow .2s ease;
+  max-width:900px;
 }
 
-.panel-content.incidencia-create #btn-save-incidencia:hover{
-  transform:translateY(-1px);
-  box-shadow:0 12px 28px rgba(99,102,241,0.45);
+.incidencia-form input,
+.incidencia-form textarea{
+  background:color-mix(in srgb,var(--card-bg),#000 10%);
 }
 
-/* botón adjuntos */
+.incidencia-files{
+  margin-top:6px;
+  margin-bottom:16px;
+}
+
 #btn-attach{
   background:none;
   border:none;
   color:var(--accent);
   cursor:pointer;
   font-size:13px;
-  padding:0;
 }
 
 #btn-attach:hover{
   text-decoration:underline;
 }
 
-/* header más limpio */
-.panel-content.incidencia-create .filters-row{
-  border-bottom:1px solid var(--panel-border);
+.incidencia-footer{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-top:10px;
 }
 
-/* título */
+.incidencia-hint{
+  font-size:12px;
+  color:var(--dim);
+}
+
+#btn-save-incidencia{
+  padding:12px 22px;
+  border-radius:10px;
+
+  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
+  color:#fff;
+
+  font-weight:600;
+  border:none;
+  cursor:pointer;
+
+  box-shadow:0 8px 20px rgba(99,102,241,0.35);
+
+  transition:all .2s ease;
+}
+
+#btn-save-incidencia:hover{
+  transform:translateY(-1px);
+  box-shadow:0 12px 28px rgba(99,102,241,0.45);
+}
+
+/* =========================
+   TITLES
+========================= */
+
 .page-title{
   font-size:20px;
   font-weight:600;

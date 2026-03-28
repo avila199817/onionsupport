@@ -12,68 +12,72 @@
 
       <div class="panel-block table-block">
 
-        <!-- =========================
-             FILTROS
-        ========================= -->
-        <div class="filters-row">
+        <!-- 🔥 TABLE SYSTEM WRAPPER -->
+        <div class="table-system incidencias">
 
-          <input 
-            type="text"
-            id="search-incidencia"
-            placeholder="Buscar incidencia..."
-            autocomplete="off"
-          >
+          <!-- =========================
+               FILTROS
+          ========================= -->
+          <div class="filters-row">
 
-          <select id="filter-status">
-            <option value="">Estado</option>
-            <option value="abierta">Abierta</option>
-            <option value="progreso">En progreso</option>
-            <option value="cerrada">Cerrada</option>
-          </select>
+            <input 
+              type="text"
+              id="search-incidencia"
+              placeholder="Buscar incidencia..."
+              autocomplete="off"
+            >
 
-          <select id="filter-priority">
-            <option value="">Prioridad</option>
-            <option value="alta">Alta</option>
-            <option value="media">Media</option>
-            <option value="baja">Baja</option>
-          </select>
+            <select id="filter-status">
+              <option value="">Estado</option>
+              <option value="abierta">Abierta</option>
+              <option value="progreso">En progreso</option>
+              <option value="cerrada">Cerrada</option>
+            </select>
 
-          <!-- 🔥 BOTÓN NUEVO (IMPORTANTE ID) -->
-          <button type="button" id="btn-new" class="btn-new-incidencia">
-            + Nuevo
-          </button>
+            <select id="filter-priority">
+              <option value="">Prioridad</option>
+              <option value="alta">Alta</option>
+              <option value="media">Media</option>
+              <option value="baja">Baja</option>
+            </select>
 
-        </div>
+            <button type="button" id="btn-new" class="btn-new-incidencia">
+              + Nuevo
+            </button>
 
-        <!-- =========================
-             TABLA
-        ========================= -->
-        <div class="table-container">
+          </div>
 
-          <table>
+          <!-- =========================
+               TABLA
+          ========================= -->
+          <div class="table-container">
 
-            <thead>
-              <tr>
-                <th>ID<div class="resizer"></div></th>
-                <th>Asunto<div class="resizer"></div></th>
-                <th>Cliente<div class="resizer"></div></th>
-                <th>Técnico<div class="resizer"></div></th>
-                <th>Estado<div class="resizer"></div></th>
-                <th>Prioridad<div class="resizer"></div></th>
-                <th>Fecha<div class="resizer"></div></th>
-                <th>Fecha cierre<div class="resizer"></div></th>
-              </tr>
-            </thead>
+            <table>
 
-            <tbody id="incidencias-body">
-              <tr class="loading">
-                <td colspan="8">Cargando incidencias...</td>
-              </tr>
-            </tbody>
+              <thead>
+                <tr>
+                  <th class="col-id">ID<div class="resizer"></div></th>
+                  <th class="col-main">Asunto<div class="resizer"></div></th>
+                  <th class="col-secondary">Cliente<div class="resizer"></div></th>
+                  <th class="col-secondary">Técnico<div class="resizer"></div></th>
+                  <th class="col-status">Estado<div class="resizer"></div></th>
+                  <th class="col-status">Prioridad<div class="resizer"></div></th>
+                  <th class="col-date">Fecha<div class="resizer"></div></th>
+                  <th class="col-date">Fecha cierre<div class="resizer"></div></th>
+                </tr>
+              </thead>
 
-          </table>
+              <tbody id="incidencias-body">
+                <tr class="loading">
+                  <td colspan="8">Cargando incidencias...</td>
+                </tr>
+              </tbody>
 
-        </div>
+            </table>
+
+          </div>
+
+        </div> <!-- END table-system -->
 
       </div>
 

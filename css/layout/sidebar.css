@@ -144,12 +144,12 @@
 .sidebar.collapsed .sidebar-toggle{
   position:absolute;
 
-  /* centrado exacto sobre el logo */
+  /* centrado exacto */
   top:50%;
   right:50%;
   transform:translate(50%, -50%);
 
-  /* tamaño SOLO del icono → sin caja */
+  /* tamaño SOLO icono */
   width:24px;
   height:24px;
   padding:0;
@@ -158,12 +158,16 @@
   align-items:center;
   justify-content:center;
 
-  /* 🔥 clave: sin identidad visual propia */
+  /* sin caja visual */
   background:transparent;
   border:none;
   box-shadow:none;
 
   color:var(--muted);
+
+  /* importante */
+  opacity:1;
+  pointer-events:auto;
 }
 
 /* hover limpio (sin recuadro) */
@@ -204,7 +208,20 @@
   z-index:9999;
 }
 
+/* tooltip en modo normal */
 .sidebar:not(.collapsed) .sidebar-toggle:hover::after{
+  opacity:1;
+  transform:translateX(-50%) translateY(0);
+}
+
+/* tooltip en collapsed (centrado correcto) */
+.sidebar.collapsed .sidebar-toggle::after{
+  top:calc(100% + 10px);
+  left:50%;
+  transform:translateX(-50%) translateY(4px);
+}
+
+.sidebar.collapsed .sidebar-toggle:hover::after{
   opacity:1;
   transform:translateX(-50%) translateY(0);
 }

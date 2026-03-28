@@ -1,11 +1,12 @@
 /* =========================
-   TOPBAR
+   TOPBAR (🔥 PERFECT ALIGN)
 ========================= */
 .topbar{
   position:fixed;
   top:0;
+
   left:var(--sidebar-width);
-  right:0;
+  width:calc(100% - var(--sidebar-width)); /* 🔥 CLAVE */
 
   height:var(--topbar-height);
 
@@ -23,13 +24,15 @@
 
   z-index:var(--z-topbar);
 
-  transition:left var(--duration-slow) var(--ease-out);
-  will-change:left;
+  transition:
+    left var(--duration-slow) var(--ease-out),
+    width var(--duration-slow) var(--ease-out);
 }
 
-/* sidebar collapsed */
+/* SIDEBAR COLLAPSED */
 .sidebar.collapsed ~ .main-content .topbar{
   left:var(--sidebar-collapsed);
+  width:calc(100% - var(--sidebar-collapsed));
 }
 
 

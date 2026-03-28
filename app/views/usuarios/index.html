@@ -1,93 +1,94 @@
-<div class="panel-content usuarios">
+<div class="panel-content usuarios table-mode">
 
-  <div class="container">
+  <!-- 🔥 TABLE SYSTEM -->
+  <div class="table-system usuarios">
 
-    <div class="panel-block">
+    <!-- =========================
+         FILTROS
+    ========================= -->
+    <div class="filters-row">
 
-      <!-- =========================
-           FILTROS
-      ========================= -->
-      <div class="filters-row">
+      <input 
+        type="text"
+        id="search-usuario"
+        placeholder="Buscar usuario..."
+        autocomplete="off"
+      >
 
-        <input 
-          type="text"
-          id="search-usuario"
-          placeholder="Buscar usuario..."
-          autocomplete="off"
-        >
+      <select id="filter-estado-usuario">
+        <option value="">Estado</option>
+        <option value="activo">Activo</option>
+        <option value="inactivo">Inactivo</option>
+      </select>
 
-        <select id="filter-estado-usuario">
-          <option value="">Estado</option>
-          <option value="activo">Activo</option>
-          <option value="inactivo">Inactivo</option>
-        </select>
+      <button id="btn-new-usuario" class="btn-new-usuario">
+        + Nuevo
+      </button>
 
-        <button id="btn-new-usuario" class="btn-new-usuario">
-          + Nuevo
-        </button>
+    </div>
 
-      </div>
+    <!-- =========================
+         TABLA
+    ========================= -->
+    <div class="table-container">
 
-      <!-- =========================
-           TABLA
-      ========================= -->
-      <div class="table-container">
+      <table>
 
-        <table>
+        <thead>
+          <tr>
+            <th class="col-id">ID</th>
+            <th class="col-main">Usuario</th>
+            <th class="col-secondary">Email</th>
+            <th class="col-secondary">Rol</th>
+            <th class="col-status">Estado</th>
+            <th class="col-date">Fecha</th>
+            <th class="col-actions">Acciones</th>
+          </tr>
+        </thead>
 
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Usuario</th>
-              <th>Email</th>
-              <th>Rol</th>
-              <th>Estado</th>
-              <th>Fecha</th>
-              <th>Acciones</th>
-            </tr>
-          </thead>
+        <tbody id="usuarios-body">
 
-          <tbody id="usuarios-body">
+          <!-- EJEMPLO FILA -->
+          <tr>
 
-            <!-- EJEMPLO FILA -->
-            <tr>
-              <td>USR-001</td>
+            <td>USR-001</td>
 
-              <td>
-                <div class="cell-user">
-                  <div class="avatar">AV</div>
-                  <div class="user-info">
-                    <span class="user-name">Ávila</span>
-                    <span class="user-sub">Administrador</span>
-                  </div>
+            <td>
+              <div class="cell-user">
+                <div class="table-avatar">AV</div>
+                <div class="user-info">
+                  <span class="user-name">Ávila</span>
+                  <span class="user-sub">Administrador</span>
                 </div>
-              </td>
+              </div>
+            </td>
 
-              <td>avila@onion.com</td>
-              <td>Admin</td>
+            <td>avila@onion.com</td>
+            <td>Admin</td>
 
-              <td>
-                <span class="badge activo">Activo</span>
-              </td>
+            <td>
+              <span class="badge success">Activo</span>
+            </td>
 
-              <td>26/03/2026</td>
+            <td>26/03/2026</td>
 
-              <td class="acciones">
+            <td>
+              <div class="actions">
                 <button data-action="edit">Editar</button>
                 <button data-action="delete">Eliminar</button>
-              </td>
-            </tr>
+              </div>
+            </td>
 
-            <!-- LOADING -->
-            <tr class="loading">
-              <td colspan="7">Cargando usuarios...</td>
-            </tr>
+          </tr>
 
-          </tbody>
+          <!-- LOADING -->
+          <tr class="loading">
+            <td colspan="7">Cargando usuarios...</td>
+          </tr>
 
-        </table>
+        </tbody>
 
-      </div>
+      </table>
 
     </div>
 

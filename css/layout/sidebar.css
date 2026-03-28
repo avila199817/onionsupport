@@ -1,5 +1,5 @@
 /* =========================
-   SIDEBAR BASE (PRO POLISHED)
+   SIDEBAR BASE
 ========================= */
 .sidebar{
   width:var(--sidebar-width);
@@ -21,7 +21,6 @@
   will-change:width;
 
   overflow:visible;
-
   z-index:var(--z-sidebar);
 }
 
@@ -31,7 +30,7 @@
 
 
 /* =========================
-   TOP (FUSIÓN PRO)
+   TOP (ESTABLE)
 ========================= */
 .sidebar-top{
   display:flex;
@@ -47,12 +46,13 @@
 
 
 /* =========================
-   LOGO
+   LOGO (MÁS GRANDE + PRO)
 ========================= */
 .logo{
   position:relative;
-  width:32px;
-  height:32px;
+
+  width:36px;
+  height:36px;
 
   display:flex;
   align-items:center;
@@ -64,25 +64,28 @@
   transition:
     transform var(--duration-fast) ease,
     background-color var(--duration-normal) ease;
-  z-index:2;
+
+  z-index:1;
 }
 
 .logo img{
-  width:20px;
-  height:20px;
+  width:22px;
+  height:22px;
   object-fit:contain;
 }
 
-.logo:hover{ transform:scale(1.05); }
+.logo:hover{ transform:scale(1.04); }
 .logo:active{ transform:scale(0.96); }
 
 
 /* =========================
-   TOGGLE (SUPERPUESTO)
+   TOGGLE (FIJO SIN SALTOS)
 ========================= */
 .sidebar-toggle{
-  width:32px;
-  height:32px;
+  position:absolute;
+
+  width:36px;
+  height:36px;
 
   display:flex;
   align-items:center;
@@ -95,22 +98,21 @@
   color:var(--muted);
 
   cursor:pointer;
-  position:absolute;
 
-  right:var(--space-md);
   top:50%;
+  right:var(--space-md);
+
   transform:translateY(-50%);
 
   transition:
-    opacity .2s ease,
-    transform .2s ease,
-    background var(--duration-fast) ease,
-    filter .2s ease;
+    opacity .18s ease,
+    background .15s ease,
+    color .15s ease;
 
-  backdrop-filter: blur(6px);
+  z-index:2;
 }
 
-/* NORMAL */
+/* HOVER NORMAL */
 .sidebar:not(.collapsed) .sidebar-toggle:hover{
   background:var(--sb-hover);
   color:var(--text);
@@ -118,31 +120,34 @@
 
 
 /* =========================
-   COLLAPSED (MAGIA CHATGPT)
+   COLLAPSED (INTEGRACIÓN REAL)
 ========================= */
+
+/* el botón se queda EXACTAMENTE centrado encima del logo */
 .sidebar.collapsed .sidebar-toggle{
   right:50%;
   top:50%;
   transform:translate(50%, -50%);
   opacity:0;
   pointer-events:none;
-  filter:blur(4px);
 }
 
-/* HOVER GLOBAL (ROBUSTO) */
+/* zona activa estable (no depende del botón) */
+.sidebar.collapsed .sidebar-top{
+  cursor:pointer;
+}
+
+/* al pasar por toda la zona → aparece limpio */
 .sidebar.collapsed .sidebar-top:hover .sidebar-toggle{
   opacity:1;
   pointer-events:auto;
-  transform:translate(50%, -50%) scale(1.05);
-  background:var(--sb-hover);
-  color:var(--text);
-  filter:blur(0);
-  z-index:3;
 }
+
+/* IMPORTANTE: sin scale ni movimiento → cero saltos */
 
 
 /* =========================
-   TOOLTIP (FINO)
+   TOOLTIP
 ========================= */
 .sidebar-toggle::after{
   content:attr(data-tooltip);
@@ -210,7 +215,6 @@
     transform var(--duration-fast) ease;
 }
 
-/* ICON */
 .menu-item span:first-child{
   display:flex;
   align-items:center;

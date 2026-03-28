@@ -1,31 +1,30 @@
 /* =========================================================
-   INCIDENCIA CREATE — FULL PRO SAAS (FIX HEIGHT REAL)
+   INCIDENCIA CREATE — FIX DEFINITIVO
 ========================================================= */
 
-/* 🔥 CLAVE GLOBAL (si no lo tienes, esto es obligatorio) */
+/* BASE */
 html, body{
   height:100%;
 }
 
-/* CONTENEDOR PRINCIPAL */
 .panel-content.incidencia-create{
   display:flex;
   height:100%;
-  min-height:100vh; /* 🔥 FIX REAL */
+  min-height:100vh;
   width:100%;
   overflow:hidden;
 }
 
 
 /* =========================================================
-   LAYOUT SPLIT
+   LAYOUT
 ========================================================= */
 
 .layout-split{
   display:flex;
   width:100%;
   height:100%;
-  min-height:0; /* 🔥 evita bugs flex */
+  min-height:0;
 }
 
 /* LEFT */
@@ -38,18 +37,21 @@ html, body{
   height:100%;
 }
 
-/* RIGHT */
+/* RIGHT (🔥 AQUÍ ESTABA EL PROBLEMA) */
 .incidencia-right{
   width:360px;
   min-width:360px;
 
-  border-left:1px solid var(--panel-border);
-  background:var(--panel-bg);
-
   display:flex;
   flex-direction:column;
 
-  height:100%; /* 🔥 CLAVE */
+  height:100%;
+  min-height:100%; /* 🔥 CLAVE */
+  
+  background:var(--panel-bg);
+  border-left:1px solid var(--panel-border);
+
+  overflow:hidden; /* 🔥 evita cortes raros */
 }
 
 
@@ -67,32 +69,7 @@ html, body{
   background:var(--panel-bg);
   border-bottom:1px solid var(--panel-border);
 
-  flex-shrink:0; /* 🔥 no colapsa */
-}
-
-#btn-back{
-  background:none;
-  border:none;
-  color:var(--text);
-  font-size:13px;
-  cursor:pointer;
-
-  opacity:.8;
-  transition:opacity .15s ease;
-}
-
-#btn-back:hover{
-  opacity:1;
-}
-
-.page-title{
-  font-size:20px;
-  font-weight:600;
-}
-
-.page-subtitle{
-  font-size:13px;
-  color:var(--dim);
+  flex-shrink:0;
 }
 
 
@@ -107,195 +84,77 @@ html, body{
   padding:30px 40px;
   width:100%;
 
-  overflow:auto; /* 🔥 scroll aquí */
+  overflow:auto;
   min-height:0;
 }
 
 
 /* =========================================================
-   FORM
-========================================================= */
-
-.incidencia-form{
-  width:100%;
-  max-width:880px;
-
-  display:flex;
-  flex-direction:column;
-  gap:16px;
-}
-
-
-/* =========================================================
-   INPUTS
-========================================================= */
-
-.incidencia-form input,
-.incidencia-form textarea{
-  width:100%;
-
-  padding:14px 16px;
-
-  border-radius:12px;
-  border:1px solid var(--card-border);
-
-  background:color-mix(in srgb, var(--card-bg), #000 10%);
-  color:var(--text);
-
-  font-size:14px;
-
-  transition:
-    border-color .2s ease,
-    box-shadow .2s ease,
-    background .2s ease;
-}
-
-.incidencia-form textarea{
-  resize:vertical;
-  min-height:180px;
-}
-
-.incidencia-form input:focus,
-.incidencia-form textarea:focus{
-  border-color:var(--accent);
-
-  box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--accent), transparent 85%);
-}
-
-
-/* =========================================================
-   FILES
-========================================================= */
-
-.incidencia-files{
-  display:flex;
-  flex-direction:column;
-  gap:6px;
-}
-
-#btn-attach{
-  background:none;
-  border:none;
-  color:var(--accent);
-
-  font-size:13px;
-  cursor:pointer;
-
-  width:fit-content;
-}
-
-#btn-attach:hover{
-  opacity:.8;
-  text-decoration:underline;
-}
-
-#file-list{
-  font-size:12px;
-  color:var(--dim);
-}
-
-
-/* =========================================================
-   FOOTER
-========================================================= */
-
-.incidencia-footer{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-
-  margin-top:10px;
-  gap:20px;
-}
-
-.incidencia-hint{
-  font-size:12px;
-  color:var(--dim);
-}
-
-
-/* =========================================================
-   CTA BUTTON
-========================================================= */
-
-#btn-save-incidencia{
-  padding:13px 26px;
-
-  border-radius:12px;
-
-  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
-  color:#fff;
-
-  font-weight:600;
-  font-size:14px;
-
-  border:none;
-  cursor:pointer;
-
-  box-shadow:0 10px 24px rgba(99,102,241,0.35);
-}
-
-#btn-save-incidencia:hover{
-  transform:translateY(-1px);
-}
-
-
-/* =========================================================
-   HISTORY PANEL (FIX HEIGHT REAL)
+   HISTORY PANEL (🔥 FIX REAL)
 ========================================================= */
 
 .incidencia-history{
-  flex:1; /* 🔥 ocupa todo */
+  flex:1;
   display:flex;
   flex-direction:column;
 
-  padding:16px;
+  height:100%;
   min-height:0;
+
+  padding:16px;
+
+  /* 🔥 ESTE ES EL TRUCO QUE TE FALTABA */
+  background:var(--panel-bg);
 }
 
-/* header */
+/* header fijo */
 .history-header{
   font-size:13px;
   font-weight:600;
   color:var(--dim);
+
   margin-bottom:12px;
 
   flex-shrink:0;
 }
 
-/* lista */
+/* lista ocupa TODO */
 .history-list{
-  flex:1; /* 🔥 ocupa todo */
-  overflow:auto;
+  flex:1;
+  min-height:0;
 
   display:flex;
   flex-direction:column;
   gap:8px;
 
-  min-height:0;
+  overflow-y:auto;
+
+  padding-right:4px; /* espacio scrollbar */
 }
 
 /* item */
 .history-item{
   padding:12px;
   border-radius:10px;
+
   background:var(--card-bg);
   border:1px solid var(--card-border);
+
   cursor:pointer;
+
+  transition:all .15s ease;
 }
 
 .history-item:hover{
   background:color-mix(in srgb, var(--card-bg), #fff 6%);
 }
 
-/* título */
 .history-title{
   font-size:13px;
   font-weight:500;
+  margin-bottom:4px;
 }
 
-/* meta */
 .history-meta{
   font-size:11px;
   color:var(--dim);
@@ -305,28 +164,25 @@ html, body{
 
 
 /* =========================================================
+   SCROLL FINO (PRO)
+========================================================= */
+
+.history-list::-webkit-scrollbar{
+  width:6px;
+}
+
+.history-list::-webkit-scrollbar-thumb{
+  background:var(--scrollbar-thumb);
+  border-radius:6px;
+}
+
+
+/* =========================================================
    RESPONSIVE
 ========================================================= */
 
-@media (max-width: 1100px){
+@media (max-width:1100px){
   .incidencia-right{
     display:none;
   }
-}
-
-@media (max-width: 900px){
-
-  .incidencia-body{
-    padding:20px;
-  }
-
-  .incidencia-footer{
-    flex-direction:column;
-    align-items:flex-start;
-  }
-
-  #btn-save-incidencia{
-    width:100%;
-  }
-
 }

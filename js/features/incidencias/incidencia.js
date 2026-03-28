@@ -1,367 +1,257 @@
-"use strict";
+/* =========================================================
+   INCIDENCIA CREATE — FINAL DEFINITIVO (SIN TOCAR LAYOUT)
+========================================================= */
 
-(function(){
-
-const Onion = window.Onion;
-
-if(!Onion){
-  console.error("💥 Onion no disponible (incidencia.js)");
-  return;
-}
-
-let initialized = false;
-let selectedFiles = [];
-
-/* =========================
-   INIT
-========================= */
-
-function init(){
-
-  const root = getRoot();
-  if(!root || initialized) return;
-
-  if(!Onion.state?.user){
-    return setTimeout(init, 100);
-  }
-
-  initialized = true;
-
-  setGreeting();
-  bindEvents();
-  loadUserIncidencias(); // 🔥 PANEL DERECHO
-
-  Onion.onCleanup(()=>{
-    initialized = false;
-  });
-
-}
-
-init();
 
 /* =========================
    ROOT
 ========================= */
+.panel-content.incidencia-create{
+  display:flex;
+  flex-direction:column;
 
-function getRoot(){
-  return document.querySelector(".panel-content.incidencia-create");
+  flex:1;
+  min-height:0;
+  width:100%;
 }
 
-function $(selector){
-  return getRoot()?.querySelector(selector);
+
+/* =========================================================
+   LAYOUT
+========================================================= */
+.layout-split{
+  display:flex;
+  flex:1;
+  min-height:0;
+  width:100%;
 }
+
 
 /* =========================
-   GREETING
+   LEFT
 ========================= */
+.incidencia-left{
+  flex:1;
+  min-width:0;
 
-function setGreeting(){
-
-  const user = Onion.state.user;
-  if(!user) return;
-
-  const name = user.name || user.username || "Usuario";
-
-  const title = getRoot()?.querySelector(".page-title");
-
-  if(title){
-    title.innerText = `Hola, ${name} 👋`;
-  }
-
+  display:flex;
+  flex-direction:column;
+  min-height:0;
 }
 
+
+/* =========================================================
+   RIGHT (PANEL PERFECTO)
+========================================================= */
+.incidencia-right{
+  width:360px;
+  min-width:360px;
+  flex-shrink:0;
+
+  display:flex;
+  flex-direction:column;
+
+  background:var(--panel-bg);
+  border-left:1px solid var(--panel-border);
+
+  min-height:0;
+  overflow:hidden;
+}
+
+
 /* =========================
-   EVENTS
+   RIGHT CONTENT
 ========================= */
+.incidencia-history{
+  flex:1;
+  min-height:0;
 
-function bindEvents(){
+  display:flex;
+  flex-direction:column;
 
-  const root = getRoot();
-  if(!root) return;
+  padding:16px;
+  background:var(--panel-bg);
 
-  // VOLVER
-  Onion.cleanupEvent(root, "click", (e)=>{
-    if(e.target.id === "btn-back"){
-      Onion.router.navigate("/incidencias");
-    }
-  });
-
-  // CREAR
-  $("#btn-save-incidencia")?.addEventListener("click", saveIncidencia);
-
-  // FILES
-  $("#btn-attach")?.addEventListener("click", ()=>{
-    $("#inc-files")?.click();
-  });
-
-  $("#inc-files")?.addEventListener("change", handleFiles);
-
+  overflow:hidden;
 }
 
+.history-header{
+  font-size:13px;
+  font-weight:600;
+  color:var(--dim);
+  margin-bottom:12px;
+  flex-shrink:0;
+}
+
+.history-list{
+  flex:1;
+  min-height:0;
+
+  overflow:auto;
+  background:var(--panel-bg);
+}
+
+
+/* =========================================================
+   HEADER
+========================================================= */
+.filters-row{
+  display:flex;
+  align-items:center;
+
+  padding:14px 40px;
+
+  background:var(--panel-bg);
+  border-bottom:1px solid var(--panel-border);
+}
+
+.header-left{
+  display:flex;
+  flex-direction:column;
+}
+
+#btn-back{
+  margin-left:auto;
+  background:none;
+  border:none;
+  color:var(--text);
+  cursor:pointer;
+  opacity:.8;
+}
+
+#btn-back:hover{
+  opacity:1;
+}
+
+.page-title{
+  font-size:20px;
+  font-weight:600;
+}
+
+.page-subtitle{
+  font-size:13px;
+  color:var(--dim);
+}
+
+
+/* =========================================================
+   BODY (SCROLL REAL)
+========================================================= */
+.incidencia-body{
+  flex:1;
+  min-height:0;
+
+  display:flex;
+  padding:30px 40px;
+
+  overflow:auto; /* 🔥 AQUÍ VA EL SCROLL */
+}
+
+
+/* =========================================================
+   FORM
+========================================================= */
+.incidencia-form{
+  width:100%;
+  max-width:none;
+
+  display:flex;
+  flex-direction:column;
+  gap:16px;
+}
+
+
 /* =========================
+   INPUTS
+========================= */
+.incidencia-form input,
+.incidencia-form textarea{
+  width:100%;
+  padding:14px 16px;
+
+  border-radius:12px;
+  border:1px solid var(--card-border);
+
+  background:color-mix(in srgb, var(--card-bg), #000 10%);
+  color:var(--text);
+}
+
+.incidencia-form textarea{
+  min-height:180px;
+  resize:vertical;
+}
+
+
+/* =========================================================
    FILES
-========================= */
-
-function handleFiles(e){
-
-  const files = Array.from(e.target.files || []);
-  if(!files.length) return;
-
-  selectedFiles = [...selectedFiles, ...files];
-  renderFiles();
-
+========================================================= */
+.incidencia-files{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  gap:6px;
 }
 
-function renderFiles(){
-
-  const list = $("#file-list");
-  if(!list) return;
-
-  if(!selectedFiles.length){
-    list.innerHTML = "";
-    return;
-  }
-
-  list.innerHTML = selectedFiles.map((f, i)=>`
-    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
-      <span>📎 ${escapeHTML(f.name)}</span>
-      <button data-remove="${i}" style="background:none;border:none;color:var(--error);cursor:pointer;">✕</button>
-    </div>
-  `).join("");
-
-  list.querySelectorAll("[data-remove]").forEach(btn=>{
-    btn.addEventListener("click", ()=>{
-      const index = Number(btn.dataset.remove);
-      selectedFiles.splice(index, 1);
-      renderFiles();
-    });
-  });
-
+#btn-attach{
+  background:none;
+  border:none;
+  color:var(--accent);
+  cursor:pointer;
+  font-size:13px;
 }
+
+#btn-attach:hover{
+  text-decoration:underline;
+}
+
+#file-list{
+  font-size:12px;
+  color:var(--dim);
+}
+
+
+/* =========================================================
+   FOOTER
+========================================================= */
+.incidencia-footer{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+
+.incidencia-hint{
+  font-size:12px;
+  color:var(--dim);
+}
+
 
 /* =========================
-   LOAD USER TICKETS
+   BOTÓN
 ========================= */
+#btn-save-incidencia{
+  padding:13px 26px;
+  border-radius:12px;
 
-async function loadUserIncidencias(){
+  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
+  color:#fff;
 
-  const container = $("#incidencias-user-list");
-  if(!container) return;
+  border:none;
+  cursor:pointer;
 
-  container.innerHTML = `<div style="color:var(--dim); font-size:12px;">Cargando...</div>`;
+  box-shadow:0 10px 24px rgba(99,102,241,0.35);
+  transition:all .15s ease;
+}
 
-  try{
+#btn-save-incidencia:hover{
+  transform:translateY(-1px);
+}
 
-    const data = await Onion.fetch(
-      Onion.config.API + "/tickets?mine=true&status=open"
-    );
 
-    if(!data || !data.length){
-      container.innerHTML = `
-        <div style="color:var(--dim); font-size:12px;">
-          No tienes incidencias abiertas
-        </div>
-      `;
-      return;
-    }
-
-    container.innerHTML = data.map(i => `
-      <div class="history-item" data-id="${i.id}">
-        
-        <div class="history-title">
-          ${escapeHTML(i.subject || "Sin asunto")}
-        </div>
-
-        <div class="history-meta">
-          <span>${formatEstado(i.status)}</span>
-          <span>${formatFecha(i.createdAt)}</span>
-        </div>
-
-      </div>
-    `).join("");
-
-    // NAV
-    container.querySelectorAll(".history-item").forEach(el=>{
-      el.addEventListener("click", ()=>{
-        const id = el.dataset.id;
-        Onion.router.navigate("/incidencias/detalle?id=" + id);
-      });
-    });
-
-  }catch(err){
-    console.error("💥 Error cargando incidencias:", err);
-    container.innerHTML = "Error cargando incidencias";
+/* =========================================================
+   RESPONSIVE
+========================================================= */
+@media (max-width:1100px){
+  .incidencia-right{
+    display:none;
   }
-
 }
-
-/* =========================
-   SAVE
-========================= */
-
-async function saveIncidencia(){
-
-  clearErrors();
-
-  const subject = $("#inc-title")?.value?.trim() || "";
-  const message = $("#inc-message")?.value?.trim() || "";
-
-  let valid = true;
-
-  if(!subject){
-    setError("#inc-title", "Introduce un asunto");
-    valid = false;
-  }
-
-  if(!message){
-    setError("#inc-message", "Describe el problema");
-    valid = false;
-  }
-
-  if(!valid) return;
-
-  const btn = $("#btn-save-incidencia");
-
-  if(btn){
-    btn.disabled = true;
-    btn.dataset.original = btn.innerText;
-    btn.innerText = "Enviando...";
-  }
-
-  try{
-
-    const formData = new FormData();
-
-    formData.append("subject", subject);
-    formData.append("message", message);
-
-    selectedFiles.forEach(file=>{
-      formData.append("files", file);
-    });
-
-    await fetch(Onion.config.API + "/tickets", {
-      method: "POST",
-      body: formData
-    });
-
-    showToast("Incidencia enviada correctamente", "success");
-
-    resetForm();
-
-    setTimeout(()=>{
-      Onion.router.navigate("/incidencias");
-    }, 800);
-
-  }catch(err){
-
-    console.error("💥 Error creando incidencia:", err);
-    showToast("Error enviando incidencia", "error");
-
-  }finally{
-
-    if(btn){
-      btn.disabled = false;
-      btn.innerText = btn.dataset.original || "Enviar incidencia";
-    }
-
-  }
-
-}
-
-/* =========================
-   HELPERS
-========================= */
-
-function resetForm(){
-
-  ["#inc-title", "#inc-message"].forEach(sel=>{
-    const el = $(sel);
-    if(el) el.value = "";
-  });
-
-  selectedFiles = [];
-  renderFiles();
-
-}
-
-function setError(selector, message){
-
-  const el = $(selector);
-  if(!el) return;
-
-  el.classList.add("error");
-
-  let msg = el.parentNode.querySelector(".input-error");
-
-  if(!msg){
-    msg = document.createElement("div");
-    msg.className = "input-error";
-    el.parentNode.appendChild(msg);
-  }
-
-  msg.innerText = message;
-
-}
-
-function clearErrors(){
-
-  const root = getRoot();
-  if(!root) return;
-
-  root.querySelectorAll(".error").forEach(el=>{
-    el.classList.remove("error");
-  });
-
-  root.querySelectorAll(".input-error").forEach(el=>{
-    el.remove();
-  });
-
-}
-
-function showToast(message, type){
-
-  const el = document.createElement("div");
-  el.className = `toast show ${type}`;
-  el.innerText = message;
-
-  document.body.appendChild(el);
-
-  setTimeout(()=>{
-    el.classList.remove("show");
-    setTimeout(()=> el.remove(), 300);
-  }, 2200);
-
-}
-
-function formatEstado(s){
-  if(s === "closed") return "Cerrada";
-  if(s === "in_progress") return "En progreso";
-  return "Abierta";
-}
-
-function formatFecha(f){
-  if(!f) return "--";
-  return new Date(f).toLocaleDateString("es-ES");
-}
-
-function escapeHTML(str){
-  return String(str)
-    .replace(/&/g,"&amp;")
-    .replace(/</g,"&lt;")
-    .replace(/>/g,"&gt;");
-}
-
-/* =========================
-   KEYBOARD UX
-========================= */
-
-document.addEventListener("keydown", (e)=>{
-  if(e.key === "Enter" && e.ctrlKey){
-    const root = getRoot();
-    if(root){
-      saveIncidencia();
-    }
-  }
-});
-
-})();

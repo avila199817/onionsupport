@@ -139,8 +139,16 @@
 
 
 /* =========================
-   COLLAPSED (INTEGRACIÓN REAL)
+   COLLAPSED (INTEGRACIÓN PRO SAAS)
 ========================= */
+
+/* LOGO visible por defecto */
+.sidebar.collapsed .logo{
+  opacity:1;
+  transition:opacity .15s ease;
+}
+
+/* BOTÓN oculto por defecto */
 .sidebar.collapsed .sidebar-toggle{
   position:absolute;
 
@@ -165,18 +173,26 @@
 
   color:var(--muted);
 
-  /* 🔴 CLAVE */
+  /* estado inicial oculto */
   opacity:0;
   pointer-events:none;
+
+  transition:opacity .15s ease;
 }
 
-/* aparece SOLO al hacer hover */
+
+/* 🔥 HOVER → SWAP REAL */
+.sidebar.collapsed .sidebar-top:hover .logo{
+  opacity:0;
+}
+
 .sidebar.collapsed .sidebar-top:hover .sidebar-toggle{
   opacity:1;
   pointer-events:auto;
 }
 
-/* hover limpio (sin recuadro) */
+
+/* hover limpio */
 .sidebar.collapsed .sidebar-toggle:hover{
   background:transparent;
   color:var(--text);
@@ -184,7 +200,7 @@
 
 
 /* =========================
-   TOOLTIP (FINO)
+   TOOLTIP (PRO)
 ========================= */
 .sidebar-toggle::after{
   content:attr(data-tooltip);
@@ -214,13 +230,13 @@
   z-index:9999;
 }
 
-/* tooltip en modo normal */
+/* tooltip normal */
 .sidebar:not(.collapsed) .sidebar-toggle:hover::after{
   opacity:1;
   transform:translateX(-50%) translateY(0);
 }
 
-/* tooltip en collapsed (centrado correcto) */
+/* tooltip collapsed */
 .sidebar.collapsed .sidebar-toggle::after{
   top:calc(100% + 10px);
   left:50%;

@@ -121,24 +121,24 @@ function getId(){
 
 function setLoading(){
   $("#detalle-content").innerHTML = `
-    <div style="padding:20px; color:var(--dim);">
-      Cargando incidencia...
+    <div class="form-grid">
+      <div class="user-sub">Cargando incidencia...</div>
     </div>
   `;
 }
 
 function setEmpty(){
   $("#detalle-content").innerHTML = `
-    <div style="padding:20px; color:var(--dim);">
-      No se encontró la incidencia
+    <div class="form-grid">
+      <div class="user-sub">No se encontró la incidencia</div>
     </div>
   `;
 }
 
 function setError(msg){
   $("#detalle-content").innerHTML = `
-    <div style="padding:20px; color:#ef4444;">
-      ❌ ${msg}
+    <div class="form-grid">
+      <div class="badge error">❌ ${msg}</div>
     </div>
   `;
 }
@@ -153,43 +153,48 @@ function render(i){
   const prioridad = formatPrioridad(i.priority);
 
   $("#detalle-content").innerHTML = `
-    <div style="display:flex; flex-direction:column; gap:16px;">
+    <div class="form-grid">
 
-      <div>
-        <strong>ID:</strong> ${escapeHTML(i.id || "--")}
-      </div>
-
-      <div>
-        <strong>Cliente:</strong> ${escapeHTML(i.name || "-")}
-      </div>
-
-      <div>
-        <strong>Título:</strong> ${escapeHTML(i.subject || "-")}
-      </div>
-
-      <div>
-        <strong>Mensaje:</strong><br>
-        <div style="margin-top:6px; color:var(--text);">
-          ${escapeHTML(i.message || "-")}
+      <!-- HEADER INFO -->
+      <div class="cell-user">
+        <div class="table-avatar">
+          ${getInitials(i.name)}
+        </div>
+        <div class="user-info">
+          <span class="user-name">${escapeHTML(i.name || "Usuario")}</span>
+          <span class="user-sub">Ticket #${escapeHTML(i.id || "--")}</span>
         </div>
       </div>
 
+      <!-- TÍTULO -->
       <div>
-        <strong>Estado:</strong>
+        <div class="user-sub">Título</div>
+        <div class="user-name">${escapeHTML(i.subject || "-")}</div>
+      </div>
+
+      <!-- MENSAJE -->
+      <div>
+        <div class="user-sub">Mensaje</div>
+        <div class="col-main">${escapeHTML(i.message || "-")}</div>
+      </div>
+
+      <!-- ESTADO + PRIORIDAD -->
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+
         <span class="badge ${estado.class}">
           ${estado.label}
         </span>
-      </div>
 
-      <div>
-        <strong>Prioridad:</strong>
         <span class="badge ${prioridad.class}">
           ${prioridad.label}
         </span>
+
       </div>
 
+      <!-- FECHA -->
       <div>
-        <strong>Fecha:</strong> ${formatFecha(i.createdAt)}
+        <div class="user-sub">Fecha</div>
+        <div>${formatFecha(i.createdAt)}</div>
       </div>
 
     </div>
@@ -204,19 +209,19 @@ function render(i){
 function formatEstado(s){
   s = (s || "").toLowerCase();
 
-  if(s === "closed") return { label:"Cerrada", class:"cerrada" };
-  if(s === "in_progress") return { label:"En progreso", class:"progreso" };
+  if(s === "closed") return { label:"Cerrada", class:"success" };
+  if(s === "in_progress") return { label:"En progreso", class:"warning" };
 
-  return { label:"Abierta", class:"abierta" };
+  return { label:"Abierta", class:"info" };
 }
 
 function formatPrioridad(p){
   p = (p || "").toLowerCase();
 
-  if(p === "high") return { label:"Alta", class:"alta" };
-  if(p === "medium") return { label:"Media", class:"media" };
+  if(p === "high") return { label:"Alta", class:"error" };
+  if(p === "medium") return { label:"Media", class:"warning" };
 
-  return { label:"Baja", class:"baja" };
+  return { label:"Baja", class:"neutral" };
 }
 
 function formatFecha(f){
@@ -225,8 +230,13 @@ function formatFecha(f){
 }
 
 /* =========================
-   SECURITY
+   HELPERS
 ========================= */
+
+function getInitials(name){
+  if(!name) return "?";
+  return name.split(" ").map(n => n[0]).join("").slice(0,2).toUpperCase();
+}
 
 function escapeHTML(str){
   return String(str)

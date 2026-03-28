@@ -1,78 +1,83 @@
-<div class="panel-content incidencia-create layout-split">
+<div class="panel-content incidencia-create">
 
-  <!-- =========================
-       LEFT (FORM)
-  ========================= -->
-  <div class="incidencia-left">
+  <div class="layout-split">
 
-    <!-- HEADER -->
-    <div class="filters-row">
+    <!-- =========================
+         LEFT (FORM)
+    ========================= -->
+    <div class="incidencia-left">
 
-      <!-- BLOQUE IZQUIERDO (ALINEADO CON FORM) -->
-      <div class="header-left">
-        <div class="page-title">
-          Hola, Usuario 👋
+      <!-- HEADER -->
+      <div class="filters-row">
+
+        <!-- BLOQUE IZQUIERDO -->
+        <div class="header-left">
+          <div class="page-title">
+            Hola, Usuario 👋
+          </div>
+          <div class="page-subtitle">
+            ¿En qué te podemos ayudar?
+          </div>
         </div>
-        <div class="page-subtitle">
-          ¿En qué te podemos ayudar?
-        </div>
+
+        <!-- BOTÓN DERECHA -->
+        <button id="btn-back">
+          ← Volver
+        </button>
+
       </div>
 
-      <!-- BOTÓN DERECHA -->
-      <button id="btn-back">
-        ← Volver
-      </button>
 
-    </div>
+      <!-- BODY -->
+      <div class="incidencia-body">
 
+        <div class="incidencia-form">
 
-    <!-- BODY -->
-    <div class="incidencia-body">
-
-      <div class="incidencia-form">
-
-        <!-- ASUNTO -->
-        <input 
-          type="text"
-          id="inc-title"
-          placeholder="Asunto — Ej: No puedo acceder a mi cuenta"
-        >
-
-        <!-- MENSAJE -->
-        <textarea 
-          id="inc-message"
-          placeholder="Cuéntanos qué está pasando..."
-          rows="8"
-        ></textarea>
-
-        <!-- ADJUNTOS -->
-        <div class="incidencia-files">
-
-          <button type="button" id="btn-attach">
-            + Añadir archivos
-          </button>
-
+          <!-- ASUNTO -->
           <input 
-            type="file"
-            id="inc-files"
-            multiple
-            style="display:none"
+            type="text"
+            id="inc-title"
+            placeholder="Asunto — Ej: No puedo acceder a mi cuenta"
+            autocomplete="off"
           >
 
-          <div id="file-list"></div>
+          <!-- MENSAJE -->
+          <textarea 
+            id="inc-message"
+            placeholder="Cuéntanos qué está pasando..."
+            rows="8"
+          ></textarea>
 
-        </div>
+          <!-- ADJUNTOS -->
+          <div class="incidencia-files">
 
-        <!-- FOOTER -->
-        <div class="incidencia-footer">
+            <button type="button" id="btn-attach">
+              + Añadir archivos
+            </button>
 
-          <div class="incidencia-hint">
-            Puedes añadir capturas, PDFs o lo que necesites
+            <input 
+              type="file"
+              id="inc-files"
+              multiple
+              hidden
+            >
+
+            <div id="file-list"></div>
+
           </div>
 
-          <button id="btn-save-incidencia">
-            Enviar incidencia
-          </button>
+          <!-- FOOTER -->
+          <div class="incidencia-footer">
+
+            <div class="incidencia-hint">
+              Puedes añadir capturas, PDFs o lo que necesites
+            </div>
+
+            <button id="btn-save-incidencia">
+              Enviar incidencia
+            </button>
+
+          </div>
 
         </div>
 
@@ -80,25 +85,25 @@
 
     </div>
 
-  </div>
 
+    <!-- =========================
+         RIGHT (HISTÓRICO USER)
+    ========================= -->
+    <aside class="incidencia-right">
 
-  <!-- =========================
-       RIGHT (HISTÓRICO USER)
-  ========================= -->
-  <div class="incidencia-right">
+      <div class="incidencia-history">
 
-    <div class="incidencia-history">
+        <div class="history-header">
+          Tus incidencias abiertas
+        </div>
 
-      <div class="history-header">
-        Tus incidencias abiertas
+        <div id="incidencias-user-list" class="history-list">
+          Cargando...
+        </div>
+
       </div>
 
-      <div id="incidencias-user-list" class="history-list">
-        Cargando...
-      </div>
-
-    </div>
+    </aside>
 
   </div>
 

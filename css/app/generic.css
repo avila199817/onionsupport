@@ -1,7 +1,8 @@
 /* =========================================================
-   TABLE SYSTEM — PRO (FINAL)
-   AISLADO | DENSITY READY | SIN BUGS
+   TABLE SYSTEM — PRO FINAL (SAAS READY)
+   AISLADO | DENSITY | SIN CONFLICTOS
 ========================================================= */
+
 
 /* =========================
    BASE
@@ -9,9 +10,11 @@
 .table-system{
   display:flex;
   flex-direction:column;
+
   width:100%;
   flex:1;
-  min-height:0; /* 🔥 CLAVE */
+
+  min-height:0; /* 🔥 scroll fix */
 }
 
 
@@ -32,12 +35,17 @@
 
   background:var(--panel-bg);
   border-bottom:1px solid var(--panel-border);
+
+  flex-wrap:wrap; /* 🔥 responsive */
 }
 
+/* INPUT FLEX */
 .table-system .filters-row input{
   flex:1;
+  min-width:180px;
 }
 
+/* INPUTS BASE */
 .table-system .filters-row input,
 .table-system .filters-row select{
   padding:
@@ -48,8 +56,28 @@
 
   background:var(--card-bg);
   border:1px solid var(--card-border);
+  color:var(--text);
+
+  font-size:13px;
+
+  transition:
+    border-color var(--duration-normal) ease,
+    box-shadow var(--duration-normal) ease,
+    background var(--duration-normal) ease;
 }
 
+/* FOCUS PRO */
+.table-system .filters-row input:focus,
+.table-system .filters-row select:focus{
+  outline:none;
+
+  border-color:var(--accent);
+
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--accent), transparent 85%);
+}
+
+/* BUTTON */
 .table-system .filters-row button{
   margin-left:auto;
 
@@ -62,7 +90,25 @@
   background:linear-gradient(135deg,var(--accent),var(--accent-hover));
   color:#fff;
 
+  font-weight:500;
+
+  border:none;
+  cursor:pointer;
+
   box-shadow:0 6px 18px rgba(99,102,241,0.35);
+
+  transition:
+    transform var(--duration-fast) ease,
+    box-shadow var(--duration-normal) ease;
+}
+
+.table-system .filters-row button:hover{
+  transform:translateY(-1px);
+  box-shadow:0 10px 24px rgba(99,102,241,0.45);
+}
+
+.table-system .filters-row button:active{
+  transform:scale(.97);
 }
 
 
@@ -72,7 +118,7 @@
 
 .table-system .table-container{
   flex:1;
-  min-height:0; /* 🔥 CLAVE SCROLL */
+  min-height:0;
 
   width:100%;
   overflow:auto;
@@ -145,7 +191,7 @@
 ========================================================= */
 
 .table-system tbody tr{
-  transition:.15s ease;
+  transition:background .15s ease, transform .15s ease;
 }
 
 .table-system tbody tr:nth-child(even){
@@ -213,6 +259,7 @@
 
   background:linear-gradient(135deg,#6366f1,#8b5cf6);
   color:#fff;
+
   font-size:13px;
   font-weight:600;
 }
@@ -285,22 +332,23 @@
   border-radius:6px;
 
   font-size:11px;
-  cursor:pointer;
 
+  cursor:pointer;
   border:none;
 
   background:rgba(255,255,255,0.04);
   color:var(--text);
 
-  transition:.15s ease;
+  transition:background .15s ease, transform .1s ease;
 }
 
 .table-system .actions button:hover{
   background:rgba(255,255,255,0.08);
+  transform:translateY(-1px);
 }
 
 
-/* botones específicos */
+/* ACTION TYPES */
 
 .table-system button[data-action="download"]{
   background:rgba(59,130,246,0.12);
@@ -347,4 +395,19 @@
 .table-system.facturas tbody tr:hover,
 .table-system.usuarios tbody tr:hover{
   transform:translateX(2px);
+}
+
+
+/* =========================================================
+   SCROLLBAR (PRO)
+========================================================= */
+
+.table-system .table-container::-webkit-scrollbar{
+  height:8px;
+  width:8px;
+}
+
+.table-system .table-container::-webkit-scrollbar-thumb{
+  background:var(--scrollbar-thumb);
+  border-radius:6px;
 }

@@ -1,8 +1,11 @@
 /* =========================
-   UI ELEMENTS
+   UI ELEMENTS — FINAL PRO
 ========================= */
 
-/* 🔥 FULL WIDTH PARA TABLAS / VISTAS GRANDES */
+
+/* =========================
+   CONTAINER FLUID
+========================= */
 .container-fluid{
   width:100%;
   max-width:none;
@@ -15,9 +18,32 @@
 
 
 /* =========================
+   PANEL BLOCK (🔥 DEPTH)
+========================= */
+.panel-block{
+  background:var(--panel-bg);
+  border:1px solid var(--panel-border);
+  border-radius:var(--radius-lg);
+
+  box-shadow:var(--panel-shadow);
+
+  transition:
+    box-shadow var(--duration-normal) ease,
+    transform var(--duration-fast) ease;
+}
+
+.panel-block:hover{
+  box-shadow:
+    0 14px 40px rgba(0,0,0,0.45),
+    0 2px 6px rgba(0,0,0,0.2);
+
+  transform:translateY(-2px);
+}
+
+
+/* =========================
    BADGES
 ========================= */
-
 .badge{
   display:inline-flex;
   align-items:center;
@@ -43,7 +69,6 @@
     transform var(--duration-fast) ease;
 }
 
-/* hover sutil pro */
 .badge.clickable:hover{
   transform:translateY(-1px);
   filter:brightness(1.05);
@@ -57,7 +82,6 @@
 /* =========================
    VARIANTS
 ========================= */
-
 .badge.success{
   background:color-mix(in srgb, var(--success), transparent 85%);
   color:var(--success);
@@ -92,7 +116,6 @@
 /* =========================
    SIZES
 ========================= */
-
 .badge.sm{
   padding:2px 8px;
   font-size:10px;
@@ -107,7 +130,6 @@
 /* =========================
    OUTLINE
 ========================= */
-
 .badge.outline{
   background:transparent;
 }
@@ -121,7 +143,6 @@
 /* =========================
    DOT
 ========================= */
-
 .badge.dot::before{
   content:"";
   width:6px;
@@ -134,7 +155,6 @@
 /* =========================
    TOAST
 ========================= */
-
 .toast{
   position:fixed;
   bottom:20px;
@@ -180,7 +200,6 @@
 /* =========================
    TOAST VARIANTS
 ========================= */
-
 .toast.success{
   border-color:color-mix(in srgb, var(--success), var(--panel-border) 70%);
 }
@@ -201,7 +220,6 @@
 /* =========================
    TOAST ICON
 ========================= */
-
 .toast-icon{
   width:18px;
   height:18px;
@@ -225,7 +243,6 @@
 /* =========================
    TOAST CONTENT
 ========================= */
-
 .toast-content{
   display:flex;
   flex-direction:column;
@@ -248,7 +265,6 @@
 /* =========================
    CLOSE
 ========================= */
-
 .toast-close{
   margin-left:auto;
 
@@ -280,7 +296,6 @@
 /* =========================
    PANEL CONTENT (LOAD UX)
 ========================= */
-
 .panel-content{
   opacity:0;
   visibility:hidden;
@@ -303,7 +318,6 @@
 /* =========================
    THEME TRANSITIONS
 ========================= */
-
 .layout,
 .sidebar,
 .topbar,
@@ -322,7 +336,6 @@
 /* =========================
    LOADER
 ========================= */
-
 body.loading{
   overflow:hidden;
 }
@@ -363,7 +376,6 @@ body:not(.loading) #app-loader{
 /* =========================
    LOADER LOGO
 ========================= */
-
 .loader-logo{
   width:64px;
   height:64px;
@@ -386,7 +398,6 @@ body:not(.loading) #app-loader{
 /* =========================
    ANIMATIONS
 ========================= */
-
 @keyframes bounce{
   0%,100%{ transform:translateY(0) scale(1); }
   30%{ transform:translateY(-18px) scale(1.05); }

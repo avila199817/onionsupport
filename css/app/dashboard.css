@@ -1,26 +1,27 @@
 /* =========================
-   HOME (SAAS HIGH LEVEL)
-   👉 Scoped: .home
-   👉 No pisa nada global
+   HOME (SAAS PRO LEVEL)
+   Scoped: .home
+   No global leaks
 ========================= */
 
 .home{
   width:100%;
 }
 
+
 /* =========================
    CONTAINER
 ========================= */
 .home .container{
   padding-top:var(--page-offset);
-  padding-bottom:30px;
+  padding-bottom:var(--space-xl);
 
   display:flex;
   flex-direction:column;
   gap:var(--space-lg);
 }
 
-/* ocultamos header si no se usa */
+/* oculto si no se usa */
 .home .dashboard-header{
   display:none;
 }
@@ -51,14 +52,15 @@
   box-shadow:var(--card-shadow);
 
   transition:
-    transform var(--duration-normal) ease,
+    transform var(--duration-fast) ease,
     box-shadow var(--duration-normal) ease,
     border-color var(--duration-normal) ease;
 }
 
 .home .card:hover{
-  transform:translateY(-4px);
+  transform:translateY(-3px);
   box-shadow:var(--card-shadow-hover);
+  border-color:color-mix(in srgb, var(--card-border), #fff 6%);
 }
 
 /* contenido */
@@ -115,11 +117,13 @@
 
   transition:
     transform var(--duration-fast) ease,
-    border-color var(--duration-normal) ease;
+    border-color var(--duration-normal) ease,
+    box-shadow var(--duration-normal) ease;
 }
 
 .home .panel-block:hover{
   transform:translateY(-2px);
+  border-color:color-mix(in srgb, var(--panel-border), #fff 6%);
 }
 
 
@@ -144,7 +148,7 @@
   gap:6px;
 }
 
-/* limitar a 3 items */
+/* limitar a 3 */
 .home .activity-item:nth-child(n+4){
   display:none;
 }
@@ -161,12 +165,14 @@
 
   transition:
     background var(--duration-fast) ease,
-    border-color var(--duration-fast) ease;
+    border-color var(--duration-fast) ease,
+    transform var(--duration-fast) ease;
 }
 
 .home .activity-item:hover{
   background:var(--card-bg);
   border-color:var(--card-border);
+  transform:translateX(2px);
 }
 
 .home .activity-title{
@@ -226,11 +232,14 @@
 
   text-align:center;
 
-  transition:transform var(--duration-fast) ease;
+  transition:
+    transform var(--duration-fast) ease,
+    border-color var(--duration-fast) ease;
 }
 
 .home .summary-item:hover{
   transform:translateY(-2px);
+  border-color:color-mix(in srgb, var(--card-border), #fff 6%);
 }
 
 .home .summary-value{
@@ -255,7 +264,7 @@
 }
 
 .home .alert-item{
-  background:color-mix(in srgb, var(--card-bg), transparent 10%);
+  background:color-mix(in srgb, var(--card-bg), transparent 8%);
   border:1px solid var(--card-border);
 
   padding:8px 10px;
@@ -266,17 +275,19 @@
 
   transition:
     transform var(--duration-fast) ease,
-    background var(--duration-fast) ease;
+    background var(--duration-fast) ease,
+    border-color var(--duration-fast) ease;
 }
 
 .home .alert-item:hover{
   transform:translateX(3px);
   background:var(--panel-bg);
+  border-color:color-mix(in srgb, var(--card-border), #fff 6%);
 }
 
 
 /* =========================
-   BADGE ALIGN (INTEGRACIÓN)
+   BADGE ALIGN
 ========================= */
 .home .card-meta .badge{
   transform:translateY(-1px);
@@ -289,7 +300,7 @@
 @media (max-width:1024px){
 
   .home .container{
-    padding:16px;
+    padding-inline:var(--space-md);
   }
 
   .home .dashboard-grid{

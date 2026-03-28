@@ -20,7 +20,7 @@
 
 
 /* =========================
-   CONTAINER
+   CONTAINER (STANDARD)
 ========================= */
 .container{
   width:100%;
@@ -32,20 +32,20 @@
   position:relative;
 }
 
-/* 🔥 FULL WIDTH */
+/* 🔥 SINGLE SOURCE OF TRUTH */
 .container-fluid{
   width:100%;
   max-width:none;
 
   margin:0;
-  padding-inline:16px; /* 🔥 control real */
+  padding-inline:var(--content-padding);
 
   position:relative;
 }
 
 
 /* =========================
-   MAIN CONTENT (🔥 FIX REAL)
+   MAIN CONTENT (FIX CLEAN)
 ========================= */
 .main-content{
   position:relative;
@@ -54,22 +54,24 @@
   min-height:100dvh;
 
   margin-left:var(--sidebar-width);
-  width:100%; /* ✅ FIX CLAVE */
+  width:calc(100% - var(--sidebar-width));
 
   padding-top:var(--topbar-height);
 
   display:flex;
   flex-direction:column;
 
-  transition:
-    margin-left var(--duration-slow) var(--ease-out);
+  min-width:0;
 
-  min-width:0; /* 🔥 evita bugs flex */
+  transition:
+    margin-left var(--duration-slow) var(--ease-out),
+    width var(--duration-slow) var(--ease-out);
 }
 
 /* SIDEBAR COLLAPSED */
 .sidebar.collapsed ~ .main-content{
   margin-left:var(--sidebar-collapsed);
+  width:calc(100% - var(--sidebar-collapsed));
 }
 
 
@@ -80,7 +82,7 @@
   flex:1;
   min-height:0;
 
-  padding-block:var(--space-lg);
+  padding:var(--space-lg);
 
   display:flex;
   flex-direction:column;
@@ -89,18 +91,17 @@
 
 
 /* =========================
-   🔥 TABLE MODE (AUTO)
+   🔥 TABLE MODE (SAFE)
 ========================= */
 
-/* elimina aire */
-.panel-content:has(.table-system){
+/* SIN :has → clase explícita */
+.panel-content.table-mode{
   display:flex;
   flex-direction:column;
   padding:0;
 }
 
-/* elimina padding interno */
-.panel-content:has(.table-system) .content-wrapper{
+.panel-content.table-mode .content-wrapper{
   flex:1;
   min-height:0;
 
@@ -180,6 +181,7 @@
 
   .main-content{
     margin-left:0;
+    width:100%;
   }
 
   .sidebar{

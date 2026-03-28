@@ -19,7 +19,7 @@
       page: "/app/views/index.html",
       style: "/css/app/dashboard.css",
       script: "/js/features/dashboard/index.js",
-      title: "Onion Support"
+      title: "Panel de control"
     },
 
     "/incidencias": {

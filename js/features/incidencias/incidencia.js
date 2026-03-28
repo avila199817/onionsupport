@@ -199,15 +199,12 @@ async function loadUserIncidencias(){
 }
 
 /* =========================
-   AUTH HEADER
+   AUTH HEADER (REAL)
 ========================= */
 
 function getAuthHeaders(){
 
-  const token =
-    Onion.state?.token ||
-    localStorage.getItem("token") ||
-    "";
+  const token = Onion.auth.getToken();
 
   return token
     ? { Authorization: "Bearer " + token }
@@ -215,7 +212,7 @@ function getAuthHeaders(){
 }
 
 /* =========================
-   SAVE (PRO SAAS)
+   SAVE (FINAL PRO)
 ========================= */
 
 async function saveIncidencia(){

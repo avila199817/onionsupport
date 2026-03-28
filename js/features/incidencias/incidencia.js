@@ -13,6 +13,13 @@ let initialized = false;
 let selectedFiles = [];
 
 /* =========================
+   CONFIG
+========================= */
+
+const MAX_FILES = 5;
+const MAX_SIZE_MB = 10;
+
+/* =========================
    INIT
 ========================= */
 
@@ -31,9 +38,7 @@ function init(){
   bindEvents();
   loadUserIncidencias();
 
-  Onion.onCleanup(()=>{
-    initialized = false;
-  });
+  Onion.onCleanup(()=> initialized = false);
 
 }
 
@@ -103,7 +108,21 @@ function handleFiles(e){
   const files = Array.from(e.target.files || []);
   if(!files.length) return;
 
-  selectedFiles = [...selectedFiles, ...files];
+  for(const file of files){
+
+    if(selectedFiles.length >= MAX_FILES){
+      showToast(`Máximo ${MAX_FILES} archivos`, "error");
+      break;
+    }
+
+    if(file.size > MAX_SIZE_MB * 1024 * 1024){
+      showToast(`Archivo demasiado grande (${file.name})`, "error");
+      continue;
+    }
+
+    selectedFiles.push(file);
+  }
+
   renderFiles();
 
 }
@@ -127,8 +146,7 @@ function renderFiles(){
 
   list.querySelectorAll("[data-remove]").forEach(btn=>{
     btn.addEventListener("click", ()=>{
-      const index = Number(btn.dataset.remove);
-      selectedFiles.splice(index, 1);
+      selectedFiles.splice(Number(btn.dataset.remove), 1);
       renderFiles();
     });
   });
@@ -153,19 +171,13 @@ async function loadUserIncidencias(){
     );
 
     if(!data || !data.length){
-      container.innerHTML = `
-        <div style="color:var(--dim); font-size:12px;">
-          No tienes incidencias abiertas
-        </div>
-      `;
+      container.innerHTML = `<div style="color:var(--dim); font-size:12px;">No tienes incidencias abiertas</div>`;
       return;
     }
 
     container.innerHTML = data.map(i => `
       <div class="history-item" data-id="${i.id}">
-        <div class="history-title">
-          ${escapeHTML(i.subject || "Sin asunto")}
-        </div>
+        <div class="history-title">${escapeHTML(i.subject || "Sin asunto")}</div>
         <div class="history-meta">
           <span>${formatEstado(i.status)}</span>
           <span>${formatFecha(i.createdAt)}</span>
@@ -187,7 +199,23 @@ async function loadUserIncidencias(){
 }
 
 /* =========================
-   SAVE (PRO)
+   AUTH HEADER
+========================= */
+
+function getAuthHeaders(){
+
+  const token =
+    Onion.state?.token ||
+    localStorage.getItem("token") ||
+    "";
+
+  return token
+    ? { Authorization: "Bearer " + token }
+    : {};
+}
+
+/* =========================
+   SAVE (PRO SAAS)
 ========================= */
 
 async function saveIncidencia(){
@@ -232,7 +260,8 @@ async function saveIncidencia(){
 
     const response = await fetch(Onion.config.API + "/tickets", {
       method: "POST",
-      body: formData
+      body: formData,
+      headers: getAuthHeaders()
     });
 
     let data = null;
@@ -274,15 +303,12 @@ async function saveIncidencia(){
 ========================= */
 
 function resetForm(){
-
   ["#inc-title", "#inc-message"].forEach(sel=>{
     const el = $(sel);
     if(el) el.value = "";
   });
-
   selectedFiles = [];
   renderFiles();
-
 }
 
 function setError(selector, message){

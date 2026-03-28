@@ -197,19 +197,44 @@ function render(items){
 
     return `
       <tr data-id="${id}" style="cursor:pointer">
-        <td>${escapeHTML(f.numero || f.id || "--")}</td>
-        <td>${escapeHTML(f.cliente || "-")}</td>
-        <td>${formatFecha(f.fecha)}</td>
-        <td>${formatMoney(f.total)}</td>
-        <td>
-          <span class="badge ${estado.class}">
+
+        <td class="col-id">
+          ${escapeHTML(f.numero || f.id || "--")}
+        </td>
+
+        <td class="col-main">
+          <div class="cell-user">
+            <div class="table-avatar">
+              ${(f.cliente || "?")[0]?.toUpperCase() || "?"}
+            </div>
+            <div class="user-info">
+              <span class="user-name">${escapeHTML(f.cliente || "-")}</span>
+              <span class="user-sub">Cliente</span>
+            </div>
+          </div>
+        </td>
+
+        <td class="col-date">
+          ${formatFecha(f.fecha)}
+        </td>
+
+        <td class="col-main">
+          ${formatMoney(f.total)}
+        </td>
+
+        <td class="col-status">
+          <span class="badge estado-${estado.class}">
             ${estado.label}
           </span>
         </td>
-        <td class="acciones">
-          <button data-action="download">Descargar</button>
-          <button data-action="send">Enviar</button>
+
+        <td class="col-actions">
+          <div class="actions">
+            <button data-action="download">Descargar</button>
+            <button data-action="send">Enviar</button>
+          </div>
         </td>
+
       </tr>
     `;
 
@@ -227,7 +252,6 @@ function downloadFactura(id){
 
 function sendFactura(id){
   alert("Enviar factura " + id);
-  // aquí luego metes API real
 }
 
 /* =========================

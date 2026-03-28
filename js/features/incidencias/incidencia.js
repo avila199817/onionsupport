@@ -66,7 +66,7 @@ function bindEvents(){
 
   });
 
-  // CREAR INCIDENCIA
+  // CREAR
   $("#btn-save-incidencia")?.addEventListener("click", saveIncidencia);
 
 }
@@ -77,6 +77,8 @@ function bindEvents(){
 
 async function saveIncidencia(){
 
+  clearErrors();
+
   const data = {
     subject: $("#inc-title")?.value?.trim() || "",
     message: $("#inc-message")?.value?.trim() || "",
@@ -84,16 +86,38 @@ async function saveIncidencia(){
     priority: $("#inc-priority")?.value || "low"
   };
 
-  // VALIDACIÓN
-  if(!data.message){
-    alert("⚠️ El mensaje es obligatorio");
-    return;
+  /* =========================
+     VALIDACIÓN PRO
+  ========================= */
+
+  let valid = true;
+
+  if(!data.subject){
+    setError("#inc-title", "Introduce un título");
+    valid = false;
   }
 
-  // UI LOCK
+  if(!data.message){
+    setError("#inc-message", "Describe el problema");
+    valid = false;
+  }
+
+  if(!data.name){
+    setError("#inc-cliente", "Indica el usuario");
+    valid = false;
+  }
+
+  if(!valid) return;
+
+  /* =========================
+     UI LOCK
+  ========================= */
+
   const btn = $("#btn-save-incidencia");
+
   if(btn){
     btn.disabled = true;
+    btn.dataset.original = btn.innerText;
     btn.innerText = "Creando...";
   }
 
@@ -104,24 +128,25 @@ async function saveIncidencia(){
       body: JSON.stringify(data)
     });
 
-    // SUCCESS
-    alert("✅ Incidencia creada");
+    showToast("Incidencia creada correctamente", "success");
 
     resetForm();
 
-    // VOLVER A LISTADO
-    Onion.router.navigate("/incidencias");
+    setTimeout(()=>{
+      Onion.router.navigate("/incidencias");
+    }, 600);
 
   }catch(err){
 
     console.error("💥 Error creando incidencia:", err);
-    alert("❌ Error creando incidencia");
+
+    showToast("Error creando incidencia", "error");
 
   }finally{
 
     if(btn){
       btn.disabled = false;
-      btn.innerText = "Crear incidencia";
+      btn.innerText = btn.dataset.original || "Crear incidencia";
     }
 
   }
@@ -129,29 +154,76 @@ async function saveIncidencia(){
 }
 
 /* =========================
-   RESET FORM
+   FORM HELPERS
 ========================= */
 
 function resetForm(){
 
-  const inputs = [
-    "#inc-title",
-    "#inc-message",
-    "#inc-cliente"
-  ];
-
-  inputs.forEach(sel => {
+  ["#inc-title", "#inc-message", "#inc-cliente"].forEach(sel=>{
     const el = $(sel);
     if(el) el.value = "";
   });
 
-  const priority = $("#inc-priority");
-  if(priority) priority.value = "low";
+  const p = $("#inc-priority");
+  if(p) p.value = "low";
+
+}
+
+function setError(selector, message){
+
+  const el = $(selector);
+  if(!el) return;
+
+  el.classList.add("error");
+
+  let msg = el.parentNode.querySelector(".input-error");
+
+  if(!msg){
+    msg = document.createElement("div");
+    msg.className = "input-error";
+    el.parentNode.appendChild(msg);
+  }
+
+  msg.innerText = message;
+
+}
+
+function clearErrors(){
+
+  const root = getRoot();
+  if(!root) return;
+
+  root.querySelectorAll(".error").forEach(el=>{
+    el.classList.remove("error");
+  });
+
+  root.querySelectorAll(".input-error").forEach(el=>{
+    el.remove();
+  });
 
 }
 
 /* =========================
-   OPTIONAL UX (ENTER SUBMIT)
+   TOAST (LIGHT)
+========================= */
+
+function showToast(message, type){
+
+  const el = document.createElement("div");
+  el.className = `toast show ${type}`;
+  el.innerText = message;
+
+  document.body.appendChild(el);
+
+  setTimeout(()=>{
+    el.classList.remove("show");
+    setTimeout(()=> el.remove(), 300);
+  }, 2000);
+
+}
+
+/* =========================
+   KEYBOARD UX
 ========================= */
 
 document.addEventListener("keydown", (e)=>{

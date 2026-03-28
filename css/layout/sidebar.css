@@ -165,7 +165,13 @@
 
   color:var(--muted);
 
-  /* importante */
+  /* 🔴 CLAVE */
+  opacity:0;
+  pointer-events:none;
+}
+
+/* aparece SOLO al hacer hover */
+.sidebar.collapsed .sidebar-top:hover .sidebar-toggle{
   opacity:1;
   pointer-events:auto;
 }

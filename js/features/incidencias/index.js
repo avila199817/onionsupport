@@ -74,10 +74,8 @@ function bindEvents(){
   const root = getRoot();
   if(!root) return;
 
-  // CLICK FILA → DETALLE
   Onion.cleanupEvent(root, "click", (e)=>{
 
-    // evitar conflicto con botones dentro de la fila
     if(e.target.closest("button")) return;
 
     const row = e.target.closest("tr[data-id]");
@@ -90,15 +88,13 @@ function bindEvents(){
 
   });
 
-  // NUEVA INCIDENCIA
-  $("#btn-new")?.addEventListener("click", crearIncidencia);
+  // 🔥 FIX ID (ANTES ESTABA MAL)
+  $("#btn-new-incidencia")?.addEventListener("click", crearIncidencia);
 
-  // FILTROS
   $("#search-incidencia")?.addEventListener("input", debounce(applyFilters, 250));
   $("#filter-status")?.addEventListener("change", applyFilters);
   $("#filter-priority")?.addEventListener("change", applyFilters);
 
-  // GLOBAL EVENTS (SPA)
   document.addEventListener("click", globalEvents);
 
 }
@@ -109,12 +105,10 @@ function bindEvents(){
 
 function globalEvents(e){
 
-  // VOLVER
   if(e.target.id === "btn-back"){
     showView("incidencias");
   }
 
-  // GUARDAR
   if(e.target.id === "btn-save-incidencia"){
     saveIncidencia();
   }
@@ -122,7 +116,7 @@ function globalEvents(e){
 }
 
 /* =========================
-   NUEVA INCIDENCIA VIEW
+   NUEVA INCIDENCIA
 ========================= */
 
 function crearIncidencia(){
@@ -154,10 +148,7 @@ async function saveIncidencia(){
       body: JSON.stringify(data)
     });
 
-    // 🔥 volver a listado
     showView("incidencias");
-
-    // 🔥 recargar sin reload
     loadIncidencias();
 
   }catch(err){
@@ -182,13 +173,13 @@ function applyFilters(){
   filteredItems = currentItems.filter(i => {
 
     const title = (i.message || i.subject || "").toLowerCase();
-    const cliente = (i.name || "").toLowerCase();
+    const usuario = (i.name || "").toLowerCase();
 
     const itemStatus = mapStatus(i.status);
     const itemPriority = mapPriority(i.priority);
 
     return (
-      (!search || title.includes(search) || cliente.includes(search) || String(i.id).includes(search)) &&
+      (!search || title.includes(search) || usuario.includes(search) || String(i.id).includes(search)) &&
       (!status || itemStatus === status) &&
       (!priority || itemPriority === priority)
     );
@@ -229,7 +220,6 @@ async function loadIncidencias(){
     }
 
     render(items);
-
     panel?.classList.add("ready");
 
   }catch(e){
@@ -288,14 +278,31 @@ function render(items){
 
     return `
       <tr data-id="${d.id}" style="cursor:pointer">
+
         <td>${d.id}</td>
+
         <td>${escapeHTML(d.title)}</td>
-        <td>${escapeHTML(d.cliente)}</td>
+
+        <td>
+          <div class="cell-user">
+            <div class="table-avatar">
+              ${getInitials(d.usuario)}
+            </div>
+            <div class="user-info">
+              <span class="user-name">${escapeHTML(d.usuario)}</span>
+            </div>
+          </div>
+        </td>
+
         <td>${escapeHTML(d.tecnico)}</td>
+
         <td><span class="badge ${d.estado.class}">${d.estado.label}</span></td>
+
         <td><span class="badge ${d.prioridad.class}">${d.prioridad.label}</span></td>
+
         <td>${d.fecha}</td>
         <td>${d.fechaCierre}</td>
+
       </tr>
     `;
 
@@ -313,7 +320,7 @@ function mapItem(i){
   return {
     id: i.id || i.ticketId || "--",
     title: i.message || i.subject || "Sin título",
-    cliente: i.name || "-",
+    usuario: i.name || "-",
     tecnico: i.tecnico?.name || "-",
     estado: getEstado(i),
     prioridad: getPrioridad(i),
@@ -342,18 +349,19 @@ function mapPriority(p){
   return "baja";
 }
 
+/* 🔥 BADGES FIX */
 function getEstado(i){
   const s = mapStatus(i.status);
-  if(s === "cerrada") return { label:"Cerrada", class:"cerrada" };
-  if(s === "progreso") return { label:"En progreso", class:"progreso" };
-  return { label:"Abierta", class:"abierta" };
+  if(s === "cerrada") return { label:"Cerrada", class:"success" };
+  if(s === "progreso") return { label:"En progreso", class:"warning" };
+  return { label:"Abierta", class:"info" };
 }
 
 function getPrioridad(i){
   const p = mapPriority(i.priority);
-  if(p === "alta") return { label:"Alta", class:"alta" };
-  if(p === "media") return { label:"Media", class:"media" };
-  return { label:"Baja", class:"baja" };
+  if(p === "alta") return { label:"Alta", class:"error" };
+  if(p === "media") return { label:"Media", class:"warning" };
+  return { label:"Baja", class:"neutral" };
 }
 
 function formatFecha(f){
@@ -369,19 +377,17 @@ function escapeHTML(str){
 }
 
 /* =========================
-   DETALLE
+   AVATAR
 ========================= */
 
-function showDetalle(item){
-  console.log("👁 DETALLE COMPLETO:", item);
-
-  alert(`
-ID: ${item.id}
-Cliente: ${item.name}
-Mensaje: ${item.message}
-Técnico: ${item.tecnico?.name || "-"}
-Estado: ${item.status}
-  `);
+function getInitials(name){
+  if(!name) return "?";
+  return name
+    .split(" ")
+    .map(n => n[0])
+    .join("")
+    .slice(0,2)
+    .toUpperCase();
 }
 
 /* =========================

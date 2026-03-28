@@ -4,32 +4,65 @@
 
     <div class="panel-block">
 
-      <!-- HEADER -->
+      <!-- =========================
+           HEADER
+      ========================= -->
       <div class="filters-row">
-        <button id="btn-back">← Volver</button>
-        <h3 style="margin-left:10px;">Nueva incidencia</h3>
+
+        <button id="btn-back">
+          ← Volver
+        </button>
+
+        <div class="page-header" style="margin-left:10px;">
+          <div>
+            <div class="page-title">Nueva incidencia</div>
+            <div class="page-subtitle">Crea un nuevo ticket</div>
+          </div>
+        </div>
+
       </div>
 
-      <!-- FORM -->
-      <div style="padding:20px; max-width:700px;">
+      <!-- =========================
+           FORM
+      ========================= -->
+      <div class="form-wrapper">
 
-        <div style="display:flex; flex-direction:column; gap:16px;">
+        <div class="form-grid">
 
-          <input type="text" id="inc-title" placeholder="Título de la incidencia">
+          <!-- TÍTULO -->
+          <input 
+            type="text"
+            id="inc-title"
+            placeholder="Título de la incidencia"
+          >
 
-          <textarea id="inc-message" placeholder="Describe el problema..." rows="5"></textarea>
+          <!-- MENSAJE -->
+          <textarea 
+            id="inc-message"
+            placeholder="Describe el problema..."
+            rows="5"
+          ></textarea>
 
-          <input type="text" id="inc-cliente" placeholder="Cliente">
+          <!-- USUARIO -->
+          <input 
+            type="text"
+            id="inc-cliente"
+            placeholder="Usuario"
+          >
 
+          <!-- PRIORIDAD -->
           <select id="inc-priority">
             <option value="low">Prioridad baja</option>
             <option value="medium">Prioridad media</option>
             <option value="high">Prioridad alta</option>
           </select>
 
-          <button id="btn-save-incidencia">
-            Crear incidencia
-          </button>
+          <!-- BOTÓN -->
+          <div class="form-actions">
+            <button id="btn-save-incidencia">
+              Crear incidencia
+            </button>
+          </div>
 
         </div>
 

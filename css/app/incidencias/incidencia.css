@@ -1,7 +1,6 @@
 /* =========================================================
-   INCIDENCIA CREATE — FINAL PRO (MISMO SISTEMA QUE TABLA)
+   INCIDENCIA CREATE — FINAL DEFINITIVO (CIERRA TODO)
 ========================================================= */
-
 
 /* =========================
    BASE
@@ -21,15 +20,20 @@ html, body{
 }
 
 
-/* =========================
-   🔥 WRAPPER FIX REAL
-========================= */
-.content-wrapper:has(.incidencia-create){
-  padding:0 !important;
+/* =========================================================
+   🔥 FIX REAL DEL LAYOUT (ESTO ERA LO QUE FALTABA)
+========================================================= */
+.content-wrapper{
   flex:1;
   min-height:0;
   display:flex;
   flex-direction:column;
+}
+
+/* SOLO ESTA VISTA */
+.content-wrapper:has(.incidencia-create){
+  padding:0 !important;
+  background:var(--panel-bg); /* 🔥 ADIÓS HUECO */
 }
 
 
@@ -68,7 +72,7 @@ html, body{
 
 
 /* =========================================================
-   🔥 RIGHT (IGUAL QUE TABLE-CONTAINER)
+   RIGHT (PANEL PERFECTO)
 ========================================================= */
 .incidencia-right{
   width:360px;
@@ -78,14 +82,15 @@ html, body{
   display:flex;
   flex-direction:column;
 
-  /* 🔥 ESTO ES LA CLAVE REAL */
   background:var(--panel-bg);
+  border-left:1px solid var(--panel-border);
 
+  min-height:0;
   overflow:hidden;
 }
 
 
-/* 🔥 CONTENEDOR REAL COMO TABLE-CONTAINER */
+/* CONTENIDO DERECHO */
 .incidencia-history{
   flex:1;
   min-height:0;
@@ -93,14 +98,12 @@ html, body{
   display:flex;
   flex-direction:column;
 
+  padding:16px;
   background:var(--panel-bg);
 
   overflow:hidden;
-  padding:16px;
 }
 
-
-/* HEADER */
 .history-header{
   font-size:13px;
   font-weight:600;
@@ -109,12 +112,9 @@ html, body{
   flex-shrink:0;
 }
 
-
-/* 🔥 SCROLL AREA REAL */
 .history-list{
   flex:1;
   min-height:0;
-
   overflow:auto;
 
   background:var(--panel-bg);

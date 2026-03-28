@@ -1,5 +1,5 @@
 /* =========================================================
-   INCIDENCIA CREATE — FINAL PRO SAAS (100% ESTABLE)
+   INCIDENCIA CREATE — FINAL DEFINITIVO (PRO SAAS CLEAN)
 ========================================================= */
 
 /* =========================
@@ -18,7 +18,7 @@ html, body{
 
 
 /* =========================
-   PANEL ROOT
+   PANEL ROOT (FULL WIDTH FIX)
 ========================= */
 .panel-content.incidencia-create{
   display:flex;
@@ -26,12 +26,14 @@ html, body{
   flex:1;
   min-height:0;
   width:100%;
-  overflow:hidden;
+
+  /* 🔥 CLAVE: rompe el padding del layout */
+  margin:calc(var(--space-lg) * -1);
 }
 
 
 /* =========================================================
-   LAYOUT (EXPANSIÓN REAL)
+   LAYOUT
 ========================================================= */
 .layout-split{
   display:flex;
@@ -41,7 +43,7 @@ html, body{
 }
 
 
-/* LEFT (SE ADAPTA AL SIDEBAR) */
+/* LEFT */
 .incidencia-left{
   flex:1 1 auto;
   min-width:0;
@@ -52,7 +54,7 @@ html, body{
 }
 
 
-/* RIGHT (PANEL FIJO Y LIMPIO) */
+/* RIGHT (PANEL FIJO Y COMPLETO) */
 .incidencia-right{
   width:360px;
   min-width:360px;
@@ -125,12 +127,12 @@ html, body{
 
 
 /* =========================================================
-   FORM (🔥 SIN LIMITES DE ANCHO)
+   FORM (FULL WIDTH REAL)
 ========================================================= */
 .incidencia-form{
   width:100%;
-  max-width:none; /* 🔥 CLAVE */
-  
+  max-width:none;
+
   display:flex;
   flex-direction:column;
   gap:16px;
@@ -157,11 +159,12 @@ html, body{
 
 
 /* =========================================================
-   FILES
+   FILES (BOTÓN A LA IZQUIERDA)
 ========================================================= */
 .incidencia-files{
   display:flex;
   flex-direction:column;
+  align-items:flex-start; /* 🔥 FIX */
   gap:6px;
   margin-top:4px;
 }
@@ -172,6 +175,7 @@ html, body{
   color:var(--accent);
   cursor:pointer;
   font-size:13px;
+  align-self:flex-start; /* 🔥 EXTRA FIX */
 }
 
 #btn-attach:hover{
@@ -221,7 +225,7 @@ html, body{
 
 
 /* =========================================================
-   PANEL DERECHO (FONDO CONTINUO)
+   PANEL DERECHO (FONDO CONTINUO REAL)
 ========================================================= */
 .incidencia-history{
   flex:1;

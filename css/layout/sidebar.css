@@ -80,8 +80,14 @@
    TOGGLE (FIJO TOTAL)
 ========================= */
 .sidebar-toggle{
+  position:absolute;
+
   width:38px;
   height:38px;
+
+  /* POSICIÓN FIJA REAL (SIN CENTRADO DINÁMICO) */
+  top:16px; /* mismo que padding aprox */
+  right:var(--space-md);
 
   display:flex;
   align-items:center;
@@ -94,21 +100,15 @@
   color:var(--muted);
 
   cursor:pointer;
-  position:absolute;
+  z-index:2;
 
-  right:var(--space-md);
-  top:50%;
-  transform:translateY(-50%);
-
+  /* SOLO COLOR → NADA DE TRANSFORM */
   transition:
     background .15s ease,
     color .15s ease,
     opacity .15s ease;
-
-  z-index:2;
 }
 
-/* SIN MOVIMIENTO */
 .sidebar-toggle:hover{
   background:var(--sb-hover);
   color:var(--text);

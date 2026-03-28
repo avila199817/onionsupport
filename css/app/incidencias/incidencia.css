@@ -1,5 +1,5 @@
 /* =========================================================
-   INCIDENCIA CREATE — FULL PRO SAAS (HEADER FIX FINAL PRO)
+   INCIDENCIA CREATE — FULL PRO SAAS (MASTER PLUS)
 ========================================================= */
 
 /* =========================
@@ -15,6 +15,8 @@ html, body{
 .panel-content{
   height:100%;
   min-height:0;
+  display:flex;
+  flex-direction:column;
 }
 
 
@@ -22,27 +24,34 @@ html, body{
    ROOT
 ========================= */
 .panel-content.incidencia-create{
+  flex:1;
+  min-height:0;
+
   display:flex;
-  height:100%;
+  flex-direction:column;
+
   width:100%;
   overflow:hidden;
 }
 
 
 /* =========================================================
-   LAYOUT SPLIT
+   LAYOUT SPLIT (🔥 CLAVE REAL)
 ========================================================= */
 .layout-split{
+  flex:1;
+  min-height:0;
+
   display:flex;
   width:100%;
   height:100%;
-  min-height:0;
 }
 
 /* LEFT */
 .incidencia-left{
   flex:1;
   min-width:0;
+
   display:flex;
   flex-direction:column;
   min-height:0;
@@ -56,57 +65,74 @@ html, body{
   display:flex;
   flex-direction:column;
 
-  align-self:stretch;
-
   background:var(--panel-bg);
   border-left:1px solid var(--panel-border);
 
-  overflow:hidden;
   min-height:0;
+  height:100%;
+
+  /* 🔥 sensación de profundidad */
+  background:
+    linear-gradient(
+      to bottom,
+      var(--panel-bg),
+      color-mix(in srgb, var(--panel-bg), #000 6%)
+    );
 }
 
 
 /* =========================================================
-   HEADER (🔥 FIX PRO)
+   HEADER (🔥 STICKY READY)
 ========================================================= */
 .panel-content.incidencia-create .filters-row{
   display:flex;
   align-items:center;
 
-  /* 🔥 CLAVE: alineación con body */
   padding:14px 40px;
 
   background:var(--panel-bg);
   border-bottom:1px solid var(--panel-border);
 
   flex-shrink:0;
+
+  /* 🔥 preparado para sticky */
+  position:sticky;
+  top:0;
+  z-index:2;
+
+  backdrop-filter:blur(6px);
 }
 
-/* 🔥 BLOQUE IZQUIERDO (greeting alineado) */
+/* BLOQUE IZQUIERDO */
 .header-left{
   display:flex;
   flex-direction:column;
   gap:2px;
 }
 
-/* 🔥 BOTÓN A LA DERECHA */
+/* BOTÓN DERECHA */
 #btn-back{
   margin-left:auto;
 
   background:none;
   border:none;
+
   color:var(--text);
   font-size:13px;
   cursor:pointer;
 
-  opacity:.8;
+  opacity:.75;
   padding:0;
+
+  transition:opacity .15s ease;
 }
 
 #btn-back:hover{
   opacity:1;
 }
 
+
+/* TITLES */
 .page-title{
   font-size:20px;
   font-weight:600;
@@ -125,13 +151,14 @@ html, body{
 ========================================================= */
 .incidencia-body{
   flex:1;
+  min-height:0;
+
   display:flex;
 
   padding:30px 40px;
 
   width:100%;
   overflow:auto;
-  min-height:0;
 }
 
 
@@ -149,7 +176,7 @@ html, body{
 
 
 /* =========================================================
-   INPUTS
+   INPUTS (🔥 UX PRO)
 ========================================================= */
 .incidencia-form input,
 .incidencia-form textarea{
@@ -164,7 +191,10 @@ html, body{
 
   font-size:14px;
 
-  transition:border-color .2s ease, box-shadow .2s ease;
+  transition:
+    border-color .2s ease,
+    box-shadow .2s ease,
+    transform .05s ease;
 }
 
 .incidencia-form textarea{
@@ -176,6 +206,11 @@ html, body{
 .incidencia-form textarea:focus{
   border-color:var(--accent);
   box-shadow:0 0 0 2px color-mix(in srgb, var(--accent), transparent 85%);
+}
+
+.incidencia-form input:active,
+.incidencia-form textarea:active{
+  transform:scale(.998);
 }
 
 
@@ -193,10 +228,14 @@ html, body{
 #btn-attach{
   background:none;
   border:none;
+
   color:var(--accent);
   font-size:13px;
   cursor:pointer;
+
   padding:0;
+
+  transition:opacity .15s ease;
 }
 
 #btn-attach:hover{
@@ -229,7 +268,7 @@ html, body{
 
 
 /* =========================================================
-   CTA BUTTON
+   CTA BUTTON (🔥 PRO FEEL)
 ========================================================= */
 #btn-save-incidencia{
   padding:13px 26px;
@@ -245,32 +284,36 @@ html, body{
   cursor:pointer;
 
   box-shadow:0 10px 24px rgba(99,102,241,0.35);
-  position:relative;
+
+  transition:
+    transform .15s ease,
+    box-shadow .2s ease;
 }
 
 #btn-save-incidencia:hover{
   transform:translateY(-1px);
+  box-shadow:0 14px 30px rgba(99,102,241,0.45);
 }
 
 #btn-save-incidencia:active{
   transform:translateY(0);
+  box-shadow:0 6px 16px rgba(99,102,241,0.3);
 }
 
 
 /* =========================================================
-   HISTORY PANEL
+   HISTORY PANEL (🔥 SCROLL INDEPENDIENTE)
 ========================================================= */
 .incidencia-history{
   flex:1;
+  min-height:0;
+
   display:flex;
   flex-direction:column;
 
-  min-height:0;
-  height:100%;
-
   padding:16px;
 
-  background:var(--panel-bg);
+  overflow:hidden;
 }
 
 .history-header{
@@ -293,6 +336,7 @@ html, body{
   overflow:auto;
 }
 
+/* ITEM */
 .history-item{
   padding:12px;
   border-radius:10px;
@@ -301,11 +345,15 @@ html, body{
   border:1px solid var(--card-border);
 
   cursor:pointer;
-  transition:all .15s ease;
+
+  transition:
+    background .15s ease,
+    transform .08s ease;
 }
 
 .history-item:hover{
   background:color-mix(in srgb, var(--card-bg), #fff 6%);
+  transform:translateY(-1px);
 }
 
 .history-title{
@@ -317,6 +365,7 @@ html, body{
 .history-meta{
   font-size:11px;
   color:var(--dim);
+
   display:flex;
   justify-content:space-between;
 }

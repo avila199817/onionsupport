@@ -1,20 +1,6 @@
 /* =========================================================
-   INCIDENCIA DETALLE — ULTIMATE SAAS PANEL
-   (FULL HEIGHT + ZERO BUGS)
+   INCIDENCIA DETALLE — ULTIMATE SAAS PANEL (FINAL FIX)
 ========================================================= */
-
-
-/* =========================================================
-   🔥 FIX GLOBAL ALTURA (CLAVE ABSOLUTA)
-========================================================= */
-html, body{
-  height:100%;
-}
-
-body{
-  display:flex;
-  flex-direction:column;
-}
 
 
 /* =========================================================
@@ -23,24 +9,21 @@ body{
 .panel-content.incidencia-detalle{
   display:flex;
   flex-direction:column;
-
   flex:1;
   min-height:0;
   width:100%;
-
-  overflow:hidden; /* 🔥 evita doble scroll */
+  overflow:hidden;
 }
 
 
 /* =========================================================
-   LAYOUT SPLIT
+   LAYOUT
 ========================================================= */
 .incidencia-detalle .layout-split{
   display:flex;
   flex:1;
   min-height:0;
   width:100%;
-
   overflow:hidden;
 }
 
@@ -61,7 +44,7 @@ body{
 
 
 /* =========================================================
-   RIGHT SIDEBAR
+   RIGHT SIDEBAR (🔥 FIX BORDER RADIUS)
 ========================================================= */
 .detalle-right{
   width:360px;
@@ -71,17 +54,17 @@ body{
   display:flex;
   flex-direction:column;
 
-  background:var(--panel-bg);
+  background:transparent; /* 🔥 clave */
   border-left:1px solid var(--panel-border);
 
+  padding:12px; /* 🔥 espacio real */
+
   min-height:0;
-  overflow:hidden;
-  margin-top:8px;
 }
 
 
 /* =========================================================
-   SIDEBAR CONTENT
+   SIDEBAR PANEL INTERNO (🔥 CLAVE)
 ========================================================= */
 .detalle-sidebar{
   flex:1;
@@ -90,15 +73,25 @@ body{
   display:flex;
   flex-direction:column;
 
+  background:var(--panel-bg);
+  border-radius:14px;
+
   padding:16px;
 
-  overflow:hidden;
+  overflow:hidden; /* 🔥 clipping correcto */
+  box-shadow:0 8px 24px rgba(0,0,0,0.25);
 }
 
+
+/* =========================================================
+   SECTION
+========================================================= */
 .sidebar-section{
   display:flex;
   flex-direction:column;
   gap:10px;
+  flex:1;
+  min-height:0;
 }
 
 .sidebar-title{
@@ -117,12 +110,14 @@ body{
 
   display:flex;
   flex-direction:column;
-  gap:8px;
+  gap:10px;
 
   overflow:auto;
   padding-right:4px;
 }
 
+
+/* SCROLL */
 .detalle-blobs::-webkit-scrollbar{
   width:6px;
 }
@@ -132,26 +127,35 @@ body{
   border-radius:6px;
 }
 
+
+/* =========================================================
+   ITEM (🔥 PERFECT CARD)
+========================================================= */
 .blob-item{
   display:flex;
   align-items:center;
   justify-content:space-between;
 
-  padding:10px 12px;
+  padding:12px 14px;
 
-  border-radius:10px;
+  border-radius:12px;
   border:1px solid var(--card-border);
 
   background:color-mix(in srgb, var(--card-bg), #000 12%);
 
-  transition:all .15s ease;
+  transition:.15s ease;
 }
 
 .blob-item:hover{
   border-color:var(--accent);
-  transform:translateY(-1px);
+  transform:translateY(-2px);
+  box-shadow:0 6px 18px rgba(0,0,0,0.25);
 }
 
+
+/* =========================================================
+   TEXT
+========================================================= */
 .blob-name{
   font-size:13px;
   color:var(--text);
@@ -162,24 +166,29 @@ body{
   white-space:nowrap;
 }
 
+
+/* =========================================================
+   BUTTON
+========================================================= */
 .blob-download{
-  padding:6px 10px;
-  border-radius:8px;
+  padding:7px 12px;
+  border-radius:10px;
 
   border:none;
   cursor:pointer;
 
   font-size:12px;
-  font-weight:500;
+  font-weight:600;
 
-  background:var(--accent);
+  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
   color:#fff;
 
   transition:.15s;
 }
 
 .blob-download:hover{
-  background:var(--accent-hover);
+  transform:translateY(-1px);
+  box-shadow:0 6px 14px rgba(99,102,241,0.35);
 }
 
 
@@ -198,34 +207,9 @@ body{
   border-bottom:1px solid var(--panel-border);
 }
 
-#btn-back{
-  margin-left:auto;
-  background:none;
-  border:none;
-  color:var(--text);
-  cursor:pointer;
-  opacity:.8;
-  transition:.15s;
-}
-
-#btn-back:hover{
-  opacity:1;
-  transform:translateX(-2px);
-}
-
-.page-title{
-  font-size:20px;
-  font-weight:600;
-}
-
-.page-subtitle{
-  font-size:13px;
-  color:var(--dim);
-}
-
 
 /* =========================================================
-   BODY (SCROLL REAL)
+   BODY
 ========================================================= */
 .detalle-body{
   flex:1;
@@ -252,113 +236,6 @@ body{
 
 
 /* =========================================================
-   ITEMS
-========================================================= */
-.detalle-item{
-  display:flex;
-  flex-direction:column;
-  gap:6px;
-}
-
-.detalle-label{
-  font-size:12px;
-  color:var(--dim);
-}
-
-.detalle-value{
-  font-size:14px;
-  font-weight:500;
-  color:var(--text);
-}
-
-
-/* =========================================================
-   MENSAJE
-========================================================= */
-.detalle-editable{
-  font-size:14px;
-  line-height:1.5;
-
-  background:color-mix(in srgb, var(--card-bg), #000 10%);
-  border:1px solid var(--card-border);
-  border-radius:10px;
-
-  padding:12px;
-  min-height:60px;
-
-  cursor:text;
-  transition:.15s;
-}
-
-.detalle-editable:hover{
-  border-color:var(--accent);
-}
-
-.detalle-editable[contenteditable="true"]{
-  outline:none;
-  border-color:var(--accent);
-  box-shadow:0 0 0 2px rgba(99,102,241,0.25);
-}
-
-
-/* =========================================================
-   SELECTS
-========================================================= */
-.detalle-select{
-  margin-top:6px;
-  padding:10px 12px;
-
-  border-radius:10px;
-  border:1px solid var(--card-border);
-
-  background:color-mix(in srgb, var(--card-bg), #000 15%);
-  color:var(--text);
-
-  font-size:13px;
-  font-weight:500;
-
-  cursor:pointer;
-  transition:.15s;
-}
-
-.detalle-select:hover{
-  border-color:var(--accent);
-}
-
-.detalle-select:focus{
-  outline:none;
-  border-color:var(--accent);
-  box-shadow:0 0 0 2px rgba(99,102,241,0.25);
-}
-
-
-/* =========================================================
-   USER
-========================================================= */
-.detalle-user{
-  display:flex;
-  align-items:center;
-  gap:10px;
-}
-
-.table-avatar{
-  width:36px;
-  height:36px;
-  border-radius:50%;
-  overflow:hidden;
-
-  background:#ddd;
-
-  display:flex;
-  align-items:center;
-  justify-content:center;
-
-  font-size:13px;
-  font-weight:600;
-}
-
-
-/* =========================================================
    FOOTER
 ========================================================= */
 .detalle-footer{
@@ -369,46 +246,6 @@ body{
   align-items:center;
 
   flex-shrink:0;
-}
-
-.detalle-hint{
-  font-size:12px;
-  color:var(--dim);
-}
-
-
-/* =========================================================
-   BUTTON
-========================================================= */
-#btn-save{
-  padding:12px 22px;
-  border-radius:12px;
-
-  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
-  color:#fff;
-
-  border:none;
-  cursor:pointer;
-
-  box-shadow:0 10px 24px rgba(99,102,241,0.35);
-  transition:.15s;
-}
-
-#btn-save:hover{
-  transform:translateY(-1px);
-}
-
-
-/* =========================================================
-   SCROLL
-========================================================= */
-.detalle-body::-webkit-scrollbar{
-  width:6px;
-}
-
-.detalle-body::-webkit-scrollbar-thumb{
-  background:rgba(255,255,255,0.1);
-  border-radius:6px;
 }
 
 

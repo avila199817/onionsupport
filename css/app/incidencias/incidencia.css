@@ -1,5 +1,5 @@
 /* =========================================================
-   INCIDENCIA CREATE — FINAL DEFINITIVO (PRO SAAS CLEAN)
+   INCIDENCIA CREATE — FINAL PRO SAAS CLEAN
 ========================================================= */
 
 
@@ -87,13 +87,67 @@
   flex:1;
   min-height:0;
   overflow:auto;
-  background:var(--panel-bg);
+
+  display:flex;
+  flex-direction:column;
+  gap:10px;
 }
 
 
-/* =========================================================
+/* =========================
+   HISTORY ITEM (🔥 PRO)
+========================= */
+.history-item{
+  padding:12px 14px;
+  border-radius:12px;
+
+  background:color-mix(in srgb, var(--card-bg), #000 8%);
+  border:1px solid var(--card-border);
+
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+
+  cursor:pointer;
+
+  transition:all .15s ease;
+}
+
+.history-item:hover{
+  transform:translateY(-2px);
+  border-color:var(--accent);
+  box-shadow:0 8px 18px rgba(0,0,0,0.25);
+}
+
+
+/* =========================
+   TITLE
+========================= */
+.history-title{
+  font-size:13px;
+  font-weight:600;
+  color:var(--text);
+
+  line-height:1.3;
+}
+
+
+/* =========================
+   META
+========================= */
+.history-meta{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+
+  font-size:11px;
+  color:var(--dim);
+}
+
+
+/* =========================
    HEADER
-========================================================= */
+========================= */
 .filters-row{
   display:flex;
   align-items:center;
@@ -134,7 +188,7 @@
 
 
 /* =========================================================
-   BODY (SCROLL)
+   BODY
 ========================================================= */
 .incidencia-body{
   flex:1;
@@ -152,7 +206,6 @@
 ========================================================= */
 .incidencia-form{
   width:100%;
-  max-width:none;
 
   display:flex;
   flex-direction:column;
@@ -243,6 +296,19 @@
 
 #btn-save-incidencia:hover{
   transform:translateY(-1px);
+}
+
+
+/* =========================================================
+   SCROLL
+========================================================= */
+.history-list::-webkit-scrollbar{
+  width:6px;
+}
+
+.history-list::-webkit-scrollbar-thumb{
+  background:rgba(255,255,255,0.1);
+  border-radius:6px;
 }
 
 

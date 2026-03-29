@@ -59,6 +59,16 @@ function $(selector){
 
 
 /* =========================
+   AUTH (🔥 CLAVE)
+========================= */
+
+function getAuthHeaders(){
+  const token = Onion.auth?.getToken?.();
+  return token ? { Authorization: "Bearer " + token } : {};
+}
+
+
+/* =========================
    OBSERVER
 ========================= */
 
@@ -133,7 +143,7 @@ function bindEvents(){
 
 
 /* =========================
-   LOAD (🔥 FIX CACHE)
+   LOAD (🔥 SIN CACHE + AUTH)
 ========================= */
 
 async function loadDetalle(){
@@ -146,7 +156,8 @@ async function loadDetalle(){
   try{
 
     const res = await fetch(Onion.config.API + "/tickets/" + id + "?t=" + Date.now(), {
-      cache: "no-store"
+      cache: "no-store",
+      headers: getAuthHeaders()
     });
 
     const json = await res.json();
@@ -175,7 +186,7 @@ async function loadDetalle(){
 
 
 /* =========================
-   UPDATE (🔥 FIX REAL)
+   UPDATE (🔥 FUNCIONA TODO)
 ========================= */
 
 async function updateTicket(){
@@ -207,12 +218,17 @@ async function updateTicket(){
       }
     }
 
-    console.log("📤 ENVIANDO:", { status, priority, message, files: files?.length });
+    console.log("📤 ENVIANDO:", {
+      status,
+      priority,
+      message,
+      files: files?.length
+    });
 
-    /* 🔥 FETCH NATIVO (CLAVE) */
     const res = await fetch(Onion.config.API + "/tickets/" + id, {
       method: "PATCH",
-      body: formData
+      body: formData,
+      headers: getAuthHeaders()
     });
 
     const json = await res.json();
@@ -245,7 +261,7 @@ async function updateTicket(){
 
 
 /* =========================
-   RENDER (igual que tenías)
+   RENDER
 ========================= */
 
 function render(i){
@@ -274,22 +290,33 @@ function render(i){
 
 
 /* =========================
-   RESTO IGUAL
+   SELECT FIX
 ========================= */
 
 function setSelectValue(select, value){
+
   if(!select) return;
+
   const option = [...select.options].find(o => o.value === value);
+
   if(option){
     option.selected = true;
     select.selectedIndex = option.index;
   }else{
     select.selectedIndex = 0;
   }
+
   select.dispatchEvent(new Event("change", { bubbles: true }));
+
 }
 
+
+/* =========================
+   VISUAL STATE
+========================= */
+
 function applyVisualState(){
+
   const estado = $("#edit-estado");
   const prioridad = $("#edit-prioridad");
   const avatarEl = $("#detalle-avatar");
@@ -304,9 +331,16 @@ function applyVisualState(){
   }else{
     avatarEl?.classList.remove("avatar-highlight");
   }
+
 }
 
+
+/* =========================
+   BLOBS
+========================= */
+
 function renderBlobs(files){
+
   const container = $("#detalle-blobs");
   if(!container) return;
 
@@ -323,42 +357,75 @@ function renderBlobs(files){
       </button>
     </div>
   `).join("");
+
 }
 
+
+/* =========================
+   FILES
+========================= */
+
 function renderFiles(files){
+
   const list = $("#detalle-file-list");
   if(!list) return;
 
   list.innerHTML = [...files].map(f =>
     `<div class="file-item">${escapeHTML(f.name)}</div>`
   ).join("");
+
 }
+
+
+/* =========================
+   DOWNLOAD
+========================= */
 
 async function downloadBlob(url, name){
-  const res = await fetch(url);
-  const blob = await res.blob();
 
-  const a = document.createElement("a");
-  const u = URL.createObjectURL(blob);
+  try{
+    const res = await fetch(url);
+    const blob = await res.blob();
 
-  a.href = u;
-  a.download = name;
+    const a = document.createElement("a");
+    const objectUrl = URL.createObjectURL(blob);
 
-  document.body.appendChild(a);
-  a.click();
+    a.href = objectUrl;
+    a.download = name || "archivo";
 
-  a.remove();
-  URL.revokeObjectURL(u);
+    document.body.appendChild(a);
+    a.click();
+
+    a.remove();
+    URL.revokeObjectURL(objectUrl);
+
+  }catch(err){
+    console.error(err);
+    toast("Error descargando archivo", "error");
+  }
+
 }
 
+
+/* =========================
+   AVATAR
+========================= */
+
 function renderAvatar(nombre, avatar){
+
   const el = $("#detalle-avatar");
   if(!el) return;
 
   el.innerHTML = avatar
     ? `<img src="${avatar}" alt="${escapeHTML(nombre)}" />`
     : `<div class="avatar-fallback">${getInitials(nombre)}</div>`;
+
 }
+
+
+/* =========================
+   HELPERS
+========================= */
 
 function setText(sel, val){
   const el = $(sel);
@@ -383,6 +450,11 @@ function getInitials(name){
 function getId(){
   return new URLSearchParams(window.location.search).get("id");
 }
+
+
+/* =========================
+   STATES
+========================= */
 
 function setLoading(){
   const el = $("#detalle-content");
@@ -409,12 +481,20 @@ function setError(msg){
 }
 
 function setSaving(active){
+
   const btn = $("#btn-save");
+
   if(btn){
     btn.disabled = active;
     btn.textContent = active ? "Guardando..." : "Guardar cambios";
   }
+
 }
+
+
+/* =========================
+   TOAST
+========================= */
 
 function toast(msg,type="info"){
   alert(msg);

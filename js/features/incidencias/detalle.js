@@ -11,16 +11,22 @@ if(!Onion){
 
 let initialized = false;
 let currentItem = null;
+let observer = null;
 
 
 /* =========================
-   INIT
+   INIT (FIX HARD)
 ========================= */
 
 function init(){
 
+  if(initialized) return;
+
   const root = getRoot();
-  if(!root || initialized) return;
+
+  if(!root){
+    return setTimeout(init, 100);
+  }
 
   if(!Onion.state?.user){
     return setTimeout(init, 100);
@@ -28,10 +34,12 @@ function init(){
 
   initialized = true;
 
+  console.log("✅ INIT OK");
+
   bindEvents();
   loadDetalle();
 
-  Onion.onCleanup(()=> initialized = false);
+  observeDOM(); // 🔥 CLAVE
 
 }
 
@@ -48,6 +56,36 @@ function getRoot(){
 
 function $(selector){
   return getRoot()?.querySelector(selector);
+}
+
+
+/* =========================
+   OBSERVER (🔥 SOLUCIÓN REAL)
+========================= */
+
+function observeDOM(){
+
+  if(observer) return;
+
+  observer = new MutationObserver(()=>{
+
+    const root = getRoot();
+
+    if(!root){
+      console.warn("💥 DOM eliminado → reinicializando");
+
+      initialized = false;
+
+      setTimeout(init, 100);
+    }
+
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+
 }
 
 
@@ -135,6 +173,9 @@ async function loadDetalle(){
   try{
 
     const res = await Onion.fetch(Onion.config.API + "/tickets/" + id);
+
+    console.log("📦 API:", res);
+
     const data = res?.ticket || res?.data || res;
 
     if(!data){
@@ -217,6 +258,8 @@ async function updateTicket(){
 
 function render(i){
 
+  console.log("🎨 RENDER:", i);
+
   const usuario = i.cliente?.nombre || "Usuario";
   const avatar = i.cliente?.avatar;
 
@@ -233,12 +276,8 @@ function render(i){
   if($("#edit-estado")) $("#edit-estado").value = i.status || "open";
   if($("#edit-prioridad")) $("#edit-prioridad").value = i.priority || "low";
 
-  /* 🔥 SIEMPRE PINTA AVATAR */
   renderAvatar(usuario, avatar);
-
-  /* 🔥 ESTILOS DINÁMICOS */
   applyVisualState();
-
   renderBlobs(i.files || i.attachments || []);
 
 }
@@ -267,7 +306,6 @@ function applyVisualState(){
   if(prioridad.value === "medium") prioridad.classList.add("prio-medium");
   if(prioridad.value === "high") prioridad.classList.add("prio-high");
 
-  /* 🔥 HIGHLIGHT AVATAR */
   if(estado.value === "open" && prioridad.value === "low"){
     avatarEl?.classList.add("avatar-highlight");
   }else{

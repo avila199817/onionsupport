@@ -80,7 +80,7 @@ function setGreeting(){
 }
 
 /* =========================
-   EVENTS (ANTI DUPLICADO REAL)
+   EVENTS
 ========================= */
 
 function bindEvents(){
@@ -95,20 +95,13 @@ function bindEvents(){
   });
 
   const btn = $("#btn-save-incidencia");
-
-  if(btn){
-    btn.onclick = saveIncidencia; // 🔥 evita duplicados reales
-  }
+  if(btn) btn.onclick = saveIncidencia;
 
   const attachBtn = $("#btn-attach");
-  if(attachBtn){
-    attachBtn.onclick = ()=> $("#inc-files")?.click();
-  }
+  if(attachBtn) attachBtn.onclick = ()=> $("#inc-files")?.click();
 
   const fileInput = $("#inc-files");
-  if(fileInput){
-    fileInput.onchange = handleFiles;
-  }
+  if(fileInput) fileInput.onchange = handleFiles;
 
 }
 
@@ -137,7 +130,6 @@ function handleFiles(e){
   }
 
   renderFiles();
-
 }
 
 function renderFiles(){
@@ -151,9 +143,9 @@ function renderFiles(){
   }
 
   list.innerHTML = selectedFiles.map((f, i)=>`
-    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
       <span>📎 ${escapeHTML(f.name)}</span>
-      <button data-remove="${i}" style="background:none;border:none;color:var(--error);cursor:pointer;">✕</button>
+      <button data-remove="${i}">✕</button>
     </div>
   `).join("");
 
@@ -167,7 +159,7 @@ function renderFiles(){
 }
 
 /* =========================
-   LOAD USER TICKETS 🔥 FIX
+   LOAD USER TICKETS 🔥
 ========================= */
 
 async function loadUserIncidencias(){
@@ -179,19 +171,29 @@ async function loadUserIncidencias(){
 
   try{
 
-    // 🔥 SIN FILTRO DE STATUS → TODAS
-    const data = await Onion.fetch(
-      Onion.config.API + "/tickets?mine=true"
+    const res = await Onion.fetch(Onion.config.API + "/tickets");
+
+    let data = [];
+    if(Array.isArray(res)) data = res;
+    else if(res?.tickets) data = res.tickets;
+    else if(res?.data) data = res.data;
+
+    const user = Onion.state?.user;
+
+    const mine = data.filter(i =>
+      i.userId === user?.id ||
+      i.email === user?.email ||
+      i.name === user?.name
     );
 
-    if(!data || !data.length){
+    if(!mine.length){
       container.innerHTML = `<div style="color:var(--dim); font-size:12px;">No tienes incidencias</div>`;
       return;
     }
 
-    container.innerHTML = data.map(i => `
+    container.innerHTML = mine.map(i => `
       <div class="history-item" data-id="${i.id}">
-        <div class="history-title">${escapeHTML(i.subject || "Sin asunto")}</div>
+        <div class="history-title">${escapeHTML(i.subject || i.message || "Sin asunto")}</div>
         <div class="history-meta">
           <span>${formatEstado(i.status)}</span>
           <span>${formatFecha(i.createdAt)}</span>
@@ -213,20 +215,7 @@ async function loadUserIncidencias(){
 }
 
 /* =========================
-   AUTH
-========================= */
-
-function getAuthHeaders(){
-
-  const token = Onion.auth.getToken();
-
-  return token
-    ? { Authorization: "Bearer " + token }
-    : {};
-}
-
-/* =========================
-   SAVE 🔥 FIX PRO
+   SAVE
 ========================= */
 
 async function saveIncidencia(){
@@ -249,7 +238,6 @@ async function saveIncidencia(){
   sending = true;
 
   const btn = $("#btn-save-incidencia");
-
   if(btn){
     btn.disabled = true;
     btn.innerText = "Enviando...";
@@ -259,10 +247,9 @@ async function saveIncidencia(){
 
     const formData = new FormData();
 
-    // 🔥 FIX CLAVE
     formData.append("subject", subject);
     formData.append("message", message);
-    formData.append("description", message); // compatibilidad backend
+    formData.append("description", message);
 
     selectedFiles.forEach(file=>{
       formData.append("files", file);
@@ -274,18 +261,13 @@ async function saveIncidencia(){
       headers: getAuthHeaders()
     });
 
-    const data = await response.json().catch(()=>null);
-
     if(!response.ok){
-      console.error("💥 API ERROR:", data);
       throw new Error("API_ERROR");
     }
 
     showToast("Incidencia enviada correctamente", "success");
 
     resetForm();
-
-    // 🔥 recarga lista SIN RECARGAR VISTA
     loadUserIncidencias();
 
     setTimeout(()=>{
@@ -314,6 +296,11 @@ async function saveIncidencia(){
    HELPERS
 ========================= */
 
+function getAuthHeaders(){
+  const token = Onion.auth.getToken();
+  return token ? { Authorization: "Bearer " + token } : {};
+}
+
 function resetForm(){
 
   ["#inc-title", "#inc-message"].forEach(sel=>{
@@ -327,7 +314,6 @@ function resetForm(){
   if(fileInput) fileInput.value = "";
 
   renderFiles();
-
 }
 
 function showToast(message, type){

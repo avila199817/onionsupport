@@ -88,7 +88,6 @@ function bindEvents(){
 
   });
 
-  // 🔥 FIX ID (ANTES ESTABA MAL)
   $("#btn-new-incidencia")?.addEventListener("click", crearIncidencia);
 
   $("#search-incidencia")?.addEventListener("input", debounce(applyFilters, 250));
@@ -286,7 +285,7 @@ function render(items){
         <td>
           <div class="cell-user">
             <div class="table-avatar">
-              ${getInitials(d.usuario)}
+              ${renderAvatar(d)}
             </div>
             <div class="user-info">
               <span class="user-name">${escapeHTML(d.usuario)}</span>
@@ -322,6 +321,7 @@ function mapItem(i){
     title: i.message || i.subject || "Sin título",
     usuario: i.name || "-",
     tecnico: i.tecnico?.name || "-",
+    avatar: i.avatar || i.photo || i.image || i.user?.avatar || null,
     estado: getEstado(i),
     prioridad: getPrioridad(i),
     fecha: formatFecha(i.createdAt),
@@ -329,6 +329,28 @@ function mapItem(i){
       ? formatFecha(i._ts ? i._ts * 1000 : i.closedAt)
       : "-"
   };
+}
+
+/* =========================
+   AVATAR RENDER 🔥
+========================= */
+
+function renderAvatar(d){
+
+  if(d.avatar){
+    return `
+      <img 
+        src="${d.avatar}" 
+        alt="${escapeHTML(d.usuario)}"
+        onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
+      >
+      <span style="display:none">
+        ${getInitials(d.usuario)}
+      </span>
+    `;
+  }
+
+  return getInitials(d.usuario);
 }
 
 /* =========================
@@ -349,7 +371,6 @@ function mapPriority(p){
   return "baja";
 }
 
-/* 🔥 BADGES FIX */
 function getEstado(i){
   const s = mapStatus(i.status);
   if(s === "cerrada") return { label:"Cerrada", class:"success" };
@@ -376,10 +397,6 @@ function escapeHTML(str){
     .replace(/>/g,"&gt;");
 }
 
-/* =========================
-   AVATAR
-========================= */
-
 function getInitials(name){
   if(!name) return "?";
   return name
@@ -389,10 +406,6 @@ function getInitials(name){
     .slice(0,2)
     .toUpperCase();
 }
-
-/* =========================
-   UTILS
-========================= */
 
 function debounce(fn, delay){
   let t;

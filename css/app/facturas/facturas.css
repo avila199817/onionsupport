@@ -1,0 +1,271 @@
+/* =========================================================
+   FACTURAS — PRO SAAS PANEL (AISLADO)
+========================================================= */
+
+.panel-content.facturas{
+  display:flex;
+  flex-direction:column;
+  height:100%;
+  width:100%;
+}
+
+
+/* =========================================================
+   TABLE WRAPPER
+========================================================= */
+
+.panel-content.facturas .table-system{
+  display:flex;
+  flex-direction:column;
+  flex:1;
+  min-height:0;
+  width:100%;
+}
+
+
+/* =========================================================
+   FILTERS (HEADER)
+========================================================= */
+
+.panel-content.facturas .filters-row{
+  display:flex;
+  align-items:center;
+  gap:10px;
+
+  padding:12px 16px;
+
+  background:var(--panel-bg);
+  border-bottom:1px solid var(--panel-border);
+}
+
+.panel-content.facturas .filters-row input{
+  flex:1;
+  min-width:220px;
+}
+
+.panel-content.facturas .filters-row input,
+.panel-content.facturas .filters-row select{
+  padding:10px 12px;
+
+  border-radius:8px;
+  border:1px solid var(--card-border);
+
+  background:var(--card-bg);
+  color:var(--text);
+
+  font-size:13px;
+}
+
+.panel-content.facturas .filters-row select{
+  min-width:140px;
+}
+
+.panel-content.facturas .btn-new-factura{
+  margin-left:auto;
+
+  padding:10px 18px;
+  border-radius:999px;
+
+  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
+  color:#fff;
+
+  font-weight:600;
+
+  border:none;
+  cursor:pointer;
+
+  box-shadow:0 6px 18px rgba(99,102,241,0.35);
+  transition:all .2s ease;
+}
+
+.panel-content.facturas .btn-new-factura:hover{
+  transform:translateY(-1px);
+  box-shadow:0 10px 26px rgba(99,102,241,0.45);
+}
+
+
+/* =========================================================
+   TABLE CONTAINER
+========================================================= */
+
+.panel-content.facturas .table-container{
+  flex:1;
+  min-height:0;
+  overflow-y:auto;
+  overflow-x:hidden;
+
+  background:var(--panel-bg);
+}
+
+
+/* =========================================================
+   TABLE BASE
+========================================================= */
+
+.panel-content.facturas table{
+  width:100%;
+  border-collapse:collapse;
+  table-layout:fixed;
+}
+
+.panel-content.facturas thead{
+  position:sticky;
+  top:0;
+  z-index:3;
+  background:var(--panel-bg);
+}
+
+.panel-content.facturas th{
+  padding:10px 14px;
+
+  text-align:left;
+
+  border-bottom:1px solid var(--panel-border);
+
+  color:var(--dim);
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:.3px;
+
+  white-space:nowrap;
+}
+
+.panel-content.facturas td{
+  padding:12px 14px;
+
+  border-bottom:1px solid var(--panel-border);
+
+  font-size:13.5px;
+  color:var(--text);
+
+  vertical-align:middle;
+
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+
+/* =========================================================
+   COLUMN SYSTEM
+========================================================= */
+
+.panel-content.facturas .col-id{
+  width:140px;
+  font-size:11px;
+  color:var(--dim);
+}
+
+.panel-content.facturas .col-main{
+  width:28%;
+  font-weight:500;
+  white-space:normal;
+  line-height:1.4;
+}
+
+.panel-content.facturas .col-date{
+  width:130px;
+}
+
+.panel-content.facturas .col-status{
+  width:110px;
+}
+
+.panel-content.facturas .col-actions{
+  width:120px;
+  text-align:right;
+}
+
+
+/* =========================================================
+   ROWS
+========================================================= */
+
+.panel-content.facturas tbody tr{
+  transition:all .15s ease;
+}
+
+.panel-content.facturas tbody tr:nth-child(even){
+  background:color-mix(in srgb, var(--panel-bg), #fff 2%);
+}
+
+.panel-content.facturas tbody tr:hover{
+  background:color-mix(in srgb, var(--panel-bg), #fff 6%);
+  transform:translateX(2px);
+}
+
+
+/* =========================================================
+   ESTADO BADGES
+========================================================= */
+
+.panel-content.facturas .badge{
+  padding:3px 9px;
+  border-radius:999px;
+  font-size:10px;
+  font-weight:500;
+}
+
+.panel-content.facturas .badge.pagada{
+  color:var(--success);
+  background:color-mix(in srgb, var(--success), transparent 85%);
+}
+
+.panel-content.facturas .badge.pendiente{
+  color:var(--warning);
+  background:color-mix(in srgb, var(--warning), transparent 85%);
+}
+
+
+/* =========================================================
+   ACCIONES
+========================================================= */
+
+.panel-content.facturas .actions{
+  display:flex;
+  justify-content:flex-end;
+  gap:6px;
+}
+
+.panel-content.facturas .btn-action{
+  padding:6px 10px;
+  border-radius:6px;
+  border:1px solid var(--card-border);
+
+  background:var(--card-bg);
+  color:var(--text);
+
+  font-size:12px;
+  cursor:pointer;
+
+  transition:all .15s ease;
+}
+
+.panel-content.facturas .btn-action:hover{
+  background:color-mix(in srgb, var(--card-bg), #fff 6%);
+}
+
+
+/* =========================================================
+   LOADING STATE
+========================================================= */
+
+.panel-content.facturas tr.loading td{
+  text-align:center;
+  padding:30px;
+  color:var(--dim);
+  font-size:13px;
+}
+
+
+/* =========================================================
+   SCROLLBAR
+========================================================= */
+
+.panel-content.facturas .table-container::-webkit-scrollbar{
+  width:8px;
+}
+
+.panel-content.facturas .table-container::-webkit-scrollbar-thumb{
+  background:var(--scrollbar-thumb);
+  border-radius:6px;
+}

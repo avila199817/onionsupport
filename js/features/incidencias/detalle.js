@@ -253,7 +253,7 @@ async function updateTicket(){
 
 
 /* =========================
-   RENDER
+   RENDER (FIX SELECT + STABLE)
 ========================= */
 
 function render(i){
@@ -273,12 +273,46 @@ function render(i){
     msg.textContent = i.message || "";
   }
 
-  if($("#edit-estado")) $("#edit-estado").value = i.status || "open";
-  if($("#edit-prioridad")) $("#edit-prioridad").value = i.priority || "low";
+  /* =========================
+     🔥 FIX SELECT REAL
+  ========================= */
+
+  const estadoEl = $("#edit-estado");
+  const prioridadEl = $("#edit-prioridad");
+
+  setSelectValue(estadoEl, i.status || "open");
+  setSelectValue(prioridadEl, i.priority || "low");
+
+  /* ========================= */
 
   renderAvatar(usuario, avatar);
   applyVisualState();
   renderBlobs(i.files || i.attachments || []);
+
+}
+
+
+/* =========================
+   🔥 HELPER SELECT (CLAVE)
+========================= */
+
+function setSelectValue(select, value){
+
+  if(!select) return;
+
+  // Buscar opción correcta
+  const option = [...select.options].find(o => o.value === value);
+
+  if(option){
+    option.selected = true;
+    select.selectedIndex = option.index;
+  }else{
+    // fallback
+    select.selectedIndex = 0;
+  }
+
+  // 🔥 FORZAR REFRESH VISUAL (esto arregla el bug)
+  select.dispatchEvent(new Event("change", { bubbles: true }));
 
 }
 

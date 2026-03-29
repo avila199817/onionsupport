@@ -11,6 +11,7 @@ if(!Onion){
 
 let initialized = false;
 let selectedFiles = [];
+let sending = false; // 🔥 LOCK ANTI DUPLICADO
 
 /* =========================
    CONFIG
@@ -38,7 +39,10 @@ function init(){
   bindEvents();
   loadUserIncidencias();
 
-  Onion.onCleanup(()=> initialized = false);
+  Onion.onCleanup(()=>{
+    initialized = false;
+    sending = false;
+  });
 
 }
 
@@ -89,7 +93,12 @@ function bindEvents(){
     }
   });
 
-  $("#btn-save-incidencia")?.addEventListener("click", saveIncidencia);
+  const btn = $("#btn-save-incidencia");
+
+  if(btn){
+    btn.removeEventListener("click", saveIncidencia); // 🔥 evita duplicados
+    btn.addEventListener("click", saveIncidencia);
+  }
 
   $("#btn-attach")?.addEventListener("click", ()=>{
     $("#inc-files")?.click();
@@ -199,7 +208,7 @@ async function loadUserIncidencias(){
 }
 
 /* =========================
-   AUTH HEADER (REAL)
+   AUTH
 ========================= */
 
 function getAuthHeaders(){
@@ -212,10 +221,12 @@ function getAuthHeaders(){
 }
 
 /* =========================
-   SAVE (FINAL PRO)
+   SAVE (ULTRA PRO)
 ========================= */
 
 async function saveIncidencia(){
+
+  if(sending) return; // 🔥 BLOQUEO TOTAL
 
   clearErrors();
 
@@ -235,6 +246,8 @@ async function saveIncidencia(){
   }
 
   if(!valid) return;
+
+  sending = true;
 
   const btn = $("#btn-save-incidencia");
 
@@ -261,11 +274,7 @@ async function saveIncidencia(){
       headers: getAuthHeaders()
     });
 
-    let data = null;
-
-    try{
-      data = await response.json();
-    }catch{}
+    const data = await response.json().catch(()=>null);
 
     if(!response.ok || !data?.ok){
       throw new Error("API_ERROR");
@@ -285,6 +294,8 @@ async function saveIncidencia(){
     showToast("Error enviando incidencia", "error");
 
   }finally{
+
+    sending = false;
 
     if(btn){
       btn.disabled = false;

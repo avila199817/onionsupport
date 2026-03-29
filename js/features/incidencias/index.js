@@ -26,6 +26,21 @@ function $(selector){
 }
 
 /* =========================
+   USERS CACHE 🔥
+========================= */
+
+function getUsersMap(){
+  const users = Onion.state?.users || [];
+  const map = {};
+
+  users.forEach(u => {
+    map[u.id] = u;
+  });
+
+  return map;
+}
+
+/* =========================
    SPA NAV
 ========================= */
 
@@ -271,9 +286,11 @@ function render(items){
   const tbody = $("#incidencias-body");
   if(!tbody) return;
 
+  const usersMap = getUsersMap();
+
   const html = items.map(i => {
 
-    const d = mapItem(i);
+    const d = mapItem(i, usersMap);
 
     return `
       <tr data-id="${d.id}" style="cursor:pointer">
@@ -315,13 +332,16 @@ function render(items){
    MAP
 ========================= */
 
-function mapItem(i){
+function mapItem(i, usersMap){
+
+  const user = usersMap[i.userId] || {};
+
   return {
     id: i.id || i.ticketId || "--",
     title: i.message || i.subject || "Sin título",
-    usuario: i.name || "-",
+    usuario: user.name || i.name || "-",
     tecnico: i.tecnico?.name || "-",
-    avatar: i.avatar || i.photo || i.image || i.user?.avatar || null,
+    avatar: user.hasAvatar ? user.avatar : null,
     estado: getEstado(i),
     prioridad: getPrioridad(i),
     fecha: formatFecha(i.createdAt),
@@ -332,7 +352,7 @@ function mapItem(i){
 }
 
 /* =========================
-   AVATAR RENDER 🔥
+   AVATAR 🔥
 ========================= */
 
 function renderAvatar(d){

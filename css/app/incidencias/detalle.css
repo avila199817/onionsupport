@@ -1,12 +1,25 @@
 /* =========================================================
-   INCIDENCIA DETALLE — FULL SCREEN PRO SAAS
-   (MISMO SISTEMA QUE CREATE)
+   INCIDENCIA DETALLE — ULTIMATE SAAS PANEL
+   (FULL HEIGHT + ZERO BUGS)
 ========================================================= */
 
 
-/* =========================
+/* =========================================================
+   🔥 FIX GLOBAL ALTURA (CLAVE ABSOLUTA)
+========================================================= */
+html, body{
+  height:100%;
+}
+
+body{
+  display:flex;
+  flex-direction:column;
+}
+
+
+/* =========================================================
    ROOT
-========================= */
+========================================================= */
 .panel-content.incidencia-detalle{
   display:flex;
   flex-direction:column;
@@ -14,37 +27,43 @@
   flex:1;
   min-height:0;
   width:100%;
+
+  overflow:hidden; /* 🔥 evita doble scroll */
 }
 
 
 /* =========================================================
-   LAYOUT SPLIT (🔥 CLAVE)
+   LAYOUT SPLIT
 ========================================================= */
 .incidencia-detalle .layout-split{
   display:flex;
   flex:1;
   min-height:0;
   width:100%;
+
+  overflow:hidden;
 }
 
 
-/* =========================
-   LEFT (CONTENIDO PRINCIPAL)
-========================= */
-.incidencia-detalle .detalle-left{
+/* =========================================================
+   LEFT
+========================================================= */
+.detalle-left{
   flex:1;
   min-width:0;
 
   display:flex;
   flex-direction:column;
   min-height:0;
+
+  overflow:hidden;
 }
 
 
 /* =========================================================
-   RIGHT (SIDEBAR / HISTORIAL / BLOBS)
+   RIGHT SIDEBAR
 ========================================================= */
-.incidencia-detalle .detalle-right{
+.detalle-right{
   width:360px;
   min-width:360px;
   flex-shrink:0;
@@ -60,9 +79,9 @@
 }
 
 
-/* =========================
+/* =========================================================
    SIDEBAR CONTENT
-========================= */
+========================================================= */
 .detalle-sidebar{
   flex:1;
   min-height:0;
@@ -71,6 +90,7 @@
   flex-direction:column;
 
   padding:16px;
+
   overflow:hidden;
 }
 
@@ -78,7 +98,6 @@
   display:flex;
   flex-direction:column;
   gap:10px;
-  margin-bottom:20px;
 }
 
 .sidebar-title{
@@ -89,9 +108,12 @@
 
 
 /* =========================================================
-   BLOBS EN SIDEBAR 🔥
+   BLOBS
 ========================================================= */
 .detalle-blobs{
+  flex:1;
+  min-height:0;
+
   display:flex;
   flex-direction:column;
   gap:8px;
@@ -152,7 +174,7 @@
   background:var(--accent);
   color:#fff;
 
-  transition:all .15s ease;
+  transition:.15s;
 }
 
 .blob-download:hover{
@@ -164,6 +186,8 @@
    HEADER
 ========================================================= */
 .incidencia-detalle .filters-row{
+  flex-shrink:0;
+
   display:flex;
   align-items:center;
 
@@ -200,13 +224,15 @@
 
 
 /* =========================================================
-   BODY (🔥 FULL HEIGHT)
+   BODY (SCROLL REAL)
 ========================================================= */
 .detalle-body{
   flex:1;
   min-height:0;
 
   display:flex;
+  flex-direction:column;
+
   padding:30px 40px;
 
   overflow:auto;
@@ -224,9 +250,9 @@
 }
 
 
-/* =========================
+/* =========================================================
    ITEMS
-========================= */
+========================================================= */
 .detalle-item{
   display:flex;
   flex-direction:column;
@@ -260,7 +286,7 @@
   min-height:60px;
 
   cursor:text;
-  transition:all .15s ease;
+  transition:.15s;
 }
 
 .detalle-editable:hover{
@@ -275,7 +301,7 @@
 
 
 /* =========================================================
-   SELECTS PRO
+   SELECTS
 ========================================================= */
 .detalle-select{
   margin-top:6px;
@@ -340,6 +366,8 @@
   display:flex;
   justify-content:space-between;
   align-items:center;
+
+  flex-shrink:0;
 }
 
 .detalle-hint{
@@ -348,9 +376,9 @@
 }
 
 
-/* =========================
+/* =========================================================
    BUTTON
-========================= */
+========================================================= */
 #btn-save{
   padding:12px 22px;
   border-radius:12px;
@@ -371,7 +399,7 @@
 
 
 /* =========================================================
-   SCROLL GLOBAL
+   SCROLL
 ========================================================= */
 .detalle-body::-webkit-scrollbar{
   width:6px;
@@ -388,7 +416,7 @@
 ========================================================= */
 @media (max-width:1100px){
 
-  .incidencia-detalle .detalle-right{
+  .detalle-right{
     display:none;
   }
 

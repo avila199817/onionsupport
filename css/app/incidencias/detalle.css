@@ -1,5 +1,5 @@
 /* =========================================================
-   INCIDENCIA DETALLE — FINAL STABLE SAAS
+   INCIDENCIA DETALLE — FINAL DEFINITIVO (FIX REAL)
 ========================================================= */
 
 
@@ -9,11 +9,9 @@
 .panel-content.incidencia-detalle{
   display:flex;
   flex-direction:column;
-
   flex:1;
   min-height:0;
   width:100%;
-
   overflow:hidden;
 }
 
@@ -35,11 +33,9 @@
 .detalle-left{
   flex:1;
   min-width:0;
-
   display:flex;
   flex-direction:column;
   min-height:0;
-
   overflow:hidden;
 }
 
@@ -51,13 +47,10 @@
   width:360px;
   min-width:360px;
   flex-shrink:0;
-
   display:flex;
   flex-direction:column;
-
   background:var(--panel-bg);
   border-left:1px solid var(--panel-border);
-
   min-height:0;
 }
 
@@ -68,13 +61,9 @@
 .detalle-sidebar{
   display:flex;
   flex-direction:column;
-
   flex:1;
   min-height:0;
-
   padding:16px;
-
-  border-radius:12px;
   overflow:hidden;
 }
 
@@ -86,7 +75,6 @@
   display:flex;
   flex-direction:column;
   gap:10px;
-
   flex:1;
   min-height:0;
 }
@@ -105,17 +93,16 @@
   display:flex;
   flex-direction:column;
   gap:10px;
-
   flex:1;
   overflow:auto;
-  padding-right:4px;
+  padding-right:6px;
 }
 
-/* Scroll */
+
+/* SCROLL */
 .detalle-blobs::-webkit-scrollbar{
   width:6px;
 }
-
 .detalle-blobs::-webkit-scrollbar-thumb{
   background:rgba(255,255,255,0.1);
   border-radius:6px;
@@ -123,7 +110,7 @@
 
 
 /* =========================================================
-   BLOB ITEM
+   BLOB ITEM (SIN BUG VISUAL)
 ========================================================= */
 .blob-item{
   display:flex;
@@ -135,7 +122,7 @@
   border-radius:12px;
   border:1px solid var(--card-border);
 
-  background:color-mix(in srgb, var(--card-bg), #000 12%);
+  background:var(--card-bg); /* 🔥 limpio */
 
   transition:.15s ease;
 }
@@ -166,7 +153,6 @@
 .blob-download{
   padding:7px 12px;
   border-radius:10px;
-
   border:none;
   cursor:pointer;
 
@@ -190,7 +176,7 @@
 .incidencia-detalle .filters-row{
   display:flex;
   align-items:center;
-  justify-content:space-between; /* 🔥 FIX VOLVER */
+  justify-content:space-between;
 
   padding:14px 40px;
 
@@ -205,7 +191,6 @@
   cursor:pointer;
   opacity:.8;
 }
-
 #btn-back:hover{
   opacity:1;
 }
@@ -217,12 +202,9 @@
 .detalle-body{
   flex:1;
   min-height:0;
-
   display:flex;
   flex-direction:column;
-
   padding:30px 40px;
-
   overflow:auto;
 }
 
@@ -286,7 +268,7 @@
 
 
 /* =========================================================
-   SELECT (FIX VISUAL)
+   SELECT (🔥 FIX DEFINITIVO DARK)
 ========================================================= */
 .detalle-select{
   margin-top:6px;
@@ -295,18 +277,23 @@
   border-radius:10px;
   border:1px solid var(--card-border);
 
-  background:#1a1d25;
-  color:#fff;
+  background:color-mix(in srgb, var(--card-bg), #000 15%);
+  color:var(--text);
+
+  -webkit-text-fill-color:var(--text); /* 🔥 CLAVE */
+  appearance:none;
+  -webkit-appearance:none;
+  -moz-appearance:none;
 
   font-size:13px;
   font-weight:500;
-
   cursor:pointer;
 }
 
+/* dropdown */
 .detalle-select option{
-  color:#000;
-  background:#fff;
+  background:#1f2937;
+  color:#fff;
 }
 
 
@@ -347,7 +334,6 @@
 ========================================================= */
 .detalle-footer{
   margin-top:20px;
-
   display:flex;
   justify-content:space-between;
   align-items:center;
@@ -382,7 +368,6 @@
 .detalle-body::-webkit-scrollbar{
   width:6px;
 }
-
 .detalle-body::-webkit-scrollbar-thumb{
   background:rgba(255,255,255,0.1);
   border-radius:6px;
@@ -393,7 +378,6 @@
    RESPONSIVE
 ========================================================= */
 @media (max-width:1100px){
-
   .detalle-right{
     display:none;
   }
@@ -401,5 +385,4 @@
   .detalle-body{
     padding:20px;
   }
-
 }

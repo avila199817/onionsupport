@@ -59,6 +59,7 @@ function bindEvents(){
   const root = getRoot();
   if(!root) return;
 
+  /* CLICK GLOBAL */
   Onion.cleanupEvent(root, "click", (e)=>{
 
     if(e.target.id === "btn-back"){
@@ -69,11 +70,42 @@ function bindEvents(){
       updateTicket();
     }
 
-    if(e.target.id === "btn-comment"){
-      sendComment();
+    if(e.target.id === "btn-attach-detalle"){
+      $("#detalle-files")?.click();
     }
 
   });
+
+  /* FILES */
+  Onion.cleanupEvent(root, "change", (e)=>{
+    if(e.target.id === "detalle-files"){
+      renderFiles(e.target.files);
+    }
+  });
+
+  /* INLINE EDIT */
+  const msg = $("#detalle-mensaje");
+
+  if(msg){
+
+    msg.addEventListener("click", ()=>{
+      msg.setAttribute("contenteditable","true");
+      msg.focus();
+    });
+
+    msg.addEventListener("blur", ()=>{
+      msg.setAttribute("contenteditable","false");
+      updateTicket();
+    });
+
+    msg.addEventListener("keydown", (e)=>{
+      if(e.key === "Enter"){
+        e.preventDefault();
+        msg.blur();
+      }
+    });
+
+  }
 
 }
 
@@ -107,7 +139,7 @@ async function loadDetalle(){
 
   }catch(err){
 
-    console.error("💥 Error:", err);
+    console.error(err);
     setError("Error cargando incidencia");
     clearLoading();
 
@@ -117,7 +149,7 @@ async function loadDetalle(){
 
 
 /* =========================
-   UPDATE (🔥 TODO EN UNO)
+   UPDATE (🔥 PRO)
 ========================= */
 
 async function updateTicket(){
@@ -128,23 +160,33 @@ async function updateTicket(){
 
   const status = $("#edit-estado")?.value;
   const priority = $("#edit-prioridad")?.value;
-  const message = $("#edit-message")?.value;
+  const message = $("#detalle-mensaje")?.innerText?.trim();
+
+  const files = $("#detalle-files")?.files;
 
   try{
 
     setSaving(true);
 
+    const formData = new FormData();
+
+    if(status) formData.append("status", status);
+    if(priority) formData.append("priority", priority);
+    if(message !== undefined) formData.append("message", message);
+
+    if(files?.length){
+      for(const f of files){
+        formData.append("files", f);
+      }
+    }
+
     await Onion.fetch(Onion.config.API + "/tickets/" + id, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        status,
-        priority,
-        message
-      })
+      body: formData
     });
 
     toast("Cambios guardados", "success");
+
     await loadDetalle();
 
   }catch(err){
@@ -160,36 +202,19 @@ async function updateTicket(){
 
 
 /* =========================
-   COMMENT
+   FILES
 ========================= */
 
-async function sendComment(){
+function renderFiles(files){
 
-  if(!currentItem) return;
+  const list = $("#detalle-file-list");
+  if(!list) return;
 
-  const text = $("#new-comment")?.value?.trim();
-  if(!text) return;
-
-  try{
-
-    await Onion.fetch(Onion.config.API + "/tickets/" + currentItem.id, {
-      method:"PATCH",
-      headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify({ comment:text })
-    });
-
-    $("#new-comment").value = "";
-
-    toast("Comentario añadido", "success");
-
-    await loadDetalle();
-
-  }catch(err){
-
-    console.error(err);
-    toast("Error enviando comentario", "error");
-
-  }
+  list.innerHTML = [...files].map(f => `
+    <div class="file-item">
+      ${escapeHTML(f.name)}
+    </div>
+  `).join("");
 
 }
 
@@ -254,8 +279,10 @@ function render(i){
   setText("#detalle-titulo", i.subject || "Sin título");
   setText("#detalle-fecha", formatFecha(i.createdAt));
 
-  if($("#edit-message")){
-    $("#edit-message").value = i.message || "";
+  /* 🔥 MENSAJE BIEN */
+  const msg = $("#detalle-mensaje");
+  if(msg){
+    msg.textContent = i.message || "";
   }
 
   renderAvatar(usuario, avatar);
@@ -266,39 +293,11 @@ function render(i){
   if($("#edit-estado")) $("#edit-estado").value = i.status;
   if($("#edit-prioridad")) $("#edit-prioridad").value = i.priority;
 
-  renderComments(i.comments);
-
 }
 
 
 /* =========================
-   COMMENTS
-========================= */
-
-function renderComments(list){
-
-  const el = $("#comments-list");
-  if(!el) return;
-
-  if(!list?.length){
-    el.innerHTML = `<div class="user-sub">Sin comentarios</div>`;
-    return;
-  }
-
-  el.innerHTML = list.map(c => `
-    <div class="comment-item ${c.role}">
-      <div class="comment-meta">
-        ${c.role} · ${formatFecha(c.createdAt)}
-      </div>
-      <div class="comment-text">${escapeHTML(c.message)}</div>
-    </div>
-  `).join("");
-
-}
-
-
-/* =========================
-   AVATAR (🔥 BIEN HECHO)
+   AVATAR
 ========================= */
 
 function renderAvatar(nombre, avatar){

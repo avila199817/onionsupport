@@ -96,23 +96,18 @@ function bindEvents(){
 
   const btn = $("#btn-save-incidencia");
 
-  if(btn && !btn.dataset.bound){
-    btn.dataset.bound = "1";
-    btn.addEventListener("click", saveIncidencia);
+  if(btn){
+    btn.onclick = saveIncidencia; // 🔥 evita duplicados reales
   }
 
   const attachBtn = $("#btn-attach");
-  if(attachBtn && !attachBtn.dataset.bound){
-    attachBtn.dataset.bound = "1";
-    attachBtn.addEventListener("click", ()=>{
-      $("#inc-files")?.click();
-    });
+  if(attachBtn){
+    attachBtn.onclick = ()=> $("#inc-files")?.click();
   }
 
   const fileInput = $("#inc-files");
-  if(fileInput && !fileInput.dataset.bound){
-    fileInput.dataset.bound = "1";
-    fileInput.addEventListener("change", handleFiles);
+  if(fileInput){
+    fileInput.onchange = handleFiles;
   }
 
 }
@@ -163,16 +158,16 @@ function renderFiles(){
   `).join("");
 
   list.querySelectorAll("[data-remove]").forEach(btn=>{
-    btn.addEventListener("click", ()=>{
+    btn.onclick = ()=>{
       selectedFiles.splice(Number(btn.dataset.remove), 1);
       renderFiles();
-    });
+    };
   });
 
 }
 
 /* =========================
-   LOAD USER TICKETS
+   LOAD USER TICKETS 🔥 FIX
 ========================= */
 
 async function loadUserIncidencias(){
@@ -184,12 +179,13 @@ async function loadUserIncidencias(){
 
   try{
 
+    // 🔥 SIN FILTRO DE STATUS → TODAS
     const data = await Onion.fetch(
-      Onion.config.API + "/tickets?mine=true&status=open"
+      Onion.config.API + "/tickets?mine=true"
     );
 
     if(!data || !data.length){
-      container.innerHTML = `<div style="color:var(--dim); font-size:12px;">No tienes incidencias abiertas</div>`;
+      container.innerHTML = `<div style="color:var(--dim); font-size:12px;">No tienes incidencias</div>`;
       return;
     }
 
@@ -204,9 +200,9 @@ async function loadUserIncidencias(){
     `).join("");
 
     container.querySelectorAll(".history-item").forEach(el=>{
-      el.addEventListener("click", ()=>{
+      el.onclick = ()=>{
         Onion.router.navigate("/incidencias/detalle?id=" + el.dataset.id);
-      });
+      };
     });
 
   }catch(err){
@@ -230,31 +226,25 @@ function getAuthHeaders(){
 }
 
 /* =========================
-   SAVE (ULTRA PRO)
+   SAVE 🔥 FIX PRO
 ========================= */
 
 async function saveIncidencia(){
 
   if(sending) return;
 
-  clearErrors();
-
   const subject = $("#inc-title")?.value?.trim() || "";
   const message = $("#inc-message")?.value?.trim() || "";
 
-  let valid = true;
-
   if(!subject){
-    setError("#inc-title", "Introduce un asunto");
-    valid = false;
+    showToast("Introduce un asunto", "error");
+    return;
   }
 
   if(!message){
-    setError("#inc-message", "Describe el problema");
-    valid = false;
+    showToast("Describe el problema", "error");
+    return;
   }
-
-  if(!valid) return;
 
   sending = true;
 
@@ -262,7 +252,6 @@ async function saveIncidencia(){
 
   if(btn){
     btn.disabled = true;
-    btn.dataset.original = btn.innerText;
     btn.innerText = "Enviando...";
   }
 
@@ -270,8 +259,10 @@ async function saveIncidencia(){
 
     const formData = new FormData();
 
+    // 🔥 FIX CLAVE
     formData.append("subject", subject);
     formData.append("message", message);
+    formData.append("description", message); // compatibilidad backend
 
     selectedFiles.forEach(file=>{
       formData.append("files", file);
@@ -285,13 +276,17 @@ async function saveIncidencia(){
 
     const data = await response.json().catch(()=>null);
 
-    if(!response.ok || !data?.ok){
+    if(!response.ok){
+      console.error("💥 API ERROR:", data);
       throw new Error("API_ERROR");
     }
 
     showToast("Incidencia enviada correctamente", "success");
 
     resetForm();
+
+    // 🔥 recarga lista SIN RECARGAR VISTA
+    loadUserIncidencias();
 
     setTimeout(()=>{
       Onion.router.navigate("/incidencias");
@@ -308,7 +303,7 @@ async function saveIncidencia(){
 
     if(btn){
       btn.disabled = false;
-      btn.innerText = btn.dataset.original || "Enviar incidencia";
+      btn.innerText = "Enviar incidencia";
     }
 
   }
@@ -335,40 +330,6 @@ function resetForm(){
 
 }
 
-function setError(selector, message){
-
-  const el = $(selector);
-  if(!el) return;
-
-  el.classList.add("error");
-
-  let msg = el.parentNode.querySelector(".input-error");
-
-  if(!msg){
-    msg = document.createElement("div");
-    msg.className = "input-error";
-    el.parentNode.appendChild(msg);
-  }
-
-  msg.innerText = message;
-
-}
-
-function clearErrors(){
-
-  const root = getRoot();
-  if(!root) return;
-
-  root.querySelectorAll(".error").forEach(el=>{
-    el.classList.remove("error");
-  });
-
-  root.querySelectorAll(".input-error").forEach(el=>{
-    el.remove();
-  });
-
-}
-
 function showToast(message, type){
 
   const el = document.createElement("div");
@@ -380,7 +341,7 @@ function showToast(message, type){
   setTimeout(()=>{
     el.classList.remove("show");
     setTimeout(()=> el.remove(), 300);
-  }, 2200);
+  }, 2000);
 
 }
 

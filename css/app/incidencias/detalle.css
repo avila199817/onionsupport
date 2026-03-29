@@ -1,5 +1,6 @@
 /* =========================================================
-   INCIDENCIA DETALLE — FINAL PRO SAAS CLEAN++
+   INCIDENCIA DETALLE — FULL SCREEN PRO SAAS
+   (MISMO SISTEMA QUE CREATE)
 ========================================================= */
 
 
@@ -9,6 +10,7 @@
 .panel-content.incidencia-detalle{
   display:flex;
   flex-direction:column;
+
   flex:1;
   min-height:0;
   width:100%;
@@ -16,53 +18,169 @@
 
 
 /* =========================================================
-   CONTAINER
+   LAYOUT SPLIT (🔥 CLAVE)
 ========================================================= */
-.container{
+.incidencia-detalle .layout-split{
+  display:flex;
   flex:1;
   min-height:0;
-  display:flex;
-  flex-direction:column;
-  padding:20px 40px;
+  width:100%;
 }
 
 
 /* =========================
-   PANEL
+   LEFT (CONTENIDO PRINCIPAL)
 ========================= */
-.panel-block{
+.incidencia-detalle .detalle-left{
   flex:1;
+  min-width:0;
+
+  display:flex;
+  flex-direction:column;
   min-height:0;
+}
+
+
+/* =========================================================
+   RIGHT (SIDEBAR / HISTORIAL / BLOBS)
+========================================================= */
+.incidencia-detalle .detalle-right{
+  width:360px;
+  min-width:360px;
+  flex-shrink:0;
+
   display:flex;
   flex-direction:column;
 
   background:var(--panel-bg);
-  border:1px solid var(--panel-border);
-  border-radius:14px;
+  border-left:1px solid var(--panel-border);
 
+  min-height:0;
   overflow:hidden;
+}
+
+
+/* =========================
+   SIDEBAR CONTENT
+========================= */
+.detalle-sidebar{
+  flex:1;
+  min-height:0;
+
+  display:flex;
+  flex-direction:column;
+
+  padding:16px;
+  overflow:hidden;
+}
+
+.sidebar-section{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  margin-bottom:20px;
+}
+
+.sidebar-title{
+  font-size:12px;
+  font-weight:600;
+  color:var(--dim);
+}
+
+
+/* =========================================================
+   BLOBS EN SIDEBAR 🔥
+========================================================= */
+.detalle-blobs{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+
+  overflow:auto;
+  padding-right:4px;
+}
+
+.detalle-blobs::-webkit-scrollbar{
+  width:6px;
+}
+
+.detalle-blobs::-webkit-scrollbar-thumb{
+  background:rgba(255,255,255,0.1);
+  border-radius:6px;
+}
+
+.blob-item{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+
+  padding:10px 12px;
+
+  border-radius:10px;
+  border:1px solid var(--card-border);
+
+  background:color-mix(in srgb, var(--card-bg), #000 12%);
+
+  transition:all .15s ease;
+}
+
+.blob-item:hover{
+  border-color:var(--accent);
+  transform:translateY(-1px);
+}
+
+.blob-name{
+  font-size:13px;
+  color:var(--text);
+
+  max-width:65%;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.blob-download{
+  padding:6px 10px;
+  border-radius:8px;
+
+  border:none;
+  cursor:pointer;
+
+  font-size:12px;
+  font-weight:500;
+
+  background:var(--accent);
+  color:#fff;
+
+  transition:all .15s ease;
+}
+
+.blob-download:hover{
+  background:var(--accent-hover);
 }
 
 
 /* =========================================================
    HEADER
 ========================================================= */
-.filters-row{
+.incidencia-detalle .filters-row{
   display:flex;
   align-items:center;
-  padding:14px 20px;
+
+  padding:14px 40px;
 
   background:var(--panel-bg);
   border-bottom:1px solid var(--panel-border);
 }
 
 #btn-back{
+  margin-left:auto;
   background:none;
   border:none;
   color:var(--text);
   cursor:pointer;
   opacity:.8;
-  transition:all .15s ease;
+  transition:.15s;
 }
 
 #btn-back:hover{
@@ -71,27 +189,26 @@
 }
 
 .page-title{
-  font-size:18px;
+  font-size:20px;
   font-weight:600;
 }
 
 .page-subtitle{
-  font-size:12px;
+  font-size:13px;
   color:var(--dim);
 }
 
 
 /* =========================================================
-   CONTENT
+   BODY (🔥 FULL HEIGHT)
 ========================================================= */
-#detalle-content{
+.detalle-body{
   flex:1;
   min-height:0;
 
   display:flex;
-  flex-direction:column;
+  padding:30px 40px;
 
-  padding:20px;
   overflow:auto;
 }
 
@@ -103,11 +220,12 @@
   display:grid;
   grid-template-columns: repeat(2, 1fr);
   gap:18px;
+  width:100%;
 }
 
 
 /* =========================
-   ITEM
+   ITEMS
 ========================= */
 .detalle-item{
   display:flex;
@@ -128,7 +246,7 @@
 
 
 /* =========================================================
-   MENSAJE EDITABLE
+   MENSAJE
 ========================================================= */
 .detalle-editable{
   font-size:14px;
@@ -139,31 +257,14 @@
   border-radius:10px;
 
   padding:12px;
-  min-height:48px;
+  min-height:60px;
 
   cursor:text;
   transition:all .15s ease;
-  position:relative;
 }
 
 .detalle-editable:hover{
   border-color:var(--accent);
-}
-
-.detalle-editable::after{
-  content:"✏️ Click para editar";
-  position:absolute;
-  top:8px;
-  right:10px;
-
-  font-size:11px;
-  color:var(--dim);
-  opacity:0;
-  transition:.15s;
-}
-
-.detalle-editable:hover::after{
-  opacity:.8;
 }
 
 .detalle-editable[contenteditable="true"]{
@@ -172,14 +273,35 @@
   box-shadow:0 0 0 2px rgba(99,102,241,0.25);
 }
 
-.detalle-editable[contenteditable="true"]::after{
-  content:"Editando...";
-  opacity:.6;
+
+/* =========================================================
+   SELECTS PRO
+========================================================= */
+.detalle-select{
+  margin-top:6px;
+  padding:10px 12px;
+
+  border-radius:10px;
+  border:1px solid var(--card-border);
+
+  background:color-mix(in srgb, var(--card-bg), #000 15%);
+  color:var(--text);
+
+  font-size:13px;
+  font-weight:500;
+
+  cursor:pointer;
+  transition:.15s;
 }
 
-.detalle-editable:empty::before{
-  content:"Escribe el mensaje...";
-  color:var(--dim);
+.detalle-select:hover{
+  border-color:var(--accent);
+}
+
+.detalle-select:focus{
+  outline:none;
+  border-color:var(--accent);
+  box-shadow:0 0 0 2px rgba(99,102,241,0.25);
 }
 
 
@@ -208,115 +330,13 @@
   font-weight:600;
 }
 
-.table-avatar img{
-  width:100%;
-  height:100%;
-  object-fit:cover;
-}
-
-
-/* =========================================================
-   SELECTS PRO (TIPO BADGE)
-========================================================= */
-.detalle-select{
-  margin-top:6px;
-  padding:10px 12px;
-
-  border-radius:10px;
-  border:1px solid var(--card-border);
-
-  background:color-mix(in srgb, var(--card-bg), #000 15%);
-  color:var(--text);
-
-  font-size:13px;
-  font-weight:500;
-
-  cursor:pointer;
-  transition:all .15s ease;
-}
-
-.detalle-select:hover{
-  border-color:var(--accent);
-}
-
-.detalle-select:focus{
-  outline:none;
-  border-color:var(--accent);
-  box-shadow:0 0 0 2px rgba(99,102,241,0.25);
-}
-
-
-/* =========================================================
-   BLOBS 🔥🔥🔥
-========================================================= */
-.detalle-blobs{
-  display:flex;
-  flex-direction:column;
-  gap:8px;
-
-  margin-top:6px;
-}
-
-.blob-item{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-
-  padding:10px 12px;
-
-  border-radius:10px;
-  border:1px solid var(--card-border);
-
-  background:color-mix(in srgb, var(--card-bg), #000 12%);
-
-  transition:all .15s ease;
-}
-
-.blob-item:hover{
-  border-color:var(--accent);
-  transform:translateY(-1px);
-}
-
-.blob-name{
-  font-size:13px;
-  color:var(--text);
-
-  max-width:70%;
-  overflow:hidden;
-  text-overflow:ellipsis;
-  white-space:nowrap;
-}
-
-.blob-download{
-  padding:6px 10px;
-  border-radius:8px;
-
-  border:none;
-  cursor:pointer;
-
-  font-size:12px;
-  font-weight:500;
-
-  background:var(--accent);
-  color:#fff;
-
-  transition:all .15s ease;
-}
-
-.blob-download:hover{
-  background:var(--accent-hover);
-}
-
-.blob-download:active{
-  transform:scale(.96);
-}
-
 
 /* =========================================================
    FOOTER
 ========================================================= */
 .detalle-footer{
   margin-top:20px;
+
   display:flex;
   justify-content:space-between;
   align-items:center;
@@ -328,9 +348,9 @@
 }
 
 
-/* =========================================================
-   BUTTON SAVE
-========================================================= */
+/* =========================
+   BUTTON
+========================= */
 #btn-save{
   padding:12px 22px;
   border-radius:12px;
@@ -342,31 +362,22 @@
   cursor:pointer;
 
   box-shadow:0 10px 24px rgba(99,102,241,0.35);
-  transition:all .15s ease;
+  transition:.15s;
 }
 
 #btn-save:hover{
   transform:translateY(-1px);
 }
 
-#btn-save:active{
-  transform:translateY(0);
-}
-
-#btn-save:disabled{
-  opacity:.6;
-  cursor:not-allowed;
-}
-
 
 /* =========================================================
-   SCROLL
+   SCROLL GLOBAL
 ========================================================= */
-#detalle-content::-webkit-scrollbar{
+.detalle-body::-webkit-scrollbar{
   width:6px;
 }
 
-#detalle-content::-webkit-scrollbar-thumb{
+.detalle-body::-webkit-scrollbar-thumb{
   background:rgba(255,255,255,0.1);
   border-radius:6px;
 }
@@ -375,8 +386,14 @@
 /* =========================================================
    RESPONSIVE
 ========================================================= */
-@media (max-width:900px){
-  .form-grid{
-    grid-template-columns:1fr;
+@media (max-width:1100px){
+
+  .incidencia-detalle .detalle-right{
+    display:none;
   }
+
+  .detalle-body{
+    padding:20px;
+  }
+
 }

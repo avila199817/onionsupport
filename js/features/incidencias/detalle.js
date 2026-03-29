@@ -30,9 +30,7 @@ function init(){
   bindEvents();
   loadDetalle();
 
-  Onion.onCleanup(()=>{
-    initialized = false;
-  });
+  Onion.onCleanup(()=> initialized = false);
 
 }
 
@@ -71,6 +69,10 @@ function bindEvents(){
       updateTicket();
     }
 
+    if(e.target.id === "btn-comment"){
+      sendComment();
+    }
+
   });
 
 }
@@ -83,19 +85,14 @@ function bindEvents(){
 async function loadDetalle(){
 
   const id = getId();
-
-  if(!id){
-    setError("ID no válido");
-    return;
-  }
+  if(!id) return setError("ID no válido");
 
   setLoading();
 
   try{
 
     const res = await Onion.fetch(Onion.config.API + "/tickets/" + id);
-
-    const data = res?.ticket || res?.data || res?.incidencia || null;
+    const data = res?.ticket || res?.data || null;
 
     if(!data){
       setEmpty();
@@ -104,12 +101,13 @@ async function loadDetalle(){
     }
 
     currentItem = data;
+
     render(data);
     clearLoading();
 
   }catch(err){
 
-    console.error("💥 Error cargando incidencia:", err);
+    console.error("💥 Error:", err);
     setError("Error cargando incidencia");
     clearLoading();
 
@@ -119,17 +117,18 @@ async function loadDetalle(){
 
 
 /* =========================
-   UPDATE
+   UPDATE (🔥 TODO EN UNO)
 ========================= */
 
 async function updateTicket(){
 
-  if(!currentItem?.id && !currentItem?.ticketId) return;
+  if(!currentItem) return;
 
   const id = currentItem.id || currentItem.ticketId;
 
   const status = $("#edit-estado")?.value;
   const priority = $("#edit-prioridad")?.value;
+  const message = $("#edit-message")?.value;
 
   try{
 
@@ -138,19 +137,58 @@ async function updateTicket(){
     await Onion.fetch(Onion.config.API + "/tickets/" + id, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status, priority })
+      body: JSON.stringify({
+        status,
+        priority,
+        message
+      })
     });
 
-    toast("Incidencia actualizada", "success");
+    toast("Cambios guardados", "success");
     await loadDetalle();
 
   }catch(err){
 
-    console.error("💥 Error actualizando:", err);
-    toast("Error actualizando incidencia", "error");
+    console.error(err);
+    toast("Error guardando cambios", "error");
 
   }finally{
     setSaving(false);
+  }
+
+}
+
+
+/* =========================
+   COMMENT
+========================= */
+
+async function sendComment(){
+
+  if(!currentItem) return;
+
+  const text = $("#new-comment")?.value?.trim();
+  if(!text) return;
+
+  try{
+
+    await Onion.fetch(Onion.config.API + "/tickets/" + currentItem.id, {
+      method:"PATCH",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ comment:text })
+    });
+
+    $("#new-comment").value = "";
+
+    toast("Comentario añadido", "success");
+
+    await loadDetalle();
+
+  }catch(err){
+
+    console.error(err);
+    toast("Error enviando comentario", "error");
+
   }
 
 }
@@ -161,51 +199,44 @@ async function updateTicket(){
 ========================= */
 
 function getId(){
-  const params = new URLSearchParams(window.location.search);
-  return params.get("id");
+  return new URLSearchParams(window.location.search).get("id");
 }
 
 
 /* =========================
-   STATES (🔥 FIX REAL)
+   STATES
 ========================= */
 
 function setLoading(){
-  const content = $("#detalle-content");
-  if(content){
-    content.style.opacity = "0.4";
-    content.style.pointerEvents = "none";
+  const el = $("#detalle-content");
+  if(el){
+    el.style.opacity = "0.4";
+    el.style.pointerEvents = "none";
   }
 }
 
 function clearLoading(){
-  const content = $("#detalle-content");
-  if(content){
-    content.style.opacity = "1";
-    content.style.pointerEvents = "auto";
+  const el = $("#detalle-content");
+  if(el){
+    el.style.opacity = "1";
+    el.style.pointerEvents = "auto";
   }
 }
 
 function setEmpty(){
-  const content = $("#detalle-content");
-  if(content){
-    content.innerHTML = `<div class="user-sub">No se encontró la incidencia</div>`;
-  }
+  $("#detalle-content").innerHTML = `<div class="user-sub">No encontrada</div>`;
 }
 
 function setError(msg){
-  const content = $("#detalle-content");
-  if(content){
-    content.innerHTML = `<div class="badge error">❌ ${msg}</div>`;
-  }
+  $("#detalle-content").innerHTML = `<div class="badge error">${msg}</div>`;
 }
 
 function setSaving(active){
   const btn = $("#btn-save");
-  if(!btn) return;
-
-  btn.disabled = active;
-  btn.textContent = active ? "Guardando..." : "Guardar cambios";
+  if(btn){
+    btn.disabled = active;
+    btn.textContent = active ? "Guardando..." : "Guardar cambios";
+  }
 }
 
 
@@ -215,31 +246,59 @@ function setSaving(active){
 
 function render(i){
 
-  const usuario = i.cliente?.nombre || i.name || "Usuario";
-  const avatar = i.cliente?.avatar || null;
+  const usuario = i.cliente?.nombre || "Usuario";
+  const avatar = i.cliente?.avatar;
 
-  setText("#detalle-id", i.id || i.ticketId || "--");
+  setText("#detalle-id", i.id);
   setText("#detalle-usuario", usuario);
-  setText("#detalle-titulo", i.subject || "-");
-  setText("#detalle-mensaje", i.message || "-");
+  setText("#detalle-titulo", i.subject || "Sin título");
   setText("#detalle-fecha", formatFecha(i.createdAt));
+
+  if($("#edit-message")){
+    $("#edit-message").value = i.message || "";
+  }
 
   renderAvatar(usuario, avatar);
 
-  const estado = formatEstado(i.status);
-  const prioridad = formatPrioridad(i.priority);
+  setBadge("#detalle-estado", formatEstado(i.status));
+  setBadge("#detalle-prioridad", formatPrioridad(i.priority));
 
-  setBadge("#detalle-estado", estado);
-  setBadge("#detalle-prioridad", prioridad);
+  if($("#edit-estado")) $("#edit-estado").value = i.status;
+  if($("#edit-prioridad")) $("#edit-prioridad").value = i.priority;
 
-  if($("#edit-estado")) $("#edit-estado").value = i.status || "open";
-  if($("#edit-prioridad")) $("#edit-prioridad").value = i.priority || "low";
+  renderComments(i.comments);
 
 }
 
 
 /* =========================
-   AVATAR
+   COMMENTS
+========================= */
+
+function renderComments(list){
+
+  const el = $("#comments-list");
+  if(!el) return;
+
+  if(!list?.length){
+    el.innerHTML = `<div class="user-sub">Sin comentarios</div>`;
+    return;
+  }
+
+  el.innerHTML = list.map(c => `
+    <div class="comment-item ${c.role}">
+      <div class="comment-meta">
+        ${c.role} · ${formatFecha(c.createdAt)}
+      </div>
+      <div class="comment-text">${escapeHTML(c.message)}</div>
+    </div>
+  `).join("");
+
+}
+
+
+/* =========================
+   AVATAR (🔥 BIEN HECHO)
 ========================= */
 
 function renderAvatar(nombre, avatar){
@@ -260,82 +319,37 @@ function renderAvatar(nombre, avatar){
    BADGES
 ========================= */
 
-function setBadge(selector, data){
-
-  const el = $(selector);
-  if(!el) return;
-
-  el.innerHTML = `<span class="badge ${data.class}">${data.label}</span>`;
-}
-
-
-/* =========================
-   TEXT
-========================= */
-
-function setText(selector, value){
-  const el = $(selector);
-  if(el) el.textContent = value;
-}
-
-
-/* =========================
-   FORMAT
-========================= */
-
-function formatEstado(s){
-  s = (s || "").toLowerCase();
-  if(s === "closed") return { label:"Cerrada", class:"success" };
-  if(s === "in_progress") return { label:"En progreso", class:"warning" };
-  return { label:"Abierta", class:"info" };
-}
-
-function formatPrioridad(p){
-  p = (p || "").toLowerCase();
-  if(p === "high") return { label:"Alta", class:"error" };
-  if(p === "medium") return { label:"Media", class:"warning" };
-  return { label:"Baja", class:"neutral" };
-}
-
-function formatFecha(f){
-  if(!f) return "--";
-  return new Date(f).toLocaleDateString("es-ES");
-}
-
-
-/* =========================
-   TOAST
-========================= */
-
-function toast(msg, type="info"){
-
-  let container = document.getElementById("toast-container");
-
-  if(!container){
-    container = document.createElement("div");
-    container.id = "toast-container";
-    document.body.appendChild(container);
-  }
-
-  const el = document.createElement("div");
-  el.className = "toast toast-" + type;
-  el.textContent = msg;
-
-  container.appendChild(el);
-
-  setTimeout(()=> el.classList.add("show"), 10);
-
-  setTimeout(()=>{
-    el.classList.remove("show");
-    setTimeout(()=> el.remove(), 300);
-  }, 3000);
-
+function setBadge(sel, d){
+  const el = $(sel);
+  if(el) el.innerHTML = `<span class="badge ${d.class}">${d.label}</span>`;
 }
 
 
 /* =========================
    HELPERS
 ========================= */
+
+function setText(sel, val){
+  const el = $(sel);
+  if(el) el.textContent = val;
+}
+
+function formatEstado(s){
+  if(s==="closed") return {label:"Cerrada",class:"success"};
+  if(s==="in_progress") return {label:"En progreso",class:"warning"};
+  return {label:"Abierta",class:"info"};
+}
+
+function formatPrioridad(p){
+  if(p==="high") return {label:"Alta",class:"error"};
+  if(p==="medium") return {label:"Media",class:"warning"};
+  return {label:"Baja",class:"neutral"};
+}
+
+function formatFecha(f){
+  if(!f) return "--";
+  return new Date(f).toLocaleDateString("es-ES");
+}
 
 function escapeHTML(str){
   return String(str)
@@ -345,8 +359,37 @@ function escapeHTML(str){
 }
 
 function getInitials(name){
-  if(!name) return "?";
-  return name.split(" ").map(n => n[0]).join("").slice(0,2).toUpperCase();
+  return name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase();
+}
+
+
+/* =========================
+   TOAST
+========================= */
+
+function toast(msg,type="info"){
+
+  let c = document.getElementById("toast-container");
+
+  if(!c){
+    c = document.createElement("div");
+    c.id = "toast-container";
+    document.body.appendChild(c);
+  }
+
+  const el = document.createElement("div");
+  el.className = "toast toast-" + type;
+  el.textContent = msg;
+
+  c.appendChild(el);
+
+  setTimeout(()=> el.classList.add("show"),10);
+
+  setTimeout(()=>{
+    el.classList.remove("show");
+    setTimeout(()=> el.remove(),300);
+  },3000);
+
 }
 
 })();

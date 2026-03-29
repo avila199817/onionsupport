@@ -15,7 +15,7 @@ let observer = null;
 
 
 /* =========================
-   INIT (FIX HARD)
+   INIT
 ========================= */
 
 function init(){
@@ -38,8 +38,7 @@ function init(){
 
   bindEvents();
   loadDetalle();
-
-  observeDOM(); // 🔥 CLAVE
+  observeDOM();
 
 }
 
@@ -60,7 +59,7 @@ function $(selector){
 
 
 /* =========================
-   OBSERVER (🔥 SOLUCIÓN REAL)
+   OBSERVER
 ========================= */
 
 function observeDOM(){
@@ -73,9 +72,7 @@ function observeDOM(){
 
     if(!root){
       console.warn("💥 DOM eliminado → reinicializando");
-
       initialized = false;
-
       setTimeout(init, 100);
     }
 
@@ -115,9 +112,7 @@ function bindEvents(){
     }
 
     if(target.classList.contains("blob-download")){
-      const url = target.dataset.url;
-      const name = target.dataset.name;
-      downloadBlob(url, name);
+      downloadBlob(target.dataset.url, target.dataset.name);
     }
 
   });
@@ -173,10 +168,9 @@ async function loadDetalle(){
   try{
 
     const res = await Onion.fetch(Onion.config.API + "/tickets/" + id);
-
-    console.log("📦 API:", res);
-
     const data = res?.ticket || res?.data || res;
+
+    console.log("📦 API:", data);
 
     if(!data){
       setEmpty();
@@ -184,7 +178,6 @@ async function loadDetalle(){
     }
 
     currentItem = data;
-
     render(data);
 
   }catch(err){
@@ -200,7 +193,7 @@ async function loadDetalle(){
 
 
 /* =========================
-   UPDATE (FIX REAL - SIN REFETCH)
+   UPDATE
 ========================= */
 
 async function updateTicket(){
@@ -213,7 +206,8 @@ async function updateTicket(){
   const priority = $("#edit-prioridad")?.value;
   const message = $("#detalle-mensaje")?.innerText?.trim();
 
-  const files = $("#detalle-files")?.files;
+  const filesInput = $("#detalle-files");
+  const files = filesInput?.files;
 
   try{
 
@@ -225,35 +219,36 @@ async function updateTicket(){
     if(priority) formData.append("priority", priority);
     if(message !== undefined) formData.append("message", message);
 
-    if(files?.length){
+    if(files && files.length > 0){
       for(const f of files){
         formData.append("files", f);
       }
     }
 
-    /* =========================
-       🔥 PATCH + USAR RESPUESTA
-    ========================= */
+    console.log("📤 ENVIANDO:", {
+      status,
+      priority,
+      message,
+      files: files?.length
+    });
 
     const res = await Onion.fetch(Onion.config.API + "/tickets/" + id, {
       method: "PATCH",
       body: formData
     });
 
-    console.log("📦 PATCH RESPONSE:", res);
-
     const data = res?.ticket || res?.data || res;
 
+    console.log("📦 PATCH:", data);
+
     if(data){
-
       currentItem = data;
-
-      // 🔥 render directo SIN volver a pedir datos
       render(data);
+    }
 
-    }else{
-      console.warn("⚠️ PATCH sin data, fallback a reload");
-      await loadDetalle();
+    if(filesInput){
+      filesInput.value = "";
+      renderFiles([]);
     }
 
     toast("Cambios guardados", "success");
@@ -271,12 +266,10 @@ async function updateTicket(){
 
 
 /* =========================
-   RENDER (FIX SELECT + STABLE)
+   RENDER
 ========================= */
 
 function render(i){
-
-  console.log("🎨 RENDER:", i);
 
   const usuario = i.cliente?.nombre || "Usuario";
   const avatar = i.cliente?.avatar;
@@ -291,45 +284,33 @@ function render(i){
     msg.textContent = i.message || "";
   }
 
-  /* =========================
-     🔥 FIX SELECT REAL
-  ========================= */
-
-  const estadoEl = $("#edit-estado");
-  const prioridadEl = $("#edit-prioridad");
-
-  setSelectValue(estadoEl, i.status || "open");
-  setSelectValue(prioridadEl, i.priority || "low");
-
-  /* ========================= */
+  setSelectValue($("#edit-estado"), i.status || "open");
+  setSelectValue($("#edit-prioridad"), i.priority || "low");
 
   renderAvatar(usuario, avatar);
   applyVisualState();
-  renderBlobs(i.files || i.attachments || []);
+  renderBlobs(i.attachments || []);
 
 }
 
 
 /* =========================
-   🔥 HELPER SELECT (CLAVE)
+   SELECT FIX
 ========================= */
 
 function setSelectValue(select, value){
 
   if(!select) return;
 
-  // Buscar opción correcta
   const option = [...select.options].find(o => o.value === value);
 
   if(option){
     option.selected = true;
     select.selectedIndex = option.index;
   }else{
-    // fallback
     select.selectedIndex = 0;
   }
 
-  // 🔥 FORZAR REFRESH VISUAL (esto arregla el bug)
   select.dispatchEvent(new Event("change", { bubbles: true }));
 
 }
@@ -347,16 +328,8 @@ function applyVisualState(){
 
   if(!estado || !prioridad) return;
 
-  estado.classList.remove("estado-open","estado-progress","estado-closed");
-  prioridad.classList.remove("prio-low","prio-medium","prio-high");
-
-  if(estado.value === "open") estado.classList.add("estado-open");
-  if(estado.value === "in_progress") estado.classList.add("estado-progress");
-  if(estado.value === "closed") estado.classList.add("estado-closed");
-
-  if(prioridad.value === "low") prioridad.classList.add("prio-low");
-  if(prioridad.value === "medium") prioridad.classList.add("prio-medium");
-  if(prioridad.value === "high") prioridad.classList.add("prio-high");
+  estado.className = "detalle-select estado-" + estado.value;
+  prioridad.className = "detalle-select prio-" + prioridad.value;
 
   if(estado.value === "open" && prioridad.value === "low"){
     avatarEl?.classList.add("avatar-highlight");
@@ -376,7 +349,7 @@ function renderBlobs(files){
   const container = $("#detalle-blobs");
   if(!container) return;
 
-  if(!files || !files.length){
+  if(!files.length){
     container.innerHTML = `<div class="detalle-hint">Sin archivos</div>`;
     return;
   }
@@ -393,13 +366,28 @@ function renderBlobs(files){
 
 
 /* =========================
+   FILE LIST
+========================= */
+
+function renderFiles(files){
+
+  const list = $("#detalle-file-list");
+  if(!list) return;
+
+  list.innerHTML = [...files].map(f =>
+    `<div class="file-item">${escapeHTML(f.name)}</div>`
+  ).join("");
+
+}
+
+
+/* =========================
    DOWNLOAD
 ========================= */
 
 async function downloadBlob(url, name){
 
   try{
-
     const res = await fetch(url);
     const blob = await res.blob();
 
@@ -424,22 +412,6 @@ async function downloadBlob(url, name){
 
 
 /* =========================
-   FILES
-========================= */
-
-function renderFiles(files){
-
-  const list = $("#detalle-file-list");
-  if(!list) return;
-
-  list.innerHTML = [...files].map(f => `
-    <div class="file-item">${escapeHTML(f.name)}</div>
-  `).join("");
-
-}
-
-
-/* =========================
    AVATAR
 ========================= */
 
@@ -448,11 +420,9 @@ function renderAvatar(nombre, avatar){
   const el = $("#detalle-avatar");
   if(!el) return;
 
-  if(avatar){
-    el.innerHTML = `<img src="${avatar}" alt="${escapeHTML(nombre)}" />`;
-  }else{
-    el.innerHTML = `<div class="avatar-fallback">${getInitials(nombre)}</div>`;
-  }
+  el.innerHTML = avatar
+    ? `<img src="${avatar}" alt="${escapeHTML(nombre)}" />`
+    : `<div class="avatar-fallback">${getInitials(nombre)}</div>`;
 
 }
 
@@ -467,8 +437,7 @@ function setText(sel, val){
 }
 
 function formatFecha(f){
-  if(!f) return "--";
-  return new Date(f).toLocaleDateString("es-ES");
+  return f ? new Date(f).toLocaleDateString("es-ES") : "--";
 }
 
 function escapeHTML(str){
@@ -516,11 +485,19 @@ function setError(msg){
 }
 
 function setSaving(active){
+
   const btn = $("#btn-save");
+
   if(btn){
     btn.disabled = active;
     btn.textContent = active ? "Guardando..." : "Guardar cambios";
   }
+
+  const files = $("#detalle-file-list");
+  if(files){
+    files.style.opacity = active ? "0.5" : "1";
+  }
+
 }
 
 

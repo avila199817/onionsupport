@@ -1,5 +1,5 @@
 /* =========================================================
-   INCIDENCIA DETALLE — FINAL PRO SAAS CLEAN
+   INCIDENCIA DETALLE — FINAL PRO SAAS CLEAN++
 ========================================================= */
 
 
@@ -9,7 +9,6 @@
 .panel-content.incidencia-detalle{
   display:flex;
   flex-direction:column;
-
   flex:1;
   min-height:0;
   width:100%;
@@ -22,10 +21,8 @@
 .container{
   flex:1;
   min-height:0;
-
   display:flex;
   flex-direction:column;
-
   padding:20px 40px;
 }
 
@@ -36,7 +33,6 @@
 .panel-block{
   flex:1;
   min-height:0;
-
   display:flex;
   flex-direction:column;
 
@@ -54,7 +50,6 @@
 .filters-row{
   display:flex;
   align-items:center;
-
   padding:14px 20px;
 
   background:var(--panel-bg);
@@ -67,11 +62,12 @@
   color:var(--text);
   cursor:pointer;
   opacity:.8;
-  transition:opacity .15s ease;
+  transition:all .15s ease;
 }
 
 #btn-back:hover{
   opacity:1;
+  transform:translateX(-2px);
 }
 
 .page-title{
@@ -132,12 +128,11 @@
 
 
 /* =========================================================
-   MENSAJE EDITABLE 🔥
+   MENSAJE EDITABLE
 ========================================================= */
 .detalle-editable{
   font-size:14px;
   line-height:1.5;
-  color:var(--text);
 
   background:color-mix(in srgb, var(--card-bg), #000 10%);
   border:1px solid var(--card-border);
@@ -151,13 +146,10 @@
   position:relative;
 }
 
-/* Hover efecto */
 .detalle-editable:hover{
   border-color:var(--accent);
-  background:color-mix(in srgb, var(--card-bg), #000 5%);
 }
 
-/* Hint overlay */
 .detalle-editable::after{
   content:"✏️ Click para editar";
   position:absolute;
@@ -167,30 +159,24 @@
   font-size:11px;
   color:var(--dim);
   opacity:0;
-  transition:opacity .15s ease;
-  pointer-events:none;
+  transition:.15s;
 }
 
 .detalle-editable:hover::after{
   opacity:.8;
 }
 
-/* Estado EDITANDO */
 .detalle-editable[contenteditable="true"]{
   outline:none;
   border-color:var(--accent);
-  background:color-mix(in srgb, var(--card-bg), #000 0%);
-
   box-shadow:0 0 0 2px rgba(99,102,241,0.25);
 }
 
-/* Quitar hint al editar */
 .detalle-editable[contenteditable="true"]::after{
   content:"Editando...";
   opacity:.6;
 }
 
-/* Placeholder si está vacío */
 .detalle-editable:empty::before{
   content:"Escribe el mensaje...";
   color:var(--dim);
@@ -228,75 +214,101 @@
   object-fit:cover;
 }
 
-.avatar-fallback{
-  display:flex;
-  align-items:center;
-  justify-content:center;
-}
-
 
 /* =========================================================
-   BADGES
-========================================================= */
-.detalle-badges{
-  display:flex;
-  align-items:center;
-  gap:6px;
-}
-
-.badge{
-  padding:4px 8px;
-  border-radius:8px;
-  font-size:11px;
-  font-weight:600;
-}
-
-.badge.success{
-  background:#16a34a;
-  color:#fff;
-}
-
-.badge.warning{
-  background:#f59e0b;
-  color:#fff;
-}
-
-.badge.error{
-  background:#ef4444;
-  color:#fff;
-}
-
-.badge.info{
-  background:#3b82f6;
-  color:#fff;
-}
-
-.badge.neutral{
-  background:#6b7280;
-  color:#fff;
-}
-
-
-/* =========================================================
-   SELECTS
+   SELECTS PRO (TIPO BADGE)
 ========================================================= */
 .detalle-select{
   margin-top:6px;
-  padding:8px;
+  padding:10px 12px;
 
   border-radius:10px;
   border:1px solid var(--card-border);
 
-  background:color-mix(in srgb, var(--card-bg), #000 10%);
+  background:color-mix(in srgb, var(--card-bg), #000 15%);
   color:var(--text);
 
   font-size:13px;
-  transition:border .15s ease;
+  font-weight:500;
+
+  cursor:pointer;
+  transition:all .15s ease;
+}
+
+.detalle-select:hover{
+  border-color:var(--accent);
 }
 
 .detalle-select:focus{
   outline:none;
   border-color:var(--accent);
+  box-shadow:0 0 0 2px rgba(99,102,241,0.25);
+}
+
+
+/* =========================================================
+   BLOBS 🔥🔥🔥
+========================================================= */
+.detalle-blobs{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+
+  margin-top:6px;
+}
+
+.blob-item{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+
+  padding:10px 12px;
+
+  border-radius:10px;
+  border:1px solid var(--card-border);
+
+  background:color-mix(in srgb, var(--card-bg), #000 12%);
+
+  transition:all .15s ease;
+}
+
+.blob-item:hover{
+  border-color:var(--accent);
+  transform:translateY(-1px);
+}
+
+.blob-name{
+  font-size:13px;
+  color:var(--text);
+
+  max-width:70%;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.blob-download{
+  padding:6px 10px;
+  border-radius:8px;
+
+  border:none;
+  cursor:pointer;
+
+  font-size:12px;
+  font-weight:500;
+
+  background:var(--accent);
+  color:#fff;
+
+  transition:all .15s ease;
+}
+
+.blob-download:hover{
+  background:var(--accent-hover);
+}
+
+.blob-download:active{
+  transform:scale(.96);
 }
 
 
@@ -305,7 +317,6 @@
 ========================================================= */
 .detalle-footer{
   margin-top:20px;
-
   display:flex;
   justify-content:space-between;
   align-items:center;
@@ -317,9 +328,9 @@
 }
 
 
-/* =========================
-   BUTTON
-========================= */
+/* =========================================================
+   BUTTON SAVE
+========================================================= */
 #btn-save{
   padding:12px 22px;
   border-radius:12px;

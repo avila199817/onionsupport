@@ -1,17 +1,19 @@
 /* =========================================================
-   INCIDENCIA DETALLE — ULTIMATE SAAS PANEL (FINAL FIX)
+   INCIDENCIA DETALLE — STABLE SAAS PANEL (FINAL)
 ========================================================= */
 
 
-/* =========================================================
+/* =========================
    ROOT
-========================================================= */
+========================= */
 .panel-content.incidencia-detalle{
   display:flex;
   flex-direction:column;
+
   flex:1;
   min-height:0;
   width:100%;
+
   overflow:hidden;
 }
 
@@ -24,7 +26,6 @@
   flex:1;
   min-height:0;
   width:100%;
-  overflow:hidden;
 }
 
 
@@ -44,7 +45,7 @@
 
 
 /* =========================================================
-   RIGHT SIDEBAR (🔥 FIX BORDER RADIUS)
+   RIGHT SIDEBAR (FIX REAL)
 ========================================================= */
 .detalle-right{
   width:360px;
@@ -54,17 +55,16 @@
   display:flex;
   flex-direction:column;
 
-  background:transparent; /* 🔥 clave */
+  background:var(--panel-bg);
   border-left:1px solid var(--panel-border);
 
-  padding:12px; /* 🔥 espacio real */
-
   min-height:0;
+  overflow:hidden;
 }
 
 
 /* =========================================================
-   SIDEBAR PANEL INTERNO (🔥 CLAVE)
+   SIDEBAR CONTENT
 ========================================================= */
 .detalle-sidebar{
   flex:1;
@@ -73,13 +73,9 @@
   display:flex;
   flex-direction:column;
 
-  background:var(--panel-bg);
-  border-radius:14px;
-
   padding:16px;
 
-  overflow:hidden; /* 🔥 clipping correcto */
-  box-shadow:0 8px 24px rgba(0,0,0,0.25);
+  overflow:hidden;
 }
 
 
@@ -90,8 +86,6 @@
   display:flex;
   flex-direction:column;
   gap:10px;
-  flex:1;
-  min-height:0;
 }
 
 .sidebar-title{
@@ -102,22 +96,19 @@
 
 
 /* =========================================================
-   BLOBS
+   BLOBS (FIX BORDER + SCROLL)
 ========================================================= */
 .detalle-blobs{
-  flex:1;
-  min-height:0;
-
   display:flex;
   flex-direction:column;
   gap:10px;
 
   overflow:auto;
   padding-right:4px;
+  margin-top:6px;
 }
 
-
-/* SCROLL */
+/* Scroll */
 .detalle-blobs::-webkit-scrollbar{
   width:6px;
 }
@@ -129,7 +120,7 @@
 
 
 /* =========================================================
-   ITEM (🔥 PERFECT CARD)
+   BLOB ITEM (🔥 FIX CORTE BORDER)
 ========================================================= */
 .blob-item{
   display:flex;
@@ -148,8 +139,7 @@
 
 .blob-item:hover{
   border-color:var(--accent);
-  transform:translateY(-2px);
-  box-shadow:0 6px 18px rgba(0,0,0,0.25);
+  transform:translateY(-1px);
 }
 
 
@@ -188,7 +178,6 @@
 
 .blob-download:hover{
   transform:translateY(-1px);
-  box-shadow:0 6px 14px rgba(99,102,241,0.35);
 }
 
 
@@ -196,8 +185,6 @@
    HEADER
 ========================================================= */
 .incidencia-detalle .filters-row{
-  flex-shrink:0;
-
   display:flex;
   align-items:center;
 
@@ -236,6 +223,112 @@
 
 
 /* =========================================================
+   ITEMS
+========================================================= */
+.detalle-item{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+
+.detalle-label{
+  font-size:12px;
+  color:var(--dim);
+}
+
+.detalle-value{
+  font-size:14px;
+  font-weight:500;
+  color:var(--text);
+}
+
+
+/* =========================================================
+   MENSAJE
+========================================================= */
+.detalle-editable{
+  font-size:14px;
+  line-height:1.5;
+
+  background:color-mix(in srgb, var(--card-bg), #000 10%);
+  border:1px solid var(--card-border);
+  border-radius:10px;
+
+  padding:12px;
+  min-height:60px;
+
+  cursor:text;
+}
+
+.detalle-editable:hover{
+  border-color:var(--accent);
+}
+
+.detalle-editable[contenteditable="true"]{
+  outline:none;
+  border-color:var(--accent);
+  box-shadow:0 0 0 2px rgba(99,102,241,0.25);
+}
+
+
+/* =========================================================
+   SELECTS (FIX TEXTO INVISIBLE)
+========================================================= */
+.detalle-select{
+  margin-top:6px;
+  padding:10px 12px;
+
+  border-radius:10px;
+  border:1px solid var(--card-border);
+
+  background:color-mix(in srgb, var(--card-bg), #000 15%);
+  color:#fff; /* 🔥 FIX */
+
+  font-size:13px;
+  font-weight:500;
+
+  cursor:pointer;
+}
+
+.detalle-select option{
+  color:#000;
+  background:#fff;
+}
+
+
+/* =========================================================
+   USER
+========================================================= */
+.detalle-user{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+.table-avatar{
+  width:36px;
+  height:36px;
+  border-radius:50%;
+  overflow:hidden;
+
+  background:#ddd;
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  font-size:13px;
+  font-weight:600;
+}
+
+.table-avatar img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+}
+
+
+/* =========================================================
    FOOTER
 ========================================================= */
 .detalle-footer{
@@ -244,8 +337,41 @@
   display:flex;
   justify-content:space-between;
   align-items:center;
+}
 
-  flex-shrink:0;
+.detalle-hint{
+  font-size:12px;
+  color:var(--dim);
+}
+
+
+/* =========================================================
+   BUTTON
+========================================================= */
+#btn-save{
+  padding:12px 22px;
+  border-radius:12px;
+
+  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
+  color:#fff;
+
+  border:none;
+  cursor:pointer;
+
+  box-shadow:0 10px 24px rgba(99,102,241,0.35);
+}
+
+
+/* =========================================================
+   SCROLL BODY
+========================================================= */
+.detalle-body::-webkit-scrollbar{
+  width:6px;
+}
+
+.detalle-body::-webkit-scrollbar-thumb{
+  background:rgba(255,255,255,0.1);
+  border-radius:6px;
 }
 
 

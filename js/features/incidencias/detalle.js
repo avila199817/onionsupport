@@ -95,21 +95,23 @@ async function loadDetalle(){
 
     const res = await Onion.fetch(Onion.config.API + "/tickets/" + id);
 
-    // 🔥 NORMALIZACIÓN PRO
     const data = res?.ticket || res?.data || res?.incidencia || null;
 
     if(!data){
       setEmpty();
+      clearLoading();
       return;
     }
 
     currentItem = data;
     render(data);
+    clearLoading();
 
   }catch(err){
 
     console.error("💥 Error cargando incidencia:", err);
     setError("Error cargando incidencia");
+    clearLoading();
 
   }
 
@@ -117,7 +119,7 @@ async function loadDetalle(){
 
 
 /* =========================
-   UPDATE (PATCH)
+   UPDATE
 ========================= */
 
 async function updateTicket(){
@@ -136,13 +138,10 @@ async function updateTicket(){
     await Onion.fetch(Onion.config.API + "/tickets/" + id, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        status,
-        priority
-      })
+      body: JSON.stringify({ status, priority })
     });
 
-    // 🔥 Reload limpio
+    toast("Incidencia actualizada", "success");
     await loadDetalle();
 
   }catch(err){
@@ -168,27 +167,36 @@ function getId(){
 
 
 /* =========================
-   STATES
+   STATES (🔥 FIX REAL)
 ========================= */
 
 function setLoading(){
-  const grid = $(".form-grid");
-  if(grid){
-    grid.innerHTML = `<div class="user-sub">Cargando incidencia...</div>`;
+  const content = $("#detalle-content");
+  if(content){
+    content.style.opacity = "0.4";
+    content.style.pointerEvents = "none";
+  }
+}
+
+function clearLoading(){
+  const content = $("#detalle-content");
+  if(content){
+    content.style.opacity = "1";
+    content.style.pointerEvents = "auto";
   }
 }
 
 function setEmpty(){
-  const grid = $(".form-grid");
-  if(grid){
-    grid.innerHTML = `<div class="user-sub">No se encontró la incidencia</div>`;
+  const content = $("#detalle-content");
+  if(content){
+    content.innerHTML = `<div class="user-sub">No se encontró la incidencia</div>`;
   }
 }
 
 function setError(msg){
-  const grid = $(".form-grid");
-  if(grid){
-    grid.innerHTML = `<div class="badge error">❌ ${msg}</div>`;
+  const content = $("#detalle-content");
+  if(content){
+    content.innerHTML = `<div class="badge error">❌ ${msg}</div>`;
   }
 }
 
@@ -257,11 +265,7 @@ function setBadge(selector, data){
   const el = $(selector);
   if(!el) return;
 
-  el.innerHTML = `
-    <span class="badge ${data.class}">
-      ${data.label}
-    </span>
-  `;
+  el.innerHTML = `<span class="badge ${data.class}">${data.label}</span>`;
 }
 
 
@@ -270,11 +274,8 @@ function setBadge(selector, data){
 ========================= */
 
 function setText(selector, value){
-
   const el = $(selector);
-  if(!el) return;
-
-  el.textContent = value;
+  if(el) el.textContent = value;
 }
 
 
@@ -284,19 +285,15 @@ function setText(selector, value){
 
 function formatEstado(s){
   s = (s || "").toLowerCase();
-
   if(s === "closed") return { label:"Cerrada", class:"success" };
   if(s === "in_progress") return { label:"En progreso", class:"warning" };
-
   return { label:"Abierta", class:"info" };
 }
 
 function formatPrioridad(p){
   p = (p || "").toLowerCase();
-
   if(p === "high") return { label:"Alta", class:"error" };
   if(p === "medium") return { label:"Media", class:"warning" };
-
   return { label:"Baja", class:"neutral" };
 }
 
@@ -307,7 +304,7 @@ function formatFecha(f){
 
 
 /* =========================
-   TOAST (PRO)
+   TOAST
 ========================= */
 
 function toast(msg, type="info"){

@@ -11,7 +11,7 @@ if(!Onion){
 
 let initialized = false;
 let selectedFiles = [];
-let sending = false; // 🔥 LOCK ANTI DUPLICADO
+let sending = false;
 
 /* =========================
    CONFIG
@@ -42,6 +42,7 @@ function init(){
   Onion.onCleanup(()=>{
     initialized = false;
     sending = false;
+    selectedFiles = [];
   });
 
 }
@@ -79,7 +80,7 @@ function setGreeting(){
 }
 
 /* =========================
-   EVENTS
+   EVENTS (ANTI DUPLICADO REAL)
 ========================= */
 
 function bindEvents(){
@@ -95,16 +96,24 @@ function bindEvents(){
 
   const btn = $("#btn-save-incidencia");
 
-  if(btn){
-    btn.removeEventListener("click", saveIncidencia); // 🔥 evita duplicados
+  if(btn && !btn.dataset.bound){
+    btn.dataset.bound = "1";
     btn.addEventListener("click", saveIncidencia);
   }
 
-  $("#btn-attach")?.addEventListener("click", ()=>{
-    $("#inc-files")?.click();
-  });
+  const attachBtn = $("#btn-attach");
+  if(attachBtn && !attachBtn.dataset.bound){
+    attachBtn.dataset.bound = "1";
+    attachBtn.addEventListener("click", ()=>{
+      $("#inc-files")?.click();
+    });
+  }
 
-  $("#inc-files")?.addEventListener("change", handleFiles);
+  const fileInput = $("#inc-files");
+  if(fileInput && !fileInput.dataset.bound){
+    fileInput.dataset.bound = "1";
+    fileInput.addEventListener("change", handleFiles);
+  }
 
 }
 
@@ -226,7 +235,7 @@ function getAuthHeaders(){
 
 async function saveIncidencia(){
 
-  if(sending) return; // 🔥 BLOQUEO TOTAL
+  if(sending) return;
 
   clearErrors();
 
@@ -311,12 +320,19 @@ async function saveIncidencia(){
 ========================= */
 
 function resetForm(){
+
   ["#inc-title", "#inc-message"].forEach(sel=>{
     const el = $(sel);
     if(el) el.value = "";
   });
+
   selectedFiles = [];
+
+  const fileInput = $("#inc-files");
+  if(fileInput) fileInput.value = "";
+
   renderFiles();
+
 }
 
 function setError(selector, message){
@@ -371,6 +387,7 @@ function showToast(message, type){
 function formatEstado(s){
   if(s === "closed") return "Cerrada";
   if(s === "in_progress") return "En progreso";
+  if(s === "pending") return "Pendiente";
   return "Abierta";
 }
 

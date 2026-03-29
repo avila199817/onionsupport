@@ -1,5 +1,5 @@
 /* =========================================================
-   INCIDENCIA DETALLE — STABLE SAAS PANEL (FINAL)
+   INCIDENCIA DETALLE — FINAL STABLE SAAS
 ========================================================= */
 
 
@@ -45,7 +45,7 @@
 
 
 /* =========================================================
-   RIGHT SIDEBAR (FIX REAL)
+   RIGHT SIDEBAR
 ========================================================= */
 .detalle-right{
   width:360px;
@@ -59,7 +59,6 @@
   border-left:1px solid var(--panel-border);
 
   min-height:0;
-  overflow:hidden;
 }
 
 
@@ -67,14 +66,15 @@
    SIDEBAR CONTENT
 ========================================================= */
 .detalle-sidebar{
-  flex:1;
-  min-height:0;
-
   display:flex;
   flex-direction:column;
 
+  flex:1;
+  min-height:0;
+
   padding:16px;
 
+  border-radius:12px;
   overflow:hidden;
 }
 
@@ -86,6 +86,9 @@
   display:flex;
   flex-direction:column;
   gap:10px;
+
+  flex:1;
+  min-height:0;
 }
 
 .sidebar-title{
@@ -96,16 +99,16 @@
 
 
 /* =========================================================
-   BLOBS (FIX BORDER + SCROLL)
+   BLOBS
 ========================================================= */
 .detalle-blobs{
   display:flex;
   flex-direction:column;
   gap:10px;
 
+  flex:1;
   overflow:auto;
   padding-right:4px;
-  margin-top:6px;
 }
 
 /* Scroll */
@@ -120,7 +123,7 @@
 
 
 /* =========================================================
-   BLOB ITEM (🔥 FIX CORTE BORDER)
+   BLOB ITEM
 ========================================================= */
 .blob-item{
   display:flex;
@@ -187,11 +190,24 @@
 .incidencia-detalle .filters-row{
   display:flex;
   align-items:center;
+  justify-content:space-between; /* 🔥 FIX VOLVER */
 
   padding:14px 40px;
 
   background:var(--panel-bg);
   border-bottom:1px solid var(--panel-border);
+}
+
+#btn-back{
+  background:none;
+  border:none;
+  color:var(--text);
+  cursor:pointer;
+  opacity:.8;
+}
+
+#btn-back:hover{
+  opacity:1;
 }
 
 
@@ -256,8 +272,6 @@
 
   padding:12px;
   min-height:60px;
-
-  cursor:text;
 }
 
 .detalle-editable:hover{
@@ -272,7 +286,7 @@
 
 
 /* =========================================================
-   SELECTS (FIX TEXTO INVISIBLE)
+   SELECT (FIX VISUAL)
 ========================================================= */
 .detalle-select{
   margin-top:6px;
@@ -281,8 +295,8 @@
   border-radius:10px;
   border:1px solid var(--card-border);
 
-  background:color-mix(in srgb, var(--card-bg), #000 15%);
-  color:#fff; /* 🔥 FIX */
+  background:#1a1d25;
+  color:#fff;
 
   font-size:13px;
   font-weight:500;
@@ -363,7 +377,7 @@
 
 
 /* =========================================================
-   SCROLL BODY
+   SCROLL
 ========================================================= */
 .detalle-body::-webkit-scrollbar{
   width:6px;

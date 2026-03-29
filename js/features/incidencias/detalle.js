@@ -34,8 +34,6 @@ function init(){
 
   initialized = true;
 
-  console.log("✅ INIT OK");
-
   bindEvents();
   loadDetalle();
   observeDOM();
@@ -67,15 +65,10 @@ function observeDOM(){
   if(observer) return;
 
   observer = new MutationObserver(()=>{
-
-    const root = getRoot();
-
-    if(!root){
-      console.warn("💥 DOM eliminado → reinicializando");
+    if(!getRoot()){
       initialized = false;
       setTimeout(init, 100);
     }
-
   });
 
   observer.observe(document.body, {
@@ -129,71 +122,39 @@ function bindEvents(){
 
   });
 
-  const msg = $("#detalle-mensaje");
-
-  if(msg){
-
-    msg.addEventListener("click", ()=>{
-      msg.setAttribute("contenteditable","true");
-      msg.focus();
-    });
-
-    msg.addEventListener("blur", ()=>{
-      msg.setAttribute("contenteditable","false");
-    });
-
-    msg.addEventListener("keydown", (e)=>{
-      if(e.key === "Enter"){
-        e.preventDefault();
-        msg.blur();
-      }
-    });
-
-  }
-
 }
 
 
 /* =========================
-   LOAD
+   LOAD (🔥 SIN CACHE)
 ========================= */
 
 async function loadDetalle(){
 
   const id = getId();
-  if(!id) return setError("ID no válido");
-
-  setLoading();
+  if(!id) return;
 
   try{
 
-    const res = await Onion.fetch(Onion.config.API + "/tickets/" + id);
-    const data = res?.ticket || res?.data || res;
+    const res = await fetch(Onion.config.API + "/tickets/" + id + "?t=" + Date.now(), {
+      cache: "no-store"
+    });
 
-    console.log("📦 API:", data);
-
-    if(!data){
-      setEmpty();
-      return;
-    }
+    const json = await res.json();
+    const data = json?.ticket || json;
 
     currentItem = data;
     render(data);
 
   }catch(err){
-
     console.error(err);
-    setError("Error cargando incidencia");
-
-  }finally{
-    clearLoading();
   }
 
 }
 
 
 /* =========================
-   UPDATE
+   UPDATE (🔥 FIX REAL)
 ========================= */
 
 async function updateTicket(){
@@ -215,31 +176,28 @@ async function updateTicket(){
 
     const formData = new FormData();
 
-    if(status) formData.append("status", status);
-    if(priority) formData.append("priority", priority);
-    if(message !== undefined) formData.append("message", message);
+    formData.append("status", status);
+    formData.append("priority", priority);
+    formData.append("message", message || "");
 
-    if(files && files.length > 0){
+    if(files && files.length){
       for(const f of files){
         formData.append("files", f);
       }
     }
 
-    console.log("📤 ENVIANDO:", {
-      status,
-      priority,
-      message,
-      files: files?.length
-    });
+    console.log("📤 ENVÍO:", { status, priority, message, files: files?.length });
 
-    const res = await Onion.fetch(Onion.config.API + "/tickets/" + id, {
+    /* 🔥 FETCH REAL (NO Onion) */
+    const res = await fetch(Onion.config.API + "/tickets/" + id, {
       method: "PATCH",
       body: formData
     });
 
-    const data = res?.ticket || res?.data || res;
+    const json = await res.json();
+    const data = json?.ticket || json;
 
-    console.log("📦 PATCH:", data);
+    console.log("📦 PATCH OK:", data);
 
     if(data){
       currentItem = data;
@@ -251,13 +209,11 @@ async function updateTicket(){
       renderFiles([]);
     }
 
-    toast("Cambios guardados", "success");
+    toast("Guardado");
 
   }catch(err){
-
     console.error(err);
-    toast("Error guardando cambios", "error");
-
+    toast("Error");
   }finally{
     setSaving(false);
   }
@@ -271,72 +227,17 @@ async function updateTicket(){
 
 function render(i){
 
-  const usuario = i.cliente?.nombre || "Usuario";
-  const avatar = i.cliente?.avatar;
-
   setText("#detalle-id", i.id);
-  setText("#detalle-usuario", usuario);
-  setText("#detalle-titulo", i.subject || "Sin título");
+  setText("#detalle-usuario", i.cliente?.nombre);
+  setText("#detalle-titulo", i.subject);
   setText("#detalle-fecha", formatFecha(i.createdAt));
 
-  const msg = $("#detalle-mensaje");
-  if(msg){
-    msg.textContent = i.message || "";
-  }
+  $("#detalle-mensaje").textContent = i.message || "";
 
-  setSelectValue($("#edit-estado"), i.status || "open");
-  setSelectValue($("#edit-prioridad"), i.priority || "low");
+  $("#edit-estado").value = i.status || "open";
+  $("#edit-prioridad").value = i.priority || "low";
 
-  renderAvatar(usuario, avatar);
-  applyVisualState();
   renderBlobs(i.attachments || []);
-
-}
-
-
-/* =========================
-   SELECT FIX
-========================= */
-
-function setSelectValue(select, value){
-
-  if(!select) return;
-
-  const option = [...select.options].find(o => o.value === value);
-
-  if(option){
-    option.selected = true;
-    select.selectedIndex = option.index;
-  }else{
-    select.selectedIndex = 0;
-  }
-
-  select.dispatchEvent(new Event("change", { bubbles: true }));
-
-}
-
-
-/* =========================
-   VISUAL STATE
-========================= */
-
-function applyVisualState(){
-
-  const estado = $("#edit-estado");
-  const prioridad = $("#edit-prioridad");
-  const avatarEl = $("#detalle-avatar");
-
-  if(!estado || !prioridad) return;
-
-  estado.className = "detalle-select estado-" + estado.value;
-  prioridad.className = "detalle-select prio-" + prioridad.value;
-
-  if(estado.value === "open" && prioridad.value === "low"){
-    avatarEl?.classList.add("avatar-highlight");
-  }else{
-    avatarEl?.classList.remove("avatar-highlight");
-  }
-
 }
 
 
@@ -350,13 +251,13 @@ function renderBlobs(files){
   if(!container) return;
 
   if(!files.length){
-    container.innerHTML = `<div class="detalle-hint">Sin archivos</div>`;
+    container.innerHTML = "Sin archivos";
     return;
   }
 
   container.innerHTML = files.map(f => `
-    <div class="blob-item">
-      <span class="blob-name">${escapeHTML(f.name)}</span>
+    <div>
+      ${f.name}
       <button class="blob-download" data-url="${f.url}" data-name="${f.name}">
         Descargar
       </button>
@@ -366,7 +267,7 @@ function renderBlobs(files){
 
 
 /* =========================
-   FILE LIST
+   FILES
 ========================= */
 
 function renderFiles(files){
@@ -374,10 +275,7 @@ function renderFiles(files){
   const list = $("#detalle-file-list");
   if(!list) return;
 
-  list.innerHTML = [...files].map(f =>
-    `<div class="file-item">${escapeHTML(f.name)}</div>`
-  ).join("");
-
+  list.innerHTML = [...files].map(f => f.name).join("<br>");
 }
 
 
@@ -387,42 +285,20 @@ function renderFiles(files){
 
 async function downloadBlob(url, name){
 
-  try{
-    const res = await fetch(url);
-    const blob = await res.blob();
+  const res = await fetch(url);
+  const blob = await res.blob();
 
-    const a = document.createElement("a");
-    const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const u = URL.createObjectURL(blob);
 
-    a.href = objectUrl;
-    a.download = name || "archivo";
+  a.href = u;
+  a.download = name;
 
-    document.body.appendChild(a);
-    a.click();
+  document.body.appendChild(a);
+  a.click();
 
-    a.remove();
-    URL.revokeObjectURL(objectUrl);
-
-  }catch(err){
-    console.error(err);
-    toast("Error descargando archivo", "error");
-  }
-
-}
-
-
-/* =========================
-   AVATAR
-========================= */
-
-function renderAvatar(nombre, avatar){
-
-  const el = $("#detalle-avatar");
-  if(!el) return;
-
-  el.innerHTML = avatar
-    ? `<img src="${avatar}" alt="${escapeHTML(nombre)}" />`
-    : `<div class="avatar-fallback">${getInitials(nombre)}</div>`;
+  a.remove();
+  URL.revokeObjectURL(u);
 
 }
 
@@ -433,101 +309,27 @@ function renderAvatar(nombre, avatar){
 
 function setText(sel, val){
   const el = $(sel);
-  if(el) el.textContent = val ?? "--";
+  if(el) el.textContent = val || "--";
 }
 
 function formatFecha(f){
   return f ? new Date(f).toLocaleDateString("es-ES") : "--";
 }
 
-function escapeHTML(str){
-  return String(str)
-    .replace(/&/g,"&amp;")
-    .replace(/</g,"&lt;")
-    .replace(/>/g,"&gt;");
-}
-
-function getInitials(name){
-  return name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase();
-}
-
 function getId(){
-  return new URLSearchParams(window.location.search).get("id");
-}
-
-
-/* =========================
-   STATES
-========================= */
-
-function setLoading(){
-  const el = $("#detalle-content");
-  if(el){
-    el.style.opacity = "0.4";
-    el.style.pointerEvents = "none";
-  }
-}
-
-function clearLoading(){
-  const el = $("#detalle-content");
-  if(el){
-    el.style.opacity = "1";
-    el.style.pointerEvents = "auto";
-  }
-}
-
-function setEmpty(){
-  $("#detalle-content").innerHTML = `<div class="detalle-hint">No encontrada</div>`;
-}
-
-function setError(msg){
-  $("#detalle-content").innerHTML = `<div class="badge error">${msg}</div>`;
+  return new URLSearchParams(location.search).get("id");
 }
 
 function setSaving(active){
-
   const btn = $("#btn-save");
-
   if(btn){
     btn.disabled = active;
-    btn.textContent = active ? "Guardando..." : "Guardar cambios";
+    btn.textContent = active ? "Guardando..." : "Guardar";
   }
-
-  const files = $("#detalle-file-list");
-  if(files){
-    files.style.opacity = active ? "0.5" : "1";
-  }
-
 }
 
-
-/* =========================
-   TOAST
-========================= */
-
-function toast(msg,type="info"){
-
-  let c = document.getElementById("toast-container");
-
-  if(!c){
-    c = document.createElement("div");
-    c.id = "toast-container";
-    document.body.appendChild(c);
-  }
-
-  const el = document.createElement("div");
-  el.className = "toast toast-" + type;
-  el.textContent = msg;
-
-  c.appendChild(el);
-
-  setTimeout(()=> el.classList.add("show"),10);
-
-  setTimeout(()=>{
-    el.classList.remove("show");
-    setTimeout(()=> el.remove(),300);
-  },3000);
-
+function toast(msg){
+  alert(msg);
 }
 
 })();

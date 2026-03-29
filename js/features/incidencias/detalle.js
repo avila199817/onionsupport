@@ -12,6 +12,7 @@ if(!Onion){
 let initialized = false;
 let currentItem = null;
 
+
 /* =========================
    INIT
 ========================= */
@@ -59,24 +60,32 @@ function bindEvents(){
   const root = getRoot();
   if(!root) return;
 
-  /* CLICK GLOBAL */
-  Onion.cleanupEvent(root, "click", (e)=>{
+  Onion.cleanupEvent(root, "click", async (e)=>{
 
-    if(e.target.id === "btn-back"){
+    const target = e.target;
+
+    if(target.id === "btn-back"){
       Onion.router.navigate("/incidencias");
     }
 
-    if(e.target.id === "btn-save"){
-      updateTicket();
+    if(target.id === "btn-save"){
+      await updateTicket();
     }
 
-    if(e.target.id === "btn-attach-detalle"){
+    if(target.id === "btn-attach-detalle"){
       $("#detalle-files")?.click();
+    }
+
+    /* 🔥 DOWNLOAD BLOBS */
+    if(target.classList.contains("blob-download")){
+      const url = target.dataset.url;
+      const name = target.dataset.name;
+      downloadBlob(url, name);
     }
 
   });
 
-  /* FILES */
+  /* FILE INPUT */
   Onion.cleanupEvent(root, "change", (e)=>{
     if(e.target.id === "detalle-files"){
       renderFiles(e.target.files);
@@ -95,7 +104,6 @@ function bindEvents(){
 
     msg.addEventListener("blur", ()=>{
       msg.setAttribute("contenteditable","false");
-      updateTicket();
     });
 
     msg.addEventListener("keydown", (e)=>{
@@ -124,32 +132,31 @@ async function loadDetalle(){
   try{
 
     const res = await Onion.fetch(Onion.config.API + "/tickets/" + id);
-    const data = res?.ticket || res?.data || null;
+    const data = res?.ticket || res?.data || res;
 
     if(!data){
       setEmpty();
-      clearLoading();
       return;
     }
 
     currentItem = data;
 
     render(data);
-    clearLoading();
 
   }catch(err){
 
     console.error(err);
     setError("Error cargando incidencia");
-    clearLoading();
 
+  }finally{
+    clearLoading();
   }
 
 }
 
 
 /* =========================
-   UPDATE (🔥 PRO)
+   UPDATE
 ========================= */
 
 async function updateTicket(){
@@ -202,7 +209,74 @@ async function updateTicket(){
 
 
 /* =========================
-   FILES
+   BLOBS 🔥
+========================= */
+
+function renderBlobs(files){
+
+  const container = $("#detalle-blobs");
+  if(!container) return;
+
+  if(!files || !files.length){
+    container.innerHTML = `<div class="detalle-hint">Sin archivos</div>`;
+    return;
+  }
+
+  container.innerHTML = files.map(f => {
+
+    const name = escapeHTML(f.name || "archivo");
+    const url = f.url || f.downloadUrl || "#";
+
+    return `
+      <div class="blob-item">
+        <span class="blob-name">${name}</span>
+        <button 
+          class="blob-download"
+          data-url="${url}"
+          data-name="${name}"
+        >
+          Descargar
+        </button>
+      </div>
+    `;
+  }).join("");
+
+}
+
+
+/* =========================
+   DOWNLOAD
+========================= */
+
+async function downloadBlob(url, name){
+
+  try{
+
+    const res = await fetch(url);
+    const blob = await res.blob();
+
+    const a = document.createElement("a");
+    const objectUrl = URL.createObjectURL(blob);
+
+    a.href = objectUrl;
+    a.download = name || "archivo";
+
+    document.body.appendChild(a);
+    a.click();
+
+    a.remove();
+    URL.revokeObjectURL(objectUrl);
+
+  }catch(err){
+    console.error(err);
+    toast("Error descargando archivo", "error");
+  }
+
+}
+
+
+/* =========================
+   FILE PREVIEW
 ========================= */
 
 function renderFiles(files){
@@ -249,7 +323,7 @@ function clearLoading(){
 }
 
 function setEmpty(){
-  $("#detalle-content").innerHTML = `<div class="user-sub">No encontrada</div>`;
+  $("#detalle-content").innerHTML = `<div class="detalle-hint">No encontrada</div>`;
 }
 
 function setError(msg){
@@ -279,7 +353,6 @@ function render(i){
   setText("#detalle-titulo", i.subject || "Sin título");
   setText("#detalle-fecha", formatFecha(i.createdAt));
 
-  /* 🔥 MENSAJE BIEN */
   const msg = $("#detalle-mensaje");
   if(msg){
     msg.textContent = i.message || "";
@@ -287,11 +360,12 @@ function render(i){
 
   renderAvatar(usuario, avatar);
 
-  setBadge("#detalle-estado", formatEstado(i.status));
-  setBadge("#detalle-prioridad", formatPrioridad(i.priority));
+  /* SELECTS */
+  if($("#edit-estado")) $("#edit-estado").value = i.status || "open";
+  if($("#edit-prioridad")) $("#edit-prioridad").value = i.priority || "low";
 
-  if($("#edit-estado")) $("#edit-estado").value = i.status;
-  if($("#edit-prioridad")) $("#edit-prioridad").value = i.priority;
+  /* 🔥 BLOBS */
+  renderBlobs(i.files || i.attachments || []);
 
 }
 
@@ -315,34 +389,12 @@ function renderAvatar(nombre, avatar){
 
 
 /* =========================
-   BADGES
-========================= */
-
-function setBadge(sel, d){
-  const el = $(sel);
-  if(el) el.innerHTML = `<span class="badge ${d.class}">${d.label}</span>`;
-}
-
-
-/* =========================
    HELPERS
 ========================= */
 
 function setText(sel, val){
   const el = $(sel);
-  if(el) el.textContent = val;
-}
-
-function formatEstado(s){
-  if(s==="closed") return {label:"Cerrada",class:"success"};
-  if(s==="in_progress") return {label:"En progreso",class:"warning"};
-  return {label:"Abierta",class:"info"};
-}
-
-function formatPrioridad(p){
-  if(p==="high") return {label:"Alta",class:"error"};
-  if(p==="medium") return {label:"Media",class:"warning"};
-  return {label:"Baja",class:"neutral"};
+  if(el) el.textContent = val ?? "--";
 }
 
 function formatFecha(f){

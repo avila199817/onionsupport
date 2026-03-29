@@ -58,7 +58,7 @@ function bindEvents(){
   const root = getRoot();
   if(!root) return;
 
-  Onion.cleanupEvent(root, "click", (e)=>{
+  Onion.cleanupEvent(root, "click", async (e)=>{
 
     const action = e.target.closest("[data-action]");
     if(action){
@@ -66,13 +66,13 @@ function bindEvents(){
 
       const row = action.closest("tr[data-id]");
       const id = row?.dataset.id;
-
       if(!id) return;
 
       const type = action.dataset.action;
 
-      if(type === "download") downloadFactura(id);
-      if(type === "send") sendFactura(id);
+      if(type === "download") return downloadFactura(id);
+      if(type === "send") return sendFactura(id);
+      if(type === "pay") return payFactura(id, row);
 
       return;
     }
@@ -175,6 +175,7 @@ function render(items){
 
     const estado = getEstado(f.estadoPago);
     const id = f.id || f.numero;
+    const isPendiente = (f.estadoPago || "").toLowerCase() === "pendiente";
 
     return `
       <tr data-id="${id}" style="cursor:pointer">
@@ -189,8 +190,8 @@ function render(items){
               ${getInitials(f.cliente)}
             </div>
             <div class="user-info">
-              <span class="user-name">${escapeHTML(f.cliente || "-")}</span>
-              <span class="user-sub">Cliente</span>
+              <div class="user-name">${escapeHTML(f.cliente || "-")}</div>
+              <div class="user-sub">Cliente</div>
             </div>
           </div>
         </td>
@@ -211,8 +212,23 @@ function render(items){
 
         <td class="col-actions">
           <div class="actions">
-            <button data-action="download">Descargar</button>
-            <button data-action="send">Enviar</button>
+
+            <button class="btn-action" data-action="download">
+              Descargar
+            </button>
+
+            <button class="btn-action" data-action="send">
+              Enviar
+            </button>
+
+            ${
+              isPendiente ? `
+                <button class="btn-action btn-pay" data-action="pay">
+                  Pagar
+                </button>
+              ` : ""
+            }
+
           </div>
         </td>
 
@@ -229,10 +245,43 @@ function render(items){
 
 function downloadFactura(id){
   window.open(Onion.config.API + "/facturas/" + id + "/pdf", "_blank");
+  toast("Factura descargada", "success");
 }
 
 function sendFactura(id){
-  alert("Enviar factura " + id);
+  toast("Factura enviada (simulado)", "info");
+}
+
+/* 🔥 PAY PRO */
+async function payFactura(id, row){
+
+  try{
+
+    toast("Procesando pago...", "info");
+
+    await Onion.fetch(Onion.config.API + "/facturas/" + id + "/pagar", {
+      method: "POST"
+    });
+
+    // UI update inmediata
+    const badge = row.querySelector(".badge");
+    if(badge){
+      badge.textContent = "Pagada";
+      badge.className = "badge pagada";
+    }
+
+    const payBtn = row.querySelector('[data-action="pay"]');
+    if(payBtn) payBtn.remove();
+
+    toast("Factura pagada correctamente", "success");
+
+  }catch(e){
+
+    console.error("💥 ERROR PAGO:", e);
+    toast("Error al pagar factura", "error");
+
+  }
+
 }
 
 /* =========================
@@ -336,18 +385,48 @@ function renderFacturaDetalle(f){
 }
 
 /* =========================
+   TOAST (🔥 PRO)
+========================= */
+
+function toast(msg, type="info"){
+
+  let container = document.getElementById("toast-container");
+
+  if(!container){
+    container = document.createElement("div");
+    container.id = "toast-container";
+    document.body.appendChild(container);
+  }
+
+  const el = document.createElement("div");
+  el.className = "toast toast-" + type;
+  el.textContent = msg;
+
+  container.appendChild(el);
+
+  setTimeout(()=>{
+    el.classList.add("show");
+  },10);
+
+  setTimeout(()=>{
+    el.classList.remove("show");
+    setTimeout(()=> el.remove(), 300);
+  },3000);
+
+}
+
+/* =========================
    HELPERS
 ========================= */
 
-/* 🔥 BADGES PRO */
 function getEstado(estado){
 
   const e = (estado || "").toLowerCase();
 
-  if(e === "pagada") return { label:"Pagada", class:"success" };
-  if(e === "pendiente") return { label:"Pendiente", class:"warning" };
+  if(e === "pagada") return { label:"Pagada", class:"pagada" };
+  if(e === "pendiente") return { label:"Pendiente", class:"pendiente" };
 
-  return { label:"Borrador", class:"neutral" };
+  return { label:"Borrador", class:"borrador" };
 }
 
 function getInitials(name){

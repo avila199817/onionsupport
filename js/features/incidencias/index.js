@@ -83,21 +83,6 @@ function bindEvents(){
     };
   }
 
-  const search = $("#search-incidencia");
-  if(search){
-    search.addEventListener("input", debounce(applyFilters, 250));
-  }
-
-  const status = $("#filter-status");
-  if(status){
-    status.addEventListener("change", applyFilters);
-  }
-
-  const priority = $("#filter-priority");
-  if(priority){
-    priority.addEventListener("change", applyFilters);
-  }
-
 }
 
 /* =========================
@@ -118,13 +103,12 @@ async function loadIncidencias(){
   try{
 
     const res = await Onion.fetch(Onion.config.API + "/tickets");
-
     const items = normalize(res);
 
     currentItems = items;
     filteredItems = items;
 
-    if(!items || items.length === 0){
+    if(!items.length){
       setEmpty();
       if(panel) panel.classList.add("ready");
       return;
@@ -154,78 +138,10 @@ function normalize(res){
   if(!res) return [];
 
   if(Array.isArray(res)) return res;
-
-  if(res.tickets && Array.isArray(res.tickets)) return res.tickets;
-
-  if(res.data && Array.isArray(res.data)) return res.data;
-
-  if(res.items && Array.isArray(res.items)) return res.items;
+  if(res.tickets) return res.tickets;
+  if(res.data) return res.data;
 
   return [];
-
-}
-
-/* =========================
-   FILTERS
-========================= */
-
-function applyFilters(){
-
-  const searchVal = ($("#search-incidencia")?.value || "").toLowerCase();
-  const statusVal = ($("#filter-status")?.value || "").toLowerCase();
-  const priorityVal = ($("#filter-priority")?.value || "").toLowerCase();
-
-  filteredItems = currentItems.filter(function(i){
-
-    const title = (i.message || i.subject || "").toLowerCase();
-    const id = String(i.id || "").toLowerCase();
-
-    const s = mapStatus(i.status);
-    const p = mapPriority(i.priority);
-
-    if(searchVal && !(title.includes(searchVal) || id.includes(searchVal))){
-      return false;
-    }
-
-    if(statusVal && s !== statusVal){
-      return false;
-    }
-
-    if(priorityVal && p !== priorityVal){
-      return false;
-    }
-
-    return true;
-
-  });
-
-  render(filteredItems);
-
-}
-
-/* =========================
-   STATES
-========================= */
-
-function setLoading(){
-  const el = $("#incidencias-body");
-  if(el){
-    el.innerHTML = `<tr><td colspan="8">Cargando incidencias...</td></tr>`;
-  }
-}
-
-function setEmpty(){
-  const el = $("#incidencias-body");
-  if(el){
-    el.innerHTML = `<tr><td colspan="8">No hay incidencias</td></tr>`;
-  }
-}
-
-function setError(){
-  const el = $("#incidencias-body");
-  if(el){
-    el.innerHTML = `<tr><td colspan="8">Error cargando incidencias</td></tr>`;
-  }
 }
 
 /* =========================
@@ -246,7 +162,9 @@ function render(items){
     html += `
       <tr data-id="${d.id}" style="cursor:pointer">
         <td>${d.id}</td>
+
         <td>${escapeHTML(d.title)}</td>
+
         <td>
           <div class="cell-user">
             <div class="table-avatar">
@@ -257,41 +175,56 @@ function render(items){
             </div>
           </div>
         </td>
+
         <td>${escapeHTML(d.tecnico)}</td>
+
         <td><span class="badge ${d.estado.class}">${d.estado.label}</span></td>
+
         <td><span class="badge ${d.prioridad.class}">${d.prioridad.label}</span></td>
+
         <td>${d.fecha}</td>
         <td>${d.fechaCierre}</td>
+
       </tr>
     `;
   }
 
   tbody.innerHTML = html;
-
 }
 
 /* =========================
-   MAP
+   MAP (🔥 CLAVE)
 ========================= */
 
 function mapItem(i){
 
-  const user = Onion.state.user;
+  const currentUser = Onion.state.user;
+
+  const isMine = i.userId === currentUser?.id;
+
+  // 🔥 usuario correcto
+  const usuario = i.name || i.receptor?.name || "Usuario";
+
+  // 🔥 email para avatar
+  const email = i.email || i.receptor?.email || "";
 
   return {
-    id: i.id || i.ticketId || "--",
+    id: i.id || "--",
     title: i.message || i.subject || "Sin título",
-    usuario: (user && user.name) ? user.name : (i.name || "-"),
-    tecnico: i.tecnico && i.tecnico.name ? i.tecnico.name : "-",
-    avatar: user && user.avatar ? user.avatar : null,
+    usuario: usuario,
+    tecnico: i.tecnico?.name || "-",
+
+    avatar: isMine
+      ? currentUser?.avatar
+      : getGravatar(email),
+
     estado: getEstado(i),
     prioridad: getPrioridad(i),
     fecha: formatFecha(i.createdAt),
     fechaCierre: i.status === "closed"
-      ? formatFecha(i._ts ? i._ts * 1000 : i.closedAt)
+      ? formatFecha(i.closedAt)
       : "-"
   };
-
 }
 
 /* =========================
@@ -306,6 +239,19 @@ function renderAvatar(d){
   }
 
   return getInitials(d.usuario);
+}
+
+/* =========================
+   GRAVATAR (🔥 PRO)
+========================= */
+
+function getGravatar(email){
+
+  if(!email) return null;
+
+  const hash = md5(email.trim().toLowerCase());
+
+  return `https://www.gravatar.com/avatar/${hash}?d=identicon`;
 }
 
 /* =========================
@@ -354,18 +300,16 @@ function escapeHTML(str){
 
 function getInitials(name){
   if(!name) return "?";
-  return name.split(" ").map(function(n){ return n[0]; }).join("").slice(0,2).toUpperCase();
+  return name.split(" ").map(n => n[0]).join("").slice(0,2).toUpperCase();
 }
 
-function debounce(fn, delay){
-  let t;
-  return function(){
-    clearTimeout(t);
-    const args = arguments;
-    t = setTimeout(function(){
-      fn.apply(null, args);
-    }, delay);
-  };
+/* =========================
+   MD5 (mini para gravatar)
+========================= */
+
+// versión simple
+function md5(str){
+  return CryptoJS.MD5(str).toString();
 }
 
 })();

@@ -9,7 +9,6 @@
       ========================= -->
       <div class="filters-row">
 
-        <!-- TÍTULO -->
         <div class="page-header">
           <div>
             <div class="page-title">Detalle incidencia</div>
@@ -17,7 +16,6 @@
           </div>
         </div>
 
-        <!-- BOTÓN DERECHA -->
         <div style="margin-left:auto;">
           <button id="btn-back">
             ← Volver
@@ -39,13 +37,11 @@
             <div class="detalle-label">Usuario</div>
 
             <div class="detalle-user">
-
               <div id="detalle-avatar" class="table-avatar"></div>
 
               <div class="user-info">
                 <div class="detalle-value" id="detalle-usuario">--</div>
               </div>
-
             </div>
           </div>
 
@@ -67,12 +63,17 @@
             <div class="detalle-value" id="detalle-titulo">--</div>
           </div>
 
-          <!-- MENSAJE -->
+          <!-- =========================
+               MENSAJE EDITABLE 🔥
+          ========================= -->
           <div class="detalle-item" style="grid-column: span 2;">
             <div class="detalle-label">Mensaje</div>
-            <div class="detalle-message" id="detalle-mensaje">
-              --
-            </div>
+
+            <textarea
+              id="edit-message"
+              class="detalle-textarea"
+              placeholder="Escribe o edita el mensaje..."
+            ></textarea>
           </div>
 
           <!-- ESTADO -->
@@ -105,12 +106,37 @@
 
 
         <!-- =========================
+             COMENTARIOS 🔥
+        ========================= -->
+        <div class="detalle-comments">
+
+          <div class="detalle-label">Actividad</div>
+
+          <div id="comments-list" class="comments-list">
+            <!-- render dinámico -->
+          </div>
+
+          <div class="comment-box">
+            <textarea 
+              id="new-comment"
+              placeholder="Añadir comentario..."
+            ></textarea>
+
+            <button id="btn-comment">
+              Enviar
+            </button>
+          </div>
+
+        </div>
+
+
+        <!-- =========================
              FOOTER
         ========================= -->
         <div class="detalle-footer">
 
           <div class="detalle-hint">
-            Modifica estado o prioridad y guarda cambios
+            Modifica datos o añade comentarios
           </div>
 
           <button id="btn-save">

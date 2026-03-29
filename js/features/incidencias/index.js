@@ -35,9 +35,8 @@ function init(){
   const root = getRoot();
   if(!root || initialized) return;
 
-  if(!Onion.state || !Onion.state.user){
-    setTimeout(init, 100);
-    return;
+  if(!Onion.state?.user){
+    return setTimeout(init, 100);
   }
 
   initialized = true;
@@ -45,7 +44,7 @@ function init(){
   bindEvents();
   loadIncidencias();
 
-  Onion.onCleanup(function(){
+  Onion.onCleanup(()=>{
     initialized = false;
   });
 
@@ -62,7 +61,7 @@ function bindEvents(){
   const root = getRoot();
   if(!root) return;
 
-  Onion.cleanupEvent(root, "click", function(e){
+  Onion.cleanupEvent(root, "click", (e)=>{
 
     if(e.target.closest("button")) return;
 
@@ -76,12 +75,13 @@ function bindEvents(){
 
   });
 
-  const btnNew = $("#btn-new-incidencia");
-  if(btnNew){
-    btnNew.onclick = function(){
-      Onion.router.navigate("/incidencias/nueva");
-    };
-  }
+  $("#btn-new-incidencia")?.addEventListener("click", ()=>{
+    Onion.router.navigate("/incidencias/nueva");
+  });
+
+  $("#search-incidencia")?.addEventListener("input", debounce(applyFilters, 250));
+  $("#filter-status")?.addEventListener("change", applyFilters);
+  $("#filter-priority")?.addEventListener("change", applyFilters);
 
 }
 
@@ -96,8 +96,7 @@ async function loadIncidencias(){
 
   if(!tbody) return;
 
-  if(panel) panel.classList.remove("ready");
-
+  panel?.classList.remove("ready");
   setLoading();
 
   try{
@@ -110,20 +109,18 @@ async function loadIncidencias(){
 
     if(!items.length){
       setEmpty();
-      if(panel) panel.classList.add("ready");
+      panel?.classList.add("ready");
       return;
     }
 
     render(items);
-
-    if(panel) panel.classList.add("ready");
+    panel?.classList.add("ready");
 
   }catch(e){
 
     console.error("💥 ERROR INCIDENCIAS:", e);
     setError();
-
-    if(panel) panel.classList.add("ready");
+    panel?.classList.add("ready");
 
   }
 
@@ -138,10 +135,67 @@ function normalize(res){
   if(!res) return [];
 
   if(Array.isArray(res)) return res;
-  if(res.tickets) return res.tickets;
-  if(res.data) return res.data;
+  if(Array.isArray(res.tickets)) return res.tickets;
+  if(Array.isArray(res.data)) return res.data;
+  if(Array.isArray(res.items)) return res.items;
 
   return [];
+
+}
+
+/* =========================
+   FILTERS
+========================= */
+
+function applyFilters(){
+
+  const search = ($("#search-incidencia")?.value || "").toLowerCase();
+  const status = ($("#filter-status")?.value || "").toLowerCase();
+  const priority = ($("#filter-priority")?.value || "").toLowerCase();
+
+  filteredItems = currentItems.filter(i => {
+
+    const title = (i.message || i.subject || "").toLowerCase();
+    const id = String(i.id || "").toLowerCase();
+
+    const s = mapStatus(i.status);
+    const p = mapPriority(i.priority);
+
+    return (
+      (!search || title.includes(search) || id.includes(search)) &&
+      (!status || s === status) &&
+      (!priority || p === priority)
+    );
+
+  });
+
+  render(filteredItems);
+
+}
+
+/* =========================
+   STATES
+========================= */
+
+function setLoading(){
+  const el = $("#incidencias-body");
+  if(el){
+    el.innerHTML = `<tr><td colspan="8">Cargando incidencias...</td></tr>`;
+  }
+}
+
+function setEmpty(){
+  const el = $("#incidencias-body");
+  if(el){
+    el.innerHTML = `<tr><td colspan="8">No hay incidencias</td></tr>`;
+  }
+}
+
+function setError(){
+  const el = $("#incidencias-body");
+  if(el){
+    el.innerHTML = `<tr><td colspan="8">Error cargando incidencias</td></tr>`;
+  }
 }
 
 /* =========================
@@ -153,14 +207,13 @@ function render(items){
   const tbody = $("#incidencias-body");
   if(!tbody) return;
 
-  let html = "";
+  const html = items.map(i => {
 
-  for(let i=0;i<items.length;i++){
+    const d = mapItem(i);
 
-    const d = mapItem(items[i]);
-
-    html += `
+    return `
       <tr data-id="${d.id}" style="cursor:pointer">
+
         <td>${d.id}</td>
 
         <td>${escapeHTML(d.title)}</td>
@@ -187,71 +240,47 @@ function render(items){
 
       </tr>
     `;
-  }
+
+  }).join("");
 
   tbody.innerHTML = html;
+
 }
 
 /* =========================
-   MAP (🔥 CLAVE)
+   MAP
 ========================= */
 
 function mapItem(i){
 
-  const currentUser = Onion.state.user;
-
-  const isMine = i.userId === currentUser?.id;
-
-  // 🔥 usuario correcto
-  const usuario = i.name || i.receptor?.name || "Usuario";
-
-  // 🔥 email para avatar
-  const email = i.email || i.receptor?.email || "";
-
   return {
-    id: i.id || "--",
+    id: i.id || i.ticketId || "--",
     title: i.message || i.subject || "Sin título",
-    usuario: usuario,
+
+    // 🔥 USUARIO REAL DEL TICKET
+    usuario: i.name || i.receptor?.name || "Usuario",
+
     tecnico: i.tecnico?.name || "-",
 
-    avatar: isMine
-      ? currentUser?.avatar
-      : getGravatar(email),
+    // 🔥 AVATAR SIMPLE SIN DEPENDENCIAS
+    avatar: null,
 
     estado: getEstado(i),
     prioridad: getPrioridad(i),
     fecha: formatFecha(i.createdAt),
     fechaCierre: i.status === "closed"
-      ? formatFecha(i.closedAt)
+      ? formatFecha(i.closedAt || (i._ts ? i._ts * 1000 : null))
       : "-"
   };
+
 }
 
 /* =========================
-   AVATAR
+   AVATAR (LIMPIO)
 ========================= */
 
 function renderAvatar(d){
-
-  if(d.avatar){
-    return `<img src="${d.avatar}" alt=""
-      onerror="this.remove(); this.parentNode.innerHTML='${getInitials(d.usuario)}';">`;
-  }
-
   return getInitials(d.usuario);
-}
-
-/* =========================
-   GRAVATAR (🔥 PRO)
-========================= */
-
-function getGravatar(email){
-
-  if(!email) return null;
-
-  const hash = md5(email.trim().toLowerCase());
-
-  return `https://www.gravatar.com/avatar/${hash}?d=identicon`;
 }
 
 /* =========================
@@ -303,13 +332,12 @@ function getInitials(name){
   return name.split(" ").map(n => n[0]).join("").slice(0,2).toUpperCase();
 }
 
-/* =========================
-   MD5 (mini para gravatar)
-========================= */
-
-// versión simple
-function md5(str){
-  return CryptoJS.MD5(str).toString();
+function debounce(fn, delay){
+  let t;
+  return function(...args){
+    clearTimeout(t);
+    t = setTimeout(()=> fn.apply(this, args), delay);
+  };
 }
 
 })();

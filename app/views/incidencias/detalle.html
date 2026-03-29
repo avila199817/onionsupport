@@ -63,9 +63,7 @@
             <div class="detalle-value" id="detalle-titulo">--</div>
           </div>
 
-          <!-- =========================
-               MENSAJE EDITABLE 🔥
-          ========================= -->
+          <!-- MENSAJE -->
           <div class="detalle-item" style="grid-column: span 2;">
             <div class="detalle-label">Mensaje</div>
 
@@ -79,7 +77,7 @@
           </div>
 
           <!-- =========================
-               ADJUNTOS 🔥
+               ADJUNTOS
           ========================= -->
           <div class="detalle-item" style="grid-column: span 2;">
 
@@ -104,11 +102,32 @@
 
           </div>
 
-          <!-- ESTADO -->
+          <!-- =========================
+               BLOBS DESCARGABLES 🔥
+          ========================= -->
+          <div class="detalle-item" style="grid-column: span 2;">
+
+            <div class="detalle-label">Archivos almacenados</div>
+
+            <div id="detalle-blobs" class="detalle-blobs">
+
+              <!-- Ejemplo dinámico -->
+              <!--
+              <div class="blob-item">
+                <span class="blob-name">archivo.pdf</span>
+                <button class="blob-download">Descargar</button>
+              </div>
+              -->
+
+            </div>
+
+          </div>
+
+          <!-- =========================
+               ESTADO
+          ========================= -->
           <div class="detalle-item">
             <div class="detalle-label">Estado</div>
-
-            <div class="detalle-value detalle-badges" id="detalle-estado"></div>
 
             <select id="edit-estado" class="detalle-select">
               <option value="open">Abierta</option>
@@ -117,11 +136,11 @@
             </select>
           </div>
 
-          <!-- PRIORIDAD -->
+          <!-- =========================
+               PRIORIDAD
+          ========================= -->
           <div class="detalle-item">
             <div class="detalle-label">Prioridad</div>
-
-            <div class="detalle-value detalle-badges" id="detalle-prioridad"></div>
 
             <select id="edit-prioridad" class="detalle-select">
               <option value="low">Baja</option>

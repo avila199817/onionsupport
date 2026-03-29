@@ -26,20 +26,6 @@ function $(selector){
 }
 
 /* =========================
-   SPA NAV
-========================= */
-
-function showView(viewClass){
-
-  document.querySelectorAll(".panel-content")
-    .forEach(v => v.style.display = "none");
-
-  const view = document.querySelector(`.panel-content.${viewClass}`);
-  if(view) view.style.display = "flex";
-
-}
-
-/* =========================
    INIT
 ========================= */
 
@@ -88,74 +74,79 @@ function bindEvents(){
 
   });
 
-  $("#btn-new-incidencia")?.onclick = crearIncidencia;
+  $("#btn-new-incidencia")?.onclick = ()=>{
+    Onion.router.navigate("/incidencias/nueva");
+  };
 
   $("#search-incidencia")?.addEventListener("input", debounce(applyFilters, 250));
   $("#filter-status")?.addEventListener("change", applyFilters);
   $("#filter-priority")?.addEventListener("change", applyFilters);
 
-  document.addEventListener("click", globalEvents);
-
 }
 
 /* =========================
-   GLOBAL EVENTS
+   LOAD
 ========================= */
 
-function globalEvents(e){
+async function loadIncidencias(){
 
-  if(e.target.id === "btn-back"){
-    showView("incidencias");
-  }
+  const panel = getRoot();
+  const tbody = $("#incidencias-body");
 
-  if(e.target.id === "btn-save-incidencia"){
-    saveIncidencia();
-  }
+  if(!tbody) return;
 
-}
-
-/* =========================
-   NUEVA INCIDENCIA
-========================= */
-
-function crearIncidencia(){
-  Onion.router.navigate("/incidencias/nueva");
-}
-
-/* =========================
-   SAVE
-========================= */
-
-async function saveIncidencia(){
-
-  const data = {
-    message: document.getElementById("inc-message")?.value || "",
-    subject: document.getElementById("inc-title")?.value || "",
-    name: Onion.state?.user?.name || "",
-    priority: document.getElementById("inc-priority")?.value || "low"
-  };
-
-  if(!data.message.trim()){
-    alert("⚠️ El mensaje es obligatorio");
-    return;
-  }
+  panel?.classList.remove("ready");
+  setLoading();
 
   try{
 
-    await Onion.fetch(Onion.config.API + "/tickets", {
-      method: "POST",
-      body: JSON.stringify(data)
-    });
+    const res = await Onion.fetch(Onion.config.API + "/tickets");
 
-    showView("incidencias");
-    loadIncidencias();
+    const items = normalize(res);
 
-  }catch(err){
+    // 🔥 DEBUG silencioso (puedes quitarlo luego)
+    console.log("INCIDENCIAS RAW:", res);
+    console.log("INCIDENCIAS NORMALIZED:", items);
 
-    console.error("💥 Error creando incidencia:", err);
-    alert("❌ Error creando incidencia");
+    currentItems = items;
+    filteredItems = items;
+
+    if(!items.length){
+      setEmpty();
+      panel?.classList.add("ready");
+      return;
+    }
+
+    render(items);
+    panel?.classList.add("ready");
+
+  }catch(e){
+
+    console.error("💥 ERROR INCIDENCIAS:", e);
+    setError();
+    panel?.classList.add("ready");
 
   }
+
+}
+
+/* =========================
+   NORMALIZE (CLAVE)
+========================= */
+
+function normalize(res){
+
+  if(!res) return [];
+
+  if(Array.isArray(res)) return res;
+
+  if(Array.isArray(res.tickets)) return res.tickets;
+
+  if(Array.isArray(res.data)) return res.data;
+
+  if(Array.isArray(res.items)) return res.items;
+
+  return [];
 
 }
 
@@ -187,60 +178,6 @@ function applyFilters(){
 
   render(filteredItems);
 
-}
-
-/* =========================
-   LOAD
-========================= */
-
-async function loadIncidencias(){
-
-  const panel = getRoot();
-  const tbody = $("#incidencias-body");
-
-  panel?.classList.remove("ready");
-
-  if(!tbody) return;
-
-  setLoading();
-
-  try{
-
-    const res = await Onion.fetch(Onion.config.API + "/tickets");
-    const items = normalize(res);
-
-    currentItems = items;
-    filteredItems = items;
-
-    if(!items.length){
-      setEmpty();
-      panel?.classList.add("ready");
-      return;
-    }
-
-    render(items);
-    panel?.classList.add("ready");
-
-  }catch(e){
-
-    console.error("💥 ERROR INCIDENCIAS:", e);
-    setError();
-    panel?.classList.add("ready");
-
-  }
-
-}
-
-/* =========================
-   NORMALIZE
-========================= */
-
-function normalize(res){
-  if(!res) return [];
-  if(Array.isArray(res)) return res;
-  if(res.tickets) return res.tickets;
-  if(res.data) return res.data;
-  return [];
 }
 
 /* =========================
@@ -324,10 +261,7 @@ function mapItem(i){
     title: i.message || i.subject || "Sin título",
     usuario: user?.name || i.name || "-",
     tecnico: i.tecnico?.name || "-",
-
-    // 🔥 AVATAR REAL FUNCIONANDO
     avatar: user?.avatar || null,
-
     estado: getEstado(i),
     prioridad: getPrioridad(i),
     fecha: formatFecha(i.createdAt),
@@ -338,21 +272,16 @@ function mapItem(i){
 }
 
 /* =========================
-   AVATAR 🔥
+   AVATAR
 ========================= */
 
 function renderAvatar(d){
 
   if(d.avatar){
-    return `
-      <img 
-        src="${d.avatar}" 
-        alt="${escapeHTML(d.usuario)}"
-        loading="lazy"
-        referrerpolicy="no-referrer"
-        onerror="this.remove(); this.parentNode.innerHTML='${getInitials(d.usuario)}';"
-      >
-    `;
+    return `<img src="${d.avatar}" alt="${escapeHTML(d.usuario)}"
+      loading="lazy"
+      referrerpolicy="no-referrer"
+      onerror="this.remove(); this.parentNode.innerHTML='${getInitials(d.usuario)}';">`;
   }
 
   return getInitials(d.usuario);
@@ -404,12 +333,7 @@ function escapeHTML(str){
 
 function getInitials(name){
   if(!name) return "?";
-  return name
-    .split(" ")
-    .map(n => n[0])
-    .join("")
-    .slice(0,2)
-    .toUpperCase();
+  return name.split(" ").map(n => n[0]).join("").slice(0,2).toUpperCase();
 }
 
 function debounce(fn, delay){

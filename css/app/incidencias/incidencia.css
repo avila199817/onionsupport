@@ -79,7 +79,7 @@
   font-size:13px;
   font-weight:600;
   color:var(--dim);
-  margin-bottom:12px;
+  margin-bottom:16px;
   flex-shrink:0;
 }
 
@@ -87,6 +87,7 @@
   flex:1;
   min-height:0;
   overflow:auto;
+  margin-top:4px;
 
   display:flex;
   flex-direction:column;

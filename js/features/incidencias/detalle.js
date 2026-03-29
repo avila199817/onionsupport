@@ -200,7 +200,7 @@ async function loadDetalle(){
 
 
 /* =========================
-   UPDATE
+   UPDATE (FIX REAL - SIN REFETCH)
 ========================= */
 
 async function updateTicket(){
@@ -231,14 +231,32 @@ async function updateTicket(){
       }
     }
 
-    await Onion.fetch(Onion.config.API + "/tickets/" + id, {
+    /* =========================
+       🔥 PATCH + USAR RESPUESTA
+    ========================= */
+
+    const res = await Onion.fetch(Onion.config.API + "/tickets/" + id, {
       method: "PATCH",
       body: formData
     });
 
-    toast("Cambios guardados", "success");
+    console.log("📦 PATCH RESPONSE:", res);
 
-    await loadDetalle();
+    const data = res?.ticket || res?.data || res;
+
+    if(data){
+
+      currentItem = data;
+
+      // 🔥 render directo SIN volver a pedir datos
+      render(data);
+
+    }else{
+      console.warn("⚠️ PATCH sin data, fallback a reload");
+      await loadDetalle();
+    }
+
+    toast("Cambios guardados", "success");
 
   }catch(err){
 

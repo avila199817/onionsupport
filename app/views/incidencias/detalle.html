@@ -1,128 +1,352 @@
-<div class="panel-content incidencia-detalle">
+"use strict";
 
-  <div class="container">
+(function(){
 
-    <div class="panel-block">
+const Onion = window.Onion;
 
-      <!-- =========================
-           HEADER
-      ========================= -->
-      <div class="filters-row">
+if(!Onion){
+  console.error("💥 Onion no disponible (detalle.js)");
+  return;
+}
 
-        <button id="btn-back">
-          ← Volver
-        </button>
+let initialized = false;
+let currentItem = null;
 
-        <div class="page-header" style="margin-left:10px;">
-          <div>
-            <div class="page-title">Detalle incidencia</div>
-            <div class="page-subtitle">Información completa del ticket</div>
-          </div>
-        </div>
+/* =========================
+   INIT
+========================= */
 
-      </div>
+function init(){
 
+  const root = getRoot();
+  if(!root || initialized) return;
 
-      <!-- =========================
-           CONTENIDO
-      ========================= -->
-      <div id="detalle-content">
+  if(!Onion.state?.user){
+    return setTimeout(init, 100);
+  }
 
-        <div class="form-grid">
+  initialized = true;
 
-          <!-- USUARIO + AVATAR -->
-          <div class="detalle-item" style="grid-column: span 2;">
-            <div class="detalle-label">Usuario</div>
+  bindEvents();
+  loadDetalle();
 
-            <div class="detalle-user">
+  Onion.onCleanup(()=>{
+    initialized = false;
+  });
 
-              <div id="detalle-avatar" class="table-avatar"></div>
+}
 
-              <div class="user-info">
-                <div class="detalle-value" id="detalle-usuario">--</div>
-              </div>
-
-            </div>
-          </div>
-
-          <!-- ID -->
-          <div class="detalle-item">
-            <div class="detalle-label">ID</div>
-            <div class="detalle-value" id="detalle-id">--</div>
-          </div>
-
-          <!-- FECHA -->
-          <div class="detalle-item">
-            <div class="detalle-label">Fecha</div>
-            <div class="detalle-value" id="detalle-fecha">--</div>
-          </div>
-
-          <!-- TÍTULO -->
-          <div class="detalle-item" style="grid-column: span 2;">
-            <div class="detalle-label">Título</div>
-            <div class="detalle-value" id="detalle-titulo">--</div>
-          </div>
-
-          <!-- MENSAJE -->
-          <div class="detalle-item" style="grid-column: span 2;">
-            <div class="detalle-label">Mensaje</div>
-            <div class="detalle-message" id="detalle-mensaje">
-              --
-            </div>
-          </div>
-
-          <!-- =========================
-               ESTADO (VISUAL + EDIT)
-          ========================= -->
-          <div class="detalle-item">
-            <div class="detalle-label">Estado</div>
-
-            <div class="detalle-value detalle-badges" id="detalle-estado"></div>
-
-            <select id="edit-estado" class="detalle-select">
-              <option value="open">Abierta</option>
-              <option value="in_progress">En progreso</option>
-              <option value="closed">Cerrada</option>
-            </select>
-          </div>
-
-          <!-- =========================
-               PRIORIDAD (VISUAL + EDIT)
-          ========================= -->
-          <div class="detalle-item">
-            <div class="detalle-label">Prioridad</div>
-
-            <div class="detalle-value detalle-badges" id="detalle-prioridad"></div>
-
-            <select id="edit-prioridad" class="detalle-select">
-              <option value="low">Baja</option>
-              <option value="medium">Media</option>
-              <option value="high">Alta</option>
-            </select>
-          </div>
-
-        </div>
+init();
 
 
-        <!-- =========================
-             FOOTER ACTIONS
-        ========================= -->
-        <div class="detalle-footer">
+/* =========================
+   ROOT
+========================= */
 
-          <div class="detalle-hint">
-            Modifica estado o prioridad y guarda cambios
-          </div>
+function getRoot(){
+  return document.querySelector(".panel-content.incidencia-detalle");
+}
 
-          <button id="btn-save">
-            Guardar cambios
-          </button>
+function $(selector){
+  return getRoot()?.querySelector(selector);
+}
 
-        </div>
 
-      </div>
+/* =========================
+   EVENTS
+========================= */
 
-    </div>
+function bindEvents(){
 
-  </div>
+  const root = getRoot();
+  if(!root) return;
 
-</div>
+  Onion.cleanupEvent(root, "click", (e)=>{
+
+    if(e.target.id === "btn-back"){
+      Onion.router.navigate("/incidencias");
+    }
+
+    if(e.target.id === "btn-save"){
+      updateTicket();
+    }
+
+  });
+
+}
+
+
+/* =========================
+   LOAD
+========================= */
+
+async function loadDetalle(){
+
+  const id = getId();
+
+  if(!id){
+    setError("ID no válido");
+    return;
+  }
+
+  setLoading();
+
+  try{
+
+    const res = await Onion.fetch(Onion.config.API + "/tickets/" + id);
+
+    const data = res?.ticket || res?.data || res?.incidencia || null;
+
+    if(!data){
+      setEmpty();
+      clearLoading();
+      return;
+    }
+
+    currentItem = data;
+    render(data);
+    clearLoading();
+
+  }catch(err){
+
+    console.error("💥 Error cargando incidencia:", err);
+    setError("Error cargando incidencia");
+    clearLoading();
+
+  }
+
+}
+
+
+/* =========================
+   UPDATE
+========================= */
+
+async function updateTicket(){
+
+  if(!currentItem?.id && !currentItem?.ticketId) return;
+
+  const id = currentItem.id || currentItem.ticketId;
+
+  const status = $("#edit-estado")?.value;
+  const priority = $("#edit-prioridad")?.value;
+
+  try{
+
+    setSaving(true);
+
+    await Onion.fetch(Onion.config.API + "/tickets/" + id, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status, priority })
+    });
+
+    toast("Incidencia actualizada", "success");
+    await loadDetalle();
+
+  }catch(err){
+
+    console.error("💥 Error actualizando:", err);
+    toast("Error actualizando incidencia", "error");
+
+  }finally{
+    setSaving(false);
+  }
+
+}
+
+
+/* =========================
+   GET ID
+========================= */
+
+function getId(){
+  const params = new URLSearchParams(window.location.search);
+  return params.get("id");
+}
+
+
+/* =========================
+   STATES (🔥 FIX REAL)
+========================= */
+
+function setLoading(){
+  const content = $("#detalle-content");
+  if(content){
+    content.style.opacity = "0.4";
+    content.style.pointerEvents = "none";
+  }
+}
+
+function clearLoading(){
+  const content = $("#detalle-content");
+  if(content){
+    content.style.opacity = "1";
+    content.style.pointerEvents = "auto";
+  }
+}
+
+function setEmpty(){
+  const content = $("#detalle-content");
+  if(content){
+    content.innerHTML = `<div class="user-sub">No se encontró la incidencia</div>`;
+  }
+}
+
+function setError(msg){
+  const content = $("#detalle-content");
+  if(content){
+    content.innerHTML = `<div class="badge error">❌ ${msg}</div>`;
+  }
+}
+
+function setSaving(active){
+  const btn = $("#btn-save");
+  if(!btn) return;
+
+  btn.disabled = active;
+  btn.textContent = active ? "Guardando..." : "Guardar cambios";
+}
+
+
+/* =========================
+   RENDER
+========================= */
+
+function render(i){
+
+  const usuario = i.cliente?.nombre || i.name || "Usuario";
+  const avatar = i.cliente?.avatar || null;
+
+  setText("#detalle-id", i.id || i.ticketId || "--");
+  setText("#detalle-usuario", usuario);
+  setText("#detalle-titulo", i.subject || "-");
+  setText("#detalle-mensaje", i.message || "-");
+  setText("#detalle-fecha", formatFecha(i.createdAt));
+
+  renderAvatar(usuario, avatar);
+
+  const estado = formatEstado(i.status);
+  const prioridad = formatPrioridad(i.priority);
+
+  setBadge("#detalle-estado", estado);
+  setBadge("#detalle-prioridad", prioridad);
+
+  if($("#edit-estado")) $("#edit-estado").value = i.status || "open";
+  if($("#edit-prioridad")) $("#edit-prioridad").value = i.priority || "low";
+
+}
+
+
+/* =========================
+   AVATAR
+========================= */
+
+function renderAvatar(nombre, avatar){
+
+  const el = $("#detalle-avatar");
+  if(!el) return;
+
+  if(avatar){
+    el.innerHTML = `<img src="${avatar}" alt="${escapeHTML(nombre)}" />`;
+  }else{
+    el.innerHTML = `<div class="avatar-fallback">${getInitials(nombre)}</div>`;
+  }
+
+}
+
+
+/* =========================
+   BADGES
+========================= */
+
+function setBadge(selector, data){
+
+  const el = $(selector);
+  if(!el) return;
+
+  el.innerHTML = `<span class="badge ${data.class}">${data.label}</span>`;
+}
+
+
+/* =========================
+   TEXT
+========================= */
+
+function setText(selector, value){
+  const el = $(selector);
+  if(el) el.textContent = value;
+}
+
+
+/* =========================
+   FORMAT
+========================= */
+
+function formatEstado(s){
+  s = (s || "").toLowerCase();
+  if(s === "closed") return { label:"Cerrada", class:"success" };
+  if(s === "in_progress") return { label:"En progreso", class:"warning" };
+  return { label:"Abierta", class:"info" };
+}
+
+function formatPrioridad(p){
+  p = (p || "").toLowerCase();
+  if(p === "high") return { label:"Alta", class:"error" };
+  if(p === "medium") return { label:"Media", class:"warning" };
+  return { label:"Baja", class:"neutral" };
+}
+
+function formatFecha(f){
+  if(!f) return "--";
+  return new Date(f).toLocaleDateString("es-ES");
+}
+
+
+/* =========================
+   TOAST
+========================= */
+
+function toast(msg, type="info"){
+
+  let container = document.getElementById("toast-container");
+
+  if(!container){
+    container = document.createElement("div");
+    container.id = "toast-container";
+    document.body.appendChild(container);
+  }
+
+  const el = document.createElement("div");
+  el.className = "toast toast-" + type;
+  el.textContent = msg;
+
+  container.appendChild(el);
+
+  setTimeout(()=> el.classList.add("show"), 10);
+
+  setTimeout(()=>{
+    el.classList.remove("show");
+    setTimeout(()=> el.remove(), 300);
+  }, 3000);
+
+}
+
+
+/* =========================
+   HELPERS
+========================= */
+
+function escapeHTML(str){
+  return String(str)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;");
+}
+
+function getInitials(name){
+  if(!name) return "?";
+  return name.split(" ").map(n => n[0]).join("").slice(0,2).toUpperCase();
+}
+
+})();

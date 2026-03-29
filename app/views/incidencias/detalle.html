@@ -73,8 +73,34 @@
               id="detalle-mensaje"
               class="detalle-value detalle-editable"
               contenteditable="false"
-              title="Click para editar"
+              data-placeholder="Click para editar mensaje"
             ></div>
+
+          </div>
+
+          <!-- =========================
+               ADJUNTOS 🔥
+          ========================= -->
+          <div class="detalle-item" style="grid-column: span 2;">
+
+            <div class="detalle-label">Adjuntos</div>
+
+            <div class="incidencia-files">
+
+              <button type="button" id="btn-attach-detalle">
+                + Añadir archivos
+              </button>
+
+              <input 
+                type="file"
+                id="detalle-files"
+                multiple
+                hidden
+              >
+
+              <div id="detalle-file-list"></div>
+
+            </div>
 
           </div>
 
@@ -113,7 +139,7 @@
         <div class="detalle-footer">
 
           <div class="detalle-hint">
-            Modifica datos
+            Modifica datos y adjuntos
           </div>
 
           <button id="btn-save">

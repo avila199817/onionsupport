@@ -1,178 +1,133 @@
 <div class="panel-content incidencia-detalle">
 
-  <div class="panel-block">
+  <div class="layout-split">
 
     <!-- =========================
-         HEADER
+         LEFT
     ========================= -->
-    <div class="filters-row">
+    <div class="detalle-left">
 
-      <div class="page-header">
-        <div>
-          <div class="page-title">Detalle incidencia</div>
-          <div class="page-subtitle">Información completa del ticket</div>
+      <!-- HEADER -->
+      <div class="filters-row">
+
+        <div class="page-header">
+          <div>
+            <div class="page-title">Detalle incidencia</div>
+            <div class="page-subtitle">Información completa del ticket</div>
+          </div>
         </div>
+
+        <button id="btn-back">
+          ← Volver
+        </button>
+
       </div>
 
-      <button id="btn-back">
-        ← Volver
-      </button>
 
-    </div>
+      <!-- BODY -->
+      <div class="detalle-body">
 
+        <div id="detalle-content" style="width:100%;">
 
-    <!-- =========================
-         LAYOUT SPLIT 🔥
-    ========================= -->
-    <div class="layout-split">
+          <div class="form-grid">
 
-      <!-- =========================================================
-           LEFT (CONTENIDO)
-      ========================================================= -->
-      <div class="detalle-left">
+            <!-- USUARIO -->
+            <div class="detalle-item" style="grid-column: span 2;">
+              <div class="detalle-label">Usuario</div>
 
-        <div class="detalle-body">
+              <div class="detalle-user">
+                <div id="detalle-avatar" class="table-avatar"></div>
 
-          <div id="detalle-content" style="width:100%;">
-
-            <div class="form-grid">
-
-              <!-- USUARIO -->
-              <div class="detalle-item" style="grid-column: span 2;">
-                <div class="detalle-label">Usuario</div>
-
-                <div class="detalle-user">
-                  <div id="detalle-avatar" class="table-avatar"></div>
-
-                  <div class="user-info">
-                    <div class="detalle-value" id="detalle-usuario">--</div>
-                  </div>
+                <div class="user-info">
+                  <div class="detalle-value" id="detalle-usuario">--</div>
                 </div>
               </div>
-
-              <!-- ID -->
-              <div class="detalle-item">
-                <div class="detalle-label">ID</div>
-                <div class="detalle-value" id="detalle-id">--</div>
-              </div>
-
-              <!-- FECHA -->
-              <div class="detalle-item">
-                <div class="detalle-label">Fecha</div>
-                <div class="detalle-value" id="detalle-fecha">--</div>
-              </div>
-
-              <!-- TÍTULO -->
-              <div class="detalle-item" style="grid-column: span 2;">
-                <div class="detalle-label">Título</div>
-                <div class="detalle-value" id="detalle-titulo">--</div>
-              </div>
-
-              <!-- MENSAJE -->
-              <div class="detalle-item" style="grid-column: span 2;">
-                <div class="detalle-label">Mensaje</div>
-
-                <div 
-                  id="detalle-mensaje"
-                  class="detalle-value detalle-editable"
-                  contenteditable="false"
-                  data-placeholder="Click para editar mensaje"
-                ></div>
-
-              </div>
-
-              <!-- ADJUNTOS -->
-              <div class="detalle-item" style="grid-column: span 2;">
-                <div class="detalle-label">Adjuntos</div>
-
-                <div class="incidencia-files">
-                  <button type="button" id="btn-attach-detalle">
-                    + Añadir archivos
-                  </button>
-
-                  <input 
-                    type="file"
-                    id="detalle-files"
-                    multiple
-                    hidden
-                  >
-
-                  <div id="detalle-file-list"></div>
-                </div>
-              </div>
-
-              <!-- ESTADO -->
-              <div class="detalle-item">
-                <div class="detalle-label">Estado</div>
-
-                <select id="edit-estado" class="detalle-select">
-                  <option value="open">Abierta</option>
-                  <option value="in_progress">En progreso</option>
-                  <option value="closed">Cerrada</option>
-                </select>
-              </div>
-
-              <!-- PRIORIDAD -->
-              <div class="detalle-item">
-                <div class="detalle-label">Prioridad</div>
-
-                <select id="edit-prioridad" class="detalle-select">
-                  <option value="low">Baja</option>
-                  <option value="medium">Media</option>
-                  <option value="high">Alta</option>
-                </select>
-              </div>
-
             </div>
 
+            <!-- ID -->
+            <div class="detalle-item">
+              <div class="detalle-label">ID</div>
+              <div class="detalle-value" id="detalle-id">--</div>
+            </div>
 
-            <!-- =========================
-                 FOOTER
-            ========================= -->
-            <div class="detalle-footer">
+            <!-- FECHA -->
+            <div class="detalle-item">
+              <div class="detalle-label">Fecha</div>
+              <div class="detalle-value" id="detalle-fecha">--</div>
+            </div>
 
-              <div class="detalle-hint">
-                Modifica datos y adjuntos
+            <!-- TÍTULO -->
+            <div class="detalle-item" style="grid-column: span 2;">
+              <div class="detalle-label">Título</div>
+              <div class="detalle-value" id="detalle-titulo">--</div>
+            </div>
+
+            <!-- MENSAJE -->
+            <div class="detalle-item" style="grid-column: span 2;">
+              <div class="detalle-label">Mensaje</div>
+
+              <div 
+                id="detalle-mensaje"
+                class="detalle-value detalle-editable"
+                contenteditable="false"
+              ></div>
+            </div>
+
+            <!-- ADJUNTOS -->
+            <div class="detalle-item" style="grid-column: span 2;">
+              <div class="detalle-label">Adjuntos</div>
+
+              <div class="incidencia-files">
+                <button type="button" id="btn-attach-detalle">
+                  + Añadir archivos
+                </button>
+
+                <input 
+                  type="file"
+                  id="detalle-files"
+                  multiple
+                  hidden
+                >
+
+                <div id="detalle-file-list"></div>
               </div>
+            </div>
 
-              <button id="btn-save">
-                Guardar cambios
-              </button>
+            <!-- ESTADO -->
+            <div class="detalle-item">
+              <div class="detalle-label">Estado</div>
 
+              <select id="edit-estado" class="detalle-select">
+                <option value="open">Abierta</option>
+                <option value="in_progress">En progreso</option>
+                <option value="closed">Cerrada</option>
+              </select>
+            </div>
+
+            <!-- PRIORIDAD -->
+            <div class="detalle-item">
+              <div class="detalle-label">Prioridad</div>
+
+              <select id="edit-prioridad" class="detalle-select">
+                <option value="low">Baja</option>
+                <option value="medium">Media</option>
+                <option value="high">Alta</option>
+              </select>
             </div>
 
           </div>
 
-        </div>
 
-      </div>
+          <!-- FOOTER -->
+          <div class="detalle-footer">
 
-
-      <!-- =========================================================
-           RIGHT (SIDEBAR 🔥)
-      ========================================================= -->
-      <div class="detalle-right">
-
-        <div class="detalle-sidebar">
-
-          <!-- BLOBS -->
-          <div class="sidebar-section">
-
-            <div class="sidebar-title">
-              Archivos
+            <div class="detalle-hint">
+              Modifica datos y adjuntos
             </div>
 
-            <div id="detalle-blobs" class="detalle-blobs">
-
-              <!-- render dinámico -->
-              <!--
-              <div class="blob-item">
-                <span class="blob-name">archivo.pdf</span>
-                <button class="blob-download">Descargar</button>
-              </div>
-              -->
-
-            </div>
+            <button id="btn-save">
+              Guardar cambios
+            </button>
 
           </div>
 
@@ -181,6 +136,24 @@
       </div>
 
     </div>
+
+
+    <!-- =========================
+         RIGHT
+    ========================= -->
+    <aside class="detalle-right">
+
+      <div class="detalle-sidebar">
+
+        <div class="sidebar-section">
+          <div class="sidebar-title">Archivos</div>
+
+          <div id="detalle-blobs" class="detalle-blobs"></div>
+        </div>
+
+      </div>
+
+    </aside>
 
   </div>
 

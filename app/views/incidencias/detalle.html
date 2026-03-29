@@ -30,37 +30,25 @@
 
         <div class="form-grid">
 
+          <!-- USUARIO + AVATAR -->
+          <div class="detalle-item" style="grid-column: span 2;">
+            <div class="detalle-label">Usuario</div>
+
+            <div class="detalle-user">
+
+              <div id="detalle-avatar" class="table-avatar"></div>
+
+              <div class="user-info">
+                <div class="detalle-value" id="detalle-usuario">--</div>
+              </div>
+
+            </div>
+          </div>
+
           <!-- ID -->
           <div class="detalle-item">
             <div class="detalle-label">ID</div>
             <div class="detalle-value" id="detalle-id">--</div>
-          </div>
-
-          <!-- USUARIO -->
-          <div class="detalle-item">
-            <div class="detalle-label">Usuario</div>
-            <div class="detalle-value" id="detalle-usuario">--</div>
-          </div>
-
-          <!-- TÍTULO -->
-          <div class="detalle-item">
-            <div class="detalle-label">Título</div>
-            <div class="detalle-value" id="detalle-titulo">--</div>
-          </div>
-
-          <!-- ESTADO + PRIORIDAD -->
-          <div class="detalle-item">
-            <div class="detalle-label">Estado</div>
-            <div class="detalle-value detalle-badges" id="detalle-estado">
-              <!-- badge aquí -->
-            </div>
-          </div>
-
-          <div class="detalle-item">
-            <div class="detalle-label">Prioridad</div>
-            <div class="detalle-value detalle-badges" id="detalle-prioridad">
-              <!-- badge aquí -->
-            </div>
           </div>
 
           <!-- FECHA -->
@@ -69,13 +57,65 @@
             <div class="detalle-value" id="detalle-fecha">--</div>
           </div>
 
+          <!-- TÍTULO -->
+          <div class="detalle-item" style="grid-column: span 2;">
+            <div class="detalle-label">Título</div>
+            <div class="detalle-value" id="detalle-titulo">--</div>
+          </div>
+
           <!-- MENSAJE -->
-          <div class="detalle-item">
+          <div class="detalle-item" style="grid-column: span 2;">
             <div class="detalle-label">Mensaje</div>
             <div class="detalle-message" id="detalle-mensaje">
               --
             </div>
           </div>
+
+          <!-- =========================
+               ESTADO (VISUAL + EDIT)
+          ========================= -->
+          <div class="detalle-item">
+            <div class="detalle-label">Estado</div>
+
+            <div class="detalle-value detalle-badges" id="detalle-estado"></div>
+
+            <select id="edit-estado" class="detalle-select">
+              <option value="open">Abierta</option>
+              <option value="in_progress">En progreso</option>
+              <option value="closed">Cerrada</option>
+            </select>
+          </div>
+
+          <!-- =========================
+               PRIORIDAD (VISUAL + EDIT)
+          ========================= -->
+          <div class="detalle-item">
+            <div class="detalle-label">Prioridad</div>
+
+            <div class="detalle-value detalle-badges" id="detalle-prioridad"></div>
+
+            <select id="edit-prioridad" class="detalle-select">
+              <option value="low">Baja</option>
+              <option value="medium">Media</option>
+              <option value="high">Alta</option>
+            </select>
+          </div>
+
+        </div>
+
+
+        <!-- =========================
+             FOOTER ACTIONS
+        ========================= -->
+        <div class="detalle-footer">
+
+          <div class="detalle-hint">
+            Modifica estado o prioridad y guarda cambios
+          </div>
+
+          <button id="btn-save">
+            Guardar cambios
+          </button>
 
         </div>
 

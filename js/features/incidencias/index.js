@@ -255,15 +255,15 @@ function mapItem(i){
 
   return {
     id: i.id || i.ticketId || "--",
-    title: i.message || i.subject || "Sin título",
+    title: i.subject || i.message || "Sin título",
 
-    // 🔥 USUARIO REAL DEL TICKET
-    usuario: i.name || i.receptor?.name || "Usuario",
+    // 🔥 USUARIO CORRECTO DESDE BACKEND
+    usuario: i.cliente?.nombre || "Usuario",
 
     tecnico: i.tecnico?.name || "-",
 
-    // 🔥 AVATAR SIMPLE SIN DEPENDENCIAS
-    avatar: null,
+    // 🔥 AVATAR REAL
+    avatar: i.cliente?.avatar || null,
 
     estado: getEstado(i),
     prioridad: getPrioridad(i),
@@ -276,11 +276,16 @@ function mapItem(i){
 }
 
 /* =========================
-   AVATAR (LIMPIO)
+   AVATAR
 ========================= */
 
 function renderAvatar(d){
-  return getInitials(d.usuario);
+
+  if(d.avatar){
+    return `<img src="${d.avatar}" alt="${escapeHTML(d.usuario)}" />`;
+  }
+
+  return `<div class="avatar-fallback">${getInitials(d.usuario)}</div>`;
 }
 
 /* =========================

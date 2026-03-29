@@ -85,6 +85,7 @@ function bindEvents(){
   });
 
   Onion.cleanupEvent(root, "change", (e)=>{
+
     if(e.target.id === "detalle-files"){
       renderFiles(e.target.files);
     }
@@ -92,11 +93,13 @@ function bindEvents(){
     if(e.target.id === "edit-estado" || e.target.id === "edit-prioridad"){
       applyVisualState();
     }
+
   });
 
   const msg = $("#detalle-mensaje");
 
   if(msg){
+
     msg.addEventListener("click", ()=>{
       msg.setAttribute("contenteditable","true");
       msg.focus();
@@ -112,6 +115,7 @@ function bindEvents(){
         msg.blur();
       }
     });
+
   }
 
 }
@@ -143,8 +147,10 @@ async function loadDetalle(){
     render(data);
 
   }catch(err){
+
     console.error(err);
     setError("Error cargando incidencia");
+
   }finally{
     clearLoading();
   }
@@ -194,8 +200,10 @@ async function updateTicket(){
     await loadDetalle();
 
   }catch(err){
+
     console.error(err);
     toast("Error guardando cambios", "error");
+
   }finally{
     setSaving(false);
   }
@@ -225,8 +233,11 @@ function render(i){
   if($("#edit-estado")) $("#edit-estado").value = i.status || "open";
   if($("#edit-prioridad")) $("#edit-prioridad").value = i.priority || "low";
 
-  /* 🔥 VISUAL STATES */
-  applyVisualState(i, usuario, avatar);
+  /* 🔥 SIEMPRE PINTA AVATAR */
+  renderAvatar(usuario, avatar);
+
+  /* 🔥 ESTILOS DINÁMICOS */
+  applyVisualState();
 
   renderBlobs(i.files || i.attachments || []);
 
@@ -234,35 +245,33 @@ function render(i){
 
 
 /* =========================
-   VISUAL STATE (🔥 CLAVE)
+   VISUAL STATE
 ========================= */
 
-function applyVisualState(i, usuario, avatar){
+function applyVisualState(){
 
   const estado = $("#edit-estado");
   const prioridad = $("#edit-prioridad");
+  const avatarEl = $("#detalle-avatar");
 
   if(!estado || !prioridad) return;
 
-  /* RESET */
   estado.classList.remove("estado-open","estado-progress","estado-closed");
   prioridad.classList.remove("prio-low","prio-medium","prio-high");
 
-  /* ESTADO */
   if(estado.value === "open") estado.classList.add("estado-open");
   if(estado.value === "in_progress") estado.classList.add("estado-progress");
   if(estado.value === "closed") estado.classList.add("estado-closed");
 
-  /* PRIORIDAD */
   if(prioridad.value === "low") prioridad.classList.add("prio-low");
   if(prioridad.value === "medium") prioridad.classList.add("prio-medium");
   if(prioridad.value === "high") prioridad.classList.add("prio-high");
 
-  /* 🔥 REGLA AVATAR */
+  /* 🔥 HIGHLIGHT AVATAR */
   if(estado.value === "open" && prioridad.value === "low"){
-    renderAvatar(usuario, avatar);
+    avatarEl?.classList.add("avatar-highlight");
   }else{
-    renderAvatar(usuario, null); // fallback
+    avatarEl?.classList.remove("avatar-highlight");
   }
 
 }
@@ -290,6 +299,53 @@ function renderBlobs(files){
       </button>
     </div>
   `).join("");
+}
+
+
+/* =========================
+   DOWNLOAD
+========================= */
+
+async function downloadBlob(url, name){
+
+  try{
+
+    const res = await fetch(url);
+    const blob = await res.blob();
+
+    const a = document.createElement("a");
+    const objectUrl = URL.createObjectURL(blob);
+
+    a.href = objectUrl;
+    a.download = name || "archivo";
+
+    document.body.appendChild(a);
+    a.click();
+
+    a.remove();
+    URL.revokeObjectURL(objectUrl);
+
+  }catch(err){
+    console.error(err);
+    toast("Error descargando archivo", "error");
+  }
+
+}
+
+
+/* =========================
+   FILES
+========================= */
+
+function renderFiles(files){
+
+  const list = $("#detalle-file-list");
+  if(!list) return;
+
+  list.innerHTML = [...files].map(f => `
+    <div class="file-item">${escapeHTML(f.name)}</div>
+  `).join("");
+
 }
 
 
@@ -342,7 +398,7 @@ function getId(){
 
 
 /* =========================
-   UI STATES
+   STATES
 ========================= */
 
 function setLoading(){

@@ -12,6 +12,7 @@ if(!Onion){
 let initialized = false;
 let currentItem = null;
 let observer = null;
+let sending = false;
 
 
 /* =========================
@@ -33,8 +34,6 @@ function init(){
   }
 
   initialized = true;
-
-  console.log("✅ INIT OK");
 
   bindEvents();
   loadDetalle();
@@ -59,7 +58,7 @@ function $(selector){
 
 
 /* =========================
-   AUTH (🔥 CLAVE)
+   AUTH
 ========================= */
 
 function getAuthHeaders(){
@@ -77,15 +76,10 @@ function observeDOM(){
   if(observer) return;
 
   observer = new MutationObserver(()=>{
-
-    const root = getRoot();
-
-    if(!root){
-      console.warn("💥 DOM eliminado → reinicializando");
+    if(!getRoot()){
       initialized = false;
       setTimeout(init, 100);
     }
-
   });
 
   observer.observe(document.body, {
@@ -114,6 +108,7 @@ function bindEvents(){
     }
 
     if(target.id === "btn-save"){
+      if(sending) return;
       await updateTicket();
     }
 
@@ -139,11 +134,34 @@ function bindEvents(){
 
   });
 
+  /* 🔥 MENSAJE EDITABLE */
+  const msg = $("#detalle-mensaje");
+
+  if(msg){
+
+    msg.addEventListener("click", ()=>{
+      msg.setAttribute("contenteditable","true");
+      msg.focus();
+    });
+
+    msg.addEventListener("blur", ()=>{
+      msg.setAttribute("contenteditable","false");
+    });
+
+    msg.addEventListener("keydown", (e)=>{
+      if(e.key === "Enter"){
+        e.preventDefault();
+        msg.blur();
+      }
+    });
+
+  }
+
 }
 
 
 /* =========================
-   LOAD (🔥 SIN CACHE + AUTH)
+   LOAD
 ========================= */
 
 async function loadDetalle(){
@@ -162,8 +180,6 @@ async function loadDetalle(){
 
     const json = await res.json();
     const data = json?.ticket || json;
-
-    console.log("📦 API:", data);
 
     if(!data){
       setEmpty();
@@ -186,12 +202,18 @@ async function loadDetalle(){
 
 
 /* =========================
-   UPDATE (🔥 FUNCIONA TODO)
+   UPDATE
 ========================= */
 
 async function updateTicket(){
 
-  if(!currentItem) return;
+  if(sending) return;
+  sending = true;
+
+  if(!currentItem){
+    sending = false;
+    return;
+  }
 
   const id = currentItem.id || currentItem.ticketId;
 
@@ -212,18 +234,11 @@ async function updateTicket(){
     if(priority) formData.append("priority", priority);
     if(message !== undefined) formData.append("message", message);
 
-    if(files && files.length > 0){
+    if(files && files.length){
       for(const f of files){
         formData.append("files", f);
       }
     }
-
-    console.log("📤 ENVIANDO:", {
-      status,
-      priority,
-      message,
-      files: files?.length
-    });
 
     const res = await fetch(Onion.config.API + "/tickets/" + id, {
       method: "PATCH",
@@ -233,8 +248,6 @@ async function updateTicket(){
 
     const json = await res.json();
     const data = json?.ticket || json;
-
-    console.log("📦 PATCH:", data);
 
     if(data){
       currentItem = data;
@@ -246,15 +259,21 @@ async function updateTicket(){
       renderFiles([]);
     }
 
-    toast("Cambios guardados", "success");
+    showToast("Cambios guardados", "success");
 
   }catch(err){
 
     console.error(err);
-    toast("Error guardando cambios", "error");
+    showToast("Error guardando cambios", "error");
 
   }finally{
+
     setSaving(false);
+
+    setTimeout(()=>{
+      sending = false;
+    }, 300);
+
   }
 
 }
@@ -290,11 +309,10 @@ function render(i){
 
 
 /* =========================
-   SELECT FIX
+   SELECT
 ========================= */
 
 function setSelectValue(select, value){
-
   if(!select) return;
 
   const option = [...select.options].find(o => o.value === value);
@@ -307,7 +325,6 @@ function setSelectValue(select, value){
   }
 
   select.dispatchEvent(new Event("change", { bubbles: true }));
-
 }
 
 
@@ -401,7 +418,7 @@ async function downloadBlob(url, name){
 
   }catch(err){
     console.error(err);
-    toast("Error descargando archivo", "error");
+    showToast("Error descargando archivo", "error");
   }
 
 }
@@ -493,11 +510,22 @@ function setSaving(active){
 
 
 /* =========================
-   TOAST
+   TOAST (🔥 BIEN)
 ========================= */
 
-function toast(msg,type="info"){
-  alert(msg);
+function showToast(message, type="info"){
+
+  const el = document.createElement("div");
+  el.className = `toast show ${type}`;
+  el.innerText = message;
+
+  document.body.appendChild(el);
+
+  setTimeout(()=>{
+    el.classList.remove("show");
+    setTimeout(()=> el.remove(), 300);
+  }, 2000);
+
 }
 
 })();

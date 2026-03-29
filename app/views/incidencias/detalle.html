@@ -69,11 +69,15 @@
           <div class="detalle-item" style="grid-column: span 2;">
             <div class="detalle-label">Mensaje</div>
 
-            <textarea
-              id="edit-message"
-              class="detalle-textarea"
-              placeholder="Escribe o edita el mensaje..."
-            ></textarea>
+            <div 
+              id="detalle-mensaje"
+              class="detalle-value detalle-editable"
+              contenteditable="false"
+              title="Haz click para editar"
+            >
+              -- (Click para editar)
+            </div>
+
           </div>
 
           <!-- ESTADO -->

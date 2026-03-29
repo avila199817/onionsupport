@@ -26,21 +26,6 @@ function $(selector){
 }
 
 /* =========================
-   USERS CACHE 🔥
-========================= */
-
-function getUsersMap(){
-  const users = Onion.state?.users || [];
-  const map = {};
-
-  users.forEach(u => {
-    map[u.id] = u;
-  });
-
-  return map;
-}
-
-/* =========================
    SPA NAV
 ========================= */
 
@@ -103,7 +88,7 @@ function bindEvents(){
 
   });
 
-  $("#btn-new-incidencia")?.addEventListener("click", crearIncidencia);
+  $("#btn-new-incidencia")?.onclick = crearIncidencia;
 
   $("#search-incidencia")?.addEventListener("input", debounce(applyFilters, 250));
   $("#filter-status")?.addEventListener("change", applyFilters);
@@ -146,7 +131,7 @@ async function saveIncidencia(){
   const data = {
     message: document.getElementById("inc-message")?.value || "",
     subject: document.getElementById("inc-title")?.value || "",
-    name: document.getElementById("inc-cliente")?.value || "",
+    name: Onion.state?.user?.name || "",
     priority: document.getElementById("inc-priority")?.value || "low"
   };
 
@@ -187,7 +172,7 @@ function applyFilters(){
   filteredItems = currentItems.filter(i => {
 
     const title = (i.message || i.subject || "").toLowerCase();
-    const usuario = (i.name || "").toLowerCase();
+    const usuario = (Onion.state?.user?.name || "").toLowerCase();
 
     const itemStatus = mapStatus(i.status);
     const itemPriority = mapPriority(i.priority);
@@ -286,11 +271,9 @@ function render(items){
   const tbody = $("#incidencias-body");
   if(!tbody) return;
 
-  const usersMap = getUsersMap();
-
   const html = items.map(i => {
 
-    const d = mapItem(i, usersMap);
+    const d = mapItem(i);
 
     return `
       <tr data-id="${d.id}" style="cursor:pointer">
@@ -332,16 +315,19 @@ function render(items){
    MAP
 ========================= */
 
-function mapItem(i, usersMap){
+function mapItem(i){
 
-  const user = usersMap[i.userId] || {};
+  const user = Onion.state?.user;
 
   return {
     id: i.id || i.ticketId || "--",
     title: i.message || i.subject || "Sin título",
-    usuario: user.name || i.name || "-",
+    usuario: user?.name || i.name || "-",
     tecnico: i.tecnico?.name || "-",
-    avatar: user.hasAvatar ? user.avatar : null,
+
+    // 🔥 AVATAR REAL FUNCIONANDO
+    avatar: user?.avatar || null,
+
     estado: getEstado(i),
     prioridad: getPrioridad(i),
     fecha: formatFecha(i.createdAt),
@@ -362,11 +348,10 @@ function renderAvatar(d){
       <img 
         src="${d.avatar}" 
         alt="${escapeHTML(d.usuario)}"
-        onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
+        loading="lazy"
+        referrerpolicy="no-referrer"
+        onerror="this.remove(); this.parentNode.innerHTML='${getInitials(d.usuario)}';"
       >
-      <span style="display:none">
-        ${getInitials(d.usuario)}
-      </span>
     `;
   }
 

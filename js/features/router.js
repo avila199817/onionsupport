@@ -45,7 +45,7 @@
 
     "/facturas": {
       page: "/app/views/facturas/index.html",
-      style: "/css/app/generic.css",
+      style: "/css/app/facturas/facturas.css",
       script: "/js/features/facturas/index.js",
       title: "Facturas"
     },

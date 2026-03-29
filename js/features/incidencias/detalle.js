@@ -93,7 +93,10 @@ async function loadDetalle(){
 
   try{
 
-    const data = await Onion.fetch(Onion.config.API + "/tickets/" + id);
+    const res = await Onion.fetch(Onion.config.API + "/tickets/" + id);
+
+    // 🔥 NORMALIZACIÓN PRO
+    const data = res?.ticket || res?.data || res?.incidencia || null;
 
     if(!data){
       setEmpty();
@@ -114,12 +117,14 @@ async function loadDetalle(){
 
 
 /* =========================
-   UPDATE (🔥 PATCH)
+   UPDATE (PATCH)
 ========================= */
 
 async function updateTicket(){
 
-  if(!currentItem?.id) return;
+  if(!currentItem?.id && !currentItem?.ticketId) return;
+
+  const id = currentItem.id || currentItem.ticketId;
 
   const status = $("#edit-estado")?.value;
   const priority = $("#edit-prioridad")?.value;
@@ -128,7 +133,7 @@ async function updateTicket(){
 
     setSaving(true);
 
-    await Onion.fetch(Onion.config.API + "/tickets/" + currentItem.id, {
+    await Onion.fetch(Onion.config.API + "/tickets/" + id, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -137,12 +142,13 @@ async function updateTicket(){
       })
     });
 
+    // 🔥 Reload limpio
     await loadDetalle();
 
   }catch(err){
 
     console.error("💥 Error actualizando:", err);
-    alert("Error actualizando incidencia");
+    toast("Error actualizando incidencia", "error");
 
   }finally{
     setSaving(false);
@@ -201,28 +207,23 @@ function setSaving(active){
 
 function render(i){
 
-  // 🔥 DATOS BASE
-  const usuario = i.cliente?.nombre || "Usuario";
+  const usuario = i.cliente?.nombre || i.name || "Usuario";
   const avatar = i.cliente?.avatar || null;
 
-  // TEXTOS
-  setText("#detalle-id", i.id || "--");
+  setText("#detalle-id", i.id || i.ticketId || "--");
   setText("#detalle-usuario", usuario);
   setText("#detalle-titulo", i.subject || "-");
   setText("#detalle-mensaje", i.message || "-");
   setText("#detalle-fecha", formatFecha(i.createdAt));
 
-  // AVATAR
   renderAvatar(usuario, avatar);
 
-  // BADGES
   const estado = formatEstado(i.status);
   const prioridad = formatPrioridad(i.priority);
 
   setBadge("#detalle-estado", estado);
   setBadge("#detalle-prioridad", prioridad);
 
-  // SELECTS (edición)
   if($("#edit-estado")) $("#edit-estado").value = i.status || "open";
   if($("#edit-prioridad")) $("#edit-prioridad").value = i.priority || "low";
 
@@ -302,6 +303,36 @@ function formatPrioridad(p){
 function formatFecha(f){
   if(!f) return "--";
   return new Date(f).toLocaleDateString("es-ES");
+}
+
+
+/* =========================
+   TOAST (PRO)
+========================= */
+
+function toast(msg, type="info"){
+
+  let container = document.getElementById("toast-container");
+
+  if(!container){
+    container = document.createElement("div");
+    container.id = "toast-container";
+    document.body.appendChild(container);
+  }
+
+  const el = document.createElement("div");
+  el.className = "toast toast-" + type;
+  el.textContent = msg;
+
+  container.appendChild(el);
+
+  setTimeout(()=> el.classList.add("show"), 10);
+
+  setTimeout(()=>{
+    el.classList.remove("show");
+    setTimeout(()=> el.remove(), 300);
+  }, 3000);
+
 }
 
 

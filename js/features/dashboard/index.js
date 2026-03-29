@@ -13,6 +13,13 @@ let interval = null;
 let initialized = false;
 
 /* =========================
+   CONFIG
+========================= */
+
+// 🔥 ajusta esto si quieres sacarlo de config
+const HEALTH_KEY = Onion.config?.HEALTH_KEY || "";
+
+/* =========================
    ROOT
 ========================= */
 
@@ -50,6 +57,7 @@ function setText(id, value){
 ========================= */
 
 function setMonthLabel(){
+
   const el = $("facturacion-mes-label");
   if(!el) return;
 
@@ -61,6 +69,7 @@ function setMonthLabel(){
   ];
 
   el.textContent = meses[now.getMonth()] + " " + now.getFullYear();
+
 }
 
 /* =========================
@@ -108,7 +117,7 @@ async function loadDashboardData(){
 }
 
 /* =========================
-   SYSTEM
+   SYSTEM (🔥 NUEVO PRO)
 ========================= */
 
 async function loadSystem(){
@@ -117,50 +126,99 @@ async function loadSystem(){
 
     const base = new URL(Onion.config.API).origin;
 
-    const res = await Onion.fetch(base + "/health");
-    const data = res?.data || res;
+    const res = await fetch(base + "/health/internal", {
+      headers: {
+        "x-health-key": HEALTH_KEY
+      }
+    });
+
+    if(!res.ok){
+      throw new Error("Health unauthorized / failed");
+    }
+
+    const data = await res.json();
+
+    /* =========================
+       STATUS GENERAL
+    ========================= */
 
     setText("status-api", "API · " + (data?.api?.latency || "--") + " ms");
     setText("status-db", "DB · " + (data?.db?.status || "--"));
     setText("status-uptime", "Uptime · " + (data?.uptime || "--"));
 
+    /* =========================
+       CPU
+    ========================= */
+
     const cpu = $("cpu-usage");
     if(cpu && data?.system?.cpu){
 
-      const model =
-        data.system.cpu.model ||
-        (data.system.cpu.cores + " cores");
-
       cpu.textContent =
         "CPU: " + data.system.cpu.usage + "% · " +
-        model + " · load " +
+        data.system.cpu.cores + " cores · load " +
         data.system.cpu.load;
     }
 
+    /* =========================
+       RAM
+    ========================= */
+
     const ram = $("ram-usage");
     if(ram && data?.system?.ram){
+
       ram.textContent =
         "RAM: " + data.system.ram.usage + "% · " +
         data.system.ram.usedMB + "MB / " +
         data.system.ram.totalMB + "MB";
     }
 
+    /* =========================
+       DISK
+    ========================= */
+
     const disk = $("disk-usage");
     if(disk && data?.system?.disk){
+
       disk.textContent =
         "Disco: " + data.system.disk.percent + "% · " +
         data.system.disk.used + "GB / " +
         data.system.disk.total + "GB";
     }
 
+    /* =========================
+       EVENT LOOP
+    ========================= */
+
+    const loop = $("event-loop");
+    if(loop && data?.system?.eventLoop){
+      loop.textContent =
+        "Event Loop: " + data.system.eventLoop.lag + " ms";
+    }
+
+    /* =========================
+       NODE MEMORY (OPCIONAL)
+    ========================= */
+
+    const node = $("node-memory");
+    if(node && data?.system?.node){
+      node.textContent =
+        "Node: heap " + data.system.node.heapUsedMB + "MB / " +
+        data.system.node.heapTotalMB + "MB";
+    }
+
   }catch(e){
+
     console.error("💥 HEALTH FAIL:", e);
+
+    setText("status-api", "API · error");
+    setText("status-db", "DB · error");
+
   }
 
 }
 
 /* =========================
-   ACTIVITY (🔥 LIMPIO)
+   ACTIVITY
 ========================= */
 
 function renderActivity(items){

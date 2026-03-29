@@ -10,6 +10,7 @@ if(!Onion){
 }
 
 let initialized = false;
+let currentItem = null;
 
 /* =========================
    INIT
@@ -66,6 +67,10 @@ function bindEvents(){
       Onion.router.navigate("/incidencias");
     }
 
+    if(e.target.id === "btn-save"){
+      updateTicket();
+    }
+
   });
 
 }
@@ -95,6 +100,7 @@ async function loadDetalle(){
       return;
     }
 
+    currentItem = data;
     render(data);
 
   }catch(err){
@@ -102,6 +108,44 @@ async function loadDetalle(){
     console.error("💥 Error cargando incidencia:", err);
     setError("Error cargando incidencia");
 
+  }
+
+}
+
+
+/* =========================
+   UPDATE (🔥 PATCH)
+========================= */
+
+async function updateTicket(){
+
+  if(!currentItem?.id) return;
+
+  const status = $("#edit-estado")?.value;
+  const priority = $("#edit-prioridad")?.value;
+
+  try{
+
+    setSaving(true);
+
+    await Onion.fetch(Onion.config.API + "/tickets/" + currentItem.id, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        status,
+        priority
+      })
+    });
+
+    await loadDetalle();
+
+  }catch(err){
+
+    console.error("💥 Error actualizando:", err);
+    alert("Error actualizando incidencia");
+
+  }finally{
+    setSaving(false);
   }
 
 }
@@ -118,53 +162,87 @@ function getId(){
 
 
 /* =========================
-   STATES (SOFT UI)
+   STATES
 ========================= */
 
 function setLoading(){
-
   const grid = $(".form-grid");
-  if(!grid) return;
-
-  grid.innerHTML = `<div class="user-sub">Cargando incidencia...</div>`;
+  if(grid){
+    grid.innerHTML = `<div class="user-sub">Cargando incidencia...</div>`;
+  }
 }
 
 function setEmpty(){
-
   const grid = $(".form-grid");
-  if(!grid) return;
-
-  grid.innerHTML = `<div class="user-sub">No se encontró la incidencia</div>`;
+  if(grid){
+    grid.innerHTML = `<div class="user-sub">No se encontró la incidencia</div>`;
+  }
 }
 
 function setError(msg){
-
   const grid = $(".form-grid");
-  if(!grid) return;
+  if(grid){
+    grid.innerHTML = `<div class="badge error">❌ ${msg}</div>`;
+  }
+}
 
-  grid.innerHTML = `<div class="badge error">❌ ${msg}</div>`;
+function setSaving(active){
+  const btn = $("#btn-save");
+  if(!btn) return;
+
+  btn.disabled = active;
+  btn.textContent = active ? "Guardando..." : "Guardar cambios";
 }
 
 
 /* =========================
-   RENDER (🔥 LIMPIO)
+   RENDER
 ========================= */
 
 function render(i){
 
-  // básicos
+  // 🔥 DATOS BASE
+  const usuario = i.cliente?.nombre || "Usuario";
+  const avatar = i.cliente?.avatar || null;
+
+  // TEXTOS
   setText("#detalle-id", i.id || "--");
-  setText("#detalle-usuario", i.name || "Usuario");
+  setText("#detalle-usuario", usuario);
   setText("#detalle-titulo", i.subject || "-");
   setText("#detalle-mensaje", i.message || "-");
   setText("#detalle-fecha", formatFecha(i.createdAt));
 
-  // badges
+  // AVATAR
+  renderAvatar(usuario, avatar);
+
+  // BADGES
   const estado = formatEstado(i.status);
   const prioridad = formatPrioridad(i.priority);
 
   setBadge("#detalle-estado", estado);
   setBadge("#detalle-prioridad", prioridad);
+
+  // SELECTS (edición)
+  if($("#edit-estado")) $("#edit-estado").value = i.status || "open";
+  if($("#edit-prioridad")) $("#edit-prioridad").value = i.priority || "low";
+
+}
+
+
+/* =========================
+   AVATAR
+========================= */
+
+function renderAvatar(nombre, avatar){
+
+  const el = $("#detalle-avatar");
+  if(!el) return;
+
+  if(avatar){
+    el.innerHTML = `<img src="${avatar}" alt="${escapeHTML(nombre)}" />`;
+  }else{
+    el.innerHTML = `<div class="avatar-fallback">${getInitials(nombre)}</div>`;
+  }
 
 }
 
@@ -228,7 +306,7 @@ function formatFecha(f){
 
 
 /* =========================
-   SECURITY
+   HELPERS
 ========================= */
 
 function escapeHTML(str){
@@ -236,6 +314,11 @@ function escapeHTML(str){
     .replace(/&/g,"&amp;")
     .replace(/</g,"&lt;")
     .replace(/>/g,"&gt;");
+}
+
+function getInitials(name){
+  if(!name) return "?";
+  return name.split(" ").map(n => n[0]).join("").slice(0,2).toUpperCase();
 }
 
 })();

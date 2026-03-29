@@ -374,6 +374,83 @@
 }
 
 
+
+
+
+
+
+
+
+
+
+/* =========================
+   FIX SELECT DARK MODE (DEFINITIVO)
+========================= */
+
+.detalle-select{
+  margin-top:6px;
+  padding:10px 12px;
+
+  border-radius:10px;
+  border:1px solid var(--card-border);
+
+  background:color-mix(in srgb, var(--card-bg), #000 15%) !important;
+
+  color:#ffffff !important;
+  -webkit-text-fill-color:#ffffff !important;
+
+  appearance:auto; /* 🔥 IMPORTANTE: evita bugs visuales */
+  -webkit-appearance:auto;
+  -moz-appearance:auto;
+
+  font-size:13px;
+  font-weight:500;
+  cursor:pointer;
+}
+
+
+/* =========================
+   OPTIONS (DROPDOWN)
+========================= */
+
+.detalle-select option{
+  background:#1f2937;
+  color:#ffffff;
+}
+
+
+/* =========================
+   FOCUS FIX
+========================= */
+
+.detalle-select:focus{
+  color:#ffffff !important;
+  outline:none;
+  border-color:var(--accent);
+  box-shadow:0 0 0 2px rgba(99,102,241,0.25);
+}
+
+
+/* =========================
+   HOVER (opcional pero fino)
+========================= */
+
+.detalle-select:hover{
+  border-color:var(--accent);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
 /* =========================================================
    RESPONSIVE
 ========================================================= */

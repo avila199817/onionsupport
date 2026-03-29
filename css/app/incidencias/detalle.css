@@ -67,6 +67,7 @@
   color:var(--text);
   cursor:pointer;
   opacity:.8;
+  transition:opacity .15s ease;
 }
 
 #btn-back:hover{
@@ -130,10 +131,10 @@
 }
 
 
-/* =========================
-   MENSAJE
-========================= */
-.detalle-message{
+/* =========================================================
+   MENSAJE EDITABLE 🔥
+========================================================= */
+.detalle-editable{
   font-size:14px;
   line-height:1.5;
   color:var(--text);
@@ -143,11 +144,61 @@
   border-radius:10px;
 
   padding:12px;
+  min-height:48px;
+
+  cursor:text;
+  transition:all .15s ease;
+  position:relative;
+}
+
+/* Hover efecto */
+.detalle-editable:hover{
+  border-color:var(--accent);
+  background:color-mix(in srgb, var(--card-bg), #000 5%);
+}
+
+/* Hint overlay */
+.detalle-editable::after{
+  content:"✏️ Click para editar";
+  position:absolute;
+  top:8px;
+  right:10px;
+
+  font-size:11px;
+  color:var(--dim);
+  opacity:0;
+  transition:opacity .15s ease;
+  pointer-events:none;
+}
+
+.detalle-editable:hover::after{
+  opacity:.8;
+}
+
+/* Estado EDITANDO */
+.detalle-editable[contenteditable="true"]{
+  outline:none;
+  border-color:var(--accent);
+  background:color-mix(in srgb, var(--card-bg), #000 0%);
+
+  box-shadow:0 0 0 2px rgba(99,102,241,0.25);
+}
+
+/* Quitar hint al editar */
+.detalle-editable[contenteditable="true"]::after{
+  content:"Editando...";
+  opacity:.6;
+}
+
+/* Placeholder si está vacío */
+.detalle-editable:empty::before{
+  content:"Escribe el mensaje...";
+  color:var(--dim);
 }
 
 
 /* =========================================================
-   USER (🔥 IGUAL QUE LISTADO)
+   USER
 ========================================================= */
 .detalle-user{
   display:flex;
@@ -227,7 +278,7 @@
 
 
 /* =========================================================
-   SELECTS (EDIT)
+   SELECTS
 ========================================================= */
 .detalle-select{
   margin-top:6px;
@@ -240,6 +291,12 @@
   color:var(--text);
 
   font-size:13px;
+  transition:border .15s ease;
+}
+
+.detalle-select:focus{
+  outline:none;
+  border-color:var(--accent);
 }
 
 
@@ -279,6 +336,10 @@
 
 #btn-save:hover{
   transform:translateY(-1px);
+}
+
+#btn-save:active{
+  transform:translateY(0);
 }
 
 #btn-save:disabled{

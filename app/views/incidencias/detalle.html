@@ -10,7 +10,6 @@
       <!-- TOP BAR -->
       <div class="filters-row" style="justify-content: space-between;">
 
-        <!-- USUARIO -->
         <div class="detalle-user">
           <div id="detalle-avatar" class="table-avatar"></div>
 
@@ -21,7 +20,6 @@
           </div>
         </div>
 
-        <!-- VOLVER -->
         <button id="btn-back">
           ← Volver
         </button>
@@ -64,34 +62,7 @@
               ></div>
             </div>
 
-            <!-- =========================
-                 ADJUNTOS USUARIO
-            ========================= -->
-            <div class="detalle-item" style="grid-column: span 2;">
-              <div class="detalle-label">Adjuntos del usuario</div>
-
-              <div class="incidencia-files">
-
-                <button type="button" id="btn-attach-detalle">
-                  + Añadir archivos
-                </button>
-
-                <input 
-                  type="file"
-                  id="detalle-files"
-                  multiple
-                  hidden
-                >
-
-                <!-- LISTA USUARIO -->
-                <div id="detalle-file-list" class="file-list"></div>
-
-              </div>
-            </div>
-
-            <!-- =========================
-                 ESTADO (SOLO 2)
-            ========================= -->
+            <!-- ESTADO -->
             <div class="detalle-item">
               <div class="detalle-label">Estado</div>
 
@@ -112,13 +83,49 @@
               </select>
             </div>
 
+            <!-- FECHA CIERRE -->
+            <div class="detalle-item">
+              <div class="detalle-label">Fecha cierre</div>
+              <div class="detalle-value" id="detalle-fecha-cierre">--</div>
+            </div>
+
+            <!-- TÉCNICO -->
+            <div class="detalle-item">
+              <div class="detalle-label">Técnico asignado</div>
+              <div class="detalle-value" id="detalle-tecnico">--</div>
+            </div>
+
+            <!-- =========================
+                 ADJUNTOS USUARIO (ABAJO)
+            ========================= -->
+            <div class="detalle-item" style="grid-column: span 2;">
+              <div class="detalle-label">Adjuntos del usuario</div>
+
+              <div class="incidencia-files">
+
+                <button type="button" id="btn-attach-detalle">
+                  + Añadir archivos
+                </button>
+
+                <input 
+                  type="file"
+                  id="detalle-files"
+                  multiple
+                  hidden
+                >
+
+                <div id="detalle-file-list" class="file-list"></div>
+
+              </div>
+            </div>
+
           </div>
 
           <!-- FOOTER -->
           <div class="detalle-footer">
 
             <div class="detalle-hint">
-              Puedes cerrar la incidencia o eliminar archivos
+              Puedes cerrar la incidencia o eliminar archivos adjuntos
             </div>
 
             <button id="btn-save">
@@ -144,7 +151,7 @@
              ARCHIVOS USUARIO
         ========================= -->
         <div class="sidebar-section">
-          <div class="sidebar-title">Archivos del usuario</div>
+          <div class="sidebar-title">Archivos aportados</div>
           <div id="detalle-blobs-user" class="detalle-blobs"></div>
         </div>
 
@@ -152,14 +159,16 @@
         <div class="sidebar-divider"></div>
 
         <!-- =========================
-             EQUIPO ONION
+             EQUIPO / SOPORTE
         ========================= -->
         <div class="sidebar-section">
-          <div class="sidebar-title">Equipo ONION</div>
+          <div class="sidebar-title">Respuesta del soporte</div>
 
-          <!-- FACTURAS / RESPUESTAS -->
+          <div class="sidebar-sub">
+            Archivos, facturas o documentación enviada por el equipo técnico
+          </div>
+
           <div id="detalle-blobs-team" class="detalle-blobs"></div>
-
         </div>
 
       </div>

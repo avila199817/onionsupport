@@ -1,13 +1,7 @@
 <div class="panel-content facturas">
 
-  <!-- =========================================================
-       TABLE SYSTEM
-  ========================================================= -->
   <div class="table-system facturas">
 
-    <!-- =========================
-         FILTERS (CLON INCIDENCIAS)
-    ========================= -->
     <div class="filters-row">
 
       <input 
@@ -29,31 +23,25 @@
 
     </div>
 
-
-    <!-- =========================
-         TABLE
-    ========================= -->
     <div class="table-container">
 
       <table>
 
         <thead>
           <tr>
-            <th class="col-id">ID</th>
-            <th class="col-main">Cliente</th>
-            <th class="col-date">Fecha</th>
-            <th class="col-importe">Importe</th>
-            <th class="col-status">Estado</th>
+            <th class="col-id" data-sort="numero">ID</th>
+            <th class="col-main" data-sort="cliente">Cliente</th>
+            <th class="col-date" data-sort="fecha">Fecha</th>
+            <th class="col-importe" data-sort="total">Importe</th>
+            <th class="col-status" data-sort="estadoPago">Estado</th>
             <th class="col-actions">Acciones</th>
           </tr>
         </thead>
 
         <tbody id="facturas-body">
-
           <tr class="loading">
             <td colspan="6">Cargando facturas...</td>
           </tr>
-
         </tbody>
 
       </table>

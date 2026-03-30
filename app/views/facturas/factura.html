@@ -1,0 +1,152 @@
+<div class="panel-content factura-create">
+
+  <div class="layout-split">
+
+    <!-- =========================
+         LEFT (FORM)
+    ========================= -->
+    <div class="factura-left">
+
+      <!-- HEADER -->
+      <div class="filters-row">
+
+        <!-- BLOQUE IZQUIERDO -->
+        <div class="header-left">
+          <div class="page-title">
+            Nueva factura 🧾
+          </div>
+          <div class="page-subtitle">
+            Crea una factura de forma rápida y clara
+          </div>
+        </div>
+
+        <!-- BOTÓN DERECHA -->
+        <button id="btn-back">
+          ← Volver
+        </button>
+
+      </div>
+
+      <!-- BODY -->
+      <div class="factura-body">
+
+        <div class="factura-form">
+
+          <!-- CLIENTE -->
+          <input 
+            type="text"
+            id="fac-cliente"
+            placeholder="Cliente — Ej: Juan Pérez / Empresa SL"
+            autocomplete="off"
+          >
+
+          <!-- CONCEPTO -->
+          <input 
+            type="text"
+            id="fac-concepto"
+            placeholder="Concepto — Ej: Desarrollo web"
+            autocomplete="off"
+          >
+
+          <!-- IMPORTE -->
+          <input 
+            type="number"
+            id="fac-total"
+            placeholder="Importe (€)"
+            autocomplete="off"
+          >
+
+          <!-- FECHA EMISIÓN -->
+          <input 
+            type="date"
+            id="fac-fecha"
+          >
+
+          <!-- FECHA VENCIMIENTO -->
+          <input 
+            type="date"
+            id="fac-vencimiento"
+          >
+
+          <!-- MÉTODO PAGO -->
+          <select id="fac-metodo">
+            <option value="">Método de pago</option>
+            <option value="transferencia">Transferencia</option>
+            <option value="tarjeta">Tarjeta</option>
+            <option value="efectivo">Efectivo</option>
+          </select>
+
+          <!-- IVA -->
+          <select id="fac-iva">
+            <option value="21">IVA 21%</option>
+            <option value="10">IVA 10%</option>
+            <option value="0">Sin IVA</option>
+          </select>
+
+          <!-- DESCRIPCIÓN -->
+          <textarea 
+            id="fac-descripcion"
+            placeholder="Detalles adicionales de la factura..."
+            rows="6"
+          ></textarea>
+
+          <!-- ADJUNTOS -->
+          <div class="incidencia-files">
+
+            <button type="button" id="btn-attach">
+              + Añadir archivos
+            </button>
+
+            <input 
+              type="file"
+              id="fac-files"
+              multiple
+              hidden
+            >
+
+            <div id="file-list"></div>
+
+          </div>
+
+          <!-- FOOTER -->
+          <div class="factura-footer">
+
+            <div class="factura-hint">
+              Puedes adjuntar contratos, presupuestos o justificantes
+            </div>
+
+            <button id="btn-save-factura">
+              Crear factura
+            </button>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+
+
+    <!-- =========================
+         RIGHT (HISTÓRICO)
+    ========================= -->
+    <aside class="factura-right">
+
+      <div class="factura-history">
+
+        <div class="history-header">
+          Últimas facturas
+        </div>
+
+        <div id="facturas-list" class="history-list">
+          Cargando...
+        </div>
+
+      </div>
+
+    </aside>
+
+  </div>
+
+</div>

@@ -1,7 +1,6 @@
 /* =========================================================
-   INCIDENCIA DETALLE — SAAS PRO UI (FINAL)
+   INCIDENCIA DETALLE — SAAS PRO UI (FINAL CLEAN)
 ========================================================= */
-
 
 /* =========================
    ROOT
@@ -41,9 +40,9 @@
 
 
 /* =========================================================
-   RIGHT SIDEBAR
+   RIGHT SIDEBAR (AISLADO)
 ========================================================= */
-.detalle-right{
+.incidencia-detalle .detalle-right{
   width:360px;
   min-width:360px;
   flex-shrink:0;
@@ -56,29 +55,38 @@
 
 
 /* =========================================================
-   SIDEBAR
+   SIDEBAR CONTENT (AISLADO)
 ========================================================= */
-.detalle-sidebar{
+.incidencia-detalle .detalle-sidebar{
   display:flex;
   flex-direction:column;
   flex:1;
   min-height:0;
   padding:18px;
   overflow:hidden;
+  gap:18px;
 }
 
-.sidebar-section{
+/* 🔥 OJO: scoped para no romper sidebar global */
+.incidencia-detalle .sidebar-section{
   display:flex;
   flex-direction:column;
   gap:12px;
-  flex:1;
+}
+
+/* divisor limpio */
+.sidebar-divider{
+  height:1px;
+  background:var(--panel-border);
+  margin:6px 0;
 }
 
 .sidebar-title{
-  font-size:12px;
+  font-size:var(--font-xs);
   font-weight:600;
   color:var(--dim);
   letter-spacing:.4px;
+  text-transform:uppercase;
 }
 
 
@@ -89,24 +97,23 @@
   display:flex;
   flex-direction:column;
   gap:10px;
-  flex:1;
   overflow:auto;
   padding-right:6px;
+  max-height:100%;
 }
 
-
-/* SCROLL */
+/* scroll fino */
 .detalle-blobs::-webkit-scrollbar{
   width:6px;
 }
 .detalle-blobs::-webkit-scrollbar-thumb{
-  background:rgba(255,255,255,0.08);
+  background:var(--scrollbar-thumb);
   border-radius:6px;
 }
 
 
 /* =========================================================
-   BLOB ITEM
+   BLOB ITEM (🔥 MEJORADO)
 ========================================================= */
 .blob-item{
   display:flex;
@@ -115,39 +122,46 @@
 
   padding:12px 14px;
   border-radius:12px;
+
   border:1px solid var(--card-border);
   background:var(--card-bg);
 
-  transition:.18s ease;
-
-  margin-top:8px;
+  transition:all var(--duration-fast) var(--ease-out);
 }
 
 .blob-item:hover{
   border-color:var(--accent);
   transform:translateY(-2px);
+  box-shadow:var(--shadow-soft);
 }
 
 
 /* TEXT */
 .blob-item span{
-  font-size:13px;
+  font-size:var(--font-sm);
   color:var(--text);
-  max-width:65%;
+
+  max-width:60%;
   overflow:hidden;
   text-overflow:ellipsis;
   white-space:nowrap;
 }
 
 
-/* BUTTON */
+/* ACTIONS */
+.blob-actions{
+  display:flex;
+  gap:8px;
+}
+
+/* DOWNLOAD */
 .blob-download{
   padding:6px 12px;
   border-radius:10px;
   border:none;
   cursor:pointer;
 
-  font-size:12px;
+  font-size:var(--font-sm);
   font-weight:600;
 
   background:linear-gradient(135deg,var(--accent),var(--accent-hover));
@@ -160,9 +174,28 @@
   transform:translateY(-1px);
 }
 
+/* DELETE */
+.blob-delete{
+  padding:6px 10px;
+  border-radius:10px;
+  border:none;
+
+  background:rgba(239,68,68,0.15);
+  color:#ef4444;
+
+  cursor:pointer;
+  font-size:12px;
+
+  transition:.15s;
+}
+
+.blob-delete:hover{
+  background:rgba(239,68,68,0.3);
+}
+
 
 /* =========================================================
-   TOP BAR (SIN HEADER PESADO)
+   TOP BAR
 ========================================================= */
 .incidencia-detalle .filters-row{
   display:flex;
@@ -202,13 +235,12 @@
   overflow:auto;
 }
 
-
-/* SCROLL */
+/* scroll */
 .detalle-body::-webkit-scrollbar{
   width:6px;
 }
 .detalle-body::-webkit-scrollbar-thumb{
-  background:rgba(255,255,255,0.08);
+  background:var(--scrollbar-thumb);
   border-radius:6px;
 }
 
@@ -234,14 +266,14 @@
 }
 
 .detalle-label{
-  font-size:11px;
+  font-size:var(--font-xs);
   color:var(--dim);
   text-transform:uppercase;
   letter-spacing:.5px;
 }
 
 .detalle-value{
-  font-size:14px;
+  font-size:var(--font-base);
   font-weight:500;
   color:var(--text);
 }
@@ -251,8 +283,8 @@
    MENSAJE
 ========================================================= */
 .detalle-editable{
-  font-size:14px;
-  line-height:1.5;
+  font-size:var(--font-base);
+  line-height:var(--line-relaxed);
 
   background:color-mix(in srgb, var(--card-bg), #000 10%);
   border:1px solid var(--card-border);
@@ -288,9 +320,7 @@
   background:color-mix(in srgb, var(--card-bg), #000 15%);
   color:#fff;
 
-  appearance:auto;
-
-  font-size:13px;
+  font-size:var(--font-sm);
   font-weight:500;
   cursor:pointer;
 }
@@ -299,11 +329,6 @@
   outline:none;
   border-color:var(--accent);
   box-shadow:0 0 0 2px rgba(99,102,241,0.25);
-}
-
-.detalle-select option{
-  background:#1f2937;
-  color:#fff;
 }
 
 
@@ -340,7 +365,7 @@
 
 
 /* =========================================================
-   FILE LIST (🔥 NUEVO PRO)
+   FILE LIST
 ========================================================= */
 .file-list{
   margin-top:10px;
@@ -360,7 +385,7 @@
   background:color-mix(in srgb, var(--card-bg), #000 10%);
   border:1px solid var(--card-border);
 
-  font-size:13px;
+  font-size:var(--font-sm);
 }
 
 .file-item span{
@@ -373,7 +398,7 @@
 .file-remove{
   background:none;
   border:none;
-  color:#ef4444;
+  color:var(--error);
   cursor:pointer;
   font-size:14px;
   font-weight:600;
@@ -398,7 +423,7 @@
 }
 
 .detalle-hint{
-  font-size:12px;
+  font-size:var(--font-xs);
   color:var(--dim);
 }
 
@@ -434,7 +459,7 @@
 ========================================================= */
 @media (max-width:1100px){
 
-  .detalle-right{
+  .incidencia-detalle .detalle-right{
     display:none;
   }
 

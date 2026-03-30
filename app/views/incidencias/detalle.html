@@ -7,15 +7,17 @@
     ========================= -->
     <div class="detalle-left">
 
-      <!-- TOP BAR (SIN HEADER PESADO) -->
+      <!-- TOP BAR -->
       <div class="filters-row" style="justify-content: space-between;">
 
-        <!-- USUARIO ARRIBA -->
+        <!-- USUARIO -->
         <div class="detalle-user">
           <div id="detalle-avatar" class="table-avatar"></div>
 
           <div class="user-info">
             <div class="detalle-value" id="detalle-usuario">--</div>
+            <div class="detalle-sub" id="detalle-userid">UserID: --</div>
+            <div class="detalle-sub" id="detalle-clienteid">ClienteID: --</div>
           </div>
         </div>
 
@@ -25,7 +27,6 @@
         </button>
 
       </div>
-
 
       <!-- BODY -->
       <div class="detalle-body">
@@ -63,9 +64,11 @@
               ></div>
             </div>
 
-            <!-- ADJUNTOS -->
+            <!-- =========================
+                 ADJUNTOS USUARIO
+            ========================= -->
             <div class="detalle-item" style="grid-column: span 2;">
-              <div class="detalle-label">Adjuntos</div>
+              <div class="detalle-label">Adjuntos del usuario</div>
 
               <div class="incidencia-files">
 
@@ -80,19 +83,20 @@
                   hidden
                 >
 
-                <!-- LISTA NUEVA CON X -->
+                <!-- LISTA USUARIO -->
                 <div id="detalle-file-list" class="file-list"></div>
 
               </div>
             </div>
 
-            <!-- ESTADO -->
+            <!-- =========================
+                 ESTADO (SOLO 2)
+            ========================= -->
             <div class="detalle-item">
               <div class="detalle-label">Estado</div>
 
               <select id="edit-estado" class="detalle-select">
                 <option value="open">Abierta</option>
-                <option value="in_progress">En progreso</option>
                 <option value="closed">Cerrada</option>
               </select>
             </div>
@@ -114,7 +118,7 @@
           <div class="detalle-footer">
 
             <div class="detalle-hint">
-              Modifica datos y adjuntos
+              Puedes cerrar la incidencia o eliminar archivos
             </div>
 
             <button id="btn-save">
@@ -129,7 +133,6 @@
 
     </div>
 
-
     <!-- =========================
          RIGHT
     ========================= -->
@@ -137,10 +140,26 @@
 
       <div class="detalle-sidebar">
 
+        <!-- =========================
+             ARCHIVOS USUARIO
+        ========================= -->
         <div class="sidebar-section">
-          <div class="sidebar-title">Archivos</div>
+          <div class="sidebar-title">Archivos del usuario</div>
+          <div id="detalle-blobs-user" class="detalle-blobs"></div>
+        </div>
 
-          <div id="detalle-blobs" class="detalle-blobs"></div>
+        <!-- DIVISOR -->
+        <div class="sidebar-divider"></div>
+
+        <!-- =========================
+             EQUIPO ONION
+        ========================= -->
+        <div class="sidebar-section">
+          <div class="sidebar-title">Equipo ONION</div>
+
+          <!-- FACTURAS / RESPUESTAS -->
+          <div id="detalle-blobs-team" class="detalle-blobs"></div>
+
         </div>
 
       </div>

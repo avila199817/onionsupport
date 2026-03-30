@@ -1,5 +1,30 @@
 <div class="panel-content facturas table-mode">
 
+  <!-- =========================
+       HEADER / KPIs (OPCIONAL PRO)
+  ========================= -->
+  <div class="facturas-header">
+
+    <div class="facturas-kpis">
+      <div class="kpi">
+        <span class="kpi-label">Total cobrado</span>
+        <span id="facturas-total" class="kpi-value">0,00 €</span>
+      </div>
+
+      <div class="kpi">
+        <span class="kpi-label">Pagadas</span>
+        <span id="facturas-pagadas" class="kpi-value">0</span>
+      </div>
+
+      <div class="kpi">
+        <span class="kpi-label">Pendientes</span>
+        <span id="facturas-pendientes" class="kpi-value">0</span>
+      </div>
+    </div>
+
+  </div>
+
+
   <!-- 🔥 TABLE SYSTEM -->
   <div class="table-system facturas">
 
@@ -11,7 +36,7 @@
       <input 
         type="text"
         id="search-factura"
-        placeholder="Buscar factura..."
+        placeholder="Buscar por cliente o ID..."
         autocomplete="off"
       >
 
@@ -33,7 +58,7 @@
     ========================= -->
     <div class="table-container">
 
-      <table>
+      <table aria-label="Listado de facturas">
 
         <thead>
           <tr>
@@ -48,10 +73,68 @@
 
         <tbody id="facturas-body">
 
-          <!-- LOADING -->
+          <!-- =========================
+               LOADING STATE
+          ========================= -->
           <tr class="loading">
             <td colspan="6">Cargando facturas...</td>
           </tr>
+
+          <!-- =========================
+               EMPTY STATE (JS LO USA)
+          ========================= -->
+          <!--
+          <tr>
+            <td colspan="6">No hay facturas</td>
+          </tr>
+          -->
+
+          <!-- =========================
+               ROW TEMPLATE (REFERENCIA)
+          ========================= -->
+          <!--
+          <tr data-id="202600001">
+
+            <td class="col-id">202600001</td>
+
+            <td class="col-main">
+              <div class="cell-user">
+                <div class="table-avatar">JH</div>
+                <div class="user-info">
+                  <div class="user-name">Javier Harandou</div>
+                  <div class="user-sub">Cliente</div>
+                </div>
+              </div>
+            </td>
+
+            <td class="col-date">17/03/2026</td>
+
+            <td class="col-importe">68,40 €</td>
+
+            <td class="col-status">
+              <span class="badge pendiente">Pendiente</span>
+            </td>
+
+            <td class="col-actions">
+              <div class="actions">
+
+                <button class="btn-action" data-action="download">
+                  Descargar
+                </button>
+
+                <button class="btn-action" data-action="send">
+                  Enviar
+                </button>
+
+                <button class="btn-action btn-pay" data-action="pay">
+                  Pagar
+                </button>
+
+              </div>
+            </td>
+
+          </tr>
+          -->
 
         </tbody>
 

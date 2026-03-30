@@ -16,7 +16,8 @@ let initialized = false;
    CONFIG
 ========================= */
 
-const HEALTH_KEY = Onion.config?.HEALTH_KEY || "";
+const API = Onion.config?.API;
+const HEALTH_KEY = Onion.config?.HEALTH_KEY;
 
 /* =========================
    ROOT
@@ -84,7 +85,7 @@ async function loadDashboardData(){
 
   try {
 
-    const resFacturas = await Onion.fetch(Onion.config.API + "/facturas");
+    const resFacturas = await Onion.fetch(API + "/facturas");
     const facturas = resFacturas?.facturas || resFacturas?.data || [];
 
     const pagadas = facturas.filter(f => f?.estadoPago === "pagada");
@@ -113,7 +114,7 @@ async function loadDashboardData(){
 
   try {
 
-    const res = await Onion.fetch(Onion.config.API + "/dashboard");
+    const res = await Onion.fetch(API + "/dashboard");
     const data = res?.data || res || {};
     const k = data?.kpis || {};
 
@@ -140,9 +141,16 @@ async function loadDashboardData(){
 
 async function loadSystem(){
 
+  if(!HEALTH_KEY){
+    console.warn("⚠️ HEALTH_KEY no definida en Onion.config");
+    setText("status-api", "API · no auth");
+    setText("status-db", "DB · no auth");
+    return;
+  }
+
   try{
 
-    const base = new URL(Onion.config.API).origin;
+    const base = new URL(API).origin;
 
     const res = await fetch(base + "/health/internal", {
       headers: {
@@ -151,6 +159,7 @@ async function loadSystem(){
     });
 
     if(!res.ok){
+      console.error("❌ HEALTH STATUS:", res.status);
       throw new Error("Health " + res.status);
     }
 
@@ -269,6 +278,11 @@ function init(){
 
   if(initialized) return;
   initialized = true;
+
+  console.log("🧅 DASHBOARD INIT", {
+    API,
+    HEALTH_KEY: HEALTH_KEY ? "OK" : "MISSING"
+  });
 
   setMonthLabel();
   loadDashboard();

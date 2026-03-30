@@ -14,6 +14,7 @@ let currentItem = null;
 let observer = null;
 let sending = false;
 let selectedFiles = [];
+let deleting = false;
 
 
 /* =========================
@@ -116,6 +117,7 @@ function bindEvents(){
     }
 
     if(t.classList.contains("blob-delete")){
+      if(deleting) return;
       await deleteBlob(t.dataset.url);
     }
 
@@ -156,6 +158,7 @@ async function loadDetalle(){
 
   }catch(err){
     console.error("💥 loadDetalle:", err);
+    showToast("❌ Error cargando");
   }
 }
 
@@ -165,39 +168,28 @@ async function loadDetalle(){
 ========================= */
 function render(i){
 
-  /* USER */
   setText("#detalle-usuario", i?.cliente?.nombre);
-
-  // 🔥 SOLO ID, SIN TEXTO
   setText("#detalle-userid", i?.userId || "--");
 
-  // ❌ eliminado clienteId (ya no se usa)
-
-  /* HEADER */
   setText("#detalle-id", i?.id);
   setText("#detalle-fecha", formatFecha(i?.createdAt));
   setText("#detalle-fecha-cierre", formatFecha(i?.closedAt));
 
-  // 🔥 FIX técnico (evita [object Object])
   const tecnico =
     typeof i?.assignedTo === "object"
       ? i?.assignedTo?.name
       : i?.assignedTo;
 
-  setText("#detalle-tecnico", tecnico || "--");
+  setText("#detalle-tecnico", tecnico || "No asignado");
 
-  /* CONTENT */
   setText("#detalle-titulo", i?.subject);
   $("#detalle-mensaje").textContent = i?.message || "";
 
-  /* SELECTS */
   $("#edit-estado").value = i?.status || "open";
   $("#edit-prioridad").value = i?.priority || "low";
 
-  /* AVATAR */
   renderAvatar(i?.cliente?.nombre, i?.cliente?.avatar);
 
-  /* BLOBS */
   const userFiles = (i?.attachments || []).filter(f => f.type !== "team");
   const teamFiles = (i?.attachments || []).filter(f => f.type === "team");
 
@@ -262,30 +254,35 @@ async function deleteBlob(url){
 
   if(!confirm("¿Eliminar archivo?")) return;
 
+  deleting = true;
+
   try{
 
-    const res = await fetch(Onion.config.API + "/uploads/delete", {
-      method:"POST",
+    const res = await fetch(Onion.config.API + "/tickets/" + currentItem.id, {
+      method:"PATCH",
       headers:{
         "Content-Type":"application/json",
         ...getAuthHeaders()
       },
-      body: JSON.stringify({ url })
+      body: JSON.stringify({
+        deleteAttachments:[url]
+      })
     });
 
     if(!res.ok) throw new Error();
 
-    /* quitar del state */
-    currentItem.attachments =
-      currentItem.attachments.filter(f => f.url !== url);
+    const json = await res.json();
+    currentItem = json?.ticket || json;
 
     render(currentItem);
 
-    showToast("🗑️ Eliminado");
+    showToast("🗑️ Archivo eliminado");
 
   }catch{
     showToast("❌ Error eliminando");
   }
+
+  deleting = false;
 }
 
 
@@ -355,10 +352,11 @@ async function updateTicket(){
         status,
         priority: $("#edit-prioridad").value,
         message: $("#detalle-mensaje").innerText,
-        attachments: uploaded,
-        closedAt: status === "closed" ? new Date().toISOString() : null
+        attachments: uploaded
       })
     });
+
+    if(!res.ok) throw new Error();
 
     const json = await res.json();
     currentItem = json?.ticket || json;
@@ -371,7 +369,7 @@ async function updateTicket(){
 
   }catch(err){
     console.error(err);
-    showToast("❌ Error");
+    showToast("❌ Error guardando");
   }
 
   sending = false;
@@ -435,7 +433,11 @@ function downloadBlob(url,name){
 }
 
 function showToast(msg){
-  console.log(msg);
+  if(Onion.toast){
+    Onion.toast(msg);
+  }else{
+    console.log(msg);
+  }
 }
 
 })();

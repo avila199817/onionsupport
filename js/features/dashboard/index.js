@@ -17,7 +17,6 @@ let initialized = false;
 ========================= */
 
 const API = Onion.config?.API;
-const HEALTH_KEY = Onion.config?.HEALTH_KEY;
 
 /* =========================
    ROOT
@@ -136,13 +135,15 @@ async function loadDashboardData(){
 }
 
 /* =========================
-   SYSTEM
+   SYSTEM (AUTH)
 ========================= */
 
 async function loadSystem(){
 
-  if(!HEALTH_KEY){
-    console.warn("⚠️ HEALTH_KEY no definida en Onion.config");
+  const token = Onion.auth?.getToken?.();
+
+  if(!token){
+    console.warn("⚠️ No token → no system");
     setText("status-api", "API · no auth");
     setText("status-db", "DB · no auth");
     return;
@@ -154,7 +155,7 @@ async function loadSystem(){
 
     const res = await fetch(base + "/health/internal", {
       headers: {
-        "x-health-key": HEALTH_KEY
+        "Authorization": "Bearer " + token
       }
     });
 
@@ -281,7 +282,7 @@ function init(){
 
   console.log("🧅 DASHBOARD INIT", {
     API,
-    HEALTH_KEY: HEALTH_KEY ? "OK" : "MISSING"
+    auth: Onion.auth?.getToken ? "OK" : "MISSING"
   });
 
   setMonthLabel();

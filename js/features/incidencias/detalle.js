@@ -13,8 +13,6 @@ let initialized = false;
 let currentItem = null;
 let observer = null;
 let sending = false;
-
-/* 🔥 MULTI FILE */
 let selectedFiles = [];
 
 
@@ -62,7 +60,7 @@ function getAuthHeaders(){
 
 
 /* =========================
-   AVATAR (FIX)
+   AVATAR
 ========================= */
 function renderAvatar(nombre, avatar){
 
@@ -82,27 +80,6 @@ function renderAvatar(nombre, avatar){
     .toUpperCase();
 
   el.textContent = initials || "U";
-}
-
-
-/* =========================
-   OBSERVER
-========================= */
-function observeDOM(){
-
-  if(observer) return;
-
-  observer = new MutationObserver(()=>{
-    if(!getRoot()){
-      initialized = false;
-      setTimeout(init, 100);
-    }
-  });
-
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true
-  });
 }
 
 
@@ -131,14 +108,12 @@ function bindEvents(){
       $("#detalle-files")?.click();
     }
 
-    /* 🔥 REMOVE FILE */
     if(t.classList.contains("file-remove")){
       const index = Number(t.dataset.index);
       selectedFiles.splice(index, 1);
       renderFiles();
     }
 
-    /* 🔥 DOWNLOAD */
     if(t.classList.contains("blob-download")){
       downloadBlob(t.dataset.url, t.dataset.name);
     }
@@ -153,33 +128,7 @@ function bindEvents(){
       e.target.value = "";
     }
 
-    if(e.target.id === "edit-estado" || e.target.id === "edit-prioridad"){
-      applyVisualState();
-    }
-
   });
-
-  const msg = $("#detalle-mensaje");
-
-  if(msg){
-
-    msg.addEventListener("click", ()=>{
-      msg.setAttribute("contenteditable","true");
-      msg.focus();
-    });
-
-    msg.addEventListener("blur", ()=>{
-      msg.setAttribute("contenteditable","false");
-    });
-
-    msg.addEventListener("keydown", (e)=>{
-      if(e.key === "Enter"){
-        e.preventDefault();
-        msg.blur();
-      }
-    });
-
-  }
 }
 
 
@@ -189,9 +138,7 @@ function bindEvents(){
 async function loadDetalle(){
 
   const id = getId();
-  if(!id) return setError("ID no válido");
-
-  setLoading();
+  if(!id) return;
 
   try{
 
@@ -200,55 +147,70 @@ async function loadDetalle(){
     });
 
     const json = await res.json();
-    const data = json?.ticket || json;
+    currentItem = json?.ticket || json;
 
-    if(!data){
-      setEmpty();
-      return;
-    }
-
-    currentItem = data;
-    render(data);
+    render(currentItem);
 
   }catch(err){
     console.error(err);
-    setError("Error cargando incidencia");
-  }finally{
-    clearLoading();
   }
 }
 
 
 /* =========================
-   UPLOAD
+   🔥 UPLOAD CON PROGRESO
 ========================= */
-async function uploadFile(file){
+function uploadFile(file){
 
-  const res = await fetch(Onion.config.API + "/uploads/upload-url", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...getAuthHeaders()
-    },
-    body: JSON.stringify({
-      fileName: file.name,
-      fileType: file.type,
-      fileSize: file.size
-    })
+  return new Promise(async (resolve, reject)=>{
+
+    try{
+
+      const res = await fetch(Onion.config.API + "/uploads/upload-url", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders()
+        },
+        body: JSON.stringify({
+          fileName: file.name,
+          fileType: file.type,
+          fileSize: file.size
+        })
+      });
+
+      const { uploadUrl, blobUrl } = await res.json();
+
+      const xhr = new XMLHttpRequest();
+
+      xhr.open("PUT", uploadUrl, true);
+      xhr.setRequestHeader("x-ms-blob-type", "BlockBlob");
+      xhr.setRequestHeader("Content-Type", file.type);
+
+      xhr.upload.onprogress = (e)=>{
+        if(e.lengthComputable){
+          const percent = Math.round((e.loaded / e.total) * 100);
+          console.log(`📦 ${file.name} → ${percent}%`);
+        }
+      };
+
+      xhr.onload = ()=>{
+        if(xhr.status >= 200 && xhr.status < 300){
+          resolve({ name: file.name, url: blobUrl });
+        }else{
+          reject("UPLOAD ERROR");
+        }
+      };
+
+      xhr.onerror = reject;
+
+      xhr.send(file);
+
+    }catch(err){
+      reject(err);
+    }
+
   });
-
-  const { uploadUrl, blobUrl } = await res.json();
-
-  await fetch(uploadUrl, {
-    method: "PUT",
-    headers: {
-      "x-ms-blob-type": "BlockBlob",
-      "Content-Type": file.type
-    },
-    body: file
-  });
-
-  return { name: file.name, url: blobUrl };
 }
 
 
@@ -286,21 +248,18 @@ async function updateTicket(){
     });
 
     const json = await res.json();
-    const data = json?.ticket || json;
+    currentItem = json?.ticket || json;
 
-    if(data){
-      currentItem = data;
-      render(data);
-    }
+    render(currentItem);
 
     selectedFiles = [];
     renderFiles();
 
-    showToast("Cambios guardados", "success");
+    showToast("✔ Guardado");
 
   }catch(err){
     console.error(err);
-    showToast("Error", "error");
+    showToast("❌ Error");
   }
 
   setSaving(false);
@@ -313,22 +272,15 @@ async function updateTicket(){
 ========================= */
 function render(i){
 
-  const nombre = i.cliente?.nombre || "Usuario";
-
-  setText("#detalle-usuario", nombre);
+  setText("#detalle-usuario", i.cliente?.nombre);
   setText("#detalle-id", i.id);
-  setText("#detalle-titulo", i.subject || "Sin título");
+  setText("#detalle-titulo", i.subject);
   setText("#detalle-fecha", formatFecha(i.createdAt));
 
   $("#detalle-mensaje").textContent = i.message || "";
 
-  setSelectValue($("#edit-estado"), i.status || "open");
-  setSelectValue($("#edit-prioridad"), i.priority || "low");
-
-  renderAvatar(nombre, i.cliente?.avatar);
+  renderAvatar(i.cliente?.nombre, i.cliente?.avatar);
   renderBlobs(i.attachments || []);
-
-  applyVisualState();
 }
 
 
@@ -356,11 +308,6 @@ function renderBlobs(files){
 
   const c = $("#detalle-blobs");
   if(!c) return;
-
-  if(!files.length){
-    c.innerHTML = `<div class="detalle-hint">Sin archivos</div>`;
-    return;
-  }
 
   c.innerHTML = files.map(f => `
     <div class="blob-item">
@@ -391,7 +338,7 @@ function downloadBlob(url, name){
 ========================= */
 function setText(sel, val){
   const el = $(sel);
-  if(el) el.textContent = val ?? "--";
+  if(el) el.textContent = val || "--";
 }
 
 function formatFecha(f){
@@ -402,39 +349,6 @@ function getId(){
   return new URLSearchParams(location.search).get("id");
 }
 
-function setSelectValue(select, value){
-  if(!select) return;
-  select.value = value;
-}
-
-
-/* =========================
-   STATES
-========================= */
-function setLoading(){
-  const el = $("#detalle-content");
-  if(el){
-    el.style.opacity = "0.4";
-    el.style.pointerEvents = "none";
-  }
-}
-
-function clearLoading(){
-  const el = $("#detalle-content");
-  if(el){
-    el.style.opacity = "1";
-    el.style.pointerEvents = "auto";
-  }
-}
-
-function setEmpty(){
-  $("#detalle-content").innerHTML = `<div>No encontrada</div>`;
-}
-
-function setError(msg){
-  $("#detalle-content").innerHTML = `<div>${msg}</div>`;
-}
-
 function setSaving(active){
   const btn = $("#btn-save");
   if(btn){
@@ -443,24 +357,8 @@ function setSaving(active){
   }
 }
 
-
-/* =========================
-   VISUAL STATE
-========================= */
-function applyVisualState(){
-  const root = getRoot();
-  if(!root) return;
-
-  root.dataset.estado = $("#edit-estado")?.value;
-  root.dataset.prioridad = $("#edit-prioridad")?.value;
-}
-
-
-/* =========================
-   TOAST
-========================= */
-function showToast(message){
-  console.log(message);
+function showToast(msg){
+  console.log(msg);
 }
 
 })();

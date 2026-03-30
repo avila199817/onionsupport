@@ -119,37 +119,70 @@ function render(){
 
   if(!factura) return;
 
-  // USER
-  $("#detalle-cliente").textContent = factura.cliente || "Cliente";
-  $("#detalle-cliente-id").textContent = factura.clienteId || "";
+  const cliente = factura.cliente || {};
 
-  $("#detalle-avatar").textContent = getInitials(factura.cliente);
+  /* =========================
+     HEADER USER
+  ========================= */
 
-  // DATA
-  $("#detalle-id").textContent = factura.id || factura.numero || "--";
+  const nombre = cliente.nombre || "Cliente";
+
+  $("#detalle-cliente").textContent = nombre;
+  $("#detalle-cliente-id").textContent = cliente.id || "";
+
+  renderAvatar(cliente);
+
+  /* =========================
+     CORE
+  ========================= */
+
+  $("#detalle-id").textContent = factura.numero || factura.id || "--";
+
   $("#detalle-fecha").textContent = formatFecha(factura.fecha);
-  $("#detalle-vencimiento").textContent = formatFecha(factura.vencimiento);
+  $("#detalle-vencimiento").textContent = formatFecha(factura.fechaServicio);
 
-  $("#detalle-metodo").textContent = factura.metodo || "-";
+  $("#detalle-metodo").textContent = factura.formaPago || "-";
   $("#detalle-total").textContent = formatMoney(factura.total);
 
   $("#detalle-concepto").textContent = factura.concepto || "-";
   $("#detalle-descripcion").textContent = factura.descripcion || "";
 
-  // SELECTS
+  /* =========================
+     SELECTS
+  ========================= */
+
   $("#edit-estado").value = mapEstado(factura.estadoPago);
-  $("#edit-iva").value = factura.iva || "21";
+  $("#edit-iva").value = getIVA(factura);
 
-  // FILES
-  renderFiles(factura.archivos || []);
+  /* =========================
+     FILES (BLOB)
+  ========================= */
 
-  // SIDEBAR
+  renderFilesFromBlob();
   renderSidebar();
 
 }
 
 /* =========================
-   FILES
+   AVATAR
+========================= */
+
+function renderAvatar(cliente){
+
+  const el = $("#detalle-avatar");
+  if(!el) return;
+
+  if(cliente.avatar){
+    el.innerHTML = `<img src="${cliente.avatar}" alt="${escapeHTML(cliente.nombre)}" />`;
+    return;
+  }
+
+  el.innerHTML = `<div class="avatar-fallback">${getInitials(cliente.nombre)}</div>`;
+
+}
+
+/* =========================
+   FILES (LOCAL MOCK)
 ========================= */
 
 function renderFiles(files){
@@ -157,7 +190,7 @@ function renderFiles(files){
   const list = $("#detalle-file-list");
   if(!list) return;
 
-  list.innerHTML = files.map(f=>`
+  list.innerHTML = (files || []).map(f=>`
     <div class="file-item">
       <span>${escapeHTML(f.nombre)}</span>
       <button class="file-remove" onclick="removeFile('${f.id}')">✕</button>
@@ -172,6 +205,31 @@ window.removeFile = function(id){
 };
 
 /* =========================
+   BLOB REAL (PDF)
+========================= */
+
+function renderFilesFromBlob(){
+
+  const list = $("#detalle-file-list");
+  if(!list) return;
+
+  if(!factura.blobPath){
+    list.innerHTML = `<span class="detalle-hint">Sin archivos</span>`;
+    return;
+  }
+
+  list.innerHTML = `
+    <div class="file-item">
+      <span>Factura PDF</span>
+      <button class="file-remove" onclick="window.open('${Onion.config.API}/facturas/${factura.id}/descargar','_blank')">
+        Ver
+      </button>
+    </div>
+  `;
+
+}
+
+/* =========================
    SIDEBAR
 ========================= */
 
@@ -179,18 +237,24 @@ function renderSidebar(){
 
   const docs = $("#detalle-blobs-docs");
 
-  if(docs){
-    docs.innerHTML = (factura.archivos || []).map(f=>`
-      <div class="blob-item">
-        <span>${escapeHTML(f.nombre)}</span>
-        <div class="blob-actions">
-          <button class="blob-download" onclick="window.open('${f.url}','_blank')">
-            Ver
-          </button>
-        </div>
-      </div>
-    `).join("");
+  if(!docs) return;
+
+  if(!factura.blobPath){
+    docs.innerHTML = `<span class="detalle-hint">Sin documentos</span>`;
+    return;
   }
+
+  docs.innerHTML = `
+    <div class="blob-item">
+      <span>Factura PDF</span>
+      <div class="blob-actions">
+        <button class="blob-download"
+          onclick="window.open('${Onion.config.API}/facturas/${factura.id}/descargar','_blank')">
+          Descargar
+        </button>
+      </div>
+    </div>
+  `;
 
 }
 
@@ -204,7 +268,6 @@ async function saveFactura(){
 
     const payload = {
       estadoPago: $("#edit-estado").value,
-      iva: $("#edit-iva").value,
       descripcion: $("#detalle-descripcion").textContent
     };
 
@@ -223,7 +286,7 @@ async function saveFactura(){
 }
 
 /* =========================
-   FILE UPLOAD
+   FILE UPLOAD MOCK
 ========================= */
 
 function handleFiles(e){
@@ -253,6 +316,10 @@ function mapEstado(e){
   if(e === "pagada") return "paid";
   if(e === "cancelada") return "cancelled";
   return "pending";
+}
+
+function getIVA(f){
+  return f.impuestos?.[0]?.porcentaje || "21";
 }
 
 function formatFecha(f){

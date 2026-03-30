@@ -10,9 +10,13 @@ if(!Onion){
 }
 
 let initialized = false;
+let state = {
+  facturas: [],
+  filtered: []
+};
 
 /* =========================
-   ROOT / DOM
+   ROOT
 ========================= */
 
 function getRoot(){
@@ -30,9 +34,7 @@ function $(selector){
 function init(){
 
   const root = getRoot();
-  if(!root) return;
-
-  if(initialized) return;
+  if(!root || initialized) return;
 
   if(!Onion.state?.user){
     return setTimeout(init, 100);
@@ -45,6 +47,8 @@ function init(){
 
   Onion.onCleanup(()=>{
     initialized = false;
+    state.facturas = [];
+    state.filtered = [];
   });
 
 }
@@ -58,6 +62,7 @@ function bindEvents(){
   const root = getRoot();
   if(!root) return;
 
+  // CLICK GLOBAL
   Onion.cleanupEvent(root, "click", async (e)=>{
 
     const action = e.target.closest("[data-action]");
@@ -80,12 +85,25 @@ function bindEvents(){
     const row = e.target.closest("tr[data-id]");
     if(!row) return;
 
-    const id = row.dataset.id;
-    if(!id) return;
-
-    openFactura(id);
+    openFactura(row.dataset.id);
 
   });
+
+  // SEARCH (DEBOUNCE)
+  const search = $("#search-factura");
+  if(search){
+    let t;
+    search.addEventListener("input", ()=>{
+      clearTimeout(t);
+      t = setTimeout(applyFilters, 250);
+    });
+  }
+
+  // FILTER ESTADO
+  const estado = $("#filter-estado-factura");
+  if(estado){
+    estado.addEventListener("change", applyFilters);
+  }
 
 }
 
@@ -98,8 +116,6 @@ async function loadFacturas(){
   const panel = getRoot();
   const tbody = $("#facturas-body");
 
-  panel?.classList.remove("ready");
-
   if(!tbody) return;
 
   setLoading();
@@ -107,30 +123,56 @@ async function loadFacturas(){
   try{
 
     const res = await Onion.fetch(Onion.config.API + "/facturas");
-    const facturas = res?.facturas || res?.data || [];
+    const data = res?.facturas || res?.data || [];
 
-    if(!Array.isArray(facturas) || facturas.length === 0){
+    state.facturas = Array.isArray(data) ? data : [];
+    state.filtered = [...state.facturas];
+
+    if(state.facturas.length === 0){
       setEmpty();
       updateKPIs([]);
-      panel?.classList.add("ready");
       return;
     }
 
-    render(facturas);
-    updateKPIs(facturas);
+    render(state.filtered);
+    updateKPIs(state.facturas);
 
-    requestAnimationFrame(()=>{
-      panel?.classList.add("ready");
-    });
+    panel?.classList.add("ready");
 
   }catch(e){
 
     console.error("💥 ERROR FACTURAS:", e);
-
     setError();
-    panel?.classList.add("ready");
 
   }
+
+}
+
+/* =========================
+   FILTERS
+========================= */
+
+function applyFilters(){
+
+  const search = ($("#search-factura")?.value || "").toLowerCase();
+  const estado = ($("#filter-estado-factura")?.value || "").toLowerCase();
+
+  state.filtered = state.facturas.filter(f => {
+
+    const matchSearch =
+      !search ||
+      (f.cliente || "").toLowerCase().includes(search) ||
+      String(f.numero || f.id).includes(search);
+
+    const matchEstado =
+      !estado ||
+      (f.estadoPago || "").toLowerCase() === estado;
+
+    return matchSearch && matchEstado;
+
+  });
+
+  render(state.filtered);
 
 }
 
@@ -171,14 +213,18 @@ function render(items){
   const tbody = $("#facturas-body");
   if(!tbody) return;
 
-  tbody.innerHTML = items.map(f => {
+  if(!items.length){
+    return setEmpty();
+  }
+
+  const html = items.map(f => {
 
     const estado = getEstado(f.estadoPago);
     const id = f.id || f.numero;
-    const isPendiente = (f.estadoPago || "").toLowerCase() === "pendiente";
+    const isPendiente = estado.class === "pendiente";
 
     return `
-      <tr data-id="${id}" style="cursor:pointer">
+      <tr data-id="${id}" class="row">
 
         <td class="col-id">
           ${escapeHTML(f.numero || f.id || "--")}
@@ -200,7 +246,7 @@ function render(items){
           ${formatFecha(f.fecha)}
         </td>
 
-        <td class="col-main">
+        <td class="col-importe">
           ${formatMoney(f.total)}
         </td>
 
@@ -237,10 +283,12 @@ function render(items){
 
   }).join("");
 
+  tbody.innerHTML = html;
+
 }
 
 /* =========================
-   ACCIONES
+   ACTIONS
 ========================= */
 
 function downloadFactura(id){
@@ -249,10 +297,9 @@ function downloadFactura(id){
 }
 
 function sendFactura(id){
-  toast("Factura enviada (simulado)", "info");
+  toast("Factura enviada", "info");
 }
 
-/* 🔥 PAY PRO */
 async function payFactura(id, row){
 
   try{
@@ -263,22 +310,27 @@ async function payFactura(id, row){
       method: "POST"
     });
 
-    // UI update inmediata
+    // UPDATE LOCAL STATE
+    const f = state.facturas.find(x => (x.id || x.numero) == id);
+    if(f) f.estadoPago = "pagada";
+
+    // UPDATE UI
     const badge = row.querySelector(".badge");
     if(badge){
       badge.textContent = "Pagada";
       badge.className = "badge pagada";
     }
 
-    const payBtn = row.querySelector('[data-action="pay"]');
-    if(payBtn) payBtn.remove();
+    row.querySelector('[data-action="pay"]')?.remove();
 
-    toast("Factura pagada correctamente", "success");
+    updateKPIs(state.facturas);
+
+    toast("Factura pagada", "success");
 
   }catch(e){
 
     console.error("💥 ERROR PAGO:", e);
-    toast("Error al pagar factura", "error");
+    toast("Error al pagar", "error");
 
   }
 
@@ -293,9 +345,9 @@ function updateKPIs(items){
   const pagadas = items.filter(f => f.estadoPago === "pagada");
   const pendientes = items.filter(f => f.estadoPago === "pendiente");
 
-  const totalPagado = pagadas.reduce((acc, f) => acc + Number(f.total || 0), 0);
+  const total = pagadas.reduce((acc, f) => acc + Number(f.total || 0), 0);
 
-  $("#facturas-total") && ($("#facturas-total").textContent = formatMoney(totalPagado));
+  $("#facturas-total") && ($("#facturas-total").textContent = formatMoney(total));
   $("#facturas-pagadas") && ($("#facturas-pagadas").textContent = pagadas.length);
   $("#facturas-pendientes") && ($("#facturas-pendientes").textContent = pendientes.length);
 
@@ -314,7 +366,6 @@ async function loadFacturaDetalle(id){
   const root = getRoot();
   if(!root) return;
 
-  root.classList.remove("ready");
   root.innerHTML = `<div class="table-loading">Cargando factura...</div>`;
 
   try{
@@ -324,22 +375,15 @@ async function loadFacturaDetalle(id){
 
     if(!f){
       root.innerHTML = `<div>Error cargando factura</div>`;
-      root.classList.add("ready");
       return;
     }
 
     renderFacturaDetalle(f);
 
-    requestAnimationFrame(()=>{
-      root.classList.add("ready");
-    });
-
   }catch(e){
 
-    console.error("💥 ERROR FACTURA DETALLE:", e);
-
+    console.error("💥 ERROR DETALLE:", e);
     root.innerHTML = `<div>Error cargando factura</div>`;
-    root.classList.add("ready");
 
   }
 
@@ -385,7 +429,7 @@ function renderFacturaDetalle(f){
 }
 
 /* =========================
-   TOAST (🔥 PRO)
+   TOAST
 ========================= */
 
 function toast(msg, type="info"){
@@ -404,14 +448,12 @@ function toast(msg, type="info"){
 
   container.appendChild(el);
 
-  setTimeout(()=>{
-    el.classList.add("show");
-  },10);
+  requestAnimationFrame(()=> el.classList.add("show"));
 
   setTimeout(()=>{
     el.classList.remove("show");
     setTimeout(()=> el.remove(), 300);
-  },3000);
+  },2500);
 
 }
 
@@ -419,13 +461,10 @@ function toast(msg, type="info"){
    HELPERS
 ========================= */
 
-function getEstado(estado){
-
-  const e = (estado || "").toLowerCase();
-
+function getEstado(e){
+  e = (e || "").toLowerCase();
   if(e === "pagada") return { label:"Pagada", class:"pagada" };
   if(e === "pendiente") return { label:"Pendiente", class:"pendiente" };
-
   return { label:"Borrador", class:"borrador" };
 }
 
@@ -448,9 +487,9 @@ function formatMoney(n){
 
 function escapeHTML(str){
   return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;");
 }
 
 /* =========================

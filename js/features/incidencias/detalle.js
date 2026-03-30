@@ -167,14 +167,24 @@ function render(i){
 
   /* USER */
   setText("#detalle-usuario", i?.cliente?.nombre);
-  setText("#detalle-userid", "UserID: " + (i?.userId || "--"));
-  setText("#detalle-clienteid", "ClienteID: " + (i?.clienteId || "--"));
+
+  // 🔥 SOLO ID, SIN TEXTO
+  setText("#detalle-userid", i?.userId || "--");
+
+  // ❌ eliminado clienteId (ya no se usa)
 
   /* HEADER */
   setText("#detalle-id", i?.id);
   setText("#detalle-fecha", formatFecha(i?.createdAt));
   setText("#detalle-fecha-cierre", formatFecha(i?.closedAt));
-  setText("#detalle-tecnico", i?.assignedTo || "--");
+
+  // 🔥 FIX técnico (evita [object Object])
+  const tecnico =
+    typeof i?.assignedTo === "object"
+      ? i?.assignedTo?.name
+      : i?.assignedTo;
+
+  setText("#detalle-tecnico", tecnico || "--");
 
   /* CONTENT */
   setText("#detalle-titulo", i?.subject);

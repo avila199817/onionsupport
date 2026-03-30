@@ -153,14 +153,12 @@ function applyFilters(){
 
   filteredItems = currentItems.filter(f => {
 
-    const cliente = getClienteNombre(f).toLowerCase();
-    const id = String(f.numeroFacturaLegal || f.id || "").toLowerCase();
-
-    const e = mapEstadoPago(f.estadoPago);
+    const cliente = (f.cliente?.nombre || "").toLowerCase();
+    const id = String(f.numero || f.id || "").toLowerCase();
 
     return (
       (!search || cliente.includes(search) || id.includes(search)) &&
-      (!estado || e === estado)
+      (!estado || (f.estadoPago || "").toLowerCase() === estado)
     );
 
   });
@@ -254,32 +252,22 @@ function mapItem(f){
 
   return {
     id: f.id,
-    numero: f.numeroFacturaLegal || f.id || "--",
+    numero: f.numero || f.numeroFacturaLegal || f.id || "--",
 
-    cliente: getClienteNombre(f),
+    cliente: f.cliente?.nombre || "Cliente",
 
-    avatar: f?.cliente?.avatar || null, // 🔥 CLAVE
+    avatar: f.cliente?.avatar || null,
 
-    fecha: formatFecha(f.fechaFactura),
+    fecha: formatFecha(f.fecha),
     total: formatMoney(f.total),
 
-    estadoPago: getEstadoPago(f),
-    estadoFactura: getEstadoFactura(f),
+    estadoPago: getEstadoPago(f.estadoPago, f.fecha),
+    estadoFactura: getEstadoFactura(f.estado),
 
     metodo: f.formaPago || "-",
     fechaEnvio: f.fechaEnvio ? formatFecha(f.fechaEnvio) : "-"
   };
 
-}
-
-/* =========================
-   CLIENTE
-========================= */
-
-function getClienteNombre(f){
-  return f?.cliente?.nombreContacto ||
-         f?.cliente?.razonSocial ||
-         "Cliente";
 }
 
 /* =========================
@@ -299,17 +287,11 @@ function renderAvatar(d){
    ESTADOS
 ========================= */
 
-function mapEstadoPago(e){
+function getEstadoPago(e, fecha){
+
   e = (e || "").toLowerCase();
-  if(e === "pagada") return "pagada";
-  return "pendiente";
-}
 
-function getEstadoPago(f){
-
-  const e = (f.estadoPago || "").toLowerCase();
-
-  if(e !== "pagada" && isVencida(f.fechaFactura)){
+  if(e !== "pagada" && isVencida(fecha)){
     return { label:"Vencida", class:"error" };
   }
 
@@ -320,9 +302,9 @@ function getEstadoPago(f){
   return { label:"Pendiente", class:"warning" };
 }
 
-function getEstadoFactura(f){
+function getEstadoFactura(e){
 
-  const e = (f.estado || "").toLowerCase();
+  e = (e || "").toLowerCase();
 
   if(e === "emitida") return { label:"Emitida", class:"info" };
   if(e === "borrador") return { label:"Borrador", class:"neutral" };

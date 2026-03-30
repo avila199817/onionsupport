@@ -63,7 +63,6 @@ function bindEvents(){
 
   Onion.cleanupEvent(root, "click", (e)=>{
 
-    // 🔥 EVITA CLICK EN BOTONES (igual incidencias)
     if(e.target.closest("button")) return;
 
     const row = e.target.closest("tr[data-id]");
@@ -72,7 +71,6 @@ function bindEvents(){
     const id = row.dataset.id;
     if(!id) return;
 
-    // 🔥 NAVEGACIÓN REAL AL DETALLE
     Onion.router.navigate("/facturas/detalle?id=" + id);
 
   });
@@ -155,10 +153,10 @@ function applyFilters(){
 
   filteredItems = currentItems.filter(f => {
 
-    const cliente = (f.cliente || "").toLowerCase();
-    const id = String(f.numero || f.id || "").toLowerCase();
+    const cliente = getClienteNombre(f).toLowerCase();
+    const id = String(f.numeroFacturaLegal || f.id || "").toLowerCase();
 
-    const e = mapEstado(f.estadoPago);
+    const e = mapEstadoPago(f.estadoPago);
 
     return (
       (!search || cliente.includes(search) || id.includes(search)) &&
@@ -176,24 +174,18 @@ function applyFilters(){
 ========================= */
 
 function setLoading(){
-  const el = $("#facturas-body");
-  if(el){
-    el.innerHTML = `<tr><td colspan="6">Cargando facturas...</td></tr>`;
-  }
+  $("#facturas-body").innerHTML =
+    `<tr><td colspan="8">Cargando facturas...</td></tr>`;
 }
 
 function setEmpty(){
-  const el = $("#facturas-body");
-  if(el){
-    el.innerHTML = `<tr><td colspan="6">No hay facturas</td></tr>`;
-  }
+  $("#facturas-body").innerHTML =
+    `<tr><td colspan="8">No hay facturas</td></tr>`;
 }
 
 function setError(){
-  const el = $("#facturas-body");
-  if(el){
-    el.innerHTML = `<tr><td colspan="6">Error cargando facturas</td></tr>`;
-  }
+  $("#facturas-body").innerHTML =
+    `<tr><td colspan="8">Error cargando facturas</td></tr>`;
 }
 
 /* =========================
@@ -212,9 +204,9 @@ function render(items){
     return `
       <tr data-id="${d.id}" style="cursor:pointer">
 
-        <td>${d.id}</td>
+        <td class="col-id">${d.numero}</td>
 
-        <td>
+        <td class="col-main">
           <div class="cell-user">
             <div class="table-avatar">
               ${getInitials(d.cliente)}
@@ -225,27 +217,25 @@ function render(items){
           </div>
         </td>
 
-        <td>${d.fecha}</td>
+        <td class="col-date">${d.fecha}</td>
 
-        <td>${d.total}</td>
+        <td class="col-importe">${d.total}</td>
 
-        <td><span class="badge ${d.estado.class}">${d.estado.label}</span></td>
-
-        <td>
-          <div class="actions">
-
-            <button class="btn-action" onclick="event.stopPropagation(); window.open('${Onion.config.API}/facturas/${d.id}/pdf')">
-              Descargar
-            </button>
-
-            ${
-              d.estado.raw === "pendiente"
-              ? `<button class="btn-action btn-pay" onclick="event.stopPropagation(); pagarFactura('${d.id}', this)">Pagar</button>`
-              : ""
-            }
-
-          </div>
+        <td class="col-status">
+          <span class="badge ${d.estadoPago.class}">
+            ${d.estadoPago.label}
+          </span>
         </td>
+
+        <td class="col-status">
+          <span class="badge ${d.estadoFactura.class}">
+            ${d.estadoFactura.label}
+          </span>
+        </td>
+
+        <td class="col-method">${d.metodo}</td>
+
+        <td class="col-date">${d.fechaEnvio}</td>
 
       </tr>
     `;
@@ -263,59 +253,87 @@ function render(items){
 function mapItem(f){
 
   return {
-    id: f.id || f.numero || "--",
-    cliente: f.cliente || "Cliente",
-    fecha: formatFecha(f.fecha),
+    id: f.id,
+    numero: f.numeroFacturaLegal || f.id || "--",
+    cliente: getClienteNombre(f),
+    fecha: formatFecha(f.fechaFactura),
     total: formatMoney(f.total),
-    estado: getEstado(f.estadoPago),
-    estadoRaw: mapEstado(f.estadoPago)
+
+    estadoPago: getEstadoPago(f),
+    estadoFactura: getEstadoFactura(f),
+
+    metodo: f.formaPago || "-",
+    fechaEnvio: f.fechaEnvio ? formatFecha(f.fechaEnvio) : "-"
   };
 
 }
 
 /* =========================
-   ACTION GLOBAL (PAY)
+   CLIENTE
 ========================= */
 
-window.pagarFactura = async function(id, btn){
-
-  try{
-
-    await Onion.fetch(Onion.config.API + "/facturas/" + id + "/pagar", {
-      method:"POST"
-    });
-
-    const row = btn.closest("tr");
-
-    row.querySelector(".badge").textContent = "Pagada";
-    row.querySelector(".badge").className = "badge pagada";
-
-    btn.remove();
-
-    toast("Factura pagada");
-
-  }catch(e){
-    console.error(e);
-    toast("Error al pagar");
-  }
-
-};
+function getClienteNombre(f){
+  return f?.cliente?.razonSocial ||
+         f?.cliente?.nombreContacto ||
+         "Cliente";
+}
 
 /* =========================
-   HELPERS
+   ESTADOS
 ========================= */
 
-function mapEstado(e){
+function mapEstadoPago(e){
   e = (e || "").toLowerCase();
   if(e === "pagada") return "pagada";
   return "pendiente";
 }
 
-function getEstado(e){
-  e = (e || "").toLowerCase();
-  if(e === "pagada") return { label:"Pagada", class:"pagada", raw:"pagada" };
-  return { label:"Pendiente", class:"pendiente", raw:"pendiente" };
+function getEstadoPago(f){
+
+  const e = (f.estadoPago || "").toLowerCase();
+
+  // 🔥 DETECTAR VENCIDA
+  if(e !== "pagada" && isVencida(f.fechaFactura)){
+    return { label:"Vencida", class:"error" };
+  }
+
+  if(e === "pagada"){
+    return { label:"Pagada", class:"success" };
+  }
+
+  return { label:"Pendiente", class:"warning" };
 }
+
+function getEstadoFactura(f){
+
+  const e = (f.estado || "").toLowerCase();
+
+  if(e === "emitida") return { label:"Emitida", class:"info" };
+  if(e === "borrador") return { label:"Borrador", class:"neutral" };
+  if(e === "anulada") return { label:"Anulada", class:"error" };
+
+  return { label:"-", class:"" };
+}
+
+/* =========================
+   VENCIMIENTO
+========================= */
+
+function isVencida(fecha){
+
+  if(!fecha) return false;
+
+  const f = new Date(fecha);
+  const hoy = new Date();
+
+  const diff = (hoy - f) / (1000 * 60 * 60 * 24);
+
+  return diff > 30; // 🔥 configurable
+}
+
+/* =========================
+   HELPERS
+========================= */
 
 function formatFecha(f){
   if(!f) return "--";
@@ -347,35 +365,6 @@ function debounce(fn, delay){
     clearTimeout(t);
     t = setTimeout(()=> fn.apply(this, args), delay);
   };
-}
-
-/* =========================
-   TOAST
-========================= */
-
-function toast(msg){
-
-  let c = document.getElementById("toast-container");
-
-  if(!c){
-    c = document.createElement("div");
-    c.id = "toast-container";
-    document.body.appendChild(c);
-  }
-
-  const el = document.createElement("div");
-  el.className = "toast";
-  el.textContent = msg;
-
-  c.appendChild(el);
-
-  requestAnimationFrame(()=> el.classList.add("show"));
-
-  setTimeout(()=>{
-    el.classList.remove("show");
-    setTimeout(()=> el.remove(), 300);
-  },2000);
-
 }
 
 })();

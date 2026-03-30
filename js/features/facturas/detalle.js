@@ -1,0 +1,311 @@
+"use strict";
+
+(function(){
+
+const Onion = window.Onion;
+
+if(!Onion){
+  console.error("💥 Onion no disponible (factura detalle)");
+  return;
+}
+
+let initialized = false;
+let factura = null;
+
+/* =========================
+   ROOT
+========================= */
+
+function getRoot(){
+  return document.querySelector(".panel-content.factura-detalle");
+}
+
+function $(selector){
+  const root = getRoot();
+  return root ? root.querySelector(selector) : null;
+}
+
+/* =========================
+   INIT
+========================= */
+
+function init(){
+
+  const root = getRoot();
+  if(!root || initialized) return;
+
+  if(!Onion.state?.user){
+    return setTimeout(init, 100);
+  }
+
+  initialized = true;
+
+  const id = getIdFromURL();
+  if(!id){
+    console.error("❌ ID no encontrado");
+    return;
+  }
+
+  bindEvents();
+  loadFactura(id);
+
+  Onion.onCleanup(()=>{
+    initialized = false;
+    factura = null;
+  });
+
+}
+
+init();
+
+/* =========================
+   GET ID
+========================= */
+
+function getIdFromURL(){
+  const params = new URLSearchParams(window.location.search);
+  return params.get("id");
+}
+
+/* =========================
+   EVENTS
+========================= */
+
+function bindEvents(){
+
+  $("#btn-back")?.addEventListener("click", ()=>{
+    Onion.router.navigate("/facturas");
+  });
+
+  $("#btn-save")?.addEventListener("click", saveFactura);
+
+  $("#btn-attach-detalle")?.addEventListener("click", ()=>{
+    $("#detalle-files")?.click();
+  });
+
+  $("#detalle-files")?.addEventListener("change", handleFiles);
+
+}
+
+/* =========================
+   LOAD
+========================= */
+
+async function loadFactura(id){
+
+  try{
+
+    const res = await Onion.fetch(Onion.config.API + "/facturas/" + id);
+    factura = res?.factura || res?.data || res;
+
+    if(!factura){
+      console.error("❌ Factura no encontrada");
+      return;
+    }
+
+    render();
+
+  }catch(e){
+    console.error("💥 ERROR FACTURA DETALLE:", e);
+  }
+
+}
+
+/* =========================
+   RENDER
+========================= */
+
+function render(){
+
+  if(!factura) return;
+
+  // USER
+  $("#detalle-cliente").textContent = factura.cliente || "Cliente";
+  $("#detalle-cliente-id").textContent = factura.clienteId || "";
+
+  $("#detalle-avatar").textContent = getInitials(factura.cliente);
+
+  // DATA
+  $("#detalle-id").textContent = factura.id || factura.numero || "--";
+  $("#detalle-fecha").textContent = formatFecha(factura.fecha);
+  $("#detalle-vencimiento").textContent = formatFecha(factura.vencimiento);
+
+  $("#detalle-metodo").textContent = factura.metodo || "-";
+  $("#detalle-total").textContent = formatMoney(factura.total);
+
+  $("#detalle-concepto").textContent = factura.concepto || "-";
+  $("#detalle-descripcion").textContent = factura.descripcion || "";
+
+  // SELECTS
+  $("#edit-estado").value = mapEstado(factura.estadoPago);
+  $("#edit-iva").value = factura.iva || "21";
+
+  // FILES
+  renderFiles(factura.archivos || []);
+
+  // SIDEBAR
+  renderSidebar();
+
+}
+
+/* =========================
+   FILES
+========================= */
+
+function renderFiles(files){
+
+  const list = $("#detalle-file-list");
+  if(!list) return;
+
+  list.innerHTML = files.map(f=>`
+    <div class="file-item">
+      <span>${escapeHTML(f.nombre)}</span>
+      <button class="file-remove" onclick="removeFile('${f.id}')">✕</button>
+    </div>
+  `).join("");
+
+}
+
+window.removeFile = function(id){
+  factura.archivos = (factura.archivos || []).filter(f=>f.id !== id);
+  renderFiles(factura.archivos);
+};
+
+/* =========================
+   SIDEBAR
+========================= */
+
+function renderSidebar(){
+
+  const docs = $("#detalle-blobs-docs");
+
+  if(docs){
+    docs.innerHTML = (factura.archivos || []).map(f=>`
+      <div class="blob-item">
+        <span>${escapeHTML(f.nombre)}</span>
+        <div class="blob-actions">
+          <button class="blob-download" onclick="window.open('${f.url}','_blank')">
+            Ver
+          </button>
+        </div>
+      </div>
+    `).join("");
+  }
+
+}
+
+/* =========================
+   SAVE
+========================= */
+
+async function saveFactura(){
+
+  try{
+
+    const payload = {
+      estadoPago: $("#edit-estado").value,
+      iva: $("#edit-iva").value,
+      descripcion: $("#detalle-descripcion").textContent
+    };
+
+    await Onion.fetch(Onion.config.API + "/facturas/" + factura.id, {
+      method:"PUT",
+      body: JSON.stringify(payload)
+    });
+
+    toast("Factura actualizada");
+
+  }catch(e){
+    console.error(e);
+    toast("Error al guardar");
+  }
+
+}
+
+/* =========================
+   FILE UPLOAD
+========================= */
+
+function handleFiles(e){
+
+  const files = Array.from(e.target.files);
+
+  factura.archivos = factura.archivos || [];
+
+  files.forEach(file=>{
+    factura.archivos.push({
+      id: Date.now() + file.name,
+      nombre: file.name,
+      file
+    });
+  });
+
+  renderFiles(factura.archivos);
+
+}
+
+/* =========================
+   HELPERS
+========================= */
+
+function mapEstado(e){
+  e = (e || "").toLowerCase();
+  if(e === "pagada") return "paid";
+  if(e === "cancelada") return "cancelled";
+  return "pending";
+}
+
+function formatFecha(f){
+  if(!f) return "--";
+  return new Date(f).toLocaleDateString("es-ES");
+}
+
+function formatMoney(n){
+  return Number(n || 0).toLocaleString("es-ES", {
+    minimumFractionDigits:2,
+    maximumFractionDigits:2
+  }) + " €";
+}
+
+function getInitials(name){
+  if(!name) return "?";
+  return name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase();
+}
+
+function escapeHTML(str){
+  return String(str)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;");
+}
+
+/* =========================
+   TOAST
+========================= */
+
+function toast(msg){
+
+  let c = document.getElementById("toast-container");
+
+  if(!c){
+    c = document.createElement("div");
+    c.id = "toast-container";
+    document.body.appendChild(c);
+  }
+
+  const el = document.createElement("div");
+  el.className = "toast";
+  el.textContent = msg;
+
+  c.appendChild(el);
+
+  requestAnimationFrame(()=> el.classList.add("show"));
+
+  setTimeout(()=>{
+    el.classList.remove("show");
+    setTimeout(()=> el.remove(), 300);
+  },2000);
+
+}
+
+})();

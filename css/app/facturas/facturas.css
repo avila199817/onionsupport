@@ -1,5 +1,5 @@
 /* =========================================================
-   FACTURAS — PRO SAAS PANEL (AISLADO)
+   FACTURAS — PRO SAAS PANEL (OPTIMIZADO FULL WIDTH)
 ========================================================= */
 
 .panel-content.facturas{
@@ -8,7 +8,6 @@
   height:100%;
   width:100%;
 }
-
 
 /* =========================================================
    TABLE WRAPPER
@@ -22,16 +21,14 @@
   width:100%;
 }
 
-
 /* =========================================================
-   FILTERS (HEADER)
+   FILTERS
 ========================================================= */
 
 .panel-content.facturas .filters-row{
   display:flex;
   align-items:center;
   gap:10px;
-
   padding:12px 16px;
 
   background:var(--panel-bg);
@@ -46,13 +43,11 @@
 .panel-content.facturas .filters-row input,
 .panel-content.facturas .filters-row select{
   padding:10px 12px;
-
   border-radius:8px;
   border:1px solid var(--card-border);
 
   background:var(--card-bg);
   color:var(--text);
-
   font-size:13px;
 }
 
@@ -70,7 +65,6 @@
   color:#fff;
 
   font-weight:600;
-
   border:none;
   cursor:pointer;
 
@@ -82,7 +76,6 @@
   transform:translateY(-1px);
   box-shadow:0 10px 26px rgba(99,102,241,0.45);
 }
-
 
 /* =========================================================
    TABLE CONTAINER
@@ -96,7 +89,6 @@
 
   background:var(--panel-bg);
 }
-
 
 /* =========================================================
    TABLE BASE
@@ -117,7 +109,6 @@
 
 .panel-content.facturas th{
   padding:10px 14px;
-
   text-align:left;
 
   border-bottom:1px solid var(--panel-border);
@@ -132,7 +123,6 @@
 
 .panel-content.facturas td{
   padding:12px 14px;
-
   border-bottom:1px solid var(--panel-border);
 
   font-size:13.5px;
@@ -144,26 +134,31 @@
   text-overflow:ellipsis;
 }
 
-
 /* =========================================================
-   COLUMN SYSTEM
+   🔥 COLUMN SYSTEM (FULL WIDTH REAL)
 ========================================================= */
 
 .panel-content.facturas .col-id{
-  width:140px;
+  width:110px;
   font-size:11px;
   color:var(--dim);
 }
 
 .panel-content.facturas .col-main{
-  width:28%;
+  width:40%; /* 🔥 más protagonismo al cliente */
   font-weight:500;
   white-space:normal;
   line-height:1.4;
 }
 
 .panel-content.facturas .col-date{
-  width:130px;
+  width:120px;
+}
+
+.panel-content.facturas .col-importe{
+  width:140px;
+  text-align:right; /* 🔥 PRO */
+  font-weight:600;
 }
 
 .panel-content.facturas .col-status{
@@ -171,10 +166,9 @@
 }
 
 .panel-content.facturas .col-actions{
-  width:120px;
+  width:140px;
   text-align:right;
 }
-
 
 /* =========================================================
    ROWS
@@ -193,9 +187,8 @@
   transform:translateX(2px);
 }
 
-
 /* =========================================================
-   ESTADO BADGES
+   BADGES
 ========================================================= */
 
 .panel-content.facturas .badge{
@@ -215,9 +208,8 @@
   background:color-mix(in srgb, var(--warning), transparent 85%);
 }
 
-
 /* =========================================================
-   ACCIONES
+   ACTIONS
 ========================================================= */
 
 .panel-content.facturas .actions{
@@ -244,9 +236,8 @@
   background:color-mix(in srgb, var(--card-bg), #fff 6%);
 }
 
-
 /* =========================================================
-   LOADING STATE
+   LOADING
 ========================================================= */
 
 .panel-content.facturas tr.loading td{
@@ -255,7 +246,6 @@
   color:var(--dim);
   font-size:13px;
 }
-
 
 /* =========================================================
    SCROLLBAR

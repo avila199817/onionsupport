@@ -32,7 +32,8 @@ function init(){
 
   bindEvents();
   loadDetalle();
-  observeDOM();
+  observeDOM(); // ✅ YA EXISTE
+
 }
 
 init();
@@ -56,6 +57,27 @@ function $(selector){
 function getAuthHeaders(){
   const token = Onion.auth?.getToken?.();
   return token ? { Authorization: "Bearer " + token } : {};
+}
+
+
+/* =========================
+   OBSERVER (FIX)
+========================= */
+function observeDOM(){
+
+  if(observer) return;
+
+  observer = new MutationObserver(()=>{
+    if(!getRoot()){
+      initialized = false;
+      setTimeout(init, 100);
+    }
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
 }
 
 
@@ -146,19 +168,21 @@ async function loadDetalle(){
       headers: getAuthHeaders()
     });
 
+    if(!res.ok) throw new Error("API ERROR");
+
     const json = await res.json();
     currentItem = json?.ticket || json;
 
     render(currentItem);
 
   }catch(err){
-    console.error(err);
+    console.error("💥 loadDetalle:", err);
   }
 }
 
 
 /* =========================
-   🔥 UPLOAD CON PROGRESO
+   UPLOAD (SAS)
 ========================= */
 function uploadFile(file){
 
@@ -179,30 +203,25 @@ function uploadFile(file){
         })
       });
 
+      if(!res.ok) return reject("SAS ERROR");
+
       const { uploadUrl, blobUrl } = await res.json();
 
       const xhr = new XMLHttpRequest();
 
       xhr.open("PUT", uploadUrl, true);
       xhr.setRequestHeader("x-ms-blob-type", "BlockBlob");
-      xhr.setRequestHeader("Content-Type", file.type);
-
-      xhr.upload.onprogress = (e)=>{
-        if(e.lengthComputable){
-          const percent = Math.round((e.loaded / e.total) * 100);
-          console.log(`📦 ${file.name} → ${percent}%`);
-        }
-      };
+      xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
 
       xhr.onload = ()=>{
         if(xhr.status >= 200 && xhr.status < 300){
           resolve({ name: file.name, url: blobUrl });
         }else{
-          reject("UPLOAD ERROR");
+          reject("UPLOAD FAILED");
         }
       };
 
-      xhr.onerror = reject;
+      xhr.onerror = ()=> reject("XHR ERROR");
 
       xhr.send(file);
 
@@ -247,6 +266,8 @@ async function updateTicket(){
       })
     });
 
+    if(!res.ok) throw new Error("UPDATE ERROR");
+
     const json = await res.json();
     currentItem = json?.ticket || json;
 
@@ -258,7 +279,7 @@ async function updateTicket(){
     showToast("✔ Guardado");
 
   }catch(err){
-    console.error(err);
+    console.error("💥 updateTicket:", err);
     showToast("❌ Error");
   }
 
@@ -272,15 +293,15 @@ async function updateTicket(){
 ========================= */
 function render(i){
 
-  setText("#detalle-usuario", i.cliente?.nombre);
-  setText("#detalle-id", i.id);
-  setText("#detalle-titulo", i.subject);
-  setText("#detalle-fecha", formatFecha(i.createdAt));
+  setText("#detalle-usuario", i?.cliente?.nombre);
+  setText("#detalle-id", i?.id);
+  setText("#detalle-titulo", i?.subject);
+  setText("#detalle-fecha", formatFecha(i?.createdAt));
 
-  $("#detalle-mensaje").textContent = i.message || "";
+  $("#detalle-mensaje").textContent = i?.message || "";
 
-  renderAvatar(i.cliente?.nombre, i.cliente?.avatar);
-  renderBlobs(i.attachments || []);
+  renderAvatar(i?.cliente?.nombre, i?.cliente?.avatar);
+  renderBlobs(i?.attachments || []);
 }
 
 
@@ -308,6 +329,11 @@ function renderBlobs(files){
 
   const c = $("#detalle-blobs");
   if(!c) return;
+
+  if(!files.length){
+    c.innerHTML = `<div class="detalle-hint">Sin archivos</div>`;
+    return;
+  }
 
   c.innerHTML = files.map(f => `
     <div class="blob-item">

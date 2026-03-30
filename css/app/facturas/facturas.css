@@ -1,13 +1,208 @@
 /* =========================================================
-   🔥 BOTONES PRO (SAAS LEVEL)
+   FACTURAS — FINAL PRO SAAS 10/10
 ========================================================= */
 
-.panel-content.facturas .btn-action{
-  position:relative;
+.panel-content.facturas{
+  display:flex;
+  flex-direction:column;
+  height:100%;
+  width:100%;
+}
 
-  display:inline-flex;
+/* =========================================================
+   TABLE SYSTEM
+========================================================= */
+
+.panel-content.facturas .table-system{
+  display:flex;
+  flex-direction:column;
+  flex:1;
+  min-height:0;
+}
+
+/* =========================================================
+   FILTERS
+========================================================= */
+
+.panel-content.facturas .filters-row{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:12px 16px;
+
+  background:var(--panel-bg);
+  border-bottom:1px solid var(--panel-border);
+}
+
+.panel-content.facturas .filters-row input{
+  flex:1;
+  min-width:220px;
+}
+
+.panel-content.facturas .filters-row input,
+.panel-content.facturas .filters-row select{
+  padding:10px 12px;
+  border-radius:8px;
+  border:1px solid var(--card-border);
+
+  background:var(--card-bg);
+  color:var(--text);
+  font-size:13px;
+}
+
+.panel-content.facturas .btn-new-factura{
+  margin-left:auto;
+
+  padding:10px 18px;
+  border-radius:999px;
+
+  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
+  color:#fff;
+
+  font-weight:600;
+  border:none;
+  cursor:pointer;
+
+  transition:.2s;
+}
+
+/* =========================================================
+   TABLE BASE
+========================================================= */
+
+.panel-content.facturas .table-container{
+  flex:1;
+  overflow:auto;
+}
+
+.panel-content.facturas table{
+  width:100%;
+  border-collapse:collapse;
+  table-layout:fixed;
+}
+
+.panel-content.facturas thead{
+  position:sticky;
+  top:0;
+  background:var(--panel-bg);
+  z-index:2;
+}
+
+.panel-content.facturas th{
+  padding:10px 14px;
+  text-align:left;
+
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:.3px;
+
+  color:var(--dim);
+  border-bottom:1px solid var(--panel-border);
+}
+
+.panel-content.facturas td{
+  padding:10px 14px;
+  border-bottom:1px solid var(--panel-border);
+  font-size:13px;
+}
+
+/* =========================================================
+   🔥 COLUMN SYSTEM PERFECTO
+========================================================= */
+
+.panel-content.facturas .col-id{
+  width:130px;
+  color:var(--dim);
+  font-size:11px;
+}
+
+.panel-content.facturas .col-main{
+  width:38%;
+}
+
+.panel-content.facturas .col-date{
+  width:110px;
+}
+
+.panel-content.facturas .col-importe{
+  width:130px;
+  text-align:right;
+  font-weight:600;
+}
+
+.panel-content.facturas .col-status{
+  width:110px;
+}
+
+.panel-content.facturas .col-actions{
+  width:230px;
+  text-align:right;
+}
+
+/* =========================================================
+   🔥 CLIENTE (CLON INCIDENCIAS PERFECTO)
+========================================================= */
+
+.panel-content.facturas .cell-user{
+  display:flex;
+  align-items:center;
+  gap:12px;
+}
+
+.panel-content.facturas .table-avatar{
+  width:32px;
+  height:32px;
+  border-radius:50%;
+
+  display:flex;
   align-items:center;
   justify-content:center;
+
+  background:linear-gradient(135deg,#6366f1,#8b5cf6);
+  color:#fff;
+  font-size:11px;
+  font-weight:600;
+}
+
+.panel-content.facturas .user-name{
+  font-weight:600;
+  color:#e5e7eb;
+}
+
+/* =========================================================
+   BADGES
+========================================================= */
+
+.panel-content.facturas .badge{
+  padding:4px 10px;
+  border-radius:999px;
+  font-size:11px;
+  font-weight:600;
+}
+
+.panel-content.facturas .badge.pagada{
+  color:var(--success);
+  background:color-mix(in srgb, var(--success), transparent 85%);
+}
+
+.panel-content.facturas .badge.pendiente{
+  color:var(--warning);
+  background:color-mix(in srgb, var(--warning), transparent 85%);
+}
+
+/* =========================================================
+   🔥 BOTONES (LIMPIOS Y NO ROTOS)
+========================================================= */
+
+.panel-content.facturas .actions{
+  display:flex;
+  justify-content:flex-end;
+  gap:8px;
+}
+
+.panel-content.facturas .btn-action{
+  display:inline-flex;
+  align-items:center;
   gap:6px;
 
   height:30px;
@@ -16,203 +211,52 @@
   border-radius:8px;
   border:1px solid var(--card-border);
 
-  background:rgba(255,255,255,0.02);
-  backdrop-filter:blur(6px);
-
+  background:transparent;
   color:var(--text);
+
   font-size:12px;
   font-weight:500;
 
-  cursor:pointer;
   white-space:nowrap;
+  cursor:pointer;
 
-  transition:
-    background .2s ease,
-    border .2s ease,
-    transform .15s ease,
-    box-shadow .2s ease;
+  transition:.15s;
 }
 
-/* hover limpio tipo Stripe */
 .panel-content.facturas .btn-action:hover{
-  background:rgba(255,255,255,0.06);
-  border-color:color-mix(in srgb, var(--accent), transparent 40%);
-  transform:translateY(-1px);
-  box-shadow:0 4px 12px rgba(0,0,0,0.25);
+  background:rgba(255,255,255,0.05);
+  border-color:var(--accent);
+  color:var(--accent);
 }
 
-/* active */
-.panel-content.facturas .btn-action:active{
-  transform:translateY(0);
-  box-shadow:none;
-}
-
-/* =========================================================
-   VARIANTES
-========================================================= */
-
-/* 📥 DESCARGAR */
-.panel-content.facturas .btn-action[data-action="download"]{
-  color:#cbd5f5;
-}
-
-/* ✉️ ENVIAR */
-.panel-content.facturas .btn-action[data-action="send"]{
-  color:#a7f3d0;
-}
-
-/* 💳 PAGAR (DESTACADO) */
+/* pagar destacado */
 .panel-content.facturas .btn-pay{
   border-color:color-mix(in srgb, var(--warning), transparent 50%);
   color:var(--warning);
-  background:color-mix(in srgb, var(--warning), transparent 92%);
 }
 
 .panel-content.facturas .btn-pay:hover{
   background:color-mix(in srgb, var(--warning), transparent 85%);
-  border-color:var(--warning);
-  box-shadow:0 4px 14px color-mix(in srgb, var(--warning), transparent 70%);
 }
 
 /* =========================================================
-   ICONOS (AUTOMÁTICOS 🔥)
-========================================================= */
-
-.panel-content.facturas .btn-action::before{
-  font-size:13px;
-  opacity:.8;
-}
-
-.panel-content.facturas .btn-action[data-action="download"]::before{
-  content:"⬇";
-}
-
-.panel-content.facturas .btn-action[data-action="send"]::before{
-  content:"✉";
-}
-
-.panel-content.facturas .btn-action[data-action="pay"]::before{
-  content:"💳";
-}
-
-/* =========================================================
-   GRUPO DE ACCIONES MÁS LIMPIO
-========================================================= */
-
-.panel-content.facturas .actions{
-  display:flex;
-  justify-content:flex-end;
-  gap:8px;
-  align-items:center;
-}
-
-/* =========================================================
-   BADGES NIVEL PRO
-========================================================= */
-
-.panel-content.facturas .badge{
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-
-  padding:4px 10px;
-  border-radius:999px;
-
-  font-size:11px;
-  font-weight:600;
-  letter-spacing:.2px;
-
-  backdrop-filter:blur(6px);
-}
-
-/* pagada glow suave */
-.panel-content.facturas .badge.pagada{
-  background:linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--success), transparent 85%),
-    color-mix(in srgb, var(--success), transparent 92%)
-  );
-  color:var(--success);
-}
-
-/* pendiente más visible */
-.panel-content.facturas .badge.pendiente{
-  background:linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--warning), transparent 85%),
-    color-mix(in srgb, var(--warning), transparent 92%)
-  );
-  color:var(--warning);
-}
-
-/* =========================================================
-   FILAS MÁS PREMIUM
+   ROWS
 ========================================================= */
 
 .panel-content.facturas tbody tr{
-  position:relative;
+  transition:.15s;
 }
 
-.panel-content.facturas tbody tr::after{
-  content:"";
-  position:absolute;
-  inset:0;
-
-  opacity:0;
-  pointer-events:none;
-
-  background:linear-gradient(
-    90deg,
-    transparent,
-    rgba(255,255,255,0.04),
-    transparent
-  );
-
-  transition:opacity .2s ease;
+.panel-content.facturas tbody tr:nth-child(even){
+  background:color-mix(in srgb, var(--panel-bg), #fff 2%);
 }
 
-.panel-content.facturas tbody tr:hover::after{
-  opacity:1;
+.panel-content.facturas tbody tr:hover{
+  background:color-mix(in srgb, var(--panel-bg), #fff 5%);
 }
 
 /* =========================================================
-   AVATAR MÁS PRO
-========================================================= */
-
-.panel-content.facturas .table-avatar{
-  background:linear-gradient(
-    135deg,
-    #6366f1,
-    #8b5cf6
-  );
-
-  box-shadow:0 4px 10px rgba(99,102,241,0.3);
-}
-
-/* =========================================================
-   TEXTO MÁS FINO
-========================================================= */
-
-.panel-content.facturas .user-name{
-  font-weight:600;
-  color:#e5e7eb;
-}
-
-.panel-content.facturas .col-id{
-  opacity:.7;
-}
-
-/* =========================================================
-   IMPORTE MÁS PREMIUM
-========================================================= */
-
-.panel-content.facturas .col-importe{
-  font-variant-numeric:tabular-nums;
-  letter-spacing:.3px;
-}
-
-/* =========================================================
-   SCROLL MÁS FINO
+   SCROLL
 ========================================================= */
 
 .panel-content.facturas .table-container::-webkit-scrollbar{

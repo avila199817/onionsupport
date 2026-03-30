@@ -12,7 +12,7 @@
       >
 
       <select id="filter-estado-factura">
-        <option value="">Estado</option>
+        <option value="">Estado pago</option>
         <option value="pagada">Pagada</option>
         <option value="pendiente">Pendiente</option>
       </select>
@@ -29,18 +29,20 @@
 
         <thead>
           <tr>
-            <th class="col-id" data-sort="numero">ID</th>
+            <th class="col-id" data-sort="numeroFacturaLegal">ID</th>
             <th class="col-main" data-sort="cliente">Cliente</th>
-            <th class="col-date" data-sort="fecha">Fecha</th>
+            <th class="col-date" data-sort="fechaFactura">Fecha</th>
             <th class="col-importe" data-sort="total">Importe</th>
-            <th class="col-status" data-sort="estadoPago">Estado</th>
-            <th class="col-actions">Acciones</th>
+            <th class="col-status" data-sort="estadoPago">Pago</th>
+            <th class="col-status" data-sort="estado">Estado</th>
+            <th class="col-method" data-sort="formaPago">Método</th>
+            <th class="col-date" data-sort="fechaEnvio">Envío</th>
           </tr>
         </thead>
 
         <tbody id="facturas-body">
           <tr class="loading">
-            <td colspan="6">Cargando facturas...</td>
+            <td colspan="8">Cargando facturas...</td>
           </tr>
         </tbody>
 

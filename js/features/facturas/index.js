@@ -10,9 +10,15 @@ if(!Onion){
 }
 
 let initialized = false;
+
 let state = {
   facturas: [],
   filtered: []
+};
+
+let sortState = {
+  key: null,
+  dir: "asc"
 };
 
 /* =========================
@@ -49,6 +55,7 @@ function init(){
     initialized = false;
     state.facturas = [];
     state.filtered = [];
+    sortState = { key:null, dir:"asc" };
   });
 
 }
@@ -89,7 +96,7 @@ function bindEvents(){
 
   });
 
-  // SEARCH (DEBOUNCE)
+  // SEARCH
   const search = $("#search-factura");
   if(search){
     let t;
@@ -99,11 +106,28 @@ function bindEvents(){
     });
   }
 
-  // FILTER ESTADO
-  const estado = $("#filter-estado-factura");
-  if(estado){
-    estado.addEventListener("change", applyFilters);
-  }
+  // FILTER
+  $("#filter-estado-factura")?.addEventListener("change", applyFilters);
+
+  // SORT
+  getRoot().querySelectorAll("th[data-sort]").forEach(th=>{
+    th.addEventListener("click", ()=>{
+
+      const key = th.dataset.sort;
+
+      if(sortState.key === key){
+        sortState.dir = sortState.dir === "asc" ? "desc" : "asc";
+      }else{
+        sortState.key = key;
+        sortState.dir = "asc";
+      }
+
+      applySort();
+      updateSortUI(th);
+      render(state.filtered);
+
+    });
+  });
 
 }
 
@@ -113,9 +137,7 @@ function bindEvents(){
 
 async function loadFacturas(){
 
-  const panel = getRoot();
   const tbody = $("#facturas-body");
-
   if(!tbody) return;
 
   setLoading();
@@ -128,22 +150,17 @@ async function loadFacturas(){
     state.facturas = Array.isArray(data) ? data : [];
     state.filtered = [...state.facturas];
 
-    if(state.facturas.length === 0){
+    if(!state.facturas.length){
       setEmpty();
-      updateKPIs([]);
       return;
     }
 
+    applySort();
     render(state.filtered);
-    updateKPIs(state.facturas);
-
-    panel?.classList.add("ready");
 
   }catch(e){
-
     console.error("💥 ERROR FACTURAS:", e);
     setError();
-
   }
 
 }
@@ -172,7 +189,57 @@ function applyFilters(){
 
   });
 
+  applySort();
   render(state.filtered);
+
+}
+
+/* =========================
+   SORT
+========================= */
+
+function applySort(){
+
+  if(!sortState.key) return;
+
+  const { key, dir } = sortState;
+
+  state.filtered.sort((a,b)=>{
+
+    let A = a[key];
+    let B = b[key];
+
+    if(key === "fecha"){
+      A = new Date(A);
+      B = new Date(B);
+    }
+
+    if(key === "total"){
+      A = Number(A);
+      B = Number(B);
+    }
+
+    if(typeof A === "string"){
+      A = A.toLowerCase();
+      B = B.toLowerCase();
+    }
+
+    if(A > B) return dir === "asc" ? 1 : -1;
+    if(A < B) return dir === "asc" ? -1 : 1;
+
+    return 0;
+
+  });
+
+}
+
+function updateSortUI(active){
+
+  getRoot().querySelectorAll("th[data-sort]").forEach(th=>{
+    th.classList.remove("asc","desc");
+  });
+
+  active.classList.add(sortState.dir);
 
 }
 
@@ -181,27 +248,18 @@ function applyFilters(){
 ========================= */
 
 function setLoading(){
-  $("#facturas-body").innerHTML = `
-    <tr class="table-loading">
-      <td colspan="6">Cargando facturas...</td>
-    </tr>
-  `;
+  $("#facturas-body").innerHTML =
+    `<tr><td colspan="6">Cargando facturas...</td></tr>`;
 }
 
 function setEmpty(){
-  $("#facturas-body").innerHTML = `
-    <tr>
-      <td colspan="6">No hay facturas</td>
-    </tr>
-  `;
+  $("#facturas-body").innerHTML =
+    `<tr><td colspan="6">No hay facturas</td></tr>`;
 }
 
 function setError(){
-  $("#facturas-body").innerHTML = `
-    <tr>
-      <td colspan="6">Error cargando facturas</td>
-    </tr>
-  `;
+  $("#facturas-body").innerHTML =
+    `<tr><td colspan="6">Error cargando facturas</td></tr>`;
 }
 
 /* =========================
@@ -217,73 +275,55 @@ function render(items){
     return setEmpty();
   }
 
-  const html = items.map(f => {
+  tbody.innerHTML = items.map(f=>{
 
     const estado = getEstado(f.estadoPago);
     const id = f.id || f.numero;
-    const isPendiente = estado.class === "pendiente";
 
     return `
-      <tr data-id="${id}" class="row">
+    <tr data-id="${id}">
 
-        <td class="col-id">
-          ${escapeHTML(f.numero || f.id || "--")}
-        </td>
+      <td class="col-id">${escapeHTML(f.numero || f.id || "--")}</td>
 
-        <td class="col-main">
-          <div class="cell-user">
-            <div class="table-avatar">
-              ${getInitials(f.cliente)}
-            </div>
-            <div class="user-info">
-              <div class="user-name">${escapeHTML(f.cliente || "-")}</div>
-              <div class="user-sub">Cliente</div>
-            </div>
-          </div>
-        </td>
+      <td class="col-main">
+        <div class="cell-user">
+          <div class="table-avatar">${getInitials(f.cliente)}</div>
+          <div class="user-name">${escapeHTML(f.cliente || "-")}</div>
+        </div>
+      </td>
 
-        <td class="col-date">
-          ${formatFecha(f.fecha)}
-        </td>
+      <td class="col-date">${formatFecha(f.fecha)}</td>
 
-        <td class="col-importe">
-          ${formatMoney(f.total)}
-        </td>
+      <td class="col-importe">${formatMoney(f.total)}</td>
 
-        <td class="col-status">
-          <span class="badge ${estado.class}">
-            ${estado.label}
-          </span>
-        </td>
+      <td class="col-status">
+        <span class="badge ${estado.class}">${estado.label}</span>
+      </td>
 
-        <td class="col-actions">
-          <div class="actions">
+      <td class="col-actions">
+        <div class="actions">
 
-            <button class="btn-action" data-action="download">
-              Descargar
-            </button>
+          <button class="btn-action" data-action="download">
+            Descargar
+          </button>
 
-            <button class="btn-action" data-action="send">
-              Enviar
-            </button>
+          <button class="btn-action" data-action="send">
+            Enviar
+          </button>
 
-            ${
-              isPendiente ? `
-                <button class="btn-action btn-pay" data-action="pay">
-                  Pagar
-                </button>
-              ` : ""
-            }
+          ${
+            estado.class === "pendiente"
+            ? `<button class="btn-action btn-pay" data-action="pay">Pagar</button>`
+            : ""
+          }
 
-          </div>
-        </td>
+        </div>
+      </td>
 
-      </tr>
+    </tr>
     `;
 
   }).join("");
-
-  tbody.innerHTML = html;
 
 }
 
@@ -293,28 +333,20 @@ function render(items){
 
 function downloadFactura(id){
   window.open(Onion.config.API + "/facturas/" + id + "/pdf", "_blank");
-  toast("Factura descargada", "success");
 }
 
-function sendFactura(id){
-  toast("Factura enviada", "info");
+function sendFactura(){
+  toast("Factura enviada");
 }
 
 async function payFactura(id, row){
 
   try{
 
-    toast("Procesando pago...", "info");
-
     await Onion.fetch(Onion.config.API + "/facturas/" + id + "/pagar", {
-      method: "POST"
+      method:"POST"
     });
 
-    // UPDATE LOCAL STATE
-    const f = state.facturas.find(x => (x.id || x.numero) == id);
-    if(f) f.estadoPago = "pagada";
-
-    // UPDATE UI
     const badge = row.querySelector(".badge");
     if(badge){
       badge.textContent = "Pagada";
@@ -323,33 +355,12 @@ async function payFactura(id, row){
 
     row.querySelector('[data-action="pay"]')?.remove();
 
-    updateKPIs(state.facturas);
-
-    toast("Factura pagada", "success");
+    toast("Factura pagada");
 
   }catch(e){
-
-    console.error("💥 ERROR PAGO:", e);
-    toast("Error al pagar", "error");
-
+    console.error(e);
+    toast("Error al pagar");
   }
-
-}
-
-/* =========================
-   KPIs
-========================= */
-
-function updateKPIs(items){
-
-  const pagadas = items.filter(f => f.estadoPago === "pagada");
-  const pendientes = items.filter(f => f.estadoPago === "pendiente");
-
-  const total = pagadas.reduce((acc, f) => acc + Number(f.total || 0), 0);
-
-  $("#facturas-total") && ($("#facturas-total").textContent = formatMoney(total));
-  $("#facturas-pagadas") && ($("#facturas-pagadas").textContent = pagadas.length);
-  $("#facturas-pendientes") && ($("#facturas-pendientes").textContent = pendientes.length);
 
 }
 
@@ -358,102 +369,35 @@ function updateKPIs(items){
 ========================= */
 
 function openFactura(id){
-  loadFacturaDetalle(id);
-}
-
-async function loadFacturaDetalle(id){
-
-  const root = getRoot();
-  if(!root) return;
-
-  root.innerHTML = `<div class="table-loading">Cargando factura...</div>`;
-
-  try{
-
-    const res = await Onion.fetch(Onion.config.API + "/facturas/" + id);
-    const f = res?.factura || res;
-
-    if(!f){
-      root.innerHTML = `<div>Error cargando factura</div>`;
-      return;
-    }
-
-    renderFacturaDetalle(f);
-
-  }catch(e){
-
-    console.error("💥 ERROR DETALLE:", e);
-    root.innerHTML = `<div>Error cargando factura</div>`;
-
-  }
-
-}
-
-function renderFacturaDetalle(f){
-
-  const root = getRoot();
-
-  root.innerHTML = `
-    <div class="factura-detalle">
-
-      <button id="volver-facturas">← Volver</button>
-
-      <h2>Factura #${escapeHTML(f.numero || f.id)}</h2>
-
-      <p><strong>Cliente:</strong> ${escapeHTML(f.cliente || "-")}</p>
-      <p><strong>Fecha:</strong> ${formatFecha(f.fecha)}</p>
-      <p><strong>Estado:</strong> ${escapeHTML(f.estadoPago)}</p>
-
-      <h3>Total</h3>
-      <p>${formatMoney(f.total)}</p>
-
-      ${
-        f.items?.length ? `
-          <h3>Conceptos</h3>
-          <ul>
-            ${f.items.map(i => `
-              <li>${escapeHTML(i.descripcion)} - ${formatMoney(i.precio)}</li>
-            `).join("")}
-          </ul>
-        ` : ""
-      }
-
-    </div>
-  `;
-
-  document.getElementById("volver-facturas")?.addEventListener("click", ()=>{
-    initialized = false;
-    init();
-  });
-
+  console.log("Abrir factura:", id);
 }
 
 /* =========================
    TOAST
 ========================= */
 
-function toast(msg, type="info"){
+function toast(msg){
 
-  let container = document.getElementById("toast-container");
+  let c = document.getElementById("toast-container");
 
-  if(!container){
-    container = document.createElement("div");
-    container.id = "toast-container";
-    document.body.appendChild(container);
+  if(!c){
+    c = document.createElement("div");
+    c.id = "toast-container";
+    document.body.appendChild(c);
   }
 
   const el = document.createElement("div");
-  el.className = "toast toast-" + type;
+  el.className = "toast";
   el.textContent = msg;
 
-  container.appendChild(el);
+  c.appendChild(el);
 
   requestAnimationFrame(()=> el.classList.add("show"));
 
   setTimeout(()=>{
     el.classList.remove("show");
     setTimeout(()=> el.remove(), 300);
-  },2500);
+  },2000);
 
 }
 
@@ -463,25 +407,25 @@ function toast(msg, type="info"){
 
 function getEstado(e){
   e = (e || "").toLowerCase();
-  if(e === "pagada") return { label:"Pagada", class:"pagada" };
-  if(e === "pendiente") return { label:"Pendiente", class:"pendiente" };
-  return { label:"Borrador", class:"borrador" };
+  if(e === "pagada") return {label:"Pagada", class:"pagada"};
+  if(e === "pendiente") return {label:"Pendiente", class:"pendiente"};
+  return {label:"-", class:""};
 }
 
 function getInitials(name){
-  if(!name) return "?";
-  return name.split(" ").map(n => n[0]).join("").slice(0,2).toUpperCase();
+  return name
+    ? name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase()
+    : "?";
 }
 
 function formatFecha(f){
-  if(!f) return "--";
-  return new Date(f).toLocaleDateString("es-ES");
+  return f ? new Date(f).toLocaleDateString("es-ES") : "--";
 }
 
 function formatMoney(n){
   return Number(n || 0).toLocaleString("es-ES", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
+    minimumFractionDigits:2,
+    maximumFractionDigits:2
   }) + " €";
 }
 

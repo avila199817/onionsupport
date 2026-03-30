@@ -209,7 +209,7 @@ function render(items){
         <td class="col-main">
           <div class="cell-user">
             <div class="table-avatar">
-              ${getInitials(d.cliente)}
+              ${renderAvatar(d)}
             </div>
             <div class="user-info">
               <span class="user-name">${escapeHTML(d.cliente)}</span>
@@ -255,7 +255,11 @@ function mapItem(f){
   return {
     id: f.id,
     numero: f.numeroFacturaLegal || f.id || "--",
+
     cliente: getClienteNombre(f),
+
+    avatar: f?.cliente?.avatar || null, // 🔥 CLAVE
+
     fecha: formatFecha(f.fechaFactura),
     total: formatMoney(f.total),
 
@@ -273,9 +277,22 @@ function mapItem(f){
 ========================= */
 
 function getClienteNombre(f){
-  return f?.cliente?.razonSocial ||
-         f?.cliente?.nombreContacto ||
+  return f?.cliente?.nombreContacto ||
+         f?.cliente?.razonSocial ||
          "Cliente";
+}
+
+/* =========================
+   AVATAR
+========================= */
+
+function renderAvatar(d){
+
+  if(d.avatar){
+    return `<img src="${d.avatar}" alt="${escapeHTML(d.cliente)}" />`;
+  }
+
+  return `<div class="avatar-fallback">${getInitials(d.cliente)}</div>`;
 }
 
 /* =========================
@@ -292,7 +309,6 @@ function getEstadoPago(f){
 
   const e = (f.estadoPago || "").toLowerCase();
 
-  // 🔥 DETECTAR VENCIDA
   if(e !== "pagada" && isVencida(f.fechaFactura)){
     return { label:"Vencida", class:"error" };
   }
@@ -328,7 +344,7 @@ function isVencida(fecha){
 
   const diff = (hoy - f) / (1000 * 60 * 60 * 24);
 
-  return diff > 30; // 🔥 configurable
+  return diff > 30;
 }
 
 /* =========================

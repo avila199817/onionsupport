@@ -68,6 +68,24 @@ function getAuthHeaders(){
 
 
 /* =========================
+   🔥 VISUAL STATE (FIX)
+========================= */
+
+function applyVisualState(){
+
+  const estado = $("#edit-estado")?.value;
+  const prioridad = $("#edit-prioridad")?.value;
+
+  const root = getRoot();
+  if(!root) return;
+
+  root.dataset.estado = estado || "open";
+  root.dataset.prioridad = prioridad || "low";
+
+}
+
+
+/* =========================
    OBSERVER
 ========================= */
 
@@ -177,6 +195,8 @@ async function loadDetalle(){
       headers: getAuthHeaders()
     });
 
+    if(!res.ok) throw new Error("API ERROR");
+
     const json = await res.json();
     const data = json?.ticket || json;
 
@@ -201,10 +221,12 @@ async function loadDetalle(){
 
 
 /* =========================
-   🔥 UPLOAD DIRECTO AZURE
+   🔥 UPLOAD AZURE PRO
 ========================= */
 
 async function uploadFile(file){
+
+  if(!file) return null;
 
   const res = await fetch(Onion.config.API + "/uploads/upload-url", {
     method: "POST",
@@ -219,16 +241,22 @@ async function uploadFile(file){
     })
   });
 
+  if(!res.ok) throw new Error("SAS ERROR");
+
   const { uploadUrl, blobUrl } = await res.json();
 
-  await fetch(uploadUrl, {
+  const upload = await fetch(uploadUrl, {
     method: "PUT",
     headers: {
       "x-ms-blob-type": "BlockBlob",
-      "Content-Type": file.type
+      "Content-Type": file.type || "application/octet-stream"
     },
     body: file
   });
+
+  if(!upload.ok){
+    throw new Error("UPLOAD FAILED");
+  }
 
   return {
     name: file.name,
@@ -238,7 +266,7 @@ async function uploadFile(file){
 
 
 /* =========================
-   UPDATE (🔥 PRO)
+   UPDATE
 ========================= */
 
 async function updateTicket(){
@@ -257,24 +285,21 @@ async function updateTicket(){
   const priority = $("#edit-prioridad")?.value;
   const message = $("#detalle-mensaje")?.innerText?.trim();
 
-  const filesInput = $("#detalle-files");
-  const files = filesInput?.files;
+  const files = $("#detalle-files")?.files;
 
   try{
 
     setSaving(true);
 
-    /* 🔥 SUBIDA DIRECTA */
     let uploaded = [];
 
-    if(files && files.length){
+    if(files?.length){
       for(const f of files){
         const fileData = await uploadFile(f);
-        uploaded.push(fileData);
+        if(fileData) uploaded.push(fileData);
       }
     }
 
-    /* 🔥 SOLO JSON */
     const res = await fetch(Onion.config.API + "/tickets/" + id, {
       method: "PATCH",
       headers: {
@@ -289,6 +314,8 @@ async function updateTicket(){
       })
     });
 
+    if(!res.ok) throw new Error("UPDATE ERROR");
+
     const json = await res.json();
     const data = json?.ticket || json;
 
@@ -297,10 +324,8 @@ async function updateTicket(){
       render(data);
     }
 
-    if(filesInput){
-      filesInput.value = "";
-      renderFiles([]);
-    }
+    $("#detalle-files").value = "";
+    renderFiles([]);
 
     showToast("Cambios guardados", "success");
 
@@ -339,6 +364,8 @@ function render(i){
 
   setSelectValue($("#edit-estado"), i.status || "open");
   setSelectValue($("#edit-prioridad"), i.priority || "low");
+
+  applyVisualState(); // 🔥 IMPORTANTE
 
   renderBlobs(i.attachments || []);
 
@@ -390,6 +417,8 @@ function renderFiles(files){
 
 async function downloadBlob(url, name){
   const res = await fetch(url);
+  if(!res.ok) throw new Error("DOWNLOAD ERROR");
+
   const blob = await res.blob();
 
   const a = document.createElement("a");

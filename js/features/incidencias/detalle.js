@@ -14,31 +14,27 @@ let currentItem = null;
 let observer = null;
 let sending = false;
 
+/* 🔥 MULTI FILE */
+let selectedFiles = [];
+
 
 /* =========================
    INIT
 ========================= */
-
 function init(){
 
   if(initialized) return;
 
   const root = getRoot();
 
-  if(!root){
-    return setTimeout(init, 100);
-  }
-
-  if(!Onion.state?.user){
-    return setTimeout(init, 100);
-  }
+  if(!root) return setTimeout(init, 100);
+  if(!Onion.state?.user) return setTimeout(init, 100);
 
   initialized = true;
 
   bindEvents();
   loadDetalle();
   observeDOM();
-
 }
 
 init();
@@ -47,7 +43,6 @@ init();
 /* =========================
    ROOT
 ========================= */
-
 function getRoot(){
   return document.querySelector(".panel-content.incidencia-detalle");
 }
@@ -60,7 +55,6 @@ function $(selector){
 /* =========================
    AUTH
 ========================= */
-
 function getAuthHeaders(){
   const token = Onion.auth?.getToken?.();
   return token ? { Authorization: "Bearer " + token } : {};
@@ -68,27 +62,32 @@ function getAuthHeaders(){
 
 
 /* =========================
-   🔥 VISUAL STATE (FIX)
+   AVATAR (FIX)
 ========================= */
+function renderAvatar(nombre, avatar){
 
-function applyVisualState(){
+  const el = $("#detalle-avatar");
+  if(!el) return;
 
-  const estado = $("#edit-estado")?.value;
-  const prioridad = $("#edit-prioridad")?.value;
+  if(avatar){
+    el.innerHTML = `<img src="${avatar}" />`;
+    return;
+  }
 
-  const root = getRoot();
-  if(!root) return;
+  const initials = nombre
+    ?.split(" ")
+    .map(w => w[0])
+    .slice(0,2)
+    .join("")
+    .toUpperCase();
 
-  root.dataset.estado = estado || "open";
-  root.dataset.prioridad = prioridad || "low";
-
+  el.textContent = initials || "U";
 }
 
 
 /* =========================
    OBSERVER
 ========================= */
-
 function observeDOM(){
 
   if(observer) return;
@@ -104,14 +103,12 @@ function observeDOM(){
     childList: true,
     subtree: true
   });
-
 }
 
 
 /* =========================
    EVENTS
 ========================= */
-
 function bindEvents(){
 
   const root = getRoot();
@@ -119,23 +116,31 @@ function bindEvents(){
 
   Onion.cleanupEvent(root, "click", async (e)=>{
 
-    const target = e.target;
+    const t = e.target;
 
-    if(target.id === "btn-back"){
+    if(t.id === "btn-back"){
       Onion.router.navigate("/incidencias");
     }
 
-    if(target.id === "btn-save"){
+    if(t.id === "btn-save"){
       if(sending) return;
       await updateTicket();
     }
 
-    if(target.id === "btn-attach-detalle"){
+    if(t.id === "btn-attach-detalle"){
       $("#detalle-files")?.click();
     }
 
-    if(target.classList.contains("blob-download")){
-      downloadBlob(target.dataset.url, target.dataset.name);
+    /* 🔥 REMOVE FILE */
+    if(t.classList.contains("file-remove")){
+      const index = Number(t.dataset.index);
+      selectedFiles.splice(index, 1);
+      renderFiles();
+    }
+
+    /* 🔥 DOWNLOAD */
+    if(t.classList.contains("blob-download")){
+      downloadBlob(t.dataset.url, t.dataset.name);
     }
 
   });
@@ -143,7 +148,9 @@ function bindEvents(){
   Onion.cleanupEvent(root, "change", (e)=>{
 
     if(e.target.id === "detalle-files"){
-      renderFiles(e.target.files);
+      selectedFiles = [...selectedFiles, ...e.target.files];
+      renderFiles();
+      e.target.value = "";
     }
 
     if(e.target.id === "edit-estado" || e.target.id === "edit-prioridad"){
@@ -173,14 +180,12 @@ function bindEvents(){
     });
 
   }
-
 }
 
 
 /* =========================
    LOAD
 ========================= */
-
 async function loadDetalle(){
 
   const id = getId();
@@ -190,12 +195,9 @@ async function loadDetalle(){
 
   try{
 
-    const res = await fetch(Onion.config.API + "/tickets/" + id + "?t=" + Date.now(), {
-      cache: "no-store",
+    const res = await fetch(Onion.config.API + "/tickets/" + id, {
       headers: getAuthHeaders()
     });
-
-    if(!res.ok) throw new Error("API ERROR");
 
     const json = await res.json();
     const data = json?.ticket || json;
@@ -209,24 +211,18 @@ async function loadDetalle(){
     render(data);
 
   }catch(err){
-
     console.error(err);
     setError("Error cargando incidencia");
-
   }finally{
     clearLoading();
   }
-
 }
 
 
 /* =========================
-   🔥 UPLOAD AZURE PRO
+   UPLOAD
 ========================= */
-
 async function uploadFile(file){
-
-  if(!file) return null;
 
   const res = await fetch(Onion.config.API + "/uploads/upload-url", {
     method: "POST",
@@ -241,51 +237,28 @@ async function uploadFile(file){
     })
   });
 
-  if(!res.ok) throw new Error("SAS ERROR");
-
   const { uploadUrl, blobUrl } = await res.json();
 
-  const upload = await fetch(uploadUrl, {
+  await fetch(uploadUrl, {
     method: "PUT",
     headers: {
       "x-ms-blob-type": "BlockBlob",
-      "Content-Type": file.type || "application/octet-stream"
+      "Content-Type": file.type
     },
     body: file
   });
 
-  if(!upload.ok){
-    throw new Error("UPLOAD FAILED");
-  }
-
-  return {
-    name: file.name,
-    url: blobUrl
-  };
+  return { name: file.name, url: blobUrl };
 }
 
 
 /* =========================
    UPDATE
 ========================= */
-
 async function updateTicket(){
 
   if(sending) return;
   sending = true;
-
-  if(!currentItem){
-    sending = false;
-    return;
-  }
-
-  const id = currentItem.id || currentItem.ticketId;
-
-  const status = $("#edit-estado")?.value;
-  const priority = $("#edit-prioridad")?.value;
-  const message = $("#detalle-mensaje")?.innerText?.trim();
-
-  const files = $("#detalle-files")?.files;
 
   try{
 
@@ -293,28 +266,24 @@ async function updateTicket(){
 
     let uploaded = [];
 
-    if(files?.length){
-      for(const f of files){
-        const fileData = await uploadFile(f);
-        if(fileData) uploaded.push(fileData);
-      }
+    for(const f of selectedFiles){
+      const data = await uploadFile(f);
+      uploaded.push(data);
     }
 
-    const res = await fetch(Onion.config.API + "/tickets/" + id, {
+    const res = await fetch(Onion.config.API + "/tickets/" + currentItem.id, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
         ...getAuthHeaders()
       },
       body: JSON.stringify({
-        status,
-        priority,
-        message,
+        status: $("#edit-estado")?.value,
+        priority: $("#edit-prioridad")?.value,
+        message: $("#detalle-mensaje")?.innerText,
         attachments: uploaded
       })
     });
-
-    if(!res.ok) throw new Error("UPDATE ERROR");
 
     const json = await res.json();
     const data = json?.ticket || json;
@@ -324,39 +293,30 @@ async function updateTicket(){
       render(data);
     }
 
-    $("#detalle-files").value = "";
-    renderFiles([]);
+    selectedFiles = [];
+    renderFiles();
 
     showToast("Cambios guardados", "success");
 
   }catch(err){
-
     console.error(err);
-    showToast("Error guardando cambios", "error");
-
-  }finally{
-
-    setSaving(false);
-
-    setTimeout(()=>{
-      sending = false;
-    }, 300);
-
+    showToast("Error", "error");
   }
 
+  setSaving(false);
+  sending = false;
 }
 
 
 /* =========================
    RENDER
 ========================= */
-
 function render(i){
 
-  const usuario = i.cliente?.nombre || "Usuario";
+  const nombre = i.cliente?.nombre || "Usuario";
 
+  setText("#detalle-usuario", nombre);
   setText("#detalle-id", i.id);
-  setText("#detalle-usuario", usuario);
   setText("#detalle-titulo", i.subject || "Sin título");
   setText("#detalle-fecha", formatFecha(i.createdAt));
 
@@ -365,24 +325,35 @@ function render(i){
   setSelectValue($("#edit-estado"), i.status || "open");
   setSelectValue($("#edit-prioridad"), i.priority || "low");
 
-  applyVisualState(); // 🔥 IMPORTANTE
-
+  renderAvatar(nombre, i.cliente?.avatar);
   renderBlobs(i.attachments || []);
 
+  applyVisualState();
 }
 
 
 /* =========================
-   UI HELPERS
+   FILE LIST
 ========================= */
+function renderFiles(){
 
-function setSelectValue(select, value){
-  if(!select) return;
-  select.value = value;
-  select.dispatchEvent(new Event("change", { bubbles: true }));
+  const list = $("#detalle-file-list");
+  if(!list) return;
+
+  list.innerHTML = selectedFiles.map((f,i)=>`
+    <div class="file-item">
+      <span>${f.name}</span>
+      <button class="file-remove" data-index="${i}">✕</button>
+    </div>
+  `).join("");
 }
 
+
+/* =========================
+   BLOBS
+========================= */
 function renderBlobs(files){
+
   const c = $("#detalle-blobs");
   if(!c) return;
 
@@ -401,44 +372,23 @@ function renderBlobs(files){
   `).join("");
 }
 
-function renderFiles(files){
-  const list = $("#detalle-file-list");
-  if(!list) return;
-
-  list.innerHTML = [...files].map(f =>
-    `<div>${f.name}</div>`
-  ).join("");
-}
-
 
 /* =========================
    DOWNLOAD
 ========================= */
-
-async function downloadBlob(url, name){
-  const res = await fetch(url);
-  if(!res.ok) throw new Error("DOWNLOAD ERROR");
-
-  const blob = await res.blob();
-
+function downloadBlob(url, name){
   const a = document.createElement("a");
-  const u = URL.createObjectURL(blob);
-
-  a.href = u;
+  a.href = url;
   a.download = name;
-
   document.body.appendChild(a);
   a.click();
-
   a.remove();
-  URL.revokeObjectURL(u);
 }
 
 
 /* =========================
    HELPERS
 ========================= */
-
 function setText(sel, val){
   const el = $(sel);
   if(el) el.textContent = val ?? "--";
@@ -452,11 +402,15 @@ function getId(){
   return new URLSearchParams(location.search).get("id");
 }
 
+function setSelectValue(select, value){
+  if(!select) return;
+  select.value = value;
+}
+
 
 /* =========================
    STATES
 ========================= */
-
 function setLoading(){
   const el = $("#detalle-content");
   if(el){
@@ -491,22 +445,22 @@ function setSaving(active){
 
 
 /* =========================
+   VISUAL STATE
+========================= */
+function applyVisualState(){
+  const root = getRoot();
+  if(!root) return;
+
+  root.dataset.estado = $("#edit-estado")?.value;
+  root.dataset.prioridad = $("#edit-prioridad")?.value;
+}
+
+
+/* =========================
    TOAST
 ========================= */
-
-function showToast(message, type="info"){
-
-  const el = document.createElement("div");
-  el.className = `toast show ${type}`;
-  el.innerText = message;
-
-  document.body.appendChild(el);
-
-  setTimeout(()=>{
-    el.classList.remove("show");
-    setTimeout(()=> el.remove(), 300);
-  }, 2000);
-
+function showToast(message){
+  console.log(message);
 }
 
 })();

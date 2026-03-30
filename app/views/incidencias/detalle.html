@@ -45,6 +45,18 @@
               <div class="detalle-value" id="detalle-fecha">--</div>
             </div>
 
+            <!-- FECHA CIERRE -->
+            <div class="detalle-item">
+              <div class="detalle-label">Fecha cierre</div>
+              <div class="detalle-value" id="detalle-fecha-cierre">--</div>
+            </div>
+
+            <!-- TÉCNICO -->
+            <div class="detalle-item">
+              <div class="detalle-label">Técnico asignado</div>
+              <div class="detalle-value" id="detalle-tecnico">--</div>
+            </div>
+
             <!-- TÍTULO -->
             <div class="detalle-item" style="grid-column: span 2;">
               <div class="detalle-label">Título</div>
@@ -83,20 +95,8 @@
               </select>
             </div>
 
-            <!-- FECHA CIERRE -->
-            <div class="detalle-item">
-              <div class="detalle-label">Fecha cierre</div>
-              <div class="detalle-value" id="detalle-fecha-cierre">--</div>
-            </div>
-
-            <!-- TÉCNICO -->
-            <div class="detalle-item">
-              <div class="detalle-label">Técnico asignado</div>
-              <div class="detalle-value" id="detalle-tecnico">--</div>
-            </div>
-
             <!-- =========================
-                 ADJUNTOS USUARIO (ABAJO)
+                 ADJUNTOS USUARIO
             ========================= -->
             <div class="detalle-item" style="grid-column: span 2;">
               <div class="detalle-label">Adjuntos del usuario</div>
@@ -147,27 +147,17 @@
 
       <div class="detalle-sidebar">
 
-        <!-- =========================
-             ARCHIVOS USUARIO
-        ========================= -->
+        <!-- USUARIO -->
         <div class="sidebar-section">
           <div class="sidebar-title">Archivos aportados</div>
           <div id="detalle-blobs-user" class="detalle-blobs"></div>
         </div>
 
-        <!-- DIVISOR -->
         <div class="sidebar-divider"></div>
 
-        <!-- =========================
-             EQUIPO / SOPORTE
-        ========================= -->
+        <!-- SOPORTE -->
         <div class="sidebar-section">
-          <div class="sidebar-title">Respuesta del soporte</div>
-
-          <div class="sidebar-sub">
-            Archivos, facturas o documentación enviada por el equipo técnico
-          </div>
-
+          <div class="sidebar-title">Adjuntos del equipo de soporte</div>
           <div id="detalle-blobs-team" class="detalle-blobs"></div>
         </div>
 

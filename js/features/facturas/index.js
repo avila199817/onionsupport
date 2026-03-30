@@ -1,6 +1,6 @@
-(function(){
-
 "use strict";
+
+(function(){
 
 const Onion = window.Onion;
 
@@ -10,16 +10,8 @@ if(!Onion){
 }
 
 let initialized = false;
-
-let state = {
-  facturas: [],
-  filtered: []
-};
-
-let sortState = {
-  key: null,
-  dir: "asc"
-};
+let currentItems = [];
+let filteredItems = [];
 
 /* =========================
    ROOT
@@ -30,7 +22,8 @@ function getRoot(){
 }
 
 function $(selector){
-  return getRoot()?.querySelector(selector);
+  const root = getRoot();
+  return root ? root.querySelector(selector) : null;
 }
 
 /* =========================
@@ -53,12 +46,11 @@ function init(){
 
   Onion.onCleanup(()=>{
     initialized = false;
-    state.facturas = [];
-    state.filtered = [];
-    sortState = { key:null, dir:"asc" };
   });
 
 }
+
+init();
 
 /* =========================
    EVENTS
@@ -69,65 +61,28 @@ function bindEvents(){
   const root = getRoot();
   if(!root) return;
 
-  // CLICK GLOBAL
-  Onion.cleanupEvent(root, "click", async (e)=>{
+  Onion.cleanupEvent(root, "click", (e)=>{
 
-    const action = e.target.closest("[data-action]");
-    if(action){
-      e.stopPropagation();
-
-      const row = action.closest("tr[data-id]");
-      const id = row?.dataset.id;
-      if(!id) return;
-
-      const type = action.dataset.action;
-
-      if(type === "download") return downloadFactura(id);
-      if(type === "send") return sendFactura(id);
-      if(type === "pay") return payFactura(id, row);
-
-      return;
-    }
+    // 🔥 EVITA CLICK EN BOTONES (igual incidencias)
+    if(e.target.closest("button")) return;
 
     const row = e.target.closest("tr[data-id]");
     if(!row) return;
 
-    openFactura(row.dataset.id);
+    const id = row.dataset.id;
+    if(!id) return;
+
+    // 🔥 NAVEGACIÓN REAL AL DETALLE
+    Onion.router.navigate("/facturas/detalle?id=" + id);
 
   });
 
-  // SEARCH
-  const search = $("#search-factura");
-  if(search){
-    let t;
-    search.addEventListener("input", ()=>{
-      clearTimeout(t);
-      t = setTimeout(applyFilters, 250);
-    });
-  }
+  $("#btn-new-factura")?.addEventListener("click", ()=>{
+    Onion.router.navigate("/facturas/nueva");
+  });
 
-  // FILTER
+  $("#search-factura")?.addEventListener("input", debounce(applyFilters, 250));
   $("#filter-estado-factura")?.addEventListener("change", applyFilters);
-
-  // SORT
-  getRoot().querySelectorAll("th[data-sort]").forEach(th=>{
-    th.addEventListener("click", ()=>{
-
-      const key = th.dataset.sort;
-
-      if(sortState.key === key){
-        sortState.dir = sortState.dir === "asc" ? "desc" : "asc";
-      }else{
-        sortState.key = key;
-        sortState.dir = "asc";
-      }
-
-      applySort();
-      updateSortUI(th);
-      render(state.filtered);
-
-    });
-  });
 
 }
 
@@ -137,31 +92,55 @@ function bindEvents(){
 
 async function loadFacturas(){
 
+  const panel = getRoot();
   const tbody = $("#facturas-body");
+
   if(!tbody) return;
 
+  panel?.classList.remove("ready");
   setLoading();
 
   try{
 
     const res = await Onion.fetch(Onion.config.API + "/facturas");
-    const data = res?.facturas || res?.data || [];
+    const items = normalize(res);
 
-    state.facturas = Array.isArray(data) ? data : [];
-    state.filtered = [...state.facturas];
+    currentItems = items;
+    filteredItems = items;
 
-    if(!state.facturas.length){
+    if(!items.length){
       setEmpty();
+      panel?.classList.add("ready");
       return;
     }
 
-    applySort();
-    render(state.filtered);
+    render(items);
+    panel?.classList.add("ready");
 
   }catch(e){
+
     console.error("💥 ERROR FACTURAS:", e);
     setError();
+    panel?.classList.add("ready");
+
   }
+
+}
+
+/* =========================
+   NORMALIZE
+========================= */
+
+function normalize(res){
+
+  if(!res) return [];
+
+  if(Array.isArray(res)) return res;
+  if(Array.isArray(res.facturas)) return res.facturas;
+  if(Array.isArray(res.data)) return res.data;
+  if(Array.isArray(res.items)) return res.items;
+
+  return [];
 
 }
 
@@ -174,72 +153,21 @@ function applyFilters(){
   const search = ($("#search-factura")?.value || "").toLowerCase();
   const estado = ($("#filter-estado-factura")?.value || "").toLowerCase();
 
-  state.filtered = state.facturas.filter(f => {
+  filteredItems = currentItems.filter(f => {
 
-    const matchSearch =
-      !search ||
-      (f.cliente || "").toLowerCase().includes(search) ||
-      String(f.numero || f.id).includes(search);
+    const cliente = (f.cliente || "").toLowerCase();
+    const id = String(f.numero || f.id || "").toLowerCase();
 
-    const matchEstado =
-      !estado ||
-      (f.estadoPago || "").toLowerCase() === estado;
+    const e = mapEstado(f.estadoPago);
 
-    return matchSearch && matchEstado;
-
-  });
-
-  applySort();
-  render(state.filtered);
-
-}
-
-/* =========================
-   SORT
-========================= */
-
-function applySort(){
-
-  if(!sortState.key) return;
-
-  const { key, dir } = sortState;
-
-  state.filtered.sort((a,b)=>{
-
-    let A = a[key];
-    let B = b[key];
-
-    if(key === "fecha"){
-      A = new Date(A);
-      B = new Date(B);
-    }
-
-    if(key === "total"){
-      A = Number(A);
-      B = Number(B);
-    }
-
-    if(typeof A === "string"){
-      A = A.toLowerCase();
-      B = B.toLowerCase();
-    }
-
-    if(A > B) return dir === "asc" ? 1 : -1;
-    if(A < B) return dir === "asc" ? -1 : 1;
-
-    return 0;
+    return (
+      (!search || cliente.includes(search) || id.includes(search)) &&
+      (!estado || e === estado)
+    );
 
   });
 
-}
-
-function updateSortUI(active){
-
-  getRoot().querySelectorAll("th[data-sort]").forEach(th=>{
-    th.classList.remove("asc","desc");
-  });
-
-  active.classList.add(sortState.dir);
+  render(filteredItems);
 
 }
 
@@ -248,18 +176,24 @@ function updateSortUI(active){
 ========================= */
 
 function setLoading(){
-  $("#facturas-body").innerHTML =
-    `<tr><td colspan="6">Cargando facturas...</td></tr>`;
+  const el = $("#facturas-body");
+  if(el){
+    el.innerHTML = `<tr><td colspan="6">Cargando facturas...</td></tr>`;
+  }
 }
 
 function setEmpty(){
-  $("#facturas-body").innerHTML =
-    `<tr><td colspan="6">No hay facturas</td></tr>`;
+  const el = $("#facturas-body");
+  if(el){
+    el.innerHTML = `<tr><td colspan="6">No hay facturas</td></tr>`;
+  }
 }
 
 function setError(){
-  $("#facturas-body").innerHTML =
-    `<tr><td colspan="6">Error cargando facturas</td></tr>`;
+  const el = $("#facturas-body");
+  if(el){
+    el.innerHTML = `<tr><td colspan="6">Error cargando facturas</td></tr>`;
+  }
 }
 
 /* =========================
@@ -271,75 +205,79 @@ function render(items){
   const tbody = $("#facturas-body");
   if(!tbody) return;
 
-  if(!items.length){
-    return setEmpty();
-  }
+  const html = items.map(f => {
 
-  tbody.innerHTML = items.map(f=>{
-
-    const estado = getEstado(f.estadoPago);
-    const id = f.id || f.numero;
+    const d = mapItem(f);
 
     return `
-    <tr data-id="${id}">
+      <tr data-id="${d.id}" style="cursor:pointer">
 
-      <td class="col-id">${escapeHTML(f.numero || f.id || "--")}</td>
+        <td>${d.id}</td>
 
-      <td class="col-main">
-        <div class="cell-user">
-          <div class="table-avatar">${getInitials(f.cliente)}</div>
-          <div class="user-name">${escapeHTML(f.cliente || "-")}</div>
-        </div>
-      </td>
+        <td>
+          <div class="cell-user">
+            <div class="table-avatar">
+              ${getInitials(d.cliente)}
+            </div>
+            <div class="user-info">
+              <span class="user-name">${escapeHTML(d.cliente)}</span>
+            </div>
+          </div>
+        </td>
 
-      <td class="col-date">${formatFecha(f.fecha)}</td>
+        <td>${d.fecha}</td>
 
-      <td class="col-importe">${formatMoney(f.total)}</td>
+        <td>${d.total}</td>
 
-      <td class="col-status">
-        <span class="badge ${estado.class}">${estado.label}</span>
-      </td>
+        <td><span class="badge ${d.estado.class}">${d.estado.label}</span></td>
 
-      <td class="col-actions">
-        <div class="actions">
+        <td>
+          <div class="actions">
 
-          <button class="btn-action" data-action="download">
-            Descargar
-          </button>
+            <button class="btn-action" onclick="event.stopPropagation(); window.open('${Onion.config.API}/facturas/${d.id}/pdf')">
+              Descargar
+            </button>
 
-          <button class="btn-action" data-action="send">
-            Enviar
-          </button>
+            ${
+              d.estado.raw === "pendiente"
+              ? `<button class="btn-action btn-pay" onclick="event.stopPropagation(); pagarFactura('${d.id}', this)">Pagar</button>`
+              : ""
+            }
 
-          ${
-            estado.class === "pendiente"
-            ? `<button class="btn-action btn-pay" data-action="pay">Pagar</button>`
-            : ""
-          }
+          </div>
+        </td>
 
-        </div>
-      </td>
-
-    </tr>
+      </tr>
     `;
 
   }).join("");
 
+  tbody.innerHTML = html;
+
 }
 
 /* =========================
-   ACTIONS
+   MAP
 ========================= */
 
-function downloadFactura(id){
-  window.open(Onion.config.API + "/facturas/" + id + "/pdf", "_blank");
+function mapItem(f){
+
+  return {
+    id: f.id || f.numero || "--",
+    cliente: f.cliente || "Cliente",
+    fecha: formatFecha(f.fecha),
+    total: formatMoney(f.total),
+    estado: getEstado(f.estadoPago),
+    estadoRaw: mapEstado(f.estadoPago)
+  };
+
 }
 
-function sendFactura(){
-  toast("Factura enviada");
-}
+/* =========================
+   ACTION GLOBAL (PAY)
+========================= */
 
-async function payFactura(id, row){
+window.pagarFactura = async function(id, btn){
 
   try{
 
@@ -347,13 +285,12 @@ async function payFactura(id, row){
       method:"POST"
     });
 
-    const badge = row.querySelector(".badge");
-    if(badge){
-      badge.textContent = "Pagada";
-      badge.className = "badge pagada";
-    }
+    const row = btn.closest("tr");
 
-    row.querySelector('[data-action="pay"]')?.remove();
+    row.querySelector(".badge").textContent = "Pagada";
+    row.querySelector(".badge").className = "badge pagada";
+
+    btn.remove();
 
     toast("Factura pagada");
 
@@ -362,14 +299,54 @@ async function payFactura(id, row){
     toast("Error al pagar");
   }
 
-}
+};
 
 /* =========================
-   DETALLE
+   HELPERS
 ========================= */
 
-function openFactura(id){
-  console.log("Abrir factura:", id);
+function mapEstado(e){
+  e = (e || "").toLowerCase();
+  if(e === "pagada") return "pagada";
+  return "pendiente";
+}
+
+function getEstado(e){
+  e = (e || "").toLowerCase();
+  if(e === "pagada") return { label:"Pagada", class:"pagada", raw:"pagada" };
+  return { label:"Pendiente", class:"pendiente", raw:"pendiente" };
+}
+
+function formatFecha(f){
+  if(!f) return "--";
+  return new Date(f).toLocaleDateString("es-ES");
+}
+
+function formatMoney(n){
+  return Number(n || 0).toLocaleString("es-ES", {
+    minimumFractionDigits:2,
+    maximumFractionDigits:2
+  }) + " €";
+}
+
+function escapeHTML(str){
+  return String(str)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;");
+}
+
+function getInitials(name){
+  if(!name) return "?";
+  return name.split(" ").map(n => n[0]).join("").slice(0,2).toUpperCase();
+}
+
+function debounce(fn, delay){
+  let t;
+  return function(...args){
+    clearTimeout(t);
+    t = setTimeout(()=> fn.apply(this, args), delay);
+  };
 }
 
 /* =========================
@@ -400,46 +377,5 @@ function toast(msg){
   },2000);
 
 }
-
-/* =========================
-   HELPERS
-========================= */
-
-function getEstado(e){
-  e = (e || "").toLowerCase();
-  if(e === "pagada") return {label:"Pagada", class:"pagada"};
-  if(e === "pendiente") return {label:"Pendiente", class:"pendiente"};
-  return {label:"-", class:""};
-}
-
-function getInitials(name){
-  return name
-    ? name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase()
-    : "?";
-}
-
-function formatFecha(f){
-  return f ? new Date(f).toLocaleDateString("es-ES") : "--";
-}
-
-function formatMoney(n){
-  return Number(n || 0).toLocaleString("es-ES", {
-    minimumFractionDigits:2,
-    maximumFractionDigits:2
-  }) + " €";
-}
-
-function escapeHTML(str){
-  return String(str)
-    .replace(/&/g,"&amp;")
-    .replace(/</g,"&lt;")
-    .replace(/>/g,"&gt;");
-}
-
-/* =========================
-   START
-========================= */
-
-init();
 
 })();

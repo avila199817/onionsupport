@@ -7,16 +7,19 @@
     ========================= -->
     <div class="detalle-left">
 
-      <!-- HEADER -->
-      <div class="filters-row">
+      <!-- TOP BAR (SIN HEADER PESADO) -->
+      <div class="filters-row" style="justify-content: space-between;">
 
-        <div class="page-header">
-          <div>
-            <div class="page-title">Actulización</div>
-            <div class="page-subtitle">Información completa de la incidencia</div>
+        <!-- USUARIO ARRIBA -->
+        <div class="detalle-user">
+          <div id="detalle-avatar" class="table-avatar"></div>
+
+          <div class="user-info">
+            <div class="detalle-value" id="detalle-usuario">--</div>
           </div>
         </div>
 
+        <!-- VOLVER -->
         <button id="btn-back">
           ← Volver
         </button>
@@ -30,19 +33,6 @@
         <div id="detalle-content" style="width:100%;">
 
           <div class="form-grid">
-
-            <!-- USUARIO -->
-            <div class="detalle-item" style="grid-column: span 2;">
-              <div class="detalle-label">Usuario</div>
-
-              <div class="detalle-user">
-                <div id="detalle-avatar" class="table-avatar"></div>
-
-                <div class="user-info">
-                  <div class="detalle-value" id="detalle-usuario">--</div>
-                </div>
-              </div>
-            </div>
 
             <!-- ID -->
             <div class="detalle-item">
@@ -78,6 +68,7 @@
               <div class="detalle-label">Adjuntos</div>
 
               <div class="incidencia-files">
+
                 <button type="button" id="btn-attach-detalle">
                   + Añadir archivos
                 </button>
@@ -89,7 +80,9 @@
                   hidden
                 >
 
-                <div id="detalle-file-list"></div>
+                <!-- LISTA NUEVA CON X -->
+                <div id="detalle-file-list" class="file-list"></div>
+
               </div>
             </div>
 
@@ -116,7 +109,6 @@
             </div>
 
           </div>
-
 
           <!-- FOOTER -->
           <div class="detalle-footer">

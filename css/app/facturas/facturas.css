@@ -1,315 +1,225 @@
 /* =========================================================
-   FACTURAS — CLON INCIDENCIAS PERFECTO
+   🔥 BOTONES PRO (SAAS LEVEL)
 ========================================================= */
 
-.panel-content.facturas{
-  display:flex;
-  flex-direction:column;
-  height:100%;
-  width:100%;
-}
+.panel-content.facturas .btn-action{
+  position:relative;
 
-/* =========================================================
-   TABLE WRAPPER
-========================================================= */
-
-.panel-content.facturas .table-system{
-  display:flex;
-  flex-direction:column;
-  flex:1;
-  min-height:0;
-  width:100%;
-}
-
-/* =========================================================
-   FILTERS
-========================================================= */
-
-.panel-content.facturas .filters-row{
-  display:flex;
+  display:inline-flex;
   align-items:center;
-  gap:10px;
-  padding:12px 16px;
+  justify-content:center;
+  gap:6px;
 
-  background:var(--panel-bg);
-  border-bottom:1px solid var(--panel-border);
-}
+  height:30px;
+  padding:0 12px;
 
-.panel-content.facturas .filters-row input{
-  flex:1;
-  min-width:220px;
-}
-
-.panel-content.facturas .filters-row input,
-.panel-content.facturas .filters-row select{
-  padding:10px 12px;
   border-radius:8px;
   border:1px solid var(--card-border);
 
-  background:var(--card-bg);
+  background:rgba(255,255,255,0.02);
+  backdrop-filter:blur(6px);
+
   color:var(--text);
-  font-size:13px;
-}
-
-.panel-content.facturas .filters-row select{
-  min-width:140px;
-}
-
-.panel-content.facturas .btn-new-factura{
-  margin-left:auto;
-
-  padding:10px 18px;
-  border-radius:999px;
-
-  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
-  color:#fff;
-
-  font-weight:600;
-  border:none;
-  cursor:pointer;
-
-  box-shadow:0 6px 18px rgba(99,102,241,0.35);
-  transition:all .2s ease;
-}
-
-.panel-content.facturas .btn-new-factura:hover{
-  transform:translateY(-1px);
-  box-shadow:0 10px 26px rgba(99,102,241,0.45);
-}
-
-/* =========================================================
-   TABLE CONTAINER
-========================================================= */
-
-.panel-content.facturas .table-container{
-  flex:1;
-  min-height:0;
-  overflow-y:auto;
-  overflow-x:hidden;
-
-  background:var(--panel-bg);
-}
-
-/* =========================================================
-   TABLE BASE
-========================================================= */
-
-.panel-content.facturas table{
-  width:100%;
-  border-collapse:collapse;
-  table-layout:fixed;
-}
-
-.panel-content.facturas thead{
-  position:sticky;
-  top:0;
-  z-index:3;
-  background:var(--panel-bg);
-}
-
-.panel-content.facturas th{
-  padding:10px 14px;
-  text-align:left;
-
-  border-bottom:1px solid var(--panel-border);
-
-  color:var(--dim);
-  font-size:11px;
-  text-transform:uppercase;
-  letter-spacing:.3px;
-
-  white-space:nowrap;
-}
-
-.panel-content.facturas td{
-  padding:12px 14px;
-  border-bottom:1px solid var(--panel-border);
-
-  font-size:13.5px;
-  color:var(--text);
-
-  vertical-align:middle;
-
-  overflow:hidden;
-  text-overflow:ellipsis;
-}
-
-/* =========================================================
-   🔥 COLUMN SYSTEM (AJUSTADO COMO INCIDENCIAS)
-========================================================= */
-
-.panel-content.facturas .col-id{
-  width:130px;
-  font-size:11px;
-  color:var(--dim);
-}
-
-.panel-content.facturas .col-main{
-  width:42%;
-  font-weight:500;
-  white-space:normal;
-  line-height:1.4;
-}
-
-.panel-content.facturas .col-date{
-  width:120px;
-}
-
-.panel-content.facturas .col-importe{
-  width:140px;
-  text-align:right;
-  font-weight:600;
-}
-
-.panel-content.facturas .col-status{
-  width:110px;
-}
-
-.panel-content.facturas .col-actions{
-  width:180px; /* 🔥 MÁS ESPACIO para botones */
-  text-align:right;
-}
-
-/* =========================================================
-   ROWS
-========================================================= */
-
-.panel-content.facturas tbody tr{
-  transition:all .15s ease;
-}
-
-.panel-content.facturas tbody tr:nth-child(even){
-  background:color-mix(in srgb, var(--panel-bg), #fff 2%);
-}
-
-.panel-content.facturas tbody tr:hover{
-  background:color-mix(in srgb, var(--panel-bg), #fff 6%);
-  transform:translateX(2px);
-}
-
-/* =========================================================
-   🔥 USER CELL (CLAVE — IGUAL QUE INCIDENCIAS)
-========================================================= */
-
-.panel-content.facturas .cell-user{
-  display:flex;
-  align-items:center;
-  gap:10px;
-}
-
-.panel-content.facturas .table-avatar{
-  width:34px;
-  height:34px;
-  min-width:34px;
-
-  border-radius:50%;
-  overflow:hidden;
-
-  display:flex;
-  align-items:center;
-  justify-content:center;
-
-  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
-  color:#fff;
-
   font-size:12px;
-  font-weight:600;
+  font-weight:500;
+
+  cursor:pointer;
+  white-space:nowrap;
+
+  transition:
+    background .2s ease,
+    border .2s ease,
+    transform .15s ease,
+    box-shadow .2s ease;
 }
 
-.panel-content.facturas .table-avatar img{
-  width:100%;
-  height:100%;
-  object-fit:cover;
-  border-radius:50%;
-  display:block;
+/* hover limpio tipo Stripe */
+.panel-content.facturas .btn-action:hover{
+  background:rgba(255,255,255,0.06);
+  border-color:color-mix(in srgb, var(--accent), transparent 40%);
+  transform:translateY(-1px);
+  box-shadow:0 4px 12px rgba(0,0,0,0.25);
 }
 
-.panel-content.facturas .user-info{
-  display:flex;
-  flex-direction:column;
-}
-
-.panel-content.facturas .user-name{
-  font-weight:600;
-}
-
-/* 🔥 ELIMINADO SUBTEXTO (Cliente) */
-.panel-content.facturas .user-sub{
-  display:none;
+/* active */
+.panel-content.facturas .btn-action:active{
+  transform:translateY(0);
+  box-shadow:none;
 }
 
 /* =========================================================
-   BADGES
+   VARIANTES
 ========================================================= */
 
-.panel-content.facturas .badge{
-  padding:3px 9px;
-  border-radius:999px;
-  font-size:10px;
-  font-weight:500;
+/* 📥 DESCARGAR */
+.panel-content.facturas .btn-action[data-action="download"]{
+  color:#cbd5f5;
 }
 
-.panel-content.facturas .badge.pagada{
-  color:var(--success);
-  background:color-mix(in srgb, var(--success), transparent 85%);
+/* ✉️ ENVIAR */
+.panel-content.facturas .btn-action[data-action="send"]{
+  color:#a7f3d0;
 }
 
-.panel-content.facturas .badge.pendiente{
+/* 💳 PAGAR (DESTACADO) */
+.panel-content.facturas .btn-pay{
+  border-color:color-mix(in srgb, var(--warning), transparent 50%);
   color:var(--warning);
+  background:color-mix(in srgb, var(--warning), transparent 92%);
+}
+
+.panel-content.facturas .btn-pay:hover{
   background:color-mix(in srgb, var(--warning), transparent 85%);
+  border-color:var(--warning);
+  box-shadow:0 4px 14px color-mix(in srgb, var(--warning), transparent 70%);
 }
 
 /* =========================================================
-   ACTIONS (🔥 MEJORADAS)
+   ICONOS (AUTOMÁTICOS 🔥)
+========================================================= */
+
+.panel-content.facturas .btn-action::before{
+  font-size:13px;
+  opacity:.8;
+}
+
+.panel-content.facturas .btn-action[data-action="download"]::before{
+  content:"⬇";
+}
+
+.panel-content.facturas .btn-action[data-action="send"]::before{
+  content:"✉";
+}
+
+.panel-content.facturas .btn-action[data-action="pay"]::before{
+  content:"💳";
+}
+
+/* =========================================================
+   GRUPO DE ACCIONES MÁS LIMPIO
 ========================================================= */
 
 .panel-content.facturas .actions{
   display:flex;
   justify-content:flex-end;
   gap:8px;
-}
-
-.panel-content.facturas .btn-action{
-  padding:6px 12px;
-  border-radius:8px;
-  border:1px solid var(--card-border);
-
-  background:var(--card-bg);
-  color:var(--text);
-
-  font-size:12px;
-  cursor:pointer;
-
-  white-space:nowrap;
-
-  transition:all .15s ease;
-}
-
-.panel-content.facturas .btn-action:hover{
-  background:color-mix(in srgb, var(--card-bg), #fff 8%);
-  transform:translateY(-1px);
+  align-items:center;
 }
 
 /* =========================================================
-   LOADING
+   BADGES NIVEL PRO
 ========================================================= */
 
-.panel-content.facturas tr.loading td{
-  text-align:center;
-  padding:30px;
-  color:var(--dim);
-  font-size:13px;
+.panel-content.facturas .badge{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+
+  padding:4px 10px;
+  border-radius:999px;
+
+  font-size:11px;
+  font-weight:600;
+  letter-spacing:.2px;
+
+  backdrop-filter:blur(6px);
+}
+
+/* pagada glow suave */
+.panel-content.facturas .badge.pagada{
+  background:linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--success), transparent 85%),
+    color-mix(in srgb, var(--success), transparent 92%)
+  );
+  color:var(--success);
+}
+
+/* pendiente más visible */
+.panel-content.facturas .badge.pendiente{
+  background:linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--warning), transparent 85%),
+    color-mix(in srgb, var(--warning), transparent 92%)
+  );
+  color:var(--warning);
 }
 
 /* =========================================================
-   SCROLLBAR
+   FILAS MÁS PREMIUM
+========================================================= */
+
+.panel-content.facturas tbody tr{
+  position:relative;
+}
+
+.panel-content.facturas tbody tr::after{
+  content:"";
+  position:absolute;
+  inset:0;
+
+  opacity:0;
+  pointer-events:none;
+
+  background:linear-gradient(
+    90deg,
+    transparent,
+    rgba(255,255,255,0.04),
+    transparent
+  );
+
+  transition:opacity .2s ease;
+}
+
+.panel-content.facturas tbody tr:hover::after{
+  opacity:1;
+}
+
+/* =========================================================
+   AVATAR MÁS PRO
+========================================================= */
+
+.panel-content.facturas .table-avatar{
+  background:linear-gradient(
+    135deg,
+    #6366f1,
+    #8b5cf6
+  );
+
+  box-shadow:0 4px 10px rgba(99,102,241,0.3);
+}
+
+/* =========================================================
+   TEXTO MÁS FINO
+========================================================= */
+
+.panel-content.facturas .user-name{
+  font-weight:600;
+  color:#e5e7eb;
+}
+
+.panel-content.facturas .col-id{
+  opacity:.7;
+}
+
+/* =========================================================
+   IMPORTE MÁS PREMIUM
+========================================================= */
+
+.panel-content.facturas .col-importe{
+  font-variant-numeric:tabular-nums;
+  letter-spacing:.3px;
+}
+
+/* =========================================================
+   SCROLL MÁS FINO
 ========================================================= */
 
 .panel-content.facturas .table-container::-webkit-scrollbar{
-  width:8px;
+  width:6px;
 }
 
 .panel-content.facturas .table-container::-webkit-scrollbar-thumb{
-  background:var(--scrollbar-thumb);
+  background:rgba(255,255,255,0.08);
   border-radius:6px;
 }

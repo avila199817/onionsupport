@@ -52,7 +52,6 @@
   background:var(--panel-bg);
   border-left:1px solid var(--panel-border);
   min-height:0;
-  margin-top:8px;
 }
 
 
@@ -120,6 +119,8 @@
   background:var(--card-bg);
 
   transition:.18s ease;
+
+  margin-top:8px;
 }
 
 .blob-item:hover{

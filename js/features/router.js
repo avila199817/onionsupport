@@ -52,14 +52,14 @@
 
     "/facturas/detalle": {
       page: "/app/views/facturas/detalle.html",
-      style: "/css/app/generic.css",
+      style: "/css/app/facturas/detalle.css",
       script: "/js/features/facturas/detalle.js",
       title: "Detalle factura"
     },
 
     "/facturas/nueva": {
       page: "/app/views/facturas/factura.html",
-      style: "/css/app/generic.css",
+      style: "/css/app/facturas/factura.css",
       script: "/js/features/facturas/factura.js",
       title: "Nueva incidencia"
     },

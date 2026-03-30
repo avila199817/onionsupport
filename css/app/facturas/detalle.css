@@ -1,5 +1,5 @@
 /* =========================================================
-   FACTURA DETALLE — SAAS PRO UI (CLON INCIDENCIA)
+   FACTURA DETALLE — SAAS PRO UI (FINAL)
 ========================================================= */
 
 /* =========================
@@ -29,7 +29,7 @@
 /* =========================================================
    LEFT
 ========================================================= */
-.detalle-left{
+.factura-detalle .detalle-left{
   flex:1;
   min-width:0;
   display:flex;
@@ -40,7 +40,7 @@
 
 
 /* =========================================================
-   RIGHT SIDEBAR (AISLADO)
+   RIGHT SIDEBAR
 ========================================================= */
 .factura-detalle .detalle-right{
   width:360px;
@@ -55,7 +55,7 @@
 
 
 /* =========================================================
-   SIDEBAR CONTENT (AISLADO)
+   SIDEBAR CONTENT
 ========================================================= */
 .factura-detalle .detalle-sidebar{
   display:flex;
@@ -67,21 +67,19 @@
   gap:18px;
 }
 
-/* scoped */
 .factura-detalle .sidebar-section{
   display:flex;
   flex-direction:column;
   gap:12px;
 }
 
-/* divisor */
-.sidebar-divider{
+.factura-detalle .sidebar-divider{
   height:1px;
   background:var(--panel-border);
   margin:6px 0;
 }
 
-.sidebar-title{
+.factura-detalle .sidebar-title{
   font-size:var(--font-xs);
   font-weight:600;
   color:var(--dim);
@@ -93,7 +91,7 @@
 /* =========================================================
    BLOBS
 ========================================================= */
-.detalle-blobs{
+.factura-detalle .detalle-blobs{
   display:flex;
   flex-direction:column;
   gap:10px;
@@ -102,10 +100,11 @@
   max-height:100%;
 }
 
-.detalle-blobs::-webkit-scrollbar{
+.factura-detalle .detalle-blobs::-webkit-scrollbar{
   width:6px;
 }
-.detalle-blobs::-webkit-scrollbar-thumb{
+
+.factura-detalle .detalle-blobs::-webkit-scrollbar-thumb{
   background:var(--scrollbar-thumb);
   border-radius:6px;
 }
@@ -114,7 +113,7 @@
 /* =========================================================
    BLOB ITEM
 ========================================================= */
-.blob-item{
+.factura-detalle .blob-item{
   display:flex;
   align-items:center;
   justify-content:space-between;
@@ -126,16 +125,15 @@
   background:var(--card-bg);
 
   transition:all var(--duration-fast) var(--ease-out);
-  margin-top:8px;
 }
 
-.blob-item:hover{
+.factura-detalle .blob-item:hover{
   border-color:var(--accent);
   transform:translateY(-2px);
   box-shadow:var(--shadow-soft);
 }
 
-.blob-item span{
+.factura-detalle .blob-item span{
   font-size:var(--font-sm);
   color:var(--text);
 
@@ -145,12 +143,12 @@
   white-space:nowrap;
 }
 
-.blob-actions{
+.factura-detalle .blob-actions{
   display:flex;
   gap:8px;
 }
 
-.blob-download{
+.factura-detalle .blob-download{
   padding:6px 12px;
   border-radius:10px;
   border:none;
@@ -161,15 +159,9 @@
 
   background:linear-gradient(135deg,var(--accent),var(--accent-hover));
   color:#fff;
-
-  transition:.15s;
 }
 
-.blob-download:hover{
-  transform:translateY(-1px);
-}
-
-.blob-delete{
+.factura-detalle .blob-delete{
   padding:6px 10px;
   border-radius:10px;
   border:none;
@@ -178,13 +170,6 @@
   color:#ef4444;
 
   cursor:pointer;
-  font-size:12px;
-
-  transition:.15s;
-}
-
-.blob-delete:hover{
-  background:rgba(239,68,68,0.3);
 }
 
 
@@ -202,26 +187,68 @@
   border-bottom:1px solid var(--panel-border);
 }
 
-#btn-back{
+.factura-detalle #btn-back{
   background:none;
   border:none;
   color:var(--text);
   cursor:pointer;
   font-size:13px;
   opacity:.7;
-  transition:.15s;
 }
 
-#btn-back:hover{
+.factura-detalle #btn-back:hover{
   opacity:1;
   transform:translateX(-2px);
 }
 
 
 /* =========================================================
+   USER HEADER
+========================================================= */
+.factura-detalle .detalle-user{
+  display:flex;
+  align-items:center;
+  gap:12px;
+}
+
+.factura-detalle .table-avatar{
+  width:38px;
+  height:38px;
+  border-radius:50%;
+  overflow:hidden;
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
+  color:#fff;
+
+  font-size:13px;
+  font-weight:600;
+}
+
+.factura-detalle .table-avatar img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+}
+
+.factura-detalle .user-info{
+  display:flex;
+  flex-direction:column;
+}
+
+.factura-detalle .detalle-meta span{
+  font-size:11px;
+  opacity:.7;
+}
+
+
+/* =========================================================
    BODY
 ========================================================= */
-.detalle-body{
+.factura-detalle .detalle-body{
   flex:1;
   display:flex;
   flex-direction:column;
@@ -229,10 +256,11 @@
   overflow:auto;
 }
 
-.detalle-body::-webkit-scrollbar{
+.factura-detalle .detalle-body::-webkit-scrollbar{
   width:6px;
 }
-.detalle-body::-webkit-scrollbar-thumb{
+
+.factura-detalle .detalle-body::-webkit-scrollbar-thumb{
   background:var(--scrollbar-thumb);
   border-radius:6px;
 }
@@ -241,60 +269,47 @@
 /* =========================================================
    GRID
 ========================================================= */
-.form-grid{
+.factura-detalle .form-grid{
   display:grid;
   grid-template-columns: repeat(2, 1fr);
   gap:18px;
-  width:100%;
 }
 
 
 /* =========================================================
    ITEMS
 ========================================================= */
-.detalle-item{
+.factura-detalle .detalle-item{
   display:flex;
   flex-direction:column;
   gap:6px;
 }
 
-.detalle-label{
+.factura-detalle .detalle-label{
   font-size:var(--font-xs);
   color:var(--dim);
   text-transform:uppercase;
-  letter-spacing:.5px;
 }
 
-.detalle-value{
+.factura-detalle .detalle-value{
   font-size:var(--font-base);
   font-weight:500;
-  color:var(--text);
 }
 
 
 /* =========================================================
    EDITABLE
 ========================================================= */
-.detalle-editable{
-  font-size:var(--font-base);
-  line-height:var(--line-relaxed);
-
+.factura-detalle .detalle-editable{
   background:color-mix(in srgb, var(--card-bg), #000 10%);
   border:1px solid var(--card-border);
   border-radius:10px;
 
   padding:12px;
   min-height:70px;
-
-  transition:.15s;
 }
 
-.detalle-editable:hover{
-  border-color:var(--accent);
-}
-
-.detalle-editable[contenteditable="true"]{
-  outline:none;
+.factura-detalle .detalle-editable[contenteditable="true"]{
   border-color:var(--accent);
   box-shadow:0 0 0 2px rgba(99,102,241,0.25);
 }
@@ -303,7 +318,7 @@
 /* =========================================================
    SELECT
 ========================================================= */
-.detalle-select{
+.factura-detalle .detalle-select{
   margin-top:6px;
   padding:10px 12px;
 
@@ -312,125 +327,52 @@
 
   background:color-mix(in srgb, var(--card-bg), #000 15%);
   color:#fff;
-
-  font-size:var(--font-sm);
-  font-weight:500;
-  cursor:pointer;
-}
-
-.detalle-select:focus{
-  outline:none;
-  border-color:var(--accent);
-  box-shadow:0 0 0 2px rgba(99,102,241,0.25);
 }
 
 
 /* =========================================================
-   USER
+   FILES
 ========================================================= */
-.detalle-user{
-  display:flex;
-  align-items:center;
-  gap:10px;
-}
-
-.table-avatar{
-  width:36px;
-  height:36px;
-  border-radius:50%;
-  overflow:hidden;
-
-  background:#ddd;
-
-  display:flex;
-  align-items:center;
-  justify-content:center;
-
-  font-size:13px;
-  font-weight:600;
-}
-
-.table-avatar img{
-  width:100%;
-  height:100%;
-  object-fit:cover;
-}
-
-
-/* =========================================================
-   FILE LIST
-========================================================= */
-.file-list{
-  margin-top:10px;
+.factura-detalle .incidencia-files{
   display:flex;
   flex-direction:column;
   gap:8px;
 }
 
-.file-item{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-
-  padding:8px 10px;
-  border-radius:10px;
-
-  background:color-mix(in srgb, var(--card-bg), #000 10%);
-  border:1px solid var(--card-border);
-
-  font-size:var(--font-sm);
-}
-
-.file-item span{
-  max-width:75%;
-  overflow:hidden;
-  text-overflow:ellipsis;
-  white-space:nowrap;
-}
-
-.file-remove{
+.factura-detalle #btn-attach-detalle{
   background:none;
   border:none;
-  color:var(--error);
+  color:var(--accent);
   cursor:pointer;
-  font-size:14px;
-  font-weight:600;
-  opacity:.7;
-  transition:.15s;
 }
 
-.file-remove:hover{
-  opacity:1;
-  transform:scale(1.1);
+.factura-detalle .file-list{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
 }
 
 
 /* =========================================================
    FOOTER
 ========================================================= */
-.detalle-footer{
+.factura-detalle .detalle-footer{
   margin-top:24px;
   display:flex;
   justify-content:space-between;
   align-items:center;
 }
 
-.detalle-hint{
-  font-size:var(--font-xs);
+.factura-detalle .detalle-hint{
+  font-size:12px;
   color:var(--dim);
-}
-
-.detalle-meta span{
-  font-size:11px;
-  opacity:.7;
-  letter-spacing:.3px;
 }
 
 
 /* =========================================================
    SAVE BUTTON
 ========================================================= */
-#btn-save{
+.factura-detalle #btn-save{
   padding:12px 22px;
   border-radius:12px;
 
@@ -441,15 +383,6 @@
   cursor:pointer;
 
   font-weight:600;
-
-  box-shadow:0 10px 24px rgba(99,102,241,0.35);
-
-  transition:.15s;
-}
-
-#btn-save:hover{
-  transform:translateY(-2px);
-  box-shadow:0 14px 30px rgba(99,102,241,0.45);
 }
 
 
@@ -462,7 +395,7 @@
     display:none;
   }
 
-  .detalle-body{
+  .factura-detalle .detalle-body{
     padding:20px;
   }
 

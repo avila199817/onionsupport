@@ -134,7 +134,6 @@ function bindEvents(){
 
   });
 
-  /* 🔥 MENSAJE EDITABLE */
   const msg = $("#detalle-mensaje");
 
   if(msg){
@@ -202,7 +201,44 @@ async function loadDetalle(){
 
 
 /* =========================
-   UPDATE
+   🔥 UPLOAD DIRECTO AZURE
+========================= */
+
+async function uploadFile(file){
+
+  const res = await fetch(Onion.config.API + "/uploads/upload-url", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getAuthHeaders()
+    },
+    body: JSON.stringify({
+      fileName: file.name,
+      fileType: file.type,
+      fileSize: file.size
+    })
+  });
+
+  const { uploadUrl, blobUrl } = await res.json();
+
+  await fetch(uploadUrl, {
+    method: "PUT",
+    headers: {
+      "x-ms-blob-type": "BlockBlob",
+      "Content-Type": file.type
+    },
+    body: file
+  });
+
+  return {
+    name: file.name,
+    url: blobUrl
+  };
+}
+
+
+/* =========================
+   UPDATE (🔥 PRO)
 ========================= */
 
 async function updateTicket(){
@@ -228,22 +264,29 @@ async function updateTicket(){
 
     setSaving(true);
 
-    const formData = new FormData();
-
-    if(status) formData.append("status", status);
-    if(priority) formData.append("priority", priority);
-    if(message !== undefined) formData.append("message", message);
+    /* 🔥 SUBIDA DIRECTA */
+    let uploaded = [];
 
     if(files && files.length){
       for(const f of files){
-        formData.append("files", f);
+        const fileData = await uploadFile(f);
+        uploaded.push(fileData);
       }
     }
 
+    /* 🔥 SOLO JSON */
     const res = await fetch(Onion.config.API + "/tickets/" + id, {
       method: "PATCH",
-      body: formData,
-      headers: getAuthHeaders()
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify({
+        status,
+        priority,
+        message,
+        attachments: uploaded
+      })
     });
 
     const json = await res.json();
@@ -286,111 +329,58 @@ async function updateTicket(){
 function render(i){
 
   const usuario = i.cliente?.nombre || "Usuario";
-  const avatar = i.cliente?.avatar;
 
   setText("#detalle-id", i.id);
   setText("#detalle-usuario", usuario);
   setText("#detalle-titulo", i.subject || "Sin título");
   setText("#detalle-fecha", formatFecha(i.createdAt));
 
-  const msg = $("#detalle-mensaje");
-  if(msg){
-    msg.textContent = i.message || "";
-  }
+  $("#detalle-mensaje").textContent = i.message || "";
 
   setSelectValue($("#edit-estado"), i.status || "open");
   setSelectValue($("#edit-prioridad"), i.priority || "low");
 
-  renderAvatar(usuario, avatar);
-  applyVisualState();
   renderBlobs(i.attachments || []);
 
 }
 
 
 /* =========================
-   SELECT
+   UI HELPERS
 ========================= */
 
 function setSelectValue(select, value){
   if(!select) return;
-
-  const option = [...select.options].find(o => o.value === value);
-
-  if(option){
-    option.selected = true;
-    select.selectedIndex = option.index;
-  }else{
-    select.selectedIndex = 0;
-  }
-
+  select.value = value;
   select.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
-
-/* =========================
-   VISUAL STATE
-========================= */
-
-function applyVisualState(){
-
-  const estado = $("#edit-estado");
-  const prioridad = $("#edit-prioridad");
-  const avatarEl = $("#detalle-avatar");
-
-  if(!estado || !prioridad) return;
-
-  estado.className = "detalle-select estado-" + estado.value;
-  prioridad.className = "detalle-select prio-" + prioridad.value;
-
-  if(estado.value === "open" && prioridad.value === "low"){
-    avatarEl?.classList.add("avatar-highlight");
-  }else{
-    avatarEl?.classList.remove("avatar-highlight");
-  }
-
-}
-
-
-/* =========================
-   BLOBS
-========================= */
-
 function renderBlobs(files){
-
-  const container = $("#detalle-blobs");
-  if(!container) return;
+  const c = $("#detalle-blobs");
+  if(!c) return;
 
   if(!files.length){
-    container.innerHTML = `<div class="detalle-hint">Sin archivos</div>`;
+    c.innerHTML = `<div class="detalle-hint">Sin archivos</div>`;
     return;
   }
 
-  container.innerHTML = files.map(f => `
+  c.innerHTML = files.map(f => `
     <div class="blob-item">
-      <span class="blob-name">${escapeHTML(f.name)}</span>
+      <span>${f.name}</span>
       <button class="blob-download" data-url="${f.url}" data-name="${f.name}">
         Descargar
       </button>
     </div>
   `).join("");
-
 }
 
-
-/* =========================
-   FILES
-========================= */
-
 function renderFiles(files){
-
   const list = $("#detalle-file-list");
   if(!list) return;
 
   list.innerHTML = [...files].map(f =>
-    `<div class="file-item">${escapeHTML(f.name)}</div>`
+    `<div>${f.name}</div>`
   ).join("");
-
 }
 
 
@@ -399,44 +389,20 @@ function renderFiles(files){
 ========================= */
 
 async function downloadBlob(url, name){
+  const res = await fetch(url);
+  const blob = await res.blob();
 
-  try{
-    const res = await fetch(url);
-    const blob = await res.blob();
+  const a = document.createElement("a");
+  const u = URL.createObjectURL(blob);
 
-    const a = document.createElement("a");
-    const objectUrl = URL.createObjectURL(blob);
+  a.href = u;
+  a.download = name;
 
-    a.href = objectUrl;
-    a.download = name || "archivo";
+  document.body.appendChild(a);
+  a.click();
 
-    document.body.appendChild(a);
-    a.click();
-
-    a.remove();
-    URL.revokeObjectURL(objectUrl);
-
-  }catch(err){
-    console.error(err);
-    showToast("Error descargando archivo", "error");
-  }
-
-}
-
-
-/* =========================
-   AVATAR
-========================= */
-
-function renderAvatar(nombre, avatar){
-
-  const el = $("#detalle-avatar");
-  if(!el) return;
-
-  el.innerHTML = avatar
-    ? `<img src="${avatar}" alt="${escapeHTML(nombre)}" />`
-    : `<div class="avatar-fallback">${getInitials(nombre)}</div>`;
-
+  a.remove();
+  URL.revokeObjectURL(u);
 }
 
 
@@ -453,19 +419,8 @@ function formatFecha(f){
   return f ? new Date(f).toLocaleDateString("es-ES") : "--";
 }
 
-function escapeHTML(str){
-  return String(str)
-    .replace(/&/g,"&amp;")
-    .replace(/</g,"&lt;")
-    .replace(/>/g,"&gt;");
-}
-
-function getInitials(name){
-  return name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase();
-}
-
 function getId(){
-  return new URLSearchParams(window.location.search).get("id");
+  return new URLSearchParams(location.search).get("id");
 }
 
 
@@ -490,27 +445,24 @@ function clearLoading(){
 }
 
 function setEmpty(){
-  $("#detalle-content").innerHTML = `<div class="detalle-hint">No encontrada</div>`;
+  $("#detalle-content").innerHTML = `<div>No encontrada</div>`;
 }
 
 function setError(msg){
-  $("#detalle-content").innerHTML = `<div class="badge error">${msg}</div>`;
+  $("#detalle-content").innerHTML = `<div>${msg}</div>`;
 }
 
 function setSaving(active){
-
   const btn = $("#btn-save");
-
   if(btn){
     btn.disabled = active;
     btn.textContent = active ? "Guardando..." : "Guardar cambios";
   }
-
 }
 
 
 /* =========================
-   TOAST (🔥 BIEN)
+   TOAST
 ========================= */
 
 function showToast(message, type="info"){

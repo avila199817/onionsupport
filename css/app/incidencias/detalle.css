@@ -127,6 +127,7 @@
   background:var(--card-bg);
 
   transition:all var(--duration-fast) var(--ease-out);
+  margin-top:8px;
 }
 
 .blob-item:hover{

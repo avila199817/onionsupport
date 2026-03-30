@@ -61,7 +61,7 @@
       page: "/app/views/facturas/factura.html",
       style: "/css/app/facturas/factura.css",
       script: "/js/features/facturas/factura.js",
-      title: "Nueva incidencia"
+      title: "Nueva factura"
     },
 
     "/cuenta": {

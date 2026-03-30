@@ -24,7 +24,6 @@ function init(){
   if(initialized) return;
 
   const root = getRoot();
-
   if(!root) return setTimeout(init, 100);
   if(!Onion.state?.user) return setTimeout(init, 100);
 
@@ -32,7 +31,7 @@ function init(){
 
   bindEvents();
   loadDetalle();
-  observeDOM(); // ✅ YA EXISTE
+  observeDOM();
 
 }
 
@@ -61,7 +60,7 @@ function getAuthHeaders(){
 
 
 /* =========================
-   OBSERVER (FIX)
+   OBSERVER
 ========================= */
 function observeDOM(){
 
@@ -78,30 +77,6 @@ function observeDOM(){
     childList: true,
     subtree: true
   });
-}
-
-
-/* =========================
-   AVATAR
-========================= */
-function renderAvatar(nombre, avatar){
-
-  const el = $("#detalle-avatar");
-  if(!el) return;
-
-  if(avatar){
-    el.innerHTML = `<img src="${avatar}" />`;
-    return;
-  }
-
-  const initials = nombre
-    ?.split(" ")
-    .map(w => w[0])
-    .slice(0,2)
-    .join("")
-    .toUpperCase();
-
-  el.textContent = initials || "U";
 }
 
 
@@ -131,13 +106,17 @@ function bindEvents(){
     }
 
     if(t.classList.contains("file-remove")){
-      const index = Number(t.dataset.index);
-      selectedFiles.splice(index, 1);
+      const i = Number(t.dataset.index);
+      selectedFiles.splice(i,1);
       renderFiles();
     }
 
     if(t.classList.contains("blob-download")){
       downloadBlob(t.dataset.url, t.dataset.name);
+    }
+
+    if(t.classList.contains("blob-delete")){
+      await deleteBlob(t.dataset.url);
     }
 
   });
@@ -182,126 +161,39 @@ async function loadDetalle(){
 
 
 /* =========================
-   UPLOAD (SAS)
-========================= */
-function uploadFile(file){
-
-  return new Promise(async (resolve, reject)=>{
-
-    try{
-
-      const res = await fetch(Onion.config.API + "/uploads/upload-url", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...getAuthHeaders()
-        },
-        body: JSON.stringify({
-          fileName: file.name,
-          fileType: file.type,
-          fileSize: file.size
-        })
-      });
-
-      if(!res.ok) return reject("SAS ERROR");
-
-      const { uploadUrl, blobUrl } = await res.json();
-
-      const xhr = new XMLHttpRequest();
-
-      xhr.open("PUT", uploadUrl, true);
-      xhr.setRequestHeader("x-ms-blob-type", "BlockBlob");
-      xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
-
-      xhr.onload = ()=>{
-        if(xhr.status >= 200 && xhr.status < 300){
-          resolve({ name: file.name, url: blobUrl });
-        }else{
-          reject("UPLOAD FAILED");
-        }
-      };
-
-      xhr.onerror = ()=> reject("XHR ERROR");
-
-      xhr.send(file);
-
-    }catch(err){
-      reject(err);
-    }
-
-  });
-}
-
-
-/* =========================
-   UPDATE
-========================= */
-async function updateTicket(){
-
-  if(sending) return;
-  sending = true;
-
-  try{
-
-    setSaving(true);
-
-    let uploaded = [];
-
-    for(const f of selectedFiles){
-      const data = await uploadFile(f);
-      uploaded.push(data);
-    }
-
-    const res = await fetch(Onion.config.API + "/tickets/" + currentItem.id, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        ...getAuthHeaders()
-      },
-      body: JSON.stringify({
-        status: $("#edit-estado")?.value,
-        priority: $("#edit-prioridad")?.value,
-        message: $("#detalle-mensaje")?.innerText,
-        attachments: uploaded
-      })
-    });
-
-    if(!res.ok) throw new Error("UPDATE ERROR");
-
-    const json = await res.json();
-    currentItem = json?.ticket || json;
-
-    render(currentItem);
-
-    selectedFiles = [];
-    renderFiles();
-
-    showToast("✔ Guardado");
-
-  }catch(err){
-    console.error("💥 updateTicket:", err);
-    showToast("❌ Error");
-  }
-
-  setSaving(false);
-  sending = false;
-}
-
-
-/* =========================
    RENDER
 ========================= */
 function render(i){
 
+  /* USER */
   setText("#detalle-usuario", i?.cliente?.nombre);
-  setText("#detalle-id", i?.id);
-  setText("#detalle-titulo", i?.subject);
-  setText("#detalle-fecha", formatFecha(i?.createdAt));
+  setText("#detalle-userid", "UserID: " + (i?.userId || "--"));
+  setText("#detalle-clienteid", "ClienteID: " + (i?.clienteId || "--"));
 
+  /* HEADER */
+  setText("#detalle-id", i?.id);
+  setText("#detalle-fecha", formatFecha(i?.createdAt));
+  setText("#detalle-fecha-cierre", formatFecha(i?.closedAt));
+  setText("#detalle-tecnico", i?.assignedTo || "--");
+
+  /* CONTENT */
+  setText("#detalle-titulo", i?.subject);
   $("#detalle-mensaje").textContent = i?.message || "";
 
+  /* SELECTS */
+  $("#edit-estado").value = i?.status || "open";
+  $("#edit-prioridad").value = i?.priority || "low";
+
+  /* AVATAR */
   renderAvatar(i?.cliente?.nombre, i?.cliente?.avatar);
-  renderBlobs(i?.attachments || []);
+
+  /* BLOBS */
+  const userFiles = (i?.attachments || []).filter(f => f.type !== "team");
+  const teamFiles = (i?.attachments || []).filter(f => f.type === "team");
+
+  renderBlobs("#detalle-blobs-user", userFiles, true);
+  renderBlobs("#detalle-blobs-team", teamFiles, false);
+
 }
 
 
@@ -325,9 +217,9 @@ function renderFiles(){
 /* =========================
    BLOBS
 ========================= */
-function renderBlobs(files){
+function renderBlobs(selector, files, allowDelete){
 
-  const c = $("#detalle-blobs");
+  const c = $(selector);
   if(!c) return;
 
   if(!files.length){
@@ -338,31 +230,173 @@ function renderBlobs(files){
   c.innerHTML = files.map(f => `
     <div class="blob-item">
       <span>${f.name}</span>
-      <button class="blob-download" data-url="${f.url}" data-name="${f.name}">
-        Descargar
-      </button>
+      <div class="blob-actions">
+        <button class="blob-download" data-url="${f.url}" data-name="${f.name}">
+          Descargar
+        </button>
+        ${allowDelete ? `
+          <button class="blob-delete" data-url="${f.url}">
+            🗑️
+          </button>
+        ` : ""}
+      </div>
     </div>
   `).join("");
 }
 
 
 /* =========================
-   DOWNLOAD
+   DELETE BLOB
 ========================= */
-function downloadBlob(url, name){
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+async function deleteBlob(url){
+
+  if(!confirm("¿Eliminar archivo?")) return;
+
+  try{
+
+    const res = await fetch(Onion.config.API + "/uploads/delete", {
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json",
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify({ url })
+    });
+
+    if(!res.ok) throw new Error();
+
+    /* quitar del state */
+    currentItem.attachments =
+      currentItem.attachments.filter(f => f.url !== url);
+
+    render(currentItem);
+
+    showToast("🗑️ Eliminado");
+
+  }catch{
+    showToast("❌ Error eliminando");
+  }
+}
+
+
+/* =========================
+   UPLOAD
+========================= */
+async function uploadFile(file){
+
+  const res = await fetch(Onion.config.API + "/uploads/upload-url", {
+    method:"POST",
+    headers:{
+      "Content-Type":"application/json",
+      ...getAuthHeaders()
+    },
+    body: JSON.stringify({
+      fileName:file.name,
+      fileType:file.type,
+      fileSize:file.size
+    })
+  });
+
+  const { uploadUrl, blobUrl } = await res.json();
+
+  await fetch(uploadUrl, {
+    method:"PUT",
+    headers:{
+      "x-ms-blob-type":"BlockBlob",
+      "Content-Type": file.type || "application/octet-stream"
+    },
+    body:file
+  });
+
+  return {
+    name:file.name,
+    url:blobUrl,
+    type:"user"
+  };
+}
+
+
+/* =========================
+   UPDATE
+========================= */
+async function updateTicket(){
+
+  sending = true;
+  setSaving(true);
+
+  try{
+
+    let uploaded = [];
+
+    for(const f of selectedFiles){
+      const data = await uploadFile(f);
+      uploaded.push(data);
+    }
+
+    const status = $("#edit-estado").value;
+
+    const res = await fetch(Onion.config.API + "/tickets/" + currentItem.id,{
+      method:"PATCH",
+      headers:{
+        "Content-Type":"application/json",
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify({
+        status,
+        priority: $("#edit-prioridad").value,
+        message: $("#detalle-mensaje").innerText,
+        attachments: uploaded,
+        closedAt: status === "closed" ? new Date().toISOString() : null
+      })
+    });
+
+    const json = await res.json();
+    currentItem = json?.ticket || json;
+
+    selectedFiles = [];
+    renderFiles();
+    render(currentItem);
+
+    showToast("✔ Guardado");
+
+  }catch(err){
+    console.error(err);
+    showToast("❌ Error");
+  }
+
+  sending = false;
+  setSaving(false);
+}
+
+
+/* =========================
+   AVATAR
+========================= */
+function renderAvatar(nombre, avatar){
+
+  const el = $("#detalle-avatar");
+  if(!el) return;
+
+  if(avatar){
+    el.innerHTML = `<img src="${avatar}" />`;
+    return;
+  }
+
+  const initials = nombre
+    ?.split(" ")
+    .map(w => w[0])
+    .slice(0,2)
+    .join("")
+    .toUpperCase();
+
+  el.textContent = initials || "U";
 }
 
 
 /* =========================
    HELPERS
 ========================= */
-function setText(sel, val){
+function setText(sel,val){
   const el = $(sel);
   if(el) el.textContent = val || "--";
 }
@@ -381,6 +415,13 @@ function setSaving(active){
     btn.disabled = active;
     btn.textContent = active ? "Guardando..." : "Guardar cambios";
   }
+}
+
+function downloadBlob(url,name){
+  const a=document.createElement("a");
+  a.href=url;
+  a.download=name;
+  a.click();
 }
 
 function showToast(msg){

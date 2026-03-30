@@ -1,0 +1,179 @@
+<div class="panel-content factura-detalle">
+
+  <div class="layout-split">
+
+    <!-- =========================
+         LEFT
+    ========================= -->
+    <div class="detalle-left">
+
+      <!-- TOP BAR -->
+      <div class="filters-row" style="justify-content: space-between;">
+
+        <div class="detalle-user">
+          <div id="detalle-avatar" class="table-avatar"></div>
+
+          <div class="user-info">
+            <div class="detalle-value" id="detalle-cliente">--</div>
+
+            <div class="detalle-meta">
+              <span id="detalle-cliente-id"></span>
+            </div>
+          </div>
+        </div>
+
+        <button id="btn-back">
+          ← Volver
+        </button>
+
+      </div>
+
+      <!-- BODY -->
+      <div class="detalle-body">
+
+        <div id="detalle-content" style="width:100%;">
+
+          <div class="form-grid">
+
+            <!-- ID FACTURA -->
+            <div class="detalle-item">
+              <div class="detalle-label">ID Factura</div>
+              <div class="detalle-value" id="detalle-id">--</div>
+            </div>
+
+            <!-- FECHA EMISIÓN -->
+            <div class="detalle-item">
+              <div class="detalle-label">Fecha emisión</div>
+              <div class="detalle-value" id="detalle-fecha">--</div>
+            </div>
+
+            <!-- FECHA VENCIMIENTO -->
+            <div class="detalle-item">
+              <div class="detalle-label">Fecha vencimiento</div>
+              <div class="detalle-value" id="detalle-vencimiento">--</div>
+            </div>
+
+            <!-- MÉTODO PAGO -->
+            <div class="detalle-item">
+              <div class="detalle-label">Método de pago</div>
+              <div class="detalle-value" id="detalle-metodo">--</div>
+            </div>
+
+            <!-- IMPORTE -->
+            <div class="detalle-item">
+              <div class="detalle-label">Importe total</div>
+              <div class="detalle-value" id="detalle-total">--</div>
+            </div>
+
+            <!-- TÍTULO / CONCEPTO -->
+            <div class="detalle-item" style="grid-column: span 2;">
+              <div class="detalle-label">Concepto</div>
+              <div class="detalle-value" id="detalle-concepto">--</div>
+            </div>
+
+            <!-- DESCRIPCIÓN -->
+            <div class="detalle-item" style="grid-column: span 2;">
+              <div class="detalle-label">Descripción</div>
+
+              <div 
+                id="detalle-descripcion"
+                class="detalle-value detalle-editable"
+                contenteditable="false"
+              ></div>
+            </div>
+
+            <!-- ESTADO -->
+            <div class="detalle-item">
+              <div class="detalle-label">Estado</div>
+
+              <select id="edit-estado" class="detalle-select">
+                <option value="pending">Pendiente</option>
+                <option value="paid">Pagada</option>
+                <option value="cancelled">Cancelada</option>
+              </select>
+            </div>
+
+            <!-- IVA -->
+            <div class="detalle-item">
+              <div class="detalle-label">IVA</div>
+
+              <select id="edit-iva" class="detalle-select">
+                <option value="0">0%</option>
+                <option value="10">10%</option>
+                <option value="21">21%</option>
+              </select>
+            </div>
+
+            <!-- =========================
+                 ADJUNTOS FACTURA
+            ========================= -->
+            <div class="detalle-item" style="grid-column: span 2;">
+              <div class="detalle-label">Archivos de la factura</div>
+
+              <div class="incidencia-files">
+
+                <button type="button" id="btn-attach-detalle">
+                  + Añadir archivos
+                </button>
+
+                <input 
+                  type="file"
+                  id="detalle-files"
+                  multiple
+                  hidden
+                >
+
+                <div id="detalle-file-list" class="file-list"></div>
+
+              </div>
+            </div>
+
+          </div>
+
+          <!-- FOOTER -->
+          <div class="detalle-footer">
+
+            <div class="detalle-hint">
+              Puedes actualizar el estado o modificar datos de la factura
+            </div>
+
+            <button id="btn-save">
+              Guardar cambios
+            </button>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- =========================
+         RIGHT
+    ========================= -->
+    <aside class="detalle-right">
+
+      <div class="detalle-sidebar">
+
+        <!-- DOCUMENTOS -->
+        <div class="sidebar-section">
+          <div class="sidebar-title">Documentos asociados</div>
+          <div id="detalle-blobs-docs" class="detalle-blobs"></div>
+        </div>
+
+        <div class="sidebar-divider"></div>
+
+        <!-- HISTORIAL -->
+        <div class="sidebar-section">
+          <div class="sidebar-title">Historial de cambios</div>
+          <div id="detalle-historial" class="detalle-blobs"></div>
+        </div>
+
+      </div>
+
+    </aside>
+
+  </div>
+
+</div>

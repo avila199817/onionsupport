@@ -1,7 +1,12 @@
+/* =========================
+   BASE LAYOUT
+========================= */
+
 .dashboard-container{
   display: flex;
   flex-direction: column;
   gap: 20px;
+  padding: 20px;
 }
 
 /* =========================
@@ -11,8 +16,9 @@
 .card-total{
   padding: 24px;
   border-radius: 16px;
-  background: linear-gradient(135deg, #1a1f3a, #0f1222);
-  border: 1px solid rgba(255,255,255,0.05);
+  background: linear-gradient(135deg, #1a1f3a, #0b0f2a);
+  border: 1px solid rgba(255,255,255,0.06);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.3);
 }
 
 .card-total span{
@@ -22,9 +28,10 @@
 
 .card-total strong{
   display: block;
-  margin-top: 5px;
-  font-size: 36px;
+  margin-top: 6px;
+  font-size: 38px;
   font-weight: 700;
+  letter-spacing: 0.5px;
 }
 
 /* =========================
@@ -32,14 +39,20 @@
 ========================= */
 
 .card-chart{
-  padding: 20px;
-  border-radius: 16px;
-  background: #0f1222;
+  padding: 22px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #0b0f2a, #090c20);
   border: 1px solid rgba(255,255,255,0.05);
+  box-shadow: 0 15px 40px rgba(0,0,0,0.4);
 }
 
 .chart-header{
-  margin-bottom: 10px;
+  margin-bottom: 15px;
+}
+
+.chart-header h2{
+  font-size: 20px;
+  font-weight: 600;
 }
 
 /* =========================
@@ -48,26 +61,24 @@
 
 .chart-area{
   position: relative;
-  height: 220px;
+  height: 240px;
   display: flex;
   align-items: flex-end;
 }
 
-/* GRID DE REFERENCIA */
+/* =========================
+   GRID POWERBI STYLE
+========================= */
 
 .chart-grid{
   position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  bottom: 0;
-
+  inset: 0;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-
   font-size: 10px;
-  opacity: 0.3;
+  opacity: 0.25;
+  pointer-events: none;
 }
 
 .chart-grid span{
@@ -85,6 +96,7 @@
   width: 100%;
   height: 100%;
   gap: 10px;
+  position: relative;
   z-index: 2;
 }
 
@@ -96,26 +108,72 @@
   justify-content: flex-end;
 }
 
+/* 🔥 BARRA */
+
 .bar{
   width: 100%;
+  min-height: 2px;
   height: 0%;
+  border-radius: 8px 8px 4px 4px;
+
   background: linear-gradient(180deg, #00c6ff, #0072ff);
-  border-radius: 6px 6px 3px 3px;
-  transition: height 0.8s cubic-bezier(.2,.8,.2,1);
+
+  box-shadow:
+    0 0 10px rgba(0,198,255,0.25),
+    0 4px 12px rgba(0,0,0,0.4);
+
+  transition:
+    height 0.9s cubic-bezier(.2,.8,.2,1),
+    transform 0.2s ease,
+    filter 0.2s ease;
 }
 
-/* 🔥 hover pro */
+/* 🔥 HOVER PRO */
+
 .month:hover .bar{
-  filter: brightness(1.2);
   transform: scaleY(1.05);
+  filter: brightness(1.2);
+
+  box-shadow:
+    0 0 20px rgba(0,198,255,0.6),
+    0 10px 25px rgba(0,0,0,0.5);
 }
 
 /* =========================
-   🔥 LABELS
+   LABELS
 ========================= */
 
 .month span{
-  margin-top: 6px;
+  margin-top: 8px;
   font-size: 11px;
   opacity: 0.6;
+}
+
+.month strong{
+  font-size: 11px;
+  opacity: 0.9;
+}
+
+/* =========================
+   EMPTY STATE
+========================= */
+
+.month.empty .bar{
+  background: rgba(255,255,255,0.05);
+  box-shadow: none;
+}
+
+/* =========================
+   ANIMACIÓN ENTRADA PANEL
+========================= */
+
+.panel-content.dashboard{
+  opacity: 0;
+  transform: translateY(10px);
+  transition: all 0.4s ease;
+}
+
+.panel-content.dashboard.ready{
+  opacity: 1;
+  transform: translateY(0);
 }

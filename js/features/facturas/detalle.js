@@ -91,7 +91,8 @@ async function loadFactura(id){
   try{
 
     const res = await Onion.fetch(Onion.config.API + "/facturas/" + id);
-    factura = res?.factura || res?.data || res;
+
+    factura = normalizeFactura(res?.factura || res?.data || res);
 
     if(!factura){
       console.error("❌ Factura no encontrada");
@@ -107,6 +108,47 @@ async function loadFactura(id){
 }
 
 /* =========================
+   NORMALIZE (CLAVE PRO)
+========================= */
+
+function normalizeFactura(f){
+
+  if(!f) return null;
+
+  return {
+    id: f.id,
+    numeroLegal: f.numeroFacturaLegal || f.numero || f.id,
+    incidenciaId: f.incidenciaId || f.incidencia_id || null,
+
+    fecha: f.fecha,
+    fechaServicio: f.fechaServicio || f.fecha_vencimiento,
+
+    formaPago: f.formaPago || f.metodoPago,
+
+    total: f.total,
+
+    concepto: f.concepto,
+    descripcion: f.descripcion,
+
+    estadoPago: (f.estadoPago || f.estado || "pendiente").toLowerCase(),
+
+    iva: f.impuestos?.[0]?.porcentaje || f.iva || 21,
+    irpf: f.irpf,
+
+    blobPath: f.blobPath || f.archivo || null,
+
+    cliente: {
+      id: f.cliente?.id || f.clienteId,
+      nombre: f.cliente?.nombre || f.nombreCliente,
+      avatar: f.cliente?.avatar,
+      tipo: f.cliente?.tipo,
+      empresa: f.cliente?.empresa
+    }
+  };
+
+}
+
+/* =========================
    RENDER
 ========================= */
 
@@ -116,25 +158,17 @@ function render(){
 
   const cliente = factura.cliente || {};
 
-  /* =========================
-     HEADER
-  ========================= */
+  /* HEADER */
 
-  const nombre = cliente.nombre || "Cliente";
-
-  $("#detalle-cliente").textContent = nombre;
+  $("#detalle-cliente").textContent = escapeHTML(cliente.nombre || "Cliente");
   $("#detalle-cliente-id").textContent = cliente.id || "";
 
   renderAvatar(cliente);
 
-  /* =========================
-     CORE
-  ========================= */
+  /* CORE */
 
-  $("#detalle-numero-legal").textContent = factura.numeroFacturaLegal || factura.numero || "--";
-
+  $("#detalle-numero-legal").textContent = factura.numeroLegal || "--";
   $("#detalle-id").textContent = factura.id || "--";
-
   $("#detalle-incidencia-id").textContent = factura.incidenciaId || "--";
 
   $("#detalle-fecha").textContent = formatFecha(factura.fecha);
@@ -146,27 +180,30 @@ function render(){
   $("#detalle-concepto").textContent = factura.concepto || "-";
   $("#detalle-descripcion").textContent = factura.descripcion || "-";
 
-  $("#detalle-estado").textContent = formatEstado(factura.estadoPago);
-  $("#detalle-iva").textContent = getIVA(factura) + "%";
+  /* ESTADO PRO */
 
-  /* =========================
-     IRPF (EMPRESA)
-  ========================= */
+  const estadoEl = $("#detalle-estado");
+  const estado = factura.estadoPago;
+
+  estadoEl.textContent = formatEstado(estado);
+  estadoEl.dataset.estado = estado;
+
+  /* IVA */
+
+  $("#detalle-iva").textContent = factura.iva + "%";
+
+  /* IRPF */
 
   const irpfContainer = $("#detalle-irpf-container");
 
   if(isEmpresa(cliente) && factura.irpf){
-
     irpfContainer.style.display = "block";
     $("#detalle-irpf").textContent = factura.irpf + "%";
-
   }else{
     irpfContainer.style.display = "none";
   }
 
-  /* =========================
-     SIDEBAR
-  ========================= */
+  /* SIDEBAR */
 
   renderSidebar();
 
@@ -197,7 +234,6 @@ function renderAvatar(cliente){
 function renderSidebar(){
 
   const docs = $("#detalle-blobs-docs");
-
   if(!docs) return;
 
   if(!factura.blobPath){
@@ -205,16 +241,14 @@ function renderSidebar(){
     return;
   }
 
+  const base = Onion.config.API;
+
   docs.innerHTML = `
     <div class="blob-item">
       <span>Factura PDF</span>
       <div class="blob-actions">
-        <button onclick="window.open('${Onion.config.API}/facturas/${factura.id}/ver','_blank')">
-          Ver
-        </button>
-        <button onclick="window.open('${Onion.config.API}/facturas/${factura.id}/descargar','_blank')">
-          Descargar
-        </button>
+        <button onclick="window.open('${base}/facturas/${factura.id}/ver','_blank')">Ver</button>
+        <button onclick="window.open('${base}/facturas/${factura.id}/descargar','_blank')">Descargar</button>
       </div>
     </div>
   `;
@@ -245,15 +279,10 @@ function capitalize(str){
 }
 
 function formatEstado(e){
-  e = (e || "").toLowerCase();
-
+  if(!e) return "Pendiente";
   if(e === "pagada") return "Pagada";
   if(e === "cancelada") return "Cancelada";
   return "Pendiente";
-}
-
-function getIVA(f){
-  return f.impuestos?.[0]?.porcentaje || "21";
 }
 
 function isEmpresa(cliente){

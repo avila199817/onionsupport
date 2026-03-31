@@ -215,7 +215,16 @@ function render(items){
     </div>
   </td>
 
-  <td class="col-secondary">${escapeHTML(d.empresa)}</td>
+  <td class="col-secondary">
+    <div class="cell-user">
+      <div class="table-avatar">
+        ${renderAvatarEmpresa(d)}
+      </div>
+      <div class="user-info">
+        <span class="user-name">${escapeHTML(d.empresa)}</span>
+      </div>
+    </div>
+  </td>
 
   <td class="col-date">${d.fecha}</td>
 
@@ -275,7 +284,7 @@ function mapItem(f){
 }
 
 /* =========================
-   AVATAR
+   AVATAR CLIENTE
 ========================= */
 
 function renderAvatar(d){
@@ -287,6 +296,23 @@ function renderAvatar(d){
   const initials = getInitials(d.cliente);
   const color = getAvatarColor(d.cliente);
 
+  return avatarHTML(initials, color);
+}
+
+/* =========================
+   AVATAR EMPRESA 🔥
+========================= */
+
+function renderAvatarEmpresa(d){
+
+  const name = d.empresa || "Empresa";
+  const initials = getInitialsEmpresa(name);
+  const color = getAvatarColor(name);
+
+  return avatarHTML(initials, color);
+}
+
+function avatarHTML(initials, color){
   return `
     <div style="
       width:100%;
@@ -322,6 +348,23 @@ function getAvatarColor(name){
   return colors[Math.abs(hashString(name)) % colors.length];
 }
 
+function getInitials(name){
+  return name ? name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase() : "?";
+}
+
+function getInitialsEmpresa(name){
+  return name
+    ? name
+        .replace(/(SL|SA|S\.L\.|S\.A\.)/gi,"")
+        .trim()
+        .split(" ")
+        .map(n=>n[0])
+        .join("")
+        .slice(0,2)
+        .toUpperCase()
+    : "?";
+}
+
 function getEstadoPago(e, fecha){
   e = (e || "").toLowerCase();
   if(e !== "pagada" && isVencida(fecha)) return { label:"Vencida", class:"error" };
@@ -353,10 +396,6 @@ function formatMoney(n){
 
 function escapeHTML(str){
   return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-}
-
-function getInitials(name){
-  return name ? name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase() : "?";
 }
 
 function debounce(fn, delay){

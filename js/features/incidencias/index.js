@@ -257,12 +257,9 @@ function mapItem(i){
     id: i.id || i.ticketId || "--",
     title: i.subject || i.message || "Sin título",
 
-    // 🔥 USUARIO CORRECTO DESDE BACKEND
     usuario: i.cliente?.nombre || "Usuario",
-
     tecnico: i.tecnico?.name || "-",
 
-    // 🔥 AVATAR REAL
     avatar: i.cliente?.avatar || null,
 
     estado: getEstado(i),
@@ -276,7 +273,7 @@ function mapItem(i){
 }
 
 /* =========================
-   AVATAR
+   AVATAR PRO 🔥
 ========================= */
 
 function renderAvatar(d){
@@ -285,7 +282,53 @@ function renderAvatar(d){
     return `<img src="${d.avatar}" alt="${escapeHTML(d.usuario)}" />`;
   }
 
-  return `<div class="avatar-fallback">${getInitials(d.usuario)}</div>`;
+  const initials = getInitials(d.usuario);
+  const color = getAvatarColor(d.usuario);
+
+  return `
+    <div style="
+      width:100%;
+      height:100%;
+      border-radius:50%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:${color};
+      color:#fff;
+      font-weight:600;
+      font-size:12px;
+    ">
+      ${initials}
+    </div>
+  `;
+}
+
+/* =========================
+   AVATAR COLORS 🔥
+========================= */
+
+function hashString(str){
+  let hash = 0;
+  for(let i = 0; i < str.length; i++){
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return hash;
+}
+
+function getAvatarColor(name){
+
+  const colors = [
+    "#6366f1",
+    "#22c55e",
+    "#eab308",
+    "#ef4444",
+    "#06b6d4",
+    "#a855f7",
+    "#f97316"
+  ];
+
+  const index = Math.abs(hashString(name)) % colors.length;
+  return colors[index];
 }
 
 /* =========================

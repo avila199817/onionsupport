@@ -77,7 +77,42 @@ function setMonthLabel(){
 }
 
 /* =========================
-   🔥 RENDER BARRAS AÑO
+   🔥 TRANSFORM DATA → 12 MESES
+========================= */
+
+function buildYearData(evolucion){
+
+  const now = new Date();
+  const currentYear = now.getFullYear();
+
+  const mesesMap = {
+    "01":0,"02":1,"03":2,"04":3,"05":4,"06":5,
+    "07":6,"08":7,"09":8,"10":9,"11":10,"12":11
+  };
+
+  const yearData = new Array(12).fill(0);
+
+  evolucion.forEach(m => {
+
+    if(!m?.mes) return;
+
+    const [year, mes] = m.mes.split("-");
+
+    if(Number(year) !== currentYear) return;
+
+    const idx = mesesMap[mes];
+
+    if(idx !== undefined){
+      yearData[idx] = safe(m.total);
+    }
+
+  });
+
+  return yearData;
+}
+
+/* =========================
+   🔥 RENDER BARRAS (PRO)
 ========================= */
 
 function renderYearRevenue(data){
@@ -91,22 +126,16 @@ function renderYearRevenue(data){
 
   container.innerHTML = data.map((value, i) => {
 
-    const percent = (value / max) * 100;
-
     return `
       <div class="month">
-
         <div class="bar" style="height:0%"></div>
-
         <span>${months[i]}</span>
         <strong>${formatMoney(value)}</strong>
-
       </div>
     `;
 
   }).join("");
 
-  // 🔥 ANIMACIÓN SUAVE
   requestAnimationFrame(()=>{
 
     const bars = container.querySelectorAll(".bar");
@@ -114,7 +143,6 @@ function renderYearRevenue(data){
     bars.forEach((bar, i)=>{
       const value = data[i];
       const percent = (value / max) * 100;
-
       bar.style.height = percent + "%";
     });
 
@@ -130,56 +158,33 @@ async function loadDashboardData(){
 
   try {
 
-    const resFacturas = await Onion.fetch(API + "/facturas");
-    const facturas = resFacturas?.facturas || resFacturas?.data || [];
-
-    const pagadas = facturas.filter(f => f?.estadoPago === "pagada");
-    const pendientes = facturas.filter(f => f?.estadoPago === "pendiente");
-
-    const totalPagado = pagadas.reduce((acc, f) => acc + safe(f?.total), 0);
-    const totalPendiente = pendientes.reduce((acc, f) => acc + safe(f?.total), 0);
-
-    const now = new Date();
-    const startMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-
-    const mensualPagado = pagadas
-      .filter(f => {
-        const d = parseDate(f?.fecha || f?.createdAt);
-        return d && d >= startMonth;
-      })
-      .reduce((acc, f) => acc + safe(f?.total), 0);
-
-    setText("home-facturas", formatMoney(totalPagado));
-    setText("home-facturas-pendiente", formatMoney(totalPendiente));
-    setText("home-facturacion-mes", formatMoney(mensualPagado));
-
-  } catch(e){
-    console.error("💥 Facturas error:", e);
-  }
-
-  try {
-
     const res = await Onion.fetch(API + "/dashboard");
-    const data = res?.data || res || {};
-    const k = data?.kpis || {};
 
-    setText("home-usuarios", safe(k?.usuarios));
-    setText("home-usuarios-inactivos", safe(k?.usuariosInactivos));
+    const data = res?.data || {};
 
-    setText("home-clientes", safe(k?.clientes));
-    setText("home-clientes-inactivos", safe(k?.clientesInactivos));
+    /* =========================
+       KPIs
+    ========================= */
 
-    setText("tickets-hoy", safe(k?.ticketsToday));
-    setText("resueltos-hoy", safe(k?.resueltosToday));
-    setText("pendientes-hoy", safe(k?.pendientesToday));
+    setText("home-facturas", formatMoney(data?.resumen?.totalFacturado));
+    setText("home-facturas-pendiente", formatMoney(data?.resumen?.totalPendiente));
+    setText("home-facturacion-mes", formatMoney(data?.charts?.cashflowMensual?.slice(-1)[0]?.total));
 
-    renderActivity(data?.activity || []);
+    setText("home-clientes", safe(data?.counters?.clientes));
+    setText("home-usuarios", safe(data?.counters?.usuarios));
 
-    // 🔥 AÑO (LO IMPORTANTE)
-    renderYearRevenue(data?.facturacionPorMes || []);
+    /* =========================
+       🔥 BARRAS AÑO (PRO)
+    ========================= */
+
+    const evolucion = data?.charts?.evolucionMensual || [];
+
+    const yearData = buildYearData(evolucion);
+
+    renderYearRevenue(yearData);
 
   } catch(e){
-    console.error("💥 KPIs error:", e);
+    console.error("💥 Dashboard error:", e);
   }
 }
 
@@ -222,37 +227,6 @@ async function loadSystem(){
 }
 
 /* =========================
-   ACTIVITY
-========================= */
-
-function renderActivity(items){
-
-  const list = $("activity-list");
-  if(!list) return;
-
-  list.innerHTML = "";
-
-  if(!items.length){
-    list.innerHTML = "<div>Sin actividad</div>";
-    return;
-  }
-
-  items.slice(0,3).forEach(i => {
-
-    const el = document.createElement("div");
-    el.className = "activity-item";
-
-    el.innerHTML = `
-      <div class="activity-title">${escapeHTML(i?.desc || "Actividad")}</div>
-      <div class="activity-meta">${timeAgo(i?.time)}</div>
-    `;
-
-    list.appendChild(el);
-
-  });
-}
-
-/* =========================
    LOAD
 ========================= */
 
@@ -291,31 +265,6 @@ function init(){
     initialized = false;
     if(interval) clearInterval(interval);
   });
-}
-
-/* =========================
-   HELPERS
-========================= */
-
-function timeAgo(date){
-
-  const d = parseDate(date);
-  if(!d) return "Ahora";
-
-  const diff = Math.floor((Date.now() - d) / 1000);
-
-  if(diff < 60) return "Hace " + diff + "s";
-  if(diff < 3600) return "Hace " + Math.floor(diff/60) + " min";
-  if(diff < 86400) return "Hace " + Math.floor(diff/3600) + " h";
-
-  return "Hace " + Math.floor(diff/86400) + " d";
-}
-
-function escapeHTML(str){
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
 }
 
 /* =========================

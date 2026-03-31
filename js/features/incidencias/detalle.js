@@ -102,8 +102,8 @@ function bindEvents(){
       await updateTicket();
     }
 
-    if(t.id === "btn-attach-detalle"){
-      $("#detalle-files")?.click();
+    if(t.id === "btn-attach"){
+      $("#inc-files")?.click();
     }
 
     if(t.classList.contains("file-remove")){
@@ -125,7 +125,7 @@ function bindEvents(){
 
   Onion.cleanupEvent(root, "change", (e)=>{
 
-    if(e.target.id === "detalle-files"){
+    if(e.target.id === "inc-files"){
       selectedFiles = [...selectedFiles, ...e.target.files];
       renderFiles();
       e.target.value = "";
@@ -183,7 +183,12 @@ function render(i){
   setText("#detalle-tecnico", tecnico || "No asignado");
 
   setText("#detalle-titulo", i?.subject);
-  $("#detalle-mensaje").textContent = i?.message || "";
+
+  const msg = $("#detalle-mensaje");
+  if(msg){
+    msg.textContent = i?.message || "";
+    msg.setAttribute("contenteditable", "true");
+  }
 
   $("#edit-estado").value = i?.status || "open";
   $("#edit-prioridad").value = i?.priority || "low";
@@ -204,7 +209,7 @@ function render(i){
 ========================= */
 function renderFiles(){
 
-  const list = $("#detalle-file-list");
+  const list = $("#file-list");
   if(!list) return;
 
   list.innerHTML = selectedFiles.map((f,i)=>`
@@ -248,82 +253,6 @@ function renderBlobs(selector, files, allowDelete){
 
 
 /* =========================
-   DELETE BLOB
-========================= */
-async function deleteBlob(url){
-
-  if(!confirm("¿Eliminar archivo?")) return;
-
-  deleting = true;
-
-  try{
-
-    const res = await fetch(Onion.config.API + "/tickets/" + currentItem.id, {
-      method:"PATCH",
-      headers:{
-        "Content-Type":"application/json",
-        ...getAuthHeaders()
-      },
-      body: JSON.stringify({
-        deleteAttachments:[url]
-      })
-    });
-
-    if(!res.ok) throw new Error();
-
-    const json = await res.json();
-    currentItem = json?.ticket || json;
-
-    render(currentItem);
-
-    showToast("🗑️ Archivo eliminado");
-
-  }catch{
-    showToast("❌ Error eliminando");
-  }
-
-  deleting = false;
-}
-
-
-/* =========================
-   UPLOAD
-========================= */
-async function uploadFile(file){
-
-  const res = await fetch(Onion.config.API + "/uploads/upload-url", {
-    method:"POST",
-    headers:{
-      "Content-Type":"application/json",
-      ...getAuthHeaders()
-    },
-    body: JSON.stringify({
-      fileName:file.name,
-      fileType:file.type,
-      fileSize:file.size
-    })
-  });
-
-  const { uploadUrl, blobUrl } = await res.json();
-
-  await fetch(uploadUrl, {
-    method:"PUT",
-    headers:{
-      "x-ms-blob-type":"BlockBlob",
-      "Content-Type": file.type || "application/octet-stream"
-    },
-    body:file
-  });
-
-  return {
-    name:file.name,
-    url:blobUrl,
-    type:"user"
-  };
-}
-
-
-/* =========================
    UPDATE
 ========================= */
 async function updateTicket(){
@@ -340,8 +269,6 @@ async function updateTicket(){
       uploaded.push(data);
     }
 
-    const status = $("#edit-estado").value;
-
     const res = await fetch(Onion.config.API + "/tickets/" + currentItem.id,{
       method:"PATCH",
       headers:{
@@ -349,9 +276,9 @@ async function updateTicket(){
         ...getAuthHeaders()
       },
       body: JSON.stringify({
-        status,
+        status: $("#edit-estado").value,
         priority: $("#edit-prioridad").value,
-        message: $("#detalle-mensaje").innerText,
+        message: $("#detalle-mensaje").innerText.trim(),
         attachments: uploaded
       })
     });
@@ -374,30 +301,6 @@ async function updateTicket(){
 
   sending = false;
   setSaving(false);
-}
-
-
-/* =========================
-   AVATAR
-========================= */
-function renderAvatar(nombre, avatar){
-
-  const el = $("#detalle-avatar");
-  if(!el) return;
-
-  if(avatar){
-    el.innerHTML = `<img src="${avatar}" />`;
-    return;
-  }
-
-  const initials = nombre
-    ?.split(" ")
-    .map(w => w[0])
-    .slice(0,2)
-    .join("")
-    .toUpperCase();
-
-  el.textContent = initials || "U";
 }
 
 

@@ -12,6 +12,7 @@ if(!Onion){
 let initialized = false;
 let currentItems = [];
 let filteredItems = [];
+let loading = false;
 
 /* =========================
    ROOT
@@ -86,18 +87,20 @@ function bindEvents(){
 }
 
 /* =========================
-   LOAD
+   LOAD (🔥 FIX LOADER)
 ========================= */
 
 async function loadIncidencias(){
+
+  if(loading) return;
+  loading = true;
 
   const panel = getRoot();
   const tbody = $("#incidencias-body");
 
   if(!tbody) return;
 
-  panel?.classList.remove("ready");
-  setLoading();
+  panel?.classList.add("loading");
 
   try{
 
@@ -109,18 +112,20 @@ async function loadIncidencias(){
 
     if(!items.length){
       setEmpty();
-      panel?.classList.add("ready");
       return;
     }
 
     render(items);
-    panel?.classList.add("ready");
 
   }catch(e){
 
     console.error("💥 ERROR INCIDENCIAS:", e);
     setError();
-    panel?.classList.add("ready");
+
+  }finally{
+
+    panel?.classList.remove("loading");
+    loading = false;
 
   }
 
@@ -179,29 +184,18 @@ function applyFilters(){
    STATES
 ========================= */
 
-function setLoading(){
-  const el = $("#incidencias-body");
-  if(el){
-    el.innerHTML = `<tr><td colspan="8">Cargando incidencias...</td></tr>`;
-  }
-}
-
 function setEmpty(){
-  const el = $("#incidencias-body");
-  if(el){
-    el.innerHTML = `<tr><td colspan="8">No hay incidencias</td></tr>`;
-  }
+  $("#incidencias-body").innerHTML =
+    `<tr><td colspan="8">No hay incidencias</td></tr>`;
 }
 
 function setError(){
-  const el = $("#incidencias-body");
-  if(el){
-    el.innerHTML = `<tr><td colspan="8">Error cargando incidencias</td></tr>`;
-  }
+  $("#incidencias-body").innerHTML =
+    `<tr><td colspan="8">Error cargando incidencias</td></tr>`;
 }
 
 /* =========================
-   RENDER 🔥
+   RENDER
 ========================= */
 
 function render(items){
@@ -260,7 +254,7 @@ function render(items){
 }
 
 /* =========================
-   MAP 🔥
+   MAP
 ========================= */
 
 function mapItem(i){
@@ -319,7 +313,7 @@ function renderAvatar(d){
 }
 
 /* =========================
-   COLORS
+   HELPERS
 ========================= */
 
 function hashString(str){
@@ -331,24 +325,9 @@ function hashString(str){
 }
 
 function getAvatarColor(name){
-
-  const colors = [
-    "#6366f1",
-    "#22c55e",
-    "#eab308",
-    "#ef4444",
-    "#06b6d4",
-    "#a855f7",
-    "#f97316"
-  ];
-
-  const index = Math.abs(hashString(name)) % colors.length;
-  return colors[index];
+  const colors = ["#6366f1","#22c55e","#eab308","#ef4444","#06b6d4","#a855f7","#f97316"];
+  return colors[Math.abs(hashString(name)) % colors.length];
 }
-
-/* =========================
-   HELPERS
-========================= */
 
 function mapStatus(s){
   s = (s || "").toLowerCase();
@@ -397,9 +376,9 @@ function getInitials(name){
 
 function debounce(fn, delay){
   let t;
-  return function(...args){
+  return (...args)=>{
     clearTimeout(t);
-    t = setTimeout(()=> fn.apply(this, args), delay);
+    t = setTimeout(()=>fn(...args), delay);
   };
 }
 

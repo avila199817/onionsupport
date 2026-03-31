@@ -1,5 +1,5 @@
 /* =========================================================
-   FACTURAS — PRO SAAS PANEL (CLON INCIDENCIAS)
+   FACTURAS — PRO SAAS PANEL (CLON CLIENTES + AJUSTE)
 ========================================================= */
 
 .panel-content.facturas{
@@ -117,36 +117,28 @@
 
 .panel-content.facturas th{
   padding:10px 14px;
-
   text-align:left;
-
   border-bottom:1px solid var(--panel-border);
-
   color:var(--dim);
   font-size:11px;
   text-transform:uppercase;
   letter-spacing:.3px;
-
   white-space:nowrap;
 }
 
 .panel-content.facturas td{
   padding:12px 14px;
-
   border-bottom:1px solid var(--panel-border);
-
   font-size:13.5px;
   color:var(--text);
-
   vertical-align:middle;
-
   overflow:hidden;
   text-overflow:ellipsis;
 }
 
 
 /* =========================================================
-   COLUMN SYSTEM (MISMA BASE + AJUSTE FACTURAS)
+   COLUMN SYSTEM (CLAVADO + NUEVA EMPRESA)
 ========================================================= */
 
 .panel-content.facturas .col-id{
@@ -156,10 +148,14 @@
 }
 
 .panel-content.facturas .col-main{
-  width:32%;
+  width:28%;
   font-weight:500;
   white-space:normal;
   line-height:1.4;
+}
+
+.panel-content.facturas .col-secondary{
+  width:180px; /* empresa */
 }
 
 .panel-content.facturas .col-date{
@@ -189,6 +185,7 @@
 
 .panel-content.facturas tbody tr{
   transition:all .15s ease;
+  cursor:pointer;
 }
 
 .panel-content.facturas tbody tr:nth-child(even){
@@ -202,7 +199,7 @@
 
 
 /* =========================================================
-   USER CELL
+   USER CELL (CLON CLIENTES)
 ========================================================= */
 
 .panel-content.facturas .cell-user{
@@ -247,9 +244,14 @@
   font-weight:600;
 }
 
+.panel-content.facturas .user-sub{
+  font-size:11px;
+  color:var(--dim);
+}
+
 
 /* =========================================================
-   BADGES (ADAPTADOS FACTURAS)
+   BADGES (FACTURAS)
 ========================================================= */
 
 .panel-content.facturas .badge{

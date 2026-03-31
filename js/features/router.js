@@ -73,7 +73,7 @@
 
     "/usuarios": {
       page: "/app/views/usuarios/index.html",
-      style: "/css/app/generic.css",
+      style: "/css/app/usuarios/usuarios.css",
       script: "/js/features/usuarios/index.js",
       title: "Usuarios"
     },

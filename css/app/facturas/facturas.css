@@ -180,7 +180,7 @@
 /* 🔥 BLOQUE DERECHO (ALINEADO PERFECTO) */
 .panel-content.facturas .col-date{
   width:120px;
-  text-align:right;
+  text-align:center;
   padding-right:18px;
 }
 

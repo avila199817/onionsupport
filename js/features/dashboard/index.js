@@ -153,7 +153,7 @@ async function loadDashboardData(){
 
   try {
 
-    const res = await Onion.fetch(API + "/dashboard");
+    const res = await Onion.fetch(API + "/api/dashboard");
 
     // 🔥 FIX REAL
     const data = res?.data?.data || {};

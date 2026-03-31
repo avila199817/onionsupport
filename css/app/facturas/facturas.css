@@ -178,8 +178,8 @@
 
 .panel-content.facturas .col-date{
   width:130px;
-  text-align:center;
-  padding-left:22px;
+  text-align:right;
+  padding-left:0;
 }
 
 .panel-content.facturas .col-importe{

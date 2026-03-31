@@ -1,61 +1,25 @@
-<div class="panel-content dashboard home">
+<div class="panel-content dashboard command-center">
 
-  <!-- 🔥 LOADING (MISMO SISTEMA QUE FACTURAS/INCIDENCIAS) -->
+  <!-- 🔥 LOADER -->
   <div class="dashboard-loading">
     <div class="dashboard-spinner"></div>
   </div>
 
-  <div class="container">
+  <div class="cc-container">
 
     <!-- =========================
-         HEADER
+         HEADER CONTROL
     ========================= -->
-    <div class="dashboard-header">
+    <div class="cc-header">
 
-      <div class="dashboard-title">
-        <h1>Dashboard</h1>
-        <span>Resumen general del sistema</span>
+      <div class="cc-title">
+        <h1>Command Center</h1>
+        <span>Sistema en tiempo real</span>
       </div>
 
-      <div class="dashboard-actions">
-        <button class="btn-primary">Actualizar</button>
-      </div>
-
-    </div>
-
-    <!-- =========================
-         KPI TOP
-    ========================= -->
-    <div class="kpi-grid">
-
-      <div class="kpi-card">
-        <div class="kpi-label">Usuarios</div>
-        <div id="home-usuarios" class="kpi-value">0</div>
-        <div class="kpi-sub">
-          Inactivos: <strong id="home-usuarios-inactivos">0</strong>
-        </div>
-      </div>
-
-      <div class="kpi-card">
-        <div class="kpi-label">Clientes</div>
-        <div id="home-clientes" class="kpi-value">0</div>
-        <div class="kpi-sub">
-          Inactivos: <strong id="home-clientes-inactivos">0</strong>
-        </div>
-      </div>
-
-      <div class="kpi-card">
-        <div class="kpi-label">Facturación total</div>
-        <div id="home-facturas" class="kpi-value">€0</div>
-        <div class="kpi-sub">
-          Pendiente: <strong id="home-facturas-pendiente">€0</strong>
-        </div>
-      </div>
-
-      <div class="kpi-card highlight">
-        <div class="kpi-label" id="facturacion-mes-label">Mes actual</div>
-        <div id="home-facturacion-mes" class="kpi-value">€0</div>
-        <div class="kpi-sub">Ingresos del mes</div>
+      <div class="cc-status-live">
+        <span class="dot"></span>
+        EN VIVO
       </div>
 
     </div>
@@ -63,60 +27,67 @@
     <!-- =========================
          GRID PRINCIPAL
     ========================= -->
-    <div class="dashboard-grid">
+    <div class="cc-grid">
 
-      <!-- ACTIVIDAD -->
-      <div class="panel-block">
+      <!-- 🟥 LEFT CONTROL -->
+      <div class="cc-side cc-left">
 
-        <div class="section-header">
-          <span>Actividad reciente</span>
+        <div class="cc-block stat">
+          <span>Usuarios</span>
+          <strong id="home-usuarios">0</strong>
         </div>
 
-        <div id="activity-list" class="activity-list">
-          <div class="activity-item">
-            <div class="activity-title">Cargando actividad...</div>
-            <div class="activity-meta">Esperando datos</div>
+        <div class="cc-block stat">
+          <span>Clientes</span>
+          <strong id="home-clientes">0</strong>
+        </div>
+
+        <div class="cc-block stat">
+          <span>Tickets</span>
+          <strong id="tickets-hoy">0</strong>
+        </div>
+
+      </div>
+
+      <!-- 🟦 CENTER CORE -->
+      <div class="cc-core">
+
+        <div class="cc-core-main">
+
+          <div class="cc-kpi big">
+            <span>Facturación hoy</span>
+            <strong id="home-facturacion-mes">€0</strong>
           </div>
+
+          <div class="cc-kpi-row">
+
+            <div class="cc-kpi">
+              <span>API</span>
+              <strong id="status-api">-- ms</strong>
+            </div>
+
+            <div class="cc-kpi">
+              <span>Base de datos</span>
+              <strong id="status-db">--</strong>
+            </div>
+
+            <div class="cc-kpi">
+              <span>Uptime</span>
+              <strong id="status-uptime">--</strong>
+            </div>
+
+          </div>
+
         </div>
 
-      </div>
+        <!-- ALERTAS -->
+        <div class="cc-alerts">
 
-      <!-- SISTEMA -->
-      <div class="panel-block">
+          <div id="cpu-usage" class="cc-alert">CPU --%</div>
+          <div id="ram-usage" class="cc-alert">RAM --%</div>
+          <div id="disk-usage" class="cc-alert">Disco --%</div>
 
-        <div class="section-header">
-          <span>Estado del sistema</span>
-        </div>
-
-        <div class="status-grid">
-          <div id="status-api" class="status-item">API -- ms</div>
-          <div id="status-db" class="status-item">DB --</div>
-          <div id="status-uptime" class="status-item">Uptime --</div>
-        </div>
-
-      </div>
-
-    </div>
-
-    <!-- =========================
-         SEGUNDO GRID
-    ========================= -->
-    <div class="dashboard-grid">
-
-      <!-- HARDWARE -->
-      <div class="panel-block">
-
-        <div class="section-header">
-          <span>Sistema / Rendimiento</span>
-        </div>
-
-        <div class="system-stats">
-
-          <div id="cpu-usage" class="stat-item">CPU --%</div>
-          <div id="ram-usage" class="stat-item">RAM --%</div>
-          <div id="disk-usage" class="stat-item">Disco --%</div>
-
-          <div id="system-warning" class="stat-warning" style="display:none;">
+          <div id="system-warning" class="cc-alert danger" style="display:none;">
             ⚠️ Alta carga del sistema
           </div>
 
@@ -124,30 +95,32 @@
 
       </div>
 
-      <!-- HOY -->
-      <div class="panel-block">
+      <!-- 🟩 RIGHT ACTION -->
+      <div class="cc-side cc-right">
 
-        <div class="section-header">
-          <span>Rendimiento hoy</span>
-        </div>
+        <button class="cc-action">+ Usuario</button>
+        <button class="cc-action">+ Cliente</button>
+        <button class="cc-action">+ Factura</button>
+        <button class="cc-action">+ Ticket</button>
 
-        <div class="summary-grid">
+      </div>
 
-          <div class="summary-item">
-            <div id="tickets-hoy" class="summary-value">0</div>
-            <div class="summary-label">Tickets</div>
-          </div>
+    </div>
 
-          <div class="summary-item">
-            <div id="resueltos-hoy" class="summary-value">0</div>
-            <div class="summary-label">Resueltos</div>
-          </div>
+    <!-- =========================
+         ACTIVITY STREAM
+    ========================= -->
+    <div class="cc-activity">
 
-          <div class="summary-item">
-            <div id="pendientes-hoy" class="summary-value">0</div>
-            <div class="summary-label">Pendientes</div>
-          </div>
+      <div class="cc-activity-header">
+        Actividad en tiempo real
+      </div>
 
+      <div id="activity-list" class="cc-activity-stream">
+
+        <div class="cc-activity-item">
+          <div class="cc-activity-title">Cargando actividad...</div>
+          <div class="cc-activity-meta">Esperando datos</div>
         </div>
 
       </div>

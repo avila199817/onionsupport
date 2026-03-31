@@ -159,42 +159,46 @@
 }
 
 /* =========================================================
-   COLUMN SYSTEM (🔥 CLAVE)
+   COLUMN SYSTEM (🔥 AJUSTE MILIMÉTRICO FINAL)
 ========================================================= */
 
 .panel-content.facturas .col-id{
-  width:130px;
+  width:120px;
   font-size:11px;
   color:var(--dim);
 }
 
+/* 🔥 BLOQUE IZQUIERDO */
 .panel-content.facturas .col-main{
-  width:25%;
+  width:24%;
 }
 
 .panel-content.facturas .col-secondary{
-  width:29%;
+  width:30%;
 }
 
+/* 🔥 BLOQUE DERECHO (ALINEADO PERFECTO) */
 .panel-content.facturas .col-date{
-  width:130px;
+  width:120px;
   text-align:right;
-  padding-left:0;
+  padding-right:18px;
 }
 
 .panel-content.facturas .col-importe{
   width:130px;
   text-align:right;
+  padding-right:18px;
 }
 
 .panel-content.facturas .col-status{
-  width:120px;
+  width:110px;
   text-align:center;
 }
 
 .panel-content.facturas .col-actions{
-  width:180px;
+  width:170px;
   text-align:right;
+  padding-right:18px;
 }
 
 /* =========================================================

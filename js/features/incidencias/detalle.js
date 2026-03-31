@@ -197,7 +197,6 @@ function clearUI(){
 
   const msg = $("#detalle-mensaje");
   if(msg) msg.textContent = "";
-
 }
 
 
@@ -248,7 +247,6 @@ function render(i){
 
   renderBlobs("#detalle-blobs-user", userFiles, true);
   renderBlobs("#detalle-blobs-team", teamFiles, false);
-
 }
 
 
@@ -277,7 +275,96 @@ function renderAvatar(nombre, avatar){
 
 
 /* =========================
-   UPDATE (🔥 FIX CLAVE)
+   FILE LIST
+========================= */
+function renderFiles(){
+
+  const list = $("#file-list");
+  if(!list) return;
+
+  list.innerHTML = selectedFiles.map((f,i)=>`
+    <div class="file-item">
+      <span>${f.name}</span>
+      <button class="file-remove" data-index="${i}">✕</button>
+    </div>
+  `).join("");
+}
+
+
+/* =========================
+   BLOBS (🔥 FIX CLAVE)
+========================= */
+function renderBlobs(selector, files, allowDelete){
+
+  const c = $(selector);
+  if(!c) return;
+
+  if(!files || !files.length){
+    c.innerHTML = `<div class="detalle-hint">Sin archivos</div>`;
+    return;
+  }
+
+  c.innerHTML = files.map(f => `
+    <div class="blob-item">
+      <span>${f.name}</span>
+
+      <div class="blob-actions">
+        <button class="blob-download" data-url="${f.url}" data-name="${f.name}">
+          Descargar
+        </button>
+
+        ${allowDelete ? `
+          <button class="blob-delete" data-url="${f.url}">
+            🗑️
+          </button>
+        ` : ""}
+      </div>
+    </div>
+  `).join("");
+}
+
+
+/* =========================
+   DELETE
+========================= */
+async function deleteBlob(url){
+
+  if(!confirm("¿Eliminar archivo?")) return;
+
+  try{
+
+    const res = await fetch(Onion.config.API + "/tickets/" + currentItem.id,{
+      method:"PATCH",
+      headers:{
+        "Content-Type":"application/json",
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify({
+        deleteAttachments:[url]
+      })
+    });
+
+    if(!res.ok) throw new Error();
+
+    const json = await res.json();
+
+    currentItem = {
+      ...currentItem,
+      ...(json?.ticket || json)
+    };
+
+    render(currentItem);
+
+    showToast("🗑️ Archivo eliminado");
+
+  }catch{
+    showToast("❌ Error eliminando");
+  }
+}
+
+
+/* =========================
+   UPDATE
 ========================= */
 async function updateTicket(){
 
@@ -303,12 +390,9 @@ async function updateTicket(){
 
     const json = await res.json();
 
-    const updated = json?.ticket || json;
-
-    /* 🔥 MERGE PRO (NO PIERDES DATOS) */
     currentItem = {
       ...currentItem,
-      ...updated
+      ...(json?.ticket || json)
     };
 
     render(currentItem);
@@ -358,7 +442,7 @@ function downloadBlob(url,name){
 
 
 /* =========================
-   TOAST (🔥 SIEMPRE FUNCIONA)
+   TOAST
 ========================= */
 function showToast(msg){
 

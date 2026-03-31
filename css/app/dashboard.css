@@ -1,293 +1,68 @@
-/* =========================================================
-   DASHBOARD — PRO SAAS (STEVE JOBS MODE)
-========================================================= */
-
-.panel-content.dashboard.pro-saas{
-  display:flex;
-  flex-direction:column;
-  height:100%;
-  width:100%;
-  position:relative;
-}
-
-/* =========================
-   LOADER
-========================= */
-
-.dashboard-loading{
-  position:absolute;
-  inset:0;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  background:rgba(10,10,10,0.5);
-  backdrop-filter:blur(4px);
-  z-index:20;
-  opacity:0;
-  pointer-events:none;
-  transition:.2s ease;
-}
-
-.panel-content.dashboard.loading .dashboard-loading{
-  opacity:1;
-  pointer-events:auto;
-}
-
-.dashboard-spinner{
-  width:42px;
-  height:42px;
-  border-radius:50%;
-  border:3px solid rgba(255,255,255,0.15);
-  border-top-color:var(--accent);
-  animation:spin .8s linear infinite;
-}
-
-@keyframes spin{
-  to{ transform:rotate(360deg); }
-}
-
-/* =========================
-   CONTAINER
-========================= */
-
 .dashboard-container{
-  display:flex;
-  flex-direction:column;
-  gap:28px;
-  padding:28px 32px;
-  max-width:1400px;
-  margin:0 auto;
-  width:100%;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
-/* =========================
-   HEADER
-========================= */
-
-.dashboard-header{
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
+/* 🔥 CARD TOTAL */
+.card-total{
+  padding: 24px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #1a1f3a, #0f1222);
+  border: 1px solid rgba(255,255,255,0.05);
 }
 
-.dashboard-title h1{
-  font-size:20px;
-  font-weight:600;
+.card-total-label{
+  font-size: 13px;
+  opacity: 0.7;
 }
 
-.dashboard-title span{
-  font-size:12px;
-  color:var(--dim);
+.card-total-value{
+  font-size: 36px;
+  font-weight: 700;
 }
 
-.dashboard-live{
-  display:flex;
-  align-items:center;
-  gap:8px;
-  font-size:12px;
-  color:#22c55e;
+/* 🔥 CARD COLUMNAS */
+.card-year{
+  padding: 20px;
+  border-radius: 16px;
+  background: #0f1222;
+  border: 1px solid rgba(255,255,255,0.05);
 }
 
-.dashboard-live .dot{
-  width:8px;
-  height:8px;
-  border-radius:50%;
-  background:#22c55e;
-  box-shadow:0 0 8px #22c55e;
+.card-year-header{
+  margin-bottom: 15px;
 }
 
-/* =========================
-   HERO (🔥 FOCO ABSOLUTO)
-========================= */
-
-.dashboard-hero{
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  justify-content:center;
-
-  padding:48px 20px;
-
-  border-radius:20px;
-
-  background:linear-gradient(
-    135deg,
-    rgba(99,102,241,0.12),
-    rgba(99,102,241,0.04)
-  );
-
-  border:1px solid rgba(99,102,241,0.25);
-
-  text-align:center;
-}
-
-.hero-label{
-  font-size:13px;
-  color:var(--dim);
-  margin-bottom:6px;
-}
-
-.hero-value{
-  font-size:48px;
-  font-weight:700;
-  letter-spacing:-1px;
-}
-
-/* =========================
-   STATUS STRIP
-========================= */
-
-.dashboard-strip{
-  display:flex;
-  flex-wrap:wrap;
-  gap:10px;
-}
-
-.strip-item{
-  padding:10px 14px;
-  border-radius:10px;
-
-  background:var(--card-bg);
-  border:1px solid var(--card-border);
-
-  font-size:12px;
-  color:var(--dim);
-
-  display:flex;
-  align-items:center;
-  gap:6px;
-
-  transition:.15s ease;
-}
-
-.strip-item strong{
-  color:var(--text);
-  font-weight:500;
-}
-
-.strip-item:hover{
-  border-color:var(--accent);
-  color:var(--accent);
-}
-
-/* =========================
-   YEAR REVENUE
-========================= */
-
-.year-revenue{
-  padding:20px;
-  border-radius:16px;
-  background:var(--panel-bg);
-  border:1px solid var(--panel-border);
-}
-
-.year-header h2{
-  font-size:15px;
-  margin-bottom:14px;
-}
-
-/* GRID */
 .year-grid{
-  display:grid;
-  grid-template-columns:repeat(12, 1fr);
-  gap:10px;
+  display: flex;
+  align-items: flex-end;
+  height: 160px;
+  gap: 10px;
 }
 
-/* MES */
 .month{
-  display:flex;
-  flex-direction:column;
-  justify-content:space-between;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
 
-  height:90px;
-  padding:10px;
-
-  border-radius:10px;
-  background:var(--card-bg);
-  border:1px solid var(--card-border);
-
-  transition:.15s ease;
+.bar{
+  width: 100%;
+  height: 0%;
+  background: linear-gradient(180deg, #00c6ff, #0072ff);
+  border-radius: 6px;
+  transition: height 0.6s ease;
 }
 
 .month span{
-  font-size:11px;
-  color:var(--dim);
+  font-size: 12px;
+  opacity: 0.6;
 }
 
 .month strong{
-  font-size:13px;
-  font-weight:600;
-}
-
-/* HOVER */
-.month:hover{
-  transform:translateY(-2px);
-  border-color:var(--accent);
-}
-
-/* =========================
-   ACTIVITY
-========================= */
-
-.dashboard-activity{
-  padding:18px;
-  border-radius:14px;
-  background:var(--panel-bg);
-  border:1px solid var(--panel-border);
-}
-
-.activity-header{
-  font-size:13px;
-  color:var(--dim);
-  margin-bottom:10px;
-}
-
-.activity-list{
-  display:flex;
-  flex-direction:column;
-  gap:8px;
-}
-
-.activity-item{
-  padding:10px 12px;
-  border-radius:10px;
-
-  background:var(--card-bg);
-  border:1px solid var(--card-border);
-
-  display:flex;
-  justify-content:space-between;
-  font-size:12px;
-}
-
-.activity-meta{
-  color:var(--dim);
-}
-
-/* =========================
-   RESPONSIVE
-========================= */
-
-@media (max-width:1024px){
-
-  .dashboard-container{
-    padding:20px;
-  }
-
-  .hero-value{
-    font-size:36px;
-  }
-
-  .year-grid{
-    grid-template-columns:repeat(6, 1fr);
-  }
-
-}
-
-@media (max-width:600px){
-
-  .year-grid{
-    grid-template-columns:repeat(3, 1fr);
-  }
-
+  font-size: 12px;
 }

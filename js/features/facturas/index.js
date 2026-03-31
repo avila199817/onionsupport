@@ -12,6 +12,7 @@ if(!Onion){
 let initialized = false;
 let currentItems = [];
 let filteredItems = [];
+let loading = false;
 
 /* =========================
    ROOT
@@ -44,14 +45,16 @@ function init(){
   bindEvents();
   loadFacturas();
 
-  Onion.onCleanup(()=>{ initialized = false; });
+  Onion.onCleanup(()=>{
+    initialized = false;
+  });
 
 }
 
 init();
 
 /* =========================
-   EVENTS
+   EVENTS (LIMPIO + DELEGADO)
 ========================= */
 
 function bindEvents(){
@@ -61,36 +64,17 @@ function bindEvents(){
 
   Onion.cleanupEvent(root, "click", (e)=>{
 
-    if(e.target.closest(".btn-action")) return;
+    const btn = e.target.closest(".btn-action");
+
+    if(btn){
+      handleAction(btn);
+      return;
+    }
 
     const row = e.target.closest("tr[data-id]");
     if(!row) return;
 
-    const id = row.dataset.id;
-    if(!id) return;
-
-    Onion.router.navigate("/facturas/detalle?id=" + id);
-
-  });
-
-  Onion.cleanupEvent(root, "click", (e)=>{
-
-    const btn = e.target.closest(".btn-action");
-    if(!btn) return;
-
-    const id = btn.dataset.id;
-
-    if(btn.classList.contains("view")){
-      Onion.router.navigate("/facturas/detalle?id=" + id);
-    }
-
-    if(btn.classList.contains("download")){
-      window.open(Onion.config.API + "/facturas/" + id + "/descargar");
-    }
-
-    if(btn.classList.contains("pay")){
-      alert("💳 Simulación pago factura " + id);
-    }
+    Onion.router.navigate("/facturas/detalle?id=" + row.dataset.id);
 
   });
 
@@ -104,17 +88,43 @@ function bindEvents(){
 }
 
 /* =========================
+   ACTIONS
+========================= */
+
+function handleAction(btn){
+
+  const id = btn.dataset.id;
+  if(!id) return;
+
+  if(btn.classList.contains("view")){
+    Onion.router.navigate("/facturas/detalle?id=" + id);
+  }
+
+  if(btn.classList.contains("download")){
+    window.open(Onion.config.API + "/facturas/" + id + "/descargar");
+  }
+
+  if(btn.classList.contains("pay")){
+    alert("💳 Simulación pago factura " + id);
+  }
+
+}
+
+/* =========================
    LOAD
 ========================= */
 
 async function loadFacturas(){
 
+  if(loading) return;
+  loading = true;
+
   const panel = getRoot();
   const tbody = $("#facturas-body");
-
   if(!tbody) return;
 
   panel?.classList.remove("ready");
+
   setLoading();
 
   try{
@@ -127,18 +137,20 @@ async function loadFacturas(){
 
     if(!items.length){
       setEmpty();
-      panel?.classList.add("ready");
       return;
     }
 
     render(items);
-    panel?.classList.add("ready");
 
   }catch(e){
 
     console.error("💥 ERROR FACTURAS:", e);
     setError();
+
+  }finally{
+
     panel?.classList.add("ready");
+    loading = false;
 
   }
 
@@ -192,10 +204,25 @@ function applyFilters(){
 ========================= */
 
 function setLoading(){
+
+  const rows = Array.from({ length: 6 }).map(() => `
+    <div class="skeleton-row">
+      <div class="sk id"></div>
+      <div class="sk user"></div>
+      <div class="sk company"></div>
+      <div class="sk date"></div>
+      <div class="sk amount"></div>
+      <div class="sk status"></div>
+      <div class="sk actions"></div>
+    </div>
+  `).join("");
+
   $("#facturas-body").innerHTML = `
     <tr class="loading-row">
       <td colspan="7">
-        <div class="skeleton-table"></div>
+        <div class="skeleton-table">
+          ${rows}
+        </div>
       </td>
     </tr>
   `;
@@ -212,7 +239,7 @@ function setError(){
 }
 
 /* =========================
-   RENDER
+   RENDER (OPTIMIZADO)
 ========================= */
 
 function render(items){
@@ -300,7 +327,6 @@ function mapItem(f){
     total: formatMoney(f.total),
 
     estadoPago: getEstadoPago(f.estadoPago)
-
   };
 
 }
@@ -379,7 +405,10 @@ function formatMoney(n){
 }
 
 function escapeHTML(str){
-  return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  return String(str)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;");
 }
 
 function debounce(fn, delay){

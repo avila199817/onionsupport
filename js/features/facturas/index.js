@@ -154,10 +154,11 @@ function applyFilters(){
   filteredItems = currentItems.filter(f => {
 
     const cliente = (f.cliente?.nombre || "").toLowerCase();
+    const empresa = (f.cliente?.empresa || "").toLowerCase();
     const id = String(f.numero || f.id || "").toLowerCase();
 
     return (
-      (!search || cliente.includes(search) || id.includes(search)) &&
+      (!search || cliente.includes(search) || empresa.includes(search) || id.includes(search)) &&
       (!estado || (f.estadoPago || "").toLowerCase() === estado)
     );
 
@@ -173,21 +174,21 @@ function applyFilters(){
 
 function setLoading(){
   $("#facturas-body").innerHTML =
-    `<tr><td colspan="8">Cargando facturas...</td></tr>`;
+    `<tr><td colspan="10">Cargando facturas...</td></tr>`;
 }
 
 function setEmpty(){
   $("#facturas-body").innerHTML =
-    `<tr><td colspan="8">No hay facturas</td></tr>`;
+    `<tr><td colspan="10">No hay facturas</td></tr>`;
 }
 
 function setError(){
   $("#facturas-body").innerHTML =
-    `<tr><td colspan="8">Error cargando facturas</td></tr>`;
+    `<tr><td colspan="10">Error cargando facturas</td></tr>`;
 }
 
 /* =========================
-   RENDER
+   RENDER 🔥
 ========================= */
 
 function render(items){
@@ -200,43 +201,46 @@ function render(items){
     const d = mapItem(f);
 
     return `
-      <tr data-id="${d.id}" style="cursor:pointer">
+<tr data-id="${d.id}" style="cursor:pointer">
 
-        <td class="col-id">${d.numero}</td>
+  <td class="col-id">${d.numero}</td>
 
-        <td class="col-main">
-          <div class="cell-user">
-            <div class="table-avatar">
-              ${renderAvatar(d)}
-            </div>
-            <div class="user-info">
-              <span class="user-name">${escapeHTML(d.cliente)}</span>
-            </div>
-          </div>
-        </td>
+  <td class="col-main">
+    <div class="cell-user">
+      <div class="table-avatar">
+        ${renderAvatar(d)}
+      </div>
+      <div class="user-info">
+        <span class="user-name">${escapeHTML(d.cliente)}</span>
+        <span class="user-sub">${escapeHTML(d.email)}</span>
+      </div>
+    </div>
+  </td>
 
-        <td class="col-date">${d.fecha}</td>
+  <td class="col-secondary">${escapeHTML(d.empresa)}</td>
 
-        <td class="col-importe">${d.total}</td>
+  <td class="col-date">${d.fecha}</td>
 
-        <td class="col-status">
-          <span class="badge ${d.estadoPago.class}">
-            ${d.estadoPago.label}
-          </span>
-        </td>
+  <td class="col-importe">${d.total}</td>
 
-        <td class="col-status">
-          <span class="badge ${d.estadoFactura.class}">
-            ${d.estadoFactura.label}
-          </span>
-        </td>
+  <td class="col-status">
+    <span class="badge ${d.estadoPago.class}">
+      ${d.estadoPago.label}
+    </span>
+  </td>
 
-        <td class="col-method">${d.metodo}</td>
+  <td class="col-status">
+    <span class="badge ${d.estadoFactura.class}">
+      ${d.estadoFactura.label}
+    </span>
+  </td>
 
-        <td class="col-date">${d.fechaEnvio}</td>
+  <td class="col-method">${d.metodo}</td>
 
-      </tr>
-    `;
+  <td class="col-date">${d.fechaEnvio}</td>
+
+</tr>
+`;
 
   }).join("");
 
@@ -245,7 +249,7 @@ function render(items){
 }
 
 /* =========================
-   MAP
+   MAP 🔥
 ========================= */
 
 function mapItem(f){
@@ -255,6 +259,8 @@ function mapItem(f){
     numero: f.numero || f.numeroFacturaLegal || f.id || "--",
 
     cliente: f.cliente?.nombre || "Cliente",
+    empresa: f.cliente?.empresa || f.cliente?.nombreFiscal || "-",
+    email: f.cliente?.email || "-",
 
     avatar: f.cliente?.avatar || null,
 
@@ -271,7 +277,7 @@ function mapItem(f){
 }
 
 /* =========================
-   AVATAR PRO (🔥 NUEVO)
+   AVATAR
 ========================= */
 
 function renderAvatar(d){
@@ -302,7 +308,7 @@ function renderAvatar(d){
 }
 
 /* =========================
-   AVATAR COLORS (🔥 CLAVE)
+   COLORS
 ========================= */
 
 function hashString(str){

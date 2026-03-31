@@ -271,7 +271,7 @@ function mapItem(f){
 }
 
 /* =========================
-   AVATAR
+   AVATAR PRO (🔥 NUEVO)
 ========================= */
 
 function renderAvatar(d){
@@ -280,7 +280,53 @@ function renderAvatar(d){
     return `<img src="${d.avatar}" alt="${escapeHTML(d.cliente)}" />`;
   }
 
-  return `<div class="avatar-fallback">${getInitials(d.cliente)}</div>`;
+  const initials = getInitials(d.cliente);
+  const color = getAvatarColor(d.cliente);
+
+  return `
+    <div style="
+      width:100%;
+      height:100%;
+      border-radius:50%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:${color};
+      color:#fff;
+      font-weight:600;
+      font-size:12px;
+    ">
+      ${initials}
+    </div>
+  `;
+}
+
+/* =========================
+   AVATAR COLORS (🔥 CLAVE)
+========================= */
+
+function hashString(str){
+  let hash = 0;
+  for(let i = 0; i < str.length; i++){
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return hash;
+}
+
+function getAvatarColor(name){
+
+  const colors = [
+    "#6366f1",
+    "#22c55e",
+    "#eab308",
+    "#ef4444",
+    "#06b6d4",
+    "#a855f7",
+    "#f97316"
+  ];
+
+  const index = Math.abs(hashString(name)) % colors.length;
+  return colors[index];
 }
 
 /* =========================

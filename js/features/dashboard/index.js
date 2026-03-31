@@ -52,25 +52,6 @@ function setText(id, value){
 }
 
 /* =========================
-   MES LABEL
-========================= */
-
-function setMonthLabel(){
-
-  const el = $("facturacion-mes-label");
-  if(!el) return;
-
-  const now = new Date();
-
-  const meses = [
-    "Enero","Febrero","Marzo","Abril","Mayo","Junio",
-    "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"
-  ];
-
-  el.textContent = meses[now.getMonth()] + " " + now.getFullYear();
-}
-
-/* =========================
    🔥 BUILD 12 MESES
 ========================= */
 
@@ -100,7 +81,7 @@ function buildYearData(evolucion){
 }
 
 /* =========================
-   🔥 RENDER BARRAS PRO
+   🔥 RENDER BARRAS (FIX REAL)
 ========================= */
 
 function renderYearRevenue(data){
@@ -115,28 +96,35 @@ function renderYearRevenue(data){
   const months = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
   const max = Math.max(...data, 1);
 
-  // 🔥 fallback visual si todo 0
-  const isEmpty = data.every(v => v === 0);
-
+  // 🔥 render limpio
   container.innerHTML = data.map((value, i) => `
-    <div class="month ${isEmpty ? "empty" : ""}">
-      <div class="bar" style="height:0%"></div>
+    <div class="month">
+      <div class="bar"></div>
       <span>${months[i]}</span>
       <strong>${formatMoney(value)}</strong>
     </div>
   `).join("");
 
+  // 🔥 ESPERAR A QUE EL DOM PINTE (CLAVE)
   requestAnimationFrame(()=>{
 
     const bars = container.querySelectorAll(".bar");
 
     bars.forEach((bar, i)=>{
-      const percent = (safe(data[i]) / max) * 100;
 
-      // 🔥 animación más suave
-      setTimeout(()=>{
-        bar.style.height = percent + "%";
-      }, i * 30);
+      const value = safe(data[i]);
+      const percent = (value / max) * 100;
+
+      // 🔥 FORZAR BASE (evita 0 invisible)
+      bar.style.height = "0%";
+
+      // 🔥 doble frame = render seguro
+      requestAnimationFrame(()=>{
+        setTimeout(()=>{
+          bar.style.height = percent + "%";
+        }, i * 40); // delay progresivo pro
+      });
+
     });
 
   });
@@ -190,7 +178,6 @@ async function loadDashboardData(){
 
     console.error("💥 Dashboard error:", e);
 
-    // 🔥 fallback duro
     renderYearRevenue(new Array(12).fill(0));
 
   }
@@ -264,7 +251,6 @@ function init(){
 
   initialized = true;
 
-  setMonthLabel();
   loadDashboard();
 
   interval = setInterval(loadDashboard, 60000);

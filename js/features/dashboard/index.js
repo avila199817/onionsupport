@@ -58,7 +58,7 @@ function parseDate(d){
 }
 
 /* =========================
-   MES
+   MES LABEL
 ========================= */
 
 function setMonthLabel(){
@@ -74,6 +74,52 @@ function setMonthLabel(){
   ];
 
   el.textContent = meses[now.getMonth()] + " " + now.getFullYear();
+}
+
+/* =========================
+   🔥 RENDER BARRAS AÑO
+========================= */
+
+function renderYearRevenue(data){
+
+  const container = document.querySelector(".year-grid");
+  if(!container) return;
+
+  const months = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+
+  const max = Math.max(...data, 1);
+
+  container.innerHTML = data.map((value, i) => {
+
+    const percent = (value / max) * 100;
+
+    return `
+      <div class="month">
+
+        <div class="bar" style="height:0%"></div>
+
+        <span>${months[i]}</span>
+        <strong>${formatMoney(value)}</strong>
+
+      </div>
+    `;
+
+  }).join("");
+
+  // 🔥 ANIMACIÓN SUAVE
+  requestAnimationFrame(()=>{
+
+    const bars = container.querySelectorAll(".bar");
+
+    bars.forEach((bar, i)=>{
+      const value = data[i];
+      const percent = (value / max) * 100;
+
+      bar.style.height = percent + "%";
+    });
+
+  });
+
 }
 
 /* =========================
@@ -129,13 +175,16 @@ async function loadDashboardData(){
 
     renderActivity(data?.activity || []);
 
+    // 🔥 AÑO (LO IMPORTANTE)
+    renderYearRevenue(data?.facturacionPorMes || []);
+
   } catch(e){
     console.error("💥 KPIs error:", e);
   }
 }
 
 /* =========================
-   SYSTEM (AUTH)
+   SYSTEM
 ========================= */
 
 async function loadSystem(){
@@ -143,7 +192,6 @@ async function loadSystem(){
   const token = Onion.auth?.getToken?.();
 
   if(!token){
-    console.warn("⚠️ No token → no system");
     setText("status-api", "API · no auth");
     setText("status-db", "DB · no auth");
     return;
@@ -159,61 +207,16 @@ async function loadSystem(){
       }
     });
 
-    if(!res.ok){
-      console.error("❌ HEALTH STATUS:", res.status);
-      throw new Error("Health " + res.status);
-    }
-
     const data = await res.json();
 
     setText("status-api", "API · " + (data?.api?.latency ?? "--") + " ms");
     setText("status-db", "DB · " + (data?.db?.status ?? "--"));
     setText("status-uptime", "Uptime · " + (data?.uptime ?? "--"));
 
-    const cpu = $("cpu-usage");
-    if(cpu){
-      cpu.textContent =
-        "CPU: " + (data?.system?.cpu?.usage ?? "--") + "% · " +
-        (data?.system?.cpu?.cores ?? "--") + " cores · load " +
-        (data?.system?.cpu?.load ?? "--");
-    }
-
-    const ram = $("ram-usage");
-    if(ram){
-      ram.textContent =
-        "RAM: " + (data?.system?.ram?.usage ?? "--") + "% · " +
-        (data?.system?.ram?.usedMB ?? "--") + "MB / " +
-        (data?.system?.ram?.totalMB ?? "--") + "MB";
-    }
-
-    const disk = $("disk-usage");
-    if(disk){
-      disk.textContent =
-        "Disco: " + (data?.system?.disk?.percent ?? "--") + "% · " +
-        (data?.system?.disk?.used ?? "--") + "GB / " +
-        (data?.system?.disk?.total ?? "--") + "GB";
-    }
-
-    const loop = $("event-loop");
-    if(loop){
-      loop.textContent =
-        "Event Loop: " + (data?.system?.eventLoop?.lag ?? "--") + " ms";
-    }
-
-    const node = $("node-memory");
-    if(node){
-      node.textContent =
-        "Node: heap " + (data?.system?.node?.heapUsedMB ?? "--") + "MB / " +
-        (data?.system?.node?.heapTotalMB ?? "--") + "MB";
-    }
-
   }catch(e){
-
-    console.error("💥 HEALTH FAIL:", e);
 
     setText("status-api", "API · error");
     setText("status-db", "DB · error");
-    setText("status-uptime", "Uptime · --");
 
   }
 }
@@ -275,15 +278,9 @@ async function loadDashboard(){
 function init(){
 
   const root = getRoot();
-  if(!root) return;
+  if(!root || initialized) return;
 
-  if(initialized) return;
   initialized = true;
-
-  console.log("🧅 DASHBOARD INIT", {
-    API,
-    auth: Onion.auth?.getToken ? "OK" : "MISSING"
-  });
 
   setMonthLabel();
   loadDashboard();

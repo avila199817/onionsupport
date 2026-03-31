@@ -2,6 +2,9 @@
 
   <div class="table-system facturas">
 
+    <!-- =========================
+         FILTROS
+    ========================= -->
     <div class="filters-row">
 
       <input 
@@ -23,6 +26,10 @@
 
     </div>
 
+
+    <!-- =========================
+         TABLA
+    ========================= -->
     <div class="table-container">
 
       <table>
@@ -31,6 +38,7 @@
           <tr>
             <th class="col-id" data-sort="numeroFacturaLegal">ID</th>
             <th class="col-main" data-sort="cliente">Cliente</th>
+            <th class="col-secondary" data-sort="empresa">Empresa</th>
             <th class="col-date" data-sort="fechaFactura">Fecha</th>
             <th class="col-importe" data-sort="total">Importe</th>
             <th class="col-status" data-sort="estadoPago">Pago</th>
@@ -41,9 +49,11 @@
         </thead>
 
         <tbody id="facturas-body">
+
           <tr class="loading">
-            <td colspan="8">Cargando facturas...</td>
+            <td colspan="9">Cargando facturas...</td>
           </tr>
+
         </tbody>
 
       </table>

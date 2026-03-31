@@ -45,9 +45,7 @@ function init(){
   bindEvents();
   loadFacturas();
 
-  Onion.onCleanup(()=>{
-    initialized = false;
-  });
+  Onion.onCleanup(()=> initialized = false);
 
 }
 
@@ -212,7 +210,7 @@ function setError(){
 }
 
 /* =========================
-   RENDER
+   RENDER 🔥 CLAVE
 ========================= */
 
 function render(items){
@@ -223,6 +221,17 @@ function render(items){
   const html = items.map(f => {
 
     const d = mapItem(f);
+
+    const empresaHTML = d.hasEmpresa
+      ? `
+        <div class="cell-user">
+          <div class="table-avatar">${renderAvatarEmpresa(d.empresa)}</div>
+          <div class="user-info">
+            <span class="user-name">${escapeHTML(d.empresa)}</span>
+          </div>
+        </div>
+      `
+      : `<span style="opacity:.6;">-</span>`;
 
     return `
 <tr data-id="${d.id}">
@@ -240,12 +249,7 @@ function render(items){
   </td>
 
   <td class="col-secondary">
-    <div class="cell-user">
-      <div class="table-avatar">${renderAvatarEmpresa(d.empresa)}</div>
-      <div class="user-info">
-        <span class="user-name">${escapeHTML(d.empresa)}</span>
-      </div>
-    </div>
+    ${empresaHTML}
   </td>
 
   <td class="col-date">${d.fecha}</td>
@@ -279,10 +283,16 @@ function render(items){
 }
 
 /* =========================
-   MAP (🔥 DATA CLEAN)
+   MAP 🔥 LIMPIO
 ========================= */
 
 function mapItem(f){
+
+  const empresaRaw =
+    f.cliente?.empresa ||
+    f.cliente?.razonSocial;
+
+  const empresaClean = cleanValue(empresaRaw, "");
 
   return {
     id: f.id,
@@ -291,19 +301,18 @@ function mapItem(f){
     cliente: {
       nombre: cleanValue(
         f.cliente?.nombre ||
-        f.cliente?.nombreContacto
-      , "Cliente"),
-
+        f.cliente?.nombreContacto,
+        "Cliente"
+      ),
       email: cleanValue(
         f.cliente?.email ||
-        f.cliente?.correo
-      , "-")
+        f.cliente?.correo,
+        "-"
+      )
     },
 
-    empresa: cleanValue(
-      f.cliente?.empresa ||
-      f.cliente?.razonSocial
-    , "Sin empresa"),
+    empresa: empresaClean,
+    hasEmpresa: !!empresaClean,
 
     fecha: formatFecha(f.fecha),
     total: formatMoney(f.total),
@@ -314,7 +323,7 @@ function mapItem(f){
 }
 
 /* =========================
-   CLEANERS 🔥
+   CLEANERS
 ========================= */
 
 function cleanValue(val, fallback){

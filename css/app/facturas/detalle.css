@@ -1,5 +1,5 @@
 /* =========================================================
-   FACTURA DETALLE — SAAS PRO UI (FINAL)
+   FACTURA DETALLE — SAAS PRO UI (FINAL 10/10)
 ========================================================= */
 
 /* =========================
@@ -80,10 +80,10 @@
 }
 
 .factura-detalle .sidebar-title{
-  font-size:var(--font-xs);
+  font-size:11px;
   font-weight:600;
   color:var(--dim);
-  letter-spacing:.4px;
+  letter-spacing:.5px;
   text-transform:uppercase;
 }
 
@@ -105,7 +105,7 @@
 }
 
 .factura-detalle .detalle-blobs::-webkit-scrollbar-thumb{
-  background:var(--scrollbar-thumb);
+  background:linear-gradient(180deg,var(--accent),var(--accent-hover));
   border-radius:6px;
 }
 
@@ -122,19 +122,27 @@
   border-radius:12px;
 
   border:1px solid var(--card-border);
-  background:var(--card-bg);
 
-  transition:all var(--duration-fast) var(--ease-out);
+  background:linear-gradient(
+    145deg,
+    rgba(255,255,255,0.02),
+    rgba(0,0,0,0.25)
+  );
+
+  backdrop-filter:blur(6px);
+
+  transition:all .2s ease;
 }
 
 .factura-detalle .blob-item:hover{
   border-color:var(--accent);
   transform:translateY(-2px);
-  box-shadow:var(--shadow-soft);
+  box-shadow:0 6px 18px rgba(0,0,0,.35);
 }
 
 .factura-detalle .blob-item span{
-  font-size:var(--font-sm);
+  font-size:13px;
+  font-weight:500;
   color:var(--text);
 
   max-width:60%;
@@ -148,28 +156,39 @@
   gap:8px;
 }
 
-.factura-detalle .blob-download{
+.factura-detalle .blob-actions button{
   padding:6px 12px;
   border-radius:10px;
   border:none;
   cursor:pointer;
 
-  font-size:var(--font-sm);
+  font-size:12px;
   font-weight:600;
 
-  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
-  color:#fff;
+  transition:all .2s ease;
 }
 
-.factura-detalle .blob-delete{
-  padding:6px 10px;
-  border-radius:10px;
-  border:none;
+/* VER */
+.factura-detalle .blob-actions button:first-child{
+  background:rgba(99,102,241,0.15);
+  color:var(--accent);
+}
 
-  background:rgba(239,68,68,0.15);
-  color:#ef4444;
+.factura-detalle .blob-actions button:first-child:hover{
+  background:rgba(99,102,241,0.25);
+  transform:translateY(-1px);
+}
 
-  cursor:pointer;
+/* DESCARGAR */
+.factura-detalle .blob-actions button:last-child{
+  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
+  color:#fff;
+  box-shadow:0 4px 14px rgba(99,102,241,0.35);
+}
+
+.factura-detalle .blob-actions button:last-child:hover{
+  transform:translateY(-1px) scale(1.03);
+  box-shadow:0 6px 18px rgba(99,102,241,0.45);
 }
 
 
@@ -183,7 +202,13 @@
 
   padding:14px 30px;
 
-  background:var(--panel-bg);
+  backdrop-filter:blur(10px);
+  background:linear-gradient(
+    180deg,
+    rgba(255,255,255,0.02),
+    rgba(0,0,0,0.1)
+  );
+
   border-bottom:1px solid var(--panel-border);
 }
 
@@ -194,6 +219,7 @@
   cursor:pointer;
   font-size:13px;
   opacity:.7;
+  transition:.2s;
 }
 
 .factura-detalle #btn-back:hover{
@@ -226,6 +252,8 @@
 
   font-size:13px;
   font-weight:600;
+
+  box-shadow:0 4px 14px rgba(0,0,0,.3);
 }
 
 .factura-detalle .table-avatar img{
@@ -261,7 +289,7 @@
 }
 
 .factura-detalle .detalle-body::-webkit-scrollbar-thumb{
-  background:var(--scrollbar-thumb);
+  background:linear-gradient(180deg,var(--accent),var(--accent-hover));
   border-radius:6px;
 }
 
@@ -272,117 +300,99 @@
 .factura-detalle .form-grid{
   display:grid;
   grid-template-columns: repeat(2, 1fr);
-  gap:18px;
+  gap:22px;
 }
 
 
 /* =========================================================
-   ITEMS
+   ITEMS (CARDS PRO)
 ========================================================= */
 .factura-detalle .detalle-item{
   display:flex;
   flex-direction:column;
   gap:6px;
+
+  padding:14px 16px;
+  border-radius:14px;
+
+  background:linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--card-bg), #fff 2%),
+    color-mix(in srgb, var(--card-bg), #000 6%)
+  );
+
+  border:1px solid var(--card-border);
+
+  transition:all .2s ease;
+}
+
+.factura-detalle .detalle-item:hover{
+  border-color:var(--accent);
+  box-shadow:0 4px 18px rgba(0,0,0,.25);
+  transform:translateY(-1px);
 }
 
 .factura-detalle .detalle-label{
-  font-size:var(--font-xs);
+  font-size:11px;
   color:var(--dim);
   text-transform:uppercase;
+  letter-spacing:.6px;
 }
 
 .factura-detalle .detalle-value{
-  font-size:var(--font-base);
-  font-weight:500;
-}
-
-
-/* =========================================================
-   EDITABLE
-========================================================= */
-.factura-detalle .detalle-editable{
-  background:color-mix(in srgb, var(--card-bg), #000 10%);
-  border:1px solid var(--card-border);
-  border-radius:10px;
-
-  padding:12px;
-  min-height:70px;
-}
-
-.factura-detalle .detalle-editable[contenteditable="true"]{
-  border-color:var(--accent);
-  box-shadow:0 0 0 2px rgba(99,102,241,0.25);
-}
-
-
-/* =========================================================
-   SELECT
-========================================================= */
-.factura-detalle .detalle-select{
-  margin-top:6px;
-  padding:10px 12px;
-
-  border-radius:10px;
-  border:1px solid var(--card-border);
-
-  background:color-mix(in srgb, var(--card-bg), #000 15%);
-  color:#fff;
-}
-
-
-/* =========================================================
-   FILES
-========================================================= */
-.factura-detalle .incidencia-files{
-  display:flex;
-  flex-direction:column;
-  gap:8px;
-}
-
-.factura-detalle #btn-attach-detalle{
-  background:none;
-  border:none;
-  color:var(--accent);
-  cursor:pointer;
-}
-
-.factura-detalle .file-list{
-  display:flex;
-  flex-direction:column;
-  gap:6px;
-}
-
-
-/* =========================================================
-   FOOTER
-========================================================= */
-.factura-detalle .detalle-footer{
-  margin-top:24px;
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-}
-
-.factura-detalle .detalle-hint{
-  font-size:12px;
-  color:var(--dim);
-}
-
-
-/* =========================================================
-   SAVE BUTTON
-========================================================= */
-.factura-detalle #btn-save{
-  padding:12px 22px;
-  border-radius:12px;
-
-  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
-  color:#fff;
-
-  border:none;
-  cursor:pointer;
-
+  font-size:15px;
   font-weight:600;
+  letter-spacing:.2px;
+  color:var(--text);
+}
+
+
+/* =========================================================
+   ESTADO COLORES (REAL)
+========================================================= */
+#detalle-estado{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:6px 10px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:600;
+  width:fit-content;
+}
+
+#detalle-estado[data-estado="pagada"]{
+  background:rgba(34,197,94,0.15);
+  color:#22c55e;
+}
+
+#detalle-estado[data-estado="pendiente"]{
+  background:rgba(234,179,8,0.15);
+  color:#eab308;
+}
+
+#detalle-estado[data-estado="cancelada"]{
+  background:rgba(239,68,68,0.15);
+  color:#ef4444;
+}
+
+
+/* =========================================================
+   IVA / IRPF
+========================================================= */
+#detalle-iva,
+#detalle-irpf{
+  font-weight:700;
+  color:var(--accent);
+}
+
+
+/* =========================================================
+   DESCRIPCIÓN
+========================================================= */
+#detalle-descripcion{
+  opacity:.9;
+  line-height:1.5;
 }
 
 
@@ -399,4 +409,16 @@
     padding:20px;
   }
 
+}
+
+
+/* =========================================================
+   TRANSICIONES GLOBALES
+========================================================= */
+.factura-detalle *{
+  transition:
+    background .2s ease,
+    border .2s ease,
+    color .2s ease,
+    transform .15s ease;
 }

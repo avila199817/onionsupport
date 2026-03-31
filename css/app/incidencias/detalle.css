@@ -250,23 +250,104 @@
 
 
 /* =========================================================
-   ITEMS
+   ITEMS (🔥 PRO UI)
 ========================================================= */
+
+/* 🔥 separación para que no se corte arriba */
+.incidencia-detalle .form-grid{
+  margin-top:10px;
+}
+
+
+/* ITEM */
 .incidencia-detalle .detalle-item{
   display:flex;
   flex-direction:column;
   gap:6px;
+
+  padding:10px 12px;
+  border-radius:10px;
+
+  transition:.15s;
 }
 
+/* hover suave tipo SaaS */
+.incidencia-detalle .detalle-item:hover{
+  background:color-mix(in srgb, var(--card-bg), #000 6%);
+}
+
+
+/* LABEL */
 .incidencia-detalle .detalle-label{
   font-size:var(--font-xs);
   color:var(--dim);
   text-transform:uppercase;
+  letter-spacing:.5px;
 }
 
+
+/* VALUE */
 .incidencia-detalle .detalle-value{
   font-size:var(--font-base);
   font-weight:500;
+  color:var(--text);
+}
+
+
+/* =========================================================
+   ACTION BUTTONS (🔥 MEJORADOS)
+========================================================= */
+
+/* contenedor */
+.incidencia-detalle .blob-actions{
+  display:flex;
+  gap:8px;
+}
+
+
+/* DESCARGAR */
+.incidencia-detalle .blob-download{
+  padding:6px 12px;
+  border-radius:10px;
+  border:none;
+
+  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
+  color:#fff;
+
+  cursor:pointer;
+  font-size:12px;
+  font-weight:600;
+
+  transition:.15s;
+}
+
+.incidencia-detalle .blob-download:hover{
+  transform:translateY(-1px);
+  box-shadow:0 6px 14px rgba(99,102,241,0.35);
+}
+
+
+/* PAPELERA */
+.incidencia-detalle .blob-delete{
+  padding:6px 10px;
+  border-radius:10px;
+  border:none;
+
+  background:rgba(239,68,68,0.12);
+  color:#ef4444;
+
+  cursor:pointer;
+  font-size:12px;
+
+  transition:.15s;
+}
+
+/* 🔥 hover rojo claro */
+.incidencia-detalle .blob-delete:hover{
+  background:#ef4444;
+  color:#fff;
+  transform:scale(1.05);
+  box-shadow:0 6px 14px rgba(239,68,68,0.4);
 }
 
 

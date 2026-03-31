@@ -1,23 +1,23 @@
-<div class="panel-content dashboard cc-v2">
+<div class="panel-content dashboard pro-saas">
 
   <!-- 🔥 LOADER -->
   <div class="dashboard-loading">
     <div class="dashboard-spinner"></div>
   </div>
 
-  <div class="ccv2-container">
+  <div class="dashboard-container">
 
     <!-- =========================
          HEADER
     ========================= -->
-    <div class="ccv2-header">
+    <div class="dashboard-header">
 
-      <div class="ccv2-title">
+      <div class="dashboard-title">
         <h1>Dashboard</h1>
-        <span>Control total del sistema</span>
+        <span>Control financiero</span>
       </div>
 
-      <div class="ccv2-live">
+      <div class="dashboard-live">
         <span class="dot"></span>
         En vivo
       </div>
@@ -25,40 +25,22 @@
     </div>
 
     <!-- =========================
-         HERO (🔥 PROTAGONISTA)
+         HERO (🔥 FOCO TOTAL)
     ========================= -->
-    <div class="ccv2-hero">
+    <div class="dashboard-hero">
 
-      <div class="ccv2-hero-main">
-        <span>Facturación hoy</span>
-        <strong id="home-facturacion-mes">€0</strong>
-      </div>
+      <span class="hero-label">Facturación hoy</span>
 
-      <div class="ccv2-hero-stats">
-
-        <div class="mini-stat">
-          <span>Usuarios</span>
-          <strong id="home-usuarios">0</strong>
-        </div>
-
-        <div class="mini-stat">
-          <span>Clientes</span>
-          <strong id="home-clientes">0</strong>
-        </div>
-
-        <div class="mini-stat">
-          <span>Tickets</span>
-          <strong id="tickets-hoy">0</strong>
-        </div>
-
-      </div>
+      <strong id="home-facturacion-mes" class="hero-value">
+        €0
+      </strong>
 
     </div>
 
     <!-- =========================
          STATUS STRIP
     ========================= -->
-    <div class="ccv2-strip">
+    <div class="dashboard-strip">
 
       <div class="strip-item">
         API <strong id="status-api">-- ms</strong>
@@ -87,31 +69,49 @@
     </div>
 
     <!-- =========================
-         ACTIONS FLOAT
+         FACTURACIÓN ANUAL (🔥 CLAVE)
     ========================= -->
-    <div class="ccv2-actions">
+    <div class="year-revenue">
 
-      <button>+ Usuario</button>
-      <button>+ Cliente</button>
-      <button>+ Factura</button>
-      <button>+ Ticket</button>
+      <div class="year-header">
+        <h2>Facturación 2026</h2>
+      </div>
+
+      <div class="year-grid">
+
+        <div class="month"><span>Ene</span><strong>€0</strong></div>
+        <div class="month"><span>Feb</span><strong>€0</strong></div>
+        <div class="month"><span>Mar</span><strong>€0</strong></div>
+        <div class="month"><span>Abr</span><strong>€0</strong></div>
+        <div class="month"><span>May</span><strong>€0</strong></div>
+        <div class="month"><span>Jun</span><strong>€0</strong></div>
+        <div class="month"><span>Jul</span><strong>€0</strong></div>
+        <div class="month"><span>Ago</span><strong>€0</strong></div>
+        <div class="month"><span>Sep</span><strong>€0</strong></div>
+        <div class="month"><span>Oct</span><strong>€0</strong></div>
+        <div class="month"><span>Nov</span><strong>€0</strong></div>
+        <div class="month"><span>Dic</span><strong>€0</strong></div>
+
+      </div>
 
     </div>
 
     <!-- =========================
-         ACTIVITY
+         ACTIVIDAD
     ========================= -->
-    <div class="ccv2-activity">
+    <div class="dashboard-activity">
 
-      <div class="ccv2-activity-header">
-        Actividad en tiempo real
+      <div class="activity-header">
+        Actividad reciente
       </div>
 
-      <div id="activity-list" class="ccv2-activity-list">
-        <div class="ccv2-activity-item">
-          <div>Cargando actividad...</div>
-          <span>Esperando datos</span>
+      <div id="activity-list" class="activity-list">
+
+        <div class="activity-item">
+          <div class="activity-title">Cargando actividad...</div>
+          <div class="activity-meta">Esperando datos</div>
         </div>
+
       </div>
 
     </div>

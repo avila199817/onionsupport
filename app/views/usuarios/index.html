@@ -1,6 +1,6 @@
 <div class="panel-content usuarios table-mode">
 
-  <!-- 🔥 TABLE SYSTEM -->
+  <!-- 🔥 TABLE SYSTEM (FULL WIDTH REAL) -->
   <div class="table-system usuarios">
 
     <!-- =========================
@@ -21,11 +21,24 @@
         <option value="inactivo">Inactivo</option>
       </select>
 
+      <select id="filter-rol-usuario">
+        <option value="">Rol</option>
+        <option value="admin">Admin</option>
+        <option value="user">Usuario</option>
+      </select>
+
+      <select id="filter-tipo-usuario">
+        <option value="">Tipo</option>
+        <option value="particular">Particular</option>
+        <option value="empresa">Empresa</option>
+      </select>
+
       <button id="btn-new-usuario" class="btn-new-usuario">
         + Nuevo
       </button>
 
     </div>
+
 
     <!-- =========================
          TABLA
@@ -40,48 +53,14 @@
             <th class="col-main">Usuario</th>
             <th class="col-secondary">Email</th>
             <th class="col-secondary">Rol</th>
+            <th class="col-secondary">Tipo</th>
             <th class="col-status">Estado</th>
-            <th class="col-date">Fecha</th>
-            <th class="col-actions">Acciones</th>
+            <th class="col-date">Alta</th>
           </tr>
         </thead>
 
         <tbody id="usuarios-body">
 
-          <!-- EJEMPLO FILA -->
-          <tr>
-
-            <td>USR-001</td>
-
-            <td>
-              <div class="cell-user">
-                <div class="table-avatar">AV</div>
-                <div class="user-info">
-                  <span class="user-name">Ávila</span>
-                  <span class="user-sub">Administrador</span>
-                </div>
-              </div>
-            </td>
-
-            <td>avila@onion.com</td>
-            <td>Admin</td>
-
-            <td>
-              <span class="badge success">Activo</span>
-            </td>
-
-            <td>26/03/2026</td>
-
-            <td>
-              <div class="actions">
-                <button data-action="edit">Editar</button>
-                <button data-action="delete">Eliminar</button>
-              </div>
-            </td>
-
-          </tr>
-
-          <!-- LOADING -->
           <tr class="loading">
             <td colspan="7">Cargando usuarios...</td>
           </tr>

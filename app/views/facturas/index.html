@@ -1,15 +1,13 @@
 <div class="panel-content facturas">
 
-  <!-- 🔥 OVERLAY LOADING -->
+  <!-- LOADING -->
   <div class="facturas-loading">
     <div class="facturas-spinner"></div>
   </div>
 
   <div class="table-system facturas">
 
-    <!-- =========================
-         FILTROS
-    ========================= -->
+    <!-- FILTROS -->
     <div class="filters-row">
 
       <input 
@@ -31,9 +29,7 @@
 
     </div>
 
-    <!-- =========================
-         TABLA
-    ========================= -->
+    <!-- TABLA -->
     <div class="table-container">
 
       <table>
@@ -51,7 +47,73 @@
         </thead>
 
         <tbody id="facturas-body">
-          <!-- 🔥 AQUÍ YA NO METEMOS SKELETON -->
+
+          <!-- 🔥 EJEMPLO FILA PERFECTA -->
+
+          <tr data-id="1">
+
+            <!-- ID -->
+            <td class="col-id">
+              2026000001
+            </td>
+
+            <!-- CLIENTE -->
+            <td class="col-main">
+              <div class="cell-user">
+                <div class="table-avatar">JH</div>
+                <div class="user-info">
+                  <span class="user-name">Javier Harandou</span>
+                  <span class="user-sub">harandou@efcusa.com</span>
+                </div>
+              </div>
+            </td>
+
+            <!-- EMPRESA (SIEMPRE MISMA ESTRUCTURA) -->
+            <td class="col-secondary">
+              <div class="cell-user empresa-cell">
+
+                <!-- CON EMPRESA -->
+                <div class="table-avatar">ES</div>
+                <div class="user-info">
+                  <span class="user-name">EFC Systems Automoción</span>
+                </div>
+
+                <!-- SIN EMPRESA (usa esto en vez de otro div raro) -->
+                <!-- <span class="empresa-empty">-</span> -->
+
+              </div>
+            </td>
+
+            <!-- FECHA -->
+            <td class="col-date">
+              17/3/2026
+            </td>
+
+            <!-- IMPORTE -->
+            <td class="col-importe">
+              68,40 €
+            </td>
+
+            <!-- ESTADO -->
+            <td class="col-status">
+              <span class="badge warning">Pendiente</span>
+            </td>
+
+            <!-- ACCIONES (SIEMPRE MISMA BASE) -->
+            <td class="col-actions">
+              <div class="actions">
+
+                <button class="btn-action view">Ver</button>
+                <button class="btn-action download">PDF</button>
+
+                <!-- SOLO SE AÑADE SI PROCEDE -->
+                <button class="btn-action pay">Pagar</button>
+
+              </div>
+            </td>
+
+          </tr>
+
         </tbody>
 
       </table>

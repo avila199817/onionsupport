@@ -45,22 +45,6 @@ function safe(v){
   return v && String(v).trim() !== "" ? v : "-";
 }
 
-function avatar(u){
-
-  const fallback = "/media/img/Usuario.png";
-
-  if(!u) return fallback;
-
-  let src = u.avatar;
-
-  if(!src || typeof src !== "string") return fallback;
-
-  if(src.startsWith("http")) return src;
-
-  return Onion.config.API.replace("/api","") + src;
-
-}
-
 function formatFecha(f){
   if(!f) return "-";
   return new Date(f).toLocaleDateString("es-ES");
@@ -69,6 +53,63 @@ function formatFecha(f){
 function capitalize(str){
   if(!str) return "-";
   return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+}
+
+/* =========================
+   AVATAR PRO
+========================= */
+
+function getInitials(name){
+  if(!name) return "?";
+  return name
+    .split(" ")
+    .map(n => n[0])
+    .join("")
+    .slice(0,2)
+    .toUpperCase();
+}
+
+function hashString(str){
+  let hash = 0;
+  for(let i = 0; i < str.length; i++){
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return hash;
+}
+
+function getAvatarColor(name){
+  const colors = [
+    "#6366f1", // azul
+    "#22c55e", // verde
+    "#eab308", // amarillo
+    "#ef4444", // rojo
+    "#06b6d4", // cyan
+    "#a855f7", // morado
+    "#f97316"  // naranja
+  ];
+
+  const index = Math.abs(hashString(name)) % colors.length;
+  return colors[index];
+}
+
+function renderAvatarHTML(u){
+
+  const name = u.name || u.username || "U";
+
+  if(u.avatar){
+    let src = u.avatar;
+
+    if(!src.startsWith("http")){
+      src = Onion.config.API.replace("/api","") + src;
+    }
+
+    return `<img src="${src}" alt="${name}" loading="lazy">`;
+  }
+
+  const initials = getInitials(name);
+  const color = getAvatarColor(name);
+
+  return `<div style="background:${color};width:100%;height:100%;display:flex;align-items:center;justify-content:center;border-radius:50%;">${initials}</div>`;
 }
 
 /* =========================
@@ -242,12 +283,12 @@ function renderUsers(users = []){
 
     return `
 <tr data-id="${u.id}">
-  <td>${safe(u.id)}</td>
+  <td style="white-space:nowrap;">${safe(u.id)}</td>
 
   <td>
     <div class="cell-user">
       <div class="table-avatar">
-        <img src="${avatar(u)}" loading="lazy">
+        ${renderAvatarHTML(u)}
       </div>
       <div class="user-info">
         <span class="user-name">${safe(u.name || u.username)}</span>
@@ -256,14 +297,9 @@ function renderUsers(users = []){
     </div>
   </td>
 
-  <td>${safe(u.email)}</td>
-
   <td>${rol}</td>
-
   <td>${tipo}</td>
-
   <td>${estado}</td>
-
   <td>${formatFecha(u.createdAt || u.created_at)}</td>
 
 </tr>
@@ -283,7 +319,7 @@ function renderState(message, cls="loading"){
 
   tbody.innerHTML = `
 <tr>
-  <td colspan="7" class="${cls}">
+  <td colspan="6" class="${cls}">
     ${message}
   </td>
 </tr>

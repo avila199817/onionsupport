@@ -59,7 +59,6 @@ function bindEvents(){
   const root = getRoot();
   if(!root) return;
 
-  // CLICK ROW (detalle)
   Onion.cleanupEvent(root, "click", (e)=>{
 
     if(e.target.closest(".btn-action")) return;
@@ -74,7 +73,6 @@ function bindEvents(){
 
   });
 
-  // BOTONES ACCIONES
   Onion.cleanupEvent(root, "click", (e)=>{
 
     const btn = e.target.closest(".btn-action");
@@ -194,8 +192,13 @@ function applyFilters(){
 ========================= */
 
 function setLoading(){
-  $("#facturas-body").innerHTML =
-    `<tr><td colspan="7">Cargando facturas...</td></tr>`;
+  $("#facturas-body").innerHTML = `
+    <tr class="loading-row">
+      <td colspan="7">
+        <div class="skeleton-table"></div>
+      </td>
+    </tr>
+  `;
 }
 
 function setEmpty(){
@@ -228,7 +231,7 @@ function render(items){
 
   <td class="col-main">
     <div class="cell-user">
-      <div class="table-avatar">${renderAvatar(d.cliente)}</div>
+      <div class="table-avatar">${renderAvatar(d.cliente.nombre)}</div>
       <div class="user-info">
         <span class="user-name">${escapeHTML(d.cliente.nombre)}</span>
         <span class="user-sub">${escapeHTML(d.cliente.email)}</span>
@@ -259,9 +262,11 @@ function render(items){
     <div class="actions">
       <button class="btn-action view" data-id="${d.id}">Ver</button>
       <button class="btn-action download" data-id="${d.id}">PDF</button>
-      ${d.estadoPago.raw === "pendiente"
-        ? `<button class="btn-action pay" data-id="${d.id}">Pagar</button>`
-        : ``}
+      ${
+        d.estadoPago.raw === "pendiente"
+          ? `<button class="btn-action pay" data-id="${d.id}">Pagar</button>`
+          : ``
+      }
     </div>
   </td>
 
@@ -294,32 +299,22 @@ function mapItem(f){
     fecha: formatFecha(f.fecha),
     total: formatMoney(f.total),
 
-    estadoPago: getEstadoPago(f.estadoPago, f.fecha),
+    estadoPago: getEstadoPago(f.estadoPago)
 
   };
 
 }
 
 /* =========================
-   AVATAR CLIENTE
+   AVATARES
 ========================= */
 
-function renderAvatar(cliente){
-  return avatarHTML(
-    getInitials(cliente.nombre),
-    getAvatarColor(cliente.nombre)
-  );
+function renderAvatar(name){
+  return avatarHTML(getInitials(name), getAvatarColor(name));
 }
 
-/* =========================
-   AVATAR EMPRESA
-========================= */
-
 function renderAvatarEmpresa(name){
-  return avatarHTML(
-    getInitialsEmpresa(name),
-    getAvatarColor(name + "_empresa") // 🔥 color distinto
-  );
+  return avatarHTML(getInitialsEmpresa(name), getAvatarColor(name + "_empresa"));
 }
 
 function avatarHTML(initials, color){

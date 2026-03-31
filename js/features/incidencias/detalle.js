@@ -140,7 +140,7 @@ function bindEvents(){
 
 
 /* =========================
-   LOAD (🔥 FIX PRO)
+   LOAD
 ========================= */
 async function loadDetalle(){
 
@@ -149,11 +149,7 @@ async function loadDetalle(){
 
   const requestId = ++currentRequestId;
 
-  /* 🔥 cancelar anterior */
-  if(currentAbort){
-    currentAbort.abort();
-  }
-
+  if(currentAbort) currentAbort.abort();
   currentAbort = new AbortController();
 
   clearUI();
@@ -166,8 +162,7 @@ async function loadDetalle(){
     });
 
     if(requestId !== currentRequestId) return;
-
-    if(!res.ok) throw new Error("API ERROR");
+    if(!res.ok) throw new Error();
 
     const json = await res.json();
 
@@ -188,7 +183,7 @@ async function loadDetalle(){
 
 
 /* =========================
-   CLEAR UI (🔥 ANTI PARPADEO)
+   CLEAR UI
 ========================= */
 function clearUI(){
 
@@ -211,7 +206,18 @@ function clearUI(){
 ========================= */
 function render(i){
 
-  setText("#detalle-usuario", i?.cliente?.nombre);
+  const nombre =
+    i?.cliente?.nombre ||
+    i?.name ||
+    i?.userName ||
+    "Usuario";
+
+  const avatar =
+    i?.cliente?.avatar ||
+    i?.avatar ||
+    null;
+
+  setText("#detalle-usuario", nombre);
   setText("#detalle-userid", i?.userId || "--");
 
   setText("#detalle-id", i?.id);
@@ -235,7 +241,7 @@ function render(i){
   $("#edit-estado").value = i?.status || "open";
   $("#edit-prioridad").value = i?.priority || "low";
 
-  renderAvatar(i?.cliente?.nombre, i?.cliente?.avatar);
+  renderAvatar(nombre, avatar);
 
   const userFiles = (i?.attachments || []).filter(f => f.type !== "team");
   const teamFiles = (i?.attachments || []).filter(f => f.type === "team");
@@ -271,89 +277,7 @@ function renderAvatar(nombre, avatar){
 
 
 /* =========================
-   FILE LIST
-========================= */
-function renderFiles(){
-
-  const list = $("#file-list");
-  if(!list) return;
-
-  list.innerHTML = selectedFiles.map((f,i)=>`
-    <div class="file-item">
-      <span>${f.name}</span>
-      <button class="file-remove" data-index="${i}">✕</button>
-    </div>
-  `).join("");
-}
-
-
-/* =========================
-   BLOBS
-========================= */
-function renderBlobs(selector, files, allowDelete){
-
-  const c = $(selector);
-  if(!c) return;
-
-  if(!files.length){
-    c.innerHTML = `<div class="detalle-hint">Sin archivos</div>`;
-    return;
-  }
-
-  c.innerHTML = files.map(f => `
-    <div class="blob-item">
-      <span>${f.name}</span>
-      <div class="blob-actions">
-        <button class="blob-download" data-url="${f.url}" data-name="${f.name}">
-          Descargar
-        </button>
-        ${allowDelete ? `
-          <button class="blob-delete" data-url="${f.url}">
-            🗑️
-          </button>
-        ` : ""}
-      </div>
-    </div>
-  `).join("");
-}
-
-
-/* =========================
-   DELETE
-========================= */
-async function deleteBlob(url){
-
-  if(!confirm("¿Eliminar archivo?")) return;
-
-  try{
-
-    const res = await fetch(Onion.config.API + "/tickets/" + currentItem.id,{
-      method:"PATCH",
-      headers:{
-        "Content-Type":"application/json",
-        ...getAuthHeaders()
-      },
-      body: JSON.stringify({
-        deleteAttachments:[url]
-      })
-    });
-
-    if(!res.ok) throw new Error();
-
-    const json = await res.json();
-    currentItem = json?.ticket || json;
-
-    render(currentItem);
-
-  }catch{
-    showToast("❌ Error eliminando");
-  }
-
-}
-
-
-/* =========================
-   UPDATE
+   UPDATE (🔥 FIX CLAVE)
 ========================= */
 async function updateTicket(){
 
@@ -378,7 +302,14 @@ async function updateTicket(){
     if(!res.ok) throw new Error();
 
     const json = await res.json();
-    currentItem = json?.ticket || json;
+
+    const updated = json?.ticket || json;
+
+    /* 🔥 MERGE PRO (NO PIERDES DATOS) */
+    currentItem = {
+      ...currentItem,
+      ...updated
+    };
 
     render(currentItem);
 
@@ -425,12 +356,33 @@ function downloadBlob(url,name){
   a.click();
 }
 
+
+/* =========================
+   TOAST (🔥 SIEMPRE FUNCIONA)
+========================= */
 function showToast(msg){
+
   if(Onion.toast){
     Onion.toast(msg);
-  }else{
-    console.log(msg);
+    return;
   }
+
+  const el = document.createElement("div");
+  el.innerText = msg;
+
+  el.style.position = "fixed";
+  el.style.bottom = "20px";
+  el.style.right = "20px";
+  el.style.padding = "10px 14px";
+  el.style.background = "#111";
+  el.style.color = "#fff";
+  el.style.borderRadius = "8px";
+  el.style.fontSize = "13px";
+  el.style.zIndex = "9999";
+
+  document.body.appendChild(el);
+
+  setTimeout(()=> el.remove(), 2000);
 }
 
 })();

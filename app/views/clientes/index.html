@@ -1,122 +1,67 @@
-<div class="panel-content clientes">
+<div class="panel-content clientes table-mode">
 
-  <div class="container">
+  <!-- 🔥 TABLE SYSTEM (FULL WIDTH REAL) -->
+  <div class="table-system clientes">
 
-    <div class="panel-block">
+    <!-- =========================
+         FILTROS
+    ========================= -->
+    <div class="filters-row">
 
-      <!-- =========================
-           FILTROS
-      ========================= -->
-      <div class="filters-row">
+      <input 
+        type="text"
+        id="search-cliente"
+        placeholder="Buscar cliente..."
+        autocomplete="off"
+      >
 
-        <input 
-          type="text"
-          id="search-cliente"
-          placeholder="Buscar cliente..."
-          autocomplete="off"
-        >
+      <select id="filter-estado-cliente">
+        <option value="">Estado</option>
+        <option value="activo">Activo</option>
+        <option value="inactivo">Inactivo</option>
+      </select>
 
-        <select id="filter-estado-cliente">
-          <option value="">Estado</option>
-          <option value="activo">Activo</option>
-          <option value="inactivo">Inactivo</option>
-        </select>
+      <select id="filter-tipo-cliente">
+        <option value="">Tipo</option>
+        <option value="empresa">Empresa</option>
+        <option value="particular">Particular</option>
+      </select>
 
-        <button id="btn-new-cliente">
-          + Nuevo
-        </button>
+      <button id="btn-new-cliente" class="btn-new-cliente">
+        + Nuevo
+      </button>
 
-      </div>
-
-      <!-- =========================
-           TABLA
-      ========================= -->
-      <div class="table-container">
-
-        <table>
-
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Empresa</th>
-              <th>Email</th>
-              <th>Teléfono</th>
-              <th>Estado</th>
-              <th>Fecha</th>
-              <th>Acciones</th>
-            </tr>
-          </thead>
-
-          <tbody id="clientes-body">
-
-            <!-- =========================
-                 EJEMPLO FILA
-            ========================= -->
-            <tr>
-
-              <!-- ID -->
-              <td>CLI-001</td>
-
-              <!-- EMPRESA -->
-              <td>
-                <div class="cell-user">
-
-                  <div class="avatar">
-                    ON
-                  </div>
-
-                  <div class="user-info">
-                    <span class="user-name">Onion Solutions</span>
-                    <span class="user-sub">Cliente Premium</span>
-                  </div>
-
-                </div>
-              </td>
-
-              <!-- EMAIL -->
-              <td>contacto@onion.com</td>
-
-              <!-- TEL -->
-              <td>+34 600 123 456</td>
-
-              <!-- ESTADO -->
-              <td>
-                <span class="badge activo">Activo</span>
-              </td>
-
-              <!-- FECHA -->
-              <td>26/03/2026</td>
-
-              <!-- ACCIONES -->
-              <td class="acciones">
-
-                <button data-action="edit">
-                  Editar
-                </button>
-
-                <button data-action="delete">
-                  Eliminar
-                </button>
-
-              </td>
-
-            </tr>
+    </div>
 
 
-            <!-- =========================
-                 LOADING STATE
-            ========================= -->
-            <tr class="loading">
-              <td colspan="7" style="text-align:center; padding:20px; color:var(--dim);">
-                Cargando clientes...
-              </td>
-            </tr>
+    <!-- =========================
+         TABLA
+    ========================= -->
+    <div class="table-container">
 
-          </tbody>
+      <table>
 
-        </table>
+        <thead>
+          <tr>
+            <th class="col-id">ID</th>
+            <th class="col-main">Cliente</th>
+            <th class="col-secondary">Email</th>
+            <th class="col-secondary">Teléfono</th>
+            <th class="col-secondary">Tipo</th>
+            <th class="col-status">Estado</th>
+            <th class="col-date">Alta</th>
+          </tr>
+        </thead>
 
-      </div>
+        <tbody id="clientes-body">
+
+          <tr class="loading">
+            <td colspan="7">Cargando clientes...</td>
+          </tr>
+
+        </tbody>
+
+      </table>
 
     </div>
 

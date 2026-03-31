@@ -44,9 +44,7 @@ function init(){
   bindEvents();
   loadFacturas();
 
-  Onion.onCleanup(()=>{
-    initialized = false;
-  });
+  Onion.onCleanup(()=>{ initialized = false; });
 
 }
 
@@ -174,21 +172,21 @@ function applyFilters(){
 
 function setLoading(){
   $("#facturas-body").innerHTML =
-    `<tr><td colspan="10">Cargando facturas...</td></tr>`;
+    `<tr><td colspan="9">Cargando facturas...</td></tr>`;
 }
 
 function setEmpty(){
   $("#facturas-body").innerHTML =
-    `<tr><td colspan="10">No hay facturas</td></tr>`;
+    `<tr><td colspan="9">No hay facturas</td></tr>`;
 }
 
 function setError(){
   $("#facturas-body").innerHTML =
-    `<tr><td colspan="10">Error cargando facturas</td></tr>`;
+    `<tr><td colspan="9">Error cargando facturas</td></tr>`;
 }
 
 /* =========================
-   RENDER 🔥
+   RENDER
 ========================= */
 
 function render(items){
@@ -249,7 +247,7 @@ function render(items){
 }
 
 /* =========================
-   MAP 🔥
+   MAP
 ========================= */
 
 function mapItem(f){
@@ -259,7 +257,7 @@ function mapItem(f){
     numero: f.numero || f.numeroFacturaLegal || f.id || "--",
 
     cliente: f.cliente?.nombre || "Cliente",
-    empresa: f.cliente?.empresa || f.cliente?.nombreFiscal || "-",
+    empresa: f.cliente?.empresa || "-",
     email: f.cliente?.email || "-",
 
     avatar: f.cliente?.avatar || null,
@@ -308,7 +306,7 @@ function renderAvatar(d){
 }
 
 /* =========================
-   COLORS
+   HELPERS
 ========================= */
 
 function hashString(str){
@@ -320,70 +318,29 @@ function hashString(str){
 }
 
 function getAvatarColor(name){
-
-  const colors = [
-    "#6366f1",
-    "#22c55e",
-    "#eab308",
-    "#ef4444",
-    "#06b6d4",
-    "#a855f7",
-    "#f97316"
-  ];
-
-  const index = Math.abs(hashString(name)) % colors.length;
-  return colors[index];
+  const colors = ["#6366f1","#22c55e","#eab308","#ef4444","#06b6d4","#a855f7","#f97316"];
+  return colors[Math.abs(hashString(name)) % colors.length];
 }
 
-/* =========================
-   ESTADOS
-========================= */
-
 function getEstadoPago(e, fecha){
-
   e = (e || "").toLowerCase();
-
-  if(e !== "pagada" && isVencida(fecha)){
-    return { label:"Vencida", class:"error" };
-  }
-
-  if(e === "pagada"){
-    return { label:"Pagada", class:"success" };
-  }
-
+  if(e !== "pagada" && isVencida(fecha)) return { label:"Vencida", class:"error" };
+  if(e === "pagada") return { label:"Pagada", class:"success" };
   return { label:"Pendiente", class:"warning" };
 }
 
 function getEstadoFactura(e){
-
   e = (e || "").toLowerCase();
-
   if(e === "emitida") return { label:"Emitida", class:"info" };
   if(e === "borrador") return { label:"Borrador", class:"neutral" };
   if(e === "anulada") return { label:"Anulada", class:"error" };
-
   return { label:"-", class:"" };
 }
 
-/* =========================
-   VENCIMIENTO
-========================= */
-
 function isVencida(fecha){
-
   if(!fecha) return false;
-
-  const f = new Date(fecha);
-  const hoy = new Date();
-
-  const diff = (hoy - f) / (1000 * 60 * 60 * 24);
-
-  return diff > 30;
+  return (new Date() - new Date(fecha)) / 86400000 > 30;
 }
-
-/* =========================
-   HELPERS
-========================= */
 
 function formatFecha(f){
   if(!f) return "--";
@@ -391,29 +348,22 @@ function formatFecha(f){
 }
 
 function formatMoney(n){
-  return Number(n || 0).toLocaleString("es-ES", {
-    minimumFractionDigits:2,
-    maximumFractionDigits:2
-  }) + " €";
+  return Number(n || 0).toLocaleString("es-ES",{minimumFractionDigits:2}) + " €";
 }
 
 function escapeHTML(str){
-  return String(str)
-    .replace(/&/g,"&amp;")
-    .replace(/</g,"&lt;")
-    .replace(/>/g,"&gt;");
+  return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }
 
 function getInitials(name){
-  if(!name) return "?";
-  return name.split(" ").map(n => n[0]).join("").slice(0,2).toUpperCase();
+  return name ? name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase() : "?";
 }
 
 function debounce(fn, delay){
   let t;
-  return function(...args){
+  return (...args)=>{
     clearTimeout(t);
-    t = setTimeout(()=> fn.apply(this, args), delay);
+    t = setTimeout(()=>fn(...args), delay);
   };
 }
 

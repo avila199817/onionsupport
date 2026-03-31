@@ -201,16 +201,16 @@ function applyFilters(){
 
 function setEmpty(){
   $("#facturas-body").innerHTML =
-    `<tr><td colspan="7">No hay facturas</td></tr>`;
+    `<tr><td colspan="7" style="text-align:center;opacity:.6;">No hay facturas</td></tr>`;
 }
 
 function setError(){
   $("#facturas-body").innerHTML =
-    `<tr><td colspan="7">Error cargando facturas</td></tr>`;
+    `<tr><td colspan="7" style="text-align:center;color:#ef4444;">Error cargando facturas</td></tr>`;
 }
 
 /* =========================
-   RENDER 🔥 CLAVE
+   RENDER
 ========================= */
 
 function render(items){
@@ -231,7 +231,15 @@ function render(items){
           </div>
         </div>
       `
-      : `<span style="opacity:.6;">-</span>`;
+      : `
+        <div style="
+          width:100%;
+          display:flex;
+          justify-content:center;
+          align-items:center;
+          opacity:.6;
+        ">-</div>
+      `;
 
     return `
 <tr data-id="${d.id}">
@@ -283,7 +291,7 @@ function render(items){
 }
 
 /* =========================
-   MAP 🔥 LIMPIO
+   MAP
 ========================= */
 
 function mapItem(f){
@@ -306,6 +314,7 @@ function mapItem(f){
       ),
       email: cleanValue(
         f.cliente?.email ||
+        f.emailCliente ||
         f.cliente?.correo,
         "-"
       )
@@ -330,13 +339,17 @@ function cleanValue(val, fallback){
 
   if(!val) return fallback;
 
-  const v = String(val).trim().toLowerCase();
+  let v = String(val).trim();
 
-  if(v === "null" || v === "undefined" || v === "-"){
+  v = v.replace(/^'+|'+$/g, "");
+
+  const lower = v.toLowerCase();
+
+  if(lower === "null" || lower === "undefined" || lower === "-"){
     return fallback;
   }
 
-  return val;
+  return v;
 }
 
 function safeText(val){

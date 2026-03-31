@@ -126,7 +126,7 @@
 }
 
 /* =========================================================
-   🔥 GRID PERFECTO
+   GRID
 ========================================================= */
 
 .panel-content.facturas thead tr,
@@ -166,7 +166,7 @@
 }
 
 /* =========================================================
-   CELLS 🔥 FIX REAL
+   CELLS 🔥 FIX DEFINITIVO
 ========================================================= */
 
 .panel-content.facturas td{
@@ -178,9 +178,10 @@
   display:flex;
   align-items:center;
 
-  height:64px;              /* 🔥 ALTURA FIJA */
+  height:64px;
   min-width:0;
-  overflow:hidden;
+
+  overflow:visible; /* 🔥 CLAVE: NO cortar aquí */
 }
 
 /* =========================================================
@@ -228,7 +229,7 @@
 }
 
 /* =========================================================
-   USER CELL
+   USER CELL (CLIENTE + EMPRESA)
 ========================================================= */
 
 .panel-content.facturas .cell-user{
@@ -258,39 +259,39 @@
   display:flex;
   flex-direction:column;
   min-width:0;
+  flex:1; /* 🔥 CLAVE */
 }
+
+/* 🔥 MISMO ESTILO PARA CLIENTE Y EMPRESA */
 
 .panel-content.facturas .user-name{
   font-weight:600;
+  font-size:13.5px;
+  color:var(--text);
+
+  white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
-  white-space:nowrap;
 }
 
 .panel-content.facturas .user-sub{
   font-size:11px;
   color:var(--dim);
+
+  white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
-  white-space:nowrap;
 }
 
 /* =========================================================
-   EMPRESA SIN DATOS 🔥 PERFECT ALIGN
+   EMPRESA ALIGN
 ========================================================= */
 
 .panel-content.facturas .col-secondary{
   display:flex;
   align-items:center;
   justify-content:flex-start;
-}
-
-.panel-content.facturas .col-secondary span{
-  width:100%;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  opacity:.6;
+  min-width:0;
 }
 
 /* =========================================================

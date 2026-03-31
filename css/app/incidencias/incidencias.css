@@ -7,6 +7,49 @@
   flex-direction:column;
   height:100%;
   width:100%;
+  position:relative; /* 🔥 necesario para overlay */
+}
+
+
+/* =========================================================
+   LOADING OVERLAY (MISMO QUE FACTURAS)
+========================================================= */
+
+.incidencias-loading{
+  position:absolute;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  background:rgba(15,15,15,0.45);
+  backdrop-filter:blur(2px);
+
+  z-index:20;
+
+  opacity:0;
+  pointer-events:none;
+  transition:opacity .2s ease;
+}
+
+.panel-content.incidencias.loading .incidencias-loading{
+  opacity:1;
+  pointer-events:auto;
+}
+
+.incidencias-spinner{
+  width:42px;
+  height:42px;
+  border-radius:50%;
+
+  border:3px solid rgba(255,255,255,0.15);
+  border-top-color:var(--accent);
+
+  animation:spin .8s linear infinite;
+}
+
+@keyframes spin{
+  to{ transform:rotate(360deg); }
 }
 
 
@@ -99,7 +142,7 @@
 
 
 /* =========================================================
-   TABLE BASE (CLON)
+   TABLE BASE
 ========================================================= */
 
 .panel-content.incidencias table{
@@ -138,7 +181,7 @@
 
 
 /* =========================================================
-   COLUMN SYSTEM (AJUSTADO ORDEN NUEVO)
+   COLUMN SYSTEM
 ========================================================= */
 
 .panel-content.incidencias .col-id{
@@ -187,7 +230,7 @@
 
 
 /* =========================================================
-   USER CELL (CLON CLIENTES)
+   USER CELL
 ========================================================= */
 
 .panel-content.incidencias .cell-user{
@@ -239,7 +282,7 @@
 
 
 /* =========================================================
-   BADGES (CLON SISTEMA)
+   BADGES
 ========================================================= */
 
 .panel-content.incidencias .badge{
@@ -249,7 +292,6 @@
   font-weight:500;
 }
 
-/* estado */
 .panel-content.incidencias .badge.info{
   color:var(--info);
   background:color-mix(in srgb, var(--info), transparent 85%);
@@ -265,7 +307,6 @@
   background:color-mix(in srgb, var(--success), transparent 85%);
 }
 
-/* prioridad */
 .panel-content.incidencias .badge.error{
   color:var(--error);
   background:color-mix(in srgb, var(--error), transparent 85%);

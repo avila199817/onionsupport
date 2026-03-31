@@ -8,20 +8,17 @@
     <div class="detalle-left">
 
       <!-- TOP BAR -->
-      <div class="filters-row" style="justify-content: space-between;">
+      <div class="filters-row">
 
         <div class="detalle-user">
           <div id="detalle-avatar" class="table-avatar"></div>
 
           <div class="user-info">
-
             <div class="detalle-value" id="detalle-usuario">--</div>
 
-            <!-- 🔥 META PRO -->
             <div class="detalle-meta">
               <span id="detalle-userid"></span>
             </div>
-
           </div>
         </div>
 
@@ -101,25 +98,25 @@
             </div>
 
             <!-- =========================
-                 ADJUNTOS USUARIO
+                 ADJUNTOS (MISMO QUE CREATE)
             ========================= -->
             <div class="detalle-item" style="grid-column: span 2;">
               <div class="detalle-label">Adjuntos del usuario</div>
 
               <div class="incidencia-files">
 
-                <button type="button" id="btn-attach-detalle">
+                <button type="button" id="btn-attach">
                   + Añadir archivos
                 </button>
 
                 <input 
                   type="file"
-                  id="detalle-files"
+                  id="inc-files"
                   multiple
                   hidden
                 >
 
-                <div id="detalle-file-list" class="file-list"></div>
+                <div id="file-list" class="file-list"></div>
 
               </div>
             </div>

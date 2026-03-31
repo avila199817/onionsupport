@@ -59,9 +59,10 @@ function bindEvents(){
   const root = getRoot();
   if(!root) return;
 
+  // CLICK ROW (detalle)
   Onion.cleanupEvent(root, "click", (e)=>{
 
-    if(e.target.closest("button")) return;
+    if(e.target.closest(".btn-action")) return;
 
     const row = e.target.closest("tr[data-id]");
     if(!row) return;
@@ -70,6 +71,28 @@ function bindEvents(){
     if(!id) return;
 
     Onion.router.navigate("/facturas/detalle?id=" + id);
+
+  });
+
+  // BOTONES ACCIONES
+  Onion.cleanupEvent(root, "click", (e)=>{
+
+    const btn = e.target.closest(".btn-action");
+    if(!btn) return;
+
+    const id = btn.dataset.id;
+
+    if(btn.classList.contains("view")){
+      Onion.router.navigate("/facturas/detalle?id=" + id);
+    }
+
+    if(btn.classList.contains("download")){
+      window.open(Onion.config.API + "/facturas/" + id + "/descargar");
+    }
+
+    if(btn.classList.contains("pay")){
+      alert("💳 Simulación pago factura " + id);
+    }
 
   });
 
@@ -172,17 +195,17 @@ function applyFilters(){
 
 function setLoading(){
   $("#facturas-body").innerHTML =
-    `<tr><td colspan="9">Cargando facturas...</td></tr>`;
+    `<tr><td colspan="7">Cargando facturas...</td></tr>`;
 }
 
 function setEmpty(){
   $("#facturas-body").innerHTML =
-    `<tr><td colspan="9">No hay facturas</td></tr>`;
+    `<tr><td colspan="7">No hay facturas</td></tr>`;
 }
 
 function setError(){
   $("#facturas-body").innerHTML =
-    `<tr><td colspan="9">Error cargando facturas</td></tr>`;
+    `<tr><td colspan="7">Error cargando facturas</td></tr>`;
 }
 
 /* =========================
@@ -199,27 +222,23 @@ function render(items){
     const d = mapItem(f);
 
     return `
-<tr data-id="${d.id}" style="cursor:pointer">
+<tr data-id="${d.id}">
 
   <td class="col-id">${d.numero}</td>
 
   <td class="col-main">
     <div class="cell-user">
-      <div class="table-avatar">
-        ${renderAvatar(d)}
-      </div>
+      <div class="table-avatar">${renderAvatar(d.cliente)}</div>
       <div class="user-info">
-        <span class="user-name">${escapeHTML(d.cliente)}</span>
-        <span class="user-sub">${escapeHTML(d.email)}</span>
+        <span class="user-name">${escapeHTML(d.cliente.nombre)}</span>
+        <span class="user-sub">${escapeHTML(d.cliente.email)}</span>
       </div>
     </div>
   </td>
 
   <td class="col-secondary">
     <div class="cell-user">
-      <div class="table-avatar">
-        ${renderAvatarEmpresa(d)}
-      </div>
+      <div class="table-avatar">${renderAvatarEmpresa(d.empresa)}</div>
       <div class="user-info">
         <span class="user-name">${escapeHTML(d.empresa)}</span>
       </div>
@@ -236,15 +255,15 @@ function render(items){
     </span>
   </td>
 
-  <td class="col-status">
-    <span class="badge ${d.estadoFactura.class}">
-      ${d.estadoFactura.label}
-    </span>
+  <td class="col-actions">
+    <div class="actions">
+      <button class="btn-action view" data-id="${d.id}">Ver</button>
+      <button class="btn-action download" data-id="${d.id}">PDF</button>
+      ${d.estadoPago.raw === "pendiente"
+        ? `<button class="btn-action pay" data-id="${d.id}">Pagar</button>`
+        : ``}
+    </div>
   </td>
-
-  <td class="col-method">${d.metodo}</td>
-
-  <td class="col-date">${d.fechaEnvio}</td>
 
 </tr>
 `;
@@ -263,22 +282,20 @@ function mapItem(f){
 
   return {
     id: f.id,
-    numero: f.numero || f.numeroFacturaLegal || f.id || "--",
+    numero: f.numero || f.id,
 
-    cliente: f.cliente?.nombre || "Cliente",
+    cliente: {
+      nombre: f.cliente?.nombre || "Cliente",
+      email: f.cliente?.email || "-"
+    },
+
     empresa: f.cliente?.empresa || "-",
-    email: f.cliente?.email || "-",
-
-    avatar: f.cliente?.avatar || null,
 
     fecha: formatFecha(f.fecha),
     total: formatMoney(f.total),
 
     estadoPago: getEstadoPago(f.estadoPago, f.fecha),
-    estadoFactura: getEstadoFactura(f.estado),
 
-    metodo: f.formaPago || "-",
-    fechaEnvio: f.fechaEnvio ? formatFecha(f.fechaEnvio) : "-"
   };
 
 }
@@ -287,29 +304,22 @@ function mapItem(f){
    AVATAR CLIENTE
 ========================= */
 
-function renderAvatar(d){
-
-  if(d.avatar){
-    return `<img src="${d.avatar}" alt="${escapeHTML(d.cliente)}" />`;
-  }
-
-  const initials = getInitials(d.cliente);
-  const color = getAvatarColor(d.cliente);
-
-  return avatarHTML(initials, color);
+function renderAvatar(cliente){
+  return avatarHTML(
+    getInitials(cliente.nombre),
+    getAvatarColor(cliente.nombre)
+  );
 }
 
 /* =========================
-   AVATAR EMPRESA 🔥
+   AVATAR EMPRESA
 ========================= */
 
-function renderAvatarEmpresa(d){
-
-  const name = d.empresa || "Empresa";
-  const initials = getInitialsEmpresa(name);
-  const color = getAvatarColor(name);
-
-  return avatarHTML(initials, color);
+function renderAvatarEmpresa(name){
+  return avatarHTML(
+    getInitialsEmpresa(name),
+    getAvatarColor(name + "_empresa") // 🔥 color distinto
+  );
 }
 
 function avatarHTML(initials, color){
@@ -354,35 +364,14 @@ function getInitials(name){
 
 function getInitialsEmpresa(name){
   return name
-    ? name
-        .replace(/(SL|SA|S\.L\.|S\.A\.)/gi,"")
-        .trim()
-        .split(" ")
-        .map(n=>n[0])
-        .join("")
-        .slice(0,2)
-        .toUpperCase()
+    ? name.replace(/(SL|SA)/gi,"").trim().split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase()
     : "?";
 }
 
-function getEstadoPago(e, fecha){
+function getEstadoPago(e){
   e = (e || "").toLowerCase();
-  if(e !== "pagada" && isVencida(fecha)) return { label:"Vencida", class:"error" };
-  if(e === "pagada") return { label:"Pagada", class:"success" };
-  return { label:"Pendiente", class:"warning" };
-}
-
-function getEstadoFactura(e){
-  e = (e || "").toLowerCase();
-  if(e === "emitida") return { label:"Emitida", class:"info" };
-  if(e === "borrador") return { label:"Borrador", class:"neutral" };
-  if(e === "anulada") return { label:"Anulada", class:"error" };
-  return { label:"-", class:"" };
-}
-
-function isVencida(fecha){
-  if(!fecha) return false;
-  return (new Date() - new Date(fecha)) / 86400000 > 30;
+  if(e === "pagada") return { label:"Pagada", class:"success", raw:e };
+  return { label:"Pendiente", class:"warning", raw:e };
 }
 
 function formatFecha(f){

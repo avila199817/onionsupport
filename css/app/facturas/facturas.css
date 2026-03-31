@@ -126,20 +126,20 @@
 }
 
 /* =========================================================
-   🔥 GRID PERFECTO (ALINEADO CON INCIDENCIAS)
+   🔥 GRID PERFECTO REAL
 ========================================================= */
 
 .panel-content.facturas thead tr,
 .panel-content.facturas tbody tr{
   display:grid;
   grid-template-columns:
-    120px   /* ID */
-    2.4fr   /* Cliente */
-    2fr     /* Empresa */
-    130px   /* Fecha */
-    130px   /* Importe */
-    120px   /* Pago */
-    200px;  /* Acciones */
+    120px
+    2.4fr
+    2fr
+    130px
+    130px
+    120px
+    200px;
   align-items:center;
 }
 
@@ -155,7 +155,7 @@
 }
 
 .panel-content.facturas th{
-  padding:10px 14px;
+  padding:12px 14px; /* 🔥 IGUAL QUE TD */
   text-align:left;
   border-bottom:1px solid var(--panel-border);
   color:var(--dim);
@@ -170,36 +170,41 @@
 ========================================================= */
 
 .panel-content.facturas td{
-  padding:14px 14px;
+  padding:12px 14px; /* 🔥 CLAVE: MISMO PADDING */
   border-bottom:1px solid var(--panel-border);
   font-size:13.5px;
   color:var(--text);
-  vertical-align:middle;
 
+  display:flex;
+  align-items:center;
+
+  min-width:0; /* 🔥 CLAVE PARA GRID */
   overflow:hidden;
-  text-overflow:ellipsis;
-  white-space:nowrap;
 }
 
-/* alineaciones pro */
+/* =========================================================
+   COLUMN ALIGN
+========================================================= */
 
 .panel-content.facturas .col-id{
   font-size:11px;
   color:var(--dim);
 }
 
+.panel-content.facturas .col-date{
+  justify-content:flex-start;
+}
+
 .panel-content.facturas .col-importe{
-  text-align:right;
+  justify-content:flex-end;
   font-variant-numeric:tabular-nums;
 }
 
 .panel-content.facturas .col-status{
-  display:flex;
   justify-content:center;
 }
 
 .panel-content.facturas .col-actions{
-  display:flex;
   justify-content:flex-end;
 }
 
@@ -230,6 +235,7 @@
   align-items:center;
   gap:10px;
   min-width:0;
+  width:100%;
 }
 
 .panel-content.facturas .table-avatar{
@@ -244,6 +250,7 @@
   color:#fff;
   font-size:12px;
   font-weight:600;
+  flex-shrink:0;
 }
 
 .panel-content.facturas .user-info{
@@ -265,6 +272,16 @@
   overflow:hidden;
   text-overflow:ellipsis;
   white-space:nowrap;
+}
+
+/* =========================================================
+   EMPRESA SIN DATOS 🔥
+========================================================= */
+
+.panel-content.facturas .col-secondary span{
+  width:100%;
+  text-align:center;
+  opacity:.6;
 }
 
 /* =========================================================

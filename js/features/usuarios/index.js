@@ -32,7 +32,6 @@ function $(id){
 async function getUsers(){
 
   const res = await Onion.fetch(Onion.config.API + "/users");
-
   return res?.users || res?.usuarios || res || [];
 
 }
@@ -79,13 +78,13 @@ function hashString(str){
 
 function getAvatarColor(name){
   const colors = [
-    "#6366f1", // azul
-    "#22c55e", // verde
-    "#eab308", // amarillo
-    "#ef4444", // rojo
-    "#06b6d4", // cyan
-    "#a855f7", // morado
-    "#f97316"  // naranja
+    "#6366f1",
+    "#22c55e",
+    "#eab308",
+    "#ef4444",
+    "#06b6d4",
+    "#a855f7",
+    "#f97316"
   ];
 
   const index = Math.abs(hashString(name)) % colors.length;
@@ -109,7 +108,22 @@ function renderAvatarHTML(u){
   const initials = getInitials(name);
   const color = getAvatarColor(name);
 
-  return `<div style="background:${color};width:100%;height:100%;display:flex;align-items:center;justify-content:center;border-radius:50%;">${initials}</div>`;
+  return `
+    <div style="
+      background:${color};
+      width:100%;
+      height:100%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      border-radius:50%;
+      color:#fff;
+      font-weight:600;
+      font-size:12px;
+    ">
+      ${initials}
+    </div>
+  `;
 }
 
 /* =========================
@@ -128,7 +142,6 @@ function init(){
   initialized = true;
 
   tbody = $("usuarios-body");
-
   if(!tbody) return;
 
   bindEvents();
@@ -261,7 +274,7 @@ async function loadUsers(){
 }
 
 /* =========================
-   RENDER
+   RENDER 🔥 CLAVE
 ========================= */
 
 function renderUsers(users = []){
@@ -283,9 +296,10 @@ function renderUsers(users = []){
 
     return `
 <tr data-id="${u.id}">
-  <td style="white-space:nowrap;">${safe(u.id)}</td>
 
-  <td>
+  <td class="col-id">${safe(u.id)}</td>
+
+  <td class="col-main">
     <div class="cell-user">
       <div class="table-avatar">
         ${renderAvatarHTML(u)}
@@ -297,10 +311,13 @@ function renderUsers(users = []){
     </div>
   </td>
 
-  <td>${rol}</td>
-  <td>${tipo}</td>
-  <td>${estado}</td>
-  <td>${formatFecha(u.createdAt || u.created_at)}</td>
+  <td class="col-secondary">${rol}</td>
+
+  <td class="col-secondary">${tipo}</td>
+
+  <td class="col-status">${estado}</td>
+
+  <td class="col-date">${formatFecha(u.createdAt || u.created_at)}</td>
 
 </tr>
 `;

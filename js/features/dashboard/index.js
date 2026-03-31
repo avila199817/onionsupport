@@ -16,7 +16,7 @@ let initialized = false;
    CONFIG
 ========================= */
 
-const API = Onion.config?.API;
+const API = Onion.config?.API || "";
 
 /* =========================
    ROOT
@@ -71,37 +71,30 @@ function setMonthLabel(){
 }
 
 /* =========================
-   🔥 BUILD 12 MESES
+   🔥 BUILD 12 MESES (ROBUSTO)
 ========================= */
 
 function buildYearData(evolucion){
 
   const currentYear = new Date().getFullYear();
 
-  const mesesMap = {
-    "01":0,"02":1,"03":2,"04":3,"05":4,"06":5,
-    "07":6,"08":7,"09":8,"10":9,"11":10,"12":11
-  };
-
   const yearData = new Array(12).fill(0);
+
+  if(!Array.isArray(evolucion)) return yearData;
 
   evolucion.forEach(m => {
 
-    if(!m?.mes) return;
+    if(!m?.mes || typeof m.mes !== "string") return;
 
-    const parts = m.mes.split("-");
-    if(parts.length !== 2) return;
+    const [yearStr, mesStr] = m.mes.split("-");
 
-    const year = Number(parts[0]);
-    const mes = parts[1];
+    const year = Number(yearStr);
+    const monthIndex = Number(mesStr) - 1;
 
     if(year !== currentYear) return;
+    if(monthIndex < 0 || monthIndex > 11) return;
 
-    const idx = mesesMap[mes];
-
-    if(idx !== undefined){
-      yearData[idx] = safe(m.total);
-    }
+    yearData[monthIndex] = safe(m.total);
 
   });
 
@@ -115,6 +108,7 @@ function buildYearData(evolucion){
 function renderYearRevenue(data){
 
   const container = getRoot()?.querySelector(".year-grid");
+
   if(!container){
     console.error("💥 .year-grid no encontrado");
     return;
@@ -137,8 +131,7 @@ function renderYearRevenue(data){
     const bars = container.querySelectorAll(".bar");
 
     bars.forEach((bar, i)=>{
-      const value = data[i];
-      const percent = (value / max) * 100;
+      const percent = (safe(data[i]) / max) * 100;
       bar.style.height = percent + "%";
     });
 
@@ -153,9 +146,10 @@ async function loadDashboardData(){
 
   try {
 
+    // 🔥 IMPORTANTE: SIN /api EXTRA
     const res = await Onion.fetch(API + "/dashboard");
 
-    // 🔥 FIX REAL
+    // 🔥 FIX JSON
     const data = res?.data?.data || {};
 
     console.log("🔥 DASHBOARD:", data);
@@ -167,7 +161,7 @@ async function loadDashboardData(){
     setText("home-facturas", formatMoney(data?.resumen?.totalFacturado));
     setText("home-facturas-pendiente", formatMoney(data?.resumen?.totalPendiente));
 
-    const ultimoMes = data?.charts?.cashflowMensual?.slice(-1)[0]?.total || 0;
+    const ultimoMes = data?.charts?.cashflowMensual?.slice(-1)?.[0]?.total || 0;
     setText("home-facturacion-mes", formatMoney(ultimoMes));
 
     setText("home-clientes", safe(data?.counters?.clientes));
@@ -178,8 +172,6 @@ async function loadDashboardData(){
     ========================= */
 
     const evolucion = data?.charts?.evolucionMensual || [];
-
-    console.log("📊 EVOLUCION:", evolucion);
 
     const yearData = buildYearData(evolucion);
 
@@ -208,7 +200,7 @@ async function loadSystem(){
 
   try{
 
-    const base = new URL(API).origin;
+    const base = new URL(API, window.location.origin).origin;
 
     const res = await fetch(base + "/health/internal", {
       headers: {

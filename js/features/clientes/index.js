@@ -45,43 +45,84 @@ function safe(v){
   return v && String(v).trim() !== "" ? v : "-";
 }
 
-function avatar(c){
+function formatFecha(f){
+  if(!f) return "-";
+  return new Date(f).toLocaleDateString("es-ES");
+}
+
+/* =========================
+   AVATAR PRO 🔥
+========================= */
+
+function getInitials(name){
+  if(!name) return "?";
+  return name
+    .split(" ")
+    .map(n => n[0])
+    .join("")
+    .slice(0,2)
+    .toUpperCase();
+}
+
+function hashString(str){
+  let hash = 0;
+  for(let i = 0; i < str.length; i++){
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return hash;
+}
+
+function getAvatarColor(name){
+
+  const colors = [
+    "#6366f1",
+    "#22c55e",
+    "#eab308",
+    "#ef4444",
+    "#06b6d4",
+    "#a855f7",
+    "#f97316"
+  ];
+
+  const index = Math.abs(hashString(name)) % colors.length;
+  return colors[index];
+}
+
+function renderAvatar(c){
 
   const fallback = "/media/img/Usuario.png";
-  let src = c?.logo || c?.avatar;
 
-  if(src){
+  let src = c.logo || c.avatar;
 
-    if(typeof src !== "string") return fallback;
+  if(src && typeof src === "string"){
 
     if(!src.startsWith("http")){
       src = Onion.config.API.replace("/api","") + src;
     }
 
-    return `
-<img
-  src="${src}"
-  class="cliente-avatar"
-  loading="lazy"
-  onerror="this.src='${fallback}'">
-`;
+    return `<img src="${src}" loading="lazy" onerror="this.src='${fallback}'">`;
   }
 
-  const nombre = (c?.empresa || "CL").trim();
-
-  const iniciales = nombre
-    .split(" ")
-    .slice(0,2)
-    .map(p => p[0])
-    .join("")
-    .toUpperCase();
+  const name = c.empresa || c.nombre || "CL";
+  const initials = getInitials(name);
+  const color = getAvatarColor(name);
 
   return `
-<div class="cliente-avatar cliente-avatar-fallback">
-${iniciales}
-</div>
-`;
-
+    <div style="
+      width:100%;
+      height:100%;
+      border-radius:50%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:${color};
+      color:#fff;
+      font-weight:600;
+      font-size:12px;
+    ">
+      ${initials}
+    </div>
+  `;
 }
 
 /* =========================
@@ -97,7 +138,7 @@ function adaptCliente(c){
     email: c.email || "-",
     telefono: c.telefono || c.phone || "-",
     activo: c.active ?? true,
-    fecha: c.created_at || c.fecha || "-"
+    fecha: c.createdAt || c.created_at || c.fecha || "-"
   };
 
 }
@@ -109,9 +150,7 @@ function adaptCliente(c){
 function init(){
 
   const root = getRoot();
-  if(!root) return;
-
-  if(initialized) return;
+  if(!root || initialized) return;
 
   if(!Onion.state?.user){
     return setTimeout(init, 100);
@@ -147,19 +186,13 @@ function bindEvents(){
 
   Onion.cleanupEvent(tbody, "click", (e)=>{
 
-    const btn = e.target.closest("button");
-    if(!btn) return;
+    const row = e.target.closest("tr[data-id]");
+    if(!row) return;
 
-    const id = btn.dataset.id;
+    const id = row.dataset.id;
     if(!id) return;
 
-    if(btn.classList.contains("btn-ver")){
-      Onion.router.navigate(`/clientes/cliente?id=${id}`);
-    }
-
-    if(btn.classList.contains("btn-editar")){
-      Onion.router.navigate(`/clientes/cliente?id=${id}&edit=true`);
-    }
+    Onion.router.navigate(`/clientes/cliente?id=${id}`);
 
   });
 
@@ -174,13 +207,8 @@ function initFilters(){
   const search = $("search-cliente");
   const estado = $("filter-estado-cliente");
 
-  if(search){
-    Onion.cleanupEvent(search, "input", applyFilters);
-  }
-
-  if(estado){
-    Onion.cleanupEvent(estado, "change", applyFilters);
-  }
+  search && Onion.cleanupEvent(search, "input", applyFilters);
+  estado && Onion.cleanupEvent(estado, "change", applyFilters);
 
 }
 
@@ -201,7 +229,7 @@ function applyFilters(){
 
   if(estado){
     filtered = filtered.filter(c =>
-      estado === "activo" ? c.activo : !c.activo
+      estado === "activo" ? c.active : !c.active
     );
   }
 
@@ -261,33 +289,33 @@ function renderClientes(list = []){
 
     const c = adaptCliente(raw);
 
-    const email = safe(c.email) !== "-"
-      ? `<a href="mailto:${c.email}">${c.email}</a>`
-      : "-";
-
     const estado = c.activo
       ? `<span class="badge activo">Activo</span>`
       : `<span class="badge inactivo">Inactivo</span>`;
 
     return `
 <tr data-id="${c.id}">
-  <td>${safe(c.id)}</td>
+
+  <td style="white-space:nowrap;">${safe(c.id)}</td>
+
   <td>
-    <div class="cliente-cell">
-      ${avatar(c)}
-      <span class="cliente-nombre">${safe(c.empresa)}</span>
+    <div class="cell-user">
+      <div class="table-avatar">
+        ${renderAvatar(c)}
+      </div>
+      <div class="user-info">
+        <span class="user-name">${safe(c.empresa)}</span>
+        <span class="user-sub">${safe(c.email)}</span>
+      </div>
     </div>
   </td>
-  <td class="cliente-email">${email}</td>
+
   <td>${safe(c.telefono)}</td>
+
   <td>${estado}</td>
-  <td>${safe(c.fecha)}</td>
-  <td>
-    <div class="table-actions">
-      <button class="action-btn btn-ver" data-id="${c.id}">👁</button>
-      <button class="action-btn btn-editar" data-id="${c.id}">✏️</button>
-    </div>
-  </td>
+
+  <td>${formatFecha(c.fecha)}</td>
+
 </tr>
 `;
 
@@ -305,7 +333,7 @@ function renderState(message, cls="loading"){
 
   tbody.innerHTML = `
 <tr>
-  <td colspan="7" class="${cls}">
+  <td colspan="5" class="${cls}">
     ${message}
   </td>
 </tr>

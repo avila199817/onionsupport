@@ -1,5 +1,5 @@
 /* =========================================================
-   FACTURAS — PRO SAAS PANEL (AJUSTE CLIENTE PRO)
+   FACTURAS — PRO SAAS PANEL (CLIENTE + EMPRESA UNIFICADOS)
 ========================================================= */
 
 .panel-content.facturas{
@@ -117,7 +117,7 @@
 }
 
 /* =========================================================
-   🔥 COLUMN SYSTEM AJUSTADO PRO
+   COLUMN SYSTEM
 ========================================================= */
 
 .panel-content.facturas .col-id{
@@ -126,37 +126,34 @@
   color:var(--dim);
 }
 
-/* 🔥 MÁS ESPACIO CLIENTE */
 .panel-content.facturas .col-main{
-  width:38%;
+  width:36%;
   font-weight:500;
   white-space:normal;
   line-height:1.4;
 }
 
-/* 🔥 EMPRESA MÁS COMPACTA */
+/* 🔥 EMPRESA AHORA IGUAL QUE CLIENTE */
 .panel-content.facturas .col-secondary{
-  width:160px;
+  width:28%;
+  white-space:normal;
+  line-height:1.4;
 }
 
-/* 🔥 FECHA MÁS PEQUEÑA */
 .panel-content.facturas .col-date{
   width:120px;
 }
 
-/* 🔥 IMPORTE FIJO */
 .panel-content.facturas .col-importe{
   width:130px;
   text-align:right;
   font-variant-numeric:tabular-nums;
 }
 
-/* 🔥 BADGES MÁS COMPACTOS */
 .panel-content.facturas .col-status{
   width:100px;
 }
 
-/* 🔥 MÉTODO MÁS PEQUEÑO */
 .panel-content.facturas .col-method{
   width:140px;
   font-size:12px;
@@ -182,7 +179,7 @@
 }
 
 /* =========================================================
-   USER CELL
+   USER CELL (CLIENTE + EMPRESA)
 ========================================================= */
 
 .panel-content.facturas .cell-user{
@@ -216,10 +213,14 @@
 .panel-content.facturas .user-info{
   display:flex;
   flex-direction:column;
+  min-width:0;
 }
 
 .panel-content.facturas .user-name{
   font-weight:600;
+  white-space:normal;
+  overflow:hidden;
+  text-overflow:ellipsis;
 }
 
 .panel-content.facturas .user-sub{

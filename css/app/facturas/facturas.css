@@ -10,8 +10,15 @@
   position:relative;
 }
 
+/* 🔥 CLAVE GLOBAL */
+.panel-content.facturas *,
+.panel-content.facturas *::before,
+.panel-content.facturas *::after{
+  box-sizing:border-box;
+}
+
 /* =========================================================
-   LOADING OVERLAY
+   LOADING
 ========================================================= */
 
 .facturas-loading{
@@ -34,12 +41,12 @@
 }
 
 .facturas-spinner{
-  width:42px;
-  height:42px;
+  width:38px;
+  height:38px;
   border-radius:50%;
   border:3px solid rgba(255,255,255,0.15);
   border-top-color:var(--accent);
-  animation:spin .8s linear infinite;
+  animation:spin .7s linear infinite;
 }
 
 @keyframes spin{
@@ -47,7 +54,7 @@
 }
 
 /* =========================================================
-   TABLE WRAPPER
+   STRUCTURE
 ========================================================= */
 
 .panel-content.facturas .table-system{
@@ -59,53 +66,47 @@
 }
 
 /* =========================================================
-   FILTERS
+   FILTERS (MÁS COMPACTO)
 ========================================================= */
 
 .panel-content.facturas .filters-row{
   display:flex;
   align-items:center;
-  gap:10px;
-  padding:12px 16px;
+  gap:8px;
+  padding:10px 14px;
   background:var(--panel-bg);
   border-bottom:1px solid var(--panel-border);
 }
 
 .panel-content.facturas .filters-row input{
   flex:1;
-  min-width:220px;
+  min-width:180px;
 }
 
 .panel-content.facturas .filters-row input,
 .panel-content.facturas .filters-row select{
-  padding:10px 12px;
-  border-radius:8px;
+  padding:8px 10px;
+  border-radius:6px;
   border:1px solid var(--card-border);
   background:var(--card-bg);
   color:var(--text);
-  font-size:13px;
+  font-size:12.5px;
 }
 
 .panel-content.facturas .filters-row select{
-  min-width:140px;
+  min-width:120px;
 }
 
 .panel-content.facturas .btn-new-factura{
   margin-left:auto;
-  padding:10px 18px;
+  padding:8px 14px;
   border-radius:999px;
   background:linear-gradient(135deg,var(--accent),var(--accent-hover));
   color:#fff;
   font-weight:600;
   border:none;
   cursor:pointer;
-  box-shadow:0 6px 18px rgba(99,102,241,0.35);
-  transition:all .2s ease;
-}
-
-.panel-content.facturas .btn-new-factura:hover{
-  transform:translateY(-1px);
-  box-shadow:0 10px 26px rgba(99,102,241,0.45);
+  box-shadow:0 5px 14px rgba(99,102,241,0.3);
 }
 
 /* =========================================================
@@ -126,20 +127,20 @@
 }
 
 /* =========================================================
-   GRID 🔥 AJUSTE MILIMÉTRICO
+   GRID 🔥 ULTRA COMPACT PRO
 ========================================================= */
 
 .panel-content.facturas thead tr,
 .panel-content.facturas tbody tr{
   display:grid;
   grid-template-columns:
-    110px                 /* ID */
-    minmax(0, 2.6fr)      /* CLIENTE */
-    minmax(0, 1.8fr)      /* EMPRESA (más compacta y a la izquierda) */
-    120px                 /* FECHA */
-    120px                 /* IMPORTE */
-    110px                 /* ESTADO */
-    190px;                /* ACCIONES */
+    90px          /* ID */
+    2.8fr         /* CLIENTE */
+    1.6fr         /* EMPRESA */
+    105px         /* FECHA */
+    110px         /* IMPORTE */
+    100px         /* ESTADO */
+    170px;        /* ACCIONES */
   align-items:center;
 }
 
@@ -155,125 +156,110 @@
 }
 
 .panel-content.facturas th{
-  padding:12px 12px;
-  text-align:left;
+  padding:10px 10px;
   border-bottom:1px solid var(--panel-border);
   color:var(--dim);
-  font-size:11px;
+  font-size:10.5px;
   text-transform:uppercase;
   letter-spacing:.4px;
   white-space:nowrap;
 }
 
 /* =========================================================
-   CELLS 🔥 ULTRA ALIGN
+   CELLS 🔥 ULTRA TIGHT
 ========================================================= */
 
 .panel-content.facturas td{
-  padding:10px 12px;
+  padding:8px 10px;
   border-bottom:1px solid var(--panel-border);
-  font-size:13.5px;
+  font-size:13px;
   color:var(--text);
 
   display:flex;
   align-items:center;
 
-  height:60px;
+  height:54px;
   min-width:0;
   width:100%;
-
   overflow:hidden;
 }
 
 /* =========================================================
-   COLUMN ALIGN 🔥 PRECISO
+   ALIGNMENT
 ========================================================= */
 
-.panel-content.facturas .col-id{
-  font-size:11px;
-  color:var(--dim);
-  justify-content:flex-start;
-}
+.col-id{ font-size:11px; color:var(--dim); }
 
-.panel-content.facturas .col-date{
-  justify-content:center;
-}
+.col-date{ justify-content:center; }
 
-.panel-content.facturas .col-importe{
+.col-importe{
   justify-content:flex-end;
   font-variant-numeric:tabular-nums;
 }
 
-.panel-content.facturas .col-status{
-  justify-content:center;
-}
+.col-status{ justify-content:center; }
 
-.panel-content.facturas .col-actions{
-  justify-content:flex-end;
-}
+.col-actions{ justify-content:flex-end; }
 
 /* =========================================================
    ROWS
 ========================================================= */
 
 .panel-content.facturas tbody tr{
-  transition:all .15s ease;
+  transition:all .12s ease;
   cursor:pointer;
 }
 
 .panel-content.facturas tbody tr:nth-child(even){
-  background:color-mix(in srgb, var(--panel-bg), #fff 2%);
+  background:color-mix(in srgb, var(--panel-bg), #fff 1.5%);
 }
 
 .panel-content.facturas tbody tr:hover{
-  background:color-mix(in srgb, var(--panel-bg), #fff 6%);
-  transform:translateX(2px);
+  background:color-mix(in srgb, var(--panel-bg), #fff 5%);
 }
 
 /* =========================================================
    USER CELL
 ========================================================= */
 
-.panel-content.facturas .cell-user{
+.cell-user{
   display:flex;
   align-items:center;
-  gap:10px;
+  gap:8px;
   min-width:0;
   width:100%;
 }
 
-.panel-content.facturas .table-avatar{
-  width:34px;
-  height:34px;
-  min-width:34px;
+.table-avatar{
+  width:30px;
+  height:30px;
+  min-width:30px;
   border-radius:50%;
   display:flex;
   align-items:center;
   justify-content:center;
-  color:#fff;
-  font-size:12px;
+  font-size:11px;
   font-weight:600;
   flex-shrink:0;
 }
 
-.panel-content.facturas .user-info{
+.user-info{
   display:flex;
   flex-direction:column;
   min-width:0;
   flex:1;
 }
 
-.panel-content.facturas .user-name{
+.user-name{
   font-weight:600;
-  font-size:13px;
-  color:var(--text);
+  font-size:12.8px;
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
 }
 
-.panel-content.facturas .user-sub{
-  font-size:11px;
+.user-sub{
+  font-size:10.5px;
   color:var(--dim);
   white-space:nowrap;
   overflow:hidden;
@@ -281,91 +267,71 @@
 }
 
 /* =========================================================
-   EMPRESA 🔥 MÁS A LA IZQUIERDA Y COMPACTA
+   EMPRESA
 ========================================================= */
 
-.panel-content.facturas .col-secondary{
-  display:flex;
-  align-items:center;
+.empresa-cell{
   justify-content:flex-start;
-  gap:8px;
-  min-width:0;
-  padding-left:4px; /* 🔥 ajuste fino */
 }
 
-.panel-content.facturas .col-secondary span{
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
+.empresa-empty{
+  width:100%;
+  text-align:center;
+  opacity:.5;
+  font-size:12px;
 }
 
 /* =========================================================
    BADGES
 ========================================================= */
 
-.panel-content.facturas .badge{
-  padding:4px 10px;
+.badge{
+  padding:3px 8px;
   border-radius:999px;
-  font-size:10px;
+  font-size:9.5px;
   font-weight:500;
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
 }
 
-.panel-content.facturas .badge.success{
+.badge.success{
   color:var(--success);
   background:color-mix(in srgb, var(--success), transparent 85%);
 }
 
-.panel-content.facturas .badge.warning{
+.badge.warning{
   color:var(--warning);
   background:color-mix(in srgb, var(--warning), transparent 85%);
 }
 
 /* =========================================================
-   ACTIONS 🔥 COMPACTO Y ALINEADO
+   ACTIONS 🔥 ESTABLE
 ========================================================= */
 
-.panel-content.facturas .actions{
-  display:flex;
-  gap:6px;
-  align-items:center;
-  justify-content:flex-end;
-  width:100%;
+.actions{
+  display:grid;
+  grid-auto-flow:column;
+  justify-content:end;
+  gap:5px;
+  min-width:150px;
 }
 
 /* =========================================================
    BUTTONS
 ========================================================= */
 
-.panel-content.facturas .btn-action{
-  padding:6px 9px;
-  border-radius:6px;
+.btn-action{
+  padding:5px 8px;
+  border-radius:5px;
   border:1px solid var(--card-border);
   background:var(--card-bg);
-  color:var(--text);
-  font-size:11px;
+  font-size:10.5px;
   cursor:pointer;
-  transition:all .15s ease;
   white-space:nowrap;
 }
 
-.panel-content.facturas .btn-action:hover{
-  background:color-mix(in srgb, var(--accent), transparent 85%);
-  color:var(--accent);
-  border-color:var(--accent);
-}
-
-.panel-content.facturas .btn-action.pay{
+.btn-action.pay{
   background:color-mix(in srgb, var(--warning), transparent 85%);
   color:var(--warning);
   border-color:var(--warning);
-}
-
-.panel-content.facturas .btn-action.pay:hover{
-  background:var(--warning);
-  color:#fff;
 }
 
 /* =========================================================
@@ -373,7 +339,7 @@
 ========================================================= */
 
 .panel-content.facturas .table-container::-webkit-scrollbar{
-  width:8px;
+  width:6px;
 }
 
 .panel-content.facturas .table-container::-webkit-scrollbar-thumb{

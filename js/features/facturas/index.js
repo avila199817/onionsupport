@@ -54,7 +54,7 @@ function init(){
 init();
 
 /* =========================
-   EVENTS (LIMPIO + DELEGADO)
+   EVENTS
 ========================= */
 
 function bindEvents(){
@@ -123,9 +123,7 @@ async function loadFacturas(){
   const tbody = $("#facturas-body");
   if(!tbody) return;
 
-  panel?.classList.remove("ready");
-
-  setLoading();
+  panel?.classList.add("loading");
 
   try{
 
@@ -149,7 +147,7 @@ async function loadFacturas(){
 
   }finally{
 
-    panel?.classList.add("ready");
+    panel?.classList.remove("loading");
     loading = false;
 
   }
@@ -203,31 +201,6 @@ function applyFilters(){
    STATES
 ========================= */
 
-function setLoading(){
-
-  const rows = Array.from({ length: 6 }).map(() => `
-    <div class="skeleton-row">
-      <div class="sk id"></div>
-      <div class="sk user"></div>
-      <div class="sk company"></div>
-      <div class="sk date"></div>
-      <div class="sk amount"></div>
-      <div class="sk status"></div>
-      <div class="sk actions"></div>
-    </div>
-  `).join("");
-
-  $("#facturas-body").innerHTML = `
-    <tr class="loading-row">
-      <td colspan="7">
-        <div class="skeleton-table">
-          ${rows}
-        </div>
-      </td>
-    </tr>
-  `;
-}
-
 function setEmpty(){
   $("#facturas-body").innerHTML =
     `<tr><td colspan="7">No hay facturas</td></tr>`;
@@ -239,7 +212,7 @@ function setError(){
 }
 
 /* =========================
-   RENDER (OPTIMIZADO)
+   RENDER
 ========================= */
 
 function render(items){
@@ -276,7 +249,6 @@ function render(items){
   </td>
 
   <td class="col-date">${d.fecha}</td>
-
   <td class="col-importe">${d.total}</td>
 
   <td class="col-status">
@@ -307,7 +279,7 @@ function render(items){
 }
 
 /* =========================
-   MAP
+   MAP (🔥 CLAVE AQUÍ)
 ========================= */
 
 function mapItem(f){
@@ -317,11 +289,21 @@ function mapItem(f){
     numero: f.numero || f.id,
 
     cliente: {
-      nombre: f.cliente?.nombre || "Cliente",
-      email: f.cliente?.email || "-"
+      nombre:
+        f.cliente?.nombre ||
+        f.cliente?.nombreContacto ||
+        "Cliente",
+
+      email:
+        f.cliente?.email ||   // backend
+        f.cliente?.correo ||  // por si acaso
+        "-",                  // fallback final
     },
 
-    empresa: f.cliente?.empresa || "-",
+    empresa:
+      f.cliente?.empresa ||
+      f.cliente?.razonSocial ||
+      "-",
 
     fecha: formatFecha(f.fecha),
     total: formatMoney(f.total),

@@ -16,6 +16,10 @@ let sending = false;
 let selectedFiles = [];
 let deleting = false;
 
+/* 🔥 CONTROL PRO */
+let currentRequestId = 0;
+let currentAbort = null;
+
 
 /* =========================
    INIT
@@ -136,30 +140,69 @@ function bindEvents(){
 
 
 /* =========================
-   LOAD
+   LOAD (🔥 FIX PRO)
 ========================= */
 async function loadDetalle(){
 
   const id = getId();
   if(!id) return;
 
+  const requestId = ++currentRequestId;
+
+  /* 🔥 cancelar anterior */
+  if(currentAbort){
+    currentAbort.abort();
+  }
+
+  currentAbort = new AbortController();
+
+  clearUI();
+
   try{
 
     const res = await fetch(Onion.config.API + "/tickets/" + id, {
-      headers: getAuthHeaders()
+      headers: getAuthHeaders(),
+      signal: currentAbort.signal
     });
+
+    if(requestId !== currentRequestId) return;
 
     if(!res.ok) throw new Error("API ERROR");
 
     const json = await res.json();
+
+    if(requestId !== currentRequestId) return;
+
     currentItem = json?.ticket || json;
 
     render(currentItem);
 
   }catch(err){
+
+    if(err.name === "AbortError") return;
+
     console.error("💥 loadDetalle:", err);
     showToast("❌ Error cargando");
   }
+}
+
+
+/* =========================
+   CLEAR UI (🔥 ANTI PARPADEO)
+========================= */
+function clearUI(){
+
+  setText("#detalle-usuario", "--");
+  setText("#detalle-userid", "--");
+  setText("#detalle-id", "--");
+  setText("#detalle-fecha", "--");
+  setText("#detalle-fecha-cierre", "--");
+  setText("#detalle-tecnico", "--");
+  setText("#detalle-titulo", "--");
+
+  const msg = $("#detalle-mensaje");
+  if(msg) msg.textContent = "";
+
 }
 
 
@@ -204,7 +247,7 @@ function render(i){
 
 
 /* =========================
-   AVATAR 🔥 (LO QUE TE FALTABA)
+   AVATAR
 ========================= */
 function renderAvatar(nombre, avatar){
 
@@ -310,43 +353,6 @@ async function deleteBlob(url){
 
 
 /* =========================
-   UPLOAD (🔥 LO QUE TE FALTABA)
-========================= */
-async function uploadFile(file){
-
-  const res = await fetch(Onion.config.API + "/uploads/upload-url",{
-    method:"POST",
-    headers:{
-      "Content-Type":"application/json",
-      ...getAuthHeaders()
-    },
-    body: JSON.stringify({
-      fileName:file.name,
-      fileType:file.type,
-      fileSize:file.size
-    })
-  });
-
-  const { uploadUrl, blobUrl } = await res.json();
-
-  await fetch(uploadUrl,{
-    method:"PUT",
-    headers:{
-      "x-ms-blob-type":"BlockBlob",
-      "Content-Type": file.type || "application/octet-stream"
-    },
-    body:file
-  });
-
-  return {
-    name:file.name,
-    url:blobUrl,
-    type:"user"
-  };
-}
-
-
-/* =========================
    UPDATE
 ========================= */
 async function updateTicket(){
@@ -355,13 +361,6 @@ async function updateTicket(){
   setSaving(true);
 
   try{
-
-    let uploaded = [];
-
-    for(const f of selectedFiles){
-      const data = await uploadFile(f);
-      uploaded.push(data);
-    }
 
     const res = await fetch(Onion.config.API + "/tickets/" + currentItem.id,{
       method:"PATCH",
@@ -372,8 +371,7 @@ async function updateTicket(){
       body: JSON.stringify({
         status: $("#edit-estado").value,
         priority: $("#edit-prioridad").value,
-        message: $("#detalle-mensaje").innerText.trim(),
-        attachments: uploaded
+        message: $("#detalle-mensaje").innerText.trim()
       })
     });
 
@@ -382,8 +380,6 @@ async function updateTicket(){
     const json = await res.json();
     currentItem = json?.ticket || json;
 
-    selectedFiles = [];
-    renderFiles();
     render(currentItem);
 
     showToast("✔ Guardado");

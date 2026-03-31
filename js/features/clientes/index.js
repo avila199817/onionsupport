@@ -30,11 +30,8 @@ function $(id){
 ========================= */
 
 async function getClientes(){
-
   const res = await Onion.fetch(Onion.config.API + "/clientes");
-
   return res?.clientes || res?.data || res || [];
-
 }
 
 /* =========================
@@ -91,7 +88,6 @@ function getAvatarColor(name){
 function renderAvatar(c){
 
   const fallback = "/media/img/Usuario.png";
-
   let src = c.logo || c.avatar;
 
   if(src && typeof src === "string"){
@@ -126,7 +122,7 @@ function renderAvatar(c){
 }
 
 /* =========================
-   ADAPTER
+   ADAPTER 🔥
 ========================= */
 
 function adaptCliente(c){
@@ -134,9 +130,11 @@ function adaptCliente(c){
   return {
     id: c.id || "-",
     empresa: c.nombreFiscal || c.empresa || "-",
-    nombre: c.nombreContacto || c.nombre || c.name || "-",
+    nombre: c.nombreContacto || c.nombre || "-",
     email: c.email || "-",
-    telefono: c.telefono || c.phone || "-",
+    telefono: c.telefono || "-",
+    ubicacion: c.ubicacion || c.localidad || c.ciudad || "-",
+    tipo: c.tipo || (c.esEmpresa ? "empresa" : "particular"),
     activo: c.active ?? true,
     fecha: c.createdAt || c.created_at || c.fecha || "-"
   };
@@ -199,16 +197,18 @@ function bindEvents(){
 }
 
 /* =========================
-   FILTROS
+   FILTROS 🔥
 ========================= */
 
 function initFilters(){
 
   const search = $("search-cliente");
   const estado = $("filter-estado-cliente");
+  const tipo = $("filter-tipo-cliente");
 
   search && Onion.cleanupEvent(search, "input", applyFilters);
   estado && Onion.cleanupEvent(estado, "change", applyFilters);
+  tipo && Onion.cleanupEvent(tipo, "change", applyFilters);
 
 }
 
@@ -216,6 +216,7 @@ function applyFilters(){
 
   const search = $("search-cliente")?.value.toLowerCase() || "";
   const estado = $("filter-estado-cliente")?.value || "";
+  const tipo = $("filter-tipo-cliente")?.value || "";
 
   let filtered = clientesCache;
 
@@ -223,7 +224,8 @@ function applyFilters(){
     filtered = filtered.filter(c =>
       (c.nombre || "").toLowerCase().includes(search) ||
       (c.empresa || "").toLowerCase().includes(search) ||
-      (c.email || "").toLowerCase().includes(search)
+      (c.email || "").toLowerCase().includes(search) ||
+      (c.ubicacion || "").toLowerCase().includes(search)
     );
   }
 
@@ -231,6 +233,10 @@ function applyFilters(){
     filtered = filtered.filter(c =>
       estado === "activo" ? c.active : !c.active
     );
+  }
+
+  if(tipo){
+    filtered = filtered.filter(c => c.tipo === tipo);
   }
 
   renderClientes(filtered);
@@ -274,7 +280,7 @@ async function loadClientes(){
 }
 
 /* =========================
-   RENDER
+   RENDER 🔥
 ========================= */
 
 function renderClientes(list = []){
@@ -293,12 +299,16 @@ function renderClientes(list = []){
       ? `<span class="badge activo">Activo</span>`
       : `<span class="badge inactivo">Inactivo</span>`;
 
+    const tipo = c.tipo === "empresa"
+      ? `<span class="badge empresa">Empresa</span>`
+      : `<span class="badge particular">Particular</span>`;
+
     return `
 <tr data-id="${c.id}">
 
-  <td style="white-space:nowrap;">${safe(c.id)}</td>
+  <td class="col-id">${safe(c.id)}</td>
 
-  <td>
+  <td class="col-main">
     <div class="cell-user">
       <div class="table-avatar">
         ${renderAvatar(c)}
@@ -310,11 +320,13 @@ function renderClientes(list = []){
     </div>
   </td>
 
-  <td>${safe(c.telefono)}</td>
+  <td class="col-secondary">${safe(c.ubicacion)}</td>
 
-  <td>${estado}</td>
+  <td class="col-secondary">${tipo}</td>
 
-  <td>${formatFecha(c.fecha)}</td>
+  <td class="col-status">${estado}</td>
+
+  <td class="col-date">${formatFecha(c.fecha)}</td>
 
 </tr>
 `;
@@ -333,7 +345,7 @@ function renderState(message, cls="loading"){
 
   tbody.innerHTML = `
 <tr>
-  <td colspan="5" class="${cls}">
+  <td colspan="6" class="${cls}">
     ${message}
   </td>
 </tr>

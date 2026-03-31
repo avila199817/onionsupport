@@ -284,3 +284,65 @@
   background:var(--scrollbar-thumb);
   border-radius:6px;
 }
+
+/* =========================
+   SKELETON FACTURAS PRO
+========================= */
+
+.loading-row td{
+  padding:16px;
+}
+
+.skeleton-table{
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+}
+
+.skeleton-row{
+  display:grid;
+  grid-template-columns:
+    130px   /* ID */
+    2fr     /* Cliente */
+    1.5fr   /* Empresa */
+    120px   /* Fecha */
+    130px   /* Importe */
+    100px   /* Pago */
+    160px;  /* Acciones */
+  gap:12px;
+  align-items:center;
+}
+
+/* =========================
+   BLOQUES
+========================= */
+
+.sk{
+  height:14px;
+  border-radius:6px;
+  background:linear-gradient(
+    90deg,
+    rgba(255,255,255,0.05) 25%,
+    rgba(255,255,255,0.12) 50%,
+    rgba(255,255,255,0.05) 75%
+  );
+  background-size:200% 100%;
+  animation:skeleton-loading 1.2s infinite linear;
+}
+
+/* tamaños específicos */
+
+.sk.id{ width:80px; }
+.sk.user{ width:70%; }
+.sk.company{ width:60%; }
+.sk.date{ width:90px; }
+.sk.amount{ width:80px; }
+.sk.status{ width:70px; }
+.sk.actions{ width:120px; height:20px; }
+
+/* animación */
+
+@keyframes skeleton-loading{
+  0%{ background-position:200% 0; }
+  100%{ background-position:-200% 0; }
+}

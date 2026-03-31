@@ -61,6 +61,16 @@ function avatar(u){
 
 }
 
+function formatFecha(f){
+  if(!f) return "-";
+  return new Date(f).toLocaleDateString("es-ES");
+}
+
+function capitalize(str){
+  if(!str) return "-";
+  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+}
+
 /* =========================
    INIT
 ========================= */
@@ -68,9 +78,7 @@ function avatar(u){
 function init(){
 
   const root = getRoot();
-  if(!root) return;
-
-  if(initialized) return;
+  if(!root || initialized) return;
 
   if(!Onion.state?.user){
     return setTimeout(init, 100);
@@ -106,19 +114,13 @@ function bindEvents(){
 
   Onion.cleanupEvent(tbody, "click", (e)=>{
 
-    const btn = e.target.closest("button");
-    if(!btn) return;
+    const row = e.target.closest("tr[data-id]");
+    if(!row) return;
 
-    const id = btn.dataset.id;
+    const id = row.dataset.id;
     if(!id) return;
 
-    if(btn.classList.contains("btn-ver")){
-      Onion.router.navigate(`/usuarios/usuario?id=${id}`);
-    }
-
-    if(btn.classList.contains("btn-editar")){
-      Onion.router.navigate(`/usuarios/usuario?id=${id}&edit=true`);
-    }
+    Onion.router.navigate(`/usuarios/usuario?id=${id}`);
 
   });
 
@@ -132,14 +134,13 @@ function initFilters(){
 
   const search = $("search-usuario");
   const estado = $("filter-estado-usuario");
+  const rol = $("filter-rol-usuario");
+  const tipo = $("filter-tipo-usuario");
 
-  if(search){
-    Onion.cleanupEvent(search, "input", applyFilters);
-  }
-
-  if(estado){
-    Onion.cleanupEvent(estado, "change", applyFilters);
-  }
+  search && Onion.cleanupEvent(search, "input", applyFilters);
+  estado && Onion.cleanupEvent(estado, "change", applyFilters);
+  rol && Onion.cleanupEvent(rol, "change", applyFilters);
+  tipo && Onion.cleanupEvent(tipo, "change", applyFilters);
 
 }
 
@@ -147,6 +148,8 @@ function applyFilters(){
 
   const search = $("search-usuario")?.value.toLowerCase() || "";
   const estado = $("filter-estado-usuario")?.value || "";
+  const rol = $("filter-rol-usuario")?.value || "";
+  const tipo = $("filter-tipo-usuario")?.value || "";
 
   let filtered = usersCache;
 
@@ -161,6 +164,18 @@ function applyFilters(){
   if(estado){
     filtered = filtered.filter(u =>
       estado === "activo" ? u.active : !u.active
+    );
+  }
+
+  if(rol){
+    filtered = filtered.filter(u =>
+      (u.role || "").toLowerCase() === rol
+    );
+  }
+
+  if(tipo){
+    filtered = filtered.filter(u =>
+      (u.tipo || "").toLowerCase() === tipo
     );
   }
 
@@ -218,33 +233,39 @@ function renderUsers(users = []){
 
   tbody.innerHTML = users.map(u => {
 
-    const email = safe(u.email) !== "-"
-      ? `<a href="mailto:${u.email}">${u.email}</a>`
-      : "-";
-
     const estado = u.active
       ? `<span class="badge activo">Activo</span>`
       : `<span class="badge inactivo">Inactivo</span>`;
 
+    const rol = `<span class="badge ${u.role || "user"}">${capitalize(u.role)}</span>`;
+    const tipo = `<span class="badge ${u.tipo || "particular"}">${capitalize(u.tipo)}</span>`;
+
     return `
 <tr data-id="${u.id}">
   <td>${safe(u.id)}</td>
+
   <td>
-    <div class="usuario-cell">
-      <img src="${avatar(u)}" class="usuario-avatar" loading="lazy">
-      <span class="usuario-username">${safe(u.username)}</span>
+    <div class="cell-user">
+      <div class="table-avatar">
+        <img src="${avatar(u)}" loading="lazy">
+      </div>
+      <div class="user-info">
+        <span class="user-name">${safe(u.name || u.username)}</span>
+        <span class="user-sub">${safe(u.email)}</span>
+      </div>
     </div>
   </td>
-  <td class="usuario-email">${email}</td>
-  <td>${safe(u.role || u.tipo)}</td>
+
+  <td>${safe(u.email)}</td>
+
+  <td>${rol}</td>
+
+  <td>${tipo}</td>
+
   <td>${estado}</td>
-  <td>${safe(u.created_at || u.fecha)}</td>
-  <td>
-    <div class="table-actions">
-      <button class="action-btn btn-ver" data-id="${u.id}">👁</button>
-      <button class="action-btn btn-editar" data-id="${u.id}">✏️</button>
-    </div>
-  </td>
+
+  <td>${formatFecha(u.createdAt || u.created_at)}</td>
+
 </tr>
 `;
 

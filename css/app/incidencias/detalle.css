@@ -1,6 +1,7 @@
 /* =========================================================
-   INCIDENCIA DETALLE — SAAS PRO UI (FINAL CLEAN)
+   INCIDENCIA DETALLE — FINAL PRO SAAS (UNIFICADO)
 ========================================================= */
+
 
 /* =========================
    ROOT
@@ -11,7 +12,6 @@
   flex:1;
   min-height:0;
   width:100%;
-  overflow:hidden;
 }
 
 
@@ -35,58 +35,54 @@
   display:flex;
   flex-direction:column;
   min-height:0;
-  overflow:hidden;
 }
 
 
 /* =========================================================
-   RIGHT SIDEBAR (AISLADO)
+   RIGHT SIDEBAR
 ========================================================= */
 .incidencia-detalle .detalle-right{
   width:360px;
   min-width:360px;
   flex-shrink:0;
+
   display:flex;
   flex-direction:column;
+
   background:var(--panel-bg);
   border-left:1px solid var(--panel-border);
+
   min-height:0;
+  overflow:hidden;
 }
 
 
 /* =========================================================
-   SIDEBAR CONTENT (AISLADO)
+   SIDEBAR CONTENT
 ========================================================= */
 .incidencia-detalle .detalle-sidebar{
-  display:flex;
-  flex-direction:column;
   flex:1;
   min-height:0;
-  padding:18px;
-  overflow:hidden;
-  gap:18px;
-}
 
-/* 🔥 OJO: scoped para no romper sidebar global */
-.incidencia-detalle .sidebar-section{
   display:flex;
   flex-direction:column;
-  gap:12px;
-}
 
-/* divisor limpio */
-.sidebar-divider{
-  height:1px;
-  background:var(--panel-border);
-  margin:6px 0;
+  padding:16px;
+  background:var(--panel-bg);
+
+  overflow:hidden;
+  gap:16px;
 }
 
 .sidebar-title{
-  font-size:var(--font-xs);
+  font-size:13px;
   font-weight:600;
   color:var(--dim);
-  letter-spacing:.4px;
-  text-transform:uppercase;
+}
+
+.sidebar-divider{
+  height:1px;
+  background:var(--panel-border);
 }
 
 
@@ -94,88 +90,63 @@
    BLOBS
 ========================================================= */
 .detalle-blobs{
+  flex:1;
+  overflow:auto;
+
   display:flex;
   flex-direction:column;
   gap:10px;
-  overflow:auto;
-  padding-right:6px;
-  max-height:100%;
 }
 
-/* scroll fino */
 .detalle-blobs::-webkit-scrollbar{
   width:6px;
 }
+
 .detalle-blobs::-webkit-scrollbar-thumb{
-  background:var(--scrollbar-thumb);
+  background:rgba(255,255,255,0.1);
   border-radius:6px;
 }
 
 
 /* =========================================================
-   BLOB ITEM (🔥 MEJORADO)
+   BLOB ITEM
 ========================================================= */
 .blob-item{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-
   padding:12px 14px;
   border-radius:12px;
 
+  background:color-mix(in srgb, var(--card-bg), #000 8%);
   border:1px solid var(--card-border);
-  background:var(--card-bg);
 
-  transition:all var(--duration-fast) var(--ease-out);
-  margin-top:8px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+
+  transition:.15s;
 }
 
 .blob-item:hover{
-  border-color:var(--accent);
   transform:translateY(-2px);
-  box-shadow:var(--shadow-soft);
+  border-color:var(--accent);
+  box-shadow:0 8px 18px rgba(0,0,0,0.25);
 }
 
-
-/* TEXT */
-.blob-item span{
-  font-size:var(--font-sm);
-  color:var(--text);
-
-  max-width:60%;
-  overflow:hidden;
-  text-overflow:ellipsis;
-  white-space:nowrap;
-}
-
-
-/* ACTIONS */
 .blob-actions{
   display:flex;
   gap:8px;
 }
 
-/* DOWNLOAD */
 .blob-download{
   padding:6px 12px;
   border-radius:10px;
   border:none;
-  cursor:pointer;
-
-  font-size:var(--font-sm);
-  font-weight:600;
 
   background:linear-gradient(135deg,var(--accent),var(--accent-hover));
   color:#fff;
 
-  transition:.15s;
+  cursor:pointer;
 }
 
-.blob-download:hover{
-  transform:translateY(-1px);
-}
-
-/* DELETE */
 .blob-delete{
   padding:6px 10px;
   border-radius:10px;
@@ -185,31 +156,22 @@
   color:#ef4444;
 
   cursor:pointer;
-  font-size:12px;
-
-  transition:.15s;
-}
-
-.blob-delete:hover{
-  background:rgba(239,68,68,0.3);
 }
 
 
 /* =========================================================
-   TOP BAR
+   HEADER (MISMO QUE CREATE)
 ========================================================= */
-.incidencia-detalle .filters-row{
+.filters-row{
   display:flex;
   align-items:center;
-  justify-content:space-between;
 
-  padding:14px 30px;
+  padding:14px 40px;
 
   background:var(--panel-bg);
   border-bottom:1px solid var(--panel-border);
 }
 
-/* 🔥 BOTÓN GLOBAL (ÚNICO) */
 #btn-back{
   margin-left:auto;
 
@@ -239,19 +201,12 @@
 ========================================================= */
 .detalle-body{
   flex:1;
-  display:flex;
-  flex-direction:column;
-  padding:26px 30px;
-  overflow:auto;
-}
+  min-height:0;
 
-/* scroll */
-.detalle-body::-webkit-scrollbar{
-  width:6px;
-}
-.detalle-body::-webkit-scrollbar-thumb{
-  background:var(--scrollbar-thumb);
-  border-radius:6px;
+  display:flex;
+  padding:30px 40px;
+
+  overflow:auto;
 }
 
 
@@ -260,7 +215,7 @@
 ========================================================= */
 .form-grid{
   display:grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns:repeat(2,1fr);
   gap:18px;
   width:100%;
 }
@@ -276,14 +231,12 @@
 }
 
 .detalle-label{
-  font-size:var(--font-xs);
+  font-size:13px;
   color:var(--dim);
-  text-transform:uppercase;
-  letter-spacing:.5px;
 }
 
 .detalle-value{
-  font-size:var(--font-base);
+  font-size:14px;
   font-weight:500;
   color:var(--text);
 }
@@ -293,27 +246,12 @@
    MENSAJE
 ========================================================= */
 .detalle-editable{
-  font-size:var(--font-base);
-  line-height:var(--line-relaxed);
-
   background:color-mix(in srgb, var(--card-bg), #000 10%);
   border:1px solid var(--card-border);
-  border-radius:10px;
+  border-radius:12px;
 
-  padding:12px;
-  min-height:70px;
-
-  transition:.15s;
-}
-
-.detalle-editable:hover{
-  border-color:var(--accent);
-}
-
-.detalle-editable[contenteditable="true"]{
-  outline:none;
-  border-color:var(--accent);
-  box-shadow:0 0 0 2px rgba(99,102,241,0.25);
+  padding:14px 16px;
+  min-height:120px;
 }
 
 
@@ -321,24 +259,15 @@
    SELECT
 ========================================================= */
 .detalle-select{
-  margin-top:6px;
-  padding:10px 12px;
+  padding:12px 14px;
 
-  border-radius:10px;
+  border-radius:12px;
   border:1px solid var(--card-border);
 
-  background:color-mix(in srgb, var(--card-bg), #000 15%);
-  color:#fff;
+  background:color-mix(in srgb, var(--card-bg), #000 10%);
+  color:var(--text);
 
-  font-size:var(--font-sm);
-  font-weight:500;
   cursor:pointer;
-}
-
-.detalle-select:focus{
-  outline:none;
-  border-color:var(--accent);
-  box-shadow:0 0 0 2px rgba(99,102,241,0.25);
 }
 
 
@@ -355,27 +284,40 @@
   width:36px;
   height:36px;
   border-radius:50%;
-  overflow:hidden;
-
   background:#ddd;
-
-  display:flex;
-  align-items:center;
-  justify-content:center;
-
-  font-size:13px;
-  font-weight:600;
-}
-
-.table-avatar img{
-  width:100%;
-  height:100%;
-  object-fit:cover;
 }
 
 
 /* =========================================================
-   FILE LIST
+   FILES (🔥 IGUAL QUE CREATE)
+========================================================= */
+.incidencia-files{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  gap:6px;
+}
+
+#btn-attach{
+  background:none;
+  border:none;
+  color:var(--accent);
+  cursor:pointer;
+  font-size:13px;
+}
+
+#btn-attach:hover{
+  text-decoration:underline;
+}
+
+#file-list{
+  font-size:12px;
+  color:var(--dim);
+}
+
+
+/* =========================================================
+   FILE ITEMS
 ========================================================= */
 .file-list{
   margin-top:10px;
@@ -386,39 +328,14 @@
 
 .file-item{
   display:flex;
-  align-items:center;
   justify-content:space-between;
+  align-items:center;
 
   padding:8px 10px;
   border-radius:10px;
 
   background:color-mix(in srgb, var(--card-bg), #000 10%);
   border:1px solid var(--card-border);
-
-  font-size:var(--font-sm);
-}
-
-.file-item span{
-  max-width:75%;
-  overflow:hidden;
-  text-overflow:ellipsis;
-  white-space:nowrap;
-}
-
-.file-remove{
-  background:none;
-  border:none;
-  color:var(--error);
-  cursor:pointer;
-  font-size:14px;
-  font-weight:600;
-  opacity:.7;
-  transition:.15s;
-}
-
-.file-remove:hover{
-  opacity:1;
-  transform:scale(1.1);
 }
 
 
@@ -426,29 +343,24 @@
    FOOTER
 ========================================================= */
 .detalle-footer{
-  margin-top:24px;
   display:flex;
   justify-content:space-between;
   align-items:center;
+
+  margin-top:24px;
 }
 
 .detalle-hint{
-  font-size:var(--font-xs);
+  font-size:12px;
   color:var(--dim);
-}
-
-.detalle-meta span{
-  font-size:11px;
-  opacity:.7;
-  letter-spacing:.3px;
 }
 
 
 /* =========================================================
-   SAVE BUTTON
+   BOTÓN (MISMO ESTILO CREATE)
 ========================================================= */
 #btn-save{
-  padding:12px 22px;
+  padding:13px 26px;
   border-radius:12px;
 
   background:linear-gradient(135deg,var(--accent),var(--accent-hover));
@@ -457,33 +369,12 @@
   border:none;
   cursor:pointer;
 
-  font-weight:600;
-
   box-shadow:0 10px 24px rgba(99,102,241,0.35);
-
   transition:.15s;
 }
 
 #btn-save:hover{
-  transform:translateY(-2px);
-  box-shadow:0 14px 30px rgba(99,102,241,0.45);
-}
-
-/* =========================================================
-   ATTACH BUTTON (IGUAL QUE CREATE)
-========================================================= */
-#btn-attach{
-  background:none;
-  border:none;
-
-  color:var(--accent);
-  cursor:pointer;
-
-  font-size:13px;
-}
-
-#btn-attach:hover{
-  text-decoration:underline;
+  transform:translateY(-1px);
 }
 
 
@@ -491,13 +382,7 @@
    RESPONSIVE
 ========================================================= */
 @media (max-width:1100px){
-
   .incidencia-detalle .detalle-right{
     display:none;
   }
-
-  .detalle-body{
-    padding:20px;
-  }
-
 }

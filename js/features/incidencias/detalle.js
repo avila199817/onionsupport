@@ -187,7 +187,6 @@ function render(i){
   const msg = $("#detalle-mensaje");
   if(msg){
     msg.textContent = i?.message || "";
-    msg.setAttribute("contenteditable", "true");
   }
 
   $("#edit-estado").value = i?.status || "open";
@@ -201,6 +200,30 @@ function render(i){
   renderBlobs("#detalle-blobs-user", userFiles, true);
   renderBlobs("#detalle-blobs-team", teamFiles, false);
 
+}
+
+
+/* =========================
+   AVATAR 🔥 (LO QUE TE FALTABA)
+========================= */
+function renderAvatar(nombre, avatar){
+
+  const el = $("#detalle-avatar");
+  if(!el) return;
+
+  if(avatar){
+    el.innerHTML = `<img src="${avatar}" />`;
+    return;
+  }
+
+  const initials = (nombre || "U")
+    .split(" ")
+    .map(w => w[0])
+    .slice(0,2)
+    .join("")
+    .toUpperCase();
+
+  el.textContent = initials;
 }
 
 
@@ -249,6 +272,77 @@ function renderBlobs(selector, files, allowDelete){
       </div>
     </div>
   `).join("");
+}
+
+
+/* =========================
+   DELETE
+========================= */
+async function deleteBlob(url){
+
+  if(!confirm("¿Eliminar archivo?")) return;
+
+  try{
+
+    const res = await fetch(Onion.config.API + "/tickets/" + currentItem.id,{
+      method:"PATCH",
+      headers:{
+        "Content-Type":"application/json",
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify({
+        deleteAttachments:[url]
+      })
+    });
+
+    if(!res.ok) throw new Error();
+
+    const json = await res.json();
+    currentItem = json?.ticket || json;
+
+    render(currentItem);
+
+  }catch{
+    showToast("❌ Error eliminando");
+  }
+
+}
+
+
+/* =========================
+   UPLOAD (🔥 LO QUE TE FALTABA)
+========================= */
+async function uploadFile(file){
+
+  const res = await fetch(Onion.config.API + "/uploads/upload-url",{
+    method:"POST",
+    headers:{
+      "Content-Type":"application/json",
+      ...getAuthHeaders()
+    },
+    body: JSON.stringify({
+      fileName:file.name,
+      fileType:file.type,
+      fileSize:file.size
+    })
+  });
+
+  const { uploadUrl, blobUrl } = await res.json();
+
+  await fetch(uploadUrl,{
+    method:"PUT",
+    headers:{
+      "x-ms-blob-type":"BlockBlob",
+      "Content-Type": file.type || "application/octet-stream"
+    },
+    body:file
+  });
+
+  return {
+    name:file.name,
+    url:blobUrl,
+    type:"user"
+  };
 }
 
 

@@ -126,7 +126,7 @@
 }
 
 /* =========================================================
-   🔥 GRID PERFECTO REAL
+   🔥 GRID PERFECTO
 ========================================================= */
 
 .panel-content.facturas thead tr,
@@ -155,7 +155,7 @@
 }
 
 .panel-content.facturas th{
-  padding:12px 14px; /* 🔥 IGUAL QUE TD */
+  padding:12px 14px;
   text-align:left;
   border-bottom:1px solid var(--panel-border);
   color:var(--dim);
@@ -166,11 +166,11 @@
 }
 
 /* =========================================================
-   CELLS
+   CELLS 🔥 FIX REAL
 ========================================================= */
 
 .panel-content.facturas td{
-  padding:12px 14px; /* 🔥 CLAVE: MISMO PADDING */
+  padding:12px 14px;
   border-bottom:1px solid var(--panel-border);
   font-size:13.5px;
   color:var(--text);
@@ -178,7 +178,8 @@
   display:flex;
   align-items:center;
 
-  min-width:0; /* 🔥 CLAVE PARA GRID */
+  height:64px;              /* 🔥 ALTURA FIJA */
+  min-width:0;
   overflow:hidden;
 }
 
@@ -275,12 +276,20 @@
 }
 
 /* =========================================================
-   EMPRESA SIN DATOS 🔥
+   EMPRESA SIN DATOS 🔥 PERFECT ALIGN
 ========================================================= */
+
+.panel-content.facturas .col-secondary{
+  display:flex;
+  align-items:center;
+  justify-content:flex-start;
+}
 
 .panel-content.facturas .col-secondary span{
   width:100%;
-  text-align:center;
+  display:flex;
+  align-items:center;
+  justify-content:center;
   opacity:.6;
 }
 

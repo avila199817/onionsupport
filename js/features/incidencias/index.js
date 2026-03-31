@@ -155,14 +155,16 @@ function applyFilters(){
 
   filteredItems = currentItems.filter(i => {
 
-    const title = (i.message || i.subject || "").toLowerCase();
+    const title = (i.subject || i.message || "").toLowerCase();
+    const usuario = (i.cliente?.nombre || "").toLowerCase();
+    const email = (i.cliente?.email || "").toLowerCase();
     const id = String(i.id || "").toLowerCase();
 
     const s = mapStatus(i.status);
     const p = mapPriority(i.priority);
 
     return (
-      (!search || title.includes(search) || id.includes(search)) &&
+      (!search || title.includes(search) || usuario.includes(search) || email.includes(search) || id.includes(search)) &&
       (!status || s === status) &&
       (!priority || p === priority)
     );
@@ -199,7 +201,7 @@ function setError(){
 }
 
 /* =========================
-   RENDER
+   RENDER 🔥
 ========================= */
 
 function render(items){
@@ -212,34 +214,44 @@ function render(items){
     const d = mapItem(i);
 
     return `
-      <tr data-id="${d.id}" style="cursor:pointer">
+<tr data-id="${d.id}">
 
-        <td>${d.id}</td>
+  <td class="col-id">${d.id}</td>
 
-        <td>${escapeHTML(d.title)}</td>
+  <td class="col-main">
+    <div class="cell-user">
+      <div class="table-avatar">
+        ${renderAvatar(d)}
+      </div>
+      <div class="user-info">
+        <span class="user-name">${escapeHTML(d.usuario)}</span>
+        <span class="user-sub">${escapeHTML(d.email)}</span>
+      </div>
+    </div>
+  </td>
 
-        <td>
-          <div class="cell-user">
-            <div class="table-avatar">
-              ${renderAvatar(d)}
-            </div>
-            <div class="user-info">
-              <span class="user-name">${escapeHTML(d.usuario)}</span>
-            </div>
-          </div>
-        </td>
+  <td class="col-main">${escapeHTML(d.title)}</td>
 
-        <td>${escapeHTML(d.tecnico)}</td>
+  <td class="col-secondary">${escapeHTML(d.tecnico)}</td>
 
-        <td><span class="badge ${d.estado.class}">${d.estado.label}</span></td>
+  <td class="col-status">
+    <span class="badge ${d.estado.class}">
+      ${d.estado.label}
+    </span>
+  </td>
 
-        <td><span class="badge ${d.prioridad.class}">${d.prioridad.label}</span></td>
+  <td class="col-status">
+    <span class="badge ${d.prioridad.class}">
+      ${d.prioridad.label}
+    </span>
+  </td>
 
-        <td>${d.fecha}</td>
-        <td>${d.fechaCierre}</td>
+  <td class="col-date">${d.fecha}</td>
 
-      </tr>
-    `;
+  <td class="col-date">${d.fechaCierre}</td>
+
+</tr>
+`;
 
   }).join("");
 
@@ -248,22 +260,25 @@ function render(items){
 }
 
 /* =========================
-   MAP
+   MAP 🔥
 ========================= */
 
 function mapItem(i){
 
   return {
     id: i.id || i.ticketId || "--",
+
     title: i.subject || i.message || "Sin título",
 
     usuario: i.cliente?.nombre || "Usuario",
+    email: i.cliente?.email || "-",
     tecnico: i.tecnico?.name || "-",
 
     avatar: i.cliente?.avatar || null,
 
     estado: getEstado(i),
     prioridad: getPrioridad(i),
+
     fecha: formatFecha(i.createdAt),
     fechaCierre: i.status === "closed"
       ? formatFecha(i.closedAt || (i._ts ? i._ts * 1000 : null))
@@ -273,7 +288,7 @@ function mapItem(i){
 }
 
 /* =========================
-   AVATAR PRO 🔥
+   AVATAR
 ========================= */
 
 function renderAvatar(d){
@@ -304,7 +319,7 @@ function renderAvatar(d){
 }
 
 /* =========================
-   AVATAR COLORS 🔥
+   COLORS
 ========================= */
 
 function hashString(str){

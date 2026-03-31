@@ -152,7 +152,7 @@ async function loadDashboardData(){
 
     const res = await Onion.fetch(API + "/dashboard");
 
-    const data = res?.data?.data;
+    const data = res?.data || {};
 
     if(!data){
       console.warn("⚠️ Dashboard sin data");

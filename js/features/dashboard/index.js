@@ -81,7 +81,7 @@ function buildYearData(evolucion){
 }
 
 /* =========================
-   🔥 RENDER BARRAS (FIX REAL)
+   🔥 RENDER BARRAS PRO
 ========================= */
 
 function renderYearRevenue(data){
@@ -96,16 +96,25 @@ function renderYearRevenue(data){
   const months = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
   const max = Math.max(...data, 1);
 
-  // 🔥 render limpio
-  container.innerHTML = data.map((value, i) => `
-    <div class="month">
-      <div class="bar"></div>
-      <span>${months[i]}</span>
-      <strong>${formatMoney(value)}</strong>
-    </div>
-  `).join("");
+  // 🔥 HTML alineado con CSS PRO
+  container.innerHTML = data.map((value, i) => {
 
-  // 🔥 ESPERAR A QUE EL DOM PINTE (CLAVE)
+    const isEmpty = value === 0;
+
+    return `
+      <div class="month ${isEmpty ? "empty" : ""}">
+        <div 
+          class="bar"
+          data-value="${formatMoney(value)}"
+          data-month="${months[i]}"
+          style="height:0%">
+        </div>
+      </div>
+    `;
+
+  }).join("");
+
+  // 🔥 ANIMACIÓN PROGRESIVA
   requestAnimationFrame(()=>{
 
     const bars = container.querySelectorAll(".bar");
@@ -115,14 +124,10 @@ function renderYearRevenue(data){
       const value = safe(data[i]);
       const percent = (value / max) * 100;
 
-      // 🔥 FORZAR BASE (evita 0 invisible)
-      bar.style.height = "0%";
-
-      // 🔥 doble frame = render seguro
       requestAnimationFrame(()=>{
         setTimeout(()=>{
-          bar.style.height = percent + "%";
-        }, i * 40); // delay progresivo pro
+          bar.style.height = (value === 0 ? 2 : percent) + "%";
+        }, i * 45);
       });
 
     });
@@ -139,7 +144,6 @@ async function loadDashboardData(){
   try {
 
     const res = await Onion.fetch(API + "/dashboard");
-
     const data = res?.data || {};
 
     if(!data){
@@ -177,7 +181,6 @@ async function loadDashboardData(){
   } catch(e){
 
     console.error("💥 Dashboard error:", e);
-
     renderYearRevenue(new Array(12).fill(0));
 
   }

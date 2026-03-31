@@ -4,7 +4,10 @@
   gap: 20px;
 }
 
-/* 🔥 CARD TOTAL */
+/* =========================
+   🔥 CARD TOTAL
+========================= */
+
 .card-total{
   padding: 24px;
   border-radius: 16px;
@@ -12,33 +15,77 @@
   border: 1px solid rgba(255,255,255,0.05);
 }
 
-.card-total-label{
+.card-total span{
   font-size: 13px;
   opacity: 0.7;
 }
 
-.card-total-value{
+.card-total strong{
+  display: block;
+  margin-top: 5px;
   font-size: 36px;
   font-weight: 700;
 }
 
-/* 🔥 CARD COLUMNAS */
-.card-year{
+/* =========================
+   🔥 CARD CHART
+========================= */
+
+.card-chart{
   padding: 20px;
   border-radius: 16px;
   background: #0f1222;
   border: 1px solid rgba(255,255,255,0.05);
 }
 
-.card-year-header{
-  margin-bottom: 15px;
+.chart-header{
+  margin-bottom: 10px;
 }
+
+/* =========================
+   🔥 AREA GRAFICO
+========================= */
+
+.chart-area{
+  position: relative;
+  height: 220px;
+  display: flex;
+  align-items: flex-end;
+}
+
+/* GRID DE REFERENCIA */
+
+.chart-grid{
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+
+  font-size: 10px;
+  opacity: 0.3;
+}
+
+.chart-grid span{
+  border-top: 1px dashed rgba(255,255,255,0.08);
+  padding-top: 2px;
+}
+
+/* =========================
+   🔥 BARRAS
+========================= */
 
 .year-grid{
   display: flex;
   align-items: flex-end;
-  height: 160px;
+  width: 100%;
+  height: 100%;
   gap: 10px;
+  z-index: 2;
 }
 
 .month{
@@ -47,22 +94,28 @@
   flex-direction: column;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
 }
 
 .bar{
   width: 100%;
   height: 0%;
   background: linear-gradient(180deg, #00c6ff, #0072ff);
-  border-radius: 6px;
-  transition: height 0.6s ease;
+  border-radius: 6px 6px 3px 3px;
+  transition: height 0.8s cubic-bezier(.2,.8,.2,1);
 }
+
+/* 🔥 hover pro */
+.month:hover .bar{
+  filter: brightness(1.2);
+  transform: scaleY(1.05);
+}
+
+/* =========================
+   🔥 LABELS
+========================= */
 
 .month span{
-  font-size: 12px;
+  margin-top: 6px;
+  font-size: 11px;
   opacity: 0.6;
-}
-
-.month strong{
-  font-size: 12px;
 }

@@ -182,8 +182,8 @@ function applyFilters(){
 
   filteredItems = currentItems.filter(f => {
 
-    const cliente = (f.cliente?.nombre || "").toLowerCase();
-    const empresa = (f.cliente?.empresa || "").toLowerCase();
+    const cliente = safeText(f.cliente?.nombre);
+    const empresa = safeText(f.cliente?.empresa);
     const id = String(f.numero || f.id || "").toLowerCase();
 
     return (
@@ -279,7 +279,7 @@ function render(items){
 }
 
 /* =========================
-   MAP (🔥 CLAVE AQUÍ)
+   MAP (🔥 DATA CLEAN)
 ========================= */
 
 function mapItem(f){
@@ -289,21 +289,21 @@ function mapItem(f){
     numero: f.numero || f.id,
 
     cliente: {
-      nombre:
+      nombre: cleanValue(
         f.cliente?.nombre ||
-        f.cliente?.nombreContacto ||
-        "Cliente",
+        f.cliente?.nombreContacto
+      , "Cliente"),
 
-      email:
-        f.cliente?.email ||   // backend
-        f.cliente?.correo ||  // por si acaso
-        "-",                  // fallback final
+      email: cleanValue(
+        f.cliente?.email ||
+        f.cliente?.correo
+      , "-")
     },
 
-    empresa:
+    empresa: cleanValue(
       f.cliente?.empresa ||
-      f.cliente?.razonSocial ||
-      "-",
+      f.cliente?.razonSocial
+    , "Sin empresa"),
 
     fecha: formatFecha(f.fecha),
     total: formatMoney(f.total),
@@ -314,7 +314,28 @@ function mapItem(f){
 }
 
 /* =========================
-   AVATARES
+   CLEANERS 🔥
+========================= */
+
+function cleanValue(val, fallback){
+
+  if(!val) return fallback;
+
+  const v = String(val).trim().toLowerCase();
+
+  if(v === "null" || v === "undefined" || v === "-"){
+    return fallback;
+  }
+
+  return val;
+}
+
+function safeText(val){
+  return String(cleanValue(val, "")).toLowerCase();
+}
+
+/* =========================
+   AVATAR
 ========================= */
 
 function renderAvatar(name){

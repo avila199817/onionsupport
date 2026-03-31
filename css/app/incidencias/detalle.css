@@ -1,5 +1,5 @@
 /* =========================================================
-   INCIDENCIA DETALLE — FINAL PRO SAAS (AJUSTADO UX)
+   INCIDENCIA DETALLE — FINAL PRO SAAS (CLON FACTURA UI)
 ========================================================= */
 
 
@@ -12,6 +12,7 @@
   flex:1;
   min-height:0;
   width:100%;
+  overflow:hidden;
 }
 
 
@@ -29,13 +30,13 @@
 /* =========================================================
    LEFT
 ========================================================= */
-.detalle-left{
+.incidencia-detalle .detalle-left{
   flex:1;
   min-width:0;
-
   display:flex;
   flex-direction:column;
   min-height:0;
+  overflow:hidden;
 }
 
 
@@ -46,176 +47,245 @@
   width:360px;
   min-width:360px;
   flex-shrink:0;
-
   display:flex;
   flex-direction:column;
-
   background:var(--panel-bg);
   border-left:1px solid var(--panel-border);
-
   min-height:0;
-  overflow:hidden;
 }
 
 
 /* =========================================================
-   SIDEBAR
+   SIDEBAR CONTENT
 ========================================================= */
 .incidencia-detalle .detalle-sidebar{
-  flex:1;
-  min-height:0;
-
   display:flex;
   flex-direction:column;
-
-  padding:16px;
-  background:var(--panel-bg);
-
+  flex:1;
+  min-height:0;
+  padding:18px;
   overflow:hidden;
-  gap:16px;
+  gap:18px;
 }
 
-.sidebar-title{
-  font-size:13px;
-  font-weight:600;
-  color:var(--dim);
+.incidencia-detalle .sidebar-section{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
 }
 
-.sidebar-divider{
+.incidencia-detalle .sidebar-divider{
   height:1px;
   background:var(--panel-border);
+  margin:6px 0;
+}
+
+.incidencia-detalle .sidebar-title{
+  font-size:var(--font-xs);
+  font-weight:600;
+  color:var(--dim);
+  letter-spacing:.4px;
+  text-transform:uppercase;
 }
 
 
 /* =========================================================
    BLOBS
 ========================================================= */
-.detalle-blobs{
-  flex:1;
-  overflow:auto;
-
+.incidencia-detalle .detalle-blobs{
   display:flex;
   flex-direction:column;
   gap:10px;
+  overflow:auto;
+  padding-right:6px;
 }
 
-.detalle-blobs::-webkit-scrollbar{
+.incidencia-detalle .detalle-blobs::-webkit-scrollbar{
   width:6px;
 }
 
-.detalle-blobs::-webkit-scrollbar-thumb{
-  background:rgba(255,255,255,0.1);
+.incidencia-detalle .detalle-blobs::-webkit-scrollbar-thumb{
+  background:var(--scrollbar-thumb);
   border-radius:6px;
 }
 
 
 /* =========================================================
-   HEADER
+   BLOB ITEM
 ========================================================= */
-.filters-row{
+.incidencia-detalle .blob-item{
   display:flex;
   align-items:center;
+  justify-content:space-between;
 
-  padding:14px 40px;
+  padding:12px 14px;
+  border-radius:12px;
+
+  border:1px solid var(--card-border);
+  background:var(--card-bg);
+
+  transition:all .15s ease;
+}
+
+.incidencia-detalle .blob-item:hover{
+  border-color:var(--accent);
+  transform:translateY(-2px);
+  box-shadow:0 8px 18px rgba(0,0,0,0.25);
+}
+
+.incidencia-detalle .blob-item span{
+  max-width:60%;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.incidencia-detalle .blob-actions{
+  display:flex;
+  gap:8px;
+}
+
+
+/* =========================================================
+   HEADER (🔥 CLON FACTURA)
+========================================================= */
+.incidencia-detalle .filters-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+
+  padding:14px 30px;
 
   background:var(--panel-bg);
   border-bottom:1px solid var(--panel-border);
 }
 
-#btn-back{
-  margin-left:auto;
-
+.incidencia-detalle #btn-back{
   background:none;
   border:none;
-
   color:var(--text);
   cursor:pointer;
-
   font-size:13px;
-  font-weight:500;
-
-  opacity:.8;
-  transition:.15s;
-
-  padding:6px 10px;
+  opacity:.7;
 }
 
-#btn-back:hover{
+.incidencia-detalle #btn-back:hover{
   opacity:1;
   transform:translateX(-2px);
 }
 
 
 /* =========================================================
-   BODY
+   USER HEADER (🔥 EXACTO FACTURA)
 ========================================================= */
-.detalle-body{
-  flex:1;
-  min-height:0;
+.incidencia-detalle .detalle-user{
+  display:flex;
+  align-items:center;
+  gap:12px;
+}
+
+.incidencia-detalle .table-avatar{
+  width:38px;
+  height:38px;
+  border-radius:50%;
+  overflow:hidden;
 
   display:flex;
-  padding:30px 40px;
+  align-items:center;
+  justify-content:center;
 
+  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
+  color:#fff;
+
+  font-size:13px;
+  font-weight:600;
+}
+
+.incidencia-detalle .table-avatar img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+}
+
+.incidencia-detalle .user-info{
+  display:flex;
+  flex-direction:column;
+}
+
+.incidencia-detalle .detalle-meta span{
+  font-size:11px;
+  opacity:.7;
+}
+
+
+/* =========================================================
+   BODY
+========================================================= */
+.incidencia-detalle .detalle-body{
+  flex:1;
+  display:flex;
+  flex-direction:column;
+  padding:26px 30px;
   overflow:auto;
+}
+
+.incidencia-detalle .detalle-body::-webkit-scrollbar{
+  width:6px;
+}
+
+.incidencia-detalle .detalle-body::-webkit-scrollbar-thumb{
+  background:var(--scrollbar-thumb);
+  border-radius:6px;
 }
 
 
 /* =========================================================
    GRID
 ========================================================= */
-.form-grid{
+.incidencia-detalle .form-grid{
   display:grid;
-  grid-template-columns:repeat(2,1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap:18px;
-  width:100%;
 }
 
 
 /* =========================================================
    ITEMS
 ========================================================= */
-.detalle-item{
+.incidencia-detalle .detalle-item{
   display:flex;
   flex-direction:column;
   gap:6px;
 }
 
-.detalle-label{
-  font-size:13px;
+.incidencia-detalle .detalle-label{
+  font-size:var(--font-xs);
   color:var(--dim);
+  text-transform:uppercase;
 }
 
-.detalle-value{
-  font-size:14px;
+.incidencia-detalle .detalle-value{
+  font-size:var(--font-base);
   font-weight:500;
-  color:var(--text);
 }
 
 
 /* =========================================================
-   MENSAJE 🔥 (MÁS PEQUEÑO Y MEJOR UX)
+   MENSAJE (🔥 AJUSTADO)
 ========================================================= */
-.detalle-editable{
+.incidencia-detalle .detalle-editable{
   background:color-mix(in srgb, var(--card-bg), #000 10%);
   border:1px solid var(--card-border);
-  border-radius:12px;
+  border-radius:10px;
 
-  padding:12px 14px;
-
-  min-height:120px; /* 🔽 antes 180 */
+  padding:12px;
+  min-height:120px;
   max-height:220px;
 
   overflow:auto;
-
-  transition:.15s;
 }
 
-.detalle-editable:hover{
-  border-color:var(--accent);
-}
-
-.detalle-editable:focus{
-  outline:none;
+.incidencia-detalle .detalle-editable[contenteditable="true"]{
   border-color:var(--accent);
   box-shadow:0 0 0 2px rgba(99,102,241,0.25);
 }
@@ -224,109 +294,54 @@
 /* =========================================================
    SELECT
 ========================================================= */
-.detalle-select{
-  padding:14px 16px;
+.incidencia-detalle .detalle-select{
+  margin-top:6px;
+  padding:10px 12px;
 
-  border-radius:12px;
+  border-radius:10px;
   border:1px solid var(--card-border);
 
-  background:color-mix(in srgb, var(--card-bg), #000 10%);
-  color:var(--text);
-
-  cursor:pointer;
-}
-
-.detalle-select:focus{
-  outline:none;
-  border-color:var(--accent);
-  box-shadow:0 0 0 2px rgba(99,102,241,0.25);
-}
-
-
-/* =========================================================
-   USER
-========================================================= */
-.detalle-user{
-  display:flex;
-  align-items:center;
-  gap:10px;
-}
-
-.table-avatar{
-  width:36px;
-  height:36px;
-  border-radius:50%;
-  overflow:hidden;
-  background:#ddd;
+  background:color-mix(in srgb, var(--card-bg), #000 15%);
+  color:#fff;
 }
 
 
 /* =========================================================
    FILES
 ========================================================= */
-.incidencia-files{
-  display:flex;
-  flex-direction:column;
-  align-items:flex-start;
-  gap:6px;
-}
-
-#btn-attach{
-  background:none;
-  border:none;
-
-  color:var(--accent);
-  cursor:pointer;
-
-  font-size:13px;
-}
-
-#btn-attach:hover{
-  text-decoration:underline;
-}
-
-#file-list{
-  font-size:12px;
-  color:var(--dim);
-}
-
-
-/* =========================================================
-   FILE ITEMS
-========================================================= */
-.file-list{
-  margin-top:10px;
+.incidencia-detalle .incidencia-files{
   display:flex;
   flex-direction:column;
   gap:8px;
 }
 
-.file-item{
+.incidencia-detalle #btn-attach{
+  background:none;
+  border:none;
+  color:var(--accent);
+  cursor:pointer;
+}
+
+.incidencia-detalle .file-list{
   display:flex;
-  justify-content:space-between;
-  align-items:center;
-
-  padding:8px 10px;
-  border-radius:10px;
-
-  background:color-mix(in srgb, var(--card-bg), #000 10%);
-  border:1px solid var(--card-border);
+  flex-direction:column;
+  gap:6px;
 }
 
 
 /* =========================================================
-   FOOTER 🔥 (BOTÓN MÁS ARRIBA)
+   FOOTER (🔥 MEJORADO)
 ========================================================= */
-.detalle-footer{
+.incidencia-detalle .detalle-footer{
+  margin-top:32px;
+  padding-bottom:20px;
+
   display:flex;
   justify-content:space-between;
   align-items:center;
-
-  margin-top:40px; /* 🔼 más aire arriba */
-  padding-bottom:20px; /* 🔼 separa del borde */
 }
 
-.detalle-hint{
+.incidencia-detalle .detalle-hint{
   font-size:12px;
   color:var(--dim);
 }
@@ -335,8 +350,8 @@
 /* =========================================================
    BOTÓN
 ========================================================= */
-#btn-save{
-  padding:13px 26px;
+.incidencia-detalle #btn-save{
+  padding:12px 22px;
   border-radius:12px;
 
   background:linear-gradient(135deg,var(--accent),var(--accent-hover));
@@ -345,12 +360,7 @@
   border:none;
   cursor:pointer;
 
-  box-shadow:0 10px 24px rgba(99,102,241,0.35);
-  transition:.15s;
-}
-
-#btn-save:hover{
-  transform:translateY(-1px);
+  font-weight:600;
 }
 
 
@@ -358,7 +368,13 @@
    RESPONSIVE
 ========================================================= */
 @media (max-width:1100px){
+
   .incidencia-detalle .detalle-right{
     display:none;
   }
+
+  .incidencia-detalle .detalle-body{
+    padding:20px;
+  }
+
 }

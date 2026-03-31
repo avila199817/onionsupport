@@ -124,17 +124,9 @@
   color:var(--dim);
 }
 
-.panel-content.facturas .col-main{
-  width:30%;
-}
-
-.panel-content.facturas .col-secondary{
-  width:26%;
-}
-
-.panel-content.facturas .col-date{
-  width:120px;
-}
+.panel-content.facturas .col-main{ width:30%; }
+.panel-content.facturas .col-secondary{ width:26%; }
+.panel-content.facturas .col-date{ width:120px; }
 
 .panel-content.facturas .col-importe{
   width:130px;
@@ -142,13 +134,8 @@
   font-variant-numeric:tabular-nums;
 }
 
-.panel-content.facturas .col-status{
-  width:110px;
-}
-
-.panel-content.facturas .col-actions{
-  width:200px;
-}
+.panel-content.facturas .col-status{ width:110px; }
+.panel-content.facturas .col-actions{ width:200px; }
 
 /* =========================================================
    ROWS
@@ -169,7 +156,7 @@
 }
 
 /* =========================================================
-   USER CELL (CLIENTE + EMPRESA)
+   USER CELL
 ========================================================= */
 
 .panel-content.facturas .cell-user{
@@ -234,7 +221,7 @@
 }
 
 /* =========================================================
-   ACTIONS 🔥
+   ACTIONS
 ========================================================= */
 
 .panel-content.facturas .actions{
@@ -260,7 +247,6 @@
   border-color:var(--accent);
 }
 
-/* 🔥 BOTÓN PAGAR DESTACADO */
 .panel-content.facturas .btn-action.pay{
   background:color-mix(in srgb, var(--warning), transparent 85%);
   color:var(--warning);
@@ -285,64 +271,112 @@
   border-radius:6px;
 }
 
-/* =========================
-   SKELETON FACTURAS PRO
-========================= */
+/* =========================================================
+   🔥 SKELETON ULTRA PRO (NIVEL SAAS TOP)
+========================================================= */
 
 .loading-row td{
-  padding:16px;
+  padding:0 !important;
 }
 
 .skeleton-table{
+  padding:16px;
   display:flex;
   flex-direction:column;
   gap:14px;
 }
 
+/* FILA */
 .skeleton-row{
   display:grid;
   grid-template-columns:
-    130px   /* ID */
-    2fr     /* Cliente */
-    1.5fr   /* Empresa */
-    120px   /* Fecha */
-    130px   /* Importe */
-    100px   /* Pago */
-    160px;  /* Acciones */
+    130px
+    2fr
+    1.5fr
+    120px
+    130px
+    100px
+    160px;
   gap:12px;
   align-items:center;
+  opacity:.9;
 }
 
-/* =========================
-   BLOQUES
-========================= */
-
+/* BLOQUES BASE */
 .sk{
+  position:relative;
   height:14px;
-  border-radius:6px;
+  border-radius:8px;
+  overflow:hidden;
+
   background:linear-gradient(
-    90deg,
-    rgba(255,255,255,0.05) 25%,
-    rgba(255,255,255,0.12) 50%,
-    rgba(255,255,255,0.05) 75%
+    100deg,
+    #1c1c1c 20%,
+    #2a2a2a 40%,
+    #1c1c1c 60%
   );
+
   background-size:200% 100%;
-  animation:skeleton-loading 1.2s infinite linear;
+  animation:shimmer 1.3s infinite linear;
 }
 
-/* tamaños específicos */
+/* BRILLO DINÁMICO PRO */
+.sk::after{
+  content:"";
+  position:absolute;
+  inset:0;
 
+  background:linear-gradient(
+    120deg,
+    transparent 30%,
+    rgba(255,255,255,0.08),
+    transparent 70%
+  );
+
+  animation:shine 2s infinite;
+}
+
+/* GLOW SUTIL */
+.sk::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  border-radius:inherit;
+  box-shadow:0 0 10px rgba(255,255,255,0.03);
+}
+
+/* TAMAÑOS */
 .sk.id{ width:80px; }
-.sk.user{ width:70%; }
+.sk.user{ width:70%; height:16px; }
 .sk.company{ width:60%; }
 .sk.date{ width:90px; }
 .sk.amount{ width:80px; }
 .sk.status{ width:70px; }
-.sk.actions{ width:120px; height:20px; }
+.sk.actions{ width:120px; height:20px; border-radius:10px; }
 
-/* animación */
+/* ANIMACIONES */
+@keyframes shimmer{
+  0%{ background-position:-200% 0; }
+  100%{ background-position:200% 0; }
+}
 
-@keyframes skeleton-loading{
-  0%{ background-position:200% 0; }
-  100%{ background-position:-200% 0; }
+@keyframes shine{
+  0%{ transform:translateX(-100%); }
+  100%{ transform:translateX(100%); }
+}
+
+/* APARICIÓN SUAVE */
+.loading-row{
+  animation:fadeIn .3s ease;
+}
+
+@keyframes fadeIn{
+  from{
+    opacity:0;
+    transform:translateY(4px);
+  }
+  to{
+    opacity:1;
+    transform:translateY(0);
+  }
 }

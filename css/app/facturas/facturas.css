@@ -126,7 +126,7 @@
 }
 
 /* =========================================================
-   GRID
+   GRID 🔥 FIX ALINEACIÓN
 ========================================================= */
 
 .panel-content.facturas thead tr,
@@ -134,8 +134,8 @@
   display:grid;
   grid-template-columns:
     120px
-    2.4fr
-    2fr
+    minmax(0, 2.4fr)
+    minmax(0, 2fr)
     130px
     130px
     120px
@@ -180,12 +180,13 @@
 
   height:64px;
   min-width:0;
+  width:100%;
 
-  overflow:visible; /* 🔥 CLAVE: NO cortar aquí */
+  overflow:visible;
 }
 
 /* =========================================================
-   COLUMN ALIGN
+   COLUMN ALIGN 🔥 FIX
 ========================================================= */
 
 .panel-content.facturas .col-id{
@@ -200,14 +201,17 @@
 .panel-content.facturas .col-importe{
   justify-content:flex-end;
   font-variant-numeric:tabular-nums;
+  width:100%;
 }
 
 .panel-content.facturas .col-status{
   justify-content:center;
+  width:100%;
 }
 
 .panel-content.facturas .col-actions{
   justify-content:flex-end;
+  width:100%;
 }
 
 /* =========================================================
@@ -229,7 +233,7 @@
 }
 
 /* =========================================================
-   USER CELL (CLIENTE + EMPRESA)
+   USER CELL
 ========================================================= */
 
 .panel-content.facturas .cell-user{
@@ -259,16 +263,13 @@
   display:flex;
   flex-direction:column;
   min-width:0;
-  flex:1; /* 🔥 CLAVE */
+  flex:1;
 }
-
-/* 🔥 MISMO ESTILO PARA CLIENTE Y EMPRESA */
 
 .panel-content.facturas .user-name{
   font-weight:600;
   font-size:13.5px;
   color:var(--text);
-
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
@@ -277,14 +278,13 @@
 .panel-content.facturas .user-sub{
   font-size:11px;
   color:var(--dim);
-
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
 }
 
 /* =========================================================
-   EMPRESA ALIGN
+   EMPRESA
 ========================================================= */
 
 .panel-content.facturas .col-secondary{
@@ -317,14 +317,20 @@
 }
 
 /* =========================================================
-   ACTIONS
+   ACTIONS 🔥 FIX
 ========================================================= */
 
 .panel-content.facturas .actions{
   display:flex;
   gap:6px;
   align-items:center;
+  justify-content:flex-end;
+  width:100%;
 }
+
+/* =========================================================
+   BUTTONS
+========================================================= */
 
 .panel-content.facturas .btn-action{
   padding:6px 10px;

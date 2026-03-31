@@ -1,21 +1,19 @@
 /* =========================================================
-   COMMAND CENTER — GOD MODE
+   DASHBOARD V2 — COMMAND CENTER GOD MODE
 ========================================================= */
 
-.panel-content.command-center{
+.panel-content.dashboard.cc-v2{
+  position:relative;
   display:flex;
   flex-direction:column;
   height:100%;
   width:100%;
-  position:relative;
-  background:radial-gradient(circle at top, #0f172a, #020617);
-  color:var(--text);
   overflow:hidden;
 }
 
-/* =========================================================
+/* =========================
    LOADER
-========================================================= */
+========================= */
 
 .dashboard-loading{
   position:absolute;
@@ -23,274 +21,291 @@
   display:flex;
   align-items:center;
   justify-content:center;
-  background:rgba(2,6,23,0.65);
-  backdrop-filter:blur(6px);
-  z-index:50;
+  background:rgba(10,10,10,0.5);
+  backdrop-filter:blur(4px);
+  z-index:20;
   opacity:0;
   pointer-events:none;
-  transition:opacity .2s ease;
+  transition:.2s ease;
 }
 
-.panel-content.command-center.loading .dashboard-loading{
+.panel-content.dashboard.cc-v2.loading .dashboard-loading{
   opacity:1;
   pointer-events:auto;
 }
 
 .dashboard-spinner{
-  width:46px;
-  height:46px;
+  width:42px;
+  height:42px;
   border-radius:50%;
-  border:3px solid rgba(255,255,255,0.1);
+  border:3px solid rgba(255,255,255,0.15);
   border-top-color:var(--accent);
-  animation:spin .7s linear infinite;
+  animation:spin .8s linear infinite;
 }
 
 @keyframes spin{
   to{ transform:rotate(360deg); }
 }
 
-/* =========================================================
+/* =========================
    CONTAINER
-========================================================= */
+========================= */
 
-.cc-container{
+.ccv2-container{
   display:flex;
   flex-direction:column;
-  gap:20px;
-  padding:20px;
-  height:100%;
+  gap:24px;
+  padding:24px 28px;
+  max-width:1400px;
+  width:100%;
+  margin:0 auto;
 }
 
-/* =========================================================
+/* =========================
    HEADER
-========================================================= */
+========================= */
 
-.cc-header{
+.ccv2-header{
   display:flex;
-  justify-content:space-between;
   align-items:center;
+  justify-content:space-between;
 }
 
-.cc-title h1{
-  font-size:20px;
+.ccv2-title h1{
+  font-size:22px;
   font-weight:600;
 }
 
-.cc-title span{
+.ccv2-title span{
   font-size:12px;
   color:var(--dim);
 }
 
-.cc-status-live{
+.ccv2-live{
   display:flex;
   align-items:center;
   gap:8px;
-  font-size:11px;
+  font-size:12px;
   color:#22c55e;
-  letter-spacing:.5px;
 }
 
-.cc-status-live .dot{
+.ccv2-live .dot{
   width:8px;
   height:8px;
   border-radius:50%;
   background:#22c55e;
-  box-shadow:0 0 8px #22c55e;
-  animation:pulse 1.5s infinite;
+  box-shadow:0 0 10px #22c55e;
 }
 
-@keyframes pulse{
-  0%{opacity:1}
-  50%{opacity:.4}
-  100%{opacity:1}
-}
+/* =========================
+   HERO (🔥 FOCO)
+========================= */
 
-/* =========================================================
-   GRID
-========================================================= */
-
-.cc-grid{
-  display:grid;
-  grid-template-columns:200px 1fr 200px;
-  gap:18px;
-  flex:1;
-}
-
-/* =========================================================
-   SIDE PANELS
-========================================================= */
-
-.cc-side{
+.ccv2-hero{
+  position:relative;
   display:flex;
   flex-direction:column;
-  gap:14px;
+  gap:20px;
+
+  padding:28px;
+  border-radius:18px;
+
+  background:linear-gradient(
+    135deg,
+    rgba(99,102,241,0.15),
+    rgba(99,102,241,0.05)
+  );
+
+  border:1px solid rgba(99,102,241,0.25);
+
+  box-shadow:
+    0 20px 60px rgba(0,0,0,0.6),
+    inset 0 1px 0 rgba(255,255,255,0.05);
 }
 
-.cc-block{
-  background:rgba(15,23,42,0.6);
-  border:1px solid rgba(255,255,255,0.05);
-  border-radius:12px;
-  padding:14px;
-  backdrop-filter:blur(6px);
-  transition:.2s ease;
+/* glow suave */
+.ccv2-hero::before{
+  content:"";
+  position:absolute;
+  inset:-1px;
+  border-radius:18px;
+  background:linear-gradient(135deg,var(--accent),transparent 60%);
+  opacity:.15;
+  z-index:0;
 }
 
-.cc-block:hover{
-  border-color:rgba(99,102,241,0.4);
-  box-shadow:0 0 12px rgba(99,102,241,0.2);
+.ccv2-hero-main{
+  position:relative;
+  z-index:1;
 }
 
-.cc-block span{
-  font-size:11px;
+.ccv2-hero-main span{
+  font-size:13px;
   color:var(--dim);
 }
 
-.cc-block strong{
+.ccv2-hero-main strong{
   display:block;
-  font-size:20px;
+  font-size:42px;
+  font-weight:700;
   margin-top:4px;
 }
 
-/* =========================================================
-   CORE
-========================================================= */
+/* =========================
+   MINI STATS
+========================= */
 
-.cc-core{
+.ccv2-hero-stats{
+  display:flex;
+  gap:16px;
+  flex-wrap:wrap;
+}
+
+.mini-stat{
+  flex:1;
+  min-width:120px;
+
+  padding:14px 16px;
+  border-radius:12px;
+
+  background:rgba(0,0,0,0.35);
+  border:1px solid var(--card-border);
+
   display:flex;
   flex-direction:column;
-  gap:16px;
+  gap:4px;
 }
 
-/* KPI PRINCIPAL */
-
-.cc-core-main{
-  background:linear-gradient(135deg, rgba(99,102,241,0.2), rgba(99,102,241,0.05));
-  border:1px solid rgba(99,102,241,0.4);
-  border-radius:16px;
-  padding:20px;
-  backdrop-filter:blur(8px);
-  box-shadow:0 0 25px rgba(99,102,241,0.25);
-}
-
-.cc-kpi.big strong{
-  font-size:34px;
-  font-weight:700;
-}
-
-.cc-kpi span{
+.mini-stat span{
   font-size:11px;
   color:var(--dim);
 }
 
-.cc-kpi-row{
+.mini-stat strong{
+  font-size:18px;
+  font-weight:600;
+}
+
+/* =========================
+   STATUS STRIP
+========================= */
+
+.ccv2-strip{
   display:flex;
-  justify-content:space-between;
-  margin-top:18px;
+  flex-wrap:wrap;
   gap:10px;
 }
 
-.cc-kpi{
-  flex:1;
-  background:rgba(2,6,23,0.6);
+.strip-item{
+  padding:10px 14px;
   border-radius:10px;
-  padding:10px;
-  text-align:center;
+
+  background:var(--card-bg);
+  border:1px solid var(--card-border);
+
+  font-size:12px;
+  color:var(--dim);
+
+  display:flex;
+  align-items:center;
+  gap:6px;
+
+  transition:.15s ease;
 }
 
-/* =========================================================
-   ALERTS
-========================================================= */
+.strip-item strong{
+  color:var(--text);
+  font-weight:500;
+}
 
-.cc-alerts{
+.strip-item:hover{
+  background:color-mix(in srgb, var(--accent), transparent 90%);
+  border-color:var(--accent);
+}
+
+/* =========================
+   ACTIONS FLOAT
+========================= */
+
+.ccv2-actions{
   display:flex;
   gap:10px;
   flex-wrap:wrap;
 }
 
-.cc-alert{
-  background:rgba(15,23,42,0.6);
-  border:1px solid rgba(255,255,255,0.05);
-  padding:8px 12px;
-  border-radius:8px;
-  font-size:12px;
-}
-
-.cc-alert.danger{
-  border-color:#ef4444;
-  color:#ef4444;
-  box-shadow:0 0 10px rgba(239,68,68,0.3);
-}
-
-/* =========================================================
-   ACTION BUTTONS
-========================================================= */
-
-.cc-action{
-  padding:12px;
+.ccv2-actions button{
+  padding:10px 14px;
   border-radius:10px;
-  border:1px solid rgba(255,255,255,0.08);
-  background:rgba(15,23,42,0.6);
+
+  background:var(--card-bg);
+  border:1px solid var(--card-border);
+
   color:var(--text);
   font-size:12px;
   cursor:pointer;
-  transition:.2s ease;
+
+  transition:.15s ease;
 }
 
-.cc-action:hover{
-  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
-  color:#fff;
+.ccv2-actions button:hover{
+  background:color-mix(in srgb, var(--accent), transparent 85%);
   border-color:var(--accent);
-  box-shadow:0 0 15px rgba(99,102,241,0.4);
+  color:var(--accent);
 }
 
-/* =========================================================
-   ACTIVITY STREAM
-========================================================= */
+/* =========================
+   ACTIVITY
+========================= */
 
-.cc-activity{
-  background:rgba(2,6,23,0.6);
-  border:1px solid rgba(255,255,255,0.05);
-  border-radius:12px;
-  padding:14px;
+.ccv2-activity{
+  margin-top:10px;
+  border-radius:14px;
+  padding:16px;
+
+  background:var(--panel-bg);
+  border:1px solid var(--panel-border);
 }
 
-.cc-activity-header{
-  font-size:12px;
-  color:var(--dim);
-  margin-bottom:10px;
-}
-
-.cc-activity-stream{
-  display:flex;
-  gap:12px;
-  overflow-x:auto;
-}
-
-.cc-activity-item{
-  min-width:220px;
-  background:rgba(15,23,42,0.6);
-  border-radius:10px;
-  padding:10px;
-}
-
-.cc-activity-title{
+.ccv2-activity-header{
   font-size:13px;
-}
-
-.cc-activity-meta{
-  font-size:11px;
+  margin-bottom:12px;
   color:var(--dim);
 }
 
-/* =========================================================
-   SCROLL
-========================================================= */
-
-.cc-activity-stream::-webkit-scrollbar{
-  height:6px;
+.ccv2-activity-list{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
 }
 
-.cc-activity-stream::-webkit-scrollbar-thumb{
-  background:var(--scrollbar-thumb);
-  border-radius:6px;
+.ccv2-activity-item{
+  padding:10px 12px;
+  border-radius:10px;
+
+  background:var(--card-bg);
+  border:1px solid var(--card-border);
+
+  display:flex;
+  justify-content:space-between;
+  font-size:12px;
+}
+
+.ccv2-activity-item span{
+  color:var(--dim);
+}
+
+/* =========================
+   RESPONSIVE
+========================= */
+
+@media (max-width:1024px){
+
+  .ccv2-container{
+    padding:18px;
+  }
+
+  .ccv2-hero-main strong{
+    font-size:32px;
+  }
+
 }

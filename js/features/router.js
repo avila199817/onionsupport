@@ -87,7 +87,7 @@
 
     "/clientes": {
       page: "/app/views/clientes/index.html",
-      style: "/css/app/generic.css",
+      style: "/css/app/clientes/clientes.css",
       script: "/js/features/clientes/index.js",
       title: "Clientes"
     },

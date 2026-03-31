@@ -1,14 +1,13 @@
 /* =========================================================
-   DASHBOARD V2 — COMMAND CENTER GOD MODE
+   DASHBOARD — PRO SAAS (STEVE JOBS MODE)
 ========================================================= */
 
-.panel-content.dashboard.cc-v2{
-  position:relative;
+.panel-content.dashboard.pro-saas{
   display:flex;
   flex-direction:column;
   height:100%;
   width:100%;
-  overflow:hidden;
+  position:relative;
 }
 
 /* =========================
@@ -29,7 +28,7 @@
   transition:.2s ease;
 }
 
-.panel-content.dashboard.cc-v2.loading .dashboard-loading{
+.panel-content.dashboard.loading .dashboard-loading{
   opacity:1;
   pointer-events:auto;
 }
@@ -51,37 +50,37 @@
    CONTAINER
 ========================= */
 
-.ccv2-container{
+.dashboard-container{
   display:flex;
   flex-direction:column;
-  gap:24px;
-  padding:24px 28px;
+  gap:28px;
+  padding:28px 32px;
   max-width:1400px;
-  width:100%;
   margin:0 auto;
+  width:100%;
 }
 
 /* =========================
    HEADER
 ========================= */
 
-.ccv2-header{
+.dashboard-header{
   display:flex;
-  align-items:center;
   justify-content:space-between;
+  align-items:center;
 }
 
-.ccv2-title h1{
-  font-size:22px;
+.dashboard-title h1{
+  font-size:20px;
   font-weight:600;
 }
 
-.ccv2-title span{
+.dashboard-title span{
   font-size:12px;
   color:var(--dim);
 }
 
-.ccv2-live{
+.dashboard-live{
   display:flex;
   align-items:center;
   gap:8px;
@@ -89,108 +88,56 @@
   color:#22c55e;
 }
 
-.ccv2-live .dot{
+.dashboard-live .dot{
   width:8px;
   height:8px;
   border-radius:50%;
   background:#22c55e;
-  box-shadow:0 0 10px #22c55e;
+  box-shadow:0 0 8px #22c55e;
 }
 
 /* =========================
-   HERO (🔥 FOCO)
+   HERO (🔥 FOCO ABSOLUTO)
 ========================= */
 
-.ccv2-hero{
-  position:relative;
+.dashboard-hero{
   display:flex;
   flex-direction:column;
-  gap:20px;
+  align-items:center;
+  justify-content:center;
 
-  padding:28px;
-  border-radius:18px;
+  padding:48px 20px;
+
+  border-radius:20px;
 
   background:linear-gradient(
     135deg,
-    rgba(99,102,241,0.15),
-    rgba(99,102,241,0.05)
+    rgba(99,102,241,0.12),
+    rgba(99,102,241,0.04)
   );
 
   border:1px solid rgba(99,102,241,0.25);
 
-  box-shadow:
-    0 20px 60px rgba(0,0,0,0.6),
-    inset 0 1px 0 rgba(255,255,255,0.05);
+  text-align:center;
 }
 
-/* glow suave */
-.ccv2-hero::before{
-  content:"";
-  position:absolute;
-  inset:-1px;
-  border-radius:18px;
-  background:linear-gradient(135deg,var(--accent),transparent 60%);
-  opacity:.15;
-  z-index:0;
-}
-
-.ccv2-hero-main{
-  position:relative;
-  z-index:1;
-}
-
-.ccv2-hero-main span{
+.hero-label{
   font-size:13px;
   color:var(--dim);
+  margin-bottom:6px;
 }
 
-.ccv2-hero-main strong{
-  display:block;
-  font-size:42px;
+.hero-value{
+  font-size:48px;
   font-weight:700;
-  margin-top:4px;
-}
-
-/* =========================
-   MINI STATS
-========================= */
-
-.ccv2-hero-stats{
-  display:flex;
-  gap:16px;
-  flex-wrap:wrap;
-}
-
-.mini-stat{
-  flex:1;
-  min-width:120px;
-
-  padding:14px 16px;
-  border-radius:12px;
-
-  background:rgba(0,0,0,0.35);
-  border:1px solid var(--card-border);
-
-  display:flex;
-  flex-direction:column;
-  gap:4px;
-}
-
-.mini-stat span{
-  font-size:11px;
-  color:var(--dim);
-}
-
-.mini-stat strong{
-  font-size:18px;
-  font-weight:600;
+  letter-spacing:-1px;
 }
 
 /* =========================
    STATUS STRIP
 ========================= */
 
-.ccv2-strip{
+.dashboard-strip{
   display:flex;
   flex-wrap:wrap;
   gap:10px;
@@ -219,66 +166,89 @@
 }
 
 .strip-item:hover{
-  background:color-mix(in srgb, var(--accent), transparent 90%);
   border-color:var(--accent);
+  color:var(--accent);
 }
 
 /* =========================
-   ACTIONS FLOAT
+   YEAR REVENUE
 ========================= */
 
-.ccv2-actions{
-  display:flex;
-  gap:10px;
-  flex-wrap:wrap;
+.year-revenue{
+  padding:20px;
+  border-radius:16px;
+  background:var(--panel-bg);
+  border:1px solid var(--panel-border);
 }
 
-.ccv2-actions button{
-  padding:10px 14px;
-  border-radius:10px;
+.year-header h2{
+  font-size:15px;
+  margin-bottom:14px;
+}
 
+/* GRID */
+.year-grid{
+  display:grid;
+  grid-template-columns:repeat(12, 1fr);
+  gap:10px;
+}
+
+/* MES */
+.month{
+  display:flex;
+  flex-direction:column;
+  justify-content:space-between;
+
+  height:90px;
+  padding:10px;
+
+  border-radius:10px;
   background:var(--card-bg);
   border:1px solid var(--card-border);
-
-  color:var(--text);
-  font-size:12px;
-  cursor:pointer;
 
   transition:.15s ease;
 }
 
-.ccv2-actions button:hover{
-  background:color-mix(in srgb, var(--accent), transparent 85%);
+.month span{
+  font-size:11px;
+  color:var(--dim);
+}
+
+.month strong{
+  font-size:13px;
+  font-weight:600;
+}
+
+/* HOVER */
+.month:hover{
+  transform:translateY(-2px);
   border-color:var(--accent);
-  color:var(--accent);
 }
 
 /* =========================
    ACTIVITY
 ========================= */
 
-.ccv2-activity{
-  margin-top:10px;
+.dashboard-activity{
+  padding:18px;
   border-radius:14px;
-  padding:16px;
-
   background:var(--panel-bg);
   border:1px solid var(--panel-border);
 }
 
-.ccv2-activity-header{
+.activity-header{
   font-size:13px;
-  margin-bottom:12px;
   color:var(--dim);
+  margin-bottom:10px;
 }
 
-.ccv2-activity-list{
+.activity-list{
   display:flex;
   flex-direction:column;
-  gap:10px;
+  gap:8px;
 }
 
-.ccv2-activity-item{
+.activity-item{
   padding:10px 12px;
   border-radius:10px;
 
@@ -290,7 +260,7 @@
   font-size:12px;
 }
 
-.ccv2-activity-item span{
+.activity-meta{
   color:var(--dim);
 }
 
@@ -300,12 +270,24 @@
 
 @media (max-width:1024px){
 
-  .ccv2-container{
-    padding:18px;
+  .dashboard-container{
+    padding:20px;
   }
 
-  .ccv2-hero-main strong{
-    font-size:32px;
+  .hero-value{
+    font-size:36px;
+  }
+
+  .year-grid{
+    grid-template-columns:repeat(6, 1fr);
+  }
+
+}
+
+@media (max-width:600px){
+
+  .year-grid{
+    grid-template-columns:repeat(3, 1fr);
   }
 
 }

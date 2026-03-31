@@ -71,23 +71,21 @@ function setMonthLabel(){
 }
 
 /* =========================
-   🔥 BUILD 12 MESES (ROBUSTO)
+   🔥 BUILD 12 MESES
 ========================= */
 
 function buildYearData(evolucion){
 
   const currentYear = new Date().getFullYear();
-
   const yearData = new Array(12).fill(0);
 
   if(!Array.isArray(evolucion)) return yearData;
 
   evolucion.forEach(m => {
 
-    if(!m?.mes || typeof m.mes !== "string") return;
+    if(!m?.mes) return;
 
     const [yearStr, mesStr] = m.mes.split("-");
-
     const year = Number(yearStr);
     const monthIndex = Number(mesStr) - 1;
 
@@ -102,7 +100,7 @@ function buildYearData(evolucion){
 }
 
 /* =========================
-   🔥 RENDER BARRAS
+   🔥 RENDER BARRAS PRO
 ========================= */
 
 function renderYearRevenue(data){
@@ -115,11 +113,13 @@ function renderYearRevenue(data){
   }
 
   const months = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
-
   const max = Math.max(...data, 1);
 
+  // 🔥 fallback visual si todo 0
+  const isEmpty = data.every(v => v === 0);
+
   container.innerHTML = data.map((value, i) => `
-    <div class="month">
+    <div class="month ${isEmpty ? "empty" : ""}">
       <div class="bar" style="height:0%"></div>
       <span>${months[i]}</span>
       <strong>${formatMoney(value)}</strong>
@@ -132,7 +132,11 @@ function renderYearRevenue(data){
 
     bars.forEach((bar, i)=>{
       const percent = (safe(data[i]) / max) * 100;
-      bar.style.height = percent + "%";
+
+      // 🔥 animación más suave
+      setTimeout(()=>{
+        bar.style.height = percent + "%";
+      }, i * 30);
     });
 
   });
@@ -146,11 +150,15 @@ async function loadDashboardData(){
 
   try {
 
-    // 🔥 IMPORTANTE: SIN /api EXTRA
     const res = await Onion.fetch(API + "/dashboard");
 
-    // 🔥 FIX JSON
-    const data = res?.data?.data || {};
+    const data = res?.data?.data;
+
+    if(!data){
+      console.warn("⚠️ Dashboard sin data");
+      renderYearRevenue(new Array(12).fill(0));
+      return;
+    }
 
     console.log("🔥 DASHBOARD:", data);
 
@@ -172,7 +180,6 @@ async function loadDashboardData(){
     ========================= */
 
     const evolucion = data?.charts?.evolucionMensual || [];
-
     const yearData = buildYearData(evolucion);
 
     console.log("📊 YEAR DATA:", yearData);
@@ -180,7 +187,12 @@ async function loadDashboardData(){
     renderYearRevenue(yearData);
 
   } catch(e){
+
     console.error("💥 Dashboard error:", e);
+
+    // 🔥 fallback duro
+    renderYearRevenue(new Array(12).fill(0));
+
   }
 }
 

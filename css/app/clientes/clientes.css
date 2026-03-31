@@ -146,17 +146,17 @@
 
 
 /* =========================================================
-   COLUMN SYSTEM
+   COLUMN SYSTEM (AJUSTADO UBICACIÓN)
 ========================================================= */
 
 .panel-content.clientes .col-id{
-  width:160px;
+  width:140px;
   font-size:11px;
   color:var(--dim);
 }
 
 .panel-content.clientes .col-main{
-  width:34%;
+  width:32%;
   font-weight:500;
   white-space:normal;
   line-height:1.4;

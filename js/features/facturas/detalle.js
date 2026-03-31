@@ -108,7 +108,7 @@ async function loadFactura(id){
 }
 
 /* =========================
-   NORMALIZE (CLAVE PRO)
+   NORMALIZE
 ========================= */
 
 function normalizeFactura(f){
@@ -167,7 +167,8 @@ function render(){
 
   /* CORE */
 
-  $("#detalle-numero-legal").textContent = factura.numeroLegal || "--";
+  $("#detalle-numero-legal").textContent = cleanNumero(factura.numeroLegal);
+
   $("#detalle-id").textContent = factura.id || "--";
   $("#detalle-incidencia-id").textContent = factura.incidenciaId || "--";
 
@@ -180,7 +181,7 @@ function render(){
   $("#detalle-concepto").textContent = factura.concepto || "-";
   $("#detalle-descripcion").textContent = factura.descripcion || "-";
 
-  /* ESTADO PRO */
+  /* ESTADO */
 
   const estadoEl = $("#detalle-estado");
   const estado = factura.estadoPago;
@@ -210,24 +211,6 @@ function render(){
 }
 
 /* =========================
-   AVATAR
-========================= */
-
-function renderAvatar(cliente){
-
-  const el = $("#detalle-avatar");
-  if(!el) return;
-
-  if(cliente.avatar){
-    el.innerHTML = `<img src="${cliente.avatar}" alt="${escapeHTML(cliente.nombre)}" />`;
-    return;
-  }
-
-  el.innerHTML = `<div class="avatar-fallback">${getInitials(cliente.nombre)}</div>`;
-
-}
-
-/* =========================
    SIDEBAR
 ========================= */
 
@@ -242,16 +225,20 @@ function renderSidebar(){
   }
 
   const base = Onion.config.API;
+  const nombreArchivo = cleanNumero(factura.numeroLegal) + ".pdf";
 
   docs.innerHTML = `
     <div class="blob-item">
-      <span>Factura PDF</span>
+      <span title="${nombreArchivo}">${nombreArchivo}</span>
       <div class="blob-actions">
-        <button onclick="window.open('${base}/facturas/${factura.id}/ver','_blank')">Ver</button>
-        <button onclick="window.open('${base}/facturas/${factura.id}/descargar','_blank')">Descargar</button>
+        <button id="btn-ver-doc">Ver</button>
+        <button id="btn-descargar-doc">Descargar</button>
       </div>
     </div>
   `;
+
+  $("#btn-ver-doc")?.addEventListener("click", openFactura);
+  $("#btn-descargar-doc")?.addEventListener("click", downloadFactura);
 
 }
 
@@ -272,6 +259,14 @@ function downloadFactura(){
 /* =========================
    HELPERS
 ========================= */
+
+function cleanNumero(num){
+  if(!num) return "--";
+
+  return String(num)
+    .replace(/^FAC-/i,"")
+    .replace(/-.*/,""); // quita sufijos tipo -9UQ
+}
 
 function capitalize(str){
   if(!str) return "-";
@@ -311,6 +306,24 @@ function escapeHTML(str){
     .replace(/&/g,"&amp;")
     .replace(/</g,"&lt;")
     .replace(/>/g,"&gt;");
+}
+
+/* =========================
+   AVATAR
+========================= */
+
+function renderAvatar(cliente){
+
+  const el = $("#detalle-avatar");
+  if(!el) return;
+
+  if(cliente.avatar){
+    el.innerHTML = `<img src="${cliente.avatar}" alt="${escapeHTML(cliente.nombre)}" />`;
+    return;
+  }
+
+  el.innerHTML = `<div class="avatar-fallback">${getInitials(cliente.nombre)}</div>`;
+
 }
 
 })();

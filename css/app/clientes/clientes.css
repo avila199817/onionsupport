@@ -1,1 +1,292 @@
+/* =========================================================
+   CLIENTES — PRO SAAS PANEL (AISLADO)
+========================================================= */
 
+.panel-content.clientes{
+  display:flex;
+  flex-direction:column;
+  height:100%;
+  width:100%;
+}
+
+
+/* =========================================================
+   TABLE WRAPPER
+========================================================= */
+
+.panel-content.clientes .table-system{
+  display:flex;
+  flex-direction:column;
+  flex:1;
+  min-height:0;
+  width:100%;
+}
+
+
+/* =========================================================
+   FILTERS (HEADER)
+========================================================= */
+
+.panel-content.clientes .filters-row{
+  display:flex;
+  align-items:center;
+  gap:10px;
+
+  padding:12px 16px;
+
+  background:var(--panel-bg);
+  border-bottom:1px solid var(--panel-border);
+}
+
+.panel-content.clientes .filters-row input{
+  flex:1;
+  min-width:220px;
+}
+
+.panel-content.clientes .filters-row input,
+.panel-content.clientes .filters-row select{
+  padding:10px 12px;
+
+  border-radius:8px;
+  border:1px solid var(--card-border);
+
+  background:var(--card-bg);
+  color:var(--text);
+
+  font-size:13px;
+}
+
+.panel-content.clientes .filters-row select{
+  min-width:140px;
+}
+
+.panel-content.clientes .btn-new-cliente{
+  margin-left:auto;
+
+  padding:10px 18px;
+  border-radius:999px;
+
+  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
+  color:#fff;
+
+  font-weight:600;
+
+  border:none;
+  cursor:pointer;
+
+  box-shadow:0 6px 18px rgba(99,102,241,0.35);
+  transition:all .2s ease;
+}
+
+.panel-content.clientes .btn-new-cliente:hover{
+  transform:translateY(-1px);
+  box-shadow:0 10px 26px rgba(99,102,241,0.45);
+}
+
+
+/* =========================================================
+   TABLE CONTAINER
+========================================================= */
+
+.panel-content.clientes .table-container{
+  flex:1;
+  min-height:0;
+  overflow-y:auto;
+  overflow-x:hidden;
+
+  background:var(--panel-bg);
+}
+
+
+/* =========================================================
+   TABLE BASE
+========================================================= */
+
+.panel-content.clientes table{
+  width:100%;
+  border-collapse:collapse;
+  table-layout:fixed;
+}
+
+.panel-content.clientes thead{
+  position:sticky;
+  top:0;
+  z-index:3;
+  background:var(--panel-bg);
+}
+
+.panel-content.clientes th{
+  padding:10px 14px;
+
+  text-align:left;
+
+  border-bottom:1px solid var(--panel-border);
+
+  color:var(--dim);
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:.3px;
+
+  white-space:nowrap;
+}
+
+.panel-content.clientes td{
+  padding:12px 14px;
+
+  border-bottom:1px solid var(--panel-border);
+
+  font-size:13.5px;
+  color:var(--text);
+
+  vertical-align:middle;
+
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+
+/* =========================================================
+   COLUMN SYSTEM
+========================================================= */
+
+.panel-content.clientes .col-id{
+  width:160px;
+  font-size:11px;
+  color:var(--dim);
+}
+
+.panel-content.clientes .col-main{
+  width:34%;
+  font-weight:500;
+  white-space:normal;
+  line-height:1.4;
+}
+
+.panel-content.clientes .col-secondary{
+  width:180px;
+}
+
+.panel-content.clientes .col-status{
+  width:120px;
+}
+
+.panel-content.clientes .col-date{
+  width:140px;
+}
+
+
+/* =========================================================
+   ROWS
+========================================================= */
+
+.panel-content.clientes tbody tr{
+  transition:all .15s ease;
+  cursor:pointer;
+}
+
+.panel-content.clientes tbody tr:nth-child(even){
+  background:color-mix(in srgb, var(--panel-bg), #fff 2%);
+}
+
+.panel-content.clientes tbody tr:hover{
+  background:color-mix(in srgb, var(--panel-bg), #fff 6%);
+  transform:translateX(2px);
+}
+
+
+/* =========================================================
+   USER CELL (REUTILIZADO)
+========================================================= */
+
+.panel-content.clientes .cell-user{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+.panel-content.clientes .table-avatar{
+  width:34px;
+  height:34px;
+  min-width:34px;
+
+  border-radius:50%;
+  overflow:hidden;
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
+  color:#fff;
+
+  font-size:12px;
+  font-weight:600;
+}
+
+.panel-content.clientes .table-avatar img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  border-radius:50%;
+  display:block;
+}
+
+.panel-content.clientes .user-info{
+  display:flex;
+  flex-direction:column;
+}
+
+.panel-content.clientes .user-name{
+  font-weight:600;
+}
+
+.panel-content.clientes .user-sub{
+  font-size:11px;
+  color:var(--dim);
+}
+
+
+/* =========================================================
+   BADGES (CLIENTES)
+========================================================= */
+
+.panel-content.clientes .badge{
+  padding:3px 9px;
+  border-radius:999px;
+  font-size:10px;
+  font-weight:500;
+}
+
+.panel-content.clientes .badge.activo{
+  color:var(--success);
+  background:color-mix(in srgb, var(--success), transparent 85%);
+}
+
+.panel-content.clientes .badge.inactivo{
+  color:var(--error);
+  background:color-mix(in srgb, var(--error), transparent 85%);
+}
+
+.panel-content.clientes .badge.empresa{
+  color:#10b981;
+  background:rgba(16,185,129,0.15);
+}
+
+.panel-content.clientes .badge.particular{
+  color:var(--info);
+  background:color-mix(in srgb, var(--info), transparent 85%);
+}
+
+
+/* =========================================================
+   SCROLLBAR
+========================================================= */
+
+.panel-content.clientes .table-container::-webkit-scrollbar{
+  width:8px;
+}
+
+.panel-content.clientes .table-container::-webkit-scrollbar-thumb{
+  background:var(--scrollbar-thumb);
+  border-radius:6px;
+}

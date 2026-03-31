@@ -51,12 +51,6 @@ function setText(id, value){
   if(el) el.textContent = value ?? "--";
 }
 
-function parseDate(d){
-  if(!d) return null;
-  const date = new Date(d);
-  return isNaN(date) ? null : date;
-}
-
 /* =========================
    MES LABEL
 ========================= */
@@ -77,13 +71,12 @@ function setMonthLabel(){
 }
 
 /* =========================
-   🔥 TRANSFORM DATA → 12 MESES
+   🔥 BUILD 12 MESES
 ========================= */
 
 function buildYearData(evolucion){
 
-  const now = new Date();
-  const currentYear = now.getFullYear();
+  const currentYear = new Date().getFullYear();
 
   const mesesMap = {
     "01":0,"02":1,"03":2,"04":3,"05":4,"06":5,
@@ -96,9 +89,13 @@ function buildYearData(evolucion){
 
     if(!m?.mes) return;
 
-    const [year, mes] = m.mes.split("-");
+    const parts = m.mes.split("-");
+    if(parts.length !== 2) return;
 
-    if(Number(year) !== currentYear) return;
+    const year = Number(parts[0]);
+    const mes = parts[1];
+
+    if(year !== currentYear) return;
 
     const idx = mesesMap[mes];
 
@@ -112,29 +109,28 @@ function buildYearData(evolucion){
 }
 
 /* =========================
-   🔥 RENDER BARRAS (PRO)
+   🔥 RENDER BARRAS
 ========================= */
 
 function renderYearRevenue(data){
 
-  const container = document.querySelector(".year-grid");
-  if(!container) return;
+  const container = getRoot()?.querySelector(".year-grid");
+  if(!container){
+    console.error("💥 .year-grid no encontrado");
+    return;
+  }
 
   const months = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
 
   const max = Math.max(...data, 1);
 
-  container.innerHTML = data.map((value, i) => {
-
-    return `
-      <div class="month">
-        <div class="bar" style="height:0%"></div>
-        <span>${months[i]}</span>
-        <strong>${formatMoney(value)}</strong>
-      </div>
-    `;
-
-  }).join("");
+  container.innerHTML = data.map((value, i) => `
+    <div class="month">
+      <div class="bar" style="height:0%"></div>
+      <span>${months[i]}</span>
+      <strong>${formatMoney(value)}</strong>
+    </div>
+  `).join("");
 
   requestAnimationFrame(()=>{
 
@@ -147,7 +143,6 @@ function renderYearRevenue(data){
     });
 
   });
-
 }
 
 /* =========================
@@ -160,7 +155,10 @@ async function loadDashboardData(){
 
     const res = await Onion.fetch(API + "/dashboard");
 
-    const data = res?.data || {};
+    // 🔥 FIX REAL
+    const data = res?.data?.data || {};
+
+    console.log("🔥 DASHBOARD:", data);
 
     /* =========================
        KPIs
@@ -168,18 +166,24 @@ async function loadDashboardData(){
 
     setText("home-facturas", formatMoney(data?.resumen?.totalFacturado));
     setText("home-facturas-pendiente", formatMoney(data?.resumen?.totalPendiente));
-    setText("home-facturacion-mes", formatMoney(data?.charts?.cashflowMensual?.slice(-1)[0]?.total));
+
+    const ultimoMes = data?.charts?.cashflowMensual?.slice(-1)[0]?.total || 0;
+    setText("home-facturacion-mes", formatMoney(ultimoMes));
 
     setText("home-clientes", safe(data?.counters?.clientes));
     setText("home-usuarios", safe(data?.counters?.usuarios));
 
     /* =========================
-       🔥 BARRAS AÑO (PRO)
+       🔥 BARRAS
     ========================= */
 
     const evolucion = data?.charts?.evolucionMensual || [];
 
+    console.log("📊 EVOLUCION:", evolucion);
+
     const yearData = buildYearData(evolucion);
+
+    console.log("📊 YEAR DATA:", yearData);
 
     renderYearRevenue(yearData);
 

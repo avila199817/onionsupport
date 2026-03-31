@@ -210,20 +210,22 @@
 }
 
 #btn-back{
+  margin-left:auto;
   background:none;
   border:none;
   color:var(--text);
   cursor:pointer;
   font-size:13px;
-  opacity:.7;
+  font-weight:500;
+  opacity:.8;
   transition:.15s;
+  padding:6px 10px;
 }
 
 #btn-back:hover{
   opacity:1;
   transform:translateX(-2px);
 }
-
 
 /* =========================================================
    BODY

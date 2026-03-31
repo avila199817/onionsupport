@@ -125,6 +125,7 @@
   background:var(--card-bg);
 
   transition:all .15s ease;
+  margin-top:8px;
 }
 
 .incidencia-detalle .blob-item:hover{

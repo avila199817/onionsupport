@@ -126,20 +126,20 @@
 }
 
 /* =========================================================
-   GRID 🔥 FIX ALINEACIÓN
+   GRID 🔥 AJUSTE MILIMÉTRICO
 ========================================================= */
 
 .panel-content.facturas thead tr,
 .panel-content.facturas tbody tr{
   display:grid;
   grid-template-columns:
-    120px
-    minmax(0, 2.4fr)
-    minmax(0, 2fr)
-    130px
-    130px
-    120px
-    200px;
+    110px                 /* ID */
+    minmax(0, 2.6fr)      /* CLIENTE */
+    minmax(0, 1.8fr)      /* EMPRESA (más compacta y a la izquierda) */
+    120px                 /* FECHA */
+    120px                 /* IMPORTE */
+    110px                 /* ESTADO */
+    190px;                /* ACCIONES */
   align-items:center;
 }
 
@@ -155,7 +155,7 @@
 }
 
 .panel-content.facturas th{
-  padding:12px 14px;
+  padding:12px 12px;
   text-align:left;
   border-bottom:1px solid var(--panel-border);
   color:var(--dim);
@@ -166,11 +166,11 @@
 }
 
 /* =========================================================
-   CELLS 🔥 FIX DEFINITIVO
+   CELLS 🔥 ULTRA ALIGN
 ========================================================= */
 
 .panel-content.facturas td{
-  padding:12px 14px;
+  padding:10px 12px;
   border-bottom:1px solid var(--panel-border);
   font-size:13.5px;
   color:var(--text);
@@ -178,40 +178,38 @@
   display:flex;
   align-items:center;
 
-  height:64px;
+  height:60px;
   min-width:0;
   width:100%;
 
-  overflow:visible;
+  overflow:hidden;
 }
 
 /* =========================================================
-   COLUMN ALIGN 🔥 FIX
+   COLUMN ALIGN 🔥 PRECISO
 ========================================================= */
 
 .panel-content.facturas .col-id{
   font-size:11px;
   color:var(--dim);
+  justify-content:flex-start;
 }
 
 .panel-content.facturas .col-date{
-  justify-content:flex-start;
+  justify-content:center;
 }
 
 .panel-content.facturas .col-importe{
   justify-content:flex-end;
   font-variant-numeric:tabular-nums;
-  width:100%;
 }
 
 .panel-content.facturas .col-status{
   justify-content:center;
-  width:100%;
 }
 
 .panel-content.facturas .col-actions{
   justify-content:flex-end;
-  width:100%;
 }
 
 /* =========================================================
@@ -245,11 +243,10 @@
 }
 
 .panel-content.facturas .table-avatar{
-  width:36px;
-  height:36px;
-  min-width:36px;
+  width:34px;
+  height:34px;
+  min-width:34px;
   border-radius:50%;
-  overflow:hidden;
   display:flex;
   align-items:center;
   justify-content:center;
@@ -268,7 +265,7 @@
 
 .panel-content.facturas .user-name{
   font-weight:600;
-  font-size:13.5px;
+  font-size:13px;
   color:var(--text);
   white-space:nowrap;
   overflow:hidden;
@@ -284,14 +281,22 @@
 }
 
 /* =========================================================
-   EMPRESA
+   EMPRESA 🔥 MÁS A LA IZQUIERDA Y COMPACTA
 ========================================================= */
 
 .panel-content.facturas .col-secondary{
   display:flex;
   align-items:center;
   justify-content:flex-start;
+  gap:8px;
   min-width:0;
+  padding-left:4px; /* 🔥 ajuste fino */
+}
+
+.panel-content.facturas .col-secondary span{
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
 }
 
 /* =========================================================
@@ -303,7 +308,9 @@
   border-radius:999px;
   font-size:10px;
   font-weight:500;
-  display:inline-block;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
 }
 
 .panel-content.facturas .badge.success{
@@ -317,7 +324,7 @@
 }
 
 /* =========================================================
-   ACTIONS 🔥 FIX
+   ACTIONS 🔥 COMPACTO Y ALINEADO
 ========================================================= */
 
 .panel-content.facturas .actions{
@@ -333,7 +340,7 @@
 ========================================================= */
 
 .panel-content.facturas .btn-action{
-  padding:6px 10px;
+  padding:6px 9px;
   border-radius:6px;
   border:1px solid var(--card-border);
   background:var(--card-bg);
@@ -341,6 +348,7 @@
   font-size:11px;
   cursor:pointer;
   transition:all .15s ease;
+  white-space:nowrap;
 }
 
 .panel-content.facturas .btn-action:hover{

@@ -1,5 +1,5 @@
 /* =========================================================
-   FACTURAS — PRO SAAS PANEL (CLIENTE + EMPRESA UNIFICADOS)
+   FACTURAS — PRO SAAS PANEL (ULTRA CLEAN SAAS)
 ========================================================= */
 
 .panel-content.facturas{
@@ -107,37 +107,29 @@
 }
 
 .panel-content.facturas td{
-  padding:12px 14px;
+  padding:14px 14px;
   border-bottom:1px solid var(--panel-border);
   font-size:13.5px;
   color:var(--text);
   vertical-align:middle;
-  overflow:hidden;
-  text-overflow:ellipsis;
 }
 
 /* =========================================================
-   COLUMN SYSTEM
+   COLUMN SYSTEM (ALINEADO PRO)
 ========================================================= */
 
 .panel-content.facturas .col-id{
-  width:130px;
+  width:120px;
   font-size:11px;
   color:var(--dim);
 }
 
 .panel-content.facturas .col-main{
-  width:36%;
-  font-weight:500;
-  white-space:normal;
-  line-height:1.4;
+  width:30%;
 }
 
-/* 🔥 EMPRESA AHORA IGUAL QUE CLIENTE */
 .panel-content.facturas .col-secondary{
-  width:28%;
-  white-space:normal;
-  line-height:1.4;
+  width:26%;
 }
 
 .panel-content.facturas .col-date{
@@ -151,13 +143,11 @@
 }
 
 .panel-content.facturas .col-status{
-  width:100px;
+  width:110px;
 }
 
-.panel-content.facturas .col-method{
-  width:140px;
-  font-size:12px;
-  color:var(--dim);
+.panel-content.facturas .col-actions{
+  width:200px;
 }
 
 /* =========================================================
@@ -186,28 +176,21 @@
   display:flex;
   align-items:center;
   gap:10px;
+  min-width:0;
 }
 
 .panel-content.facturas .table-avatar{
-  width:34px;
-  height:34px;
-  min-width:34px;
+  width:36px;
+  height:36px;
+  min-width:36px;
   border-radius:50%;
   overflow:hidden;
   display:flex;
   align-items:center;
   justify-content:center;
-  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
   color:#fff;
   font-size:12px;
   font-weight:600;
-}
-
-.panel-content.facturas .table-avatar img{
-  width:100%;
-  height:100%;
-  object-fit:cover;
-  border-radius:50%;
 }
 
 .panel-content.facturas .user-info{
@@ -218,7 +201,7 @@
 
 .panel-content.facturas .user-name{
   font-weight:600;
-  white-space:normal;
+  white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
 }
@@ -233,10 +216,11 @@
 ========================================================= */
 
 .panel-content.facturas .badge{
-  padding:3px 9px;
+  padding:4px 10px;
   border-radius:999px;
   font-size:10px;
   font-weight:500;
+  display:inline-block;
 }
 
 .panel-content.facturas .badge.success{
@@ -249,19 +233,43 @@
   background:color-mix(in srgb, var(--warning), transparent 85%);
 }
 
-.panel-content.facturas .badge.error{
-  color:var(--error);
-  background:color-mix(in srgb, var(--error), transparent 85%);
+/* =========================================================
+   ACTIONS 🔥
+========================================================= */
+
+.panel-content.facturas .actions{
+  display:flex;
+  gap:6px;
+  align-items:center;
 }
 
-.panel-content.facturas .badge.info{
-  color:var(--info);
-  background:color-mix(in srgb, var(--info), transparent 85%);
+.panel-content.facturas .btn-action{
+  padding:6px 10px;
+  border-radius:6px;
+  border:1px solid var(--card-border);
+  background:var(--card-bg);
+  color:var(--text);
+  font-size:11px;
+  cursor:pointer;
+  transition:all .15s ease;
 }
 
-.panel-content.facturas .badge.neutral{
-  color:var(--dim);
-  background:color-mix(in srgb, var(--dim), transparent 85%);
+.panel-content.facturas .btn-action:hover{
+  background:color-mix(in srgb, var(--accent), transparent 85%);
+  color:var(--accent);
+  border-color:var(--accent);
+}
+
+/* 🔥 BOTÓN PAGAR DESTACADO */
+.panel-content.facturas .btn-action.pay{
+  background:color-mix(in srgb, var(--warning), transparent 85%);
+  color:var(--warning);
+  border-color:var(--warning);
+}
+
+.panel-content.facturas .btn-action.pay:hover{
+  background:var(--warning);
+  color:#fff;
 }
 
 /* =========================================================

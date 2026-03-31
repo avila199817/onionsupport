@@ -25,15 +25,42 @@
     </div>
 
     <!-- =========================
-         HERO (🔥 FOCO TOTAL)
+         HERO
     ========================= -->
     <div class="dashboard-hero">
 
-      <span class="hero-label">Facturación hoy</span>
+      <span class="hero-label">Facturación mes actual</span>
 
       <strong id="home-facturacion-mes" class="hero-value">
         €0
       </strong>
+
+    </div>
+
+    <!-- =========================
+         KPIs
+    ========================= -->
+    <div class="dashboard-kpis">
+
+      <div class="kpi">
+        <span>Total facturado</span>
+        <strong id="home-facturas">€0</strong>
+      </div>
+
+      <div class="kpi">
+        <span>Pendiente</span>
+        <strong id="home-facturas-pendiente">€0</strong>
+      </div>
+
+      <div class="kpi">
+        <span>Clientes</span>
+        <strong id="home-clientes">0</strong>
+      </div>
+
+      <div class="kpi">
+        <span>Usuarios</span>
+        <strong id="home-usuarios">0</strong>
+      </div>
 
     </div>
 
@@ -54,43 +81,32 @@
         Uptime <strong id="status-uptime">--</strong>
       </div>
 
-      <div class="strip-item">
-        CPU <strong id="cpu-usage">--%</strong>
-      </div>
-
-      <div class="strip-item">
-        RAM <strong id="ram-usage">--%</strong>
-      </div>
-
-      <div class="strip-item">
-        Disco <strong id="disk-usage">--%</strong>
-      </div>
-
     </div>
 
     <!-- =========================
-         FACTURACIÓN ANUAL (🔥 CLAVE)
+         FACTURACIÓN ANUAL
     ========================= -->
     <div class="year-revenue">
 
       <div class="year-header">
-        <h2>Facturación 2026</h2>
+        <h2 id="year-title">Facturación</h2>
       </div>
 
       <div class="year-grid">
 
-        <div class="month"><span>Ene</span><strong>€0</strong></div>
-        <div class="month"><span>Feb</span><strong>€0</strong></div>
-        <div class="month"><span>Mar</span><strong>€0</strong></div>
-        <div class="month"><span>Abr</span><strong>€0</strong></div>
-        <div class="month"><span>May</span><strong>€0</strong></div>
-        <div class="month"><span>Jun</span><strong>€0</strong></div>
-        <div class="month"><span>Jul</span><strong>€0</strong></div>
-        <div class="month"><span>Ago</span><strong>€0</strong></div>
-        <div class="month"><span>Sep</span><strong>€0</strong></div>
-        <div class="month"><span>Oct</span><strong>€0</strong></div>
-        <div class="month"><span>Nov</span><strong>€0</strong></div>
-        <div class="month"><span>Dic</span><strong>€0</strong></div>
+        <!-- 🔥 12 MESES CON BAR -->
+        <div class="month"><div class="bar"></div><span>Ene</span><strong>€0</strong></div>
+        <div class="month"><div class="bar"></div><span>Feb</span><strong>€0</strong></div>
+        <div class="month"><div class="bar"></div><span>Mar</span><strong>€0</strong></div>
+        <div class="month"><div class="bar"></div><span>Abr</span><strong>€0</strong></div>
+        <div class="month"><div class="bar"></div><span>May</span><strong>€0</strong></div>
+        <div class="month"><div class="bar"></div><span>Jun</span><strong>€0</strong></div>
+        <div class="month"><div class="bar"></div><span>Jul</span><strong>€0</strong></div>
+        <div class="month"><div class="bar"></div><span>Ago</span><strong>€0</strong></div>
+        <div class="month"><div class="bar"></div><span>Sep</span><strong>€0</strong></div>
+        <div class="month"><div class="bar"></div><span>Oct</span><strong>€0</strong></div>
+        <div class="month"><div class="bar"></div><span>Nov</span><strong>€0</strong></div>
+        <div class="month"><div class="bar"></div><span>Dic</span><strong>€0</strong></div>
 
       </div>
 

@@ -1,128 +1,117 @@
-<div class="panel-content dashboard command-center">
+<div class="panel-content dashboard cc-v2">
 
   <!-- 🔥 LOADER -->
   <div class="dashboard-loading">
     <div class="dashboard-spinner"></div>
   </div>
 
-  <div class="cc-container">
+  <div class="ccv2-container">
 
     <!-- =========================
-         HEADER CONTROL
+         HEADER
     ========================= -->
-    <div class="cc-header">
+    <div class="ccv2-header">
 
-      <div class="cc-title">
-        <h1>Command Center</h1>
-        <span>Sistema en tiempo real</span>
+      <div class="ccv2-title">
+        <h1>Dashboard</h1>
+        <span>Control total del sistema</span>
       </div>
 
-      <div class="cc-status-live">
+      <div class="ccv2-live">
         <span class="dot"></span>
-        EN VIVO
+        En vivo
       </div>
 
     </div>
 
     <!-- =========================
-         GRID PRINCIPAL
+         HERO (🔥 PROTAGONISTA)
     ========================= -->
-    <div class="cc-grid">
+    <div class="ccv2-hero">
 
-      <!-- 🟥 LEFT CONTROL -->
-      <div class="cc-side cc-left">
+      <div class="ccv2-hero-main">
+        <span>Facturación hoy</span>
+        <strong id="home-facturacion-mes">€0</strong>
+      </div>
 
-        <div class="cc-block stat">
+      <div class="ccv2-hero-stats">
+
+        <div class="mini-stat">
           <span>Usuarios</span>
           <strong id="home-usuarios">0</strong>
         </div>
 
-        <div class="cc-block stat">
+        <div class="mini-stat">
           <span>Clientes</span>
           <strong id="home-clientes">0</strong>
         </div>
 
-        <div class="cc-block stat">
+        <div class="mini-stat">
           <span>Tickets</span>
           <strong id="tickets-hoy">0</strong>
         </div>
 
       </div>
 
-      <!-- 🟦 CENTER CORE -->
-      <div class="cc-core">
+    </div>
 
-        <div class="cc-core-main">
+    <!-- =========================
+         STATUS STRIP
+    ========================= -->
+    <div class="ccv2-strip">
 
-          <div class="cc-kpi big">
-            <span>Facturación hoy</span>
-            <strong id="home-facturacion-mes">€0</strong>
-          </div>
-
-          <div class="cc-kpi-row">
-
-            <div class="cc-kpi">
-              <span>API</span>
-              <strong id="status-api">-- ms</strong>
-            </div>
-
-            <div class="cc-kpi">
-              <span>Base de datos</span>
-              <strong id="status-db">--</strong>
-            </div>
-
-            <div class="cc-kpi">
-              <span>Uptime</span>
-              <strong id="status-uptime">--</strong>
-            </div>
-
-          </div>
-
-        </div>
-
-        <!-- ALERTAS -->
-        <div class="cc-alerts">
-
-          <div id="cpu-usage" class="cc-alert">CPU --%</div>
-          <div id="ram-usage" class="cc-alert">RAM --%</div>
-          <div id="disk-usage" class="cc-alert">Disco --%</div>
-
-          <div id="system-warning" class="cc-alert danger" style="display:none;">
-            ⚠️ Alta carga del sistema
-          </div>
-
-        </div>
-
+      <div class="strip-item">
+        API <strong id="status-api">-- ms</strong>
       </div>
 
-      <!-- 🟩 RIGHT ACTION -->
-      <div class="cc-side cc-right">
+      <div class="strip-item">
+        DB <strong id="status-db">--</strong>
+      </div>
 
-        <button class="cc-action">+ Usuario</button>
-        <button class="cc-action">+ Cliente</button>
-        <button class="cc-action">+ Factura</button>
-        <button class="cc-action">+ Ticket</button>
+      <div class="strip-item">
+        Uptime <strong id="status-uptime">--</strong>
+      </div>
 
+      <div class="strip-item">
+        CPU <strong id="cpu-usage">--%</strong>
+      </div>
+
+      <div class="strip-item">
+        RAM <strong id="ram-usage">--%</strong>
+      </div>
+
+      <div class="strip-item">
+        Disco <strong id="disk-usage">--%</strong>
       </div>
 
     </div>
 
     <!-- =========================
-         ACTIVITY STREAM
+         ACTIONS FLOAT
     ========================= -->
-    <div class="cc-activity">
+    <div class="ccv2-actions">
 
-      <div class="cc-activity-header">
+      <button>+ Usuario</button>
+      <button>+ Cliente</button>
+      <button>+ Factura</button>
+      <button>+ Ticket</button>
+
+    </div>
+
+    <!-- =========================
+         ACTIVITY
+    ========================= -->
+    <div class="ccv2-activity">
+
+      <div class="ccv2-activity-header">
         Actividad en tiempo real
       </div>
 
-      <div id="activity-list" class="cc-activity-stream">
-
-        <div class="cc-activity-item">
-          <div class="cc-activity-title">Cargando actividad...</div>
-          <div class="cc-activity-meta">Esperando datos</div>
+      <div id="activity-list" class="ccv2-activity-list">
+        <div class="ccv2-activity-item">
+          <div>Cargando actividad...</div>
+          <span>Esperando datos</span>
         </div>
-
       </div>
 
     </div>

@@ -125,7 +125,7 @@
   color:var(--dim);
   font-size:11px;
   text-transform:uppercase;
-  letter-spacing:.3px;
+  letter-spacing:.4px;
 
   white-space:nowrap;
 }
@@ -146,13 +146,16 @@
 
 
 /* =========================================================
-   COLUMN SYSTEM
+   COLUMN SYSTEM (MEJORADO)
 ========================================================= */
 
 .panel-content.usuarios .col-id{
   width:160px;
   font-size:11px;
   color:var(--dim);
+  font-family:monospace;
+  letter-spacing:0.8px;
+  opacity:.85;
 }
 
 .panel-content.usuarios .col-main{

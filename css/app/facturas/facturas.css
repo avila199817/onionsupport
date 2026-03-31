@@ -7,11 +7,11 @@
   flex-direction:column;
   height:100%;
   width:100%;
-  position:relative; /* 🔥 IMPORTANTE para overlay */
+  position:relative;
 }
 
 /* =========================================================
-   LOADING OVERLAY (SIMPLE + PRO)
+   LOADING OVERLAY
 ========================================================= */
 
 .facturas-loading{
@@ -20,12 +20,9 @@
   display:flex;
   align-items:center;
   justify-content:center;
-
   background:rgba(15,15,15,0.45);
   backdrop-filter:blur(2px);
-
   z-index:20;
-
   opacity:0;
   pointer-events:none;
   transition:opacity .2s ease;
@@ -36,15 +33,12 @@
   pointer-events:auto;
 }
 
-/* spinner limpio */
 .facturas-spinner{
   width:42px;
   height:42px;
   border-radius:50%;
-
   border:3px solid rgba(255,255,255,0.15);
   border-top-color:var(--accent);
-
   animation:spin .8s linear infinite;
 }
 
@@ -115,7 +109,7 @@
 }
 
 /* =========================================================
-   TABLE
+   TABLE BASE
 ========================================================= */
 
 .panel-content.facturas .table-container{
@@ -129,8 +123,26 @@
 .panel-content.facturas table{
   width:100%;
   border-collapse:collapse;
-  table-layout:fixed;
 }
+
+/* 🔥 GRID PERFECTO (AQUÍ ESTÁ LA MAGIA) */
+.panel-content.facturas thead tr,
+.panel-content.facturas tbody tr{
+  display:grid;
+  grid-template-columns:
+    110px   /* ID */
+    2.2fr   /* Cliente */
+    1.8fr   /* Empresa */
+    120px   /* Fecha */
+    120px   /* Importe */
+    110px   /* Pago */
+    180px;  /* Acciones */
+  align-items:center;
+}
+
+/* =========================================================
+   HEADERS
+========================================================= */
 
 .panel-content.facturas thead{
   position:sticky;
@@ -146,8 +158,12 @@
   color:var(--dim);
   font-size:11px;
   text-transform:uppercase;
-  letter-spacing:.3px;
+  letter-spacing:.4px;
 }
+
+/* =========================================================
+   CELLS
+========================================================= */
 
 .panel-content.facturas td{
   padding:14px 14px;
@@ -157,28 +173,20 @@
   vertical-align:middle;
 }
 
-/* =========================================================
-   COLUMN SYSTEM
-========================================================= */
-
-.panel-content.facturas .col-id{
-  width:120px;
-  font-size:11px;
-  color:var(--dim);
-}
-
-.panel-content.facturas .col-main{ width:30%; }
-.panel-content.facturas .col-secondary{ width:26%; }
-.panel-content.facturas .col-date{ width:120px; }
-
+/* alineaciones pro */
 .panel-content.facturas .col-importe{
-  width:130px;
   text-align:right;
   font-variant-numeric:tabular-nums;
 }
 
-.panel-content.facturas .col-status{ width:110px; }
-.panel-content.facturas .col-actions{ width:200px; }
+.panel-content.facturas .col-status{
+  text-align:center;
+}
+
+.panel-content.facturas .col-actions{
+  display:flex;
+  justify-content:flex-end;
+}
 
 /* =========================================================
    ROWS

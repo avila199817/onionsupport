@@ -1,5 +1,10 @@
 <div class="panel-content incidencias table-mode">
 
+  <!-- 🔥 OVERLAY LOADING -->
+  <div class="incidencias-loading">
+    <div class="incidencias-spinner"></div>
+  </div>
+
   <!-- 🔥 TABLE SYSTEM -->
   <div class="table-system incidencias">
 
@@ -35,7 +40,6 @@
 
     </div>
 
-
     <!-- =========================
          TABLA
     ========================= -->
@@ -57,11 +61,7 @@
         </thead>
 
         <tbody id="incidencias-body">
-
-          <tr class="loading">
-            <td colspan="8">Cargando incidencias...</td>
-          </tr>
-
+          <!-- 🔥 vacío, ya no usamos "Cargando..." -->
         </tbody>
 
       </table>

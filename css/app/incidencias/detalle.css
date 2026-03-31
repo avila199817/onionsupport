@@ -1,5 +1,5 @@
 /* =========================================================
-   INCIDENCIA DETALLE — FINAL PRO SAAS (UNIFICADO)
+   INCIDENCIA DETALLE — FINAL PRO SAAS (UNIFICADO REAL)
 ========================================================= */
 
 
@@ -32,6 +32,7 @@
 .detalle-left{
   flex:1;
   min-width:0;
+
   display:flex;
   flex-direction:column;
   min-height:0;
@@ -160,7 +161,7 @@
 
 
 /* =========================================================
-   HEADER (MISMO QUE CREATE)
+   HEADER (🔥 EXACTO CREATE)
 ========================================================= */
 .filters-row{
   display:flex;
@@ -171,6 +172,8 @@
   background:var(--panel-bg);
   border-bottom:1px solid var(--panel-border);
 }
+
+/* ❌ NADA DE justify-content aquí */
 
 #btn-back{
   margin-left:auto;
@@ -197,7 +200,7 @@
 
 
 /* =========================================================
-   BODY
+   BODY (🔥 MISMO SPACING CREATE)
 ========================================================= */
 .detalle-body{
   flex:1;
@@ -243,7 +246,7 @@
 
 
 /* =========================================================
-   MENSAJE
+   MENSAJE (🔥 IGUAL INPUT CREATE)
 ========================================================= */
 .detalle-editable{
   background:color-mix(in srgb, var(--card-bg), #000 10%);
@@ -251,15 +254,27 @@
   border-radius:12px;
 
   padding:14px 16px;
-  min-height:120px;
+  min-height:180px;
+
+  transition:.15s;
+}
+
+.detalle-editable:hover{
+  border-color:var(--accent);
+}
+
+.detalle-editable:focus{
+  outline:none;
+  border-color:var(--accent);
+  box-shadow:0 0 0 2px rgba(99,102,241,0.25);
 }
 
 
 /* =========================================================
-   SELECT
+   SELECT (🔥 CLON CREATE)
 ========================================================= */
 .detalle-select{
-  padding:12px 14px;
+  padding:14px 16px;
 
   border-radius:12px;
   border:1px solid var(--card-border);
@@ -268,6 +283,12 @@
   color:var(--text);
 
   cursor:pointer;
+}
+
+.detalle-select:focus{
+  outline:none;
+  border-color:var(--accent);
+  box-shadow:0 0 0 2px rgba(99,102,241,0.25);
 }
 
 
@@ -284,12 +305,13 @@
   width:36px;
   height:36px;
   border-radius:50%;
+  overflow:hidden;
   background:#ddd;
 }
 
 
 /* =========================================================
-   FILES (🔥 IGUAL QUE CREATE)
+   FILES (🔥 EXACTO CREATE)
 ========================================================= */
 .incidencia-files{
   display:flex;
@@ -301,8 +323,10 @@
 #btn-attach{
   background:none;
   border:none;
+
   color:var(--accent);
   cursor:pointer;
+
   font-size:13px;
 }
 
@@ -357,7 +381,7 @@
 
 
 /* =========================================================
-   BOTÓN (MISMO ESTILO CREATE)
+   BOTÓN (🔥 CLON CREATE)
 ========================================================= */
 #btn-save{
   padding:13px 26px;

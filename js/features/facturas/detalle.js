@@ -77,13 +77,8 @@ function bindEvents(){
     Onion.router.navigate("/facturas");
   });
 
-  $("#btn-save")?.addEventListener("click", saveFactura);
-
-  $("#btn-attach-detalle")?.addEventListener("click", ()=>{
-    $("#detalle-files")?.click();
-  });
-
-  $("#detalle-files")?.addEventListener("change", handleFiles);
+  $("#btn-ver-factura")?.addEventListener("click", openFactura);
+  $("#btn-descargar-factura")?.addEventListener("click", downloadFactura);
 
 }
 
@@ -122,7 +117,7 @@ function render(){
   const cliente = factura.cliente || {};
 
   /* =========================
-     HEADER USER
+     HEADER
   ========================= */
 
   const nombre = cliente.nombre || "Cliente";
@@ -136,29 +131,43 @@ function render(){
      CORE
   ========================= */
 
-  $("#detalle-id").textContent = factura.numero || factura.id || "--";
+  $("#detalle-numero-legal").textContent = factura.numeroFacturaLegal || factura.numero || "--";
+
+  $("#detalle-id").textContent = factura.id || "--";
+
+  $("#detalle-incidencia-id").textContent = factura.incidenciaId || "--";
 
   $("#detalle-fecha").textContent = formatFecha(factura.fecha);
   $("#detalle-vencimiento").textContent = formatFecha(factura.fechaServicio);
 
-  $("#detalle-metodo").textContent = factura.formaPago || "-";
+  $("#detalle-metodo").textContent = capitalize(factura.formaPago);
   $("#detalle-total").textContent = formatMoney(factura.total);
 
   $("#detalle-concepto").textContent = factura.concepto || "-";
-  $("#detalle-descripcion").textContent = factura.descripcion || "";
+  $("#detalle-descripcion").textContent = factura.descripcion || "-";
+
+  $("#detalle-estado").textContent = formatEstado(factura.estadoPago);
+  $("#detalle-iva").textContent = getIVA(factura) + "%";
 
   /* =========================
-     SELECTS
+     IRPF (EMPRESA)
   ========================= */
 
-  $("#edit-estado").value = mapEstado(factura.estadoPago);
-  $("#edit-iva").value = getIVA(factura);
+  const irpfContainer = $("#detalle-irpf-container");
+
+  if(isEmpresa(cliente) && factura.irpf){
+
+    irpfContainer.style.display = "block";
+    $("#detalle-irpf").textContent = factura.irpf + "%";
+
+  }else{
+    irpfContainer.style.display = "none";
+  }
 
   /* =========================
-     FILES (BLOB)
+     SIDEBAR
   ========================= */
 
-  renderFilesFromBlob();
   renderSidebar();
 
 }
@@ -182,54 +191,6 @@ function renderAvatar(cliente){
 }
 
 /* =========================
-   FILES (LOCAL MOCK)
-========================= */
-
-function renderFiles(files){
-
-  const list = $("#detalle-file-list");
-  if(!list) return;
-
-  list.innerHTML = (files || []).map(f=>`
-    <div class="file-item">
-      <span>${escapeHTML(f.nombre)}</span>
-      <button class="file-remove" onclick="removeFile('${f.id}')">✕</button>
-    </div>
-  `).join("");
-
-}
-
-window.removeFile = function(id){
-  factura.archivos = (factura.archivos || []).filter(f=>f.id !== id);
-  renderFiles(factura.archivos);
-};
-
-/* =========================
-   BLOB REAL (PDF)
-========================= */
-
-function renderFilesFromBlob(){
-
-  const list = $("#detalle-file-list");
-  if(!list) return;
-
-  if(!factura.blobPath){
-    list.innerHTML = `<span class="detalle-hint">Sin archivos</span>`;
-    return;
-  }
-
-  list.innerHTML = `
-    <div class="file-item">
-      <span>Factura PDF</span>
-      <button class="file-remove" onclick="window.open('${Onion.config.API}/facturas/${factura.id}/descargar','_blank')">
-        Ver
-      </button>
-    </div>
-  `;
-
-}
-
-/* =========================
    SIDEBAR
 ========================= */
 
@@ -248,8 +209,10 @@ function renderSidebar(){
     <div class="blob-item">
       <span>Factura PDF</span>
       <div class="blob-actions">
-        <button class="blob-download"
-          onclick="window.open('${Onion.config.API}/facturas/${factura.id}/descargar','_blank')">
+        <button onclick="window.open('${Onion.config.API}/facturas/${factura.id}/ver','_blank')">
+          Ver
+        </button>
+        <button onclick="window.open('${Onion.config.API}/facturas/${factura.id}/descargar','_blank')">
           Descargar
         </button>
       </div>
@@ -259,67 +222,42 @@ function renderSidebar(){
 }
 
 /* =========================
-   SAVE
+   ACTIONS
 ========================= */
 
-async function saveFactura(){
-
-  try{
-
-    const payload = {
-      estadoPago: $("#edit-estado").value,
-      descripcion: $("#detalle-descripcion").textContent
-    };
-
-    await Onion.fetch(Onion.config.API + "/facturas/" + factura.id, {
-      method:"PUT",
-      body: JSON.stringify(payload)
-    });
-
-    toast("Factura actualizada");
-
-  }catch(e){
-    console.error(e);
-    toast("Error al guardar");
-  }
-
+function openFactura(){
+  if(!factura?.id) return;
+  window.open(`${Onion.config.API}/facturas/${factura.id}/ver`, "_blank");
 }
 
-/* =========================
-   FILE UPLOAD MOCK
-========================= */
-
-function handleFiles(e){
-
-  const files = Array.from(e.target.files);
-
-  factura.archivos = factura.archivos || [];
-
-  files.forEach(file=>{
-    factura.archivos.push({
-      id: Date.now() + file.name,
-      nombre: file.name,
-      file
-    });
-  });
-
-  renderFiles(factura.archivos);
-
+function downloadFactura(){
+  if(!factura?.id) return;
+  window.open(`${Onion.config.API}/facturas/${factura.id}/descargar`, "_blank");
 }
 
 /* =========================
    HELPERS
 ========================= */
 
-function mapEstado(e){
+function capitalize(str){
+  if(!str) return "-";
+  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+}
+
+function formatEstado(e){
   e = (e || "").toLowerCase();
-  if(e === "pagada") return "paid";
-  if(e === "cancelada") return "cancelled";
-  return "pending";
+
+  if(e === "pagada") return "Pagada";
+  if(e === "cancelada") return "Cancelada";
+  return "Pendiente";
 }
 
 function getIVA(f){
   return f.impuestos?.[0]?.porcentaje || "21";
+}
+
+function isEmpresa(cliente){
+  return cliente.tipo === "empresa" || cliente.empresa === true;
 }
 
 function formatFecha(f){
@@ -344,35 +282,6 @@ function escapeHTML(str){
     .replace(/&/g,"&amp;")
     .replace(/</g,"&lt;")
     .replace(/>/g,"&gt;");
-}
-
-/* =========================
-   TOAST
-========================= */
-
-function toast(msg){
-
-  let c = document.getElementById("toast-container");
-
-  if(!c){
-    c = document.createElement("div");
-    c.id = "toast-container";
-    document.body.appendChild(c);
-  }
-
-  const el = document.createElement("div");
-  el.className = "toast";
-  el.textContent = msg;
-
-  c.appendChild(el);
-
-  requestAnimationFrame(()=> el.classList.add("show"));
-
-  setTimeout(()=>{
-    el.classList.remove("show");
-    setTimeout(()=> el.remove(), 300);
-  },2000);
-
 }
 
 })();

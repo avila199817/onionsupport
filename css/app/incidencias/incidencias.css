@@ -1,5 +1,5 @@
 /* =========================================================
-   INCIDENCIAS — PRO SAAS PANEL (AISLADO)
+   INCIDENCIAS — PRO SAAS PANEL (CLON CLIENTES)
 ========================================================= */
 
 .panel-content.incidencias{
@@ -99,7 +99,7 @@
 
 
 /* =========================================================
-   TABLE BASE
+   TABLE BASE (CLON)
 ========================================================= */
 
 .panel-content.incidencias table{
@@ -117,36 +117,28 @@
 
 .panel-content.incidencias th{
   padding:10px 14px;
-
   text-align:left;
-
   border-bottom:1px solid var(--panel-border);
-
   color:var(--dim);
   font-size:11px;
   text-transform:uppercase;
   letter-spacing:.3px;
-
   white-space:nowrap;
 }
 
 .panel-content.incidencias td{
   padding:12px 14px;
-
   border-bottom:1px solid var(--panel-border);
-
   font-size:13.5px;
   color:var(--text);
-
   vertical-align:middle;
-
   overflow:hidden;
   text-overflow:ellipsis;
 }
 
 
 /* =========================================================
-   COLUMN SYSTEM (PRECISO)
+   COLUMN SYSTEM (AJUSTADO ORDEN NUEVO)
 ========================================================= */
 
 .panel-content.incidencias .col-id{
@@ -156,7 +148,7 @@
 }
 
 .panel-content.incidencias .col-main{
-  width:36%;
+  width:30%;
   font-weight:500;
   white-space:normal;
   line-height:1.4;
@@ -181,6 +173,7 @@
 
 .panel-content.incidencias tbody tr{
   transition:all .15s ease;
+  cursor:pointer;
 }
 
 .panel-content.incidencias tbody tr:nth-child(even){
@@ -194,7 +187,7 @@
 
 
 /* =========================================================
-   USER CELL
+   USER CELL (CLON CLIENTES)
 ========================================================= */
 
 .panel-content.incidencias .cell-user{
@@ -209,7 +202,7 @@
   min-width:34px;
 
   border-radius:50%;
-  overflow:hidden; /* 🔥 FIX */
+  overflow:hidden;
 
   display:flex;
   align-items:center;
@@ -222,7 +215,6 @@
   font-weight:600;
 }
 
-/* 🔥 FIX CLAVE PARA IMAGEN */
 .panel-content.incidencias .table-avatar img{
   width:100%;
   height:100%;
@@ -247,7 +239,7 @@
 
 
 /* =========================================================
-   BADGES (PRECISOS)
+   BADGES (CLON SISTEMA)
 ========================================================= */
 
 .panel-content.incidencias .badge{
@@ -257,34 +249,29 @@
   font-weight:500;
 }
 
-/* estados */
-.panel-content.incidencias .badge.cerrada{
-  color:var(--success);
-  background:color-mix(in srgb, var(--success), transparent 85%);
-}
-
-.panel-content.incidencias .badge.abierta{
+/* estado */
+.panel-content.incidencias .badge.info{
   color:var(--info);
   background:color-mix(in srgb, var(--info), transparent 85%);
 }
 
-.panel-content.incidencias .badge.progreso{
+.panel-content.incidencias .badge.warning{
   color:var(--warning);
   background:color-mix(in srgb, var(--warning), transparent 85%);
 }
 
+.panel-content.incidencias .badge.success{
+  color:var(--success);
+  background:color-mix(in srgb, var(--success), transparent 85%);
+}
+
 /* prioridad */
-.panel-content.incidencias .badge.alta{
+.panel-content.incidencias .badge.error{
   color:var(--error);
   background:color-mix(in srgb, var(--error), transparent 85%);
 }
 
-.panel-content.incidencias .badge.media{
-  color:var(--warning);
-  background:color-mix(in srgb, var(--warning), transparent 85%);
-}
-
-.panel-content.incidencias .badge.baja{
+.panel-content.incidencias .badge.neutral{
   color:var(--dim);
   background:color-mix(in srgb, var(--dim), transparent 85%);
 }

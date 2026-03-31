@@ -125,18 +125,21 @@
   border-collapse:collapse;
 }
 
-/* 🔥 GRID PERFECTO (AQUÍ ESTÁ LA MAGIA) */
+/* =========================================================
+   🔥 GRID PERFECTO (ALINEADO CON INCIDENCIAS)
+========================================================= */
+
 .panel-content.facturas thead tr,
 .panel-content.facturas tbody tr{
   display:grid;
   grid-template-columns:
-    110px   /* ID */
-    2.2fr   /* Cliente */
-    1.8fr   /* Empresa */
-    120px   /* Fecha */
-    120px   /* Importe */
-    110px   /* Pago */
-    180px;  /* Acciones */
+    120px   /* ID */
+    2.4fr   /* Cliente */
+    2fr     /* Empresa */
+    130px   /* Fecha */
+    130px   /* Importe */
+    120px   /* Pago */
+    200px;  /* Acciones */
   align-items:center;
 }
 
@@ -159,6 +162,7 @@
   font-size:11px;
   text-transform:uppercase;
   letter-spacing:.4px;
+  white-space:nowrap;
 }
 
 /* =========================================================
@@ -171,16 +175,27 @@
   font-size:13.5px;
   color:var(--text);
   vertical-align:middle;
+
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
 }
 
 /* alineaciones pro */
+
+.panel-content.facturas .col-id{
+  font-size:11px;
+  color:var(--dim);
+}
+
 .panel-content.facturas .col-importe{
   text-align:right;
   font-variant-numeric:tabular-nums;
 }
 
 .panel-content.facturas .col-status{
-  text-align:center;
+  display:flex;
+  justify-content:center;
 }
 
 .panel-content.facturas .col-actions{
@@ -239,14 +254,17 @@
 
 .panel-content.facturas .user-name{
   font-weight:600;
-  white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
+  white-space:nowrap;
 }
 
 .panel-content.facturas .user-sub{
   font-size:11px;
   color:var(--dim);
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
 }
 
 /* =========================================================

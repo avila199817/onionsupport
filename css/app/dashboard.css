@@ -20,7 +20,7 @@
   line-height: 1.2;
   margin: 0;
 
-  background: linear-gradient(90deg, #ffffff, #8fdcff);
+  background: linear-gradient(90deg, #ffffff, #a8d8ff);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
@@ -47,7 +47,7 @@
   font-weight: 700;
   letter-spacing: 1px;
 
-  background: linear-gradient(90deg, #ffffff, #8fdcff);
+  background: linear-gradient(90deg, #ffffff, #a8d8ff);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
@@ -72,7 +72,7 @@
 }
 
 /* =========================
-   GRID ULTRA FINO
+   GRID SUAVE
 ========================= */
 
 .chart-grid{
@@ -81,7 +81,7 @@
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  opacity: 0.12;
+  opacity: 0.08;
   pointer-events: none;
 }
 
@@ -139,27 +139,27 @@
 }
 
 /* =========================
-   🔥 STACK (VERDE + ROJO)
+   🔥 STACK (SUAVE PRO)
 ========================= */
 
-/* PAGADO */
+/* PAGADO (verde suave tirando a teal) */
 .bar-paid{
   width: 100%;
-  background: linear-gradient(180deg, #00ff9c, #00c96b);
+  background: linear-gradient(180deg, #6ee7b7, #34d399);
 
   box-shadow:
-    0 0 12px rgba(0,255,156,0.25),
-    inset 0 0 8px rgba(255,255,255,0.08);
+    0 0 10px rgba(52,211,153,0.25),
+    inset 0 0 6px rgba(255,255,255,0.08);
 }
 
-/* PENDIENTE */
+/* PENDIENTE (rojo suave elegante) */
 .bar-pending{
   width: 100%;
-  background: linear-gradient(180deg, #ff5a5a, #b30000);
+  background: linear-gradient(180deg, #fca5a5, #f87171);
 
   box-shadow:
-    0 0 12px rgba(255,80,80,0.25),
-    inset 0 0 8px rgba(255,255,255,0.05);
+    0 0 10px rgba(248,113,113,0.25),
+    inset 0 0 6px rgba(255,255,255,0.05);
 }
 
 /* =========================
@@ -174,13 +174,14 @@
   left: 50%;
   transform: translateX(-50%);
 
-  font-size: 10px;
-  opacity: 0.6;
-  color: white;
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.65;
+  color: #cbd5e1;
   letter-spacing: 0.4px;
 }
 
-/* PAGADO TEXTO */
+/* TEXTO PAGADO */
 .bar-paid::after{
   content: attr(data-paid);
   position: absolute;
@@ -190,11 +191,12 @@
 
   font-size: 11px;
   font-weight: 600;
-  color: #00ff9c;
-  opacity: 0.95;
+  color: #ecfdf5;
+  text-shadow: 0 0 6px rgba(0,0,0,0.4);
+  pointer-events: none;
 }
 
-/* PENDIENTE TEXTO */
+/* TEXTO PENDIENTE */
 .bar-pending::after{
   content: attr(data-pending);
   position: absolute;
@@ -204,29 +206,30 @@
 
   font-size: 11px;
   font-weight: 600;
-  color: #ff5a5a;
-  opacity: 0.95;
+  color: #fff1f2;
+  text-shadow: 0 0 6px rgba(0,0,0,0.4);
+  pointer-events: none;
 }
 
 /* =========================
-   🔥 HOVER
+   🔥 HOVER SUAVE
 ========================= */
 
 .month:hover .bar{
-  transform: scaleY(1.08);
-  filter: brightness(1.15);
+  transform: scaleY(1.06);
+  filter: brightness(1.08);
 }
 
 .month:hover .bar-paid{
   box-shadow:
-    0 0 22px rgba(0,255,156,0.6),
-    0 10px 20px rgba(0,0,0,0.6);
+    0 0 18px rgba(52,211,153,0.45),
+    0 8px 18px rgba(0,0,0,0.5);
 }
 
 .month:hover .bar-pending{
   box-shadow:
-    0 0 22px rgba(255,80,80,0.6),
-    0 10px 20px rgba(0,0,0,0.6);
+    0 0 18px rgba(248,113,113,0.45),
+    0 8px 18px rgba(0,0,0,0.5);
 }
 
 /* =========================

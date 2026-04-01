@@ -66,12 +66,10 @@ function setGreeting(){
 
   if(hour >= 12 && hour < 20){
     greeting = "Buenas tardes";
-  } 
-  else if(hour >= 20 || hour < 6){
+  } else if(hour >= 20 || hour < 6){
     greeting = "Buenas noches";
   }
 
-  // 🔥 SOLO NOMBRE
   const fullName = Onion.auth?.getUser?.()?.nombre || "Cristian";
   const name = fullName.split(" ")[0];
 
@@ -79,13 +77,17 @@ function setGreeting(){
 }
 
 /* =========================
-   🔥 BUILD 12 MESES
+   🔥 BUILD DATA (PAGADO + PENDIENTE)
 ========================= */
 
 function buildYearData(evolucion){
 
   const currentYear = new Date().getFullYear();
-  const yearData = new Array(12).fill(0);
+
+  const yearData = new Array(12).fill(0).map(()=>({
+    paid: 0,
+    pending: 0
+  }));
 
   if(!Array.isArray(evolucion)) return yearData;
 
@@ -100,7 +102,10 @@ function buildYearData(evolucion){
     if(year !== currentYear) return;
     if(monthIndex < 0 || monthIndex > 11) return;
 
-    yearData[monthIndex] = safe(m.total);
+    yearData[monthIndex] = {
+      paid: safe(m.pagado),
+      pending: safe(m.pendiente)
+    };
 
   });
 
@@ -108,7 +113,7 @@ function buildYearData(evolucion){
 }
 
 /* =========================
-   🔥 RENDER BARRAS PRO
+   🔥 RENDER PRO STACK
 ========================= */
 
 function renderYearRevenue(data){
@@ -121,19 +126,31 @@ function renderYearRevenue(data){
   }
 
   const months = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
-  const max = Math.max(...data, 1);
 
-  container.innerHTML = data.map((value, i) => {
+  const max = Math.max(
+    ...data.map(d => d.paid + d.pending),
+    1
+  );
 
-    const isEmpty = value === 0;
+  container.innerHTML = data.map((d, i) => {
+
+    const total = d.paid + d.pending;
+    const isEmpty = total === 0;
 
     return `
       <div class="month ${isEmpty ? "empty" : ""}">
-        <div 
-          class="bar"
-          data-value="${isEmpty ? "" : formatMoney(value)}"
-          data-month="${months[i]}"
-          style="height:0%">
+        <div class="bar" data-month="${months[i]}" style="height:0%">
+
+          <div class="bar-paid"
+               data-paid="${d.paid ? formatMoney(d.paid) : ""}"
+               style="height:0%">
+          </div>
+
+          <div class="bar-pending"
+               data-pending="${d.pending ? "- " + formatMoney(d.pending) : ""}"
+               style="height:0%">
+          </div>
+
         </div>
       </div>
     `;
@@ -147,14 +164,25 @@ function renderYearRevenue(data){
 
     bars.forEach((bar, i)=>{
 
-      const value = safe(data[i]);
-      const percent = (value / max) * 100;
+      const d = data[i];
+      const total = d.paid + d.pending;
 
-      requestAnimationFrame(()=>{
-        setTimeout(()=>{
-          bar.style.height = (value === 0 ? 2 : percent) + "%";
-        }, i * 45);
-      });
+      const percent = (total / max) * 100;
+
+      const paidPercent = total ? (d.paid / total) * 100 : 0;
+      const pendingPercent = total ? (d.pending / total) * 100 : 0;
+
+      const paidEl = bar.querySelector(".bar-paid");
+      const pendingEl = bar.querySelector(".bar-pending");
+
+      setTimeout(()=>{
+
+        bar.style.height = (total === 0 ? 2 : percent) + "%";
+
+        paidEl.style.height = paidPercent + "%";
+        pendingEl.style.height = pendingPercent + "%";
+
+      }, i * 50);
 
     });
 
@@ -173,12 +201,12 @@ async function loadDashboardData(){
     const data = res?.data || {};
 
     if(!data){
-      renderYearRevenue(new Array(12).fill(0));
+      renderYearRevenue(new Array(12).fill({paid:0, pending:0}));
       return;
     }
 
-    /* KPIs */
-    setText("home-facturas", formatMoney(data?.resumen?.totalFacturado));
+    /* KPI TOTAL SOLO PAGADO 🔥 */
+    setText("home-facturas", formatMoney(data?.resumen?.totalPagado));
 
     /* BARRAS */
     const evolucion = data?.charts?.evolucionMensual || [];
@@ -189,7 +217,7 @@ async function loadDashboardData(){
   } catch(e){
 
     console.error("💥 Dashboard error:", e);
-    renderYearRevenue(new Array(12).fill(0));
+    renderYearRevenue(new Array(12).fill({paid:0, pending:0}));
 
   }
 }
@@ -201,7 +229,6 @@ async function loadDashboardData(){
 async function loadSystem(){
 
   const token = Onion.auth?.getToken?.();
-
   if(!token) return;
 
   try{

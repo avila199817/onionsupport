@@ -52,6 +52,33 @@ function setText(id, value){
 }
 
 /* =========================
+   🔥 GREETING PRO
+========================= */
+
+function setGreeting(){
+
+  const el = document.getElementById("greeting-text");
+  if(!el) return;
+
+  const hour = new Date().getHours();
+
+  let greeting = "Buenos días";
+
+  if(hour >= 12 && hour < 20){
+    greeting = "Buenas tardes";
+  } 
+  else if(hour >= 20 || hour < 6){
+    greeting = "Buenas noches";
+  }
+
+  // 🔥 SOLO NOMBRE
+  const fullName = Onion.auth?.getUser?.()?.nombre || "Cristian";
+  const name = fullName.split(" ")[0];
+
+  el.textContent = `${greeting}, ${name}`;
+}
+
+/* =========================
    🔥 BUILD 12 MESES
 ========================= */
 
@@ -96,7 +123,6 @@ function renderYearRevenue(data){
   const months = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
   const max = Math.max(...data, 1);
 
-  // 🔥 HTML alineado con CSS PRO
   container.innerHTML = data.map((value, i) => {
 
     const isEmpty = value === 0;
@@ -105,7 +131,7 @@ function renderYearRevenue(data){
       <div class="month ${isEmpty ? "empty" : ""}">
         <div 
           class="bar"
-          data-value="${formatMoney(value)}"
+          data-value="${isEmpty ? "" : formatMoney(value)}"
           data-month="${months[i]}"
           style="height:0%">
         </div>
@@ -114,7 +140,7 @@ function renderYearRevenue(data){
 
   }).join("");
 
-  // 🔥 ANIMACIÓN PROGRESIVA
+  /* 🔥 ANIMACIÓN */
   requestAnimationFrame(()=>{
 
     const bars = container.querySelectorAll(".bar");
@@ -147,34 +173,16 @@ async function loadDashboardData(){
     const data = res?.data || {};
 
     if(!data){
-      console.warn("⚠️ Dashboard sin data");
       renderYearRevenue(new Array(12).fill(0));
       return;
     }
 
-    console.log("🔥 DASHBOARD:", data);
-
-    /* =========================
-       KPIs
-    ========================= */
-
+    /* KPIs */
     setText("home-facturas", formatMoney(data?.resumen?.totalFacturado));
-    setText("home-facturas-pendiente", formatMoney(data?.resumen?.totalPendiente));
 
-    const ultimoMes = data?.charts?.cashflowMensual?.slice(-1)?.[0]?.total || 0;
-    setText("home-facturacion-mes", formatMoney(ultimoMes));
-
-    setText("home-clientes", safe(data?.counters?.clientes));
-    setText("home-usuarios", safe(data?.counters?.usuarios));
-
-    /* =========================
-       🔥 BARRAS
-    ========================= */
-
+    /* BARRAS */
     const evolucion = data?.charts?.evolucionMensual || [];
     const yearData = buildYearData(evolucion);
-
-    console.log("📊 YEAR DATA:", yearData);
 
     renderYearRevenue(yearData);
 
@@ -194,11 +202,7 @@ async function loadSystem(){
 
   const token = Onion.auth?.getToken?.();
 
-  if(!token){
-    setText("status-api", "API · no auth");
-    setText("status-db", "DB · no auth");
-    return;
-  }
+  if(!token) return;
 
   try{
 
@@ -214,7 +218,6 @@ async function loadSystem(){
 
     setText("status-api", "API · " + (data?.api?.latency ?? "--") + " ms");
     setText("status-db", "DB · " + (data?.db?.status ?? "--"));
-    setText("status-uptime", "Uptime · " + (data?.uptime ?? "--"));
 
   }catch(e){
 
@@ -232,6 +235,8 @@ async function loadDashboard(){
 
   const panel = getRoot();
   panel?.classList.remove("ready");
+
+  setGreeting();
 
   await Promise.allSettled([
     loadDashboardData(),

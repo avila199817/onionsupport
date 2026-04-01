@@ -77,12 +77,12 @@
   display:flex;
   flex-direction:column;
   justify-content:space-between;
-  opacity:.08;
+  opacity:.06;
   pointer-events:none;
 }
 
 .chart-grid span{
-  border-top:1px dashed rgba(255,255,255,.05);
+  border-top:1px dashed rgba(255,255,255,.04);
 }
 
 /* =========================
@@ -125,7 +125,6 @@
   flex-direction:column;
   justify-content:flex-end;
 
-  /* 🔥 CLAVE: no cortar textos */
   overflow:visible;
 
   border-radius:12px 12px 6px 6px;
@@ -137,26 +136,26 @@
 }
 
 /* =========================
-   🔥 STACK (COLORES PRO)
+   🔥 STACK (COLORES PRO SERIOS)
 ========================= */
 
-/* PAGADO → teal elegante */
+/* PAGADO → azul profesional tipo SaaS */
 .bar-paid{
   width:100%;
-  background:linear-gradient(180deg,#7dd3fc,#22d3ee);
+  background:linear-gradient(180deg,#4f8cff,#2563eb);
 
   box-shadow:
-    0 6px 18px rgba(34,211,238,.18),
+    0 6px 18px rgba(37,99,235,.25),
     inset 0 0 6px rgba(255,255,255,.08);
 }
 
-/* PENDIENTE → coral suave */
+/* PENDIENTE → rojo elegante */
 .bar-pending{
   width:100%;
-  background:linear-gradient(180deg,#fda4af,#fb7185);
+  background:linear-gradient(180deg,#ff6b6b,#dc2626);
 
   box-shadow:
-    0 6px 18px rgba(251,113,133,.18),
+    0 6px 18px rgba(220,38,38,.25),
     inset 0 0 6px rgba(255,255,255,.05);
 }
 
@@ -164,7 +163,7 @@
    🔥 TEXTOS
 ========================= */
 
-/* MES (visible, limpio) */
+/* MES */
 .bar::before{
   content:attr(data-month);
   position:absolute;
@@ -173,59 +172,57 @@
 
   font-size:11px;
   font-weight:500;
-  color:#cbd5e1;
-  opacity:.7;
+  color:#94a3b8;
+  opacity:.8;
   letter-spacing:.3px;
 }
 
-/* IMPORTE PAGADO */
+/* PAGADO → abajo derecha */
 .bar-paid::after{
   content:attr(data-paid);
   position:absolute;
-  top:6px;
-  left:8px;
+  bottom:6px;
+  right:8px;
 
   font-size:11px;
   font-weight:600;
-  color:#ecfeff;
+  color:#e0f2fe;
 
-  text-shadow:0 0 6px rgba(0,0,0,.45);
-  pointer-events:none;
+  text-shadow:0 0 6px rgba(0,0,0,.6);
 }
 
-/* IMPORTE PENDIENTE */
+/* PENDIENTE → encima del pagado */
 .bar-pending::after{
   content:attr(data-pending);
   position:absolute;
-  top:22px;
-  left:8px;
+  bottom:22px;
+  right:8px;
 
   font-size:11px;
   font-weight:600;
-  color:#fff1f2;
+  color:#ffe4e6;
 
-  text-shadow:0 0 6px rgba(0,0,0,.45);
-  pointer-events:none;
+  text-shadow:0 0 6px rgba(0,0,0,.6);
 }
 
 /* =========================
-   🔥 HOVER SUAVE
+   🔥 HOVER
 ========================= */
 
 .month:hover .bar{
   transform:scaleY(1.06);
-  filter:brightness(1.06);
+  filter:brightness(1.08);
 }
 
 .month:hover .bar-paid{
   box-shadow:
-    0 0 18px rgba(34,211,238,.35),
+    0 0 22px rgba(37,99,235,.45),
     0 10px 20px rgba(0,0,0,.5);
 }
 
 .month:hover .bar-pending{
   box-shadow:
-    0 0 18px rgba(251,113,133,.35),
+    0 0 22px rgba(220,38,38,.45),
     0 10px 20px rgba(0,0,0,.5);
 }
 
@@ -234,7 +231,7 @@
 ========================= */
 
 .month.empty .bar{
-  background:rgba(255,255,255,.04);
+  background:rgba(255,255,255,.03);
 }
 
 /* =========================

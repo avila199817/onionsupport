@@ -77,7 +77,7 @@
   display:flex;
   flex-direction:column;
   justify-content:space-between;
-  opacity:.06;
+  opacity:.05;
   pointer-events:none;
 }
 
@@ -136,26 +136,30 @@
 }
 
 /* =========================
-   🔥 STACK (COLORES PRO SERIOS)
+   🔥 STACK (VERDE PRO + ROJO FINO)
 ========================= */
 
-/* PAGADO → azul profesional tipo SaaS */
+/* PAGADO → verde elegante (tipo emerald SaaS) */
 .bar-paid{
   width:100%;
-  background:linear-gradient(180deg,#4f8cff,#2563eb);
+  position:relative;
+
+  background:linear-gradient(180deg,#34d399,#059669);
 
   box-shadow:
-    0 6px 18px rgba(37,99,235,.25),
-    inset 0 0 6px rgba(255,255,255,.08);
+    0 6px 16px rgba(5,150,105,.25),
+    inset 0 0 6px rgba(255,255,255,.06);
 }
 
 /* PENDIENTE → rojo elegante */
 .bar-pending{
   width:100%;
-  background:linear-gradient(180deg,#ff6b6b,#dc2626);
+  position:relative;
+
+  background:linear-gradient(180deg,#f87171,#dc2626);
 
   box-shadow:
-    0 6px 18px rgba(220,38,38,.25),
+    0 6px 16px rgba(220,38,38,.25),
     inset 0 0 6px rgba(255,255,255,.05);
 }
 
@@ -173,11 +177,12 @@
   font-size:11px;
   font-weight:500;
   color:#94a3b8;
-  opacity:.8;
-  letter-spacing:.3px;
+  opacity:.85;
 }
 
-/* PAGADO → abajo derecha */
+/* 🔥 IMPORTES DENTRO (CLAVE) */
+
+/* PAGADO → abajo derecha dentro del verde */
 .bar-paid::after{
   content:attr(data-paid);
   position:absolute;
@@ -186,23 +191,25 @@
 
   font-size:11px;
   font-weight:600;
-  color:#e0f2fe;
+  color:#ecfdf5;
 
-  text-shadow:0 0 6px rgba(0,0,0,.6);
+  text-shadow:0 0 4px rgba(0,0,0,.5);
+  pointer-events:none;
 }
 
-/* PENDIENTE → encima del pagado */
+/* PENDIENTE → justo encima del pagado */
 .bar-pending::after{
   content:attr(data-pending);
   position:absolute;
-  bottom:22px;
+  bottom:6px;
   right:8px;
 
   font-size:11px;
   font-weight:600;
-  color:#ffe4e6;
+  color:#fee2e2;
 
-  text-shadow:0 0 6px rgba(0,0,0,.6);
+  text-shadow:0 0 4px rgba(0,0,0,.5);
+  pointer-events:none;
 }
 
 /* =========================
@@ -210,19 +217,19 @@
 ========================= */
 
 .month:hover .bar{
-  transform:scaleY(1.06);
-  filter:brightness(1.08);
+  transform:scaleY(1.05);
+  filter:brightness(1.05);
 }
 
 .month:hover .bar-paid{
   box-shadow:
-    0 0 22px rgba(37,99,235,.45),
+    0 0 20px rgba(16,185,129,.4),
     0 10px 20px rgba(0,0,0,.5);
 }
 
 .month:hover .bar-pending{
   box-shadow:
-    0 0 22px rgba(220,38,38,.45),
+    0 0 20px rgba(220,38,38,.4),
     0 10px 20px rgba(0,0,0,.5);
 }
 

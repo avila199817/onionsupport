@@ -52,7 +52,7 @@ function setText(id, value){
 }
 
 /* =========================
-   🔥 GREETING PRO
+   🔥 GREETING
 ========================= */
 
 function setGreeting(){
@@ -77,7 +77,7 @@ function setGreeting(){
 }
 
 /* =========================
-   🔥 BUILD DATA (PAGADO + PENDIENTE)
+   BUILD DATA
 ========================= */
 
 function buildYearData(evolucion){
@@ -100,7 +100,6 @@ function buildYearData(evolucion){
     const monthIndex = Number(mesStr) - 1;
 
     if(year !== currentYear) return;
-    if(monthIndex < 0 || monthIndex > 11) return;
 
     yearData[monthIndex] = {
       paid: safe(m.pagado),
@@ -113,51 +112,39 @@ function buildYearData(evolucion){
 }
 
 /* =========================
-   🔥 RENDER PRO STACK
+   🔥 RENDER PRO
 ========================= */
 
 function renderYearRevenue(data){
 
   const container = getRoot()?.querySelector(".year-grid");
-
-  if(!container){
-    console.error("💥 .year-grid no encontrado");
-    return;
-  }
+  if(!container) return;
 
   const months = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
 
-  const max = Math.max(
-    ...data.map(d => d.paid + d.pending),
-    1
-  );
+  const max = Math.max(...data.map(d => d.paid + d.pending), 1);
 
   container.innerHTML = data.map((d, i) => {
 
     const total = d.paid + d.pending;
-    const isEmpty = total === 0;
 
     return `
-      <div class="month ${isEmpty ? "empty" : ""}">
+      <div class="month ${total === 0 ? "empty" : ""}">
         <div class="bar" data-month="${months[i]}" style="height:0%">
 
-          <div class="bar-paid"
-               data-paid="${d.paid ? formatMoney(d.paid) : ""}"
-               style="height:0%">
+          <div class="bar-paid" style="height:0%">
+            ${d.paid ? `<span class="value-paid">${formatMoney(d.paid)}</span>` : ""}
           </div>
 
-          <div class="bar-pending"
-               data-pending="${d.pending ? "- " + formatMoney(d.pending) : ""}"
-               style="height:0%">
+          <div class="bar-pending" style="height:0%">
+            ${d.pending ? `<span class="value-pending">- ${formatMoney(d.pending)}</span>` : ""}
           </div>
 
         </div>
       </div>
     `;
-
   }).join("");
 
-  /* 🔥 ANIMACIÓN */
   requestAnimationFrame(()=>{
 
     const bars = container.querySelectorAll(".bar");
@@ -168,7 +155,6 @@ function renderYearRevenue(data){
       const total = d.paid + d.pending;
 
       const percent = (total / max) * 100;
-
       const paidPercent = total ? (d.paid / total) * 100 : 0;
       const pendingPercent = total ? (d.pending / total) * 100 : 0;
 
@@ -178,7 +164,6 @@ function renderYearRevenue(data){
       setTimeout(()=>{
 
         bar.style.height = (total === 0 ? 2 : percent) + "%";
-
         paidEl.style.height = paidPercent + "%";
         pendingEl.style.height = pendingPercent + "%";
 
@@ -190,7 +175,7 @@ function renderYearRevenue(data){
 }
 
 /* =========================
-   DASHBOARD DATA
+   DATA
 ========================= */
 
 async function loadDashboardData(){
@@ -201,14 +186,13 @@ async function loadDashboardData(){
     const data = res?.data || {};
 
     if(!data){
-      renderYearRevenue(new Array(12).fill({paid:0, pending:0}));
+      renderYearRevenue(new Array(12).fill({paid:0,pending:0}));
       return;
     }
 
-    /* KPI TOTAL SOLO PAGADO 🔥 */
-    setText("home-facturas", formatMoney(data?.resumen?.totalPagado));
+    // 🔥 CORREGIDO
+    setText("home-facturas", formatMoney(data?.resumen?.totalCobrado));
 
-    /* BARRAS */
     const evolucion = data?.charts?.evolucionMensual || [];
     const yearData = buildYearData(evolucion);
 
@@ -217,40 +201,6 @@ async function loadDashboardData(){
   } catch(e){
 
     console.error("💥 Dashboard error:", e);
-    renderYearRevenue(new Array(12).fill({paid:0, pending:0}));
-
-  }
-}
-
-/* =========================
-   SYSTEM
-========================= */
-
-async function loadSystem(){
-
-  const token = Onion.auth?.getToken?.();
-  if(!token) return;
-
-  try{
-
-    const base = new URL(API, window.location.origin).origin;
-
-    const res = await fetch(base + "/health/internal", {
-      headers: {
-        "Authorization": "Bearer " + token
-      }
-    });
-
-    const data = await res.json();
-
-    setText("status-api", "API · " + (data?.api?.latency ?? "--") + " ms");
-    setText("status-db", "DB · " + (data?.db?.status ?? "--"));
-
-  }catch(e){
-
-    setText("status-api", "API · error");
-    setText("status-db", "DB · error");
-
   }
 }
 
@@ -265,10 +215,7 @@ async function loadDashboard(){
 
   setGreeting();
 
-  await Promise.allSettled([
-    loadDashboardData(),
-    loadSystem()
-  ]);
+  await loadDashboardData();
 
   requestAnimationFrame(()=>{
     panel?.classList.add("ready");

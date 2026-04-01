@@ -3,10 +3,10 @@
 ========================= */
 
 .dashboard-container{
-  display: flex;
-  flex-direction: column;
-  gap: 28px;
-  padding: 28px;
+  display:flex;
+  flex-direction:column;
+  gap:28px;
+  padding:28px;
 }
 
 /* =========================
@@ -14,61 +14,57 @@
 ========================= */
 
 .dashboard-greeting h1{
-  font-size: 38px;
-  font-weight: 700;
-  letter-spacing: 0.6px;
-  line-height: 1.2;
-  margin: 0;
+  font-size:38px;
+  font-weight:700;
+  letter-spacing:.6px;
+  line-height:1.2;
+  margin:0;
 
-  background: linear-gradient(90deg, #ffffff, #a8d8ff);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  background:linear-gradient(90deg,#ffffff,#b7dcff);
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
 }
 
 /* =========================
    🔥 TOTAL
 ========================= */
 
-.card-total{
-  padding: 6px 2px;
-}
+.card-total{ padding:6px 2px; }
 
 .card-total span{
-  font-size: 11px;
-  opacity: 0.55;
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
+  font-size:11px;
+  opacity:.55;
+  letter-spacing:.6px;
+  text-transform:uppercase;
 }
 
 .card-total strong{
-  display: block;
-  margin-top: 6px;
-  font-size: 46px;
-  font-weight: 700;
-  letter-spacing: 1px;
+  display:block;
+  margin-top:6px;
+  font-size:46px;
+  font-weight:700;
+  letter-spacing:1px;
 
-  background: linear-gradient(90deg, #ffffff, #a8d8ff);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  background:linear-gradient(90deg,#ffffff,#b7dcff);
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
 }
 
 /* =========================
    🔥 CHART
 ========================= */
 
-.card-chart{
-  padding-top: 6px;
-}
+.card-chart{ padding-top:6px; }
 
 /* =========================
    🔥 AREA GRAFICO
 ========================= */
 
 .chart-area{
-  position: relative;
-  height: 260px;
-  display: flex;
-  align-items: flex-end;
+  position:relative;
+  height:260px;
+  display:flex;
+  align-items:flex-end;
 }
 
 /* =========================
@@ -76,17 +72,17 @@
 ========================= */
 
 .chart-grid{
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  opacity: 0.08;
-  pointer-events: none;
+  position:absolute;
+  inset:0;
+  display:flex;
+  flex-direction:column;
+  justify-content:space-between;
+  opacity:.08;
+  pointer-events:none;
 }
 
 .chart-grid span{
-  border-top: 1px dashed rgba(255,255,255,0.05);
+  border-top:1px dashed rgba(255,255,255,.05);
 }
 
 /* =========================
@@ -94,12 +90,12 @@
 ========================= */
 
 .year-grid{
-  display: flex;
-  align-items: flex-end;
-  width: 100%;
-  height: 100%;
-  gap: 10px;
-  z-index: 2;
+  display:flex;
+  align-items:flex-end;
+  width:100%;
+  height:100%;
+  gap:12px;
+  z-index:2;
 }
 
 /* =========================
@@ -107,12 +103,12 @@
 ========================= */
 
 .month{
-  flex: 1;
-  height: 100%;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  position: relative;
+  flex:1;
+  height:100%;
+  display:flex;
+  align-items:flex-end;
+  justify-content:center;
+  position:relative;
 }
 
 /* =========================
@@ -120,95 +116,96 @@
 ========================= */
 
 .bar{
-  position: relative;
-  width: 100%;
-  height: 0%;
-  min-height: 2px;
+  position:relative;
+  width:100%;
+  height:0%;
+  min-height:2px;
 
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  overflow: hidden;
+  display:flex;
+  flex-direction:column;
+  justify-content:flex-end;
 
-  border-radius: 12px 12px 6px 6px;
+  /* 🔥 CLAVE: no cortar textos */
+  overflow:visible;
+
+  border-radius:12px 12px 6px 6px;
 
   transition:
-    height 0.9s cubic-bezier(.2,.8,.2,1),
-    transform 0.2s ease,
-    filter 0.2s ease;
+    height .9s cubic-bezier(.2,.8,.2,1),
+    transform .2s ease,
+    filter .2s ease;
 }
 
 /* =========================
-   🔥 STACK (SUAVE PRO)
+   🔥 STACK (COLORES PRO)
 ========================= */
 
-/* PAGADO (verde suave tirando a teal) */
+/* PAGADO → teal elegante */
 .bar-paid{
-  width: 100%;
-  background: linear-gradient(180deg, #6ee7b7, #34d399);
+  width:100%;
+  background:linear-gradient(180deg,#7dd3fc,#22d3ee);
 
   box-shadow:
-    0 0 10px rgba(52,211,153,0.25),
-    inset 0 0 6px rgba(255,255,255,0.08);
+    0 6px 18px rgba(34,211,238,.18),
+    inset 0 0 6px rgba(255,255,255,.08);
 }
 
-/* PENDIENTE (rojo suave elegante) */
+/* PENDIENTE → coral suave */
 .bar-pending{
-  width: 100%;
-  background: linear-gradient(180deg, #fca5a5, #f87171);
+  width:100%;
+  background:linear-gradient(180deg,#fda4af,#fb7185);
 
   box-shadow:
-    0 0 10px rgba(248,113,113,0.25),
-    inset 0 0 6px rgba(255,255,255,0.05);
+    0 6px 18px rgba(251,113,133,.18),
+    inset 0 0 6px rgba(255,255,255,.05);
 }
 
 /* =========================
    🔥 TEXTOS
 ========================= */
 
-/* MES */
+/* MES (visible, limpio) */
 .bar::before{
-  content: attr(data-month);
-  position: absolute;
-  bottom: -20px;
-  left: 50%;
-  transform: translateX(-50%);
+  content:attr(data-month);
+  position:absolute;
+  bottom:-22px;
+  left:0;
 
-  font-size: 11px;
-  font-weight: 500;
-  opacity: 0.65;
-  color: #cbd5e1;
-  letter-spacing: 0.4px;
+  font-size:11px;
+  font-weight:500;
+  color:#cbd5e1;
+  opacity:.7;
+  letter-spacing:.3px;
 }
 
-/* TEXTO PAGADO */
+/* IMPORTE PAGADO */
 .bar-paid::after{
-  content: attr(data-paid);
-  position: absolute;
-  top: 6px;
-  left: 50%;
-  transform: translateX(-50%);
+  content:attr(data-paid);
+  position:absolute;
+  top:6px;
+  left:8px;
 
-  font-size: 11px;
-  font-weight: 600;
-  color: #ecfdf5;
-  text-shadow: 0 0 6px rgba(0,0,0,0.4);
-  pointer-events: none;
+  font-size:11px;
+  font-weight:600;
+  color:#ecfeff;
+
+  text-shadow:0 0 6px rgba(0,0,0,.45);
+  pointer-events:none;
 }
 
-/* TEXTO PENDIENTE */
+/* IMPORTE PENDIENTE */
 .bar-pending::after{
-  content: attr(data-pending);
-  position: absolute;
-  top: 22px;
-  left: 50%;
-  transform: translateX(-50%);
+  content:attr(data-pending);
+  position:absolute;
+  top:22px;
+  left:8px;
 
-  font-size: 11px;
-  font-weight: 600;
-  color: #fff1f2;
-  text-shadow: 0 0 6px rgba(0,0,0,0.4);
-  pointer-events: none;
+  font-size:11px;
+  font-weight:600;
+  color:#fff1f2;
+
+  text-shadow:0 0 6px rgba(0,0,0,.45);
+  pointer-events:none;
 }
 
 /* =========================
@@ -216,20 +213,20 @@
 ========================= */
 
 .month:hover .bar{
-  transform: scaleY(1.06);
-  filter: brightness(1.08);
+  transform:scaleY(1.06);
+  filter:brightness(1.06);
 }
 
 .month:hover .bar-paid{
   box-shadow:
-    0 0 18px rgba(52,211,153,0.45),
-    0 8px 18px rgba(0,0,0,0.5);
+    0 0 18px rgba(34,211,238,.35),
+    0 10px 20px rgba(0,0,0,.5);
 }
 
 .month:hover .bar-pending{
   box-shadow:
-    0 0 18px rgba(248,113,113,0.45),
-    0 8px 18px rgba(0,0,0,0.5);
+    0 0 18px rgba(251,113,133,.35),
+    0 10px 20px rgba(0,0,0,.5);
 }
 
 /* =========================
@@ -237,7 +234,7 @@
 ========================= */
 
 .month.empty .bar{
-  background: rgba(255,255,255,0.04);
+  background:rgba(255,255,255,.04);
 }
 
 /* =========================
@@ -245,12 +242,12 @@
 ========================= */
 
 .panel-content.dashboard{
-  opacity: 0;
-  transform: translateY(14px);
-  transition: all 0.45s ease;
+  opacity:0;
+  transform:translateY(14px);
+  transition:all .45s ease;
 }
 
 .panel-content.dashboard.ready{
-  opacity: 1;
-  transform: translateY(0);
+  opacity:1;
+  transform:translateY(0);
 }

@@ -78,9 +78,9 @@
       title: "Usuarios"
     },
 
-    "/usuarios/usuario": {
+    "/usuarios/nuevo": {
       page: "/app/views/usuarios/usuario.html",
-      style: "/css/app/usuarios.css",
+      style: "/css/app/usuarios/usuario.css",
       script: "/js/features/usuarios/usuario.js",
       title: "Usuario"
     },

@@ -4,13 +4,42 @@
 
     <!-- 🔥 GREETING -->
     <div class="dashboard-greeting">
-      <h1 id="greeting-text">Buenos días,</h1>
+      <h1 id="greeting-text">Buenas tardes, Cristian</h1>
     </div>
 
-    <!-- 🔥 TOTAL -->
-    <div class="card-total">
-      <span>Total facturado 2026</span>
-      <strong id="home-facturas" class="skeleton-text">€0</strong>
+    <!-- 🔥 KPI ROW (ESTILO SAAS PRO) -->
+    <div class="dashboard-kpis">
+
+      <!-- TOTAL FACTURADO -->
+      <div class="card-total">
+        <span>Total facturado 2026</span>
+        <strong id="home-facturas" class="skeleton-text">€0</strong>
+      </div>
+
+      <!-- IVA -->
+      <div class="card-kpi">
+        <span>IVA</span>
+        <strong id="home-iva" class="skeleton-text">€0</strong>
+      </div>
+
+      <!-- IRPF -->
+      <div class="card-kpi">
+        <span>IRPF</span>
+        <strong id="home-irpf" class="skeleton-text">€0</strong>
+      </div>
+
+      <!-- BENEFICIO -->
+      <div class="card-kpi">
+        <span>Beneficio limpio</span>
+        <strong id="home-beneficio" class="skeleton-text">€0</strong>
+      </div>
+
+      <!-- TOTAL FACTURAS -->
+      <div class="card-kpi">
+        <span>Total facturas</span>
+        <strong id="home-total-facturas" class="skeleton-text">0</strong>
+      </div>
+
     </div>
 
     <!-- 🔥 GRAFICO -->
@@ -21,54 +50,18 @@
         <!-- 🔥 SKELETON LOADER -->
         <div class="year-grid skeleton-grid" id="chart-loader">
 
-          <!-- Generamos 12 columnas fake limpias -->
-          <div class="month">
-            <div class="bar skeleton-bar" style="height:70%"></div>
-          </div>
-
-          <div class="month">
-            <div class="bar skeleton-bar" style="height:45%"></div>
-          </div>
-
-          <div class="month">
-            <div class="bar skeleton-bar" style="height:30%"></div>
-          </div>
-
-          <div class="month">
-            <div class="bar skeleton-bar" style="height:50%"></div>
-          </div>
-
-          <div class="month">
-            <div class="bar skeleton-bar" style="height:20%"></div>
-          </div>
-
-          <div class="month">
-            <div class="bar skeleton-bar" style="height:35%"></div>
-          </div>
-
-          <div class="month">
-            <div class="bar skeleton-bar" style="height:25%"></div>
-          </div>
-
-          <div class="month">
-            <div class="bar skeleton-bar" style="height:40%"></div>
-          </div>
-
-          <div class="month">
-            <div class="bar skeleton-bar" style="height:15%"></div>
-          </div>
-
-          <div class="month">
-            <div class="bar skeleton-bar" style="height:30%"></div>
-          </div>
-
-          <div class="month">
-            <div class="bar skeleton-bar" style="height:22%"></div>
-          </div>
-
-          <div class="month">
-            <div class="bar skeleton-bar" style="height:28%"></div>
-          </div>
+          <div class="month"><div class="bar skeleton-bar" style="height:70%"></div></div>
+          <div class="month"><div class="bar skeleton-bar" style="height:45%"></div></div>
+          <div class="month"><div class="bar skeleton-bar" style="height:30%"></div></div>
+          <div class="month"><div class="bar skeleton-bar" style="height:50%"></div></div>
+          <div class="month"><div class="bar skeleton-bar" style="height:20%"></div></div>
+          <div class="month"><div class="bar skeleton-bar" style="height:35%"></div></div>
+          <div class="month"><div class="bar skeleton-bar" style="height:25%"></div></div>
+          <div class="month"><div class="bar skeleton-bar" style="height:40%"></div></div>
+          <div class="month"><div class="bar skeleton-bar" style="height:15%"></div></div>
+          <div class="month"><div class="bar skeleton-bar" style="height:30%"></div></div>
+          <div class="month"><div class="bar skeleton-bar" style="height:22%"></div></div>
+          <div class="month"><div class="bar skeleton-bar" style="height:28%"></div></div>
 
         </div>
 

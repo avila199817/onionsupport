@@ -68,6 +68,46 @@ function getInitials(name){
 }
 
 /* =========================
+   🔥 AVATAR SYSTEM (CLON FACTURAS)
+========================= */
+
+function hashString(str){
+  let hash = 0;
+  for(let i = 0; i < str.length; i++){
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return hash;
+}
+
+function getAvatarColor(name){
+  const colors = ["#6366f1","#22c55e","#eab308","#ef4444","#06b6d4","#a855f7","#f97316"];
+  return colors[Math.abs(hashString(name)) % colors.length];
+}
+
+function avatarHTML(initials, color){
+  return `
+    <div style="
+      width:100%;
+      height:100%;
+      border-radius:50%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:${color};
+      color:#fff;
+      font-weight:600;
+      font-size:12px;
+    ">
+      ${initials}
+    </div>
+  `;
+}
+
+function renderAvatar(name){
+  return avatarHTML(getInitials(name), getAvatarColor(name));
+}
+
+/* =========================
    GREETING
 ========================= */
 
@@ -219,7 +259,7 @@ function renderPendingFacturas(facturas){
 
         <td class="col-main">
           <div class="cell-user">
-            <div class="table-avatar">${getInitials(cliente)}</div>
+            <div class="table-avatar">${renderAvatar(cliente)}</div>
             <div class="user-info">
               <span class="user-name">${cliente}</span>
               <span class="user-sub">${email}</span>

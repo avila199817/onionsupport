@@ -1,4 +1,146 @@
 /* =========================
+   🔥 KPI ROW (NUEVO)
+========================= */
+
+.dashboard-kpis{
+  display:flex;
+  gap:18px;
+  align-items:stretch;
+  flex-wrap:wrap;
+}
+
+/* =========================
+   🔥 CARDS BASE
+========================= */
+
+.card-total,
+.card-kpi{
+  position:relative;
+  flex:1;
+  min-width:160px;
+
+  padding:14px 16px;
+
+  border-radius:16px;
+
+  background:linear-gradient(
+    145deg,
+    rgba(255,255,255,.04),
+    rgba(255,255,255,.02)
+  );
+
+  backdrop-filter:blur(10px);
+
+  border:1px solid rgba(255,255,255,.06);
+
+  box-shadow:
+    0 6px 20px rgba(0,0,0,.25),
+    inset 0 0 10px rgba(255,255,255,.03);
+
+  transition:
+    transform .2s ease,
+    box-shadow .2s ease,
+    border .2s ease;
+}
+
+/* HOVER PRO */
+.card-total:hover,
+.card-kpi:hover{
+  transform:translateY(-3px);
+  box-shadow:
+    0 12px 30px rgba(0,0,0,.35),
+    inset 0 0 12px rgba(255,255,255,.04);
+
+  border:1px solid rgba(255,255,255,.12);
+}
+
+/* =========================
+   🔥 TEXTOS KPI
+========================= */
+
+.card-total span,
+.card-kpi span{
+  font-size:11px;
+  opacity:.55;
+  letter-spacing:.8px;
+  text-transform:uppercase;
+}
+
+.card-total strong,
+.card-kpi strong{
+  display:block;
+  margin-top:6px;
+
+  font-size:28px;
+  font-weight:700;
+  letter-spacing:.5px;
+
+  color:#fff;
+}
+
+/* =========================
+   🔥 TOTAL DESTACADO
+========================= */
+
+.card-total{
+  flex:1.4; /* 🔥 más grande que los demás */
+}
+
+.card-total strong{
+  font-size:40px;
+
+  background:linear-gradient(90deg,#ffffff,#b7dcff);
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+}
+
+/* =========================
+   🔥 COLORES POR KPI
+========================= */
+
+/* IVA */
+#home-iva{
+  color:#60a5fa; /* azul */
+}
+
+/* IRPF */
+#home-irpf{
+  color:#f87171; /* rojo */
+}
+
+/* BENEFICIO */
+#home-beneficio{
+  color:#34d399; /* verde */
+}
+
+/* FACTURAS */
+#home-total-facturas{
+  color:#facc15; /* amarillo */
+}
+
+/* =========================
+   🔥 MINI INDICADOR TOP
+========================= */
+
+.card-kpi::after{
+  content:"";
+  position:absolute;
+  top:0;
+  left:0;
+  width:100%;
+  height:2px;
+
+  background:linear-gradient(
+    90deg,
+    transparent,
+    rgba(255,255,255,.2),
+    transparent
+  );
+
+  opacity:.4;
+}
+
+/* =========================
    BASE
 ========================= */
 
@@ -19,33 +161,6 @@
   letter-spacing:.6px;
   line-height:var(--line-tight);
   margin:0;
-
-  background:linear-gradient(90deg,#ffffff,#b7dcff);
-  -webkit-background-clip:text;
-  -webkit-text-fill-color:transparent;
-}
-
-/* =========================
-   🔥 TOTAL
-========================= */
-
-.card-total{
-  padding:var(--space-xs) var(--space-sm);
-}
-
-.card-total span{
-  font-size:var(--font-xs);
-  opacity:.55;
-  letter-spacing:.6px;
-  text-transform:uppercase;
-}
-
-.card-total strong{
-  display:block;
-  margin-top:var(--space-xs);
-  font-size:42px;
-  font-weight:700;
-  letter-spacing:1px;
 
   background:linear-gradient(90deg,#ffffff,#b7dcff);
   -webkit-background-clip:text;
@@ -120,7 +235,7 @@
 }
 
 /* =========================
-   🔥 STACK (CURVA CONTROLADA)
+   🔥 STACK
 ========================= */
 
 .bar-paid,
@@ -132,7 +247,6 @@
   overflow:hidden;
 }
 
-/* PAGADO */
 .bar-paid{
   background:linear-gradient(180deg,#34d399,#059669);
 
@@ -141,7 +255,6 @@
     inset 0 0 6px rgba(255,255,255,.06);
 }
 
-/* PENDIENTE */
 .bar-pending{
   background:linear-gradient(180deg,#f87171,#dc2626);
 
@@ -151,7 +264,7 @@
 }
 
 /* =========================
-   🔥 BRILLO SUPERIOR
+   🔥 BRILLO
 ========================= */
 
 .bar-paid::before,
@@ -173,13 +286,12 @@
 }
 
 /* =========================
-   🔥 LABEL DENTRO (CLAVE 🔥)
+   🔥 LABEL
 ========================= */
 
 .bar-label{
   position:absolute;
-
-  top:8px; /* 🔥 dentro con aire */
+  top:8px;
   left:50%;
   transform:translateX(-50%);
 
@@ -209,13 +321,12 @@
   pointer-events:none;
 }
 
-/* NEGATIVE */
 .bar-label.negative{
   color:#fecaca;
 }
 
 /* =========================
-   🔥 MES
+   🔥 MES LABEL
 ========================= */
 
 .bar::before{

@@ -12,6 +12,10 @@ if(!Onion){
 let initialized = false;
 let factura = null;
 
+/* 🔥 CONTROL PRO */
+let currentRequestId = 0;
+let currentAbort = null;
+
 /* =========================
    ROOT
 ========================= */
@@ -23,6 +27,18 @@ function getRoot(){
 function $(selector){
   const root = getRoot();
   return root ? root.querySelector(selector) : null;
+}
+
+/* =========================
+   LOADER
+========================= */
+
+function setLoading(active){
+  const root = getRoot();
+  if(!root) return;
+
+  if(active) root.classList.add("loading");
+  else root.classList.remove("loading");
 }
 
 /* =========================
@@ -52,6 +68,8 @@ function init(){
   Onion.onCleanup(()=>{
     initialized = false;
     factura = null;
+
+    if(currentAbort) currentAbort.abort();
   });
 
 }
@@ -73,30 +91,61 @@ function getIdFromURL(){
 
 function bindEvents(){
 
-  $("#btn-back")?.addEventListener("click", ()=>{
-    Onion.router.navigate("/facturas");
-  });
+  const root = getRoot();
+  if(!root) return;
 
-  $("#btn-ver-factura")?.addEventListener("click", openFactura);
-  $("#btn-descargar-factura")?.addEventListener("click", downloadFactura);
+  Onion.cleanupEvent(root, "click", (e)=>{
+
+    const t = e.target;
+
+    if(t.id === "btn-back"){
+      Onion.router.navigate("/facturas");
+    }
+
+    if(t.id === "btn-ver-factura"){
+      openFactura();
+    }
+
+    if(t.id === "btn-descargar-factura"){
+      downloadFactura();
+    }
+
+    if(t.id === "btn-ver-doc"){
+      openFactura();
+    }
+
+    if(t.id === "btn-descargar-doc"){
+      downloadFactura();
+    }
+
+  });
 
 }
 
 /* =========================
-   LOAD
+   LOAD (🔥 PRO)
 ========================= */
 
 async function loadFactura(id){
+
+  const requestId = ++currentRequestId;
+
+  if(currentAbort) currentAbort.abort();
+  currentAbort = new AbortController();
+
+  setLoading(true);
 
   try{
 
     const res = await fetch(Onion.config.API + "/facturas/" + id, {
       headers: {
         Authorization: "Bearer " + Onion.auth.getToken()
-      }
+      },
+      signal: currentAbort.signal
     });
 
-    // 🔥 CONTROL SAAS PRO
+    if(requestId !== currentRequestId) return;
+
     if(!res.ok){
 
       if(res.status === 403 || res.status === 404){
@@ -109,6 +158,8 @@ async function loadFactura(id){
 
     const json = await res.json();
 
+    if(requestId !== currentRequestId) return;
+
     factura = normalizeFactura(json?.factura || json?.data || json);
 
     if(!factura){
@@ -119,14 +170,24 @@ async function loadFactura(id){
     render();
 
   }catch(e){
+
+    if(e.name === "AbortError") return;
+
     console.error("💥 ERROR FACTURA DETALLE:", e);
     showNotFound();
+
+  }finally{
+
+    if(requestId === currentRequestId){
+      setLoading(false);
+    }
+
   }
 
 }
 
 /* =========================
-   ERROR SAAS UI 🔥
+   ERROR UI
 ========================= */
 
 function showNotFound(){
@@ -219,11 +280,9 @@ function render(){
   $("#detalle-descripcion").textContent = factura.descripcion || "-";
 
   const estadoEl = $("#detalle-estado");
-  const estado = factura.estadoPago;
-
   if(estadoEl){
-    estadoEl.textContent = formatEstado(estado);
-    estadoEl.dataset.estado = estado;
+    estadoEl.textContent = formatEstado(factura.estadoPago);
+    estadoEl.dataset.estado = factura.estadoPago;
   }
 
   $("#detalle-iva").textContent = factura.iva + "%";
@@ -266,9 +325,6 @@ function renderSidebar(){
       </div>
     </div>
   `;
-
-  $("#btn-ver-doc")?.addEventListener("click", openFactura);
-  $("#btn-descargar-doc")?.addEventListener("click", downloadFactura);
 
 }
 
@@ -350,7 +406,6 @@ function renderAvatar(cliente){
   }
 
   el.innerHTML = `<div class="avatar-fallback">${getInitials(cliente.nombre)}</div>`;
-
 }
 
 })();

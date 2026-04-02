@@ -89,7 +89,7 @@ function bindEvents(){
    ACTIONS
 ========================= */
 
-function handleAction(btn){
+async function handleAction(btn){
 
   const id = btn.dataset.id;
   if(!id) return;
@@ -99,7 +99,27 @@ function handleAction(btn){
   }
 
   if(btn.classList.contains("download")){
-    window.open(Onion.config.API + "/facturas/" + id + "/descargar");
+
+    try{
+
+      const res = await Onion.fetch(
+        Onion.config.API + "/facturas/" + id + "/descargar"
+      );
+
+      if(!res || !res.ok || !res.url){
+        console.error("❌ ERROR DESCARGA", res);
+        alert("Error descargando PDF");
+        return;
+      }
+
+      // 🔥 ABRE EL PDF REAL DESDE AZURE
+      window.open(res.url, "_blank");
+
+    }catch(e){
+      console.error("💥 ERROR DOWNLOAD:", e);
+      alert("Error descargando PDF");
+    }
+
   }
 
   if(btn.classList.contains("pay")){
@@ -291,7 +311,7 @@ function render(items){
 }
 
 /* =========================
-   MAP
+   MAP + HELPERS (INTACTO)
 ========================= */
 
 function mapItem(f){
@@ -331,34 +351,20 @@ function mapItem(f){
 
 }
 
-/* =========================
-   CLEANERS
-========================= */
-
 function cleanValue(val, fallback){
-
   if(!val) return fallback;
-
   let v = String(val).trim();
-
   v = v.replace(/^'+|'+$/g, "");
-
   const lower = v.toLowerCase();
-
   if(lower === "null" || lower === "undefined" || lower === "-"){
     return fallback;
   }
-
   return v;
 }
 
 function safeText(val){
   return String(cleanValue(val, "")).toLowerCase();
 }
-
-/* =========================
-   AVATAR
-========================= */
 
 function renderAvatar(name){
   return avatarHTML(getInitials(name), getAvatarColor(name));
@@ -386,10 +392,6 @@ function avatarHTML(initials, color){
     </div>
   `;
 }
-
-/* =========================
-   HELPERS
-========================= */
 
 function hashString(str){
   let hash = 0;

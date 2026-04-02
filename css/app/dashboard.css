@@ -1,5 +1,5 @@
 /* =========================
-   🔥 KPI ROW (NUEVO)
+   🔥 KPI ROW
 ========================= */
 
 .dashboard-kpis{
@@ -43,7 +43,6 @@
     border .2s ease;
 }
 
-/* HOVER PRO */
 .card-total:hover,
 .card-kpi:hover{
   transform:translateY(-3px);
@@ -83,7 +82,7 @@
 ========================= */
 
 .card-total{
-  flex:1.4; /* 🔥 más grande que los demás */
+  flex:1.4;
 }
 
 .card-total strong{
@@ -95,31 +94,16 @@
 }
 
 /* =========================
-   🔥 COLORES POR KPI
+   🔥 COLORES KPI
 ========================= */
 
-/* IVA */
-#home-iva{
-  color:#60a5fa; /* azul */
-}
-
-/* IRPF */
-#home-irpf{
-  color:#f87171; /* rojo */
-}
-
-/* BENEFICIO */
-#home-beneficio{
-  color:#34d399; /* verde */
-}
-
-/* FACTURAS */
-#home-total-facturas{
-  color:#facc15; /* amarillo */
-}
+#home-iva{ color:#60a5fa; }
+#home-irpf{ color:#f87171; }
+#home-beneficio{ color:#34d399; }
+#home-total-facturas{ color:#facc15; }
 
 /* =========================
-   🔥 MINI INDICADOR TOP
+   🔥 MINI TOP LINE
 ========================= */
 
 .card-kpi::after{
@@ -176,7 +160,7 @@
 }
 
 /* =========================
-   🔥 AREA GRAFICO
+   🔥 AREA
 ========================= */
 
 .chart-area{
@@ -213,26 +197,47 @@
 }
 
 /* =========================
-   🔥 BARRA BASE
+   🔥 BARRA (ANIMACIÓN PRO)
 ========================= */
 
 .bar{
   position:relative;
   width:100%;
-  height:0%;
-  min-height:2px;
+  height:100%;
 
   display:flex;
   flex-direction:column;
   justify-content:flex-end;
 
-  overflow:visible;
+  transform:scaleY(0);
+  transform-origin:bottom;
 
   transition:
-    height .9s var(--ease-out),
-    transform var(--duration-fast) var(--ease-out),
-    filter var(--duration-fast) var(--ease-out);
+    transform 1s cubic-bezier(.22,1,.36,1),
+    filter .2s ease;
 }
+
+/* ACTIVAR CRECIMIENTO */
+.bar.animate{
+  transform:scaleY(1);
+}
+
+/* =========================
+   🔥 DELAY PROGRESIVO
+========================= */
+
+.month:nth-child(1) .bar{ transition-delay:.05s; }
+.month:nth-child(2) .bar{ transition-delay:.1s; }
+.month:nth-child(3) .bar{ transition-delay:.15s; }
+.month:nth-child(4) .bar{ transition-delay:.2s; }
+.month:nth-child(5) .bar{ transition-delay:.25s; }
+.month:nth-child(6) .bar{ transition-delay:.3s; }
+.month:nth-child(7) .bar{ transition-delay:.35s; }
+.month:nth-child(8) .bar{ transition-delay:.4s; }
+.month:nth-child(9) .bar{ transition-delay:.45s; }
+.month:nth-child(10) .bar{ transition-delay:.5s; }
+.month:nth-child(11) .bar{ transition-delay:.55s; }
+.month:nth-child(12) .bar{ transition-delay:.6s; }
 
 /* =========================
    🔥 STACK
@@ -346,8 +351,7 @@
 ========================= */
 
 .month:hover .bar{
-  transform:scaleY(1.04);
-  filter:brightness(1.05);
+  filter:brightness(1.08);
 }
 
 /* =========================
@@ -359,12 +363,15 @@
 }
 
 /* =========================
-   🔥 SKELETON
+   🔥 SKELETON (CRECIMIENTO)
 ========================= */
 
 .skeleton-bar{
   width:100%;
   border-radius:18px;
+
+  transform:scaleY(0);
+  transform-origin:bottom;
 
   background:linear-gradient(
     90deg,
@@ -374,12 +381,20 @@
   );
 
   background-size:200% 100%;
-  animation:skeleton-loading 1.2s infinite linear;
+
+  animation:
+    skeleton-loading 1.2s infinite linear,
+    grow-bar 1s cubic-bezier(.22,1,.36,1) forwards;
 }
 
 @keyframes skeleton-loading{
   0%{ background-position:200% 0; }
   100%{ background-position:-200% 0; }
+}
+
+@keyframes grow-bar{
+  from{ transform:scaleY(0); }
+  to{ transform:scaleY(1); }
 }
 
 /* =========================

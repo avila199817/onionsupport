@@ -212,7 +212,7 @@
 }
 
 /* =========================
-   🔥 BARRA
+   🔥 BARRA (ANIMACIÓN PRO)
 ========================= */
 
 .bar{
@@ -237,7 +237,7 @@
 }
 
 /* =========================
-   🔥 DELAY
+   🔥 DELAY PROGRESIVO
 ========================= */
 
 .month:nth-child(1) .bar{ transition-delay:.05s; }
@@ -257,34 +257,40 @@
    🔥 STACK
 ========================= */
 
+.bar-paid,
+.bar-pending{
+  width:100%;
+  position:relative;
+
+  border-radius:18px 18px 10px 10px;
+  overflow:hidden;
+}
+
 .bar-paid{
   background:linear-gradient(180deg,#34d399,#059669);
-  border-radius:18px 18px 10px 10px;
 }
 
 .bar-pending{
   background:linear-gradient(180deg,#f87171,#dc2626);
-  border-radius:18px 18px 10px 10px;
 }
 
 /* =========================
-   🔥 NUEVO: FACTURAS PENDIENTES
+   🔥 NUEVO BLOQUE (NO ROMPE NADA)
 ========================= */
 
 .dashboard-pending{
   margin-top:var(--space-xl);
 }
 
-/* HEADER */
 .dashboard-section-header{
   display:flex;
   justify-content:space-between;
   align-items:center;
-  margin-bottom:var(--space-md);
+  margin-bottom:12px;
 }
 
 .dashboard-section-header h2{
-  font-size:16px;
+  font-size:15px;
   font-weight:600;
   color:#fff;
 }
@@ -294,15 +300,7 @@
   opacity:.6;
 }
 
-/* TABLA COMPACTA */
-.table-system.facturas.compact{
-  padding:0;
-  background:transparent;
-  border:none;
-  box-shadow:none;
-}
-
-/* CONTENEDOR */
+/* reutiliza tu sistema de tablas */
 .dashboard-pending .table-container{
   border-radius:16px;
   overflow:hidden;
@@ -319,16 +317,12 @@
     0 6px 20px rgba(0,0,0,.25);
 }
 
-/* FILAS */
-.dashboard-pending tbody tr{
-  transition:background .15s ease;
-}
-
+/* hover fino */
 .dashboard-pending tbody tr:hover{
   background:rgba(255,255,255,.03);
 }
 
-/* BADGE PENDIENTE MÁS FINO */
+/* badge pendiente */
 .dashboard-pending .badge.warning{
   background:rgba(248,113,113,.15);
   color:#f87171;

@@ -128,7 +128,6 @@
   width:100%;
   position:relative;
 
-  /* 🔥 AQUÍ ESTÁ EL BALANCE */
   border-radius:18px 18px 10px 10px;
   overflow:hidden;
 }
@@ -152,7 +151,7 @@
 }
 
 /* =========================
-   🔥 BRILLO SUAVE ARRIBA
+   🔥 BRILLO SUPERIOR
 ========================= */
 
 .bar-paid::before,
@@ -174,21 +173,17 @@
 }
 
 /* =========================
-   🔥 LABEL
+   🔥 LABEL DENTRO (CLAVE 🔥)
 ========================= */
 
 .bar-label{
   position:absolute;
-  top:-20px;
+
+  top:8px; /* 🔥 dentro con aire */
   left:50%;
   transform:translateX(-50%);
 
-  min-width:60%;
-  padding:6px 12px;
-
-  display:flex;
-  justify-content:center;
-  align-items:center;
+  padding:5px 10px;
 
   font-size:var(--font-xs);
   font-weight:600;
@@ -197,23 +192,26 @@
 
   background:linear-gradient(
     180deg,
-    rgba(40,40,40,.95),
-    rgba(20,20,20,.85)
+    rgba(0,0,0,.55),
+    rgba(0,0,0,.35)
   );
 
-  backdrop-filter:blur(10px);
+  backdrop-filter:blur(6px);
 
-  color:#f9fafb;
+  color:#fff;
 
   box-shadow:
-    0 8px 20px rgba(0,0,0,.4),
-    inset 0 0 8px rgba(255,255,255,.04);
+    0 4px 12px rgba(0,0,0,.35),
+    inset 0 0 6px rgba(255,255,255,.05);
 
   border:1px solid rgba(255,255,255,.08);
 
   pointer-events:none;
+}
 
-  transition:all var(--duration-fast) var(--ease-out);
+/* NEGATIVE */
+.bar-label.negative{
+  color:#fecaca;
 }
 
 /* =========================

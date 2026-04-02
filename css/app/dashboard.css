@@ -72,25 +72,7 @@
 }
 
 /* =========================
-   GRID SUAVE
-========================= */
-
-.chart-grid{
-  position:absolute;
-  inset:0;
-  display:flex;
-  flex-direction:column;
-  justify-content:space-between;
-  opacity:.05;
-  pointer-events:none;
-}
-
-.chart-grid span{
-  border-top:1px dashed rgba(255,255,255,.04);
-}
-
-/* =========================
-   🔥 GRID BARRAS
+   🔥 GRID
 ========================= */
 
 .year-grid{
@@ -131,8 +113,6 @@
 
   overflow:visible;
 
-  border-radius:var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-sm);
-
   transition:
     height .9s var(--ease-out),
     transform var(--duration-fast) var(--ease-out),
@@ -140,13 +120,17 @@
 }
 
 /* =========================
-   🔥 STACK
+   🔥 STACK OVALADO PRO
 ========================= */
 
 .bar-paid,
 .bar-pending{
   width:100%;
   position:relative;
+
+  /* 🔥 CLAVE */
+  border-radius:999px 999px 12px 12px;
+  overflow:hidden;
 }
 
 /* PAGADO */
@@ -154,8 +138,8 @@
   background:linear-gradient(180deg,#34d399,#059669);
 
   box-shadow:
-    var(--shadow-soft),
-    inset 0 0 6px rgba(255,255,255,.06);
+    0 10px 25px rgba(16,185,129,.25),
+    inset 0 0 8px rgba(255,255,255,.08);
 }
 
 /* PENDIENTE */
@@ -163,17 +147,41 @@
   background:linear-gradient(180deg,#f87171,#dc2626);
 
   box-shadow:
-    var(--shadow-soft),
-    inset 0 0 6px rgba(255,255,255,.05);
+    0 10px 25px rgba(220,38,38,.25),
+    inset 0 0 8px rgba(255,255,255,.06);
 }
 
 /* =========================
-   🔥 LABEL PRO ULTRA FINO
+   🔥 CAPA SUPERIOR (EFECTO OVAL)
+========================= */
+
+.bar-paid::before,
+.bar-pending::before{
+  content:"";
+  position:absolute;
+  top:0;
+  left:0;
+  width:100%;
+  height:14px;
+
+  border-radius:999px;
+
+  background:linear-gradient(
+    to bottom,
+    rgba(255,255,255,.25),
+    rgba(255,255,255,0)
+  );
+
+  pointer-events:none;
+}
+
+/* =========================
+   🔥 LABEL
 ========================= */
 
 .bar-label{
   position:absolute;
-  top:-20px;
+  top:-22px;
   left:50%;
   transform:translateX(-50%);
 
@@ -200,7 +208,7 @@
   color:#f9fafb;
 
   box-shadow:
-    0 8px 22px rgba(0,0,0,.4),
+    0 10px 30px rgba(0,0,0,.45),
     inset 0 0 10px rgba(255,255,255,.05);
 
   border:1px solid rgba(255,255,255,.08);
@@ -210,22 +218,8 @@
   transition:all var(--duration-fast) var(--ease-out);
 }
 
-/* COLOR POR TIPO */
-
-.bar-paid .bar-label{
-  border-color:rgba(34,197,94,.4);
-}
-
-.bar-pending .bar-label{
-  border-color:rgba(239,68,68,.4);
-}
-
-.bar-label.negative{
-  color:#fecaca;
-}
-
 /* =========================
-   🔥 MES LABEL
+   🔥 MES
 ========================= */
 
 .bar::before{
@@ -245,27 +239,8 @@
 ========================= */
 
 .month:hover .bar{
-  transform:scaleY(1.05);
-  filter:brightness(1.05);
-}
-
-.month:hover .bar-paid{
-  box-shadow:
-    0 0 20px rgba(16,185,129,.4),
-    var(--shadow-strong);
-}
-
-.month:hover .bar-pending{
-  box-shadow:
-    0 0 20px rgba(220,38,38,.4),
-    var(--shadow-strong);
-}
-
-.month:hover .bar-label{
-  transform:translateX(-50%) translateY(-4px);
-  box-shadow:
-    0 12px 28px rgba(0,0,0,.5),
-    inset 0 0 10px rgba(255,255,255,.06);
+  transform:scaleY(1.06);
+  filter:brightness(1.08);
 }
 
 /* =========================
@@ -277,46 +252,22 @@
 }
 
 /* =========================
-   🔥 SKELETON LOADER PRO
+   🔥 SKELETON
 ========================= */
-
-.skeleton-grid{
-  opacity:.6;
-}
 
 .skeleton-bar{
   width:100%;
-  border-radius:var(--radius-lg);
+  border-radius:999px;
 
   background:linear-gradient(
     90deg,
-    rgba(255,255,255,.04) 25%,
-    rgba(255,255,255,.08) 50%,
-    rgba(255,255,255,.04) 75%
-  );
-
-  background-size:200% 100%;
-
-  animation:skeleton-loading 1.2s infinite linear;
-}
-
-.skeleton-text{
-  display:inline-block;
-  min-width:120px;
-  height:32px;
-
-  background:linear-gradient(
-    90deg,
-    rgba(255,255,255,.05),
-    rgba(255,255,255,.1),
-    rgba(255,255,255,.05)
+    rgba(255,255,255,.04),
+    rgba(255,255,255,.08),
+    rgba(255,255,255,.04)
   );
 
   background-size:200% 100%;
   animation:skeleton-loading 1.2s infinite linear;
-
-  border-radius:var(--radius-sm);
-  color:transparent;
 }
 
 @keyframes skeleton-loading{
@@ -325,7 +276,7 @@
 }
 
 /* =========================
-   ANIMACIÓN PANEL
+   PANEL
 ========================= */
 
 .panel-content.dashboard{

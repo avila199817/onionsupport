@@ -1,0 +1,122 @@
+<div class="panel-content user-create">
+
+  <div class="layout-split">
+
+    <!-- =========================
+         LEFT (FORM)
+    ========================= -->
+    <div class="incidencia-left">
+
+      <!-- HEADER -->
+      <div class="filters-row">
+
+        <div class="header-left">
+          <div class="page-title">
+            Crear usuario 👤
+          </div>
+          <div class="page-subtitle">
+            Añade un nuevo usuario al sistema
+          </div>
+        </div>
+
+        <button id="btn-back">
+          ← Volver
+        </button>
+
+      </div>
+
+
+      <!-- BODY -->
+      <div class="incidencia-body">
+
+        <div class="incidencia-form">
+
+          <!-- NOMBRE -->
+          <input 
+            type="text"
+            id="user-name"
+            placeholder="Nombre completo"
+            autocomplete="off"
+          >
+
+          <!-- EMAIL -->
+          <input 
+            type="email"
+            id="user-email"
+            placeholder="Email"
+            autocomplete="off"
+          >
+
+          <!-- PASSWORD -->
+          <input 
+            type="password"
+            id="user-password"
+            placeholder="Contraseña"
+          >
+
+          <!-- ROL -->
+          <select id="user-role">
+            <option value="">Seleccionar rol</option>
+            <option value="admin">Administrador</option>
+            <option value="user">Usuario</option>
+          </select>
+
+          <!-- ESTADO -->
+          <select id="user-status">
+            <option value="activo">Activo</option>
+            <option value="inactivo">Inactivo</option>
+          </select>
+
+          <!-- FOOTER -->
+          <div class="incidencia-footer">
+
+            <div class="incidencia-hint">
+              Asegúrate de que el email sea válido
+            </div>
+
+            <button id="btn-save-user">
+              Crear usuario
+            </button>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+
+
+    <!-- =========================
+         RIGHT (INFO / PREVIEW)
+    ========================= -->
+    <aside class="incidencia-right">
+
+      <div class="incidencia-history">
+
+        <div class="history-header">
+          Vista previa
+        </div>
+
+        <div class="history-list" id="user-preview">
+
+          <div class="cell-user" style="padding:10px;">
+
+            <div class="table-avatar" id="preview-avatar">?</div>
+
+            <div class="user-info">
+              <span class="user-name" id="preview-name">Nombre</span>
+              <span class="user-sub" id="preview-email">email@email.com</span>
+            </div>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </aside>
+
+  </div>
+
+</div>

@@ -78,10 +78,10 @@ function setGreeting(){
 }
 
 /* =========================
-   🔥 BUILD YEAR DATA (REAL)
+   🔥 BUILD YEAR DATA (DESDE DASHBOARD)
 ========================= */
 
-function buildYearData(facturas){
+function buildYearData(evolucion){
 
   const currentYear = new Date().getFullYear();
 
@@ -90,67 +90,26 @@ function buildYearData(facturas){
     pending: 0
   }));
 
-  if(!Array.isArray(facturas)) return yearData;
+  if(!Array.isArray(evolucion)) return yearData;
 
-  facturas.forEach(f => {
+  evolucion.forEach(m => {
 
-    if(!f?.fechaFactura) return;
+    if(!m?.mes) return;
 
-    const date = new Date(f.fechaFactura);
-    const year = date.getFullYear();
-    const monthIndex = date.getMonth();
+    const [yearStr, mesStr] = m.mes.split("-");
+    const year = Number(yearStr);
+    const monthIndex = Number(mesStr) - 1;
 
     if(year !== currentYear) return;
 
-    const base = safe(f.baseImponible);
-
-    if(f.estadoPago === "pagada"){
-      yearData[monthIndex].paid += base;
-    } else {
-      yearData[monthIndex].pending += base;
-    }
+    yearData[monthIndex] = {
+      paid: safe(m.pagado),
+      pending: safe(m.pendiente)
+    };
 
   });
 
   return yearData;
-}
-
-/* =========================
-   🔥 KPI CALC REAL (PRO)
-========================= */
-
-function calculateKPIs(facturas){
-
-  let totalCobrado = 0;
-  let totalIVA = 0;
-  let totalIRPF = 0;
-  let totalPendiente = 0;
-
-  facturas.forEach(f => {
-
-    const base = safe(f.baseImponible);
-    const iva = safe(f.impuestos?.[0]?.importe);
-    const irpf = safe(f.irpf);
-
-    if(f.estadoPago === "pagada"){
-      totalCobrado += base;
-      totalIVA += iva;
-      totalIRPF += irpf;
-    } else {
-      totalPendiente += base;
-    }
-
-  });
-
-  const beneficio = totalCobrado - totalIRPF;
-
-  return {
-    totalCobrado,
-    totalIVA,
-    totalIRPF,
-    totalPendiente,
-    beneficio
-  };
 }
 
 /* =========================
@@ -217,25 +176,27 @@ function renderYearRevenue(data){
 }
 
 /* =========================
-   🔥 DATA
+   🔥 DATA (DESDE /dashboard)
 ========================= */
 
 async function loadDashboardData(){
 
   try {
 
-    const res = await Onion.fetch(API + "/facturas"); // 🔥 usamos facturas reales
-    const facturas = res?.data || [];
+    const res = await Onion.fetch(API + "/dashboard");
+    const data = res?.data || {};
 
-    const yearData = buildYearData(facturas);
-    const kpis = calculateKPIs(facturas);
+    const resumen = data.resumen || {};
+    const evolucion = data.charts?.evolucionMensual || [];
 
     // 🔥 KPIs REALES
-    setText("home-facturas", formatMoney(kpis.totalCobrado));
-    setText("home-iva", formatMoney(kpis.totalIVA));
-    setText("home-irpf", formatMoney(kpis.totalIRPF));
-    setText("home-beneficio", formatMoney(kpis.beneficio));
-    setText("home-pendiente", formatMoney(kpis.totalPendiente));
+    setText("home-facturas", formatMoney(resumen.totalCobrado));
+    setText("home-iva", formatMoney(resumen.totalIVA));
+    setText("home-irpf", formatMoney(resumen.totalIRPF));
+    setText("home-beneficio", formatMoney(resumen.beneficio));
+    setText("home-pendiente", formatMoney(resumen.totalPendiente));
+
+    const yearData = buildYearData(evolucion);
 
     hideLoader();
     renderYearRevenue(yearData);

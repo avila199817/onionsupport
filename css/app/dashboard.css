@@ -429,3 +429,63 @@
   opacity:1;
   transform:translateY(0);
 }
+
+
+/* =========================
+   🔥 DASHBOARD PENDIENTES (ADD-ON)
+   NO TOCA NADA EXISTENTE
+========================= */
+
+.dashboard-pending{
+  margin-top:32px;
+}
+
+/* HEADER */
+.dashboard-section-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:14px;
+}
+
+.dashboard-section-header h2{
+  font-size:14px;
+  font-weight:600;
+  color:#fff;
+  letter-spacing:.4px;
+}
+
+#pending-count{
+  font-size:12px;
+  opacity:.6;
+}
+
+/* CONTENEDOR (usa tu estilo base sin romperlo) */
+.dashboard-pending .table-container{
+  border-radius:16px;
+  overflow:hidden;
+}
+
+/* HOVER SUAVE (no agresivo) */
+.dashboard-pending tbody tr:hover{
+  background:rgba(255,255,255,.025);
+}
+
+/* BADGE PENDIENTE (coherente con tu rojo actual) */
+.dashboard-pending .badge.warning{
+  background:rgba(248,113,113,.12);
+  color:#f87171;
+  border:1px solid rgba(248,113,113,.2);
+}
+
+/* AVATAR UN POCO MÁS FINO SOLO EN DASHBOARD */
+.dashboard-pending .table-avatar{
+  font-size:11px;
+  opacity:.85;
+}
+
+/* ACCIONES MÁS COMPACTAS SOLO AQUÍ */
+.dashboard-pending .btn-action{
+  padding:4px 8px;
+  font-size:11px;
+}

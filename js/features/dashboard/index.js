@@ -84,7 +84,7 @@ function buildYearData(evolucion){
 
   const currentYear = new Date().getFullYear();
 
-  const yearData = new Array(12).fill(0).map(()=>({
+  const yearData = new Array(12).fill(0).map(() => ({
     paid: 0,
     pending: 0
   }));
@@ -132,13 +132,14 @@ function renderYearRevenue(data){
       <div class="month ${total === 0 ? "empty" : ""}">
         <div class="bar" data-month="${months[i]}" style="height:0%">
 
-          <div class="bar-paid" style="height:0%">
-            ${d.paid ? `<span class="value-paid">${formatMoney(d.paid)}</span>` : ""}
-          </div>
+          ${
+            total > 0
+              ? `<span class="bar-label">${formatMoney(total)}</span>`
+              : ""
+          }
 
-          <div class="bar-pending" style="height:0%">
-            ${d.pending ? `<span class="value-pending">- ${formatMoney(d.pending)}</span>` : ""}
-          </div>
+          <div class="bar-paid" style="height:0%"></div>
+          <div class="bar-pending" style="height:0%"></div>
 
         </div>
       </div>
@@ -167,7 +168,7 @@ function renderYearRevenue(data){
         paidEl.style.height = paidPercent + "%";
         pendingEl.style.height = pendingPercent + "%";
 
-      }, i * 50);
+      }, i * 60);
 
     });
 
@@ -190,7 +191,6 @@ async function loadDashboardData(){
       return;
     }
 
-    // 🔥 CORREGIDO
     setText("home-facturas", formatMoney(data?.resumen?.totalCobrado));
 
     const evolucion = data?.charts?.evolucionMensual || [];

@@ -155,14 +155,21 @@ function renderYearRevenue(data){
       <div class="month ${total === 0 ? "empty" : ""}">
         <div class="bar" data-month="${months[i]}" style="height:${total === 0 ? 2 : percent}%">
 
-          ${
-            total > 0
-              ? `<span class="bar-label">${formatMoney(total)}</span>`
-              : ""
-          }
+          <div class="bar-paid" style="height:${paidPercent}%">
+            ${
+              d.paid > 0
+                ? `<span class="bar-label">${formatMoney(d.paid)}</span>`
+                : ""
+            }
+          </div>
 
-          <div class="bar-paid" style="height:${paidPercent}%"></div>
-          <div class="bar-pending" style="height:${pendingPercent}%"></div>
+          <div class="bar-pending" style="height:${pendingPercent}%">
+            ${
+              d.pending > 0
+                ? `<span class="bar-label negative">- ${formatMoney(d.pending)}</span>`
+                : ""
+            }
+          </div>
 
         </div>
       </div>
@@ -171,7 +178,6 @@ function renderYearRevenue(data){
 
   container.innerHTML = html;
 
-  // 🔥 animación suave
   requestAnimationFrame(()=>{
     container.querySelectorAll(".bar").forEach((bar, i)=>{
       bar.style.transform = "scaleY(0.92)";

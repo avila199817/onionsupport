@@ -9,7 +9,6 @@ if(!Onion){
   return;
 }
 
-let interval = null;
 let initialized = false;
 let loading = false;
 
@@ -69,7 +68,7 @@ function getInitials(name){
 }
 
 /* =========================
-   🔥 GREETING
+   GREETING
 ========================= */
 
 function setGreeting(){
@@ -94,7 +93,7 @@ function setGreeting(){
 }
 
 /* =========================
-   🔥 BUILD YEAR DATA
+   BUILD YEAR DATA
 ========================= */
 
 function buildYearData(evolucion){
@@ -129,24 +128,7 @@ function buildYearData(evolucion){
 }
 
 /* =========================
-   🔥 LOADER
-========================= */
-
-function showLoader(){
-  const container = getRoot()?.querySelector(".year-grid");
-  if(!container) return;
-  container.classList.add("skeleton-grid");
-}
-
-function hideLoader(){
-  const container = getRoot()?.querySelector(".year-grid");
-  if(!container) return;
-  container.classList.remove("skeleton-grid");
-  container.innerHTML = "";
-}
-
-/* =========================
-   🔥 RENDER CHART
+   RENDER CHART
 ========================= */
 
 function renderYearRevenue(data){
@@ -192,7 +174,7 @@ function renderYearRevenue(data){
 }
 
 /* =========================
-   🔥 RENDER PENDIENTES
+   RENDER PENDIENTES
 ========================= */
 
 function renderPendingFacturas(facturas){
@@ -203,8 +185,8 @@ function renderPendingFacturas(facturas){
   if(!tbody) return;
 
   const pendientes = (facturas || [])
-    .filter(f => (f.estadoPago || "").toLowerCase() !== "pagada")
-    .sort((a,b) => safe(b.baseImponible) - safe(a.baseImponible))
+    .filter(f => f.estadoPago !== "pagada")
+    .sort((a,b) => safe(b.total) - safe(a.total))
     .slice(0,5);
 
   if(countEl){
@@ -224,12 +206,11 @@ function renderPendingFacturas(facturas){
 
   const html = pendientes.map(f => {
 
-    const cliente = f.cliente?.nombreContacto || "Sin nombre";
-    const empresa = f.cliente?.razonSocial || "";
-    const email = f.emailCliente || "";
-    const fecha = formatDate(f.fechaFactura);
+    const cliente = f.cliente?.nombre || "Cliente";
+    const email = f.cliente?.email || "-";
+    const fecha = formatDate(f.fecha);
     const importe = formatMoney(f.total);
-    const id = f.numeroFacturaLegal || "-";
+    const id = f.numero || "-";
 
     return `
       <tr data-id="${f.id}">
@@ -270,7 +251,7 @@ function renderPendingFacturas(facturas){
 }
 
 /* =========================
-   🔥 DATA
+   DATA
 ========================= */
 
 async function loadDashboardData(){
@@ -283,33 +264,27 @@ async function loadDashboardData(){
     const resumen = data.resumen || {};
     const evolucion = data.charts?.evolucionMensual || [];
 
-    // KPIs
     setText("home-facturas", formatMoney(resumen.totalCobrado));
     setText("home-iva", formatMoney(resumen.totalIVA));
     setText("home-irpf", formatMoney(resumen.totalIRPF));
     setText("home-beneficio", formatMoney(resumen.beneficio));
     setText("home-pendiente", formatMoney(resumen.totalPendiente));
 
-    const yearData = buildYearData(evolucion);
+    renderYearRevenue(buildYearData(evolucion));
 
-    hideLoader();
-    renderYearRevenue(yearData);
-
-    // 🔥 NUEVO FETCH FACTURAS
     const resFacturas = await Onion.fetch(API + "/facturas");
-    const facturas = resFacturas?.data || [];
+    const facturas = resFacturas?.facturas || [];
 
     renderPendingFacturas(facturas);
 
   } catch(e){
 
     console.error("💥 Dashboard error:", e);
-    hideLoader();
   }
 }
 
 /* =========================
-   🔥 LOAD
+   LOAD
 ========================= */
 
 async function loadDashboard(){
@@ -317,23 +292,18 @@ async function loadDashboard(){
   if(loading) return;
   loading = true;
 
-  const panel = getRoot();
-  panel?.classList.remove("ready");
-
   setGreeting();
-  showLoader();
 
   await loadDashboardData();
 
-  requestAnimationFrame(()=>{
-    panel?.classList.add("ready");
-  });
+  const panel = getRoot();
+  panel?.classList.add("ready");
 
   loading = false;
 }
 
 /* =========================
-   🔥 INIT
+   INIT
 ========================= */
 
 function init(){
@@ -345,11 +315,8 @@ function init(){
 
   loadDashboard();
 
-  interval = setInterval(loadDashboard, 60000);
-
   Onion.onCleanup(()=>{
     initialized = false;
-    if(interval) clearInterval(interval);
   });
 }
 

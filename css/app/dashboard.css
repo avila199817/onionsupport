@@ -1,22 +1,4 @@
 /* =========================
-   LAYOUT
-========================= */
-html, body{
-  height:100%;
-}
-
-.panel-content.dashboard{
-  min-height:100%;
-  display:flex;
-  flex-direction:column;
-}
-
-.dashboard-container{
-  flex:1;
-  min-height:100%;
-}
-
-/* =========================
    🔥 KPI ROW
 ========================= */
 
@@ -456,7 +438,14 @@ html, body{
    PANEL
 ========================= */
 
+/* 🔥 IGUALAMOS A FACTURAS */
 .panel-content.dashboard{
+  display:flex;
+  flex-direction:column;
+  height:100%;
+  width:100%;
+  position:relative;
+
   opacity:0;
   transform:translateY(14px);
   transition:all var(--duration-slow) var(--ease-out);
@@ -465,6 +454,14 @@ html, body{
 .panel-content.dashboard.ready{
   opacity:1;
   transform:translateY(0);
+}
+
+/* 🔥 CONTENEDOR INTERNO */
+.dashboard-container{
+  display:flex;
+  flex-direction:column;
+  flex:1;
+  min-height:0; /* 🔥 CLAVE igual que facturas */
 }
 
 

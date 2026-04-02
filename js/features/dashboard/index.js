@@ -78,10 +78,10 @@ function setGreeting(){
 }
 
 /* =========================
-   BUILD DATA
+   🔥 BUILD YEAR DATA (REAL)
 ========================= */
 
-function buildYearData(evolucion){
+function buildYearData(facturas){
 
   const currentYear = new Date().getFullYear();
 
@@ -90,22 +90,25 @@ function buildYearData(evolucion){
     pending: 0
   }));
 
-  if(!Array.isArray(evolucion)) return yearData;
+  if(!Array.isArray(facturas)) return yearData;
 
-  evolucion.forEach(m => {
+  facturas.forEach(f => {
 
-    if(!m?.mes) return;
+    if(!f?.fechaFactura) return;
 
-    const [yearStr, mesStr] = m.mes.split("-");
-    const year = Number(yearStr);
-    const monthIndex = Number(mesStr) - 1;
+    const date = new Date(f.fechaFactura);
+    const year = date.getFullYear();
+    const monthIndex = date.getMonth();
 
     if(year !== currentYear) return;
 
-    yearData[monthIndex] = {
-      paid: safe(m.pagado),
-      pending: safe(m.pendiente)
-    };
+    const base = safe(f.baseImponible);
+
+    if(f.estadoPago === "pagada"){
+      yearData[monthIndex].paid += base;
+    } else {
+      yearData[monthIndex].pending += base;
+    }
 
   });
 
@@ -113,24 +116,41 @@ function buildYearData(evolucion){
 }
 
 /* =========================
-   🔥 KPI CALC (PRO)
+   🔥 KPI CALC REAL (PRO)
 ========================= */
 
-function calculateKPIs(data){
+function calculateKPIs(facturas){
 
-  let total = 0;
-  let totalFacturas = 0;
+  let totalCobrado = 0;
+  let totalIVA = 0;
+  let totalIRPF = 0;
+  let totalPendiente = 0;
 
-  data.forEach(d=>{
-    total += d.paid;
-    totalFacturas += (d.paid > 0 || d.pending > 0) ? 1 : 0;
+  facturas.forEach(f => {
+
+    const base = safe(f.baseImponible);
+    const iva = safe(f.impuestos?.[0]?.importe);
+    const irpf = safe(f.irpf);
+
+    if(f.estadoPago === "pagada"){
+      totalCobrado += base;
+      totalIVA += iva;
+      totalIRPF += irpf;
+    } else {
+      totalPendiente += base;
+    }
+
   });
 
-  const iva = total * 0.21;
-  const irpf = total * 0.15;
-  const beneficio = total - iva - irpf;
+  const beneficio = totalCobrado - totalIRPF;
 
-  return { total, iva, irpf, beneficio, totalFacturas };
+  return {
+    totalCobrado,
+    totalIVA,
+    totalIRPF,
+    totalPendiente,
+    beneficio
+  };
 }
 
 /* =========================
@@ -140,20 +160,18 @@ function calculateKPIs(data){
 function showLoader(){
   const container = getRoot()?.querySelector(".year-grid");
   if(!container) return;
-
   container.classList.add("skeleton-grid");
 }
 
 function hideLoader(){
   const container = getRoot()?.querySelector(".year-grid");
   if(!container) return;
-
   container.classList.remove("skeleton-grid");
   container.innerHTML = "";
 }
 
 /* =========================
-   🔥 RENDER PRO
+   🔥 RENDER CHART
 ========================= */
 
 function renderYearRevenue(data){
@@ -177,19 +195,11 @@ function renderYearRevenue(data){
         <div class="bar" data-month="${months[i]}" style="height:${total === 0 ? 2 : percent}%">
 
           <div class="bar-paid" style="height:${paidPercent}%">
-            ${
-              d.paid > 0
-                ? `<span class="bar-label">${formatMoney(d.paid)}</span>`
-                : ""
-            }
+            ${d.paid > 0 ? `<span class="bar-label">${formatMoney(d.paid)}</span>` : ""}
           </div>
 
           <div class="bar-pending" style="height:${pendingPercent}%">
-            ${
-              d.pending > 0
-                ? `<span class="bar-label negative">${formatMoney(d.pending)}</span>`
-                : ""
-            }
+            ${d.pending > 0 ? `<span class="bar-label negative">${formatMoney(d.pending)}</span>` : ""}
           </div>
 
         </div>
@@ -199,7 +209,6 @@ function renderYearRevenue(data){
 
   container.innerHTML = html;
 
-  // 🔥 ACTIVAR ANIMACIÓN REAL (PRO)
   requestAnimationFrame(()=>{
     container.querySelectorAll(".bar").forEach(bar=>{
       bar.classList.add("animate");
@@ -208,27 +217,25 @@ function renderYearRevenue(data){
 }
 
 /* =========================
-   DATA
+   🔥 DATA
 ========================= */
 
 async function loadDashboardData(){
 
   try {
 
-    const res = await Onion.fetch(API + "/dashboard");
-    const data = res?.data || {};
+    const res = await Onion.fetch(API + "/facturas"); // 🔥 usamos facturas reales
+    const facturas = res?.data || [];
 
-    const evolucion = data?.charts?.evolucionMensual || [];
-    const yearData = buildYearData(evolucion);
+    const yearData = buildYearData(facturas);
+    const kpis = calculateKPIs(facturas);
 
-    const kpis = calculateKPIs(yearData);
-
-    // 🔥 KPIs
-    setText("home-facturas", formatMoney(kpis.total));
-    setText("home-iva", formatMoney(kpis.iva));
-    setText("home-irpf", formatMoney(kpis.irpf));
+    // 🔥 KPIs REALES
+    setText("home-facturas", formatMoney(kpis.totalCobrado));
+    setText("home-iva", formatMoney(kpis.totalIVA));
+    setText("home-irpf", formatMoney(kpis.totalIRPF));
     setText("home-beneficio", formatMoney(kpis.beneficio));
-    setText("home-total-facturas", kpis.totalFacturas);
+    setText("home-pendiente", formatMoney(kpis.totalPendiente));
 
     hideLoader();
     renderYearRevenue(yearData);
@@ -241,7 +248,7 @@ async function loadDashboardData(){
 }
 
 /* =========================
-   LOAD
+   🔥 LOAD
 ========================= */
 
 async function loadDashboard(){
@@ -265,7 +272,7 @@ async function loadDashboard(){
 }
 
 /* =========================
-   INIT
+   🔥 INIT
 ========================= */
 
 function init(){

@@ -85,7 +85,7 @@
       title: "Nuevo usuario"
     },
 
-    "/usuarios/nuevo": {
+    "/usuarios/detalle": {
       page: "/app/views/usuarios/detalle.html",
       style: "/css/app/usuarios/detalle.css",
       script: "/js/features/usuarios/detalle.js",

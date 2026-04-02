@@ -390,7 +390,7 @@ body:not(.loading) #app-loader{
 
 
 /* =========================
-   ERROR SAAS
+   ERROR SAAS · ONION PRO
 ========================= */
 
 .error-saas {
@@ -398,16 +398,121 @@ body:not(.loading) #app-loader{
   flex-direction:column;
   align-items:center;
   justify-content:center;
-  height:60vh;
+  min-height:60vh;
+  padding:var(--space-xl) var(--space-lg);
   text-align:center;
-  color:#aaa;
+
+  color:var(--dim);
+  animation:fadeIn var(--duration-normal) var(--ease-out);
 }
 
+/* ICONO */
 .error-icon {
-  font-size:42px;
-  margin-bottom:15px;
+  width:64px;
+  height:64px;
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  font-size:26px;
+
+  border-radius:var(--radius-lg);
+
+  background:rgba(255,255,255,0.03);
+  border:1px solid var(--panel-border);
+
+  box-shadow:var(--shadow-soft);
+
+  margin-bottom:var(--space-md);
 }
 
+/* TITULO */
+.error-saas h2 {
+  font-size:var(--font-2xl);
+  font-weight:600;
+  color:var(--text);
+
+  margin-bottom:var(--space-xs);
+
+  letter-spacing:-0.2px;
+}
+
+/* DESCRIPCION */
+.error-saas p {
+  font-size:var(--font-base);
+  line-height:var(--line-relaxed);
+
+  max-width:420px;
+
+  color:var(--dim);
+}
+
+/* ACCIONES */
 .error-actions {
-  margin-top:20px;
+  margin-top:var(--space-lg);
+  display:flex;
+  gap:var(--space-sm);
+}
+
+/* BOTON BASE */
+.error-actions button {
+  padding:8px 14px;
+
+  font-size:var(--font-sm);
+  font-weight:500;
+
+  border-radius:var(--radius-md);
+
+  border:1px solid var(--panel-border);
+  background:var(--surface-2);
+
+  color:var(--text);
+
+  cursor:pointer;
+
+  transition:
+    transform var(--duration-fast) var(--ease-out),
+    background var(--duration-fast),
+    border var(--duration-fast),
+    box-shadow var(--duration-fast);
+}
+
+/* HOVER */
+.error-actions button:hover {
+  background:var(--surface-3);
+  border-color:rgba(255,255,255,0.08);
+
+  transform:translateY(-1px);
+
+  box-shadow:var(--shadow-sm);
+}
+
+/* ACTIVE */
+.error-actions button:active {
+  transform:scale(0.97);
+}
+
+/* OPCIONAL: BOTON PRIMARIO 🔥 */
+.error-actions .primary {
+  background:var(--accent);
+  border-color:var(--accent);
+  color:#fff;
+}
+
+.error-actions .primary:hover {
+  background:var(--accent-hover);
+  border-color:var(--accent-hover);
+}
+
+/* ANIMACION */
+@keyframes fadeIn {
+  from {
+    opacity:0;
+    transform:translateY(6px);
+  }
+  to {
+    opacity:1;
+    transform:translateY(0);
+  }
 }

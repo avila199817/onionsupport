@@ -1,6 +1,6 @@
-(function(){
-
 "use strict";
+
+(function(){
 
 const Onion = window.Onion;
 
@@ -30,10 +30,8 @@ function $(id){
 ========================= */
 
 async function getUsers(){
-
   const res = await Onion.fetch(Onion.config.API + "/users");
   return res?.users || res?.usuarios || res || [];
-
 }
 
 /* =========================
@@ -55,7 +53,7 @@ function capitalize(str){
 }
 
 /* =========================
-   AVATAR PRO
+   AVATAR SYSTEM
 ========================= */
 
 function getInitials(name){
@@ -86,9 +84,7 @@ function getAvatarColor(name){
     "#a855f7",
     "#f97316"
   ];
-
-  const index = Math.abs(hashString(name)) % colors.length;
-  return colors[index];
+  return colors[Math.abs(hashString(name)) % colors.length];
 }
 
 function renderAvatarHTML(u){
@@ -166,6 +162,7 @@ function bindEvents(){
 
   if(!tbody) return;
 
+  /* 🔥 CLICK FILA */
   Onion.cleanupEvent(tbody, "click", (e)=>{
 
     const row = e.target.closest("tr[data-id]");
@@ -177,6 +174,15 @@ function bindEvents(){
     Onion.router.navigate(`/usuarios/usuario?id=${id}`);
 
   });
+
+  /* 🔥 BOTÓN NUEVO */
+  const btnNew = $("btn-new-usuario");
+
+  if(btnNew){
+    Onion.cleanupEvent(btnNew, "click", ()=>{
+      Onion.router.navigate("/usuarios/nuevo");
+    });
+  }
 
 }
 
@@ -274,7 +280,7 @@ async function loadUsers(){
 }
 
 /* =========================
-   RENDER 🔥 CLAVE
+   RENDER
 ========================= */
 
 function renderUsers(users = []){
@@ -312,7 +318,6 @@ function renderUsers(users = []){
   </td>
 
   <td class="col-secondary">${rol}</td>
-
   <td class="col-secondary">${tipo}</td>
 
   <td class="col-status">${estado}</td>
@@ -321,7 +326,6 @@ function renderUsers(users = []){
 
 </tr>
 `;
-
   }).join("");
 
 }

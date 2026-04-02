@@ -1,4 +1,23 @@
 /* =========================
+   LAYOUT
+========================= */
+html, body{
+  height:100%;
+}
+
+.panel-content.dashboard{
+  min-height:100%;
+  display:flex;
+  flex-direction:column;
+}
+
+.dashboard-container{
+  flex:1;
+  min-height:100%;
+}
+
+
+/* =========================
    🔥 KPI ROW
 ========================= */
 

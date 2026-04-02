@@ -5,8 +5,8 @@
 .dashboard-container{
   display:flex;
   flex-direction:column;
-  gap:28px;
-  padding:28px;
+  gap:var(--space-xl);
+  padding:var(--space-xl);
 }
 
 /* =========================
@@ -14,10 +14,10 @@
 ========================= */
 
 .dashboard-greeting h1{
-  font-size:38px;
+  font-size:var(--font-2xl);
   font-weight:700;
   letter-spacing:.6px;
-  line-height:1.2;
+  line-height:var(--line-tight);
   margin:0;
 
   background:linear-gradient(90deg,#ffffff,#b7dcff);
@@ -29,10 +29,12 @@
    🔥 TOTAL
 ========================= */
 
-.card-total{ padding:6px 2px; }
+.card-total{
+  padding:var(--space-xs) var(--space-sm);
+}
 
 .card-total span{
-  font-size:11px;
+  font-size:var(--font-xs);
   opacity:.55;
   letter-spacing:.6px;
   text-transform:uppercase;
@@ -40,8 +42,8 @@
 
 .card-total strong{
   display:block;
-  margin-top:6px;
-  font-size:46px;
+  margin-top:var(--space-xs);
+  font-size:42px;
   font-weight:700;
   letter-spacing:1px;
 
@@ -54,7 +56,9 @@
    🔥 CHART
 ========================= */
 
-.card-chart{ padding-top:6px; }
+.card-chart{
+  padding-top:var(--space-xs);
+}
 
 /* =========================
    🔥 AREA GRAFICO
@@ -94,7 +98,7 @@
   align-items:flex-end;
   width:100%;
   height:100%;
-  gap:12px;
+  gap:var(--space-sm);
   z-index:2;
 }
 
@@ -127,19 +131,19 @@
 
   overflow:visible;
 
-  border-radius:12px 12px 6px 6px;
+  border-radius:var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-sm);
 
   transition:
-    height .9s cubic-bezier(.2,.8,.2,1),
-    transform .2s ease,
-    filter .2s ease;
+    height .9s var(--ease-out),
+    transform var(--duration-fast) var(--ease-out),
+    filter var(--duration-fast) var(--ease-out);
 }
 
 /* =========================
-   🔥 STACK (VERDE PRO + ROJO FINO)
+   🔥 STACK
 ========================= */
 
-/* PAGADO → verde elegante (tipo emerald SaaS) */
+/* PAGADO */
 .bar-paid{
   width:100%;
   position:relative;
@@ -147,11 +151,11 @@
   background:linear-gradient(180deg,#34d399,#059669);
 
   box-shadow:
-    0 6px 16px rgba(5,150,105,.25),
+    var(--shadow-soft),
     inset 0 0 6px rgba(255,255,255,.06);
 }
 
-/* PENDIENTE → rojo elegante */
+/* PENDIENTE */
 .bar-pending{
   width:100%;
   position:relative;
@@ -159,7 +163,7 @@
   background:linear-gradient(180deg,#f87171,#dc2626);
 
   box-shadow:
-    0 6px 16px rgba(220,38,38,.25),
+    var(--shadow-soft),
     inset 0 0 6px rgba(255,255,255,.05);
 }
 
@@ -174,22 +178,20 @@
   bottom:-22px;
   left:0;
 
-  font-size:11px;
+  font-size:var(--font-xs);
   font-weight:500;
-  color:#94a3b8;
+  color:var(--dim);
   opacity:.85;
 }
 
-/* 🔥 IMPORTES DENTRO (CLAVE) */
-
-/* PAGADO → abajo derecha dentro del verde */
+/* PAGADO */
 .bar-paid::after{
   content:attr(data-paid);
   position:absolute;
   bottom:6px;
   right:8px;
 
-  font-size:11px;
+  font-size:var(--font-xs);
   font-weight:600;
   color:#ecfdf5;
 
@@ -197,14 +199,15 @@
   pointer-events:none;
 }
 
-/* PENDIENTE → justo encima del pagado */
+/* PENDIENTE */
 .bar-pending::after{
   content:attr(data-pending);
   position:absolute;
-  bottom:6px;
+  bottom:22px;
+
   right:8px;
 
-  font-size:11px;
+  font-size:var(--font-xs);
   font-weight:600;
   color:#fee2e2;
 
@@ -224,13 +227,13 @@
 .month:hover .bar-paid{
   box-shadow:
     0 0 20px rgba(16,185,129,.4),
-    0 10px 20px rgba(0,0,0,.5);
+    var(--shadow-strong);
 }
 
 .month:hover .bar-pending{
   box-shadow:
     0 0 20px rgba(220,38,38,.4),
-    0 10px 20px rgba(0,0,0,.5);
+    var(--shadow-strong);
 }
 
 /* =========================
@@ -248,7 +251,7 @@
 .panel-content.dashboard{
   opacity:0;
   transform:translateY(14px);
-  transition:all .45s ease;
+  transition:all var(--duration-slow) var(--ease-out);
 }
 
 .panel-content.dashboard.ready{

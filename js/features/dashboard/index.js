@@ -11,6 +11,7 @@ if(!Onion){
 
 let interval = null;
 let initialized = false;
+let loading = false;
 
 /* =========================
    CONFIG
@@ -112,7 +113,16 @@ function buildYearData(evolucion){
 }
 
 /* =========================
-   🔥 RENDER PRO
+   🔥 CLEAN BEFORE RENDER
+========================= */
+
+function clearChart(){
+  const container = getRoot()?.querySelector(".year-grid");
+  if(container) container.innerHTML = "";
+}
+
+/* =========================
+   🔥 RENDER PRO (SIN FANTASMAS)
 ========================= */
 
 function renderYearRevenue(data){
@@ -121,16 +131,20 @@ function renderYearRevenue(data){
   if(!container) return;
 
   const months = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
-
   const max = Math.max(...data.map(d => d.paid + d.pending), 1);
 
+  // 🔥 render directo con valores finales (NO 0%)
   container.innerHTML = data.map((d, i) => {
 
     const total = d.paid + d.pending;
 
+    const percent = (total / max) * 100;
+    const paidPercent = total ? (d.paid / total) * 100 : 0;
+    const pendingPercent = total ? (d.pending / total) * 100 : 0;
+
     return `
       <div class="month ${total === 0 ? "empty" : ""}">
-        <div class="bar" data-month="${months[i]}" style="height:0%">
+        <div class="bar" data-month="${months[i]}" style="height:${total === 0 ? 2 : percent}%">
 
           ${
             total > 0
@@ -138,40 +152,22 @@ function renderYearRevenue(data){
               : ""
           }
 
-          <div class="bar-paid" style="height:0%"></div>
-          <div class="bar-pending" style="height:0%"></div>
+          <div class="bar-paid" style="height:${paidPercent}%"></div>
+          <div class="bar-pending" style="height:${pendingPercent}%"></div>
 
         </div>
       </div>
     `;
   }).join("");
 
+  // 🔥 animación suave SOLO visual
   requestAnimationFrame(()=>{
-
-    const bars = container.querySelectorAll(".bar");
-
-    bars.forEach((bar, i)=>{
-
-      const d = data[i];
-      const total = d.paid + d.pending;
-
-      const percent = (total / max) * 100;
-      const paidPercent = total ? (d.paid / total) * 100 : 0;
-      const pendingPercent = total ? (d.pending / total) * 100 : 0;
-
-      const paidEl = bar.querySelector(".bar-paid");
-      const pendingEl = bar.querySelector(".bar-pending");
-
+    container.querySelectorAll(".bar").forEach((bar, i)=>{
+      bar.style.transform = "scaleY(0.95)";
       setTimeout(()=>{
-
-        bar.style.height = (total === 0 ? 2 : percent) + "%";
-        paidEl.style.height = paidPercent + "%";
-        pendingEl.style.height = pendingPercent + "%";
-
-      }, i * 60);
-
+        bar.style.transform = "scaleY(1)";
+      }, i * 40);
     });
-
   });
 }
 
@@ -185,11 +181,6 @@ async function loadDashboardData(){
 
     const res = await Onion.fetch(API + "/dashboard");
     const data = res?.data || {};
-
-    if(!data){
-      renderYearRevenue(new Array(12).fill({paid:0,pending:0}));
-      return;
-    }
 
     setText("home-facturas", formatMoney(data?.resumen?.totalCobrado));
 
@@ -210,16 +201,24 @@ async function loadDashboardData(){
 
 async function loadDashboard(){
 
+  if(loading) return;
+  loading = true;
+
   const panel = getRoot();
   panel?.classList.remove("ready");
 
   setGreeting();
+
+  // 🔥 limpiar antes de pintar
+  clearChart();
 
   await loadDashboardData();
 
   requestAnimationFrame(()=>{
     panel?.classList.add("ready");
   });
+
+  loading = false;
 }
 
 /* =========================

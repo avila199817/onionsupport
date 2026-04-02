@@ -568,13 +568,11 @@ html, body{
 
 
 
-
-
 /* =========================================================
-   🔥 DASHBOARD → FACTURAS PENDIENTES (PRO SAAS FINAL v2)
-   MISMA LÓGICA QUE PANEL FACTURAS (COLUMN SYSTEM + TABLE)
+   🔥 DASHBOARD → FACTURAS PENDIENTES (MATCH FACTURAS 1:1)
 ========================================================= */
 
+/* CONTENEDOR */
 .panel-content.dashboard .dashboard-pending{
   display:flex;
   flex-direction:column;
@@ -584,32 +582,10 @@ html, body{
   padding:16px;
   border-radius:16px;
 
-  background:linear-gradient(
-    145deg,
-    rgba(255,255,255,.03),
-    rgba(255,255,255,.015)
-  );
+  background:var(--panel-bg);
+  border:1px solid var(--panel-border);
 
-  border:1px solid rgba(255,255,255,.05);
-
-  box-shadow:
-    0 8px 30px rgba(0,0,0,.25),
-    inset 0 0 10px rgba(255,255,255,.02);
-
-  transition:
-    transform .25s ease,
-    box-shadow .25s ease,
-    border .25s ease;
-}
-
-.panel-content.dashboard .dashboard-pending:hover{
-  transform:translateY(-3px);
-
-  box-shadow:
-    0 16px 40px rgba(0,0,0,.35),
-    inset 0 0 12px rgba(255,255,255,.03);
-
-  border:1px solid rgba(255,255,255,.08);
+  box-shadow:var(--panel-shadow);
 }
 
 /* =========================================================
@@ -621,18 +597,15 @@ html, body{
   align-items:center;
   justify-content:space-between;
 
-  margin-bottom:14px;
-  padding:0 4px;
+  margin-bottom:10px;
 }
 
 .panel-content.dashboard .dashboard-section-header h2{
   font-size:13px;
   font-weight:600;
   color:var(--text);
-
-  letter-spacing:.6px;
   text-transform:uppercase;
-  opacity:.9;
+  letter-spacing:.4px;
 }
 
 .panel-content.dashboard #pending-count{
@@ -647,7 +620,7 @@ html, body{
 }
 
 /* =========================================================
-   🔥 SISTEMA FACTURAS (MISMA BASE)
+   TABLE SYSTEM (IGUAL QUE FACTURAS)
 ========================================================= */
 
 .panel-content.dashboard .table-system.facturas{
@@ -655,184 +628,236 @@ html, body{
   flex-direction:column;
   flex:1;
   min-height:0;
-  width:100%;
 }
 
-/* SIN FILTROS */
-.panel-content.dashboard .table-system.facturas .filters-row{
-  display:none;
-}
-
-/* =========================================================
-   CONTENEDOR
-========================================================= */
-
-.panel-content.dashboard .table-system.facturas .table-container{
-  max-height:320px;
+/* CONTENEDOR SCROLL */
+.panel-content.dashboard .table-container{
+  flex:1;
+  min-height:0;
   overflow-y:auto;
   overflow-x:hidden;
 
-  border-radius:12px;
-
-  background:rgba(255,255,255,.02);
-
-  box-shadow:
-    inset 0 0 12px rgba(0,0,0,.2);
-
-  transition:all .2s ease;
+  background:var(--panel-bg);
 }
 
 /* =========================================================
-   🔥 TABLE BASE (IGUAL QUE FACTURAS)
+   TABLA BASE
 ========================================================= */
 
-.panel-content.dashboard .table-system.facturas table{
+.panel-content.dashboard table{
   width:100%;
   border-collapse:collapse;
   table-layout:fixed;
 }
 
-.panel-content.dashboard .table-system.facturas thead{
+/* HEADER STICKY */
+.panel-content.dashboard thead{
   position:sticky;
   top:0;
   z-index:3;
+  background:var(--panel-bg);
+}
 
-  background:rgba(20,20,20,.95);
-  backdrop-filter:blur(6px);
+/* HEADERS */
+.panel-content.dashboard th{
+  padding:12px 14px;
+  text-align:left;
+
+  border-bottom:1px solid var(--panel-border);
+
+  color:var(--dim);
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:.4px;
+  white-space:nowrap;
+}
+
+/* CELDAS */
+.panel-content.dashboard td{
+  padding:12px 14px;
+  border-bottom:1px solid var(--panel-border);
+
+  font-size:13.5px;
+  color:var(--text);
+
+  vertical-align:middle;
+  overflow:hidden;
+  text-overflow:ellipsis;
 }
 
 /* =========================================================
-   🔥 COLUMN SYSTEM (CLON EXACTO)
+   COLUMN SYSTEM (CLON EXACTO)
 ========================================================= */
 
-.panel-content.dashboard .table-system.facturas .col-id{
+.panel-content.dashboard .col-id{
   width:120px;
   font-size:11px;
   color:var(--dim);
 }
 
-.panel-content.dashboard .table-system.facturas .col-main{
+.panel-content.dashboard .col-main{
   width:24%;
 }
 
-.panel-content.dashboard .table-system.facturas .col-secondary{
+.panel-content.dashboard .col-secondary{
   width:30%;
 }
 
-.panel-content.dashboard .table-system.facturas .col-date{
+.panel-content.dashboard .col-date{
   width:120px;
   text-align:center;
   padding-right:18px;
 }
 
-.panel-content.dashboard .table-system.facturas .col-importe{
+.panel-content.dashboard .col-importe{
   width:130px;
   text-align:right;
   padding-right:18px;
 }
 
-.panel-content.dashboard .table-system.facturas .col-status{
+.panel-content.dashboard .col-status{
   width:110px;
   text-align:center;
 }
 
-.panel-content.dashboard .table-system.facturas .col-actions{
+.panel-content.dashboard .col-actions{
   width:180px;
   text-align:right;
   padding-right:18px;
 }
 
 /* =========================================================
-   🔥 CELLS
+   ROWS
 ========================================================= */
 
-.panel-content.dashboard .table-system.facturas th{
-  padding:10px 12px;
-  font-size:10.5px;
+.panel-content.dashboard tbody tr{
+  transition:all .15s ease;
+  cursor:pointer;
 }
 
-.panel-content.dashboard .table-system.facturas td{
-  font-size:12.5px;
-  padding:10px 12px;
+.panel-content.dashboard tbody tr:nth-child(even){
+  background:color-mix(in srgb, var(--panel-bg), #fff 2%);
+}
+
+.panel-content.dashboard tbody tr:hover{
+  background:color-mix(in srgb, var(--panel-bg), #fff 6%);
+  transform:translateX(2px);
+}
+
+/* =========================================================
+   USER CELL (IGUAL)
+========================================================= */
+
+.panel-content.dashboard .cell-user{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+.panel-content.dashboard .table-avatar{
+  width:36px;
+  height:36px;
+  min-width:36px;
+
+  border-radius:50%;
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  color:#fff;
+  font-size:12px;
+  font-weight:600;
+}
+
+/* TEXTO USER */
+.panel-content.dashboard .user-info{
+  display:flex;
+  flex-direction:column;
+}
+
+.panel-content.dashboard .user-name{
+  font-weight:600;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+.panel-content.dashboard .user-sub{
+  font-size:11px;
+  color:var(--dim);
+  white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
 }
 
 /* =========================================================
-   🔥 FILAS (MISMA SENSACIÓN)
+   EMPRESA
 ========================================================= */
 
-.panel-content.dashboard .table-system.facturas tbody tr{
-  transition:
-    transform .15s ease,
-    background .15s ease;
-}
-
-.panel-content.dashboard .table-system.facturas tbody tr:nth-child(even){
-  background:color-mix(in srgb, var(--panel-bg), #fff 2%);
-}
-
-.panel-content.dashboard .table-system.facturas tbody tr:hover{
-  transform:translateX(4px);
-  background:color-mix(in srgb, var(--panel-bg), #fff 6%);
+.panel-content.dashboard .empresa-cell{
+  display:flex;
+  align-items:center;
+  gap:10px;
 }
 
 /* =========================================================
-   🔥 USER / AVATAR
+   BADGES
 ========================================================= */
 
-.panel-content.dashboard .table-system.facturas .table-avatar{
-  width:30px;
-  height:30px;
-  min-width:30px;
-  font-size:11px;
-
-  box-shadow:
-    0 4px 10px rgba(0,0,0,.25);
-}
-
-/* =========================================================
-   🔥 ACTIONS
-========================================================= */
-
-.panel-content.dashboard .table-system.facturas .btn-action{
-  padding:4px 8px;
+.panel-content.dashboard .badge{
+  padding:4px 10px;
+  border-radius:999px;
   font-size:10px;
-
-  transition:all .15s ease;
+  font-weight:500;
 }
 
-.panel-content.dashboard .table-system.facturas .btn-action:hover{
-  transform:translateY(-1px);
+.panel-content.dashboard .badge.success{
+  color:var(--success);
+  background:color-mix(in srgb, var(--success), transparent 85%);
 }
 
-/* =========================================================
-   🔥 BADGES
-========================================================= */
-
-.panel-content.dashboard .table-system.facturas .badge{
-  font-size:9px;
-  padding:3px 8px;
+.panel-content.dashboard .badge.warning{
+  color:var(--warning);
+  background:color-mix(in srgb, var(--warning), transparent 85%);
 }
 
 /* =========================================================
-   🔥 SCROLL
+   ACTIONS
 ========================================================= */
 
-.panel-content.dashboard .table-system.facturas .table-container::-webkit-scrollbar{
-  width:6px;
+.panel-content.dashboard .actions{
+  display:inline-flex;
+  gap:6px;
+  justify-content:flex-end;
 }
 
-.panel-content.dashboard .table-system.facturas .table-container::-webkit-scrollbar-thumb{
-  background:var(--scrollbar-thumb);
+.panel-content.dashboard .btn-action{
+  padding:6px 10px;
   border-radius:6px;
+
+  border:1px solid var(--card-border);
+  background:var(--card-bg);
+  color:var(--text);
+
+  font-size:11px;
+  cursor:pointer;
 }
 
-/* =========================================================
-   🔥 EMPTY STATE
-========================================================= */
-
-.panel-content.dashboard .table-system.facturas tbody tr td[colspan]{
-  opacity:.6;
-  font-style:italic;
+.panel-content.dashboard .btn-action:hover{
+  background:color-mix(in srgb, var(--accent), transparent 85%);
+  color:var(--accent);
+  border-color:var(--accent);
 }
+
+.panel-content.dashboard .btn-action.pay{
+  background:color-mix(in srgb, var(--warning), transparent 85%);
+  color:var(--warning);
+  border-color:var(--warning);
+}
+
+.panel-content.dashboard .btn-action.pay:hover{
+  background:var(--warning);
+  color:#fff;
+}
+

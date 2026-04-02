@@ -94,13 +94,31 @@
 }
 
 /* =========================
-   🔥 COLORES KPI
+   🔥 COLORES KPI (PRO)
 ========================= */
 
-#home-iva{ color:#60a5fa; }
-#home-irpf{ color:#f87171; }
-#home-beneficio{ color:#34d399; }
-#home-total-facturas{ color:#facc15; }
+/* 🟠 IVA → AMARILLO */
+#home-iva{
+  color:#facc15;
+  text-shadow:0 0 12px rgba(250,204,21,.25);
+}
+
+/* 🔴 PENDIENTE */
+#home-pendiente{
+  color:#f87171;
+  text-shadow:0 0 12px rgba(248,113,113,.25);
+}
+
+/* 🔴 IRPF */
+#home-irpf{
+  color:#f87171;
+}
+
+/* 🟢 BENEFICIO */
+#home-beneficio{
+  color:#34d399;
+  text-shadow:0 0 12px rgba(52,211,153,.25);
+}
 
 /* =========================
    🔥 MINI TOP LINE
@@ -217,7 +235,6 @@
     filter .2s ease;
 }
 
-/* ACTIVAR CRECIMIENTO */
 .bar.animate{
   transform:scaleY(1);
 }
@@ -363,7 +380,7 @@
 }
 
 /* =========================
-   🔥 SKELETON (CRECIMIENTO)
+   🔥 SKELETON
 ========================= */
 
 .skeleton-bar{

@@ -82,7 +82,14 @@
       page: "/app/views/usuarios/usuario.html",
       style: "/css/app/usuarios/usuario.css",
       script: "/js/features/usuarios/usuario.js",
-      title: "Usuario"
+      title: "Nuevo usuario"
+    },
+
+    "/usuarios/nuevo": {
+      page: "/app/views/usuarios/detalle.html",
+      style: "/css/app/usuarios/detalle.css",
+      script: "/js/features/usuarios/detalle.js",
+      title: "Detalle usuario"
     },
 
     "/clientes": {

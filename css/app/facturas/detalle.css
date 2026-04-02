@@ -423,3 +423,30 @@
     color .2s ease,
     transform .15s ease;
 }
+
+
+/* =========================================================
+   LOADING
+========================================================= */
+.factura-loading{
+  position:absolute;
+  inset:0;
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  background:var(--main-bg);
+
+  z-index:20;
+
+  opacity:0;
+  pointer-events:none;
+
+  transition:opacity .25s ease;
+}
+
+.panel-content.factura-detalle.loading .factura-loading{
+  opacity:1;
+  pointer-events:auto;
+}

@@ -387,3 +387,27 @@ body:not(.loading) #app-loader{
   0%,100%{ opacity:1; }
   50%{ opacity:.6; }
 }
+
+
+/* =========================
+   ERROR SAAS
+========================= */
+
+.error-saas {
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  height:60vh;
+  text-align:center;
+  color:#aaa;
+}
+
+.error-icon {
+  font-size:42px;
+  margin-bottom:15px;
+}
+
+.error-actions {
+  margin-top:20px;
+}

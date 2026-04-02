@@ -113,16 +113,26 @@ function buildYearData(evolucion){
 }
 
 /* =========================
-   🔥 CLEAN BEFORE RENDER
+   🔥 LOADER CONTROL
 ========================= */
 
-function clearChart(){
+function showLoader(){
   const container = getRoot()?.querySelector(".year-grid");
-  if(container) container.innerHTML = "";
+  if(!container) return;
+
+  container.classList.add("skeleton-grid");
+}
+
+function hideLoader(){
+  const container = getRoot()?.querySelector(".year-grid");
+  if(!container) return;
+
+  container.classList.remove("skeleton-grid");
+  container.innerHTML = ""; // 🔥 elimina skeleton
 }
 
 /* =========================
-   🔥 RENDER PRO (SIN FANTASMAS)
+   🔥 RENDER PRO
 ========================= */
 
 function renderYearRevenue(data){
@@ -133,8 +143,7 @@ function renderYearRevenue(data){
   const months = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
   const max = Math.max(...data.map(d => d.paid + d.pending), 1);
 
-  // 🔥 render directo con valores finales (NO 0%)
-  container.innerHTML = data.map((d, i) => {
+  const html = data.map((d, i) => {
 
     const total = d.paid + d.pending;
 
@@ -160,13 +169,15 @@ function renderYearRevenue(data){
     `;
   }).join("");
 
-  // 🔥 animación suave SOLO visual
+  container.innerHTML = html;
+
+  // 🔥 animación suave
   requestAnimationFrame(()=>{
     container.querySelectorAll(".bar").forEach((bar, i)=>{
-      bar.style.transform = "scaleY(0.95)";
+      bar.style.transform = "scaleY(0.92)";
       setTimeout(()=>{
         bar.style.transform = "scaleY(1)";
-      }, i * 40);
+      }, i * 35);
     });
   });
 }
@@ -187,11 +198,13 @@ async function loadDashboardData(){
     const evolucion = data?.charts?.evolucionMensual || [];
     const yearData = buildYearData(evolucion);
 
+    hideLoader(); // 🔥 quita skeleton justo antes de pintar
     renderYearRevenue(yearData);
 
   } catch(e){
 
     console.error("💥 Dashboard error:", e);
+    hideLoader();
   }
 }
 
@@ -209,8 +222,7 @@ async function loadDashboard(){
 
   setGreeting();
 
-  // 🔥 limpiar antes de pintar
-  clearChart();
+  showLoader(); // 🔥 muestra skeleton limpio
 
   await loadDashboardData();
 

@@ -168,17 +168,17 @@
 }
 
 /* =========================
-   🔥 LABEL PRO (AFINADO)
+   🔥 LABEL PRO ULTRA FINO
 ========================= */
 
 .bar-label{
   position:absolute;
-  top:-18px; /* 🔥 más aire arriba */
+  top:-20px;
   left:50%;
   transform:translateX(-50%);
 
-  min-width:60%;
-  padding:6px 12px; /* 🔥 más respiración */
+  min-width:65%;
+  padding:7px 14px;
 
   display:flex;
   justify-content:center;
@@ -189,36 +189,35 @@
 
   border-radius:999px;
 
-  /* 🔥 COLOR NUEVO (mucho más premium) */
   background:linear-gradient(
     180deg,
-    rgba(30,30,30,.9),
-    rgba(20,20,20,.75)
+    rgba(35,35,35,.95),
+    rgba(20,20,20,.8)
   );
 
-  backdrop-filter:blur(10px);
+  backdrop-filter:blur(12px);
 
   color:#f9fafb;
 
   box-shadow:
-    0 6px 18px rgba(0,0,0,.35),
-    inset 0 0 8px rgba(255,255,255,.04);
+    0 8px 22px rgba(0,0,0,.4),
+    inset 0 0 10px rgba(255,255,255,.05);
 
-  border:1px solid rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.08);
 
   pointer-events:none;
 
   transition:all var(--duration-fast) var(--ease-out);
 }
 
-/* COLOR SEGÚN TIPO */
+/* COLOR POR TIPO */
 
 .bar-paid .bar-label{
-  border-color:rgba(34,197,94,.35);
+  border-color:rgba(34,197,94,.4);
 }
 
 .bar-pending .bar-label{
-  border-color:rgba(239,68,68,.35);
+  border-color:rgba(239,68,68,.4);
 }
 
 .bar-label.negative{
@@ -263,10 +262,10 @@
 }
 
 .month:hover .bar-label{
-  transform:translateX(-50%) translateY(-3px); /* 🔥 más lift */
+  transform:translateX(-50%) translateY(-4px);
   box-shadow:
-    0 10px 25px rgba(0,0,0,.45),
-    inset 0 0 8px rgba(255,255,255,.06);
+    0 12px 28px rgba(0,0,0,.5),
+    inset 0 0 10px rgba(255,255,255,.06);
 }
 
 /* =========================
@@ -275,6 +274,54 @@
 
 .month.empty .bar{
   background:rgba(255,255,255,.03);
+}
+
+/* =========================
+   🔥 SKELETON LOADER PRO
+========================= */
+
+.skeleton-grid{
+  opacity:.6;
+}
+
+.skeleton-bar{
+  width:100%;
+  border-radius:var(--radius-lg);
+
+  background:linear-gradient(
+    90deg,
+    rgba(255,255,255,.04) 25%,
+    rgba(255,255,255,.08) 50%,
+    rgba(255,255,255,.04) 75%
+  );
+
+  background-size:200% 100%;
+
+  animation:skeleton-loading 1.2s infinite linear;
+}
+
+.skeleton-text{
+  display:inline-block;
+  min-width:120px;
+  height:32px;
+
+  background:linear-gradient(
+    90deg,
+    rgba(255,255,255,.05),
+    rgba(255,255,255,.1),
+    rgba(255,255,255,.05)
+  );
+
+  background-size:200% 100%;
+  animation:skeleton-loading 1.2s infinite linear;
+
+  border-radius:var(--radius-sm);
+  color:transparent;
+}
+
+@keyframes skeleton-loading{
+  0%{ background-position:200% 0; }
+  100%{ background-position:-200% 0; }
 }
 
 /* =========================

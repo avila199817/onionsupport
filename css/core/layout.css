@@ -109,7 +109,7 @@ html, body{
 
 
 /* =========================================================
-   🔥 CONTENT WRAPPER (NO MÁS BUGS)
+   🔥 CONTENT WRAPPER (FIX SIN ROMPER SISTEMA)
 ========================================================= */
 .content-wrapper{
   flex:1;
@@ -121,9 +121,29 @@ html, body{
   padding:var(--space-lg);
   gap:var(--space-lg);
 
-  overflow:hidden; /* 🔥 NUNCA AUTO */
+  overflow:hidden; /* 🔥 SE MANTIENE */
 
   background:transparent;
+}
+
+
+/* =========================================================
+   🔥 DASHBOARD FIX (SCROLL INTERNO REAL)
+========================================================= */
+.panel-content.dashboard{
+  flex:1;
+  min-height:0;
+
+  display:flex;
+  flex-direction:column;
+
+  overflow:auto; /* 🔥 CLAVE */
+}
+
+/* opcional fino: evitar doble scroll en hijos */
+.dashboard-container{
+  flex:1;
+  min-height:0;
 }
 
 

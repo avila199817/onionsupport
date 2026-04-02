@@ -123,7 +123,7 @@ function bindEvents(){
 }
 
 /* =========================
-   LOAD (🔥 PRO)
+   LOAD
 ========================= */
 
 async function loadFactura(id){
@@ -198,10 +198,8 @@ function showNotFound(){
   root.innerHTML = `
     <div class="error-saas">
       <div class="error-icon">🔒</div>
-
       <h2>Factura no encontrada</h2>
       <p>No existe o no tienes acceso a este recurso.</p>
-
       <div class="error-actions">
         <button id="btn-back">← Volver</button>
       </div>
@@ -222,29 +220,29 @@ function normalizeFactura(f){
     numeroLegal: f.numeroFacturaLegal || f.numero || f.id,
     incidenciaId: f.incidenciaId || f.incidencia_id || null,
 
-    fecha: f.fecha,
-    fechaServicio: f.fechaServicio || f.fecha_vencimiento,
+    fecha: f.fechaFactura || f.fecha,
+    fechaServicio: f.fechaServicio,
 
-    formaPago: f.formaPago || f.metodoPago,
+    formaPago: f.formaPago,
 
     total: f.total,
 
     concepto: f.concepto,
     descripcion: f.descripcion,
 
-    estadoPago: (f.estadoPago || f.estado || "pendiente").toLowerCase(),
+    estadoPago: (f.estadoPago || "pendiente").toLowerCase(),
 
-    iva: f.impuestos?.[0]?.porcentaje || f.iva || 21,
+    iva: f.impuestos?.[0]?.porcentaje || 21,
     irpf: f.irpf,
 
-    blobPath: f.blobPath || f.archivo || null,
+    blobPath: f.blobPath || null,
 
     cliente: {
-      id: f.cliente?.id || f.clienteId,
-      nombre: f.cliente?.nombre || f.nombreCliente,
+      id: f.clienteId,
+      nombre: f.cliente?.nombreContacto,
       avatar: f.cliente?.avatar,
       tipo: f.cliente?.tipo,
-      empresa: f.cliente?.empresa
+      empresa: f.cliente?.razonSocial
     }
   };
 
@@ -329,17 +327,54 @@ function renderSidebar(){
 }
 
 /* =========================
-   ACTIONS
+   ACTIONS (🔥 CLAVE)
 ========================= */
 
-function openFactura(){
-  if(!factura?.id) return;
-  window.open(`${Onion.config.API}/facturas/${factura.id}/ver`, "_blank");
+async function getFacturaURL(){
+
+  if(!factura?.id) return null;
+
+  try{
+
+    const res = await fetch(
+      `${Onion.config.API}/facturas/${factura.id}/descargar`,
+      {
+        headers: {
+          Authorization: "Bearer " + Onion.auth.getToken()
+        }
+      }
+    );
+
+    const data = await res.json();
+
+    if(!data?.ok || !data.url){
+      console.error("❌ ERROR OBTENIENDO URL", data);
+      return null;
+    }
+
+    return data.url;
+
+  }catch(e){
+    console.error("💥 ERROR FETCH PDF:", e);
+    return null;
+  }
+
 }
 
-function downloadFactura(){
-  if(!factura?.id) return;
-  window.open(`${Onion.config.API}/facturas/${factura.id}/descargar`, "_blank");
+async function openFactura(){
+
+  const url = await getFacturaURL();
+  if(!url) return alert("Error abriendo PDF");
+
+  window.open(url, "_blank"); // 👁️ ver
+}
+
+async function downloadFactura(){
+
+  const url = await getFacturaURL();
+  if(!url) return alert("Error descargando PDF");
+
+  window.location.href = url; // ⬇️ descarga
 }
 
 /* =========================
@@ -364,7 +399,7 @@ function formatEstado(e){
 }
 
 function isEmpresa(cliente){
-  return cliente.tipo === "empresa" || cliente.empresa === true;
+  return !!cliente.empresa;
 }
 
 function formatFecha(f){

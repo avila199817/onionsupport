@@ -143,11 +143,14 @@
    🔥 STACK
 ========================= */
 
-/* PAGADO */
-.bar-paid{
+.bar-paid,
+.bar-pending{
   width:100%;
   position:relative;
+}
 
+/* PAGADO */
+.bar-paid{
   background:linear-gradient(180deg,#34d399,#059669);
 
   box-shadow:
@@ -157,14 +160,56 @@
 
 /* PENDIENTE */
 .bar-pending{
-  width:100%;
-  position:relative;
-
   background:linear-gradient(180deg,#f87171,#dc2626);
 
   box-shadow:
     var(--shadow-soft),
     inset 0 0 6px rgba(255,255,255,.05);
+}
+
+/* =========================
+   🔥 LABEL CAJITA (NUEVO PRO)
+========================= */
+
+.bar-label{
+  position:absolute;
+  top:-12px;
+  left:50%;
+  transform:translateX(-50%);
+
+  padding:3px 8px;
+
+  font-size:var(--font-xs);
+  font-weight:600;
+
+  border-radius:var(--radius-sm);
+
+  background:rgba(0,0,0,.65);
+  backdrop-filter:blur(6px);
+
+  color:#fff;
+
+  white-space:nowrap;
+
+  box-shadow:var(--shadow-sm);
+
+  pointer-events:none;
+
+  transition:all var(--duration-fast) var(--ease-out);
+}
+
+/* COLOR SEGÚN TIPO */
+
+.bar-paid .bar-label{
+  border:1px solid rgba(34,197,94,.25);
+}
+
+.bar-pending .bar-label{
+  border:1px solid rgba(239,68,68,.25);
+}
+
+.bar-label.negative{
+  color:#fecaca;
 }
 
 /* =========================
@@ -182,37 +227,6 @@
   font-weight:500;
   color:var(--dim);
   opacity:.85;
-}
-
-/* PAGADO */
-.bar-paid::after{
-  content:attr(data-paid);
-  position:absolute;
-  bottom:6px;
-  right:8px;
-
-  font-size:var(--font-xs);
-  font-weight:600;
-  color:#ecfdf5;
-
-  text-shadow:0 0 4px rgba(0,0,0,.5);
-  pointer-events:none;
-}
-
-/* PENDIENTE */
-.bar-pending::after{
-  content:attr(data-pending);
-  position:absolute;
-  bottom:22px;
-
-  right:8px;
-
-  font-size:var(--font-xs);
-  font-weight:600;
-  color:#fee2e2;
-
-  text-shadow:0 0 4px rgba(0,0,0,.5);
-  pointer-events:none;
 }
 
 /* =========================
@@ -234,6 +248,11 @@
   box-shadow:
     0 0 20px rgba(220,38,38,.4),
     var(--shadow-strong);
+}
+
+.month:hover .bar-label{
+  transform:translateX(-50%) translateY(-2px);
+  box-shadow:var(--shadow-md);
 }
 
 /* =========================

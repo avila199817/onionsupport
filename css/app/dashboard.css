@@ -94,27 +94,28 @@
 }
 
 /* =========================
-   🔥 COLORES KPI (PRO)
+   🔥 COLORES KPI (SAAS PRO)
 ========================= */
 
-/* 🟠 IVA → AMARILLO */
-#home-iva{
-  color:#facc15;
-  text-shadow:0 0 12px rgba(250,204,21,.25);
-}
-
-/* 🔴 PENDIENTE */
+/* 🔴 PENDIENTE (riesgo) */
 #home-pendiente{
   color:#f87171;
-  text-shadow:0 0 12px rgba(248,113,113,.25);
+  text-shadow:0 0 10px rgba(248,113,113,.25);
 }
 
-/* 🔴 IRPF */
+/* 🟡 IVA (neutral fiscal) */
+#home-iva{
+  color:#facc15;
+  text-shadow:0 0 10px rgba(250,204,21,.25);
+}
+
+/* 🟣 IRPF (diferenciado, no agresivo) */
 #home-irpf{
-  color:#f87171;
+  color:#a78bfa;
+  text-shadow:0 0 10px rgba(167,139,250,.25);
 }
 
-/* 🟢 BENEFICIO */
+/* 🟢 BENEFICIO (dinero real) */
 #home-beneficio{
   color:#34d399;
   text-shadow:0 0 12px rgba(52,211,153,.25);

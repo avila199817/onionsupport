@@ -166,7 +166,7 @@ function renderYearRevenue(data){
           <div class="bar-pending" style="height:${pendingPercent}%">
             ${
               d.pending > 0
-                ? `<span class="bar-label negative">- ${formatMoney(d.pending)}</span>`
+                ? `<span class="bar-label negative">${formatMoney(d.pending)}</span>`
                 : ""
             }
           </div>

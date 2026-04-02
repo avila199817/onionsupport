@@ -112,7 +112,6 @@ async function handleAction(btn){
         return;
       }
 
-      // 🔥 ABRE EL PDF REAL DESDE AZURE
       window.open(res.url, "_blank");
 
     }catch(e){
@@ -142,6 +141,9 @@ async function loadFacturas(){
   if(!tbody) return;
 
   panel?.classList.add("loading");
+
+  // 🔥 LIMPIEZA PRO (evita factura fantasma)
+  setLoadingTable();
 
   try{
 
@@ -173,6 +175,33 @@ async function loadFacturas(){
 }
 
 /* =========================
+   LOADING TABLE
+========================= */
+
+function setLoadingTable(){
+
+  const tbody = $("#facturas-body");
+  if(!tbody) return;
+
+  tbody.innerHTML = `
+    <tr class="table-loading">
+      <td colspan="7">
+        <div style="
+          display:flex;
+          justify-content:center;
+          align-items:center;
+          gap:10px;
+          opacity:.6;
+        ">
+          <span class="spinner"></span>
+          <span>Cargando facturas...</span>
+        </div>
+      </td>
+    </tr>
+  `;
+}
+
+/* =========================
    NORMALIZE
 ========================= */
 
@@ -200,8 +229,8 @@ function applyFilters(){
 
   filteredItems = currentItems.filter(f => {
 
-    const cliente = safeText(f.cliente?.nombre);
-    const empresa = safeText(f.cliente?.empresa);
+    const cliente = safeText(f.cliente?.nombre || f.cliente?.nombreContacto);
+    const empresa = safeText(f.cliente?.empresa || f.cliente?.razonSocial);
     const id = String(f.numero || f.id || "").toLowerCase();
 
     return (
@@ -311,7 +340,7 @@ function render(items){
 }
 
 /* =========================
-   MAP + HELPERS (INTACTO)
+   MAP + HELPERS
 ========================= */
 
 function mapItem(f){
@@ -324,7 +353,7 @@ function mapItem(f){
 
   return {
     id: f.id,
-    numero: f.numero || f.id,
+    numero: f.numeroFacturaLegal || f.numero || f.id,
 
     cliente: {
       nombre: cleanValue(
@@ -334,8 +363,7 @@ function mapItem(f){
       ),
       email: cleanValue(
         f.cliente?.email ||
-        f.emailCliente ||
-        f.cliente?.correo,
+        f.emailCliente,
         "-"
       )
     },
@@ -343,13 +371,17 @@ function mapItem(f){
     empresa: empresaClean,
     hasEmpresa: !!empresaClean,
 
-    fecha: formatFecha(f.fecha),
+    fecha: formatFecha(f.fechaFactura || f.fecha),
     total: formatMoney(f.total),
 
     estadoPago: getEstadoPago(f.estadoPago)
   };
 
 }
+
+/* =========================
+   HELPERS
+========================= */
 
 function cleanValue(val, fallback){
   if(!val) return fallback;

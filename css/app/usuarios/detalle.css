@@ -1,0 +1,257 @@
+/* =========================================================
+   USUARIO DETALLE — MATCH FACTURA 1:1
+========================================================= */
+
+/* =========================
+   ROOT
+========================= */
+.panel-content.usuario-detalle{
+  display:flex;
+  flex-direction:column;
+
+  flex:1;
+  min-height:0;
+  width:100%;
+}
+
+
+/* =========================================================
+   LAYOUT
+========================================================= */
+.panel-content.usuario-detalle .layout-split{
+  display:flex;
+  flex:1;
+  min-height:0;
+}
+
+
+/* =========================
+   LEFT
+========================= */
+.panel-content.usuario-detalle .detalle-left{
+  flex:1;
+  min-width:0;
+
+  display:flex;
+  flex-direction:column;
+  min-height:0;
+}
+
+
+/* =========================================================
+   RIGHT (SIDEBAR)
+========================================================= */
+.panel-content.usuario-detalle .detalle-right{
+  width:360px;
+  min-width:360px;
+  flex-shrink:0;
+
+  display:flex;
+  flex-direction:column;
+
+  background:var(--panel-bg);
+  border-left:1px solid var(--panel-border);
+
+  min-height:0;
+  overflow:hidden;
+}
+
+
+/* =========================
+   SIDEBAR CONTENT
+========================= */
+.panel-content.usuario-detalle .detalle-sidebar{
+  flex:1;
+  min-height:0;
+
+  display:flex;
+  flex-direction:column;
+
+  padding:16px;
+  background:var(--panel-bg);
+
+  overflow:auto;
+}
+
+.panel-content.usuario-detalle .sidebar-section{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+
+.panel-content.usuario-detalle .sidebar-title{
+  font-size:13px;
+  font-weight:600;
+  color:var(--dim);
+}
+
+.panel-content.usuario-detalle .sidebar-divider{
+  height:1px;
+  background:var(--panel-border);
+  margin:16px 0;
+}
+
+
+/* =========================================================
+   HEADER
+========================================================= */
+.panel-content.usuario-detalle .filters-row{
+  display:flex;
+  align-items:center;
+
+  padding:14px 40px;
+
+  background:var(--panel-bg);
+  border-bottom:1px solid var(--panel-border);
+}
+
+.panel-content.usuario-detalle #btn-back{
+  margin-left:auto;
+  background:none;
+  border:none;
+  color:var(--text);
+  cursor:pointer;
+  opacity:.8;
+}
+
+.panel-content.usuario-detalle #btn-back:hover{
+  opacity:1;
+}
+
+
+/* =========================================================
+   USER HEADER
+========================================================= */
+.panel-content.usuario-detalle .detalle-user{
+  display:flex;
+  align-items:center;
+  gap:12px;
+}
+
+.panel-content.usuario-detalle .detalle-meta{
+  font-size:12px;
+  color:var(--dim);
+}
+
+
+/* =========================================================
+   BODY
+========================================================= */
+.panel-content.usuario-detalle .detalle-body{
+  flex:1;
+  min-height:0;
+
+  display:flex;
+  padding:30px 40px;
+
+  overflow:auto;
+}
+
+
+/* =========================================================
+   GRID
+========================================================= */
+.panel-content.usuario-detalle .form-grid{
+  display:grid;
+  grid-template-columns:repeat(2, minmax(0,1fr));
+  gap:16px;
+  width:100%;
+}
+
+
+/* =========================
+   ITEMS
+========================= */
+.panel-content.usuario-detalle .detalle-item{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+
+.panel-content.usuario-detalle .detalle-label{
+  font-size:12px;
+  color:var(--dim);
+}
+
+.panel-content.usuario-detalle .detalle-value{
+  font-size:14px;
+  font-weight:500;
+  color:var(--text);
+}
+
+
+/* =========================================================
+   BLOBS (SIDEBAR ITEMS)
+========================================================= */
+.panel-content.usuario-detalle .detalle-blobs{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+
+.panel-content.usuario-detalle .blob-item{
+  padding:12px 14px;
+  border-radius:12px;
+
+  background:color-mix(in srgb, var(--card-bg), #000 8%);
+  border:1px solid var(--card-border);
+
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+
+  transition:all .15s ease;
+}
+
+.panel-content.usuario-detalle .blob-item:hover{
+  transform:translateY(-2px);
+  border-color:var(--accent);
+  box-shadow:0 8px 18px rgba(0,0,0,0.25);
+}
+
+
+/* =========================
+   ACTIONS
+========================= */
+.panel-content.usuario-detalle .blob-actions{
+  display:flex;
+  gap:6px;
+}
+
+.panel-content.usuario-detalle .blob-actions button{
+  padding:6px 10px;
+  border-radius:6px;
+
+  border:1px solid var(--card-border);
+  background:var(--card-bg);
+  color:var(--text);
+
+  font-size:11px;
+  cursor:pointer;
+}
+
+.panel-content.usuario-detalle .blob-actions button:hover{
+  background:color-mix(in srgb, var(--accent), transparent 85%);
+  color:var(--accent);
+  border-color:var(--accent);
+}
+
+
+/* =========================================================
+   AVATAR (REUTILIZA SISTEMA GLOBAL)
+========================================================= */
+.panel-content.usuario-detalle .table-avatar{
+  width:40px;
+  height:40px;
+  min-width:40px;
+}
+
+
+/* =========================================================
+   RESPONSIVE
+========================================================= */
+@media (max-width:1100px){
+  .panel-content.usuario-detalle .detalle-right{
+    display:none;
+  }
+}

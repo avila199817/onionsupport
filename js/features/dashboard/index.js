@@ -113,7 +113,28 @@ function buildYearData(evolucion){
 }
 
 /* =========================
-   🔥 LOADER CONTROL
+   🔥 KPI CALC (PRO)
+========================= */
+
+function calculateKPIs(data){
+
+  let total = 0;
+  let totalFacturas = 0;
+
+  data.forEach(d=>{
+    total += d.paid;
+    totalFacturas += (d.paid > 0 || d.pending > 0) ? 1 : 0;
+  });
+
+  const iva = total * 0.21;
+  const irpf = total * 0.15;
+  const beneficio = total - iva - irpf;
+
+  return { total, iva, irpf, beneficio, totalFacturas };
+}
+
+/* =========================
+   🔥 LOADER
 ========================= */
 
 function showLoader(){
@@ -128,7 +149,7 @@ function hideLoader(){
   if(!container) return;
 
   container.classList.remove("skeleton-grid");
-  container.innerHTML = ""; // 🔥 elimina skeleton
+  container.innerHTML = "";
 }
 
 /* =========================
@@ -178,12 +199,10 @@ function renderYearRevenue(data){
 
   container.innerHTML = html;
 
+  // 🔥 ACTIVAR ANIMACIÓN REAL (PRO)
   requestAnimationFrame(()=>{
-    container.querySelectorAll(".bar").forEach((bar, i)=>{
-      bar.style.transform = "scaleY(0.92)";
-      setTimeout(()=>{
-        bar.style.transform = "scaleY(1)";
-      }, i * 35);
+    container.querySelectorAll(".bar").forEach(bar=>{
+      bar.classList.add("animate");
     });
   });
 }
@@ -199,12 +218,19 @@ async function loadDashboardData(){
     const res = await Onion.fetch(API + "/dashboard");
     const data = res?.data || {};
 
-    setText("home-facturas", formatMoney(data?.resumen?.totalCobrado));
-
     const evolucion = data?.charts?.evolucionMensual || [];
     const yearData = buildYearData(evolucion);
 
-    hideLoader(); // 🔥 quita skeleton justo antes de pintar
+    const kpis = calculateKPIs(yearData);
+
+    // 🔥 KPIs
+    setText("home-facturas", formatMoney(kpis.total));
+    setText("home-iva", formatMoney(kpis.iva));
+    setText("home-irpf", formatMoney(kpis.irpf));
+    setText("home-beneficio", formatMoney(kpis.beneficio));
+    setText("home-total-facturas", kpis.totalFacturas);
+
+    hideLoader();
     renderYearRevenue(yearData);
 
   } catch(e){
@@ -227,8 +253,7 @@ async function loadDashboard(){
   panel?.classList.remove("ready");
 
   setGreeting();
-
-  showLoader(); // 🔥 muestra skeleton limpio
+  showLoader();
 
   await loadDashboardData();
 

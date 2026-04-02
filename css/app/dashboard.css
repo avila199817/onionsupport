@@ -431,61 +431,146 @@
 }
 
 
-/* =========================
-   🔥 DASHBOARD PENDIENTES (ADD-ON)
-   NO TOCA NADA EXISTENTE
-========================= */
 
-.dashboard-pending{
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* =========================================================
+   🔥 DASHBOARD → FACTURAS PENDIENTES (REUTILIZA SISTEMA)
+   NO ROMPE NADA EXISTENTE
+========================================================= */
+
+.panel-content.dashboard .dashboard-pending{
+  display:flex;
+  flex-direction:column;
+  width:100%;
   margin-top:32px;
 }
 
 /* HEADER */
-.dashboard-section-header{
+.panel-content.dashboard .dashboard-section-header{
   display:flex;
-  justify-content:space-between;
   align-items:center;
-  margin-bottom:14px;
+  justify-content:space-between;
+  margin-bottom:10px;
+  padding:0 4px;
 }
 
-.dashboard-section-header h2{
-  font-size:14px;
+.panel-content.dashboard .dashboard-section-header h2{
+  font-size:13px;
   font-weight:600;
-  color:#fff;
+  color:var(--text);
   letter-spacing:.4px;
-}
-
-#pending-count{
-  font-size:12px;
-  opacity:.6;
-}
-
-/* CONTENEDOR (usa tu estilo base sin romperlo) */
-.dashboard-pending .table-container{
-  border-radius:16px;
-  overflow:hidden;
-}
-
-/* HOVER SUAVE (no agresivo) */
-.dashboard-pending tbody tr:hover{
-  background:rgba(255,255,255,.025);
-}
-
-/* BADGE PENDIENTE (coherente con tu rojo actual) */
-.dashboard-pending .badge.warning{
-  background:rgba(248,113,113,.12);
-  color:#f87171;
-  border:1px solid rgba(248,113,113,.2);
-}
-
-/* AVATAR UN POCO MÁS FINO SOLO EN DASHBOARD */
-.dashboard-pending .table-avatar{
-  font-size:11px;
+  text-transform:uppercase;
   opacity:.85;
 }
 
-/* ACCIONES MÁS COMPACTAS SOLO AQUÍ */
-.dashboard-pending .btn-action{
-  padding:4px 8px;
+.panel-content.dashboard #pending-count{
   font-size:11px;
+  color:var(--dim);
+}
+
+/* =========================================================
+   🔥 CLAVE: CLONAMOS COMPORTAMIENTO FACTURAS
+========================================================= */
+
+.panel-content.dashboard .table-system.facturas{
+  display:flex;
+  flex-direction:column;
+  flex:1;
+  min-height:0;
+  width:100%;
+}
+
+/* SIN FILTROS EN DASHBOARD */
+.panel-content.dashboard .table-system.facturas .filters-row{
+  display:none;
+}
+
+/* CONTENEDOR */
+.panel-content.dashboard .table-system.facturas .table-container{
+  max-height:320px; /* 🔥 importante para dashboard */
+  overflow-y:auto;
+  border-radius:12px;
+}
+
+/* =========================================================
+   🔥 TABLA (MISMO SISTEMA)
+========================================================= */
+
+.panel-content.dashboard .table-system.facturas table{
+  width:100%;
+  border-collapse:collapse;
+  table-layout:fixed;
+}
+
+/* HEADER */
+.panel-content.dashboard .table-system.facturas thead{
+  position:sticky;
+  top:0;
+  z-index:2;
+  background:var(--panel-bg);
+}
+
+/* =========================================================
+   🔥 AJUSTES VISUALES DASHBOARD
+========================================================= */
+
+/* filas menos agresivas */
+.panel-content.dashboard .table-system.facturas tbody tr{
+  transform:none;
+}
+
+.panel-content.dashboard .table-system.facturas tbody tr:hover{
+  transform:none;
+  background:color-mix(in srgb, var(--panel-bg), #fff 4%);
+}
+
+/* avatar un pelín más compacto */
+.panel-content.dashboard .table-system.facturas .table-avatar{
+  width:30px;
+  height:30px;
+  min-width:30px;
+  font-size:11px;
+}
+
+/* texto ligeramente más compacto */
+.panel-content.dashboard .table-system.facturas td{
+  font-size:12.5px;
+  padding:10px 12px;
+}
+
+/* botones más pequeños */
+.panel-content.dashboard .table-system.facturas .btn-action{
+  padding:4px 8px;
+  font-size:10px;
+}
+
+/* badge más fino */
+.panel-content.dashboard .table-system.facturas .badge{
+  font-size:9px;
+  padding:3px 8px;
+}
+
+/* =========================================================
+   🔥 SCROLL DASHBOARD
+========================================================= */
+
+.panel-content.dashboard .table-system.facturas .table-container::-webkit-scrollbar{
+  width:6px;
+}
+
+.panel-content.dashboard .table-system.facturas .table-container::-webkit-scrollbar-thumb{
+  background:var(--scrollbar-thumb);
+  border-radius:6px;
 }

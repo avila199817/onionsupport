@@ -47,9 +47,25 @@ function formatMoney(n){
   }).format(safe(n));
 }
 
+function formatDate(d){
+  if(!d) return "-";
+  const date = new Date(d);
+  return date.toLocaleDateString("es-ES");
+}
+
 function setText(id, value){
   const el = $(id);
   if(el) el.textContent = value ?? "--";
+}
+
+function getInitials(name){
+  if(!name) return "?";
+  return name
+    .split(" ")
+    .map(n => n[0])
+    .slice(0,2)
+    .join("")
+    .toUpperCase();
 }
 
 /* =========================
@@ -78,7 +94,7 @@ function setGreeting(){
 }
 
 /* =========================
-   🔥 BUILD YEAR DATA (DESDE DASHBOARD)
+   🔥 BUILD YEAR DATA
 ========================= */
 
 function buildYearData(evolucion){
@@ -176,7 +192,85 @@ function renderYearRevenue(data){
 }
 
 /* =========================
-   🔥 DATA (DESDE /dashboard)
+   🔥 RENDER PENDIENTES
+========================= */
+
+function renderPendingFacturas(facturas){
+
+  const tbody = $("dashboard-pending-body");
+  const countEl = $("pending-count");
+
+  if(!tbody) return;
+
+  const pendientes = (facturas || [])
+    .filter(f => (f.estadoPago || "").toLowerCase() !== "pagada")
+    .sort((a,b) => safe(b.baseImponible) - safe(a.baseImponible))
+    .slice(0,5);
+
+  if(countEl){
+    countEl.textContent = pendientes.length;
+  }
+
+  if(!pendientes.length){
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" style="text-align:center; opacity:.6; padding:20px;">
+          Sin facturas pendientes
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  const html = pendientes.map(f => {
+
+    const cliente = f.cliente?.nombreContacto || "Sin nombre";
+    const empresa = f.cliente?.razonSocial || "";
+    const email = f.emailCliente || "";
+    const fecha = formatDate(f.fechaFactura);
+    const importe = formatMoney(f.total);
+    const id = f.numeroFacturaLegal || "-";
+
+    return `
+      <tr data-id="${f.id}">
+
+        <td class="col-id">${id}</td>
+
+        <td class="col-main">
+          <div class="cell-user">
+            <div class="table-avatar">${getInitials(cliente)}</div>
+            <div class="user-info">
+              <span class="user-name">${cliente}</span>
+              <span class="user-sub">${email}</span>
+            </div>
+          </div>
+        </td>
+
+        <td class="col-date">${fecha}</td>
+
+        <td class="col-importe">${importe}</td>
+
+        <td class="col-status">
+          <span class="badge warning">Pendiente</span>
+        </td>
+
+        <td class="col-actions">
+          <div class="actions">
+            <button class="btn-action view">Ver</button>
+            <button class="btn-action download">PDF</button>
+            <button class="btn-action pay">Pagar</button>
+          </div>
+        </td>
+
+      </tr>
+    `;
+  }).join("");
+
+  tbody.innerHTML = html;
+}
+
+/* =========================
+   🔥 DATA
 ========================= */
 
 async function loadDashboardData(){
@@ -189,7 +283,7 @@ async function loadDashboardData(){
     const resumen = data.resumen || {};
     const evolucion = data.charts?.evolucionMensual || [];
 
-    // 🔥 KPIs REALES
+    // KPIs
     setText("home-facturas", formatMoney(resumen.totalCobrado));
     setText("home-iva", formatMoney(resumen.totalIVA));
     setText("home-irpf", formatMoney(resumen.totalIRPF));
@@ -200,6 +294,12 @@ async function loadDashboardData(){
 
     hideLoader();
     renderYearRevenue(yearData);
+
+    // 🔥 NUEVO FETCH FACTURAS
+    const resFacturas = await Onion.fetch(API + "/facturas");
+    const facturas = resFacturas?.data || [];
+
+    renderPendingFacturas(facturas);
 
   } catch(e){
 

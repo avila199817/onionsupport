@@ -91,10 +91,7 @@ html, body{
 
 .card-total strong{
   font-size:40px;
-
-  background:linear-gradient(90deg,#ffffff,#b7dcff);
-  -webkit-background-clip:text;
-  -webkit-text-fill-color:transparent;
+  color:var(--text);
 }
 
 /* =========================
@@ -169,9 +166,7 @@ html, body{
   line-height:var(--line-tight);
   margin:0;
 
-  background:linear-gradient(90deg,#ffffff,#b7dcff);
-  -webkit-background-clip:text;
-  -webkit-text-fill-color:transparent;
+  color:var(--text);
 }
 
 /* =========================

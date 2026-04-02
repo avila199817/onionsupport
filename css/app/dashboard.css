@@ -216,6 +216,25 @@
 }
 
 /* =========================
+   🔥 HOVER COLUMNAS (PRO)
+========================= */
+
+.month{
+  transition:
+    transform .2s ease,
+    filter .2s ease;
+}
+
+.month:hover{
+  transform:translateY(-3px);
+}
+
+/* opcional: dar un pelín más de presencia */
+.month:hover .bar{
+  filter:brightness(1.08);
+}
+
+/* =========================
    🔥 BARRA (ANIMACIÓN PRO)
 ========================= */
 

@@ -1,431 +1,262 @@
-/* =========================
-   🔥 KPI ROW
-========================= */
+"use strict";
 
-.dashboard-kpis{
-  display:flex;
-  gap:18px;
-  align-items:stretch;
-  flex-wrap:wrap;
+(function(){
+
+const Onion = window.Onion;
+
+if(!Onion){
+  console.error("💥 Onion no disponible (dashboard)");
+  return;
 }
 
+let interval = null;
+let initialized = false;
+let loading = false;
+
 /* =========================
-   🔥 CARDS BASE
+   CONFIG
 ========================= */
 
-.card-total,
-.card-kpi{
-  position:relative;
-  flex:1;
-  min-width:160px;
+const API = Onion.config?.API || "";
 
-  padding:14px 16px;
+/* =========================
+   ROOT
+========================= */
 
-  border-radius:16px;
-
-  background:linear-gradient(
-    145deg,
-    rgba(255,255,255,.04),
-    rgba(255,255,255,.02)
-  );
-
-  backdrop-filter:blur(10px);
-
-  border:1px solid rgba(255,255,255,.06);
-
-  box-shadow:
-    0 6px 20px rgba(0,0,0,.25),
-    inset 0 0 10px rgba(255,255,255,.03);
-
-  transition:
-    transform .2s ease,
-    box-shadow .2s ease,
-    border .2s ease;
+function getRoot(){
+  return document.querySelector(".panel-content.dashboard");
 }
 
-.card-total:hover,
-.card-kpi:hover{
-  transform:translateY(-3px);
-  box-shadow:
-    0 12px 30px rgba(0,0,0,.35),
-    inset 0 0 12px rgba(255,255,255,.04);
-
-  border:1px solid rgba(255,255,255,.12);
+function $(id){
+  return getRoot()?.querySelector("#" + id);
 }
 
 /* =========================
-   🔥 TEXTOS KPI
+   HELPERS
 ========================= */
 
-.card-total span,
-.card-kpi span{
-  font-size:11px;
-  opacity:.55;
-  letter-spacing:.8px;
-  text-transform:uppercase;
+function safe(n){
+  return Number(n || 0);
 }
 
-.card-total strong,
-.card-kpi strong{
-  display:block;
-  margin-top:6px;
-
-  font-size:28px;
-  font-weight:700;
-  letter-spacing:.5px;
-
-  color:#fff;
+function formatMoney(n){
+  return new Intl.NumberFormat("es-ES", {
+    style:"currency",
+    currency:"EUR",
+    maximumFractionDigits:0
+  }).format(safe(n));
 }
 
-/* =========================
-   🔥 TOTAL DESTACADO
-========================= */
-
-.card-total{
-  flex:1.4;
-}
-
-.card-total strong{
-  font-size:40px;
-
-  background:linear-gradient(90deg,#ffffff,#b7dcff);
-  -webkit-background-clip:text;
-  -webkit-text-fill-color:transparent;
-}
-
-/* =========================
-   🔥 COLORES KPI (SAAS PRO)
-========================= */
-
-/* 🔴 PENDIENTE (riesgo) */
-#home-pendiente{
-  color:#f87171;
-  text-shadow:0 0 10px rgba(248,113,113,.25);
-}
-
-/* 🟡 IVA (neutral fiscal) */
-#home-iva{
-  color:#facc15;
-  text-shadow:0 0 10px rgba(250,204,21,.25);
-}
-
-/* 🟣 IRPF (diferenciado, no agresivo) */
-#home-irpf{
-  color:#a78bfa;
-  text-shadow:0 0 10px rgba(167,139,250,.25);
-}
-
-/* 🟢 BENEFICIO (dinero real) */
-#home-beneficio{
-  color:#34d399;
-  text-shadow:0 0 12px rgba(52,211,153,.25);
-}
-
-/* =========================
-   🔥 MINI TOP LINE
-========================= */
-
-.card-kpi::after{
-  content:"";
-  position:absolute;
-  top:0;
-  left:0;
-  width:100%;
-  height:2px;
-
-  background:linear-gradient(
-    90deg,
-    transparent,
-    rgba(255,255,255,.2),
-    transparent
-  );
-
-  opacity:.4;
-}
-
-/* =========================
-   BASE
-========================= */
-
-.dashboard-container{
-  display:flex;
-  flex-direction:column;
-  gap:var(--space-xl);
-  padding:var(--space-xl);
+function setText(id, value){
+  const el = $(id);
+  if(el) el.textContent = value ?? "--";
 }
 
 /* =========================
    🔥 GREETING
 ========================= */
 
-.dashboard-greeting h1{
-  font-size:var(--font-2xl);
-  font-weight:700;
-  letter-spacing:.6px;
-  line-height:var(--line-tight);
-  margin:0;
+function setGreeting(){
 
-  background:linear-gradient(90deg,#ffffff,#b7dcff);
-  -webkit-background-clip:text;
-  -webkit-text-fill-color:transparent;
+  const el = document.getElementById("greeting-text");
+  if(!el) return;
+
+  const hour = new Date().getHours();
+
+  let greeting = "Buenos días";
+
+  if(hour >= 12 && hour < 20){
+    greeting = "Buenas tardes";
+  } else if(hour >= 20 || hour < 6){
+    greeting = "Buenas noches";
+  }
+
+  const fullName = Onion.auth?.getUser?.()?.nombre || "Cristian";
+  const name = fullName.split(" ")[0];
+
+  el.textContent = `${greeting}, ${name}`;
 }
 
 /* =========================
-   🔥 CHART
+   🔥 BUILD YEAR DATA (DESDE DASHBOARD)
 ========================= */
 
-.card-chart{
-  padding-top:var(--space-xs);
+function buildYearData(evolucion){
+
+  const currentYear = new Date().getFullYear();
+
+  const yearData = new Array(12).fill(0).map(() => ({
+    paid: 0,
+    pending: 0
+  }));
+
+  if(!Array.isArray(evolucion)) return yearData;
+
+  evolucion.forEach(m => {
+
+    if(!m?.mes) return;
+
+    const [yearStr, mesStr] = m.mes.split("-");
+    const year = Number(yearStr);
+    const monthIndex = Number(mesStr) - 1;
+
+    if(year !== currentYear) return;
+
+    yearData[monthIndex] = {
+      paid: safe(m.pagado),
+      pending: safe(m.pendiente)
+    };
+
+  });
+
+  return yearData;
 }
 
 /* =========================
-   🔥 AREA
+   🔥 LOADER
 ========================= */
 
-.chart-area{
-  position:relative;
-  height:260px;
-  display:flex;
-  align-items:flex-end;
+function showLoader(){
+  const container = getRoot()?.querySelector(".year-grid");
+  if(!container) return;
+  container.classList.add("skeleton-grid");
+}
+
+function hideLoader(){
+  const container = getRoot()?.querySelector(".year-grid");
+  if(!container) return;
+  container.classList.remove("skeleton-grid");
+  container.innerHTML = "";
 }
 
 /* =========================
-   🔥 GRID
+   🔥 RENDER CHART
 ========================= */
 
-.year-grid{
-  display:flex;
-  align-items:flex-end;
-  width:100%;
-  height:100%;
-  gap:var(--space-sm);
-  z-index:2;
+function renderYearRevenue(data){
+
+  const container = getRoot()?.querySelector(".year-grid");
+  if(!container) return;
+
+  const months = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+  const max = Math.max(...data.map(d => d.paid + d.pending), 1);
+
+  const html = data.map((d, i) => {
+
+    const total = d.paid + d.pending;
+
+    const percent = (total / max) * 100;
+    const paidPercent = total ? (d.paid / total) * 100 : 0;
+    const pendingPercent = total ? (d.pending / total) * 100 : 0;
+
+    return `
+      <div class="month ${total === 0 ? "empty" : ""}">
+        <div class="bar" data-month="${months[i]}" style="height:${total === 0 ? 2 : percent}%">
+
+          <div class="bar-paid" style="height:${paidPercent}%">
+            ${d.paid > 0 ? `<span class="bar-label">${formatMoney(d.paid)}</span>` : ""}
+          </div>
+
+          <div class="bar-pending" style="height:${pendingPercent}%">
+            ${d.pending > 0 ? `<span class="bar-label negative">${formatMoney(d.pending)}</span>` : ""}
+          </div>
+
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  container.innerHTML = html;
+
+  requestAnimationFrame(()=>{
+    container.querySelectorAll(".bar").forEach(bar=>{
+      bar.classList.add("animate");
+    });
+  });
 }
 
 /* =========================
-   🔥 MES
+   🔥 DATA (DESDE /dashboard)
 ========================= */
 
-.month{
-  flex:1;
-  height:100%;
-  display:flex;
-  align-items:flex-end;
-  justify-content:center;
-  position:relative;
+async function loadDashboardData(){
+
+  try {
+
+    const res = await Onion.fetch(API + "/dashboard");
+    const data = res?.data || {};
+
+    const resumen = data.resumen || {};
+    const evolucion = data.charts?.evolucionMensual || [];
+
+    // 🔥 KPIs REALES
+    setText("home-facturas", formatMoney(resumen.totalCobrado));
+    setText("home-iva", formatMoney(resumen.totalIVA));
+    setText("home-irpf", formatMoney(resumen.totalIRPF));
+    setText("home-beneficio", formatMoney(resumen.beneficio));
+    setText("home-pendiente", formatMoney(resumen.totalPendiente));
+
+    const yearData = buildYearData(evolucion);
+
+    hideLoader();
+    renderYearRevenue(yearData);
+
+  } catch(e){
+
+    console.error("💥 Dashboard error:", e);
+    hideLoader();
+  }
 }
 
 /* =========================
-   🔥 BARRA (ANIMACIÓN PRO)
+   🔥 LOAD
 ========================= */
 
-.bar{
-  position:relative;
-  width:100%;
-  height:100%;
+async function loadDashboard(){
 
-  display:flex;
-  flex-direction:column;
-  justify-content:flex-end;
+  if(loading) return;
+  loading = true;
 
-  transform:scaleY(0);
-  transform-origin:bottom;
+  const panel = getRoot();
+  panel?.classList.remove("ready");
 
-  transition:
-    transform 1s cubic-bezier(.22,1,.36,1),
-    filter .2s ease;
-}
+  setGreeting();
+  showLoader();
 
-.bar.animate{
-  transform:scaleY(1);
+  await loadDashboardData();
+
+  requestAnimationFrame(()=>{
+    panel?.classList.add("ready");
+  });
+
+  loading = false;
 }
 
 /* =========================
-   🔥 DELAY PROGRESIVO
+   🔥 INIT
 ========================= */
 
-.month:nth-child(1) .bar{ transition-delay:.05s; }
-.month:nth-child(2) .bar{ transition-delay:.1s; }
-.month:nth-child(3) .bar{ transition-delay:.15s; }
-.month:nth-child(4) .bar{ transition-delay:.2s; }
-.month:nth-child(5) .bar{ transition-delay:.25s; }
-.month:nth-child(6) .bar{ transition-delay:.3s; }
-.month:nth-child(7) .bar{ transition-delay:.35s; }
-.month:nth-child(8) .bar{ transition-delay:.4s; }
-.month:nth-child(9) .bar{ transition-delay:.45s; }
-.month:nth-child(10) .bar{ transition-delay:.5s; }
-.month:nth-child(11) .bar{ transition-delay:.55s; }
-.month:nth-child(12) .bar{ transition-delay:.6s; }
+function init(){
 
-/* =========================
-   🔥 STACK
-========================= */
+  const root = getRoot();
+  if(!root || initialized) return;
 
-.bar-paid,
-.bar-pending{
-  width:100%;
-  position:relative;
+  initialized = true;
 
-  border-radius:18px 18px 10px 10px;
-  overflow:hidden;
-}
+  loadDashboard();
 
-.bar-paid{
-  background:linear-gradient(180deg,#34d399,#059669);
+  interval = setInterval(loadDashboard, 60000);
 
-  box-shadow:
-    0 8px 18px rgba(16,185,129,.22),
-    inset 0 0 6px rgba(255,255,255,.06);
-}
-
-.bar-pending{
-  background:linear-gradient(180deg,#f87171,#dc2626);
-
-  box-shadow:
-    0 8px 18px rgba(220,38,38,.22),
-    inset 0 0 6px rgba(255,255,255,.05);
+  Onion.onCleanup(()=>{
+    initialized = false;
+    if(interval) clearInterval(interval);
+  });
 }
 
 /* =========================
-   🔥 BRILLO
+   START
 ========================= */
 
-.bar-paid::before,
-.bar-pending::before{
-  content:"";
-  position:absolute;
-  top:0;
-  left:0;
-  width:100%;
-  height:10px;
+init();
 
-  border-radius:18px 18px 0 0;
-
-  background:linear-gradient(
-    to bottom,
-    rgba(255,255,255,.18),
-    transparent
-  );
-}
-
-/* =========================
-   🔥 LABEL
-========================= */
-
-.bar-label{
-  position:absolute;
-  top:8px;
-  left:50%;
-  transform:translateX(-50%);
-
-  padding:5px 10px;
-
-  font-size:var(--font-xs);
-  font-weight:600;
-
-  border-radius:999px;
-
-  background:linear-gradient(
-    180deg,
-    rgba(0,0,0,.55),
-    rgba(0,0,0,.35)
-  );
-
-  backdrop-filter:blur(6px);
-
-  color:#fff;
-
-  box-shadow:
-    0 4px 12px rgba(0,0,0,.35),
-    inset 0 0 6px rgba(255,255,255,.05);
-
-  border:1px solid rgba(255,255,255,.08);
-
-  pointer-events:none;
-}
-
-.bar-label.negative{
-  color:#fecaca;
-}
-
-/* =========================
-   🔥 MES LABEL
-========================= */
-
-.bar::before{
-  content:attr(data-month);
-  position:absolute;
-  bottom:-22px;
-  left:0;
-
-  font-size:var(--font-xs);
-  font-weight:500;
-  color:var(--dim);
-  opacity:.85;
-}
-
-/* =========================
-   🔥 HOVER
-========================= */
-
-.month:hover .bar{
-  filter:brightness(1.08);
-}
-
-/* =========================
-   EMPTY
-========================= */
-
-.month.empty .bar{
-  background:rgba(255,255,255,.03);
-}
-
-/* =========================
-   🔥 SKELETON
-========================= */
-
-.skeleton-bar{
-  width:100%;
-  border-radius:18px;
-
-  transform:scaleY(0);
-  transform-origin:bottom;
-
-  background:linear-gradient(
-    90deg,
-    rgba(255,255,255,.04),
-    rgba(255,255,255,.08),
-    rgba(255,255,255,.04)
-  );
-
-  background-size:200% 100%;
-
-  animation:
-    skeleton-loading 1.2s infinite linear,
-    grow-bar 1s cubic-bezier(.22,1,.36,1) forwards;
-}
-
-@keyframes skeleton-loading{
-  0%{ background-position:200% 0; }
-  100%{ background-position:-200% 0; }
-}
-
-@keyframes grow-bar{
-  from{ transform:scaleY(0); }
-  to{ transform:scaleY(1); }
-}
-
-/* =========================
-   PANEL
-========================= */
-
-.panel-content.dashboard{
-  opacity:0;
-  transform:translateY(14px);
-  transition:all var(--duration-slow) var(--ease-out);
-}
-
-.panel-content.dashboard.ready{
-  opacity:1;
-  transform:translateY(0);
-}
+})();

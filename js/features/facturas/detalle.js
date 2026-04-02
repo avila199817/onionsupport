@@ -90,12 +90,29 @@ async function loadFactura(id){
 
   try{
 
-    const res = await Onion.fetch(Onion.config.API + "/facturas/" + id);
+    const res = await fetch(Onion.config.API + "/facturas/" + id, {
+      headers: {
+        Authorization: "Bearer " + Onion.auth.getToken()
+      }
+    });
 
-    factura = normalizeFactura(res?.factura || res?.data || res);
+    // 🔥 CONTROL SAAS PRO
+    if(!res.ok){
+
+      if(res.status === 403 || res.status === 404){
+        showNotFound();
+        return;
+      }
+
+      throw new Error("Error inesperado");
+    }
+
+    const json = await res.json();
+
+    factura = normalizeFactura(json?.factura || json?.data || json);
 
     if(!factura){
-      console.error("❌ Factura no encontrada");
+      showNotFound();
       return;
     }
 
@@ -103,8 +120,32 @@ async function loadFactura(id){
 
   }catch(e){
     console.error("💥 ERROR FACTURA DETALLE:", e);
+    showNotFound();
   }
 
+}
+
+/* =========================
+   ERROR SAAS UI 🔥
+========================= */
+
+function showNotFound(){
+
+  const root = getRoot();
+  if(!root) return;
+
+  root.innerHTML = `
+    <div class="error-saas">
+      <div class="error-icon">🔒</div>
+
+      <h2>Factura no encontrada</h2>
+      <p>No existe o no tienes acceso a este recurso.</p>
+
+      <div class="error-actions">
+        <button id="btn-back">← Volver</button>
+      </div>
+    </div>
+  `;
 }
 
 /* =========================
@@ -158,14 +199,10 @@ function render(){
 
   const cliente = factura.cliente || {};
 
-  /* HEADER */
-
   $("#detalle-cliente").textContent = escapeHTML(cliente.nombre || "Cliente");
   $("#detalle-cliente-id").textContent = cliente.id || "";
 
   renderAvatar(cliente);
-
-  /* CORE */
 
   $("#detalle-numero-legal").textContent = cleanNumero(factura.numeroLegal);
 
@@ -181,19 +218,15 @@ function render(){
   $("#detalle-concepto").textContent = factura.concepto || "-";
   $("#detalle-descripcion").textContent = factura.descripcion || "-";
 
-  /* ESTADO */
-
   const estadoEl = $("#detalle-estado");
   const estado = factura.estadoPago;
 
-  estadoEl.textContent = formatEstado(estado);
-  estadoEl.dataset.estado = estado;
-
-  /* IVA */
+  if(estadoEl){
+    estadoEl.textContent = formatEstado(estado);
+    estadoEl.dataset.estado = estado;
+  }
 
   $("#detalle-iva").textContent = factura.iva + "%";
-
-  /* IRPF */
 
   const irpfContainer = $("#detalle-irpf-container");
 
@@ -203,8 +236,6 @@ function render(){
   }else{
     irpfContainer.style.display = "none";
   }
-
-  /* SIDEBAR */
 
   renderSidebar();
 
@@ -224,7 +255,6 @@ function renderSidebar(){
     return;
   }
 
-  const base = Onion.config.API;
   const nombreArchivo = cleanNumero(factura.numeroLegal) + ".pdf";
 
   docs.innerHTML = `
@@ -262,10 +292,7 @@ function downloadFactura(){
 
 function cleanNumero(num){
   if(!num) return "--";
-
-  return String(num)
-    .replace(/^FAC-/i,"")
-    .replace(/-.*/,""); // quita sufijos tipo -9UQ
+  return String(num).replace(/^FAC-/i,"").replace(/-.*/,"");
 }
 
 function capitalize(str){

@@ -1,5 +1,11 @@
 <div class="panel-content factura-detalle">
 
+  <!-- 🔥 LOADER (MISMO CONCEPTO GLOBAL) -->
+  <div class="factura-loading" aria-hidden="true">
+    <img class="loader-logo loader-dark" src="/media/img/favicon_white.png" draggable="false">
+    <img class="loader-logo loader-light" src="/media/img/favicon_black.png" draggable="false">
+  </div>
+
   <div class="layout-split">
 
     <!-- =========================
@@ -35,80 +41,65 @@
 
           <div class="form-grid">
 
-            <!-- ID FACTURA LEGAL -->
             <div class="detalle-item">
               <div class="detalle-label">Factura</div>
               <div class="detalle-value" id="detalle-numero-legal">--</div>
             </div>
 
-            <!-- ID FACTURA -->
             <div class="detalle-item">
               <div class="detalle-label">ID Factura</div>
               <div class="detalle-value" id="detalle-id">--</div>
             </div>
 
-            <!-- ID INCIDENCIA -->
             <div class="detalle-item">
               <div class="detalle-label">ID Incidencia</div>
               <div class="detalle-value" id="detalle-incidencia-id">--</div>
             </div>
 
-            <!-- FECHA EMISIÓN -->
             <div class="detalle-item">
               <div class="detalle-label">Fecha emisión</div>
               <div class="detalle-value" id="detalle-fecha">--</div>
             </div>
 
-            <!-- FECHA VENCIMIENTO -->
             <div class="detalle-item">
               <div class="detalle-label">Fecha vencimiento</div>
               <div class="detalle-value" id="detalle-vencimiento">--</div>
             </div>
 
-            <!-- MÉTODO PAGO -->
             <div class="detalle-item">
               <div class="detalle-label">Método de pago</div>
               <div class="detalle-value" id="detalle-metodo">Transferencia</div>
             </div>
 
-            <!-- IMPORTE -->
             <div class="detalle-item">
               <div class="detalle-label">Importe total</div>
               <div class="detalle-value" id="detalle-total">--</div>
             </div>
 
-            <!-- ESTADO (VISOR) -->
             <div class="detalle-item">
               <div class="detalle-label">Estado</div>
               <div class="detalle-value" id="detalle-estado">--</div>
             </div>
 
-            <!-- IVA (VISOR) -->
             <div class="detalle-item">
               <div class="detalle-label">IVA</div>
               <div class="detalle-value" id="detalle-iva">--</div>
             </div>
 
-            <!-- IRPF (SOLO EMPRESA) -->
             <div class="detalle-item" id="detalle-irpf-container" style="display:none;">
               <div class="detalle-label">IRPF</div>
               <div class="detalle-value" id="detalle-irpf">--</div>
             </div>
 
-            <!-- CONCEPTO -->
             <div class="detalle-item" style="grid-column: span 2;">
               <div class="detalle-label">Concepto</div>
               <div class="detalle-value" id="detalle-concepto">--</div>
             </div>
 
-            <!-- DESCRIPCIÓN -->
             <div class="detalle-item" style="grid-column: span 2;">
               <div class="detalle-label">Descripción</div>
 
-              <div 
-                id="detalle-descripcion"
-                class="detalle-value"
-              ></div>
+              <div id="detalle-descripcion" class="detalle-value"></div>
             </div>
 
           </div>
@@ -126,7 +117,6 @@
 
       <div class="detalle-sidebar">
 
-        <!-- DOCUMENTOS -->
         <div class="sidebar-section">
           <div class="sidebar-title">Documentos asociados</div>
 
@@ -146,7 +136,6 @@
 
         <div class="sidebar-divider"></div>
 
-        <!-- HISTORIAL -->
         <div class="sidebar-section">
           <div class="sidebar-title">Historial de cambios</div>
           <div id="detalle-historial" class="detalle-blobs"></div>

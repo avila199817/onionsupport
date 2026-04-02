@@ -171,7 +171,7 @@ function bindEvents(){
     const id = row.dataset.id;
     if(!id) return;
 
-    Onion.router.navigate(`/usuarios/usuario?id=${id}`);
+    Onion.router.navigate(`/usuarios/detalle?id=${id}`);
 
   });
 

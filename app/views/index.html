@@ -4,37 +4,32 @@
 
     <!-- 🔥 GREETING -->
     <div class="dashboard-greeting">
-      <h1 id="greeting-text">Buenas tardes, Cristian</h1>
+      <h1 id="greeting-text"></h1>
     </div>
 
-    <!-- 🔥 KPI ROW (ESTILO SAAS PRO) -->
+    <!-- 🔥 KPI ROW -->
     <div class="dashboard-kpis">
 
-      <!-- TOTAL FACTURADO -->
       <div class="card-total">
         <span>Total ingresos 2026</span>
         <strong id="home-facturas" class="skeleton-text">€0</strong>
       </div>
 
-      <!-- 🔥 NUEVO: PENDIENTE -->
       <div class="card-kpi">
         <span>Pendiente</span>
         <strong id="home-pendiente" class="skeleton-text">€0</strong>
       </div>
 
-      <!-- IVA -->
       <div class="card-kpi">
         <span>IVA</span>
         <strong id="home-iva" class="skeleton-text">€0</strong>
       </div>
 
-      <!-- IRPF -->
       <div class="card-kpi">
         <span>IRPF</span>
         <strong id="home-irpf" class="skeleton-text">€0</strong>
       </div>
 
-      <!-- BENEFICIO -->
       <div class="card-kpi">
         <span>Beneficio</span>
         <strong id="home-beneficio" class="skeleton-text">€0</strong>
@@ -47,7 +42,6 @@
 
       <div class="chart-area">
 
-        <!-- 🔥 SKELETON LOADER -->
         <div class="year-grid skeleton-grid" id="chart-loader">
 
           <div class="month"><div class="bar skeleton-bar" style="height:70%"></div></div>
@@ -62,6 +56,45 @@
           <div class="month"><div class="bar skeleton-bar" style="height:30%"></div></div>
           <div class="month"><div class="bar skeleton-bar" style="height:22%"></div></div>
           <div class="month"><div class="bar skeleton-bar" style="height:28%"></div></div>
+
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- 🔥 NUEVO BLOQUE: FACTURAS PENDIENTES -->
+    <div class="dashboard-pending">
+
+      <div class="dashboard-section-header">
+        <h2>Facturas pendientes</h2>
+        <span id="pending-count">0</span>
+      </div>
+
+      <div class="table-system facturas compact">
+
+        <div class="table-container">
+
+          <table>
+
+            <thead>
+              <tr>
+                <th class="col-id">ID</th>
+                <th class="col-main">Cliente</th>
+                <th class="col-date">Fecha</th>
+                <th class="col-importe">Importe</th>
+                <th class="col-status">Pago</th>
+                <th class="col-actions">Acciones</th>
+              </tr>
+            </thead>
+
+            <tbody id="dashboard-pending-body">
+
+              <!-- 🔥 se rellena por JS -->
+
+            </tbody>
+
+          </table>
 
         </div>
 

@@ -1,0 +1,133 @@
+<div class="panel-content usuario-detalle">
+
+  <!-- 🔥 LOADER -->
+  <div class="factura-loading" aria-hidden="true">
+    <img class="loader-logo loader-dark" src="/media/img/favicon_white.png" draggable="false">
+    <img class="loader-logo loader-light" src="/media/img/favicon_black.png" draggable="false">
+  </div>
+
+  <div class="layout-split">
+
+    <!-- =========================
+         LEFT
+    ========================= -->
+    <div class="detalle-left">
+
+      <!-- TOP BAR -->
+      <div class="filters-row" style="justify-content: space-between;">
+
+        <div class="detalle-user">
+          <div id="detalle-avatar" class="table-avatar"></div>
+
+          <div class="user-info">
+            <div class="detalle-value" id="detalle-nombre">--</div>
+
+            <div class="detalle-meta">
+              <span id="detalle-id"></span>
+            </div>
+          </div>
+        </div>
+
+        <button id="btn-back">
+          ← Volver
+        </button>
+
+      </div>
+
+      <!-- BODY -->
+      <div class="detalle-body">
+
+        <div style="width:100%;">
+
+          <div class="form-grid">
+
+            <div class="detalle-item">
+              <div class="detalle-label">Nombre</div>
+              <div class="detalle-value" id="detalle-nombre-full">--</div>
+            </div>
+
+            <div class="detalle-item">
+              <div class="detalle-label">Email</div>
+              <div class="detalle-value" id="detalle-email">--</div>
+            </div>
+
+            <div class="detalle-item">
+              <div class="detalle-label">Rol</div>
+              <div class="detalle-value" id="detalle-rol">--</div>
+            </div>
+
+            <div class="detalle-item">
+              <div class="detalle-label">Tipo</div>
+              <div class="detalle-value" id="detalle-tipo">--</div>
+            </div>
+
+            <div class="detalle-item">
+              <div class="detalle-label">Estado</div>
+              <div class="detalle-value" id="detalle-estado">--</div>
+            </div>
+
+            <div class="detalle-item">
+              <div class="detalle-label">Fecha alta</div>
+              <div class="detalle-value" id="detalle-fecha">--</div>
+            </div>
+
+            <div class="detalle-item" style="grid-column: span 2;">
+              <div class="detalle-label">Notas</div>
+              <div class="detalle-value" id="detalle-notas">--</div>
+            </div>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- =========================
+         RIGHT
+    ========================= -->
+    <aside class="detalle-right">
+
+      <div class="detalle-sidebar">
+
+        <div class="sidebar-section">
+          <div class="sidebar-title">Acciones</div>
+
+          <div class="detalle-blobs">
+
+            <div class="blob-item">
+              <span>Editar usuario</span>
+
+              <div class="blob-actions">
+                <button id="btn-edit-user">Editar</button>
+              </div>
+            </div>
+
+            <div class="blob-item">
+              <span>Estado</span>
+
+              <div class="blob-actions">
+                <button id="btn-toggle-user">Activar / Desactivar</button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="sidebar-divider"></div>
+
+        <div class="sidebar-section">
+          <div class="sidebar-title">Actividad reciente</div>
+          <div id="detalle-historial" class="detalle-blobs">
+            Sin actividad
+          </div>
+        </div>
+
+      </div>
+
+    </aside>
+
+  </div>
+
+</div>

@@ -131,7 +131,7 @@ function render(){
   renderAvatar(c);
 
   /* DATA */
-  setText("#detalle-numero-legal", factura.numeroFacturaLegal || "--");
+  setText("#detalle-numero-legal", factura.numeroFacturaLegal || factura.numero || "--");
   setText("#detalle-id", factura.id || "--");
   setText("#detalle-incidencia-id", factura.incidenciaId || "--");
 

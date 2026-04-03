@@ -5,25 +5,39 @@
 const Onion = window.Onion;
 
 if(!Onion){
-  console.error("💥 Onion no disponible");
+  console.error("💥 Onion no disponible (factura-detalle)");
   return;
 }
 
+/* =========================================================
+   STATE
+========================================================= */
 let initialized = false;
 let factura = null;
 
-/* ========================= ROOT ========================= */
+let observer = null;
 
+/* 🔥 CONTROL PRO */
+let currentRequestId = 0;
+let currentAbort = null;
+
+
+/* =========================================================
+   ROOT
+========================================================= */
 function getRoot(){
   return document.querySelector(".panel-view.factura-detalle");
 }
 
 function $(s){
-  return getRoot()?.querySelector(s);
+  const root = getRoot();
+  return root ? root.querySelector(s) : null;
 }
 
-/* ========================= INIT ========================= */
 
+/* =========================================================
+   INIT
+========================================================= */
 function init(){
 
   const root = getRoot();
@@ -35,27 +49,65 @@ function init(){
 
   initialized = true;
 
+  /* 🔥 LOADER DESDE EL FRAME 0 */
+  root.classList.add("loading");
+
   bindEvents();
-  loadFactura(getId());
+  observeDOM();
+
+  requestAnimationFrame(()=>{
+    loadFactura(getId());
+  });
+
+  Onion.onCleanup(()=>{
+    initialized = false;
+    currentAbort?.abort();
+  });
 
 }
 
 init();
 
-/* ========================= ID ========================= */
 
+/* =========================================================
+   OBSERVER
+========================================================= */
+function observeDOM(){
+
+  if(observer) return;
+
+  observer = new MutationObserver(()=>{
+    if(!getRoot()){
+      initialized = false;
+      setTimeout(init,100);
+    }
+  });
+
+  observer.observe(document.body,{
+    childList:true,
+    subtree:true
+  });
+
+}
+
+
+/* =========================================================
+   ID
+========================================================= */
 function getId(){
   return new URLSearchParams(location.search).get("id");
 }
 
-/* ========================= EVENTS ========================= */
 
+/* =========================================================
+   EVENTS
+========================================================= */
 function bindEvents(){
 
   const root = getRoot();
   if(!root) return;
 
-  Onion.cleanupEvent(root,"click",(e)=>{
+  Onion.cleanupEvent(root,"click",async (e)=>{
 
     const t = e.target;
 
@@ -64,28 +116,35 @@ function bindEvents(){
     }
 
     if(t.id === "btn-descargar-factura"){
-      downloadFactura();
+      await downloadFactura();
     }
 
     if(t.id === "btn-enviar-factura"){
-      sendFactura();
+      await sendFactura();
     }
 
   });
 
 }
 
-/* ========================= LOAD ========================= */
 
+/* =========================================================
+   LOAD
+========================================================= */
 async function loadFactura(id){
 
   const root = getRoot();
+  if(!id || !root) return;
 
-  // 🔥 QUITAR FOCO (evita el cursor loco)
+  const requestId = ++currentRequestId;
+
+  if(currentAbort) currentAbort.abort();
+  currentAbort = new AbortController();
+
   document.activeElement?.blur();
+  root.classList.add("loading");
 
-  // 🔥 ACTIVAR LOADER
-  root?.classList.add("loading");
+  clearUI();
 
   try{
 
@@ -94,33 +153,75 @@ async function loadFactura(id){
       {
         headers:{
           Authorization: "Bearer " + Onion.auth.getToken()
-        }
+        },
+        signal: currentAbort.signal
       }
     );
 
+    if(requestId !== currentRequestId) return;
     if(!res.ok) throw new Error();
 
     const json = await res.json();
 
+    if(requestId !== currentRequestId) return;
+
     factura = json?.factura || json;
 
-    render();
+    requestAnimationFrame(()=>{
+      render();
+    });
 
   }catch(e){
+
+    if(e.name === "AbortError") return;
 
     console.error("💥 ERROR LOAD:", e);
 
   }finally{
 
-    // 🔥 DESACTIVAR LOADER (SIEMPRE)
-    root?.classList.remove("loading");
+    if(requestId === currentRequestId){
+
+      setTimeout(()=>{
+        root.classList.remove("loading");
+      }, 80);
+
+    }
 
   }
 
 }
 
-/* ========================= RENDER ========================= */
 
+/* =========================================================
+   CLEAR UI
+========================================================= */
+function clearUI(){
+
+  setText("#detalle-cliente","--");
+  setText("#detalle-cliente-id","--");
+
+  setText("#detalle-numero-legal","--");
+  setText("#detalle-id","--");
+  setText("#detalle-incidencia-id","--");
+
+  setText("#detalle-fecha","--");
+  setText("#detalle-vencimiento","--");
+
+  setText("#detalle-metodo","--");
+  setText("#detalle-total","--");
+
+  setText("#detalle-concepto","--");
+  setText("#detalle-descripcion","--");
+
+  setText("#detalle-iva","--");
+  setText("#detalle-irpf","--");
+
+}
+
+
+/* =========================================================
+   RENDER
+========================================================= */
 function render(){
 
   if(!factura) return;
@@ -142,10 +243,10 @@ function render(){
   setText("#detalle-vencimiento", formatFecha(factura.fechaServicio));
 
   setText(
-   "#detalle-metodo",
-   factura.estadoPago === "pagada"
-    ? capitalize(factura.formaPago || "-")
-    : "-"
+    "#detalle-metodo",
+    factura.estadoPago === "pagada"
+      ? capitalize(factura.formaPago || "-")
+      : "-"
   );
 
   setText("#detalle-total", formatMoney(factura.total));
@@ -183,7 +284,6 @@ function render(){
   let irpf = factura.impuestos?.find(i => i.tipo === "IRPF");
 
   if(!irpf && factura.irpf){
-
     const base = factura.baseImponible || 0;
 
     irpf = {
@@ -207,40 +307,39 @@ function render(){
 
   }
 
-  /* SIDEBAR */
-  const blobNameEl = document.querySelector(".view-file span");
-
-  if(blobNameEl){
-    blobNameEl.textContent = factura.numero || "Factura";
-  }
-
 }
 
-/* ========================= AVATAR ========================= */
 
+/* =========================================================
+   AVATAR
+========================================================= */
 function renderAvatar(cliente){
 
   const el = $("#detalle-avatar");
   if(!el) return;
 
+  el.innerHTML = "";
+
   if(cliente.avatar){
     el.innerHTML = `<img src="${cliente.avatar}" />`;
-  }else{
-
-    const initials = (cliente.nombre || "?")
-      .split(" ")
-      .map(n=>n[0])
-      .join("")
-      .slice(0,2)
-      .toUpperCase();
-
-    el.textContent = initials;
+    return;
   }
+
+  const initials = (cliente.nombre || "?")
+    .split(" ")
+    .map(n=>n[0])
+    .join("")
+    .slice(0,2)
+    .toUpperCase();
+
+  el.textContent = initials;
 
 }
 
-/* ========================= ACTIONS ========================= */
 
+/* =========================================================
+   ACTIONS
+========================================================= */
 async function getURL(){
 
   const res = await fetch(
@@ -303,16 +402,17 @@ async function sendFactura(){
 
 }
 
-/* ========================= HELPERS ========================= */
 
+/* =========================================================
+   HELPERS
+========================================================= */
 function setText(sel,val){
   const el = $(sel);
   if(el) el.textContent = val || "--";
 }
 
 function formatFecha(f){
-  if(!f) return "--";
-  return new Date(f).toLocaleDateString("es-ES");
+  return f ? new Date(f).toLocaleDateString("es-ES") : "--";
 }
 
 function formatMoney(n){

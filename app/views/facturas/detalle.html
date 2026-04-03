@@ -1,140 +1,147 @@
-<div class="panel-content factura-detalle loading">
+<div class="panel-content factura-detalle">
 
-  <!-- 🔥 LOADER UNIVERSAL -->
-  <div class="view-loading"></div>
+  <!-- 🔥 LOADER REAL (TIPO TABLA) -->
+  <div id="factura-loading" class="table-loader">
+    <div class="spinner"></div>
+    <span>Cargando factura...</span>
+  </div>
 
   <!-- 🔥 CONTENIDO -->
-  <div class="view-layout">
+  <div id="factura-content" style="display:none;">
 
-    <!-- =========================
-         MAIN
-    ========================= -->
-    <div class="view-main">
+    <div class="view-layout">
 
-      <!-- HEADER -->
-      <div class="view-header">
+      <!-- =========================
+           MAIN
+      ========================= -->
+      <div class="view-main">
 
-        <div class="view-user">
-          <div id="detalle-avatar" class="view-avatar"></div>
+        <!-- HEADER -->
+        <div class="view-header">
 
-          <div class="view-user-info">
-            <div class="view-title" id="detalle-cliente">--</div>
+          <div class="view-user">
+            <div id="detalle-avatar" class="view-avatar"></div>
 
-            <div class="view-sub">
-              <span id="detalle-cliente-id"></span>
-            </div>
-          </div>
-        </div>
+            <div class="view-user-info">
+              <div class="view-title" id="detalle-cliente">--</div>
 
-        <button id="btn-back" class="view-back">
-          ← Volver
-        </button>
-
-      </div>
-
-      <!-- BODY -->
-      <div class="view-body">
-
-        <div class="view-grid">
-
-          <div class="view-card">
-            <div class="view-label">Factura</div>
-            <div class="view-value" id="detalle-numero-legal">--</div>
-          </div>
-
-          <div class="view-card">
-            <div class="view-label">ID Factura</div>
-            <div class="view-value" id="detalle-id">--</div>
-          </div>
-
-          <div class="view-card">
-            <div class="view-label">ID Incidencia</div>
-            <div class="view-value" id="detalle-incidencia-id">--</div>
-          </div>
-
-          <div class="view-card">
-            <div class="view-label">Fecha emisión</div>
-            <div class="view-value" id="detalle-fecha">--</div>
-          </div>
-
-          <div class="view-card">
-            <div class="view-label">Fecha vencimiento</div>
-            <div class="view-value" id="detalle-vencimiento">--</div>
-          </div>
-
-          <div class="view-card">
-            <div class="view-label">Método de pago</div>
-            <div class="view-value" id="detalle-metodo">--</div>
-          </div>
-
-          <div class="view-card">
-            <div class="view-label">Importe total</div>
-            <div class="view-value money" id="detalle-total">--</div>
-          </div>
-
-          <div class="view-card">
-            <div class="view-label">Estado</div>
-            <div id="detalle-estado" class="view-badge">--</div>
-          </div>
-
-          <div class="view-card">
-            <div class="view-label">IVA</div>
-            <div class="view-value iva" id="detalle-iva">--</div>
-          </div>
-
-          <div class="view-card" id="detalle-irpf-container" style="display:none;">
-            <div class="view-label">IRPF</div>
-            <div class="view-value irpf" id="detalle-irpf">--</div>
-          </div>
-
-          <div class="view-card full">
-            <div class="view-label">Concepto</div>
-            <div class="view-value" id="detalle-concepto">--</div>
-          </div>
-
-          <div class="view-card full">
-            <div class="view-label">Descripción</div>
-            <div class="view-value" id="detalle-descripcion"></div>
-          </div>
-
-        </div>
-
-      </div>
-
-    </div>
-
-    <!-- =========================
-         SIDEBAR
-    ========================= -->
-    <aside class="view-aside">
-
-      <div class="view-sidebar">
-
-        <div class="view-section">
-          <div class="view-section-title">Documentos</div>
-
-          <div class="view-files">
-            <div class="view-file">
-              <span>Factura</span>
-
-              <div class="view-file-actions">
-                <button id="btn-enviar-factura" class="view-btn soft">📧</button>
-                <button id="btn-descargar-factura" class="view-btn primary">Descargar</button>
+              <div class="view-sub">
+                <span id="detalle-cliente-id"></span>
               </div>
             </div>
           </div>
+
+          <button id="btn-back" class="view-back">
+            ← Volver
+          </button>
+
         </div>
 
-        <div class="sidebar-divider"></div>
+        <!-- BODY -->
+        <div class="view-body">
 
-        <div class="view-section">
-          <div class="view-section-title">Historial</div>
-          <div id="detalle-historial" class="view-files"></div>
+          <div class="view-grid">
+
+            <div class="view-card">
+              <div class="view-label">Factura</div>
+              <div class="view-value" id="detalle-numero-legal">--</div>
+            </div>
+
+            <div class="view-card">
+              <div class="view-label">ID Factura</div>
+              <div class="view-value" id="detalle-id">--</div>
+            </div>
+
+            <div class="view-card">
+              <div class="view-label">ID Incidencia</div>
+              <div class="view-value" id="detalle-incidencia-id">--</div>
+            </div>
+
+            <div class="view-card">
+              <div class="view-label">Fecha emisión</div>
+              <div class="view-value" id="detalle-fecha">--</div>
+            </div>
+
+            <div class="view-card">
+              <div class="view-label">Fecha vencimiento</div>
+              <div class="view-value" id="detalle-vencimiento">--</div>
+            </div>
+
+            <div class="view-card">
+              <div class="view-label">Método de pago</div>
+              <div class="view-value" id="detalle-metodo">--</div>
+            </div>
+
+            <div class="view-card">
+              <div class="view-label">Importe total</div>
+              <div class="view-value money" id="detalle-total">--</div>
+            </div>
+
+            <div class="view-card">
+              <div class="view-label">Estado</div>
+              <div id="detalle-estado" class="view-badge">--</div>
+            </div>
+
+            <div class="view-card">
+              <div class="view-label">IVA</div>
+              <div class="view-value iva" id="detalle-iva">--</div>
+            </div>
+
+            <div class="view-card" id="detalle-irpf-container" style="display:none;">
+              <div class="view-label">IRPF</div>
+              <div class="view-value irpf" id="detalle-irpf">--</div>
+            </div>
+
+            <div class="view-card full">
+              <div class="view-label">Concepto</div>
+              <div class="view-value" id="detalle-concepto">--</div>
+            </div>
+
+            <div class="view-card full">
+              <div class="view-label">Descripción</div>
+              <div class="view-value" id="detalle-descripcion"></div>
+            </div>
+
+          </div>
+
         </div>
 
       </div>
 
-    </aside>
+      <!-- =========================
+           SIDEBAR
+      ========================= -->
+      <aside class="view-aside">
+
+        <div class="view-sidebar">
+
+          <div class="view-section">
+            <div class="view-section-title">Documentos</div>
+
+            <div class="view-files">
+              <div class="view-file">
+                <span>Factura</span>
+
+                <div class="view-file-actions">
+                  <button id="btn-enviar-factura" class="view-btn soft">📧</button>
+                  <button id="btn-descargar-factura" class="view-btn primary">Descargar</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="sidebar-divider"></div>
+
+          <div class="view-section">
+            <div class="view-section-title">Historial</div>
+            <div id="detalle-historial" class="view-files"></div>
+          </div>
+
+        </div>
+
+      </aside>
+
+    </div>
 
   </div>
 

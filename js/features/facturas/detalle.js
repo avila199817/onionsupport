@@ -26,12 +26,38 @@ let currentAbort = null;
    ROOT
 ========================================================= */
 function getRoot(){
-  return document.querySelector(".panel-view.factura-detalle");
+  return document.querySelector(".panel-content.factura-detalle");
 }
 
 function $(s){
   const root = getRoot();
   return root ? root.querySelector(s) : null;
+}
+
+
+/* =========================================================
+   LOADER CONTROL 🔥
+========================================================= */
+function setLoading(active){
+  const root = getRoot();
+  if(!root) return;
+
+  if(active){
+    root.classList.add("loading");
+    root.classList.remove("ready");
+  }else{
+    root.classList.remove("loading");
+    root.classList.add("ready");
+  }
+}
+
+
+/* =========================================================
+   AUTH
+========================================================= */
+function getAuthHeaders(){
+  const token = Onion.auth?.getToken?.();
+  return token ? { Authorization: "Bearer " + token } : {};
 }
 
 
@@ -49,8 +75,7 @@ function init(){
 
   initialized = true;
 
-  /* 🔥 LOADER DESDE EL FRAME 0 */
-  root.classList.add("loading");
+  setLoading(true);
 
   bindEvents();
   observeDOM();
@@ -61,6 +86,7 @@ function init(){
 
   Onion.onCleanup(()=>{
     initialized = false;
+    currentRequestId++;
     currentAbort?.abort();
   });
 
@@ -70,7 +96,7 @@ init();
 
 
 /* =========================================================
-   OBSERVER
+   OBSERVER (SPA SAFE)
 ========================================================= */
 function observeDOM(){
 
@@ -79,6 +105,7 @@ function observeDOM(){
   observer = new MutationObserver(()=>{
     if(!getRoot()){
       initialized = false;
+      currentRequestId++;
       setTimeout(init,100);
     }
   });
@@ -134,7 +161,10 @@ function bindEvents(){
 async function loadFactura(id){
 
   const root = getRoot();
-  if(!id || !root) return;
+  if(!id || !root){
+    setLoading(false);
+    return;
+  }
 
   const requestId = ++currentRequestId;
 
@@ -142,24 +172,22 @@ async function loadFactura(id){
   currentAbort = new AbortController();
 
   document.activeElement?.blur();
-  root.classList.add("loading");
+  setLoading(true);
 
   clearUI();
 
   try{
 
     const res = await fetch(
-      Onion.config.API + "/facturas/" + id,
+      `${Onion.config.API}/facturas/${id}`,
       {
-        headers:{
-          Authorization: "Bearer " + Onion.auth.getToken()
-        },
+        headers: getAuthHeaders(),
         signal: currentAbort.signal
       }
     );
 
     if(requestId !== currentRequestId) return;
-    if(!res.ok) throw new Error();
+    if(!res.ok) throw new Error("API ERROR");
 
     const json = await res.json();
 
@@ -175,16 +203,14 @@ async function loadFactura(id){
 
     if(e.name === "AbortError") return;
 
+    if(requestId !== currentRequestId) return;
+
     console.error("💥 ERROR LOAD:", e);
 
   }finally{
 
     if(requestId === currentRequestId){
-
-      setTimeout(()=>{
-        root.classList.remove("loading");
-      }, 80);
-
+      setTimeout(()=> setLoading(false), 80);
     }
 
   }
@@ -345,9 +371,7 @@ async function getURL(){
   const res = await fetch(
     `${Onion.config.API}/facturas/${factura.id}/descargar`,
     {
-      headers:{
-        Authorization: "Bearer " + Onion.auth.getToken()
-      }
+      headers: getAuthHeaders()
     }
   );
 
@@ -383,9 +407,7 @@ async function sendFactura(){
       `${Onion.config.API}/facturas/${factura.id}/enviar`,
       {
         method:"POST",
-        headers:{
-          Authorization: "Bearer " + Onion.auth.getToken()
-        }
+        headers: getAuthHeaders()
       }
     );
 

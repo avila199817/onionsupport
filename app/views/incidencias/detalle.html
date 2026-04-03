@@ -1,167 +1,169 @@
-<div class="panel-content incidencia-detalle loading">
+<div class="panel-content incidencia-detalle">
 
-  <!-- 🔥 LOADER TIPO TABLA (CONSISTENTE) -->
-  <div class="view-loading">
-    <div class="table-loader">
-      <div class="spinner"></div>
-      <span>Cargando incidencia...</span>
-    </div>
+  <!-- 🔥 LOADER REAL (MISMO SISTEMA QUE TABLA) -->
+  <div id="detalle-loading" class="table-loader">
+    <div class="spinner"></div>
+    <span>Cargando incidencia...</span>
   </div>
 
   <!-- 🔥 CONTENIDO -->
-  <div class="view-layout">
+  <div id="detalle-content" style="display:none;">
 
-    <!-- =========================
-         MAIN
-    ========================= -->
-    <div class="view-main">
+    <div class="view-layout">
 
-      <!-- HEADER -->
-      <div class="view-header">
+      <!-- =========================
+           MAIN
+      ========================= -->
+      <div class="view-main">
 
-        <div class="view-user">
-          <div id="detalle-avatar" class="view-avatar"></div>
+        <!-- HEADER -->
+        <div class="view-header">
 
-          <div class="view-user-info">
-            <div class="view-title" id="detalle-usuario">--</div>
-            <div class="view-sub" id="detalle-userid"></div>
-          </div>
-        </div>
+          <div class="view-user">
+            <div id="detalle-avatar" class="view-avatar"></div>
 
-        <button id="btn-back" class="view-back">
-          ← Volver
-        </button>
-
-      </div>
-
-      <!-- BODY -->
-      <div class="view-body">
-
-        <div class="view-grid">
-
-          <!-- ID -->
-          <div class="view-card">
-            <div class="view-label">ID</div>
-            <div class="view-value" id="detalle-id">--</div>
-          </div>
-
-          <!-- FECHA CREACIÓN -->
-          <div class="view-card">
-            <div class="view-label">Fecha de creación</div>
-            <div class="view-value" id="detalle-fecha">--</div>
-          </div>
-
-          <!-- FECHA CIERRE -->
-          <div class="view-card">
-            <div class="view-label">Fecha cierre</div>
-            <div class="view-value" id="detalle-fecha-cierre">--</div>
-          </div>
-
-          <!-- TÉCNICO -->
-          <div class="view-card">
-            <div class="view-label">Técnico asignado</div>
-            <div class="view-value" id="detalle-tecnico">--</div>
-          </div>
-
-          <!-- TÍTULO -->
-          <div class="view-card full">
-            <div class="view-label">Título</div>
-            <div class="view-value" id="detalle-titulo">--</div>
-          </div>
-
-          <!-- MENSAJE -->
-          <div class="view-card full">
-            <div class="view-label">Mensaje</div>
-
-            <div 
-              id="detalle-mensaje"
-              class="view-value"
-              contenteditable="true"
-              spellcheck="false"
-            ></div>
-          </div>
-
-          <!-- ESTADO -->
-          <div class="view-card">
-            <div class="view-label">Estado</div>
-
-            <select id="edit-estado" class="view-select">
-              <option value="open">Abierta</option>
-              <option value="closed">Cerrada</option>
-            </select>
-          </div>
-
-          <!-- PRIORIDAD -->
-          <div class="view-card">
-            <div class="view-label">Prioridad</div>
-
-            <select id="edit-prioridad" class="view-select">
-              <option value="low">Baja</option>
-              <option value="medium">Media</option>
-              <option value="high">Alta</option>
-            </select>
-          </div>
-
-          <!-- ADJUNTOS -->
-          <div class="view-card full">
-            <div class="view-label">Adjuntos del usuario</div>
-
-            <div class="view-files">
-
-              <button id="btn-attach" class="view-btn soft">
-                + Añadir archivos
-              </button>
-
-              <input type="file" id="inc-files" multiple hidden>
-
-              <div id="file-list" class="view-files"></div>
-
+            <div class="view-user-info">
+              <div class="view-title" id="detalle-usuario">--</div>
+              <div class="view-sub" id="detalle-userid"></div>
             </div>
           </div>
 
-        </div>
-
-        <!-- FOOTER -->
-        <div class="view-footer">
-
-          <div class="view-hint">
-            Puedes cerrar la incidencia o eliminar archivos adjuntos
-          </div>
-
-          <button id="btn-save" class="view-btn primary">
-            Guardar cambios
+          <button id="btn-back" class="view-back">
+            ← Volver
           </button>
 
         </div>
 
+        <!-- BODY -->
+        <div class="view-body">
+
+          <div class="view-grid">
+
+            <!-- ID -->
+            <div class="view-card">
+              <div class="view-label">ID</div>
+              <div class="view-value" id="detalle-id">--</div>
+            </div>
+
+            <!-- FECHA CREACIÓN -->
+            <div class="view-card">
+              <div class="view-label">Fecha de creación</div>
+              <div class="view-value" id="detalle-fecha">--</div>
+            </div>
+
+            <!-- FECHA CIERRE -->
+            <div class="view-card">
+              <div class="view-label">Fecha cierre</div>
+              <div class="view-value" id="detalle-fecha-cierre">--</div>
+            </div>
+
+            <!-- TÉCNICO -->
+            <div class="view-card">
+              <div class="view-label">Técnico asignado</div>
+              <div class="view-value" id="detalle-tecnico">--</div>
+            </div>
+
+            <!-- TÍTULO -->
+            <div class="view-card full">
+              <div class="view-label">Título</div>
+              <div class="view-value" id="detalle-titulo">--</div>
+            </div>
+
+            <!-- MENSAJE -->
+            <div class="view-card full">
+              <div class="view-label">Mensaje</div>
+
+              <div 
+                id="detalle-mensaje"
+                class="view-value"
+                contenteditable="true"
+                spellcheck="false"
+              ></div>
+            </div>
+
+            <!-- ESTADO -->
+            <div class="view-card">
+              <div class="view-label">Estado</div>
+
+              <select id="edit-estado" class="view-select">
+                <option value="open">Abierta</option>
+                <option value="closed">Cerrada</option>
+              </select>
+            </div>
+
+            <!-- PRIORIDAD -->
+            <div class="view-card">
+              <div class="view-label">Prioridad</div>
+
+              <select id="edit-prioridad" class="view-select">
+                <option value="low">Baja</option>
+                <option value="medium">Media</option>
+                <option value="high">Alta</option>
+              </select>
+            </div>
+
+            <!-- ADJUNTOS -->
+            <div class="view-card full">
+              <div class="view-label">Adjuntos del usuario</div>
+
+              <div class="view-files">
+
+                <button id="btn-attach" class="view-btn soft">
+                  + Añadir archivos
+                </button>
+
+                <input type="file" id="inc-files" multiple hidden>
+
+                <div id="file-list" class="view-files"></div>
+
+              </div>
+            </div>
+
+          </div>
+
+          <!-- FOOTER -->
+          <div class="view-footer">
+
+            <div class="view-hint">
+              Puedes cerrar la incidencia o eliminar archivos adjuntos
+            </div>
+
+            <button id="btn-save" class="view-btn primary">
+              Guardar cambios
+            </button>
+
+          </div>
+
+        </div>
+
       </div>
+
+      <!-- =========================
+           SIDEBAR
+      ========================= -->
+      <aside class="view-aside">
+
+        <div class="view-sidebar">
+
+          <!-- USER FILES -->
+          <div class="view-section">
+            <div class="view-section-title">Archivos del usuario</div>
+            <div id="detalle-blobs-user" class="view-files"></div>
+          </div>
+
+          <div class="sidebar-divider"></div>
+
+          <!-- TEAM FILES -->
+          <div class="view-section">
+            <div class="view-section-title">Adjuntos soporte</div>
+            <div id="detalle-blobs-team" class="view-files"></div>
+          </div>
+
+        </div>
+
+      </aside>
 
     </div>
-
-    <!-- =========================
-         SIDEBAR
-    ========================= -->
-    <aside class="view-aside">
-
-      <div class="view-sidebar">
-
-        <!-- USER FILES -->
-        <div class="view-section">
-          <div class="view-section-title">Archivos del usuario</div>
-          <div id="detalle-blobs-user" class="view-files"></div>
-        </div>
-
-        <div class="sidebar-divider"></div>
-
-        <!-- TEAM FILES -->
-        <div class="view-section">
-          <div class="view-section-title">Adjuntos soporte</div>
-          <div id="detalle-blobs-team" class="view-files"></div>
-        </div>
-
-      </div>
-
-    </aside>
 
   </div>
 

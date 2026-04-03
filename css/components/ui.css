@@ -1,10 +1,10 @@
-/* =========================
-   UI ELEMENTS — FINAL CLEAN 10/10
-========================= */
+/* =========================================================
+   🔥 UI ELEMENTS — SAAS PANEL CLEAN (FINAL 10/10)
+========================================================= */
 
 
 /* =========================
-   PANEL BLOCK (CLEAN DEPTH)
+   PANEL BLOCK
 ========================= */
 .panel-block{
   background:var(--panel-bg);
@@ -56,10 +56,7 @@
     transform var(--duration-fast) ease;
 }
 
-/* CLICKABLE */
-.badge.clickable{
-  cursor:pointer;
-}
+.badge.clickable{ cursor:pointer; }
 
 .badge.clickable:hover{
   transform:translateY(-1px);
@@ -71,7 +68,7 @@
 
 
 /* =========================
-   VARIANTS (TOKEN SAFE)
+   VARIANTS
 ========================= */
 .badge.success{
   background:color-mix(in srgb, var(--success), transparent 88%);
@@ -144,7 +141,7 @@
 
 
 /* =========================
-   TOAST (PREMIUM CLEAN)
+   TOAST
 ========================= */
 .toast{
   position:fixed;
@@ -277,7 +274,7 @@
 
 
 /* =========================
-   PANEL CONTENT (LOAD UX)
+   PANEL CONTENT LOAD UX
 ========================= */
 .panel-content{
   opacity:0;
@@ -299,40 +296,25 @@
 
 
 /* =========================
-   THEME TRANSITIONS (CLEAN)
+   ERROR VIEW
 ========================= */
-.layout,
-.sidebar,
-.topbar,
-.card,
-.panel-block{
-  transition:
-    background-color .3s ease,
-    border-color .3s ease,
-    color .3s ease,
-    box-shadow .3s ease;
-}
-
-
-/* =========================
-   ERROR SAAS · ONION PRO
-========================= */
-
-.error-saas {
+.error-saas{
   display:flex;
   flex-direction:column;
   align-items:center;
   justify-content:center;
+
   min-height:60vh;
+
   padding:var(--space-xl) var(--space-lg);
   text-align:center;
 
   color:var(--dim);
+
   animation:fadeIn var(--duration-normal) var(--ease-out);
 }
 
-/* ICONO */
-.error-icon {
+.error-icon{
   width:64px;
   height:64px;
 
@@ -352,36 +334,29 @@
   margin-bottom:var(--space-md);
 }
 
-/* TITULO */
-.error-saas h2 {
+.error-saas h2{
   font-size:var(--font-2xl);
   font-weight:600;
   color:var(--text);
 
   margin-bottom:var(--space-xs);
-
-  letter-spacing:-0.2px;
 }
 
-/* DESCRIPCION */
-.error-saas p {
+.error-saas p{
   font-size:var(--font-base);
   line-height:var(--line-relaxed);
 
   max-width:420px;
-
   color:var(--dim);
 }
 
-/* ACCIONES */
-.error-actions {
+.error-actions{
   margin-top:var(--space-lg);
   display:flex;
   gap:var(--space-sm);
 }
 
-/* BOTON BASE */
-.error-actions button {
+.error-actions button{
   padding:8px 14px;
 
   font-size:var(--font-sm);
@@ -397,46 +372,43 @@
   cursor:pointer;
 
   transition:
-    transform var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast),
     background var(--duration-fast),
     border var(--duration-fast),
     box-shadow var(--duration-fast);
 }
 
-/* HOVER */
-.error-actions button:hover {
+.error-actions button:hover{
   background:var(--surface-3);
-  border-color:rgba(255,255,255,0.08);
-
   transform:translateY(-1px);
-
   box-shadow:var(--shadow-sm);
 }
 
-/* ACTIVE */
-.error-actions button:active {
+.error-actions button:active{
   transform:scale(0.97);
 }
 
-/* OPCIONAL: BOTON PRIMARIO 🔥 */
-.error-actions .primary {
+.error-actions .primary{
   background:var(--accent);
   border-color:var(--accent);
   color:#fff;
 }
 
-.error-actions .primary:hover {
+.error-actions .primary:hover{
   background:var(--accent-hover);
   border-color:var(--accent-hover);
 }
 
-/* ANIMACION */
-@keyframes fadeIn {
-  from {
+
+/* =========================
+   ANIMATION
+========================= */
+@keyframes fadeIn{
+  from{
     opacity:0;
     transform:translateY(6px);
   }
-  to {
+  to{
     opacity:1;
     transform:translateY(0);
   }

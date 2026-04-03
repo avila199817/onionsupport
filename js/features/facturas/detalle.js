@@ -12,13 +12,10 @@ if(!Onion){
 let initialized = false;
 let factura = null;
 
-/* 🔥 CONTROL PRO */
 let currentRequestId = 0;
 let currentAbort = null;
 
-/* =========================
-   ROOT
-========================= */
+/* ========================= ROOT ========================= */
 
 function getRoot(){
   return document.querySelector(".panel-content.factura-detalle");
@@ -29,20 +26,15 @@ function $(selector){
   return root ? root.querySelector(selector) : null;
 }
 
-/* =========================
-   LOADER
-========================= */
+/* ========================= LOADER ========================= */
 
 function setLoading(active){
   const root = getRoot();
   if(!root) return;
-
   root.classList.toggle("loading", active);
 }
 
-/* =========================
-   INIT
-========================= */
+/* ========================= INIT ========================= */
 
 function init(){
 
@@ -74,17 +66,13 @@ function init(){
 
 init();
 
-/* =========================
-   GET ID
-========================= */
+/* ========================= GET ID ========================= */
 
 function getIdFromURL(){
   return new URLSearchParams(window.location.search).get("id");
 }
 
-/* =========================
-   EVENTS
-========================= */
+/* ========================= EVENTS ========================= */
 
 function bindEvents(){
 
@@ -99,21 +87,19 @@ function bindEvents(){
       Onion.router.navigate("/facturas");
     }
 
-    if(t.id === "btn-ver-factura" || t.id === "btn-ver-doc"){
-      openFactura();
+    if(t.id === "btn-descargar-doc"){
+      downloadFactura();
     }
 
-    if(t.id === "btn-descargar-factura" || t.id === "btn-descargar-doc"){
-      downloadFactura();
+    if(t.id === "btn-enviar-doc"){
+      sendFactura();
     }
 
   });
 
 }
 
-/* =========================
-   LOAD
-========================= */
+/* ========================= LOAD ========================= */
 
 async function loadFactura(id){
 
@@ -136,25 +122,12 @@ async function loadFactura(id){
     if(requestId !== currentRequestId) return;
 
     if(!res.ok){
-
-      if(res.status === 403 || res.status === 404){
-        showNotFound();
-        return;
-      }
-
-      throw new Error("Error inesperado");
+      throw new Error("Error factura");
     }
 
     const json = await res.json();
 
-    if(requestId !== currentRequestId) return;
-
-    factura = normalizeFactura(json?.factura || json?.data || json);
-
-    if(!factura){
-      showNotFound();
-      return;
-    }
+    factura = normalizeFactura(json?.factura || json);
 
     render();
 
@@ -162,8 +135,7 @@ async function loadFactura(id){
 
     if(e.name === "AbortError") return;
 
-    console.error("💥 ERROR FACTURA DETALLE:", e);
-    showNotFound();
+    console.error("💥 ERROR:", e);
 
   }finally{
 
@@ -175,34 +147,9 @@ async function loadFactura(id){
 
 }
 
-/* =========================
-   ERROR UI
-========================= */
-
-function showNotFound(){
-
-  const root = getRoot();
-  if(!root) return;
-
-  root.innerHTML = `
-    <div class="error-saas">
-      <div class="error-icon">🔒</div>
-      <h2>Factura no encontrada</h2>
-      <p>No existe o no tienes acceso a este recurso.</p>
-      <div class="error-actions">
-        <button id="btn-back">← Volver</button>
-      </div>
-    </div>
-  `;
-}
-
-/* =========================
-   NORMALIZE (🔥 FIX REAL)
-========================= */
+/* ========================= NORMALIZE ========================= */
 
 function normalizeFactura(f){
-
-  if(!f) return null;
 
   return {
     id: f.id,
@@ -213,7 +160,7 @@ function normalizeFactura(f){
     fechaServicio: f.fechaServicio,
 
     formaPago: f.formaPago,
-    total: f.total,
+    total: Number(f.total || 0),
 
     concepto: f.concepto,
     descripcion: f.descripcion,
@@ -221,11 +168,10 @@ function normalizeFactura(f){
     estadoPago: (f.estadoPago || "pendiente").toLowerCase(),
 
     iva: f.impuestos?.[0]?.porcentaje || 21,
-    irpf: f.irpf,
+    irpf: Number(f.irpf || 0),
 
     blobPath: f.blobPath || null,
 
-    /* 🔥 ALINEADO CON BACKEND */
     cliente: {
       id: f.cliente?.id || null,
       nombre: f.cliente?.nombre || "Cliente",
@@ -236,20 +182,18 @@ function normalizeFactura(f){
 
 }
 
-/* =========================
-   RENDER
-========================= */
+/* ========================= RENDER ========================= */
 
 function render(){
 
   if(!factura) return;
 
-  const cliente = factura.cliente || {};
+  const c = factura.cliente;
 
-  $("#detalle-cliente").textContent = escapeHTML(cliente.nombre);
-  $("#detalle-cliente-id").textContent = cliente.id || "";
+  $("#detalle-cliente").textContent = c.nombre;
+  $("#detalle-cliente-id").textContent = c.id || "";
 
-  renderAvatar(cliente);
+  renderAvatar(c);
 
   $("#detalle-numero-legal").textContent = cleanNumero(factura.numeroLegal);
   $("#detalle-id").textContent = factura.id || "--";
@@ -267,16 +211,22 @@ function render(){
   const estadoEl = $("#detalle-estado");
   if(estadoEl){
     estadoEl.textContent = formatEstado(factura.estadoPago);
-    estadoEl.dataset.estado = factura.estadoPago;
   }
 
-  $("#detalle-iva").textContent = factura.iva + "%";
+  /* 🔥 IVA CALCULADO */
+  const ivaImporte = factura.total * (factura.iva / 100);
+  $("#detalle-iva").textContent =
+    `${factura.iva}% · ${formatMoney(ivaImporte)}`;
 
+  /* 🔥 IRPF CALCULADO */
   const irpfContainer = $("#detalle-irpf-container");
 
-  if(cliente.empresa && factura.irpf){
+  if(factura.irpf){
+    const irpfImporte = factura.total * (factura.irpf / 100);
+
     irpfContainer.style.display = "block";
-    $("#detalle-irpf").textContent = factura.irpf + "%";
+    $("#detalle-irpf").textContent =
+      `${factura.irpf}% · -${formatMoney(irpfImporte)}`;
   }else{
     irpfContainer.style.display = "none";
   }
@@ -285,9 +235,7 @@ function render(){
 
 }
 
-/* =========================
-   SIDEBAR
-========================= */
+/* ========================= SIDEBAR ========================= */
 
 function renderSidebar(){
 
@@ -295,17 +243,17 @@ function renderSidebar(){
   if(!docs) return;
 
   if(!factura.blobPath){
-    docs.innerHTML = `<span class="detalle-hint">Sin documentos</span>`;
+    docs.innerHTML = `<span>Sin documentos</span>`;
     return;
   }
 
-  const nombreArchivo = cleanNumero(factura.numeroLegal) + ".pdf";
+  const nombre = factura.numeroLegal + ".pdf";
 
   docs.innerHTML = `
     <div class="blob-item">
-      <span title="${nombreArchivo}">${nombreArchivo}</span>
+      <span title="${nombre}">${nombre}</span>
       <div class="blob-actions">
-        <button id="btn-ver-doc">Ver</button>
+        <button id="btn-enviar-doc" title="Enviar">📧</button>
         <button id="btn-descargar-doc">Descargar</button>
       </div>
     </div>
@@ -313,19 +261,44 @@ function renderSidebar(){
 
 }
 
-/* =========================
-   ACTIONS (🔥 DESCARGA PRO)
-========================= */
+/* ========================= ACTIONS ========================= */
 
-async function getFacturaURL(){
+async function getURL(){
 
-  if(!factura?.id) return null;
+  const res = await fetch(
+    `${Onion.config.API}/facturas/${factura.id}/descargar`,
+    {
+      headers: {
+        Authorization: "Bearer " + Onion.auth.getToken()
+      }
+    }
+  );
+
+  const data = await res.json();
+  return data.url;
+
+}
+
+async function downloadFactura(){
+
+  const url = await getURL();
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `factura-${factura.numeroLegal}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+async function sendFactura(){
 
   try{
 
     const res = await fetch(
-      `${Onion.config.API}/facturas/${factura.id}/descargar`,
+      `${Onion.config.API}/facturas/${factura.id}/enviar`,
       {
+        method: "POST",
         headers: {
           Authorization: "Bearer " + Onion.auth.getToken()
         }
@@ -334,43 +307,17 @@ async function getFacturaURL(){
 
     const data = await res.json();
 
-    if(!data?.ok || !data.url){
-      return null;
-    }
+    if(!data.ok) throw new Error();
 
-    return data.url;
+    alert("📧 Factura enviada correctamente");
 
   }catch(e){
-    console.error("💥 ERROR FETCH PDF:", e);
-    return null;
+    alert("Error enviando factura");
   }
 
 }
 
-async function openFactura(){
-
-  const url = await getFacturaURL();
-  if(!url) return alert("Error abriendo PDF");
-
-  window.open(url, "_blank");
-}
-
-async function downloadFactura(){
-
-  const url = await getFacturaURL();
-  if(!url) return alert("Error descargando PDF");
-
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `factura-${factura.id}.pdf`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-}
-
-/* =========================
-   HELPERS
-========================= */
+/* ========================= HELPERS ========================= */
 
 function cleanNumero(num){
   if(!num) return "--";
@@ -394,7 +341,7 @@ function formatFecha(f){
 }
 
 function formatMoney(n){
-  return Number(n || 0).toLocaleString("es-ES", {
+  return Number(n).toLocaleString("es-ES", {
     minimumFractionDigits:2
   }) + " €";
 }
@@ -404,28 +351,17 @@ function getInitials(name){
   return name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase();
 }
 
-function escapeHTML(str){
-  return String(str)
-    .replace(/&/g,"&amp;")
-    .replace(/</g,"&lt;")
-    .replace(/>/g,"&gt;");
-}
-
-/* =========================
-   AVATAR
-========================= */
-
 function renderAvatar(cliente){
 
   const el = $("#detalle-avatar");
   if(!el) return;
 
   if(cliente.avatar){
-    el.innerHTML = `<img src="${cliente.avatar}" alt="${escapeHTML(cliente.nombre)}" />`;
-    return;
+    el.innerHTML = `<img src="${cliente.avatar}" />`;
+  }else{
+    el.innerHTML = `<div class="avatar-fallback">${getInitials(cliente.nombre)}</div>`;
   }
 
-  el.innerHTML = `<div class="avatar-fallback">${getInitials(cliente.nombre)}</div>`;
 }
 
 })();

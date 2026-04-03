@@ -153,16 +153,16 @@ async function loadDetalle(){
 
   const root = getRoot();
   const id = getId();
-  if(!id) return;
+  if(!id || !root) return;
 
   const requestId = ++currentRequestId;
 
   if(currentAbort) currentAbort.abort();
   currentAbort = new AbortController();
 
-  // 🔥 FIX CURSOR + LOADER
+  // 🔥 UX FIX PRO
   document.activeElement?.blur();
-  root?.classList.add("loading");
+  root.classList.add("loading");
 
   clearUI();
 
@@ -193,7 +193,10 @@ async function loadDetalle(){
 
   }finally{
 
-    root?.classList.remove("loading");
+    // 🔥 SOLO QUITA LOADER SI ES EL REQUEST ACTUAL
+    if(requestId === currentRequestId){
+      root.classList.remove("loading");
+    }
 
   }
 
@@ -255,8 +258,8 @@ function render(i){
     msg.textContent = i?.message || "";
   }
 
-  $("#edit-estado").value = i?.status || "open";
-  $("#edit-prioridad").value = i?.priority || "low";
+  $("#edit-estado") && ($("#edit-estado").value = i?.status || "open");
+  $("#edit-prioridad") && ($("#edit-prioridad").value = i?.priority || "low");
 
   renderAvatar(nombre, avatar);
 
@@ -275,6 +278,8 @@ function renderAvatar(nombre, avatar){
 
   const el = $("#detalle-avatar");
   if(!el) return;
+
+  el.innerHTML = "";
 
   if(avatar){
     el.innerHTML = `<img src="${avatar}" />`;
@@ -398,9 +403,9 @@ async function updateTicket(){
         ...getAuthHeaders()
       },
       body:JSON.stringify({
-        status: $("#edit-estado").value,
-        priority: $("#edit-prioridad").value,
-        message: $("#detalle-mensaje").innerText.trim()
+        status: $("#edit-estado")?.value,
+        priority: $("#edit-prioridad")?.value,
+        message: $("#detalle-mensaje")?.innerText.trim()
       })
     });
 

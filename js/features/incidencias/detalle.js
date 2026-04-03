@@ -30,10 +30,11 @@ function init(){
 
   initialized = true;
 
+  setLoading(true);
+
   bindEvents();
   loadDetalle();
   observeDOM();
-
 }
 
 init();
@@ -43,11 +44,28 @@ init();
    ROOT
 ========================= */
 function getRoot(){
-  return document.querySelector(".panel-content.incidencia-detalle");
+  return document.querySelector(".panel-view.incidencia-detalle");
 }
 
 function $(selector){
   return getRoot()?.querySelector(selector);
+}
+
+
+/* =========================
+   LOADER CONTROL 🔥
+========================= */
+function setLoading(active){
+  const root = getRoot();
+  if(!root) return;
+
+  if(active){
+    root.classList.add("loading");
+    root.classList.remove("ready");
+  }else{
+    root.classList.remove("loading");
+    root.classList.add("ready");
+  }
 }
 
 
@@ -160,7 +178,10 @@ function bindEvents(){
 async function loadDetalle(){
 
   const id = getId();
-  if(!id) return;
+  if(!id){
+    setLoading(false);
+    return;
+  }
 
   try{
 
@@ -177,7 +198,10 @@ async function loadDetalle(){
 
   }catch(err){
     console.error("💥 loadDetalle:", err);
+    showToast("❌ Error cargando incidencia");
   }
+
+  setLoading(false);
 }
 
 
@@ -304,7 +328,6 @@ function render(i){
   if(msg) msg.textContent = i?.message || "";
 
   renderAvatar(i?.cliente?.nombre, i?.cliente?.avatar);
-
   renderBlobs(i?.attachments || []);
 }
 

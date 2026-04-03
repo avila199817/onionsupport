@@ -126,7 +126,7 @@ function render(){
   $("#detalle-fecha").textContent = formatFecha(factura.fecha);
   $("#detalle-vencimiento").textContent = formatFecha(factura.fechaServicio);
 
-  /* 🔥 método solo si pagada */
+  /* método solo si pagada */
   $("#detalle-metodo").textContent =
     factura.estadoPago === "pagada"
       ? (factura.formaPago || "-")
@@ -137,47 +137,62 @@ function render(){
   $("#detalle-concepto").textContent = factura.concepto || "-";
   $("#detalle-descripcion").textContent = factura.descripcion || "-";
 
-  /* ========================= ESTADO BADGE ========================= */
+  /* ========================= ESTADO ========================= */
 
   const estadoEl = $("#detalle-estado");
 
-  estadoEl.className =
-    "detalle-value badge " +
-    (factura.estadoPago === "pagada" ? "success" : "warning");
+  estadoEl.dataset.estado = factura.estadoPago;
 
   estadoEl.textContent =
-    factura.estadoPago === "pagada" ? "Pagada" : "Pendiente";
+    factura.estadoPago === "pagada" ? "Pagada" :
+    factura.estadoPago === "cancelada" ? "Cancelada" :
+    "Pendiente";
 
-  /* ========================= CALCULOS REALES ========================= */
+  /* ========================= IVA (REAL BACKEND) ========================= */
 
-  const ivaPct = factura.impuestos?.[0]?.porcentaje || 21;
-  const irpfPct = factura.irpf || 0;
+  const iva = factura.impuestos?.find(i => i.tipo === "IVA");
 
-  const base = factura.total / (1 + ivaPct/100 - irpfPct/100);
+  if(iva){
+    $("#detalle-iva").textContent =
+      `${iva.porcentaje}% · ${formatMoney(iva.importe)}`;
+  }else{
+    $("#detalle-iva").textContent = "--";
+  }
 
-  const ivaImporte = base * (ivaPct/100);
-  const irpfImporte = base * (irpfPct/100);
-
-  $("#detalle-iva").textContent =
-    `${ivaPct}% · ${formatMoney(ivaImporte)}`;
-
-  /* ========================= IRPF ========================= */
+  /* ========================= IRPF (🔥 FIX REAL) ========================= */
 
   const irpfContainer = $("#detalle-irpf-container");
 
-  if(irpfPct){
-    irpfContainer.style.display = "block";
-    $("#detalle-irpf").textContent =
-      `${irpfPct}% · -${formatMoney(irpfImporte)}`;
-  }else{
-    irpfContainer.style.display = "none";
+  let irpf = factura.impuestos?.find(i => i.tipo === "IRPF");
+
+  if(!irpf && factura.irpf){
+    irpf = {
+      porcentaje: factura.irpf,
+      importe: factura.baseImponible
+        ? factura.baseImponible * (factura.irpf / 100)
+        : 0
+    };
   }
 
-  /* ========================= SIDEBAR NOMBRE PDF ========================= */
+  if(irpf && irpf.porcentaje){
+
+    irpfContainer.style.display = "block";
+
+    $("#detalle-irpf").textContent =
+      `${irpf.porcentaje}% · -${formatMoney(irpf.importe)}`;
+
+  }else{
+
+    irpfContainer.style.display = "none";
+
+  }
+
+  /* ========================= SIDEBAR ========================= */
 
   const blobNameEl = document.querySelector(".blob-item span");
+
   if(blobNameEl){
-    blobNameEl.textContent = factura.numero + ".pdf";
+    blobNameEl.textContent = factura.numero; // 🔥 SIN .pdf
   }
 
 }
@@ -230,6 +245,7 @@ async function downloadFactura(){
     const a = document.createElement("a");
     a.href = url;
     a.download = factura.numero + ".pdf";
+
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -275,7 +291,9 @@ function formatFecha(f){
 }
 
 function formatMoney(n){
-  return Number(n).toLocaleString("es-ES",{minimumFractionDigits:2})+" €";
+  return Number(n || 0).toLocaleString("es-ES",{
+    minimumFractionDigits:2
+  }) + " €";
 }
 
 })();

@@ -1,0 +1,353 @@
+/* =========================================================
+   🔥 VIEW UNIVERSAL — GLOBAL SAAS PANEL
+   Reutilizable para cualquier detalle (factura, incidencia, etc)
+========================================================= */
+
+/* =========================
+   ROOT
+========================= */
+.panel-view{
+  display:flex;
+  flex-direction:column;
+  flex:1;
+  min-height:0;
+  width:100%;
+  overflow:hidden;
+}
+
+
+/* =========================================================
+   LAYOUT
+========================================================= */
+.panel-view .view-layout{
+  display:flex;
+  flex:1;
+  min-height:0;
+  width:100%;
+}
+
+
+/* =========================================================
+   LEFT (MAIN)
+========================================================= */
+.panel-view .view-main{
+  flex:1;
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  min-height:0;
+  overflow:hidden;
+}
+
+
+/* =========================================================
+   RIGHT SIDEBAR
+========================================================= */
+.panel-view .view-aside{
+  width:340px;
+  min-width:340px;
+  flex-shrink:0;
+
+  display:flex;
+  flex-direction:column;
+
+  background:var(--panel-bg);
+  border-left:1px solid var(--panel-border);
+}
+
+
+/* =========================================================
+   HEADER (🔥 CLAVE UNIVERSAL)
+========================================================= */
+.panel-view .view-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+
+  padding:14px 30px;
+
+  background:var(--panel-bg);
+  border-bottom:1px solid var(--panel-border);
+}
+
+.panel-view .view-user{
+  display:flex;
+  align-items:center;
+  gap:12px;
+}
+
+.panel-view .view-avatar{
+  width:38px;
+  height:38px;
+  border-radius:50%;
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
+  color:#fff;
+  font-weight:600;
+  font-size:13px;
+}
+
+.panel-view .view-user-info{
+  display:flex;
+  flex-direction:column;
+}
+
+.panel-view .view-title{
+  font-size:14px;
+  font-weight:600;
+}
+
+.panel-view .view-sub{
+  font-size:11px;
+  color:var(--dim);
+}
+
+.panel-view .view-back{
+  background:none;
+  border:none;
+  color:var(--text);
+  font-size:13px;
+  opacity:.7;
+  cursor:pointer;
+}
+
+.panel-view .view-back:hover{
+  opacity:1;
+  transform:translateX(-2px);
+}
+
+
+/* =========================================================
+   BODY
+========================================================= */
+.panel-view .view-body{
+  flex:1;
+  padding:26px 30px;
+  overflow:auto;
+}
+
+.panel-view .view-body::-webkit-scrollbar{
+  width:6px;
+}
+
+.panel-view .view-body::-webkit-scrollbar-thumb{
+  background:var(--scrollbar-thumb);
+  border-radius:6px;
+}
+
+
+/* =========================================================
+   GRID SYSTEM
+========================================================= */
+.panel-view .view-grid{
+  display:grid;
+  grid-template-columns:repeat(2,1fr);
+  gap:18px;
+}
+
+
+/* =========================================================
+   CARD ITEM
+========================================================= */
+.panel-view .view-card{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+
+  padding:12px 14px;
+  border-radius:10px;
+
+  border:1px solid var(--card-border);
+  background:var(--card-bg);
+
+  transition:.15s;
+}
+
+.panel-view .view-card:hover{
+  background:color-mix(in srgb, var(--card-bg), #000 6%);
+}
+
+.panel-view .view-label{
+  font-size:var(--font-xs);
+  color:var(--dim);
+  text-transform:uppercase;
+  letter-spacing:.5px;
+}
+
+.panel-view .view-value{
+  font-size:var(--font-base);
+  font-weight:600;
+  color:var(--text);
+}
+
+
+/* =========================================================
+   BADGES (ESTADOS)
+========================================================= */
+.view-badge{
+  display:inline-flex;
+  align-items:center;
+  padding:6px 10px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:600;
+}
+
+.view-badge.success{
+  background:rgba(34,197,94,0.15);
+  color:#22c55e;
+}
+
+.view-badge.warning{
+  background:rgba(234,179,8,0.15);
+  color:#eab308;
+}
+
+.view-badge.error{
+  background:rgba(239,68,68,0.15);
+  color:#ef4444;
+}
+
+
+/* =========================================================
+   FINANCIAL COLORS (🔥 GLOBAL)
+========================================================= */
+.view-value.iva{
+  color:var(--color-iva);
+  text-shadow:0 0 10px var(--color-iva-glow);
+  font-weight:700;
+}
+
+.view-value.irpf{
+  color:var(--color-irpf);
+  text-shadow:0 0 10px var(--color-irpf-glow);
+  font-weight:700;
+}
+
+.view-value.money{
+  color:var(--color-beneficio);
+  text-shadow:0 0 10px var(--color-beneficio-glow);
+}
+
+
+/* =========================================================
+   FULL WIDTH BLOCK
+========================================================= */
+.panel-view .view-card.full{
+  grid-column:span 2;
+}
+
+
+/* =========================================================
+   SIDEBAR
+========================================================= */
+.panel-view .view-sidebar{
+  padding:18px;
+  display:flex;
+  flex-direction:column;
+  gap:18px;
+  overflow:auto;
+}
+
+.panel-view .view-section{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+
+.panel-view .view-section-title{
+  font-size:11px;
+  text-transform:uppercase;
+  color:var(--dim);
+  letter-spacing:.4px;
+}
+
+
+/* =========================================================
+   BLOBS / FILES
+========================================================= */
+.panel-view .view-files{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+
+.panel-view .view-file{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+
+  padding:10px 12px;
+  border-radius:10px;
+
+  border:1px solid var(--card-border);
+  background:var(--card-bg);
+}
+
+.panel-view .view-file-actions{
+  display:flex;
+  gap:6px;
+}
+
+.panel-view .view-btn{
+  padding:6px 10px;
+  border:none;
+  border-radius:8px;
+  cursor:pointer;
+  font-size:12px;
+}
+
+.panel-view .view-btn.primary{
+  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
+  color:#fff;
+}
+
+.panel-view .view-btn.soft{
+  background:rgba(255,255,255,.06);
+  color:var(--text);
+}
+
+
+/* =========================================================
+   LOADING
+========================================================= */
+.view-loading{
+  position:absolute;
+  inset:0;
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  background:var(--main-bg);
+  z-index:20;
+
+  opacity:0;
+  pointer-events:none;
+  transition:.25s;
+}
+
+.panel-view.loading .view-loading{
+  opacity:1;
+  pointer-events:auto;
+}
+
+
+/* =========================================================
+   RESPONSIVE
+========================================================= */
+@media (max-width:1100px){
+
+  .panel-view .view-aside{
+    display:none;
+  }
+
+  .panel-view .view-body{
+    padding:20px;
+  }
+
+}

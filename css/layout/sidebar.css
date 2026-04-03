@@ -521,41 +521,65 @@
   right:10px;
 
   padding:10px;
-  border-radius:12px;
+  border-radius:var(--radius-lg);
 
-  background: var(--dropdown-bg);
+  background:var(--dropdown-bg);
+  border:1px solid var(--border-default);
+
+  box-shadow:var(--shadow-md);
+
+  backdrop-filter:blur(6px);
 
   opacity:0;
-  transform:translateY(8px);
+  transform:translateY(8px) scale(.98);
   pointer-events:none;
 
   transition:
-    opacity var(--duration-fast) ease,
-    transform var(--duration-fast) ease;
+    opacity var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
 
   z-index:var(--z-dropdown);
 }
 
 .user-dropdown.active{
   opacity:1;
-  transform:translateY(0);
+  transform:translateY(0) scale(1);
   pointer-events:auto;
 }
 
+
+/* =========================
+   ITEMS
+========================= */
 .dropdown-item{
   display:flex;
   align-items:center;
   gap:10px;
 
   padding:10px;
-  border-radius:8px;
+  border-radius:var(--radius-md);
 
-  font-size:13px;
+  font-size:var(--font-md);
+  color:var(--text);
+
   cursor:pointer;
 
-  transition:background var(--duration-fast) ease;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
 }
 
 .dropdown-item:hover{
   background:var(--sb-hover);
+  transform:translateX(2px);
+}
+
+
+/* =========================
+   SEPARATOR (opcional 🔥)
+========================= */
+.dropdown-divider{
+  height:1px;
+  margin:6px 4px;
+  background:var(--border-soft);
 }

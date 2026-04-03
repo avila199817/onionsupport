@@ -9,33 +9,40 @@ if(!Onion){
   return;
 }
 
+/* =========================================================
+   STATE
+========================================================= */
 let initialized = false;
 let currentItem = null;
+
 let observer = null;
+
 let sending = false;
-let selectedFiles = [];
 let deleting = false;
+
+let selectedFiles = [];
 
 /* 🔥 CONTROL PRO */
 let currentRequestId = 0;
 let currentAbort = null;
 
 
-/* =========================
+/* =========================================================
    ROOT
-========================= */
+========================================================= */
 function getRoot(){
   return document.querySelector(".panel-view.incidencia-detalle");
 }
 
 function $(selector){
-  return getRoot()?.querySelector(selector);
+  const root = getRoot();
+  return root ? root.querySelector(selector) : null;
 }
 
 
-/* =========================
+/* =========================================================
    INIT
-========================= */
+========================================================= */
 function init(){
 
   const root = getRoot();
@@ -48,8 +55,8 @@ function init(){
   initialized = true;
 
   bindEvents();
-  loadDetalle();
   observeDOM();
+  loadDetalle();
 
   Onion.onCleanup(()=>{
     initialized = false;
@@ -61,18 +68,18 @@ function init(){
 init();
 
 
-/* =========================
+/* =========================================================
    AUTH
-========================= */
+========================================================= */
 function getAuthHeaders(){
   const token = Onion.auth?.getToken?.();
   return token ? { Authorization: "Bearer " + token } : {};
 }
 
 
-/* =========================
+/* =========================================================
    OBSERVER
-========================= */
+========================================================= */
 function observeDOM(){
 
   if(observer) return;
@@ -88,12 +95,13 @@ function observeDOM(){
     childList:true,
     subtree:true
   });
+
 }
 
 
-/* =========================
+/* =========================================================
    EVENTS
-========================= */
+========================================================= */
 function bindEvents(){
 
   const root = getRoot();
@@ -146,13 +154,14 @@ function bindEvents(){
 }
 
 
-/* =========================
-   LOAD
-========================= */
+/* =========================================================
+   LOAD DETALLE
+========================================================= */
 async function loadDetalle(){
 
   const root = getRoot();
   const id = getId();
+
   if(!id || !root) return;
 
   const requestId = ++currentRequestId;
@@ -160,7 +169,7 @@ async function loadDetalle(){
   if(currentAbort) currentAbort.abort();
   currentAbort = new AbortController();
 
-  // 🔥 UX FIX PRO
+  /* 🔥 UX FIX */
   document.activeElement?.blur();
   root.classList.add("loading");
 
@@ -193,7 +202,6 @@ async function loadDetalle(){
 
   }finally{
 
-    // 🔥 SOLO QUITA LOADER SI ES EL REQUEST ACTUAL
     if(requestId === currentRequestId){
       root.classList.remove("loading");
     }
@@ -203,9 +211,9 @@ async function loadDetalle(){
 }
 
 
-/* =========================
+/* =========================================================
    CLEAR UI
-========================= */
+========================================================= */
 function clearUI(){
 
   setText("#detalle-usuario","--");
@@ -218,13 +226,16 @@ function clearUI(){
 
   const msg = $("#detalle-mensaje");
   if(msg) msg.textContent = "";
+
 }
 
 
-/* =========================
+/* =========================================================
    RENDER
-========================= */
+========================================================= */
 function render(i){
+
+  if(!i) return;
 
   const nombre =
     i?.cliente?.nombre ||
@@ -258,8 +269,8 @@ function render(i){
     msg.textContent = i?.message || "";
   }
 
-  $("#edit-estado") && ($("#edit-estado").value = i?.status || "open");
-  $("#edit-prioridad") && ($("#edit-prioridad").value = i?.priority || "low");
+  if($("#edit-estado")) $("#edit-estado").value = i?.status || "open";
+  if($("#edit-prioridad")) $("#edit-prioridad").value = i?.priority || "low";
 
   renderAvatar(nombre, avatar);
 
@@ -268,12 +279,13 @@ function render(i){
 
   renderBlobs("#detalle-blobs-user", userFiles, true);
   renderBlobs("#detalle-blobs-team", teamFiles, false);
+
 }
 
 
-/* =========================
+/* =========================================================
    AVATAR
-========================= */
+========================================================= */
 function renderAvatar(nombre, avatar){
 
   const el = $("#detalle-avatar");
@@ -294,12 +306,13 @@ function renderAvatar(nombre, avatar){
     .toUpperCase();
 
   el.textContent = initials;
+
 }
 
 
-/* =========================
-   FILE LIST
-========================= */
+/* =========================================================
+   FILE LIST (LOCAL)
+========================================================= */
 function renderFiles(){
 
   const list = $("#file-list");
@@ -311,12 +324,13 @@ function renderFiles(){
       <button class="blob-delete file-remove" data-index="${i}">✕</button>
     </div>
   `).join("");
+
 }
 
 
-/* =========================
-   BLOBS
-========================= */
+/* =========================================================
+   BLOBS (SERVER)
+========================================================= */
 function renderBlobs(selector, files, allowDelete){
 
   const c = $(selector);
@@ -344,15 +358,18 @@ function renderBlobs(selector, files, allowDelete){
       </div>
     </div>
   `).join("");
+
 }
 
 
-/* =========================
-   DELETE
-========================= */
+/* =========================================================
+   DELETE FILE
+========================================================= */
 async function deleteBlob(url){
 
   if(!confirm("¿Eliminar archivo?")) return;
+
+  deleting = true;
 
   try{
 
@@ -383,13 +400,18 @@ async function deleteBlob(url){
   }catch{
     showToast("❌ Error eliminando");
   }
+
+  deleting = false;
+
 }
 
 
-/* =========================
+/* =========================================================
    UPDATE
-========================= */
+========================================================= */
 async function updateTicket(){
+
+  if(!currentItem) return;
 
   sending = true;
   setSaving(true);
@@ -429,12 +451,13 @@ async function updateTicket(){
 
   sending = false;
   setSaving(false);
+
 }
 
 
-/* =========================
+/* =========================================================
    HELPERS
-========================= */
+========================================================= */
 function setText(sel,val){
   const el = $(sel);
   if(el) el.textContent = val || "--";
@@ -464,9 +487,9 @@ function downloadBlob(url,name){
 }
 
 
-/* =========================
+/* =========================================================
    TOAST
-========================= */
+========================================================= */
 function showToast(msg){
 
   if(Onion.toast){

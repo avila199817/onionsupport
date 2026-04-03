@@ -317,81 +317,79 @@ function uploadFile(file){
 
 
 /* =========================
-   RENDER 🔥 FINAL ESTABLE
+   MAP + RENDER + AVATAR 🔥 FINAL
 ========================= */
+
+function mapDetalle(i){
+  return {
+    id: i.id || i.ticketId || "--",
+    usuario: i.name || i.cliente?.nombre || "Usuario",
+    userId: i.userId || i.clienteId || "--",
+    titulo: i.subject || i.message || "Sin título",
+    mensaje: i.message || i.descripcion || "",
+    tecnico: i.tecnico?.name || (typeof i.tecnico === "string" ? i.tecnico : "No asignado"),
+    avatar: i.cliente?.avatar || i.avatar || null,
+    fecha: formatFecha(i.createdAt),
+    fechaCierre: i.status === "closed"
+      ? formatFecha(i.closedAt || (i._ts ? i._ts * 1000 : null))
+      : "--",
+    attachments: i.attachments || []
+  };
+}
+
 function render(i){
 
   if(!i) return;
 
-  /* =========================
-     USER
-  ========================= */
-  const nombre = i?.name || i?.cliente?.nombre || "--";
-  const avatar = i?.avatar || i?.cliente?.avatar || null;
+  const d = mapDetalle(i);
 
-  setText("#detalle-usuario", nombre);
-  setText("#detalle-userid", i?.userId || i?.clienteId || "--");
+  setText("#detalle-usuario", d.usuario);
+  setText("#detalle-userid", d.userId);
 
+  setText("#detalle-id", d.id);
+  setText("#detalle-titulo", d.titulo);
+  setText("#detalle-fecha", d.fecha);
+  setText("#detalle-fecha-cierre", d.fechaCierre);
 
-  /* =========================
-     DATA
-  ========================= */
-  setText("#detalle-id", i?.id || "--");
-  setText("#detalle-titulo", i?.subject || "--");
-  setText("#detalle-fecha", formatFecha(i?.createdAt));
+  setText("#detalle-tecnico", d.tecnico);
 
-
-  /* =========================
-     FECHA CIERRE
-  ========================= */
-  setText(
-    "#detalle-fecha-cierre",
-    i?.closedAt ? formatFecha(i.closedAt) : "--"
-  );
-
-
-  /* =========================
-     TECNICO (FIX REAL)
-  ========================= */
-  let tecnico = "No asignado";
-
-  if(i?.tecnico){
-
-    // caso correcto (tu JSON real)
-    if(i.tecnico.name){
-      tecnico = i.tecnico.name;
-    }
-
-    // fallback por si algún día viene string
-    else if(typeof i.tecnico === "string"){
-      tecnico = i.tecnico;
-    }
-
-  }
-
-  setText("#detalle-tecnico", tecnico);
-
-
-  /* =========================
-     MENSAJE
-  ========================= */
   const msg = $("#detalle-mensaje");
-  if(msg){
-    msg.textContent = i?.message || i?.descripcion || "";
+  if(msg) msg.textContent = d.mensaje;
+
+  renderAvatar(d.usuario, d.avatar);
+
+  renderBlobs(d.attachments);
+}
+
+function renderAvatar(nombre, avatar){
+
+  const el = $("#detalle-avatar");
+  if(!el) return;
+
+  if(avatar){
+    el.innerHTML = `<img src="${avatar}" alt="${escapeHTML(nombre)}" />`;
+    return;
   }
 
+  const initials = getInitials(nombre);
+  const color = getAvatarColor(nombre);
 
-  /* =========================
-     AVATAR (FIX REAL)
-  ========================= */
-  renderAvatar(nombre, avatar);
-
-
-  /* =========================
-     FILES
-  ========================= */
-  renderBlobs(i?.attachments || []);
-
+  el.innerHTML = `
+    <div style="
+      width:100%;
+      height:100%;
+      border-radius:50%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:${color};
+      color:#fff;
+      font-weight:600;
+      font-size:12px;
+    ">
+      ${initials}
+    </div>
+  `;
 }
   
   

@@ -1,3 +1,6 @@
+/* =========================================================
+   🔥 BOOT — SAFE LOADER CONTROL (SAAS PRO)
+========================================================= */
 "use strict";
 
 (function(){
@@ -22,49 +25,78 @@
     if(typeof config.darkMode === "boolean"){
       darkMode = config.darkMode;
     }else{
-      // fallback → sistema operativo
       darkMode = window.matchMedia("(prefers-color-scheme: dark)").matches;
     }
 
     const theme = darkMode ? "dark" : "light";
-
     document.documentElement.setAttribute("data-theme", theme);
 
   }catch{
-    // fallback seguro
     document.documentElement.setAttribute("data-theme", "dark");
   }
 
+
+  /* =========================================================
+     🔥 SAFE LOADER (CLAVE DE TODO)
+  ========================================================= */
+
+  function hideLoaderSafe(){
+
+    document.body.classList.remove("loading");
+
+    const loader = document.getElementById("app-loader");
+
+    if(loader){
+      loader.style.opacity = "0";
+
+      setTimeout(()=>{
+        loader.remove();
+      }, 200);
+    }
+
+  }
+
+
+  /* =========================================================
+     BOOT
+  ========================================================= */
+
   document.addEventListener("DOMContentLoaded", async () => {
+
+    let bootTimeout;
 
     try{
 
+      /* 🔥 FALLBACK: pase lo que pase, quita loader */
+      bootTimeout = setTimeout(hideLoaderSafe, 4000);
+
       /* =========================
-         CONFIG GLOBAL
+         CONFIG
       ========================= */
 
       Onion.userConfig?.apply();
 
       /* =========================
-         IDIOMA (🔥 NUEVO)
+         IDIOMA
       ========================= */
 
       const lang = Onion.userConfig?.get("lang") || "es";
       Onion.i18n?.setLang?.(lang);
 
       /* =========================
-         ESTADO BASE
+         AUTH
       ========================= */
 
       Onion.state.slug = localStorage.getItem("onion_user_slug");
 
       if(!Onion.state.slug){
+        hideLoaderSafe();
         Onion.auth.redirectLogin();
         return;
       }
 
       /* =========================
-         INIT APP
+         INIT CORE
       ========================= */
 
       await Onion.init();
@@ -74,17 +106,23 @@
       ========================= */
 
       Onion.ui?.init?.();
-      Onion.i18n.apply();
+      Onion.i18n?.apply?.();
 
       /* =========================
          READY
       ========================= */
 
-      document.body.classList.remove("loading");
-      document.getElementById("app-loader")?.remove();
+      clearTimeout(bootTimeout);
+      hideLoaderSafe();
 
     }catch(e){
+
       console.error("💥 BOOT ERROR:", e);
+
+      /* 🔥 aunque pete TODO, quitamos loader */
+      clearTimeout(bootTimeout);
+      hideLoaderSafe();
+
     }
 
   });

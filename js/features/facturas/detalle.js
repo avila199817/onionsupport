@@ -37,8 +37,7 @@ function setLoading(active){
   const root = getRoot();
   if(!root) return;
 
-  if(active) root.classList.add("loading");
-  else root.classList.remove("loading");
+  root.classList.toggle("loading", active);
 }
 
 /* =========================
@@ -68,7 +67,6 @@ function init(){
   Onion.onCleanup(()=>{
     initialized = false;
     factura = null;
-
     if(currentAbort) currentAbort.abort();
   });
 
@@ -81,8 +79,7 @@ init();
 ========================= */
 
 function getIdFromURL(){
-  const params = new URLSearchParams(window.location.search);
-  return params.get("id");
+  return new URLSearchParams(window.location.search).get("id");
 }
 
 /* =========================
@@ -102,19 +99,11 @@ function bindEvents(){
       Onion.router.navigate("/facturas");
     }
 
-    if(t.id === "btn-ver-factura"){
+    if(t.id === "btn-ver-factura" || t.id === "btn-ver-doc"){
       openFactura();
     }
 
-    if(t.id === "btn-descargar-factura"){
-      downloadFactura();
-    }
-
-    if(t.id === "btn-ver-doc"){
-      openFactura();
-    }
-
-    if(t.id === "btn-descargar-doc"){
+    if(t.id === "btn-descargar-factura" || t.id === "btn-descargar-doc"){
       downloadFactura();
     }
 
@@ -208,7 +197,7 @@ function showNotFound(){
 }
 
 /* =========================
-   NORMALIZE
+   NORMALIZE (🔥 FIX REAL)
 ========================= */
 
 function normalizeFactura(f){
@@ -217,14 +206,13 @@ function normalizeFactura(f){
 
   return {
     id: f.id,
-    numeroLegal: f.numeroFacturaLegal || f.numero || f.id,
-    incidenciaId: f.incidenciaId || f.incidencia_id || null,
+    numeroLegal: f.numero || f.id,
+    incidenciaId: f.incidenciaId || null,
 
-    fecha: f.fechaFactura || f.fecha,
+    fecha: f.fecha,
     fechaServicio: f.fechaServicio,
 
     formaPago: f.formaPago,
-
     total: f.total,
 
     concepto: f.concepto,
@@ -237,12 +225,12 @@ function normalizeFactura(f){
 
     blobPath: f.blobPath || null,
 
+    /* 🔥 ALINEADO CON BACKEND */
     cliente: {
-      id: f.clienteId,
-      nombre: f.cliente?.nombreContacto,
-      avatar: f.cliente?.avatar,
-      tipo: f.cliente?.tipo,
-      empresa: f.cliente?.razonSocial
+      id: f.cliente?.id || null,
+      nombre: f.cliente?.nombre || "Cliente",
+      avatar: f.cliente?.avatar || null,
+      empresa: f.cliente?.empresa || null
     }
   };
 
@@ -258,13 +246,12 @@ function render(){
 
   const cliente = factura.cliente || {};
 
-  $("#detalle-cliente").textContent = escapeHTML(cliente.nombre || "Cliente");
+  $("#detalle-cliente").textContent = escapeHTML(cliente.nombre);
   $("#detalle-cliente-id").textContent = cliente.id || "";
 
   renderAvatar(cliente);
 
   $("#detalle-numero-legal").textContent = cleanNumero(factura.numeroLegal);
-
   $("#detalle-id").textContent = factura.id || "--";
   $("#detalle-incidencia-id").textContent = factura.incidenciaId || "--";
 
@@ -287,7 +274,7 @@ function render(){
 
   const irpfContainer = $("#detalle-irpf-container");
 
-  if(isEmpresa(cliente) && factura.irpf){
+  if(cliente.empresa && factura.irpf){
     irpfContainer.style.display = "block";
     $("#detalle-irpf").textContent = factura.irpf + "%";
   }else{
@@ -327,7 +314,7 @@ function renderSidebar(){
 }
 
 /* =========================
-   ACTIONS (🔥 CLAVE)
+   ACTIONS (🔥 DESCARGA PRO)
 ========================= */
 
 async function getFacturaURL(){
@@ -348,7 +335,6 @@ async function getFacturaURL(){
     const data = await res.json();
 
     if(!data?.ok || !data.url){
-      console.error("❌ ERROR OBTENIENDO URL", data);
       return null;
     }
 
@@ -366,7 +352,7 @@ async function openFactura(){
   const url = await getFacturaURL();
   if(!url) return alert("Error abriendo PDF");
 
-  window.open(url, "_blank"); // 👁️ ver
+  window.open(url, "_blank");
 }
 
 async function downloadFactura(){
@@ -374,7 +360,12 @@ async function downloadFactura(){
   const url = await getFacturaURL();
   if(!url) return alert("Error descargando PDF");
 
-  window.location.href = url; // ⬇️ descarga
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `factura-${factura.id}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
 /* =========================
@@ -392,14 +383,9 @@ function capitalize(str){
 }
 
 function formatEstado(e){
-  if(!e) return "Pendiente";
   if(e === "pagada") return "Pagada";
   if(e === "cancelada") return "Cancelada";
   return "Pendiente";
-}
-
-function isEmpresa(cliente){
-  return !!cliente.empresa;
 }
 
 function formatFecha(f){
@@ -409,8 +395,7 @@ function formatFecha(f){
 
 function formatMoney(n){
   return Number(n || 0).toLocaleString("es-ES", {
-    minimumFractionDigits:2,
-    maximumFractionDigits:2
+    minimumFractionDigits:2
   }) + " €";
 }
 

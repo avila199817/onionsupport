@@ -42,15 +42,40 @@ function init(){
 
   initialized = true;
 
+  // 🔥 RESET VISUAL (evita glitches del loader)
+  resetView();
+
   bindEvents();
   loadFacturas();
 
-  Onion.onCleanup(()=> initialized = false);
+  Onion.onCleanup(()=>{
+    initialized = false;
+  });
 
 }
 
 init();
 
+/* =========================
+   RESET VIEW
+========================= */
+
+function resetView(){
+
+  const panel = getRoot();
+  if(!panel) return;
+
+  // quitar estado loading residual
+  panel.classList.remove("loading");
+
+  // limpiar tabla (evita flash raro)
+  const tbody = $("#facturas-body");
+  if(tbody){
+    tbody.innerHTML = "";
+  }
+
+}
+ 
 /* =========================
    EVENTS
 ========================= */

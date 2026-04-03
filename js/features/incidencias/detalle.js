@@ -54,13 +54,10 @@ function init(){
 
   initialized = true;
 
-  /* 🔥 FORZAR LOADER DESDE EL PRIMER FRAME */
-  root.classList.add("loading");
-
   bindEvents();
   observeDOM();
 
-  /* 🔥 Espera 1 frame para evitar paint previo */
+  /* 🔥 CARGA EN SIGUIENTE FRAME (suave) */
   requestAnimationFrame(()=>{
     loadDetalle();
   });
@@ -176,9 +173,7 @@ async function loadDetalle(){
   if(currentAbort) currentAbort.abort();
   currentAbort = new AbortController();
 
-  /* 🔥 UX CONTROL TOTAL */
   document.activeElement?.blur();
-  root.classList.add("loading");
 
   clearUI();
 
@@ -198,7 +193,7 @@ async function loadDetalle(){
 
     currentItem = json?.ticket || json;
 
-    /* 🔥 PINTADO SUAVE (evita flicker) */
+    /* 🔥 RENDER SUAVE */
     requestAnimationFrame(()=>{
       render(currentItem);
     });
@@ -214,7 +209,7 @@ async function loadDetalle(){
 
     if(requestId === currentRequestId){
 
-      /* 🔥 PEQUEÑO DELAY PARA SUAVIDAD VISUAL */
+      /* 🔥 SALIDA SUAVE */
       setTimeout(()=>{
         root.classList.remove("loading");
       }, 80);
@@ -298,11 +293,9 @@ function render(i){
 }
 
 
-/* =========================================================
-   AVATAR
-========================================================= */
-function renderAvatar(nombre, avatar){
+/* ========================= RESTO IGUAL ========================= */
 
+function renderAvatar(nombre, avatar){
   const el = $("#detalle-avatar");
   if(!el) return;
 
@@ -321,15 +314,9 @@ function renderAvatar(nombre, avatar){
     .toUpperCase();
 
   el.textContent = initials;
-
 }
 
-
-/* =========================================================
-   FILE LIST
-========================================================= */
 function renderFiles(){
-
   const list = $("#file-list");
   if(!list) return;
 
@@ -339,15 +326,9 @@ function renderFiles(){
       <button class="blob-delete file-remove" data-index="${i}">✕</button>
     </div>
   `).join("");
-
 }
 
-
-/* =========================================================
-   BLOBS
-========================================================= */
 function renderBlobs(selector, files, allowDelete){
-
   const c = $(selector);
   if(!c) return;
 
@@ -359,120 +340,16 @@ function renderBlobs(selector, files, allowDelete){
   c.innerHTML = files.map(f=>`
     <div class="blob-item">
       <span>${f.name}</span>
-
       <div class="blob-actions">
         <button class="blob-download" data-url="${f.url}" data-name="${f.name}">
           Descargar
         </button>
-
-        ${allowDelete ? `
-          <button class="blob-delete" data-url="${f.url}">
-            🗑️
-          </button>
-        ` : ""}
+        ${allowDelete ? `<button class="blob-delete" data-url="${f.url}">🗑️</button>` : ""}
       </div>
     </div>
   `).join("");
-
 }
 
-
-/* =========================================================
-   DELETE
-========================================================= */
-async function deleteBlob(url){
-
-  if(!confirm("¿Eliminar archivo?")) return;
-
-  deleting = true;
-
-  try{
-
-    const res = await fetch(Onion.config.API + "/tickets/" + currentItem.id,{
-      method:"PATCH",
-      headers:{
-        "Content-Type":"application/json",
-        ...getAuthHeaders()
-      },
-      body:JSON.stringify({
-        deleteAttachments:[url]
-      })
-    });
-
-    if(!res.ok) throw new Error();
-
-    const json = await res.json();
-
-    currentItem = {
-      ...currentItem,
-      ...(json?.ticket || json)
-    };
-
-    render(currentItem);
-
-    showToast("🗑️ Archivo eliminado");
-
-  }catch{
-    showToast("❌ Error eliminando");
-  }
-
-  deleting = false;
-
-}
-
-
-/* =========================================================
-   UPDATE
-========================================================= */
-async function updateTicket(){
-
-  if(!currentItem) return;
-
-  sending = true;
-  setSaving(true);
-
-  try{
-
-    const res = await fetch(Onion.config.API + "/tickets/" + currentItem.id,{
-      method:"PATCH",
-      headers:{
-        "Content-Type":"application/json",
-        ...getAuthHeaders()
-      },
-      body:JSON.stringify({
-        status: $("#edit-estado")?.value,
-        priority: $("#edit-prioridad")?.value,
-        message: $("#detalle-mensaje")?.innerText.trim()
-      })
-    });
-
-    if(!res.ok) throw new Error();
-
-    const json = await res.json();
-
-    currentItem = {
-      ...currentItem,
-      ...(json?.ticket || json)
-    };
-
-    render(currentItem);
-
-    showToast("✔ Guardado");
-
-  }catch(err){
-    console.error(err);
-    showToast("❌ Error guardando");
-  }
-
-  sending = false;
-  setSaving(false);
-
-}
-
-
-/* =========================================================
-   HELPERS
-========================================================= */
 function setText(sel,val){
   const el = $(sel);
   if(el) el.textContent = val || "--";
@@ -501,12 +378,7 @@ function downloadBlob(url,name){
   a.click();
 }
 
-
-/* =========================================================
-   TOAST
-========================================================= */
 function showToast(msg){
-
   if(Onion.toast){
     Onion.toast(msg);
     return;
@@ -526,7 +398,6 @@ function showToast(msg){
   el.style.zIndex="9999";
 
   document.body.appendChild(el);
-
   setTimeout(()=>el.remove(),2000);
 }
 

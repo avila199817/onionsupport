@@ -55,34 +55,60 @@
     });
   };
 
-  /* =========================
-     LOAD STYLE
-  ========================= */
+/* =========================
+   LOAD STYLE (PRO MULTI)
+========================= */
 
-  Onion.loadStyle = function(href){
-    return new Promise((resolve)=>{
+Onion.loadStyle = function(styles){
+  return new Promise((resolve)=>{
+
+    // 🔥 limpiar estilos anteriores del router
+    document
+      .querySelectorAll('link[data-onion-page-style]')
+      .forEach(l=>{
+        try{ l.remove(); }catch{}
+      });
+
+    if(!styles) return resolve();
+
+    // 🔥 soporta string o array
+    if(!Array.isArray(styles)){
+      styles = [styles];
+    }
+
+    let loaded = 0;
+
+    styles.forEach((href)=>{
 
       const finalHref = normalizeUrl(href);
-      if(!finalHref) return resolve();
 
-      document
-        .querySelectorAll('link[data-onion-page-style]')
-        .forEach(l=>{
-          try{ l.remove(); }catch{}
-        });
+      if(!finalHref){
+        done();
+        return;
+      }
 
       const link = document.createElement("link");
       link.rel = "stylesheet";
       link.href = finalHref + "?v=" + Date.now();
-      link.setAttribute("data-onion-page-style", "true");
 
-      link.onload = resolve;
-      link.onerror = resolve;
+      link.setAttribute("data-onion-page-style","true");
+
+      link.onload = done;
+      link.onerror = done;
 
       document.head.appendChild(link);
 
     });
-  };
+
+    function done(){
+      loaded++;
+      if(loaded === styles.length){
+        resolve();
+      }
+    }
+
+  });
+};
 
   /* =========================
      FETCH HTML

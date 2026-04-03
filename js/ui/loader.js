@@ -12,10 +12,11 @@
   let timer = null;
   let active = false;
 
+  const DELAY = 120; // 🔥 más rápido y fino
+
   /* =========================
      SHOW
   ========================= */
-
   Onion.ui.showLoader = function(){
 
     if(active || timer) return;
@@ -27,15 +28,15 @@
 
       document.body.classList.add("loading");
       active = true;
+      timer = null;
 
-    }, 200);
+    }, DELAY);
 
   };
 
   /* =========================
      HIDE
   ========================= */
-
   Onion.ui.hideLoader = function(){
 
     if(timer){
@@ -43,8 +44,13 @@
       timer = null;
     }
 
-    document.body.classList.remove("loading");
-    active = false;
+    if(!active) return;
+
+    // 🔥 salida suave
+    setTimeout(()=>{
+      document.body.classList.remove("loading");
+      active = false;
+    }, 80);
 
   };
 

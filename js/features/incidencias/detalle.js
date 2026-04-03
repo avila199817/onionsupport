@@ -54,9 +54,16 @@ function init(){
 
   initialized = true;
 
+  /* 🔥 FORZAR LOADER DESDE EL PRIMER FRAME */
+  root.classList.add("loading");
+
   bindEvents();
   observeDOM();
-  loadDetalle();
+
+  /* 🔥 Espera 1 frame para evitar paint previo */
+  requestAnimationFrame(()=>{
+    loadDetalle();
+  });
 
   Onion.onCleanup(()=>{
     initialized = false;
@@ -169,7 +176,7 @@ async function loadDetalle(){
   if(currentAbort) currentAbort.abort();
   currentAbort = new AbortController();
 
-  /* 🔥 UX FIX */
+  /* 🔥 UX CONTROL TOTAL */
   document.activeElement?.blur();
   root.classList.add("loading");
 
@@ -191,7 +198,10 @@ async function loadDetalle(){
 
     currentItem = json?.ticket || json;
 
-    render(currentItem);
+    /* 🔥 PINTADO SUAVE (evita flicker) */
+    requestAnimationFrame(()=>{
+      render(currentItem);
+    });
 
   }catch(err){
 
@@ -203,7 +213,12 @@ async function loadDetalle(){
   }finally{
 
     if(requestId === currentRequestId){
-      root.classList.remove("loading");
+
+      /* 🔥 PEQUEÑO DELAY PARA SUAVIDAD VISUAL */
+      setTimeout(()=>{
+        root.classList.remove("loading");
+      }, 80);
+
     }
 
   }
@@ -311,7 +326,7 @@ function renderAvatar(nombre, avatar){
 
 
 /* =========================================================
-   FILE LIST (LOCAL)
+   FILE LIST
 ========================================================= */
 function renderFiles(){
 
@@ -329,7 +344,7 @@ function renderFiles(){
 
 
 /* =========================================================
-   BLOBS (SERVER)
+   BLOBS
 ========================================================= */
 function renderBlobs(selector, files, allowDelete){
 
@@ -363,7 +378,7 @@ function renderBlobs(selector, files, allowDelete){
 
 
 /* =========================================================
-   DELETE FILE
+   DELETE
 ========================================================= */
 async function deleteBlob(url){
 

@@ -1,357 +1,125 @@
 /* =========================================================
-   FACTURA DETALLE — SAAS PRO UI (FINAL 10/10)
+   FACTURA DETALLE — SAAS PRO (UNIFICADO CON VIEW)
 ========================================================= */
 
 /* =========================
-   ROOT
+   ROOT (HEREDA DE panel-view)
 ========================= */
-.panel-content.factura-detalle{
-  display:flex;
-  flex-direction:column;
-  flex:1;
-  min-height:0;
-  width:100%;
-  overflow:hidden;
+.panel-view.factura-detalle{
+  position:relative;
 }
 
 
 /* =========================================================
-   LAYOUT
+   LOADING UNIFICADO
 ========================================================= */
-.factura-detalle .layout-split{
-  display:flex;
-  flex:1;
-  min-height:0;
-  width:100%;
-}
-
-
-/* =========================================================
-   LEFT
-========================================================= */
-.factura-detalle .detalle-left{
-  flex:1;
-  min-width:0;
-  display:flex;
-  flex-direction:column;
-  min-height:0;
-  overflow:hidden;
-}
-
-
-/* =========================================================
-   RIGHT SIDEBAR
-========================================================= */
-.factura-detalle .detalle-right{
-  width:360px;
-  min-width:360px;
-  flex-shrink:0;
-  display:flex;
-  flex-direction:column;
-  background:var(--panel-bg);
-  border-left:1px solid var(--panel-border);
-  min-height:0;
-}
-
-
-/* =========================================================
-   SIDEBAR
-========================================================= */
-.factura-detalle .detalle-sidebar{
-  display:flex;
-  flex-direction:column;
-  flex:1;
-  min-height:0;
-  padding:18px;
-  overflow:hidden;
-  gap:18px;
-}
-
-.factura-detalle .sidebar-section{
-  display:flex;
-  flex-direction:column;
-  gap:12px;
-}
-
-.factura-detalle .sidebar-divider{
-  height:1px;
-  background:var(--panel-border);
-  margin:6px 0;
-}
-
-.factura-detalle .sidebar-title{
-  font-size:11px;
-  font-weight:600;
-  color:var(--dim);
-  letter-spacing:.5px;
-  text-transform:uppercase;
-}
-
-
-/* =========================================================
-   BLOBS
-========================================================= */
-.factura-detalle .detalle-blobs{
-  display:flex;
-  flex-direction:column;
-  gap:10px;
-  overflow:auto;
-  padding-right:6px;
-}
-
-.factura-detalle .detalle-blobs::-webkit-scrollbar{
-  width:6px;
-}
-
-.factura-detalle .detalle-blobs::-webkit-scrollbar-thumb{
-  background:var(--scrollbar-thumb);
-  border-radius:6px;
-}
-
-
-/* =========================================================
-   BLOB ITEM (LIMPIO)
-========================================================= */
-.factura-detalle .blob-item{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-
-  padding:12px 14px;
-  border-radius:12px;
-
-  border:1px solid var(--card-border);
-  background:var(--card-bg);
-
-  transition:.15s;
-}
-
-.factura-detalle .blob-item:hover{
-  border-color:var(--accent);
-  transform:translateY(-2px);
-  box-shadow:var(--shadow-soft);
-}
-
-.factura-detalle .blob-item span{
-  font-size:13px;
-  font-weight:500;
-  color:var(--text);
-
-  max-width:60%;
-  overflow:hidden;
-  text-overflow:ellipsis;
-  white-space:nowrap;
-}
-
-.factura-detalle .blob-actions{
-  display:flex;
-  gap:8px;
-}
-
-.factura-detalle .blob-actions button{
-  padding:6px 12px;
-  border-radius:10px;
-  border:none;
-  cursor:pointer;
-
-  font-size:12px;
-  font-weight:600;
-  transition:.2s;
-}
-
-/* 📧 enviar */
-.factura-detalle #btn-enviar-factura{
-  background:rgba(167,139,250,0.15);
-  color:var(--color-irpf);
-}
-
-.factura-detalle #btn-enviar-factura:hover{
-  background:rgba(167,139,250,0.25);
-  transform:translateY(-1px);
-}
-
-/* ⬇️ descargar */
-.factura-detalle #btn-descargar-factura{
-  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
-  color:#fff;
-}
-
-.factura-detalle #btn-descargar-factura:hover{
-  transform:translateY(-1px);
-  box-shadow:0 6px 18px rgba(99,102,241,.4);
-}
-
-
-/* =========================================================
-   TOP BAR
-========================================================= */
-.factura-detalle .filters-row{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-
-  padding:14px 30px;
-
-  background:var(--panel-bg);
-  border-bottom:1px solid var(--panel-border);
-}
-
-.factura-detalle #btn-back{
-  background:none;
-  border:none;
-  color:var(--text);
-  cursor:pointer;
-  font-size:13px;
-  opacity:.7;
-}
-
-.factura-detalle #btn-back:hover{
-  opacity:1;
-  transform:translateX(-2px);
-}
-
-
-/* =========================================================
-   USER HEADER
-========================================================= */
-.factura-detalle .detalle-user{
-  display:flex;
-  align-items:center;
-  gap:12px;
-}
-
-.factura-detalle .table-avatar{
-  width:38px;
-  height:38px;
-  border-radius:50%;
-  overflow:hidden;
+.factura-detalle-loading{
+  position:absolute;
+  inset:0;
 
   display:flex;
   align-items:center;
   justify-content:center;
 
-  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
-  color:#fff;
+  background:rgba(15,15,15,0.45);
+  backdrop-filter:blur(2px);
 
-  font-size:13px;
-  font-weight:600;
+  z-index:20;
+
+  opacity:0;
+  pointer-events:none;
+  transition:opacity .2s ease;
 }
 
-.factura-detalle .table-avatar img{
-  width:100%;
-  height:100%;
-  object-fit:cover;
+.panel-view.factura-detalle.loading .factura-detalle-loading{
+  opacity:1;
+  pointer-events:auto;
 }
 
-.factura-detalle .user-info{
-  display:flex;
-  flex-direction:column;
+.factura-detalle-spinner{
+  width:42px;
+  height:42px;
+  border-radius:50%;
+  border:3px solid rgba(255,255,255,0.15);
+  border-top-color:var(--accent);
+  animation:spin .8s linear infinite;
 }
 
-.factura-detalle .detalle-meta span{
+
+/* =========================================================
+   HEADER EXTRA FINO
+========================================================= */
+.panel-view.factura-detalle .view-title{
+  font-size:15px;
+}
+
+.panel-view.factura-detalle .view-sub{
   font-size:11px;
   opacity:.7;
 }
 
 
 /* =========================================================
-   BODY
+   GRID AJUSTADO
 ========================================================= */
-.factura-detalle .detalle-body{
-  flex:1;
-  display:flex;
-  flex-direction:column;
-  padding:26px 30px;
-  overflow:auto;
-}
-
-.factura-detalle .detalle-body::-webkit-scrollbar{
-  width:6px;
-}
-
-.factura-detalle .detalle-body::-webkit-scrollbar-thumb{
-  background:var(--scrollbar-thumb);
-  border-radius:6px;
+.panel-view.factura-detalle .view-grid{
+  gap:16px;
 }
 
 
 /* =========================================================
-   GRID
+   CARDS HOVER MÁS FINO
 ========================================================= */
-.factura-detalle .form-grid{
-  display:grid;
-  grid-template-columns:repeat(2,1fr);
-  gap:18px;
+.panel-view.factura-detalle .view-card:hover{
+  transform:translateY(-2px);
+  box-shadow:var(--shadow-soft);
 }
 
 
 /* =========================================================
-   ITEMS
-========================================================= */
-.factura-detalle .detalle-item{
-  display:flex;
-  flex-direction:column;
-  gap:6px;
-
-  padding:12px 14px;
-  border-radius:10px;
-
-  border:1px solid var(--card-border);
-  background:var(--card-bg);
-
-  transition:.15s;
-}
-
-.factura-detalle .detalle-item:hover{
-  background:color-mix(in srgb, var(--card-bg), #000 6%);
-}
-
-.factura-detalle .detalle-label{
-  font-size:var(--font-xs);
-  color:var(--dim);
-  text-transform:uppercase;
-  letter-spacing:.5px;
-}
-
-.factura-detalle .detalle-value{
-  font-size:var(--font-base);
-  font-weight:600;
-  color:var(--text);
-}
-
-
-/* =========================================================
-   ESTADO
+   ESTADO (🔥 MÁS PEQUEÑO Y PRO)
 ========================================================= */
 #detalle-estado{
   display:inline-flex;
   align-items:center;
-  padding:6px 10px;
+  justify-content:center;
+
+  padding:3px 8px;
   border-radius:999px;
-  font-size:12px;
+
+  font-size:10.5px;
   font-weight:600;
+  line-height:1;
+
+  transition:
+    transform .12s ease,
+    box-shadow .12s ease;
 }
 
 #detalle-estado[data-estado="pagada"]{
-  background:rgba(34,197,94,0.15);
+  background:rgba(34,197,94,0.12);
   color:#22c55e;
 }
 
 #detalle-estado[data-estado="pendiente"]{
-  background:rgba(234,179,8,0.15);
+  background:rgba(234,179,8,0.12);
   color:#eab308;
 }
 
 #detalle-estado[data-estado="cancelada"]{
-  background:rgba(239,68,68,0.15);
+  background:rgba(239,68,68,0.12);
   color:#ef4444;
+}
+
+#detalle-estado:hover{
+  transform:translateY(-1px) scale(1.03);
+  box-shadow:0 0 6px currentColor;
 }
 
 
 /* =========================================================
-   IVA / IRPF (🔥 MATCH DASHBOARD)
+   IVA / IRPF
 ========================================================= */
-
 #detalle-iva{
   font-weight:700;
   color:var(--color-iva);
@@ -375,43 +143,53 @@
 
 
 /* =========================================================
-   RESPONSIVE
+   SIDEBAR MEJORADA
 ========================================================= */
-@media (max-width:1100px){
+.panel-view.factura-detalle .view-file{
+  transition:.15s;
+}
 
-  .factura-detalle .detalle-right{
-    display:none;
-  }
-
-  .factura-detalle .detalle-body{
-    padding:20px;
-  }
-
+.panel-view.factura-detalle .view-file:hover{
+  border-color:var(--accent);
+  transform:translateY(-2px);
+  box-shadow:var(--shadow-soft);
 }
 
 
 /* =========================================================
-   LOADING
+   BOTONES SIDEBAR
 ========================================================= */
-.factura-loading{
-  position:absolute;
-  inset:0;
-
-  display:flex;
-  align-items:center;
-  justify-content:center;
-
-  background:var(--main-bg);
-
-  z-index:20;
-
-  opacity:0;
-  pointer-events:none;
-
-  transition:opacity .25s ease;
+#btn-enviar-factura{
+  background:rgba(167,139,250,0.15);
+  color:var(--color-irpf);
 }
 
-.panel-content.factura-detalle.loading .factura-loading{
-  opacity:1;
-  pointer-events:auto;
+#btn-enviar-factura:hover{
+  background:rgba(167,139,250,0.25);
+}
+
+#btn-descargar-factura{
+  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
+  color:#fff;
+}
+
+#btn-descargar-factura:hover{
+  transform:translateY(-1px);
+  box-shadow:0 6px 18px rgba(99,102,241,.4);
+}
+
+
+/* =========================================================
+   RESPONSIVE
+========================================================= */
+@media (max-width:1100px){
+
+  .panel-view.factura-detalle .view-aside{
+    display:none;
+  }
+
+  .panel-view.factura-detalle .view-body{
+    padding:20px;
+  }
+
 }

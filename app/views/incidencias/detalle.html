@@ -1,143 +1,137 @@
-<div class="panel-content incidencia-detalle">
+<div class="panel-view incidencia-detalle">
 
-  <div class="layout-split">
+  <!-- 🔥 LOADER UNIFICADO -->
+  <div class="view-loading">
+    <div class="factura-detalle-spinner"></div>
+  </div>
+
+  <div class="view-layout">
 
     <!-- =========================
-         LEFT
+         MAIN
     ========================= -->
-    <div class="detalle-left">
+    <div class="view-main">
 
-      <!-- HEADER (🔥 MISMO QUE CREATE) -->
-      <div class="filters-row">
+      <!-- HEADER -->
+      <div class="view-header">
 
-        <!-- BLOQUE IZQUIERDO (CLON CREATE) -->
-        <div class="header-left" style="display:flex; align-items:center; gap:12px;">
+        <div class="view-user">
+          <div id="detalle-avatar" class="view-avatar"></div>
 
-          <!-- AVATAR -->
-          <div id="detalle-avatar" class="table-avatar"></div>
-
-          <!-- TEXTO -->
-          <div>
-            <div class="page-title" id="detalle-usuario">--</div>
-            <div class="page-subtitle" id="detalle-userid"></div>
+          <div class="view-user-info">
+            <div class="view-title" id="detalle-usuario">--</div>
+            <div class="view-sub" id="detalle-userid"></div>
           </div>
-
         </div>
 
-        <!-- BOTÓN DERECHA -->
-        <button id="btn-back">
+        <button id="btn-back" class="view-back">
           ← Volver
         </button>
 
       </div>
 
       <!-- BODY -->
-      <div class="detalle-body">
+      <div class="view-body">
 
-        <div id="detalle-content" style="width:100%;">
+        <div class="view-grid">
 
-          <div class="form-grid">
-
-            <!-- ID -->
-            <div class="detalle-item">
-              <div class="detalle-label">ID</div>
-              <div class="detalle-value" id="detalle-id">--</div>
-            </div>
-
-            <!-- FECHA CREACIÓN -->
-            <div class="detalle-item">
-              <div class="detalle-label">Fecha de creación</div>
-              <div class="detalle-value" id="detalle-fecha">--</div>
-            </div>
-
-            <!-- FECHA CIERRE -->
-            <div class="detalle-item">
-              <div class="detalle-label">Fecha cierre</div>
-              <div class="detalle-value" id="detalle-fecha-cierre">--</div>
-            </div>
-
-            <!-- TÉCNICO -->
-            <div class="detalle-item">
-              <div class="detalle-label">Técnico asignado</div>
-              <div class="detalle-value" id="detalle-tecnico">--</div>
-            </div>
-
-            <!-- TÍTULO -->
-            <div class="detalle-item" style="grid-column: span 2;">
-              <div class="detalle-label">Título</div>
-              <div class="detalle-value" id="detalle-titulo">--</div>
-            </div>
-
-            <!-- MENSAJE (EDITABLE) -->
-            <div class="detalle-item" style="grid-column: span 2;">
-              <div class="detalle-label">Mensaje</div>
-
-              <div 
-                id="detalle-mensaje"
-                class="detalle-value detalle-editable"
-                contenteditable="true"
-              ></div>
-            </div>
-
-            <!-- ESTADO -->
-            <div class="detalle-item">
-              <div class="detalle-label">Estado</div>
-
-              <select id="edit-estado" class="detalle-select">
-                <option value="open">Abierta</option>
-                <option value="closed">Cerrada</option>
-              </select>
-            </div>
-
-            <!-- PRIORIDAD -->
-            <div class="detalle-item">
-              <div class="detalle-label">Prioridad</div>
-
-              <select id="edit-prioridad" class="detalle-select">
-                <option value="low">Baja</option>
-                <option value="medium">Media</option>
-                <option value="high">Alta</option>
-              </select>
-            </div>
-
-            <!-- =========================
-                 ADJUNTOS (CLON CREATE)
-            ========================= -->
-            <div class="detalle-item" style="grid-column: span 2;">
-              <div class="detalle-label">Adjuntos del usuario</div>
-
-              <div class="incidencia-files">
-
-                <button type="button" id="btn-attach">
-                  + Añadir archivos
-                </button>
-
-                <input 
-                  type="file"
-                  id="inc-files"
-                  multiple
-                  hidden
-                >
-
-                <div id="file-list" class="file-list"></div>
-
-              </div>
-            </div>
-
+          <!-- ID -->
+          <div class="view-card">
+            <div class="view-label">ID</div>
+            <div class="view-value" id="detalle-id">--</div>
           </div>
 
-          <!-- FOOTER -->
-          <div class="detalle-footer">
-
-            <div class="detalle-hint">
-              Puedes cerrar la incidencia o eliminar archivos adjuntos
-            </div>
-
-            <button id="btn-save">
-              Guardar cambios
-            </button>
-
+          <!-- FECHA CREACIÓN -->
+          <div class="view-card">
+            <div class="view-label">Fecha de creación</div>
+            <div class="view-value" id="detalle-fecha">--</div>
           </div>
+
+          <!-- FECHA CIERRE -->
+          <div class="view-card">
+            <div class="view-label">Fecha cierre</div>
+            <div class="view-value" id="detalle-fecha-cierre">--</div>
+          </div>
+
+          <!-- TÉCNICO -->
+          <div class="view-card">
+            <div class="view-label">Técnico asignado</div>
+            <div class="view-value" id="detalle-tecnico">--</div>
+          </div>
+
+          <!-- TÍTULO -->
+          <div class="view-card full">
+            <div class="view-label">Título</div>
+            <div class="view-value" id="detalle-titulo">--</div>
+          </div>
+
+          <!-- MENSAJE -->
+          <div class="view-card full">
+            <div class="view-label">Mensaje</div>
+
+            <div 
+              id="detalle-mensaje"
+              class="view-value"
+              contenteditable="true"
+            ></div>
+          </div>
+
+          <!-- ESTADO -->
+          <div class="view-card">
+            <div class="view-label">Estado</div>
+
+            <select id="edit-estado" class="view-select">
+              <option value="open">Abierta</option>
+              <option value="closed">Cerrada</option>
+            </select>
+          </div>
+
+          <!-- PRIORIDAD -->
+          <div class="view-card">
+            <div class="view-label">Prioridad</div>
+
+            <select id="edit-prioridad" class="view-select">
+              <option value="low">Baja</option>
+              <option value="medium">Media</option>
+              <option value="high">Alta</option>
+            </select>
+          </div>
+
+          <!-- ADJUNTOS -->
+          <div class="view-card full">
+            <div class="view-label">Adjuntos del usuario</div>
+
+            <div class="view-files">
+
+              <button id="btn-attach" class="view-btn soft">
+                + Añadir archivos
+              </button>
+
+              <input type="file" id="inc-files" multiple hidden>
+
+              <div id="file-list" class="view-files"></div>
+
+            </div>
+          </div>
+
+        </div>
+
+        <!-- FOOTER -->
+        <div style="
+          margin-top:20px;
+          display:flex;
+          justify-content:space-between;
+          align-items:center;
+          gap:12px;
+        ">
+
+          <div style="font-size:12px; opacity:.6;">
+            Puedes cerrar la incidencia o eliminar archivos adjuntos
+          </div>
+
+          <button id="btn-save" class="view-btn primary">
+            Guardar cambios
+          </button>
 
         </div>
 
@@ -146,24 +140,24 @@
     </div>
 
     <!-- =========================
-         RIGHT
+         SIDEBAR
     ========================= -->
-    <aside class="detalle-right">
+    <aside class="view-aside">
 
-      <div class="detalle-sidebar">
+      <div class="view-sidebar">
 
-        <!-- USUARIO -->
-        <div class="sidebar-section">
-          <div class="sidebar-title">Archivos aportados</div>
-          <div id="detalle-blobs-user" class="detalle-blobs"></div>
+        <!-- USER FILES -->
+        <div class="view-section">
+          <div class="view-section-title">Archivos del usuario</div>
+          <div id="detalle-blobs-user" class="view-files"></div>
         </div>
 
         <div class="sidebar-divider"></div>
 
-        <!-- SOPORTE -->
-        <div class="sidebar-section">
-          <div class="sidebar-title">Adjuntos del equipo de soporte</div>
-          <div id="detalle-blobs-team" class="detalle-blobs"></div>
+        <!-- TEAM FILES -->
+        <div class="view-section">
+          <div class="view-section-title">Adjuntos soporte</div>
+          <div id="detalle-blobs-team" class="view-files"></div>
         </div>
 
       </div>

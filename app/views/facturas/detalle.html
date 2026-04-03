@@ -1,9 +1,8 @@
 <div class="panel-view factura-detalle">
 
-  <!-- 🔥 LOADER GLOBAL -->
-  <div class="view-loading" aria-hidden="true">
-    <img class="loader-logo loader-dark" src="/media/img/favicon_white.png" draggable="false">
-    <img class="loader-logo loader-light" src="/media/img/favicon_black.png" draggable="false">
+  <!-- 🔥 LOADING PRO UNIFICADO -->
+  <div class="factura-detalle-loading">
+    <div class="factura-detalle-spinner"></div>
   </div>
 
   <div class="view-layout">
@@ -39,73 +38,61 @@
 
         <div class="view-grid">
 
-          <!-- FACTURA -->
           <div class="view-card">
             <div class="view-label">Factura</div>
             <div class="view-value" id="detalle-numero-legal">--</div>
           </div>
 
-          <!-- ID -->
           <div class="view-card">
             <div class="view-label">ID Factura</div>
             <div class="view-value" id="detalle-id">--</div>
           </div>
 
-          <!-- INCIDENCIA -->
           <div class="view-card">
             <div class="view-label">ID Incidencia</div>
             <div class="view-value" id="detalle-incidencia-id">--</div>
           </div>
 
-          <!-- FECHA -->
           <div class="view-card">
             <div class="view-label">Fecha emisión</div>
             <div class="view-value" id="detalle-fecha">--</div>
           </div>
 
-          <!-- VENCIMIENTO -->
           <div class="view-card">
             <div class="view-label">Fecha vencimiento</div>
             <div class="view-value" id="detalle-vencimiento">--</div>
           </div>
 
-          <!-- MÉTODO -->
           <div class="view-card">
             <div class="view-label">Método de pago</div>
             <div class="view-value" id="detalle-metodo">--</div>
           </div>
 
-          <!-- TOTAL -->
           <div class="view-card">
             <div class="view-label">Importe total</div>
             <div class="view-value money" id="detalle-total">--</div>
           </div>
 
-          <!-- ESTADO -->
           <div class="view-card">
             <div class="view-label">Estado</div>
             <div id="detalle-estado" class="view-badge">--</div>
           </div>
 
-          <!-- IVA -->
           <div class="view-card">
             <div class="view-label">IVA</div>
             <div class="view-value iva" id="detalle-iva">--</div>
           </div>
 
-          <!-- IRPF -->
           <div class="view-card" id="detalle-irpf-container" style="display:none;">
             <div class="view-label">IRPF</div>
             <div class="view-value irpf" id="detalle-irpf">--</div>
           </div>
 
-          <!-- CONCEPTO -->
           <div class="view-card full">
             <div class="view-label">Concepto</div>
             <div class="view-value" id="detalle-concepto">--</div>
           </div>
 
-          <!-- DESCRIPCIÓN -->
           <div class="view-card full">
             <div class="view-label">Descripción</div>
             <div class="view-value" id="detalle-descripcion"></div>
@@ -117,7 +104,6 @@
 
     </div>
 
-
     <!-- =========================
          SIDEBAR
     ========================= -->
@@ -125,27 +111,23 @@
 
       <div class="view-sidebar">
 
-        <!-- DOCUMENTOS -->
         <div class="view-section">
           <div class="view-section-title">Documentos</div>
 
           <div class="view-files">
-
             <div class="view-file">
               <span>Factura</span>
 
               <div class="view-file-actions">
-                <button id="btn-enviar-factura" class="view-btn soft" title="Enviar">📧</button>
+                <button id="btn-enviar-factura" class="view-btn soft">📧</button>
                 <button id="btn-descargar-factura" class="view-btn primary">Descargar</button>
               </div>
             </div>
-
           </div>
         </div>
 
         <div class="sidebar-divider"></div>
 
-        <!-- HISTORIAL -->
         <div class="view-section">
           <div class="view-section-title">Historial</div>
           <div id="detalle-historial" class="view-files"></div>

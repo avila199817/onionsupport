@@ -32,13 +32,13 @@
     "/incidencias/detalle": {
       page: "/app/views/incidencias/detalle.html",
       style: [
-        "/css/app/core/view.css", 
-        "/css/app/incidencias/detalle.css"    
+        "/css/app/core/view.css",
+        "/css/app/incidencias/detalle.css"
       ],
       script: "/js/features/incidencias/detalle.js",
       title: "Detalle incidencia"
     },
-    
+
     "/incidencias/nueva": {
       page: "/app/views/incidencias/incidencia.html",
       style: "/css/app/incidencias/incidencia.css",
@@ -56,8 +56,8 @@
     "/facturas/detalle": {
       page: "/app/views/facturas/detalle.html",
       style: [
-        "/css/app/core/view.css", 
-        "/css/app/facturas/detalle.css"    
+        "/css/app/core/view.css",
+        "/css/app/facturas/detalle.css"
       ],
       script: "/js/features/facturas/detalle.js",
       title: "Detalle factura"
@@ -192,6 +192,11 @@
     try{
 
       const route = Onion.router.get();
+
+      if(!Onion.routes[route]){
+        console.warn("⚠️ Ruta no encontrada:", route);
+      }
+
       const config = Onion.routes[route] || Onion.routes["/"];
 
       Onion.setTitle(config.title);
@@ -241,12 +246,10 @@
       finalHref = "/@" + username + href;
     }
 
-    if(window.location.pathname === finalHref) return;
+    if(normalize(window.location.pathname) === normalize(finalHref)) return;
 
     history.pushState({}, "", finalHref);
 
-    // 🔥 flujo limpio
-    Onion.runCleanup();
     Onion.render().then(()=>{
       Onion.ui?.init?.();
     });
@@ -291,7 +294,6 @@
 
     window.addEventListener("popstate", function(){
 
-      Onion.runCleanup();
       Onion.render().then(()=>{
         Onion.ui?.init?.();
       });

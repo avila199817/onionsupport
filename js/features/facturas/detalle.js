@@ -90,6 +90,8 @@ async function loadFactura(id){
       }
     );
 
+    if(!res.ok) throw new Error("HTTP " + res.status);
+
     const json = await res.json();
 
     factura = json?.factura || json;
@@ -112,65 +114,72 @@ function render(){
 
   /* ========================= CLIENTE ========================= */
 
-  $("#detalle-cliente").textContent = c.nombre || "Cliente";
-  $("#detalle-cliente-id").textContent = c.id || "";
+  setText("#detalle-cliente", c.nombre || "Cliente");
+  setText("#detalle-cliente-id", c.id || "");
 
   renderAvatar(c);
 
   /* ========================= DATA ========================= */
 
-  $("#detalle-numero-legal").textContent = factura.numero;
-  $("#detalle-id").textContent = factura.id || "--";
-  $("#detalle-incidencia-id").textContent = factura.incidenciaId || "--";
+  setText("#detalle-numero-legal", factura.numero);
+  setText("#detalle-id", factura.id || "--");
+  setText("#detalle-incidencia-id", factura.incidenciaId || "--");
 
-  $("#detalle-fecha").textContent = formatFecha(factura.fecha);
-  $("#detalle-vencimiento").textContent = formatFecha(factura.fechaServicio);
+  setText("#detalle-fecha", formatFecha(factura.fecha));
+  setText("#detalle-vencimiento", formatFecha(factura.fechaServicio));
 
-  /* método solo si pagada */
-  $("#detalle-metodo").textContent =
+  setText(
+    "#detalle-metodo",
     factura.estadoPago === "pagada"
       ? (factura.formaPago || "-")
-      : "-";
+      : "-"
+  );
 
-  $("#detalle-total").textContent = formatMoney(factura.total);
-
-  $("#detalle-concepto").textContent = factura.concepto || "-";
-  $("#detalle-descripcion").textContent = factura.descripcion || "-";
+  setText("#detalle-total", formatMoney(factura.total));
+  setText("#detalle-concepto", factura.concepto || "-");
+  setText("#detalle-descripcion", factura.descripcion || "-");
 
   /* ========================= ESTADO ========================= */
 
   const estadoEl = $("#detalle-estado");
 
-  estadoEl.dataset.estado = factura.estadoPago;
+  if(estadoEl){
 
-  estadoEl.textContent =
-    factura.estadoPago === "pagada" ? "Pagada" :
-    factura.estadoPago === "cancelada" ? "Cancelada" :
-    "Pendiente";
+    const estado = factura.estadoPago || "pendiente";
 
-  /* ========================= IVA (REAL BACKEND) ========================= */
+    estadoEl.dataset.estado = estado;
+
+    estadoEl.textContent =
+      estado === "pagada" ? "Pagada" :
+      estado === "cancelada" ? "Cancelada" :
+      "Pendiente";
+
+  }
+
+  /* ========================= IVA ========================= */
 
   const iva = factura.impuestos?.find(i => i.tipo === "IVA");
 
-  if(iva){
-    $("#detalle-iva").textContent =
-      `${iva.porcentaje}% · ${formatMoney(iva.importe)}`;
-  }else{
-    $("#detalle-iva").textContent = "--";
-  }
+  setText(
+    "#detalle-iva",
+    iva
+      ? `${iva.porcentaje}% · ${formatMoney(iva.importe)}`
+      : "--"
+  );
 
-  /* ========================= IRPF (🔥 FIX REAL) ========================= */
+  /* ========================= IRPF (ROBUSTO) ========================= */
 
   const irpfContainer = $("#detalle-irpf-container");
 
   let irpf = factura.impuestos?.find(i => i.tipo === "IRPF");
 
   if(!irpf && factura.irpf){
+
+    const base = factura.baseImponible || 0;
+
     irpf = {
       porcentaje: factura.irpf,
-      importe: factura.baseImponible
-        ? factura.baseImponible * (factura.irpf / 100)
-        : 0
+      importe: base * (factura.irpf / 100)
     };
   }
 
@@ -178,8 +187,10 @@ function render(){
 
     irpfContainer.style.display = "block";
 
-    $("#detalle-irpf").textContent =
-      `${irpf.porcentaje}% · -${formatMoney(irpf.importe)}`;
+    setText(
+      "#detalle-irpf",
+      `${irpf.porcentaje}% · -${formatMoney(irpf.importe)}`
+    );
 
   }else{
 
@@ -192,7 +203,7 @@ function render(){
   const blobNameEl = document.querySelector(".blob-item span");
 
   if(blobNameEl){
-    blobNameEl.textContent = factura.numero; // 🔥 SIN .pdf
+    blobNameEl.textContent = factura.numero || "Factura";
   }
 
 }
@@ -207,6 +218,7 @@ function renderAvatar(cliente){
   if(cliente.avatar){
     el.innerHTML = `<img src="${cliente.avatar}" />`;
   }else{
+
     const initials = (cliente.nombre || "?")
       .split(" ")
       .map(n=>n[0])
@@ -214,7 +226,7 @@ function renderAvatar(cliente){
       .slice(0,2)
       .toUpperCase();
 
-    el.innerHTML = `<div class="avatar-fallback">${initials}</div>`;
+    el.textContent = initials;
   }
 
 }
@@ -284,6 +296,11 @@ async function sendFactura(){
 }
 
 /* ========================= HELPERS ========================= */
+
+function setText(sel,val){
+  const el = $(sel);
+  if(el) el.textContent = val || "--";
+}
 
 function formatFecha(f){
   if(!f) return "--";

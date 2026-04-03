@@ -9,10 +9,17 @@ if(!Onion){
   return;
 }
 
+/* =========================================================
+   STATE
+========================================================= */
 let initialized = false;
 let currentItems = [];
 let filteredItems = [];
 let loading = false;
+
+/* 🔥 CONTROL PRO */
+let currentRequestId = 0;
+
 
 /* =========================
    ROOT
@@ -26,6 +33,7 @@ function $(selector){
   const root = getRoot();
   return root ? root.querySelector(selector) : null;
 }
+
 
 /* =========================
    INIT
@@ -42,8 +50,14 @@ function init(){
 
   initialized = true;
 
+  /* 🔥 LOADER DESDE EL FRAME 0 */
+  root.classList.add("loading");
+
   bindEvents();
-  loadIncidencias();
+
+  requestAnimationFrame(()=>{
+    loadIncidencias();
+  });
 
   Onion.onCleanup(()=>{
     initialized = false;
@@ -52,6 +66,7 @@ function init(){
 }
 
 init();
+
 
 /* =========================
    EVENTS
@@ -86,8 +101,9 @@ function bindEvents(){
 
 }
 
+
 /* =========================
-   LOAD (🔥 FIX LOADER)
+   LOAD (PRO)
 ========================= */
 
 async function loadIncidencias(){
@@ -98,14 +114,23 @@ async function loadIncidencias(){
   const panel = getRoot();
   const tbody = $("#incidencias-body");
 
-  if(!tbody) return;
+  if(!tbody || !panel) return;
 
-  panel?.classList.add("loading");
+  const requestId = ++currentRequestId;
+
+  /* 🔥 UX */
+  document.activeElement?.blur();
+  panel.classList.add("loading");
+
+  /* 🔥 LIMPIAR PARA EVITAR FLASH */
+  tbody.innerHTML = "";
 
   try{
 
     const res = await Onion.fetch(Onion.config.API + "/tickets");
     const items = normalize(res);
+
+    if(requestId !== currentRequestId) return;
 
     currentItems = items;
     filteredItems = items;
@@ -115,21 +140,36 @@ async function loadIncidencias(){
       return;
     }
 
-    render(items);
+    /* 🔥 RENDER SUAVE */
+    requestAnimationFrame(()=>{
+      render(items);
+    });
 
   }catch(e){
 
     console.error("💥 ERROR INCIDENCIAS:", e);
+
+    if(requestId !== currentRequestId) return;
+
     setError();
 
   }finally{
 
-    panel?.classList.remove("loading");
+    if(requestId === currentRequestId){
+
+      /* 🔥 SALIDA SUAVE */
+      setTimeout(()=>{
+        panel.classList.remove("loading");
+      }, 80);
+
+    }
+
     loading = false;
 
   }
 
 }
+
 
 /* =========================
    NORMALIZE
@@ -147,6 +187,7 @@ function normalize(res){
   return [];
 
 }
+
 
 /* =========================
    FILTERS
@@ -176,9 +217,12 @@ function applyFilters(){
 
   });
 
-  render(filteredItems);
+  requestAnimationFrame(()=>{
+    render(filteredItems);
+  });
 
 }
+
 
 /* =========================
    STATES
@@ -193,6 +237,7 @@ function setError(){
   $("#incidencias-body").innerHTML =
     `<tr><td colspan="8">Error cargando incidencias</td></tr>`;
 }
+
 
 /* =========================
    RENDER
@@ -253,6 +298,7 @@ function render(items){
 
 }
 
+
 /* =========================
    MAP
 ========================= */
@@ -261,18 +307,13 @@ function mapItem(i){
 
   return {
     id: i.id || i.ticketId || "--",
-
     title: i.subject || i.message || "Sin título",
-
     usuario: i.cliente?.nombre || "Usuario",
     email: i.cliente?.email || "-",
     tecnico: i.tecnico?.name || "-",
-
     avatar: i.cliente?.avatar || null,
-
     estado: getEstado(i),
     prioridad: getPrioridad(i),
-
     fecha: formatFecha(i.createdAt),
     fechaCierre: i.status === "closed"
       ? formatFecha(i.closedAt || (i._ts ? i._ts * 1000 : null))
@@ -280,6 +321,7 @@ function mapItem(i){
   };
 
 }
+
 
 /* =========================
    AVATAR
@@ -311,6 +353,7 @@ function renderAvatar(d){
     </div>
   `;
 }
+
 
 /* =========================
    HELPERS

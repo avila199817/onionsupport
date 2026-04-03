@@ -194,7 +194,7 @@
 
 
 /* =========================================================
-   TOP BAR
+   TOP BAR (CLON INCIDENCIA)
 ========================================================= */
 .factura-detalle .filters-row{
   display:flex;
@@ -203,13 +203,7 @@
 
   padding:14px 30px;
 
-  backdrop-filter:blur(10px);
-  background:linear-gradient(
-    180deg,
-    rgba(255,255,255,0.02),
-    rgba(0,0,0,0.1)
-  );
-
+  background:var(--panel-bg);
   border-bottom:1px solid var(--panel-border);
 }
 
@@ -220,7 +214,6 @@
   cursor:pointer;
   font-size:13px;
   opacity:.7;
-  transition:.2s;
 }
 
 .factura-detalle #btn-back:hover{
@@ -230,7 +223,7 @@
 
 
 /* =========================================================
-   USER HEADER
+   USER HEADER (CLON INCIDENCIA)
 ========================================================= */
 .factura-detalle .detalle-user{
   display:flex;
@@ -253,8 +246,6 @@
 
   font-size:13px;
   font-weight:600;
-
-  box-shadow:0 4px 14px rgba(0,0,0,.3);
 }
 
 .factura-detalle .table-avatar img{

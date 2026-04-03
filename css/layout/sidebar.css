@@ -523,7 +523,7 @@
   padding:10px;
   border-radius:12px;
 
-  background:var(--dropdown-bg);
+  background:var(--main-bg);
 
   opacity:0;
   transform:translateY(8px);

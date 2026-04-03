@@ -98,7 +98,7 @@ function bindEvents(){
 
 
 /* =========================
-   LOAD (GLOBAL LOADER)
+   LOAD
 ========================= */
 
 async function loadIncidencias(){
@@ -110,9 +110,6 @@ async function loadIncidencias(){
   if(!tbody) return;
 
   const requestId = ++currentRequestId;
-
-  /* 🔥 LOADER GLOBAL */
-  Onion.ui?.showLoader?.();
 
   document.activeElement?.blur();
   tbody.innerHTML = "";
@@ -145,13 +142,7 @@ async function loadIncidencias(){
     setError();
 
   }finally{
-
-    if(requestId === currentRequestId){
-      Onion.ui?.hideLoader?.();
-    }
-
     loading = false;
-
   }
 
 }
@@ -240,7 +231,6 @@ function render(items){
 
     return `
 <tr data-id="${d.id}">
-
   <td class="col-id">${d.id}</td>
 
   <td class="col-main">
@@ -256,7 +246,6 @@ function render(items){
   </td>
 
   <td class="col-main">${escapeHTML(d.title)}</td>
-
   <td class="col-secondary">${escapeHTML(d.tecnico)}</td>
 
   <td class="col-status">
@@ -272,9 +261,7 @@ function render(items){
   </td>
 
   <td class="col-date">${d.fecha}</td>
-
   <td class="col-date">${d.fechaCierre}</td>
-
 </tr>
 `;
 

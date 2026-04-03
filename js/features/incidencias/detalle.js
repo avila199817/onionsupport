@@ -58,6 +58,7 @@ function $(selector){
    LOADER CONTROL 🔥
 ========================= */
 function setLoading(active){
+
   const root = getRoot();
   if(!root) return;
 
@@ -65,9 +66,17 @@ function setLoading(active){
     root.classList.add("loading");
     root.classList.remove("ready");
   }else{
-    root.classList.remove("loading");
-    root.classList.add("ready");
+
+    // 🔥 doble frame = render real antes de mostrar
+    requestAnimationFrame(()=>{
+      requestAnimationFrame(()=>{
+        root.classList.remove("loading");
+        root.classList.add("ready");
+      });
+    });
+
   }
+
 }
 
 
@@ -88,17 +97,20 @@ function observeDOM(){
   if(observer) return;
 
   observer = new MutationObserver(()=>{
+
     if(!getRoot()){
       initialized = false;
       currentRequestId++;
       setTimeout(init, 100);
     }
+
   });
 
   observer.observe(document.body, {
     childList: true,
     subtree: true
   });
+
 }
 
 
@@ -148,6 +160,7 @@ function bindEvents(){
     }
 
   });
+
 }
 
 
@@ -157,6 +170,7 @@ function bindEvents(){
 async function loadDetalle(){
 
   const id = getId();
+
   if(!id){
     setLoading(false);
     return;
@@ -173,13 +187,12 @@ async function loadDetalle(){
     if(!res.ok) throw new Error("API ERROR");
 
     const json = await res.json();
+
     if(requestId !== currentRequestId) return;
 
     currentItem = json?.ticket || json;
 
-    requestAnimationFrame(()=>{
-      render(currentItem);
-    });
+    render(currentItem);
 
   }catch(err){
 
@@ -191,10 +204,16 @@ async function loadDetalle(){
   }finally{
 
     if(requestId === currentRequestId){
-      setTimeout(()=> setLoading(false), 80);
+
+      // 🔥 delay mínimo para evitar flash blanco
+      setTimeout(()=>{
+        setLoading(false);
+      }, 120);
+
     }
 
   }
+
 }
 
 
@@ -250,6 +269,7 @@ async function updateTicket(){
 
   setSaving(false);
   sending = false;
+
 }
 
 
@@ -300,6 +320,7 @@ function uploadFile(file){
     }
 
   });
+
 }
 
 
@@ -320,6 +341,7 @@ function render(i){
 
   renderAvatar(i?.cliente?.nombre, i?.cliente?.avatar);
   renderBlobs(i?.attachments || []);
+
 }
 
 
@@ -341,6 +363,7 @@ function renderAvatar(nombre, avatar){
 }
 
 function renderFiles(){
+
   const list = $("#file-list");
   if(!list) return;
 
@@ -350,6 +373,7 @@ function renderFiles(){
       <button class="file-remove" data-index="${i}">✕</button>
     </div>
   `).join("");
+
 }
 
 function renderBlobs(files){
@@ -366,6 +390,7 @@ function renderBlobs(files){
       </div>
     `).join("") || `<div class="detalle-hint">Sin archivos</div>`;
   }
+
 }
 
 

@@ -9,28 +9,20 @@
 
   const Onion = window.Onion;
 
-  let timer = null;
   let active = false;
-
-  const DELAY = 120; // 🔥 más rápido y fino
 
   /* =========================
      SHOW
   ========================= */
+  Onion.ui = Onion.ui || {};
+
   Onion.ui.showLoader = function(){
 
-    if(active || timer) return;
+    if(active) return;
 
-    timer = setTimeout(()=>{
+    active = true;
 
-      const el = document.getElementById("app-loader");
-      if(!el) return;
-
-      document.body.classList.add("loading");
-      active = true;
-      timer = null;
-
-    }, DELAY);
+    document.body.classList.add("loading");
 
   };
 
@@ -39,19 +31,28 @@
   ========================= */
   Onion.ui.hideLoader = function(){
 
-    if(timer){
-      clearTimeout(timer);
-      timer = null;
-    }
-
     if(!active) return;
 
-    // 🔥 salida suave
-    setTimeout(()=>{
-      document.body.classList.remove("loading");
-      active = false;
-    }, 80);
+    // 🔥 dejamos 2 frames para asegurar render completo
+    requestAnimationFrame(()=>{
+      requestAnimationFrame(()=>{
+        document.body.classList.remove("loading");
+        active = false;
+      });
+    });
 
   };
+
+  /* =========================
+     AUTO HOOK (OPCIONAL PRO)
+  ========================= */
+  // 👉 si usas eventos del router, puedes disparar esto
+  document.addEventListener("onion:route:start", ()=>{
+    Onion.ui.showLoader();
+  });
+
+  document.addEventListener("onion:route:end", ()=>{
+    Onion.ui.hideLoader();
+  });
 
 })();

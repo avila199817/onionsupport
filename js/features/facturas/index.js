@@ -13,6 +13,7 @@ let initialized = false;
 let currentItems = [];
 let filteredItems = [];
 let loading = false;
+let currentRequestId = 0;
 
 /* =========================
    ROOT
@@ -42,11 +43,11 @@ function init(){
 
   initialized = true;
 
-  // 🔥 RESET VISUAL (evita glitches del loader)
-  resetView();
-
   bindEvents();
-  loadFacturas();
+
+  requestAnimationFrame(()=>{
+    loadFacturas();
+  });
 
   Onion.onCleanup(()=>{
     initialized = false;
@@ -56,26 +57,6 @@ function init(){
 
 init();
 
-/* =========================
-   RESET VIEW
-========================= */
-
-function resetView(){
-
-  const panel = getRoot();
-  if(!panel) return;
-
-  // quitar estado loading residual
-  panel.classList.remove("loading");
-
-  // limpiar tabla (evita flash raro)
-  const tbody = $("#facturas-body");
-  if(tbody){
-    tbody.innerHTML = "";
-  }
-
-}
- 
 /* =========================
    EVENTS
 ========================= */
@@ -111,6 +92,62 @@ function bindEvents(){
 }
 
 /* =========================
+   LOAD (MISMO FIX QUE INCIDENCIAS)
+========================= */
+
+async function loadFacturas(){
+
+  if(loading) return;
+  loading = true;
+
+  const tbody = $("#facturas-body");
+  if(!tbody) return;
+
+  const requestId = ++currentRequestId;
+
+  document.activeElement?.blur();
+
+  try{
+
+    /* 🔥 FORZAR PINTADO DEL LOADER */
+    await new Promise(r => requestAnimationFrame(r));
+    await new Promise(r => requestAnimationFrame(r));
+
+    /* 🔥 DELAY MÍNIMO (anti pantalla blanca) */
+    await new Promise(r => setTimeout(r, 200));
+
+    const res = await Onion.fetch(Onion.config.API + "/facturas");
+    const items = normalize(res);
+
+    if(requestId !== currentRequestId) return;
+
+    currentItems = items;
+    filteredItems = items;
+
+    if(!items.length){
+      setEmpty();
+      return;
+    }
+
+    requestAnimationFrame(()=>{
+      render(items);
+    });
+
+  }catch(e){
+
+    console.error("💥 ERROR FACTURAS:", e);
+
+    if(requestId !== currentRequestId) return;
+
+    setError();
+
+  }finally{
+    loading = false;
+  }
+
+}
+
+/* =========================
    ACTIONS
 ========================= */
 
@@ -132,40 +169,16 @@ async function handleAction(btn){
       );
 
       if(!res || !res.ok || !res.url){
-        console.error("❌ ERROR DESCARGA", res);
         alert("Error descargando PDF");
         return;
       }
 
-      /* =========================
-         DESCARGA PRO (SIN PESTAÑA)
-      ========================= */
-
-      try{
-        // 🚀 Método rápido (la mayoría de casos)
-        const link = document.createElement("a");
-        link.href = res.url;
-        link.download = `factura-${id}.pdf`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-
-      }catch(err){
-
-        console.warn("⚠️ FALLBACK BLOB ACTIVADO", err);
-
-        // 🧱 Método blindado (fallback total)
-        const response = await fetch(res.url);
-        const blob = await response.blob();
-
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `factura-${id}.pdf`;
-        a.click();
-
-        window.URL.revokeObjectURL(url);
-      }
+      const link = document.createElement("a");
+      link.href = res.url;
+      link.download = `factura-${id}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
 
     }catch(e){
       console.error("💥 ERROR DOWNLOAD:", e);
@@ -178,85 +191,6 @@ async function handleAction(btn){
     alert("💳 Simulación pago factura " + id);
   }
 
-}
-
-/* =========================
-   LOAD
-========================= */
-
-async function loadFacturas(){
-
-  if(loading) return;
-  loading = true;
-
-  const panel = getRoot();
-  const tbody = $("#facturas-body");
-  if(!tbody) return;
-
-  // 🔥 QUITAR FOCO (evita cursor raro)
-  document.activeElement?.blur();
-
-  // 🔥 ACTIVAR LOADER
-  panel?.classList.add("loading");
-
-  // 🔥 LIMPIEZA PRO (evita datos viejos)
-  setLoadingTable();
-
-  try{
-
-    const res = await Onion.fetch(Onion.config.API + "/facturas");
-    const items = normalize(res);
-
-    currentItems = items;
-    filteredItems = items;
-
-    if(!items.length){
-      setEmpty();
-      return;
-    }
-
-    render(items);
-
-  }catch(e){
-
-    console.error("💥 ERROR FACTURAS:", e);
-    setError();
-
-  }finally{
-
-    // 🔥 DESACTIVAR LOADER SIEMPRE
-    panel?.classList.remove("loading");
-    loading = false;
-
-  }
-
-}
-
-/* =========================
-   LOADING TABLE
-========================= */
-
-function setLoadingTable(){
-
-  const tbody = $("#facturas-body");
-  if(!tbody) return;
-
-  tbody.innerHTML = `
-    <tr class="table-loading">
-      <td colspan="7">
-        <div style="
-          display:flex;
-          justify-content:center;
-          align-items:center;
-          gap:10px;
-          opacity:.6;
-        ">
-          <span class="spinner"></span>
-          <span>Cargando facturas...</span>
-        </div>
-      </td>
-    </tr>
-  `;
 }
 
 /* =========================
@@ -298,7 +232,9 @@ function applyFilters(){
 
   });
 
-  render(filteredItems);
+  requestAnimationFrame(()=>{
+    render(filteredItems);
+  });
 
 }
 
@@ -308,12 +244,12 @@ function applyFilters(){
 
 function setEmpty(){
   $("#facturas-body").innerHTML =
-    `<tr><td colspan="7" style="text-align:center;opacity:.6;">No hay facturas</td></tr>`;
+    `<tr><td colspan="7">No hay facturas</td></tr>`;
 }
 
 function setError(){
   $("#facturas-body").innerHTML =
-    `<tr><td colspan="7" style="text-align:center;color:#ef4444;">Error cargando facturas</td></tr>`;
+    `<tr><td colspan="7">Error cargando facturas</td></tr>`;
 }
 
 /* =========================
@@ -329,42 +265,12 @@ function render(items){
 
     const d = mapItem(f);
 
-    const empresaHTML = d.hasEmpresa
-      ? `
-        <div class="cell-user">
-          <div class="table-avatar">${renderAvatarEmpresa(d.empresa)}</div>
-          <div class="user-info">
-            <span class="user-name">${escapeHTML(d.empresa)}</span>
-          </div>
-        </div>
-      `
-      : `
-        <div style="
-          width:100%;
-          display:flex;
-          justify-content:center;
-          align-items:center;
-          opacity:.6;
-        ">-</div>
-      `;
-
     return `
 <tr data-id="${d.id}">
-
   <td class="col-id">${d.numero}</td>
 
   <td class="col-main">
-    <div class="cell-user">
-      <div class="table-avatar">${renderAvatar(d.cliente.nombre)}</div>
-      <div class="user-info">
-        <span class="user-name">${escapeHTML(d.cliente.nombre)}</span>
-        <span class="user-sub">${escapeHTML(d.cliente.email)}</span>
-      </div>
-    </div>
-  </td>
-
-  <td class="col-secondary">
-    ${empresaHTML}
+    ${escapeHTML(d.cliente.nombre)}
   </td>
 
   <td class="col-date">${d.fecha}</td>
@@ -377,17 +283,9 @@ function render(items){
   </td>
 
   <td class="col-actions">
-    <div class="actions">
-      <button class="btn-action view" data-id="${d.id}">Ver</button>
-      <button class="btn-action download" data-id="${d.id}">PDF</button>
-      ${
-        d.estadoPago.raw === "pendiente"
-          ? `<button class="btn-action pay" data-id="${d.id}">Pagar</button>`
-          : ``
-      }
-    </div>
+    <button class="btn-action view" data-id="${d.id}">Ver</button>
+    <button class="btn-action download" data-id="${d.id}">PDF</button>
   </td>
-
 </tr>
 `;
 
@@ -402,108 +300,20 @@ function render(items){
 ========================= */
 
 function mapItem(f){
-
-  const empresaRaw =
-    f.cliente?.empresa ||
-    f.cliente?.razonSocial;
-
-  const empresaClean = cleanValue(empresaRaw, "");
-
   return {
     id: f.id,
     numero: f.numeroFacturaLegal || f.numero || f.id,
-
     cliente: {
-      nombre: cleanValue(
-        f.cliente?.nombre ||
-        f.cliente?.nombreContacto,
-        "Cliente"
-      ),
-      email: cleanValue(
-        f.cliente?.email ||
-        f.emailCliente,
-        "-"
-      )
+      nombre: f.cliente?.nombre || "Cliente"
     },
-
-    empresa: empresaClean,
-    hasEmpresa: !!empresaClean,
-
     fecha: formatFecha(f.fechaFactura || f.fecha),
     total: formatMoney(f.total),
-
     estadoPago: getEstadoPago(f.estadoPago)
   };
-
-}
-
-/* =========================
-   HELPERS
-========================= */
-
-function cleanValue(val, fallback){
-  if(!val) return fallback;
-  let v = String(val).trim();
-  v = v.replace(/^'+|'+$/g, "");
-  const lower = v.toLowerCase();
-  if(lower === "null" || lower === "undefined" || lower === "-"){
-    return fallback;
-  }
-  return v;
 }
 
 function safeText(val){
-  return String(cleanValue(val, "")).toLowerCase();
-}
-
-function renderAvatar(name){
-  return avatarHTML(getInitials(name), getAvatarColor(name));
-}
-
-function renderAvatarEmpresa(name){
-  return avatarHTML(getInitialsEmpresa(name), getAvatarColor(name + "_empresa"));
-}
-
-function avatarHTML(initials, color){
-  return `
-    <div style="
-      width:100%;
-      height:100%;
-      border-radius:50%;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      background:${color};
-      color:#fff;
-      font-weight:600;
-      font-size:12px;
-    ">
-      ${initials}
-    </div>
-  `;
-}
-
-function hashString(str){
-  let hash = 0;
-  for(let i = 0; i < str.length; i++){
-    hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return hash;
-}
-
-function getAvatarColor(name){
-  const colors = ["#6366f1","#22c55e","#eab308","#ef4444","#06b6d4","#a855f7","#f97316"];
-  return colors[Math.abs(hashString(name)) % colors.length];
-}
-
-function getInitials(name){
-  return name ? name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase() : "?";
-}
-
-function getInitialsEmpresa(name){
-  return name
-    ? name.replace(/(SL|SA)/gi,"").trim().split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase()
-    : "?";
+  return String(val || "").toLowerCase();
 }
 
 function getEstadoPago(e){

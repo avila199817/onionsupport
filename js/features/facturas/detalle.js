@@ -127,10 +127,10 @@ function render(){
   setText("#detalle-vencimiento", formatFecha(factura.fechaServicio));
 
   setText(
-    "#detalle-metodo",
-    factura.estadoPago === "pagada"
-      ? (factura.formaPago || "-")
-      : "-"
+   "#detalle-metodo",
+   factura.estadoPago === "pagada"
+    ? capitalize(factura.formaPago || "-")
+    : "-"
   );
 
   setText("#detalle-total", formatMoney(factura.total));

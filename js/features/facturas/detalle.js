@@ -79,6 +79,11 @@ function bindEvents(){
 
 async function loadFactura(id){
 
+  const root = getRoot();
+
+  // 🔥 ACTIVAR LOADER
+  root?.classList.add("loading");
+
   try{
 
     const res = await fetch(
@@ -99,7 +104,14 @@ async function loadFactura(id){
     render();
 
   }catch(e){
+
     console.error("💥 ERROR LOAD:", e);
+
+  }finally{
+
+    // 🔥 DESACTIVAR LOADER (SIEMPRE)
+    root?.classList.remove("loading");
+
   }
 
 }

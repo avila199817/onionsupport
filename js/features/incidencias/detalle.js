@@ -317,37 +317,83 @@ function uploadFile(file){
 
 
 /* =========================
-   RENDER 🔥 AFINADO
+   RENDER 🔥 AFINADO PRO
 ========================= */
 function render(i){
 
   if(!i) return;
 
-  /* USER */
-  setText("#detalle-usuario", i?.name || i?.cliente?.nombre);
+  /* =========================
+     USER
+  ========================= */
+  setText("#detalle-usuario", i?.name || i?.cliente?.nombre || "--");
   setText("#detalle-userid", i?.userId || i?.clienteId || "--");
 
-  /* DATA */
-  setText("#detalle-id", i?.id);
-  setText("#detalle-titulo", i?.subject);
+
+  /* =========================
+     DATA
+  ========================= */
+  setText("#detalle-id", i?.id || "--");
+  setText("#detalle-titulo", i?.subject || "--");
   setText("#detalle-fecha", formatFecha(i?.createdAt));
 
-  /* 🔥 FECHA CIERRE */
-  setText("#detalle-fecha-cierre", i?.closedAt ? formatFecha(i.closedAt) : "--");
 
-  /* 🔥 TECNICO */
-  setText("#detalle-tecnico", i?.tecnico?.name || "No asignado");
+  /* =========================
+     FECHA CIERRE 🔥
+  ========================= */
+  setText(
+    "#detalle-fecha-cierre",
+    i?.closedAt
+      ? formatFecha(i.closedAt)
+      : "--"
+  );
 
-  /* MENSAJE */
+
+  /* =========================
+     TECNICO 🔥 (BLINDADO)
+  ========================= */
+  let tecnico = "No asignado";
+
+  if(i?.tecnico){
+
+    if(typeof i.tecnico === "object"){
+      tecnico = i.tecnico?.name || "No asignado";
+    }
+    else if(typeof i.tecnico === "string"){
+      tecnico = i.tecnico;
+    }
+
+  }
+
+  setText("#detalle-tecnico", tecnico);
+
+
+  /* =========================
+     MENSAJE
+  ========================= */
   const msg = $("#detalle-mensaje");
-  if(msg) msg.textContent = i?.message || "";
+  if(msg){
+    msg.textContent = i?.message || i?.descripcion || "";
+  }
 
-  renderAvatar(i?.name || i?.cliente?.nombre, i?.avatar);
+
+  /* =========================
+     AVATAR
+  ========================= */
+  renderAvatar(
+    i?.name || i?.cliente?.nombre,
+    i?.avatar
+  );
+
+
+  /* =========================
+     FILES
+  ========================= */
   renderBlobs(i?.attachments || []);
 
 }
 
-
+  
 /* =========================
    UI HELPERS
 ========================= */

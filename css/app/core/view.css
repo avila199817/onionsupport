@@ -1,5 +1,5 @@
 /* =========================================================
-   🔥 VIEW UNIVERSAL — GLOBAL SAAS PANEL (FINAL 10/10)
+   🔥 VIEW UNIVERSAL — GLOBAL SAAS PANEL (FINAL PRO 10/10)
 ========================================================= */
 
 /* =========================
@@ -25,6 +25,17 @@
   flex:1;
   min-height:0;
   width:100%;
+
+  /* 🔥 CONTROL VISUAL PRO */
+  opacity:0;
+  transform:translateY(4px);
+  transition:opacity .25s ease, transform .25s ease;
+}
+
+/* 🔥 CUANDO TERMINA DE CARGAR */
+.panel-view:not(.loading) .view-layout{
+  opacity:1;
+  transform:translateY(0);
 }
 
 
@@ -216,10 +227,8 @@
 
   font-size:10.5px;
   font-weight:600;
-  line-height:1;
 
   white-space:nowrap;
-
   transition:.15s;
 }
 
@@ -244,7 +253,7 @@
 
 
 /* =========================================================
-   FINANCIAL COLORS
+   COLORS
 ========================================================= */
 .view-value.iva{
   color:var(--color-iva);
@@ -334,7 +343,7 @@
 
 
 /* =========================================================
-   LOADING
+   🔥 LOADING SYSTEM (PRO)
 ========================================================= */
 .view-loading{
   position:absolute;
@@ -376,22 +385,14 @@
 
 
 /* =========================================================
-   LOADER UX FIX
+   UX LOCK
 ========================================================= */
-.panel-view.loading *{
-  caret-color: transparent !important;
-}
-
 .panel-view.loading{
   user-select:none;
 }
 
-.panel-view.loading .view-layout{
-  filter:blur(1px) brightness(.95);
-}
-
-.panel-view.loading .view-loading{
-  filter:none;
+.panel-view.loading *{
+  caret-color:transparent !important;
 }
 
 

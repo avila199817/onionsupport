@@ -92,7 +92,7 @@ function bindEvents(){
 }
 
 /* =========================
-   LOAD (MISMO FIX QUE INCIDENCIAS)
+   LOAD
 ========================= */
 
 async function loadFacturas(){
@@ -113,7 +113,7 @@ async function loadFacturas(){
     await new Promise(r => requestAnimationFrame(r));
     await new Promise(r => requestAnimationFrame(r));
 
-    /* 🔥 DELAY MÍNIMO (anti pantalla blanca) */
+    /* 🔥 DELAY MÍNIMO */
     await new Promise(r => setTimeout(r, 200));
 
     const res = await Onion.fetch(Onion.config.API + "/facturas");
@@ -253,7 +253,7 @@ function setError(){
 }
 
 /* =========================
-   RENDER
+   RENDER (COMPLETO)
 ========================= */
 
 function render(items){
@@ -265,12 +265,34 @@ function render(items){
 
     const d = mapItem(f);
 
+    const empresaHTML = d.hasEmpresa
+      ? `
+        <div class="cell-user empresa-cell">
+          <div class="table-avatar">${renderAvatarEmpresa(d.empresa)}</div>
+          <div class="user-info">
+            <span class="user-name">${escapeHTML(d.empresa)}</span>
+          </div>
+        </div>
+      `
+      : `<span class="empresa-empty">-</span>`;
+
     return `
 <tr data-id="${d.id}">
+
   <td class="col-id">${d.numero}</td>
 
   <td class="col-main">
-    ${escapeHTML(d.cliente.nombre)}
+    <div class="cell-user">
+      <div class="table-avatar">${renderAvatar(d.cliente.nombre)}</div>
+      <div class="user-info">
+        <span class="user-name">${escapeHTML(d.cliente.nombre)}</span>
+        <span class="user-sub">${escapeHTML(d.cliente.email)}</span>
+      </div>
+    </div>
+  </td>
+
+  <td class="col-secondary">
+    ${empresaHTML}
   </td>
 
   <td class="col-date">${d.fecha}</td>
@@ -283,9 +305,17 @@ function render(items){
   </td>
 
   <td class="col-actions">
-    <button class="btn-action view" data-id="${d.id}">Ver</button>
-    <button class="btn-action download" data-id="${d.id}">PDF</button>
+    <div class="actions">
+      <button class="btn-action view" data-id="${d.id}">Ver</button>
+      <button class="btn-action download" data-id="${d.id}">PDF</button>
+      ${
+        d.estadoPago.raw === "pendiente"
+          ? `<button class="btn-action pay" data-id="${d.id}">Pagar</button>`
+          : ``
+      }
+    </div>
   </td>
+
 </tr>
 `;
 
@@ -296,24 +326,112 @@ function render(items){
 }
 
 /* =========================
-   MAP + HELPERS
+   MAP
 ========================= */
 
 function mapItem(f){
+
+  const empresaRaw =
+    f.cliente?.empresa ||
+    f.cliente?.razonSocial;
+
+  const empresaClean = cleanValue(empresaRaw, "");
+
   return {
     id: f.id,
     numero: f.numeroFacturaLegal || f.numero || f.id,
+
     cliente: {
-      nombre: f.cliente?.nombre || "Cliente"
+      nombre: cleanValue(
+        f.cliente?.nombre ||
+        f.cliente?.nombreContacto,
+        "Cliente"
+      ),
+      email: cleanValue(
+        f.cliente?.email ||
+        f.emailCliente,
+        "-"
+      )
     },
+
+    empresa: empresaClean,
+    hasEmpresa: !!empresaClean,
+
     fecha: formatFecha(f.fechaFactura || f.fecha),
     total: formatMoney(f.total),
+
     estadoPago: getEstadoPago(f.estadoPago)
   };
+
+}
+
+/* =========================
+   HELPERS
+========================= */
+
+function cleanValue(val, fallback){
+  if(!val) return fallback;
+  let v = String(val).trim();
+  v = v.replace(/^'+|'+$/g, "");
+  const lower = v.toLowerCase();
+  if(lower === "null" || lower === "undefined" || lower === "-"){
+    return fallback;
+  }
+  return v;
 }
 
 function safeText(val){
-  return String(val || "").toLowerCase();
+  return String(cleanValue(val, "")).toLowerCase();
+}
+
+function renderAvatar(name){
+  return avatarHTML(getInitials(name), getAvatarColor(name));
+}
+
+function renderAvatarEmpresa(name){
+  return avatarHTML(getInitialsEmpresa(name), getAvatarColor(name + "_empresa"));
+}
+
+function avatarHTML(initials, color){
+  return `
+    <div style="
+      width:100%;
+      height:100%;
+      border-radius:50%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:${color};
+      color:#fff;
+      font-weight:600;
+      font-size:12px;
+    ">
+      ${initials}
+    </div>
+  `;
+}
+
+function hashString(str){
+  let hash = 0;
+  for(let i = 0; i < str.length; i++){
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return hash;
+}
+
+function getAvatarColor(name){
+  const colors = ["#6366f1","#22c55e","#eab308","#ef4444","#06b6d4","#a855f7","#f97316"];
+  return colors[Math.abs(hashString(name)) % colors.length];
+}
+
+function getInitials(name){
+  return name ? name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase() : "?";
+}
+
+function getInitialsEmpresa(name){
+  return name
+    ? name.replace(/(SL|SA)/gi,"").trim().split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase()
+    : "?";
 }
 
 function getEstadoPago(e){

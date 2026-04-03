@@ -31,7 +31,10 @@
 
     "/incidencias/detalle": {
       page: "/app/views/incidencias/detalle.html",
-      style: "/css/app/incidencias/detalle.css",
+      style: [
+        "/css/app/core/view.css", 
+        "/css/app/incidencias/detalle.css"    
+      ],
       script: "/js/features/incidencias/detalle.js",
       title: "Detalle incidencia"
     },

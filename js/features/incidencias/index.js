@@ -16,8 +16,6 @@ let initialized = false;
 let currentItems = [];
 let filteredItems = [];
 let loading = false;
-
-/* 🔥 CONTROL PRO */
 let currentRequestId = 0;
 
 
@@ -49,9 +47,6 @@ function init(){
   }
 
   initialized = true;
-
-  /* 🔥 LOADER DESDE EL FRAME 0 */
-  root.classList.add("loading");
 
   bindEvents();
 
@@ -103,7 +98,7 @@ function bindEvents(){
 
 
 /* =========================
-   LOAD (PRO)
+   LOAD (GLOBAL LOADER)
 ========================= */
 
 async function loadIncidencias(){
@@ -111,18 +106,15 @@ async function loadIncidencias(){
   if(loading) return;
   loading = true;
 
-  const panel = getRoot();
   const tbody = $("#incidencias-body");
-
-  if(!tbody || !panel) return;
+  if(!tbody) return;
 
   const requestId = ++currentRequestId;
 
-  /* 🔥 UX */
-  document.activeElement?.blur();
-  panel.classList.add("loading");
+  /* 🔥 LOADER GLOBAL */
+  Onion.ui?.showLoader?.();
 
-  /* 🔥 LIMPIAR PARA EVITAR FLASH */
+  document.activeElement?.blur();
   tbody.innerHTML = "";
 
   try{
@@ -140,7 +132,6 @@ async function loadIncidencias(){
       return;
     }
 
-    /* 🔥 RENDER SUAVE */
     requestAnimationFrame(()=>{
       render(items);
     });
@@ -156,12 +147,7 @@ async function loadIncidencias(){
   }finally{
 
     if(requestId === currentRequestId){
-
-      /* 🔥 SALIDA SUAVE */
-      setTimeout(()=>{
-        panel.classList.remove("loading");
-      }, 80);
-
+      Onion.ui?.hideLoader?.();
     }
 
     loading = false;

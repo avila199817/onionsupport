@@ -1,5 +1,5 @@
 /* =========================================================
-   🔥 GLOBAL APP LOADER — SAAS PRO
+   🔥 GLOBAL APP LOADER — SAAS PRO (FIXED)
 ========================================================= */
 
 /* =========================
@@ -14,7 +14,8 @@
   align-items:center;
   justify-content:center;
 
-  background:var(--main-bg);
+  /* 🔥 IMPORTANTE: transparente */
+  background:transparent;
 
   opacity:0;
   visibility:hidden;
@@ -34,6 +35,7 @@ body.loading #app-loader{
   visibility:visible;
   pointer-events:auto;
 
+  /* 🔥 blur sin fondo sólido */
   backdrop-filter:blur(8px);
   -webkit-backdrop-filter:blur(8px);
 }
@@ -81,7 +83,6 @@ body.loading #app-loader{
 ========================= */
 #app-loader::after{
   content:"";
-
   position:absolute;
 
   width:72px;
@@ -96,19 +97,17 @@ body.loading #app-loader{
 
 
 /* =========================
-   UX LOCK (PRO)
+   UX LOCK
 ========================= */
 body.loading{
   overflow:hidden;
   cursor:progress;
 }
 
-/* bloquea interacción global */
 body.loading *{
   pointer-events:none;
 }
 
-/* permite interacción en loader */
 #app-loader{
   pointer-events:auto;
 }
@@ -128,7 +127,7 @@ body.loading #app-content{
 
 
 /* =========================
-   INPUT UX FIX
+   INPUT FIX
 ========================= */
 body.loading input,
 body.loading textarea{
@@ -138,21 +137,45 @@ body.loading textarea{
 
 
 /* =========================================================
-   🔥 TABLE LOADER — LOCAL (INCIDENCIAS / TABLAS)
+   🔥 TABLE LOADER — SAAS PRO (FLOATING FIX)
 ========================================================= */
 
+/* 🔥 CONTENEDOR RELATIVO */
+.table-container{
+  position:relative;
+}
+
+
+/* 🔥 FILA LOADER OCULTA (NO BLOQUE) */
+.table-loading{
+  height:0;
+}
+
+.table-loading td{
+  padding:0 !important;
+  border:none !important;
+  background:transparent !important;
+}
+
+
+/* 🔥 LOADER FLOTANTE (CLAVE) */
 .table-loader{
+  position:absolute;
+  inset:0;
+
   display:flex;
   flex-direction:column;
   align-items:center;
   justify-content:center;
   gap:12px;
-  padding:40px 20px;
-  width:100%;
+
+  z-index:2;
 
   color:var(--text-secondary, #9ca3af);
   font-size:13px;
+
   background:transparent;
+  pointer-events:none;
 }
 
 
@@ -165,7 +188,6 @@ body.loading textarea{
   height:26px;
 }
 
-/* base */
 .table-loader .spinner::before{
   content:"";
   position:absolute;
@@ -174,7 +196,6 @@ body.loading textarea{
   border:2px solid rgba(255,255,255,0.08);
 }
 
-/* activo */
 .table-loader .spinner::after{
   content:"";
   position:absolute;
@@ -189,19 +210,10 @@ body.loading textarea{
 
 
 /* =========================
-   TEXTO ANIMADO
+   TEXTO
 ========================= */
 .table-loader span{
   animation:fadePulse 1.6s ease-in-out infinite;
-}
-
-
-/* =========================
-   ROW FIX
-========================= */
-.table-loading td{
-  border-bottom:none !important;
-  background: transparent !important;
 }
 
 

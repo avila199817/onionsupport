@@ -52,7 +52,10 @@
 
     "/facturas/detalle": {
       page: "/app/views/facturas/detalle.html",
-      style: "/css/app/facturas/detalle.css",
+      style: [
+        "/css/app/core/view.css", 
+        "/css/app/facturas/detalle.css"    
+      ],
       script: "/js/features/facturas/detalle.js",
       title: "Detalle factura"
     },

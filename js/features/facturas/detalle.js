@@ -11,8 +11,6 @@ if(!Onion){
 
 let initialized = false;
 let factura = null;
-
-let currentRequestId = 0;
 let currentAbort = null;
 
 /* ========================= ROOT ========================= */
@@ -24,14 +22,6 @@ function getRoot(){
 function $(selector){
   const root = getRoot();
   return root ? root.querySelector(selector) : null;
-}
-
-/* ========================= LOADER ========================= */
-
-function setLoading(active){
-  const root = getRoot();
-  if(!root) return;
-  root.classList.toggle("loading", active);
 }
 
 /* ========================= INIT ========================= */
@@ -47,11 +37,8 @@ function init(){
 
   initialized = true;
 
-  const id = getIdFromURL();
-  if(!id){
-    console.error("❌ ID no encontrado");
-    return;
-  }
+  const id = new URLSearchParams(window.location.search).get("id");
+  if(!id) return;
 
   bindEvents();
   loadFactura(id);
@@ -65,12 +52,6 @@ function init(){
 }
 
 init();
-
-/* ========================= GET ID ========================= */
-
-function getIdFromURL(){
-  return new URLSearchParams(window.location.search).get("id");
-}
 
 /* ========================= EVENTS ========================= */
 
@@ -103,12 +84,8 @@ function bindEvents(){
 
 async function loadFactura(id){
 
-  const requestId = ++currentRequestId;
-
   if(currentAbort) currentAbort.abort();
   currentAbort = new AbortController();
-
-  setLoading(true);
 
   try{
 
@@ -119,12 +96,6 @@ async function loadFactura(id){
       signal: currentAbort.signal
     });
 
-    if(requestId !== currentRequestId) return;
-
-    if(!res.ok){
-      throw new Error("Error factura");
-    }
-
     const json = await res.json();
 
     factura = normalizeFactura(json?.factura || json);
@@ -132,17 +103,7 @@ async function loadFactura(id){
     render();
 
   }catch(e){
-
-    if(e.name === "AbortError") return;
-
     console.error("💥 ERROR:", e);
-
-  }finally{
-
-    if(requestId === currentRequestId){
-      setLoading(false);
-    }
-
   }
 
 }
@@ -170,13 +131,11 @@ function normalizeFactura(f){
     iva: f.impuestos?.[0]?.porcentaje || 21,
     irpf: Number(f.irpf || 0),
 
-    blobPath: f.blobPath || null,
+    blobPath: f.blobPath,
 
     cliente: {
-      id: f.cliente?.id || null,
-      nombre: f.cliente?.nombre || "Cliente",
-      avatar: f.cliente?.avatar || null,
-      empresa: f.cliente?.empresa || null
+      id: f.cliente?.id,
+      nombre: f.cliente?.nombre || "Cliente"
     }
   };
 
@@ -186,43 +145,47 @@ function normalizeFactura(f){
 
 function render(){
 
-  if(!factura) return;
-
   const c = factura.cliente;
 
   $("#detalle-cliente").textContent = c.nombre;
   $("#detalle-cliente-id").textContent = c.id || "";
 
-  renderAvatar(c);
-
-  $("#detalle-numero-legal").textContent = cleanNumero(factura.numeroLegal);
+  $("#detalle-numero-legal").textContent = factura.numeroLegal;
   $("#detalle-id").textContent = factura.id || "--";
-  $("#detalle-incidencia-id").textContent = factura.incidenciaId || "--";
 
   $("#detalle-fecha").textContent = formatFecha(factura.fecha);
   $("#detalle-vencimiento").textContent = formatFecha(factura.fechaServicio);
 
-  $("#detalle-metodo").textContent = capitalize(factura.formaPago);
+  /* 🔥 MÉTODO SOLO SI PAGADA */
+  const metodoEl = $("#detalle-metodo");
+  if(factura.estadoPago === "pagada"){
+    metodoEl.textContent = factura.formaPago || "-";
+  }else{
+    metodoEl.textContent = "-";
+  }
+
   $("#detalle-total").textContent = formatMoney(factura.total);
 
   $("#detalle-concepto").textContent = factura.concepto || "-";
   $("#detalle-descripcion").textContent = factura.descripcion || "-";
 
+  /* 🔥 BADGE ESTADO */
   const estadoEl = $("#detalle-estado");
-  if(estadoEl){
-    estadoEl.textContent = formatEstado(factura.estadoPago);
-  }
+  estadoEl.className = "badge " + (factura.estadoPago === "pagada" ? "success" : "warning");
+  estadoEl.textContent = factura.estadoPago === "pagada" ? "Pagada" : "Pendiente";
 
-  /* 🔥 IVA CALCULADO */
-  const ivaImporte = factura.total * (factura.iva / 100);
+  /* 🔥 IVA CORRECTO (base real) */
+  const base = factura.total / (1 + factura.iva/100);
+  const ivaImporte = factura.total - base;
+
   $("#detalle-iva").textContent =
     `${factura.iva}% · ${formatMoney(ivaImporte)}`;
 
-  /* 🔥 IRPF CALCULADO */
+  /* 🔥 IRPF */
   const irpfContainer = $("#detalle-irpf-container");
 
   if(factura.irpf){
-    const irpfImporte = factura.total * (factura.irpf / 100);
+    const irpfImporte = base * (factura.irpf / 100);
 
     irpfContainer.style.display = "block";
     $("#detalle-irpf").textContent =
@@ -251,7 +214,7 @@ function renderSidebar(){
 
   docs.innerHTML = `
     <div class="blob-item">
-      <span title="${nombre}">${nombre}</span>
+      <span>${nombre}</span>
       <div class="blob-actions">
         <button id="btn-enviar-doc" title="Enviar">📧</button>
         <button id="btn-descargar-doc">Descargar</button>
@@ -276,7 +239,6 @@ async function getURL(){
 
   const data = await res.json();
   return data.url;
-
 }
 
 async function downloadFactura(){
@@ -285,7 +247,7 @@ async function downloadFactura(){
 
   const a = document.createElement("a");
   a.href = url;
-  a.download = `factura-${factura.numeroLegal}.pdf`;
+  a.download = `${factura.numeroLegal}.pdf`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -294,7 +256,6 @@ async function downloadFactura(){
 async function sendFactura(){
 
   try{
-
     const res = await fetch(
       `${Onion.config.API}/facturas/${factura.id}/enviar`,
       {
@@ -309,31 +270,15 @@ async function sendFactura(){
 
     if(!data.ok) throw new Error();
 
-    alert("📧 Factura enviada correctamente");
+    alert("📧 Enviado");
 
   }catch(e){
-    alert("Error enviando factura");
+    alert("Error enviando");
   }
 
 }
 
 /* ========================= HELPERS ========================= */
-
-function cleanNumero(num){
-  if(!num) return "--";
-  return String(num).replace(/^FAC-/i,"").replace(/-.*/,"");
-}
-
-function capitalize(str){
-  if(!str) return "-";
-  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
-}
-
-function formatEstado(e){
-  if(e === "pagada") return "Pagada";
-  if(e === "cancelada") return "Cancelada";
-  return "Pendiente";
-}
 
 function formatFecha(f){
   if(!f) return "--";
@@ -341,27 +286,7 @@ function formatFecha(f){
 }
 
 function formatMoney(n){
-  return Number(n).toLocaleString("es-ES", {
-    minimumFractionDigits:2
-  }) + " €";
-}
-
-function getInitials(name){
-  if(!name) return "?";
-  return name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase();
-}
-
-function renderAvatar(cliente){
-
-  const el = $("#detalle-avatar");
-  if(!el) return;
-
-  if(cliente.avatar){
-    el.innerHTML = `<img src="${cliente.avatar}" />`;
-  }else{
-    el.innerHTML = `<div class="avatar-fallback">${getInitials(cliente.nombre)}</div>`;
-  }
-
+  return Number(n).toLocaleString("es-ES",{minimumFractionDigits:2})+" €";
 }
 
 })();

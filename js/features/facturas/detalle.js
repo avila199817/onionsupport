@@ -183,7 +183,7 @@ function render(){
 
     setText(
       "#detalle-irpf",
-      `${irpf.porcentaje}% · -${formatMoney(irpf.importe)}`
+      `${irpf.porcentaje}% · ${irpf.importe ? "-" : ""}${formatMoney(Math.abs(irpf.importe))}`
     );
 
   }else{

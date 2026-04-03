@@ -1,11 +1,13 @@
 /* =========================================================
-   🔥 VIEW UNIVERSAL — GLOBAL SAAS PANEL
+   🔥 VIEW UNIVERSAL — GLOBAL SAAS PANEL (FINAL 10/10)
 ========================================================= */
 
 /* =========================
    ROOT
 ========================= */
 .panel-view{
+  position:relative; /* 🔥 CLAVE PARA LOADER */
+
   display:flex;
   flex-direction:column;
   flex:1;
@@ -75,10 +77,15 @@
   gap:12px;
 }
 
+
+/* =========================================================
+   🔥 AVATAR (FIX FINAL)
+========================================================= */
 .panel-view .view-avatar{
   width:38px;
   height:38px;
   border-radius:50%;
+  overflow:hidden; /* 🔥 CLAVE */
 
   display:flex;
   align-items:center;
@@ -90,6 +97,17 @@
   font-size:13px;
 }
 
+.panel-view .view-avatar img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  border-radius:50%;
+}
+
+
+/* =========================================================
+   TEXT
+========================================================= */
 .panel-view .view-user-info{
   display:flex;
   flex-direction:column;
@@ -185,7 +203,7 @@
 
 
 /* =========================================================
-   🔥 BADGES (ESTADOS) — PRO REFINED
+   BADGES
 ========================================================= */
 .view-badge{
   display:inline-flex;
@@ -199,15 +217,9 @@
   font-weight:600;
   line-height:1;
 
-  letter-spacing:.2px;
-
   white-space:nowrap;
 
-  transition:
-    transform .12s ease,
-    box-shadow .12s ease,
-    background .2s ease,
-    color .2s ease;
+  transition:.15s;
 }
 
 .view-badge.success{
@@ -226,15 +238,7 @@
 }
 
 .view-badge:hover{
-  transform:translateY(-1px) scale(1.03);
-  box-shadow:
-    0 2px 6px rgba(0,0,0,0.25),
-    0 0 6px currentColor;
-}
-
-.view-badge:active{
-  transform:scale(0.96);
-  box-shadow:none;
+  transform:translateY(-1px);
 }
 
 
@@ -288,7 +292,6 @@
   font-size:11px;
   text-transform:uppercase;
   color:var(--dim);
-  letter-spacing:.4px;
 }
 
 
@@ -299,23 +302,6 @@
   display:flex;
   flex-direction:column;
   gap:8px;
-}
-
-.panel-view .view-file{
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-
-  padding:10px 12px;
-  border-radius:10px;
-
-  border:1px solid var(--card-border);
-  background:var(--card-bg);
-}
-
-.panel-view .view-file-actions{
-  display:flex;
-  gap:6px;
 }
 
 .panel-view .view-btn{
@@ -338,7 +324,7 @@
 
 
 /* =========================================================
-   LOADING
+   🔥 LOADING (FINAL FIX)
 ========================================================= */
 .view-loading{
   position:absolute;
@@ -353,7 +339,7 @@
 
   opacity:0;
   pointer-events:none;
-  transition:.25s;
+  transition:.2s ease;
 }
 
 .panel-view.loading .view-loading{
@@ -361,30 +347,42 @@
   pointer-events:auto;
 }
 
+/* 🔥 SPINNER REAL */
+.view-loading::after{
+  content:"";
+
+  width:42px;
+  height:42px;
+
+  border-radius:50%;
+  border:3px solid rgba(255,255,255,0.15);
+  border-top-color:var(--accent);
+
+  animation:spin .8s linear infinite;
+}
+
+@keyframes spin{
+  to{ transform:rotate(360deg); }
+}
+
 
 /* =========================================================
-   🔥 LOADER FIX (ANTI-CURSOR + BLOQUEO UI)
+   LOADER UX FIX
 ========================================================= */
-
-/* 🔥 Oculta el cursor de texto mientras carga */
 .panel-view.loading *{
   caret-color: transparent !important;
 }
 
-/* 🔥 Evita interacción completa debajo del loader */
 .panel-view.loading{
-  user-select: none;
+  user-select:none;
 }
 
-/* 🔥 Opcional: ligera desaturación para efecto pro */
 .panel-view.loading .view-layout{
-  filter: blur(1px) brightness(.95);
-  transition: filter .2s ease;
+  filter:blur(1px) brightness(.95);
 }
 
-/* 🔥 Mantener loader limpio (sin blur encima) */
 .panel-view.loading .view-loading{
-  filter: none;
+  filter:none;
 }
 
 

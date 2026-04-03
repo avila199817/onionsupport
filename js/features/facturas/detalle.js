@@ -15,7 +15,7 @@ let factura = null;
 /* ========================= ROOT ========================= */
 
 function getRoot(){
-  return document.querySelector(".panel-content.factura-detalle");
+  return document.querySelector(".panel-view.factura-detalle");
 }
 
 function $(s){
@@ -90,7 +90,7 @@ async function loadFactura(id){
       }
     );
 
-    if(!res.ok) throw new Error("HTTP " + res.status);
+    if(!res.ok) throw new Error();
 
     const json = await res.json();
 
@@ -112,15 +112,13 @@ function render(){
 
   const c = factura.cliente || {};
 
-  /* ========================= CLIENTE ========================= */
-
+  /* CLIENTE */
   setText("#detalle-cliente", c.nombre || "Cliente");
   setText("#detalle-cliente-id", c.id || "");
 
   renderAvatar(c);
 
-  /* ========================= DATA ========================= */
-
+  /* DATA */
   setText("#detalle-numero-legal", factura.numero);
   setText("#detalle-id", factura.id || "--");
   setText("#detalle-incidencia-id", factura.incidenciaId || "--");
@@ -139,8 +137,7 @@ function render(){
   setText("#detalle-concepto", factura.concepto || "-");
   setText("#detalle-descripcion", factura.descripcion || "-");
 
-  /* ========================= ESTADO ========================= */
-
+  /* ESTADO */
   const estadoEl = $("#detalle-estado");
 
   if(estadoEl){
@@ -153,11 +150,9 @@ function render(){
       estado === "pagada" ? "Pagada" :
       estado === "cancelada" ? "Cancelada" :
       "Pendiente";
-
   }
 
-  /* ========================= IVA ========================= */
-
+  /* IVA */
   const iva = factura.impuestos?.find(i => i.tipo === "IVA");
 
   setText(
@@ -167,8 +162,7 @@ function render(){
       : "--"
   );
 
-  /* ========================= IRPF (ROBUSTO) ========================= */
-
+  /* IRPF */
   const irpfContainer = $("#detalle-irpf-container");
 
   let irpf = factura.impuestos?.find(i => i.tipo === "IRPF");
@@ -198,9 +192,8 @@ function render(){
 
   }
 
-  /* ========================= SIDEBAR ========================= */
-
-  const blobNameEl = document.querySelector(".blob-item span");
+  /* SIDEBAR */
+  const blobNameEl = document.querySelector(".view-file span");
 
   if(blobNameEl){
     blobNameEl.textContent = factura.numero || "Factura";

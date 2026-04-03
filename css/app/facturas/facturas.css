@@ -11,42 +11,6 @@
 }
 
 /* =========================================================
-   LOADING OVERLAY
-========================================================= */
-
-.facturas-loading{
-  position:absolute;
-  inset:0;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  background:rgba(15,15,15,0.45);
-  backdrop-filter:blur(2px);
-  z-index:20;
-  opacity:0;
-  pointer-events:none;
-  transition:opacity .2s ease;
-}
-
-.panel-content.facturas.loading .facturas-loading{
-  opacity:1;
-  pointer-events:auto;
-}
-
-.facturas-spinner{
-  width:42px;
-  height:42px;
-  border-radius:50%;
-  border:3px solid rgba(255,255,255,0.15);
-  border-top-color:var(--accent);
-  animation:spin .8s linear infinite;
-}
-
-@keyframes spin{
-  to{ transform:rotate(360deg); }
-}
-
-/* =========================================================
    STRUCTURE
 ========================================================= */
 
@@ -121,7 +85,7 @@
 }
 
 /* =========================================================
-   TABLE BASE (🔥 CLAVE)
+   TABLE BASE
 ========================================================= */
 
 .panel-content.facturas table{
@@ -159,7 +123,7 @@
 }
 
 /* =========================================================
-   COLUMN SYSTEM (🔥 AJUSTE MILIMÉTRICO FINAL)
+   COLUMN SYSTEM
 ========================================================= */
 
 .panel-content.facturas .col-id{
@@ -168,7 +132,6 @@
   color:var(--dim);
 }
 
-/* 🔥 BLOQUE IZQUIERDO */
 .panel-content.facturas .col-main{
   width:24%;
 }
@@ -177,7 +140,6 @@
   width:30%;
 }
 
-/* 🔥 BLOQUE DERECHO (ALINEADO PERFECTO) */
 .panel-content.facturas .col-date{
   width:120px;
   text-align:center;

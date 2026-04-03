@@ -363,6 +363,32 @@
 
 
 /* =========================================================
+   🔥 LOADER FIX (ANTI-CURSOR + BLOQUEO UI)
+========================================================= */
+
+/* 🔥 Oculta el cursor de texto mientras carga */
+.panel-view.loading *{
+  caret-color: transparent !important;
+}
+
+/* 🔥 Evita interacción completa debajo del loader */
+.panel-view.loading{
+  user-select: none;
+}
+
+/* 🔥 Opcional: ligera desaturación para efecto pro */
+.panel-view.loading .view-layout{
+  filter: blur(1px) brightness(.95);
+  transition: filter .2s ease;
+}
+
+/* 🔥 Mantener loader limpio (sin blur encima) */
+.panel-view.loading .view-loading{
+  filter: none;
+}
+
+
+/* =========================================================
    RESPONSIVE
 ========================================================= */
 @media (max-width:1100px){

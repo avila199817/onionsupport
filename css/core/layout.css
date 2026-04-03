@@ -1,13 +1,13 @@
 /* =========================================================
-   LAYOUT — FINAL PRO SAAS (BLINDADO REAL DEFINITIVO)
+   🔥 LAYOUT — SAAS PANEL CLEAN (FINAL 10/10)
 ========================================================= */
 
+
 /* =========================
-   RESET ALTURA GLOBAL
+   ROOT ALTURA BASE
 ========================= */
 html, body{
   height:100%;
-  margin:0;
 }
 
 #app{
@@ -65,7 +65,7 @@ html, body{
 
 
 /* =========================
-   MAIN CONTENT (ESTABLE)
+   MAIN CONTENT
 ========================= */
 .main-content{
   position:relative;
@@ -96,9 +96,9 @@ html, body{
 }
 
 
-/* =========================================================
-   🔥 APP CONTENT (CLAVE ABSOLUTA)
-========================================================= */
+/* =========================
+   APP CONTENT
+========================= */
 #app-content{
   flex:1;
   min-height:0;
@@ -108,9 +108,9 @@ html, body{
 }
 
 
-/* =========================================================
-   🔥 CONTENT WRAPPER (FIX SIN ROMPER SISTEMA)
-========================================================= */
+/* =========================
+   CONTENT WRAPPER
+========================= */
 .content-wrapper{
   flex:1;
   min-height:0;
@@ -127,29 +127,9 @@ html, body{
 }
 
 
-/* =========================================================
-   🔥 DASHBOARD FIX (SCROLL INTERNO REAL)
-========================================================= */
-.panel-content.dashboard{
-  flex:1;
-  min-height:0;
-
-  display:flex;
-  flex-direction:column;
-
-  overflow:auto; /* 🔥 CLAVE */
-}
-
-/* opcional fino: evitar doble scroll en hijos */
-.dashboard-container{
-  flex:1;
-  min-height:0;
-}
-
-
-/* =========================================================
-   🔥 PANEL SYSTEM (UNIFICADO)
-========================================================= */
+/* =========================
+   PANEL SYSTEM
+========================= */
 .panel-content{
   flex:1;
   min-height:0;
@@ -162,7 +142,20 @@ html, body{
 
 
 /* =========================
-   TABLE MODE (SAFE)
+   DASHBOARD SCROLL FIX
+========================= */
+.panel-content.dashboard{
+  overflow:auto;
+}
+
+.dashboard-container{
+  flex:1;
+  min-height:0;
+}
+
+
+/* =========================
+   TABLE MODE
 ========================= */
 .panel-content.table-mode{
   padding:0;
@@ -223,48 +216,6 @@ html, body{
 
 
 /* =========================
-   RESPONSIVE
-========================= */
-@media (max-width:1200px){
-  .grid.cols-4{
-    grid-template-columns:repeat(3,1fr);
-  }
-}
-
-@media (max-width:900px){
-
-  .grid.cols-3,
-  .grid.cols-4{
-    grid-template-columns:repeat(2,1fr);
-  }
-
-  .main-content{
-    margin-left:0;
-    width:100%;
-  }
-
-  .sidebar{
-    transform:translateX(-100%);
-    position:fixed;
-  }
-
-  .sidebar.open{
-    transform:translateX(0);
-  }
-}
-
-@media (max-width:600px){
-
-  .grid.cols-2,
-  .grid.cols-3,
-  .grid.cols-4{
-    grid-template-columns:1fr;
-  }
-
-}
-
-
-/* =========================
    SECTION
 ========================= */
 .section{
@@ -303,7 +254,7 @@ html, body{
 
 
 /* =========================
-   LOADING
+   PAGE LOADING (LOCAL)
 ========================= */
 .page-loading{
   opacity:.6;
@@ -313,4 +264,46 @@ html, body{
   transition:
     opacity var(--duration-normal) ease,
     filter var(--duration-normal) ease;
+}
+
+
+/* =========================
+   RESPONSIVE
+========================= */
+@media (max-width:1200px){
+  .grid.cols-4{
+    grid-template-columns:repeat(3,1fr);
+  }
+}
+
+@media (max-width:900px){
+
+  .grid.cols-3,
+  .grid.cols-4{
+    grid-template-columns:repeat(2,1fr);
+  }
+
+  .main-content{
+    margin-left:0;
+    width:100%;
+  }
+
+  .sidebar{
+    transform:translateX(-100%);
+    position:fixed;
+  }
+
+  .sidebar.open{
+    transform:translateX(0);
+  }
+}
+
+@media (max-width:600px){
+
+  .grid.cols-2,
+  .grid.cols-3,
+  .grid.cols-4{
+    grid-template-columns:1fr;
+  }
+
 }

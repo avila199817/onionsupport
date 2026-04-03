@@ -1,6 +1,5 @@
 /* =========================================================
    🔥 VIEW UNIVERSAL — GLOBAL SAAS PANEL
-   Reutilizable para cualquier detalle (factura, incidencia, etc)
 ========================================================= */
 
 /* =========================
@@ -57,7 +56,7 @@
 
 
 /* =========================================================
-   HEADER (🔥 CLAVE UNIVERSAL)
+   HEADER
 ========================================================= */
 .panel-view .view-header{
   display:flex;
@@ -141,7 +140,7 @@
 
 
 /* =========================================================
-   GRID SYSTEM
+   GRID
 ========================================================= */
 .panel-view .view-grid{
   display:grid;
@@ -151,7 +150,7 @@
 
 
 /* =========================================================
-   CARD ITEM
+   CARD
 ========================================================= */
 .panel-view .view-card{
   display:flex;
@@ -186,35 +185,61 @@
 
 
 /* =========================================================
-   BADGES (ESTADOS)
+   🔥 BADGES (ESTADOS) — PRO REFINED
 ========================================================= */
 .view-badge{
   display:inline-flex;
   align-items:center;
-  padding:6px 10px;
+  justify-content:center;
+
+  padding:3px 8px;
   border-radius:999px;
-  font-size:12px;
+
+  font-size:10.5px;
   font-weight:600;
+  line-height:1;
+
+  letter-spacing:.2px;
+
+  white-space:nowrap;
+
+  transition:
+    transform .12s ease,
+    box-shadow .12s ease,
+    background .2s ease,
+    color .2s ease;
 }
 
 .view-badge.success{
-  background:rgba(34,197,94,0.15);
+  background:rgba(34,197,94,0.12);
   color:#22c55e;
 }
 
 .view-badge.warning{
-  background:rgba(234,179,8,0.15);
+  background:rgba(234,179,8,0.12);
   color:#eab308;
 }
 
 .view-badge.error{
-  background:rgba(239,68,68,0.15);
+  background:rgba(239,68,68,0.12);
   color:#ef4444;
+}
+
+.view-badge:hover{
+  transform:translateY(-1px) scale(1.03);
+  box-shadow:
+    0 2px 6px rgba(0,0,0,0.25),
+    0 0 6px currentColor;
+}
+
+.view-badge:active{
+  transform:scale(0.96);
+  box-shadow:none;
 }
 
 
 /* =========================================================
-   FINANCIAL COLORS (🔥 GLOBAL)
+   FINANCIAL COLORS
 ========================================================= */
 .view-value.iva{
   color:var(--color-iva);
@@ -235,7 +260,7 @@
 
 
 /* =========================================================
-   FULL WIDTH BLOCK
+   FULL WIDTH
 ========================================================= */
 .panel-view .view-card.full{
   grid-column:span 2;
@@ -268,7 +293,7 @@
 
 
 /* =========================================================
-   BLOBS / FILES
+   FILES
 ========================================================= */
 .panel-view .view-files{
   display:flex;

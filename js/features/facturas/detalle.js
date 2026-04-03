@@ -81,6 +81,9 @@ async function loadFactura(id){
 
   const root = getRoot();
 
+  // 🔥 QUITAR FOCO (evita el cursor loco)
+  document.activeElement?.blur();
+
   // 🔥 ACTIVAR LOADER
   root?.classList.add("loading");
 

@@ -1,5 +1,5 @@
 /* =========================================================
-   🔥 VIEW UNIVERSAL — GLOBAL SAAS PANEL (FINAL PRO 10/10)
+   🔥 VIEW UNIVERSAL — CLEAN (SIN LOADER)
 ========================================================= */
 
 /* =========================
@@ -18,7 +18,7 @@
 
 
 /* =========================================================
-   LAYOUT
+   LAYOUT (ANIMACIÓN SUAVE)
 ========================================================= */
 .panel-view .view-layout{
   display:flex;
@@ -26,14 +26,13 @@
   min-height:0;
   width:100%;
 
-  /* 🔥 CONTROL VISUAL PRO */
   opacity:0;
   transform:translateY(4px);
   transition:opacity .25s ease, transform .25s ease;
 }
 
-/* 🔥 CUANDO TERMINA DE CARGAR */
-.panel-view:not(.loading) .view-layout{
+/* READY */
+.panel-view.ready .view-layout{
   opacity:1;
   transform:translateY(0);
 }
@@ -339,60 +338,6 @@
 
 .panel-view .view-btn.soft:hover{
   background:rgba(255,255,255,.1);
-}
-
-
-/* =========================================================
-   🔥 LOADING SYSTEM (PRO)
-========================================================= */
-.view-loading{
-  position:absolute;
-  inset:0;
-
-  display:flex;
-  align-items:center;
-  justify-content:center;
-
-  background:var(--panel-bg);
-  z-index:20;
-
-  opacity:0;
-  pointer-events:none;
-  transition:.2s ease;
-}
-
-.panel-view.loading .view-loading{
-  opacity:1;
-  pointer-events:auto;
-}
-
-.view-loading::after{
-  content:"";
-
-  width:42px;
-  height:42px;
-
-  border-radius:50%;
-  border:3px solid rgba(255,255,255,0.15);
-  border-top-color:var(--accent);
-
-  animation:spin .8s linear infinite;
-}
-
-@keyframes spin{
-  to{ transform:rotate(360deg); }
-}
-
-
-/* =========================================================
-   UX LOCK
-========================================================= */
-.panel-view.loading{
-  user-select:none;
-}
-
-.panel-view.loading *{
-  caret-color:transparent !important;
 }
 
 

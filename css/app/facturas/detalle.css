@@ -55,7 +55,7 @@
 
 
 /* =========================================================
-   SIDEBAR CONTENT
+   SIDEBAR
 ========================================================= */
 .factura-detalle .detalle-sidebar{
   display:flex;
@@ -97,7 +97,6 @@
   gap:10px;
   overflow:auto;
   padding-right:6px;
-  max-height:100%;
 }
 
 .factura-detalle .detalle-blobs::-webkit-scrollbar{
@@ -105,13 +104,13 @@
 }
 
 .factura-detalle .detalle-blobs::-webkit-scrollbar-thumb{
-  background:linear-gradient(180deg,var(--accent),var(--accent-hover));
+  background:var(--scrollbar-thumb);
   border-radius:6px;
 }
 
 
 /* =========================================================
-   BLOB ITEM
+   BLOB ITEM (LIMPIO)
 ========================================================= */
 .factura-detalle .blob-item{
   display:flex;
@@ -122,23 +121,15 @@
   border-radius:12px;
 
   border:1px solid var(--card-border);
+  background:var(--card-bg);
 
-  background:linear-gradient(
-    145deg,
-    rgba(255,255,255,0.02),
-    rgba(0,0,0,0.25)
-  );
-   
-  margin-top:8px;
-  backdrop-filter:blur(6px);
-
-  transition:all .2s ease;
+  transition:.15s;
 }
 
 .factura-detalle .blob-item:hover{
   border-color:var(--accent);
   transform:translateY(-2px);
-  box-shadow:0 6px 18px rgba(0,0,0,.35);
+  box-shadow:var(--shadow-soft);
 }
 
 .factura-detalle .blob-item span{
@@ -165,36 +156,34 @@
 
   font-size:12px;
   font-weight:600;
-
-  transition:all .2s ease;
+  transition:.2s;
 }
 
-/* VER */
-.factura-detalle .blob-actions button:first-child{
-  background:rgba(99,102,241,0.15);
-  color:var(--accent);
+/* 📧 enviar */
+.factura-detalle #btn-enviar-factura{
+  background:rgba(167,139,250,0.15);
+  color:var(--color-irpf);
 }
 
-.factura-detalle .blob-actions button:first-child:hover{
-  background:rgba(99,102,241,0.25);
+.factura-detalle #btn-enviar-factura:hover{
+  background:rgba(167,139,250,0.25);
   transform:translateY(-1px);
 }
 
-/* DESCARGAR */
-.factura-detalle .blob-actions button:last-child{
+/* ⬇️ descargar */
+.factura-detalle #btn-descargar-factura{
   background:linear-gradient(135deg,var(--accent),var(--accent-hover));
   color:#fff;
-  box-shadow:0 4px 14px rgba(99,102,241,0.35);
 }
 
-.factura-detalle .blob-actions button:last-child:hover{
-  transform:translateY(-1px) scale(1.03);
-  box-shadow:0 6px 18px rgba(99,102,241,0.45);
+.factura-detalle #btn-descargar-factura:hover{
+  transform:translateY(-1px);
+  box-shadow:0 6px 18px rgba(99,102,241,.4);
 }
 
 
 /* =========================================================
-   TOP BAR (CLON INCIDENCIA)
+   TOP BAR
 ========================================================= */
 .factura-detalle .filters-row{
   display:flex;
@@ -223,7 +212,7 @@
 
 
 /* =========================================================
-   USER HEADER (CLON INCIDENCIA)
+   USER HEADER
 ========================================================= */
 .factura-detalle .detalle-user{
   display:flex;
@@ -281,7 +270,7 @@
 }
 
 .factura-detalle .detalle-body::-webkit-scrollbar-thumb{
-  background:linear-gradient(180deg,var(--accent),var(--accent-hover));
+  background:var(--scrollbar-thumb);
   border-radius:6px;
 }
 
@@ -291,66 +280,56 @@
 ========================================================= */
 .factura-detalle .form-grid{
   display:grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap:22px;
+  grid-template-columns:repeat(2,1fr);
+  gap:18px;
 }
 
 
 /* =========================================================
-   ITEMS (CARDS PRO)
+   ITEMS
 ========================================================= */
 .factura-detalle .detalle-item{
   display:flex;
   flex-direction:column;
   gap:6px;
 
-  padding:14px 16px;
-  border-radius:14px;
-
-  background:linear-gradient(
-    145deg,
-    color-mix(in srgb, var(--card-bg), #fff 2%),
-    color-mix(in srgb, var(--card-bg), #000 6%)
-  );
+  padding:12px 14px;
+  border-radius:10px;
 
   border:1px solid var(--card-border);
+  background:var(--card-bg);
 
-  transition:all .2s ease;
+  transition:.15s;
 }
 
 .factura-detalle .detalle-item:hover{
-  border-color:var(--accent);
-  box-shadow:0 4px 18px rgba(0,0,0,.25);
-  transform:translateY(-1px);
+  background:color-mix(in srgb, var(--card-bg), #000 6%);
 }
 
 .factura-detalle .detalle-label{
-  font-size:11px;
+  font-size:var(--font-xs);
   color:var(--dim);
   text-transform:uppercase;
-  letter-spacing:.6px;
+  letter-spacing:.5px;
 }
 
 .factura-detalle .detalle-value{
-  font-size:15px;
+  font-size:var(--font-base);
   font-weight:600;
-  letter-spacing:.2px;
   color:var(--text);
 }
 
 
 /* =========================================================
-   ESTADO COLORES (REAL)
+   ESTADO
 ========================================================= */
 #detalle-estado{
   display:inline-flex;
   align-items:center;
-  gap:6px;
   padding:6px 10px;
   border-radius:999px;
   font-size:12px;
   font-weight:600;
-  width:fit-content;
 }
 
 #detalle-estado[data-estado="pagada"]{
@@ -370,12 +349,19 @@
 
 
 /* =========================================================
-   IVA / IRPF
+   IVA / IRPF (🔥 MATCH DASHBOARD)
 ========================================================= */
-#detalle-iva,
+
+#detalle-iva{
+  font-weight:700;
+  color:var(--color-iva);
+  text-shadow:0 0 10px var(--color-iva-glow);
+}
+
 #detalle-irpf{
   font-weight:700;
-  color:var(--accent);
+  color:var(--color-irpf);
+  text-shadow:0 0 10px var(--color-irpf-glow);
 }
 
 
@@ -401,18 +387,6 @@
     padding:20px;
   }
 
-}
-
-
-/* =========================================================
-   TRANSICIONES GLOBALES
-========================================================= */
-.factura-detalle *{
-  transition:
-    background .2s ease,
-    border .2s ease,
-    color .2s ease,
-    transform .15s ease;
 }
 
 

@@ -1,5 +1,5 @@
 /* =========================================================
-   🔥 PANEL UNIVERSAL — SAAS CORE
+   🔥 PANEL UNIVERSAL — SAAS CORE (CLEAN)
 ========================================================= */
 
 /* =========================
@@ -17,7 +17,7 @@
 
 
 /* =========================
-   LOADER
+   LOADER STATES
 ========================= */
 .panel-content.loading .view-layout{
   opacity:0;
@@ -41,7 +41,7 @@
 
 
 /* =========================
-   LOADER ELEMENT
+   LOADER ELEMENT (SIN SPINNER HARD)
 ========================= */
 .view-loading{
   position:absolute;
@@ -58,19 +58,11 @@
   transition:opacity .25s ease;
 }
 
-/* opcional: spinner */
-.view-loading::after{
-  content:"";
-  width:28px;
-  height:28px;
-  border-radius:50%;
-  border:3px solid rgba(255,255,255,0.1);
-  border-top-color:var(--accent);
-  animation:spin .8s linear infinite;
-}
-
-@keyframes spin{
-  to{ transform:rotate(360deg); }
+/* 🔥 CENTRADO PARA TU .spinner GLOBAL */
+.view-loader-center{
+  display:flex;
+  align-items:center;
+  justify-content:center;
 }
 
 

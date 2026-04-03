@@ -22,15 +22,28 @@ let currentAbort = null;
 
 
 /* =========================
+   ROOT
+========================= */
+function getRoot(){
+  return document.querySelector(".panel-view.incidencia-detalle");
+}
+
+function $(selector){
+  return getRoot()?.querySelector(selector);
+}
+
+
+/* =========================
    INIT
 ========================= */
 function init(){
 
-  if(initialized) return;
-
   const root = getRoot();
-  if(!root) return setTimeout(init, 100);
-  if(!Onion.state?.user) return setTimeout(init, 100);
+  if(!root || initialized) return;
+
+  if(!Onion.state?.user){
+    return setTimeout(init, 100);
+  }
 
   initialized = true;
 
@@ -38,21 +51,14 @@ function init(){
   loadDetalle();
   observeDOM();
 
+  Onion.onCleanup(()=>{
+    initialized = false;
+    currentAbort?.abort();
+  });
+
 }
 
 init();
-
-
-/* =========================
-   ROOT
-========================= */
-function getRoot(){
-  return document.querySelector(".panel-content.incidencia-detalle");
-}
-
-function $(selector){
-  return getRoot()?.querySelector(selector);
-}
 
 
 /* =========================
@@ -78,9 +84,9 @@ function observeDOM(){
     }
   });
 
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true
+  observer.observe(document.body,{
+    childList:true,
+    subtree:true
   });
 }
 
@@ -93,7 +99,7 @@ function bindEvents(){
   const root = getRoot();
   if(!root) return;
 
-  Onion.cleanupEvent(root, "click", async (e)=>{
+  Onion.cleanupEvent(root,"click", async (e)=>{
 
     const t = e.target;
 
@@ -127,7 +133,7 @@ function bindEvents(){
 
   });
 
-  Onion.cleanupEvent(root, "change", (e)=>{
+  Onion.cleanupEvent(root,"change",(e)=>{
 
     if(e.target.id === "inc-files"){
       selectedFiles = [...selectedFiles, ...e.target.files];
@@ -136,6 +142,7 @@ function bindEvents(){
     }
 
   });
+
 }
 
 
@@ -144,6 +151,7 @@ function bindEvents(){
 ========================= */
 async function loadDetalle(){
 
+  const root = getRoot();
   const id = getId();
   if(!id) return;
 
@@ -152,13 +160,17 @@ async function loadDetalle(){
   if(currentAbort) currentAbort.abort();
   currentAbort = new AbortController();
 
+  // 🔥 FIX CURSOR + LOADER
+  document.activeElement?.blur();
+  root?.classList.add("loading");
+
   clearUI();
 
   try{
 
-    const res = await fetch(Onion.config.API + "/tickets/" + id, {
-      headers: getAuthHeaders(),
-      signal: currentAbort.signal
+    const res = await fetch(Onion.config.API + "/tickets/" + id,{
+      headers:getAuthHeaders(),
+      signal:currentAbort.signal
     });
 
     if(requestId !== currentRequestId) return;
@@ -178,7 +190,13 @@ async function loadDetalle(){
 
     console.error("💥 loadDetalle:", err);
     showToast("❌ Error cargando");
+
+  }finally{
+
+    root?.classList.remove("loading");
+
   }
+
 }
 
 
@@ -187,13 +205,13 @@ async function loadDetalle(){
 ========================= */
 function clearUI(){
 
-  setText("#detalle-usuario", "--");
-  setText("#detalle-userid", "--");
-  setText("#detalle-id", "--");
-  setText("#detalle-fecha", "--");
-  setText("#detalle-fecha-cierre", "--");
-  setText("#detalle-tecnico", "--");
-  setText("#detalle-titulo", "--");
+  setText("#detalle-usuario","--");
+  setText("#detalle-userid","--");
+  setText("#detalle-id","--");
+  setText("#detalle-fecha","--");
+  setText("#detalle-fecha-cierre","--");
+  setText("#detalle-tecnico","--");
+  setText("#detalle-titulo","--");
 
   const msg = $("#detalle-mensaje");
   if(msg) msg.textContent = "";
@@ -265,7 +283,7 @@ function renderAvatar(nombre, avatar){
 
   const initials = (nombre || "U")
     .split(" ")
-    .map(w => w[0])
+    .map(w=>w[0])
     .slice(0,2)
     .join("")
     .toUpperCase();
@@ -283,16 +301,16 @@ function renderFiles(){
   if(!list) return;
 
   list.innerHTML = selectedFiles.map((f,i)=>`
-    <div class="file-item">
+    <div class="blob-item">
       <span>${f.name}</span>
-      <button class="file-remove" data-index="${i}">✕</button>
+      <button class="blob-delete file-remove" data-index="${i}">✕</button>
     </div>
   `).join("");
 }
 
 
 /* =========================
-   BLOBS (🔥 FIX CLAVE)
+   BLOBS
 ========================= */
 function renderBlobs(selector, files, allowDelete){
 
@@ -300,11 +318,11 @@ function renderBlobs(selector, files, allowDelete){
   if(!c) return;
 
   if(!files || !files.length){
-    c.innerHTML = `<div class="detalle-hint">Sin archivos</div>`;
+    c.innerHTML = `<div class="view-hint">Sin archivos</div>`;
     return;
   }
 
-  c.innerHTML = files.map(f => `
+  c.innerHTML = files.map(f=>`
     <div class="blob-item">
       <span>${f.name}</span>
 
@@ -339,7 +357,7 @@ async function deleteBlob(url){
         "Content-Type":"application/json",
         ...getAuthHeaders()
       },
-      body: JSON.stringify({
+      body:JSON.stringify({
         deleteAttachments:[url]
       })
     });
@@ -379,7 +397,7 @@ async function updateTicket(){
         "Content-Type":"application/json",
         ...getAuthHeaders()
       },
-      body: JSON.stringify({
+      body:JSON.stringify({
         status: $("#edit-estado").value,
         priority: $("#edit-prioridad").value,
         message: $("#detalle-mensaje").innerText.trim()
@@ -451,22 +469,22 @@ function showToast(msg){
     return;
   }
 
-  const el = document.createElement("div");
-  el.innerText = msg;
+  const el=document.createElement("div");
+  el.innerText=msg;
 
-  el.style.position = "fixed";
-  el.style.bottom = "20px";
-  el.style.right = "20px";
-  el.style.padding = "10px 14px";
-  el.style.background = "#111";
-  el.style.color = "#fff";
-  el.style.borderRadius = "8px";
-  el.style.fontSize = "13px";
-  el.style.zIndex = "9999";
+  el.style.position="fixed";
+  el.style.bottom="20px";
+  el.style.right="20px";
+  el.style.padding="10px 14px";
+  el.style.background="#111";
+  el.style.color="#fff";
+  el.style.borderRadius="8px";
+  el.style.fontSize="13px";
+  el.style.zIndex="9999";
 
   document.body.appendChild(el);
 
-  setTimeout(()=> el.remove(), 2000);
+  setTimeout(()=>el.remove(),2000);
 }
 
 })();

@@ -1,9 +1,7 @@
 <div class="panel-view incidencia-detalle">
 
-  <!-- 🔥 LOADER UNIFICADO -->
-  <div class="view-loading">
-    <div class="factura-detalle-spinner"></div>
-  </div>
+  <!-- 🔥 LOADER UNIFICADO (SIN DIV INTERNO) -->
+  <div class="view-loading"></div>
 
   <div class="view-layout">
 
@@ -117,15 +115,9 @@
         </div>
 
         <!-- FOOTER -->
-        <div style="
-          margin-top:20px;
-          display:flex;
-          justify-content:space-between;
-          align-items:center;
-          gap:12px;
-        ">
+        <div class="view-footer">
 
-          <div style="font-size:12px; opacity:.6;">
+          <div class="view-hint">
             Puedes cerrar la incidencia o eliminar archivos adjuntos
           </div>
 

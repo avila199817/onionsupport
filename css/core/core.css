@@ -1,6 +1,6 @@
-/* =========================
-   CORE SYSTEM — CLEAN 10/10
-========================= */
+/* =========================================================
+   🔥 CORE SYSTEM — SAAS PANEL CLEAN (FINAL 10/10)
+========================================================= */
 
 
 /* =========================
@@ -26,9 +26,13 @@
 
 
 /* =========================
-   THEME TRANSITION (SAFE)
+   THEME TRANSITIONS (GLOBAL SAFE)
 ========================= */
-.theme-transition{
+.layout,
+.sidebar,
+.topbar,
+.panel-content,
+.panel-block{
   transition:
     background-color var(--duration-slow) ease,
     color var(--duration-slow) ease,
@@ -38,10 +42,8 @@
 
 
 /* =========================
-   🔥 INTERACTION SYSTEM (UNIFIED)
+   INTERACTION SYSTEM
 ========================= */
-
-/* BASE INTERACTION */
 .interactive{
   cursor:pointer;
 
@@ -50,26 +52,25 @@
     box-shadow var(--duration-normal) ease;
 }
 
-/* HOVER */
 .interactive:hover{
   transform:translateY(-1px);
 }
 
-/* ACTIVE */
 .interactive:active{
   transform:scale(.96);
 }
 
 
 /* =========================
-   BUTTON RESET + FEEDBACK
+   BUTTON SYSTEM
 ========================= */
 button{
   cursor:pointer;
 
   transition:
     transform var(--duration-fast) ease,
-    box-shadow var(--duration-normal) ease;
+    box-shadow var(--duration-normal) ease,
+    background var(--duration-fast) ease;
 }
 
 button:hover{
@@ -82,7 +83,7 @@ button:active{
 
 
 /* =========================
-   INPUT FOCUS (GLOBAL CLEAN)
+   INPUT FOCUS (GLOBAL)
 ========================= */
 input:focus,
 select:focus,
@@ -95,7 +96,7 @@ textarea:focus{
 
 
 /* =========================
-   LINKS / ITEMS
+   LINKS / NAV ITEMS
 ========================= */
 a,
 .menu-item,
@@ -164,7 +165,7 @@ a,
 
 
 /* =========================
-   Z-INDEX HELPERS
+   Z-INDEX SYSTEM
 ========================= */
 .z-sidebar{ z-index:var(--z-sidebar); }
 .z-topbar{ z-index:var(--z-topbar); }

@@ -55,26 +55,21 @@ function $(selector){
 
 
 /* =========================
-   LOADER CONTROL 🔥
+   LOADER REAL (TIPO TABLA) 🔥
 ========================= */
 function setLoading(active){
 
-  const root = getRoot();
-  if(!root) return;
+  const loader = document.getElementById("detalle-loading");
+  const content = document.getElementById("detalle-content");
+
+  if(!loader || !content) return;
 
   if(active){
-    root.classList.add("loading");
-    root.classList.remove("ready");
+    loader.style.display = "flex";
+    content.style.display = "none";
   }else{
-
-    // 🔥 doble frame = render real antes de mostrar
-    requestAnimationFrame(()=>{
-      requestAnimationFrame(()=>{
-        root.classList.remove("loading");
-        root.classList.add("ready");
-      });
-    });
-
+    loader.style.display = "none";
+    content.style.display = "block";
   }
 
 }
@@ -205,10 +200,10 @@ async function loadDetalle(){
 
     if(requestId === currentRequestId){
 
-      // 🔥 delay mínimo para evitar flash blanco
+      // 🔥 pequeño delay = UX suave
       setTimeout(()=>{
         setLoading(false);
-      }, 120);
+      }, 100);
 
     }
 

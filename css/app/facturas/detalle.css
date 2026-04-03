@@ -180,25 +180,25 @@
 
 
 /* =========================================================
-   FACTURA DETALLE — SIDEBAR (PREMIUM SAAS / APPLE STYLE)
+   FACTURA DETALLE — SIDEBAR (SAAS PRO / VARIABLES ADAPTADAS)
 ========================================================= */
 
 /* =========================
-   ASIDE BASE (glass + depth)
+   ASIDE BASE
 ========================= */
 .panel-content.factura-detalle .view-aside{
   background:
-    linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.25)),
+    linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.25)),
     var(--panel-bg);
 
   backdrop-filter:blur(6px);
 
-  border-left:1px solid rgba(255,255,255,0.04);
+  border-left:1px solid var(--border-soft);
 
   position:relative;
 }
 
-/* glow lateral sutil */
+/* glow lateral */
 .panel-content.factura-detalle .view-aside::before{
   content:"";
   position:absolute;
@@ -214,7 +214,7 @@
     transparent
   );
 
-  opacity:.15;
+  opacity:.12;
 }
 
 
@@ -222,27 +222,28 @@
    SIDEBAR CONTENT
 ========================= */
 .panel-content.factura-detalle .view-sidebar{
-  padding:22px 20px;
-  gap:22px;
+  padding:var(--space-lg) var(--space-md);
+  display:flex;
+  flex-direction:column;
+  gap:var(--space-lg);
 }
 
 
 /* =========================
-   SECTION TITLE (minimal pro)
+   SECTION TITLE
 ========================= */
 .panel-content.factura-detalle .view-section-title{
-  font-size:10.5px;
+  font-size:var(--font-xs);
   letter-spacing:.8px;
   text-transform:uppercase;
 
-  color:rgba(255,255,255,0.45);
+  color:var(--dim);
 
   display:flex;
   align-items:center;
-  gap:8px;
+  gap:6px;
 }
 
-/* punto estilo apple */
 .panel-content.factura-detalle .view-section-title::before{
   content:"";
   width:4px;
@@ -254,37 +255,33 @@
 
 
 /* =========================
-   FILE CARD (premium)
+   FILE CARD
 ========================= */
 .panel-content.factura-detalle .view-file{
   position:relative;
 
-  padding:14px 16px;
-  border-radius:14px;
+  padding:var(--space-sm) var(--space-md);
+  border-radius:var(--radius-lg);
 
   background:
-    linear-gradient(135deg, rgba(255,255,255,0.04), rgba(0,0,0,0.3));
+    linear-gradient(135deg, rgba(255,255,255,0.03), rgba(0,0,0,0.3));
 
-  border:1px solid rgba(255,255,255,0.06);
+  border:1px solid var(--border-soft);
 
   transition:
-    transform .18s ease,
-    box-shadow .18s ease,
-    border .18s ease;
+    transform var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out),
+    border var(--duration-fast) var(--ease-out);
 }
 
-/* hover tipo SaaS */
 .panel-content.factura-detalle .view-file:hover{
-  transform:translateY(-3px);
+  transform:translateY(-2px);
 
-  border-color:rgba(255,255,255,0.12);
+  border-color:var(--border-default);
 
-  box-shadow:
-    0 10px 30px rgba(0,0,0,0.45),
-    0 0 0 1px rgba(255,255,255,0.03) inset;
+  box-shadow:var(--shadow-md);
 }
 
-/* glow interno sutil */
 .panel-content.factura-detalle .view-file::after{
   content:"";
   position:absolute;
@@ -294,11 +291,11 @@
 
   background:radial-gradient(
     circle at 20% 20%,
-    rgba(255,255,255,0.08),
+    rgba(255,255,255,0.06),
     transparent 60%
   );
 
-  opacity:.4;
+  opacity:.3;
   pointer-events:none;
 }
 
@@ -307,10 +304,10 @@
    FILE TEXT
 ========================= */
 .panel-content.factura-detalle .view-file span{
-  font-size:13px;
+  font-size:var(--font-md);
   font-weight:500;
 
-  color:rgba(255,255,255,0.9);
+  color:var(--text);
 
   letter-spacing:.2px;
 }
@@ -321,32 +318,34 @@
 ========================= */
 .panel-content.factura-detalle .view-file-actions{
   display:flex;
-  gap:8px;
+  gap:var(--space-xs);
 }
 
 
 /* =========================
-   BUTTON BASE (refinado)
+   BUTTON BASE
 ========================= */
 .panel-content.factura-detalle .view-btn{
-  border-radius:10px;
+  border-radius:var(--radius-md);
   padding:6px 10px;
 
   backdrop-filter:blur(4px);
 
+  font-size:var(--font-sm);
+
   transition:
-    transform .12s ease,
-    box-shadow .12s ease,
-    background .12s ease;
+    transform var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out);
 }
 
 
 /* =========================
-   EMAIL BUTTON (soft glass)
+   EMAIL BUTTON
 ========================= */
 .panel-content.factura-detalle #btn-enviar-factura{
   background:rgba(167,139,250,0.12);
-  color:#a78bfa;
+  color:var(--color-irpf);
   border:1px solid rgba(167,139,250,0.25);
 }
 
@@ -354,29 +353,30 @@
   background:rgba(167,139,250,0.22);
   transform:translateY(-1px);
 
-  box-shadow:0 4px 14px rgba(167,139,250,0.25);
+  box-shadow:0 4px 14px var(--color-irpf-glow);
 }
 
 
 /* =========================
-   DOWNLOAD BUTTON (main CTA)
+   DOWNLOAD BUTTON
 ========================= */
 .panel-content.factura-detalle #btn-descargar-factura{
   background:linear-gradient(135deg,var(--accent),var(--accent-hover));
-  border:1px solid rgba(255,255,255,0.1);
+  border:1px solid var(--border-soft);
+  color:#fff;
 }
 
 .panel-content.factura-detalle #btn-descargar-factura:hover{
   transform:translateY(-1px);
 
   box-shadow:
-    0 6px 20px rgba(99,102,241,.45),
-    0 0 0 1px rgba(255,255,255,0.06) inset;
+    0 6px 20px rgba(99,102,241,.4),
+    0 0 0 1px rgba(255,255,255,0.05) inset;
 }
 
 
 /* =========================
-   DIVIDER (premium fade)
+   DIVIDER
 ========================= */
 .panel-content.factura-detalle .sidebar-divider{
   height:1px;
@@ -384,30 +384,30 @@
   background:linear-gradient(
     90deg,
     transparent,
-    rgba(255,255,255,0.08),
+    var(--border-soft),
     transparent
   );
 
-  margin:6px 0;
+  margin:var(--space-xs) 0;
 }
 
 
 /* =========================
-   HISTORIAL EMPTY (pro)
+   HISTORIAL EMPTY
 ========================= */
 .panel-content.factura-detalle #detalle-historial{
   display:flex;
   flex-direction:column;
-  gap:10px;
+  gap:var(--space-xs);
 }
 
 .panel-content.factura-detalle #detalle-historial:empty::after{
   content:"Sin actividad";
-  font-size:12px;
-  color:rgba(255,255,255,0.4);
+  font-size:var(--font-sm);
+  color:var(--dim);
 
-  padding:10px;
-  border-radius:10px;
+  padding:var(--space-sm);
+  border-radius:var(--radius-md);
 
   background:rgba(255,255,255,0.03);
 

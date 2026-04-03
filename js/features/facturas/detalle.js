@@ -36,19 +36,23 @@ function $(s){
 
 
 /* =========================================================
-   LOADER CONTROL 🔥
+   LOADER CONTROL 🔥 (MISMO QUE INCIDENCIAS)
 ========================================================= */
 function setLoading(active){
-  const root = getRoot();
-  if(!root) return;
+
+  const loader = document.getElementById("factura-loading");
+  const content = document.getElementById("factura-content");
+
+  if(!loader || !content) return;
 
   if(active){
-    root.classList.add("loading");
-    root.classList.remove("ready");
+    loader.style.display = "flex";
+    content.style.display = "none";
   }else{
-    root.classList.remove("loading");
-    root.classList.add("ready");
+    loader.style.display = "none";
+    content.style.display = "block";
   }
+
 }
 
 
@@ -254,13 +258,11 @@ function render(){
 
   const c = factura.cliente || {};
 
-  /* CLIENTE */
   setText("#detalle-cliente", c.nombre || "Cliente");
   setText("#detalle-cliente-id", c.id || "");
 
   renderAvatar(c);
 
-  /* DATA */
   setText("#detalle-numero-legal", factura.numeroFacturaLegal || factura.numero || "--");
   setText("#detalle-id", factura.id || "--");
   setText("#detalle-incidencia-id", factura.incidenciaId || "--");
@@ -279,11 +281,9 @@ function render(){
   setText("#detalle-concepto", factura.concepto || "-");
   setText("#detalle-descripcion", factura.descripcion || "-");
 
-  /* ESTADO */
   const estadoEl = $("#detalle-estado");
 
   if(estadoEl){
-
     const estado = factura.estadoPago || "pendiente";
 
     estadoEl.dataset.estado = estado;
@@ -294,7 +294,6 @@ function render(){
       "Pendiente";
   }
 
-  /* IVA */
   const iva = factura.impuestos?.find(i => i.tipo === "IVA");
 
   setText(
@@ -304,7 +303,6 @@ function render(){
       : "--"
   );
 
-  /* IRPF */
   const irpfContainer = $("#detalle-irpf-container");
 
   let irpf = factura.impuestos?.find(i => i.tipo === "IRPF");

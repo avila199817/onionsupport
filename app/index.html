@@ -1,64 +1,100 @@
+<!DOCTYPE html>
+<html lang="es">
+
 <head>
 
-<meta charset="UTF-8">
-<meta http-equiv="X-UA-Compatible" content="IE=edge">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <!-- =========================
+       META BASE
+  ========================= -->
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 
-<title>Onion Support</title>
+  <title>Onion Support</title>
 
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.onionit.net https://onionassets.blob.core.windows.net; img-src 'self' data: https://onionassets.blob.core.windows.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self' 'unsafe-inline';">
+  <!-- =========================
+       SECURITY (CSP)
+  ========================= -->
+  <meta http-equiv="Content-Security-Policy"
+    content="
+      default-src 'self';
+      connect-src 'self' https://api.onionit.net https://onionassets.blob.core.windows.net;
+      img-src 'self' data: https://onionassets.blob.core.windows.net;
+      style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+      font-src 'self' https://fonts.gstatic.com;
+      script-src 'self' 'unsafe-inline';
+    ">
 
-<!-- BASE (SPA) -->
-<base href="/">
+  <!-- =========================
+       BASE (SPA)
+  ========================= -->
+  <base href="/">
 
-<!-- SEO CONTROL -->
-<meta name="robots" content="noindex, nofollow">
+  <!-- =========================
+       SEO
+  ========================= -->
+  <meta name="robots" content="noindex, nofollow">
 
-<!-- COLOR SCHEME -->
-<meta name="color-scheme" content="dark light">
+  <!-- =========================
+       UI / THEME
+  ========================= -->
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#0d0d0d">
 
-<!-- THEME COLOR -->
-<meta name="theme-color" content="#0d0d0d">
+  <!-- =========================
+       ICON
+  ========================= -->
+  <link rel="icon" href="/favicon.ico">
 
-<!-- FAVICON -->
-<link rel="icon" href="/favicon.ico">
+  <!-- =========================
+       PERFORMANCE
+  ========================= -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 
-<!-- PERFORMANCE -->
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <!-- =========================
+       FONTS
+  ========================= -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 
-<!-- FONTS -->
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <!-- =========================
+       CSS ORDER (CRÍTICO)
+  ========================= -->
 
-<!-- CSS TOKENS -->
-<link rel="stylesheet" href="/css/tokens/variables.css">
-<link rel="stylesheet" href="/css/tokens/light.css">
+  <!-- TOKENS -->
+  <link rel="stylesheet" href="/css/tokens/variables.css">
+  <link rel="stylesheet" href="/css/tokens/light.css">
 
-<!-- CORE BASE -->
-<link rel="stylesheet" href="/css/core/reset.css">
-<link rel="stylesheet" href="/css/core/layout.css">
-<link rel="stylesheet" href="/css/core/core.css">
+  <!-- RESET -->
+  <link rel="stylesheet" href="/css/core/reset.css">
 
-<!-- 🔥 LOADER GLOBAL -->
-<link rel="stylesheet" href="/css/core/loader.css">
+  <!-- CORE -->
+  <link rel="stylesheet" href="/css/core/layout.css">
+  <link rel="stylesheet" href="/css/core/core.css">
 
-<!-- LAYOUT -->
-<link rel="stylesheet" href="/css/layout/sidebar.css">
-<link rel="stylesheet" href="/css/layout/topbar.css">
+  <!-- LAYOUT -->
+  <link rel="stylesheet" href="/css/layout/sidebar.css">
+  <link rel="stylesheet" href="/css/layout/topbar.css">
 
-<!-- COMPONENTS -->
-<link rel="stylesheet" href="/css/components/ui.css">
+  <!-- COMPONENTS -->
+  <link rel="stylesheet" href="/css/components/ui.css">
 
-<noscript>
-  <style>
-    #app-loader{display:none}
-    .layout{visibility:visible !important}
-  </style>
+  <!-- LOADER (ÚLTIMO) -->
+  <link rel="stylesheet" href="/css/core/loader.css">
 
-  <div style="padding:20px; font-family:sans-serif;">
-    ⚠️ Esta aplicación requiere JavaScript para funcionar.
-  </div>
-</noscript>
+  <!-- =========================
+       NOSCRIPT
+  ========================= -->
+  <noscript>
+    <style>
+      #app-loader{display:none}
+      .layout{visibility:visible !important}
+    </style>
+
+    <div style="padding:20px; font-family:sans-serif;">
+      ⚠️ Esta aplicación requiere JavaScript para funcionar.
+    </div>
+  </noscript>
 
 </head>
 

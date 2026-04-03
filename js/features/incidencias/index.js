@@ -98,7 +98,7 @@ function bindEvents(){
 
 
 /* =========================
-   LOAD
+   LOAD (FIX REAL)
 ========================= */
 
 async function loadIncidencias(){
@@ -112,9 +112,18 @@ async function loadIncidencias(){
   const requestId = ++currentRequestId;
 
   document.activeElement?.blur();
-  tbody.innerHTML = "";
+
+  /* 🔥 CLAVE 1: NO BORRAR EL LOADER */
+  // tbody.innerHTML = "";
 
   try{
+
+    /* 🔥 CLAVE 2: FORZAR PINTADO DEL LOADER */
+    await new Promise(r => requestAnimationFrame(r));
+    await new Promise(r => requestAnimationFrame(r));
+
+    /* 🔥 CLAVE 3: DELAY MÍNIMO PARA QUE SE VEA */
+    await new Promise(r => setTimeout(r, 200));
 
     const res = await Onion.fetch(Onion.config.API + "/tickets");
     const items = normalize(res);
@@ -130,7 +139,7 @@ async function loadIncidencias(){
     }
 
     requestAnimationFrame(()=>{
-      render(items);
+      render(items); // 👉 aquí ya se reemplaza todo
     });
 
   }catch(e){
@@ -273,11 +282,10 @@ function render(items){
 
 
 /* =========================
-   MAP
+   RESTO IGUAL
 ========================= */
 
 function mapItem(i){
-
   return {
     id: i.id || i.ticketId || "--",
     title: i.subject || i.message || "Sin título",
@@ -292,20 +300,12 @@ function mapItem(i){
       ? formatFecha(i.closedAt || (i._ts ? i._ts * 1000 : null))
       : "-"
   };
-
 }
 
-
-/* =========================
-   AVATAR
-========================= */
-
 function renderAvatar(d){
-
   if(d.avatar){
     return `<img src="${d.avatar}" alt="${escapeHTML(d.usuario)}" />`;
   }
-
   const initials = getInitials(d.usuario);
   const color = getAvatarColor(d.usuario);
 
@@ -326,11 +326,6 @@ function renderAvatar(d){
     </div>
   `;
 }
-
-
-/* =========================
-   HELPERS
-========================= */
 
 function hashString(str){
   let hash = 0;

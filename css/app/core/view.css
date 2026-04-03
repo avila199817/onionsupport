@@ -344,7 +344,7 @@
   align-items:center;
   justify-content:center;
 
-  background:var(--main-bg);
+  background:var(--panel-bg);
   z-index:20;
 
   opacity:0;

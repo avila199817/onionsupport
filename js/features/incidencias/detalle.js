@@ -14,6 +14,7 @@ let currentItem = null;
 let observer = null;
 let sending = false;
 let selectedFiles = [];
+let currentRequestId = 0;
 
 
 /* =========================
@@ -35,6 +36,7 @@ function init(){
   bindEvents();
   loadDetalle();
   observeDOM();
+
 }
 
 init();
@@ -44,7 +46,7 @@ init();
    ROOT
 ========================= */
 function getRoot(){
-  return document.querySelector(".panel-view.incidencia-detalle");
+  return document.querySelector(".panel-content.incidencia-detalle");
 }
 
 function $(selector){
@@ -88,6 +90,7 @@ function observeDOM(){
   observer = new MutationObserver(()=>{
     if(!getRoot()){
       initialized = false;
+      currentRequestId++;
       setTimeout(init, 100);
     }
   });
@@ -96,30 +99,6 @@ function observeDOM(){
     childList: true,
     subtree: true
   });
-}
-
-
-/* =========================
-   AVATAR
-========================= */
-function renderAvatar(nombre, avatar){
-
-  const el = $("#detalle-avatar");
-  if(!el) return;
-
-  if(avatar){
-    el.innerHTML = `<img src="${avatar}" />`;
-    return;
-  }
-
-  const initials = nombre
-    ?.split(" ")
-    .map(w => w[0])
-    .slice(0,2)
-    .join("")
-    .toUpperCase();
-
-  el.textContent = initials || "U";
 }
 
 
@@ -183,6 +162,8 @@ async function loadDetalle(){
     return;
   }
 
+  const requestId = ++currentRequestId;
+
   try{
 
     const res = await fetch(Onion.config.API + "/tickets/" + id, {
@@ -192,68 +173,28 @@ async function loadDetalle(){
     if(!res.ok) throw new Error("API ERROR");
 
     const json = await res.json();
+    if(requestId !== currentRequestId) return;
+
     currentItem = json?.ticket || json;
 
-    render(currentItem);
+    requestAnimationFrame(()=>{
+      render(currentItem);
+    });
 
   }catch(err){
+
+    if(requestId !== currentRequestId) return;
+
     console.error("💥 loadDetalle:", err);
     showToast("❌ Error cargando incidencia");
-  }
 
-  setLoading(false);
-}
+  }finally{
 
-
-/* =========================
-   UPLOAD (SAS)
-========================= */
-function uploadFile(file){
-
-  return new Promise(async (resolve, reject)=>{
-
-    try{
-
-      const res = await fetch(Onion.config.API + "/uploads/upload-url", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...getAuthHeaders()
-        },
-        body: JSON.stringify({
-          fileName: file.name,
-          fileType: file.type,
-          fileSize: file.size
-        })
-      });
-
-      if(!res.ok) return reject("SAS ERROR");
-
-      const { uploadUrl, blobUrl } = await res.json();
-
-      const xhr = new XMLHttpRequest();
-
-      xhr.open("PUT", uploadUrl, true);
-      xhr.setRequestHeader("x-ms-blob-type", "BlockBlob");
-      xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
-
-      xhr.onload = ()=>{
-        if(xhr.status >= 200 && xhr.status < 300){
-          resolve({ name: file.name, url: blobUrl });
-        }else{
-          reject("UPLOAD FAILED");
-        }
-      };
-
-      xhr.onerror = ()=> reject("XHR ERROR");
-
-      xhr.send(file);
-
-    }catch(err){
-      reject(err);
+    if(requestId === currentRequestId){
+      setTimeout(()=> setLoading(false), 80);
     }
 
-  });
+  }
 }
 
 
@@ -313,6 +254,56 @@ async function updateTicket(){
 
 
 /* =========================
+   UPLOAD
+========================= */
+function uploadFile(file){
+
+  return new Promise(async (resolve, reject)=>{
+
+    try{
+
+      const res = await fetch(Onion.config.API + "/uploads/upload-url", {
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json",
+          ...getAuthHeaders()
+        },
+        body:JSON.stringify({
+          fileName:file.name,
+          fileType:file.type,
+          fileSize:file.size
+        })
+      });
+
+      if(!res.ok) return reject("SAS ERROR");
+
+      const { uploadUrl, blobUrl } = await res.json();
+
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", uploadUrl, true);
+
+      xhr.setRequestHeader("x-ms-blob-type","BlockBlob");
+      xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+
+      xhr.onload = ()=>{
+        if(xhr.status >= 200 && xhr.status < 300){
+          resolve({ name:file.name, url:blobUrl });
+        }else reject("UPLOAD FAILED");
+      };
+
+      xhr.onerror = ()=> reject("XHR ERROR");
+
+      xhr.send(file);
+
+    }catch(err){
+      reject(err);
+    }
+
+  });
+}
+
+
+/* =========================
    RENDER
 ========================= */
 function render(i){
@@ -333,10 +324,23 @@ function render(i){
 
 
 /* =========================
-   FILE LIST
+   UI HELPERS
 ========================= */
-function renderFiles(){
+function renderAvatar(nombre, avatar){
 
+  const el = $("#detalle-avatar");
+  if(!el) return;
+
+  if(avatar){
+    el.innerHTML = `<img src="${avatar}" />`;
+    return;
+  }
+
+  const initials = nombre?.split(" ").map(w=>w[0]).slice(0,2).join("").toUpperCase();
+  el.textContent = initials || "U";
+}
+
+function renderFiles(){
   const list = $("#file-list");
   if(!list) return;
 
@@ -348,14 +352,9 @@ function renderFiles(){
   `).join("");
 }
 
-
-/* =========================
-   BLOBS
-========================= */
 function renderBlobs(files){
 
   const user = $("#detalle-blobs-user");
-  const team = $("#detalle-blobs-team");
 
   if(user){
     user.innerHTML = files.map(f => `
@@ -367,15 +366,11 @@ function renderBlobs(files){
       </div>
     `).join("") || `<div class="detalle-hint">Sin archivos</div>`;
   }
-
-  if(team){
-    team.innerHTML = "";
-  }
 }
 
 
 /* =========================
-   DOWNLOAD
+   UTILS
 ========================= */
 function downloadBlob(url, name){
   const a = document.createElement("a");
@@ -386,10 +381,6 @@ function downloadBlob(url, name){
   a.remove();
 }
 
-
-/* =========================
-   HELPERS
-========================= */
 function setText(sel, val){
   const el = $(sel);
   if(el) el.textContent = val || "--";

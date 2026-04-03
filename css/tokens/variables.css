@@ -42,7 +42,66 @@
 
 
   /* =========================
-     🔥 KPI / FINANCIAL COLORS (NEW)
+     BASE
+  ========================= */
+  --main-bg:#0d0d0d;
+
+
+  /* =========================
+     SURFACE SYSTEM 🔥
+  ========================= */
+  --surface-1:#0d0d0d;
+  --surface-2:#1b1b1b;
+  --surface-3:#1e1e1e;
+
+  --dropdown-bg:var(--surface-2);
+
+
+  /* =========================
+     BORDERS 🔥
+  ========================= */
+  --border-soft:rgba(255,255,255,0.04);
+  --border-default:#2a2a2a;
+
+
+  /* =========================
+     CARDS
+  ========================= */
+  --card-bg:var(--surface-3);
+  --card-border:var(--border-default);
+
+  --card-shadow:0 10px 30px rgba(0,0,0,0.35);
+  --card-shadow-hover:0 20px 40px rgba(0,0,0,0.45);
+
+
+  /* =========================
+     PANELS
+  ========================= */
+  --panel-bg:var(--surface-2);
+  --panel-border:var(--border-default);
+
+  --panel-shadow:0 10px 30px rgba(0,0,0,0.4);
+
+
+  /* =========================
+     TEXT
+  ========================= */
+  --text:#ffffff;
+  --muted:rgba(255,255,255,0.92);
+  --dim:rgba(255,255,255,0.6);
+
+
+  /* =========================
+     STATUS
+  ========================= */
+  --success:#22c55e;
+  --warning:#f59e0b;
+  --error:#ef4444;
+  --info:#60a5fa;
+
+
+  /* =========================
+     KPI COLORS
   ========================= */
   --color-iva:#facc15;
   --color-iva-glow:rgba(250,204,21,.25);
@@ -63,61 +122,7 @@
   --sb-bg:#1b1b1b;
   --sb-hover:#121212;
   --sb-active:#151515;
-  --sb-border:rgba(255,255,255,0.04);
-
-
-  /* =========================
-     TEXT
-  ========================= */
-  --text:#ffffff;
-  --muted:rgba(255,255,255,0.92);
-  --dim:rgba(255,255,255,0.6);
-
-
-  /* =========================
-     BASE
-  ========================= */
-  --main-bg:#0d0d0d;
-  --dropdown-bg:#333333;
-
-
-  /* =========================
-     SURFACE SYSTEM
-  ========================= */
-  --surface-1:var(--main-bg);
-  --surface-2:var(--panel-bg);
-  --surface-3:var(--card-bg);
-
-
-  /* =========================
-     CARDS
-  ========================= */
-  --card-bg:#1e1e1e;
-  --card-border:#2a2a2a;
-
-  --card-shadow:0 10px 30px rgba(0,0,0,0.35);
-  --card-shadow-hover:0 20px 40px rgba(0,0,0,0.45);
-
-
-  /* =========================
-     PANELS
-  ========================= */
-  --panel-bg:#1b1b1b;
-  --panel-border:#2a2a2a;
-
-  --panel-shadow:0 10px 30px rgba(0,0,0,0.4);
-
-
-  /* =========================
-     STATUS
-  ========================= */
-  --success:#22c55e;
-  --warning:#f59e0b;
-  --error:#ef4444;
-  --info:#60a5fa;
-
-  --warning-bg:rgba(245,158,11,0.12);
-  --info-bg:rgba(59,130,246,0.12);
+  --sb-border:var(--border-soft);
 
 
   /* =========================
@@ -150,7 +155,7 @@
 
 
   /* =========================
-     SPACING SYSTEM
+     SPACING
   ========================= */
   --space-xs:6px;
   --space-sm:10px;
@@ -160,7 +165,7 @@
 
 
   /* =========================
-     🔥 DENSITY SYSTEM
+     DENSITY
   ========================= */
   --density-factor:1;
 
@@ -171,7 +176,7 @@
 
 
   /* =========================
-     🔥 TYPOGRAPHY SYSTEM
+     TYPOGRAPHY 🔥
   ========================= */
   --font-xs:11px;
   --font-sm:12px;
@@ -198,7 +203,7 @@
 
 
   /* =========================
-     RADIUS SYSTEM
+     RADIUS
   ========================= */
   --radius-sm:6px;
   --radius-md:10px;
@@ -206,7 +211,7 @@
 
 
   /* =========================
-     SHADOW SYSTEM
+     SHADOW
   ========================= */
   --shadow-sm:0 4px 12px rgba(0,0,0,0.2);
   --shadow-md:0 10px 30px rgba(0,0,0,0.35);

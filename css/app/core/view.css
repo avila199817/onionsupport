@@ -1,13 +1,12 @@
 /* =========================================================
-   🔥 VIEW UNIVERSAL — CLEAN (SIN LOADER)
+   🔥 PANEL UNIVERSAL — SAAS CORE
 ========================================================= */
 
 /* =========================
    ROOT
 ========================= */
-.panel-view{
+.panel-content{
   position:relative;
-
   display:flex;
   flex-direction:column;
   flex:1;
@@ -17,31 +16,86 @@
 }
 
 
-/* =========================================================
-   LAYOUT (ANIMACIÓN SUAVE)
-========================================================= */
-.panel-view .view-layout{
+/* =========================
+   LOADER
+========================= */
+.panel-content.loading .view-layout{
+  opacity:0;
+  pointer-events:none;
+}
+
+.panel-content.loading .view-loading{
+  opacity:1;
+  pointer-events:auto;
+}
+
+.panel-content.ready .view-layout{
+  opacity:1;
+  transform:translateY(0);
+}
+
+.panel-content.ready .view-loading{
+  opacity:0;
+  pointer-events:none;
+}
+
+
+/* =========================
+   LOADER ELEMENT
+========================= */
+.view-loading{
+  position:absolute;
+  inset:0;
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  background:var(--main-bg);
+  z-index:5;
+
+  opacity:1;
+  transition:opacity .25s ease;
+}
+
+/* opcional: spinner */
+.view-loading::after{
+  content:"";
+  width:28px;
+  height:28px;
+  border-radius:50%;
+  border:3px solid rgba(255,255,255,0.1);
+  border-top-color:var(--accent);
+  animation:spin .8s linear infinite;
+}
+
+@keyframes spin{
+  to{ transform:rotate(360deg); }
+}
+
+
+/* =========================
+   LAYOUT
+========================= */
+.panel-content .view-layout{
   display:flex;
   flex:1;
   min-height:0;
   width:100%;
 
   opacity:0;
-  transform:translateY(4px);
-  transition:opacity .25s ease, transform .25s ease;
-}
+  transform:translateY(6px);
 
-/* READY */
-.panel-view.ready .view-layout{
-  opacity:1;
-  transform:translateY(0);
+  transition:
+    opacity .25s ease,
+    transform .25s ease;
 }
 
 
-/* =========================================================
-   LEFT (MAIN)
-========================================================= */
-.panel-view .view-main{
+/* =========================
+   MAIN
+========================= */
+.panel-content .view-main{
   flex:1;
   min-width:0;
   display:flex;
@@ -51,10 +105,10 @@
 }
 
 
-/* =========================================================
-   RIGHT SIDEBAR
-========================================================= */
-.panel-view .view-aside{
+/* =========================
+   SIDEBAR
+========================= */
+.panel-content .view-aside{
   width:340px;
   min-width:340px;
   flex-shrink:0;
@@ -67,10 +121,10 @@
 }
 
 
-/* =========================================================
+/* =========================
    HEADER
-========================================================= */
-.panel-view .view-header{
+========================= */
+.panel-content .view-header{
   display:flex;
   align-items:center;
   justify-content:space-between;
@@ -81,17 +135,17 @@
   border-bottom:1px solid var(--panel-border);
 }
 
-.panel-view .view-user{
+.panel-content .view-user{
   display:flex;
   align-items:center;
   gap:12px;
 }
 
 
-/* =========================================================
+/* =========================
    AVATAR
-========================================================= */
-.panel-view .view-avatar{
+========================= */
+.panel-content .view-avatar{
   width:38px;
   height:38px;
   border-radius:50%;
@@ -107,7 +161,7 @@
   font-size:13px;
 }
 
-.panel-view .view-avatar img{
+.panel-content .view-avatar img{
   width:100%;
   height:100%;
   object-fit:cover;
@@ -115,25 +169,25 @@
 }
 
 
-/* =========================================================
+/* =========================
    TEXT
-========================================================= */
-.panel-view .view-user-info{
+========================= */
+.panel-content .view-user-info{
   display:flex;
   flex-direction:column;
 }
 
-.panel-view .view-title{
+.panel-content .view-title{
   font-size:14px;
   font-weight:600;
 }
 
-.panel-view .view-sub{
+.panel-content .view-sub{
   font-size:11px;
   color:var(--dim);
 }
 
-.panel-view .view-back{
+.panel-content .view-back{
   background:none;
   border:none;
   color:var(--text);
@@ -143,45 +197,45 @@
   transition:.15s;
 }
 
-.panel-view .view-back:hover{
+.panel-content .view-back:hover{
   opacity:1;
   transform:translateX(-2px);
 }
 
 
-/* =========================================================
+/* =========================
    BODY
-========================================================= */
-.panel-view .view-body{
+========================= */
+.panel-content .view-body{
   flex:1;
   padding:26px 30px;
   overflow:auto;
 }
 
-.panel-view .view-body::-webkit-scrollbar{
+.panel-content .view-body::-webkit-scrollbar{
   width:6px;
 }
 
-.panel-view .view-body::-webkit-scrollbar-thumb{
+.panel-content .view-body::-webkit-scrollbar-thumb{
   background:var(--scrollbar-thumb);
   border-radius:6px;
 }
 
 
-/* =========================================================
+/* =========================
    GRID
-========================================================= */
-.panel-view .view-grid{
+========================= */
+.panel-content .view-grid{
   display:grid;
   grid-template-columns:repeat(2,1fr);
   gap:18px;
 }
 
 
-/* =========================================================
+/* =========================
    CARD
-========================================================= */
-.panel-view .view-card{
+========================= */
+.panel-content .view-card{
   display:flex;
   flex-direction:column;
   gap:6px;
@@ -195,95 +249,36 @@
   transition:.15s;
 }
 
-.panel-view .view-card:hover{
+.panel-content .view-card:hover{
   background:color-mix(in srgb, var(--card-bg), #000 6%);
 }
 
-.panel-view .view-label{
+.panel-content .view-label{
   font-size:var(--font-xs);
   color:var(--dim);
   text-transform:uppercase;
   letter-spacing:.5px;
 }
 
-.panel-view .view-value{
+.panel-content .view-value{
   font-size:var(--font-base);
   font-weight:600;
   color:var(--text);
 }
 
 
-/* =========================================================
-   BADGES
-========================================================= */
-.view-badge{
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-
-  padding:3px 8px;
-  border-radius:999px;
-
-  font-size:10.5px;
-  font-weight:600;
-
-  white-space:nowrap;
-  transition:.15s;
-}
-
-.view-badge.success{
-  background:rgba(34,197,94,0.12);
-  color:#22c55e;
-}
-
-.view-badge.warning{
-  background:rgba(234,179,8,0.12);
-  color:#eab308;
-}
-
-.view-badge.error{
-  background:rgba(239,68,68,0.12);
-  color:#ef4444;
-}
-
-.view-badge:hover{
-  transform:translateY(-1px);
-}
-
-
-/* =========================================================
-   COLORS
-========================================================= */
-.view-value.iva{
-  color:var(--color-iva);
-  text-shadow:0 0 10px var(--color-iva-glow);
-  font-weight:700;
-}
-
-.view-value.irpf{
-  color:var(--color-irpf);
-  text-shadow:0 0 10px var(--color-irpf-glow);
-  font-weight:700;
-}
-
-.view-value.money{
-  color:var(--color-beneficio);
-  text-shadow:0 0 10px var(--color-beneficio-glow);
-}
-
-
-/* =========================================================
+/* =========================
    FULL WIDTH
-========================================================= */
-.panel-view .view-card.full{
+========================= */
+.panel-content .view-card.full{
   grid-column:span 2;
 }
 
 
-/* =========================================================
-   SIDEBAR
-========================================================= */
-.panel-view .view-sidebar{
+/* =========================
+   SIDEBAR CONTENT
+========================= */
+.panel-content .view-sidebar{
   padding:18px;
   display:flex;
   flex-direction:column;
@@ -291,29 +286,33 @@
   overflow:auto;
 }
 
-.panel-view .view-section{
+.panel-content .view-section{
   display:flex;
   flex-direction:column;
   gap:10px;
 }
 
-.panel-view .view-section-title{
+.panel-content .view-section-title{
   font-size:11px;
   text-transform:uppercase;
   color:var(--dim);
 }
 
 
-/* =========================================================
+/* =========================
    FILES
-========================================================= */
-.panel-view .view-files{
+========================= */
+.panel-content .view-files{
   display:flex;
   flex-direction:column;
   gap:8px;
 }
 
-.panel-view .view-btn{
+
+/* =========================
+   BUTTONS
+========================= */
+.panel-content .view-btn{
   padding:6px 10px;
   border:none;
   border-radius:8px;
@@ -322,35 +321,35 @@
   transition:.15s;
 }
 
-.panel-view .view-btn.primary{
+.panel-content .view-btn.primary{
   background:linear-gradient(135deg,var(--accent),var(--accent-hover));
   color:#fff;
 }
 
-.panel-view .view-btn.primary:hover{
+.panel-content .view-btn.primary:hover{
   transform:translateY(-1px);
 }
 
-.panel-view .view-btn.soft{
+.panel-content .view-btn.soft{
   background:rgba(255,255,255,.06);
   color:var(--text);
 }
 
-.panel-view .view-btn.soft:hover{
+.panel-content .view-btn.soft:hover{
   background:rgba(255,255,255,.1);
 }
 
 
-/* =========================================================
+/* =========================
    RESPONSIVE
-========================================================= */
+========================= */
 @media (max-width:1100px){
 
-  .panel-view .view-aside{
+  .panel-content .view-aside{
     display:none;
   }
 
-  .panel-view .view-body{
+  .panel-content .view-body{
     padding:20px;
   }
 

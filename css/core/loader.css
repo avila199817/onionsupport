@@ -1,5 +1,5 @@
 /* =========================================================
-   🔥 GLOBAL APP LOADER — SAAS PRO (FIXED)
+   🔥 GLOBAL APP LOADER — SAAS PRO (FINAL SOLID)
 ========================================================= */
 
 /* =========================
@@ -14,16 +14,16 @@
   align-items:center;
   justify-content:center;
 
-  /* 🔥 IMPORTANTE: transparente */
-  background:transparent;
+  /* 🔥 FONDO TOTAL (usa tu sistema) */
+  background:color-mix(in srgb, var(--main-bg) 92%, transparent);
 
   opacity:0;
   visibility:hidden;
   pointer-events:none;
 
   transition:
-    opacity .25s ease,
-    visibility .25s ease;
+    opacity var(--duration-normal) var(--ease-out),
+    visibility var(--duration-normal) var(--ease-out);
 }
 
 
@@ -35,7 +35,6 @@ body.loading #app-loader{
   visibility:visible;
   pointer-events:auto;
 
-  /* 🔥 blur sin fondo sólido */
   backdrop-filter:blur(8px);
   -webkit-backdrop-filter:blur(8px);
 }
@@ -118,7 +117,7 @@ body.loading *{
 ========================= */
 #app-content{
   opacity:1;
-  transition:opacity .18s ease;
+  transition:opacity var(--duration-fast) var(--ease-out);
 }
 
 body.loading #app-content{
@@ -137,16 +136,20 @@ body.loading textarea{
 
 
 /* =========================================================
-   🔥 TABLE LOADER — SAAS PRO (FLOATING FIX)
+   🔥 TABLE LOADER — SAAS PRO (FLOATING FINAL)
 ========================================================= */
 
-/* 🔥 CONTENEDOR RELATIVO */
+/* =========================
+   CONTENEDOR
+========================= */
 .table-container{
   position:relative;
 }
 
 
-/* 🔥 FILA LOADER OCULTA (NO BLOQUE) */
+/* =========================
+   FILA OCULTA
+========================= */
 .table-loading{
   height:0;
 }
@@ -158,7 +161,9 @@ body.loading textarea{
 }
 
 
-/* 🔥 LOADER FLOTANTE (CLAVE) */
+/* =========================
+   LOADER FLOTANTE
+========================= */
 .table-loader{
   position:absolute;
   inset:0;
@@ -171,8 +176,8 @@ body.loading textarea{
 
   z-index:2;
 
-  color:var(--text-secondary, #9ca3af);
-  font-size:13px;
+  color:var(--dim);
+  font-size:var(--font-sm);
 
   background:transparent;
   pointer-events:none;
@@ -180,7 +185,7 @@ body.loading textarea{
 
 
 /* =========================
-   SPINNER LOCAL
+   SPINNER
 ========================= */
 .table-loader .spinner{
   position:relative;
@@ -224,7 +229,7 @@ body.light .table-loader{
   color:#6b7280;
 }
 
-body.light .table-loader .spinner::before{
+body.light .spinner::before{
   border-color:rgba(0,0,0,0.08);
 }
 

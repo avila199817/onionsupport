@@ -317,7 +317,7 @@ function uploadFile(file){
 
 
 /* =========================
-   RENDER 🔥 AFINADO PRO
+   RENDER 🔥 FINAL ESTABLE
 ========================= */
 function render(i){
 
@@ -326,7 +326,10 @@ function render(i){
   /* =========================
      USER
   ========================= */
-  setText("#detalle-usuario", i?.name || i?.cliente?.nombre || "--");
+  const nombre = i?.name || i?.cliente?.nombre || "--";
+  const avatar = i?.avatar || i?.cliente?.avatar || null;
+
+  setText("#detalle-usuario", nombre);
   setText("#detalle-userid", i?.userId || i?.clienteId || "--");
 
 
@@ -339,26 +342,27 @@ function render(i){
 
 
   /* =========================
-     FECHA CIERRE 🔥
+     FECHA CIERRE
   ========================= */
   setText(
     "#detalle-fecha-cierre",
-    i?.closedAt
-      ? formatFecha(i.closedAt)
-      : "--"
+    i?.closedAt ? formatFecha(i.closedAt) : "--"
   );
 
 
   /* =========================
-     TECNICO 🔥 (BLINDADO)
+     TECNICO (FIX REAL)
   ========================= */
   let tecnico = "No asignado";
 
   if(i?.tecnico){
 
-    if(typeof i.tecnico === "object"){
-      tecnico = i.tecnico?.name || "No asignado";
+    // caso correcto (tu JSON real)
+    if(i.tecnico.name){
+      tecnico = i.tecnico.name;
     }
+
+    // fallback por si algún día viene string
     else if(typeof i.tecnico === "string"){
       tecnico = i.tecnico;
     }
@@ -378,12 +382,9 @@ function render(i){
 
 
   /* =========================
-     AVATAR
+     AVATAR (FIX REAL)
   ========================= */
-  renderAvatar(
-    i?.name || i?.cliente?.nombre,
-    i?.avatar
-  );
+  renderAvatar(nombre, avatar);
 
 
   /* =========================
@@ -392,7 +393,7 @@ function render(i){
   renderBlobs(i?.attachments || []);
 
 }
-
+  
   
 /* =========================
    UI HELPERS

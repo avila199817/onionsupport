@@ -9,10 +9,6 @@
 
   const Onion = window.Onion;
 
-  /* =========================
-     NORMALIZE URL
-  ========================= */
-
   function normalizeUrl(src){
     if(!src) return null;
 
@@ -27,10 +23,6 @@
     return window.location.origin + "/" + src.replace(/^\/+/,"");
   }
 
-  /* =========================
-     LOAD SCRIPT
-  ========================= */
-
   Onion.loadScript = function(src){
     return new Promise((resolve, reject)=>{
 
@@ -42,7 +34,7 @@
       });
 
       const s = document.createElement("script");
-      s.src = finalSrc; // 🔥 SIN timestamp
+      s.src = finalSrc;
       s.defer = true;
       s.async = false;
       s.setAttribute("data-onion-page","true");
@@ -54,10 +46,6 @@
 
     });
   };
-
-  /* =========================
-     LOAD STYLE (FIXED)
-  ========================= */
 
   Onion.loadStyle = function(styles){
     return new Promise((resolve)=>{
@@ -81,7 +69,7 @@
 
         const link = document.createElement("link");
         link.rel = "stylesheet";
-        link.href = finalHref; // 🔥 SIN timestamp
+        link.href = finalHref;
         link.setAttribute("data-onion-page-style","true");
 
         link.onload = done;
@@ -97,14 +85,12 @@
 
         if(loaded === styles.length){
 
-          // 🔥 ahora sí limpiamos estilos antiguos
           document
             .querySelectorAll('link[data-onion-page-style-old]')
             .forEach(l=>{
               try{ l.remove(); }catch{}
             });
 
-          // 🔥 marcamos los actuales como antiguos para próxima carga
           newLinks.forEach(l=>{
             l.setAttribute("data-onion-page-style-old","true");
           });
@@ -115,10 +101,6 @@
 
     });
   };
-
-  /* =========================
-     FETCH HTML
-  ========================= */
 
   Onion.fetchHTML = async function(url){
 
@@ -136,10 +118,6 @@
     return await res.text();
   };
 
-  /* =========================
-     EXTRACT CONTENT
-  ========================= */
-
   function extractContent(html){
 
     const wrapper = document.createElement("div");
@@ -150,10 +128,6 @@
       wrapper
     );
   }
-
-  /* =========================
-     SWAP CONTENT
-  ========================= */
 
   Onion.swapContent = function(node){
 
@@ -166,9 +140,8 @@
   };
 
   /* =========================
-     RENDER (FIXED FLOW)
+     RENDER PRO 🔥
   ========================= */
-
   Onion.render = async function(){
 
     const currentRenderId = ++Onion.state.renderId;
@@ -190,45 +163,36 @@
       const content = extractContent(html);
       content.classList.remove("ready");
 
-      /* =========================
-         CLEANUP
-      ========================= */
-
       Onion.runCleanup?.();
 
-      /* =========================
-         🔥 STYLE FIRST (CLAVE)
-      ========================= */
-
+      /* 🔥 CARGA ESTILOS PRIMERO */
       if(route.style){
         await Onion.loadStyle(route.style);
       }
 
-      /* =========================
-         SWAP DESPUÉS
-      ========================= */
-
+      /* 🔥 INSERTA HTML */
       Onion.swapContent(content);
 
-      /* =========================
-         SCRIPT
-      ========================= */
-
+      /* 🔥 CARGA SCRIPT */
       if(route.script){
         await Onion.loadScript(route.script);
       }
 
       if(currentRenderId !== Onion.state.renderId) return;
 
+      /* 🔥 DOBLE FRAME = CLAVE ABSOLUTA */
+      await new Promise(r => requestAnimationFrame(r));
       await new Promise(r => requestAnimationFrame(r));
 
+      /* 🔥 AHORA YA ESTÁ TODO PINTADO */
       content.classList.add("ready");
+
+      /* 🔥 QUITAMOS LOADER AQUÍ (NO EN FINALLY) */
+      Onion.ui.hideLoader?.();
 
     }catch(e){
 
       console.error("💥 RENDER ERROR:", e);
-
-    }finally{
 
       Onion.ui.hideLoader?.();
 

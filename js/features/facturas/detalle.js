@@ -263,13 +263,39 @@ function render(){
 
   renderAvatar(c);
 
-  setText("#detalle-numero-legal", factura.numeroFacturaLegal || factura.numero || "--");
+  /* =========================
+     NUMEROS
+  ========================= */
+  const numeroLegal = factura.numeroFacturaLegal || factura.numero || "--";
+
+  setText("#detalle-numero-legal", numeroLegal);
   setText("#detalle-id", factura.id || "--");
   setText("#detalle-incidencia-id", factura.incidenciaId || "--");
 
+
+  /* =========================
+     🔥 SIDEBAR TITLE FIX
+  ========================= */
+  const fileCard = document.querySelector(".view-file");
+
+  if(fileCard){
+    const label = fileCard.querySelector("span");
+    if(label){
+      label.textContent = numeroLegal;
+    }
+  }
+
+
+  /* =========================
+     FECHAS
+  ========================= */
   setText("#detalle-fecha", formatFecha(factura.fecha));
   setText("#detalle-vencimiento", formatFecha(factura.fechaServicio));
 
+
+  /* =========================
+     METODO
+  ========================= */
   setText(
     "#detalle-metodo",
     factura.estadoPago === "pagada"
@@ -277,10 +303,18 @@ function render(){
       : "-"
   );
 
+
+  /* =========================
+     IMPORTES
+  ========================= */
   setText("#detalle-total", formatMoney(factura.total));
   setText("#detalle-concepto", factura.concepto || "-");
   setText("#detalle-descripcion", factura.descripcion || "-");
 
+
+  /* =========================
+     ESTADO
+  ========================= */
   const estadoEl = $("#detalle-estado");
 
   if(estadoEl){
@@ -294,6 +328,10 @@ function render(){
       "Pendiente";
   }
 
+
+  /* =========================
+     IVA
+  ========================= */
   const iva = factura.impuestos?.find(i => i.tipo === "IVA");
 
   setText(
@@ -303,6 +341,10 @@ function render(){
       : "--"
   );
 
+
+  /* =========================
+     IRPF
+  ========================= */
   const irpfContainer = $("#detalle-irpf-container");
 
   let irpf = factura.impuestos?.find(i => i.tipo === "IRPF");
@@ -333,7 +375,7 @@ function render(){
 
 }
 
-
+  
 /* =========================================================
    AVATAR
 ========================================================= */

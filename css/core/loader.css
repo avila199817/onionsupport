@@ -1,7 +1,6 @@
 /* =========================================================
-   🔥 GLOBAL APP LOADER — SAAS PRO (FINAL GOD MODE)
+   🔥 GLOBAL APP LOADER — SAAS PRO
 ========================================================= */
-
 
 /* =========================
    ROOT
@@ -97,20 +96,6 @@ body.loading #app-loader{
 
 
 /* =========================
-   ANIMATIONS
-========================= */
-@keyframes spin{
-  to{ transform:rotate(360deg); }
-}
-
-@keyframes loaderPulse{
-  0%{ transform:scale(.94); opacity:.6; }
-  50%{ transform:scale(1); opacity:1; }
-  100%{ transform:scale(.94); opacity:.6; }
-}
-
-
-/* =========================
    UX LOCK (PRO)
 ========================= */
 body.loading{
@@ -118,19 +103,19 @@ body.loading{
   cursor:progress;
 }
 
-/* 🔥 bloquea interacción global */
+/* bloquea interacción global */
 body.loading *{
   pointer-events:none;
 }
 
-/* 🔥 PERMITE interacción en loader */
+/* permite interacción en loader */
 #app-loader{
   pointer-events:auto;
 }
 
 
 /* =========================
-   CONTENT FADE (CLAVE)
+   CONTENT FADE
 ========================= */
 #app-content{
   opacity:1;
@@ -148,4 +133,102 @@ body.loading #app-content{
 body.loading input,
 body.loading textarea{
   caret-color:transparent;
+}
+
+
+
+/* =========================================================
+   🔥 TABLE LOADER — LOCAL (INCIDENCIAS / TABLAS)
+========================================================= */
+
+.table-loader{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:12px;
+  padding:40px 20px;
+  width:100%;
+
+  color:var(--text-secondary, #9ca3af);
+  font-size:13px;
+}
+
+
+/* =========================
+   SPINNER LOCAL
+========================= */
+.table-loader .spinner{
+  position:relative;
+  width:26px;
+  height:26px;
+}
+
+/* base */
+.table-loader .spinner::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  border-radius:50%;
+  border:2px solid rgba(255,255,255,0.08);
+}
+
+/* activo */
+.table-loader .spinner::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  border-radius:50%;
+  border:2px solid transparent;
+  border-top-color:var(--accent);
+  border-right-color:var(--accent);
+
+  animation:spin .7s linear infinite;
+}
+
+
+/* =========================
+   TEXTO ANIMADO
+========================= */
+.table-loader span{
+  animation:fadePulse 1.6s ease-in-out infinite;
+}
+
+
+/* =========================
+   ROW FIX
+========================= */
+.table-loading td{
+  border-bottom:none !important;
+}
+
+
+/* =========================
+   LIGHT MODE
+========================= */
+body.light .table-loader{
+  color:#6b7280;
+}
+
+body.light .table-loader .spinner::before{
+  border-color:rgba(0,0,0,0.08);
+}
+
+
+/* =========================
+   ANIMACIONES
+========================= */
+@keyframes spin{
+  to{ transform:rotate(360deg); }
+}
+
+@keyframes loaderPulse{
+  0%{ transform:scale(.94); opacity:.6; }
+  50%{ transform:scale(1); opacity:1; }
+  100%{ transform:scale(.94); opacity:.6; }
+}
+
+@keyframes fadePulse{
+  0%,100%{ opacity:.4; }
+  50%{ opacity:1; }
 }

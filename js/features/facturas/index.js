@@ -112,7 +112,35 @@ async function handleAction(btn){
         return;
       }
 
-      window.open(res.url, "_blank");
+      /* =========================
+         DESCARGA PRO (SIN PESTAÑA)
+      ========================= */
+
+      try{
+        // 🚀 Método rápido (la mayoría de casos)
+        const link = document.createElement("a");
+        link.href = res.url;
+        link.download = `factura-${id}.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+      }catch(err){
+
+        console.warn("⚠️ FALLBACK BLOB ACTIVADO", err);
+
+        // 🧱 Método blindado (fallback total)
+        const response = await fetch(res.url);
+        const blob = await response.blob();
+
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `factura-${id}.pdf`;
+        a.click();
+
+        window.URL.revokeObjectURL(url);
+      }
 
     }catch(e){
       console.error("💥 ERROR DOWNLOAD:", e);

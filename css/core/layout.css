@@ -121,7 +121,7 @@ html, body{
   padding:var(--space-lg);
   gap:var(--space-lg);
 
-  overflow:hidden; /* 🔥 SE MANTIENE */
+  overflow:auto;
 
   background:transparent;
 }

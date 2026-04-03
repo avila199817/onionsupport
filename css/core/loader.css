@@ -1,7 +1,10 @@
 /* =========================================================
-   🔥 GLOBAL APP LOADER — SAAS PRO 10/10
+   🔥 GLOBAL APP LOADER — SAAS PRO 10/10 FINAL
 ========================================================= */
 
+/* =========================
+   ROOT
+========================= */
 #app-loader{
   position:fixed;
   inset:0;
@@ -26,39 +29,75 @@
 body.loading #app-loader{
   opacity:1;
   pointer-events:auto;
-}
 
-
-/* =========================
-   SPINNER
-========================= */
-#app-loader::after{
-  content:"";
-
-  width:46px;
-  height:46px;
-
-  border-radius:50%;
-  border:3px solid rgba(255,255,255,0.15);
-  border-top-color:var(--accent);
-
-  animation:spin .8s linear infinite;
-}
-
-
-/* =========================
-   BACKGROUND FX
-========================= */
-body.loading #app-loader{
   backdrop-filter:blur(6px);
 }
 
 
 /* =========================
-   ANIMATION
+   CENTER
+========================= */
+#app-loader .loader-center{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  position:relative;
+}
+
+
+/* =========================
+   LOGO
+========================= */
+.loader-logo{
+  width:42px;
+  height:42px;
+  object-fit:contain;
+
+  z-index:2;
+
+  animation:loaderPulse 1.2s ease-in-out infinite;
+}
+
+
+/* DARK / LIGHT */
+.loader-light{ display:none; }
+
+@media (prefers-color-scheme: light){
+  .loader-dark{ display:none; }
+  .loader-light{ display:block; }
+}
+
+
+/* =========================
+   SPINNER RING (SUAVE)
+========================= */
+#app-loader::after{
+  content:"";
+
+  position:absolute;
+
+  width:70px;
+  height:70px;
+
+  border-radius:50%;
+  border:2px solid rgba(255,255,255,0.08);
+  border-top-color:var(--accent);
+
+  animation:spin .9s linear infinite;
+}
+
+
+/* =========================
+   ANIMATIONS
 ========================= */
 @keyframes spin{
   to{ transform:rotate(360deg); }
+}
+
+@keyframes loaderPulse{
+  0%{ transform:scale(.92); opacity:.6; }
+  50%{ transform:scale(1); opacity:1; }
+  100%{ transform:scale(.92); opacity:.6; }
 }
 
 

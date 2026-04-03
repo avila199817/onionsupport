@@ -200,6 +200,7 @@ body.loading textarea{
 ========================= */
 .table-loading td{
   border-bottom:none !important;
+  background: transparent !important;
 }
 
 

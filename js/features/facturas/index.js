@@ -193,9 +193,13 @@ async function loadFacturas(){
   const tbody = $("#facturas-body");
   if(!tbody) return;
 
+  // 🔥 QUITAR FOCO (evita cursor raro)
+  document.activeElement?.blur();
+
+  // 🔥 ACTIVAR LOADER
   panel?.classList.add("loading");
 
-  // 🔥 LIMPIEZA PRO (evita factura fantasma)
+  // 🔥 LIMPIEZA PRO (evita datos viejos)
   setLoadingTable();
 
   try{
@@ -220,6 +224,7 @@ async function loadFacturas(){
 
   }finally{
 
+    // 🔥 DESACTIVAR LOADER SIEMPRE
     panel?.classList.remove("loading");
     loading = false;
 

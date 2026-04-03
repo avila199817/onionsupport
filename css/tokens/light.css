@@ -12,7 +12,7 @@
   /* =========================
      TEXT
   ========================= */
-  --text:#0f172a; /* 🔥 más pro que #111827 */
+  --text:#0f172a;
   --muted:#334155;
   --dim:#64748b;
 
@@ -21,22 +21,29 @@
      BASE
   ========================= */
   --main-bg:#f6f8fb;
-  --dropdown-bg:#ffffff;
 
 
   /* =========================
-     SURFACE SYSTEM
+     SURFACE SYSTEM 🔥
   ========================= */
   --surface-1:#f6f8fb;
   --surface-2:#ffffff;
-  --surface-3:#ffffff;
+  --surface-3:#f9fafb;
+
+  --dropdown-bg:var(--surface-2);
+
+
+  /* =========================
+     BORDERS
+  ========================= */
+  --border-default:rgba(0,0,0,0.06);
 
 
   /* =========================
      CARDS
   ========================= */
-  --card-bg:#ffffff;
-  --card-border:rgba(0,0,0,0.06);
+  --card-bg:var(--surface-2);
+  --card-border:var(--border-default);
 
   --card-shadow:
     0 6px 18px rgba(0,0,0,0.05),
@@ -50,8 +57,8 @@
   /* =========================
      PANELS
   ========================= */
-  --panel-bg:#ffffff;
-  --panel-border:rgba(0,0,0,0.06);
+  --panel-bg:var(--surface-2);
+  --panel-border:var(--border-default);
 
   --panel-shadow:
     0 10px 30px rgba(0,0,0,0.06),
@@ -103,7 +110,7 @@
 
 
   /* =========================
-     SHADOW SYSTEM (LIGHT TUNED)
+     SHADOW SYSTEM
   ========================= */
   --shadow-sm:0 4px 12px rgba(0,0,0,0.06);
   --shadow-md:0 10px 30px rgba(0,0,0,0.08);

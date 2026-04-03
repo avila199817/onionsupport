@@ -1,9 +1,7 @@
-<div class="panel-content incidencia-detalle">
+<div class="panel-view incidencia-detalle">
 
-  <!-- 🔥 LOADING OVERLAY (MISMO SISTEMA QUE INCIDENCIAS) -->
-  <div class="incidencia-detalle-loading">
-    <div class="incidencia-detalle-spinner"></div>
-  </div>
+  <!-- 🔥 LOADER UNIVERSAL -->
+  <div class="view-loading"></div>
 
   <div class="view-layout">
 
@@ -35,37 +33,31 @@
 
         <div class="view-grid">
 
-          <!-- ID -->
           <div class="view-card">
             <div class="view-label">ID</div>
             <div class="view-value" id="detalle-id">--</div>
           </div>
 
-          <!-- FECHA CREACIÓN -->
           <div class="view-card">
             <div class="view-label">Fecha de creación</div>
             <div class="view-value" id="detalle-fecha">--</div>
           </div>
 
-          <!-- FECHA CIERRE -->
           <div class="view-card">
             <div class="view-label">Fecha cierre</div>
             <div class="view-value" id="detalle-fecha-cierre">--</div>
           </div>
 
-          <!-- TÉCNICO -->
           <div class="view-card">
             <div class="view-label">Técnico asignado</div>
             <div class="view-value" id="detalle-tecnico">--</div>
           </div>
 
-          <!-- TÍTULO -->
           <div class="view-card full">
             <div class="view-label">Título</div>
             <div class="view-value" id="detalle-titulo">--</div>
           </div>
 
-          <!-- MENSAJE -->
           <div class="view-card full">
             <div class="view-label">Mensaje</div>
 
@@ -76,7 +68,6 @@
             ></div>
           </div>
 
-          <!-- ESTADO -->
           <div class="view-card">
             <div class="view-label">Estado</div>
 
@@ -86,7 +77,6 @@
             </select>
           </div>
 
-          <!-- PRIORIDAD -->
           <div class="view-card">
             <div class="view-label">Prioridad</div>
 
@@ -97,7 +87,6 @@
             </select>
           </div>
 
-          <!-- ADJUNTOS -->
           <div class="view-card full">
             <div class="view-label">Adjuntos del usuario</div>
 
@@ -116,7 +105,6 @@
 
         </div>
 
-        <!-- FOOTER -->
         <div class="view-footer">
 
           <div class="view-hint">
@@ -140,7 +128,6 @@
 
       <div class="view-sidebar">
 
-        <!-- USER FILES -->
         <div class="view-section">
           <div class="view-section-title">Archivos del usuario</div>
           <div id="detalle-blobs-user" class="view-files"></div>
@@ -148,7 +135,6 @@
 
         <div class="sidebar-divider"></div>
 
-        <!-- TEAM FILES -->
         <div class="view-section">
           <div class="view-section-title">Adjuntos soporte</div>
           <div id="detalle-blobs-team" class="view-files"></div>

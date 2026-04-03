@@ -122,9 +122,14 @@
   });
 
   /* =========================
+     STATE
+  ========================= */
+  Onion.state = Onion.state || {};
+  Onion.state.navigating = false;
+
+  /* =========================
      TITLE
   ========================= */
-
   Onion.setTitle = function(title){
     document.title = title ? `${title} · Onion` : "Onion Panel";
   };
@@ -132,38 +137,26 @@
   /* =========================
      NORMALIZE
   ========================= */
-
   function normalize(path){
-
     if(!path) return "/";
-
     path = path.replace(/\/+/g, "/");
-
     if(path.length > 1 && path.endsWith("/")){
       path = path.slice(0, -1);
     }
-
     return path || "/";
   }
 
   /* =========================
      GET
   ========================= */
-
   Onion.router.get = function(){
-
     try{
-
       let path = normalize(window.location.pathname);
 
       if(path.startsWith("/@")){
-
         const parts = path.split("/").filter(Boolean);
-
         const userSlug = parts[0];
-        const cleanUser = userSlug.replace("@","");
-
-        Onion.state.slug = cleanUser;
+        Onion.state.slug = userSlug.replace("@","");
 
         if(parts.length === 1){
           return "/";
@@ -175,22 +168,16 @@
       return path;
 
     }catch(e){
-
       console.error("💥 Router get error:", e);
       return "/";
-
     }
-
   };
 
   /* =========================
      RESOLVE
   ========================= */
-
   Onion.router.resolve = function(){
-
     try{
-
       const route = Onion.router.get();
 
       if(!Onion.routes[route]){
@@ -198,34 +185,30 @@
       }
 
       const config = Onion.routes[route] || Onion.routes["/"];
-
       Onion.setTitle(config.title);
 
       return config;
 
     }catch(e){
-
       console.error("💥 Router resolve error:", e);
       Onion.setTitle("Panel");
-
       return Onion.routes["/"];
-
     }
-
   };
 
   /* =========================
-     NAVIGATE
+     NAVIGATE 🔥
   ========================= */
-
   Onion.router.navigate = function(href){
 
-    if(!href) return;
+    if(!href || Onion.state.navigating) return;
 
     if(href.startsWith("http")){
       window.location.href = href;
       return;
     }
+
+    Onion.state.navigating = true;
 
     const username =
       Onion.state.slug ||
@@ -246,12 +229,19 @@
       finalHref = "/@" + username + href;
     }
 
-    if(normalize(window.location.pathname) === normalize(finalHref)) return;
+    if(normalize(window.location.pathname) === normalize(finalHref)){
+      Onion.state.navigating = false;
+      return;
+    }
+
+    /* 🔥 LOADER ON */
+    Onion.ui?.showLoader?.();
 
     history.pushState({}, "", finalHref);
 
     Onion.render().then(()=>{
       Onion.ui?.init?.();
+      Onion.state.navigating = false;
     });
 
   };
@@ -259,7 +249,6 @@
   /* =========================
      CLICK INTERCEPT
   ========================= */
-
   if(!window.__ONION_ROUTER_BOUND__){
 
     window.__ONION_ROUTER_BOUND__ = true;
@@ -285,17 +274,23 @@
   }
 
   /* =========================
-     POPSTATE
+     POPSTATE 🔥
   ========================= */
-
   if(!window.__ONION_POPSTATE_BOUND__){
 
     window.__ONION_POPSTATE_BOUND__ = true;
 
     window.addEventListener("popstate", function(){
 
+      if(Onion.state.navigating) return;
+
+      Onion.state.navigating = true;
+
+      Onion.ui?.showLoader?.();
+
       Onion.render().then(()=>{
         Onion.ui?.init?.();
+        Onion.state.navigating = false;
       });
 
     });
@@ -305,15 +300,9 @@
   /* =========================
      HAS ROUTE
   ========================= */
-
   Onion.router.has = function(path){
-
     if(!path) return false;
-
-    const clean = normalize(path);
-
-    return !!Onion.routes[clean];
-
+    return !!Onion.routes[normalize(path)];
   };
 
 })();

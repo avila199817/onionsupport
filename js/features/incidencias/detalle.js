@@ -55,7 +55,7 @@ function $(selector){
 
 
 /* =========================
-   LOADER REAL (TIPO TABLA) 🔥
+   LOADER REAL 🔥
 ========================= */
 function setLoading(active){
 
@@ -200,10 +200,7 @@ async function loadDetalle(){
 
     if(requestId === currentRequestId){
 
-      // 🔥 pequeño delay = UX suave
-      setTimeout(()=>{
-        setLoading(false);
-      }, 100);
+      setTimeout(()=> setLoading(false), 100);
 
     }
 
@@ -320,21 +317,32 @@ function uploadFile(file){
 
 
 /* =========================
-   RENDER
+   RENDER 🔥 AFINADO
 ========================= */
 function render(i){
 
   if(!i) return;
 
-  setText("#detalle-usuario", i?.cliente?.nombre);
+  /* USER */
+  setText("#detalle-usuario", i?.name || i?.cliente?.nombre);
+  setText("#detalle-userid", i?.userId || i?.clienteId || "--");
+
+  /* DATA */
   setText("#detalle-id", i?.id);
   setText("#detalle-titulo", i?.subject);
   setText("#detalle-fecha", formatFecha(i?.createdAt));
 
+  /* 🔥 FECHA CIERRE */
+  setText("#detalle-fecha-cierre", i?.closedAt ? formatFecha(i.closedAt) : "--");
+
+  /* 🔥 TECNICO */
+  setText("#detalle-tecnico", i?.tecnico?.name || "No asignado");
+
+  /* MENSAJE */
   const msg = $("#detalle-mensaje");
   if(msg) msg.textContent = i?.message || "";
 
-  renderAvatar(i?.cliente?.nombre, i?.cliente?.avatar);
+  renderAvatar(i?.name || i?.cliente?.nombre, i?.avatar);
   renderBlobs(i?.attachments || []);
 
 }
@@ -353,7 +361,13 @@ function renderAvatar(nombre, avatar){
     return;
   }
 
-  const initials = nombre?.split(" ").map(w=>w[0]).slice(0,2).join("").toUpperCase();
+  const initials = (nombre || "?")
+    .split(" ")
+    .map(w=>w[0])
+    .slice(0,2)
+    .join("")
+    .toUpperCase();
+
   el.textContent = initials || "U";
 }
 

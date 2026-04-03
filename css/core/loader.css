@@ -1,6 +1,7 @@
 /* =========================================================
-   🔥 GLOBAL APP LOADER — SAAS PRO 10/10 FINAL
+   🔥 GLOBAL APP LOADER — SAAS PRO (FINAL 10/10)
 ========================================================= */
+
 
 /* =========================
    ROOT
@@ -17,9 +18,12 @@
   background:var(--main-bg);
 
   opacity:0;
+  visibility:hidden;
   pointer-events:none;
 
-  transition:opacity .25s ease;
+  transition:
+    opacity .3s ease,
+    visibility .3s ease;
 }
 
 
@@ -28,9 +32,11 @@
 ========================= */
 body.loading #app-loader{
   opacity:1;
+  visibility:visible;
   pointer-events:auto;
 
-  backdrop-filter:blur(6px);
+  backdrop-filter:blur(8px);
+  -webkit-backdrop-filter:blur(8px);
 }
 
 
@@ -38,10 +44,11 @@ body.loading #app-loader{
    CENTER
 ========================= */
 #app-loader .loader-center{
+  position:relative;
+
   display:flex;
   align-items:center;
   justify-content:center;
-  position:relative;
 }
 
 
@@ -55,11 +62,13 @@ body.loading #app-loader{
 
   z-index:2;
 
-  animation:loaderPulse 1.2s ease-in-out infinite;
+  animation:loaderPulse 1.4s ease-in-out infinite;
 }
 
 
-/* DARK / LIGHT */
+/* =========================
+   THEME LOGO
+========================= */
 .loader-light{ display:none; }
 
 @media (prefers-color-scheme: light){
@@ -69,21 +78,21 @@ body.loading #app-loader{
 
 
 /* =========================
-   SPINNER RING (SUAVE)
+   SPINNER RING
 ========================= */
 #app-loader::after{
   content:"";
 
   position:absolute;
 
-  width:70px;
-  height:70px;
+  width:72px;
+  height:72px;
 
   border-radius:50%;
   border:2px solid rgba(255,255,255,0.08);
   border-top-color:var(--accent);
 
-  animation:spin .9s linear infinite;
+  animation:spin 1s linear infinite;
 }
 
 
@@ -95,19 +104,21 @@ body.loading #app-loader{
 }
 
 @keyframes loaderPulse{
-  0%{ transform:scale(.92); opacity:.6; }
+  0%{ transform:scale(.94); opacity:.6; }
   50%{ transform:scale(1); opacity:1; }
-  100%{ transform:scale(.92); opacity:.6; }
+  100%{ transform:scale(.94); opacity:.6; }
 }
 
 
 /* =========================
-   UX LOCK
+   UX LOCK (SUAVE)
 ========================= */
 body.loading{
   overflow:hidden;
 }
 
-body.loading *{
-  caret-color:transparent !important;
+/* ⚠️ IMPORTANTE: no bloqueamos TODO el DOM */
+body.loading input,
+body.loading textarea{
+  caret-color:transparent;
 }

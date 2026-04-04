@@ -1,5 +1,5 @@
 /* =========================================================
-   🔥 MINI TOPBAR — FINAL PRO (ALIGNED WITH TOPBAR)
+   🔥 MINI TOPBAR — FINAL PRO SAAS PANEL (PERFECT ALIGN)
 ========================================================= */
 
 /* =========================
@@ -8,7 +8,7 @@
 .mini-topbar{
   position:fixed;
 
-  top:var(--topbar-height); /* 🔥 pegado debajo de topbar */
+  top:var(--topbar-height);
   left:var(--sidebar-width);
   right:0;
 
@@ -24,6 +24,9 @@
   border-bottom:1px solid var(--panel-border);
 
   backdrop-filter:blur(6px);
+
+  /* 🔥 mejora visual */
+  box-shadow:0 4px 12px rgba(0,0,0,0.15);
 
   transition:
     left var(--duration-slow) var(--ease-out),
@@ -140,6 +143,7 @@
 ========================= */
 .mini-topbar-table{
   border-top:1px solid var(--panel-border);
+  background:var(--panel-bg);
 }
 
 .mini-topbar-table table{
@@ -163,11 +167,45 @@
   white-space:nowrap;
 
   border-bottom:1px solid var(--panel-border);
+  background:var(--panel-bg);
 }
 
 
 /* =========================
-   🔥 OFFSET GLOBAL (SIN MAGIA)
+   🔥 TABLE BODY SYNC FIX
+========================= */
+.table-container{
+  flex:1;
+  min-height:0;
+
+  overflow-y:auto;
+  overflow-x:hidden;
+
+  /* 🔥 CLAVE PARA ALIGN PERFECTO */
+  scrollbar-gutter:stable;
+
+  background:var(--panel-bg);
+}
+
+.table-container table{
+  width:100%;
+  table-layout:fixed;
+
+  border-collapse:separate;
+  border-spacing:0;
+}
+
+
+/* =========================
+   🔥 PADDING GLOBAL ALIGN
+========================= */
+th, td{
+  padding:12px 14px;
+}
+
+
+/* =========================
+   🔥 OFFSET GLOBAL (REAL)
 ========================= */
 .panel-content.has-mini-topbar{
   padding-top:var(--mini-topbar-height);

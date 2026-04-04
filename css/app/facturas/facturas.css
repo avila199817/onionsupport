@@ -1,5 +1,5 @@
 /* =========================================================
-   FACTURAS — FINAL PRO (SCROLL SOLO TABLA REAL)
+   FACTURAS — FINAL PRO 10/10 (SCROLL + SORT READY)
 ========================================================= */
 
 /* =========================
@@ -110,14 +110,15 @@
   table-layout:fixed;
 }
 
-/* HEADER STICKY SOLO DENTRO DEL SCROLL */
+/* HEADER STICKY */
 .panel-content.facturas thead{
   position:sticky;
   top:0;
-  z-index:1;
+  z-index:2;
   background:var(--panel-bg);
 }
 
+/* 🔥 TH BASE */
 .panel-content.facturas th{
   padding:12px 14px;
   text-align:left;
@@ -129,6 +130,40 @@
   white-space:nowrap;
 }
 
+/* 🔥 SORT INTERACTIVO */
+.panel-content.facturas th[data-sort]{
+  cursor:pointer;
+  user-select:none;
+  position:relative;
+}
+
+.panel-content.facturas th[data-sort]:hover{
+  color:var(--text);
+}
+
+/* 🔥 ICONO SORT (simple) */
+.panel-content.facturas th[data-sort]::after{
+  content:"⇅";
+  font-size:10px;
+  margin-left:6px;
+  opacity:.4;
+}
+
+.panel-content.facturas th[data-sort].asc::after{
+  content:"↑";
+  opacity:1;
+  color:var(--accent);
+}
+
+.panel-content.facturas th[data-sort].desc::after{
+  content:"↓";
+  opacity:1;
+  color:var(--accent);
+}
+
+/* =========================
+   TD
+========================= */
 .panel-content.facturas td{
   padding:12px 14px;
   border-bottom:1px solid var(--panel-border);
@@ -146,25 +181,10 @@
 .panel-content.facturas .col-main{ width:24%; }
 .panel-content.facturas .col-secondary{ width:30%; }
 
-.panel-content.facturas .col-date{
-  width:120px;
-  text-align:center;
-}
-
-.panel-content.facturas .col-importe{
-  width:130px;
-  text-align:right;
-}
-
-.panel-content.facturas .col-status{
-  width:110px;
-  text-align:center;
-}
-
-.panel-content.facturas .col-actions{
-  width:180px;
-  text-align:right;
-}
+.panel-content.facturas .col-date{ width:120px; text-align:center; }
+.panel-content.facturas .col-importe{ width:130px; text-align:right; }
+.panel-content.facturas .col-status{ width:110px; text-align:center; }
+.panel-content.facturas .col-actions{ width:180px; text-align:right; }
 
 /* =========================
    ROWS

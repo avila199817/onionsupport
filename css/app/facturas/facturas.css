@@ -1,5 +1,5 @@
 /* =========================================================
-   FACTURAS — CLEAN SAAS PANEL (TABLE ONLY)
+   FACTURAS — FINAL PRO SAAS PANEL (CLEAN + STABLE)
 ========================================================= */
 
 /* =========================
@@ -12,8 +12,8 @@
   min-height:0;
   width:100%;
   position:relative;
-  overflow:hidden;
 }
+
 
 /* =========================
    GLOBAL TABLE MODE
@@ -23,6 +23,7 @@
   padding:0 !important;
   gap:0 !important;
 }
+
 
 /* =========================
    STRUCTURE
@@ -35,26 +36,35 @@
   width:100%;
 }
 
+
 /* =========================
-   SCROLL REAL
+   SCROLL REAL (ÚNICO)
 ========================= */
 .panel-content.facturas .table-container{
   flex:1;
   min-height:0;
+
   overflow-y:auto;
   overflow-x:hidden;
+
+  /* 🔥 CLAVE ALIGN PERFECTO */
+  scrollbar-gutter:stable;
+
   background:var(--panel-bg);
 }
 
+
 /* =========================
-   TABLE
+   TABLE BODY
 ========================= */
 .panel-content.facturas .table-container table{
   width:100%;
   table-layout:fixed;
+
   border-collapse:separate;
   border-spacing:0;
 }
+
 
 /* =========================
    TABLE HEAD (VISUAL ONLY)
@@ -62,33 +72,43 @@
 .panel-content.facturas .table-head table{
   width:100%;
   table-layout:fixed;
+
   border-collapse:separate;
   border-spacing:0;
 }
 
 .panel-content.facturas .table-head th{
   padding:12px 14px;
+
   text-align:left;
   border-bottom:1px solid var(--panel-border);
+
   color:var(--dim);
   font-size:11px;
   text-transform:uppercase;
   letter-spacing:.4px;
+
   white-space:nowrap;
 }
+
 
 /* =========================
    TD
 ========================= */
 .panel-content.facturas td{
   padding:12px 14px;
+
   border-bottom:1px solid var(--panel-border);
+
   font-size:13.5px;
   color:var(--text);
+
   vertical-align:middle;
+
   overflow:hidden;
   text-overflow:ellipsis;
 }
+
 
 /* =========================
    COLUMNS
@@ -101,6 +121,7 @@
 .panel-content.facturas .col-importe{ width:130px; text-align:right; }
 .panel-content.facturas .col-status{ width:110px; text-align:center; }
 .panel-content.facturas .col-actions{ width:180px; text-align:right; }
+
 
 /* =========================
    ROWS
@@ -119,6 +140,7 @@
   transform:translateX(2px);
 }
 
+
 /* =========================
    USER CELL
 ========================= */
@@ -132,13 +154,17 @@
   width:36px;
   height:36px;
   min-width:36px;
+
   border-radius:50%;
+
   display:flex;
   align-items:center;
   justify-content:center;
+
   color:#fff;
   font-size:12px;
   font-weight:600;
+
   flex-shrink:0;
 }
 
@@ -149,6 +175,7 @@
 
 .panel-content.facturas .user-name{
   font-weight:600;
+
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
@@ -158,6 +185,7 @@
   font-size:11px;
   color:var(--dim);
 }
+
 
 /* =========================
    EMPRESA
@@ -174,12 +202,14 @@
   opacity:.6;
 }
 
+
 /* =========================
    BADGES
 ========================= */
 .panel-content.facturas .badge{
   padding:4px 10px;
   border-radius:999px;
+
   font-size:10px;
   font-weight:500;
 }
@@ -194,6 +224,7 @@
   background:color-mix(in srgb, var(--warning), transparent 85%);
 }
 
+
 /* =========================
    ACTIONS
 ========================= */
@@ -205,9 +236,12 @@
 
 .panel-content.facturas .btn-action{
   padding:6px 10px;
+
   border-radius:6px;
   border:1px solid var(--card-border);
+
   background:var(--card-bg);
+
   font-size:11px;
   cursor:pointer;
 }
@@ -228,6 +262,7 @@
   background:var(--warning);
   color:#fff;
 }
+
 
 /* =========================
    SCROLLBAR

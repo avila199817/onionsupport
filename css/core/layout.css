@@ -180,7 +180,7 @@ html, body{
   flex:1;
   min-height:0;
 
-  overflow-y:auto;
+  overflow: visible !important;
   overflow-x:hidden;
 }
 
@@ -293,26 +293,6 @@ html, body{
     opacity var(--duration-normal) ease,
     filter var(--duration-normal) ease;
 }
-
-
-
-
-
-
-
-
-
-.panel-content.facturas .table-container{
-  overflow: visible !important;
-}
-
-
-
-
-
-
-
-
 
 
 /* =========================

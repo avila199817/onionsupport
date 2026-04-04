@@ -1,5 +1,5 @@
 /* =========================================================
-   🔥 MINI TOPBAR — FINAL PRO SAAS PANEL (PERFECT ALIGN)
+   🔥 MINI TOPBAR — FINAL PRO SAAS PANEL (CLEAN & SCOPED)
 ========================================================= */
 
 /* =========================
@@ -24,8 +24,6 @@
   border-bottom:1px solid var(--panel-border);
 
   backdrop-filter:blur(6px);
-
-  /* 🔥 mejora visual */
   box-shadow:0 4px 12px rgba(0,0,0,0.15);
 
   transition:
@@ -174,20 +172,19 @@
 /* =========================
    🔥 TABLE BODY SYNC FIX
 ========================= */
-.table-container{
+.panel-content .table-container{
   flex:1;
   min-height:0;
 
   overflow-y:auto;
   overflow-x:hidden;
 
-  /* 🔥 CLAVE PARA ALIGN PERFECTO */
   scrollbar-gutter:stable;
 
   background:var(--panel-bg);
 }
 
-.table-container table{
+.panel-content .table-container table{
   width:100%;
   table-layout:fixed;
 
@@ -197,16 +194,17 @@
 
 
 /* =========================
-   🔥 PADDING GLOBAL ALIGN
+   🔥 ALIGN SOLO FACTURAS (NO GLOBAL)
 ========================= */
-th, td{
+.panel-content.facturas th,
+.panel-content.facturas td{
   padding:12px 14px;
 }
 
 
 /* =========================
-   🔥 OFFSET GLOBAL (REAL)
+   🔥 OFFSET GLOBAL REAL
 ========================= */
 .panel-content.has-mini-topbar{
-  padding-top:var(--mini-topbar-height);
+  padding-top:var(--mini-topbar-height, 0px);
 }

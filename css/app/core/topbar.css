@@ -1,14 +1,5 @@
 /* =========================================================
-   🔥 TOPBARVIEW — FIXED + OFFSET SYSTEM (CLON TOPBAR PADRE)
-========================================================= */
-
-:root{
-  --topbarview-height: 64px; /* 🔥 ajusta si cambia altura */
-}
-
-
-/* =========================================================
-   BASE
+   🔥 TOPBARVIEW — CLON REAL DEL TOPBAR
 ========================================================= */
 
 .topbarview{
@@ -18,16 +9,24 @@
   left: var(--sidebar-width);
   right: 0;
 
-  z-index: 1000;
+  height: 60px; /* 👈 ajusta si quieres */
 
   display:flex;
   align-items:center;
   gap:10px;
 
-  padding:12px 16px;
+  padding:0 16px;
 
-  background:var(--panel-bg);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.02), transparent 40%),
+    var(--panel-bg);
+
   border-bottom:1px solid var(--panel-border);
+
+  z-index: var(--z-topbar);
+
+  transition:
+    left var(--duration-slow) var(--ease-out);
 }
 
 
@@ -37,9 +36,9 @@
 }
 
 
-/* =========================================================
+/* =========================
    INPUTS
-========================================================= */
+========================= */
 
 .topbarview input{
   flex:1;
@@ -72,9 +71,9 @@
 }
 
 
-/* =========================================================
+/* =========================
    BUTTON
-========================================================= */
+========================= */
 
 .topbarview .btn-primary{
   margin-left:auto;
@@ -96,13 +95,4 @@
 .topbarview .btn-primary:hover{
   transform:translateY(-1px);
   box-shadow:0 8px 20px rgba(99,102,241,0.35);
-}
-
-
-/* =========================================================
-   🔥 OFFSET (CLAVE PARA QUE NO TAPE)
-========================================================= */
-
-.panel-content.facturas{
-  padding-top: var(--topbarview-height);
 }

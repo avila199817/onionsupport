@@ -1,61 +1,8 @@
 /* =========================================================
-   🔥 MINI TOPBAR — CLON INCIDENCIAS (LIMPIO Y ESTABLE)
+   🔥 TOPBAR (GLOBAL SYSTEM)
 ========================================================= */
 
-:root{
-  --mini-topbar-height: 110px;
-}
-
-
-/* =========================================================
-   BASE
-========================================================= */
-
-.mini-topbar{
-  position:fixed;
-  top:0;
-
-  left:var(--sidebar-width);
-  right:0;
-
-  z-index:calc(var(--z-topbar) - 1);
-
-  display:flex;
-  flex-direction:column;
-
-  background:var(--panel-bg);
-
-  border-bottom:1px solid var(--panel-border);
-
-  backdrop-filter:blur(6px);
-  box-shadow:0 6px 20px rgba(0,0,0,0.25);
-
-  transition:left var(--duration-normal) var(--ease-out);
-}
-
-
-/* SIDEBAR COLLAPSADO */
-.sidebar.collapsed ~ .main-content .mini-topbar{
-  left:var(--sidebar-collapsed);
-}
-
-
-/* =========================================================
-   EMPUJE GLOBAL (IGUAL QUE INCIDENCIAS)
-========================================================= */
-
-#app-content.has-mini-topbar{
-  padding-top:calc(
-    var(--topbar-height) + var(--mini-topbar-height)
-  );
-}
-
-
-/* =========================================================
-   FILA 1 (FILTROS) = filters-row
-========================================================= */
-
-.mini-topbar-inner{
+.topbar{
   display:flex;
   align-items:center;
   gap:10px;
@@ -64,34 +11,20 @@
 
   background:var(--panel-bg);
   border-bottom:1px solid var(--panel-border);
-
-  height:60px;
 }
 
 
-/* AREAS */
-.mini-topbar-left{
-  display:flex;
-  align-items:center;
-  flex:1;
-  min-width:0;
-}
+/* =========================
+   INPUTS
+========================= */
 
-.mini-topbar-right{
-  display:flex;
-  align-items:center;
-  gap:10px;
-}
-
-
-/* INPUTS (CLON EXACTO) */
-.mini-topbar input{
+.topbar input{
   flex:1;
   min-width:220px;
 }
 
-.mini-topbar input,
-.mini-topbar select{
+.topbar input,
+.topbar select{
   padding:10px 12px;
 
   border-radius:8px;
@@ -103,13 +36,16 @@
   font-size:13px;
 }
 
-.mini-topbar select{
+.topbar select{
   min-width:140px;
 }
 
 
-/* BUTTON (CLON btn-new-incidencia) */
-.mini-topbar .btn-primary{
+/* =========================
+   BUTTON (GENÉRICO)
+========================= */
+
+.topbar .btn-primary{
   margin-left:auto;
 
   padding:10px 18px;
@@ -127,36 +63,7 @@
   transition:all .2s ease;
 }
 
-.mini-topbar .btn-primary:hover{
+.topbar .btn-primary:hover{
   transform:translateY(-1px);
   box-shadow:0 10px 26px rgba(99,102,241,0.45);
-}
-
-
-/* =========================================================
-   FILA 2 (HEADER TABLA) = thead
-========================================================= */
-
-.mini-topbar-table{
-  background:var(--panel-bg);
-}
-
-.mini-topbar-table table{
-  width:100%;
-  border-collapse:collapse;
-  table-layout:fixed;
-}
-
-.mini-topbar-table th{
-  padding:10px 14px;
-
-  text-align:left;
-  border-bottom:1px solid var(--panel-border);
-
-  color:var(--dim);
-  font-size:11px;
-  text-transform:uppercase;
-  letter-spacing:.3px;
-
-  white-space:nowrap;
 }

@@ -36,13 +36,27 @@ function $(s){
 
 
 /* =========================================================
-   🔥 TOAST PRO
+   🔥 TOAST PRO (ALINEADO CON UI)
 ========================================================= */
-function showToast(msg, type="ok"){
+function showToast(msg, type="success"){
 
   const t = document.createElement("div");
-  t.className = "onion-toast " + type;
-  t.textContent = msg;
+  t.className = `toast ${type}`;
+
+  const content = document.createElement("div");
+  content.className = "toast-content";
+
+  const message = document.createElement("div");
+  message.className = "toast-message";
+  message.textContent = msg;
+
+  const close = document.createElement("div");
+  close.className = "toast-close";
+  close.textContent = "✕";
+
+  content.appendChild(message);
+  t.appendChild(content);
+  t.appendChild(close);
 
   document.body.appendChild(t);
 
@@ -50,13 +64,22 @@ function showToast(msg, type="ok"){
     t.classList.add("show");
   });
 
-  setTimeout(()=>{
-    t.classList.remove("show");
-    setTimeout(()=> t.remove(), 300);
+  const timeout = setTimeout(()=>{
+    remove();
   }, 2200);
 
-}
+  function remove(){
+    t.classList.remove("show");
+    setTimeout(()=> t.remove(), 250);
+  }
 
+  close.onclick = ()=>{
+    clearTimeout(timeout);
+    remove();
+  };
+
+}
+  
 
 /* =========================================================
    🔥 BUTTON STATE

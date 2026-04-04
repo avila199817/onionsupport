@@ -179,7 +179,7 @@
   };
 
   /* =========================
-     RENDER PRO 🔥
+     RENDER BASE
   ========================= */
   const originalRender = async function(){
 
@@ -232,62 +232,68 @@
 
   };
 
-/* =========================
-   🔥 RENDER EXTENDIDO (TOPBARVIEW)
-========================= */
-Onion.render = async function(){
+  /* =========================
+     🔥 TOPBARVIEW SYSTEM
+  ========================= */
+  const TopbarViews = {
 
-  const result = await originalRender.apply(this, arguments);
+    facturas: () => `
+      <div class="topbarview">
 
-  requestAnimationFrame(()=>{
+        <input 
+          type="text"
+          id="search-factura"
+          placeholder="Buscar factura..."
+          autocomplete="off"
+        >
 
-    const container = document.getElementById("topbarview-container");
-    const appContent = document.getElementById("app-content");
+        <select id="filter-estado-factura">
+          <option value="">Estado pago</option>
+          <option value="pagada">Pagada</option>
+          <option value="pendiente">Pendiente</option>
+        </select>
 
-    if(!container || !appContent) return;
+        <button id="btn-new-factura" class="btn-primary">
+          + Nueva
+        </button>
 
-    const route = location.pathname;
+      </div>
+    `
 
-    // 🔥 FIX REAL (detecta /facturas en cualquier ruta)
-    const isFacturas = route.includes("/facturas");
+  };
 
-    if(isFacturas){
+  /* =========================
+     🔥 RENDER FINAL
+  ========================= */
+  Onion.render = async function(){
 
-      container.innerHTML = `
-        <div class="topbarview">
+    const result = await originalRender.apply(this, arguments);
 
-          <input 
-            type="text"
-            id="search-factura"
-            placeholder="Buscar factura..."
-            autocomplete="off"
-          >
+    requestAnimationFrame(()=>{
 
-          <select id="filter-estado-factura">
-            <option value="">Estado pago</option>
-            <option value="pagada">Pagada</option>
-            <option value="pendiente">Pendiente</option>
-          </select>
+      const container = document.getElementById("topbarview-container");
+      const appContent = document.getElementById("app-content");
 
-          <button id="btn-new-factura" class="btn-primary">
-            + Nueva
-          </button>
+      if(!container || !appContent) return;
 
-        </div>
-      `;
+      const route = Onion.router.resolve();
+      const view = route.topbarview;
 
-      appContent.classList.add("has-topbarview");
+      if(view && TopbarViews[view]){
 
-    } else {
+        container.innerHTML = TopbarViews[view]();
+        appContent.classList.add("has-topbarview");
 
-      container.innerHTML = "";
-      appContent.classList.remove("has-topbarview");
+      } else {
 
-    }
+        container.innerHTML = "";
+        appContent.classList.remove("has-topbarview");
 
-  });
+      }
 
-  return result;
-};
+    });
+
+    return result;
+  };
 
 })();

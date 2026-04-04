@@ -1,5 +1,5 @@
 /* =========================================================
-   FACTURAS — PRO SAAS PANEL (TABLE MODE LIKE INCIDENCIAS)
+   FACTURAS — PRO SAAS PANEL (ELITE VERSION)
 ========================================================= */
 
 .panel-content.facturas{
@@ -23,7 +23,22 @@
 }
 
 /* =========================================================
-   FILTERS (🔥 STICKY FIX)
+   TABLE CONTAINER (SCROLL ROOT)
+========================================================= */
+
+.panel-content.facturas .table-container{
+  flex:1;
+  min-height:0;
+  overflow-y:auto;
+  overflow-x:hidden;
+  background:var(--panel-bg);
+
+  /* 🔥 mejora scroll */
+  scroll-behavior:smooth;
+}
+
+/* =========================================================
+   FILTERS (STICKY PRO)
 ========================================================= */
 
 .panel-content.facturas .filters-row{
@@ -31,13 +46,27 @@
   align-items:center;
   gap:10px;
   padding:12px 16px;
-  background:var(--panel-bg);
-  border-bottom:1px solid var(--panel-border);
 
   position:sticky;
   top:0;
-  z-index:5;
+  z-index:20;
+
+  background:color-mix(in srgb, var(--panel-bg), transparent 5%);
+  backdrop-filter:blur(10px);
+
+  border-bottom:1px solid var(--panel-border);
+
+  transition:all .2s ease;
 }
+
+/* 🔥 sombra cuando haces scroll */
+.panel-content.facturas .table-container.scrolled .filters-row{
+  box-shadow:0 8px 20px rgba(0,0,0,0.25);
+}
+
+/* =========================================================
+   INPUTS
+========================================================= */
 
 .panel-content.facturas .filters-row input{
   flex:1;
@@ -58,6 +87,10 @@
   min-width:140px;
 }
 
+/* =========================================================
+   BUTTON
+========================================================= */
+
 .panel-content.facturas .btn-new-factura{
   margin-left:auto;
   padding:10px 18px;
@@ -77,18 +110,6 @@
 }
 
 /* =========================================================
-   TABLE CONTAINER
-========================================================= */
-
-.panel-content.facturas .table-container{
-  flex:1;
-  min-height:0;
-  overflow-y:auto;
-  overflow-x:hidden;
-  background:var(--panel-bg);
-}
-
-/* =========================================================
    TABLE BASE
 ========================================================= */
 
@@ -98,12 +119,24 @@
   table-layout:fixed;
 }
 
-/* 🔥 FIX: THEAD DEBAJO DE FILTROS */
+/* =========================================================
+   THEAD (STICKY PRO)
+========================================================= */
+
 .panel-content.facturas thead{
   position:sticky;
-  top:56px; /* altura de filters-row */
-  z-index:4;
-  background:var(--panel-bg);
+  top:56px;
+  z-index:15;
+
+  background:color-mix(in srgb, var(--panel-bg), transparent 3%);
+  backdrop-filter:blur(6px);
+
+  transition:all .2s ease;
+}
+
+/* 🔥 sombra dinámica */
+.panel-content.facturas .table-container.scrolled thead{
+  box-shadow:0 6px 14px rgba(0,0,0,0.2);
 }
 
 .panel-content.facturas th{
@@ -131,42 +164,13 @@
    COLUMN SYSTEM
 ========================================================= */
 
-.panel-content.facturas .col-id{
-  width:120px;
-  font-size:11px;
-  color:var(--dim);
-}
-
-.panel-content.facturas .col-main{
-  width:24%;
-}
-
-.panel-content.facturas .col-secondary{
-  width:30%;
-}
-
-.panel-content.facturas .col-date{
-  width:120px;
-  text-align:center;
-  padding-right:18px;
-}
-
-.panel-content.facturas .col-importe{
-  width:130px;
-  text-align:right;
-  padding-right:18px;
-}
-
-.panel-content.facturas .col-status{
-  width:110px;
-  text-align:center;
-}
-
-.panel-content.facturas .col-actions{
-  width:180px;
-  text-align:right;
-  padding-right:18px;
-}
+.panel-content.facturas .col-id{ width:120px; font-size:11px; color:var(--dim); }
+.panel-content.facturas .col-main{ width:24%; }
+.panel-content.facturas .col-secondary{ width:30%; }
+.panel-content.facturas .col-date{ width:120px; text-align:center; padding-right:18px; }
+.panel-content.facturas .col-importe{ width:130px; text-align:right; padding-right:18px; }
+.panel-content.facturas .col-status{ width:110px; text-align:center; }
+.panel-content.facturas .col-actions{ width:180px; text-align:right; padding-right:18px; }
 
 /* =========================================================
    ROWS
@@ -231,22 +235,6 @@
 }
 
 /* =========================================================
-   EMPRESA
-========================================================= */
-
-.panel-content.facturas .empresa-cell{
-  display:flex;
-  align-items:center;
-  gap:10px;
-}
-
-.panel-content.facturas .empresa-empty{
-  display:block;
-  text-align:center;
-  opacity:.6;
-}
-
-/* =========================================================
    BADGES
 ========================================================= */
 
@@ -293,19 +281,8 @@
   border-color:var(--accent);
 }
 
-.panel-content.facturas .btn-action.pay{
-  background:color-mix(in srgb, var(--warning), transparent 85%);
-  color:var(--warning);
-  border-color:var(--warning);
-}
-
-.panel-content.facturas .btn-action.pay:hover{
-  background:var(--warning);
-  color:#fff;
-}
-
 /* =========================================================
-   SCROLL
+   SCROLLBAR
 ========================================================= */
 
 .panel-content.facturas .table-container::-webkit-scrollbar{

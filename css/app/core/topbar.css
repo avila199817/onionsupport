@@ -149,3 +149,17 @@
 
   border-bottom:1px solid var(--panel-border);
 }
+
+
+
+
+
+.mini-topbar{
+  position:fixed !important;
+  top:56px !important;
+  left:260px !important;
+  right:0 !important;
+  z-index:999999 !important;
+
+  background:red !important;
+}

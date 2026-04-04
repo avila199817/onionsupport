@@ -564,4 +564,6 @@ function debounce(fn, delay){
   };
 }
 
+init();  
+  
 })();

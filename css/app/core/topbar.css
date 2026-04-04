@@ -117,10 +117,3 @@
   border-bottom:1px solid #222;
 }
 
-
-/* =========================
-   OFFSET FINAL CORRECTO
-========================= */
-.panel-content.has-mini-topbar{
-  padding-top:80px; /* 🔥 CLAVE: ni 56 ni 96 → este es el punto bueno */
-}

@@ -15,6 +15,7 @@ let filteredItems = [];
 let loading = false;
 let currentRequestId = 0;
 
+/* 🔥 SORT STATE */
 let currentSort = {
   field: null,
   direction: null
@@ -34,7 +35,7 @@ function $(selector){
 }
 
 /* =========================
-   INIT (SPA SAFE)
+   INIT
 ========================= */
 
 function init(){
@@ -48,8 +49,6 @@ function init(){
 
   initialized = true;
 
-  console.log("🔥 INIT FACTURAS");
-
   bindEvents();
 
   requestAnimationFrame(()=>{
@@ -62,11 +61,7 @@ function init(){
 
 }
 
-/* 🔥 CLAVE SPA */
-window.initPage = init;
-
-/* 🔥 FALLBACK (por si el render no lo llama) */
-setTimeout(init, 50);
+init();
 
 /* =========================
    EVENTS
@@ -79,6 +74,7 @@ function bindEvents(){
 
   Onion.cleanupEvent(root, "click", (e)=>{
 
+    /* 🔥 SORT CLICK */
     const th = e.target.closest("th[data-sort]");
     if(th){
       handleSort(th);
@@ -86,6 +82,7 @@ function bindEvents(){
     }
 
     const btn = e.target.closest(".btn-action");
+
     if(btn){
       handleAction(btn);
       return;
@@ -208,7 +205,7 @@ async function loadFacturas(){
 
     await new Promise(r => requestAnimationFrame(r));
     await new Promise(r => requestAnimationFrame(r));
-    await new Promise(r => setTimeout(r, 150));
+    await new Promise(r => setTimeout(r, 200));
 
     const res = await Onion.fetch(Onion.config.API + "/facturas");
     const items = normalize(res);
@@ -257,6 +254,7 @@ async function handleAction(btn){
     if(btn.classList.contains("loading")) return;
 
     btn.classList.add("loading");
+
     const original = btn.textContent;
     btn.textContent = "⏳";
 
@@ -372,21 +370,52 @@ function render(items){
 
     const d = mapItem(f);
 
+    const empresaHTML = d.hasEmpresa
+      ? `
+        <div class="cell-user empresa-cell">
+          <div class="table-avatar">${renderAvatarEmpresa(d.empresa)}</div>
+          <div class="user-info">
+            <span class="user-name">${escapeHTML(d.empresa)}</span>
+          </div>
+        </div>
+      `
+      : `<span class="empresa-empty">-</span>`;
+
     return `
 <tr data-id="${d.id}">
   <td class="col-id">${d.numero}</td>
-  <td class="col-main">${escapeHTML(d.cliente.nombre)}</td>
-  <td class="col-secondary">${escapeHTML(d.empresa || "-")}</td>
+
+  <td class="col-main">
+    <div class="cell-user">
+      <div class="table-avatar">${renderAvatar(d.cliente.nombre)}</div>
+      <div class="user-info">
+        <span class="user-name">${escapeHTML(d.cliente.nombre)}</span>
+        <span class="user-sub">${escapeHTML(d.cliente.email)}</span>
+      </div>
+    </div>
+  </td>
+
+  <td class="col-secondary">${empresaHTML}</td>
+
   <td class="col-date">${d.fecha}</td>
   <td class="col-importe">${d.total}</td>
+
   <td class="col-status">
     <span class="badge ${d.estadoPago.class}">
       ${d.estadoPago.label}
     </span>
   </td>
+
   <td class="col-actions">
-    <button class="btn-action view" data-id="${d.id}">Ver</button>
-    <button class="btn-action download" data-id="${d.id}">PDF</button>
+    <div class="actions">
+      <button class="btn-action view" data-id="${d.id}">Ver</button>
+      <button class="btn-action download" data-id="${d.id}">PDF</button>
+      ${
+        d.estadoPago.raw === "pendiente"
+          ? `<button class="btn-action pay" data-id="${d.id}">Pagar</button>`
+          : ``
+      }
+    </div>
   </td>
 </tr>`;
   }).join("");
@@ -399,32 +428,110 @@ function render(items){
 ========================= */
 
 function mapItem(f){
+
+  const empresaRaw =
+    f.cliente?.empresa ||
+    f.cliente?.razonSocial;
+
+  const empresaClean = cleanValue(empresaRaw, "");
+
   return {
     id: f.id,
     numero: f.numeroFacturaLegal || f.numero || f.id,
+
     cliente: {
-      nombre: cleanValue(f.cliente?.nombre, "Cliente")
+      nombre: cleanValue(
+        f.cliente?.nombre ||
+        f.cliente?.nombreContacto,
+        "Cliente"
+      ),
+      email: cleanValue(
+        f.cliente?.email ||
+        f.emailCliente,
+        "-"
+      )
     },
-    empresa: cleanValue(f.cliente?.empresa, ""),
+
+    empresa: empresaClean,
+    hasEmpresa: !!empresaClean,
+
     fecha: formatFecha(f.fechaFactura || f.fecha),
     total: formatMoney(f.total),
+
     estadoPago: getEstadoPago(f.estadoPago)
   };
+
 }
 
 function cleanValue(val, fallback){
   if(!val) return fallback;
-  return String(val).trim();
+  let v = String(val).trim();
+  v = v.replace(/^'+|'+$/g, "");
+  const lower = v.toLowerCase();
+  if(lower === "null" || lower === "undefined" || lower === "-"){
+    return fallback;
+  }
+  return v;
 }
 
 function safeText(val){
-  return String(val || "").toLowerCase();
+  return String(cleanValue(val, "")).toLowerCase();
+}
+
+function renderAvatar(name){
+  return avatarHTML(getInitials(name), getAvatarColor(name));
+}
+
+function renderAvatarEmpresa(name){
+  return avatarHTML(getInitialsEmpresa(name), getAvatarColor(name + "_empresa"));
+}
+
+function avatarHTML(initials, color){
+  return `
+    <div style="
+      width:100%;
+      height:100%;
+      border-radius:50%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:${color};
+      color:#fff;
+      font-weight:600;
+      font-size:12px;
+    ">
+      ${initials}
+    </div>
+  `;
+}
+
+function hashString(str){
+  let hash = 0;
+  for(let i = 0; i < str.length; i++){
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return hash;
+}
+
+function getAvatarColor(name){
+  const colors = ["#6366f1","#22c55e","#eab308","#ef4444","#06b6d4","#a855f7","#f97316"];
+  return colors[Math.abs(hashString(name)) % colors.length];
+}
+
+function getInitials(name){
+  return name ? name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase() : "?";
+}
+
+function getInitialsEmpresa(name){
+  return name
+    ? name.replace(/(SL|SA)/gi,"").trim().split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase()
+    : "?";
 }
 
 function getEstadoPago(e){
   e = (e || "").toLowerCase();
-  if(e === "pagada") return { label:"Pagada", class:"success" };
-  return { label:"Pendiente", class:"warning" };
+  if(e === "pagada") return { label:"Pagada", class:"success", raw:e };
+  return { label:"Pendiente", class:"warning", raw:e };
 }
 
 function formatFecha(f){

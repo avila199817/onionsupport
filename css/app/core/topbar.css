@@ -1,21 +1,28 @@
 /* =========================================================
-   🔥 TOPBARVIEW (AISLADO, CLON DE TOPBAR)
+   🔥 TOPBARVIEW — FIXED (NO SE MUEVE NI A TIROS)
 ========================================================= */
 
 .topbarview{
-  position: sticky;
-  top: 0;
-  z-index: 5;
+  position: fixed !important;
 
-  display:flex;
-  align-items:center;
-  gap:10px;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
 
-  padding:12px 16px;
+  z-index: 999999 !important;
 
-  background:var(--panel-bg);
-  border-bottom:1px solid var(--panel-border);
+  display:flex !important;
+  align-items:center !important;
+  gap:10px !important;
+
+  padding:12px 16px !important;
+
+  background:var(--panel-bg) !important;
+  border-bottom:1px solid var(--panel-border) !important;
+
+  transform: none !important;
 }
+
 
 /* =========================
    INPUTS

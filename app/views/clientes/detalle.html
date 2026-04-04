@@ -1,0 +1,159 @@
+<div class="panel-content cliente-detalle">
+
+  <!-- 🔥 LOADER CORE -->
+  <div class="view-loading">
+    <div class="view-loader-center">
+      <div class="spinner"></div>
+    </div>
+  </div>
+
+  <!-- 🔥 CONTENIDO -->
+  <div class="view-layout">
+
+    <!-- =========================
+         MAIN
+    ========================= -->
+    <div class="view-main">
+
+      <!-- HEADER -->
+      <div class="view-header">
+
+        <div class="view-user">
+          <div id="detalle-avatar" class="view-avatar"></div>
+
+          <div class="view-user-info">
+            <div class="view-title" id="detalle-nombre">--</div>
+
+            <div class="view-sub">
+              <span id="detalle-id"></span>
+            </div>
+          </div>
+        </div>
+
+        <button id="btn-back" class="view-back">
+          ← Volver
+        </button>
+
+      </div>
+
+      <!-- BODY -->
+      <div class="view-body">
+
+        <div class="view-grid">
+
+          <div class="view-card">
+            <div class="view-label">Nombre</div>
+            <div class="view-value" id="detalle-nombre-full">--</div>
+          </div>
+
+          <div class="view-card">
+            <div class="view-label">Email</div>
+            <div class="view-value" id="detalle-email">--</div>
+          </div>
+
+          <div class="view-card">
+            <div class="view-label">Teléfono</div>
+            <div class="view-value" id="detalle-telefono">--</div>
+          </div>
+
+          <div class="view-card">
+            <div class="view-label">Empresa</div>
+            <div class="view-value" id="detalle-empresa">--</div>
+          </div>
+
+          <div class="view-card">
+            <div class="view-label">NIF / CIF</div>
+            <div class="view-value" id="detalle-nif">--</div>
+          </div>
+
+          <div class="view-card">
+            <div class="view-label">Estado</div>
+            <div class="view-value" id="detalle-estado">--</div>
+          </div>
+
+          <div class="view-card">
+            <div class="view-label">Fecha alta</div>
+            <div class="view-value" id="detalle-fecha">--</div>
+          </div>
+
+          <div class="view-card full">
+            <div class="view-label">Dirección</div>
+            <div class="view-value" id="detalle-direccion">--</div>
+          </div>
+
+          <div class="view-card full">
+            <div class="view-label">Notas</div>
+            <div class="view-value" id="detalle-notas">--</div>
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- =========================
+         SIDEBAR
+    ========================= -->
+    <aside class="view-aside">
+
+      <div class="view-sidebar">
+
+        <!-- ACCIONES -->
+        <div class="view-section">
+          <div class="view-section-title">Acciones</div>
+
+          <div class="view-files">
+
+            <div class="view-file">
+              <span>Editar cliente</span>
+
+              <div class="view-file-actions">
+                <button id="btn-edit-cliente" class="view-btn soft">
+                  Editar
+                </button>
+              </div>
+            </div>
+
+            <div class="view-file">
+              <span>Estado</span>
+
+              <div class="view-file-actions">
+                <button id="btn-toggle-cliente" class="view-btn primary">
+                  Activar / Desactivar
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="sidebar-divider"></div>
+
+        <!-- FACTURAS -->
+        <div class="view-section">
+          <div class="view-section-title">Facturas</div>
+
+          <div id="cliente-facturas" class="view-files">
+            Sin facturas
+          </div>
+        </div>
+
+        <div class="sidebar-divider"></div>
+
+        <!-- ACTIVIDAD -->
+        <div class="view-section">
+          <div class="view-section-title">Actividad</div>
+
+          <div id="detalle-historial" class="view-files">
+            Sin actividad
+          </div>
+        </div>
+
+      </div>
+
+    </aside>
+
+  </div>
+
+</div>

@@ -327,3 +327,29 @@
   background:var(--scrollbar-thumb);
   border-radius:6px;
 }
+
+/* 🔥 MATAMOS EL SCROLL PADRE */
+.panel-content.facturas{
+  overflow:hidden;
+}
+
+/* 🔥 ASEGURAMOS QUE SOLO SCROLLEA LA TABLA */
+.panel-content.facturas .table-container{
+  overflow-y:auto;
+  overflow-x:hidden;
+  position:relative;
+}
+
+/* 🔥 STICKY REAL */
+.panel-content.facturas thead th{
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background:var(--panel-bg);
+}
+
+/* 🔥 IMPORTANTE (ARREGLA BUG TABLA) */
+.panel-content.facturas table{
+  border-collapse:separate;
+  border-spacing:0;
+}

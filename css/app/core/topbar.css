@@ -1,14 +1,14 @@
 /* =========================================================
-   🔥 MINI TOPBAR — FINAL REAL (FIXED + FULL WIDTH + NO OVERLAP)
+   🔥 MINI TOPBAR — FINAL REAL (FIXED + FULL WIDTH + STABLE)
 ========================================================= */
 
 .mini-topbar{
   position:fixed;
 
-  /* 🔥 SIEMPRE debajo de la topbar real */
+  /* 🔥 DEBAJO DE LA TOPBAR GLOBAL */
   top:var(--topbar-height);
 
-  /* 🔥 MISMO SISTEMA QUE LA TOPBAR */
+  /* 🔥 ALINEADO CON SIDEBAR */
   left:var(--sidebar-width);
   right:0;
 
@@ -37,7 +37,7 @@
 
 
 /* =========================
-   🔥 CLAVE REAL: EMPUJA CONTENIDO
+   🔥 EMPUJE DE CONTENIDO
 ========================= */
 .panel-content.has-mini-topbar{
   padding-top:var(--mini-topbar-height);
@@ -148,18 +148,4 @@
   letter-spacing:.4px;
 
   border-bottom:1px solid var(--panel-border);
-}
-
-
-
-
-
-.mini-topbar{
-  position:fixed !important;
-  top:56px !important;
-  left:260px !important;
-  right:0 !important;
-  z-index:999999 !important;
-
-  background:red !important;
 }

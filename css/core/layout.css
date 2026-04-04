@@ -1,19 +1,21 @@
 /* =========================================================
-   🔥 LAYOUT — SAAS PANEL CLEAN (FINAL FIX SCROLL REAL)
+   🔥 LAYOUT — SAAS PANEL CLEAN (SCROLL PERFECT FIX)
 ========================================================= */
-
 
 /* =========================
    ROOT ALTURA BASE
 ========================= */
 html, body{
   height:100%;
+  margin:0;
+  overflow:hidden; /* 🔥 evita scroll global */
 }
 
 #app{
   height:100%;
   display:flex;
   flex-direction:column;
+  min-height:0;
 }
 
 
@@ -26,8 +28,10 @@ html, body{
   display:flex;
   flex-direction:column;
 
-  height:100dvh;   /* 🔥 CLAVE */
-  min-height:0;    /* 🔥 CLAVE */
+  height:100dvh;
+  min-height:0;
+
+  overflow:hidden; /* 🔥 CLAVE */
 
   isolation:isolate;
 
@@ -65,7 +69,7 @@ html, body{
 
 
 /* =========================
-   MAIN CONTENT (🔥 CLAVE)
+   MAIN CONTENT (🔥 CORE FIX)
 ========================= */
 .main-content{
   position:relative;
@@ -84,7 +88,7 @@ html, body{
 
   min-width:0;
 
-  overflow:hidden; /* 🔥 EVITA SCROLL GLOBAL */
+  overflow:hidden; /* 🔥 SOLO UN SCROLL EN HIJOS */
 
   transition:
     margin-left var(--duration-slow) var(--ease-out),
@@ -107,6 +111,8 @@ html, body{
 
   display:flex;
   flex-direction:column;
+
+  overflow:hidden; /* 🔥 IMPORTANTE */
 }
 
 
@@ -145,6 +151,8 @@ html, body{
   flex-direction:column;
 
   background:var(--panel-bg);
+
+  overflow:hidden; /* 🔥 CLAVE */
 }
 
 
@@ -153,6 +161,7 @@ html, body{
 ========================= */
 .panel-content.dashboard{
   overflow:auto;
+  overscroll-behavior:contain;
 }
 
 .dashboard-container{
@@ -166,6 +175,7 @@ html, body{
 ========================= */
 .panel-content.table-mode{
   padding:0;
+  overflow:hidden;
 }
 
 

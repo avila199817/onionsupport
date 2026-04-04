@@ -1,15 +1,19 @@
 /* =========================================================
-   MINI TOPBAR — HARD FIX (SIN VARIABLES)
+   MINI TOPBAR — FIX DEFINITIVO (SIN VARIABLES / SIN JS)
 ========================================================= */
 
 .mini-topbar{
   position:fixed;
   top:56px;
 
-  /* 🔥 ANCHO REAL SIDEBAR ABIERTO */
-  left:260px;
-
+  /* 🔥 CLAVE: no usamos left */
+  left:0;
   right:0;
+
+  /* 🔥 esto la coloca después del sidebar */
+  width:calc(100% - 260px);
+  margin-left:260px;
+
   z-index:9999;
 
   display:flex;
@@ -19,12 +23,6 @@
   border-bottom:1px solid #222;
 
   box-shadow:0 4px 12px rgba(0,0,0,0.4);
-}
-
-
-/* 🔥 CUANDO SIDEBAR ESTÁ COLAPSADO */
-body.sidebar-collapsed .mini-topbar{
-  left:80px;
 }
 
 

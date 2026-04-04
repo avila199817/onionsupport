@@ -1,15 +1,20 @@
 /* =========================================================
-   🔥 LAYOUT — SINGLE SCROLL REAL (BODY ONLY)
+   🔥 LAYOUT — FINAL 10/10 (SIN HUECOS NI DOBLE SCROLL)
 ========================================================= */
 
 /* =========================
-   ROOT
+   ROOT (ÚNICO SCROLL)
 ========================= */
 html, body{
   height:100%;
   margin:0;
-  overflow-y:auto; /* 🔥 ÚNICO SCROLL */
+  overflow-y:auto;
   overflow-x:hidden;
+}
+
+/* 🔥 evita salto por scrollbar */
+html{
+  scrollbar-gutter: stable;
 }
 
 #app{
@@ -20,77 +25,43 @@ html, body{
 
 
 /* =========================
-   APP ROOT
+   LAYOUT BASE
 ========================= */
 .layout{
-  position:relative;
-
-  display:flex;
-  flex-direction:column;
-
+  display:flex; /* 🔥 CLAVE: horizontal real */
   min-height:100vh;
-
-  isolation:isolate;
 
   background:
     var(--gradient-overlay),
     var(--gradient-main);
-
-  transition:
-    background-color var(--duration-slow) ease;
 }
 
 
 /* =========================
-   CONTAINER
+   SIDEBAR
 ========================= */
-.container{
-  width:100%;
-  max-width:var(--content-max);
-  margin-inline:auto;
-  padding-inline:var(--content-padding);
-  position:relative;
+.sidebar{
+  width:var(--sidebar-width);
+  flex-shrink:0; /* 🔥 no se deforma */
 }
 
-.container-fluid{
-  width:100%;
-  max-width:none;
-  margin:0;
-  padding-inline:var(--content-padding);
-  position:relative;
+/* collapsed */
+.sidebar.collapsed{
+  width:var(--sidebar-collapsed);
 }
 
 
 /* =========================
-   MAIN CONTENT
+   MAIN CONTENT (🔥 SIN CALC)
 ========================= */
 .main-content{
-  position:relative;
-  z-index:1;
-
   flex:1;
+  min-width:0;
 
   display:flex;
   flex-direction:column;
 
-  margin-left:var(--sidebar-width);
-  width:calc(100% - var(--sidebar-width));
-
   padding-top:var(--topbar-height);
-
-  min-width:0;
-
-  overflow:visible; /* 🔥 NADA DE SCROLL AQUÍ */
-
-  transition:
-    margin-left var(--duration-slow) var(--ease-out),
-    width var(--duration-slow) var(--ease-out);
-}
-
-/* SIDEBAR COLLAPSED */
-.sidebar.collapsed ~ .main-content{
-  margin-left:var(--sidebar-collapsed);
-  width:calc(100% - var(--sidebar-collapsed));
 }
 
 
@@ -113,10 +84,6 @@ html, body{
 
   padding:var(--space-lg);
   gap:var(--space-lg);
-
-  background:transparent;
-
-  overflow:visible;
 }
 
 /* TABLE MODE */
@@ -132,10 +99,19 @@ html, body{
 .panel-content{
   display:flex;
   flex-direction:column;
-
   background:var(--panel-bg);
+}
 
+
+/* =========================
+   TABLE (SIN SCROLL INTERNO)
+========================= */
+.panel-content.table-mode{
   overflow:visible;
+}
+
+.table-container{
+  overflow:visible !important;
 }
 
 
@@ -144,24 +120,6 @@ html, body{
 ========================= */
 .panel-content.dashboard{
   overflow:visible;
-}
-
-.dashboard-container{
-  flex:1;
-}
-
-
-/* =========================
-   TABLE MODE (🔥 SIN SCROLL INTERNO)
-========================= */
-.panel-content.table-mode{
-  padding:0;
-  overflow:visible;
-}
-
-/* 🔥 MUY IMPORTANTE */
-.table-container{
-  overflow:visible !important;
 }
 
 
@@ -189,24 +147,16 @@ html, body{
 
 
 /* =========================
-   GRID SYSTEM
+   GRID
 ========================= */
 .grid{
   display:grid;
   gap:var(--space-lg);
 }
 
-.grid.cols-2{
-  grid-template-columns:repeat(2, minmax(0,1fr));
-}
-
-.grid.cols-3{
-  grid-template-columns:repeat(3, minmax(0,1fr));
-}
-
-.grid.cols-4{
-  grid-template-columns:repeat(4, minmax(0,1fr));
-}
+.grid.cols-2{ grid-template-columns:repeat(2, minmax(0,1fr)); }
+.grid.cols-3{ grid-template-columns:repeat(3, minmax(0,1fr)); }
+.grid.cols-4{ grid-template-columns:repeat(4, minmax(0,1fr)); }
 
 
 /* =========================
@@ -247,7 +197,7 @@ html, body{
 
 
 /* =========================
-   PAGE LOADING
+   LOADING
 ========================= */
 .page-loading{
   opacity:.6;
@@ -261,7 +211,7 @@ html, body{
 
 
 /* =========================
-   CARET KILLER
+   CARET FIX
 ========================= */
 input:not(:focus),
 textarea:not(:focus),
@@ -290,14 +240,13 @@ textarea:not(:focus),
     grid-template-columns:repeat(2,1fr);
   }
 
-  .main-content{
-    margin-left:0;
-    width:100%;
+  .layout{
+    flex-direction:column;
   }
 
   .sidebar{
-    transform:translateX(-100%);
     position:fixed;
+    transform:translateX(-100%);
   }
 
   .sidebar.open{
@@ -306,11 +255,9 @@ textarea:not(:focus),
 }
 
 @media (max-width:600px){
-
   .grid.cols-2,
   .grid.cols-3,
   .grid.cols-4{
     grid-template-columns:1fr;
   }
-
 }

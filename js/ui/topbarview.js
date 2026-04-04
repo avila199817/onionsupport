@@ -1,10 +1,11 @@
-/* =========================
-   MINI TOPBAR HEIGHT AUTO (FIX REAL SPA)
-========================= */
+/* =========================================================
+   MINI TOPBAR HEIGHT AUTO — PRO SPA FIX (10/10)
+========================================================= */
 
 (function(){
 
   let observer = null;
+  let rafId = null;
 
   function setMiniTopbarHeight(){
 
@@ -15,7 +16,7 @@
       return;
     }
 
-    const height = mini.offsetHeight;
+    const height = mini.offsetHeight || 0;
 
     document.documentElement.style.setProperty(
       '--mini-topbar-height',
@@ -23,54 +24,67 @@
     );
   }
 
+  function measure(){
+
+    // 🔥 cancela RAF anterior (evita spam en SPA)
+    if(rafId){
+      cancelAnimationFrame(rafId);
+    }
+
+    rafId = requestAnimationFrame(()=>{
+      requestAnimationFrame(setMiniTopbarHeight);
+    });
+  }
+
   function init(){
 
     const mini = document.querySelector('.mini-topbar');
-    if(!mini) return;
 
-    // 🔥 medir después de pintar
-    requestAnimationFrame(()=>{
-      requestAnimationFrame(()=>{
-        setMiniTopbarHeight();
-      });
-    });
+    if(!mini){
+      setMiniTopbarHeight();
+      return;
+    }
 
-    // 🔥 limpiar observer anterior
+    measure();
+
+    // 🔥 limpiar observer previo
     if(observer){
       observer.disconnect();
       observer = null;
     }
 
-    // 🔥 observar cambios reales
+    // 🔥 ResizeObserver PRO (con debounce natural)
     if(window.ResizeObserver){
-      observer = new ResizeObserver(setMiniTopbarHeight);
+      observer = new ResizeObserver(()=>{
+        measure();
+      });
+
       observer.observe(mini);
     }
 
   }
 
   /* =========================
-     🔥 CLAVE: HOOK EN RENDER
+     🔥 HOOK SPA (SIN ROMPER RENDER)
   ========================= */
 
-  if(window.Onion){
+  if(window.Onion && !Onion.__miniTopbarHooked){
+
+    Onion.__miniTopbarHooked = true;
 
     const originalRender = Onion.render;
 
     Onion.render = async function(){
 
-      await originalRender.apply(this, arguments);
+      const result = await originalRender.apply(this, arguments);
 
-      // 🔥 esperar a que DOM esté listo
-      requestAnimationFrame(()=>{
-        init();
-      });
+      measure();
 
+      return result;
     };
 
   }else{
-    // fallback normal
-    window.addEventListener('load', init);
+    window.addEventListener('load', measure);
   }
 
   /* =========================
@@ -82,6 +96,11 @@
       if(observer){
         observer.disconnect();
         observer = null;
+      }
+
+      if(rafId){
+        cancelAnimationFrame(rafId);
+        rafId = null;
       }
     });
   }

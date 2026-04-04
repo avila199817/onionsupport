@@ -1,5 +1,5 @@
 /* =========================================================
-   FACTURAS — FINAL PRO SAAS PANEL (CLEAN + STABLE + FIXED SAFE)
+   FACTURAS — FINAL PRO SAAS PANEL (CLEAN + STABLE + STICKY FIX)
 ========================================================= */
 
 /* =========================
@@ -13,7 +13,7 @@
   width:100%;
   position:relative;
 
-  overflow:visible; /* 🔥 CLAVE: evita conflictos con fixed */
+  overflow:visible;
 }
 
 
@@ -21,7 +21,8 @@
    GLOBAL TABLE MODE
 ========================= */
 .content-wrapper.table-mode{
-  overflow:hidden !important;
+  /* 🔥 IMPORTANTE: no romper sticky */
+  overflow:visible !important;
   padding:0 !important;
   gap:0 !important;
 }
@@ -36,6 +37,22 @@
   flex:1;
   min-height:0;
   width:100%;
+}
+
+
+/* =========================
+   🔥 MINI TOPBAR (FIX REAL)
+========================= */
+.mini-topbar{
+  position:sticky;
+  top:0;
+  z-index:20;
+
+  display:flex;
+  flex-direction:column;
+
+  background:var(--panel-bg);
+  border-bottom:1px solid var(--panel-border);
 }
 
 

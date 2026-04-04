@@ -1,51 +1,53 @@
-<div class="mini-topbar">
-
-  <div class="mini-topbar-inner">
-
-    <div class="mini-topbar-left">
-      <input
-        type="text"
-        id="search-factura"
-        placeholder="Buscar factura..."
-        autocomplete="off"
-      >
-    </div>
-
-    <div class="mini-topbar-right">
-      <select id="filter-estado-factura">
-        <option value="">Estado pago</option>
-        <option value="pagada">Pagada</option>
-        <option value="pendiente">Pendiente</option>
-      </select>
-
-      <button id="btn-new-factura" class="btn-primary">
-        + Nueva
-      </button>
-    </div>
-
-  </div>
-
-  <div class="mini-topbar-table">
-    <table class="facturas-table">
-      <thead>
-        <tr>
-          <th class="col-id">ID</th>
-          <th class="col-main">Cliente</th>
-          <th class="col-secondary">Empresa</th>
-          <th class="col-date">Fecha</th>
-          <th class="col-importe">Importe</th>
-          <th class="col-status">Pago</th>
-          <th class="col-actions">Acciones</th>
-        </tr>
-      </thead>
-    </table>
-  </div>
-
-</div>
-
-
 <div class="panel-content facturas">
 
+  <!-- 🔥 MINI TOPBAR (CORRECTO, DENTRO) -->
+  <div class="mini-topbar">
+
+    <div class="mini-topbar-inner">
+
+      <div class="mini-topbar-left">
+        <input
+          type="text"
+          id="search-factura"
+          placeholder="Buscar factura..."
+          autocomplete="off"
+        >
+      </div>
+
+      <div class="mini-topbar-right">
+        <select id="filter-estado-factura">
+          <option value="">Estado pago</option>
+          <option value="pagada">Pagada</option>
+          <option value="pendiente">Pendiente</option>
+        </select>
+
+        <button id="btn-new-factura" class="btn-primary">
+          + Nueva
+        </button>
+      </div>
+
+    </div>
+
+    <!-- 🔥 HEADER -->
+    <div class="mini-topbar-table">
+      <table class="facturas-table">
+        <thead>
+          <tr>
+            <th class="col-id">ID</th>
+            <th class="col-main">Cliente</th>
+            <th class="col-secondary">Empresa</th>
+            <th class="col-date">Fecha</th>
+            <th class="col-importe">Importe</th>
+            <th class="col-status">Pago</th>
+            <th class="col-actions">Acciones</th>
+          </tr>
+        </thead>
+      </table>
+    </div>
+
+  </div>
+
+  <!-- 🔥 TABLA REAL -->
   <div class="table-container">
 
     <table class="facturas-table">

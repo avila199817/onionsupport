@@ -93,7 +93,10 @@
 
     "/usuarios/detalle": {
       page: "/app/views/usuarios/detalle.html",
-      style: "/css/app/usuarios/detalle.css",
+      style: [
+        "/css/app/core/view.css",
+        "/css/app/usuarios/detalle.css"
+      ],
       script: "/js/features/usuarios/detalle.js",
       title: "Detalle usuario"
     },

@@ -1,25 +1,29 @@
 /* =========================================================
-   FACTURAS — FINAL 100% FUNCIONANDO (SOLO SCROLL TABLA)
+   FACTURAS — FINAL PRO (SCROLL SOLO TABLA REAL)
 ========================================================= */
 
+/* =========================
+   ROOT
+========================= */
 .panel-content.facturas{
   display:flex;
   flex-direction:column;
-  height:100%;
+  flex:1;
+  min-height:0;
   width:100%;
   position:relative;
-  min-height:0;
 }
 
-/* 🔥 CLAVE: matar scroll del wrapper padre */
-.panel-content.table-mode{
-  overflow:hidden;
+/* 🔥 CLAVE GLOBAL */
+.content-wrapper.table-mode{
+  overflow:hidden !important;
+  padding:0 !important;
+  gap:0 !important;
 }
 
-/* =========================================================
+/* =========================
    STRUCTURE
-========================================================= */
-
+========================= */
 .panel-content.facturas .table-system{
   display:flex;
   flex-direction:column;
@@ -28,12 +32,11 @@
   width:100%;
 }
 
-/* =========================================================
-   FILTERS (NO SE MUEVEN)
-========================================================= */
-
+/* =========================
+   FILTERS (FIJO REAL)
+========================= */
 .panel-content.facturas .filters-row{
-  flex:0 0 auto; /* 🔥 FIJO REAL */
+  flex:0 0 auto;
 
   display:flex;
   align-items:center;
@@ -42,8 +45,11 @@
 
   background:var(--panel-bg);
   border-bottom:1px solid var(--panel-border);
+
+  z-index:2;
 }
 
+/* INPUTS */
 .panel-content.facturas .filters-row input{
   flex:1;
   min-width:220px;
@@ -63,6 +69,7 @@
   min-width:140px;
 }
 
+/* BUTTON */
 .panel-content.facturas .btn-new-factura{
   margin-left:auto;
   padding:10px 18px;
@@ -81,12 +88,11 @@
   box-shadow:0 10px 26px rgba(99,102,241,0.45);
 }
 
-/* =========================================================
-   TABLE CONTAINER (ÚNICO SCROLL)
-========================================================= */
-
+/* =========================
+   SCROLL REAL (ÚNICO)
+========================= */
 .panel-content.facturas .table-container{
-  flex:1 1 auto;
+  flex:1;
   min-height:0;
 
   overflow-y:auto;
@@ -95,21 +101,20 @@
   background:var(--panel-bg);
 }
 
-/* =========================================================
-   TABLE BASE
-========================================================= */
-
+/* =========================
+   TABLE
+========================= */
 .panel-content.facturas table{
   width:100%;
   border-collapse:collapse;
   table-layout:fixed;
 }
 
-/* header de tabla fijo (esto sí está bien) */
+/* HEADER STICKY SOLO DENTRO DEL SCROLL */
 .panel-content.facturas thead{
   position:sticky;
   top:0;
-  z-index:2;
+  z-index:1;
   background:var(--panel-bg);
 }
 
@@ -134,34 +139,21 @@
   text-overflow:ellipsis;
 }
 
-/* =========================================================
+/* =========================
    COLUMN SYSTEM
-========================================================= */
-
-.panel-content.facturas .col-id{
-  width:120px;
-  font-size:11px;
-  color:var(--dim);
-}
-
-.panel-content.facturas .col-main{
-  width:24%;
-}
-
-.panel-content.facturas .col-secondary{
-  width:30%;
-}
+========================= */
+.panel-content.facturas .col-id{ width:120px; font-size:11px; color:var(--dim); }
+.panel-content.facturas .col-main{ width:24%; }
+.panel-content.facturas .col-secondary{ width:30%; }
 
 .panel-content.facturas .col-date{
   width:120px;
   text-align:center;
-  padding-right:18px;
 }
 
 .panel-content.facturas .col-importe{
   width:130px;
   text-align:right;
-  padding-right:18px;
 }
 
 .panel-content.facturas .col-status{
@@ -172,13 +164,11 @@
 .panel-content.facturas .col-actions{
   width:180px;
   text-align:right;
-  padding-right:18px;
 }
 
-/* =========================================================
+/* =========================
    ROWS
-========================================================= */
-
+========================= */
 .panel-content.facturas tbody tr{
   transition:all .15s ease;
   cursor:pointer;
@@ -193,10 +183,9 @@
   transform:translateX(2px);
 }
 
-/* =========================================================
+/* =========================
    USER CELL
-========================================================= */
-
+========================= */
 .panel-content.facturas .cell-user{
   display:flex;
   align-items:center;
@@ -232,15 +221,11 @@
 .panel-content.facturas .user-sub{
   font-size:11px;
   color:var(--dim);
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
 }
 
-/* =========================================================
+/* =========================
    EMPRESA
-========================================================= */
-
+========================= */
 .panel-content.facturas .empresa-cell{
   display:flex;
   align-items:center;
@@ -253,10 +238,9 @@
   opacity:.6;
 }
 
-/* =========================================================
+/* =========================
    BADGES
-========================================================= */
-
+========================= */
 .panel-content.facturas .badge{
   padding:4px 10px;
   border-radius:999px;
@@ -274,10 +258,9 @@
   background:color-mix(in srgb, var(--warning), transparent 85%);
 }
 
-/* =========================================================
+/* =========================
    ACTIONS
-========================================================= */
-
+========================= */
 .panel-content.facturas .actions{
   display:inline-flex;
   gap:6px;
@@ -289,7 +272,6 @@
   border-radius:6px;
   border:1px solid var(--card-border);
   background:var(--card-bg);
-  color:var(--text);
   font-size:11px;
   cursor:pointer;
 }
@@ -311,10 +293,9 @@
   color:#fff;
 }
 
-/* =========================================================
-   SCROLL
-========================================================= */
-
+/* =========================
+   SCROLLBAR
+========================= */
 .panel-content.facturas .table-container::-webkit-scrollbar{
   width:8px;
 }

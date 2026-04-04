@@ -1,5 +1,5 @@
 /* =========================================================
-   FACTURAS — PRO SAAS PANEL (TABLE MODE LIKE INCIDENCIAS)
+   FACTURAS — PRO SAAS PANEL (TABLE MODE CLEAN)
 ========================================================= */
 
 .panel-content.facturas{
@@ -9,6 +9,7 @@
   width:100%;
   position:relative;
 }
+
 
 /* =========================================================
    STRUCTURE
@@ -22,55 +23,6 @@
   width:100%;
 }
 
-/* =========================================================
-   FILTERS
-========================================================= */
-
-.panel-content.facturas .filters-row{
-  display:flex;
-  align-items:center;
-  gap:10px;
-  padding:12px 16px;
-  background:var(--panel-bg);
-  border-bottom:1px solid var(--panel-border);
-}
-
-.panel-content.facturas .filters-row input{
-  flex:1;
-  min-width:220px;
-}
-
-.panel-content.facturas .filters-row input,
-.panel-content.facturas .filters-row select{
-  padding:10px 12px;
-  border-radius:8px;
-  border:1px solid var(--card-border);
-  background:var(--card-bg);
-  color:var(--text);
-  font-size:13px;
-}
-
-.panel-content.facturas .filters-row select{
-  min-width:140px;
-}
-
-.panel-content.facturas .btn-new-factura{
-  margin-left:auto;
-  padding:10px 18px;
-  border-radius:999px;
-  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
-  color:#fff;
-  font-weight:600;
-  border:none;
-  cursor:pointer;
-  box-shadow:0 6px 18px rgba(99,102,241,0.35);
-  transition:all .2s ease;
-}
-
-.panel-content.facturas .btn-new-factura:hover{
-  transform:translateY(-1px);
-  box-shadow:0 10px 26px rgba(99,102,241,0.45);
-}
 
 /* =========================================================
    TABLE CONTAINER
@@ -83,6 +35,7 @@
   overflow-x:hidden;
   background:var(--panel-bg);
 }
+
 
 /* =========================================================
    TABLE BASE
@@ -121,6 +74,7 @@
   overflow:hidden;
   text-overflow:ellipsis;
 }
+
 
 /* =========================================================
    COLUMN SYSTEM
@@ -163,6 +117,7 @@
   padding-right:18px;
 }
 
+
 /* =========================================================
    ROWS
 ========================================================= */
@@ -180,6 +135,7 @@
   background:color-mix(in srgb, var(--panel-bg), #fff 6%);
   transform:translateX(2px);
 }
+
 
 /* =========================================================
    USER CELL
@@ -225,6 +181,7 @@
   text-overflow:ellipsis;
 }
 
+
 /* =========================================================
    EMPRESA
 ========================================================= */
@@ -240,6 +197,7 @@
   text-align:center;
   opacity:.6;
 }
+
 
 /* =========================================================
    BADGES
@@ -261,6 +219,7 @@
   color:var(--warning);
   background:color-mix(in srgb, var(--warning), transparent 85%);
 }
+
 
 /* =========================================================
    ACTIONS
@@ -298,6 +257,7 @@
   background:var(--warning);
   color:#fff;
 }
+
 
 /* =========================================================
    SCROLL

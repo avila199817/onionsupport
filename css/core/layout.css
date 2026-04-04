@@ -109,7 +109,7 @@ html, body{
 
 
 /* =========================
-   CONTENT WRAPPER
+   CONTENT WRAPPER (BASE)
 ========================= */
 .content-wrapper{
   flex:1;
@@ -121,11 +121,15 @@ html, body{
   padding:var(--space-lg);
   gap:var(--space-lg);
 
-  overflow:auto;
+  overflow:auto; /* scroll global por defecto */
   background:transparent;
 }
 
-.panel-content.table-mode .content-wrapper{
+
+/* =========================
+   TABLE MODE (FIX SCROLL)
+========================= */
+.content-wrapper.table-mode{
   overflow:hidden;
   padding:0;
   gap:0;

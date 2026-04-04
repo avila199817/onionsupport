@@ -12,10 +12,12 @@
   left:var(--sidebar-width);
   right:0;
 
-  z-index:1200;
+  z-index:var(--z-topbar);
 
   display:flex;
   flex-direction:column;
+
+  height:var(--mini-topbar-height); /* 🔥 IMPORTANTE */
 
   background:
     linear-gradient(180deg, rgba(255,255,255,0.02), transparent 40%),
@@ -26,7 +28,7 @@
   backdrop-filter:blur(6px);
   box-shadow:0 6px 20px rgba(0,0,0,0.25);
 
-  transition:left .25s ease;
+  transition:left var(--duration-normal) var(--ease-out);
 }
 
 
@@ -54,6 +56,8 @@
 
   gap:var(--space-md);
   padding:10px var(--space-lg);
+
+  height:100%; /* 🔥 CLAVE para centrar vertical */
 }
 
 

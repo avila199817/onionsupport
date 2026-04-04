@@ -53,7 +53,7 @@
         "/css/app/facturas/facturas.css"
       ],
       script: [
-        "/js/ui/topbarview.js",
+        "/js/features/facturas/topbarview.js",
         "/js/features/facturas/index.js"
       ],
       topbarview: "facturas",

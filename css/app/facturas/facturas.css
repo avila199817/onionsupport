@@ -1,5 +1,5 @@
 /* =========================================================
-   🔥 FACTURAS — FINAL PRO SAAS (BODY SCROLL + MINI TOPBAR FIXED)
+   🔥 FACTURAS — PRO SAAS (CLON INCIDENCIAS + MINI TOPBAR)
 ========================================================= */
 
 /* =========================
@@ -8,22 +8,9 @@
 .panel-content.facturas{
   display:flex;
   flex-direction:column;
-  flex:1;
-  min-height:0;
+  height:100%;
   width:100%;
   position:relative;
-
-  overflow:visible; /* 🔥 scroll global (body) */
-}
-
-
-/* =========================
-   GLOBAL TABLE MODE
-========================= */
-.content-wrapper.table-mode{
-  overflow:visible !important;
-  padding:0 !important;
-  gap:0 !important;
 }
 
 
@@ -40,16 +27,14 @@
 
 
 /* =========================
-   🚫 SIN SCROLL INTERNO
+   🔥 SCROLL REAL (IGUAL INCIDENCIAS)
 ========================= */
 .panel-content.facturas .table-container{
   flex:1;
   min-height:0;
 
-  overflow:visible;
-
-  position:relative;
-  z-index:1;
+  overflow-y:auto;
+  overflow-x:hidden;
 
   background:var(--panel-bg);
 }
@@ -58,46 +43,24 @@
 /* =========================
    🔥 COMPENSACIÓN MINI TOPBAR
 ========================= */
-.panel-content.facturas.has-mini-topbar .table-system{
-  padding-top:var(--mini-topbar-height);
+.panel-content.facturas.has-mini-topbar .table-container{
+  margin-top:var(--mini-topbar-height);
 }
 
 
 /* =========================
-   TABLE BODY
+   TABLE
 ========================= */
-.panel-content.facturas .table-container table{
+.panel-content.facturas table{
   width:100%;
+  border-collapse:collapse;
   table-layout:fixed;
-
-  border-collapse:separate;
-  border-spacing:0;
 }
 
 
-/* =========================
-   TABLE HEAD (LEGACY SAFE)
-========================= */
-.panel-content.facturas .table-head table{
-  width:100%;
-  table-layout:fixed;
-
-  border-collapse:separate;
-  border-spacing:0;
-}
-
-.panel-content.facturas .table-head th{
-  padding:12px 14px;
-
-  text-align:left;
-  border-bottom:1px solid var(--panel-border);
-
-  color:var(--dim);
-  font-size:11px;
-  text-transform:uppercase;
-  letter-spacing:.4px;
-
-  white-space:nowrap;
+/* ❌ NO STICKY (LO CONTROLA MINI-TOPBAR) */
+.panel-content.facturas thead{
+  display:none;
 }
 
 
@@ -122,14 +85,40 @@
 /* =========================
    COLUMNS
 ========================= */
-.panel-content.facturas .col-id{ width:120px; font-size:11px; color:var(--dim); }
-.panel-content.facturas .col-main{ width:24%; }
-.panel-content.facturas .col-secondary{ width:30%; }
+.panel-content.facturas .col-id{
+  width:140px;
+  font-size:11px;
+  color:var(--dim);
+}
 
-.panel-content.facturas .col-date{ width:120px; text-align:center; }
-.panel-content.facturas .col-importe{ width:130px; text-align:right; }
-.panel-content.facturas .col-status{ width:110px; text-align:center; }
-.panel-content.facturas .col-actions{ width:180px; text-align:right; }
+.panel-content.facturas .col-main{
+  width:30%;
+  font-weight:500;
+  white-space:normal;
+  line-height:1.4;
+}
+
+.panel-content.facturas .col-secondary{
+  width:180px;
+}
+
+.panel-content.facturas .col-date{
+  width:130px;
+}
+
+.panel-content.facturas .col-importe{
+  width:130px;
+  text-align:right;
+}
+
+.panel-content.facturas .col-status{
+  width:110px;
+}
+
+.panel-content.facturas .col-actions{
+  width:180px;
+  text-align:right;
+}
 
 
 /* =========================
@@ -151,7 +140,7 @@
 
 
 /* =========================
-   USER CELL
+   USER CELL (CLON)
 ========================= */
 .panel-content.facturas .cell-user{
   display:flex;
@@ -160,21 +149,22 @@
 }
 
 .panel-content.facturas .table-avatar{
-  width:36px;
-  height:36px;
-  min-width:36px;
+  width:34px;
+  height:34px;
+  min-width:34px;
 
   border-radius:50%;
+  overflow:hidden;
 
   display:flex;
   align-items:center;
   justify-content:center;
 
+  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
   color:#fff;
+
   font-size:12px;
   font-weight:600;
-
-  flex-shrink:0;
 }
 
 .panel-content.facturas .user-info{
@@ -184,10 +174,6 @@
 
 .panel-content.facturas .user-name{
   font-weight:600;
-
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
 }
 
 .panel-content.facturas .user-sub{
@@ -216,9 +202,8 @@
    BADGES
 ========================= */
 .panel-content.facturas .badge{
-  padding:4px 10px;
+  padding:3px 9px;
   border-radius:999px;
-
   font-size:10px;
   font-weight:500;
 }
@@ -270,4 +255,17 @@
 .panel-content.facturas .btn-action.pay:hover{
   background:var(--warning);
   color:#fff;
+}
+
+
+/* =========================
+   SCROLLBAR (CLON)
+========================= */
+.panel-content.facturas .table-container::-webkit-scrollbar{
+  width:8px;
+}
+
+.panel-content.facturas .table-container::-webkit-scrollbar-thumb{
+  background:var(--scrollbar-thumb);
+  border-radius:6px;
 }

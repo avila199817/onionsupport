@@ -8,7 +8,6 @@
   }
 
   const Onion = window.Onion;
-
   const MAX_TOASTS = 5;
 
   function getContainer(){
@@ -25,10 +24,6 @@
 
   }
 
-  /* =========================
-     REMOVE
-  ========================= */
-
   function removeToast(toast){
 
     if(!toast) return;
@@ -36,28 +31,16 @@
     toast.classList.remove("show");
     toast.classList.add("hide");
 
-    setTimeout(()=>{
-      toast.remove();
-    },250);
+    setTimeout(()=> toast.remove(), 250);
 
   }
-
-  /* =========================
-     CLEAR ALL
-  ========================= */
 
   function clearAll(){
 
     const container = document.querySelector(".toast-container");
-    if(!container) return;
-
-    container.innerHTML = "";
+    if(container) container.innerHTML = "";
 
   }
-
-  /* =========================
-     CREATE
-  ========================= */
 
   function showToast(message, type="info", duration=3000){
 
@@ -97,10 +80,6 @@
 
     btn.addEventListener("click", onClose);
 
-    /* =========================
-       CLEANUP
-    ========================= */
-
     Onion.onCleanup(()=>{
       clearTimeout(timeout);
       btn.removeEventListener("click", onClose);
@@ -110,8 +89,10 @@
   }
 
   /* =========================
-     API
+     API GLOBAL
   ========================= */
+
+  Onion.ui = Onion.ui || {};
 
   Onion.ui.toast = {
     success:(msg,d)=>showToast(msg,"success",d),

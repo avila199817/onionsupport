@@ -1,5 +1,5 @@
 /* =========================================================
-   🔥 LAYOUT — SAAS PANEL CLEAN (FINAL DEFINITIVO)
+   🔥 LAYOUT — SAAS PANEL CLEAN (FINAL PRO STICKY FIX)
 ========================================================= */
 
 
@@ -80,7 +80,6 @@ html, body{
   margin-left:var(--sidebar-width);
   width:calc(100% - var(--sidebar-width));
 
-  /* 🔥 SOLO TOPBAR GLOBAL */
   padding-top:var(--topbar-height);
 
   min-width:0;
@@ -122,7 +121,7 @@ html, body{
   padding:var(--space-lg);
   gap:var(--space-lg);
 
-  overflow:hidden;
+  overflow:hidden; /* 🔥 mantenido para SaaS */
 
   background:transparent;
 }
@@ -139,16 +138,16 @@ html, body{
   flex-direction:column;
 
   background:var(--panel-bg);
+
+  overflow:hidden; /* 🔥 CLAVE: controla scroll interno */
 }
 
 
 /* =========================
-   🔥 MINI TOPBAR SUPPORT (REAL)
+   MINI TOPBAR SUPPORT (STICKY MODE)
 ========================= */
-
-/* 🔥 SIN HARDCODE — usa JS dinámico */
 .panel-content.has-mini-topbar{
-  padding-top:var(--mini-topbar-height, 0px);
+  padding-top:0; /* 🔥 ya NO empujamos con padding */
 }
 
 
@@ -166,7 +165,7 @@ html, body{
 
 
 /* =========================
-   TABLE MODE
+   TABLE MODE (SCROLL REAL)
 ========================= */
 .panel-content.table-mode{
   padding:0;
@@ -178,6 +177,20 @@ html, body{
 
   padding:0;
   gap:0;
+
+  overflow:hidden;
+}
+
+
+/* =========================
+   🔥 SCROLL ÚNICO DEL PANEL
+========================= */
+.panel-content.table-mode .table-container{
+  flex:1;
+  min-height:0;
+
+  overflow-y:auto;
+  overflow-x:hidden;
 }
 
 

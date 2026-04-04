@@ -10,8 +10,10 @@ if(!Onion){
 }
 
 let initialized = false;
-let tbody = null;
-let usersCache = [];
+let currentItems = [];
+let filteredItems = [];
+let loading = false;
+let currentRequestId = 0;
 
 /* =========================
    ROOT
@@ -21,105 +23,9 @@ function getRoot(){
   return document.querySelector(".panel-content.usuarios");
 }
 
-function $(id){
-  return getRoot()?.querySelector("#" + id);
-}
-
-/* =========================
-   API
-========================= */
-
-async function getUsers(){
-  const res = await Onion.fetch(Onion.config.API + "/users");
-  return res?.users || res?.usuarios || res || [];
-}
-
-/* =========================
-   HELPERS
-========================= */
-
-function safe(v){
-  return v && String(v).trim() !== "" ? v : "-";
-}
-
-function formatFecha(f){
-  if(!f) return "-";
-  return new Date(f).toLocaleDateString("es-ES");
-}
-
-function capitalize(str){
-  if(!str) return "-";
-  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
-}
-
-/* =========================
-   AVATAR SYSTEM
-========================= */
-
-function getInitials(name){
-  if(!name) return "?";
-  return name
-    .split(" ")
-    .map(n => n[0])
-    .join("")
-    .slice(0,2)
-    .toUpperCase();
-}
-
-function hashString(str){
-  let hash = 0;
-  for(let i = 0; i < str.length; i++){
-    hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return hash;
-}
-
-function getAvatarColor(name){
-  const colors = [
-    "#6366f1",
-    "#22c55e",
-    "#eab308",
-    "#ef4444",
-    "#06b6d4",
-    "#a855f7",
-    "#f97316"
-  ];
-  return colors[Math.abs(hashString(name)) % colors.length];
-}
-
-function renderAvatarHTML(u){
-
-  const name = u.name || u.username || "U";
-
-  if(u.avatar){
-    let src = u.avatar;
-
-    if(!src.startsWith("http")){
-      src = Onion.config.API.replace("/api","") + src;
-    }
-
-    return `<img src="${src}" alt="${name}" loading="lazy">`;
-  }
-
-  const initials = getInitials(name);
-  const color = getAvatarColor(name);
-
-  return `
-    <div style="
-      background:${color};
-      width:100%;
-      height:100%;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      border-radius:50%;
-      color:#fff;
-      font-weight:600;
-      font-size:12px;
-    ">
-      ${initials}
-    </div>
-  `;
+function $(selector){
+  const root = getRoot();
+  return root ? root.querySelector(selector) : null;
 }
 
 /* =========================
@@ -137,17 +43,14 @@ function init(){
 
   initialized = true;
 
-  tbody = $("usuarios-body");
-  if(!tbody) return;
-
   bindEvents();
-  initFilters();
-  loadUsers();
+
+  requestAnimationFrame(()=>{
+    loadUsers();
+  });
 
   Onion.onCleanup(()=>{
     initialized = false;
-    tbody = null;
-    usersCache = [];
   });
 
 }
@@ -160,86 +63,26 @@ init();
 
 function bindEvents(){
 
-  if(!tbody) return;
+  const root = getRoot();
+  if(!root) return;
 
-  /* 🔥 CLICK FILA */
-  Onion.cleanupEvent(tbody, "click", (e)=>{
+  Onion.cleanupEvent(root, "click", (e)=>{
 
     const row = e.target.closest("tr[data-id]");
     if(!row) return;
 
-    const id = row.dataset.id;
-    if(!id) return;
-
-    Onion.router.navigate(`/usuarios/detalle?id=${id}`);
+    Onion.router.navigate("/usuarios/detalle?id=" + row.dataset.id);
 
   });
 
-  /* 🔥 BOTÓN NUEVO */
-  const btnNew = $("btn-new-usuario");
+  $("#btn-new-usuario")?.addEventListener("click", ()=>{
+    Onion.router.navigate("/usuarios/nuevo");
+  });
 
-  if(btnNew){
-    Onion.cleanupEvent(btnNew, "click", ()=>{
-      Onion.router.navigate("/usuarios/nuevo");
-    });
-  }
-
-}
-
-/* =========================
-   FILTROS
-========================= */
-
-function initFilters(){
-
-  const search = $("search-usuario");
-  const estado = $("filter-estado-usuario");
-  const rol = $("filter-rol-usuario");
-  const tipo = $("filter-tipo-usuario");
-
-  search && Onion.cleanupEvent(search, "input", applyFilters);
-  estado && Onion.cleanupEvent(estado, "change", applyFilters);
-  rol && Onion.cleanupEvent(rol, "change", applyFilters);
-  tipo && Onion.cleanupEvent(tipo, "change", applyFilters);
-
-}
-
-function applyFilters(){
-
-  const search = $("search-usuario")?.value.toLowerCase() || "";
-  const estado = $("filter-estado-usuario")?.value || "";
-  const rol = $("filter-rol-usuario")?.value || "";
-  const tipo = $("filter-tipo-usuario")?.value || "";
-
-  let filtered = usersCache;
-
-  if(search){
-    filtered = filtered.filter(u =>
-      (u.username || "").toLowerCase().includes(search) ||
-      (u.name || "").toLowerCase().includes(search) ||
-      (u.email || "").toLowerCase().includes(search)
-    );
-  }
-
-  if(estado){
-    filtered = filtered.filter(u =>
-      estado === "activo" ? u.active : !u.active
-    );
-  }
-
-  if(rol){
-    filtered = filtered.filter(u =>
-      (u.role || "").toLowerCase() === rol
-    );
-  }
-
-  if(tipo){
-    filtered = filtered.filter(u =>
-      (u.tipo || "").toLowerCase() === tipo
-    );
-  }
-
-  renderUsers(filtered);
+  $("#search-usuario")?.addEventListener("input", debounce(applyFilters, 250));
+  $("#filter-estado-usuario")?.addEventListener("change", applyFilters);
+  $("#filter-rol-usuario")?.addEventListener("change", applyFilters);
+  $("#filter-tipo-usuario")?.addEventListener("change", applyFilters);
 
 }
 
@@ -249,84 +92,99 @@ function applyFilters(){
 
 async function loadUsers(){
 
-  const panel = getRoot();
+  if(loading) return;
+  loading = true;
 
-  panel?.classList.remove("ready");
+  const tbody = $("#usuarios-body");
+  if(!tbody) return;
 
-  renderState("Cargando usuarios…");
+  const requestId = ++currentRequestId;
+
+  document.activeElement?.blur();
 
   try{
 
-    const users = await getUsers();
+    await new Promise(r => requestAnimationFrame(r));
+    await new Promise(r => requestAnimationFrame(r));
+    await new Promise(r => setTimeout(r, 200));
 
-    usersCache = users;
+    const res = await Onion.fetch(Onion.config.API + "/users");
+    const items = normalize(res);
 
-    renderUsers(users);
+    if(requestId !== currentRequestId) return;
+
+    currentItems = items;
+    filteredItems = items;
+
+    if(!items.length){
+      setEmpty();
+      return;
+    }
 
     requestAnimationFrame(()=>{
-      panel?.classList.add("ready");
+      render(items);
     });
 
-  }catch(err){
+  }catch(e){
 
-    console.error("💥 USERS ERROR:", err);
+    console.error("💥 ERROR USERS:", e);
 
-    renderState("Error cargando usuarios","error");
+    if(requestId !== currentRequestId) return;
 
-    panel?.classList.add("ready");
+    setError();
 
+  }finally{
+    loading = false;
   }
 
 }
 
 /* =========================
-   RENDER
+   NORMALIZE
 ========================= */
 
-function renderUsers(users = []){
+function normalize(res){
 
-  if(!tbody) return;
+  if(!res) return [];
 
-  if(!Array.isArray(users) || users.length === 0){
-    return renderState("No hay usuarios","empty");
-  }
+  if(Array.isArray(res)) return res;
+  if(Array.isArray(res.users)) return res.users;
+  if(Array.isArray(res.usuarios)) return res.usuarios;
+  if(Array.isArray(res.data)) return res.data;
+  if(Array.isArray(res.items)) return res.items;
 
-  tbody.innerHTML = users.map(u => {
+  return [];
 
-    const estado = u.active
-      ? `<span class="badge activo">Activo</span>`
-      : `<span class="badge inactivo">Inactivo</span>`;
+}
 
-    const rol = `<span class="badge ${u.role || "user"}">${capitalize(u.role)}</span>`;
-    const tipo = `<span class="badge ${u.tipo || "particular"}">${capitalize(u.tipo)}</span>`;
+/* =========================
+   FILTERS
+========================= */
 
-    return `
-<tr data-id="${u.id}">
+function applyFilters(){
 
-  <td class="col-id">${safe(u.id)}</td>
+  const search = ($("#search-usuario")?.value || "").toLowerCase();
+  const estado = ($("#filter-estado-usuario")?.value || "").toLowerCase();
+  const rol = ($("#filter-rol-usuario")?.value || "").toLowerCase();
+  const tipo = ($("#filter-tipo-usuario")?.value || "").toLowerCase();
 
-  <td class="col-main">
-    <div class="cell-user">
-      <div class="table-avatar">
-        ${renderAvatarHTML(u)}
-      </div>
-      <div class="user-info">
-        <span class="user-name">${safe(u.name || u.username)}</span>
-        <span class="user-sub">${safe(u.email)}</span>
-      </div>
-    </div>
-  </td>
+  filteredItems = currentItems.filter(u => {
 
-  <td class="col-secondary">${rol}</td>
-  <td class="col-secondary">${tipo}</td>
+    const name = safeText(u.name || u.username);
+    const email = safeText(u.email);
 
-  <td class="col-status">${estado}</td>
+    return (
+      (!search || name.includes(search) || email.includes(search)) &&
+      (!estado || (estado === "activo" ? u.active : !u.active)) &&
+      (!rol || (u.role || "").toLowerCase() === rol) &&
+      (!tipo || (u.tipo || "").toLowerCase() === tipo)
+    );
 
-  <td class="col-date">${formatFecha(u.createdAt || u.created_at)}</td>
+  });
 
-</tr>
-`;
-  }).join("");
+  requestAnimationFrame(()=>{
+    render(filteredItems);
+  });
 
 }
 
@@ -334,18 +192,199 @@ function renderUsers(users = []){
    STATES
 ========================= */
 
-function renderState(message, cls="loading"){
+function setEmpty(){
+  $("#usuarios-body").innerHTML =
+    `<tr><td colspan="7">No hay usuarios</td></tr>`;
+}
 
+function setError(){
+  $("#usuarios-body").innerHTML =
+    `<tr><td colspan="7">Error cargando usuarios</td></tr>`;
+}
+
+/* =========================
+   RENDER
+========================= */
+
+function render(items){
+
+  const tbody = $("#usuarios-body");
   if(!tbody) return;
 
-  tbody.innerHTML = `
-<tr>
-  <td colspan="6" class="${cls}">
-    ${message}
+  const html = items.map(u => {
+
+    const d = mapItem(u);
+
+    return `
+<tr data-id="${d.id}">
+
+  <td class="col-id">${d.id}</td>
+
+  <td class="col-main">
+    <div class="cell-user">
+      <div class="table-avatar">${renderAvatar(d.nombre)}</div>
+      <div class="user-info">
+        <span class="user-name">${escapeHTML(d.nombre)}</span>
+        <span class="user-sub">${escapeHTML(d.email)}</span>
+      </div>
+    </div>
   </td>
+
+  <td class="col-secondary">
+    <span class="badge ${d.rol.class}">
+      ${d.rol.label}
+    </span>
+  </td>
+
+  <td class="col-secondary">
+    <span class="badge ${d.tipo.class}">
+      ${d.tipo.label}
+    </span>
+  </td>
+
+  <td class="col-status">
+    <span class="badge ${d.estado.class}">
+      ${d.estado.label}
+    </span>
+  </td>
+
+  <td class="col-date">${d.fecha}</td>
+
+  <td class="col-actions">
+    <div class="actions">
+      <button class="btn-action view" data-id="${d.id}">Ver</button>
+    </div>
+  </td>
+
 </tr>
 `;
 
+  }).join("");
+
+  tbody.innerHTML = html;
+
+}
+
+/* =========================
+   MAP
+========================= */
+
+function mapItem(u){
+
+  return {
+    id: u.id,
+
+    nombre: cleanValue(
+      u.name || u.username,
+      "Usuario"
+    ),
+
+    email: cleanValue(
+      u.email,
+      "-"
+    ),
+
+    fecha: formatFecha(u.createdAt || u.created_at),
+
+    estado: getEstado(u.active),
+    rol: getRol(u.role),
+    tipo: getTipo(u.tipo)
+  };
+
+}
+
+/* =========================
+   HELPERS
+========================= */
+
+function cleanValue(val, fallback){
+  if(!val) return fallback;
+  let v = String(val).trim();
+  if(v === "" || v === "null" || v === "undefined") return fallback;
+  return v;
+}
+
+function safeText(val){
+  return String(cleanValue(val, "")).toLowerCase();
+}
+
+function renderAvatar(name){
+  return avatarHTML(getInitials(name), getAvatarColor(name));
+}
+
+function avatarHTML(initials, color){
+  return `
+    <div style="
+      width:100%;
+      height:100%;
+      border-radius:50%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:${color};
+      color:#fff;
+      font-weight:600;
+      font-size:12px;
+    ">
+      ${initials}
+    </div>
+  `;
+}
+
+function hashString(str){
+  let hash = 0;
+  for(let i = 0; i < str.length; i++){
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return hash;
+}
+
+function getAvatarColor(name){
+  const colors = ["#6366f1","#22c55e","#eab308","#ef4444","#06b6d4","#a855f7","#f97316"];
+  return colors[Math.abs(hashString(name)) % colors.length];
+}
+
+function getInitials(name){
+  return name ? name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase() : "?";
+}
+
+function getEstado(active){
+  if(active) return { label:"Activo", class:"success" };
+  return { label:"Inactivo", class:"danger" };
+}
+
+function getRol(r){
+  r = (r || "user").toLowerCase();
+  return { label: capitalize(r), class: r };
+}
+
+function getTipo(t){
+  t = (t || "particular").toLowerCase();
+  return { label: capitalize(t), class: t };
+}
+
+function formatFecha(f){
+  if(!f) return "--";
+  return new Date(f).toLocaleDateString("es-ES");
+}
+
+function capitalize(str){
+  return str ? str.charAt(0).toUpperCase() + str.slice(1) : "-";
+}
+
+function escapeHTML(str){
+  return String(str)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;");
+}
+
+function debounce(fn, delay){
+  let t;
+  return (...args)=>{
+    clearTimeout(t);
+    t = setTimeout(()=>fn(...args), delay);
+  };
 }
 
 })();

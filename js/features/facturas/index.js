@@ -65,6 +65,9 @@ function init(){
 /* 🔥 CLAVE SPA */
 window.initPage = init;
 
+/* 🔥 FALLBACK (por si el render no lo llama) */
+setTimeout(init, 50);
+
 /* =========================
    EVENTS
 ========================= */
@@ -365,26 +368,22 @@ function render(items){
     return;
   }
 
-  tbody.innerHTML = items.map(f => {
+  const html = items.map(f => {
 
     const d = mapItem(f);
 
     return `
 <tr data-id="${d.id}">
   <td class="col-id">${d.numero}</td>
-
   <td class="col-main">${escapeHTML(d.cliente.nombre)}</td>
   <td class="col-secondary">${escapeHTML(d.empresa || "-")}</td>
-
   <td class="col-date">${d.fecha}</td>
   <td class="col-importe">${d.total}</td>
-
   <td class="col-status">
     <span class="badge ${d.estadoPago.class}">
       ${d.estadoPago.label}
     </span>
   </td>
-
   <td class="col-actions">
     <button class="btn-action view" data-id="${d.id}">Ver</button>
     <button class="btn-action download" data-id="${d.id}">PDF</button>
@@ -392,6 +391,7 @@ function render(items){
 </tr>`;
   }).join("");
 
+  tbody.innerHTML = html;
 }
 
 /* =========================
@@ -399,7 +399,6 @@ function render(items){
 ========================= */
 
 function mapItem(f){
-
   return {
     id: f.id,
     numero: f.numeroFacturaLegal || f.numero || f.id,
@@ -411,7 +410,6 @@ function mapItem(f){
     total: formatMoney(f.total),
     estadoPago: getEstadoPago(f.estadoPago)
   };
-
 }
 
 function cleanValue(val, fallback){

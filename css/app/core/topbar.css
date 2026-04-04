@@ -4,7 +4,7 @@
 
 .mini-topbar{
   position:fixed;
-  top:56px;           /* altura real de la topbar */
+  top:0px;           /* altura real de la topbar */
   left:0;
   right:0;
 

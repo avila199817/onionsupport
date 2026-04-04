@@ -332,3 +332,16 @@
   background:var(--scrollbar-thumb);
   border-radius:6px;
 }
+
+.facturas-fixed{
+  position: fixed;
+  top: var(--topbar-height);
+  left: var(--sidebar-width);
+  right: 0;
+  z-index: 200;
+  background: var(--panel-bg);
+}
+
+.panel-content.facturas{
+  padding-top: 120px;
+}

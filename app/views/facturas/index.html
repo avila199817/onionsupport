@@ -1,25 +1,41 @@
-<div class="panel-content facturas table-mode">
+<div class="panel-content facturas table-mode has-mini-topbar">
 
   <div class="table-system facturas">
 
-    <!-- 🔥 MINI TOPBAR FIJA -->
-    <div class="facturas-fixed">
+    <!-- 🔥 MINI TOPBAR GENÉRICA -->
+    <div class="mini-topbar">
 
-      <!-- FILTROS -->
-      <div class="filters-row">
-        <input type="text" id="search-factura" placeholder="Buscar factura..." autocomplete="off">
-        
-        <select id="filter-estado-factura">
-          <option value="">Estado pago</option>
-          <option value="pagada">Pagada</option>
-          <option value="pendiente">Pendiente</option>
-        </select>
+      <div class="mini-topbar-inner">
 
-        <button id="btn-new-factura" class="btn-new-factura">+ Nueva</button>
+        <!-- LEFT -->
+        <div class="mini-topbar-left">
+          <input
+            type="text"
+            id="search-factura"
+            placeholder="Buscar factura..."
+            autocomplete="off"
+          >
+        </div>
+
+        <!-- RIGHT -->
+        <div class="mini-topbar-right">
+
+          <select id="filter-estado-factura">
+            <option value="">Estado pago</option>
+            <option value="pagada">Pagada</option>
+            <option value="pendiente">Pendiente</option>
+          </select>
+
+          <button id="btn-new-factura" class="btn-primary">
+            + Nueva
+          </button>
+
+        </div>
+
       </div>
 
-      <!-- HEADER TABLA -->
-      <div class="table-head">
+      <!-- 🔥 HEADER TABLA -->
+      <div class="mini-topbar-table">
         <table>
           <thead>
             <tr>
@@ -42,6 +58,7 @@
 
       <table>
         <tbody id="facturas-body">
+
           <tr class="table-loading">
             <td colspan="7">
               <div class="table-loader">
@@ -50,6 +67,7 @@
               </div>
             </td>
           </tr>
+
         </tbody>
       </table>
 

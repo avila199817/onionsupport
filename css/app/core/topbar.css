@@ -1,21 +1,21 @@
 /* =========================================================
-   🔥 MINI TOPBAR — FINAL PRO SAAS (STICKY REAL)
+   🔥 MINI TOPBAR — FINAL REAL (FIXED + FULL WIDTH OK)
 ========================================================= */
 
 .mini-topbar{
-  position:sticky;
+  position:fixed;
 
-  /* 🔥 se pega justo debajo del topbar global */
+  /* 🔥 DEBAJO DE LA TOPBAR GLOBAL */
   top:var(--topbar-height);
 
-  z-index:1000;
+  /* 🔥 EXACTAMENTE IGUAL QUE .topbar */
+  left:var(--sidebar-width);
+  right:0;
+
+  z-index:1200;
 
   display:flex;
   flex-direction:column;
-
-  /* 🔥 alineación REAL con layout */
-  margin-left:var(--sidebar-width);
-  width:calc(100% - var(--sidebar-width));
 
   background:
     linear-gradient(180deg, rgba(255,255,255,0.02), transparent 40%),
@@ -26,19 +26,13 @@
   backdrop-filter:blur(6px);
   box-shadow:0 6px 20px rgba(0,0,0,0.25);
 
-  transition:
-    margin-left var(--duration-slow) var(--ease-out),
-    width var(--duration-slow) var(--ease-out),
-    box-shadow var(--duration-fast) ease;
+  transition:left .25s ease;
 }
 
 
-/* =========================
-   SIDEBAR COLLAPSED
-========================= */
+/* 🔥 SIDEBAR COLLAPSADO */
 .sidebar.collapsed ~ .main-content .mini-topbar{
-  margin-left:var(--sidebar-collapsed);
-  width:calc(100% - var(--sidebar-collapsed));
+  left:var(--sidebar-collapsed);
 }
 
 
@@ -85,25 +79,6 @@
   color:var(--text);
 
   font-size:13px;
-
-  transition:
-    border-color var(--duration-normal) ease,
-    background var(--duration-normal) ease,
-    box-shadow var(--duration-normal) ease;
-}
-
-.mini-topbar input{
-  width:100%;
-  max-width:320px;
-}
-
-.mini-topbar input:focus,
-.mini-topbar select:focus{
-  border-color:var(--accent);
-  background:var(--panel-bg);
-
-  box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--accent), transparent 85%);
 }
 
 
@@ -120,15 +95,6 @@
   font-weight:600;
   border:none;
   cursor:pointer;
-
-  box-shadow:0 6px 18px rgba(99,102,241,0.35);
-
-  transition:all .2s ease;
-}
-
-.mini-topbar .btn-primary:hover{
-  transform:translateY(-1px);
-  box-shadow:0 10px 26px rgba(99,102,241,0.45);
 }
 
 
@@ -137,28 +103,21 @@
 ========================= */
 .mini-topbar-table{
   border-top:1px solid var(--panel-border);
-  background:var(--panel-bg);
 }
 
 .mini-topbar-table table{
   width:100%;
   table-layout:fixed;
-
-  border-collapse:separate;
-  border-spacing:0;
 }
 
 .mini-topbar-table th{
   padding:12px 14px;
 
-  text-align:left;
   font-size:11px;
+  text-align:left;
 
   color:var(--dim);
   text-transform:uppercase;
-  letter-spacing:.4px;
-
-  white-space:nowrap;
 
   border-bottom:1px solid var(--panel-border);
 }

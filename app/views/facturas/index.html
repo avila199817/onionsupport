@@ -2,36 +2,45 @@
 
   <div class="table-system facturas">
 
-    <!-- FILTROS -->
-    <div class="filters-row">
-      <input type="text" id="search-factura" placeholder="Buscar factura..." autocomplete="off">
-      
-      <select id="filter-estado-factura">
-        <option value="">Estado pago</option>
-        <option value="pagada">Pagada</option>
-        <option value="pendiente">Pendiente</option>
-      </select>
+    <!-- 🔥 MINI TOPBAR FIJA -->
+    <div class="facturas-fixed">
 
-      <button id="btn-new-factura" class="btn-new-factura">+ Nueva</button>
+      <!-- FILTROS -->
+      <div class="filters-row">
+        <input type="text" id="search-factura" placeholder="Buscar factura..." autocomplete="off">
+        
+        <select id="filter-estado-factura">
+          <option value="">Estado pago</option>
+          <option value="pagada">Pagada</option>
+          <option value="pendiente">Pendiente</option>
+        </select>
+
+        <button id="btn-new-factura" class="btn-new-factura">+ Nueva</button>
+      </div>
+
+      <!-- HEADER TABLA -->
+      <div class="table-head">
+        <table>
+          <thead>
+            <tr>
+              <th class="col-id" data-sort="numero">ID</th>
+              <th class="col-main" data-sort="cliente">Cliente</th>
+              <th class="col-secondary" data-sort="empresa">Empresa</th>
+              <th class="col-date" data-sort="fecha">Fecha</th>
+              <th class="col-importe" data-sort="total">Importe</th>
+              <th class="col-status" data-sort="estadoPago">Pago</th>
+              <th class="col-actions">Acciones</th>
+            </tr>
+          </thead>
+        </table>
+      </div>
+
     </div>
 
-    <!-- TABLA (ÚNICO SCROLL) -->
+    <!-- 🔥 SCROLL SOLO BODY -->
     <div class="table-container">
 
       <table>
-
-        <thead>
-          <tr>
-            <th class="col-id" data-sort="numero">ID</th>
-            <th class="col-main" data-sort="cliente">Cliente</th>
-            <th class="col-secondary" data-sort="empresa">Empresa</th>
-            <th class="col-date" data-sort="fecha">Fecha</th>
-            <th class="col-importe" data-sort="total">Importe</th>
-            <th class="col-status" data-sort="estadoPago">Pago</th>
-            <th class="col-actions">Acciones</th>
-          </tr>
-        </thead>
-
         <tbody id="facturas-body">
           <tr class="table-loading">
             <td colspan="7">
@@ -42,7 +51,6 @@
             </td>
           </tr>
         </tbody>
-
       </table>
 
     </div>

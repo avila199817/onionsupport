@@ -1,5 +1,5 @@
 /* =========================================================
-   🔥 LAYOUT — SAAS PANEL CLEAN (FINAL 10/10)
+   🔥 LAYOUT — SAAS PANEL CLEAN (FIX SCROLL REAL)
 ========================================================= */
 
 
@@ -65,7 +65,7 @@ html, body{
 
 
 /* =========================
-   MAIN CONTENT
+   MAIN CONTENT (🔥 FIX CLAVE)
 ========================= */
 .main-content{
   position:relative;
@@ -83,6 +83,8 @@ html, body{
   padding-top:var(--topbar-height);
 
   min-width:0;
+
+  overflow:hidden; /* 🔥 AQUÍ ESTÁ LA MAGIA */
 
   transition:
     margin-left var(--duration-slow) var(--ease-out),
@@ -109,7 +111,7 @@ html, body{
 
 
 /* =========================
-   CONTENT WRAPPER (BASE)
+   CONTENT WRAPPER (🔥 FIX REAL)
 ========================= */
 .content-wrapper{
   flex:1;
@@ -121,19 +123,16 @@ html, body{
   padding:var(--space-lg);
   gap:var(--space-lg);
 
-  overflow:auto; /* scroll global por defecto */
+  overflow:hidden; /* 🔥 YA NO SCROLLEA */
   background:transparent;
 }
 
-
-/* =========================
-   TABLE MODE (FIX SCROLL)
-========================= */
+/* TABLE MODE */
 .content-wrapper.table-mode{
-  overflow:hidden;
   padding:0;
   gap:0;
 }
+
 
 /* =========================
    PANEL SYSTEM
@@ -167,14 +166,6 @@ html, body{
 ========================= */
 .panel-content.table-mode{
   padding:0;
-}
-
-.panel-content.table-mode .content-wrapper{
-  flex:1;
-  min-height:0;
-
-  padding:0;
-  gap:0;
 }
 
 
@@ -262,7 +253,7 @@ html, body{
 
 
 /* =========================
-   PAGE LOADING (LOCAL)
+   PAGE LOADING
 ========================= */
 .page-loading{
   opacity:.6;
@@ -275,18 +266,15 @@ html, body{
 }
 
 
-/* =========================================================
-   🔥 CARET KILLER (GLOBAL FIX PRO)
-========================================================= */
-
-/* Oculta cursor cuando NO estás escribiendo */
+/* =========================
+   CARET KILLER
+========================= */
 input:not(:focus),
 textarea:not(:focus),
 [contenteditable="true"]:not(:focus){
   caret-color: transparent !important;
 }
 
-/* Fuerza ocultación en cualquier elemento raro */
 *:not(input):not(textarea):not([contenteditable="true"]){
   caret-color: transparent !important;
 }

@@ -301,7 +301,9 @@ html, body{
 
 
 
-
+.panel-content.facturas .table-container{
+  overflow:visible;
+}
 
 
 

@@ -267,13 +267,20 @@ html, body{
 }
 
 
-/* =========================
-   CARET FIX (CURSOR TEXTO)
-========================= */
+/* =========================================================
+   🔥 CARET KILLER (GLOBAL FIX PRO)
+========================================================= */
+
+/* Oculta cursor cuando NO estás escribiendo */
 input:not(:focus),
 textarea:not(:focus),
 [contenteditable="true"]:not(:focus){
-  caret-color: transparent;
+  caret-color: transparent !important;
+}
+
+/* Fuerza ocultación en cualquier elemento raro */
+*:not(input):not(textarea):not([contenteditable="true"]){
+  caret-color: transparent !important;
 }
 
 

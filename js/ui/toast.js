@@ -51,7 +51,7 @@
     }
 
     const toast = document.createElement("div");
-    toast.className = `toast toast-${type}`;
+    toast.className = `toast ${type}`;
 
     const msg = document.createElement("div");
     msg.className = "toast-message";

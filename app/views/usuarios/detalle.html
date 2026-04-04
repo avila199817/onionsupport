@@ -1,132 +1,135 @@
 <div class="panel-content usuario-detalle">
 
-  <!-- 🔥 LOADER -->
-  <div class="factura-loading" aria-hidden="true">
-    <img class="loader-logo loader-dark" src="/media/img/favicon_white.png" draggable="false">
-    <img class="loader-logo loader-light" src="/media/img/favicon_black.png" draggable="false">
+  <!-- 🔥 LOADER REAL (MISMO SISTEMA QUE FACTURAS) -->
+  <div id="usuario-loading" class="table-loader">
+    <div class="spinner"></div>
+    <span>Cargando usuario...</span>
   </div>
 
-  <div class="layout-split">
+  <!-- 🔥 CONTENIDO -->
+  <div id="usuario-content" style="display:none;">
 
-    <!-- =========================
-         LEFT
-    ========================= -->
-    <div class="detalle-left">
+    <div class="view-layout">
 
-      <!-- TOP BAR -->
-      <div class="filters-row" style="justify-content: space-between;">
+      <!-- =========================
+           MAIN
+      ========================= -->
+      <div class="view-main">
 
-        <div class="detalle-user">
-          <div id="detalle-avatar" class="table-avatar"></div>
+        <!-- HEADER -->
+        <div class="view-header">
 
-          <div class="user-info">
-            <div class="detalle-value" id="detalle-nombre">--</div>
+          <div class="view-user">
+            <div id="detalle-avatar" class="view-avatar"></div>
 
-            <div class="detalle-meta">
-              <span id="detalle-id"></span>
+            <div class="view-user-info">
+              <div class="view-title" id="detalle-nombre">--</div>
+
+              <div class="view-sub">
+                <span id="detalle-id"></span>
+              </div>
             </div>
           </div>
-        </div>
 
-        <button id="btn-back">
-          ← Volver
-        </button>
-
-      </div>
-
-      <!-- BODY -->
-      <div class="detalle-body">
-
-        <div style="width:100%;">
-
-          <div class="form-grid">
-
-            <div class="detalle-item">
-              <div class="detalle-label">Nombre</div>
-              <div class="detalle-value" id="detalle-nombre-full">--</div>
-            </div>
-
-            <div class="detalle-item">
-              <div class="detalle-label">Email</div>
-              <div class="detalle-value" id="detalle-email">--</div>
-            </div>
-
-            <div class="detalle-item">
-              <div class="detalle-label">Rol</div>
-              <div class="detalle-value" id="detalle-rol">--</div>
-            </div>
-
-            <div class="detalle-item">
-              <div class="detalle-label">Tipo</div>
-              <div class="detalle-value" id="detalle-tipo">--</div>
-            </div>
-
-            <div class="detalle-item">
-              <div class="detalle-label">Estado</div>
-              <div class="detalle-value" id="detalle-estado">--</div>
-            </div>
-
-            <div class="detalle-item">
-              <div class="detalle-label">Fecha alta</div>
-              <div class="detalle-value" id="detalle-fecha">--</div>
-            </div>
-
-            <div class="detalle-item" style="grid-column: span 2;">
-              <div class="detalle-label">Notas</div>
-              <div class="detalle-value" id="detalle-notas">--</div>
-            </div>
-
-          </div>
+          <button id="btn-back" class="view-back">
+            ← Volver
+          </button>
 
         </div>
 
+        <!-- BODY -->
+        <div class="view-body">
+
+          <div class="view-grid">
+
+            <div class="view-card">
+              <div class="view-label">Nombre</div>
+              <div class="view-value" id="detalle-nombre-full">--</div>
+            </div>
+
+            <div class="view-card">
+              <div class="view-label">Email</div>
+              <div class="view-value" id="detalle-email">--</div>
+            </div>
+
+            <div class="view-card">
+              <div class="view-label">Rol</div>
+              <div class="view-value" id="detalle-rol">--</div>
+            </div>
+
+            <div class="view-card">
+              <div class="view-label">Tipo</div>
+              <div class="view-value" id="detalle-tipo">--</div>
+            </div>
+
+            <div class="view-card">
+              <div class="view-label">Estado</div>
+              <div class="view-value" id="detalle-estado">--</div>
+            </div>
+
+            <div class="view-card">
+              <div class="view-label">Fecha alta</div>
+              <div class="view-value" id="detalle-fecha">--</div>
+            </div>
+
+            <div class="view-card full">
+              <div class="view-label">Notas</div>
+              <div class="view-value" id="detalle-notas">--</div>
+            </div>
+
+          </div>
+
+        </div>
+
       </div>
+
+      <!-- =========================
+           SIDEBAR
+      ========================= -->
+      <aside class="view-aside">
+
+        <div class="view-sidebar">
+
+          <div class="view-section">
+            <div class="view-section-title">Acciones</div>
+
+            <div class="view-files">
+
+              <div class="view-file">
+                <span>Editar usuario</span>
+
+                <div class="view-file-actions">
+                  <button id="btn-edit-user" class="view-btn soft">Editar</button>
+                </div>
+              </div>
+
+              <div class="view-file">
+                <span>Estado</span>
+
+                <div class="view-file-actions">
+                  <button id="btn-toggle-user" class="view-btn primary">
+                    Activar / Desactivar
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <div class="sidebar-divider"></div>
+
+          <div class="view-section">
+            <div class="view-section-title">Actividad reciente</div>
+            <div id="detalle-historial" class="view-files">
+              Sin actividad
+            </div>
+          </div>
+
+        </div>
+
+      </aside>
 
     </div>
-
-    <!-- =========================
-         RIGHT
-    ========================= -->
-    <aside class="detalle-right">
-
-      <div class="detalle-sidebar">
-
-        <div class="sidebar-section">
-          <div class="sidebar-title">Acciones</div>
-
-          <div class="detalle-blobs">
-
-            <div class="blob-item">
-              <span>Editar usuario</span>
-
-              <div class="blob-actions">
-                <button id="btn-edit-user">Editar</button>
-              </div>
-            </div>
-
-            <div class="blob-item">
-              <span>Estado</span>
-
-              <div class="blob-actions">
-                <button id="btn-toggle-user">Activar / Desactivar</button>
-              </div>
-            </div>
-
-          </div>
-        </div>
-
-        <div class="sidebar-divider"></div>
-
-        <div class="sidebar-section">
-          <div class="sidebar-title">Actividad reciente</div>
-          <div id="detalle-historial" class="detalle-blobs">
-            Sin actividad
-          </div>
-        </div>
-
-      </div>
-
-    </aside>
 
   </div>
 

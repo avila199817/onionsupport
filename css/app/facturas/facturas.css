@@ -1,5 +1,5 @@
 /* =========================================================
-   FACTURAS — FINAL PRO SAAS PANEL (CLEAN + STABLE)
+   FACTURAS — FINAL PRO SAAS PANEL (CLEAN + STABLE + FIXED SAFE)
 ========================================================= */
 
 /* =========================
@@ -12,6 +12,8 @@
   min-height:0;
   width:100%;
   position:relative;
+
+  overflow:visible; /* 🔥 CLAVE: evita conflictos con fixed */
 }
 
 
@@ -47,7 +49,9 @@
   overflow-y:auto;
   overflow-x:hidden;
 
-  /* 🔥 CLAVE ALIGN PERFECTO */
+  position:relative;
+  z-index:1;
+
   scrollbar-gutter:stable;
 
   background:var(--panel-bg);
@@ -67,7 +71,7 @@
 
 
 /* =========================
-   TABLE HEAD (VISUAL ONLY)
+   TABLE HEAD (LEGACY SAFE)
 ========================= */
 .panel-content.facturas .table-head table{
   width:100%;

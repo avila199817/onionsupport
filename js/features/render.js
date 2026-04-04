@@ -158,21 +158,21 @@
   };
 
   /* =========================
-     🔥 EXTRACT CONTENT (FIX REAL)
+     🔥 EXTRACT CONTENT (ESTABLE)
   ========================= */
   function extractContent(html){
 
     const wrapper = document.createElement("div");
     wrapper.innerHTML = html;
 
-    // 🔥 devolvemos TODO (multi-nodo seguro)
-    const fragment = document.createDocumentFragment();
+    // 🔥 contenedor único SIEMPRE
+    const container = document.createElement("div");
 
-    Array.from(wrapper.childNodes).forEach(node => {
-      fragment.appendChild(node);
-    });
+    while(wrapper.firstChild){
+      container.appendChild(wrapper.firstChild);
+    }
 
-    return fragment;
+    return container;
   }
 
   /* =========================
@@ -235,6 +235,11 @@
         app.classList.add("has-mini-topbar");
       }else{
         app.classList.remove("has-mini-topbar");
+      }
+
+      /* 🔥 INIT DE VISTA (CLAVE) */
+      if(window.initPage){
+        window.initPage();
       }
 
       /* 🔥 DOBLE FRAME */

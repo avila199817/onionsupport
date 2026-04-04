@@ -1,26 +1,21 @@
 /* =========================================================
-   🔥 MINI TOPBAR — PRO SAAS FINAL (SYNC REAL LAYOUT)
+   🔥 MINI TOPBAR — FINAL PRO SAAS (100% CORRECTO)
 ========================================================= */
 
 .mini-topbar{
   position:fixed;
 
-  /* 🔥 IMPORTANTE: viewport REAL del panel */
+  /* 🔥 viewport REAL del panel */
   top:0;
-  left:0;
+
+  /* 🔥 EXACTAMENTE igual que .topbar */
+  left:var(--sidebar-width);
   right:0;
 
   z-index:1000;
 
   display:flex;
   flex-direction:column;
-
-  /* 🔥 ALINEACIÓN PERFECTA CON TU LAYOUT */
-  margin-left:var(--sidebar-width);
-  width:calc(100% - var(--sidebar-width));
-
-  /* 🔥 MISMO OFFSET QUE TOPBAR GLOBAL */
-  transform:translateY(0);
 
   background:
     linear-gradient(180deg, rgba(255,255,255,0.02), transparent 40%),
@@ -32,17 +27,15 @@
   box-shadow:0 6px 20px rgba(0,0,0,0.25);
 
   transition:
-    margin-left var(--duration-slow) var(--ease-out),
-    width var(--duration-slow) var(--ease-out);
+    left var(--duration-slow) var(--ease-out);
 }
 
 
 /* =========================
-   SIDEBAR COLLAPSED (SYNC REAL)
+   SIDEBAR COLLAPSED (SYNC PERFECTO)
 ========================= */
 .sidebar.collapsed ~ .main-content .mini-topbar{
-  margin-left:var(--sidebar-collapsed);
-  width:calc(100% - var(--sidebar-collapsed));
+  left:var(--sidebar-collapsed);
 }
 
 
@@ -137,7 +130,7 @@
 
 
 /* =========================
-   TABLE HEADER (SYNC)
+   TABLE HEADER (SYNC PERFECTO)
 ========================= */
 .mini-topbar-table{
   border-top:1px solid var(--panel-border);

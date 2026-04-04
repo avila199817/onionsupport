@@ -2,12 +2,11 @@
 
   <div class="table-system facturas">
 
-    <!-- 🔥 MINI TOPBAR GENÉRICA -->
+    <!-- MINI TOPBAR -->
     <div class="mini-topbar">
 
       <div class="mini-topbar-inner">
 
-        <!-- LEFT -->
         <div class="mini-topbar-left">
           <input
             type="text"
@@ -17,9 +16,7 @@
           >
         </div>
 
-        <!-- RIGHT -->
         <div class="mini-topbar-right">
-
           <select id="filter-estado-factura">
             <option value="">Estado pago</option>
             <option value="pagada">Pagada</option>
@@ -29,14 +26,13 @@
           <button id="btn-new-factura" class="btn-primary">
             + Nueva
           </button>
-
         </div>
 
       </div>
 
-      <!-- 🔥 HEADER TABLA -->
+      <!-- HEADER -->
       <div class="mini-topbar-table">
-        <table>
+        <table class="facturas-table">
           <thead>
             <tr>
               <th class="col-id" data-sort="numero">ID</th>
@@ -53,10 +49,24 @@
 
     </div>
 
-    <!-- 🔥 SCROLL SOLO BODY -->
+    <!-- BODY -->
     <div class="table-container">
 
-      <table>
+      <table class="facturas-table">
+
+        <!-- 🔥 IMPORTANTE -->
+        <thead>
+          <tr>
+            <th class="col-id"></th>
+            <th class="col-main"></th>
+            <th class="col-secondary"></th>
+            <th class="col-date"></th>
+            <th class="col-importe"></th>
+            <th class="col-status"></th>
+            <th class="col-actions"></th>
+          </tr>
+        </thead>
+
         <tbody id="facturas-body">
 
           <tr class="table-loading">
@@ -69,6 +79,7 @@
           </tr>
 
         </tbody>
+
       </table>
 
     </div>

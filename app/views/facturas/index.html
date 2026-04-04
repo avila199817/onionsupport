@@ -2,7 +2,7 @@
 
   <div class="table-system facturas">
 
-    <!-- ✅ FILTROS (FUERA DEL SCROLL) -->
+    <!-- FILTROS -->
     <div class="filters-row">
       <input type="text" id="search-factura" placeholder="Buscar factura..." autocomplete="off">
       
@@ -15,19 +15,19 @@
       <button id="btn-new-factura" class="btn-new-factura">+ Nueva</button>
     </div>
 
-    <!-- ✅ SOLO LA TABLA SCROLLEA -->
+    <!-- TABLA (ÚNICO SCROLL) -->
     <div class="table-container">
 
       <table>
 
         <thead>
           <tr>
-            <th class="col-id">ID</th>
-            <th class="col-main">Cliente</th>
-            <th class="col-secondary">Empresa</th>
-            <th class="col-date">Fecha</th>
-            <th class="col-importe">Importe</th>
-            <th class="col-status">Pago</th>
+            <th class="col-id" data-sort="numero">ID</th>
+            <th class="col-main" data-sort="cliente">Cliente</th>
+            <th class="col-secondary" data-sort="empresa">Empresa</th>
+            <th class="col-date" data-sort="fecha">Fecha</th>
+            <th class="col-importe" data-sort="total">Importe</th>
+            <th class="col-status" data-sort="estadoPago">Pago</th>
             <th class="col-actions">Acciones</th>
           </tr>
         </thead>

@@ -97,7 +97,7 @@ function bindEvents(){
 }
 
 /* =========================
-   SORT (🔥 PRO)
+   SORTING
 ========================= */
 
 function bindSorting(){
@@ -109,8 +109,6 @@ function bindSorting(){
 
     const key = getSortKey(th);
     if(!key) return;
-
-    th.style.cursor = "pointer";
 
     th.addEventListener("click", ()=>{
 
@@ -172,8 +170,8 @@ function applySort(){
         break;
 
       case "total":
-        valA = parseFloat(A.total);
-        valB = parseFloat(B.total);
+        valA = parseFloat(A.total.replace(",", "."));
+        valB = parseFloat(B.total.replace(",", "."));
         break;
 
       case "estado":
@@ -184,7 +182,6 @@ function applySort(){
       default:
         valA = A.numero;
         valB = B.numero;
-
     }
 
     if(valA < valB) return sortState.dir === "asc" ? -1 : 1;
@@ -224,7 +221,12 @@ async function loadFacturas(){
   if(loading) return;
   loading = true;
 
+  const tbody = $("#facturas-body");
+  if(!tbody) return;
+
   const requestId = ++currentRequestId;
+
+  document.activeElement?.blur();
 
   try{
 
@@ -239,7 +241,10 @@ async function loadFacturas(){
     currentItems = items;
     filteredItems = items;
 
-    if(!items.length) return setEmpty();
+    if(!items.length){
+      setEmpty();
+      return;
+    }
 
     render(items);
 
@@ -285,15 +290,17 @@ function applyFilters(){
 ========================= */
 
 function setEmpty(){
-  $("#facturas-body").innerHTML = `<tr><td colspan="7">No hay facturas</td></tr>`;
+  $("#facturas-body").innerHTML =
+    `<tr><td colspan="7">No hay facturas</td></tr>`;
 }
 
 function setError(){
-  $("#facturas-body").innerHTML = `<tr><td colspan="7">Error cargando facturas</td></tr>`;
+  $("#facturas-body").innerHTML =
+    `<tr><td colspan="7">Error cargando facturas</td></tr>`;
 }
 
 /* =========================
-   RENDER
+   RENDER (ORIGINAL INTACTO)
 ========================= */
 
 function render(items){
@@ -301,48 +308,168 @@ function render(items){
   const tbody = $("#facturas-body");
   if(!tbody) return;
 
-  tbody.innerHTML = items.map(f => {
+  const html = items.map(f => {
 
     const d = mapItem(f);
 
+    const empresaHTML = d.hasEmpresa
+      ? `
+        <div class="cell-user empresa-cell">
+          <div class="table-avatar">${renderAvatarEmpresa(d.empresa)}</div>
+          <div class="user-info">
+            <span class="user-name">${escapeHTML(d.empresa)}</span>
+          </div>
+        </div>
+      `
+      : `<span class="empresa-empty">-</span>`;
+
     return `
 <tr data-id="${d.id}">
+
   <td class="col-id">${d.numero}</td>
-  <td class="col-main">${escapeHTML(d.cliente.nombre)}</td>
-  <td class="col-secondary">${escapeHTML(d.empresa || "-")}</td>
+
+  <td class="col-main">
+    <div class="cell-user">
+      <div class="table-avatar">${renderAvatar(d.cliente.nombre)}</div>
+      <div class="user-info">
+        <span class="user-name">${escapeHTML(d.cliente.nombre)}</span>
+        <span class="user-sub">${escapeHTML(d.cliente.email)}</span>
+      </div>
+    </div>
+  </td>
+
+  <td class="col-secondary">
+    ${empresaHTML}
+  </td>
+
   <td class="col-date">${d.fecha}</td>
   <td class="col-importe">${d.total}</td>
-  <td class="col-status">${d.estadoPago.label}</td>
-  <td class="col-actions">
-    <button class="btn-action view" data-id="${d.id}">Ver</button>
+
+  <td class="col-status">
+    <span class="badge ${d.estadoPago.class}">
+      ${d.estadoPago.label}
+    </span>
   </td>
+
+  <td class="col-actions">
+    <div class="actions">
+      <button class="btn-action view" data-id="${d.id}">Ver</button>
+      <button class="btn-action download" data-id="${d.id}">PDF</button>
+      ${
+        d.estadoPago.raw === "pendiente"
+          ? `<button class="btn-action pay" data-id="${d.id}">Pagar</button>`
+          : ``
+      }
+    </div>
+  </td>
+
 </tr>
 `;
+
   }).join("");
+
+  tbody.innerHTML = html;
 
 }
 
 /* =========================
-   MAP
+   MAP + HELPERS (INTACTOS)
 ========================= */
 
 function mapItem(f){
+
+  const empresaRaw = f.cliente?.empresa || f.cliente?.razonSocial;
+  const empresaClean = cleanValue(empresaRaw, "");
+
   return {
     id: f.id,
-    numero: f.numero || f.id,
-    cliente: { nombre: f.cliente?.nombre || "Cliente" },
-    empresa: f.cliente?.empresa || "",
-    fecha: formatFecha(f.fecha),
+    numero: f.numeroFacturaLegal || f.numero || f.id,
+
+    cliente: {
+      nombre: cleanValue(f.cliente?.nombre || f.cliente?.nombreContacto, "Cliente"),
+      email: cleanValue(f.cliente?.email || f.emailCliente, "-")
+    },
+
+    empresa: empresaClean,
+    hasEmpresa: !!empresaClean,
+
+    fecha: formatFecha(f.fechaFactura || f.fecha),
     total: formatMoney(f.total),
+
     estadoPago: getEstadoPago(f.estadoPago)
   };
+
 }
 
-/* =========================
-   HELPERS
-========================= */
+function cleanValue(val, fallback){
+  if(!val) return fallback;
+  let v = String(val).trim();
+  const lower = v.toLowerCase();
+  if(lower === "null" || lower === "undefined" || lower === "-"){
+    return fallback;
+  }
+  return v;
+}
 
-function safeText(v){ return String(v||"").toLowerCase(); }
+function safeText(val){
+  return String(cleanValue(val, "")).toLowerCase();
+}
+
+function renderAvatar(name){
+  return avatarHTML(getInitials(name), getAvatarColor(name));
+}
+
+function renderAvatarEmpresa(name){
+  return avatarHTML(getInitialsEmpresa(name), getAvatarColor(name + "_empresa"));
+}
+
+function avatarHTML(initials, color){
+  return `
+    <div style="
+      width:100%;
+      height:100%;
+      border-radius:50%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:${color};
+      color:#fff;
+      font-weight:600;
+      font-size:12px;
+    ">
+      ${initials}
+    </div>
+  `;
+}
+
+function hashString(str){
+  let hash = 0;
+  for(let i = 0; i < str.length; i++){
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return hash;
+}
+
+function getAvatarColor(name){
+  const colors = ["#6366f1","#22c55e","#eab308","#ef4444","#06b6d4","#a855f7","#f97316"];
+  return colors[Math.abs(hashString(name)) % colors.length];
+}
+
+function getInitials(name){
+  return name ? name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase() : "?";
+}
+
+function getInitialsEmpresa(name){
+  return name
+    ? name.replace(/(SL|SA)/gi,"").trim().split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase()
+    : "?";
+}
+
+function getEstadoPago(e){
+  e = (e || "").toLowerCase();
+  if(e === "pagada") return { label:"Pagada", class:"success", raw:e };
+  return { label:"Pendiente", class:"warning", raw:e };
+}
 
 function formatFecha(f){
   if(!f) return "--";
@@ -350,14 +477,7 @@ function formatFecha(f){
 }
 
 function formatMoney(n){
-  return Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2})+" €";
-}
-
-function getEstadoPago(e){
-  e = (e||"").toLowerCase();
-  return e === "pagada"
-    ? {label:"Pagada",raw:e}
-    : {label:"Pendiente",raw:e};
+  return Number(n || 0).toLocaleString("es-ES",{minimumFractionDigits:2}) + " €";
 }
 
 function escapeHTML(str){

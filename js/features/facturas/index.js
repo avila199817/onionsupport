@@ -49,9 +49,6 @@ function init(){
 
   initialized = true;
 
-  const wrapper = document.querySelector('.content-wrapper');
-  if(wrapper) wrapper.classList.add('table-mode');
-
   bindEvents();
 
   requestAnimationFrame(()=>{
@@ -59,11 +56,7 @@ function init(){
   });
 
   Onion.onCleanup(()=>{
-
     initialized = false;
-
-    if(wrapper) wrapper.classList.remove('table-mode');
-
   });
 
 }
@@ -360,7 +353,7 @@ function setError(){
 }
 
 /* =========================
-   RENDER (TUYO INTACTO)
+   RENDER
 ========================= */
 
 function render(items){
@@ -431,7 +424,7 @@ function render(items){
 }
 
 /* =========================
-   HELPERS (ENTEROS)
+   HELPERS
 ========================= */
 
 function mapItem(f){

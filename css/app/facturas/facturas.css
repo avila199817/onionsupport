@@ -1,5 +1,5 @@
 /* =========================================================
-   FACTURAS — FINAL PRO 10/10 (SCROLL + SORT READY)
+   FACTURAS — FINAL PRO 10/10 (SCROLL + SORT CLEAN)
 ========================================================= */
 
 /* =========================
@@ -33,23 +33,19 @@
 }
 
 /* =========================
-   FILTERS (FIJO REAL)
+   FILTERS
 ========================= */
 .panel-content.facturas .filters-row{
   flex:0 0 auto;
-
   display:flex;
   align-items:center;
   gap:10px;
   padding:12px 16px;
-
   background:var(--panel-bg);
   border-bottom:1px solid var(--panel-border);
-
   z-index:2;
 }
 
-/* INPUTS */
 .panel-content.facturas .filters-row input{
   flex:1;
   min-width:220px;
@@ -89,15 +85,13 @@
 }
 
 /* =========================
-   SCROLL REAL (ÚNICO)
+   SCROLL
 ========================= */
 .panel-content.facturas .table-container{
   flex:1;
   min-height:0;
-
   overflow-y:auto;
   overflow-x:hidden;
-
   background:var(--panel-bg);
 }
 
@@ -118,7 +112,7 @@
   background:var(--panel-bg);
 }
 
-/* 🔥 TH BASE */
+/* TH BASE */
 .panel-content.facturas th{
   padding:12px 14px;
   text-align:left;
@@ -130,7 +124,9 @@
   white-space:nowrap;
 }
 
-/* 🔥 SORT INTERACTIVO */
+/* =========================
+   SORT LIMPIO 🔥
+========================= */
 .panel-content.facturas th[data-sort]{
   cursor:pointer;
   user-select:none;
@@ -141,23 +137,23 @@
   color:var(--text);
 }
 
-/* 🔥 ICONO SORT (simple) */
+/* ❌ QUITAMOS ICONO POR DEFECTO */
 .panel-content.facturas th[data-sort]::after{
-  content:"⇅";
-  font-size:10px;
-  margin-left:6px;
-  opacity:.4;
+  content:"";
 }
 
+/* ✅ SOLO CUANDO ESTÁ ACTIVO */
 .panel-content.facturas th[data-sort].asc::after{
   content:"↑";
-  opacity:1;
+  font-size:10px;
+  margin-left:6px;
   color:var(--accent);
 }
 
 .panel-content.facturas th[data-sort].desc::after{
   content:"↓";
-  opacity:1;
+  font-size:10px;
+  margin-left:6px;
   color:var(--accent);
 }
 
@@ -175,7 +171,7 @@
 }
 
 /* =========================
-   COLUMN SYSTEM
+   COLUMNS
 ========================= */
 .panel-content.facturas .col-id{ width:120px; font-size:11px; color:var(--dim); }
 .panel-content.facturas .col-main{ width:24%; }

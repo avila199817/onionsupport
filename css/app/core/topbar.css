@@ -1,26 +1,33 @@
 /* =========================================================
-   🔥 TOPBARVIEW — FIXED (NO SE MUEVE NI A TIROS)
+   🔥 TOPBARVIEW — FIXED (ESTABLE Y LIMPIO)
 ========================================================= */
 
 .topbarview{
-  position: fixed !important;
+  position: fixed;
 
-  top: 0 !important;
-  left: 0 !important;
-  right: 0 !important;
+  top: 0;
+  left: var(--sidebar-width);
+  right: 0;
 
-  z-index: 999999 !important;
+  z-index: 1000;
 
-  display:flex !important;
-  align-items:center !important;
-  gap:10px !important;
+  display:flex;
+  align-items:center;
+  gap:10px;
 
-  padding:12px 16px !important;
+  padding:12px 16px;
 
-  background:var(--panel-bg) !important;
-  border-bottom:1px solid var(--panel-border) !important;
+  background:var(--panel-bg);
+  border-bottom:1px solid var(--panel-border);
 
-  transform: none !important;
+  /* 🔥 evita bugs raros de render */
+  will-change: transform;
+}
+
+
+/* 🔥 SIDEBAR COLLAPSADO */
+.sidebar.collapsed ~ .main-content .topbarview{
+  left: var(--sidebar-collapsed);
 }
 
 
@@ -44,6 +51,14 @@
   color:var(--text);
 
   font-size:13px;
+
+  outline:none;
+}
+
+.topbarview input:focus,
+.topbarview select:focus{
+  border-color:var(--accent);
+  box-shadow:0 0 0 2px color-mix(in srgb, var(--accent), transparent 85%);
 }
 
 .topbarview select{
@@ -69,11 +84,10 @@
   border:none;
   cursor:pointer;
 
-  box-shadow:0 6px 18px rgba(99,102,241,0.35);
   transition:all .2s ease;
 }
 
 .topbarview .btn-primary:hover{
   transform:translateY(-1px);
-  box-shadow:0 10px 26px rgba(99,102,241,0.45);
+  box-shadow:0 8px 20px rgba(99,102,241,0.35);
 }

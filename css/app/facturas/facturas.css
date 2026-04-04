@@ -1,5 +1,5 @@
 /* =========================================================
-   🔥 FACTURAS — FINAL PRO SAAS (NO INTERNAL SCROLL)
+   🔥 FACTURAS — FINAL PRO SAAS (BODY SCROLL + MINI TOPBAR FIXED)
 ========================================================= */
 
 /* =========================
@@ -13,7 +13,7 @@
   width:100%;
   position:relative;
 
-  overflow:visible; /* 🔥 ya NO bloqueamos scroll */
+  overflow:visible; /* 🔥 scroll global (body) */
 }
 
 
@@ -21,7 +21,7 @@
    GLOBAL TABLE MODE
 ========================= */
 .content-wrapper.table-mode{
-  overflow:visible !important; /* 🔥 scroll vuelve al body */
+  overflow:visible !important;
   padding:0 !important;
   gap:0 !important;
 }
@@ -46,12 +46,20 @@
   flex:1;
   min-height:0;
 
-  overflow:visible; /* 🔥 eliminado scroll interno */
+  overflow:visible;
 
   position:relative;
   z-index:1;
 
   background:var(--panel-bg);
+}
+
+
+/* =========================
+   🔥 COMPENSACIÓN MINI TOPBAR
+========================= */
+.panel-content.facturas.has-mini-topbar .table-system{
+  padding-top:var(--mini-topbar-height);
 }
 
 

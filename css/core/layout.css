@@ -1,5 +1,5 @@
 /* =========================================================
-   🔥 LAYOUT — SAAS PANEL CLEAN (FINAL PRO STICKY FIX)
+   🔥 LAYOUT — SAAS PANEL CLEAN (FINAL PRO FIXED SYSTEM)
 ========================================================= */
 
 
@@ -80,7 +80,8 @@ html, body{
   margin-left:var(--sidebar-width);
   width:calc(100% - var(--sidebar-width));
 
-  padding-top:var(--topbar-height);
+  /* 🔥 CLAVE: YA NO EMPUJAMOS AQUÍ */
+  padding-top:0;
 
   min-width:0;
 
@@ -97,7 +98,7 @@ html, body{
 
 
 /* =========================
-   APP CONTENT
+   APP CONTENT (🔥 FIX REAL)
 ========================= */
 #app-content{
   flex:1;
@@ -105,6 +106,9 @@ html, body{
 
   display:flex;
   flex-direction:column;
+
+  /* 🔥 AQUÍ SE COMPENSA TODO */
+  padding-top:var(--topbar-height);
 }
 
 
@@ -121,7 +125,7 @@ html, body{
   padding:var(--space-lg);
   gap:var(--space-lg);
 
-  overflow:hidden; /* 🔥 mantenido para SaaS */
+  overflow:hidden;
 
   background:transparent;
 }
@@ -139,15 +143,15 @@ html, body{
 
   background:var(--panel-bg);
 
-  overflow:hidden; /* 🔥 CLAVE: controla scroll interno */
+  overflow:hidden;
 }
 
 
 /* =========================
-   MINI TOPBAR SUPPORT (STICKY MODE)
+   MINI TOPBAR SUPPORT
 ========================= */
 .panel-content.has-mini-topbar{
-  padding-top:0; /* 🔥 ya NO empujamos con padding */
+  padding-top:0; /* 🔥 NO usamos padding aquí */
 }
 
 
@@ -165,7 +169,7 @@ html, body{
 
 
 /* =========================
-   TABLE MODE (SCROLL REAL)
+   TABLE MODE
 ========================= */
 .panel-content.table-mode{
   padding:0;
@@ -183,7 +187,7 @@ html, body{
 
 
 /* =========================
-   🔥 SCROLL ÚNICO DEL PANEL
+   SCROLL PANEL (OPCIONAL)
 ========================= */
 .panel-content.table-mode .table-container{
   flex:1;
@@ -278,7 +282,7 @@ html, body{
 
 
 /* =========================
-   PAGE LOADING (LOCAL)
+   PAGE LOADING
 ========================= */
 .page-loading{
   opacity:.6;

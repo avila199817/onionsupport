@@ -1,37 +1,22 @@
 <div class="panel-content facturas table-mode">
 
-  <!-- 🔥 TABLE SYSTEM -->
   <div class="table-system facturas">
 
-    <!-- =========================
-         FILTROS
-    ========================= -->
-    <div class="filters-row">
-
-      <input 
-        type="text"
-        id="search-factura"
-        placeholder="Buscar factura..."
-        autocomplete="off"
-      >
-
-      <select id="filter-estado-factura">
-        <option value="">Estado pago</option>
-        <option value="pagada">Pagada</option>
-        <option value="pendiente">Pendiente</option>
-      </select>
-
-      <button id="btn-new-factura" class="btn-new-factura">
-        + Nueva
-      </button>
-
-    </div>
-
-    <!-- =========================
-         TABLA
-    ========================= -->
+    <!-- 🔥 TODO dentro del mismo scroll -->
     <div class="table-container">
 
+      <!-- FILTROS -->
+      <div class="filters-row">
+        <input type="text" id="search-factura" placeholder="Buscar factura..." autocomplete="off">
+        <select id="filter-estado-factura">
+          <option value="">Estado pago</option>
+          <option value="pagada">Pagada</option>
+          <option value="pendiente">Pendiente</option>
+        </select>
+        <button id="btn-new-factura" class="btn-new-factura">+ Nueva</button>
+      </div>
+
+      <!-- TABLA -->
       <table>
 
         <thead>
@@ -47,8 +32,6 @@
         </thead>
 
         <tbody id="facturas-body">
-
-          <!-- 🔥 LOADER LOCAL (IGUAL QUE INCIDENCIAS) -->
           <tr class="table-loading">
             <td colspan="7">
               <div class="table-loader">
@@ -57,7 +40,6 @@
               </div>
             </td>
           </tr>
-
         </tbody>
 
       </table>

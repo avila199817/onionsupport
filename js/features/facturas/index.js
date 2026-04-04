@@ -109,11 +109,8 @@ async function loadFacturas(){
 
   try{
 
-    /* 🔥 FORZAR PINTADO DEL LOADER */
     await new Promise(r => requestAnimationFrame(r));
     await new Promise(r => requestAnimationFrame(r));
-
-    /* 🔥 DELAY MÍNIMO */
     await new Promise(r => setTimeout(r, 200));
 
     const res = await Onion.fetch(Onion.config.API + "/facturas");
@@ -162,6 +159,14 @@ async function handleAction(btn){
 
   if(btn.classList.contains("download")){
 
+    /* 🔥 ANTI DOBLE CLICK */
+    if(btn.classList.contains("loading")) return;
+
+    btn.classList.add("loading");
+
+    const original = btn.textContent;
+    btn.textContent = "⏳ Descargando...";
+
     try{
 
       const res = await Onion.fetch(
@@ -169,7 +174,7 @@ async function handleAction(btn){
       );
 
       if(!res || !res.ok || !res.url){
-        alert("Error descargando PDF");
+        Onion.ui.toast?.error("Error descargando PDF");
         return;
       }
 
@@ -180,15 +185,21 @@ async function handleAction(btn){
       link.click();
       document.body.removeChild(link);
 
+      /* 🔥 TOAST OK */
+      Onion.ui.toast?.success("Factura descargada 📄");
+
     }catch(e){
       console.error("💥 ERROR DOWNLOAD:", e);
-      alert("Error descargando PDF");
+      Onion.ui.toast?.error("Error descargando PDF");
+    }finally{
+      btn.textContent = original;
+      btn.classList.remove("loading");
     }
 
   }
 
   if(btn.classList.contains("pay")){
-    alert("💳 Simulación pago factura " + id);
+    Onion.ui.toast?.info("💳 Simulación pago factura " + id);
   }
 
 }

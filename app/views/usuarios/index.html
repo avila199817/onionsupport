@@ -39,7 +39,6 @@
 
     </div>
 
-
     <!-- =========================
          TABLA
     ========================= -->
@@ -55,15 +54,19 @@
             <th class="col-secondary">Tipo</th>
             <th class="col-status">Estado</th>
             <th class="col-date">Alta</th>
+            <th class="col-actions">Acciones</th>
           </tr>
         </thead>
 
         <tbody id="usuarios-body">
 
-          <!-- 🔥 IMPORTANTE: mismas clases que el CSS -->
-          <tr class="loading">
-            <td class="col-id" colspan="6">
-              Cargando usuarios...
+          <!-- 🔥 LOADER IGUAL QUE FACTURAS -->
+          <tr class="table-loading">
+            <td colspan="7">
+              <div class="table-loader">
+                <div class="spinner"></div>
+                <span>Cargando usuarios...</span>
+              </div>
             </td>
           </tr>
 

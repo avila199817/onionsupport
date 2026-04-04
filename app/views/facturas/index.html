@@ -1,88 +1,81 @@
-<div class="main-content">
+<div class="mini-topbar">
 
-  <!-- 🔥 MINI TOPBAR (FIXED, FUERA DEL FLUJO) -->
-  <div class="mini-topbar">
+  <div class="mini-topbar-inner">
 
-    <div class="mini-topbar-inner">
-
-      <div class="mini-topbar-left">
-        <input
-          type="text"
-          id="search-factura"
-          placeholder="Buscar factura..."
-          autocomplete="off"
-        >
-      </div>
-
-      <div class="mini-topbar-right">
-        <select id="filter-estado-factura">
-          <option value="">Estado pago</option>
-          <option value="pagada">Pagada</option>
-          <option value="pendiente">Pendiente</option>
-        </select>
-
-        <button id="btn-new-factura" class="btn-primary">
-          + Nueva
-        </button>
-      </div>
-
+    <div class="mini-topbar-left">
+      <input
+        type="text"
+        id="search-factura"
+        placeholder="Buscar factura..."
+        autocomplete="off"
+      >
     </div>
 
-    <!-- 🔥 HEADER (SIMULA THEAD STICKY) -->
-    <div class="mini-topbar-table">
-      <table class="facturas-table">
-        <thead>
-          <tr>
-            <th class="col-id">ID</th>
-            <th class="col-main">Cliente</th>
-            <th class="col-secondary">Empresa</th>
-            <th class="col-date">Fecha</th>
-            <th class="col-importe">Importe</th>
-            <th class="col-status">Pago</th>
-            <th class="col-actions">Acciones</th>
-          </tr>
-        </thead>
-      </table>
+    <div class="mini-topbar-right">
+      <select id="filter-estado-factura">
+        <option value="">Estado pago</option>
+        <option value="pagada">Pagada</option>
+        <option value="pendiente">Pendiente</option>
+      </select>
+
+      <button id="btn-new-factura" class="btn-primary">
+        + Nueva
+      </button>
     </div>
 
   </div>
 
+  <div class="mini-topbar-table">
+    <table class="facturas-table">
+      <thead>
+        <tr>
+          <th class="col-id">ID</th>
+          <th class="col-main">Cliente</th>
+          <th class="col-secondary">Empresa</th>
+          <th class="col-date">Fecha</th>
+          <th class="col-importe">Importe</th>
+          <th class="col-status">Pago</th>
+          <th class="col-actions">Acciones</th>
+        </tr>
+      </thead>
+    </table>
+  </div>
 
-  <!-- 🔥 CONTENIDO REAL -->
-  <div class="panel-content facturas">
+</div>
 
-    <div class="table-container">
 
-      <table class="facturas-table">
+<div class="panel-content facturas">
 
-        <thead>
-          <tr>
-            <th class="col-id"></th>
-            <th class="col-main"></th>
-            <th class="col-secondary"></th>
-            <th class="col-date"></th>
-            <th class="col-importe"></th>
-            <th class="col-status"></th>
-            <th class="col-actions"></th>
-          </tr>
-        </thead>
+  <div class="table-container">
 
-        <tbody id="facturas-body">
+    <table class="facturas-table">
 
-          <tr class="table-loading">
-            <td colspan="7">
-              <div class="table-loader">
-                <div class="spinner"></div>
-                <span>Cargando facturas...</span>
-              </div>
-            </td>
-          </tr>
+      <thead>
+        <tr>
+          <th class="col-id"></th>
+          <th class="col-main"></th>
+          <th class="col-secondary"></th>
+          <th class="col-date"></th>
+          <th class="col-importe"></th>
+          <th class="col-status"></th>
+          <th class="col-actions"></th>
+        </tr>
+      </thead>
 
-        </tbody>
+      <tbody id="facturas-body">
 
-      </table>
+        <tr class="table-loading">
+          <td colspan="7">
+            <div class="table-loader">
+              <div class="spinner"></div>
+              <span>Cargando facturas...</span>
+            </div>
+          </td>
+        </tr>
 
-    </div>
+      </tbody>
+
+    </table>
 
   </div>
 

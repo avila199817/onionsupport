@@ -1,5 +1,5 @@
 /* =========================================================
-   FACTURAS — FINAL PRO 10/10 (SCROLL + STICKY PRO)
+   FACTURAS — FINAL PRO 10/10 (SCROLL + STICKY PERFECT)
 ========================================================= */
 
 /* =========================
@@ -12,6 +12,7 @@
   min-height:0;
   width:100%;
   position:relative;
+  overflow:hidden; /* 🔥 CLAVE */
 }
 
 /* 🔥 CLAVE GLOBAL */
@@ -38,7 +39,7 @@
 .panel-content.facturas .filters-row{
   position:sticky;
   top:0;
-  z-index:5;
+  z-index:30;
 
   flex:0 0 auto;
   display:flex;
@@ -90,7 +91,7 @@
 }
 
 /* =========================
-   SCROLL
+   SCROLL (ÚNICO)
 ========================= */
 .panel-content.facturas .table-container{
   flex:1;
@@ -98,6 +99,7 @@
   overflow-y:auto;
   overflow-x:hidden;
   background:var(--panel-bg);
+  position:relative;
 }
 
 /* =========================
@@ -110,12 +112,12 @@
 }
 
 /* =========================
-   HEADER STICKY (BAJO FILTROS 🔥)
+   HEADER STICKY 🔥 (CORRECTO)
 ========================= */
 .panel-content.facturas thead{
   position:sticky;
-  top:56px; /* 🔥 altura filters-row */
-  z-index:4;
+  top:0; /* 🔥 IMPORTANTE: YA NO 56 */
+  z-index:20;
   background:var(--panel-bg);
 }
 

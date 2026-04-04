@@ -15,7 +15,10 @@ let filteredItems = [];
 let loading = false;
 let currentRequestId = 0;
 
-/* 🔥 SORT STATE */
+/* =========================
+   SORT STATE
+========================= */
+
 let sortState = {
   key: null,
   dir: "asc"
@@ -165,18 +168,18 @@ function applySort(){
         break;
 
       case "fecha":
-        valA = new Date(A.fecha);
-        valB = new Date(B.fecha);
+        valA = new Date(a.fechaFactura || a.fecha);
+        valB = new Date(b.fechaFactura || b.fecha);
         break;
 
       case "total":
-        valA = parseFloat(A.total.replace(",", "."));
-        valB = parseFloat(B.total.replace(",", "."));
+        valA = Number(a.total);
+        valB = Number(b.total);
         break;
 
       case "estado":
-        valA = A.estadoPago.raw;
-        valB = B.estadoPago.raw;
+        valA = (a.estadoPago || "").toLowerCase();
+        valB = (b.estadoPago || "").toLowerCase();
         break;
 
       default:
@@ -221,12 +224,7 @@ async function loadFacturas(){
   if(loading) return;
   loading = true;
 
-  const tbody = $("#facturas-body");
-  if(!tbody) return;
-
   const requestId = ++currentRequestId;
-
-  document.activeElement?.blur();
 
   try{
 
@@ -256,6 +254,23 @@ async function loadFacturas(){
   }finally{
     loading = false;
   }
+
+}
+
+/* =========================
+   NORMALIZE (🔥 FIX CLAVE)
+========================= */
+
+function normalize(res){
+
+  if(!res) return [];
+
+  if(Array.isArray(res)) return res;
+  if(Array.isArray(res.facturas)) return res.facturas;
+  if(Array.isArray(res.data)) return res.data;
+  if(Array.isArray(res.items)) return res.items;
+
+  return [];
 
 }
 
@@ -300,7 +315,22 @@ function setError(){
 }
 
 /* =========================
-   RENDER (ORIGINAL INTACTO)
+   ACTIONS
+========================= */
+
+async function handleAction(btn){
+
+  const id = btn.dataset.id;
+  if(!id) return;
+
+  if(btn.classList.contains("view")){
+    Onion.router.navigate("/facturas/detalle?id=" + id);
+  }
+
+}
+
+/* =========================
+   RENDER
 ========================= */
 
 function render(items){
@@ -312,57 +342,17 @@ function render(items){
 
     const d = mapItem(f);
 
-    const empresaHTML = d.hasEmpresa
-      ? `
-        <div class="cell-user empresa-cell">
-          <div class="table-avatar">${renderAvatarEmpresa(d.empresa)}</div>
-          <div class="user-info">
-            <span class="user-name">${escapeHTML(d.empresa)}</span>
-          </div>
-        </div>
-      `
-      : `<span class="empresa-empty">-</span>`;
-
     return `
 <tr data-id="${d.id}">
-
   <td class="col-id">${d.numero}</td>
-
-  <td class="col-main">
-    <div class="cell-user">
-      <div class="table-avatar">${renderAvatar(d.cliente.nombre)}</div>
-      <div class="user-info">
-        <span class="user-name">${escapeHTML(d.cliente.nombre)}</span>
-        <span class="user-sub">${escapeHTML(d.cliente.email)}</span>
-      </div>
-    </div>
-  </td>
-
-  <td class="col-secondary">
-    ${empresaHTML}
-  </td>
-
+  <td class="col-main">${escapeHTML(d.cliente.nombre)}</td>
+  <td class="col-secondary">${escapeHTML(d.empresa || "-")}</td>
   <td class="col-date">${d.fecha}</td>
   <td class="col-importe">${d.total}</td>
-
-  <td class="col-status">
-    <span class="badge ${d.estadoPago.class}">
-      ${d.estadoPago.label}
-    </span>
-  </td>
-
+  <td class="col-status">${d.estadoPago.label}</td>
   <td class="col-actions">
-    <div class="actions">
-      <button class="btn-action view" data-id="${d.id}">Ver</button>
-      <button class="btn-action download" data-id="${d.id}">PDF</button>
-      ${
-        d.estadoPago.raw === "pendiente"
-          ? `<button class="btn-action pay" data-id="${d.id}">Pagar</button>`
-          : ``
-      }
-    </div>
+    <button class="btn-action view" data-id="${d.id}">Ver</button>
   </td>
-
 </tr>
 `;
 
@@ -373,25 +363,20 @@ function render(items){
 }
 
 /* =========================
-   MAP + HELPERS (INTACTOS)
+   MAP
 ========================= */
 
 function mapItem(f){
-
-  const empresaRaw = f.cliente?.empresa || f.cliente?.razonSocial;
-  const empresaClean = cleanValue(empresaRaw, "");
 
   return {
     id: f.id,
     numero: f.numeroFacturaLegal || f.numero || f.id,
 
     cliente: {
-      nombre: cleanValue(f.cliente?.nombre || f.cliente?.nombreContacto, "Cliente"),
-      email: cleanValue(f.cliente?.email || f.emailCliente, "-")
+      nombre: f.cliente?.nombre || f.cliente?.nombreContacto || "Cliente"
     },
 
-    empresa: empresaClean,
-    hasEmpresa: !!empresaClean,
+    empresa: f.cliente?.empresa || f.cliente?.razonSocial || "",
 
     fecha: formatFecha(f.fechaFactura || f.fecha),
     total: formatMoney(f.total),
@@ -401,74 +386,12 @@ function mapItem(f){
 
 }
 
-function cleanValue(val, fallback){
-  if(!val) return fallback;
-  let v = String(val).trim();
-  const lower = v.toLowerCase();
-  if(lower === "null" || lower === "undefined" || lower === "-"){
-    return fallback;
-  }
-  return v;
-}
+/* =========================
+   HELPERS
+========================= */
 
 function safeText(val){
-  return String(cleanValue(val, "")).toLowerCase();
-}
-
-function renderAvatar(name){
-  return avatarHTML(getInitials(name), getAvatarColor(name));
-}
-
-function renderAvatarEmpresa(name){
-  return avatarHTML(getInitialsEmpresa(name), getAvatarColor(name + "_empresa"));
-}
-
-function avatarHTML(initials, color){
-  return `
-    <div style="
-      width:100%;
-      height:100%;
-      border-radius:50%;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      background:${color};
-      color:#fff;
-      font-weight:600;
-      font-size:12px;
-    ">
-      ${initials}
-    </div>
-  `;
-}
-
-function hashString(str){
-  let hash = 0;
-  for(let i = 0; i < str.length; i++){
-    hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return hash;
-}
-
-function getAvatarColor(name){
-  const colors = ["#6366f1","#22c55e","#eab308","#ef4444","#06b6d4","#a855f7","#f97316"];
-  return colors[Math.abs(hashString(name)) % colors.length];
-}
-
-function getInitials(name){
-  return name ? name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase() : "?";
-}
-
-function getInitialsEmpresa(name){
-  return name
-    ? name.replace(/(SL|SA)/gi,"").trim().split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase()
-    : "?";
-}
-
-function getEstadoPago(e){
-  e = (e || "").toLowerCase();
-  if(e === "pagada") return { label:"Pagada", class:"success", raw:e };
-  return { label:"Pendiente", class:"warning", raw:e };
+  return String(val || "").toLowerCase();
 }
 
 function formatFecha(f){
@@ -478,6 +401,13 @@ function formatFecha(f){
 
 function formatMoney(n){
   return Number(n || 0).toLocaleString("es-ES",{minimumFractionDigits:2}) + " €";
+}
+
+function getEstadoPago(e){
+  e = (e || "").toLowerCase();
+  return e === "pagada"
+    ? { label:"Pagada", class:"success", raw:e }
+    : { label:"Pendiente", class:"warning", raw:e };
 }
 
 function escapeHTML(str){

@@ -1,10 +1,18 @@
-/* =========================================================
-   ROLES SYSTEM — BASE LIMPIA (READY)
-========================================================= */
+"use strict";
 
 (function(){
 
-  if(!window.Onion) return;
+  if(!window.Onion){
+    console.error("💥 Onion no disponible (roles)");
+    return;
+  }
+
+  /* =========================
+     STATE
+  ========================= */
+
+  let initialized = false;
+  let observer = null;
 
   /* =========================
      HELPERS
@@ -18,42 +26,82 @@
     return getUser()?.role || "guest";
   }
 
-  function isAdmin(){
-    return getRole() === "admin";
+  function hasRole(role){
+    return getRole() === role;
   }
 
-  function isUser(){
-    return getRole() === "user";
+  function hasAnyRole(roles){
+    const current = getRole();
+    return roles.includes(current);
   }
 
   /* =========================
-     UI APPLY
+     APPLY UI
   ========================= */
 
-  function applyRoleUI(){
+  function applyRoleUI(root = document){
 
     const role = getRole();
 
-    // 🔥 ejemplo: botones admin
-    document.querySelectorAll('[data-role="admin"]').forEach(el=>{
-      el.style.display = isAdmin() ? "" : "none";
-    });
+    // 🔥 data-role="admin"
+    root.querySelectorAll("[data-role]").forEach(el => {
 
-    // 🔥 ejemplo: solo users
-    document.querySelectorAll('[data-role="user"]').forEach(el=>{
-      el.style.display = isUser() ? "" : "none";
+      const roles = el.dataset.role.split(",").map(r => r.trim());
+
+      const allowed = hasAnyRole(roles);
+
+      // ✅ no rompemos display original
+      el.hidden = !allowed;
     });
 
     // 🔥 debug opcional
-    console.log("👤 ROLE:", role);
+    // console.log("👤 ROLE:", role);
+
   }
 
   /* =========================
-     HOOK SPA
+     OBSERVER (DOM dinámico)
   ========================= */
 
-  if(!Onion.__rolesHooked){
+  function initObserver(){
 
+    if(observer) return;
+
+    observer = new MutationObserver((mutations)=>{
+
+      for(const m of mutations){
+
+        if(m.addedNodes.length){
+
+          m.addedNodes.forEach(node => {
+
+            if(node.nodeType !== 1) return;
+
+            // 🔥 aplicar solo a lo nuevo
+            applyRoleUI(node);
+
+          });
+
+        }
+
+      }
+
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+
+  }
+
+  /* =========================
+     HOOK RENDER SPA
+  ========================= */
+
+  function hookRender(){
+
+    if(Onion.__rolesHooked) return;
     Onion.__rolesHooked = true;
 
     const originalRender = Onion.render;
@@ -62,13 +110,49 @@
 
       const result = await originalRender.apply(this, arguments);
 
-      applyRoleUI();
+      // 🔥 esperar al DOM
+      requestAnimationFrame(()=>{
+        applyRoleUI();
+      });
 
       return result;
     };
 
-  }else{
-    window.addEventListener("load", applyRoleUI);
   }
+
+  /* =========================
+     PUBLIC API (opcional)
+  ========================= */
+
+  window.RoleSystem = {
+    refresh: () => applyRoleUI(),
+    getRole,
+    hasRole,
+    hasAnyRole
+  };
+
+  /* =========================
+     INIT
+  ========================= */
+
+  function init(){
+
+    if(initialized) return;
+
+    initialized = true;
+
+    hookRender();
+    initObserver();
+
+    // 🔥 primera pasada
+    if(document.readyState === "loading"){
+      document.addEventListener("DOMContentLoaded", ()=> applyRoleUI());
+    }else{
+      applyRoleUI();
+    }
+
+  }
+
+  init();
 
 })();

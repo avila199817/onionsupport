@@ -30,7 +30,7 @@ html, body{
   height:100dvh;
   min-height:0;
 
-  overflow:hidden; /* 🔥 evita doble scroll */
+  overflow:hidden;
 
   isolation:isolate;
 
@@ -83,8 +83,11 @@ html, body{
 
   min-width:0;
 
-  overflow:auto; /* 🔥 AQUÍ VIVE EL SCROLL GLOBAL */
+  overflow-y:scroll; /* 🔥 SIEMPRE VISIBLE */
+  overflow-x:hidden;
+
   overscroll-behavior:contain;
+  scrollbar-gutter:stable;
 
   transition:
     margin-left var(--duration-slow) var(--ease-out),
@@ -95,6 +98,23 @@ html, body{
 .sidebar.collapsed ~ .main-content{
   margin-left:var(--sidebar-collapsed);
   width:calc(100% - var(--sidebar-collapsed));
+}
+
+
+/* =========================
+   SCROLLBAR GLOBAL 🔥
+========================= */
+.main-content::-webkit-scrollbar{
+  width:8px;
+}
+
+.main-content::-webkit-scrollbar-thumb{
+  background:var(--scrollbar-thumb);
+  border-radius:6px;
+}
+
+.main-content::-webkit-scrollbar-track{
+  background:transparent;
 }
 
 
@@ -165,7 +185,7 @@ html, body{
 ========================= */
 .panel-content.table-mode{
   padding:0;
-  overflow:hidden; /* 🔥 scroll lo controla la tabla */
+  overflow:hidden;
 }
 
 

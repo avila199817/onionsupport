@@ -23,7 +23,7 @@
 }
 
 /* =========================================================
-   FILTERS
+   FILTERS (🔥 STICKY FIX)
 ========================================================= */
 
 .panel-content.facturas .filters-row{
@@ -33,6 +33,10 @@
   padding:12px 16px;
   background:var(--panel-bg);
   border-bottom:1px solid var(--panel-border);
+
+  position:sticky;
+  top:0;
+  z-index:5;
 }
 
 .panel-content.facturas .filters-row input{
@@ -94,10 +98,11 @@
   table-layout:fixed;
 }
 
+/* 🔥 FIX: THEAD DEBAJO DE FILTROS */
 .panel-content.facturas thead{
   position:sticky;
-  top:0;
-  z-index:3;
+  top:56px; /* altura de filters-row */
+  z-index:4;
   background:var(--panel-bg);
 }
 

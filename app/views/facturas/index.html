@@ -1,88 +1,84 @@
-<div class="panel-content facturas table-mode has-mini-topbar">
+<div class="panel-content facturas has-mini-topbar">
 
-  <div class="table-system facturas">
+  <!-- 🔥 MINI TOPBAR FUERA DEL SCROLL -->
+  <div class="mini-topbar">
 
-    <!-- MINI TOPBAR -->
-    <div class="mini-topbar">
+    <div class="mini-topbar-inner">
 
-      <div class="mini-topbar-inner">
-
-        <div class="mini-topbar-left">
-          <input
-            type="text"
-            id="search-factura"
-            placeholder="Buscar factura..."
-            autocomplete="off"
-          >
-        </div>
-
-        <div class="mini-topbar-right">
-          <select id="filter-estado-factura">
-            <option value="">Estado pago</option>
-            <option value="pagada">Pagada</option>
-            <option value="pendiente">Pendiente</option>
-          </select>
-
-          <button id="btn-new-factura" class="btn-primary">
-            + Nueva
-          </button>
-        </div>
-
+      <div class="mini-topbar-left">
+        <input
+          type="text"
+          id="search-factura"
+          placeholder="Buscar factura..."
+          autocomplete="off"
+        >
       </div>
 
-      <!-- HEADER -->
-      <div class="mini-topbar-table">
-        <table class="facturas-table">
-          <thead>
-            <tr>
-              <th class="col-id" data-sort="numero">ID</th>
-              <th class="col-main" data-sort="cliente">Cliente</th>
-              <th class="col-secondary" data-sort="empresa">Empresa</th>
-              <th class="col-date" data-sort="fecha">Fecha</th>
-              <th class="col-importe" data-sort="total">Importe</th>
-              <th class="col-status" data-sort="estadoPago">Pago</th>
-              <th class="col-actions">Acciones</th>
-            </tr>
-          </thead>
-        </table>
+      <div class="mini-topbar-right">
+        <select id="filter-estado-factura">
+          <option value="">Estado pago</option>
+          <option value="pagada">Pagada</option>
+          <option value="pendiente">Pendiente</option>
+        </select>
+
+        <button id="btn-new-factura" class="btn-primary">
+          + Nueva
+        </button>
       </div>
 
     </div>
 
-    <!-- BODY -->
-    <div class="table-container">
-
+    <!-- HEADER -->
+    <div class="mini-topbar-table">
       <table class="facturas-table">
-
-        <!-- 🔥 IMPORTANTE -->
         <thead>
           <tr>
-            <th class="col-id"></th>
-            <th class="col-main"></th>
-            <th class="col-secondary"></th>
-            <th class="col-date"></th>
-            <th class="col-importe"></th>
-            <th class="col-status"></th>
-            <th class="col-actions"></th>
+            <th class="col-id">ID</th>
+            <th class="col-main">Cliente</th>
+            <th class="col-secondary">Empresa</th>
+            <th class="col-date">Fecha</th>
+            <th class="col-importe">Importe</th>
+            <th class="col-status">Pago</th>
+            <th class="col-actions">Acciones</th>
           </tr>
         </thead>
-
-        <tbody id="facturas-body">
-
-          <tr class="table-loading">
-            <td colspan="7">
-              <div class="table-loader">
-                <div class="spinner"></div>
-                <span>Cargando facturas...</span>
-              </div>
-            </td>
-          </tr>
-
-        </tbody>
-
       </table>
-
     </div>
+
+  </div>
+
+
+  <!-- 🔥 SOLO EL SCROLL -->
+  <div class="table-container">
+
+    <table class="facturas-table">
+
+      <thead>
+        <tr>
+          <th class="col-id"></th>
+          <th class="col-main"></th>
+          <th class="col-secondary"></th>
+          <th class="col-date"></th>
+          <th class="col-importe"></th>
+          <th class="col-status"></th>
+          <th class="col-actions"></th>
+        </tr>
+      </thead>
+
+      <tbody id="facturas-body">
+
+        <tr class="table-loading">
+          <td colspan="7">
+            <div class="table-loader">
+              <div class="spinner"></div>
+              <span>Cargando facturas...</span>
+            </div>
+          </td>
+        </tr>
+
+      </tbody>
+
+    </table>
 
   </div>
 

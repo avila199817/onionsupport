@@ -1,17 +1,11 @@
 /* =========================================================
-   🔥 TOPBARVIEW — FIXED (ESTABLE Y LIMPIO)
+   🔥 TOPBARVIEW (AISLADO, CLON DE TOPBAR)
 ========================================================= */
 
-/* 🔥 TOPBARVIEW — FIJO ABSOLUTO */
-
 .topbarview{
-  position: fixed;
-
+  position: sticky;
   top: 0;
-  left: 0;
-  right: 0;
-
-  z-index: 999999;
+  z-index: 5;
 
   display:flex;
   align-items:center;
@@ -43,14 +37,6 @@
   color:var(--text);
 
   font-size:13px;
-
-  outline:none;
-}
-
-.topbarview input:focus,
-.topbarview select:focus{
-  border-color:var(--accent);
-  box-shadow:0 0 0 2px color-mix(in srgb, var(--accent), transparent 85%);
 }
 
 .topbarview select{
@@ -76,10 +62,11 @@
   border:none;
   cursor:pointer;
 
+  box-shadow:0 6px 18px rgba(99,102,241,0.35);
   transition:all .2s ease;
 }
 
 .topbarview .btn-primary:hover{
   transform:translateY(-1px);
-  box-shadow:0 8px 20px rgba(99,102,241,0.35);
+  box-shadow:0 10px 26px rgba(99,102,241,0.45);
 }

@@ -2,21 +2,22 @@
 
   <div class="table-system facturas">
 
-    <!-- 🔥 TODO dentro del mismo scroll -->
+    <!-- ✅ FILTROS (FUERA DEL SCROLL) -->
+    <div class="filters-row">
+      <input type="text" id="search-factura" placeholder="Buscar factura..." autocomplete="off">
+      
+      <select id="filter-estado-factura">
+        <option value="">Estado pago</option>
+        <option value="pagada">Pagada</option>
+        <option value="pendiente">Pendiente</option>
+      </select>
+
+      <button id="btn-new-factura" class="btn-new-factura">+ Nueva</button>
+    </div>
+
+    <!-- ✅ SOLO LA TABLA SCROLLEA -->
     <div class="table-container">
 
-      <!-- FILTROS -->
-      <div class="filters-row">
-        <input type="text" id="search-factura" placeholder="Buscar factura..." autocomplete="off">
-        <select id="filter-estado-factura">
-          <option value="">Estado pago</option>
-          <option value="pagada">Pagada</option>
-          <option value="pendiente">Pendiente</option>
-        </select>
-        <button id="btn-new-factura" class="btn-new-factura">+ Nueva</button>
-      </div>
-
-      <!-- TABLA -->
       <table>
 
         <thead>

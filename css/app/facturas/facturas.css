@@ -1,5 +1,5 @@
 /* =========================================================
-   FACTURAS — FINAL PRO 10/10 (SCROLL + STICKY PERFECT)
+   FACTURAS — FINAL PRO 10/10 (SCROLL + STICKY REAL)
 ========================================================= */
 
 /* =========================
@@ -12,10 +12,12 @@
   min-height:0;
   width:100%;
   position:relative;
-  overflow:hidden; /* 🔥 CLAVE */
+  overflow:hidden; /* 🔥 solo un scroll */
 }
 
-/* 🔥 CLAVE GLOBAL */
+/* =========================
+   GLOBAL TABLE MODE
+========================= */
 .content-wrapper.table-mode{
   overflow:hidden !important;
   padding:0 !important;
@@ -34,14 +36,13 @@
 }
 
 /* =========================
-   FILTERS (FIJO 🔥)
+   FILTERS (FIJOS)
 ========================= */
 .panel-content.facturas .filters-row{
   position:sticky;
   top:0;
   z-index:30;
 
-  flex:0 0 auto;
   display:flex;
   align-items:center;
   gap:10px;
@@ -71,7 +72,9 @@
   min-width:140px;
 }
 
-/* BUTTON */
+/* =========================
+   BUTTON
+========================= */
 .panel-content.facturas .btn-new-factura{
   margin-left:auto;
   padding:10px 18px;
@@ -91,41 +94,43 @@
 }
 
 /* =========================
-   SCROLL (ÚNICO)
+   SCROLL (ÚNICO REAL)
 ========================= */
 .panel-content.facturas .table-container{
   flex:1;
   min-height:0;
   overflow-y:auto;
   overflow-x:hidden;
-  background:var(--panel-bg);
   position:relative;
+  background:var(--panel-bg);
 }
 
 /* =========================
-   TABLE
+   TABLE (FIX STICKY BUG)
 ========================= */
 .panel-content.facturas table{
   width:100%;
-  border-collapse:collapse;
   table-layout:fixed;
+
+  border-collapse:separate; /* 🔥 CLAVE */
+  border-spacing:0;
 }
 
 /* =========================
-   HEADER STICKY 🔥 (CORRECTO)
+   HEADER STICKY REAL 🔥
 ========================= */
-.panel-content.facturas thead{
+.panel-content.facturas thead th{
   position:sticky;
-  top:0; /* 🔥 IMPORTANTE: YA NO 56 */
-  z-index:20;
-  background:var(--panel-bg);
-}
+  top:0;
+  z-index:50;
 
-/* TH BASE */
-.panel-content.facturas th{
+  background:var(--panel-bg);
+
   padding:12px 14px;
   text-align:left;
+
   border-bottom:1px solid var(--panel-border);
+
   color:var(--dim);
   font-size:11px;
   text-transform:uppercase;
@@ -134,7 +139,7 @@
 }
 
 /* =========================
-   SORT LIMPIO 🔥
+   SORT
 ========================= */
 .panel-content.facturas th[data-sort]{
   cursor:pointer;
@@ -326,30 +331,4 @@
 .panel-content.facturas .table-container::-webkit-scrollbar-thumb{
   background:var(--scrollbar-thumb);
   border-radius:6px;
-}
-
-/* 🔥 MATAMOS EL SCROLL PADRE */
-.panel-content.facturas{
-  overflow:hidden;
-}
-
-/* 🔥 ASEGURAMOS QUE SOLO SCROLLEA LA TABLA */
-.panel-content.facturas .table-container{
-  overflow-y:auto;
-  overflow-x:hidden;
-  position:relative;
-}
-
-/* 🔥 STICKY REAL */
-.panel-content.facturas thead th{
-  position: sticky;
-  top: 0;
-  z-index: 50;
-  background:var(--panel-bg);
-}
-
-/* 🔥 IMPORTANTE (ARREGLA BUG TABLA) */
-.panel-content.facturas table{
-  border-collapse:separate;
-  border-spacing:0;
 }

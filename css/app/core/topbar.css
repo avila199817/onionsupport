@@ -1,28 +1,25 @@
 /* =========================================================
-   MINI TOPBAR — FIX DEFINITIVO (SIN VARIABLES / SIN JS)
+   MINI TOPBAR — PRO REAL (ALINEADO + LIMPIO)
 ========================================================= */
 
 .mini-topbar{
   position:fixed;
   top:56px;
-
-  /* 🔥 CLAVE: no usamos left */
   left:0;
   right:0;
 
-  /* 🔥 esto la coloca después del sidebar */
-  width:calc(100% - 260px);
-  margin-left:260px;
-
-  z-index:9999;
+  z-index:1000;
 
   display:flex;
   flex-direction:column;
 
+  /* 🔥 CLAVE REAL */
+  padding-left:260px;
+
   background:#111;
   border-bottom:1px solid #222;
 
-  box-shadow:0 4px 12px rgba(0,0,0,0.4);
+  box-shadow:0 6px 20px rgba(0,0,0,0.35);
 }
 
 
@@ -87,6 +84,12 @@
 
   border:none;
   cursor:pointer;
+
+  transition:all .15s ease;
+}
+
+.mini-topbar .btn-primary:hover{
+  background:#6366f1;
 }
 
 

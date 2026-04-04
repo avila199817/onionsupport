@@ -48,44 +48,39 @@
   </div>
 
 
-  <!-- 🔥 CONTENIDO REAL (IMPORTANTE: ESTA CLASE MANDA) -->
-  <div class="panel-content facturas has-mini-topbar">
+  <!-- 🔥 CONTENIDO REAL -->
+  <div class="panel-content facturas">
 
-    <!-- PANEL -->
-    <div class="panel-content facturas">
+    <div class="table-container">
 
-      <div class="table-container">
+      <table class="facturas-table">
 
-        <table class="facturas-table">
+        <thead>
+          <tr>
+            <th class="col-id"></th>
+            <th class="col-main"></th>
+            <th class="col-secondary"></th>
+            <th class="col-date"></th>
+            <th class="col-importe"></th>
+            <th class="col-status"></th>
+            <th class="col-actions"></th>
+          </tr>
+        </thead>
 
-          <thead>
-            <tr>
-              <th class="col-id"></th>
-              <th class="col-main"></th>
-              <th class="col-secondary"></th>
-              <th class="col-date"></th>
-              <th class="col-importe"></th>
-              <th class="col-status"></th>
-              <th class="col-actions"></th>
-            </tr>
-          </thead>
+        <tbody id="facturas-body">
 
-          <tbody id="facturas-body">
+          <tr class="table-loading">
+            <td colspan="7">
+              <div class="table-loader">
+                <div class="spinner"></div>
+                <span>Cargando facturas...</span>
+              </div>
+            </td>
+          </tr>
 
-            <tr class="table-loading">
-              <td colspan="7">
-                <div class="table-loader">
-                  <div class="spinner"></div>
-                  <span>Cargando facturas...</span>
-                </div>
-              </td>
-            </tr>
+        </tbody>
 
-          </tbody>
-
-        </table>
-
-      </div>
+      </table>
 
     </div>
 

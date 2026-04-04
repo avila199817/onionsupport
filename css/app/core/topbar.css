@@ -1,5 +1,5 @@
 /* =========================================================
-   🔥 MINI TOPBAR — FINAL PRO (FIXED + NO OFFSET CONFLICT)
+   🔥 MINI TOPBAR — FINAL PRO (FIXED + PERFECT ALIGN)
 ========================================================= */
 
 .mini-topbar{
@@ -18,7 +18,8 @@
   display:flex;
   flex-direction:column;
 
-  height:var(--mini-topbar-height);
+  /* 🔥 ALTURA REAL (2 FILAS) */
+  height:auto;
 
   background:
     linear-gradient(180deg, rgba(255,255,255,0.02), transparent 40%),
@@ -30,8 +31,6 @@
   box-shadow:0 6px 20px rgba(0,0,0,0.25);
 
   transition:left var(--duration-normal) var(--ease-out);
-
-  will-change:transform; /* 🔥 smooth */
 }
 
 
@@ -46,13 +45,13 @@
 ========================= */
 #app-content.has-mini-topbar{
   padding-top:calc(
-    var(--topbar-height) + var(--mini-topbar-height)
+    var(--topbar-height) + 110px /* 🔥 altura real aproximada */
   );
 }
 
 
 /* =========================
-   INNER
+   INNER (FILA SUPERIOR)
 ========================= */
 .mini-topbar-inner{
   display:flex;
@@ -62,7 +61,7 @@
   gap:var(--space-md);
   padding:10px var(--space-lg);
 
-  height:100%;
+  height:60px;
 }
 
 
@@ -131,7 +130,7 @@
 
 
 /* =========================
-   TABLE HEADER
+   TABLE HEADER (FILA 2)
 ========================= */
 .mini-topbar-table{
   border-top:1px solid var(--panel-border);

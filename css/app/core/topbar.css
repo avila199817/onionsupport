@@ -1,14 +1,14 @@
 /* =========================================================
-   🔥 MINI TOPBAR — FINAL REAL (FIXED + FULL WIDTH OK)
+   🔥 MINI TOPBAR — FINAL REAL (FIXED + FULL WIDTH + NO OVERLAP)
 ========================================================= */
 
 .mini-topbar{
   position:fixed;
 
-  /* 🔥 DEBAJO DE LA TOPBAR GLOBAL */
+  /* 🔥 SIEMPRE debajo de la topbar real */
   top:var(--topbar-height);
 
-  /* 🔥 EXACTAMENTE IGUAL QUE .topbar */
+  /* 🔥 MISMO SISTEMA QUE LA TOPBAR */
   left:var(--sidebar-width);
   right:0;
 
@@ -33,6 +33,14 @@
 /* 🔥 SIDEBAR COLLAPSADO */
 .sidebar.collapsed ~ .main-content .mini-topbar{
   left:var(--sidebar-collapsed);
+}
+
+
+/* =========================
+   🔥 CLAVE REAL: EMPUJA CONTENIDO
+========================= */
+.panel-content.has-mini-topbar{
+  padding-top:var(--mini-topbar-height);
 }
 
 
@@ -79,6 +87,14 @@
   color:var(--text);
 
   font-size:13px;
+
+  outline:none;
+}
+
+.mini-topbar input:focus,
+.mini-topbar select:focus{
+  border-color:var(--accent);
+  box-shadow:0 0 0 2px color-mix(in srgb, var(--accent), transparent 85%);
 }
 
 
@@ -95,6 +111,13 @@
   font-weight:600;
   border:none;
   cursor:pointer;
+
+  transition:all .2s ease;
+}
+
+.mini-topbar .btn-primary:hover{
+  transform:translateY(-1px);
+  box-shadow:0 8px 20px rgba(99,102,241,0.35);
 }
 
 
@@ -103,11 +126,15 @@
 ========================= */
 .mini-topbar-table{
   border-top:1px solid var(--panel-border);
+  background:var(--panel-bg);
 }
 
 .mini-topbar-table table{
   width:100%;
   table-layout:fixed;
+
+  border-collapse:separate;
+  border-spacing:0;
 }
 
 .mini-topbar-table th{
@@ -118,6 +145,7 @@
 
   color:var(--dim);
   text-transform:uppercase;
+  letter-spacing:.4px;
 
   border-bottom:1px solid var(--panel-border);
 }

@@ -39,19 +39,50 @@
      TOKEN
   ========================= */
 
+  Onion.auth = Onion.auth || {};
+
   Onion.auth.getToken = function(){
     return safeGet("onion_token");
   };
 
   Onion.auth.setToken = function(token){
-
     if(!token) return;
-
     safeSet("onion_token", token);
   };
 
   Onion.auth.clearToken = function(){
     safeRemove("onion_token");
+  };
+
+  /* =========================
+     USER
+  ========================= */
+
+  Onion.user = null;
+
+  Onion.setUser = function(user){
+    Onion.user = user;
+  };
+
+  Onion.getUser = function(){
+    return Onion.user;
+  };
+
+  Onion.clearUser = function(){
+    Onion.user = null;
+  };
+
+  /* =========================
+     PERMISSIONS
+  ========================= */
+
+  Onion.can = function(permission){
+
+    const user = Onion.user;
+
+    if(!user || !user.permissions) return false;
+
+    return user.permissions.includes(permission);
   };
 
   /* =========================

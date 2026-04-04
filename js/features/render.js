@@ -289,3 +289,5 @@ Onion.render = async function(){
 
   return result;
 };
+
+})();

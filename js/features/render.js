@@ -55,12 +55,13 @@
   }
 
   /* =========================
-     LOAD SCRIPT (MULTI)
+     LOAD SCRIPT (MULTI 🔥)
   ========================= */
   Onion.loadScript = async function(scripts){
 
     if(!scripts) return;
 
+    // 🔥 soporta string o array
     if(typeof scripts === "string"){
       scripts = [scripts];
     }
@@ -70,10 +71,12 @@
       return;
     }
 
+    // 🔥 limpiar scripts anteriores
     document.querySelectorAll("script[data-onion-page]").forEach(s=>{
       try{ s.remove(); }catch{}
     });
 
+    // 🔥 carga secuencial (orden garantizado)
     for(const src of scripts){
       await loadScriptSingle(src);
     }
@@ -158,21 +161,17 @@
   };
 
   /* =========================
-     🔥 EXTRACT CONTENT (ESTABLE)
+     EXTRACT CONTENT
   ========================= */
   function extractContent(html){
 
     const wrapper = document.createElement("div");
     wrapper.innerHTML = html;
 
-    // 🔥 contenedor único SIEMPRE
-    const container = document.createElement("div");
-
-    while(wrapper.firstChild){
-      container.appendChild(wrapper.firstChild);
-    }
-
-    return container;
+    return (
+      wrapper.querySelector(".panel-content") ||
+      wrapper
+    );
   }
 
   /* =========================
@@ -189,7 +188,7 @@
   };
 
   /* =========================
-     RENDER PRO
+     RENDER PRO 🔥
   ========================= */
   Onion.render = async function(){
 
@@ -210,6 +209,7 @@
       if(currentRenderId !== Onion.state.renderId) return;
 
       const content = extractContent(html);
+      content.classList.remove("ready");
 
       Onion.runCleanup?.();
 
@@ -221,30 +221,18 @@
       /* 🔥 HTML */
       Onion.swapContent(content);
 
-      /* 🔥 SCRIPTS */
+      /* 🔥 SCRIPTS (AHORA MULTI 🔥) */
       if(route.script){
         await Onion.loadScript(route.script);
       }
 
       if(currentRenderId !== Onion.state.renderId) return;
 
-      /* 🔥 MINI TOPBAR DETECTION */
-      const app = document.getElementById("app-content");
-
-      if(app.querySelector(".mini-topbar")){
-        app.classList.add("has-mini-topbar");
-      }else{
-        app.classList.remove("has-mini-topbar");
-      }
-
-      /* 🔥 INIT DE VISTA (CLAVE) */
-      if(window.initPage){
-        window.initPage();
-      }
-
       /* 🔥 DOBLE FRAME */
       await new Promise(r => requestAnimationFrame(r));
       await new Promise(r => requestAnimationFrame(r));
+
+      content.classList.add("ready");
 
       Onion.ui.hideLoader?.();
 

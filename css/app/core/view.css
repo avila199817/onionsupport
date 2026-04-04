@@ -346,3 +346,20 @@
   }
 
 }
+
+
+/* =========================================================
+   🔥 CARET KILLER (GLOBAL FIX PRO)
+========================================================= */
+
+/* Oculta el cursor SI NO estás escribiendo */
+input:not(:focus),
+textarea:not(:focus),
+[contenteditable="true"]:not(:focus){
+  caret-color: transparent !important;
+}
+
+/* Extra: evita cursores fantasmas en elementos raros */
+*:not(input):not(textarea):not([contenteditable="true"]){
+  caret-color: transparent !important;
+}

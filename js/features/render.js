@@ -246,4 +246,60 @@
 
   };
 
+
+// =========================
+// 🔥 TOPBARVIEW FACTURAS
+// =========================
+(function(){
+
+  const Onion = window.Onion;
+  if(!Onion) return;
+
+  const originalRender = Onion.render;
+
+  Onion.render = async function(){
+
+    const result = await originalRender.apply(this, arguments);
+
+    requestAnimationFrame(()=>{
+
+      const container = document.getElementById("topbarview-container");
+      if(!container) return;
+
+      const route = location.pathname;
+
+      if(route === "/facturas"){
+
+        container.innerHTML = `
+          <div class="topbarview">
+
+            <input 
+              type="text"
+              id="search-factura"
+              placeholder="Buscar factura..."
+              autocomplete="off"
+            >
+
+            <select id="filter-estado-factura">
+              <option value="">Estado pago</option>
+              <option value="pagada">Pagada</option>
+              <option value="pendiente">Pendiente</option>
+            </select>
+
+            <button id="btn-new-factura" class="btn-primary">
+              + Nueva
+            </button>
+
+          </div>
+        `;
+
+      } else {
+        container.innerHTML = "";
+      }
+
+    });
+
+    return result;
+  };
+
 })();

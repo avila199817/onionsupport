@@ -1,6 +1,6 @@
-<div class="panel-content facturas has-mini-topbar">
+<div class="main-content">
 
-  <!-- 🔥 MINI TOPBAR FUERA DEL SCROLL -->
+  <!-- 🔥 MINI TOPBAR (FIXED, FUERA DEL PANEL) -->
   <div class="mini-topbar">
 
     <div class="mini-topbar-inner">
@@ -48,37 +48,41 @@
   </div>
 
 
-  <!-- 🔥 SOLO EL SCROLL -->
-  <div class="table-container">
+  <!-- 🔥 PANEL -->
+  <div class="panel-content facturas has-mini-topbar">
 
-    <table class="facturas-table">
+    <div class="table-container">
 
-      <thead>
-        <tr>
-          <th class="col-id"></th>
-          <th class="col-main"></th>
-          <th class="col-secondary"></th>
-          <th class="col-date"></th>
-          <th class="col-importe"></th>
-          <th class="col-status"></th>
-          <th class="col-actions"></th>
-        </tr>
-      </thead>
+      <table class="facturas-table">
 
-      <tbody id="facturas-body">
+        <thead>
+          <tr>
+            <th class="col-id"></th>
+            <th class="col-main"></th>
+            <th class="col-secondary"></th>
+            <th class="col-date"></th>
+            <th class="col-importe"></th>
+            <th class="col-status"></th>
+            <th class="col-actions"></th>
+          </tr>
+        </thead>
 
-        <tr class="table-loading">
-          <td colspan="7">
-            <div class="table-loader">
-              <div class="spinner"></div>
-              <span>Cargando facturas...</span>
-            </div>
-          </td>
-        </tr>
+        <tbody id="facturas-body">
 
-      </tbody>
+          <tr class="table-loading">
+            <td colspan="7">
+              <div class="table-loader">
+                <div class="spinner"></div>
+                <span>Cargando facturas...</span>
+              </div>
+            </td>
+          </tr>
 
-    </table>
+        </tbody>
+
+      </table>
+
+    </div>
 
   </div>
 

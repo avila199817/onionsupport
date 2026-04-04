@@ -165,7 +165,7 @@ async function handleAction(btn){
     btn.classList.add("loading");
 
     const original = btn.textContent;
-    btn.textContent = "⏳ Descargando...";
+    btn.textContent = "⏳";
 
     try{
 

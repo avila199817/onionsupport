@@ -107,8 +107,15 @@ html, body{
   display:flex;
   flex-direction:column;
 
-  /* 🔥 AQUÍ SE COMPENSA TODO */
+  /* 🔥 TOPBAR GLOBAL */
   padding-top:var(--topbar-height);
+}
+
+/* 🔥 MINI TOPBAR (ACTIVADO POR JS) */
+#app-content.has-mini-topbar{
+  padding-top: calc(
+    var(--topbar-height) + var(--mini-topbar-height)
+  );
 }
 
 

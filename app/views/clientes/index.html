@@ -1,6 +1,6 @@
 <div class="panel-content clientes table-mode">
 
-  <!-- 🔥 TABLE SYSTEM (FULL WIDTH REAL) -->
+  <!-- 🔥 TABLE SYSTEM -->
   <div class="table-system clientes">
 
     <!-- =========================
@@ -33,7 +33,6 @@
 
     </div>
 
-
     <!-- =========================
          TABLA
     ========================= -->
@@ -49,13 +48,20 @@
             <th class="col-secondary">Tipo</th>
             <th class="col-status">Estado</th>
             <th class="col-date">Alta</th>
+            <th class="col-actions">Acciones</th>
           </tr>
         </thead>
 
         <tbody id="clientes-body">
 
-          <tr class="loading">
-            <td colspan="6">Cargando clientes...</td>
+          <!-- 🔥 LOADER IGUAL QUE FACTURAS -->
+          <tr class="table-loading">
+            <td colspan="7">
+              <div class="table-loader">
+                <div class="spinner"></div>
+                <span>Cargando clientes...</span>
+              </div>
+            </td>
           </tr>
 
         </tbody>

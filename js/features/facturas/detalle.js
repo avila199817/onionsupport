@@ -36,7 +36,51 @@ function $(s){
 
 
 /* =========================================================
-   LOADER CONTROL 🔥 (MISMO QUE INCIDENCIAS)
+   🔥 TOAST PRO
+========================================================= */
+function showToast(msg, type="ok"){
+
+  const t = document.createElement("div");
+  t.className = "onion-toast " + type;
+  t.textContent = msg;
+
+  document.body.appendChild(t);
+
+  requestAnimationFrame(()=>{
+    t.classList.add("show");
+  });
+
+  setTimeout(()=>{
+    t.classList.remove("show");
+    setTimeout(()=> t.remove(), 300);
+  }, 2200);
+
+}
+
+
+/* =========================================================
+   🔥 BUTTON STATE
+========================================================= */
+function setBtnLoading(btn, active, textLoading){
+
+  if(!btn) return;
+
+  if(active){
+    btn.dataset.original = btn.textContent;
+    btn.textContent = textLoading;
+    btn.disabled = true;
+    btn.classList.add("loading");
+  }else{
+    btn.textContent = btn.dataset.original || btn.textContent;
+    btn.disabled = false;
+    btn.classList.remove("loading");
+  }
+
+}
+
+
+/* =========================================================
+   LOADER CONTROL
 ========================================================= */
 function setLoading(active){
 
@@ -100,7 +144,7 @@ init();
 
 
 /* =========================================================
-   OBSERVER (SPA SAFE)
+   OBSERVER
 ========================================================= */
 function observeDOM(){
 
@@ -147,11 +191,11 @@ function bindEvents(){
     }
 
     if(t.id === "btn-descargar-factura"){
-      await downloadFactura();
+      await downloadFactura(t);
     }
 
     if(t.id === "btn-enviar-factura"){
-      await sendFactura();
+      await sendFactura(t);
     }
 
   });
@@ -263,39 +307,21 @@ function render(){
 
   renderAvatar(c);
 
-  /* =========================
-     NUMEROS
-  ========================= */
   const numeroLegal = factura.numeroFacturaLegal || factura.numero || "--";
 
   setText("#detalle-numero-legal", numeroLegal);
   setText("#detalle-id", factura.id || "--");
   setText("#detalle-incidencia-id", factura.incidenciaId || "--");
 
-
-  /* =========================
-     🔥 SIDEBAR TITLE FIX
-  ========================= */
   const fileCard = document.querySelector(".view-file");
-
   if(fileCard){
     const label = fileCard.querySelector("span");
-    if(label){
-      label.textContent = numeroLegal;
-    }
+    if(label) label.textContent = numeroLegal;
   }
 
-
-  /* =========================
-     FECHAS
-  ========================= */
   setText("#detalle-fecha", formatFecha(factura.fecha));
   setText("#detalle-vencimiento", formatFecha(factura.fechaServicio));
 
-
-  /* =========================
-     METODO
-  ========================= */
   setText(
     "#detalle-metodo",
     factura.estadoPago === "pagada"
@@ -303,55 +329,30 @@ function render(){
       : "-"
   );
 
-
-  /* =========================
-     IMPORTES
-  ========================= */
   setText("#detalle-total", formatMoney(factura.total));
   setText("#detalle-concepto", factura.concepto || "-");
   setText("#detalle-descripcion", factura.descripcion || "-");
 
-
-  /* =========================
-     ESTADO
-  ========================= */
   const estadoEl = $("#detalle-estado");
-
   if(estadoEl){
     const estado = factura.estadoPago || "pendiente";
-
     estadoEl.dataset.estado = estado;
-
     estadoEl.textContent =
       estado === "pagada" ? "Pagada" :
       estado === "cancelada" ? "Cancelada" :
       "Pendiente";
   }
 
-
-  /* =========================
-     IVA
-  ========================= */
   const iva = factura.impuestos?.find(i => i.tipo === "IVA");
-
-  setText(
-    "#detalle-iva",
-    iva
-      ? `${iva.porcentaje}% · ${formatMoney(iva.importe)}`
-      : "--"
+  setText("#detalle-iva",
+    iva ? `${iva.porcentaje}% · ${formatMoney(iva.importe)}` : "--"
   );
 
-
-  /* =========================
-     IRPF
-  ========================= */
   const irpfContainer = $("#detalle-irpf-container");
-
   let irpf = factura.impuestos?.find(i => i.tipo === "IRPF");
 
   if(!irpf && factura.irpf){
     const base = factura.baseImponible || 0;
-
     irpf = {
       porcentaje: factura.irpf,
       importe: base * (factura.irpf / 100)
@@ -359,23 +360,17 @@ function render(){
   }
 
   if(irpf && irpf.porcentaje){
-
     irpfContainer.style.display = "block";
-
-    setText(
-      "#detalle-irpf",
+    setText("#detalle-irpf",
       `${irpf.porcentaje}% · ${irpf.importe ? "-" : ""}${formatMoney(Math.abs(irpf.importe))}`
     );
-
   }else{
-
     irpfContainer.style.display = "none";
-
   }
 
 }
 
-  
+
 /* =========================================================
    AVATAR
 ========================================================= */
@@ -410,19 +405,20 @@ async function getURL(){
 
   const res = await fetch(
     `${Onion.config.API}/facturas/${factura.id}/descargar`,
-    {
-      headers: getAuthHeaders()
-    }
+    { headers: getAuthHeaders() }
   );
 
   const data = await res.json();
   return data.url;
 }
 
-async function downloadFactura(){
+async function downloadFactura(btn){
+
+  if(!factura) return;
+
+  setBtnLoading(btn, true, "Descargando...");
 
   try{
-
     const url = await getURL();
 
     const a = document.createElement("a");
@@ -433,16 +429,24 @@ async function downloadFactura(){
     a.click();
     document.body.removeChild(a);
 
+    showToast("Factura descargada 📄");
+
   }catch(e){
     console.error("💥 DOWNLOAD ERROR", e);
+    showToast("Error al descargar", "error");
   }
+
+  setBtnLoading(btn, false);
 
 }
 
-async function sendFactura(){
+async function sendFactura(btn){
+
+  if(!factura) return;
+
+  setBtnLoading(btn, true, "Enviando...");
 
   try{
-
     const res = await fetch(
       `${Onion.config.API}/facturas/${factura.id}/enviar`,
       {
@@ -452,15 +456,16 @@ async function sendFactura(){
     );
 
     const data = await res.json();
-
     if(!data.ok) throw new Error();
 
-    alert("📧 Enviada");
+    showToast("Factura enviada 📧");
 
   }catch(e){
     console.error("💥 SEND ERROR", e);
-    alert("Error enviando");
+    showToast("Error al enviar", "error");
   }
+
+  setBtnLoading(btn, false);
 
 }
 

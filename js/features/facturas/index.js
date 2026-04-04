@@ -43,6 +43,9 @@ function init(){
 
   initialized = true;
 
+  const wrapper = document.querySelector('.content-wrapper');
+  if(wrapper) wrapper.classList.add('table-mode');
+
   bindEvents();
 
   requestAnimationFrame(()=>{
@@ -50,7 +53,12 @@ function init(){
   });
 
   Onion.onCleanup(()=>{
+
     initialized = false;
+
+    /* 🔥 LIMPIAR AL SALIR (importante) */
+    if(wrapper) wrapper.classList.remove('table-mode');
+
   });
 
 }

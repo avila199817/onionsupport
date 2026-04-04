@@ -48,7 +48,7 @@
 }
 
 .panel-content.facturas thead{
-  position:sticky;
+  position:static;
   top:0;
   z-index:3;
   background:var(--panel-bg);

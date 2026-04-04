@@ -1,75 +1,75 @@
 /* =========================================================
-   🔥 MINI TOPBAR — SPA CORRECT (NO OFFSET, NO DOUBLE SHIFT)
+   🔥 MINI TOPBAR — CLON INCIDENCIAS (LIMPIO Y ESTABLE)
+========================================================= */
+
+:root{
+  --mini-topbar-height: 110px;
+}
+
+
+/* =========================================================
+   BASE
 ========================================================= */
 
 .mini-topbar{
-  position: fixed;
+  position:fixed;
+  top:0;
 
-  /* 🔥 CLAVE: la vista empieza en 0 */
-  top: 0;
+  left:var(--sidebar-width);
+  right:0;
 
-  /* 🔥 ALINEADO CON SIDEBAR */
-  left: var(--sidebar-width);
-  right: 0;
+  z-index:calc(var(--z-topbar) - 1);
 
-  z-index: calc(var(--z-topbar) - 1);
+  display:flex;
+  flex-direction:column;
 
-  display: flex;
-  flex-direction: column;
+  background:var(--panel-bg);
 
-  height: auto;
+  border-bottom:1px solid var(--panel-border);
 
-  background:
-    linear-gradient(180deg, rgba(255,255,255,0.02), transparent 40%),
-    var(--panel-bg);
+  backdrop-filter:blur(6px);
+  box-shadow:0 6px 20px rgba(0,0,0,0.25);
 
-  border-bottom: 1px solid var(--panel-border);
-
-  backdrop-filter: blur(6px);
-  box-shadow: 0 6px 20px rgba(0,0,0,0.25);
-
-  transition: left var(--duration-normal) var(--ease-out);
+  transition:left var(--duration-normal) var(--ease-out);
 }
 
 
-/* 🔥 SIDEBAR COLLAPSADO */
+/* SIDEBAR COLLAPSADO */
 .sidebar.collapsed ~ .main-content .mini-topbar{
-  left: var(--sidebar-collapsed);
+  left:var(--sidebar-collapsed);
 }
 
 
-/* =========================
-   🔥 EMPUJE GLOBAL REAL
-========================= */
-#app-content{
-  padding-top: var(--topbar-height);
-}
+/* =========================================================
+   EMPUJE GLOBAL (IGUAL QUE INCIDENCIAS)
+========================================================= */
 
 #app-content.has-mini-topbar{
-  padding-top: calc(
-    var(--topbar-height) + 110px
+  padding-top:calc(
+    var(--topbar-height) + var(--mini-topbar-height)
   );
 }
 
 
-/* =========================
-   INNER (FILA SUPERIOR)
-========================= */
+/* =========================================================
+   FILA 1 (FILTROS) = filters-row
+========================================================= */
+
 .mini-topbar-inner{
   display:flex;
   align-items:center;
-  justify-content:space-between;
+  gap:10px;
 
-  gap:var(--space-md);
-  padding:10px var(--space-lg);
+  padding:12px 16px;
+
+  background:var(--panel-bg);
+  border-bottom:1px solid var(--panel-border);
 
   height:60px;
 }
 
 
-/* =========================
-   AREAS
-========================= */
+/* AREAS */
 .mini-topbar-left{
   display:flex;
   align-items:center;
@@ -80,38 +80,38 @@
 .mini-topbar-right{
   display:flex;
   align-items:center;
-  gap:var(--space-md);
+  gap:10px;
 }
 
 
-/* =========================
-   INPUTS
-========================= */
+/* INPUTS (CLON EXACTO) */
+.mini-topbar input{
+  flex:1;
+  min-width:220px;
+}
+
 .mini-topbar input,
 .mini-topbar select{
   padding:10px 12px;
-  border-radius:8px;
 
+  border-radius:8px;
   border:1px solid var(--card-border);
+
   background:var(--card-bg);
   color:var(--text);
 
   font-size:13px;
-
-  outline:none;
 }
 
-.mini-topbar input:focus,
-.mini-topbar select:focus{
-  border-color:var(--accent);
-  box-shadow:0 0 0 2px color-mix(in srgb, var(--accent), transparent 85%);
+.mini-topbar select{
+  min-width:140px;
 }
 
 
-/* =========================
-   BUTTON
-========================= */
+/* BUTTON (CLON btn-new-incidencia) */
 .mini-topbar .btn-primary{
+  margin-left:auto;
+
   padding:10px 18px;
   border-radius:999px;
 
@@ -119,43 +119,44 @@
   color:#fff;
 
   font-weight:600;
+
   border:none;
   cursor:pointer;
 
+  box-shadow:0 6px 18px rgba(99,102,241,0.35);
   transition:all .2s ease;
 }
 
 .mini-topbar .btn-primary:hover{
   transform:translateY(-1px);
-  box-shadow:0 8px 20px rgba(99,102,241,0.35);
+  box-shadow:0 10px 26px rgba(99,102,241,0.45);
 }
 
 
-/* =========================
-   TABLE HEADER (FILA 2)
-========================= */
+/* =========================================================
+   FILA 2 (HEADER TABLA) = thead
+========================================================= */
+
 .mini-topbar-table{
-  border-top:1px solid var(--panel-border);
   background:var(--panel-bg);
 }
 
 .mini-topbar-table table{
   width:100%;
+  border-collapse:collapse;
   table-layout:fixed;
-
-  border-collapse:separate;
-  border-spacing:0;
 }
 
 .mini-topbar-table th{
-  padding:12px 14px;
+  padding:10px 14px;
 
-  font-size:11px;
   text-align:left;
+  border-bottom:1px solid var(--panel-border);
 
   color:var(--dim);
+  font-size:11px;
   text-transform:uppercase;
-  letter-spacing:.4px;
+  letter-spacing:.3px;
 
-  border-bottom:1px solid var(--panel-border);
+  white-space:nowrap;
 }

@@ -1,76 +1,60 @@
 /* =========================================================
-   MINI TOPBAR HEIGHT AUTO — PRO SPA FIX (10/10)
+   ROLES SYSTEM — BASE LIMPIA (READY)
 ========================================================= */
 
 (function(){
 
-  let observer = null;
-  let rafId = null;
+  if(!window.Onion) return;
 
-  function setMiniTopbarHeight(){
+  /* =========================
+     HELPERS
+  ========================= */
 
-    const mini = document.querySelector('.mini-topbar');
-
-    if(!mini){
-      document.documentElement.style.setProperty('--mini-topbar-height', '0px');
-      return;
-    }
-
-    const height = mini.offsetHeight || 0;
-
-    document.documentElement.style.setProperty(
-      '--mini-topbar-height',
-      height + 'px'
-    );
+  function getUser(){
+    return Onion.state?.user || null;
   }
 
-  function measure(){
-
-    // 🔥 cancela RAF anterior (evita spam en SPA)
-    if(rafId){
-      cancelAnimationFrame(rafId);
-    }
-
-    rafId = requestAnimationFrame(()=>{
-      requestAnimationFrame(setMiniTopbarHeight);
-    });
+  function getRole(){
+    return getUser()?.role || "guest";
   }
 
-  function init(){
+  function isAdmin(){
+    return getRole() === "admin";
+  }
 
-    const mini = document.querySelector('.mini-topbar');
-
-    if(!mini){
-      setMiniTopbarHeight();
-      return;
-    }
-
-    measure();
-
-    // 🔥 limpiar observer previo
-    if(observer){
-      observer.disconnect();
-      observer = null;
-    }
-
-    // 🔥 ResizeObserver PRO (con debounce natural)
-    if(window.ResizeObserver){
-      observer = new ResizeObserver(()=>{
-        measure();
-      });
-
-      observer.observe(mini);
-    }
-
+  function isUser(){
+    return getRole() === "user";
   }
 
   /* =========================
-     🔥 HOOK SPA (SIN ROMPER RENDER)
+     UI APPLY
   ========================= */
 
-  if(window.Onion && !Onion.__miniTopbarHooked){
+  function applyRoleUI(){
 
-    Onion.__miniTopbarHooked = true;
+    const role = getRole();
+
+    // 🔥 ejemplo: botones admin
+    document.querySelectorAll('[data-role="admin"]').forEach(el=>{
+      el.style.display = isAdmin() ? "" : "none";
+    });
+
+    // 🔥 ejemplo: solo users
+    document.querySelectorAll('[data-role="user"]').forEach(el=>{
+      el.style.display = isUser() ? "" : "none";
+    });
+
+    // 🔥 debug opcional
+    console.log("👤 ROLE:", role);
+  }
+
+  /* =========================
+     HOOK SPA
+  ========================= */
+
+  if(!Onion.__rolesHooked){
+
+    Onion.__rolesHooked = true;
 
     const originalRender = Onion.render;
 
@@ -78,31 +62,13 @@
 
       const result = await originalRender.apply(this, arguments);
 
-      measure();
+      applyRoleUI();
 
       return result;
     };
 
   }else{
-    window.addEventListener('load', measure);
-  }
-
-  /* =========================
-     CLEANUP
-  ========================= */
-
-  if(window.Onion){
-    Onion.onCleanup(()=>{
-      if(observer){
-        observer.disconnect();
-        observer = null;
-      }
-
-      if(rafId){
-        cancelAnimationFrame(rafId);
-        rafId = null;
-      }
-    });
+    window.addEventListener("load", applyRoleUI);
   }
 
 })();

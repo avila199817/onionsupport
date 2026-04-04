@@ -1,23 +1,26 @@
-const TopbarViews = {
+"use strict";
 
-  facturas: () => `
-    <div class="topbarview">
+(function(){
 
-      <input 
-        type="text"
-        id="search-factura"
-        placeholder="Buscar factura..."
-      >
+  function init(){
 
-      <select id="filter-estado-factura">
-        <option value="">Estado pago</option>
-        <option value="pagada">Pagada</option>
-        <option value="pendiente">Pendiente</option>
-      </select>
+    const btn = document.getElementById("btn-new-factura");
+    if(!btn) return;
 
-      <button class="btn-primary">+ Nueva</button>
+    const user = window.Onion?.user;
 
-    </div>
-  `
+    // 🔥 SOLO ADMIN VE EL BOTÓN
+    if(!user || user.role !== "admin"){
+      btn.remove(); // o btn.style.display = "none";
+      return;
+    }
 
-};
+    btn.addEventListener("click", ()=>{
+      console.log("crear factura");
+    });
+
+  }
+
+  requestAnimationFrame(init);
+
+})();

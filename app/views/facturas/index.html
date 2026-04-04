@@ -3,32 +3,31 @@
   <!-- 🔥 TABLE SYSTEM -->
   <div class="table-system">
 
-    <!-- 🔥 TABLA + SCROLL -->
+    <!-- 🔥 TOPBAR FIJO (FUERA DEL SCROLL) -->
+    <div class="topbarview">
+
+      <input 
+        type="text"
+        id="search-factura"
+        placeholder="Buscar factura..."
+        autocomplete="off"
+      >
+
+      <select id="filter-estado-factura">
+        <option value="">Estado pago</option>
+        <option value="pagada">Pagada</option>
+        <option value="pendiente">Pendiente</option>
+      </select>
+
+      <button id="btn-new-factura" class="btn-primary">
+        + Nueva
+      </button>
+
+    </div>
+
+    <!-- 🔥 SCROLL SOLO AQUÍ -->
     <div class="table-container">
 
-      <!-- 🔥 TOPBAR VIEW (DENTRO DEL SCROLL) -->
-      <div class="topbarview">
-
-        <input 
-          type="text"
-          id="search-factura"
-          placeholder="Buscar factura..."
-          autocomplete="off"
-        >
-
-        <select id="filter-estado-factura">
-          <option value="">Estado pago</option>
-          <option value="pagada">Pagada</option>
-          <option value="pendiente">Pendiente</option>
-        </select>
-
-        <button id="btn-new-factura" class="btn-primary">
-          + Nueva
-        </button>
-
-      </div>
-
-      <!-- 🔥 TABLA -->
       <table>
 
         <thead>
@@ -44,7 +43,6 @@
         </thead>
 
         <tbody id="facturas-body">
-
           <tr class="table-loading">
             <td colspan="7">
               <div class="table-loader">
@@ -53,7 +51,6 @@
               </div>
             </td>
           </tr>
-
         </tbody>
 
       </table>

@@ -119,3 +119,18 @@
 .panel-content.has-mini-topbar{
   padding-top:100px; /* 🔥 fijo y estable */
 }
+
+.mini-topbar{
+  background: red !important;
+  border-bottom: 3px solid yellow !important;
+  box-shadow: 0 0 20px red !important;
+}
+
+.mini-topbar input{
+  background: lime !important;
+  color: black !important;
+}
+
+.mini-topbar-table th{
+  color: cyan !important;
+}

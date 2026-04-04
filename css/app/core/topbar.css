@@ -1,223 +1,121 @@
 /* =========================================================
-   🔥 MINI TOPBAR — FINAL PRO SAAS PANEL (PERFECT ALIGN REAL)
+   🔥 MINI TOPBAR — VERSION SIMPLE Y ESTABLE (FIX REAL)
 ========================================================= */
 
-/* =========================
-   WRAPPER
-========================= */
 .mini-topbar{
   position:fixed;
 
-  top:var(--topbar-height);
-  left:0;
+  /* 🔥 ALTURA REAL DE TU TOPBAR */
+  top:56px;
+
+  /* 🔥 ALINEADO CON SIDEBAR */
+  left:var(--sidebar-width);
   right:0;
 
-  /* 🔥 FIX REAL */
-  margin-left:var(--sidebar-width);
-
-  z-index:calc(var(--z-topbar) - 1);
+  z-index:1000;
 
   display:flex;
   flex-direction:column;
 
-  background:
-    linear-gradient(180deg, rgba(255,255,255,0.02), transparent 40%),
-    var(--panel-bg);
-
+  background:var(--panel-bg);
   border-bottom:1px solid var(--panel-border);
 
-  backdrop-filter:blur(6px);
   box-shadow:0 4px 12px rgba(0,0,0,0.15);
-
-  transition:
-    margin-left var(--duration-slow) var(--ease-out),
-    background var(--duration-normal) ease;
-}
-
-/* 🔥 FIX COLAPSADO (ROBUSTO) */
-.sidebar.collapsed ~ * .mini-topbar{
-  margin-left:var(--sidebar-collapsed);
 }
 
 
 /* =========================
-   🔥 ALIGN EXACTO COMO TOPBAR
-========================= */
-.mini-topbar-inner,
-.mini-topbar-table{
-  padding-left:var(--space-lg);
-  padding-right:var(--space-lg);
-}
-
-
-/* =========================
-   INNER LAYOUT
+   INNER
 ========================= */
 .mini-topbar-inner{
   display:flex;
   align-items:center;
   justify-content:space-between;
 
-  gap:var(--space-md);
-  padding-top:10px;
-  padding-bottom:10px;
+  gap:12px;
+  padding:10px 16px;
 }
 
 
 /* =========================
-   FLEX AREAS
+   AREAS
 ========================= */
 .mini-topbar-left{
   display:flex;
   align-items:center;
-  gap:var(--space-md);
-  min-width:0;
   flex:1;
-}
-
-.mini-topbar-center{
-  flex:1;
-  display:flex;
-  align-items:center;
-  justify-content:center;
 }
 
 .mini-topbar-right{
   display:flex;
   align-items:center;
-  gap:var(--space-md);
+  gap:10px;
 }
 
 
 /* =========================
-   INPUTS / CONTROLS
+   INPUTS
 ========================= */
 .mini-topbar input,
 .mini-topbar select{
-  padding:10px 12px;
-  border-radius:8px;
+  padding:8px 10px;
+  border-radius:6px;
 
   border:1px solid var(--card-border);
-
   background:var(--card-bg);
   color:var(--text);
 
   font-size:13px;
-
-  transition:
-    border-color var(--duration-normal) ease,
-    background var(--duration-normal) ease,
-    box-shadow var(--duration-normal) ease;
 }
 
 .mini-topbar input{
-  width:100%;
-  max-width:320px;
-}
-
-.mini-topbar input:focus,
-.mini-topbar select:focus{
-  border-color:var(--accent);
-  background:var(--panel-bg);
-
-  box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--accent), transparent 85%);
+  width:260px;
 }
 
 
 /* =========================
-   BUTTON PRIMARY
+   BUTTON
 ========================= */
 .mini-topbar .btn-primary{
-  padding:10px 18px;
-  border-radius:999px;
+  padding:8px 14px;
+  border-radius:20px;
 
-  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
+  background:var(--accent);
   color:#fff;
 
-  font-weight:600;
   border:none;
   cursor:pointer;
-
-  box-shadow:0 6px 18px rgba(99,102,241,0.35);
-
-  transition:all .2s ease;
-}
-
-.mini-topbar .btn-primary:hover{
-  transform:translateY(-1px);
-  box-shadow:0 10px 26px rgba(99,102,241,0.45);
 }
 
 
 /* =========================
-   TABLE HEADER (SYNC PERFECTO)
+   TABLE HEADER
 ========================= */
 .mini-topbar-table{
   border-top:1px solid var(--panel-border);
-  background:var(--panel-bg);
 }
 
 .mini-topbar-table table{
   width:100%;
   table-layout:fixed;
-
-  border-collapse:separate;
-  border-spacing:0;
 }
 
 .mini-topbar-table th{
   padding:12px 14px;
 
-  text-align:left;
   font-size:11px;
+  text-align:left;
 
   color:var(--dim);
   text-transform:uppercase;
-  letter-spacing:.4px;
-
-  white-space:nowrap;
 
   border-bottom:1px solid var(--panel-border);
 }
 
 
 /* =========================
-   🔥 TABLE BODY SYNC FIX
-========================= */
-.panel-content .table-container{
-  flex:1;
-  min-height:0;
-
-  overflow-y:auto;
-  overflow-x:hidden;
-
-  scrollbar-gutter:stable;
-
-  background:var(--panel-bg);
-}
-
-.panel-content .table-container table{
-  width:100%;
-  table-layout:fixed;
-
-  border-collapse:separate;
-  border-spacing:0;
-}
-
-
-/* =========================
-   🔥 ALIGN SOLO FACTURAS
-========================= */
-.panel-content.facturas th,
-.panel-content.facturas td{
-  padding:12px 14px;
-}
-
-
-/* =========================
-   🔥 OFFSET REAL (CLAVE)
+   OFFSET BODY
 ========================= */
 .panel-content.has-mini-topbar{
-  padding-top:var(--mini-topbar-height, 0px);
+  padding-top:100px; /* 🔥 fijo y estable */
 }

@@ -1,10 +1,12 @@
 /* =========================================================
-   MINI TOPBAR — FIXED FINAL (ALINEADO + SIN HUECOS)
+   🔥 MINI TOPBAR — PRO SAAS FINAL (SYNC REAL LAYOUT)
 ========================================================= */
 
 .mini-topbar{
   position:fixed;
-  top:0px;           /* altura real de la topbar */
+
+  /* 🔥 IMPORTANTE: viewport REAL del panel */
+  top:0;
   left:0;
   right:0;
 
@@ -13,13 +15,34 @@
   display:flex;
   flex-direction:column;
 
-  /* alineación con sidebar */
-  padding-left:260px; /* ajusta si tu sidebar mide otra cosa */
+  /* 🔥 ALINEACIÓN PERFECTA CON TU LAYOUT */
+  margin-left:var(--sidebar-width);
+  width:calc(100% - var(--sidebar-width));
 
-  background:#111;
-  border-bottom:1px solid #222;
+  /* 🔥 MISMO OFFSET QUE TOPBAR GLOBAL */
+  transform:translateY(0);
 
-  box-shadow:0 6px 20px rgba(0,0,0,0.35);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.02), transparent 40%),
+    var(--panel-bg);
+
+  border-bottom:1px solid var(--panel-border);
+
+  backdrop-filter:blur(6px);
+  box-shadow:0 6px 20px rgba(0,0,0,0.25);
+
+  transition:
+    margin-left var(--duration-slow) var(--ease-out),
+    width var(--duration-slow) var(--ease-out);
+}
+
+
+/* =========================
+   SIDEBAR COLLAPSED (SYNC REAL)
+========================= */
+.sidebar.collapsed ~ .main-content .mini-topbar{
+  margin-left:var(--sidebar-collapsed);
+  width:calc(100% - var(--sidebar-collapsed));
 }
 
 
@@ -31,8 +54,8 @@
   align-items:center;
   justify-content:space-between;
 
-  gap:12px;
-  padding:10px 16px;
+  gap:var(--space-md);
+  padding:10px var(--space-lg);
 }
 
 
@@ -43,12 +66,13 @@
   display:flex;
   align-items:center;
   flex:1;
+  min-width:0;
 }
 
 .mini-topbar-right{
   display:flex;
   align-items:center;
-  gap:10px;
+  gap:var(--space-md);
 }
 
 
@@ -57,18 +81,33 @@
 ========================= */
 .mini-topbar input,
 .mini-topbar select{
-  padding:8px 10px;
-  border-radius:6px;
+  padding:10px 12px;
+  border-radius:8px;
 
-  border:1px solid #333;
-  background:#000;
-  color:#fff;
+  border:1px solid var(--card-border);
+  background:var(--card-bg);
+  color:var(--text);
 
   font-size:13px;
+
+  transition:
+    border-color var(--duration-normal) ease,
+    background var(--duration-normal) ease,
+    box-shadow var(--duration-normal) ease;
 }
 
 .mini-topbar input{
-  width:260px;
+  width:100%;
+  max-width:320px;
+}
+
+.mini-topbar input:focus,
+.mini-topbar select:focus{
+  border-color:var(--accent);
+  background:var(--panel-bg);
+
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--accent), transparent 85%);
 }
 
 
@@ -76,44 +115,54 @@
    BUTTON
 ========================= */
 .mini-topbar .btn-primary{
-  padding:8px 14px;
-  border-radius:20px;
+  padding:10px 18px;
+  border-radius:999px;
 
-  background:#4f46e5;
+  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
   color:#fff;
 
+  font-weight:600;
   border:none;
   cursor:pointer;
 
-  transition:all .15s ease;
+  box-shadow:0 6px 18px rgba(99,102,241,0.35);
+
+  transition:all .2s ease;
 }
 
 .mini-topbar .btn-primary:hover{
-  background:#6366f1;
+  transform:translateY(-1px);
+  box-shadow:0 10px 26px rgba(99,102,241,0.45);
 }
 
 
 /* =========================
-   TABLE HEADER
+   TABLE HEADER (SYNC)
 ========================= */
 .mini-topbar-table{
-  border-top:1px solid #222;
+  border-top:1px solid var(--panel-border);
+  background:var(--panel-bg);
 }
 
 .mini-topbar-table table{
   width:100%;
   table-layout:fixed;
+
+  border-collapse:separate;
+  border-spacing:0;
 }
 
 .mini-topbar-table th{
   padding:12px 14px;
 
-  font-size:11px;
   text-align:left;
+  font-size:11px;
 
-  color:#888;
+  color:var(--dim);
   text-transform:uppercase;
+  letter-spacing:.4px;
 
-  border-bottom:1px solid #222;
+  white-space:nowrap;
+
+  border-bottom:1px solid var(--panel-border);
 }
-

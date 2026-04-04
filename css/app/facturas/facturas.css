@@ -1,5 +1,5 @@
 /* =========================================================
-   FACTURAS — FINAL (SCROLL SOLO TABLA)
+   FACTURAS — FINAL 100% FUNCIONANDO (SOLO SCROLL TABLA)
 ========================================================= */
 
 .panel-content.facturas{
@@ -11,8 +11,8 @@
   min-height:0;
 }
 
-/* 🔥 EVITA SCROLL GLOBAL DEL WRAPPER */
-.panel-content.table-mode .content-wrapper{
+/* 🔥 CLAVE: matar scroll del wrapper padre */
+.panel-content.table-mode{
   overflow:hidden;
 }
 
@@ -29,11 +29,11 @@
 }
 
 /* =========================================================
-   FILTERS (FIJOS POR ESTRUCTURA, NO STICKY)
+   FILTERS (NO SE MUEVEN)
 ========================================================= */
 
 .panel-content.facturas .filters-row{
-  flex-shrink:0;
+  flex:0 0 auto; /* 🔥 FIJO REAL */
 
   display:flex;
   align-items:center;
@@ -82,14 +82,16 @@
 }
 
 /* =========================================================
-   TABLE CONTAINER (ÚNICO SCROLL REAL)
+   TABLE CONTAINER (ÚNICO SCROLL)
 ========================================================= */
 
 .panel-content.facturas .table-container{
-  flex:1;
+  flex:1 1 auto;
   min-height:0;
+
   overflow-y:auto;
   overflow-x:hidden;
+
   background:var(--panel-bg);
 }
 
@@ -103,6 +105,7 @@
   table-layout:fixed;
 }
 
+/* header de tabla fijo (esto sí está bien) */
 .panel-content.facturas thead{
   position:sticky;
   top:0;

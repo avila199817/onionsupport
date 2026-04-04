@@ -293,6 +293,23 @@ html, body{
 }
 
 
+
+
+
+
+
+.panel-content.facturas .content-wrapper{
+  overflow: visible;
+}
+
+
+
+
+
+
+
+
+
 /* =========================
    RESPONSIVE
 ========================= */

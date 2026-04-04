@@ -1,5 +1,5 @@
 /* =========================================================
-   MINI TOPBAR — PRO REAL (ALINEADO + LIMPIO)
+   MINI TOPBAR — FIXED PERFECTO (SIN CHAPUZAS)
 ========================================================= */
 
 .mini-topbar{
@@ -13,7 +13,7 @@
   display:flex;
   flex-direction:column;
 
-  /* 🔥 CLAVE REAL */
+  /* 🔥 alineación con sidebar */
   padding-left:260px;
 
   background:#111;
@@ -119,8 +119,8 @@
 
 
 /* =========================
-   OFFSET BODY
+   OFFSET REAL (SIN CHAPUZAS)
 ========================= */
 .panel-content.has-mini-topbar{
-  padding-top:-25px;
+  padding-top:96px; /* 🔥 AJUSTADO REAL */
 }

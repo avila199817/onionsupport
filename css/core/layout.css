@@ -298,9 +298,53 @@ html, body{
 
 
 
-.panel-content.facturas .content-wrapper{
-  overflow: visible;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* =========================================================
+   🔥 FACTURAS — TOPBAR OFFSET (CLON TOPBAR PADRE)
+========================================================= */
+
+:root{
+  --topbarview-height: 64px; /* ajusta luego si hace falta */
 }
+
+.panel-content.facturas{
+  padding-top: var(--topbarview-height);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

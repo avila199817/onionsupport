@@ -10,6 +10,12 @@
   --sidebar-collapsed:72px;
 
   --topbar-height:56px;
+  --mini-topbar-height:56px; /* 🔥 AÑADIDO */
+
+  --header-total-height:calc(
+    var(--topbar-height) + var(--mini-topbar-height)
+  ); /* 🔥 OPCIONAL PRO */
+
   --page-offset:28px;
 
 

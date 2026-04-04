@@ -301,11 +301,10 @@ html, body{
 
 
 
+
 .panel-content.facturas .table-container{
-  overflow:visible;
+  overflow: visible !important;
 }
-
-
 
 
 

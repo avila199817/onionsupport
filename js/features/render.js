@@ -233,67 +233,10 @@
   };
 
   /* =========================
-     🔥 TOPBARVIEW SYSTEM
-  ========================= */
-  const TopbarViews = {
-
-    facturas: () => `
-      <div class="topbarview">
-
-        <input 
-          type="text"
-          id="search-factura"
-          placeholder="Buscar factura..."
-          autocomplete="off"
-        >
-
-        <select id="filter-estado-factura">
-          <option value="">Estado pago</option>
-          <option value="pagada">Pagada</option>
-          <option value="pendiente">Pendiente</option>
-        </select>
-
-        <button id="btn-new-factura" class="btn-primary">
-          + Nueva
-        </button>
-
-      </div>
-    `
-
-  };
-
-  /* =========================
-     🔥 RENDER FINAL
+     🔥 RENDER FINAL (SOLO ORQUESTA)
   ========================= */
   Onion.render = async function(){
-
-    const result = await originalRender.apply(this, arguments);
-
-    requestAnimationFrame(()=>{
-
-      const container = document.getElementById("topbarview-container");
-      const appContent = document.getElementById("app-content");
-
-      if(!container || !appContent) return;
-
-      const route = Onion.router.resolve();
-      const view = route.topbarview;
-
-      if(view && TopbarViews[view]){
-
-        container.innerHTML = TopbarViews[view]();
-        appContent.classList.add("has-topbarview");
-
-      } else {
-
-        container.innerHTML = "";
-        appContent.classList.remove("has-topbarview");
-
-      }
-
-    });
-
-    return result;
+    return await originalRender.apply(this, arguments);
   };
 
 })();

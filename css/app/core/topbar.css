@@ -1,10 +1,10 @@
 /* =========================================================
-   MINI TOPBAR — FIXED PERFECTO (SIN CHAPUZAS)
+   MINI TOPBAR — FIXED FINAL (ALINEADO + SIN HUECOS)
 ========================================================= */
 
 .mini-topbar{
   position:fixed;
-  top:56px;
+  top:56px;           /* altura real de la topbar */
   left:0;
   right:0;
 
@@ -13,8 +13,8 @@
   display:flex;
   flex-direction:column;
 
-  /* 🔥 alineación con sidebar */
-  padding-left:260px;
+  /* alineación con sidebar */
+  padding-left:260px; /* ajusta si tu sidebar mide otra cosa */
 
   background:#111;
   border-bottom:1px solid #222;
@@ -119,8 +119,8 @@
 
 
 /* =========================
-   OFFSET REAL (SIN CHAPUZAS)
+   OFFSET FINAL CORRECTO
 ========================= */
 .panel-content.has-mini-topbar{
-  padding-top:96px; /* 🔥 AJUSTADO REAL */
+  padding-top:80px; /* 🔥 CLAVE: ni 56 ni 96 → este es el punto bueno */
 }

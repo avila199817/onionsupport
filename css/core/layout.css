@@ -128,8 +128,6 @@ html, body{
   padding:var(--space-lg);
   gap:var(--space-lg);
 
-  overflow:hidden;
-
   background:transparent;
 }
 

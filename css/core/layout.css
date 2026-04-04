@@ -1,5 +1,5 @@
 /* =========================================================
-   🔥 LAYOUT — SAAS PANEL CLEAN (SCROLL PERFECT FIX)
+   🔥 LAYOUT — SAAS PANEL CLEAN (FINAL REAL SCROLL FIX)
 ========================================================= */
 
 /* =========================
@@ -8,7 +8,6 @@
 html, body{
   height:100%;
   margin:0;
-  overflow:hidden; /* 🔥 evita scroll global */
 }
 
 #app{
@@ -20,7 +19,7 @@ html, body{
 
 
 /* =========================
-   APP ROOT (🔥 FIX REAL)
+   APP ROOT
 ========================= */
 .layout{
   position:relative;
@@ -31,7 +30,7 @@ html, body{
   height:100dvh;
   min-height:0;
 
-  overflow:hidden; /* 🔥 CLAVE */
+  overflow:hidden; /* 🔥 evita doble scroll */
 
   isolation:isolate;
 
@@ -50,26 +49,22 @@ html, body{
 .container{
   width:100%;
   max-width:var(--content-max);
-
   margin-inline:auto;
   padding-inline:var(--content-padding);
-
   position:relative;
 }
 
 .container-fluid{
   width:100%;
   max-width:none;
-
   margin:0;
   padding-inline:var(--content-padding);
-
   position:relative;
 }
 
 
 /* =========================
-   MAIN CONTENT (🔥 CORE FIX)
+   MAIN CONTENT (🔥 SCROLL REAL)
 ========================= */
 .main-content{
   position:relative;
@@ -88,7 +83,8 @@ html, body{
 
   min-width:0;
 
-  overflow:hidden; /* 🔥 SOLO UN SCROLL EN HIJOS */
+  overflow:auto; /* 🔥 AQUÍ VIVE EL SCROLL GLOBAL */
+  overscroll-behavior:contain;
 
   transition:
     margin-left var(--duration-slow) var(--ease-out),
@@ -111,13 +107,11 @@ html, body{
 
   display:flex;
   flex-direction:column;
-
-  overflow:hidden; /* 🔥 IMPORTANTE */
 }
 
 
 /* =========================
-   CONTENT WRAPPER (🔥 FIX)
+   CONTENT WRAPPER
 ========================= */
 .content-wrapper{
   flex:1;
@@ -129,7 +123,6 @@ html, body{
   padding:var(--space-lg);
   gap:var(--space-lg);
 
-  overflow:hidden; /* 🔥 NO SCROLL AQUÍ */
   background:transparent;
 }
 
@@ -151,17 +144,14 @@ html, body{
   flex-direction:column;
 
   background:var(--panel-bg);
-
-  overflow:hidden; /* 🔥 CLAVE */
 }
 
 
 /* =========================
-   DASHBOARD (SCROLL NORMAL)
+   DASHBOARD (SCROLL INTERNO)
 ========================= */
 .panel-content.dashboard{
   overflow:auto;
-  overscroll-behavior:contain;
 }
 
 .dashboard-container{
@@ -175,7 +165,7 @@ html, body{
 ========================= */
 .panel-content.table-mode{
   padding:0;
-  overflow:hidden;
+  overflow:hidden; /* 🔥 scroll lo controla la tabla */
 }
 
 

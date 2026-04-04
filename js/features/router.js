@@ -108,6 +108,16 @@
       title: "Clientes"
     },
 
+    "/clientes/detalle": {
+      page: "/app/views/clientes/detalle.html",
+      style: [
+        "/css/app/core/view.css",
+        "/css/app/clientes/detalle.css"
+      ],
+      script: "/js/features/clientes/detalle.js",
+      title: "Detalle cliente"
+    },
+    
     "/clientes/cliente": {
       page: "/app/views/clientes/cliente.html",
       style: "/css/app/clientes.css",

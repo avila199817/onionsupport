@@ -1,6 +1,6 @@
-(function(){
-
 "use strict";
+
+(function(){
 
 const Onion = window.Onion;
 
@@ -10,8 +10,10 @@ if(!Onion){
 }
 
 let initialized = false;
-let tbody = null;
-let clientesCache = [];
+let currentItems = [];
+let filteredItems = [];
+let loading = false;
+let currentRequestId = 0;
 
 /* =========================
    ROOT
@@ -21,88 +23,303 @@ function getRoot(){
   return document.querySelector(".panel-content.clientes");
 }
 
-function $(id){
-  return getRoot()?.querySelector("#" + id);
+function $(selector){
+  const root = getRoot();
+  return root ? root.querySelector(selector) : null;
 }
 
 /* =========================
-   API
+   INIT
 ========================= */
 
-async function getClientes(){
-  const res = await Onion.fetch(Onion.config.API + "/clientes");
-  return res?.clientes || res?.data || res || [];
+function init(){
+
+  const root = getRoot();
+  if(!root || initialized) return;
+
+  if(!Onion.state?.user){
+    return setTimeout(init, 100);
+  }
+
+  initialized = true;
+
+  bindEvents();
+
+  requestAnimationFrame(()=>{
+    loadClientes();
+  });
+
+  Onion.onCleanup(()=>{
+    initialized = false;
+  });
+
+}
+
+init();
+
+/* =========================
+   EVENTS
+========================= */
+
+function bindEvents(){
+
+  const root = getRoot();
+  if(!root) return;
+
+  Onion.cleanupEvent(root, "click", (e)=>{
+
+    const row = e.target.closest("tr[data-id]");
+    if(!row) return;
+
+    Onion.router.navigate("/clientes/cliente?id=" + row.dataset.id);
+
+  });
+
+  $("#btn-new-cliente")?.addEventListener("click", ()=>{
+    Onion.router.navigate("/clientes/nuevo");
+  });
+
+  $("#search-cliente")?.addEventListener("input", debounce(applyFilters, 250));
+  $("#filter-estado-cliente")?.addEventListener("change", applyFilters);
+  $("#filter-tipo-cliente")?.addEventListener("change", applyFilters);
+
+}
+
+/* =========================
+   LOAD
+========================= */
+
+async function loadClientes(){
+
+  if(loading) return;
+  loading = true;
+
+  const tbody = $("#clientes-body");
+  if(!tbody) return;
+
+  const requestId = ++currentRequestId;
+
+  document.activeElement?.blur();
+
+  try{
+
+    await new Promise(r => requestAnimationFrame(r));
+    await new Promise(r => requestAnimationFrame(r));
+    await new Promise(r => setTimeout(r, 200));
+
+    const res = await Onion.fetch(Onion.config.API + "/clientes");
+    const items = normalize(res);
+
+    if(requestId !== currentRequestId) return;
+
+    currentItems = items;
+    filteredItems = items;
+
+    if(!items.length){
+      setEmpty();
+      return;
+    }
+
+    requestAnimationFrame(()=>{
+      render(items);
+    });
+
+  }catch(e){
+
+    console.error("💥 ERROR CLIENTES:", e);
+
+    if(requestId !== currentRequestId) return;
+
+    setError();
+
+  }finally{
+    loading = false;
+  }
+
+}
+
+/* =========================
+   NORMALIZE
+========================= */
+
+function normalize(res){
+
+  if(!res) return [];
+
+  if(Array.isArray(res)) return res;
+  if(Array.isArray(res.clientes)) return res.clientes;
+  if(Array.isArray(res.data)) return res.data;
+  if(Array.isArray(res.items)) return res.items;
+
+  return [];
+
+}
+
+/* =========================
+   FILTERS
+========================= */
+
+function applyFilters(){
+
+  const search = ($("#search-cliente")?.value || "").toLowerCase();
+  const estado = ($("#filter-estado-cliente")?.value || "").toLowerCase();
+  const tipo = ($("#filter-tipo-cliente")?.value || "").toLowerCase();
+
+  filteredItems = currentItems.filter(c => {
+
+    const d = mapItem(c);
+
+    const text =
+      d.nombre + " " +
+      d.empresa + " " +
+      d.email + " " +
+      d.ubicacion;
+
+    return (
+      (!search || text.toLowerCase().includes(search)) &&
+      (!estado || (estado === "activo" ? d.activo : !d.activo)) &&
+      (!tipo || d.tipo.raw === tipo)
+    );
+
+  });
+
+  requestAnimationFrame(()=>{
+    render(filteredItems);
+  });
+
+}
+
+/* =========================
+   STATES
+========================= */
+
+function setEmpty(){
+  $("#clientes-body").innerHTML =
+    `<tr><td colspan="7">No hay clientes</td></tr>`;
+}
+
+function setError(){
+  $("#clientes-body").innerHTML =
+    `<tr><td colspan="7">Error cargando clientes</td></tr>`;
+}
+
+/* =========================
+   RENDER
+========================= */
+
+function render(items){
+
+  const tbody = $("#clientes-body");
+  if(!tbody) return;
+
+  const html = items.map(c => {
+
+    const d = mapItem(c);
+
+    return `
+<tr data-id="${d.id}">
+
+  <td class="col-id">${d.id}</td>
+
+  <td class="col-main">
+    <div class="cell-user">
+      <div class="table-avatar">${renderAvatar(d.displayName)}</div>
+      <div class="user-info">
+        <span class="user-name">${escapeHTML(d.displayName)}</span>
+        <span class="user-sub">${escapeHTML(d.email)}</span>
+      </div>
+    </div>
+  </td>
+
+  <td class="col-secondary">${escapeHTML(d.ubicacion)}</td>
+
+  <td class="col-secondary">
+    <span class="badge ${d.tipo.class}">
+      ${d.tipo.label}
+    </span>
+  </td>
+
+  <td class="col-status">
+    <span class="badge ${d.estado.class}">
+      ${d.estado.label}
+    </span>
+  </td>
+
+  <td class="col-date">${d.fecha}</td>
+
+  <td class="col-actions">
+    <div class="actions">
+      <button class="btn-action view" data-id="${d.id}">Ver</button>
+    </div>
+  </td>
+
+</tr>
+`;
+
+  }).join("");
+
+  tbody.innerHTML = html;
+
+}
+
+/* =========================
+   MAP
+========================= */
+
+function mapItem(c){
+
+  const empresa = cleanValue(
+    c.nombreFiscal || c.empresa,
+    ""
+  );
+
+  const nombre = cleanValue(
+    c.nombreContacto || c.nombre,
+    "Cliente"
+  );
+
+  const displayName = empresa || nombre;
+
+  return {
+    id: c.id,
+
+    nombre,
+    empresa,
+    displayName,
+
+    email: cleanValue(c.email, "-"),
+    ubicacion: cleanValue(
+      c.ubicacion || c.localidad || c.ciudad,
+      "-"
+    ),
+
+    fecha: formatFecha(c.createdAt || c.created_at || c.fecha),
+
+    activo: c.active ?? true,
+
+    estado: getEstado(c.active),
+
+    tipo: getTipo(c.tipo || (c.esEmpresa ? "empresa" : "particular"))
+  };
+
 }
 
 /* =========================
    HELPERS
 ========================= */
 
-function safe(v){
-  return v && String(v).trim() !== "" ? v : "-";
+function cleanValue(val, fallback){
+  if(!val) return fallback;
+  let v = String(val).trim();
+  if(v === "" || v === "null" || v === "undefined") return fallback;
+  return v;
 }
 
-function formatFecha(f){
-  if(!f) return "-";
-  return new Date(f).toLocaleDateString("es-ES");
+function renderAvatar(name){
+  return avatarHTML(getInitials(name), getAvatarColor(name));
 }
 
-/* =========================
-   AVATAR PRO 🔥
-========================= */
-
-function getInitials(name){
-  if(!name) return "?";
-  return name
-    .split(" ")
-    .map(n => n[0])
-    .join("")
-    .slice(0,2)
-    .toUpperCase();
-}
-
-function hashString(str){
-  let hash = 0;
-  for(let i = 0; i < str.length; i++){
-    hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return hash;
-}
-
-function getAvatarColor(name){
-
-  const colors = [
-    "#6366f1",
-    "#22c55e",
-    "#eab308",
-    "#ef4444",
-    "#06b6d4",
-    "#a855f7",
-    "#f97316"
-  ];
-
-  const index = Math.abs(hashString(name)) % colors.length;
-  return colors[index];
-}
-
-function renderAvatar(c){
-
-  const fallback = "/media/img/Usuario.png";
-  let src = c.logo || c.avatar;
-
-  if(src && typeof src === "string"){
-
-    if(!src.startsWith("http")){
-      src = Onion.config.API.replace("/api","") + src;
-    }
-
-    return `<img src="${src}" loading="lazy" onerror="this.src='${fallback}'">`;
-  }
-
-  const name = c.empresa || c.nombre || "CL";
-  const initials = getInitials(name);
-  const color = getAvatarColor(name);
-
+function avatarHTML(initials, color){
   return `
     <div style="
       width:100%;
@@ -121,236 +338,55 @@ function renderAvatar(c){
   `;
 }
 
-/* =========================
-   ADAPTER 🔥
-========================= */
+function hashString(str){
+  let hash = 0;
+  for(let i = 0; i < str.length; i++){
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return hash;
+}
 
-function adaptCliente(c){
+function getAvatarColor(name){
+  const colors = ["#6366f1","#22c55e","#eab308","#ef4444","#06b6d4","#a855f7","#f97316"];
+  return colors[Math.abs(hashString(name)) % colors.length];
+}
 
-  return {
-    id: c.id || "-",
-    empresa: c.nombreFiscal || c.empresa || "-",
-    nombre: c.nombreContacto || c.nombre || "-",
-    email: c.email || "-",
-    telefono: c.telefono || "-",
-    ubicacion: c.ubicacion || c.localidad || c.ciudad || "-",
-    tipo: c.tipo || (c.esEmpresa ? "empresa" : "particular"),
-    activo: c.active ?? true,
-    fecha: c.createdAt || c.created_at || c.fecha || "-"
+function getInitials(name){
+  return name ? name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase() : "?";
+}
+
+function getEstado(active){
+  if(active) return { label:"Activo", class:"success" };
+  return { label:"Inactivo", class:"danger" };
+}
+
+function getTipo(t){
+  t = (t || "particular").toLowerCase();
+  return { label: capitalize(t), class: t, raw:t };
+}
+
+function formatFecha(f){
+  if(!f) return "--";
+  return new Date(f).toLocaleDateString("es-ES");
+}
+
+function capitalize(str){
+  return str ? str.charAt(0).toUpperCase() + str.slice(1) : "-";
+}
+
+function escapeHTML(str){
+  return String(str)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;");
+}
+
+function debounce(fn, delay){
+  let t;
+  return (...args)=>{
+    clearTimeout(t);
+    t = setTimeout(()=>fn(...args), delay);
   };
-
-}
-
-/* =========================
-   INIT
-========================= */
-
-function init(){
-
-  const root = getRoot();
-  if(!root || initialized) return;
-
-  if(!Onion.state?.user){
-    return setTimeout(init, 100);
-  }
-
-  initialized = true;
-
-  tbody = $("clientes-body");
-
-  if(!tbody) return;
-
-  bindEvents();
-  initFilters();
-  loadClientes();
-
-  Onion.onCleanup(()=>{
-    initialized = false;
-    tbody = null;
-    clientesCache = [];
-  });
-
-}
-
-init();
-
-/* =========================
-   EVENTS
-========================= */
-
-function bindEvents(){
-
-  if(!tbody) return;
-
-  Onion.cleanupEvent(tbody, "click", (e)=>{
-
-    const row = e.target.closest("tr[data-id]");
-    if(!row) return;
-
-    const id = row.dataset.id;
-    if(!id) return;
-
-    Onion.router.navigate(`/clientes/cliente?id=${id}`);
-
-  });
-
-}
-
-/* =========================
-   FILTROS 🔥
-========================= */
-
-function initFilters(){
-
-  const search = $("search-cliente");
-  const estado = $("filter-estado-cliente");
-  const tipo = $("filter-tipo-cliente");
-
-  search && Onion.cleanupEvent(search, "input", applyFilters);
-  estado && Onion.cleanupEvent(estado, "change", applyFilters);
-  tipo && Onion.cleanupEvent(tipo, "change", applyFilters);
-
-}
-
-function applyFilters(){
-
-  const search = $("search-cliente")?.value.toLowerCase() || "";
-  const estado = $("filter-estado-cliente")?.value || "";
-  const tipo = $("filter-tipo-cliente")?.value || "";
-
-  let filtered = clientesCache;
-
-  if(search){
-    filtered = filtered.filter(c =>
-      (c.nombre || "").toLowerCase().includes(search) ||
-      (c.empresa || "").toLowerCase().includes(search) ||
-      (c.email || "").toLowerCase().includes(search) ||
-      (c.ubicacion || "").toLowerCase().includes(search)
-    );
-  }
-
-  if(estado){
-    filtered = filtered.filter(c =>
-      estado === "activo" ? c.active : !c.active
-    );
-  }
-
-  if(tipo){
-    filtered = filtered.filter(c => c.tipo === tipo);
-  }
-
-  renderClientes(filtered);
-
-}
-
-/* =========================
-   LOAD
-========================= */
-
-async function loadClientes(){
-
-  const panel = getRoot();
-
-  panel?.classList.remove("ready");
-
-  renderState("Cargando clientes…");
-
-  try{
-
-    const clientes = await getClientes();
-
-    clientesCache = clientes;
-
-    renderClientes(clientes);
-
-    requestAnimationFrame(()=>{
-      panel?.classList.add("ready");
-    });
-
-  }catch(err){
-
-    console.error("💥 CLIENTES ERROR:", err);
-
-    renderState("Error cargando clientes","error");
-
-    panel?.classList.add("ready");
-
-  }
-
-}
-
-/* =========================
-   RENDER 🔥
-========================= */
-
-function renderClientes(list = []){
-
-  if(!tbody) return;
-
-  if(!Array.isArray(list) || list.length === 0){
-    return renderState("No hay clientes","empty");
-  }
-
-  tbody.innerHTML = list.map(raw => {
-
-    const c = adaptCliente(raw);
-
-    const estado = c.activo
-      ? `<span class="badge activo">Activo</span>`
-      : `<span class="badge inactivo">Inactivo</span>`;
-
-    const tipo = c.tipo === "empresa"
-      ? `<span class="badge empresa">Empresa</span>`
-      : `<span class="badge particular">Particular</span>`;
-
-    return `
-<tr data-id="${c.id}">
-
-  <td class="col-id">${safe(c.id)}</td>
-
-  <td class="col-main">
-    <div class="cell-user">
-      <div class="table-avatar">
-        ${renderAvatar(c)}
-      </div>
-      <div class="user-info">
-        <span class="user-name">${safe(c.empresa)}</span>
-        <span class="user-sub">${safe(c.email)}</span>
-      </div>
-    </div>
-  </td>
-
-  <td class="col-secondary">${safe(c.ubicacion)}</td>
-
-  <td class="col-secondary">${tipo}</td>
-
-  <td class="col-status">${estado}</td>
-
-  <td class="col-date">${formatFecha(c.fecha)}</td>
-
-</tr>
-`;
-
-  }).join("");
-
-}
-
-/* =========================
-   STATES
-========================= */
-
-function renderState(message, cls="loading"){
-
-  if(!tbody) return;
-
-  tbody.innerHTML = `
-<tr>
-  <td colspan="6" class="${cls}">
-    ${message}
-  </td>
-</tr>
-`;
-
 }
 
 })();

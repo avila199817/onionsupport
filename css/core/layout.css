@@ -122,10 +122,14 @@ html, body{
   gap:var(--space-lg);
 
   overflow:auto;
-
   background:transparent;
 }
 
+.panel-content.table-mode .content-wrapper{
+  overflow:hidden;
+  padding:0;
+  gap:0;
+}
 
 /* =========================
    PANEL SYSTEM

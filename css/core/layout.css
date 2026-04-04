@@ -1,5 +1,5 @@
 /* =========================================================
-   🔥 LAYOUT — SAAS PANEL CLEAN (FINAL PRO + MINI TOPBAR)
+   🔥 LAYOUT — SAAS PANEL CLEAN (FINAL DEFINITIVO)
 ========================================================= */
 
 
@@ -14,14 +14,6 @@ html, body{
   height:100%;
   display:flex;
   flex-direction:column;
-}
-
-
-/* =========================
-   VARIABLES GLOBAL
-========================= */
-:root{
-  --mini-topbar-height: 120px; /* 🔥 ajustable global */
 }
 
 
@@ -88,6 +80,7 @@ html, body{
   margin-left:var(--sidebar-width);
   width:calc(100% - var(--sidebar-width));
 
+  /* 🔥 SOLO TOPBAR GLOBAL */
   padding-top:var(--topbar-height);
 
   min-width:0;
@@ -150,13 +143,14 @@ html, body{
 
 
 /* =========================
-   🔥 MINI TOPBAR SUPPORT (GLOBAL)
+   🔥 MINI TOPBAR SUPPORT (REAL)
 ========================= */
 
-/* Reserva espacio automáticamente */
+/* 🔥 SIN HARDCODE — usa JS dinámico */
 .panel-content.has-mini-topbar{
-  padding-top: var(--mini-topbar-height);
+  padding-top:var(--mini-topbar-height, 0px);
 }
+
 
 /* =========================
    DASHBOARD SCROLL FIX

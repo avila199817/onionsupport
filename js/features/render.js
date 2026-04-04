@@ -32,7 +32,7 @@
   }
 
   /* =========================
-     LOAD SCRIPT (UNITARIO)
+     LOAD SCRIPT
   ========================= */
   function loadScriptSingle(src){
     return new Promise((resolve, reject)=>{
@@ -54,14 +54,10 @@
     });
   }
 
-  /* =========================
-     LOAD SCRIPT (MULTI 🔥)
-  ========================= */
   Onion.loadScript = async function(scripts){
 
     if(!scripts) return;
 
-    // 🔥 soporta string o array
     if(typeof scripts === "string"){
       scripts = [scripts];
     }
@@ -71,12 +67,10 @@
       return;
     }
 
-    // 🔥 limpiar scripts anteriores
     document.querySelectorAll("script[data-onion-page]").forEach(s=>{
       try{ s.remove(); }catch{}
     });
 
-    // 🔥 carga secuencial (orden garantizado)
     for(const src of scripts){
       await loadScriptSingle(src);
     }
@@ -168,10 +162,7 @@
     const wrapper = document.createElement("div");
     wrapper.innerHTML = html;
 
-    return (
-      wrapper.querySelector(".panel-content") ||
-      wrapper
-    );
+    return wrapper.querySelector(".panel-content") || wrapper;
   }
 
   /* =========================
@@ -190,7 +181,7 @@
   /* =========================
      RENDER PRO 🔥
   ========================= */
-  Onion.render = async function(){
+  const originalRender = async function(){
 
     const currentRenderId = ++Onion.state.renderId;
 
@@ -213,22 +204,18 @@
 
       Onion.runCleanup?.();
 
-      /* 🔥 ESTILOS */
       if(route.style){
         await Onion.loadStyle(route.style);
       }
 
-      /* 🔥 HTML */
       Onion.swapContent(content);
 
-      /* 🔥 SCRIPTS (AHORA MULTI 🔥) */
       if(route.script){
         await Onion.loadScript(route.script);
       }
 
       if(currentRenderId !== Onion.state.renderId) return;
 
-      /* 🔥 DOBLE FRAME */
       await new Promise(r => requestAnimationFrame(r));
       await new Promise(r => requestAnimationFrame(r));
 
@@ -239,24 +226,15 @@
     }catch(e){
 
       console.error("💥 RENDER ERROR:", e);
-
       Onion.ui.hideLoader?.();
 
     }
 
   };
 
-
-// =========================
-// 🔥 TOPBARVIEW FACTURAS
-// =========================
-(function(){
-
-  const Onion = window.Onion;
-  if(!Onion) return;
-
-  const originalRender = Onion.render;
-
+  /* =========================
+     🔥 RENDER EXTENDIDO (TOPBARVIEW)
+  ========================= */
   Onion.render = async function(){
 
     const result = await originalRender.apply(this, arguments);
@@ -264,7 +242,9 @@
     requestAnimationFrame(()=>{
 
       const container = document.getElementById("topbarview-container");
-      if(!container) return;
+      const appContent = document.getElementById("app-content");
+
+      if(!container || !appContent) return;
 
       const route = location.pathname;
 
@@ -293,8 +273,13 @@
           </div>
         `;
 
+        appContent.classList.add("has-topbarview");
+
       } else {
+
         container.innerHTML = "";
+        appContent.classList.remove("has-topbarview");
+
       }
 
     });

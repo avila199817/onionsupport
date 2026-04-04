@@ -1,13 +1,19 @@
 /* =========================
-   MINI TOPBAR HEIGHT AUTO
+   MINI TOPBAR HEIGHT AUTO (PRO)
 ========================= */
 
 (function(){
 
+  let observer = null;
+
   function setMiniTopbarHeight(){
 
     const mini = document.querySelector('.mini-topbar');
-    if(!mini) return;
+
+    if(!mini){
+      document.documentElement.style.setProperty('--mini-topbar-height', '0px');
+      return;
+    }
 
     const height = mini.offsetHeight;
 
@@ -15,21 +21,53 @@
       '--mini-topbar-height',
       height + 'px'
     );
-
   }
 
-  // 🔥 Inicial
-  window.addEventListener('load', setMiniTopbarHeight);
+  function init(){
 
-  // 🔥 Resize (responsive)
+    const mini = document.querySelector('.mini-topbar');
+
+    // 🔥 primera medición
+    setMiniTopbarHeight();
+
+    // 🔥 limpiar observer anterior (SPA safe)
+    if(observer){
+      observer.disconnect();
+      observer = null;
+    }
+
+    // 🔥 observar cambios reales de tamaño
+    if(mini && window.ResizeObserver){
+      observer = new ResizeObserver(setMiniTopbarHeight);
+      observer.observe(mini);
+    }
+  }
+
+  /* =========================
+     INIT FLOW
+  ========================= */
+
+  // 🔥 DOM listo
+  document.addEventListener('DOMContentLoaded', init);
+
+  // 🔥 fallback por si cargas dinámico (Onion / SPA)
+  setTimeout(init, 100);
+  setTimeout(init, 300);
+
+  // 🔥 responsive
   window.addEventListener('resize', setMiniTopbarHeight);
 
-  // 🔥 Por si cambia dinámicamente (filters, etc)
-  const observer = new ResizeObserver(setMiniTopbarHeight);
+  /* =========================
+     CLEANUP (Onion SPA)
+  ========================= */
 
-  const mini = document.querySelector('.mini-topbar');
-  if(mini){
-    observer.observe(mini);
+  if(window.Onion){
+    Onion.onCleanup(()=>{
+      if(observer){
+        observer.disconnect();
+        observer = null;
+      }
+    });
   }
 
 })();

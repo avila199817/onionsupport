@@ -2,51 +2,46 @@
 
   <div class="table-system">
 
-    <!-- 🔥 TOPBAR COMPLETO -->
+    <!-- 🔥 TOPBAR (NO SE MUEVE) -->
     <div class="topbarview">
 
-      <!-- FILTROS -->
-      <div class="topbarview-filters">
+      <input 
+        type="text"
+        id="search-factura"
+        placeholder="Buscar factura..."
+        autocomplete="off"
+      >
 
-        <input 
-          type="text"
-          id="search-factura"
-          placeholder="Buscar factura..."
-          autocomplete="off"
-        >
+      <select id="filter-estado-factura">
+        <option value="">Estado pago</option>
+        <option value="pagada">Pagada</option>
+        <option value="pendiente">Pendiente</option>
+      </select>
 
-        <select id="filter-estado-factura">
-          <option value="">Estado pago</option>
-          <option value="pagada">Pagada</option>
-          <option value="pendiente">Pendiente</option>
-        </select>
-
-        <button id="btn-new-factura" class="btn-primary">
-          + Nueva
-        </button>
-
-      </div>
-
-      <!-- HEADER TABLA (FUERA DEL SCROLL) -->
-      <div class="topbarview-table">
-        <table>
-          <thead>
-            <tr>
-              <th class="col-id">ID</th>
-              <th class="col-main">Cliente</th>
-              <th class="col-secondary">Empresa</th>
-              <th class="col-date">Fecha</th>
-              <th class="col-importe">Importe</th>
-              <th class="col-status">Pago</th>
-              <th class="col-actions">Acciones</th>
-            </tr>
-          </thead>
-        </table>
-      </div>
+      <button id="btn-new-factura" class="btn-primary">
+        + Nueva
+      </button>
 
     </div>
 
-    <!-- 🔥 SOLO EL BODY SCROLLEA -->
+    <!-- 🔥 HEADER TABLA (TAMPOCO SE MUEVE) -->
+    <div class="table-head">
+      <table>
+        <thead>
+          <tr>
+            <th class="col-id">ID</th>
+            <th class="col-main">Cliente</th>
+            <th class="col-secondary">Empresa</th>
+            <th class="col-date">Fecha</th>
+            <th class="col-importe">Importe</th>
+            <th class="col-status">Pago</th>
+            <th class="col-actions">Acciones</th>
+          </tr>
+        </thead>
+      </table>
+    </div>
+
+    <!-- 🔥 SOLO AQUÍ HAY SCROLL -->
     <div class="table-container">
 
       <table>

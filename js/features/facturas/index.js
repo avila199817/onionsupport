@@ -15,6 +15,12 @@ let filteredItems = [];
 let loading = false;
 let currentRequestId = 0;
 
+/* 🔥 SORT STATE */
+let currentSort = {
+  field: null,
+  direction: null
+};
+
 /* =========================
    ROOT
 ========================= */
@@ -56,7 +62,6 @@ function init(){
 
     initialized = false;
 
-    /* 🔥 LIMPIAR AL SALIR (importante) */
     if(wrapper) wrapper.classList.remove('table-mode');
 
   });
@@ -75,6 +80,13 @@ function bindEvents(){
   if(!root) return;
 
   Onion.cleanupEvent(root, "click", (e)=>{
+
+    /* 🔥 SORT CLICK */
+    const th = e.target.closest("th[data-sort]");
+    if(th){
+      handleSort(th);
+      return;
+    }
 
     const btn = e.target.closest(".btn-action");
 
@@ -96,6 +108,87 @@ function bindEvents(){
 
   $("#search-factura")?.addEventListener("input", debounce(applyFilters, 250));
   $("#filter-estado-factura")?.addEventListener("change", applyFilters);
+
+}
+
+/* =========================
+   SORT
+========================= */
+
+function handleSort(th){
+
+  const field = th.dataset.sort;
+
+  if(currentSort.field === field){
+    currentSort.direction = currentSort.direction === "asc" ? "desc" : "asc";
+  }else{
+    currentSort.field = field;
+    currentSort.direction = "asc";
+  }
+
+  updateSortUI();
+  applySort();
+}
+
+function applySort(){
+
+  if(!currentSort.field){
+    render(filteredItems);
+    return;
+  }
+
+  const dir = currentSort.direction === "asc" ? 1 : -1;
+
+  filteredItems.sort((a,b)=>{
+
+    const A = getSortValue(a, currentSort.field);
+    const B = getSortValue(b, currentSort.field);
+
+    if(A > B) return 1 * dir;
+    if(A < B) return -1 * dir;
+    return 0;
+  });
+
+  render(filteredItems);
+}
+
+function getSortValue(f, field){
+
+  switch(field){
+
+    case "numero":
+      return Number(f.numeroFacturaLegal || f.numero || f.id || 0);
+
+    case "cliente":
+      return safeText(f.cliente?.nombre || f.cliente?.nombreContacto);
+
+    case "empresa":
+      return safeText(f.cliente?.empresa || f.cliente?.razonSocial);
+
+    case "fecha":
+      return new Date(f.fechaFactura || f.fecha || 0).getTime();
+
+    case "total":
+      return Number(f.total || 0);
+
+    case "estadoPago":
+      return safeText(f.estadoPago);
+
+    default:
+      return "";
+  }
+
+}
+
+function updateSortUI(){
+
+  document.querySelectorAll("th[data-sort]").forEach(th=>{
+    th.classList.remove("asc","desc");
+
+    if(th.dataset.sort === currentSort.field){
+      th.classList.add(currentSort.direction);
+    }
+  });
 
 }
 
@@ -134,9 +227,7 @@ async function loadFacturas(){
       return;
     }
 
-    requestAnimationFrame(()=>{
-      render(items);
-    });
+    applyFilters();
 
   }catch(e){
 
@@ -167,7 +258,6 @@ async function handleAction(btn){
 
   if(btn.classList.contains("download")){
 
-    /* 🔥 ANTI DOBLE CLICK */
     if(btn.classList.contains("loading")) return;
 
     btn.classList.add("loading");
@@ -193,7 +283,6 @@ async function handleAction(btn){
       link.click();
       document.body.removeChild(link);
 
-      /* 🔥 TOAST OK */
       Onion.ui.toast?.success("Factura descargada 📄");
 
     }catch(e){
@@ -243,17 +332,16 @@ function applyFilters(){
     const cliente = safeText(f.cliente?.nombre || f.cliente?.nombreContacto);
     const empresa = safeText(f.cliente?.empresa || f.cliente?.razonSocial);
     const id = String(f.numero || f.id || "").toLowerCase();
+    const estadoPago = safeText(f.estadoPago);
 
     return (
       (!search || cliente.includes(search) || empresa.includes(search) || id.includes(search)) &&
-      (!estado || (f.estadoPago || "").toLowerCase() === estado)
+      (!estado || estadoPago === estado)
     );
 
   });
 
-  requestAnimationFrame(()=>{
-    render(filteredItems);
-  });
+  applySort();
 
 }
 
@@ -272,13 +360,18 @@ function setError(){
 }
 
 /* =========================
-   RENDER (COMPLETO)
+   RENDER (TUYO INTACTO)
 ========================= */
 
 function render(items){
 
   const tbody = $("#facturas-body");
   if(!tbody) return;
+
+  if(!items.length){
+    setEmpty();
+    return;
+  }
 
   const html = items.map(f => {
 
@@ -297,7 +390,6 @@ function render(items){
 
     return `
 <tr data-id="${d.id}">
-
   <td class="col-id">${d.numero}</td>
 
   <td class="col-main">
@@ -310,9 +402,7 @@ function render(items){
     </div>
   </td>
 
-  <td class="col-secondary">
-    ${empresaHTML}
-  </td>
+  <td class="col-secondary">${empresaHTML}</td>
 
   <td class="col-date">${d.fecha}</td>
   <td class="col-importe">${d.total}</td>
@@ -334,18 +424,14 @@ function render(items){
       }
     </div>
   </td>
-
-</tr>
-`;
-
+</tr>`;
   }).join("");
 
   tbody.innerHTML = html;
-
 }
 
 /* =========================
-   MAP
+   HELPERS (ENTEROS)
 ========================= */
 
 function mapItem(f){
@@ -383,10 +469,6 @@ function mapItem(f){
   };
 
 }
-
-/* =========================
-   HELPERS
-========================= */
 
 function cleanValue(val, fallback){
   if(!val) return fallback;

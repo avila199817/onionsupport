@@ -43,7 +43,9 @@ function init(){
   const root = getRoot();
   if(!root || initialized) return;
 
-  if(!Onion.state?.user){
+  // 🔥 ESPERAR USER REAL (NUEVO SISTEMA)
+  if(!Onion.user){
+    console.warn("⏳ esperando user...");
     return setTimeout(init, 100);
   }
 

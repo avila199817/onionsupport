@@ -1,5 +1,5 @@
 /* =========================================================
-   🔥 FACTURAS — FINAL PRO SAAS (SCROLL FIX + FIXED TOPBAR)
+   🔥 FACTURAS — FINAL PRO SAAS (NO INTERNAL SCROLL)
 ========================================================= */
 
 /* =========================
@@ -13,7 +13,7 @@
   width:100%;
   position:relative;
 
-  overflow:hidden; /* 🔥 CLAVE: evita scroll global */
+  overflow:visible; /* 🔥 ya NO bloqueamos scroll */
 }
 
 
@@ -21,7 +21,7 @@
    GLOBAL TABLE MODE
 ========================= */
 .content-wrapper.table-mode{
-  overflow:hidden !important; /* 🔥 CLAVE REAL */
+  overflow:visible !important; /* 🔥 scroll vuelve al body */
   padding:0 !important;
   gap:0 !important;
 }
@@ -40,19 +40,16 @@
 
 
 /* =========================
-   SCROLL REAL (ÚNICO)
+   🚫 SIN SCROLL INTERNO
 ========================= */
 .panel-content.facturas .table-container{
   flex:1;
   min-height:0;
 
-  overflow-y:auto;
-  overflow-x:hidden;
+  overflow:visible; /* 🔥 eliminado scroll interno */
 
   position:relative;
   z-index:1;
-
-  scrollbar-gutter:stable;
 
   background:var(--panel-bg);
 }
@@ -265,17 +262,4 @@
 .panel-content.facturas .btn-action.pay:hover{
   background:var(--warning);
   color:#fff;
-}
-
-
-/* =========================
-   SCROLLBAR
-========================= */
-.panel-content.facturas .table-container::-webkit-scrollbar{
-  width:8px;
-}
-
-.panel-content.facturas .table-container::-webkit-scrollbar-thumb{
-  background:var(--scrollbar-thumb);
-  border-radius:6px;
 }

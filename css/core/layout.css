@@ -268,6 +268,16 @@ html, body{
 
 
 /* =========================
+   CARET FIX (CURSOR TEXTO)
+========================= */
+input:not(:focus),
+textarea:not(:focus),
+[contenteditable="true"]:not(:focus){
+  caret-color: transparent;
+}
+
+
+/* =========================
    RESPONSIVE
 ========================= */
 @media (max-width:1200px){

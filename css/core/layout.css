@@ -1,67 +1,98 @@
 /* =========================================================
-   🔥 LAYOUT — FINAL 10/10 (SIN HUECOS NI DOBLE SCROLL)
+   🔥 LAYOUT — SAAS PANEL CLEAN (FINAL 10/10)
 ========================================================= */
 
+
 /* =========================
-   ROOT (ÚNICO SCROLL)
+   ROOT ALTURA BASE
 ========================= */
 html, body{
   height:100%;
-  margin:0;
-  overflow-y:auto;
-  overflow-x:hidden;
-}
-
-/* 🔥 evita salto por scrollbar */
-html{
-  scrollbar-gutter: stable;
 }
 
 #app{
-  min-height:100%;
+  height:100%;
   display:flex;
   flex-direction:column;
 }
 
 
 /* =========================
-   LAYOUT BASE
+   APP ROOT
 ========================= */
 .layout{
-  display:flex; /* 🔥 CLAVE: horizontal real */
-  min-height:100vh;
+  position:relative;
+
+  display:flex;
+  flex-direction:column;
+
+  min-height:100dvh;
+  height:auto;
+
+  isolation:isolate;
 
   background:
     var(--gradient-overlay),
     var(--gradient-main);
+
+  transition:
+    background-color var(--duration-slow) ease;
 }
 
 
 /* =========================
-   SIDEBAR
+   CONTAINER
 ========================= */
-.sidebar{
-  width:var(--sidebar-width);
-  flex-shrink:0; /* 🔥 no se deforma */
+.container{
+  width:100%;
+  max-width:var(--content-max);
+
+  margin-inline:auto;
+  padding-inline:var(--content-padding);
+
+  position:relative;
 }
 
-/* collapsed */
-.sidebar.collapsed{
-  width:var(--sidebar-collapsed);
+.container-fluid{
+  width:100%;
+  max-width:none;
+
+  margin:0;
+  padding-inline:var(--content-padding);
+
+  position:relative;
 }
 
 
 /* =========================
-   MAIN CONTENT (🔥 SIN CALC)
+   MAIN CONTENT
 ========================= */
 .main-content{
+  position:relative;
+  z-index:1;
+
   flex:1;
-  min-width:0;
+  min-height:0;
 
   display:flex;
   flex-direction:column;
 
+  margin-left:var(--sidebar-width);
+  width:calc(100% - var(--sidebar-width));
+
   padding-top:var(--topbar-height);
+
+  min-width:0;
+
+  transition:
+    margin-left var(--duration-slow) var(--ease-out),
+    width var(--duration-slow) var(--ease-out);
+}
+
+/* SIDEBAR COLLAPSED */
+.sidebar.collapsed ~ .main-content{
+  margin-left:var(--sidebar-collapsed);
+  width:calc(100% - var(--sidebar-collapsed));
 }
 
 
@@ -70,6 +101,8 @@ html{
 ========================= */
 #app-content{
   flex:1;
+  min-height:0;
+
   display:flex;
   flex-direction:column;
 }
@@ -79,17 +112,18 @@ html{
    CONTENT WRAPPER
 ========================= */
 .content-wrapper{
+  flex:1;
+  min-height:0;
+
   display:flex;
   flex-direction:column;
 
   padding:var(--space-lg);
   gap:var(--space-lg);
-}
 
-/* TABLE MODE */
-.content-wrapper.table-mode{
-  padding:0;
-  gap:0;
+  overflow:auto;
+
+  background:transparent;
 }
 
 
@@ -97,29 +131,42 @@ html{
    PANEL SYSTEM
 ========================= */
 .panel-content{
+  flex:1;
+  min-height:0;
+
   display:flex;
   flex-direction:column;
+
   background:var(--panel-bg);
 }
 
 
 /* =========================
-   TABLE (SIN SCROLL INTERNO)
+   DASHBOARD SCROLL FIX
 ========================= */
-.panel-content.table-mode{
-  overflow:visible;
+.panel-content.dashboard{
+  overflow:auto;
 }
 
-.table-container{
-  overflow:visible !important;
+.dashboard-container{
+  flex:1;
+  min-height:0;
 }
 
 
 /* =========================
-   DASHBOARD
+   TABLE MODE
 ========================= */
-.panel-content.dashboard{
-  overflow:visible;
+.panel-content.table-mode{
+  padding:0;
+}
+
+.panel-content.table-mode .content-wrapper{
+  flex:1;
+  min-height:0;
+
+  padding:0;
+  gap:0;
 }
 
 
@@ -131,6 +178,7 @@ html{
   align-items:center;
   justify-content:space-between;
   gap:var(--space-md);
+
   flex-wrap:wrap;
 }
 
@@ -147,16 +195,24 @@ html{
 
 
 /* =========================
-   GRID
+   GRID SYSTEM
 ========================= */
 .grid{
   display:grid;
   gap:var(--space-lg);
 }
 
-.grid.cols-2{ grid-template-columns:repeat(2, minmax(0,1fr)); }
-.grid.cols-3{ grid-template-columns:repeat(3, minmax(0,1fr)); }
-.grid.cols-4{ grid-template-columns:repeat(4, minmax(0,1fr)); }
+.grid.cols-2{
+  grid-template-columns:repeat(2, minmax(0,1fr));
+}
+
+.grid.cols-3{
+  grid-template-columns:repeat(3, minmax(0,1fr));
+}
+
+.grid.cols-4{
+  grid-template-columns:repeat(4, minmax(0,1fr));
+}
 
 
 /* =========================
@@ -189,6 +245,7 @@ html{
   justify-content:center;
 
   gap:var(--space-md);
+
   padding:var(--space-xl);
 
   text-align:center;
@@ -197,7 +254,7 @@ html{
 
 
 /* =========================
-   LOADING
+   PAGE LOADING (LOCAL)
 ========================= */
 .page-loading{
   opacity:.6;
@@ -207,20 +264,6 @@ html{
   transition:
     opacity var(--duration-normal) ease,
     filter var(--duration-normal) ease;
-}
-
-
-/* =========================
-   CARET FIX
-========================= */
-input:not(:focus),
-textarea:not(:focus),
-[contenteditable="true"]:not(:focus){
-  caret-color: transparent !important;
-}
-
-*:not(input):not(textarea):not([contenteditable="true"]){
-  caret-color: transparent !important;
 }
 
 
@@ -240,13 +283,14 @@ textarea:not(:focus),
     grid-template-columns:repeat(2,1fr);
   }
 
-  .layout{
-    flex-direction:column;
+  .main-content{
+    margin-left:0;
+    width:100%;
   }
 
   .sidebar{
-    position:fixed;
     transform:translateX(-100%);
+    position:fixed;
   }
 
   .sidebar.open{
@@ -255,9 +299,11 @@ textarea:not(:focus),
 }
 
 @media (max-width:600px){
+
   .grid.cols-2,
   .grid.cols-3,
   .grid.cols-4{
     grid-template-columns:1fr;
   }
+
 }

@@ -1,5 +1,5 @@
 /* =========================================================
-   FACTURAS — FINAL PRO 10/10 (SCROLL + SORT CLEAN)
+   FACTURAS — FINAL PRO 10/10 (SCROLL + STICKY PRO)
 ========================================================= */
 
 /* =========================
@@ -33,17 +33,22 @@
 }
 
 /* =========================
-   FILTERS
+   FILTERS (FIJO 🔥)
 ========================= */
 .panel-content.facturas .filters-row{
+  position:sticky;
+  top:0;
+  z-index:5;
+
   flex:0 0 auto;
   display:flex;
   align-items:center;
   gap:10px;
+
   padding:12px 16px;
+
   background:var(--panel-bg);
   border-bottom:1px solid var(--panel-border);
-  z-index:2;
 }
 
 .panel-content.facturas .filters-row input{
@@ -104,11 +109,13 @@
   table-layout:fixed;
 }
 
-/* HEADER STICKY */
+/* =========================
+   HEADER STICKY (BAJO FILTROS 🔥)
+========================= */
 .panel-content.facturas thead{
   position:sticky;
-  top:0;
-  z-index:2;
+  top:56px; /* 🔥 altura filters-row */
+  z-index:4;
   background:var(--panel-bg);
 }
 
@@ -137,12 +144,10 @@
   color:var(--text);
 }
 
-/* ❌ QUITAMOS ICONO POR DEFECTO */
 .panel-content.facturas th[data-sort]::after{
   content:"";
 }
 
-/* ✅ SOLO CUANDO ESTÁ ACTIVO */
 .panel-content.facturas th[data-sort].asc::after{
   content:"↑";
   font-size:10px;

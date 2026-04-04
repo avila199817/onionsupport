@@ -1,5 +1,5 @@
 /* =========================================================
-   🔥 LAYOUT — SAAS PANEL CLEAN (FINAL PRO FIXED SYSTEM)
+   🔥 LAYOUT — SAAS PANEL CLEAN (FINAL FIXED SYSTEM OK)
 ========================================================= */
 
 
@@ -27,7 +27,6 @@ html, body{
   flex-direction:column;
 
   min-height:100dvh;
-  height:auto;
 
   isolation:isolate;
 
@@ -80,9 +79,6 @@ html, body{
   margin-left:var(--sidebar-width);
   width:calc(100% - var(--sidebar-width));
 
-  /* 🔥 CLAVE: YA NO EMPUJAMOS AQUÍ */
-  padding-top:0;
-
   min-width:0;
 
   transition:
@@ -98,7 +94,7 @@ html, body{
 
 
 /* =========================
-   APP CONTENT (🔥 FIX REAL)
+   🔥 APP CONTENT (UN SOLO EMPUJE REAL)
 ========================= */
 #app-content{
   flex:1;
@@ -107,11 +103,11 @@ html, body{
   display:flex;
   flex-direction:column;
 
-  /* 🔥 TOPBAR GLOBAL */
+  /* 🔥 SOLO TOPBAR GLOBAL */
   padding-top:var(--topbar-height);
 }
 
-/* 🔥 MINI TOPBAR (ACTIVADO POR JS) */
+/* 🔥 MINI TOPBAR (FIXED) */
 #app-content.has-mini-topbar{
   padding-top: calc(
     var(--topbar-height) + var(--mini-topbar-height)
@@ -153,25 +149,9 @@ html, body{
   overflow:hidden;
 }
 
-
-/* =========================
-   MINI TOPBAR SUPPORT
-========================= */
+/* 🔥 IMPORTANTE: NO TOCAR OFFSETS AQUÍ */
 .panel-content.has-mini-topbar{
-  padding-top:0; /* 🔥 NO usamos padding aquí */
-}
-
-
-/* =========================
-   DASHBOARD SCROLL FIX
-========================= */
-.panel-content.dashboard{
-  overflow:auto;
-}
-
-.dashboard-container{
-  flex:1;
-  min-height:0;
+  padding-top:0;
 }
 
 
@@ -194,7 +174,7 @@ html, body{
 
 
 /* =========================
-   SCROLL PANEL (OPCIONAL)
+   SCROLL REAL (SOLO AQUÍ)
 ========================= */
 .panel-content.table-mode .table-container{
   flex:1;
@@ -202,6 +182,19 @@ html, body{
 
   overflow-y:auto;
   overflow-x:hidden;
+}
+
+
+/* =========================
+   DASHBOARD SCROLL
+========================= */
+.panel-content.dashboard{
+  overflow:auto;
+}
+
+.dashboard-container{
+  flex:1;
+  min-height:0;
 }
 
 

@@ -52,7 +52,10 @@
         "/css/app/core/topbar.css",
         "/css/app/facturas/facturas.css"
       ],
-      script: "/js/features/facturas/index.js",
+      script: [
+        "/js/ui/topbarview.js",
+        "/js/features/facturas/index.js"
+      ],
       title: "Facturas"
     },
 

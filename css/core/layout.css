@@ -1,5 +1,5 @@
 /* =========================================================
-   🔥 LAYOUT — SAAS PANEL CLEAN (FIX SCROLL REAL)
+   🔥 LAYOUT — SAAS PANEL CLEAN (FINAL FIX SCROLL REAL)
 ========================================================= */
 
 
@@ -18,7 +18,7 @@ html, body{
 
 
 /* =========================
-   APP ROOT
+   APP ROOT (🔥 FIX REAL)
 ========================= */
 .layout{
   position:relative;
@@ -26,8 +26,8 @@ html, body{
   display:flex;
   flex-direction:column;
 
-  min-height:100dvh;
-  height:auto;
+  height:100dvh;   /* 🔥 CLAVE */
+  min-height:0;    /* 🔥 CLAVE */
 
   isolation:isolate;
 
@@ -65,7 +65,7 @@ html, body{
 
 
 /* =========================
-   MAIN CONTENT (🔥 FIX CLAVE)
+   MAIN CONTENT (🔥 CLAVE)
 ========================= */
 .main-content{
   position:relative;
@@ -84,7 +84,7 @@ html, body{
 
   min-width:0;
 
-  overflow:hidden; /* 🔥 AQUÍ ESTÁ LA MAGIA */
+  overflow:hidden; /* 🔥 EVITA SCROLL GLOBAL */
 
   transition:
     margin-left var(--duration-slow) var(--ease-out),
@@ -111,7 +111,7 @@ html, body{
 
 
 /* =========================
-   CONTENT WRAPPER (🔥 FIX REAL)
+   CONTENT WRAPPER (🔥 FIX)
 ========================= */
 .content-wrapper{
   flex:1;
@@ -123,7 +123,7 @@ html, body{
   padding:var(--space-lg);
   gap:var(--space-lg);
 
-  overflow:hidden; /* 🔥 YA NO SCROLLEA */
+  overflow:hidden; /* 🔥 NO SCROLL AQUÍ */
   background:transparent;
 }
 
@@ -149,7 +149,7 @@ html, body{
 
 
 /* =========================
-   DASHBOARD SCROLL FIX
+   DASHBOARD (SCROLL NORMAL)
 ========================= */
 .panel-content.dashboard{
   overflow:auto;
@@ -177,7 +177,6 @@ html, body{
   align-items:center;
   justify-content:space-between;
   gap:var(--space-md);
-
   flex-wrap:wrap;
 }
 
@@ -244,7 +243,6 @@ html, body{
   justify-content:center;
 
   gap:var(--space-md);
-
   padding:var(--space-xl);
 
   text-align:center;

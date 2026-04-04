@@ -49,6 +49,10 @@ function init(){
 
   initialized = true;
 
+  // 🔥 ACTIVAR MINI TOPBAR
+  document.getElementById("app-content")
+    ?.classList.add("has-mini-topbar");
+
   bindEvents();
 
   requestAnimationFrame(()=>{
@@ -57,11 +61,13 @@ function init(){
 
   Onion.onCleanup(()=>{
     initialized = false;
+
+    // 🔥 DESACTIVAR AL SALIR
+    document.getElementById("app-content")
+      ?.classList.remove("has-mini-topbar");
   });
 
 }
-
-init();
 
 /* =========================
    EVENTS

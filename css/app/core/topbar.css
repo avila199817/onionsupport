@@ -1,11 +1,24 @@
 /* =========================================================
-   🔥 TOPBARVIEW (AISLADO, CLON DE TOPBAR)
+   🔥 TOPBARVIEW — FIXED + OFFSET SYSTEM (CLON TOPBAR PADRE)
+========================================================= */
+
+:root{
+  --topbarview-height: 64px; /* 🔥 ajusta si cambia altura */
+}
+
+
+/* =========================================================
+   BASE
 ========================================================= */
 
 .topbarview{
-  position: sticky;
-  top: 0;
-  z-index: 5;
+  position: fixed;
+
+  top: var(--topbar-height); /* 👈 debajo del topbar padre */
+  left: var(--sidebar-width);
+  right: 0;
+
+  z-index: 1000;
 
   display:flex;
   align-items:center;
@@ -17,9 +30,16 @@
   border-bottom:1px solid var(--panel-border);
 }
 
-/* =========================
+
+/* 🔥 SIDEBAR COLLAPSADO */
+.sidebar.collapsed ~ .main-content .topbarview{
+  left: var(--sidebar-collapsed);
+}
+
+
+/* =========================================================
    INPUTS
-========================= */
+========================================================= */
 
 .topbarview input{
   flex:1;
@@ -37,6 +57,14 @@
   color:var(--text);
 
   font-size:13px;
+
+  outline:none;
+}
+
+.topbarview input:focus,
+.topbarview select:focus{
+  border-color:var(--accent);
+  box-shadow:0 0 0 2px color-mix(in srgb, var(--accent), transparent 85%);
 }
 
 .topbarview select{
@@ -44,9 +72,9 @@
 }
 
 
-/* =========================
+/* =========================================================
    BUTTON
-========================= */
+========================================================= */
 
 .topbarview .btn-primary{
   margin-left:auto;
@@ -62,11 +90,19 @@
   border:none;
   cursor:pointer;
 
-  box-shadow:0 6px 18px rgba(99,102,241,0.35);
   transition:all .2s ease;
 }
 
 .topbarview .btn-primary:hover{
   transform:translateY(-1px);
-  box-shadow:0 10px 26px rgba(99,102,241,0.45);
+  box-shadow:0 8px 20px rgba(99,102,241,0.35);
+}
+
+
+/* =========================================================
+   🔥 OFFSET (CLAVE PARA QUE NO TAPE)
+========================================================= */
+
+.panel-content.facturas{
+  padding-top: var(--topbarview-height);
 }

@@ -180,7 +180,7 @@ html, body{
   flex:1;
   min-height:0;
 
-  overflow: visible !important;
+ overflow-y: auto;
   overflow-x:hidden;
 }
 

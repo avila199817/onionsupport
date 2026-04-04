@@ -1,11 +1,10 @@
 /* =========================
-   MINI TOPBAR HEIGHT AUTO (FINAL PRO)
+   MINI TOPBAR HEIGHT AUTO (FIX REAL SPA)
 ========================= */
 
 (function(){
 
   let observer = null;
-  let initialized = false;
 
   function setMiniTopbarHeight(){
 
@@ -29,64 +28,61 @@
     const mini = document.querySelector('.mini-topbar');
     if(!mini) return;
 
-    // 🔥 evitar doble init en SPA
-    if(initialized) return;
-    initialized = true;
-
-    // 🔥 primera medición
+    // 🔥 medir después de pintar
     requestAnimationFrame(()=>{
-      setMiniTopbarHeight();
+      requestAnimationFrame(()=>{
+        setMiniTopbarHeight();
+      });
     });
 
-    // 🔥 limpiar observer previo
+    // 🔥 limpiar observer anterior
     if(observer){
       observer.disconnect();
       observer = null;
     }
 
-    // 🔥 observar cambios reales (filters, responsive, etc)
+    // 🔥 observar cambios reales
     if(window.ResizeObserver){
-      observer = new ResizeObserver(()=>{
-        setMiniTopbarHeight();
-      });
-
+      observer = new ResizeObserver(setMiniTopbarHeight);
       observer.observe(mini);
     }
 
   }
 
   /* =========================
-     INIT FLOW
+     🔥 CLAVE: HOOK EN RENDER
   ========================= */
 
-  // 🔥 DOM listo
-  document.addEventListener('DOMContentLoaded', init);
+  if(window.Onion){
 
-  // 🔥 SPA / render dinámico (clave real)
-  window.addEventListener('load', init);
+    const originalRender = Onion.render;
 
-  // 🔥 resize global
-  window.addEventListener('resize', setMiniTopbarHeight);
+    Onion.render = async function(){
 
-  // 🔥 reintento ligero por si render tarda
-  setTimeout(init, 150);
+      await originalRender.apply(this, arguments);
+
+      // 🔥 esperar a que DOM esté listo
+      requestAnimationFrame(()=>{
+        init();
+      });
+
+    };
+
+  }else{
+    // fallback normal
+    window.addEventListener('load', init);
+  }
 
   /* =========================
-     CLEANUP (Onion SPA)
+     CLEANUP
   ========================= */
 
   if(window.Onion){
     Onion.onCleanup(()=>{
-
       if(observer){
         observer.disconnect();
         observer = null;
       }
-
-      initialized = false;
-
-      document.documentElement.style.setProperty('--mini-topbar-height', '0px');
-
     });
   }
 

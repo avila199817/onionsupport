@@ -94,7 +94,7 @@ html, body{
 
 
 /* =========================
-   🔥 APP CONTENT (UN SOLO EMPUJE REAL)
+   🔥 APP CONTENT (OFFSET REAL)
 ========================= */
 #app-content{
   flex:1;
@@ -103,14 +103,14 @@ html, body{
   display:flex;
   flex-direction:column;
 
-  /* 🔥 SOLO TOPBAR GLOBAL */
+  /* 🔥 TOPBAR PADRE */
   padding-top:var(--topbar-height);
 }
 
-/* 🔥 MINI TOPBAR (FIXED) */
-#app-content.has-mini-topbar{
+/* 🔥 TOPBARVIEW (FACTURAS) */
+#app-content.has-topbarview{
   padding-top: calc(
-    var(--topbar-height) + var(--mini-topbar-height)
+    var(--topbar-height) + var(--topbarview-height)
   );
 }
 
@@ -147,11 +147,6 @@ html, body{
   overflow:hidden;
 }
 
-/* 🔥 IMPORTANTE: NO TOCAR OFFSETS AQUÍ */
-.panel-content.has-mini-topbar{
-  padding-top:0;
-}
-
 
 /* =========================
    TABLE MODE
@@ -172,13 +167,13 @@ html, body{
 
 
 /* =========================
-   SCROLL REAL (SOLO AQUÍ)
+   SCROLL REAL (SOLO TABLA)
 ========================= */
 .panel-content.table-mode .table-container{
   flex:1;
   min-height:0;
 
- overflow-y: auto;
+  overflow-y:auto;
   overflow-x:hidden;
 }
 
@@ -293,65 +288,13 @@ html, body{
 }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /* =========================================================
-   🔥 FACTURAS — TOPBAR OFFSET (CLON TOPBAR PADRE)
+   🔥 VARIABLES TOPBARVIEW
 ========================================================= */
 
 :root{
-  --topbarview-height: 64px; /* ajusta luego si hace falta */
+  --topbarview-height: 64px;
 }
-
-.panel-content.facturas{
-  padding-top: var(--topbarview-height);
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 /* =========================

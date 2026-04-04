@@ -56,6 +56,7 @@
         "/js/ui/topbarview.js",
         "/js/features/facturas/index.js"
       ],
+      topbarview: "facturas",
       title: "Facturas"
     },
 

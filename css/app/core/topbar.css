@@ -1,5 +1,5 @@
 /* =========================================================
-   🔥 MINI TOPBAR — FINAL PRO SAAS PANEL (ALIGNED + CLEAN)
+   🔥 MINI TOPBAR — FINAL PRO SAAS PANEL (PERFECT ALIGN REAL)
 ========================================================= */
 
 /* =========================
@@ -38,17 +38,12 @@
 
 
 /* =========================
-   🔥 CONTENIDO ALINEADO CON LAYOUT
+   🔥 ALIGN EXACTO COMO TOPBAR
 ========================= */
 .mini-topbar-inner,
 .mini-topbar-table{
-  width:100%;
-  max-width:var(--content-max);
-
-  margin-inline:auto;
-
-  padding-left:var(--content-padding);
-  padding-right:var(--content-padding);
+  padding-left:var(--space-lg);
+  padding-right:var(--space-lg);
 }
 
 
@@ -153,7 +148,7 @@
 
 
 /* =========================
-   TABLE HEADER (SYNCED)
+   TABLE HEADER (SYNC PERFECTO)
 ========================= */
 .mini-topbar-table{
   border-top:1px solid var(--panel-border);
@@ -181,7 +176,6 @@
   white-space:nowrap;
 
   border-bottom:1px solid var(--panel-border);
-  background:var(--panel-bg);
 }
 
 
@@ -219,7 +213,7 @@
 
 
 /* =========================
-   🔥 OFFSET GLOBAL REAL
+   🔥 OFFSET REAL (CLAVE)
 ========================= */
 .panel-content.has-mini-topbar{
   padding-top:var(--mini-topbar-height, 0px);

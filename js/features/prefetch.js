@@ -1,5 +1,9 @@
 "use strict";
 
+/* =========================================================
+   🧅 PREFETCH — FULL PRO (CONTROLADO, SIN FUGAS, EFICIENTE)
+========================================================= */
+
 (function(){
 
   if(!window.Onion){
@@ -9,7 +13,12 @@
 
   const Onion = window.Onion;
 
+  /* =========================================================
+     STATE PRIVADO
+  ========================================================= */
+
   const prefetched = new Set();
+  const MAX_PREFETCH = 50; // 🔥 límite anti-memoria
 
   /* =========================
      NORMALIZE PATH
@@ -47,14 +56,12 @@
 
     if(!href) return;
 
-    const finalHref = href;
-
-    if(document.querySelector(`link[href="${finalHref}"]`)) return;
+    if(document.querySelector(`link[href="${href}"]`)) return;
 
     const link = document.createElement("link");
     link.rel = rel;
     link.as = as;
-    link.href = finalHref;
+    link.href = href;
 
     document.head.appendChild(link);
   }
@@ -76,6 +83,11 @@
 
       const route = Onion.routes[clean];
       if(!route) return;
+
+      /* 🔥 control memoria */
+      if(prefetched.size >= MAX_PREFETCH){
+        prefetched.clear();
+      }
 
       prefetched.add(clean);
 
@@ -126,14 +138,14 @@
   };
 
   /* =========================
-     EVENTS
+     EVENTOS (UNA SOLA VEZ)
   ========================= */
 
   if(!window.__ONION_PREFETCH_BOUND__){
 
     window.__ONION_PREFETCH_BOUND__ = true;
 
-    document.addEventListener("mouseover", function(e){
+    const handler = function(e){
 
       const link = e.target.closest("a[data-spa]");
       if(!link) return;
@@ -150,21 +162,19 @@
       }
 
       Onion.prefetch(href);
+    };
 
-    });
+    document.addEventListener("mouseover", handler);
+    document.addEventListener("touchstart", handler, { passive: true });
 
-    document.addEventListener("touchstart", function(e){
+  }
 
-      const link = e.target.closest("a[data-spa]");
-      if(!link) return;
+  /* =========================
+     DEBUG
+  ========================= */
 
-      const href = link.getAttribute("href");
-      if(!href) return;
-
-      Onion.prefetch(href);
-
-    }, { passive: true });
-
+  if(Onion.config?.DEBUG){
+    Onion.log("⚡ Prefetch system PRO ready");
   }
 
 })();

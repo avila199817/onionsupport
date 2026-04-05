@@ -148,7 +148,6 @@ function bindEvents(){
     Onion.cleanupEvent(logout, "click", async (e)=>{
       e.stopPropagation();
 
-      // 🔥 loader global suave
       Onion.ui?.showLoader?.();
 
       try{
@@ -166,7 +165,6 @@ function bindEvents(){
           throw new Error("Logout fallido");
         }
 
-        // pequeño delay para UX suave
         await new Promise(r => setTimeout(r, 300));
 
       }catch(err){

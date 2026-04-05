@@ -34,6 +34,32 @@ function $(selector){
   return root ? root.querySelector(selector) : null;
 }
 
+
+/* =========================
+   🔥 LOADER CONTROL (NEW)
+========================= */
+
+function showLoader(){
+  const loader = $(".table-loader-overlay");
+  if(!loader) return;
+
+  loader.style.display = "flex";
+  loader.style.opacity = "1";
+}
+
+function hideLoader(){
+  const loader = $(".table-loader-overlay");
+  if(!loader) return;
+
+  loader.style.transition = "opacity .25s ease";
+  loader.style.opacity = "0";
+
+  setTimeout(()=>{
+    loader.style.display = "none";
+  }, 250);
+}
+
+
 /* =========================
    INIT
 ========================= */
@@ -43,7 +69,6 @@ function init(){
   const root = getRoot();
   if(!root || initialized) return;
 
-  // 🔥 ESPERAR USER REAL (NUEVO SISTEMA)
   if(!Onion.user){
     console.warn("⏳ esperando user...");
     return setTimeout(init, 100);
@@ -65,6 +90,7 @@ function init(){
 
 init();
 
+
 /* =========================
    EVENTS
 ========================= */
@@ -76,7 +102,6 @@ function bindEvents(){
 
   Onion.cleanupEvent(root, "click", (e)=>{
 
-    /* 🔥 SORT CLICK */
     const th = e.target.closest("th[data-sort]");
     if(th){
       handleSort(th);
@@ -105,6 +130,7 @@ function bindEvents(){
   $("#filter-estado-factura")?.addEventListener("change", applyFilters);
 
 }
+
 
 /* =========================
    SORT
@@ -187,6 +213,7 @@ function updateSortUI(){
 
 }
 
+
 /* =========================
    LOAD
 ========================= */
@@ -200,6 +227,8 @@ async function loadFacturas(){
   if(!tbody) return;
 
   const requestId = ++currentRequestId;
+
+  showLoader(); // 🔥
 
   document.activeElement?.blur();
 
@@ -234,9 +263,11 @@ async function loadFacturas(){
 
   }finally{
     loading = false;
+    hideLoader(); // 🔥
   }
 
 }
+
 
 /* =========================
    ACTIONS
@@ -296,6 +327,7 @@ async function handleAction(btn){
 
 }
 
+
 /* =========================
    NORMALIZE
 ========================= */
@@ -312,6 +344,7 @@ function normalize(res){
   return [];
 
 }
+
 
 /* =========================
    FILTERS
@@ -340,6 +373,7 @@ function applyFilters(){
 
 }
 
+
 /* =========================
    STATES
 ========================= */
@@ -353,6 +387,7 @@ function setError(){
   $("#facturas-body").innerHTML =
     `<tr><td colspan="7">Error cargando facturas</td></tr>`;
 }
+
 
 /* =========================
    RENDER
@@ -425,16 +460,13 @@ function render(items){
   tbody.innerHTML = html;
 }
 
+
 /* =========================
-   HELPERS
+   HELPERS (SIN CAMBIOS)
 ========================= */
 
 function mapItem(f){
-
-  const empresaRaw =
-    f.cliente?.empresa ||
-    f.cliente?.razonSocial;
-
+  const empresaRaw = f.cliente?.empresa || f.cliente?.razonSocial;
   const empresaClean = cleanValue(empresaRaw, "");
 
   return {
@@ -442,16 +474,8 @@ function mapItem(f){
     numero: f.numeroFacturaLegal || f.numero || f.id,
 
     cliente: {
-      nombre: cleanValue(
-        f.cliente?.nombre ||
-        f.cliente?.nombreContacto,
-        "Cliente"
-      ),
-      email: cleanValue(
-        f.cliente?.email ||
-        f.emailCliente,
-        "-"
-      )
+      nombre: cleanValue(f.cliente?.nombre || f.cliente?.nombreContacto,"Cliente"),
+      email: cleanValue(f.cliente?.email || f.emailCliente,"-")
     },
 
     empresa: empresaClean,
@@ -462,7 +486,6 @@ function mapItem(f){
 
     estadoPago: getEstadoPago(f.estadoPago)
   };
-
 }
 
 function cleanValue(val, fallback){

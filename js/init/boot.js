@@ -39,7 +39,6 @@
 
   function hideLoaderSafe(){
 
-    // quitar clase global
     document.body.classList.remove("loading");
 
     const loader = document.getElementById("app-loader");
@@ -117,7 +116,6 @@
 
       clearTimeout(bootTimeout);
 
-      // 🔥 solo si aún sigue activo
       if(document.body.classList.contains("loading")){
         hideLoaderSafe();
       }

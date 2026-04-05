@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 FETCH — FULL PRO (ABORT GLOBAL, TIMEOUT, AUTH, SAFE)
+   🧅 FETCH — FULL PRO (FIXED · SIN RACE · ABORT CONTROLADO)
 ========================================================= */
 
 (function(){
@@ -59,25 +59,32 @@
     }
 
     /* =========================
-       ABORT GLOBAL (🔥 CLAVE)
+       ABORT CONTROLADO (🔥 FIX)
     ========================= */
 
-    // cancelar request anterior si existe
-    if(Onion.state.abortController){
-      try{ Onion.state.abortController.abort(); }catch{}
+    let controller;
+    let signal;
+
+    if(options.signal){
+      // usar señal externa → NO tocar global
+      signal = options.signal;
+    }else{
+      // solo aquí usamos abort global
+      if(Onion.state.abortController){
+        try{ Onion.state.abortController.abort(); }catch{}
+      }
+
+      controller = new AbortController();
+      Onion.state.abortController = controller;
+      signal = controller.signal;
     }
-
-    const controller = new AbortController();
-    Onion.state.abortController = controller;
-
-    const signal = options.signal || controller.signal;
 
     /* =========================
        TIMEOUT
     ========================= */
 
     const timeout = setTimeout(()=>{
-      if(!options.signal){
+      if(controller){
         controller.abort();
       }
     }, Onion.config.TIMEOUT || 10000);
@@ -183,7 +190,7 @@
     }catch(e){
 
       if(e.name === "AbortError"){
-        throw new Error("TIMEOUT");
+        throw new Error("ABORTED");
       }
 
       throw e;
@@ -192,8 +199,8 @@
 
       clearTimeout(timeout);
 
-      // limpiar controller si sigue siendo el activo
-      if(Onion.state.abortController === controller){
+      // limpiar SOLO si es el controller global
+      if(controller && Onion.state.abortController === controller){
         Onion.state.abortController = null;
       }
 

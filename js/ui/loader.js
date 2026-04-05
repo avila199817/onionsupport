@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 LOADER — FULL PRO SAAS (FIABLE · SIN FLICKER · ANTI-RACE)
+   🧅 LOADER — FULL PRO (SYNC CON EVENTS, SIN FLICKER, ROBUSTO)
 ========================================================= */
 
 (function(){
@@ -14,14 +14,16 @@
   const Onion = window.Onion;
 
   let active = false;
+  let showTimeout = null;
   let forceHideTimeout = null;
 
+  const MIN_SHOW_DELAY = 120;
   const MAX_DURATION = 8000;
 
   Onion.ui = Onion.ui || {};
 
   /* =========================
-     SHOW (INMEDIATO Y SEGURO)
+     SHOW
   ========================= */
 
   Onion.ui.showLoader = function(){
@@ -30,30 +32,31 @@
 
     active = true;
 
+    clearTimeout(showTimeout);
     clearTimeout(forceHideTimeout);
 
-    // 🔥 aparece SIEMPRE (sin delays)
-    document.body.classList.add("loading");
+    showTimeout = setTimeout(()=>{
+      document.body.classList.add("loading");
+    }, MIN_SHOW_DELAY);
 
-    // failsafe por si algo rompe el flujo
     forceHideTimeout = setTimeout(()=>{
-      Onion.warn?.("⚠️ Loader forzado a cerrar (failsafe)");
+      Onion.warn("Loader forzado a cerrar (failsafe)");
       Onion.ui.hideLoader(true);
     }, MAX_DURATION);
 
   };
 
   /* =========================
-     HIDE (SUAVE Y SIN CORTES)
+     HIDE
   ========================= */
 
   Onion.ui.hideLoader = function(force = false){
 
     if(!active && !force) return;
 
+    clearTimeout(showTimeout);
     clearTimeout(forceHideTimeout);
 
-    // 🔥 aseguramos que el render ya terminó
     requestAnimationFrame(()=>{
       requestAnimationFrame(()=>{
         document.body.classList.remove("loading");
@@ -64,25 +67,23 @@
   };
 
   /* =========================
-     EVENTS SYNC (DOBLE SISTEMA)
+     SYNC CON EVENTS (🔥 FIX REAL)
   ========================= */
 
-  // sistema moderno
-  if(Onion.events?.on){
-    Onion.events.on("route:start", Onion.ui.showLoader);
-    Onion.events.on("route:end", Onion.ui.hideLoader);
-  }
+  Onion.events?.on?.("route:start", ()=>{
+    Onion.ui.showLoader();
+  });
 
-  // fallback legacy (por si algo no dispara events)
-  document.addEventListener("onion:route:start", Onion.ui.showLoader);
-  document.addEventListener("onion:route:end", Onion.ui.hideLoader);
+  Onion.events?.on?.("route:end", ()=>{
+    Onion.ui.hideLoader();
+  });
 
   /* =========================
      DEBUG
   ========================= */
 
   if(Onion.config?.DEBUG){
-    Onion.log?.("⏳ Loader PRO ready");
+    Onion.log("⏳ Loader system PRO ready");
   }
 
 })();

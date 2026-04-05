@@ -10,6 +10,12 @@
   const Onion = window.Onion;
   const MAX_TOASTS = 5;
 
+  let lastMessage = null;
+
+  /* =========================
+     CONTAINER
+  ========================= */
+
   function getContainer(){
 
     let container = document.querySelector(".toast-container");
@@ -24,6 +30,10 @@
 
   }
 
+  /* =========================
+     REMOVE
+  ========================= */
+
   function removeToast(toast){
 
     if(!toast) return;
@@ -31,9 +41,15 @@
     toast.classList.remove("show");
     toast.classList.add("hide");
 
-    setTimeout(()=> toast.remove(), 250);
+    setTimeout(()=>{
+      try{ toast.remove(); }catch{}
+    }, 250);
 
   }
+
+  /* =========================
+     CLEAR
+  ========================= */
 
   function clearAll(){
 
@@ -42,7 +58,19 @@
 
   }
 
+  /* =========================
+     SHOW
+  ========================= */
+
   function showToast(message, type="info", duration=3000){
+
+    if(!message) return;
+
+    // 🔥 evitar spam duplicado inmediato
+    if(message === lastMessage) return;
+    lastMessage = message;
+
+    setTimeout(()=>{ lastMessage = null; }, 500);
 
     const container = getContainer();
 
@@ -59,7 +87,7 @@
 
     const btn = document.createElement("button");
     btn.className = "toast-close";
-    btn.textContent = "✕";
+    btn.innerHTML = "&times;";
 
     toast.appendChild(msg);
     toast.appendChild(btn);
@@ -73,17 +101,43 @@
       removeToast(toast);
     }, duration);
 
+    /* =========================
+       EVENTS
+    ========================= */
+
     const onClose = ()=>{
       clearTimeout(timeout);
       removeToast(toast);
     };
 
-    btn.addEventListener("click", onClose);
-
-    Onion.onCleanup(()=>{
+    const onHover = ()=>{
       clearTimeout(timeout);
+    };
+
+    const onLeave = ()=>{
+      timeout = setTimeout(()=>{
+        removeToast(toast);
+      }, duration);
+    };
+
+    btn.addEventListener("click", onClose);
+    toast.addEventListener("mouseenter", onHover);
+    toast.addEventListener("mouseleave", onLeave);
+
+    /* =========================
+       CLEANUP SPA
+    ========================= */
+
+    Onion.onCleanup?.(()=>{
+
+      clearTimeout(timeout);
+
       btn.removeEventListener("click", onClose);
+      toast.removeEventListener("mouseenter", onHover);
+      toast.removeEventListener("mouseleave", onLeave);
+
       removeToast(toast);
+
     });
 
   }

@@ -55,21 +55,24 @@
   };
 
   /* =========================
-     USER
+     USER (SINCRONIZADO)
   ========================= */
 
   Onion.user = null;
+  Onion.state = Onion.state || {};
 
   Onion.setUser = function(user){
     Onion.user = user;
+    Onion.state.user = user; // 🔥 CLAVE
   };
 
   Onion.getUser = function(){
-    return Onion.user;
+    return Onion.user || Onion.state.user || null;
   };
 
   Onion.clearUser = function(){
     Onion.user = null;
+    Onion.state.user = null; // 🔥 CLAVE
   };
 
   /* =========================
@@ -78,7 +81,7 @@
 
   Onion.can = function(permission){
 
-    const user = Onion.user;
+    const user = Onion.getUser();
 
     if(!user || !user.permissions) return false;
 

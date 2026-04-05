@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 RENDER — FULL PRO SAAS (FINAL FIX · HTML ≠ API · NO RACE)
+   🧅 RENDER — GOD MODE (CORE SAFE · VIEW ONLY · PERFECT SYNC)
 ========================================================= */
 
 (function(){
@@ -90,7 +90,7 @@ function normalizeUrl(src){
 }
 
 /* =========================================================
-   SCRIPT LOADER
+   SCRIPT LOADER (VIEW ONLY)
 ========================================================= */
 
 function loadScriptSingle(src){
@@ -131,6 +131,7 @@ Onion.loadScript = async function(scripts){
     return;
   }
 
+  // 🔥 SOLO eliminar scripts de vista
   document.querySelectorAll("script[data-onion-page]").forEach(s=>{
     try{ s.remove(); }catch{}
   });
@@ -142,7 +143,7 @@ Onion.loadScript = async function(scripts){
 };
 
 /* =========================================================
-   STYLE LOADER
+   STYLE LOADER (VIEW ONLY)
 ========================================================= */
 
 Onion.loadStyle = function(styles){
@@ -212,7 +213,7 @@ Onion.loadStyle = function(styles){
 };
 
 /* =========================================================
-   FETCH HTML (FIX REAL 🔥)
+   FETCH HTML (FRONTEND ONLY)
 ========================================================= */
 
 Onion.fetchHTML = async function(url){
@@ -245,8 +246,6 @@ function extractContent(html){
 
   if(content) return content;
 
-  console.warn("⚠️ panel-content no encontrado → fallback");
-
   const fallback = document.createElement("div");
   fallback.className = "panel-content";
   fallback.innerHTML = html;
@@ -256,7 +255,7 @@ function extractContent(html){
 }
 
 /* =========================================================
-   SWAP VIEW
+   SWAP VIEW (SAFE)
 ========================================================= */
 
 function swapView(container, node){
@@ -264,7 +263,7 @@ function swapView(container, node){
 }
 
 /* =========================================================
-   TOPBAR
+   TOPBAR (CORE SAFE)
 ========================================================= */
 
 function updateTopbar(route){
@@ -277,21 +276,27 @@ function updateTopbar(route){
 }
 
 /* =========================================================
-   CLEAR DYNAMIC
+   CLEAR VIEW ONLY 🔥
 ========================================================= */
 
-function clearDynamic(){
+function clearView(){
 
+  // 🔥 SOLO limpia contenido dinámico
   document.getElementById("topbarview-container")?.replaceChildren();
   document.getElementById("tablehead-container")?.replaceChildren();
 
 }
 
 /* =========================================================
-   CORE RENDER
+   CORE RENDER (PERFECT SYNC)
 ========================================================= */
 
 const originalRender = async function(){
+
+  // 🔥 NO render si app no está lista (sidebar manda)
+  if(!Onion.state.appReady){
+    return;
+  }
 
   const renderId = ++Onion.state.renderId;
   Onion.state.rendering = true;
@@ -321,6 +326,7 @@ const originalRender = async function(){
     const content = extractContent(html);
     content.classList.remove("ready");
 
+    // 🔥 SOLO limpia VISTAS (no core)
     Onion.runCleanup?.();
 
     if(route.style){
@@ -329,7 +335,7 @@ const originalRender = async function(){
 
     const container = await waitForViewContainer();
 
-    clearDynamic();
+    clearView();
     swapView(container, content);
 
     if(route.script){
@@ -349,8 +355,6 @@ const originalRender = async function(){
 
   }catch(e){
 
-    if(e.message === "ABORTED") return;
-
     console.error("💥 RENDER ERROR:", e);
 
     const container = document.getElementById("view-container");
@@ -364,9 +368,7 @@ const originalRender = async function(){
       `;
     }
 
-    if(renderId === Onion.state.renderId){
-      Onion.ui.hideLoader?.();
-    }
+    Onion.ui.hideLoader?.();
 
   }finally{
 
@@ -391,7 +393,7 @@ Onion.render = function(){
 ========================================================= */
 
 if(Onion.config?.DEBUG){
-  Onion.log?.("🔥 Render PRO ready");
+  Onion.log?.("🔥 Render GOD MODE ready");
 }
 
 })();

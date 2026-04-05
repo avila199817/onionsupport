@@ -1,11 +1,12 @@
 /* =========================================================
-   FACTURAS — PRO SAAS PANEL (TABLE MODE CLEAN)
+   FACTURAS — PRO SAAS PANEL (TABLE MODE CLEAN FINAL)
 ========================================================= */
 
 .panel-content.facturas{
   display:flex;
   flex-direction:column;
-  height:100%;
+  flex:1;
+  min-height:0;
   width:100%;
   position:relative;
 }
@@ -25,14 +26,16 @@
 
 
 /* =========================================================
-   TABLE CONTAINER
+   TABLE CONTAINER (ÚNICO SCROLL REAL)
 ========================================================= */
 
 .panel-content.facturas .table-container{
   flex:1;
   min-height:0;
+
   overflow-y:auto;
   overflow-x:hidden;
+
   background:var(--panel-bg);
 }
 
@@ -48,29 +51,33 @@
 }
 
 .panel-content.facturas thead{
-  position:static;
-  top:0;
-  z-index:3;
   background:var(--panel-bg);
 }
 
 .panel-content.facturas th{
   padding:12px 14px;
   text-align:left;
+
   border-bottom:1px solid var(--panel-border);
+
   color:var(--dim);
   font-size:11px;
   text-transform:uppercase;
   letter-spacing:.4px;
+
   white-space:nowrap;
 }
 
 .panel-content.facturas td{
   padding:12px 14px;
+
   border-bottom:1px solid var(--panel-border);
+
   font-size:13.5px;
   color:var(--text);
+
   vertical-align:middle;
+
   overflow:hidden;
   text-overflow:ellipsis;
 }
@@ -151,13 +158,17 @@
   width:36px;
   height:36px;
   min-width:36px;
+
   border-radius:50%;
+
   display:flex;
   align-items:center;
   justify-content:center;
+
   color:#fff;
   font-size:12px;
   font-weight:600;
+
   flex-shrink:0;
 }
 
@@ -168,6 +179,7 @@
 
 .panel-content.facturas .user-name{
   font-weight:600;
+
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
@@ -176,6 +188,7 @@
 .panel-content.facturas .user-sub{
   font-size:11px;
   color:var(--dim);
+
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
@@ -206,6 +219,7 @@
 .panel-content.facturas .badge{
   padding:4px 10px;
   border-radius:999px;
+
   font-size:10px;
   font-weight:500;
 }
@@ -233,10 +247,13 @@
 
 .panel-content.facturas .btn-action{
   padding:6px 10px;
+
   border-radius:6px;
   border:1px solid var(--card-border);
+
   background:var(--card-bg);
   color:var(--text);
+
   font-size:11px;
   cursor:pointer;
 }

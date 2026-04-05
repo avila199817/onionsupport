@@ -5,7 +5,7 @@
   let mounted = false;
 
   /* =========================
-     🔥 STATE UI
+     🔥 STATE UI CENTRALIZADO
   ========================= */
   const state = {
     search: "",
@@ -13,13 +13,23 @@
     tipo: ""
   };
 
+  let debounceTimer = null;
+
+
+  /* =========================
+     🔥 HELPERS
+  ========================= */
+  function getContainer(id){
+    return document.getElementById(id);
+  }
+
 
   /* =========================
      🔥 RENDER TOPBAR
   ========================= */
   function renderTopbar(){
 
-    const container = document.getElementById("topbarview-container");
+    const container = getContainer("topbarview-container");
     if(!container) return;
 
     if(container.querySelector(".topbarview")) return;
@@ -28,28 +38,40 @@
     div.className = "topbarview";
 
     div.innerHTML = `
-      <input 
-        type="text"
-        id="search-cliente"
-        placeholder="Buscar cliente..."
-        autocomplete="off"
-      >
+      <div class="topbar-left">
 
-      <select id="filter-estado-cliente">
-        <option value="">Estado</option>
-        <option value="activo">Activo</option>
-        <option value="inactivo">Inactivo</option>
-      </select>
+        <input 
+          type="text"
+          id="search-cliente"
+          placeholder="Buscar por nombre, empresa, email o ubicación..."
+          autocomplete="off"
+        >
 
-      <select id="filter-tipo-cliente">
-        <option value="">Tipo</option>
-        <option value="particular">Particular</option>
-        <option value="empresa">Empresa</option>
-      </select>
+        <select id="filter-estado-cliente">
+          <option value="">Estado</option>
+          <option value="activo">Activo</option>
+          <option value="inactivo">Inactivo</option>
+        </select>
 
-      <button id="btn-new-cliente" class="btn-primary">
-        + Nuevo
-      </button>
+        <select id="filter-tipo-cliente">
+          <option value="">Tipo</option>
+          <option value="particular">Particular</option>
+          <option value="empresa">Empresa</option>
+        </select>
+
+      </div>
+
+      <div class="topbar-right">
+
+        <button id="btn-clear-filters" class="btn-secondary">
+          Limpiar
+        </button>
+
+        <button id="btn-new-cliente" class="btn-primary">
+          + Nuevo
+        </button>
+
+      </div>
     `;
 
     container.appendChild(div);
@@ -61,7 +83,7 @@
   ========================= */
   function renderTableHead(){
 
-    const container = document.getElementById("tablehead-container");
+    const container = getContainer("tablehead-container");
     if(!container) return;
 
     if(container.querySelector(".table-head")) return;
@@ -94,51 +116,87 @@
   ========================= */
   function bindUIEvents(){
 
-    const btn = document.getElementById("btn-new-cliente");
     const input = document.getElementById("search-cliente");
     const estado = document.getElementById("filter-estado-cliente");
     const tipo = document.getElementById("filter-tipo-cliente");
+    const btnNew = document.getElementById("btn-new-cliente");
+    const btnClear = document.getElementById("btn-clear-filters");
 
     const user = window.Onion?.state?.user;
 
-    // 🔥 SOLO ADMIN
+    /* 🔥 CONTROL ADMIN */
     if(!user || user.role !== "admin"){
-      btn?.remove();
+      btnNew?.remove();
     }
 
-    /* 🔥 CREAR CLIENTE */
-    btn?.addEventListener("click", ()=>{
+    /* =========================
+       🔥 CREAR CLIENTE
+    ========================= */
+    btnNew?.addEventListener("click", ()=>{
       window.Onion?.router?.navigate("/clientes/cliente");
     });
 
-    /* 🔥 SEARCH */
+
+    /* =========================
+       🔥 SEARCH (DEBOUNCE)
+    ========================= */
     input?.addEventListener("input", (e)=>{
-      state.search = e.target.value.toLowerCase();
-      triggerFilters();
+
+      clearTimeout(debounceTimer);
+
+      debounceTimer = setTimeout(()=>{
+        state.search = e.target.value.trim().toLowerCase();
+        triggerFilters();
+      }, 250);
+
     });
 
-    /* 🔥 ESTADO */
+
+    /* =========================
+       🔥 ESTADO
+    ========================= */
     estado?.addEventListener("change", (e)=>{
       state.estado = e.target.value;
       triggerFilters();
     });
 
-    /* 🔥 TIPO */
+
+    /* =========================
+       🔥 TIPO
+    ========================= */
     tipo?.addEventListener("change", (e)=>{
       state.tipo = e.target.value;
       triggerFilters();
+    });
+
+
+    /* =========================
+       🔥 LIMPIAR FILTROS
+    ========================= */
+    btnClear?.addEventListener("click", ()=>{
+
+      state.search = "";
+      state.estado = "";
+      state.tipo = "";
+
+      if(input) input.value = "";
+      if(estado) estado.value = "";
+      if(tipo) tipo.value = "";
+
+      triggerFilters();
+
     });
 
   }
 
 
   /* =========================
-     🔥 TRIGGER FILTROS (GLOBAL)
+     🔥 TRIGGER GLOBAL
   ========================= */
   function triggerFilters(){
 
     if(window.ClientesUIExternal?.applyFilters){
-      window.ClientesUIExternal.applyFilters(state);
+      window.ClientesUIExternal.applyFilters({ ...state });
     }
 
   }
@@ -185,17 +243,18 @@
 
 
   /* =========================
-     🔥 CLEANUP
+     🔥 DESTROY
   ========================= */
   function destroy(){
 
-    const topbar = document.getElementById("topbarview-container");
+    const topbar = getContainer("topbarview-container");
     if(topbar) topbar.innerHTML = "";
 
-    const tablehead = document.getElementById("tablehead-container");
+    const tablehead = getContainer("tablehead-container");
     if(tablehead) tablehead.innerHTML = "";
 
     mounted = false;
+
   }
 
 

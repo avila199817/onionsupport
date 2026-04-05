@@ -63,7 +63,7 @@
 
   Onion.setUser = function(user){
     Onion.user = user;
-    Onion.state.user = user; // 🔥 CLAVE
+    Onion.state.user = user;
   };
 
   Onion.getUser = function(){
@@ -72,7 +72,7 @@
 
   Onion.clearUser = function(){
     Onion.user = null;
-    Onion.state.user = null; // 🔥 CLAVE
+    Onion.state.user = null;
   };
 
   /* =========================

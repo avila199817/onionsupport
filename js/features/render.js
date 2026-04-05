@@ -176,7 +176,6 @@
 
     app.innerHTML = "";
 
-    // 🔥 CLAVE: clonar nodo para evitar bugs de referencia
     app.appendChild(node.cloneNode(true));
 
   };
@@ -224,7 +223,6 @@
 
       if(currentRenderId !== Onion.state.renderId) return;
 
-      // 🔥 asegurar render completo antes de mostrar
       await new Promise(r => requestAnimationFrame(r));
       await new Promise(r => requestAnimationFrame(r));
 

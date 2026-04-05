@@ -10,16 +10,21 @@ if(!Onion){
 }
 
 /* =========================================================
+   VIEW ENGINE 🔥
+========================================================= */
+
+const view = Onion.createView();
+
+/* =========================================================
    STATE
 ========================================================= */
+
 let initialized = false;
-let destroyed = false;
 
 let currentItems = [];
 let filteredItems = [];
 
 let loading = false;
-let currentRequestId = 0;
 
 let externalFilters = {
   search: "",
@@ -40,19 +45,12 @@ function $(selector){
   return root ? root.querySelector(selector) : null;
 }
 
-function isAlive(){
-  const root = getRoot();
-  return !destroyed && root && document.body.contains(root);
-}
-
 /* =========================
    LOADER SAFE
 ========================= */
 
 function showLoader(){
-  if(!isAlive()) return;
-
-  const loader = $(".table-loader");
+  const loader = view.safeDOM(()=> $(".table-loader"));
   if(loader){
     loader.style.display = "flex";
     loader.style.opacity = "1";
@@ -60,9 +58,7 @@ function showLoader(){
 }
 
 function hideLoader(){
-  if(!isAlive()) return;
-
-  const loader = $(".table-loader");
+  const loader = view.safeDOM(()=> $(".table-loader"));
   if(loader){
     loader.style.opacity = "0";
     setTimeout(()=>{
@@ -85,17 +81,14 @@ function init(){
   }
 
   initialized = true;
-  destroyed = false;
 
   bindEvents();
 
   requestAnimationFrame(()=>{
-    if(!isAlive()) return;
     loadIncidencias();
   });
 
   Onion.onCleanup(()=>{
-    destroyed = true;
     initialized = false;
   });
 
@@ -114,8 +107,6 @@ function bindEvents(){
 
   Onion.cleanupEvent(root, "click", (e)=>{
 
-    if(!isAlive()) return;
-
     if(e.target.closest("button")) return;
 
     const row = e.target.closest("tr[data-id]");
@@ -128,23 +119,17 @@ function bindEvents(){
 }
 
 /* =========================
-   LOAD (ANTI RACE TOTAL)
+   LOAD (ENGINE SAFE)
 ========================= */
 
 async function loadIncidencias(){
 
   if(loading) return;
-  if(!isAlive()) return;
+
+  const tbody = view.safeDOM(()=> $("#incidencias-body"));
+  if(!tbody) return;
 
   loading = true;
-
-  const tbody = $("#incidencias-body");
-  if(!tbody){
-    loading = false;
-    return;
-  }
-
-  const requestId = ++currentRequestId;
 
   document.activeElement?.blur();
   showLoader();
@@ -154,11 +139,11 @@ async function loadIncidencias(){
     await new Promise(r => requestAnimationFrame(r));
     await new Promise(r => requestAnimationFrame(r));
 
-    if(!isAlive() || requestId !== currentRequestId) return;
+    const res = await view.safeFetch(() =>
+      Onion.fetch(Onion.config.API + "/tickets")
+    );
 
-    const res = await Onion.fetch(Onion.config.API + "/tickets");
-
-    if(!isAlive() || requestId !== currentRequestId) return;
+    if(!res) return;
 
     const items = normalize(res);
 
@@ -173,9 +158,6 @@ async function loadIncidencias(){
     applyFilters();
 
   }catch(e){
-
-    if(e.message === "ABORTED") return;
-    if(!isAlive() || requestId !== currentRequestId) return;
 
     console.error("💥 ERROR INCIDENCIAS:", e);
     setError();
@@ -204,12 +186,10 @@ function normalize(res){
 }
 
 /* =========================
-   FILTERS SAFE
+   FILTERS
 ========================= */
 
 function applyFilters(){
-
-  if(!isAlive()) return;
 
   const search = externalFilters.search.toLowerCase();
   const estado = externalFilters.estado.toLowerCase();
@@ -238,11 +218,11 @@ function applyFilters(){
 }
 
 /* =========================
-   STATES SAFE
+   STATES
 ========================= */
 
 function setEmpty(){
-  const el = $("#incidencias-body");
+  const el = view.safeDOM(()=> $("#incidencias-body"));
   if(!el) return;
 
   el.innerHTML = `<tr><td colspan="8">No hay incidencias</td></tr>`;
@@ -250,7 +230,7 @@ function setEmpty(){
 }
 
 function setError(){
-  const el = $("#incidencias-body");
+  const el = view.safeDOM(()=> $("#incidencias-body"));
   if(!el) return;
 
   el.innerHTML = `<tr><td colspan="8">Error cargando incidencias</td></tr>`;
@@ -258,14 +238,12 @@ function setError(){
 }
 
 /* =========================
-   RENDER SAFE
+   RENDER
 ========================= */
 
 function render(items){
 
-  if(!isAlive()) return;
-
-  const tbody = $("#incidencias-body");
+  const tbody = view.safeDOM(()=> $("#incidencias-body"));
   if(!tbody) return;
 
   if(!items.length) return setEmpty();
@@ -311,8 +289,6 @@ function render(items){
 `;
 
   }).join("");
-
-  if(!isAlive()) return;
 
   tbody.innerHTML = html;
 

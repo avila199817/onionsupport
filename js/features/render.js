@@ -385,7 +385,7 @@ Onion.render = function(){
 ========================================================= */
 
 if(Onion.config?.DEBUG){
-  Onion.log?.("🔥 Render FINAL PRO 10/10 ready");
+  Onion.log?.("🎬 Render FINAL PRO 10/10 ready");
 }
 
 })();

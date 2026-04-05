@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 SIDEBAR — GOD MODE FINAL (SPA SAFE · SIN RACES · LIMPIO)
+   🧅 SIDEBAR — STABLE SPA (FIABLE · SIMPLE · FUNCIONA SIEMPRE)
 ========================================================= */
 
 (function(){
@@ -23,23 +23,18 @@
     const user     = document.getElementById("userToggle");
     const dropdown = document.getElementById("userDropdown");
 
-    if(!sidebar || !toggle) return;
+    if(!sidebar || !toggle){
+      return;
+    }
 
     /* =========================
        RESTORE STATE
     ========================= */
 
     const saved = localStorage.getItem("sidebar-collapsed");
-
     sidebar.classList.toggle("collapsed", saved === "true");
 
     updateTooltip();
-
-    /* =========================
-       USER RENDER (SIN BLOQUEOS)
-    ========================= */
-
-    renderUser();
 
     /* =========================
        TOGGLE SIDEBAR
@@ -113,68 +108,7 @@
       }
     });
 
-    /* =========================
-       DROPDOWN ACTIONS
-    ========================= */
-
-    if(dropdown){
-
-      Onion.cleanupEvent(dropdown, "click", (e)=>{
-
-        const item = e.target.closest(".dropdown-item");
-        if(!item) return;
-
-        const action =
-          item.dataset.action ||
-          (item.id === "logoutBtn" ? "logout" : null);
-
-        if(action === "logout"){
-          Onion.ui?.showLoader?.();
-          Onion.auth.logout?.();
-        }
-
-        dropdown.classList.remove("active");
-
-      });
-
-    }
-
   };
-
-  /* =========================
-     USER RENDER
-  ========================= */
-
-  function renderUser(){
-
-    const user = Onion.getUser?.() || Onion.state?.user;
-    if(!user) return;
-
-    const nameEl = document.getElementById("sidebar-name");
-    const avatarEl = document.getElementById("sidebar-avatar");
-
-    const name =
-      user.name ||
-      user.username ||
-      user.email ||
-      "Usuario";
-
-    if(nameEl) nameEl.textContent = name;
-
-    if(avatarEl){
-
-      if(user.avatar){
-        avatarEl.innerHTML = `
-          <img src="${user.avatar}"
-          style="width:100%;height:100%;border-radius:50%;object-fit:cover;">
-        `;
-      }else{
-        avatarEl.textContent = name.slice(0,2).toUpperCase();
-      }
-
-    }
-
-  }
 
   /* =========================
      TOOLTIP
@@ -197,6 +131,10 @@
     );
 
   }
+
+  /* =========================
+     DEBUG
+  ========================= */
 
   if(Onion.config?.DEBUG){
     Onion.log?.("📚 Sidebar PRO ready");

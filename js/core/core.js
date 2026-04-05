@@ -294,6 +294,6 @@
      READY FLAG
   ========================= */
 
-  Onion.log("🚀 Onion Core PRO ready");
+  Onion.log("❤️ Onion Core PRO ready");
 
 })();

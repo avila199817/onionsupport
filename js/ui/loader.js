@@ -1,5 +1,9 @@
 "use strict";
 
+/* =========================================================
+   🧅 LOADER — FULL PRO (SYNC CON EVENTS, SIN FLICKER, ROBUSTO)
+========================================================= */
+
 (function(){
 
   if(!window.Onion){
@@ -36,7 +40,7 @@
     }, MIN_SHOW_DELAY);
 
     forceHideTimeout = setTimeout(()=>{
-      console.warn("⚠️ Loader forzado a cerrar (failsafe)");
+      Onion.warn("Loader forzado a cerrar (failsafe)");
       Onion.ui.hideLoader(true);
     }, MAX_DURATION);
 
@@ -63,15 +67,23 @@
   };
 
   /* =========================
-     AUTO HOOK (OPCIONAL)
+     SYNC CON EVENTS (🔥 FIX REAL)
   ========================= */
 
-  document.addEventListener("onion:route:start", ()=>{
+  Onion.events?.on?.("route:start", ()=>{
     Onion.ui.showLoader();
   });
 
-  document.addEventListener("onion:route:end", ()=>{
+  Onion.events?.on?.("route:end", ()=>{
     Onion.ui.hideLoader();
   });
+
+  /* =========================
+     DEBUG
+  ========================= */
+
+  if(Onion.config?.DEBUG){
+    Onion.log("⏳ Loader system PRO ready");
+  }
 
 })();

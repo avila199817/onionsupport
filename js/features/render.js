@@ -205,11 +205,16 @@ function extractContent(html){
 
 function swapView(node){
 
-  const container = document.getElementById("view-container");
+  let container = document.getElementById("view-container");
 
   if(!container){
-    console.error("❌ view-container no existe");
-    return;
+
+    console.warn("⚠️ view-container no listo, reintentando...");
+
+    return setTimeout(()=>{
+      swapView(node);
+    }, 50);
+
   }
 
   container.innerHTML = "";

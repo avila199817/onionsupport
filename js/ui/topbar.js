@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 TOPBAR SEARCH — FULL PRO (SPA SAFE · CLEAN EVENTS)
+   🧅 TOPBAR SEARCH — FULL PRO SAAS (FIXED · NO DUPES · NO LEAKS)
 ========================================================= */
 
 (function(){
@@ -34,11 +34,8 @@ function init(){
     return setTimeout(init, 100);
   }
 
-  // 🔥 REINIT SPA
-  if(initialized){
-    bind(input, container);
-    return;
-  }
+  // 🔥 evitar rebind duplicado
+  if(initialized) return;
 
   initialized = true;
 
@@ -52,9 +49,15 @@ function init(){
 
 init();
 
-/* 🔥 SPA HOOKS */
-Onion.events?.on?.("app:ready", ()=> requestAnimationFrame(init));
-Onion.events?.on?.("route:end", ()=> requestAnimationFrame(init));
+/* 🔥 SPA HOOKS (SIN DUPES) */
+if(!window.__ONION_SEARCH_BOUND__){
+
+  window.__ONION_SEARCH_BOUND__ = true;
+
+  Onion.events?.on?.("app:ready", ()=> requestAnimationFrame(init));
+  Onion.events?.on?.("route:end", ()=> requestAnimationFrame(init));
+
+}
 
 /* =========================================================
    CORE BIND
@@ -180,11 +183,13 @@ function bind(input, container){
 
     try{
 
-      if(controller) controller.abort();
+      if(controller){
+        try{ controller.abort(); }catch{}
+      }
 
       controller = new AbortController();
 
-      const url = Onion.config.API + "/search?q=" + encodeURIComponent(q);
+      const url = "/search?q=" + encodeURIComponent(q);
 
       const data = await Onion.fetch(url,{ signal:controller.signal });
 
@@ -192,7 +197,7 @@ function bind(input, container){
 
     }catch(e){
 
-      if(e.name === "AbortError") return [];
+      if(e.message === "ABORTED") return [];
 
       console.warn("Search API no disponible");
       return [];

@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 UI — FULL PRO SAAS (FIXED · NO DUPES · NO DOUBLE EVENTS)
+   🧅 UI — GOD MODE (CORE SAFE · NO DUPES · SIDEBAR FIRST)
 ========================================================= */
 
 (function(){
@@ -138,7 +138,7 @@
   };
 
   /* =========================
-     GLOBAL EVENTS (FIX DUPES)
+     GLOBAL EVENTS (CORE SAFE)
   ========================= */
 
   function bindGlobalEvents(){
@@ -146,7 +146,7 @@
     if(bindGlobalEvents._bound) return;
     bindGlobalEvents._bound = true;
 
-    document.addEventListener("click", async (e)=>{
+    Onion.onGlobalEvent(document, "click", async (e)=>{
 
       const logout = e.target.closest("#logoutBtn");
       if(!logout) return;
@@ -169,15 +169,25 @@
      WAIT DOM (ANTI RACE)
   ========================= */
 
-  function waitDOMAndRender(retries = 10){
+  function waitDOMAndRender(retries = 12){
 
-    if(
+    const sidebarReady =
       exists("#sidebar-name") &&
-      exists("#topbar-title")
-    ){
+      exists("#sidebar-avatar");
+
+    const topbarReady =
+      exists("#topbar-title");
+
+    if(sidebarReady){
       Onion.ui.renderSidebar();
-      Onion.ui.renderTopbar();
       Onion.ui.updateSidebarActive();
+    }
+
+    if(topbarReady){
+      Onion.ui.renderTopbar();
+    }
+
+    if(sidebarReady && topbarReady){
       return;
     }
 
@@ -215,19 +225,19 @@
   };
 
   /* =========================
-     HOOK SPA (FIX DUPES)
+     HOOK SPA (CORE SAFE)
   ========================= */
 
   if(!window.__ONION_UI_BOUND__){
 
     window.__ONION_UI_BOUND__ = true;
 
-    Onion.events?.on?.("route:end", ()=>{
-      Onion.ui.refresh();
-    });
-
     Onion.events?.on?.("app:ready", ()=>{
       Onion.ui.init();
+    });
+
+    Onion.events?.on?.("route:end", ()=>{
+      Onion.ui.refresh();
     });
 
   }
@@ -237,7 +247,7 @@
   ========================= */
 
   if(Onion.config?.DEBUG){
-    Onion.log("🎨 UI system PRO ready");
+    Onion.log("🎨 UI GOD MODE ready");
   }
 
 })();

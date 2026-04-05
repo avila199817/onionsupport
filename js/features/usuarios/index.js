@@ -9,11 +9,24 @@ if(!Onion){
   return;
 }
 
+/* =========================================================
+   STATE
+========================================================= */
+
 let initialized = false;
 let currentItems = [];
 let filteredItems = [];
 let loading = false;
 let currentRequestId = 0;
+
+/* 🔥 FILTROS EXTERNOS (TOPBAR) */
+let externalFilters = {
+  search: "",
+  estado: "",
+  rol: "",
+  tipo: ""
+};
+
 
 /* =========================
    ROOT
@@ -27,6 +40,7 @@ function $(selector){
   const root = getRoot();
   return root ? root.querySelector(selector) : null;
 }
+
 
 /* =========================
    INIT
@@ -45,9 +59,7 @@ function init(){
 
   bindEvents();
 
-  requestAnimationFrame(()=>{
-    loadUsers();
-  });
+  requestAnimationFrame(loadUsers);
 
   Onion.onCleanup(()=>{
     initialized = false;
@@ -56,6 +68,7 @@ function init(){
 }
 
 init();
+
 
 /* =========================
    EVENTS
@@ -69,22 +82,14 @@ function bindEvents(){
   Onion.cleanupEvent(root, "click", (e)=>{
 
     const row = e.target.closest("tr[data-id]");
-    if(!row) return;
-
-    Onion.router.navigate("/usuarios/detalle?id=" + row.dataset.id);
+    if(row){
+      Onion.router.navigate("/usuarios/detalle?id=" + row.dataset.id);
+    }
 
   });
-
-  $("#btn-new-usuario")?.addEventListener("click", ()=>{
-    Onion.router.navigate("/usuarios/nuevo");
-  });
-
-  $("#search-usuario")?.addEventListener("input", debounce(applyFilters, 250));
-  $("#filter-estado-usuario")?.addEventListener("change", applyFilters);
-  $("#filter-rol-usuario")?.addEventListener("change", applyFilters);
-  $("#filter-tipo-usuario")?.addEventListener("change", applyFilters);
 
 }
+
 
 /* =========================
    LOAD
@@ -96,7 +101,10 @@ async function loadUsers(){
   loading = true;
 
   const tbody = $("#usuarios-body");
-  if(!tbody) return;
+  if(!tbody){
+    loading = false;
+    return;
+  }
 
   const requestId = ++currentRequestId;
 
@@ -106,7 +114,7 @@ async function loadUsers(){
 
     await new Promise(r => requestAnimationFrame(r));
     await new Promise(r => requestAnimationFrame(r));
-    await new Promise(r => setTimeout(r, 200));
+    await new Promise(r => setTimeout(r, 150));
 
     const res = await Onion.fetch(Onion.config.API + "/users");
     const items = normalize(res);
@@ -121,23 +129,22 @@ async function loadUsers(){
       return;
     }
 
-    requestAnimationFrame(()=>{
-      render(items);
-    });
+    applyFilters();
 
   }catch(e){
 
     console.error("💥 ERROR USERS:", e);
 
-    if(requestId !== currentRequestId) return;
-
-    setError();
+    if(requestId === currentRequestId){
+      setError();
+    }
 
   }finally{
     loading = false;
   }
 
 }
+
 
 /* =========================
    NORMALIZE
@@ -157,16 +164,17 @@ function normalize(res){
 
 }
 
+
 /* =========================
    FILTERS
 ========================= */
 
 function applyFilters(){
 
-  const search = ($("#search-usuario")?.value || "").toLowerCase();
-  const estado = ($("#filter-estado-usuario")?.value || "").toLowerCase();
-  const rol = ($("#filter-rol-usuario")?.value || "").toLowerCase();
-  const tipo = ($("#filter-tipo-usuario")?.value || "").toLowerCase();
+  const search = externalFilters.search.toLowerCase();
+  const estado = externalFilters.estado.toLowerCase();
+  const rol = externalFilters.rol.toLowerCase();
+  const tipo = externalFilters.tipo.toLowerCase();
 
   filteredItems = currentItems.filter(u => {
 
@@ -182,11 +190,10 @@ function applyFilters(){
 
   });
 
-  requestAnimationFrame(()=>{
-    render(filteredItems);
-  });
+  render(filteredItems);
 
 }
+
 
 /* =========================
    STATES
@@ -202,6 +209,7 @@ function setError(){
     `<tr><td colspan="7">Error cargando usuarios</td></tr>`;
 }
 
+
 /* =========================
    RENDER
 ========================= */
@@ -210,6 +218,8 @@ function render(items){
 
   const tbody = $("#usuarios-body");
   if(!tbody) return;
+
+  if(!items.length) return setEmpty();
 
   const html = items.map(u => {
 
@@ -265,6 +275,7 @@ function render(items){
 
 }
 
+
 /* =========================
    MAP
 ========================= */
@@ -292,6 +303,7 @@ function mapItem(u){
   };
 
 }
+
 
 /* =========================
    HELPERS
@@ -379,12 +391,16 @@ function escapeHTML(str){
     .replace(/>/g,"&gt;");
 }
 
-function debounce(fn, delay){
-  let t;
-  return (...args)=>{
-    clearTimeout(t);
-    t = setTimeout(()=>fn(...args), delay);
-  };
-}
+
+/* =========================
+   🔥 TOPBAR CONNECT
+========================= */
+
+window.UsuariosUIExternal = {
+  applyFilters: (uiState)=>{
+    externalFilters = uiState || externalFilters;
+    applyFilters();
+  }
+};
 
 })();

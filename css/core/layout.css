@@ -1,5 +1,5 @@
 /* =========================================================
-   🔥 LAYOUT — SAAS PANEL CLEAN (FINAL FIXED SYSTEM OK)
+   🔥 LAYOUT — SAAS PANEL CLEAN (FINAL PRO SYSTEM)
 ========================================================= */
 
 
@@ -14,6 +14,14 @@ html, body{
   height:100%;
   display:flex;
   flex-direction:column;
+}
+
+
+/* =========================
+   VARIABLES GLOBALES
+========================= */
+:root{
+  --topbarview-height: 64px;
 }
 
 
@@ -94,7 +102,7 @@ html, body{
 
 
 /* =========================
-   🔥 APP CONTENT (OFFSET REAL)
+   🔥 APP CONTENT (OFFSET SYSTEM)
 ========================= */
 #app-content{
   flex:1;
@@ -103,11 +111,11 @@ html, body{
   display:flex;
   flex-direction:column;
 
-  /* 🔥 TOPBAR PADRE */
+  /* 🔥 SOLO TOPBAR GLOBAL */
   padding-top:var(--topbar-height);
 }
 
-/* 🔥 TOPBARVIEW (FACTURAS) */
+/* 🔥 TOPBARVIEW (EXTENSIÓN LIMPIA) */
 #app-content.has-topbarview{
   padding-top: calc(
     var(--topbar-height) + var(--topbarview-height)
@@ -129,6 +137,9 @@ html, body{
   gap:var(--space-lg);
 
   background:transparent;
+
+  /* 🔥 IMPORTANTE: evita bugs de scroll */
+  overflow:hidden;
 }
 
 
@@ -149,7 +160,7 @@ html, body{
 
 
 /* =========================
-   TABLE MODE
+   TABLE MODE (PRO)
 ========================= */
 .panel-content.table-mode{
   padding:0;
@@ -175,6 +186,9 @@ html, body{
 
   overflow-y:auto;
   overflow-x:hidden;
+
+  /* 🔥 suaviza scroll */
+  scroll-behavior:smooth;
 }
 
 
@@ -285,15 +299,6 @@ html, body{
   transition:
     opacity var(--duration-normal) ease,
     filter var(--duration-normal) ease;
-}
-
-
-/* =========================================================
-   🔥 VARIABLES TOPBARVIEW
-========================================================= */
-
-:root{
-  --topbarview-height: 64px;
 }
 
 

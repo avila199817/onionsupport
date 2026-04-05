@@ -1,6 +1,11 @@
 /* =========================================================
-   🔥 TOPBARVIEW — CLON REAL DEL TOPBAR (PRO)
+   🔥 TOPBARVIEW — CLON REAL DEL TOPBAR (PRO FINAL)
 ========================================================= */
+
+:root{
+  /* 🔥 capa dedicada (por debajo del topbar) */
+  --z-topbarview: calc(var(--z-topbar) - 1);
+}
 
 .topbarview{
   position: fixed;
@@ -9,7 +14,7 @@
   left: var(--sidebar-width);
   right: 0;
 
-  height: var(--topbarview-height); /* 🔥 CLAVE */
+  height: var(--topbarview-height);
 
   display:flex;
   align-items:center;
@@ -17,16 +22,21 @@
 
   padding:0 16px;
 
+  /* 🔥 MISMO LOOK QUE TOPBAR */
   background:
     linear-gradient(180deg, rgba(255,255,255,0.02), transparent 40%),
-    var(--panel-bg);
+    var(--sb-bg);
 
+  /* 🔥 continuidad limpia */
   border-bottom:1px solid var(--panel-border);
+  box-shadow: 0 1px 0 var(--panel-border) inset;
 
-  z-index: var(--z-topbar);
+  /* 🔥 por debajo del topbar */
+  z-index: var(--z-topbarview);
 
   transition:
-    left var(--duration-slow) var(--ease-out);
+    left var(--duration-slow) var(--ease-out),
+    background var(--duration-normal) ease;
 }
 
 
@@ -58,12 +68,21 @@
   font-size:13px;
 
   outline:none;
+
+  transition:
+    border-color var(--duration-normal) ease,
+    box-shadow var(--duration-normal) ease,
+    background var(--duration-normal) ease;
 }
 
 .topbarview input:focus,
 .topbarview select:focus{
   border-color:var(--accent);
-  box-shadow:0 0 0 2px color-mix(in srgb, var(--accent), transparent 85%);
+  background:var(--panel-bg);
+
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--accent), transparent 85%),
+    0 4px 14px rgba(0,0,0,0.25);
 }
 
 .topbarview select{
@@ -89,10 +108,14 @@
   border:none;
   cursor:pointer;
 
-  transition:all .2s ease;
+  transition:
+    transform .2s ease,
+    box-shadow .2s ease,
+    filter .2s ease;
 }
 
 .topbarview .btn-primary:hover{
   transform:translateY(-1px);
   box-shadow:0 8px 20px rgba(99,102,241,0.35);
+  filter:brightness(1.05);
 }

@@ -124,7 +124,7 @@
       script: "/js/features/clientes/detalle.js",
       title: "Detalle cliente"
     },
-    
+
     "/clientes/cliente": {
       page: "/app/views/clientes/cliente.html",
       style: "/css/app/clientes.css",
@@ -171,11 +171,13 @@
   ========================= */
   Onion.router.get = function(){
     try{
+
       let path = normalize(window.location.pathname);
 
       if(path.startsWith("/@")){
         const parts = path.split("/").filter(Boolean);
         const userSlug = parts[0];
+
         Onion.state.slug = userSlug.replace("@","");
 
         if(parts.length === 1){
@@ -198,6 +200,7 @@
   ========================= */
   Onion.router.resolve = function(){
     try{
+
       const route = Onion.router.get();
 
       if(!Onion.routes[route]){
@@ -205,6 +208,7 @@
       }
 
       const config = Onion.routes[route] || Onion.routes["/"];
+
       Onion.setTitle(config.title);
 
       return config;
@@ -254,15 +258,17 @@
       return;
     }
 
-    /* 🔥 LOADER ON */
     Onion.ui?.showLoader?.();
+    Onion.events?.emit?.("route:start");
 
     history.pushState({}, "", finalHref);
 
-    Onion.render().then(()=>{
-      Onion.ui?.init?.();
-      Onion.state.navigating = false;
-    });
+    Onion.render()
+      .catch(e => console.error("💥 NAV ERROR:", e))
+      .finally(()=>{
+        Onion.events?.emit?.("route:end");
+        Onion.state.navigating = false;
+      });
 
   };
 
@@ -307,11 +313,14 @@
       Onion.state.navigating = true;
 
       Onion.ui?.showLoader?.();
+      Onion.events?.emit?.("route:start");
 
-      Onion.render().then(()=>{
-        Onion.ui?.init?.();
-        Onion.state.navigating = false;
-      });
+      Onion.render()
+        .catch(e => console.error("💥 POPSTATE ERROR:", e))
+        .finally(()=>{
+          Onion.events?.emit?.("route:end");
+          Onion.state.navigating = false;
+        });
 
     });
 

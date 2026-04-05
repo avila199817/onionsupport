@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 TOPBAR SEARCH — FULL PRO SAAS (FIXED · NO DUPES · NO LEAKS)
+   🧅 TOPBAR SEARCH — GOD MODE (SPA SAFE · NO DUPES · CORE SAFE)
 ========================================================= */
 
 (function(){
@@ -14,14 +14,8 @@ if(!Onion){
 }
 
 /* =========================================================
-   STATE GLOBAL
+   INIT (SIEMPRE REACTIVO)
 ========================================================= */
-
-let initialized = false;
-
-/* =========================
-   INIT
-========================= */
 
 function init(){
 
@@ -34,22 +28,13 @@ function init(){
     return setTimeout(init, 100);
   }
 
-  // 🔥 evitar rebind duplicado
-  if(initialized) return;
-
-  initialized = true;
-
   bind(input, container);
-
-  Onion.onCleanup(()=>{
-    initialized = false;
-  });
 
 }
 
 init();
 
-/* 🔥 SPA HOOKS (SIN DUPES) */
+/* 🔥 SPA HOOKS (CORE SAFE) */
 if(!window.__ONION_SEARCH_BOUND__){
 
   window.__ONION_SEARCH_BOUND__ = true;
@@ -60,18 +45,21 @@ if(!window.__ONION_SEARCH_BOUND__){
 }
 
 /* =========================================================
-   CORE BIND
+   CORE BIND (ANTI DUPES REAL)
 ========================================================= */
 
 function bind(input, container){
 
-  if(input.__searchInit) return;
-  input.__searchInit = true;
+  // 🔥 reset completo si ya existía
+  if(input.__searchBound){
+    input.__searchCleanup?.();
+  }
+
+  input.__searchBound = true;
 
   let timer = null;
   let controller = null;
   let activeIndex = -1;
-  let currentResults = [];
 
   /* =========================
      UI
@@ -127,7 +115,6 @@ function bind(input, container){
   function render(results, q=""){
 
     container.innerHTML = "";
-    currentResults = results;
     activeIndex = -1;
 
     if(!results.length){
@@ -189,9 +176,9 @@ function bind(input, container){
 
       controller = new AbortController();
 
-      const url = "/search?q=" + encodeURIComponent(q);
-
-      const data = await Onion.fetch(url,{ signal:controller.signal });
+      const data = await Onion.fetch("/search?q=" + encodeURIComponent(q), {
+        signal: controller.signal
+      });
 
       return data?.results || data || [];
 
@@ -285,10 +272,10 @@ function bind(input, container){
   }
 
   /* =========================
-     CLEANUP
+     CLEANUP CONTROLADO
   ========================= */
 
-  Onion.onCleanup(()=>{
+  input.__searchCleanup = function(){
 
     clearTimeout(timer);
 
@@ -296,9 +283,9 @@ function bind(input, container){
       try{ controller.abort(); }catch{}
     }
 
-    input.__searchInit = false;
+    input.__searchBound = false;
 
-  });
+  };
 
 }
 
@@ -307,7 +294,7 @@ function bind(input, container){
 ========================= */
 
 if(Onion.config?.DEBUG){
-  Onion.log("🔍 Topbar Search PRO ready");
+  Onion.log("🔍 Topbar Search GOD MODE ready");
 }
 
 })();

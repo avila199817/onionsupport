@@ -1,6 +1,3 @@
-/* =========================================================
-   🔥 BOOT — SAFE LOADER CONTROL (SAAS PRO)
-========================================================= */
 "use strict";
 
 (function(){
@@ -37,11 +34,12 @@
 
 
   /* =========================================================
-     🔥 SAFE LOADER (CLAVE DE TODO)
+     🔥 SAFE LOADER
   ========================================================= */
 
   function hideLoaderSafe(){
 
+    // quitar clase global
     document.body.classList.remove("loading");
 
     const loader = document.getElementById("app-loader");
@@ -50,7 +48,7 @@
       loader.style.opacity = "0";
 
       setTimeout(()=>{
-        loader.remove();
+        try{ loader.remove(); }catch{}
       }, 200);
     }
 
@@ -67,31 +65,34 @@
 
     try{
 
-      /* 🔥 FALLBACK: pase lo que pase, quita loader */
-      bootTimeout = setTimeout(hideLoaderSafe, 4000);
+      /* 🔥 FALLBACK GLOBAL (ANTI-BLOQUEO) */
+      bootTimeout = setTimeout(()=>{
+        console.warn("⚠️ Loader timeout fallback");
+        hideLoaderSafe();
+      }, 4000);
 
       /* =========================
          CONFIG
       ========================= */
 
-      Onion.userConfig?.apply();
+      Onion.userConfig?.apply?.();
 
       /* =========================
          IDIOMA
       ========================= */
 
-      const lang = Onion.userConfig?.get("lang") || "es";
+      const lang = Onion.userConfig?.get?.("lang") || "es";
       Onion.i18n?.setLang?.(lang);
 
       /* =========================
-         AUTH
+         AUTH (PRE-CHECK)
       ========================= */
 
       Onion.state.slug = localStorage.getItem("onion_user_slug");
 
       if(!Onion.state.slug){
         hideLoaderSafe();
-        Onion.auth.redirectLogin();
+        Onion.auth?.redirectLogin?.();
         return;
       }
 
@@ -102,24 +103,29 @@
       await Onion.init();
 
       /* =========================
-         INIT UI
+         READY → UI (EVENTO GLOBAL)
       ========================= */
 
-      Onion.ui?.init?.();
-      Onion.i18n?.apply?.();
+      Onion.events?.on?.("app:ready", ()=>{
+        Onion.ui?.init?.();
+        Onion.i18n?.apply?.();
+      });
 
       /* =========================
-         READY
+         LOADER CONTROL FINAL
       ========================= */
 
       clearTimeout(bootTimeout);
-      hideLoaderSafe();
+
+      // 🔥 solo si aún sigue activo
+      if(document.body.classList.contains("loading")){
+        hideLoaderSafe();
+      }
 
     }catch(e){
 
       console.error("💥 BOOT ERROR:", e);
 
-      /* 🔥 aunque pete TODO, quitamos loader */
       clearTimeout(bootTimeout);
       hideLoaderSafe();
 

@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 UI — FULL PRO (SIN DUPES, SIN RACE, TODO CENTRALIZADO)
+   🧅 UI — FULL PRO SAAS (FIXED · NO DUPES · NO DOUBLE EVENTS)
 ========================================================= */
 
 (function(){
@@ -138,7 +138,7 @@
   };
 
   /* =========================
-     GLOBAL EVENTS
+     GLOBAL EVENTS (FIX DUPES)
   ========================= */
 
   function bindGlobalEvents(){
@@ -146,10 +146,9 @@
     if(bindGlobalEvents._bound) return;
     bindGlobalEvents._bound = true;
 
-    Onion.cleanupEvent(document, "click", async (e)=>{
+    document.addEventListener("click", async (e)=>{
 
       const logout = e.target.closest("#logoutBtn");
-
       if(!logout) return;
 
       e.preventDefault();
@@ -158,8 +157,8 @@
 
       try{
         await Onion.auth.logout();
-      }catch(e){
-        Onion.error("Logout error:", e);
+      }catch(err){
+        Onion.error("Logout error:", err);
       }
 
     });
@@ -199,8 +198,8 @@
     if(!initialized){
 
       bindGlobalEvents();
-
       initialized = true;
+
     }
 
     Onion.ui.refresh();
@@ -212,22 +211,26 @@
   ========================= */
 
   Onion.ui.refresh = function(){
-
     waitDOMAndRender();
-
   };
 
   /* =========================
-     HOOK SPA
+     HOOK SPA (FIX DUPES)
   ========================= */
 
-  Onion.events?.on?.("route:end", ()=>{
-    Onion.ui.refresh();
-  });
+  if(!window.__ONION_UI_BOUND__){
 
-  Onion.events?.on?.("app:ready", ()=>{
-    Onion.ui.init();
-  });
+    window.__ONION_UI_BOUND__ = true;
+
+    Onion.events?.on?.("route:end", ()=>{
+      Onion.ui.refresh();
+    });
+
+    Onion.events?.on?.("app:ready", ()=>{
+      Onion.ui.init();
+    });
+
+  }
 
   /* =========================
      DEBUG

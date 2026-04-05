@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 UI — FULL PRO FIX (SYNC REAL · SIN RACE · SIN ROTURAS)
+   🧅 UI — FULL PRO (SIN DUPES, SIN RACE, TODO CENTRALIZADO)
 ========================================================= */
 
 (function(){
@@ -21,7 +21,7 @@
 
   function getUserSafe(){
 
-    let user = Onion.getUser?.() || Onion.state.user;
+    let user = Onion.getUser?.();
 
     if(!user || !Object.keys(user).length){
 
@@ -91,30 +91,34 @@
      RENDER
   ========================= */
 
-  Onion.ui.renderAll = function(){
+  Onion.ui.renderSidebar = function(){
 
     const nameEl = exists("#sidebar-name");
     const avatarEl = exists("#sidebar-avatar");
-    const topbarEl = exists("#topbar-title");
 
-    if(nameEl && avatarEl){
+    if(!nameEl || !avatarEl) return;
 
-      const user = getUserSafe();
-      const name = getDisplayName(user);
+    const user = getUserSafe();
+    const name = getDisplayName(user);
 
-      nameEl.textContent = name;
-      setAvatar(avatarEl, user, name);
+    nameEl.textContent = name;
+    setAvatar(avatarEl, user, name);
 
-    }
+  };
 
-    if(topbarEl){
+  Onion.ui.renderTopbar = function(){
 
-      const route = Onion.router.get();
-      const config = Onion.routes[route];
+    const el = exists("#topbar-title");
+    if(!el) return;
 
-      topbarEl.textContent = config?.title || "Panel";
+    const route = Onion.router.get();
+    const config = Onion.routes[route];
 
-    }
+    el.textContent = config?.title || "Panel";
+
+  };
+
+  Onion.ui.updateSidebarActive = function(){
 
     const route = Onion.router.get();
 
@@ -145,6 +149,7 @@
     Onion.cleanupEvent(document, "click", async (e)=>{
 
       const logout = e.target.closest("#logoutBtn");
+
       if(!logout) return;
 
       e.preventDefault();
@@ -154,9 +159,33 @@
       try{
         await Onion.auth.logout();
       }catch(e){
-        Onion.error?.("Logout error:", e);
+        Onion.error("Logout error:", e);
       }
 
+    });
+
+  }
+
+  /* =========================
+     WAIT DOM (ANTI RACE)
+  ========================= */
+
+  function waitDOMAndRender(retries = 10){
+
+    if(
+      exists("#sidebar-name") &&
+      exists("#topbar-title")
+    ){
+      Onion.ui.renderSidebar();
+      Onion.ui.renderTopbar();
+      Onion.ui.updateSidebarActive();
+      return;
+    }
+
+    if(retries <= 0) return;
+
+    requestAnimationFrame(()=>{
+      waitDOMAndRender(retries - 1);
     });
 
   }
@@ -171,11 +200,6 @@
 
       bindGlobalEvents();
 
-      // 🔥 VOLVEMOS A ACTIVAR MÓDULOS (CLAVE)
-      Onion.ui.sidebar?.init?.();
-      Onion.ui.dropdown?.init?.();
-      Onion.ui.search?.init?.();
-
       initialized = true;
     }
 
@@ -184,17 +208,12 @@
   };
 
   /* =========================
-     REFRESH (SYNC REAL)
+     REFRESH
   ========================= */
 
   Onion.ui.refresh = function(){
 
-    // 🔥 esperamos a que el render haya pintado + estilos aplicados
-    requestAnimationFrame(()=>{
-      requestAnimationFrame(()=>{
-        Onion.ui.renderAll();
-      });
-    });
+    waitDOMAndRender();
 
   };
 
@@ -215,7 +234,7 @@
   ========================= */
 
   if(Onion.config?.DEBUG){
-    Onion.log?.("🎨 UI PRO ready");
+    Onion.log("🎨 UI system PRO ready");
   }
 
 })();

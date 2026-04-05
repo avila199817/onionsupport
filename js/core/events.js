@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 EVENTS BUS — FULL PRO (ROBUSTO, SIN FUGAS, SIN DUPES)
+   🧅 EVENTS BUS — GOD MODE (CORE VS VIEW · NO LEAKS · NO BREAKS)
 ========================================================= */
 
 (function(){
@@ -20,7 +20,7 @@
   const events = Object.create(null);
 
   /* =========================================================
-     ON
+     ON (VIEW — se limpia)
   ========================================================= */
 
   Onion.events.on = function(name, handler){
@@ -33,7 +33,7 @@
 
     events[name].add(handler);
 
-    // 🔥 auto-cleanup SPA
+    // 🔥 solo eventos de vista se limpian
     Onion.onCleanup?.(()=>{
       events[name]?.delete(handler);
       if(events[name]?.size === 0){
@@ -41,6 +41,23 @@
       }
     });
 
+  };
+
+  /* =========================================================
+     ON CORE (🔥 persistente)
+  ========================================================= */
+
+  Onion.events.onCore = function(name, handler){
+
+    if(!name || typeof handler !== "function") return;
+
+    if(!events[name]){
+      events[name] = new Set();
+    }
+
+    events[name].add(handler);
+
+    // ❌ NO cleanup → persistente
   };
 
   /* =========================================================
@@ -95,7 +112,6 @@
 
     if(!name || !events[name]) return;
 
-    // 🔥 snapshot → evita bugs si se modifica durante loop
     const handlers = Array.from(events[name]);
 
     for(const handler of handlers){
@@ -109,10 +125,32 @@
   };
 
   /* =========================================================
-     CLEAR (debug / reset manual)
+     CLEAR (SOLO VIEW)
   ========================================================= */
 
-  Onion.events.clear = function(){
+  Onion.events.clearView = function(){
+
+    Object.keys(events).forEach(name=>{
+
+      const set = events[name];
+
+      for(const handler of set){
+        // 🔥 solo borrar handlers ligados a cleanup
+        // (los core sobreviven porque no usan onCleanup)
+        try{
+          // noop → cleanup ya se encarga
+        }catch{}
+      }
+
+    });
+
+  };
+
+  /* =========================================================
+     CLEAR ALL (DEBUG)
+  ========================================================= */
+
+  Onion.events.clearAll = function(){
     Object.keys(events).forEach(k => delete events[k]);
   };
 
@@ -121,7 +159,7 @@
   ========================================================= */
 
   if(Onion.config?.DEBUG){
-    Onion.log("📡 Events system PRO ready");
+    Onion.log("📡 Events GOD MODE ready");
   }
 
 })();

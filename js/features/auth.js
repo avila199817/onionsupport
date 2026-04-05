@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 AUTH — FULL PRO (SIN DUPLICADOS, SOURCE OF TRUTH = CORE)
+   🧅 AUTH — FULL PRO SAAS (FIXED · NO DUPES · CONSISTENTE CON CORE)
 ========================================================= */
 
 (function(){
@@ -51,19 +51,6 @@
   };
 
   /* =========================
-     PERMISSIONS (CORE USER)
-  ========================= */
-
-  Onion.can = function(permission){
-
-    const user = Onion.getUser?.();
-
-    if(!user || !Array.isArray(user.permissions)) return false;
-
-    return user.permissions.includes(permission);
-  };
-
-  /* =========================
      RESET SESSION (HARD)
   ========================= */
 
@@ -97,15 +84,15 @@
   Onion.auth.redirectLogin = function(){
 
     if(redirecting) return;
-    redirecting = true;
 
     const path = window.location.pathname;
 
     // evitar loop
     if(path.startsWith("/auth")){
-      redirecting = false;
       return;
     }
+
+    redirecting = true;
 
     Onion.auth.resetSession();
 
@@ -114,7 +101,7 @@
   };
 
   /* =========================
-     REQUIRE AUTH (GUARD)
+     REQUIRE AUTH
   ========================= */
 
   Onion.auth.require = function(){
@@ -129,20 +116,19 @@
   };
 
   /* =========================
-     LOGOUT CENTRALIZADO 🔥
+     LOGOUT CENTRALIZADO
   ========================= */
 
   Onion.auth.logout = async function(){
 
     try{
 
-      await fetch(Onion.config.API + "/auth/logout", {
-        method: "POST",
-        credentials: "include"
+      await Onion.fetch("/auth/logout", {
+        method: "POST"
       });
 
     }catch(e){
-      console.warn("⚠️ Logout request falló (continuamos cleanup)");
+      Onion.warn("Logout request falló (continuamos cleanup)");
     }
 
     Onion.auth.resetSession();

@@ -264,7 +264,7 @@ function updateTooltip(){
 }
 
 if(Onion.config?.DEBUG){
-  Onion.log("📚 Sidebar PRO (recientes desactivado) ready");
+  Onion.log("📚 Sidebar PRO ready");
 }
 
 })();

@@ -1,5 +1,9 @@
 "use strict";
 
+/* =========================================================
+   🧅 AUTH — FULL PRO (SIN DUPLICADOS, SOURCE OF TRUTH = CORE)
+========================================================= */
+
 (function(){
 
   if(!window.Onion){
@@ -12,27 +16,19 @@
   let redirecting = false;
 
   /* =========================
-     STORAGE SAFE
+     SAFE STORAGE
   ========================= */
 
   function safeSet(key, value){
-    try{
-      localStorage.setItem(key, value);
-    }catch{}
+    try{ localStorage.setItem(key, value); }catch{}
   }
 
   function safeGet(key){
-    try{
-      return localStorage.getItem(key);
-    }catch{
-      return null;
-    }
+    try{ return localStorage.getItem(key); }catch{ return null; }
   }
 
   function safeRemove(key){
-    try{
-      localStorage.removeItem(key);
-    }catch{}
+    try{ localStorage.removeItem(key); }catch{}
   }
 
   /* =========================
@@ -55,41 +51,20 @@
   };
 
   /* =========================
-     USER (SINCRONIZADO)
-  ========================= */
-
-  Onion.user = null;
-  Onion.state = Onion.state || {};
-
-  Onion.setUser = function(user){
-    Onion.user = user;
-    Onion.state.user = user;
-  };
-
-  Onion.getUser = function(){
-    return Onion.user || Onion.state.user || null;
-  };
-
-  Onion.clearUser = function(){
-    Onion.user = null;
-    Onion.state.user = null;
-  };
-
-  /* =========================
-     PERMISSIONS
+     PERMISSIONS (CORE USER)
   ========================= */
 
   Onion.can = function(permission){
 
-    const user = Onion.getUser();
+    const user = Onion.getUser?.();
 
-    if(!user || !user.permissions) return false;
+    if(!user || !Array.isArray(user.permissions)) return false;
 
     return user.permissions.includes(permission);
   };
 
   /* =========================
-     RESET SESSION
+     RESET SESSION (HARD)
   ========================= */
 
   Onion.auth.resetSession = function(){
@@ -126,7 +101,11 @@
 
     const path = window.location.pathname;
 
-    if(path.startsWith("/auth")) return;
+    // evitar loop
+    if(path.startsWith("/auth")){
+      redirecting = false;
+      return;
+    }
 
     Onion.auth.resetSession();
 
@@ -135,7 +114,7 @@
   };
 
   /* =========================
-     REQUIRE AUTH
+     REQUIRE AUTH (GUARD)
   ========================= */
 
   Onion.auth.require = function(){
@@ -148,5 +127,36 @@
     return false;
 
   };
+
+  /* =========================
+     LOGOUT CENTRALIZADO 🔥
+  ========================= */
+
+  Onion.auth.logout = async function(){
+
+    try{
+
+      await fetch(Onion.config.API + "/auth/logout", {
+        method: "POST",
+        credentials: "include"
+      });
+
+    }catch(e){
+      console.warn("⚠️ Logout request falló (continuamos cleanup)");
+    }
+
+    Onion.auth.resetSession();
+
+    window.location.href = "/auth";
+
+  };
+
+  /* =========================
+     DEBUG
+  ========================= */
+
+  if(Onion.config?.DEBUG){
+    Onion.log("🔐 Auth system PRO ready");
+  }
 
 })();

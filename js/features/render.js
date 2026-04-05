@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 RENDER — FULL PRO (SPA SAFE · NO ROMPE LAYOUT)
+   🧅 RENDER — GOD MODE (ROBUSTO · SPA SAFE · SIN FALLOS)
 ========================================================= */
 
 (function(){
@@ -78,7 +78,6 @@ Onion.loadScript = async function(scripts){
     return;
   }
 
-  /* 🔥 limpiar scripts anteriores */
   document.querySelectorAll("script[data-onion-page]").forEach(s=>{
     try{ s.remove(); }catch{}
   });
@@ -176,26 +175,42 @@ Onion.fetchHTML = async function(url){
 };
 
 /* =========================================================
-   EXTRACT CONTENT
+   EXTRACT (ULTRA ROBUSTO)
 ========================================================= */
 
 function extractContent(html){
 
   const wrapper = document.createElement("div");
-  wrapper.innerHTML = html;
+  wrapper.innerHTML = html.trim();
 
-  return wrapper.querySelector(".panel-content") || wrapper;
+  let content = wrapper.querySelector(".panel-content");
+
+  if(content){
+    return content;
+  }
+
+  console.warn("⚠️ panel-content no encontrado, usando fallback");
+
+  const fallback = document.createElement("div");
+  fallback.className = "panel-content";
+  fallback.innerHTML = html;
+
+  return fallback;
 
 }
 
 /* =========================================================
-   SWAP (🔥 SOLO VIEW-CONTAINER)
+   SWAP (SOLO VIEW)
 ========================================================= */
 
 function swapView(node){
 
   const container = document.getElementById("view-container");
-  if(!container) return;
+
+  if(!container){
+    console.error("❌ view-container no existe");
+    return;
+  }
 
   container.innerHTML = "";
   container.appendChild(node.cloneNode(true));
@@ -203,7 +218,7 @@ function swapView(node){
 }
 
 /* =========================================================
-   TOPBAR TITLE
+   TOPBAR
 ========================================================= */
 
 function updateTopbar(route){
@@ -216,7 +231,7 @@ function updateTopbar(route){
 }
 
 /* =========================================================
-   DYNAMIC CONTAINERS
+   CLEAR DYNAMIC
 ========================================================= */
 
 function clearDynamic(){
@@ -244,72 +259,49 @@ const originalRender = async function(){
 
     const route = Onion.router.resolve();
 
-    /* =========================
-       TITLE
-    ========================= */
-
+    /* TITLE */
     if(route.title){
       document.title = "Onion Support · " + route.title;
     }
 
     updateTopbar(route);
 
-    /* =========================
-       FETCH
-    ========================= */
-
+    /* FETCH */
     const html = await Onion.fetchHTML(route.page);
 
     if(renderId !== Onion.state.renderId) return;
 
+    /* EXTRACT */
     const content = extractContent(html);
 
     if(!content){
-      throw new Error("No se encontró .panel-content");
+      throw new Error("❌ Error extrayendo contenido");
     }
 
     content.classList.remove("ready");
 
-    /* =========================
-       CLEANUP
-    ========================= */
-
+    /* CLEANUP */
     Onion.runCleanup?.();
 
-    /* =========================
-       STYLE
-    ========================= */
-
+    /* STYLE */
     if(route.style){
       await Onion.loadStyle(route.style);
     }
 
-    /* =========================
-       CLEAR DYNAMIC
-    ========================= */
-
+    /* CLEAR */
     clearDynamic();
 
-    /* =========================
-       SWAP VIEW
-    ========================= */
-
+    /* SWAP */
     swapView(content);
 
-    /* =========================
-       SCRIPTS
-    ========================= */
-
+    /* SCRIPTS */
     if(route.script){
       await Onion.loadScript(route.script);
     }
 
     if(renderId !== Onion.state.renderId) return;
 
-    /* =========================
-       FRAME SYNC
-    ========================= */
-
+    /* FRAME SYNC */
     await new Promise(r => requestAnimationFrame(r));
     await new Promise(r => requestAnimationFrame(r));
 
@@ -323,7 +315,7 @@ const originalRender = async function(){
 
   }catch(e){
 
-    Onion.error("RENDER ERROR:", e);
+    console.error("💥 RENDER ERROR:", e);
     Onion.ui.hideLoader?.();
 
   }finally{
@@ -347,7 +339,7 @@ Onion.render = async function(){
 ========================================================= */
 
 if(Onion.config?.DEBUG){
-  Onion.log("🎬 Render PRO ready");
+  Onion.log("🔥 Render PRO ready");
 }
 
 })();

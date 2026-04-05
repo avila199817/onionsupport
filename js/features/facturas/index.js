@@ -15,11 +15,18 @@ let filteredItems = [];
 let loading = false;
 let currentRequestId = 0;
 
+/* 🔥 FILTROS CENTRALIZADOS */
+let externalFilters = {
+  search: "",
+  estado: ""
+};
+
 /* 🔥 SORT STATE */
 let currentSort = {
   field: null,
   direction: null
 };
+
 
 /* =========================
    ROOT
@@ -36,37 +43,28 @@ function $(selector){
 
 
 /* =========================
-   🔥 TABLE LOADER CONTROL
+   LOADER
 ========================= */
 
 function showLoader(){
-  const root = getRoot();
-  if(!root) return;
-
-  const loader = root.querySelector(".table-loader");
-  if(!loader) return;
-
-  loader.style.display = "flex";
-  loader.style.opacity = "1";
+  const loader = getRoot()?.querySelector(".table-loader");
+  if(loader){
+    loader.style.display = "flex";
+    loader.style.opacity = "1";
+  }
 }
 
 function hideLoader(){
-  const root = getRoot();
-  if(!root) return;
-
-  const loader = root.querySelector(".table-loader");
-  if(!loader) return;
-
-  loader.style.opacity = "0";
-
-  setTimeout(()=>{
-    loader.style.display = "none";
-  }, 250);
+  const loader = getRoot()?.querySelector(".table-loader");
+  if(loader){
+    loader.style.opacity = "0";
+    setTimeout(()=> loader.style.display = "none", 250);
+  }
 }
 
 
 /* =========================
-   LOAD — ÚNICO Y FINAL
+   LOAD
 ========================= */
 
 async function loadFacturas(){
@@ -93,9 +91,7 @@ async function loadFacturas(){
     const res = await Onion.fetch(Onion.config.API + "/facturas");
     const items = normalize(res);
 
-    if(requestId !== currentRequestId){
-      return;
-    }
+    if(requestId !== currentRequestId) return;
 
     currentItems = items;
     filteredItems = items;
@@ -116,7 +112,6 @@ async function loadFacturas(){
     }
 
   }finally{
-
     hideLoader();
     loading = false;
   }
@@ -134,7 +129,6 @@ function init(){
   if(!root || initialized) return;
 
   if(!Onion.state?.user){
-    console.warn("⏳ esperando user...");
     return setTimeout(init, 100);
   }
 
@@ -142,9 +136,7 @@ function init(){
 
   bindEvents();
 
-  requestAnimationFrame(()=>{
-    loadFacturas();
-  });
+  requestAnimationFrame(loadFacturas);
 
   Onion.onCleanup(()=>{
     initialized = false;
@@ -167,31 +159,17 @@ function bindEvents(){
   Onion.cleanupEvent(root, "click", (e)=>{
 
     const th = e.target.closest("th[data-sort]");
-    if(th){
-      handleSort(th);
-      return;
-    }
+    if(th) return handleSort(th);
 
     const btn = e.target.closest(".btn-action");
-
-    if(btn){
-      handleAction(btn);
-      return;
-    }
+    if(btn) return handleAction(btn);
 
     const row = e.target.closest("tr[data-id]");
-    if(!row) return;
-
-    Onion.router.navigate("/facturas/detalle?id=" + row.dataset.id);
+    if(row){
+      Onion.router.navigate("/facturas/detalle?id=" + row.dataset.id);
+    }
 
   });
-
-  $("#btn-new-factura")?.addEventListener("click", ()=>{
-    Onion.router.navigate("/facturas/nueva");
-  });
-
-  $("#search-factura")?.addEventListener("input", debounce(applyFilters, 250));
-  $("#filter-estado-factura")?.addEventListener("change", applyFilters);
 
 }
 
@@ -218,8 +196,7 @@ function handleSort(th){
 function applySort(){
 
   if(!currentSort.field){
-    render(filteredItems);
-    return;
+    return render(filteredItems);
   }
 
   const dir = currentSort.direction === "asc" ? 1 : -1;
@@ -229,8 +206,8 @@ function applySort(){
     const A = getSortValue(a, currentSort.field);
     const B = getSortValue(b, currentSort.field);
 
-    if(A > B) return 1 * dir;
-    if(A < B) return -1 * dir;
+    if(A > B) return dir;
+    if(A < B) return -dir;
     return 0;
   });
 
@@ -240,129 +217,35 @@ function applySort(){
 function getSortValue(f, field){
 
   switch(field){
-
-    case "numero":
-      return Number(f.numeroFacturaLegal || f.numero || f.id || 0);
-
-    case "cliente":
-      return safeText(f.cliente?.nombre || f.cliente?.nombreContacto);
-
-    case "empresa":
-      return safeText(f.cliente?.empresa || f.cliente?.razonSocial);
-
-    case "fecha":
-      return new Date(f.fechaFactura || f.fecha || 0).getTime();
-
-    case "total":
-      return Number(f.total || 0);
-
-    case "estadoPago":
-      return safeText(f.estadoPago);
-
-    default:
-      return "";
+    case "numero": return Number(f.numeroFacturaLegal || f.numero || f.id || 0);
+    case "cliente": return safeText(f.cliente?.nombre || f.cliente?.nombreContacto);
+    case "empresa": return safeText(f.cliente?.empresa || f.cliente?.razonSocial);
+    case "fecha": return new Date(f.fechaFactura || f.fecha || 0).getTime();
+    case "total": return Number(f.total || 0);
+    case "estadoPago": return safeText(f.estadoPago);
+    default: return "";
   }
 
 }
 
 function updateSortUI(){
-
   document.querySelectorAll("th[data-sort]").forEach(th=>{
     th.classList.remove("asc","desc");
-
     if(th.dataset.sort === currentSort.field){
       th.classList.add(currentSort.direction);
     }
   });
-
 }
 
 
 /* =========================
-   ACTIONS
-========================= */
-
-async function handleAction(btn){
-
-  const id = btn.dataset.id;
-  if(!id) return;
-
-  if(btn.classList.contains("view")){
-    Onion.router.navigate("/facturas/detalle?id=" + id);
-  }
-
-  if(btn.classList.contains("download")){
-
-    if(btn.classList.contains("loading")) return;
-
-    btn.classList.add("loading");
-
-    const original = btn.textContent;
-    btn.textContent = "⏳";
-
-    try{
-
-      const res = await Onion.fetch(
-        Onion.config.API + "/facturas/" + id + "/descargar"
-      );
-
-      if(!res || !res.ok || !res.url){
-        Onion.ui.toast?.error("Error descargando PDF");
-        return;
-      }
-
-      const link = document.createElement("a");
-      link.href = res.url;
-      link.download = `factura-${id}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
-      Onion.ui.toast?.success("Factura descargada 📄");
-
-    }catch(e){
-      console.error("💥 ERROR DOWNLOAD:", e);
-      Onion.ui.toast?.error("Error descargando PDF");
-    }finally{
-      btn.textContent = original;
-      btn.classList.remove("loading");
-    }
-
-  }
-
-  if(btn.classList.contains("pay")){
-    Onion.ui.toast?.info("💳 Simulación pago factura " + id);
-  }
-
-}
-
-
-/* =========================
-   NORMALIZE
-========================= */
-
-function normalize(res){
-
-  if(!res) return [];
-
-  if(Array.isArray(res)) return res;
-  if(Array.isArray(res.facturas)) return res.facturas;
-  if(Array.isArray(res.data)) return res.data;
-  if(Array.isArray(res.items)) return res.items;
-
-  return [];
-
-}
-
-
-/* =========================
-   FILTERS
+   FILTERS (PRO)
 ========================= */
 
 function applyFilters(){
 
-  const search = ($("#search-factura")?.value || "").toLowerCase();
-  const estado = ($("#filter-estado-factura")?.value || "").toLowerCase();
+  const search = externalFilters.search.toLowerCase();
+  const estado = externalFilters.estado.toLowerCase();
 
   filteredItems = currentItems.filter(f => {
 
@@ -379,7 +262,6 @@ function applyFilters(){
   });
 
   applySort();
-
 }
 
 
@@ -388,18 +270,16 @@ function applyFilters(){
 ========================= */
 
 function setEmpty(){
-  $("#facturas-body").innerHTML =
-    `<tr><td colspan="7">No hay facturas</td></tr>`;
+  $("#facturas-body").innerHTML = `<tr><td colspan="7">No hay facturas</td></tr>`;
 }
 
 function setError(){
-  $("#facturas-body").innerHTML =
-    `<tr><td colspan="7">Error cargando facturas</td></tr>`;
+  $("#facturas-body").innerHTML = `<tr><td colspan="7">Error cargando facturas</td></tr>`;
 }
 
 
 /* =========================
-   RENDER
+   RENDER (COMPLETO)
 ========================= */
 
 function render(items){
@@ -407,10 +287,7 @@ function render(items){
   const tbody = $("#facturas-body");
   if(!tbody) return;
 
-  if(!items.length){
-    setEmpty();
-    return;
-  }
+  if(!items.length) return setEmpty();
 
   const html = items.map(f => {
 
@@ -471,11 +348,15 @@ function render(items){
 
 
 /* =========================
-   HELPERS
+   HELPERS (COMPLETO)
 ========================= */
 
 function mapItem(f){
-  const empresaRaw = f.cliente?.empresa || f.cliente?.razonSocial;
+
+  const empresaRaw =
+    f.cliente?.empresa ||
+    f.cliente?.razonSocial;
+
   const empresaClean = cleanValue(empresaRaw, "");
 
   return {
@@ -483,8 +364,16 @@ function mapItem(f){
     numero: f.numeroFacturaLegal || f.numero || f.id,
 
     cliente: {
-      nombre: cleanValue(f.cliente?.nombre || f.cliente?.nombreContacto,"Cliente"),
-      email: cleanValue(f.cliente?.email || f.emailCliente,"-")
+      nombre: cleanValue(
+        f.cliente?.nombre ||
+        f.cliente?.nombreContacto,
+        "Cliente"
+      ),
+      email: cleanValue(
+        f.cliente?.email ||
+        f.emailCliente,
+        "-"
+      )
     },
 
     empresa: empresaClean,
@@ -495,6 +384,7 @@ function mapItem(f){
 
     estadoPago: getEstadoPago(f.estadoPago)
   };
+
 }
 
 function cleanValue(val, fallback){
@@ -584,33 +474,14 @@ function escapeHTML(str){
     .replace(/>/g,"&gt;");
 }
 
-function debounce(fn, delay){
-  let t;
-  return (...args)=>{
-    clearTimeout(t);
-    t = setTimeout(()=>fn(...args), delay);
-  };
-}
 
 /* =========================
-   🔥 CONEXIÓN TOPBAR (AQUÍ)
+   🔥 CONEXIÓN TOPBAR FINAL
 ========================= */
 
 window.FacturasUIExternal = {
   applyFilters: (uiState)=>{
-
-    if(uiState){
-      // 🔥 usar estado del topbar
-      if(typeof uiState.search !== "undefined"){
-        document.getElementById("search-factura")?.value = uiState.search;
-      }
-
-      if(typeof uiState.estado !== "undefined"){
-        document.getElementById("filter-estado-factura")?.value = uiState.estado;
-      }
-    }
-
-    // 🔥 ejecutar filtros reales del sistema
+    externalFilters = uiState || externalFilters;
     applyFilters();
   }
 };

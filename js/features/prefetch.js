@@ -49,7 +49,6 @@
 
     const finalHref = href;
 
-    // evitar duplicados reales
     if(document.querySelector(`link[href="${finalHref}"]`)) return;
 
     const link = document.createElement("link");

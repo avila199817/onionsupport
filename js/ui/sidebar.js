@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 SIDEBAR — FULL PRO SAAS (FIXED · NO DUPES · SPA SAFE REAL)
+   🧅 SIDEBAR — GOD MODE (IDEMPOTENTE · REBIND REAL · ZERO BUGS)
 ========================================================= */
 
 (function(){
@@ -14,14 +14,8 @@ if(!Onion){
 }
 
 /* =========================================================
-   STATE
+   INIT (IDEMPOTENTE)
 ========================================================= */
-
-let initialized = false;
-
-/* =========================
-   INIT
-========================= */
 
 function init(){
 
@@ -34,26 +28,17 @@ function init(){
     return setTimeout(init, 100);
   }
 
-  // 🔥 evitar duplicar binds
-  if(initialized) return;
-
-  initialized = true;
-
+  // 🔥 SIEMPRE re-render + rebind (clave real)
   renderUser();
   restoreState();
   bindEvents();
-
   setRecientesError();
-
-  Onion.onCleanup(()=>{
-    initialized = false;
-  });
 
 }
 
 init();
 
-/* 🔥 SPA HOOKS (SIN DUPES) */
+/* 🔥 SPA HOOKS (UNA SOLA VEZ) */
 if(!window.__ONION_SIDEBAR_BOUND__){
 
   window.__ONION_SIDEBAR_BOUND__ = true;
@@ -80,7 +65,7 @@ function restoreState(){
 }
 
 /* =========================================================
-   EVENTS
+   EVENTS (REBINDEABLE SIEMPRE)
 ========================================================= */
 
 function bindEvents(){
@@ -93,7 +78,10 @@ function bindEvents(){
 
   if(!sidebar || !toggle) return;
 
-  /* TOGGLE SIDEBAR */
+  /* =========================
+     TOGGLE SIDEBAR
+  ========================= */
+
   Onion.cleanupEvent(toggle, "click", (e)=>{
     e.stopPropagation();
 
@@ -108,7 +96,10 @@ function bindEvents(){
     updateTooltip();
   });
 
-  /* USER DROPDOWN */
+  /* =========================
+     USER DROPDOWN
+  ========================= */
+
   if(user && dropdown){
 
     Onion.cleanupEvent(user, "click", (e)=>{
@@ -132,7 +123,10 @@ function bindEvents(){
 
   }
 
-  /* CLOSE DROPDOWN */
+  /* =========================
+     CLOSE DROPDOWN CLICK OUT
+  ========================= */
+
   Onion.cleanupEvent(document, "click", (e)=>{
 
     if(
@@ -145,14 +139,20 @@ function bindEvents(){
     dropdown?.classList.remove("active");
   });
 
-  /* ESC CLOSE */
+  /* =========================
+     ESC CLOSE
+  ========================= */
+
   Onion.cleanupEvent(document, "keydown", (e)=>{
     if(e.key === "Escape"){
       dropdown?.classList.remove("active");
     }
   });
 
-  /* LOGOUT */
+  /* =========================
+     LOGOUT
+  ========================= */
+
   if(logout){
 
     Onion.cleanupEvent(logout, "click", async (e)=>{
@@ -277,8 +277,12 @@ function updateTooltip(){
   );
 }
 
+/* =========================================================
+   DEBUG
+========================================================= */
+
 if(Onion.config?.DEBUG){
-  Onion.log("📚 Sidebar PRO ready");
+  Onion.log("📚 Sidebar GOD MODE ready");
 }
 
 })();

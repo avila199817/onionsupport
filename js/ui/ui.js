@@ -17,7 +17,7 @@
 
   function getUserSafe(){
 
-    let user = Onion.state.user;
+    let user = Onion.getUser?.();
 
     if(!user || !Object.keys(user).length){
 
@@ -130,12 +130,13 @@
   };
 
   /* =========================
-     EVENTOS GLOBALES (SOLO LOGOUT)
+     EVENTOS GLOBALES
   ========================= */
 
   function bindGlobalEvents(){
 
-    if(initialized) return;
+    if(bindGlobalEvents._bound) return;
+    bindGlobalEvents._bound = true;
 
     Onion.cleanupEvent(document, "click", async (e)=>{
 
@@ -166,16 +167,20 @@
 
   Onion.ui.init = function(){
 
-    bindGlobalEvents();
+    // 🔥 evita doble init duro
+    if(!initialized){
 
-    // 🔥 módulos separados (CLAVE)
-    Onion.ui.sidebar?.init?.();
-    Onion.ui.dropdown?.init?.();
-    Onion.ui.search?.init?.();
+      bindGlobalEvents();
 
+      Onion.ui.sidebar?.init?.();
+      Onion.ui.dropdown?.init?.();
+      Onion.ui.search?.init?.();
+
+      initialized = true;
+    }
+
+    // 🔥 SIEMPRE refrescar (SPA)
     Onion.ui.refresh();
-
-    initialized = true;
 
   };
 

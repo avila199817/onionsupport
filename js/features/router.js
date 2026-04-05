@@ -9,137 +9,159 @@
 
   const Onion = window.Onion;
 
-  /* =========================
-     ROUTES
-  ========================= */
+  
+/* =========================
+   ROUTES
+========================= */
 
-  Onion.routes = Object.freeze({
+Onion.routes = Object.freeze({
 
-    "/": {
-      page: "/app/views/index.html",
-      style: "/css/app/dashboard.css",
-      script: "/js/features/dashboard/index.js",
-      title: "Dashboard"
-    },
+  "/": {
+    page: "/app/views/index.html",
+    style: "/css/app/dashboard.css",
+    script: "/js/features/dashboard/index.js",
+    title: "Dashboard"
+  },
 
-    "/incidencias": {
-      page: "/app/views/incidencias/index.html",
-      style: "/css/app/incidencias/incidencias.css",
-      script: "/js/features/incidencias/index.js",
-      title: "Incidencias"
-    },
+  "/incidencias": {
+    page: "/app/views/incidencias/index.html",
+    style: [
+      "/css/app/core/topbarview.css",
+      "/css/app/incidencias/incidencias.css"
+    ],
+    script: [
+      "/js/features/incidencias/topbarview.js",
+      "/js/features/incidencias/index.js"
+    ],
+    topbarview: "incidencias",
+    title: "Incidencias"
+  },
 
-    "/incidencias/detalle": {
-      page: "/app/views/incidencias/detalle.html",
-      style: [
-        "/css/app/core/view.css",
-        "/css/app/incidencias/detalle.css"
-      ],
-      script: "/js/features/incidencias/detalle.js",
-      title: "Detalle incidencia"
-    },
+  "/incidencias/detalle": {
+    page: "/app/views/incidencias/detalle.html",
+    style: [
+      "/css/app/core/view.css",
+      "/css/app/incidencias/detalle.css"
+    ],
+    script: "/js/features/incidencias/detalle.js",
+    title: "Detalle incidencia"
+  },
 
-    "/incidencias/nueva": {
-      page: "/app/views/incidencias/incidencia.html",
-      style: "/css/app/incidencias/incidencia.css",
-      script: "/js/features/incidencias/incidencia.js",
-      title: "Nueva incidencia"
-    },
+  "/incidencias/nueva": {
+    page: "/app/views/incidencias/incidencia.html",
+    style: "/css/app/incidencias/incidencia.css",
+    script: "/js/features/incidencias/incidencia.js",
+    title: "Nueva incidencia"
+  },
 
-    "/facturas": {
-      page: "/app/views/facturas/index.html",
-      style: [
-        "/css/app/core/topbarview.css",
-        "/css/app/facturas/facturas.css"
-      ],
-      script: [
-        "/js/features/facturas/topbarview.js",
-        "/js/features/facturas/index.js"
-      ],
-      topbarview: "facturas",
-      title: "Facturas"
-    },
+  "/facturas": {
+    page: "/app/views/facturas/index.html",
+    style: [
+      "/css/app/core/topbarview.css",
+      "/css/app/facturas/facturas.css"
+    ],
+    script: [
+      "/js/features/facturas/topbarview.js",
+      "/js/features/facturas/index.js"
+    ],
+    topbarview: "facturas",
+    title: "Facturas"
+  },
 
-    "/facturas/detalle": {
-      page: "/app/views/facturas/detalle.html",
-      style: [
-        "/css/app/core/view.css",
-        "/css/app/facturas/detalle.css"
-      ],
-      script: "/js/features/facturas/detalle.js",
-      title: "Detalle factura"
-    },
+  "/facturas/detalle": {
+    page: "/app/views/facturas/detalle.html",
+    style: [
+      "/css/app/core/view.css",
+      "/css/app/facturas/detalle.css"
+    ],
+    script: "/js/features/facturas/detalle.js",
+    title: "Detalle factura"
+  },
 
-    "/facturas/nueva": {
-      page: "/app/views/facturas/factura.html",
-      style: "/css/app/facturas/factura.css",
-      script: "/js/features/facturas/factura.js",
-      title: "Nueva factura"
-    },
+  "/facturas/nueva": {
+    page: "/app/views/facturas/factura.html",
+    style: "/css/app/facturas/factura.css",
+    script: "/js/features/facturas/factura.js",
+    title: "Nueva factura"
+  },
 
-    "/cuenta": {
-      page: "/app/views/cuenta/index.html",
-      style: "/css/app/cuenta.css",
-      script: "/js/features/cuenta/index.js",
-      title: "Cuenta"
-    },
+  "/cuenta": {
+    page: "/app/views/cuenta/index.html",
+    style: "/css/app/cuenta.css",
+    script: "/js/features/cuenta/index.js",
+    title: "Cuenta"
+  },
 
-    "/usuarios": {
-      page: "/app/views/usuarios/index.html",
-      style: "/css/app/usuarios/usuarios.css",
-      script: "/js/features/usuarios/index.js",
-      title: "Usuarios"
-    },
+  "/usuarios": {
+    page: "/app/views/usuarios/index.html",
+    style: [
+      "/css/app/core/topbarview.css",
+      "/css/app/usuarios/usuarios.css"
+    ],
+    script: [
+      "/js/features/usuarios/topbarview.js",
+      "/js/features/usuarios/index.js"
+    ],
+    topbarview: "usuarios",
+    title: "Usuarios"
+  },
 
-    "/usuarios/nuevo": {
-      page: "/app/views/usuarios/usuario.html",
-      style: "/css/app/usuarios/usuario.css",
-      script: "/js/features/usuarios/usuario.js",
-      title: "Nuevo usuario"
-    },
+  "/usuarios/nuevo": {
+    page: "/app/views/usuarios/usuario.html",
+    style: "/css/app/usuarios/usuario.css",
+    script: "/js/features/usuarios/usuario.js",
+    title: "Nuevo usuario"
+  },
 
-    "/usuarios/detalle": {
-      page: "/app/views/usuarios/detalle.html",
-      style: [
-        "/css/app/core/view.css",
-        "/css/app/usuarios/detalle.css"
-      ],
-      script: "/js/features/usuarios/detalle.js",
-      title: "Detalle usuario"
-    },
+  "/usuarios/detalle": {
+    page: "/app/views/usuarios/detalle.html",
+    style: [
+      "/css/app/core/view.css",
+      "/css/app/usuarios/detalle.css"
+    ],
+    script: "/js/features/usuarios/detalle.js",
+    title: "Detalle usuario"
+  },
 
-    "/clientes": {
-      page: "/app/views/clientes/index.html",
-      style: "/css/app/clientes/clientes.css",
-      script: "/js/features/clientes/index.js",
-      title: "Clientes"
-    },
+  "/clientes": {
+    page: "/app/views/clientes/index.html",
+    style: [
+      "/css/app/core/topbarview.css",
+      "/css/app/clientes/clientes.css"
+    ],
+    script: [
+      "/js/features/clientes/topbarview.js",
+      "/js/features/clientes/index.js"
+    ],
+    topbarview: "clientes",
+    title: "Clientes"
+  },
 
-    "/clientes/detalle": {
-      page: "/app/views/clientes/detalle.html",
-      style: [
-        "/css/app/core/view.css",
-        "/css/app/clientes/detalle.css"
-      ],
-      script: "/js/features/clientes/detalle.js",
-      title: "Detalle cliente"
-    },
+  "/clientes/detalle": {
+    page: "/app/views/clientes/detalle.html",
+    style: [
+      "/css/app/core/view.css",
+      "/css/app/clientes/detalle.css"
+    ],
+    script: "/js/features/clientes/detalle.js",
+    title: "Detalle cliente"
+  },
 
-    "/clientes/cliente": {
-      page: "/app/views/clientes/cliente.html",
-      style: "/css/app/clientes.css",
-      script: "/js/features/clientes/cliente.js",
-      title: "Cliente"
-    },
+  "/clientes/cliente": {
+    page: "/app/views/clientes/cliente.html",
+    style: "/css/app/clientes.css",
+    script: "/js/features/clientes/cliente.js",
+    title: "Cliente"
+  },
 
-    "/ajustes": {
-      page: "/app/views/ajustes/index.html",
-      style: "/css/app/cuenta.css",
-      script: "/js/features/ajustes/index.js",
-      title: "Ajustes"
-    }
+  "/ajustes": {
+    page: "/app/views/ajustes/index.html",
+    style: "/css/app/cuenta.css",
+    script: "/js/features/ajustes/index.js",
+    title: "Ajustes"
+  }
 
-  });
+});
 
   /* =========================
      STATE

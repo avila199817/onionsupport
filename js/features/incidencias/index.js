@@ -13,21 +13,22 @@ if(!Onion){
    STATE
 ========================================================= */
 let initialized = false;
+let destroyed = false;
+
 let currentItems = [];
 let filteredItems = [];
+
 let loading = false;
 let currentRequestId = 0;
 
-/* 🔥 FILTROS EXTERNOS (TOPBAR) */
 let externalFilters = {
   search: "",
   estado: "",
   prioridad: ""
 };
 
-
 /* =========================
-   ROOT
+   ROOT SAFE
 ========================= */
 
 function getRoot(){
@@ -39,13 +40,19 @@ function $(selector){
   return root ? root.querySelector(selector) : null;
 }
 
+function isAlive(){
+  const root = getRoot();
+  return !destroyed && root && document.body.contains(root);
+}
 
 /* =========================
-   LOADER
+   LOADER SAFE
 ========================= */
 
 function showLoader(){
-  const loader = getRoot()?.querySelector(".table-loader");
+  if(!isAlive()) return;
+
+  const loader = $(".table-loader");
   if(loader){
     loader.style.display = "flex";
     loader.style.opacity = "1";
@@ -53,13 +60,16 @@ function showLoader(){
 }
 
 function hideLoader(){
-  const loader = getRoot()?.querySelector(".table-loader");
+  if(!isAlive()) return;
+
+  const loader = $(".table-loader");
   if(loader){
     loader.style.opacity = "0";
-    setTimeout(()=> loader.style.display = "none", 250);
+    setTimeout(()=>{
+      if(loader) loader.style.display = "none";
+    }, 250);
   }
 }
-
 
 /* =========================
    INIT
@@ -75,19 +85,23 @@ function init(){
   }
 
   initialized = true;
+  destroyed = false;
 
   bindEvents();
 
-  requestAnimationFrame(loadIncidencias);
+  requestAnimationFrame(()=>{
+    if(!isAlive()) return;
+    loadIncidencias();
+  });
 
   Onion.onCleanup(()=>{
+    destroyed = true;
     initialized = false;
   });
 
 }
 
 init();
-
 
 /* =========================
    EVENTS
@@ -100,6 +114,8 @@ function bindEvents(){
 
   Onion.cleanupEvent(root, "click", (e)=>{
 
+    if(!isAlive()) return;
+
     if(e.target.closest("button")) return;
 
     const row = e.target.closest("tr[data-id]");
@@ -111,14 +127,15 @@ function bindEvents(){
 
 }
 
-
 /* =========================
-   LOAD
+   LOAD (ANTI RACE TOTAL)
 ========================= */
 
 async function loadIncidencias(){
 
   if(loading) return;
+  if(!isAlive()) return;
+
   loading = true;
 
   const tbody = $("#incidencias-body");
@@ -136,12 +153,14 @@ async function loadIncidencias(){
 
     await new Promise(r => requestAnimationFrame(r));
     await new Promise(r => requestAnimationFrame(r));
-    await new Promise(r => setTimeout(r, 150));
+
+    if(!isAlive() || requestId !== currentRequestId) return;
 
     const res = await Onion.fetch(Onion.config.API + "/tickets");
-    const items = normalize(res);
 
-    if(requestId !== currentRequestId) return;
+    if(!isAlive() || requestId !== currentRequestId) return;
+
+    const items = normalize(res);
 
     currentItems = items;
     filteredItems = items;
@@ -155,18 +174,17 @@ async function loadIncidencias(){
 
   }catch(e){
 
-    console.error("💥 ERROR INCIDENCIAS:", e);
+    if(e.message === "ABORTED") return;
+    if(!isAlive() || requestId !== currentRequestId) return;
 
-    if(requestId === currentRequestId){
-      setError();
-    }
+    console.error("💥 ERROR INCIDENCIAS:", e);
+    setError();
 
   }finally{
     loading = false;
   }
 
 }
-
 
 /* =========================
    NORMALIZE
@@ -185,12 +203,13 @@ function normalize(res){
 
 }
 
-
 /* =========================
-   FILTERS
+   FILTERS SAFE
 ========================= */
 
 function applyFilters(){
+
+  if(!isAlive()) return;
 
   const search = externalFilters.search.toLowerCase();
   const estado = externalFilters.estado.toLowerCase();
@@ -218,29 +237,33 @@ function applyFilters(){
 
 }
 
-
 /* =========================
-   STATES
+   STATES SAFE
 ========================= */
 
 function setEmpty(){
-  $("#incidencias-body").innerHTML =
-    `<tr><td colspan="8">No hay incidencias</td></tr>`;
+  const el = $("#incidencias-body");
+  if(!el) return;
+
+  el.innerHTML = `<tr><td colspan="8">No hay incidencias</td></tr>`;
   hideLoader();
 }
 
 function setError(){
-  $("#incidencias-body").innerHTML =
-    `<tr><td colspan="8">Error cargando incidencias</td></tr>`;
+  const el = $("#incidencias-body");
+  if(!el) return;
+
+  el.innerHTML = `<tr><td colspan="8">Error cargando incidencias</td></tr>`;
   hideLoader();
 }
 
-
 /* =========================
-   RENDER
+   RENDER SAFE
 ========================= */
 
 function render(items){
+
+  if(!isAlive()) return;
 
   const tbody = $("#incidencias-body");
   if(!tbody) return;
@@ -289,16 +312,16 @@ function render(items){
 
   }).join("");
 
+  if(!isAlive()) return;
+
   tbody.innerHTML = html;
 
-  /* 🔥 CLAVE FINAL */
   hideLoader();
 
 }
 
-
 /* =========================
-   MAP / HELPERS
+   HELPERS
 ========================= */
 
 function mapItem(i){
@@ -326,22 +349,7 @@ function renderAvatar(d){
   const initials = getInitials(d.usuario);
   const color = getAvatarColor(d.usuario);
 
-  return `
-    <div style="
-      width:100%;
-      height:100%;
-      border-radius:50%;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      background:${color};
-      color:#fff;
-      font-weight:600;
-      font-size:12px;
-    ">
-      ${initials}
-    </div>
-  `;
+  return `<div style="width:100%;height:100%;border-radius:50%;display:flex;align-items:center;justify-content:center;background:${color};color:#fff;font-weight:600;font-size:12px;">${initials}</div>`;
 }
 
 function hashString(str){
@@ -402,9 +410,8 @@ function getInitials(name){
   return name.split(" ").map(n => n[0]).join("").slice(0,2).toUpperCase();
 }
 
-
 /* =========================
-   🔥 TOPBAR CONNECT
+   TOPBAR CONNECT
 ========================= */
 
 window.IncidenciasUIExternal = {

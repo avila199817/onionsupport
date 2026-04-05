@@ -59,7 +59,7 @@ init();
 
 
 /* =========================
-   USER RENDER
+   USER RENDER (FIX AVATAR)
 ========================= */
 
 function renderUser(){
@@ -70,19 +70,40 @@ function renderUser(){
   const nameEl = $("#sidebar-name");
   const avatarEl = $("#sidebar-avatar");
 
-  const name = user.name || user.nombre || user.email || "Usuario";
+  const name =
+    user.name ||
+    user.nombre ||
+    user.email ||
+    "Usuario";
 
   if(nameEl){
     nameEl.textContent = name;
   }
 
+  // 🔥 AVATAR REAL (si existe imagen)
   if(avatarEl){
-    avatarEl.innerHTML = renderAvatar(name);
+
+    if(user.avatar || user.image){
+
+      const src = user.avatar || user.image;
+
+      avatarEl.innerHTML = `
+        <img src="${src}" 
+             alt="${name}" 
+             style="width:100%;height:100%;border-radius:50%;object-fit:cover;">
+      `;
+
+    }else{
+
+      avatarEl.innerHTML = renderAvatarFallback(name);
+
+    }
+
   }
 
 }
 
-function renderAvatar(name){
+function renderAvatarFallback(name){
 
   const initials = getInitials(name);
   const color = getAvatarColor(name);
@@ -107,29 +128,50 @@ function renderAvatar(name){
 
 
 /* =========================
-   EVENTS
+   EVENTS (FIX TODO)
 ========================= */
 
 function bindEvents(){
 
-  const toggle = $("#userToggle");
+  const root = getRoot();
+  if(!root) return;
+
+  const toggleSidebarBtn = document.getElementById("toggleSidebar");
+  const userToggle = $("#userToggle");
   const dropdown = $("#userDropdown");
   const logout = $("#logoutBtn");
 
-  if(toggle && dropdown){
+  /* 🔥 SIDEBAR TOGGLE */
+  if(toggleSidebarBtn){
 
-    toggle.addEventListener("click", ()=>{
+    toggleSidebarBtn.addEventListener("click", (e)=>{
+      e.stopPropagation();
+      document.body.classList.toggle("sidebar-collapsed");
+
+      // opcional si usas clase directa
+      root.classList.toggle("collapsed");
+    });
+
+  }
+
+  /* 🔥 DROPDOWN FIX */
+  if(userToggle && dropdown){
+
+    userToggle.addEventListener("click", (e)=>{
+      e.stopPropagation();
       dropdown.classList.toggle("open");
     });
 
+    // 🔥 cerrar al hacer click fuera
     document.addEventListener("click", (e)=>{
-      if(!toggle.contains(e.target)){
+      if(!userToggle.contains(e.target) && !dropdown.contains(e.target)){
         dropdown.classList.remove("open");
       }
     });
 
   }
 
+  /* 🔥 LOGOUT */
   if(logout){
     logout.addEventListener("click", ()=>{
       handleLogout();
@@ -156,7 +198,7 @@ function handleLogout(){
 
 
 /* =========================
-   RECIENTES (PRO)
+   RECIENTES (PRO LIMPIO)
 ========================= */
 
 function renderRecientes(){
@@ -164,7 +206,7 @@ function renderRecientes(){
   const section = document.querySelector(".sidebar-section");
   if(!section) return;
 
-  // 🔥 Loader inicial
+  // 🔥 loader
   section.innerHTML = `
     <span class="section-title">Recientes</span>
     <div class="recientes-loader">
@@ -173,32 +215,17 @@ function renderRecientes(){
     </div>
   `;
 
-  // 🔥 Simulación carga (luego aquí metes API real)
   setTimeout(()=>{
 
-    const items = []; // 👉 de momento vacío
+    const items = []; // 🔥 vacío por ahora
 
     if(!items.length){
       section.innerHTML = `
         <span class="section-title">Recientes</span>
-        <div class="recientes-empty">
-          No hay recientes
-        </div>
+        <div class="recientes-empty">No hay recientes</div>
       `;
       return;
     }
-
-    // 🔥 futuro render dinámico
-    const html = items.map(i=>`
-      <a href="${i.url}" data-spa class="chat-item">
-        ${i.label}
-      </a>
-    `).join("");
-
-    section.innerHTML = `
-      <span class="section-title">Recientes</span>
-      ${html}
-    `;
 
   }, 800);
 

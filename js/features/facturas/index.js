@@ -592,4 +592,27 @@ function debounce(fn, delay){
   };
 }
 
+/* =========================
+   🔥 CONEXIÓN TOPBAR (AQUÍ)
+========================= */
+
+window.FacturasUIExternal = {
+  applyFilters: (uiState)=>{
+
+    if(uiState){
+      // 🔥 usar estado del topbar
+      if(typeof uiState.search !== "undefined"){
+        document.getElementById("search-factura")?.value = uiState.search;
+      }
+
+      if(typeof uiState.estado !== "undefined"){
+        document.getElementById("filter-estado-factura")?.value = uiState.estado;
+      }
+    }
+
+    // 🔥 ejecutar filtros reales del sistema
+    applyFilters();
+  }
+};
+
 })();

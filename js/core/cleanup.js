@@ -1,5 +1,9 @@
 "use strict";
 
+/* =========================================================
+   🧅 CLEANUP — FULL PRO (SIN DUPLICADOS, SIN CONFLICTOS)
+========================================================= */
+
 (function(){
 
   if(!window.Onion){
@@ -9,7 +13,21 @@
 
   const Onion = window.Onion;
 
-  Onion.state = Onion.state || {};
+  /* =========================================================
+     🔥 NOTA CRÍTICA
+     - El CORE ya define TODO el sistema de cleanup
+     - Aquí NO redefinimos nada
+     - Solo aseguramos consistencia
+  ========================================================= */
+
+  /* =========================
+     VALIDACIÓN DE ESTADO
+  ========================= */
+
+  if(!Onion.state){
+    Onion.error("State no existe en cleanup");
+    return;
+  }
 
   if(!Array.isArray(Onion.state.cleanup)){
     Onion.state.cleanup = [];
@@ -20,66 +38,20 @@
   }
 
   /* =========================
-     CORE CLEANUP
+     ALIAS SEGUROS (OPCIONAL)
   ========================= */
 
-  Onion.onCleanup = function(fn){
-    if(typeof fn === "function"){
-      Onion.state.cleanup.push(fn);
-    }
-  };
-
-  Onion.runCleanup = function(){
-
-    // ejecutar funciones
-    for(const fn of Onion.state.cleanup){
-      try{ fn(); }
-      catch(e){ console.error("Cleanup error:", e); }
-    }
-
-    Onion.state.cleanup = [];
-
-    // eliminar eventos
-    for(const ev of Onion.state.globalEvents){
-      try{
-        ev.target.removeEventListener(ev.name, ev.handler, ev.options);
-      }catch{}
-    }
-
-    Onion.state.globalEvents = [];
-  };
-
-  /* =========================
-     HELPERS
-  ========================= */
-
-  Onion.cleanupInterval = id => id && Onion.onCleanup(()=> clearInterval(id));
-  Onion.cleanupTimeout = id => id && Onion.onCleanup(()=> clearTimeout(id));
-  Onion.cleanupRAF = id => id && Onion.onCleanup(()=> cancelAnimationFrame(id));
-  Onion.cleanupObserver = obs => obs && Onion.onCleanup(()=> obs.disconnect());
-
-  /* =========================
-     EVENTOS
-  ========================= */
-
-  Onion.cleanupEvent = function(target, name, handler, options){
-
-    if(!target || !name || !handler) return;
-
-    target.addEventListener(name, handler, options);
-
-    Onion.state.globalEvents.push({
-      target, name, handler, options
-    });
-
-  };
-
-  /* =========================
-     CLEAN ALL
-  ========================= */
-
+  // mantener compatibilidad sin duplicar lógica
   Onion.cleanupAll = function(){
-    Onion.runCleanup();
+    return Onion.runCleanup();
   };
+
+  /* =========================
+     DEBUG (opcional)
+  ========================= */
+
+  if(Onion.config?.DEBUG){
+    Onion.log("🧹 Cleanup module ready (delegado al core)");
+  }
 
 })();

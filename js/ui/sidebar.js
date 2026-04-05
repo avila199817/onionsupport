@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 SIDEBAR — GOD MODE FINAL (ROOT CONTROLLER · SPA MASTER)
+   🧅 SIDEBAR — GOD MODE FINAL 10/10 (ROOT CONTROLLER REAL)
 ========================================================= */
 
 (function(){
@@ -14,7 +14,7 @@ if(!Onion){
 }
 
 /* =========================================================
-   INIT (SIEMPRE VIVO · NUNCA SE ROMPE)
+   INIT (ROOT CONTROLLER)
 ========================================================= */
 
 function init(){
@@ -28,11 +28,18 @@ function init(){
     return setTimeout(init, 100);
   }
 
-  // 🔥 siempre reconstruye estado + eventos
   renderUser();
   restoreState();
   bindEvents();
   setRecientesError();
+
+  /* 🔥 BOOT REAL DEL SISTEMA (CLAVE) */
+  if(!Onion.state.appReady){
+    Onion.state.appReady = true;
+
+    // 🚀 primer render REAL
+    Onion.render?.();
+  }
 
 }
 
@@ -43,8 +50,8 @@ if(!window.__ONION_SIDEBAR_BOUND__){
 
   window.__ONION_SIDEBAR_BOUND__ = true;
 
-  Onion.events?.on?.("app:ready", ()=> requestAnimationFrame(init));
-  Onion.events?.on?.("route:end", ()=> requestAnimationFrame(init));
+  Onion.events?.onCore?.("app:ready", ()=> requestAnimationFrame(init));
+  Onion.events?.onCore?.("route:end", ()=> requestAnimationFrame(init));
 
 }
 
@@ -65,7 +72,7 @@ function restoreState(){
 }
 
 /* =========================================================
-   EVENTS (ANTI-DUPES REAL)
+   EVENTS (ANTI DUPES REAL)
 ========================================================= */
 
 function bindEvents(){
@@ -78,27 +85,29 @@ function bindEvents(){
 
   if(!sidebar || !toggle) return;
 
-  // 🔥 evitar duplicados manualmente
-  if(toggle.__bound) return;
-  toggle.__bound = true;
-
   /* =========================
      TOGGLE SIDEBAR
   ========================= */
 
-  Onion.cleanupEvent(toggle, "click", (e)=>{
-    e.stopPropagation();
+  if(!toggle.__bound){
 
-    const isCollapsed = sidebar.classList.contains("collapsed");
+    toggle.__bound = true;
 
-    sidebar.classList.toggle("collapsed");
+    Onion.cleanupEvent(toggle, "click", (e)=>{
+      e.stopPropagation();
 
-    localStorage.setItem("sidebar-collapsed", String(!isCollapsed));
+      const isCollapsed = sidebar.classList.contains("collapsed");
 
-    dropdown?.classList.remove("active");
+      sidebar.classList.toggle("collapsed");
 
-    updateTooltip();
-  });
+      localStorage.setItem("sidebar-collapsed", String(!isCollapsed));
+
+      dropdown?.classList.remove("active");
+
+      updateTooltip();
+    });
+
+  }
 
   /* =========================
      USER DROPDOWN
@@ -137,7 +146,7 @@ function bindEvents(){
 
     document.__sidebarClickBound = true;
 
-    Onion.onGlobalEvent(document, "click", (e)=>{
+    Onion.onGlobalEvent?.(document, "click", (e)=>{
 
       if(
         e.target.closest("#userToggle") ||
@@ -146,7 +155,7 @@ function bindEvents(){
         return;
       }
 
-      dropdown?.classList.remove("active");
+      document.getElementById("userDropdown")?.classList.remove("active");
     });
 
   }
@@ -159,9 +168,9 @@ function bindEvents(){
 
     document.__sidebarEscBound = true;
 
-    Onion.onGlobalEvent(document, "keydown", (e)=>{
+    Onion.onGlobalEvent?.(document, "keydown", (e)=>{
       if(e.key === "Escape"){
-        dropdown?.classList.remove("active");
+        document.getElementById("userDropdown")?.classList.remove("active");
       }
     });
 
@@ -302,7 +311,7 @@ function updateTooltip(){
 ========================================================= */
 
 if(Onion.config?.DEBUG){
-  Onion.log("📚 Sidebar GOD MODE FINAL ready");
+  Onion.log("📚 Sidebar GOD MODE FINAL 10/10 ready");
 }
 
 })();

@@ -43,6 +43,7 @@ function init(){
   const root = getRoot();
   if(!root || initialized) return;
 
+  // 🔥 ESPERAR USER REAL (NUEVO SISTEMA)
   if(!Onion.user){
     console.warn("⏳ esperando user...");
     return setTimeout(init, 100);
@@ -75,6 +76,7 @@ function bindEvents(){
 
   Onion.cleanupEvent(root, "click", (e)=>{
 
+    /* 🔥 SORT CLICK */
     const th = e.target.closest("th[data-sort]");
     if(th){
       handleSort(th);
@@ -95,11 +97,12 @@ function bindEvents(){
 
   });
 
-  /* 🔥 ESCUCHAR FILTROS DEL TOPBAR */
-  document.addEventListener("facturas:filter", (e)=>{
-    const { search, estado } = e.detail;
-    applyFiltersExternal(search, estado);
+  $("#btn-new-factura")?.addEventListener("click", ()=>{
+    Onion.router.navigate("/facturas/nueva");
   });
+
+  $("#search-factura")?.addEventListener("input", debounce(applyFilters, 250));
+  $("#filter-estado-factura")?.addEventListener("change", applyFilters);
 
 }
 
@@ -219,7 +222,7 @@ async function loadFacturas(){
       return;
     }
 
-    applySort();
+    applyFilters();
 
   }catch(e){
 
@@ -236,13 +239,88 @@ async function loadFacturas(){
 }
 
 /* =========================
-   FILTERS (EXTERNOS)
+   ACTIONS
 ========================= */
 
-function applyFiltersExternal(search, estado){
+async function handleAction(btn){
 
-  search = (search || "").toLowerCase();
-  estado = (estado || "").toLowerCase();
+  const id = btn.dataset.id;
+  if(!id) return;
+
+  if(btn.classList.contains("view")){
+    Onion.router.navigate("/facturas/detalle?id=" + id);
+  }
+
+  if(btn.classList.contains("download")){
+
+    if(btn.classList.contains("loading")) return;
+
+    btn.classList.add("loading");
+
+    const original = btn.textContent;
+    btn.textContent = "⏳";
+
+    try{
+
+      const res = await Onion.fetch(
+        Onion.config.API + "/facturas/" + id + "/descargar"
+      );
+
+      if(!res || !res.ok || !res.url){
+        Onion.ui.toast?.error("Error descargando PDF");
+        return;
+      }
+
+      const link = document.createElement("a");
+      link.href = res.url;
+      link.download = `factura-${id}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      Onion.ui.toast?.success("Factura descargada 📄");
+
+    }catch(e){
+      console.error("💥 ERROR DOWNLOAD:", e);
+      Onion.ui.toast?.error("Error descargando PDF");
+    }finally{
+      btn.textContent = original;
+      btn.classList.remove("loading");
+    }
+
+  }
+
+  if(btn.classList.contains("pay")){
+    Onion.ui.toast?.info("💳 Simulación pago factura " + id);
+  }
+
+}
+
+/* =========================
+   NORMALIZE
+========================= */
+
+function normalize(res){
+
+  if(!res) return [];
+
+  if(Array.isArray(res)) return res;
+  if(Array.isArray(res.facturas)) return res.facturas;
+  if(Array.isArray(res.data)) return res.data;
+  if(Array.isArray(res.items)) return res.items;
+
+  return [];
+
+}
+
+/* =========================
+   FILTERS
+========================= */
+
+function applyFilters(){
+
+  const search = ($("#search-factura")?.value || "").toLowerCase();
+  const estado = ($("#filter-estado-factura")?.value || "").toLowerCase();
 
   filteredItems = currentItems.filter(f => {
 
@@ -259,6 +337,7 @@ function applyFiltersExternal(search, estado){
   });
 
   applySort();
+
 }
 
 /* =========================
@@ -350,20 +429,6 @@ function render(items){
    HELPERS
 ========================= */
 
-function normalize(res){
-
-  if(!res) return [];
-
-  if(Array.isArray(res)) return res;
-  if(Array.isArray(res.facturas)) return res.facturas;
-  if(Array.isArray(res.data)) return res.data;
-  if(Array.isArray(res.items)) return res.items;
-
-  return [];
-
-}
-
-
 function mapItem(f){
 
   const empresaRaw =
@@ -400,40 +465,28 @@ function mapItem(f){
 
 }
 
-
 function cleanValue(val, fallback){
   if(!val) return fallback;
-
   let v = String(val).trim();
   v = v.replace(/^'+|'+$/g, "");
-
   const lower = v.toLowerCase();
-
   if(lower === "null" || lower === "undefined" || lower === "-"){
     return fallback;
   }
-
   return v;
 }
-
 
 function safeText(val){
   return String(cleanValue(val, "")).toLowerCase();
 }
 
-
 function renderAvatar(name){
   return avatarHTML(getInitials(name), getAvatarColor(name));
 }
 
-
 function renderAvatarEmpresa(name){
-  return avatarHTML(
-    getInitialsEmpresa(name),
-    getAvatarColor(name + "_empresa")
-  );
+  return avatarHTML(getInitialsEmpresa(name), getAvatarColor(name + "_empresa"));
 }
-
 
 function avatarHTML(initials, color){
   return `
@@ -454,97 +507,57 @@ function avatarHTML(initials, color){
   `;
 }
 
-
 function hashString(str){
   let hash = 0;
-
   for(let i = 0; i < str.length; i++){
     hash = str.charCodeAt(i) + ((hash << 5) - hash);
   }
-
   return hash;
 }
 
-
 function getAvatarColor(name){
-  const colors = [
-    "#6366f1",
-    "#22c55e",
-    "#eab308",
-    "#ef4444",
-    "#06b6d4",
-    "#a855f7",
-    "#f97316"
-  ];
-
+  const colors = ["#6366f1","#22c55e","#eab308","#ef4444","#06b6d4","#a855f7","#f97316"];
   return colors[Math.abs(hashString(name)) % colors.length];
 }
 
-
 function getInitials(name){
-  return name
-    ? name
-        .split(" ")
-        .map(n => n[0])
-        .join("")
-        .slice(0,2)
-        .toUpperCase()
-    : "?";
+  return name ? name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase() : "?";
 }
-
 
 function getInitialsEmpresa(name){
   return name
-    ? name
-        .replace(/(SL|SA)/gi,"")
-        .trim()
-        .split(" ")
-        .map(n => n[0])
-        .join("")
-        .slice(0,2)
-        .toUpperCase()
+    ? name.replace(/(SL|SA)/gi,"").trim().split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase()
     : "?";
 }
 
-
 function getEstadoPago(e){
-
   e = (e || "").toLowerCase();
-
-  if(e === "pagada"){
-    return {
-      label:"Pagada",
-      class:"success",
-      raw:e
-    };
-  }
-
-  return {
-    label:"Pendiente",
-    class:"warning",
-    raw:e
-  };
+  if(e === "pagada") return { label:"Pagada", class:"success", raw:e };
+  return { label:"Pendiente", class:"warning", raw:e };
 }
-
 
 function formatFecha(f){
   if(!f) return "--";
-
   return new Date(f).toLocaleDateString("es-ES");
 }
 
-
 function formatMoney(n){
-  return Number(n || 0)
-    .toLocaleString("es-ES",{ minimumFractionDigits:2 }) + " €";
+  return Number(n || 0).toLocaleString("es-ES",{minimumFractionDigits:2}) + " €";
 }
-
 
 function escapeHTML(str){
   return String(str)
     .replace(/&/g,"&amp;")
     .replace(/</g,"&lt;")
     .replace(/>/g,"&gt;");
+}
+
+function debounce(fn, delay){
+  let t;
+  return (...args)=>{
+    clearTimeout(t);
+    t = setTimeout(()=>fn(...args), delay);
+  };
 }
 
 })();

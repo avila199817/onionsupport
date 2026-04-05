@@ -215,7 +215,7 @@
   };
 
   /* =========================
-     REFRESH (🔥 FIX CLAVE)
+     REFRESH
   ========================= */
 
   Onion.ui.refresh = function(){

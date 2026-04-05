@@ -1,9 +1,5 @@
 "use strict";
 
-/* =========================
-   SIDEBAR (FINAL DEFINITIVO)
-========================= */
-
 (function(){
 
 const Onion = window.Onion;
@@ -14,14 +10,7 @@ if(!Onion){
 }
 
 /* =========================
-   STATE
-========================= */
-
-let initialized = false;
-
-
-/* =========================
-   INIT
+   INIT (SPA SAFE)
 ========================= */
 
 function init(){
@@ -31,25 +20,35 @@ function init(){
   const user     = document.getElementById("userToggle");
   const dropdown = document.getElementById("userDropdown");
 
-  if(!sidebar || !toggle || initialized) return;
+  // 👉 SI NO EXISTE, REINTENTA
+  if(!sidebar || !toggle){
+    return;
+  }
 
   if(!Onion.state?.user){
     return setTimeout(init, 100);
   }
 
-  initialized = true;
+  // 🔥 IMPORTANTE: limpiar antes de re-bind
+  Onion.cleanup?.();
 
   renderUser();
   restoreState();
   bindEvents();
 
-  Onion.onCleanup(()=>{
-    initialized = false;
-  });
-
 }
 
 init();
+
+
+/* =========================
+   RE-INIT AUTOMÁTICO
+========================= */
+
+// 🔥 cada navegación SPA vuelve a montar
+Onion.on?.("route:change", ()=>{
+  requestAnimationFrame(init);
+});
 
 
 /* =========================
@@ -63,11 +62,7 @@ function restoreState(){
 
   const saved = localStorage.getItem("sidebar-collapsed");
 
-  if(saved === "true"){
-    sidebar.classList.add("collapsed");
-  }else{
-    sidebar.classList.remove("collapsed");
-  }
+  sidebar.classList.toggle("collapsed", saved === "true");
 
   updateTooltip();
 }
@@ -102,41 +97,32 @@ function bindEvents(){
 
       dropdown?.classList.remove("active");
 
-      requestAnimationFrame(updateTooltip);
+      updateTooltip();
     });
 
   }
 
-  /* 🔥 USER CLICK */
+  /* 🔥 USER */
   if(user && dropdown){
 
     Onion.cleanupEvent(user, "click", (e)=>{
       e.stopPropagation();
 
       const isCollapsed = sidebar.classList.contains("collapsed");
-      const isOpen = dropdown.classList.contains("active");
 
-      // 👉 si está colapsado → abrir primero
       if(isCollapsed){
 
         sidebar.classList.remove("collapsed");
         localStorage.setItem("sidebar-collapsed", "false");
 
-        requestAnimationFrame(updateTooltip);
-
         setTimeout(()=>{
           dropdown.classList.add("active");
-        }, 200);
+        }, 180);
 
         return;
       }
 
-      // 👉 toggle normal
-      if(isOpen){
-        dropdown.classList.remove("active");
-      }else{
-        dropdown.classList.add("active");
-      }
+      dropdown.classList.toggle("active");
 
     });
 
@@ -145,27 +131,25 @@ function bindEvents(){
   /* 🔥 CLICK FUERA */
   Onion.cleanupEvent(document, "click", (e)=>{
 
-    if(!dropdown) return;
-
     if(
-      e.target.closest("#userDropdown") ||
-      e.target.closest("#userToggle")
+      e.target.closest("#userToggle") ||
+      e.target.closest("#userDropdown")
     ){
       return;
     }
 
-    dropdown.classList.remove("active");
+    dropdown?.classList.remove("active");
 
   });
 
-  /* 🔥 ESCAPE */
+  /* 🔥 ESC */
   Onion.cleanupEvent(document, "keydown", (e)=>{
     if(e.key === "Escape"){
       dropdown?.classList.remove("active");
     }
   });
 
-  /* 🔥 DROPDOWN ACTIONS */
+  /* 🔥 DROPDOWN */
   if(dropdown){
 
     Onion.cleanupEvent(dropdown, "click", (e)=>{
@@ -196,7 +180,7 @@ function bindEvents(){
 
   }
 
-  /* 🔥 LOGOUT DIRECTO (fallback) */
+  /* 🔥 LOGOUT */
   if(logout){
 
     Onion.cleanupEvent(logout, "click", (e)=>{
@@ -211,7 +195,7 @@ function bindEvents(){
 
 
 /* =========================
-   USER RENDER
+   USER
 ========================= */
 
 function renderUser(){
@@ -238,7 +222,6 @@ function renderUser(){
 
       avatarEl.innerHTML = `
         <img src="${user.avatar}" 
-             alt="${escapeHTML(name)}"
              style="width:100%;height:100%;border-radius:50%;object-fit:cover;">
       `;
 
@@ -323,13 +306,6 @@ function getAvatarColor(name){
 function getInitials(name){
   if(!name) return "?";
   return name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase();
-}
-
-function escapeHTML(str){
-  return String(str)
-    .replace(/&/g,"&amp;")
-    .replace(/</g,"&lt;")
-    .replace(/>/g,"&gt;");
 }
 
 })();

@@ -215,7 +215,7 @@ function updateSortUI(){
 
 
 /* =========================
-   LOAD
+   LOAD — PRO SAAS FINAL
 ========================= */
 
 async function loadFacturas(){
@@ -224,50 +224,67 @@ async function loadFacturas(){
   loading = true;
 
   const tbody = $("#facturas-body");
-  if(!tbody) return;
+  if(!tbody){
+    loading = false;
+    return;
+  }
 
   const requestId = ++currentRequestId;
 
-  showLoader(); // 🔥
+  // 🔥 Mostrar loader
+  showLoader();
 
+  // 🔥 Quitar focus (UX limpia)
   document.activeElement?.blur();
 
   try{
 
+    // 🔥 Micro delay controlado (evita parpadeos + mejora percepción)
     await new Promise(r => requestAnimationFrame(r));
     await new Promise(r => requestAnimationFrame(r));
-    await new Promise(r => setTimeout(r, 200));
 
+    // 🔥 Fetch real
     const res = await Onion.fetch(Onion.config.API + "/facturas");
+
+    // 🔥 Normalizar datos
     const items = normalize(res);
 
+    // 🔥 Cancelación si hay otra request más reciente
     if(requestId !== currentRequestId) return;
 
     currentItems = items;
     filteredItems = items;
 
+    // 🔥 Estado vacío
     if(!items.length){
       setEmpty();
       return;
     }
 
+    // 🔥 Aplicar filtros + render
     applyFilters();
 
   }catch(e){
 
     console.error("💥 ERROR FACTURAS:", e);
 
+    // 🔥 Evitar pintar errores si la request ya no es válida
     if(requestId !== currentRequestId) return;
 
     setError();
 
   }finally{
-    loading = false;
-    hideLoader(); // 🔥
+
+    // 🔥 Solo cerrar loader si esta request sigue siendo la activa
+    if(requestId === currentRequestId){
+      hideLoader();
+      loading = false;
+    }
+
   }
 
 }
-
+  
 
 /* =========================
    ACTIONS

@@ -36,7 +36,7 @@ function $(selector){
 
 
 /* =========================
-   LOAD — FIX REAL
+   LOAD — ÚNICO Y FINAL
 ========================= */
 
 async function loadFacturas(){
@@ -63,7 +63,7 @@ async function loadFacturas(){
     const res = await Onion.fetch(Onion.config.API + "/facturas");
     const items = normalize(res);
 
-    // 🔥 Si esta request ya no es válida → NO renderizar
+    // 🔥 Cancelar render si hay request más nueva
     if(requestId !== currentRequestId){
       return;
     }
@@ -88,10 +88,9 @@ async function loadFacturas(){
 
   }finally{
 
-    // 🔥 SIEMPRE ocultar loader
+    // 🔥 SIEMPRE apagar loader
     hideLoader();
 
-    // 🔥 Reset estado global
     loading = false;
   }
 
@@ -251,78 +250,6 @@ function updateSortUI(){
 
 }
 
-
-/* =========================
-   LOAD — PRO SAAS FINAL
-========================= */
-
-async function loadFacturas(){
-
-  if(loading) return;
-  loading = true;
-
-  const tbody = $("#facturas-body");
-  if(!tbody){
-    loading = false;
-    return;
-  }
-
-  const requestId = ++currentRequestId;
-
-  // 🔥 Mostrar loader
-  showLoader();
-
-  // 🔥 Quitar focus (UX limpia)
-  document.activeElement?.blur();
-
-  try{
-
-    // 🔥 Micro delay controlado (evita parpadeos + mejora percepción)
-    await new Promise(r => requestAnimationFrame(r));
-    await new Promise(r => requestAnimationFrame(r));
-
-    // 🔥 Fetch real
-    const res = await Onion.fetch(Onion.config.API + "/facturas");
-
-    // 🔥 Normalizar datos
-    const items = normalize(res);
-
-    // 🔥 Cancelación si hay otra request más reciente
-    if(requestId !== currentRequestId) return;
-
-    currentItems = items;
-    filteredItems = items;
-
-    // 🔥 Estado vacío
-    if(!items.length){
-      setEmpty();
-      return;
-    }
-
-    // 🔥 Aplicar filtros + render
-    applyFilters();
-
-  }catch(e){
-
-    console.error("💥 ERROR FACTURAS:", e);
-
-    // 🔥 Evitar pintar errores si la request ya no es válida
-    if(requestId !== currentRequestId) return;
-
-    setError();
-
-  }finally{
-
-    // 🔥 Solo cerrar loader si esta request sigue siendo la activa
-    if(requestId === currentRequestId){
-      hideLoader();
-      loading = false;
-    }
-
-  }
-
-}
-  
 
 /* =========================
    ACTIONS

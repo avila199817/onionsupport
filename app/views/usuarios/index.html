@@ -1,77 +1,20 @@
 <div class="panel-content usuarios table-mode">
 
-  <!-- 🔥 TABLE SYSTEM -->
-  <div class="table-system usuarios">
+  <div class="table-system">
 
-    <!-- =========================
-         FILTROS
-    ========================= -->
-    <div class="filters-row">
-
-      <input 
-        type="text"
-        id="search-usuario"
-        placeholder="Buscar usuario..."
-        autocomplete="off"
-      >
-
-      <select id="filter-estado-usuario">
-        <option value="">Estado</option>
-        <option value="activo">Activo</option>
-        <option value="inactivo">Inactivo</option>
-      </select>
-
-      <select id="filter-rol-usuario">
-        <option value="">Rol</option>
-        <option value="admin">Admin</option>
-        <option value="user">Usuario</option>
-      </select>
-
-      <select id="filter-tipo-usuario">
-        <option value="">Tipo</option>
-        <option value="particular">Particular</option>
-        <option value="empresa">Empresa</option>
-      </select>
-
-      <button id="btn-new-usuario" class="btn-new-usuario">
-        + Nuevo
-      </button>
-
-    </div>
-
-    <!-- =========================
-         TABLA
-    ========================= -->
+    <!-- 🔥 SCROLL SOLO AQUÍ -->
     <div class="table-container">
 
+      <!-- 🔥 LOADER (FUERA DE LA TABLA) -->
+      <div class="table-loader">
+        <div class="spinner"></div>
+        <span>Cargando usuarios...</span>
+      </div>
+
       <table>
-
-        <thead>
-          <tr>
-            <th class="col-id">ID</th>
-            <th class="col-main">Usuario</th>
-            <th class="col-secondary">Rol</th>
-            <th class="col-secondary">Tipo</th>
-            <th class="col-status">Estado</th>
-            <th class="col-date">Alta</th>
-            <th class="col-actions">Acciones</th>
-          </tr>
-        </thead>
-
         <tbody id="usuarios-body">
-
-          <!-- 🔥 LOADER IGUAL QUE FACTURAS -->
-          <tr class="table-loading">
-            <td colspan="7">
-              <div class="table-loader">
-                <div class="spinner"></div>
-                <span>Cargando usuarios...</span>
-              </div>
-            </td>
-          </tr>
-
+          <!-- filas dinámicas -->
         </tbody>
-
       </table>
 
     </div>

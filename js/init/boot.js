@@ -1,5 +1,9 @@
 "use strict";
 
+/* =========================================================
+   🧅 BOOT — FULL PRO (ENTRYPOINT LIMPIO, SIN BLOQUEOS)
+========================================================= */
+
 (function(){
 
   if(!window.Onion){
@@ -32,10 +36,9 @@
     document.documentElement.setAttribute("data-theme", "dark");
   }
 
-
-  /* =========================================================
-     🔥 SAFE LOADER
-  ========================================================= */
+  /* =========================
+     SAFE LOADER
+  ========================= */
 
   function hideLoaderSafe(){
 
@@ -53,10 +56,9 @@
 
   }
 
-
-  /* =========================================================
+  /* =========================
      BOOT
-  ========================================================= */
+  ========================= */
 
   document.addEventListener("DOMContentLoaded", async () => {
 
@@ -64,27 +66,27 @@
 
     try{
 
-      /* 🔥 FALLBACK GLOBAL (ANTI-BLOQUEO) */
+      /* 🔥 FAILSAFE GLOBAL */
       bootTimeout = setTimeout(()=>{
-        console.warn("⚠️ Loader timeout fallback");
+        Onion.warn("Loader timeout fallback");
         hideLoaderSafe();
       }, 4000);
 
       /* =========================
-         CONFIG
+         USER CONFIG
       ========================= */
 
       Onion.userConfig?.apply?.();
 
       /* =========================
-         IDIOMA
+         LANG
       ========================= */
 
       const lang = Onion.userConfig?.get?.("lang") || "es";
       Onion.i18n?.setLang?.(lang);
 
       /* =========================
-         AUTH (PRE-CHECK)
+         AUTH PRECHECK
       ========================= */
 
       Onion.state.slug = localStorage.getItem("onion_user_slug");
@@ -96,13 +98,13 @@
       }
 
       /* =========================
-         INIT CORE
+         INIT
       ========================= */
 
       await Onion.init();
 
       /* =========================
-         READY → UI (EVENTO GLOBAL)
+         READY → UI
       ========================= */
 
       Onion.events?.on?.("app:ready", ()=>{
@@ -111,7 +113,7 @@
       });
 
       /* =========================
-         LOADER CONTROL FINAL
+         FINAL LOADER
       ========================= */
 
       clearTimeout(bootTimeout);
@@ -122,7 +124,7 @@
 
     }catch(e){
 
-      console.error("💥 BOOT ERROR:", e);
+      Onion.error("BOOT ERROR:", e);
 
       clearTimeout(bootTimeout);
       hideLoaderSafe();
@@ -130,5 +132,13 @@
     }
 
   });
+
+  /* =========================
+     DEBUG
+  ========================= */
+
+  if(Onion.config?.DEBUG){
+    Onion.log("⚡ Boot system PRO ready");
+  }
 
 })();

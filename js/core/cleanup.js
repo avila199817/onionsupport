@@ -51,7 +51,7 @@
   ========================= */
 
   if(Onion.config?.DEBUG){
-    Onion.log("🧹 Cleanup module ready");
+    Onion.log("🧹 Cleanup module PRO ready");
   }
 
 })();

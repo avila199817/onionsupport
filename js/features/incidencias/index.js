@@ -41,6 +41,27 @@ function $(selector){
 
 
 /* =========================
+   LOADER
+========================= */
+
+function showLoader(){
+  const loader = getRoot()?.querySelector(".table-loader");
+  if(loader){
+    loader.style.display = "flex";
+    loader.style.opacity = "1";
+  }
+}
+
+function hideLoader(){
+  const loader = getRoot()?.querySelector(".table-loader");
+  if(loader){
+    loader.style.opacity = "0";
+    setTimeout(()=> loader.style.display = "none", 250);
+  }
+}
+
+
+/* =========================
    INIT
 ========================= */
 
@@ -109,6 +130,7 @@ async function loadIncidencias(){
   const requestId = ++currentRequestId;
 
   document.activeElement?.blur();
+  showLoader();
 
   try{
 
@@ -204,11 +226,13 @@ function applyFilters(){
 function setEmpty(){
   $("#incidencias-body").innerHTML =
     `<tr><td colspan="8">No hay incidencias</td></tr>`;
+  hideLoader();
 }
 
 function setError(){
   $("#incidencias-body").innerHTML =
     `<tr><td colspan="8">Error cargando incidencias</td></tr>`;
+  hideLoader();
 }
 
 
@@ -266,6 +290,9 @@ function render(items){
   }).join("");
 
   tbody.innerHTML = html;
+
+  /* 🔥 CLAVE FINAL */
+  hideLoader();
 
 }
 

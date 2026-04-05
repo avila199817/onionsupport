@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 EVENTS BUS — GOD MODE (CORE VS VIEW · NO LEAKS · NO BREAKS)
+   🧅 EVENTS BUS — GOD MODE (CORE GLOBAL · SIN CLEANUP · ESTABLE)
 ========================================================= */
 
 (function(){
@@ -20,7 +20,7 @@
   const events = Object.create(null);
 
   /* =========================================================
-     ON (VIEW — se limpia)
+     ON (GLOBAL · PERSISTENTE)
   ========================================================= */
 
   Onion.events.on = function(name, handler){
@@ -33,31 +33,6 @@
 
     events[name].add(handler);
 
-    // 🔥 solo eventos de vista se limpian
-    Onion.onCleanup?.(()=>{
-      events[name]?.delete(handler);
-      if(events[name]?.size === 0){
-        delete events[name];
-      }
-    });
-
-  };
-
-  /* =========================================================
-     ON CORE (🔥 persistente)
-  ========================================================= */
-
-  Onion.events.onCore = function(name, handler){
-
-    if(!name || typeof handler !== "function") return;
-
-    if(!events[name]){
-      events[name] = new Set();
-    }
-
-    events[name].add(handler);
-
-    // ❌ NO cleanup → persistente
   };
 
   /* =========================================================
@@ -125,29 +100,7 @@
   };
 
   /* =========================================================
-     CLEAR (SOLO VIEW)
-  ========================================================= */
-
-  Onion.events.clearView = function(){
-
-    Object.keys(events).forEach(name=>{
-
-      const set = events[name];
-
-      for(const handler of set){
-        // 🔥 solo borrar handlers ligados a cleanup
-        // (los core sobreviven porque no usan onCleanup)
-        try{
-          // noop → cleanup ya se encarga
-        }catch{}
-      }
-
-    });
-
-  };
-
-  /* =========================================================
-     CLEAR ALL (DEBUG)
+     CLEAR ALL (DEBUG ONLY)
   ========================================================= */
 
   Onion.events.clearAll = function(){
@@ -159,7 +112,7 @@
   ========================================================= */
 
   if(Onion.config?.DEBUG){
-    Onion.log("📡 Events GOD MODE ready");
+    Onion.log("📡 Events GOD MODE GLOBAL ready");
   }
 
 })();

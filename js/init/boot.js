@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 BOOT — FULL PRO (ENTRYPOINT LIMPIO, SIN BLOQUEOS)
+   🧅 BOOT — GOD MODE (SIDEBAR FIRST · APP CONTROL · ZERO DESYNC)
 ========================================================= */
 
 (function(){
@@ -12,6 +12,13 @@
   }
 
   const Onion = window.Onion;
+
+  /* =========================================================
+     STATE BASE
+  ========================================================= */
+
+  Onion.state = Onion.state || {};
+  Onion.state.appReady = false;
 
   /* =========================
      THEME (ANTES DE TODO)
@@ -98,18 +105,27 @@
       }
 
       /* =========================
-         INIT
+         INIT CORE
       ========================= */
 
       await Onion.init();
 
       /* =========================
-         READY → UI
+         APP READY (SIDEBAR MANDA)
       ========================= */
 
       Onion.events?.on?.("app:ready", ()=>{
+
+        if(Onion.state.appReady) return;
+
+        Onion.state.appReady = true;
+
         Onion.ui?.init?.();
         Onion.i18n?.apply?.();
+
+        // 🔥 PRIMER RENDER SOLO CUANDO TODO ESTÁ OK
+        Onion.render();
+
       });
 
       /* =========================
@@ -138,7 +154,7 @@
   ========================= */
 
   if(Onion.config?.DEBUG){
-    Onion.log("⚡ Boot system PRO ready");
+    Onion.log("⚡ Boot GOD MODE ready");
   }
 
 })();

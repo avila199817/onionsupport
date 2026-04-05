@@ -165,7 +165,7 @@
   ========================= */
 
   if(Onion.config?.DEBUG){
-    Onion.log("🍞 Toast system PRO ready");
+    Onion.log("ℹ️ Toast system PRO ready");
   }
 
 })();

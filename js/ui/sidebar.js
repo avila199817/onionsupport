@@ -48,7 +48,11 @@ function init(){
 
 init();
 
-/* 🔥 RE-MONTAR TRAS CADA RENDER */
+/* 🔥 FIX HARD LOAD + SPA */
+Onion.events?.on?.("app:ready", ()=>{
+  requestAnimationFrame(init);
+});
+
 Onion.events?.on?.("route:end", ()=>{
   requestAnimationFrame(init);
 });
@@ -138,13 +142,18 @@ function bindEvents(){
     }
   });
 
-  /* 🔥 LOGOUT REAL (FIX DEFINITIVO) */
+  /* 🔥 LOGOUT PRO CON LOADER */
   if(logout){
 
     Onion.cleanupEvent(logout, "click", async (e)=>{
       e.stopPropagation();
 
+      // 🔥 loader global suave
+      Onion.ui?.showLoader?.();
+
       try{
+
+        await new Promise(r => requestAnimationFrame(r));
 
         const res = await Onion.fetch(
           Onion.config.API + "/logout",
@@ -157,6 +166,9 @@ function bindEvents(){
           throw new Error("Logout fallido");
         }
 
+        // pequeño delay para UX suave
+        await new Promise(r => setTimeout(r, 300));
+
       }catch(err){
 
         console.error("💥 LOGOUT ERROR:", err);
@@ -164,7 +176,6 @@ function bindEvents(){
 
       }finally{
 
-        // 🔥 limpiar SIEMPRE frontend
         try{
           Onion.auth?.logout?.();
         }catch{}
@@ -172,7 +183,6 @@ function bindEvents(){
         localStorage.removeItem("onion_user_slug");
 
         window.location.href = "/login";
-
       }
 
     });
@@ -219,7 +229,7 @@ function renderUser(){
 
 
 /* =========================
-   🔥 LOADER RECIENTES (PRO)
+   🔥 LOADER RECIENTES
 ========================= */
 
 function showRecientesLoader(){

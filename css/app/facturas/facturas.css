@@ -63,7 +63,7 @@
 
 
 /* =========================================================
-   HEADERS (SHARED)
+   🔥 HEADERS (SHARED + ALIGN FIX)
 ========================================================= */
 
 .panel-content.facturas th,
@@ -79,6 +79,39 @@
   letter-spacing:.4px;
 
   white-space:nowrap;
+
+  /* 🔥 FIX ALTURA EXACTA */
+  height:48px;
+  box-sizing:border-box;
+}
+
+
+/* =========================================================
+   🔥 TABLE HEAD (GLASS EFFECT)
+========================================================= */
+
+.table-head{
+  backdrop-filter: blur(0px);
+  -webkit-backdrop-filter: blur(0px);
+
+  transition:
+    backdrop-filter 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+/* 🔥 ACTIVADO CON SCROLL */
+.table-head.scrolled{
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+
+  background:
+    linear-gradient(180deg, rgba(0,0,0,0.35), rgba(0,0,0,0.15)),
+    var(--sb-bg);
+
+  box-shadow:
+    0 6px 20px rgba(0,0,0,0.25),
+    0 1px 0 var(--panel-border);
 }
 
 

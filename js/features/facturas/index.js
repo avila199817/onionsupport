@@ -36,6 +36,36 @@ function $(selector){
 
 
 /* =========================
+   🔥 TABLE LOADER CONTROL
+========================= */
+
+function showLoader(){
+  const root = getRoot();
+  if(!root) return;
+
+  const loader = root.querySelector(".table-loader");
+  if(!loader) return;
+
+  loader.style.display = "flex";
+  loader.style.opacity = "1";
+}
+
+function hideLoader(){
+  const root = getRoot();
+  if(!root) return;
+
+  const loader = root.querySelector(".table-loader");
+  if(!loader) return;
+
+  loader.style.opacity = "0";
+
+  setTimeout(()=>{
+    loader.style.display = "none";
+  }, 250);
+}
+
+
+/* =========================
    LOAD — ÚNICO Y FINAL
 ========================= */
 
@@ -63,7 +93,6 @@ async function loadFacturas(){
     const res = await Onion.fetch(Onion.config.API + "/facturas");
     const items = normalize(res);
 
-    // 🔥 Cancelar render si hay request más nueva
     if(requestId !== currentRequestId){
       return;
     }
@@ -88,9 +117,7 @@ async function loadFacturas(){
 
   }finally{
 
-    // 🔥 SIEMPRE apagar loader
     hideLoader();
-
     loading = false;
   }
 
@@ -444,7 +471,7 @@ function render(items){
 
 
 /* =========================
-   HELPERS (SIN CAMBIOS)
+   HELPERS
 ========================= */
 
 function mapItem(f){

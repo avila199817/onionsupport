@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 ROUTER — FULL PRO SAAS (FIXED · NO DOUBLE NAV · CLEAN EVENTS)
+   🧅 ROUTER — GOD MODE (SIDEBAR FIRST · SYNC PERFECT · NO RACE)
 ========================================================= */
 
 (function(){
@@ -36,7 +36,6 @@
         "/js/features/incidencias/topbarview.js",
         "/js/features/incidencias/index.js"
       ],
-      topbarview: "incidencias",
       title: "Incidencias"
     },
 
@@ -67,7 +66,6 @@
         "/js/features/facturas/topbarview.js",
         "/js/features/facturas/index.js"
       ],
-      topbarview: "facturas",
       title: "Facturas"
     },
 
@@ -105,7 +103,6 @@
         "/js/features/usuarios/topbarview.js",
         "/js/features/usuarios/index.js"
       ],
-      topbarview: "usuarios",
       title: "Usuarios"
     },
 
@@ -136,7 +133,6 @@
         "/js/features/clientes/topbarview.js",
         "/js/features/clientes/index.js"
       ],
-      topbarview: "clientes",
       title: "Clientes"
     },
 
@@ -218,10 +214,8 @@
   Onion.router.resolve = function(){
 
     try{
-
       const route = Onion.router.get();
       return Onion.routes[route] || Onion.routes["/"];
-
     }catch(e){
       Onion.error("Router resolve error:", e);
       return Onion.routes["/"];
@@ -230,7 +224,7 @@
   };
 
   /* =========================
-     NAVIGATE (FIX DOUBLE NAV)
+     NAVIGATE (SYNC CON SIDEBAR)
   ========================= */
 
   Onion.router.navigate = function(href){
@@ -239,6 +233,11 @@
 
     if(href.startsWith("http")){
       window.location.href = href;
+      return;
+    }
+
+    // 🔥 NO navegar si app no está lista
+    if(!Onion.state.appReady){
       return;
     }
 
@@ -264,14 +263,8 @@
     const current = normalize(window.location.pathname);
     const next = normalize(finalHref);
 
-    // 🔥 evitar navegación duplicada REAL
-    if(current === next){
-      return;
-    }
-
-    if(Onion.state.navigating){
-      return;
-    }
+    if(current === next) return;
+    if(Onion.state.navigating) return;
 
     Onion.state.navigating = true;
 
@@ -326,6 +319,7 @@
 
     window.addEventListener("popstate", function(){
 
+      if(!Onion.state.appReady) return;
       if(Onion.state.navigating) return;
 
       Onion.state.navigating = true;
@@ -357,7 +351,7 @@
   ========================= */
 
   if(Onion.config?.DEBUG){
-    Onion.log("🧭 Router PRO ready");
+    Onion.log("🧭 Router GOD MODE ready");
   }
 
 })();

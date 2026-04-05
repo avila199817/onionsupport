@@ -80,13 +80,21 @@
   }
 
   /* =========================
+     SAFE QUERY (CLAVE)
+  ========================= */
+
+  function exists(selector){
+    return document.querySelector(selector);
+  }
+
+  /* =========================
      RENDER
   ========================= */
 
   Onion.ui.renderSidebar = function(){
 
-    const nameEl = document.querySelector("#sidebar-name");
-    const avatarEl = document.querySelector("#sidebar-avatar");
+    const nameEl = exists("#sidebar-name");
+    const avatarEl = exists("#sidebar-avatar");
 
     if(!nameEl || !avatarEl) return;
 
@@ -100,11 +108,11 @@
 
   Onion.ui.renderTopbar = function(){
 
+    const el = exists("#topbar-title");
+    if(!el) return;
+
     const route = Onion.router.get();
     const config = Onion.routes[route];
-
-    const el = document.querySelector("#topbar-title");
-    if(!el) return;
 
     el.textContent = config?.title || "Panel";
 
@@ -162,12 +170,35 @@
   }
 
   /* =========================
+     WAIT DOM (🔥 FIX REAL)
+  ========================= */
+
+  function waitDOMAndRender(retries = 10){
+
+    if(
+      exists("#sidebar-name") &&
+      exists("#topbar-title")
+    ){
+      Onion.ui.renderSidebar();
+      Onion.ui.renderTopbar();
+      Onion.ui.updateSidebarActive();
+      return;
+    }
+
+    if(retries <= 0) return;
+
+    requestAnimationFrame(()=>{
+      waitDOMAndRender(retries - 1);
+    });
+
+  }
+
+  /* =========================
      INIT
   ========================= */
 
   Onion.ui.init = function(){
 
-    // 🔥 evita doble init duro
     if(!initialized){
 
       bindGlobalEvents();
@@ -179,24 +210,17 @@
       initialized = true;
     }
 
-    // 🔥 SIEMPRE refrescar (SPA)
     Onion.ui.refresh();
 
   };
 
   /* =========================
-     REFRESH
+     REFRESH (🔥 FIX CLAVE)
   ========================= */
 
   Onion.ui.refresh = function(){
 
-    requestAnimationFrame(()=>{
-
-      Onion.ui.renderSidebar();
-      Onion.ui.renderTopbar();
-      Onion.ui.updateSidebarActive();
-
-    });
+    waitDOMAndRender();
 
   };
 

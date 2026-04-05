@@ -1,310 +1,353 @@
 "use strict";
 
 /* =========================================================
-   🧅 RENDER — FULL PRO (SIN RACE CONDITIONS, LIMPIO, CONSISTENTE)
+   🧅 RENDER — FULL PRO (SPA SAFE · NO ROMPE LAYOUT)
 ========================================================= */
 
 (function(){
 
-  if(!window.Onion){
-    console.error("💥 Onion no definido (render.js)");
+if(!window.Onion){
+  console.error("💥 Onion no definido (render.js)");
+  return;
+}
+
+const Onion = window.Onion;
+
+/* =========================================================
+   UTILS
+========================================================= */
+
+function normalizeUrl(src){
+
+  if(!src) return null;
+
+  if(typeof src !== "string"){
+    Onion.error("URL inválida:", src);
+    return null;
+  }
+
+  if(src.startsWith("/")){
+    return window.location.origin + src;
+  }
+
+  if(src.startsWith("http")){
+    return src;
+  }
+
+  return window.location.origin + "/" + src.replace(/^\/+/,"");
+
+}
+
+/* =========================================================
+   LOAD SCRIPT
+========================================================= */
+
+function loadScriptSingle(src){
+
+  return new Promise((resolve, reject)=>{
+
+    const finalSrc = normalizeUrl(src);
+    if(!finalSrc) return resolve();
+
+    const s = document.createElement("script");
+
+    s.src = finalSrc;
+    s.defer = true;
+    s.async = false;
+    s.setAttribute("data-onion-page","true");
+
+    s.onload = resolve;
+    s.onerror = reject;
+
+    document.body.appendChild(s);
+
+  });
+
+}
+
+Onion.loadScript = async function(scripts){
+
+  if(!scripts) return;
+
+  if(typeof scripts === "string"){
+    scripts = [scripts];
+  }
+
+  if(!Array.isArray(scripts)){
+    Onion.error("Scripts inválidos:", scripts);
     return;
   }
 
-  const Onion = window.Onion;
+  /* 🔥 limpiar scripts anteriores */
+  document.querySelectorAll("script[data-onion-page]").forEach(s=>{
+    try{ s.remove(); }catch{}
+  });
 
-  /* =========================
-     NORMALIZE URL
-  ========================= */
-
-  function normalizeUrl(src){
-    if(!src) return null;
-
-    if(typeof src !== "string"){
-      Onion.error("URL inválida:", src);
-      return null;
-    }
-
-    if(src.startsWith("/")){
-      return window.location.origin + src;
-    }
-
-    if(src.startsWith("http")){
-      return src;
-    }
-
-    return window.location.origin + "/" + src.replace(/^\/+/,"");
+  for(const src of scripts){
+    await loadScriptSingle(src);
   }
 
-  /* =========================
-     LOAD SCRIPT
-  ========================= */
+};
 
-  function loadScriptSingle(src){
-    return new Promise((resolve, reject)=>{
+/* =========================================================
+   LOAD STYLE
+========================================================= */
 
-      const finalSrc = normalizeUrl(src);
-      if(!finalSrc) return resolve();
+Onion.loadStyle = function(styles){
 
-      const s = document.createElement("script");
-      s.src = finalSrc;
-      s.defer = true;
-      s.async = false;
-      s.setAttribute("data-onion-page","true");
+  return new Promise((resolve)=>{
 
-      s.onload = resolve;
-      s.onerror = reject;
+    if(!styles) return resolve();
 
-      document.body.appendChild(s);
-
-    });
-  }
-
-  Onion.loadScript = async function(scripts){
-
-    if(!scripts) return;
-
-    if(typeof scripts === "string"){
-      scripts = [scripts];
+    if(!Array.isArray(styles)){
+      styles = [styles];
     }
 
-    if(!Array.isArray(scripts)){
-      Onion.error("Scripts inválidos:", scripts);
-      return;
-    }
+    let loaded = 0;
+    const newLinks = [];
 
-    /* 🔥 limpiar scripts anteriores */
-    document.querySelectorAll("script[data-onion-page]").forEach(s=>{
-      try{ s.remove(); }catch{}
-    });
+    styles.forEach((href)=>{
 
-    for(const src of scripts){
-      await loadScriptSingle(src);
-    }
+      const finalHref = normalizeUrl(href);
 
-  };
-
-  /* =========================
-     LOAD STYLE
-  ========================= */
-
-  Onion.loadStyle = function(styles){
-
-    return new Promise((resolve)=>{
-
-      if(!styles) return resolve();
-
-      if(!Array.isArray(styles)){
-        styles = [styles];
+      if(!finalHref){
+        done();
+        return;
       }
 
-      let loaded = 0;
-      const newLinks = [];
+      const link = document.createElement("link");
 
-      styles.forEach((href)=>{
+      link.rel = "stylesheet";
+      link.href = finalHref;
+      link.setAttribute("data-onion-page-style","true");
 
-        const finalHref = normalizeUrl(href);
+      link.onload = done;
+      link.onerror = done;
 
-        if(!finalHref){
-          done();
-          return;
-        }
+      document.head.appendChild(link);
+      newLinks.push(link);
 
-        const link = document.createElement("link");
-        link.rel = "stylesheet";
-        link.href = finalHref;
-        link.setAttribute("data-onion-page-style","true");
+    });
 
-        link.onload = done;
-        link.onerror = done;
+    function done(){
 
-        document.head.appendChild(link);
-        newLinks.push(link);
+      loaded++;
 
-      });
+      if(loaded === styles.length){
 
-      function done(){
-
-        loaded++;
-
-        if(loaded === styles.length){
-
-          document
-            .querySelectorAll('link[data-onion-page-style-old]')
-            .forEach(l=>{
-              try{ l.remove(); }catch{}
-            });
-
-          newLinks.forEach(l=>{
-            l.setAttribute("data-onion-page-style-old","true");
+        document
+          .querySelectorAll('link[data-onion-page-style-old]')
+          .forEach(l=>{
+            try{ l.remove(); }catch{}
           });
 
-          resolve();
-        }
+        newLinks.forEach(l=>{
+          l.setAttribute("data-onion-page-style-old","true");
+        });
 
+        resolve();
       }
-
-    });
-
-  };
-
-  /* =========================
-     FETCH HTML
-  ========================= */
-
-  Onion.fetchHTML = async function(url){
-
-    const finalUrl = normalizeUrl(url);
-    if(!finalUrl) return null;
-
-    const res = await fetch(finalUrl, {
-      credentials: "include"
-    });
-
-    if(!res.ok){
-      throw new Error("HTTP " + res.status);
-    }
-
-    return await res.text();
-
-  };
-
-  /* =========================
-     EXTRACT CONTENT
-  ========================= */
-
-  function extractContent(html){
-
-    const wrapper = document.createElement("div");
-    wrapper.innerHTML = html;
-
-    return wrapper.querySelector(".panel-content") || wrapper;
-
-  }
-
-  /* =========================
-     SWAP CONTENT
-  ========================= */
-
-  Onion.swapContent = function(node){
-
-    const app = document.getElementById("app-content");
-    if(!app) return;
-
-    app.innerHTML = "";
-
-    app.appendChild(node.cloneNode(true));
-
-  };
-
-  /* =========================
-     RENDER CORE
-  ========================= */
-
-  const originalRender = async function(){
-
-    const currentRenderId = ++Onion.state.renderId;
-
-    Onion.state.rendering = true;
-
-    try{
-
-      Onion.ui.showLoader?.();
-
-      const route = Onion.router.resolve();
-
-      if(route.title){
-        document.title = "Onion Support · " + route.title;
-      }
-
-      /* =========================
-         FETCH HTML
-      ========================= */
-
-      const html = await Onion.fetchHTML(route.page);
-
-      if(currentRenderId !== Onion.state.renderId) return;
-
-      const content = extractContent(html);
-
-      if(!content){
-        throw new Error("No se encontró .panel-content");
-      }
-
-      content.classList.remove("ready");
-
-      /* =========================
-         CLEANUP (UNA SOLA VEZ)
-      ========================= */
-
-      Onion.runCleanup?.();
-
-      /* =========================
-         STYLE
-      ========================= */
-
-      if(route.style){
-        await Onion.loadStyle(route.style);
-      }
-
-      /* =========================
-         SWAP DOM
-      ========================= */
-
-      Onion.swapContent(content);
-
-      /* =========================
-         SCRIPTS
-      ========================= */
-
-      if(route.script){
-        await Onion.loadScript(route.script);
-      }
-
-      if(currentRenderId !== Onion.state.renderId) return;
-
-      /* =========================
-         FRAME SYNC
-      ========================= */
-
-      await new Promise(r => requestAnimationFrame(r));
-      await new Promise(r => requestAnimationFrame(r));
-
-      const newContent = document.querySelector("#app-content .panel-content");
-
-      if(newContent){
-        newContent.classList.add("ready");
-      }
-
-      Onion.ui.hideLoader?.();
-
-    }catch(e){
-
-      Onion.error("RENDER ERROR:", e);
-      Onion.ui.hideLoader?.();
-
-    }finally{
-
-      Onion.state.rendering = false;
 
     }
 
-  };
+  });
 
-  /* =========================
-     PUBLIC RENDER
-  ========================= */
+};
 
-  Onion.render = async function(){
-    return originalRender.apply(this, arguments);
-  };
+/* =========================================================
+   FETCH HTML
+========================================================= */
 
-  /* =========================
-     DEBUG
-  ========================= */
+Onion.fetchHTML = async function(url){
 
-  if(Onion.config?.DEBUG){
-    Onion.log("🎬 Render system PRO ready");
+  const finalUrl = normalizeUrl(url);
+  if(!finalUrl) return null;
+
+  const res = await fetch(finalUrl, {
+    credentials: "include"
+  });
+
+  if(!res.ok){
+    throw new Error("HTTP " + res.status);
   }
+
+  return await res.text();
+
+};
+
+/* =========================================================
+   EXTRACT CONTENT
+========================================================= */
+
+function extractContent(html){
+
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = html;
+
+  return wrapper.querySelector(".panel-content") || wrapper;
+
+}
+
+/* =========================================================
+   SWAP (🔥 SOLO VIEW-CONTAINER)
+========================================================= */
+
+function swapView(node){
+
+  const container = document.getElementById("view-container");
+  if(!container) return;
+
+  container.innerHTML = "";
+  container.appendChild(node.cloneNode(true));
+
+}
+
+/* =========================================================
+   TOPBAR TITLE
+========================================================= */
+
+function updateTopbar(route){
+
+  const el = document.getElementById("topbar-title");
+  if(!el) return;
+
+  el.textContent = route?.title || "Panel";
+
+}
+
+/* =========================================================
+   DYNAMIC CONTAINERS
+========================================================= */
+
+function clearDynamic(){
+
+  const topbar = document.getElementById("topbarview-container");
+  const table  = document.getElementById("tablehead-container");
+
+  if(topbar) topbar.innerHTML = "";
+  if(table) table.innerHTML = "";
+
+}
+
+/* =========================================================
+   CORE RENDER
+========================================================= */
+
+const originalRender = async function(){
+
+  const renderId = ++Onion.state.renderId;
+  Onion.state.rendering = true;
+
+  try{
+
+    Onion.ui.showLoader?.();
+
+    const route = Onion.router.resolve();
+
+    /* =========================
+       TITLE
+    ========================= */
+
+    if(route.title){
+      document.title = "Onion Support · " + route.title;
+    }
+
+    updateTopbar(route);
+
+    /* =========================
+       FETCH
+    ========================= */
+
+    const html = await Onion.fetchHTML(route.page);
+
+    if(renderId !== Onion.state.renderId) return;
+
+    const content = extractContent(html);
+
+    if(!content){
+      throw new Error("No se encontró .panel-content");
+    }
+
+    content.classList.remove("ready");
+
+    /* =========================
+       CLEANUP
+    ========================= */
+
+    Onion.runCleanup?.();
+
+    /* =========================
+       STYLE
+    ========================= */
+
+    if(route.style){
+      await Onion.loadStyle(route.style);
+    }
+
+    /* =========================
+       CLEAR DYNAMIC
+    ========================= */
+
+    clearDynamic();
+
+    /* =========================
+       SWAP VIEW
+    ========================= */
+
+    swapView(content);
+
+    /* =========================
+       SCRIPTS
+    ========================= */
+
+    if(route.script){
+      await Onion.loadScript(route.script);
+    }
+
+    if(renderId !== Onion.state.renderId) return;
+
+    /* =========================
+       FRAME SYNC
+    ========================= */
+
+    await new Promise(r => requestAnimationFrame(r));
+    await new Promise(r => requestAnimationFrame(r));
+
+    const newContent = document.querySelector("#view-container .panel-content");
+
+    if(newContent){
+      newContent.classList.add("ready");
+    }
+
+    Onion.ui.hideLoader?.();
+
+  }catch(e){
+
+    Onion.error("RENDER ERROR:", e);
+    Onion.ui.hideLoader?.();
+
+  }finally{
+
+    Onion.state.rendering = false;
+
+  }
+
+};
+
+/* =========================================================
+   PUBLIC
+========================================================= */
+
+Onion.render = async function(){
+  return originalRender.apply(this, arguments);
+};
+
+/* =========================================================
+   DEBUG
+========================================================= */
+
+if(Onion.config?.DEBUG){
+  Onion.log("🎬 Render PRO ready");
+}
 
 })();

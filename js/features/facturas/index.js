@@ -36,27 +36,65 @@ function $(selector){
 
 
 /* =========================
-   🔥 LOADER CONTROL (NEW)
+   LOAD — FIX REAL
 ========================= */
 
-function showLoader(){
-  const loader = $(".table-loader-overlay");
-  if(!loader) return;
+async function loadFacturas(){
 
-  loader.style.display = "flex";
-  loader.style.opacity = "1";
-}
+  if(loading) return;
+  loading = true;
 
-function hideLoader(){
-  const loader = $(".table-loader-overlay");
-  if(!loader) return;
+  const tbody = $("#facturas-body");
+  if(!tbody){
+    loading = false;
+    return;
+  }
 
-  loader.style.transition = "opacity .25s ease";
-  loader.style.opacity = "0";
+  const requestId = ++currentRequestId;
 
-  setTimeout(()=>{
-    loader.style.display = "none";
-  }, 250);
+  showLoader();
+  document.activeElement?.blur();
+
+  try{
+
+    await new Promise(r => requestAnimationFrame(r));
+    await new Promise(r => requestAnimationFrame(r));
+
+    const res = await Onion.fetch(Onion.config.API + "/facturas");
+    const items = normalize(res);
+
+    // 🔥 Si esta request ya no es válida → NO renderizar
+    if(requestId !== currentRequestId){
+      return;
+    }
+
+    currentItems = items;
+    filteredItems = items;
+
+    if(!items.length){
+      setEmpty();
+      return;
+    }
+
+    applyFilters();
+
+  }catch(e){
+
+    console.error("💥 ERROR FACTURAS:", e);
+
+    if(requestId === currentRequestId){
+      setError();
+    }
+
+  }finally{
+
+    // 🔥 SIEMPRE ocultar loader
+    hideLoader();
+
+    // 🔥 Reset estado global
+    loading = false;
+  }
+
 }
 
 

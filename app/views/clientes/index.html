@@ -1,71 +1,20 @@
 <div class="panel-content clientes table-mode">
 
-  <!-- 🔥 TABLE SYSTEM -->
-  <div class="table-system clientes">
+  <div class="table-system">
 
-    <!-- =========================
-         FILTROS
-    ========================= -->
-    <div class="filters-row">
-
-      <input 
-        type="text"
-        id="search-cliente"
-        placeholder="Buscar cliente..."
-        autocomplete="off"
-      >
-
-      <select id="filter-estado-cliente">
-        <option value="">Estado</option>
-        <option value="activo">Activo</option>
-        <option value="inactivo">Inactivo</option>
-      </select>
-
-      <select id="filter-tipo-cliente">
-        <option value="">Tipo</option>
-        <option value="particular">Particular</option>
-        <option value="empresa">Empresa</option>
-      </select>
-
-      <button id="btn-new-cliente" class="btn-new-cliente">
-        + Nuevo
-      </button>
-
-    </div>
-
-    <!-- =========================
-         TABLA
-    ========================= -->
+    <!-- 🔥 SCROLL SOLO AQUÍ -->
     <div class="table-container">
 
+      <!-- 🔥 LOADER (FUERA DE LA TABLA) -->
+      <div class="table-loader">
+        <div class="spinner"></div>
+        <span>Cargando clientes...</span>
+      </div>
+
       <table>
-
-        <thead>
-          <tr>
-            <th class="col-id">ID</th>
-            <th class="col-main">Cliente</th>
-            <th class="col-secondary">Ubicación</th>
-            <th class="col-secondary">Tipo</th>
-            <th class="col-status">Estado</th>
-            <th class="col-date">Alta</th>
-            <th class="col-actions">Acciones</th>
-          </tr>
-        </thead>
-
         <tbody id="clientes-body">
-
-          <!-- 🔥 LOADER IGUAL QUE FACTURAS -->
-          <tr class="table-loading">
-            <td colspan="7">
-              <div class="table-loader">
-                <div class="spinner"></div>
-                <span>Cargando clientes...</span>
-              </div>
-            </td>
-          </tr>
-
+          <!-- filas dinámicas -->
         </tbody>
-
       </table>
 
     </div>

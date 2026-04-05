@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 ROUTER — GOD MODE (SIDEBAR FIRST · SYNC PERFECT · NO RACE)
+   🧅 ROUTER — GOD MODE FINAL (FIX REAL · NO DEAD SPA · NO BLOCKS)
 ========================================================= */
 
 (function(){
@@ -224,7 +224,7 @@
   };
 
   /* =========================
-     NAVIGATE (SYNC CON SIDEBAR)
+     NAVIGATE (FIX REAL 🔥)
   ========================= */
 
   Onion.router.navigate = function(href){
@@ -233,11 +233,6 @@
 
     if(href.startsWith("http")){
       window.location.href = href;
-      return;
-    }
-
-    // 🔥 NO navegar si app no está lista
-    if(!Onion.state.appReady){
       return;
     }
 
@@ -275,8 +270,12 @@
     Onion.render()
       .catch(e => Onion.error("NAV ERROR:", e))
       .finally(()=>{
+
         Onion.events?.emit?.("route:end");
+
+        // 🔥 FIX CRÍTICO: liberar siempre
         Onion.state.navigating = false;
+
       });
 
   };
@@ -319,7 +318,6 @@
 
     window.addEventListener("popstate", function(){
 
-      if(!Onion.state.appReady) return;
       if(Onion.state.navigating) return;
 
       Onion.state.navigating = true;
@@ -329,8 +327,11 @@
       Onion.render()
         .catch(e => Onion.error("POPSTATE ERROR:", e))
         .finally(()=>{
+
           Onion.events?.emit?.("route:end");
+
           Onion.state.navigating = false;
+
         });
 
     });
@@ -338,20 +339,11 @@
   }
 
   /* =========================
-     HAS ROUTE
-  ========================= */
-
-  Onion.router.has = function(path){
-    if(!path) return false;
-    return !!Onion.routes[normalize(path)];
-  };
-
-  /* =========================
      DEBUG
   ========================= */
 
   if(Onion.config?.DEBUG){
-    Onion.log("🧭 Router GOD MODE ready");
+    Onion.log("🧭 Router GOD MODE FINAL ready");
   }
 
 })();

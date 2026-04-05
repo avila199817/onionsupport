@@ -1,15 +1,15 @@
 /* =========================================================
-   🔥 TOPBARVIEW — CLON REAL DEL TOPBAR
+   🔥 TOPBARVIEW — CLON REAL DEL TOPBAR (PRO)
 ========================================================= */
 
 .topbarview{
   position: fixed;
 
-  top: var(--topbar-height); /* 👈 debajo del topbar padre */
+  top: var(--topbar-height);
   left: var(--sidebar-width);
   right: 0;
 
-  height: 60px; /* 👈 ajusta si quieres */
+  height: var(--topbarview-height); /* 🔥 CLAVE */
 
   display:flex;
   align-items:center;

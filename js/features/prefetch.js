@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 PREFETCH — FULL PRO (CONTROLADO, SIN FUGAS, EFICIENTE)
+   🧅 PREFETCH — FULL PRO (CONTROLADO, SIN FUGAS, SIN WARNINGS)
 ========================================================= */
 
 (function(){
@@ -52,7 +52,7 @@
      ADD LINK SAFE
   ========================= */
 
-  function addLink(rel, as, href){
+  function addLink(rel, href){
 
     if(!href) return;
 
@@ -60,7 +60,6 @@
 
     const link = document.createElement("link");
     link.rel = rel;
-    link.as = as;
     link.href = href;
 
     document.head.appendChild(link);
@@ -100,7 +99,7 @@
       }
 
       /* =========================
-         CSS
+         CSS (⚡ prefetch limpio)
       ========================= */
 
       if(route.style){
@@ -110,13 +109,13 @@
           : [route.style];
 
         styles.forEach(href=>{
-          addLink("preload", "style", href);
+          addLink("prefetch", href);
         });
 
       }
 
       /* =========================
-         JS
+         JS (⚡ prefetch limpio)
       ========================= */
 
       if(route.script){
@@ -126,7 +125,7 @@
           : [route.script];
 
         scripts.forEach(src=>{
-          addLink("preload", "script", src);
+          addLink("prefetch", src);
         });
 
       }
@@ -161,6 +160,9 @@
         return;
       }
 
+      // 🔥 solo si la pestaña está activa
+      if(document.visibilityState !== "visible") return;
+
       Onion.prefetch(href);
     };
 
@@ -174,7 +176,7 @@
   ========================= */
 
   if(Onion.config?.DEBUG){
-    Onion.log("⚡ Prefetch system PRO ready");
+    Onion.log("⚡ PREFETCH PRO");
   }
 
 })();

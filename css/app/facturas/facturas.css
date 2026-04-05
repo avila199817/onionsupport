@@ -1,5 +1,5 @@
 /* =========================================================
-   FACTURAS — PRO SAAS PANEL (TABLE MODE CLEAN FINAL)
+   FACTURAS — PRO SAAS PANEL (TABLE MODE CLEAN FINAL v2)
 ========================================================= */
 
 .panel-content.facturas{
@@ -37,6 +37,8 @@
   overflow-x:hidden;
 
   background:var(--panel-bg);
+
+  position:relative; /* 🔥 clave para sticky */
 }
 
 
@@ -46,7 +48,8 @@
 
 .panel-content.facturas table{
   width:100%;
-  border-collapse:collapse;
+  border-collapse:separate; /* 🔥 mejora sticky */
+  border-spacing:0;
   table-layout:fixed;
 }
 
@@ -54,7 +57,13 @@
   background:var(--panel-bg);
 }
 
-.panel-content.facturas th{
+/* 🔥 STICKY HEADER PRO */
+.panel-content.facturas thead th{
+  position:sticky;
+  top:0;
+
+  z-index:10;
+
   padding:12px 14px;
   text-align:left;
 
@@ -66,6 +75,16 @@
   letter-spacing:.4px;
 
   white-space:nowrap;
+
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.02), transparent 40%),
+    var(--panel-bg);
+
+  /* 🔥 efecto pro */
+  backdrop-filter: blur(6px);
+
+  /* 🔥 separación limpia */
+  box-shadow: 0 1px 0 var(--panel-border);
 }
 
 .panel-content.facturas td{
@@ -132,6 +151,9 @@
 .panel-content.facturas tbody tr{
   transition:all .15s ease;
   cursor:pointer;
+
+  position:relative; /* 🔥 evita problemas con sticky */
+  z-index:1;
 }
 
 .panel-content.facturas tbody tr:nth-child(even){

@@ -1,5 +1,9 @@
 "use strict";
 
+/* =========================
+   SIDEBAR FINAL 10/10 (SPA SAFE)
+========================= */
+
 (function(){
 
 const Onion = window.Onion;
@@ -9,7 +13,9 @@ if(!Onion){
   return;
 }
 
-let initialized = false;
+/* =========================
+   INIT (RE-MONTABLE)
+========================= */
 
 function init(){
 
@@ -18,20 +24,24 @@ function init(){
   const user     = document.getElementById("userToggle");
   const dropdown = document.getElementById("userDropdown");
 
-  if(!sidebar || !toggle || initialized) return;
+  if(!sidebar || !toggle) return;
 
   if(!Onion.state?.user){
     return setTimeout(init, 100);
   }
 
-  initialized = true;
-
   renderUser();
   restoreState();
   bindEvents();
+  renderRecientes();
 }
 
 init();
+
+/* 🔥 RE-INIT TRAS CADA RENDER */
+Onion.events?.on?.("route:end", ()=>{
+  requestAnimationFrame(init);
+});
 
 
 /* =========================
@@ -52,7 +62,7 @@ function restoreState(){
 
 
 /* =========================
-   EVENTS (🔥 SIN CLEANUP)
+   EVENTS (USANDO CLEANUP)
 ========================= */
 
 function bindEvents(){
@@ -65,7 +75,7 @@ function bindEvents(){
 
   if(toggle){
 
-    toggle.addEventListener("click", (e)=>{
+    Onion.cleanupEvent(toggle, "click", (e)=>{
       e.stopPropagation();
 
       const isCollapsed = sidebar.classList.contains("collapsed");
@@ -86,7 +96,7 @@ function bindEvents(){
 
   if(user && dropdown){
 
-    user.addEventListener("click", (e)=>{
+    Onion.cleanupEvent(user, "click", (e)=>{
       e.stopPropagation();
 
       const isCollapsed = sidebar.classList.contains("collapsed");
@@ -109,7 +119,7 @@ function bindEvents(){
 
   }
 
-  document.addEventListener("click", (e)=>{
+  Onion.cleanupEvent(document, "click", (e)=>{
 
     if(
       e.target.closest("#userToggle") ||
@@ -122,7 +132,7 @@ function bindEvents(){
 
   });
 
-  document.addEventListener("keydown", (e)=>{
+  Onion.cleanupEvent(document, "keydown", (e)=>{
     if(e.key === "Escape"){
       dropdown?.classList.remove("active");
     }
@@ -130,7 +140,7 @@ function bindEvents(){
 
   if(dropdown){
 
-    dropdown.addEventListener("click", (e)=>{
+    Onion.cleanupEvent(dropdown, "click", (e)=>{
 
       e.stopPropagation();
 
@@ -160,7 +170,7 @@ function bindEvents(){
 
   if(logout){
 
-    logout.addEventListener("click", (e)=>{
+    Onion.cleanupEvent(logout, "click", (e)=>{
       e.stopPropagation();
       Onion.auth?.logout?.();
       window.location.href = "/login";
@@ -214,6 +224,90 @@ function renderUser(){
 
 
 /* =========================
+   RECIENTES (LOADER PRO)
+========================= */
+
+function renderRecientes(){
+
+  const section = document.querySelector(".sidebar-section");
+  if(!section) return;
+
+  // 🔥 LOADER
+  section.innerHTML = `
+    <span class="section-title">Recientes</span>
+
+    <div class="sidebar-recientes-loading">
+      <div class="spinner"></div>
+      <span>Cargando...</span>
+    </div>
+  `;
+
+  // 🔥 SIMULACIÓN (puedes conectar API aquí)
+  setTimeout(()=>{
+
+    const recientes = getRecientesMock();
+
+    if(!recientes.length){
+
+      section.innerHTML = `
+        <span class="section-title">Recientes</span>
+        <div class="sidebar-empty">
+          No hay actividad reciente
+        </div>
+      `;
+      return;
+    }
+
+    section.innerHTML = `
+      <span class="section-title">Recientes</span>
+      ${recientes.map(r => `
+        <a href="${r.href}" data-spa class="chat-item">
+          ${escapeHTML(r.label)}
+        </a>
+      `).join("")}
+    `;
+
+  }, 600);
+
+}
+
+
+/* =========================
+   MOCK (puedes cambiar por API)
+========================= */
+
+function getRecientesMock(){
+  return [
+    { label: "Incidencia servidor", href: "/incidencias" },
+    { label: "Factura cliente", href: "/facturas" },
+    { label: "Usuario nuevo", href: "/usuarios" }
+  ];
+}
+
+
+/* =========================
+   TOOLTIP
+========================= */
+
+function updateTooltip(){
+
+  const sidebar = document.querySelector(".sidebar");
+  const toggle = document.getElementById("toggleSidebar");
+
+  if(!sidebar || !toggle) return;
+
+  const collapsed = sidebar.classList.contains("collapsed");
+
+  toggle.setAttribute(
+    "data-tooltip",
+    collapsed
+      ? "Abrir barra lateral"
+      : "Cerrar barra lateral"
+  );
+}
+
+
+/* =========================
    HELPERS
 ========================= */
 
@@ -240,23 +334,6 @@ function renderAvatarFallback(name){
   `;
 }
 
-function updateTooltip(){
-
-  const sidebar = document.querySelector(".sidebar");
-  const toggle = document.getElementById("toggleSidebar");
-
-  if(!sidebar || !toggle) return;
-
-  const collapsed = sidebar.classList.contains("collapsed");
-
-  toggle.setAttribute(
-    "data-tooltip",
-    collapsed
-      ? "Abrir barra lateral"
-      : "Cerrar barra lateral"
-  );
-}
-
 function hashString(str){
   let hash = 0;
   for(let i = 0; i < str.length; i++){
@@ -273,6 +350,13 @@ function getAvatarColor(name){
 function getInitials(name){
   if(!name) return "?";
   return name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase();
+}
+
+function escapeHTML(str){
+  return String(str)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;");
 }
 
 })();

@@ -1,5 +1,9 @@
 "use strict";
 
+/* =========================
+   SIDEBAR (FINAL DEFINITIVO)
+========================= */
+
 (function(){
 
 const Onion = window.Onion;
@@ -17,27 +21,17 @@ let initialized = false;
 
 
 /* =========================
-   ROOT
-========================= */
-
-function getRoot(){
-  return document.querySelector(".sidebar");
-}
-
-function $(selector){
-  const root = getRoot();
-  return root ? root.querySelector(selector) : null;
-}
-
-
-/* =========================
    INIT
 ========================= */
 
 function init(){
 
-  const root = getRoot();
-  if(!root || initialized) return;
+  const sidebar  = document.querySelector(".sidebar");
+  const toggle   = document.getElementById("toggleSidebar");
+  const user     = document.getElementById("userToggle");
+  const dropdown = document.getElementById("userDropdown");
+
+  if(!sidebar || !toggle || initialized) return;
 
   if(!Onion.state?.user){
     return setTimeout(init, 100);
@@ -46,8 +40,8 @@ function init(){
   initialized = true;
 
   renderUser();
+  restoreState();
   bindEvents();
-  renderRecientes();
 
   Onion.onCleanup(()=>{
     initialized = false;
@@ -59,7 +53,165 @@ init();
 
 
 /* =========================
-   USER
+   RESTORE STATE
+========================= */
+
+function restoreState(){
+
+  const sidebar = document.querySelector(".sidebar");
+  if(!sidebar) return;
+
+  const saved = localStorage.getItem("sidebar-collapsed");
+
+  if(saved === "true"){
+    sidebar.classList.add("collapsed");
+  }else{
+    sidebar.classList.remove("collapsed");
+  }
+
+  updateTooltip();
+}
+
+
+/* =========================
+   EVENTS
+========================= */
+
+function bindEvents(){
+
+  const sidebar  = document.querySelector(".sidebar");
+  const toggle   = document.getElementById("toggleSidebar");
+  const user     = document.getElementById("userToggle");
+  const dropdown = document.getElementById("userDropdown");
+  const logout   = document.getElementById("logoutBtn");
+
+  /* 🔥 SIDEBAR TOGGLE */
+  if(toggle){
+
+    Onion.cleanupEvent(toggle, "click", (e)=>{
+      e.stopPropagation();
+
+      const isCollapsed = sidebar.classList.contains("collapsed");
+
+      sidebar.classList.toggle("collapsed");
+
+      localStorage.setItem(
+        "sidebar-collapsed",
+        String(!isCollapsed)
+      );
+
+      dropdown?.classList.remove("active");
+
+      requestAnimationFrame(updateTooltip);
+    });
+
+  }
+
+  /* 🔥 USER CLICK */
+  if(user && dropdown){
+
+    Onion.cleanupEvent(user, "click", (e)=>{
+      e.stopPropagation();
+
+      const isCollapsed = sidebar.classList.contains("collapsed");
+      const isOpen = dropdown.classList.contains("active");
+
+      // 👉 si está colapsado → abrir primero
+      if(isCollapsed){
+
+        sidebar.classList.remove("collapsed");
+        localStorage.setItem("sidebar-collapsed", "false");
+
+        requestAnimationFrame(updateTooltip);
+
+        setTimeout(()=>{
+          dropdown.classList.add("active");
+        }, 200);
+
+        return;
+      }
+
+      // 👉 toggle normal
+      if(isOpen){
+        dropdown.classList.remove("active");
+      }else{
+        dropdown.classList.add("active");
+      }
+
+    });
+
+  }
+
+  /* 🔥 CLICK FUERA */
+  Onion.cleanupEvent(document, "click", (e)=>{
+
+    if(!dropdown) return;
+
+    if(
+      e.target.closest("#userDropdown") ||
+      e.target.closest("#userToggle")
+    ){
+      return;
+    }
+
+    dropdown.classList.remove("active");
+
+  });
+
+  /* 🔥 ESCAPE */
+  Onion.cleanupEvent(document, "keydown", (e)=>{
+    if(e.key === "Escape"){
+      dropdown?.classList.remove("active");
+    }
+  });
+
+  /* 🔥 DROPDOWN ACTIONS */
+  if(dropdown){
+
+    Onion.cleanupEvent(dropdown, "click", (e)=>{
+
+      e.stopPropagation();
+
+      const item = e.target.closest(".dropdown-item");
+      if(!item) return;
+
+      const action =
+        item.dataset.action ||
+        (item.id === "logoutBtn" ? "logout" : null);
+
+      if(action){
+
+        if(action === "logout"){
+          Onion.auth?.logout?.();
+          window.location.href = "/login";
+          return;
+        }
+
+        Onion.emit?.("dropdown:" + action);
+      }
+
+      dropdown.classList.remove("active");
+
+    });
+
+  }
+
+  /* 🔥 LOGOUT DIRECTO (fallback) */
+  if(logout){
+
+    Onion.cleanupEvent(logout, "click", (e)=>{
+      e.stopPropagation();
+      Onion.auth?.logout?.();
+      window.location.href = "/login";
+    });
+
+  }
+
+}
+
+
+/* =========================
+   USER RENDER
 ========================= */
 
 function renderUser(){
@@ -67,8 +219,8 @@ function renderUser(){
   const user = Onion.state?.user;
   if(!user) return;
 
-  const nameEl = $("#sidebar-name");
-  const avatarEl = $("#sidebar-avatar");
+  const nameEl = document.getElementById("sidebar-name");
+  const avatarEl = document.getElementById("sidebar-avatar");
 
   const name =
     user.nombre ||
@@ -130,148 +282,24 @@ function renderAvatarFallback(name){
 
 
 /* =========================
-   EVENTS (FIX REAL)
+   TOOLTIP
 ========================= */
 
-function bindEvents(){
+function updateTooltip(){
 
-  const toggleSidebarBtn = document.getElementById("toggleSidebar");
-  const userToggle = $("#userToggle");
-  const dropdown = $("#userDropdown");
-  const logout = $("#logoutBtn");
+  const sidebar = document.querySelector(".sidebar");
+  const toggle = document.getElementById("toggleSidebar");
 
-  /* 🔥 SIDEBAR TOGGLE */
-  if(toggleSidebarBtn){
+  if(!sidebar || !toggle) return;
 
-    Onion.cleanupEvent(toggleSidebarBtn, "click", (e)=>{
-      e.stopPropagation();
+  const collapsed = sidebar.classList.contains("collapsed");
 
-      document.body.classList.toggle("sidebar-collapsed");
-
-      // debug opcional
-      // console.log("sidebar toggle:", document.body.classList.contains("sidebar-collapsed"));
-    });
-
-  }
-
-  /* 🔥 DROPDOWN (FIX CLAVE) */
-  if(userToggle && dropdown){
-
-    Onion.cleanupEvent(userToggle, "click", (e)=>{
-      e.stopPropagation();
-
-      const isOpen = dropdown.classList.contains("open");
-
-      closeAllDropdowns();
-
-      if(!isOpen){
-        dropdown.classList.add("open");
-      }
-
-    });
-
-  }
-
-  /* 🔥 CLICK GLOBAL (FIX REAL) */
-  Onion.cleanupEvent(document, "click", (e)=>{
-
-    // 👉 si haces click dentro del user o dropdown → NO cerrar
-    if(
-      e.target.closest("#userToggle") ||
-      e.target.closest("#userDropdown")
-    ){
-      return;
-    }
-
-    closeAllDropdowns();
-
-  });
-
-  /* 🔥 LOGOUT */
-  if(logout){
-
-    Onion.cleanupEvent(logout, "click", (e)=>{
-      e.stopPropagation();
-      handleLogout();
-    });
-
-  }
-
-}
-
-
-/* =========================
-   CLOSE DROPDOWNS
-========================= */
-
-function closeAllDropdowns(){
-  const dropdown = $("#userDropdown");
-  if(dropdown){
-    dropdown.classList.remove("open");
-  }
-}
-
-
-/* =========================
-   LOGOUT
-========================= */
-
-function handleLogout(){
-
-  try{
-    Onion.auth?.logout?.();
-  }catch(e){
-    console.error("💥 logout error", e);
-  }
-
-  window.location.href = "/login";
-}
-
-
-/* =========================
-   RECIENTES
-========================= */
-
-function renderRecientes(){
-
-  const section = document.querySelector(".sidebar-section");
-  if(!section) return;
-
-  section.innerHTML = `
-    <span class="section-title">Recientes</span>
-
-    <div style="
-      display:flex;
-      align-items:center;
-      gap:10px;
-      padding:10px;
-      opacity:.7;
-      font-size:12px;
-    ">
-      <div style="
-        width:14px;
-        height:14px;
-        border:2px solid rgba(255,255,255,0.1);
-        border-top-color:var(--accent);
-        border-radius:50%;
-        animation:spin .6s linear infinite;
-      "></div>
-
-      <span>Cargando...</span>
-    </div>
-  `;
-
-  setTimeout(()=>{
-
-    section.innerHTML = `
-      <span class="section-title">Recientes</span>
-      <div style="padding:10px;font-size:12px;opacity:.6;">
-        No hay recientes
-      </div>
-    `;
-
-  }, 800);
-
+  toggle.setAttribute(
+    "data-tooltip",
+    collapsed
+      ? "Abrir barra lateral"
+      : "Cerrar barra lateral"
+  );
 }
 
 

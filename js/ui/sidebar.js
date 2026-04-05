@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 SIDEBAR — FULL PRO (SIN DUPES, CLEAN EVENTS, CONSISTENTE)
+   🧅 SIDEBAR — FULL PRO GOD (SPA CLEAN + TRACK RECENTES)
 ========================================================= */
 
 (function(){
@@ -51,13 +51,13 @@ function init(){
 
 init();
 
-/* 🔥 FIX SPA */
+/* 🔥 SPA HOOKS */
 Onion.events?.on?.("app:ready", ()=> requestAnimationFrame(init));
 Onion.events?.on?.("route:end", ()=> requestAnimationFrame(init));
 
-/* =========================
+/* =========================================================
    STATE
-========================= */
+========================================================= */
 
 function restoreState(){
 
@@ -71,9 +71,9 @@ function restoreState(){
   updateTooltip();
 }
 
-/* =========================
+/* =========================================================
    EVENTS
-========================= */
+========================================================= */
 
 function bindEvents(){
 
@@ -137,7 +137,7 @@ function bindEvents(){
     }
   });
 
-  /* 🔥 LOGOUT CENTRALIZADO */
+  /* 🔥 LOGOUT */
   if(logout){
 
     Onion.cleanupEvent(logout, "click", async (e)=>{
@@ -158,9 +158,9 @@ function bindEvents(){
 
 }
 
-/* =========================
+/* =========================================================
    USER
-========================= */
+========================================================= */
 
 function renderUser(){
 
@@ -193,9 +193,9 @@ function renderUser(){
 
 }
 
-/* =========================
+/* =========================================================
    RECIENTES
-========================= */
+========================================================= */
 
 function showRecientesLoader(){
 
@@ -256,7 +256,7 @@ async function loadRecientes(){
     await new Promise(r => requestAnimationFrame(r));
     await new Promise(r => requestAnimationFrame(r));
 
-    const res = await Onion.fetch(Onion.config.API + "/recientes");
+    const res = await Onion.fetch("/recientes");
     const items = normalize(res);
 
     if(requestId !== currentRequestId) return;
@@ -282,9 +282,50 @@ async function loadRecientes(){
 
 }
 
-/* =========================
+/* =========================================================
+   TRACK RECENTES (🔥 NIVEL SAAS REAL)
+========================================================= */
+
+Onion.events?.on?.("route:end", ()=>{
+
+  try{
+
+    const route = Onion.router.get();
+    const config = Onion.routes?.[route];
+
+    if(!route || !config) return;
+    if(route === "/") return;
+
+    const payload = {
+      label: config.title || "Vista",
+      href: route,
+      ts: Date.now()
+    };
+
+    const url = Onion.config.API + "/recientes";
+
+    // 🔥 envío no bloqueante
+    if(navigator.sendBeacon){
+      const blob = new Blob([JSON.stringify(payload)], {
+        type: "application/json"
+      });
+      navigator.sendBeacon(url, blob);
+    }else{
+      Onion.fetch("/recientes", {
+        method: "POST",
+        body: payload
+      }).catch(()=>{});
+    }
+
+  }catch(e){
+    // silencio total
+  }
+
+});
+
+/* =========================================================
    NORMALIZE
-========================= */
+========================================================= */
 
 function normalize(res){
 
@@ -297,9 +338,9 @@ function normalize(res){
   return [];
 }
 
-/* =========================
+/* =========================================================
    RENDER
-========================= */
+========================================================= */
 
 function renderRecientes(items){
 
@@ -320,9 +361,9 @@ function renderRecientes(items){
   `;
 }
 
-/* =========================
+/* =========================================================
    HELPERS
-========================= */
+========================================================= */
 
 function renderAvatarFallback(name){
 
@@ -381,7 +422,7 @@ function updateTooltip(){
 }
 
 if(Onion.config?.DEBUG){
-  Onion.log("📚 Sidebar PRO ready");
+  Onion.log("📚 Sidebar GOD MODE ready");
 }
 
 })();

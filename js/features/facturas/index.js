@@ -133,7 +133,7 @@ function init(){
   const root = getRoot();
   if(!root || initialized) return;
 
-  if(!Onion.user){
+  if(!Onion.state?.user){
     console.warn("⏳ esperando user...");
     return setTimeout(init, 100);
   }

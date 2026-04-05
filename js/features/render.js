@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 RENDER — GOD MODE (ROBUSTO · SPA SAFE · SIN FALLOS)
+   🧅 RENDER — GOD MODE FINAL (SPA ESTABLE · SIN RACES · CLEAN)
 ========================================================= */
 
 (function(){
@@ -12,6 +12,47 @@ if(!window.Onion){
 }
 
 const Onion = window.Onion;
+
+/* =========================================================
+   DOM READY (🔥 CLAVE)
+========================================================= */
+
+function waitForDOMReady(){
+
+  if(document.readyState === "complete" || document.readyState === "interactive"){
+    return Promise.resolve();
+  }
+
+  return new Promise(resolve=>{
+    document.addEventListener("DOMContentLoaded", resolve, { once: true });
+  });
+
+}
+
+/* =========================================================
+   WAIT VIEW CONTAINER (SIN LOOPS LOCOS)
+========================================================= */
+
+function waitForViewContainer(){
+
+  return new Promise(resolve=>{
+
+    const check = () => {
+
+      const el = document.getElementById("view-container");
+
+      if(el){
+        return resolve(el);
+      }
+
+      requestAnimationFrame(check);
+    };
+
+    check();
+
+  });
+
+}
 
 /* =========================================================
    UTILS
@@ -175,7 +216,7 @@ Onion.fetchHTML = async function(url){
 };
 
 /* =========================================================
-   EXTRACT (ULTRA ROBUSTO)
+   EXTRACT CONTENT (ROBUSTO)
 ========================================================= */
 
 function extractContent(html){
@@ -183,13 +224,11 @@ function extractContent(html){
   const wrapper = document.createElement("div");
   wrapper.innerHTML = html.trim();
 
-  let content = wrapper.querySelector(".panel-content");
+  const content = wrapper.querySelector(".panel-content");
 
-  if(content){
-    return content;
-  }
+  if(content) return content;
 
-  console.warn("⚠️ panel-content no encontrado, usando fallback");
+  console.warn("⚠️ panel-content no encontrado → fallback");
 
   const fallback = document.createElement("div");
   fallback.className = "panel-content";
@@ -200,22 +239,10 @@ function extractContent(html){
 }
 
 /* =========================================================
-   SWAP (SOLO VIEW)
+   SWAP VIEW (SEGURO)
 ========================================================= */
 
-function swapView(node){
-
-  let container = document.getElementById("view-container");
-
-  if(!container){
-
-    console.warn("⚠️ view-container no listo, reintentando...");
-
-    return setTimeout(()=>{
-      swapView(node);
-    }, 50);
-
-  }
+function swapView(container, node){
 
   container.innerHTML = "";
   container.appendChild(node.cloneNode(true));
@@ -260,6 +287,9 @@ const originalRender = async function(){
 
   try{
 
+    /* 🔥 DOM READY */
+    await waitForDOMReady();
+
     Onion.ui.showLoader?.();
 
     const route = Onion.router.resolve();
@@ -279,10 +309,6 @@ const originalRender = async function(){
     /* EXTRACT */
     const content = extractContent(html);
 
-    if(!content){
-      throw new Error("❌ Error extrayendo contenido");
-    }
-
     content.classList.remove("ready");
 
     /* CLEANUP */
@@ -293,11 +319,14 @@ const originalRender = async function(){
       await Onion.loadStyle(route.style);
     }
 
+    /* 🔥 ESPERA REAL AL CONTAINER */
+    const container = await waitForViewContainer();
+
     /* CLEAR */
     clearDynamic();
 
     /* SWAP */
-    swapView(content);
+    swapView(container, content);
 
     /* SCRIPTS */
     if(route.script){
@@ -310,7 +339,7 @@ const originalRender = async function(){
     await new Promise(r => requestAnimationFrame(r));
     await new Promise(r => requestAnimationFrame(r));
 
-    const newContent = document.querySelector("#view-container .panel-content");
+    const newContent = container.querySelector(".panel-content");
 
     if(newContent){
       newContent.classList.add("ready");

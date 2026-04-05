@@ -350,6 +350,20 @@ function render(items){
    HELPERS
 ========================= */
 
+function normalize(res){
+
+  if(!res) return [];
+
+  if(Array.isArray(res)) return res;
+  if(Array.isArray(res.facturas)) return res.facturas;
+  if(Array.isArray(res.data)) return res.data;
+  if(Array.isArray(res.items)) return res.items;
+
+  return [];
+
+}
+
+
 function mapItem(f){
 
   const empresaRaw =
@@ -386,28 +400,40 @@ function mapItem(f){
 
 }
 
+
 function cleanValue(val, fallback){
   if(!val) return fallback;
+
   let v = String(val).trim();
   v = v.replace(/^'+|'+$/g, "");
+
   const lower = v.toLowerCase();
+
   if(lower === "null" || lower === "undefined" || lower === "-"){
     return fallback;
   }
+
   return v;
 }
+
 
 function safeText(val){
   return String(cleanValue(val, "")).toLowerCase();
 }
 
+
 function renderAvatar(name){
   return avatarHTML(getInitials(name), getAvatarColor(name));
 }
 
+
 function renderAvatarEmpresa(name){
-  return avatarHTML(getInitialsEmpresa(name), getAvatarColor(name + "_empresa"));
+  return avatarHTML(
+    getInitialsEmpresa(name),
+    getAvatarColor(name + "_empresa")
+  );
 }
+
 
 function avatarHTML(initials, color){
   return `
@@ -428,43 +454,91 @@ function avatarHTML(initials, color){
   `;
 }
 
+
 function hashString(str){
   let hash = 0;
+
   for(let i = 0; i < str.length; i++){
     hash = str.charCodeAt(i) + ((hash << 5) - hash);
   }
+
   return hash;
 }
 
+
 function getAvatarColor(name){
-  const colors = ["#6366f1","#22c55e","#eab308","#ef4444","#06b6d4","#a855f7","#f97316"];
+  const colors = [
+    "#6366f1",
+    "#22c55e",
+    "#eab308",
+    "#ef4444",
+    "#06b6d4",
+    "#a855f7",
+    "#f97316"
+  ];
+
   return colors[Math.abs(hashString(name)) % colors.length];
 }
 
-function getInitials(name){
-  return name ? name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase() : "?";
-}
 
-function getInitialsEmpresa(name){
+function getInitials(name){
   return name
-    ? name.replace(/(SL|SA)/gi,"").trim().split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase()
+    ? name
+        .split(" ")
+        .map(n => n[0])
+        .join("")
+        .slice(0,2)
+        .toUpperCase()
     : "?";
 }
 
-function getEstadoPago(e){
-  e = (e || "").toLowerCase();
-  if(e === "pagada") return { label:"Pagada", class:"success", raw:e };
-  return { label:"Pendiente", class:"warning", raw:e };
+
+function getInitialsEmpresa(name){
+  return name
+    ? name
+        .replace(/(SL|SA)/gi,"")
+        .trim()
+        .split(" ")
+        .map(n => n[0])
+        .join("")
+        .slice(0,2)
+        .toUpperCase()
+    : "?";
 }
+
+
+function getEstadoPago(e){
+
+  e = (e || "").toLowerCase();
+
+  if(e === "pagada"){
+    return {
+      label:"Pagada",
+      class:"success",
+      raw:e
+    };
+  }
+
+  return {
+    label:"Pendiente",
+    class:"warning",
+    raw:e
+  };
+}
+
 
 function formatFecha(f){
   if(!f) return "--";
+
   return new Date(f).toLocaleDateString("es-ES");
 }
 
+
 function formatMoney(n){
-  return Number(n || 0).toLocaleString("es-ES",{minimumFractionDigits:2}) + " €";
+  return Number(n || 0)
+    .toLocaleString("es-ES",{ minimumFractionDigits:2 }) + " €";
 }
+
 
 function escapeHTML(str){
   return String(str)

@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 PREFETCH — FULL PRO SAAS (FIXED · NO DUPES · CONTROL TOTAL)
+   🧅 PREFETCH — GOD MODE (VIEW SAFE · ZERO INTERFERENCE · SMART CACHE)
 ========================================================= */
 
 (function(){
@@ -49,14 +49,13 @@
   }
 
   /* =========================
-     ADD LINK SAFE (FIX DUPES)
+     ADD LINK SAFE
   ========================= */
 
   function addLink(rel, href){
 
     if(!href) return;
 
-    // 🔥 evitar duplicados reales
     const existing = document.querySelector(`link[href="${href}"][rel="${rel}"]`);
     if(existing) return;
 
@@ -92,13 +91,12 @@
       prefetched.add(clean);
 
       /* =========================
-         HTML (LOW PRIORITY)
+         HTML (FRONTEND)
       ========================= */
 
       if(route.page){
         fetch(route.page, {
-          credentials: "include",
-          priority: "low"
+          credentials: "include"
         }).catch(()=>{});
       }
 
@@ -141,7 +139,7 @@
   };
 
   /* =========================
-     EVENTOS (UNA SOLA VEZ · FIX PERFORMANCE)
+     EVENTS (CORE — NO CLEANUP)
   ========================= */
 
   if(!window.__ONION_PREFETCH_BOUND__){
@@ -153,8 +151,6 @@
     const handler = function(e){
 
       const now = performance.now();
-
-      // 🔥 throttle real
       if(now - last < 80) return;
       last = now;
 
@@ -187,7 +183,7 @@
   ========================= */
 
   if(Onion.config?.DEBUG){
-    Onion.log("⚡ Prefetch system PRO ready");
+    Onion.log("⚡ Prefetch GOD MODE ready");
   }
 
 })();

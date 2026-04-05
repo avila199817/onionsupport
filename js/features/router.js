@@ -1,349 +1,344 @@
 "use strict";
 
 /* =========================================================
-   🧅 ROUTER — GOD MODE FINAL (FIX REAL · NO DEAD SPA · NO BLOCKS)
+   🧅 ROUTER — FINAL PRO 10/10 (NO RACE · FULL ROUTES · STABLE)
 ========================================================= */
 
 (function(){
 
-  if(!window.Onion){
-    console.error("💥 Onion no está definido (router.js)");
+if(!window.Onion){
+  console.error("💥 Onion no está definido (router.js)");
+  return;
+}
+
+const Onion = window.Onion;
+
+/* =========================================================
+   ROUTES
+========================================================= */
+
+Onion.routes = Object.freeze({
+
+  "/": {
+    page: "/app/views/index.html",
+    style: "/css/app/dashboard.css",
+    script: "/js/features/dashboard/index.js",
+    title: "Dashboard"
+  },
+
+  "/incidencias": {
+    page: "/app/views/incidencias/index.html",
+    style: [
+      "/css/app/core/topbarview.css",
+      "/css/app/incidencias/incidencias.css"
+    ],
+    script: [
+      "/js/features/incidencias/topbarview.js",
+      "/js/features/incidencias/index.js"
+    ],
+    title: "Incidencias"
+  },
+
+  "/incidencias/detalle": {
+    page: "/app/views/incidencias/detalle.html",
+    style: [
+      "/css/app/core/view.css",
+      "/css/app/incidencias/detalle.css"
+    ],
+    script: "/js/features/incidencias/detalle.js",
+    title: "Detalle incidencia"
+  },
+
+  "/incidencias/nueva": {
+    page: "/app/views/incidencias/incidencia.html",
+    style: "/css/app/incidencias/incidencia.css",
+    script: "/js/features/incidencias/incidencia.js",
+    title: "Nueva incidencia"
+  },
+
+  "/facturas": {
+    page: "/app/views/facturas/index.html",
+    style: [
+      "/css/app/core/topbarview.css",
+      "/css/app/facturas/facturas.css"
+    ],
+    script: [
+      "/js/features/facturas/topbarview.js",
+      "/js/features/facturas/index.js"
+    ],
+    title: "Facturas"
+  },
+
+  "/facturas/detalle": {
+    page: "/app/views/facturas/detalle.html",
+    style: [
+      "/css/app/core/view.css",
+      "/css/app/facturas/detalle.css"
+    ],
+    script: "/js/features/facturas/detalle.js",
+    title: "Detalle factura"
+  },
+
+  "/facturas/nueva": {
+    page: "/app/views/facturas/factura.html",
+    style: "/css/app/facturas/factura.css",
+    script: "/js/features/facturas/factura.js",
+    title: "Nueva factura"
+  },
+
+  "/usuarios": {
+    page: "/app/views/usuarios/index.html",
+    style: [
+      "/css/app/core/topbarview.css",
+      "/css/app/usuarios/usuarios.css"
+    ],
+    script: [
+      "/js/features/usuarios/topbarview.js",
+      "/js/features/usuarios/index.js"
+    ],
+    title: "Usuarios"
+  },
+
+  "/usuarios/detalle": {
+    page: "/app/views/usuarios/detalle.html",
+    style: [
+      "/css/app/core/view.css",
+      "/css/app/usuarios/detalle.css"
+    ],
+    script: "/js/features/usuarios/detalle.js",
+    title: "Detalle usuario"
+  },
+
+  "/usuarios/nuevo": {
+    page: "/app/views/usuarios/usuario.html",
+    style: "/css/app/usuarios/usuario.css",
+    script: "/js/features/usuarios/usuario.js",
+    title: "Nuevo usuario"
+  },
+
+  "/clientes": {
+    page: "/app/views/clientes/index.html",
+    style: [
+      "/css/app/core/topbarview.css",
+      "/css/app/clientes/clientes.css"
+    ],
+    script: [
+      "/js/features/clientes/topbarview.js",
+      "/js/features/clientes/index.js"
+    ],
+    title: "Clientes"
+  },
+
+  "/clientes/detalle": {
+    page: "/app/views/clientes/detalle.html",
+    style: [
+      "/css/app/core/view.css",
+      "/css/app/clientes/detalle.css"
+    ],
+    script: "/js/features/clientes/detalle.js",
+    title: "Detalle cliente"
+  },
+
+  "/clientes/cliente": {
+    page: "/app/views/clientes/cliente.html",
+    style: "/css/app/clientes.css",
+    script: "/js/features/clientes/cliente.js",
+    title: "Cliente"
+  },
+
+  "/cuenta": {
+    page: "/app/views/cuenta/index.html",
+    style: "/css/app/cuenta.css",
+    script: "/js/features/cuenta/index.js",
+    title: "Cuenta"
+  },
+
+  "/ajustes": {
+    page: "/app/views/ajustes/index.html",
+    style: "/css/app/cuenta.css",
+    script: "/js/features/ajustes/index.js",
+    title: "Ajustes"
+  }
+
+});
+
+/* =========================================================
+   NORMALIZE
+========================================================= */
+
+function normalize(path){
+  if(!path) return "/";
+  path = path.replace(/\/+/g, "/");
+  if(path.length > 1 && path.endsWith("/")){
+    path = path.slice(0, -1);
+  }
+  return path || "/";
+}
+
+/* =========================================================
+   GET PATH
+========================================================= */
+
+Onion.router.get = function(){
+
+  try{
+
+    let path = normalize(window.location.pathname);
+
+    if(path.startsWith("/@")){
+      const parts = path.split("/").filter(Boolean);
+
+      Onion.state.slug = parts[0].replace("@","");
+
+      return "/" + (parts.slice(1).join("/") || "");
+    }
+
+    return path;
+
+  }catch(e){
+    Onion.error("Router get error:", e);
+    return "/";
+  }
+
+};
+
+/* =========================================================
+   QUERY PARAMS 🔥
+========================================================= */
+
+Onion.router.getQuery = function(){
+  return Object.fromEntries(new URLSearchParams(window.location.search));
+};
+
+/* =========================================================
+   RESOLVE
+========================================================= */
+
+Onion.router.resolve = function(){
+  const route = Onion.router.get();
+  return Onion.routes[route] || Onion.routes["/"];
+};
+
+/* =========================================================
+   BUILD URL
+========================================================= */
+
+function buildUrl(href){
+
+  const username =
+    Onion.state.slug ||
+    localStorage.getItem("onion_user_slug");
+
+  if(!username) return href;
+
+  if(href === "/") return "/@" + username;
+
+  if(href.startsWith("/@")) return href;
+
+  return "/@" + username + href;
+
+}
+
+/* =========================================================
+   NAVIGATE (ANTI RACE REAL)
+========================================================= */
+
+Onion.router.navigate = function(href){
+
+  if(!href) return;
+
+  if(href.startsWith("http")){
+    window.location.href = href;
     return;
   }
 
-  const Onion = window.Onion;
+  const finalHref = buildUrl(href);
 
-  /* =========================
-     ROUTES
-  ========================= */
+  const current = normalize(window.location.pathname);
+  const next    = normalize(finalHref);
 
-  Onion.routes = Object.freeze({
+  if(current === next) return;
 
-    "/": {
-      page: "/app/views/index.html",
-      style: "/css/app/dashboard.css",
-      script: "/js/features/dashboard/index.js",
-      title: "Dashboard"
-    },
+  // 🔥 cancelar renders anteriores
+  Onion.state.renderId++;
 
-    "/incidencias": {
-      page: "/app/views/incidencias/index.html",
-      style: [
-        "/css/app/core/topbarview.css",
-        "/css/app/incidencias/incidencias.css"
-      ],
-      script: [
-        "/js/features/incidencias/topbarview.js",
-        "/js/features/incidencias/index.js"
-      ],
-      title: "Incidencias"
-    },
+  Onion.state.navigating = true;
 
-    "/incidencias/detalle": {
-      page: "/app/views/incidencias/detalle.html",
-      style: [
-        "/css/app/core/view.css",
-        "/css/app/incidencias/detalle.css"
-      ],
-      script: "/js/features/incidencias/detalle.js",
-      title: "Detalle incidencia"
-    },
+  Onion.events?.emit?.("route:start");
 
-    "/incidencias/nueva": {
-      page: "/app/views/incidencias/incidencia.html",
-      style: "/css/app/incidencias/incidencia.css",
-      script: "/js/features/incidencias/incidencia.js",
-      title: "Nueva incidencia"
-    },
+  history.pushState({}, "", finalHref);
 
-    "/facturas": {
-      page: "/app/views/facturas/index.html",
-      style: [
-        "/css/app/core/topbarview.css",
-        "/css/app/facturas/facturas.css"
-      ],
-      script: [
-        "/js/features/facturas/topbarview.js",
-        "/js/features/facturas/index.js"
-      ],
-      title: "Facturas"
-    },
+  Promise.resolve()
+    .then(()=> Onion.render())
+    .catch(e => Onion.error("NAV ERROR:", e))
+    .finally(()=>{
 
-    "/facturas/detalle": {
-      page: "/app/views/facturas/detalle.html",
-      style: [
-        "/css/app/core/view.css",
-        "/css/app/facturas/detalle.css"
-      ],
-      script: "/js/features/facturas/detalle.js",
-      title: "Detalle factura"
-    },
+      Onion.state.navigating = false;
+      Onion.events?.emit?.("route:end");
 
-    "/facturas/nueva": {
-      page: "/app/views/facturas/factura.html",
-      style: "/css/app/facturas/factura.css",
-      script: "/js/features/facturas/factura.js",
-      title: "Nueva factura"
-    },
+    });
 
-    "/cuenta": {
-      page: "/app/views/cuenta/index.html",
-      style: "/css/app/cuenta.css",
-      script: "/js/features/cuenta/index.js",
-      title: "Cuenta"
-    },
+};
 
-    "/usuarios": {
-      page: "/app/views/usuarios/index.html",
-      style: [
-        "/css/app/core/topbarview.css",
-        "/css/app/usuarios/usuarios.css"
-      ],
-      script: [
-        "/js/features/usuarios/topbarview.js",
-        "/js/features/usuarios/index.js"
-      ],
-      title: "Usuarios"
-    },
+/* =========================================================
+   CLICK INTERCEPT
+========================================================= */
 
-    "/usuarios/nuevo": {
-      page: "/app/views/usuarios/usuario.html",
-      style: "/css/app/usuarios/usuario.css",
-      script: "/js/features/usuarios/usuario.js",
-      title: "Nuevo usuario"
-    },
+if(!window.__ONION_ROUTER_BOUND__){
 
-    "/usuarios/detalle": {
-      page: "/app/views/usuarios/detalle.html",
-      style: [
-        "/css/app/core/view.css",
-        "/css/app/usuarios/detalle.css"
-      ],
-      script: "/js/features/usuarios/detalle.js",
-      title: "Detalle usuario"
-    },
+  window.__ONION_ROUTER_BOUND__ = true;
 
-    "/clientes": {
-      page: "/app/views/clientes/index.html",
-      style: [
-        "/css/app/core/topbarview.css",
-        "/css/app/clientes/clientes.css"
-      ],
-      script: [
-        "/js/features/clientes/topbarview.js",
-        "/js/features/clientes/index.js"
-      ],
-      title: "Clientes"
-    },
+  document.addEventListener("click", function(e){
 
-    "/clientes/detalle": {
-      page: "/app/views/clientes/detalle.html",
-      style: [
-        "/css/app/core/view.css",
-        "/css/app/clientes/detalle.css"
-      ],
-      script: "/js/features/clientes/detalle.js",
-      title: "Detalle cliente"
-    },
+    const link = e.target.closest("a[data-spa]");
+    if(!link) return;
 
-    "/clientes/cliente": {
-      page: "/app/views/clientes/cliente.html",
-      style: "/css/app/clientes.css",
-      script: "/js/features/clientes/cliente.js",
-      title: "Cliente"
-    },
+    const href = link.getAttribute("href");
+    if(!href) return;
 
-    "/ajustes": {
-      page: "/app/views/ajustes/index.html",
-      style: "/css/app/cuenta.css",
-      script: "/js/features/ajustes/index.js",
-      title: "Ajustes"
-    }
+    if(link.target === "_blank") return;
+    if(e.metaKey || e.ctrlKey) return;
+    if(link.hasAttribute("download")) return;
+
+    e.preventDefault();
+
+    Onion.router.navigate(href);
 
   });
 
-  /* =========================
-     NORMALIZE
-  ========================= */
+}
 
-  function normalize(path){
-    if(!path) return "/";
-    path = path.replace(/\/+/g, "/");
-    if(path.length > 1 && path.endsWith("/")){
-      path = path.slice(0, -1);
-    }
-    return path || "/";
-  }
+/* =========================================================
+   POPSTATE
+========================================================= */
 
-  /* =========================
-     GET PATH
-  ========================= */
+if(!window.__ONION_POPSTATE_BOUND__){
 
-  Onion.router.get = function(){
+  window.__ONION_POPSTATE_BOUND__ = true;
 
-    try{
+  window.addEventListener("popstate", function(){
 
-      let path = normalize(window.location.pathname);
-
-      if(path.startsWith("/@")){
-        const parts = path.split("/").filter(Boolean);
-        const userSlug = parts[0];
-
-        Onion.state.slug = userSlug.replace("@","");
-
-        if(parts.length === 1){
-          return "/";
-        }
-
-        return "/" + parts.slice(1).join("/");
-      }
-
-      return path;
-
-    }catch(e){
-      Onion.error("Router get error:", e);
-      return "/";
-    }
-
-  };
-
-  /* =========================
-     RESOLVE
-  ========================= */
-
-  Onion.router.resolve = function(){
-
-    try{
-      const route = Onion.router.get();
-      return Onion.routes[route] || Onion.routes["/"];
-    }catch(e){
-      Onion.error("Router resolve error:", e);
-      return Onion.routes["/"];
-    }
-
-  };
-
-  /* =========================
-     NAVIGATE (FIX REAL 🔥)
-  ========================= */
-
-  Onion.router.navigate = function(href){
-
-    if(!href) return;
-
-    if(href.startsWith("http")){
-      window.location.href = href;
-      return;
-    }
-
-    const username =
-      Onion.state.slug ||
-      localStorage.getItem("onion_user_slug");
-
-    let finalHref;
-
-    if(!username){
-      finalHref = href;
-    }
-    else if(href === "/"){
-      finalHref = "/@" + username;
-    }
-    else if(href.startsWith("/@")){
-      finalHref = href;
-    }
-    else{
-      finalHref = "/@" + username + href;
-    }
-
-    const current = normalize(window.location.pathname);
-    const next = normalize(finalHref);
-
-    if(current === next) return;
-    if(Onion.state.navigating) return;
-
-    Onion.state.navigating = true;
+    Onion.state.renderId++;
 
     Onion.events?.emit?.("route:start");
 
-    history.pushState({}, "", finalHref);
-
-    Onion.render()
-      .catch(e => Onion.error("NAV ERROR:", e))
+    Promise.resolve()
+      .then(()=> Onion.render())
+      .catch(e => Onion.error("POPSTATE ERROR:", e))
       .finally(()=>{
-
         Onion.events?.emit?.("route:end");
-
-        // 🔥 FIX CRÍTICO: liberar siempre
-        Onion.state.navigating = false;
-
       });
 
-  };
+  });
 
-  /* =========================
-     CLICK INTERCEPT
-  ========================= */
+}
 
-  if(!window.__ONION_ROUTER_BOUND__){
+/* =========================================================
+   DEBUG
+========================================================= */
 
-    window.__ONION_ROUTER_BOUND__ = true;
-
-    document.addEventListener("click", function(e){
-
-      const link = e.target.closest("a[data-spa]");
-      if(!link) return;
-
-      const href = link.getAttribute("href");
-      if(!href) return;
-
-      if(link.target === "_blank") return;
-      if(e.metaKey || e.ctrlKey) return;
-      if(link.hasAttribute("download")) return;
-
-      e.preventDefault();
-
-      Onion.router.navigate(href);
-
-    });
-
-  }
-
-  /* =========================
-     POPSTATE
-  ========================= */
-
-  if(!window.__ONION_POPSTATE_BOUND__){
-
-    window.__ONION_POPSTATE_BOUND__ = true;
-
-    window.addEventListener("popstate", function(){
-
-      if(Onion.state.navigating) return;
-
-      Onion.state.navigating = true;
-
-      Onion.events?.emit?.("route:start");
-
-      Onion.render()
-        .catch(e => Onion.error("POPSTATE ERROR:", e))
-        .finally(()=>{
-
-          Onion.events?.emit?.("route:end");
-
-          Onion.state.navigating = false;
-
-        });
-
-    });
-
-  }
-
-  /* =========================
-     DEBUG
-  ========================= */
-
-  if(Onion.config?.DEBUG){
-    Onion.log("🧭 Router GOD MODE FINAL ready");
-  }
+if(Onion.config?.DEBUG){
+  Onion.log("🧭 Router FINAL PRO 10/10 ready");
+}
 
 })();

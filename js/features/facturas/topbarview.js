@@ -5,14 +5,13 @@
   let mounted = false;
 
   /* =========================
-     🔥 RENDER HTML (SAFE)
+     🔥 RENDER TOPBARVIEW
   ========================= */
-  function render(){
+  function renderTopbar(){
 
     const container = document.getElementById("topbarview-container");
     if(!container) return;
 
-    // 🔥 evitar duplicados
     if(container.querySelector(".topbarview")) return;
 
     const div = document.createElement("div");
@@ -40,8 +39,43 @@
     container.appendChild(div);
   }
 
+
   /* =========================
-     🔥 INIT LOGIC (ROBUST)
+     🔥 RENDER TABLE HEAD (GLOBAL)
+  ========================= */
+  function renderTableHead(){
+
+    const container = document.getElementById("tablehead-container");
+    if(!container) return;
+
+    // evitar duplicados
+    if(container.querySelector(".table-head")) return;
+
+    const div = document.createElement("div");
+    div.className = "table-head";
+
+    div.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th class="col-id">ID</th>
+            <th class="col-main">Cliente</th>
+            <th class="col-secondary">Empresa</th>
+            <th class="col-date">Fecha</th>
+            <th class="col-importe">Importe</th>
+            <th class="col-status">Pago</th>
+            <th class="col-actions">Acciones</th>
+          </tr>
+        </thead>
+      </table>
+    `;
+
+    container.appendChild(div);
+  }
+
+
+  /* =========================
+     🔥 INIT LOGIC
   ========================= */
   function init(){
 
@@ -56,35 +90,45 @@
       return;
     }
 
-    // 🔥 evitar doble bind global
     if(mounted) return;
     mounted = true;
 
     btn.addEventListener("click", onCreateFactura);
   }
 
+
+  /* =========================
+     🔥 ACTIONS
+  ========================= */
   function onCreateFactura(){
     console.log("crear factura");
   }
 
+
   /* =========================
-     🔥 CLEANUP (PRO)
+     🔥 CLEANUP (SPA)
   ========================= */
   function destroy(){
-    const container = document.getElementById("topbarview-container");
-    if(!container) return;
 
-    container.innerHTML = "";
+    const topbar = document.getElementById("topbarview-container");
+    if(topbar) topbar.innerHTML = "";
+
+    const tablehead = document.getElementById("tablehead-container");
+    if(tablehead) tablehead.innerHTML = "";
+
     mounted = false;
   }
+
 
   /* =========================
      🔥 START
   ========================= */
   function start(){
-    render();
+    renderTopbar();
+    renderTableHead();
     init();
   }
+
 
   if(document.readyState === "loading"){
     document.addEventListener("DOMContentLoaded", start);
@@ -92,8 +136,11 @@
     start();
   }
 
-  /* 🔥 opcional: exponer para SPA */
-  window.TopbarView = {
+
+  /* =========================
+     🔥 EXPORT (SPA READY)
+  ========================= */
+  window.FacturasUI = {
     start,
     destroy
   };

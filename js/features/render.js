@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 RENDER — GOD MODE (CORE SAFE · VIEW ONLY · PERFECT SYNC)
+   🧅 RENDER — GOD MODE FINAL (FIX REAL · ORDER · NO DEAD VIEW)
 ========================================================= */
 
 (function(){
@@ -90,7 +90,7 @@ function normalizeUrl(src){
 }
 
 /* =========================================================
-   SCRIPT LOADER (VIEW ONLY)
+   SCRIPT LOADER
 ========================================================= */
 
 function loadScriptSingle(src){
@@ -131,7 +131,6 @@ Onion.loadScript = async function(scripts){
     return;
   }
 
-  // 🔥 SOLO eliminar scripts de vista
   document.querySelectorAll("script[data-onion-page]").forEach(s=>{
     try{ s.remove(); }catch{}
   });
@@ -143,7 +142,7 @@ Onion.loadScript = async function(scripts){
 };
 
 /* =========================================================
-   STYLE LOADER (VIEW ONLY)
+   STYLE LOADER
 ========================================================= */
 
 Onion.loadStyle = function(styles){
@@ -213,7 +212,7 @@ Onion.loadStyle = function(styles){
 };
 
 /* =========================================================
-   FETCH HTML (FRONTEND ONLY)
+   FETCH HTML
 ========================================================= */
 
 Onion.fetchHTML = async function(url){
@@ -234,7 +233,7 @@ Onion.fetchHTML = async function(url){
 };
 
 /* =========================================================
-   EXTRACT CONTENT
+   EXTRACT CONTENT (FIX ROBUSTO)
 ========================================================= */
 
 function extractContent(html){
@@ -242,20 +241,20 @@ function extractContent(html){
   const wrapper = document.createElement("div");
   wrapper.innerHTML = html.trim();
 
-  const content = wrapper.querySelector(".panel-content");
+  let content = wrapper.querySelector(".panel-content");
 
-  if(content) return content;
+  if(!content){
+    content = document.createElement("div");
+    content.className = "panel-content";
+    content.innerHTML = wrapper.innerHTML;
+  }
 
-  const fallback = document.createElement("div");
-  fallback.className = "panel-content";
-  fallback.innerHTML = html;
-
-  return fallback;
+  return content;
 
 }
 
 /* =========================================================
-   SWAP VIEW (SAFE)
+   SWAP VIEW
 ========================================================= */
 
 function swapView(container, node){
@@ -263,7 +262,7 @@ function swapView(container, node){
 }
 
 /* =========================================================
-   TOPBAR (CORE SAFE)
+   TOPBAR
 ========================================================= */
 
 function updateTopbar(route){
@@ -276,24 +275,22 @@ function updateTopbar(route){
 }
 
 /* =========================================================
-   CLEAR VIEW ONLY 🔥
+   CLEAR VIEW
 ========================================================= */
 
 function clearView(){
 
-  // 🔥 SOLO limpia contenido dinámico
   document.getElementById("topbarview-container")?.replaceChildren();
   document.getElementById("tablehead-container")?.replaceChildren();
 
 }
 
 /* =========================================================
-   CORE RENDER (PERFECT SYNC)
+   CORE RENDER (FIX ORDEN 🔥)
 ========================================================= */
 
 const originalRender = async function(){
 
-  // 🔥 NO render si app no está lista (sidebar manda)
   if(!Onion.state.appReady){
     return;
   }
@@ -326,14 +323,14 @@ const originalRender = async function(){
     const content = extractContent(html);
     content.classList.remove("ready");
 
-    // 🔥 SOLO limpia VISTAS (no core)
-    Onion.runCleanup?.();
-
     if(route.style){
       await Onion.loadStyle(route.style);
     }
 
     const container = await waitForViewContainer();
+
+    // 🔥 ORDEN CORRECTO (FIX CLAVE)
+    Onion.runCleanup?.();
 
     clearView();
     swapView(container, content);
@@ -393,7 +390,7 @@ Onion.render = function(){
 ========================================================= */
 
 if(Onion.config?.DEBUG){
-  Onion.log?.("🔥 Render GOD MODE ready");
+  Onion.log?.("🔥 Render GOD MODE FINAL ready");
 }
 
 })();

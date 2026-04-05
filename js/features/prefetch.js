@@ -176,7 +176,7 @@
   ========================= */
 
   if(Onion.config?.DEBUG){
-    Onion.log("⚡ PREFETCH PRO");
+    Onion.log("⚡ Prefectch system PRO ready");
   }
 
 })();

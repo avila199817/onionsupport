@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 INIT — FULL PRO (BOOT LIMPIO, SOURCE OF TRUTH, SIN DUPES)
+   🧅 INIT — GOD MODE (SIDEBAR FIRST · NO AUTO RENDER · PERFECT FLOW)
 ========================================================= */
 
 (function(){
@@ -35,7 +35,7 @@
 
       try{
 
-        const res = await Onion.fetch(Onion.config.API + "/auth/me");
+        const res = await Onion.fetch("/auth/me");
 
         user = res?.user || res || null;
 
@@ -43,7 +43,7 @@
           throw new Error("NO_USER");
         }
 
-        // 🔥 SINGLE SOURCE (CORE)
+        // 🔥 SOURCE OF TRUTH
         Onion.setUser(user);
 
         /* =========================
@@ -95,20 +95,14 @@
       }
 
       /* =========================
-         FIRST RENDER
-      ========================= */
-
-      await Onion.render();
-
-      /* =========================
-         FRAME SYNC
+         FRAME SYNC (ANTES DE READY)
       ========================= */
 
       await new Promise(r => requestAnimationFrame(r));
       await new Promise(r => requestAnimationFrame(r));
 
       /* =========================
-         READY
+         READY (SIN RENDER 🔥)
       ========================= */
 
       Onion.state.ready = true;
@@ -116,6 +110,9 @@
       Onion.events.emit?.("app:ready", {
         user: Onion.getUser?.()
       });
+
+      // 🔥 IMPORTANTE:
+      // NO render aquí → lo controla boot + sidebar
 
     }catch(e){
 
@@ -148,7 +145,7 @@
   ========================= */
 
   if(Onion.config?.DEBUG){
-    Onion.log("🚀 Init system PRO ready");
+    Onion.log("🚀 Init GOD MODE ready");
   }
 
 })();

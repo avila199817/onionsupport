@@ -18,6 +18,13 @@ let filteredItems = [];
 let loading = false;
 let currentRequestId = 0;
 
+/* 🔥 FILTROS EXTERNOS (TOPBAR) */
+let externalFilters = {
+  search: "",
+  estado: "",
+  prioridad: ""
+};
+
 
 /* =========================
    ROOT
@@ -50,9 +57,7 @@ function init(){
 
   bindEvents();
 
-  requestAnimationFrame(()=>{
-    loadIncidencias();
-  });
+  requestAnimationFrame(loadIncidencias);
 
   Onion.onCleanup(()=>{
     initialized = false;
@@ -77,28 +82,17 @@ function bindEvents(){
     if(e.target.closest("button")) return;
 
     const row = e.target.closest("tr[data-id]");
-    if(!row) return;
-
-    const id = row.dataset.id;
-    if(!id) return;
-
-    Onion.router.navigate("/incidencias/detalle?id=" + id);
+    if(row){
+      Onion.router.navigate("/incidencias/detalle?id=" + row.dataset.id);
+    }
 
   });
-
-  $("#btn-new-incidencia")?.addEventListener("click", ()=>{
-    Onion.router.navigate("/incidencias/nueva");
-  });
-
-  $("#search-incidencia")?.addEventListener("input", debounce(applyFilters, 250));
-  $("#filter-status")?.addEventListener("change", applyFilters);
-  $("#filter-priority")?.addEventListener("change", applyFilters);
 
 }
 
 
 /* =========================
-   LOAD (FIX REAL)
+   LOAD
 ========================= */
 
 async function loadIncidencias(){
@@ -107,23 +101,20 @@ async function loadIncidencias(){
   loading = true;
 
   const tbody = $("#incidencias-body");
-  if(!tbody) return;
+  if(!tbody){
+    loading = false;
+    return;
+  }
 
   const requestId = ++currentRequestId;
 
   document.activeElement?.blur();
 
-  /* 🔥 CLAVE 1: NO BORRAR EL LOADER */
-  // tbody.innerHTML = "";
-
   try{
 
-    /* 🔥 CLAVE 2: FORZAR PINTADO DEL LOADER */
     await new Promise(r => requestAnimationFrame(r));
     await new Promise(r => requestAnimationFrame(r));
-
-    /* 🔥 CLAVE 3: DELAY MÍNIMO PARA QUE SE VEA */
-    await new Promise(r => setTimeout(r, 200));
+    await new Promise(r => setTimeout(r, 150));
 
     const res = await Onion.fetch(Onion.config.API + "/tickets");
     const items = normalize(res);
@@ -138,17 +129,15 @@ async function loadIncidencias(){
       return;
     }
 
-    requestAnimationFrame(()=>{
-      render(items); // 👉 aquí ya se reemplaza todo
-    });
+    applyFilters();
 
   }catch(e){
 
     console.error("💥 ERROR INCIDENCIAS:", e);
 
-    if(requestId !== currentRequestId) return;
-
-    setError();
+    if(requestId === currentRequestId){
+      setError();
+    }
 
   }finally{
     loading = false;
@@ -181,9 +170,9 @@ function normalize(res){
 
 function applyFilters(){
 
-  const search = ($("#search-incidencia")?.value || "").toLowerCase();
-  const status = ($("#filter-status")?.value || "").toLowerCase();
-  const priority = ($("#filter-priority")?.value || "").toLowerCase();
+  const search = externalFilters.search.toLowerCase();
+  const estado = externalFilters.estado.toLowerCase();
+  const prioridad = externalFilters.prioridad.toLowerCase();
 
   filteredItems = currentItems.filter(i => {
 
@@ -197,15 +186,13 @@ function applyFilters(){
 
     return (
       (!search || title.includes(search) || usuario.includes(search) || email.includes(search) || id.includes(search)) &&
-      (!status || s === status) &&
-      (!priority || p === priority)
+      (!estado || s === estado) &&
+      (!prioridad || p === prioridad)
     );
 
   });
 
-  requestAnimationFrame(()=>{
-    render(filteredItems);
-  });
+  render(filteredItems);
 
 }
 
@@ -233,6 +220,8 @@ function render(items){
 
   const tbody = $("#incidencias-body");
   if(!tbody) return;
+
+  if(!items.length) return setEmpty();
 
   const html = items.map(i => {
 
@@ -282,7 +271,7 @@ function render(items){
 
 
 /* =========================
-   RESTO IGUAL
+   MAP / HELPERS
 ========================= */
 
 function mapItem(i){
@@ -306,6 +295,7 @@ function renderAvatar(d){
   if(d.avatar){
     return `<img src="${d.avatar}" alt="${escapeHTML(d.usuario)}" />`;
   }
+
   const initials = getInitials(d.usuario);
   const color = getAvatarColor(d.usuario);
 
@@ -385,12 +375,16 @@ function getInitials(name){
   return name.split(" ").map(n => n[0]).join("").slice(0,2).toUpperCase();
 }
 
-function debounce(fn, delay){
-  let t;
-  return (...args)=>{
-    clearTimeout(t);
-    t = setTimeout(()=>fn(...args), delay);
-  };
-}
+
+/* =========================
+   🔥 TOPBAR CONNECT
+========================= */
+
+window.IncidenciasUIExternal = {
+  applyFilters: (uiState)=>{
+    externalFilters = uiState || externalFilters;
+    applyFilters();
+  }
+};
 
 })();

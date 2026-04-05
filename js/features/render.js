@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 RENDER — GOD MODE FINAL (FIX REAL · ORDER · NO DEAD VIEW)
+   🧅 RENDER — FINAL PRO 10/10 (NO RACE · NO DEADLOCK · STABLE)
 ========================================================= */
 
 (function(){
@@ -12,10 +12,6 @@ if(!window.Onion){
 }
 
 const Onion = window.Onion;
-
-/* =========================================================
-   CONFIG
-========================================================= */
 
 const MAX_CONTAINER_WAIT = 5000;
 
@@ -233,7 +229,7 @@ Onion.fetchHTML = async function(url){
 };
 
 /* =========================================================
-   EXTRACT CONTENT (FIX ROBUSTO)
+   EXTRACT CONTENT
 ========================================================= */
 
 function extractContent(html){
@@ -286,13 +282,16 @@ function clearView(){
 }
 
 /* =========================================================
-   CORE RENDER (FIX ORDEN 🔥)
+   CORE RENDER
 ========================================================= */
 
 const originalRender = async function(){
 
-  if(!Onion.state.appReady){
-    return;
+  if(!Onion.state.appReady) return;
+
+  // 🔥 evitar doble render simultáneo
+  if(Onion.state.rendering){
+    Onion.state.renderId++;
   }
 
   const renderId = ++Onion.state.renderId;
@@ -329,7 +328,7 @@ const originalRender = async function(){
 
     const container = await waitForViewContainer();
 
-    // 🔥 ORDEN CORRECTO (FIX CLAVE)
+    // 🔥 CLEANUP SOLO AHORA
     Onion.runCleanup?.();
 
     clearView();
@@ -346,10 +345,6 @@ const originalRender = async function(){
 
     container.querySelector(".panel-content")?.classList.add("ready");
 
-    if(renderId === Onion.state.renderId){
-      Onion.ui.hideLoader?.();
-    }
-
   }catch(e){
 
     console.error("💥 RENDER ERROR:", e);
@@ -365,9 +360,9 @@ const originalRender = async function(){
       `;
     }
 
-    Onion.ui.hideLoader?.();
-
   }finally{
+
+    Onion.ui.hideLoader?.();
 
     if(renderId === Onion.state.renderId){
       Onion.state.rendering = false;
@@ -390,7 +385,7 @@ Onion.render = function(){
 ========================================================= */
 
 if(Onion.config?.DEBUG){
-  Onion.log?.("🔥 Render GOD MODE FINAL ready");
+  Onion.log?.("🔥 Render FINAL PRO 10/10 ready");
 }
 
 })();

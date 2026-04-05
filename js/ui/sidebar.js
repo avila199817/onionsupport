@@ -39,7 +39,8 @@ function init(){
   const root = getRoot();
   if(!root || initialized) return;
 
-  if(!Onion.user){
+  // 🔥 USAR MISMO SISTEMA QUE INCIDENCIAS
+  if(!Onion.state?.user){
     return setTimeout(init, 100);
   }
 
@@ -59,20 +60,20 @@ init();
 
 
 /* =========================
-   USER RENDER (FIX AVATAR)
+   USER RENDER (MISMO SISTEMA)
 ========================= */
 
 function renderUser(){
 
-  const user = Onion.user;
+  const user = Onion.state?.user;
   if(!user) return;
 
   const nameEl = $("#sidebar-name");
   const avatarEl = $("#sidebar-avatar");
 
   const name =
-    user.name ||
     user.nombre ||
+    user.name ||
     user.email ||
     "Usuario";
 
@@ -80,16 +81,14 @@ function renderUser(){
     nameEl.textContent = name;
   }
 
-  // 🔥 AVATAR REAL (si existe imagen)
+  // 🔥 EXACTAMENTE IGUAL QUE INCIDENCIAS
   if(avatarEl){
 
-    if(user.avatar || user.image){
-
-      const src = user.avatar || user.image;
+    if(user.avatar){
 
       avatarEl.innerHTML = `
-        <img src="${src}" 
-             alt="${name}" 
+        <img src="${user.avatar}" 
+             alt="${escapeHTML(name)}"
              style="width:100%;height:100%;border-radius:50%;object-fit:cover;">
       `;
 
@@ -102,6 +101,11 @@ function renderUser(){
   }
 
 }
+
+
+/* =========================
+   AVATAR FALLBACK
+========================= */
 
 function renderAvatarFallback(name){
 
@@ -128,13 +132,10 @@ function renderAvatarFallback(name){
 
 
 /* =========================
-   EVENTS (FIX TODO)
+   EVENTS — FIX REAL DROPDOWN
 ========================= */
 
 function bindEvents(){
-
-  const root = getRoot();
-  if(!root) return;
 
   const toggleSidebarBtn = document.getElementById("toggleSidebar");
   const userToggle = $("#userToggle");
@@ -143,41 +144,56 @@ function bindEvents(){
 
   /* 🔥 SIDEBAR TOGGLE */
   if(toggleSidebarBtn){
-
     toggleSidebarBtn.addEventListener("click", (e)=>{
       e.stopPropagation();
       document.body.classList.toggle("sidebar-collapsed");
-
-      // opcional si usas clase directa
-      root.classList.toggle("collapsed");
     });
-
   }
 
-  /* 🔥 DROPDOWN FIX */
+  /* 🔥 DROPDOWN (FIX REAL) */
   if(userToggle && dropdown){
 
     userToggle.addEventListener("click", (e)=>{
       e.stopPropagation();
-      dropdown.classList.toggle("open");
-    });
 
-    // 🔥 cerrar al hacer click fuera
-    document.addEventListener("click", (e)=>{
-      if(!userToggle.contains(e.target) && !dropdown.contains(e.target)){
-        dropdown.classList.remove("open");
+      const isOpen = dropdown.classList.contains("open");
+
+      // 🔥 cerrar todo primero
+      closeAllDropdowns();
+
+      // 🔥 abrir si estaba cerrado
+      if(!isOpen){
+        dropdown.classList.add("open");
       }
     });
 
   }
 
+  /* 🔥 CLICK GLOBAL (NO ROMPE) */
+  document.addEventListener("click", ()=>{
+    closeAllDropdowns();
+  });
+
   /* 🔥 LOGOUT */
   if(logout){
-    logout.addEventListener("click", ()=>{
+    logout.addEventListener("click", (e)=>{
+      e.stopPropagation();
       handleLogout();
     });
   }
 
+}
+
+
+/* =========================
+   CLOSE DROPDOWNS
+========================= */
+
+function closeAllDropdowns(){
+  const dropdown = $("#userDropdown");
+  if(dropdown){
+    dropdown.classList.remove("open");
+  }
 }
 
 
@@ -198,7 +214,7 @@ function handleLogout(){
 
 
 /* =========================
-   RECIENTES (PRO LIMPIO)
+   RECIENTES (LOADER PRO)
 ========================= */
 
 function renderRecientes(){
@@ -206,26 +222,38 @@ function renderRecientes(){
   const section = document.querySelector(".sidebar-section");
   if(!section) return;
 
-  // 🔥 loader
   section.innerHTML = `
     <span class="section-title">Recientes</span>
-    <div class="recientes-loader">
-      <div class="mini-spinner"></div>
+
+    <div style="
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:10px;
+      opacity:.7;
+      font-size:12px;
+    ">
+      <div style="
+        width:14px;
+        height:14px;
+        border:2px solid rgba(255,255,255,0.1);
+        border-top-color:var(--accent);
+        border-radius:50%;
+        animation:spin .6s linear infinite;
+      "></div>
+
       <span>Cargando...</span>
     </div>
   `;
 
   setTimeout(()=>{
 
-    const items = []; // 🔥 vacío por ahora
-
-    if(!items.length){
-      section.innerHTML = `
-        <span class="section-title">Recientes</span>
-        <div class="recientes-empty">No hay recientes</div>
-      `;
-      return;
-    }
+    section.innerHTML = `
+      <span class="section-title">Recientes</span>
+      <div style="padding:10px;font-size:12px;opacity:.6;">
+        No hay recientes
+      </div>
+    `;
 
   }, 800);
 
@@ -252,6 +280,13 @@ function getAvatarColor(name){
 function getInitials(name){
   if(!name) return "?";
   return name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase();
+}
+
+function escapeHTML(str){
+  return String(str)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;");
 }
 
 })();

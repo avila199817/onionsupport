@@ -1,74 +1,20 @@
 <div class="panel-content incidencias table-mode">
 
-  <!-- 🔥 TABLE SYSTEM -->
-  <div class="table-system incidencias">
+  <div class="table-system">
 
-    <!-- =========================
-         FILTROS
-    ========================= -->
-    <div class="filters-row">
-
-      <input 
-        type="text"
-        id="search-incidencia"
-        placeholder="Buscar incidencia..."
-        autocomplete="off"
-      >
-
-      <select id="filter-status">
-        <option value="">Estado</option>
-        <option value="abierta">Abierta</option>
-        <option value="progreso">En progreso</option>
-        <option value="cerrada">Cerrada</option>
-      </select>
-
-      <select id="filter-priority">
-        <option value="">Prioridad</option>
-        <option value="alta">Alta</option>
-        <option value="media">Media</option>
-        <option value="baja">Baja</option>
-      </select>
-
-      <button id="btn-new-incidencia" class="btn-new-incidencia">
-        + Nueva
-      </button>
-
-    </div>
-
-    <!-- =========================
-         TABLA
-    ========================= -->
+    <!-- 🔥 SCROLL SOLO AQUÍ -->
     <div class="table-container">
 
+      <!-- 🔥 LOADER (FUERA DE LA TABLA) -->
+      <div class="table-loader">
+        <div class="spinner"></div>
+        <span>Cargando incidencias...</span>
+      </div>
+
       <table>
-
-        <thead>
-          <tr>
-            <th class="col-id">ID</th>
-            <th class="col-main">Usuario</th>
-            <th class="col-main">Asunto</th>
-            <th class="col-secondary">Técnico</th>
-            <th class="col-status">Estado</th>
-            <th class="col-status">Prioridad</th>
-            <th class="col-date">Fecha</th>
-            <th class="col-date">Cierre</th>
-          </tr>
-        </thead>
-
         <tbody id="incidencias-body">
-
-          <!-- 🔥 LOADER LOCAL -->
-          <tr class="table-loading">
-            <td colspan="8">
-              <div class="table-loader">
-                <div class="spinner"></div>
-                <span>Cargando incidencias...</span>
-              </div>
-            </td>
-          </tr>
-
+          <!-- filas dinámicas -->
         </tbody>
-
       </table>
 
     </div>

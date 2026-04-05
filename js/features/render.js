@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 RENDER — GOD MODE (PRO SAAS · ANTI-RACE · LOADER SYNC)
+   🧅 RENDER — GOD MODE FINAL (PRO SAAS · ANTI-RACE · ABORT · LOADER SYNC)
 ========================================================= */
 
 (function(){
@@ -20,6 +20,12 @@ const Onion = window.Onion;
 const MAX_CONTAINER_WAIT = 5000;
 
 /* =========================================================
+   STATE EXTRA
+========================================================= */
+
+let currentAbortController = null;
+
+/* =========================================================
    DOM READY
 ========================================================= */
 
@@ -36,7 +42,7 @@ function waitForDOMReady(){
 }
 
 /* =========================================================
-   WAIT VIEW CONTAINER (CON TIMEOUT)
+   WAIT VIEW CONTAINER
 ========================================================= */
 
 function waitForViewContainer(){
@@ -206,7 +212,7 @@ Onion.loadStyle = function(styles){
 };
 
 /* =========================================================
-   FETCH HTML
+   FETCH HTML (CON ABORT)
 ========================================================= */
 
 Onion.fetchHTML = async function(url){
@@ -214,7 +220,16 @@ Onion.fetchHTML = async function(url){
   const finalUrl = normalizeUrl(url);
   if(!finalUrl) throw new Error("URL inválida");
 
-  const res = await fetch(finalUrl, { credentials:"include" });
+  if(currentAbortController){
+    currentAbortController.abort();
+  }
+
+  currentAbortController = new AbortController();
+
+  const res = await fetch(finalUrl, {
+    credentials: "include",
+    signal: currentAbortController.signal
+  });
 
   if(!res.ok){
     throw new Error("HTTP " + res.status);
@@ -292,7 +307,6 @@ const originalRender = async function(){
 
     await waitForDOMReady();
 
-    /* 🔥 LOADER SYNC */
     Onion.ui.showLoader?.(renderId);
 
     const route = Onion.router.resolve();
@@ -336,10 +350,13 @@ const originalRender = async function(){
 
     container.querySelector(".panel-content")?.classList.add("ready");
 
-    /* 🔥 LOADER SYNC */
     Onion.ui.hideLoader?.(renderId);
 
   }catch(e){
+
+    if(e.name === "AbortError"){
+      return;
+    }
 
     console.error("💥 RENDER ERROR:", e);
 
@@ -377,7 +394,7 @@ Onion.render = function(){
 ========================================================= */
 
 if(Onion.config?.DEBUG){
-  Onion.log("🔥 Render GOD MODE + Loader Sync listo");
+  Onion.log("🔥 Render GOD MODE FINAL listo");
 }
 
 })();

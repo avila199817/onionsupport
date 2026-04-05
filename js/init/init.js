@@ -1,6 +1,17 @@
+"use strict";
+
+(function(){
+
+const Onion = window.Onion;
+
+if(!Onion){
+  console.error("💥 Onion no disponible (init)");
+  return;
+}
+
 Onion.init = async function(){
 
-  // LOCK
+  // 🔒 LOCK
   if(Onion.state._initializing) return;
   if(Onion.state.ready) return;
 
@@ -24,7 +35,10 @@ Onion.init = async function(){
         throw new Error("NO_USER");
       }
 
+      // 🔥 SET USER (doble fuente sincronizada)
       Onion.setUser?.(user);
+      Onion.state.user = user;
+      Onion.user = user;
 
       /* =========================
          THEME SYNC (BD → UI)
@@ -36,10 +50,9 @@ Onion.init = async function(){
 
         if(dbConfig){
 
-          // Guardar en cache
+          // cache local
           localStorage.setItem("onion_config", JSON.stringify(dbConfig));
 
-          // Aplicar tema real
           let darkMode;
 
           if(typeof dbConfig.darkMode === "boolean"){
@@ -68,6 +81,9 @@ Onion.init = async function(){
         msg.includes("NO_USER")
       ){
         Onion.clearUser?.();
+        Onion.state.user = null;
+        Onion.user = null;
+
         Onion.auth?.redirectLogin?.();
         return;
       }
@@ -82,6 +98,10 @@ Onion.init = async function(){
 
     await Onion.render();
 
+    // 🔥 asegurar que DOM + scripts están listos
+    await new Promise(r => requestAnimationFrame(r));
+    await new Promise(r => requestAnimationFrame(r));
+
     /* =========================
        READY
     ========================= */
@@ -89,7 +109,7 @@ Onion.init = async function(){
     Onion.state.ready = true;
 
     Onion.events.emit?.("app:ready", {
-      user: Onion.state.user
+      user: Onion.user || Onion.state.user
     });
 
   }catch(e){
@@ -118,3 +138,5 @@ Onion.init = async function(){
   }
 
 };
+
+})();

@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 PREFETCH — FULL PRO (CONTROLADO, SIN FUGAS, SIN WARNINGS)
+   🧅 PREFETCH — FULL PRO SAAS (FIXED · NO DUPES · CONTROL TOTAL)
 ========================================================= */
 
 (function(){
@@ -18,7 +18,7 @@
   ========================================================= */
 
   const prefetched = new Set();
-  const MAX_PREFETCH = 50; // 🔥 límite anti-memoria
+  const MAX_PREFETCH = 50;
 
   /* =========================
      NORMALIZE PATH
@@ -49,14 +49,16 @@
   }
 
   /* =========================
-     ADD LINK SAFE
+     ADD LINK SAFE (FIX DUPES)
   ========================= */
 
   function addLink(rel, href){
 
     if(!href) return;
 
-    if(document.querySelector(`link[href="${href}"]`)) return;
+    // 🔥 evitar duplicados reales
+    const existing = document.querySelector(`link[href="${href}"][rel="${rel}"]`);
+    if(existing) return;
 
     const link = document.createElement("link");
     link.rel = rel;
@@ -83,7 +85,6 @@
       const route = Onion.routes[clean];
       if(!route) return;
 
-      /* 🔥 control memoria */
       if(prefetched.size >= MAX_PREFETCH){
         prefetched.clear();
       }
@@ -91,15 +92,18 @@
       prefetched.add(clean);
 
       /* =========================
-         HTML
+         HTML (LOW PRIORITY)
       ========================= */
 
       if(route.page){
-        fetch(route.page, { credentials: "include" }).catch(()=>{});
+        fetch(route.page, {
+          credentials: "include",
+          priority: "low"
+        }).catch(()=>{});
       }
 
       /* =========================
-         CSS (⚡ prefetch limpio)
+         CSS
       ========================= */
 
       if(route.style){
@@ -115,7 +119,7 @@
       }
 
       /* =========================
-         JS (⚡ prefetch limpio)
+         JS
       ========================= */
 
       if(route.script){
@@ -137,14 +141,22 @@
   };
 
   /* =========================
-     EVENTOS (UNA SOLA VEZ)
+     EVENTOS (UNA SOLA VEZ · FIX PERFORMANCE)
   ========================= */
 
   if(!window.__ONION_PREFETCH_BOUND__){
 
     window.__ONION_PREFETCH_BOUND__ = true;
 
+    let last = 0;
+
     const handler = function(e){
+
+      const now = performance.now();
+
+      // 🔥 throttle real
+      if(now - last < 80) return;
+      last = now;
 
       const link = e.target.closest("a[data-spa]");
       if(!link) return;
@@ -160,7 +172,6 @@
         return;
       }
 
-      // 🔥 solo si la pestaña está activa
       if(document.visibilityState !== "visible") return;
 
       Onion.prefetch(href);
@@ -176,7 +187,7 @@
   ========================= */
 
   if(Onion.config?.DEBUG){
-    Onion.log("⚡ Prefectch system PRO ready");
+    Onion.log("⚡ Prefetch system PRO ready");
   }
 
 })();

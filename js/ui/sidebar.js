@@ -39,7 +39,6 @@ function init(){
   const root = getRoot();
   if(!root || initialized) return;
 
-  // 🔥 USAR MISMO SISTEMA QUE INCIDENCIAS
   if(!Onion.state?.user){
     return setTimeout(init, 100);
   }
@@ -60,7 +59,7 @@ init();
 
 
 /* =========================
-   USER RENDER (MISMO SISTEMA)
+   USER
 ========================= */
 
 function renderUser(){
@@ -81,7 +80,6 @@ function renderUser(){
     nameEl.textContent = name;
   }
 
-  // 🔥 EXACTAMENTE IGUAL QUE INCIDENCIAS
   if(avatarEl){
 
     if(user.avatar){
@@ -104,7 +102,7 @@ function renderUser(){
 
 
 /* =========================
-   AVATAR FALLBACK
+   AVATAR
 ========================= */
 
 function renderAvatarFallback(name){
@@ -132,7 +130,7 @@ function renderAvatarFallback(name){
 
 
 /* =========================
-   EVENTS — FIX REAL DROPDOWN
+   EVENTS (FIX REAL)
 ========================= */
 
 function bindEvents(){
@@ -144,42 +142,59 @@ function bindEvents(){
 
   /* 🔥 SIDEBAR TOGGLE */
   if(toggleSidebarBtn){
-    toggleSidebarBtn.addEventListener("click", (e)=>{
+
+    Onion.cleanupEvent(toggleSidebarBtn, "click", (e)=>{
       e.stopPropagation();
+
       document.body.classList.toggle("sidebar-collapsed");
+
+      // debug opcional
+      // console.log("sidebar toggle:", document.body.classList.contains("sidebar-collapsed"));
     });
+
   }
 
-  /* 🔥 DROPDOWN (FIX REAL) */
+  /* 🔥 DROPDOWN (FIX CLAVE) */
   if(userToggle && dropdown){
 
-    userToggle.addEventListener("click", (e)=>{
+    Onion.cleanupEvent(userToggle, "click", (e)=>{
       e.stopPropagation();
 
       const isOpen = dropdown.classList.contains("open");
 
-      // 🔥 cerrar todo primero
       closeAllDropdowns();
 
-      // 🔥 abrir si estaba cerrado
       if(!isOpen){
         dropdown.classList.add("open");
       }
+
     });
 
   }
 
-  /* 🔥 CLICK GLOBAL (NO ROMPE) */
-  document.addEventListener("click", ()=>{
+  /* 🔥 CLICK GLOBAL (FIX REAL) */
+  Onion.cleanupEvent(document, "click", (e)=>{
+
+    // 👉 si haces click dentro del user o dropdown → NO cerrar
+    if(
+      e.target.closest("#userToggle") ||
+      e.target.closest("#userDropdown")
+    ){
+      return;
+    }
+
     closeAllDropdowns();
+
   });
 
   /* 🔥 LOGOUT */
   if(logout){
-    logout.addEventListener("click", (e)=>{
+
+    Onion.cleanupEvent(logout, "click", (e)=>{
       e.stopPropagation();
       handleLogout();
     });
+
   }
 
 }
@@ -214,7 +229,7 @@ function handleLogout(){
 
 
 /* =========================
-   RECIENTES (LOADER PRO)
+   RECIENTES
 ========================= */
 
 function renderRecientes(){

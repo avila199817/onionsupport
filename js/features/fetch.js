@@ -1,5 +1,9 @@
 "use strict";
 
+/* =========================================================
+   🧅 FETCH — FULL PRO (ABORT GLOBAL, TIMEOUT, AUTH, SAFE)
+========================================================= */
+
 (function(){
 
   if(!window.Onion){
@@ -36,14 +40,14 @@
       return Onion.config.API + "/" + url;
 
     }catch(e){
-      console.error("💥 URL inválida:", url);
+      Onion.error("URL inválida:", url);
       return null;
     }
 
   }
 
   /* =========================
-     FETCH
+     FETCH PRO
   ========================= */
 
   Onion.fetch = async function(url, options = {}){
@@ -54,14 +58,29 @@
       throw new Error("NO_URL");
     }
 
+    /* =========================
+       ABORT GLOBAL (🔥 CLAVE)
+    ========================= */
+
+    // cancelar request anterior si existe
+    if(Onion.state.abortController){
+      try{ Onion.state.abortController.abort(); }catch{}
+    }
+
     const controller = new AbortController();
+    Onion.state.abortController = controller;
+
     const signal = options.signal || controller.signal;
+
+    /* =========================
+       TIMEOUT
+    ========================= */
 
     const timeout = setTimeout(()=>{
       if(!options.signal){
         controller.abort();
       }
-    }, Onion.config.TIMEOUT || 15000);
+    }, Onion.config.TIMEOUT || 10000);
 
     try{
 
@@ -170,9 +189,24 @@
       throw e;
 
     }finally{
+
       clearTimeout(timeout);
+
+      // limpiar controller si sigue siendo el activo
+      if(Onion.state.abortController === controller){
+        Onion.state.abortController = null;
+      }
+
     }
 
   };
+
+  /* =========================
+     DEBUG
+  ========================= */
+
+  if(Onion.config?.DEBUG){
+    Onion.log("🌐 Fetch system PRO ready");
+  }
 
 })();

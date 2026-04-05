@@ -43,6 +43,24 @@ function $(selector){
 
 
 /* =========================
+   NORMALIZE (🔥 FALTABA ESTO)
+========================= */
+
+function normalize(res){
+
+  if(!res) return [];
+
+  if(Array.isArray(res)) return res;
+  if(Array.isArray(res.facturas)) return res.facturas;
+  if(Array.isArray(res.data)) return res.data;
+  if(Array.isArray(res.items)) return res.items;
+
+  return [];
+
+}
+
+
+/* =========================
    LOADER
 ========================= */
 
@@ -239,7 +257,7 @@ function updateSortUI(){
 
 
 /* =========================
-   FILTERS (PRO)
+   FILTERS
 ========================= */
 
 function applyFilters(){
@@ -279,7 +297,7 @@ function setError(){
 
 
 /* =========================
-   RENDER (COMPLETO)
+   RENDER
 ========================= */
 
 function render(items){
@@ -348,7 +366,7 @@ function render(items){
 
 
 /* =========================
-   HELPERS (COMPLETO)
+   HELPERS
 ========================= */
 
 function mapItem(f){
@@ -476,7 +494,7 @@ function escapeHTML(str){
 
 
 /* =========================
-   🔥 CONEXIÓN TOPBAR FINAL
+   🔥 CONEXIÓN TOPBAR
 ========================= */
 
 window.FacturasUIExternal = {

@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 AUTH — FULL PRO SAAS (FIXED · NO DUPES · CONSISTENTE CON CORE)
+   🧅 AUTH — GOD MODE (CORE SAFE · NO RACE · SINGLE SOURCE)
 ========================================================= */
 
 (function(){
@@ -78,7 +78,7 @@
   };
 
   /* =========================
-     REDIRECT LOGIN
+     REDIRECT LOGIN (CORE)
   ========================= */
 
   Onion.auth.redirectLogin = function(){
@@ -87,7 +87,6 @@
 
     const path = window.location.pathname;
 
-    // evitar loop
     if(path.startsWith("/auth")){
       return;
     }
@@ -116,7 +115,7 @@
   };
 
   /* =========================
-     LOGOUT CENTRALIZADO
+     LOGOUT (CORE CONTROLADO)
   ========================= */
 
   Onion.auth.logout = async function(){
@@ -133,7 +132,8 @@
 
     Onion.auth.resetSession();
 
-    window.location.href = "/auth";
+    // 🔥 evitar estado SPA corrupto
+    window.location.replace("/auth");
 
   };
 
@@ -142,7 +142,7 @@
   ========================= */
 
   if(Onion.config?.DEBUG){
-    Onion.log("🔐 Auth system PRO ready");
+    Onion.log("🔐 Auth GOD MODE ready");
   }
 
 })();

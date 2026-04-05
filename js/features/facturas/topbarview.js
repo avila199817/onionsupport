@@ -2,40 +2,46 @@
 
 (function(){
 
+  let mounted = false;
+
   /* =========================
-     🔥 RENDER HTML
+     🔥 RENDER HTML (SAFE)
   ========================= */
   function render(){
 
     const container = document.getElementById("topbarview-container");
     if(!container) return;
 
-    container.innerHTML = `
-      <div class="topbarview">
+    // 🔥 evitar duplicados
+    if(container.querySelector(".topbarview")) return;
 
-        <input 
-          type="text"
-          id="search-factura"
-          placeholder="Buscar factura..."
-          autocomplete="off"
-        >
+    const div = document.createElement("div");
+    div.className = "topbarview";
 
-        <select id="filter-estado-factura">
-          <option value="">Estado pago</option>
-          <option value="pagada">Pagada</option>
-          <option value="pendiente">Pendiente</option>
-        </select>
+    div.innerHTML = `
+      <input 
+        type="text"
+        id="search-factura"
+        placeholder="Buscar factura..."
+        autocomplete="off"
+      >
 
-        <button id="btn-new-factura" class="btn-primary">
-          + Nueva
-        </button>
+      <select id="filter-estado-factura">
+        <option value="">Estado pago</option>
+        <option value="pagada">Pagada</option>
+        <option value="pendiente">Pendiente</option>
+      </select>
 
-      </div>
+      <button id="btn-new-factura" class="btn-primary">
+        + Nueva
+      </button>
     `;
+
+    container.appendChild(div);
   }
 
   /* =========================
-     🔥 INIT LOGIC
+     🔥 INIT LOGIC (ROBUST)
   ========================= */
   function init(){
 
@@ -50,14 +56,26 @@
       return;
     }
 
-    // 🔥 EVITAR DUPLICADOS
-    if(btn.dataset.bound === "true") return;
-    btn.dataset.bound = "true";
+    // 🔥 evitar doble bind global
+    if(mounted) return;
+    mounted = true;
 
-    btn.addEventListener("click", ()=>{
-      console.log("crear factura");
-    });
+    btn.addEventListener("click", onCreateFactura);
+  }
 
+  function onCreateFactura(){
+    console.log("crear factura");
+  }
+
+  /* =========================
+     🔥 CLEANUP (PRO)
+  ========================= */
+  function destroy(){
+    const container = document.getElementById("topbarview-container");
+    if(!container) return;
+
+    container.innerHTML = "";
+    mounted = false;
   }
 
   /* =========================
@@ -65,7 +83,7 @@
   ========================= */
   function start(){
     render();
-    requestAnimationFrame(init);
+    init();
   }
 
   if(document.readyState === "loading"){
@@ -73,5 +91,11 @@
   } else {
     start();
   }
+
+  /* 🔥 opcional: exponer para SPA */
+  window.TopbarView = {
+    start,
+    destroy
+  };
 
 })();

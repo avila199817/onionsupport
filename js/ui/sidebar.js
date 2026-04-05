@@ -1,5 +1,9 @@
 "use strict";
 
+/* =========================================================
+   🧅 SIDEBAR — FULL PRO (SIN DUPES, CLEAN EVENTS, CONSISTENTE)
+========================================================= */
+
 (function(){
 
 const Onion = window.Onion;
@@ -16,7 +20,6 @@ if(!Onion){
 let initialized = false;
 let loading = false;
 let currentRequestId = 0;
-
 
 /* =========================
    INIT
@@ -48,15 +51,9 @@ function init(){
 
 init();
 
-/* 🔥 FIX HARD LOAD + SPA */
-Onion.events?.on?.("app:ready", ()=>{
-  requestAnimationFrame(init);
-});
-
-Onion.events?.on?.("route:end", ()=>{
-  requestAnimationFrame(init);
-});
-
+/* 🔥 FIX SPA */
+Onion.events?.on?.("app:ready", ()=> requestAnimationFrame(init));
+Onion.events?.on?.("route:end", ()=> requestAnimationFrame(init));
 
 /* =========================
    STATE
@@ -73,7 +70,6 @@ function restoreState(){
 
   updateTooltip();
 }
-
 
 /* =========================
    EVENTS
@@ -115,7 +111,6 @@ function bindEvents(){
         setTimeout(()=>{
           dropdown.classList.add("active");
         }, 180);
-
         return;
       }
 
@@ -142,7 +137,7 @@ function bindEvents(){
     }
   });
 
-  /* 🔥 LOGOUT PRO CON LOADER */
+  /* 🔥 LOGOUT CENTRALIZADO */
   if(logout){
 
     Onion.cleanupEvent(logout, "click", async (e)=>{
@@ -151,36 +146,10 @@ function bindEvents(){
       Onion.ui?.showLoader?.();
 
       try{
-
         await new Promise(r => requestAnimationFrame(r));
-
-        const res = await Onion.fetch(
-          Onion.config.API + "/logout",
-          {
-            method: "POST"
-          }
-        );
-
-        if(!res || res.ok === false){
-          throw new Error("Logout fallido");
-        }
-
-        await new Promise(r => setTimeout(r, 300));
-
+        await Onion.auth.logout();
       }catch(err){
-
-        console.error("💥 LOGOUT ERROR:", err);
-        Onion.ui.toast?.error("Error cerrando sesión");
-
-      }finally{
-
-        try{
-          Onion.auth?.logout?.();
-        }catch{}
-
-        localStorage.removeItem("onion_user_slug");
-
-        window.location.href = "/login";
+        Onion.error("LOGOUT ERROR:", err);
       }
 
     });
@@ -189,22 +158,21 @@ function bindEvents(){
 
 }
 
-
 /* =========================
    USER
 ========================= */
 
 function renderUser(){
 
-  const user = Onion.state?.user;
+  const user = Onion.getUser?.();
   if(!user) return;
 
   const nameEl = document.getElementById("sidebar-name");
   const avatarEl = document.getElementById("sidebar-avatar");
 
   const name =
-    user.nombre ||
     user.name ||
+    user.username ||
     user.email ||
     "Usuario";
 
@@ -225,9 +193,8 @@ function renderUser(){
 
 }
 
-
 /* =========================
-   🔥 LOADER RECIENTES
+   RECIENTES
 ========================= */
 
 function showRecientesLoader(){
@@ -237,24 +204,9 @@ function showRecientesLoader(){
 
   section.innerHTML = `
     <span class="section-title">Recientes</span>
-
-    <div style="
-      display:flex;
-      align-items:center;
-      gap:10px;
-      padding:10px;
-      opacity:.7;
-      font-size:12px;
-    ">
-      <div style="
-        width:14px;
-        height:14px;
-        border:2px solid rgba(255,255,255,0.1);
-        border-top-color:var(--accent);
-        border-radius:50%;
-        animation:spin .6s linear infinite;
-      "></div>
-
+    <div style="display:flex;gap:10px;padding:10px;opacity:.7;font-size:12px;">
+      <div style="width:14px;height:14px;border:2px solid rgba(255,255,255,0.1);
+      border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;"></div>
       <span>Cargando...</span>
     </div>
   `;
@@ -286,9 +238,8 @@ function setRecientesError(){
   `;
 }
 
-
 /* =========================
-   LOAD RECIENTES
+   LOAD
 ========================= */
 
 async function loadRecientes(){
@@ -319,7 +270,7 @@ async function loadRecientes(){
 
   }catch(e){
 
-    console.error("💥 ERROR RECIENTES:", e);
+    Onion.error("ERROR RECIENTES:", e);
 
     if(requestId === currentRequestId){
       setRecientesError();
@@ -330,7 +281,6 @@ async function loadRecientes(){
   }
 
 }
-
 
 /* =========================
    NORMALIZE
@@ -347,9 +297,8 @@ function normalize(res){
   return [];
 }
 
-
 /* =========================
-   RENDER RECIENTES
+   RENDER
 ========================= */
 
 function renderRecientes(items){
@@ -371,7 +320,6 @@ function renderRecientes(items){
   `;
 }
 
-
 /* =========================
    HELPERS
 ========================= */
@@ -382,18 +330,9 @@ function renderAvatarFallback(name){
   const color = getAvatarColor(name);
 
   return `
-    <div style="
-      width:100%;
-      height:100%;
-      border-radius:50%;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      background:${color};
-      color:#fff;
-      font-weight:600;
-      font-size:12px;
-    ">
+    <div style="width:100%;height:100%;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    background:${color};color:#fff;font-weight:600;font-size:12px;">
       ${initials}
     </div>
   `;
@@ -439,6 +378,10 @@ function updateTooltip(){
       ? "Abrir barra lateral"
       : "Cerrar barra lateral"
   );
+}
+
+if(Onion.config?.DEBUG){
+  Onion.log("📚 Sidebar PRO ready");
 }
 
 })();

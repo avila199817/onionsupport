@@ -1,5 +1,9 @@
 "use strict";
 
+/* =========================================================
+   🧅 RENDER — FULL PRO (SIN RACE CONDITIONS, LIMPIO, CONSISTENTE)
+========================================================= */
+
 (function(){
 
   if(!window.Onion){
@@ -12,11 +16,12 @@
   /* =========================
      NORMALIZE URL
   ========================= */
+
   function normalizeUrl(src){
     if(!src) return null;
 
     if(typeof src !== "string"){
-      console.error("💥 URL inválida:", src);
+      Onion.error("URL inválida:", src);
       return null;
     }
 
@@ -34,6 +39,7 @@
   /* =========================
      LOAD SCRIPT
   ========================= */
+
   function loadScriptSingle(src){
     return new Promise((resolve, reject)=>{
 
@@ -63,11 +69,11 @@
     }
 
     if(!Array.isArray(scripts)){
-      console.error("💥 Scripts inválidos:", scripts);
+      Onion.error("Scripts inválidos:", scripts);
       return;
     }
 
-    // 🔥 limpiar scripts anteriores
+    /* 🔥 limpiar scripts anteriores */
     document.querySelectorAll("script[data-onion-page]").forEach(s=>{
       try{ s.remove(); }catch{}
     });
@@ -81,7 +87,9 @@
   /* =========================
      LOAD STYLE
   ========================= */
+
   Onion.loadStyle = function(styles){
+
     return new Promise((resolve)=>{
 
       if(!styles) return resolve();
@@ -96,6 +104,7 @@
       styles.forEach((href)=>{
 
         const finalHref = normalizeUrl(href);
+
         if(!finalHref){
           done();
           return;
@@ -115,6 +124,7 @@
       });
 
       function done(){
+
         loaded++;
 
         if(loaded === styles.length){
@@ -131,14 +141,17 @@
 
           resolve();
         }
+
       }
 
     });
+
   };
 
   /* =========================
      FETCH HTML
   ========================= */
+
   Onion.fetchHTML = async function(url){
 
     const finalUrl = normalizeUrl(url);
@@ -153,22 +166,26 @@
     }
 
     return await res.text();
+
   };
 
   /* =========================
      EXTRACT CONTENT
   ========================= */
+
   function extractContent(html){
 
     const wrapper = document.createElement("div");
     wrapper.innerHTML = html;
 
     return wrapper.querySelector(".panel-content") || wrapper;
+
   }
 
   /* =========================
-     SWAP CONTENT (FIX PRO)
+     SWAP CONTENT
   ========================= */
+
   Onion.swapContent = function(node){
 
     const app = document.getElementById("app-content");
@@ -181,11 +198,14 @@
   };
 
   /* =========================
-     RENDER BASE
+     RENDER CORE
   ========================= */
+
   const originalRender = async function(){
 
     const currentRenderId = ++Onion.state.renderId;
+
+    Onion.state.rendering = true;
 
     try{
 
@@ -196,6 +216,10 @@
       if(route.title){
         document.title = "Onion Support · " + route.title;
       }
+
+      /* =========================
+         FETCH HTML
+      ========================= */
 
       const html = await Onion.fetchHTML(route.page);
 
@@ -209,13 +233,29 @@
 
       content.classList.remove("ready");
 
+      /* =========================
+         CLEANUP (UNA SOLA VEZ)
+      ========================= */
+
       Onion.runCleanup?.();
+
+      /* =========================
+         STYLE
+      ========================= */
 
       if(route.style){
         await Onion.loadStyle(route.style);
       }
 
+      /* =========================
+         SWAP DOM
+      ========================= */
+
       Onion.swapContent(content);
+
+      /* =========================
+         SCRIPTS
+      ========================= */
 
       if(route.script){
         await Onion.loadScript(route.script);
@@ -223,10 +263,15 @@
 
       if(currentRenderId !== Onion.state.renderId) return;
 
+      /* =========================
+         FRAME SYNC
+      ========================= */
+
       await new Promise(r => requestAnimationFrame(r));
       await new Promise(r => requestAnimationFrame(r));
 
       const newContent = document.querySelector("#app-content .panel-content");
+
       if(newContent){
         newContent.classList.add("ready");
       }
@@ -235,18 +280,31 @@
 
     }catch(e){
 
-      console.error("💥 RENDER ERROR:", e);
+      Onion.error("RENDER ERROR:", e);
       Onion.ui.hideLoader?.();
+
+    }finally{
+
+      Onion.state.rendering = false;
 
     }
 
   };
 
   /* =========================
-     RENDER FINAL
+     PUBLIC RENDER
   ========================= */
+
   Onion.render = async function(){
-    return await originalRender.apply(this, arguments);
+    return originalRender.apply(this, arguments);
   };
+
+  /* =========================
+     DEBUG
+  ========================= */
+
+  if(Onion.config?.DEBUG){
+    Onion.log("🎬 Render system PRO ready");
+  }
 
 })();

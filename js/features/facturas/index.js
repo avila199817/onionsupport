@@ -43,7 +43,6 @@ function init(){
   const root = getRoot();
   if(!root || initialized) return;
 
-  // 🔥 ESPERAR USER REAL (NUEVO SISTEMA)
   if(!Onion.user){
     console.warn("⏳ esperando user...");
     return setTimeout(init, 100);
@@ -76,7 +75,6 @@ function bindEvents(){
 
   Onion.cleanupEvent(root, "click", (e)=>{
 
-    /* 🔥 SORT CLICK */
     const th = e.target.closest("th[data-sort]");
     if(th){
       handleSort(th);
@@ -97,12 +95,11 @@ function bindEvents(){
 
   });
 
-  $("#btn-new-factura")?.addEventListener("click", ()=>{
-    Onion.router.navigate("/facturas/nueva");
+  /* 🔥 ESCUCHAR FILTROS DEL TOPBAR */
+  document.addEventListener("facturas:filter", (e)=>{
+    const { search, estado } = e.detail;
+    applyFiltersExternal(search, estado);
   });
-
-  $("#search-factura")?.addEventListener("input", debounce(applyFilters, 250));
-  $("#filter-estado-factura")?.addEventListener("change", applyFilters);
 
 }
 
@@ -222,7 +219,7 @@ async function loadFacturas(){
       return;
     }
 
-    applyFilters();
+    applySort();
 
   }catch(e){
 
@@ -239,88 +236,13 @@ async function loadFacturas(){
 }
 
 /* =========================
-   ACTIONS
+   FILTERS (EXTERNOS)
 ========================= */
 
-async function handleAction(btn){
+function applyFiltersExternal(search, estado){
 
-  const id = btn.dataset.id;
-  if(!id) return;
-
-  if(btn.classList.contains("view")){
-    Onion.router.navigate("/facturas/detalle?id=" + id);
-  }
-
-  if(btn.classList.contains("download")){
-
-    if(btn.classList.contains("loading")) return;
-
-    btn.classList.add("loading");
-
-    const original = btn.textContent;
-    btn.textContent = "⏳";
-
-    try{
-
-      const res = await Onion.fetch(
-        Onion.config.API + "/facturas/" + id + "/descargar"
-      );
-
-      if(!res || !res.ok || !res.url){
-        Onion.ui.toast?.error("Error descargando PDF");
-        return;
-      }
-
-      const link = document.createElement("a");
-      link.href = res.url;
-      link.download = `factura-${id}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
-      Onion.ui.toast?.success("Factura descargada 📄");
-
-    }catch(e){
-      console.error("💥 ERROR DOWNLOAD:", e);
-      Onion.ui.toast?.error("Error descargando PDF");
-    }finally{
-      btn.textContent = original;
-      btn.classList.remove("loading");
-    }
-
-  }
-
-  if(btn.classList.contains("pay")){
-    Onion.ui.toast?.info("💳 Simulación pago factura " + id);
-  }
-
-}
-
-/* =========================
-   NORMALIZE
-========================= */
-
-function normalize(res){
-
-  if(!res) return [];
-
-  if(Array.isArray(res)) return res;
-  if(Array.isArray(res.facturas)) return res.facturas;
-  if(Array.isArray(res.data)) return res.data;
-  if(Array.isArray(res.items)) return res.items;
-
-  return [];
-
-}
-
-/* =========================
-   FILTERS
-========================= */
-
-function applyFilters(){
-
-  const search = ($("#search-factura")?.value || "").toLowerCase();
-  const estado = ($("#filter-estado-factura")?.value || "").toLowerCase();
+  search = (search || "").toLowerCase();
+  estado = (estado || "").toLowerCase();
 
   filteredItems = currentItems.filter(f => {
 
@@ -337,7 +259,6 @@ function applyFilters(){
   });
 
   applySort();
-
 }
 
 /* =========================
@@ -550,14 +471,6 @@ function escapeHTML(str){
     .replace(/&/g,"&amp;")
     .replace(/</g,"&lt;")
     .replace(/>/g,"&gt;");
-}
-
-function debounce(fn, delay){
-  let t;
-  return (...args)=>{
-    clearTimeout(t);
-    t = setTimeout(()=>fn(...args), delay);
-  };
 }
 
 })();

@@ -1,11 +1,17 @@
 "use strict";
 
+/* =========================================================
+   🧅 ROLE / TOPBARVIEW SYSTEM — FULL PRO (SIN HOOKS ROTOS)
+========================================================= */
+
 (function(){
 
   if(!window.Onion){
-    console.error("💥 Onion no disponible (roles)");
+    console.error("💥 Onion no disponible (topbarview)");
     return;
   }
+
+  const Onion = window.Onion;
 
   /* =========================
      STATE
@@ -19,7 +25,7 @@
   ========================= */
 
   function getUser(){
-    return Onion.state?.user || null;
+    return Onion.getUser?.() || Onion.state?.user || null;
   }
 
   function getRole(){
@@ -45,17 +51,20 @@
 
     root.querySelectorAll("[data-role]").forEach(el => {
 
-      const roles = el.dataset.role.split(",").map(r => r.trim());
+      const roles = el.dataset.role
+        .split(",")
+        .map(r => r.trim());
 
       const allowed = hasAnyRole(roles);
 
       el.hidden = !allowed;
+
     });
 
   }
 
   /* =========================
-     OBSERVER (DOM dinámico)
+     OBSERVER (DOM DINÁMICO)
   ========================= */
 
   function initObserver(){
@@ -90,31 +99,23 @@
   }
 
   /* =========================
-     HOOK RENDER SPA
+     HOOK SPA (SIN ROMPER RENDER)
   ========================= */
 
-  function hookRender(){
+  function bindEvents(){
 
-    if(Onion.__rolesHooked) return;
-    Onion.__rolesHooked = true;
+    Onion.events?.on?.("route:end", ()=>{
+      requestAnimationFrame(()=> applyRoleUI());
+    });
 
-    const originalRender = Onion.render;
-
-    Onion.render = async function(){
-
-      const result = await originalRender.apply(this, arguments);
-
-      requestAnimationFrame(()=>{
-        applyRoleUI();
-      });
-
-      return result;
-    };
+    Onion.events?.on?.("app:ready", ()=>{
+      requestAnimationFrame(()=> applyRoleUI());
+    });
 
   }
 
   /* =========================
-     PUBLIC API (opcional)
+     API GLOBAL
   ========================= */
 
   window.RoleSystem = {
@@ -131,11 +132,10 @@
   function init(){
 
     if(initialized) return;
-
     initialized = true;
 
-    hookRender();
     initObserver();
+    bindEvents();
 
     if(document.readyState === "loading"){
       document.addEventListener("DOMContentLoaded", ()=> applyRoleUI());
@@ -146,5 +146,13 @@
   }
 
   init();
+
+  /* =========================
+     DEBUG
+  ========================= */
+
+  if(Onion.config?.DEBUG){
+    Onion.log("👤 Role system PRO ready");
+  }
 
 })();

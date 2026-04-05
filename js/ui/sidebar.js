@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 SIDEBAR — FULL PRO GOD (SIN API · UI ESTABLE)
+   🧅 SIDEBAR — FULL PRO GOD (SPA SAFE · SIN EVENTOS MUERTOS)
 ========================================================= */
 
 (function(){
@@ -28,10 +28,16 @@ function init(){
   const sidebar = document.querySelector(".sidebar");
   const toggle  = document.getElementById("toggleSidebar");
 
-  if(!sidebar || !toggle || initialized) return;
+  if(!sidebar || !toggle) return;
 
   if(!Onion.state?.user){
     return setTimeout(init, 100);
+  }
+
+  // 🔥 CLAVE: rebind en SPA
+  if(initialized){
+    bindEvents();
+    return;
   }
 
   initialized = true;
@@ -40,7 +46,7 @@ function init(){
   restoreState();
   bindEvents();
 
-  // 🔥 ahora SIEMPRE mostramos error (sin fetch)
+  // UI fija (sin API)
   setRecientesError();
 
   Onion.onCleanup(()=>{
@@ -83,6 +89,9 @@ function bindEvents(){
   const dropdown = document.getElementById("userDropdown");
   const logout   = document.getElementById("logoutBtn");
 
+  if(!sidebar || !toggle) return;
+
+  /* TOGGLE SIDEBAR */
   Onion.cleanupEvent(toggle, "click", (e)=>{
     e.stopPropagation();
 
@@ -97,6 +106,7 @@ function bindEvents(){
     updateTooltip();
   });
 
+  /* USER DROPDOWN */
   if(user && dropdown){
 
     Onion.cleanupEvent(user, "click", (e)=>{
@@ -111,6 +121,7 @@ function bindEvents(){
         setTimeout(()=>{
           dropdown.classList.add("active");
         }, 180);
+
         return;
       }
 
@@ -119,6 +130,7 @@ function bindEvents(){
 
   }
 
+  /* CLOSE DROPDOWN */
   Onion.cleanupEvent(document, "click", (e)=>{
 
     if(
@@ -131,13 +143,14 @@ function bindEvents(){
     dropdown?.classList.remove("active");
   });
 
+  /* ESC CLOSE */
   Onion.cleanupEvent(document, "keydown", (e)=>{
     if(e.key === "Escape"){
       dropdown?.classList.remove("active");
     }
   });
 
-  /* 🔥 LOGOUT */
+  /* LOGOUT */
   if(logout){
 
     Onion.cleanupEvent(logout, "click", async (e)=>{
@@ -194,7 +207,7 @@ function renderUser(){
 }
 
 /* =========================================================
-   RECIENTES (DESACTIVADO · UI SOLO)
+   RECIENTES (DESACTIVADO)
 ========================================================= */
 
 function setRecientesError(){

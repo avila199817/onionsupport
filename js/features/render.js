@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 RENDER — GOD MODE (PRO SAAS · ANTI-RACE · FAILSAFE)
+   🧅 RENDER — GOD MODE (PRO SAAS · ANTI-RACE · LOADER SYNC)
 ========================================================= */
 
 (function(){
@@ -36,7 +36,7 @@ function waitForDOMReady(){
 }
 
 /* =========================================================
-   WAIT VIEW CONTAINER (🔥 CON TIMEOUT REAL)
+   WAIT VIEW CONTAINER (CON TIMEOUT)
 ========================================================= */
 
 function waitForViewContainer(){
@@ -90,7 +90,7 @@ function normalizeUrl(src){
 }
 
 /* =========================================================
-   SCRIPT LOADER (SIN DUPES)
+   SCRIPT LOADER
 ========================================================= */
 
 function loadScriptSingle(src){
@@ -101,9 +101,7 @@ function loadScriptSingle(src){
     if(!finalSrc) return resolve();
 
     const existing = document.querySelector(`script[src="${finalSrc}"][data-onion-page]`);
-    if(existing){
-      return resolve();
-    }
+    if(existing) return resolve();
 
     const s = document.createElement("script");
     s.src = finalSrc;
@@ -144,7 +142,7 @@ Onion.loadScript = async function(scripts){
 };
 
 /* =========================================================
-   STYLE LOADER (SIN PARPADEOS)
+   STYLE LOADER
 ========================================================= */
 
 Onion.loadStyle = function(styles){
@@ -250,13 +248,11 @@ function extractContent(html){
 }
 
 /* =========================================================
-   SWAP VIEW (ULTRA SAFE)
+   SWAP VIEW
 ========================================================= */
 
 function swapView(container, node){
-
   container.replaceChildren(node.cloneNode(true));
-
 }
 
 /* =========================================================
@@ -296,7 +292,8 @@ const originalRender = async function(){
 
     await waitForDOMReady();
 
-    Onion.ui.showLoader?.();
+    /* 🔥 LOADER SYNC */
+    Onion.ui.showLoader?.(renderId);
 
     const route = Onion.router.resolve();
 
@@ -339,7 +336,8 @@ const originalRender = async function(){
 
     container.querySelector(".panel-content")?.classList.add("ready");
 
-    Onion.ui.hideLoader?.();
+    /* 🔥 LOADER SYNC */
+    Onion.ui.hideLoader?.(renderId);
 
   }catch(e){
 
@@ -356,7 +354,7 @@ const originalRender = async function(){
       `;
     }
 
-    Onion.ui.hideLoader?.();
+    Onion.ui.hideLoader?.(renderId);
 
   }finally{
 
@@ -379,7 +377,7 @@ Onion.render = function(){
 ========================================================= */
 
 if(Onion.config?.DEBUG){
-  Onion.log("🔥 Render GOD MODE listo");
+  Onion.log("🔥 Render GOD MODE + Loader Sync listo");
 }
 
 })();

@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 SIDEBAR — FULL PRO GOD (SPA CLEAN + TRACK RECENTES)
+   🧅 SIDEBAR — FULL PRO GOD (SIN API · UI ESTABLE)
 ========================================================= */
 
 (function(){
@@ -18,8 +18,6 @@ if(!Onion){
 ========================================================= */
 
 let initialized = false;
-let loading = false;
-let currentRequestId = 0;
 
 /* =========================
    INIT
@@ -41,7 +39,9 @@ function init(){
   renderUser();
   restoreState();
   bindEvents();
-  loadRecientes();
+
+  // 🔥 ahora SIEMPRE mostramos error (sin fetch)
+  setRecientesError();
 
   Onion.onCleanup(()=>{
     initialized = false;
@@ -194,36 +194,8 @@ function renderUser(){
 }
 
 /* =========================================================
-   RECIENTES
+   RECIENTES (DESACTIVADO · UI SOLO)
 ========================================================= */
-
-function showRecientesLoader(){
-
-  const section = document.querySelector(".sidebar-section");
-  if(!section) return;
-
-  section.innerHTML = `
-    <span class="section-title">Recientes</span>
-    <div style="display:flex;gap:10px;padding:10px;opacity:.7;font-size:12px;">
-      <div style="width:14px;height:14px;border:2px solid rgba(255,255,255,0.1);
-      border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;"></div>
-      <span>Cargando...</span>
-    </div>
-  `;
-}
-
-function setRecientesEmpty(){
-
-  const section = document.querySelector(".sidebar-section");
-  if(!section) return;
-
-  section.innerHTML = `
-    <span class="section-title">Recientes</span>
-    <div style="padding:10px;font-size:12px;opacity:.6;">
-      No hay recientes
-    </div>
-  `;
-}
 
 function setRecientesError(){
 
@@ -235,129 +207,6 @@ function setRecientesError(){
     <div style="padding:10px;font-size:12px;color:#ef4444;">
       Error cargando recientes
     </div>
-  `;
-}
-
-/* =========================
-   LOAD
-========================= */
-
-async function loadRecientes(){
-
-  if(loading) return;
-  loading = true;
-
-  const requestId = ++currentRequestId;
-
-  showRecientesLoader();
-
-  try{
-
-    await new Promise(r => requestAnimationFrame(r));
-    await new Promise(r => requestAnimationFrame(r));
-
-    const res = await Onion.fetch("/recientes");
-    const items = normalize(res);
-
-    if(requestId !== currentRequestId) return;
-
-    if(!items.length){
-      setRecientesEmpty();
-      return;
-    }
-
-    renderRecientes(items);
-
-  }catch(e){
-
-    Onion.error("ERROR RECIENTES:", e);
-
-    if(requestId === currentRequestId){
-      setRecientesError();
-    }
-
-  }finally{
-    loading = false;
-  }
-
-}
-
-/* =========================================================
-   TRACK RECENTES (🔥 NIVEL SAAS REAL)
-========================================================= */
-
-Onion.events?.on?.("route:end", ()=>{
-
-  try{
-
-    const route = Onion.router.get();
-    const config = Onion.routes?.[route];
-
-    if(!route || !config) return;
-    if(route === "/") return;
-
-    const payload = {
-      label: config.title || "Vista",
-      href: route,
-      ts: Date.now()
-    };
-
-    const url = Onion.config.API + "/recientes";
-
-    // 🔥 envío no bloqueante
-    if(navigator.sendBeacon){
-      const blob = new Blob([JSON.stringify(payload)], {
-        type: "application/json"
-      });
-      navigator.sendBeacon(url, blob);
-    }else{
-      Onion.fetch("/recientes", {
-        method: "POST",
-        body: payload
-      }).catch(()=>{});
-    }
-
-  }catch(e){
-    // silencio total
-  }
-
-});
-
-/* =========================================================
-   NORMALIZE
-========================================================= */
-
-function normalize(res){
-
-  if(!res) return [];
-
-  if(Array.isArray(res)) return res;
-  if(Array.isArray(res.data)) return res.data;
-  if(Array.isArray(res.items)) return res.items;
-
-  return [];
-}
-
-/* =========================================================
-   RENDER
-========================================================= */
-
-function renderRecientes(items){
-
-  const section = document.querySelector(".sidebar-section");
-  if(!section) return;
-
-  const html = items.map(i => {
-    return `
-      <a href="${i.href || '#'}" data-spa class="chat-item">
-        ${escapeHTML(i.label || "Item")}
-      </a>
-    `;
-  }).join("");
-
-  section.innerHTML = `
-    <span class="section-title">Recientes</span>
-    ${html}
   `;
 }
 
@@ -397,13 +246,6 @@ function getInitials(name){
   return name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase();
 }
 
-function escapeHTML(str){
-  return String(str)
-    .replace(/&/g,"&amp;")
-    .replace(/</g,"&lt;")
-    .replace(/>/g,"&gt;");
-}
-
 function updateTooltip(){
 
   const sidebar = document.querySelector(".sidebar");
@@ -422,7 +264,7 @@ function updateTooltip(){
 }
 
 if(Onion.config?.DEBUG){
-  Onion.log("📚 Sidebar GOD MODE ready");
+  Onion.log("📚 Sidebar PRO (recientes desactivado) ready");
 }
 
 })();

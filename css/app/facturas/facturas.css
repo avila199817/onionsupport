@@ -37,6 +37,10 @@
   overflow-x:hidden;
 
   background:var(--panel-bg);
+
+  /* 🔥 FIX CAPAS */
+  position:relative;
+  z-index:1;
 }
 
 
@@ -46,7 +50,11 @@
 
 .panel-content.facturas table{
   width:100%;
-  border-collapse:collapse;
+
+  /* 🔥 FIX RENDER (no cambia diseño) */
+  border-collapse:separate;
+  border-spacing:0;
+
   table-layout:fixed;
 }
 
@@ -132,6 +140,10 @@
 .panel-content.facturas tbody tr{
   transition:all .15s ease;
   cursor:pointer;
+
+  /* 🔥 FIX STACKING */
+  position:relative;
+  z-index:1;
 }
 
 .panel-content.facturas tbody tr:nth-child(even){

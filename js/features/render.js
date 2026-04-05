@@ -67,6 +67,7 @@
       return;
     }
 
+    // 🔥 limpiar scripts anteriores
     document.querySelectorAll("script[data-onion-page]").forEach(s=>{
       try{ s.remove(); }catch{}
     });
@@ -166,7 +167,7 @@
   }
 
   /* =========================
-     SWAP CONTENT
+     SWAP CONTENT (FIX PRO)
   ========================= */
   Onion.swapContent = function(node){
 
@@ -174,7 +175,9 @@
     if(!app) return;
 
     app.innerHTML = "";
-    app.appendChild(node);
+
+    // 🔥 CLAVE: clonar nodo para evitar bugs de referencia
+    app.appendChild(node.cloneNode(true));
 
   };
 
@@ -200,6 +203,11 @@
       if(currentRenderId !== Onion.state.renderId) return;
 
       const content = extractContent(html);
+
+      if(!content){
+        throw new Error("No se encontró .panel-content");
+      }
+
       content.classList.remove("ready");
 
       Onion.runCleanup?.();
@@ -216,10 +224,14 @@
 
       if(currentRenderId !== Onion.state.renderId) return;
 
+      // 🔥 asegurar render completo antes de mostrar
       await new Promise(r => requestAnimationFrame(r));
       await new Promise(r => requestAnimationFrame(r));
 
-      content.classList.add("ready");
+      const newContent = document.querySelector("#app-content .panel-content");
+      if(newContent){
+        newContent.classList.add("ready");
+      }
 
       Onion.ui.hideLoader?.();
 
@@ -233,7 +245,7 @@
   };
 
   /* =========================
-     🔥 RENDER FINAL (SOLO ORQUESTA)
+     RENDER FINAL
   ========================= */
   Onion.render = async function(){
     return await originalRender.apply(this, arguments);

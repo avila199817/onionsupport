@@ -36,7 +36,7 @@
       return Onion.config.API + "/" + url;
 
     }catch(e){
-      console.error("URL inválida:", url);
+      console.error("💥 URL inválida:", url);
       return null;
     }
 
@@ -61,7 +61,7 @@
       if(!options.signal){
         controller.abort();
       }
-    }, Onion.config.TIMEOUT);
+    }, Onion.config.TIMEOUT || 15000);
 
     try{
 
@@ -69,9 +69,21 @@
         ...(options.headers || {})
       };
 
-      if(options.body && !headers["Content-Type"]){
+      let body = options.body;
+
+      /* =========================
+         CONTENT TYPE AUTO
+      ========================= */
+
+      const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
+
+      if(body && !isFormData && !headers["Content-Type"]){
         headers["Content-Type"] = "application/json";
       }
+
+      /* =========================
+         AUTH TOKEN
+      ========================= */
 
       try{
         const token = Onion.auth?.getToken?.();
@@ -80,11 +92,21 @@
         }
       }catch{}
 
-      let body = options.body;
+      /* =========================
+         SERIALIZE BODY
+      ========================= */
 
-      if(body && headers["Content-Type"] === "application/json" && typeof body !== "string"){
+      if(
+        body &&
+        headers["Content-Type"] === "application/json" &&
+        typeof body !== "string"
+      ){
         body = JSON.stringify(body);
       }
+
+      /* =========================
+         REQUEST
+      ========================= */
 
       const res = await fetch(finalUrl, {
         method: options.method || "GET",
@@ -94,25 +116,47 @@
         credentials: "include"
       });
 
+      /* =========================
+         AUTH ERROR
+      ========================= */
+
       if(res.status === 401){
         throw new Error("401");
       }
+
+      /* =========================
+         PARSE RESPONSE
+      ========================= */
 
       let data;
       const contentType = res.headers.get("content-type") || "";
 
       if(contentType.includes("application/json")){
-        data = await res.json().catch(()=>{ throw new Error("INVALID_JSON"); });
+        try{
+          data = await res.json();
+        }catch{
+          throw new Error("INVALID_JSON");
+        }
       }else{
         data = await res.text();
       }
 
+      /* =========================
+         ERROR HANDLING
+      ========================= */
+
       if(!res.ok){
+
         const msg =
           (typeof data === "object" && data?.message)
+          || (typeof data === "string" && data)
           || ("HTTP " + res.status);
 
-        throw new Error(msg);
+        const error = new Error(msg);
+        error.status = res.status;
+        error.data = data;
+
+        throw error;
       }
 
       return data;

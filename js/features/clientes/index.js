@@ -42,6 +42,27 @@ function $(selector){
 
 
 /* =========================
+   LOADER
+========================= */
+
+function showLoader(){
+  const loader = getRoot()?.querySelector(".table-loader");
+  if(loader){
+    loader.style.display = "flex";
+    loader.style.opacity = "1";
+  }
+}
+
+function hideLoader(){
+  const loader = getRoot()?.querySelector(".table-loader");
+  if(loader){
+    loader.style.opacity = "0";
+    setTimeout(()=> loader.style.display = "none", 250);
+  }
+}
+
+
+/* =========================
    INIT
 ========================= */
 
@@ -108,6 +129,7 @@ async function loadClientes(){
   const requestId = ++currentRequestId;
 
   document.activeElement?.blur();
+  showLoader();
 
   try{
 
@@ -203,11 +225,13 @@ function applyFilters(){
 function setEmpty(){
   $("#clientes-body").innerHTML =
     `<tr><td colspan="7">No hay clientes</td></tr>`;
+  hideLoader();
 }
 
 function setError(){
   $("#clientes-body").innerHTML =
     `<tr><td colspan="7">Error cargando clientes</td></tr>`;
+  hideLoader();
 }
 
 
@@ -269,6 +293,9 @@ function render(items){
   }).join("");
 
   tbody.innerHTML = html;
+
+  /* 🔥 CLAVE: matar loader siempre aquí */
+  hideLoader();
 
 }
 

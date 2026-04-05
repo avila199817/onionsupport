@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 SIDEBAR — GOD MODE (IDEMPOTENTE · REBIND REAL · ZERO BUGS)
+   🧅 SIDEBAR — GOD MODE FINAL (ROOT CONTROLLER · SPA MASTER)
 ========================================================= */
 
 (function(){
@@ -14,7 +14,7 @@ if(!Onion){
 }
 
 /* =========================================================
-   INIT (IDEMPOTENTE)
+   INIT (SIEMPRE VIVO · NUNCA SE ROMPE)
 ========================================================= */
 
 function init(){
@@ -28,7 +28,7 @@ function init(){
     return setTimeout(init, 100);
   }
 
-  // 🔥 SIEMPRE re-render + rebind (clave real)
+  // 🔥 siempre reconstruye estado + eventos
   renderUser();
   restoreState();
   bindEvents();
@@ -38,7 +38,7 @@ function init(){
 
 init();
 
-/* 🔥 SPA HOOKS (UNA SOLA VEZ) */
+/* 🔥 SPA HOOKS (UNA VEZ GLOBAL) */
 if(!window.__ONION_SIDEBAR_BOUND__){
 
   window.__ONION_SIDEBAR_BOUND__ = true;
@@ -65,7 +65,7 @@ function restoreState(){
 }
 
 /* =========================================================
-   EVENTS (REBINDEABLE SIEMPRE)
+   EVENTS (ANTI-DUPES REAL)
 ========================================================= */
 
 function bindEvents(){
@@ -77,6 +77,10 @@ function bindEvents(){
   const logout   = document.getElementById("logoutBtn");
 
   if(!sidebar || !toggle) return;
+
+  // 🔥 evitar duplicados manualmente
+  if(toggle.__bound) return;
+  toggle.__bound = true;
 
   /* =========================
      TOGGLE SIDEBAR
@@ -100,7 +104,9 @@ function bindEvents(){
      USER DROPDOWN
   ========================= */
 
-  if(user && dropdown){
+  if(user && dropdown && !user.__bound){
+
+    user.__bound = true;
 
     Onion.cleanupEvent(user, "click", (e)=>{
       e.stopPropagation();
@@ -127,33 +133,47 @@ function bindEvents(){
      CLOSE DROPDOWN CLICK OUT
   ========================= */
 
-  Onion.cleanupEvent(document, "click", (e)=>{
+  if(!document.__sidebarClickBound){
 
-    if(
-      e.target.closest("#userToggle") ||
-      e.target.closest("#userDropdown")
-    ){
-      return;
-    }
+    document.__sidebarClickBound = true;
 
-    dropdown?.classList.remove("active");
-  });
+    Onion.onGlobalEvent(document, "click", (e)=>{
+
+      if(
+        e.target.closest("#userToggle") ||
+        e.target.closest("#userDropdown")
+      ){
+        return;
+      }
+
+      dropdown?.classList.remove("active");
+    });
+
+  }
 
   /* =========================
      ESC CLOSE
   ========================= */
 
-  Onion.cleanupEvent(document, "keydown", (e)=>{
-    if(e.key === "Escape"){
-      dropdown?.classList.remove("active");
-    }
-  });
+  if(!document.__sidebarEscBound){
+
+    document.__sidebarEscBound = true;
+
+    Onion.onGlobalEvent(document, "keydown", (e)=>{
+      if(e.key === "Escape"){
+        dropdown?.classList.remove("active");
+      }
+    });
+
+  }
 
   /* =========================
      LOGOUT
   ========================= */
 
-  if(logout){
+  if(logout && !logout.__bound){
+
+    logout.__bound = true;
 
     Onion.cleanupEvent(logout, "click", async (e)=>{
       e.stopPropagation();
@@ -282,7 +302,7 @@ function updateTooltip(){
 ========================================================= */
 
 if(Onion.config?.DEBUG){
-  Onion.log("📚 Sidebar GOD MODE ready");
+  Onion.log("📚 Sidebar GOD MODE FINAL ready");
 }
 
 })();

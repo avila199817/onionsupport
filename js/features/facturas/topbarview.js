@@ -5,6 +5,15 @@
   let mounted = false;
 
   /* =========================
+     🔥 STATE
+  ========================= */
+  const state = {
+    search: "",
+    estado: ""
+  };
+
+
+  /* =========================
      🔥 RENDER TOPBARVIEW
   ========================= */
   function renderTopbar(){
@@ -41,14 +50,13 @@
 
 
   /* =========================
-     🔥 RENDER TABLE HEAD (GLOBAL)
+     🔥 RENDER TABLE HEAD
   ========================= */
   function renderTableHead(){
 
     const container = document.getElementById("tablehead-container");
     if(!container) return;
 
-    // evitar duplicados
     if(container.querySelector(".table-head")) return;
 
     const div = document.createElement("div");
@@ -75,25 +83,85 @@
 
 
   /* =========================
+     🔥 FILTER LOGIC
+  ========================= */
+  function applyFilters(){
+
+    const rows = document.querySelectorAll("#facturas-body tr");
+
+    rows.forEach(row => {
+
+      if(row.classList.contains("table-loading")) return;
+
+      const text = row.innerText.toLowerCase();
+      const estado = row.dataset.estado || "";
+
+      const matchSearch = text.includes(state.search);
+      const matchEstado = !state.estado || estado === state.estado;
+
+      row.style.display = (matchSearch && matchEstado) ? "" : "none";
+    });
+  }
+
+
+  /* =========================
+     🔥 SCROLL EFFECT (GLASS)
+  ========================= */
+  function initScrollEffect(){
+
+    const container = document.querySelector(".table-container");
+    const head = document.querySelector(".table-head");
+
+    if(!container || !head) return;
+
+    container.addEventListener("scroll", () => {
+      if(container.scrollTop > 10){
+        head.classList.add("scrolled");
+      } else {
+        head.classList.remove("scrolled");
+      }
+    });
+  }
+
+
+  /* =========================
      🔥 INIT LOGIC
   ========================= */
   function init(){
 
+    if(mounted) return;
+    mounted = true;
+
     const btn = document.getElementById("btn-new-factura");
-    if(!btn) return;
+    const input = document.getElementById("search-factura");
+    const select = document.getElementById("filter-estado-factura");
 
     const user = window.Onion?.user;
 
     // 🔥 SOLO ADMIN
     if(!user || user.role !== "admin"){
-      btn.remove();
-      return;
+      if(btn) btn.remove();
     }
 
-    if(mounted) return;
-    mounted = true;
+    if(btn){
+      btn.addEventListener("click", onCreateFactura);
+    }
 
-    btn.addEventListener("click", onCreateFactura);
+    if(input){
+      input.addEventListener("input", (e)=>{
+        state.search = e.target.value.toLowerCase();
+        applyFilters();
+      });
+    }
+
+    if(select){
+      select.addEventListener("change", (e)=>{
+        state.estado = e.target.value;
+        applyFilters();
+      });
+    }
+
+    initScrollEffect();
   }
 
 
@@ -106,7 +174,7 @@
 
 
   /* =========================
-     🔥 CLEANUP (SPA)
+     🔥 CLEANUP
   ========================= */
   function destroy(){
 
@@ -138,11 +206,12 @@
 
 
   /* =========================
-     🔥 EXPORT (SPA READY)
+     🔥 EXPORT
   ========================= */
   window.FacturasUI = {
     start,
-    destroy
+    destroy,
+    applyFilters
   };
 
 })();

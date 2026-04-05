@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 RENDER — GOD MODE FINAL (PRO SAAS · ANTI-RACE · ABORT · LOADER SYNC REAL)
+   🧅 RENDER — FULL PRO SAAS (FIXED · NO DOUBLE ABORT · NO RACE · CLEAN SYNC)
 ========================================================= */
 
 (function(){
@@ -18,12 +18,6 @@ const Onion = window.Onion;
 ========================================================= */
 
 const MAX_CONTAINER_WAIT = 5000;
-
-/* =========================================================
-   STATE EXTRA
-========================================================= */
-
-let currentAbortController = null;
 
 /* =========================================================
    DOM READY
@@ -148,7 +142,7 @@ Onion.loadScript = async function(scripts){
 };
 
 /* =========================================================
-   STYLE LOADER
+   STYLE LOADER (FIX DUPLICADOS)
 ========================================================= */
 
 Onion.loadStyle = function(styles){
@@ -169,6 +163,13 @@ Onion.loadStyle = function(styles){
       const finalHref = normalizeUrl(href);
 
       if(!finalHref){
+        done();
+        return;
+      }
+
+      // 🔥 evitar duplicados reales
+      const existing = document.querySelector(`link[href="${finalHref}"][data-onion-page-style]`);
+      if(existing){
         done();
         return;
       }
@@ -212,30 +213,12 @@ Onion.loadStyle = function(styles){
 };
 
 /* =========================================================
-   FETCH HTML (CON ABORT)
+   FETCH HTML (USANDO Onion.fetch 🔥)
 ========================================================= */
 
 Onion.fetchHTML = async function(url){
 
-  const finalUrl = normalizeUrl(url);
-  if(!finalUrl) throw new Error("URL inválida");
-
-  if(currentAbortController){
-    currentAbortController.abort();
-  }
-
-  currentAbortController = new AbortController();
-
-  const res = await fetch(finalUrl, {
-    credentials: "include",
-    signal: currentAbortController.signal
-  });
-
-  if(!res.ok){
-    throw new Error("HTTP " + res.status);
-  }
-
-  return res.text();
+  return Onion.fetch(url, { method:"GET" });
 
 };
 
@@ -307,7 +290,6 @@ const originalRender = async function(){
 
     await waitForDOMReady();
 
-    // 🔥 loader SIEMPRE visible
     Onion.ui.showLoader?.();
 
     const route = Onion.router.resolve();
@@ -346,22 +328,18 @@ const originalRender = async function(){
 
     if(renderId !== Onion.state.renderId) return;
 
-    // 🔥 aseguramos paint real antes de mostrar
     await new Promise(r=>requestAnimationFrame(r));
     await new Promise(r=>requestAnimationFrame(r));
 
     container.querySelector(".panel-content")?.classList.add("ready");
 
-    // 🔥 SOLO el render activo puede cerrar loader
     if(renderId === Onion.state.renderId){
       Onion.ui.hideLoader?.();
     }
 
   }catch(e){
 
-    if(e.name === "AbortError"){
-      return;
-    }
+    if(e.message === "ABORTED") return;
 
     console.error("💥 RENDER ERROR:", e);
 

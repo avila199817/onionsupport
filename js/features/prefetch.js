@@ -40,6 +40,27 @@
   }
 
   /* =========================
+     ADD LINK SAFE
+  ========================= */
+
+  function addLink(rel, as, href){
+
+    if(!href) return;
+
+    const finalHref = href;
+
+    // evitar duplicados reales
+    if(document.querySelector(`link[href="${finalHref}"]`)) return;
+
+    const link = document.createElement("link");
+    link.rel = rel;
+    link.as = as;
+    link.href = finalHref;
+
+    document.head.appendChild(link);
+  }
+
+  /* =========================
      PREFETCH
   ========================= */
 
@@ -59,31 +80,44 @@
 
       prefetched.add(clean);
 
-      // HTML
+      /* =========================
+         HTML
+      ========================= */
+
       if(route.page){
         fetch(route.page, { credentials: "include" }).catch(()=>{});
       }
 
-      // CSS
+      /* =========================
+         CSS
+      ========================= */
+
       if(route.style){
 
-        const link = document.createElement("link");
-        link.rel = "prefetch";
-        link.as = "style";
-        link.href = route.style;
+        const styles = Array.isArray(route.style)
+          ? route.style
+          : [route.style];
 
-        document.head.appendChild(link);
+        styles.forEach(href=>{
+          addLink("preload", "style", href);
+        });
+
       }
 
-      // JS
+      /* =========================
+         JS
+      ========================= */
+
       if(route.script){
 
-        const link = document.createElement("link");
-        link.rel = "prefetch";
-        link.as = "script";
-        link.href = route.script;
+        const scripts = Array.isArray(route.script)
+          ? route.script
+          : [route.script];
 
-        document.head.appendChild(link);
+        scripts.forEach(src=>{
+          addLink("preload", "script", src);
+        });
+
       }
 
     }catch(e){

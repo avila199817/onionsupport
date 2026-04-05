@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 SIDEBAR — GOD MODE FINAL 10/10 (ROOT CONTROLLER REAL)
+   🧅 SIDEBAR — CORE CLEAN 10/10 (INMUTABLE · ROOT REAL)
 ========================================================= */
 
 (function(){
@@ -14,15 +14,13 @@ if(!Onion){
 }
 
 /* =========================================================
-   INIT (ROOT CONTROLLER)
+   INIT
 ========================================================= */
 
 function init(){
 
   const sidebar = document.querySelector(".sidebar");
-  const toggle  = document.getElementById("toggleSidebar");
-
-  if(!sidebar || !toggle) return;
+  if(!sidebar) return;
 
   if(!Onion.state?.user){
     return setTimeout(init, 100);
@@ -30,14 +28,11 @@ function init(){
 
   renderUser();
   restoreState();
-  bindEvents();
   setRecientesError();
 
-  /* 🔥 BOOT REAL DEL SISTEMA (CLAVE) */
+  // 🔥 BOOT REAL (solo una vez)
   if(!Onion.state.appReady){
     Onion.state.appReady = true;
-
-    // 🚀 primer render REAL
     Onion.render?.();
   }
 
@@ -45,13 +40,21 @@ function init(){
 
 init();
 
-/* 🔥 SPA HOOKS (UNA VEZ GLOBAL) */
-if(!window.__ONION_SIDEBAR_BOUND__){
+/* =========================================================
+   HOOKS CORE (PERSISTENTES)
+========================================================= */
 
-  window.__ONION_SIDEBAR_BOUND__ = true;
+if(!window.__ONION_SIDEBAR_CORE__){
+
+  window.__ONION_SIDEBAR_CORE__ = true;
 
   Onion.events?.onCore?.("app:ready", ()=> requestAnimationFrame(init));
-  Onion.events?.onCore?.("route:end", ()=> requestAnimationFrame(init));
+  Onion.events?.onCore?.("route:end", ()=> requestAnimationFrame(()=>{
+    renderUser();
+    restoreState();
+  }));
+
+  bindGlobalEvents();
 
 }
 
@@ -62,39 +65,44 @@ if(!window.__ONION_SIDEBAR_BOUND__){
 function restoreState(){
 
   const sidebar = document.querySelector(".sidebar");
-  if(!sidebar) return;
+  const toggle  = document.getElementById("toggleSidebar");
+
+  if(!sidebar || !toggle) return;
 
   const saved = localStorage.getItem("sidebar-collapsed");
 
   sidebar.classList.toggle("collapsed", saved === "true");
 
-  updateTooltip();
+  toggle.setAttribute(
+    "data-tooltip",
+    sidebar.classList.contains("collapsed")
+      ? "Abrir barra lateral"
+      : "Cerrar barra lateral"
+  );
+
 }
 
 /* =========================================================
-   EVENTS (ANTI DUPES REAL)
+   GLOBAL EVENTS (CORE REAL)
 ========================================================= */
 
-function bindEvents(){
-
-  const sidebar  = document.querySelector(".sidebar");
-  const toggle   = document.getElementById("toggleSidebar");
-  const user     = document.getElementById("userToggle");
-  const dropdown = document.getElementById("userDropdown");
-  const logout   = document.getElementById("logoutBtn");
-
-  if(!sidebar || !toggle) return;
+function bindGlobalEvents(){
 
   /* =========================
      TOGGLE SIDEBAR
   ========================= */
 
-  if(!toggle.__bound){
+  Onion.onGlobalEvent?.(document, "click", (e)=>{
 
-    toggle.__bound = true;
+    const toggle = e.target.closest("#toggleSidebar");
+    if(toggle){
 
-    Onion.cleanupEvent(toggle, "click", (e)=>{
       e.stopPropagation();
+
+      const sidebar = document.querySelector(".sidebar");
+      const dropdown = document.getElementById("userDropdown");
+
+      if(!sidebar) return;
 
       const isCollapsed = sidebar.classList.contains("collapsed");
 
@@ -104,100 +112,92 @@ function bindEvents(){
 
       dropdown?.classList.remove("active");
 
-      updateTooltip();
-    });
+      restoreState();
+      return;
+    }
 
-  }
+  });
 
   /* =========================
      USER DROPDOWN
   ========================= */
 
-  if(user && dropdown && !user.__bound){
+  Onion.onGlobalEvent?.(document, "click", (e)=>{
 
-    user.__bound = true;
+    const user = e.target.closest("#userToggle");
+    if(!user) return;
 
-    Onion.cleanupEvent(user, "click", (e)=>{
-      e.stopPropagation();
+    e.stopPropagation();
 
-      const isCollapsed = sidebar.classList.contains("collapsed");
+    const sidebar = document.querySelector(".sidebar");
+    const dropdown = document.getElementById("userDropdown");
 
-      if(isCollapsed){
-        sidebar.classList.remove("collapsed");
-        localStorage.setItem("sidebar-collapsed", "false");
+    if(!sidebar || !dropdown) return;
 
-        setTimeout(()=>{
-          dropdown.classList.add("active");
-        }, 180);
+    const isCollapsed = sidebar.classList.contains("collapsed");
 
-        return;
-      }
+    if(isCollapsed){
+      sidebar.classList.remove("collapsed");
+      localStorage.setItem("sidebar-collapsed", "false");
 
-      dropdown.classList.toggle("active");
-    });
+      setTimeout(()=>{
+        dropdown.classList.add("active");
+      }, 180);
 
-  }
+      return;
+    }
+
+    dropdown.classList.toggle("active");
+
+  });
 
   /* =========================
-     CLOSE DROPDOWN CLICK OUT
+     CLOSE DROPDOWN
   ========================= */
 
-  if(!document.__sidebarClickBound){
+  Onion.onGlobalEvent?.(document, "click", (e)=>{
 
-    document.__sidebarClickBound = true;
+    if(
+      e.target.closest("#userToggle") ||
+      e.target.closest("#userDropdown")
+    ){
+      return;
+    }
 
-    Onion.onGlobalEvent?.(document, "click", (e)=>{
+    document.getElementById("userDropdown")?.classList.remove("active");
 
-      if(
-        e.target.closest("#userToggle") ||
-        e.target.closest("#userDropdown")
-      ){
-        return;
-      }
-
-      document.getElementById("userDropdown")?.classList.remove("active");
-    });
-
-  }
+  });
 
   /* =========================
      ESC CLOSE
   ========================= */
 
-  if(!document.__sidebarEscBound){
-
-    document.__sidebarEscBound = true;
-
-    Onion.onGlobalEvent?.(document, "keydown", (e)=>{
-      if(e.key === "Escape"){
-        document.getElementById("userDropdown")?.classList.remove("active");
-      }
-    });
-
-  }
+  Onion.onGlobalEvent?.(document, "keydown", (e)=>{
+    if(e.key === "Escape"){
+      document.getElementById("userDropdown")?.classList.remove("active");
+    }
+  });
 
   /* =========================
      LOGOUT
   ========================= */
 
-  if(logout && !logout.__bound){
+  Onion.onGlobalEvent?.(document, "click", async (e)=>{
 
-    logout.__bound = true;
+    const logout = e.target.closest("#logoutBtn");
+    if(!logout) return;
 
-    Onion.cleanupEvent(logout, "click", async (e)=>{
-      e.stopPropagation();
+    e.stopPropagation();
 
-      Onion.ui?.showLoader?.();
+    Onion.ui?.showLoader?.();
 
-      try{
-        await Onion.auth.logout();
-      }catch(err){
-        Onion.error("LOGOUT ERROR:", err);
-      }
+    try{
+      await Onion.auth.logout();
+    }catch(err){
+      Onion.error("LOGOUT ERROR:", err);
+    }
 
-    });
-
-  }
+  });
 
 }
 
@@ -289,29 +289,12 @@ function getInitials(name){
   return name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase();
 }
 
-function updateTooltip(){
-
-  const sidebar = document.querySelector(".sidebar");
-  const toggle = document.getElementById("toggleSidebar");
-
-  if(!sidebar || !toggle) return;
-
-  const collapsed = sidebar.classList.contains("collapsed");
-
-  toggle.setAttribute(
-    "data-tooltip",
-    collapsed
-      ? "Abrir barra lateral"
-      : "Cerrar barra lateral"
-  );
-}
-
 /* =========================================================
    DEBUG
 ========================================================= */
 
 if(Onion.config?.DEBUG){
-  Onion.log("📚 Sidebar GOD MODE FINAL 10/10 ready");
+  Onion.log("📚 Sidebar CORE CLEAN 10/10 ready");
 }
 
 })();

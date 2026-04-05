@@ -138,11 +138,45 @@ function bindEvents(){
     }
   });
 
+  /* 🔥 LOGOUT REAL (FIX DEFINITIVO) */
   if(logout){
-    Onion.cleanupEvent(logout, "click", ()=>{
-      Onion.auth?.logout?.();
-      window.location.href = "/login";
+
+    Onion.cleanupEvent(logout, "click", async (e)=>{
+      e.stopPropagation();
+
+      try{
+
+        const res = await Onion.fetch(
+          Onion.config.API + "/logout",
+          {
+            method: "POST"
+          }
+        );
+
+        if(!res || res.ok === false){
+          throw new Error("Logout fallido");
+        }
+
+      }catch(err){
+
+        console.error("💥 LOGOUT ERROR:", err);
+        Onion.ui.toast?.error("Error cerrando sesión");
+
+      }finally{
+
+        // 🔥 limpiar SIEMPRE frontend
+        try{
+          Onion.auth?.logout?.();
+        }catch{}
+
+        localStorage.removeItem("onion_user_slug");
+
+        window.location.href = "/login";
+
+      }
+
     });
+
   }
 
 }
@@ -246,7 +280,7 @@ function setRecientesError(){
 
 
 /* =========================
-   LOAD RECIENTES (MISMO FLOW FACTURAS)
+   LOAD RECIENTES
 ========================= */
 
 async function loadRecientes(){
@@ -263,7 +297,6 @@ async function loadRecientes(){
     await new Promise(r => requestAnimationFrame(r));
     await new Promise(r => requestAnimationFrame(r));
 
-    // 🔥 CAMBIA ESTE ENDPOINT SI QUIERES
     const res = await Onion.fetch(Onion.config.API + "/recientes");
     const items = normalize(res);
 
@@ -317,13 +350,11 @@ function renderRecientes(items){
   if(!section) return;
 
   const html = items.map(i => {
-
     return `
       <a href="${i.href || '#'}" data-spa class="chat-item">
         ${escapeHTML(i.label || "Item")}
       </a>
     `;
-
   }).join("");
 
   section.innerHTML = `

@@ -38,20 +38,19 @@
 
   background:var(--panel-bg);
 
-  /* 🔥 FIX CAPAS */
   position:relative;
   z-index:1;
 }
 
 
 /* =========================================================
-   TABLE BASE
+   TABLE BASE (SHARED)
 ========================================================= */
 
-.panel-content.facturas table{
+.panel-content.facturas table,
+.table-head table{
   width:100%;
 
-  /* 🔥 FIX RENDER (no cambia diseño) */
   border-collapse:separate;
   border-spacing:0;
 
@@ -62,7 +61,13 @@
   background:var(--panel-bg);
 }
 
-.panel-content.facturas th{
+
+/* =========================================================
+   HEADERS (SHARED)
+========================================================= */
+
+.panel-content.facturas th,
+.table-head th{
   padding:12px 14px;
   text-align:left;
 
@@ -75,6 +80,11 @@
 
   white-space:nowrap;
 }
+
+
+/* =========================================================
+   CELLS
+========================================================= */
 
 .panel-content.facturas td{
   padding:12px 14px;
@@ -92,41 +102,48 @@
 
 
 /* =========================================================
-   COLUMN SYSTEM
+   COLUMN SYSTEM (SHARED)
 ========================================================= */
 
-.panel-content.facturas .col-id{
+.panel-content.facturas .col-id,
+.table-head .col-id{
   width:120px;
   font-size:11px;
   color:var(--dim);
 }
 
-.panel-content.facturas .col-main{
+.panel-content.facturas .col-main,
+.table-head .col-main{
   width:24%;
 }
 
-.panel-content.facturas .col-secondary{
+.panel-content.facturas .col-secondary,
+.table-head .col-secondary{
   width:30%;
 }
 
-.panel-content.facturas .col-date{
+.panel-content.facturas .col-date,
+.table-head .col-date{
   width:120px;
   text-align:center;
   padding-right:18px;
 }
 
-.panel-content.facturas .col-importe{
+.panel-content.facturas .col-importe,
+.table-head .col-importe{
   width:130px;
   text-align:right;
   padding-right:18px;
 }
 
-.panel-content.facturas .col-status{
+.panel-content.facturas .col-status,
+.table-head .col-status{
   width:110px;
   text-align:center;
 }
 
-.panel-content.facturas .col-actions{
+.panel-content.facturas .col-actions,
+.table-head .col-actions{
   width:180px;
   text-align:right;
   padding-right:18px;
@@ -141,7 +158,6 @@
   transition:all .15s ease;
   cursor:pointer;
 
-  /* 🔥 FIX STACKING */
   position:relative;
   z-index:1;
 }

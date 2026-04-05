@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 RENDER — FULL PRO SAAS (FIXED · NO DOUBLE ABORT · NO RACE · CLEAN SYNC)
+   🧅 RENDER — FULL PRO SAAS (FINAL FIX · HTML ≠ API · NO RACE)
 ========================================================= */
 
 (function(){
@@ -142,7 +142,7 @@ Onion.loadScript = async function(scripts){
 };
 
 /* =========================================================
-   STYLE LOADER (FIX DUPLICADOS)
+   STYLE LOADER
 ========================================================= */
 
 Onion.loadStyle = function(styles){
@@ -167,7 +167,6 @@ Onion.loadStyle = function(styles){
         return;
       }
 
-      // 🔥 evitar duplicados reales
       const existing = document.querySelector(`link[href="${finalHref}"][data-onion-page-style]`);
       if(existing){
         done();
@@ -213,12 +212,23 @@ Onion.loadStyle = function(styles){
 };
 
 /* =========================================================
-   FETCH HTML (USANDO Onion.fetch 🔥)
+   FETCH HTML (FIX REAL 🔥)
 ========================================================= */
 
 Onion.fetchHTML = async function(url){
 
-  return Onion.fetch(url, { method:"GET" });
+  const finalUrl = normalizeUrl(url);
+  if(!finalUrl) throw new Error("URL inválida");
+
+  const res = await fetch(finalUrl, {
+    credentials: "include"
+  });
+
+  if(!res.ok){
+    throw new Error("HTTP " + res.status);
+  }
+
+  return res.text();
 
 };
 
@@ -278,7 +288,7 @@ function clearDynamic(){
 }
 
 /* =========================================================
-   CORE RENDER (ANTI-RACE REAL)
+   CORE RENDER
 ========================================================= */
 
 const originalRender = async function(){

@@ -5,7 +5,7 @@
   let mounted = false;
 
   /* =========================
-     🔥 STATE UI
+     🔥 STATE UI CENTRALIZADO
   ========================= */
   const state = {
     search: "",
@@ -13,13 +13,23 @@
     prioridad: ""
   };
 
+  let debounceTimer = null;
+
+
+  /* =========================
+     🔥 ROOT HELPERS
+  ========================= */
+  function getContainer(id){
+    return document.getElementById(id);
+  }
+
 
   /* =========================
      🔥 RENDER TOPBAR
   ========================= */
   function renderTopbar(){
 
-    const container = document.getElementById("topbarview-container");
+    const container = getContainer("topbarview-container");
     if(!container) return;
 
     if(container.querySelector(".topbarview")) return;
@@ -28,30 +38,40 @@
     div.className = "topbarview";
 
     div.innerHTML = `
-      <input 
-        type="text"
-        id="search-incidencia"
-        placeholder="Buscar incidencia..."
-        autocomplete="off"
-      >
+      <div class="topbar-left">
 
-      <select id="filter-estado-incidencia">
-        <option value="">Estado</option>
-        <option value="abierta">Abierta</option>
-        <option value="progreso">En progreso</option>
-        <option value="cerrada">Cerrada</option>
-      </select>
+        <input 
+          type="text"
+          id="search-incidencia"
+          placeholder="Buscar por ID, usuario, email o asunto..."
+          autocomplete="off"
+        >
 
-      <select id="filter-prioridad-incidencia">
-        <option value="">Prioridad</option>
-        <option value="alta">Alta</option>
-        <option value="media">Media</option>
-        <option value="baja">Baja</option>
-      </select>
+        <select id="filter-estado-incidencia">
+          <option value="">Estado</option>
+          <option value="abierta">Abierta</option>
+          <option value="progreso">En progreso</option>
+          <option value="cerrada">Cerrada</option>
+        </select>
 
-      <button id="btn-new-incidencia" class="btn-primary">
-        + Nueva
-      </button>
+        <select id="filter-prioridad-incidencia">
+          <option value="">Prioridad</option>
+          <option value="alta">Alta</option>
+          <option value="media">Media</option>
+          <option value="baja">Baja</option>
+        </select>
+
+      </div>
+
+      <div class="topbar-right">
+        <button id="btn-clear-filters" class="btn-secondary">
+          Limpiar
+        </button>
+
+        <button id="btn-new-incidencia" class="btn-primary">
+          + Nueva
+        </button>
+      </div>
     `;
 
     container.appendChild(div);
@@ -63,7 +83,7 @@
   ========================= */
   function renderTableHead(){
 
-    const container = document.getElementById("tablehead-container");
+    const container = getContainer("tablehead-container");
     if(!container) return;
 
     if(container.querySelector(".table-head")) return;
@@ -97,51 +117,87 @@
   ========================= */
   function bindUIEvents(){
 
-    const btn = document.getElementById("btn-new-incidencia");
     const input = document.getElementById("search-incidencia");
     const estado = document.getElementById("filter-estado-incidencia");
     const prioridad = document.getElementById("filter-prioridad-incidencia");
+    const btnNew = document.getElementById("btn-new-incidencia");
+    const btnClear = document.getElementById("btn-clear-filters");
 
     const user = window.Onion?.state?.user;
 
-    // 🔥 SOLO ADMIN
+    /* 🔥 CONTROL ADMIN */
     if(!user || user.role !== "admin"){
-      btn?.remove();
+      btnNew?.remove();
     }
 
-    /* 🔥 CREAR INCIDENCIA */
-    btn?.addEventListener("click", ()=>{
+    /* =========================
+       🔥 CREAR INCIDENCIA
+    ========================= */
+    btnNew?.addEventListener("click", ()=>{
       window.Onion?.router?.navigate("/incidencias/nueva");
     });
 
-    /* 🔥 SEARCH */
+
+    /* =========================
+       🔥 SEARCH (DEBOUNCE)
+    ========================= */
     input?.addEventListener("input", (e)=>{
-      state.search = e.target.value.toLowerCase();
-      triggerFilters();
+
+      clearTimeout(debounceTimer);
+
+      debounceTimer = setTimeout(()=>{
+        state.search = e.target.value.trim().toLowerCase();
+        triggerFilters();
+      }, 250);
+
     });
 
-    /* 🔥 ESTADO */
+
+    /* =========================
+       🔥 ESTADO
+    ========================= */
     estado?.addEventListener("change", (e)=>{
       state.estado = e.target.value;
       triggerFilters();
     });
 
-    /* 🔥 PRIORIDAD */
+
+    /* =========================
+       🔥 PRIORIDAD
+    ========================= */
     prioridad?.addEventListener("change", (e)=>{
       state.prioridad = e.target.value;
       triggerFilters();
+    });
+
+
+    /* =========================
+       🔥 LIMPIAR FILTROS
+    ========================= */
+    btnClear?.addEventListener("click", ()=>{
+
+      state.search = "";
+      state.estado = "";
+      state.prioridad = "";
+
+      if(input) input.value = "";
+      if(estado) estado.value = "";
+      if(prioridad) prioridad.value = "";
+
+      triggerFilters();
+
     });
 
   }
 
 
   /* =========================
-     🔥 TRIGGER FILTROS (GLOBAL)
+     🔥 TRIGGER GLOBAL
   ========================= */
   function triggerFilters(){
 
     if(window.IncidenciasUIExternal?.applyFilters){
-      window.IncidenciasUIExternal.applyFilters(state);
+      window.IncidenciasUIExternal.applyFilters({ ...state });
     }
 
   }
@@ -188,17 +244,18 @@
 
 
   /* =========================
-     🔥 CLEANUP
+     🔥 DESTROY
   ========================= */
   function destroy(){
 
-    const topbar = document.getElementById("topbarview-container");
+    const topbar = getContainer("topbarview-container");
     if(topbar) topbar.innerHTML = "";
 
-    const tablehead = document.getElementById("tablehead-container");
+    const tablehead = getContainer("tablehead-container");
     if(tablehead) tablehead.innerHTML = "";
 
     mounted = false;
+
   }
 
 

@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 FETCH — FULL PRO (FIXED · SIN RACE · ABORT CONTROLADO)
+   🧅 FETCH — GOD MODE (API ONLY · NO SIDE EFFECTS · SAFE ABORT)
 ========================================================= */
 
 (function(){
@@ -14,7 +14,7 @@
   const Onion = window.Onion;
 
   /* =========================
-     NORMALIZE URL
+     NORMALIZE URL (API ONLY)
   ========================= */
 
   function normalizeUrl(url){
@@ -27,12 +27,7 @@
         return url;
       }
 
-      const API = Onion.config.API.replace(/\/api$/, "");
-
-      if(url.startsWith("/api/")){
-        return API + url;
-      }
-
+      // 🔥 SIEMPRE API (esto SOLO es para backend)
       if(url.startsWith("/")){
         return Onion.config.API + url;
       }
@@ -59,17 +54,15 @@
     }
 
     /* =========================
-       ABORT CONTROLADO (🔥 FIX)
+       ABORT CONTROLADO
     ========================= */
 
-    let controller;
-    let signal;
+    let controller = null;
+    let signal = options.signal;
 
-    if(options.signal){
-      // usar señal externa → NO tocar global
-      signal = options.signal;
-    }else{
-      // solo aquí usamos abort global
+    // 🔥 SOLO usamos abort global si NO hay señal externa
+    if(!signal){
+
       if(Onion.state.abortController){
         try{ Onion.state.abortController.abort(); }catch{}
       }
@@ -77,6 +70,7 @@
       controller = new AbortController();
       Onion.state.abortController = controller;
       signal = controller.signal;
+
     }
 
     /* =========================
@@ -199,7 +193,7 @@
 
       clearTimeout(timeout);
 
-      // limpiar SOLO si es el controller global
+      // 🔥 limpiar SOLO si es el controller global
       if(controller && Onion.state.abortController === controller){
         Onion.state.abortController = null;
       }
@@ -213,7 +207,7 @@
   ========================= */
 
   if(Onion.config?.DEBUG){
-    Onion.log("🌐 Fetch system PRO ready");
+    Onion.log("🌐 Fetch GOD MODE ready");
   }
 
 })();

@@ -154,7 +154,7 @@
   ========================= */
 
   if(Onion.config?.DEBUG){
-    Onion.log("⚡ Boot GOD MODE ready");
+    Onion.log("🔌 Boot GOD MODE ready");
   }
 
 })();

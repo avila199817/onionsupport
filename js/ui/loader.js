@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 LOADER — FULL PRO SAAS (FIXED · NO DESYNC · NO FLICKER REAL)
+   🧅 LOADER — GOD MODE (LOCK SYSTEM · ZERO DESYNC · CORE SAFE)
 ========================================================= */
 
 (function(){
@@ -16,7 +16,7 @@
   let active = false;
   let showTimeout = null;
   let forceHideTimeout = null;
-  let lock = 0; // 🔥 evita hide prematuro
+  let lock = 0;
 
   const MIN_SHOW_DELAY = 120;
   const MAX_DURATION = 8000;
@@ -29,7 +29,7 @@
 
   Onion.ui.showLoader = function(){
 
-    lock++; // 🔥 cada show incrementa lock
+    lock++;
 
     if(active) return;
 
@@ -56,11 +56,8 @@
   Onion.ui.hideLoader = function(force = false){
 
     if(!force){
-
-      // 🔥 solo cerramos si no hay locks pendientes
       lock = Math.max(lock - 1, 0);
       if(lock > 0) return;
-
     }else{
       lock = 0;
     }
@@ -80,23 +77,29 @@
   };
 
   /* =========================
-     SYNC CON EVENTS
+     EVENTS (CORE SAFE)
   ========================= */
 
-  Onion.events?.on?.("route:start", ()=>{
-    Onion.ui.showLoader();
-  });
+  if(!window.__ONION_LOADER_BOUND__){
 
-  Onion.events?.on?.("route:end", ()=>{
-    Onion.ui.hideLoader();
-  });
+    window.__ONION_LOADER_BOUND__ = true;
+
+    Onion.events?.on?.("route:start", ()=>{
+      Onion.ui.showLoader();
+    });
+
+    Onion.events?.on?.("route:end", ()=>{
+      Onion.ui.hideLoader();
+    });
+
+  }
 
   /* =========================
      DEBUG
   ========================= */
 
   if(Onion.config?.DEBUG){
-    Onion.log("⏳ Loader system PRO ready");
+    Onion.log("⏳ Loader GOD MODE ready");
   }
 
 })();

@@ -310,13 +310,13 @@
 
 
 
-  <!-- =========================
+<!-- =========================
      MAIN SPA (ROOT)
 ========================= -->
-<main id="app-content" class="main-content" data-view role="main">
+<main id="app-content" class="main-content" role="main">
 
   <!-- =========================
-       TOPBAR GLOBAL
+       TOPBAR GLOBAL (FIJA)
   ========================= -->
   <header class="topbar">
 
@@ -350,21 +350,24 @@
 
   </header>
 
+  <!-- =========================
+       TOPBAR DINÁMICO
+  ========================= -->
+  <div id="topbarview-container" data-dynamic></div>
 
-<!-- =========================
-     TOPBAR DINÁMICO
-========================= -->
-<div id="topbarview-container" data-dynamic></div>
+  <!-- =========================
+       TABLE HEAD DINÁMICO
+  ========================= -->
+  <div id="tablehead-container" data-dynamic></div>
 
-<!-- =========================
-     TABLE HEAD DINÁMICO
-========================= -->
-<div id="tablehead-container" data-dynamic></div>
+  <!-- =========================
+       🔥 VIEW REAL (AQUÍ RENDERIZA TODO)
+  ========================= -->
+  <div id="view-container"></div>
 
 </main>
-
+  
 </div>
-
 
 
 

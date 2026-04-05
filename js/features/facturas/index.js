@@ -9,19 +9,23 @@ if(!Onion){
   return;
 }
 
+/* =========================================================
+   STATE
+========================================================= */
+
 let initialized = false;
 let currentItems = [];
 let filteredItems = [];
 let loading = false;
 let currentRequestId = 0;
 
-/* 🔥 FILTROS CENTRALIZADOS */
+/* 🔥 FILTROS EXTERNOS (TOPBAR) */
 let externalFilters = {
   search: "",
   estado: ""
 };
 
-/* 🔥 SORT STATE */
+/* 🔥 SORT */
 let currentSort = {
   field: null,
   direction: null
@@ -43,7 +47,7 @@ function $(selector){
 
 
 /* =========================
-   NORMALIZE (🔥 FALTABA ESTO)
+   NORMALIZE
 ========================= */
 
 function normalize(res){
@@ -56,7 +60,6 @@ function normalize(res){
   if(Array.isArray(res.items)) return res.items;
 
   return [];
-
 }
 
 
@@ -105,6 +108,7 @@ async function loadFacturas(){
 
     await new Promise(r => requestAnimationFrame(r));
     await new Promise(r => requestAnimationFrame(r));
+    await new Promise(r => setTimeout(r, 120));
 
     const res = await Onion.fetch(Onion.config.API + "/facturas");
     const items = normalize(res);
@@ -133,7 +137,6 @@ async function loadFacturas(){
     hideLoader();
     loading = false;
   }
-
 }
 
 
@@ -243,7 +246,6 @@ function getSortValue(f, field){
     case "estadoPago": return safeText(f.estadoPago);
     default: return "";
   }
-
 }
 
 function updateSortUI(){
@@ -253,6 +255,65 @@ function updateSortUI(){
       th.classList.add(currentSort.direction);
     }
   });
+}
+
+
+/* =========================
+   ACTIONS
+========================= */
+
+async function handleAction(btn){
+
+  const id = btn.dataset.id;
+  if(!id) return;
+
+  if(btn.classList.contains("view")){
+    Onion.router.navigate("/facturas/detalle?id=" + id);
+  }
+
+  if(btn.classList.contains("download")){
+
+    if(btn.classList.contains("loading")) return;
+
+    btn.classList.add("loading");
+
+    const original = btn.textContent;
+    btn.textContent = "⏳";
+
+    try{
+
+      const res = await Onion.fetch(
+        Onion.config.API + "/facturas/" + id + "/descargar"
+      );
+
+      if(!res || !res.ok || !res.url){
+        Onion.ui.toast?.error("Error descargando PDF");
+        return;
+      }
+
+      const link = document.createElement("a");
+      link.href = res.url;
+      link.download = `factura-${id}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      Onion.ui.toast?.success("Factura descargada 📄");
+
+    }catch(e){
+      console.error("💥 ERROR DOWNLOAD:", e);
+      Onion.ui.toast?.error("Error descargando PDF");
+    }finally{
+      btn.textContent = original;
+      btn.classList.remove("loading");
+    }
+
+  }
+
+  if(btn.classList.contains("pay")){
+    Onion.ui.toast?.info("💳 Simulación pago factura " + id);
+  }
+
 }
 
 
@@ -371,10 +432,7 @@ function render(items){
 
 function mapItem(f){
 
-  const empresaRaw =
-    f.cliente?.empresa ||
-    f.cliente?.razonSocial;
-
+  const empresaRaw = f.cliente?.empresa || f.cliente?.razonSocial;
   const empresaClean = cleanValue(empresaRaw, "");
 
   return {
@@ -382,16 +440,8 @@ function mapItem(f){
     numero: f.numeroFacturaLegal || f.numero || f.id,
 
     cliente: {
-      nombre: cleanValue(
-        f.cliente?.nombre ||
-        f.cliente?.nombreContacto,
-        "Cliente"
-      ),
-      email: cleanValue(
-        f.cliente?.email ||
-        f.emailCliente,
-        "-"
-      )
+      nombre: cleanValue(f.cliente?.nombre || f.cliente?.nombreContacto,"Cliente"),
+      email: cleanValue(f.cliente?.email || f.emailCliente,"-")
     },
 
     empresa: empresaClean,
@@ -402,7 +452,6 @@ function mapItem(f){
 
     estadoPago: getEstadoPago(f.estadoPago)
   };
-
 }
 
 function cleanValue(val, fallback){
@@ -494,7 +543,7 @@ function escapeHTML(str){
 
 
 /* =========================
-   🔥 CONEXIÓN TOPBAR
+   🔥 TOPBAR CONNECT
 ========================= */
 
 window.FacturasUIExternal = {

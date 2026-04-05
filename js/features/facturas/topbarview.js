@@ -5,7 +5,7 @@
   let mounted = false;
 
   /* =========================
-     🔥 STATE
+     🔥 STATE UI
   ========================= */
   const state = {
     search: "",
@@ -14,7 +14,7 @@
 
 
   /* =========================
-     🔥 RENDER TOPBARVIEW
+     🔥 RENDER TOPBAR
   ========================= */
   function renderTopbar(){
 
@@ -83,29 +83,56 @@
 
 
   /* =========================
-     🔥 FILTER LOGIC
+     🔥 EVENTOS UI
   ========================= */
-  function applyFilters(){
+  function bindUIEvents(){
 
-    const rows = document.querySelectorAll("#facturas-body tr");
+    const btn = document.getElementById("btn-new-factura");
+    const input = document.getElementById("search-factura");
+    const select = document.getElementById("filter-estado-factura");
 
-    rows.forEach(row => {
+    const user = window.Onion?.state?.user;
 
-      if(row.classList.contains("table-loading")) return;
+    // 🔥 SOLO ADMIN
+    if(!user || user.role !== "admin"){
+      btn?.remove();
+    }
 
-      const text = row.innerText.toLowerCase();
-      const estado = row.dataset.estado || "";
-
-      const matchSearch = text.includes(state.search);
-      const matchEstado = !state.estado || estado === state.estado;
-
-      row.style.display = (matchSearch && matchEstado) ? "" : "none";
+    /* 🔥 CREAR FACTURA */
+    btn?.addEventListener("click", ()=>{
+      window.Onion?.router?.navigate("/facturas/nueva");
     });
+
+    /* 🔥 SEARCH */
+    input?.addEventListener("input", (e)=>{
+      state.search = e.target.value.toLowerCase();
+      triggerFilters();
+    });
+
+    /* 🔥 ESTADO */
+    select?.addEventListener("change", (e)=>{
+      state.estado = e.target.value;
+      triggerFilters();
+    });
+
   }
 
 
   /* =========================
-     🔥 SCROLL EFFECT (GLASS)
+     🔥 TRIGGER FILTROS (GLOBAL)
+  ========================= */
+  function triggerFilters(){
+
+    // 🔥 delega al sistema de facturas
+    if(window.FacturasUIExternal?.applyFilters){
+      window.FacturasUIExternal.applyFilters(state);
+    }
+
+  }
+
+
+  /* =========================
+     🔥 SCROLL EFFECT
   ========================= */
   function initScrollEffect(){
 
@@ -121,55 +148,27 @@
         head.classList.remove("scrolled");
       }
     });
+
   }
 
 
   /* =========================
-     🔥 INIT LOGIC
+     🔥 INIT
   ========================= */
   function init(){
 
     if(mounted) return;
     mounted = true;
 
-    const btn = document.getElementById("btn-new-factura");
-    const input = document.getElementById("search-factura");
-    const select = document.getElementById("filter-estado-factura");
+    renderTopbar();
+    renderTableHead();
 
-    const user = window.Onion?.user;
+    // 🔥 IMPORTANTE: esperar a que el DOM exista
+    requestAnimationFrame(()=>{
+      bindUIEvents();
+      initScrollEffect();
+    });
 
-    // 🔥 SOLO ADMIN
-    if(!user || user.role !== "admin"){
-      if(btn) btn.remove();
-    }
-
-    if(btn){
-      btn.addEventListener("click", onCreateFactura);
-    }
-
-    if(input){
-      input.addEventListener("input", (e)=>{
-        state.search = e.target.value.toLowerCase();
-        applyFilters();
-      });
-    }
-
-    if(select){
-      select.addEventListener("change", (e)=>{
-        state.estado = e.target.value;
-        applyFilters();
-      });
-    }
-
-    initScrollEffect();
-  }
-
-
-  /* =========================
-     🔥 ACTIONS
-  ========================= */
-  function onCreateFactura(){
-    console.log("crear factura");
   }
 
 
@@ -192,17 +191,16 @@
      🔥 START
   ========================= */
   function start(){
-    renderTopbar();
-    renderTableHead();
-    init();
+
+    if(document.readyState === "loading"){
+      document.addEventListener("DOMContentLoaded", init);
+    } else {
+      init();
+    }
+
   }
 
-
-  if(document.readyState === "loading"){
-    document.addEventListener("DOMContentLoaded", start);
-  } else {
-    start();
-  }
+  start();
 
 
   /* =========================
@@ -210,8 +208,7 @@
   ========================= */
   window.FacturasUI = {
     start,
-    destroy,
-    applyFilters
+    destroy
   };
 
 })();

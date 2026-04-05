@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 SIDEBAR — FULL PRO GOD (SPA SAFE · SIN EVENTOS MUERTOS)
+   🧅 SIDEBAR — FULL PRO SAAS (FIXED · NO DUPES · SPA SAFE REAL)
 ========================================================= */
 
 (function(){
@@ -34,11 +34,8 @@ function init(){
     return setTimeout(init, 100);
   }
 
-  // 🔥 CLAVE: rebind en SPA
-  if(initialized){
-    bindEvents();
-    return;
-  }
+  // 🔥 evitar duplicar binds
+  if(initialized) return;
 
   initialized = true;
 
@@ -46,7 +43,6 @@ function init(){
   restoreState();
   bindEvents();
 
-  // UI fija (sin API)
   setRecientesError();
 
   Onion.onCleanup(()=>{
@@ -57,9 +53,15 @@ function init(){
 
 init();
 
-/* 🔥 SPA HOOKS */
-Onion.events?.on?.("app:ready", ()=> requestAnimationFrame(init));
-Onion.events?.on?.("route:end", ()=> requestAnimationFrame(init));
+/* 🔥 SPA HOOKS (SIN DUPES) */
+if(!window.__ONION_SIDEBAR_BOUND__){
+
+  window.__ONION_SIDEBAR_BOUND__ = true;
+
+  Onion.events?.on?.("app:ready", ()=> requestAnimationFrame(init));
+  Onion.events?.on?.("route:end", ()=> requestAnimationFrame(init));
+
+}
 
 /* =========================================================
    STATE
@@ -159,7 +161,6 @@ function bindEvents(){
       Onion.ui?.showLoader?.();
 
       try{
-        await new Promise(r => requestAnimationFrame(r));
         await Onion.auth.logout();
       }catch(err){
         Onion.error("LOGOUT ERROR:", err);
@@ -207,7 +208,7 @@ function renderUser(){
 }
 
 /* =========================================================
-   RECIENTES (DESACTIVADO)
+   RECIENTES
 ========================================================= */
 
 function setRecientesError(){

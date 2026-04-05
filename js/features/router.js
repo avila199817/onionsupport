@@ -1,5 +1,9 @@
 "use strict";
 
+/* =========================================================
+   🧅 ROUTER — FULL PRO (SIN RACE, CLEAN, CONSISTENTE)
+========================================================= */
+
 (function(){
 
   if(!window.Onion){
@@ -163,21 +167,6 @@
   });
 
   /* =========================
-     STATE
-  ========================= */
-
-  Onion.state = Onion.state || {};
-  Onion.state.navigating = false;
-
-  /* =========================
-     TITLE
-  ========================= */
-
-  Onion.setTitle = function(title){
-    document.title = title ? `${title} · Onion` : "Onion Panel";
-  };
-
-  /* =========================
      NORMALIZE
   ========================= */
 
@@ -191,10 +180,11 @@
   }
 
   /* =========================
-     GET
+     GET PATH
   ========================= */
 
   Onion.router.get = function(){
+
     try{
 
       let path = normalize(window.location.pathname);
@@ -215,9 +205,10 @@
       return path;
 
     }catch(e){
-      console.error("💥 Router get error:", e);
+      Onion.error("Router get error:", e);
       return "/";
     }
+
   };
 
   /* =========================
@@ -225,29 +216,26 @@
   ========================= */
 
   Onion.router.resolve = function(){
+
     try{
 
       const route = Onion.router.get();
 
-      if(!Onion.routes[route]){
-        console.warn("⚠️ Ruta no encontrada:", route);
-      }
-
       const config = Onion.routes[route] || Onion.routes["/"];
 
-      Onion.setTitle(config.title);
+      Onion.setTitle?.(config.title);
 
       return config;
 
     }catch(e){
-      console.error("💥 Router resolve error:", e);
-      Onion.setTitle("Panel");
+      Onion.error("Router resolve error:", e);
       return Onion.routes["/"];
     }
+
   };
 
   /* =========================
-     NAVIGATE 🔥
+     NAVIGATE
   ========================= */
 
   Onion.router.navigate = function(href){
@@ -258,8 +246,6 @@
       window.location.href = href;
       return;
     }
-
-    Onion.state.navigating = true;
 
     const username =
       Onion.state.slug ||
@@ -281,9 +267,10 @@
     }
 
     if(normalize(window.location.pathname) === normalize(finalHref)){
-      Onion.state.navigating = false;
       return;
     }
+
+    Onion.state.navigating = true;
 
     Onion.ui?.showLoader?.();
     Onion.events?.emit?.("route:start");
@@ -291,7 +278,7 @@
     history.pushState({}, "", finalHref);
 
     Onion.render()
-      .catch(e => console.error("💥 NAV ERROR:", e))
+      .catch(e => Onion.error("NAV ERROR:", e))
       .finally(()=>{
         Onion.events?.emit?.("route:end");
         Onion.state.navigating = false;
@@ -328,7 +315,7 @@
   }
 
   /* =========================
-     POPSTATE 🔥
+     POPSTATE
   ========================= */
 
   if(!window.__ONION_POPSTATE_BOUND__){
@@ -345,7 +332,7 @@
       Onion.events?.emit?.("route:start");
 
       Onion.render()
-        .catch(e => console.error("💥 POPSTATE ERROR:", e))
+        .catch(e => Onion.error("POPSTATE ERROR:", e))
         .finally(()=>{
           Onion.events?.emit?.("route:end");
           Onion.state.navigating = false;
@@ -363,5 +350,13 @@
     if(!path) return false;
     return !!Onion.routes[normalize(path)];
   };
+
+  /* =========================
+     DEBUG
+  ========================= */
+
+  if(Onion.config?.DEBUG){
+    Onion.log("🧭 Router PRO ready");
+  }
 
 })();

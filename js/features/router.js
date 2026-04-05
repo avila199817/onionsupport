@@ -49,7 +49,7 @@
     "/facturas": {
       page: "/app/views/facturas/index.html",
       style: [
-        "/css/app/core/topbar.css",
+        "/css/app/core/topbarview.css",
         "/css/app/facturas/facturas.css"
       ],
       script: [

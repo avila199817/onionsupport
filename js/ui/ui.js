@@ -1,5 +1,9 @@
 "use strict";
 
+/* =========================================================
+   🧅 UI — FULL PRO (SIN DUPES, SIN RACE, TODO CENTRALIZADO)
+========================================================= */
+
 (function(){
 
   if(!window.Onion){
@@ -79,10 +83,6 @@
 
   }
 
-  /* =========================
-     SAFE QUERY (CLAVE)
-  ========================= */
-
   function exists(selector){
     return document.querySelector(selector);
   }
@@ -138,7 +138,7 @@
   };
 
   /* =========================
-     EVENTOS GLOBALES
+     GLOBAL EVENTS
   ========================= */
 
   function bindGlobalEvents(){
@@ -150,19 +150,16 @@
 
       const logout = e.target.closest("#logoutBtn");
 
-      if(logout){
+      if(!logout) return;
 
-        e.preventDefault();
+      e.preventDefault();
 
-        try{
-          await fetch(Onion.config.API + "/auth/logout", {
-            method: "POST",
-            credentials: "include"
-          });
-        }catch{}
+      Onion.ui?.showLoader?.();
 
-        Onion.auth.resetSession();
-        Onion.auth.redirectLogin();
+      try{
+        await Onion.auth.logout();
+      }catch(e){
+        Onion.error("Logout error:", e);
       }
 
     });
@@ -170,7 +167,7 @@
   }
 
   /* =========================
-     WAIT DOM (🔥 FIX REAL)
+     WAIT DOM (ANTI RACE)
   ========================= */
 
   function waitDOMAndRender(retries = 10){
@@ -203,10 +200,6 @@
 
       bindGlobalEvents();
 
-      Onion.ui.sidebar?.init?.();
-      Onion.ui.dropdown?.init?.();
-      Onion.ui.search?.init?.();
-
       initialized = true;
     }
 
@@ -223,5 +216,25 @@
     waitDOMAndRender();
 
   };
+
+  /* =========================
+     HOOK SPA
+  ========================= */
+
+  Onion.events?.on?.("route:end", ()=>{
+    Onion.ui.refresh();
+  });
+
+  Onion.events?.on?.("app:ready", ()=>{
+    Onion.ui.init();
+  });
+
+  /* =========================
+     DEBUG
+  ========================= */
+
+  if(Onion.config?.DEBUG){
+    Onion.log("🎨 UI system PRO ready");
+  }
 
 })();

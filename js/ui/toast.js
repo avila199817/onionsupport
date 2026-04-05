@@ -66,7 +66,6 @@
 
     if(!message) return;
 
-    // 🔥 evitar spam duplicado inmediato
     if(message === lastMessage) return;
     lastMessage = message;
 

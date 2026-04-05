@@ -13,14 +13,30 @@ if(!window.Onion){
 
 const Onion = window.Onion;
 
+/* =========================================================
+   INIT DEBUG
+========================================================= */
+
+if(Onion.config?.DEBUG){
+  Onion.log("🧠 ViewEngine initialized");
+}
+
 Onion.createView = function(){
 
   let destroyed = false;
   let requestId = 0;
 
+  if(Onion.config?.DEBUG){
+    Onion.log("🧠 View instance created");
+  }
+
   Onion.onCleanup(()=>{
     destroyed = true;
     requestId++;
+
+    if(Onion.config?.DEBUG){
+      Onion.log("🧹 View destroyed (cleanup executed)");
+    }
   });
 
   function isAlive(){
@@ -28,11 +44,23 @@ Onion.createView = function(){
   }
 
   function nextRequest(){
-    return ++requestId;
+    requestId++;
+
+    if(Onion.config?.DEBUG){
+      Onion.log(`📡 New request -> ${requestId}`);
+    }
+
+    return requestId;
   }
 
   function isCurrent(id){
-    return id === requestId && !destroyed;
+    const valid = id === requestId && !destroyed;
+
+    if(Onion.config?.DEBUG && !valid){
+      Onion.log(`⚠️ Stale request ignored -> ${id}`);
+    }
+
+    return valid;
   }
 
   async function safeFetch(fn){
@@ -49,9 +77,18 @@ Onion.createView = function(){
 
     }catch(e){
 
-      if(e.message === "ABORTED") return null;
+      if(e.message === "ABORTED"){
+        if(Onion.config?.DEBUG){
+          Onion.log("⛔ Fetch aborted");
+        }
+        return null;
+      }
 
       if(!isCurrent(id)) return null;
+
+      if(Onion.config?.DEBUG){
+        Onion.log("💥 Fetch error:", e);
+      }
 
       throw e;
 
@@ -61,11 +98,19 @@ Onion.createView = function(){
 
   function safeDOM(getter){
 
-    if(!isAlive()) return null;
+    if(!isAlive()){
+      if(Onion.config?.DEBUG){
+        Onion.log("⚠️ safeDOM blocked (view destroyed)");
+      }
+      return null;
+    }
 
     const el = getter?.();
 
     if(!el || !document.body.contains(el)){
+      if(Onion.config?.DEBUG){
+        Onion.log("⚠️ safeDOM invalid element");
+      }
       return null;
     }
 
@@ -81,8 +126,12 @@ Onion.createView = function(){
 
 };
 
+/* =========================================================
+   GLOBAL READY DEBUG
+========================================================= */
+
 if(Onion.config?.DEBUG){
-  Onion.log("🧠 ViewEngine ready");
+  Onion.log("🚀 ViewEngine GOD MODE ready");
 }
 
 })();

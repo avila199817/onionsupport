@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 ROUTER — FULL PRO (SIN RACE, CLEAN, CONSISTENTE)
+   🧅 ROUTER — FULL PRO SAAS (FIXED · NO DOUBLE NAV · CLEAN EVENTS)
 ========================================================= */
 
 (function(){
@@ -220,12 +220,7 @@
     try{
 
       const route = Onion.router.get();
-
-      const config = Onion.routes[route] || Onion.routes["/"];
-
-      Onion.setTitle?.(config.title);
-
-      return config;
+      return Onion.routes[route] || Onion.routes["/"];
 
     }catch(e){
       Onion.error("Router resolve error:", e);
@@ -235,12 +230,12 @@
   };
 
   /* =========================
-     NAVIGATE
+     NAVIGATE (FIX DOUBLE NAV)
   ========================= */
 
   Onion.router.navigate = function(href){
 
-    if(!href || Onion.state.navigating) return;
+    if(!href) return;
 
     if(href.startsWith("http")){
       window.location.href = href;
@@ -266,13 +261,20 @@
       finalHref = "/@" + username + href;
     }
 
-    if(normalize(window.location.pathname) === normalize(finalHref)){
+    const current = normalize(window.location.pathname);
+    const next = normalize(finalHref);
+
+    // 🔥 evitar navegación duplicada REAL
+    if(current === next){
+      return;
+    }
+
+    if(Onion.state.navigating){
       return;
     }
 
     Onion.state.navigating = true;
 
-    Onion.ui?.showLoader?.();
     Onion.events?.emit?.("route:start");
 
     history.pushState({}, "", finalHref);
@@ -328,7 +330,6 @@
 
       Onion.state.navigating = true;
 
-      Onion.ui?.showLoader?.();
       Onion.events?.emit?.("route:start");
 
       Onion.render()

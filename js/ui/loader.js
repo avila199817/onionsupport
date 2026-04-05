@@ -13,8 +13,8 @@
   let showTimeout = null;
   let forceHideTimeout = null;
 
-  const MIN_SHOW_DELAY = 120;   // evita flicker
-  const MAX_DURATION = 8000;    // failsafe brutal
+  const MIN_SHOW_DELAY = 120;
+  const MAX_DURATION = 8000;
 
   Onion.ui = Onion.ui || {};
 
@@ -31,19 +31,13 @@
     clearTimeout(showTimeout);
     clearTimeout(forceHideTimeout);
 
-    // 🔥 pequeño delay para evitar parpadeo
     showTimeout = setTimeout(()=>{
-
       document.body.classList.add("loading");
-
     }, MIN_SHOW_DELAY);
 
-    // 🔥 failsafe por si algo peta
     forceHideTimeout = setTimeout(()=>{
-
       console.warn("⚠️ Loader forzado a cerrar (failsafe)");
       Onion.ui.hideLoader(true);
-
     }, MAX_DURATION);
 
   };
@@ -61,10 +55,8 @@
 
     requestAnimationFrame(()=>{
       requestAnimationFrame(()=>{
-
         document.body.classList.remove("loading");
         active = false;
-
       });
     });
 

@@ -1,5 +1,5 @@
 /* =========================================================
-   🔥 LAYOUT — SAAS PANEL CLEAN (FINAL PRO SYSTEM)
+   🔥 LAYOUT — SAAS PANEL CLEAN (FINAL PRO SYSTEM v2)
 ========================================================= */
 
 
@@ -22,6 +22,10 @@ html, body{
 ========================= */
 :root{
   --topbarview-height: 64px;
+
+  /* 🔥 OFFSET TOTAL GLOBAL */
+  --app-offset:
+    calc(var(--topbar-height) + var(--topbarview-height));
 }
 
 
@@ -102,7 +106,7 @@ html, body{
 
 
 /* =========================
-   🔥 APP CONTENT (OFFSET SYSTEM)
+   🔥 APP CONTENT (OFFSET PRO)
 ========================= */
 #app-content{
   flex:1;
@@ -111,15 +115,8 @@ html, body{
   display:flex;
   flex-direction:column;
 
-  /* 🔥 SOLO TOPBAR GLOBAL */
-  padding-top:var(--topbar-height);
-}
-
-/* 🔥 TOPBARVIEW (EXTENSIÓN LIMPIA) */
-#app-content.has-topbarview{
-  padding-top: calc(
-    var(--topbar-height) + var(--topbarview-height)
-  );
+  /* 🔥 SIEMPRE RESERVA ESPACIO (ANTI-BUG) */
+  padding-top: var(--app-offset);
 }
 
 
@@ -138,7 +135,6 @@ html, body{
 
   background:transparent;
 
-  /* 🔥 IMPORTANTE: evita bugs de scroll */
   overflow:hidden;
 }
 
@@ -156,6 +152,9 @@ html, body{
   background:var(--panel-bg);
 
   overflow:hidden;
+
+  position:relative;
+  z-index:1;
 }
 
 
@@ -187,7 +186,6 @@ html, body{
   overflow-y:auto;
   overflow-x:hidden;
 
-  /* 🔥 suaviza scroll */
   scroll-behavior:smooth;
 }
 

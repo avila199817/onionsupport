@@ -1,5 +1,9 @@
 "use strict";
 
+/* =========================================================
+   🧅 EVENTS BUS — FULL PRO (ROBUSTO, SIN FUGAS, SIN DUPES)
+========================================================= */
+
 (function(){
 
   if(!window.Onion){
@@ -9,11 +13,15 @@
 
   const Onion = window.Onion;
 
+  /* =========================================================
+     STORE PRIVADO
+  ========================================================= */
+
   const events = Object.create(null);
 
-  /* =========================
+  /* =========================================================
      ON
-  ========================= */
+  ========================================================= */
 
   Onion.events.on = function(name, handler){
 
@@ -25,11 +33,19 @@
 
     events[name].add(handler);
 
+    // 🔥 auto-cleanup SPA
+    Onion.onCleanup?.(()=>{
+      events[name]?.delete(handler);
+      if(events[name]?.size === 0){
+        delete events[name];
+      }
+    });
+
   };
 
-  /* =========================
+  /* =========================================================
      OFF
-  ========================= */
+  ========================================================= */
 
   Onion.events.off = function(name, handler){
 
@@ -47,15 +63,16 @@
 
   };
 
-  /* =========================
+  /* =========================================================
      ONCE
-  ========================= */
+  ========================================================= */
 
   Onion.events.once = function(name, handler){
 
     if(!name || typeof handler !== "function") return;
 
     const wrapper = function(payload){
+
       try{
         handler(payload);
       }catch(e){
@@ -63,20 +80,22 @@
       }finally{
         Onion.events.off(name, wrapper);
       }
+
     };
 
     Onion.events.on(name, wrapper);
 
   };
 
-  /* =========================
+  /* =========================================================
      EMIT
-  ========================= */
+  ========================================================= */
 
   Onion.events.emit = function(name, payload){
 
     if(!name || !events[name]) return;
 
+    // 🔥 snapshot → evita bugs si se modifica durante loop
     const handlers = Array.from(events[name]);
 
     for(const handler of handlers){
@@ -89,12 +108,20 @@
 
   };
 
-  /* =========================
-     CLEAR (manual)
-  ========================= */
+  /* =========================================================
+     CLEAR (debug / reset manual)
+  ========================================================= */
 
   Onion.events.clear = function(){
     Object.keys(events).forEach(k => delete events[k]);
   };
+
+  /* =========================================================
+     DEBUG
+  ========================================================= */
+
+  if(Onion.config?.DEBUG){
+    Onion.log("📡 Events system PRO ready");
+  }
 
 })();

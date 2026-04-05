@@ -1,12 +1,19 @@
 "use strict";
 
-/* =========================
-   INIT GUARD
-========================= */
+/* =========================================================
+   🧅 ONION CORE — FULL PRO SAAS (SOURCE OF TRUTH)
+========================================================= */
 
-if (window.Onion) {
-  console.warn("⚠️ Onion ya inicializado");
-} else {
+(function(){
+
+  /* =========================
+     INIT GUARD
+  ========================= */
+
+  if(window.Onion){
+    console.warn("⚠️ Onion ya inicializado");
+    return;
+  }
 
   const Onion = {};
   window.Onion = Onion;
@@ -15,7 +22,7 @@ if (window.Onion) {
      VERSION
   ========================= */
 
-  Onion.version = "2.1.0";
+  Onion.version = "3.0.0";
 
   /* =========================
      CONFIG
@@ -77,7 +84,7 @@ if (window.Onion) {
   }
 
   /* =========================
-     STATE
+     STATE (SINGLE SOURCE)
   ========================= */
 
   Onion.state = {
@@ -93,7 +100,8 @@ if (window.Onion) {
     cleanup: [],
     globalEvents: [],
 
-    ready: false
+    ready: false,
+    _initializing: false
   };
 
   /* =========================
@@ -115,7 +123,7 @@ if (window.Onion) {
   Onion.router = {};
 
   /* =========================
-     USER MANAGEMENT
+     USER (SINGLE SOURCE)
   ========================= */
 
   Onion.setUser = function(user){
@@ -131,7 +139,9 @@ if (window.Onion) {
       name: user.name || user.username || user.email || "Usuario",
       email: user.email || "",
       avatar: user.avatar || null,
-      hasAvatar: user.hasAvatar === true
+      hasAvatar: !!user.avatar,
+      role: user.role || "user",
+      permissions: user.permissions || []
     };
 
     Onion.state.user = cleanUser;
@@ -179,48 +189,71 @@ if (window.Onion) {
 
   };
 
+  Onion.can = function(permission){
+
+    const user = Onion.getUser();
+
+    if(!user || !Array.isArray(user.permissions)) return false;
+
+    return user.permissions.includes(permission);
+  };
+
   /* =========================
-     CLEANUP CORE
+     CLEANUP (UNIFICADO)
   ========================= */
+
+  Onion.onCleanup = function(fn){
+    if(typeof fn === "function"){
+      Onion.state.cleanup.push(fn);
+    }
+  };
+
+  Onion.cleanupEvent = function(target, name, handler, options){
+
+    if(!target || !name || !handler) return;
+
+    target.addEventListener(name, handler, options);
+
+    Onion.state.globalEvents.push({
+      target, name, handler, options
+    });
+
+  };
+
+  Onion.cleanupInterval = id => id && Onion.onCleanup(()=> clearInterval(id));
+  Onion.cleanupTimeout  = id => id && Onion.onCleanup(()=> clearTimeout(id));
+  Onion.cleanupRAF      = id => id && Onion.onCleanup(()=> cancelAnimationFrame(id));
+  Onion.cleanupObserver = obs => obs && Onion.onCleanup(()=> obs.disconnect());
 
   Onion.runCleanup = function(){
 
-    const list = Onion.state.cleanup;
-
-    if(Array.isArray(list)){
-      for(const fn of list){
-        try{ fn(); }
-        catch(e){ Onion.error("Cleanup error:", e); }
-      }
+    // 🔥 funciones
+    for(const fn of Onion.state.cleanup){
+      try{ fn(); }
+      catch(e){ Onion.error("Cleanup error:", e); }
     }
 
     Onion.state.cleanup = [];
 
-    // limpiar eventos globales
-    if(Array.isArray(Onion.state.globalEvents)){
-      for(const ev of Onion.state.globalEvents){
-        try{
-          ev.target.removeEventListener(ev.name, ev.handler, ev.options);
-        }catch{}
-      }
-      Onion.state.globalEvents = [];
+    // 🔥 eventos
+    for(const ev of Onion.state.globalEvents){
+      try{
+        ev.target.removeEventListener(ev.name, ev.handler, ev.options);
+      }catch{}
     }
 
-    // reset estado
-    Onion.state.rendering = false;
-    Onion.state.navigating = false;
+    Onion.state.globalEvents = [];
 
+    // 🔥 abort fetch activo
     if(Onion.state.abortController){
-      try{
-        Onion.state.abortController.abort();
-      }catch{}
+      try{ Onion.state.abortController.abort(); }catch{}
       Onion.state.abortController = null;
     }
 
   };
 
   /* =========================
-     NAVIGATION
+     NAVIGATION SAFE
   ========================= */
 
   Onion.go = function(path){
@@ -231,8 +264,6 @@ if (window.Onion) {
       Onion.warn("Router no disponible");
       return;
     }
-
-    Onion.runCleanup();
 
     Onion.router.navigate(path);
 
@@ -260,9 +291,9 @@ if (window.Onion) {
   };
 
   /* =========================
-     READY
+     READY FLAG
   ========================= */
 
-  Onion.log("🚀 Onion Core listo");
+  Onion.log("🚀 Onion Core PRO listo");
 
-}
+})();

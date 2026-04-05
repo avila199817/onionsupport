@@ -80,7 +80,6 @@
 
   white-space:nowrap;
 
-  /* 🔥 FIX ALTURA EXACTA */
   height:48px;
   box-sizing:border-box;
 }
@@ -100,7 +99,6 @@
     box-shadow 0.2s ease;
 }
 
-/* 🔥 ACTIVADO CON SCROLL */
 .table-head.scrolled{
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
@@ -334,6 +332,37 @@
 .panel-content.facturas .btn-action.pay:hover{
   background:var(--warning);
   color:#fff;
+}
+
+
+/* =========================================================
+   🔥 LOADER CENTRADO (NUEVO)
+========================================================= */
+
+.panel-content.facturas .table-loader{
+  position:absolute;
+
+  top:50%;
+  left:50%;
+
+  transform:translate(-50%, -50%);
+
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:10px;
+
+  pointer-events:none;
+  z-index:2;
+}
+
+.panel-content.facturas .table-loading{
+  height:0;
+}
+
+.panel-content.facturas .table-loading td{
+  padding:0;
+  border:none;
 }
 
 

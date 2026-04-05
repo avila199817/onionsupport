@@ -10,11 +10,17 @@
   const Onion = window.Onion;
 
   let active = false;
+  let showTimeout = null;
+  let forceHideTimeout = null;
+
+  const MIN_SHOW_DELAY = 120;   // evita flicker
+  const MAX_DURATION = 8000;    // failsafe brutal
+
+  Onion.ui = Onion.ui || {};
 
   /* =========================
      SHOW
   ========================= */
-  Onion.ui = Onion.ui || {};
 
   Onion.ui.showLoader = function(){
 
@@ -22,31 +28,52 @@
 
     active = true;
 
-    document.body.classList.add("loading");
+    clearTimeout(showTimeout);
+    clearTimeout(forceHideTimeout);
+
+    // 🔥 pequeño delay para evitar parpadeo
+    showTimeout = setTimeout(()=>{
+
+      document.body.classList.add("loading");
+
+    }, MIN_SHOW_DELAY);
+
+    // 🔥 failsafe por si algo peta
+    forceHideTimeout = setTimeout(()=>{
+
+      console.warn("⚠️ Loader forzado a cerrar (failsafe)");
+      Onion.ui.hideLoader(true);
+
+    }, MAX_DURATION);
 
   };
 
   /* =========================
      HIDE
   ========================= */
-  Onion.ui.hideLoader = function(){
 
-    if(!active) return;
+  Onion.ui.hideLoader = function(force = false){
 
-    // 🔥 dejamos 2 frames para asegurar render completo
+    if(!active && !force) return;
+
+    clearTimeout(showTimeout);
+    clearTimeout(forceHideTimeout);
+
     requestAnimationFrame(()=>{
       requestAnimationFrame(()=>{
+
         document.body.classList.remove("loading");
         active = false;
+
       });
     });
 
   };
 
   /* =========================
-     AUTO HOOK (OPCIONAL PRO)
+     AUTO HOOK (OPCIONAL)
   ========================= */
-  // 👉 si usas eventos del router, puedes disparar esto
+
   document.addEventListener("onion:route:start", ()=>{
     Onion.ui.showLoader();
   });

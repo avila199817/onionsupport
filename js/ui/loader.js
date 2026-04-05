@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 LOADER — FULL PRO (SYNC CON EVENTS, SIN FLICKER, ROBUSTO)
+   🧅 LOADER — FULL PRO SAAS (FIXED · NO DESYNC · NO FLICKER REAL)
 ========================================================= */
 
 (function(){
@@ -16,6 +16,7 @@
   let active = false;
   let showTimeout = null;
   let forceHideTimeout = null;
+  let lock = 0; // 🔥 evita hide prematuro
 
   const MIN_SHOW_DELAY = 120;
   const MAX_DURATION = 8000;
@@ -27,6 +28,8 @@
   ========================= */
 
   Onion.ui.showLoader = function(){
+
+    lock++; // 🔥 cada show incrementa lock
 
     if(active) return;
 
@@ -52,6 +55,16 @@
 
   Onion.ui.hideLoader = function(force = false){
 
+    if(!force){
+
+      // 🔥 solo cerramos si no hay locks pendientes
+      lock = Math.max(lock - 1, 0);
+      if(lock > 0) return;
+
+    }else{
+      lock = 0;
+    }
+
     if(!active && !force) return;
 
     clearTimeout(showTimeout);
@@ -67,7 +80,7 @@
   };
 
   /* =========================
-     SYNC CON EVENTS (🔥 FIX REAL)
+     SYNC CON EVENTS
   ========================= */
 
   Onion.events?.on?.("route:start", ()=>{

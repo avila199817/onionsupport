@@ -1,5 +1,9 @@
 "use strict";
 
+/* =========================================================
+   🧅 TOAST — FULL PRO (SIN DUPES, CLEAN SPA, CONTROL TOTAL)
+========================================================= */
+
 (function(){
 
   if(!window.Onion){
@@ -8,8 +12,8 @@
   }
 
   const Onion = window.Onion;
-  const MAX_TOASTS = 5;
 
+  const MAX_TOASTS = 5;
   let lastMessage = null;
 
   /* =========================
@@ -27,7 +31,6 @@
     }
 
     return container;
-
   }
 
   /* =========================
@@ -44,7 +47,6 @@
     setTimeout(()=>{
       try{ toast.remove(); }catch{}
     }, 250);
-
   }
 
   /* =========================
@@ -66,6 +68,7 @@
 
     if(!message) return;
 
+    // 🔥 evitar duplicados inmediatos
     if(message === lastMessage) return;
     lastMessage = message;
 
@@ -73,8 +76,9 @@
 
     const container = getContainer();
 
+    // 🔥 límite de toasts
     if(container.children.length >= MAX_TOASTS){
-      container.firstChild.remove();
+      removeToast(container.firstChild);
     }
 
     const toast = document.createElement("div");
@@ -155,5 +159,13 @@
     show:showToast,
     clear:clearAll
   };
+
+  /* =========================
+     DEBUG
+  ========================= */
+
+  if(Onion.config?.DEBUG){
+    Onion.log("🍞 Toast system PRO ready");
+  }
 
 })();

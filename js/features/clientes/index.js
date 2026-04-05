@@ -9,11 +9,23 @@ if(!Onion){
   return;
 }
 
+/* =========================================================
+   STATE
+========================================================= */
+
 let initialized = false;
 let currentItems = [];
 let filteredItems = [];
 let loading = false;
 let currentRequestId = 0;
+
+/* 🔥 FILTROS EXTERNOS (TOPBAR) */
+let externalFilters = {
+  search: "",
+  estado: "",
+  tipo: ""
+};
+
 
 /* =========================
    ROOT
@@ -27,6 +39,7 @@ function $(selector){
   const root = getRoot();
   return root ? root.querySelector(selector) : null;
 }
+
 
 /* =========================
    INIT
@@ -45,9 +58,7 @@ function init(){
 
   bindEvents();
 
-  requestAnimationFrame(()=>{
-    loadClientes();
-  });
+  requestAnimationFrame(loadClientes);
 
   Onion.onCleanup(()=>{
     initialized = false;
@@ -56,6 +67,7 @@ function init(){
 }
 
 init();
+
 
 /* =========================
    EVENTS
@@ -69,21 +81,14 @@ function bindEvents(){
   Onion.cleanupEvent(root, "click", (e)=>{
 
     const row = e.target.closest("tr[data-id]");
-    if(!row) return;
-
-    Onion.router.navigate("/clientes/cliente?id=" + row.dataset.id);
+    if(row){
+      Onion.router.navigate("/clientes/cliente?id=" + row.dataset.id);
+    }
 
   });
-
-  $("#btn-new-cliente")?.addEventListener("click", ()=>{
-    Onion.router.navigate("/clientes/nuevo");
-  });
-
-  $("#search-cliente")?.addEventListener("input", debounce(applyFilters, 250));
-  $("#filter-estado-cliente")?.addEventListener("change", applyFilters);
-  $("#filter-tipo-cliente")?.addEventListener("change", applyFilters);
 
 }
+
 
 /* =========================
    LOAD
@@ -95,7 +100,10 @@ async function loadClientes(){
   loading = true;
 
   const tbody = $("#clientes-body");
-  if(!tbody) return;
+  if(!tbody){
+    loading = false;
+    return;
+  }
 
   const requestId = ++currentRequestId;
 
@@ -105,7 +113,7 @@ async function loadClientes(){
 
     await new Promise(r => requestAnimationFrame(r));
     await new Promise(r => requestAnimationFrame(r));
-    await new Promise(r => setTimeout(r, 200));
+    await new Promise(r => setTimeout(r, 150));
 
     const res = await Onion.fetch(Onion.config.API + "/clientes");
     const items = normalize(res);
@@ -120,23 +128,22 @@ async function loadClientes(){
       return;
     }
 
-    requestAnimationFrame(()=>{
-      render(items);
-    });
+    applyFilters();
 
   }catch(e){
 
     console.error("💥 ERROR CLIENTES:", e);
 
-    if(requestId !== currentRequestId) return;
-
-    setError();
+    if(requestId === currentRequestId){
+      setError();
+    }
 
   }finally{
     loading = false;
   }
 
 }
+
 
 /* =========================
    NORMALIZE
@@ -155,15 +162,16 @@ function normalize(res){
 
 }
 
+
 /* =========================
    FILTERS
 ========================= */
 
 function applyFilters(){
 
-  const search = ($("#search-cliente")?.value || "").toLowerCase();
-  const estado = ($("#filter-estado-cliente")?.value || "").toLowerCase();
-  const tipo = ($("#filter-tipo-cliente")?.value || "").toLowerCase();
+  const search = externalFilters.search.toLowerCase();
+  const estado = externalFilters.estado.toLowerCase();
+  const tipo = externalFilters.tipo.toLowerCase();
 
   filteredItems = currentItems.filter(c => {
 
@@ -183,11 +191,10 @@ function applyFilters(){
 
   });
 
-  requestAnimationFrame(()=>{
-    render(filteredItems);
-  });
+  render(filteredItems);
 
 }
+
 
 /* =========================
    STATES
@@ -203,6 +210,7 @@ function setError(){
     `<tr><td colspan="7">Error cargando clientes</td></tr>`;
 }
 
+
 /* =========================
    RENDER
 ========================= */
@@ -211,6 +219,8 @@ function render(items){
 
   const tbody = $("#clientes-body");
   if(!tbody) return;
+
+  if(!items.length) return setEmpty();
 
   const html = items.map(c => {
 
@@ -262,6 +272,7 @@ function render(items){
 
 }
 
+
 /* =========================
    MAP
 ========================= */
@@ -303,6 +314,7 @@ function mapItem(c){
   };
 
 }
+
 
 /* =========================
    HELPERS
@@ -381,12 +393,16 @@ function escapeHTML(str){
     .replace(/>/g,"&gt;");
 }
 
-function debounce(fn, delay){
-  let t;
-  return (...args)=>{
-    clearTimeout(t);
-    t = setTimeout(()=>fn(...args), delay);
-  };
-}
+
+/* =========================
+   🔥 TOPBAR CONNECT
+========================= */
+
+window.ClientesUIExternal = {
+  applyFilters: (uiState)=>{
+    externalFilters = uiState || externalFilters;
+    applyFilters();
+  }
+};
 
 })();

@@ -1,11 +1,5 @@
 "use strict";
 
-/* =========================================================
-   🧅 ONION SERVER (FRONTEND CONTROLLER)
-   - Flujo tipo backend
-   - Control total del ciclo SPA
-========================================================= */
-
 (function(){
 
   if(!window.Onion){
@@ -16,196 +10,135 @@
   const Onion = window.Onion;
 
   /* =========================================================
-     STATE BASE
+     ROUTERS REGISTRY
   ========================================================= */
 
-  Onion.state = Onion.state || {};
-  Onion.state.appReady = false;
-  Onion.state.booting = false;
+  const routes = [];
+
+  function use(path, handler){
+    routes.push({ path, handler });
+  }
 
   /* =========================================================
-     SERVER FLOW
+     MATCHER
   ========================================================= */
 
-  Onion.server = {
+  function match(path){
 
-    /* =========================
-       INIT (ENTRY POINT)
-    ========================= */
+    for(const r of routes){
+      if(path.startsWith(r.path)){
+        return r;
+      }
+    }
 
-    async start(){
+    return null;
+  }
 
-      if(Onion.state.booting) return;
-      Onion.state.booting = true;
+  /* =========================================================
+     CONTEXT
+  ========================================================= */
 
-      try{
+  function createContext(){
 
-        this.applyTheme();
+    const route = Onion.router.resolve();
 
-        await this.preAuthCheck();
+    return {
+      path: route.path,
+      query: route.query,
+      user: Onion.getUser?.(),
+      navigate: Onion.router.navigate,
+      render: Onion.render
+    };
 
-        await this.initCore();
+  }
 
-        this.appReady();
+  /* =========================================================
+     HANDLE REQUEST (LIKE EXPRESS)
+  ========================================================= */
 
-        this.handleRouting();
+  async function handle(){
 
-      }catch(e){
+    try{
 
-        console.error("💥 SERVER ERROR:", e);
-        this.failSafe();
+      const ctx = createContext();
 
+      const matchRoute = match(ctx.path);
+
+      if(!matchRoute){
+        console.warn("⚠️ No route matched:", ctx.path);
+        return Onion.render();
       }
 
-    },
+      await matchRoute.handler(ctx);
 
-    /* =========================
-       THEME
-    ========================= */
+    }catch(e){
 
-    applyTheme(){
-
-      try{
-
-        const config = JSON.parse(localStorage.getItem("onion_config") || "{}");
-
-        let darkMode;
-
-        if(typeof config.darkMode === "boolean"){
-          darkMode = config.darkMode;
-        }else{
-          darkMode = window.matchMedia("(prefers-color-scheme: dark)").matches;
-        }
-
-        const theme = darkMode ? "dark" : "light";
-        document.documentElement.setAttribute("data-theme", theme);
-
-      }catch{
-        document.documentElement.setAttribute("data-theme", "dark");
-      }
-
-    },
-
-    /* =========================
-       AUTH CHECK
-    ========================= */
-
-    async preAuthCheck(){
-
-      Onion.state.slug = localStorage.getItem("onion_user_slug");
-
-      if(!Onion.state.slug){
-
-        this.failSafe();
-
-        Onion.auth?.redirectLogin?.();
-
-        throw new Error("No auth");
-
-      }
-
-    },
-
-    /* =========================
-       INIT CORE
-    ========================= */
-
-    async initCore(){
-
-      await Onion.init?.();
-
-    },
-
-    /* =========================
-       APP READY
-    ========================= */
-
-    appReady(){
-
-      if(Onion.state.appReady) return;
-
-      Onion.state.appReady = true;
-
-      Onion.ui?.init?.();
-      Onion.i18n?.apply?.();
-
-    },
-
-    /* =========================
-       ROUTING CONTROL
-    ========================= */
-
-    handleRouting(){
-
-      // 🔥 Primera carga
+      console.error("💥 SERVER ERROR:", e);
       Onion.render();
-
-      // 🔥 Navegación SPA
-      document.addEventListener("click", (e)=>{
-
-        const link = e.target.closest("[data-spa]");
-        if(!link) return;
-
-        e.preventDefault();
-
-        const href = link.getAttribute("href");
-        if(!href) return;
-
-        if(href === window.location.pathname) return;
-
-        Onion.ui?.showLoader?.();
-
-        Onion.router.navigate(href);
-
-      });
-
-      // 🔥 Back / forward
-      window.addEventListener("popstate", ()=>{
-        Onion.render();
-      });
-
-      // 🔥 Fin render → apagar loader
-      Onion.events?.on?.("render:end", ()=>{
-        Onion.ui?.hideLoader?.();
-      });
-
-    },
-
-    /* =========================
-       FAILSAFE
-    ========================= */
-
-    failSafe(){
-
-      document.body.classList.remove("loading");
-
-      const loader = document.getElementById("app-loader");
-
-      if(loader){
-        loader.style.opacity = "0";
-        setTimeout(()=>{
-          try{ loader.remove(); }catch{}
-        }, 200);
-      }
 
     }
 
+  }
+
+  /* =========================================================
+     PUBLIC API
+  ========================================================= */
+
+  Onion.server = {
+    use,
+    handle
   };
+
+  /* =========================================================
+     CONNECT ROUTERS 🔥
+  ========================================================= */
+
+  // 👇 IMPORTS (como backend)
+  // IMPORTANTE: estos scripts deben estar cargados antes
+
+  use("/auth", window.AuthRouter);
+  use("/facturas", window.FacturasRouter);
+  use("/incidencias", window.IncidenciasRouter);
+  use("/clientes", window.ClientesRouter);
+  use("/usuarios", window.UsersRouter);
+  use("/", window.DashboardRouter);
+
+  /* =========================================================
+     NAVIGATION HOOK
+  ========================================================= */
+
+  const originalNavigate = Onion.router.navigate;
+
+  Onion.router.navigate = function(path){
+
+    originalNavigate(path);
+
+    handle();
+
+  };
+
+  window.addEventListener("popstate", handle);
 
   /* =========================================================
      START
   ========================================================= */
 
-  document.addEventListener("DOMContentLoaded", ()=>{
-    Onion.server.start();
+  document.addEventListener("DOMContentLoaded", async ()=>{
+
+    try{
+
+      await Onion.init();
+
+      Onion.state.appReady = true;
+
+      await handle();
+
+    }catch(e){
+
+      console.error("💥 BOOT ERROR:", e);
+
+    }
+
   });
-
-  /* =========================================================
-     DEBUG
-  ========================================================= */
-
-  if(Onion.config?.DEBUG){
-    Onion.log("🧅 Server mode ACTIVE");
-  }
 
 })();

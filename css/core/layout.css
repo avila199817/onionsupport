@@ -100,9 +100,6 @@ html, body{
   transition:
     margin-left var(--duration-slow) var(--ease-out),
     width var(--duration-slow) var(--ease-out);
-
-  /* 🔥 ANTI FLICKER */
-  contain: layout paint;
 }
 
 /* SIDEBAR COLLAPSED */
@@ -123,28 +120,6 @@ html, body{
   flex-direction:column;
 
   padding-top: var(--app-offset);
-}
-
-
-/* =========================
-   🔥 TOPBAR GLOBAL (FIX BIEN)
-========================= */
-.topbar{
-  position:fixed;
-
-  top:0;
-  left:var(--sidebar-width);
-  right:0;
-
-  z-index:var(--z-topbar);
-
-  transition:
-    left var(--duration-slow) var(--ease-out);
-}
-
-/* SIDEBAR COLLAPSADO */
-.sidebar.collapsed ~ .main-content .topbar{
-  left:var(--sidebar-collapsed);
 }
 
 
@@ -220,20 +195,6 @@ html, body{
 
   position:relative;
   z-index:1;
-
-  /* 🔥 ANTI FLICKER */
-  opacity:0;
-  transform:translateY(4px);
-  transition:opacity .12s ease, transform .12s ease;
-}
-
-.panel-content.ready{
-  opacity:1;
-  transform:translateY(0);
-}
-
-.panel-content:not(.ready){
-  pointer-events:none;
 }
 
 
@@ -407,11 +368,6 @@ html, body{
 
   .sidebar.open{
     transform:translateX(0);
-  }
-
-  .topbar,
-  .table-head{
-    left:0 !important;
   }
 }
 

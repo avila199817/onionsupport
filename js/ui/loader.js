@@ -43,7 +43,7 @@
     }, MIN_SHOW_DELAY);
 
     forceHideTimeout = setTimeout(()=>{
-      Onion.warn("Loader forzado a cerrar (failsafe)");
+      Onion.warn?.("Loader forzado a cerrar (failsafe)");
       Onion.ui.hideLoader(true);
     }, MAX_DURATION);
 
@@ -75,24 +75,6 @@
     });
 
   };
-
-  /* =========================
-     EVENTS (CORE SAFE)
-  ========================= */
-
-  if(!window.__ONION_LOADER_BOUND__){
-
-    window.__ONION_LOADER_BOUND__ = true;
-
-    Onion.events?.on?.("route:start", ()=>{
-      Onion.ui.showLoader();
-    });
-
-    Onion.events?.on?.("route:end", ()=>{
-      Onion.ui.hideLoader();
-    });
-
-  }
 
   /* =========================
      DEBUG

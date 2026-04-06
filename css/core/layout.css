@@ -52,8 +52,8 @@ html, body{
 
   transition:
     background-color var(--duration-slow) ease;
-   
-  contain: layout style paint;
+
+  contain: none;
 }
 
 

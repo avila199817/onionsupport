@@ -138,7 +138,7 @@ Onion.loadScript = async function(scripts){
 };
 
 /* =========================================================
-   STYLE LOADER
+   STYLE LOADER — FIX REAL 🔥
 ========================================================= */
 
 Onion.loadStyle = function(styles){
@@ -152,19 +152,20 @@ Onion.loadStyle = function(styles){
     }
 
     let loaded = 0;
-    const newLinks = [];
 
+    /* 🔥 LIMPIEZA TOTAL (SIN RESIDUOS) */
+    document
+      .querySelectorAll('link[data-onion-page-style]')
+      .forEach(l=>{
+        try{ l.remove(); }catch{}
+      });
+
+    /* 🔥 CARGA REAL */
     styles.forEach(href=>{
 
       const finalHref = normalizeUrl(href);
 
       if(!finalHref){
-        done();
-        return;
-      }
-
-      const existing = document.querySelector(`link[href="${finalHref}"][data-onion-page-style]`);
-      if(existing){
         done();
         return;
       }
@@ -178,7 +179,6 @@ Onion.loadStyle = function(styles){
       link.onerror = done;
 
       document.head.appendChild(link);
-      newLinks.push(link);
 
     });
 
@@ -188,17 +188,13 @@ Onion.loadStyle = function(styles){
 
       if(loaded === styles.length){
 
-        document
-          .querySelectorAll('link[data-onion-page-style-old]')
-          .forEach(l=>{
-            try{ l.remove(); }catch{}
+        // 🔥 DOBLE FRAME → asegura CSS aplicado
+        requestAnimationFrame(()=>{
+          requestAnimationFrame(()=>{
+            resolve();
           });
-
-        newLinks.forEach(l=>{
-          l.dataset.onionPageStyleOld = "true";
         });
 
-        resolve();
       }
 
     }
@@ -289,7 +285,6 @@ const originalRender = async function(){
 
   if(!Onion.state.appReady) return;
 
-  // 🔥 evitar doble render simultáneo
   if(Onion.state.rendering){
     Onion.state.renderId++;
   }
@@ -322,13 +317,14 @@ const originalRender = async function(){
     const content = extractContent(html);
     content.classList.remove("ready");
 
+    /* 🔥 CSS ANTES DE PINTAR */
     if(route.style){
       await Onion.loadStyle(route.style);
     }
 
     const container = await waitForViewContainer();
 
-    // 🔥 CLEANUP SOLO AHORA
+    /* 🔥 CLEAN EXACTO */
     Onion.runCleanup?.();
 
     clearView();

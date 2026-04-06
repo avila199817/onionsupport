@@ -21,7 +21,9 @@ const loadedScripts = new Set();
 ========================================================= */
 
 function log(...args){
-  console.log("🧅 [RENDER]", ...args);
+  if(Onion.config?.DEBUG){
+    console.log("🧅 [RENDER]", ...args);
+  }
 }
 
 /* =========================================================
@@ -178,22 +180,11 @@ function extractContent(html){
 }
 
 /* =========================================================
-   SWAP VIEW
+   SWAP VIEW (ATÓMICO)
 ========================================================= */
 
 function swapView(container, node){
-  container.innerHTML = "";
-  container.appendChild(node);
-}
-
-/* =========================================================
-   TOPBAR
-========================================================= */
-
-function updateTopbar(route){
-  const el = document.getElementById("topbar-title");
-  if(!el) return;
-  el.textContent = route?.title || "Panel";
+  container.replaceChildren(node);
 }
 
 /* =========================================================
@@ -206,25 +197,12 @@ function clearView(){
 }
 
 /* =========================================================
-   LOADER CONTROL (🔥 FIX REAL)
-========================================================= */
-
-function stopLoader(){
-  document.body.classList.remove("loading");
-  clearTimeout(window.__onionLoaderTimeout);
-}
-
-/* =========================================================
-   CORE RENDER (ULTRA PRO)
+   CORE RENDER (PURO)
 ========================================================= */
 
 const originalRender = async function(){
 
   if(!Onion.state.appReady) return;
-
-  if(Onion.state.rendering){
-    Onion.state.renderId++;
-  }
 
   const renderId = ++Onion.state.renderId;
   Onion.state.rendering = true;
@@ -232,48 +210,48 @@ const originalRender = async function(){
   try{
 
     const container = document.getElementById("view-container");
-
     if(!container){
       throw new Error("view-container no encontrado");
     }
 
     const route = Onion.router.resolve();
-
     if(!route?.page){
       throw new Error("Ruta inválida");
     }
 
-    updateTopbar(route);
-
-    /* 🔥 FETCH CACHEADO */
+    /* 🔥 FETCH */
     const html = await Onion.fetchHTML(route.page);
 
+    /* 🔒 CANCELACIÓN POR RACE */
     if(renderId !== Onion.state.renderId) return;
 
     const content = extractContent(html);
     content.classList.remove("ready");
 
+    /* 🔥 CLEANUP JUSTO ANTES DEL SWAP */
     Onion.runCleanup?.();
 
-    /* 🔥 RENDER INMEDIATO */
+    /* 🔥 LIMPIEZA AUXILIAR */
     clearView();
+
+    /* 🔥 SWAP ATÓMICO */
     swapView(container, content);
 
-    /* 🔥 FIX LOADER (CLAVE) */
-    stopLoader();
+    /* 🔥 READY FRAME (SINCRONÍA REAL DOM) */
+    requestAnimationFrame(()=>{
+      if(renderId !== Onion.state.renderId) return;
 
-    /* 🔥 READY */
-    container.querySelector(".panel-content")?.classList.add("ready");
+      const el = container.querySelector(".panel-content");
+      if(el) el.classList.add("ready");
+    });
 
-    /* 🔥 BACKGROUND */
+    /* 🔥 CARGA PASIVA (NO BLOQUEA RENDER) */
     if(route.style) Onion.loadStyle(route.style);
     if(route.script) Onion.loadScript(route.script);
 
   }catch(e){
 
     console.error("💥 RENDER ERROR:", e);
-
-    stopLoader();
 
     const container = document.getElementById("view-container");
 

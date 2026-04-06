@@ -2,66 +2,98 @@
 
 (function(){
 
-  if(!window.Onion){
-    console.error("💥 Onion no está definido (loader.js)");
-    return;
-  }
+if(!window.Onion){
+  console.error("💥 Onion no está definido (loader.js)");
+  return;
+}
 
-  const Onion = window.Onion;
+const Onion = window.Onion;
 
-  let active = false;
-  let forceHideTimeout = null;
+let active = false;
+let forceHideTimeout = null;
 
-  const MAX_DURATION = 8000;
+const MAX_DURATION = 8000;
 
-  Onion.ui = Onion.ui || {};
+Onion.ui = Onion.ui || {};
 
-  /* =========================
-     SHOW
-  ========================= */
+/* =========================
+   SHOW
+========================= */
 
-  Onion.ui.showLoader = function(){
+Onion.ui.showLoader = function(){
 
-    if(active) return;
+  if(active) return;
 
-    active = true;
+  active = true;
 
-    document.body.classList.add("loading");
+  document.body.classList.add("loading");
 
-    clearTimeout(forceHideTimeout);
+  clearTimeout(forceHideTimeout);
 
-    forceHideTimeout = setTimeout(()=>{
-      Onion.warn?.("⚠️ Loader forced reset");
-      Onion.ui.hideLoader(true);
-    }, MAX_DURATION);
+  forceHideTimeout = setTimeout(()=>{
+    console.warn("⚠️ Loader forced reset");
+    Onion.ui.hideLoader(true);
+  }, MAX_DURATION);
 
-  };
+};
 
-  /* =========================
-     HIDE
-  ========================= */
+/* =========================
+   HIDE
+========================= */
 
-  Onion.ui.hideLoader = function(force = false){
+Onion.ui.hideLoader = function(force = false){
 
-    if(!active && !force) return;
+  if(!active && !force) return;
 
-    clearTimeout(forceHideTimeout);
+  clearTimeout(forceHideTimeout);
 
+  requestAnimationFrame(()=>{
     requestAnimationFrame(()=>{
-      requestAnimationFrame(()=>{
-        document.body.classList.remove("loading");
-        active = false;
-      });
+      document.body.classList.remove("loading");
+      active = false;
     });
+  });
+
+};
+
+/* =========================
+   🔥 AUTO HOOK RENDER
+========================= */
+
+if(!Onion.__loaderHooked){
+
+  const originalRender = Onion.render;
+
+  Onion.render = async function(){
+
+    try{
+
+      Onion.ui.showLoader(); // 🔥 antes
+
+      await originalRender.apply(this, arguments);
+
+    }catch(e){
+
+      console.error("💥 Render error:", e);
+
+    }finally{
+
+      // 🔥 SIEMPRE se quita
+      Onion.ui.hideLoader();
+
+    }
 
   };
 
-  /* =========================
-     DEBUG
-  ========================= */
+  Onion.__loaderHooked = true;
+}
 
-  if(Onion.config?.DEBUG){
-    Onion.log("⏳ Loader SIMPLE ready");
-  }
+/* =========================
+   DEBUG
+========================= */
+
+if(Onion.config?.DEBUG){
+  console.log("⏳ Loader FINAL PRO READY");
+}
 
 })();

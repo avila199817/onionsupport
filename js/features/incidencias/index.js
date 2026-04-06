@@ -10,7 +10,7 @@ if(!Onion){
 }
 
 /* =========================================================
-   VIEW ENGINE 🔥
+   VIEW ENGINE
 ========================================================= */
 
 const view = Onion.createView();
@@ -20,11 +20,10 @@ const view = Onion.createView();
 ========================================================= */
 
 let initialized = false;
-
 let currentItems = [];
 let filteredItems = [];
-
 let loading = false;
+let requestId = 0;
 
 let externalFilters = {
   search: "",
@@ -32,13 +31,9 @@ let externalFilters = {
   prioridad: ""
 };
 
-/* 🔥 LOADER TIMER GLOBAL */
-let loaderStart = 0;
-const MIN_LOADER_TIME = 2000;
-
-/* =========================
+/* =========================================================
    ROOT SAFE
-========================= */
+========================================================= */
 
 function getRoot(){
   return document.querySelector(".panel-content.incidencias");
@@ -49,35 +44,29 @@ function $(selector){
   return root ? root.querySelector(selector) : null;
 }
 
-/* =========================
-   LOADER SAFE (PRO)
-========================= */
+/* =========================================================
+   LOADER (INSTANT)
+========================================================= */
 
 function showLoader(){
   const loader = view.safeDOM(()=> $(".table-loader"));
   if(loader){
     loader.classList.remove("hidden");
-    loaderStart = performance.now(); /* 🔥 start timer */
+    console.log("🟡 Loader ON");
   }
 }
 
-async function hideLoader(){
+function hideLoader(){
   const loader = view.safeDOM(()=> $(".table-loader"));
-  if(!loader) return;
-
-  const elapsed = performance.now() - loaderStart;
-  const remaining = MIN_LOADER_TIME - elapsed;
-
-  if(remaining > 0){
-    await new Promise(r => setTimeout(r, remaining));
+  if(loader){
+    loader.classList.add("hidden");
+    console.log("🟢 Loader OFF");
   }
-
-  loader.classList.add("hidden");
 }
 
-/* =========================
+/* =========================================================
    INIT
-========================= */
+========================================================= */
 
 function init(){
 
@@ -85,16 +74,17 @@ function init(){
   if(!root || initialized) return;
 
   if(!Onion.state?.user){
-    return setTimeout(init, 100);
+    return setTimeout(init, 50);
   }
 
   initialized = true;
 
   bindEvents();
 
-  /* 🔥 loader obligatorio SIEMPRE */
+  /* 🔥 LOADER INSTANTÁNEO */
   showLoader();
 
+  /* 🔥 SIGUIENTE FRAME → FETCH */
   requestAnimationFrame(()=>{
     loadIncidencias();
   });
@@ -107,9 +97,9 @@ function init(){
 
 init();
 
-/* =========================
+/* =========================================================
    EVENTS
-========================= */
+========================================================= */
 
 function bindEvents(){
 
@@ -129,9 +119,9 @@ function bindEvents(){
 
 }
 
-/* =========================
-   LOAD (ENGINE SAFE)
-========================= */
+/* =========================================================
+   LOAD (CANCELABLE)
+========================================================= */
 
 async function loadIncidencias(){
 
@@ -142,19 +132,35 @@ async function loadIncidencias(){
 
   loading = true;
 
+  const currentRequest = ++requestId;
+
   document.activeElement?.blur();
+
   showLoader();
+
+  console.time("🧅 incidencias fetch");
 
   try{
 
-    await new Promise(r => requestAnimationFrame(r));
-    await new Promise(r => requestAnimationFrame(r));
+    /* 🔥 DEJA PINTAR EL LOADER */
+    await new Promise(r=>requestAnimationFrame(r));
 
     const res = await view.safeFetch(() =>
       Onion.fetch(Onion.config.API + "/tickets")
     );
 
-    if(!res) return;
+    console.timeEnd("🧅 incidencias fetch");
+
+    /* 🔥 CANCEL SI CAMBIÓ LA VISTA */
+    if(currentRequest !== requestId){
+      console.log("🟠 Fetch cancelado");
+      return;
+    }
+
+    if(!res){
+      setError();
+      return;
+    }
 
     const items = normalize(res);
 
@@ -179,9 +185,9 @@ async function loadIncidencias(){
 
 }
 
-/* =========================
+/* =========================================================
    NORMALIZE
-========================= */
+========================================================= */
 
 function normalize(res){
 
@@ -196,9 +202,9 @@ function normalize(res){
 
 }
 
-/* =========================
+/* =========================================================
    FILTERS
-========================= */
+========================================================= */
 
 function applyFilters(){
 
@@ -228,31 +234,31 @@ function applyFilters(){
 
 }
 
-/* =========================
+/* =========================================================
    STATES
-========================= */
+========================================================= */
 
-async function setEmpty(){
+function setEmpty(){
   const el = view.safeDOM(()=> $("#incidencias-body"));
   if(!el) return;
 
   el.innerHTML = `<tr><td colspan="8">No hay incidencias</td></tr>`;
-  await hideLoader();
+  hideLoader();
 }
 
-async function setError(){
+function setError(){
   const el = view.safeDOM(()=> $("#incidencias-body"));
   if(!el) return;
 
   el.innerHTML = `<tr><td colspan="8">Error cargando incidencias</td></tr>`;
-  await hideLoader();
+  hideLoader();
 }
 
-/* =========================
+/* =========================================================
    RENDER
-========================= */
+========================================================= */
 
-async function render(items){
+function render(items){
 
   const tbody = view.safeDOM(()=> $("#incidencias-body"));
   if(!tbody) return;
@@ -303,13 +309,13 @@ async function render(items){
 
   tbody.innerHTML = html;
 
-  await hideLoader();
+  hideLoader();
 
 }
 
-/* =========================
+/* =========================================================
    HELPERS
-========================= */
+========================================================= */
 
 function mapItem(i){
   return {
@@ -397,9 +403,9 @@ function getInitials(name){
   return name.split(" ").map(n => n[0]).join("").slice(0,2).toUpperCase();
 }
 
-/* =========================
+/* =========================================================
    TOPBAR CONNECT
-========================= */
+========================================================= */
 
 window.IncidenciasUIExternal = {
   applyFilters: (uiState)=>{

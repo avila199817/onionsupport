@@ -193,7 +193,7 @@ html, body{
 
   background:var(--panel-bg);
 
-  overflow:hidden;
+  overflow:clip;
 
   position:relative;
   z-index:1;

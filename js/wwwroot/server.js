@@ -297,7 +297,7 @@ Onion.init = async function(){
   /* 🔥 CARGAR INDEX.JS (PUENTE) */
 
   const script = document.createElement("script");
-  script.src = "/js/wwwroot/index.js";
+  script.src = "/js/wwwroot/router/index.js";
   script.defer = true;
 
   script.onload = ()=>{

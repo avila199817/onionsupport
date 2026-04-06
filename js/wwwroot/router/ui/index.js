@@ -18,6 +18,7 @@
     // UI CORE
     "/js/wwwroot/router/ui/sidebar.js",
     "/js/wwwroot/router/ui/topbar.js",
+    "/js/wwwroot/router/ui/ui.js",
     
 
   ];

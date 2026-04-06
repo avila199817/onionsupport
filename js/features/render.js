@@ -246,7 +246,7 @@ function clearView(){
 }
 
 /* =========================================================
-   CORE RENDER (10/10 FINAL)
+   CORE RENDER (TABLE LOADER PRO)
 ========================================================= */
 
 const originalRender = async function(){
@@ -260,7 +260,8 @@ const originalRender = async function(){
   const renderId = ++Onion.state.renderId;
   Onion.state.rendering = true;
 
-  let loaderStart = 0;
+  let tableLoader = null;
+  let tableLoaderStart = 0;
 
   try{
 
@@ -268,11 +269,8 @@ const originalRender = async function(){
 
     const container = await waitForViewContainer();
 
-    /* 🔥 ocultar antes de pintar */
+    /* 🔥 anti flicker */
     container.style.visibility = "hidden";
-
-    loaderStart = performance.now();
-    Onion.ui.showLoader?.();
 
     const route = Onion.router.resolve();
 
@@ -293,9 +291,12 @@ const originalRender = async function(){
     let content = extractContent(html);
     content.classList.remove("ready");
 
-    const localLoader = content.querySelector(".table-loader");
-    if(localLoader){
-      localLoader.classList.remove("hidden");
+    /* 🔥 detectar loader de tabla */
+    tableLoader = content.querySelector(".table-loader");
+
+    if(tableLoader){
+      tableLoader.classList.remove("hidden");
+      tableLoaderStart = performance.now();
     }
 
     if(route.style){
@@ -313,12 +314,27 @@ const originalRender = async function(){
 
     if(renderId !== Onion.state.renderId) return;
 
+    /* 🔥 estabilidad visual */
     await new Promise(r=>requestAnimationFrame(r));
     await new Promise(r=>requestAnimationFrame(r));
+
+    /* 🔥 tiempo mínimo loader tabla */
+    if(tableLoader){
+
+      const MIN_TABLE_LOADER = 800;
+
+      const elapsed = performance.now() - tableLoaderStart;
+      const remaining = MIN_TABLE_LOADER - elapsed;
+
+      if(remaining > 0){
+        await new Promise(r => setTimeout(r, remaining));
+      }
+
+      tableLoader.classList.add("hidden");
+    }
 
     container.querySelector(".panel-content")?.classList.add("ready");
 
-    /* 🔥 mostrar limpio */
     container.style.visibility = "";
 
   }catch(e){
@@ -338,18 +354,6 @@ const originalRender = async function(){
     }
 
   }finally{
-
-    /* 🔥 loader mínimo SIEMPRE visible */
-    const MIN_LOADER_TIME = 1000;
-
-    const elapsed = performance.now() - loaderStart;
-    const remaining = MIN_LOADER_TIME - elapsed;
-
-    if(remaining > 0){
-      await new Promise(r => setTimeout(r, remaining));
-    }
-
-    Onion.ui.hideLoader?.();
 
     if(renderId === Onion.state.renderId){
       Onion.state.rendering = false;

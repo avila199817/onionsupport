@@ -23,7 +23,6 @@ let initialized = false;
 let currentItems = [];
 let filteredItems = [];
 let loading = false;
-let requestId = 0;
 
 /* 🔥 CACHE DATA */
 let cache = null;
@@ -41,18 +40,20 @@ let externalFilters = {
 };
 
 /* =========================================================
-   ROOT + CACHE DOM
+   INIT DOM (SAFE)
 ========================================================= */
 
 function initDOM(){
 
-  rootEl = document.querySelector(".panel-content.incidencias");
-  if(!rootEl) return false;
+  const root = view.safeDOM(()=> document.querySelector(".panel-content.incidencias"));
+  if(!root) return false;
 
-  tbodyEl = rootEl.querySelector("#incidencias-body");
-  loaderEl = rootEl.querySelector(".table-loader");
+  rootEl = root;
+  tbodyEl = root.querySelector("#incidencias-body");
+  loaderEl = root.querySelector(".table-loader");
 
-  return true;
+  return !!tbodyEl;
+
 }
 
 /* =========================================================
@@ -80,17 +81,18 @@ function renderSkeleton(){
 }
 
 /* =========================================================
-   INIT
+   INIT (REACTIVO REAL)
 ========================================================= */
 
 function init(){
 
   if(initialized) return;
-  if(!Onion.state?.user){
-    return setTimeout(init, 50);
-  }
+  if(!Onion.state?.user) return;
 
-  if(!initDOM()) return;
+  if(!initDOM()){
+    requestAnimationFrame(init);
+    return;
+  }
 
   initialized = true;
 
@@ -110,6 +112,7 @@ function init(){
 
 }
 
+/* 🔥 HOOK SPA */
 init();
 
 /* =========================================================
@@ -132,17 +135,15 @@ function bindEvents(){
 }
 
 /* =========================================================
-   LOAD
+   LOAD (100% SAFE)
 ========================================================= */
 
 async function loadIncidencias(){
 
   if(loading) return;
-  if(!tbodyEl) return;
+  if(!tbodyEl || !view.isAlive()) return;
 
   loading = true;
-
-  const currentRequest = ++requestId;
 
   document.activeElement?.blur();
 
@@ -156,10 +157,10 @@ async function loadIncidencias(){
   try{
 
     const res = await view.safeFetch(() =>
-      Onion.fetch(Onion.config.API + "/tickets")
+      Onion.fetch("/tickets")
     );
 
-    if(currentRequest !== requestId) return;
+    if(!view.isAlive()) return;
 
     if(!res){
       setError();
@@ -169,7 +170,6 @@ async function loadIncidencias(){
     const items = normalize(res);
 
     cache = items;
-
     currentItems = items;
     filteredItems = items;
 
@@ -209,10 +209,12 @@ function normalize(res){
 }
 
 /* =========================================================
-   FILTERS (OPTIMIZADO)
+   FILTERS
 ========================================================= */
 
 function applyFilters(){
+
+  if(!view.isAlive()) return;
 
   const search = externalFilters.search.toLowerCase();
   const estado = externalFilters.estado.toLowerCase();
@@ -257,12 +259,12 @@ function setError(){
 }
 
 /* =========================================================
-   RENDER (ULTRA OPTIMIZADO 🔥)
+   RENDER (ULTRA SAFE + FAST)
 ========================================================= */
 
 function render(items){
 
-  if(!tbodyEl) return;
+  if(!tbodyEl || !view.isAlive()) return;
 
   if(!items.length){
     setEmpty();

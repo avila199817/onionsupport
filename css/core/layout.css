@@ -100,6 +100,9 @@ html, body{
   transition:
     margin-left var(--duration-slow) var(--ease-out),
     width var(--duration-slow) var(--ease-out);
+
+  /* 🔥 ANTI FLICKER */
+  contain: layout paint;
 }
 
 /* SIDEBAR COLLAPSED */
@@ -195,6 +198,21 @@ html, body{
 
   position:relative;
   z-index:1;
+
+  /* 🔥 ANTI FLICKER (oculto hasta ready) */
+  opacity:0;
+  transform:translateY(4px);
+  transition:opacity .12s ease, transform .12s ease;
+}
+
+.panel-content.ready{
+  opacity:1;
+  transform:translateY(0);
+}
+
+/* 🔥 evitar interacción antes de estar listo */
+.panel-content:not(.ready){
+  pointer-events:none;
 }
 
 

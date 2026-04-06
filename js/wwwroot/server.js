@@ -115,11 +115,16 @@ Onion.cleanupEvent = function(el,type,handler,opt){
 
 Onion.runCleanup = function(){
 
-  for(let i=Onion.state.cleanup.length-1;i>=0;i--){
-    try{Onion.state.cleanup[i]();}catch(e){warn(e);}
+  const list = Onion.state.cleanup;
+
+  if(!Array.isArray(list)) return;
+
+  for(let i=list.length-1;i>=0;i--){
+    try{ list[i](); }
+    catch(e){ warn("cleanup error", e); }
   }
 
-  Onion.state.cleanup.length = 0;
+  Onion.state.cleanup = [];
 
   if(Onion.state.abortController){
     try{Onion.state.abortController.abort();}catch{}
@@ -178,9 +183,7 @@ Onion.fetch = async function(url,opt={}){
 
     let data = null;
 
-    try{
-      data = await res.json();
-    }catch{}
+    try{ data = await res.json(); }catch{}
 
     if(!res.ok){
       throw new Error(data?.message || "HTTP "+res.status);
@@ -203,7 +206,7 @@ Onion.fetch = async function(url,opt={}){
 };
 
 /* =========================================================
-   AUTH (NO BLOQUEA 🔥)
+   AUTH (NO BLOQUEA)
 ========================================================= */
 
 Onion.auth = {};
@@ -227,7 +230,7 @@ Onion.auth.tryLoadUser = async function(){
 };
 
 /* =========================================================
-   ROUTER (CON @SLUG 🔥)
+   ROUTER (CON @SLUG)
 ========================================================= */
 
 Onion.routes = {
@@ -257,6 +260,8 @@ Onion.router.resolve = function(){
 };
 
 Onion.router.navigate = function(path){
+
+  if(typeof path !== "string") return;
 
   const current = normalize(location.pathname);
   const next = normalize(path);
@@ -293,7 +298,13 @@ function hideLoader(){
 }
 
 /* =========================================================
-   RENDER (NUNCA FALLA 🔥)
+   FEATURES SAFE EXECUTION
+========================================================= */
+
+Onion.features = Object.create(null);
+
+/* =========================================================
+   RENDER (BLINDADO)
 ========================================================= */
 
 Onion.render = async function(){
@@ -311,6 +322,10 @@ Onion.render = async function(){
     if(!container) throw new Error("No container");
 
     const route = Onion.router.resolve();
+
+    if(!route || !route.page){
+      throw new Error("Ruta inválida");
+    }
 
     let html = "";
 
@@ -330,12 +345,23 @@ Onion.render = async function(){
       container.classList.add("ready");
     });
 
-    document.getElementById("topbar-title").textContent =
-      route.title || "Panel";
+    const titleEl = document.getElementById("topbar-title");
+    if(titleEl){
+      titleEl.textContent = route.title || "Panel";
+    }
+
+    /* 🔥 FEATURE SAFE */
+    if(route.feature && Onion.features?.[route.feature]){
+      try{
+        Onion.features[route.feature]();
+      }catch(e){
+        console.error("💥 Feature crash:", e);
+      }
+    }
 
   }catch(e){
 
-    error("Render",e);
+    error("Render", e);
 
   }finally{
 
@@ -370,16 +396,21 @@ document.addEventListener("click",(e)=>{
 });
 
 /* =========================================================
-   INIT (BLINDADO 🔥)
+   INIT (LOCK)
 ========================================================= */
 
+Onion._booted = false;
+
 Onion.init = async function(){
+
+  if(Onion._booted) return;
+  Onion._booted = true;
 
   if(Onion.state.ready) return;
 
   log("INIT...");
 
-  await Onion.auth.tryLoadUser(); // 🔥 NO BLOQUEA
+  await Onion.auth.tryLoadUser();
 
   Onion.state.ready = true;
 
@@ -395,6 +426,19 @@ document.addEventListener("DOMContentLoaded", ()=>{
   Onion.init();
 });
 
-log("🚀 Onion SPA FULL PRO READY");
+/* =========================================================
+   🔒 CORE FREEZE (INDESTRUCTIBLE)
+========================================================= */
+
+Object.freeze(Onion.config);
+Object.freeze(Onion.state);
+Object.freeze(Onion.auth);
+Object.freeze(Onion.router);
+
+/* =========================================================
+   READY
+========================================================= */
+
+log("🚀 Onion SPA CORE");
 
 })();

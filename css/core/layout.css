@@ -331,7 +331,6 @@ html, body{
 ========================= */
 .page-loading{
   opacity:.6;
-  pointer-events:none;
   filter:blur(2px);
 
   transition:

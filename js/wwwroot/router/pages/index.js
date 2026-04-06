@@ -101,7 +101,7 @@ Onion.routes = Object.freeze({
     ],
     script: [
       "/js/features/incidencias/topbarview.js",
-      "/js/features/incidencias/index.js"
+      "/js/wwwroot/router/pages/incidencias/index.js"
     ],
     title: "Incidencias"
   },

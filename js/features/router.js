@@ -11,9 +11,9 @@
 
   Onion.state = Onion.state || {};
 
-  /* =========================
-     NORMALIZE PATH
-  ========================= */
+  /* =========================================================
+     NORMALIZE
+  ========================================================= */
 
   function normalize(path){
 
@@ -22,43 +22,59 @@
     // quitar query
     path = path.split("?")[0];
 
+    // limpiar barras duplicadas
+    path = path.replace(/\/+/g, "/");
+
     // quitar trailing slash
     if(path.length > 1 && path.endsWith("/")){
       path = path.slice(0, -1);
     }
 
     return path || "/";
-
   }
 
-  /* =========================
-     GET PATH
-  ========================= */
+  /* =========================================================
+     GET PATH (CON SLUG)
+  ========================================================= */
 
   function getPath(){
-    return normalize(window.location.pathname);
-  }
 
-  /* =========================
-     GET QUERY
-  ========================= */
+    try{
 
-  function getQuery(){
+      let path = normalize(window.location.pathname);
 
-    const params = new URLSearchParams(window.location.search);
-    const query = {};
+      // soporte /@usuario/...
+      if(path.startsWith("/@")){
 
-    for(const [k,v] of params.entries()){
-      query[k] = v;
+        const parts = path.split("/").filter(Boolean);
+
+        Onion.state.slug = parts[0].replace("@","");
+
+        return "/" + (parts.slice(1).join("/") || "");
+      }
+
+      return path;
+
+    }catch(e){
+
+      Onion.error?.("Router get error:", e);
+      return "/";
+
     }
 
-    return query;
-
   }
 
-  /* =========================
+  /* =========================================================
+     QUERY
+  ========================================================= */
+
+  function getQuery(){
+    return Object.fromEntries(new URLSearchParams(window.location.search));
+  }
+
+  /* =========================================================
      RESOLVE
-  ========================= */
+  ========================================================= */
 
   function resolve(){
 
@@ -70,8 +86,7 @@
 
       console.warn("⚠️ Ruta no encontrada:", path);
 
-      route = Onion.routes["/"];
-
+      route = Onion.routes?.["/"];
     }
 
     return {
@@ -82,20 +97,48 @@
 
   }
 
-  /* =========================
-     NAVIGATE
-  ========================= */
+  /* =========================================================
+     BUILD URL (CON SLUG)
+  ========================================================= */
 
-  function navigate(path){
+  function buildUrl(href){
 
-    if(!path) return;
+    const slug =
+      Onion.state.slug ||
+      localStorage.getItem("onion_user_slug");
 
-    const target = normalize(path);
-    const current = getPath();
+    if(!slug) return href;
 
-    if(target === current) return;
+    if(href === "/") return "/@" + slug;
 
-    history.pushState({}, "", target);
+    if(href.startsWith("/@")) return href;
+
+    return "/@" + slug + href;
+
+  }
+
+  /* =========================================================
+     NAVIGATE (SIN LÓGICA EXTRA)
+  ========================================================= */
+
+  function navigate(href){
+
+    if(!href) return;
+
+    // externas
+    if(href.startsWith("http")){
+      window.location.href = href;
+      return;
+    }
+
+    const finalHref = buildUrl(href);
+
+    const current = normalize(window.location.pathname);
+    const next    = normalize(finalHref);
+
+    if(current === next) return;
+
+    history.pushState({}, "", finalHref);
 
     window.scrollTo(0, 0);
 
@@ -103,17 +146,17 @@
 
   }
 
-  /* =========================
+  /* =========================================================
      POPSTATE
-  ========================= */
+  ========================================================= */
 
   window.addEventListener("popstate", ()=>{
     Onion.render?.();
   });
 
-  /* =========================
-     PUBLIC
-  ========================= */
+  /* =========================================================
+     PUBLIC API
+  ========================================================= */
 
   Onion.router = {
     get: getPath,
@@ -123,8 +166,12 @@
     query: getQuery
   };
 
+  /* =========================================================
+     DEBUG
+  ========================================================= */
+
   if(Onion.config?.DEBUG){
-    Onion.log("🧭 Router FINAL READY");
+    Onion.log("🧭 Router CLEAN ready");
   }
 
 })();

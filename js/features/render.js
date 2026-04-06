@@ -8,7 +8,13 @@ if(!window.Onion){
 }
 
 const Onion = window.Onion;
-const MAX_CONTAINER_WAIT = 5000;
+
+/* =========================================================
+   CACHE PRO
+========================================================= */
+
+const viewCache = new Map();
+const loadedScripts = new Set();
 
 /* =========================================================
    DEBUG
@@ -18,56 +24,12 @@ function log(...args){
   console.log("🧅 [RENDER]", ...args);
 }
 
-function time(label){
-  console.time("🧅 " + label);
-}
-
-function timeEnd(label){
-  console.timeEnd("🧅 " + label);
-}
-
-/* =========================================================
-   DOM READY
-========================================================= */
-
-function waitForDOMReady(){
-  if(document.readyState === "complete" || document.readyState === "interactive"){
-    return Promise.resolve();
-  }
-  return new Promise(resolve=>{
-    document.addEventListener("DOMContentLoaded", resolve, { once:true });
-  });
-}
-
-/* =========================================================
-   WAIT VIEW CONTAINER
-========================================================= */
-
-function waitForViewContainer(){
-  return new Promise((resolve, reject)=>{
-    const start = performance.now();
-
-    const check = () => {
-      const el = document.getElementById("view-container");
-
-      if(el) return resolve(el);
-
-      if(performance.now() - start > MAX_CONTAINER_WAIT){
-        return reject(new Error("⏱️ view-container timeout"));
-      }
-
-      requestAnimationFrame(check);
-    };
-
-    check();
-  });
-}
-
 /* =========================================================
    UTILS
 ========================================================= */
 
 function normalizeUrl(src){
+
   if(!src) return null;
 
   if(typeof src !== "string"){
@@ -82,10 +44,11 @@ function normalizeUrl(src){
   }
 
   return window.location.origin + "/" + src.replace(/^\/+/,"");
+
 }
 
 /* =========================================================
-   SCRIPT LOADER (NO BLOQUEANTE)
+   SCRIPT LOADER (CACHEADO)
 ========================================================= */
 
 function loadScriptSingle(src){
@@ -94,10 +57,12 @@ function loadScriptSingle(src){
     const finalSrc = normalizeUrl(src);
     if(!finalSrc) return resolve();
 
-    const existing = document.querySelector(`script[src="${finalSrc}"][data-onion-page]`);
-    if(existing){
+    /* 🔥 YA CARGADO → SKIP */
+    if(loadedScripts.has(finalSrc)){
       return resolve();
     }
+
+    loadedScripts.add(finalSrc);
 
     const s = document.createElement("script");
     s.src = finalSrc;
@@ -123,17 +88,14 @@ Onion.loadScript = function(scripts){
 
   if(!Array.isArray(scripts)) return;
 
-  document.querySelectorAll("script[data-onion-page]").forEach(s=>{
-    try{ s.remove(); }catch{}
-  });
-
   Promise.all(scripts.map(loadScriptSingle))
     .then(()=> log("✅ Scripts OK"))
     .catch(e=> console.error("❌ Script error", e));
+
 };
 
 /* =========================================================
-   STYLE LOADER (NO BLOQUEANTE)
+   STYLE LOADER
 ========================================================= */
 
 Onion.loadStyle = function(styles){
@@ -167,13 +129,18 @@ Onion.loadStyle = function(styles){
 };
 
 /* =========================================================
-   FETCH HTML
+   FETCH HTML (CACHEADO 🔥)
 ========================================================= */
 
 Onion.fetchHTML = async function(url){
 
   const finalUrl = normalizeUrl(url);
   if(!finalUrl) throw new Error("URL inválida");
+
+  /* 🔥 CACHE HIT */
+  if(viewCache.has(finalUrl)){
+    return viewCache.get(finalUrl);
+  }
 
   const res = await fetch(finalUrl, {
     credentials: "include"
@@ -183,7 +150,11 @@ Onion.fetchHTML = async function(url){
     throw new Error("HTTP " + res.status);
   }
 
-  return await res.text();
+  const text = await res.text();
+
+  viewCache.set(finalUrl, text);
+
+  return text;
 
 };
 
@@ -209,11 +180,12 @@ function extractContent(html){
 }
 
 /* =========================================================
-   SWAP VIEW
+   SWAP VIEW (RÁPIDO Y ESTABLE)
 ========================================================= */
 
 function swapView(container, node){
-  container.replaceChildren(node);
+  container.innerHTML = "";
+  container.appendChild(node);
 }
 
 /* =========================================================
@@ -236,7 +208,7 @@ function clearView(){
 }
 
 /* =========================================================
-   CORE RENDER (ULTRA FAST)
+   CORE RENDER (ULTRA FAST 🚀)
 ========================================================= */
 
 const originalRender = async function(){
@@ -252,17 +224,22 @@ const originalRender = async function(){
 
   try{
 
-    await waitForDOMReady();
-    const container = await waitForViewContainer();
+    /* 🔥 DIRECTO SIN ESPERAS */
+    const container = document.getElementById("view-container");
+
+    if(!container){
+      throw new Error("view-container no encontrado");
+    }
 
     const route = Onion.router.resolve();
+
     if(!route?.page){
       throw new Error("Ruta inválida");
     }
 
     updateTopbar(route);
 
-    /* 🔥 FETCH */
+    /* 🔥 FETCH (CACHEADO) */
     const html = await Onion.fetchHTML(route.page);
 
     if(renderId !== Onion.state.renderId) return;
@@ -272,17 +249,14 @@ const originalRender = async function(){
 
     Onion.runCleanup?.();
 
-    /* 🔥 PINTA YA (loader visible inmediato) */
+    /* 🔥 RENDER INMEDIATO */
     clearView();
     swapView(container, content);
 
-    /* 🔥 FRAME PARA QUE APAREZCA */
-    await new Promise(r=>requestAnimationFrame(r));
-
-    /* 🔥 READY (animación suave) */
+    /* 🔥 READY SIN DELAY */
     container.querySelector(".panel-content")?.classList.add("ready");
 
-    /* 🔥 LOAD EN BACKGROUND */
+    /* 🔥 BACKGROUND LOAD */
     if(route.style) Onion.loadStyle(route.style);
     if(route.script) Onion.loadScript(route.script);
 

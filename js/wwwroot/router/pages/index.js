@@ -27,7 +27,7 @@ Onion.routes = Object.freeze({
   "/": {
     page: "/app/views/index.html",
     style: "/css/app/dashboard.css",
-    script: "/js/features/dashboard/index.js",
+    script: "/js/wwwroot/router/pages/dashboard/index.js",
     title: "Dashboard"
   },
 

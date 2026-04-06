@@ -14,6 +14,7 @@ if(!Onion){
 
 let sidebar = null;
 let dropdown = null;
+let toggleBtn = null;
 
 /* =========================================================
    INIT SAFE
@@ -27,10 +28,12 @@ function init(){
   }
 
   dropdown = document.getElementById("userDropdown");
+  toggleBtn = document.getElementById("toggleSidebar");
 
   renderUser();
   restoreState();
   applyRole();
+  updateToggleLabel(); // 🔥 clave
 
 }
 
@@ -52,7 +55,6 @@ function stopLoader(){
   document.body.classList.remove("loading");
 }
 
-/* 🔥 HOOK GLOBAL RENDER */
 if(!Onion.__sidebarHooked){
 
   const originalRender = Onion.render;
@@ -93,6 +95,8 @@ document.addEventListener("click", async (e)=>{
     const collapsed = sidebar.classList.toggle("collapsed");
     localStorage.setItem("sidebar-collapsed", collapsed);
 
+    updateToggleLabel(); // 🔥 actualizar texto
+
     dropdown?.classList.remove("active");
     return;
   }
@@ -100,6 +104,14 @@ document.addEventListener("click", async (e)=>{
   /* USER MENU */
   if(e.target.closest("#userToggle")){
     if(!dropdown) return;
+
+    // 🔥 abrir sidebar si está cerrado
+    if(sidebar?.classList.contains("collapsed")){
+      sidebar.classList.remove("collapsed");
+      localStorage.setItem("sidebar-collapsed", "false");
+      updateToggleLabel();
+    }
+
     dropdown.classList.toggle("active");
     return;
   }
@@ -109,23 +121,18 @@ document.addEventListener("click", async (e)=>{
     dropdown?.classList.remove("active");
   }
 
-  /* 🔥 LOGOUT REAL */
+  /* LOGOUT */
   if(e.target.closest("#logoutBtn")){
 
     e.preventDefault();
     startLoader();
 
     try{
-
-      await Onion.fetch("/auth/logout", {
-        method: "POST"
-      });
-
+      await Onion.fetch("/auth/logout", { method: "POST" });
     }catch(e){
       console.warn("Logout error (ignorado)");
     }
 
-    /* limpiar cliente */
     localStorage.removeItem("onion_token");
     localStorage.removeItem("onion_user_slug");
     localStorage.removeItem("onion_user_name");
@@ -133,9 +140,7 @@ document.addEventListener("click", async (e)=>{
 
     Onion.state.user = null;
 
-    /* reload limpio */
     location.href = "/";
-
   }
 
 });
@@ -149,12 +154,31 @@ function restoreState(){
   if(!sidebar) return;
 
   const saved = localStorage.getItem("sidebar-collapsed");
-  sidebar.classList.toggle("collapsed", saved === "true");
+  const isCollapsed = saved === "true";
+
+  sidebar.classList.toggle("collapsed", isCollapsed);
 
 }
 
 /* =========================================================
-   USER (AVATAR + NAME)
+   🔥 TOGGLE LABEL FIX
+========================================================= */
+
+function updateToggleLabel(){
+  if(!toggleBtn || !sidebar) return;
+
+  const isCollapsed = sidebar.classList.contains("collapsed");
+
+  const text = isCollapsed
+    ? "Abrir barra lateral"
+    : "Cerrar barra lateral";
+
+  toggleBtn.setAttribute("title", text);
+  toggleBtn.setAttribute("aria-label", text);
+}
+
+/* =========================================================
+   USER
 ========================================================= */
 
 function renderUser(){
@@ -172,9 +196,7 @@ function renderUser(){
 
   if(!avatarEl) return;
 
-  /* 🔥 SI HAY FOTO */
   if(avatar){
-
     avatarEl.innerHTML = `
       <img 
         src="${avatar}" 
@@ -182,12 +204,8 @@ function renderUser(){
         style="width:100%;height:100%;object-fit:cover;border-radius:50%;"
       />
     `;
-
   }else{
-
-    /* 🔥 FALLBACK LETRA */
     avatarEl.textContent = name[0]?.toUpperCase() || "U";
-
   }
 
 }

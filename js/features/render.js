@@ -11,6 +11,22 @@ const Onion = window.Onion;
 const MAX_CONTAINER_WAIT = 5000;
 
 /* =========================================================
+   DEBUG
+========================================================= */
+
+function log(...args){
+  console.log("🧅 [RENDER]", ...args);
+}
+
+function time(label){
+  console.time("🧅 " + label);
+}
+
+function timeEnd(label){
+  console.timeEnd("🧅 " + label);
+}
+
+/* =========================================================
    DOM READY
 ========================================================= */
 
@@ -69,7 +85,7 @@ function normalizeUrl(src){
 }
 
 /* =========================================================
-   SCRIPT LOADER
+   SCRIPT LOADER (PARALELO)
 ========================================================= */
 
 function loadScriptSingle(src){
@@ -79,7 +95,10 @@ function loadScriptSingle(src){
     if(!finalSrc) return resolve();
 
     const existing = document.querySelector(`script[src="${finalSrc}"][data-onion-page]`);
-    if(existing) return resolve();
+    if(existing){
+      log("🟡 Script ya cargado:", finalSrc);
+      return resolve();
+    }
 
     const s = document.createElement("script");
     s.src = finalSrc;
@@ -87,8 +106,15 @@ function loadScriptSingle(src){
     s.async = false;
     s.dataset.onionPage = "true";
 
-    s.onload = resolve;
-    s.onerror = reject;
+    s.onload = () => {
+      log("✅ Script cargado:", finalSrc);
+      resolve();
+    };
+
+    s.onerror = (e) => {
+      console.error("❌ Error script:", finalSrc, e);
+      reject(e);
+    };
 
     document.body.appendChild(s);
 
@@ -112,10 +138,11 @@ Onion.loadScript = async function(scripts){
     try{ s.remove(); }catch{}
   });
 
-  for(const src of scripts){
-    await loadScriptSingle(src);
-  }
+  time("scripts");
 
+  await Promise.all(scripts.map(loadScriptSingle));
+
+  timeEnd("scripts");
 };
 
 /* =========================================================
@@ -139,6 +166,8 @@ Onion.loadStyle = function(styles){
       .forEach(l=>{
         try{ l.remove(); }catch{}
       });
+
+    time("styles");
 
     styles.forEach(href=>{
 
@@ -164,11 +193,8 @@ Onion.loadStyle = function(styles){
     function done(){
       loaded++;
       if(loaded === styles.length){
-        requestAnimationFrame(()=>{
-          requestAnimationFrame(()=>{
-            resolve();
-          });
-        });
+        timeEnd("styles");
+        resolve();
       }
     }
 
@@ -185,6 +211,8 @@ Onion.fetchHTML = async function(url){
   const finalUrl = normalizeUrl(url);
   if(!finalUrl) throw new Error("URL inválida");
 
+  time("fetch");
+
   const res = await fetch(finalUrl, {
     credentials: "include"
   });
@@ -193,7 +221,11 @@ Onion.fetchHTML = async function(url){
     throw new Error("HTTP " + res.status);
   }
 
-  return res.text();
+  const text = await res.text();
+
+  timeEnd("fetch");
+
+  return text;
 
 };
 
@@ -246,7 +278,7 @@ function clearView(){
 }
 
 /* =========================================================
-   CORE RENDER (TABLE LOADER PRO)
+   CORE RENDER (OPTIMIZADO)
 ========================================================= */
 
 const originalRender = async function(){
@@ -260,16 +292,13 @@ const originalRender = async function(){
   const renderId = ++Onion.state.renderId;
   Onion.state.rendering = true;
 
-  let tableLoader = null;
-  let tableLoaderStart = 0;
+  time("TOTAL RENDER");
 
   try{
 
     await waitForDOMReady();
-
     const container = await waitForViewContainer();
 
-    /* 🔥 anti flicker */
     container.style.visibility = "hidden";
 
     const route = Onion.router.resolve();
@@ -277,6 +306,8 @@ const originalRender = async function(){
     if(!route?.page){
       throw new Error("Ruta inválida");
     }
+
+    log("📍 Ruta:", route);
 
     if(route.title){
       document.title = "Onion Support · " + route.title;
@@ -290,14 +321,6 @@ const originalRender = async function(){
 
     let content = extractContent(html);
     content.classList.remove("ready");
-
-    /* 🔥 detectar loader de tabla */
-    tableLoader = content.querySelector(".table-loader");
-
-    if(tableLoader){
-      tableLoader.classList.remove("hidden");
-      tableLoaderStart = performance.now();
-    }
 
     if(route.style){
       await Onion.loadStyle(route.style);
@@ -314,28 +337,14 @@ const originalRender = async function(){
 
     if(renderId !== Onion.state.renderId) return;
 
-    /* 🔥 estabilidad visual */
+    /* solo 1 frame */
     await new Promise(r=>requestAnimationFrame(r));
-    await new Promise(r=>requestAnimationFrame(r));
-
-    /* 🔥 tiempo mínimo loader tabla */
-    if(tableLoader){
-
-      const MIN_TABLE_LOADER = 800;
-
-      const elapsed = performance.now() - tableLoaderStart;
-      const remaining = MIN_TABLE_LOADER - elapsed;
-
-      if(remaining > 0){
-        await new Promise(r => setTimeout(r, remaining));
-      }
-
-      tableLoader.classList.add("hidden");
-    }
 
     container.querySelector(".panel-content")?.classList.add("ready");
 
     container.style.visibility = "";
+
+    log("✅ Render completado");
 
   }catch(e){
 
@@ -359,6 +368,7 @@ const originalRender = async function(){
       Onion.state.rendering = false;
     }
 
+    timeEnd("TOTAL RENDER");
   }
 
 };

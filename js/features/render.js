@@ -85,7 +85,7 @@ function normalizeUrl(src){
 }
 
 /* =========================================================
-   SCRIPT LOADER (PARALELO)
+   SCRIPT LOADER (NO BLOQUEANTE)
 ========================================================= */
 
 function loadScriptSingle(src){
@@ -96,7 +96,6 @@ function loadScriptSingle(src){
 
     const existing = document.querySelector(`script[src="${finalSrc}"][data-onion-page]`);
     if(existing){
-      log("🟡 Script ya cargado:", finalSrc);
       return resolve();
     }
 
@@ -106,22 +105,15 @@ function loadScriptSingle(src){
     s.async = false;
     s.dataset.onionPage = "true";
 
-    s.onload = () => {
-      log("✅ Script cargado:", finalSrc);
-      resolve();
-    };
-
-    s.onerror = (e) => {
-      console.error("❌ Error script:", finalSrc, e);
-      reject(e);
-    };
+    s.onload = resolve;
+    s.onerror = reject;
 
     document.body.appendChild(s);
 
   });
 }
 
-Onion.loadScript = async function(scripts){
+Onion.loadScript = function(scripts){
 
   if(!scripts) return;
 
@@ -129,72 +121,46 @@ Onion.loadScript = async function(scripts){
     scripts = [scripts];
   }
 
-  if(!Array.isArray(scripts)){
-    Onion.error?.("Scripts inválidos:", scripts);
-    return;
-  }
+  if(!Array.isArray(scripts)) return;
 
   document.querySelectorAll("script[data-onion-page]").forEach(s=>{
     try{ s.remove(); }catch{}
   });
 
-  time("scripts");
-  await Promise.all(scripts.map(loadScriptSingle));
-  timeEnd("scripts");
+  Promise.all(scripts.map(loadScriptSingle))
+    .then(()=> log("✅ Scripts OK"))
+    .catch(e=> console.error("❌ Script error", e));
 };
 
 /* =========================================================
-   STYLE LOADER
+   STYLE LOADER (NO BLOQUEANTE)
 ========================================================= */
 
 Onion.loadStyle = function(styles){
 
-  return new Promise(resolve=>{
+  if(!styles) return;
 
-    if(!styles) return resolve();
+  if(!Array.isArray(styles)){
+    styles = [styles];
+  }
 
-    if(!Array.isArray(styles)){
-      styles = [styles];
-    }
-
-    let loaded = 0;
-
-    document
-      .querySelectorAll('link[data-onion-page-style]')
-      .forEach(l=>{
-        try{ l.remove(); }catch{}
-      });
-
-    time("styles");
-
-    styles.forEach(href=>{
-
-      const finalHref = normalizeUrl(href);
-
-      if(!finalHref){
-        done();
-        return;
-      }
-
-      const link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.href = finalHref;
-      link.dataset.onionPageStyle = "true";
-
-      link.onload = done;
-      link.onerror = done;
-
-      document.head.appendChild(link);
-
+  document
+    .querySelectorAll('link[data-onion-page-style]')
+    .forEach(l=>{
+      try{ l.remove(); }catch{}
     });
 
-    function done(){
-      loaded++;
-      if(loaded === styles.length){
-        timeEnd("styles");
-        resolve();
-      }
-    }
+  styles.forEach(href=>{
+
+    const finalHref = normalizeUrl(href);
+    if(!finalHref) return;
+
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = finalHref;
+    link.dataset.onionPageStyle = "true";
+
+    document.head.appendChild(link);
 
   });
 
@@ -209,8 +175,6 @@ Onion.fetchHTML = async function(url){
   const finalUrl = normalizeUrl(url);
   if(!finalUrl) throw new Error("URL inválida");
 
-  time("fetch");
-
   const res = await fetch(finalUrl, {
     credentials: "include"
   });
@@ -219,11 +183,7 @@ Onion.fetchHTML = async function(url){
     throw new Error("HTTP " + res.status);
   }
 
-  const text = await res.text();
-
-  timeEnd("fetch");
-
-  return text;
+  return await res.text();
 
 };
 
@@ -276,7 +236,7 @@ function clearView(){
 }
 
 /* =========================================================
-   CORE RENDER (PRO)
+   CORE RENDER (ULTRA FAST)
 ========================================================= */
 
 const originalRender = async function(){
@@ -290,60 +250,41 @@ const originalRender = async function(){
   const renderId = ++Onion.state.renderId;
   Onion.state.rendering = true;
 
-  time("TOTAL RENDER");
-
   try{
 
     await waitForDOMReady();
     const container = await waitForViewContainer();
 
     const route = Onion.router.resolve();
-
     if(!route?.page){
       throw new Error("Ruta inválida");
     }
 
-    log("📍 Ruta:", route);
-
-    if(route.title){
-      document.title = "Onion Support · " + route.title;
-    }
-
     updateTopbar(route);
 
-    /* 🔥 FETCH HTML */
+    /* 🔥 FETCH */
     const html = await Onion.fetchHTML(route.page);
 
     if(renderId !== Onion.state.renderId) return;
 
-    let content = extractContent(html);
+    const content = extractContent(html);
     content.classList.remove("ready");
-
-    /* 🔥 LOAD STYLE (antes del paint) */
-    if(route.style){
-      await Onion.loadStyle(route.style);
-    }
 
     Onion.runCleanup?.();
 
-    /* 🔥 SWAP INMEDIATO (aquí ya aparece loader si existe en HTML) */
+    /* 🔥 PINTA YA (loader visible inmediato) */
     clearView();
     swapView(container, content);
 
-    /* 🔥 FORZAR PAINT (loader visible YA) */
+    /* 🔥 FRAME PARA QUE APAREZCA */
     await new Promise(r=>requestAnimationFrame(r));
 
-    /* 🔥 LOAD SCRIPTS (NO bloquea render visual) */
-    if(route.script){
-      await Onion.loadScript(route.script);
-    }
-
-    if(renderId !== Onion.state.renderId) return;
-
-    /* 🔥 READY */
+    /* 🔥 READY (animación suave) */
     container.querySelector(".panel-content")?.classList.add("ready");
 
-    log("✅ Render completado");
+    /* 🔥 LOAD EN BACKGROUND */
+    if(route.style) Onion.loadStyle(route.style);
+    if(route.script) Onion.loadScript(route.script);
 
   }catch(e){
 
@@ -366,7 +307,6 @@ const originalRender = async function(){
       Onion.state.rendering = false;
     }
 
-    timeEnd("TOTAL RENDER");
   }
 
 };

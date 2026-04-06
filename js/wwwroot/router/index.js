@@ -16,32 +16,37 @@
   Onion.features = Onion.features || Object.create(null);
 
   /* =========================================================
-     🔌 LISTA DE SCRIPTS (ESTO ES TU BACKEND)
+     🔥 ZONA SAGRADA (SOLO TOCAS ESTO)
+     Añade aquí nuevos scripts y YA FUNCIONA
   ========================================================= */
 
   const SCRIPTS = [
 
     // FEATURES
-    "/js/wwwroot/features/incidencias/index.js",
-    "/js/wwwroot/features/facturas/index.js",
+       "/js/wwwroot/features/index.js",
+    // "/js/wwwroot/features/facturas/index.js",
 
     // UI
-    "/js/wwwroot/ui/index.js",
+    // "/js/wwwroot/ui/index.js",
 
     // USER
-    "/js/wwwroot/user/index.js"
+    // "/js/wwwroot/user/index.js"
+
+    // 👉 AQUÍ AÑADES MÁS:
+    // "/js/wwwroot/features/clientes/index.js"
 
   ];
 
   /* =========================================================
-     LOADER
+     LOADER (NO TOCAR)
   ========================================================= */
 
   const loaded = new Set();
 
   function loadScript(src){
 
-    if(loaded.has(src)) return;
+    if(loaded.has(src)) return Promise.resolve();
+
     loaded.add(src);
 
     return new Promise((resolve, reject)=>{
@@ -67,7 +72,7 @@
   }
 
   /* =========================================================
-     CARGA SECUENCIAL (IMPORTANTE 🔥)
+     CARGA CONTROLADA (NO TOCAR)
   ========================================================= */
 
   async function loadAll(){
@@ -85,12 +90,12 @@
   }
 
   /* =========================================================
-     INIT
+     INIT (NO TOCAR)
   ========================================================= */
 
   function init(){
 
-    console.log("🔌 Script loader iniciado");
+    console.log("🔌 Loader iniciado");
 
     loadAll();
 

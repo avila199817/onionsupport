@@ -57,7 +57,6 @@ function loadScriptSingle(src){
     const finalSrc = normalizeUrl(src);
     if(!finalSrc) return resolve();
 
-    /* 🔥 YA CARGADO → SKIP */
     if(loadedScripts.has(finalSrc)){
       return resolve();
     }
@@ -129,7 +128,7 @@ Onion.loadStyle = function(styles){
 };
 
 /* =========================================================
-   FETCH HTML (CACHEADO 🔥)
+   FETCH HTML (CACHEADO)
 ========================================================= */
 
 Onion.fetchHTML = async function(url){
@@ -137,7 +136,6 @@ Onion.fetchHTML = async function(url){
   const finalUrl = normalizeUrl(url);
   if(!finalUrl) throw new Error("URL inválida");
 
-  /* 🔥 CACHE HIT */
   if(viewCache.has(finalUrl)){
     return viewCache.get(finalUrl);
   }
@@ -180,7 +178,7 @@ function extractContent(html){
 }
 
 /* =========================================================
-   SWAP VIEW (RÁPIDO Y ESTABLE)
+   SWAP VIEW
 ========================================================= */
 
 function swapView(container, node){
@@ -208,7 +206,16 @@ function clearView(){
 }
 
 /* =========================================================
-   CORE RENDER (ULTRA FAST 🚀)
+   LOADER CONTROL (🔥 FIX REAL)
+========================================================= */
+
+function stopLoader(){
+  document.body.classList.remove("loading");
+  clearTimeout(window.__onionLoaderTimeout);
+}
+
+/* =========================================================
+   CORE RENDER (ULTRA PRO)
 ========================================================= */
 
 const originalRender = async function(){
@@ -224,7 +231,6 @@ const originalRender = async function(){
 
   try{
 
-    /* 🔥 DIRECTO SIN ESPERAS */
     const container = document.getElementById("view-container");
 
     if(!container){
@@ -239,7 +245,7 @@ const originalRender = async function(){
 
     updateTopbar(route);
 
-    /* 🔥 FETCH (CACHEADO) */
+    /* 🔥 FETCH CACHEADO */
     const html = await Onion.fetchHTML(route.page);
 
     if(renderId !== Onion.state.renderId) return;
@@ -253,16 +259,21 @@ const originalRender = async function(){
     clearView();
     swapView(container, content);
 
-    /* 🔥 READY SIN DELAY */
+    /* 🔥 FIX LOADER (CLAVE) */
+    stopLoader();
+
+    /* 🔥 READY */
     container.querySelector(".panel-content")?.classList.add("ready");
 
-    /* 🔥 BACKGROUND LOAD */
+    /* 🔥 BACKGROUND */
     if(route.style) Onion.loadStyle(route.style);
     if(route.script) Onion.loadScript(route.script);
 
   }catch(e){
 
     console.error("💥 RENDER ERROR:", e);
+
+    stopLoader();
 
     const container = document.getElementById("view-container");
 

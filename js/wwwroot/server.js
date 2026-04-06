@@ -346,6 +346,24 @@ Onion.init = async function(){
 
   await Onion.auth.tryLoadUser();
 
+  /* =========================================================
+     🔒 AUTH GUARD
+  ========================================================= */
+
+  if(!Onion.state.user){
+
+    // permitir acceso a /auth
+    if(!location.pathname.startsWith("/auth")){
+      location.href = "/auth";
+      return;
+    }
+
+  }
+
+  /* =========================================================
+     🔌 BRIDGE LOAD
+  ========================================================= */
+
   const script = document.createElement("script");
   script.src = "/js/wwwroot/router/index.js";
   script.defer = true;

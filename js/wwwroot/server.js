@@ -316,7 +316,6 @@ document.addEventListener("DOMContentLoaded", Onion.init);
 ========================================================= */
 
 Object.freeze(Onion.config);
-Object.freeze(Onion.state);
 Object.freeze(Onion.router);
 
 log("🚀 CORE ready");

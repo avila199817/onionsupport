@@ -162,9 +162,7 @@ Onion.loadStyle = function(styles){
     });
 
     function done(){
-
       loaded++;
-
       if(loaded === styles.length){
         requestAnimationFrame(()=>{
           requestAnimationFrame(()=>{
@@ -172,7 +170,6 @@ Onion.loadStyle = function(styles){
           });
         });
       }
-
     }
 
   });
@@ -234,12 +231,9 @@ function swapView(container, node){
 ========================================================= */
 
 function updateTopbar(route){
-
   const el = document.getElementById("topbar-title");
   if(!el) return;
-
   el.textContent = route?.title || "Panel";
-
 }
 
 /* =========================================================
@@ -247,14 +241,12 @@ function updateTopbar(route){
 ========================================================= */
 
 function clearView(){
-
   document.getElementById("topbarview-container")?.replaceChildren();
   document.getElementById("tablehead-container")?.replaceChildren();
-
 }
 
 /* =========================================================
-   CORE RENDER (FIX FLICKER 🔥)
+   CORE RENDER (10/10 FINAL)
 ========================================================= */
 
 const originalRender = async function(){
@@ -268,15 +260,18 @@ const originalRender = async function(){
   const renderId = ++Onion.state.renderId;
   Onion.state.rendering = true;
 
+  let loaderStart = 0;
+
   try{
 
     await waitForDOMReady();
 
     const container = await waitForViewContainer();
 
-    /* 🔥 CLAVE: ocultar antes de tocar DOM */
+    /* 🔥 ocultar antes de pintar */
     container.style.visibility = "hidden";
 
+    loaderStart = performance.now();
     Onion.ui.showLoader?.();
 
     const route = Onion.router.resolve();
@@ -318,13 +313,12 @@ const originalRender = async function(){
 
     if(renderId !== Onion.state.renderId) return;
 
-    /* 🔥 doble frame = render estable */
     await new Promise(r=>requestAnimationFrame(r));
     await new Promise(r=>requestAnimationFrame(r));
 
     container.querySelector(".panel-content")?.classList.add("ready");
 
-    /* 🔥 mostrar SOLO cuando todo está listo */
+    /* 🔥 mostrar limpio */
     container.style.visibility = "";
 
   }catch(e){
@@ -344,6 +338,16 @@ const originalRender = async function(){
     }
 
   }finally{
+
+    /* 🔥 loader mínimo SIEMPRE visible */
+    const MIN_LOADER_TIME = 1000;
+
+    const elapsed = performance.now() - loaderStart;
+    const remaining = MIN_LOADER_TIME - elapsed;
+
+    if(remaining > 0){
+      await new Promise(r => setTimeout(r, remaining));
+    }
 
     Onion.ui.hideLoader?.();
 

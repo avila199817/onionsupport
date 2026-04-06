@@ -2,46 +2,80 @@
 
 (function(){
 
-  if(!window.Onion){
-    console.error("Onion no existe (ui/index)");
+  const Onion = window.Onion;
+
+  if(!Onion){
+    console.error("💥 Onion no disponible (ui/index.js)");
     return;
   }
 
-  const Onion = window.Onion;
-
-  // evitar doble ejecución
-  if(Onion.__uiLoaded__) return;
-  Onion.__uiLoaded__ = true;
-
   /* =========================================================
-     VALIDAR MÓDULOS UI
+     🔥 ZONA SAGRADA (AQUÍ SOLO AÑADES SCRIPTS UI)
   ========================================================= */
 
-  if(!Onion.ui){
-    console.warn("⚠️ ui.js no cargado");
-  }
+  const SCRIPTS = [
 
-  if(!Onion.ui?.showLoader){
-    console.warn("⚠️ loader.js no cargado");
-  }
+    // UI CORE
+    "/js/wwwroot/router/ui/sidebar.js",
 
-  if(!Onion.ui?.toast){
-    console.warn("⚠️ toast.js no cargado");
-  }
+  ];
 
-  /* sidebar y topbar pueden no ser obligatorios */
-  if(!document.querySelector(".sidebar")){
-    console.warn("⚠️ sidebar no detectado en DOM");
-  }
+  /* =========================================================
+     LOADER (NO TOCAR)
+  ========================================================= */
 
-  if(!document.querySelector(".topbar")){
-    console.warn("⚠️ topbar no detectado en DOM");
+  const loaded = new Set();
+
+  function loadScript(src){
+
+    if(loaded.has(src)) return Promise.resolve();
+
+    loaded.add(src);
+
+    return new Promise((resolve, reject)=>{
+
+      const s = document.createElement("script");
+      s.src = src;
+      s.defer = true;
+
+      s.onload = ()=>{
+        console.log("🧩 UI cargado:", src);
+        resolve();
+      };
+
+      s.onerror = ()=>{
+        console.error("💥 UI error:", src);
+        reject(src);
+      };
+
+      document.body.appendChild(s);
+
+    });
+
   }
 
   /* =========================================================
-     READY
+     INIT
   ========================================================= */
 
-  console.log("🎨 UI listo");
+  async function init(){
+
+    console.log("🎨 UI INIT");
+
+    for(const src of SCRIPTS){
+      try{
+        await loadScript(src);
+      }catch(e){}
+    }
+
+    console.log("🎨 UI READY");
+
+  }
+
+  if(document.readyState === "loading"){
+    document.addEventListener("DOMContentLoaded", init);
+  }else{
+    init();
+  }
 
 })();

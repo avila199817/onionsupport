@@ -14,84 +14,27 @@
   ========================================================= */
 
   Onion.features = Onion.features || Object.create(null);
-  Onion.modules  = Onion.modules  || Object.create(null);
 
   /* =========================================================
-     CONFIG RUTAS BASE
+     🔌 LISTA DE SCRIPTS (ESTO ES TU BACKEND)
   ========================================================= */
 
-  const BASE = "/js/wwwroot/";
+  const SCRIPTS = [
 
-  const MODULES = [
-    "features",
-    "ui",
-    "pages",
-    "user",
-    "i18n"
+    // FEATURES
+    "/js/wwwroot/features/incidencias/index.js",
+    "/js/wwwroot/features/facturas/index.js",
+
+    // UI
+    "/js/wwwroot/ui/index.js",
+
+    // USER
+    "/js/wwwroot/user/index.js"
+
   ];
 
   /* =========================================================
-     CARGADOR CORE
-  ========================================================= */
-
-  function loadAll(){
-
-    MODULES.forEach(loadModuleFolder);
-
-  }
-
-  /* =========================================================
-     CARGAR CARPETA COMPLETA
-  ========================================================= */
-
-  function loadModuleFolder(folder){
-
-    // 🔥 IMPORTANTE:
-    // aquí defines SOLO carpetas base
-    // dentro de ellas deben existir subcarpetas con index.js
-
-    fetchFolderStructure(folder)
-      .then(files=>{
-        files.forEach(name=>{
-          loadScript(`${BASE}${folder}/${name}/index.js`);
-        });
-      })
-      .catch(()=>{
-        console.warn("⚠️ No se pudo cargar carpeta:", folder);
-      });
-
-  }
-
-  /* =========================================================
-     FETCH ESTRUCTURA (SIMULADO / MANUAL FALLBACK)
-  ========================================================= */
-
-  async function fetchFolderStructure(folder){
-
-    // 🚨 IMPORTANTE:
-    // JS puro NO puede leer carpetas del servidor
-    // 👉 así que usamos lista manual fallback
-
-    const MAP = {
-
-      features: [
-        "incidencias",
-        "facturas"
-      ],
-
-      ui: [],
-      pages: [],
-      user: [],
-      i18n: []
-
-    };
-
-    return MAP[folder] || [];
-
-  }
-
-  /* =========================================================
-     SCRIPT LOADER (ANTI DUPES)
+     LOADER
   ========================================================= */
 
   const loaded = new Set();
@@ -99,22 +42,45 @@
   function loadScript(src){
 
     if(loaded.has(src)) return;
-
     loaded.add(src);
 
-    const s = document.createElement("script");
-    s.src = src;
-    s.defer = true;
+    return new Promise((resolve, reject)=>{
 
-    s.onload = ()=>{
-      console.log("🧩 módulo cargado:", src);
-    };
+      const s = document.createElement("script");
+      s.src = src;
+      s.defer = true;
 
-    s.onerror = ()=>{
-      console.error("💥 error cargando:", src);
-    };
+      s.onload = ()=>{
+        console.log("🧩 script cargado:", src);
+        resolve();
+      };
 
-    document.body.appendChild(s);
+      s.onerror = ()=>{
+        console.error("💥 error cargando:", src);
+        reject(src);
+      };
+
+      document.body.appendChild(s);
+
+    });
+
+  }
+
+  /* =========================================================
+     CARGA SECUENCIAL (IMPORTANTE 🔥)
+  ========================================================= */
+
+  async function loadAll(){
+
+    for(const src of SCRIPTS){
+      try{
+        await loadScript(src);
+      }catch(e){
+        console.error("💥 fallo en:", e);
+      }
+    }
+
+    console.log("🚀 TODOS LOS SCRIPTS LISTOS");
 
   }
 
@@ -124,15 +90,11 @@
 
   function init(){
 
-    console.log("🔌 Onion Index Loader iniciado");
+    console.log("🔌 Script loader iniciado");
 
     loadAll();
 
   }
-
-  /* =========================================================
-     START
-  ========================================================= */
 
   if(document.readyState === "loading"){
     document.addEventListener("DOMContentLoaded", init);

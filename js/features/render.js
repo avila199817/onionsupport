@@ -139,9 +139,7 @@ Onion.loadScript = async function(scripts){
   });
 
   time("scripts");
-
   await Promise.all(scripts.map(loadScriptSingle));
-
   timeEnd("scripts");
 };
 
@@ -278,7 +276,7 @@ function clearView(){
 }
 
 /* =========================================================
-   CORE RENDER (OPTIMIZADO)
+   CORE RENDER (PRO)
 ========================================================= */
 
 const originalRender = async function(){
@@ -299,8 +297,6 @@ const originalRender = async function(){
     await waitForDOMReady();
     const container = await waitForViewContainer();
 
-    container.style.visibility = "hidden";
-
     const route = Onion.router.resolve();
 
     if(!route?.page){
@@ -315,6 +311,7 @@ const originalRender = async function(){
 
     updateTopbar(route);
 
+    /* 🔥 FETCH HTML */
     const html = await Onion.fetchHTML(route.page);
 
     if(renderId !== Onion.state.renderId) return;
@@ -322,27 +319,29 @@ const originalRender = async function(){
     let content = extractContent(html);
     content.classList.remove("ready");
 
+    /* 🔥 LOAD STYLE (antes del paint) */
     if(route.style){
       await Onion.loadStyle(route.style);
     }
 
     Onion.runCleanup?.();
 
+    /* 🔥 SWAP INMEDIATO (aquí ya aparece loader si existe en HTML) */
     clearView();
     swapView(container, content);
 
+    /* 🔥 FORZAR PAINT (loader visible YA) */
+    await new Promise(r=>requestAnimationFrame(r));
+
+    /* 🔥 LOAD SCRIPTS (NO bloquea render visual) */
     if(route.script){
       await Onion.loadScript(route.script);
     }
 
     if(renderId !== Onion.state.renderId) return;
 
-    /* solo 1 frame */
-    await new Promise(r=>requestAnimationFrame(r));
-
+    /* 🔥 READY */
     container.querySelector(".panel-content")?.classList.add("ready");
-
-    container.style.visibility = "";
 
     log("✅ Render completado");
 
@@ -359,7 +358,6 @@ const originalRender = async function(){
           <p>${e.message}</p>
         </div>
       `;
-      container.style.visibility = "";
     }
 
   }finally{

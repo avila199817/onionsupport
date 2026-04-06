@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 SIDEBAR — FULL PRO SAAS (SYNC + LOADER + NO FLICKER)
+   🧅 SIDEBAR — FULL PRO SAAS FINAL (STABLE + NO FREEZE)
 ========================================================= */
 
 (function(){
@@ -11,6 +11,28 @@ const Onion = window.Onion;
 if(!Onion){
   console.error("💥 Onion no disponible (sidebar)");
   return;
+}
+
+/* =========================================================
+   LOADER CONTROL (ANTI FREEZE)
+========================================================= */
+
+function startGlobalLoader(){
+
+  document.body.classList.add("loading");
+
+  clearTimeout(window.__onionLoaderTimeout);
+
+  window.__onionLoaderTimeout = setTimeout(()=>{
+    console.warn("⚠️ Loader auto-reset (fail safe)");
+    document.body.classList.remove("loading");
+  }, 4000);
+
+}
+
+function stopGlobalLoader(){
+  document.body.classList.remove("loading");
+  clearTimeout(window.__onionLoaderTimeout);
 }
 
 /* =========================================================
@@ -31,7 +53,6 @@ function init(){
   applyRoleVisibility();
   setRecientesError();
 
-  /* 🔥 BOOT LIMPIO */
   if(!Onion.state.appReady && Onion.state.user){
     Onion.state.appReady = true;
 
@@ -64,8 +85,11 @@ if(!window.__ONION_SIDEBAR_CORE__){
       renderUser();
       restoreState();
       applyRoleVisibility();
-      fixImageFlicker(); // 🔥 clave
+      fixImageFlicker();
     });
+
+    /* 🔥 SIEMPRE APAGA LOADER */
+    stopGlobalLoader();
 
   });
 
@@ -124,7 +148,7 @@ function applyRoleVisibility(){
 function bindGlobalEvents(){
 
   /* =========================
-     🔥 SPA NAV + LOADER GLOBAL
+     🔥 SPA NAV + LOADER
   ========================= */
 
   Onion.onGlobalEvent?.(document, "click", (e)=>{
@@ -132,13 +156,11 @@ function bindGlobalEvents(){
     const link = e.target.closest("[data-spa]");
     if(!link) return;
 
-    // evitar recarga misma ruta
     if(link.href === window.location.href) return;
 
-    console.log("🟡 Sidebar → navegación SPA");
+    console.log("🟡 SPA NAV → loader ON");
 
-    /* 🔥 loader GLOBAL instantáneo */
-    document.body.classList.add("loading");
+    startGlobalLoader();
 
   });
 
@@ -243,7 +265,7 @@ function bindGlobalEvents(){
 
     e.stopPropagation();
 
-    Onion.ui?.showLoader?.();
+    startGlobalLoader();
 
     try{
       await Onion.auth.logout();
@@ -256,7 +278,7 @@ function bindGlobalEvents(){
 }
 
 /* =========================================================
-   🖼️ ANTI FLICKER IMAGES (CLAVE)
+   🖼️ ANTI FLICKER IMAGES
 ========================================================= */
 
 function fixImageFlicker(){
@@ -371,7 +393,7 @@ function getInitials(name){
 ========================================================= */
 
 if(Onion.config?.DEBUG){
-  Onion.log("📚 Sidebar FULL PRO ready");
+  Onion.log("📚 Sidebar FULL PRO FINAL ready");
 }
 
 })();

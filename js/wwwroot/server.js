@@ -10,7 +10,13 @@
   const Onion = window.Onion;
 
   /* =========================================================
-     SCRIPT LOADER (SAFE)
+     SAFE STATE
+  ========================================================= */
+
+  Onion.state = Onion.state || {};
+
+  /* =========================================================
+     SCRIPT LOADER
   ========================================================= */
 
   function loadScript(src){
@@ -21,14 +27,10 @@
       s.defer = true;
       s.async = false;
 
-      s.onload = () => {
-        console.log("✅", src);
-        resolve(true);
-      };
-
+      s.onload  = () => resolve(true);
       s.onerror = () => {
         console.warn("⚠️ NO CARGADO:", src);
-        resolve(false); // 🔥 NO rompe el flujo
+        resolve(false);
       };
 
       document.head.appendChild(s);
@@ -37,17 +39,14 @@
   }
 
   async function loadGroup(name, list){
-
-    console.log(`📦 Loading ${name}...`);
-
+    console.log(`📦 ${name}`);
     for(const src of list){
       await loadScript(src);
     }
-
   }
 
   /* =========================================================
-     CORE
+     FILES
   ========================================================= */
 
   const CORE = [
@@ -58,19 +57,11 @@
     "/js/wwwroot/router/core/index.js"
   ];
 
-  /* =========================================================
-     INIT
-  ========================================================= */
-
   const INIT = [
     "/js/wwwroot/router/init/init.js",
     "/js/wwwroot/router/init/boot.js",
     "/js/wwwroot/router/init/index.js"
   ];
-
-  /* =========================================================
-     UI
-  ========================================================= */
 
   const UI = [
     "/js/wwwroot/router/ui/ui.js",
@@ -80,10 +71,6 @@
     "/js/wwwroot/router/ui/topbar.js",
     "/js/wwwroot/router/ui/index.js"
   ];
-
-  /* =========================================================
-     FEATURES BASE
-  ========================================================= */
 
   const FEATURES = [
     "/js/wwwroot/router/features/fetch.js",
@@ -95,10 +82,6 @@
     "/js/wwwroot/router/features/index.js"
   ];
 
-  /* =========================================================
-     ROUTERS (🔥 NO METAS LOS QUE NO EXISTEN)
-  ========================================================= */
-
   const ROUTERS = [
     "/js/wwwroot/router/incidencias/index.js",
     "/js/wwwroot/router/facturas/index.js",
@@ -106,62 +89,52 @@
     "/js/wwwroot/router/usuarios/index.js"
   ];
 
-  /* =========================================================
-     LOAD ALL
-  ========================================================= */
-
   async function loadAll(){
-
     await loadGroup("CORE", CORE);
     await loadGroup("INIT", INIT);
     await loadGroup("UI", UI);
     await loadGroup("FEATURES", FEATURES);
     await loadGroup("ROUTERS", ROUTERS);
-
   }
 
   /* =========================================================
-     SERVER ENGINE
+     SERVER
   ========================================================= */
 
   const routes = [];
 
   function use(path, handler){
     routes.push({ path, handler });
+
+    // 🔥 ordenar por prioridad (más largo primero)
+    routes.sort((a, b) => b.path.length - a.path.length);
   }
 
   function match(path){
-    for(const r of routes){
-      if(path.startsWith(r.path)){
-        return r;
-      }
-    }
-    return null;
+    return routes.find(r => path.startsWith(r.path)) || null;
   }
 
   function createContext(){
-
-    const route = Onion.router?.get?.() || "/";
-
     return {
-      path: route,
+      path: Onion.router?.get?.() || "/",
       query: Onion.router?.getQuery?.() || {},
       user: Onion.getUser?.(),
       navigate: Onion.router?.navigate,
       render: Onion.render
     };
-
   }
 
   async function handle(){
 
+    const ctx = createContext();
+
     try{
 
-      const ctx = createContext();
       const route = match(ctx.path);
 
       if(!route){
-        return ctx.render?.();
+        console.warn("⚠️ Ruta no encontrada:", ctx.path);
+        return ctx.render?.("404");
       }
 
       await route.handler(ctx);
@@ -169,19 +142,16 @@
     }catch(e){
 
       console.error("💥 SERVER ERROR:", e);
-      Onion.render?.();
+      ctx.render?.("error");
 
     }
 
   }
 
-  Onion.server = {
-    use,
-    handle
-  };
+  Onion.server = { use, handle };
 
   /* =========================================================
-     CONNECT ROUTERS
+     ROUTERS
   ========================================================= */
 
   function connectRouters(){
@@ -191,7 +161,7 @@
     if(window.ClientesRouter)    use("/clientes", window.ClientesRouter);
     if(window.UsersRouter)       use("/usuarios", window.UsersRouter);
 
-    use("/", async (ctx)=> ctx.render());
+    use("/", async (ctx)=> ctx.render("home"));
 
   }
 
@@ -203,11 +173,11 @@
 
     if(!Onion.router?.navigate) return;
 
-    const originalNavigate = Onion.router.navigate;
+    const original = Onion.router.navigate;
 
     Onion.router.navigate = function(path){
 
-      originalNavigate(path);
+      original(path);
       handle();
 
     };
@@ -222,35 +192,22 @@
 
   async function start(){
 
-    try{
+    console.log("🧅 Booting Onion...");
 
-      console.log("🧅 Server booting...");
+    await loadAll();
 
-      await loadAll();
+    connectRouters();
+    bindNavigation();
 
-      connectRouters();
+    await Onion.init?.();
 
-      bindNavigation();
+    Onion.state.appReady = true;
 
-      await Onion.init?.();
+    await handle();
 
-      Onion.state.appReady = true;
-
-      await handle();
-
-      console.log("🚀 Onion SPA READY");
-
-    }catch(e){
-
-      console.error("💥 BOOT ERROR:", e);
-
-    }
+    console.log("🚀 Onion READY");
 
   }
-
-  /* =========================================================
-     BOOT
-  ========================================================= */
 
   document.addEventListener("DOMContentLoaded", start);
 

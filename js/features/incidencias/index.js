@@ -46,24 +46,20 @@ function $(selector){
 }
 
 /* =========================
-   LOADER SAFE
+   LOADER SAFE (FIXED)
 ========================= */
 
 function showLoader(){
   const loader = view.safeDOM(()=> $(".table-loader"));
   if(loader){
-    loader.style.display = "flex";
-    loader.style.opacity = "1";
+    loader.classList.remove("hidden");
   }
 }
 
 function hideLoader(){
   const loader = view.safeDOM(()=> $(".table-loader"));
   if(loader){
-    loader.style.opacity = "0";
-    setTimeout(()=>{
-      if(loader) loader.style.display = "none";
-    }, 250);
+    loader.classList.add("hidden");
   }
 }
 
@@ -83,6 +79,9 @@ function init(){
   initialized = true;
 
   bindEvents();
+
+  /* 🔥 opcional: refuerzo extra */
+  showLoader();
 
   requestAnimationFrame(()=>{
     loadIncidencias();

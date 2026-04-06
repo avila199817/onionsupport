@@ -9,169 +9,82 @@
 
   const Onion = window.Onion;
 
-  Onion.state = Onion.state || {};
-
   /* =========================================================
-     NORMALIZE
+     GET PATH
   ========================================================= */
 
-  function normalize(path){
-
-    if(!path) return "/";
-
-    // quitar query
-    path = path.split("?")[0];
-
-    // limpiar barras duplicadas
-    path = path.replace(/\/+/g, "/");
-
-    // quitar trailing slash
-    if(path.length > 1 && path.endsWith("/")){
-      path = path.slice(0, -1);
-    }
-
-    return path || "/";
+  function get(){
+    return window.location.pathname || "/";
   }
-
-  /* =========================================================
-     GET PATH (CON SLUG)
-  ========================================================= */
-
-  function getPath(){
-
-    try{
-
-      let path = normalize(window.location.pathname);
-
-      // soporte /@usuario/...
-      if(path.startsWith("/@")){
-
-        const parts = path.split("/").filter(Boolean);
-
-        Onion.state.slug = parts[0].replace("@","");
-
-        return "/" + (parts.slice(1).join("/") || "");
-      }
-
-      return path;
-
-    }catch(e){
-
-      Onion.error?.("Router get error:", e);
-      return "/";
-
-    }
-
-  }
-
-  /* =========================================================
-     QUERY
-  ========================================================= */
 
   function getQuery(){
-    return Object.fromEntries(new URLSearchParams(window.location.search));
-  }
+    const params = new URLSearchParams(window.location.search);
+    const query = {};
 
-  /* =========================================================
-     RESOLVE
-  ========================================================= */
-
-  function resolve(){
-
-    const path = getPath();
-
-    let route = Onion.routes?.[path];
-
-    if(!route){
-
-      console.warn("⚠️ Ruta no encontrada:", path);
-
-      route = Onion.routes?.["/"];
+    for(const [k, v] of params.entries()){
+      query[k] = v;
     }
 
-    return {
-      ...route,
-      path,
-      query: getQuery()
-    };
+    return query;
+  }
+
+  /* =========================================================
+     NAVIGATE
+  ========================================================= */
+
+  function navigate(path){
+
+    if(!path) return;
+
+    // evitar duplicados
+    if(path === get()) return;
+
+    history.pushState({}, "", path);
 
   }
 
   /* =========================================================
-     BUILD URL (CON SLUG)
+     CLICK INTERCEPT
   ========================================================= */
 
-  function buildUrl(href){
+  function handleClick(e){
 
-    const slug =
-      Onion.state.slug ||
-      localStorage.getItem("onion_user_slug");
+    const link = e.target.closest("a[data-spa]");
 
-    if(!slug) return href;
+    if(!link) return;
 
-    if(href === "/") return "/@" + slug;
+    const href = link.getAttribute("href");
 
-    if(href.startsWith("/@")) return href;
+    if(!href || href.startsWith("http")) return;
 
-    return "/@" + slug + href;
+    e.preventDefault();
+
+    navigate(href);
+
+    // 🔥 el server se encarga de renderizar
+    Onion.server?.handle?.();
 
   }
 
   /* =========================================================
-     NAVIGATE (SIN LÓGICA EXTRA)
+     INIT
   ========================================================= */
 
-  function navigate(href){
+  function init(){
 
-    if(!href) return;
-
-    // externas
-    if(href.startsWith("http")){
-      window.location.href = href;
-      return;
-    }
-
-    const finalHref = buildUrl(href);
-
-    const current = normalize(window.location.pathname);
-    const next    = normalize(finalHref);
-
-    if(current === next) return;
-
-    history.pushState({}, "", finalHref);
-
-    window.scrollTo(0, 0);
-
-    Onion.render?.();
+    document.addEventListener("click", handleClick);
 
   }
 
   /* =========================================================
-     POPSTATE
-  ========================================================= */
-
-  window.addEventListener("popstate", ()=>{
-    Onion.render?.();
-  });
-
-  /* =========================================================
-     PUBLIC API
+     API
   ========================================================= */
 
   Onion.router = {
-    get: getPath,
-    resolve,
+    get,
+    getQuery,
     navigate,
-    go: navigate,
-    query: getQuery
+    init
   };
-
-  /* =========================================================
-     DEBUG
-  ========================================================= */
-
-  if(Onion.config?.DEBUG){
-    Onion.log("🧭 Router CLEAN ready");
-  }
 
 })();

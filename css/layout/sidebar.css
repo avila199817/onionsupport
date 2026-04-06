@@ -477,6 +477,10 @@
   font-weight:500;
 }
 
+.user-info{
+  display:flex;
+  flex-direction:column;
+}
 
 /* =========================
    AVATAR

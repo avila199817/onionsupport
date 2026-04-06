@@ -22,8 +22,7 @@
 
   const SCRIPTS = [
 
-    // 🧩 FEATURES REALES (EJEMPLOS)
-    //"/js/wwwroot/features/incidencias.js",
+    "/js/wwwroot/features/routers.js",
     //"/js/wwwroot/features/facturas.js",
     //"/js/wwwroot/features/clientes.js"
 

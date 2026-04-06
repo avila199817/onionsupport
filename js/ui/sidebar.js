@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 SIDEBAR — CORE DEFINITIVO (SYNC + ROLES)
+   🧅 SIDEBAR — FULL PRO SAAS (SYNC + LOADER + NO FLICKER)
 ========================================================= */
 
 (function(){
@@ -64,6 +64,7 @@ if(!window.__ONION_SIDEBAR_CORE__){
       renderUser();
       restoreState();
       applyRoleVisibility();
+      fixImageFlicker(); // 🔥 clave
     });
 
   });
@@ -97,7 +98,7 @@ function restoreState(){
 }
 
 /* =========================================================
-   ROLES (ADMIN CONTROL)
+   ROLES
 ========================================================= */
 
 function applyRoleVisibility(){
@@ -106,12 +107,9 @@ function applyRoleVisibility(){
   if(!user) return;
 
   const role = (user.role || "").toLowerCase();
-
   const isAdmin = role === "admin";
 
-  const adminItems = document.querySelectorAll(
-    '[data-role="admin"]'
-  );
+  const adminItems = document.querySelectorAll('[data-role="admin"]');
 
   adminItems.forEach(el=>{
     el.style.display = isAdmin ? "" : "none";
@@ -124,6 +122,25 @@ function applyRoleVisibility(){
 ========================================================= */
 
 function bindGlobalEvents(){
+
+  /* =========================
+     🔥 SPA NAV + LOADER GLOBAL
+  ========================= */
+
+  Onion.onGlobalEvent?.(document, "click", (e)=>{
+
+    const link = e.target.closest("[data-spa]");
+    if(!link) return;
+
+    // evitar recarga misma ruta
+    if(link.href === window.location.href) return;
+
+    console.log("🟡 Sidebar → navegación SPA");
+
+    /* 🔥 loader GLOBAL instantáneo */
+    document.body.classList.add("loading");
+
+  });
 
   /* =========================
      TOGGLE SIDEBAR
@@ -239,6 +256,29 @@ function bindGlobalEvents(){
 }
 
 /* =========================================================
+   🖼️ ANTI FLICKER IMAGES (CLAVE)
+========================================================= */
+
+function fixImageFlicker(){
+
+  const imgs = document.querySelectorAll("img");
+
+  imgs.forEach(img=>{
+
+    if(img.complete) return;
+
+    img.style.opacity = "0";
+
+    img.onload = ()=>{
+      img.style.transition = "opacity .2s ease";
+      img.style.opacity = "1";
+    };
+
+  });
+
+}
+
+/* =========================================================
    USER
 ========================================================= */
 
@@ -331,7 +371,7 @@ function getInitials(name){
 ========================================================= */
 
 if(Onion.config?.DEBUG){
-  Onion.log("📚 Sidebar DEFINITIVO ready");
+  Onion.log("📚 Sidebar FULL PRO ready");
 }
 
 })();

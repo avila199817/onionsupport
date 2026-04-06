@@ -16,7 +16,7 @@
   const PAGES = [
 
     // 🔥 páginas
-    "/js/wwwroot/router/pages/dashboard/index.js",
+    "/js/wwwroot/router/pages/routers.js",
 
   ];
 

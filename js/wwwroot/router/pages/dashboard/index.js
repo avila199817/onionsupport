@@ -9,7 +9,6 @@ if(!Onion){
   return;
 }
 
-let initialized = false;
 let loading = false;
 
 /* =========================
@@ -17,31 +16,6 @@ let loading = false;
 ========================= */
 
 const API = Onion.config?.API || "";
-
-/* =========================
-   TEMPLATE
-========================= */
-
-function template(){
-  return `
-    <div class="panel-content dashboard">
-
-      <div class="dashboard-header">
-        <h1 id="greeting-text">Cargando...</h1>
-      </div>
-
-      <!-- AQUÍ VA TU HTML REAL DEL DASHBOARD -->
-      <!-- (respeta tus IDs: home-facturas, year-grid, etc.) -->
-
-      <div class="year-grid"></div>
-
-      <table>
-        <tbody id="dashboard-pending-body"></tbody>
-      </table>
-
-    </div>
-  `;
-}
 
 /* =========================
    ROOT
@@ -109,7 +83,7 @@ function getAvatarColor(name){
   return colors[Math.abs(hashString(name)) % colors.length];
 }
 
-function avatarHTML(initials, color){
+function renderAvatar(name){
   return `
     <div style="
       width:100%;
@@ -118,18 +92,14 @@ function avatarHTML(initials, color){
       display:flex;
       align-items:center;
       justify-content:center;
-      background:${color};
+      background:${getAvatarColor(name)};
       color:#fff;
       font-weight:600;
       font-size:12px;
     ">
-      ${initials}
+      ${getInitials(name)}
     </div>
   `;
-}
-
-function renderAvatar(name){
-  return avatarHTML(getInitials(name), getAvatarColor(name));
 }
 
 /* =========================
@@ -151,7 +121,7 @@ function setGreeting(){
     greeting = "Buenas noches";
   }
 
-  const fullName = Onion.auth?.getUser?.()?.nombre || "Cristian";
+  const fullName = Onion.state.user?.name || "Usuario";
   const name = fullName.split(" ")[0];
 
   el.textContent = `${greeting}, ${name}`;
@@ -204,38 +174,17 @@ function renderYearRevenue(data){
   const months = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
   const max = Math.max(...data.map(d => d.paid + d.pending), 1);
 
-  const html = data.map((d, i) => {
+  container.innerHTML = data.map((d, i) => {
 
     const total = d.paid + d.pending;
-
     const percent = (total / max) * 100;
-    const paidPercent = total ? (d.paid / total) * 100 : 0;
-    const pendingPercent = total ? (d.pending / total) * 100 : 0;
 
     return `
-      <div class="month ${total === 0 ? "empty" : ""}">
-        <div class="bar" data-month="${months[i]}" style="height:${total === 0 ? 2 : percent}%">
-
-          <div class="bar-paid" style="height:${paidPercent}%">
-            ${d.paid > 0 ? `<span class="bar-label">${formatMoney(d.paid)}</span>` : ""}
-          </div>
-
-          <div class="bar-pending" style="height:${pendingPercent}%">
-            ${d.pending > 0 ? `<span class="bar-label negative">${formatMoney(d.pending)}</span>` : ""}
-          </div>
-
-        </div>
+      <div class="month">
+        <div class="bar" style="height:${percent}%"></div>
       </div>
     `;
   }).join("");
-
-  container.innerHTML = html;
-
-  requestAnimationFrame(()=>{
-    container.querySelectorAll(".bar").forEach(bar=>{
-      bar.classList.add("animate");
-    });
-  });
 }
 
 /* =========================
@@ -247,50 +196,16 @@ function renderPendingFacturas(facturas){
   const tbody = $("dashboard-pending-body");
   if(!tbody) return;
 
-  const pendientes = (facturas || [])
-    .filter(f => f.estadoPago !== "pagada")
-    .sort((a,b) => safe(b.total) - safe(a.total))
-    .slice(0,5);
+  const pendientes = (facturas || []).slice(0,5);
 
-  if(!pendientes.length){
-    tbody.innerHTML = `
-      <tr>
-        <td colspan="6" style="text-align:center; opacity:.6; padding:20px;">
-          Sin facturas pendientes
-        </td>
-      </tr>
-    `;
-    return;
-  }
-
-  const html = pendientes.map(f => {
-
-    const cliente = f.cliente?.nombre || "Cliente";
-    const email = f.cliente?.email || "-";
-    const fecha = formatDate(f.fecha);
-    const importe = formatMoney(f.total);
-    const id = f.numero || "-";
-
-    return `
-      <tr data-id="${f.id}">
-        <td>${id}</td>
-        <td>
-          <div class="cell-user">
-            <div class="table-avatar">${renderAvatar(cliente)}</div>
-            <div class="user-info">
-              <span>${cliente}</span>
-              <span>${email}</span>
-            </div>
-          </div>
-        </td>
-        <td>${fecha}</td>
-        <td>${importe}</td>
-        <td><span class="badge warning">Pendiente</span></td>
-      </tr>
-    `;
-  }).join("");
-
-  tbody.innerHTML = html;
+  tbody.innerHTML = pendientes.map(f => `
+    <tr>
+      <td>${f.numero || "-"}</td>
+      <td>${f.cliente?.nombre || "Cliente"}</td>
+      <td>${formatDate(f.fecha)}</td>
+      <td>${formatMoney(f.total)}</td>
+    </tr>
+  `).join("");
 }
 
 /* =========================
@@ -304,21 +219,11 @@ async function loadDashboardData(){
     const res = await Onion.fetch(API + "/dashboard");
     const data = res?.data || {};
 
-    const resumen = data.resumen || {};
-    const evolucion = data.charts?.evolucionMensual || [];
-
-    setText("home-facturas", formatMoney(resumen.totalCobrado));
-    setText("home-iva", formatMoney(resumen.totalIVA));
-    setText("home-irpf", formatMoney(resumen.totalIRPF));
-    setText("home-beneficio", formatMoney(resumen.beneficio));
-    setText("home-pendiente", formatMoney(resumen.totalPendiente));
-
-    renderYearRevenue(buildYearData(evolucion));
+    renderYearRevenue(buildYearData(data.charts?.evolucionMensual));
 
     const resFacturas = await Onion.fetch(API + "/facturas");
-    const facturas = resFacturas?.facturas || [];
 
-    renderPendingFacturas(facturas);
+    renderPendingFacturas(resFacturas?.facturas);
 
   } catch(e){
     console.error("💥 Dashboard error:", e);
@@ -335,6 +240,7 @@ async function loadDashboard(){
   loading = true;
 
   setGreeting();
+
   await loadDashboardData();
 
   getRoot()?.classList.add("ready");
@@ -343,37 +249,25 @@ async function loadDashboard(){
 }
 
 /* =========================
-   MOUNT
+   🔥 AUTO INIT (CLAVE)
 ========================= */
 
-function mount(){
+(function init(){
 
-  const root = getRoot();
-  if(!root || initialized) return;
+  function waitRoot(){
 
-  initialized = true;
+    const root = getRoot();
 
-  loadDashboard();
-}
+    if(!root){
+      requestAnimationFrame(waitRoot);
+      return;
+    }
 
-/* =========================
-   CLEANUP
-========================= */
+    loadDashboard();
+  }
 
-function cleanup(){
-  initialized = false;
-}
+  waitRoot();
 
-/* =========================
-   REGISTER
-========================= */
-
-Onion.pages = Onion.pages || {};
-
-Onion.pages["dashboard"] = {
-  render: template,
-  mount,
-  cleanup
-};
+})();
 
 })();

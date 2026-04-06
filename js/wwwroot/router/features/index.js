@@ -16,19 +16,19 @@
   Onion.features = Onion.features || Object.create(null);
 
   /* =========================================================
-     🔥 ZONA SAGRADA (AQUÍ SOLO AÑADES SCRIPTS)
+     🔥 ZONA SAGRADA (SOLO FEATURES REALES)
+     👉 SOLO módulos de vistas / negocio
   ========================================================= */
 
   const SCRIPTS = [
 
-    // CORE EXTENSIONS / FEATURES BASE
-    "/js/wwwroot/features/auth.js",
-    "/js/wwwroot/features/fetch.js",
-    "/js/wwwroot/features/i18n.js",
-    "/js/wwwroot/features/prefetch.js",
-    "/js/wwwroot/features/render.js",
-    "/js/wwwroot/features/router.js",
-    "/js/wwwroot/features/routers.js"
+    // 🧩 FEATURES REALES (EJEMPLOS)
+    //"/js/wwwroot/features/incidencias.js",
+    //"/js/wwwroot/features/facturas.js",
+    //"/js/wwwroot/features/clientes.js"
+
+    // 👉 AÑADES AQUÍ MÁS:
+    // "/js/wwwroot/features/usuarios.js"
 
   ];
 
@@ -51,7 +51,7 @@
       s.defer = true;
 
       s.onload = ()=>{
-        console.log("🧩 módulo cargado:", src);
+        console.log("🧩 feature cargada:", src);
         resolve();
       };
 
@@ -67,7 +67,7 @@
   }
 
   /* =========================================================
-     CARGA SECUENCIAL (IMPORTANTE 🔥)
+     CARGA SECUENCIAL
   ========================================================= */
 
   async function loadAll(){
@@ -80,7 +80,7 @@
       }
     }
 
-    console.log("🚀 FEATURES CORE READY");
+    console.log("🚀 FEATURES READY");
 
   }
 

@@ -1,151 +1,104 @@
 "use strict";
 
 /* =========================================================
-   🧅 INIT — GOD MODE (SIDEBAR FIRST · NO AUTO RENDER · PERFECT FLOW)
+   🧅 INIT — CORE PREPARATION (NO RENDER · NO NAV)
+   - Carga sesión
+   - Setea usuario
+   - Prepara estado base
 ========================================================= */
 
 (function(){
 
-  const Onion = window.Onion;
-
-  if(!Onion){
-    console.error("💥 Onion no disponible (init)");
+  if(!window.Onion){
+    console.error("💥 Onion no existe (init.js)");
     return;
   }
 
-  /* =========================
+  const Onion = window.Onion;
+
+  /* =========================================================
      INIT
-  ========================= */
+  ========================================================= */
 
   Onion.init = async function(){
 
-    // 🔒 LOCK DURO
-    if(Onion.state._initializing) return;
-    if(Onion.state.ready) return;
-
-    Onion.state._initializing = true;
+    if(Onion.state?.initialized) return;
 
     try{
 
       /* =========================
-         AUTH (ME)
+         BASE STATE
+      ========================= */
+
+      Onion.state = Onion.state || {};
+      Onion.state.initializing = true;
+
+      /* =========================
+         TOKEN / AUTH
+      ========================= */
+
+      const token = Onion.auth?.getToken?.();
+
+      if(!token){
+        throw new Error("Token no disponible");
+      }
+
+      /* =========================
+         USER (SESSION)
       ========================= */
 
       let user = null;
 
       try{
 
-        const res = await Onion.fetch("/auth/me");
+        const res = await Onion.fetch?.("/auth/me");
 
-        user = res?.user || res || null;
-
-        if(!user){
-          throw new Error("NO_USER");
-        }
-
-        // 🔥 SOURCE OF TRUTH
-        Onion.setUser(user);
-
-        /* =========================
-           THEME SYNC (BD → UI)
-        ========================= */
-
-        try{
-
-          const dbConfig = user?.config || {};
-
-          if(dbConfig){
-
-            localStorage.setItem("onion_config", JSON.stringify(dbConfig));
-
-            let darkMode;
-
-            if(typeof dbConfig.darkMode === "boolean"){
-              darkMode = dbConfig.darkMode;
-            }else{
-              darkMode = window.matchMedia("(prefers-color-scheme: dark)").matches;
-            }
-
-            const theme = darkMode ? "dark" : "light";
-
-            document.documentElement.setAttribute("data-theme", theme);
-
-          }
-
-        }catch(e){
-          Onion.warn("Theme sync error:", e);
+        if(res && (res.user || res.data)){
+          user = res.user || res.data;
         }
 
       }catch(e){
+        console.warn("⚠️ Error obteniendo usuario:", e);
+      }
 
-        const msg = e?.message || "";
-
-        if(
-          msg.includes("401") ||
-          msg.includes("NO_TOKEN") ||
-          msg.includes("NO_USER")
-        ){
-          Onion.clearUser?.();
-          Onion.auth?.redirectLogin?.();
-          return;
-        }
-
-        throw e;
-
+      if(!user){
+        throw new Error("Usuario no válido");
       }
 
       /* =========================
-         FRAME SYNC (ANTES DE READY)
+         SET USER
       ========================= */
 
-      await new Promise(r => requestAnimationFrame(r));
-      await new Promise(r => requestAnimationFrame(r));
+      Onion.setUser?.(user);
 
       /* =========================
-         READY (SIN RENDER 🔥)
+         FLAGS
       ========================= */
 
-      Onion.state.ready = true;
+      Onion.state.initialized = true;
+      Onion.state.initializing = false;
 
-      Onion.events.emit?.("app:ready", {
-        user: Onion.getUser?.()
-      });
-
-      // 🔥 IMPORTANTE:
-      // NO render aquí → lo controla boot + sidebar
+      if(Onion.config?.DEBUG){
+        Onion.log("✅ INIT OK");
+      }
 
     }catch(e){
 
-      Onion.error("INIT ERROR:", e);
+      console.error("💥 INIT ERROR:", e);
 
-      const app = document.getElementById("app-content");
+      Onion.state.initialized = false;
+      Onion.state.initializing = false;
 
-      if(app){
-        app.innerHTML = `
-          <div style="padding:20px">
-            <h2>Error inicializando</h2>
-            <p>${e.message}</p>
-            <button onclick="location.reload()">Reintentar</button>
-          </div>
-        `;
-      }
+      /* 🔥 RESET SESIÓN */
+      Onion.auth?.resetSession?.();
 
-    }finally{
+      /* 🔥 REDIRECT */
+      Onion.auth?.redirectLogin?.();
 
-      Onion.state._initializing = false;
-      Onion.state.navigating = false;
-      Onion.state.rendering = false;
+      throw e;
 
     }
 
   };
-
-  /* =========================
-     DEBUG
-  ========================= */
-
-  if(Onion.config?.DEBUG){
-    Onion.log("⚙️ Init GOD MODE ready");
-  }
 
 })();

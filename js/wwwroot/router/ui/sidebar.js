@@ -12,16 +12,20 @@ if(!Onion){
    STATE
 ========================================================= */
 
-let sidebar, dropdown;
+let sidebar = null;
+let dropdown = null;
 
 /* =========================================================
-   INIT
+   INIT SAFE (REINTENTO SPA)
 ========================================================= */
 
 function init(){
 
   sidebar = document.querySelector(".sidebar");
-  if(!sidebar) return;
+  if(!sidebar){
+    // 🔥 SPA: reintenta hasta que exista
+    return setTimeout(init, 50);
+  }
 
   dropdown = document.getElementById("userDropdown");
 
@@ -31,10 +35,14 @@ function init(){
 
 }
 
-document.addEventListener("DOMContentLoaded", init);
+if(document.readyState === "loading"){
+  document.addEventListener("DOMContentLoaded", init);
+}else{
+  init();
+}
 
 /* =========================================================
-   LOADER HOOK
+   LOADER HOOK (GLOBAL)
 ========================================================= */
 
 function startLoader(){
@@ -45,19 +53,26 @@ function stopLoader(){
   document.body.classList.remove("loading");
 }
 
-/* 👉 enganchar al render global */
-const originalRender = Onion.render;
-Onion.render = async function(){
-  try{
-    startLoader();
-    await originalRender.apply(this, arguments);
-  }finally{
-    stopLoader();
-  }
-};
+/* 🔥 enganchar al render SIN romperlo */
+if(!Onion.__sidebarHooked){
+
+  const originalRender = Onion.render;
+
+  Onion.render = async function(){
+    try{
+      startLoader();
+      await originalRender.apply(this, arguments);
+    }finally{
+      stopLoader();
+      init(); // 🔥 re-sync DOM tras render
+    }
+  };
+
+  Onion.__sidebarHooked = true;
+}
 
 /* =========================================================
-   EVENTS
+   EVENTS SAFE
 ========================================================= */
 
 document.addEventListener("click",(e)=>{
@@ -74,15 +89,20 @@ document.addEventListener("click",(e)=>{
 
   /* TOGGLE SIDEBAR */
   if(e.target.closest("#toggleSidebar")){
+
+    if(!sidebar) return;
+
     const collapsed = sidebar.classList.toggle("collapsed");
     localStorage.setItem("sidebar-collapsed", collapsed);
+
     dropdown?.classList.remove("active");
     return;
   }
 
   /* USER MENU */
   if(e.target.closest("#userToggle")){
-    dropdown?.classList.toggle("active");
+    if(!dropdown) return;
+    dropdown.classList.toggle("active");
     return;
   }
 
@@ -98,8 +118,12 @@ document.addEventListener("click",(e)=>{
 ========================================================= */
 
 function restoreState(){
+
+  if(!sidebar) return;
+
   const saved = localStorage.getItem("sidebar-collapsed");
   sidebar.classList.toggle("collapsed", saved === "true");
+
 }
 
 /* =========================================================

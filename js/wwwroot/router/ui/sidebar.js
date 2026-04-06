@@ -3,7 +3,6 @@
 (function(){
 
 const Onion = window.Onion;
-
 if(!Onion){
   console.error("💥 Onion no disponible (sidebar)");
   return;
@@ -13,34 +12,7 @@ if(!Onion){
    STATE
 ========================================================= */
 
-let initialized = false;
-let sidebarEl = null;
-let dropdownEl = null;
-
-/* =========================================================
-   LOADER (CONTROL REAL POR EVENTOS)
-========================================================= */
-
-function startLoader(){
-
-  document.body.classList.add("loading");
-
-  clearTimeout(window.__onionLoaderTimeout);
-
-  /* 🔥 FAILSAFE */
-  window.__onionLoaderTimeout = setTimeout(()=>{
-    console.warn("⚠️ Loader forced reset");
-    stopLoader(true);
-  }, 6000);
-
-}
-
-function stopLoader(force = false){
-
-  document.body.classList.remove("loading");
-  clearTimeout(window.__onionLoaderTimeout);
-
-}
+let sidebar, dropdown;
 
 /* =========================================================
    INIT
@@ -48,116 +20,75 @@ function stopLoader(force = false){
 
 function init(){
 
-  if(initialized) return;
+  sidebar = document.querySelector(".sidebar");
+  if(!sidebar) return;
 
-  sidebarEl = document.querySelector(".sidebar");
-  if(!sidebarEl) return;
-
-  if(!Onion.state?.user){
-    return setTimeout(init, 50);
-  }
-
-  dropdownEl = document.getElementById("userDropdown");
+  dropdown = document.getElementById("userDropdown");
 
   renderUser();
   restoreState();
-  applyRoleVisibility();
-
-  bindRenderEvents();
-
-  initialized = true;
-
-  /* 🔥 APP READY */
-  if(!Onion.state.appReady){
-
-    Onion.state.appReady = true;
-
-    console.log("🧅 App READY");
-
-    requestAnimationFrame(()=> Onion.render?.());
-
-  }
+  applyRole();
 
 }
 
-init();
+document.addEventListener("DOMContentLoaded", init);
 
 /* =========================================================
-   🔥 RENDER SYNC (CLAVE TOTAL)
+   LOADER HOOK
 ========================================================= */
 
-function bindRenderEvents(){
+function startLoader(){
+  document.body.classList.add("loading");
+}
 
-  /* 👉 cuando termina render → ocultar loader */
-  Onion.events.on("render:end", ()=>{
+function stopLoader(){
+  document.body.classList.remove("loading");
+}
+
+/* 👉 enganchar al render global */
+const originalRender = Onion.render;
+Onion.render = async function(){
+  try{
+    startLoader();
+    await originalRender.apply(this, arguments);
+  }finally{
     stopLoader();
-  });
-
-}
+  }
+};
 
 /* =========================================================
-   GLOBAL EVENTS
+   EVENTS
 ========================================================= */
 
-document.addEventListener("click", (e)=>{
+document.addEventListener("click",(e)=>{
 
-  /* 🔥 SPA NAV */
+  /* SPA NAV */
   const link = e.target.closest("[data-spa]");
   if(link){
-
     const href = link.getAttribute("href");
-
-    if(href && href !== window.location.pathname){
+    if(href && href !== location.pathname){
       startLoader();
     }
-
     return;
   }
 
   /* TOGGLE SIDEBAR */
-  const toggle = e.target.closest("#toggleSidebar");
-  if(toggle){
-
-    e.stopPropagation();
-
-    const isCollapsed = sidebarEl.classList.contains("collapsed");
-
-    sidebarEl.classList.toggle("collapsed");
-
-    localStorage.setItem("sidebar-collapsed", String(!isCollapsed));
-
-    dropdownEl?.classList.remove("active");
-
-    restoreState();
+  if(e.target.closest("#toggleSidebar")){
+    const collapsed = sidebar.classList.toggle("collapsed");
+    localStorage.setItem("sidebar-collapsed", collapsed);
+    dropdown?.classList.remove("active");
     return;
   }
 
   /* USER MENU */
-  const user = e.target.closest("#userToggle");
-  if(user){
-
-    e.stopPropagation();
-    dropdownEl?.classList.toggle("active");
+  if(e.target.closest("#userToggle")){
+    dropdown?.classList.toggle("active");
     return;
   }
 
   /* CLOSE DROPDOWN */
   if(!e.target.closest("#userDropdown")){
-    dropdownEl?.classList.remove("active");
-  }
-
-  /* LOGOUT */
-  const logout = e.target.closest("#logoutBtn");
-  if(logout){
-
-    e.stopPropagation();
-
-    startLoader();
-
-    Onion.auth.logout().catch(()=>{
-      stopLoader(true);
-    });
-
+    dropdown?.classList.remove("active");
   }
 
 });
@@ -167,11 +98,8 @@ document.addEventListener("click", (e)=>{
 ========================================================= */
 
 function restoreState(){
-
   const saved = localStorage.getItem("sidebar-collapsed");
-
-  sidebarEl.classList.toggle("collapsed", saved === "true");
-
+  sidebar.classList.toggle("collapsed", saved === "true");
 }
 
 /* =========================================================
@@ -180,18 +108,18 @@ function restoreState(){
 
 function renderUser(){
 
-  const user = Onion.getUser?.();
+  const user = Onion.state.user;
   if(!user) return;
 
   const nameEl = document.getElementById("sidebar-name");
   const avatarEl = document.getElementById("sidebar-avatar");
 
-  const name = user.name || user.email || "Usuario";
+  const name = user.name || user.username || "Usuario";
 
   if(nameEl) nameEl.textContent = name;
 
   if(avatarEl){
-    avatarEl.innerHTML = `<div>${name[0]}</div>`;
+    avatarEl.textContent = name[0]?.toUpperCase() || "U";
   }
 
 }
@@ -200,9 +128,9 @@ function renderUser(){
    ROLES
 ========================================================= */
 
-function applyRoleVisibility(){
+function applyRole(){
 
-  const user = Onion.getUser?.();
+  const user = Onion.state.user;
   if(!user) return;
 
   const isAdmin = (user.role || "").toLowerCase() === "admin";
@@ -211,14 +139,6 @@ function applyRoleVisibility(){
     el.style.display = isAdmin ? "" : "none";
   });
 
-}
-
-/* =========================================================
-   DEBUG
-========================================================= */
-
-if(Onion.config?.DEBUG){
-  Onion.log("📦 Sidebar EVENT-DRIVEN synced with render");
 }
 
 })();

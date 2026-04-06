@@ -2,7 +2,7 @@
 
 (function(){
 
-  // 🔥 CORE BASE (si no existe, lo creamos)
+  // 🔥 CORE BASE (auto-creado)
   if(!window.Onion){
     window.Onion = {};
   }
@@ -14,6 +14,28 @@
   ========================================================= */
 
   Onion.state = Onion.state || {};
+
+  /* =========================================================
+     🔥 RENDER FALLBACK (ANTI PANTALLA BLANCA)
+  ========================================================= */
+
+  if(!Onion.render){
+    Onion.render = function(html){
+
+      const el = document.getElementById("view-container");
+
+      if(!el){
+        console.error("💥 No existe view-container");
+        return;
+      }
+
+      el.innerHTML = html || `
+        <div style="padding:20px">
+          <h1>RENDER OK 🔥</h1>
+        </div>
+      `;
+    };
+  }
 
   /* =========================================================
      SCRIPT LOADER
@@ -41,11 +63,11 @@
 
     console.log("📦 Loading scripts...");
 
-    // 👉 SOLO lo mínimo
+    // 👉 opcional (si existen)
     await loadScript("/js/wwwroot/router/features/render.js");
     await loadScript("/js/wwwroot/router/features/router.js");
 
-    // 👉 routers (si existen)
+    // 👉 router ejemplo
     await loadScript("/js/wwwroot/router/incidencias/index.js");
 
   }
@@ -81,10 +103,10 @@
       return route.handler(ctx);
     }
 
-    // 👉 fallback
-    ctx.render?.(`
+    // 🔥 fallback seguro
+    ctx.render(`
       <div style="padding:20px">
-        <h1>HOME 🔥</h1>
+        <h1>ONION FUNCIONA 🔥</h1>
       </div>
     `);
 
@@ -113,12 +135,11 @@
   }
 
   /* =========================================================
-     NAVIGATION
+     NAVIGATION (SPA SIMPLE)
   ========================================================= */
 
   function bindNavigation(){
 
-    // click SPA
     document.addEventListener("click", (e)=>{
 
       const link = e.target.closest("a[data-spa]");

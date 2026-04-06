@@ -1,20 +1,15 @@
 "use strict";
 
-/* =========================================================
-   🧅 TOPBAR SEARCH — GOD MODE (SPA SAFE · NO DUPES · CORE SAFE)
-========================================================= */
-
 (function(){
 
 const Onion = window.Onion;
-
 if(!Onion){
   console.error("💥 Onion no definido (topbar)");
   return;
 }
 
 /* =========================================================
-   INIT (SIEMPRE REACTIVO)
+   INIT SAFE (SPA)
 ========================================================= */
 
 function init(){
@@ -22,35 +17,39 @@ function init(){
   const input = document.querySelector("#topbar-search");
   const container = document.querySelector("#topbar-search-results");
 
-  if(!input || !container) return;
-
-  if(!Onion.state?.user){
-    return setTimeout(init, 100);
+  if(!input || !container){
+    return setTimeout(init, 50);
   }
 
   bind(input, container);
 
 }
 
-init();
+if(document.readyState === "loading"){
+  document.addEventListener("DOMContentLoaded", init);
+}else{
+  init();
+}
 
-/* 🔥 SPA HOOKS (CORE SAFE) */
-if(!window.__ONION_SEARCH_BOUND__){
+/* 🔥 RE-HOOK TRAS RENDER */
+if(!Onion.__topbarHooked){
 
-  window.__ONION_SEARCH_BOUND__ = true;
+  const originalRender = Onion.render;
 
-  Onion.events?.on?.("app:ready", ()=> requestAnimationFrame(init));
-  Onion.events?.on?.("route:end", ()=> requestAnimationFrame(init));
+  Onion.render = async function(){
+    await originalRender.apply(this, arguments);
+    init();
+  };
 
+  Onion.__topbarHooked = true;
 }
 
 /* =========================================================
-   CORE BIND (ANTI DUPES REAL)
+   CORE BIND (ANTI DUPES)
 ========================================================= */
 
 function bind(input, container){
 
-  // 🔥 reset completo si ya existía
   if(input.__searchBound){
     input.__searchCleanup?.();
   }
@@ -83,10 +82,8 @@ function bind(input, container){
 
   function highlight(text,q){
     if(!q) return text;
-
     const i = text.toLowerCase().indexOf(q.toLowerCase());
     if(i === -1) return text;
-
     return text.slice(0,i)
       + "<mark>"+text.slice(i,i+q.length)+"</mark>"
       + text.slice(i+q.length);
@@ -132,7 +129,7 @@ function bind(input, container){
 
       container.appendChild(header);
 
-      groups[type].slice(0,6).forEach((r)=>{
+      groups[type].slice(0,6).forEach(r=>{
 
         const el = document.createElement("div");
         el.className = "search-result";
@@ -148,7 +145,7 @@ function bind(input, container){
         Onion.cleanupEvent(el, "click", ()=>{
           hide();
           if(r.url){
-            Onion.router?.navigate?.(r.url);
+            Onion.router.navigate(r.url);
           }
         });
 
@@ -186,7 +183,7 @@ function bind(input, container){
 
       if(e.message === "ABORTED") return [];
 
-      console.warn("Search API no disponible");
+      console.warn("Search API fallback");
       return [];
 
     }
@@ -241,13 +238,13 @@ function bind(input, container){
     if(e.key==="ArrowDown"){
       e.preventDefault();
       activeIndex = Math.min(activeIndex+1, items.length-1);
-      updateActive(items);
+      update(items);
     }
 
     if(e.key==="ArrowUp"){
       e.preventDefault();
       activeIndex = Math.max(activeIndex-1, 0);
-      updateActive(items);
+      update(items);
     }
 
     if(e.key==="Enter" && activeIndex>=0){
@@ -260,7 +257,7 @@ function bind(input, container){
 
   });
 
-  function updateActive(items){
+  function update(items){
 
     items.forEach(el=>el.classList.remove("active"));
 
@@ -272,7 +269,7 @@ function bind(input, container){
   }
 
   /* =========================
-     CLEANUP CONTROLADO
+     CLEANUP
   ========================= */
 
   input.__searchCleanup = function(){
@@ -289,12 +286,12 @@ function bind(input, container){
 
 }
 
-/* =========================
+/* =========================================================
    DEBUG
-========================= */
+========================================================= */
 
 if(Onion.config?.DEBUG){
-  Onion.log("🔍 Topbar Search GOD MODE ready");
+  console.log("🔍 Topbar READY");
 }
 
 })();

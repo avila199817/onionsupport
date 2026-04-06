@@ -180,7 +180,7 @@ function extractContent(html){
 }
 
 /* =========================================================
-   SWAP VIEW (ATÓMICO)
+   SWAP VIEW
 ========================================================= */
 
 function swapView(container, node){
@@ -197,7 +197,7 @@ function clearView(){
 }
 
 /* =========================================================
-   CORE RENDER (PURO)
+   CORE RENDER
 ========================================================= */
 
 const originalRender = async function(){
@@ -222,30 +222,31 @@ const originalRender = async function(){
     /* 🔥 FETCH */
     const html = await Onion.fetchHTML(route.page);
 
-    /* 🔒 CANCELACIÓN POR RACE */
     if(renderId !== Onion.state.renderId) return;
 
     const content = extractContent(html);
     content.classList.remove("ready");
 
-    /* 🔥 CLEANUP JUSTO ANTES DEL SWAP */
+    /* 🔥 CLEANUP */
     Onion.runCleanup?.();
 
-    /* 🔥 LIMPIEZA AUXILIAR */
     clearView();
 
-    /* 🔥 SWAP ATÓMICO */
+    /* 🔥 SWAP */
     swapView(container, content);
 
-    /* 🔥 READY FRAME (SINCRONÍA REAL DOM) */
+    /* 🔥 READY FRAME */
     requestAnimationFrame(()=>{
       if(renderId !== Onion.state.renderId) return;
 
       const el = container.querySelector(".panel-content");
       if(el) el.classList.add("ready");
+
+      /* 🔥 AQUÍ ESTÁ LA CLAVE */
+      Onion.events?.emit?.("render:end");
     });
 
-    /* 🔥 CARGA PASIVA (NO BLOQUEA RENDER) */
+    /* 🔥 ASSETS */
     if(route.style) Onion.loadStyle(route.style);
     if(route.script) Onion.loadScript(route.script);
 
@@ -263,6 +264,9 @@ const originalRender = async function(){
         </div>
       `;
     }
+
+    /* 🔥 TAMBIÉN AQUÍ (IMPORTANTE) */
+    Onion.events?.emit?.("render:end");
 
   }finally{
 

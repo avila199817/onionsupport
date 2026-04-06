@@ -17,19 +17,23 @@ let initialized = false;
 let sidebarEl = null;
 let dropdownEl = null;
 let observer = null;
+let lastRenderTime = 0;
 
 /* =========================================================
-   LOADER CORE (INDEPENDIENTE 🔥)
+   LOADER CORE (INDESTRUCTIBLE)
 ========================================================= */
 
 function startLoader(){
 
   document.body.classList.add("loading");
 
+  lastRenderTime = performance.now();
+
   clearTimeout(window.__onionLoaderTimeout);
 
+  /* 🔥 FALLBACK DURO */
   window.__onionLoaderTimeout = setTimeout(()=>{
-    console.warn("⚠️ Loader fallback reset");
+    console.warn("⚠️ Loader forced reset");
     stopLoader();
   }, 4000);
 
@@ -45,7 +49,7 @@ function stopLoader(){
 }
 
 /* =========================================================
-   🔥 DETECTOR REAL DE RENDER (CLAVE)
+   🔥 DETECTOR REAL (NO CONFÍA EN NADIE)
 ========================================================= */
 
 function observeView(){
@@ -59,20 +63,23 @@ function observeView(){
 
   observer = new MutationObserver(()=>{
 
-    /* 🔥 SI CAMBIA EL DOM → APAGA LOADER */
-    stopLoader();
+    const now = performance.now();
+
+    /* 🔥 SOLO SI HA PASADO UN POCO DE TIEMPO */
+    if(now - lastRenderTime > 50){
+      stopLoader();
+    }
 
   });
 
   observer.observe(container, {
-    childList: true,
-    subtree: false
+    childList: true
   });
 
 }
 
 /* =========================================================
-   INIT
+   INIT (UNA VEZ Y LISTO)
 ========================================================= */
 
 function init(){
@@ -91,7 +98,8 @@ function init(){
   renderUser();
   restoreState();
   applyRoleVisibility();
-  observeView(); /* 🔥 CLAVE */
+
+  observeView(); /* 🔥 CLAVE TOTAL */
 
   initialized = true;
 
@@ -108,10 +116,10 @@ function init(){
 init();
 
 /* =========================================================
-   GLOBAL EVENTS
+   GLOBAL EVENTS (ULTRA LIMPIO)
 ========================================================= */
 
-Onion.onGlobalEvent?.(document, "click", (e)=>{
+document.addEventListener("click", (e)=>{
 
   /* 🔥 SPA NAV */
   const link = e.target.closest("[data-spa]");
@@ -120,7 +128,7 @@ Onion.onGlobalEvent?.(document, "click", (e)=>{
     return;
   }
 
-  /* TOGGLE */
+  /* TOGGLE SIDEBAR */
   const toggle = e.target.closest("#toggleSidebar");
   if(toggle){
 
@@ -138,16 +146,16 @@ Onion.onGlobalEvent?.(document, "click", (e)=>{
     return;
   }
 
-  /* USER */
+  /* USER MENU */
   const user = e.target.closest("#userToggle");
   if(user){
 
     e.stopPropagation();
-
     dropdownEl?.classList.toggle("active");
     return;
   }
 
+  /* CLOSE DROPDOWN */
   if(!e.target.closest("#userDropdown")){
     dropdownEl?.classList.remove("active");
   }
@@ -192,12 +200,12 @@ function renderUser(){
   const nameEl = document.getElementById("sidebar-name");
   const avatarEl = document.getElementById("sidebar-avatar");
 
-  if(nameEl){
-    nameEl.textContent = user.name || user.email || "Usuario";
-  }
+  const name = user.name || user.email || "Usuario";
+
+  if(nameEl) nameEl.textContent = name;
 
   if(avatarEl){
-    avatarEl.innerHTML = `<div>${(user.name || "U")[0]}</div>`;
+    avatarEl.innerHTML = `<div>${name[0]}</div>`;
   }
 
 }

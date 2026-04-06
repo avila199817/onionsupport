@@ -10,21 +10,11 @@ if(!window.Onion){
 const Onion = window.Onion;
 
 /* =========================================================
-   CACHE PRO
+   CACHE
 ========================================================= */
 
 const viewCache = new Map();
 const loadedScripts = new Set();
-
-/* =========================================================
-   DEBUG
-========================================================= */
-
-function log(...args){
-  if(Onion.config?.DEBUG){
-    console.log("🧅 [RENDER]", ...args);
-  }
-}
 
 /* =========================================================
    UTILS
@@ -50,7 +40,7 @@ function normalizeUrl(src){
 }
 
 /* =========================================================
-   SCRIPT LOADER (CACHEADO)
+   SCRIPT LOADER
 ========================================================= */
 
 function loadScriptSingle(src){
@@ -90,7 +80,6 @@ Onion.loadScript = function(scripts){
   if(!Array.isArray(scripts)) return;
 
   Promise.all(scripts.map(loadScriptSingle))
-    .then(()=> log("✅ Scripts OK"))
     .catch(e=> console.error("❌ Script error", e));
 
 };
@@ -130,7 +119,7 @@ Onion.loadStyle = function(styles){
 };
 
 /* =========================================================
-   FETCH HTML (CACHEADO)
+   FETCH HTML
 ========================================================= */
 
 Onion.fetchHTML = async function(url){
@@ -159,7 +148,7 @@ Onion.fetchHTML = async function(url){
 };
 
 /* =========================================================
-   EXTRACT CONTENT
+   EXTRACT
 ========================================================= */
 
 function extractContent(html){
@@ -180,15 +169,7 @@ function extractContent(html){
 }
 
 /* =========================================================
-   SWAP VIEW
-========================================================= */
-
-function swapView(container, node){
-  container.replaceChildren(node);
-}
-
-/* =========================================================
-   CLEAR VIEW
+   CLEAR
 ========================================================= */
 
 function clearView(){
@@ -197,15 +178,14 @@ function clearView(){
 }
 
 /* =========================================================
-   CORE RENDER
+   RENDER CORE
 ========================================================= */
 
-const originalRender = async function(){
+async function render(){
 
   if(!Onion.state.appReady) return;
 
   const renderId = ++Onion.state.renderId;
-  Onion.state.rendering = true;
 
   try{
 
@@ -215,11 +195,15 @@ const originalRender = async function(){
     }
 
     const route = Onion.router.resolve();
+
     if(!route?.page){
       throw new Error("Ruta inválida");
     }
 
-    /* 🔥 FETCH */
+    /* 👉 LOADER ON (controlado por server mental) */
+    Onion.ui?.showLoader?.();
+
+    /* FETCH */
     const html = await Onion.fetchHTML(route.page);
 
     if(renderId !== Onion.state.renderId) return;
@@ -227,26 +211,28 @@ const originalRender = async function(){
     const content = extractContent(html);
     content.classList.remove("ready");
 
-    /* 🔥 CLEANUP */
+    /* CLEANUP */
     Onion.runCleanup?.();
 
     clearView();
 
-    /* 🔥 SWAP */
-    swapView(container, content);
+    /* SWAP */
+    container.replaceChildren(content);
 
-    /* 🔥 READY FRAME */
+    /* READY */
     requestAnimationFrame(()=>{
+
       if(renderId !== Onion.state.renderId) return;
 
       const el = container.querySelector(".panel-content");
       if(el) el.classList.add("ready");
 
-      /* 🔥 AQUÍ ESTÁ LA CLAVE */
-      Onion.events?.emit?.("render:end");
+      /* 👉 LOADER OFF (SIN EVENTS) */
+      Onion.ui?.hideLoader?.();
+
     });
 
-    /* 🔥 ASSETS */
+    /* ASSETS */
     if(route.style) Onion.loadStyle(route.style);
     if(route.script) Onion.loadScript(route.script);
 
@@ -265,25 +251,16 @@ const originalRender = async function(){
       `;
     }
 
-    /* 🔥 TAMBIÉN AQUÍ (IMPORTANTE) */
-    Onion.events?.emit?.("render:end");
-
-  }finally{
-
-    if(renderId === Onion.state.renderId){
-      Onion.state.rendering = false;
-    }
+    Onion.ui?.hideLoader?.();
 
   }
 
-};
+}
 
 /* =========================================================
    PUBLIC
 ========================================================= */
 
-Onion.render = function(){
-  return originalRender.apply(this, arguments);
-};
+Onion.render = render;
 
 })();

@@ -17,31 +17,39 @@ let initialized = false;
 let sidebarEl = null;
 let dropdownEl = null;
 let observer = null;
-let lastRenderTime = 0;
+
+/* 🔥 CONTROL REAL */
+let activeRenderId = 0;
+let loaderActive = false;
 
 /* =========================================================
-   LOADER CORE (INDESTRUCTIBLE)
+   LOADER (SINCRONIZADO AL RENDER)
 ========================================================= */
 
 function startLoader(){
 
-  document.body.classList.add("loading");
+  const currentId = Onion.state.renderId + 1;
 
-  lastRenderTime = performance.now();
+  activeRenderId = currentId;
+  loaderActive = true;
+
+  document.body.classList.add("loading");
 
   clearTimeout(window.__onionLoaderTimeout);
 
-  /* 🔥 FALLBACK DURO */
+  /* 🔥 FAILSAFE DURO */
   window.__onionLoaderTimeout = setTimeout(()=>{
     console.warn("⚠️ Loader forced reset");
-    stopLoader();
-  }, 4000);
+    stopLoader(true);
+  }, 6000);
 
 }
 
-function stopLoader(){
+function stopLoader(force = false){
 
-  if(!document.body.classList.contains("loading")) return;
+  if(!loaderActive && !force) return;
+
+  loaderActive = false;
 
   document.body.classList.remove("loading");
   clearTimeout(window.__onionLoaderTimeout);
@@ -49,7 +57,7 @@ function stopLoader(){
 }
 
 /* =========================================================
-   🔥 DETECTOR REAL (NO CONFÍA EN NADIE)
+   🔥 DETECTOR REAL (ALINEADO CON RENDER)
 ========================================================= */
 
 function observeView(){
@@ -63,12 +71,15 @@ function observeView(){
 
   observer = new MutationObserver(()=>{
 
-    const now = performance.now();
+    /* 🔒 SOLO cerrar si coincide render */
+    if(activeRenderId !== Onion.state.renderId) return;
 
-    /* 🔥 SOLO SI HA PASADO UN POCO DE TIEMPO */
-    if(now - lastRenderTime > 50){
-      stopLoader();
-    }
+    /* 🔥 ESPERAR FRAME REAL (DOM estable) */
+    requestAnimationFrame(()=>{
+      requestAnimationFrame(()=>{
+        stopLoader();
+      });
+    });
 
   });
 
@@ -79,7 +90,7 @@ function observeView(){
 }
 
 /* =========================================================
-   INIT (UNA VEZ Y LISTO)
+   INIT
 ========================================================= */
 
 function init(){
@@ -99,16 +110,19 @@ function init(){
   restoreState();
   applyRoleVisibility();
 
-  observeView(); /* 🔥 CLAVE TOTAL */
+  observeView();
 
   initialized = true;
 
+  /* 🔥 APP READY REAL */
   if(!Onion.state.appReady){
+
     Onion.state.appReady = true;
 
     console.log("🧅 App READY");
 
     requestAnimationFrame(()=> Onion.render?.());
+
   }
 
 }
@@ -116,15 +130,21 @@ function init(){
 init();
 
 /* =========================================================
-   GLOBAL EVENTS (ULTRA LIMPIO)
+   GLOBAL EVENTS
 ========================================================= */
 
 document.addEventListener("click", (e)=>{
 
   /* 🔥 SPA NAV */
   const link = e.target.closest("[data-spa]");
-  if(link && link.href !== window.location.href){
-    startLoader();
+  if(link){
+
+    const href = link.getAttribute("href");
+
+    if(href && href !== window.location.pathname){
+      startLoader();
+    }
+
     return;
   }
 
@@ -169,7 +189,7 @@ document.addEventListener("click", (e)=>{
     startLoader();
 
     Onion.auth.logout().catch(()=>{
-      stopLoader();
+      stopLoader(true);
     });
 
   }
@@ -225,6 +245,14 @@ function applyRoleVisibility(){
     el.style.display = isAdmin ? "" : "none";
   });
 
+}
+
+/* =========================================================
+   DEBUG
+========================================================= */
+
+if(Onion.config?.DEBUG){
+  Onion.log("📦 Sidebar FULL PRO synced with render");
 }
 
 })();

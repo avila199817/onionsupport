@@ -7,7 +7,7 @@
 ========================================================= */
 
 if(window.Onion){
-  console.warn("⚠️ Onion ya inicializado");
+  console.warn("⚠️ Onion ya existe");
   return;
 }
 
@@ -18,23 +18,15 @@ window.Onion = Onion;
    CONFIG
 ========================================================= */
 
-Onion.config = Object.freeze({
+Onion.config = {
   API: "https://api.onionit.net/api",
-  TIMEOUT: 10000,
-  DEBUG: true
-});
-
-/* =========================================================
-   LOGGER
-========================================================= */
+  DEBUG: true,
+  TIMEOUT: 10000
+};
 
 const log = (...a)=> Onion.config.DEBUG && console.log("🧅", ...a);
 const warn = (...a)=> Onion.config.DEBUG && console.warn("⚠️", ...a);
 const error = (...a)=> console.error("💥", ...a);
-
-Onion.log = log;
-Onion.warn = warn;
-Onion.error = error;
 
 /* =========================================================
    STATE
@@ -43,13 +35,10 @@ Onion.error = error;
 Onion.state = {
   user: null,
   slug: localStorage.getItem("onion_user_slug"),
-
   renderId: 0,
   rendering: false,
-
   cleanup: [],
   abortController: null,
-
   ready: false
 };
 
@@ -57,17 +46,9 @@ Onion.state = {
    SAFE STORAGE
 ========================================================= */
 
-const safeGet = k => {
-  try{ return localStorage.getItem(k); }catch{return null;}
-};
-
-const safeSet = (k,v)=>{
-  try{ localStorage.setItem(k,v); }catch{}
-};
-
-const safeRemove = k=>{
-  try{ localStorage.removeItem(k); }catch{}
-};
+const safeGet = k=>{ try{return localStorage.getItem(k);}catch{return null;} };
+const safeSet = (k,v)=>{ try{localStorage.setItem(k,v);}catch{} };
+const safeRemove = k=>{ try{localStorage.removeItem(k);}catch{} };
 
 /* =========================================================
    USER
@@ -100,6 +81,7 @@ Onion.getUser = function(){
   if(Onion.state.user) return Onion.state.user;
 
   const username = safeGet("onion_user_slug");
+
   if(!username) return null;
 
   return {
@@ -109,60 +91,48 @@ Onion.getUser = function(){
   };
 };
 
-Onion.clearUser = function(){
-
-  Onion.state.user = null;
-
-  safeRemove("onion_user_slug");
-  safeRemove("onion_user_name");
-  safeRemove("onion_user_avatar");
-
-};
-
 /* =========================================================
-   CLEANUP (VIEW ONLY 🔥)
+   CLEANUP (VIEW SAFE)
 ========================================================= */
 
-Onion.onCleanup = fn => {
-  if(typeof fn === "function"){
+Onion.onCleanup = fn=>{
+  if(typeof fn==="function"){
     Onion.state.cleanup.push(fn);
   }
 };
 
-Onion.cleanupEvent = function(el, type, handler, options){
+Onion.cleanupEvent = function(el,type,handler,opt){
 
   if(!el) return;
 
-  el.addEventListener(type, handler, options);
+  el.addEventListener(type,handler,opt);
 
   Onion.onCleanup(()=>{
-    try{ el.removeEventListener(type, handler, options); }catch{}
+    try{el.removeEventListener(type,handler,opt);}catch{}
   });
 
 };
 
 Onion.runCleanup = function(){
 
-  const list = Onion.state.cleanup;
-
-  for(let i = list.length - 1; i >= 0; i--){
-    try{ list[i](); }catch(e){ warn("cleanup error", e); }
+  for(let i=Onion.state.cleanup.length-1;i>=0;i--){
+    try{Onion.state.cleanup[i]();}catch(e){warn(e);}
   }
 
   Onion.state.cleanup.length = 0;
 
   if(Onion.state.abortController){
-    try{ Onion.state.abortController.abort(); }catch{}
+    try{Onion.state.abortController.abort();}catch{}
     Onion.state.abortController = null;
   }
 
 };
 
 /* =========================================================
-   FETCH (SAFE + ABORT)
+   FETCH (ANTI RACE)
 ========================================================= */
 
-Onion.fetch = async function(url, options = {}){
+Onion.fetch = async function(url,opt={}){
 
   if(url.startsWith("/")){
     url = Onion.config.API + url;
@@ -170,46 +140,47 @@ Onion.fetch = async function(url, options = {}){
 
   let controller = null;
 
-  if(!options.signal){
+  if(!opt.signal){
+
     if(Onion.state.abortController){
-      try{ Onion.state.abortController.abort(); }catch{}
+      try{Onion.state.abortController.abort();}catch{}
     }
 
     controller = new AbortController();
     Onion.state.abortController = controller;
-    options.signal = controller.signal;
+    opt.signal = controller.signal;
   }
 
   const timeout = setTimeout(()=>{
     controller?.abort();
-  }, Onion.config.TIMEOUT);
+  },Onion.config.TIMEOUT);
 
   try{
 
-    const headers = options.headers || {};
+    const headers = opt.headers || {};
 
     const token = localStorage.getItem("onion_token");
+
     if(token){
-      headers["Authorization"] = "Bearer " + token;
+      headers["Authorization"] = "Bearer "+token;
     }
 
-    if(options.body && typeof options.body === "object"){
-      headers["Content-Type"] = "application/json";
-      options.body = JSON.stringify(options.body);
+    if(opt.body && typeof opt.body==="object"){
+      headers["Content-Type"]="application/json";
+      opt.body = JSON.stringify(opt.body);
     }
 
     const res = await fetch(url,{
-      ...options,
+      ...opt,
       headers,
       credentials:"include"
     });
 
-    if(res.status === 401){
-      Onion.auth.redirectLogin();
-      return null;
-    }
+    let data = null;
 
-    const data = await res.json().catch(()=>null);
+    try{
+      data = await res.json();
+    }catch{}
 
     if(!res.ok){
       throw new Error(data?.message || "HTTP "+res.status);
@@ -219,7 +190,7 @@ Onion.fetch = async function(url, options = {}){
 
   }catch(e){
 
-    if(e.name === "AbortError"){
+    if(e.name==="AbortError"){
       throw new Error("ABORTED");
     }
 
@@ -232,41 +203,54 @@ Onion.fetch = async function(url, options = {}){
 };
 
 /* =========================================================
-   AUTH
+   AUTH (NO BLOQUEA 🔥)
 ========================================================= */
 
 Onion.auth = {};
 
 Onion.auth.getToken = ()=> safeGet("onion_token");
 
-Onion.auth.redirectLogin = function(){
-  Onion.clearUser();
-  location.replace("/auth");
-};
+Onion.auth.tryLoadUser = async function(){
 
-Onion.auth.require = function(){
-  if(!Onion.auth.getToken()){
-    Onion.auth.redirectLogin();
-    return false;
+  try{
+    const res = await Onion.fetch("/auth/me");
+    const user = res?.user || res;
+
+    if(user){
+      Onion.setUser(user);
+    }
+
+  }catch(e){
+    warn("Auth fallback (no bloquea)");
   }
-  return true;
+
 };
 
 /* =========================================================
-   ROUTER
+   ROUTER (CON @SLUG 🔥)
 ========================================================= */
 
 Onion.routes = {
-  "/": { page: "/app/views/index.html", title:"Dashboard" }
+  "/": { page:"/app/views/index.html", title:"Dashboard" }
 };
 
-function normalize(path){
-  return path.replace(/\/+/g,"/").replace(/\/$/,"") || "/";
+function normalize(p){
+  return p.replace(/\/+/g,"/").replace(/\/$/,"") || "/";
 }
 
 Onion.router = {};
 
-Onion.router.get = ()=> normalize(location.pathname);
+Onion.router.get = function(){
+
+  let path = location.pathname;
+
+  if(path.startsWith("/@")){
+    const parts = path.split("/").slice(2);
+    return "/" + (parts.join("/") || "");
+  }
+
+  return normalize(path);
+};
 
 Onion.router.resolve = function(){
   return Onion.routes[Onion.router.get()] || Onion.routes["/"];
@@ -277,7 +261,7 @@ Onion.router.navigate = function(path){
   const current = normalize(location.pathname);
   const next = normalize(path);
 
-  if(current === next) return;
+  if(current===next) return;
 
   Onion.state.renderId++;
 
@@ -293,7 +277,23 @@ window.addEventListener("popstate", ()=>{
 });
 
 /* =========================================================
-   RENDER ENGINE 🔥
+   LOADER
+========================================================= */
+
+function hideLoader(){
+
+  document.body.classList.remove("loading");
+
+  const el = document.getElementById("app-loader");
+  if(el){
+    el.style.opacity="0";
+    setTimeout(()=> el.remove(),200);
+  }
+
+}
+
+/* =========================================================
+   RENDER (NUNCA FALLA 🔥)
 ========================================================= */
 
 Onion.render = async function(){
@@ -312,7 +312,13 @@ Onion.render = async function(){
 
     const route = Onion.router.resolve();
 
-    const html = await fetch(route.page).then(r=>r.text());
+    let html = "";
+
+    try{
+      html = await fetch(route.page).then(r=>r.text());
+    }catch{
+      html = "<div class='panel-content'>Error cargando vista</div>";
+    }
 
     if(renderId !== Onion.state.renderId) return;
 
@@ -324,14 +330,19 @@ Onion.render = async function(){
       container.classList.add("ready");
     });
 
+    document.getElementById("topbar-title").textContent =
+      route.title || "Panel";
+
   }catch(e){
 
-    error("Render error", e);
+    error("Render",e);
 
   }finally{
 
-    if(renderId === Onion.state.renderId){
-      Onion.state.rendering = false;
+    hideLoader();
+
+    if(renderId===Onion.state.renderId){
+      Onion.state.rendering=false;
     }
 
   }
@@ -339,28 +350,40 @@ Onion.render = async function(){
 };
 
 /* =========================================================
-   INIT
+   SPA LINKS
+========================================================= */
+
+document.addEventListener("click",(e)=>{
+
+  const link = e.target.closest("[data-spa]");
+  if(!link) return;
+
+  const href = link.getAttribute("href");
+  if(!href) return;
+
+  if(href.startsWith("http")) return;
+
+  e.preventDefault();
+
+  Onion.router.navigate(href);
+
+});
+
+/* =========================================================
+   INIT (BLINDADO 🔥)
 ========================================================= */
 
 Onion.init = async function(){
 
   if(Onion.state.ready) return;
 
-  if(!Onion.auth.require()) return;
+  log("INIT...");
 
-  try{
+  await Onion.auth.tryLoadUser(); // 🔥 NO BLOQUEA
 
-    const res = await Onion.fetch("/auth/me");
+  Onion.state.ready = true;
 
-    Onion.setUser(res?.user || res);
-
-    Onion.state.ready = true;
-
-    Onion.render();
-
-  }catch(e){
-    error("Init error", e);
-  }
+  Onion.render();
 
 };
 
@@ -372,6 +395,6 @@ document.addEventListener("DOMContentLoaded", ()=>{
   Onion.init();
 });
 
-log("🚀 Onion SPA GOD MODE READY");
+log("🚀 Onion SPA FULL PRO READY");
 
 })();

@@ -10,7 +10,86 @@
   const Onion = window.Onion;
 
   /* =========================================================
-     ROUTERS REGISTRY
+     SCRIPT LOADER GLOBAL
+  ========================================================= */
+
+  function loadScript(src){
+    return new Promise((resolve, reject)=>{
+
+      const s = document.createElement("script");
+      s.src = src;
+      s.defer = true;
+      s.async = false;
+
+      s.onload = resolve;
+      s.onerror = reject;
+
+      document.head.appendChild(s);
+
+    });
+  }
+
+  /* =========================================================
+     MODULES (AUTO LOAD)
+  ========================================================= */
+
+  const MODULES = [
+
+    // CORE
+    "/js/wwwroot/router/core/index.js",
+
+    // INIT
+    "/js/wwwroot/router/init/index.js",
+
+    // USER
+    "/js/wwwroot/router/user/index.js",
+
+    // UI
+    "/js/wwwroot/router/ui/index.js",
+
+    // I18N
+    "/js/wwwroot/router/i18n/index.js",
+
+    // FEATURES / PAGES
+    "/js/wwwroot/router/pages/index.js",
+    "/js/wwwroot/router/features/index.js"
+
+  ];
+
+  /* =========================================================
+     ROUTERS (FEATURE MODULES)
+  ========================================================= */
+
+  const ROUTERS = [
+
+    "/js/wwwroot/router/auth/index.js",
+    "/js/wwwroot/router/incidencias/index.js",
+    "/js/wwwroot/router/facturas/index.js",
+    "/js/wwwroot/router/clientes/index.js",
+    "/js/wwwroot/router/usuarios/index.js"
+
+  ];
+
+  /* =========================================================
+     LOAD ALL
+  ========================================================= */
+
+  async function loadAll(){
+
+    // CORE primero
+    for(const src of MODULES){
+      await loadScript(src);
+    }
+
+    // luego routers
+    for(const src of ROUTERS){
+      await loadScript(src);
+    }
+
+  }
+
+  /* =========================================================
+     SERVER ENGINE (EXPRESS STYLE)
   ========================================================= */
 
   const routes = [];
@@ -19,24 +98,14 @@
     routes.push({ path, handler });
   }
 
-  /* =========================================================
-     MATCHER
-  ========================================================= */
-
   function match(path){
-
     for(const r of routes){
       if(path.startsWith(r.path)){
         return r;
       }
     }
-
     return null;
   }
-
-  /* =========================================================
-     CONTEXT
-  ========================================================= */
 
   function createContext(){
 
@@ -52,24 +121,19 @@
 
   }
 
-  /* =========================================================
-     HANDLE REQUEST (LIKE EXPRESS)
-  ========================================================= */
-
   async function handle(){
 
     try{
 
       const ctx = createContext();
 
-      const matchRoute = match(ctx.path);
+      const route = match(ctx.path);
 
-      if(!matchRoute){
-        console.warn("⚠️ No route matched:", ctx.path);
-        return Onion.render();
+      if(!route){
+        return ctx.render();
       }
 
-      await matchRoute.handler(ctx);
+      await route.handler(ctx);
 
     }catch(e){
 
@@ -80,52 +144,65 @@
 
   }
 
-  /* =========================================================
-     PUBLIC API
-  ========================================================= */
-
   Onion.server = {
     use,
     handle
   };
 
   /* =========================================================
-     CONNECT ROUTERS 🔥
+     CONNECT ROUTERS
   ========================================================= */
 
-  // 👇 IMPORTS (como backend)
-  // IMPORTANTE: estos scripts deben estar cargados antes
+  function connectRouters(){
 
-  use("/auth", window.AuthRouter);
-  use("/facturas", window.FacturasRouter);
-  use("/incidencias", window.IncidenciasRouter);
-  use("/clientes", window.ClientesRouter);
-  use("/usuarios", window.UsersRouter);
-  use("/", window.DashboardRouter);
+    // 👇 estos deben existir tras loadAll()
+
+    if(window.AuthRouter)       use("/auth", window.AuthRouter);
+    if(window.FacturasRouter)   use("/facturas", window.FacturasRouter);
+    if(window.IncidenciasRouter)use("/incidencias", window.IncidenciasRouter);
+    if(window.ClientesRouter)   use("/clientes", window.ClientesRouter);
+    if(window.UsersRouter)      use("/usuarios", window.UsersRouter);
+
+    // fallback
+    use("/", async (ctx)=> ctx.render());
+
+  }
 
   /* =========================================================
      NAVIGATION HOOK
   ========================================================= */
 
-  const originalNavigate = Onion.router.navigate;
+  function bindNavigation(){
 
-  Onion.router.navigate = function(path){
+    const originalNavigate = Onion.router.navigate;
 
-    originalNavigate(path);
+    Onion.router.navigate = function(path){
 
-    handle();
+      originalNavigate(path);
 
-  };
+      handle();
 
-  window.addEventListener("popstate", handle);
+    };
+
+    window.addEventListener("popstate", handle);
+
+  }
 
   /* =========================================================
      START
   ========================================================= */
 
-  document.addEventListener("DOMContentLoaded", async ()=>{
+  async function start(){
 
     try{
+
+      console.log("🧅 Server booting...");
+
+      await loadAll();
+
+      connectRouters();
+
+      bindNavigation();
 
       await Onion.init();
 
@@ -133,12 +210,20 @@
 
       await handle();
 
+      console.log("🚀 Onion SPA READY");
+
     }catch(e){
 
       console.error("💥 BOOT ERROR:", e);
 
     }
 
-  });
+  }
+
+  /* =========================================================
+     BOOT
+  ========================================================= */
+
+  document.addEventListener("DOMContentLoaded", start);
 
 })();

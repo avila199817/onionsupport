@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 SIDEBAR — CORE CLEAN 10/10 (INMUTABLE · ROOT REAL)
+   🧅 SIDEBAR — CORE DEFINITIVO (SYNC + ROLES)
 ========================================================= */
 
 (function(){
@@ -23,17 +23,23 @@ function init(){
   if(!sidebar) return;
 
   if(!Onion.state?.user){
-    return setTimeout(init, 100);
+    return setTimeout(init, 50);
   }
 
   renderUser();
   restoreState();
+  applyRoleVisibility();
   setRecientesError();
 
-  // 🔥 BOOT REAL (solo una vez)
-  if(!Onion.state.appReady){
+  /* 🔥 BOOT LIMPIO */
+  if(!Onion.state.appReady && Onion.state.user){
     Onion.state.appReady = true;
-    Onion.render?.();
+
+    console.log("🧅 App READY → first render");
+
+    requestAnimationFrame(()=>{
+      Onion.render?.();
+    });
   }
 
 }
@@ -41,18 +47,26 @@ function init(){
 init();
 
 /* =========================================================
-   HOOKS CORE (PERSISTENTES)
+   HOOKS CORE
 ========================================================= */
 
 if(!window.__ONION_SIDEBAR_CORE__){
 
   window.__ONION_SIDEBAR_CORE__ = true;
 
-  Onion.events?.onCore?.("app:ready", ()=> requestAnimationFrame(init));
-  Onion.events?.onCore?.("route:end", ()=> requestAnimationFrame(()=>{
-    renderUser();
-    restoreState();
-  }));
+  Onion.events?.onCore?.("app:ready", ()=>{
+    requestAnimationFrame(init);
+  });
+
+  Onion.events?.onCore?.("route:end", ()=>{
+
+    requestAnimationFrame(()=>{
+      renderUser();
+      restoreState();
+      applyRoleVisibility();
+    });
+
+  });
 
   bindGlobalEvents();
 
@@ -83,7 +97,30 @@ function restoreState(){
 }
 
 /* =========================================================
-   GLOBAL EVENTS (CORE REAL)
+   ROLES (ADMIN CONTROL)
+========================================================= */
+
+function applyRoleVisibility(){
+
+  const user = Onion.getUser?.();
+  if(!user) return;
+
+  const role = (user.role || "").toLowerCase();
+
+  const isAdmin = role === "admin";
+
+  const adminItems = document.querySelectorAll(
+    '[data-role="admin"]'
+  );
+
+  adminItems.forEach(el=>{
+    el.style.display = isAdmin ? "" : "none";
+  });
+
+}
+
+/* =========================================================
+   GLOBAL EVENTS
 ========================================================= */
 
 function bindGlobalEvents(){
@@ -294,7 +331,7 @@ function getInitials(name){
 ========================================================= */
 
 if(Onion.config?.DEBUG){
-  Onion.log("📚 Sidebar CORE CLEAN 10/10 ready");
+  Onion.log("📚 Sidebar DEFINITIVO ready");
 }
 
 })();

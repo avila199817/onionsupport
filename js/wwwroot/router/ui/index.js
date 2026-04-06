@@ -20,6 +20,7 @@
     "/js/wwwroot/router/ui/topbar.js",
     "/js/wwwroot/router/ui/ui.js",
     "/js/wwwroot/router/ui/toast.js",
+    "/js/wwwroot/router/ui/loader.js",
 
   ];
 

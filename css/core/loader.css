@@ -14,7 +14,6 @@
   align-items:center;
   justify-content:center;
 
-  /* 🔥 FONDO TOTAL (usa tu sistema) */
   background:color-mix(in srgb, var(--main-bg) 92%, transparent);
 
   opacity:0;
@@ -136,13 +135,18 @@ body.loading textarea{
 
 
 /* =========================================================
-   🔥 TABLE LOADER — SAAS PRO (FLOATING FINAL)
+   🔥 TABLE LOADER — SAAS PRO (FLOATING FINAL FIXED)
 ========================================================= */
 
 /* =========================
    CONTENEDOR
 ========================= */
 .table-container{
+  position:relative;
+}
+
+/* 🔥 asegura overlay correcto */
+.panel-content.incidencias{
   position:relative;
 }
 
@@ -162,7 +166,7 @@ body.loading textarea{
 
 
 /* =========================
-   LOADER FLOTANTE
+   LOADER FLOTANTE (FIX REAL)
 ========================= */
 .table-loader{
   position:absolute;
@@ -174,13 +178,32 @@ body.loading textarea{
   justify-content:center;
   gap:12px;
 
-  z-index:2;
+  z-index:5;
 
   color:var(--dim);
   font-size:var(--font-sm);
 
-  background:transparent;
+  /* 🔥 CLAVE: overlay real */
+  background:color-mix(in srgb, var(--main-bg) 85%, transparent);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+
   pointer-events:none;
+
+  /* 🔥 visible por defecto */
+  opacity:1;
+  visibility:visible;
+
+  transition:
+    opacity .25s ease,
+    visibility .25s ease;
+}
+
+
+/* 🔥 estado oculto controlado por JS */
+.table-loader.hidden{
+  opacity:0;
+  visibility:hidden;
 }
 
 
@@ -229,7 +252,7 @@ body.light .table-loader{
   color:#6b7280;
 }
 
-body.light .spinner::before{
+body.light .table-loader .spinner::before{
   border-color:rgba(0,0,0,0.08);
 }
 

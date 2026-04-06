@@ -29,7 +29,7 @@ const warn = (...a)=> Onion.config.DEBUG && console.warn("⚠️", ...a);
 const error = (...a)=> console.error("💥", ...a);
 
 /* =========================================================
-   STATE
+   STATE (NO FREEZE)
 ========================================================= */
 
 Onion.state = {
@@ -76,7 +76,7 @@ Onion.setUser = function(user){
 };
 
 /* =========================================================
-   CLEANUP
+   CLEANUP SAFE
 ========================================================= */
 
 Onion.onCleanup = fn=>{
@@ -115,7 +115,7 @@ Onion.runCleanup = function(){
 };
 
 /* =========================================================
-   FETCH
+   FETCH (ANTI RACE + TIMEOUT)
 ========================================================= */
 
 Onion.fetch = async function(url,opt={}){
@@ -128,13 +128,22 @@ Onion.fetch = async function(url,opt={}){
   Onion.state.abortController = controller;
   opt.signal = controller.signal;
 
+  const timeout = setTimeout(()=>{
+    controller.abort();
+  }, Onion.config.TIMEOUT);
+
   try{
 
     const headers = opt.headers || {};
-    const token = localStorage.getItem("onion_token");
+    const token = safeGet("onion_token");
 
     if(token){
       headers["Authorization"] = "Bearer "+token;
+    }
+
+    if(opt.body && typeof opt.body==="object"){
+      headers["Content-Type"] = "application/json";
+      opt.body = JSON.stringify(opt.body);
     }
 
     const res = await fetch(url,{
@@ -159,12 +168,14 @@ Onion.fetch = async function(url,opt={}){
 
     throw e;
 
+  }finally{
+    clearTimeout(timeout);
   }
 
 };
 
 /* =========================================================
-   AUTH
+   AUTH (NO BLOQUEA)
 ========================================================= */
 
 Onion.auth = {};
@@ -223,13 +234,8 @@ Onion.router.navigate = function(path){
 window.addEventListener("popstate", Onion.render);
 
 /* =========================================================
-   🔌 BRIDGE (INDEX.JS AUTO)
+   🔌 BRIDGE
 ========================================================= */
-
-Onion.bridge = {
-  ready: false,
-  queue: []
-};
 
 Onion.register = function(type, name, fn){
 
@@ -237,37 +243,75 @@ Onion.register = function(type, name, fn){
 
   Onion[type][name] = fn;
 
-  log(`📦 registrado -> ${type}:${name}`);
+  log(`📦 ${type}:${name}`);
 };
 
 /* =========================================================
-   RENDER
+   LOADER CONTROL (CRÍTICO)
+========================================================= */
+
+function hideLoader(){
+
+  document.body.classList.remove("loading");
+
+  const el = document.getElementById("app-loader");
+  if(el){
+    el.style.opacity = "0";
+    setTimeout(()=> el.remove(), 200);
+  }
+
+}
+
+/* =========================================================
+   RENDER (ANTI-RACE + SAFE)
 ========================================================= */
 
 Onion.render = async function(){
 
-  const container = document.getElementById("view-container");
-  if(!container) return;
+  const renderId = ++Onion.state.renderId;
 
-  const route = Onion.router.resolve();
+  try{
 
-  Onion.runCleanup();
+    const container = document.getElementById("view-container");
+    if(!container) return;
 
-  const html = await fetch(route.page).then(r=>r.text()).catch(()=>"<div>Error</div>");
+    const route = Onion.router.resolve();
 
-  container.innerHTML = html;
+    Onion.runCleanup();
 
-  document.getElementById("topbar-title").textContent =
-    route.title || "Panel";
+    let html = "";
 
-  /* 🔥 EJECUCIÓN FEATURE */
-
-  if(route.feature && Onion.features?.[route.feature]){
     try{
-      Onion.features[route.feature]();
-    }catch(e){
-      console.error("Feature crash", e);
+      html = await fetch(route.page).then(r=>r.text());
+    }catch{
+      html = "<div class='panel-content'>Error cargando vista</div>";
     }
+
+    if(renderId !== Onion.state.renderId) return;
+
+    container.innerHTML = html;
+
+    const title = document.getElementById("topbar-title");
+    if(title){
+      title.textContent = route.title || "Panel";
+    }
+
+    if(route.feature && Onion.features?.[route.feature]){
+      try{
+        Onion.features[route.feature]();
+      }catch(e){
+        error("Feature crash", e);
+      }
+    }
+
+  }catch(e){
+
+    error("Render", e);
+
+  }finally{
+
+    hideLoader(); // 🔥 NUNCA PANTALLA NEGRA
+
   }
 
 };
@@ -281,8 +325,12 @@ document.addEventListener("click",(e)=>{
   const link = e.target.closest("[data-spa]");
   if(!link) return;
 
+  const href = link.getAttribute("href");
+  if(!href || href.startsWith("http")) return;
+
   e.preventDefault();
-  Onion.router.navigate(link.getAttribute("href"));
+
+  Onion.router.navigate(href);
 
 });
 
@@ -292,9 +340,11 @@ document.addEventListener("click",(e)=>{
 
 Onion.init = async function(){
 
-  await Onion.auth.tryLoadUser();
+  if(Onion.state.ready) return;
 
-  /* 🔥 CARGAR INDEX.JS (PUENTE) */
+  log("INIT...");
+
+  await Onion.auth.tryLoadUser();
 
   const script = document.createElement("script");
   script.src = "/js/wwwroot/router/index.js";
@@ -302,7 +352,13 @@ Onion.init = async function(){
 
   script.onload = ()=>{
     log("🔌 Bridge cargado");
+    Onion.state.ready = true;
     Onion.render();
+  };
+
+  script.onerror = ()=>{
+    error("💥 Bridge no cargado");
+    Onion.render(); // fallback
   };
 
   document.body.appendChild(script);
@@ -318,6 +374,6 @@ document.addEventListener("DOMContentLoaded", Onion.init);
 Object.freeze(Onion.config);
 Object.freeze(Onion.router);
 
-log("🚀 CORE ready");
+log("🚀 CORE READY");
 
 })();

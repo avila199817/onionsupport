@@ -9,28 +9,39 @@
 
   const Onion = window.Onion;
 
-  /* =========================================================
-     STATE
-  ========================================================= */
-
   Onion.state = Onion.state || {};
 
-  /* =========================================================
-     HELPERS
-  ========================================================= */
+  /* =========================
+     NORMALIZE PATH
+  ========================= */
 
-  function getPath(){
+  function normalize(path){
 
-    let path = window.location.pathname || "/";
+    if(!path) return "/";
+
+    // quitar query
+    path = path.split("?")[0];
 
     // quitar trailing slash
     if(path.length > 1 && path.endsWith("/")){
       path = path.slice(0, -1);
     }
 
-    return path;
+    return path || "/";
 
   }
+
+  /* =========================
+     GET PATH
+  ========================= */
+
+  function getPath(){
+    return normalize(window.location.pathname);
+  }
+
+  /* =========================
+     GET QUERY
+  ========================= */
 
   function getQuery(){
 
@@ -45,20 +56,22 @@
 
   }
 
-  /* =========================================================
-     RESOLVE (CLAVE)
-  ========================================================= */
+  /* =========================
+     RESOLVE
+  ========================= */
 
   function resolve(){
 
     const path = getPath();
 
-    let route = Onion.routes[path];
+    let route = Onion.routes?.[path];
 
     if(!route){
+
       console.warn("⚠️ Ruta no encontrada:", path);
 
-      route = Onion.routes["/"]; // fallback
+      route = Onion.routes["/"];
+
     }
 
     return {
@@ -69,79 +82,49 @@
 
   }
 
-  /* =========================================================
+  /* =========================
      NAVIGATE
-  ========================================================= */
+  ========================= */
 
-  function navigate(path, options = {}){
+  function navigate(path){
 
     if(!path) return;
 
+    const target = normalize(path);
     const current = getPath();
 
-    // evitar doble navegación
-    if(path === current) return;
+    if(target === current) return;
 
-    try{
+    history.pushState({}, "", target);
 
-      history.pushState({}, "", path);
+    window.scrollTo(0, 0);
 
-      if(options.scroll !== false){
-        window.scrollTo(0, 0);
-      }
-
-      Onion.render?.();
-
-    }catch(e){
-
-      console.error("💥 NAVIGATION ERROR:", e);
-
-    }
+    Onion.render?.();
 
   }
 
-  /* =========================================================
-     BACK / FORWARD
-  ========================================================= */
+  /* =========================
+     POPSTATE
+  ========================= */
 
-  function initPopState(){
+  window.addEventListener("popstate", ()=>{
+    Onion.render?.();
+  });
 
-    window.addEventListener("popstate", ()=>{
-      Onion.render?.();
-    });
-
-  }
-
-  /* =========================================================
-     PUBLIC API
-  ========================================================= */
+  /* =========================
+     PUBLIC
+  ========================= */
 
   Onion.router = {
-
     get: getPath,
-
     resolve,
-
     navigate,
-
-    go: navigate, // alias estilo backend
-
+    go: navigate,
     query: getQuery
-
   };
 
-  /* =========================================================
-     INIT
-  ========================================================= */
-
-  initPopState();
-
-  /* =========================================================
-     DEBUG
-  ========================================================= */
-
   if(Onion.config?.DEBUG){
-    Onion.log("🧭 Router READY");
+    Onion.log("🧭 Router FINAL READY");
   }
 
 })();

@@ -16,14 +16,13 @@ let sidebar = null;
 let dropdown = null;
 
 /* =========================================================
-   INIT SAFE (REINTENTO SPA)
+   INIT SAFE
 ========================================================= */
 
 function init(){
 
   sidebar = document.querySelector(".sidebar");
   if(!sidebar){
-    // 🔥 SPA: reintenta hasta que exista
     return setTimeout(init, 50);
   }
 
@@ -42,7 +41,7 @@ if(document.readyState === "loading"){
 }
 
 /* =========================================================
-   LOADER HOOK (GLOBAL)
+   LOADER HOOK
 ========================================================= */
 
 function startLoader(){
@@ -53,7 +52,7 @@ function stopLoader(){
   document.body.classList.remove("loading");
 }
 
-/* 🔥 enganchar al render SIN romperlo */
+/* 🔥 HOOK GLOBAL RENDER */
 if(!Onion.__sidebarHooked){
 
   const originalRender = Onion.render;
@@ -64,7 +63,7 @@ if(!Onion.__sidebarHooked){
       await originalRender.apply(this, arguments);
     }finally{
       stopLoader();
-      init(); // 🔥 re-sync DOM tras render
+      init();
     }
   };
 
@@ -72,10 +71,10 @@ if(!Onion.__sidebarHooked){
 }
 
 /* =========================================================
-   EVENTS SAFE
+   EVENTS
 ========================================================= */
 
-document.addEventListener("click",(e)=>{
+document.addEventListener("click", async (e)=>{
 
   /* SPA NAV */
   const link = e.target.closest("[data-spa]");
@@ -89,7 +88,6 @@ document.addEventListener("click",(e)=>{
 
   /* TOGGLE SIDEBAR */
   if(e.target.closest("#toggleSidebar")){
-
     if(!sidebar) return;
 
     const collapsed = sidebar.classList.toggle("collapsed");
@@ -111,6 +109,35 @@ document.addEventListener("click",(e)=>{
     dropdown?.classList.remove("active");
   }
 
+  /* 🔥 LOGOUT REAL */
+  if(e.target.closest("#logoutBtn")){
+
+    e.preventDefault();
+    startLoader();
+
+    try{
+
+      await Onion.fetch("/auth/logout", {
+        method: "POST"
+      });
+
+    }catch(e){
+      console.warn("Logout error (ignorado)");
+    }
+
+    /* limpiar cliente */
+    localStorage.removeItem("onion_token");
+    localStorage.removeItem("onion_user_slug");
+    localStorage.removeItem("onion_user_name");
+    localStorage.removeItem("onion_user_avatar");
+
+    Onion.state.user = null;
+
+    /* reload limpio */
+    location.href = "/";
+
+  }
+
 });
 
 /* =========================================================
@@ -127,7 +154,7 @@ function restoreState(){
 }
 
 /* =========================================================
-   USER
+   USER (AVATAR + NAME)
 ========================================================= */
 
 function renderUser(){
@@ -139,11 +166,28 @@ function renderUser(){
   const avatarEl = document.getElementById("sidebar-avatar");
 
   const name = user.name || user.username || "Usuario";
+  const avatar = user.avatar;
 
   if(nameEl) nameEl.textContent = name;
 
-  if(avatarEl){
+  if(!avatarEl) return;
+
+  /* 🔥 SI HAY FOTO */
+  if(avatar){
+
+    avatarEl.innerHTML = `
+      <img 
+        src="${avatar}" 
+        alt="avatar"
+        style="width:100%;height:100%;object-fit:cover;border-radius:50%;"
+      />
+    `;
+
+  }else{
+
+    /* 🔥 FALLBACK LETRA */
     avatarEl.textContent = name[0]?.toUpperCase() || "U";
+
   }
 
 }

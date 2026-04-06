@@ -10,33 +10,50 @@
   const Onion = window.Onion;
 
   /* =========================================================
-     SCRIPT LOADER
+     SCRIPT LOADER (SAFE)
   ========================================================= */
 
   function loadScript(src){
-    return new Promise((resolve, reject)=>{
+    return new Promise((resolve)=>{
 
       const s = document.createElement("script");
       s.src = src;
       s.defer = true;
       s.async = false;
 
-      s.onload = resolve;
-      s.onerror = reject;
+      s.onload = () => {
+        console.log("✅", src);
+        resolve(true);
+      };
+
+      s.onerror = () => {
+        console.warn("⚠️ NO CARGADO:", src);
+        resolve(false); // 🔥 NO rompe el flujo
+      };
 
       document.head.appendChild(s);
 
     });
   }
 
+  async function loadGroup(name, list){
+
+    console.log(`📦 Loading ${name}...`);
+
+    for(const src of list){
+      await loadScript(src);
+    }
+
+  }
+
   /* =========================================================
-     CORE (ORDEN IMPORTANTE)
+     CORE
   ========================================================= */
 
   const CORE = [
     "/js/wwwroot/router/core/core.js",
-    "/js/wwwroot/router/core/cleanup.js",
     "/js/wwwroot/router/core/events.js",
+    "/js/wwwroot/router/core/cleanup.js",
     "/js/wwwroot/router/core/viewEngine.js",
     "/js/wwwroot/router/core/index.js"
   ];
@@ -46,8 +63,8 @@
   ========================================================= */
 
   const INIT = [
-    "/js/wwwroot/router/init/boot.js",
     "/js/wwwroot/router/init/init.js",
+    "/js/wwwroot/router/init/boot.js",
     "/js/wwwroot/router/init/index.js"
   ];
 
@@ -79,7 +96,7 @@
   ];
 
   /* =========================================================
-     ROUTERS (TUS MÓDULOS)
+     ROUTERS (🔥 NO METAS LOS QUE NO EXISTEN)
   ========================================================= */
 
   const ROUTERS = [
@@ -93,19 +110,13 @@
      LOAD ALL
   ========================================================= */
 
-  async function loadGroup(list){
-    for(const src of list){
-      await loadScript(src);
-    }
-  }
-
   async function loadAll(){
 
-    await loadGroup(CORE);
-    await loadGroup(INIT);
-    await loadGroup(UI);
-    await loadGroup(FEATURES);
-    await loadGroup(ROUTERS);
+    await loadGroup("CORE", CORE);
+    await loadGroup("INIT", INIT);
+    await loadGroup("UI", UI);
+    await loadGroup("FEATURES", FEATURES);
+    await loadGroup("ROUTERS", ROUTERS);
 
   }
 
@@ -130,11 +141,11 @@
 
   function createContext(){
 
-    const route = Onion.router?.resolve?.() || { path:"/" };
+    const route = Onion.router?.get?.() || "/";
 
     return {
-      path: route.path,
-      query: route.query || {},
+      path: route,
+      query: Onion.router?.getQuery?.() || {},
       user: Onion.getUser?.(),
       navigate: Onion.router?.navigate,
       render: Onion.render
@@ -147,11 +158,10 @@
     try{
 
       const ctx = createContext();
-
       const route = match(ctx.path);
 
       if(!route){
-        return ctx.render();
+        return ctx.render?.();
       }
 
       await route.handler(ctx);
@@ -176,13 +186,11 @@
 
   function connectRouters(){
 
-    if(window.AuthRouter)        use("/auth", window.AuthRouter);
     if(window.FacturasRouter)    use("/facturas", window.FacturasRouter);
     if(window.IncidenciasRouter) use("/incidencias", window.IncidenciasRouter);
     if(window.ClientesRouter)    use("/clientes", window.ClientesRouter);
     if(window.UsersRouter)       use("/usuarios", window.UsersRouter);
 
-    // fallback
     use("/", async (ctx)=> ctx.render());
 
   }
@@ -193,16 +201,13 @@
 
   function bindNavigation(){
 
-    if(!Onion.router?.navigate){
-      return;
-    }
+    if(!Onion.router?.navigate) return;
 
     const originalNavigate = Onion.router.navigate;
 
     Onion.router.navigate = function(path){
 
       originalNavigate(path);
-
       handle();
 
     };

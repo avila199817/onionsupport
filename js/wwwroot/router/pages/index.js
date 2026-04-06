@@ -1,7 +1,12 @@
 "use strict";
 
 /* =========================================================
-   🧅 ROUTER — FINAL PRO 10/10 (NO RACE · FULL ROUTES · STABLE)
+   🧅 ONION ROUTER + INDEX ENGINE (FULL PRO SAAS)
+   - HTML → server.js
+   - CSS + JS → aquí
+   - Slug integrado
+   - Sin duplicados
+   - Sin memory leaks
 ========================================================= */
 
 (function(){
@@ -168,6 +173,7 @@ Onion.routes = Object.freeze({
 
 function normalize(path){
   if(!path) return "/";
+  path = path.split("?")[0];
   path = path.replace(/\/+/g, "/");
   if(path.length > 1 && path.endsWith("/")){
     path = path.slice(0, -1);
@@ -176,7 +182,7 @@ function normalize(path){
 }
 
 /* =========================================================
-   GET PATH
+   ROUTER CORE (CON SLUG)
 ========================================================= */
 
 Onion.router.get = function(){
@@ -186,6 +192,7 @@ Onion.router.get = function(){
     let path = normalize(window.location.pathname);
 
     if(path.startsWith("/@")){
+
       const parts = path.split("/").filter(Boolean);
 
       Onion.state.slug = parts[0].replace("@","");
@@ -196,51 +203,57 @@ Onion.router.get = function(){
     return path;
 
   }catch(e){
-    Onion.error("Router get error:", e);
+    console.error("Router get error:", e);
     return "/";
   }
 
 };
 
-/* =========================================================
-   QUERY PARAMS 🔥
-========================================================= */
-
 Onion.router.getQuery = function(){
   return Object.fromEntries(new URLSearchParams(window.location.search));
 };
 
-/* =========================================================
-   RESOLVE
-========================================================= */
-
 Onion.router.resolve = function(){
-  const route = Onion.router.get();
-  return Onion.routes[route] || Onion.routes["/"];
+
+  const path = Onion.router.get();
+
+  let route = Onion.routes[path];
+
+  if(!route){
+    console.warn("⚠️ Ruta no encontrada:", path);
+    route = Onion.routes["/"];
+  }
+
+  return {
+    ...route,
+    path,
+    query: Onion.router.getQuery()
+  };
+
 };
 
 /* =========================================================
-   BUILD URL
+   BUILD URL (SLUG)
 ========================================================= */
 
 function buildUrl(href){
 
-  const username =
+  const slug =
     Onion.state.slug ||
     localStorage.getItem("onion_user_slug");
 
-  if(!username) return href;
+  if(!slug) return href;
 
-  if(href === "/") return "/@" + username;
+  if(href === "/") return "/@" + slug;
 
   if(href.startsWith("/@")) return href;
 
-  return "/@" + username + href;
+  return "/@" + slug + href;
 
 }
 
 /* =========================================================
-   NAVIGATE (ANTI RACE REAL)
+   NAVIGATE
 ========================================================= */
 
 Onion.router.navigate = function(href){
@@ -259,78 +272,116 @@ Onion.router.navigate = function(href){
 
   if(current === next) return;
 
-  // 🔥 cancelar renders anteriores
   Onion.state.renderId++;
-
-  Onion.state.navigating = true;
-
-  Onion.events?.emit?.("route:start");
 
   history.pushState({}, "", finalHref);
 
-  Promise.resolve()
-    .then(()=> Onion.render())
-    .catch(e => Onion.error("NAV ERROR:", e))
-    .finally(()=>{
+  window.scrollTo(0,0);
 
-      Onion.state.navigating = false;
-      Onion.events?.emit?.("route:end");
-
-    });
+  Onion.render();
 
 };
 
+window.addEventListener("popstate", ()=>{
+  Onion.render();
+});
+
 /* =========================================================
-   CLICK INTERCEPT
+   🔥 INDEX ENGINE (GESTIÓN REAL DE VISTAS)
 ========================================================= */
 
-if(!window.__ONION_ROUTER_BOUND__){
+let currentScripts = [];
+let currentStyles  = [];
 
-  window.__ONION_ROUTER_BOUND__ = true;
+/* ---------- CSS ---------- */
 
-  document.addEventListener("click", function(e){
+function loadStyle(href){
 
-    const link = e.target.closest("a[data-spa]");
-    if(!link) return;
+  currentStyles.forEach(el => el.remove());
+  currentStyles = [];
 
-    const href = link.getAttribute("href");
-    if(!href) return;
+  if(!href) return;
 
-    if(link.target === "_blank") return;
-    if(e.metaKey || e.ctrlKey) return;
-    if(link.hasAttribute("download")) return;
+  const add = (h)=>{
 
-    e.preventDefault();
+    const l = document.createElement("link");
+    l.rel = "stylesheet";
+    l.href = h;
+    l.dataset.dynamic = "true";
 
-    Onion.router.navigate(href);
+    document.head.appendChild(l);
+    currentStyles.push(l);
+  };
 
-  });
+  if(Array.isArray(href)){
+    href.forEach(add);
+  }else{
+    add(href);
+  }
+
+}
+
+/* ---------- JS ---------- */
+
+function loadScript(src){
+
+  currentScripts.forEach(el => el.remove());
+  currentScripts = [];
+
+  if(!src) return;
+
+  const add = (s)=>{
+
+    const el = document.createElement("script");
+    el.src = s;
+    el.defer = true;
+    el.dataset.dynamic = "true";
+
+    el.onload = ()=> console.log("🧩 script:", s);
+    el.onerror = ()=> console.error("💥 script error:", s);
+
+    document.body.appendChild(el);
+    currentScripts.push(el);
+  };
+
+  if(Array.isArray(src)){
+    src.forEach(add);
+  }else{
+    add(src);
+  }
+
+}
+
+/* ---------- LOAD ---------- */
+
+function loadAssets(route){
+
+  if(!route) return;
+
+  loadStyle(route.style);
+  loadScript(route.script);
 
 }
 
 /* =========================================================
-   POPSTATE
+   🔥 HOOK RENDER (CLAVE ABSOLUTA)
 ========================================================= */
 
-if(!window.__ONION_POPSTATE_BOUND__){
+if(!Onion.__viewEngineHooked){
 
-  window.__ONION_POPSTATE_BOUND__ = true;
+  const originalRender = Onion.render;
 
-  window.addEventListener("popstate", function(){
+  Onion.render = async function(){
 
-    Onion.state.renderId++;
+    const route = Onion.router.resolve();
 
-    Onion.events?.emit?.("route:start");
+    await originalRender.apply(this, arguments);
 
-    Promise.resolve()
-      .then(()=> Onion.render())
-      .catch(e => Onion.error("POPSTATE ERROR:", e))
-      .finally(()=>{
-        Onion.events?.emit?.("route:end");
-      });
+    loadAssets(route);
 
-  });
+  };
 
+  Onion.__viewEngineHooked = true;
 }
 
 /* =========================================================
@@ -338,7 +389,7 @@ if(!window.__ONION_POPSTATE_BOUND__){
 ========================================================= */
 
 if(Onion.config?.DEBUG){
-  Onion.log("🧭 Router FINAL PRO 10/10 ready");
+  console.log("🧭 Router + Index Engine FULL PRO ready");
 }
 
 })();

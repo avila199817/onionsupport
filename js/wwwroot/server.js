@@ -2,15 +2,15 @@
 
 (function(){
 
+  // 🔥 CORE BASE (si no existe, lo creamos)
   if(!window.Onion){
-    console.error("💥 Onion no existe (server.js)");
-    return;
+    window.Onion = {};
   }
 
   const Onion = window.Onion;
 
   /* =========================================================
-     SAFE STATE
+     STATE
   ========================================================= */
 
   Onion.state = Onion.state || {};
@@ -25,11 +25,10 @@
       const s = document.createElement("script");
       s.src = src;
       s.defer = true;
-      s.async = false;
 
       s.onload  = () => resolve(true);
       s.onerror = () => {
-        console.warn("⚠️ NO CARGADO:", src);
+        console.warn("⚠️ Error cargando:", src);
         resolve(false);
       };
 
@@ -38,63 +37,17 @@
     });
   }
 
-  async function loadGroup(name, list){
-    console.log(`📦 ${name}`);
-    for(const src of list){
-      await loadScript(src);
-    }
-  }
-
-  /* =========================================================
-     FILES
-  ========================================================= */
-
-  const CORE = [
-    "/js/wwwroot/router/core/core.js",
-    "/js/wwwroot/router/core/events.js",
-    "/js/wwwroot/router/core/cleanup.js",
-    "/js/wwwroot/router/core/viewEngine.js",
-    "/js/wwwroot/router/core/index.js"
-  ];
-
-  const INIT = [
-    "/js/wwwroot/router/init/init.js",
-    "/js/wwwroot/router/init/boot.js",
-    "/js/wwwroot/router/init/index.js"
-  ];
-
-  const UI = [
-    "/js/wwwroot/router/ui/ui.js",
-    "/js/wwwroot/router/ui/loader.js",
-    "/js/wwwroot/router/ui/sidebar.js",
-    "/js/wwwroot/router/ui/toast.js",
-    "/js/wwwroot/router/ui/topbar.js",
-    "/js/wwwroot/router/ui/index.js"
-  ];
-
-  const FEATURES = [
-    "/js/wwwroot/router/features/fetch.js",
-    "/js/wwwroot/router/features/router.js",
-    "/js/wwwroot/router/features/render.js",
-    "/js/wwwroot/router/features/i18n.js",
-    "/js/wwwroot/router/features/prefetch.js",
-    "/js/wwwroot/router/features/auth.js",
-    "/js/wwwroot/router/features/index.js"
-  ];
-
-  const ROUTERS = [
-    "/js/wwwroot/router/incidencias/index.js",
-    "/js/wwwroot/router/facturas/index.js",
-    "/js/wwwroot/router/clientes/index.js",
-    "/js/wwwroot/router/usuarios/index.js"
-  ];
-
   async function loadAll(){
-    await loadGroup("CORE", CORE);
-    await loadGroup("INIT", INIT);
-    await loadGroup("UI", UI);
-    await loadGroup("FEATURES", FEATURES);
-    await loadGroup("ROUTERS", ROUTERS);
+
+    console.log("📦 Loading scripts...");
+
+    // 👉 SOLO lo mínimo
+    await loadScript("/js/wwwroot/router/features/render.js");
+    await loadScript("/js/wwwroot/router/features/router.js");
+
+    // 👉 routers (si existen)
+    await loadScript("/js/wwwroot/router/incidencias/index.js");
+
   }
 
   /* =========================================================
@@ -105,21 +58,15 @@
 
   function use(path, handler){
     routes.push({ path, handler });
-
-    // 🔥 ordenar por prioridad (más largo primero)
-    routes.sort((a, b) => b.path.length - a.path.length);
   }
 
   function match(path){
-    return routes.find(r => path.startsWith(r.path)) || null;
+    return routes.find(r => path.startsWith(r.path));
   }
 
   function createContext(){
     return {
       path: Onion.router?.get?.() || "/",
-      query: Onion.router?.getQuery?.() || {},
-      user: Onion.getUser?.(),
-      navigate: Onion.router?.navigate,
       render: Onion.render
     };
   }
@@ -128,23 +75,18 @@
 
     const ctx = createContext();
 
-    try{
+    const route = match(ctx.path);
 
-      const route = match(ctx.path);
-
-      if(!route){
-        console.warn("⚠️ Ruta no encontrada:", ctx.path);
-        return ctx.render?.("404");
-      }
-
-      await route.handler(ctx);
-
-    }catch(e){
-
-      console.error("💥 SERVER ERROR:", e);
-      ctx.render?.("error");
-
+    if(route){
+      return route.handler(ctx);
     }
+
+    // 👉 fallback
+    ctx.render?.(`
+      <div style="padding:20px">
+        <h1>HOME 🔥</h1>
+      </div>
+    `);
 
   }
 
@@ -156,12 +98,17 @@
 
   function connectRouters(){
 
-    if(window.FacturasRouter)    use("/facturas", window.FacturasRouter);
-    if(window.IncidenciasRouter) use("/incidencias", window.IncidenciasRouter);
-    if(window.ClientesRouter)    use("/clientes", window.ClientesRouter);
-    if(window.UsersRouter)       use("/usuarios", window.UsersRouter);
+    if(window.IncidenciasRouter){
+      use("/incidencias", window.IncidenciasRouter);
+    }
 
-    use("/", async (ctx)=> ctx.render("home"));
+    use("/", async (ctx)=>{
+      ctx.render(`
+        <div style="padding:20px">
+          <h1>ONION FUNCIONA 🔥</h1>
+        </div>
+      `);
+    });
 
   }
 
@@ -171,16 +118,21 @@
 
   function bindNavigation(){
 
-    if(!Onion.router?.navigate) return;
+    // click SPA
+    document.addEventListener("click", (e)=>{
 
-    const original = Onion.router.navigate;
+      const link = e.target.closest("a[data-spa]");
+      if(!link) return;
 
-    Onion.router.navigate = function(path){
+      e.preventDefault();
 
-      original(path);
+      const href = link.getAttribute("href");
+
+      history.pushState({}, "", href);
+
       handle();
 
-    };
+    });
 
     window.addEventListener("popstate", handle);
 
@@ -192,20 +144,16 @@
 
   async function start(){
 
-    console.log("🧅 Booting Onion...");
+    console.log("🧅 Starting...");
 
     await loadAll();
 
     connectRouters();
     bindNavigation();
 
-    await Onion.init?.();
+    handle();
 
-    Onion.state.appReady = true;
-
-    await handle();
-
-    console.log("🚀 Onion READY");
+    console.log("🚀 READY");
 
   }
 

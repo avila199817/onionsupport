@@ -104,6 +104,19 @@ Onion.routes = Object.freeze({
       "/js/features/incidencias/index.js"
     ],
     title: "Incidencias"
+  },
+    
+  "/facturas": {
+    page: "/app/views/facturas/index.html",
+    style: [
+      "/css/app/core/topbarview.css",
+      "/css/app/facturas/facturas.css"
+    ],
+    script: [
+      "/js/features/facturas/topbarview.js",
+      "/js/wwwroot/router/pages/dashboard/index.js"
+    ],
+    title: "Facturas"
   }
 
 });

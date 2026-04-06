@@ -23,7 +23,7 @@
   const SCRIPTS = [
 
     // FEATURES
-       "/js/wwwroot/features/index.js",
+       "/js/wwwroot/router/features/index.js",
     // "/js/wwwroot/features/facturas/index.js",
 
     // UI

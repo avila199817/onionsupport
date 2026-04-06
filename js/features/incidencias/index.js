@@ -25,6 +25,9 @@ let filteredItems = [];
 let loading = false;
 let requestId = 0;
 
+/* 🔥 CACHE PRO */
+let cache = null;
+
 let externalFilters = {
   search: "",
   estado: "",
@@ -45,14 +48,13 @@ function $(selector){
 }
 
 /* =========================================================
-   LOADER (INSTANT)
+   LOADER
 ========================================================= */
 
 function showLoader(){
   const loader = view.safeDOM(()=> $(".table-loader"));
   if(loader){
     loader.classList.remove("hidden");
-    console.log("🟡 Loader ON");
   }
 }
 
@@ -60,8 +62,21 @@ function hideLoader(){
   const loader = view.safeDOM(()=> $(".table-loader"));
   if(loader){
     loader.classList.add("hidden");
-    console.log("🟢 Loader OFF");
   }
+}
+
+/* =========================================================
+   SKELETON (UI INSTANT)
+========================================================= */
+
+function renderSkeleton(){
+
+  const tbody = view.safeDOM(()=> $("#incidencias-body"));
+  if(!tbody) return;
+
+  tbody.innerHTML = `
+    <tr><td colspan="8">Cargando incidencias...</td></tr>
+  `;
 }
 
 /* =========================================================
@@ -81,13 +96,12 @@ function init(){
 
   bindEvents();
 
-  /* 🔥 LOADER INSTANTÁNEO */
+  /* 🔥 UI INSTANT */
   showLoader();
+  renderSkeleton();
 
-  /* 🔥 SIGUIENTE FRAME → FETCH */
-  requestAnimationFrame(()=>{
-    loadIncidencias();
-  });
+  /* 🔥 FETCH EN BACKGROUND */
+  loadIncidencias();
 
   Onion.onCleanup(()=>{
     initialized = false;
@@ -120,7 +134,7 @@ function bindEvents(){
 }
 
 /* =========================================================
-   LOAD (CANCELABLE)
+   LOAD (ULTRA PRO)
 ========================================================= */
 
 async function loadIncidencias(){
@@ -136,14 +150,16 @@ async function loadIncidencias(){
 
   document.activeElement?.blur();
 
-  showLoader();
+  /* 🔥 CACHE INSTANT */
+  if(cache){
+    currentItems = cache;
+    filteredItems = cache;
+    applyFilters();
+  }
 
   console.time("🧅 incidencias fetch");
 
   try{
-
-    /* 🔥 DEJA PINTAR EL LOADER */
-    await new Promise(r=>requestAnimationFrame(r));
 
     const res = await view.safeFetch(() =>
       Onion.fetch(Onion.config.API + "/tickets")
@@ -151,9 +167,7 @@ async function loadIncidencias(){
 
     console.timeEnd("🧅 incidencias fetch");
 
-    /* 🔥 CANCEL SI CAMBIÓ LA VISTA */
     if(currentRequest !== requestId){
-      console.log("🟠 Fetch cancelado");
       return;
     }
 
@@ -163,6 +177,9 @@ async function loadIncidencias(){
     }
 
     const items = normalize(res);
+
+    /* 🔥 GUARDA CACHE */
+    cache = items;
 
     currentItems = items;
     filteredItems = items;

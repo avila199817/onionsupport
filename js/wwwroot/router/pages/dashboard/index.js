@@ -19,6 +19,31 @@ let loading = false;
 const API = Onion.config?.API || "";
 
 /* =========================
+   TEMPLATE
+========================= */
+
+function template(){
+  return `
+    <div class="panel-content dashboard">
+
+      <div class="dashboard-header">
+        <h1 id="greeting-text">Cargando...</h1>
+      </div>
+
+      <!-- AQUÍ VA TU HTML REAL DEL DASHBOARD -->
+      <!-- (respeta tus IDs: home-facturas, year-grid, etc.) -->
+
+      <div class="year-grid"></div>
+
+      <table>
+        <tbody id="dashboard-pending-body"></tbody>
+      </table>
+
+    </div>
+  `;
+}
+
+/* =========================
    ROOT
 ========================= */
 
@@ -68,7 +93,7 @@ function getInitials(name){
 }
 
 /* =========================
-   🔥 AVATAR SYSTEM (CLON FACTURAS)
+   AVATAR
 ========================= */
 
 function hashString(str){
@@ -133,7 +158,7 @@ function setGreeting(){
 }
 
 /* =========================
-   BUILD YEAR DATA
+   YEAR DATA
 ========================= */
 
 function buildYearData(evolucion){
@@ -168,7 +193,7 @@ function buildYearData(evolucion){
 }
 
 /* =========================
-   RENDER CHART
+   CHART
 ========================= */
 
 function renderYearRevenue(data){
@@ -214,24 +239,18 @@ function renderYearRevenue(data){
 }
 
 /* =========================
-   RENDER PENDIENTES
+   PENDIENTES
 ========================= */
 
 function renderPendingFacturas(facturas){
 
   const tbody = $("dashboard-pending-body");
-  const countEl = $("pending-count");
-
   if(!tbody) return;
 
   const pendientes = (facturas || [])
     .filter(f => f.estadoPago !== "pagada")
     .sort((a,b) => safe(b.total) - safe(a.total))
     .slice(0,5);
-
-  if(countEl){
-    countEl.textContent = pendientes.length;
-  }
 
   if(!pendientes.length){
     tbody.innerHTML = `
@@ -254,35 +273,19 @@ function renderPendingFacturas(facturas){
 
     return `
       <tr data-id="${f.id}">
-
-        <td class="col-id">${id}</td>
-
-        <td class="col-main">
+        <td>${id}</td>
+        <td>
           <div class="cell-user">
             <div class="table-avatar">${renderAvatar(cliente)}</div>
             <div class="user-info">
-              <span class="user-name">${cliente}</span>
-              <span class="user-sub">${email}</span>
+              <span>${cliente}</span>
+              <span>${email}</span>
             </div>
           </div>
         </td>
-
-        <td class="col-date">${fecha}</td>
-
-        <td class="col-importe">${importe}</td>
-
-        <td class="col-status">
-          <span class="badge warning">Pendiente</span>
-        </td>
-
-        <td class="col-actions">
-          <div class="actions">
-            <button class="btn-action view">Ver</button>
-            <button class="btn-action download">PDF</button>
-            <button class="btn-action pay">Pagar</button>
-          </div>
-        </td>
-
+        <td>${fecha}</td>
+        <td>${importe}</td>
+        <td><span class="badge warning">Pendiente</span></td>
       </tr>
     `;
   }).join("");
@@ -318,7 +321,6 @@ async function loadDashboardData(){
     renderPendingFacturas(facturas);
 
   } catch(e){
-
     console.error("💥 Dashboard error:", e);
   }
 }
@@ -333,20 +335,18 @@ async function loadDashboard(){
   loading = true;
 
   setGreeting();
-
   await loadDashboardData();
 
-  const panel = getRoot();
-  panel?.classList.add("ready");
+  getRoot()?.classList.add("ready");
 
   loading = false;
 }
 
 /* =========================
-   INIT
+   MOUNT
 ========================= */
 
-function init(){
+function mount(){
 
   const root = getRoot();
   if(!root || initialized) return;
@@ -354,16 +354,26 @@ function init(){
   initialized = true;
 
   loadDashboard();
-
-  Onion.onCleanup(()=>{
-    initialized = false;
-  });
 }
 
 /* =========================
-   START
+   CLEANUP
 ========================= */
 
-init();
+function cleanup(){
+  initialized = false;
+}
+
+/* =========================
+   REGISTER
+========================= */
+
+Onion.pages = Onion.pages || {};
+
+Onion.pages["dashboard"] = {
+  render: template,
+  mount,
+  cleanup
+};
 
 })();

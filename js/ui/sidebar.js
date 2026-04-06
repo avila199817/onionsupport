@@ -16,28 +16,18 @@ if(!Onion){
 let initialized = false;
 let sidebarEl = null;
 let dropdownEl = null;
-let observer = null;
-
-/* 🔥 CONTROL REAL */
-let activeRenderId = 0;
-let loaderActive = false;
 
 /* =========================================================
-   LOADER (SINCRONIZADO AL RENDER)
+   LOADER (CONTROL REAL POR EVENTOS)
 ========================================================= */
 
 function startLoader(){
-
-  const currentId = Onion.state.renderId + 1;
-
-  activeRenderId = currentId;
-  loaderActive = true;
 
   document.body.classList.add("loading");
 
   clearTimeout(window.__onionLoaderTimeout);
 
-  /* 🔥 FAILSAFE DURO */
+  /* 🔥 FAILSAFE */
   window.__onionLoaderTimeout = setTimeout(()=>{
     console.warn("⚠️ Loader forced reset");
     stopLoader(true);
@@ -47,45 +37,8 @@ function startLoader(){
 
 function stopLoader(force = false){
 
-  if(!loaderActive && !force) return;
-
-  loaderActive = false;
-
   document.body.classList.remove("loading");
   clearTimeout(window.__onionLoaderTimeout);
-
-}
-
-/* =========================================================
-   🔥 DETECTOR REAL (ALINEADO CON RENDER)
-========================================================= */
-
-function observeView(){
-
-  const container = document.getElementById("view-container");
-  if(!container) return;
-
-  if(observer){
-    observer.disconnect();
-  }
-
-  observer = new MutationObserver(()=>{
-
-    /* 🔒 SOLO cerrar si coincide render */
-    if(activeRenderId !== Onion.state.renderId) return;
-
-    /* 🔥 ESPERAR FRAME REAL (DOM estable) */
-    requestAnimationFrame(()=>{
-      requestAnimationFrame(()=>{
-        stopLoader();
-      });
-    });
-
-  });
-
-  observer.observe(container, {
-    childList: true
-  });
 
 }
 
@@ -110,11 +63,11 @@ function init(){
   restoreState();
   applyRoleVisibility();
 
-  observeView();
+  bindRenderEvents();
 
   initialized = true;
 
-  /* 🔥 APP READY REAL */
+  /* 🔥 APP READY */
   if(!Onion.state.appReady){
 
     Onion.state.appReady = true;
@@ -128,6 +81,19 @@ function init(){
 }
 
 init();
+
+/* =========================================================
+   🔥 RENDER SYNC (CLAVE TOTAL)
+========================================================= */
+
+function bindRenderEvents(){
+
+  /* 👉 cuando termina render → ocultar loader */
+  Onion.events.on("render:end", ()=>{
+    stopLoader();
+  });
+
+}
 
 /* =========================================================
    GLOBAL EVENTS
@@ -252,7 +218,7 @@ function applyRoleVisibility(){
 ========================================================= */
 
 if(Onion.config?.DEBUG){
-  Onion.log("📦 Sidebar FULL PRO synced with render");
+  Onion.log("📦 Sidebar EVENT-DRIVEN synced with render");
 }
 
 })();

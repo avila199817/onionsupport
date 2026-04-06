@@ -1,7 +1,7 @@
 "use strict";
 
 /* =========================================================
-   🧅 FETCH — GOD MODE (API ONLY · NO SIDE EFFECTS · SAFE ABORT)
+   🧅 FETCH — FINAL PRO (STABLE · AUTH SAFE · NO SIDE EFFECTS)
 ========================================================= */
 
 (function(){
@@ -13,31 +13,29 @@
 
   const Onion = window.Onion;
 
+  /* =========================================================
+     BASE
+  ========================================================= */
+
+  Onion.state = Onion.state || {};
+
   /* =========================
-     NORMALIZE URL (API ONLY)
+     NORMALIZE URL
   ========================= */
 
   function normalizeUrl(url){
 
     if(!url) return null;
 
-    try{
-
-      if(url.startsWith("http")){
-        return url;
-      }
-
-      // 🔥 SIEMPRE API (esto SOLO es para backend)
-      if(url.startsWith("/")){
-        return Onion.config.API + url;
-      }
-
-      return Onion.config.API + "/" + url;
-
-    }catch(e){
-      Onion.error("URL inválida:", url);
-      return null;
+    if(url.startsWith("http")){
+      return url;
     }
+
+    if(url.startsWith("/")){
+      return (Onion.config?.API || "") + url;
+    }
+
+    return (Onion.config?.API || "") + "/" + url;
 
   }
 
@@ -54,13 +52,12 @@
     }
 
     /* =========================
-       ABORT CONTROLADO
+       ABORT CONTROLADO (SPA SAFE)
     ========================= */
 
     let controller = null;
     let signal = options.signal;
 
-    // 🔥 SOLO usamos abort global si NO hay señal externa
     if(!signal){
 
       if(Onion.state.abortController){
@@ -81,7 +78,7 @@
       if(controller){
         controller.abort();
       }
-    }, Onion.config.TIMEOUT || 10000);
+    }, Onion.config?.TIMEOUT || 10000);
 
     try{
 
@@ -102,7 +99,7 @@
       }
 
       /* =========================
-         AUTH TOKEN
+         AUTH TOKEN (🔥 CLAVE)
       ========================= */
 
       try{
@@ -137,10 +134,16 @@
       });
 
       /* =========================
-         AUTH ERROR
+         AUTH ERROR (🔥 IMPORTANTE)
       ========================= */
 
       if(res.status === 401){
+
+        console.warn("🔐 401 → sesión inválida");
+
+        Onion.auth?.resetSession?.();
+        Onion.auth?.redirectLogin?.();
+
         throw new Error("401");
       }
 
@@ -193,7 +196,6 @@
 
       clearTimeout(timeout);
 
-      // 🔥 limpiar SOLO si es el controller global
       if(controller && Onion.state.abortController === controller){
         Onion.state.abortController = null;
       }
@@ -207,7 +209,7 @@
   ========================= */
 
   if(Onion.config?.DEBUG){
-    Onion.log("🌐 Fetch GOD MODE ready");
+    Onion.log("🌐 Fetch FINAL PRO ready");
   }
 
 })();

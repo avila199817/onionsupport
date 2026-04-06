@@ -18,7 +18,7 @@ let sidebarEl = null;
 let dropdownEl = null;
 
 /* =========================================================
-   LOADER CONTROL (ESTABLE)
+   LOADER CONTROL (ROBUSTO 🔥)
 ========================================================= */
 
 function startGlobalLoader(){
@@ -28,19 +28,23 @@ function startGlobalLoader(){
   clearTimeout(window.__onionLoaderTimeout);
 
   window.__onionLoaderTimeout = setTimeout(()=>{
-    console.warn("⚠️ Loader auto-reset");
+    console.warn("⚠️ Loader auto-reset (fallback)");
     stopGlobalLoader();
-  }, 5000);
+  }, 4000);
 
 }
 
 function stopGlobalLoader(){
+
+  if(!document.body.classList.contains("loading")) return;
+
   document.body.classList.remove("loading");
   clearTimeout(window.__onionLoaderTimeout);
+
 }
 
 /* =========================================================
-   INIT (UNA SOLA VEZ 🔥)
+   INIT (ANTI DUPLICADOS)
 ========================================================= */
 
 function init(){
@@ -76,7 +80,7 @@ function init(){
 init();
 
 /* =========================================================
-   CORE HOOKS (SOLO UNA VEZ)
+   CORE HOOKS (BLINDADOS)
 ========================================================= */
 
 if(!window.__ONION_SIDEBAR_CORE__){
@@ -96,6 +100,7 @@ if(!window.__ONION_SIDEBAR_CORE__){
       fixImageFlicker();
     });
 
+    /* 🔥 FALLBACK SOLO */
     stopGlobalLoader();
 
   });
@@ -105,19 +110,21 @@ if(!window.__ONION_SIDEBAR_CORE__){
 }
 
 /* =========================================================
-   GLOBAL EVENTS (OPTIMIZADOS)
+   GLOBAL EVENTS (FINOS)
 ========================================================= */
 
 function bindGlobalEvents(){
 
   Onion.onGlobalEvent?.(document, "click", (e)=>{
 
+    /* 🔥 SPA NAV */
     const link = e.target.closest("[data-spa]");
     if(link && link.href !== window.location.href){
       startGlobalLoader();
       return;
     }
 
+    /* 🔥 TOGGLE SIDEBAR */
     const toggle = e.target.closest("#toggleSidebar");
     if(toggle){
 
@@ -135,6 +142,7 @@ function bindGlobalEvents(){
       return;
     }
 
+    /* 🔥 USER DROPDOWN */
     const user = e.target.closest("#userToggle");
     if(user){
 
@@ -146,7 +154,7 @@ function bindGlobalEvents(){
         sidebarEl.classList.remove("collapsed");
         localStorage.setItem("sidebar-collapsed", "false");
 
-        setTimeout(()=> dropdownEl?.classList.add("active"), 150);
+        setTimeout(()=> dropdownEl?.classList.add("active"), 120);
         return;
       }
 
@@ -154,11 +162,12 @@ function bindGlobalEvents(){
       return;
     }
 
-    /* cerrar dropdown */
+    /* 🔥 CLOSE DROPDOWN */
     if(!e.target.closest("#userDropdown")){
       dropdownEl?.classList.remove("active");
     }
 
+    /* 🔥 LOGOUT */
     const logout = e.target.closest("#logoutBtn");
     if(logout){
 
@@ -168,6 +177,7 @@ function bindGlobalEvents(){
 
       Onion.auth.logout().catch(err=>{
         Onion.error("LOGOUT ERROR:", err);
+        stopGlobalLoader();
       });
 
     }

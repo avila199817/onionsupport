@@ -9,21 +9,11 @@ if(!Onion){
   return;
 }
 
-/* =========================================================
-   VIEW ENGINE 🔥
-========================================================= */
-
 const view = Onion.createView();
 
-/* =========================================================
-   STATE
-========================================================= */
-
 let initialized = false;
-
 let currentItems = [];
 let filteredItems = [];
-
 let loading = false;
 
 let externalFilters = {
@@ -37,11 +27,11 @@ let currentSort = {
 };
 
 /* =========================
-   ROOT
+   ROOT SAFE
 ========================= */
 
 function getRoot(){
-  return document.querySelector(".panel-content.facturas");
+  return view.safeDOM(()=> document.querySelector(".panel-content.facturas"));
 }
 
 function $(selector){
@@ -63,10 +53,11 @@ function normalize(res){
   if(Array.isArray(res.items)) return res.items;
 
   return [];
+
 }
 
 /* =========================
-   LOADER SAFE
+   LOADER
 ========================= */
 
 function showLoader(){
@@ -81,19 +72,17 @@ function hideLoader(){
   const loader = view.safeDOM(()=> $(".table-loader"));
   if(loader){
     loader.style.opacity = "0";
-    setTimeout(()=>{
-      if(loader) loader.style.display = "none";
-    }, 250);
+    setTimeout(()=> loader && (loader.style.display = "none"), 250);
   }
 }
 
 /* =========================
-   LOAD (ENGINE SAFE)
+   LOAD
 ========================= */
 
 async function loadFacturas(){
 
-  if(loading) return;
+  if(loading || !view.isAlive()) return;
 
   const tbody = view.safeDOM(()=> $("#facturas-body"));
   if(!tbody) return;
@@ -109,10 +98,10 @@ async function loadFacturas(){
     await new Promise(r => requestAnimationFrame(r));
 
     const res = await view.safeFetch(() =>
-      Onion.fetch(Onion.config.API + "/facturas")
+      Onion.fetch("/facturas")
     );
 
-    if(!res) return;
+    if(!res || !view.isAlive()) return;
 
     const items = normalize(res);
 
@@ -135,6 +124,7 @@ async function loadFacturas(){
     hideLoader();
     loading = false;
   }
+
 }
 
 /* =========================
@@ -143,20 +133,20 @@ async function loadFacturas(){
 
 function init(){
 
-  const root = getRoot();
-  if(!root || initialized) return;
+  if(initialized) return;
+  if(!Onion.state?.user) return;
 
-  if(!Onion.state?.user){
-    return setTimeout(init, 100);
+  const root = getRoot();
+  if(!root){
+    requestAnimationFrame(init);
+    return;
   }
 
   initialized = true;
 
   bindEvents();
 
-  requestAnimationFrame(()=>{
-    loadFacturas();
-  });
+  requestAnimationFrame(()=> loadFacturas());
 
   Onion.onCleanup(()=>{
     initialized = false;
@@ -193,11 +183,10 @@ function bindEvents(){
 }
 
 /* =========================
-   SORT
+   SORT + FILTER (igual)
 ========================= */
 
 function handleSort(th){
-
   const field = th.dataset.sort;
 
   if(currentSort.field === field){
@@ -254,69 +243,9 @@ function updateSortUI(){
   });
 }
 
-/* =========================
-   ACTIONS (SAFE)
-========================= */
-
-async function handleAction(btn){
-
-  const id = btn.dataset.id;
-  if(!id) return;
-
-  if(btn.classList.contains("view")){
-    Onion.router.navigate("/facturas/detalle?id=" + id);
-  }
-
-  if(btn.classList.contains("download")){
-
-    if(btn.classList.contains("loading")) return;
-
-    btn.classList.add("loading");
-
-    const original = btn.textContent;
-    btn.textContent = "⏳";
-
-    try{
-
-      const res = await view.safeFetch(() =>
-        Onion.fetch(Onion.config.API + "/facturas/" + id + "/descargar")
-      );
-
-      if(!res || !res.ok || !res.url){
-        Onion.ui.toast?.error("Error descargando PDF");
-        return;
-      }
-
-      const link = document.createElement("a");
-      link.href = res.url;
-      link.download = `factura-${id}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
-      Onion.ui.toast?.success("Factura descargada 📄");
-
-    }catch(e){
-      console.error("💥 ERROR DOWNLOAD:", e);
-      Onion.ui.toast?.error("Error descargando PDF");
-    }finally{
-      btn.textContent = original;
-      btn.classList.remove("loading");
-    }
-
-  }
-
-  if(btn.classList.contains("pay")){
-    Onion.ui.toast?.info("💳 Simulación pago factura " + id);
-  }
-
-}
-
-/* =========================
-   FILTERS
-========================= */
-
 function applyFilters(){
+
+  if(!view.isAlive()) return;
 
   const search = externalFilters.search.toLowerCase();
   const estado = externalFilters.estado.toLowerCase();
@@ -345,25 +274,23 @@ function applyFilters(){
 function setEmpty(){
   const el = view.safeDOM(()=> $("#facturas-body"));
   if(!el) return;
-
   el.innerHTML = `<tr><td colspan="7">No hay facturas</td></tr>`;
 }
 
 function setError(){
   const el = view.safeDOM(()=> $("#facturas-body"));
   if(!el) return;
-
   el.innerHTML = `<tr><td colspan="7">Error cargando facturas</td></tr>`;
 }
 
 /* =========================
-   RENDER
+   RENDER (CON SVG 🔥)
 ========================= */
 
 function render(items){
 
   const tbody = view.safeDOM(()=> $("#facturas-body"));
-  if(!tbody) return;
+  if(!tbody || !view.isAlive()) return;
 
   if(!items.length) return setEmpty();
 
@@ -409,28 +336,29 @@ function render(items){
 
   <td class="col-actions">
     <div class="actions">
-      <button class="btn-action send" data-id="${d.id}" aria-label="Enviar factura">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+
+      <!-- SEND -->
+      <button class="btn-action send" data-id="${d.id}">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
           <path d="m3.62 6.389 8.396 6.724 8.638-6.572-7.69-4.29a1.975 1.975 0 0 0-1.928 0L3.62 6.39Z"/>
           <path d="m22 8.053-8.784 6.683a1.978 1.978 0 0 1-2.44-.031L2.02 7.693a1.091 1.091 0 0 0-.019.199v11.065C2 20.637 3.343 22 5 22h14c1.657 0 3-1.362 3-3.043V8.053Z"/>
         </svg>
       </button>
-      <button class="btn-action download" data-id="${d.id}" aria-label="Descargar PDF">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <path fill-rule="evenodd"
-            d="M13 11.15V4a1 1 0 1 0-2 0v7.15L8.78 8.374a1 1 0 1 0-1.56 1.25l4 5a1 1 0 0 0 1.56 0l4-5a1 1 0 1 0-1.56-1.25L13 11.15Z"
-            clip-rule="evenodd"/>
-          <path fill-rule="evenodd"
-            d="M9.657 15.874 7.358 13H5a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4a2 2 0 0 0-2-2h-2.358l-2.3 2.874a3 3 0 0 1-4.
-            685 0ZM17 16a1 1 0 1 0 0 2h.01a1 1 0 1 0 0-2H17Z"
-            clip-rule="evenodd"/>
+
+      <!-- DOWNLOAD -->
+      <button class="btn-action download" data-id="${d.id}">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M13 11.15V4a1 1 0 1 0-2 0v7.15L8.78 8.374a1 1 0 1 0-1.56 1.25l4 5a1 1 0 0 0 1.56 0l4-5a1 1 0 1 0-1.56-1.25L13 11.15Z"/>
+          <path d="M5 13a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4a2 2 0 0 0-2-2h-2.5l-2 2.5a3 3 0 0 1-4.5 0L7.5 13H5Z"/>
         </svg>
       </button>
+
       ${
         d.estadoPago.raw === "pendiente"
           ? `<button class="btn-action pay" data-id="${d.id}">Pagar</button>`
           : ``
       }
+
     </div>
   </td>
 </tr>`;

@@ -1,9 +1,5 @@
 "use strict";
 
-/* =========================================================
-   🧅 LOADER — GOD MODE (LOCK SYSTEM · ZERO DESYNC · CORE SAFE)
-========================================================= */
-
 (function(){
 
   if(!window.Onion){
@@ -14,11 +10,8 @@
   const Onion = window.Onion;
 
   let active = false;
-  let showTimeout = null;
   let forceHideTimeout = null;
-  let lock = 0;
 
-  const MIN_SHOW_DELAY = 120;
   const MAX_DURATION = 8000;
 
   Onion.ui = Onion.ui || {};
@@ -29,21 +22,16 @@
 
   Onion.ui.showLoader = function(){
 
-    lock++;
-
     if(active) return;
 
     active = true;
 
-    clearTimeout(showTimeout);
+    document.body.classList.add("loading");
+
     clearTimeout(forceHideTimeout);
 
-    showTimeout = setTimeout(()=>{
-      document.body.classList.add("loading");
-    }, MIN_SHOW_DELAY);
-
     forceHideTimeout = setTimeout(()=>{
-      Onion.warn?.("Loader forzado a cerrar (failsafe)");
+      Onion.warn?.("⚠️ Loader forced reset");
       Onion.ui.hideLoader(true);
     }, MAX_DURATION);
 
@@ -55,16 +43,8 @@
 
   Onion.ui.hideLoader = function(force = false){
 
-    if(!force){
-      lock = Math.max(lock - 1, 0);
-      if(lock > 0) return;
-    }else{
-      lock = 0;
-    }
-
     if(!active && !force) return;
 
-    clearTimeout(showTimeout);
     clearTimeout(forceHideTimeout);
 
     requestAnimationFrame(()=>{
@@ -81,7 +61,7 @@
   ========================= */
 
   if(Onion.config?.DEBUG){
-    Onion.log("⏳ Loader GOD MODE ready");
+    Onion.log("⏳ Loader SIMPLE ready");
   }
 
 })();

@@ -22,7 +22,7 @@
 
   const SCRIPTS = [
 
-    "/js/wwwroot/features/routers.js",
+    //"/js/wwwroot/features/routers.js",
     //"/js/wwwroot/features/facturas.js",
     //"/js/wwwroot/features/clientes.js"
 

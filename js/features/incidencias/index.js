@@ -25,9 +25,15 @@ let filteredItems = [];
 let loading = false;
 let requestId = 0;
 
-/* 🔥 CACHE PRO */
+/* 🔥 CACHE DATA */
 let cache = null;
 
+/* 🔥 CACHE DOM */
+let rootEl = null;
+let tbodyEl = null;
+let loaderEl = null;
+
+/* 🔥 FILTROS */
 let externalFilters = {
   search: "",
   estado: "",
@@ -35,16 +41,18 @@ let externalFilters = {
 };
 
 /* =========================================================
-   ROOT SAFE
+   ROOT + CACHE DOM
 ========================================================= */
 
-function getRoot(){
-  return document.querySelector(".panel-content.incidencias");
-}
+function initDOM(){
 
-function $(selector){
-  const root = getRoot();
-  return root ? root.querySelector(selector) : null;
+  rootEl = document.querySelector(".panel-content.incidencias");
+  if(!rootEl) return false;
+
+  tbodyEl = rootEl.querySelector("#incidencias-body");
+  loaderEl = rootEl.querySelector(".table-loader");
+
+  return true;
 }
 
 /* =========================================================
@@ -52,29 +60,21 @@ function $(selector){
 ========================================================= */
 
 function showLoader(){
-  const loader = view.safeDOM(()=> $(".table-loader"));
-  if(loader){
-    loader.classList.remove("hidden");
-  }
+  if(loaderEl) loaderEl.classList.remove("hidden");
 }
 
 function hideLoader(){
-  const loader = view.safeDOM(()=> $(".table-loader"));
-  if(loader){
-    loader.classList.add("hidden");
-  }
+  if(loaderEl) loaderEl.classList.add("hidden");
 }
 
 /* =========================================================
-   SKELETON (UI INSTANT)
+   SKELETON
 ========================================================= */
 
 function renderSkeleton(){
+  if(!tbodyEl) return;
 
-  const tbody = view.safeDOM(()=> $("#incidencias-body"));
-  if(!tbody) return;
-
-  tbody.innerHTML = `
+  tbodyEl.innerHTML = `
     <tr><td colspan="8">Cargando incidencias...</td></tr>
   `;
 }
@@ -85,26 +85,27 @@ function renderSkeleton(){
 
 function init(){
 
-  const root = getRoot();
-  if(!root || initialized) return;
-
+  if(initialized) return;
   if(!Onion.state?.user){
     return setTimeout(init, 50);
   }
+
+  if(!initDOM()) return;
 
   initialized = true;
 
   bindEvents();
 
-  /* 🔥 UI INSTANT */
   showLoader();
   renderSkeleton();
 
-  /* 🔥 FETCH EN BACKGROUND */
   loadIncidencias();
 
   Onion.onCleanup(()=>{
     initialized = false;
+    rootEl = null;
+    tbodyEl = null;
+    loaderEl = null;
   });
 
 }
@@ -117,10 +118,7 @@ init();
 
 function bindEvents(){
 
-  const root = getRoot();
-  if(!root) return;
-
-  Onion.cleanupEvent(root, "click", (e)=>{
+  Onion.cleanupEvent(rootEl, "click", (e)=>{
 
     if(e.target.closest("button")) return;
 
@@ -134,15 +132,13 @@ function bindEvents(){
 }
 
 /* =========================================================
-   LOAD (ULTRA PRO)
+   LOAD
 ========================================================= */
 
 async function loadIncidencias(){
 
   if(loading) return;
-
-  const tbody = view.safeDOM(()=> $("#incidencias-body"));
-  if(!tbody) return;
+  if(!tbodyEl) return;
 
   loading = true;
 
@@ -157,19 +153,13 @@ async function loadIncidencias(){
     applyFilters();
   }
 
-  console.time("🧅 incidencias fetch");
-
   try{
 
     const res = await view.safeFetch(() =>
       Onion.fetch(Onion.config.API + "/tickets")
     );
 
-    console.timeEnd("🧅 incidencias fetch");
-
-    if(currentRequest !== requestId){
-      return;
-    }
+    if(currentRequest !== requestId) return;
 
     if(!res){
       setError();
@@ -178,7 +168,6 @@ async function loadIncidencias(){
 
     const items = normalize(res);
 
-    /* 🔥 GUARDA CACHE */
     cache = items;
 
     currentItems = items;
@@ -220,7 +209,7 @@ function normalize(res){
 }
 
 /* =========================================================
-   FILTERS
+   FILTERS (OPTIMIZADO)
 ========================================================= */
 
 function applyFilters(){
@@ -256,75 +245,78 @@ function applyFilters(){
 ========================================================= */
 
 function setEmpty(){
-  const el = view.safeDOM(()=> $("#incidencias-body"));
-  if(!el) return;
-
-  el.innerHTML = `<tr><td colspan="8">No hay incidencias</td></tr>`;
+  if(!tbodyEl) return;
+  tbodyEl.innerHTML = `<tr><td colspan="8">No hay incidencias</td></tr>`;
   hideLoader();
 }
 
 function setError(){
-  const el = view.safeDOM(()=> $("#incidencias-body"));
-  if(!el) return;
-
-  el.innerHTML = `<tr><td colspan="8">Error cargando incidencias</td></tr>`;
+  if(!tbodyEl) return;
+  tbodyEl.innerHTML = `<tr><td colspan="8">Error cargando incidencias</td></tr>`;
   hideLoader();
 }
 
 /* =========================================================
-   RENDER
+   RENDER (ULTRA OPTIMIZADO 🔥)
 ========================================================= */
 
 function render(items){
 
-  const tbody = view.safeDOM(()=> $("#incidencias-body"));
-  if(!tbody) return;
+  if(!tbodyEl) return;
 
-  if(!items.length) return setEmpty();
+  if(!items.length){
+    setEmpty();
+    return;
+  }
 
-  const html = items.map(i => {
+  const fragment = document.createDocumentFragment();
 
-    const d = mapItem(i);
+  for(let i = 0; i < items.length; i++){
 
-    return `
-<tr data-id="${d.id}">
-  <td class="col-id">${d.id}</td>
+    const d = mapItem(items[i]);
 
-  <td class="col-main">
-    <div class="cell-user">
-      <div class="table-avatar">
-        ${renderAvatar(d)}
-      </div>
-      <div class="user-info">
-        <span class="user-name">${escapeHTML(d.usuario)}</span>
-        <span class="user-sub">${escapeHTML(d.email)}</span>
-      </div>
-    </div>
-  </td>
+    const tr = document.createElement("tr");
+    tr.dataset.id = d.id;
 
-  <td class="col-main">${escapeHTML(d.title)}</td>
-  <td class="col-secondary">${escapeHTML(d.tecnico)}</td>
+    tr.innerHTML = `
+      <td class="col-id">${d.id}</td>
 
-  <td class="col-status">
-    <span class="badge ${d.estado.class}">
-      ${d.estado.label}
-    </span>
-  </td>
+      <td class="col-main">
+        <div class="cell-user">
+          <div class="table-avatar">
+            ${renderAvatar(d)}
+          </div>
+          <div class="user-info">
+            <span class="user-name">${escapeHTML(d.usuario)}</span>
+            <span class="user-sub">${escapeHTML(d.email)}</span>
+          </div>
+        </div>
+      </td>
 
-  <td class="col-status">
-    <span class="badge ${d.prioridad.class}">
-      ${d.prioridad.label}
-    </span>
-  </td>
+      <td class="col-main">${escapeHTML(d.title)}</td>
+      <td class="col-secondary">${escapeHTML(d.tecnico)}</td>
 
-  <td class="col-date">${d.fecha}</td>
-  <td class="col-date">${d.fechaCierre}</td>
-</tr>
-`;
+      <td class="col-status">
+        <span class="badge ${d.estado.class}">
+          ${d.estado.label}
+        </span>
+      </td>
 
-  }).join("");
+      <td class="col-status">
+        <span class="badge ${d.prioridad.class}">
+          ${d.prioridad.label}
+        </span>
+      </td>
 
-  tbody.innerHTML = html;
+      <td class="col-date">${d.fecha}</td>
+      <td class="col-date">${d.fechaCierre}</td>
+    `;
+
+    fragment.appendChild(tr);
+  }
+
+  tbodyEl.innerHTML = "";
+  tbodyEl.appendChild(fragment);
 
   hideLoader();
 
@@ -360,19 +352,6 @@ function renderAvatar(d){
   const color = getAvatarColor(d.usuario);
 
   return `<div style="width:100%;height:100%;border-radius:50%;display:flex;align-items:center;justify-content:center;background:${color};color:#fff;font-weight:600;font-size:12px;">${initials}</div>`;
-}
-
-function hashString(str){
-  let hash = 0;
-  for(let i = 0; i < str.length; i++){
-    hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return hash;
-}
-
-function getAvatarColor(name){
-  const colors = ["#6366f1","#22c55e","#eab308","#ef4444","#06b6d4","#a855f7","#f97316"];
-  return colors[Math.abs(hashString(name)) % colors.length];
 }
 
 function mapStatus(s){
@@ -420,8 +399,17 @@ function getInitials(name){
   return name.split(" ").map(n => n[0]).join("").slice(0,2).toUpperCase();
 }
 
+function getAvatarColor(name){
+  const colors = ["#6366f1","#22c55e","#eab308","#ef4444","#06b6d4","#a855f7","#f97316"];
+  let hash = 0;
+  for(let i = 0; i < name.length; i++){
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+}
+
 /* =========================================================
-   TOPBAR CONNECT
+   EXTERNAL
 ========================================================= */
 
 window.IncidenciasUIExternal = {

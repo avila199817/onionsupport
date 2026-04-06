@@ -83,7 +83,6 @@
   ========================================================= */
 
   const ROUTERS = [
-    "/js/wwwroot/router/auth/index.js",
     "/js/wwwroot/router/incidencias/index.js",
     "/js/wwwroot/router/facturas/index.js",
     "/js/wwwroot/router/clientes/index.js",

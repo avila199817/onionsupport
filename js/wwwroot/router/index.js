@@ -24,7 +24,7 @@
 
     // FEATURES
        "/js/wwwroot/router/features/index.js",
-    // "/js/wwwroot/features/facturas/index.js",
+       "/js/wwwroot/router/ui/index.js",
 
     // UI
     // "/js/wwwroot/ui/index.js",

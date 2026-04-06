@@ -1,9 +1,5 @@
 "use strict";
 
-/* =========================================================
-   🧅 BOOT — GOD MODE (SIDEBAR FIRST · APP CONTROL · ZERO DESYNC)
-========================================================= */
-
 (function(){
 
   if(!window.Onion){
@@ -13,15 +9,11 @@
 
   const Onion = window.Onion;
 
-  /* =========================================================
-     STATE BASE
-  ========================================================= */
-
   Onion.state = Onion.state || {};
   Onion.state.appReady = false;
 
   /* =========================
-     THEME (ANTES DE TODO)
+     THEME
   ========================= */
 
   try{
@@ -44,7 +36,7 @@
   }
 
   /* =========================
-     SAFE LOADER
+     LOADER SAFE
   ========================= */
 
   function hideLoaderSafe(){
@@ -73,88 +65,79 @@
 
     try{
 
-      /* 🔥 FAILSAFE GLOBAL */
       bootTimeout = setTimeout(()=>{
         Onion.warn("Loader timeout fallback");
         hideLoaderSafe();
       }, 4000);
 
-      /* =========================
-         USER CONFIG
-      ========================= */
-
       Onion.userConfig?.apply?.();
-
-      /* =========================
-         LANG
-      ========================= */
 
       const lang = Onion.userConfig?.get?.("lang") || "es";
       Onion.i18n?.setLang?.(lang);
 
       /* =========================
-         AUTH PRECHECK
+         🔥 MODO DEBUG SIN AUTH
       ========================= */
 
       Onion.state.slug = localStorage.getItem("onion_user_slug");
 
       if(!Onion.state.slug){
-        hideLoaderSafe();
-        Onion.auth?.redirectLogin?.();
-        return;
+        console.warn("⚠️ Modo debug sin login");
+
+        // 👉 usuario fake para que todo funcione
+        Onion.setUser?.({
+          username: "avila",
+          name: "Ávila",
+          role: "admin"
+        });
       }
 
       /* =========================
-         INIT CORE
+         INIT (aunque falle auth)
       ========================= */
 
-      await Onion.init();
+      try{
+        await Onion.init?.();
+      }catch(e){
+        console.warn("⚠️ Init falló, seguimos en modo debug");
+      }
 
       /* =========================
-         APP READY (SIDEBAR MANDA)
+         🔥 FORZAR APP READY
       ========================= */
 
-      Onion.events?.on?.("app:ready", ()=>{
-
-        if(Onion.state.appReady) return;
+      if(!Onion.state.appReady){
 
         Onion.state.appReady = true;
 
         Onion.ui?.init?.();
         Onion.i18n?.apply?.();
 
-        // 🔥 PRIMER RENDER SOLO CUANDO TODO ESTÁ OK
-        Onion.render();
+        // 👉 render mínimo SI TODO FALLA
+        try{
+          Onion.render?.();
+        }catch{
+          document.getElementById("view-container").innerHTML =
+            "<h1 style='padding:20px'>ONION VIVO 🔥</h1>";
+        }
 
-      });
-
-      /* =========================
-         FINAL LOADER
-      ========================= */
-
-      clearTimeout(bootTimeout);
-
-      if(document.body.classList.contains("loading")){
-        hideLoaderSafe();
       }
-
-    }catch(e){
-
-      Onion.error("BOOT ERROR:", e);
 
       clearTimeout(bootTimeout);
       hideLoaderSafe();
 
+    }catch(e){
+
+      console.error("💥 BOOT ERROR:", e);
+
+      clearTimeout(bootTimeout);
+      hideLoaderSafe();
+
+      document.getElementById("view-container").innerHTML =
+        "<h1 style='padding:20px'>ERROR DE ARRANQUE</h1>";
+
     }
 
   });
-
-  /* =========================
-     DEBUG
-  ========================= */
-
-  if(Onion.config?.DEBUG){
-    Onion.log("🔌 Boot GOD MODE ready");
-  }
 
 })();

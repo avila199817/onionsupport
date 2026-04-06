@@ -1,25 +1,25 @@
 "use strict";
 
 /* =========================================================
-   🧅 ONION ROUTER + INDEX ENGINE (FULL PRO SAAS)
-   - HTML → server.js
-   - CSS + JS → aquí
-   - Slug integrado
-   - Sin duplicados
-   - Sin memory leaks
+   🧅 ONION INDEX ENGINE (FULL PRO SAAS · SAFE MODE)
+   - NO toca server.js
+   - NO modifica Onion.router (freeze safe)
+   - Slug compatible
+   - Scripts SIEMPRE se re-ejecutan
+   - CSS limpio por vista
 ========================================================= */
 
 (function(){
 
 if(!window.Onion){
-  console.error("💥 Onion no está definido (router.js)");
+  console.error("💥 Onion no está definido (index.js)");
   return;
 }
 
 const Onion = window.Onion;
 
 /* =========================================================
-   ROUTES
+   ROUTES (SE RESPETAN)
 ========================================================= */
 
 Onion.routes = Object.freeze({
@@ -168,132 +168,13 @@ Onion.routes = Object.freeze({
 });
 
 /* =========================================================
-   NORMALIZE
-========================================================= */
-
-function normalize(path){
-  if(!path) return "/";
-  path = path.split("?")[0];
-  path = path.replace(/\/+/g, "/");
-  if(path.length > 1 && path.endsWith("/")){
-    path = path.slice(0, -1);
-  }
-  return path || "/";
-}
-
-/* =========================================================
-   ROUTER CORE (CON SLUG)
-========================================================= */
-
-Onion.router.get = function(){
-
-  try{
-
-    let path = normalize(window.location.pathname);
-
-    if(path.startsWith("/@")){
-
-      const parts = path.split("/").filter(Boolean);
-
-      Onion.state.slug = parts[0].replace("@","");
-
-      return "/" + (parts.slice(1).join("/") || "");
-    }
-
-    return path;
-
-  }catch(e){
-    console.error("Router get error:", e);
-    return "/";
-  }
-
-};
-
-Onion.router.getQuery = function(){
-  return Object.fromEntries(new URLSearchParams(window.location.search));
-};
-
-Onion.router.resolve = function(){
-
-  const path = Onion.router.get();
-
-  let route = Onion.routes[path];
-
-  if(!route){
-    console.warn("⚠️ Ruta no encontrada:", path);
-    route = Onion.routes["/"];
-  }
-
-  return {
-    ...route,
-    path,
-    query: Onion.router.getQuery()
-  };
-
-};
-
-/* =========================================================
-   BUILD URL (SLUG)
-========================================================= */
-
-function buildUrl(href){
-
-  const slug =
-    Onion.state.slug ||
-    localStorage.getItem("onion_user_slug");
-
-  if(!slug) return href;
-
-  if(href === "/") return "/@" + slug;
-
-  if(href.startsWith("/@")) return href;
-
-  return "/@" + slug + href;
-
-}
-
-/* =========================================================
-   NAVIGATE
-========================================================= */
-
-Onion.router.navigate = function(href){
-
-  if(!href) return;
-
-  if(href.startsWith("http")){
-    window.location.href = href;
-    return;
-  }
-
-  const finalHref = buildUrl(href);
-
-  const current = normalize(window.location.pathname);
-  const next    = normalize(finalHref);
-
-  if(current === next) return;
-
-  Onion.state.renderId++;
-
-  history.pushState({}, "", finalHref);
-
-  window.scrollTo(0,0);
-
-  Onion.render();
-
-};
-
-window.addEventListener("popstate", ()=>{
-  Onion.render();
-});
-
-/* =========================================================
-   🔥 INDEX ENGINE (GESTIÓN REAL DE VISTAS)
+   🔥 INDEX ENGINE (SIN TOCAR ROUTER)
 ========================================================= */
 
 let currentScripts = [];
 let currentStyles  = [];
 
-/* ---------- CSS ---------- */
+/* ---------- CSS CLEAN ---------- */
 
 function loadStyle(href){
 
@@ -303,7 +184,6 @@ function loadStyle(href){
   if(!href) return;
 
   const add = (h)=>{
-
     const l = document.createElement("link");
     l.rel = "stylesheet";
     l.href = h;
@@ -313,15 +193,10 @@ function loadStyle(href){
     currentStyles.push(l);
   };
 
-  if(Array.isArray(href)){
-    href.forEach(add);
-  }else{
-    add(href);
-  }
-
+  Array.isArray(href) ? href.forEach(add) : add(href);
 }
 
-/* ---------- JS ---------- */
+/* ---------- JS CLEAN + RELOAD ---------- */
 
 function loadScript(src){
 
@@ -331,7 +206,6 @@ function loadScript(src){
   if(!src) return;
 
   const add = (s)=>{
-
     const el = document.createElement("script");
     el.src = s;
     el.defer = true;
@@ -344,12 +218,7 @@ function loadScript(src){
     currentScripts.push(el);
   };
 
-  if(Array.isArray(src)){
-    src.forEach(add);
-  }else{
-    add(src);
-  }
-
+  Array.isArray(src) ? src.forEach(add) : add(src);
 }
 
 /* ---------- LOAD ---------- */
@@ -360,11 +229,10 @@ function loadAssets(route){
 
   loadStyle(route.style);
   loadScript(route.script);
-
 }
 
 /* =========================================================
-   🔥 HOOK RENDER (CLAVE ABSOLUTA)
+   🔥 HOOK RENDER (SIN TOCAR CORE)
 ========================================================= */
 
 if(!Onion.__viewEngineHooked){
@@ -373,12 +241,11 @@ if(!Onion.__viewEngineHooked){
 
   Onion.render = async function(){
 
-    const route = Onion.router.resolve();
+    const route = Onion.router.resolve(); // 🔥 usamos router congelado
 
     await originalRender.apply(this, arguments);
 
     loadAssets(route);
-
   };
 
   Onion.__viewEngineHooked = true;
@@ -389,7 +256,7 @@ if(!Onion.__viewEngineHooked){
 ========================================================= */
 
 if(Onion.config?.DEBUG){
-  console.log("🧭 Router + Index Engine FULL PRO ready");
+  console.log("🧭 INDEX ENGINE FULL PRO (SAFE) ready");
 }
 
 })();

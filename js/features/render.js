@@ -1,10 +1,5 @@
 "use strict";
 
-/* =========================================================
-   🧅 RENDER — FINAL PRO 10/10 (NO RACE · NO DEADLOCK · STABLE)
-   🔥 FIX FINAL: LOADER DESDE FRAME 0 REAL (NO FLICKER)
-========================================================= */
-
 (function(){
 
 if(!window.Onion){
@@ -13,7 +8,6 @@ if(!window.Onion){
 }
 
 const Onion = window.Onion;
-
 const MAX_CONTAINER_WAIT = 5000;
 
 /* =========================================================
@@ -21,15 +15,12 @@ const MAX_CONTAINER_WAIT = 5000;
 ========================================================= */
 
 function waitForDOMReady(){
-
   if(document.readyState === "complete" || document.readyState === "interactive"){
     return Promise.resolve();
   }
-
   return new Promise(resolve=>{
     document.addEventListener("DOMContentLoaded", resolve, { once:true });
   });
-
 }
 
 /* =========================================================
@@ -37,18 +28,13 @@ function waitForDOMReady(){
 ========================================================= */
 
 function waitForViewContainer(){
-
   return new Promise((resolve, reject)=>{
-
     const start = performance.now();
 
     const check = () => {
-
       const el = document.getElementById("view-container");
 
-      if(el){
-        return resolve(el);
-      }
+      if(el) return resolve(el);
 
       if(performance.now() - start > MAX_CONTAINER_WAIT){
         return reject(new Error("⏱️ view-container timeout"));
@@ -58,9 +44,7 @@ function waitForViewContainer(){
     };
 
     check();
-
   });
-
 }
 
 /* =========================================================
@@ -68,7 +52,6 @@ function waitForViewContainer(){
 ========================================================= */
 
 function normalizeUrl(src){
-
   if(!src) return null;
 
   if(typeof src !== "string"){
@@ -83,7 +66,6 @@ function normalizeUrl(src){
   }
 
   return window.location.origin + "/" + src.replace(/^\/+/,"");
-
 }
 
 /* =========================================================
@@ -91,7 +73,6 @@ function normalizeUrl(src){
 ========================================================= */
 
 function loadScriptSingle(src){
-
   return new Promise((resolve, reject)=>{
 
     const finalSrc = normalizeUrl(src);
@@ -112,7 +93,6 @@ function loadScriptSingle(src){
     document.body.appendChild(s);
 
   });
-
 }
 
 Onion.loadScript = async function(scripts){
@@ -274,7 +254,7 @@ function clearView(){
 }
 
 /* =========================================================
-   CORE RENDER
+   CORE RENDER (FIX FLICKER 🔥)
 ========================================================= */
 
 const originalRender = async function(){
@@ -291,6 +271,11 @@ const originalRender = async function(){
   try{
 
     await waitForDOMReady();
+
+    const container = await waitForViewContainer();
+
+    /* 🔥 CLAVE: ocultar antes de tocar DOM */
+    container.style.visibility = "hidden";
 
     Onion.ui.showLoader?.();
 
@@ -313,7 +298,6 @@ const originalRender = async function(){
     let content = extractContent(html);
     content.classList.remove("ready");
 
-    /* 🔥 ACTIVAR LOADER ANTES DEL DOM */
     const localLoader = content.querySelector(".table-loader");
     if(localLoader){
       localLoader.classList.remove("hidden");
@@ -322,8 +306,6 @@ const originalRender = async function(){
     if(route.style){
       await Onion.loadStyle(route.style);
     }
-
-    const container = await waitForViewContainer();
 
     Onion.runCleanup?.();
 
@@ -336,10 +318,14 @@ const originalRender = async function(){
 
     if(renderId !== Onion.state.renderId) return;
 
+    /* 🔥 doble frame = render estable */
     await new Promise(r=>requestAnimationFrame(r));
     await new Promise(r=>requestAnimationFrame(r));
 
     container.querySelector(".panel-content")?.classList.add("ready");
+
+    /* 🔥 mostrar SOLO cuando todo está listo */
+    container.style.visibility = "";
 
   }catch(e){
 
@@ -354,6 +340,7 @@ const originalRender = async function(){
           <p>${e.message}</p>
         </div>
       `;
+      container.style.visibility = "";
     }
 
   }finally{
@@ -375,13 +362,5 @@ const originalRender = async function(){
 Onion.render = function(){
   return originalRender.apply(this, arguments);
 };
-
-/* =========================================================
-   DEBUG
-========================================================= */
-
-if(Onion.config?.DEBUG){
-  Onion.log?.("🎬 Render FINAL PRO 10/10 ready");
-}
 
 })();

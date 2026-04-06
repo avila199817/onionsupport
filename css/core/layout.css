@@ -379,7 +379,3 @@ html, body{
   }
 
 }
-
-*:not(input):not(textarea):not([contenteditable="true"]) {
-  caret-color: transparent !important;
-}

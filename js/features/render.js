@@ -2,6 +2,7 @@
 
 /* =========================================================
    🧅 RENDER — FINAL PRO 10/10 (NO RACE · NO DEADLOCK · STABLE)
+   🔥 FIX: LOADER PERFECT SYNC (GLOBAL + LOCAL)
 ========================================================= */
 
 (function(){
@@ -153,14 +154,12 @@ Onion.loadStyle = function(styles){
 
     let loaded = 0;
 
-    /* 🔥 LIMPIEZA TOTAL (SIN RESIDUOS) */
     document
       .querySelectorAll('link[data-onion-page-style]')
       .forEach(l=>{
         try{ l.remove(); }catch{}
       });
 
-    /* 🔥 CARGA REAL */
     styles.forEach(href=>{
 
       const finalHref = normalizeUrl(href);
@@ -187,14 +186,11 @@ Onion.loadStyle = function(styles){
       loaded++;
 
       if(loaded === styles.length){
-
-        // 🔥 DOBLE FRAME → asegura CSS aplicado
         requestAnimationFrame(()=>{
           requestAnimationFrame(()=>{
             resolve();
           });
         });
-
       }
 
     }
@@ -296,6 +292,7 @@ const originalRender = async function(){
 
     await waitForDOMReady();
 
+    /* 🔥 GLOBAL LOADER */
     Onion.ui.showLoader?.();
 
     const route = Onion.router.resolve();
@@ -317,18 +314,24 @@ const originalRender = async function(){
     const content = extractContent(html);
     content.classList.remove("ready");
 
-    /* 🔥 CSS ANTES DE PINTAR */
     if(route.style){
       await Onion.loadStyle(route.style);
     }
 
     const container = await waitForViewContainer();
 
-    /* 🔥 CLEAN EXACTO */
     Onion.runCleanup?.();
 
     clearView();
     swapView(container, content);
+
+    /* 🔥 FIX CLAVE: LOADER LOCAL INMEDIATO */
+    requestAnimationFrame(()=>{
+      const localLoader = container.querySelector(".table-loader");
+      if(localLoader){
+        localLoader.classList.remove("hidden");
+      }
+    });
 
     if(route.script){
       await Onion.loadScript(route.script);

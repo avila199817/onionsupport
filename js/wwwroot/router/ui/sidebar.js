@@ -173,7 +173,8 @@ function updateToggleLabel(){
     ? "Abrir barra lateral"
     : "Cerrar barra lateral";
 
-  toggleBtn.setAttribute("data-tooltip", text);
+  toggleBtn.dataset.tooltip = text;
+  toggleBtn.removeAttribute("title");
   toggleBtn.setAttribute("aria-label", text);
 }
 

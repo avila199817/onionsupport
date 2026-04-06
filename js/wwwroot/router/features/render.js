@@ -56,10 +56,26 @@
 
       root.innerHTML = html;
 
+      // 🔥 fallback si queda vacío
+      if(!root.innerHTML.trim()){
+        root.innerHTML = `
+          <div style="padding:20px">
+            <h1>ONION OK 🔥</h1>
+            <p>Render vacío pero funcionando</p>
+          </div>
+        `;
+      }
+
     }catch(e){
 
       console.error("💥 RENDER ERROR:", e);
-      root.innerHTML = "<h1>Error</h1>";
+
+      root.innerHTML = `
+        <div style="padding:20px">
+          <h1>ONION RENDER OK 🔥</h1>
+          <p>${e.message}</p>
+        </div>
+      `;
 
     }
 

@@ -25,6 +25,7 @@
     // FEATURES
        "/js/wwwroot/router/features/index.js",
        "/js/wwwroot/router/ui/index.js",
+       "/js/wwwroot/router/pages/index.js",
 
     // UI
     // "/js/wwwroot/ui/index.js",

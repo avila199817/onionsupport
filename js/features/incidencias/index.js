@@ -32,6 +32,10 @@ let externalFilters = {
   prioridad: ""
 };
 
+/* 🔥 LOADER TIMER GLOBAL */
+let loaderStart = 0;
+const MIN_LOADER_TIME = 2000;
+
 /* =========================
    ROOT SAFE
 ========================= */
@@ -46,21 +50,29 @@ function $(selector){
 }
 
 /* =========================
-   LOADER SAFE (FIXED)
+   LOADER SAFE (PRO)
 ========================= */
 
 function showLoader(){
   const loader = view.safeDOM(()=> $(".table-loader"));
   if(loader){
     loader.classList.remove("hidden");
+    loaderStart = performance.now(); /* 🔥 start timer */
   }
 }
 
-function hideLoader(){
+async function hideLoader(){
   const loader = view.safeDOM(()=> $(".table-loader"));
-  if(loader){
-    loader.classList.add("hidden");
+  if(!loader) return;
+
+  const elapsed = performance.now() - loaderStart;
+  const remaining = MIN_LOADER_TIME - elapsed;
+
+  if(remaining > 0){
+    await new Promise(r => setTimeout(r, remaining));
   }
+
+  loader.classList.add("hidden");
 }
 
 /* =========================
@@ -80,7 +92,7 @@ function init(){
 
   bindEvents();
 
-  /* 🔥 opcional: refuerzo extra */
+  /* 🔥 loader obligatorio SIEMPRE */
   showLoader();
 
   requestAnimationFrame(()=>{
@@ -220,27 +232,27 @@ function applyFilters(){
    STATES
 ========================= */
 
-function setEmpty(){
+async function setEmpty(){
   const el = view.safeDOM(()=> $("#incidencias-body"));
   if(!el) return;
 
   el.innerHTML = `<tr><td colspan="8">No hay incidencias</td></tr>`;
-  hideLoader();
+  await hideLoader();
 }
 
-function setError(){
+async function setError(){
   const el = view.safeDOM(()=> $("#incidencias-body"));
   if(!el) return;
 
   el.innerHTML = `<tr><td colspan="8">Error cargando incidencias</td></tr>`;
-  hideLoader();
+  await hideLoader();
 }
 
 /* =========================
    RENDER
 ========================= */
 
-function render(items){
+async function render(items){
 
   const tbody = view.safeDOM(()=> $("#incidencias-body"));
   if(!tbody) return;
@@ -291,7 +303,7 @@ function render(items){
 
   tbody.innerHTML = html;
 
-  hideLoader();
+  await hideLoader();
 
 }
 

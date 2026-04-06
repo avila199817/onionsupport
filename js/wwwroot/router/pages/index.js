@@ -1,12 +1,12 @@
 "use strict";
 
 /* =========================================================
-   🧅 ONION INDEX ENGINE (FULL PRO SAAS · SAFE MODE)
+   🧅 ONION INDEX ENGINE (FULL PRO SAAS · FINAL)
    - NO toca server.js
-   - NO modifica Onion.router (freeze safe)
-   - Slug compatible
-   - Scripts SIEMPRE se re-ejecutan
+   - NO rompe Onion.router (freeze safe)
+   - Slug FIX + navegación correcta
    - CSS limpio por vista
+   - JS SIEMPRE se re-ejecuta
 ========================================================= */
 
 (function(){
@@ -17,6 +17,73 @@ if(!window.Onion){
 }
 
 const Onion = window.Onion;
+
+/* =========================================================
+   🔥 FIX SLUG (SIN TOCAR SERVER)
+========================================================= */
+
+(function fixSlug(){
+
+  try{
+
+    const path = window.location.pathname;
+
+    if(path.startsWith("/@")){
+
+      const parts = path.split("/").filter(Boolean);
+
+      const slug = parts[0].replace("@","");
+
+      Onion.state.slug = slug;
+
+      try{
+        localStorage.setItem("onion_user_slug", slug);
+      }catch{}
+
+    }
+
+  }catch(e){
+    console.warn("⚠️ slug fix error", e);
+  }
+
+})();
+
+/* =========================================================
+   🔥 PATCH NAVIGATE (SIN ROMPER CORE)
+========================================================= */
+
+Onion.router.navigate = function(href){
+
+  if(!href) return;
+
+  if(href.startsWith("http")){
+    window.location.href = href;
+    return;
+  }
+
+  const slug =
+    Onion.state.slug ||
+    localStorage.getItem("onion_user_slug");
+
+  let final = href;
+
+  if(slug){
+
+    if(href === "/"){
+      final = "/@" + slug;
+    }
+    else if(!href.startsWith("/@")){
+      final = "/@" + slug + href;
+    }
+
+  }
+
+  history.pushState({}, "", final);
+
+  window.scrollTo(0,0);
+
+  Onion.render();
+};
 
 /* =========================================================
    ROUTES (SE RESPETAN)
@@ -168,13 +235,13 @@ Onion.routes = Object.freeze({
 });
 
 /* =========================================================
-   🔥 INDEX ENGINE (SIN TOCAR ROUTER)
+   🔥 INDEX ENGINE
 ========================================================= */
 
 let currentScripts = [];
 let currentStyles  = [];
 
-/* ---------- CSS CLEAN ---------- */
+/* ---------- CSS ---------- */
 
 function loadStyle(href){
 
@@ -196,7 +263,7 @@ function loadStyle(href){
   Array.isArray(href) ? href.forEach(add) : add(href);
 }
 
-/* ---------- JS CLEAN + RELOAD ---------- */
+/* ---------- JS ---------- */
 
 function loadScript(src){
 
@@ -232,7 +299,7 @@ function loadAssets(route){
 }
 
 /* =========================================================
-   🔥 HOOK RENDER (SIN TOCAR CORE)
+   🔥 HOOK RENDER
 ========================================================= */
 
 if(!Onion.__viewEngineHooked){
@@ -241,7 +308,7 @@ if(!Onion.__viewEngineHooked){
 
   Onion.render = async function(){
 
-    const route = Onion.router.resolve(); // 🔥 usamos router congelado
+    const route = Onion.router.resolve();
 
     await originalRender.apply(this, arguments);
 
@@ -256,7 +323,7 @@ if(!Onion.__viewEngineHooked){
 ========================================================= */
 
 if(Onion.config?.DEBUG){
-  console.log("🧭 INDEX ENGINE FULL PRO (SAFE) ready");
+  console.log("🧭 INDEX ENGINE FULL PRO 10/10 READY");
 }
 
 })();

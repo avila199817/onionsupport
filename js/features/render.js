@@ -2,7 +2,7 @@
 
 /* =========================================================
    🧅 RENDER — FINAL PRO 10/10 (NO RACE · NO DEADLOCK · STABLE)
-   🔥 FIX: LOADER PERFECT SYNC (GLOBAL + LOCAL)
+   🔥 FIX FINAL: LOADER DESDE FRAME 0 REAL (NO FLICKER)
 ========================================================= */
 
 (function(){
@@ -139,7 +139,7 @@ Onion.loadScript = async function(scripts){
 };
 
 /* =========================================================
-   STYLE LOADER — FIX REAL 🔥
+   STYLE LOADER
 ========================================================= */
 
 Onion.loadStyle = function(styles){
@@ -246,7 +246,7 @@ function extractContent(html){
 ========================================================= */
 
 function swapView(container, node){
-  container.replaceChildren(node.cloneNode(true));
+  container.replaceChildren(node);
 }
 
 /* =========================================================
@@ -292,7 +292,6 @@ const originalRender = async function(){
 
     await waitForDOMReady();
 
-    /* 🔥 GLOBAL LOADER */
     Onion.ui.showLoader?.();
 
     const route = Onion.router.resolve();
@@ -311,8 +310,14 @@ const originalRender = async function(){
 
     if(renderId !== Onion.state.renderId) return;
 
-    const content = extractContent(html);
+    let content = extractContent(html);
     content.classList.remove("ready");
+
+    /* 🔥 ACTIVAR LOADER ANTES DEL DOM */
+    const localLoader = content.querySelector(".table-loader");
+    if(localLoader){
+      localLoader.classList.remove("hidden");
+    }
 
     if(route.style){
       await Onion.loadStyle(route.style);
@@ -324,14 +329,6 @@ const originalRender = async function(){
 
     clearView();
     swapView(container, content);
-
-    /* 🔥 FIX CLAVE: LOADER LOCAL INMEDIATO */
-    requestAnimationFrame(()=>{
-      const localLoader = container.querySelector(".table-loader");
-      if(localLoader){
-        localLoader.classList.remove("hidden");
-      }
-    });
 
     if(route.script){
       await Onion.loadScript(route.script);

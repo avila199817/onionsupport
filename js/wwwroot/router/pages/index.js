@@ -93,6 +93,10 @@ Onion.routes = Object.freeze({
     title: "Dashboard"
   },
 
+
+
+
+
   "/incidencias": {
     page: "/app/views/incidencias/index.html",
     style: [
@@ -105,7 +109,30 @@ Onion.routes = Object.freeze({
     ],
     title: "Incidencias"
   },
-    
+  
+  "/incidencias/detalle": {
+    page: "/app/views/incidencias/detalle.html",
+    style: [
+      "/css/app/core/view.css",
+      "/css/app/incidencias/detalle.css"
+    ],
+    script: "/js/wwwroot/router/pages/incidencias/detalle.js",
+    title: "Detalle incidencia"
+  },
+
+  "/incidencias/nueva": {
+    page: "/app/views/incidencias/incidencia.html",
+    style: "/css/app/incidencias/incidencia.css",
+    script: "/js/wwwroot/router/pages/incidencias/incidencia.js",
+    title: "Nueva incidencia"
+  },
+
+
+
+
+  
+  
+  
   "/facturas": {
     page: "/app/views/facturas/index.html",
     style: [
@@ -114,11 +141,114 @@ Onion.routes = Object.freeze({
     ],
     script: [
       "/js/features/facturas/topbarview.js",
-      "/js/wwwroot/router/pages/dashboard/index.js"
+      "/js/wwwroot/router/pages/facturas/index.js"
     ],
     title: "Facturas"
+  },
+
+  "/facturas/detalle": {
+    page: "/app/views/facturas/detalle.html",
+    style: [
+      "/css/app/core/view.css",
+      "/css/app/facturas/detalle.css"
+    ],
+    script: "/js/wwwroot/router/pages/facturas/detalle.js",
+    title: "Detalle factura"
+  },
+
+  "/facturas/nueva": {
+    page: "/app/views/facturas/factura.html",
+    style: "/css/app/facturas/factura.css",
+    script: "/js/wwwroot/router/pages/facturas/factura.js",
+    title: "Nueva factura"
+  },
+
+
+
+
+
+
+  "/usuarios": {
+    page: "/app/views/usuarios/index.html",
+    style: [
+      "/css/app/core/topbarview.css",
+      "/css/app/usuarios/usuarios.css"
+    ],
+    script: [
+      "/js/features/usuarios/topbarview.js",
+      "/js/wwwroot/router/pages/usuarios/index.js"
+    ],
+    title: "Usuarios"
+  },
+
+  "/usuarios/detalle": {
+    page: "/app/views/usuarios/detalle.html",
+    style: [
+      "/css/app/core/view.css",
+      "/css/app/usuarios/detalle.css"
+    ],
+    script: "/js/wwwroot/router/pages/usuarios/detalle.js",
+    title: "Detalle usuario"
+  },
+
+  "/usuarios/nuevo": {
+    page: "/app/views/usuarios/usuario.html",
+    style: "/css/app/usuarios/usuario.css",
+    script: "/js/wwwroot/router/pages/usuarios/usuario.js",
+    title: "Nuevo usuario"
+  },
+
+
+
+
+
+  "/clientes": {
+    page: "/app/views/clientes/index.html",
+    style: [
+      "/css/app/core/topbarview.css",
+      "/css/app/clientes/clientes.css"
+    ],
+    script: [
+      "/js/features/clientes/topbarview.js",
+      "/js/wwwroot/router/pages/clientes/index.js"
+    ],
+    title: "Clientes"
+  },
+
+  "/clientes/detalle": {
+    page: "/app/views/clientes/detalle.html",
+    style: [
+      "/css/app/core/view.css",
+      "/css/app/clientes/detalle.css"
+    ],
+    script: "/js/wwwroot/router/pages/clientes/detalle.js",
+    title: "Detalle cliente"
+  },
+
+  "/clientes/cliente": {
+    page: "/app/views/clientes/cliente.html",
+    style: "/css/app/clientes.css",
+    script: "/js/wwwroot/router/pages/clientes/cliente.js",
+    title: "Cliente"
+  },
+
+  "/cuenta": {
+    page: "/app/views/cuenta/index.html",
+    style: "/css/app/cuenta.css",
+    script: "/js/wwwroot/router/pages/cuenta/index.js",
+    title: "Cuenta"
+  },
+
+  "/ajustes": {
+    page: "/app/views/ajustes/index.html",
+    style: "/css/app/cuenta.css",
+    script: "/js/wwwroot/router/pages/ajustes/index.js",
+    title: "Ajustes"
   }
 
+
+
+  
 });
 
 /* =========================================================

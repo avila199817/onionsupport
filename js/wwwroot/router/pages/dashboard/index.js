@@ -1,9 +1,3 @@
- (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
-diff --git a/js/wwwroot/router/pages/dashboard/index.js b/js/wwwroot/router/pages/dashboard/index.js
-index 47dd75b99369def998bffd611f9bde94815dc0d7..68c29fb74cd31a07e0645167e0740920cf42cb8d 100644
---- a/js/wwwroot/router/pages/dashboard/index.js
-+++ b/js/wwwroot/router/pages/dashboard/index.js
-@@ -1,273 +1,328 @@
  "use strict";
  
  (function(){

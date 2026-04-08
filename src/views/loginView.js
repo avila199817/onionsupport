@@ -17,6 +17,8 @@
    - soportar toggle password tipo eye
    - login limpio sin imagen lateral
    - forzar apagado del loader al renderizar login
+   - usar rutas absolutas coherentes con el shell SPA
+   - evitar reactivar el form tras login correcto
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
@@ -32,6 +34,8 @@ export const LoginView = (() => {
   const SUCCESS_REDIRECT_DELAY = 220;
 
   let logoIntervalId = null;
+  let redirectTimerId = null;
+  let isNavigatingAway = false;
 
   /* =========================================================
      HELPERS BASE
@@ -45,7 +49,16 @@ export const LoginView = (() => {
   }
 
   function escapeHtml(value = "") {
-    return AppCore.utils.escapeHtml(String(value ?? ""));
+    if (AppCore?.utils?.escapeHtml) {
+      return AppCore.utils.escapeHtml(String(value ?? ""));
+    }
+
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
   }
 
   function normalizeIdentifier(value = "") {
@@ -65,6 +78,13 @@ export const LoginView = (() => {
       .replace(/-+/g, "-")
       .replace(/^-+|-+$/g, "")
       .toLowerCase();
+  }
+
+  function clearRedirectTimer() {
+    if (redirectTimerId) {
+      window.clearTimeout(redirectTimerId);
+      redirectTimerId = null;
+    }
   }
 
   function getCurrentRedirectPath() {
@@ -100,8 +120,8 @@ export const LoginView = (() => {
 
   function getShellElements() {
     return {
-      sidebar: AppCore.dom.sidebar || document.querySelector(".sidebar"),
-      topbar: AppCore.dom.topbar || document.querySelector(".topbar"),
+      sidebar: AppCore.dom.sidebar || document.getElementById("sidebar"),
+      topbar: AppCore.dom.topbar || document.getElementById("topbar") || document.querySelector(".topbar"),
       topbarViewContainer:
         AppCore.dom.topbarViewContainer ||
         document.getElementById("topbarview-container"),
@@ -139,6 +159,8 @@ export const LoginView = (() => {
 
     if (!loader) return;
 
+    loader.hidden = false;
+    loader.setAttribute("aria-hidden", "true");
     loader.style.display = "";
     loader.style.opacity = "";
     loader.style.visibility = "";
@@ -168,6 +190,7 @@ export const LoginView = (() => {
 
   function clearLoginScope() {
     stopLogoAnimation();
+    clearRedirectTimer();
     AppCore.cleanup.run(SCOPE);
   }
 
@@ -176,6 +199,25 @@ export const LoginView = (() => {
       identifierInput?.focus();
       identifierInput?.select?.();
     }, 0);
+  }
+
+  function navigateTo(path) {
+    const target = AppCore.utils.normalizePath(path || "/");
+
+    if (typeof Router.goAfterLogin === "function") {
+      Router.goAfterLogin(target);
+      return;
+    }
+
+    if (typeof Router.navigate === "function") {
+      Router.navigate(target, {
+        replaceState: true,
+        force: true,
+      });
+      return;
+    }
+
+    window.location.href = target;
   }
 
   /* =========================================================
@@ -460,6 +502,7 @@ export const LoginView = (() => {
 
   function handleSuccessfulLogin(result, feedbackEl, payload) {
     const redirectTo = resolvePostLoginPath(result, payload?.identifier || "");
+    isNavigatingAway = true;
 
     persistLegacyUserInfo(result, payload?.identifier || "");
     AppCore.syncUserUI?.();
@@ -471,26 +514,15 @@ export const LoginView = (() => {
 
     setFeedback(feedbackEl, "Acceso correcto. Redirigiendo...", "success");
 
-    window.setTimeout(() => {
-      if (typeof Router.goAfterLogin === "function") {
-        Router.goAfterLogin(redirectTo);
-        return;
-      }
-
-      if (typeof Router.navigate === "function") {
-        Router.navigate(redirectTo, {
-          replaceState: true,
-          force: true,
-        });
-        return;
-      }
-
-      window.location.href = redirectTo;
+    clearRedirectTimer();
+    redirectTimerId = window.setTimeout(() => {
+      navigateTo(redirectTo);
     }, SUCCESS_REDIRECT_DELAY);
   }
 
   function handle2FARequired(result, feedbackEl) {
     const redirectTo = result?.redirectTo || "/2fa";
+    isNavigatingAway = true;
 
     try {
       if (result?.tempToken) {
@@ -511,16 +543,9 @@ export const LoginView = (() => {
       "info"
     );
 
-    window.setTimeout(() => {
-      if (typeof Router.navigate === "function") {
-        Router.navigate(redirectTo, {
-          replaceState: true,
-          force: true,
-        });
-        return;
-      }
-
-      window.location.href = redirectTo;
+    clearRedirectTimer();
+    redirectTimerId = window.setTimeout(() => {
+      navigateTo(redirectTo);
     }, SUCCESS_REDIRECT_DELAY);
   }
 
@@ -538,6 +563,7 @@ export const LoginView = (() => {
       return;
     }
 
+    isNavigatingAway = false;
     clearLoginScope();
     restoreGlobalLoaderStyles();
     setAuthScreen(true);
@@ -546,6 +572,9 @@ export const LoginView = (() => {
     AppCore.setDocumentTitle?.("Acceso");
 
     const redirectPath = getCurrentRedirectPath();
+    const appName = escapeHtml(AppCore?.config?.appName || "Onion Support");
+    const appVersion = escapeHtml(AppCore?.config?.version || "1.0.0");
+    const currentYear = new Date().getFullYear();
 
     container.innerHTML = `
       <section class="login-view">
@@ -555,15 +584,13 @@ export const LoginView = (() => {
           <div class="login-card" id="loginCard">
             <div class="login-header">
               <div class="logo-fade" aria-hidden="true">
-                <img src="./src/media/img/favicon_black.png" alt="">
-                <img src="./src/media/img/favicon_black_circle.png" alt="">
-                <img src="./src/media/img/favicon_support.png" alt="">
-                <img src="./src/media/img/favicon_white.png" alt="">
+                <img src="/src/media/img/favicon_black.png" alt="">
+                <img src="/src/media/img/favicon_black_circle.png" alt="">
+                <img src="/src/media/img/favicon_support.png" alt="">
+                <img src="/src/media/img/favicon_white.png" alt="">
               </div>
 
-              <h2>Iniciar sesión con la cuenta ${escapeHtml(
-                AppCore.config.appName
-              )}</h2>
+              <h2>Iniciar sesión con la cuenta ${appName}</h2>
             </div>
 
             <form id="loginForm" class="login-form" novalidate>
@@ -692,9 +719,7 @@ export const LoginView = (() => {
             </form>
 
             <div class="login-footer">
-              © ${new Date().getFullYear()} ${escapeHtml(
-                AppCore.config.appName
-              )} · v${escapeHtml(AppCore.config.version)}
+              © ${currentYear} ${appName} · v${appVersion}
             </div>
           </div>
         </div>
@@ -859,12 +884,13 @@ export const LoginView = (() => {
           passwordInput,
           message,
         });
-      } finally {
+
         setSubmitting(controls, false);
       }
     });
 
     AppCore.cleanup.event(scope, "auth:login:error", () => {
+      isNavigatingAway = false;
       setSubmitting(controls, false);
     });
 
@@ -878,8 +904,12 @@ export const LoginView = (() => {
 
     AppCore.cleanup.add(scope, () => {
       stopLogoAnimation();
-      setAuthScreen(false);
-      restoreGlobalLoaderStyles();
+      clearRedirectTimer();
+
+      if (!isNavigatingAway) {
+        setAuthScreen(false);
+        restoreGlobalLoaderStyles();
+      }
     });
   }
 

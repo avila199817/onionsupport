@@ -19,10 +19,11 @@
    - forzar apagado del loader al renderizar login
    - usar rutas absolutas coherentes con el shell SPA
    - evitar reactivar el form tras login correcto
-   - quitar botón superior de volver
-   - añadir laterales interactivos izquierda / derecha
-   - desplazar el card hacia la derecha
+   - quitar bloques visuales sobrantes
+   - conservar bloque lateral izquierdo de estado
+   - mover el card más a la derecha
    - mantener layout estable sin generar scroll
+   - reducir efectos para un resultado más limpio
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
@@ -36,14 +37,10 @@ export const LoginView = (() => {
   const LOGO_ROTATE_INTERVAL = 3000;
   const LOGO_FADE_DURATION = 1800;
   const SUCCESS_REDIRECT_DELAY = 220;
-  const PARALLAX_MAX_X = 14;
-  const PARALLAX_MAX_Y = 10;
 
   let logoIntervalId = null;
   let redirectTimerId = null;
   let isNavigatingAway = false;
-  let parallaxFrameId = null;
-  let lastParallaxTarget = null;
 
   /* =========================================================
      HELPERS BASE
@@ -92,13 +89,6 @@ export const LoginView = (() => {
     if (redirectTimerId) {
       window.clearTimeout(redirectTimerId);
       redirectTimerId = null;
-    }
-  }
-
-  function clearParallaxFrame() {
-    if (parallaxFrameId) {
-      window.cancelAnimationFrame(parallaxFrameId);
-      parallaxFrameId = null;
     }
   }
 
@@ -216,7 +206,6 @@ export const LoginView = (() => {
   function clearLoginScope() {
     stopLogoAnimation();
     clearRedirectTimer();
-    clearParallaxFrame();
     AppCore.cleanup.run(SCOPE);
   }
 
@@ -477,89 +466,6 @@ export const LoginView = (() => {
   }
 
   /* =========================================================
-     PARALLAX / INTERACTIVO
-  ========================================================= */
-  function applyParallax(rootEl, data) {
-    if (!rootEl || !data) return;
-
-    const {
-      rotateX = 0,
-      rotateY = 0,
-      shiftX = 0,
-      shiftY = 0,
-      glowX = 50,
-      glowY = 50,
-    } = data;
-
-    rootEl.style.setProperty("--login-rotate-x", `${rotateX}deg`);
-    rootEl.style.setProperty("--login-rotate-y", `${rotateY}deg`);
-    rootEl.style.setProperty("--login-shift-x", `${shiftX}px`);
-    rootEl.style.setProperty("--login-shift-y", `${shiftY}px`);
-    rootEl.style.setProperty("--login-glow-x", `${glowX}%`);
-    rootEl.style.setProperty("--login-glow-y", `${glowY}%`);
-  }
-
-  function resetParallax(rootEl) {
-    applyParallax(rootEl, {
-      rotateX: 0,
-      rotateY: 0,
-      shiftX: 0,
-      shiftY: 0,
-      glowX: 50,
-      glowY: 50,
-    });
-  }
-
-  function scheduleParallax(rootEl, payload) {
-    lastParallaxTarget = payload;
-    clearParallaxFrame();
-
-    parallaxFrameId = window.requestAnimationFrame(() => {
-      applyParallax(rootEl, lastParallaxTarget);
-      parallaxFrameId = null;
-    });
-  }
-
-  function bindInteractiveScene(scope, sceneEl, stageEl, cardEl) {
-    if (!sceneEl || !stageEl || !cardEl) return;
-
-    resetParallax(sceneEl);
-
-    AppCore.cleanup.on(scope, stageEl, "pointermove", (event) => {
-      const rect = stageEl.getBoundingClientRect();
-      if (!rect.width || !rect.height) return;
-
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
-
-      const px = x / rect.width;
-      const py = y / rect.height;
-
-      const centeredX = (px - 0.5) * 2;
-      const centeredY = (py - 0.5) * 2;
-
-      scheduleParallax(sceneEl, {
-        rotateX: +(centeredY * -4).toFixed(2),
-        rotateY: +(centeredX * 5).toFixed(2),
-        shiftX: +(centeredX * PARALLAX_MAX_X).toFixed(2),
-        shiftY: +(centeredY * PARALLAX_MAX_Y).toFixed(2),
-        glowX: +(px * 100).toFixed(2),
-        glowY: +(py * 100).toFixed(2),
-      });
-    });
-
-    AppCore.cleanup.on(scope, stageEl, "pointerleave", () => {
-      clearParallaxFrame();
-      resetParallax(sceneEl);
-      cardEl.classList.remove("is-interactive");
-    });
-
-    AppCore.cleanup.on(scope, stageEl, "pointerenter", () => {
-      cardEl.classList.add("is-interactive");
-    });
-  }
-
-  /* =========================================================
      REDIRECCIONES
   ========================================================= */
   function resolvePostLoginPath(result, fallbackIdentifier = "") {
@@ -686,11 +592,9 @@ export const LoginView = (() => {
     const currentYear = new Date().getFullYear();
 
     container.innerHTML = `
-      <section class="login-view login-view--pro" aria-label="Pantalla de acceso">
-        <div class="login-scene" id="loginScene">
-          <div class="login-scene-glow" aria-hidden="true"></div>
-
-          <div class="login-grid" id="loginGrid">
+      <section class="login-view login-view--clean" aria-label="Pantalla de acceso">
+        <div class="login-scene">
+          <div class="login-grid login-grid--clean" id="loginGrid">
             <aside class="login-side login-side-left" aria-hidden="true">
               <div class="login-side-panel login-side-panel--status">
                 <div class="login-side-eyebrow">Entorno seguro</div>
@@ -701,29 +605,23 @@ export const LoginView = (() => {
                     <span class="dot"></span>
                     <span>Sesión cifrada</span>
                   </div>
+
                   <div class="login-signal-item">
                     <span class="dot"></span>
                     <span>Controles de acceso activos</span>
                   </div>
+
                   <div class="login-signal-item">
                     <span class="dot"></span>
                     <span>Shell SPA preparado</span>
                   </div>
                 </div>
               </div>
-
-              <div class="login-side-panel login-side-panel--orbital">
-                <div class="orbital-ring orbital-ring-a"></div>
-                <div class="orbital-ring orbital-ring-b"></div>
-                <div class="orbital-core"></div>
-              </div>
             </aside>
 
-            <div class="login-stage" id="loginStage">
-              <div class="login-card-shell">
-                <div class="login-card login-card--offset" id="loginCard">
-                  <div class="login-card-glow" aria-hidden="true"></div>
-
+            <div class="login-stage login-stage--right" id="loginStage">
+              <div class="login-card-shell login-card-shell--right">
+                <div class="login-card login-card--clean login-card--offset" id="loginCard">
                   <div class="login-header">
                     <div class="logo-fade" aria-hidden="true">
                       <img src="/src/media/img/favicon_black.png" alt="">
@@ -733,6 +631,7 @@ export const LoginView = (() => {
                     </div>
 
                     <h2>Iniciar sesión con la cuenta ${appName}</h2>
+
                     <p class="login-subtitle">
                       Accede a tu espacio de soporte, incidencias y gestión interna.
                     </p>
@@ -869,36 +768,6 @@ export const LoginView = (() => {
                 </div>
               </div>
             </div>
-
-            <aside class="login-side login-side-right" aria-hidden="true">
-              <div class="login-side-panel login-side-panel--metric">
-                <div class="login-side-eyebrow">Interacción</div>
-
-                <div class="metric-stack">
-                  <div class="metric-row">
-                    <span class="metric-label">Panel</span>
-                    <strong class="metric-value">LIVE</strong>
-                  </div>
-
-                  <div class="metric-row">
-                    <span class="metric-label">Focus</span>
-                    <strong class="metric-value">ON</strong>
-                  </div>
-
-                  <div class="metric-row">
-                    <span class="metric-label">Motion</span>
-                    <strong class="metric-value">3D</strong>
-                  </div>
-                </div>
-              </div>
-
-              <div class="login-side-panel login-side-panel--trail">
-                <div class="trail-line"></div>
-                <div class="trail-node trail-node-a"></div>
-                <div class="trail-node trail-node-b"></div>
-                <div class="trail-node trail-node-c"></div>
-              </div>
-            </aside>
           </div>
         </div>
       </section>
@@ -914,8 +783,6 @@ export const LoginView = (() => {
   function bind() {
     const scope = AppCore.cleanup.scope(SCOPE);
 
-    const scene = document.getElementById("loginScene");
-    const stage = document.getElementById("loginStage");
     const form = document.getElementById("loginForm");
     const card = document.getElementById("loginCard");
     const button = document.getElementById("loginButton");
@@ -960,7 +827,6 @@ export const LoginView = (() => {
     startLogoAnimation(logoImages);
     focusInitialField(identifierInput);
     updateCapsVisual(capsIcon, passwordFocused, capsActive);
-    bindInteractiveScene(scope, scene, stage, card);
     forceHideGlobalLoader();
 
     if (toggleBtn) {
@@ -1086,7 +952,6 @@ export const LoginView = (() => {
     AppCore.cleanup.add(scope, () => {
       stopLogoAnimation();
       clearRedirectTimer();
-      clearParallaxFrame();
 
       if (!isNavigatingAway) {
         setAuthScreen(false);

@@ -36,7 +36,11 @@ export const LoginView = (() => {
      HELPERS BASE
   ========================================================= */
   function getContainer() {
-    return AppCore.dom.viewContainer;
+    return (
+      AppCore.dom.viewContainer ||
+      document.getElementById("view-container") ||
+      document.querySelector("#view-container")
+    );
   }
 
   function escapeHtml(value = "") {
@@ -93,11 +97,38 @@ export const LoginView = (() => {
     );
   }
 
+  function getShellElements() {
+    return {
+      sidebar: AppCore.dom.sidebar || document.querySelector(".sidebar"),
+      topbar: AppCore.dom.topbar || document.querySelector(".topbar"),
+      topbarViewContainer:
+        AppCore.dom.topbarViewContainer ||
+        document.getElementById("topbarview-container"),
+      tableheadContainer:
+        AppCore.dom.tableheadContainer ||
+        document.getElementById("tablehead-container"),
+    };
+  }
+
   function setAuthScreen(active) {
     if (!document?.body) return;
-    document.body.classList.toggle("auth-screen", Boolean(active));
-    document.body.classList.toggle("route-auth", Boolean(active));
-    document.body.classList.toggle("route-shell-hidden", Boolean(active));
+
+    const enabled = Boolean(active);
+    const {
+      sidebar,
+      topbar,
+      topbarViewContainer,
+      tableheadContainer,
+    } = getShellElements();
+
+    document.body.classList.toggle("auth-screen", enabled);
+    document.body.classList.toggle("route-auth", enabled);
+    document.body.classList.toggle("route-shell-hidden", enabled);
+
+    if (sidebar) sidebar.hidden = enabled;
+    if (topbar) topbar.hidden = enabled;
+    if (topbarViewContainer) topbarViewContainer.hidden = enabled;
+    if (tableheadContainer) tableheadContainer.hidden = enabled;
   }
 
   function clearLoginScope() {
@@ -463,7 +494,12 @@ export const LoginView = (() => {
   ========================================================= */
   function render() {
     const container = getContainer();
-    if (!container) return;
+    if (!container) {
+      AppCore.utils.warn(
+        "LoginView: no se encontró #view-container para renderizar."
+      );
+      return;
+    }
 
     clearLoginScope();
     setAuthScreen(true);
@@ -657,6 +693,9 @@ export const LoginView = (() => {
       : [];
 
     if (!form || !identifierInput || !passwordInput || !button || !feedbackEl) {
+      AppCore.utils.warn(
+        "LoginView: faltan nodos críticos del formulario de acceso."
+      );
       return;
     }
 
@@ -791,7 +830,7 @@ export const LoginView = (() => {
     AppCore.cleanup.event(scope, "router:before-render", ({ detail }) => {
       const nextPath = detail?.path || detail?.canonicalPath || "";
 
-      if (nextPath && nextPath !== "/login") {
+      if (nextPath && !String(nextPath).startsWith("/login")) {
         setAuthScreen(false);
       }
     });

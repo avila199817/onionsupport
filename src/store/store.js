@@ -15,54 +15,79 @@ import { AppCore } from "../core/core.js";
 export const Store = (() => {
   "use strict";
 
+  let initialized = false;
+
+  /* =========================================================
+     HELPERS BASE
+  ========================================================= */
+  function isBrowser() {
+    return typeof window !== "undefined" && typeof document !== "undefined";
+  }
+
+  function safeTitle() {
+    if (!isBrowser()) return AppCore.config.appName;
+    return document.title || AppCore.config.appName;
+  }
+
+  function safeTopbarTitle() {
+    return (
+      AppCore.dom.topbarTitle?.textContent ||
+      safeTitle() ||
+      AppCore.config.appName
+    );
+  }
+
+  function initialState() {
+    return {
+      app: {
+        ready: false,
+        booted: false,
+        route: AppCore.state.route || "/",
+        loading: AppCore.state.loading || false,
+        initialized: AppCore.state.initialized || false,
+        lastError: AppCore.state.lastError || null,
+      },
+
+      session: {
+        authenticated: AppCore.state.authenticated || false,
+        token: AppCore.state.token || null,
+        user: AppCore.state.user || null,
+        role: AppCore.state.role || null,
+      },
+
+      ui: {
+        theme: AppCore.state.theme || "dark",
+        lang: AppCore.state.lang || "es",
+        sidebarOpen: AppCore.state.sidebarOpen ?? true,
+        pageTitle: safeTitle(),
+        topbarTitle: safeTopbarTitle(),
+      },
+
+      entities: {
+        incidencias: [],
+        facturas: [],
+        usuarios: [],
+        clientes: [],
+      },
+
+      meta: {
+        hydrated: false,
+        updatedAt: Date.now(),
+      },
+    };
+  }
+
   /* =========================================================
      ESTADO INTERNO
   ========================================================= */
-  const state = {
-    app: {
-      ready: false,
-      booted: false,
-      route: AppCore.state.route || "/",
-      loading: AppCore.state.loading || false,
-      initialized: AppCore.state.initialized || false,
-      lastError: AppCore.state.lastError || null,
-    },
-
-    session: {
-      authenticated: AppCore.state.authenticated || false,
-      token: AppCore.state.token || null,
-      user: AppCore.state.user || null,
-      role: AppCore.state.role || null,
-    },
-
-    ui: {
-      theme: AppCore.state.theme || "dark",
-      lang: AppCore.state.lang || "es",
-      sidebarOpen: AppCore.state.sidebarOpen ?? true,
-      pageTitle: document.title || AppCore.config.appName,
-      topbarTitle:
-        AppCore.dom.topbarTitle?.textContent ||
-        AppCore.config.appName,
-    },
-
-    entities: {
-      incidencias: [],
-      facturas: [],
-      usuarios: [],
-      clientes: [],
-    },
-
-    meta: {
-      hydrated: false,
-      updatedAt: Date.now(),
-    },
-  };
+  const state = initialState();
 
   /* =========================================================
      LISTENERS
   ========================================================= */
   const listeners = new Set();
   const keyListeners = new Map();
+  const coreUnsubscribers = [];
 
   /* =========================================================
      HELPERS
@@ -76,26 +101,47 @@ export const Store = (() => {
       try {
         return structuredClone(value);
       } catch {
-        return JSON.parse(JSON.stringify(value));
+        /* no-op */
       }
     }
 
-    return JSON.parse(JSON.stringify(value));
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch {
+      return value;
+    }
   }
 
   function shallowCloneRoot() {
     return {
       ...state,
       app: { ...state.app },
-      session: { ...state.session },
+      session: {
+        ...state.session,
+        user: state.session.user ? { ...state.session.user } : null,
+      },
       ui: { ...state.ui },
-      entities: { ...state.entities },
+      entities: {
+        incidencias: Array.isArray(state.entities.incidencias)
+          ? [...state.entities.incidencias]
+          : [],
+        facturas: Array.isArray(state.entities.facturas)
+          ? [...state.entities.facturas]
+          : [],
+        usuarios: Array.isArray(state.entities.usuarios)
+          ? [...state.entities.usuarios]
+          : [],
+        clientes: Array.isArray(state.entities.clientes)
+          ? [...state.entities.clientes]
+          : [],
+      },
       meta: { ...state.meta },
     };
   }
 
   function getByPath(obj, path) {
     if (!path) return obj;
+
     return String(path)
       .split(".")
       .reduce((acc, key) => (acc == null ? undefined : acc[key]), obj);
@@ -150,6 +196,26 @@ export const Store = (() => {
     return output;
   }
 
+  function collectChangedPaths(input, prefix = "") {
+    if (!isObject(input)) {
+      return prefix ? [prefix] : [];
+    }
+
+    const paths = [];
+
+    Object.entries(input).forEach(([key, value]) => {
+      const nextPath = prefix ? `${prefix}.${key}` : key;
+
+      paths.push(nextPath);
+
+      if (isObject(value) && !Array.isArray(value)) {
+        paths.push(...collectChangedPaths(value, nextPath));
+      }
+    });
+
+    return Array.from(new Set(paths));
+  }
+
   function touchMeta() {
     state.meta.updatedAt = Date.now();
   }
@@ -163,30 +229,43 @@ export const Store = (() => {
       }
     });
 
-    if (payload?.changedPaths?.length) {
-      payload.changedPaths.forEach((path) => {
-        const bucket = keyListeners.get(path);
-        if (!bucket) return;
+    if (!payload?.changedPaths?.length) return;
 
-        bucket.forEach((listener) => {
-          try {
-            listener({
-              ...payload,
-              value: get(path),
-            });
-          } catch (error) {
-            AppCore.utils.error(`Store key listener error (${path})`, error);
-          }
-        });
+    const allEntries = Array.from(keyListeners.entries());
+
+    allEntries.forEach(([watchedPath, bucket]) => {
+      const matched = payload.changedPaths.some((changedPath) => {
+        return (
+          changedPath === watchedPath ||
+          changedPath.startsWith(`${watchedPath}.`) ||
+          watchedPath.startsWith(`${changedPath}.`)
+        );
       });
-    }
+
+      if (!matched) return;
+
+      bucket.forEach((listener) => {
+        try {
+          listener({
+            ...payload,
+            value: get(watchedPath),
+            path: watchedPath,
+          });
+        } catch (error) {
+          AppCore.utils.error(
+            `Store key listener error (${watchedPath})`,
+            error
+          );
+        }
+      });
+    });
   }
 
   function buildPayload(changedPaths = [], previousState = null) {
     return {
       state: snapshot(),
       previousState,
-      changedPaths,
+      changedPaths: Array.from(new Set(changedPaths)),
       timestamp: Date.now(),
     };
   }
@@ -225,7 +304,7 @@ export const Store = (() => {
 
     touchMeta();
 
-    const changedPaths = Object.keys(partialState);
+    const changedPaths = collectChangedPaths(partialState);
     notify(buildPayload(changedPaths, previousState));
 
     return shallowCloneRoot();
@@ -244,44 +323,21 @@ export const Store = (() => {
 
   function reset() {
     const previousState = snapshot();
+    const next = initialState();
 
-    state.app = {
-      ready: false,
-      booted: false,
-      route: "/",
-      loading: false,
-      initialized: false,
-      lastError: null,
-    };
+    Object.keys(next).forEach((key) => {
+      state[key] = next[key];
+    });
 
-    state.session = {
-      authenticated: false,
-      token: null,
-      user: null,
-      role: null,
-    };
+    touchMeta();
 
-    state.ui = {
-      theme: "dark",
-      lang: "es",
-      sidebarOpen: true,
-      pageTitle: AppCore.config.appName,
-      topbarTitle: AppCore.config.appName,
-    };
+    notify(
+      buildPayload(
+        ["app", "session", "ui", "entities", "meta"],
+        previousState
+      )
+    );
 
-    state.entities = {
-      incidencias: [],
-      facturas: [],
-      usuarios: [],
-      clientes: [],
-    };
-
-    state.meta = {
-      hydrated: false,
-      updatedAt: Date.now(),
-    };
-
-    notify(buildPayload(["app", "session", "ui", "entities", "meta"], previousState));
     return shallowCloneRoot();
   }
 
@@ -428,9 +484,7 @@ export const Store = (() => {
 
         return list.map((item) => {
           const matched =
-            typeof matcher === "function"
-              ? matcher(item)
-              : item?.id === matcher;
+            typeof matcher === "function" ? matcher(item) : item?.id === matcher;
 
           return matched ? updater({ ...item }) : item;
         });
@@ -475,11 +529,8 @@ export const Store = (() => {
           theme: AppCore.state.theme,
           lang: AppCore.state.lang,
           sidebarOpen: AppCore.state.sidebarOpen,
-          pageTitle: document.title || AppCore.config.appName,
-          topbarTitle:
-            AppCore.dom.topbarTitle?.textContent ||
-            document.title ||
-            AppCore.config.appName,
+          pageTitle: safeTitle(),
+          topbarTitle: safeTopbarTitle(),
         },
         meta: {
           hydrated: true,
@@ -492,8 +543,16 @@ export const Store = (() => {
   /* =========================================================
      SYNC CON AppCore
   ========================================================= */
+  function addCoreEvent(eventName, handler) {
+    const off = AppCore.events.on(eventName, handler);
+    coreUnsubscribers.push(off);
+    return off;
+  }
+
   function bindCoreEvents() {
-    AppCore.events.on("app:state:change", ({ detail }) => {
+    if (coreUnsubscribers.length) return;
+
+    addCoreEvent("app:state:change", ({ detail }) => {
       patch({
         app: {
           route: detail?.state?.route ?? state.app.route,
@@ -502,7 +561,8 @@ export const Store = (() => {
           lastError: detail?.state?.lastError ?? state.app.lastError,
         },
         session: {
-          authenticated: detail?.state?.authenticated ?? state.session.authenticated,
+          authenticated:
+            detail?.state?.authenticated ?? state.session.authenticated,
           token: detail?.state?.token ?? state.session.token,
           user: detail?.state?.user ?? state.session.user,
           role: detail?.state?.role ?? state.session.role,
@@ -511,39 +571,38 @@ export const Store = (() => {
           theme: detail?.state?.theme ?? state.ui.theme,
           lang: detail?.state?.lang ?? state.ui.lang,
           sidebarOpen: detail?.state?.sidebarOpen ?? state.ui.sidebarOpen,
-          pageTitle: document.title || state.ui.pageTitle,
-          topbarTitle:
-            AppCore.dom.topbarTitle?.textContent || state.ui.topbarTitle,
+          pageTitle: safeTitle(),
+          topbarTitle: safeTopbarTitle(),
         },
       });
     });
 
-    AppCore.events.on("app:core:ready", () => {
+    addCoreEvent("app:core:ready", () => {
       actions.hydrateFromCore();
       actions.markReady(true);
     });
 
-    AppCore.events.on("app:theme:change", ({ detail }) => {
+    addCoreEvent("app:theme:change", ({ detail }) => {
       actions.setTheme(detail?.theme || "dark");
     });
 
-    AppCore.events.on("app:lang:change", ({ detail }) => {
+    addCoreEvent("app:lang:change", ({ detail }) => {
       actions.setLang(detail?.lang || "es");
     });
 
-    AppCore.events.on("app:sidebar:change", ({ detail }) => {
+    addCoreEvent("app:sidebar:change", ({ detail }) => {
       actions.setSidebarOpen(Boolean(detail?.open));
     });
 
-    AppCore.events.on("app:error", ({ detail }) => {
+    addCoreEvent("app:error", ({ detail }) => {
       actions.setError(detail?.error || null);
     });
 
-    AppCore.events.on("auth:session:cleared", () => {
+    addCoreEvent("auth:session:cleared", () => {
       actions.clearSession();
     });
 
-    AppCore.events.on("auth:session:applied", () => {
+    addCoreEvent("auth:session:applied", () => {
       actions.setSession({
         authenticated: AppCore.state.authenticated,
         token: AppCore.state.token,
@@ -552,9 +611,14 @@ export const Store = (() => {
       });
     });
 
-    AppCore.events.on("router:rendered", ({ detail }) => {
-      actions.setRoute(detail?.path || window.location.pathname || "/");
-      actions.setPageTitle(document.title || AppCore.config.appName);
+    addCoreEvent("router:rendered", ({ detail }) => {
+      actions.setRoute(
+        detail?.canonicalPath ||
+          detail?.path ||
+          window.location.pathname ||
+          "/"
+      );
+      actions.setPageTitle(safeTitle());
     });
   }
 
@@ -562,8 +626,16 @@ export const Store = (() => {
      INIT
   ========================================================= */
   function init() {
+    if (initialized) {
+      AppCore.utils.warn("Store ya estaba inicializado.");
+      return api;
+    }
+
     actions.hydrateFromCore();
     bindCoreEvents();
+
+    initialized = true;
+
     AppCore.utils.log("Store inicializado correctamente.");
     return api;
   }

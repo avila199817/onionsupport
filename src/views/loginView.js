@@ -584,7 +584,7 @@ export const LoginView = (() => {
     setAuthScreen(true);
 
     AppCore.clearDynamicContainers?.();
-    AppCore.setDocumentTitle?.("Acceso");
+    AppCore.setDocumentTitle?.("Onion Support");
 
     const redirectPath = getCurrentRedirectPath();
     const appName = escapeHtml(AppCore?.config?.appName || "Onion Support");

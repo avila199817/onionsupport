@@ -1,5 +1,5 @@
 /* =========================================================
-   Onion SPA - Core
+   Onion SPA - Core (FULL PRO SAAS PANEL)
    Archivo: src/core/core.js
 
    Qué centraliza:
@@ -169,10 +169,7 @@ export const AppCore = (() => {
     let raw = String(path).trim();
 
     if (!raw) return "/";
-
-    if (raw.startsWith("#")) {
-      return "/";
-    }
+    if (raw.startsWith("#")) return "/";
 
     if (/^https?:\/\//i.test(raw)) {
       try {
@@ -193,7 +190,6 @@ export const AppCore = (() => {
 
     const hashIndex = raw.indexOf("#");
     const searchIndex = raw.indexOf("?");
-
     let cutIndex = -1;
 
     if (searchIndex >= 0 && hashIndex >= 0) {
@@ -381,7 +377,9 @@ export const AppCore = (() => {
           current = result;
         }
       } catch (error) {
-        console.error(`[${config.appName}] Error ejecutando hook`, error);
+        if (config.debug) {
+          console.error(`[${config.appName}] Error ejecutando hook`, error);
+        }
       }
     }
 
@@ -396,7 +394,7 @@ export const AppCore = (() => {
 
   function createAbortTimeout(ms = config.requestTimeout) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), ms);
+    const timeoutId = setTimeout(() => controller.abort("timeout"), ms);
     return { controller, timeoutId };
   }
 
@@ -407,6 +405,42 @@ export const AppCore = (() => {
       }
       return acc;
     }, {});
+  }
+
+  function mergeAbortSignals(signals = []) {
+    const validSignals = signals.filter(Boolean);
+
+    if (!validSignals.length) return null;
+    if (validSignals.length === 1) return validSignals[0];
+
+    const controller = new AbortController();
+
+    function abortFrom(sourceSignal) {
+      if (controller.signal.aborted) return;
+
+      try {
+        controller.abort(sourceSignal?.reason || "aborted");
+      } catch {
+        controller.abort();
+      }
+    }
+
+    validSignals.forEach((signal) => {
+      if (signal.aborted) {
+        abortFrom(signal);
+        return;
+      }
+
+      signal.addEventListener(
+        "abort",
+        () => {
+          abortFrom(signal);
+        },
+        { once: true }
+      );
+    });
+
+    return controller.signal;
   }
 
   /* =========================================================
@@ -439,7 +473,7 @@ export const AppCore = (() => {
   function cloneState() {
     return {
       ...state,
-      user: state.user ? { ...state.user } : null,
+      user: state.user ? safeClone(state.user, state.user) : null,
       lastError: cloneError(state.lastError),
     };
   }
@@ -566,6 +600,7 @@ export const AppCore = (() => {
     },
 
     warn(...args) {
+      if (!config.debug) return;
       console.warn(`[${config.appName}]`, ...args);
     },
 
@@ -732,7 +767,7 @@ export const AppCore = (() => {
       try {
         const keysToRemove = [];
 
-        for (let i = 0; i < localStorage.length; i++) {
+        for (let i = 0; i < localStorage.length; i += 1) {
           const currentKey = localStorage.key(i);
           if (currentKey && currentKey.startsWith(`${config.storagePrefix}:`)) {
             keysToRemove.push(currentKey);
@@ -938,7 +973,10 @@ export const AppCore = (() => {
     nextUser = state.user,
     nextToken = state.token
   ) {
-    return Boolean(normalizeUser(nextUser) || hasValidToken(nextToken));
+    const normalizedUser = normalizeUser(nextUser);
+    const validToken = hasValidToken(nextToken);
+
+    return Boolean(validToken && normalizedUser?.active !== false);
   }
 
   function setState(patch = {}) {
@@ -1188,7 +1226,6 @@ export const AppCore = (() => {
     if (!isBrowser()) return;
 
     const safeTitle = String(title || config.appName);
-
     document.title = safeTitle;
 
     if (dom.topbarTitle) {
@@ -1292,7 +1329,7 @@ export const AppCore = (() => {
       .filter(([, value]) => !value)
       .map(([key]) => key);
 
-    if (missing.length > 0) {
+    if (missing.length > 0 && config.debug) {
       utils.warn("Faltan nodos importantes del layout:", missing);
     }
 
@@ -1438,6 +1475,7 @@ export const AppCore = (() => {
       responseType: "auto",
       query: null,
       credentials: "same-origin",
+      signal: null,
       ...options,
       path,
     };
@@ -1457,6 +1495,7 @@ export const AppCore = (() => {
       responseType = "auto",
       query = null,
       credentials = "same-origin",
+      signal = null,
     } = requestConfig;
 
     const url = buildUrl(requestConfig.path, query);
@@ -1486,6 +1525,7 @@ export const AppCore = (() => {
         : body;
 
     const { controller, timeoutId } = createAbortTimeout(timeout);
+    const mergedSignal = mergeAbortSignals([controller.signal, signal]);
 
     events.emit("app:request:start", {
       url,
@@ -1501,7 +1541,7 @@ export const AppCore = (() => {
         method,
         headers: finalHeaders,
         body: payload,
-        signal: controller.signal,
+        signal: mergedSignal,
         credentials,
       });
 
@@ -1556,18 +1596,30 @@ export const AppCore = (() => {
       clearTimeout(timeoutId);
 
       if (error?.name === "AbortError") {
-        const timeoutError = {
-          status: 0,
-          statusText: "Request timeout",
-          message: `La petición superó ${timeout}ms`,
-          url,
-          method,
-        };
+        const abortedByExternalSignal = signal?.aborted === true;
 
-        setError(timeoutError);
-        await runHookSeries(registry.hooks.onRequestError, timeoutError);
-        events.emit("app:request:error", timeoutError);
-        throw timeoutError;
+        const abortError = abortedByExternalSignal
+          ? {
+              status: 0,
+              statusText: "Request aborted",
+              message: "La petición fue cancelada.",
+              url,
+              method,
+              aborted: true,
+            }
+          : {
+              status: 0,
+              statusText: "Request timeout",
+              message: `La petición superó ${timeout}ms`,
+              url,
+              method,
+              timeout: true,
+            };
+
+        setError(abortError);
+        await runHookSeries(registry.hooks.onRequestError, abortError);
+        events.emit("app:request:error", abortError);
+        throw abortError;
       }
 
       const normalizedError =

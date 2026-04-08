@@ -79,17 +79,21 @@ export const Auth = (() => {
       .replace(/^-+|-+$/g, "");
   }
 
+  function isBrowser() {
+    return typeof window !== "undefined";
+  }
+
   function normalizeUser(rawUser) {
     if (!rawUser || typeof rawUser !== "object") return null;
 
     const username = sanitizeUsername(
       rawUser.username ??
-      rawUser.userName ??
-      rawUser.nick ??
-      rawUser.alias ??
-      rawUser.login ??
-      rawUser.slug ??
-      ""
+        rawUser.userName ??
+        rawUser.nick ??
+        rawUser.alias ??
+        rawUser.login ??
+        rawUser.slug ??
+        ""
     );
 
     const displayName =
@@ -161,6 +165,8 @@ export const Auth = (() => {
       payload.refreshToken ||
       payload.data?.refresh_token ||
       payload.data?.refreshToken ||
+      payload.meta?.refreshToken ||
+      payload.meta?.refresh_token ||
       null
     );
   }
@@ -173,6 +179,8 @@ export const Auth = (() => {
       payload.temp_token ||
       payload.data?.tempToken ||
       payload.data?.temp_token ||
+      payload.meta?.tempToken ||
+      payload.meta?.temp_token ||
       null
     );
   }
@@ -182,11 +190,11 @@ export const Auth = (() => {
 
     return Boolean(
       payload.requires2FA ||
-      payload.requires_2fa ||
-      payload.requiresTwoFactor ||
-      payload.data?.requires2FA ||
-      payload.data?.requires_2fa ||
-      payload.data?.requiresTwoFactor
+        payload.requires_2fa ||
+        payload.requiresTwoFactor ||
+        payload.data?.requires2FA ||
+        payload.data?.requires_2fa ||
+        payload.data?.requiresTwoFactor
     );
   }
 
@@ -195,14 +203,14 @@ export const Auth = (() => {
 
     return normalizeUser(
       payload.user ||
-      payload.data?.user ||
-      payload.me ||
-      payload.data?.me ||
-      payload.profile ||
-      payload.data?.profile ||
-      payload.account ||
-      payload.data?.account ||
-      null
+        payload.data?.user ||
+        payload.me ||
+        payload.data?.me ||
+        payload.profile ||
+        payload.data?.profile ||
+        payload.account ||
+        payload.data?.account ||
+        null
     );
   }
 
@@ -221,16 +229,16 @@ export const Auth = (() => {
   function resolveLoginIdentifier(credentials = {}) {
     return String(
       credentials.identifier ??
-      credentials.username ??
-      credentials.user ??
-      credentials.email ??
-      ""
+        credentials.username ??
+        credentials.user ??
+        credentials.email ??
+        ""
     ).trim();
   }
 
   function normalizeLoginPayload(credentials = {}) {
     const identifier = resolveLoginIdentifier(credentials);
-    const password = String(credentials.password ?? credentials.pass ?? "").trim();
+    const password = String(credentials.password ?? credentials.pass ?? "");
     const remember = Boolean(credentials.remember);
 
     return {
@@ -250,12 +258,12 @@ export const Auth = (() => {
     };
   }
 
-  function hasValidToken() {
-    return Boolean(AppCore.state.token && String(AppCore.state.token).trim());
+  function hasValidToken(token = AppCore.state.token) {
+    return Boolean(token && String(token).trim());
   }
 
   function isAuthenticated() {
-    return hasValidToken();
+    return hasValidToken(AppCore.state.token);
   }
 
   function getCurrentRole() {
@@ -288,14 +296,14 @@ export const Auth = (() => {
   }
 
   function getCurrentCanonicalPath() {
-    const rawPath = window.location.pathname || "/";
+    const rawPath = isBrowser() ? window.location.pathname || "/" : "/";
     const normalizer =
       AppCore.utils.normalizeCanonicalPath || AppCore.utils.normalizePath;
 
     return normalizer(rawPath);
   }
 
-  function isAuthRoute(pathname = window.location.pathname) {
+  function isAuthRoute(pathname = isBrowser() ? window.location.pathname : "/") {
     const normalizer =
       AppCore.utils.normalizeCanonicalPath || AppCore.utils.normalizePath;
 
@@ -314,9 +322,7 @@ export const Auth = (() => {
   }
 
   function buildLoginRedirectPath(targetPath = null) {
-    const loginPath = configLikeRoute(
-      AppCore.config?.routes?.login || "/login"
-    );
+    const loginPath = configLikeRoute(AppCore.config?.routes?.login || "/login");
 
     const canonicalTarget = configLikeRoute(
       targetPath || getCurrentCanonicalPath() || "/"
@@ -374,10 +380,12 @@ export const Auth = (() => {
   }
 
   function getPostLoginTarget(user = AppCore.state.user) {
-    const redirectParam = new URLSearchParams(window.location.search).get("redirect");
+    if (isBrowser()) {
+      const redirectParam = new URLSearchParams(window.location.search).get("redirect");
 
-    if (redirectParam) {
-      return AppCore.utils.normalizePath(redirectParam);
+      if (redirectParam) {
+        return AppCore.utils.normalizePath(redirectParam);
+      }
     }
 
     const slug =
@@ -394,17 +402,7 @@ export const Auth = (() => {
   /* =========================================================
      SESIÓN LOCAL
   ========================================================= */
-  function applySession({ token = undefined, user = undefined } = {}) {
-    const normalizedUser = user === undefined ? undefined : normalizeUser(user);
-
-    if (token !== undefined) {
-      AppCore.setToken(token || null);
-    }
-
-    if (user !== undefined) {
-      AppCore.setUser(normalizedUser || null);
-    }
-
+  function persistAuxSessionData(normalizedUser = null) {
     if (normalizedUser?.slug) {
       AppCore.storage.setRaw("user_slug", normalizedUser.slug);
     } else {
@@ -422,6 +420,22 @@ export const Auth = (() => {
     } else {
       AppCore.storage.remove("role");
     }
+  }
+
+  function applySession({ token = undefined, user = undefined } = {}) {
+    const normalizedUser = user === undefined ? undefined : normalizeUser(user);
+
+    if (token !== undefined) {
+      AppCore.setToken(token || null);
+    }
+
+    if (user !== undefined) {
+      AppCore.setUser(normalizedUser || null);
+    }
+
+    persistAuxSessionData(
+      normalizedUser === undefined ? AppCore.state.user : normalizedUser
+    );
 
     const snapshot = buildSessionSnapshot();
 
@@ -433,6 +447,7 @@ export const Auth = (() => {
   function clearSessionLocal() {
     AppCore.clearSession();
     AppCore.storage.remove("temp_token");
+    AppCore.storage.remove("refresh_token");
     AppCore.storage.remove("user_slug");
     AppCore.storage.remove("user_name");
     AppCore.storage.remove("role");
@@ -490,6 +505,10 @@ export const Auth = (() => {
           redirectTo: "/2fa",
           response,
         };
+      }
+
+      if (authData.refreshToken) {
+        AppCore.storage.setRaw("refresh_token", authData.refreshToken);
       }
 
       const snapshot = applySession({
@@ -558,6 +577,7 @@ export const Auth = (() => {
       }
 
       AppCore.setUser(user);
+      persistAuxSessionData(user);
       session.lastCheckAt = Date.now();
 
       AppCore.events.emit("auth:me:success", {
@@ -608,9 +628,14 @@ export const Auth = (() => {
 
       const nextToken = extractToken(response);
       const nextUser = extractUser(response);
+      const nextRefreshToken = extractRefreshToken(response);
 
       if (!nextToken && !nextUser) {
         throw new Error("La respuesta de refresh no contiene datos de sesión.");
+      }
+
+      if (nextRefreshToken) {
+        AppCore.storage.setRaw("refresh_token", nextRefreshToken);
       }
 
       const snapshot = applySession({
@@ -767,7 +792,7 @@ export const Auth = (() => {
         redirectTo,
       });
 
-      if (!silent && typeof window !== "undefined") {
+      if (!silent && isBrowser()) {
         const nextPath = configLikeRoute(redirectTo);
         window.history.replaceState({}, "", nextPath);
         window.dispatchEvent(new PopStateEvent("popstate"));
@@ -802,7 +827,7 @@ export const Auth = (() => {
       path: currentPath,
     });
 
-    if (hardRedirect && typeof window !== "undefined") {
+    if (hardRedirect && isBrowser()) {
       window.location.href = finalRedirect;
     }
 

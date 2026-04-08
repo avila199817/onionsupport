@@ -1,28 +1,41 @@
 {
-"navigationFallback": {
-"rewrite": "/index.html",
-"exclude": [
-"/css/*",
-"/js/*",
-"/media/*",
-"/assets/*",
-"/fonts/*",
-"/src/*",
-"/config/*",
-"/favicon.ico",
-"/robots.txt",
-"/sitemap.xml",
-"/manifest.json",
-"/sw.js",
-"/api/*"
-]
-},
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": [
+      "/favicon.ico",
+      "/robots.txt",
+      "/sitemap.xml",
+      "/manifest.json",
+      "/sw.js",
 
-"globalHeaders": {
-"Content-Security-Policy": "default-src 'self'; connect-src 'self' https://api.onionit.net; img-src 'self' data: https://onionassets.blob.core.windows.net; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com;",
-"X-Frame-Options": "DENY",
-"X-Content-Type-Options": "nosniff",
-"Referrer-Policy": "strict-origin-when-cross-origin",
-"Permissions-Policy": "geolocation=(), microphone=(), camera=()"
-}
+      "/api/*",
+
+      "/src/*",
+      "/assets/*",
+      "/media/*",
+      "/fonts/*",
+
+      "/css/*",
+      "/js/*"
+    ]
+  },
+
+  "routes": [
+    {
+      "route": "/login",
+      "rewrite": "/index.html"
+    },
+    {
+      "route": "/@*",
+      "rewrite": "/index.html"
+    }
+  ],
+
+  "globalHeaders": {
+    "Content-Security-Policy": "default-src 'self'; connect-src 'self' https://api.onionit.net; img-src 'self' data: https://onionassets.blob.core.windows.net; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com;",
+    "X-Frame-Options": "DENY",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "geolocation=(), microphone=(), camera=()"
+  }
 }

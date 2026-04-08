@@ -1,5 +1,5 @@
 /* =========================================================
-   Onion SPA - Login View
+   Onion SPA - Login View (FULL PRO SAAS PANEL · GOD MODE)
    Archivo: src/views/loginView.js
 
    Responsabilidades:
@@ -35,10 +35,13 @@ export const LoginView = (() => {
   "use strict";
 
   const SCOPE = "view:login";
+
   const LOGO_ROTATE_INTERVAL = 3000;
   const LOGO_FADE_DURATION = 1800;
 
   const TOAST_DEFAULT_DURATION = 3600;
+  const TOAST_MIN_DURATION = 1200;
+
   const LOGIN_LOADING_TOAST_TITLE = "Validando acceso";
   const LOGIN_LOADING_TOAST_MESSAGE =
     "Comprobando credenciales y preparando tu sesión...";
@@ -50,7 +53,10 @@ export const LoginView = (() => {
   let logoIntervalId = null;
   let redirectTimerId = null;
   let toastTimerId = null;
+
   let isNavigatingAway = false;
+  let isSubmitting = false;
+  let isRendered = false;
 
   /* =========================================================
      HELPERS BASE
@@ -81,7 +87,7 @@ export const LoginView = (() => {
   }
 
   function isEmail(value = "") {
-    return /\S+@\S+\.\S+/.test(String(value || "").trim());
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
   }
 
   function slugify(value = "") {
@@ -159,9 +165,7 @@ export const LoginView = (() => {
   function forceHideGlobalLoader() {
     const loader = AppCore.dom.loader || document.getElementById("app-loader");
 
-    if (typeof AppCore.setLoading === "function") {
-      AppCore.setLoading(false);
-    }
+    AppCore.setLoading?.(false);
 
     if (document?.body) {
       document.body.classList.remove("loading");
@@ -220,16 +224,28 @@ export const LoginView = (() => {
     if (tableheadContainer) tableheadContainer.hidden = enabled;
   }
 
-  function clearLoginScope() {
+  function stopLogoAnimation() {
+    if (logoIntervalId) {
+      window.clearInterval(logoIntervalId);
+      logoIntervalId = null;
+    }
+  }
+
+  function destroyViewState({ preserveToast = false } = {}) {
     stopLogoAnimation();
     clearRedirectTimer();
     clearToastTimer();
+
+    if (!preserveToast) {
+      hideToast();
+    }
+
     AppCore.cleanup.run(SCOPE);
   }
 
   function focusInitialField(identifierInput) {
     window.setTimeout(() => {
-      identifierInput?.focus();
+      identifierInput?.focus?.();
       identifierInput?.select?.();
     }, 0);
   }
@@ -259,6 +275,10 @@ export const LoginView = (() => {
     redirectTimerId = window.setTimeout(() => {
       navigateTo(path);
     }, Math.max(0, Number(duration) || 0) + NAVIGATION_BUFFER_MS);
+  }
+
+  function clampToastDuration(duration) {
+    return Math.max(TOAST_MIN_DURATION, Number(duration) || TOAST_DEFAULT_DURATION);
   }
 
   /* =========================================================
@@ -326,6 +346,8 @@ export const LoginView = (() => {
 
     if (toastProgress) {
       toastProgress.style.animation = "none";
+      toastProgress.style.transform = "";
+      toastProgress.style.opacity = "";
     }
   }
 
@@ -347,6 +369,8 @@ export const LoginView = (() => {
     } = getToastElements();
 
     if (!toastRoot || !toastTitle || !toastText) return;
+
+    const safeDuration = clampToastDuration(duration);
 
     clearToastTimer();
 
@@ -375,16 +399,19 @@ export const LoginView = (() => {
 
     if (toastProgress) {
       toastProgress.style.animation = "none";
-      void toastProgress.offsetWidth;
-      toastProgress.style.animation = persistent
-        ? "none"
-        : `loginToastProgress ${Math.max(1200, Number(duration) || TOAST_DEFAULT_DURATION)}ms linear forwards`;
+      toastProgress.style.transform = "";
+      toastProgress.style.opacity = "";
+
+      if (!persistent) {
+        void toastProgress.offsetWidth;
+        toastProgress.style.animation = `loginToastProgress ${safeDuration}ms linear forwards`;
+      }
     }
 
     if (!persistent) {
       toastTimerId = window.setTimeout(() => {
         hideToast();
-      }, Math.max(1200, Number(duration) || TOAST_DEFAULT_DURATION));
+      }, safeDuration);
     }
   }
 
@@ -402,7 +429,7 @@ export const LoginView = (() => {
     inputs.forEach((input) => setFieldError(input, false));
   }
 
-  function setSubmitting(controls, isSubmitting) {
+  function setSubmitting(controls, nextValue) {
     const {
       form,
       identifierInput,
@@ -413,27 +440,28 @@ export const LoginView = (() => {
       forgotLink,
     } = controls;
 
-    const submitting = Boolean(isSubmitting);
+    isSubmitting = Boolean(nextValue);
 
     if (form) {
-      form.setAttribute("aria-busy", String(submitting));
+      form.setAttribute("aria-busy", String(isSubmitting));
+      form.dataset.submitting = String(isSubmitting);
     }
 
-    if (identifierInput) identifierInput.disabled = submitting;
-    if (passwordInput) passwordInput.disabled = submitting;
-    if (rememberInput) rememberInput.disabled = submitting;
-    if (toggleBtn) toggleBtn.disabled = submitting;
+    if (identifierInput) identifierInput.disabled = isSubmitting;
+    if (passwordInput) passwordInput.disabled = isSubmitting;
+    if (rememberInput) rememberInput.disabled = isSubmitting;
+    if (toggleBtn) toggleBtn.disabled = isSubmitting;
 
     if (forgotLink) {
-      forgotLink.setAttribute("aria-disabled", String(submitting));
-      forgotLink.classList.toggle("is-disabled", submitting);
-      forgotLink.tabIndex = submitting ? -1 : 0;
+      forgotLink.setAttribute("aria-disabled", String(isSubmitting));
+      forgotLink.classList.toggle("is-disabled", isSubmitting);
+      forgotLink.tabIndex = isSubmitting ? -1 : 0;
     }
 
     if (submitBtn) {
-      submitBtn.disabled = submitting;
-      submitBtn.dataset.loading = String(submitting);
-      submitBtn.innerHTML = submitting
+      submitBtn.disabled = isSubmitting;
+      submitBtn.dataset.loading = String(isSubmitting);
+      submitBtn.innerHTML = isSubmitting
         ? `<span class="login-submit-text">Accediendo...</span>`
         : `<span class="login-submit-text">Acceder</span>`;
     }
@@ -468,7 +496,7 @@ export const LoginView = (() => {
     shakeCard(cardEl);
 
     window.setTimeout(() => {
-      passwordInput?.focus();
+      passwordInput?.focus?.();
       passwordInput?.select?.();
     }, 0);
   }
@@ -507,7 +535,7 @@ export const LoginView = (() => {
         duration: 3400,
         closable: true,
       });
-      identifierInput?.focus();
+      identifierInput?.focus?.();
       return false;
     }
 
@@ -520,7 +548,7 @@ export const LoginView = (() => {
         duration: 3400,
         closable: true,
       });
-      identifierInput?.focus();
+      identifierInput?.focus?.();
       return false;
     }
 
@@ -533,7 +561,7 @@ export const LoginView = (() => {
         duration: 3400,
         closable: true,
       });
-      passwordInput?.focus();
+      passwordInput?.focus?.();
       return false;
     }
 
@@ -546,7 +574,7 @@ export const LoginView = (() => {
         duration: 3600,
         closable: true,
       });
-      passwordInput?.focus();
+      passwordInput?.focus?.();
       return false;
     }
 
@@ -613,13 +641,6 @@ export const LoginView = (() => {
   /* =========================================================
      LOGO FADE
   ========================================================= */
-  function stopLogoAnimation() {
-    if (logoIntervalId) {
-      window.clearInterval(logoIntervalId);
-      logoIntervalId = null;
-    }
-  }
-
   function startLogoAnimation(logoImages = []) {
     stopLogoAnimation();
 
@@ -702,7 +723,7 @@ export const LoginView = (() => {
     }
   }
 
-  function handleSuccessfulLogin(result, payload) {
+  function handleSuccessfulLogin(result, payload, controls) {
     const redirectTo = resolvePostLoginPath(result, payload?.identifier || "");
     isNavigatingAway = true;
 
@@ -723,10 +744,11 @@ export const LoginView = (() => {
       closable: false,
     });
 
+    setSubmitting(controls, true);
     navigateAfterToast(redirectTo, SUCCESS_TOAST_DURATION);
   }
 
-  function handle2FARequired(result) {
+  function handle2FARequired(result, controls) {
     const redirectTo = result?.redirectTo || "/2fa";
     isNavigatingAway = true;
 
@@ -752,6 +774,7 @@ export const LoginView = (() => {
       closable: false,
     });
 
+    setSubmitting(controls, true);
     navigateAfterToast(redirectTo, TWO_FA_TOAST_DURATION);
   }
 
@@ -770,7 +793,9 @@ export const LoginView = (() => {
     }
 
     isNavigatingAway = false;
-    clearLoginScope();
+    isSubmitting = false;
+
+    destroyViewState({ preserveToast: false });
     restoreGlobalLoaderStyles();
     setAuthScreen(true);
 
@@ -1007,6 +1032,7 @@ export const LoginView = (() => {
       </section>
     `;
 
+    isRendered = true;
     forceHideGlobalLoader();
     bind();
   }
@@ -1065,16 +1091,20 @@ export const LoginView = (() => {
     startLogoAnimation(logoImages);
     focusInitialField(identifierInput);
     updateCapsVisual(capsWrap, capsIcon, capsLabel, passwordFocused, capsActive);
+    setSubmitting(controls, false);
     forceHideGlobalLoader();
 
     if (toastClose) {
       AppCore.cleanup.on(scope, toastClose, "click", () => {
+        if (isSubmitting && isNavigatingAway) return;
         hideToast();
       });
     }
 
     if (toggleBtn) {
       AppCore.cleanup.on(scope, toggleBtn, "click", () => {
+        if (isSubmitting) return;
+
         togglePasswordVisibility(
           passwordInput,
           toggleBtn,
@@ -1096,6 +1126,7 @@ export const LoginView = (() => {
       if (!event?.getModifierState) return;
 
       const nextState = event.getModifierState("CapsLock");
+
       if (nextState !== capsActive) {
         capsActive = nextState;
         updateCapsVisual(
@@ -1141,6 +1172,10 @@ export const LoginView = (() => {
     AppCore.cleanup.on(scope, form, "submit", async (event) => {
       event.preventDefault();
 
+      if (isSubmitting || isNavigatingAway) {
+        return;
+      }
+
       hideToast();
       clearFieldErrors([identifierInput, passwordInput]);
 
@@ -1179,11 +1214,11 @@ export const LoginView = (() => {
         });
 
         if (result?.requires2FA) {
-          handle2FARequired(result);
+          handle2FARequired(result, controls);
           return;
         }
 
-        handleSuccessfulLogin(result, payload);
+        handleSuccessfulLogin(result, payload, controls);
       } catch (error) {
         const message = getErrorMessage(error);
 
@@ -1202,7 +1237,7 @@ export const LoginView = (() => {
     });
 
     AppCore.cleanup.event(scope, "auth:login:error", () => {
-      isNavigatingAway = false;
+      if (isNavigatingAway) return;
       setSubmitting(controls, false);
     });
 

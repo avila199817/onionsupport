@@ -26,11 +26,12 @@ const App = (() => {
 
   let booted = false;
   let booting = false;
-  let modulesInitialized = false;
-  let uiSystemsInitialized = false;
+  let storeInitialized = false;
+  let routerBound = false;
+  let uiInitialized = false;
 
   /* =========================================================
-     HELPERS
+     HELPERS BASE
   ========================================================= */
   function getCurrentPath() {
     return AppCore.utils.normalizePath(
@@ -38,57 +39,26 @@ const App = (() => {
     );
   }
 
-  function syncUserUI() {
-    AppCore.syncUserUI();
+  function getCurrentPublicPath() {
+    return AppCore.utils.normalizePath(
+      `${window.location.pathname || "/"}${window.location.search || ""}`
+    );
   }
 
-  function clearAppScope() {
-    AppCore.cleanup.run(SCOPE);
+  function escapeHtml(value = "") {
+    return AppCore.utils.escapeHtml(String(value ?? ""));
   }
 
   function ensureScope() {
     return AppCore.cleanup.scope(SCOPE);
   }
 
-  function closeUserDropdown() {
-    const userDropdown = AppCore.dom.userDropdown;
-    const userToggle = AppCore.dom.userToggle;
-
-    if (userDropdown) {
-      userDropdown.classList.remove("open");
-      userDropdown.setAttribute("aria-hidden", "true");
-    }
-
-    if (userToggle) {
-      userToggle.setAttribute("aria-expanded", "false");
-    }
+  function clearScope() {
+    AppCore.cleanup.run(SCOPE);
   }
 
-  function openUserDropdown() {
-    const userDropdown = AppCore.dom.userDropdown;
-    const userToggle = AppCore.dom.userToggle;
-
-    if (userDropdown) {
-      userDropdown.classList.add("open");
-      userDropdown.setAttribute("aria-hidden", "false");
-    }
-
-    if (userToggle) {
-      userToggle.setAttribute("aria-expanded", "true");
-    }
-  }
-
-  function toggleUserDropdown() {
-    const userDropdown = AppCore.dom.userDropdown;
-    if (!userDropdown) return;
-
-    const isOpen = userDropdown.classList.contains("open");
-
-    if (isOpen) {
-      closeUserDropdown();
-    } else {
-      openUserDropdown();
-    }
+  function syncUserUI() {
+    AppCore.syncUserUI();
   }
 
   function closeSearchResults() {
@@ -99,23 +69,92 @@ const App = (() => {
     results.innerHTML = "";
   }
 
+  function getResolvedUsername() {
+    return (
+      Router.getCurrentResolvedUsername?.() ||
+      AppCore.getUserUsername?.() ||
+      AppCore.state.user?.username ||
+      ""
+    );
+  }
+
   function getSearchItems() {
-    const username = AppCore.getUserUsername?.() || AppCore.state.user?.username || "";
+    const username = getResolvedUsername();
 
     return [
-      { label: "Inicio", path: Router.buildPublicPath("/", { username }) },
-      { label: "Incidencias", path: Router.buildPublicPath("/incidencias", { username }) },
-      { label: "Facturas", path: Router.buildPublicPath("/facturas", { username }) },
-      { label: "Usuarios", path: Router.buildPublicPath("/usuarios", { username }) },
-      { label: "Clientes", path: Router.buildPublicPath("/clientes", { username }) },
-      { label: "Cuenta", path: Router.buildPublicPath("/cuenta", { username }) },
-      { label: "Ajustes", path: Router.buildPublicPath("/ajustes", { username }) },
-      { label: "Login", path: "/login" },
+      {
+        label: "Inicio",
+        path: Router.buildPublicPath("/", { username }),
+      },
+      {
+        label: "Incidencias",
+        path: Router.buildPublicPath("/incidencias", { username }),
+      },
+      {
+        label: "Facturas",
+        path: Router.buildPublicPath("/facturas", { username }),
+      },
+      {
+        label: "Usuarios",
+        path: Router.buildPublicPath("/usuarios", { username }),
+      },
+      {
+        label: "Clientes",
+        path: Router.buildPublicPath("/clientes", { username }),
+      },
+      {
+        label: "Cuenta",
+        path: Router.buildPublicPath("/cuenta", { username }),
+      },
+      {
+        label: "Ajustes",
+        path: Router.buildPublicPath("/ajustes", { username }),
+      },
+      {
+        label: "Login",
+        path: "/login",
+      },
     ];
   }
 
+  function setShellVisibility(visible = true) {
+    const hidden = !visible;
+
+    if (AppCore.dom.sidebar) {
+      AppCore.dom.sidebar.hidden = hidden;
+    }
+
+    if (AppCore.dom.topbar) {
+      AppCore.dom.topbar.hidden = hidden;
+    }
+
+    if (AppCore.dom.topbarViewContainer) {
+      AppCore.dom.topbarViewContainer.hidden = hidden;
+    }
+
+    if (AppCore.dom.tableheadContainer) {
+      AppCore.dom.tableheadContainer.hidden = hidden;
+    }
+
+    if (AppCore.dom.body) {
+      AppCore.dom.body.classList.toggle("route-shell-hidden", hidden);
+      AppCore.dom.body.classList.toggle("auth-screen", hidden);
+    }
+  }
+
+  function markAppBootState({ booted: isBooted = false, booting: isBooting = false } = {}) {
+    AppCore.setState({
+      booting: Boolean(isBooting),
+      ready: Boolean(isBooted),
+    });
+  }
+
+  /* =========================================================
+     ERROR SCREEN
+  ========================================================= */
   function renderBootError(error) {
-    if (!AppCore.dom.viewContainer) return;
+    const container = AppCore.dom.viewContainer;
+    if (!container) return;
 
     const message =
       error?.message ||
@@ -124,25 +163,32 @@ const App = (() => {
       "Se produjo un error al iniciar la aplicación.";
 
     AppCore.setDocumentTitle("Error de inicio");
+    AppCore.clearDynamicContainers();
+    setShellVisibility(false);
 
-    if (AppCore.dom.sidebar) {
-      AppCore.dom.sidebar.hidden = true;
-    }
-
-    if (AppCore.dom.topbar) {
-      AppCore.dom.topbar.hidden = true;
-    }
-
-    AppCore.dom.viewContainer.innerHTML = `
+    container.innerHTML = `
       <section class="content-wrapper">
         <div class="panel-block" style="padding:24px;">
-          <div style="display:grid; gap:16px;">
-            <div style="font-size:32px; line-height:1;">⚠️</div>
+          <div style="display:grid; gap:18px;">
+            <div
+              style="
+                width:56px;
+                height:56px;
+                border-radius:16px;
+                display:grid;
+                place-items:center;
+                border:1px solid rgba(255,255,255,.08);
+                background:rgba(255,255,255,.04);
+                font-size:28px;
+              "
+            >
+              ⚠️
+            </div>
 
-            <div>
-              <h2 style="margin:0 0 8px 0;">Error al iniciar la aplicación</h2>
+            <div style="display:grid; gap:8px;">
+              <h2 style="margin:0;">Error al iniciar la aplicación</h2>
               <p style="margin:0; color:var(--text-dim);">
-                ${AppCore.utils.escapeHtml(message)}
+                ${escapeHtml(message)}
               </p>
             </div>
 
@@ -182,7 +228,10 @@ const App = (() => {
         try {
           Auth.clearSessionLocal();
         } catch (sessionError) {
-          AppCore.utils.warn("No se pudo limpiar la sesión desde boot error.", sessionError);
+          AppCore.utils.warn(
+            "No se pudo limpiar la sesión desde la pantalla de error.",
+            sessionError
+          );
         } finally {
           window.location.href = "/login";
         }
@@ -191,93 +240,21 @@ const App = (() => {
   }
 
   /* =========================================================
-     UI GLOBAL
+     SEARCH UI
   ========================================================= */
-  function bindSidebarToggle(scope) {
-    const toggle = AppCore.dom.sidebarToggle || document.getElementById("toggleSidebar");
-    if (!toggle) return;
-
-    AppCore.cleanup.on(scope, toggle, "click", () => {
-      AppCore.setSidebarOpen(!AppCore.state.sidebarOpen);
-    });
-  }
-
-  function bindUserDropdown(scope) {
-    const userToggle = AppCore.dom.userToggle || document.getElementById("userToggle");
-    const userDropdown = AppCore.dom.userDropdown || document.getElementById("userDropdown");
-
-    if (!userToggle || !userDropdown) return;
-
-    userToggle.setAttribute("aria-haspopup", "menu");
-    userToggle.setAttribute("aria-expanded", "false");
-    userDropdown.setAttribute("aria-hidden", "true");
-
-    AppCore.cleanup.on(scope, userToggle, "click", (event) => {
-      event.stopPropagation();
-      toggleUserDropdown();
-    });
-
-    AppCore.cleanup.on(scope, userToggle, "keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        toggleUserDropdown();
-      }
-
-      if (event.key === "Escape") {
-        closeUserDropdown();
-      }
-    });
-
-    AppCore.cleanup.on(scope, document, "click", (event) => {
-      const withinDropdown = userDropdown.contains(event.target);
-      const withinToggle = userToggle.contains(event.target);
-
-      if (!withinDropdown && !withinToggle) {
-        closeUserDropdown();
-      }
-    });
-
-    AppCore.cleanup.on(scope, document, "keydown", (event) => {
-      if (event.key === "Escape") {
-        closeUserDropdown();
-      }
-    });
-  }
-
-  function bindLogoutButton(scope) {
-    const logoutBtn = AppCore.dom.logoutBtn || document.getElementById("logoutBtn");
-    if (!logoutBtn) return;
-
-    AppCore.cleanup.on(scope, logoutBtn, "click", async () => {
-      try {
-        await Auth.logout({
-          silent: true,
-          notifyServer: true,
-        });
-      } catch (error) {
-        AppCore.utils.warn("Logout con error controlado", error);
-      } finally {
-        closeUserDropdown();
-        syncUserUI();
-
-        Router.navigate("/login", {
-          replaceState: true,
-          force: true,
-        });
-      }
-    });
-  }
-
   function bindSearchUI(scope) {
     const input = AppCore.dom.searchInput;
     const results = AppCore.dom.searchResults;
 
     if (!input || !results) return;
 
-    function paintResults(matches) {
+    function paintResults(matches = []) {
       if (!matches.length) {
         results.innerHTML = `
-          <div class="search-empty text-dim" style="padding:12px 14px;">
+          <div
+            class="search-empty text-dim"
+            style="padding:12px 14px;"
+          >
             Sin resultados
           </div>
         `;
@@ -291,9 +268,9 @@ const App = (() => {
             <button
               type="button"
               class="search-result-item dropdown-item"
-              data-path="${AppCore.utils.escapeHtml(item.path)}"
+              data-path="${escapeHtml(item.path)}"
             >
-              ${AppCore.utils.escapeHtml(item.label)}
+              ${escapeHtml(item.label)}
             </button>
           `
         )
@@ -314,8 +291,8 @@ const App = (() => {
 
       const matches = items.filter((item) => {
         return (
-          item.label.toLowerCase().includes(term) ||
-          item.path.toLowerCase().includes(term)
+          String(item.label || "").toLowerCase().includes(term) ||
+          String(item.path || "").toLowerCase().includes(term)
         );
       });
 
@@ -324,11 +301,24 @@ const App = (() => {
 
     AppCore.cleanup.on(scope, input, "input", runSearch);
 
-    AppCore.cleanup.on(scope, results, "click", (event) => {
-      const btn = event.target.closest("[data-path]");
-      if (!btn) return;
+    AppCore.cleanup.on(scope, input, "focus", () => {
+      const term = String(input.value || "").trim();
+      if (term) {
+        runSearch();
+      }
+    });
 
-      const path = btn.getAttribute("data-path");
+    AppCore.cleanup.on(scope, input, "keydown", (event) => {
+      if (event.key === "Escape") {
+        closeSearchResults();
+      }
+    });
+
+    AppCore.cleanup.on(scope, results, "click", (event) => {
+      const button = event.target.closest("[data-path]");
+      if (!button) return;
+
+      const path = button.getAttribute("data-path");
       if (!path) return;
 
       input.value = "";
@@ -345,68 +335,78 @@ const App = (() => {
         closeSearchResults();
       }
     });
-
-    AppCore.cleanup.on(scope, input, "keydown", (event) => {
-      if (event.key === "Escape") {
-        closeSearchResults();
-      }
-    });
-  }
-
-  function bindGlobalUI(scope) {
-    bindSidebarToggle(scope);
-    bindUserDropdown(scope);
-    bindLogoutButton(scope);
-    bindSearchUI(scope);
   }
 
   /* =========================================================
-     ERRORES GLOBALES
+     GLOBAL ERROR HANDLERS
   ========================================================= */
   function bindGlobalErrorHandlers(scope) {
     AppCore.cleanup.on(scope, window, "error", (event) => {
-      AppCore.setError(event.error || event.message || "Error global no controlado");
-      AppCore.utils.error("window.error", event.error || event.message);
+      const error = event?.error || {
+        message: event?.message || "Error global no controlado",
+      };
+
+      AppCore.setError(error);
+      AppCore.utils.error("window.error", error);
     });
 
     AppCore.cleanup.on(scope, window, "unhandledrejection", (event) => {
-      AppCore.setError(event.reason || "Promise rechazada sin control");
-      AppCore.utils.error("unhandledrejection", event.reason);
+      const reason = event?.reason || {
+        message: "Promise rechazada sin control",
+      };
+
+      AppCore.setError(reason);
+      AppCore.utils.error("unhandledrejection", reason);
     });
   }
 
   /* =========================================================
-     EVENTOS APP
+     GLOBAL APP EVENTS
   ========================================================= */
   function bindAppEvents(scope) {
     AppCore.cleanup.event(scope, "app:user:change", () => {
       syncUserUI();
     });
 
+    AppCore.cleanup.event(scope, "app:user-ui:sync", () => {
+      AppCore.utils.log("UI de usuario sincronizada.");
+    });
+
     AppCore.cleanup.event(scope, "app:session:cleared", () => {
       syncUserUI();
-      closeUserDropdown();
       closeSearchResults();
     });
 
-    AppCore.cleanup.event(scope, "app:theme:change", () => {
-      AppCore.utils.log("Tema cambiado a:", AppCore.state.theme);
+    AppCore.cleanup.event(scope, "app:theme:change", ({ detail }) => {
+      AppCore.utils.log("Tema cambiado:", detail?.theme || AppCore.state.theme);
+    });
+
+    AppCore.cleanup.event(scope, "app:lang:change", ({ detail }) => {
+      AppCore.utils.log("Idioma cambiado:", detail?.lang || AppCore.state.lang);
     });
 
     AppCore.cleanup.event(scope, "auth:login:success", () => {
       syncUserUI();
-      closeUserDropdown();
+      closeSearchResults();
 
       Router.goAfterLogin("/");
     });
 
+    AppCore.cleanup.event(scope, "auth:logout:success", () => {
+      closeSearchResults();
+    });
+
     AppCore.cleanup.event(scope, "router:rendered", ({ detail }) => {
-      AppCore.setPublicPath(window.location.pathname + window.location.search);
+      const publicPath = getCurrentPublicPath();
+
+      AppCore.setPublicPath(publicPath);
 
       AppCore.utils.log("Ruta renderizada:", {
-        publicPath: window.location.pathname + window.location.search,
+        publicPath,
         canonicalPath: detail?.canonicalPath || detail?.path || null,
         username: detail?.username || null,
+        found: Boolean(detail?.found),
+        forbidden: Boolean(detail?.forbidden),
       });
     });
   }
@@ -428,37 +428,28 @@ const App = (() => {
       AppCore.utils.log("Username detectado:", AppCore.state.user.username);
     }
 
-    AppCore.utils.log("Estado auth:", {
+    AppCore.utils.log("Estado app:", {
       authenticated: AppCore.state.authenticated,
       role: AppCore.state.role,
       route: AppCore.state.route,
       publicPath: AppCore.state.publicPath,
+      theme: AppCore.state.theme,
+      lang: AppCore.state.lang,
     });
   }
 
   /* =========================================================
-     BOOT STEPS
+     INIT STEPS
   ========================================================= */
   async function initCore() {
     await AppCore.init();
   }
 
-  function initStoreAndModules() {
-    if (!modulesInitialized) {
-      if (typeof Store?.init === "function") {
-        Store.init();
-      }
+  function initStore() {
+    if (storeInitialized) return;
 
-      AppCore.modules.register("store", Store);
-      AppCore.modules.register("auth", Auth);
-      AppCore.modules.register("router", Router);
-
-      if (SidebarUI) {
-        AppCore.modules.register("sidebarUI", SidebarUI);
-      }
-
-      modulesInitialized = true;
-      return;
+    if (typeof Store?.init === "function") {
+      Store.init();
     }
 
     if (!AppCore.modules.has("store")) {
@@ -473,19 +464,19 @@ const App = (() => {
       AppCore.modules.register("router", Router);
     }
 
-    if (SidebarUI && !AppCore.modules.has("sidebarUI")) {
-      AppCore.modules.register("sidebarUI", SidebarUI);
-    }
+    storeInitialized = true;
   }
 
   function initUISystems() {
-    if (uiSystemsInitialized) return;
+    if (uiInitialized) return;
 
     if (SidebarUI && typeof SidebarUI.init === "function") {
       SidebarUI.init();
+    } else if (SidebarUI && !AppCore.modules.has("sidebarUI")) {
+      AppCore.modules.register("sidebarUI", SidebarUI);
     }
 
-    uiSystemsInitialized = true;
+    uiInitialized = true;
   }
 
   async function restoreAuthSession() {
@@ -503,25 +494,39 @@ const App = (() => {
     AppCore.utils.log("Resultado restoreSession():", {
       ok: Boolean(result?.ok),
       authenticated: AppCore.state.authenticated,
-      user: AppCore.state.user?.username || AppCore.state.user?.email || null,
+      user:
+        AppCore.state.user?.username ||
+        AppCore.state.user?.email ||
+        null,
     });
 
     return result;
   }
 
-  function initRouter() {
-    Router.bind();
+  function bindRouter() {
+    if (routerBound) return;
 
-    Router.render(getCurrentPath(), {
+    Router.bind();
+    routerBound = true;
+  }
+
+  function renderInitialRoute() {
+    const currentPath = getCurrentPath();
+
+    Router.render(currentPath, {
       skipHistory: true,
       replaceState: true,
       force: true,
     });
 
-    AppCore.setPublicPath(window.location.pathname + window.location.search);
+    AppCore.setPublicPath(getCurrentPublicPath());
   }
 
   function finalizeBoot() {
+    if (Store?.actions?.markReady) {
+      Store.actions.markReady(true);
+    }
+
     if (Store?.actions?.markBooted) {
       Store.actions.markBooted(true);
     }
@@ -547,18 +552,19 @@ const App = (() => {
   async function boot() {
     if (booted) {
       AppCore.utils.warn("App ya arrancada.");
-      return;
+      return api;
     }
 
     if (booting) {
       AppCore.utils.warn("App ya está arrancando.");
-      return;
+      return api;
     }
 
     booting = true;
+    markAppBootState({ booted: false, booting: true });
 
     try {
-      clearAppScope();
+      clearScope();
 
       await initCore();
 
@@ -569,24 +575,31 @@ const App = (() => {
 
       bindGlobalErrorHandlers(scope);
       bindAppEvents(scope);
-      bindGlobalUI(scope);
+      bindSearchUI(scope);
 
-      initStoreAndModules();
+      initStore();
       initUISystems();
 
       await restoreAuthSession();
       await warmup();
 
-      initRouter();
+      bindRouter();
+      renderInitialRoute();
       finalizeBoot();
 
       booted = true;
+      markAppBootState({ booted: true, booting: false });
+
+      return api;
     } catch (error) {
       booted = false;
+      markAppBootState({ booted: false, booting: false });
       AppCore.setError(error);
       AppCore.utils.error("💥 Fallo en boot()", error);
 
       renderBootError(error);
+
+      return api;
     } finally {
       booting = false;
       AppCore.setLoading(false);
@@ -602,22 +615,32 @@ const App = (() => {
     booted = false;
     booting = false;
 
-    clearAppScope();
+    clearScope();
 
     if (!preserveError) {
       AppCore.setError(null);
     }
 
-    await boot();
+    if (Store?.actions?.markBooted) {
+      Store.actions.markBooted(false);
+    }
+
+    if (Store?.actions?.markReady) {
+      Store.actions.markReady(false);
+    }
+
+    return boot();
   }
 
   /* =========================================================
-     EXPORT
+     API PÚBLICA
   ========================================================= */
-  return {
+  const api = {
     boot,
     reboot,
   };
+
+  return api;
 })();
 
 /* =========================================================

@@ -32,6 +32,7 @@ export const SidebarUI = (() => {
   ========================================================= */
   function getElements() {
     return {
+      body: AppCore.dom.body || document.body,
       sidebar: AppCore.dom.sidebar || document.querySelector(".sidebar"),
       toggleBtn:
         AppCore.dom.sidebarToggle || document.getElementById("toggleSidebar"),
@@ -51,6 +52,13 @@ export const SidebarUI = (() => {
   function hasSidebarShell() {
     const { sidebar } = getElements();
     return Boolean(sidebar);
+  }
+
+  function isShellHidden() {
+    return Boolean(
+      AppCore.dom.body?.classList.contains("route-shell-hidden") ||
+        document.body?.classList.contains("route-shell-hidden")
+    );
   }
 
   /* =========================================================
@@ -157,6 +165,7 @@ export const SidebarUI = (() => {
   }
 
   function openDropdown() {
+    if (isShellHidden()) return;
     setDropdownOpen(true);
   }
 
@@ -165,6 +174,11 @@ export const SidebarUI = (() => {
   }
 
   function toggleDropdown() {
+    if (isShellHidden()) {
+      closeDropdown();
+      return;
+    }
+
     setDropdownOpen(!state.dropdownOpen);
   }
 
@@ -201,7 +215,10 @@ export const SidebarUI = (() => {
     }
 
     if (userToggle) {
-      userToggle.setAttribute("aria-label", `Abrir menú de usuario de ${displayName}`);
+      userToggle.setAttribute(
+        "aria-label",
+        `Abrir menú de usuario de ${displayName}`
+      );
       userToggle.setAttribute("title", displayName);
     }
 
@@ -233,8 +250,24 @@ export const SidebarUI = (() => {
      SIDEBAR STATE
   ========================================================= */
   function syncSidebarState() {
-    const { sidebar, toggleBtn } = getElements();
+    const { sidebar, toggleBtn, body } = getElements();
     if (!sidebar) return;
+
+    const shellHidden = isShellHidden();
+
+    if (shellHidden) {
+      sidebar.hidden = true;
+      closeDropdown();
+
+      if (toggleBtn) {
+        toggleBtn.setAttribute("aria-expanded", "false");
+        toggleBtn.classList.remove("is-active");
+      }
+
+      return;
+    }
+
+    sidebar.hidden = false;
 
     const isOpen = Boolean(AppCore.state.sidebarOpen);
     const mobile = isMobileViewport();
@@ -251,12 +284,9 @@ export const SidebarUI = (() => {
       sidebar.classList.toggle("is-open", isOpen);
     }
 
-    if (AppCore.dom.body) {
-      AppCore.dom.body.classList.toggle(
-        "sidebar-collapsed",
-        !isOpen && !mobile
-      );
-      AppCore.dom.body.classList.toggle("sidebar-open", isOpen && mobile);
+    if (body) {
+      body.classList.toggle("sidebar-collapsed", !isOpen && !mobile);
+      body.classList.toggle("sidebar-open", isOpen && mobile);
     }
 
     if (toggleBtn) {
@@ -287,6 +317,7 @@ export const SidebarUI = (() => {
   }
 
   function toggleSidebar() {
+    if (isShellHidden()) return;
     AppCore.setSidebarOpen(!AppCore.state.sidebarOpen);
     closeDropdown();
   }
@@ -419,6 +450,7 @@ export const SidebarUI = (() => {
 
     AppCore.cleanup.event(scope, "router:rendered", () => {
       closeDropdown();
+      syncSidebarState();
       closeSidebarOnMobileAfterNavigation();
     });
 
@@ -426,6 +458,8 @@ export const SidebarUI = (() => {
       if (detail?.hidden) {
         closeDropdown();
       }
+
+      syncSidebarState();
     });
 
     AppCore.cleanup.event(scope, "app:user-ui:sync", () => {
@@ -464,9 +498,7 @@ export const SidebarUI = (() => {
     }
 
     if (!hasSidebarShell()) {
-      AppCore.utils.warn(
-        "No se encontró .sidebar para inicializar SidebarUI."
-      );
+      AppCore.utils.warn("No se encontró .sidebar para inicializar SidebarUI.");
       return api;
     }
 

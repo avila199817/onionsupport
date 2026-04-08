@@ -12,6 +12,8 @@
    - integración con vistas externas
    - control de shell por ruta
    - soporte slug público /@username
+   - redirección automática a login sin sesión
+   - redirección fuera de /login si ya hay sesión
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
@@ -25,6 +27,11 @@ export const Router = (() => {
 
   let isBound = false;
 
+  const ROUTE_NAMES = {
+    HOME: "/",
+    LOGIN: AppCore.config?.routes?.login || "/login",
+  };
+
   /* =========================================================
      TABLA DE RUTAS
      path = ruta canónica interna
@@ -34,7 +41,7 @@ export const Router = (() => {
       path: "/",
       name: "home",
       title: "Onion Support",
-      public: true,
+      public: false,
       roles: [],
       hideShell: false,
       render: renderHomeView,
@@ -103,11 +110,6 @@ export const Router = (() => {
       render: renderLoginView,
     },
   ];
-
-  const ROUTE_NAMES = {
-    HOME: "/",
-    LOGIN: AppCore.config?.routes?.login || "/login",
-  };
 
   /* =========================================================
      HELPERS BASE
@@ -293,7 +295,13 @@ export const Router = (() => {
     if (!redirect) return null;
 
     const resolved = resolveSpaHref(redirect);
-    return normalizeCanonicalPath(resolved);
+    const canonical = normalizeCanonicalPath(resolved);
+
+    if (!canonical || canonical === ROUTE_NAMES.LOGIN) {
+      return null;
+    }
+
+    return canonical;
   }
 
   function buildLoginUrl(redirectPath = null) {
@@ -390,9 +398,18 @@ export const Router = (() => {
       AppCore.dom.topbar.hidden = hideShell;
     }
 
+    if (AppCore.dom.topbarViewContainer) {
+      AppCore.dom.topbarViewContainer.hidden = hideShell;
+    }
+
+    if (AppCore.dom.tableheadContainer) {
+      AppCore.dom.tableheadContainer.hidden = hideShell;
+    }
+
     if (AppCore.dom.body) {
       AppCore.dom.body.classList.toggle("route-auth", hideShell);
       AppCore.dom.body.classList.toggle("route-shell-hidden", hideShell);
+      AppCore.dom.body.classList.toggle("auth-screen", hideShell);
     }
 
     AppCore.events.emit("router:shell:change", {
@@ -401,11 +418,28 @@ export const Router = (() => {
     });
   }
 
-  function shouldAllowRoute(route) {
+  /* =========================================================
+     GUARDS / ACCESS
+  ========================================================= */
+  function shouldAllowRoute(route, requestedCanonicalPath = "/") {
     if (!route) {
       return {
         allowed: false,
         reason: "not-found",
+        redirectTo: null,
+      };
+    }
+
+    if (route.path === ROUTE_NAMES.LOGIN && Auth.isAuthenticated()) {
+      return {
+        allowed: false,
+        reason: "already-authenticated",
+        redirectTo:
+          getRedirectPath() ||
+          buildPublicPath(ROUTE_NAMES.HOME, {
+            username: getCurrentResolvedUsername() || getCurrentUsername(),
+          }) ||
+          ROUTE_NAMES.HOME,
       };
     }
 
@@ -413,6 +447,7 @@ export const Router = (() => {
       return {
         allowed: true,
         reason: null,
+        redirectTo: null,
       };
     }
 
@@ -420,7 +455,7 @@ export const Router = (() => {
       return {
         allowed: false,
         reason: "not-authenticated",
-        redirectTo: ROUTE_NAMES.LOGIN,
+        redirectTo: buildLoginUrl(requestedCanonicalPath),
       };
     }
 
@@ -428,13 +463,16 @@ export const Router = (() => {
       return {
         allowed: false,
         reason: "insufficient-role",
-        redirectTo: ROUTE_NAMES.HOME,
+        redirectTo: buildPublicPath(ROUTE_NAMES.HOME, {
+          username: getCurrentResolvedUsername() || getCurrentUsername(),
+        }) || ROUTE_NAMES.HOME,
       };
     }
 
     return {
       allowed: true,
       reason: null,
+      redirectTo: null,
     };
   }
 
@@ -479,7 +517,7 @@ export const Router = (() => {
     if (!view) return;
 
     const canonicalPath = AppCore.state.route || "/";
-    const publicPath = window.location.pathname || "/";
+    const publicPath = window.location.pathname + window.location.search;
     const resolvedUsername = getCurrentResolvedUsername();
 
     view.innerHTML = `
@@ -518,8 +556,8 @@ export const Router = (() => {
     const view = getViewContainer();
     if (!view) return;
 
-    const homeHref = buildPublicPath("/", {
-      username: getCurrentResolvedUsername(),
+    const homeHref = buildPublicPath(ROUTE_NAMES.HOME, {
+      username: getCurrentResolvedUsername() || getCurrentUsername(),
     });
 
     view.innerHTML = `
@@ -547,10 +585,11 @@ export const Router = (() => {
     const view = getViewContainer();
     if (!view) return;
 
-    const homeHref = buildPublicPath("/", {
+    const homeHref = buildPublicPath(ROUTE_NAMES.HOME, {
       username:
         extractUsernameFromPath(requestedPath) ||
-        getCurrentResolvedUsername(),
+        getCurrentResolvedUsername() ||
+        getCurrentUsername(),
     });
 
     view.innerHTML = `
@@ -580,23 +619,45 @@ export const Router = (() => {
   function syncRouteState(canonicalPath = "/", publicPath = null) {
     const finalCanonical = normalizeCanonicalPath(canonicalPath);
     const finalPublicPath = normalizePath(
-      publicPath || window.location.pathname || finalCanonical
+      publicPath || window.location.pathname + window.location.search || finalCanonical
     );
 
     AppCore.setRoute(finalCanonical);
     AppCore.setPublicPath(finalPublicPath);
   }
 
+  function emitBeforeRender(payload = {}) {
+    AppCore.events.emit("router:before-render", {
+      path: payload.path || null,
+      canonicalPath: payload.canonicalPath || null,
+      publicPath: payload.publicPath || null,
+      username: payload.username || null,
+      route: payload.route || null,
+    });
+  }
+
   function emitRendered(payload = {}) {
     AppCore.events.emit("router:rendered", {
       path: payload.path || null,
       canonicalPath: payload.canonicalPath || null,
-      publicPath: payload.publicPath || window.location.pathname || null,
+      publicPath: payload.publicPath || window.location.pathname + window.location.search || null,
       username: payload.username || null,
       found: Boolean(payload.found),
       forbidden: Boolean(payload.forbidden),
       redirectedFrom: payload.redirectedFrom || null,
       route: payload.route || null,
+    });
+  }
+
+  /* =========================================================
+     HELPERS DE REDIRECCIÓN
+  ========================================================= */
+  function performRedirect(targetPath, meta = {}, navOptions = {}) {
+    navigate(targetPath, {
+      replaceState: true,
+      force: true,
+      redirectedFrom: meta.redirectedFrom || null,
+      ...navOptions,
     });
   }
 
@@ -608,7 +669,14 @@ export const Router = (() => {
     const canonicalPath = normalizeCanonicalPath(requestedPath);
     const requestedUsername = extractUsernameFromPath(requestedPath);
     const route = getRoute(canonicalPath);
-    const access = shouldAllowRoute(route);
+
+    emitBeforeRender({
+      path: requestedPath,
+      canonicalPath,
+      publicPath: requestedPath,
+      username: requestedUsername || getCurrentResolvedUsername() || null,
+      route,
+    });
 
     clearDynamicContainers();
     setActiveMenu(canonicalPath);
@@ -627,7 +695,7 @@ export const Router = (() => {
       emitRendered({
         path: requestedPath,
         canonicalPath,
-        publicPath: window.location.pathname || requestedPath,
+        publicPath: window.location.pathname + window.location.search || requestedPath,
         username: requestedUsername || getCurrentResolvedUsername(),
         found: false,
         route: null,
@@ -636,16 +704,17 @@ export const Router = (() => {
       return;
     }
 
+    const access = shouldAllowRoute(route, canonicalPath);
+
     if (!access.allowed) {
       if (access.reason === "not-authenticated") {
-        const loginRoute = getRoute(access.redirectTo || ROUTE_NAMES.LOGIN);
-        const redirectTarget = canonicalPath;
-        const loginUrl = buildLoginUrl(redirectTarget);
+        const loginRoute = getRoute(ROUTE_NAMES.LOGIN);
+        const loginUrl = access.redirectTo || buildLoginUrl(canonicalPath);
 
         updateHistory(loginUrl, {
           replaceState: true,
           preservePath: true,
-          redirectedFrom: redirectTarget,
+          redirectedFrom: canonicalPath,
         });
 
         syncRouteState(ROUTE_NAMES.LOGIN, window.location.pathname + window.location.search);
@@ -662,9 +731,16 @@ export const Router = (() => {
           username: null,
           found: true,
           route: loginRoute,
-          redirectedFrom: redirectTarget,
+          redirectedFrom: canonicalPath,
         });
 
+        return;
+      }
+
+      if (access.reason === "already-authenticated") {
+        performRedirect(access.redirectTo || ROUTE_NAMES.HOME, {
+          redirectedFrom: canonicalPath,
+        });
         return;
       }
 
@@ -674,7 +750,7 @@ export const Router = (() => {
           username: requestedUsername || getCurrentUsername(),
         });
 
-        syncRouteState(canonicalPath, window.location.pathname || canonicalPath);
+        syncRouteState(canonicalPath, window.location.pathname + window.location.search || canonicalPath);
         setShellMode(route);
         setDocumentTitle("Acceso denegado");
         renderForbiddenView(route);
@@ -682,7 +758,7 @@ export const Router = (() => {
         emitRendered({
           path: requestedPath,
           canonicalPath,
-          publicPath: window.location.pathname || requestedPath,
+          publicPath: window.location.pathname + window.location.search || requestedPath,
           username: requestedUsername || getCurrentResolvedUsername(),
           found: true,
           forbidden: true,
@@ -693,30 +769,12 @@ export const Router = (() => {
       }
     }
 
-    if (
-      route.path === ROUTE_NAMES.LOGIN &&
-      Auth.isAuthenticated() &&
-      !options.allowWhenAuthenticated
-    ) {
-      const redirectPath = getRedirectPath();
-      const fallbackPath = buildPublicPath("/", {
-        username: getCurrentResolvedUsername() || getCurrentUsername(),
-      });
-
-      navigate(redirectPath || fallbackPath, {
-        replaceState: true,
-        force: true,
-      });
-
-      return;
-    }
-
     updateHistory(canonicalPath, {
       ...options,
       username: requestedUsername || getCurrentUsername(),
     });
 
-    syncRouteState(canonicalPath, window.location.pathname || canonicalPath);
+    syncRouteState(canonicalPath, window.location.pathname + window.location.search || canonicalPath);
     setShellMode(route);
     setDocumentTitle(route.title || AppCore.config.appName);
     route.render(route);
@@ -724,7 +782,7 @@ export const Router = (() => {
     emitRendered({
       path: requestedPath,
       canonicalPath,
-      publicPath: window.location.pathname || requestedPath,
+      publicPath: window.location.pathname + window.location.search || requestedPath,
       username: requestedUsername || getCurrentResolvedUsername() || null,
       found: true,
       route,
@@ -760,9 +818,12 @@ export const Router = (() => {
 
   function goAfterLogin(fallback = "/") {
     const redirectPath = getRedirectPath();
-    const nextPath = redirectPath || normalizeCanonicalPath(fallback);
+    const nextCanonicalPath = normalizeCanonicalPath(redirectPath || fallback);
+    const nextPublicPath = buildPublicPath(nextCanonicalPath, {
+      username: getCurrentResolvedUsername() || getCurrentUsername(),
+    });
 
-    navigate(nextPath, {
+    navigate(nextPublicPath || nextCanonicalPath, {
       replaceState: true,
       force: true,
     });
@@ -842,5 +903,6 @@ export const Router = (() => {
     stripUsernamePrefix,
     extractUsernameFromPath,
     resolveSpaHref,
+    isSlugCandidatePath,
   };
 })();

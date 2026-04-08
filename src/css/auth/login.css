@@ -318,6 +318,10 @@ body.auth-screen.login-no-scroll #view-container{
   opacity:.16;
 }
 
+.login-toast.is-info .login-toast-progress{
+  display:none !important;
+}
+
 @keyframes loginToastPulseDot{
   0%,100%{
     opacity:.42;

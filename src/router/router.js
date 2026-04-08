@@ -131,7 +131,25 @@ export const Router = (() => {
   }
 
   function getViewContainer() {
-    return AppCore.dom.viewContainer;
+    return (
+      AppCore.dom.viewContainer ||
+      document.getElementById("view-container") ||
+      document.querySelector("#view-container")
+    );
+  }
+
+  function getShellElements() {
+    return {
+      sidebar: AppCore.dom.sidebar || document.querySelector(".sidebar"),
+      topbar: AppCore.dom.topbar || document.querySelector(".topbar"),
+      topbarViewContainer:
+        AppCore.dom.topbarViewContainer ||
+        document.getElementById("topbarview-container"),
+      tableheadContainer:
+        AppCore.dom.tableheadContainer ||
+        document.getElementById("tablehead-container"),
+      body: AppCore.dom.body || document.body,
+    };
   }
 
   function getCurrentUrl() {
@@ -415,27 +433,34 @@ export const Router = (() => {
 
   function setShellMode(route = null) {
     const hideShell = Boolean(route?.hideShell);
+    const {
+      sidebar,
+      topbar,
+      topbarViewContainer,
+      tableheadContainer,
+      body,
+    } = getShellElements();
 
-    if (AppCore.dom.sidebar) {
-      AppCore.dom.sidebar.hidden = hideShell;
+    if (sidebar) {
+      sidebar.hidden = hideShell;
     }
 
-    if (AppCore.dom.topbar) {
-      AppCore.dom.topbar.hidden = hideShell;
+    if (topbar) {
+      topbar.hidden = hideShell;
     }
 
-    if (AppCore.dom.topbarViewContainer) {
-      AppCore.dom.topbarViewContainer.hidden = hideShell;
+    if (topbarViewContainer) {
+      topbarViewContainer.hidden = hideShell;
     }
 
-    if (AppCore.dom.tableheadContainer) {
-      AppCore.dom.tableheadContainer.hidden = hideShell;
+    if (tableheadContainer) {
+      tableheadContainer.hidden = hideShell;
     }
 
-    if (AppCore.dom.body) {
-      AppCore.dom.body.classList.toggle("route-auth", hideShell);
-      AppCore.dom.body.classList.toggle("route-shell-hidden", hideShell);
-      AppCore.dom.body.classList.toggle("auth-screen", hideShell);
+    if (body) {
+      body.classList.toggle("route-auth", hideShell);
+      body.classList.toggle("route-shell-hidden", hideShell);
+      body.classList.toggle("auth-screen", hideShell);
     }
 
     AppCore.events.emit("router:shell:change", {
@@ -533,7 +558,12 @@ export const Router = (() => {
 
   function renderGenericView(route) {
     const view = getViewContainer();
-    if (!view) return;
+    if (!view) {
+      AppCore.utils.warn(
+        "Router: no se encontró #view-container para renderGenericView."
+      );
+      return;
+    }
 
     const canonicalPath = AppCore.state.route || "/";
     const publicPath =
@@ -574,7 +604,12 @@ export const Router = (() => {
 
   function renderForbiddenView(route = null) {
     const view = getViewContainer();
-    if (!view) return;
+    if (!view) {
+      AppCore.utils.warn(
+        "Router: no se encontró #view-container para renderForbiddenView."
+      );
+      return;
+    }
 
     const homeHref = getDefaultHomeTarget();
 
@@ -601,7 +636,12 @@ export const Router = (() => {
 
   function renderNotFoundView(requestedPath = "/") {
     const view = getViewContainer();
-    if (!view) return;
+    if (!view) {
+      AppCore.utils.warn(
+        "Router: no se encontró #view-container para renderNotFoundView."
+      );
+      return;
+    }
 
     const homeHref = buildPublicPath(ROUTE_NAMES.HOME, {
       username:
@@ -837,7 +877,9 @@ export const Router = (() => {
   function navigate(pathname = "/", options = {}) {
     const requestedPath = resolveSpaHref(pathname);
     const canonicalPath = normalizeCanonicalPath(requestedPath);
-    const currentCanonicalPath = normalizeCanonicalPath(AppCore.state.route || "/");
+    const currentCanonicalPath = normalizeCanonicalPath(
+      AppCore.state.route || "/"
+    );
 
     if (canonicalPath === currentCanonicalPath && !options.force) {
       render(requestedPath, {
@@ -956,6 +998,7 @@ export const Router = (() => {
     extractUsernameFromPath,
     resolveSpaHref,
     isSlugCandidatePath,
+    isSameCanonicalPath,
   };
 
   return api;

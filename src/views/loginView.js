@@ -19,6 +19,10 @@
    - forzar apagado del loader al renderizar login
    - usar rutas absolutas coherentes con el shell SPA
    - evitar reactivar el form tras login correcto
+   - quitar botón superior de volver
+   - añadir laterales interactivos izquierda / derecha
+   - desplazar el card hacia la derecha
+   - mantener layout estable sin generar scroll
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
@@ -32,10 +36,14 @@ export const LoginView = (() => {
   const LOGO_ROTATE_INTERVAL = 3000;
   const LOGO_FADE_DURATION = 1800;
   const SUCCESS_REDIRECT_DELAY = 220;
+  const PARALLAX_MAX_X = 14;
+  const PARALLAX_MAX_Y = 10;
 
   let logoIntervalId = null;
   let redirectTimerId = null;
   let isNavigatingAway = false;
+  let parallaxFrameId = null;
+  let lastParallaxTarget = null;
 
   /* =========================================================
      HELPERS BASE
@@ -87,6 +95,13 @@ export const LoginView = (() => {
     }
   }
 
+  function clearParallaxFrame() {
+    if (parallaxFrameId) {
+      window.cancelAnimationFrame(parallaxFrameId);
+      parallaxFrameId = null;
+    }
+  }
+
   function getCurrentRedirectPath() {
     try {
       const url = new URL(window.location.href);
@@ -121,7 +136,10 @@ export const LoginView = (() => {
   function getShellElements() {
     return {
       sidebar: AppCore.dom.sidebar || document.getElementById("sidebar"),
-      topbar: AppCore.dom.topbar || document.getElementById("topbar") || document.querySelector(".topbar"),
+      topbar:
+        AppCore.dom.topbar ||
+        document.getElementById("topbar") ||
+        document.querySelector(".topbar"),
       topbarViewContainer:
         AppCore.dom.topbarViewContainer ||
         document.getElementById("topbarview-container"),
@@ -132,8 +150,7 @@ export const LoginView = (() => {
   }
 
   function forceHideGlobalLoader() {
-    const loader =
-      AppCore.dom.loader || document.getElementById("app-loader");
+    const loader = AppCore.dom.loader || document.getElementById("app-loader");
 
     if (typeof AppCore.setLoading === "function") {
       AppCore.setLoading(false);
@@ -154,8 +171,7 @@ export const LoginView = (() => {
   }
 
   function restoreGlobalLoaderStyles() {
-    const loader =
-      AppCore.dom.loader || document.getElementById("app-loader");
+    const loader = AppCore.dom.loader || document.getElementById("app-loader");
 
     if (!loader) return;
 
@@ -181,6 +197,15 @@ export const LoginView = (() => {
     document.body.classList.toggle("auth-screen", enabled);
     document.body.classList.toggle("route-auth", enabled);
     document.body.classList.toggle("route-shell-hidden", enabled);
+    document.body.classList.toggle("login-no-scroll", enabled);
+
+    if (enabled) {
+      document.documentElement.style.overflow = "hidden";
+      document.body.style.overflow = "hidden";
+    } else {
+      document.documentElement.style.overflow = "";
+      document.body.style.overflow = "";
+    }
 
     if (sidebar) sidebar.hidden = enabled;
     if (topbar) topbar.hidden = enabled;
@@ -191,6 +216,7 @@ export const LoginView = (() => {
   function clearLoginScope() {
     stopLogoAnimation();
     clearRedirectTimer();
+    clearParallaxFrame();
     AppCore.cleanup.run(SCOPE);
   }
 
@@ -451,6 +477,89 @@ export const LoginView = (() => {
   }
 
   /* =========================================================
+     PARALLAX / INTERACTIVO
+  ========================================================= */
+  function applyParallax(rootEl, data) {
+    if (!rootEl || !data) return;
+
+    const {
+      rotateX = 0,
+      rotateY = 0,
+      shiftX = 0,
+      shiftY = 0,
+      glowX = 50,
+      glowY = 50,
+    } = data;
+
+    rootEl.style.setProperty("--login-rotate-x", `${rotateX}deg`);
+    rootEl.style.setProperty("--login-rotate-y", `${rotateY}deg`);
+    rootEl.style.setProperty("--login-shift-x", `${shiftX}px`);
+    rootEl.style.setProperty("--login-shift-y", `${shiftY}px`);
+    rootEl.style.setProperty("--login-glow-x", `${glowX}%`);
+    rootEl.style.setProperty("--login-glow-y", `${glowY}%`);
+  }
+
+  function resetParallax(rootEl) {
+    applyParallax(rootEl, {
+      rotateX: 0,
+      rotateY: 0,
+      shiftX: 0,
+      shiftY: 0,
+      glowX: 50,
+      glowY: 50,
+    });
+  }
+
+  function scheduleParallax(rootEl, payload) {
+    lastParallaxTarget = payload;
+    clearParallaxFrame();
+
+    parallaxFrameId = window.requestAnimationFrame(() => {
+      applyParallax(rootEl, lastParallaxTarget);
+      parallaxFrameId = null;
+    });
+  }
+
+  function bindInteractiveScene(scope, sceneEl, stageEl, cardEl) {
+    if (!sceneEl || !stageEl || !cardEl) return;
+
+    resetParallax(sceneEl);
+
+    AppCore.cleanup.on(scope, stageEl, "pointermove", (event) => {
+      const rect = stageEl.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+
+      const px = x / rect.width;
+      const py = y / rect.height;
+
+      const centeredX = (px - 0.5) * 2;
+      const centeredY = (py - 0.5) * 2;
+
+      scheduleParallax(sceneEl, {
+        rotateX: +(centeredY * -4).toFixed(2),
+        rotateY: +(centeredX * 5).toFixed(2),
+        shiftX: +(centeredX * PARALLAX_MAX_X).toFixed(2),
+        shiftY: +(centeredY * PARALLAX_MAX_Y).toFixed(2),
+        glowX: +(px * 100).toFixed(2),
+        glowY: +(py * 100).toFixed(2),
+      });
+    });
+
+    AppCore.cleanup.on(scope, stageEl, "pointerleave", () => {
+      clearParallaxFrame();
+      resetParallax(sceneEl);
+      cardEl.classList.remove("is-interactive");
+    });
+
+    AppCore.cleanup.on(scope, stageEl, "pointerenter", () => {
+      cardEl.classList.add("is-interactive");
+    });
+  }
+
+  /* =========================================================
      REDIRECCIONES
   ========================================================= */
   function resolvePostLoginPath(result, fallbackIdentifier = "") {
@@ -577,150 +686,219 @@ export const LoginView = (() => {
     const currentYear = new Date().getFullYear();
 
     container.innerHTML = `
-      <section class="login-view">
-        <a href="/" class="back-arrow" aria-label="Volver al inicio" data-spa></a>
+      <section class="login-view login-view--pro" aria-label="Pantalla de acceso">
+        <div class="login-scene" id="loginScene">
+          <div class="login-scene-glow" aria-hidden="true"></div>
 
-        <div class="login-wrapper">
-          <div class="login-card" id="loginCard">
-            <div class="login-header">
-              <div class="logo-fade" aria-hidden="true">
-                <img src="/src/media/img/favicon_black.png" alt="">
-                <img src="/src/media/img/favicon_black_circle.png" alt="">
-                <img src="/src/media/img/favicon_support.png" alt="">
-                <img src="/src/media/img/favicon_white.png" alt="">
+          <div class="login-grid" id="loginGrid">
+            <aside class="login-side login-side-left" aria-hidden="true">
+              <div class="login-side-panel login-side-panel--status">
+                <div class="login-side-eyebrow">Entorno seguro</div>
+                <h3>Tu acceso entra en un panel más vivo y con más presencia visual.</h3>
+
+                <div class="login-signal-list">
+                  <div class="login-signal-item">
+                    <span class="dot"></span>
+                    <span>Sesión cifrada</span>
+                  </div>
+                  <div class="login-signal-item">
+                    <span class="dot"></span>
+                    <span>Controles de acceso activos</span>
+                  </div>
+                  <div class="login-signal-item">
+                    <span class="dot"></span>
+                    <span>Shell SPA preparado</span>
+                  </div>
+                </div>
               </div>
 
-              <h2>Iniciar sesión con la cuenta ${appName}</h2>
+              <div class="login-side-panel login-side-panel--orbital">
+                <div class="orbital-ring orbital-ring-a"></div>
+                <div class="orbital-ring orbital-ring-b"></div>
+                <div class="orbital-core"></div>
+              </div>
+            </aside>
+
+            <div class="login-stage" id="loginStage">
+              <div class="login-card-shell">
+                <div class="login-card login-card--offset" id="loginCard">
+                  <div class="login-card-glow" aria-hidden="true"></div>
+
+                  <div class="login-header">
+                    <div class="logo-fade" aria-hidden="true">
+                      <img src="/src/media/img/favicon_black.png" alt="">
+                      <img src="/src/media/img/favicon_black_circle.png" alt="">
+                      <img src="/src/media/img/favicon_support.png" alt="">
+                      <img src="/src/media/img/favicon_white.png" alt="">
+                    </div>
+
+                    <h2>Iniciar sesión con la cuenta ${appName}</h2>
+                    <p class="login-subtitle">
+                      Accede a tu espacio de soporte, incidencias y gestión interna.
+                    </p>
+                  </div>
+
+                  <form id="loginForm" class="login-form" novalidate>
+                    <input
+                      type="hidden"
+                      name="redirect"
+                      value="${escapeHtml(redirectPath || "")}"
+                    >
+
+                    <div
+                      class="login-error"
+                      id="loginError"
+                      role="alert"
+                      aria-live="polite"
+                      data-state="default"
+                      hidden
+                    ></div>
+
+                    <div class="login-field">
+                      <input
+                        type="text"
+                        id="username"
+                        name="identifier"
+                        class="input-text"
+                        placeholder="Usuario o email"
+                        autocomplete="username"
+                        inputmode="email"
+                        spellcheck="false"
+                        autocapitalize="off"
+                        required
+                        aria-invalid="false"
+                      >
+                    </div>
+
+                    <div class="login-field password-wrapper">
+                      <input
+                        type="password"
+                        id="password"
+                        name="password"
+                        class="input-text"
+                        placeholder="Contraseña"
+                        autocomplete="current-password"
+                        required
+                        minlength="6"
+                        aria-invalid="false"
+                      >
+
+                      <button
+                        type="button"
+                        class="password-toggle"
+                        id="togglePassword"
+                        aria-label="Mostrar contraseña"
+                        aria-pressed="false"
+                        title="Mostrar contraseña"
+                      >
+                        <svg
+                          id="eyeOpenIcon"
+                          viewBox="0 0 24 24"
+                          width="20"
+                          height="20"
+                          aria-hidden="true"
+                        >
+                          <path
+                            fill="currentColor"
+                            d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7Zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8Z"
+                          />
+                        </svg>
+
+                        <svg
+                          id="eyeClosedIcon"
+                          viewBox="0 0 24 24"
+                          width="20"
+                          height="20"
+                          aria-hidden="true"
+                          hidden
+                        >
+                          <path
+                            fill="currentColor"
+                            d="M3.27 2 2 3.27l3.05 3.05C3.18 7.86 2 10 2 10s3 7 10 7c2.06 0 3.82-.6 5.3-1.48L20.73 19 22 17.73 3.27 2Zm8.77 8.77 2.19 2.19A3.96 3.96 0 0 1 12 13a4 4 0 0 1-4-4c0-.77.22-1.49.6-2.1l1.59 1.59A2 2 0 0 0 12 11c.01 0 .03 0 .04-.23ZM12 5c7 0 10 7 10 7a17.73 17.73 0 0 1-2.92 3.81l-1.42-1.42A15.1 15.1 0 0 0 19.82 12c-.87-1.28-3.35-4-7.82-4-.86 0-1.66.1-2.4.28L7.83 6.51C9.03 5.95 10.43 5.62 12 5Z"
+                          />
+                        </svg>
+                      </button>
+
+                      <svg
+                        id="capsIcon"
+                        class="caps-icon"
+                        viewBox="0 0 24 24"
+                        width="18"
+                        height="18"
+                        aria-hidden="true"
+                        hidden
+                      >
+                        <path
+                          fill="currentColor"
+                          d="M12 3l6 6h-4v6h-4V9H6l6-6zM6 19h12v2H6z"
+                        />
+                      </svg>
+                    </div>
+
+                    <div class="login-options">
+                      <label class="login-check" for="loginRemember">
+                        <input
+                          id="loginRemember"
+                          type="checkbox"
+                          name="remember"
+                        >
+                        <span>Recordarme</span>
+                      </label>
+
+                      <span class="login-meta">Acceso seguro</span>
+                    </div>
+
+                    <button
+                      type="submit"
+                      class="login-button"
+                      id="loginButton"
+                    >
+                      <span class="login-submit-text">Acceder</span>
+                    </button>
+
+                    <div class="login-reset">
+                      <a href="/reset-password" id="forgotPasswordLink" data-spa>
+                        ¿Has olvidado tu contraseña?
+                      </a>
+                    </div>
+                  </form>
+
+                  <div class="login-footer">
+                    © ${currentYear} ${appName} · v${appVersion}
+                  </div>
+                </div>
+              </div>
             </div>
 
-            <form id="loginForm" class="login-form" novalidate>
-              <input
-                type="hidden"
-                name="redirect"
-                value="${escapeHtml(redirectPath || "")}"
-              >
+            <aside class="login-side login-side-right" aria-hidden="true">
+              <div class="login-side-panel login-side-panel--metric">
+                <div class="login-side-eyebrow">Interacción</div>
 
-              <div
-                class="login-error"
-                id="loginError"
-                role="alert"
-                aria-live="polite"
-                data-state="default"
-                hidden
-              ></div>
+                <div class="metric-stack">
+                  <div class="metric-row">
+                    <span class="metric-label">Panel</span>
+                    <strong class="metric-value">LIVE</strong>
+                  </div>
 
-              <div class="login-field">
-                <input
-                  type="text"
-                  id="username"
-                  name="identifier"
-                  class="input-text"
-                  placeholder="Usuario o email"
-                  autocomplete="username"
-                  inputmode="email"
-                  spellcheck="false"
-                  autocapitalize="off"
-                  required
-                  aria-invalid="false"
-                >
+                  <div class="metric-row">
+                    <span class="metric-label">Focus</span>
+                    <strong class="metric-value">ON</strong>
+                  </div>
+
+                  <div class="metric-row">
+                    <span class="metric-label">Motion</span>
+                    <strong class="metric-value">3D</strong>
+                  </div>
+                </div>
               </div>
 
-              <div class="login-field password-wrapper">
-                <input
-                  type="password"
-                  id="password"
-                  name="password"
-                  class="input-text"
-                  placeholder="Contraseña"
-                  autocomplete="current-password"
-                  required
-                  minlength="6"
-                  aria-invalid="false"
-                >
-
-                <button
-                  type="button"
-                  class="password-toggle"
-                  id="togglePassword"
-                  aria-label="Mostrar contraseña"
-                  aria-pressed="false"
-                  title="Mostrar contraseña"
-                >
-                  <svg
-                    id="eyeOpenIcon"
-                    viewBox="0 0 24 24"
-                    width="20"
-                    height="20"
-                    aria-hidden="true"
-                  >
-                    <path
-                      fill="currentColor"
-                      d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7Zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8Z"
-                    />
-                  </svg>
-
-                  <svg
-                    id="eyeClosedIcon"
-                    viewBox="0 0 24 24"
-                    width="20"
-                    height="20"
-                    aria-hidden="true"
-                    hidden
-                  >
-                    <path
-                      fill="currentColor"
-                      d="M3.27 2 2 3.27l3.05 3.05C3.18 7.86 2 10 2 10s3 7 10 7c2.06 0 3.82-.6 5.3-1.48L20.73 19 22 17.73 3.27 2Zm8.77 8.77 2.19 2.19A3.96 3.96 0 0 1 12 13a4 4 0 0 1-4-4c0-.77.22-1.49.6-2.1l1.59 1.59A2 2 0 0 0 12 11c.01 0 .03 0 .04-.23ZM12 5c7 0 10 7 10 7a17.73 17.73 0 0 1-2.92 3.81l-1.42-1.42A15.1 15.1 0 0 0 19.82 12c-.87-1.28-3.35-4-7.82-4-.86 0-1.66.1-2.4.28L7.83 6.51C9.03 5.95 10.43 5.62 12 5Z"
-                    />
-                  </svg>
-                </button>
-
-                <svg
-                  id="capsIcon"
-                  class="caps-icon"
-                  viewBox="0 0 24 24"
-                  width="18"
-                  height="18"
-                  aria-hidden="true"
-                  hidden
-                >
-                  <path
-                    fill="currentColor"
-                    d="M12 3l6 6h-4v6h-4V9H6l6-6zM6 19h12v2H6z"
-                  />
-                </svg>
+              <div class="login-side-panel login-side-panel--trail">
+                <div class="trail-line"></div>
+                <div class="trail-node trail-node-a"></div>
+                <div class="trail-node trail-node-b"></div>
+                <div class="trail-node trail-node-c"></div>
               </div>
-
-              <div class="login-options">
-                <label class="login-check" for="loginRemember">
-                  <input
-                    id="loginRemember"
-                    type="checkbox"
-                    name="remember"
-                  >
-                  <span>Recordarme</span>
-                </label>
-
-                <span class="login-meta">Acceso seguro</span>
-              </div>
-
-              <button
-                type="submit"
-                class="login-button"
-                id="loginButton"
-              >
-                <span class="login-submit-text">Acceder</span>
-              </button>
-
-              <div class="login-reset">
-                <a href="/reset-password" id="forgotPasswordLink" data-spa>
-                  ¿Has olvidado tu contraseña?
-                </a>
-              </div>
-            </form>
-
-            <div class="login-footer">
-              © ${currentYear} ${appName} · v${appVersion}
-            </div>
+            </aside>
           </div>
         </div>
       </section>
@@ -736,6 +914,8 @@ export const LoginView = (() => {
   function bind() {
     const scope = AppCore.cleanup.scope(SCOPE);
 
+    const scene = document.getElementById("loginScene");
+    const stage = document.getElementById("loginStage");
     const form = document.getElementById("loginForm");
     const card = document.getElementById("loginCard");
     const button = document.getElementById("loginButton");
@@ -780,6 +960,7 @@ export const LoginView = (() => {
     startLogoAnimation(logoImages);
     focusInitialField(identifierInput);
     updateCapsVisual(capsIcon, passwordFocused, capsActive);
+    bindInteractiveScene(scope, scene, stage, card);
     forceHideGlobalLoader();
 
     if (toggleBtn) {
@@ -905,6 +1086,7 @@ export const LoginView = (() => {
     AppCore.cleanup.add(scope, () => {
       stopLogoAnimation();
       clearRedirectTimer();
+      clearParallaxFrame();
 
       if (!isNavigatingAway) {
         setAuthScreen(false);

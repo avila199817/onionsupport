@@ -1,15 +1,15 @@
 /* =========================================================
-   Onion SPA - App Bootstrap
+   Onion SPA - App Bootstrap (FULL PRO SAAS PANEL)
    Archivo: src/app.js
 
    Responsabilidades:
    - arrancar AppCore
    - inicializar Store
-   - restaurar sesión
+   - bind del router
+   - lanzar la primera renderización INMEDIATA
+   - restaurar sesión sin bloquear el primer paint
    - montar listeners globales
    - bind de UI global
-   - bind del router
-   - lanzar la primera renderización
    - apagar loader
    - aplicar failsafe anti-loader infinito
 ========================================================= */
@@ -32,6 +32,7 @@ const App = (() => {
   let routerBound = false;
   let uiInitialized = false;
   let bootFailsafeTimer = null;
+  let sessionRestorePromise = null;
 
   /* =========================================================
      HELPERS BASE
@@ -46,6 +47,14 @@ const App = (() => {
     return AppCore.utils.normalizePath(
       `${window.location.pathname || "/"}${window.location.search || ""}`
     );
+  }
+
+  function getCurrentCanonicalPath() {
+    if (typeof Router?.getCurrentCanonicalPath === "function") {
+      return Router.getCurrentCanonicalPath();
+    }
+
+    return AppCore.utils.normalizeCanonicalPath(getCurrentPublicPath());
   }
 
   function escapeHtml(value = "") {
@@ -186,21 +195,10 @@ const App = (() => {
       body,
     } = getShellElements();
 
-    if (sidebar) {
-      sidebar.hidden = hidden;
-    }
-
-    if (topbar) {
-      topbar.hidden = hidden;
-    }
-
-    if (topbarViewContainer) {
-      topbarViewContainer.hidden = hidden;
-    }
-
-    if (tableheadContainer) {
-      tableheadContainer.hidden = hidden;
-    }
+    if (sidebar) sidebar.hidden = hidden;
+    if (topbar) topbar.hidden = hidden;
+    if (topbarViewContainer) topbarViewContainer.hidden = hidden;
+    if (tableheadContainer) tableheadContainer.hidden = hidden;
 
     if (body) {
       body.classList.toggle("route-shell-hidden", hidden);
@@ -230,24 +228,26 @@ const App = (() => {
     clearBootFailsafeTimer();
 
     bootFailsafeTimer = window.setTimeout(() => {
-      AppCore.utils.warn(
-        "Failsafe loader aplicado tras el arranque inicial."
-      );
+      AppCore.utils.warn("Failsafe loader aplicado tras el arranque inicial.");
       AppCore.setLoading(false);
       forceHideLoader();
     }, BOOT_FAILSAFE_LOADER_MS);
   }
 
+  function isLoginPath(path = "") {
+    const normalized = AppCore.utils.normalizePath(path || "/");
+    return normalized === "/login" || normalized.startsWith("/login?");
+  }
+
   function applyPostRenderLoaderPolicy() {
-    const currentCanonicalPath =
-      Router.getCurrentCanonicalPath?.() || AppCore.state.route || "/";
+    const currentCanonicalPath = getCurrentCanonicalPath();
     const currentPublicPath = getCurrentPublicPath();
     const viewContainer = getViewContainer();
     const hasViewContent = Boolean(viewContainer?.innerHTML?.trim());
 
     if (
       currentCanonicalPath === "/login" ||
-      currentPublicPath.startsWith("/login")
+      isLoginPath(currentPublicPath)
     ) {
       AppCore.setLoading(false);
       forceHideLoader();
@@ -259,6 +259,38 @@ const App = (() => {
       AppCore.setLoading(false);
       forceHideLoader();
     }
+  }
+
+  function navigateAfterSessionRestore() {
+    if (!AppCore.state.authenticated) return;
+
+    const currentCanonicalPath = getCurrentCanonicalPath();
+
+    if (currentCanonicalPath === "/login") {
+      const target =
+        typeof Router.goAfterLogin === "function"
+          ? null
+          : typeof Auth.getPostLoginTarget === "function"
+          ? Auth.getPostLoginTarget(AppCore.state.user)
+          : "/";
+
+      if (typeof Router.goAfterLogin === "function") {
+        Router.goAfterLogin("/");
+        return;
+      }
+
+      Router.navigate(target || "/", {
+        replaceState: true,
+        force: true,
+      });
+      return;
+    }
+
+    Router.render(getCurrentPublicPath(), {
+      skipHistory: true,
+      replaceState: true,
+      force: true,
+    });
   }
 
   /* =========================================================
@@ -340,7 +372,7 @@ const App = (() => {
     if (resetSessionBtn) {
       AppCore.utils.on(resetSessionBtn, "click", () => {
         try {
-          Auth.clearSessionLocal();
+          Auth.clearSessionLocal?.();
         } catch (sessionError) {
           AppCore.utils.warn(
             "No se pudo limpiar la sesión desde la pantalla de error.",
@@ -485,24 +517,9 @@ const App = (() => {
       syncUserUI();
     });
 
-    AppCore.cleanup.event(scope, "app:user-ui:sync", () => {
-      AppCore.utils.log("UI de usuario sincronizada.");
-    });
-
     AppCore.cleanup.event(scope, "app:session:cleared", () => {
       syncUserUI();
       closeSearchResults();
-    });
-
-    AppCore.cleanup.event(scope, "app:theme:change", ({ detail }) => {
-      AppCore.utils.log("Tema cambiado:", detail?.theme || AppCore.state.theme);
-    });
-
-    AppCore.cleanup.event(scope, "app:lang:change", ({ detail }) => {
-      AppCore.utils.log(
-        "Idioma cambiado:",
-        detail?.lang || AppCore.state.lang
-      );
     });
 
     AppCore.cleanup.event(scope, "auth:login:success", () => {
@@ -607,6 +624,10 @@ const App = (() => {
   }
 
   async function restoreAuthSession() {
+    if (sessionRestorePromise) {
+      return sessionRestorePromise;
+    }
+
     if (typeof Auth.restoreSession !== "function") {
       return {
         ok: false,
@@ -614,17 +635,28 @@ const App = (() => {
       };
     }
 
-    const result = await Auth.restoreSession();
+    sessionRestorePromise = (async () => {
+      try {
+        const result = await Auth.restoreSession();
 
-    syncUserUI();
+        syncUserUI();
 
-    AppCore.utils.log("Resultado restoreSession():", {
-      ok: Boolean(result?.ok),
-      authenticated: AppCore.state.authenticated,
-      user: AppCore.state.user?.username || AppCore.state.user?.email || null,
-    });
+        AppCore.utils.log("Resultado restoreSession():", {
+          ok: Boolean(result?.ok),
+          authenticated: AppCore.state.authenticated,
+          user:
+            AppCore.state.user?.username ||
+            AppCore.state.user?.email ||
+            null,
+        });
 
-    return result;
+        return result;
+      } finally {
+        sessionRestorePromise = null;
+      }
+    })();
+
+    return sessionRestorePromise;
   }
 
   function bindRouter() {
@@ -645,6 +677,30 @@ const App = (() => {
 
     AppCore.setPublicPath(getCurrentPublicPath());
     applyPostRenderLoaderPolicy();
+  }
+
+  async function restoreSessionInBackground() {
+    try {
+      const result = await restoreAuthSession();
+
+      await warmup();
+
+      if (result?.ok && AppCore.state.authenticated) {
+        navigateAfterSessionRestore();
+      } else {
+        applyPostRenderLoaderPolicy();
+      }
+
+      return result;
+    } catch (error) {
+      AppCore.utils.warn("restoreSession en background falló.", error);
+      applyPostRenderLoaderPolicy();
+      return {
+        ok: false,
+        user: null,
+        error,
+      };
+    }
   }
 
   function finalizeBoot() {
@@ -709,17 +765,31 @@ const App = (() => {
       bindSearchUI(scope);
 
       initStore();
-      initUISystems();
 
-      await restoreAuthSession();
-      await warmup();
-
+      /* =========================================
+         CLAVE:
+         bind + primer render ANTES de restoreSession
+      ========================================= */
       bindRouter();
       renderInitialRoute();
+
+      /* =========================================
+         UI después del primer render
+      ========================================= */
+      initUISystems();
+
+      /* =========================================
+         Boot visual completado
+      ========================================= */
       finalizeBoot();
 
       booted = true;
       markAppBootState({ booted: true, booting: false });
+
+      /* =========================================
+         Restaurar sesión sin bloquear el login
+      ========================================= */
+      void restoreSessionInBackground();
 
       return api;
     } catch (error) {
@@ -748,6 +818,8 @@ const App = (() => {
 
     booted = false;
     booting = false;
+    sessionRestorePromise = null;
+
     clearBootFailsafeTimer();
     clearScope();
 

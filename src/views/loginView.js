@@ -921,7 +921,7 @@ export const LoginView = (() => {
                         </svg>
 
                         <span id="capsLabel" class="caps-label" hidden>
-                          Caps activado
+                          Bloq mayús
                         </span>
                       </div>
                     </div>

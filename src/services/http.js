@@ -1,12 +1,16 @@
 /* =========================================================
-   Onion SPA - HTTP Service (PRO)
+   Onion SPA - HTTP Service (FULL PRO SAAS PANEL)
    Archivo: src/services/http.js
 
    Encima de AppCore.apiClient:
-   - interceptores
-   - retries
+   - interceptores request / response / error
+   - retry policy robusta
+   - refresh automático en 401
+   - logout automático si refresh falla
+   - control de loader global
    - errores normalizados
-   - hooks globales
+   - soporte signal / abort
+   - helpers REST
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
@@ -21,9 +25,17 @@ export const Http = (() => {
   const config = {
     retries: 1,
     retryDelay: 400,
+    retryJitter: 120,
+
     autoRefreshOn401: true,
     autoLogoutOn401: true,
+
     logRequests: true,
+    logResponses: true,
+    logErrors: true,
+
+    defaultUseLoader: true,
+    defaultAuth: true,
   };
 
   /* =========================================================
@@ -32,6 +44,7 @@ export const Http = (() => {
   const state = {
     pendingRequests: 0,
     refreshPromise: null,
+    initialized: false,
   };
 
   /* =========================================================
@@ -43,70 +56,55 @@ export const Http = (() => {
     error: [],
   };
 
-  function useRequest(fn) {
-    if (typeof fn !== "function") {
-      throw new Error("useRequest(fn) requiere una función");
-    }
-
-    interceptors.request.push(fn);
-
-    return () => {
-      const index = interceptors.request.indexOf(fn);
-      if (index >= 0) {
-        interceptors.request.splice(index, 1);
-      }
-    };
-  }
-
-  function useResponse(fn) {
-    if (typeof fn !== "function") {
-      throw new Error("useResponse(fn) requiere una función");
-    }
-
-    interceptors.response.push(fn);
-
-    return () => {
-      const index = interceptors.response.indexOf(fn);
-      if (index >= 0) {
-        interceptors.response.splice(index, 1);
-      }
-    };
-  }
-
-  function useError(fn) {
-    if (typeof fn !== "function") {
-      throw new Error("useError(fn) requiere una función");
-    }
-
-    interceptors.error.push(fn);
-
-    return () => {
-      const index = interceptors.error.indexOf(fn);
-      if (index >= 0) {
-        interceptors.error.splice(index, 1);
-      }
-    };
-  }
-
   /* =========================================================
-     HELPERS
+     HELPERS BASE
   ========================================================= */
+  function isFn(value) {
+    return typeof value === "function";
+  }
+
+  function isAbortError(error) {
+    return (
+      error?.name === "AbortError" ||
+      error?.code === "ABORT_ERR" ||
+      String(error?.message || "").toLowerCase().includes("aborted")
+    );
+  }
+
   function delay(ms = config.retryDelay) {
     return AppCore.utils.sleep(ms);
   }
 
   function incrementPendingRequests() {
     state.pendingRequests += 1;
+    AppCore.events.emit("http:pending:change", {
+      pending: state.pendingRequests,
+    });
     return state.pendingRequests;
   }
 
   function decrementPendingRequests() {
     state.pendingRequests = Math.max(0, state.pendingRequests - 1);
+    AppCore.events.emit("http:pending:change", {
+      pending: state.pendingRequests,
+    });
     return state.pendingRequests;
   }
 
   function shouldToggleGlobalLoader(requestConfig = {}) {
     return requestConfig.useLoader !== false;
+  }
+
+  function shouldLogRequests() {
+    return Boolean(config.logRequests && AppCore.config?.debug);
+  }
+
+  function shouldLogResponses() {
+    return Boolean(config.logResponses && AppCore.config?.debug);
+  }
+
+  function shouldLogErrors() {
+    return Boolean(config.logErrors);
   }
 
   function isAuthEndpoint(path = "") {
@@ -116,15 +114,20 @@ export const Http = (() => {
       value.includes("/api/auth/login") ||
       value.includes("/api/auth/logout") ||
       value.includes("/api/auth/me") ||
-      value.includes("/api/auth/refresh")
+      value.includes("/api/auth/refresh") ||
+      value.includes("/api/auth/2fa")
     );
   }
 
   function isRetryableError(error) {
+    if (!error) return false;
+    if (isAbortError(error)) return false;
+
     const status = Number(error?.status || 0);
 
     if (!status) return true;
     if (status === 408) return true;
+    if (status === 425) return true;
     if (status === 429) return true;
     if (status >= 500) return true;
 
@@ -132,7 +135,24 @@ export const Http = (() => {
   }
 
   function isIdempotentMethod(method = "GET") {
-    return ["GET", "HEAD", "OPTIONS"].includes(String(method).toUpperCase());
+    return ["GET", "HEAD", "OPTIONS"].includes(
+      String(method || "GET").toUpperCase()
+    );
+  }
+
+  function buildRetryDelay(requestConfig = {}, attempt = 0) {
+    const baseDelay =
+      typeof requestConfig.retryDelay === "number"
+        ? requestConfig.retryDelay
+        : config.retryDelay;
+
+    const jitter =
+      typeof requestConfig.retryJitter === "number"
+        ? requestConfig.retryJitter
+        : config.retryJitter;
+
+    const randomJitter = Math.floor(Math.random() * jitter);
+    return baseDelay * (attempt + 1) + randomJitter;
   }
 
   function shouldRetry(error, requestConfig = {}, attempt = 0) {
@@ -146,31 +166,24 @@ export const Http = (() => {
     if (requestConfig._skipRetry === true) return false;
 
     const method = String(requestConfig.method || "GET").toUpperCase();
-    const allowNonIdempotentRetry = requestConfig.retryUnsafe === true;
+    const allowUnsafeRetry = requestConfig.retryUnsafe === true;
 
-    if (!isIdempotentMethod(method) && !allowNonIdempotentRetry) {
+    if (!isIdempotentMethod(method) && !allowUnsafeRetry) {
       return false;
     }
 
     return isRetryableError(error);
   }
 
-  function buildRetryDelay(requestConfig = {}, attempt = 0) {
-    const baseDelay =
-      typeof requestConfig.retryDelay === "number"
-        ? requestConfig.retryDelay
-        : config.retryDelay;
-
-    return baseDelay * (attempt + 1);
-  }
-
   function normalizeError(error, requestConfig = null) {
     if (!error) {
       return {
+        name: "HttpError",
         message: "Error desconocido",
         status: 0,
         statusText: "",
         data: null,
+        code: null,
         url: requestConfig?.path || null,
         method: requestConfig?.method || null,
         requestConfig,
@@ -178,7 +191,12 @@ export const Http = (() => {
       };
     }
 
-    return {
+    if (error?.name === "HttpErrorNormalized") {
+      return error;
+    }
+
+    const normalized = {
+      name: "HttpErrorNormalized",
       message:
         error?.data?.message ||
         error?.data?.error ||
@@ -194,6 +212,69 @@ export const Http = (() => {
       code: error?.code || null,
       requestConfig,
       raw: error,
+      aborted: isAbortError(error),
+    };
+
+    return normalized;
+  }
+
+  function buildRequestSummary(requestConfig = {}) {
+    return {
+      method: requestConfig.method,
+      path: requestConfig.path,
+      query: requestConfig.query || null,
+      auth: requestConfig.auth !== false,
+      retries: requestConfig.retries,
+      useLoader: requestConfig.useLoader !== false,
+      responseType: requestConfig.responseType || "auto",
+    };
+  }
+
+  /* =========================================================
+     INTERCEPTOR API
+  ========================================================= */
+  function useRequest(fn) {
+    if (!isFn(fn)) {
+      throw new Error("useRequest(fn) requiere una función");
+    }
+
+    interceptors.request.push(fn);
+
+    return () => {
+      const index = interceptors.request.indexOf(fn);
+      if (index >= 0) {
+        interceptors.request.splice(index, 1);
+      }
+    };
+  }
+
+  function useResponse(fn) {
+    if (!isFn(fn)) {
+      throw new Error("useResponse(fn) requiere una función");
+    }
+
+    interceptors.response.push(fn);
+
+    return () => {
+      const index = interceptors.response.indexOf(fn);
+      if (index >= 0) {
+        interceptors.response.splice(index, 1);
+      }
+    };
+  }
+
+  function useError(fn) {
+    if (!isFn(fn)) {
+      throw new Error("useError(fn) requiere una función");
+    }
+
+    interceptors.error.push(fn);
+
+    return () => {
+      const index = interceptors.error.indexOf(fn);
+      if (index >= 0) {
+        interceptors.error.splice(index, 1);
+      }
     };
   }
 
@@ -202,7 +283,9 @@ export const Http = (() => {
 
     for (const interceptor of interceptors.request) {
       const result = await interceptor(nextConfig);
-      nextConfig = result || nextConfig;
+      if (result && typeof result === "object") {
+        nextConfig = result;
+      }
     }
 
     return nextConfig;
@@ -213,7 +296,9 @@ export const Http = (() => {
 
     for (const interceptor of interceptors.response) {
       const result = await interceptor(nextResponse, requestConfig);
-      nextResponse = result || nextResponse;
+      if (result !== undefined) {
+        nextResponse = result;
+      }
     }
 
     return nextResponse;
@@ -225,29 +310,38 @@ export const Http = (() => {
     }
   }
 
+  /* =========================================================
+     AUTO REFRESH 401
+  ========================================================= */
   async function runAutoRefreshIfNeeded(error, requestConfig) {
     if (!config.autoRefreshOn401) return false;
-    if (!Auth.isAuthenticated()) return false;
+    if (!Auth?.isAuthenticated?.()) return false;
     if (Number(error?.status || 0) !== 401) return false;
     if (requestConfig?._skipAuthRefresh === true) return false;
+    if (requestConfig?._authRefreshAttempted === true) return false;
     if (isAuthEndpoint(requestConfig?.path)) return false;
-    if (typeof Auth.refreshSession !== "function") return false;
+    if (!isFn(Auth?.refreshSession)) return false;
 
     try {
       if (!state.refreshPromise) {
-        state.refreshPromise = Auth.refreshSession().finally(() => {
-          state.refreshPromise = null;
-        });
+        state.refreshPromise = Promise.resolve(Auth.refreshSession()).finally(
+          () => {
+            state.refreshPromise = null;
+          }
+        );
       }
 
       await state.refreshPromise;
       return true;
     } catch (refreshError) {
-      AppCore.utils.warn("Auto refresh falló.", refreshError);
+      AppCore.utils.warn("HTTP auto-refresh falló.", refreshError);
       return false;
     }
   }
 
+  /* =========================================================
+     REQUEST CORE
+  ========================================================= */
   async function executeBaseRequest(requestConfig = {}) {
     return AppCore.apiClient.request(requestConfig.path, {
       method: requestConfig.method,
@@ -259,6 +353,7 @@ export const Http = (() => {
       responseType: requestConfig.responseType,
       query: requestConfig.query ?? null,
       credentials: requestConfig.credentials,
+      signal: requestConfig.signal,
     });
   }
 
@@ -280,6 +375,15 @@ export const Http = (() => {
         }
 
         const waitMs = buildRetryDelay(requestConfig, attempt);
+
+        AppCore.events.emit("http:retry", {
+          path: requestConfig.path,
+          method: requestConfig.method,
+          attempt: attempt + 1,
+          waitMs,
+          error: lastError,
+        });
+
         await delay(waitMs);
         attempt += 1;
       }
@@ -288,48 +392,58 @@ export const Http = (() => {
     throw lastError;
   }
 
-  /* =========================================================
-     CORE REQUEST
-  ========================================================= */
   async function request(method, path, options = {}) {
     let requestConfig = {
       method: String(method || "GET").toUpperCase(),
       path,
       body: null,
       headers: {},
-      auth: true,
+      auth: config.defaultAuth,
       timeout: AppCore.config.requestTimeout,
       raw: false,
       responseType: "auto",
       query: null,
       credentials: "same-origin",
-      useLoader: true,
+      useLoader: config.defaultUseLoader,
       retries: config.retries,
       retryDelay: config.retryDelay,
+      retryJitter: config.retryJitter,
       retry: true,
       retryUnsafe: false,
+      signal: null,
+      meta: null,
+
       _skipRetry: false,
       _skipAuthRefresh: false,
+      _authRefreshAttempted: false,
+
       ...options,
     };
+
+    let loaderWasEnabled = false;
 
     try {
       requestConfig = await runRequestInterceptors(requestConfig);
 
       const useLoader = shouldToggleGlobalLoader(requestConfig);
+      loaderWasEnabled = useLoader;
 
-      if (config.logRequests) {
-        AppCore.utils.log("HTTP →", requestConfig.method, requestConfig.path, {
-          query: requestConfig.query || null,
-          auth: requestConfig.auth !== false,
-          useLoader,
-        });
+      if (shouldLogRequests()) {
+        AppCore.utils.log("HTTP →", buildRequestSummary(requestConfig));
       }
 
       if (useLoader) {
         incrementPendingRequests();
         AppCore.setLoading(true);
       }
+
+      AppCore.events.emit("http:request:start", {
+        method: requestConfig.method,
+        path: requestConfig.path,
+        query: requestConfig.query || null,
+        auth: requestConfig.auth !== false,
+        useLoader,
+      });
 
       let result;
 
@@ -348,6 +462,7 @@ export const Http = (() => {
             ...requestConfig,
             _skipAuthRefresh: true,
             _skipRetry: true,
+            _authRefreshAttempted: true,
           };
 
           result = await executeBaseRequest(retryAfterRefreshConfig);
@@ -358,25 +473,57 @@ export const Http = (() => {
 
       const response = await runResponseInterceptors(result, requestConfig);
 
+      AppCore.events.emit("http:request:success", {
+        method: requestConfig.method,
+        path: requestConfig.path,
+        response,
+      });
+
+      if (shouldLogResponses()) {
+        AppCore.utils.log("HTTP ✓", {
+          method: requestConfig.method,
+          path: requestConfig.path,
+          response,
+        });
+      }
+
       return response;
     } catch (error) {
       const normalized = normalizeError(error, requestConfig);
 
       await runErrorInterceptors(normalized, requestConfig);
 
+      AppCore.events.emit("http:request:error", {
+        method: requestConfig?.method || method,
+        path: requestConfig?.path || path,
+        error: normalized,
+      });
+
+      if (shouldLogErrors()) {
+        AppCore.utils.error("HTTP ✗", normalized);
+      }
+
       if (
         config.autoLogoutOn401 &&
         normalized.status === 401 &&
-        Auth.isAuthenticated() &&
+        Auth?.isAuthenticated?.() &&
         requestConfig?._skipAuthRefresh === true
       ) {
-        AppCore.utils.warn("Token inválido → logout automático");
-        await Auth.logout({ silent: false });
+        AppCore.utils.warn("HTTP 401 persistente → logout automático");
+
+        try {
+          await Auth.logout({
+            silent: false,
+            notifyServer: false,
+          });
+        } catch (logoutError) {
+          AppCore.utils.warn("No se pudo completar logout automático.", logoutError);
+        }
       }
 
       throw normalized;
     } finally {
-      if (shouldToggleGlobalLoader(requestConfig)) {
+      if (loaderWasEnabled) {
         const pending = decrementPendingRequests();
 
         if (pending === 0) {
@@ -387,7 +534,7 @@ export const Http = (() => {
   }
 
   /* =========================================================
-     MÉTODOS
+     MÉTODOS REST
   ========================================================= */
   function get(path, options = {}) {
     return request("GET", path, options);
@@ -419,52 +566,98 @@ export const Http = (() => {
   }
 
   /* =========================================================
-     INTERCEPTORES DEFAULT
+     HELPERS EXTRA
   ========================================================= */
+  function createAbortController() {
+    return new AbortController();
+  }
 
-  useRequest((requestConfig) => {
-    if (AppCore.config.debug) {
-      AppCore.utils.log("HTTP request config", {
-        method: requestConfig.method,
-        path: requestConfig.path,
-        query: requestConfig.query || null,
-        auth: requestConfig.auth !== false,
-        retries: requestConfig.retries,
+  function withSignal(controllerOrSignal) {
+    if (!controllerOrSignal) return null;
+
+    if (controllerOrSignal instanceof AbortController) {
+      return controllerOrSignal.signal;
+    }
+
+    return controllerOrSignal;
+  }
+
+  /* =========================================================
+     INIT DEFAULT INTERCEPTORS
+  ========================================================= */
+  function init() {
+    if (state.initialized) {
+      return api;
+    }
+
+    state.initialized = true;
+
+    useRequest((requestConfig) => {
+      const nextConfig = {
+        ...requestConfig,
+        headers: {
+          ...(requestConfig.headers || {}),
+          "X-Requested-With": "XMLHttpRequest",
+        },
+      };
+
+      if (AppCore.config.debug) {
+        AppCore.utils.log("HTTP request config", buildRequestSummary(nextConfig));
+      }
+
+      return nextConfig;
+    });
+
+    useResponse((response, requestConfig) => {
+      if (AppCore.config.debug) {
+        AppCore.utils.log("HTTP response interceptada", {
+          method: requestConfig?.method || null,
+          path: requestConfig?.path || null,
+          response,
+        });
+      }
+
+      return response;
+    });
+
+    useError((error, requestConfig) => {
+      AppCore.utils.error("HTTP error interceptado", {
+        method: requestConfig?.method || null,
+        path: requestConfig?.path || null,
+        error,
       });
-    }
+    });
 
-    return requestConfig;
-  });
+    AppCore.events.emit("http:ready", {
+      config: { ...config },
+    });
 
-  useResponse((response) => {
-    if (AppCore.config.debug) {
-      AppCore.utils.log("HTTP ✓ response", response);
-    }
-
-    return response;
-  });
-
-  useError((error) => {
-    AppCore.utils.error("HTTP ✗ error", error);
-  });
+    return api;
+  }
 
   /* =========================================================
      API PÚBLICA
   ========================================================= */
-  return {
+  const api = {
+    init,
+
     get,
     post,
     put,
     patch,
     delete: del,
-
     request,
 
     useRequest,
     useResponse,
     useError,
 
+    createAbortController,
+    withSignal,
+
     config,
     state,
   };
+
+  return api;
 })();

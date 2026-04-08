@@ -23,12 +23,14 @@ const App = (() => {
   "use strict";
 
   const SCOPE = "app:global";
+  const BOOT_FAILSAFE_LOADER_MS = 1800;
 
   let booted = false;
   let booting = false;
   let storeInitialized = false;
   let routerBound = false;
   let uiInitialized = false;
+  let bootFailsafeTimer = null;
 
   /* =========================================================
      HELPERS BASE
@@ -61,8 +63,33 @@ const App = (() => {
     AppCore.syncUserUI();
   }
 
+  function getShellElements() {
+    return {
+      sidebar: AppCore.dom.sidebar || document.querySelector(".sidebar"),
+      topbar: AppCore.dom.topbar || document.querySelector(".topbar"),
+      topbarViewContainer:
+        AppCore.dom.topbarViewContainer ||
+        document.getElementById("topbarview-container"),
+      tableheadContainer:
+        AppCore.dom.tableheadContainer ||
+        document.getElementById("tablehead-container"),
+      body: AppCore.dom.body || document.body,
+    };
+  }
+
+  function getViewContainer() {
+    return (
+      AppCore.dom.viewContainer ||
+      document.getElementById("view-container") ||
+      document.querySelector("#view-container")
+    );
+  }
+
   function closeSearchResults() {
-    const results = AppCore.dom.searchResults;
+    const results =
+      AppCore.dom.searchResults ||
+      document.getElementById("topbar-search-results");
+
     if (!results) return;
 
     results.hidden = true;
@@ -119,41 +146,70 @@ const App = (() => {
 
   function setShellVisibility(visible = true) {
     const hidden = !visible;
+    const {
+      sidebar,
+      topbar,
+      topbarViewContainer,
+      tableheadContainer,
+      body,
+    } = getShellElements();
 
-    if (AppCore.dom.sidebar) {
-      AppCore.dom.sidebar.hidden = hidden;
+    if (sidebar) {
+      sidebar.hidden = hidden;
     }
 
-    if (AppCore.dom.topbar) {
-      AppCore.dom.topbar.hidden = hidden;
+    if (topbar) {
+      topbar.hidden = hidden;
     }
 
-    if (AppCore.dom.topbarViewContainer) {
-      AppCore.dom.topbarViewContainer.hidden = hidden;
+    if (topbarViewContainer) {
+      topbarViewContainer.hidden = hidden;
     }
 
-    if (AppCore.dom.tableheadContainer) {
-      AppCore.dom.tableheadContainer.hidden = hidden;
+    if (tableheadContainer) {
+      tableheadContainer.hidden = hidden;
     }
 
-    if (AppCore.dom.body) {
-      AppCore.dom.body.classList.toggle("route-shell-hidden", hidden);
-      AppCore.dom.body.classList.toggle("auth-screen", hidden);
+    if (body) {
+      body.classList.toggle("route-shell-hidden", hidden);
+      body.classList.toggle("auth-screen", hidden);
+      body.classList.toggle("route-auth", hidden);
     }
   }
 
-  function markAppBootState({ booted: isBooted = false, booting: isBooting = false } = {}) {
+  function markAppBootState({
+    booted: isBooted = false,
+    booting: isBooting = false,
+  } = {}) {
     AppCore.setState({
       booting: Boolean(isBooting),
       ready: Boolean(isBooted),
     });
   }
 
+  function clearBootFailsafeTimer() {
+    if (bootFailsafeTimer) {
+      window.clearTimeout(bootFailsafeTimer);
+      bootFailsafeTimer = null;
+    }
+  }
+
+  function armBootFailsafeLoader() {
+    clearBootFailsafeTimer();
+
+    bootFailsafeTimer = window.setTimeout(() => {
+      AppCore.utils.warn(
+        "Failsafe loader aplicado tras el arranque inicial."
+      );
+      AppCore.setLoading(false);
+    }, BOOT_FAILSAFE_LOADER_MS);
+  }
+
   /* =========================================================
      ERROR SCREEN
   ========================================================= */
   function renderBootError(error) {
-    const container = AppCore.dom.viewContainer;
+    const container = getViewContainer();
     if (!container) return;
 
     const message =
@@ -243,8 +299,11 @@ const App = (() => {
      SEARCH UI
   ========================================================= */
   function bindSearchUI(scope) {
-    const input = AppCore.dom.searchInput;
-    const results = AppCore.dom.searchResults;
+    const input =
+      AppCore.dom.searchInput || document.getElementById("topbar-search");
+    const results =
+      AppCore.dom.searchResults ||
+      document.getElementById("topbar-search-results");
 
     if (!input || !results) return;
 
@@ -382,7 +441,10 @@ const App = (() => {
     });
 
     AppCore.cleanup.event(scope, "app:lang:change", ({ detail }) => {
-      AppCore.utils.log("Idioma cambiado:", detail?.lang || AppCore.state.lang);
+      AppCore.utils.log(
+        "Idioma cambiado:",
+        detail?.lang || AppCore.state.lang
+      );
     });
 
     AppCore.cleanup.event(scope, "auth:login:success", () => {
@@ -394,6 +456,14 @@ const App = (() => {
 
     AppCore.cleanup.event(scope, "auth:logout:success", () => {
       closeSearchResults();
+    });
+
+    AppCore.cleanup.event(scope, "router:before-render", ({ detail }) => {
+      AppCore.utils.log("Router before render:", {
+        path: detail?.path || null,
+        canonicalPath: detail?.canonicalPath || null,
+        username: detail?.username || null,
+      });
     });
 
     AppCore.cleanup.event(scope, "router:rendered", ({ detail }) => {
@@ -446,10 +516,12 @@ const App = (() => {
   }
 
   function initStore() {
-    if (storeInitialized) return;
+    if (!storeInitialized) {
+      if (typeof Store?.init === "function") {
+        Store.init();
+      }
 
-    if (typeof Store?.init === "function") {
-      Store.init();
+      storeInitialized = true;
     }
 
     if (!AppCore.modules.has("store")) {
@@ -463,8 +535,6 @@ const App = (() => {
     if (!AppCore.modules.has("router")) {
       AppCore.modules.register("router", Router);
     }
-
-    storeInitialized = true;
   }
 
   function initUISystems() {
@@ -494,10 +564,7 @@ const App = (() => {
     AppCore.utils.log("Resultado restoreSession():", {
       ok: Boolean(result?.ok),
       authenticated: AppCore.state.authenticated,
-      user:
-        AppCore.state.user?.username ||
-        AppCore.state.user?.email ||
-        null,
+      user: AppCore.state.user?.username || AppCore.state.user?.email || null,
     });
 
     return result;
@@ -531,6 +598,9 @@ const App = (() => {
       Store.actions.markBooted(true);
     }
 
+    AppCore.setLoading(false);
+    armBootFailsafeLoader();
+
     AppCore.events.emit("app:ready", {
       route: AppCore.state.route,
       publicPath: AppCore.state.publicPath,
@@ -562,6 +632,7 @@ const App = (() => {
 
     booting = true;
     markAppBootState({ booted: false, booting: true });
+    clearBootFailsafeTimer();
 
     try {
       clearScope();
@@ -597,6 +668,7 @@ const App = (() => {
       AppCore.setError(error);
       AppCore.utils.error("💥 Fallo en boot()", error);
 
+      AppCore.setLoading(false);
       renderBootError(error);
 
       return api;
@@ -614,7 +686,7 @@ const App = (() => {
 
     booted = false;
     booting = false;
-
+    clearBootFailsafeTimer();
     clearScope();
 
     if (!preserveError) {
@@ -628,6 +700,8 @@ const App = (() => {
     if (Store?.actions?.markReady) {
       Store.actions.markReady(false);
     }
+
+    AppCore.setLoading(false);
 
     return boot();
   }

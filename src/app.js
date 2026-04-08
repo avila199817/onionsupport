@@ -11,6 +11,7 @@
    - bind del router
    - lanzar la primera renderización
    - apagar loader
+   - aplicar failsafe anti-loader infinito
 ========================================================= */
 
 import { AppCore } from "./core/core.js";
@@ -83,6 +84,37 @@ const App = (() => {
       document.getElementById("view-container") ||
       document.querySelector("#view-container")
     );
+  }
+
+  function getLoaderElement() {
+    return AppCore.dom.loader || document.getElementById("app-loader");
+  }
+
+  function forceHideLoader() {
+    const loader = getLoaderElement();
+
+    if (document?.body) {
+      document.body.classList.remove("loading");
+    }
+
+    if (loader) {
+      loader.hidden = true;
+      loader.setAttribute("aria-hidden", "true");
+      loader.style.display = "none";
+      loader.style.opacity = "0";
+      loader.style.visibility = "hidden";
+      loader.style.pointerEvents = "none";
+    }
+  }
+
+  function restoreLoaderInlineStyles() {
+    const loader = getLoaderElement();
+    if (!loader) return;
+
+    loader.style.display = "";
+    loader.style.opacity = "";
+    loader.style.visibility = "";
+    loader.style.pointerEvents = "";
   }
 
   function closeSearchResults() {
@@ -202,7 +234,31 @@ const App = (() => {
         "Failsafe loader aplicado tras el arranque inicial."
       );
       AppCore.setLoading(false);
+      forceHideLoader();
     }, BOOT_FAILSAFE_LOADER_MS);
+  }
+
+  function applyPostRenderLoaderPolicy() {
+    const currentCanonicalPath =
+      Router.getCurrentCanonicalPath?.() || AppCore.state.route || "/";
+    const currentPublicPath = getCurrentPublicPath();
+    const viewContainer = getViewContainer();
+    const hasViewContent = Boolean(viewContainer?.innerHTML?.trim());
+
+    if (
+      currentCanonicalPath === "/login" ||
+      currentPublicPath.startsWith("/login")
+    ) {
+      AppCore.setLoading(false);
+      forceHideLoader();
+      setShellVisibility(false);
+      return;
+    }
+
+    if (hasViewContent) {
+      AppCore.setLoading(false);
+      forceHideLoader();
+    }
   }
 
   /* =========================================================
@@ -269,6 +325,8 @@ const App = (() => {
         </div>
       </section>
     `;
+
+    forceHideLoader();
 
     const retryBtn = document.getElementById("boot-retry-btn");
     const resetSessionBtn = document.getElementById("boot-reset-session-btn");
@@ -450,8 +508,6 @@ const App = (() => {
     AppCore.cleanup.event(scope, "auth:login:success", () => {
       syncUserUI();
       closeSearchResults();
-
-      Router.goAfterLogin("/");
     });
 
     AppCore.cleanup.event(scope, "auth:logout:success", () => {
@@ -470,6 +526,7 @@ const App = (() => {
       const publicPath = getCurrentPublicPath();
 
       AppCore.setPublicPath(publicPath);
+      applyPostRenderLoaderPolicy();
 
       AppCore.utils.log("Ruta renderizada:", {
         publicPath,
@@ -587,6 +644,7 @@ const App = (() => {
     });
 
     AppCore.setPublicPath(getCurrentPublicPath());
+    applyPostRenderLoaderPolicy();
   }
 
   function finalizeBoot() {
@@ -599,6 +657,7 @@ const App = (() => {
     }
 
     AppCore.setLoading(false);
+    forceHideLoader();
     armBootFailsafeLoader();
 
     AppCore.events.emit("app:ready", {
@@ -633,6 +692,7 @@ const App = (() => {
     booting = true;
     markAppBootState({ booted: false, booting: true });
     clearBootFailsafeTimer();
+    restoreLoaderInlineStyles();
 
     try {
       clearScope();
@@ -669,12 +729,14 @@ const App = (() => {
       AppCore.utils.error("💥 Fallo en boot()", error);
 
       AppCore.setLoading(false);
+      forceHideLoader();
       renderBootError(error);
 
       return api;
     } finally {
       booting = false;
       AppCore.setLoading(false);
+      applyPostRenderLoaderPolicy();
     }
   }
 
@@ -702,6 +764,7 @@ const App = (() => {
     }
 
     AppCore.setLoading(false);
+    forceHideLoader();
 
     return boot();
   }

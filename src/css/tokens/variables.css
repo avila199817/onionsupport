@@ -1,29 +1,69 @@
 :root {
   /* =========================================================
-     ONION SUPPORT — DESIGN TOKENS / PRO SAAS PANEL
+     ONION SUPPORT — DESIGN TOKENS / ULTRA PRO SAAS PANEL
+     SISTEMA MAESTRO DE VARIABLES
+     - dark premium ui
+     - glass surfaces
+     - enterprise saas feel
+     - auth ready
+     - dashboard ready
+     - tables / cards / forms / modals / sidebar
   ========================================================= */
 
   /* =========================
      APP IDENTITY
   ========================= */
   --app-name: "Onion Support";
-
+  --app-font-sans:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  --app-font-mono:
+    "SFMono-Regular",
+    Consolas,
+    "Liberation Mono",
+    Menlo,
+    monospace;
 
   /* =========================
      LAYOUT
   ========================= */
-  --content-max: 1360px;
+  --content-max: 1380px;
+  --content-narrow: 1180px;
   --content-padding: 32px;
+  --content-padding-lg: 40px;
+  --content-padding-xl: 48px;
 
-  --sidebar-width: 264px;
-  --sidebar-collapsed: 76px;
+  --sidebar-width: 268px;
+  --sidebar-collapsed: 78px;
+  --sidebar-item-height: 46px;
+  --sidebar-icon-size: 20px;
+  --sidebar-item-padding-x: 12px;
+  --sidebar-icon-offset: calc(
+    var(--sidebar-item-padding-x) + (var(--sidebar-icon-size) / 2)
+  );
 
   --topbar-height: 60px;
+  --topbar-view-height: 56px;
   --page-offset: 28px;
-
   --tablehead-height: 48px;
-  --view-radius: 24px;
 
+  --view-radius: 26px;
+  --panel-radius: 22px;
+  --card-radius: 24px;
+  --card-radius-lg: 30px;
+  --modal-radius: 28px;
+  --dropdown-radius: 18px;
+  --input-radius: 16px;
+  --btn-radius: 16px;
+
+  --app-offset: calc(
+    var(--topbar-height) + var(--topbar-view-height) + var(--tablehead-height)
+  );
 
   /* =========================
      Z-INDEX
@@ -32,175 +72,300 @@
   --z-sidebar: 20;
   --z-topbar: 30;
   --z-dropdown: 40;
+  --z-sticky: 45;
   --z-overlay: 60;
   --z-modal: 80;
   --z-toast: 100;
-
+  --z-loader: 9999;
 
   /* =========================
-     BRAND
+     BRAND SYSTEM
   ========================= */
   --accent: #7c3aed;
   --accent-hover: #6d28d9;
   --accent-active: #5b21b6;
+
+  --accent-2: #8b5cf6;
+  --accent-3: #06b6d4;
+  --accent-4: #22c55e;
+  --accent-5: #ec4899;
+
   --accent-soft: rgba(124, 58, 237, 0.18);
+  --accent-soft-2: rgba(139, 92, 246, 0.16);
   --accent-ghost: rgba(124, 58, 237, 0.10);
-  --accent-ring: rgba(124, 58, 237, 0.35);
+  --accent-subtle: rgba(124, 58, 237, 0.07);
+  --accent-ring: rgba(124, 58, 237, 0.34);
+  --accent-border: rgba(124, 58, 237, 0.42);
+  --accent-glow: rgba(124, 58, 237, 0.26);
 
   --brand-2: #22c55e;
-  --brand-3: #06b6d4;
+  --brand-2-soft: rgba(34, 197, 94, 0.16);
 
+  --brand-3: #06b6d4;
+  --brand-3-soft: rgba(6, 182, 212, 0.16);
+
+  --brand-4: #f59e0b;
+  --brand-4-soft: rgba(245, 158, 11, 0.16);
+
+  --brand-5: #ec4899;
+  --brand-5-soft: rgba(236, 72, 153, 0.16);
 
   /* =========================
-     BASE / BACKDROP
+     MAIN BACKGROUND / ATMOSPHERE
   ========================= */
-  --main-bg: #0a0c11;
+  --main-bg: #090b10;
+  --main-bg-2: #0d1017;
+  --main-bg-3: #11151d;
+  --body-fallback: #090b10;
+
   --body-bg:
-    radial-gradient(circle at top left, rgba(124,58,237,.10), transparent 26%),
-    radial-gradient(circle at top right, rgba(6,182,212,.08), transparent 24%),
+    radial-gradient(circle at 0% 0%, rgba(124,58,237,.11), transparent 28%),
+    radial-gradient(circle at 100% 0%, rgba(6,182,212,.09), transparent 24%),
+    radial-gradient(circle at 50% 100%, rgba(236,72,153,.06), transparent 24%),
     linear-gradient(180deg, #0b0e14 0%, #090b10 100%);
 
-  --app-noise: radial-gradient(
-    circle at 50% 0%,
-    rgba(255,255,255,0.025),
-    transparent 60%
-  );
+  --gradient-main:
+    linear-gradient(180deg, #0b0e14 0%, #090b10 100%);
+  --gradient-overlay:
+    radial-gradient(circle at 20% 20%, rgba(255,255,255,.03), transparent 30%),
+    radial-gradient(circle at 80% 0%, rgba(255,255,255,.02), transparent 24%);
+  --gradient-accent:
+    linear-gradient(135deg, #8b5cf6 0%, #7c3aed 48%, #06b6d4 100%);
+  --gradient-accent-soft:
+    linear-gradient(135deg, rgba(139,92,246,.18) 0%, rgba(6,182,212,.16) 100%);
+  --gradient-success:
+    linear-gradient(180deg, #34d399 0%, #22c55e 100%);
+  --gradient-warning:
+    linear-gradient(180deg, #fbbf24 0%, #f59e0b 100%);
+  --gradient-error:
+    linear-gradient(180deg, #fb7185 0%, #ef4444 100%);
 
+  --app-noise:
+    radial-gradient(circle at 50% 0%, rgba(255,255,255,.025), transparent 60%);
+  --panel-noise:
+    linear-gradient(180deg, rgba(255,255,255,.022), transparent 38%);
+  --glass-shine:
+    linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,0) 34%);
 
   /* =========================
      SURFACE SYSTEM
   ========================= */
-  --surface-0: #0a0c11;
-  --surface-1: #11141b;
-  --surface-2: #171b23;
-  --surface-3: #1d2330;
-  --surface-4: #242c3b;
+  --surface-0: #090b10;
+  --surface-1: #10141b;
+  --surface-2: #161b24;
+  --surface-3: #1c2330;
+  --surface-4: #253042;
+  --surface-5: #2c3950;
 
-  --surface-elevated: rgba(20, 25, 35, 0.88);
-  --surface-glass: rgba(255,255,255,0.045);
-  --surface-glass-strong: rgba(255,255,255,0.07);
+  --surface-elevated: rgba(17, 22, 31, 0.88);
+  --surface-elevated-strong: rgba(20, 25, 35, 0.94);
+  --surface-glass: rgba(255,255,255,0.040);
+  --surface-glass-strong: rgba(255,255,255,0.070);
+  --surface-glass-accent: rgba(124,58,237,0.11);
 
-  --dropdown-bg: #171b23;
-  --tooltip-bg: #0f131a;
+  --surface-hover: rgba(255,255,255,0.045);
+  --surface-hover-strong: rgba(255,255,255,0.065);
+  --surface-active: rgba(255,255,255,0.075);
+  --surface-selected: rgba(124,58,237,0.14);
+  --surface-disabled: rgba(255,255,255,0.020);
 
+  --dropdown-bg: rgba(18, 23, 32, 0.98);
+  --tooltip-bg: #0e131b;
+  --popover-bg: rgba(18, 23, 32, 0.98);
+  --modal-bg: rgba(14, 18, 28, 0.96);
+  --backdrop-bg: rgba(4, 7, 12, 0.68);
 
   /* =========================
-     BORDERS
+     BORDER SYSTEM
   ========================= */
-  --border-soft: rgba(255,255,255,0.06);
-  --border-default: rgba(255,255,255,0.10);
-  --border-strong: rgba(255,255,255,0.16);
-  --border-accent: rgba(124, 58, 237, 0.40);
+  --border-soft: rgba(255,255,255,0.05);
+  --border-default: rgba(255,255,255,0.09);
+  --border-strong: rgba(255,255,255,0.15);
+  --border-stronger: rgba(255,255,255,0.22);
+  --border-glass: rgba(255,255,255,0.08);
 
+  --border-accent: rgba(124, 58, 237, 0.40);
+  --border-accent-strong: rgba(124, 58, 237, 0.56);
+  --border-success: rgba(34,197,94,.34);
+  --border-warning: rgba(245,158,11,.34);
+  --border-error: rgba(239,68,68,.34);
+  --border-info: rgba(96,165,250,.34);
 
   /* =========================
-     TEXT
+     TEXT SYSTEM
   ========================= */
   --text: #f8fafc;
   --text-strong: #ffffff;
-  --text-muted: rgba(248, 250, 252, 0.76);
-  --text-dim: rgba(248, 250, 252, 0.52);
-  --text-faint: rgba(248, 250, 252, 0.36);
+  --text-soft: rgba(248,250,252,.88);
+  --text-muted: rgba(248,250,252,.74);
+  --text-dim: rgba(248,250,252,.54);
+  --text-faint: rgba(248,250,252,.36);
+  --text-disabled: rgba(248,250,252,.24);
   --text-on-accent: #ffffff;
+  --text-on-light: #0f172a;
 
+  --link: #c4b5fd;
+  --link-hover: #ddd6fe;
 
   /* =========================
-     STATUS
+     STATUS SYSTEM
   ========================= */
   --success: #22c55e;
+  --success-hover: #16a34a;
   --success-soft: rgba(34,197,94,.14);
+  --success-bg: rgba(34,197,94,.10);
 
   --warning: #f59e0b;
+  --warning-hover: #d97706;
   --warning-soft: rgba(245,158,11,.14);
+  --warning-bg: rgba(245,158,11,.10);
 
   --error: #ef4444;
+  --error-hover: #dc2626;
   --error-soft: rgba(239,68,68,.14);
+  --error-bg: rgba(239,68,68,.10);
 
   --info: #60a5fa;
+  --info-hover: #3b82f6;
   --info-soft: rgba(96,165,250,.14);
-
+  --info-bg: rgba(96,165,250,.10);
 
   /* =========================
-     CARD / PANEL
+     CARD / PANEL / BLOCK
   ========================= */
-  --card-bg: linear-gradient(
-      180deg,
-      rgba(255,255,255,0.035) 0%,
-      rgba(255,255,255,0.015) 100%
-    ),
+  --card-bg:
+    linear-gradient(180deg, rgba(255,255,255,0.034) 0%, rgba(255,255,255,0.012) 100%),
     var(--surface-elevated);
+  --card-bg-hover:
+    linear-gradient(180deg, rgba(255,255,255,0.045) 0%, rgba(255,255,255,0.016) 100%),
+    rgba(22, 27, 36, 0.92);
   --card-border: var(--border-default);
-  --card-radius: 24px;
-  --card-radius-lg: 28px;
+  --card-border-hover: var(--border-strong);
+  --card-highlight: inset 0 1px 0 rgba(255,255,255,.06);
 
-  --panel-bg: linear-gradient(
-      180deg,
-      rgba(255,255,255,0.03) 0%,
-      rgba(255,255,255,0.01) 100%
-    ),
+  --panel-bg:
+    linear-gradient(180deg, rgba(255,255,255,0.028) 0%, rgba(255,255,255,0.010) 100%),
     var(--surface-2);
+  --panel-bg-hover:
+    linear-gradient(180deg, rgba(255,255,255,0.038) 0%, rgba(255,255,255,0.014) 100%),
+    #1a2030;
   --panel-border: var(--border-soft);
-  --panel-radius: 20px;
+  --panel-border-hover: var(--border-default);
 
+  --block-bg: rgba(255,255,255,0.028);
+  --block-bg-hover: rgba(255,255,255,0.045);
+  --block-border: rgba(255,255,255,0.06);
 
   /* =========================
-     INPUTS
+     INPUT SYSTEM
   ========================= */
   --input-height: 52px;
-  --input-bg: rgba(255,255,255,0.03);
-  --input-bg-hover: rgba(255,255,255,0.045);
+  --input-height-sm: 42px;
+  --input-height-lg: 58px;
+
+  --input-bg: rgba(255,255,255,0.030);
+  --input-bg-hover: rgba(255,255,255,0.044);
+  --input-bg-focus: rgba(255,255,255,0.050);
+  --input-disabled-bg: rgba(255,255,255,0.018);
+
   --input-border: rgba(255,255,255,0.10);
   --input-border-hover: rgba(255,255,255,0.16);
-  --input-border-focus: rgba(124,58,237,.60);
+  --input-border-focus: rgba(124,58,237,.62);
+  --input-border-error: rgba(239,68,68,.54);
+  --input-border-success: rgba(34,197,94,.50);
+
   --input-text: var(--text);
   --input-placeholder: rgba(248,250,252,.34);
-  --input-radius: 16px;
+  --input-icon: rgba(248,250,252,.54);
+
+  --input-shadow:
+    inset 0 1px 0 rgba(255,255,255,.02);
+  --input-shadow-hover:
+    inset 0 1px 0 rgba(255,255,255,.03);
   --input-shadow-focus:
     0 0 0 4px rgba(124,58,237,.16),
-    0 10px 30px rgba(0,0,0,.24);
-
+    0 12px 30px rgba(10,12,18,.28);
 
   /* =========================
-     BUTTONS
+     BUTTON SYSTEM
   ========================= */
   --btn-height: 52px;
-  --btn-radius: 16px;
+  --btn-height-sm: 40px;
+  --btn-height-lg: 58px;
 
-  --btn-primary-bg: linear-gradient(
-    180deg,
-    #8b5cf6 0%,
-    #7c3aed 100%
-  );
-  --btn-primary-bg-hover: linear-gradient(
-    180deg,
-    #935ffb 0%,
-    #6d28d9 100%
-  );
+  --btn-primary-bg:
+    linear-gradient(180deg, #8b5cf6 0%, #7c3aed 100%);
+  --btn-primary-bg-hover:
+    linear-gradient(180deg, #935ffb 0%, #6d28d9 100%);
+  --btn-primary-bg-active:
+    linear-gradient(180deg, #7c3aed 0%, #5b21b6 100%);
   --btn-primary-text: #ffffff;
+  --btn-primary-border: rgba(255,255,255,.06);
   --btn-primary-shadow:
-    0 12px 30px rgba(124,58,237,.32),
-    inset 0 1px 0 rgba(255,255,255,.14);
+    0 14px 34px rgba(124,58,237,.28),
+    inset 0 1px 0 rgba(255,255,255,.16);
 
-  --btn-ghost-bg: rgba(255,255,255,0.03);
-  --btn-ghost-bg-hover: rgba(255,255,255,0.06);
+  --btn-secondary-bg: rgba(255,255,255,0.050);
+  --btn-secondary-bg-hover: rgba(255,255,255,0.070);
+  --btn-secondary-bg-active: rgba(255,255,255,0.090);
+  --btn-secondary-text: var(--text);
+  --btn-secondary-border: rgba(255,255,255,.10);
+  --btn-secondary-shadow: 0 8px 20px rgba(0,0,0,.12);
+
+  --btn-ghost-bg: rgba(255,255,255,0.030);
+  --btn-ghost-bg-hover: rgba(255,255,255,0.060);
+  --btn-ghost-bg-active: rgba(255,255,255,0.075);
+  --btn-ghost-text: var(--text-muted);
   --btn-ghost-border: rgba(255,255,255,0.08);
 
+  --btn-danger-bg:
+    linear-gradient(180deg, #fb7185 0%, #ef4444 100%);
+  --btn-danger-bg-hover:
+    linear-gradient(180deg, #ff7f92 0%, #dc2626 100%);
+  --btn-danger-text: #ffffff;
+  --btn-danger-shadow:
+    0 12px 28px rgba(239,68,68,.22),
+    inset 0 1px 0 rgba(255,255,255,.14);
 
   /* =========================
      SIDEBAR
   ========================= */
-  --sidebar-bg: rgba(13, 16, 22, 0.94);
+  --sidebar-bg: rgba(12, 16, 22, 0.94);
+  --sidebar-bg-strong: rgba(11, 14, 20, 0.98);
   --sidebar-border: rgba(255,255,255,0.06);
+  --sidebar-shadow:
+    0 24px 60px rgba(0,0,0,.34);
+
   --sidebar-hover: rgba(255,255,255,0.045);
   --sidebar-active: rgba(124,58,237,0.16);
+  --sidebar-active-hover: rgba(124,58,237,0.20);
   --sidebar-active-border: rgba(124,58,237,0.35);
 
-  --sidebar-icon-size: 20px;
-  --sidebar-item-padding-x: 12px;
-  --sidebar-icon-offset: calc(
-    var(--sidebar-item-padding-x) + (var(--sidebar-icon-size) / 2)
-  );
+  --sidebar-text: rgba(248,250,252,.78);
+  --sidebar-text-active: #ffffff;
+  --sidebar-icon: rgba(248,250,252,.66);
+  --sidebar-icon-active: #c4b5fd;
 
+  /* =========================
+     TOPBAR
+  ========================= */
+  --topbar-bg: rgba(10, 13, 19, 0.78);
+  --topbar-border: rgba(255,255,255,0.06);
+  --topbar-shadow:
+    0 12px 30px rgba(0,0,0,.18);
+  --topbar-blur: blur(18px);
+
+  /* =========================
+     TABLES / DATA UI
+  ========================= */
+  --table-bg: transparent;
+  --table-head-bg: rgba(255,255,255,0.028);
+  --table-row-bg: transparent;
+  --table-row-hover: rgba(255,255,255,0.032);
+  --table-row-selected: rgba(124,58,237,0.10);
+
+  --table-border: rgba(255,255,255,0.06);
+  --table-head-border: rgba(255,255,255,0.09);
 
   /* =========================
      KPI COLORS
@@ -217,18 +382,31 @@
   --color-pendiente: #f87171;
   --color-pendiente-glow: rgba(248,113,113,.24);
 
+  --color-facturacion: #60a5fa;
+  --color-facturacion-glow: rgba(96,165,250,.24);
+
+  /* =========================
+     AVATAR / BADGES / CHIPS
+  ========================= */
+  --avatar-bg:
+    linear-gradient(180deg, #ec4899 0%, #db2777 100%);
+  --avatar-bg-2:
+    linear-gradient(180deg, #8b5cf6 0%, #6d28d9 100%);
+  --avatar-text: #ffffff;
+
+  --badge-bg: rgba(255,255,255,0.06);
+  --badge-border: rgba(255,255,255,0.08);
+  --badge-text: var(--text-muted);
+
+  --chip-bg: rgba(255,255,255,0.045);
+  --chip-border: rgba(255,255,255,0.08);
+  --chip-text: var(--text-soft);
 
   /* =========================
      TYPOGRAPHY
   ========================= */
-  --font-family:
-    Inter,
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
+  --font-family: var(--app-font-sans);
+  --font-family-mono: var(--app-font-mono);
 
   --font-xs: 11px;
   --font-sm: 12px;
@@ -239,6 +417,7 @@
   --font-2xl: 22px;
   --font-3xl: 30px;
   --font-4xl: 38px;
+  --font-5xl: 48px;
 
   --weight-regular: 400;
   --weight-medium: 500;
@@ -246,19 +425,20 @@
   --weight-bold: 700;
   --weight-black: 800;
 
-  --line-tight: 1.1;
-  --line-snug: 1.25;
-  --line-normal: 1.45;
-  --line-relaxed: 1.65;
+  --line-tight: 1.10;
+  --line-snug: 1.24;
+  --line-normal: 1.46;
+  --line-relaxed: 1.68;
 
   --letter-tight: -0.03em;
   --letter-normal: 0;
   --letter-wide: 0.02em;
-
+  --letter-wider: 0.08em;
 
   /* =========================
      SPACING
   ========================= */
+  --space-3xs: 2px;
   --space-2xs: 4px;
   --space-xs: 8px;
   --space-sm: 12px;
@@ -268,7 +448,7 @@
   --space-2xl: 32px;
   --space-3xl: 40px;
   --space-4xl: 56px;
-
+  --space-5xl: 72px;
 
   /* =========================
      DENSITY
@@ -279,7 +459,7 @@
   --space-dynamic-sm: calc(var(--space-sm) * var(--density-factor));
   --space-dynamic-md: calc(var(--space-md) * var(--density-factor));
   --space-dynamic-lg: calc(var(--space-lg) * var(--density-factor));
-
+  --space-dynamic-xl: calc(var(--space-xl) * var(--density-factor));
 
   /* =========================
      RADIUS
@@ -290,22 +470,36 @@
   --radius-lg: 20px;
   --radius-xl: 24px;
   --radius-2xl: 28px;
+  --radius-3xl: 34px;
   --radius-pill: 999px;
 
+  /* =========================
+     SHADOW SYSTEM
+  ========================= */
+  --shadow-xs: 0 2px 8px rgba(0,0,0,.14);
+  --shadow-sm: 0 8px 20px rgba(0,0,0,.18);
+  --shadow-md: 0 18px 40px rgba(0,0,0,.26);
+  --shadow-lg: 0 24px 60px rgba(0,0,0,.34);
+  --shadow-xl: 0 36px 90px rgba(0,0,0,.42);
+
+  --shadow-soft: 0 10px 24px rgba(0,0,0,.14);
+  --shadow-strong: 0 30px 80px rgba(0,0,0,.46);
+  --shadow-glow:
+    0 0 0 1px rgba(255,255,255,.04),
+    0 20px 60px rgba(124,58,237,.20);
+  --shadow-glow-cyan:
+    0 0 0 1px rgba(255,255,255,.03),
+    0 20px 60px rgba(6,182,212,.16);
+  --shadow-inner:
+    inset 0 1px 0 rgba(255,255,255,.05);
 
   /* =========================
-     SHADOW
+     BLUR
   ========================= */
-  --shadow-xs: 0 2px 8px rgba(0,0,0,0.16);
-  --shadow-sm: 0 8px 20px rgba(0,0,0,0.20);
-  --shadow-md: 0 18px 40px rgba(0,0,0,0.28);
-  --shadow-lg: 0 24px 60px rgba(0,0,0,0.36);
-  --shadow-xl: 0 36px 90px rgba(0,0,0,0.44);
-
-  --shadow-soft: 0 10px 24px rgba(0,0,0,0.16);
-  --shadow-strong: 0 30px 80px rgba(0,0,0,0.48);
-  --shadow-glow: 0 0 0 1px rgba(255,255,255,.04), 0 20px 60px rgba(124,58,237,.20);
-
+  --blur-sm: blur(8px);
+  --blur-md: blur(14px);
+  --blur-lg: blur(20px);
+  --blur-xl: blur(28px);
 
   /* =========================
      MOTION
@@ -313,20 +507,54 @@
   --ease-out: cubic-bezier(.22,1,.36,1);
   --ease-in: cubic-bezier(.4,0,1,1);
   --ease-standard: cubic-bezier(.2,.8,.2,1);
+  --ease-emphasis: cubic-bezier(.16,1,.3,1);
 
   --duration-fast: .12s;
   --duration-normal: .22s;
   --duration-slow: .34s;
-
+  --duration-xslow: .48s;
 
   /* =========================
-     MISC
+     FOCUS / ACCESSIBILITY
   ========================= */
+  --focus-ring: 0 0 0 4px rgba(124,58,237,.18);
+  --focus-ring-strong: 0 0 0 4px rgba(124,58,237,.26);
+  --selection-bg: rgba(124,58,237,.32);
+  --selection-text: #ffffff;
+
+  /* =========================
+     SCROLLBAR
+  ========================= */
+  --scrollbar-size: 10px;
+  --scrollbar-track: transparent;
   --scrollbar-thumb: rgba(255,255,255,0.12);
   --scrollbar-thumb-hover: rgba(255,255,255,0.18);
 
-  --avatar-bg: linear-gradient(180deg, #ec4899 0%, #db2777 100%);
-  --avatar-text: #fff;
+  /* =========================
+     AUTH / LOGIN ESPECÍFICAS
+  ========================= */
+  --auth-max-width: 1180px;
+  --auth-card-width: 460px;
+  --auth-card-bg:
+    linear-gradient(180deg, rgba(255,255,255,.045) 0%, rgba(255,255,255,.016) 100%),
+    rgba(15, 20, 30, 0.88);
+  --auth-card-border: rgba(255,255,255,.09);
+  --auth-card-shadow:
+    0 30px 90px rgba(2,6,23,.52),
+    0 0 0 1px rgba(255,255,255,.03),
+    0 20px 80px rgba(124,58,237,.18);
 
-  --focus-ring: 0 0 0 4px rgba(124,58,237,.18);
+  --auth-input-bg: rgba(255,255,255,.035);
+  --auth-input-border: rgba(255,255,255,.11);
+  --auth-input-border-focus: rgba(124,58,237,.62);
+
+  --auth-logo-glow: 0 0 60px rgba(124,58,237,.20);
+
+  /* =========================
+     LOADER
+  ========================= */
+  --loader-bg: rgba(9,11,16,.96);
+  --loader-text: var(--text);
+  --loader-ring: rgba(255,255,255,.12);
+  --loader-ring-active: var(--accent);
 }

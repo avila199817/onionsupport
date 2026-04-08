@@ -1,5 +1,5 @@
 /* =========================================================
-   Onion SPA - Core (FULL PRO SAAS PANEL)
+   Onion SPA - Core (FULL PRO SAAS PANEL · GOD MODE)
    Archivo: src/core/core.js
 
    Qué centraliza:
@@ -16,6 +16,8 @@
    - utilidades de request
    - helpers UI/lifecycle
    - helpers de username/slug
+   - diagnóstico de red / timeouts / aborts
+   - init idempotente y robusta
 ========================================================= */
 
 export const AppCore = (() => {
@@ -26,11 +28,12 @@ export const AppCore = (() => {
   ========================================================= */
   const config = {
     appName: "Onion Support",
-    version: "1.0.0",
+    version: "2.0.0",
     debug: true,
 
     apiBase: "https://api.onionit.net",
     requestTimeout: 15000,
+    requestRetries: 0,
 
     defaultLang: "es",
     defaultTheme: "dark",
@@ -48,13 +51,32 @@ export const AppCore = (() => {
       theme: "theme",
       lang: "lang",
       sidebarOpen: "sidebarOpen",
+      lastPublicPath: "lastPublicPath",
     },
 
     ui: {
       themeColorDark: "#0a0c11",
       themeColorLight: "#f4f7fb",
     },
+
+    auth: {
+      bearerPrefix: "Bearer",
+      publicApiPaths: [
+        "/api/auth/login",
+        "/api/auth/refresh",
+        "/api/auth/reset-password-request",
+        "/api/auth/reset-password-confirm",
+        "/api/auth/activate/first-user",
+        "/api/auth/2fa/login",
+      ],
+    },
   };
+
+  /* =========================================================
+     PRIVADOS / FLAGS
+  ========================================================= */
+  let initPromise = null;
+  let initDone = false;
 
   /* =========================================================
      HELPERS PRIVADOS BASE
@@ -67,16 +89,8 @@ export const AppCore = (() => {
     return isBrowser() && document.readyState !== "loading";
   }
 
-  function buildStorageKey(key) {
-    return `${config.storagePrefix}:${key}`;
-  }
-
-  function safeParse(value, fallback = null) {
-    try {
-      return JSON.parse(value);
-    } catch {
-      return fallback;
-    }
+  function now() {
+    return Date.now();
   }
 
   function isPlainObject(value) {
@@ -106,6 +120,18 @@ export const AppCore = (() => {
     }
 
     return { capture: false };
+  }
+
+  function buildStorageKey(key) {
+    return `${config.storagePrefix}:${key}`;
+  }
+
+  function safeParse(value, fallback = null) {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return fallback;
+    }
   }
 
   function safeClone(value, fallback = null) {
@@ -138,7 +164,9 @@ export const AppCore = (() => {
     }
 
     if (typeof error === "object") {
-      return safeClone(error, { message: String(error) });
+      return safeClone(error, {
+        message: String(error),
+      });
     }
 
     return { message: String(error) };
@@ -161,6 +189,10 @@ export const AppCore = (() => {
       .toLowerCase()
       .replace(/[^a-z0-9._-]+/g, "-")
       .replace(/^-+|-+$/g, "");
+  }
+
+  function normalizeApiBase(base = "") {
+    return String(base || "").trim().replace(/\/+$/, "");
   }
 
   function normalizePath(path = "/") {
@@ -231,16 +263,18 @@ export const AppCore = (() => {
   }
 
   function joinUrl(base, path = "") {
-    const cleanBase = String(base || "").replace(/\/+$/, "");
+    const cleanBase = normalizeApiBase(base);
     const cleanPath = String(path || "").replace(/^\/+/, "");
     return cleanPath ? `${cleanBase}/${cleanPath}` : cleanBase;
   }
 
   function buildUrl(path, query = null) {
-    const rawPath = String(path || "");
+    const rawPath = String(path || "").trim();
+    const apiBase = normalizeApiBase(config.apiBase);
+
     const baseUrl = /^https?:\/\//i.test(rawPath)
       ? rawPath
-      : joinUrl(config.apiBase, rawPath);
+      : joinUrl(apiBase, rawPath);
 
     if (!query || !isPlainObject(query) || Object.keys(query).length === 0) {
       return baseUrl;
@@ -269,6 +303,13 @@ export const AppCore = (() => {
 
   function hasValidToken(token = null) {
     return Boolean(token && String(token).trim());
+  }
+
+  function isPublicApiPath(path = "") {
+    const normalized = normalizeCanonicalPath(path);
+    return config.auth.publicApiPaths.some(
+      (publicPath) => normalizeCanonicalPath(publicPath) === normalized
+    );
   }
 
   function normalizeUser(user = null) {
@@ -345,7 +386,7 @@ export const AppCore = (() => {
 
   function getInitials(value = "") {
     return String(value || "")
-      .split(" ")
+      .split(/\s+/)
       .filter(Boolean)
       .slice(0, 2)
       .map((part) => part[0]?.toUpperCase() || "")
@@ -394,7 +435,14 @@ export const AppCore = (() => {
 
   function createAbortTimeout(ms = config.requestTimeout) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort("timeout"), ms);
+    const timeoutId = setTimeout(() => {
+      try {
+        controller.abort("timeout");
+      } catch {
+        controller.abort();
+      }
+    }, ms);
+
     return { controller, timeoutId };
   }
 
@@ -443,6 +491,57 @@ export const AppCore = (() => {
     return controller.signal;
   }
 
+  function isAbortError(error) {
+    return (
+      error?.name === "AbortError" ||
+      error?.code === 20 ||
+      String(error?.message || "").toLowerCase().includes("aborted")
+    );
+  }
+
+  function isProbablyTimeoutError(error) {
+    const message = String(error?.message || "").toLowerCase();
+    const raw = String(error?.raw || "").toLowerCase();
+
+    return (
+      message.includes("timeout") ||
+      raw.includes("timeout") ||
+      error?.timeout === true
+    );
+  }
+
+  function detectNetworkHints(url = "") {
+    const hints = [];
+
+    if (!isBrowser()) return hints;
+
+    if (navigator.onLine === false) {
+      hints.push("El navegador parece estar offline.");
+    }
+
+    if (/^https:\/\//i.test(url) && window.location.protocol === "http:") {
+      hints.push("Hay mezcla de protocolos: frontend en HTTP y API en HTTPS.");
+    }
+
+    if (/^http:\/\//i.test(url) && window.location.protocol === "https:") {
+      hints.push("Hay mezcla de protocolos: frontend en HTTPS y API en HTTP.");
+    }
+
+    const apiOrigin = (() => {
+      try {
+        return new URL(url).origin;
+      } catch {
+        return null;
+      }
+    })();
+
+    if (apiOrigin && apiOrigin !== window.location.origin) {
+      hints.push("Petición cross-origin: revisa CORS y preflight OPTIONS.");
+    }
+
+    return hints;
+  }
+
   /* =========================================================
      ESTADO GLOBAL
   ========================================================= */
@@ -468,6 +567,8 @@ export const AppCore = (() => {
     lastError: null,
     lastRoute: null,
     lastRequestAt: null,
+    lastRequestUrl: null,
+    online: isBrowser() ? navigator.onLine !== false : true,
   };
 
   function cloneState() {
@@ -682,8 +783,10 @@ export const AppCore = (() => {
     slugify,
     normalizeUser,
     getUserUsername,
+    getUserDisplayName,
     hasValidToken,
     getInitials,
+    isPublicApiPath,
   };
 
   /* =========================================================
@@ -1022,6 +1125,8 @@ export const AppCore = (() => {
       publicPath: normalizedPath,
     });
 
+    storage.set(config.storageKeys.lastPublicPath, normalizedPath);
+
     events.emit("app:public-path:change", {
       publicPath: normalizedPath,
     });
@@ -1329,7 +1434,7 @@ export const AppCore = (() => {
       .filter(([, value]) => !value)
       .map(([key]) => key);
 
-    if (missing.length > 0 && config.debug) {
+    if (missing.length > 0) {
       utils.warn("Faltan nodos importantes del layout:", missing);
     }
 
@@ -1398,36 +1503,48 @@ export const AppCore = (() => {
   }
 
   /* =========================================================
-     REQUEST HELPERS
+     RESPONSE PARSING
   ========================================================= */
   async function parseResponseBody(response, responseType = "auto") {
-    const contentType = response.headers.get("content-type") || "";
+    if (!response) return null;
+    if (response.status === 204) return null;
 
-    if (response.status === 204) {
-      return null;
+    const contentType = String(response.headers.get("content-type") || "")
+      .trim()
+      .toLowerCase();
+
+    if (responseType === "blob") return response.blob();
+    if (responseType === "arrayBuffer") return response.arrayBuffer();
+
+    if (responseType === "text") {
+      try {
+        return await response.text();
+      } catch {
+        return "";
+      }
     }
 
     if (responseType === "json") {
-      return response.json();
-    }
-
-    if (responseType === "text") {
-      return response.text();
-    }
-
-    if (responseType === "blob") {
-      return response.blob();
-    }
-
-    if (responseType === "arrayBuffer") {
-      return response.arrayBuffer();
+      try {
+        return await response.json();
+      } catch {
+        return null;
+      }
     }
 
     if (contentType.includes("application/json")) {
-      return response.json();
+      try {
+        return await response.json();
+      } catch {
+        return null;
+      }
     }
 
-    return response.text();
+    try {
+      return await response.text();
+    } catch {
+      return null;
+    }
   }
 
   function buildRequestError({
@@ -1435,15 +1552,32 @@ export const AppCore = (() => {
     data = null,
     url = "",
     method = "",
+    timeout = false,
+    aborted = false,
+    raw = null,
   }) {
     if (!response) {
+      const hints = detectNetworkHints(url);
+
       return {
         status: 0,
-        statusText: "Network Error",
+        statusText: timeout
+          ? "Request Timeout"
+          : aborted
+          ? "Request Aborted"
+          : "Network Error",
         data,
         url,
         method,
-        message: "No se pudo completar la petición.",
+        timeout,
+        aborted,
+        raw,
+        hints,
+        message: timeout
+          ? "La petición excedió el tiempo máximo."
+          : aborted
+          ? "La petición fue cancelada."
+          : "No se pudo completar la petición.",
       };
     }
 
@@ -1453,12 +1587,48 @@ export const AppCore = (() => {
       data,
       url,
       method,
+      timeout,
+      aborted,
+      raw,
       message:
         data?.message ||
         data?.error ||
+        data?.detail ||
         response.statusText ||
         "Error de petición",
     };
+  }
+
+  function shouldRetryRequest(error, requestConfig) {
+    const method = String(requestConfig?.method || "GET").toUpperCase();
+    const retries = Number(requestConfig?.retries ?? config.requestRetries ?? 0);
+
+    if (retries <= 0) return false;
+    if (!["GET", "HEAD"].includes(method)) return false;
+
+    if (error?.status >= 500) return true;
+    if (error?.status === 0) return true;
+
+    return false;
+  }
+
+  async function executeFetchWithRetry(url, fetchConfig, requestConfig) {
+    const retries = Number(requestConfig?.retries ?? config.requestRetries ?? 0);
+    let attempt = 0;
+    let lastError = null;
+
+    while (attempt <= retries) {
+      try {
+        return await fetch(url, fetchConfig);
+      } catch (error) {
+        lastError = error;
+        if (attempt >= retries) throw error;
+        await utils.sleep(250 * (attempt + 1));
+      }
+      attempt += 1;
+    }
+
+    throw lastError;
   }
 
   /* =========================================================
@@ -1469,13 +1639,14 @@ export const AppCore = (() => {
       method: "GET",
       headers: {},
       body: null,
-      auth: true,
+      auth: !isPublicApiPath(path),
       timeout: config.requestTimeout,
       raw: false,
       responseType: "auto",
       query: null,
-      credentials: "same-origin",
+      credentials: "omit",
       signal: null,
+      retries: config.requestRetries,
       ...options,
       path,
     };
@@ -1489,16 +1660,18 @@ export const AppCore = (() => {
       method = "GET",
       headers = {},
       body = null,
-      auth = true,
+      auth = !isPublicApiPath(requestConfig.path),
       timeout = config.requestTimeout,
       raw = false,
       responseType = "auto",
       query = null,
-      credentials = "same-origin",
+      credentials = "omit",
       signal = null,
+      retries = config.requestRetries,
     } = requestConfig;
 
     const url = buildUrl(requestConfig.path, query);
+    const upperMethod = String(method || "GET").toUpperCase();
 
     const finalHeaders = normalizeHeaders({
       Accept: "application/json",
@@ -1506,44 +1679,55 @@ export const AppCore = (() => {
     });
 
     if (auth && hasValidToken(state.token)) {
-      finalHeaders.Authorization = `Bearer ${state.token}`;
+      finalHeaders.Authorization = `${config.auth.bearerPrefix} ${state.token}`;
     }
 
-    const isFormData = isBrowser() && body instanceof FormData;
+    const isFormData = isBrowser() && typeof FormData !== "undefined" && body instanceof FormData;
+    const isBodyAllowed = !["GET", "HEAD"].includes(upperMethod);
 
-    if (!isFormData && body !== null && !finalHeaders["Content-Type"]) {
+    if (!isFormData && body !== null && isBodyAllowed && !finalHeaders["Content-Type"]) {
       finalHeaders["Content-Type"] = "application/json";
     }
 
-    const payload =
-      body === null
-        ? null
-        : isFormData
-        ? body
-        : finalHeaders["Content-Type"]?.includes("application/json")
-        ? JSON.stringify(body)
-        : body;
+    const payload = !isBodyAllowed
+      ? undefined
+      : body === null
+      ? null
+      : isFormData
+      ? body
+      : finalHeaders["Content-Type"]?.includes("application/json")
+      ? JSON.stringify(body)
+      : body;
 
     const { controller, timeoutId } = createAbortTimeout(timeout);
     const mergedSignal = mergeAbortSignals([controller.signal, signal]);
 
     events.emit("app:request:start", {
       url,
-      method,
+      method: upperMethod,
       auth,
       hasBody: body !== null,
     });
 
     try {
-      state.lastRequestAt = Date.now();
+      state.lastRequestAt = now();
+      state.lastRequestUrl = url;
 
-      const response = await fetch(url, {
-        method,
-        headers: finalHeaders,
-        body: payload,
-        signal: mergedSignal,
-        credentials,
-      });
+      const response = await executeFetchWithRetry(
+        url,
+        {
+          method: upperMethod,
+          headers: finalHeaders,
+          body: payload,
+          signal: mergedSignal,
+          credentials,
+        },
+        {
+          ...requestConfig,
+          retries,
+          method: upperMethod,
+        }
+      );
 
       clearTimeout(timeoutId);
 
@@ -1555,7 +1739,7 @@ export const AppCore = (() => {
 
         events.emit("app:request:success", {
           url,
-          method,
+          method: upperMethod,
           status: response.status,
           response: hookedRaw,
         });
@@ -1570,7 +1754,7 @@ export const AppCore = (() => {
           response,
           data,
           url,
-          method,
+          method: upperMethod,
         });
 
         setError(error);
@@ -1586,7 +1770,7 @@ export const AppCore = (() => {
 
       events.emit("app:request:success", {
         url,
-        method,
+        method: upperMethod,
         status: response.status,
         data: hookedData,
       });
@@ -1595,26 +1779,18 @@ export const AppCore = (() => {
     } catch (error) {
       clearTimeout(timeoutId);
 
-      if (error?.name === "AbortError") {
+      if (isAbortError(error)) {
         const abortedByExternalSignal = signal?.aborted === true;
 
-        const abortError = abortedByExternalSignal
-          ? {
-              status: 0,
-              statusText: "Request aborted",
-              message: "La petición fue cancelada.",
-              url,
-              method,
-              aborted: true,
-            }
-          : {
-              status: 0,
-              statusText: "Request timeout",
-              message: `La petición superó ${timeout}ms`,
-              url,
-              method,
-              timeout: true,
-            };
+        const abortError = buildRequestError({
+          response: null,
+          data: null,
+          url,
+          method: upperMethod,
+          timeout: !abortedByExternalSignal,
+          aborted: abortedByExternalSignal,
+          raw: error?.reason || error?.message || error,
+        });
 
         setError(abortError);
         await runHookSeries(registry.hooks.onRequestError, abortError);
@@ -1625,14 +1801,18 @@ export const AppCore = (() => {
       const normalizedError =
         error?.status !== undefined
           ? error
-          : {
-              status: 0,
-              statusText: "Network Error",
-              message: error?.message || "Error de red no controlado",
+          : buildRequestError({
+              response: null,
+              data: null,
               url,
-              method,
-              raw: error,
-            };
+              method: upperMethod,
+              timeout: isProbablyTimeoutError(error),
+              raw: error?.message || error,
+            });
+
+      if (shouldRetryRequest(normalizedError, { ...requestConfig, retries })) {
+        normalizedError.retryable = true;
+      }
 
       setError(normalizedError);
       await runHookSeries(registry.hooks.onRequestError, normalizedError);
@@ -1666,6 +1846,25 @@ export const AppCore = (() => {
   };
 
   /* =========================================================
+     RED / ONLINE
+  ========================================================= */
+  function bindNetworkEvents() {
+    if (!isBrowser()) return;
+
+    cleanup.on("core:network", window, "online", () => {
+      state.online = true;
+      events.emit("app:network:change", { online: true });
+      utils.log("Conectividad recuperada.");
+    });
+
+    cleanup.on("core:network", window, "offline", () => {
+      state.online = false;
+      events.emit("app:network:change", { online: false });
+      utils.warn("El navegador está offline.");
+    });
+  }
+
+  /* =========================================================
      READY
   ========================================================= */
   function ready(callback) {
@@ -1683,28 +1882,28 @@ export const AppCore = (() => {
   /* =========================================================
      INIT
   ========================================================= */
-  async function init() {
-    if (state.initialized || state.booting) {
-      utils.warn("AppCore ya fue inicializado o está arrancando.");
-      return api;
-    }
-
+  async function doInit() {
     state.booting = true;
 
     try {
       await runHookSeries(registry.hooks.beforeInit, api);
+
+      config.apiBase = normalizeApiBase(config.apiBase);
 
       cacheDom();
       validateRequiredDom();
       loadPreferences();
       loadSession();
       syncBaseUI();
+      bindNetworkEvents();
 
       state.route = getCurrentLocationCanonicalPath();
       state.publicPath = getCurrentLocationPath();
       state.initialized = true;
       state.booting = false;
       state.ready = true;
+
+      initDone = true;
 
       utils.log("Core inicializado correctamente.", {
         version: config.version,
@@ -1715,6 +1914,7 @@ export const AppCore = (() => {
         theme: state.theme,
         authenticated: state.authenticated,
         username: getUserUsername(state.user) || null,
+        online: state.online,
       });
 
       events.emit("app:core:ready", {
@@ -1728,9 +1928,27 @@ export const AppCore = (() => {
     } catch (error) {
       state.booting = false;
       state.ready = false;
+      state.initialized = false;
       setError(error);
       throw error;
+    } finally {
+      initPromise = null;
     }
+  }
+
+  async function init() {
+    if (initDone || state.initialized) {
+      utils.warn("AppCore ya fue inicializado.");
+      return api;
+    }
+
+    if (initPromise) {
+      utils.warn("AppCore ya está arrancando.");
+      return initPromise;
+    }
+
+    initPromise = doInit();
+    return initPromise;
   }
 
   /* =========================================================

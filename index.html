@@ -4,6 +4,12 @@
   <!-- =========================================================
        ONION SUPPORT — INDEX / SPA SHELL
        PRO SAAS PANEL / FINAL PRO SYSTEM
+       Versión afinada para:
+       - shell SPA estable
+       - login auth-screen compatible
+       - loader limpio
+       - topbar / sidebar / dynamic slots
+       - rutas absolutas coherentes
   ========================================================= -->
 
   <!-- =========================
@@ -28,8 +34,9 @@
   <!-- =========================
        BASE SPA
        IMPORTANTE:
-       Mantén esto para que funcione bien
-       en local, subcarpetas y SPA.
+       - mantener en "/"
+       - coherente con Router + data-spa
+       - coherente con rutas absolutas /src/...
   ========================= -->
   <base href="/">
 
@@ -82,7 +89,8 @@
   ========================= -->
   <noscript>
     <style>
-      html, body {
+      html,
+      body {
         margin: 0;
         min-height: 100%;
         background: #0a0c11;
@@ -529,7 +537,7 @@
       aria-label="Contenido principal"
     >
       <!-- TOPBAR -->
-      <header class="topbar">
+      <header class="topbar" id="topbar">
         <div class="topbar-left">
           <button
             type="button"
@@ -588,13 +596,25 @@
       </header>
 
       <!-- TOPBAR VIEW SLOT -->
-      <div id="topbarview-container" data-dynamic></div>
+      <div
+        id="topbarview-container"
+        data-dynamic
+        aria-live="polite"
+      ></div>
 
       <!-- TABLE HEAD SLOT -->
-      <div id="tablehead-container" data-dynamic></div>
+      <div
+        id="tablehead-container"
+        data-dynamic
+        aria-live="polite"
+      ></div>
 
       <!-- VIEW ROOT -->
-      <div id="view-container"></div>
+      <div
+        id="view-container"
+        data-view-root
+        aria-live="polite"
+      ></div>
     </main>
   </div>
 

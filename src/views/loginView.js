@@ -15,6 +15,7 @@
    - respetar logo animado
    - soportar caps lock indicator
    - soportar toggle password tipo eye
+   - login limpio sin imagen lateral
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
@@ -64,7 +65,9 @@ export const LoginView = (() => {
     const redirectPath = getCurrentRedirectPath();
 
     if (!redirectPath) return "/";
-    if (redirectPath === "/login" || redirectPath.startsWith("/login?")) return "/";
+    if (redirectPath === "/login" || redirectPath.startsWith("/login?")) {
+      return "/";
+    }
 
     return AppCore.utils.normalizePath(redirectPath);
   }
@@ -146,6 +149,7 @@ export const LoginView = (() => {
     if (passwordInput) passwordInput.disabled = submitting;
     if (rememberInput) rememberInput.disabled = submitting;
     if (toggleBtn) toggleBtn.disabled = submitting;
+
     if (forgotLink) {
       forgotLink.setAttribute("aria-disabled", String(submitting));
       forgotLink.classList.toggle("is-disabled", submitting);
@@ -172,7 +176,13 @@ export const LoginView = (() => {
     cardEl.classList.add("shake");
   }
 
-  function showErrorState({ cardEl, feedbackEl, identifierInput, passwordInput, message }) {
+  function showErrorState({
+    cardEl,
+    feedbackEl,
+    identifierInput,
+    passwordInput,
+    message,
+  }) {
     setFieldError(identifierInput, true);
     setFieldError(passwordInput, true);
     setFeedback(feedbackEl, message, "error");
@@ -189,7 +199,12 @@ export const LoginView = (() => {
      IMPORTANTE:
      No usamos FormData después de deshabilitar inputs.
   ========================================================= */
-  function getFormPayload({ identifierInput, passwordInput, rememberInput, form }) {
+  function getFormPayload({
+    identifierInput,
+    passwordInput,
+    rememberInput,
+    form,
+  }) {
     const redirectInput = form?.querySelector('input[name="redirect"]');
 
     return {
@@ -208,7 +223,11 @@ export const LoginView = (() => {
 
     if (!identifier) {
       setFieldError(identifierInput, true);
-      setFeedback(feedbackEl, "Introduce tu email o nombre de usuario.", "error");
+      setFeedback(
+        feedbackEl,
+        "Introduce tu email o nombre de usuario.",
+        "error"
+      );
       identifierInput?.focus();
       return false;
     }
@@ -229,7 +248,11 @@ export const LoginView = (() => {
 
     if (password.length < 6) {
       setFieldError(passwordInput, true);
-      setFeedback(feedbackEl, "La contraseña debe tener al menos 6 caracteres.", "error");
+      setFeedback(
+        feedbackEl,
+        "La contraseña debe tener al menos 6 caracteres.",
+        "error"
+      );
       passwordInput?.focus();
       return false;
     }
@@ -240,7 +263,12 @@ export const LoginView = (() => {
   /* =========================================================
      PASSWORD TOGGLE
   ========================================================= */
-  function togglePasswordVisibility(passwordInput, toggleBtn, eyeOpenIcon, eyeClosedIcon) {
+  function togglePasswordVisibility(
+    passwordInput,
+    toggleBtn,
+    eyeOpenIcon,
+    eyeClosedIcon
+  ) {
     if (!passwordInput || !toggleBtn) return;
 
     const willShow = passwordInput.type === "password";
@@ -356,7 +384,10 @@ export const LoginView = (() => {
       localStorage.setItem("onion_user_name", user.name || user.nombre || "");
       localStorage.setItem("onion_role", user.role || "user");
     } catch (error) {
-      AppCore.utils.error?.("No se pudo persistir el estado legado del login", error);
+      AppCore.utils.error?.(
+        "No se pudo persistir el estado legado del login",
+        error
+      );
     }
   }
 
@@ -407,7 +438,11 @@ export const LoginView = (() => {
       tempToken: result?.tempToken || null,
     });
 
-    setFeedback(feedbackEl, "Verificación adicional requerida. Redirigiendo...", "info");
+    setFeedback(
+      feedbackEl,
+      "Verificación adicional requerida. Redirigiendo...",
+      "info"
+    );
 
     window.setTimeout(() => {
       if (typeof Router.navigate === "function") {
@@ -442,24 +477,18 @@ export const LoginView = (() => {
         <a href="/" class="back-arrow" aria-label="Volver al inicio" data-spa></a>
 
         <div class="login-wrapper">
-          <img
-            src="/media/img/Laptop_Access.png"
-            alt="Laptop Access"
-            class="login-laptop"
-            loading="eager"
-            decoding="async"
-          >
-
           <div class="login-card" id="loginCard">
             <div class="login-header">
               <div class="logo-fade" aria-hidden="true">
-                <img src="/media/img/favicon_black.png" alt="">
-                <img src="/media/img/favicon_black_circle.png" alt="">
-                <img src="/media/img/favicon_support.png" alt="">
-                <img src="/media/img/favicon_white.png" alt="">
+                <img src="/src/media/img/favicon_black.png" alt="">
+                <img src="/src/media/img/favicon_black_circle.png" alt="">
+                <img src="/src/media/img/favicon_support.png" alt="">
+                <img src="/src/media/img/favicon_white.png" alt="">
               </div>
 
-              <h2>Iniciar sesión con la cuenta ${escapeHtml(AppCore.config.appName)}</h2>
+              <h2>Iniciar sesión con la cuenta ${escapeHtml(
+                AppCore.config.appName
+              )}</h2>
             </div>
 
             <form id="loginForm" class="login-form" novalidate>
@@ -588,7 +617,9 @@ export const LoginView = (() => {
             </form>
 
             <div class="login-footer">
-              © ${new Date().getFullYear()} ${escapeHtml(AppCore.config.appName)} · v${escapeHtml(AppCore.config.version)}
+              © ${new Date().getFullYear()} ${escapeHtml(
+                AppCore.config.appName
+              )} · v${escapeHtml(AppCore.config.version)}
             </div>
           </div>
         </div>

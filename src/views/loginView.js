@@ -11,6 +11,7 @@
    - soportar login con username o email
    - soportar flujo opcional 2FA
    - redirigir correctamente tras login
+   - mantener visible el toast tras login hasta su desaparición
    - evitar pérdida de valores al deshabilitar inputs
    - respetar logo animado
    - soportar caps lock indicator con icono tipo apple
@@ -21,7 +22,6 @@
    - evitar reactivar el form tras login correcto
    - quitar bloques visuales sobrantes
    - conservar bloque lateral izquierdo de estado
-   - subir el card lateral izquierdo y hacerlo ligeramente más pequeño
    - mover el card principal a la derecha
    - mantener layout estable sin generar scroll
    - reducir efectos para un resultado más limpio
@@ -37,8 +37,15 @@ export const LoginView = (() => {
   const SCOPE = "view:login";
   const LOGO_ROTATE_INTERVAL = 3000;
   const LOGO_FADE_DURATION = 1800;
-  const SUCCESS_REDIRECT_DELAY = 220;
+
   const TOAST_DEFAULT_DURATION = 3600;
+  const LOGIN_LOADING_TOAST_TITLE = "Validando acceso";
+  const LOGIN_LOADING_TOAST_MESSAGE =
+    "Comprobando credenciales y preparando tu sesión...";
+
+  const SUCCESS_TOAST_DURATION = 1850;
+  const TWO_FA_TOAST_DURATION = 1850;
+  const NAVIGATION_BUFFER_MS = 80;
 
   let logoIntervalId = null;
   let redirectTimerId = null;
@@ -246,6 +253,14 @@ export const LoginView = (() => {
     window.location.href = target;
   }
 
+  function navigateAfterToast(path, duration) {
+    clearRedirectTimer();
+
+    redirectTimerId = window.setTimeout(() => {
+      navigateTo(path);
+    }, Math.max(0, Number(duration) || 0) + NAVIGATION_BUFFER_MS);
+  }
+
   /* =========================================================
      TOAST SYSTEM
   ========================================================= */
@@ -298,7 +313,13 @@ export const LoginView = (() => {
 
     if (!toastRoot) return;
 
-    toastRoot.classList.remove("is-visible", "is-success", "is-error", "is-info", "is-warning");
+    toastRoot.classList.remove(
+      "is-visible",
+      "is-success",
+      "is-error",
+      "is-info",
+      "is-warning"
+    );
     toastRoot.hidden = true;
     toastRoot.setAttribute("aria-hidden", "true");
     toastRoot.dataset.state = "default";
@@ -314,12 +335,14 @@ export const LoginView = (() => {
     type = "info",
     duration = TOAST_DEFAULT_DURATION,
     persistent = false,
+    closable = true,
   } = {}) {
     const {
       toastRoot,
       toastIcon,
       toastTitle,
       toastText,
+      toastClose,
       toastProgress,
     } = getToastElements();
 
@@ -339,6 +362,15 @@ export const LoginView = (() => {
 
     if (toastIcon) {
       toastIcon.innerHTML = getToastGlyph(type);
+    }
+
+    if (toastClose) {
+      toastClose.hidden = !closable;
+      toastClose.disabled = !closable;
+      toastClose.setAttribute("aria-hidden", String(!closable));
+      toastClose.tabIndex = closable ? 0 : -1;
+      toastClose.style.pointerEvents = closable ? "" : "none";
+      toastClose.style.opacity = closable ? "" : "0";
     }
 
     if (toastProgress) {
@@ -429,6 +461,8 @@ export const LoginView = (() => {
       message: message || "No se pudo iniciar sesión.",
       type: "error",
       duration: 4200,
+      persistent: false,
+      closable: true,
     });
 
     shakeCard(cardEl);
@@ -471,6 +505,7 @@ export const LoginView = (() => {
         message: "Introduce tu email o nombre de usuario.",
         type: "error",
         duration: 3400,
+        closable: true,
       });
       identifierInput?.focus();
       return false;
@@ -483,6 +518,7 @@ export const LoginView = (() => {
         message: "El formato del email no es válido.",
         type: "error",
         duration: 3400,
+        closable: true,
       });
       identifierInput?.focus();
       return false;
@@ -495,6 +531,7 @@ export const LoginView = (() => {
         message: "Introduce tu contraseña.",
         type: "error",
         duration: 3400,
+        closable: true,
       });
       passwordInput?.focus();
       return false;
@@ -507,6 +544,7 @@ export const LoginView = (() => {
         message: "La contraseña debe tener al menos 6 caracteres.",
         type: "error",
         duration: 3600,
+        closable: true,
       });
       passwordInput?.focus();
       return false;
@@ -549,7 +587,13 @@ export const LoginView = (() => {
   /* =========================================================
      CAPS LOCK
   ========================================================= */
-  function updateCapsVisual(capsWrap, capsIcon, capsLabel, passwordFocused, capsActive) {
+  function updateCapsVisual(
+    capsWrap,
+    capsIcon,
+    capsLabel,
+    passwordFocused,
+    capsActive
+  ) {
     const visible = Boolean(passwordFocused && capsActive);
 
     if (capsWrap) {
@@ -674,13 +718,12 @@ export const LoginView = (() => {
       title: "Acceso correcto",
       message: "Redirigiendo a tu espacio de trabajo...",
       type: "success",
-      duration: 2400,
+      duration: SUCCESS_TOAST_DURATION,
+      persistent: false,
+      closable: false,
     });
 
-    clearRedirectTimer();
-    redirectTimerId = window.setTimeout(() => {
-      navigateTo(redirectTo);
-    }, SUCCESS_REDIRECT_DELAY);
+    navigateAfterToast(redirectTo, SUCCESS_TOAST_DURATION);
   }
 
   function handle2FARequired(result) {
@@ -704,13 +747,12 @@ export const LoginView = (() => {
       title: "Verificación adicional",
       message: "Se requiere una comprobación extra. Redirigiendo...",
       type: "info",
-      duration: 2600,
+      duration: TWO_FA_TOAST_DURATION,
+      persistent: false,
+      closable: false,
     });
 
-    clearRedirectTimer();
-    redirectTimerId = window.setTimeout(() => {
-      navigateTo(redirectTo);
-    }, SUCCESS_REDIRECT_DELAY);
+    navigateAfterToast(redirectTo, TWO_FA_TOAST_DURATION);
   }
 
   /* =========================================================
@@ -1056,16 +1098,13 @@ export const LoginView = (() => {
       const nextState = event.getModifierState("CapsLock");
       if (nextState !== capsActive) {
         capsActive = nextState;
-        updateCapsVisual(capsWrap, capsIcon, capsLabel, passwordFocused, capsActive);
-
-        if (passwordFocused && capsActive) {
-          showToast({
-            title: "Bloq Mayús activado",
-            message: "La contraseña distingue mayúsculas y minúsculas.",
-            type: "warning",
-            duration: 2600,
-          });
-        }
+        updateCapsVisual(
+          capsWrap,
+          capsIcon,
+          capsLabel,
+          passwordFocused,
+          capsActive
+        );
       }
     }
 
@@ -1079,12 +1118,24 @@ export const LoginView = (() => {
         capsActive = event.getModifierState("CapsLock");
       }
 
-      updateCapsVisual(capsWrap, capsIcon, capsLabel, passwordFocused, capsActive);
+      updateCapsVisual(
+        capsWrap,
+        capsIcon,
+        capsLabel,
+        passwordFocused,
+        capsActive
+      );
     });
 
     AppCore.cleanup.on(scope, passwordInput, "blur", () => {
       passwordFocused = false;
-      updateCapsVisual(capsWrap, capsIcon, capsLabel, passwordFocused, capsActive);
+      updateCapsVisual(
+        capsWrap,
+        capsIcon,
+        capsLabel,
+        passwordFocused,
+        capsActive
+      );
     });
 
     AppCore.cleanup.on(scope, form, "submit", async (event) => {
@@ -1113,10 +1164,11 @@ export const LoginView = (() => {
       setSubmitting(controls, true);
 
       showToast({
-        title: "Validando acceso",
-        message: "Comprobando credenciales y preparando tu sesión...",
+        title: LOGIN_LOADING_TOAST_TITLE,
+        message: LOGIN_LOADING_TOAST_MESSAGE,
         type: "info",
         persistent: true,
+        closable: false,
       });
 
       try {
@@ -1145,6 +1197,7 @@ export const LoginView = (() => {
         });
 
         setSubmitting(controls, false);
+        isNavigatingAway = false;
       }
     });
 

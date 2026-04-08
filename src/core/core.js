@@ -208,6 +208,7 @@ export const AppCore = (() => {
     const suffix = cutIndex >= 0 ? raw.slice(cutIndex) : "";
 
     let cleanPathname = pathname || "/";
+
     if (cleanPathname.length > 1) {
       cleanPathname = cleanPathname.replace(/\/+$/, "");
     }
@@ -220,7 +221,9 @@ export const AppCore = (() => {
   function stripUsernamePrefix(path = "/") {
     const normalized = normalizePath(path);
     const [pathOnly, suffix = ""] = normalized.split(/([?#].*)/, 2);
-    const stripped = (pathOnly || "/").replace(/^\/@[^/]+(?=\/|$)/i, "") || "/";
+    const stripped =
+      (pathOnly || "/").replace(/^\/@[^/]+(?=\/|$)/i, "") || "/";
+
     return normalizePath(`${stripped}${suffix}`);
   }
 
@@ -805,7 +808,8 @@ export const AppCore = (() => {
 
   const cleanup = {
     scope(name = "global") {
-      return ensureScope(name) && name;
+      ensureScope(name);
+      return name;
     },
 
     on(scopeName = "global", target, event, handler, options = false) {
@@ -916,7 +920,9 @@ export const AppCore = (() => {
       registry.hooks[type].push(handler);
 
       return () => {
-        registry.hooks[type] = registry.hooks[type].filter((fn) => fn !== handler);
+        registry.hooks[type] = registry.hooks[type].filter(
+          (fn) => fn !== handler
+        );
       };
     },
 
@@ -928,7 +934,10 @@ export const AppCore = (() => {
   /* =========================================================
      STATE
   ========================================================= */
-  function computeAuthenticated(nextUser = state.user, nextToken = state.token) {
+  function computeAuthenticated(
+    nextUser = state.user,
+    nextToken = state.token
+  ) {
     return Boolean(normalizeUser(nextUser) || hasValidToken(nextToken));
   }
 
@@ -1098,7 +1107,8 @@ export const AppCore = (() => {
   }
 
   function setLang(lang = config.defaultLang) {
-    const normalizedLang = String(lang || config.defaultLang).trim() || config.defaultLang;
+    const normalizedLang =
+      String(lang || config.defaultLang).trim() || config.defaultLang;
 
     setState({ lang: normalizedLang });
     storage.set(config.storageKeys.lang, normalizedLang);
@@ -1293,7 +1303,10 @@ export const AppCore = (() => {
      PREFERENCIAS / SESIÓN
   ========================================================= */
   function loadPreferences() {
-    const savedTheme = storage.get(config.storageKeys.theme, config.defaultTheme);
+    const savedTheme = storage.get(
+      config.storageKeys.theme,
+      config.defaultTheme
+    );
     const savedLang = storage.get(config.storageKeys.lang, config.defaultLang);
     const savedSidebarOpen = storage.get(config.storageKeys.sidebarOpen, true);
 
@@ -1380,7 +1393,12 @@ export const AppCore = (() => {
     return response.text();
   }
 
-  function buildRequestError({ response = null, data = null, url = "", method = "" }) {
+  function buildRequestError({
+    response = null,
+    data = null,
+    url = "",
+    method = "",
+  }) {
     if (!response) {
       return {
         status: 0,

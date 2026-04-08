@@ -16,6 +16,7 @@
    - soportar caps lock indicator
    - soportar toggle password tipo eye
    - login limpio sin imagen lateral
+   - forzar apagado del loader al renderizar login
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
@@ -108,6 +109,40 @@ export const LoginView = (() => {
         AppCore.dom.tableheadContainer ||
         document.getElementById("tablehead-container"),
     };
+  }
+
+  function forceHideGlobalLoader() {
+    const loader =
+      AppCore.dom.loader || document.getElementById("app-loader");
+
+    if (typeof AppCore.setLoading === "function") {
+      AppCore.setLoading(false);
+    }
+
+    if (document?.body) {
+      document.body.classList.remove("loading");
+    }
+
+    if (loader) {
+      loader.hidden = true;
+      loader.setAttribute("aria-hidden", "true");
+      loader.style.display = "none";
+      loader.style.opacity = "0";
+      loader.style.visibility = "hidden";
+      loader.style.pointerEvents = "none";
+    }
+  }
+
+  function restoreGlobalLoaderStyles() {
+    const loader =
+      AppCore.dom.loader || document.getElementById("app-loader");
+
+    if (!loader) return;
+
+    loader.style.display = "";
+    loader.style.opacity = "";
+    loader.style.visibility = "";
+    loader.style.pointerEvents = "";
   }
 
   function setAuthScreen(active) {
@@ -494,14 +529,17 @@ export const LoginView = (() => {
   ========================================================= */
   function render() {
     const container = getContainer();
+
     if (!container) {
       AppCore.utils.warn(
         "LoginView: no se encontró #view-container para renderizar."
       );
+      forceHideGlobalLoader();
       return;
     }
 
     clearLoginScope();
+    restoreGlobalLoaderStyles();
     setAuthScreen(true);
 
     AppCore.clearDynamicContainers?.();
@@ -517,10 +555,10 @@ export const LoginView = (() => {
           <div class="login-card" id="loginCard">
             <div class="login-header">
               <div class="logo-fade" aria-hidden="true">
-                <img src="/src/media/img/favicon_black.png" alt="">
-                <img src="/src/media/img/favicon_black_circle.png" alt="">
-                <img src="/src/media/img/favicon_support.png" alt="">
-                <img src="/src/media/img/favicon_white.png" alt="">
+                <img src="./src/media/img/favicon_black.png" alt="">
+                <img src="./src/media/img/favicon_black_circle.png" alt="">
+                <img src="./src/media/img/favicon_support.png" alt="">
+                <img src="./src/media/img/favicon_white.png" alt="">
               </div>
 
               <h2>Iniciar sesión con la cuenta ${escapeHtml(
@@ -663,6 +701,7 @@ export const LoginView = (() => {
       </section>
     `;
 
+    forceHideGlobalLoader();
     bind();
   }
 
@@ -696,6 +735,7 @@ export const LoginView = (() => {
       AppCore.utils.warn(
         "LoginView: faltan nodos críticos del formulario de acceso."
       );
+      forceHideGlobalLoader();
       return;
     }
 
@@ -715,6 +755,7 @@ export const LoginView = (() => {
     startLogoAnimation(logoImages);
     focusInitialField(identifierInput);
     updateCapsVisual(capsIcon, passwordFocused, capsActive);
+    forceHideGlobalLoader();
 
     if (toggleBtn) {
       AppCore.cleanup.on(scope, toggleBtn, "click", () => {
@@ -838,6 +879,7 @@ export const LoginView = (() => {
     AppCore.cleanup.add(scope, () => {
       stopLogoAnimation();
       setAuthScreen(false);
+      restoreGlobalLoaderStyles();
     });
   }
 

@@ -266,7 +266,10 @@ export const Http = (() => {
     let attempt = 0;
     let lastError = null;
 
-    while (attempt === 0 || shouldRetry(lastError, requestConfig, attempt - 1)) {
+    while (
+      attempt === 0 ||
+      shouldRetry(lastError, requestConfig, attempt - 1)
+    ) {
       try {
         return await executeBaseRequest(requestConfig);
       } catch (error) {
@@ -310,15 +313,16 @@ export const Http = (() => {
       ...options,
     };
 
-    const useLoader = shouldToggleGlobalLoader(requestConfig);
-
     try {
       requestConfig = await runRequestInterceptors(requestConfig);
+
+      const useLoader = shouldToggleGlobalLoader(requestConfig);
 
       if (config.logRequests) {
         AppCore.utils.log("HTTP →", requestConfig.method, requestConfig.path, {
           query: requestConfig.query || null,
           auth: requestConfig.auth !== false,
+          useLoader,
         });
       }
 
@@ -372,7 +376,7 @@ export const Http = (() => {
 
       throw normalized;
     } finally {
-      if (useLoader) {
+      if (shouldToggleGlobalLoader(requestConfig)) {
         const pending = decrementPendingRequests();
 
         if (pending === 0) {
@@ -418,7 +422,6 @@ export const Http = (() => {
      INTERCEPTORES DEFAULT
   ========================================================= */
 
-  // Debug request
   useRequest((requestConfig) => {
     if (AppCore.config.debug) {
       AppCore.utils.log("HTTP request config", {
@@ -433,7 +436,6 @@ export const Http = (() => {
     return requestConfig;
   });
 
-  // Debug response
   useResponse((response) => {
     if (AppCore.config.debug) {
       AppCore.utils.log("HTTP ✓ response", response);
@@ -442,7 +444,6 @@ export const Http = (() => {
     return response;
   });
 
-  // Debug error
   useError((error) => {
     AppCore.utils.error("HTTP ✗ error", error);
   });

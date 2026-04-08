@@ -7,21 +7,22 @@
    - activar modo fullscreen auth
    - validar credenciales en cliente
    - enviar login a Auth
-   - mostrar feedback visual de estado/error
+   - mostrar feedback visual mediante toast
    - soportar login con username o email
    - soportar flujo opcional 2FA
    - redirigir correctamente tras login
    - evitar pérdida de valores al deshabilitar inputs
    - respetar logo animado
-   - soportar caps lock indicator
+   - soportar caps lock indicator con icono tipo apple
    - soportar toggle password tipo eye
-   - login limpio sin imagen lateral
+   - login limpio sin mensajes dentro del card
    - forzar apagado del loader al renderizar login
    - usar rutas absolutas coherentes con el shell SPA
    - evitar reactivar el form tras login correcto
    - quitar bloques visuales sobrantes
    - conservar bloque lateral izquierdo de estado
-   - mover el card más a la derecha
+   - subir el card lateral izquierdo y hacerlo ligeramente más pequeño
+   - mover el card principal a la derecha
    - mantener layout estable sin generar scroll
    - reducir efectos para un resultado más limpio
 ========================================================= */
@@ -37,9 +38,11 @@ export const LoginView = (() => {
   const LOGO_ROTATE_INTERVAL = 3000;
   const LOGO_FADE_DURATION = 1800;
   const SUCCESS_REDIRECT_DELAY = 220;
+  const TOAST_DEFAULT_DURATION = 3600;
 
   let logoIntervalId = null;
   let redirectTimerId = null;
+  let toastTimerId = null;
   let isNavigatingAway = false;
 
   /* =========================================================
@@ -89,6 +92,13 @@ export const LoginView = (() => {
     if (redirectTimerId) {
       window.clearTimeout(redirectTimerId);
       redirectTimerId = null;
+    }
+  }
+
+  function clearToastTimer() {
+    if (toastTimerId) {
+      window.clearTimeout(toastTimerId);
+      toastTimerId = null;
     }
   }
 
@@ -206,6 +216,7 @@ export const LoginView = (() => {
   function clearLoginScope() {
     stopLogoAnimation();
     clearRedirectTimer();
+    clearToastTimer();
     AppCore.cleanup.run(SCOPE);
   }
 
@@ -236,16 +247,118 @@ export const LoginView = (() => {
   }
 
   /* =========================================================
-     FEEDBACK / STATE
+     TOAST SYSTEM
   ========================================================= */
-  function setFeedback(feedbackEl, message = "", type = "default") {
-    if (!feedbackEl) return;
-
-    feedbackEl.textContent = message || "";
-    feedbackEl.dataset.state = type || "default";
-    feedbackEl.hidden = !message;
+  function getToastElements() {
+    return {
+      toastRoot: document.getElementById("loginToast"),
+      toastIcon: document.getElementById("loginToastIcon"),
+      toastTitle: document.getElementById("loginToastTitle"),
+      toastText: document.getElementById("loginToastText"),
+      toastClose: document.getElementById("loginToastClose"),
+      toastProgress: document.getElementById("loginToastProgress"),
+    };
   }
 
+  function getToastGlyph(type = "default") {
+    if (type === "success") {
+      return `
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+          <path fill="currentColor" d="M9.55 16.6 5.4 12.45l1.4-1.4 2.75 2.75 7.65-7.65 1.4 1.4-9.05 9.05Z"/>
+        </svg>
+      `;
+    }
+
+    if (type === "error") {
+      return `
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+          <path fill="currentColor" d="M12 2 1 21h22L12 2Zm1 15h-2v-2h2v2Zm0-4h-2V9h2v4Z"/>
+        </svg>
+      `;
+    }
+
+    if (type === "warning") {
+      return `
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+          <path fill="currentColor" d="M12 2 1 21h22L12 2Zm1 14h-2v-2h2v2Zm0-4h-2V8h2v4Z"/>
+        </svg>
+      `;
+    }
+
+    return `
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+        <path fill="currentColor" d="M11 7h2V5h-2v2Zm0 12h2V9h-2v10Zm1-17C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2Z"/>
+      </svg>
+    `;
+  }
+
+  function hideToast() {
+    const { toastRoot, toastProgress } = getToastElements();
+    clearToastTimer();
+
+    if (!toastRoot) return;
+
+    toastRoot.classList.remove("is-visible", "is-success", "is-error", "is-info", "is-warning");
+    toastRoot.hidden = true;
+    toastRoot.setAttribute("aria-hidden", "true");
+    toastRoot.dataset.state = "default";
+
+    if (toastProgress) {
+      toastProgress.style.animation = "none";
+    }
+  }
+
+  function showToast({
+    title = "Aviso",
+    message = "",
+    type = "info",
+    duration = TOAST_DEFAULT_DURATION,
+    persistent = false,
+  } = {}) {
+    const {
+      toastRoot,
+      toastIcon,
+      toastTitle,
+      toastText,
+      toastProgress,
+    } = getToastElements();
+
+    if (!toastRoot || !toastTitle || !toastText) return;
+
+    clearToastTimer();
+
+    toastRoot.hidden = false;
+    toastRoot.setAttribute("aria-hidden", "false");
+    toastRoot.dataset.state = type;
+
+    toastRoot.classList.remove("is-success", "is-error", "is-info", "is-warning");
+    toastRoot.classList.add("is-visible", `is-${type}`);
+
+    toastTitle.textContent = title || "Aviso";
+    toastText.textContent = message || "";
+
+    if (toastIcon) {
+      toastIcon.innerHTML = getToastGlyph(type);
+    }
+
+    if (toastProgress) {
+      toastProgress.style.animation = "none";
+      void toastProgress.offsetWidth;
+      toastProgress.style.animation = persistent
+        ? "none"
+        : `loginToastProgress ${Math.max(1200, Number(duration) || TOAST_DEFAULT_DURATION)}ms linear forwards`;
+    }
+
+    if (!persistent) {
+      toastTimerId = window.setTimeout(() => {
+        hideToast();
+      }, Math.max(1200, Number(duration) || TOAST_DEFAULT_DURATION));
+    }
+  }
+
+  /* =========================================================
+     FEEDBACK / STATE
+  ========================================================= */
   function setFieldError(input, active = false) {
     if (!input) return;
 
@@ -304,14 +417,20 @@ export const LoginView = (() => {
 
   function showErrorState({
     cardEl,
-    feedbackEl,
     identifierInput,
     passwordInput,
     message,
   }) {
     setFieldError(identifierInput, true);
     setFieldError(passwordInput, true);
-    setFeedback(feedbackEl, message, "error");
+
+    showToast({
+      title: "Acceso denegado",
+      message: message || "No se pudo iniciar sesión.",
+      type: "error",
+      duration: 4200,
+    });
+
     shakeCard(cardEl);
 
     window.setTimeout(() => {
@@ -339,7 +458,7 @@ export const LoginView = (() => {
     };
   }
 
-  function validate({ identifierInput, passwordInput, feedbackEl }) {
+  function validate({ identifierInput, passwordInput }) {
     const identifier = normalizeIdentifier(identifierInput?.value || "");
     const password = String(passwordInput?.value || "");
 
@@ -347,36 +466,48 @@ export const LoginView = (() => {
 
     if (!identifier) {
       setFieldError(identifierInput, true);
-      setFeedback(
-        feedbackEl,
-        "Introduce tu email o nombre de usuario.",
-        "error"
-      );
+      showToast({
+        title: "Campo requerido",
+        message: "Introduce tu email o nombre de usuario.",
+        type: "error",
+        duration: 3400,
+      });
       identifierInput?.focus();
       return false;
     }
 
     if (identifier.includes("@") && !isEmail(identifier)) {
       setFieldError(identifierInput, true);
-      setFeedback(feedbackEl, "El formato del email no es válido.", "error");
+      showToast({
+        title: "Email no válido",
+        message: "El formato del email no es válido.",
+        type: "error",
+        duration: 3400,
+      });
       identifierInput?.focus();
       return false;
     }
 
     if (!password.trim()) {
       setFieldError(passwordInput, true);
-      setFeedback(feedbackEl, "Introduce tu contraseña.", "error");
+      showToast({
+        title: "Campo requerido",
+        message: "Introduce tu contraseña.",
+        type: "error",
+        duration: 3400,
+      });
       passwordInput?.focus();
       return false;
     }
 
     if (password.length < 6) {
       setFieldError(passwordInput, true);
-      setFeedback(
-        feedbackEl,
-        "La contraseña debe tener al menos 6 caracteres.",
-        "error"
-      );
+      showToast({
+        title: "Contraseña demasiado corta",
+        message: "La contraseña debe tener al menos 6 caracteres.",
+        type: "error",
+        duration: 3600,
+      });
       passwordInput?.focus();
       return false;
     }
@@ -418,9 +549,21 @@ export const LoginView = (() => {
   /* =========================================================
      CAPS LOCK
   ========================================================= */
-  function updateCapsVisual(capsIcon, passwordFocused, capsActive) {
-    if (!capsIcon) return;
-    capsIcon.hidden = !(passwordFocused && capsActive);
+  function updateCapsVisual(capsWrap, capsIcon, capsLabel, passwordFocused, capsActive) {
+    const visible = Boolean(passwordFocused && capsActive);
+
+    if (capsWrap) {
+      capsWrap.hidden = !visible;
+      capsWrap.classList.toggle("is-visible", visible);
+    }
+
+    if (capsIcon) {
+      capsIcon.hidden = !visible;
+    }
+
+    if (capsLabel) {
+      capsLabel.hidden = !visible;
+    }
   }
 
   /* =========================================================
@@ -515,7 +658,7 @@ export const LoginView = (() => {
     }
   }
 
-  function handleSuccessfulLogin(result, feedbackEl, payload) {
+  function handleSuccessfulLogin(result, payload) {
     const redirectTo = resolvePostLoginPath(result, payload?.identifier || "");
     isNavigatingAway = true;
 
@@ -527,7 +670,12 @@ export const LoginView = (() => {
       redirectTo,
     });
 
-    setFeedback(feedbackEl, "Acceso correcto. Redirigiendo...", "success");
+    showToast({
+      title: "Acceso correcto",
+      message: "Redirigiendo a tu espacio de trabajo...",
+      type: "success",
+      duration: 2400,
+    });
 
     clearRedirectTimer();
     redirectTimerId = window.setTimeout(() => {
@@ -535,7 +683,7 @@ export const LoginView = (() => {
     }, SUCCESS_REDIRECT_DELAY);
   }
 
-  function handle2FARequired(result, feedbackEl) {
+  function handle2FARequired(result) {
     const redirectTo = result?.redirectTo || "/2fa";
     isNavigatingAway = true;
 
@@ -552,11 +700,12 @@ export const LoginView = (() => {
       tempToken: result?.tempToken || null,
     });
 
-    setFeedback(
-      feedbackEl,
-      "Verificación adicional requerida. Redirigiendo...",
-      "info"
-    );
+    showToast({
+      title: "Verificación adicional",
+      message: "Se requiere una comprobación extra. Redirigiendo...",
+      type: "info",
+      duration: 2600,
+    });
 
     clearRedirectTimer();
     redirectTimerId = window.setTimeout(() => {
@@ -593,10 +742,50 @@ export const LoginView = (() => {
 
     container.innerHTML = `
       <section class="login-view login-view--clean" aria-label="Pantalla de acceso">
+        <div class="login-toast-stack login-toast-stack--top-right" aria-live="polite" aria-atomic="true">
+          <div
+            id="loginToast"
+            class="login-toast"
+            role="status"
+            aria-hidden="true"
+            data-state="default"
+            hidden
+          >
+            <div class="login-toast-glow" aria-hidden="true"></div>
+
+            <div class="login-toast-body">
+              <div id="loginToastIcon" class="login-toast-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                  <path fill="currentColor" d="M11 7h2V5h-2v2Zm0 12h2V9h-2v10Zm1-17C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2Z"/>
+                </svg>
+              </div>
+
+              <div class="login-toast-content">
+                <div id="loginToastTitle" class="login-toast-title">Aviso</div>
+                <div id="loginToastText" class="login-toast-text"></div>
+              </div>
+
+              <button
+                type="button"
+                id="loginToastClose"
+                class="login-toast-close"
+                aria-label="Cerrar aviso"
+                title="Cerrar aviso"
+              >
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                  <path fill="currentColor" d="M18.3 5.71 12 12.01l-6.3-6.3-1.41 1.41 6.3 6.3-6.3 6.29 1.41 1.41 6.3-6.29 6.29 6.29 1.41-1.41-6.29-6.29 6.29-6.3-1.41-1.41Z"/>
+                </svg>
+              </button>
+            </div>
+
+            <span id="loginToastProgress" class="login-toast-progress" aria-hidden="true"></span>
+          </div>
+        </div>
+
         <div class="login-scene">
           <div class="login-grid login-grid--clean" id="loginGrid">
-            <aside class="login-side login-side-left" aria-hidden="true">
-              <div class="login-side-panel login-side-panel--status">
+            <aside class="login-side login-side-left login-side-left--raised" aria-hidden="true">
+              <div class="login-side-panel login-side-panel--status login-side-panel--compact">
                 <div class="login-side-eyebrow">Entorno seguro</div>
                 <h3>Tu acceso entra en un panel más vivo y con más presencia visual.</h3>
 
@@ -643,15 +832,6 @@ export const LoginView = (() => {
                       name="redirect"
                       value="${escapeHtml(redirectPath || "")}"
                     >
-
-                    <div
-                      class="login-error"
-                      id="loginError"
-                      role="alert"
-                      aria-live="polite"
-                      data-state="default"
-                      hidden
-                    ></div>
 
                     <div class="login-field">
                       <input
@@ -718,20 +898,32 @@ export const LoginView = (() => {
                         </svg>
                       </button>
 
-                      <svg
-                        id="capsIcon"
-                        class="caps-icon"
-                        viewBox="0 0 24 24"
-                        width="18"
-                        height="18"
-                        aria-hidden="true"
+                      <div
+                        id="capsIndicator"
+                        class="caps-indicator"
+                        aria-live="polite"
+                        aria-atomic="true"
                         hidden
                       >
-                        <path
-                          fill="currentColor"
-                          d="M12 3l6 6h-4v6h-4V9H6l6-6zM6 19h12v2H6z"
-                        />
-                      </svg>
+                        <svg
+                          id="capsIcon"
+                          class="caps-icon"
+                          viewBox="0 0 24 24"
+                          width="18"
+                          height="18"
+                          aria-hidden="true"
+                          hidden
+                        >
+                          <path
+                            fill="currentColor"
+                            d="M12 3.2 18.8 10h-4.2v5.2h-5.2V10H5.2L12 3.2Zm-4.9 14h9.8a1.1 1.1 0 0 1 0 2.2H7.1a1.1 1.1 0 0 1 0-2.2Z"
+                          />
+                        </svg>
+
+                        <span id="capsLabel" class="caps-label" hidden>
+                          Caps activado
+                        </span>
+                      </div>
                     </div>
 
                     <div class="login-options">
@@ -786,7 +978,6 @@ export const LoginView = (() => {
     const form = document.getElementById("loginForm");
     const card = document.getElementById("loginCard");
     const button = document.getElementById("loginButton");
-    const feedbackEl = document.getElementById("loginError");
 
     const identifierInput = document.getElementById("username");
     const passwordInput = document.getElementById("password");
@@ -795,15 +986,20 @@ export const LoginView = (() => {
     const toggleBtn = document.getElementById("togglePassword");
     const eyeOpenIcon = document.getElementById("eyeOpenIcon");
     const eyeClosedIcon = document.getElementById("eyeClosedIcon");
+
+    const capsWrap = document.getElementById("capsIndicator");
     const capsIcon = document.getElementById("capsIcon");
+    const capsLabel = document.getElementById("capsLabel");
+
     const forgotLink = document.getElementById("forgotPasswordLink");
+    const toastClose = document.getElementById("loginToastClose");
 
     const logoContainer = document.querySelector(".logo-fade");
     const logoImages = logoContainer
       ? Array.from(logoContainer.querySelectorAll("img"))
       : [];
 
-    if (!form || !identifierInput || !passwordInput || !button || !feedbackEl) {
+    if (!form || !identifierInput || !passwordInput || !button) {
       AppCore.utils.warn(
         "LoginView: faltan nodos críticos del formulario de acceso."
       );
@@ -826,8 +1022,14 @@ export const LoginView = (() => {
 
     startLogoAnimation(logoImages);
     focusInitialField(identifierInput);
-    updateCapsVisual(capsIcon, passwordFocused, capsActive);
+    updateCapsVisual(capsWrap, capsIcon, capsLabel, passwordFocused, capsActive);
     forceHideGlobalLoader();
+
+    if (toastClose) {
+      AppCore.cleanup.on(scope, toastClose, "click", () => {
+        hideToast();
+      });
+    }
 
     if (toggleBtn) {
       AppCore.cleanup.on(scope, toggleBtn, "click", () => {
@@ -842,18 +1044,10 @@ export const LoginView = (() => {
 
     AppCore.cleanup.on(scope, identifierInput, "input", () => {
       setFieldError(identifierInput, false);
-
-      if (!feedbackEl.hidden) {
-        setFeedback(feedbackEl, "", "default");
-      }
     });
 
     AppCore.cleanup.on(scope, passwordInput, "input", () => {
       setFieldError(passwordInput, false);
-
-      if (!feedbackEl.hidden) {
-        setFeedback(feedbackEl, "", "default");
-      }
     });
 
     function updateCapsState(event) {
@@ -862,33 +1056,46 @@ export const LoginView = (() => {
       const nextState = event.getModifierState("CapsLock");
       if (nextState !== capsActive) {
         capsActive = nextState;
-        updateCapsVisual(capsIcon, passwordFocused, capsActive);
+        updateCapsVisual(capsWrap, capsIcon, capsLabel, passwordFocused, capsActive);
+
+        if (passwordFocused && capsActive) {
+          showToast({
+            title: "Bloq Mayús activado",
+            message: "La contraseña distingue mayúsculas y minúsculas.",
+            type: "warning",
+            duration: 2600,
+          });
+        }
       }
     }
 
     AppCore.cleanup.on(scope, document, "keydown", updateCapsState);
     AppCore.cleanup.on(scope, document, "keyup", updateCapsState);
 
-    AppCore.cleanup.on(scope, passwordInput, "focus", () => {
+    AppCore.cleanup.on(scope, passwordInput, "focus", (event) => {
       passwordFocused = true;
-      updateCapsVisual(capsIcon, passwordFocused, capsActive);
+
+      if (event?.getModifierState) {
+        capsActive = event.getModifierState("CapsLock");
+      }
+
+      updateCapsVisual(capsWrap, capsIcon, capsLabel, passwordFocused, capsActive);
     });
 
     AppCore.cleanup.on(scope, passwordInput, "blur", () => {
       passwordFocused = false;
-      updateCapsVisual(capsIcon, passwordFocused, capsActive);
+      updateCapsVisual(capsWrap, capsIcon, capsLabel, passwordFocused, capsActive);
     });
 
     AppCore.cleanup.on(scope, form, "submit", async (event) => {
       event.preventDefault();
 
-      setFeedback(feedbackEl, "", "default");
+      hideToast();
       clearFieldErrors([identifierInput, passwordInput]);
 
       const isValid = validate({
         identifierInput,
         passwordInput,
-        feedbackEl,
       });
 
       if (!isValid) {
@@ -904,7 +1111,13 @@ export const LoginView = (() => {
       });
 
       setSubmitting(controls, true);
-      setFeedback(feedbackEl, "Validando acceso...", "info");
+
+      showToast({
+        title: "Validando acceso",
+        message: "Comprobando credenciales y preparando tu sesión...",
+        type: "info",
+        persistent: true,
+      });
 
       try {
         const result = await Auth.login({
@@ -914,11 +1127,11 @@ export const LoginView = (() => {
         });
 
         if (result?.requires2FA) {
-          handle2FARequired(result, feedbackEl);
+          handle2FARequired(result);
           return;
         }
 
-        handleSuccessfulLogin(result, feedbackEl, payload);
+        handleSuccessfulLogin(result, payload);
       } catch (error) {
         const message = getErrorMessage(error);
 
@@ -926,7 +1139,6 @@ export const LoginView = (() => {
 
         showErrorState({
           cardEl: card,
-          feedbackEl,
           identifierInput,
           passwordInput,
           message,
@@ -952,8 +1164,10 @@ export const LoginView = (() => {
     AppCore.cleanup.add(scope, () => {
       stopLogoAnimation();
       clearRedirectTimer();
+      clearToastTimer();
 
       if (!isNavigatingAway) {
+        hideToast();
         setAuthScreen(false);
         restoreGlobalLoaderStyles();
       }

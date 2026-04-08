@@ -51,6 +51,17 @@ export const LoginView = (() => {
     return /\S+@\S+\.\S+/.test(String(value || "").trim());
   }
 
+  function slugify(value = "") {
+    return String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, "-")
+      .replace(/[^a-zA-Z0-9-_]/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .toLowerCase();
+  }
+
   function getCurrentRedirectPath() {
     try {
       const url = new URL(window.location.href);
@@ -83,9 +94,27 @@ export const LoginView = (() => {
   }
 
   function setAuthScreen(active) {
+    if (!document?.body) return;
     document.body.classList.toggle("auth-screen", Boolean(active));
+    document.body.classList.toggle("route-auth", Boolean(active));
+    document.body.classList.toggle("route-shell-hidden", Boolean(active));
   }
 
+  function clearLoginScope() {
+    stopLogoAnimation();
+    AppCore.cleanup.run(SCOPE);
+  }
+
+  function focusInitialField(identifierInput) {
+    window.setTimeout(() => {
+      identifierInput?.focus();
+      identifierInput?.select?.();
+    }, 0);
+  }
+
+  /* =========================================================
+     FEEDBACK / STATE
+  ========================================================= */
   function setFeedback(feedbackEl, message = "", type = "default") {
     if (!feedbackEl) return;
 
@@ -103,29 +132,6 @@ export const LoginView = (() => {
 
   function clearFieldErrors(inputs = []) {
     inputs.forEach((input) => setFieldError(input, false));
-  }
-
-  function focusInitialField(identifierInput) {
-    window.setTimeout(() => {
-      identifierInput?.focus();
-      identifierInput?.select?.();
-    }, 0);
-  }
-
-  function clearLoginScope() {
-    stopLogoAnimation();
-    AppCore.cleanup.run(SCOPE);
-  }
-
-  function slugify(value = "") {
-    return String(value || "")
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/\s+/g, "-")
-      .replace(/[^a-zA-Z0-9-_]/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .toLowerCase();
   }
 
   function setSubmitting(controls, isSubmitting) {
@@ -165,9 +171,6 @@ export const LoginView = (() => {
     }
   }
 
-  /* =========================================================
-     FEEDBACK UX
-  ========================================================= */
   function shakeCard(cardEl) {
     if (!cardEl) return;
 
@@ -196,8 +199,6 @@ export const LoginView = (() => {
 
   /* =========================================================
      LECTURA ROBUSTA DEL FORM
-     IMPORTANTE:
-     No usamos FormData después de deshabilitar inputs.
   ========================================================= */
   function getFormPayload({
     identifierInput,
@@ -795,7 +796,7 @@ export const LoginView = (() => {
       }
     });
 
-    AppCore.cleanup.add?.(scope, () => {
+    AppCore.cleanup.add(scope, () => {
       stopLogoAnimation();
       setAuthScreen(false);
     });

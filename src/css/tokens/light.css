@@ -1,0 +1,252 @@
+[data-theme="light"] {
+  /* =========================================================
+     ONION SUPPORT — LIGHT THEME / PRO SAAS PANEL
+  ========================================================= */
+
+  /* =========================
+     BRAND
+  ========================= */
+  --accent: #7c3aed;
+  --accent-hover: #6d28d9;
+  --accent-active: #5b21b6;
+  --accent-soft: rgba(124, 58, 237, 0.12);
+  --accent-ghost: rgba(124, 58, 237, 0.08);
+  --accent-ring: rgba(124, 58, 237, 0.18);
+
+  --brand-2: #16a34a;
+  --brand-3: #0891b2;
+
+
+  /* =========================
+     TEXT
+  ========================= */
+  --text: #0f172a;
+  --text-strong: #020617;
+  --text-muted: #334155;
+  --text-dim: #64748b;
+  --text-faint: #94a3b8;
+  --text-on-accent: #ffffff;
+
+  /* Compat legacy */
+  --muted: var(--text-muted);
+  --dim: var(--text-dim);
+
+
+  /* =========================
+     BASE / BACKDROP
+  ========================= */
+  --main-bg: #f4f7fb;
+  --body-bg:
+    radial-gradient(circle at top left, rgba(124,58,237,.06), transparent 24%),
+    radial-gradient(circle at top right, rgba(8,145,178,.05), transparent 22%),
+    linear-gradient(180deg, #f8fbff 0%, #f1f5f9 100%);
+
+  --app-noise: radial-gradient(
+    circle at 50% 0%,
+    rgba(255,255,255,0.60),
+    transparent 65%
+  );
+
+
+  /* =========================
+     SURFACE SYSTEM
+  ========================= */
+  --surface-0: #f4f7fb;
+  --surface-1: #f8fafc;
+  --surface-2: #ffffff;
+  --surface-3: #f8fbff;
+  --surface-4: #eef3f8;
+
+  --surface-elevated: rgba(255, 255, 255, 0.88);
+  --surface-glass: rgba(255, 255, 255, 0.72);
+  --surface-glass-strong: rgba(255, 255, 255, 0.84);
+
+  /* Compat legacy */
+  --dropdown-bg: var(--surface-2);
+
+
+  /* =========================
+     BORDERS
+  ========================= */
+  --border-soft: rgba(15, 23, 42, 0.06);
+  --border-default: rgba(15, 23, 42, 0.10);
+  --border-strong: rgba(15, 23, 42, 0.16);
+  --border-accent: rgba(124, 58, 237, 0.26);
+
+
+  /* =========================
+     CARD / PANEL
+  ========================= */
+  --card-bg:
+    linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(248,250,252,0.98) 100%);
+  --card-border: rgba(15, 23, 42, 0.08);
+  --card-radius: 24px;
+  --card-radius-lg: 28px;
+
+  --card-shadow:
+    0 10px 30px rgba(15,23,42,0.06),
+    0 2px 8px rgba(15,23,42,0.04);
+
+  --card-shadow-hover:
+    0 18px 40px rgba(15,23,42,0.10),
+    0 6px 16px rgba(15,23,42,0.06);
+
+  --panel-bg:
+    linear-gradient(180deg, rgba(255,255,255,0.94) 0%, rgba(248,250,252,0.98) 100%);
+  --panel-border: rgba(15, 23, 42, 0.08);
+  --panel-radius: 20px;
+
+  --panel-shadow:
+    0 12px 28px rgba(15,23,42,0.06),
+    0 2px 8px rgba(15,23,42,0.04);
+
+
+  /* =========================
+     INPUTS
+  ========================= */
+  --input-height: 52px;
+  --input-bg: #ffffff;
+  --input-bg-hover: #fcfdff;
+  --input-border: rgba(15, 23, 42, 0.10);
+  --input-border-hover: rgba(15, 23, 42, 0.18);
+  --input-border-focus: rgba(124, 58, 237, 0.52);
+  --input-text: var(--text);
+  --input-placeholder: #94a3b8;
+  --input-radius: 16px;
+  --input-shadow-focus:
+    0 0 0 4px rgba(124,58,237,.12),
+    0 10px 24px rgba(124,58,237,.08);
+
+
+  /* =========================
+     BUTTONS
+  ========================= */
+  --btn-height: 52px;
+  --btn-radius: 16px;
+
+  --btn-primary-bg: linear-gradient(
+    180deg,
+    #8b5cf6 0%,
+    #7c3aed 100%
+  );
+  --btn-primary-bg-hover: linear-gradient(
+    180deg,
+    #7f56f1 0%,
+    #6d28d9 100%
+  );
+  --btn-primary-text: #ffffff;
+  --btn-primary-shadow:
+    0 12px 24px rgba(124,58,237,.18),
+    inset 0 1px 0 rgba(255,255,255,.18);
+
+  --btn-ghost-bg: rgba(15,23,42,0.03);
+  --btn-ghost-bg-hover: rgba(15,23,42,0.06);
+  --btn-ghost-border: rgba(15,23,42,0.08);
+
+
+  /* =========================
+     SIDEBAR
+  ========================= */
+  --sidebar-bg: rgba(255, 255, 255, 0.90);
+  --sidebar-border: rgba(15, 23, 42, 0.07);
+  --sidebar-hover: rgba(15, 23, 42, 0.04);
+  --sidebar-active: rgba(124, 58, 237, 0.10);
+  --sidebar-active-border: rgba(124, 58, 237, 0.22);
+
+  /* Compat legacy */
+  --sb-bg: var(--sidebar-bg);
+  --sb-hover: var(--sidebar-hover);
+  --sb-active: var(--sidebar-active);
+  --sb-border: var(--sidebar-border);
+
+
+  /* =========================
+     STATUS
+  ========================= */
+  --success: #16a34a;
+  --success-soft: rgba(22,163,74,.12);
+
+  --warning: #d97706;
+  --warning-soft: rgba(217,119,6,.12);
+
+  --error: #dc2626;
+  --error-soft: rgba(220,38,38,.12);
+
+  --info: #2563eb;
+  --info-soft: rgba(37,99,235,.12);
+
+  /* Compat legacy */
+  --warning-bg: var(--warning-soft);
+  --info-bg: var(--info-soft);
+
+
+  /* =========================
+     KPI COLORS
+  ========================= */
+  --color-iva: #ca8a04;
+  --color-iva-glow: rgba(202,138,4,.16);
+
+  --color-irpf: #8b5cf6;
+  --color-irpf-glow: rgba(139,92,246,.16);
+
+  --color-beneficio: #10b981;
+  --color-beneficio-glow: rgba(16,185,129,.16);
+
+  --color-pendiente: #ef4444;
+  --color-pendiente-glow: rgba(239,68,68,.16);
+
+
+  /* =========================
+     BACKGROUNDS
+  ========================= */
+  --gradient-main: linear-gradient(
+    180deg,
+    #f8fbff 0%,
+    #eef3f8 100%
+  );
+
+  --gradient-overlay: radial-gradient(
+    circle at 40% 0%,
+    rgba(15,23,42,0.04),
+    transparent 70%
+  );
+
+
+  /* =========================
+     UI ELEMENTS
+  ========================= */
+  --tooltip-bg: #0f172a;
+  --tooltip-text: #ffffff;
+
+  --scrollbar-thumb: rgba(15,23,42,0.14);
+  --scrollbar-thumb-hover: rgba(15,23,42,0.22);
+
+
+  /* =========================
+     AVATAR
+  ========================= */
+  --avatar-bg: linear-gradient(180deg, #8b5cf6 0%, #7c3aed 100%);
+  --avatar-text: #ffffff;
+
+
+  /* =========================
+     SHADOW SYSTEM
+  ========================= */
+  --shadow-xs: 0 2px 8px rgba(15,23,42,0.04);
+  --shadow-sm: 0 6px 18px rgba(15,23,42,0.06);
+  --shadow-md: 0 12px 30px rgba(15,23,42,0.08);
+  --shadow-lg: 0 20px 50px rgba(15,23,42,0.12);
+  --shadow-xl: 0 30px 70px rgba(15,23,42,0.14);
+
+  --shadow-soft: 0 8px 20px rgba(15,23,42,0.06);
+  --shadow-strong: 0 24px 50px rgba(15,23,42,0.12);
+  --shadow-glow:
+    0 0 0 1px rgba(255,255,255,.40),
+    0 18px 45px rgba(124,58,237,.08);
+
+
+  /* =========================
+     FOCUS
+  ========================= */
+  --focus-ring: 0 0 0 4px rgba(124,58,237,.12);
+}

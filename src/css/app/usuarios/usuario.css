@@ -1,0 +1,252 @@
+/* =========================================================
+   USER CREATE — MATCH INCIDENCIA 1:1
+========================================================= */
+
+/* =========================
+   ROOT
+========================= */
+.panel-content.user-create{
+  display:flex;
+  flex-direction:column;
+
+  flex:1;
+  min-height:0;
+  width:100%;
+}
+
+
+/* =========================================================
+   LAYOUT
+========================================================= */
+.layout-split{
+  display:flex;
+  flex:1;
+  min-height:0;
+  width:100%;
+}
+
+
+/* =========================
+   LEFT
+========================= */
+.user-left{
+  flex:1;
+  min-width:0;
+
+  display:flex;
+  flex-direction:column;
+  min-height:0;
+}
+
+
+/* =========================================================
+   RIGHT (SIDEBAR)
+========================================================= */
+.user-right{
+  width:360px;
+  min-width:360px;
+  flex-shrink:0;
+
+  display:flex;
+  flex-direction:column;
+
+  background:var(--panel-bg);
+  border-left:1px solid var(--panel-border);
+
+  min-height:0;
+  overflow:hidden;
+}
+
+
+/* =========================
+   RIGHT CONTENT
+========================= */
+.user-preview-wrapper{
+  flex:1;
+  min-height:0;
+
+  display:flex;
+  flex-direction:column;
+
+  padding:16px;
+  background:var(--panel-bg);
+
+  overflow:hidden;
+}
+
+.preview-header{
+  font-size:13px;
+  font-weight:600;
+  color:var(--dim);
+  margin-bottom:16px;
+  flex-shrink:0;
+}
+
+.preview-box{
+  flex:1;
+  min-height:0;
+
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+
+
+/* =========================
+   HEADER
+========================= */
+.filters-row{
+  display:flex;
+  align-items:center;
+
+  padding:14px 40px;
+
+  background:var(--panel-bg);
+  border-bottom:1px solid var(--panel-border);
+}
+
+.header-left{
+  display:flex;
+  flex-direction:column;
+}
+
+#btn-back{
+  margin-left:auto;
+  background:none;
+  border:none;
+  color:var(--text);
+  cursor:pointer;
+  opacity:.8;
+}
+
+#btn-back:hover{
+  opacity:1;
+}
+
+.page-title{
+  font-size:20px;
+  font-weight:600;
+}
+
+.page-subtitle{
+  font-size:13px;
+  color:var(--dim);
+}
+
+
+/* =========================================================
+   BODY
+========================================================= */
+.user-body{
+  flex:1;
+  min-height:0;
+
+  display:flex;
+  padding:30px 40px;
+
+  overflow:auto;
+}
+
+
+/* =========================================================
+   FORM
+========================================================= */
+.user-form{
+  width:100%;
+
+  display:flex;
+  flex-direction:column;
+  gap:16px;
+}
+
+
+/* =========================
+   INPUTS
+========================= */
+.user-form input,
+.user-form select{
+  width:100%;
+  padding:14px 16px;
+
+  border-radius:12px;
+  border:1px solid var(--card-border);
+
+  background:color-mix(in srgb, var(--card-bg), #000 10%);
+  color:var(--text);
+}
+
+
+/* =========================================================
+   FOOTER
+========================================================= */
+.user-footer{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+
+.user-hint{
+  font-size:12px;
+  color:var(--dim);
+}
+
+
+/* =========================
+   BOTÓN
+========================= */
+#btn-save-user{
+  padding:13px 26px;
+  border-radius:12px;
+
+  background:linear-gradient(135deg,var(--accent),var(--accent-hover));
+  color:#fff;
+
+  border:none;
+  cursor:pointer;
+
+  box-shadow:0 10px 24px rgba(99,102,241,0.35);
+  transition:all .15s ease;
+}
+
+#btn-save-user:hover{
+  transform:translateY(-1px);
+}
+
+
+/* =========================================================
+   PREVIEW USER (REUTILIZA TU SISTEMA)
+========================================================= */
+.preview-user{
+  padding:12px 14px;
+  border-radius:12px;
+
+  background:color-mix(in srgb, var(--card-bg), #000 8%);
+  border:1px solid var(--card-border);
+
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+
+/* =========================================================
+   SCROLL
+========================================================= */
+.preview-box::-webkit-scrollbar{
+  width:6px;
+}
+
+.preview-box::-webkit-scrollbar-thumb{
+  background:rgba(255,255,255,0.1);
+  border-radius:6px;
+}
+
+
+/* =========================================================
+   RESPONSIVE
+========================================================= */
+@media (max-width:1100px){
+  .user-right{
+    display:none;
+  }
+}

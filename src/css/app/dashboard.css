@@ -1,0 +1,854 @@
+html, body{
+  height:100%;
+}
+
+/* =========================
+   🔥 KPI ROW
+========================= */
+
+.dashboard-kpis{
+  display:flex;
+  gap:18px;
+  align-items:stretch;
+  flex-wrap:wrap;
+}
+
+/* =========================
+   🔥 CARDS BASE
+========================= */
+
+.card-total,
+.card-kpi{
+  position:relative;
+  flex:1;
+  min-width:160px;
+
+  padding:14px 16px;
+
+  border-radius:16px;
+
+  background:var(--card-bg);
+  
+  backdrop-filter:blur(10px);
+
+  border:1px solid rgba(255,255,255,.06);
+
+  box-shadow:
+    0 6px 20px rgba(0,0,0,.25),
+    inset 0 0 10px rgba(255,255,255,.03);
+
+  transition:
+    transform .2s ease,
+    box-shadow .2s ease,
+    border .2s ease;
+}
+
+.card-total:hover,
+.card-kpi:hover{
+  transform:translateY(-3px);
+  box-shadow:
+    0 12px 30px rgba(0,0,0,.35),
+    inset 0 0 12px rgba(255,255,255,.04);
+
+  border:1px solid rgba(255,255,255,.12);
+}
+
+/* =========================
+   🔥 TEXTOS KPI
+========================= */
+
+.card-total span,
+.card-kpi span{
+  font-size:11px;
+  opacity:.55;
+  letter-spacing:.8px;
+  text-transform:uppercase;
+}
+
+.card-total strong,
+.card-kpi strong{
+  display:block;
+  margin-top:6px;
+
+  font-size:28px;
+  font-weight:700;
+  letter-spacing:.5px;
+
+  color:#fff;
+}
+
+/* =========================
+   🔥 TOTAL DESTACADO
+========================= */
+
+.card-total{
+  flex:1.4;
+}
+
+.card-total strong{
+  font-size:40px;
+  color:var(--text);
+}
+
+/* =========================
+   🔥 COLORES KPI (SAAS PRO)
+========================= */
+
+/* 🔴 PENDIENTE (riesgo) */
+#home-pendiente{
+  color:#f87171;
+  text-shadow:0 0 10px rgba(248,113,113,.25);
+}
+
+/* 🟡 IVA (neutral fiscal) */
+#home-iva{
+  color:#facc15;
+  text-shadow:0 0 10px rgba(250,204,21,.25);
+}
+
+/* 🟣 IRPF (diferenciado, no agresivo) */
+#home-irpf{
+  color:#a78bfa;
+  text-shadow:0 0 10px rgba(167,139,250,.25);
+}
+
+/* 🟢 BENEFICIO (dinero real) */
+#home-beneficio{
+  color:#34d399;
+  text-shadow:0 0 12px rgba(52,211,153,.25);
+}
+
+/* =========================
+   🔥 MINI TOP LINE
+========================= */
+
+.card-kpi::after{
+  content:"";
+  position:absolute;
+  top:0;
+  left:0;
+  width:100%;
+  height:2px;
+
+  background:linear-gradient(
+    90deg,
+    transparent,
+    rgba(255,255,255,.2),
+    transparent
+  );
+
+  opacity:.4;
+}
+
+/* =========================
+   BASE
+========================= */
+
+.dashboard-container{
+  display:flex;
+  flex-direction:column;
+  gap:var(--space-xl);
+  padding:var(--space-xl);
+}
+
+/* =========================
+   🔥 GREETING
+========================= */
+
+.dashboard-greeting h1{
+  font-size:var(--font-2xl);
+  font-weight:700;
+  letter-spacing:.6px;
+  line-height:var(--line-tight);
+  margin:0;
+
+  color:var(--text);
+}
+
+/* =========================
+   🔥 CHART
+========================= */
+
+.card-chart{
+  padding-top:var(--space-xs);
+}
+
+/* =========================
+   🔥 AREA
+========================= */
+
+.chart-area{
+  position:relative;
+  height:260px;
+  display:flex;
+  align-items:flex-end;
+}
+
+/* =========================
+   🔥 GRID
+========================= */
+
+.year-grid{
+  display:flex;
+  align-items:flex-end;
+  width:100%;
+  height:100%;
+  gap:var(--space-sm);
+  z-index:2;
+}
+
+/* =========================
+   🔥 MES
+========================= */
+
+.month{
+  flex:1;
+  height:100%;
+  display:flex;
+  align-items:flex-end;
+  justify-content:center;
+  position:relative;
+}
+
+/* =========================
+   🔥 HOVER COLUMNAS (PRO)
+========================= */
+
+.month{
+  transition:
+    transform .2s ease,
+    filter .2s ease;
+}
+
+.month:hover{
+  transform:translateY(-3px);
+}
+
+/* opcional: dar un pelín más de presencia */
+.month:hover .bar{
+  filter:brightness(1.08);
+}
+
+/* =========================
+   🔥 BARRA (ANIMACIÓN PRO)
+========================= */
+
+.bar{
+  position:relative;
+  width:100%;
+  height:100%;
+
+  display:flex;
+  flex-direction:column;
+  justify-content:flex-end;
+
+  transform:scaleY(0);
+  transform-origin:bottom;
+
+  transition:
+    transform 1s cubic-bezier(.22,1,.36,1),
+    filter .2s ease;
+}
+
+.bar.animate{
+  transform:scaleY(1);
+}
+
+/* =========================
+   🔥 DELAY PROGRESIVO
+========================= */
+
+.month:nth-child(1) .bar{ transition-delay:.05s; }
+.month:nth-child(2) .bar{ transition-delay:.1s; }
+.month:nth-child(3) .bar{ transition-delay:.15s; }
+.month:nth-child(4) .bar{ transition-delay:.2s; }
+.month:nth-child(5) .bar{ transition-delay:.25s; }
+.month:nth-child(6) .bar{ transition-delay:.3s; }
+.month:nth-child(7) .bar{ transition-delay:.35s; }
+.month:nth-child(8) .bar{ transition-delay:.4s; }
+.month:nth-child(9) .bar{ transition-delay:.45s; }
+.month:nth-child(10) .bar{ transition-delay:.5s; }
+.month:nth-child(11) .bar{ transition-delay:.55s; }
+.month:nth-child(12) .bar{ transition-delay:.6s; }
+
+/* =========================
+   🔥 STACK
+========================= */
+
+.bar-paid,
+.bar-pending{
+  width:100%;
+  position:relative;
+
+  border-radius:18px 18px 10px 10px;
+  overflow:hidden;
+}
+
+.bar-paid{
+  background:linear-gradient(180deg,#34d399,#059669);
+
+  box-shadow:
+    0 8px 18px rgba(16,185,129,.22),
+    inset 0 0 6px rgba(255,255,255,.06);
+}
+
+.bar-pending{
+  background:linear-gradient(180deg,#f87171,#dc2626);
+
+  box-shadow:
+    0 8px 18px rgba(220,38,38,.22),
+    inset 0 0 6px rgba(255,255,255,.05);
+}
+
+/* =========================
+   🔥 BRILLO
+========================= */
+
+.bar-paid::before,
+.bar-pending::before{
+  content:"";
+  position:absolute;
+  top:0;
+  left:0;
+  width:100%;
+  height:10px;
+
+  border-radius:18px 18px 0 0;
+
+  background:linear-gradient(
+    to bottom,
+    rgba(255,255,255,.18),
+    transparent
+  );
+}
+
+/* =========================
+   🔥 LABEL
+========================= */
+
+.bar-label{
+  position:absolute;
+  top:8px;
+  left:50%;
+  transform:translateX(-50%);
+
+  padding:5px 10px;
+
+  font-size:var(--font-xs);
+  font-weight:600;
+
+  border-radius:999px;
+
+  background:linear-gradient(
+    180deg,
+    rgba(0,0,0,.55),
+    rgba(0,0,0,.35)
+  );
+
+  backdrop-filter:blur(6px);
+
+  color:#fff;
+
+  box-shadow:
+    0 4px 12px rgba(0,0,0,.35),
+    inset 0 0 6px rgba(255,255,255,.05);
+
+  border:1px solid rgba(255,255,255,.08);
+
+  pointer-events:none;
+}
+
+.bar-label.negative{
+  color:#fecaca;
+}
+
+/* =========================
+   🔥 MES LABEL
+========================= */
+
+.bar::before{
+  content:attr(data-month);
+  position:absolute;
+  bottom:-22px;
+  left:0;
+
+  font-size:var(--font-xs);
+  font-weight:500;
+  color:var(--dim);
+  opacity:.85;
+}
+
+/* =========================
+   🔥 HOVER
+========================= */
+
+.month:hover .bar{
+  filter:brightness(1.08);
+}
+
+/* =========================
+   EMPTY
+========================= */
+
+.month.empty .bar{
+  background:rgba(255,255,255,.03);
+}
+
+/* =========================
+   🔥 SKELETON
+========================= */
+
+.skeleton-bar{
+  width:100%;
+  border-radius:18px;
+
+  transform:scaleY(0);
+  transform-origin:bottom;
+
+  background:linear-gradient(
+    90deg,
+    rgba(255,255,255,.04),
+    rgba(255,255,255,.08),
+    rgba(255,255,255,.04)
+  );
+
+  background-size:200% 100%;
+
+  animation:
+    skeleton-loading 1.2s infinite linear,
+    grow-bar 1s cubic-bezier(.22,1,.36,1) forwards;
+}
+
+@keyframes skeleton-loading{
+  0%{ background-position:200% 0; }
+  100%{ background-position:-200% 0; }
+}
+
+@keyframes grow-bar{
+  from{ transform:scaleY(0); }
+  to{ transform:scaleY(1); }
+}
+
+/* =========================
+   PANEL
+========================= */
+
+/* 🔥 IGUALAMOS A FACTURAS */
+.panel-content.dashboard{
+  display:flex;
+  flex-direction:column;
+  height:100%;
+  width:100%;
+  position:relative;
+
+  opacity:0;
+  transform:translateY(14px);
+  transition:all var(--duration-slow) var(--ease-out);
+}
+
+.panel-content.dashboard.ready{
+  opacity:1;
+  transform:translateY(0);
+}
+
+/* 🔥 CONTENEDOR INTERNO */
+.dashboard-container{
+  display:flex;
+  flex-direction:column;
+  flex:1;
+  min-height:0; /* 🔥 CLAVE igual que facturas */
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* =========================================================
+   🔥 DASHBOARD → FACTURAS PENDIENTES (MATCH FACTURAS 1:1)
+========================================================= */
+
+/* CONTENEDOR */
+.panel-content.dashboard .dashboard-pending{
+  display:flex;
+  flex-direction:column;
+  width:100%;
+  margin-top:32px;
+
+  padding:16px;
+  border-radius:16px;
+
+  background:var(--panel-bg);
+  border:1px solid var(--panel-border);
+
+  box-shadow:var(--panel-shadow);
+}
+
+/* =========================================================
+   HEADER
+========================================================= */
+
+.panel-content.dashboard .dashboard-section-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+
+  margin-bottom:10px;
+}
+
+.panel-content.dashboard .dashboard-section-header h2{
+  font-size:13px;
+  font-weight:600;
+  color:var(--text);
+  text-transform:uppercase;
+  letter-spacing:.4px;
+}
+
+.panel-content.dashboard #pending-count{
+  font-size:11px;
+  color:var(--dim);
+
+  padding:4px 10px;
+  border-radius:999px;
+
+  background:rgba(255,255,255,.05);
+  border:1px solid rgba(255,255,255,.06);
+}
+
+/* =========================================================
+   TABLE SYSTEM (IGUAL QUE FACTURAS)
+========================================================= */
+
+.panel-content.dashboard .table-system.facturas{
+  display:flex;
+  flex-direction:column;
+  flex:1;
+  min-height:0;
+}
+
+/* CONTENEDOR SCROLL */
+.panel-content.dashboard .table-container{
+  flex:1;
+  min-height:0;
+  overflow-y:auto;
+  overflow-x:hidden;
+
+  background:var(--panel-bg);
+}
+
+/* =========================================================
+   TABLA BASE
+========================================================= */
+
+.panel-content.dashboard table{
+  width:100%;
+  border-collapse:collapse;
+  table-layout:fixed;
+}
+
+/* HEADER STICKY */
+.panel-content.dashboard thead{
+  position:sticky;
+  top:0;
+  z-index:3;
+  background:var(--panel-bg);
+}
+
+/* HEADERS */
+.panel-content.dashboard th{
+  padding:12px 14px;
+  text-align:left;
+
+  border-bottom:1px solid var(--panel-border);
+
+  color:var(--dim);
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:.4px;
+  white-space:nowrap;
+}
+
+/* CELDAS */
+.panel-content.dashboard td{
+  padding:12px 14px;
+  border-bottom:1px solid var(--panel-border);
+
+  font-size:13.5px;
+  color:var(--text);
+
+  vertical-align:middle;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+/* =========================================================
+   COLUMN SYSTEM (CLON EXACTO)
+========================================================= */
+
+.panel-content.dashboard .col-id{
+  width:120px;
+  font-size:11px;
+  color:var(--dim);
+}
+
+.panel-content.dashboard .col-main{
+  width:24%;
+}
+
+.panel-content.dashboard .col-secondary{
+  width:30%;
+}
+
+.panel-content.dashboard .col-date{
+  width:120px;
+  text-align:center;
+  padding-right:18px;
+}
+
+.panel-content.dashboard .col-importe{
+  width:130px;
+  text-align:right;
+  padding-right:18px;
+}
+
+.panel-content.dashboard .col-status{
+  width:110px;
+  text-align:center;
+}
+
+.panel-content.dashboard .col-actions{
+  width:180px;
+  text-align:right;
+  padding-right:18px;
+}
+
+/* =========================================================
+   ROWS
+========================================================= */
+
+.panel-content.dashboard tbody tr{
+  transition:all .15s ease;
+  cursor:pointer;
+}
+
+.panel-content.dashboard tbody tr:nth-child(even){
+  background:color-mix(in srgb, var(--panel-bg), #fff 2%);
+}
+
+.panel-content.dashboard tbody tr:hover{
+  background:color-mix(in srgb, var(--panel-bg), #fff 6%);
+  transform:translateX(2px);
+}
+
+/* =========================================================
+   USER CELL (IGUAL)
+========================================================= */
+
+.panel-content.dashboard .cell-user{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+.panel-content.dashboard .table-avatar{
+  width:36px;
+  height:36px;
+  min-width:36px;
+
+  border-radius:50%;
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  color:#fff;
+  font-size:12px;
+  font-weight:600;
+}
+
+/* TEXTO USER */
+.panel-content.dashboard .user-info{
+  display:flex;
+  flex-direction:column;
+}
+
+.panel-content.dashboard .user-name{
+  font-weight:600;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+.panel-content.dashboard .user-sub{
+  font-size:11px;
+  color:var(--dim);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+/* =========================================================
+   EMPRESA
+========================================================= */
+
+.panel-content.dashboard .empresa-cell{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+/* =========================================================
+   BADGES
+========================================================= */
+
+.panel-content.dashboard .badge{
+  padding:4px 10px;
+  border-radius:999px;
+  font-size:10px;
+  font-weight:500;
+}
+
+.panel-content.dashboard .badge.success{
+  color:var(--success);
+  background:color-mix(in srgb, var(--success), transparent 85%);
+}
+
+.panel-content.dashboard .badge.warning{
+  color:var(--warning);
+  background:color-mix(in srgb, var(--warning), transparent 85%);
+}
+
+/* =========================================================
+   ACTIONS
+========================================================= */
+
+.panel-content.dashboard .actions{
+  display:inline-flex;
+  gap:6px;
+  justify-content:flex-end;
+}
+
+.panel-content.dashboard .btn-action{
+  padding:6px 10px;
+  border-radius:6px;
+
+  border:1px solid var(--card-border);
+  background:var(--card-bg);
+  color:var(--text);
+
+  font-size:11px;
+  cursor:pointer;
+}
+
+.panel-content.dashboard .btn-action:hover{
+  background:color-mix(in srgb, var(--accent), transparent 85%);
+  color:var(--accent);
+  border-color:var(--accent);
+}
+
+.panel-content.dashboard .btn-action.pay{
+  background:color-mix(in srgb, var(--warning), transparent 85%);
+  color:var(--warning);
+  border-color:var(--warning);
+}
+
+.panel-content.dashboard .btn-action.pay:hover{
+  background:var(--warning);
+  color:#fff;
+}
+

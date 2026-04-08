@@ -1,0 +1,316 @@
+/* =========================
+   TOPBAR — FINAL 10/10
+========================= */
+.topbar{
+  position:fixed;
+  top:0;
+
+  left:var(--sidebar-width);
+  right:0; /* 🔥 mejor que width calc */
+
+  height:var(--topbar-height);
+
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+
+  padding:0 var(--space-lg);
+
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.02), transparent 40%),
+    var(--sb-bg);
+
+  border-bottom:1px solid var(--panel-border);
+
+  z-index:var(--z-topbar);
+
+  transition:
+    left var(--duration-slow) var(--ease-out);
+}
+
+/* SIDEBAR COLLAPSED */
+.sidebar.collapsed ~ .main-content .topbar{
+  left:var(--sidebar-collapsed);
+}
+
+
+/* =========================
+   LEFT
+========================= */
+.topbar-left{
+  display:flex;
+  align-items:center;
+  gap:var(--space-md);
+  min-width:0;
+}
+
+.topbar-title{
+  font-size:15px;
+  font-weight:600;
+  color:var(--text);
+  white-space:nowrap;
+}
+
+
+/* =========================
+   RIGHT
+========================= */
+.topbar-right{
+  display:flex;
+  align-items:center;
+  gap:var(--space-md);
+
+  flex:1;
+  justify-content:flex-end;
+}
+
+
+/* =========================
+   SEARCH WRAP
+========================= */
+.topbar-search-wrap{
+  position:relative;
+
+  width:100%;
+  max-width:480px;
+
+  margin-left:auto;
+}
+
+
+/* =========================
+   INPUT
+========================= */
+.topbar-search{
+  width:100%;
+
+  padding:10px 14px;
+  padding-left:36px;
+
+  border-radius:999px;
+  border:1px solid var(--card-border);
+
+  background:var(--card-bg);
+  color:var(--text);
+
+  font-size:13.5px;
+
+  transition:
+    border-color var(--duration-normal) ease,
+    background var(--duration-normal) ease,
+    box-shadow var(--duration-normal) ease;
+}
+
+.topbar-search::placeholder{
+  color:var(--dim);
+}
+
+
+/* =========================
+   FOCUS (PRO)
+========================= */
+.topbar-search-wrap:focus-within .topbar-search{
+  border-color:var(--accent);
+  background:var(--panel-bg);
+
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--accent), transparent 85%),
+    0 4px 14px rgba(0,0,0,0.25);
+}
+
+
+/* =========================
+   ICON
+========================= */
+.topbar-search-icon{
+  position:absolute;
+  left:12px;
+  top:50%;
+  transform:translateY(-50%);
+
+  width:16px;
+  height:16px;
+
+  color:var(--dim);
+  pointer-events:none;
+
+  transition:color var(--duration-normal) ease;
+}
+
+.topbar-search-wrap:focus-within .topbar-search-icon{
+  color:var(--accent);
+}
+
+
+/* =========================
+   SEARCH DROPDOWN
+========================= */
+.topbar-search-results{
+  position:absolute;
+  top:calc(100% + 8px);
+  left:0;
+  width:100%;
+
+  background:var(--panel-bg);
+  border:1px solid var(--panel-border);
+  border-radius:var(--radius-lg);
+
+  box-shadow:var(--shadow-lg);
+
+  max-height:320px;
+  overflow-y:auto;
+
+  opacity:0;
+  transform:translateY(6px);
+  pointer-events:none;
+
+  transition:
+    opacity var(--duration-fast) ease,
+    transform var(--duration-fast) ease;
+
+  z-index:var(--z-dropdown);
+}
+
+.topbar-search-results.active{
+  opacity:1;
+  transform:translateY(0);
+  pointer-events:auto;
+}
+
+
+/* =========================
+   GROUP HEADER
+========================= */
+.search-group{
+  padding:8px 12px;
+  font-size:11px;
+  font-weight:600;
+  color:var(--dim);
+  text-transform:uppercase;
+}
+
+
+/* =========================
+   RESULT ITEM
+========================= */
+.search-result{
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+
+  padding:10px 12px;
+  border-radius:var(--radius-md);
+
+  font-size:13px;
+  color:var(--text);
+
+  cursor:pointer;
+}
+
+.search-result:hover{
+  background:var(--sb-hover);
+  transform:translateX(2px);
+}
+
+.search-result.active{
+  background:var(--sb-active);
+}
+
+
+/* =========================
+   RESULT TEXT
+========================= */
+.search-text{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  line-height:1.25;
+}
+
+.search-title{
+  font-weight:600;
+  font-size:13px;
+}
+
+.search-subtitle{
+  font-size:12px;
+  color:var(--dim);
+}
+
+
+/* =========================
+   RESULT ICON
+========================= */
+.search-icon{
+  width:18px;
+  height:18px;
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  font-size:14px;
+  opacity:.85;
+}
+
+.search-result.active .search-icon{
+  color:var(--accent);
+}
+
+
+/* =========================
+   HIGHLIGHT
+========================= */
+mark,
+.search-result .highlight{
+  background:color-mix(in srgb, var(--accent), transparent 85%);
+  color:var(--accent);
+
+  padding:1px 5px;
+  border-radius:6px;
+
+  font-weight:600;
+}
+
+
+/* =========================
+   EMPTY STATE
+========================= */
+.search-empty{
+  padding:14px;
+  font-size:13px;
+  color:var(--dim);
+  text-align:center;
+}
+
+
+/* =========================
+   SCROLL
+========================= */
+.topbar-search-results::-webkit-scrollbar{
+  width:6px;
+}
+
+.topbar-search-results::-webkit-scrollbar-thumb{
+  background:var(--scrollbar-thumb);
+  border-radius:6px;
+}
+
+
+/* =========================
+   RESPONSIVE
+========================= */
+@media (max-width:768px){
+
+  .topbar{
+    padding:0 var(--space-md);
+  }
+
+  .topbar-search-wrap{
+    max-width:100%;
+  }
+
+  .topbar-title{
+    display:none;
+  }
+}

@@ -1,0 +1,332 @@
+:root {
+  /* =========================================================
+     ONION SUPPORT — DESIGN TOKENS / PRO SAAS PANEL
+  ========================================================= */
+
+  /* =========================
+     APP IDENTITY
+  ========================= */
+  --app-name: "Onion Support";
+
+
+  /* =========================
+     LAYOUT
+  ========================= */
+  --content-max: 1360px;
+  --content-padding: 32px;
+
+  --sidebar-width: 264px;
+  --sidebar-collapsed: 76px;
+
+  --topbar-height: 60px;
+  --page-offset: 28px;
+
+  --tablehead-height: 48px;
+  --view-radius: 24px;
+
+
+  /* =========================
+     Z-INDEX
+  ========================= */
+  --z-base: 1;
+  --z-sidebar: 20;
+  --z-topbar: 30;
+  --z-dropdown: 40;
+  --z-overlay: 60;
+  --z-modal: 80;
+  --z-toast: 100;
+
+
+  /* =========================
+     BRAND
+  ========================= */
+  --accent: #7c3aed;
+  --accent-hover: #6d28d9;
+  --accent-active: #5b21b6;
+  --accent-soft: rgba(124, 58, 237, 0.18);
+  --accent-ghost: rgba(124, 58, 237, 0.10);
+  --accent-ring: rgba(124, 58, 237, 0.35);
+
+  --brand-2: #22c55e;
+  --brand-3: #06b6d4;
+
+
+  /* =========================
+     BASE / BACKDROP
+  ========================= */
+  --main-bg: #0a0c11;
+  --body-bg:
+    radial-gradient(circle at top left, rgba(124,58,237,.10), transparent 26%),
+    radial-gradient(circle at top right, rgba(6,182,212,.08), transparent 24%),
+    linear-gradient(180deg, #0b0e14 0%, #090b10 100%);
+
+  --app-noise: radial-gradient(
+    circle at 50% 0%,
+    rgba(255,255,255,0.025),
+    transparent 60%
+  );
+
+
+  /* =========================
+     SURFACE SYSTEM
+  ========================= */
+  --surface-0: #0a0c11;
+  --surface-1: #11141b;
+  --surface-2: #171b23;
+  --surface-3: #1d2330;
+  --surface-4: #242c3b;
+
+  --surface-elevated: rgba(20, 25, 35, 0.88);
+  --surface-glass: rgba(255,255,255,0.045);
+  --surface-glass-strong: rgba(255,255,255,0.07);
+
+  --dropdown-bg: #171b23;
+  --tooltip-bg: #0f131a;
+
+
+  /* =========================
+     BORDERS
+  ========================= */
+  --border-soft: rgba(255,255,255,0.06);
+  --border-default: rgba(255,255,255,0.10);
+  --border-strong: rgba(255,255,255,0.16);
+  --border-accent: rgba(124, 58, 237, 0.40);
+
+
+  /* =========================
+     TEXT
+  ========================= */
+  --text: #f8fafc;
+  --text-strong: #ffffff;
+  --text-muted: rgba(248, 250, 252, 0.76);
+  --text-dim: rgba(248, 250, 252, 0.52);
+  --text-faint: rgba(248, 250, 252, 0.36);
+  --text-on-accent: #ffffff;
+
+
+  /* =========================
+     STATUS
+  ========================= */
+  --success: #22c55e;
+  --success-soft: rgba(34,197,94,.14);
+
+  --warning: #f59e0b;
+  --warning-soft: rgba(245,158,11,.14);
+
+  --error: #ef4444;
+  --error-soft: rgba(239,68,68,.14);
+
+  --info: #60a5fa;
+  --info-soft: rgba(96,165,250,.14);
+
+
+  /* =========================
+     CARD / PANEL
+  ========================= */
+  --card-bg: linear-gradient(
+      180deg,
+      rgba(255,255,255,0.035) 0%,
+      rgba(255,255,255,0.015) 100%
+    ),
+    var(--surface-elevated);
+  --card-border: var(--border-default);
+  --card-radius: 24px;
+  --card-radius-lg: 28px;
+
+  --panel-bg: linear-gradient(
+      180deg,
+      rgba(255,255,255,0.03) 0%,
+      rgba(255,255,255,0.01) 100%
+    ),
+    var(--surface-2);
+  --panel-border: var(--border-soft);
+  --panel-radius: 20px;
+
+
+  /* =========================
+     INPUTS
+  ========================= */
+  --input-height: 52px;
+  --input-bg: rgba(255,255,255,0.03);
+  --input-bg-hover: rgba(255,255,255,0.045);
+  --input-border: rgba(255,255,255,0.10);
+  --input-border-hover: rgba(255,255,255,0.16);
+  --input-border-focus: rgba(124,58,237,.60);
+  --input-text: var(--text);
+  --input-placeholder: rgba(248,250,252,.34);
+  --input-radius: 16px;
+  --input-shadow-focus:
+    0 0 0 4px rgba(124,58,237,.16),
+    0 10px 30px rgba(0,0,0,.24);
+
+
+  /* =========================
+     BUTTONS
+  ========================= */
+  --btn-height: 52px;
+  --btn-radius: 16px;
+
+  --btn-primary-bg: linear-gradient(
+    180deg,
+    #8b5cf6 0%,
+    #7c3aed 100%
+  );
+  --btn-primary-bg-hover: linear-gradient(
+    180deg,
+    #935ffb 0%,
+    #6d28d9 100%
+  );
+  --btn-primary-text: #ffffff;
+  --btn-primary-shadow:
+    0 12px 30px rgba(124,58,237,.32),
+    inset 0 1px 0 rgba(255,255,255,.14);
+
+  --btn-ghost-bg: rgba(255,255,255,0.03);
+  --btn-ghost-bg-hover: rgba(255,255,255,0.06);
+  --btn-ghost-border: rgba(255,255,255,0.08);
+
+
+  /* =========================
+     SIDEBAR
+  ========================= */
+  --sidebar-bg: rgba(13, 16, 22, 0.94);
+  --sidebar-border: rgba(255,255,255,0.06);
+  --sidebar-hover: rgba(255,255,255,0.045);
+  --sidebar-active: rgba(124,58,237,0.16);
+  --sidebar-active-border: rgba(124,58,237,0.35);
+
+  --sidebar-icon-size: 20px;
+  --sidebar-item-padding-x: 12px;
+  --sidebar-icon-offset: calc(
+    var(--sidebar-item-padding-x) + (var(--sidebar-icon-size) / 2)
+  );
+
+
+  /* =========================
+     KPI COLORS
+  ========================= */
+  --color-iva: #facc15;
+  --color-iva-glow: rgba(250,204,21,.24);
+
+  --color-irpf: #a78bfa;
+  --color-irpf-glow: rgba(167,139,250,.24);
+
+  --color-beneficio: #34d399;
+  --color-beneficio-glow: rgba(52,211,153,.24);
+
+  --color-pendiente: #f87171;
+  --color-pendiente-glow: rgba(248,113,113,.24);
+
+
+  /* =========================
+     TYPOGRAPHY
+  ========================= */
+  --font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+
+  --font-xs: 11px;
+  --font-sm: 12px;
+  --font-md: 13px;
+  --font-base: 14px;
+  --font-lg: 16px;
+  --font-xl: 18px;
+  --font-2xl: 22px;
+  --font-3xl: 30px;
+  --font-4xl: 38px;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+  --weight-black: 800;
+
+  --line-tight: 1.1;
+  --line-snug: 1.25;
+  --line-normal: 1.45;
+  --line-relaxed: 1.65;
+
+  --letter-tight: -0.03em;
+  --letter-normal: 0;
+  --letter-wide: 0.02em;
+
+
+  /* =========================
+     SPACING
+  ========================= */
+  --space-2xs: 4px;
+  --space-xs: 8px;
+  --space-sm: 12px;
+  --space-md: 16px;
+  --space-lg: 20px;
+  --space-xl: 24px;
+  --space-2xl: 32px;
+  --space-3xl: 40px;
+  --space-4xl: 56px;
+
+
+  /* =========================
+     DENSITY
+  ========================= */
+  --density-factor: 1;
+
+  --space-dynamic-xs: calc(var(--space-xs) * var(--density-factor));
+  --space-dynamic-sm: calc(var(--space-sm) * var(--density-factor));
+  --space-dynamic-md: calc(var(--space-md) * var(--density-factor));
+  --space-dynamic-lg: calc(var(--space-lg) * var(--density-factor));
+
+
+  /* =========================
+     RADIUS
+  ========================= */
+  --radius-xs: 8px;
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+  --radius-xl: 24px;
+  --radius-2xl: 28px;
+  --radius-pill: 999px;
+
+
+  /* =========================
+     SHADOW
+  ========================= */
+  --shadow-xs: 0 2px 8px rgba(0,0,0,0.16);
+  --shadow-sm: 0 8px 20px rgba(0,0,0,0.20);
+  --shadow-md: 0 18px 40px rgba(0,0,0,0.28);
+  --shadow-lg: 0 24px 60px rgba(0,0,0,0.36);
+  --shadow-xl: 0 36px 90px rgba(0,0,0,0.44);
+
+  --shadow-soft: 0 10px 24px rgba(0,0,0,0.16);
+  --shadow-strong: 0 30px 80px rgba(0,0,0,0.48);
+  --shadow-glow: 0 0 0 1px rgba(255,255,255,.04), 0 20px 60px rgba(124,58,237,.20);
+
+
+  /* =========================
+     MOTION
+  ========================= */
+  --ease-out: cubic-bezier(.22,1,.36,1);
+  --ease-in: cubic-bezier(.4,0,1,1);
+  --ease-standard: cubic-bezier(.2,.8,.2,1);
+
+  --duration-fast: .12s;
+  --duration-normal: .22s;
+  --duration-slow: .34s;
+
+
+  /* =========================
+     MISC
+  ========================= */
+  --scrollbar-thumb: rgba(255,255,255,0.12);
+  --scrollbar-thumb-hover: rgba(255,255,255,0.18);
+
+  --avatar-bg: linear-gradient(180deg, #ec4899 0%, #db2777 100%);
+  --avatar-text: #fff;
+
+  --focus-ring: 0 0 0 4px rgba(124,58,237,.18);
+}

@@ -11,6 +11,7 @@
    - soportar login con username o email
    - soportar flujo opcional 2FA
    - redirigir correctamente tras login
+   - evitar pérdida de valores al deshabilitar inputs
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
@@ -38,9 +39,7 @@ export const LoginView = (() => {
       const url = new URL(window.location.href);
       const redirect = url.searchParams.get("redirect");
 
-      return redirect
-        ? AppCore.utils.normalizePath(redirect)
-        : null;
+      return redirect ? AppCore.utils.normalizePath(redirect) : null;
     } catch {
       return null;
     }
@@ -53,10 +52,7 @@ export const LoginView = (() => {
       return "/";
     }
 
-    if (
-      redirectPath === "/login" ||
-      redirectPath.startsWith("/login?")
-    ) {
+    if (redirectPath === "/login" || redirectPath.startsWith("/login?")) {
       return "/";
     }
 
@@ -134,23 +130,19 @@ export const LoginView = (() => {
     }
   }
 
-  function getFormPayload(form) {
-    const formData = new FormData(form);
+  /* =========================================================
+     LECTURA ROBUSTA DEL FORM
+     IMPORTANTE:
+     No usamos FormData después de deshabilitar inputs.
+  ========================================================= */
+  function getFormPayload({ identifierInput, passwordInput, rememberInput, form }) {
+    const redirectInput = form?.querySelector('input[name="redirect"]');
 
     return {
-      identifier: normalizeIdentifier(
-        formData.get("identifier") ||
-        formData.get("username") ||
-        formData.get("email") ||
-        formData.get("user") ||
-        ""
-      ),
-      password: String(formData.get("password") || ""),
-      remember:
-        formData.get("remember") === "on" ||
-        formData.get("remember") === "true",
-      redirect:
-        normalizeIdentifier(formData.get("redirect") || "") || "",
+      identifier: normalizeIdentifier(identifierInput?.value || ""),
+      password: String(passwordInput?.value || ""),
+      remember: Boolean(rememberInput?.checked),
+      redirect: normalizeIdentifier(redirectInput?.value || ""),
     };
   }
 
@@ -495,12 +487,20 @@ export const LoginView = (() => {
 
       if (!isValid) return;
 
+      /* =====================================================
+         LEEMOS ANTES DE DESHABILITAR CAMPOS
+      ===================================================== */
+      const payload = getFormPayload({
+        identifierInput,
+        passwordInput,
+        rememberInput,
+        form,
+      });
+
       setSubmitting(controls, true);
       setFeedback(feedbackEl, "Validando acceso...", "info");
 
       try {
-        const payload = getFormPayload(form);
-
         const result = await Auth.login({
           identifier: payload.identifier,
           password: payload.password,

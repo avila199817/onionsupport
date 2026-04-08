@@ -4,10 +4,13 @@
 
    Responsabilidades:
    - pintar pantalla de acceso
+   - activar modo fullscreen auth
    - validar credenciales en cliente
    - enviar login a Auth
    - mostrar feedback visual de estado/error
-   - exponer experiencia de login pro para la SPA
+   - soportar login con username o email
+   - soportar flujo opcional 2FA
+   - redirigir correctamente tras login
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
@@ -34,10 +37,30 @@ export const LoginView = (() => {
     try {
       const url = new URL(window.location.href);
       const redirect = url.searchParams.get("redirect");
-      return redirect ? AppCore.utils.normalizeCanonicalPath(redirect) : null;
+
+      return redirect
+        ? AppCore.utils.normalizePath(redirect)
+        : null;
     } catch {
       return null;
     }
+  }
+
+  function getSafeRedirectPath() {
+    const redirectPath = getCurrentRedirectPath();
+
+    if (!redirectPath) {
+      return "/";
+    }
+
+    if (
+      redirectPath === "/login" ||
+      redirectPath.startsWith("/login?")
+    ) {
+      return "/";
+    }
+
+    return AppCore.utils.normalizePath(redirectPath);
   }
 
   function getErrorMessage(error) {
@@ -58,6 +81,10 @@ export const LoginView = (() => {
     return /\S+@\S+\.\S+/.test(String(value || "").trim());
   }
 
+  function setAuthScreen(active) {
+    document.body.classList.toggle("auth-screen", Boolean(active));
+  }
+
   function setFeedback(feedbackEl, message = "", type = "default") {
     if (!feedbackEl) return;
 
@@ -68,6 +95,7 @@ export const LoginView = (() => {
 
   function setFieldError(input, active = false) {
     if (!input) return;
+
     input.setAttribute("aria-invalid", active ? "true" : "false");
     input.classList.toggle("is-invalid", Boolean(active));
   }
@@ -86,19 +114,21 @@ export const LoginView = (() => {
       submitBtn,
     } = controls;
 
+    const submitting = Boolean(isSubmitting);
+
     if (form) {
-      form.setAttribute("aria-busy", String(Boolean(isSubmitting)));
+      form.setAttribute("aria-busy", String(submitting));
     }
 
-    if (identifierInput) identifierInput.disabled = Boolean(isSubmitting);
-    if (passwordInput) passwordInput.disabled = Boolean(isSubmitting);
-    if (rememberInput) rememberInput.disabled = Boolean(isSubmitting);
-    if (toggleBtn) toggleBtn.disabled = Boolean(isSubmitting);
+    if (identifierInput) identifierInput.disabled = submitting;
+    if (passwordInput) passwordInput.disabled = submitting;
+    if (rememberInput) rememberInput.disabled = submitting;
+    if (toggleBtn) toggleBtn.disabled = submitting;
 
     if (submitBtn) {
-      submitBtn.disabled = Boolean(isSubmitting);
-      submitBtn.dataset.loading = String(Boolean(isSubmitting));
-      submitBtn.innerHTML = isSubmitting
+      submitBtn.disabled = submitting;
+      submitBtn.dataset.loading = String(submitting);
+      submitBtn.innerHTML = submitting
         ? `<span class="login-submit-text">Entrando...</span>`
         : `<span class="login-submit-text">Entrar</span>`;
     }
@@ -110,20 +140,23 @@ export const LoginView = (() => {
     return {
       identifier: normalizeIdentifier(
         formData.get("identifier") ||
-        formData.get("email") ||
         formData.get("username") ||
+        formData.get("email") ||
+        formData.get("user") ||
         ""
       ),
-      password: String(formData.get("password") || "").trim(),
+      password: String(formData.get("password") || ""),
       remember:
         formData.get("remember") === "on" ||
         formData.get("remember") === "true",
+      redirect:
+        normalizeIdentifier(formData.get("redirect") || "") || "",
     };
   }
 
   function validate({ identifierInput, passwordInput, feedbackEl }) {
     const identifier = normalizeIdentifier(identifierInput?.value || "");
-    const password = String(passwordInput?.value || "").trim();
+    const password = String(passwordInput?.value || "");
 
     clearFieldErrors([identifierInput, passwordInput]);
 
@@ -149,9 +182,13 @@ export const LoginView = (() => {
       return false;
     }
 
-    if (!password) {
+    if (!password.trim()) {
       setFieldError(passwordInput, true);
-      setFeedback(feedbackEl, "Introduce tu contraseña.", "error");
+      setFeedback(
+        feedbackEl,
+        "Introduce tu contraseña.",
+        "error"
+      );
       passwordInput?.focus();
       return false;
     }
@@ -177,7 +214,6 @@ export const LoginView = (() => {
     const isVisible = nextType === "text";
 
     passwordInput.type = nextType;
-
     toggleBtn.innerHTML = isVisible ? "🙈" : "👁️";
     toggleBtn.setAttribute(
       "aria-label",
@@ -197,6 +233,74 @@ export const LoginView = (() => {
     }, 0);
   }
 
+  function clearLoginScope() {
+    AppCore.cleanup.run(SCOPE);
+  }
+
+  function handleSuccessfulLogin(result, feedbackEl) {
+    const redirectTo =
+      result?.redirectTo ||
+      getSafeRedirectPath() ||
+      "/";
+
+    AppCore.syncUserUI();
+
+    AppCore.events.emit("login:success", {
+      user: result?.user || AppCore.state.user,
+      redirectTo,
+    });
+
+    setFeedback(
+      feedbackEl,
+      "Acceso correcto. Redirigiendo...",
+      "success"
+    );
+
+    window.setTimeout(() => {
+      if (typeof Router.goAfterLogin === "function") {
+        Router.goAfterLogin(redirectTo);
+        return;
+      }
+
+      if (typeof Router.navigate === "function") {
+        Router.navigate(redirectTo, {
+          replaceState: true,
+          force: true,
+        });
+        return;
+      }
+
+      window.location.href = redirectTo;
+    }, 180);
+  }
+
+  function handle2FARequired(result, feedbackEl) {
+    const redirectTo = result?.redirectTo || "/2fa";
+
+    AppCore.events.emit("login:2fa-required", {
+      redirectTo,
+      tempToken: result?.tempToken || null,
+    });
+
+    setFeedback(
+      feedbackEl,
+      "Verificación adicional requerida. Redirigiendo...",
+      "info"
+    );
+
+    window.setTimeout(() => {
+      if (typeof Router.navigate === "function") {
+        Router.navigate(redirectTo, {
+          replaceState: true,
+          force: true,
+        });
+        return;
+      }
+
+      window.location.href = redirectTo;
+    }, 180);
+  }
+
   /* =========================================================
      TEMPLATE
   ========================================================= */
@@ -204,7 +308,9 @@ export const LoginView = (() => {
     const container = getContainer();
     if (!container) return;
 
-    AppCore.cleanup.run(SCOPE);
+    clearLoginScope();
+    setAuthScreen(true);
+    AppCore.clearDynamicContainers?.();
     AppCore.setDocumentTitle("Acceso");
 
     const redirectPath = getCurrentRedirectPath();
@@ -212,7 +318,7 @@ export const LoginView = (() => {
     container.innerHTML = `
       <section class="login-view">
         <div class="login-shell">
-          <div class="login-card">
+          <div class="login-card" id="login-card">
             <div class="login-brand">
               <div class="login-brand-mark-wrap">
                 <div class="login-brand-mark" aria-hidden="true">ON</div>
@@ -254,7 +360,9 @@ export const LoginView = (() => {
               </div>
 
               <div class="login-field">
-                <label for="login-password" class="login-label">Contraseña</label>
+                <label for="login-password" class="login-label">
+                  Contraseña
+                </label>
 
                 <div class="login-input-wrap">
                   <input
@@ -283,8 +391,12 @@ export const LoginView = (() => {
               </div>
 
               <div class="login-options">
-                <label class="login-check">
-                  <input id="login-remember" type="checkbox" name="remember">
+                <label class="login-check" for="login-remember">
+                  <input
+                    id="login-remember"
+                    type="checkbox"
+                    name="remember"
+                  >
                   <span>Recordarme</span>
                 </label>
 
@@ -391,24 +503,16 @@ export const LoginView = (() => {
 
         const result = await Auth.login({
           identifier: payload.identifier,
-          email: payload.identifier,
-          username: payload.identifier,
           password: payload.password,
           remember: payload.remember,
         });
 
-        AppCore.syncUserUI();
+        if (result?.requires2FA) {
+          handle2FARequired(result, feedbackEl);
+          return;
+        }
 
-        AppCore.events.emit("login:success", {
-          user: result?.user || AppCore.state.user,
-          redirectTo: getCurrentRedirectPath() || "/",
-        });
-
-        setFeedback(feedbackEl, "Acceso correcto. Redirigiendo...", "success");
-
-        window.setTimeout(() => {
-          Router.goAfterLogin("/");
-        }, 180);
+        handleSuccessfulLogin(result, feedbackEl);
       } catch (error) {
         const message = getErrorMessage(error);
 
@@ -429,6 +533,14 @@ export const LoginView = (() => {
 
     AppCore.cleanup.event(scope, "auth:login:error", () => {
       setSubmitting(controls, false);
+    });
+
+    AppCore.cleanup.event(scope, "router:before-render", ({ detail }) => {
+      const nextPath = detail?.path || detail?.canonicalPath || "";
+
+      if (nextPath && nextPath !== "/login") {
+        setAuthScreen(false);
+      }
     });
 
     focusInitialField(identifierInput);

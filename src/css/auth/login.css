@@ -9,19 +9,21 @@
    - compatible con shell SPA existente
    - NO rompe #view-container ni .layout
    - card desplazado hacia la derecha
-   - conserva bloque lateral izquierdo en desktop
-   - bloque lateral izquierdo más ancho y más bajo
-   - bloque lateral izquierdo alineado en altura con el login
+   - conserva bloque lateral izquierdo
+   - bloque lateral izquierdo alineado al mismo nivel que el card login
+   - bloque lateral izquierdo más ancho y más corto de alto
    - sin bloques laterales sobrantes
    - sin hover agresivo global
-   - hover fino en reset password
+   - hover fino en "¿Has olvidado tu contraseña?"
    - toast superior derecha grande y limpio
+   - loading premium con bolita parpadeando EN EL TOAST
    - sin mensajes dentro del card
    - indicador caps lock premium estilo apple
-   - loading premium en botón con punto blanco parpadeando
-   - en móvil SOLO se muestra el card login
+   - el card NO se mueve
+   - pilotos verdes con pulso suave
    - accesible
    - responsive
+   - mobile solo login card
    - sin generar scroll innecesario
 ========================================================= */
 
@@ -119,12 +121,12 @@ body.auth-screen.login-no-scroll #view-container{
 .login-toast-stack--top-right{
   display:flex;
   justify-content:flex-end;
-  width:min(100% - 36px, 460px);
+  width:min(100% - 36px, 500px);
 }
 
 .login-toast{
   position:relative;
-  width:min(460px, calc(100vw - 36px));
+  width:min(500px, calc(100vw - 36px));
   overflow:hidden;
   border-radius:24px;
   border:1px solid rgba(255,255,255,.10);
@@ -294,6 +296,45 @@ body.auth-screen.login-no-scroll #view-container{
   to{ transform:scaleX(0); opacity:.72; }
 }
 
+/* Bolita loading en el TOAST */
+.login-toast.is-info .login-toast-icon{
+  position:relative;
+}
+
+.login-toast.is-info .login-toast-icon::after{
+  content:"";
+  position:absolute;
+  width:10px;
+  height:10px;
+  border-radius:50%;
+  background:#ffffff;
+  box-shadow:
+    0 0 0 0 rgba(255,255,255,.08),
+    0 0 16px rgba(255,255,255,.28);
+  animation:loginToastPulseDot .95s ease-in-out infinite;
+}
+
+.login-toast.is-info .login-toast-icon svg{
+  opacity:.16;
+}
+
+@keyframes loginToastPulseDot{
+  0%,100%{
+    opacity:.42;
+    transform:scale(.74);
+    box-shadow:
+      0 0 0 0 rgba(255,255,255,.04),
+      0 0 10px rgba(255,255,255,.12);
+  }
+  50%{
+    opacity:1;
+    transform:scale(1);
+    box-shadow:
+      0 0 0 6px rgba(255,255,255,.08),
+      0 0 18px rgba(255,255,255,.28);
+  }
+}
+
 /* =========================================================
    SCENE
 ========================================================= */
@@ -312,20 +353,20 @@ body.auth-screen.login-no-scroll #view-container{
 .login-grid{
   position:relative;
   z-index:1;
-  width:min(100%, 1540px);
+  width:min(100%, 1560px);
   height:100%;
   min-height:100dvh;
   margin:0 auto;
   padding:
     clamp(16px, 2vh, 24px)
-    clamp(20px, 3vw, 40px);
+    clamp(20px, 3vw, 42px);
 
   display:grid;
   grid-template-columns:
-    minmax(380px, 520px)
-    minmax(560px, 1fr);
+    minmax(420px, 540px)
+    minmax(540px, 1fr);
   align-items:center;
-  gap:clamp(30px, 3vw, 52px);
+  gap:clamp(30px, 3vw, 54px);
 }
 
 /* =========================================================
@@ -334,7 +375,6 @@ body.auth-screen.login-no-scroll #view-container{
 .login-side{
   position:relative;
   min-height:0;
-  height:100%;
   display:grid;
   align-items:center;
   align-content:center;
@@ -344,7 +384,7 @@ body.auth-screen.login-no-scroll #view-container{
 }
 
 .login-side-left--raised{
-  align-self:stretch;
+  align-self:center;
   padding-top:0;
 }
 
@@ -404,25 +444,20 @@ body.auth-screen.login-no-scroll #view-container{
 }
 
 .login-side-panel--status{
-  width:min(100%, 480px);
-  min-height:clamp(520px, 64vh, 640px);
-  height:min(100%, calc(100dvh - 64px));
-  max-height:calc(100dvh - 64px);
-  padding:30px 28px;
-  display:flex;
-  flex-direction:column;
-  justify-content:center;
+  width:min(100%, 500px);
+  min-height:0;
+  padding:28px 28px;
 }
 
 .login-side-panel--compact{
-  width:min(100%, 480px);
+  width:min(100%, 500px);
 }
 
 .login-side-panel--status h3{
   margin:0;
-  max-width:16ch;
+  max-width:15ch;
   color:var(--text-strong);
-  font-size:clamp(30px, 2.2vw, 40px);
+  font-size:clamp(30px, 2vw, 38px);
   font-weight:var(--weight-black);
   line-height:1.02;
   letter-spacing:var(--letter-tight);
@@ -431,15 +466,15 @@ body.auth-screen.login-no-scroll #view-container{
 
 .login-signal-list{
   display:grid;
-  gap:16px;
-  margin-top:28px;
+  gap:14px;
+  margin-top:26px;
 }
 
 .login-signal-item{
   display:flex;
   align-items:center;
   gap:14px;
-  min-height:58px;
+  min-height:56px;
   padding:0 18px;
   border-radius:20px;
   border:1px solid rgba(255,255,255,.06);
@@ -481,14 +516,13 @@ body.auth-screen.login-no-scroll #view-container{
 .login-card-shell{
   position:relative;
   width:100%;
-  height:100%;
   display:flex;
   align-items:center;
 }
 
 .login-card-shell--right{
   justify-content:flex-end;
-  padding-right:clamp(16px, 3vw, 64px);
+  padding-right:clamp(16px, 3vw, 58px);
 }
 
 .login-card{
@@ -509,7 +543,7 @@ body.auth-screen.login-no-scroll #view-container{
     0 0 0 1px rgba(255,255,255,.03),
     0 18px 60px rgba(124,58,237,.12);
 
-  padding:clamp(24px, 2.4vw, 32px);
+  padding:clamp(22px, 2.2vw, 30px);
   display:grid;
   gap:22px;
 
@@ -526,8 +560,7 @@ body.auth-screen.login-no-scroll #view-container{
 }
 
 .login-card--clean{
-  min-height:clamp(520px, 64vh, 640px);
-  max-height:calc(100dvh - 64px);
+  max-height:calc(100dvh - 44px);
 }
 
 .login-card::before{
@@ -556,6 +589,13 @@ body.auth-screen.login-no-scroll #view-container{
 .login-card > *{
   position:relative;
   z-index:1;
+}
+
+/* Igualar nivel vertical con el card derecho */
+.login-side-panel--status,
+.login-card--clean{
+  margin-top:0;
+  margin-bottom:0;
 }
 
 /* =========================================================
@@ -613,21 +653,16 @@ body.auth-screen.login-no-scroll #view-container{
   width:82px;
   height:82px;
   border-radius:24px;
-
   display:grid;
   place-items:center;
-
   background:
     linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.03)),
     rgba(255,255,255,.03);
-
   border:1px solid rgba(255,255,255,.10);
-
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,.08),
     0 20px 44px rgba(0,0,0,.24),
     0 0 34px rgba(124,58,237,.12);
-
   overflow:hidden;
 }
 
@@ -691,22 +726,18 @@ body.auth-screen.login-no-scroll #view-container{
 .input-text{
   width:100%;
   height:56px;
-
   appearance:none;
   border:none;
   outline:none;
   border-radius:18px;
   padding:0 18px;
-
   background:var(--auth-input-bg);
   color:var(--input-text);
   border:1px solid var(--auth-input-border);
   box-shadow:var(--input-shadow);
-
   font:inherit;
   font-size:15px;
   font-weight:var(--weight-medium);
-
   transition:
     background var(--duration-normal) var(--ease-standard),
     border-color var(--duration-normal) var(--ease-standard),
@@ -759,19 +790,15 @@ body.auth-screen.login-no-scroll #view-container{
   top:50%;
   right:14px;
   transform:translateY(-50%);
-
   width:42px;
   height:42px;
   border-radius:14px;
   border:1px solid transparent;
-
   background:transparent;
   color:var(--text-dim);
-
   display:grid;
   place-items:center;
   cursor:pointer;
-
   transition:
     background var(--duration-normal) var(--ease-standard),
     color var(--duration-normal) var(--ease-standard),
@@ -987,32 +1014,25 @@ body.auth-screen.login-no-scroll #view-container{
   isolation:isolate;
   width:100%;
   height:56px;
-
   display:inline-flex;
   align-items:center;
   justify-content:center;
   gap:10px;
-
   padding:0 18px;
   border:none;
   outline:none;
   border-radius:18px;
-
   color:var(--btn-primary-text);
   background:var(--gradient-accent);
   cursor:pointer;
-
   font:inherit;
   font-size:15px;
   font-weight:var(--weight-bold);
   letter-spacing:.01em;
-
   box-shadow:
     0 14px 34px rgba(124,58,237,.24),
     inset 0 1px 0 rgba(255,255,255,.16);
-
   overflow:hidden;
-
   transition:
     transform .18s cubic-bezier(.2,.8,.2,1),
     filter .24s cubic-bezier(.2,.8,.2,1),
@@ -1076,9 +1096,9 @@ body.auth-screen.login-no-scroll #view-container{
 }
 
 .login-button:disabled{
-  opacity:.92;
+  opacity:.78;
   cursor:not-allowed;
-  filter:saturate(.98);
+  filter:saturate(.95);
   transform:none;
 }
 
@@ -1093,33 +1113,9 @@ body.auth-screen.login-no-scroll #view-container{
   gap:10px;
 }
 
+/* Quitamos la bolita/spinner del botón */
 .login-button[data-loading="true"] .login-submit-text::before{
-  content:"";
-  width:10px;
-  height:10px;
-  border-radius:50%;
-  background:#ffffff;
-  box-shadow:
-    0 0 0 0 rgba(255,255,255,.42),
-    0 0 18px rgba(255,255,255,.36);
-  animation:loginPulseDot .95s ease-in-out infinite;
-}
-
-@keyframes loginPulseDot{
-  0%,100%{
-    opacity:.42;
-    transform:scale(.72);
-    box-shadow:
-      0 0 0 0 rgba(255,255,255,.10),
-      0 0 10px rgba(255,255,255,.14);
-  }
-  50%{
-    opacity:1;
-    transform:scale(1);
-    box-shadow:
-      0 0 0 6px rgba(255,255,255,.10),
-      0 0 18px rgba(255,255,255,.34);
-  }
+  content:none;
 }
 
 /* =========================================================
@@ -1306,7 +1302,7 @@ body.auth-screen.login-no-scroll #view-container{
   .login-signal-item .dot,
   .login-meta::before,
   .caps-icon,
-  .login-button[data-loading="true"] .login-submit-text::before{
+  .login-toast.is-info .login-toast-icon::after{
     animation:none !important;
   }
 
@@ -1324,25 +1320,24 @@ body.auth-screen.login-no-scroll #view-container{
 ========================================================= */
 @media (min-width: 1500px){
   .login-grid{
-    width:min(100%, 1600px);
+    width:min(100%, 1620px);
     grid-template-columns:
-      minmax(400px, 540px)
+      minmax(440px, 560px)
       minmax(580px, 1fr);
-    gap:56px;
+    gap:54px;
   }
 
   .login-card{
-    max-width:560px;
+    max-width:540px;
   }
 
   .login-card-shell--right{
-    padding-right:72px;
+    padding-right:70px;
   }
 
   .login-side-panel--status,
-  .login-card--clean{
-    min-height:560px;
-    max-height:calc(100dvh - 72px);
+  .login-side-panel--compact{
+    width:min(100%, 520px);
   }
 }
 
@@ -1351,33 +1346,36 @@ body.auth-screen.login-no-scroll #view-container{
 ========================================================= */
 @media (max-width: 1220px){
   .login-grid{
-    width:min(100%, 1380px);
+    width:min(100%, 1420px);
     grid-template-columns:
-      minmax(330px, 430px)
-      minmax(500px, 1fr);
+      minmax(340px, 430px)
+      minmax(470px, 1fr);
     gap:28px;
   }
 
   .login-card-shell--right{
-    padding-right:18px;
+    padding-right:20px;
+  }
+
+  .login-side{
+    align-self:center;
+  }
+
+  .login-side-panel--status,
+  .login-side-panel--compact{
+    width:min(100%, 430px);
   }
 
   .login-side-panel--status{
-    width:min(100%, 430px);
-    min-height:500px;
-    padding:28px 24px;
+    padding:26px 24px;
   }
 
   .login-side-panel--status h3{
-    font-size:34px;
+    font-size:32px;
   }
 
-  .login-card{
-    max-width:500px;
-  }
-
-  .login-card--clean{
-    min-height:500px;
+  .login-signal-item{
+    min-height:54px;
   }
 }
 
@@ -1407,7 +1405,8 @@ body.auth-screen.login-no-scroll #view-container{
     max-width:620px;
     width:100%;
     margin:0 auto;
-    height:auto;
+    transform:none;
+    padding-top:0;
   }
 
   .login-side-panel--compact{
@@ -1432,11 +1431,8 @@ body.auth-screen.login-no-scroll #view-container{
     max-height:none;
   }
 
-  .login-side-panel--status,
-  .login-card--clean{
+  .login-side-panel--status{
     min-height:auto;
-    height:auto;
-    max-height:none;
   }
 
   .login-toast-stack{
@@ -1461,8 +1457,8 @@ body.auth-screen.login-no-scroll #view-container{
       14px
       max(14px, env(safe-area-inset-bottom));
     gap:0;
-    grid-template-columns:1fr;
     align-content:center;
+    grid-template-columns:1fr;
   }
 
   .login-side,
@@ -1486,19 +1482,14 @@ body.auth-screen.login-no-scroll #view-container{
 
   .login-card,
   .login-card--offset{
+    max-width:100%;
     margin-inline:auto;
-    max-width:min(100%, 480px);
-    max-height:none;
   }
 
   .login-card{
     padding:22px 18px;
     gap:20px;
     border-radius:24px;
-  }
-
-  .login-card--clean{
-    min-height:auto;
   }
 
   .logo-fade{

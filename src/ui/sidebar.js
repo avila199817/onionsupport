@@ -33,13 +33,24 @@ export const SidebarUI = (() => {
   function getElements() {
     return {
       sidebar: AppCore.dom.sidebar || document.querySelector(".sidebar"),
-      toggleBtn: AppCore.dom.sidebarToggle || document.getElementById("toggleSidebar"),
-      userToggle: AppCore.dom.userToggle || document.getElementById("userToggle"),
-      userDropdown: AppCore.dom.userDropdown || document.getElementById("userDropdown"),
-      logoutBtn: AppCore.dom.logoutBtn || document.getElementById("logoutBtn"),
-      avatarEl: AppCore.dom.sidebarAvatar || document.getElementById("sidebar-avatar"),
-      nameEl: AppCore.dom.sidebarName || document.getElementById("sidebar-name"),
+      toggleBtn:
+        AppCore.dom.sidebarToggle || document.getElementById("toggleSidebar"),
+      userToggle:
+        AppCore.dom.userToggle || document.getElementById("userToggle"),
+      userDropdown:
+        AppCore.dom.userDropdown || document.getElementById("userDropdown"),
+      logoutBtn:
+        AppCore.dom.logoutBtn || document.getElementById("logoutBtn"),
+      avatarEl:
+        AppCore.dom.sidebarAvatar || document.getElementById("sidebar-avatar"),
+      nameEl:
+        AppCore.dom.sidebarName || document.getElementById("sidebar-name"),
     };
+  }
+
+  function hasSidebarShell() {
+    const { sidebar } = getElements();
+    return Boolean(sidebar);
   }
 
   /* =========================================================
@@ -64,28 +75,37 @@ export const SidebarUI = (() => {
   function getUsername(user = null) {
     const currentUser = user || getUser();
 
-    return AppCore.utils.getUserUsername
-      ? AppCore.utils.getUserUsername(currentUser)
-      : String(currentUser?.username || "").trim().toLowerCase();
+    if (typeof AppCore.getUserUsername === "function") {
+      return AppCore.getUserUsername(currentUser);
+    }
+
+    if (typeof AppCore.utils.getUserUsername === "function") {
+      return AppCore.utils.getUserUsername(currentUser);
+    }
+
+    return String(currentUser?.username || "")
+      .trim()
+      .toLowerCase();
   }
 
   function getAvatarText(user = null) {
     const displayName = getDisplayName(user);
+    const username = getUsername(user);
 
-    return (
-      displayName
-        .split(" ")
-        .filter(Boolean)
-        .slice(0, 2)
-        .map((part) => part[0]?.toUpperCase() || "")
-        .join("")
-        .slice(0, 2) || "ON"
-    );
+    const initials = String(displayName || "")
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() || "")
+      .join("")
+      .slice(0, 2);
+
+    return initials || (username ? username.slice(0, 2).toUpperCase() : "ON");
   }
 
   function isAdmin(user = null) {
     const currentUser = user || getUser();
-    return String(currentUser?.role || "").toLowerCase() === "admin";
+    return String(currentUser?.role || "").trim().toLowerCase() === "admin";
   }
 
   /* =========================================================
@@ -112,13 +132,22 @@ export const SidebarUI = (() => {
   }
 
   function setDropdownOpen(value) {
-    const { userDropdown } = getElements();
-    if (!userDropdown) return;
+    const { userDropdown, userToggle } = getElements();
 
     state.dropdownOpen = Boolean(value);
 
+    if (!userDropdown) {
+      syncDropdownA11y(state.dropdownOpen);
+      return;
+    }
+
     userDropdown.classList.toggle("open", state.dropdownOpen);
     userDropdown.classList.toggle("active", state.dropdownOpen);
+    userDropdown.hidden = !state.dropdownOpen;
+
+    if (userToggle) {
+      userToggle.classList.toggle("active", state.dropdownOpen);
+    }
 
     syncDropdownA11y(state.dropdownOpen);
 
@@ -143,7 +172,7 @@ export const SidebarUI = (() => {
      USER UI
   ========================================================= */
   function renderUser() {
-    const { nameEl, avatarEl } = getElements();
+    const { nameEl, avatarEl, userToggle } = getElements();
     const user = getUser();
     const displayName = getDisplayName(user);
     const avatarText = getAvatarText(user);
@@ -169,6 +198,11 @@ export const SidebarUI = (() => {
       } else {
         delete avatarEl.dataset.username;
       }
+    }
+
+    if (userToggle) {
+      userToggle.setAttribute("aria-label", `Abrir menú de usuario de ${displayName}`);
+      userToggle.setAttribute("title", displayName);
     }
 
     AppCore.events.emit("sidebar:user:rendered", {
@@ -208,7 +242,8 @@ export const SidebarUI = (() => {
     if (mobile) {
       sidebar.classList.toggle("open", isOpen);
       sidebar.classList.toggle("is-open", isOpen);
-      sidebar.classList.remove("collapsed", "is-collapsed");
+      sidebar.classList.remove("collapsed");
+      sidebar.classList.remove("is-collapsed");
     } else {
       sidebar.classList.toggle("collapsed", !isOpen);
       sidebar.classList.toggle("is-collapsed", !isOpen);
@@ -217,7 +252,10 @@ export const SidebarUI = (() => {
     }
 
     if (AppCore.dom.body) {
-      AppCore.dom.body.classList.toggle("sidebar-collapsed", !isOpen && !mobile);
+      AppCore.dom.body.classList.toggle(
+        "sidebar-collapsed",
+        !isOpen && !mobile
+      );
       AppCore.dom.body.classList.toggle("sidebar-open", isOpen && mobile);
     }
 
@@ -231,6 +269,7 @@ export const SidebarUI = (() => {
         "data-tooltip",
         isOpen ? "Cerrar barra lateral" : "Abrir barra lateral"
       );
+      toggleBtn.classList.toggle("is-active", isOpen);
     }
 
     AppCore.events.emit("sidebar:state:synced", {
@@ -329,7 +368,9 @@ export const SidebarUI = (() => {
     }
 
     if (event.key === "Escape") {
+      event.preventDefault();
       closeDropdown();
+      return;
     }
 
     if (event.key === "ArrowDown" && !state.dropdownOpen) {
@@ -372,6 +413,10 @@ export const SidebarUI = (() => {
       syncSidebarState();
     });
 
+    AppCore.cleanup.event(scope, "router:before-render", () => {
+      closeDropdown();
+    });
+
     AppCore.cleanup.event(scope, "router:rendered", () => {
       closeDropdown();
       closeSidebarOnMobileAfterNavigation();
@@ -386,12 +431,21 @@ export const SidebarUI = (() => {
     AppCore.cleanup.event(scope, "app:user-ui:sync", () => {
       renderUser();
     });
+
+    AppCore.cleanup.event(scope, "app:theme:change", () => {
+      syncSidebarState();
+    });
   }
 
   function bindDomEvents(scope) {
     AppCore.cleanup.on(scope, document, "click", handleDocumentClick);
     AppCore.cleanup.on(scope, document, "keydown", handleGlobalKeydown);
-    AppCore.cleanup.on(scope, window, "resize", AppCore.utils.debounce(handleResize, 120));
+    AppCore.cleanup.on(
+      scope,
+      window,
+      "resize",
+      AppCore.utils.debounce(handleResize, 120)
+    );
 
     const { userToggle } = getElements();
 
@@ -409,13 +463,14 @@ export const SidebarUI = (() => {
       return api;
     }
 
-    const { sidebar, userToggle, userDropdown } = getElements();
-
-    if (!sidebar) {
-      AppCore.utils.warn("No se encontró .sidebar para inicializar SidebarUI.");
+    if (!hasSidebarShell()) {
+      AppCore.utils.warn(
+        "No se encontró .sidebar para inicializar SidebarUI."
+      );
       return api;
     }
 
+    const { userToggle, userDropdown } = getElements();
     const scope = AppCore.cleanup.scope(SCOPE);
 
     if (userToggle) {
@@ -427,6 +482,7 @@ export const SidebarUI = (() => {
     if (userDropdown) {
       userDropdown.setAttribute("role", "menu");
       userDropdown.setAttribute("aria-hidden", "true");
+      userDropdown.hidden = true;
     }
 
     syncSidebarState();
@@ -439,7 +495,9 @@ export const SidebarUI = (() => {
 
     initialized = true;
 
-    AppCore.modules.register("sidebar", api);
+    if (!AppCore.modules.has("sidebar")) {
+      AppCore.modules.register("sidebar", api);
+    }
 
     AppCore.events.emit("sidebar:ready", {
       initialized: true,

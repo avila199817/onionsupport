@@ -10,8 +10,23 @@
    - validar acceso por rol
    - exponer helpers auth para toda la SPA
 
-   IMPORTANTE:
-   Si tu backend usa otras rutas, cambia SOLO el bloque ENDPOINTS.
+   BACKEND ESPERADO:
+   - POST   /api/auth/login
+   - POST   /api/auth/logout
+   - GET    /api/auth/me
+   - POST   /api/auth/refresh
+
+   FORMATO LOGIN:
+   {
+     identifier: "usuario_o_email",
+     password: "******"
+   }
+
+   NOTAS:
+   - Soporta username sin @dominio.com
+   - Soporta email
+   - Soporta respuesta con { ok, token, user }
+   - Soporta 2FA opcional con tempToken
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
@@ -21,13 +36,12 @@ export const Auth = (() => {
 
   /* =========================================================
      ENDPOINTS
-     Ajusta aquí si tu API usa otras rutas.
   ========================================================= */
   const ENDPOINTS = {
-    login: "/auth/login",
-    logout: "/auth/logout",
-    me: "/auth/me",
-    refresh: "/auth/refresh",
+    login: "/api/auth/login",
+    logout: "/api/auth/logout",
+    me: "/api/auth/me",
+    refresh: "/api/auth/refresh",
   };
 
   /* =========================================================
@@ -55,6 +69,16 @@ export const Auth = (() => {
           .toLowerCase();
   }
 
+  function slugify(value = "") {
+    return String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  }
+
   function normalizeUser(rawUser) {
     if (!rawUser || typeof rawUser !== "object") return null;
 
@@ -64,48 +88,49 @@ export const Auth = (() => {
       rawUser.nick ??
       rawUser.alias ??
       rawUser.login ??
+      rawUser.slug ??
       ""
     );
 
+    const displayName =
+      rawUser.name ??
+      rawUser.nombre ??
+      rawUser.full_name ??
+      rawUser.fullName ??
+      rawUser.display_name ??
+      rawUser.displayName ??
+      rawUser.username ??
+      rawUser.email ??
+      "Usuario";
+
+    const role =
+      rawUser.role ??
+      rawUser.rol ??
+      rawUser.type ??
+      rawUser.user_type ??
+      rawUser.userType ??
+      "user";
+
+    const userSlug = rawUser.slug || slugify(username || displayName || "usuario");
+
     return {
       id: rawUser.id ?? rawUser.user_id ?? rawUser.uuid ?? rawUser._id ?? null,
-
       username,
-
-      name:
-        rawUser.name ??
-        rawUser.nombre ??
-        rawUser.full_name ??
-        rawUser.fullName ??
-        rawUser.display_name ??
-        rawUser.displayName ??
-        rawUser.username ??
-        rawUser.email ??
-        "Usuario",
-
-      email: rawUser.email ?? rawUser.mail ?? null,
-
-      role:
-        rawUser.role ??
-        rawUser.rol ??
-        rawUser.type ??
-        rawUser.user_type ??
-        rawUser.userType ??
-        null,
-
+      slug: userSlug,
+      name: displayName,
+      email: rawUser.email ?? rawUser.mail ?? "",
+      role,
       avatar:
         rawUser.avatar ??
         rawUser.photo ??
         rawUser.image ??
         rawUser.picture ??
         null,
-
       active:
         rawUser.active ??
         rawUser.is_active ??
         rawUser.isActive ??
         true,
-
       raw: rawUser,
     };
   }
@@ -140,6 +165,31 @@ export const Auth = (() => {
     );
   }
 
+  function extractTempToken(payload) {
+    if (!payload) return null;
+
+    return (
+      payload.tempToken ||
+      payload.temp_token ||
+      payload.data?.tempToken ||
+      payload.data?.temp_token ||
+      null
+    );
+  }
+
+  function extractRequires2FA(payload) {
+    if (!payload) return false;
+
+    return Boolean(
+      payload.requires2FA ||
+      payload.requires_2fa ||
+      payload.requiresTwoFactor ||
+      payload.data?.requires2FA ||
+      payload.data?.requires_2fa ||
+      payload.data?.requiresTwoFactor
+    );
+  }
+
   function extractUser(payload) {
     if (!payload) return null;
 
@@ -170,10 +220,10 @@ export const Auth = (() => {
 
   function resolveLoginIdentifier(credentials = {}) {
     return String(
-      credentials.email ??
+      credentials.identifier ??
       credentials.username ??
       credentials.user ??
-      credentials.identifier ??
+      credentials.email ??
       ""
     ).trim();
   }
@@ -194,8 +244,6 @@ export const Auth = (() => {
     const { identifier, password, remember } = normalizeLoginPayload(credentials);
 
     return {
-      email: identifier,
-      username: identifier,
       identifier,
       password,
       remember,
@@ -287,6 +335,19 @@ export const Auth = (() => {
   function validateAuthResponse(response) {
     const token = extractToken(response);
     const user = extractUser(response);
+    const requires2FA = extractRequires2FA(response);
+    const tempToken = extractTempToken(response);
+
+    if (requires2FA && tempToken) {
+      return {
+        token: null,
+        user: null,
+        refreshToken: null,
+        requires2FA: true,
+        tempToken,
+        response,
+      };
+    }
 
     if (!token && !user) {
       throw new Error("La respuesta del API no contiene una sesión válida.");
@@ -296,6 +357,8 @@ export const Auth = (() => {
       token,
       user,
       refreshToken: extractRefreshToken(response),
+      requires2FA: false,
+      tempToken: null,
       response,
     };
   }
@@ -308,6 +371,24 @@ export const Auth = (() => {
       role: AppCore.state.role,
       ...extra,
     };
+  }
+
+  function getPostLoginTarget(user = AppCore.state.user) {
+    const redirectParam = new URLSearchParams(window.location.search).get("redirect");
+
+    if (redirectParam) {
+      return AppCore.utils.normalizePath(redirectParam);
+    }
+
+    const slug =
+      user?.slug ||
+      slugify(user?.username || user?.name || "");
+
+    if (slug) {
+      return `/@${slug}`;
+    }
+
+    return AppCore.config?.routes?.home || "/";
   }
 
   /* =========================================================
@@ -324,6 +405,24 @@ export const Auth = (() => {
       AppCore.setUser(normalizedUser || null);
     }
 
+    if (normalizedUser?.slug) {
+      AppCore.storage.setRaw("user_slug", normalizedUser.slug);
+    } else {
+      AppCore.storage.remove("user_slug");
+    }
+
+    if (normalizedUser?.name) {
+      AppCore.storage.setRaw("user_name", normalizedUser.name);
+    } else {
+      AppCore.storage.remove("user_name");
+    }
+
+    if (normalizedUser?.role) {
+      AppCore.storage.setRaw("role", normalizedUser.role);
+    } else {
+      AppCore.storage.remove("role");
+    }
+
     const snapshot = buildSessionSnapshot();
 
     AppCore.events.emit("auth:session:applied", snapshot);
@@ -333,6 +432,10 @@ export const Auth = (() => {
 
   function clearSessionLocal() {
     AppCore.clearSession();
+    AppCore.storage.remove("temp_token");
+    AppCore.storage.remove("user_slug");
+    AppCore.storage.remove("user_name");
+    AppCore.storage.remove("role");
 
     AppCore.events.emit("auth:session:cleared", {
       authenticated: false,
@@ -356,6 +459,8 @@ export const Auth = (() => {
 
     AppCore.events.emit("auth:login:start", {
       identifier: payload.identifier,
+      apiBase: AppCore.config.apiBase,
+      endpoint: ENDPOINTS.login,
     });
 
     try {
@@ -367,25 +472,47 @@ export const Auth = (() => {
         }
       );
 
-      const { token, user } = validateAuthResponse(response);
+      const authData = validateAuthResponse(response);
+
+      if (authData.requires2FA && authData.tempToken) {
+        AppCore.storage.setRaw("temp_token", authData.tempToken);
+
+        AppCore.events.emit("auth:login:2fa-required", {
+          identifier: payload.identifier,
+          tempToken: authData.tempToken,
+          response,
+        });
+
+        return {
+          ok: true,
+          requires2FA: true,
+          tempToken: authData.tempToken,
+          redirectTo: "/2fa",
+          response,
+        };
+      }
 
       const snapshot = applySession({
-        token: token ?? null,
-        user: user ?? null,
+        token: authData.token ?? null,
+        user: authData.user ?? null,
       });
 
       if (!snapshot.token) {
         throw new Error("El login devolvió usuario pero no devolvió token.");
       }
 
+      const redirectTo = getPostLoginTarget(snapshot.user);
+
       AppCore.events.emit("auth:login:success", {
         ...snapshot,
+        redirectTo,
         response,
       });
 
       return {
         ok: true,
         ...snapshot,
+        redirectTo,
         response,
       };
     } catch (error) {
@@ -719,7 +846,12 @@ export const Auth = (() => {
     const formData = new FormData(formElement);
 
     const credentials = {
-      email: formData.get("email") || formData.get("username") || "",
+      identifier:
+        formData.get("identifier") ||
+        formData.get("username") ||
+        formData.get("email") ||
+        formData.get("user") ||
+        "",
       password: formData.get("password") || "",
       remember:
         formData.get("remember") === "on" ||
@@ -759,5 +891,6 @@ export const Auth = (() => {
     clearSessionLocal,
     normalizeUser,
     buildLoginRedirectPath,
+    getPostLoginTarget,
   };
 })();

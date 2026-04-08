@@ -1,5 +1,5 @@
 /* =========================================================
-   Onion SPA - Auth / Session
+   Onion SPA - Auth / Session (FULL PRO SAAS PANEL)
    Archivo: src/features/auth.js
 
    Responsabilidades:
@@ -7,6 +7,7 @@
    - logout
    - restaurar sesión
    - cargar usuario actual
+   - refrescar access token
    - validar acceso por rol
    - exponer helpers auth para toda la SPA
 
@@ -16,17 +17,11 @@
    - GET    /api/auth/me
    - POST   /api/auth/refresh
 
-   FORMATO LOGIN:
-   {
-     identifier: "usuario_o_email",
-     password: "******"
-   }
-
    NOTAS:
-   - Soporta username sin @dominio.com
-   - Soporta email
-   - Soporta respuesta con { ok, token, user }
-   - Soporta 2FA opcional con tempToken
+   - soporta username o email
+   - soporta 2FA opcional con tempToken
+   - soporta refresh token + sessionId + userId
+   - restaura sesión incluso si el access token ya no existe
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
@@ -42,6 +37,19 @@ export const Auth = (() => {
     logout: "/api/auth/logout",
     me: "/api/auth/me",
     refresh: "/api/auth/refresh",
+  };
+
+  /* =========================================================
+     STORAGE KEYS
+  ========================================================= */
+  const STORAGE_KEYS = {
+    refreshToken: "refresh_token",
+    tempToken: "temp_token",
+    userSlug: "user_slug",
+    userName: "user_name",
+    role: "role",
+    sessionId: "session_id",
+    sessionUserId: "session_user_id",
   };
 
   /* =========================================================
@@ -127,7 +135,8 @@ export const Auth = (() => {
     const userSlug = rawUser.slug || slugify(username || displayName || "usuario");
 
     return {
-      id: rawUser.id ?? rawUser.user_id ?? rawUser.uuid ?? rawUser._id ?? null,
+      id: rawUser.id ?? rawUser.userId ?? rawUser.user_id ?? rawUser.uuid ?? rawUser._id ?? null,
+      userId: rawUser.userId ?? rawUser.id ?? rawUser.user_id ?? rawUser.uuid ?? rawUser._id ?? null,
       username,
       slug: userSlug,
       name: displayName,
@@ -145,6 +154,40 @@ export const Auth = (() => {
         rawUser.isActive ??
         true,
       raw: clone(rawUser),
+    };
+  }
+
+  function normalizeSessionPayload(payload = null) {
+    if (!payload || typeof payload !== "object") return null;
+
+    const sessionNode = payload.session || payload.data?.session || payload.meta?.session || null;
+
+    if (!sessionNode || typeof sessionNode !== "object") {
+      return null;
+    }
+
+    const sessionId = String(
+      sessionNode.sessionId ??
+        sessionNode.id ??
+        ""
+    ).trim();
+
+    const userId = String(
+      sessionNode.userId ??
+        payload.user?.userId ??
+        payload.user?.id ??
+        payload.data?.user?.userId ??
+        payload.data?.user?.id ??
+        ""
+    ).trim();
+
+    return {
+      sessionId: sessionId || null,
+      userId: userId || null,
+      expiresAt: sessionNode.expiresAt || null,
+      createdAt: sessionNode.createdAt || null,
+      lastActiveAt: sessionNode.lastActiveAt || null,
+      lastRefreshAt: sessionNode.lastRefreshAt || null,
     };
   }
 
@@ -225,13 +268,11 @@ export const Auth = (() => {
 
   function extractMessage(error) {
     if (!error) return "Error de autenticación";
-
     if (typeof error === "string") return error;
     if (error.data?.message) return error.data.message;
     if (error.data?.error) return error.data.error;
     if (typeof error.data === "string") return error.data;
     if (error.message) return error.message;
-
     return "Error de autenticación";
   }
 
@@ -271,9 +312,29 @@ export const Auth = (() => {
     return Boolean(token && String(token).trim());
   }
 
+  function getStoredRefreshToken() {
+    return AppCore.storage.getRaw(STORAGE_KEYS.refreshToken, null);
+  }
+
   function hasRefreshToken() {
-    const refreshToken = AppCore.storage.getRaw("refresh_token", null);
+    const refreshToken = getStoredRefreshToken();
     return Boolean(refreshToken && String(refreshToken).trim());
+  }
+
+  function getStoredSessionId() {
+    return AppCore.storage.getRaw(STORAGE_KEYS.sessionId, null);
+  }
+
+  function getStoredSessionUserId() {
+    return AppCore.storage.getRaw(STORAGE_KEYS.sessionUserId, null);
+  }
+
+  function hasRefreshContext() {
+    return Boolean(
+      hasRefreshToken() &&
+      String(getStoredSessionId() || "").trim() &&
+      String(getStoredSessionUserId() || "").trim()
+    );
   }
 
   function isAuthenticated() {
@@ -362,14 +423,17 @@ export const Auth = (() => {
   function validateAuthResponse(response) {
     const token = extractToken(response);
     const user = extractUser(response);
+    const refreshToken = extractRefreshToken(response);
     const requires2FA = extractRequires2FA(response);
     const tempToken = extractTempToken(response);
+    const sessionData = normalizeSessionPayload(response);
 
     if (requires2FA && tempToken) {
       return {
         token: null,
         user: null,
         refreshToken: null,
+        sessionData: null,
         requires2FA: true,
         tempToken,
         response,
@@ -383,7 +447,8 @@ export const Auth = (() => {
     return {
       token,
       user,
-      refreshToken: extractRefreshToken(response),
+      refreshToken,
+      sessionData,
       requires2FA: false,
       tempToken: null,
       response,
@@ -396,6 +461,9 @@ export const Auth = (() => {
       token: AppCore.state.token,
       user: AppCore.state.user,
       role: AppCore.state.role,
+      refreshToken: getStoredRefreshToken(),
+      sessionId: getStoredSessionId(),
+      sessionUserId: getStoredSessionUserId(),
       ...extra,
     };
   }
@@ -423,41 +491,68 @@ export const Auth = (() => {
   ========================================================= */
   function persistAuxSessionData(normalizedUser = null) {
     if (normalizedUser?.slug) {
-      AppCore.storage.setRaw("user_slug", normalizedUser.slug);
+      AppCore.storage.setRaw(STORAGE_KEYS.userSlug, normalizedUser.slug);
     } else {
-      AppCore.storage.remove("user_slug");
+      AppCore.storage.remove(STORAGE_KEYS.userSlug);
     }
 
     if (normalizedUser?.name) {
-      AppCore.storage.setRaw("user_name", normalizedUser.name);
+      AppCore.storage.setRaw(STORAGE_KEYS.userName, normalizedUser.name);
     } else {
-      AppCore.storage.remove("user_name");
+      AppCore.storage.remove(STORAGE_KEYS.userName);
     }
 
     if (normalizedUser?.role) {
-      AppCore.storage.setRaw("role", normalizedUser.role);
+      AppCore.storage.setRaw(STORAGE_KEYS.role, normalizedUser.role);
     } else {
-      AppCore.storage.remove("role");
+      AppCore.storage.remove(STORAGE_KEYS.role);
     }
   }
 
   function persistRefreshToken(refreshToken = null) {
     if (refreshToken && String(refreshToken).trim()) {
-      AppCore.storage.setRaw("refresh_token", String(refreshToken).trim());
+      AppCore.storage.setRaw(STORAGE_KEYS.refreshToken, String(refreshToken).trim());
     } else {
-      AppCore.storage.remove("refresh_token");
+      AppCore.storage.remove(STORAGE_KEYS.refreshToken);
     }
   }
 
   function persistTempToken(tempToken = null) {
     if (tempToken && String(tempToken).trim()) {
-      AppCore.storage.setRaw("temp_token", String(tempToken).trim());
+      AppCore.storage.setRaw(STORAGE_KEYS.tempToken, String(tempToken).trim());
     } else {
-      AppCore.storage.remove("temp_token");
+      AppCore.storage.remove(STORAGE_KEYS.tempToken);
     }
   }
 
-  function applySession({ token = undefined, user = undefined } = {}) {
+  function persistSessionContext(sessionData = null, fallbackUser = null) {
+    const sessionId = String(sessionData?.sessionId || "").trim();
+    const sessionUserId = String(
+      sessionData?.userId ||
+        fallbackUser?.userId ||
+        fallbackUser?.id ||
+        ""
+    ).trim();
+
+    if (sessionId) {
+      AppCore.storage.setRaw(STORAGE_KEYS.sessionId, sessionId);
+    } else {
+      AppCore.storage.remove(STORAGE_KEYS.sessionId);
+    }
+
+    if (sessionUserId) {
+      AppCore.storage.setRaw(STORAGE_KEYS.sessionUserId, sessionUserId);
+    } else {
+      AppCore.storage.remove(STORAGE_KEYS.sessionUserId);
+    }
+  }
+
+  function applySession({
+    token = undefined,
+    user = undefined,
+    refreshToken = undefined,
+    sessionData = undefined,
+  } = {}) {
     const normalizedUser = user === undefined ? undefined : normalizeUser(user);
 
     if (token !== undefined) {
@@ -466,6 +561,14 @@ export const Auth = (() => {
 
     if (user !== undefined) {
       AppCore.setUser(normalizedUser || null);
+    }
+
+    if (refreshToken !== undefined) {
+      persistRefreshToken(refreshToken || null);
+    }
+
+    if (sessionData !== undefined) {
+      persistSessionContext(sessionData || null, normalizedUser || AppCore.state.user);
     }
 
     persistAuxSessionData(
@@ -481,17 +584,22 @@ export const Auth = (() => {
 
   function clearSessionLocal() {
     AppCore.clearSession();
-    AppCore.storage.remove("temp_token");
-    AppCore.storage.remove("refresh_token");
-    AppCore.storage.remove("user_slug");
-    AppCore.storage.remove("user_name");
-    AppCore.storage.remove("role");
+    AppCore.storage.remove(STORAGE_KEYS.tempToken);
+    AppCore.storage.remove(STORAGE_KEYS.refreshToken);
+    AppCore.storage.remove(STORAGE_KEYS.userSlug);
+    AppCore.storage.remove(STORAGE_KEYS.userName);
+    AppCore.storage.remove(STORAGE_KEYS.role);
+    AppCore.storage.remove(STORAGE_KEYS.sessionId);
+    AppCore.storage.remove(STORAGE_KEYS.sessionUserId);
 
     AppCore.events.emit("auth:session:cleared", {
       authenticated: false,
       token: null,
       user: null,
       role: null,
+      refreshToken: null,
+      sessionId: null,
+      sessionUserId: null,
     });
   }
 
@@ -543,11 +651,12 @@ export const Auth = (() => {
       }
 
       persistTempToken(null);
-      persistRefreshToken(authData.refreshToken);
 
       const snapshot = applySession({
         token: authData.token ?? null,
         user: authData.user ?? null,
+        refreshToken: authData.refreshToken ?? null,
+        sessionData: authData.sessionData ?? null,
       });
 
       if (!snapshot.token) {
@@ -610,15 +719,17 @@ export const Auth = (() => {
         throw new Error("No se pudo resolver el usuario actual.");
       }
 
-      AppCore.setUser(user);
-      persistAuxSessionData(user);
-      session.lastCheckAt = Date.now();
-
-      AppCore.events.emit("auth:me:success", {
+      const snapshot = applySession({
         user,
       });
 
-      return user;
+      session.lastCheckAt = Date.now();
+
+      AppCore.events.emit("auth:me:success", {
+        user: snapshot.user,
+      });
+
+      return snapshot.user;
     } catch (error) {
       AppCore.events.emit("auth:me:error", {
         error,
@@ -635,8 +746,8 @@ export const Auth = (() => {
      REFRESH TOKEN
   ========================================================= */
   async function refreshSession() {
-    if (!hasValidToken() && !hasRefreshToken()) {
-      throw new Error("No hay token para intentar refresh.");
+    if (!hasRefreshContext()) {
+      throw new Error("No hay contexto de refresh disponible.");
     }
 
     if (session.refreshPromise) {
@@ -649,43 +760,41 @@ export const Auth = (() => {
 
     session.refreshPromise = (async () => {
       try {
-        const storedRefreshToken = AppCore.storage.getRaw("refresh_token", null);
+        const storedRefreshToken = getStoredRefreshToken();
+        const storedSessionId = getStoredSessionId();
+        const storedSessionUserId = getStoredSessionUserId();
 
-        const requestOptions = {
-          auth: true,
+        const requestBody = {
+          refreshToken: String(storedRefreshToken || "").trim(),
+          sessionId: String(storedSessionId || "").trim(),
+          userId: String(storedSessionUserId || "").trim(),
         };
-
-        let requestBody = null;
-
-        if (storedRefreshToken && String(storedRefreshToken).trim()) {
-          requestBody = {
-            refreshToken: String(storedRefreshToken).trim(),
-          };
-        }
 
         const response = await AppCore.apiClient.post(
           ENDPOINTS.refresh,
           requestBody,
-          requestOptions
+          {
+            auth: false,
+          }
         );
 
         const nextToken = extractToken(response);
         const nextUser = extractUser(response);
         const nextRefreshToken = extractRefreshToken(response);
+        const nextSessionData = normalizeSessionPayload(response);
 
         if (!nextToken && !nextUser) {
-          throw new Error(
-            "La respuesta de refresh no contiene datos de sesión."
-          );
-        }
-
-        if (nextRefreshToken) {
-          persistRefreshToken(nextRefreshToken);
+          throw new Error("La respuesta de refresh no contiene datos de sesión.");
         }
 
         const snapshot = applySession({
           token: nextToken ?? AppCore.state.token,
           user: nextUser ?? AppCore.state.user,
+          refreshToken: nextRefreshToken ?? storedRefreshToken,
+          sessionData: nextSessionData ?? {
+            sessionId: storedSessionId,
+            userId: storedSessionUserId,
+          },
         });
 
         if (!snapshot.token) {
@@ -736,20 +845,55 @@ export const Auth = (() => {
     AppCore.events.emit("auth:restore:start", {
       hasToken: hasValidToken(),
       hasUser: Boolean(AppCore.state.user),
+      hasRefreshContext: hasRefreshContext(),
     });
 
     try {
       if (!hasValidToken()) {
-        clearSessionLocal();
+        if (!hasRefreshContext()) {
+          clearSessionLocal();
 
-        AppCore.events.emit("auth:restore:empty", {
-          reason: "missing-token",
-        });
+          AppCore.events.emit("auth:restore:empty", {
+            reason: "missing-token-and-refresh-context",
+          });
 
-        return {
-          ok: false,
-          user: null,
-        };
+          return {
+            ok: false,
+            user: null,
+          };
+        }
+
+        try {
+          const refreshed = await refreshSession();
+
+          if (!AppCore.state.user && hasValidToken()) {
+            await fetchMe();
+          }
+
+          AppCore.events.emit("auth:restore:success", {
+            user: AppCore.state.user,
+            source: "refresh-without-token",
+          });
+
+          return {
+            ok: true,
+            user: AppCore.state.user,
+            refreshed,
+          };
+        } catch (refreshWithoutTokenError) {
+          clearSessionLocal();
+
+          AppCore.events.emit("auth:restore:error", {
+            error: refreshWithoutTokenError,
+            message: extractMessage(refreshWithoutTokenError),
+          });
+
+          return {
+            ok: false,
+            user: null,
+            error: refreshWithoutTokenError,
+          };
+        }
       }
 
       try {
@@ -769,6 +913,21 @@ export const Auth = (() => {
           "fetchMe() falló en restoreSession(), intentando refresh.",
           meError
         );
+
+        if (!hasRefreshContext()) {
+          clearSessionLocal();
+
+          AppCore.events.emit("auth:restore:error", {
+            error: meError,
+            message: extractMessage(meError),
+          });
+
+          return {
+            ok: false,
+            user: null,
+            error: meError,
+          };
+        }
 
         try {
           const refreshed = await refreshSession();
@@ -942,6 +1101,7 @@ export const Auth = (() => {
   ========================================================= */
   return {
     ENDPOINTS,
+    STORAGE_KEYS,
     session,
 
     login,
@@ -962,5 +1122,10 @@ export const Auth = (() => {
     normalizeUser,
     buildLoginRedirectPath,
     getPostLoginTarget,
+
+    hasRefreshToken,
+    hasRefreshContext,
+    getStoredSessionId,
+    getStoredSessionUserId,
   };
 })();

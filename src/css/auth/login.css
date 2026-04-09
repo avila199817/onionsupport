@@ -841,11 +841,13 @@ body.auth-screen.login-no-scroll #view-container{
 }
 
 [data-theme="light"] .password-toggle:hover{
+  transform:translateY(-50%);
   background:transparent;
   border-color:transparent;
 }
 
 [data-theme="light"] .password-toggle.active{
+  transform:translateY(-50%);
   background:rgba(124,58,237,.10);
   border-color:rgba(124,58,237,.16);
 }
@@ -1549,12 +1551,12 @@ body.auth-screen.login-no-scroll #view-container{
     border-radius:12px;
   }
 
-  .password-toggle:hover,
-  .password-toggle.active,
-  .password-toggle:focus-visible,
-  .password-toggle:active{
-    transform:translateY(-50%);
-  }
+   .password-toggle:hover,
+   .password-toggle.active,
+   .password-toggle:focus-visible,
+   .password-toggle:active{
+     transform:none;
+   }
 
   .caps-indicator{
     right:54px;

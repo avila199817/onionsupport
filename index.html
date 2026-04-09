@@ -4,14 +4,14 @@
   <!-- =========================================================
        ONION SUPPORT — INDEX / SPA SHELL
        PRO SAAS PANEL / FINAL PRO SYSTEM
-       Versión afinada para:
-       - shell SPA estable
-       - login auth-screen compatible
+       Shell SPA final alineado con:
+       - sidebar.css final
+       - sidebar.js final
+       - tooltips custom por data-tooltip
+       - sidebar desktop / mobile
        - loader limpio
-       - topbar / sidebar / dynamic slots
-       - rutas absolutas coherentes
-       - sidebar colapsado con tooltips finos
-       - accesibilidad base correcta
+       - topbar / dynamic slots
+       - base href coherente
   ========================================================= -->
 
   <!-- =========================
@@ -35,10 +35,6 @@
 
   <!-- =========================
        BASE SPA
-       IMPORTANTE:
-       - mantener en "/"
-       - coherente con Router + data-spa
-       - coherente con rutas absolutas /src/...
   ========================= -->
   <base href="/">
 
@@ -63,7 +59,7 @@
   >
 
   <!-- =========================
-       CSS ORDER (CRÍTICO)
+       CSS ORDER
   ========================= -->
 
   <!-- TOKENS -->
@@ -186,7 +182,7 @@
   </div>
 
   <!-- =========================================================
-       NOSCRIPT FALLBACK CONTENT
+       NOSCRIPT FALLBACK
   ========================================================= -->
   <noscript>
     <div class="layout">
@@ -436,6 +432,7 @@
           aria-haspopup="menu"
           aria-expanded="false"
           aria-controls="userDropdown"
+          aria-label="Abrir menú de usuario"
           data-tooltip="Cuenta"
         >
           <div
@@ -473,6 +470,7 @@
           id="userDropdown"
           role="menu"
           aria-label="Menú de usuario"
+          aria-hidden="true"
           hidden
         >
           <button type="button" class="dropdown-item" role="menuitem" tabindex="-1">

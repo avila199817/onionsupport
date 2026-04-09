@@ -1,11 +1,13 @@
 /* =========================================================
-   Onion SPA - Topbar Search (FULL PRO SAAS PANEL · GOD MODE)
-   Archivo: src/ui/topbarSearch.js
+   Onion SPA - Topbar UI (FULL PRO SAAS PANEL · FINAL PRO)
+   Archivo: src/ui/topbar.js
 
    Responsabilidades:
-   - bind seguro del buscador global del topbar
-   - no pisar lógica del resto de la SPA
-   - soportar rebind tras render SPA
+   - controlar la UI global del topbar
+   - sincronizar título de la vista actual
+   - gestionar toggle mobile de sidebar
+   - bind seguro y rebind tras render SPA
+   - integrar buscador global del topbar
    - debounce + abort de peticiones
    - renderizar resultados agrupados
    - soportar navegación por teclado
@@ -18,10 +20,11 @@
 import { AppCore } from "../core/core.js";
 import { Router } from "../router/router.js";
 
-export const TopbarSearch = (() => {
+export const TopbarUI = (() => {
   "use strict";
 
-  const SCOPE = "ui:topbar-search";
+  const SCOPE = "ui:topbar";
+  const SEARCH_SCOPE = "ui:topbar:search";
 
   const SEARCH_DEBOUNCE_MS = 220;
   const MIN_QUERY_LENGTH = 1;
@@ -30,8 +33,8 @@ export const TopbarSearch = (() => {
   const CACHE_TTL_MS = 20 * 1000;
 
   let isBound = false;
-  let controller = null;
-  let debounceTimer = null;
+  let searchController = null;
+  let searchDebounceTimer = null;
   let activeIndex = -1;
   let currentItems = [];
   let currentQuery = "";
@@ -40,29 +43,6 @@ export const TopbarSearch = (() => {
   /* =========================================================
      HELPERS BASE
   ========================================================= */
-  function getDom() {
-    const input =
-      AppCore.dom.searchInput ||
-      document.getElementById("topbar-search") ||
-      document.querySelector("#topbar-search");
-
-    const container =
-      AppCore.dom.searchResults ||
-      document.getElementById("topbar-search-results") ||
-      document.querySelector("#topbar-search-results");
-
-    const wrap =
-      input?.closest(".topbar-search-wrap") ||
-      container?.closest(".topbar-search-wrap") ||
-      document.querySelector(".topbar-search-wrap");
-
-    return {
-      input,
-      container,
-      wrap,
-    };
-  }
-
   function escapeHtml(value = "") {
     if (AppCore?.utils?.escapeHtml) {
       return AppCore.utils.escapeHtml(String(value ?? ""));
@@ -102,32 +82,269 @@ export const TopbarSearch = (() => {
     return result;
   }
 
-  function clearDebounce() {
-    if (debounceTimer) {
-      window.clearTimeout(debounceTimer);
-      debounceTimer = null;
+  function getDom() {
+    const topbar =
+      AppCore.dom.topbar ||
+      document.getElementById("topbar") ||
+      document.querySelector(".topbar");
+
+    const title =
+      AppCore.dom.topbarTitle ||
+      document.getElementById("topbar-title") ||
+      document.querySelector("#topbar-title");
+
+    const mobileToggle =
+      AppCore.dom.toggleSidebarMobile ||
+      document.getElementById("toggleSidebarMobile") ||
+      document.querySelector("#toggleSidebarMobile");
+
+    const sidebar =
+      AppCore.dom.sidebar ||
+      document.getElementById("sidebar") ||
+      document.querySelector(".sidebar");
+
+    const searchInput =
+      AppCore.dom.searchInput ||
+      document.getElementById("topbar-search") ||
+      document.querySelector("#topbar-search");
+
+    const searchResults =
+      AppCore.dom.searchResults ||
+      document.getElementById("topbar-search-results") ||
+      document.querySelector("#topbar-search-results");
+
+    const searchWrap =
+      searchInput?.closest(".topbar-search-wrap") ||
+      searchResults?.closest(".topbar-search-wrap") ||
+      document.querySelector(".topbar-search-wrap");
+
+    return {
+      topbar,
+      title,
+      mobileToggle,
+      sidebar,
+      searchInput,
+      searchResults,
+      searchWrap,
+    };
+  }
+
+  function syncDomCache() {
+    const dom = getDom();
+
+    AppCore.dom.topbar = dom.topbar || AppCore.dom.topbar || null;
+    AppCore.dom.topbarTitle = dom.title || AppCore.dom.topbarTitle || null;
+    AppCore.dom.toggleSidebarMobile =
+      dom.mobileToggle || AppCore.dom.toggleSidebarMobile || null;
+    AppCore.dom.searchInput = dom.searchInput || AppCore.dom.searchInput || null;
+    AppCore.dom.searchResults =
+      dom.searchResults || AppCore.dom.searchResults || null;
+  }
+
+  function safeNormalizePath(path = "/") {
+    try {
+      return AppCore.utils.normalizePath(path || "/");
+    } catch {
+      return "/";
+    }
+  }
+
+  function safeNormalizeCanonicalPath(path = "/") {
+    try {
+      if (typeof AppCore.utils.normalizeCanonicalPath === "function") {
+        return AppCore.utils.normalizeCanonicalPath(path || "/");
+      }
+
+      return safeNormalizePath(path);
+    } catch {
+      return "/";
+    }
+  }
+
+  function getCurrentPublicPath() {
+    return safeNormalizePath(
+      `${window.location.pathname || "/"}${window.location.search || ""}`
+    );
+  }
+
+  function getCurrentCanonicalPath() {
+    if (typeof Router?.getCurrentCanonicalPath === "function") {
+      try {
+        return Router.getCurrentCanonicalPath();
+      } catch {
+        /* no-op */
+      }
+    }
+
+    return safeNormalizeCanonicalPath(getCurrentPublicPath());
+  }
+
+  function isMobileViewport() {
+    return window.matchMedia("(max-width: 900px)").matches;
+  }
+
+  function clearSearchDebounce() {
+    if (searchDebounceTimer) {
+      window.clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = null;
     }
   }
 
   function abortSearch() {
-    if (controller) {
+    if (searchController) {
       try {
-        controller.abort();
+        searchController.abort();
       } catch {
         /* no-op */
       }
-      controller = null;
+      searchController = null;
     }
   }
 
-  function clearState() {
-    clearDebounce();
+  function clearSearchState() {
+    clearSearchDebounce();
     abortSearch();
     activeIndex = -1;
     currentItems = [];
     currentQuery = "";
   }
 
+  /* =========================================================
+     TOPBAR TITLE
+  ========================================================= */
+  function resolveRouteTitle(path = "") {
+    const canonicalPath = safeNormalizeCanonicalPath(path || "/");
+
+    const staticMap = {
+      "/": "Onion Support",
+      "/incidencias": "Incidencias",
+      "/facturas": "Facturas",
+      "/usuarios": "Usuarios",
+      "/clientes": "Clientes",
+      "/cuenta": "Cuenta",
+      "/ajustes": "Ajustes",
+      "/login": "Acceso",
+    };
+
+    if (staticMap[canonicalPath]) {
+      return staticMap[canonicalPath];
+    }
+
+    const routes =
+      Router?.routes ||
+      Router?.table ||
+      Router?.routeTable ||
+      AppCore?.routes ||
+      null;
+
+    if (routes && typeof routes === "object") {
+      const exact =
+        routes[canonicalPath] ||
+        routes[safeNormalizePath(path || "/")] ||
+        null;
+
+      if (exact?.title) {
+        return String(exact.title);
+      }
+    }
+
+    if (canonicalPath === "/") {
+      return "Onion Support";
+    }
+
+    const pretty = canonicalPath
+      .replace(/^\/+/, "")
+      .split("/")
+      .filter(Boolean)
+      .map((segment) => {
+        const clean = decodeURIComponent(segment)
+          .replace(/[-_]+/g, " ")
+          .trim();
+
+        if (!clean) return "";
+        return clean.charAt(0).toUpperCase() + clean.slice(1);
+      })
+      .filter(Boolean)
+      .join(" · ");
+
+    return pretty || "Onion Support";
+  }
+
+  function syncTitle(path = "") {
+    const { title } = getDom();
+    if (!title) return;
+
+    const nextTitle = resolveRouteTitle(path || getCurrentPublicPath());
+    title.textContent = nextTitle;
+  }
+
+  /* =========================================================
+     SIDEBAR MOBILE
+  ========================================================= */
+  function setMobileToggleState() {
+    const { mobileToggle, sidebar } = getDom();
+    if (!mobileToggle || !sidebar) return;
+
+    const isOpen = sidebar.classList.contains("open");
+    mobileToggle.setAttribute("aria-expanded", String(isOpen));
+  }
+
+  function openSidebarMobile() {
+    const { sidebar } = getDom();
+    if (!sidebar) return;
+
+    sidebar.classList.add("open");
+    setMobileToggleState();
+  }
+
+  function closeSidebarMobile() {
+    const { sidebar } = getDom();
+    if (!sidebar) return;
+
+    sidebar.classList.remove("open");
+    setMobileToggleState();
+  }
+
+  function toggleSidebarMobile() {
+    const { sidebar } = getDom();
+    if (!sidebar) return;
+
+    sidebar.classList.toggle("open");
+    setMobileToggleState();
+  }
+
+  function handleMobileToggleClick() {
+    toggleSidebarMobile();
+  }
+
+  function handleOutsideSidebarClick(event) {
+    if (!isMobileViewport()) return;
+
+    const { sidebar, mobileToggle } = getDom();
+    if (!sidebar || !mobileToggle) return;
+    if (!sidebar.classList.contains("open")) return;
+
+    const clickedSidebar = event.target?.closest?.("#sidebar, .sidebar");
+    const clickedToggle = event.target?.closest?.("#toggleSidebarMobile");
+
+    if (clickedSidebar || clickedToggle) {
+      return;
+    }
+
+    closeSidebarMobile();
+  }
+
+  function handleViewportResize() {
+    if (!isMobileViewport()) {
+      closeSidebarMobile();
+    } else {
+      setMobileToggleState();
+    }
+  }
+
+  /* =========================================================
+     SEARCH HELPERS
+  ========================================================= */
   function getTypeLabel(type = "general") {
     const map = {
       cliente: "Clientes",
@@ -198,7 +415,6 @@ export const TopbarSearch = (() => {
 
     const normalizedText = normalizeText(safeText);
     const normalizedQuery = normalizeText(safeQuery);
-
     const index = normalizedText.indexOf(normalizedQuery);
 
     if (index === -1) {
@@ -212,32 +428,37 @@ export const TopbarSearch = (() => {
     return `${escapeHtml(start)}<mark>${escapeHtml(middle)}</mark>${escapeHtml(end)}`;
   }
 
-  function safeUrl(url = "/") {
-    try {
-      return AppCore.utils.normalizePath(url || "/");
-    } catch {
-      return "/";
-    }
+  function setSearchExpanded(input, expanded = false) {
+    if (!input) return;
+    input.setAttribute("aria-expanded", String(Boolean(expanded)));
   }
 
-  function showContainer(container) {
+  function showResultsContainer(container) {
+    const { searchInput } = getDom();
+
     if (!container) return;
     container.hidden = false;
     container.classList.add("active");
     container.setAttribute("aria-hidden", "false");
+    setSearchExpanded(searchInput, true);
   }
 
-  function hideContainer(container) {
+  function hideResultsContainer(container) {
+    const { searchInput } = getDom();
+
     if (!container) return;
     container.classList.remove("active");
     container.hidden = true;
     container.setAttribute("aria-hidden", "true");
     container.innerHTML = "";
+
     activeIndex = -1;
     currentItems = [];
+
+    setSearchExpanded(searchInput, false);
   }
 
-  function setLoading(container, query = "") {
+  function setLoadingState(container, query = "") {
     if (!container) return;
 
     container.innerHTML = `
@@ -249,25 +470,29 @@ export const TopbarSearch = (() => {
       </div>
     `;
 
-    showContainer(container);
+    showResultsContainer(container);
   }
 
-  function setEmpty(container, query = "") {
+  function setEmptyState(container, query = "") {
     if (!container) return;
 
     container.innerHTML = `
       <div class="search-state search-state-empty" aria-live="polite">
         <div class="search-state-title">Sin resultados</div>
         <div class="search-state-text">
-          ${escapeHtml(query ? `No encontramos coincidencias para “${query}”.` : "No hay resultados.")}
+          ${escapeHtml(
+            query
+              ? `No encontramos coincidencias para “${query}”.`
+              : "No hay resultados."
+          )}
         </div>
       </div>
     `;
 
-    showContainer(container);
+    showResultsContainer(container);
   }
 
-  function setError(container) {
+  function setErrorState(container) {
     if (!container) return;
 
     container.innerHTML = `
@@ -279,7 +504,7 @@ export const TopbarSearch = (() => {
       </div>
     `;
 
-    showContainer(container);
+    showResultsContainer(container);
   }
 
   function updateActiveItem(items = []) {
@@ -293,18 +518,38 @@ export const TopbarSearch = (() => {
     }
   }
 
+  function updateActiveVisuals(container) {
+    if (!container) return;
+
+    const items = Array.from(container.querySelectorAll(".search-result"));
+
+    items.forEach((el, index) => {
+      const isActive = index === activeIndex;
+      el.classList.toggle("active", isActive);
+      el.setAttribute("aria-selected", String(isActive));
+    });
+
+    if (activeIndex >= 0 && items[activeIndex]) {
+      items[activeIndex].scrollIntoView({
+        block: "nearest",
+      });
+    }
+  }
+
   function goToResult(item = null) {
     if (!item?.url) return;
 
-    const { container, input } = getDom();
+    const { searchResults, searchInput } = getDom();
 
-    hideContainer(container);
+    hideResultsContainer(searchResults);
 
-    if (input) {
-      input.blur();
+    if (searchInput) {
+      searchInput.blur();
     }
 
-    const target = safeUrl(item.url);
+    closeSidebarMobile();
+
+    const target = safeNormalizePath(item.url);
 
     if (typeof Router.navigate === "function") {
       Router.navigate(target, {
@@ -317,7 +562,7 @@ export const TopbarSearch = (() => {
   }
 
   /* =========================================================
-     FALLBACK LOCAL
+     SEARCH LOCAL INDEX
   ========================================================= */
   function getLocalIndex() {
     return [
@@ -395,7 +640,7 @@ export const TopbarSearch = (() => {
   }
 
   /* =========================================================
-     NORMALIZACIÓN RESPUESTA API
+     SEARCH API NORMALIZATION
   ========================================================= */
   function normalizeApiItem(raw, index = 0) {
     if (!raw || typeof raw !== "object") return null;
@@ -453,7 +698,7 @@ export const TopbarSearch = (() => {
       type: String(type || "general").toLowerCase(),
       title: String(title || "Resultado"),
       subtitle: String(subtitle || ""),
-      url: url ? safeUrl(url) : null,
+      url: url ? safeNormalizePath(url) : null,
       raw,
       source: "api",
     };
@@ -500,6 +745,7 @@ export const TopbarSearch = (() => {
             { ...item, type: item?.type || key },
             index
           );
+
           if (normalized) {
             collected.push(normalized);
           }
@@ -511,7 +757,7 @@ export const TopbarSearch = (() => {
   }
 
   /* =========================================================
-     API SEARCH
+     SEARCH API
   ========================================================= */
   function getCacheKey(query = "") {
     return normalizeText(query);
@@ -522,6 +768,7 @@ export const TopbarSearch = (() => {
     const found = cache.get(key);
 
     if (!found) return null;
+
     if (Date.now() - found.createdAt > CACHE_TTL_MS) {
       cache.delete(key);
       return null;
@@ -532,6 +779,7 @@ export const TopbarSearch = (() => {
 
   function setCached(query = "", value = []) {
     const key = getCacheKey(query);
+
     cache.set(key, {
       value,
       createdAt: Date.now(),
@@ -544,13 +792,17 @@ export const TopbarSearch = (() => {
       return cached;
     }
 
+    if (!AppCore?.apiClient?.get) {
+      return [];
+    }
+
     abortSearch();
-    controller = new AbortController();
+    searchController = new AbortController();
 
     try {
       const data = await AppCore.apiClient.get("/api/search", {
         query: { q: query },
-        signal: controller.signal,
+        signal: searchController.signal,
         auth: true,
         timeout: 12000,
       });
@@ -563,15 +815,15 @@ export const TopbarSearch = (() => {
         return [];
       }
 
-      AppCore.utils.warn?.("TopbarSearch: fallo búsqueda API", error);
+      AppCore.utils.warn?.("TopbarUI: fallo búsqueda API", error);
       throw error;
     } finally {
-      controller = null;
+      searchController = null;
     }
   }
 
   /* =========================================================
-     MERGE / SCORE
+     SEARCH SCORE / MERGE
   ========================================================= */
   function scoreResult(item, query = "") {
     const titleScore = scoreTextMatch(item.title, query);
@@ -602,6 +854,7 @@ export const TopbarSearch = (() => {
         break;
       case "nav":
       case "route":
+      case "routes":
         typeBoost = 3;
         break;
       default:
@@ -617,7 +870,8 @@ export const TopbarSearch = (() => {
         ...item,
         score: scoreResult(item, query),
       })),
-      (item) => `${item.type}|${item.url || ""}|${item.title || ""}|${item.subtitle || ""}`
+      (item) =>
+        `${item.type}|${item.url || ""}|${item.title || ""}|${item.subtitle || ""}`
     );
 
     return merged
@@ -643,7 +897,7 @@ export const TopbarSearch = (() => {
   }
 
   /* =========================================================
-     RENDER
+     SEARCH RENDER
   ========================================================= */
   function renderResults(container, results = [], query = "") {
     if (!container) return;
@@ -653,7 +907,7 @@ export const TopbarSearch = (() => {
     currentItems = [];
 
     if (!results.length) {
-      setEmpty(container, query);
+      setEmptyState(container, query);
       return;
     }
 
@@ -670,7 +924,7 @@ export const TopbarSearch = (() => {
       header.textContent = getTypeLabel(type);
       groupEl.appendChild(header);
 
-      items.slice(0, MAX_RESULTS_PER_GROUP).forEach((item, index) => {
+      items.slice(0, MAX_RESULTS_PER_GROUP).forEach((item) => {
         const resultEl = document.createElement("button");
         resultEl.type = "button";
         resultEl.className = "search-result";
@@ -681,12 +935,17 @@ export const TopbarSearch = (() => {
         resultEl.setAttribute("aria-selected", "false");
 
         resultEl.innerHTML = `
-          <span class="search-icon" aria-hidden="true">${escapeHtml(getTypeIcon(item.type))}</span>
+          <span class="search-icon" aria-hidden="true">${escapeHtml(
+            getTypeIcon(item.type)
+          )}</span>
           <span class="search-text">
             <span class="search-title">${highlight(item.title || "", query)}</span>
             ${
               item.subtitle
-                ? `<span class="search-subtitle">${highlight(item.subtitle || "", query)}</span>`
+                ? `<span class="search-subtitle">${highlight(
+                    item.subtitle || "",
+                    query
+                  )}</span>`
                 : ""
             }
           </span>
@@ -712,43 +971,26 @@ export const TopbarSearch = (() => {
     });
 
     container.appendChild(fragment);
-    showContainer(container);
-  }
-
-  function updateActiveVisuals(container) {
-    if (!container) return;
-
-    const items = Array.from(container.querySelectorAll(".search-result"));
-
-    items.forEach((el, index) => {
-      const isActive = index === activeIndex;
-      el.classList.toggle("active", isActive);
-      el.setAttribute("aria-selected", String(isActive));
-    });
-
-    if (activeIndex >= 0 && items[activeIndex]) {
-      items[activeIndex].scrollIntoView({
-        block: "nearest",
-      });
-    }
+    showResultsContainer(container);
   }
 
   /* =========================================================
-     RUN SEARCH
+     SEARCH EXECUTION
   ========================================================= */
   async function runSearch(query = "") {
-    const { container } = getDom();
+    const { searchResults } = getDom();
     const q = normalizeQuery(query);
 
     currentQuery = q;
 
-    if (!container) return;
+    if (!searchResults) return;
+
     if (!q || q.length < MIN_QUERY_LENGTH) {
-      hideContainer(container);
+      hideResultsContainer(searchResults);
       return;
     }
 
-    setLoading(container, q);
+    setLoadingState(searchResults, q);
 
     try {
       const [remote, local] = await Promise.all([
@@ -761,7 +1003,7 @@ export const TopbarSearch = (() => {
       }
 
       const merged = mergeResults(remote, local, q);
-      renderResults(container, merged, q);
+      renderResults(searchResults, merged, q);
     } catch (error) {
       if (currentQuery !== q) {
         return;
@@ -770,54 +1012,56 @@ export const TopbarSearch = (() => {
       const local = searchLocal(q);
 
       if (local.length) {
-        renderResults(container, local, q);
+        renderResults(searchResults, local, q);
         return;
       }
 
-      setError(container);
+      setErrorState(searchResults);
     }
   }
 
   /* =========================================================
-     INPUT / KEYBOARD
+     SEARCH HANDLERS
   ========================================================= */
-  function handleInput() {
-    const { input, container } = getDom();
-    const value = normalizeQuery(input?.value || "");
+  function handleSearchInput() {
+    const { searchInput, searchResults } = getDom();
+    const value = normalizeQuery(searchInput?.value || "");
 
-    clearDebounce();
+    clearSearchDebounce();
 
     if (!value) {
-      hideContainer(container);
+      hideResultsContainer(searchResults);
       return;
     }
 
-    debounceTimer = window.setTimeout(() => {
+    searchDebounceTimer = window.setTimeout(() => {
       runSearch(value);
     }, SEARCH_DEBOUNCE_MS);
   }
 
-  function handleFocus() {
-    const { input, container } = getDom();
-    const value = normalizeQuery(input?.value || "");
+  function handleSearchFocus() {
+    const { searchInput, searchResults } = getDom();
+    const value = normalizeQuery(searchInput?.value || "");
 
     if (value.length >= MIN_QUERY_LENGTH) {
       runSearch(value);
       return;
     }
 
-    hideContainer(container);
+    hideResultsContainer(searchResults);
   }
 
-  function handleKeydown(event) {
-    const { container, input } = getDom();
-    if (!input || !container) return;
-    if (document.activeElement !== input) return;
+  function handleSearchKeydown(event) {
+    const { searchResults, searchInput } = getDom();
+    if (!searchInput || !searchResults) return;
+    if (document.activeElement !== searchInput) return;
 
-    const items = Array.from(container.querySelectorAll(".search-result"));
+    const items = Array.from(searchResults.querySelectorAll(".search-result"));
+
     if (!items.length) {
       if (event.key === "Escape") {
-        hideContainer(container);
+        hideResultsContainer(searchResults);
+        searchInput.blur();
       }
       return;
     }
@@ -826,7 +1070,7 @@ export const TopbarSearch = (() => {
       event.preventDefault();
       activeIndex = Math.min(activeIndex + 1, items.length - 1);
       updateActiveItem(items);
-      updateActiveVisuals(container);
+      updateActiveVisuals(searchResults);
       return;
     }
 
@@ -834,7 +1078,7 @@ export const TopbarSearch = (() => {
       event.preventDefault();
       activeIndex = Math.max(activeIndex - 1, 0);
       updateActiveItem(items);
-      updateActiveVisuals(container);
+      updateActiveVisuals(searchResults);
       return;
     }
 
@@ -848,88 +1092,162 @@ export const TopbarSearch = (() => {
 
     if (event.key === "Escape") {
       event.preventDefault();
-      hideContainer(container);
-      input.blur();
+      hideResultsContainer(searchResults);
+      searchInput.blur();
     }
   }
 
-  function handleDocumentClick(event) {
-    const { wrap, container } = getDom();
-    if (!wrap || !container) return;
+  function handleSearchOutsideClick(event) {
+    const { searchWrap, searchResults } = getDom();
+    if (!searchWrap || !searchResults) return;
 
     if (event.target?.closest?.(".topbar-search-wrap")) {
       return;
     }
 
-    hideContainer(container);
+    hideResultsContainer(searchResults);
   }
 
   /* =========================================================
-     BIND / REBIND
+     ROUTE / APP EVENTS
   ========================================================= */
-  function bindDomEvents() {
-    const { input, container } = getDom();
+  function handleRouteVisualSync() {
+    syncDomCache();
+    syncTitle(getCurrentPublicPath());
+    closeSidebarMobile();
+  }
 
-    if (!input || !container) {
+  /* =========================================================
+     BINDS
+  ========================================================= */
+  function bindTopbarDomEvents() {
+    const { mobileToggle } = getDom();
+
+    if (mobileToggle) {
+      AppCore.cleanup.on(SCOPE, mobileToggle, "click", handleMobileToggleClick);
+    }
+
+    AppCore.cleanup.on(SCOPE, document, "click", handleOutsideSidebarClick);
+    AppCore.cleanup.on(SCOPE, window, "resize", handleViewportResize);
+
+    return true;
+  }
+
+  function bindSearchDomEvents() {
+    const { searchInput, searchResults } = getDom();
+
+    if (!searchInput || !searchResults) {
       return false;
     }
 
-    AppCore.cleanup.on(SCOPE, input, "input", handleInput);
-    AppCore.cleanup.on(SCOPE, input, "focus", handleFocus);
-    AppCore.cleanup.on(SCOPE, document, "keydown", handleKeydown);
-    AppCore.cleanup.on(SCOPE, document, "click", handleDocumentClick);
+    searchResults.setAttribute("role", "listbox");
+    searchResults.setAttribute("aria-hidden", "true");
+    setSearchExpanded(searchInput, false);
+
+    AppCore.cleanup.on(
+      SEARCH_SCOPE,
+      searchInput,
+      "input",
+      handleSearchInput
+    );
+    AppCore.cleanup.on(
+      SEARCH_SCOPE,
+      searchInput,
+      "focus",
+      handleSearchFocus
+    );
+    AppCore.cleanup.on(
+      SEARCH_SCOPE,
+      document,
+      "keydown",
+      handleSearchKeydown
+    );
+    AppCore.cleanup.on(
+      SEARCH_SCOPE,
+      document,
+      "click",
+      handleSearchOutsideClick
+    );
 
     return true;
   }
 
   function bindAppEvents() {
-    AppCore.cleanup.event(SCOPE, "app:route:change", () => {
-      const { container } = getDom();
-      hideContainer(container);
-    });
+    AppCore.cleanup.event(SCOPE, "router:before-render", ({ detail }) => {
+      const nextPath =
+        detail?.path ||
+        detail?.publicPath ||
+        detail?.canonicalPath ||
+        getCurrentPublicPath();
 
-    AppCore.cleanup.event(SCOPE, "app:public-path:change", () => {
-      const { container } = getDom();
-      hideContainer(container);
+      syncTitle(nextPath);
     });
 
     AppCore.cleanup.event(SCOPE, "router:rendered", () => {
+      handleRouteVisualSync();
       rebind();
     });
 
     AppCore.cleanup.event(SCOPE, "app:route:rendered", () => {
+      handleRouteVisualSync();
       rebind();
+    });
+
+    AppCore.cleanup.event(SCOPE, "app:route:change", () => {
+      const { searchResults } = getDom();
+      hideResultsContainer(searchResults);
+      syncTitle(getCurrentPublicPath());
+      closeSidebarMobile();
+    });
+
+    AppCore.cleanup.event(SCOPE, "app:public-path:change", () => {
+      const { searchResults } = getDom();
+      hideResultsContainer(searchResults);
+      syncTitle(getCurrentPublicPath());
+    });
+
+    AppCore.cleanup.event(SCOPE, "router:shell:change", () => {
+      syncDomCache();
+      setMobileToggleState();
+    });
+
+    AppCore.cleanup.event(SCOPE, "app:user-ui:sync", () => {
+      syncDomCache();
     });
   }
 
   function destroy() {
     AppCore.cleanup.run(SCOPE);
-    clearState();
+    AppCore.cleanup.run(SEARCH_SCOPE);
+    clearSearchState();
     isBound = false;
   }
 
   function bind() {
     destroy();
+    syncDomCache();
 
-    const ok = bindDomEvents();
-    if (!ok) {
-      return false;
-    }
-
+    bindTopbarDomEvents();
+    bindSearchDomEvents();
     bindAppEvents();
+
+    syncTitle(getCurrentPublicPath());
+    setMobileToggleState();
+
     isBound = true;
 
     if (AppCore.config?.debug) {
-      AppCore.utils.log?.("TopbarSearch inicializado correctamente.");
+      AppCore.utils.log?.("TopbarUI inicializado correctamente.");
     }
 
     return true;
   }
 
   function rebind() {
-    const { input, container } = getDom();
+    syncDomCache();
 
-    if (!input || !container) {
+    const { topbar } = getDom();
+    if (!topbar) {
       isBound = false;
       return false;
     }
@@ -952,23 +1270,6 @@ export const TopbarSearch = (() => {
     return done;
   }
 
-  function ready() {
-    if (document.readyState === "loading") {
-      document.addEventListener(
-        "DOMContentLoaded",
-        () => {
-          init();
-        },
-        { once: true }
-      );
-      return;
-    }
-
-    init();
-  }
-
-  ready();
-
   /* =========================================================
      API PÚBLICA
   ========================================================= */
@@ -978,5 +1279,12 @@ export const TopbarSearch = (() => {
     rebind,
     destroy,
     runSearch,
+    syncTitle,
+    openSidebarMobile,
+    closeSidebarMobile,
+    toggleSidebarMobile,
+    get isBound() {
+      return isBound;
+    },
   };
 })();

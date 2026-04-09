@@ -5,12 +5,14 @@
        ONION SUPPORT — INDEX / SPA SHELL
        PRO SAAS PANEL / FINAL PRO SYSTEM
        Shell SPA final alineado con:
+       - layout.css final
        - sidebar.css final
-       - sidebar.js final
+       - topbar.css final
+       - loader.css final
        - tooltips custom por data-tooltip
        - sidebar desktop / mobile
        - loader limpio
-       - topbar / dynamic slots
+       - topbar / tablehead / dynamic slots
        - base href coherente
   ========================================================= -->
 
@@ -31,7 +33,7 @@
   >
   <meta name="robots" content="noindex, nofollow">
   <meta name="color-scheme" content="dark light">
-  <meta name="theme-color" content="#0a0c11">
+  <meta name="theme-color" content="#1f1f1f">
 
   <!-- =========================
        BASE SPA
@@ -88,57 +90,65 @@
   <noscript>
     <style>
       html,
-      body {
-        margin: 0;
-        min-height: 100%;
-        background: #0a0c11;
-        color: #ffffff;
-        font-family: Inter, system-ui, sans-serif;
+      body{
+        margin:0;
+        min-height:100%;
+        background:#1f1f1f;
+        color:#ffffff;
+        font-family:Inter, system-ui, sans-serif;
       }
 
-      #app-loader {
-        display: none !important;
+      #app-loader{
+        display:none !important;
       }
 
-      .layout {
-        display: block !important;
-        visibility: visible !important;
-        opacity: 1 !important;
-        min-height: 100vh;
+      .layout{
+        display:block !important;
+        visibility:visible !important;
+        opacity:1 !important;
+        min-height:100vh;
       }
 
       .sidebar,
       .topbar,
-      #tablehead-container {
-        display: none !important;
+      .table-head{
+        display:none !important;
       }
 
-      #view-container {
-        display: block !important;
-        min-height: 100vh;
-        padding: 24px;
+      .main-content,
+      #app-content,
+      #view-container{
+        display:block !important;
+        min-height:100vh;
+        width:100%;
+        margin:0;
+        padding:0;
       }
 
-      .noscript-box {
-        max-width: 760px;
-        margin: 48px auto;
-        padding: 24px 28px;
-        border-radius: 18px;
-        border: 1px solid rgba(255,255,255,.08);
-        background: rgba(255,255,255,.04);
-        box-shadow: 0 18px 40px rgba(0,0,0,.24);
+      #view-container{
+        padding:24px;
       }
 
-      .noscript-box h1 {
-        margin: 0 0 12px;
-        font-size: 28px;
-        line-height: 1.1;
+      .noscript-box{
+        max-width:760px;
+        margin:48px auto;
+        padding:24px 28px;
+        border-radius:18px;
+        border:1px solid rgba(255,255,255,.08);
+        background:rgba(255,255,255,.04);
+        box-shadow:0 18px 40px rgba(0,0,0,.24);
       }
 
-      .noscript-box p {
-        margin: 0;
-        line-height: 1.55;
-        color: rgba(255,255,255,.78);
+      .noscript-box h1{
+        margin:0 0 12px;
+        font-size:28px;
+        line-height:1.1;
+      }
+
+      .noscript-box p{
+        margin:0;
+        line-height:1.55;
+        color:rgba(255,255,255,.78);
       }
     </style>
   </noscript>
@@ -186,14 +196,18 @@
   ========================================================= -->
   <noscript>
     <div class="layout">
-      <main id="view-container" role="main">
-        <section class="noscript-box">
-          <h1>JavaScript es necesario</h1>
-          <p>
-            Onion Support necesita JavaScript para cargar la navegación SPA,
-            el panel, las vistas y la autenticación.
-          </p>
-        </section>
+      <main class="main-content" role="main" aria-label="Contenido principal">
+        <div id="app-content">
+          <div id="view-container">
+            <section class="noscript-box">
+              <h1>JavaScript es necesario</h1>
+              <p>
+                Onion Support necesita JavaScript para cargar la navegación SPA,
+                el panel, las vistas y la autenticación.
+              </p>
+            </section>
+          </div>
+        </div>
       </main>
     </div>
   </noscript>
@@ -418,9 +432,13 @@
       </nav>
 
       <!-- EXTRA SLOT -->
-      <div class="sidebar-section" aria-label="Recientes">
+      <section
+        class="sidebar-section"
+        id="sidebar-recents"
+        aria-label="Recientes"
+      >
         <span class="section-title">Recientes</span>
-      </div>
+      </section>
 
       <!-- USER -->
       <div class="sidebar-footer">
@@ -536,11 +554,11 @@
     </aside>
 
     <!-- =========================
-         MAIN
+         MAIN CONTENT SHELL
     ========================= -->
     <main
       class="main-content"
-      id="app-content"
+      id="main-content"
       role="main"
       aria-label="Contenido principal"
     >
@@ -591,6 +609,9 @@
               autocomplete="off"
               inputmode="search"
               aria-label="Buscar en la aplicación"
+              aria-controls="topbar-search-results"
+              aria-expanded="false"
+              aria-autocomplete="list"
             >
 
             <div
@@ -603,20 +624,24 @@
         </div>
       </header>
 
-      <!-- TABLE HEAD SLOT -->
-      <div
-        id="tablehead-container"
-        class="table-head"
-        data-dynamic
-        aria-live="polite"
-      ></div>
+      <!-- TABLE HEAD -->
+      <div class="table-head" id="table-head">
+        <div
+          id="tablehead-container"
+          data-dynamic
+          aria-live="polite"
+        ></div>
+      </div>
 
-      <!-- VIEW ROOT -->
-      <div
-        id="view-container"
-        data-view-root
-        aria-live="polite"
-      ></div>
+      <!-- APP CONTENT -->
+      <div id="app-content">
+        <!-- VIEW ROOT -->
+        <div
+          id="view-container"
+          data-view-root
+          aria-live="polite"
+        ></div>
+      </div>
     </main>
   </div>
 

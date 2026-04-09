@@ -3,16 +3,18 @@
    Archivo: src/ui/sidebar.js
 
    Responsabilidades:
-   - toggle sidebar
+   - toggle sidebar desktop / mobile
    - persistencia collapsed/expanded
-   - dropdown de usuario
+   - dropdown de usuario robusto
    - render de usuario
    - pintar avatar real si existe
-   - fallback a iniciales si no hay avatar
+   - fallback a iniciales si no hay avatar o falla la imagen
    - visibilidad por rol
    - cierre inteligente en navegación
    - abrir sidebar automáticamente al hacer click en user dropdown
      si el sidebar está cerrado
+   - logout robusto aunque falle el endpoint remoto
+   - evitar warnings de aria-hidden al cerrar dropdown
    - init seguro una sola vez
    - sincronización robusta con AppCore
    - inyectar acceso admin a estado del servidor
@@ -32,6 +34,7 @@ export const SidebarUI = (() => {
 
   let initialized = false;
   let resizeHandler = null;
+  let logoutInFlight = false;
 
   const state = {
     dropdownOpen: false,
@@ -57,6 +60,9 @@ export const SidebarUI = (() => {
       toggleBtn:
         AppCore.dom.sidebarToggle ||
         document.getElementById("toggleSidebar"),
+
+      mobileToggleBtn:
+        document.getElementById("toggleSidebarMobile"),
 
       userToggle:
         AppCore.dom.userToggle ||
@@ -88,8 +94,19 @@ export const SidebarUI = (() => {
   function isShellHidden() {
     return Boolean(
       document.body?.classList.contains("route-shell-hidden") ||
-        AppCore.dom.body?.classList.contains("route-shell-hidden")
+      AppCore.dom.body?.classList.contains("route-shell-hidden")
     );
+  }
+
+  function blurIfInside(element) {
+    try {
+      const activeEl = document.activeElement;
+      if (element && activeEl && element.contains(activeEl)) {
+        activeEl.blur?.();
+      }
+    } catch {
+      /* noop */
+    }
   }
 
   /* =========================================================
@@ -133,7 +150,7 @@ export const SidebarUI = (() => {
     const username = getUsername(currentUser);
 
     const initials = String(displayName || "")
-      .split(" ")
+      .split(/\s+/)
       .filter(Boolean)
       .slice(0, 2)
       .map((part) => part[0]?.toUpperCase() || "")
@@ -146,14 +163,15 @@ export const SidebarUI = (() => {
   function getAvatarUrl(user = null) {
     const currentUser = user || getUser();
 
-    return (
+    return String(
       currentUser?.avatar ||
       currentUser?.avatarUrl ||
       currentUser?.photo ||
       currentUser?.image ||
       currentUser?.profileImage ||
+      currentUser?.picture ||
       ""
-    );
+    ).trim();
   }
 
   function isAdmin(user = null) {
@@ -163,9 +181,7 @@ export const SidebarUI = (() => {
       AppCore.state.role ||
       "";
 
-    return String(role)
-      .trim()
-      .toLowerCase() === "admin";
+    return String(role).trim().toLowerCase() === "admin";
   }
 
   /* =========================================================
@@ -210,21 +226,30 @@ export const SidebarUI = (() => {
   }
 
   function updateToggleLabel(isOpen = null) {
-    const { toggleBtn, sidebar } = getElements();
-    if (!toggleBtn || !sidebar) return;
+    const { toggleBtn, mobileToggleBtn, sidebar } = getElements();
+    if (!sidebar) return;
 
     const open =
       typeof isOpen === "boolean"
         ? isOpen
         : !sidebar.classList.contains("collapsed");
 
-    const text = open ? "Cerrar barra lateral" : "Abrir barra lateral";
+    const desktopText = open ? "Cerrar barra lateral" : "Abrir barra lateral";
+    const mobileText = open ? "Cerrar navegación" : "Abrir navegación";
 
-    toggleBtn.dataset.tooltip = text;
-    toggleBtn.removeAttribute("title");
-    toggleBtn.setAttribute("aria-label", text);
-    toggleBtn.setAttribute("aria-expanded", String(open));
-    toggleBtn.classList.toggle("is-active", open);
+    if (toggleBtn) {
+      toggleBtn.dataset.tooltip = desktopText;
+      toggleBtn.removeAttribute("title");
+      toggleBtn.setAttribute("aria-label", desktopText);
+      toggleBtn.setAttribute("aria-expanded", String(open));
+      toggleBtn.classList.toggle("is-active", open);
+    }
+
+    if (mobileToggleBtn) {
+      mobileToggleBtn.setAttribute("aria-label", mobileText);
+      mobileToggleBtn.setAttribute("aria-expanded", String(open));
+      mobileToggleBtn.classList.toggle("is-active", open);
+    }
   }
 
   function syncSidebarState() {
@@ -421,6 +446,10 @@ export const SidebarUI = (() => {
       return;
     }
 
+    if (!state.dropdownOpen) {
+      blurIfInside(userDropdown);
+    }
+
     userDropdown.classList.toggle("open", state.dropdownOpen);
     userDropdown.classList.toggle("active", state.dropdownOpen);
     userDropdown.hidden = !state.dropdownOpen;
@@ -465,17 +494,23 @@ export const SidebarUI = (() => {
   /* =========================================================
      USER UI
   ========================================================= */
+  function renderAvatarFallback(avatarEl, displayName, avatarText) {
+    if (!avatarEl) return;
+
+    avatarEl.innerHTML = "";
+    avatarEl.textContent = avatarText;
+    avatarEl.classList.remove("has-image");
+    avatarEl.setAttribute("aria-label", `Avatar ${displayName}`);
+    avatarEl.setAttribute("title", displayName);
+  }
+
   function renderAvatarImage(avatarEl, avatarUrl, displayName, avatarText) {
     if (!avatarEl) return;
 
     const safeUrl = String(avatarUrl || "").trim();
 
     if (!safeUrl) {
-      avatarEl.innerHTML = "";
-      avatarEl.textContent = avatarText;
-      avatarEl.classList.remove("has-image");
-      avatarEl.setAttribute("aria-label", `Avatar ${displayName}`);
-      avatarEl.setAttribute("title", displayName);
+      renderAvatarFallback(avatarEl, displayName, avatarText);
       return;
     }
 
@@ -487,11 +522,22 @@ export const SidebarUI = (() => {
       <img
         src="${safeUrl}"
         alt="Avatar de ${displayName}"
-        loading="lazy"
+        loading="eager"
+        decoding="async"
+        fetchpriority="high"
         referrerpolicy="no-referrer"
+        draggable="false"
         style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block;"
       />
     `;
+
+    const img = avatarEl.querySelector("img");
+
+    if (img) {
+      img.onerror = () => {
+        renderAvatarFallback(avatarEl, displayName, avatarText);
+      };
+    }
   }
 
   function renderUser() {
@@ -563,7 +609,19 @@ export const SidebarUI = (() => {
      ACTIONS
   ========================================================= */
   async function handleLogout() {
+    if (logoutInFlight) return;
+
+    logoutInFlight = true;
+
+    const { logoutBtn } = getElements();
+
     closeDropdown();
+
+    if (logoutBtn) {
+      logoutBtn.disabled = true;
+      logoutBtn.setAttribute("aria-disabled", "true");
+    }
+
     AppCore.setLoading?.(true);
 
     try {
@@ -572,15 +630,37 @@ export const SidebarUI = (() => {
         notifyServer: true,
       });
     } catch (error) {
-      AppCore.utils.warn?.("Logout controlado con error:", error);
+      AppCore.utils.warn?.("Logout remoto falló, se limpiará sesión local igualmente.", error);
     } finally {
-      AppCore.syncUserUI?.();
-      AppCore.setLoading?.(false);
+      try {
+        if (typeof AppCore.clearSession === "function") {
+          AppCore.clearSession();
+        } else {
+          AppCore.state.user = null;
+          AppCore.state.token = null;
+          AppCore.state.role = null;
+          AppCore.state.authenticated = false;
+        }
 
-      Router.navigate("/login", {
-        replaceState: true,
-        force: true,
-      });
+        renderUser();
+        applyRoleVisibility();
+        closeDropdown();
+        closeSidebarOnMobileAfterNavigation();
+
+        AppCore.setLoading?.(false);
+
+        Router.navigate("/login", {
+          replaceState: true,
+          force: true,
+        });
+      } finally {
+        logoutInFlight = false;
+
+        if (logoutBtn) {
+          logoutBtn.disabled = false;
+          logoutBtn.setAttribute("aria-disabled", "false");
+        }
+      }
     }
   }
 
@@ -588,10 +668,24 @@ export const SidebarUI = (() => {
      DOM EVENTS
   ========================================================= */
   function handleDocumentClick(event) {
-    const { toggleBtn, userToggle, userDropdown, logoutBtn } = getElements();
+    const {
+      toggleBtn,
+      mobileToggleBtn,
+      userToggle,
+      userDropdown,
+      logoutBtn,
+    } = getElements();
+
     const target = event.target;
 
     if (toggleBtn && toggleBtn.contains(target)) {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleSidebar();
+      return;
+    }
+
+    if (mobileToggleBtn && mobileToggleBtn.contains(target)) {
       event.preventDefault();
       event.stopPropagation();
       toggleSidebar();
@@ -806,6 +900,7 @@ export const SidebarUI = (() => {
     toggleSidebar,
     updateToggleLabel,
     ensureServerNavItem,
+    handleLogout,
   };
 
   return api;

@@ -15,6 +15,7 @@
      si el sidebar está cerrado
    - init seguro una sola vez
    - sincronización robusta con AppCore
+   - inyectar acceso admin a estado del servidor
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
@@ -26,6 +27,8 @@ export const SidebarUI = (() => {
 
   const SCOPE = "ui:sidebar";
   const MOBILE_BREAKPOINT = 900;
+  const SERVER_NAV_ID = "sidebar-server-link";
+  const SERVER_ROUTE = "/servidor";
 
   let initialized = false;
   let resizeHandler = null;
@@ -40,10 +43,16 @@ export const SidebarUI = (() => {
   function getElements() {
     return {
       body: AppCore.dom.body || document.body,
+
       sidebar:
         AppCore.dom.sidebar ||
         document.getElementById("sidebar") ||
         document.querySelector(".sidebar"),
+
+      sidebarMenu:
+        AppCore.dom.sidebarMenu ||
+        document.getElementById("sidebar-menu") ||
+        document.querySelector(".sidebar-menu"),
 
       toggleBtn:
         AppCore.dom.sidebarToggle ||
@@ -149,7 +158,12 @@ export const SidebarUI = (() => {
 
   function isAdmin(user = null) {
     const currentUser = user || getUser();
-    return String(currentUser?.role || "")
+    const role =
+      currentUser?.role ||
+      AppCore.state.role ||
+      "";
+
+    return String(role)
       .trim()
       .toLowerCase() === "admin";
   }
@@ -324,6 +338,64 @@ export const SidebarUI = (() => {
   }
 
   /* =========================================================
+     SERVER NAV ITEM
+  ========================================================= */
+  function getServerNavMarkup() {
+    return `
+      <a
+        href="${SERVER_ROUTE}"
+        data-spa
+        class="menu-item"
+        id="${SERVER_NAV_ID}"
+        data-tooltip="Estado del servidor"
+        data-role="admin"
+      >
+        <span aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+            <rect x="4" y="4" width="16" height="6" rx="2" stroke="currentColor" stroke-width="1.6"/>
+            <rect x="4" y="14" width="16" height="6" rx="2" stroke="currentColor" stroke-width="1.6"/>
+            <circle cx="8" cy="7" r="1" fill="currentColor"/>
+            <circle cx="8" cy="17" r="1" fill="currentColor"/>
+            <path d="M12 7h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            <path d="M12 17h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <span data-i18n="Servidor">Servidor</span>
+      </a>
+    `;
+  }
+
+  function ensureServerNavItem() {
+    const { sidebarMenu } = getElements();
+    if (!sidebarMenu) return null;
+
+    let serverLink = document.getElementById(SERVER_NAV_ID);
+
+    if (serverLink) {
+      return serverLink;
+    }
+
+    const facturasLink = sidebarMenu.querySelector('a[href="/facturas"]');
+    const usuariosLink = sidebarMenu.querySelector('a[href="/usuarios"]');
+
+    if (usuariosLink) {
+      usuariosLink.insertAdjacentHTML("beforebegin", getServerNavMarkup());
+    } else if (facturasLink) {
+      facturasLink.insertAdjacentHTML("afterend", getServerNavMarkup());
+    } else {
+      sidebarMenu.insertAdjacentHTML("beforeend", getServerNavMarkup());
+    }
+
+    serverLink = document.getElementById(SERVER_NAV_ID);
+
+    if (serverLink) {
+      serverLink.setAttribute("aria-hidden", String(!isAdmin()));
+    }
+
+    return serverLink;
+  }
+
+  /* =========================================================
      DROPDOWN
   ========================================================= */
   function syncDropdownA11y(open) {
@@ -474,6 +546,8 @@ export const SidebarUI = (() => {
   function applyRoleVisibility() {
     const admin = isAdmin();
 
+    ensureServerNavItem();
+
     document.querySelectorAll('[data-role="admin"]').forEach((element) => {
       element.hidden = !admin;
       element.setAttribute("aria-hidden", String(!admin));
@@ -606,6 +680,7 @@ export const SidebarUI = (() => {
     });
 
     AppCore.cleanup.event(scope, "router:rendered", () => {
+      ensureServerNavItem();
       renderUser();
       applyRoleVisibility();
       syncSidebarState();
@@ -631,6 +706,7 @@ export const SidebarUI = (() => {
 
     AppCore.cleanup.event(scope, "login:success", () => {
       window.setTimeout(() => {
+        ensureServerNavItem();
         renderUser();
         applyRoleVisibility();
         syncSidebarState();
@@ -661,6 +737,7 @@ export const SidebarUI = (() => {
   ========================================================= */
   function init() {
     if (initialized) {
+      ensureServerNavItem();
       syncSidebarState();
       renderUser();
       applyRoleVisibility();
@@ -674,6 +751,8 @@ export const SidebarUI = (() => {
 
     const { userToggle, userDropdown } = getElements();
     const scope = AppCore.cleanup.scope(SCOPE);
+
+    ensureServerNavItem();
 
     if (userToggle) {
       userToggle.setAttribute("aria-haspopup", "menu");
@@ -726,6 +805,7 @@ export const SidebarUI = (() => {
     closeSidebar,
     toggleSidebar,
     updateToggleLabel,
+    ensureServerNavItem,
   };
 
   return api;

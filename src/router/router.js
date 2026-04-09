@@ -15,6 +15,8 @@
    - redirección automática a login sin sesión
    - redirección fuera de /login si ya hay sesión
    - nueva vista admin de servidor
+   - navegación SPA robusta con rutas canónicas y públicas
+   - soporte mobile / desktop sin romper el shell
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
@@ -23,6 +25,7 @@ import { LoginView } from "../views/loginView.js";
 import { HomeView } from "../views/homeView.js";
 import { IncidenciasView } from "../views/incidenciasView.js";
 import { FacturasView } from "../views/facturasView.js";
+import { ServerView } from "../views/serverView.js";
 
 export const Router = (() => {
   "use strict";
@@ -130,19 +133,6 @@ export const Router = (() => {
     return AppCore.utils.normalizePath(path);
   }
 
-  function stripSearchAndHash(path = "/") {
-    return String(path || "/").split("?")[0].split("#")[0] || "/";
-  }
-
-  function normalizeCanonicalPath(path = "/") {
-    if (typeof AppCore.utils.normalizeCanonicalPath === "function") {
-      return AppCore.utils.normalizeCanonicalPath(path);
-    }
-
-    const stripped = stripUsernamePrefix(path);
-    return normalizePath(stripSearchAndHash(stripped));
-  }
-
   function escapeHtml(value = "") {
     return AppCore.utils.escapeHtml(String(value ?? ""));
   }
@@ -152,72 +142,24 @@ export const Router = (() => {
     return Number.isFinite(num) ? num : fallback;
   }
 
-  function getViewContainer() {
-    return (
-      AppCore.dom.viewContainer ||
-      document.getElementById("view-container") ||
-      document.querySelector("#view-container")
-    );
+  function stripSearchAndHash(path = "/") {
+    const raw = String(path || "/");
+    const hashIndex = raw.indexOf("#");
+    const searchIndex = raw.indexOf("?");
+
+    let cutIndex = -1;
+
+    if (searchIndex >= 0 && hashIndex >= 0) {
+      cutIndex = Math.min(searchIndex, hashIndex);
+    } else if (searchIndex >= 0) {
+      cutIndex = searchIndex;
+    } else if (hashIndex >= 0) {
+      cutIndex = hashIndex;
+    }
+
+    return cutIndex >= 0 ? raw.slice(0, cutIndex) || "/" : raw || "/";
   }
 
-  function getShellElements() {
-    return {
-      sidebar: AppCore.dom.sidebar || document.querySelector(".sidebar"),
-      topbar: AppCore.dom.topbar || document.querySelector(".topbar"),
-      tableheadContainer:
-        AppCore.dom.tableheadContainer ||
-        document.getElementById("tablehead-container"),
-      body: AppCore.dom.body || document.body,
-    };
-  }
-
-  function getCurrentUrl() {
-    return new URL(window.location.href);
-  }
-
-  function getCurrentPath() {
-    return normalizePath(
-      `${window.location.pathname || "/"}${window.location.search || ""}`
-    );
-  }
-
-  function getCurrentCanonicalPath() {
-    return normalizeCanonicalPath(
-      `${window.location.pathname || "/"}${window.location.search || ""}`
-    );
-  }
-
-  function getRoute(pathname = "/") {
-    const canonical = normalizeCanonicalPath(pathname);
-    return routes.find((route) => route.path === canonical) || null;
-  }
-
-  function routeExists(pathname = "/") {
-    return Boolean(getRoute(pathname));
-  }
-
-  function isExternalHref(href = "") {
-    return /^(https?:|mailto:|tel:|javascript:)/i.test(
-      String(href || "").trim()
-    );
-  }
-
-  function isHashOnlyHref(href = "") {
-    return String(href || "").trim().startsWith("#");
-  }
-
-  function isSameCanonicalPath(a = "/", b = "/") {
-    return normalizeCanonicalPath(a) === normalizeCanonicalPath(b);
-  }
-
-  /* =========================================================
-     USERNAME / SLUG SYSTEM
-     URL pública:
-     - /@cristian
-     - /@cristian/incidencias
-     - /@cristian/facturas
-     - /@cristian/servidor
-  ========================================================= */
   function sanitizeUsername(value = "") {
     return AppCore.utils.sanitizeUsername
       ? AppCore.utils.sanitizeUsername(value)
@@ -227,16 +169,6 @@ export const Router = (() => {
           .replace(/\s+/g, "")
           .replace(/[^a-zA-Z0-9._-]/g, "")
           .toLowerCase();
-  }
-
-  function getCurrentUsername() {
-    return sanitizeUsername(
-      AppCore.state.user?.username ||
-        AppCore.state.user?.userName ||
-        AppCore.state.user?.nick ||
-        AppCore.state.user?.alias ||
-        ""
-    );
   }
 
   function extractUsernameFromPath(pathname = "/") {
@@ -270,12 +202,92 @@ export const Router = (() => {
     return normalizePath(`${stripped}${suffix}`);
   }
 
+  function normalizeCanonicalPath(path = "/") {
+    if (typeof AppCore.utils.normalizeCanonicalPath === "function") {
+      return AppCore.utils.normalizeCanonicalPath(path);
+    }
+
+    const stripped = stripUsernamePrefix(path);
+    return normalizePath(stripSearchAndHash(stripped));
+  }
+
+  function isExternalHref(href = "") {
+    return /^(https?:|mailto:|tel:|javascript:)/i.test(
+      String(href || "").trim()
+    );
+  }
+
+  function isHashOnlyHref(href = "") {
+    return String(href || "").trim().startsWith("#");
+  }
+
+  function isSameCanonicalPath(a = "/", b = "/") {
+    return normalizeCanonicalPath(a) === normalizeCanonicalPath(b);
+  }
+
+  function getViewContainer() {
+    return (
+      AppCore.dom.viewContainer ||
+      document.getElementById("view-container") ||
+      document.querySelector("#view-container")
+    );
+  }
+
+  function getShellElements() {
+    return {
+      sidebar: AppCore.dom.sidebar || document.querySelector(".sidebar"),
+      topbar: AppCore.dom.topbar || document.querySelector(".topbar"),
+      tableheadContainer:
+        AppCore.dom.tableheadContainer ||
+        document.getElementById("tablehead-container"),
+      body: AppCore.dom.body || document.body,
+      mobileToggle:
+        AppCore.dom.sidebarMobileToggle ||
+        document.getElementById("toggleSidebarMobile"),
+    };
+  }
+
+  function getCurrentUrl() {
+    return new URL(window.location.href);
+  }
+
+  function getCurrentPath() {
+    return normalizePath(
+      `${window.location.pathname || "/"}${window.location.search || ""}`
+    );
+  }
+
+  function getCurrentCanonicalPath() {
+    return normalizeCanonicalPath(
+      `${window.location.pathname || "/"}${window.location.search || ""}`
+    );
+  }
+
+  function getCurrentUsername() {
+    return sanitizeUsername(
+      AppCore.state.user?.username ||
+        AppCore.state.user?.userName ||
+        AppCore.state.user?.nick ||
+        AppCore.state.user?.alias ||
+        ""
+    );
+  }
+
   function getCurrentResolvedUsername() {
     return (
       extractUsernameFromPath(window.location.pathname || "/") ||
       getCurrentUsername() ||
       null
     );
+  }
+
+  function getRoute(pathname = "/") {
+    const canonical = normalizeCanonicalPath(pathname);
+    return routes.find((route) => route.path === canonical) || null;
+  }
+
+  function routeExists(pathname = "/") {
+    return Boolean(getRoute(pathname));
   }
 
   function isSlugCandidatePath(pathname = "/") {
@@ -470,11 +482,17 @@ export const Router = (() => {
       topbar,
       tableheadContainer,
       body,
+      mobileToggle,
     } = getShellElements();
 
     if (sidebar) sidebar.hidden = hideShell;
     if (topbar) topbar.hidden = hideShell;
     if (tableheadContainer) tableheadContainer.hidden = hideShell;
+
+    if (mobileToggle) {
+      mobileToggle.hidden = hideShell;
+      mobileToggle.setAttribute("aria-expanded", String(!hideShell));
+    }
 
     if (body) {
       body.classList.toggle("route-auth", hideShell);
@@ -580,208 +598,7 @@ export const Router = (() => {
   }
 
   function renderServidorView() {
-    const view = getViewContainer();
-    if (!view) {
-      AppCore.utils.warn(
-        "Router: no se encontró #view-container para renderServidorView."
-      );
-      return;
-    }
-
-    const cpu = 72;
-    const ram = 68;
-    const disk = 41;
-    const api = "Operativa";
-    const db = "Operativa";
-    const uptime = "12d 07h 18m";
-
-    const getTone = (value) => {
-      const num = safeNumber(value, 0);
-
-      if (num >= 85) return "var(--error)";
-      if (num >= 70) return "var(--warning)";
-      return "var(--success)";
-    };
-
-    const metricCard = ({ label, value, hint, suffix = "%" }) => {
-      const numeric = safeNumber(value, 0);
-      const tone = getTone(numeric);
-
-      return `
-        <article
-          class="ui-card"
-          style="padding:20px; display:grid; gap:12px;"
-        >
-          <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-            <span style="font-size:13px; color:var(--text-dim); font-weight:600;">
-              ${escapeHtml(label)}
-            </span>
-            <span
-              style="
-                display:inline-flex;
-                min-width:54px;
-                justify-content:center;
-                align-items:center;
-                padding:6px 10px;
-                border-radius:999px;
-                background:color-mix(in srgb, ${tone}, transparent 86%);
-                color:${tone};
-                font-size:12px;
-                font-weight:700;
-              "
-            >
-              ${escapeHtml(String(numeric))}${escapeHtml(suffix)}
-            </span>
-          </div>
-
-          <div
-            style="
-              position:relative;
-              width:100%;
-              height:10px;
-              border-radius:999px;
-              background:var(--surface-3);
-              overflow:hidden;
-            "
-          >
-            <span
-              style="
-                display:block;
-                width:${Math.max(0, Math.min(100, numeric))}%;
-                height:100%;
-                border-radius:999px;
-                background:${tone};
-                box-shadow:0 0 18px color-mix(in srgb, ${tone}, transparent 55%);
-              "
-            ></span>
-          </div>
-
-          <p style="margin:0; font-size:12px; color:var(--text-dim);">
-            ${escapeHtml(hint)}
-          </p>
-        </article>
-      `;
-    };
-
-    view.innerHTML = `
-      <section class="content-wrapper">
-        <div style="display:grid; gap:20px;">
-          <section class="panel-block" style="padding:24px;">
-            <div style="display:grid; gap:14px;">
-              <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:18px; flex-wrap:wrap;">
-                <div style="display:grid; gap:8px;">
-                  <h2 style="margin:0;">Estado del servidor</h2>
-                  <p style="margin:0; color:var(--text-dim); max-width:860px;">
-                    Panel de observación rápida del estado general del sistema.
-                    Vista pensada para administración, monitorización básica y diagnóstico visual.
-                  </p>
-                </div>
-
-                <div
-                  class="badge info lg"
-                  style="align-self:flex-start;"
-                >
-                  Admin only
-                </div>
-              </div>
-
-              <div style="display:flex; gap:10px; flex-wrap:wrap;">
-                <span class="badge success dot">API ${escapeHtml(api)}</span>
-                <span class="badge success dot">Base de datos ${escapeHtml(db)}</span>
-                <span class="badge neutral">Uptime ${escapeHtml(uptime)}</span>
-              </div>
-            </div>
-          </section>
-
-          <section
-            style="
-              display:grid;
-              grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));
-              gap:16px;
-            "
-          >
-            ${metricCard({
-              label: "CPU",
-              value: cpu,
-              hint: "Carga actual del servidor principal.",
-            })}
-
-            ${metricCard({
-              label: "RAM",
-              value: ram,
-              hint: "Consumo de memoria del entorno.",
-            })}
-
-            ${metricCard({
-              label: "Disco",
-              value: disk,
-              hint: "Uso global del almacenamiento.",
-            })}
-          </section>
-
-          <section
-            style="
-              display:grid;
-              grid-template-columns:1.2fr .8fr;
-              gap:16px;
-            "
-            class="server-grid"
-          >
-            <div class="panel-block" style="padding:20px; display:grid; gap:14px;">
-              <div style="display:grid; gap:6px;">
-                <h3 style="margin:0; font-size:18px;">Resumen operativo</h3>
-                <p style="margin:0; color:var(--text-dim); font-size:13px;">
-                  Estado rápido de servicios internos y salud general del entorno.
-                </p>
-              </div>
-
-              <div style="display:grid; gap:10px;">
-                <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-                  <span style="color:var(--text-dim);">Backend API</span>
-                  <span class="badge success">Operativa</span>
-                </div>
-
-                <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-                  <span style="color:var(--text-dim);">Base de datos</span>
-                  <span class="badge success">Operativa</span>
-                </div>
-
-                <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-                  <span style="color:var(--text-dim);">Jobs / colas</span>
-                  <span class="badge warning">Revisar</span>
-                </div>
-
-                <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-                  <span style="color:var(--text-dim);">Storage / blobs</span>
-                  <span class="badge success">Operativo</span>
-                </div>
-              </div>
-            </div>
-
-            <div class="panel-block" style="padding:20px; display:grid; gap:14px;">
-              <div style="display:grid; gap:6px;">
-                <h3 style="margin:0; font-size:18px;">Contexto</h3>
-                <p style="margin:0; color:var(--text-dim); font-size:13px;">
-                  Datos visibles del entorno actual de la SPA.
-                </p>
-              </div>
-
-              <div style="display:grid; gap:10px; font-size:13px;">
-                <div><strong>Ruta canónica:</strong> ${escapeHtml(AppCore.state.route || ROUTE_NAMES.SERVER)}</div>
-                <div><strong>Ruta pública:</strong> ${escapeHtml(`${window.location.pathname || ""}${window.location.search || ""}` || ROUTE_NAMES.SERVER)}</div>
-                <div><strong>Usuario:</strong> ${escapeHtml(
-                  AppCore.state.user?.username ||
-                    AppCore.state.user?.name ||
-                    AppCore.state.user?.email ||
-                    "No autenticado"
-                )}</div>
-                <div><strong>Rol:</strong> ${escapeHtml(AppCore.state.role || "Sin rol")}</div>
-              </div>
-            </div>
-          </section>
-        </div>
-      </section>
-    `;
+    ServerView.render();
   }
 
   function renderGenericView(route) {

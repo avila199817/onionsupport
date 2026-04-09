@@ -812,104 +812,106 @@ export const Auth = (() => {
   /* =========================================================
      REFRESH TOKEN
   ========================================================= */
-  async function refreshSession() {
-    if (!hasRefreshContext()) {
-      throw new Error("No hay contexto de refresh disponible.");
-    }
+ async function refreshSession() {
+  if (!hasRefreshContext()) {
+    throw new Error("No hay contexto de refresh disponible.");
+  }
 
-    if (session.refreshPromise) {
-      return session.refreshPromise;
-    }
-
-    const now = Date.now();
-    if (session.refreshBlockedUntil > now) {
-      throw new Error("Refresh temporalmente bloqueado por seguridad.");
-    }
-
-    session.refreshing = true;
-
-    AppCore.events.emit("auth:refresh:start", {});
-
-    session.refreshPromise = (async () => {
-      try {
-        const storedRefreshToken = getStoredRefreshToken();
-        const storedSessionId = getStoredSessionId();
-        const storedSessionUserId = getStoredSessionUserId();
-
-        const requestBody = {
-          refreshToken: String(storedRefreshToken || "").trim(),
-          sessionId: String(storedSessionId || "").trim(),
-          userId: String(storedSessionUserId || "").trim(),
-        };
-
-        const response = await AppCore.apiClient.post(
-          ENDPOINTS.refresh,
-          requestBody,
-          {
-            auth: false,
-          }
-        );
-
-        const nextToken = extractToken(response);
-        const nextUser = extractUser(response);
-        const nextRefreshToken = extractRefreshToken(response);
-        const nextSessionData = normalizeSessionPayload(response);
-
-        if (!nextToken && !nextUser) {
-          throw new Error("La respuesta de refresh no contiene datos de sesión.");
-        }
-
-        const snapshot = applySession({
-          token: nextToken ?? AppCore.state.token,
-          user: nextUser ?? AppCore.state.user,
-          refreshToken: nextRefreshToken ?? storedRefreshToken,
-          sessionData: nextSessionData ?? {
-            sessionId: storedSessionId,
-            userId: storedSessionUserId,
-          },
-        });
-
-        if (!snapshot.token) {
-          throw new Error("Refresh completado sin token válido.");
-        }
-
-        session.lastRefreshAt = Date.now();
-        session.refreshFailCount = 0;
-        session.refreshBlockedUntil = 0;
-
-        AppCore.events.emit("auth:refresh:success", {
-          ...snapshot,
-          response,
-        });
-
-        return {
-          ok: true,
-          ...snapshot,
-          response,
-        };
-      } catch (error) {
-        session.refreshFailCount += 1;
-        if (session.refreshFailCount >= AUTH_CONSTANTS.maxSequentialRefreshFailures) {
-          session.refreshBlockedUntil = Date.now() + AUTH_CONSTANTS.refreshRetryCooldownMs;
-        }
-
-        AppCore.events.emit("auth:refresh:error", {
-          error,
-          message: extractMessage(error),
-          refreshFailCount: session.refreshFailCount,
-          refreshBlockedUntil: session.refreshBlockedUntil || null,
-        });
-
-        throw error;
-      } finally {
-        session.refreshing = false;
-        session.refreshPromise = null;
-      }
-    })();
-
+  if (session.refreshPromise) {
     return session.refreshPromise;
   }
 
+  const now = Date.now();
+  if (session.refreshBlockedUntil > now) {
+    throw new Error("Refresh temporalmente bloqueado por seguridad.");
+  }
+
+  session.refreshing = true;
+
+  AppCore.events.emit("auth:refresh:start", {});
+
+  session.refreshPromise = (async () => {
+    try {
+      const storedRefreshToken = getStoredRefreshToken();
+      const storedSessionId = getStoredSessionId();
+      const storedSessionUserId = getStoredSessionUserId();
+
+      const requestBody = {
+        refreshToken: String(storedRefreshToken || "").trim(),
+        sessionId: String(storedSessionId || "").trim(),
+        userId: String(storedSessionUserId || "").trim(),
+      };
+
+      const response = await AppCore.apiClient.post(
+        ENDPOINTS.refresh,
+        requestBody,
+        {
+          auth: false,
+        }
+      );
+
+      const nextToken = extractToken(response);
+      const nextUser = extractUser(response);
+      const nextRefreshToken = extractRefreshToken(response);
+      const nextSessionData = normalizeSessionPayload(response);
+
+      if (!nextToken && !nextUser) {
+        throw new Error("La respuesta de refresh no contiene datos de sesión.");
+      }
+
+      const snapshot = applySession({
+        token: nextToken ?? AppCore.state.token,
+        user: nextUser ?? AppCore.state.user,
+        refreshToken: nextRefreshToken ?? storedRefreshToken,
+        sessionData: nextSessionData ?? {
+          sessionId: storedSessionId,
+          userId: storedSessionUserId,
+        },
+      });
+
+      if (!snapshot.token) {
+        throw new Error("Refresh completado sin token válido.");
+      }
+
+      session.lastRefreshAt = Date.now();
+      session.refreshFailCount = 0;
+      session.refreshBlockedUntil = 0;
+
+      AppCore.events.emit("auth:refresh:success", {
+        ...snapshot,
+        response,
+      });
+
+      return {
+        ok: true,
+        ...snapshot,
+        response,
+      };
+    } catch (error) {
+      session.refreshFailCount += 1;
+
+      if (session.refreshFailCount >= AUTH_CONSTANTS.maxSequentialRefreshFailures) {
+        session.refreshBlockedUntil =
+          Date.now() + AUTH_CONSTANTS.refreshRetryCooldownMs;
+      }
+
+      AppCore.events.emit("auth:refresh:error", {
+        error,
+        message: extractMessage(error),
+        refreshFailCount: session.refreshFailCount,
+        refreshBlockedUntil: session.refreshBlockedUntil || null,
+      });
+
+      throw error;
+    } finally {
+      session.refreshing = false;
+      session.refreshPromise = null;
+    }
+  })();
+
+  return session.refreshPromise;
+}
+   
   /* =========================================================
      RESTAURAR SESIÓN
   ========================================================= */
@@ -1178,7 +1180,7 @@ export const Auth = (() => {
 
     return result;
   }
-
+   
   /* =========================================================
      API PÚBLICA
   ========================================================= */
@@ -1212,7 +1214,3 @@ export const Auth = (() => {
     getStoredSessionUserId,
   };
 })();
-    const now = Date.now();
-    if (session.refreshBlockedUntil > now) {
-      throw new Error("Refresh temporalmente bloqueado por seguridad.");
-    }

@@ -10,6 +10,7 @@
    - restaurar sesión sin bloquear el primer paint
    - montar listeners globales
    - bind de UI global
+   - inicializar SidebarUI / TopbarUI / Toast
    - apagar loader
    - aplicar failsafe anti-loader infinito
 ========================================================= */
@@ -19,6 +20,8 @@ import { Store } from "./store/store.js";
 import { Auth } from "./features/auth.js";
 import { Router } from "./router/router.js";
 import { SidebarUI } from "./ui/sidebar.js";
+import { TopbarUI } from "./ui/topbar.js";
+import { Toast } from "./ui/toast.js";
 
 const App = (() => {
   "use strict";
@@ -70,16 +73,22 @@ const App = (() => {
   }
 
   function syncUserUI() {
-    AppCore.syncUserUI();
+    AppCore.syncUserUI?.();
+
+    AppCore.events.emit("app:user-ui:sync", {
+      user: AppCore.state.user || null,
+      authenticated: Boolean(AppCore.state.authenticated),
+      role: AppCore.state.role || null,
+    });
   }
 
   function getShellElements() {
     return {
       sidebar: AppCore.dom.sidebar || document.querySelector(".sidebar"),
       topbar: AppCore.dom.topbar || document.querySelector(".topbar"),
-      topbarViewContainer:
-        AppCore.dom.topbarViewContainer ||
-        document.getElementById("topbarview-container"),
+      tablehead:
+        document.getElementById("table-head") ||
+        document.querySelector(".table-head"),
       tableheadContainer:
         AppCore.dom.tableheadContainer ||
         document.getElementById("tablehead-container"),
@@ -120,69 +129,12 @@ const App = (() => {
     const loader = getLoaderElement();
     if (!loader) return;
 
+    loader.hidden = false;
+    loader.setAttribute("aria-hidden", "true");
     loader.style.display = "";
     loader.style.opacity = "";
     loader.style.visibility = "";
     loader.style.pointerEvents = "";
-  }
-
-  function closeSearchResults() {
-    const results =
-      AppCore.dom.searchResults ||
-      document.getElementById("topbar-search-results");
-
-    if (!results) return;
-
-    results.hidden = true;
-    results.innerHTML = "";
-  }
-
-  function getResolvedUsername() {
-    return (
-      Router.getCurrentResolvedUsername?.() ||
-      AppCore.getUserUsername?.() ||
-      AppCore.state.user?.username ||
-      ""
-    );
-  }
-
-  function getSearchItems() {
-    const username = getResolvedUsername();
-
-    return [
-      {
-        label: "Inicio",
-        path: Router.buildPublicPath("/", { username }),
-      },
-      {
-        label: "Incidencias",
-        path: Router.buildPublicPath("/incidencias", { username }),
-      },
-      {
-        label: "Facturas",
-        path: Router.buildPublicPath("/facturas", { username }),
-      },
-      {
-        label: "Usuarios",
-        path: Router.buildPublicPath("/usuarios", { username }),
-      },
-      {
-        label: "Clientes",
-        path: Router.buildPublicPath("/clientes", { username }),
-      },
-      {
-        label: "Cuenta",
-        path: Router.buildPublicPath("/cuenta", { username }),
-      },
-      {
-        label: "Ajustes",
-        path: Router.buildPublicPath("/ajustes", { username }),
-      },
-      {
-        label: "Login",
-        path: "/login",
-      },
-    ];
   }
 
   function setShellVisibility(visible = true) {
@@ -190,14 +142,14 @@ const App = (() => {
     const {
       sidebar,
       topbar,
-      topbarViewContainer,
+      tablehead,
       tableheadContainer,
       body,
     } = getShellElements();
 
     if (sidebar) sidebar.hidden = hidden;
     if (topbar) topbar.hidden = hidden;
-    if (topbarViewContainer) topbarViewContainer.hidden = hidden;
+    if (tablehead) tablehead.hidden = hidden;
     if (tableheadContainer) tableheadContainer.hidden = hidden;
 
     if (body) {
@@ -205,6 +157,10 @@ const App = (() => {
       body.classList.toggle("auth-screen", hidden);
       body.classList.toggle("route-auth", hidden);
     }
+
+    AppCore.events.emit("router:shell:change", {
+      hidden,
+    });
   }
 
   function markAppBootState({
@@ -254,6 +210,8 @@ const App = (() => {
       setShellVisibility(false);
       return;
     }
+
+    setShellVisibility(true);
 
     if (hasViewContent) {
       AppCore.setLoading(false);
@@ -307,7 +265,7 @@ const App = (() => {
       "Se produjo un error al iniciar la aplicación.";
 
     AppCore.setDocumentTitle("Error de inicio");
-    AppCore.clearDynamicContainers();
+    AppCore.clearDynamicContainers?.();
     setShellVisibility(false);
 
     container.innerHTML = `
@@ -340,7 +298,7 @@ const App = (() => {
               <button
                 type="button"
                 id="boot-retry-btn"
-                class="btn btn-primary"
+                class="ui-btn ui-btn-primary"
               >
                 Reintentar
               </button>
@@ -348,7 +306,7 @@ const App = (() => {
               <button
                 type="button"
                 id="boot-reset-session-btn"
-                class="btn"
+                class="ui-btn ui-btn-secondary"
               >
                 Limpiar sesión
               </button>
@@ -386,107 +344,6 @@ const App = (() => {
   }
 
   /* =========================================================
-     SEARCH UI
-  ========================================================= */
-  function bindSearchUI(scope) {
-    const input =
-      AppCore.dom.searchInput || document.getElementById("topbar-search");
-    const results =
-      AppCore.dom.searchResults ||
-      document.getElementById("topbar-search-results");
-
-    if (!input || !results) return;
-
-    function paintResults(matches = []) {
-      if (!matches.length) {
-        results.innerHTML = `
-          <div
-            class="search-empty text-dim"
-            style="padding:12px 14px;"
-          >
-            Sin resultados
-          </div>
-        `;
-        results.hidden = false;
-        return;
-      }
-
-      results.innerHTML = matches
-        .map(
-          (item) => `
-            <button
-              type="button"
-              class="search-result-item dropdown-item"
-              data-path="${escapeHtml(item.path)}"
-            >
-              ${escapeHtml(item.label)}
-            </button>
-          `
-        )
-        .join("");
-
-      results.hidden = false;
-    }
-
-    const runSearch = AppCore.utils.debounce(() => {
-      const term = String(input.value || "").trim().toLowerCase();
-
-      if (!term) {
-        closeSearchResults();
-        return;
-      }
-
-      const items = getSearchItems();
-
-      const matches = items.filter((item) => {
-        return (
-          String(item.label || "").toLowerCase().includes(term) ||
-          String(item.path || "").toLowerCase().includes(term)
-        );
-      });
-
-      paintResults(matches);
-    }, 120);
-
-    AppCore.cleanup.on(scope, input, "input", runSearch);
-
-    AppCore.cleanup.on(scope, input, "focus", () => {
-      const term = String(input.value || "").trim();
-      if (term) {
-        runSearch();
-      }
-    });
-
-    AppCore.cleanup.on(scope, input, "keydown", (event) => {
-      if (event.key === "Escape") {
-        closeSearchResults();
-      }
-    });
-
-    AppCore.cleanup.on(scope, results, "click", (event) => {
-      const button = event.target.closest("[data-path]");
-      if (!button) return;
-
-      const path = button.getAttribute("data-path");
-      if (!path) return;
-
-      input.value = "";
-      closeSearchResults();
-
-      Router.navigate(path);
-    });
-
-    AppCore.cleanup.on(scope, document, "click", (event) => {
-      const withinInput = input.contains(event.target);
-      const withinResults = results.contains(event.target);
-
-      if (!withinInput && !withinResults) {
-        closeSearchResults();
-      }
-    });
-  }
-
-  /* =========================================================
      GLOBAL ERROR HANDLERS
   ========================================================= */
   function bindGlobalErrorHandlers(scope) {
@@ -497,6 +354,14 @@ const App = (() => {
 
       AppCore.setError(error);
       AppCore.utils.error("window.error", error);
+
+      Toast?.error?.(
+        error?.message || "Se ha producido un error inesperado.",
+        {
+          title: "Error",
+          duration: 5000,
+        }
+      );
     });
 
     AppCore.cleanup.on(scope, window, "unhandledrejection", (event) => {
@@ -506,6 +371,14 @@ const App = (() => {
 
       AppCore.setError(reason);
       AppCore.utils.error("unhandledrejection", reason);
+
+      Toast?.error?.(
+        reason?.message || "Se ha producido un error inesperado.",
+        {
+          title: "Error",
+          duration: 5000,
+        }
+      );
     });
   }
 
@@ -519,16 +392,22 @@ const App = (() => {
 
     AppCore.cleanup.event(scope, "app:session:cleared", () => {
       syncUserUI();
-      closeSearchResults();
     });
 
     AppCore.cleanup.event(scope, "auth:login:success", () => {
       syncUserUI();
-      closeSearchResults();
+
+      Toast?.success?.("Sesión iniciada correctamente.", {
+        title: "Bienvenido",
+        duration: 2800,
+      });
     });
 
     AppCore.cleanup.event(scope, "auth:logout:success", () => {
-      closeSearchResults();
+      Toast?.info?.("Sesión cerrada correctamente.", {
+        title: "Sesión finalizada",
+        duration: 2200,
+      });
     });
 
     AppCore.cleanup.event(scope, "router:before-render", ({ detail }) => {
@@ -544,6 +423,10 @@ const App = (() => {
 
       AppCore.setPublicPath(publicPath);
       applyPostRenderLoaderPolicy();
+
+      AppCore.events.emit("app:user-ui:sync", {
+        route: publicPath,
+      });
 
       AppCore.utils.log("Ruta renderizada:", {
         publicPath,
@@ -614,10 +497,22 @@ const App = (() => {
   function initUISystems() {
     if (uiInitialized) return;
 
+    if (Toast && typeof Toast.init === "function") {
+      Toast.init();
+    } else if (Toast && !AppCore.modules.has("toast")) {
+      AppCore.modules.register("toast", Toast);
+    }
+
     if (SidebarUI && typeof SidebarUI.init === "function") {
       SidebarUI.init();
     } else if (SidebarUI && !AppCore.modules.has("sidebarUI")) {
       AppCore.modules.register("sidebarUI", SidebarUI);
+    }
+
+    if (TopbarUI && typeof TopbarUI.init === "function") {
+      TopbarUI.init();
+    } else if (TopbarUI && !AppCore.modules.has("topbarUI")) {
+      AppCore.modules.register("topbarUI", TopbarUI);
     }
 
     uiInitialized = true;
@@ -680,21 +575,54 @@ const App = (() => {
   }
 
   async function restoreSessionInBackground() {
+    let loadingToastId = null;
+
     try {
+      loadingToastId = Toast?.loading?.("Restaurando sesión...", {
+        title: "Inicializando",
+        closable: false,
+      });
+
       const result = await restoreAuthSession();
 
       await warmup();
 
       if (result?.ok && AppCore.state.authenticated) {
+        if (loadingToastId) {
+          Toast.update(loadingToastId, {
+            type: "success",
+            title: "Sesión restaurada",
+            message: "Tu sesión se ha recuperado correctamente.",
+            duration: 1800,
+            closable: true,
+          });
+        }
+
         navigateAfterSessionRestore();
       } else {
+        if (loadingToastId) {
+          Toast.dismiss(loadingToastId);
+        }
+
         applyPostRenderLoaderPolicy();
       }
 
       return result;
     } catch (error) {
       AppCore.utils.warn("restoreSession en background falló.", error);
+
+      if (loadingToastId) {
+        Toast.update(loadingToastId, {
+          type: "warning",
+          title: "Sesión no restaurada",
+          message: "Se continuará sin restaurar la sesión.",
+          duration: 2600,
+          closable: true,
+        });
+      }
+
       applyPostRenderLoaderPolicy();
+
       return {
         ok: false,
         user: null,
@@ -762,7 +690,6 @@ const App = (() => {
 
       bindGlobalErrorHandlers(scope);
       bindAppEvents(scope);
-      bindSearchUI(scope);
 
       initStore();
 
@@ -777,6 +704,7 @@ const App = (() => {
          UI después del primer render
       ========================================= */
       initUISystems();
+      syncUserUI();
 
       /* =========================================
          Boot visual completado
@@ -800,6 +728,15 @@ const App = (() => {
 
       AppCore.setLoading(false);
       forceHideLoader();
+
+      Toast?.error?.(
+        error?.message || "No se pudo arrancar la aplicación.",
+        {
+          title: "Error de arranque",
+          duration: 5000,
+        }
+      );
+
       renderBootError(error);
 
       return api;

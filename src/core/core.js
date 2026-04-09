@@ -1,5 +1,5 @@
 /* =========================================================
-   Onion SPA - Core (FULL PRO SAAS PANEL · GOD MODE)
+   Onion SPA - Core (FULL PRO SAAS PANEL · OLYMPUS MODE)
    Archivo: src/core/core.js
 
    Qué centraliza:
@@ -14,10 +14,11 @@
    - sesión base
    - preferencias base
    - utilidades de request
-   - helpers UI/lifecycle
-   - helpers de username/slug
+   - helpers UI / lifecycle
+   - helpers de username / slug
    - diagnóstico de red / timeouts / aborts
    - init idempotente y robusta
+   - compatibilidad con shell SPA actual
 ========================================================= */
 
 export const AppCore = (() => {
@@ -28,7 +29,7 @@ export const AppCore = (() => {
   ========================================================= */
   const config = {
     appName: "Onion Support",
-    version: "2.0.0",
+    version: "2.1.0",
     debug: true,
 
     apiBase: "https://api.onionit.net",
@@ -54,6 +55,14 @@ export const AppCore = (() => {
       lastPublicPath: "lastPublicPath",
     },
 
+    legacyStorageKeys: {
+      token: "onion_token",
+      userSlug: "onion_user_slug",
+      userName: "onion_user_name",
+      role: "onion_role",
+      tempToken: "onion_temp_token",
+    },
+
     ui: {
       themeColorDark: "#0a0c11",
       themeColorLight: "#f4f7fb",
@@ -68,6 +77,7 @@ export const AppCore = (() => {
         "/api/auth/reset-password-confirm",
         "/api/auth/activate/first-user",
         "/api/auth/2fa/login",
+        "/api/auth/_health",
       ],
     },
   };
@@ -142,7 +152,7 @@ export const AppCore = (() => {
         return structuredClone(value);
       }
     } catch {
-      /* no-op */
+      /* noop */
     }
 
     try {
@@ -248,9 +258,10 @@ export const AppCore = (() => {
 
   function stripUsernamePrefix(path = "/") {
     const normalized = normalizePath(path);
-    const [pathOnly, suffix = ""] = normalized.split(/([?#].*)/, 2);
-    const stripped =
-      (pathOnly || "/").replace(/^\/@[^/]+(?=\/|$)/i, "") || "/";
+    const match = normalized.match(/^([^?#]*)(.*)$/);
+    const pathOnly = match?.[1] || "/";
+    const suffix = match?.[2] || "";
+    const stripped = pathOnly.replace(/^\/@[^/]+(?=\/|$)/i, "") || "/";
 
     return normalizePath(`${stripped}${suffix}`);
   }
@@ -317,12 +328,12 @@ export const AppCore = (() => {
 
     const username = sanitizeUsername(
       user.username ||
-        user.userName ||
-        user.nick ||
-        user.alias ||
-        user.login ||
-        user.slug ||
-        ""
+      user.userName ||
+      user.nick ||
+      user.alias ||
+      user.login ||
+      user.slug ||
+      ""
     );
 
     const name =
@@ -354,7 +365,14 @@ export const AppCore = (() => {
       name,
       email: user.email || user.mail || "",
       role,
-      avatar: user.avatar || user.photo || user.image || user.picture || null,
+      avatar:
+        user.avatar ||
+        user.avatarUrl ||
+        user.photo ||
+        user.image ||
+        user.profileImage ||
+        user.picture ||
+        null,
       active: user.active ?? user.is_active ?? user.isActive ?? true,
     };
   }
@@ -376,12 +394,26 @@ export const AppCore = (() => {
 
     return sanitizeUsername(
       target?.username ||
-        target?.userName ||
-        target?.nick ||
-        target?.alias ||
-        target?.login ||
-        ""
+      target?.userName ||
+      target?.nick ||
+      target?.alias ||
+      target?.login ||
+      ""
     );
+  }
+
+  function getUserAvatarUrl(user = null) {
+    const target = user || state.user;
+
+    return String(
+      target?.avatar ||
+      target?.avatarUrl ||
+      target?.photo ||
+      target?.image ||
+      target?.profileImage ||
+      target?.picture ||
+      ""
+    ).trim();
   }
 
   function getInitials(value = "") {
@@ -542,6 +574,20 @@ export const AppCore = (() => {
     return hints;
   }
 
+  function removeLegacySessionKeys() {
+    if (!isBrowser()) return;
+
+    try {
+      Object.values(config.legacyStorageKeys).forEach((key) => {
+        localStorage.removeItem(key);
+      });
+    } catch (error) {
+      if (config.debug) {
+        console.warn(`[${config.appName}] No se pudieron borrar claves legacy`, error);
+      }
+    }
+  }
+
   /* =========================================================
      ESTADO GLOBAL
   ========================================================= */
@@ -590,6 +636,7 @@ export const AppCore = (() => {
     layout: null,
     loader: null,
     sidebar: null,
+    sidebarMenu: null,
     mainContent: null,
     viewContainer: null,
 
@@ -605,6 +652,7 @@ export const AppCore = (() => {
     userDropdown: null,
     logoutBtn: null,
     sidebarToggle: null,
+    sidebarMobileToggle: null,
     sidebarAvatar: null,
     sidebarName: null,
   };
@@ -784,6 +832,7 @@ export const AppCore = (() => {
     normalizeUser,
     getUserUsername,
     getUserDisplayName,
+    getUserAvatarUrl,
     hasValidToken,
     getInitials,
     isPublicApiPath,
@@ -878,6 +927,7 @@ export const AppCore = (() => {
         }
 
         keysToRemove.forEach((key) => localStorage.removeItem(key));
+        removeLegacySessionKeys();
         return true;
       } catch (error) {
         utils.warn("No se pudo limpiar el storage de la app", error);
@@ -1156,6 +1206,7 @@ export const AppCore = (() => {
       user: normalizedUser,
       authenticated,
       username: normalizedUser?.username || null,
+      avatarUrl: normalizedUser?.avatar || null,
     });
 
     return normalizedUser;
@@ -1207,6 +1258,7 @@ export const AppCore = (() => {
   function clearSession() {
     storage.remove(config.storageKeys.user);
     storage.remove(config.storageKeys.token);
+    removeLegacySessionKeys();
 
     setState({
       user: null,
@@ -1289,6 +1341,10 @@ export const AppCore = (() => {
       dom.sidebarToggle.setAttribute("aria-expanded", String(nextValue));
     }
 
+    if (dom.sidebarMobileToggle) {
+      dom.sidebarMobileToggle.setAttribute("aria-expanded", String(nextValue));
+    }
+
     events.emit("app:sidebar:change", {
       open: nextValue,
     });
@@ -1356,10 +1412,10 @@ export const AppCore = (() => {
     const user = state.user;
     const displayName = getUserDisplayName(user);
     const username = getUserUsername(user);
-
     const avatarText =
       getInitials(displayName) ||
       (username ? username.slice(0, 2).toUpperCase() : "ON");
+    const avatarUrl = getUserAvatarUrl(user);
 
     if (dom.sidebarName) {
       dom.sidebarName.textContent = displayName;
@@ -1372,7 +1428,13 @@ export const AppCore = (() => {
     }
 
     if (dom.sidebarAvatar) {
-      dom.sidebarAvatar.textContent = avatarText;
+      if (!avatarUrl) {
+        dom.sidebarAvatar.textContent = avatarText;
+        dom.sidebarAvatar.classList.remove("has-image");
+      } else if (!dom.sidebarAvatar.querySelector("img")) {
+        dom.sidebarAvatar.textContent = avatarText;
+      }
+
       dom.sidebarAvatar.setAttribute("aria-label", `Avatar ${displayName}`);
       dom.sidebarAvatar.setAttribute("title", displayName);
 
@@ -1386,6 +1448,7 @@ export const AppCore = (() => {
     events.emit("app:user-ui:sync", {
       displayName,
       avatarText,
+      avatarUrl: avatarUrl || null,
       username: username || null,
     });
   }
@@ -1403,6 +1466,7 @@ export const AppCore = (() => {
     dom.layout = utils.qs(".layout");
     dom.loader = utils.qs("#app-loader");
     dom.sidebar = utils.qs(".sidebar");
+    dom.sidebarMenu = utils.qs("#sidebar-menu") || utils.qs(".sidebar-menu");
     dom.mainContent = utils.qs("#app-content");
     dom.viewContainer = utils.qs("#view-container");
 
@@ -1418,6 +1482,7 @@ export const AppCore = (() => {
     dom.userDropdown = utils.qs("#userDropdown");
     dom.logoutBtn = utils.qs("#logoutBtn");
     dom.sidebarToggle = utils.qs("#toggleSidebar");
+    dom.sidebarMobileToggle = utils.qs("#toggleSidebarMobile");
     dom.sidebarAvatar = utils.qs("#sidebar-avatar");
     dom.sidebarName = utils.qs("#sidebar-name");
   }
@@ -1479,6 +1544,10 @@ export const AppCore = (() => {
 
     if (dom.sidebarToggle) {
       dom.sidebarToggle.setAttribute("aria-expanded", String(state.sidebarOpen));
+    }
+
+    if (dom.sidebarMobileToggle) {
+      dom.sidebarMobileToggle.setAttribute("aria-expanded", String(state.sidebarOpen));
     }
 
     if (dom.loader) {
@@ -1682,10 +1751,19 @@ export const AppCore = (() => {
       finalHeaders.Authorization = `${config.auth.bearerPrefix} ${state.token}`;
     }
 
-    const isFormData = isBrowser() && typeof FormData !== "undefined" && body instanceof FormData;
+    const isFormData =
+      isBrowser() &&
+      typeof FormData !== "undefined" &&
+      body instanceof FormData;
+
     const isBodyAllowed = !["GET", "HEAD"].includes(upperMethod);
 
-    if (!isFormData && body !== null && isBodyAllowed && !finalHeaders["Content-Type"]) {
+    if (
+      !isFormData &&
+      body !== null &&
+      isBodyAllowed &&
+      !finalHeaders["Content-Type"]
+    ) {
       finalHeaders["Content-Type"] = "application/json";
     }
 
@@ -1989,6 +2067,7 @@ export const AppCore = (() => {
 
     getUserDisplayName,
     getUserUsername,
+    getUserAvatarUrl,
     normalizeUser,
   };
 

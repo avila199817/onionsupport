@@ -791,11 +791,12 @@ body.auth-screen.login-no-scroll #view-container{
 
 .password-toggle{
   position:absolute;
-  top:50%;
+  top:7px;
   right:14px;
-  transform:translateY(-50%);
   width:42px;
   height:42px;
+  padding:0;
+  line-height:0;
   border-radius:14px;
   border:1px solid transparent;
   background:transparent;
@@ -818,7 +819,6 @@ body.auth-screen.login-no-scroll #view-container{
 }
 
 .password-toggle:hover{
-  transform:translateY(-50%);
   color:var(--text-dim);
   background:transparent;
   border-color:transparent;
@@ -826,7 +826,6 @@ body.auth-screen.login-no-scroll #view-container{
 }
 
 .password-toggle.active{
-  transform:translateY(-50%);
   color:#d8b4fe;
   background:rgba(124,58,237,.10);
   border-color:rgba(124,58,237,.18);
@@ -835,12 +834,20 @@ body.auth-screen.login-no-scroll #view-container{
 
 .password-toggle:focus-visible{
   outline:none;
-  transform:translateY(-50%);
   box-shadow:var(--focus-ring);
 }
 
 .password-toggle:active{
-  transform:translateY(-50%);
+}
+
+[data-theme="light"] .password-toggle:hover{
+  background:transparent;
+  border-color:transparent;
+}
+
+[data-theme="light"] .password-toggle.active{
+  background:rgba(124,58,237,.10);
+  border-color:rgba(124,58,237,.16);
 }
 
 .password-toggle:disabled{

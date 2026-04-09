@@ -1,16 +1,19 @@
 /* =========================================================
-   Onion SPA - Incidencias View
+   Onion SPA - Incidencias View (FULL PRO SAAS PANEL · GOD MODE)
    Archivo: src/views/incidenciasView.js
 
    Responsabilidades:
    - pintar el panel de incidencias
-   - cargar incidencias desde backend
+   - cargar incidencias desde backend nuevo
    - guardar incidencias en Store
-   - búsqueda local
-   - filtros por estado/prioridad
+   - soportar búsqueda local y remota
+   - filtros por estado / prioridad / asignación
    - KPIs rápidos
-   - tabla responsive base
+   - tabla responsive pro
+   - vista cards responsive
    - gestión de loading / error / vacío
+   - normalizar tickets del nuevo backend
+   - dejar base fina para detalle / edición
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
@@ -23,19 +26,38 @@ export const IncidenciasView = (() => {
   const SCOPE = "view:incidencias";
 
   const ENDPOINTS = {
-    list: "/incidencias",
+    list: "/api/tickets",
+    stats: "/api/tickets/stats",
+  };
+
+  const PRIORITY_ORDER = {
+    low: 1,
+    medium: 2,
+    high: 3,
+    urgent: 4,
   };
 
   const localState = {
+    bootstrapped: false,
     loading: false,
     loaded: false,
     error: null,
+
     query: "",
     status: "all",
     priority: "all",
+    assigned: "all",
     sort: "updated_desc",
+
+    remoteCount: 0,
+    stats: {
+      active: 0,
+    },
   };
 
+  /* =========================================================
+     HELPERS BASE
+  ========================================================= */
   function getContainer() {
     return AppCore.dom.viewContainer;
   }
@@ -44,49 +66,79 @@ export const IncidenciasView = (() => {
     return AppCore.utils.escapeHtml(String(value ?? ""));
   }
 
-  function normalizeIncidencia(item = {}) {
-    return {
-      id: item.id ?? item._id ?? item.uuid ?? null,
-      code: item.code ?? item.codigo ?? item.reference ?? item.ref ?? null,
-      title: item.title ?? item.titulo ?? item.subject ?? "Sin título",
-      description: item.description ?? item.descripcion ?? "",
-      status: normalizeStatus(item.status ?? item.estado ?? "open"),
-      priority: normalizePriority(item.priority ?? item.prioridad ?? "medium"),
-      client:
-        item.client?.name ??
-        item.client_name ??
-        item.cliente?.nombre ??
-        item.cliente ??
-        "Sin cliente",
-      assignedTo:
-        item.assigned_to?.name ??
-        item.assignedTo?.name ??
-        item.tecnico?.nombre ??
-        item.agent?.name ??
-        item.assignee ??
-        "Sin asignar",
-      createdAt: item.created_at ?? item.createdAt ?? item.fecha_alta ?? null,
-      updatedAt: item.updated_at ?? item.updatedAt ?? item.fecha_actualizacion ?? null,
-      raw: item,
-    };
+  function safeString(value, fallback = "") {
+    if (value === null || value === undefined) return fallback;
+    const text = String(value).trim();
+    return text || fallback;
   }
 
+  function safeArray(value, fallback = []) {
+    return Array.isArray(value) ? value : fallback;
+  }
+
+  function safeNumber(value, fallback = 0) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  }
+
+  function normalizeText(value = "") {
+    return String(value || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim();
+  }
+
+  function toMs(value) {
+    if (!value) return 0;
+    const ms = new Date(value).getTime();
+    return Number.isFinite(ms) ? ms : 0;
+  }
+
+  function truncate(value = "", max = 140) {
+    const text = safeString(value);
+    if (text.length <= max) return text;
+    return `${text.slice(0, max).trim()}…`;
+  }
+
+  function getInitials(value = "") {
+    return String(value || "")
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part.charAt(0).toUpperCase())
+      .join("")
+      .slice(0, 2) || "ON";
+  }
+
+  function buildAvatar(name = "") {
+    return getInitials(name || "Usuario");
+  }
+
+  /* =========================================================
+     NORMALIZACIÓN NUEVO BACKEND
+  ========================================================= */
   function normalizeStatus(value = "open") {
     const map = {
       abierta: "open",
       abierto: "open",
       open: "open",
+
       pending: "pending",
       pendiente: "pending",
+
+      "en proceso": "in_progress",
       en_proceso: "in_progress",
       in_progress: "in_progress",
       progress: "in_progress",
+
       resuelta: "resolved",
       resuelto: "resolved",
       resolved: "resolved",
-      closed: "closed",
+
       cerrada: "closed",
       cerrado: "closed",
+      closed: "closed",
     };
 
     const key = String(value ?? "")
@@ -101,11 +153,14 @@ export const IncidenciasView = (() => {
     const map = {
       low: "low",
       baja: "low",
+
       medium: "medium",
       media: "medium",
       normal: "medium",
+
       high: "high",
       alta: "high",
+
       urgent: "urgent",
       urgente: "urgent",
       critical: "urgent",
@@ -113,37 +168,156 @@ export const IncidenciasView = (() => {
       crítica: "urgent",
     };
 
-    const key = String(value ?? "")
-      .trim()
-      .toLowerCase();
-
+    const key = String(value ?? "").trim().toLowerCase();
     return map[key] || "medium";
+  }
+
+  function normalizeIncidencia(item = {}) {
+    const id = item.id ?? item.ticketId ?? null;
+    const ticketId = item.ticketId ?? item.id ?? null;
+
+    const status = normalizeStatus(item.status ?? item.estado ?? "open");
+    const priority = normalizePriority(
+      item.priority ?? item.prioridad ?? "medium"
+    );
+
+    const clienteNombre =
+      item.cliente?.nombre ??
+      item.name ??
+      item.receptor?.name ??
+      item.createdBy?.name ??
+      "Usuario";
+
+    const clienteEmail =
+      item.cliente?.email ??
+      item.email ??
+      item.receptor?.email ??
+      item.createdBy?.email ??
+      "-";
+
+    const tecnicoNombre =
+      item.tecnico?.name ??
+      item.assignedTo?.name ??
+      item.assigned_to?.name ??
+      "No asignado";
+
+    const createdAt = item.createdAt ?? null;
+    const updatedAt = item.updatedAt ?? item.closedAt ?? createdAt ?? null;
+    const closedAt = item.closedAt ?? null;
+
+    const attachments = safeArray(item.attachments);
+    const history = safeArray(item.history);
+
+    const meta = item.meta || {};
+    const isAssigned =
+      meta.isAssigned === true ||
+      normalizeText(tecnicoNombre) !== "no asignado" ||
+      Boolean(safeString(item.tecnico?.email));
+
+    return {
+      id,
+      ticketId,
+      code: ticketId || id || null,
+
+      title:
+        item.subject ??
+        item.asunto ??
+        item.title ??
+        `Ticket ${ticketId || id || "sin asunto"}`,
+
+      preview:
+        item.preview ??
+        item.descripcion ??
+        item.message ??
+        item.description ??
+        "",
+
+      description:
+        item.descripcion ??
+        item.message ??
+        item.description ??
+        item.preview ??
+        "",
+
+      status,
+      priority,
+
+      tipo: safeString(item.tipo, "general"),
+      categoria: safeString(item.categoria, "general"),
+
+      client: clienteNombre,
+      clientEmail: clienteEmail,
+
+      assignedTo: tecnicoNombre,
+      assignedEmail: safeString(item.tecnico?.email, ""),
+
+      cliente: {
+        id: item.cliente?.id ?? item.userId ?? item.clienteId ?? null,
+        nombre: clienteNombre,
+        email: clienteEmail,
+        avatar: item.cliente?.avatar ?? null,
+        initials: buildAvatar(clienteNombre),
+      },
+
+      receptor: {
+        name: safeString(item.receptor?.name, ""),
+        email: safeString(item.receptor?.email, ""),
+      },
+
+      createdBy: {
+        userId: safeString(item.createdBy?.userId, ""),
+        name: safeString(item.createdBy?.name, ""),
+        email: safeString(item.createdBy?.email, ""),
+      },
+
+      tecnico: {
+        name: tecnicoNombre,
+        email: safeString(item.tecnico?.email, ""),
+      },
+
+      attachments,
+      attachmentsCount:
+        safeNumber(item.attachmentsCount, attachments.length) || 0,
+
+      history,
+      historyCount: safeNumber(item.historyCount, history.length) || 0,
+
+      createdAt,
+      createdAtES: item.createdAtES ?? null,
+      updatedAt,
+      closedAt,
+      closedAtES: item.closedAtES ?? null,
+
+      meta: {
+        timestampMs:
+          safeNumber(meta.timestampMs, 0) ||
+          toMs(updatedAt) ||
+          toMs(createdAt) ||
+          0,
+        hasAttachments:
+          meta.hasAttachments === true || attachments.length > 0,
+        isClosed: meta.isClosed === true || status === "closed",
+        isAssigned,
+      },
+
+      raw: item,
+    };
   }
 
   function extractItems(response) {
     if (Array.isArray(response)) return response;
+    if (Array.isArray(response?.tickets)) return response.tickets;
     if (Array.isArray(response?.items)) return response.items;
     if (Array.isArray(response?.data)) return response.data;
+    if (Array.isArray(response?.data?.tickets)) return response.data.tickets;
     if (Array.isArray(response?.data?.items)) return response.data.items;
     if (Array.isArray(response?.results)) return response.results;
     return [];
   }
 
-  function formatDate(value) {
-    if (!value) return "—";
-
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return "—";
-
-    return new Intl.DateTimeFormat("es-ES", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(date);
-  }
-
+  /* =========================================================
+     LABELS / TONES
+  ========================================================= */
   function getStatusLabel(status) {
     const labels = {
       open: "Abierta",
@@ -169,50 +343,110 @@ export const IncidenciasView = (() => {
 
   function getStatusTone(status) {
     const tones = {
-      open: "rgba(59,130,246,.18)",
-      pending: "rgba(245,158,11,.18)",
-      in_progress: "rgba(168,85,247,.18)",
-      resolved: "rgba(34,197,94,.18)",
-      closed: "rgba(107,114,128,.18)",
+      open: "rgba(59,130,246,.16)",
+      pending: "rgba(245,158,11,.16)",
+      in_progress: "rgba(168,85,247,.16)",
+      resolved: "rgba(34,197,94,.16)",
+      closed: "rgba(107,114,128,.16)",
     };
 
-    return tones[status] || "rgba(59,130,246,.18)";
+    return tones[status] || "rgba(59,130,246,.16)";
   }
 
   function getPriorityTone(priority) {
     const tones = {
-      low: "rgba(34,197,94,.18)",
-      medium: "rgba(59,130,246,.18)",
-      high: "rgba(245,158,11,.18)",
-      urgent: "rgba(239,68,68,.18)",
+      low: "rgba(34,197,94,.16)",
+      medium: "rgba(59,130,246,.16)",
+      high: "rgba(245,158,11,.16)",
+      urgent: "rgba(239,68,68,.16)",
     };
 
-    return tones[priority] || "rgba(59,130,246,.18)";
+    return tones[priority] || "rgba(59,130,246,.16)";
   }
 
+  /* =========================================================
+     STORE
+  ========================================================= */
   function getIncidencias() {
     return Store.get("entities.incidencias") || [];
   }
 
+  function setIncidencias(items = []) {
+    if (Store?.actions?.setCollection) {
+      Store.actions.setCollection("incidencias", items);
+      return;
+    }
+
+    if (Store?.set) {
+      Store.set("entities.incidencias", items);
+    }
+  }
+
+  /* =========================================================
+     FORMATTERS
+  ========================================================= */
+  function formatDate(value) {
+    if (!value) return "—";
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "—";
+
+    return new Intl.DateTimeFormat("es-ES", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date);
+  }
+
+  function formatRelativeDate(value) {
+    if (!value) return "—";
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "—";
+
+    const diff = Date.now() - date.getTime();
+    const minute = 60 * 1000;
+    const hour = 60 * minute;
+    const day = 24 * hour;
+
+    if (diff < minute) return "Hace un momento";
+    if (diff < hour) return `Hace ${Math.floor(diff / minute)} min`;
+    if (diff < day) return `Hace ${Math.floor(diff / hour)} h`;
+    if (diff < day * 7) return `Hace ${Math.floor(diff / day)} d`;
+
+    return formatDate(value);
+  }
+
+  /* =========================================================
+     FILTRO / ORDEN
+  ========================================================= */
   function getFilteredIncidencias() {
     let items = [...getIncidencias()];
 
     if (localState.query) {
-      const term = localState.query.toLowerCase();
+      const term = normalizeText(localState.query);
 
       items = items.filter((item) => {
         return [
           item.id,
+          item.ticketId,
           item.code,
           item.title,
+          item.preview,
           item.description,
           item.client,
+          item.clientEmail,
           item.assignedTo,
+          item.assignedEmail,
+          item.tipo,
+          item.categoria,
           getStatusLabel(item.status),
           getPriorityLabel(item.priority),
         ]
           .filter(Boolean)
-          .some((value) => String(value).toLowerCase().includes(term));
+          .some((value) => normalizeText(value).includes(term));
       });
     }
 
@@ -224,31 +458,45 @@ export const IncidenciasView = (() => {
       items = items.filter((item) => item.priority === localState.priority);
     }
 
+    if (localState.assigned === "assigned") {
+      items = items.filter((item) => item.meta?.isAssigned);
+    }
+
+    if (localState.assigned === "unassigned") {
+      items = items.filter((item) => !item.meta?.isAssigned);
+    }
+
     items.sort((a, b) => {
       if (localState.sort === "updated_desc") {
-        return new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0);
+        return (b.meta?.timestampMs || 0) - (a.meta?.timestampMs || 0);
       }
 
       if (localState.sort === "updated_asc") {
-        return new Date(a.updatedAt || 0) - new Date(b.updatedAt || 0);
+        return (a.meta?.timestampMs || 0) - (b.meta?.timestampMs || 0);
       }
 
       if (localState.sort === "created_desc") {
-        return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+        return toMs(b.createdAt) - toMs(a.createdAt);
       }
 
       if (localState.sort === "created_asc") {
-        return new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
+        return toMs(a.createdAt) - toMs(b.createdAt);
       }
 
       if (localState.sort === "priority_desc") {
-        const order = { low: 1, medium: 2, high: 3, urgent: 4 };
-        return (order[b.priority] || 0) - (order[a.priority] || 0);
+        return (PRIORITY_ORDER[b.priority] || 0) - (PRIORITY_ORDER[a.priority] || 0);
       }
 
       if (localState.sort === "priority_asc") {
-        const order = { low: 1, medium: 2, high: 3, urgent: 4 };
-        return (order[a.priority] || 0) - (order[b.priority] || 0);
+        return (PRIORITY_ORDER[a.priority] || 0) - (PRIORITY_ORDER[b.priority] || 0);
+      }
+
+      if (localState.sort === "title_asc") {
+        return String(a.title || "").localeCompare(String(b.title || ""), "es");
+      }
+
+      if (localState.sort === "title_desc") {
+        return String(b.title || "").localeCompare(String(a.title || ""), "es");
       }
 
       return 0;
@@ -264,10 +512,17 @@ export const IncidenciasView = (() => {
       total: items.length,
       open: items.filter((item) => item.status === "open").length,
       pending: items.filter((item) => item.status === "pending").length,
+      inProgress: items.filter((item) => item.status === "in_progress").length,
       urgent: items.filter((item) => item.priority === "urgent").length,
+      closed: items.filter((item) => item.status === "closed").length,
+      assigned: items.filter((item) => item.meta?.isAssigned).length,
+      withAttachments: items.filter((item) => item.attachmentsCount > 0).length,
     };
   }
 
+  /* =========================================================
+     UI PARTS
+  ========================================================= */
   function statCard({ label, value, hint, icon }) {
     return `
       <article
@@ -278,6 +533,7 @@ export const IncidenciasView = (() => {
           border-radius:18px;
           border:1px solid rgba(255,255,255,.08);
           background:rgba(255,255,255,.03);
+          backdrop-filter: blur(10px);
         "
       >
         <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
@@ -290,6 +546,7 @@ export const IncidenciasView = (() => {
               place-items:center;
               border-radius:12px;
               border:1px solid rgba(255,255,255,.08);
+              background:rgba(255,255,255,.03);
             "
           >
             ${icon}
@@ -324,9 +581,10 @@ export const IncidenciasView = (() => {
           <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:20px; flex-wrap:wrap;">
             <div style="display:grid; gap:8px;">
               <h2 style="margin:0; font-size:30px;">Incidencias</h2>
-              <p style="margin:0; opacity:.74; max-width:760px;">
-                Controla el flujo de tickets, revisa prioridades, filtra incidencias
-                y mantén una visión operativa clara del soporte.
+              <p style="margin:0; opacity:.74; max-width:860px;">
+                Vista operativa de tickets conectada al backend nuevo. Consulta
+                estados, prioridades, asignación, adjuntos y actividad reciente
+                en un panel limpio y rápido.
               </p>
             </div>
 
@@ -339,6 +597,7 @@ export const IncidenciasView = (() => {
                   border:1px solid rgba(255,255,255,.08);
                   border-radius:14px;
                   background:rgba(255,255,255,.04);
+                  color:inherit;
                   cursor:pointer;
                   font-weight:600;
                 "
@@ -359,14 +618,14 @@ export const IncidenciasView = (() => {
           ${statCard({
             label: "Total incidencias",
             value: kpis.total,
-            hint: "Tickets visibles en el sistema",
+            hint: `${localState.remoteCount || kpis.total} visibles desde backend`,
             icon: "🎫",
           })}
 
           ${statCard({
             label: "Abiertas",
             value: kpis.open,
-            hint: "Necesitan atención",
+            hint: `${localState.stats.active || 0} activas no cerradas`,
             icon: "🟦",
           })}
 
@@ -380,8 +639,22 @@ export const IncidenciasView = (() => {
           ${statCard({
             label: "Urgentes",
             value: kpis.urgent,
-            hint: "Prioridad máxima",
+            hint: "Máxima prioridad",
             icon: "🟥",
+          })}
+
+          ${statCard({
+            label: "Asignadas",
+            value: kpis.assigned,
+            hint: "Con técnico vinculado",
+            icon: "🧑‍💻",
+          })}
+
+          ${statCard({
+            label: "Con adjuntos",
+            value: kpis.withAttachments,
+            hint: "Incluyen archivos",
+            icon: "📎",
           })}
         </div>
       </section>
@@ -402,13 +675,13 @@ export const IncidenciasView = (() => {
       >
         <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
           <h3 style="margin:0; font-size:18px;">Filtros</h3>
-          <span style="font-size:13px; opacity:.65;">Búsqueda y clasificación local</span>
+          <span style="font-size:13px; opacity:.65;">Búsqueda y clasificación local sobre la colección cargada</span>
         </div>
 
         <div
           style="
             display:grid;
-            grid-template-columns:minmax(220px, 1.5fr) repeat(3, minmax(160px, .7fr));
+            grid-template-columns:minmax(220px, 1.6fr) repeat(4, minmax(150px, .65fr));
             gap:14px;
           "
           class="incidencias-filters-grid"
@@ -416,7 +689,7 @@ export const IncidenciasView = (() => {
           <input
             id="incidencias-search"
             type="text"
-            placeholder="Buscar por título, cliente, técnico, código..."
+            placeholder="Buscar por ticket, asunto, cliente, email, técnico..."
             value="${escapeHtml(localState.query)}"
             style="
               width:100%;
@@ -466,6 +739,22 @@ export const IncidenciasView = (() => {
           </select>
 
           <select
+            id="incidencias-assigned-filter"
+            style="
+              width:100%;
+              padding:14px 16px;
+              border-radius:14px;
+              border:1px solid rgba(255,255,255,.10);
+              background:transparent;
+              color:inherit;
+            "
+          >
+            <option value="all"${localState.assigned === "all" ? " selected" : ""}>Asignación</option>
+            <option value="assigned"${localState.assigned === "assigned" ? " selected" : ""}>Asignadas</option>
+            <option value="unassigned"${localState.assigned === "unassigned" ? " selected" : ""}>Sin asignar</option>
+          </select>
+
+          <select
             id="incidencias-sort"
             style="
               width:100%;
@@ -482,29 +771,35 @@ export const IncidenciasView = (() => {
             <option value="created_asc"${localState.sort === "created_asc" ? " selected" : ""}>Creación ↑</option>
             <option value="priority_desc"${localState.sort === "priority_desc" ? " selected" : ""}>Prioridad ↓</option>
             <option value="priority_asc"${localState.sort === "priority_asc" ? " selected" : ""}>Prioridad ↑</option>
+            <option value="title_asc"${localState.sort === "title_asc" ? " selected" : ""}>Título A-Z</option>
+            <option value="title_desc"${localState.sort === "title_desc" ? " selected" : ""}>Título Z-A</option>
           </select>
         </div>
       </section>
     `;
   }
 
+  function renderEmptyState(message) {
+    return `
+      <section
+        style="
+          display:grid;
+          gap:12px;
+          padding:24px;
+          border-radius:20px;
+          border:1px solid rgba(255,255,255,.08);
+          background:rgba(255,255,255,.03);
+        "
+      >
+        <h3 style="margin:0;">Listado</h3>
+        <p style="margin:0; opacity:.72;">${escapeHtml(message)}</p>
+      </section>
+    `;
+  }
+
   function renderTable() {
     if (localState.loading) {
-      return `
-        <section
-          style="
-            display:grid;
-            gap:12px;
-            padding:20px;
-            border-radius:20px;
-            border:1px solid rgba(255,255,255,.08);
-            background:rgba(255,255,255,.03);
-          "
-        >
-          <h3 style="margin:0;">Listado</h3>
-          <p style="margin:0; opacity:.72;">Cargando incidencias...</p>
-        </section>
-      `;
+      return renderEmptyState("Cargando incidencias...");
     }
 
     if (localState.error) {
@@ -513,14 +808,14 @@ export const IncidenciasView = (() => {
           style="
             display:grid;
             gap:12px;
-            padding:20px;
+            padding:24px;
             border-radius:20px;
             border:1px solid rgba(255,255,255,.08);
             background:rgba(255,255,255,.03);
           "
         >
           <h3 style="margin:0;">Listado</h3>
-          <p style="margin:0; color:#ff6b6b;">
+          <p style="margin:0; color:#ff7b7b;">
             ${escapeHtml(localState.error)}
           </p>
         </section>
@@ -530,23 +825,9 @@ export const IncidenciasView = (() => {
     const items = getFilteredIncidencias();
 
     if (!items.length) {
-      return `
-        <section
-          style="
-            display:grid;
-            gap:12px;
-            padding:20px;
-            border-radius:20px;
-            border:1px solid rgba(255,255,255,.08);
-            background:rgba(255,255,255,.03);
-          "
-        >
-          <h3 style="margin:0;">Listado</h3>
-          <p style="margin:0; opacity:.72;">
-            No hay incidencias que coincidan con los filtros actuales.
-          </p>
-        </section>
-      `;
+      return renderEmptyState(
+        "No hay incidencias que coincidan con los filtros actuales."
+      );
     }
 
     return `
@@ -570,17 +851,18 @@ export const IncidenciasView = (() => {
             style="
               width:100%;
               border-collapse:collapse;
-              min-width:980px;
+              min-width:1180px;
             "
           >
             <thead>
               <tr style="text-align:left; border-bottom:1px solid rgba(255,255,255,.08);">
-                <th style="padding:12px 10px; font-size:13px; opacity:.7;">Código</th>
-                <th style="padding:12px 10px; font-size:13px; opacity:.7;">Título</th>
+                <th style="padding:12px 10px; font-size:13px; opacity:.7;">Ticket</th>
+                <th style="padding:12px 10px; font-size:13px; opacity:.7;">Asunto</th>
                 <th style="padding:12px 10px; font-size:13px; opacity:.7;">Cliente</th>
                 <th style="padding:12px 10px; font-size:13px; opacity:.7;">Asignado</th>
                 <th style="padding:12px 10px; font-size:13px; opacity:.7;">Estado</th>
                 <th style="padding:12px 10px; font-size:13px; opacity:.7;">Prioridad</th>
+                <th style="padding:12px 10px; font-size:13px; opacity:.7;">Adjuntos</th>
                 <th style="padding:12px 10px; font-size:13px; opacity:.7;">Actualizada</th>
               </tr>
             </thead>
@@ -589,26 +871,39 @@ export const IncidenciasView = (() => {
               ${items
                 .map(
                   (item) => `
-                    <tr style="border-bottom:1px solid rgba(255,255,255,.06);">
-                      <td style="padding:14px 10px; font-size:14px; white-space:nowrap;">
-                        ${escapeHtml(item.code || item.id || "—")}
+                    <tr
+                      data-ticket-id="${escapeHtml(item.ticketId || item.id || "")}"
+                      class="incidencia-row"
+                      style="border-bottom:1px solid rgba(255,255,255,.06); cursor:pointer;"
+                    >
+                      <td style="padding:14px 10px; font-size:13px; white-space:nowrap;">
+                        <div style="display:grid; gap:4px;">
+                          <strong>${escapeHtml(item.code || item.id || "—")}</strong>
+                          <span style="opacity:.6;">${escapeHtml(item.tipo || "general")}</span>
+                        </div>
                       </td>
 
-                      <td style="padding:14px 10px; min-width:240px;">
-                        <div style="display:grid; gap:4px;">
+                      <td style="padding:14px 10px; min-width:280px;">
+                        <div style="display:grid; gap:5px;">
                           <strong style="font-size:14px;">${escapeHtml(item.title)}</strong>
                           <span style="font-size:12px; opacity:.65;">
-                            ${escapeHtml(item.description || "Sin descripción")}
+                            ${escapeHtml(truncate(item.preview || item.description || "Sin descripción", 120))}
                           </span>
                         </div>
                       </td>
 
-                      <td style="padding:14px 10px; font-size:14px;">
-                        ${escapeHtml(item.client)}
+                      <td style="padding:14px 10px; min-width:220px;">
+                        <div style="display:grid; gap:5px;">
+                          <strong style="font-size:14px;">${escapeHtml(item.client)}</strong>
+                          <span style="font-size:12px; opacity:.65;">${escapeHtml(item.clientEmail || "-")}</span>
+                        </div>
                       </td>
 
-                      <td style="padding:14px 10px; font-size:14px;">
-                        ${escapeHtml(item.assignedTo)}
+                      <td style="padding:14px 10px; min-width:180px;">
+                        <div style="display:grid; gap:5px;">
+                          <strong style="font-size:14px;">${escapeHtml(item.assignedTo)}</strong>
+                          <span style="font-size:12px; opacity:.65;">${escapeHtml(item.assignedEmail || "Sin email")}</span>
+                        </div>
                       </td>
 
                       <td style="padding:14px 10px;">
@@ -646,7 +941,14 @@ export const IncidenciasView = (() => {
                       </td>
 
                       <td style="padding:14px 10px; font-size:13px; white-space:nowrap;">
-                        ${escapeHtml(formatDate(item.updatedAt))}
+                        ${escapeHtml(String(item.attachmentsCount || 0))}
+                      </td>
+
+                      <td style="padding:14px 10px; font-size:13px; white-space:nowrap;">
+                        <div style="display:grid; gap:4px;">
+                          <strong>${escapeHtml(formatRelativeDate(item.updatedAt))}</strong>
+                          <span style="opacity:.6;">${escapeHtml(formatDate(item.updatedAt))}</span>
+                        </div>
                       </td>
                     </tr>
                   `
@@ -659,12 +961,118 @@ export const IncidenciasView = (() => {
     `;
   }
 
+  function renderCards() {
+    if (localState.loading || localState.error) return "";
+
+    const items = getFilteredIncidencias();
+
+    if (!items.length) return "";
+
+    return `
+      <section
+        class="incidencias-cards-mobile"
+        style="
+          display:grid;
+          gap:14px;
+        "
+      >
+        ${items
+          .map(
+            (item) => `
+              <article
+                data-ticket-id="${escapeHtml(item.ticketId || item.id || "")}"
+                class="incidencia-card-mobile"
+                style="
+                  display:grid;
+                  gap:14px;
+                  padding:18px;
+                  border-radius:18px;
+                  border:1px solid rgba(255,255,255,.08);
+                  background:rgba(255,255,255,.03);
+                  cursor:pointer;
+                "
+              >
+                <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
+                  <div style="display:grid; gap:4px; min-width:0;">
+                    <strong style="font-size:14px;">${escapeHtml(item.code || item.id || "—")}</strong>
+                    <span style="font-size:12px; opacity:.65;">${escapeHtml(item.title)}</span>
+                  </div>
+
+                  <span
+                    style="
+                      display:inline-flex;
+                      align-items:center;
+                      justify-content:center;
+                      min-width:38px;
+                      height:38px;
+                      padding:0 10px;
+                      border-radius:12px;
+                      background:rgba(255,255,255,.05);
+                      border:1px solid rgba(255,255,255,.08);
+                      font-size:12px;
+                      font-weight:700;
+                    "
+                  >
+                    ${escapeHtml(String(item.attachmentsCount || 0))}
+                  </span>
+                </div>
+
+                <div style="display:grid; gap:8px;">
+                  <div style="font-size:13px; opacity:.75;">${escapeHtml(truncate(item.preview || item.description || "Sin descripción", 140))}</div>
+
+                  <div style="display:grid; gap:5px; font-size:13px;">
+                    <span><strong>Cliente:</strong> ${escapeHtml(item.client)}</span>
+                    <span><strong>Técnico:</strong> ${escapeHtml(item.assignedTo)}</span>
+                    <span><strong>Actualizada:</strong> ${escapeHtml(formatRelativeDate(item.updatedAt))}</span>
+                  </div>
+                </div>
+
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                  <span
+                    style="
+                      display:inline-flex;
+                      align-items:center;
+                      justify-content:center;
+                      padding:7px 10px;
+                      border-radius:999px;
+                      font-size:12px;
+                      font-weight:600;
+                      background:${getStatusTone(item.status)};
+                    "
+                  >
+                    ${escapeHtml(getStatusLabel(item.status))}
+                  </span>
+
+                  <span
+                    style="
+                      display:inline-flex;
+                      align-items:center;
+                      justify-content:center;
+                      padding:7px 10px;
+                      border-radius:999px;
+                      font-size:12px;
+                      font-weight:600;
+                      background:${getPriorityTone(item.priority)};
+                    "
+                  >
+                    ${escapeHtml(getPriorityLabel(item.priority))}
+                  </span>
+                </div>
+              </article>
+            `
+          )
+          .join("")}
+      </section>
+    `;
+  }
+
   function render() {
     const container = getContainer();
     if (!container) return;
 
     AppCore.cleanup.run(SCOPE);
     AppCore.setDocumentTitle("Incidencias");
+    AppCore.clearDynamicContainers?.();
 
     container.innerHTML = `
       <section
@@ -678,10 +1086,25 @@ export const IncidenciasView = (() => {
         ${renderHeader()}
         ${renderFilters()}
         ${renderTable()}
+        ${renderCards()}
       </section>
     `;
 
     bind();
+  }
+
+  /* =========================================================
+     REQUESTS
+  ========================================================= */
+  async function loadStats() {
+    try {
+      const response = await Http.get(ENDPOINTS.stats);
+      localState.stats = {
+        active: safeNumber(response?.active, response?.data?.active || 0),
+      };
+    } catch {
+      localState.stats = { active: 0 };
+    }
   }
 
   async function loadIncidencias({ silent = false } = {}) {
@@ -692,10 +1115,17 @@ export const IncidenciasView = (() => {
     }
 
     try {
-      const response = await Http.get(ENDPOINTS.list);
-      const items = extractItems(response).map(normalizeIncidencia);
+      const [listResponse] = await Promise.all([
+        Http.get(ENDPOINTS.list),
+        loadStats(),
+      ]);
 
-      Store.actions.setCollection("incidencias", items);
+      const items = extractItems(listResponse).map(normalizeIncidencia);
+
+      setIncidencias(items);
+
+      localState.remoteCount =
+        safeNumber(listResponse?.count, items.length) || items.length;
 
       localState.loaded = true;
       localState.loading = false;
@@ -714,12 +1144,16 @@ export const IncidenciasView = (() => {
     }
   }
 
+  /* =========================================================
+     BIND
+  ========================================================= */
   function bind() {
     const scope = AppCore.cleanup.scope(SCOPE);
 
     const searchInput = document.getElementById("incidencias-search");
     const statusFilter = document.getElementById("incidencias-status-filter");
     const priorityFilter = document.getElementById("incidencias-priority-filter");
+    const assignedFilter = document.getElementById("incidencias-assigned-filter");
     const sortSelect = document.getElementById("incidencias-sort");
     const refreshBtn = document.getElementById("incidencias-refresh-btn");
 
@@ -731,7 +1165,7 @@ export const IncidenciasView = (() => {
         AppCore.utils.debounce((event) => {
           localState.query = event.target.value.trim();
           render();
-        }, 100)
+        }, 120)
       );
     }
 
@@ -749,6 +1183,13 @@ export const IncidenciasView = (() => {
       });
     }
 
+    if (assignedFilter) {
+      AppCore.cleanup.on(scope, assignedFilter, "change", (event) => {
+        localState.assigned = event.target.value;
+        render();
+      });
+    }
+
     if (sortSelect) {
       AppCore.cleanup.on(scope, sortSelect, "change", (event) => {
         localState.sort = event.target.value;
@@ -762,15 +1203,33 @@ export const IncidenciasView = (() => {
       });
     }
 
-    const unsubscribe = Store.subscribeKey("entities.incidencias", () => {
+    const clickableRows = document.querySelectorAll("[data-ticket-id]");
+    clickableRows.forEach((row) => {
+      AppCore.cleanup.on(scope, row, "click", () => {
+        const ticketId = row.getAttribute("data-ticket-id");
+        if (!ticketId) return;
+
+        if (typeof AppCore.events?.emit === "function") {
+          AppCore.events.emit("incidencias:open", { ticketId });
+        }
+
+        // Base lista para navegar a detalle cuando lo tengas fino:
+        // Router.navigate(`/incidencias/${ticketId}`);
+      });
+    });
+
+    const unsubscribe = Store.subscribeKey?.("entities.incidencias", () => {
       if (!localState.loading) {
         render();
       }
     });
 
-    AppCore.cleanup.add(scope, unsubscribe);
+    if (typeof unsubscribe === "function") {
+      AppCore.cleanup.add(scope, unsubscribe);
+    }
 
-    if (!localState.loaded && !localState.loading) {
+    if (!localState.bootstrapped) {
+      localState.bootstrapped = true;
       loadIncidencias();
     }
   }

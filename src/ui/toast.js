@@ -24,11 +24,13 @@ export const Toast = (() => {
   const DEFAULT_DURATION = 4200;
   const MAX_TOASTS = 5;
   const CONTAINER_ID = "toast-stack";
+  const KEYFRAMES_ID = "toast-progress-keyframes";
 
   let initialized = false;
   let seed = 0;
 
   const store = new Map();
+  const dismissing = new Set();
 
   /* =========================================================
      HELPERS
@@ -74,9 +76,11 @@ export const Toast = (() => {
   function normalizeDuration(type, duration) {
     if (type === "loading") return 0;
     if (duration === false || duration === null) return 0;
+
     if (typeof duration === "number" && Number.isFinite(duration)) {
       return Math.max(0, duration);
     }
+
     return DEFAULT_DURATION;
   }
 
@@ -220,17 +224,18 @@ export const Toast = (() => {
     return container;
   }
 
-  function enforceMaxToasts() {
-    const active = [...store.values()]
-      .filter((item) => item?.toastEl?.isConnected)
-      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  function injectToastProgressKeyframes() {
+    if (document.getElementById(KEYFRAMES_ID)) return;
 
-    while (active.length > MAX_TOASTS) {
-      const oldest = active.shift();
-      if (oldest?.id) {
-        dismiss(oldest.id);
+    const style = document.createElement("style");
+    style.id = KEYFRAMES_ID;
+    style.textContent = `
+      @keyframes toastProgress{
+        from{ transform:scaleX(1); opacity:1; }
+        to{ transform:scaleX(0); opacity:.72; }
       }
-    }
+    `;
+    document.head.appendChild(style);
   }
 
   function clearTimer(item) {
@@ -242,41 +247,19 @@ export const Toast = (() => {
     }
   }
 
-  function startTimer(item) {
-    if (!item || !item.duration || item.duration <= 0) return;
-
-    clearTimer(item);
-
-    const remaining = Math.max(0, item.remaining ?? item.duration);
-    item.startedAt = Date.now();
-
-    item.timeoutId = window.setTimeout(() => {
-      dismiss(item.id);
-    }, remaining);
-
-    updateProgressAnimation(item, remaining);
+  function removeElement(item) {
+    if (!item?.toastEl) return;
+    item.toastEl.remove();
   }
 
-  function pauseTimer(item) {
-    if (!item || !item.duration || item.duration <= 0) return;
-
-    if (!item.startedAt) return;
-
-    const elapsed = Date.now() - item.startedAt;
-    item.remaining = Math.max(0, (item.remaining ?? item.duration) - elapsed);
-    item.startedAt = 0;
+  function destroyItem(item) {
+    if (!item) return;
 
     clearTimer(item);
-    freezeProgress(item);
-  }
+    removeElement(item);
 
-  function resumeTimer(item) {
-    if (!item || !item.duration || item.duration <= 0) return;
-    if (item.remaining <= 0) {
-      dismiss(item.id);
-      return;
-    }
-    startTimer(item);
+    store.delete(item.id);
+    dismissing.delete(item.id);
   }
 
   function freezeProgress(item) {
@@ -307,10 +290,62 @@ export const Toast = (() => {
       return;
     }
 
-    // Force reflow
     void progressEl.offsetWidth;
-
     progressEl.style.animation = `toastProgress ${duration}ms linear forwards`;
+  }
+
+  function startTimer(item) {
+    if (!item || !item.duration || item.duration <= 0) return;
+    if (item.dismissed) return;
+
+    clearTimer(item);
+
+    const remaining = Math.max(0, item.remaining ?? item.duration);
+    item.startedAt = Date.now();
+
+    item.timeoutId = window.setTimeout(() => {
+      dismiss(item.id);
+    }, remaining);
+
+    updateProgressAnimation(item, remaining);
+  }
+
+  function pauseTimer(item) {
+    if (!item || !item.duration || item.duration <= 0) return;
+    if (!item.startedAt) return;
+    if (item.dismissed) return;
+
+    const elapsed = Date.now() - item.startedAt;
+    item.remaining = Math.max(0, (item.remaining ?? item.duration) - elapsed);
+    item.startedAt = 0;
+
+    clearTimer(item);
+    freezeProgress(item);
+  }
+
+  function resumeTimer(item) {
+    if (!item || !item.duration || item.duration <= 0) return;
+    if (item.dismissed) return;
+
+    if ((item.remaining ?? item.duration) <= 0) {
+      dismiss(item.id);
+      return;
+    }
+
+    startTimer(item);
+  }
+
+  function enforceMaxToasts() {
+    const active = [...store.values()]
+      .filter((item) => item?.toastEl?.isConnected && !item.dismissed)
+      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+
+    while (active.length > MAX_TOASTS) {
+      const oldest = active.shift();
+      if (oldest?.id) {
+        dismiss(oldest.id);
+      }
+    }
   }
 
   function createToastElement({
@@ -342,6 +377,7 @@ export const Toast = (() => {
             <button
               type="button"
               class="toast-close"
+              data-toast-dismiss="${escapeHtml(id)}"
               aria-label="Cerrar notificación"
             >
               <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18">
@@ -359,31 +395,9 @@ export const Toast = (() => {
     return toast;
   }
 
-  function injectToastProgressKeyframes() {
-    if (document.getElementById("toast-progress-keyframes")) return;
-
-    const style = document.createElement("style");
-    style.id = "toast-progress-keyframes";
-    style.textContent = `
-      @keyframes toastProgress{
-        from{ transform:scaleX(1); opacity:1; }
-        to{ transform:scaleX(0); opacity:.72; }
-      }
-    `;
-    document.head.appendChild(style);
-  }
-
   function registerInteractions(item) {
     const { toastEl } = item;
     if (!toastEl) return;
-
-    const closeBtn = toastEl.querySelector(".toast-close");
-
-    if (closeBtn) {
-      closeBtn.addEventListener("click", () => {
-        dismiss(item.id);
-      });
-    }
 
     toastEl.addEventListener("mouseenter", () => {
       pauseTimer(item);
@@ -394,16 +408,16 @@ export const Toast = (() => {
     });
   }
 
-  function removeElement(item) {
-    if (!item?.toastEl) return;
-    item.toastEl.remove();
-  }
-
-  function destroyItem(item) {
-    if (!item) return;
-    clearTimer(item);
-    removeElement(item);
-    store.delete(item.id);
+  function buildEventPayload(item, extra = {}) {
+    return {
+      id: item?.id || null,
+      type: item?.type || null,
+      title: item?.title || "",
+      message: item?.message || "",
+      duration: item?.duration ?? 0,
+      closable: Boolean(item?.closable),
+      ...extra,
+    };
   }
 
   /* =========================================================
@@ -460,6 +474,7 @@ export const Toast = (() => {
       toastEl,
       progressEl,
       createdAt: Date.now(),
+      dismissed: false,
     };
 
     store.set(id, item);
@@ -469,26 +484,22 @@ export const Toast = (() => {
     updateProgressAnimation(item, duration);
 
     requestAnimationFrame(() => {
-      toastEl.classList.add("show");
+      if (item.toastEl?.isConnected && !item.dismissed) {
+        item.toastEl.classList.add("show");
+      }
     });
 
     startTimer(item);
     enforceMaxToasts();
 
-    AppCore.events?.emit?.("toast:show", {
-      id,
-      type,
-      title,
-      message,
-      duration,
-    });
+    AppCore.events?.emit?.("toast:shown", buildEventPayload(item));
 
     return id;
   }
 
   function update(id, patch = {}) {
     const item = store.get(String(id));
-    if (!item) return null;
+    if (!item || item.dismissed) return null;
 
     const nextType = patch.type ? normalizeType(patch.type) : item.type;
     const nextTitle =
@@ -497,6 +508,11 @@ export const Toast = (() => {
       patch.message !== undefined || patch.text !== undefined
         ? String(patch.message || patch.text || "").trim()
         : item.message;
+
+    if (!nextMessage) {
+      AppCore.utils?.warn?.("Toast.update requiere message/text.");
+      return null;
+    }
 
     const nextDuration =
       patch.duration !== undefined
@@ -511,6 +527,7 @@ export const Toast = (() => {
     item.message = nextMessage;
     item.duration = nextDuration;
     item.remaining = nextDuration;
+    item.startedAt = 0;
     item.closable = nextClosable;
 
     const newEl = createToastElement({
@@ -529,28 +546,36 @@ export const Toast = (() => {
     updateProgressAnimation(item, nextDuration);
     startTimer(item);
 
-    newEl.classList.add("show");
-
-    AppCore.events?.emit?.("toast:update", {
-      id: item.id,
-      type: item.type,
-      title: item.title,
-      message: item.message,
-      duration: item.duration,
+    requestAnimationFrame(() => {
+      if (item.toastEl?.isConnected && !item.dismissed) {
+        item.toastEl.classList.add("show");
+      }
     });
+
+    AppCore.events?.emit?.("toast:updated", buildEventPayload(item));
 
     return item.id;
   }
 
   function dismiss(id) {
-    const item = store.get(String(id));
+    const normalizedId = String(id || "");
+    if (!normalizedId) return false;
+
+    const item = store.get(normalizedId);
     if (!item) return false;
+    if (item.dismissed) return false;
+    if (dismissing.has(normalizedId)) return false;
+
+    dismissing.add(normalizedId);
+    item.dismissed = true;
 
     clearTimer(item);
 
     const { toastEl } = item;
+
     if (!toastEl) {
       destroyItem(item);
+      AppCore.events?.emit?.("toast:dismissed", buildEventPayload(item));
       return true;
     }
 
@@ -564,16 +589,15 @@ export const Toast = (() => {
       destroyItem(item);
     }, delay);
 
-    AppCore.events?.emit?.("toast:dismiss", {
-      id: item.id,
-      type: item.type,
-    });
+    AppCore.events?.emit?.("toast:dismissed", buildEventPayload(item));
 
     return true;
   }
 
   function clear() {
-    [...store.keys()].forEach((id) => dismiss(id));
+    [...store.keys()].forEach((id) => {
+      dismiss(id);
+    });
   }
 
   /* =========================================================
@@ -628,7 +652,7 @@ export const Toast = (() => {
     if (!AppCore.cleanup?.event) return;
 
     AppCore.cleanup.event(scope, "toast:show", ({ detail }) => {
-      if (!detail || detail.__fromToastModule) return;
+      if (!detail) return;
 
       show({
         ...detail,
@@ -655,6 +679,16 @@ export const Toast = (() => {
       info(detail.message || detail.text || "", detail);
     });
 
+    AppCore.cleanup.event(scope, "toast:loading", ({ detail }) => {
+      if (!detail) return;
+      loading(detail.message || detail.text || "Cargando...", detail);
+    });
+
+    AppCore.cleanup.event(scope, "toast:update", ({ detail }) => {
+      if (!detail?.id) return;
+      update(detail.id, detail);
+    });
+
     AppCore.cleanup.event(scope, "toast:dismiss", ({ detail }) => {
       if (!detail?.id) return;
       dismiss(detail.id);
@@ -665,8 +699,30 @@ export const Toast = (() => {
     });
   }
 
+  function bindDomEvents(scope) {
+    if (!AppCore.cleanup?.on) return;
+
+    AppCore.cleanup.on(scope, document, "click", (event) => {
+      const closeBtn = event.target?.closest?.("[data-toast-dismiss]");
+      if (!closeBtn) return;
+
+      const toastId =
+        closeBtn.getAttribute("data-toast-dismiss") ||
+        closeBtn.closest("[data-toast-id]")?.dataset?.toastId ||
+        null;
+
+      if (!toastId) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+
+      dismiss(toastId);
+    });
+  }
+
   /* =========================================================
-     INIT
+     INIT / DESTROY
   ========================================================= */
   function init() {
     if (initialized) {
@@ -681,6 +737,7 @@ export const Toast = (() => {
 
     if (scope) {
       bindGlobalEvents(scope);
+      bindDomEvents(scope);
     }
 
     initialized = true;
@@ -694,8 +751,19 @@ export const Toast = (() => {
     return api;
   }
 
+  function destroy() {
+    AppCore.cleanup?.run?.(SCOPE);
+    clear();
+    initialized = false;
+    return true;
+  }
+
+  /* =========================================================
+     API
+  ========================================================= */
   const api = {
     init,
+    destroy,
     show,
     update,
     dismiss,

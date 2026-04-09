@@ -11,7 +11,7 @@
    - soportar login con username o email
    - soportar flujo opcional 2FA
    - redirigir correctamente tras login
-   - mantener visible el toast tras login hasta su desaparición
+   - evitar delays artificiales tras login correcto
    - evitar pérdida de valores al deshabilitar inputs
    - respetar logo animado
    - soportar caps lock indicator con icono tipo apple
@@ -46,9 +46,9 @@ export const LoginView = (() => {
   const LOGIN_LOADING_TOAST_MESSAGE =
     "Comprobando credenciales y preparando tu sesión...";
 
-  const SUCCESS_TOAST_DURATION = 1850;
-  const TWO_FA_TOAST_DURATION = 1850;
-  const NAVIGATION_BUFFER_MS = 80;
+  const ERROR_TOAST_DURATION = 4200;
+  const TWO_FA_TOAST_DURATION = 250;
+  const NAVIGATION_BUFFER_MS = 0;
 
   let logoIntervalId = null;
   let redirectTimerId = null;
@@ -56,7 +56,6 @@ export const LoginView = (() => {
 
   let isNavigatingAway = false;
   let isSubmitting = false;
-  let isRendered = false;
 
   /* =========================================================
      HELPERS BASE
@@ -253,6 +252,10 @@ export const LoginView = (() => {
   function navigateTo(path) {
     const target = AppCore.utils.normalizePath(path || "/");
 
+    setAuthScreen(false);
+    hideToast();
+    forceHideGlobalLoader();
+
     if (typeof Router.goAfterLogin === "function") {
       Router.goAfterLogin(target);
       return;
@@ -269,12 +272,19 @@ export const LoginView = (() => {
     window.location.href = target;
   }
 
-  function navigateAfterToast(path, duration) {
+  function navigateSoon(path, delay = 0) {
     clearRedirectTimer();
+
+    const safeDelay = Math.max(0, Number(delay) || 0) + NAVIGATION_BUFFER_MS;
+
+    if (safeDelay <= 0) {
+      navigateTo(path);
+      return;
+    }
 
     redirectTimerId = window.setTimeout(() => {
       navigateTo(path);
-    }, Math.max(0, Number(duration) || 0) + NAVIGATION_BUFFER_MS);
+    }, safeDelay);
   }
 
   function clampToastDuration(duration) {
@@ -488,7 +498,7 @@ export const LoginView = (() => {
       title: "Acceso denegado",
       message: message || "No se pudo iniciar sesión.",
       type: "error",
-      duration: 4200,
+      duration: ERROR_TOAST_DURATION,
       persistent: false,
       closable: true,
     });
@@ -723,29 +733,50 @@ export const LoginView = (() => {
     }
   }
 
+  function syncUserStateAfterLogin(result, payload) {
+    const normalizedUser =
+      result?.user ||
+      AppCore.state.user ||
+      null;
+
+    const token =
+      result?.token ??
+      AppCore.state.token ??
+      null;
+
+    if (typeof AppCore.applySession === "function") {
+      AppCore.applySession({
+        token,
+        user: normalizedUser,
+      });
+    } else {
+      if (typeof AppCore.setToken === "function" && token !== undefined) {
+        AppCore.setToken(token);
+      }
+
+      if (typeof AppCore.setUser === "function" && normalizedUser !== undefined) {
+        AppCore.setUser(normalizedUser);
+      }
+    }
+
+    AppCore.syncUserUI?.();
+
+    AppCore.events.emit("login:success", {
+      user: normalizedUser,
+      identifier: payload?.identifier || "",
+      redirectTo: resolvePostLoginPath(result, payload?.identifier || ""),
+    });
+  }
+
   function handleSuccessfulLogin(result, payload, controls) {
     const redirectTo = resolvePostLoginPath(result, payload?.identifier || "");
     isNavigatingAway = true;
 
     persistLegacyUserInfo(result, payload?.identifier || "");
-    AppCore.syncUserUI?.();
-
-    AppCore.events.emit("login:success", {
-      user: result?.user || AppCore.state.user || null,
-      redirectTo,
-    });
-
-    showToast({
-      title: "Acceso correcto",
-      message: "Redirigiendo a tu espacio de trabajo...",
-      type: "success",
-      duration: SUCCESS_TOAST_DURATION,
-      persistent: false,
-      closable: false,
-    });
-
+    syncUserStateAfterLogin(result, payload);
     setSubmitting(controls, true);
-    navigateAfterToast(redirectTo, SUCCESS_TOAST_DURATION);
+
+    navigateTo(redirectTo);
   }
 
   function handle2FARequired(result, controls) {
@@ -775,7 +806,7 @@ export const LoginView = (() => {
     });
 
     setSubmitting(controls, true);
-    navigateAfterToast(redirectTo, TWO_FA_TOAST_DURATION);
+    navigateSoon(redirectTo, TWO_FA_TOAST_DURATION);
   }
 
   /* =========================================================
@@ -1032,7 +1063,6 @@ export const LoginView = (() => {
       </section>
     `;
 
-    isRendered = true;
     forceHideGlobalLoader();
     bind();
   }

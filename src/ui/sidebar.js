@@ -217,10 +217,6 @@ export const SidebarUI = (() => {
       return Boolean(AppCore.state.sidebarOpen);
     }
 
-    if (typeof AppCore.state?.sidebarOpen === "boolean") {
-      return AppCore.state.sidebarOpen;
-    }
-
     return !getSavedSidebarCollapsed();
   }
 
@@ -275,16 +271,14 @@ export const SidebarUI = (() => {
     if (mobile) {
       sidebar.classList.toggle("open", isOpen);
       sidebar.classList.toggle("is-open", isOpen);
-      sidebar.classList.remove("collapsed");
-      sidebar.classList.remove("is-collapsed");
+      sidebar.classList.remove("collapsed", "is-collapsed");
 
       body?.classList.toggle("sidebar-open", isOpen);
       body?.classList.remove("sidebar-collapsed");
     } else {
       sidebar.classList.toggle("collapsed", !isOpen);
       sidebar.classList.toggle("is-collapsed", !isOpen);
-      sidebar.classList.remove("open");
-      sidebar.classList.remove("is-open");
+      sidebar.classList.remove("open", "is-open");
 
       body?.classList.toggle("sidebar-collapsed", !isOpen);
       body?.classList.remove("sidebar-open");
@@ -303,10 +297,6 @@ export const SidebarUI = (() => {
     const mobile = isMobileViewport();
 
     AppCore.state.sidebarOpen = nextOpen;
-
-    if (typeof AppCore.setSidebarOpen === "function") {
-      AppCore.setSidebarOpen(nextOpen);
-    }
 
     if (!mobile) {
       saveSidebarCollapsed(!nextOpen);
@@ -406,6 +396,9 @@ export const SidebarUI = (() => {
     let serverLink = document.getElementById(SERVER_NAV_ID);
 
     if (serverLink) {
+      serverLink.hidden = !isAdmin();
+      serverLink.setAttribute("aria-hidden", String(!isAdmin()));
+      serverLink.style.display = isAdmin() ? "" : "none";
       return serverLink;
     }
 
@@ -423,7 +416,9 @@ export const SidebarUI = (() => {
     serverLink = document.getElementById(SERVER_NAV_ID);
 
     if (serverLink) {
+      serverLink.hidden = !isAdmin();
       serverLink.setAttribute("aria-hidden", String(!isAdmin()));
+      serverLink.style.display = isAdmin() ? "" : "none";
     }
 
     return serverLink;
@@ -525,26 +520,26 @@ export const SidebarUI = (() => {
     avatarEl.classList.add("has-image");
     avatarEl.setAttribute("aria-label", `Avatar ${displayName}`);
 
-    avatarEl.innerHTML = `
-      <img
-        src="${safeUrl}"
-        alt="Avatar de ${displayName}"
-        loading="eager"
-        decoding="async"
-        fetchpriority="high"
-        referrerpolicy="no-referrer"
-        draggable="false"
-        style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block;"
-      />
-    `;
+    const img = document.createElement("img");
+    img.src = safeUrl;
+    img.alt = `Avatar de ${displayName}`;
+    img.loading = "eager";
+    img.decoding = "async";
+    img.draggable = false;
+    img.referrerPolicy = "no-referrer";
 
-    const img = avatarEl.querySelector("img");
+    img.style.width = "100%";
+    img.style.height = "100%";
+    img.style.objectFit = "cover";
+    img.style.borderRadius = "50%";
+    img.style.display = "block";
 
-    if (img) {
-      img.onerror = () => {
-        renderAvatarFallback(avatarEl, displayName, avatarText);
-      };
-    }
+    img.onerror = () => {
+      renderAvatarFallback(avatarEl, displayName, avatarText);
+    };
+
+    avatarEl.innerHTML = "";
+    avatarEl.appendChild(img);
   }
 
   function renderUser() {
@@ -737,6 +732,20 @@ export const SidebarUI = (() => {
     closeDropdown();
   }
 
+  function handleSidebarMenuClick(event) {
+    const { sidebarMenu } = getElements();
+    if (!sidebarMenu) return;
+
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+
+    const link = target.closest('a[data-spa]');
+    if (!link || !sidebarMenu.contains(link)) return;
+
+    closeDropdown();
+    closeSidebarOnMobileAfterNavigation();
+  }
+
   function handleUserToggleKeydown(event) {
     const { userToggle } = getElements();
     if (!userToggle || event.target !== userToggle) return;
@@ -843,10 +852,14 @@ export const SidebarUI = (() => {
 
     AppCore.cleanup.on(scope, window, "resize", resizeHandler);
 
-    const { userToggle } = getElements();
+    const { userToggle, sidebarMenu } = getElements();
 
     if (userToggle) {
       AppCore.cleanup.on(scope, userToggle, "keydown", handleUserToggleKeydown);
+    }
+
+    if (sidebarMenu) {
+      AppCore.cleanup.on(scope, sidebarMenu, "click", handleSidebarMenuClick);
     }
   }
 

@@ -12,6 +12,7 @@
    - polish visual + performance
    - sin topbarview-container
    - alineación perfecta entre sidebar / topbar / tablehead / content
+   - table-head visible solo cuando tenga contenido real
 ========================================================= */
 
 
@@ -26,10 +27,12 @@
 
   --app-sidebar-current-width: var(--sidebar-width);
 
-  --app-offset: calc(
+  --app-offset-topbar: calc(
     var(--topbar-height) +
-    var(--tablehead-height)
+    var(--app-safe-top)
   );
+
+  --app-offset-tablehead: 0px;
 
   --content-padding-inline: var(--content-padding);
   --content-padding-block: var(--space-lg);
@@ -230,12 +233,19 @@ a{
   min-inline-size:0;
   min-block-size:0;
 
-  padding-block-start:calc(var(--app-offset) + var(--app-safe-top));
+  padding-block-start:calc(
+    var(--app-offset-topbar) +
+    var(--app-offset-tablehead)
+  );
   padding-inline-end:var(--app-safe-right);
   padding-block-end:var(--app-safe-bottom);
   padding-inline-start:var(--app-safe-left);
 
   isolation:isolate;
+}
+
+.main-content:has(.table-head:not(:has(#tablehead-container:empty))) #app-content{
+  --app-offset-tablehead: var(--tablehead-height);
 }
 
 #app-content::before{
@@ -302,6 +312,10 @@ a{
   background:
     linear-gradient(180deg, rgba(255,255,255,.028), transparent 42%);
   opacity:.72;
+}
+
+.table-head:has(#tablehead-container:empty){
+  display:none;
 }
 
 .sidebar.collapsed ~ .main-content .table-head{

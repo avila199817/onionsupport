@@ -1,19 +1,21 @@
-:root {
+:root{
   /* =========================================================
      ONION SUPPORT — DESIGN TOKENS / ULTRA PRO SAAS PANEL
-     SISTEMA MAESTRO DE VARIABLES
+     SISTEMA MAESTRO DE VARIABLES / EXTREME LEVEL
      - dark premium ui
      - glass surfaces
      - enterprise saas feel
      - auth ready
      - dashboard ready
      - tables / cards / forms / modals / sidebar
+     - sin topbar view slot legado
   ========================================================= */
 
   /* =========================
      APP IDENTITY
   ========================= */
   --app-name: "Onion Support";
+
   --app-font-sans:
     Inter,
     ui-sans-serif,
@@ -22,11 +24,13 @@
     BlinkMacSystemFont,
     "Segoe UI",
     sans-serif;
+
   --app-font-mono:
     "SFMono-Regular",
     Consolas,
     "Liberation Mono",
     Menlo,
+    Monaco,
     monospace;
 
   /* =========================
@@ -34,6 +38,7 @@
   ========================= */
   --content-max: 1380px;
   --content-narrow: 1180px;
+
   --content-padding: 32px;
   --content-padding-lg: 40px;
   --content-padding-xl: 48px;
@@ -48,7 +53,6 @@
   );
 
   --topbar-height: 60px;
-  --topbar-view-height: 56px;
   --page-offset: 28px;
   --tablehead-height: 48px;
 
@@ -62,7 +66,7 @@
   --btn-radius: 16px;
 
   --app-offset: calc(
-    var(--topbar-height) + var(--topbar-view-height) + var(--tablehead-height)
+    var(--topbar-height) + var(--tablehead-height)
   );
 
   /* =========================
@@ -90,25 +94,27 @@
   --accent-4: #22c55e;
   --accent-5: #ec4899;
 
-  --accent-soft: rgba(124, 58, 237, 0.18);
-  --accent-soft-2: rgba(139, 92, 246, 0.16);
-  --accent-ghost: rgba(124, 58, 237, 0.10);
-  --accent-subtle: rgba(124, 58, 237, 0.07);
-  --accent-ring: rgba(124, 58, 237, 0.34);
-  --accent-border: rgba(124, 58, 237, 0.42);
-  --accent-glow: rgba(124, 58, 237, 0.26);
+  --accent-soft: rgba(124,58,237,.18);
+  --accent-soft-2: rgba(139,92,246,.16);
+  --accent-ghost: rgba(124,58,237,.10);
+  --accent-subtle: rgba(124,58,237,.07);
+  --accent-ring: rgba(124,58,237,.34);
+  --accent-border: rgba(124,58,237,.42);
+  --accent-border-strong: rgba(124,58,237,.56);
+  --accent-glow: rgba(124,58,237,.26);
+  --accent-glow-strong: rgba(124,58,237,.38);
 
   --brand-2: #22c55e;
-  --brand-2-soft: rgba(34, 197, 94, 0.16);
+  --brand-2-soft: rgba(34,197,94,.16);
 
   --brand-3: #06b6d4;
-  --brand-3-soft: rgba(6, 182, 212, 0.16);
+  --brand-3-soft: rgba(6,182,212,.16);
 
   --brand-4: #f59e0b;
-  --brand-4-soft: rgba(245, 158, 11, 0.16);
+  --brand-4-soft: rgba(245,158,11,.16);
 
   --brand-5: #ec4899;
-  --brand-5-soft: rgba(236, 72, 153, 0.16);
+  --brand-5-soft: rgba(236,72,153,.16);
 
   /* =========================
      MAIN BACKGROUND / ATMOSPHERE
@@ -126,24 +132,32 @@
 
   --gradient-main:
     linear-gradient(180deg, #0b0e14 0%, #090b10 100%);
+
   --gradient-overlay:
     radial-gradient(circle at 20% 20%, rgba(255,255,255,.03), transparent 30%),
     radial-gradient(circle at 80% 0%, rgba(255,255,255,.02), transparent 24%);
+
   --gradient-accent:
     linear-gradient(135deg, #8b5cf6 0%, #7c3aed 48%, #06b6d4 100%);
+
   --gradient-accent-soft:
     linear-gradient(135deg, rgba(139,92,246,.18) 0%, rgba(6,182,212,.16) 100%);
+
   --gradient-success:
     linear-gradient(180deg, #34d399 0%, #22c55e 100%);
+
   --gradient-warning:
     linear-gradient(180deg, #fbbf24 0%, #f59e0b 100%);
+
   --gradient-error:
     linear-gradient(180deg, #fb7185 0%, #ef4444 100%);
 
   --app-noise:
     radial-gradient(circle at 50% 0%, rgba(255,255,255,.025), transparent 60%);
+
   --panel-noise:
     linear-gradient(180deg, rgba(255,255,255,.022), transparent 38%);
+
   --glass-shine:
     linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,0) 34%);
 
@@ -157,35 +171,36 @@
   --surface-4: #253042;
   --surface-5: #2c3950;
 
-  --surface-elevated: rgba(17, 22, 31, 0.88);
-  --surface-elevated-strong: rgba(20, 25, 35, 0.94);
-  --surface-glass: rgba(255,255,255,0.040);
-  --surface-glass-strong: rgba(255,255,255,0.070);
-  --surface-glass-accent: rgba(124,58,237,0.11);
+  --surface-elevated: rgba(17,22,31,.88);
+  --surface-elevated-strong: rgba(20,25,35,.94);
 
-  --surface-hover: rgba(255,255,255,0.045);
-  --surface-hover-strong: rgba(255,255,255,0.065);
-  --surface-active: rgba(255,255,255,0.075);
-  --surface-selected: rgba(124,58,237,0.14);
-  --surface-disabled: rgba(255,255,255,0.020);
+  --surface-glass: rgba(255,255,255,.040);
+  --surface-glass-strong: rgba(255,255,255,.070);
+  --surface-glass-accent: rgba(124,58,237,.11);
 
-  --dropdown-bg: rgba(18, 23, 32, 0.98);
+  --surface-hover: rgba(255,255,255,.045);
+  --surface-hover-strong: rgba(255,255,255,.065);
+  --surface-active: rgba(255,255,255,.075);
+  --surface-selected: rgba(124,58,237,.14);
+  --surface-disabled: rgba(255,255,255,.020);
+
+  --dropdown-bg: rgba(18,23,32,.98);
   --tooltip-bg: #0e131b;
-  --popover-bg: rgba(18, 23, 32, 0.98);
-  --modal-bg: rgba(14, 18, 28, 0.96);
-  --backdrop-bg: rgba(4, 7, 12, 0.68);
+  --popover-bg: rgba(18,23,32,.98);
+  --modal-bg: rgba(14,18,28,.96);
+  --backdrop-bg: rgba(4,7,12,.68);
 
   /* =========================
      BORDER SYSTEM
   ========================= */
-  --border-soft: rgba(255,255,255,0.05);
-  --border-default: rgba(255,255,255,0.09);
-  --border-strong: rgba(255,255,255,0.15);
-  --border-stronger: rgba(255,255,255,0.22);
-  --border-glass: rgba(255,255,255,0.08);
+  --border-soft: rgba(255,255,255,.05);
+  --border-default: rgba(255,255,255,.09);
+  --border-strong: rgba(255,255,255,.15);
+  --border-stronger: rgba(255,255,255,.22);
+  --border-glass: rgba(255,255,255,.08);
 
-  --border-accent: rgba(124, 58, 237, 0.40);
-  --border-accent-strong: rgba(124, 58, 237, 0.56);
+  --border-accent: rgba(124,58,237,.40);
+  --border-accent-strong: rgba(124,58,237,.56);
   --border-success: rgba(34,197,94,.34);
   --border-warning: rgba(245,158,11,.34);
   --border-error: rgba(239,68,68,.34);
@@ -201,6 +216,7 @@
   --text-dim: rgba(248,250,252,.54);
   --text-faint: rgba(248,250,252,.36);
   --text-disabled: rgba(248,250,252,.24);
+
   --text-on-accent: #ffffff;
   --text-on-light: #0f172a;
 
@@ -234,27 +250,33 @@
      CARD / PANEL / BLOCK
   ========================= */
   --card-bg:
-    linear-gradient(180deg, rgba(255,255,255,0.034) 0%, rgba(255,255,255,0.012) 100%),
+    linear-gradient(180deg, rgba(255,255,255,.034) 0%, rgba(255,255,255,.012) 100%),
     var(--surface-elevated);
+
   --card-bg-hover:
-    linear-gradient(180deg, rgba(255,255,255,0.045) 0%, rgba(255,255,255,0.016) 100%),
-    rgba(22, 27, 36, 0.92);
+    linear-gradient(180deg, rgba(255,255,255,.045) 0%, rgba(255,255,255,.016) 100%),
+    rgba(22,27,36,.92);
+
   --card-border: var(--border-default);
   --card-border-hover: var(--border-strong);
   --card-highlight: inset 0 1px 0 rgba(255,255,255,.06);
+  --card-shadow: 0 18px 40px rgba(0,0,0,.26);
 
   --panel-bg:
-    linear-gradient(180deg, rgba(255,255,255,0.028) 0%, rgba(255,255,255,0.010) 100%),
+    linear-gradient(180deg, rgba(255,255,255,.028) 0%, rgba(255,255,255,.010) 100%),
     var(--surface-2);
+
   --panel-bg-hover:
-    linear-gradient(180deg, rgba(255,255,255,0.038) 0%, rgba(255,255,255,0.014) 100%),
+    linear-gradient(180deg, rgba(255,255,255,.038) 0%, rgba(255,255,255,.014) 100%),
     #1a2030;
+
   --panel-border: var(--border-soft);
   --panel-border-hover: var(--border-default);
+  --panel-shadow: 0 10px 24px rgba(0,0,0,.14);
 
-  --block-bg: rgba(255,255,255,0.028);
-  --block-bg-hover: rgba(255,255,255,0.045);
-  --block-border: rgba(255,255,255,0.06);
+  --block-bg: rgba(255,255,255,.028);
+  --block-bg-hover: rgba(255,255,255,.045);
+  --block-border: rgba(255,255,255,.06);
 
   /* =========================
      INPUT SYSTEM
@@ -263,13 +285,13 @@
   --input-height-sm: 42px;
   --input-height-lg: 58px;
 
-  --input-bg: rgba(255,255,255,0.030);
-  --input-bg-hover: rgba(255,255,255,0.044);
-  --input-bg-focus: rgba(255,255,255,0.050);
-  --input-disabled-bg: rgba(255,255,255,0.018);
+  --input-bg: rgba(255,255,255,.030);
+  --input-bg-hover: rgba(255,255,255,.044);
+  --input-bg-focus: rgba(255,255,255,.050);
+  --input-disabled-bg: rgba(255,255,255,.018);
 
-  --input-border: rgba(255,255,255,0.10);
-  --input-border-hover: rgba(255,255,255,0.16);
+  --input-border: rgba(255,255,255,.10);
+  --input-border-hover: rgba(255,255,255,.16);
   --input-border-focus: rgba(124,58,237,.62);
   --input-border-error: rgba(239,68,68,.54);
   --input-border-success: rgba(34,197,94,.50);
@@ -280,8 +302,10 @@
 
   --input-shadow:
     inset 0 1px 0 rgba(255,255,255,.02);
+
   --input-shadow-hover:
     inset 0 1px 0 rgba(255,255,255,.03);
+
   --input-shadow-focus:
     0 0 0 4px rgba(124,58,237,.16),
     0 12px 30px rgba(10,12,18,.28);
@@ -305,23 +329,25 @@
     0 14px 34px rgba(124,58,237,.28),
     inset 0 1px 0 rgba(255,255,255,.16);
 
-  --btn-secondary-bg: rgba(255,255,255,0.050);
-  --btn-secondary-bg-hover: rgba(255,255,255,0.070);
-  --btn-secondary-bg-active: rgba(255,255,255,0.090);
+  --btn-secondary-bg: rgba(255,255,255,.050);
+  --btn-secondary-bg-hover: rgba(255,255,255,.070);
+  --btn-secondary-bg-active: rgba(255,255,255,.090);
   --btn-secondary-text: var(--text);
   --btn-secondary-border: rgba(255,255,255,.10);
   --btn-secondary-shadow: 0 8px 20px rgba(0,0,0,.12);
 
-  --btn-ghost-bg: rgba(255,255,255,0.030);
-  --btn-ghost-bg-hover: rgba(255,255,255,0.060);
-  --btn-ghost-bg-active: rgba(255,255,255,0.075);
+  --btn-ghost-bg: rgba(255,255,255,.030);
+  --btn-ghost-bg-hover: rgba(255,255,255,.060);
+  --btn-ghost-bg-active: rgba(255,255,255,.075);
   --btn-ghost-text: var(--text-muted);
-  --btn-ghost-border: rgba(255,255,255,0.08);
+  --btn-ghost-border: rgba(255,255,255,.08);
 
   --btn-danger-bg:
     linear-gradient(180deg, #fb7185 0%, #ef4444 100%);
   --btn-danger-bg-hover:
     linear-gradient(180deg, #ff7f92 0%, #dc2626 100%);
+  --btn-danger-bg-active:
+    linear-gradient(180deg, #ef4444 0%, #b91c1c 100%);
   --btn-danger-text: #ffffff;
   --btn-danger-shadow:
     0 12px 28px rgba(239,68,68,.22),
@@ -330,16 +356,15 @@
   /* =========================
      SIDEBAR
   ========================= */
-  --sidebar-bg: rgba(12, 16, 22, 0.94);
-  --sidebar-bg-strong: rgba(11, 14, 20, 0.98);
-  --sidebar-border: rgba(255,255,255,0.06);
-  --sidebar-shadow:
-    0 24px 60px rgba(0,0,0,.34);
+  --sidebar-bg: rgba(12,16,22,.94);
+  --sidebar-bg-strong: rgba(11,14,20,.98);
+  --sidebar-border: rgba(255,255,255,.06);
+  --sidebar-shadow: 0 24px 60px rgba(0,0,0,.34);
 
-  --sidebar-hover: rgba(255,255,255,0.045);
-  --sidebar-active: rgba(124,58,237,0.16);
-  --sidebar-active-hover: rgba(124,58,237,0.20);
-  --sidebar-active-border: rgba(124,58,237,0.35);
+  --sidebar-hover: rgba(255,255,255,.045);
+  --sidebar-active: rgba(124,58,237,.16);
+  --sidebar-active-hover: rgba(124,58,237,.20);
+  --sidebar-active-border: rgba(124,58,237,.35);
 
   --sidebar-text: rgba(248,250,252,.78);
   --sidebar-text-active: #ffffff;
@@ -349,23 +374,22 @@
   /* =========================
      TOPBAR
   ========================= */
-  --topbar-bg: rgba(10, 13, 19, 0.78);
-  --topbar-border: rgba(255,255,255,0.06);
-  --topbar-shadow:
-    0 12px 30px rgba(0,0,0,.18);
+  --topbar-bg: rgba(10,13,19,.78);
+  --topbar-border: rgba(255,255,255,.06);
+  --topbar-shadow: 0 12px 30px rgba(0,0,0,.18);
   --topbar-blur: blur(18px);
 
   /* =========================
      TABLES / DATA UI
   ========================= */
   --table-bg: transparent;
-  --table-head-bg: rgba(255,255,255,0.028);
+  --table-head-bg: rgba(255,255,255,.028);
   --table-row-bg: transparent;
-  --table-row-hover: rgba(255,255,255,0.032);
-  --table-row-selected: rgba(124,58,237,0.10);
+  --table-row-hover: rgba(255,255,255,.032);
+  --table-row-selected: rgba(124,58,237,.10);
 
-  --table-border: rgba(255,255,255,0.06);
-  --table-head-border: rgba(255,255,255,0.09);
+  --table-border: rgba(255,255,255,.06);
+  --table-head-border: rgba(255,255,255,.09);
 
   /* =========================
      KPI COLORS
@@ -394,12 +418,12 @@
     linear-gradient(180deg, #8b5cf6 0%, #6d28d9 100%);
   --avatar-text: #ffffff;
 
-  --badge-bg: rgba(255,255,255,0.06);
-  --badge-border: rgba(255,255,255,0.08);
+  --badge-bg: rgba(255,255,255,.06);
+  --badge-border: rgba(255,255,255,.08);
   --badge-text: var(--text-muted);
 
-  --chip-bg: rgba(255,255,255,0.045);
-  --chip-border: rgba(255,255,255,0.08);
+  --chip-bg: rgba(255,255,255,.045);
+  --chip-border: rgba(255,255,255,.08);
   --chip-text: var(--text-soft);
 
   /* =========================
@@ -484,12 +508,15 @@
 
   --shadow-soft: 0 10px 24px rgba(0,0,0,.14);
   --shadow-strong: 0 30px 80px rgba(0,0,0,.46);
+
   --shadow-glow:
     0 0 0 1px rgba(255,255,255,.04),
     0 20px 60px rgba(124,58,237,.20);
+
   --shadow-glow-cyan:
     0 0 0 1px rgba(255,255,255,.03),
     0 20px 60px rgba(6,182,212,.16);
+
   --shadow-inner:
     inset 0 1px 0 rgba(255,255,255,.05);
 
@@ -519,6 +546,7 @@
   ========================= */
   --focus-ring: 0 0 0 4px rgba(124,58,237,.18);
   --focus-ring-strong: 0 0 0 4px rgba(124,58,237,.26);
+
   --selection-bg: rgba(124,58,237,.32);
   --selection-text: #ffffff;
 
@@ -527,18 +555,21 @@
   ========================= */
   --scrollbar-size: 10px;
   --scrollbar-track: transparent;
-  --scrollbar-thumb: rgba(255,255,255,0.12);
-  --scrollbar-thumb-hover: rgba(255,255,255,0.18);
+  --scrollbar-thumb: rgba(255,255,255,.12);
+  --scrollbar-thumb-hover: rgba(255,255,255,.18);
 
   /* =========================
      AUTH / LOGIN ESPECÍFICAS
   ========================= */
   --auth-max-width: 1180px;
   --auth-card-width: 460px;
+
   --auth-card-bg:
     linear-gradient(180deg, rgba(255,255,255,.045) 0%, rgba(255,255,255,.016) 100%),
-    rgba(15, 20, 30, 0.88);
+    rgba(15,20,30,.88);
+
   --auth-card-border: rgba(255,255,255,.09);
+
   --auth-card-shadow:
     0 30px 90px rgba(2,6,23,.52),
     0 0 0 1px rgba(255,255,255,.03),

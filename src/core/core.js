@@ -467,13 +467,19 @@ export const AppCore = (() => {
 
   function createAbortTimeout(ms = config.requestTimeout) {
     const controller = new AbortController();
+    const normalizedMs = Number(ms);
+
+    if (!Number.isFinite(normalizedMs) || normalizedMs <= 0) {
+      return { controller, timeoutId: null };
+    }
+
     const timeoutId = setTimeout(() => {
       try {
         controller.abort("timeout");
       } catch {
         controller.abort();
       }
-    }, ms);
+    }, normalizedMs);
 
     return { controller, timeoutId };
   }
@@ -1136,12 +1142,40 @@ export const AppCore = (() => {
     if (!patch || typeof patch !== "object") return cloneState();
 
     const previousState = cloneState();
+    const normalizedPatch = { ...patch };
 
-    Object.assign(state, patch);
+    if (Object.prototype.hasOwnProperty.call(normalizedPatch, "user")) {
+      normalizedPatch.user = normalizeUser(normalizedPatch.user);
+      normalizedPatch.role = normalizedPatch.user?.role || null;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(normalizedPatch, "token")) {
+      normalizedPatch.token = hasValidToken(normalizedPatch.token)
+        ? String(normalizedPatch.token).trim()
+        : null;
+    }
+
+    const shouldRecomputeAuth =
+      Object.prototype.hasOwnProperty.call(normalizedPatch, "user") ||
+      Object.prototype.hasOwnProperty.call(normalizedPatch, "token") ||
+      Object.prototype.hasOwnProperty.call(normalizedPatch, "authenticated");
+
+    if (shouldRecomputeAuth) {
+      normalizedPatch.authenticated = computeAuthenticated(
+        Object.prototype.hasOwnProperty.call(normalizedPatch, "user")
+          ? normalizedPatch.user
+          : state.user,
+        Object.prototype.hasOwnProperty.call(normalizedPatch, "token")
+          ? normalizedPatch.token
+          : state.token
+      );
+    }
+
+    Object.assign(state, normalizedPatch);
 
     events.emit("app:state:change", {
       state: cloneState(),
-      patch: { ...patch },
+      patch: normalizedPatch,
       previousState,
     });
 
@@ -1429,10 +1463,24 @@ export const AppCore = (() => {
 
     if (dom.sidebarAvatar) {
       if (!avatarUrl) {
+        const avatarImage = dom.sidebarAvatar.querySelector("img[data-avatar-image]");
+        if (avatarImage) avatarImage.remove();
         dom.sidebarAvatar.textContent = avatarText;
         dom.sidebarAvatar.classList.remove("has-image");
-      } else if (!dom.sidebarAvatar.querySelector("img")) {
-        dom.sidebarAvatar.textContent = avatarText;
+      } else {
+        let avatarImage = dom.sidebarAvatar.querySelector("img[data-avatar-image]");
+
+        if (!avatarImage) {
+          avatarImage = document.createElement("img");
+          avatarImage.dataset.avatarImage = "true";
+          avatarImage.loading = "lazy";
+          dom.sidebarAvatar.innerHTML = "";
+          dom.sidebarAvatar.appendChild(avatarImage);
+        }
+
+        avatarImage.src = avatarUrl;
+        avatarImage.alt = `Avatar ${displayName}`;
+        dom.sidebarAvatar.classList.add("has-image");
       }
 
       dom.sidebarAvatar.setAttribute("aria-label", `Avatar ${displayName}`);
@@ -1683,6 +1731,8 @@ export const AppCore = (() => {
 
   async function executeFetchWithRetry(url, fetchConfig, requestConfig) {
     const retries = Number(requestConfig?.retries ?? config.requestRetries ?? 0);
+    const baseDelay = Number(requestConfig?.retryDelay ?? 250);
+    const maxDelay = Number(requestConfig?.retryMaxDelay ?? 3000);
     let attempt = 0;
     let lastError = null;
 
@@ -1692,7 +1742,12 @@ export const AppCore = (() => {
       } catch (error) {
         lastError = error;
         if (attempt >= retries) throw error;
-        await utils.sleep(250 * (attempt + 1));
+        const backoff = Math.min(
+          maxDelay,
+          Math.max(baseDelay, baseDelay * 2 ** attempt)
+        );
+        const jitter = Math.floor(Math.random() * Math.max(1, baseDelay));
+        await utils.sleep(backoff + jitter);
       }
       attempt += 1;
     }

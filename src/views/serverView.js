@@ -25,7 +25,7 @@ export const ServerView = (() => {
 
   const ENDPOINTS = {
     dashboard: "/api/dashboard",
-    health: "/api/health",
+    health: "/health",
   };
 
   const REFRESH_INTERVAL_MS = 3000;

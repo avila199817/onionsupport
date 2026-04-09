@@ -72,6 +72,12 @@ const App = (() => {
     AppCore.cleanup.run(SCOPE);
   }
 
+  function registerModule(name, moduleRef) {
+    if (!name || !moduleRef) return;
+    if (AppCore.modules.has(name)) return;
+    AppCore.modules.register(name, moduleRef);
+  }
+
   function syncUserUI() {
     AppCore.syncUserUI?.();
 
@@ -481,38 +487,28 @@ const App = (() => {
       storeInitialized = true;
     }
 
-    if (!AppCore.modules.has("store")) {
-      AppCore.modules.register("store", Store);
-    }
-
-    if (!AppCore.modules.has("auth")) {
-      AppCore.modules.register("auth", Auth);
-    }
-
-    if (!AppCore.modules.has("router")) {
-      AppCore.modules.register("router", Router);
-    }
+    registerModule("store", Store);
+    registerModule("auth", Auth);
+    registerModule("router", Router);
   }
 
   function initUISystems() {
     if (uiInitialized) return;
 
+    registerModule("toast", Toast);
+    registerModule("sidebarUI", SidebarUI);
+    registerModule("topbarUI", TopbarUI);
+
     if (Toast && typeof Toast.init === "function") {
       Toast.init();
-    } else if (Toast && !AppCore.modules.has("toast")) {
-      AppCore.modules.register("toast", Toast);
     }
 
     if (SidebarUI && typeof SidebarUI.init === "function") {
       SidebarUI.init();
-    } else if (SidebarUI && !AppCore.modules.has("sidebarUI")) {
-      AppCore.modules.register("sidebarUI", SidebarUI);
     }
 
     if (TopbarUI && typeof TopbarUI.init === "function") {
       TopbarUI.init();
-    } else if (TopbarUI && !AppCore.modules.has("topbarUI")) {
-      AppCore.modules.register("topbarUI", TopbarUI);
     }
 
     uiInitialized = true;
@@ -588,7 +584,7 @@ const App = (() => {
       await warmup();
 
       if (result?.ok && AppCore.state.authenticated) {
-        if (loadingToastId) {
+        if (loadingToastId && typeof Toast?.update === "function") {
           Toast.update(loadingToastId, {
             type: "success",
             title: "Sesión restaurada",
@@ -601,7 +597,17 @@ const App = (() => {
         navigateAfterSessionRestore();
       } else {
         if (loadingToastId) {
-          Toast.dismiss(loadingToastId);
+          if (typeof Toast?.dismiss === "function") {
+            Toast.dismiss(loadingToastId);
+          } else if (typeof Toast?.update === "function") {
+            Toast.update(loadingToastId, {
+              type: "info",
+              title: "Inicialización completada",
+              message: "Se continuará sin restaurar la sesión.",
+              duration: 1800,
+              closable: true,
+            });
+          }
         }
 
         applyPostRenderLoaderPolicy();
@@ -611,7 +617,7 @@ const App = (() => {
     } catch (error) {
       AppCore.utils.warn("restoreSession en background falló.", error);
 
-      if (loadingToastId) {
+      if (loadingToastId && typeof Toast?.update === "function") {
         Toast.update(loadingToastId, {
           type: "warning",
           title: "Sesión no restaurada",
@@ -639,6 +645,11 @@ const App = (() => {
     if (Store?.actions?.markBooted) {
       Store.actions.markBooted(true);
     }
+
+    booted = true;
+    booting = false;
+
+    markAppBootState({ booted: true, booting: false });
 
     AppCore.setLoading(false);
     forceHideLoader();
@@ -711,9 +722,6 @@ const App = (() => {
       ========================================= */
       finalizeBoot();
 
-      booted = true;
-      markAppBootState({ booted: true, booting: false });
-
       /* =========================================
          Restaurar sesión sin bloquear el login
       ========================================= */
@@ -722,7 +730,9 @@ const App = (() => {
       return api;
     } catch (error) {
       booted = false;
+      booting = false;
       markAppBootState({ booted: false, booting: false });
+
       AppCore.setError(error);
       AppCore.utils.error("💥 Fallo en boot()", error);
 
@@ -755,6 +765,9 @@ const App = (() => {
 
     booted = false;
     booting = false;
+    storeInitialized = false;
+    routerBound = false;
+    uiInitialized = false;
     sessionRestorePromise = null;
 
     clearBootFailsafeTimer();

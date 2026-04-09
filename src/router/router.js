@@ -14,6 +14,7 @@
    - soporte slug público /@username
    - redirección automática a login sin sesión
    - redirección fuera de /login si ya hay sesión
+   - nueva vista admin de servidor
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
@@ -31,6 +32,7 @@ export const Router = (() => {
   const ROUTE_NAMES = {
     HOME: AppCore.config?.routes?.home || "/",
     LOGIN: AppCore.config?.routes?.login || "/login",
+    SERVER: "/servidor",
   };
 
   /* =========================================================
@@ -64,6 +66,15 @@ export const Router = (() => {
       roles: [],
       hideShell: false,
       render: renderFacturasView,
+    },
+    {
+      path: "/servidor",
+      name: "servidor",
+      title: "Servidor",
+      public: false,
+      roles: ["admin"],
+      hideShell: false,
+      render: renderServidorView,
     },
     {
       path: "/usuarios",
@@ -136,6 +147,11 @@ export const Router = (() => {
     return AppCore.utils.escapeHtml(String(value ?? ""));
   }
 
+  function safeNumber(value, fallback = 0) {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : fallback;
+  }
+
   function getViewContainer() {
     return (
       AppCore.dom.viewContainer ||
@@ -148,9 +164,6 @@ export const Router = (() => {
     return {
       sidebar: AppCore.dom.sidebar || document.querySelector(".sidebar"),
       topbar: AppCore.dom.topbar || document.querySelector(".topbar"),
-      topbarViewContainer:
-        AppCore.dom.topbarViewContainer ||
-        document.getElementById("topbarview-container"),
       tableheadContainer:
         AppCore.dom.tableheadContainer ||
         document.getElementById("tablehead-container"),
@@ -203,6 +216,7 @@ export const Router = (() => {
      - /@cristian
      - /@cristian/incidencias
      - /@cristian/facturas
+     - /@cristian/servidor
   ========================================================= */
   function sanitizeUsername(value = "") {
     return AppCore.utils.sanitizeUsername
@@ -454,14 +468,12 @@ export const Router = (() => {
     const {
       sidebar,
       topbar,
-      topbarViewContainer,
       tableheadContainer,
       body,
     } = getShellElements();
 
     if (sidebar) sidebar.hidden = hideShell;
     if (topbar) topbar.hidden = hideShell;
-    if (topbarViewContainer) topbarViewContainer.hidden = hideShell;
     if (tableheadContainer) tableheadContainer.hidden = hideShell;
 
     if (body) {
@@ -565,6 +577,211 @@ export const Router = (() => {
 
   function renderFacturasView() {
     FacturasView.render();
+  }
+
+  function renderServidorView() {
+    const view = getViewContainer();
+    if (!view) {
+      AppCore.utils.warn(
+        "Router: no se encontró #view-container para renderServidorView."
+      );
+      return;
+    }
+
+    const cpu = 72;
+    const ram = 68;
+    const disk = 41;
+    const api = "Operativa";
+    const db = "Operativa";
+    const uptime = "12d 07h 18m";
+
+    const getTone = (value) => {
+      const num = safeNumber(value, 0);
+
+      if (num >= 85) return "var(--error)";
+      if (num >= 70) return "var(--warning)";
+      return "var(--success)";
+    };
+
+    const metricCard = ({ label, value, hint, suffix = "%" }) => {
+      const numeric = safeNumber(value, 0);
+      const tone = getTone(numeric);
+
+      return `
+        <article
+          class="ui-card"
+          style="padding:20px; display:grid; gap:12px;"
+        >
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+            <span style="font-size:13px; color:var(--text-dim); font-weight:600;">
+              ${escapeHtml(label)}
+            </span>
+            <span
+              style="
+                display:inline-flex;
+                min-width:54px;
+                justify-content:center;
+                align-items:center;
+                padding:6px 10px;
+                border-radius:999px;
+                background:color-mix(in srgb, ${tone}, transparent 86%);
+                color:${tone};
+                font-size:12px;
+                font-weight:700;
+              "
+            >
+              ${escapeHtml(String(numeric))}${escapeHtml(suffix)}
+            </span>
+          </div>
+
+          <div
+            style="
+              position:relative;
+              width:100%;
+              height:10px;
+              border-radius:999px;
+              background:var(--surface-3);
+              overflow:hidden;
+            "
+          >
+            <span
+              style="
+                display:block;
+                width:${Math.max(0, Math.min(100, numeric))}%;
+                height:100%;
+                border-radius:999px;
+                background:${tone};
+                box-shadow:0 0 18px color-mix(in srgb, ${tone}, transparent 55%);
+              "
+            ></span>
+          </div>
+
+          <p style="margin:0; font-size:12px; color:var(--text-dim);">
+            ${escapeHtml(hint)}
+          </p>
+        </article>
+      `;
+    };
+
+    view.innerHTML = `
+      <section class="content-wrapper">
+        <div style="display:grid; gap:20px;">
+          <section class="panel-block" style="padding:24px;">
+            <div style="display:grid; gap:14px;">
+              <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:18px; flex-wrap:wrap;">
+                <div style="display:grid; gap:8px;">
+                  <h2 style="margin:0;">Estado del servidor</h2>
+                  <p style="margin:0; color:var(--text-dim); max-width:860px;">
+                    Panel de observación rápida del estado general del sistema.
+                    Vista pensada para administración, monitorización básica y diagnóstico visual.
+                  </p>
+                </div>
+
+                <div
+                  class="badge info lg"
+                  style="align-self:flex-start;"
+                >
+                  Admin only
+                </div>
+              </div>
+
+              <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                <span class="badge success dot">API ${escapeHtml(api)}</span>
+                <span class="badge success dot">Base de datos ${escapeHtml(db)}</span>
+                <span class="badge neutral">Uptime ${escapeHtml(uptime)}</span>
+              </div>
+            </div>
+          </section>
+
+          <section
+            style="
+              display:grid;
+              grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));
+              gap:16px;
+            "
+          >
+            ${metricCard({
+              label: "CPU",
+              value: cpu,
+              hint: "Carga actual del servidor principal.",
+            })}
+
+            ${metricCard({
+              label: "RAM",
+              value: ram,
+              hint: "Consumo de memoria del entorno.",
+            })}
+
+            ${metricCard({
+              label: "Disco",
+              value: disk,
+              hint: "Uso global del almacenamiento.",
+            })}
+          </section>
+
+          <section
+            style="
+              display:grid;
+              grid-template-columns:1.2fr .8fr;
+              gap:16px;
+            "
+            class="server-grid"
+          >
+            <div class="panel-block" style="padding:20px; display:grid; gap:14px;">
+              <div style="display:grid; gap:6px;">
+                <h3 style="margin:0; font-size:18px;">Resumen operativo</h3>
+                <p style="margin:0; color:var(--text-dim); font-size:13px;">
+                  Estado rápido de servicios internos y salud general del entorno.
+                </p>
+              </div>
+
+              <div style="display:grid; gap:10px;">
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                  <span style="color:var(--text-dim);">Backend API</span>
+                  <span class="badge success">Operativa</span>
+                </div>
+
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                  <span style="color:var(--text-dim);">Base de datos</span>
+                  <span class="badge success">Operativa</span>
+                </div>
+
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                  <span style="color:var(--text-dim);">Jobs / colas</span>
+                  <span class="badge warning">Revisar</span>
+                </div>
+
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                  <span style="color:var(--text-dim);">Storage / blobs</span>
+                  <span class="badge success">Operativo</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel-block" style="padding:20px; display:grid; gap:14px;">
+              <div style="display:grid; gap:6px;">
+                <h3 style="margin:0; font-size:18px;">Contexto</h3>
+                <p style="margin:0; color:var(--text-dim); font-size:13px;">
+                  Datos visibles del entorno actual de la SPA.
+                </p>
+              </div>
+
+              <div style="display:grid; gap:10px; font-size:13px;">
+                <div><strong>Ruta canónica:</strong> ${escapeHtml(AppCore.state.route || ROUTE_NAMES.SERVER)}</div>
+                <div><strong>Ruta pública:</strong> ${escapeHtml(`${window.location.pathname || ""}${window.location.search || ""}` || ROUTE_NAMES.SERVER)}</div>
+                <div><strong>Usuario:</strong> ${escapeHtml(
+                  AppCore.state.user?.username ||
+                    AppCore.state.user?.name ||
+                    AppCore.state.user?.email ||
+                    "No autenticado"
+                )}</div>
+                <div><strong>Rol:</strong> ${escapeHtml(AppCore.state.role || "Sin rol")}</div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
+    `;
   }
 
   function renderGenericView(route) {

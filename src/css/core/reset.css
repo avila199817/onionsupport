@@ -1,6 +1,14 @@
 /* =========================================================
    ONION SUPPORT — RESET
-   PRO SAAS PANEL / CLEAN FOUNDATION
+   PRO SAAS PANEL / CLEAN FOUNDATION / EXTREME LEVEL
+   Archivo: src/css/core/reset.css
+
+   Objetivo:
+   - reset base premium y consistente
+   - foundation robusta para SPA enterprise
+   - reducir diferencias entre navegadores
+   - mejorar formularios, media, tablas y tipografía
+   - respetar accesibilidad y rendering moderno
 ========================================================= */
 
 
@@ -9,24 +17,45 @@
 ========================= */
 *,
 *::before,
-*::after {
-  box-sizing: border-box;
+*::after{
+  box-sizing:border-box;
 }
 
 
 /* =========================
    ROOT DEFAULTS
 ========================= */
-html {
-  line-height: 1.15;
-  -webkit-text-size-adjust: 100%;
-  text-size-adjust: 100%;
-  tab-size: 4;
+html{
+  line-height:1.15;
+  -webkit-text-size-adjust:100%;
+  text-size-adjust:100%;
+  tab-size:4;
+  scroll-behavior:smooth;
 }
 
-body {
-  margin: 0;
-  min-height: 100%;
+html:focus-within{
+  scroll-behavior:smooth;
+}
+
+body{
+  margin:0;
+  min-height:100%;
+}
+
+
+/* =========================
+   DOCUMENT ROOT
+========================= */
+html,
+body{
+  width:100%;
+  min-width:320px;
+}
+
+body{
+  text-rendering:optimizeLegibility;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
 }
 
 
@@ -43,24 +72,52 @@ p,
 figure,
 blockquote,
 dl,
-dd {
-  margin: 0;
+dd{
+  margin:0;
 }
 
 ul,
-ol {
-  margin: 0;
-  padding: 0;
-  list-style: none;
+ol{
+  margin:0;
+  padding:0;
+  list-style:none;
+}
+
+b,
+strong{
+  font-weight:bolder;
+}
+
+small{
+  font-size:80%;
+}
+
+
+/* =========================
+   TEXT HELPERS / INLINE
+========================= */
+abbr[title]{
+  text-decoration:underline dotted;
+  text-decoration-skip-ink:auto;
+}
+
+mark{
+  color:inherit;
+  background-color:transparent;
 }
 
 
 /* =========================
    LINKS
 ========================= */
-a {
-  color: inherit;
-  text-decoration: none;
+a{
+  color:inherit;
+  text-decoration:none;
+}
+
+a:active,
+a:hover{
+  outline-width:0;
 }
 
 
@@ -71,30 +128,49 @@ img,
 picture,
 video,
 canvas,
-svg {
-  display: block;
-  max-width: 100%;
+svg{
+  display:block;
+  max-width:100%;
 }
 
 img,
 picture,
 video,
-canvas {
-  height: auto;
+canvas{
+  height:auto;
+}
+
+img{
+  border-style:none;
+}
+
+svg{
+  overflow:hidden;
+}
+
+audio,
+video{
+  display:block;
+}
+
+audio:not([controls]){
+  display:none;
+  height:0;
 }
 
 
 /* =========================
    TABLES
 ========================= */
-table {
-  border-collapse: collapse;
-  border-spacing: 0;
-  width: 100%;
+table{
+  width:100%;
+  border-collapse:collapse;
+  border-spacing:0;
+  text-indent:0;
 }
 
-caption {
-  text-align: left;
+caption{
+  text-align:left;
 }
 
 
@@ -104,75 +180,108 @@ caption {
 input,
 button,
 textarea,
-select {
-  font: inherit;
-  color: inherit;
+select{
+  font:inherit;
+  color:inherit;
+  letter-spacing:inherit;
 }
 
 button,
 input,
 select,
-textarea {
-  margin: 0;
+textarea{
+  margin:0;
 }
 
 button,
-select {
-  text-transform: none;
+select{
+  text-transform:none;
 }
 
 button,
 [type="button"],
 [type="reset"],
-[type="submit"] {
-  -webkit-appearance: button;
-  appearance: button;
+[type="submit"]{
+  -webkit-appearance:button;
+  appearance:button;
 }
 
-button {
-  background: none;
-  border: 0;
-  padding: 0;
+button{
+  padding:0;
+  border:0;
+  background:none;
 }
 
-textarea {
-  resize: vertical;
-  resize: block;
+textarea{
+  resize:vertical;
+  resize:block;
 }
 
 input,
 textarea,
-select {
-  background: transparent;
-  border-radius: 0;
+select{
+  background:transparent;
+  border-radius:0;
+}
+
+fieldset{
+  min-width:0;
+  margin:0;
+  padding:0;
+  border:0;
+}
+
+legend{
+  padding:0;
+  color:inherit;
+  display:table;
+  max-width:100%;
+  white-space:normal;
+}
+
+label{
+  display:inline-block;
+}
+
+progress{
+  vertical-align:baseline;
+}
+
+
+/* =========================
+   PLACEHOLDER / FOCUS
+========================= */
+::placeholder{
+  opacity:1;
+  color:inherit;
 }
 
 input:focus,
 textarea:focus,
 select:focus,
-button:focus {
-  outline: none;
+button:focus{
+  outline:none;
 }
 
-::placeholder {
-  opacity: 1;
+:focus:not(:focus-visible){
+  outline:none;
 }
 
 
 /* =========================
    SEARCH
 ========================= */
-[type="search"] {
-  -webkit-appearance: textfield;
-  appearance: textfield;
-  outline-offset: -2px;
+[type="search"]{
+  -webkit-appearance:textfield;
+  appearance:textfield;
+  outline-offset:-2px;
 }
 
 [type="search"]::-webkit-search-decoration,
 [type="search"]::-webkit-search-cancel-button,
 [type="search"]::-webkit-search-results-button,
-[type="search"]::-webkit-search-results-decoration {
-  -webkit-appearance: none;
+[type="search"]::-webkit-search-results-decoration{
+  -webkit-appearance:none;
 }
 
 
@@ -180,65 +289,67 @@ button:focus {
    NUMBER
 ========================= */
 [type="number"]::-webkit-outer-spin-button,
-[type="number"]::-webkit-inner-spin-button {
-  height: auto;
+[type="number"]::-webkit-inner-spin-button{
+  height:auto;
 }
 
 
 /* =========================
    FILE INPUT
 ========================= */
-::-webkit-file-upload-button {
-  -webkit-appearance: button;
-  font: inherit;
+::-webkit-file-upload-button{
+  -webkit-appearance:button;
+  font:inherit;
 }
 
-::file-selector-button {
-  font: inherit;
+::file-selector-button{
+  font:inherit;
+}
+
+
+/* =========================
+   CHECKBOX / RADIO
+========================= */
+[type="checkbox"],
+[type="radio"]{
+  padding:0;
 }
 
 
 /* =========================
    DETAILS / SUMMARY
 ========================= */
-details {
-  display: block;
+details{
+  display:block;
 }
 
-summary {
-  display: list-item;
-  cursor: pointer;
+summary{
+  display:list-item;
+  cursor:pointer;
 }
 
 
 /* =========================
    HIDDEN / TEMPLATE
 ========================= */
-[hidden] {
-  display: none !important;
+[hidden]{
+  display:none !important;
 }
 
-template {
-  display: none;
+template{
+  display:none;
 }
 
 
 /* =========================
    HR
 ========================= */
-hr {
-  height: 0;
-  color: inherit;
-  border: 0;
-}
-
-
-/* =========================
-   ABBR
-========================= */
-abbr[title] {
-  text-decoration: underline dotted;
-  text-decoration-skip-ink: auto;
+hr{
+  height:0;
+  color:inherit;
+  border:0;
+  border-top:1px solid currentColor;
+  opacity:.12;
 }
 
 
@@ -248,7 +359,7 @@ abbr[title] {
 code,
 kbd,
 samp,
-pre {
+pre{
   font-family:
     ui-monospace,
     SFMono-Regular,
@@ -258,11 +369,11 @@ pre {
     "Liberation Mono",
     "Courier New",
     monospace;
-  font-size: 1em;
+  font-size:1em;
 }
 
-pre {
-  overflow: auto;
+pre{
+  overflow:auto;
 }
 
 
@@ -270,31 +381,64 @@ pre {
    SUB / SUP
 ========================= */
 sub,
-sup {
-  position: relative;
-  font-size: 75%;
-  line-height: 0;
-  vertical-align: baseline;
+sup{
+  position:relative;
+  font-size:75%;
+  line-height:0;
+  vertical-align:baseline;
 }
 
-sub {
-  bottom: -0.25em;
+sub{
+  bottom:-0.25em;
 }
 
-sup {
-  top: -0.5em;
+sup{
+  top:-0.5em;
+}
+
+
+/* =========================
+   EMBEDDED CONTENT
+========================= */
+iframe{
+  border:0;
+}
+
+object,
+embed{
+  display:block;
+  max-width:100%;
+}
+
+
+/* =========================
+   DIALOG
+========================= */
+dialog{
+  padding:0;
+  border:0;
+  background:transparent;
+  color:inherit;
+}
+
+dialog::backdrop{
+  background:rgba(0,0,0,.4);
 }
 
 
 /* =========================
    INTERACTIVE CONSISTENCY
 ========================= */
-[role="button"] {
-  cursor: pointer;
+[role="button"]{
+  cursor:pointer;
 }
 
-:disabled {
-  cursor: not-allowed;
+:disabled{
+  cursor:not-allowed;
+}
+
+[aria-busy="true"]{
+  cursor:progress;
 }
 
 
@@ -308,26 +452,47 @@ input,
 label,
 select,
 textarea,
-summary {
-  -webkit-tap-highlight-color: transparent;
+summary{
+  -webkit-tap-highlight-color:transparent;
+  touch-action:manipulation;
 }
 
 
 /* =========================
-   EMBEDDED CONTENT
+   SELECTION
 ========================= */
-iframe {
-  border: 0;
+::selection{
+  background:rgba(124,58,237,.24);
+  color:inherit;
 }
 
 
 /* =========================
-   DIALOG
+   WORD SAFETY
 ========================= */
-dialog {
-  padding: 0;
-  border: 0;
-  background: transparent;
+p,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+li,
+figcaption{
+  overflow-wrap:break-word;
+}
+
+p{
+  text-wrap:pretty;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6{
+  text-wrap:balance;
 }
 
 
@@ -335,7 +500,46 @@ dialog {
    ROOT APP NODES
 ========================= */
 #app,
+#app-shell,
 #app-content,
-#view-container {
-  min-width: 0;
+#view-container{
+  min-width:0;
+}
+
+
+/* =========================
+   FORM AUTOFILL NORMALIZE
+========================= */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+textarea:-webkit-autofill:hover,
+textarea:-webkit-autofill:focus,
+select:-webkit-autofill,
+select:-webkit-autofill:hover,
+select:-webkit-autofill:focus{
+  -webkit-text-fill-color:inherit;
+  transition:background-color 9999s ease-in-out 0s;
+  font:inherit;
+}
+
+
+/* =========================
+   REDUCED MOTION BASE
+========================= */
+@media (prefers-reduced-motion: reduce){
+  html,
+  html:focus-within{
+    scroll-behavior:auto;
+  }
+
+  *,
+  *::before,
+  *::after{
+    animation-duration:.01ms !important;
+    animation-iteration-count:1 !important;
+    transition-duration:.01ms !important;
+    scroll-behavior:auto !important;
+  }
 }

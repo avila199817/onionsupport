@@ -52,6 +52,14 @@ export const Auth = (() => {
     sessionUserId: "session_user_id",
   };
 
+  const AUTH_CONSTANTS = {
+    identifierMaxLength: 160,
+    passwordMaxLength: 1024,
+    tokenMaxLength: 4096,
+    refreshRetryCooldownMs: 30_000,
+    maxSequentialRefreshFailures: 3,
+  };
+
   /* =========================================================
      ESTADO INTERNO
   ========================================================= */
@@ -62,6 +70,10 @@ export const Auth = (() => {
     lastCheckAt: null,
     lastRefreshAt: null,
     refreshPromise: null,
+    mePromise: null,
+    restorePromise: null,
+    refreshFailCount: 0,
+    refreshBlockedUntil: 0,
   };
 
   /* =========================================================
@@ -80,6 +92,33 @@ export const Auth = (() => {
           .replace(/\s+/g, "")
           .replace(/[^a-zA-Z0-9._-]/g, "")
           .toLowerCase();
+  }
+
+  function normalizeTokenValue(token = null) {
+    if (token === null || token === undefined) return null;
+
+    const normalized = String(token).trim();
+    if (!normalized) return null;
+
+    return normalized.slice(0, AUTH_CONSTANTS.tokenMaxLength);
+  }
+
+  function normalizeSessionValue(value = null, maxLength = 128) {
+    if (value === null || value === undefined) return null;
+
+    const normalized = String(value).trim();
+    if (!normalized) return null;
+
+    return normalized.slice(0, maxLength);
+  }
+
+  function isSafeRelativePath(path = "") {
+    const raw = String(path || "").trim();
+    if (!raw) return false;
+    if (!raw.startsWith("/")) return false;
+    if (raw.startsWith("//")) return false;
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/i.test(raw)) return false;
+    return true;
   }
 
   function slugify(value = "") {
@@ -287,8 +326,14 @@ export const Auth = (() => {
   }
 
   function normalizeLoginPayload(credentials = {}) {
-    const identifier = resolveLoginIdentifier(credentials);
-    const password = String(credentials.password ?? credentials.pass ?? "");
+    const rawIdentifier = resolveLoginIdentifier(credentials);
+    const cleanIdentifier = String(rawIdentifier || "")
+      .trim()
+      .replace(/\s+/g, " ");
+    const identifier = cleanIdentifier.slice(0, AUTH_CONSTANTS.identifierMaxLength);
+
+    const rawPassword = String(credentials.password ?? credentials.pass ?? "");
+    const password = rawPassword.slice(0, AUTH_CONSTANTS.passwordMaxLength);
     const remember = Boolean(credentials.remember);
 
     return {
@@ -300,9 +345,13 @@ export const Auth = (() => {
 
   function buildLoginRequestBody(credentials = {}) {
     const { identifier, password, remember } = normalizeLoginPayload(credentials);
+    const cleanIdentifier = String(identifier || "").trim();
+    const looksLikeEmail = cleanIdentifier.includes("@");
 
     return {
       identifier,
+      email: looksLikeEmail ? cleanIdentifier.toLowerCase() : undefined,
+      username: looksLikeEmail ? undefined : sanitizeUsername(cleanIdentifier),
       password,
       remember,
     };
@@ -473,7 +522,11 @@ export const Auth = (() => {
       const redirectParam = new URLSearchParams(window.location.search).get("redirect");
 
       if (redirectParam) {
-        return AppCore.utils.normalizePath(redirectParam);
+        const candidate = AppCore.utils.normalizePath(redirectParam);
+
+        if (isSafeRelativePath(candidate) && !isAuthRoute(candidate)) {
+          return candidate;
+        }
       }
     }
 
@@ -510,29 +563,34 @@ export const Auth = (() => {
   }
 
   function persistRefreshToken(refreshToken = null) {
-    if (refreshToken && String(refreshToken).trim()) {
-      AppCore.storage.setRaw(STORAGE_KEYS.refreshToken, String(refreshToken).trim());
+    const normalized = normalizeTokenValue(refreshToken);
+
+    if (normalized) {
+      AppCore.storage.setRaw(STORAGE_KEYS.refreshToken, normalized);
     } else {
       AppCore.storage.remove(STORAGE_KEYS.refreshToken);
     }
   }
 
   function persistTempToken(tempToken = null) {
-    if (tempToken && String(tempToken).trim()) {
-      AppCore.storage.setRaw(STORAGE_KEYS.tempToken, String(tempToken).trim());
+    const normalized = normalizeTokenValue(tempToken);
+
+    if (normalized) {
+      AppCore.storage.setRaw(STORAGE_KEYS.tempToken, normalized);
     } else {
       AppCore.storage.remove(STORAGE_KEYS.tempToken);
     }
   }
 
   function persistSessionContext(sessionData = null, fallbackUser = null) {
-    const sessionId = String(sessionData?.sessionId || "").trim();
-    const sessionUserId = String(
+    const sessionId = normalizeSessionValue(sessionData?.sessionId, 128);
+    const sessionUserId = normalizeSessionValue(
       sessionData?.userId ||
         fallbackUser?.userId ||
         fallbackUser?.id ||
-        ""
-    ).trim();
+        "",
+      128
+    );
 
     if (sessionId) {
       AppCore.storage.setRaw(STORAGE_KEYS.sessionId, sessionId);
@@ -697,49 +755,58 @@ export const Auth = (() => {
       throw new Error("No hay token disponible para consultar /me.");
     }
 
+    if (session.mePromise) {
+      return session.mePromise;
+    }
+
     session.checking = true;
 
     AppCore.events.emit("auth:me:start", {});
 
-    try {
-      const response = await AppCore.apiClient.get(ENDPOINTS.me, {
-        auth: true,
-      });
+    session.mePromise = (async () => {
+      try {
+        const response = await AppCore.apiClient.get(ENDPOINTS.me, {
+          auth: true,
+        });
 
-      const user =
-        normalizeUser(response?.user) ||
-        normalizeUser(response?.data?.user) ||
-        normalizeUser(response?.me) ||
-        normalizeUser(response?.data?.me) ||
-        normalizeUser(response?.profile) ||
-        normalizeUser(response?.data?.profile) ||
-        normalizeUser(response);
+        const user =
+          normalizeUser(response?.user) ||
+          normalizeUser(response?.data?.user) ||
+          normalizeUser(response?.me) ||
+          normalizeUser(response?.data?.me) ||
+          normalizeUser(response?.profile) ||
+          normalizeUser(response?.data?.profile) ||
+          normalizeUser(response);
 
-      if (!user) {
-        throw new Error("No se pudo resolver el usuario actual.");
+        if (!user) {
+          throw new Error("No se pudo resolver el usuario actual.");
+        }
+
+        const snapshot = applySession({
+          user,
+        });
+
+        session.lastCheckAt = Date.now();
+
+        AppCore.events.emit("auth:me:success", {
+          user: snapshot.user,
+        });
+
+        return snapshot.user;
+      } catch (error) {
+        AppCore.events.emit("auth:me:error", {
+          error,
+          message: extractMessage(error),
+        });
+
+        throw error;
+      } finally {
+        session.checking = false;
+        session.mePromise = null;
       }
+    })();
 
-      const snapshot = applySession({
-        user,
-      });
-
-      session.lastCheckAt = Date.now();
-
-      AppCore.events.emit("auth:me:success", {
-        user: snapshot.user,
-      });
-
-      return snapshot.user;
-    } catch (error) {
-      AppCore.events.emit("auth:me:error", {
-        error,
-        message: extractMessage(error),
-      });
-
-      throw error;
-    } finally {
-      session.checking = false;
-    }
+    return session.mePromise;
   }
 
   /* =========================================================
@@ -752,6 +819,11 @@ export const Auth = (() => {
 
     if (session.refreshPromise) {
       return session.refreshPromise;
+    }
+
+    const now = Date.now();
+    if (session.refreshBlockedUntil > now) {
+      throw new Error("Refresh temporalmente bloqueado por seguridad.");
     }
 
     session.refreshing = true;
@@ -802,6 +874,8 @@ export const Auth = (() => {
         }
 
         session.lastRefreshAt = Date.now();
+        session.refreshFailCount = 0;
+        session.refreshBlockedUntil = 0;
 
         AppCore.events.emit("auth:refresh:success", {
           ...snapshot,
@@ -814,9 +888,16 @@ export const Auth = (() => {
           response,
         };
       } catch (error) {
+        session.refreshFailCount += 1;
+        if (session.refreshFailCount >= AUTH_CONSTANTS.maxSequentialRefreshFailures) {
+          session.refreshBlockedUntil = Date.now() + AUTH_CONSTANTS.refreshRetryCooldownMs;
+        }
+
         AppCore.events.emit("auth:refresh:error", {
           error,
           message: extractMessage(error),
+          refreshFailCount: session.refreshFailCount,
+          refreshBlockedUntil: session.refreshBlockedUntil || null,
         });
 
         throw error;
@@ -833,11 +914,8 @@ export const Auth = (() => {
      RESTAURAR SESIÓN
   ========================================================= */
   async function restoreSession() {
-    if (session.restoring) {
-      return {
-        ok: AppCore.state.authenticated,
-        user: AppCore.state.user,
-      };
+    if (session.restorePromise) {
+      return session.restorePromise;
     }
 
     session.restoring = true;
@@ -848,122 +926,127 @@ export const Auth = (() => {
       hasRefreshContext: hasRefreshContext(),
     });
 
-    try {
-      if (!hasValidToken()) {
-        if (!hasRefreshContext()) {
-          clearSessionLocal();
-
-          AppCore.events.emit("auth:restore:empty", {
-            reason: "missing-token-and-refresh-context",
-          });
-
-          return {
-            ok: false,
-            user: null,
-          };
-        }
-
-        try {
-          const refreshed = await refreshSession();
-
-          if (!AppCore.state.user && hasValidToken()) {
-            await fetchMe();
-          }
-
-          AppCore.events.emit("auth:restore:success", {
-            user: AppCore.state.user,
-            source: "refresh-without-token",
-          });
-
-          return {
-            ok: true,
-            user: AppCore.state.user,
-            refreshed,
-          };
-        } catch (refreshWithoutTokenError) {
-          clearSessionLocal();
-
-          AppCore.events.emit("auth:restore:error", {
-            error: refreshWithoutTokenError,
-            message: extractMessage(refreshWithoutTokenError),
-          });
-
-          return {
-            ok: false,
-            user: null,
-            error: refreshWithoutTokenError,
-          };
-        }
-      }
-
+    session.restorePromise = (async () => {
       try {
-        const user = await fetchMe();
+        if (!hasValidToken()) {
+          if (!hasRefreshContext()) {
+            clearSessionLocal();
 
-        AppCore.events.emit("auth:restore:success", {
-          user,
-          source: "me",
-        });
+            AppCore.events.emit("auth:restore:empty", {
+              reason: "missing-token-and-refresh-context",
+            });
 
-        return {
-          ok: true,
-          user,
-        };
-      } catch (meError) {
-        AppCore.utils.warn(
-          "fetchMe() falló en restoreSession(), intentando refresh.",
-          meError
-        );
+            return {
+              ok: false,
+              user: null,
+            };
+          }
 
-        if (!hasRefreshContext()) {
-          clearSessionLocal();
+          try {
+            const refreshed = await refreshSession();
 
-          AppCore.events.emit("auth:restore:error", {
-            error: meError,
-            message: extractMessage(meError),
-          });
+            if (!AppCore.state.user && hasValidToken()) {
+              await fetchMe();
+            }
 
-          return {
-            ok: false,
-            user: null,
-            error: meError,
-          };
+            AppCore.events.emit("auth:restore:success", {
+              user: AppCore.state.user,
+              source: "refresh-without-token",
+            });
+
+            return {
+              ok: true,
+              user: AppCore.state.user,
+              refreshed,
+            };
+          } catch (refreshWithoutTokenError) {
+            clearSessionLocal();
+
+            AppCore.events.emit("auth:restore:error", {
+              error: refreshWithoutTokenError,
+              message: extractMessage(refreshWithoutTokenError),
+            });
+
+            return {
+              ok: false,
+              user: null,
+              error: refreshWithoutTokenError,
+            };
+          }
         }
 
         try {
-          const refreshed = await refreshSession();
-
-          if (!AppCore.state.user) {
-            await fetchMe();
-          }
+          const user = await fetchMe();
 
           AppCore.events.emit("auth:restore:success", {
-            user: AppCore.state.user,
-            source: "refresh",
+            user,
+            source: "me",
           });
 
           return {
             ok: true,
-            user: AppCore.state.user,
-            refreshed,
+            user,
           };
-        } catch (refreshError) {
-          clearSessionLocal();
+        } catch (meError) {
+          AppCore.utils.warn(
+            "fetchMe() falló en restoreSession(), intentando refresh.",
+            meError
+          );
 
-          AppCore.events.emit("auth:restore:error", {
-            error: refreshError,
-            message: extractMessage(refreshError),
-          });
+          if (!hasRefreshContext()) {
+            clearSessionLocal();
 
-          return {
-            ok: false,
-            user: null,
-            error: refreshError,
-          };
+            AppCore.events.emit("auth:restore:error", {
+              error: meError,
+              message: extractMessage(meError),
+            });
+
+            return {
+              ok: false,
+              user: null,
+              error: meError,
+            };
+          }
+
+          try {
+            const refreshed = await refreshSession();
+
+            if (!AppCore.state.user) {
+              await fetchMe();
+            }
+
+            AppCore.events.emit("auth:restore:success", {
+              user: AppCore.state.user,
+              source: "refresh",
+            });
+
+            return {
+              ok: true,
+              user: AppCore.state.user,
+              refreshed,
+            };
+          } catch (refreshError) {
+            clearSessionLocal();
+
+            AppCore.events.emit("auth:restore:error", {
+              error: refreshError,
+              message: extractMessage(refreshError),
+            });
+
+            return {
+              ok: false,
+              user: null,
+              error: refreshError,
+            };
+          }
         }
+      } finally {
+        session.restoring = false;
+        session.restorePromise = null;
       }
-    } finally {
-      session.restoring = false;
-    }
+    })();
+
+    return session.restorePromise;
   }
 
   /* =========================================================
@@ -1129,3 +1212,7 @@ export const Auth = (() => {
     getStoredSessionUserId,
   };
 })();
+    const now = Date.now();
+    if (session.refreshBlockedUntil > now) {
+      throw new Error("Refresh temporalmente bloqueado por seguridad.");
+    }

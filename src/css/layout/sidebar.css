@@ -268,10 +268,15 @@
 
 
 /* =========================
-   TOOLTIP SYSTEM
+   TOOLTIP SYSTEM — FINAL
+   - definido siempre
+   - visible solo donde toca
 ========================= */
-.sidebar-toggle::after{
-  content: "";
+
+/* CAJA BASE */
+.sidebar-toggle::after,
+.menu-item::after{
+  content: attr(data-tooltip);
   position: absolute;
   top: 50%;
   left: calc(100% + 14px);
@@ -310,13 +315,44 @@
   z-index: 9999;
 }
 
-.sidebar-toggle::after{
-  content: attr(data-tooltip);
+/* FLECHITA */
+.sidebar-toggle::before,
+.menu-item::before{
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: calc(100% + 9px);
+
+  width: 10px;
+  height: 10px;
+
+  transform: translateY(-50%) rotate(45deg);
+
+  background: var(--tooltip-bg);
+  border-top: 1px solid var(--border-default);
+  border-left: 1px solid var(--border-default);
+
+  box-shadow: -2px -2px 8px rgba(0,0,0,.04);
+
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    visibility var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-out);
+
+  z-index: 9998;
 }
 
+/* TOGGLE: visible siempre en hover */
 .sidebar:not(.collapsed):not(.is-collapsed) .sidebar-toggle:hover::after,
+.sidebar:not(.collapsed):not(.is-collapsed) .sidebar-toggle:hover::before,
 .sidebar.collapsed .sidebar-toggle:hover::after,
-.sidebar.is-collapsed .sidebar-toggle:hover::after{
+.sidebar.collapsed .sidebar-toggle:hover::before,
+.sidebar.is-collapsed .sidebar-toggle:hover::after,
+.sidebar.is-collapsed .sidebar-toggle:hover::before{
   opacity: 1;
   visibility: visible;
 }
@@ -324,6 +360,20 @@
 .sidebar:not(.collapsed):not(.is-collapsed) .sidebar-toggle:hover::after,
 .sidebar.collapsed .sidebar-toggle:hover::after,
 .sidebar.is-collapsed .sidebar-toggle:hover::after{
+  transform: translateY(-50%) translateX(0);
+}
+
+/* MENU: visible solo en collapsed */
+.sidebar.collapsed .menu-item:hover::after,
+.sidebar.collapsed .menu-item:hover::before,
+.sidebar.is-collapsed .menu-item:hover::after,
+.sidebar.is-collapsed .menu-item:hover::before{
+  opacity: 1;
+  visibility: visible;
+}
+
+.sidebar.collapsed .menu-item:hover::after,
+.sidebar.is-collapsed .menu-item:hover::after{
   transform: translateY(-50%) translateX(0);
 }
 

@@ -191,213 +191,185 @@ export const SidebarUI = (() => {
     return window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`).matches;
   }
 
-   /* =========================================================
-      SIDEBAR STATE
-   ========================================================= */
-   function getSavedSidebarCollapsed() {
-     try {
-       return localStorage.getItem("sidebar-collapsed") === "true";
-     } catch {
-       return false;
-     }
-   }
-   
-   function saveSidebarCollapsed(value) {
-     try {
-       localStorage.setItem("sidebar-collapsed", String(Boolean(value)));
-     } catch {
-       /* noop */
-     }
-   }
-   
-   function getDesiredSidebarOpenState() {
-     const mobile = isMobileViewport();
-   
-     if (mobile) {
-       return Boolean(AppCore.state.sidebarOpen);
-     }
-   
-     if (typeof AppCore.state?.sidebarOpen === "boolean") {
-       return AppCore.state.sidebarOpen;
-     }
-   
-     return !getSavedSidebarCollapsed();
-   }
-   
-   function syncMenuItemTitles(isOpen = null) {
-     const { sidebar, sidebarMenu } = getElements();
-     if (!sidebar || !sidebarMenu) return;
-   
-     const open =
-       typeof isOpen === "boolean"
-         ? isOpen
-         : (
-             !sidebar.classList.contains("collapsed") &&
-             !sidebar.classList.contains("is-collapsed")
-           );
-   
-     sidebarMenu.querySelectorAll(".menu-item").forEach((item) => {
-       const tooltipText = String(item.dataset.tooltip || "").trim();
-   
-       if (!tooltipText) {
-         item.removeAttribute("title");
-         return;
-       }
-   
-       if (open) {
-         item.removeAttribute("title");
-       } else {
-         item.setAttribute("title", tooltipText);
-       }
-     });
-   }
-   
-   function updateToggleLabel(isOpen = null) {
-     const { toggleBtn, mobileToggleBtn, sidebar } = getElements();
-     if (!sidebar) return;
-   
-     const open =
-       typeof isOpen === "boolean"
-         ? isOpen
-         : (
-             !sidebar.classList.contains("collapsed") &&
-             !sidebar.classList.contains("is-collapsed")
-           );
-   
-     const desktopText = open ? "Cerrar barra lateral" : "Abrir barra lateral";
-     const mobileText = open ? "Cerrar navegación" : "Abrir navegación";
-   
-     if (toggleBtn) {
-       toggleBtn.dataset.tooltip = desktopText;
-       toggleBtn.removeAttribute("title");
-       toggleBtn.setAttribute("aria-label", desktopText);
-       toggleBtn.setAttribute("aria-expanded", String(open));
-       toggleBtn.classList.toggle("is-active", open);
-     }
-   
-     if (mobileToggleBtn) {
-       mobileToggleBtn.setAttribute("aria-label", mobileText);
-       mobileToggleBtn.setAttribute("aria-expanded", String(open));
-       mobileToggleBtn.classList.toggle("is-active", open);
-     }
-   }
-   
-   function syncSidebarState() {
-     const { sidebar, body } = getElements();
-     if (!sidebar) return;
-   
-     if (isShellHidden()) {
-       sidebar.hidden = true;
-       closeDropdown();
-       updateToggleLabel(false);
-       syncMenuItemTitles(true);
-       return;
-     }
-   
-     sidebar.hidden = false;
-   
-     const mobile = isMobileViewport();
-     const isOpen = getDesiredSidebarOpenState();
-   
-     if (mobile) {
-       sidebar.classList.toggle("open", isOpen);
-       sidebar.classList.toggle("is-open", isOpen);
-       sidebar.classList.remove("collapsed");
-       sidebar.classList.remove("is-collapsed");
-   
-       body?.classList.toggle("sidebar-open", isOpen);
-       body?.classList.remove("sidebar-collapsed");
-     } else {
-       sidebar.classList.toggle("collapsed", !isOpen);
-       sidebar.classList.toggle("is-collapsed", !isOpen);
-       sidebar.classList.remove("open");
-       sidebar.classList.remove("is-open");
-   
-       body?.classList.toggle("sidebar-collapsed", !isOpen);
-       body?.classList.remove("sidebar-open");
-     }
-   
-     updateToggleLabel(isOpen);
-     syncMenuItemTitles(isOpen);
-   
-     AppCore.events.emit("sidebar:state:synced", {
-       open: isOpen,
-       mobile,
-     });
-   }
-   
-   function setSidebarOpen(open) {
-     const nextOpen = Boolean(open);
-     const mobile = isMobileViewport();
-   
-     AppCore.state.sidebarOpen = nextOpen;
-   
-     if (typeof AppCore.setSidebarOpen === "function") {
-       AppCore.setSidebarOpen(nextOpen);
-     }
-   
-     if (!mobile) {
-       saveSidebarCollapsed(!nextOpen);
-     }
-   
-     syncSidebarState();
-   }
-   
-   function openSidebar() {
-     if (isShellHidden()) return;
-     setSidebarOpen(true);
-   }
-   
-   function closeSidebar() {
-     setSidebarOpen(false);
-   }
-   
-   function toggleSidebar() {
-     if (isShellHidden()) return;
-   
-     const currentOpen = getDesiredSidebarOpenState();
-     const nextOpen = !currentOpen;
-   
-     setSidebarOpen(nextOpen);
-   
-     if (!nextOpen) {
-       closeDropdown();
-     }
-   }
-   
-   function ensureSidebarOpenForUserMenu() {
-     if (isShellHidden()) return false;
-   
-     const { sidebar } = getElements();
-     if (!sidebar) return false;
-   
-     const mobile = isMobileViewport();
-     const isCollapsedDesktop =
-       !mobile &&
-       (
-         sidebar.classList.contains("collapsed") ||
-         sidebar.classList.contains("is-collapsed")
-       );
-   
-     const isClosedMobile =
-       mobile &&
-       !sidebar.classList.contains("open") &&
-       !sidebar.classList.contains("is-open");
-   
-     if (isCollapsedDesktop || isClosedMobile) {
-       openSidebar();
-       return true;
-     }
-   
-     return false;
-   }
-   
-   function closeSidebarOnMobileAfterNavigation() {
-     if (isMobileViewport()) {
-       closeSidebar();
-     }
-   }
-   
+  /* =========================================================
+     SIDEBAR STATE
+  ========================================================= */
+  function getSavedSidebarCollapsed() {
+    try {
+      return localStorage.getItem("sidebar-collapsed") === "true";
+    } catch {
+      return false;
+    }
+  }
+
+  function saveSidebarCollapsed(value) {
+    try {
+      localStorage.setItem("sidebar-collapsed", String(Boolean(value)));
+    } catch {
+      /* noop */
+    }
+  }
+
+  function getDesiredSidebarOpenState() {
+    const mobile = isMobileViewport();
+
+    if (mobile) {
+      return Boolean(AppCore.state.sidebarOpen);
+    }
+
+    if (typeof AppCore.state?.sidebarOpen === "boolean") {
+      return AppCore.state.sidebarOpen;
+    }
+
+    return !getSavedSidebarCollapsed();
+  }
+
+  function updateToggleLabel(isOpen = null) {
+    const { toggleBtn, mobileToggleBtn, sidebar } = getElements();
+    if (!sidebar) return;
+
+    const open =
+      typeof isOpen === "boolean"
+        ? isOpen
+        : (
+            !sidebar.classList.contains("collapsed") &&
+            !sidebar.classList.contains("is-collapsed")
+          );
+
+    const desktopText = open ? "Cerrar barra lateral" : "Abrir barra lateral";
+    const mobileText = open ? "Cerrar navegación" : "Abrir navegación";
+
+    if (toggleBtn) {
+      toggleBtn.dataset.tooltip = desktopText;
+      toggleBtn.removeAttribute("title");
+      toggleBtn.setAttribute("aria-label", desktopText);
+      toggleBtn.setAttribute("aria-expanded", String(open));
+      toggleBtn.classList.toggle("is-active", open);
+    }
+
+    if (mobileToggleBtn) {
+      mobileToggleBtn.setAttribute("aria-label", mobileText);
+      mobileToggleBtn.setAttribute("aria-expanded", String(open));
+      mobileToggleBtn.classList.toggle("is-active", open);
+    }
+  }
+
+  function syncSidebarState() {
+    const { sidebar, body } = getElements();
+    if (!sidebar) return;
+
+    if (isShellHidden()) {
+      sidebar.hidden = true;
+      sidebar.classList.remove("open", "is-open", "collapsed", "is-collapsed");
+      body?.classList.remove("sidebar-open", "sidebar-collapsed");
+      closeDropdown();
+      updateToggleLabel(false);
+      return;
+    }
+
+    sidebar.hidden = false;
+
+    const mobile = isMobileViewport();
+    const isOpen = getDesiredSidebarOpenState();
+
+    if (mobile) {
+      sidebar.classList.toggle("open", isOpen);
+      sidebar.classList.toggle("is-open", isOpen);
+      sidebar.classList.remove("collapsed");
+      sidebar.classList.remove("is-collapsed");
+
+      body?.classList.toggle("sidebar-open", isOpen);
+      body?.classList.remove("sidebar-collapsed");
+    } else {
+      sidebar.classList.toggle("collapsed", !isOpen);
+      sidebar.classList.toggle("is-collapsed", !isOpen);
+      sidebar.classList.remove("open");
+      sidebar.classList.remove("is-open");
+
+      body?.classList.toggle("sidebar-collapsed", !isOpen);
+      body?.classList.remove("sidebar-open");
+    }
+
+    updateToggleLabel(isOpen);
+
+    AppCore.events.emit("sidebar:state:synced", {
+      open: isOpen,
+      mobile,
+    });
+  }
+
+  function setSidebarOpen(open) {
+    const nextOpen = Boolean(open);
+    const mobile = isMobileViewport();
+
+    AppCore.state.sidebarOpen = nextOpen;
+
+    if (typeof AppCore.setSidebarOpen === "function") {
+      AppCore.setSidebarOpen(nextOpen);
+    }
+
+    if (!mobile) {
+      saveSidebarCollapsed(!nextOpen);
+    }
+
+    syncSidebarState();
+  }
+
+  function openSidebar() {
+    if (isShellHidden()) return;
+    setSidebarOpen(true);
+  }
+
+  function closeSidebar() {
+    setSidebarOpen(false);
+  }
+
+  function toggleSidebar() {
+    if (isShellHidden()) return;
+
+    const currentOpen = getDesiredSidebarOpenState();
+    const nextOpen = !currentOpen;
+
+    setSidebarOpen(nextOpen);
+
+    if (!nextOpen) {
+      closeDropdown();
+    }
+  }
+
+  function ensureSidebarOpenForUserMenu() {
+    if (isShellHidden()) return false;
+
+    const { sidebar } = getElements();
+    if (!sidebar) return false;
+
+    const mobile = isMobileViewport();
+    const isCollapsedDesktop =
+      !mobile &&
+      (
+        sidebar.classList.contains("collapsed") ||
+        sidebar.classList.contains("is-collapsed")
+      );
+
+    const isClosedMobile =
+      mobile &&
+      !sidebar.classList.contains("open") &&
+      !sidebar.classList.contains("is-open");
+
+    if (isCollapsedDesktop || isClosedMobile) {
+      openSidebar();
+      return true;
+    }
+
+    return false;
+  }
+
+  function closeSidebarOnMobileAfterNavigation() {
+    if (isMobileViewport()) {
+      closeSidebar();
+    }
+  }
+
   /* =========================================================
      SERVER NAV ITEM
   ========================================================= */
@@ -410,6 +382,7 @@ export const SidebarUI = (() => {
         id="${SERVER_NAV_ID}"
         data-tooltip="Estado del servidor"
         data-role="admin"
+        aria-label="Estado del servidor"
       >
         <span aria-hidden="true">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
@@ -537,7 +510,6 @@ export const SidebarUI = (() => {
     avatarEl.textContent = avatarText;
     avatarEl.classList.remove("has-image");
     avatarEl.setAttribute("aria-label", `Avatar ${displayName}`);
-    avatarEl.setAttribute("title", displayName);
   }
 
   function renderAvatarImage(avatarEl, avatarUrl, displayName, avatarText) {
@@ -552,7 +524,6 @@ export const SidebarUI = (() => {
 
     avatarEl.classList.add("has-image");
     avatarEl.setAttribute("aria-label", `Avatar ${displayName}`);
-    avatarEl.setAttribute("title", displayName);
 
     avatarEl.innerHTML = `
       <img
@@ -610,7 +581,6 @@ export const SidebarUI = (() => {
         "aria-label",
         `Abrir menú de usuario de ${displayName}`
       );
-      userToggle.setAttribute("title", displayName);
     }
 
     AppCore.events.emit("sidebar:user:rendered", {
@@ -627,10 +597,13 @@ export const SidebarUI = (() => {
   ========================================================= */
   function applyRoleVisibility() {
     const admin = isAdmin();
+    const { sidebar } = getElements();
 
     ensureServerNavItem();
 
-    document.querySelectorAll('[data-role="admin"]').forEach((element) => {
+    if (!sidebar) return;
+
+    sidebar.querySelectorAll('[data-role="admin"]').forEach((element) => {
       element.hidden = !admin;
       element.setAttribute("aria-hidden", String(!admin));
       element.style.display = admin ? "" : "none";
@@ -666,7 +639,10 @@ export const SidebarUI = (() => {
         notifyServer: true,
       });
     } catch (error) {
-      AppCore.utils.warn?.("Logout remoto falló, se limpiará sesión local igualmente.", error);
+      AppCore.utils.warn?.(
+        "Logout remoto falló, se limpiará sesión local igualmente.",
+        error
+      );
     } finally {
       try {
         if (typeof AppCore.clearSession === "function") {
@@ -705,6 +681,7 @@ export const SidebarUI = (() => {
   ========================================================= */
   function handleDocumentClick(event) {
     const {
+      sidebar,
       toggleBtn,
       mobileToggleBtn,
       userToggle,
@@ -713,6 +690,7 @@ export const SidebarUI = (() => {
     } = getElements();
 
     const target = event.target;
+    if (!(target instanceof Node)) return;
 
     if (toggleBtn && toggleBtn.contains(target)) {
       event.preventDefault();
@@ -744,6 +722,16 @@ export const SidebarUI = (() => {
 
     if (userDropdown && userDropdown.contains(target)) {
       return;
+    }
+
+    if (
+      isMobileViewport() &&
+      sidebar &&
+      (sidebar.classList.contains("open") || sidebar.classList.contains("is-open")) &&
+      !sidebar.contains(target) &&
+      !(mobileToggleBtn && mobileToggleBtn.contains(target))
+    ) {
+      closeSidebar();
     }
 
     closeDropdown();

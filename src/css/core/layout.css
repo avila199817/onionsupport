@@ -10,6 +10,7 @@
    - auth mode limpio
    - responsive real
    - polish visual + performance
+   - sin topbarview-container
 ========================================================= */
 
 
@@ -17,8 +18,6 @@
    ROOT / SAFE APP TOKENS
 ========================= */
 :root{
-  --topbarview-height: 64px;
-
   --app-safe-top: env(safe-area-inset-top, 0px);
   --app-safe-right: env(safe-area-inset-right, 0px);
   --app-safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -26,7 +25,6 @@
 
   --app-offset: calc(
     var(--topbar-height) +
-    var(--topbarview-height) +
     var(--tablehead-height)
   );
 
@@ -247,42 +245,11 @@ a{
 
 
 /* =========================
-   FIXED DYNAMIC TOPBAR VIEW SLOT
-========================= */
-#topbarview-container{
-  position:fixed;
-  top:calc(var(--topbar-height) + var(--app-safe-top));
-  left:var(--sidebar-width);
-  right:0;
-
-  height:var(--topbarview-height);
-  min-height:var(--topbarview-height);
-
-  display:flex;
-  align-items:stretch;
-
-  z-index:calc(var(--z-topbar) - 1);
-
-  transition:
-    left var(--duration-slow) var(--ease-emphasis),
-    height var(--duration-normal) var(--ease-standard);
-}
-
-#topbarview-container:empty{
-  pointer-events:none;
-}
-
-.sidebar.collapsed ~ .main-content #topbarview-container{
-  left:var(--sidebar-collapsed);
-}
-
-
-/* =========================
    TABLE HEAD / SECONDARY FIXED BAR
 ========================= */
 .table-head{
   position:fixed;
-  top:calc(var(--topbar-height) + var(--topbarview-height) + var(--app-safe-top));
+  top:calc(var(--topbar-height) + var(--app-safe-top));
   left:var(--sidebar-width);
   right:0;
 
@@ -337,6 +304,10 @@ a{
   position:relative;
   z-index:1;
   min-width:0;
+}
+
+#tablehead-container:empty{
+  display:none;
 }
 
 
@@ -777,7 +748,6 @@ body.auth-screen #app-content{
 body.auth-screen .sidebar,
 body.auth-screen .topbar,
 body.auth-screen .table-head,
-body.auth-screen #topbarview-container,
 body.auth-screen #tablehead-container{
   display:none !important;
 }
@@ -879,10 +849,6 @@ body.auth-screen .content-wrapper{
    RESPONSIVE — TABLET
 ========================= */
 @media (max-width: 900px){
-  :root{
-    --topbarview-height: 56px;
-  }
-
   .main-content{
     margin-left:0;
     width:100%;
@@ -894,7 +860,6 @@ body.auth-screen .content-wrapper{
     width:100%;
   }
 
-  #topbarview-container,
   .table-head{
     left:0;
   }
@@ -940,7 +905,6 @@ body.auth-screen .content-wrapper{
 ========================= */
 @media (max-width: 640px){
   :root{
-    --topbarview-height: 52px;
     --tablehead-height: 44px;
     --content-padding-inline: 16px;
   }
@@ -998,7 +962,6 @@ body.auth-screen .content-wrapper{
   .layout,
   .main-content,
   .table-head,
-  #topbarview-container,
   .panel-content,
   .sidebar,
   .panel-surface,

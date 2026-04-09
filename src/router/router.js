@@ -31,6 +31,12 @@ export const Router = (() => {
   "use strict";
 
   let isBound = false;
+  let lastRenderPromise = Promise.resolve();
+
+  const ROUTER_CONFIG = {
+    maxRouteLength: 2048,
+    maxUsernameLength: 64,
+  };
 
   const ROUTE_NAMES = {
     HOME: AppCore.config?.routes?.home || "/",
@@ -125,12 +131,22 @@ export const Router = (() => {
       render: renderLoginView,
     },
   ];
+  const immutableRoutes = Object.freeze(
+    routes.map((route) => Object.freeze({ ...route }))
+  );
 
   /* =========================================================
      HELPERS BASE
   ========================================================= */
   function normalizePath(path = "/") {
     return AppCore.utils.normalizePath(path);
+  }
+
+  function normalizeRouteInput(path = "/") {
+    const raw = String(path ?? "").trim();
+    if (!raw) return "/";
+
+    return raw.slice(0, ROUTER_CONFIG.maxRouteLength);
   }
 
   function escapeHtml(value = "") {
@@ -161,7 +177,7 @@ export const Router = (() => {
   }
 
   function sanitizeUsername(value = "") {
-    return AppCore.utils.sanitizeUsername
+    const normalized = AppCore.utils.sanitizeUsername
       ? AppCore.utils.sanitizeUsername(value)
       : String(value || "")
           .trim()
@@ -169,6 +185,8 @@ export const Router = (() => {
           .replace(/\s+/g, "")
           .replace(/[^a-zA-Z0-9._-]/g, "")
           .toLowerCase();
+
+    return normalized.slice(0, ROUTER_CONFIG.maxUsernameLength);
   }
 
   function extractUsernameFromPath(pathname = "/") {
@@ -217,6 +235,10 @@ export const Router = (() => {
     );
   }
 
+  function isUnsafeHref(href = "") {
+    return /^(javascript:|data:|vbscript:)/i.test(String(href || "").trim());
+  }
+
   function isHashOnlyHref(href = "") {
     return String(href || "").trim().startsWith("#");
   }
@@ -253,13 +275,17 @@ export const Router = (() => {
 
   function getCurrentPath() {
     return normalizePath(
-      `${window.location.pathname || "/"}${window.location.search || ""}`
+      normalizeRouteInput(
+        `${window.location.pathname || "/"}${window.location.search || ""}`
+      )
     );
   }
 
   function getCurrentCanonicalPath() {
     return normalizeCanonicalPath(
-      `${window.location.pathname || "/"}${window.location.search || ""}`
+      normalizeRouteInput(
+        `${window.location.pathname || "/"}${window.location.search || ""}`
+      )
     );
   }
 
@@ -283,7 +309,7 @@ export const Router = (() => {
 
   function getRoute(pathname = "/") {
     const canonical = normalizeCanonicalPath(pathname);
-    return routes.find((route) => route.path === canonical) || null;
+    return immutableRoutes.find((route) => route.path === canonical) || null;
   }
 
   function routeExists(pathname = "/") {
@@ -304,9 +330,10 @@ export const Router = (() => {
   }
 
   function resolveSpaHref(href = "/") {
-    const raw = String(href || "").trim();
+    const raw = normalizeRouteInput(href);
 
     if (!raw) return ROUTE_NAMES.HOME;
+    if (isUnsafeHref(raw)) return ROUTE_NAMES.HOME;
     if (isExternalHref(raw)) return raw;
     if (isHashOnlyHref(raw)) return raw;
 
@@ -716,6 +743,32 @@ export const Router = (() => {
     `;
   }
 
+  function renderRuntimeErrorView(error, route = null, requestedPath = "/") {
+    const view = getViewContainer();
+    if (!view) return;
+
+    view.innerHTML = `
+      <section class="content-wrapper">
+        <div class="panel-block" style="padding:24px;">
+          <div style="display:grid; gap:16px;">
+            <h2 style="margin:0;">Error de navegación</h2>
+            <p style="margin:0; color:var(--text-dim);">
+              Ocurrió un error al renderizar esta vista. Intenta recargar.
+            </p>
+            <div style="display:grid; gap:8px; font-size:14px;">
+              <div><strong>Ruta:</strong> ${escapeHtml(requestedPath)}</div>
+              <div><strong>Vista:</strong> ${escapeHtml(route?.name || "desconocida")}</div>
+              <div><strong>Error:</strong> ${escapeHtml(error?.message || "Error inesperado")}</div>
+            </div>
+            <div>
+              <a href="${escapeHtml(getDefaultHomeTarget())}" data-spa>Volver al inicio</a>
+            </div>
+          </div>
+        </div>
+      </section>
+    `;
+  }
+
   /* =========================================================
      ESTADO DE RUTA
   ========================================================= */
@@ -757,6 +810,31 @@ export const Router = (() => {
     });
   }
 
+  function validateRoutesTable() {
+    const seen = new Set();
+
+    immutableRoutes.forEach((route) => {
+      if (!route || typeof route !== "object") {
+        throw new Error("Router: existe una ruta inválida en la tabla.");
+      }
+
+      const normalizedPath = normalizeCanonicalPath(route.path || "/");
+      if (!normalizedPath.startsWith("/")) {
+        throw new Error(`Router: ruta inválida "${route.path}".`);
+      }
+
+      if (seen.has(normalizedPath)) {
+        throw new Error(`Router: ruta duplicada detectada "${normalizedPath}".`);
+      }
+
+      if (typeof route.render !== "function") {
+        throw new Error(`Router: la ruta "${normalizedPath}" no tiene render().`);
+      }
+
+      seen.add(normalizedPath);
+    });
+  }
+
   /* =========================================================
      HELPERS DE REDIRECCIÓN
   ========================================================= */
@@ -772,7 +850,7 @@ export const Router = (() => {
   /* =========================================================
      RENDER CENTRAL
   ========================================================= */
-  function render(pathname = "/", options = {}) {
+  function executeRender(pathname = "/", options = {}) {
     const requestedPath = resolveSpaHref(pathname);
     const canonicalPath = normalizeCanonicalPath(requestedPath);
     const requestedUsername = extractUsernameFromPath(requestedPath);
@@ -905,7 +983,27 @@ export const Router = (() => {
 
     setShellMode(route);
     setDocumentTitle(route.title || AppCore.config.appName);
-    route.render(route);
+    try {
+      route.render(route);
+    } catch (error) {
+      AppCore.utils.error?.("Router render error:", error);
+      setDocumentTitle("Error");
+      renderRuntimeErrorView(error, route, requestedPath);
+
+      emitRendered({
+        path: requestedPath,
+        canonicalPath,
+        publicPath:
+          `${window.location.pathname || ""}${window.location.search || ""}` ||
+          requestedPath,
+        username: requestedUsername || getCurrentResolvedUsername() || null,
+        found: true,
+        forbidden: false,
+        route,
+      });
+
+      return;
+    }
 
     emitRendered({
       path: requestedPath,
@@ -919,26 +1017,40 @@ export const Router = (() => {
     });
   }
 
+  function render(pathname = "/", options = {}) {
+    lastRenderPromise = lastRenderPromise
+      .catch(() => {})
+      .then(() => executeRender(pathname, options));
+
+    return lastRenderPromise;
+  }
+
   function navigate(pathname = "/", options = {}) {
     const requestedPath = resolveSpaHref(pathname);
     const canonicalPath = normalizeCanonicalPath(requestedPath);
     const currentCanonicalPath = normalizeCanonicalPath(
       AppCore.state.route || "/"
     );
+    const currentPath =
+      `${window.location.pathname || "/"}${window.location.search || ""}` || "/";
+    const normalizedCurrentPath = resolveSpaHref(currentPath);
 
-    if (canonicalPath === currentCanonicalPath && !options.force) {
-      render(requestedPath, {
+    if (
+      canonicalPath === currentCanonicalPath &&
+      requestedPath === normalizedCurrentPath &&
+      !options.force
+    ) {
+      return render(requestedPath, {
         ...options,
         skipHistory: true,
       });
-      return;
     }
 
-    render(requestedPath, options);
+    return render(requestedPath, options);
   }
 
   function replace(pathname = "/", options = {}) {
-    navigate(pathname, {
+    return navigate(pathname, {
       ...options,
       replaceState: true,
     });
@@ -974,6 +1086,11 @@ export const Router = (() => {
 
     const href = link.getAttribute("href") || "";
     if (!href) return;
+    if (isUnsafeHref(href)) {
+      event.preventDefault();
+      AppCore.utils.warn("Router bloqueó href inseguro:", href);
+      return;
+    }
     if (isExternalHref(href)) return;
     if (isHashOnlyHref(href)) return;
     if (link.hasAttribute("download")) return;
@@ -997,6 +1114,7 @@ export const Router = (() => {
   function bind() {
     if (isBound) return api;
 
+    validateRoutesTable();
     isBound = true;
 
     AppCore.utils.on(document, "click", handleDocumentClick);
@@ -1011,7 +1129,7 @@ export const Router = (() => {
     }
 
     AppCore.events.emit("router:bound", {
-      routes: routes.map((route) => route.path),
+      routes: immutableRoutes.map((route) => route.path),
     });
 
     return api;
@@ -1021,7 +1139,7 @@ export const Router = (() => {
      API PÚBLICA
   ========================================================= */
   const api = {
-    routes,
+    routes: immutableRoutes,
     bind,
 
     getRoute,

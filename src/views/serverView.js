@@ -11,6 +11,9 @@
    - pintar estado de API / DB / sistema
    - pintar CPU / RAM / disco / host / runtime
    - soportar loading / error / refresh sin romper la SPA
+   - incluir mini administrador de tareas visual
+   - dibujar gráficos en tiempo real de CPU / RAM
+   - mantener histórico local sin librerías externas
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
@@ -24,6 +27,9 @@ export const ServerView = (() => {
     dashboard: "/api/dashboard",
     health: "/api/health/internal",
   };
+
+  const REFRESH_INTERVAL_MS = 3000;
+  const HISTORY_LIMIT = 40;
 
   const state = {
     bootstrapped: false,
@@ -41,6 +47,17 @@ export const ServerView = (() => {
     browserMetrics: null,
     environmentMetrics: null,
     telemetry: null,
+
+    autoRefresh: true,
+    intervalId: null,
+
+    history: {
+      cpu: [],
+      ram: [],
+      apiLatency: [],
+      dbLatency: [],
+      timestamps: [],
+    },
   };
 
   /* =========================================================
@@ -116,6 +133,19 @@ export const ServerView = (() => {
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }).format(date);
+  }
+
+  function formatClock(value) {
+    if (!value) return "—";
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "—";
+
+    return new Intl.DateTimeFormat("es-ES", {
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
@@ -199,6 +229,283 @@ export const ServerView = (() => {
     return "Lenta";
   }
 
+  function getBrowserMemoryMetrics() {
+    try {
+      const mem = performance?.memory;
+
+      if (!mem) {
+        return {
+          available: false,
+          jsHeapUsedMB: null,
+          jsHeapTotalMB: null,
+          jsHeapLimitMB: null,
+        };
+      }
+
+      return {
+        available: true,
+        jsHeapUsedMB: round2(mem.usedJSHeapSize / 1024 / 1024),
+        jsHeapTotalMB: round2(mem.totalJSHeapSize / 1024 / 1024),
+        jsHeapLimitMB: round2(mem.jsHeapSizeLimit / 1024 / 1024),
+      };
+    } catch {
+      return {
+        available: false,
+        jsHeapUsedMB: null,
+        jsHeapTotalMB: null,
+        jsHeapLimitMB: null,
+      };
+    }
+  }
+
+  function getCpuStatusLabel(value) {
+    const num = clamp(value, 0, 100);
+    if (num >= 85) return "Alta";
+    if (num >= 70) return "Elevada";
+    if (num >= 40) return "Normal";
+    return "Baja";
+  }
+
+  function getRamStatusLabel(value) {
+    const num = clamp(value, 0, 100);
+    if (num >= 90) return "Crítica";
+    if (num >= 80) return "Muy alta";
+    if (num >= 65) return "Moderada";
+    return "Estable";
+  }
+
+  function stopAutoRefresh() {
+    if (state.intervalId) {
+      window.clearInterval(state.intervalId);
+      state.intervalId = null;
+    }
+  }
+
+  function startAutoRefresh() {
+    stopAutoRefresh();
+
+    if (!state.autoRefresh) return;
+
+    state.intervalId = window.setInterval(() => {
+      if (state.loading || state.refreshing) return;
+      loadData({ silent: true });
+    }, REFRESH_INTERVAL_MS);
+  }
+
+  function pushHistoryValue(bucket, value) {
+    state.history[bucket].push(value);
+    if (state.history[bucket].length > HISTORY_LIMIT) {
+      state.history[bucket].shift();
+    }
+  }
+
+  function pushHistorySnapshot() {
+    const server = state.telemetry?.server || {};
+    const api = state.telemetry?.api || {};
+    const db = state.telemetry?.db || {};
+
+    pushHistoryValue("cpu", server.cpuPercent ?? null);
+    pushHistoryValue("ram", server.ramPercent ?? null);
+    pushHistoryValue("apiLatency", api.latencyMs ?? null);
+    pushHistoryValue("dbLatency", db.latencyMs ?? null);
+    pushHistoryValue("timestamps", new Date().toISOString());
+  }
+
+  function buildSparklinePath(values = [], width = 100, height = 42, max = 100) {
+    const filtered = values.map((v) => (v === null || v === undefined ? null : safeNumber(v, 0)));
+    const valid = filtered.filter((v) => v !== null);
+
+    if (!valid.length) return "";
+
+    const top = 4;
+    const bottom = height - 4;
+    const usableHeight = Math.max(1, bottom - top);
+    const step = filtered.length > 1 ? width / (filtered.length - 1) : width;
+
+    return filtered
+      .map((value, index) => {
+        const x = round2(index * step);
+
+        if (value === null) {
+          return "";
+        }
+
+        const normalized = clamp(value, 0, max);
+        const y = round2(bottom - (normalized / max) * usableHeight);
+
+        return `${index === 0 ? "M" : "L"} ${x} ${y}`;
+      })
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  function renderMiniSparkline({
+    title,
+    values = [],
+    valueLabel = "—",
+    max = 100,
+    tone = "neutral",
+    subtitle = "",
+  }) {
+    const color = getToneColor(tone);
+    const path = buildSparklinePath(values, 220, 54, max);
+    const areaPath = path
+      ? `${path} L 220 54 L 0 54 Z`
+      : "";
+
+    return `
+      <article
+        class="ui-card"
+        style="
+          padding:16px;
+          display:grid;
+          gap:12px;
+          min-height:152px;
+        "
+      >
+        <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
+          <div style="display:grid; gap:4px;">
+            <strong style="font-size:14px; color:var(--text-strong);">
+              ${escapeHtml(title)}
+            </strong>
+            <span style="font-size:12px; color:var(--text-dim);">
+              ${escapeHtml(subtitle)}
+            </span>
+          </div>
+
+          <span
+            style="
+              display:inline-flex;
+              align-items:center;
+              justify-content:center;
+              padding:6px 10px;
+              border-radius:999px;
+              background:color-mix(in srgb, ${color}, transparent 86%);
+              color:${color};
+              font-size:12px;
+              font-weight:700;
+              white-space:nowrap;
+            "
+          >
+            ${escapeHtml(valueLabel)}
+          </span>
+        </div>
+
+        <div
+          style="
+            position:relative;
+            height:56px;
+            border-radius:14px;
+            border:1px solid var(--border-soft);
+            background:
+              linear-gradient(180deg, rgba(255,255,255,.025), transparent 100%),
+              var(--surface-glass);
+            overflow:hidden;
+          "
+        >
+          <svg
+            viewBox="0 0 220 54"
+            preserveAspectRatio="none"
+            style="width:100%; height:100%; display:block;"
+            aria-hidden="true"
+          >
+            <path
+              d="${escapeHtml(areaPath)}"
+              fill="color-mix(in srgb, ${color}, transparent 88%)"
+              stroke="none"
+            ></path>
+
+            <path
+              d="${escapeHtml(path)}"
+              fill="none"
+              stroke="${color}"
+              stroke-width="2.4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            ></path>
+          </svg>
+        </div>
+      </article>
+    `;
+  }
+
+  function renderUsageRing({
+    label,
+    percent = null,
+    sublabel = "",
+    available = true,
+  }) {
+    if (!available || percent === null || percent === undefined) {
+      return `
+        <article class="ui-card" style="padding:18px; display:grid; gap:14px; place-items:center;">
+          <strong style="font-size:15px; color:var(--text-strong);">${escapeHtml(label)}</strong>
+          <div
+            style="
+              width:108px;
+              height:108px;
+              border-radius:50%;
+              border:8px solid var(--surface-3);
+              display:grid;
+              place-items:center;
+              color:var(--text-dim);
+              font-weight:700;
+            "
+          >
+            —
+          </div>
+          <span style="font-size:12px; color:var(--text-dim); text-align:center;">
+            ${escapeHtml(sublabel || "No disponible")}
+          </span>
+        </article>
+      `;
+    }
+
+    const value = clamp(percent, 0, 100);
+    const tone = getPercentTone(value);
+    const color = getToneColor(tone);
+
+    return `
+      <article class="ui-card" style="padding:18px; display:grid; gap:14px; place-items:center;">
+        <strong style="font-size:15px; color:var(--text-strong);">${escapeHtml(label)}</strong>
+
+        <div
+          style="
+            width:108px;
+            height:108px;
+            border-radius:50%;
+            display:grid;
+            place-items:center;
+            background:
+              radial-gradient(circle at center, var(--panel-bg) 55%, transparent 56%),
+              conic-gradient(${color} 0 ${value}%, var(--surface-3) ${value}% 100%);
+            box-shadow: inset 0 0 0 1px var(--border-soft);
+          "
+        >
+          <div
+            style="
+              width:74px;
+              height:74px;
+              border-radius:50%;
+              display:grid;
+              place-items:center;
+              background:var(--panel-bg);
+              border:1px solid var(--border-soft);
+              color:var(--text-strong);
+              font-weight:800;
+              font-size:18px;
+            "
+          >
+            ${escapeHtml(`${Math.round(value)}%`)}
+          </div>
+        </div>
+
+        <span style="font-size:12px; color:var(--text-dim); text-align:center;">
+          ${escapeHtml(sublabel)}
+        </span>
+      </article>
+    `;
+  }
+
   /* =========================================================
      PERFORMANCE / ENV
   ========================================================= */
@@ -255,6 +562,7 @@ export const ServerView = (() => {
       downlink:
         typeof connection?.downlink === "number" ? connection.downlink : null,
       rtt: typeof connection?.rtt === "number" ? connection.rtt : null,
+      browserMemory: getBrowserMemoryMetrics(),
     };
   }
 
@@ -334,6 +642,7 @@ export const ServerView = (() => {
         cpuLoad: system?.cpu?.load ?? null,
         cpuCores: system?.cpu?.cores ?? null,
         cpuModel: safeString(system?.cpu?.model, ""),
+        cpuSpeedMHz: system?.cpu?.speedMHz ?? null,
 
         ramPercent: system?.ram?.usage ?? null,
         ramUsedMB: system?.ram?.usedMB ?? null,
@@ -436,6 +745,7 @@ export const ServerView = (() => {
     try {
       const dashboardStartedAt = performance.now();
       const dashboardPromise = fetchDashboard();
+
       const healthStartedAt = performance.now();
       const healthPromise = fetchHealth();
 
@@ -444,10 +754,11 @@ export const ServerView = (() => {
         healthPromise,
       ]);
 
-      const endAt = performance.now();
+      const dashboardFinishedAt = performance.now();
+      state.dashboardLatencyMs = round2(dashboardFinishedAt - dashboardStartedAt);
 
-      state.dashboardLatencyMs = round2(endAt - dashboardStartedAt);
-      state.healthLatencyMs = round2(endAt - healthStartedAt);
+      const healthFinishedAt = performance.now();
+      state.healthLatencyMs = round2(healthFinishedAt - healthStartedAt);
 
       state.dashboardPayload = dashboard || null;
       state.healthPayload = health || null;
@@ -455,6 +766,8 @@ export const ServerView = (() => {
       state.browserMetrics = getBrowserMetrics();
       state.environmentMetrics = getEnvironmentMetrics();
       state.telemetry = extractTelemetry(dashboard, health);
+
+      pushHistorySnapshot();
 
       state.loading = false;
       state.refreshing = false;
@@ -684,7 +997,7 @@ export const ServerView = (() => {
               <h2 style="margin:0;">Servidor</h2>
               <p style="margin:0; color:var(--text-dim); max-width:920px;">
                 Observabilidad básica del entorno Onion: salud global, API, base de datos, CPU, RAM, disco,
-                runtime Node/V8, host, entorno Azure y timings reales de la SPA.
+                runtime Node/V8, host, entorno Azure y un mini administrador de tareas visual en tiempo real.
               </p>
             </div>
 
@@ -708,6 +1021,40 @@ export const ServerView = (() => {
             <span class="badge neutral">Scope ${escapeHtml(dashboard.scope || "—")}</span>
             <span class="badge neutral">Health frontend ${escapeHtml(formatMs(state.healthLatencyMs))}</span>
             <span class="badge neutral">Dashboard frontend ${escapeHtml(formatMs(state.dashboardLatencyMs))}</span>
+          </div>
+        </div>
+      </section>
+    `;
+  }
+
+  function renderControls() {
+    return `
+      <section class="panel-block" style="padding:18px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;">
+          <div style="display:grid; gap:4px;">
+            <strong style="font-size:15px; color:var(--text-strong);">Refresco en tiempo real</strong>
+            <span style="font-size:12px; color:var(--text-dim);">
+              Actualización automática cada ${Math.round(REFRESH_INTERVAL_MS / 1000)} s.
+            </span>
+          </div>
+
+          <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <button
+              type="button"
+              id="server-refresh-btn"
+              class="ui-btn ui-btn-secondary"
+              ${state.loading || state.refreshing ? "disabled" : ""}
+            >
+              ${state.refreshing ? "Actualizando..." : "Actualizar ahora"}
+            </button>
+
+            <button
+              type="button"
+              id="server-toggle-live-btn"
+              class="ui-btn ${state.autoRefresh ? "ui-btn-primary" : "ui-btn-ghost"}"
+            >
+              ${state.autoRefresh ? "Tiempo real activo" : "Tiempo real pausado"}
+            </button>
           </div>
         </div>
       </section>
@@ -816,6 +1163,181 @@ export const ServerView = (() => {
     `;
   }
 
+  function renderLiveTaskManager() {
+    const server = state.telemetry?.server || {};
+    const api = state.telemetry?.api || {};
+    const db = state.telemetry?.db || {};
+    const runtime = state.telemetry?.runtime || {};
+    const browserMemory = state.environmentMetrics?.browserMemory || {};
+
+    return `
+      <section class="panel-block" style="padding:22px; display:grid; gap:18px;">
+        <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap;">
+          <div style="display:grid; gap:6px;">
+            <h3 style="margin:0; font-size:20px;">Mini administrador de tareas</h3>
+            <p style="margin:0; color:var(--text-dim); font-size:13px; max-width:860px;">
+              Monitor visual del backend y del navegador. Se actualiza en tiempo real y mantiene un histórico local
+              de las últimas ${HISTORY_LIMIT} muestras.
+            </p>
+          </div>
+
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            ${statusBadge(state.autoRefresh ? "Live ON" : "Live OFF", state.autoRefresh ? "success" : "neutral")}
+            ${statusBadge(`Última muestra ${formatClock(state.history.timestamps.at(-1))}`, "neutral")}
+          </div>
+        </div>
+
+        <div
+          style="
+            display:grid;
+            grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));
+            gap:16px;
+          "
+        >
+          ${renderUsageRing({
+            label: "CPU",
+            percent: server.cpuPercent,
+            available: server.cpuPercent !== null,
+            sublabel:
+              server.cpuPercent !== null
+                ? `${getCpuStatusLabel(server.cpuPercent)} · ${server.cpuCores || "—"} core(s)`
+                : "Sin métrica",
+          })}
+
+          ${renderUsageRing({
+            label: "RAM",
+            percent: server.ramPercent,
+            available: server.ramPercent !== null,
+            sublabel:
+              server.ramPercent !== null
+                ? `${formatGB(server.ramUsedGB)} / ${formatGB(server.ramTotalGB)}`
+                : "Sin métrica",
+          })}
+
+          ${renderUsageRing({
+            label: "Disco",
+            percent: server.diskPercent,
+            available: server.diskPercent !== null,
+            sublabel:
+              server.diskPercent !== null
+                ? `${formatGB(server.diskUsedGB)} / ${formatGB(server.diskTotalGB)}`
+                : "Sin métrica",
+          })}
+
+          ${renderUsageRing({
+            label: "Heap navegador",
+            percent:
+              browserMemory.available &&
+              browserMemory.jsHeapUsedMB !== null &&
+              browserMemory.jsHeapLimitMB
+                ? round2((browserMemory.jsHeapUsedMB / browserMemory.jsHeapLimitMB) * 100)
+                : null,
+            available: Boolean(browserMemory.available),
+            sublabel:
+              browserMemory.available
+                ? `${formatMB(browserMemory.jsHeapUsedMB)} / ${formatMB(browserMemory.jsHeapLimitMB)}`
+                : "No soportado por este navegador",
+          })}
+        </div>
+
+        <div
+          style="
+            display:grid;
+            grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));
+            gap:16px;
+          "
+        >
+          ${renderMiniSparkline({
+            title: "CPU en tiempo real",
+            values: state.history.cpu,
+            valueLabel:
+              server.cpuPercent !== null ? `${Math.round(server.cpuPercent)}%` : "—",
+            tone: getPercentTone(server.cpuPercent || 0),
+            subtitle:
+              server.cpuPercent !== null
+                ? `${server.cpuModel || "CPU"} · ${getCpuStatusLabel(server.cpuPercent)}`
+                : "Sin datos",
+          })}
+
+          ${renderMiniSparkline({
+            title: "RAM en tiempo real",
+            values: state.history.ram,
+            valueLabel:
+              server.ramPercent !== null ? `${Math.round(server.ramPercent)}%` : "—",
+            tone: getPercentTone(server.ramPercent || 0),
+            subtitle:
+              server.ramPercent !== null
+                ? `${formatGB(server.ramUsedGB)} usadas de ${formatGB(server.ramTotalGB)}`
+                : "Sin datos",
+          })}
+
+          ${renderMiniSparkline({
+            title: "Latencia API",
+            values: state.history.apiLatency,
+            valueLabel: api.latencyMs ? formatMs(api.latencyMs) : "—",
+            max: 2000,
+            tone: getStatusTone(api.status),
+            subtitle: "Health interno del backend",
+          })}
+
+          ${renderMiniSparkline({
+            title: "Latencia Cosmos DB",
+            values: state.history.dbLatency,
+            valueLabel: db.latencyMs ? formatMs(db.latencyMs) : "—",
+            max: 2000,
+            tone: getStatusTone(db.status),
+            subtitle: "db.read() real del backend",
+          })}
+        </div>
+
+        <div
+          style="
+            display:grid;
+            grid-template-columns:1.1fr .9fr;
+            gap:16px;
+          "
+          class="server-view-grid-2"
+        >
+          <div class="ui-card" style="padding:18px; display:grid; gap:12px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+              <strong style="font-size:15px; color:var(--text-strong);">Procesos clave</strong>
+              <span style="font-size:12px; color:var(--text-dim);">Snapshot actual</span>
+            </div>
+
+            <div style="display:grid; gap:10px;">
+              ${infoRow("Proceso Node", runtime.nodePid !== null ? `PID ${runtime.nodePid}` : "—")}
+              ${infoRow("RSS proceso", formatMB(runtime.rssMB))}
+              ${infoRow("Heap used", formatMB(runtime.heapUsedMB))}
+              ${infoRow("Heap total", formatMB(runtime.heapTotalMB))}
+              ${infoRow("External", formatMB(runtime.externalMB))}
+              ${infoRow("Event loop", formatMs(server.eventLoopLag))}
+              ${infoRow("CPU host", server.cpuPercent !== null ? `${Math.round(server.cpuPercent)}%` : "—")}
+              ${infoRow("RAM host", server.ramPercent !== null ? `${Math.round(server.ramPercent)}%` : "—")}
+            </div>
+          </div>
+
+          <div class="ui-card" style="padding:18px; display:grid; gap:12px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+              <strong style="font-size:15px; color:var(--text-strong);">Capacidad</strong>
+              <span style="font-size:12px; color:var(--text-dim);">Uso / total</span>
+            </div>
+
+            <div style="display:grid; gap:10px;">
+              ${infoRow("RAM servidor", server.ramUsedGB !== null ? `${formatGB(server.ramUsedGB)} / ${formatGB(server.ramTotalGB)}` : "—")}
+              ${infoRow("Disco servidor", server.diskUsedGB !== null ? `${formatGB(server.diskUsedGB)} / ${formatGB(server.diskTotalGB)}` : "—")}
+              ${infoRow("Heap Node", runtime.heapUsedMB !== null ? `${formatMB(runtime.heapUsedMB)} / ${formatMB(runtime.heapTotalMB)}` : "—")}
+              ${infoRow("Heap navegador", browserMemory.available ? `${formatMB(browserMemory.jsHeapUsedMB)} / ${formatMB(browserMemory.jsHeapLimitMB)}` : "No soportado")}
+              ${infoRow("CPU model", server.cpuModel || "—")}
+              ${infoRow("CPU speed", server.cpuSpeedMHz ? `${formatNumber(server.cpuSpeedMHz)} MHz` : "—")}
+              ${infoRow("Cores", server.cpuCores !== null ? String(server.cpuCores) : "—")}
+              ${infoRow("Node", runtime.nodeVersion || "—")}
+            </div>
+          </div>
+        </div>
+      </section>
+    `;
+  }
+
   function renderServices() {
     const services = state.telemetry?.services || {};
 
@@ -865,6 +1387,7 @@ export const ServerView = (() => {
     const runtime = state.telemetry?.runtime || {};
     const environment = state.telemetry?.environment || {};
     const db = state.telemetry?.db || {};
+    const browserMemory = env.browserMemory || {};
 
     return `
       <section
@@ -963,6 +1486,7 @@ export const ServerView = (() => {
             ${infoRow("Conexión", env.connectionType || "—")}
             ${infoRow("Downlink", env.downlink ? `${env.downlink} Mb/s` : "—")}
             ${infoRow("RTT", env.rtt ? `${env.rtt} ms` : "—")}
+            ${infoRow("Heap navegador", browserMemory.available ? `${formatMB(browserMemory.jsHeapUsedMB)} / ${formatMB(browserMemory.jsHeapLimitMB)}` : "No soportado")}
             ${infoRow("DB status", db.status || "—")}
             ${infoRow("DB error", db.errorMessage || "—")}
           `
@@ -977,9 +1501,9 @@ export const ServerView = (() => {
         <div style="display:grid; gap:6px;">
           <strong style="color:var(--text-strong);">Vista conectada al health real</strong>
           <p style="margin:0; color:var(--text-dim); font-size:13px;">
-            Este panel ya consume <strong>/api/health/internal</strong> y <strong>/api/dashboard</strong>.
+            Este panel consume <strong>/api/health/internal</strong> y <strong>/api/dashboard</strong>.
             CPU, RAM, disco, host, runtime, DB y entorno proceden del backend.
-            Blob Storage seguirá en “No disponible” hasta que lo expongas también desde health interno.
+            Los gráficos en tiempo real se mantienen en memoria local del navegador y no requieren librerías externas.
           </p>
         </div>
       </section>
@@ -993,7 +1517,7 @@ export const ServerView = (() => {
           <div class="ui-empty-icon">⌛</div>
           <h3 class="ui-empty-title">Cargando estado del sistema…</h3>
           <p class="ui-empty-text">
-            Preparando dashboard, health interno, métricas del host y timings de la SPA.
+            Preparando dashboard, health interno, métricas del host, gráficas en tiempo real y timings de la SPA.
           </p>
         </div>
       </section>
@@ -1031,7 +1555,9 @@ export const ServerView = (() => {
         style="display:grid; gap:24px; padding:24px;"
       >
         ${renderHeader()}
+        ${renderControls()}
         ${renderTopKpis()}
+        ${renderLiveTaskManager()}
         ${renderSystemMetrics()}
         ${renderServices()}
         ${renderTechnicalGrid()}
@@ -1071,6 +1597,7 @@ export const ServerView = (() => {
     const scope = AppCore.cleanup.scope(SCOPE);
 
     const refreshBtn = document.getElementById("server-refresh-btn");
+    const toggleLiveBtn = document.getElementById("server-toggle-live-btn");
 
     if (refreshBtn) {
       AppCore.cleanup.on(scope, refreshBtn, "click", async () => {
@@ -1079,9 +1606,32 @@ export const ServerView = (() => {
       });
     }
 
+    if (toggleLiveBtn) {
+      AppCore.cleanup.on(scope, toggleLiveBtn, "click", () => {
+        state.autoRefresh = !state.autoRefresh;
+
+        if (state.autoRefresh) {
+          startAutoRefresh();
+        } else {
+          stopAutoRefresh();
+        }
+
+        render();
+      });
+    }
+
+    AppCore.cleanup.add(scope, () => {
+      if (!state.autoRefresh) {
+        stopAutoRefresh();
+      }
+    });
+
     if (!state.bootstrapped) {
       state.bootstrapped = true;
       loadData();
+      startAutoRefresh();
+    } else {
+      startAutoRefresh();
     }
   }
 

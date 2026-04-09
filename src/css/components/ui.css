@@ -9,6 +9,7 @@
    - cards / panels / buttons / forms / tables / toasts / modal
    - dark/light pulido
    - motion fino y enterprise
+   - integrado con shell neutral graphite
 ========================================================= */
 
 
@@ -37,9 +38,8 @@
   position:absolute;
   inset:0;
   pointer-events:none;
-
   background:
-    linear-gradient(180deg, rgba(255,255,255,.04), transparent 30%);
+    linear-gradient(180deg, rgba(255,255,255,.028), transparent 30%);
   opacity:.9;
 }
 
@@ -49,9 +49,9 @@
 }
 
 .panel-block:hover{
-  transform:translateY(-2px);
+  transform:translateY(-1px);
   box-shadow:var(--shadow-md);
-  border-color:color-mix(in srgb, var(--panel-border), #ffffff 10%);
+  border-color:var(--panel-border-hover, var(--border-default));
 }
 
 [data-theme="light"] .panel-block:hover{
@@ -84,9 +84,8 @@
   position:absolute;
   inset:0;
   pointer-events:none;
-
   background:
-    linear-gradient(180deg, rgba(255,255,255,.035), transparent 32%);
+    linear-gradient(180deg, rgba(255,255,255,.026), transparent 32%);
 }
 
 .ui-card > *{
@@ -95,9 +94,9 @@
 }
 
 .ui-card:hover{
-  transform:translateY(-2px);
+  transform:translateY(-1px);
   box-shadow:var(--card-shadow-hover, var(--shadow-md));
-  border-color:var(--card-border-hover, var(--card-border));
+  border-color:var(--card-border-hover, var(--border-strong));
 }
 
 
@@ -106,6 +105,7 @@
 ========================= */
 .ui-btn{
   position:relative;
+  isolation:isolate;
 
   display:inline-flex;
   align-items:center;
@@ -189,12 +189,12 @@
 }
 
 .ui-btn-secondary:hover{
-  background:var(--btn-secondary-bg-hover, var(--surface-3));
+  background:var(--btn-secondary-bg-hover, var(--surface-hover));
   border-color:var(--border-strong);
 }
 
 .ui-btn-secondary:active{
-  background:var(--btn-secondary-bg-active, var(--surface-4));
+  background:var(--btn-secondary-bg-active, var(--surface-active));
 }
 
 .ui-btn-ghost{
@@ -403,9 +403,9 @@
 }
 
 .badge.neutral{
-  background:var(--surface-3);
-  color:var(--text-dim);
-  border-color:var(--card-border);
+  background:var(--badge-bg, var(--surface-glass));
+  color:var(--badge-text, var(--text-dim));
+  border-color:var(--badge-border, var(--card-border));
 }
 
 .badge.outline{
@@ -468,7 +468,9 @@
   min-width:220px;
   padding:8px;
 
-  background:var(--dropdown-bg);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.022), rgba(255,255,255,.008)),
+    var(--dropdown-bg);
   border:1px solid var(--panel-border);
   border-radius:var(--radius-lg);
   box-shadow:var(--shadow-lg);
@@ -528,7 +530,9 @@
 
   border-radius:var(--radius-xl);
   border:1px solid var(--panel-border);
-  background:var(--panel-bg);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.028), rgba(255,255,255,.010)),
+    var(--panel-bg);
 
   box-shadow:
     var(--shadow-lg),
@@ -687,7 +691,9 @@
   max-height:min(85dvh, 900px);
   overflow:auto;
 
-  background:var(--panel-bg);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.022), rgba(255,255,255,.008)),
+    var(--panel-bg);
   border:1px solid var(--panel-border);
   border-radius:var(--radius-2xl);
   box-shadow:var(--shadow-xl);
@@ -738,7 +744,7 @@
   color:var(--text-muted);
   padding:14px 16px;
   border-bottom:1px solid var(--border-soft);
-  background:color-mix(in srgb, var(--panel-bg), var(--surface-3) 32%);
+  background:var(--table-head-bg, rgba(255,255,255,.022));
 }
 
 .ui-table tbody td{
@@ -753,7 +759,7 @@
 }
 
 .ui-table tbody tr:hover{
-  background:color-mix(in srgb, var(--surface-3), transparent 18%);
+  background:var(--table-row-hover, rgba(255,255,255,.026));
 }
 
 

@@ -338,6 +338,16 @@
   transform: translateY(-50%) translateX(0);
 }
 
+.sidebar .menu-item::after{
+  content: attr(data-tooltip);
+}
+
+.sidebar .menu-item:hover::after{
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(-50%) translateX(0);
+}
+
 /* =========================
    MENU
 ========================= */

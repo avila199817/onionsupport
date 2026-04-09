@@ -21,6 +21,7 @@ import { Auth } from "../features/auth.js";
 import { LoginView } from "../views/loginView.js";
 import { HomeView } from "../views/homeView.js";
 import { IncidenciasView } from "../views/incidenciasView.js";
+import { FacturasView } from "../views/facturasView.js";
 
 export const Router = (() => {
   "use strict";
@@ -62,7 +63,7 @@ export const Router = (() => {
       public: false,
       roles: [],
       hideShell: false,
-      render: renderGenericView,
+      render: renderFacturasView,
     },
     {
       path: "/usuarios",
@@ -118,12 +119,17 @@ export const Router = (() => {
     return AppCore.utils.normalizePath(path);
   }
 
+  function stripSearchAndHash(path = "/") {
+    return String(path || "/").split("?")[0].split("#")[0] || "/";
+  }
+
   function normalizeCanonicalPath(path = "/") {
     if (typeof AppCore.utils.normalizeCanonicalPath === "function") {
       return AppCore.utils.normalizeCanonicalPath(path);
     }
 
-    return stripUsernamePrefix(normalizePath(path));
+    const stripped = stripUsernamePrefix(path);
+    return normalizePath(stripSearchAndHash(stripped));
   }
 
   function escapeHtml(value = "") {
@@ -221,7 +227,7 @@ export const Router = (() => {
 
   function extractUsernameFromPath(pathname = "/") {
     const normalized = normalizePath(pathname);
-    const pathOnly = normalized.split("?")[0].split("#")[0] || "/";
+    const pathOnly = stripSearchAndHash(normalized);
     const match = pathOnly.match(/^\/@([^/]+)(?:\/|$)/i);
 
     if (!match) return null;
@@ -231,7 +237,19 @@ export const Router = (() => {
 
   function stripUsernamePrefix(pathname = "/") {
     const normalized = normalizePath(pathname);
-    const [pathOnly, suffix = ""] = normalized.split(/([?#].*)/, 2);
+
+    const hashIndex = normalized.indexOf("#");
+    const queryIndex = normalized.indexOf("?");
+
+    let splitIndex = -1;
+    if (queryIndex >= 0 && hashIndex >= 0) splitIndex = Math.min(queryIndex, hashIndex);
+    else if (queryIndex >= 0) splitIndex = queryIndex;
+    else if (hashIndex >= 0) splitIndex = hashIndex;
+
+    const pathOnly =
+      splitIndex >= 0 ? normalized.slice(0, splitIndex) : normalized;
+    const suffix = splitIndex >= 0 ? normalized.slice(splitIndex) : "";
+
     const stripped =
       (pathOnly || "/").replace(/^\/@[^/]+(?=\/|$)/i, "") || "/";
 
@@ -248,7 +266,7 @@ export const Router = (() => {
 
   function isSlugCandidatePath(pathname = "/") {
     const normalized = normalizePath(pathname);
-    const pathOnly = normalized.split("?")[0].split("#")[0] || "/";
+    const pathOnly = stripSearchAndHash(normalized);
     return /^\/@[^/]+(?:\/|$)/i.test(pathOnly);
   }
 
@@ -405,11 +423,11 @@ export const Router = (() => {
   }
 
   function clearDynamicContainers() {
-    AppCore.clearDynamicContainers();
+    AppCore.clearDynamicContainers?.();
   }
 
   function setDocumentTitle(title = AppCore.config.appName) {
-    AppCore.setDocumentTitle(title);
+    AppCore.setDocumentTitle?.(title);
   }
 
   function setActiveMenu(pathname = "/") {
@@ -441,21 +459,10 @@ export const Router = (() => {
       body,
     } = getShellElements();
 
-    if (sidebar) {
-      sidebar.hidden = hideShell;
-    }
-
-    if (topbar) {
-      topbar.hidden = hideShell;
-    }
-
-    if (topbarViewContainer) {
-      topbarViewContainer.hidden = hideShell;
-    }
-
-    if (tableheadContainer) {
-      tableheadContainer.hidden = hideShell;
-    }
+    if (sidebar) sidebar.hidden = hideShell;
+    if (topbar) topbar.hidden = hideShell;
+    if (topbarViewContainer) topbarViewContainer.hidden = hideShell;
+    if (tableheadContainer) tableheadContainer.hidden = hideShell;
 
     if (body) {
       body.classList.toggle("route-auth", hideShell);
@@ -554,6 +561,10 @@ export const Router = (() => {
 
   function renderIncidenciasView() {
     IncidenciasView.render();
+  }
+
+  function renderFacturasView() {
+    FacturasView.render();
   }
 
   function renderGenericView(route) {
@@ -682,8 +693,8 @@ export const Router = (() => {
         finalCanonical
     );
 
-    AppCore.setRoute(finalCanonical);
-    AppCore.setPublicPath(finalPublicPath);
+    AppCore.setRoute?.(finalCanonical);
+    AppCore.setPublicPath?.(finalPublicPath);
   }
 
   function emitBeforeRender(payload = {}) {

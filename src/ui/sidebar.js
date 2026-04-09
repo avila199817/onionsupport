@@ -224,6 +224,34 @@ export const SidebarUI = (() => {
      return !getSavedSidebarCollapsed();
    }
    
+   function syncMenuItemTitles(isOpen = null) {
+     const { sidebar, sidebarMenu } = getElements();
+     if (!sidebar || !sidebarMenu) return;
+   
+     const open =
+       typeof isOpen === "boolean"
+         ? isOpen
+         : (
+             !sidebar.classList.contains("collapsed") &&
+             !sidebar.classList.contains("is-collapsed")
+           );
+   
+     sidebarMenu.querySelectorAll(".menu-item").forEach((item) => {
+       const tooltipText = String(item.dataset.tooltip || "").trim();
+   
+       if (!tooltipText) {
+         item.removeAttribute("title");
+         return;
+       }
+   
+       if (open) {
+         item.removeAttribute("title");
+       } else {
+         item.setAttribute("title", tooltipText);
+       }
+     });
+   }
+   
    function updateToggleLabel(isOpen = null) {
      const { toggleBtn, mobileToggleBtn, sidebar } = getElements();
      if (!sidebar) return;
@@ -262,6 +290,7 @@ export const SidebarUI = (() => {
        sidebar.hidden = true;
        closeDropdown();
        updateToggleLabel(false);
+       syncMenuItemTitles(true);
        return;
      }
    
@@ -289,6 +318,7 @@ export const SidebarUI = (() => {
      }
    
      updateToggleLabel(isOpen);
+     syncMenuItemTitles(isOpen);
    
      AppCore.events.emit("sidebar:state:synced", {
        open: isOpen,

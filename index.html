@@ -10,7 +10,8 @@
        - loader limpio
        - topbar / sidebar / dynamic slots
        - rutas absolutas coherentes
-       - topbarview-container eliminado
+       - sidebar colapsado con tooltips finos
+       - accesibilidad base correcta
   ========================================================= -->
 
   <!-- =========================
@@ -221,6 +222,7 @@
           class="logo"
           id="homeLink"
           aria-label="Ir al inicio"
+          data-tooltip="Inicio"
         >
           <img
             class="logo-dark"
@@ -288,6 +290,7 @@
           data-spa
           class="menu-item"
           data-tooltip="Inicio"
+          aria-label="Inicio"
         >
           <span aria-hidden="true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
@@ -307,6 +310,7 @@
           data-spa
           class="menu-item"
           data-tooltip="Incidencias"
+          aria-label="Incidencias"
         >
           <span aria-hidden="true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
@@ -333,6 +337,7 @@
           data-spa
           class="menu-item"
           data-tooltip="Facturas"
+          aria-label="Facturas"
         >
           <span aria-hidden="true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
@@ -349,6 +354,7 @@
           class="menu-item"
           data-tooltip="Usuarios"
           data-role="admin"
+          aria-label="Usuarios"
         >
           <span aria-hidden="true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
@@ -365,6 +371,7 @@
           class="menu-item"
           data-tooltip="Clientes"
           data-role="admin"
+          aria-label="Clientes"
         >
           <span aria-hidden="true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
@@ -382,6 +389,7 @@
           data-spa
           class="menu-item"
           data-tooltip="Cuenta"
+          aria-label="Cuenta"
         >
           <span aria-hidden="true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
@@ -397,6 +405,7 @@
           data-spa
           class="menu-item"
           data-tooltip="Ajustes"
+          aria-label="Ajustes"
         >
           <span aria-hidden="true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
@@ -427,6 +436,7 @@
           aria-haspopup="menu"
           aria-expanded="false"
           aria-controls="userDropdown"
+          data-tooltip="Cuenta"
         >
           <div
             class="avatar"
@@ -598,6 +608,7 @@
       <!-- TABLE HEAD SLOT -->
       <div
         id="tablehead-container"
+        class="table-head"
         data-dynamic
         aria-live="polite"
       ></div>

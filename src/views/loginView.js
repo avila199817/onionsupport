@@ -457,10 +457,11 @@ export const LoginView = (() => {
       form.dataset.submitting = String(isSubmitting);
     }
 
-    if (identifierInput) identifierInput.disabled = isSubmitting;
-    if (passwordInput) passwordInput.disabled = isSubmitting;
-    if (rememberInput) rememberInput.disabled = isSubmitting;
-    if (toggleBtn) toggleBtn.disabled = isSubmitting;
+   if (identifierInput) identifierInput.disabled = isSubmitting;
+   if (rememberInput) rememberInput.disabled = isSubmitting;
+   
+   if (passwordInput) passwordInput.disabled = false;
+   if (toggleBtn) toggleBtn.disabled = false;
 
     if (forgotLink) {
       forgotLink.setAttribute("aria-disabled", String(isSubmitting));

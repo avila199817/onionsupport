@@ -1,6 +1,12 @@
-[data-theme="light"] {
+[data-theme="light"]{
   /* =========================================================
      ONION SUPPORT — LIGHT THEME / PRO SAAS PANEL
+     EXTREME LEVEL
+     - light premium ui
+     - enterprise clarity
+     - glass limpio
+     - contraste fino
+     - coherente con design tokens globales
   ========================================================= */
 
   /* =========================
@@ -9,44 +15,98 @@
   --accent: #7c3aed;
   --accent-hover: #6d28d9;
   --accent-active: #5b21b6;
-  --accent-soft: rgba(124, 58, 237, 0.12);
-  --accent-ghost: rgba(124, 58, 237, 0.08);
-  --accent-ring: rgba(124, 58, 237, 0.18);
+
+  --accent-2: #8b5cf6;
+  --accent-3: #0891b2;
+  --accent-4: #16a34a;
+  --accent-5: #db2777;
+
+  --accent-soft: rgba(124,58,237,.12);
+  --accent-soft-2: rgba(139,92,246,.10);
+  --accent-ghost: rgba(124,58,237,.08);
+  --accent-subtle: rgba(124,58,237,.05);
+  --accent-ring: rgba(124,58,237,.18);
+  --accent-border: rgba(124,58,237,.26);
+  --accent-border-strong: rgba(124,58,237,.38);
+  --accent-glow: rgba(124,58,237,.12);
+  --accent-glow-strong: rgba(124,58,237,.18);
 
   --brand-2: #16a34a;
-  --brand-3: #0891b2;
+  --brand-2-soft: rgba(22,163,74,.12);
 
+  --brand-3: #0891b2;
+  --brand-3-soft: rgba(8,145,178,.12);
+
+  --brand-4: #d97706;
+  --brand-4-soft: rgba(217,119,6,.12);
+
+  --brand-5: #db2777;
+  --brand-5-soft: rgba(219,39,119,.12);
 
   /* =========================
      TEXT
   ========================= */
   --text: #0f172a;
   --text-strong: #020617;
-  --text-muted: #334155;
-  --text-dim: #64748b;
-  --text-faint: #94a3b8;
+  --text-soft: rgba(15,23,42,.88);
+  --text-muted: rgba(15,23,42,.74);
+  --text-dim: rgba(15,23,42,.54);
+  --text-faint: rgba(15,23,42,.38);
+  --text-disabled: rgba(15,23,42,.24);
+
   --text-on-accent: #ffffff;
+  --text-on-light: #0f172a;
+
+  --link: #7c3aed;
+  --link-hover: #6d28d9;
 
   /* Compat legacy */
   --muted: var(--text-muted);
   --dim: var(--text-dim);
 
-
   /* =========================
      BASE / BACKDROP
   ========================= */
   --main-bg: #f4f7fb;
+  --main-bg-2: #eef3f8;
+  --main-bg-3: #e8eef5;
+  --body-fallback: #f4f7fb;
+
   --body-bg:
     radial-gradient(circle at top left, rgba(124,58,237,.06), transparent 24%),
     radial-gradient(circle at top right, rgba(8,145,178,.05), transparent 22%),
+    radial-gradient(circle at 50% 100%, rgba(236,72,153,.03), transparent 24%),
     linear-gradient(180deg, #f8fbff 0%, #f1f5f9 100%);
 
-  --app-noise: radial-gradient(
-    circle at 50% 0%,
-    rgba(255,255,255,0.60),
-    transparent 65%
-  );
+  --gradient-main:
+    linear-gradient(180deg, #f8fbff 0%, #eef3f8 100%);
 
+  --gradient-overlay:
+    radial-gradient(circle at 40% 0%, rgba(15,23,42,.04), transparent 70%);
+
+  --gradient-accent:
+    linear-gradient(135deg, #8b5cf6 0%, #7c3aed 48%, #0891b2 100%);
+
+  --gradient-accent-soft:
+    linear-gradient(135deg, rgba(139,92,246,.12) 0%, rgba(8,145,178,.10) 100%);
+
+  --gradient-success:
+    linear-gradient(180deg, #22c55e 0%, #16a34a 100%);
+
+  --gradient-warning:
+    linear-gradient(180deg, #f59e0b 0%, #d97706 100%);
+
+  --gradient-error:
+    linear-gradient(180deg, #ef4444 0%, #dc2626 100%);
+
+  --app-noise:
+    radial-gradient(circle at 50% 0%, rgba(255,255,255,.60), transparent 65%);
+
+  --panel-noise:
+    linear-gradient(180deg, rgba(255,255,255,.48), transparent 40%);
+
+  --glass-shine:
+    linear-gradient(180deg, rgba(255,255,255,.82), rgba(255,255,255,0) 34%);
 
   /* =========================
      SURFACE SYSTEM
@@ -56,102 +116,173 @@
   --surface-2: #ffffff;
   --surface-3: #f8fbff;
   --surface-4: #eef3f8;
+  --surface-5: #e5ebf3;
 
-  --surface-elevated: rgba(255, 255, 255, 0.88);
-  --surface-glass: rgba(255, 255, 255, 0.72);
-  --surface-glass-strong: rgba(255, 255, 255, 0.84);
+  --surface-elevated: rgba(255,255,255,.88);
+  --surface-elevated-strong: rgba(255,255,255,.96);
+
+  --surface-glass: rgba(255,255,255,.72);
+  --surface-glass-strong: rgba(255,255,255,.84);
+  --surface-glass-accent: rgba(124,58,237,.07);
+
+  --surface-hover: rgba(15,23,42,.035);
+  --surface-hover-strong: rgba(15,23,42,.055);
+  --surface-active: rgba(15,23,42,.075);
+  --surface-selected: rgba(124,58,237,.10);
+  --surface-disabled: rgba(15,23,42,.018);
+
+  --dropdown-bg: rgba(255,255,255,.98);
+  --tooltip-bg: #0f172a;
+  --tooltip-text: #ffffff;
+  --popover-bg: rgba(255,255,255,.98);
+  --modal-bg: rgba(255,255,255,.94);
+  --backdrop-bg: rgba(15,23,42,.26);
 
   /* Compat legacy */
-  --dropdown-bg: var(--surface-2);
-
+  --sb-bg: rgba(255,255,255,.90);
+  --dropdown-bg-legacy: var(--dropdown-bg);
 
   /* =========================
-     BORDERS
+     BORDER SYSTEM
   ========================= */
-  --border-soft: rgba(15, 23, 42, 0.06);
-  --border-default: rgba(15, 23, 42, 0.10);
-  --border-strong: rgba(15, 23, 42, 0.16);
-  --border-accent: rgba(124, 58, 237, 0.26);
+  --border-soft: rgba(15,23,42,.06);
+  --border-default: rgba(15,23,42,.10);
+  --border-strong: rgba(15,23,42,.16);
+  --border-stronger: rgba(15,23,42,.22);
+  --border-glass: rgba(255,255,255,.54);
 
+  --border-accent: rgba(124,58,237,.26);
+  --border-accent-strong: rgba(124,58,237,.38);
+  --border-success: rgba(22,163,74,.26);
+  --border-warning: rgba(217,119,6,.26);
+  --border-error: rgba(220,38,38,.26);
+  --border-info: rgba(37,99,235,.26);
 
   /* =========================
-     CARD / PANEL
+     CARD / PANEL / BLOCK
   ========================= */
   --card-bg:
-    linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(248,250,252,0.98) 100%);
-  --card-border: rgba(15, 23, 42, 0.08);
-  --card-radius: 24px;
-  --card-radius-lg: 28px;
+    linear-gradient(180deg, rgba(255,255,255,.96) 0%, rgba(248,250,252,.98) 100%);
+  --card-bg-hover:
+    linear-gradient(180deg, rgba(255,255,255,1) 0%, rgba(248,250,252,.98) 100%);
+
+  --card-border: rgba(15,23,42,.08);
+  --card-border-hover: rgba(15,23,42,.12);
+  --card-highlight: inset 0 1px 0 rgba(255,255,255,.82);
 
   --card-shadow:
-    0 10px 30px rgba(15,23,42,0.06),
-    0 2px 8px rgba(15,23,42,0.04);
-
-  --card-shadow-hover:
-    0 18px 40px rgba(15,23,42,0.10),
-    0 6px 16px rgba(15,23,42,0.06);
+    0 10px 30px rgba(15,23,42,.06),
+    0 2px 8px rgba(15,23,42,.04);
 
   --panel-bg:
-    linear-gradient(180deg, rgba(255,255,255,0.94) 0%, rgba(248,250,252,0.98) 100%);
-  --panel-border: rgba(15, 23, 42, 0.08);
-  --panel-radius: 20px;
+    linear-gradient(180deg, rgba(255,255,255,.94) 0%, rgba(248,250,252,.98) 100%);
+  --panel-bg-hover:
+    linear-gradient(180deg, rgba(255,255,255,.98) 0%, rgba(248,250,252,1) 100%);
+
+  --panel-border: rgba(15,23,42,.08);
+  --panel-border-hover: rgba(15,23,42,.12);
 
   --panel-shadow:
-    0 12px 28px rgba(15,23,42,0.06),
-    0 2px 8px rgba(15,23,42,0.04);
+    0 12px 28px rgba(15,23,42,.06),
+    0 2px 8px rgba(15,23,42,.04);
 
+  --block-bg: rgba(15,23,42,.028);
+  --block-bg-hover: rgba(15,23,42,.045);
+  --block-border: rgba(15,23,42,.08);
 
   /* =========================
-     INPUTS
+     INPUT SYSTEM
   ========================= */
   --input-height: 52px;
+  --input-height-sm: 42px;
+  --input-height-lg: 58px;
+
   --input-bg: #ffffff;
   --input-bg-hover: #fcfdff;
-  --input-border: rgba(15, 23, 42, 0.10);
-  --input-border-hover: rgba(15, 23, 42, 0.18);
-  --input-border-focus: rgba(124, 58, 237, 0.52);
+  --input-bg-focus: #ffffff;
+  --input-disabled-bg: rgba(15,23,42,.03);
+
+  --input-border: rgba(15,23,42,.10);
+  --input-border-hover: rgba(15,23,42,.18);
+  --input-border-focus: rgba(124,58,237,.52);
+  --input-border-error: rgba(220,38,38,.40);
+  --input-border-success: rgba(22,163,74,.38);
+
   --input-text: var(--text);
   --input-placeholder: #94a3b8;
-  --input-radius: 16px;
+  --input-icon: rgba(15,23,42,.46);
+
+  --input-shadow:
+    inset 0 1px 0 rgba(255,255,255,.90);
+
+  --input-shadow-hover:
+    inset 0 1px 0 rgba(255,255,255,1);
+
   --input-shadow-focus:
     0 0 0 4px rgba(124,58,237,.12),
     0 10px 24px rgba(124,58,237,.08);
-
 
   /* =========================
      BUTTONS
   ========================= */
   --btn-height: 52px;
-  --btn-radius: 16px;
+  --btn-height-sm: 40px;
+  --btn-height-lg: 58px;
 
-  --btn-primary-bg: linear-gradient(
-    180deg,
-    #8b5cf6 0%,
-    #7c3aed 100%
-  );
-  --btn-primary-bg-hover: linear-gradient(
-    180deg,
-    #7f56f1 0%,
-    #6d28d9 100%
-  );
+  --btn-primary-bg:
+    linear-gradient(180deg, #8b5cf6 0%, #7c3aed 100%);
+  --btn-primary-bg-hover:
+    linear-gradient(180deg, #7f56f1 0%, #6d28d9 100%);
+  --btn-primary-bg-active:
+    linear-gradient(180deg, #6d28d9 0%, #5b21b6 100%);
   --btn-primary-text: #ffffff;
+  --btn-primary-border: rgba(255,255,255,.14);
   --btn-primary-shadow:
     0 12px 24px rgba(124,58,237,.18),
     inset 0 1px 0 rgba(255,255,255,.18);
 
-  --btn-ghost-bg: rgba(15,23,42,0.03);
-  --btn-ghost-bg-hover: rgba(15,23,42,0.06);
-  --btn-ghost-border: rgba(15,23,42,0.08);
+  --btn-secondary-bg: rgba(15,23,42,.04);
+  --btn-secondary-bg-hover: rgba(15,23,42,.06);
+  --btn-secondary-bg-active: rgba(15,23,42,.09);
+  --btn-secondary-text: var(--text);
+  --btn-secondary-border: rgba(15,23,42,.08);
+  --btn-secondary-shadow: 0 6px 14px rgba(15,23,42,.05);
 
+  --btn-ghost-bg: rgba(15,23,42,.03);
+  --btn-ghost-bg-hover: rgba(15,23,42,.06);
+  --btn-ghost-bg-active: rgba(15,23,42,.08);
+  --btn-ghost-text: var(--text-muted);
+  --btn-ghost-border: rgba(15,23,42,.08);
+
+  --btn-danger-bg:
+    linear-gradient(180deg, #fb7185 0%, #ef4444 100%);
+  --btn-danger-bg-hover:
+    linear-gradient(180deg, #f87171 0%, #dc2626 100%);
+  --btn-danger-bg-active:
+    linear-gradient(180deg, #ef4444 0%, #b91c1c 100%);
+  --btn-danger-text: #ffffff;
+  --btn-danger-shadow:
+    0 10px 20px rgba(239,68,68,.14),
+    inset 0 1px 0 rgba(255,255,255,.12);
 
   /* =========================
      SIDEBAR
   ========================= */
-  --sidebar-bg: rgba(255, 255, 255, 0.90);
-  --sidebar-border: rgba(15, 23, 42, 0.07);
-  --sidebar-hover: rgba(15, 23, 42, 0.04);
-  --sidebar-active: rgba(124, 58, 237, 0.10);
-  --sidebar-active-border: rgba(124, 58, 237, 0.22);
+  --sidebar-bg: rgba(255,255,255,.90);
+  --sidebar-bg-strong: rgba(255,255,255,.97);
+  --sidebar-border: rgba(15,23,42,.07);
+  --sidebar-shadow:
+    0 18px 40px rgba(15,23,42,.08);
+
+  --sidebar-hover: rgba(15,23,42,.04);
+  --sidebar-active: rgba(124,58,237,.10);
+  --sidebar-active-hover: rgba(124,58,237,.14);
+  --sidebar-active-border: rgba(124,58,237,.22);
+
+  --sidebar-text: rgba(15,23,42,.74);
+  --sidebar-text-active: #111827;
+  --sidebar-icon: rgba(15,23,42,.58);
+  --sidebar-icon-active: #7c3aed;
 
   /* Compat legacy */
   --sb-bg: var(--sidebar-bg);
@@ -159,26 +290,53 @@
   --sb-active: var(--sidebar-active);
   --sb-border: var(--sidebar-border);
 
+  /* =========================
+     TOPBAR
+  ========================= */
+  --topbar-bg: rgba(255,255,255,.78);
+  --topbar-border: rgba(15,23,42,.06);
+  --topbar-shadow:
+    0 10px 22px rgba(15,23,42,.05);
+  --topbar-blur: blur(18px);
+
+  /* =========================
+     TABLES / DATA UI
+  ========================= */
+  --table-bg: transparent;
+  --table-head-bg: rgba(15,23,42,.028);
+  --table-row-bg: transparent;
+  --table-row-hover: rgba(15,23,42,.028);
+  --table-row-selected: rgba(124,58,237,.08);
+
+  --table-border: rgba(15,23,42,.06);
+  --table-head-border: rgba(15,23,42,.10);
 
   /* =========================
      STATUS
   ========================= */
   --success: #16a34a;
+  --success-hover: #15803d;
   --success-soft: rgba(22,163,74,.12);
+  --success-bg: rgba(22,163,74,.09);
 
   --warning: #d97706;
+  --warning-hover: #b45309;
   --warning-soft: rgba(217,119,6,.12);
+  --warning-bg: rgba(217,119,6,.09);
 
   --error: #dc2626;
+  --error-hover: #b91c1c;
   --error-soft: rgba(220,38,38,.12);
+  --error-bg: rgba(220,38,38,.09);
 
   --info: #2563eb;
+  --info-hover: #1d4ed8;
   --info-soft: rgba(37,99,235,.12);
+  --info-bg: rgba(37,99,235,.09);
 
   /* Compat legacy */
-  --warning-bg: var(--warning-soft);
-  --info-bg: var(--info-soft);
-
+  --warning-bg-legacy: var(--warning-soft);
+  --info-bg-legacy: var(--info-soft);
 
   /* =========================
      KPI COLORS
@@ -195,58 +353,96 @@
   --color-pendiente: #ef4444;
   --color-pendiente-glow: rgba(239,68,68,.16);
 
+  --color-facturacion: #2563eb;
+  --color-facturacion-glow: rgba(37,99,235,.16);
 
   /* =========================
-     BACKGROUNDS
+     AVATAR / BADGES / CHIPS
   ========================= */
-  --gradient-main: linear-gradient(
-    180deg,
-    #f8fbff 0%,
-    #eef3f8 100%
-  );
-
-  --gradient-overlay: radial-gradient(
-    circle at 40% 0%,
-    rgba(15,23,42,0.04),
-    transparent 70%
-  );
-
-
-  /* =========================
-     UI ELEMENTS
-  ========================= */
-  --tooltip-bg: #0f172a;
-  --tooltip-text: #ffffff;
-
-  --scrollbar-thumb: rgba(15,23,42,0.14);
-  --scrollbar-thumb-hover: rgba(15,23,42,0.22);
-
-
-  /* =========================
-     AVATAR
-  ========================= */
-  --avatar-bg: linear-gradient(180deg, #8b5cf6 0%, #7c3aed 100%);
+  --avatar-bg:
+    linear-gradient(180deg, #8b5cf6 0%, #7c3aed 100%);
+  --avatar-bg-2:
+    linear-gradient(180deg, #06b6d4 0%, #0891b2 100%);
   --avatar-text: #ffffff;
 
+  --badge-bg: rgba(15,23,42,.045);
+  --badge-border: rgba(15,23,42,.08);
+  --badge-text: var(--text-muted);
+
+  --chip-bg: rgba(15,23,42,.045);
+  --chip-border: rgba(15,23,42,.08);
+  --chip-text: var(--text-soft);
 
   /* =========================
      SHADOW SYSTEM
   ========================= */
-  --shadow-xs: 0 2px 8px rgba(15,23,42,0.04);
-  --shadow-sm: 0 6px 18px rgba(15,23,42,0.06);
-  --shadow-md: 0 12px 30px rgba(15,23,42,0.08);
-  --shadow-lg: 0 20px 50px rgba(15,23,42,0.12);
-  --shadow-xl: 0 30px 70px rgba(15,23,42,0.14);
+  --shadow-xs: 0 2px 8px rgba(15,23,42,.04);
+  --shadow-sm: 0 6px 18px rgba(15,23,42,.06);
+  --shadow-md: 0 12px 30px rgba(15,23,42,.08);
+  --shadow-lg: 0 20px 50px rgba(15,23,42,.12);
+  --shadow-xl: 0 30px 70px rgba(15,23,42,.14);
 
-  --shadow-soft: 0 8px 20px rgba(15,23,42,0.06);
-  --shadow-strong: 0 24px 50px rgba(15,23,42,0.12);
+  --shadow-soft: 0 8px 20px rgba(15,23,42,.06);
+  --shadow-strong: 0 24px 50px rgba(15,23,42,.12);
+
   --shadow-glow:
     0 0 0 1px rgba(255,255,255,.40),
     0 18px 45px rgba(124,58,237,.08);
 
+  --shadow-glow-cyan:
+    0 0 0 1px rgba(255,255,255,.46),
+    0 18px 42px rgba(8,145,178,.06);
+
+  --shadow-inner:
+    inset 0 1px 0 rgba(255,255,255,.72);
 
   /* =========================
-     FOCUS
+     BLUR
+  ========================= */
+  --blur-sm: blur(8px);
+  --blur-md: blur(14px);
+  --blur-lg: blur(20px);
+  --blur-xl: blur(28px);
+
+  /* =========================
+     FOCUS / ACCESSIBILITY
   ========================= */
   --focus-ring: 0 0 0 4px rgba(124,58,237,.12);
+  --focus-ring-strong: 0 0 0 4px rgba(124,58,237,.18);
+
+  --selection-bg: rgba(124,58,237,.18);
+  --selection-text: #111827;
+
+  /* =========================
+     SCROLLBAR
+  ========================= */
+  --scrollbar-size: 10px;
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: rgba(15,23,42,.14);
+  --scrollbar-thumb-hover: rgba(15,23,42,.22);
+
+  /* =========================
+     AUTH / LOGIN ESPECÍFICAS
+  ========================= */
+  --auth-card-bg:
+    linear-gradient(180deg, rgba(255,255,255,.96) 0%, rgba(248,250,252,.98) 100%);
+  --auth-card-border: rgba(15,23,42,.08);
+  --auth-card-shadow:
+    0 24px 60px rgba(15,23,42,.10),
+    0 0 0 1px rgba(255,255,255,.56),
+    0 18px 45px rgba(124,58,237,.05);
+
+  --auth-input-bg: #ffffff;
+  --auth-input-border: rgba(15,23,42,.10);
+  --auth-input-border-focus: rgba(124,58,237,.48);
+
+  --auth-logo-glow: 0 0 32px rgba(124,58,237,.10);
+
+  /* =========================
+     LOADER
+  ========================= */
+  --loader-bg: rgba(244,247,251,.92);
+  --loader-text: var(--text);
+  --loader-ring: rgba(15,23,42,.12);
+  --loader-ring-active: var(--accent);
 }

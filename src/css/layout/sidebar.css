@@ -270,9 +270,7 @@
 /* =========================
    TOOLTIP SYSTEM
 ========================= */
-.sidebar-toggle::after,
-.sidebar.collapsed .menu-item::after,
-.sidebar.is-collapsed .menu-item::after{
+.sidebar-toggle::after{
   content: "";
   position: absolute;
   top: 50%;
@@ -316,25 +314,16 @@
   content: attr(data-tooltip);
 }
 
-.sidebar.collapsed .menu-item::after,
-.sidebar.is-collapsed .menu-item::after{
-  content: attr(data-tooltip);
-}
-
 .sidebar:not(.collapsed):not(.is-collapsed) .sidebar-toggle:hover::after,
 .sidebar.collapsed .sidebar-toggle:hover::after,
-.sidebar.is-collapsed .sidebar-toggle:hover::after,
-.sidebar.collapsed .menu-item:hover::after,
-.sidebar.is-collapsed .menu-item:hover::after{
+.sidebar.is-collapsed .sidebar-toggle:hover::after{
   opacity: 1;
   visibility: visible;
 }
 
 .sidebar:not(.collapsed):not(.is-collapsed) .sidebar-toggle:hover::after,
 .sidebar.collapsed .sidebar-toggle:hover::after,
-.sidebar.is-collapsed .sidebar-toggle:hover::after,
-.sidebar.collapsed .menu-item:hover::after,
-.sidebar.is-collapsed .menu-item:hover::after{
+.sidebar.is-collapsed .sidebar-toggle:hover::after{
   transform: translateY(-50%) translateX(0);
 }
 

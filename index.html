@@ -10,6 +10,7 @@
        - loader limpio
        - topbar / sidebar / dynamic slots
        - rutas absolutas coherentes
+       - topbarview-container eliminado
   ========================================================= -->
 
   <!-- =========================
@@ -111,7 +112,6 @@
 
       .sidebar,
       .topbar,
-      #topbarview-container,
       #tablehead-container {
         display: none !important;
       }
@@ -594,13 +594,6 @@
           </div>
         </div>
       </header>
-
-      <!-- TOPBAR VIEW SLOT -->
-      <div
-        id="topbarview-container"
-        data-dynamic
-        aria-live="polite"
-      ></div>
 
       <!-- TABLE HEAD SLOT -->
       <div

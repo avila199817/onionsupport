@@ -13,6 +13,8 @@
    - init seguro una sola vez
    - accesible
    - compatible con ui.css
+   - loading spinner real vía CSS
+   - progreso visual refinado
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
@@ -20,12 +22,18 @@ import { AppCore } from "../core/core.js";
 export const Toast = (() => {
   "use strict";
 
+  /* =========================================================
+     CONFIG
+  ========================================================= */
   const SCOPE = "ui:toast";
   const DEFAULT_DURATION = 4200;
   const MAX_TOASTS = 5;
   const CONTAINER_ID = "toast-stack";
   const KEYFRAMES_ID = "toast-progress-keyframes";
 
+  /* =========================================================
+     STATE
+  ========================================================= */
   let initialized = false;
   let seed = 0;
 
@@ -144,24 +152,7 @@ export const Toast = (() => {
         `;
 
       case "loading":
-        return `
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <circle
-              cx="12"
-              cy="12"
-              r="9"
-              stroke="currentColor"
-              stroke-width="1.7"
-              opacity=".28"
-            />
-            <path
-              d="M12 3a9 9 0 0 1 9 9"
-              stroke="currentColor"
-              stroke-width="1.9"
-              stroke-linecap="round"
-            />
-          </svg>
-        `;
+        return "";
 
       case "info":
       default:
@@ -208,12 +199,15 @@ export const Toast = (() => {
     container.className = "toast-stack";
     container.setAttribute("aria-live", "polite");
     container.setAttribute("aria-relevant", "additions removals");
+    container.setAttribute("aria-atomic", "false");
+
     container.style.position = "fixed";
     container.style.top = "0";
     container.style.right = "0";
     container.style.zIndex = "var(--z-toast, 100)";
     container.style.display = "flex";
     container.style.flexDirection = "column";
+    container.style.alignItems = "flex-end";
     container.style.gap = "12px";
     container.style.padding = "24px";
     container.style.pointerEvents = "none";
@@ -231,8 +225,14 @@ export const Toast = (() => {
     style.id = KEYFRAMES_ID;
     style.textContent = `
       @keyframes toastProgress{
-        from{ transform:scaleX(1); opacity:1; }
-        to{ transform:scaleX(0); opacity:.72; }
+        from{
+          transform:scaleX(1);
+          opacity:1;
+        }
+        to{
+          transform:scaleX(0);
+          opacity:.72;
+        }
       }
     `;
     document.head.appendChild(style);
@@ -285,6 +285,7 @@ export const Toast = (() => {
     progressEl.style.display = "";
     progressEl.style.animation = "none";
     progressEl.style.transform = "scaleX(1)";
+    progressEl.style.transformOrigin = "left center";
 
     if (isReducedMotion()) {
       return;
@@ -363,8 +364,13 @@ export const Toast = (() => {
     toast.setAttribute("aria-atomic", "true");
     toast.style.pointerEvents = "auto";
 
+    const iconMarkup =
+      type === "loading"
+        ? `<div class="toast-icon" aria-hidden="true"></div>`
+        : `<div class="toast-icon" aria-hidden="true">${getIconSvg(type)}</div>`;
+
     toast.innerHTML = `
-      <div class="toast-icon">${getIconSvg(type)}</div>
+      ${iconMarkup}
 
       <div class="toast-content">
         ${title ? `<h4 class="toast-title">${escapeHtml(title)}</h4>` : ""}
@@ -391,6 +397,21 @@ export const Toast = (() => {
 
       <div class="toast-progress" aria-hidden="true"></div>
     `;
+
+    const progressEl = toast.querySelector(".toast-progress");
+    if (progressEl) {
+      progressEl.style.position = "absolute";
+      progressEl.style.left = "0";
+      progressEl.style.right = "0";
+      progressEl.style.bottom = "0";
+      progressEl.style.height = "3px";
+      progressEl.style.borderRadius = "0 0 inherit inherit";
+      progressEl.style.background =
+        "linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent), #ffffff 18%))";
+      progressEl.style.opacity = ".9";
+      progressEl.style.transformOrigin = "left center";
+      progressEl.style.pointerEvents = "none";
+    }
 
     return toast;
   }

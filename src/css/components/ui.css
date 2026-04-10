@@ -545,6 +545,9 @@
   transform:translateY(-14px) scale(.975);
   pointer-events:none;
 
+  overflow:hidden;
+  isolation:isolate;
+
   transition:
     opacity .24s var(--ease-out),
     visibility .24s var(--ease-out),
@@ -657,6 +660,8 @@
   gap:6px;
   min-width:0;
   flex:1 1 auto;
+
+  padding-bottom:calc(var(--ui-toast-progress-height, 2px) + var(--ui-toast-progress-bottom, 10px));
 }
 
 .toast-title{

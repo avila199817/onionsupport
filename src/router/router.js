@@ -716,6 +716,10 @@ export const Router = (() => {
     UsuariosView.render();
   }
 
+  function renderClientesView() {
+     ClientesView.render();
+  }
+
   function renderGenericView(route) {
     const view = getViewContainer();
 

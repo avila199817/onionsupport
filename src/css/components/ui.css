@@ -14,34 +14,6 @@
    - animaciones suaves y consistentes con tokens globales
 ========================================================= */
 
-
-/* =========================
-   ROOT / LOCAL UI TOKENS
-========================= */
-:root{
-  --ui-toast-top: 24px;
-  --ui-toast-right: 24px;
-  --ui-toast-width: min(520px, calc(100vw - 32px));
-  --ui-toast-padding-y: 18px;
-  --ui-toast-padding-x: 20px;
-  --ui-toast-gap: 16px;
-  --ui-toast-radius: var(--radius-xl);
-  --ui-toast-icon-size: 24px;
-  --ui-toast-close-size: 28px;
-
-  --ui-toast-loading-ring: rgba(255,255,255,.12);
-  --ui-toast-loading-active: var(--accent);
-  --ui-toast-loading-active-2: rgba(113,113,122,.42);
-
-  --ui-toast-overlay:
-    linear-gradient(180deg, rgba(255,255,255,.028), rgba(255,255,255,.010));
-
-  --ui-toast-shadow:
-    var(--shadow-lg),
-    0 0 0 1px rgba(255,255,255,.03) inset;
-}
-
-
 /* =========================
    PANEL BLOCK
 ========================= */

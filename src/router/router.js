@@ -29,6 +29,7 @@ import { IncidenciasView } from "../views/incidenciasView.js";
 import { FacturasView } from "../views/facturasView.js";
 import { ServerView } from "../views/serverView.js";
 import { UsuariosView } from "../views/usuariosView.js";
+import { ClientesView } from "../views/clientesView.js";
 
 export const Router = (() => {
   "use strict";
@@ -109,7 +110,7 @@ export const Router = (() => {
       public: false,
       roles: ["admin"],
       hideShell: false,
-      render: renderGenericView,
+      render: renderClientesView,
     },
     {
       path: "/cuenta",

@@ -1,18 +1,20 @@
 /* =========================================================
-   Onion SPA - App Bootstrap (FULL PRO SAAS PANEL)
+   Onion SPA - App Bootstrap (FULL PRO SAAS PANEL · FINAL PRO SYSTEM v3)
    Archivo: src/app.js
 
    Responsabilidades:
    - arrancar AppCore
    - inicializar Store
    - bind del router
-   - lanzar la primera renderización INMEDIATA
+   - lanzar la primera renderización inmediata
    - restaurar sesión sin bloquear el primer paint
    - montar listeners globales
    - bind de UI global
    - inicializar SidebarUI / TopbarUI / Toast
-   - apagar loader
-   - aplicar failsafe anti-loader infinito
+   - apagar loader de forma robusta
+   - aplicar failsafe anti-loader infinito real
+   - evitar race conditions en boot / reboot
+   - mantener compatibilidad con shell SPA actual
 ========================================================= */
 
 import { AppCore } from "./core/core.js";
@@ -26,9 +28,15 @@ import { Toast } from "./ui/toast.js";
 const App = (() => {
   "use strict";
 
+  /* =========================================================
+     CONFIG LOCAL APP
+  ========================================================= */
   const SCOPE = "app:global";
-  const BOOT_FAILSAFE_LOADER_MS = 1800;
+  const BOOT_FAILSAFE_LOADER_MS = 2500;
 
+  /* =========================================================
+     FLAGS INTERNOS
+  ========================================================= */
   let booted = false;
   let booting = false;
   let storeInitialized = false;
@@ -114,6 +122,9 @@ const App = (() => {
     return AppCore.dom.loader || document.getElementById("app-loader");
   }
 
+  /* =========================================================
+     LOADER / VISUAL BOOT CONTROL
+  ========================================================= */
   function forceHideLoader() {
     const loader = getLoaderElement();
 
@@ -136,13 +147,59 @@ const App = (() => {
     if (!loader) return;
 
     loader.hidden = false;
-    loader.setAttribute("aria-hidden", "true");
+    loader.setAttribute("aria-hidden", "false");
     loader.style.display = "";
     loader.style.opacity = "";
     loader.style.visibility = "";
     loader.style.pointerEvents = "";
   }
 
+  function showLoader() {
+    restoreLoaderInlineStyles();
+    AppCore.setLoading(true);
+  }
+
+  function hideLoader() {
+    AppCore.setLoading(false);
+    forceHideLoader();
+  }
+
+  function clearBootFailsafeTimer() {
+    if (bootFailsafeTimer) {
+      window.clearTimeout(bootFailsafeTimer);
+      bootFailsafeTimer = null;
+    }
+  }
+
+  function armBootFailsafeLoader() {
+    clearBootFailsafeTimer();
+
+    bootFailsafeTimer = window.setTimeout(() => {
+      const stillBooting = Boolean(booting || AppCore.state.booting);
+      const loaderStillVisible = Boolean(AppCore.state.loading);
+
+      if (!stillBooting && !loaderStillVisible) {
+        return;
+      }
+
+      AppCore.utils.warn(
+        "Failsafe loader aplicado: el arranque excedió el umbral previsto.",
+        {
+          booting,
+          coreBooting: AppCore.state.booting,
+          loading: AppCore.state.loading,
+          route: AppCore.state.route,
+          publicPath: AppCore.state.publicPath,
+        }
+      );
+
+      hideLoader();
+    }, BOOT_FAILSAFE_LOADER_MS);
+  }
+
+  /* =========================================================
+     SHELL / VISIBILIDAD
+  ========================================================= */
   function setShellVisibility(visible = true) {
     const hidden = !visible;
     const {
@@ -169,6 +226,49 @@ const App = (() => {
     });
   }
 
+  function isLoginPath(path = "") {
+    const normalized = AppCore.utils.normalizePath(path || "/");
+    return normalized === "/login" || normalized.startsWith("/login?");
+  }
+
+  function isAuthLikeRoute() {
+    const currentCanonicalPath = getCurrentCanonicalPath();
+    const currentPublicPath = getCurrentPublicPath();
+
+    return (
+      currentCanonicalPath === "/login" ||
+      isLoginPath(currentPublicPath)
+    );
+  }
+
+  function updateShellVisibilityByRoute() {
+    if (isAuthLikeRoute()) {
+      setShellVisibility(false);
+      return;
+    }
+
+    setShellVisibility(true);
+  }
+
+  function applyPostRenderLoaderPolicy() {
+    const viewContainer = getViewContainer();
+    const hasViewContent = Boolean(viewContainer?.innerHTML?.trim());
+
+    updateShellVisibilityByRoute();
+
+    if (isAuthLikeRoute()) {
+      hideLoader();
+      return;
+    }
+
+    if (hasViewContent) {
+      hideLoader();
+    }
+  }
+
+  /* =========================================================
+     ESTADO DE BOOT
+  ========================================================= */
   function markAppBootState({
     booted: isBooted = false,
     booting: isBooting = false,
@@ -179,52 +279,22 @@ const App = (() => {
     });
   }
 
-  function clearBootFailsafeTimer() {
-    if (bootFailsafeTimer) {
-      window.clearTimeout(bootFailsafeTimer);
-      bootFailsafeTimer = null;
+  function markStoreBootState({
+    ready = false,
+    booted = false,
+  } = {}) {
+    if (Store?.actions?.markReady) {
+      Store.actions.markReady(Boolean(ready));
+    }
+
+    if (Store?.actions?.markBooted) {
+      Store.actions.markBooted(Boolean(booted));
     }
   }
 
-  function armBootFailsafeLoader() {
-    clearBootFailsafeTimer();
-
-    bootFailsafeTimer = window.setTimeout(() => {
-      AppCore.utils.warn("Failsafe loader aplicado tras el arranque inicial.");
-      AppCore.setLoading(false);
-      forceHideLoader();
-    }, BOOT_FAILSAFE_LOADER_MS);
-  }
-
-  function isLoginPath(path = "") {
-    const normalized = AppCore.utils.normalizePath(path || "/");
-    return normalized === "/login" || normalized.startsWith("/login?");
-  }
-
-  function applyPostRenderLoaderPolicy() {
-    const currentCanonicalPath = getCurrentCanonicalPath();
-    const currentPublicPath = getCurrentPublicPath();
-    const viewContainer = getViewContainer();
-    const hasViewContent = Boolean(viewContainer?.innerHTML?.trim());
-
-    if (
-      currentCanonicalPath === "/login" ||
-      isLoginPath(currentPublicPath)
-    ) {
-      AppCore.setLoading(false);
-      forceHideLoader();
-      setShellVisibility(false);
-      return;
-    }
-
-    setShellVisibility(true);
-
-    if (hasViewContent) {
-      AppCore.setLoading(false);
-      forceHideLoader();
-    }
-  }
-
+  /* =========================================================
+     NAVEGACIÓN POST-SESSION
+  ========================================================= */
   function navigateAfterSessionRestore() {
     if (!AppCore.state.authenticated) return;
 
@@ -273,6 +343,7 @@ const App = (() => {
     AppCore.setDocumentTitle("Error de inicio");
     AppCore.clearDynamicContainers?.();
     setShellVisibility(false);
+    hideLoader();
 
     container.innerHTML = `
       <section class="content-wrapper">
@@ -321,8 +392,6 @@ const App = (() => {
         </div>
       </section>
     `;
-
-    forceHideLoader();
 
     const retryBtn = document.getElementById("boot-retry-btn");
     const resetSessionBtn = document.getElementById("boot-reset-session-btn");
@@ -445,7 +514,7 @@ const App = (() => {
   }
 
   /* =========================================================
-     WARMUP
+     WARMUP / DIAGNÓSTICO
   ========================================================= */
   async function warmup() {
     AppCore.utils.log("Warmup app iniciado.");
@@ -617,14 +686,18 @@ const App = (() => {
     } catch (error) {
       AppCore.utils.warn("restoreSession en background falló.", error);
 
-      if (loadingToastId && typeof Toast?.update === "function") {
-        Toast.update(loadingToastId, {
-          type: "warning",
-          title: "Sesión no restaurada",
-          message: "Se continuará sin restaurar la sesión.",
-          duration: 2600,
-          closable: true,
-        });
+      if (loadingToastId) {
+        if (typeof Toast?.update === "function") {
+          Toast.update(loadingToastId, {
+            type: "warning",
+            title: "Sesión no restaurada",
+            message: "Se continuará sin restaurar la sesión.",
+            duration: 2600,
+            closable: true,
+          });
+        } else if (typeof Toast?.dismiss === "function") {
+          Toast.dismiss(loadingToastId);
+        }
       }
 
       applyPostRenderLoaderPolicy();
@@ -637,23 +710,27 @@ const App = (() => {
     }
   }
 
+  /* =========================================================
+     FINALIZACIÓN DE BOOT
+  ========================================================= */
   function finalizeBoot() {
-    if (Store?.actions?.markReady) {
-      Store.actions.markReady(true);
-    }
+    clearBootFailsafeTimer();
 
-    if (Store?.actions?.markBooted) {
-      Store.actions.markBooted(true);
-    }
+    markStoreBootState({
+      ready: true,
+      booted: true,
+    });
 
     booted = true;
     booting = false;
 
-    markAppBootState({ booted: true, booting: false });
+    markAppBootState({
+      booted: true,
+      booting: false,
+    });
 
-    AppCore.setLoading(false);
-    forceHideLoader();
-    armBootFailsafeLoader();
+    hideLoader();
+    updateShellVisibilityByRoute();
 
     AppCore.events.emit("app:ready", {
       route: AppCore.state.route,
@@ -685,17 +762,22 @@ const App = (() => {
     }
 
     booting = true;
-    markAppBootState({ booted: false, booting: true });
+
+    markAppBootState({
+      booted: false,
+      booting: true,
+    });
+
     clearBootFailsafeTimer();
-    restoreLoaderInlineStyles();
 
     try {
       clearScope();
 
       await initCore();
 
-      AppCore.setLoading(true);
       AppCore.setError(null);
+      showLoader();
+      armBootFailsafeLoader();
 
       const scope = ensureScope();
 
@@ -729,15 +811,25 @@ const App = (() => {
 
       return api;
     } catch (error) {
+      clearBootFailsafeTimer();
+
       booted = false;
       booting = false;
-      markAppBootState({ booted: false, booting: false });
+
+      markStoreBootState({
+        ready: false,
+        booted: false,
+      });
+
+      markAppBootState({
+        booted: false,
+        booting: false,
+      });
 
       AppCore.setError(error);
       AppCore.utils.error("💥 Fallo en boot()", error);
 
-      AppCore.setLoading(false);
-      forceHideLoader();
+      hideLoader();
 
       Toast?.error?.(
         error?.message || "No se pudo arrancar la aplicación.",
@@ -751,8 +843,9 @@ const App = (() => {
 
       return api;
     } finally {
+      clearBootFailsafeTimer();
       booting = false;
-      AppCore.setLoading(false);
+      AppCore.setState({ booting: false });
       applyPostRenderLoaderPolicy();
     }
   }
@@ -777,16 +870,12 @@ const App = (() => {
       AppCore.setError(null);
     }
 
-    if (Store?.actions?.markBooted) {
-      Store.actions.markBooted(false);
-    }
+    markStoreBootState({
+      ready: false,
+      booted: false,
+    });
 
-    if (Store?.actions?.markReady) {
-      Store.actions.markReady(false);
-    }
-
-    AppCore.setLoading(false);
-    forceHideLoader();
+    hideLoader();
 
     return boot();
   }

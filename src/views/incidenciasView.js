@@ -1,5 +1,5 @@
 /* =========================================================
-   Onion SPA - Incidencias View (EXTREME PRO CLIENT DESK)
+   Onion SPA - Incidencias View (FULL PRO SAAS PANEL · FINAL PRO SYSTEM v3)
    Archivo: src/views/incidenciasView.js
 
    Responsabilidades:
@@ -16,6 +16,8 @@
    - normalizar tickets del backend nuevo
    - quick create de incidencia
    - acciones rápidas base para detalle / edición / recarga
+   - compatibilidad real con design tokens globales
+   - zero hardcoded visual noise / full variable driven UI
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
@@ -25,6 +27,9 @@ import { Http } from "../services/http.js";
 export const IncidenciasView = (() => {
   "use strict";
 
+  /* =========================================================
+     CONFIG
+  ========================================================= */
   const SCOPE = "view:incidencias";
 
   const ENDPOINTS = {
@@ -51,6 +56,9 @@ export const IncidenciasView = (() => {
   const CACHE_KEY = "incidencias.cache";
   const CACHE_TTL = 1000 * 60 * 3; // 3 min
 
+  /* =========================================================
+     ESTADO LOCAL
+  ========================================================= */
   const localState = {
     bootstrapped: false,
     hydrated: false,
@@ -142,13 +150,15 @@ export const IncidenciasView = (() => {
   }
 
   function getInitials(value = "") {
-    return String(value || "")
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part.charAt(0).toUpperCase())
-      .join("")
-      .slice(0, 2) || "ON";
+    return (
+      String(value || "")
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((part) => part.charAt(0).toUpperCase())
+        .join("")
+        .slice(0, 2) || "ON"
+    );
   }
 
   function buildAvatar(name = "") {
@@ -161,8 +171,13 @@ export const IncidenciasView = (() => {
 
   function getCurrentUserEmail() {
     const user = getCurrentUser();
+
     return normalizeText(
-      user?.email || user?.correo || user?.mail || user?.username || ""
+      user?.email ||
+      user?.correo ||
+      user?.mail ||
+      user?.username ||
+      ""
     );
   }
 
@@ -182,6 +197,7 @@ export const IncidenciasView = (() => {
 
   function schedulePaint(mode = "content") {
     if (renderScheduled) return;
+
     renderScheduled = true;
 
     requestAnimationFrame(() => {
@@ -215,8 +231,13 @@ export const IncidenciasView = (() => {
         return;
       }
 
-      localStorage.setItem(`${AppCore.config?.storagePrefix || "onion"}:${CACHE_KEY}`, JSON.stringify(payload));
-    } catch {}
+      localStorage.setItem(
+        `${AppCore.config?.storagePrefix || "onion"}:${CACHE_KEY}`,
+        JSON.stringify(payload)
+      );
+    } catch {
+      /* noop */
+    }
   }
 
   function readCache() {
@@ -304,7 +325,9 @@ export const IncidenciasView = (() => {
     const ticketId = item.ticketId ?? item.id ?? item._id ?? null;
 
     const status = normalizeStatus(item.status ?? item.estado ?? "open");
-    const priority = normalizePriority(item.priority ?? item.prioridad ?? "medium");
+    const priority = normalizePriority(
+      item.priority ?? item.prioridad ?? "medium"
+    );
 
     const clienteNombre =
       item.cliente?.nombre ??
@@ -337,7 +360,12 @@ export const IncidenciasView = (() => {
       "";
 
     const createdAt = item.createdAt ?? item.fechaCreacion ?? null;
-    const updatedAt = item.updatedAt ?? item.closedAt ?? item.fechaActualizacion ?? createdAt ?? null;
+    const updatedAt =
+      item.updatedAt ??
+      item.closedAt ??
+      item.fechaActualizacion ??
+      createdAt ??
+      null;
     const closedAt = item.closedAt ?? null;
 
     const attachments = safeArray(item.attachments);
@@ -411,7 +439,8 @@ export const IncidenciasView = (() => {
       },
 
       attachments,
-      attachmentsCount: safeNumber(item.attachmentsCount, attachments.length) || 0,
+      attachmentsCount:
+        safeNumber(item.attachmentsCount, attachments.length) || 0,
 
       history,
       historyCount: safeNumber(item.historyCount, history.length) || 0,
@@ -455,7 +484,7 @@ export const IncidenciasView = (() => {
   }
 
   /* =========================================================
-     LABELS / TONES
+     LABELS / TOKENS STATUS
   ========================================================= */
   function getStatusLabel(status) {
     const labels = {
@@ -465,6 +494,7 @@ export const IncidenciasView = (() => {
       resolved: "Resuelta",
       closed: "Cerrada",
     };
+
     return labels[status] || "Abierta";
   }
 
@@ -475,28 +505,40 @@ export const IncidenciasView = (() => {
       high: "Alta",
       urgent: "Urgente",
     };
+
     return labels[priority] || "Media";
   }
 
   function getStatusTone(status) {
     const tones = {
-      open: "rgba(59,130,246,.16)",
-      pending: "rgba(245,158,11,.16)",
-      in_progress: "rgba(168,85,247,.16)",
-      resolved: "rgba(34,197,94,.16)",
-      closed: "rgba(107,114,128,.16)",
+      open:
+        "background:color-mix(in srgb, var(--info) 14%, transparent); border:1px solid color-mix(in srgb, var(--info) 32%, transparent); color:var(--text-soft);",
+      pending:
+        "background:color-mix(in srgb, var(--warning) 14%, transparent); border:1px solid color-mix(in srgb, var(--warning) 32%, transparent); color:var(--text-soft);",
+      in_progress:
+        "background:color-mix(in srgb, var(--accent-2) 18%, transparent); border:1px solid color-mix(in srgb, var(--accent-2) 34%, transparent); color:var(--text-soft);",
+      resolved:
+        "background:color-mix(in srgb, var(--success) 14%, transparent); border:1px solid color-mix(in srgb, var(--success) 32%, transparent); color:var(--text-soft);",
+      closed:
+        "background:color-mix(in srgb, var(--text-dim) 14%, transparent); border:1px solid color-mix(in srgb, var(--text-dim) 28%, transparent); color:var(--text-muted);",
     };
-    return tones[status] || "rgba(59,130,246,.16)";
+
+    return tones[status] || tones.open;
   }
 
   function getPriorityTone(priority) {
     const tones = {
-      low: "rgba(34,197,94,.16)",
-      medium: "rgba(59,130,246,.16)",
-      high: "rgba(245,158,11,.16)",
-      urgent: "rgba(239,68,68,.16)",
+      low:
+        "background:color-mix(in srgb, var(--success) 12%, transparent); border:1px solid color-mix(in srgb, var(--success) 28%, transparent); color:var(--text-soft);",
+      medium:
+        "background:color-mix(in srgb, var(--info) 12%, transparent); border:1px solid color-mix(in srgb, var(--info) 28%, transparent); color:var(--text-soft);",
+      high:
+        "background:color-mix(in srgb, var(--warning) 12%, transparent); border:1px solid color-mix(in srgb, var(--warning) 28%, transparent); color:var(--text-soft);",
+      urgent:
+        "background:color-mix(in srgb, var(--error) 12%, transparent); border:1px solid color-mix(in srgb, var(--error) 28%, transparent); color:var(--text-soft);",
     };
-    return tones[priority] || "rgba(59,130,246,.16)";
+
+    return tones[priority] || tones.medium;
   }
 
   /* =========================================================
@@ -677,130 +719,276 @@ export const IncidenciasView = (() => {
   }
 
   /* =========================================================
-     UI TOKENS
+     HELPERS VISUALES 100% VARIABLES
   ========================================================= */
-  function cardStyle() {
+  function statCard({ label, value, hint, icon, accent = "var(--accent)" }) {
     return `
-      border:1px solid rgba(255,255,255,.08);
-      background:
-        linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.025));
-      border-radius:22px;
-      box-shadow:0 14px 34px rgba(0,0,0,.16);
+      <article
+        class="incidencias-stat-card"
+        style="
+          display:grid;
+          gap:var(--space-lg);
+          padding:var(--space-xl);
+          border-radius:var(--card-radius);
+          border:1px solid var(--card-border);
+          background:var(--card-bg);
+          box-shadow:var(--card-shadow);
+          min-height:154px;
+          position:relative;
+          overflow:hidden;
+        "
+      >
+        <div style="
+          position:absolute;
+          inset:auto -14% 64% auto;
+          width:110px;
+          height:110px;
+          border-radius:50%;
+          background:${accent};
+          opacity:.08;
+          filter:blur(24px);
+          pointer-events:none;
+        "></div>
+
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:var(--space-md); position:relative; z-index:1;">
+          <span style="
+            font-size:var(--font-md);
+            font-weight:var(--weight-medium);
+            color:var(--text-muted);
+            letter-spacing:var(--letter-wide);
+          ">
+            ${escapeHtml(label)}
+          </span>
+
+          <span style="
+            width:44px;
+            height:44px;
+            display:grid;
+            place-items:center;
+            border-radius:var(--radius-lg);
+            border:1px solid var(--border-default);
+            background:var(--surface-glass);
+            box-shadow:var(--shadow-xs);
+            font-size:18px;
+          ">
+            ${icon}
+          </span>
+        </div>
+
+        <div style="display:grid; gap:var(--space-xs); position:relative; z-index:1;">
+          <strong style="
+            font-size:clamp(28px, 3.2vw, 34px);
+            line-height:1;
+            letter-spacing:var(--letter-tight);
+            color:var(--text-strong);
+            font-weight:var(--weight-black);
+          ">
+            ${escapeHtml(String(value))}
+          </strong>
+
+          <span style="
+            font-size:var(--font-sm);
+            color:var(--text-dim);
+          ">
+            ${escapeHtml(hint)}
+          </span>
+        </div>
+      </article>
     `;
   }
 
-  function glassButtonStyle(primary = false) {
+  function baseButtonStyle(variant = "ghost") {
+    if (variant === "primary") {
+      return `
+        min-height:var(--btn-height-sm);
+        padding:10px 14px;
+        border-radius:var(--btn-radius);
+        border:1px solid var(--btn-primary-border);
+        background:var(--btn-primary-bg);
+        color:var(--btn-primary-text);
+        box-shadow:var(--btn-primary-shadow);
+        font-size:var(--font-md);
+        font-weight:var(--weight-bold);
+        letter-spacing:var(--letter-normal);
+        cursor:pointer;
+        transition:
+          transform var(--duration-normal) var(--ease-standard),
+          opacity var(--duration-normal) var(--ease-standard),
+          background var(--duration-normal) var(--ease-standard),
+          border-color var(--duration-normal) var(--ease-standard),
+          box-shadow var(--duration-normal) var(--ease-standard);
+      `;
+    }
+
     return `
-      padding:12px 16px;
-      border-radius:14px;
-      border:1px solid ${primary ? "rgba(99,102,241,.45)" : "rgba(255,255,255,.08)"};
-      background:${primary ? "rgba(99,102,241,.18)" : "rgba(255,255,255,.04)"};
-      color:inherit;
+      min-height:var(--btn-height-sm);
+      padding:10px 14px;
+      border-radius:var(--btn-radius);
+      border:1px solid var(--btn-secondary-border);
+      background:var(--btn-secondary-bg);
+      color:var(--btn-secondary-text);
+      box-shadow:var(--btn-secondary-shadow);
+      font-size:var(--font-md);
+      font-weight:var(--weight-bold);
+      letter-spacing:var(--letter-normal);
       cursor:pointer;
-      font-weight:700;
-      transition:all .18s ease;
+      transition:
+        transform var(--duration-normal) var(--ease-standard),
+        opacity var(--duration-normal) var(--ease-standard),
+        background var(--duration-normal) var(--ease-standard),
+        border-color var(--duration-normal) var(--ease-standard),
+        box-shadow var(--duration-normal) var(--ease-standard);
+    `;
+  }
+
+  function smallActionButtonStyle() {
+    return `
+      min-height:36px;
+      padding:8px 12px;
+      border-radius:var(--radius-sm);
+      border:1px solid var(--border-default);
+      background:var(--surface-glass);
+      color:var(--text-soft);
+      box-shadow:var(--shadow-xs);
+      cursor:pointer;
+      font-size:var(--font-sm);
+      font-weight:var(--weight-bold);
+      transition:
+        transform var(--duration-fast) var(--ease-standard),
+        background var(--duration-normal) var(--ease-standard),
+        border-color var(--duration-normal) var(--ease-standard),
+        color var(--duration-normal) var(--ease-standard);
+    `;
+  }
+
+  function inputStyle(multiline = false) {
+    return `
+      width:100%;
+      min-height:${multiline ? "140px" : "var(--input-height)"};
+      padding:${multiline ? "14px 16px" : "0 16px"};
+      border-radius:${multiline ? "var(--radius-lg)" : "var(--input-radius)"};
+      border:1px solid var(--input-border);
+      background:var(--input-bg);
+      color:var(--input-text);
+      box-shadow:var(--input-shadow);
+      outline:none;
+      resize:${multiline ? "vertical" : "none"};
+      font-size:var(--font-base);
+      transition:
+        background var(--duration-normal) var(--ease-standard),
+        border-color var(--duration-normal) var(--ease-standard),
+        box-shadow var(--duration-normal) var(--ease-standard);
+    `;
+  }
+
+  function panelStyle(extra = "") {
+    return `
+      border-radius:var(--panel-radius);
+      border:1px solid var(--panel-border);
+      background:var(--panel-bg);
+      box-shadow:var(--panel-shadow);
+      ${extra}
+    `;
+  }
+
+  function chipStyle(extra = "") {
+    return `
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:8px;
+      min-height:34px;
+      padding:7px 12px;
+      border-radius:var(--radius-pill);
+      border:1px solid var(--chip-border);
+      background:var(--chip-bg);
+      color:var(--chip-text);
+      font-size:var(--font-sm);
+      font-weight:var(--weight-semibold);
+      ${extra}
     `;
   }
 
   /* =========================================================
      UI PARTS
   ========================================================= */
-  function statCard({ label, value, hint, icon }) {
-    return `
-      <article style="
-        display:grid;
-        gap:14px;
-        padding:18px;
-        ${cardStyle()}
-      ">
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-          <span style="font-size:13px; opacity:.72;">${escapeHtml(label)}</span>
-          <span style="
-            width:42px;
-            height:42px;
-            display:grid;
-            place-items:center;
-            border-radius:14px;
-            border:1px solid rgba(255,255,255,.08);
-            background:rgba(255,255,255,.04);
-            font-size:18px;
-          ">${icon}</span>
-        </div>
-
-        <div style="display:grid; gap:4px;">
-          <strong style="font-size:30px; line-height:1;">${escapeHtml(value)}</strong>
-          <span style="font-size:12px; opacity:.65;">${escapeHtml(hint)}</span>
-        </div>
-      </article>
-    `;
-  }
-
   function renderShell() {
     return `
-      <section class="incidencias-view" style="display:grid; gap:24px; padding:24px;">
+      <section class="incidencias-view" style="display:grid; gap:var(--space-xl); padding:var(--content-padding);">
         <section style="
           display:grid;
-          gap:20px;
-          padding:24px;
-          ${cardStyle()}
+          gap:var(--space-xl);
+          padding:var(--space-xl);
+          ${panelStyle()}
         ">
-          <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:18px; flex-wrap:wrap;">
-            <div style="display:grid; gap:10px;">
-              <div style="width:220px; height:18px; border-radius:999px; background:rgba(255,255,255,.08);"></div>
-              <div style="width:min(760px, 80vw); height:12px; border-radius:999px; background:rgba(255,255,255,.06);"></div>
-              <div style="width:min(600px, 70vw); height:12px; border-radius:999px; background:rgba(255,255,255,.04);"></div>
+          <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:var(--space-xl); flex-wrap:wrap;">
+            <div style="display:grid; gap:var(--space-sm); min-width:0;">
+              <div style="width:240px; height:18px; border-radius:var(--radius-pill); background:var(--surface-glass-strong);"></div>
+              <div style="width:min(760px, 80vw); height:12px; border-radius:var(--radius-pill); background:var(--surface-glass);"></div>
+              <div style="width:min(600px, 70vw); height:12px; border-radius:var(--radius-pill); background:var(--surface-disabled);"></div>
             </div>
-            <div style="display:flex; gap:12px;">
-              <div style="width:120px; height:44px; border-radius:14px; background:rgba(255,255,255,.08);"></div>
-              <div style="width:150px; height:44px; border-radius:14px; background:rgba(255,255,255,.08);"></div>
+
+            <div style="display:flex; gap:var(--space-sm);">
+              <div style="width:120px; height:42px; border-radius:var(--btn-radius); background:var(--surface-glass-strong);"></div>
+              <div style="width:152px; height:42px; border-radius:var(--btn-radius); background:var(--surface-glass-strong);"></div>
             </div>
           </div>
         </section>
 
         <section style="
           display:grid;
-          grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
-          gap:16px;
+          grid-template-columns:repeat(auto-fit, minmax(210px, 1fr));
+          gap:var(--space-md);
         ">
           ${Array.from({ length: 6 })
             .map(
               () => `
-              <article style="
-                display:grid;
-                gap:14px;
-                padding:18px;
-                ${cardStyle()}
-              ">
-                <div style="width:70%; height:12px; border-radius:999px; background:rgba(255,255,255,.08);"></div>
-                <div style="width:40%; height:28px; border-radius:999px; background:rgba(255,255,255,.10);"></div>
-                <div style="width:75%; height:11px; border-radius:999px; background:rgba(255,255,255,.05);"></div>
-              </article>
-            `
+                <article style="
+                  display:grid;
+                  gap:var(--space-md);
+                  min-height:150px;
+                  padding:var(--space-xl);
+                  ${panelStyle()}
+                ">
+                  <div style="width:72%; height:12px; border-radius:var(--radius-pill); background:var(--surface-glass-strong);"></div>
+                  <div style="width:42%; height:30px; border-radius:var(--radius-pill); background:var(--surface-hover-strong);"></div>
+                  <div style="width:78%; height:11px; border-radius:var(--radius-pill); background:var(--surface-disabled);"></div>
+                </article>
+              `
             )
             .join("")}
         </section>
 
-        <section style="display:grid; grid-template-columns: minmax(300px, 420px) 1fr; gap:20px;" class="incidencias-main-grid">
-          <article style="padding:20px; ${cardStyle()}">
-            <div style="display:grid; gap:12px;">
-              <div style="width:160px; height:14px; border-radius:999px; background:rgba(255,255,255,.08);"></div>
-              <div style="height:46px; border-radius:14px; background:rgba(255,255,255,.05);"></div>
-              <div style="height:120px; border-radius:16px; background:rgba(255,255,255,.05);"></div>
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-                <div style="height:46px; border-radius:14px; background:rgba(255,255,255,.05);"></div>
-                <div style="height:46px; border-radius:14px; background:rgba(255,255,255,.05);"></div>
+        <section class="incidencias-main-grid" style="
+          display:grid;
+          grid-template-columns:minmax(320px, 420px) 1fr;
+          gap:var(--space-lg);
+        ">
+          <article style="padding:var(--space-xl); ${panelStyle()}">
+            <div style="display:grid; gap:var(--space-md);">
+              <div style="width:160px; height:14px; border-radius:var(--radius-pill); background:var(--surface-glass-strong);"></div>
+              <div style="height:52px; border-radius:var(--input-radius); background:var(--surface-glass);"></div>
+              <div style="height:150px; border-radius:var(--radius-lg); background:var(--surface-glass);"></div>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:var(--space-sm);">
+                <div style="height:52px; border-radius:var(--input-radius); background:var(--surface-glass);"></div>
+                <div style="height:52px; border-radius:var(--input-radius); background:var(--surface-glass);"></div>
               </div>
-              <div style="height:46px; width:160px; border-radius:14px; background:rgba(255,255,255,.08);"></div>
+              <div style="width:170px; height:42px; border-radius:var(--btn-radius); background:var(--surface-glass-strong);"></div>
             </div>
           </article>
 
-          <article style="padding:20px; ${cardStyle()}">
-            <div style="display:grid; gap:12px;">
-              <div style="height:52px; border-radius:16px; background:rgba(255,255,255,.05);"></div>
+          <article style="padding:var(--space-xl); ${panelStyle()}">
+            <div style="display:grid; gap:var(--space-md);">
+              <div style="height:54px; border-radius:var(--radius-lg); background:var(--surface-glass);"></div>
               ${Array.from({ length: 6 })
                 .map(
                   () => `
-                    <div style="height:70px; border-radius:16px; background:rgba(255,255,255,.04);"></div>
+                    <div style="
+                      height:72px;
+                      border-radius:var(--radius-lg);
+                      background:var(--surface-glass);
+                      border:1px solid var(--border-soft);
+                    "></div>
                   `
                 )
                 .join("")}
@@ -815,62 +1003,61 @@ export const IncidenciasView = (() => {
     const kpis = getKpis();
 
     return `
-      <section style="display:grid; gap:20px;">
+      <section style="display:grid; gap:var(--space-xl);">
         <div style="
           display:grid;
-          gap:16px;
-          padding:24px;
-          ${cardStyle()}
+          gap:var(--space-xl);
+          padding:var(--space-xl);
+          border-radius:var(--card-radius-lg);
+          border:1px solid var(--card-border);
           background:
-            radial-gradient(circle at top right, rgba(99,102,241,.20), transparent 32%),
-            linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.025));
+            radial-gradient(circle at top right, color-mix(in srgb, var(--accent) 12%, transparent), transparent 34%),
+            var(--card-bg);
+          box-shadow:var(--shadow-md);
         ">
-          <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:20px; flex-wrap:wrap;">
-            <div style="display:grid; gap:8px; min-width:0;">
-              <h2 style="margin:0; font-size:32px; line-height:1.05;">Centro de Incidencias</h2>
-              <p style="margin:0; opacity:.76; max-width:880px;">
-                Panel operativo para crear, consultar y gestionar incidencias desde una vista más rápida,
-                limpia y pensada para cliente final y equipo soporte.
+          <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:var(--space-xl); flex-wrap:wrap;">
+            <div style="display:grid; gap:var(--space-sm); min-width:0;">
+              <h2 style="
+                margin:0;
+                font-size:clamp(28px, 4vw, 36px);
+                line-height:var(--line-tight);
+                letter-spacing:var(--letter-tight);
+                color:var(--text-strong);
+                font-weight:var(--weight-black);
+              ">
+                Centro de Incidencias
+              </h2>
+
+              <p style="
+                margin:0;
+                max-width:900px;
+                color:var(--text-muted);
+                font-size:var(--font-lg);
+                line-height:var(--line-relaxed);
+              ">
+                Panel operativo limpio, serio y rápido para crear, consultar y gestionar incidencias
+                con una UX consistente con el shell principal de Onion Support.
               </p>
 
-              <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:4px;">
-                <span style="
-                  display:inline-flex;
-                  align-items:center;
-                  gap:8px;
-                  padding:8px 12px;
-                  border-radius:999px;
-                  border:1px solid rgba(255,255,255,.08);
-                  background:rgba(255,255,255,.04);
-                  font-size:12px;
-                  opacity:.88;
-                ">
-                  ${localState.refreshing ? "⟳" : "●"} ${
-      localState.lastSyncAt ? `Última sync: ${escapeHtml(formatRelativeDate(localState.lastSyncAt))}` : "Sincronizando"
-    }
+              <div style="display:flex; gap:var(--space-sm); flex-wrap:wrap; margin-top:2px;">
+                <span style="${chipStyle()}">
+                  ${localState.refreshing ? "⟳" : "●"}
+                  ${localState.lastSyncAt
+                    ? `Última sync: ${escapeHtml(formatRelativeDate(localState.lastSyncAt))}`
+                    : "Sincronizando"}
                 </span>
 
-                <span style="
-                  display:inline-flex;
-                  align-items:center;
-                  gap:8px;
-                  padding:8px 12px;
-                  border-radius:999px;
-                  border:1px solid rgba(255,255,255,.08);
-                  background:rgba(255,255,255,.04);
-                  font-size:12px;
-                  opacity:.88;
-                ">
+                <span style="${chipStyle()}">
                   ${escapeHtml(String(localState.remoteCount || kpis.total))} tickets visibles
                 </span>
               </div>
             </div>
 
-            <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+            <div style="display:flex; gap:var(--space-sm); flex-wrap:wrap; align-items:center;">
               <button
                 type="button"
                 id="incidencias-toggle-view-btn"
-                style="${glassButtonStyle(false)}"
+                style="${baseButtonStyle("ghost")}"
               >
                 Vista: ${localState.view === "table" ? "Tabla" : "Cards"}
               </button>
@@ -878,7 +1065,7 @@ export const IncidenciasView = (() => {
               <button
                 type="button"
                 id="incidencias-refresh-btn"
-                style="${glassButtonStyle(true)}"
+                style="${baseButtonStyle("primary")}"
               >
                 ${localState.refreshing ? "Actualizando..." : "Actualizar"}
               </button>
@@ -888,44 +1075,55 @@ export const IncidenciasView = (() => {
 
         <div style="
           display:grid;
-          grid-template-columns:repeat(auto-fit, minmax(210px, 1fr));
-          gap:16px;
+          grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
+          gap:var(--space-md);
         ">
           ${statCard({
             label: "Total",
             value: kpis.total,
             hint: "Incidencias cargadas",
             icon: "🎫",
+            accent: "var(--accent)",
           })}
+
           ${statCard({
             label: "Abiertas",
             value: kpis.open,
             hint: `${localState.stats.active || 0} activas`,
             icon: "🟦",
+            accent: "var(--info)",
           })}
+
           ${statCard({
             label: "Pendientes",
             value: kpis.pending,
             hint: "Esperando acción",
             icon: "🟨",
+            accent: "var(--warning)",
           })}
+
           ${statCard({
             label: "Urgentes",
             value: kpis.urgent,
             hint: "Prioridad máxima",
             icon: "🟥",
+            accent: "var(--error)",
           })}
+
           ${statCard({
             label: "Asignadas",
             value: kpis.assigned,
             hint: "Con técnico asociado",
             icon: "🧑‍💻",
+            accent: "var(--accent-2)",
           })}
+
           ${statCard({
             label: "Mías",
             value: kpis.mine,
             hint: "Relacionadas con mi cuenta",
             icon: "🙋",
+            accent: "var(--success)",
           })}
         </div>
       </section>
@@ -938,20 +1136,37 @@ export const IncidenciasView = (() => {
     return `
       <section style="
         display:grid;
-        gap:16px;
-        padding:20px;
-        ${cardStyle()}
+        gap:var(--space-lg);
+        padding:var(--space-xl);
+        ${panelStyle()}
       ">
-        <div style="display:grid; gap:6px;">
-          <h3 style="margin:0; font-size:20px;">Crear incidencia</h3>
-          <p style="margin:0; font-size:13px; opacity:.72;">
-            Alta rápida para cliente final. Pensado para reducir fricción y dejar el ticket creado en segundos.
+        <div style="display:grid; gap:var(--space-xs);">
+          <h3 style="
+            margin:0;
+            font-size:var(--font-2xl);
+            line-height:var(--line-snug);
+            color:var(--text-strong);
+            font-weight:var(--weight-bold);
+          ">
+            Crear incidencia
+          </h3>
+
+          <p style="
+            margin:0;
+            font-size:var(--font-md);
+            color:var(--text-muted);
+            line-height:var(--line-relaxed);
+          ">
+            Alta rápida orientada a cliente final. Menos fricción, mejor trazabilidad y entrada directa al flujo operativo.
           </p>
         </div>
 
-        <form id="incidencias-create-form" style="display:grid; gap:14px;">
-          <div style="display:grid; gap:8px;">
-            <label for="incidencias-create-subject" style="font-size:13px; opacity:.8;">Asunto</label>
+        <form id="incidencias-create-form" style="display:grid; gap:var(--space-md);">
+          <div style="display:grid; gap:var(--space-xs);">
+            <label for="incidencias-create-subject" style="font-size:var(--font-md); color:var(--text-muted);">
+              Asunto
+            </label>
+
             <input
               id="incidencias-create-subject"
               name="subject"
@@ -959,55 +1174,38 @@ export const IncidenciasView = (() => {
               maxlength="160"
               value="${escapeHtml(form.subject)}"
               placeholder="Ej. No puedo acceder al panel"
-              style="
-                width:100%;
-                padding:14px 16px;
-                border-radius:14px;
-                border:1px solid rgba(255,255,255,.10);
-                background:rgba(255,255,255,.02);
-                color:inherit;
-              "
+              style="${inputStyle(false)}"
             >
           </div>
 
-          <div style="display:grid; gap:8px;">
-            <label for="incidencias-create-description" style="font-size:13px; opacity:.8;">Descripción</label>
+          <div style="display:grid; gap:var(--space-xs);">
+            <label for="incidencias-create-description" style="font-size:var(--font-md); color:var(--text-muted);">
+              Descripción
+            </label>
+
             <textarea
               id="incidencias-create-description"
               name="description"
               rows="6"
               placeholder="Describe el problema con detalle: qué ocurre, desde cuándo y qué intentaste hacer."
-              style="
-                width:100%;
-                padding:14px 16px;
-                border-radius:16px;
-                border:1px solid rgba(255,255,255,.10);
-                background:rgba(255,255,255,.02);
-                color:inherit;
-                resize:vertical;
-                min-height:140px;
-              "
+              style="${inputStyle(true)}"
             >${escapeHtml(form.description)}</textarea>
           </div>
 
-          <div style="
+          <div class="incidencias-create-grid" style="
             display:grid;
             grid-template-columns:1fr 1fr;
-            gap:12px;
-          " class="incidencias-create-grid">
-            <div style="display:grid; gap:8px;">
-              <label for="incidencias-create-priority" style="font-size:13px; opacity:.8;">Prioridad</label>
+            gap:var(--space-sm);
+          ">
+            <div style="display:grid; gap:var(--space-xs);">
+              <label for="incidencias-create-priority" style="font-size:var(--font-md); color:var(--text-muted);">
+                Prioridad
+              </label>
+
               <select
                 id="incidencias-create-priority"
                 name="priority"
-                style="
-                  width:100%;
-                  padding:14px 16px;
-                  border-radius:14px;
-                  border:1px solid rgba(255,255,255,.10);
-                  background:rgba(255,255,255,.02);
-                  color:inherit;
-                "
+                style="${inputStyle(false)}"
               >
                 <option value="low"${form.priority === "low" ? " selected" : ""}>Baja</option>
                 <option value="medium"${form.priority === "medium" ? " selected" : ""}>Media</option>
@@ -1016,19 +1214,15 @@ export const IncidenciasView = (() => {
               </select>
             </div>
 
-            <div style="display:grid; gap:8px;">
-              <label for="incidencias-create-category" style="font-size:13px; opacity:.8;">Categoría</label>
+            <div style="display:grid; gap:var(--space-xs);">
+              <label for="incidencias-create-category" style="font-size:var(--font-md); color:var(--text-muted);">
+                Categoría
+              </label>
+
               <select
                 id="incidencias-create-category"
                 name="category"
-                style="
-                  width:100%;
-                  padding:14px 16px;
-                  border-radius:14px;
-                  border:1px solid rgba(255,255,255,.10);
-                  background:rgba(255,255,255,.02);
-                  color:inherit;
-                "
+                style="${inputStyle(false)}"
               >
                 <option value="general"${form.category === "general" ? " selected" : ""}>General</option>
                 <option value="facturacion"${form.category === "facturacion" ? " selected" : ""}>Facturación</option>
@@ -1042,41 +1236,41 @@ export const IncidenciasView = (() => {
           ${
             form.error
               ? `
-              <div style="
-                padding:12px 14px;
-                border-radius:14px;
-                border:1px solid rgba(239,68,68,.35);
-                background:rgba(239,68,68,.10);
-                color:#ffb4b4;
-                font-size:13px;
-              ">
-                ${escapeHtml(form.error)}
-              </div>
-            `
+                <div style="
+                  padding:12px 14px;
+                  border-radius:var(--radius-md);
+                  border:1px solid var(--border-error);
+                  background:var(--error-bg);
+                  color:var(--text-soft);
+                  font-size:var(--font-md);
+                ">
+                  ${escapeHtml(form.error)}
+                </div>
+              `
               : ""
           }
 
           ${
             form.success
               ? `
-              <div style="
-                padding:12px 14px;
-                border-radius:14px;
-                border:1px solid rgba(34,197,94,.30);
-                background:rgba(34,197,94,.10);
-                color:#b8f2c8;
-                font-size:13px;
-              ">
-                ${escapeHtml(form.success)}
-              </div>
-            `
+                <div style="
+                  padding:12px 14px;
+                  border-radius:var(--radius-md);
+                  border:1px solid var(--border-success);
+                  background:var(--success-bg);
+                  color:var(--text-soft);
+                  font-size:var(--font-md);
+                ">
+                  ${escapeHtml(form.success)}
+                </div>
+              `
               : ""
           }
 
-          <div style="display:flex; gap:12px; flex-wrap:wrap;">
+          <div style="display:flex; gap:var(--space-sm); flex-wrap:wrap;">
             <button
               type="submit"
-              style="${glassButtonStyle(true)} min-width:170px;"
+              style="${baseButtonStyle("primary")} min-width:176px;"
               ${form.sending ? "disabled" : ""}
             >
               ${form.sending ? "Creando..." : "Crear incidencia"}
@@ -1085,7 +1279,7 @@ export const IncidenciasView = (() => {
             <button
               type="button"
               id="incidencias-create-clear-btn"
-              style="${glassButtonStyle(false)}"
+              style="${baseButtonStyle("ghost")}"
             >
               Limpiar
             </button>
@@ -1099,13 +1293,24 @@ export const IncidenciasView = (() => {
     return `
       <section style="
         display:grid;
-        gap:16px;
-        padding:20px;
-        ${cardStyle()}
+        gap:var(--space-lg);
+        padding:var(--space-xl);
+        ${panelStyle()}
       ">
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-          <h3 style="margin:0; font-size:18px;">Gestión y filtros</h3>
-          <span style="font-size:13px; opacity:.65;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:var(--space-sm); flex-wrap:wrap;">
+          <h3 style="
+            margin:0;
+            font-size:var(--font-xl);
+            color:var(--text-strong);
+            font-weight:var(--weight-bold);
+          ">
+            Gestión y filtros
+          </h3>
+
+          <span style="
+            font-size:var(--font-md);
+            color:var(--text-dim);
+          ">
             Búsqueda local instantánea sobre la colección cargada
           </span>
         </div>
@@ -1115,7 +1320,7 @@ export const IncidenciasView = (() => {
           style="
             display:grid;
             grid-template-columns:minmax(220px, 1.6fr) repeat(5, minmax(132px, .7fr));
-            gap:12px;
+            gap:var(--space-sm);
           "
         >
           <input
@@ -1123,27 +1328,10 @@ export const IncidenciasView = (() => {
             type="text"
             placeholder="Buscar por ticket, asunto, cliente, email, técnico..."
             value="${escapeHtml(localState.query)}"
-            style="
-              width:100%;
-              padding:14px 16px;
-              border-radius:14px;
-              border:1px solid rgba(255,255,255,.10);
-              background:rgba(255,255,255,.02);
-              color:inherit;
-            "
+            style="${inputStyle(false)}"
           >
 
-          <select
-            id="incidencias-status-filter"
-            style="
-              width:100%;
-              padding:14px 16px;
-              border-radius:14px;
-              border:1px solid rgba(255,255,255,.10);
-              background:rgba(255,255,255,.02);
-              color:inherit;
-            "
-          >
+          <select id="incidencias-status-filter" style="${inputStyle(false)}">
             <option value="all"${localState.status === "all" ? " selected" : ""}>Estado</option>
             <option value="open"${localState.status === "open" ? " selected" : ""}>Abiertas</option>
             <option value="pending"${localState.status === "pending" ? " selected" : ""}>Pendientes</option>
@@ -1152,17 +1340,7 @@ export const IncidenciasView = (() => {
             <option value="closed"${localState.status === "closed" ? " selected" : ""}>Cerradas</option>
           </select>
 
-          <select
-            id="incidencias-priority-filter"
-            style="
-              width:100%;
-              padding:14px 16px;
-              border-radius:14px;
-              border:1px solid rgba(255,255,255,.10);
-              background:rgba(255,255,255,.02);
-              color:inherit;
-            "
-          >
+          <select id="incidencias-priority-filter" style="${inputStyle(false)}">
             <option value="all"${localState.priority === "all" ? " selected" : ""}>Prioridad</option>
             <option value="low"${localState.priority === "low" ? " selected" : ""}>Baja</option>
             <option value="medium"${localState.priority === "medium" ? " selected" : ""}>Media</option>
@@ -1170,48 +1348,18 @@ export const IncidenciasView = (() => {
             <option value="urgent"${localState.priority === "urgent" ? " selected" : ""}>Urgente</option>
           </select>
 
-          <select
-            id="incidencias-assigned-filter"
-            style="
-              width:100%;
-              padding:14px 16px;
-              border-radius:14px;
-              border:1px solid rgba(255,255,255,.10);
-              background:rgba(255,255,255,.02);
-              color:inherit;
-            "
-          >
+          <select id="incidencias-assigned-filter" style="${inputStyle(false)}">
             <option value="all"${localState.assigned === "all" ? " selected" : ""}>Asignación</option>
             <option value="assigned"${localState.assigned === "assigned" ? " selected" : ""}>Asignadas</option>
             <option value="unassigned"${localState.assigned === "unassigned" ? " selected" : ""}>Sin asignar</option>
           </select>
 
-          <select
-            id="incidencias-mine-filter"
-            style="
-              width:100%;
-              padding:14px 16px;
-              border-radius:14px;
-              border:1px solid rgba(255,255,255,.10);
-              background:rgba(255,255,255,.02);
-              color:inherit;
-            "
-          >
+          <select id="incidencias-mine-filter" style="${inputStyle(false)}">
             <option value="all"${localState.mine === "all" ? " selected" : ""}>Relación</option>
             <option value="mine"${localState.mine === "mine" ? " selected" : ""}>Solo mis incidencias</option>
           </select>
 
-          <select
-            id="incidencias-sort"
-            style="
-              width:100%;
-              padding:14px 16px;
-              border-radius:14px;
-              border:1px solid rgba(255,255,255,.10);
-              background:rgba(255,255,255,.02);
-              color:inherit;
-            "
-          >
+          <select id="incidencias-sort" style="${inputStyle(false)}">
             <option value="updated_desc"${localState.sort === "updated_desc" ? " selected" : ""}>Actualización ↓</option>
             <option value="updated_asc"${localState.sort === "updated_asc" ? " selected" : ""}>Actualización ↑</option>
             <option value="created_desc"${localState.sort === "created_desc" ? " selected" : ""}>Creación ↓</option>
@@ -1231,14 +1379,28 @@ export const IncidenciasView = (() => {
     return `
       <section style="
         display:grid;
-        gap:12px;
-        padding:24px;
-        ${cardStyle()}
+        gap:var(--space-md);
+        padding:var(--space-xl);
+        ${panelStyle()}
       ">
-        <h3 style="margin:0;">No se pudo cargar el listado</h3>
-        <p style="margin:0; color:#ffb4b4;">${escapeHtml(message)}</p>
-        <div style="display:flex; gap:12px; flex-wrap:wrap;">
-          <button id="incidencias-retry-btn" type="button" style="${glassButtonStyle(true)}">
+        <h3 style="
+          margin:0;
+          font-size:var(--font-xl);
+          color:var(--text-strong);
+        ">
+          No se pudo cargar el listado
+        </h3>
+
+        <p style="
+          margin:0;
+          color:var(--text-soft);
+          font-size:var(--font-base);
+        ">
+          ${escapeHtml(message)}
+        </p>
+
+        <div style="display:flex; gap:var(--space-sm); flex-wrap:wrap;">
+          <button id="incidencias-retry-btn" type="button" style="${baseButtonStyle("primary")}">
             Reintentar
           </button>
         </div>
@@ -1250,12 +1412,25 @@ export const IncidenciasView = (() => {
     return `
       <section style="
         display:grid;
-        gap:12px;
-        padding:24px;
-        ${cardStyle()}
+        gap:var(--space-md);
+        padding:var(--space-xl);
+        ${panelStyle()}
       ">
-        <h3 style="margin:0;">Sin incidencias</h3>
-        <p style="margin:0; opacity:.72;">${escapeHtml(message)}</p>
+        <h3 style="
+          margin:0;
+          font-size:var(--font-xl);
+          color:var(--text-strong);
+        ">
+          Sin incidencias
+        </h3>
+
+        <p style="
+          margin:0;
+          color:var(--text-muted);
+          font-size:var(--font-base);
+        ">
+          ${escapeHtml(message)}
+        </p>
       </section>
     `;
   }
@@ -1264,32 +1439,52 @@ export const IncidenciasView = (() => {
     return `
       <section style="
         display:grid;
-        gap:16px;
-        padding:20px;
-        ${cardStyle()}
+        gap:var(--space-lg);
+        padding:var(--space-xl);
+        ${panelStyle()}
       ">
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-          <h3 style="margin:0; font-size:18px;">Listado</h3>
-          <span style="font-size:13px; opacity:.65;">${items.length} resultado(s)</span>
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:var(--space-sm); flex-wrap:wrap;">
+          <h3 style="
+            margin:0;
+            font-size:var(--font-xl);
+            color:var(--text-strong);
+            font-weight:var(--weight-bold);
+          ">
+            Listado
+          </h3>
+
+          <span style="font-size:var(--font-md); color:var(--text-dim);">
+            ${items.length} resultado(s)
+          </span>
         </div>
 
-        <div style="overflow:auto;">
+        <div style="
+          overflow:auto;
+          border-radius:var(--radius-lg);
+          border:1px solid var(--table-head-border);
+          background:var(--surface-glass);
+        ">
           <table style="
             width:100%;
+            min-width:1140px;
             border-collapse:collapse;
-            min-width:1120px;
+            background:var(--table-bg);
           ">
             <thead>
-              <tr style="text-align:left; border-bottom:1px solid rgba(255,255,255,.08);">
-                <th style="padding:12px 10px; font-size:13px; opacity:.7;">Ticket</th>
-                <th style="padding:12px 10px; font-size:13px; opacity:.7;">Asunto</th>
-                <th style="padding:12px 10px; font-size:13px; opacity:.7;">Cliente</th>
-                <th style="padding:12px 10px; font-size:13px; opacity:.7;">Asignado</th>
-                <th style="padding:12px 10px; font-size:13px; opacity:.7;">Estado</th>
-                <th style="padding:12px 10px; font-size:13px; opacity:.7;">Prioridad</th>
-                <th style="padding:12px 10px; font-size:13px; opacity:.7;">Adj.</th>
-                <th style="padding:12px 10px; font-size:13px; opacity:.7;">Actualizada</th>
-                <th style="padding:12px 10px; font-size:13px; opacity:.7;">Acciones</th>
+              <tr style="
+                text-align:left;
+                background:var(--table-head-bg);
+                border-bottom:1px solid var(--table-head-border);
+              ">
+                <th style="padding:14px 12px; font-size:var(--font-md); color:var(--text-dim); font-weight:var(--weight-semibold);">Ticket</th>
+                <th style="padding:14px 12px; font-size:var(--font-md); color:var(--text-dim); font-weight:var(--weight-semibold);">Asunto</th>
+                <th style="padding:14px 12px; font-size:var(--font-md); color:var(--text-dim); font-weight:var(--weight-semibold);">Cliente</th>
+                <th style="padding:14px 12px; font-size:var(--font-md); color:var(--text-dim); font-weight:var(--weight-semibold);">Asignado</th>
+                <th style="padding:14px 12px; font-size:var(--font-md); color:var(--text-dim); font-weight:var(--weight-semibold);">Estado</th>
+                <th style="padding:14px 12px; font-size:var(--font-md); color:var(--text-dim); font-weight:var(--weight-semibold);">Prioridad</th>
+                <th style="padding:14px 12px; font-size:var(--font-md); color:var(--text-dim); font-weight:var(--weight-semibold);">Adj.</th>
+                <th style="padding:14px 12px; font-size:var(--font-md); color:var(--text-dim); font-weight:var(--weight-semibold);">Actualizada</th>
+                <th style="padding:14px 12px; font-size:var(--font-md); color:var(--text-dim); font-weight:var(--weight-semibold);">Acciones</th>
               </tr>
             </thead>
 
@@ -1300,95 +1495,91 @@ export const IncidenciasView = (() => {
                     <tr
                       data-ticket-id="${escapeHtml(item.ticketId || item.id || "")}"
                       class="incidencia-row"
-                      style="border-bottom:1px solid rgba(255,255,255,.06);"
+                      style="border-bottom:1px solid var(--table-border); background:var(--table-row-bg);"
                     >
-                      <td style="padding:14px 10px; font-size:13px; white-space:nowrap;">
-                        <div style="display:grid; gap:4px;">
-                          <strong>${escapeHtml(item.code || item.id || "—")}</strong>
-                          <span style="opacity:.6;">${escapeHtml(item.tipo || "general")}</span>
+                      <td style="padding:16px 12px; font-size:var(--font-md); white-space:nowrap; vertical-align:top;">
+                        <div style="display:grid; gap:var(--space-2xs);">
+                          <strong style="font-size:var(--font-base); color:var(--text-strong);">${escapeHtml(item.code || item.id || "—")}</strong>
+                          <span style="font-size:var(--font-sm); color:var(--text-dim);">${escapeHtml(item.tipo || "general")}</span>
                         </div>
                       </td>
 
-                      <td style="padding:14px 10px; min-width:280px;">
-                        <div style="display:grid; gap:5px;">
-                          <strong style="font-size:14px;">${escapeHtml(item.title)}</strong>
-                          <span style="font-size:12px; opacity:.65;">
-                            ${escapeHtml(truncate(item.preview || item.description || "Sin descripción", 120))}
+                      <td style="padding:16px 12px; min-width:300px; vertical-align:top;">
+                        <div style="display:grid; gap:var(--space-2xs);">
+                          <strong style="
+                            font-size:var(--font-base);
+                            color:var(--text-strong);
+                            line-height:var(--line-snug);
+                          ">
+                            ${escapeHtml(item.title)}
+                          </strong>
+
+                          <span style="
+                            font-size:var(--font-sm);
+                            color:var(--text-dim);
+                            line-height:var(--line-relaxed);
+                          ">
+                            ${escapeHtml(truncate(item.preview || item.description || "Sin descripción", 128))}
                           </span>
                         </div>
                       </td>
 
-                      <td style="padding:14px 10px; min-width:220px;">
-                        <div style="display:grid; gap:5px;">
-                          <strong style="font-size:14px;">${escapeHtml(item.client)}</strong>
-                          <span style="font-size:12px; opacity:.65;">${escapeHtml(item.clientEmail || "-")}</span>
+                      <td style="padding:16px 12px; min-width:220px; vertical-align:top;">
+                        <div style="display:grid; gap:var(--space-2xs);">
+                          <strong style="font-size:var(--font-base); color:var(--text-soft);">${escapeHtml(item.client)}</strong>
+                          <span style="font-size:var(--font-sm); color:var(--text-dim);">${escapeHtml(item.clientEmail || "-")}</span>
                         </div>
                       </td>
 
-                      <td style="padding:14px 10px; min-width:180px;">
-                        <div style="display:grid; gap:5px;">
-                          <strong style="font-size:14px;">${escapeHtml(item.assignedTo)}</strong>
-                          <span style="font-size:12px; opacity:.65;">${escapeHtml(item.assignedEmail || "Sin email")}</span>
+                      <td style="padding:16px 12px; min-width:190px; vertical-align:top;">
+                        <div style="display:grid; gap:var(--space-2xs);">
+                          <strong style="font-size:var(--font-base); color:var(--text-soft);">${escapeHtml(item.assignedTo)}</strong>
+                          <span style="font-size:var(--font-sm); color:var(--text-dim);">${escapeHtml(item.assignedEmail || "Sin email")}</span>
                         </div>
                       </td>
 
-                      <td style="padding:14px 10px;">
+                      <td style="padding:16px 12px; vertical-align:top;">
                         <span style="
-                          display:inline-flex;
-                          align-items:center;
-                          justify-content:center;
-                          padding:7px 10px;
-                          border-radius:999px;
-                          font-size:12px;
-                          font-weight:700;
-                          background:${getStatusTone(item.status)};
+                          ${chipStyle(getStatusTone(item.status))}
+                          min-height:30px;
+                          padding:6px 10px;
                         ">
                           ${escapeHtml(getStatusLabel(item.status))}
                         </span>
                       </td>
 
-                      <td style="padding:14px 10px;">
+                      <td style="padding:16px 12px; vertical-align:top;">
                         <span style="
-                          display:inline-flex;
-                          align-items:center;
-                          justify-content:center;
-                          padding:7px 10px;
-                          border-radius:999px;
-                          font-size:12px;
-                          font-weight:700;
-                          background:${getPriorityTone(item.priority)};
+                          ${chipStyle(getPriorityTone(item.priority))}
+                          min-height:30px;
+                          padding:6px 10px;
                         ">
                           ${escapeHtml(getPriorityLabel(item.priority))}
                         </span>
                       </td>
 
-                      <td style="padding:14px 10px; font-size:13px; white-space:nowrap;">
+                      <td style="padding:16px 12px; white-space:nowrap; vertical-align:top; font-size:var(--font-md); color:var(--text-soft);">
                         ${escapeHtml(String(item.attachmentsCount || 0))}
                       </td>
 
-                      <td style="padding:14px 10px; font-size:13px; white-space:nowrap;">
-                        <div style="display:grid; gap:4px;">
-                          <strong>${escapeHtml(formatRelativeDate(item.updatedAt))}</strong>
-                          <span style="opacity:.6;">${escapeHtml(formatDate(item.updatedAt))}</span>
+                      <td style="padding:16px 12px; white-space:nowrap; vertical-align:top;">
+                        <div style="display:grid; gap:var(--space-2xs);">
+                          <strong style="font-size:var(--font-md); color:var(--text-soft);">
+                            ${escapeHtml(formatRelativeDate(item.updatedAt))}
+                          </strong>
+                          <span style="font-size:var(--font-sm); color:var(--text-dim);">
+                            ${escapeHtml(formatDate(item.updatedAt))}
+                          </span>
                         </div>
                       </td>
 
-                      <td style="padding:14px 10px;">
-                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                      <td style="padding:16px 12px; vertical-align:top;">
+                        <div style="display:flex; gap:var(--space-xs); flex-wrap:wrap;">
                           <button
                             type="button"
                             data-action="open-ticket"
                             data-ticket-id="${escapeHtml(item.ticketId || item.id || "")}"
-                            style="
-                              padding:8px 10px;
-                              border-radius:12px;
-                              border:1px solid rgba(255,255,255,.08);
-                              background:rgba(255,255,255,.04);
-                              color:inherit;
-                              cursor:pointer;
-                              font-size:12px;
-                              font-weight:700;
-                            "
+                            style="${smallActionButtonStyle()}"
                           >
                             Abrir
                           </button>
@@ -1397,16 +1588,7 @@ export const IncidenciasView = (() => {
                             type="button"
                             data-action="copy-ticket"
                             data-ticket-code="${escapeHtml(item.code || item.id || "")}"
-                            style="
-                              padding:8px 10px;
-                              border-radius:12px;
-                              border:1px solid rgba(255,255,255,.08);
-                              background:rgba(255,255,255,.04);
-                              color:inherit;
-                              cursor:pointer;
-                              font-size:12px;
-                              font-weight:700;
-                            "
+                            style="${smallActionButtonStyle()}"
                           >
                             Copiar ID
                           </button>
@@ -1425,7 +1607,7 @@ export const IncidenciasView = (() => {
 
   function renderCards(items) {
     return `
-      <section class="incidencias-cards-mobile" style="display:grid; gap:14px;">
+      <section class="incidencias-cards-mobile" style="display:grid; gap:var(--space-sm);">
         ${items
           .map(
             (item) => `
@@ -1434,90 +1616,75 @@ export const IncidenciasView = (() => {
                 class="incidencia-card-mobile"
                 style="
                   display:grid;
-                  gap:14px;
-                  padding:18px;
-                  ${cardStyle()}
-                  cursor:pointer;
+                  gap:var(--space-md);
+                  padding:var(--space-lg);
+                  ${panelStyle("cursor:pointer;")}
                 "
               >
-                <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
-                  <div style="display:grid; gap:4px; min-width:0;">
-                    <strong style="font-size:14px;">${escapeHtml(item.code || item.id || "—")}</strong>
-                    <span style="font-size:12px; opacity:.65;">${escapeHtml(item.title)}</span>
+                <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:var(--space-sm);">
+                  <div style="display:grid; gap:var(--space-2xs); min-width:0;">
+                    <strong style="font-size:var(--font-base); color:var(--text-strong);">
+                      ${escapeHtml(item.code || item.id || "—")}
+                    </strong>
+
+                    <span style="
+                      font-size:var(--font-sm);
+                      color:var(--text-dim);
+                      line-height:var(--line-snug);
+                    ">
+                      ${escapeHtml(item.title)}
+                    </span>
                   </div>
 
                   <span style="
-                    display:inline-flex;
-                    align-items:center;
-                    justify-content:center;
-                    min-width:40px;
-                    height:40px;
-                    padding:0 10px;
-                    border-radius:14px;
-                    background:rgba(255,255,255,.05);
-                    border:1px solid rgba(255,255,255,.08);
-                    font-size:12px;
-                    font-weight:800;
+                    width:42px;
+                    height:42px;
+                    display:grid;
+                    place-items:center;
+                    border-radius:var(--radius-lg);
+                    border:1px solid var(--border-default);
+                    background:var(--surface-glass);
+                    color:var(--text-soft);
+                    font-size:var(--font-sm);
+                    font-weight:var(--weight-black);
+                    flex:0 0 auto;
                   ">
                     ${escapeHtml(String(item.attachmentsCount || 0))}
                   </span>
                 </div>
 
-                <div style="display:grid; gap:8px;">
-                  <div style="font-size:13px; opacity:.75;">
+                <div style="display:grid; gap:var(--space-sm);">
+                  <div style="
+                    font-size:var(--font-md);
+                    color:var(--text-muted);
+                    line-height:var(--line-relaxed);
+                  ">
                     ${escapeHtml(truncate(item.preview || item.description || "Sin descripción", 140))}
                   </div>
 
-                  <div style="display:grid; gap:5px; font-size:13px;">
-                    <span><strong>Cliente:</strong> ${escapeHtml(item.client)}</span>
-                    <span><strong>Técnico:</strong> ${escapeHtml(item.assignedTo)}</span>
-                    <span><strong>Actualizada:</strong> ${escapeHtml(formatRelativeDate(item.updatedAt))}</span>
+                  <div style="display:grid; gap:var(--space-2xs); font-size:var(--font-md); color:var(--text-soft);">
+                    <span><strong style="color:var(--text-strong);">Cliente:</strong> ${escapeHtml(item.client)}</span>
+                    <span><strong style="color:var(--text-strong);">Técnico:</strong> ${escapeHtml(item.assignedTo)}</span>
+                    <span><strong style="color:var(--text-strong);">Actualizada:</strong> ${escapeHtml(formatRelativeDate(item.updatedAt))}</span>
                   </div>
                 </div>
 
-                <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                  <span style="
-                    display:inline-flex;
-                    align-items:center;
-                    justify-content:center;
-                    padding:7px 10px;
-                    border-radius:999px;
-                    font-size:12px;
-                    font-weight:700;
-                    background:${getStatusTone(item.status)};
-                  ">
+                <div style="display:flex; gap:var(--space-xs); flex-wrap:wrap;">
+                  <span style="${chipStyle(getStatusTone(item.status))}">
                     ${escapeHtml(getStatusLabel(item.status))}
                   </span>
 
-                  <span style="
-                    display:inline-flex;
-                    align-items:center;
-                    justify-content:center;
-                    padding:7px 10px;
-                    border-radius:999px;
-                    font-size:12px;
-                    font-weight:700;
-                    background:${getPriorityTone(item.priority)};
-                  ">
+                  <span style="${chipStyle(getPriorityTone(item.priority))}">
                     ${escapeHtml(getPriorityLabel(item.priority))}
                   </span>
                 </div>
 
-                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <div style="display:flex; gap:var(--space-xs); flex-wrap:wrap;">
                   <button
                     type="button"
                     data-action="open-ticket"
                     data-ticket-id="${escapeHtml(item.ticketId || item.id || "")}"
-                    style="
-                      padding:10px 12px;
-                      border-radius:12px;
-                      border:1px solid rgba(255,255,255,.08);
-                      background:rgba(255,255,255,.04);
-                      color:inherit;
-                      cursor:pointer;
-                      font-size:12px;
-                      font-weight:700;
-                    "
+                    style="${smallActionButtonStyle()}"
                   >
                     Abrir
                   </button>
@@ -1526,16 +1693,7 @@ export const IncidenciasView = (() => {
                     type="button"
                     data-action="copy-ticket"
                     data-ticket-code="${escapeHtml(item.code || item.id || "")}"
-                    style="
-                      padding:10px 12px;
-                      border-radius:12px;
-                      border:1px solid rgba(255,255,255,.08);
-                      background:rgba(255,255,255,.04);
-                      color:inherit;
-                      cursor:pointer;
-                      font-size:12px;
-                      font-weight:700;
-                    "
+                    style="${smallActionButtonStyle()}"
                   >
                     Copiar ID
                   </button>
@@ -1553,26 +1711,26 @@ export const IncidenciasView = (() => {
       return `
         <section style="
           display:grid;
-          gap:16px;
-          padding:20px;
-          ${cardStyle()}
+          gap:var(--space-lg);
+          padding:var(--space-xl);
+          ${panelStyle()}
         ">
-          <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-            <h3 style="margin:0; font-size:18px;">Listado</h3>
-            <span style="font-size:13px; opacity:.65;">Cargando...</span>
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:var(--space-sm);">
+            <h3 style="margin:0; font-size:var(--font-xl); color:var(--text-strong);">Listado</h3>
+            <span style="font-size:var(--font-md); color:var(--text-dim);">Cargando...</span>
           </div>
 
-          <div style="display:grid; gap:12px;">
+          <div style="display:grid; gap:var(--space-sm);">
             ${Array.from({ length: 6 })
               .map(
                 () => `
-                <div style="
-                  height:72px;
-                  border-radius:16px;
-                  background:rgba(255,255,255,.04);
-                  border:1px solid rgba(255,255,255,.05);
-                "></div>
-              `
+                  <div style="
+                    height:72px;
+                    border-radius:var(--radius-lg);
+                    background:var(--surface-glass);
+                    border:1px solid var(--border-soft);
+                  "></div>
+                `
               )
               .join("")}
           </div>
@@ -1589,16 +1747,18 @@ export const IncidenciasView = (() => {
     if (!items.length) {
       return renderEmptyState(
         localState.query ||
-          localState.status !== "all" ||
-          localState.priority !== "all" ||
-          localState.assigned !== "all" ||
-          localState.mine !== "all"
+        localState.status !== "all" ||
+        localState.priority !== "all" ||
+        localState.assigned !== "all" ||
+        localState.mine !== "all"
           ? "No hay incidencias que coincidan con los filtros actuales."
           : "Todavía no hay incidencias registradas. Usa el panel de creación para abrir la primera."
       );
     }
 
-    return localState.view === "table" ? renderTable(items) : renderCards(items);
+    return localState.view === "table"
+      ? renderTable(items)
+      : renderCards(items);
   }
 
   function renderContent() {
@@ -1608,15 +1768,15 @@ export const IncidenciasView = (() => {
         style="
           display:grid;
           grid-template-columns:minmax(320px, 420px) 1fr;
-          gap:20px;
+          gap:var(--space-lg);
           align-items:start;
         "
       >
-        <div style="display:grid; gap:20px;">
+        <div style="display:grid; gap:var(--space-lg);">
           ${renderQuickCreate()}
         </div>
 
-        <div style="display:grid; gap:20px;">
+        <div style="display:grid; gap:var(--space-lg);">
           ${renderFilters()}
           ${renderListArea()}
         </div>
@@ -1629,6 +1789,7 @@ export const IncidenciasView = (() => {
   ========================================================= */
   function collectDomRefs() {
     const container = getContainer();
+
     dom = {
       container,
       headerSlot: container?.querySelector("#incidencias-header-slot") || null,
@@ -1645,8 +1806,67 @@ export const IncidenciasView = (() => {
     AppCore.clearDynamicContainers?.();
 
     container.innerHTML = `
-      <section class="incidencias-view" style="display:grid; gap:24px; padding:24px;">
+      <section class="incidencias-view" style="
+        display:grid;
+        gap:var(--space-xl);
+        padding:var(--content-padding);
+        max-width:var(--content-max);
+        width:100%;
+        margin:0 auto;
+      ">
         <style>
+          .incidencias-view input::placeholder,
+          .incidencias-view textarea::placeholder {
+            color: var(--input-placeholder);
+          }
+
+          .incidencias-view input,
+          .incidencias-view textarea,
+          .incidencias-view select,
+          .incidencias-view button {
+            font-family: var(--font-family);
+          }
+
+          .incidencias-view input:hover,
+          .incidencias-view textarea:hover,
+          .incidencias-view select:hover {
+            background: var(--input-bg-hover) !important;
+            border-color: var(--input-border-hover) !important;
+            box-shadow: var(--input-shadow-hover) !important;
+          }
+
+          .incidencias-view input:focus,
+          .incidencias-view textarea:focus,
+          .incidencias-view select:focus {
+            background: var(--input-bg-focus) !important;
+            border-color: var(--input-border-focus) !important;
+            box-shadow: var(--input-shadow-focus) !important;
+          }
+
+          .incidencias-view button:hover {
+            transform: translateY(-1px);
+            filter: brightness(1.03);
+          }
+
+          .incidencias-view button:active {
+            transform: translateY(0);
+          }
+
+          .incidencias-view button:disabled {
+            opacity: .65;
+            cursor: not-allowed;
+            transform: none !important;
+          }
+
+          .incidencia-row:hover {
+            background: var(--table-row-hover) !important;
+          }
+
+          .incidencia-card-mobile:hover {
+            background: var(--panel-bg-hover) !important;
+            border-color: var(--panel-border-hover) !important;
+          }
+
           @media (max-width: 1180px) {
             .incidencias-main-grid {
               grid-template-columns: 1fr !important;
@@ -1660,6 +1880,10 @@ export const IncidenciasView = (() => {
           }
 
           @media (max-width: 720px) {
+            .incidencias-view {
+              padding: var(--space-lg) !important;
+            }
+
             .incidencias-filters-grid,
             .incidencias-create-grid {
               grid-template-columns: 1fr !important;
@@ -1724,6 +1948,7 @@ export const IncidenciasView = (() => {
     if (!cache || !Array.isArray(cache.items)) return false;
 
     const items = cache.items.map(normalizeIncidencia);
+
     setIncidencias(items);
 
     localState.remoteCount = safeNumber(cache.remoteCount, items.length);
@@ -1742,6 +1967,7 @@ export const IncidenciasView = (() => {
 
     if (!localState.loaded && cached?.items?.length) {
       hydrateFromCache();
+
       if (!localState.hydrated) {
         render();
       } else {
@@ -1759,6 +1985,7 @@ export const IncidenciasView = (() => {
 
       if (!localState.hydrated) {
         const container = getContainer();
+
         if (container) {
           AppCore.cleanup.run(SCOPE);
           AppCore.setDocumentTitle("Incidencias");
@@ -1860,12 +2087,7 @@ export const IncidenciasView = (() => {
       tipo: category,
     };
 
-    try {
-      const response = await Http.post(ENDPOINTS.create, body);
-      return response;
-    } catch (error) {
-      throw error;
-    }
+    return Http.post(ENDPOINTS.create, body);
   }
 
   /* =========================================================
@@ -1889,6 +2111,7 @@ export const IncidenciasView = (() => {
     localState.createForm.sending = true;
     localState.createForm.error = null;
     localState.createForm.success = null;
+
     schedulePaint("content");
 
     try {
@@ -1921,6 +2144,7 @@ export const IncidenciasView = (() => {
         error?.message ||
         "No se pudo crear la incidencia.";
       localState.createForm.success = null;
+
       schedulePaint("content");
     }
   }
@@ -1935,6 +2159,7 @@ export const IncidenciasView = (() => {
       error: null,
       success: null,
     };
+
     schedulePaint("content");
   }
 

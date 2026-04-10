@@ -1,19 +1,19 @@
 /* =========================================================
-   Onion SPA - Facturas View (FULL PRO SAAS PANEL · GOD MODE)
+   Onion SPA - Facturas View (LEAN PRO SAAS PANEL)
    Archivo: src/views/facturasView.js
 
-   Responsabilidades:
-   - pintar el panel de facturas
-   - cargar facturas y stats desde backend nuevo
-   - soportar búsqueda local
-   - filtros por estado de pago / estado / envío
-   - soportar ordenación avanzada
-   - mostrar KPIs financieros
-   - renderizar tabla + cards responsive
-   - abrir detalle lateral de factura
-   - descargar factura PDF
-   - enviar factura al cliente
-   - gestionar loading / error / vacío sin romper la SPA
+   Objetivo actual:
+   - pintar SOLO cards de facturas existentes
+   - respetar el layout real del shell
+   - usar content-wrapper / panel-content / grid del sistema
+   - cargar facturas desde backend
+   - guardar facturas en Store
+   - normalizar facturas del backend nuevo
+   - estados mínimos: loading / error / vacío
+   - cero filtros
+   - cero tabla
+   - cero drawer
+   - simplicidad máxima
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
@@ -24,49 +24,19 @@ export const FacturasView = (() => {
 
   const SCOPE = "view:facturas";
 
-  const ENDPOINTS = {
-    list: "/api/facturas",
-    stats: "/api/facturas/stats",
-    detail: (id) => `/api/facturas/${encodeURIComponent(id)}`,
-    download: (id) => `/api/facturas/${encodeURIComponent(id)}/descargar`,
-    send: (id) => `/api/facturas/${encodeURIComponent(id)}/enviar`,
-  };
+  const ENDPOINT = "/api/facturas";
 
   const localState = {
-    bootstrapped: false,
+    hydrated: false,
     loading: false,
     loaded: false,
     error: null,
     refreshing: false,
-
-    query: "",
-    estadoPago: "all",
-    estado: "all",
-    sent: "all",
-    sort: "date_desc",
-
-    stats: {
-      totalPagado: 0,
-      totalPendiente: 0,
-      totalMes: 0,
-      totalVencido: 0,
-      countPagadas: 0,
-      countPendientes: 0,
-      countVencidas: 0,
-      countEnviadas: 0,
-      countTotal: 0,
-    },
-
+    bootstrapped: false,
     remoteCount: 0,
-
-    detailOpen: false,
-    detailLoading: false,
-    detailError: null,
-    selectedFacturaId: null,
-    selectedFactura: null,
-
-    sendingId: null,
   };
+
+  let inflightLoad = null;
 
   /* =========================================================
      HELPERS SAFE
@@ -77,8 +47,9 @@ export const FacturasView = (() => {
         return Store.get(path) ?? fallback;
       }
     } catch {
-      /* no-op */
+      /* noop */
     }
+
     return fallback;
   }
 
@@ -89,8 +60,9 @@ export const FacturasView = (() => {
         return true;
       }
     } catch {
-      /* no-op */
+      /* noop */
     }
+
     return false;
   }
 
@@ -101,8 +73,9 @@ export const FacturasView = (() => {
         return true;
       }
     } catch {
-      /* no-op */
+      /* noop */
     }
+
     return false;
   }
 
@@ -129,36 +102,20 @@ export const FacturasView = (() => {
     return Array.isArray(value) ? value : fallback;
   }
 
-  function normalizeText(value = "") {
-    return String(value || "")
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .trim();
+  function round2(value) {
+    return Math.round((safeNumber(value) + Number.EPSILON) * 100) / 100;
+  }
+
+  function truncate(value = "", max = 140) {
+    const text = safeString(value);
+    if (text.length <= max) return text;
+    return `${text.slice(0, max).trim()}…`;
   }
 
   function toMs(value) {
     if (!value) return 0;
     const ms = new Date(value).getTime();
     return Number.isFinite(ms) ? ms : 0;
-  }
-
-  function round2(value) {
-    return Math.round((safeNumber(value) + Number.EPSILON) * 100) / 100;
-  }
-
-  function truncate(value = "", max = 110) {
-    const text = safeString(value);
-    if (text.length <= max) return text;
-    return `${text.slice(0, max).trim()}…`;
-  }
-
-  function getUserRole() {
-    return String(AppCore.state.role || "").toLowerCase();
-  }
-
-  function isAdmin() {
-    return getUserRole() === "admin";
   }
 
   /* =========================================================
@@ -185,21 +142,6 @@ export const FacturasView = (() => {
     }).format(date);
   }
 
-  function formatDateTime(value) {
-    if (!value) return "—";
-
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return "—";
-
-    return new Intl.DateTimeFormat("es-ES", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(date);
-  }
-
   function formatRelativeDate(value) {
     if (!value) return "—";
 
@@ -219,6 +161,21 @@ export const FacturasView = (() => {
     return formatDate(value);
   }
 
+  function getInitials(value = "") {
+    return (
+      String(value || "")
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((part) => part[0]?.toUpperCase() || "")
+        .join("")
+        .slice(0, 2) || "ON"
+    );
+  }
+
+  /* =========================================================
+     NORMALIZACIÓN
+  ========================================================= */
   function normalizeEstadoPago(value = "pending") {
     const map = {
       pagada: "paid",
@@ -242,7 +199,8 @@ export const FacturasView = (() => {
       canceled: "cancelled",
     };
 
-    return map[normalizeText(value)] || "pending";
+    const key = safeString(value).toLowerCase();
+    return map[key] || "pending";
   }
 
   function normalizeEstado(value = "issued") {
@@ -263,7 +221,8 @@ export const FacturasView = (() => {
       draft: "draft",
     };
 
-    return map[normalizeText(value)] || "issued";
+    const key = safeString(value).toLowerCase();
+    return map[key] || "issued";
   }
 
   function getEstadoPagoLabel(value = "pending") {
@@ -289,32 +248,38 @@ export const FacturasView = (() => {
     return labels[value] || "Emitida";
   }
 
-  function getEstadoPagoTone(value = "pending") {
+  function getEstadoPagoChipStyle(value = "pending") {
     const tones = {
-      paid: "rgba(34,197,94,.16)",
-      pending: "rgba(245,158,11,.16)",
-      overdue: "rgba(239,68,68,.16)",
-      draft: "rgba(59,130,246,.16)",
-      cancelled: "rgba(107,114,128,.16)",
+      paid:
+        "background:var(--success-bg); border-color:var(--border-success); color:var(--text-soft);",
+      pending:
+        "background:var(--warning-bg); border-color:var(--border-warning); color:var(--text-soft);",
+      overdue:
+        "background:var(--error-bg); border-color:var(--border-error); color:var(--text-soft);",
+      draft:
+        "background:var(--info-bg); border-color:var(--border-info); color:var(--text-soft);",
+      cancelled:
+        "background:var(--surface-glass); border-color:var(--border-soft); color:var(--text-muted);",
     };
 
-    return tones[value] || "rgba(245,158,11,.16)";
+    return tones[value] || tones.pending;
   }
 
-  function getEstadoTone(value = "issued") {
+  function getEstadoChipStyle(value = "issued") {
     const tones = {
-      issued: "rgba(59,130,246,.16)",
-      sent: "rgba(16,185,129,.16)",
-      void: "rgba(107,114,128,.16)",
-      draft: "rgba(168,85,247,.16)",
+      issued:
+        "background:var(--info-bg); border-color:var(--border-info); color:var(--text-soft);",
+      sent:
+        "background:var(--success-bg); border-color:var(--border-success); color:var(--text-soft);",
+      void:
+        "background:var(--surface-glass); border-color:var(--border-soft); color:var(--text-muted);",
+      draft:
+        "background:var(--accent-soft-2); border-color:var(--border-accent); color:var(--text-soft);",
     };
 
-    return tones[value] || "rgba(59,130,246,.16)";
+    return tones[value] || tones.issued;
   }
 
-  /* =========================================================
-     NORMALIZACIÓN
-  ========================================================= */
   function normalizeFactura(item = {}) {
     const estadoPago = normalizeEstadoPago(item.estadoPago || "pending");
     const estado = normalizeEstado(item.estado || "issued");
@@ -338,15 +303,15 @@ export const FacturasView = (() => {
 
     return {
       id: item.id ?? null,
-      numero: item.numero ?? item.numeroFacturaLegal ?? item.numeroFacturaSistema ?? item.id ?? "--",
-
-      serie: safeString(item.serie, ""),
-      correlativo: safeNumber(item.correlativo, 0),
+      numero:
+        item.numero ??
+        item.numeroFacturaLegal ??
+        item.numeroFacturaSistema ??
+        item.id ??
+        "--",
 
       fecha,
-      fechaServicio: item.fechaServicio ?? null,
       fechaEnvio,
-      fechaPago: item.fechaPago ?? null,
       updatedAt,
 
       estadoPago,
@@ -365,97 +330,19 @@ export const FacturasView = (() => {
       attachmentsCount: safeNumber(item.attachmentsCount, 0),
       hasPdf: item.hasPdf === true || Boolean(item.blobPath),
 
-      blobPath: safeString(item.blobPath, ""),
-
       cliente: {
         id: item.cliente?.id ?? item.clienteId ?? null,
         nombre: clienteNombre,
         email: safeString(item.cliente?.email, "-"),
-        avatar: item.cliente?.avatar ?? null,
         empresa: clienteEmpresa,
-      },
-
-      auditoria: {
-        createdAt: item.auditoria?.createdAt ?? null,
-        createdBy: safeString(item.auditoria?.createdBy, ""),
+        initials: getInitials(clienteEmpresa !== "-" ? clienteEmpresa : clienteNombre),
       },
 
       meta: {
-        timestampMs:
-          safeNumber(item.meta?.timestampMs, 0) ||
-          toMs(updatedAt) ||
-          toMs(fecha) ||
-          0,
-        isPaid: item.meta?.isPaid === true || estadoPago === "paid",
-        isPending: item.meta?.isPending === true || estadoPago === "pending",
-        isOverdue: item.meta?.isOverdue === true || estadoPago === "overdue",
-        isSent: item.meta?.isSent === true || Boolean(fechaEnvio),
+        timestampMs: toMs(updatedAt) || toMs(fecha) || 0,
       },
 
       raw: item,
-    };
-  }
-
-  function normalizeFacturaDetalle(item = {}) {
-    const base = normalizeFactura(item);
-
-    return {
-      ...base,
-      tipoDocumento: safeString(item.tipoDocumento, "factura"),
-      tipoFactura: safeString(item.tipoFactura, "ordinaria"),
-      year: safeNumber(item.year, 0),
-      mes: safeString(item.mes, ""),
-      dia: safeString(item.dia, ""),
-
-      emisor: {
-        nombreComercial: safeString(item.emisor?.nombreComercial, ""),
-        nombreFiscal: safeString(item.emisor?.nombreFiscal, ""),
-        nif: safeString(item.emisor?.nif, ""),
-        direccion: {
-          calle: safeString(item.emisor?.direccion?.calle, ""),
-          cp: safeString(item.emisor?.direccion?.cp, ""),
-          ciudad: safeString(item.emisor?.direccion?.ciudad, ""),
-          provincia: safeString(item.emisor?.direccion?.provincia, ""),
-          pais: safeString(item.emisor?.direccion?.pais, ""),
-        },
-      },
-
-      cliente: {
-        ...base.cliente,
-        nif: safeString(item.cliente?.nif, ""),
-        numeroCliente: safeString(item.cliente?.numeroCliente, ""),
-        clienteIdInterno: safeString(item.cliente?.clienteIdInterno, ""),
-        direccion: {
-          calle: safeString(item.cliente?.direccion?.calle, ""),
-          cp: safeString(item.cliente?.direccion?.cp, ""),
-          ciudad: safeString(item.cliente?.direccion?.ciudad, ""),
-          provincia: safeString(item.cliente?.direccion?.provincia, ""),
-          pais: safeString(item.cliente?.direccion?.pais, ""),
-        },
-      },
-
-      direccionServicio: {
-        calle: safeString(item.direccionServicio?.calle, ""),
-        cp: safeString(item.direccionServicio?.cp, ""),
-        ciudad: safeString(item.direccionServicio?.ciudad, ""),
-        provincia: safeString(item.direccionServicio?.provincia, ""),
-        pais: safeString(item.direccionServicio?.pais, ""),
-      },
-
-      lineas: safeArray(item.lineas).map((linea) => ({
-        concepto: safeString(linea?.concepto, "Línea"),
-        descripcion: safeString(linea?.descripcion, ""),
-        cantidad: safeNumber(linea?.cantidad, 0),
-        precioUnitario: round2(linea?.precioUnitario),
-        totalLinea: round2(linea?.totalLinea),
-      })),
-
-      impuestos: safeArray(item.impuestos).map((imp) => ({
-        tipo: safeString(imp?.tipo, ""),
-        porcentaje: safeNumber(imp?.porcentaje, 0),
-        base: round2(imp?.base),
-        importe: round2(imp?.importe),
-      })),
     };
   }
 
@@ -483,34 +370,15 @@ export const FacturasView = (() => {
      REQUESTS
   ========================================================= */
   async function fetchFacturas() {
-    return AppCore.apiClient.get(ENDPOINTS.list, {
+    return AppCore.apiClient.get(ENDPOINT, {
       timeout: 15000,
-      auth: true,
-    });
-  }
-
-  async function fetchStats() {
-    return AppCore.apiClient.get(ENDPOINTS.stats, {
-      timeout: 15000,
-      auth: true,
-    });
-  }
-
-  async function fetchDetalle(id) {
-    return AppCore.apiClient.get(ENDPOINTS.detail(id), {
-      timeout: 15000,
-      auth: true,
-    });
-  }
-
-  async function sendFactura(id) {
-    return AppCore.apiClient.post(ENDPOINTS.send(id), null, {
-      timeout: 20000,
       auth: true,
     });
   }
 
   async function loadFacturas({ silent = false } = {}) {
+    if (inflightLoad) return inflightLoad;
+
     if (!silent) {
       localState.loading = true;
       localState.error = null;
@@ -520,791 +388,129 @@ export const FacturasView = (() => {
       render();
     }
 
-    try {
-      const [listResponse, statsResponse] = await Promise.all([
-        fetchFacturas(),
-        fetchStats(),
-      ]);
+    inflightLoad = (async () => {
+      try {
+        const response = await fetchFacturas();
+        const items = extractFacturas(response).map(normalizeFactura);
 
-      const items = extractFacturas(listResponse).map(normalizeFactura);
-      const stats = listResponse?.stats || statsResponse?.stats || statsResponse || {};
+        setFacturas(items);
 
-      setFacturas(items);
+        localState.remoteCount =
+          safeNumber(response?.count, items.length) || items.length;
 
-      localState.remoteCount = safeNumber(listResponse?.count, items.length) || items.length;
-      localState.stats = {
-        totalPagado: round2(stats.totalPagado),
-        totalPendiente: round2(stats.totalPendiente),
-        totalMes: round2(stats.totalMes),
-        totalVencido: round2(stats.totalVencido),
-        countPagadas: safeNumber(stats.countPagadas, 0),
-        countPendientes: safeNumber(stats.countPendientes, 0),
-        countVencidas: safeNumber(stats.countVencidas, 0),
-        countEnviadas: safeNumber(stats.countEnviadas, 0),
-        countTotal: safeNumber(stats.countTotal, items.length),
-      };
+        localState.loading = false;
+        localState.refreshing = false;
+        localState.loaded = true;
+        localState.error = null;
 
-      localState.loading = false;
-      localState.refreshing = false;
-      localState.loaded = true;
-      localState.error = null;
+        render();
+        return items;
+      } catch (error) {
+        localState.loading = false;
+        localState.refreshing = false;
+        localState.loaded = true;
+        localState.error =
+          error?.data?.message ||
+          error?.message ||
+          "No se pudieron cargar las facturas.";
 
-      render();
-    } catch (error) {
-      localState.loading = false;
-      localState.refreshing = false;
-      localState.loaded = true;
-      localState.error =
-        error?.data?.message ||
-        error?.message ||
-        "No se pudieron cargar las facturas.";
+        render();
+        throw error;
+      } finally {
+        inflightLoad = null;
+      }
+    })();
 
-      render();
-    }
-  }
-
-  async function openFacturaDetalle(id) {
-    if (!id) return;
-
-    localState.selectedFacturaId = id;
-    localState.selectedFactura = null;
-    localState.detailOpen = true;
-    localState.detailLoading = true;
-    localState.detailError = null;
-    render();
-
-    try {
-      const response = await fetchDetalle(id);
-      const factura = response?.factura || response?.data?.factura || response || {};
-      localState.selectedFactura = normalizeFacturaDetalle(factura);
-      localState.detailLoading = false;
-      localState.detailError = null;
-      render();
-    } catch (error) {
-      localState.detailLoading = false;
-      localState.detailError =
-        error?.data?.message ||
-        error?.message ||
-        "No se pudo cargar el detalle de la factura.";
-      render();
-    }
-  }
-
-  function closeFacturaDetalle() {
-    localState.detailOpen = false;
-    localState.detailLoading = false;
-    localState.detailError = null;
-    localState.selectedFacturaId = null;
-    localState.selectedFactura = null;
-    render();
-  }
-
-  function triggerDownload(id) {
-    if (!id) return;
-    window.open(ENDPOINTS.download(id), "_blank", "noopener,noreferrer");
-  }
-
-  async function triggerSend(id) {
-    if (!id || localState.sendingId) return;
-
-    localState.sendingId = id;
-    render();
-
-    try {
-      await sendFactura(id);
-      localState.sendingId = null;
-      await loadFacturas({ silent: true });
-      await openFacturaDetalle(id);
-    } catch (error) {
-      localState.sendingId = null;
-      localState.detailError =
-        error?.data?.message ||
-        error?.message ||
-        "No se pudo enviar la factura.";
-      render();
-    }
+    return inflightLoad;
   }
 
   /* =========================================================
-     FILTRO / ORDEN
+     ACTIONS
   ========================================================= */
-  function getFilteredFacturas() {
-    let items = [...getFacturas()];
+  function openFactura(id) {
+    if (!id) return;
 
-    if (localState.query) {
-      const term = normalizeText(localState.query);
-
-      items = items.filter((item) => {
-        return [
-          item.id,
-          item.numero,
-          item.cliente?.nombre,
-          item.cliente?.empresa,
-          item.cliente?.email,
-          item.formaPago,
-          item.preview,
-          getEstadoPagoLabel(item.estadoPago),
-          getEstadoLabel(item.estado),
-        ]
-          .filter(Boolean)
-          .some((value) => normalizeText(value).includes(term));
-      });
+    if (typeof AppCore.events?.emit === "function") {
+      AppCore.events.emit("facturas:open", { facturaId: id });
     }
 
-    if (localState.estadoPago !== "all") {
-      items = items.filter((item) => item.estadoPago === localState.estadoPago);
-    }
-
-    if (localState.estado !== "all") {
-      items = items.filter((item) => item.estado === localState.estado);
-    }
-
-    if (localState.sent === "sent") {
-      items = items.filter((item) => item.meta?.isSent);
-    }
-
-    if (localState.sent === "not_sent") {
-      items = items.filter((item) => !item.meta?.isSent);
-    }
-
-    items.sort((a, b) => {
-      if (localState.sort === "date_desc") {
-        return (b.meta?.timestampMs || 0) - (a.meta?.timestampMs || 0);
-      }
-
-      if (localState.sort === "date_asc") {
-        return (a.meta?.timestampMs || 0) - (b.meta?.timestampMs || 0);
-      }
-
-      if (localState.sort === "amount_desc") {
-        return safeNumber(b.total, 0) - safeNumber(a.total, 0);
-      }
-
-      if (localState.sort === "amount_asc") {
-        return safeNumber(a.total, 0) - safeNumber(b.total, 0);
-      }
-
-      if (localState.sort === "number_desc") {
-        return String(b.numero || "").localeCompare(String(a.numero || ""), "es");
-      }
-
-      if (localState.sort === "number_asc") {
-        return String(a.numero || "").localeCompare(String(b.numero || ""), "es");
-      }
-
-      if (localState.sort === "client_asc") {
-        return String(a.cliente?.empresa || a.cliente?.nombre || "").localeCompare(
-          String(b.cliente?.empresa || b.cliente?.nombre || ""),
-          "es"
-        );
-      }
-
-      return 0;
-    });
-
-    return items;
+    // Base lista para detalle real si lo conectas luego:
+    // Router.navigate(`/facturas/${id}`);
   }
 
   /* =========================================================
-     KPIS
+     UI
   ========================================================= */
-  function getKpis() {
+  function renderHeader() {
     const items = getFacturas();
-    const stats = localState.stats || {};
 
-    return {
-      total: items.length,
-      totalPagado: round2(stats.totalPagado),
-      totalPendiente: round2(stats.totalPendiente),
-      totalMes: round2(stats.totalMes),
-      totalVencido: round2(stats.totalVencido),
-      countPagadas: safeNumber(stats.countPagadas, items.filter((f) => f.meta?.isPaid).length),
-      countPendientes: safeNumber(stats.countPendientes, items.filter((f) => f.meta?.isPending).length),
-      countVencidas: safeNumber(stats.countVencidas, items.filter((f) => f.meta?.isOverdue).length),
-      countEnviadas: safeNumber(stats.countEnviadas, items.filter((f) => f.meta?.isSent).length),
-    };
-  }
-
-  /* =========================================================
-     UI PIECES
-  ========================================================= */
-  function statCard({ label, value, hint, icon }) {
     return `
-      <article
-        style="
-          display:grid;
-          gap:14px;
-          padding:18px;
-          border-radius:18px;
-          border:1px solid rgba(255,255,255,.08);
-          background:rgba(255,255,255,.03);
-        "
-      >
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-          <span style="font-size:14px; opacity:.72;">${escapeHtml(label)}</span>
-          <span
+      <header class="page-header">
+        <div class="page-header-main">
+          <h1 class="page-title">Facturas</h1>
+          <p class="page-subtitle">
+            Listado simple de facturas existentes. Solo cards, sin ruido y sin inventar otro layout.
+          </p>
+        </div>
+
+        <div class="page-header-actions">
+          <button
+            type="button"
+            id="facturas-refresh-btn"
             style="
-              width:40px;
-              height:40px;
-              display:grid;
-              place-items:center;
-              border-radius:12px;
-              border:1px solid rgba(255,255,255,.08);
-              background:rgba(255,255,255,.03);
+              min-height:var(--btn-height-sm);
+              padding:10px 14px;
+              border-radius:var(--btn-radius);
+              border:1px solid var(--btn-secondary-border);
+              background:var(--btn-secondary-bg);
+              color:var(--btn-secondary-text);
+              box-shadow:var(--btn-secondary-shadow);
+              font-weight:var(--weight-bold);
+              cursor:pointer;
             "
           >
-            ${icon}
-          </span>
+            ${localState.loading || localState.refreshing ? "Actualizando..." : "Actualizar"}
+          </button>
         </div>
+      </header>
 
-        <div style="display:grid; gap:4px;">
-          <strong style="font-size:30px; line-height:1;">${escapeHtml(value)}</strong>
-          <span style="font-size:13px; opacity:.65;">${escapeHtml(hint)}</span>
-        </div>
-      </article>
-    `;
-  }
-
-  function actionButton({ id, action, label, title }) {
-    return `
-      <button
-        type="button"
-        data-factura-action="${escapeHtml(action)}"
-        data-factura-id="${escapeHtml(id || "")}"
-        title="${escapeHtml(title || label)}"
-        style="
-          display:inline-flex;
-          align-items:center;
-          justify-content:center;
-          padding:9px 12px;
-          border-radius:12px;
-          border:1px solid rgba(255,255,255,.08);
-          background:rgba(255,255,255,.04);
-          color:inherit;
-          cursor:pointer;
-          font-size:12px;
-          font-weight:700;
-          white-space:nowrap;
-        "
-      >
-        ${escapeHtml(label)}
-      </button>
-    `;
-  }
-
-  function renderHeader() {
-    const kpis = getKpis();
-
-    return `
-      <section style="display:grid; gap:20px;">
-        <div
-          style="
-            display:grid;
-            gap:14px;
-            padding:24px;
-            border-radius:24px;
-            border:1px solid rgba(255,255,255,.08);
-            background:
-              radial-gradient(circle at top right, rgba(255,255,255,.06), transparent 35%),
-              rgba(255,255,255,.03);
-          "
-        >
-          <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:20px; flex-wrap:wrap;">
-            <div style="display:grid; gap:8px;">
-              <h2 style="margin:0; font-size:30px;">Facturas</h2>
-              <p style="margin:0; opacity:.74; max-width:860px;">
-                Gestión de facturas orientada a cliente y administración. Consulta,
-                revisa el detalle, descarga PDF y envía documentos con una vista
-                limpia y preparada para trabajo real.
-              </p>
-            </div>
-
-            <div style="display:flex; gap:12px; flex-wrap:wrap;">
-              <button
-                type="button"
-                id="facturas-refresh-btn"
-                style="
-                  padding:12px 16px;
-                  border:1px solid rgba(255,255,255,.08);
-                  border-radius:14px;
-                  background:rgba(255,255,255,.04);
-                  color:inherit;
-                  cursor:pointer;
-                  font-weight:600;
-                "
-              >
-                ${localState.refreshing ? "Actualizando..." : "Actualizar"}
-              </button>
-            </div>
+      <section class="section">
+        <div class="section-header">
+          <div class="section-header-main">
+            <h2 class="section-title">${items.length} factura(s)</h2>
+            <p class="section-subtitle">
+              ${escapeHtml(String(localState.remoteCount || items.length))} visibles en la colección actual
+            </p>
           </div>
         </div>
-
-        <div
-          style="
-            display:grid;
-            grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
-            gap:16px;
-          "
-        >
-          ${statCard({
-            label: "Pagado",
-            value: formatMoney(kpis.totalPagado),
-            hint: `${kpis.countPagadas} factura(s) cobradas`,
-            icon: "💶",
-          })}
-
-          ${statCard({
-            label: "Pendiente",
-            value: formatMoney(kpis.totalPendiente),
-            hint: `${kpis.countPendientes} pendiente(s)`,
-            icon: "⏳",
-          })}
-
-          ${statCard({
-            label: "Mes actual",
-            value: formatMoney(kpis.totalMes),
-            hint: "Volumen del mes",
-            icon: "📆",
-          })}
-
-          ${statCard({
-            label: "Vencido",
-            value: formatMoney(kpis.totalVencido),
-            hint: `${kpis.countVencidas} vencida(s)`,
-            icon: "🚨",
-          })}
-
-          ${statCard({
-            label: "Enviadas",
-            value: kpis.countEnviadas,
-            hint: `${localState.remoteCount || kpis.total} visibles`,
-            icon: "📤",
-          })}
-        </div>
       </section>
     `;
   }
 
-  function renderFilters() {
+  function renderLoadingState() {
     return `
-      <section
-        style="
-          display:grid;
-          gap:16px;
-          padding:20px;
-          border-radius:20px;
-          border:1px solid rgba(255,255,255,.08);
-          background:rgba(255,255,255,.03);
-        "
-      >
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-          <h3 style="margin:0; font-size:18px;">Filtros</h3>
-          <span style="font-size:13px; opacity:.65;">Búsqueda y clasificación local</span>
-        </div>
-
-        <div
-          style="
-            display:grid;
-            grid-template-columns:minmax(220px, 1.55fr) repeat(4, minmax(150px, .65fr));
-            gap:14px;
-          "
-          class="facturas-filters-grid"
-        >
-          <input
-            id="facturas-search"
-            type="text"
-            placeholder="Buscar por número, cliente, empresa, email..."
-            value="${escapeHtml(localState.query)}"
-            style="
-              width:100%;
-              padding:14px 16px;
-              border-radius:14px;
-              border:1px solid rgba(255,255,255,.10);
-              background:transparent;
-              color:inherit;
-            "
-          >
-
-          <select
-            id="facturas-estado-pago-filter"
-            style="
-              width:100%;
-              padding:14px 16px;
-              border-radius:14px;
-              border:1px solid rgba(255,255,255,.10);
-              background:transparent;
-              color:inherit;
-            "
-          >
-            <option value="all"${localState.estadoPago === "all" ? " selected" : ""}>Todos los pagos</option>
-            <option value="paid"${localState.estadoPago === "paid" ? " selected" : ""}>Pagadas</option>
-            <option value="pending"${localState.estadoPago === "pending" ? " selected" : ""}>Pendientes</option>
-            <option value="overdue"${localState.estadoPago === "overdue" ? " selected" : ""}>Vencidas</option>
-            <option value="draft"${localState.estadoPago === "draft" ? " selected" : ""}>Borrador</option>
-            <option value="cancelled"${localState.estadoPago === "cancelled" ? " selected" : ""}>Canceladas</option>
-          </select>
-
-          <select
-            id="facturas-estado-filter"
-            style="
-              width:100%;
-              padding:14px 16px;
-              border-radius:14px;
-              border:1px solid rgba(255,255,255,.10);
-              background:transparent;
-              color:inherit;
-            "
-          >
-            <option value="all"${localState.estado === "all" ? " selected" : ""}>Todos los estados</option>
-            <option value="issued"${localState.estado === "issued" ? " selected" : ""}>Emitidas</option>
-            <option value="sent"${localState.estado === "sent" ? " selected" : ""}>Enviadas</option>
-            <option value="draft"${localState.estado === "draft" ? " selected" : ""}>Borrador</option>
-            <option value="void"${localState.estado === "void" ? " selected" : ""}>Anuladas</option>
-          </select>
-
-          <select
-            id="facturas-sent-filter"
-            style="
-              width:100%;
-              padding:14px 16px;
-              border-radius:14px;
-              border:1px solid rgba(255,255,255,.10);
-              background:transparent;
-              color:inherit;
-            "
-          >
-            <option value="all"${localState.sent === "all" ? " selected" : ""}>Envío</option>
-            <option value="sent"${localState.sent === "sent" ? " selected" : ""}>Enviadas</option>
-            <option value="not_sent"${localState.sent === "not_sent" ? " selected" : ""}>No enviadas</option>
-          </select>
-
-          <select
-            id="facturas-sort"
-            style="
-              width:100%;
-              padding:14px 16px;
-              border-radius:14px;
-              border:1px solid rgba(255,255,255,.10);
-              background:transparent;
-              color:inherit;
-            "
-          >
-            <option value="date_desc"${localState.sort === "date_desc" ? " selected" : ""}>Fecha ↓</option>
-            <option value="date_asc"${localState.sort === "date_asc" ? " selected" : ""}>Fecha ↑</option>
-            <option value="amount_desc"${localState.sort === "amount_desc" ? " selected" : ""}>Importe ↓</option>
-            <option value="amount_asc"${localState.sort === "amount_asc" ? " selected" : ""}>Importe ↑</option>
-            <option value="number_desc"${localState.sort === "number_desc" ? " selected" : ""}>Número ↓</option>
-            <option value="number_asc"${localState.sort === "number_asc" ? " selected" : ""}>Número ↑</option>
-            <option value="client_asc"${localState.sort === "client_asc" ? " selected" : ""}>Cliente A-Z</option>
-          </select>
-        </div>
-      </section>
-    `;
-  }
-
-  function renderEmptyState(message) {
-    return `
-      <section
-        style="
-          display:grid;
-          gap:12px;
-          padding:24px;
-          border-radius:20px;
-          border:1px solid rgba(255,255,255,.08);
-          background:rgba(255,255,255,.03);
-        "
-      >
-        <h3 style="margin:0;">Listado</h3>
-        <p style="margin:0; opacity:.72;">${escapeHtml(message)}</p>
-      </section>
-    `;
-  }
-
-  function renderTable() {
-    if (localState.loading) {
-      return renderEmptyState("Cargando facturas...");
-    }
-
-    if (localState.error) {
-      return `
-        <section
-          style="
-            display:grid;
-            gap:12px;
-            padding:24px;
-            border-radius:20px;
-            border:1px solid rgba(255,255,255,.08);
-            background:rgba(255,255,255,.03);
-          "
-        >
-          <h3 style="margin:0;">Listado</h3>
-          <p style="margin:0; color:#ff7b7b;">
-            ${escapeHtml(localState.error)}
-          </p>
-        </section>
-      `;
-    }
-
-    const items = getFilteredFacturas();
-
-    if (!items.length) {
-      return renderEmptyState(
-        "No hay facturas que coincidan con los filtros actuales."
-      );
-    }
-
-    return `
-      <section
-        style="
-          display:grid;
-          gap:16px;
-          padding:20px;
-          border-radius:20px;
-          border:1px solid rgba(255,255,255,.08);
-          background:rgba(255,255,255,.03);
-        "
-      >
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-          <h3 style="margin:0; font-size:18px;">Listado</h3>
-          <span style="font-size:13px; opacity:.65;">${items.length} resultado(s)</span>
-        </div>
-
-        <div style="overflow:auto;">
-          <table
-            style="
-              width:100%;
-              border-collapse:collapse;
-              min-width:1220px;
-            "
-          >
-            <thead>
-              <tr style="text-align:left; border-bottom:1px solid rgba(255,255,255,.08);">
-                <th style="padding:12px 10px; font-size:13px; opacity:.7;">Número</th>
-                <th style="padding:12px 10px; font-size:13px; opacity:.7;">Cliente</th>
-                <th style="padding:12px 10px; font-size:13px; opacity:.7;">Detalle</th>
-                <th style="padding:12px 10px; font-size:13px; opacity:.7;">Pago</th>
-                <th style="padding:12px 10px; font-size:13px; opacity:.7;">Estado</th>
-                <th style="padding:12px 10px; font-size:13px; opacity:.7;">Importe</th>
-                <th style="padding:12px 10px; font-size:13px; opacity:.7;">Fecha</th>
-                <th style="padding:12px 10px; font-size:13px; opacity:.7;">Acciones</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              ${items
-                .map(
-                  (item) => `
-                    <tr style="border-bottom:1px solid rgba(255,255,255,.06);">
-                      <td style="padding:14px 10px; white-space:nowrap;">
-                        <div style="display:grid; gap:4px;">
-                          <strong style="font-size:14px;">${escapeHtml(item.numero)}</strong>
-                          <span style="font-size:12px; opacity:.62;">${escapeHtml(item.id || "—")}</span>
-                        </div>
-                      </td>
-
-                      <td style="padding:14px 10px; min-width:220px;">
-                        <div style="display:grid; gap:5px;">
-                          <strong style="font-size:14px;">${escapeHtml(item.cliente?.empresa || item.cliente?.nombre || "Cliente")}</strong>
-                          <span style="font-size:12px; opacity:.65;">${escapeHtml(item.cliente?.nombre || "—")}</span>
-                          <span style="font-size:12px; opacity:.55;">${escapeHtml(item.cliente?.email || "-")}</span>
-                        </div>
-                      </td>
-
-                      <td style="padding:14px 10px; min-width:220px;">
-                        <div style="display:grid; gap:5px;">
-                          <strong style="font-size:13px;">${escapeHtml(truncate(item.preview || "Sin detalle", 82))}</strong>
-                          <span style="font-size:12px; opacity:.62;">${escapeHtml(item.formaPago || "-")}</span>
-                        </div>
-                      </td>
-
-                      <td style="padding:14px 10px;">
-                        <span
-                          style="
-                            display:inline-flex;
-                            align-items:center;
-                            justify-content:center;
-                            padding:7px 10px;
-                            border-radius:999px;
-                            font-size:12px;
-                            font-weight:600;
-                            background:${getEstadoPagoTone(item.estadoPago)};
-                          "
-                        >
-                          ${escapeHtml(getEstadoPagoLabel(item.estadoPago))}
-                        </span>
-                      </td>
-
-                      <td style="padding:14px 10px;">
-                        <span
-                          style="
-                            display:inline-flex;
-                            align-items:center;
-                            justify-content:center;
-                            padding:7px 10px;
-                            border-radius:999px;
-                            font-size:12px;
-                            font-weight:600;
-                            background:${getEstadoTone(item.estado)};
-                          "
-                        >
-                          ${escapeHtml(getEstadoLabel(item.estado))}
-                        </span>
-                      </td>
-
-                      <td style="padding:14px 10px; white-space:nowrap;">
-                        <div style="display:grid; gap:4px;">
-                          <strong style="font-size:14px;">${escapeHtml(formatMoney(item.total, item.moneda))}</strong>
-                          <span style="font-size:12px; opacity:.6;">Base ${escapeHtml(formatMoney(item.baseImponible, item.moneda))}</span>
-                        </div>
-                      </td>
-
-                      <td style="padding:14px 10px; white-space:nowrap;">
-                        <div style="display:grid; gap:4px;">
-                          <strong style="font-size:13px;">${escapeHtml(formatDate(item.fecha))}</strong>
-                          <span style="font-size:12px; opacity:.6;">${escapeHtml(formatRelativeDate(item.updatedAt))}</span>
-                        </div>
-                      </td>
-
-                      <td style="padding:14px 10px;">
-                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                          ${actionButton({
-                            id: item.id,
-                            action: "view",
-                            label: "Ver",
-                            title: "Ver detalle",
-                          })}
-
-                          ${actionButton({
-                            id: item.id,
-                            action: "download",
-                            label: "Descargar",
-                            title: "Descargar factura",
-                          })}
-
-                          ${actionButton({
-                            id: item.id,
-                            action: "send",
-                            label:
-                              localState.sendingId === item.id
-                                ? "Enviando..."
-                                : "Enviar",
-                            title: "Enviar factura",
-                          })}
-                        </div>
-                      </td>
-                    </tr>
-                  `
-                )
-                .join("")}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    `;
-  }
-
-  function renderCards() {
-    if (localState.loading || localState.error) return "";
-
-    const items = getFilteredFacturas();
-
-    if (!items.length) return "";
-
-    return `
-      <section
-        class="facturas-cards-mobile"
-        style="
-          display:grid;
-          gap:14px;
-        "
-      >
-        ${items
+      <section class="grid cols-auto dense">
+        ${Array.from({ length: 6 })
           .map(
-            (item) => `
-              <article
-                style="
-                  display:grid;
-                  gap:14px;
-                  padding:18px;
-                  border-radius:18px;
-                  border:1px solid rgba(255,255,255,.08);
-                  background:rgba(255,255,255,.03);
-                "
-              >
-                <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
-                  <div style="display:grid; gap:4px; min-width:0;">
-                    <strong style="font-size:14px;">${escapeHtml(item.numero)}</strong>
-                    <span style="font-size:12px; opacity:.62;">${escapeHtml(item.cliente?.empresa || item.cliente?.nombre || "Cliente")}</span>
+            () => `
+              <article class="card-surface" style="padding:var(--space-lg); display:grid; gap:var(--space-md); min-height:230px;">
+                <div style="display:flex; justify-content:space-between; gap:var(--space-sm);">
+                  <div style="display:grid; gap:var(--space-xs); flex:1;">
+                    <div style="width:110px; height:14px; border-radius:var(--radius-pill); background:var(--surface-glass-strong);"></div>
+                    <div style="width:72%; height:16px; border-radius:var(--radius-pill); background:var(--surface-hover-strong);"></div>
                   </div>
-
-                  <strong style="font-size:14px; white-space:nowrap;">
-                    ${escapeHtml(formatMoney(item.total, item.moneda))}
-                  </strong>
+                  <div style="width:44px; height:44px; border-radius:var(--radius-lg); background:var(--surface-glass);"></div>
                 </div>
 
-                <div style="display:grid; gap:7px; font-size:13px;">
-                  <span><strong>Contacto:</strong> ${escapeHtml(item.cliente?.nombre || "—")}</span>
-                  <span><strong>Email:</strong> ${escapeHtml(item.cliente?.email || "-")}</span>
-                  <span><strong>Fecha:</strong> ${escapeHtml(formatDate(item.fecha))}</span>
-                  <span><strong>Detalle:</strong> ${escapeHtml(truncate(item.preview || "Sin detalle", 95))}</span>
+                <div style="display:grid; gap:var(--space-xs);">
+                  <div style="width:100%; height:12px; border-radius:var(--radius-pill); background:var(--surface-glass);"></div>
+                  <div style="width:84%; height:12px; border-radius:var(--radius-pill); background:var(--surface-glass);"></div>
+                  <div style="width:62%; height:12px; border-radius:var(--radius-pill); background:var(--surface-glass);"></div>
                 </div>
 
-                <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                  <span
-                    style="
-                      display:inline-flex;
-                      align-items:center;
-                      justify-content:center;
-                      padding:7px 10px;
-                      border-radius:999px;
-                      font-size:12px;
-                      font-weight:600;
-                      background:${getEstadoPagoTone(item.estadoPago)};
-                    "
-                  >
-                    ${escapeHtml(getEstadoPagoLabel(item.estadoPago))}
-                  </span>
-
-                  <span
-                    style="
-                      display:inline-flex;
-                      align-items:center;
-                      justify-content:center;
-                      padding:7px 10px;
-                      border-radius:999px;
-                      font-size:12px;
-                      font-weight:600;
-                      background:${getEstadoTone(item.estado)};
-                    "
-                  >
-                    ${escapeHtml(getEstadoLabel(item.estado))}
-                  </span>
-                </div>
-
-                <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                  ${actionButton({
-                    id: item.id,
-                    action: "view",
-                    label: "Ver",
-                    title: "Ver detalle",
-                  })}
-
-                  ${actionButton({
-                    id: item.id,
-                    action: "download",
-                    label: "Descargar",
-                    title: "Descargar factura",
-                  })}
-
-                  ${actionButton({
-                    id: item.id,
-                    action: "send",
-                    label:
-                      localState.sendingId === item.id
-                        ? "Enviando..."
-                        : "Enviar",
-                    title: "Enviar factura",
-                  })}
+                <div style="display:flex; gap:var(--space-xs); flex-wrap:wrap;">
+                  <div style="width:96px; height:30px; border-radius:var(--radius-pill); background:var(--surface-glass);"></div>
+                  <div style="width:96px; height:30px; border-radius:var(--radius-pill); background:var(--surface-glass);"></div>
                 </div>
               </article>
             `
@@ -1314,282 +520,259 @@ export const FacturasView = (() => {
     `;
   }
 
-  function renderDetailDrawer() {
-    const open = localState.detailOpen;
-    const factura = localState.selectedFactura;
-    const canSend = isAdmin();
-
-    if (!open) {
-      return `
-        <aside
-          id="factura-detail-drawer"
-          style="display:none;"
-        ></aside>
-      `;
-    }
-
-    let body = "";
-
-    if (localState.detailLoading) {
-      body = `
-        <div style="display:grid; gap:8px;">
-          <strong style="font-size:16px;">Cargando detalle…</strong>
-          <span style="font-size:13px; opacity:.7;">Preparando datos de la factura.</span>
-        </div>
-      `;
-    } else if (localState.detailError) {
-      body = `
-        <div style="display:grid; gap:8px;">
-          <strong style="font-size:16px;">No se pudo cargar el detalle</strong>
-          <span style="font-size:13px; opacity:.8;">${escapeHtml(localState.detailError)}</span>
-        </div>
-      `;
-    } else if (factura) {
-      body = `
-        <div style="display:grid; gap:18px;">
-          <section style="display:grid; gap:10px;">
-            <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
-              <div style="display:grid; gap:5px;">
-                <strong style="font-size:22px;">${escapeHtml(factura.numero)}</strong>
-                <span style="font-size:13px; opacity:.68;">${escapeHtml(factura.id || "—")}</span>
-              </div>
-
-              <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
-                <span
-                  style="
-                    display:inline-flex;
-                    align-items:center;
-                    justify-content:center;
-                    padding:7px 10px;
-                    border-radius:999px;
-                    font-size:12px;
-                    font-weight:600;
-                    background:${getEstadoPagoTone(factura.estadoPago)};
-                  "
-                >
-                  ${escapeHtml(getEstadoPagoLabel(factura.estadoPago))}
-                </span>
-
-                <span
-                  style="
-                    display:inline-flex;
-                    align-items:center;
-                    justify-content:center;
-                    padding:7px 10px;
-                    border-radius:999px;
-                    font-size:12px;
-                    font-weight:600;
-                    background:${getEstadoTone(factura.estado)};
-                  "
-                >
-                  ${escapeHtml(getEstadoLabel(factura.estado))}
-                </span>
-              </div>
-            </div>
-
-            <div style="display:grid; gap:8px; font-size:13px;">
-              <span><strong>Fecha factura:</strong> ${escapeHtml(formatDate(factura.fecha))}</span>
-              <span><strong>Fecha envío:</strong> ${escapeHtml(formatDateTime(factura.fechaEnvio))}</span>
-              <span><strong>Forma de pago:</strong> ${escapeHtml(factura.formaPago || "-")}</span>
-              <span><strong>PDF:</strong> ${escapeHtml(factura.hasPdf ? "Disponible" : "No disponible")}</span>
-            </div>
-          </section>
-
-          <section
-            style="
-              display:grid;
-              gap:10px;
-              padding:16px;
-              border-radius:16px;
-              border:1px solid rgba(255,255,255,.08);
-              background:rgba(255,255,255,.03);
-            "
-          >
-            <h4 style="margin:0; font-size:15px;">Cliente</h4>
-
-            <div style="display:grid; gap:7px; font-size:13px;">
-              <span><strong>Empresa:</strong> ${escapeHtml(factura.cliente?.empresa || "-")}</span>
-              <span><strong>Contacto:</strong> ${escapeHtml(factura.cliente?.nombre || "-")}</span>
-              <span><strong>Email:</strong> ${escapeHtml(factura.cliente?.email || "-")}</span>
-              <span><strong>NIF:</strong> ${escapeHtml(factura.cliente?.nif || "-")}</span>
-            </div>
-          </section>
-
-          <section
-            style="
-              display:grid;
-              gap:10px;
-              padding:16px;
-              border-radius:16px;
-              border:1px solid rgba(255,255,255,.08);
-              background:rgba(255,255,255,.03);
-            "
-          >
-            <h4 style="margin:0; font-size:15px;">Importes</h4>
-
-            <div style="display:grid; gap:8px; font-size:13px;">
-              <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-                <span>Base imponible</span>
-                <strong>${escapeHtml(formatMoney(factura.baseImponible, factura.moneda))}</strong>
-              </div>
-
-              <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-                <span>IVA</span>
-                <strong>${escapeHtml(formatMoney(factura.iva, factura.moneda))}</strong>
-              </div>
-
-              <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-                <span>IRPF</span>
-                <strong>${escapeHtml(formatMoney(factura.irpf, factura.moneda))}</strong>
-              </div>
-
-              <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-                <span>Total</span>
-                <strong>${escapeHtml(formatMoney(factura.total, factura.moneda))}</strong>
-              </div>
-            </div>
-          </section>
-
-          <section
-            style="
-              display:grid;
-              gap:10px;
-              padding:16px;
-              border-radius:16px;
-              border:1px solid rgba(255,255,255,.08);
-              background:rgba(255,255,255,.03);
-            "
-          >
-            <h4 style="margin:0; font-size:15px;">Líneas</h4>
-
-            ${
-              factura.lineas?.length
-                ? factura.lineas
-                    .map(
-                      (linea) => `
-                        <div style="display:grid; gap:4px; padding:10px 0; border-bottom:1px solid rgba(255,255,255,.06);">
-                          <strong style="font-size:13px;">${escapeHtml(linea.concepto)}</strong>
-                          <span style="font-size:12px; opacity:.7;">${escapeHtml(linea.descripcion || "Sin descripción")}</span>
-                          <span style="font-size:12px; opacity:.7;">
-                            ${escapeHtml(String(linea.cantidad))} × ${escapeHtml(formatMoney(linea.precioUnitario, factura.moneda))} = ${escapeHtml(formatMoney(linea.totalLinea, factura.moneda))}
-                          </span>
-                        </div>
-                      `
-                    )
-                    .join("")
-                : `<span style="font-size:13px; opacity:.68;">Sin líneas disponibles.</span>`
-            }
-          </section>
-
-          <section style="display:flex; gap:10px; flex-wrap:wrap;">
-            <button
-              type="button"
-              data-factura-action="download"
-              data-factura-id="${escapeHtml(factura.id || "")}"
-              style="
-                display:inline-flex;
-                align-items:center;
-                justify-content:center;
-                padding:12px 14px;
-                border-radius:14px;
-                border:1px solid rgba(255,255,255,.08);
-                background:rgba(255,255,255,.04);
-                color:inherit;
-                cursor:pointer;
-                font-weight:700;
-              "
-            >
-              Descargar PDF
-            </button>
-
-            ${
-              canSend
-                ? `
-                  <button
-                    type="button"
-                    data-factura-action="send"
-                    data-factura-id="${escapeHtml(factura.id || "")}"
-                    style="
-                      display:inline-flex;
-                      align-items:center;
-                      justify-content:center;
-                      padding:12px 14px;
-                      border-radius:14px;
-                      border:1px solid rgba(255,255,255,.08);
-                      background:rgba(255,255,255,.04);
-                      color:inherit;
-                      cursor:pointer;
-                      font-weight:700;
-                    "
-                  >
-                    ${localState.sendingId === factura.id ? "Enviando..." : "Enviar factura"}
-                  </button>
-                `
-                : ""
-            }
-          </section>
-        </div>
-      `;
-    }
-
+  function renderErrorState() {
     return `
-      <div
-        id="factura-detail-overlay"
-        style="
-          position:fixed;
-          inset:0;
-          background:rgba(0,0,0,.45);
-          z-index:49;
-        "
-      ></div>
-
-      <aside
-        id="factura-detail-drawer"
-        style="
-          position:fixed;
-          top:0;
-          right:0;
-          width:min(560px, 100vw);
-          height:100dvh;
-          overflow:auto;
-          z-index:50;
-          padding:20px;
-          border-left:1px solid rgba(255,255,255,.08);
-          background:rgba(12,14,18,.96);
-          backdrop-filter:blur(18px);
-          box-shadow:-12px 0 40px rgba(0,0,0,.28);
-        "
-      >
-        <div style="display:grid; gap:18px;">
-          <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-            <h3 style="margin:0; font-size:20px;">Detalle factura</h3>
-
-            <button
-              type="button"
-              id="factura-detail-close"
-              style="
-                width:38px;
-                height:38px;
-                display:grid;
-                place-items:center;
-                border-radius:12px;
-                border:1px solid rgba(255,255,255,.08);
-                background:rgba(255,255,255,.04);
-                color:inherit;
-                cursor:pointer;
-                font-weight:700;
-              "
-            >
-              ✕
-            </button>
-          </div>
-
-          ${body}
+      <section class="panel-surface">
+        <div class="empty-state">
+          <div class="empty-state-icon">⚠️</div>
+          <h3 class="empty-state-title">No se pudo cargar el listado</h3>
+          <p class="empty-state-text">${escapeHtml(localState.error || "Error desconocido")}</p>
+          <button
+            type="button"
+            id="facturas-retry-btn"
+            style="
+              min-height:var(--btn-height-sm);
+              padding:10px 14px;
+              border-radius:var(--btn-radius);
+              border:1px solid var(--btn-primary-border);
+              background:var(--btn-primary-bg);
+              color:var(--btn-primary-text);
+              box-shadow:var(--btn-primary-shadow);
+              font-weight:var(--weight-bold);
+              cursor:pointer;
+            "
+          >
+            Reintentar
+          </button>
         </div>
-      </aside>
+      </section>
     `;
   }
 
+  function renderEmptyState() {
+    return `
+      <section class="panel-surface">
+        <div class="empty-state">
+          <div class="empty-state-icon">🧾</div>
+          <h3 class="empty-state-title">Sin facturas</h3>
+          <p class="empty-state-text">
+            No hay facturas registradas en este momento.
+          </p>
+        </div>
+      </section>
+    `;
+  }
+
+  function renderCards() {
+    const items = [...getFacturas()].sort(
+      (a, b) => (b.meta?.timestampMs || 0) - (a.meta?.timestampMs || 0)
+    );
+
+    if (localState.loading && !items.length) {
+      return renderLoadingState();
+    }
+
+    if (localState.error && !items.length) {
+      return renderErrorState();
+    }
+
+    if (!items.length) {
+      return renderEmptyState();
+    }
+
+    return `
+      <section class="grid cols-auto">
+        ${items
+          .map(
+            (item) => `
+              <article
+                class="card-surface hover-lift factura-card"
+                data-factura-id="${escapeHtml(item.id || "")}"
+                style="
+                  display:grid;
+                  gap:var(--space-md);
+                  padding:var(--space-lg);
+                  cursor:pointer;
+                "
+              >
+                <div style="
+                  display:flex;
+                  align-items:flex-start;
+                  justify-content:space-between;
+                  gap:var(--space-sm);
+                ">
+                  <div style="display:grid; gap:var(--space-xs); min-width:0;">
+                    <span style="
+                      font-size:var(--font-sm);
+                      color:var(--text-dim);
+                      font-weight:var(--weight-semibold);
+                      letter-spacing:var(--letter-wide);
+                    ">
+                      ${escapeHtml(item.numero || item.id || "—")}
+                    </span>
+
+                    <h3 style="
+                      margin:0;
+                      font-size:var(--font-lg);
+                      line-height:var(--line-snug);
+                      color:var(--text-strong);
+                      font-weight:var(--weight-bold);
+                    ">
+                      ${escapeHtml(item.cliente?.empresa || item.cliente?.nombre || "Cliente")}
+                    </h3>
+                  </div>
+
+                  <div style="
+                    inline-size:44px;
+                    block-size:44px;
+                    flex:0 0 auto;
+                    display:grid;
+                    place-items:center;
+                    border-radius:var(--radius-lg);
+                    border:1px solid var(--border-soft);
+                    background:var(--avatar-bg);
+                    color:var(--avatar-text);
+                    font-size:var(--font-sm);
+                    font-weight:var(--weight-black);
+                    box-shadow:var(--shadow-xs);
+                  ">
+                    ${escapeHtml(item.cliente?.initials || "ON")}
+                  </div>
+                </div>
+
+                <p style="
+                  margin:0;
+                  font-size:var(--font-md);
+                  line-height:var(--line-relaxed);
+                  color:var(--text-muted);
+                ">
+                  ${escapeHtml(truncate(item.preview || "Sin detalle", 160))}
+                </p>
+
+                <div style="
+                  display:grid;
+                  gap:var(--space-xs);
+                  font-size:var(--font-md);
+                  color:var(--text-soft);
+                ">
+                  <span><strong style="color:var(--text-strong);">Cliente:</strong> ${escapeHtml(item.cliente?.nombre || "—")}</span>
+                  <span><strong style="color:var(--text-strong);">Email:</strong> ${escapeHtml(item.cliente?.email || "-")}</span>
+                  <span><strong style="color:var(--text-strong);">Fecha:</strong> ${escapeHtml(formatDate(item.fecha))}</span>
+                  <span><strong style="color:var(--text-strong);">Pago:</strong> ${escapeHtml(item.formaPago || "-")}</span>
+                </div>
+
+                <div style="
+                  display:flex;
+                  align-items:center;
+                  justify-content:space-between;
+                  gap:var(--space-sm);
+                  flex-wrap:wrap;
+                ">
+                  <div style="display:grid; gap:2px;">
+                    <strong style="
+                      font-size:var(--font-xl);
+                      line-height:1;
+                      color:var(--text-strong);
+                    ">
+                      ${escapeHtml(formatMoney(item.total, item.moneda))}
+                    </strong>
+
+                    <span style="
+                      font-size:var(--font-sm);
+                      color:var(--text-dim);
+                    ">
+                      Base ${escapeHtml(formatMoney(item.baseImponible, item.moneda))}
+                    </span>
+                  </div>
+
+                  <div style="display:flex; gap:var(--space-xs); flex-wrap:wrap;">
+                    <span style="
+                      display:inline-flex;
+                      align-items:center;
+                      justify-content:center;
+                      min-height:30px;
+                      padding:6px 10px;
+                      border-radius:var(--radius-pill);
+                      border:1px solid var(--border-soft);
+                      font-size:var(--font-sm);
+                      font-weight:var(--weight-semibold);
+                      ${getEstadoPagoChipStyle(item.estadoPago)}
+                    ">
+                      ${escapeHtml(getEstadoPagoLabel(item.estadoPago))}
+                    </span>
+
+                    <span style="
+                      display:inline-flex;
+                      align-items:center;
+                      justify-content:center;
+                      min-height:30px;
+                      padding:6px 10px;
+                      border-radius:var(--radius-pill);
+                      border:1px solid var(--border-soft);
+                      font-size:var(--font-sm);
+                      font-weight:var(--weight-semibold);
+                      ${getEstadoChipStyle(item.estado)}
+                    ">
+                      ${escapeHtml(getEstadoLabel(item.estado))}
+                    </span>
+                  </div>
+                </div>
+
+                <div class="divider"></div>
+
+                <div style="
+                  display:flex;
+                  align-items:center;
+                  justify-content:space-between;
+                  gap:var(--space-sm);
+                  flex-wrap:wrap;
+                ">
+                  <div style="display:grid; gap:2px;">
+                    <span style="
+                      font-size:var(--font-sm);
+                      color:var(--text-dim);
+                    ">
+                      ${escapeHtml(formatRelativeDate(item.updatedAt))}
+                    </span>
+
+                    <span style="
+                      font-size:var(--font-xs);
+                      color:var(--text-faint);
+                    ">
+                      Adjuntos: ${escapeHtml(String(item.attachmentsCount || 0))}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    data-action="open-factura"
+                    data-factura-id="${escapeHtml(item.id || "")}"
+                    style="
+                      min-height:36px;
+                      padding:8px 12px;
+                      border-radius:var(--radius-sm);
+                      border:1px solid var(--btn-secondary-border);
+                      background:var(--btn-secondary-bg);
+                      color:var(--btn-secondary-text);
+                      font-size:var(--font-sm);
+                      font-weight:var(--weight-bold);
+                      cursor:pointer;
+                    "
+                  >
+                    Ver factura
+                  </button>
+                </div>
+              </article>
+            `
+          )
+          .join("")}
+      </section>
+    `;
+  }
+
+  /* =========================================================
+     RENDER
+  ========================================================= */
   function render() {
     const container = getContainer();
     if (!container) return;
@@ -1599,22 +782,15 @@ export const FacturasView = (() => {
     AppCore.clearDynamicContainers?.();
 
     container.innerHTML = `
-      <section
-        class="facturas-view"
-        style="
-          display:grid;
-          gap:24px;
-          padding:24px;
-        "
-      >
-        ${renderHeader()}
-        ${renderFilters()}
-        ${renderTable()}
-        ${renderCards()}
-        ${renderDetailDrawer()}
+      <section class="panel-content dashboard ready">
+        <div class="content-wrapper">
+          ${renderHeader()}
+          ${renderCards()}
+        </div>
       </section>
     `;
 
+    localState.hydrated = true;
     bind();
   }
 
@@ -1625,14 +801,7 @@ export const FacturasView = (() => {
     const scope = AppCore.cleanup.scope(SCOPE);
 
     const refreshBtn = document.getElementById("facturas-refresh-btn");
-    const searchInput = document.getElementById("facturas-search");
-    const estadoPagoFilter = document.getElementById("facturas-estado-pago-filter");
-    const estadoFilter = document.getElementById("facturas-estado-filter");
-    const sentFilter = document.getElementById("facturas-sent-filter");
-    const sortSelect = document.getElementById("facturas-sort");
-
-    const overlay = document.getElementById("factura-detail-overlay");
-    const closeBtn = document.getElementById("factura-detail-close");
+    const retryBtn = document.getElementById("facturas-retry-btn");
 
     if (refreshBtn) {
       AppCore.cleanup.on(scope, refreshBtn, "click", async () => {
@@ -1641,88 +810,24 @@ export const FacturasView = (() => {
       });
     }
 
-    if (searchInput) {
-      AppCore.cleanup.on(
-        scope,
-        searchInput,
-        "input",
-        AppCore.utils.debounce((event) => {
-          localState.query = event.target.value.trim();
-          render();
-        }, 120)
-      );
-    }
-
-    if (estadoPagoFilter) {
-      AppCore.cleanup.on(scope, estadoPagoFilter, "change", (event) => {
-        localState.estadoPago = event.target.value;
-        render();
+    if (retryBtn) {
+      AppCore.cleanup.on(scope, retryBtn, "click", async () => {
+        await loadFacturas();
       });
     }
 
-    if (estadoFilter) {
-      AppCore.cleanup.on(scope, estadoFilter, "change", (event) => {
-        localState.estado = event.target.value;
-        render();
+    const openButtons = document.querySelectorAll('[data-action="open-factura"]');
+    openButtons.forEach((button) => {
+      AppCore.cleanup.on(scope, button, "click", (event) => {
+        event.stopPropagation();
+        openFactura(button.getAttribute("data-factura-id"));
       });
-    }
-
-    if (sentFilter) {
-      AppCore.cleanup.on(scope, sentFilter, "change", (event) => {
-        localState.sent = event.target.value;
-        render();
-      });
-    }
-
-    if (sortSelect) {
-      AppCore.cleanup.on(scope, sortSelect, "change", (event) => {
-        localState.sort = event.target.value;
-        render();
-      });
-    }
-
-    if (overlay) {
-      AppCore.cleanup.on(scope, overlay, "click", () => {
-        closeFacturaDetalle();
-      });
-    }
-
-    if (closeBtn) {
-      AppCore.cleanup.on(scope, closeBtn, "click", () => {
-        closeFacturaDetalle();
-      });
-    }
-
-    AppCore.cleanup.on(scope, document, "keydown", (event) => {
-      if (event.key === "Escape" && localState.detailOpen) {
-        closeFacturaDetalle();
-      }
     });
 
-    const actionButtons = document.querySelectorAll("[data-factura-action][data-factura-id]");
-    actionButtons.forEach((button) => {
-      AppCore.cleanup.on(scope, button, "click", async (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-
-        const id = button.getAttribute("data-factura-id");
-        const action = button.getAttribute("data-factura-action");
-
-        if (!id || !action) return;
-
-        if (action === "view") {
-          await openFacturaDetalle(id);
-          return;
-        }
-
-        if (action === "download") {
-          triggerDownload(id);
-          return;
-        }
-
-        if (action === "send") {
-          await triggerSend(id);
-        }
+    const cards = document.querySelectorAll(".factura-card");
+    cards.forEach((card) => {
+      AppCore.cleanup.on(scope, card, "click", () => {
+        openFactura(card.getAttribute("data-factura-id"));
       });
     });
 
@@ -1735,6 +840,5 @@ export const FacturasView = (() => {
   return {
     render,
     loadFacturas,
-    openFacturaDetalle,
   };
 })();

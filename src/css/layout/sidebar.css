@@ -848,8 +848,11 @@
 
 /* =========================
    DROPDOWN ITEMS
+   PRO / CLEAN / SOLID / TOKEN-DRIVEN
 ========================= */
 .dropdown-item{
+  position:relative;
+
   display:flex;
   align-items:center;
   gap:12px;
@@ -858,24 +861,71 @@
   min-height:42px;
   padding:10px 12px;
 
+  border:1px solid transparent;
   border-radius:12px;
+
+  background:transparent;
+  color:var(--text-muted);
 
   font-size:var(--font-md);
   font-weight:var(--weight-medium);
-  color:var(--text-muted);
+  line-height:1.15;
+  text-align:left;
+  text-decoration:none;
 
   cursor:pointer;
+  user-select:none;
+  -webkit-tap-highlight-color:transparent;
 
   transition:
     background var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
+}
+
+.dropdown-item svg{
+  width:18px;
+  height:18px;
+  flex:0 0 auto;
+  color:currentColor;
+  opacity:.92;
+  transition:
+    color var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard),
     transform var(--duration-fast) var(--ease-out);
+}
+
+.dropdown-item span{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
 }
 
 .dropdown-item:hover{
   background:var(--sidebar-hover);
+  border-color:rgba(255,255,255,.04);
   color:var(--text-strong);
   transform:translateX(2px);
+}
+
+.dropdown-item:hover svg{
+  opacity:1;
+  transform:translateX(1px);
+}
+
+.dropdown-item:active{
+  transform:translateX(1px) scale(.995);
+}
+
+.dropdown-item:disabled,
+.dropdown-item[aria-disabled="true"]{
+  opacity:.46;
+  cursor:not-allowed;
+  pointer-events:none;
 }
 
 .dropdown-item:focus-visible{
@@ -883,12 +933,39 @@
   box-shadow:var(--focus-ring);
 }
 
+/* variante destructiva */
+.dropdown-item-danger{
+  color:var(--error);
+}
+
+.dropdown-item-danger:hover{
+  background:var(--error-bg);
+  border-color:var(--border-error);
+  color:var(--error-hover);
+}
+
+.dropdown-item-danger:focus-visible{
+  outline:none;
+  box-shadow:
+    0 0 0 4px rgba(239,68,68,.16);
+}
+
+/* divisor */
 .dropdown-divider{
   height:1px;
   margin:6px 4px;
   background:var(--border-soft);
 }
 
+/* light mode polish */
+[data-theme="light"] .dropdown-item:hover{
+  border-color:rgba(15,23,42,.06);
+}
+
+[data-theme="light"] .dropdown-item-danger:hover{
+  background:rgba(239,68,68,.08);
+  border-color:rgba(239,68,68,.18);
+}
 
 /* =========================
    SCROLLBAR POLISH

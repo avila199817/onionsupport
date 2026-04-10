@@ -399,23 +399,19 @@ export const Toast = (() => {
     `;
 
     const progressEl = toast.querySelector(".toast-progress");
-      if (progressEl) {
-        progressEl.style.position = "absolute";
-      
-        progressEl.style.left = "var(--ui-toast-progress-left, 16px)";
-        progressEl.style.right = "var(--ui-toast-progress-right, 16px)";
-        progressEl.style.bottom = "var(--ui-toast-progress-bottom, 10px)";
-      
-        progressEl.style.height = "var(--ui-toast-progress-height, 2px)";
-        progressEl.style.borderRadius = "var(--ui-toast-progress-radius, 999px)";
-      
-        progressEl.style.background =
-          "linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent), #ffffff 18%))";
-      
-        progressEl.style.opacity = "var(--ui-toast-progress-opacity, .9)";
-        progressEl.style.transformOrigin = "left center";
-        progressEl.style.pointerEvents = "none";
-      }
+    if (progressEl) {
+      progressEl.style.position = "absolute";
+      progressEl.style.left = "0";
+      progressEl.style.right = "0";
+      progressEl.style.bottom = "0";
+      progressEl.style.height = "3px";
+      progressEl.style.borderRadius = "0 0 inherit inherit";
+      progressEl.style.background =
+        "linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent), #ffffff 18%))";
+      progressEl.style.opacity = ".9";
+      progressEl.style.transformOrigin = "left center";
+      progressEl.style.pointerEvents = "none";
+    }
 
     return toast;
   }

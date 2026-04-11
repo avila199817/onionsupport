@@ -12,7 +12,7 @@
 import { AppCore } from "../core/index.js";
 import { Store } from "../store/store.js";
 import { Auth } from "../features/auth/index.js";
-import { Router } from "../router/router.js";
+import { Router } from "../router/index.js";
 import { SidebarUI } from "../ui/sidebar/index.js";
 import { TopbarUI } from "../ui/topbar.js";
 import { Toast } from "../ui/toast.js";

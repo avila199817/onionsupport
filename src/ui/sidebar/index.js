@@ -9,9 +9,9 @@
    - init seguro una sola vez
 ========================================================= */
 
-import { AppCore } from "../../core/core.js";
-import { Auth } from "../../features/auth.js";
-import { Router } from "../../router/router.js";
+import { AppCore } from "../../core/index.js";
+import { Auth } from "../../features/auth/index.js";
+import { Router } from "../../router/index.js";
 
 import {
   SCOPE,

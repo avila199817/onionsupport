@@ -100,10 +100,10 @@
      Z-INDEX
   ========================= */
   --z-base: 1;
-  --z-sidebar: 20;
   --z-topbar: 30;
-  --z-dropdown: 40;
-  --z-sticky: 45;
+  --z-sidebar: 40;
+  --z-dropdown: 50;
+  --z-sticky: 55;
   --z-overlay: 60;
   --z-modal: 80;
   --z-toast: 100;

@@ -1,7 +1,7 @@
 /* =========================================================
    ONION SUPPORT — LAYOUT SYSTEM
    PRO SAAS PANEL / HIGH LEVEL / FINAL PRO SYSTEM
-   Archivo: css/layout/layout.css
+   Archivo: src/css/core/layout.css
 
    Objetivo:
    - layout maestro del panel
@@ -13,6 +13,7 @@
    - sin topbarview-container
    - alineación perfecta entre sidebar / topbar / tablehead / content
    - table-head visible solo cuando tenga contenido real
+   - compensación robusta con sidebar fixed montado desde JS
 ========================================================= */
 
 
@@ -203,9 +204,9 @@ a{
   min-inline-size:0;
   min-block-size:100dvh;
 
-  margin-inline-start:var(--app-sidebar-current-width);
-  inline-size:calc(100% - var(--app-sidebar-current-width));
-  max-inline-size:calc(100% - var(--app-sidebar-current-width));
+  margin-inline-start:var(--sidebar-width);
+  inline-size:calc(100% - var(--sidebar-width));
+  max-inline-size:calc(100% - var(--sidebar-width));
 
   transition:
     margin-inline-start var(--duration-slow) var(--ease-emphasis),
@@ -215,8 +216,10 @@ a{
   will-change:margin-inline-start, inline-size;
 }
 
-.sidebar.collapsed ~ .main-content{
-  --app-sidebar-current-width: var(--sidebar-collapsed);
+body.sidebar-collapsed .main-content{
+  margin-inline-start:var(--sidebar-collapsed);
+  inline-size:calc(100% - var(--sidebar-collapsed));
+  max-inline-size:calc(100% - var(--sidebar-collapsed));
 }
 
 
@@ -272,7 +275,7 @@ a{
 .table-head{
   position:fixed;
   inset-block-start:calc(var(--topbar-height) + var(--app-safe-top));
-  inset-inline-start:var(--app-sidebar-current-width);
+  inset-inline-start:var(--sidebar-width);
   inset-inline-end:0;
 
   block-size:var(--tablehead-height);
@@ -318,7 +321,7 @@ a{
   display:none;
 }
 
-.sidebar.collapsed ~ .main-content .table-head{
+body.sidebar-collapsed .table-head{
   inset-inline-start:var(--sidebar-collapsed);
 }
 
@@ -764,7 +767,6 @@ body.auth-screen .layout{
 }
 
 body.auth-screen .main-content{
-  --app-sidebar-current-width: 0px;
   margin-inline-start:0;
   inline-size:100%;
   max-inline-size:100%;
@@ -880,10 +882,6 @@ body.auth-screen .content-wrapper{
    RESPONSIVE — TABLET
 ========================= */
 @media (max-width: 900px){
-  :root{
-    --app-sidebar-current-width: 0px;
-  }
-
   .main-content{
     margin-inline-start:0;
     inline-size:100%;
@@ -891,7 +889,8 @@ body.auth-screen .content-wrapper{
     min-block-size:100dvh;
   }
 
-  .sidebar.collapsed ~ .main-content{
+  body.sidebar-collapsed .main-content,
+  body.sidebar-open .main-content{
     margin-inline-start:0;
     inline-size:100%;
     max-inline-size:100%;
@@ -901,16 +900,9 @@ body.auth-screen .content-wrapper{
     inset-inline-start:0;
   }
 
-  .sidebar{
-    position:fixed;
-    inset:0 auto 0 0;
-    transform:translateX(-100%);
-    transition:transform var(--duration-slow) var(--ease-emphasis);
-    z-index:var(--z-overlay);
-  }
-
-  .sidebar.open{
-    transform:translateX(0);
+  body.sidebar-collapsed .table-head,
+  body.sidebar-open .table-head{
+    inset-inline-start:0;
   }
 
   .content-wrapper{

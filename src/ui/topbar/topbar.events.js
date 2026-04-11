@@ -34,6 +34,7 @@ export function createTopbarEventHandlers({
   syncFixedTopbarOffset,
   closeSidebarMobile,
   toggleSidebarMobile,
+  syncDomCache,
 }) {
   function handleMobileToggleClick(event) {
     event.preventDefault();
@@ -155,7 +156,10 @@ export function createTopbarEventHandlers({
     }
 
     if (event.key === "Enter") {
-      if (runtime.activeIndex >= 0 && runtime.currentItems[runtime.activeIndex]) {
+      if (
+        runtime.activeIndex >= 0 &&
+        runtime.currentItems[runtime.activeIndex]
+      ) {
         event.preventDefault();
         goToResult({
           AppCore,
@@ -188,6 +192,7 @@ export function createTopbarEventHandlers({
   }
 
   function handleRouteVisualSync() {
+    syncDomCache?.();
     syncTitle(getCurrentPublicPath(AppCore));
     setMobileToggleState();
     syncFixedTopbarOffset();
@@ -272,7 +277,6 @@ export function bindSearchDomEvents({
 export function bindTopbarAppEvents({
   AppCore,
   scope,
-  searchScope,
   getDom,
   handlers,
   hideResults,
@@ -280,6 +284,8 @@ export function bindTopbarAppEvents({
   setMobileToggleState,
   syncFixedTopbarOffset,
   closeSidebarMobile,
+  syncDomCache,
+  rebind,
 }) {
   AppCore.cleanup.event(scope, "router:before-render", ({ detail }) => {
     const nextPath =
@@ -293,13 +299,16 @@ export function bindTopbarAppEvents({
 
   AppCore.cleanup.event(scope, "router:rendered", () => {
     handlers.handleRouteVisualSync();
+    rebind?.();
   });
 
   AppCore.cleanup.event(scope, "app:route:rendered", () => {
     handlers.handleRouteVisualSync();
+    rebind?.();
   });
 
   AppCore.cleanup.event(scope, "app:route:change", () => {
+    syncDomCache?.();
     hideResults();
     syncTitle(getCurrentPublicPath(AppCore));
     closeSidebarMobile();
@@ -308,30 +317,37 @@ export function bindTopbarAppEvents({
   });
 
   AppCore.cleanup.event(scope, "app:public-path:change", () => {
+    syncDomCache?.();
     hideResults();
     syncTitle(getCurrentPublicPath(AppCore));
     syncFixedTopbarOffset();
   });
 
   AppCore.cleanup.event(scope, "router:shell:change", () => {
+    syncDomCache?.();
     setMobileToggleState();
     syncFixedTopbarOffset();
   });
 
   AppCore.cleanup.event(scope, "app:user-ui:sync", () => {
+    syncDomCache?.();
     syncFixedTopbarOffset();
   });
 
   AppCore.cleanup.event(scope, "sidebar:state:synced", () => {
     window.setTimeout(() => {
+      syncDomCache?.();
       setMobileToggleState();
       syncFixedTopbarOffset();
     }, 0);
   });
 
   AppCore.cleanup.event(scope, "app:theme:change", () => {
-    window.setTimeout(syncFixedTopbarOffset, 0);
+    window.setTimeout(() => {
+      syncDomCache?.();
+      syncFixedTopbarOffset();
+    }, 0);
   });
 
-  return { scope, searchScope, getDom };
+  return true;
 }

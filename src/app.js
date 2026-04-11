@@ -10,11 +10,12 @@
    - restaurar sesión sin bloquear el primer paint
    - montar listeners globales
    - bind de UI global
-   - inicializar SidebarUI / TopbarUI / Toast
+   - inicializar SidebarUI / TopbarUI / Toast / i18n
    - apagar loader de forma robusta
    - aplicar failsafe anti-loader infinito real
    - evitar race conditions en boot / reboot
    - mantener compatibilidad con shell SPA actual
+   - rerender de ruta al cambiar idioma
 ========================================================= */
 
 import { AppCore } from "./core/core.js";
@@ -24,6 +25,7 @@ import { Router } from "./router/router.js";
 import { SidebarUI } from "./ui/sidebar.js";
 import { TopbarUI } from "./ui/topbar.js";
 import { Toast } from "./ui/toast.js";
+import { I18n } from "./i18n/index.js";
 
 const App = (() => {
   "use strict";
@@ -42,6 +44,7 @@ const App = (() => {
   let storeInitialized = false;
   let routerBound = false;
   let uiInitialized = false;
+  let i18nInitialized = false;
   let bootFailsafeTimer = null;
   let sessionRestorePromise = null;
 
@@ -96,6 +99,30 @@ const App = (() => {
     });
   }
 
+  function syncLangState() {
+    try {
+      const lang = I18n.getLang?.() || AppCore.state.lang || "es";
+
+      AppCore.setState({
+        lang,
+      });
+
+      document.documentElement.setAttribute("lang", lang);
+
+      return lang;
+    } catch {
+      const fallbackLang = AppCore.state.lang || AppCore.config.defaultLang || "es";
+
+      AppCore.setState({
+        lang: fallbackLang,
+      });
+
+      document.documentElement.setAttribute("lang", fallbackLang);
+
+      return fallbackLang;
+    }
+  }
+
   function getShellElements() {
     return {
       sidebar: AppCore.dom.sidebar || document.querySelector(".sidebar"),
@@ -120,6 +147,51 @@ const App = (() => {
 
   function getLoaderElement() {
     return AppCore.dom.loader || document.getElementById("app-loader");
+  }
+
+  /* =========================================================
+     I18N
+  ========================================================= */
+  function initI18n() {
+    if (i18nInitialized) {
+      syncLangState();
+      return;
+    }
+
+    try {
+      I18n.boot?.();
+    } catch (error) {
+      AppCore.utils.warn("I18n.boot falló; se continuará con fallback.", error);
+    }
+
+    syncLangState();
+    registerModule("i18n", I18n);
+
+    i18nInitialized = true;
+
+    AppCore.utils.log("I18n inicializado.", {
+      lang: AppCore.state.lang,
+      available: I18n?.getAvailable?.() || [],
+    });
+  }
+
+  function rerenderCurrentRoute() {
+    const currentPath = getCurrentPublicPath();
+
+    AppCore.utils.log("Rerender por cambio de idioma.", {
+      path: currentPath,
+      lang: AppCore.state.lang,
+    });
+
+    Router.render(currentPath, {
+      skipHistory: true,
+      replaceState: true,
+      force: true,
+    });
+
+    AppCore.setPublicPath(currentPath);
+    applyPostRenderLoaderPolicy();
+    syncUserUI();
   }
 
   /* =========================================================
@@ -305,8 +377,8 @@ const App = (() => {
         typeof Router.goAfterLogin === "function"
           ? null
           : typeof Auth.getPostLoginTarget === "function"
-          ? Auth.getPostLoginTarget(AppCore.state.user)
-          : "/";
+            ? Auth.getPostLoginTarget(AppCore.state.user)
+            : "/";
 
       if (typeof Router.goAfterLogin === "function") {
         Router.goAfterLogin("/");
@@ -469,6 +541,28 @@ const App = (() => {
       syncUserUI();
     });
 
+    AppCore.cleanup.event(scope, "app:lang:change", ({ detail }) => {
+      const lang = String(detail?.lang || I18n.getLang?.() || "es");
+
+      AppCore.setState({
+        lang,
+      });
+
+      document.documentElement.setAttribute("lang", lang);
+
+      rerenderCurrentRoute();
+
+      Toast?.success?.(I18n.t("settings.languageChanged", {}, "Idioma actualizado"), {
+        title: I18n.t("settings.language", {}, "Idioma"),
+        duration: 2200,
+      });
+
+      AppCore.utils.log("Idioma cambiado.", {
+        lang,
+        route: getCurrentPublicPath(),
+      });
+    });
+
     AppCore.cleanup.event(scope, "auth:login:success", () => {
       syncUserUI();
 
@@ -509,6 +603,7 @@ const App = (() => {
         username: detail?.username || null,
         found: Boolean(detail?.found),
         forbidden: Boolean(detail?.forbidden),
+        lang: AppCore.state.lang,
       });
     });
   }
@@ -737,6 +832,7 @@ const App = (() => {
       publicPath: AppCore.state.publicPath,
       user: AppCore.state.user,
       authenticated: AppCore.state.authenticated,
+      lang: AppCore.state.lang,
     });
 
     AppCore.utils.log("🔥 Aplicación arrancada correctamente.", {
@@ -744,6 +840,7 @@ const App = (() => {
       publicPath: AppCore.state.publicPath,
       username: AppCore.state.user?.username || null,
       authenticated: AppCore.state.authenticated,
+      lang: AppCore.state.lang,
     });
   }
 
@@ -774,6 +871,7 @@ const App = (() => {
       clearScope();
 
       await initCore();
+      initI18n();
 
       AppCore.setError(null);
       showLoader();
@@ -798,6 +896,7 @@ const App = (() => {
       ========================================= */
       initUISystems();
       syncUserUI();
+      syncLangState();
 
       /* =========================================
          Boot visual completado
@@ -861,6 +960,7 @@ const App = (() => {
     storeInitialized = false;
     routerBound = false;
     uiInitialized = false;
+    i18nInitialized = false;
     sessionRestorePromise = null;
 
     clearBootFailsafeTimer();

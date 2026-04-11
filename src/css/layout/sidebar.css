@@ -13,7 +13,14 @@
    - sin scroll horizontal fantasma
    - neutral graphite / enterprise shell
    - compatible con sidebar montado desde JS
+
+   FIXES INCLUIDOS:
+   - tooltip del sidebar por encima del topbar
+   - sin conflicto entre tooltip y estado active
+   - sin clipping horizontal en collapsed
+   - comportamiento limpio desktop / mobile
 ========================================================= */
+
 
 /* =========================
    SIDEBAR BASE
@@ -135,6 +142,8 @@
 
   min-height:var(--sidebar-top-height);
   padding:14px;
+
+  overflow:visible;
 }
 
 
@@ -319,17 +328,16 @@
 
 
 /* =========================
-   TOOLTIP SYSTEM — FINAL
+   TOOLTIP SYSTEM — FINAL FIX
    SOLO PARA ELEMENTOS CON data-tooltip
    EXCLUYE FOOTER / USER / DROPDOWN
    SIN ROMPER BOTONES
-   PREPARADO PARA Z-INDEX GLOBAL VIA TOKENS
+   SIN CONFLICTO CON ACTIVE
 ========================= */
 
 .sidebar,
 .sidebar-top,
-.sidebar-menu,
-.sidebar-section{
+.sidebar-menu{
   overflow:visible;
 }
 
@@ -344,9 +352,81 @@
   position:relative;
 }
 
-/* caja del tooltip */
+/* logo / toggle: caja tooltip */
 .logo[data-tooltip]::after,
-.sidebar-toggle[data-tooltip]::after,
+.sidebar-toggle[data-tooltip]::after{
+  content:attr(data-tooltip);
+  position:absolute;
+  top:50%;
+  left:calc(100% + var(--sidebar-tooltip-offset));
+
+  transform:translateY(-50%) translateX(8px);
+  transform-origin:left center;
+
+  padding:9px 12px;
+  border-radius:12px;
+  border:1px solid var(--border-default);
+
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.032), rgba(255,255,255,.010)),
+    var(--tooltip-bg);
+
+  color:var(--text-soft);
+  font-size:12px;
+  line-height:1;
+  font-weight:var(--weight-semibold);
+  letter-spacing:.01em;
+  white-space:nowrap;
+
+  box-shadow:
+    0 14px 34px rgba(0,0,0,.28),
+    inset 0 1px 0 rgba(255,255,255,.04);
+
+  opacity:0;
+  visibility:hidden;
+  pointer-events:none;
+
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    visibility var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-out);
+
+  z-index:var(--z-tooltip, 70);
+}
+
+/* logo / toggle: flecha tooltip */
+.logo[data-tooltip]::before,
+.sidebar-toggle[data-tooltip]::before{
+  content:"";
+  position:absolute;
+  top:50%;
+  left:calc(100% + var(--sidebar-tooltip-arrow-offset));
+
+  width:10px;
+  height:10px;
+
+  transform:translateY(-50%) rotate(45deg);
+
+  background:var(--tooltip-bg);
+  border-top:1px solid var(--border-default);
+  border-left:1px solid var(--border-default);
+
+  box-shadow:-2px -2px 8px rgba(0,0,0,.04);
+
+  opacity:0;
+  visibility:hidden;
+  pointer-events:none;
+
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    visibility var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-out);
+
+  z-index:calc(var(--z-tooltip, 70) - 1);
+}
+
+/* menu-item: SOLO caja
+   ::before queda libre para la barra active */
 .menu-item[data-tooltip]::after{
   content:attr(data-tooltip);
   position:absolute;
@@ -387,38 +467,6 @@
   z-index:var(--z-tooltip, 70);
 }
 
-/* flecha */
-.logo[data-tooltip]::before,
-.sidebar-toggle[data-tooltip]::before,
-.menu-item[data-tooltip]::before{
-  content:"";
-  position:absolute;
-  top:50%;
-  left:calc(100% + var(--sidebar-tooltip-arrow-offset));
-
-  width:10px;
-  height:10px;
-
-  transform:translateY(-50%) rotate(45deg);
-
-  background:var(--tooltip-bg);
-  border-top:1px solid var(--border-default);
-  border-left:1px solid var(--border-default);
-
-  box-shadow:-2px -2px 8px rgba(0,0,0,.04);
-
-  opacity:0;
-  visibility:hidden;
-  pointer-events:none;
-
-  transition:
-    opacity var(--duration-fast) var(--ease-standard),
-    visibility var(--duration-fast) var(--ease-standard),
-    transform var(--duration-fast) var(--ease-out);
-
-  z-index:calc(var(--z-tooltip, 70) - 1);
-}
-
 /* toggle desktop */
 .sidebar-toggle[data-tooltip]:hover::after,
 .sidebar-toggle[data-tooltip]:hover::before{
@@ -436,9 +484,7 @@
 .sidebar.is-collapsed .logo[data-tooltip]:hover::after,
 .sidebar.is-collapsed .logo[data-tooltip]:hover::before,
 .sidebar.collapsed .menu-item[data-tooltip]:hover::after,
-.sidebar.collapsed .menu-item[data-tooltip]:hover::before,
-.sidebar.is-collapsed .menu-item[data-tooltip]:hover::after,
-.sidebar.is-collapsed .menu-item[data-tooltip]:hover::before{
+.sidebar.is-collapsed .menu-item[data-tooltip]:hover::after{
   opacity:1;
   visibility:visible;
 }
@@ -448,6 +494,15 @@
 .sidebar.collapsed .menu-item[data-tooltip]:hover::after,
 .sidebar.is-collapsed .menu-item[data-tooltip]:hover::after{
   transform:translateY(-50%) translateX(0);
+}
+
+/* no tooltip en item activo para evitar conflicto visual */
+.sidebar.collapsed .menu-item.active[data-tooltip]::after,
+.sidebar.collapsed .menu-item[aria-current="page"][data-tooltip]::after,
+.sidebar.is-collapsed .menu-item.active[data-tooltip]::after,
+.sidebar.is-collapsed .menu-item[aria-current="page"][data-tooltip]::after{
+  opacity:0 !important;
+  visibility:hidden !important;
 }
 
 /* footer blindado */
@@ -569,6 +624,7 @@
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,.03),
     0 8px 20px rgba(0,0,0,.12);
+  z-index:2;
 }
 
 .menu-item.active svg,
@@ -587,11 +643,6 @@
   background:transparent;
 }
 
-.menu-item.active::after,
-.menu-item[aria-current="page"]::after{
-  z-index:9999;
-}
-
 .menu-item.active::before,
 .menu-item[aria-current="page"]::before{
   content:"";
@@ -604,6 +655,7 @@
   border-radius:0 3px 3px 0;
   background:var(--accent);
   box-shadow:0 0 10px rgba(255,255,255,.04);
+  z-index:1;
 }
 
 .sidebar.collapsed .sidebar-menu,
@@ -683,7 +735,7 @@
   padding-bottom:12px;
 
   overflow-y:auto;
-  overflow-x:hidden;
+  overflow-x:visible;
 }
 
 .sidebar-section .section-title{
@@ -1258,6 +1310,7 @@
 
   .sidebar .sidebar-section{
     display:flex !important;
+    overflow-x:hidden;
   }
 
   .sidebar .user{
@@ -1285,7 +1338,6 @@
   .logo[data-tooltip]::after,
   .logo[data-tooltip]::before,
   .menu-item[data-tooltip]::after,
-  .menu-item[data-tooltip]::before,
   .sidebar-toggle[data-tooltip]::after,
   .sidebar-toggle[data-tooltip]::before{
     display:none !important;

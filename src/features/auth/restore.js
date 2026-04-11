@@ -10,7 +10,7 @@
    - endurecer recuperación de sesión
 ========================================================= */
 
-import { AppCore } from "../../core/core.js";
+import { AppCore } from "../../core/index.js";
 
 import {
   extractMessage,

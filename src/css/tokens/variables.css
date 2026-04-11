@@ -71,19 +71,30 @@
 
   /* =========================
      SAFE AREAS / SHELL
-     SOLO LO JUSTO PARA EL LAYOUT
+     SISTEMA BASE DEL LAYOUT
   ========================= */
   --app-safe-top: env(safe-area-inset-top, 0px);
   --app-safe-right: env(safe-area-inset-right, 0px);
   --app-safe-bottom: env(safe-area-inset-bottom, 0px);
   --app-safe-left: env(safe-area-inset-left, 0px);
 
-  /* ancho real usado por el shell */
-  --sidebar-current-width: var(--sidebar-width);
+  --app-sidebar-current-width: var(--sidebar-width);
 
-  /* offsets reales del layout */
-  --app-offset-topbar: calc(var(--topbar-height) + var(--app-safe-top));
+  --app-offset-topbar: calc(
+    var(--topbar-height) + var(--app-safe-top)
+  );
+
   --app-offset-tablehead: 0px;
+
+  --content-padding-inline: var(--content-padding);
+  --content-padding-block: var(--space-lg);
+
+  --shell-blur: var(--blur-lg);
+  --shell-border: var(--border-soft);
+
+  --shell-surface:
+    linear-gradient(180deg, rgba(255,255,255,.018), rgba(255,255,255,.006)),
+    transparent;
 
   /* =========================
      Z-INDEX

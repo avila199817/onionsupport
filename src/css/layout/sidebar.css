@@ -336,10 +336,30 @@
 
 /* =========================
    TOOLTIP SYSTEM — FINAL
+   SOLO PARA ELEMENTOS CON data-tooltip
+   EXCLUYE FOOTER / USER / DROPDOWN
 ========================= */
-.sidebar-toggle::after,
-.menu-item::after,
-.user::after{
+.sidebar,
+.sidebar-top,
+.sidebar-menu,
+.sidebar-section{
+  overflow:visible;
+}
+
+.sidebar-footer,
+.user-dropdown{
+  overflow:visible;
+}
+
+.logo[data-tooltip],
+.sidebar-toggle[data-tooltip],
+.menu-item[data-tooltip]{
+  position:relative;
+}
+
+.logo[data-tooltip]::after,
+.sidebar-toggle[data-tooltip]::after,
+.menu-item[data-tooltip]::after{
   content:attr(data-tooltip);
   position:absolute;
   top:50%;
@@ -379,9 +399,9 @@
   z-index:9999;
 }
 
-.sidebar-toggle::before,
-.menu-item::before,
-.user::before{
+.logo[data-tooltip]::before,
+.sidebar-toggle[data-tooltip]::before,
+.menu-item[data-tooltip]::before{
   content:"";
   position:absolute;
   top:50%;
@@ -410,44 +430,50 @@
   z-index:9998;
 }
 
-.sidebar:not(.collapsed):not(.is-collapsed) .sidebar-toggle:hover::after,
-.sidebar:not(.collapsed):not(.is-collapsed) .sidebar-toggle:hover::before,
-.sidebar.collapsed .sidebar-toggle:hover::after,
-.sidebar.collapsed .sidebar-toggle:hover::before,
-.sidebar.is-collapsed .sidebar-toggle:hover::after,
-.sidebar.is-collapsed .sidebar-toggle:hover::before{
+/* Toggle visible también abierto/cerrado */
+.sidebar-toggle[data-tooltip]:hover::after,
+.sidebar-toggle[data-tooltip]:hover::before{
   opacity:1;
   visibility:visible;
 }
 
-.sidebar:not(.collapsed):not(.is-collapsed) .sidebar-toggle:hover::after,
-.sidebar.collapsed .sidebar-toggle:hover::after,
-.sidebar.is-collapsed .sidebar-toggle:hover::after{
+.sidebar-toggle[data-tooltip]:hover::after{
   transform:translateY(-50%) translateX(0);
 }
 
-.sidebar.collapsed .menu-item:hover::after,
-.sidebar.collapsed .menu-item:hover::before,
-.sidebar.is-collapsed .menu-item:hover::after,
-.sidebar.is-collapsed .menu-item:hover::before,
-.sidebar.collapsed .user:hover::after,
-.sidebar.collapsed .user:hover::before,
-.sidebar.is-collapsed .user:hover::after,
-.sidebar.is-collapsed .user:hover::before{
+/* Tooltips del resto SOLO en collapsed desktop */
+.sidebar.collapsed .logo[data-tooltip]:hover::after,
+.sidebar.collapsed .logo[data-tooltip]:hover::before,
+.sidebar.is-collapsed .logo[data-tooltip]:hover::after,
+.sidebar.is-collapsed .logo[data-tooltip]:hover::before,
+.sidebar.collapsed .menu-item[data-tooltip]:hover::after,
+.sidebar.collapsed .menu-item[data-tooltip]:hover::before,
+.sidebar.is-collapsed .menu-item[data-tooltip]:hover::after,
+.sidebar.is-collapsed .menu-item[data-tooltip]:hover::before{
   opacity:1;
   visibility:visible;
 }
 
-.sidebar.collapsed .menu-item:hover::after,
-.sidebar.is-collapsed .menu-item:hover::after,
-.sidebar.collapsed .user:hover::after,
-.sidebar.is-collapsed .user:hover::after{
+.sidebar.collapsed .logo[data-tooltip]:hover::after,
+.sidebar.is-collapsed .logo[data-tooltip]:hover::after,
+.sidebar.collapsed .menu-item[data-tooltip]:hover::after,
+.sidebar.is-collapsed .menu-item[data-tooltip]:hover::after{
   transform:translateY(-50%) translateX(0);
 }
 
-.sidebar:not(.collapsed):not(.is-collapsed) .user::before,
-.sidebar:not(.collapsed):not(.is-collapsed) .user::after{
-  display:none;
+/* Footer jamás genera tooltip */
+.sidebar-footer [data-tooltip]::before,
+.sidebar-footer [data-tooltip]::after,
+.user::before,
+.user::after,
+.avatar::before,
+.avatar::after,
+.user-info::before,
+.user-info::after,
+.user-dropdown::before,
+.user-dropdown::after{
+  content:none !important;
+  display:none !important;
 }
 
 
@@ -489,7 +515,7 @@
   line-height:1.1;
 
   min-width:0;
-  overflow:hidden;
+  overflow:visible;
 
   transition:
     background var(--duration-fast) var(--ease-standard),
@@ -1184,12 +1210,12 @@
     max-width:none;
   }
 
-  .sidebar .menu-item::after,
-  .sidebar .menu-item::before,
-  .sidebar .sidebar-toggle::after,
-  .sidebar .sidebar-toggle::before,
-  .sidebar .user::after,
-  .sidebar .user::before{
+  .logo[data-tooltip]::after,
+  .logo[data-tooltip]::before,
+  .menu-item[data-tooltip]::after,
+  .menu-item[data-tooltip]::before,
+  .sidebar-toggle[data-tooltip]::after,
+  .sidebar-toggle[data-tooltip]::before{
     display:none !important;
   }
 }

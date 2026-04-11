@@ -9,9 +9,9 @@
    - mantener la API pública App
 ========================================================= */
 
-import { AppCore } from "../core/core.js";
+import { AppCore } from "../core/index.js";
 import { Store } from "../store/store.js";
-import { Auth } from "../features/index.js";
+import { Auth } from "../features/auth/index.js";
 import { Router } from "../router/router.js";
 import { SidebarUI } from "../ui/sidebar/index.js";
 import { TopbarUI } from "../ui/topbar.js";

@@ -22,7 +22,7 @@ import { AppCore } from "./core/core.js";
 import { Store } from "./store/store.js";
 import { Auth } from "./features/auth.js";
 import { Router } from "./router/router.js";
-import { SidebarUI } from "./ui/sidebar.js";
+import { SidebarUI } from "./ui/sidebar/index.js";
 import { TopbarUI } from "./ui/topbar.js";
 import { Toast } from "./ui/toast.js";
 import { I18n } from "./i18n/index.js";

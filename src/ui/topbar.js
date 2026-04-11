@@ -17,7 +17,8 @@
    - tolerar distintos formatos del backend search
    - cleanup sólido anti duplicados
    - integrarse de forma robusta con SidebarUI
-   - alinearse con topbar fija como parte del layout SPA
+   - alinearse con layout controlado por CSS
+   - NO pisar offsets del shell con inline styles
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
@@ -324,28 +325,22 @@ export const TopbarUI = (() => {
     }
   }
 
+  /* =========================================================
+     LAYOUT SYNC
+     IMPORTANTE:
+     - el offset horizontal del topbar lo debe gobernar CSS
+     - aquí NO metemos left inline ni width inline
+     - como mucho, limpiamos restos de estilos antiguos
+  ========================================================= */
   function syncFixedTopbarOffset() {
-    const { topbar, sidebar } = getDom();
+    const { topbar } = getDom();
     if (!topbar) return;
 
-    if (document.body?.classList.contains("route-shell-hidden")) {
-      topbar.style.left = "0";
-      return;
-    }
-
-    if (isMobileViewport()) {
-      topbar.style.left = "0";
-      return;
-    }
-
-    const sidebarWidth =
-      sidebar?.getBoundingClientRect?.().width ||
-      parseFloat(
-        getComputedStyle(document.documentElement).getPropertyValue("--sidebar-width")
-      ) ||
-      0;
-
-    topbar.style.left = `${Math.max(0, Math.round(sidebarWidth))}px`;
+    topbar.style.left = "";
+    topbar.style.right = "";
+    topbar.style.width = "";
+    topbar.style.insetInlineStart = "";
+    topbar.style.insetInlineEnd = "";
   }
 
   /* =========================================================
@@ -617,9 +612,9 @@ export const TopbarUI = (() => {
       return escapeHtml(safeText);
     }
 
-    const normalizedText = normalizeText(safeText);
-    const normalizedQuery = normalizeText(safeQuery);
-    const index = normalizedText.indexOf(normalizedQuery);
+    const normalizedSource = normalizeText(safeText);
+    const normalizedNeedle = normalizeText(safeQuery);
+    const index = normalizedSource.indexOf(normalizedNeedle);
 
     if (index === -1) {
       return escapeHtml(safeText);
@@ -1357,30 +1352,10 @@ export const TopbarUI = (() => {
     searchResults.setAttribute("aria-hidden", "true");
     setSearchExpanded(searchInput, false);
 
-    AppCore.cleanup.on(
-      SEARCH_SCOPE,
-      searchInput,
-      "input",
-      handleSearchInput
-    );
-    AppCore.cleanup.on(
-      SEARCH_SCOPE,
-      searchInput,
-      "focus",
-      handleSearchFocus
-    );
-    AppCore.cleanup.on(
-      SEARCH_SCOPE,
-      document,
-      "keydown",
-      handleSearchKeydown
-    );
-    AppCore.cleanup.on(
-      SEARCH_SCOPE,
-      document,
-      "click",
-      handleSearchOutsideClick
-    );
+    AppCore.cleanup.on(SEARCH_SCOPE, searchInput, "input", handleSearchInput);
+    AppCore.cleanup.on(SEARCH_SCOPE, searchInput, "focus", handleSearchFocus);
+    AppCore.cleanup.on(SEARCH_SCOPE, document, "keydown", handleSearchKeydown);
+    AppCore.cleanup.on(SEARCH_SCOPE, document, "click", handleSearchOutsideClick);
 
     return true;
   }

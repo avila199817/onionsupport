@@ -8,6 +8,7 @@
    - cambio de idioma
    - consistencia visual SaaS panel
    - lista para backend
+   - conectada a i18n real
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
@@ -29,6 +30,14 @@ export const AjustesView = (() => {
     return AppCore.utils.escapeHtml(String(value ?? ""));
   }
 
+  function t(key, fallback = "", params = {}) {
+    try {
+      return I18n.t(key, params, fallback);
+    } catch {
+      return fallback;
+    }
+  }
+
   function getCurrentLang() {
     try {
       return I18n.getLang();
@@ -39,9 +48,10 @@ export const AjustesView = (() => {
 
   function setLang(lang) {
     try {
-      I18n.setLang(lang);
+      return I18n.setLang(lang);
     } catch {
       AppCore.state.lang = lang;
+      return lang;
     }
   }
 
@@ -52,9 +62,17 @@ export const AjustesView = (() => {
     return `
       <header class="page-header">
         <div class="page-header-main">
-          <h1 class="page-title">Ajustes</h1>
+          <h1 class="page-title">
+            ${escapeHtml(t("settings.title", "Ajustes"))}
+          </h1>
+
           <p class="page-subtitle">
-            Configuración básica de la cuenta y preferencias.
+            ${escapeHtml(
+              t(
+                "settings.subtitle",
+                "Configuración básica de la cuenta y preferencias."
+              )
+            )}
           </p>
         </div>
       </header>
@@ -91,7 +109,7 @@ export const AjustesView = (() => {
                 font-weight:var(--weight-semibold);
                 letter-spacing:var(--letter-wide);
               ">
-                IDIOMA
+                ${escapeHtml(t("settings.languageCardEyebrow", "IDIOMA"))}
               </span>
 
               <h2 style="
@@ -101,7 +119,7 @@ export const AjustesView = (() => {
                 color:var(--text-strong);
                 font-weight:var(--weight-black);
               ">
-                Cambiar idioma
+                ${escapeHtml(t("settings.languageCardTitle", "Cambiar idioma"))}
               </h2>
             </div>
 
@@ -128,7 +146,12 @@ export const AjustesView = (() => {
             line-height:var(--line-relaxed);
             color:var(--text-muted);
           ">
-            Selecciona el idioma principal de la interfaz.
+            ${escapeHtml(
+              t(
+                "settings.languageCardDescription",
+                "Selecciona el idioma principal de la interfaz."
+              )
+            )}
           </p>
 
           <div style="
@@ -144,11 +167,16 @@ export const AjustesView = (() => {
                 color:var(--text-dim);
                 font-weight:var(--weight-semibold);
               ">
-                Idioma disponible
+                ${escapeHtml(
+                  t("settings.languageSelectLabel", "Idioma disponible")
+                )}
               </span>
 
               <select
                 id="ajustes-language-select"
+                aria-label="${escapeHtml(
+                  t("settings.languageSelectLabel", "Idioma disponible")
+                )}"
                 style="
                   min-height:46px;
                   padding:0 14px;
@@ -208,7 +236,7 @@ export const AjustesView = (() => {
                 font-weight:var(--weight-semibold);
                 letter-spacing:var(--letter-wide);
               ">
-                SEGURIDAD
+                ${escapeHtml(t("settings.passwordCardEyebrow", "SEGURIDAD"))}
               </span>
 
               <h2 style="
@@ -218,7 +246,9 @@ export const AjustesView = (() => {
                 color:var(--text-strong);
                 font-weight:var(--weight-black);
               ">
-                Cambiar contraseña
+                ${escapeHtml(
+                  t("settings.passwordCardTitle", "Cambiar contraseña")
+                )}
               </h2>
             </div>
 
@@ -245,7 +275,12 @@ export const AjustesView = (() => {
             line-height:var(--line-relaxed);
             color:var(--text-muted);
           ">
-            Desde aquí podrás actualizar tu contraseña de acceso.
+            ${escapeHtml(
+              t(
+                "settings.passwordCardDescription",
+                "Desde aquí podrás actualizar tu contraseña de acceso."
+              )
+            )}
           </p>
 
           <div style="
@@ -263,7 +298,12 @@ export const AjustesView = (() => {
                 color:var(--text-strong);
                 font-weight:var(--weight-bold);
               ">
-                Próximamente conectable
+                ${escapeHtml(
+                  t(
+                    "settings.passwordComingSoonTitle",
+                    "Próximamente conectable"
+                  )
+                )}
               </strong>
 
               <span style="
@@ -271,7 +311,12 @@ export const AjustesView = (() => {
                 color:var(--text-dim);
                 line-height:var(--line-normal);
               ">
-                Esta vista ya está preparada para montar el formulario de cambio de contraseña cuando conectes el endpoint.
+                ${escapeHtml(
+                  t(
+                    "settings.passwordComingSoonText",
+                    "Esta vista ya está preparada para montar el formulario de cambio de contraseña cuando conectes el endpoint."
+                  )
+                )}
               </span>
             </div>
           </div>
@@ -298,7 +343,9 @@ export const AjustesView = (() => {
                 cursor:pointer;
               "
             >
-              Cambiar contraseña
+              ${escapeHtml(
+                t("settings.changePasswordAction", "Cambiar contraseña")
+              )}
             </button>
           </div>
         </article>
@@ -314,7 +361,9 @@ export const AjustesView = (() => {
     if (!container) return;
 
     AppCore.cleanup.run(SCOPE);
-    AppCore.setDocumentTitle("Ajustes");
+    AppCore.setDocumentTitle(
+      t("settings.title", "Ajustes")
+    );
     AppCore.clearDynamicContainers?.();
 
     container.innerHTML = `
@@ -347,7 +396,16 @@ export const AjustesView = (() => {
     if (changePasswordBtn) {
       AppCore.cleanup.on(scope, changePasswordBtn, "click", () => {
         AppCore.utils?.toast?.info?.(
-          "Aquí irá el flujo de cambio de contraseña."
+          t(
+            "settings.passwordFlowSoon",
+            "Aquí irá el flujo de cambio de contraseña."
+          ),
+          {
+            title: t(
+              "settings.passwordCardTitle",
+              "Cambiar contraseña"
+            ),
+          }
         );
       });
     }
@@ -355,14 +413,7 @@ export const AjustesView = (() => {
     if (languageSelect) {
       AppCore.cleanup.on(scope, languageSelect, "change", (event) => {
         const nextLang = String(event.target.value || "es");
-
         setLang(nextLang);
-
-        AppCore.utils?.toast?.success?.(
-          "Idioma actualizado correctamente."
-        );
-
-        window.location.reload();
       });
     }
   }

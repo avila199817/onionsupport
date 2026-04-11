@@ -14,6 +14,7 @@
    - alineación perfecta entre sidebar / topbar / tablehead / content
    - table-head visible solo cuando tenga contenido real
    - compensación robusta con sidebar fixed montado desde JS
+   - compatible con topbar sticky montado desde JS
 ========================================================= */
 
 
@@ -28,11 +29,8 @@
 
   --app-sidebar-current-width: var(--sidebar-width);
 
-  --app-offset-topbar: calc(
-    var(--topbar-height) +
-    var(--app-safe-top)
-  );
-
+  /* topbar ahora es sticky dentro de main-content */
+  --app-offset-topbar: 0px;
   --app-offset-tablehead: 0px;
 
   --content-padding-inline: var(--content-padding);
@@ -236,10 +234,8 @@ body.sidebar-collapsed .main-content{
   min-inline-size:0;
   min-block-size:0;
 
-  padding-block-start:calc(
-    var(--app-offset-topbar) +
-    var(--app-offset-tablehead)
-  );
+  /* ya no reservamos hueco para topbar sticky */
+  padding-block-start:var(--app-offset-tablehead);
   padding-inline-end:var(--app-safe-right);
   padding-block-end:var(--app-safe-bottom);
   padding-inline-start:var(--app-safe-left);

@@ -18,11 +18,12 @@
 
 /* =========================
    ROOT SAFE / LOCAL TUNING
+   SOLO AJUSTES LOCALES DE TOPBAR
 ========================= */
 :root{
-  --topbar-safe-top: env(safe-area-inset-top, 0px);
-  --topbar-safe-right: env(safe-area-inset-right, 0px);
-  --topbar-safe-left: env(safe-area-inset-left, 0px);
+  --topbar-safe-top: var(--app-safe-top);
+  --topbar-safe-right: var(--app-safe-right);
+  --topbar-safe-left: var(--app-safe-left);
 
   --topbar-inline-padding: var(--space-lg);
 
@@ -44,9 +45,9 @@
 ========================= */
 .topbar{
   position:fixed;
-  top:0;
-  left:var(--sidebar-width);
-  right:0;
+  inset-block-start:0;
+  inset-inline-start:var(--app-sidebar-current-width);
+  inset-inline-end:0;
 
   inline-size:auto;
   min-inline-size:0;
@@ -76,8 +77,7 @@
   z-index:var(--z-topbar);
 
   transition:
-    left var(--duration-slow) var(--ease-emphasis),
-    width var(--duration-slow) var(--ease-emphasis),
+    inset-inline-start var(--duration-slow) var(--ease-emphasis),
     background var(--duration-normal) var(--ease-standard),
     border-color var(--duration-normal) var(--ease-standard),
     box-shadow var(--duration-normal) var(--ease-standard),
@@ -124,18 +124,19 @@
 
 
 /* =========================
-   TOPBAR VS SIDEBAR STATES
+   TOPBAR VS SHELL STATES
 ========================= */
-body.sidebar-collapsed .topbar{
-  left:var(--sidebar-collapsed);
+body.route-shell-hidden .topbar,
+body.auth-screen .topbar{
+  inset-inline-start:0;
 }
 
-body.route-shell-hidden .topbar{
-  left:0;
+body.sidebar-collapsed .topbar{
+  inset-inline-start:var(--app-sidebar-current-width);
 }
 
 body.sidebar-open .topbar{
-  left:var(--sidebar-width);
+  inset-inline-start:var(--app-sidebar-current-width);
 }
 
 
@@ -608,8 +609,8 @@ mark,
 ========================= */
 @media (max-width: 900px){
   .topbar{
-    left:0;
-    right:0;
+    inset-inline-start:0;
+    inset-inline-end:0;
     gap:var(--space-md);
     padding-inline-end:calc(var(--space-md) + var(--topbar-safe-right));
     padding-inline-start:calc(var(--space-md) + var(--topbar-safe-left));

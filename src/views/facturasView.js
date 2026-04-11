@@ -16,8 +16,8 @@
    - simplicidad máxima
 ========================================================= */
 
-import { AppCore } from "../core/core.js";
-import { Store } from "../store/store.js";
+import { AppCore } from "../core/index.js";
+import { Store } from "../store/index.js";
 
 export const FacturasView = (() => {
   "use strict";

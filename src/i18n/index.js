@@ -10,6 +10,7 @@
    - persistencia local
    - sincronización con AppCore
    - evento global app:lang:change
+   - helpers para refresco de UI
 ========================================================= */
 
 import es from "./es.js";
@@ -123,7 +124,10 @@ export const I18n = (() => {
 
   function syncLangToDocument(lang) {
     try {
-      document.documentElement.setAttribute("lang", lang);
+      document.documentElement.setAttribute(
+        "lang",
+        lang
+      );
     } catch {
       /* noop */
     }
@@ -150,8 +154,102 @@ export const I18n = (() => {
         "app:lang:change",
         {
           lang,
+          dictionary: getDictionary(lang),
         }
       );
+    } catch {
+      /* noop */
+    }
+  }
+
+  function updateDOM(root = document) {
+    try {
+      const scope =
+        root instanceof Element ||
+        root instanceof Document
+          ? root
+          : document;
+
+      /* text */
+      scope
+        .querySelectorAll("[data-i18n]")
+        .forEach((node) => {
+          const key =
+            node.getAttribute("data-i18n");
+
+          if (!key) return;
+
+          node.textContent = t(key);
+        });
+
+      /* html */
+      scope
+        .querySelectorAll("[data-i18n-html]")
+        .forEach((node) => {
+          const key =
+            node.getAttribute(
+              "data-i18n-html"
+            );
+
+          if (!key) return;
+
+          node.innerHTML = t(key);
+        });
+
+      /* placeholder */
+      scope
+        .querySelectorAll(
+          "[data-i18n-placeholder]"
+        )
+        .forEach((node) => {
+          const key =
+            node.getAttribute(
+              "data-i18n-placeholder"
+            );
+
+          if (!key) return;
+
+          node.setAttribute(
+            "placeholder",
+            t(key)
+          );
+        });
+
+      /* title */
+      scope
+        .querySelectorAll("[data-i18n-title]")
+        .forEach((node) => {
+          const key =
+            node.getAttribute(
+              "data-i18n-title"
+            );
+
+          if (!key) return;
+
+          node.setAttribute(
+            "title",
+            t(key)
+          );
+        });
+
+      /* aria-label */
+      scope
+        .querySelectorAll(
+          "[data-i18n-aria-label]"
+        )
+        .forEach((node) => {
+          const key =
+            node.getAttribute(
+              "data-i18n-aria-label"
+            );
+
+          if (!key) return;
+
+          node.setAttribute(
+            "aria-label",
+            t(key)
+          );
+        });
     } catch {
       /* noop */
     }
@@ -164,8 +262,8 @@ export const I18n = (() => {
     try {
       return normalizeLang(
         navigator.language ||
-        navigator.userLanguage ||
-        DEFAULT_LANG
+          navigator.userLanguage ||
+          DEFAULT_LANG
       );
     } catch {
       return DEFAULT_LANG;
@@ -186,37 +284,56 @@ export const I18n = (() => {
     return currentLang;
   }
 
-  function setLang(lang = DEFAULT_LANG) {
-    const nextLang = normalizeLang(lang);
+  function setLang(
+    lang = DEFAULT_LANG,
+    options = {}
+  ) {
+    const {
+      force = false,
+      silent = false,
+      updateUi = true,
+    } = options || {};
 
-    if (nextLang === currentLang) {
-      syncLangToDocument(nextLang);
-      syncLangToState(nextLang);
-      return currentLang;
-    }
+    const nextLang =
+      normalizeLang(lang);
+
+    const changed =
+      nextLang !== currentLang;
 
     currentLang = nextLang;
 
     safeStorageSet(nextLang);
     syncLangToDocument(nextLang);
     syncLangToState(nextLang);
-    emitLangChange(nextLang);
+
+    if (updateUi) {
+      updateDOM(document);
+    }
+
+    if (
+      !silent &&
+      (changed || force)
+    ) {
+      emitLangChange(nextLang);
+    }
 
     return currentLang;
   }
 
-  function t(key = "", params = {}, fallback = "") {
-    const active =
-      getNested(
-        dictionaries[currentLang],
-        key
-      );
+  function t(
+    key = "",
+    params = {},
+    fallback = ""
+  ) {
+    const active = getNested(
+      dictionaries[currentLang],
+      key
+    );
 
-    const base =
-      getNested(
-        dictionaries[DEFAULT_LANG],
-        key
-      );
+    const base = getNested(
+      dictionaries[DEFAULT_LANG],
+      key
+    );
 
     const resolved =
       active ??
@@ -224,7 +341,10 @@ export const I18n = (() => {
       fallback ??
       key;
 
-    return interpolate(resolved, params);
+    return interpolate(
+      resolved,
+      params
+    );
   }
 
   function exists(key = "") {
@@ -240,33 +360,63 @@ export const I18n = (() => {
     );
   }
 
-  function register(lang, data = {}) {
-    const code = normalizeLang(lang);
+  function register(
+    lang,
+    data = {}
+  ) {
+    const code =
+      normalizeLang(lang);
 
-    if (!code || typeof data !== "object" || data === null) {
+    if (
+      !code ||
+      typeof data !== "object" ||
+      data === null
+    ) {
       return false;
     }
 
     dictionaries[code] = data;
+
     return true;
   }
 
   function getAvailable() {
-    return Object.keys(dictionaries);
+    return Object.keys(
+      dictionaries
+    );
   }
 
-  function getDictionary(lang = currentLang) {
-    const code = normalizeLang(lang);
-    return dictionaries[code] || dictionaries[DEFAULT_LANG] || {};
+  function getDictionary(
+    lang = currentLang
+  ) {
+    const code =
+      normalizeLang(lang);
+
+    return (
+      dictionaries[code] ||
+      dictionaries[
+        DEFAULT_LANG
+      ] ||
+      {}
+    );
   }
 
   function boot() {
-    const initial = detectInitialLang();
+    const initial =
+      detectInitialLang();
 
-    currentLang = normalizeLang(initial);
+    currentLang =
+      normalizeLang(initial);
 
-    syncLangToDocument(currentLang);
-    syncLangToState(currentLang);
+    syncLangToDocument(
+      currentLang
+    );
+
+    syncLangToState(
+      currentLang
+    );
+
+    updateDOM(document);
 
     return currentLang;
   }
@@ -285,5 +435,6 @@ export const I18n = (() => {
     register,
     getAvailable,
     getDictionary,
+    updateDOM,
   };
 })();

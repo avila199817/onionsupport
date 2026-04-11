@@ -8,7 +8,7 @@
    - labels de navegación
    - acciones comunes
    - auth / estados / errores
-   - soporte inicial para toast
+   - soporte completo UI shell
    - estructura escalable por namespaces
 ========================================================= */
 
@@ -37,6 +37,7 @@ const en = {
     remove: "Remove",
     add: "Add",
     create: "Create",
+    update: "Update",
     search: "Search",
     filter: "Filter",
     clear: "Clear",
@@ -81,12 +82,14 @@ const en = {
     online: "Connection restored",
     notFound: {
       title: "Page not found",
-      message: "The route you are trying to open does not exist or is no longer available.",
+      message:
+        "The route you are trying to open does not exist or is no longer available.",
       action: "Back to home",
     },
     forbidden: {
       title: "Access denied",
-      message: "You do not have permission to access this section.",
+      message:
+        "You do not have permission to access this section.",
     },
   },
 
@@ -105,232 +108,383 @@ const en = {
   },
 
   topbar: {
-    searchPlaceholder: "Search in the application...",
+    title: "Onion Support",
+    searchPlaceholder:
+      "Search in the application...",
+    searchEmpty:
+      "No matching results",
     openMenu: "Open menu",
     closeMenu: "Close menu",
-    openUserMenu: "Open user menu",
-    changeTheme: "Change theme",
-    changeLanguage: "Change language",
+    openUserMenu:
+      "Open user menu",
+    closeUserMenu:
+      "Close user menu",
+    changeTheme:
+      "Change theme",
+    changeLanguage:
+      "Change language",
   },
 
   sidebar: {
-    collapse: "Collapse sidebar",
-    expand: "Expand sidebar",
+    title: "Navigation",
+    collapse:
+      "Collapse sidebar",
+    expand:
+      "Expand sidebar",
   },
 
   home: {
     title: "Home",
-    welcome: "Welcome to Onion Support",
-    description: "Your management and support panel is ready.",
+    welcome:
+      "Welcome to Onion Support",
+    description:
+      "Your management and support panel is ready.",
     summary: {
-      title: "System summary",
-      apiBase: "API Base",
-      currentRoute: "Current route",
-      currentTheme: "Current theme",
-      currentLanguage: "Current language",
-      authenticated: "Authenticated session",
+      title:
+        "System summary",
+      apiBase:
+        "API Base",
+      currentRoute:
+        "Current route",
+      currentTheme:
+        "Current theme",
+      currentLanguage:
+        "Current language",
+      authenticated:
+        "Authenticated session",
     },
     actions: {
-      toggleTheme: "Toggle theme",
-      logState: "Log state to console",
+      toggleTheme:
+        "Toggle theme",
+      logState:
+        "Log state to console",
     },
   },
 
   auth: {
     login: {
       title: "Sign in",
-      subtitle: "Access your account to continue",
-      username: "Username",
+      subtitle:
+        "Access your account to continue",
+      username:
+        "Username",
       email: "Email",
-      password: "Password",
-      remember: "Remember me",
-      submit: "Sign in",
-      forgotPassword: "I forgot my password",
-      noAccount: "You do not have an account",
+      password:
+        "Password",
+      remember:
+        "Remember me",
+      submit:
+        "Sign in",
+      forgotPassword:
+        "I forgot my password",
+      noAccount:
+        "You do not have an account",
     },
+
     logout: {
-      action: "Log out",
-      success: "Session closed successfully",
+      action:
+        "Log out",
+      success:
+        "Session closed successfully",
     },
+
     session: {
-      expired: "Your session has expired. Please sign in again.",
-      invalid: "The session is not valid.",
-      required: "You must sign in to continue.",
-      restored: "Session restored successfully",
+      expired:
+        "Your session has expired. Please sign in again.",
+      invalid:
+        "The session is not valid.",
+      required:
+        "You must sign in to continue.",
+      restored:
+        "Session restored successfully",
     },
+
     user: {
-      guest: "Guest",
+      guest:
+        "Guest",
     },
   },
 
   account: {
     title: "Account",
-    profile: "Profile",
-    security: "Security",
-    preferences: "Preferences",
+    profile:
+      "Profile",
+    security:
+      "Security",
+    preferences:
+      "Preferences",
   },
 
   settings: {
-    title: "Settings",
-    appearance: "Appearance",
-    notifications: "Notifications",
-    language: "Language",
-    system: "System",
+    title:
+      "Settings",
+    appearance:
+      "Appearance",
+    notifications:
+      "Notifications",
+    language:
+      "Language",
+    system:
+      "System",
+
     theme: {
-      label: "Theme",
-      dark: "Dark",
-      light: "Light",
-      auto: "Auto",
-      changed: "Theme updated",
+      label:
+        "Theme",
+      dark:
+        "Dark",
+      light:
+        "Light",
+      auto:
+        "Auto",
+      changed:
+        "Theme updated",
     },
-    languageChanged: "Language updated",
+
+    languageChanged:
+      "Language updated",
   },
 
   clients: {
-    title: "Clients",
-    empty: "No clients available",
+    title:
+      "Clients",
+    empty:
+      "No clients available",
   },
 
   users: {
-    title: "Users",
-    empty: "No users available",
+    title:
+      "Users",
+    empty:
+      "No users available",
   },
 
   invoices: {
-    title: "Invoices",
-    empty: "No invoices available",
+    title:
+      "Invoices",
+    empty:
+      "No invoices available",
   },
 
   incidents: {
-    title: "Incidents",
-    empty: "No incidents available",
+    title:
+      "Incidents",
+    empty:
+      "No incidents available",
   },
 
   search: {
-    placeholder: "Search...",
-    empty: "No results",
+    placeholder:
+      "Search...",
+    empty:
+      "No results",
+
     sections: {
-      navigation: "Navigation",
-      results: "Results",
+      navigation:
+        "Navigation",
+      results:
+        "Results",
     },
+
     items: {
-      home: "Home",
-      incidents: "Incidents",
-      invoices: "Invoices",
-      users: "Users",
-      clients: "Clients",
-      account: "Account",
-      settings: "Settings",
+      home:
+        "Home",
+      incidents:
+        "Incidents",
+      invoices:
+        "Invoices",
+      users:
+        "Users",
+      clients:
+        "Clients",
+      account:
+        "Account",
+      settings:
+        "Settings",
     },
   },
 
   theme: {
-    light: "Light",
-    dark: "Dark",
-    changedToLight: "Theme changed to light",
-    changedToDark: "Theme changed to dark",
+    light:
+      "Light",
+    dark:
+      "Dark",
+    changedToLight:
+      "Theme changed to light",
+    changedToDark:
+      "Theme changed to dark",
   },
 
   toast: {
-    close: "Close notification",
+    close:
+      "Close notification",
+
     types: {
-      success: "Success",
-      error: "Error",
-      warning: "Warning",
-      info: "Information",
-      loading: "Loading",
+      success:
+        "Success",
+      error:
+        "Error",
+      warning:
+        "Warning",
+      info:
+        "Information",
+      loading:
+        "Loading",
     },
+
     generic: {
-      success: "Action completed successfully",
-      error: "An unexpected error has occurred",
-      warning: "Review the information before continuing",
-      info: "New information is available",
-      loading: "Processing request...",
+      success:
+        "Action completed successfully",
+      error:
+        "An unexpected error has occurred",
+      warning:
+        "Review the information before continuing",
+      info:
+        "New information is available",
+      loading:
+        "Processing request...",
     },
+
     actions: {
-      dismiss: "Dismiss",
-      undo: "Undo",
-      retry: "Retry",
+      dismiss:
+        "Dismiss",
+      undo:
+        "Undo",
+      retry:
+        "Retry",
     },
   },
 
   feedback: {
     success: {
-      saved: "Changes saved successfully",
-      updated: "Data updated successfully",
-      created: "Item created successfully",
-      deleted: "Item deleted successfully",
-      sent: "Sent successfully",
+      saved:
+        "Changes saved successfully",
+      updated:
+        "Data updated successfully",
+      created:
+        "Item created successfully",
+      deleted:
+        "Item deleted successfully",
+      sent:
+        "Sent successfully",
     },
+
     error: {
-      generic: "An unexpected error has occurred",
-      network: "Network error. Check your connection.",
-      server: "The server did not respond correctly",
-      timeout: "The operation took too long",
-      forbidden: "You do not have permission to perform this action",
-      unauthorized: "Unauthorized",
-      notFound: "The requested resource was not found",
-      validation: "Please review the highlighted fields",
-      saveFailed: "Could not save changes",
-      loadFailed: "Could not load information",
+      generic:
+        "An unexpected error has occurred",
+      network:
+        "Network error. Check your connection.",
+      server:
+        "The server did not respond correctly",
+      timeout:
+        "The operation took too long",
+      forbidden:
+        "You do not have permission to perform this action",
+      unauthorized:
+        "Unauthorized",
+      notFound:
+        "The requested resource was not found",
+      validation:
+        "Please review the highlighted fields",
+      saveFailed:
+        "Could not save changes",
+      loadFailed:
+        "Could not load information",
     },
   },
 
   forms: {
-    required: "This field is required",
-    invalidEmail: "Enter a valid email address",
-    invalidPhone: "Enter a valid phone number",
-    minLength: "Must be at least {min} characters",
-    maxLength: "Cannot exceed {max} characters",
-    passwordMismatch: "Passwords do not match",
-    invalidFormat: "Invalid format",
+    required:
+      "This field is required",
+    invalidEmail:
+      "Enter a valid email address",
+    invalidPhone:
+      "Enter a valid phone number",
+    minLength:
+      "Must be at least {min} characters",
+    maxLength:
+      "Cannot exceed {max} characters",
+    passwordMismatch:
+      "Passwords do not match",
+    invalidFormat:
+      "Invalid format",
   },
 
   validation: {
-    required: "Required field",
-    invalid: "Invalid value",
-    tooShort: "Value is too short",
-    tooLong: "Value is too long",
+    required:
+      "Required field",
+    invalid:
+      "Invalid value",
+    tooShort:
+      "Value is too short",
+    tooLong:
+      "Value is too long",
   },
 
   table: {
-    empty: "No records available",
-    loading: "Loading table...",
-    columns: "Columns",
+    empty:
+      "No records available",
+    loading:
+      "Loading table...",
+    columns:
+      "Columns",
+
     pagination: {
-      previous: "Previous",
-      next: "Next",
-      page: "Page",
-      of: "of",
+      previous:
+        "Previous",
+      next:
+        "Next",
+      page:
+        "Page",
+      of:
+        "of",
     },
   },
 
   status: {
-    active: "Active",
-    inactive: "Inactive",
-    pending: "Pending",
-    resolved: "Resolved",
-    open: "Open",
-    closed: "Closed",
-    success: "Success",
-    error: "Error",
-    warning: "Warning",
-    info: "Information",
+    active:
+      "Active",
+    inactive:
+      "Inactive",
+    pending:
+      "Pending",
+    resolved:
+      "Resolved",
+    open:
+      "Open",
+    closed:
+      "Closed",
+    success:
+      "Success",
+    error:
+      "Error",
+    warning:
+      "Warning",
+    info:
+      "Information",
   },
 
   dates: {
-    today: "Today",
-    yesterday: "Yesterday",
-    tomorrow: "Tomorrow",
+    today:
+      "Today",
+    yesterday:
+      "Yesterday",
+    tomorrow:
+      "Tomorrow",
   },
 
   aria: {
-    close: "Close",
-    open: "Open",
-    menu: "Menu",
-    navigation: "Main navigation",
-    notifications: "Notifications",
-    userMenu: "User menu",
+    close:
+      "Close",
+    open:
+      "Open",
+    menu:
+      "Menu",
+    navigation:
+      "Main navigation",
+    notifications:
+      "Notifications",
+    userMenu:
+      "User menu",
   },
 };
 

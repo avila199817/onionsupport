@@ -201,21 +201,52 @@ export const Toast = (() => {
   function getDefaultTitle(type) {
     switch (type) {
       case "success":
-        return t("toast.successTitle", "Éxito");
+        return t("toast.types.success", "Éxito");
       case "error":
-        return t("toast.errorTitle", "Error");
+        return t("toast.types.error", "Error");
       case "warning":
-        return t("toast.warningTitle", "Aviso");
+        return t("toast.types.warning", "Aviso");
       case "loading":
-        return t("toast.loadingTitle", "Cargando");
+        return t("toast.types.loading", "Cargando");
       case "info":
       default:
-        return t("toast.infoTitle", "Información");
+        return t("toast.types.info", "Información");
+    }
+  }
+
+  function getDefaultMessage(type) {
+    switch (type) {
+      case "success":
+        return t(
+          "toast.generic.success",
+          "Acción completada correctamente"
+        );
+      case "error":
+        return t(
+          "toast.generic.error",
+          "Ha ocurrido un error inesperado"
+        );
+      case "warning":
+        return t(
+          "toast.generic.warning",
+          "Revisa la información antes de continuar"
+        );
+      case "loading":
+        return t(
+          "toast.generic.loading",
+          "Procesando solicitud..."
+        );
+      case "info":
+      default:
+        return t(
+          "toast.generic.info",
+          "Hay información nueva disponible"
+        );
     }
   }
 
   function getDefaultLoadingMessage() {
-    return t("toast.loadingMessage", "Cargando...");
+    return t("toast.generic.loading", "Procesando solicitud...");
   }
 
   function getCloseLabel() {
@@ -486,10 +517,15 @@ export const Toast = (() => {
     const title =
       String(options.title ?? "").trim() ||
       (options.useDefaultTitle === true ? getDefaultTitle(type) : "");
+
     const message = String(
       options.message ||
       options.text ||
-      (type === "loading" ? getDefaultLoadingMessage() : "")
+      (options.useDefaultMessage === true
+        ? getDefaultMessage(type)
+        : type === "loading"
+          ? getDefaultLoadingMessage()
+          : "")
     ).trim();
 
     if (!message) {
@@ -566,10 +602,12 @@ export const Toast = (() => {
     if (!item || item.dismissed) return null;
 
     const nextType = patch.type ? normalizeType(patch.type) : item.type;
+
     const nextTitle =
       patch.title !== undefined
         ? String(patch.title || "").trim()
         : item.title;
+
     const nextMessage =
       patch.message !== undefined || patch.text !== undefined
         ? String(patch.message || patch.text || "").trim()
@@ -669,35 +707,35 @@ export const Toast = (() => {
   /* =========================================================
      SHORTCUTS
   ========================================================= */
-  function success(message, options = {}) {
+  function success(message = "", options = {}) {
     return show({
       ...options,
       type: "success",
-      message,
+      message: String(message || "").trim() || getDefaultMessage("success"),
     });
   }
 
-  function error(message, options = {}) {
+  function error(message = "", options = {}) {
     return show({
       ...options,
       type: "error",
-      message,
+      message: String(message || "").trim() || getDefaultMessage("error"),
     });
   }
 
-  function warning(message, options = {}) {
+  function warning(message = "", options = {}) {
     return show({
       ...options,
       type: "warning",
-      message,
+      message: String(message || "").trim() || getDefaultMessage("warning"),
     });
   }
 
-  function info(message, options = {}) {
+  function info(message = "", options = {}) {
     return show({
       ...options,
       type: "info",
-      message,
+      message: String(message || "").trim() || getDefaultMessage("info"),
     });
   }
 
@@ -705,7 +743,7 @@ export const Toast = (() => {
     return show({
       ...options,
       type: "loading",
-      message: message || getDefaultLoadingMessage(),
+      message: String(message || "").trim() || getDefaultLoadingMessage(),
       duration: 0,
       closable: options.closable ?? false,
     });

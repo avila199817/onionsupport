@@ -416,15 +416,19 @@ export const TopbarUI = (() => {
   /* =========================================================
      SIDEBAR MOBILE
   ========================================================= */
+  function getSidebarMobileOpenState(sidebar) {
+    return Boolean(
+      sidebar &&
+      (sidebar.classList.contains("open") || sidebar.classList.contains("is-open"))
+    );
+  }
+
   function setMobileToggleState() {
     const { mobileToggle, sidebar } = getDom();
     if (!mobileToggle) return;
 
     const isDesktop = !isMobileViewport();
-    const isOpen = Boolean(
-      sidebar &&
-      (sidebar.classList.contains("open") || sidebar.classList.contains("is-open"))
-    );
+    const isOpen = getSidebarMobileOpenState(sidebar);
 
     mobileToggle.setAttribute("aria-expanded", String(isOpen));
     mobileToggle.setAttribute(
@@ -492,9 +496,7 @@ export const TopbarUI = (() => {
     const { sidebar } = getDom();
     if (!sidebar) return;
 
-    const nextOpen =
-      !sidebar.classList.contains("open") &&
-      !sidebar.classList.contains("is-open");
+    const nextOpen = !getSidebarMobileOpenState(sidebar);
 
     sidebar.classList.toggle("open", nextOpen);
     sidebar.classList.toggle("is-open", nextOpen);
@@ -515,10 +517,7 @@ export const TopbarUI = (() => {
     const { sidebar, mobileToggle } = getDom();
     if (!sidebar || !mobileToggle) return;
 
-    const isOpen =
-      sidebar.classList.contains("open") ||
-      sidebar.classList.contains("is-open");
-
+    const isOpen = getSidebarMobileOpenState(sidebar);
     if (!isOpen) return;
 
     const clickedSidebar = event.target?.closest?.("#sidebar, .sidebar");

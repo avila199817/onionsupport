@@ -19,7 +19,7 @@
    - init seguro una sola vez
    - sincronización robusta con AppCore
    - inyectar acceso admin a estado del servidor
-   - tooltips nativos automáticos cuando el sidebar está collapsed
+   - soporte limpio para tooltips CSS vía data-tooltip
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
@@ -89,7 +89,7 @@ export const SidebarUI = (() => {
             id="toggleSidebar"
             data-tooltip="Contraer barra lateral"
             aria-label="Contraer barra lateral"
-            aria-controls="sidebar-menu"
+            aria-controls="${SIDEBAR_MENU_ID}"
             aria-expanded="true"
           >
             <svg
@@ -120,7 +120,7 @@ export const SidebarUI = (() => {
 
         <nav
           class="sidebar-menu"
-          id="sidebar-menu"
+          id="${SIDEBAR_MENU_ID}"
           aria-label="Navegación principal"
         >
           <a
@@ -418,7 +418,7 @@ export const SidebarUI = (() => {
 
   function cacheDomRefs() {
     const sidebar = document.getElementById("sidebar");
-    const sidebarMenu = document.getElementById("sidebar-menu");
+    const sidebarMenu = document.getElementById(SIDEBAR_MENU_ID);
     const sidebarRecents = document.getElementById("sidebar-recents");
     const sidebarToggle = document.getElementById("toggleSidebar");
     const mobileToggleBtn = document.getElementById("toggleSidebarMobile");
@@ -451,12 +451,12 @@ export const SidebarUI = (() => {
 
       sidebar:
         AppCore.dom.sidebar ||
-        document.getElementById("sidebar") ||
+        document.getElementById(SIDEBAR_ROOT_ID) ||
         document.querySelector(".sidebar"),
 
       sidebarMenu:
         AppCore.dom.sidebarMenu ||
-        document.getElementById("sidebar-menu") ||
+        document.getElementById(SIDEBAR_MENU_ID) ||
         document.querySelector(".sidebar-menu"),
 
       toggleBtn:
@@ -617,34 +617,33 @@ export const SidebarUI = (() => {
     return Boolean(AppCore.state.sidebarOpen);
   }
 
-  function syncTooltipTitles(forceOpen = null) {
+  function isSidebarCollapsedDesktop() {
     const { sidebar } = getElements();
-    if (!sidebar) return;
+    if (!sidebar) return false;
+    if (isMobileViewport()) return false;
+
+    return (
+      sidebar.classList.contains("collapsed") ||
+      sidebar.classList.contains("is-collapsed")
+    );
+  }
+
+  function syncTooltipMode(isOpen = null) {
+    const { sidebar, body } = getElements();
+    if (!sidebar || !body) return;
 
     const open =
-      typeof forceOpen === "boolean"
-        ? forceOpen
-        : !sidebar.classList.contains("collapsed") &&
-          !sidebar.classList.contains("is-collapsed");
+      typeof isOpen === "boolean"
+        ? isOpen
+        : !isSidebarCollapsedDesktop();
 
-    const shouldShowNativeTitle =
+    const enableCssTooltipMode =
       !isMobileViewport() &&
-      !open;
+      !open &&
+      !isShellHidden();
 
-    sidebar.querySelectorAll("[data-tooltip]").forEach((element) => {
-      const tooltipText = String(element.dataset.tooltip || "").trim();
-
-      if (!tooltipText) {
-        element.removeAttribute("title");
-        return;
-      }
-
-      if (shouldShowNativeTitle) {
-        element.setAttribute("title", tooltipText);
-      } else {
-        element.removeAttribute("title");
-      }
-    });
+    sidebar.classList.toggle("sidebar-tooltips-active", enableCssTooltipMode);
+    body.classList.toggle("sidebar-tooltips-active", enableCssTooltipMode);
   }
 
   function updateToggleLabel(isOpen = null) {
@@ -659,8 +658,13 @@ export const SidebarUI = (() => {
             !sidebar.classList.contains("is-collapsed")
           );
 
-    const desktopText = open ? "Contraer barra lateral" : "Expandir barra lateral";
-    const mobileText = open ? "Cerrar navegación" : "Abrir navegación";
+    const desktopText = open
+      ? "Contraer barra lateral"
+      : "Expandir barra lateral";
+
+    const mobileText = open
+      ? "Cerrar navegación"
+      : "Abrir navegación";
 
     if (toggleBtn) {
       toggleBtn.dataset.tooltip = desktopText;
@@ -675,7 +679,7 @@ export const SidebarUI = (() => {
       mobileToggleBtn.classList.toggle("is-active", open);
     }
 
-    syncTooltipTitles(open);
+    syncTooltipMode(open);
   }
 
   function syncSidebarState() {
@@ -686,6 +690,7 @@ export const SidebarUI = (() => {
       sidebar.hidden = true;
       sidebar.classList.remove("open", "is-open", "collapsed", "is-collapsed");
       body?.classList.remove("sidebar-open", "sidebar-collapsed");
+      syncTooltipMode(true);
       closeDropdown();
       updateToggleLabel(false);
       return;
@@ -827,7 +832,6 @@ export const SidebarUI = (() => {
       serverLink.hidden = !isAdmin();
       serverLink.setAttribute("aria-hidden", String(!isAdmin()));
       serverLink.style.display = isAdmin() ? "" : "none";
-      syncTooltipTitles();
       return serverLink;
     }
 
@@ -849,8 +853,6 @@ export const SidebarUI = (() => {
       serverLink.setAttribute("aria-hidden", String(!isAdmin()));
       serverLink.style.display = isAdmin() ? "" : "none";
     }
-
-    syncTooltipTitles();
 
     return serverLink;
   }
@@ -1007,9 +1009,8 @@ export const SidebarUI = (() => {
         "aria-label",
         `Abrir menú de usuario de ${displayName}`
       );
+      userToggle.dataset.tooltip = displayName || "Cuenta";
     }
-
-    syncTooltipTitles();
 
     AppCore.events.emit("sidebar:user:rendered", {
       user,
@@ -1036,8 +1037,6 @@ export const SidebarUI = (() => {
       element.setAttribute("aria-hidden", String(!admin));
       element.style.display = admin ? "" : "none";
     });
-
-    syncTooltipTitles();
 
     AppCore.events.emit("sidebar:roles:applied", {
       isAdmin: admin,

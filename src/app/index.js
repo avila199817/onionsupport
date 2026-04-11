@@ -4,7 +4,8 @@
 
    Responsabilidades:
    - punto de entrada del bootstrap de la aplicación
-   - composición de submódulos del app
+   - composición de módulos principales
+   - inicialización ordenada del runtime
    - controlar boot / reboot
    - mantener la API pública App
 ========================================================= */
@@ -13,38 +14,63 @@ import { AppCore } from "../core/index.js";
 import { Store } from "../store/index.js";
 import { Auth } from "../features/auth/index.js";
 import { Router } from "../router/index.js";
+import { Http } from "../services/index.js";
+
 import { SidebarUI } from "../ui/sidebar/index.js";
 import { TopbarUI } from "../ui/topbar.js";
 import { Toast } from "../ui/toast.js";
 import { I18n } from "../i18n/index.js";
 
 import { ensureScope, clearScope } from "./helpers.js";
+
 import {
   showLoader,
   hideLoader,
   clearBootFailsafeTimer,
   armBootFailsafeLoader,
 } from "./loader.js";
+
 import {
   getViewContainer,
   setShellVisibility,
   applyPostRenderLoaderPolicy,
   updateShellVisibilityByRoute,
 } from "./shell.js";
-import { markAppBootState, markStoreBootState } from "./boot-state.js";
-import { syncLangState, initI18n, rerenderCurrentRoute } from "./i18n.js";
-import { syncUserUI, initUISystems } from "./ui.js";
+
+import {
+  markAppBootState,
+  markStoreBootState,
+} from "./boot-state.js";
+
+import {
+  syncLangState,
+  initI18n,
+  rerenderCurrentRoute,
+} from "./i18n.js";
+
+import {
+  syncUserUI,
+  initUISystems,
+} from "./ui.js";
+
 import {
   configureRouter,
   bindRouter,
   renderInitialRoute,
 } from "./router.js";
+
 import { warmup } from "./warmup.js";
+
 import {
   navigateAfterSessionRestore,
   restoreSessionInBackground,
 } from "./session.js";
-import { renderBootError, bindGlobalErrorHandlers } from "./errors.js";
+
+import {
+  renderBootError,
+  bindGlobalErrorHandlers,
+} from "./errors.js";
+
 import { bindAppEvents } from "./events.js";
 
 export const App = (() => {
@@ -56,22 +82,47 @@ export const App = (() => {
   const state = {
     booted: false,
     booting: false,
+
+    servicesInitialized: false,
     storeInitialized: false,
+
     routerConfigured: false,
     routerBound: false,
+
     uiInitialized: false,
     i18nInitialized: false,
+
     bootFailsafeTimer: null,
     sessionRestorePromise: null,
   };
 
   /* =========================================================
-     CORE / STORE
+     CORE
   ========================================================= */
   async function initCore() {
     await AppCore.init();
   }
 
+  /* =========================================================
+     SERVICES
+  ========================================================= */
+  function initServices() {
+    if (!state.servicesInitialized) {
+      if (typeof Http?.init === "function") {
+        Http.init();
+      }
+
+      state.servicesInitialized = true;
+    }
+
+    if (!AppCore.modules.has("http")) {
+      AppCore.modules.register("http", Http);
+    }
+  }
+
+  /* =========================================================
+     STORE / AUTH / ROUTER REGISTRY
+  ========================================================= */
   function initStore() {
     if (!state.storeInitialized) {
       if (typeof Store?.init === "function") {
@@ -94,6 +145,9 @@ export const App = (() => {
     }
   }
 
+  /* =========================================================
+     ROUTER
+  ========================================================= */
   function initRouter() {
     configureRouter({
       Router,
@@ -109,7 +163,7 @@ export const App = (() => {
   }
 
   /* =========================================================
-     FINALIZACIÓN DE BOOT
+     FINALIZACIÓN BOOT
   ========================================================= */
   function finalizeBoot() {
     clearBootFailsafeTimer(state);
@@ -175,6 +229,9 @@ export const App = (() => {
 
       await initCore();
 
+      initServices();
+      initStore();
+
       initI18n({
         AppCore,
         I18n,
@@ -204,19 +261,23 @@ export const App = (() => {
         Toast,
         scope,
         syncUserUI,
+
         rerenderCurrentRoute: () =>
           rerenderCurrentRoute({
             AppCore,
             Router,
             I18n,
+
             applyPostRenderLoaderPolicy: () =>
               applyPostRenderLoaderPolicy({
                 AppCore,
                 Router,
                 hideLoader,
               }),
+
             syncUserUI,
           }),
+
         applyPostRenderLoaderPolicy: () =>
           applyPostRenderLoaderPolicy({
             AppCore,
@@ -225,12 +286,12 @@ export const App = (() => {
           }),
       });
 
-      initStore();
       initRouter();
 
       renderInitialRoute({
         AppCore,
         Router,
+
         applyPostRenderLoaderPolicy: () =>
           applyPostRenderLoaderPolicy({
             AppCore,
@@ -261,6 +322,7 @@ export const App = (() => {
         syncUserUI,
         warmup,
         navigateAfterSessionRestore,
+
         applyPostRenderLoaderPolicy: () =>
           applyPostRenderLoaderPolicy({
             AppCore,
@@ -304,8 +366,12 @@ export const App = (() => {
       return api;
     } finally {
       clearBootFailsafeTimer(state);
+
       state.booting = false;
-      AppCore.setState({ booting: false });
+
+      AppCore.setState({
+        booting: false,
+      });
 
       applyPostRenderLoaderPolicy({
         AppCore,
@@ -323,11 +389,16 @@ export const App = (() => {
 
     state.booted = false;
     state.booting = false;
+
+    state.servicesInitialized = false;
     state.storeInitialized = false;
+
     state.routerConfigured = false;
     state.routerBound = false;
+
     state.uiInitialized = false;
     state.i18nInitialized = false;
+
     state.sessionRestorePromise = null;
 
     clearBootFailsafeTimer(state);

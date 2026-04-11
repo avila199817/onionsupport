@@ -333,6 +333,7 @@
    EXCLUYE FOOTER / USER / DROPDOWN
    SIN ROMPER BOTONES
    SIN CONFLICTO CON ACTIVE
+   TOPSIDEBAR: TOOLTIP DEBAJO DEL MOUSE
 ========================= */
 
 .sidebar,
@@ -352,16 +353,22 @@
   position:relative;
 }
 
+/* =========================================================
+   TOPSIDEBAR (logo + toggle)
+   Tooltip por debajo del trigger, no a la derecha
+========================================================= */
+
 /* logo / toggle: caja tooltip */
 .logo[data-tooltip]::after,
 .sidebar-toggle[data-tooltip]::after{
   content:attr(data-tooltip);
   position:absolute;
-  top:50%;
-  left:calc(100% + var(--sidebar-tooltip-offset));
 
-  transform:translateY(-50%) translateX(8px);
-  transform-origin:left center;
+  top:calc(100% + 10px);
+  left:50%;
+
+  transform:translateX(-50%) translateY(8px);
+  transform-origin:top center;
 
   padding:9px 12px;
   border-radius:12px;
@@ -399,13 +406,14 @@
 .sidebar-toggle[data-tooltip]::before{
   content:"";
   position:absolute;
-  top:50%;
-  left:calc(100% + var(--sidebar-tooltip-arrow-offset));
+
+  top:calc(100% + 5px);
+  left:50%;
 
   width:10px;
   height:10px;
 
-  transform:translateY(-50%) rotate(45deg);
+  transform:translateX(-50%) rotate(45deg);
 
   background:var(--tooltip-bg);
   border-top:1px solid var(--border-default);
@@ -425,8 +433,11 @@
   z-index:calc(var(--z-tooltip, 70) - 1);
 }
 
-/* menu-item: SOLO caja
-   ::before queda libre para la barra active */
+/* =========================================================
+   MENU ITEM
+   SOLO caja
+   ::before queda libre para la barra active
+========================================================= */
 .menu-item[data-tooltip]::after{
   content:attr(data-tooltip);
   position:absolute;
@@ -467,7 +478,9 @@
   z-index:var(--z-tooltip, 70);
 }
 
-/* toggle desktop */
+/* =========================================================
+   HOVER TOPSIDEBAR
+========================================================= */
 .sidebar-toggle[data-tooltip]:hover::after,
 .sidebar-toggle[data-tooltip]:hover::before{
   opacity:1;
@@ -475,22 +488,31 @@
 }
 
 .sidebar-toggle[data-tooltip]:hover::after{
-  transform:translateY(-50%) translateX(0);
+  transform:translateX(-50%) translateY(0);
 }
 
-/* collapsed */
 .sidebar.collapsed .logo[data-tooltip]:hover::after,
 .sidebar.collapsed .logo[data-tooltip]:hover::before,
 .sidebar.is-collapsed .logo[data-tooltip]:hover::after,
-.sidebar.is-collapsed .logo[data-tooltip]:hover::before,
+.sidebar.is-collapsed .logo[data-tooltip]:hover::before{
+  opacity:1;
+  visibility:visible;
+}
+
+.sidebar.collapsed .logo[data-tooltip]:hover::after,
+.sidebar.is-collapsed .logo[data-tooltip]:hover::after{
+  transform:translateX(-50%) translateY(0);
+}
+
+/* =========================================================
+   HOVER MENU ITEM (collapsed)
+========================================================= */
 .sidebar.collapsed .menu-item[data-tooltip]:hover::after,
 .sidebar.is-collapsed .menu-item[data-tooltip]:hover::after{
   opacity:1;
   visibility:visible;
 }
 
-.sidebar.collapsed .logo[data-tooltip]:hover::after,
-.sidebar.is-collapsed .logo[data-tooltip]:hover::after,
 .sidebar.collapsed .menu-item[data-tooltip]:hover::after,
 .sidebar.is-collapsed .menu-item[data-tooltip]:hover::after{
   transform:translateY(-50%) translateX(0);

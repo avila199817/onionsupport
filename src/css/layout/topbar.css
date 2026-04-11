@@ -10,6 +10,7 @@
    - dropdown de resultados sólido
    - responsive real
    - neutral graphite / enterprise shell
+   - compatible con sidebar fixed montado desde JS
 ========================================================= */
 
 
@@ -41,14 +42,16 @@
 ========================= */
 .topbar{
   position:fixed;
-  top:0;
-  left:var(--topbar-current-left);
-  right:0;
+  inset-block-start:0;
+  inset-inline-start:var(--sidebar-width);
+  inset-inline-end:0;
 
-  height:calc(var(--topbar-height) + var(--topbar-safe-top));
-  padding-top:var(--topbar-safe-top);
-  padding-right:calc(var(--topbar-inline-padding) + var(--topbar-safe-right));
-  padding-left:calc(var(--topbar-inline-padding) + var(--topbar-safe-left));
+  block-size:calc(var(--topbar-height) + var(--topbar-safe-top));
+  min-block-size:calc(var(--topbar-height) + var(--topbar-safe-top));
+
+  padding-block-start:var(--topbar-safe-top);
+  padding-inline-end:calc(var(--topbar-inline-padding) + var(--topbar-safe-right));
+  padding-inline-start:calc(var(--topbar-inline-padding) + var(--topbar-safe-left));
 
   display:flex;
   align-items:center;
@@ -59,7 +62,7 @@
     linear-gradient(180deg, rgba(255,255,255,.022), transparent 42%),
     var(--topbar-bg);
 
-  border-bottom:1px solid var(--topbar-border);
+  border-block-end:1px solid var(--topbar-border);
   box-shadow:var(--topbar-shadow);
 
   backdrop-filter:var(--topbar-blur);
@@ -68,7 +71,7 @@
   z-index:var(--z-topbar);
 
   transition:
-    left var(--duration-slow) var(--ease-emphasis),
+    inset-inline-start var(--duration-slow) var(--ease-emphasis),
     background var(--duration-normal) var(--ease-standard),
     border-color var(--duration-normal) var(--ease-standard),
     box-shadow var(--duration-normal) var(--ease-standard),
@@ -93,10 +96,9 @@
 .topbar::after{
   content:"";
   position:absolute;
-  left:0;
-  right:0;
-  bottom:0;
-  height:1px;
+  inset-inline:0;
+  inset-block-end:0;
+  block-size:1px;
   pointer-events:none;
   background:linear-gradient(
     90deg,
@@ -118,9 +120,8 @@
 /* =========================
    SIDEBAR COLLAPSED
 ========================= */
-.sidebar.collapsed ~ .main-content .topbar,
-.sidebar.is-collapsed ~ .main-content .topbar{
-  --topbar-current-left: var(--sidebar-collapsed);
+body.sidebar-collapsed .topbar{
+  inset-inline-start:var(--sidebar-collapsed);
 }
 
 
@@ -131,7 +132,7 @@
   display:flex;
   align-items:center;
   gap:var(--space-md);
-  min-width:0;
+  min-inline-size:0;
   flex:0 1 auto;
 }
 
@@ -154,8 +155,8 @@
    MOBILE TOGGLE
 ========================= */
 .topbar-mobile-toggle{
-  width:40px;
-  height:40px;
+  inline-size:40px;
+  block-size:40px;
   flex:0 0 auto;
 
   display:none;
@@ -174,6 +175,12 @@
     color var(--duration-fast) var(--ease-standard),
     transform var(--duration-fast) var(--ease-out),
     box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.topbar-mobile-toggle svg{
+  inline-size:20px;
+  block-size:20px;
+  pointer-events:none;
 }
 
 .topbar-mobile-toggle:hover{
@@ -202,7 +209,7 @@
 
   flex:1 1 auto;
   justify-content:flex-end;
-  min-width:0;
+  min-inline-size:0;
 }
 
 
@@ -212,11 +219,11 @@
 .topbar-search-wrap{
   position:relative;
 
-  width:100%;
-  max-width:var(--topbar-search-max-width);
-  min-width:0;
+  inline-size:100%;
+  max-inline-size:var(--topbar-search-max-width);
+  min-inline-size:0;
 
-  margin-left:auto;
+  margin-inline-start:auto;
 }
 
 
@@ -224,10 +231,12 @@
    SEARCH INPUT
 ========================= */
 .topbar-search{
-  width:100%;
-  height:var(--topbar-search-height);
+  inline-size:100%;
+  block-size:var(--topbar-search-height);
 
-  padding:0 16px 0 40px;
+  padding-block:0;
+  padding-inline:16px 16px;
+  padding-inline-start:40px;
 
   border-radius:var(--topbar-search-radius);
   border:1px solid var(--input-border);
@@ -280,12 +289,12 @@
 ========================= */
 .topbar-search-icon{
   position:absolute;
-  left:14px;
-  top:50%;
+  inset-inline-start:14px;
+  inset-block-start:50%;
   transform:translateY(-50%);
 
-  width:16px;
-  height:16px;
+  inline-size:16px;
+  block-size:16px;
 
   color:var(--text-dim);
   pointer-events:none;
@@ -305,9 +314,9 @@
 ========================= */
 .topbar-search-results{
   position:absolute;
-  top:calc(100% + var(--topbar-search-results-offset));
-  left:0;
-  width:100%;
+  inset-block-start:calc(100% + var(--topbar-search-results-offset));
+  inset-inline-start:0;
+  inline-size:100%;
 
   padding:8px;
 
@@ -322,7 +331,7 @@
   backdrop-filter:var(--blur-md);
   -webkit-backdrop-filter:var(--blur-md);
 
-  max-height:var(--topbar-search-results-max-height);
+  max-block-size:var(--topbar-search-results-max-height);
   overflow-y:auto;
   overflow-x:hidden;
 
@@ -337,6 +346,10 @@
     transform var(--duration-fast) var(--ease-out);
 
   z-index:var(--z-dropdown);
+}
+
+.topbar-search-results[hidden]{
+  display:block;
 }
 
 .topbar-search-results::before{
@@ -382,7 +395,7 @@
   align-items:flex-start;
   gap:10px;
 
-  width:100%;
+  inline-size:100%;
   padding:10px 12px;
 
   border:1px solid transparent;
@@ -427,7 +440,7 @@
   flex-direction:column;
   gap:2px;
   line-height:1.25;
-  min-width:0;
+  min-inline-size:0;
 }
 
 .search-title{
@@ -454,8 +467,8 @@
    RESULT ICON
 ========================= */
 .search-icon{
-  width:18px;
-  height:18px;
+  inline-size:18px;
+  block-size:18px;
   flex:0 0 auto;
 
   display:flex;
@@ -561,14 +574,16 @@ mark,
    TABLET / MOBILE
 ========================= */
 @media (max-width: 900px){
-  :root{
-    --topbar-current-left: 0px;
-    --topbar-inline-padding: var(--space-md);
+  .topbar{
+    inset-inline-start:0;
+    gap:var(--space-md);
+    padding-inline-end:calc(var(--space-md) + var(--topbar-safe-right));
+    padding-inline-start:calc(var(--space-md) + var(--topbar-safe-left));
   }
 
-  .topbar{
-    left:0;
-    gap:var(--space-md);
+  body.sidebar-collapsed .topbar,
+  body.sidebar-open .topbar{
+    inset-inline-start:0;
   }
 
   .topbar-mobile-toggle{
@@ -576,11 +591,11 @@ mark,
   }
 
   .topbar-title{
-    max-width:180px;
+    max-inline-size:180px;
   }
 
   .topbar-search-wrap{
-    max-width:100%;
+    max-inline-size:100%;
   }
 }
 
@@ -594,21 +609,21 @@ mark,
   }
 
   .topbar-right{
-    min-width:0;
+    min-inline-size:0;
   }
 
   .topbar-search-wrap{
-    max-width:100%;
+    max-inline-size:100%;
   }
 
   .topbar-search{
-    height:42px;
+    block-size:42px;
     font-size:13px;
   }
 
   .topbar-search-results{
-    top:calc(100% + 8px);
-    max-height:280px;
+    inset-block-start:calc(100% + 8px);
+    max-block-size:280px;
   }
 }
 
@@ -617,8 +632,9 @@ mark,
    MOBILE XS
 ========================= */
 @media (max-width: 640px){
-  :root{
-    --topbar-inline-padding: var(--space-sm);
+  .topbar{
+    padding-inline-end:calc(var(--space-sm) + var(--topbar-safe-right));
+    padding-inline-start:calc(var(--space-sm) + var(--topbar-safe-left));
   }
 
   .topbar-left{
@@ -630,11 +646,11 @@ mark,
   }
 
   .topbar-search{
-    padding-left:38px;
+    padding-inline-start:38px;
   }
 
   .topbar-search-icon{
-    left:13px;
+    inset-inline-start:13px;
   }
 }
 

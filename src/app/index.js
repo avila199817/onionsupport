@@ -10,7 +10,7 @@
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
-import { Store } from "../store/store.js";
+import { Store } from "../store/index.js";
 import { Auth } from "../features/auth/index.js";
 import { Router } from "../router/index.js";
 import { SidebarUI } from "../ui/sidebar/index.js";

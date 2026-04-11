@@ -17,6 +17,7 @@
    - tolerar distintos formatos del backend search
    - cleanup sólido anti duplicados
    - integrarse de forma robusta con SidebarUI
+   - alinearse con topbar fija como parte del layout SPA
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
@@ -184,6 +185,7 @@ export const TopbarUI = (() => {
       document.querySelector("#topbar-title");
 
     const mobileToggle =
+      AppCore.dom.mobileSidebarToggle ||
       AppCore.dom.toggleSidebarMobile ||
       document.getElementById("toggleSidebarMobile") ||
       document.querySelector("#toggleSidebarMobile");
@@ -224,6 +226,7 @@ export const TopbarUI = (() => {
 
     AppCore.dom.topbar = dom.topbar || null;
     AppCore.dom.topbarTitle = dom.title || null;
+    AppCore.dom.mobileSidebarToggle = dom.mobileToggle || null;
     AppCore.dom.toggleSidebarMobile = dom.mobileToggle || null;
     AppCore.dom.searchInput = dom.searchInput || null;
     AppCore.dom.searchResults = dom.searchResults || null;
@@ -231,15 +234,24 @@ export const TopbarUI = (() => {
 
   function safeNormalizePath(path = "/") {
     try {
-      return AppCore.utils.normalizePath(path || "/");
+      if (typeof AppCore?.utils?.normalizePath === "function") {
+        return AppCore.utils.normalizePath(path || "/");
+      }
     } catch {
-      return "/";
+      /* noop */
     }
+
+    const raw = String(path || "/").trim() || "/";
+    if (raw === "/") return "/";
+
+    const [pathname = "/", search = ""] = raw.split("?");
+    const normalizedPath = pathname.replace(/\/{2,}/g, "/").replace(/\/+$/, "") || "/";
+    return search ? `${normalizedPath}?${search}` : normalizedPath;
   }
 
   function safeNormalizeCanonicalPath(path = "/") {
     try {
-      if (typeof AppCore.utils.normalizeCanonicalPath === "function") {
+      if (typeof AppCore?.utils?.normalizeCanonicalPath === "function") {
         return AppCore.utils.normalizeCanonicalPath(path || "/");
       }
 
@@ -310,6 +322,30 @@ export const TopbarUI = (() => {
     } catch {
       return null;
     }
+  }
+
+  function syncFixedTopbarOffset() {
+    const { topbar, sidebar } = getDom();
+    if (!topbar) return;
+
+    if (document.body?.classList.contains("route-shell-hidden")) {
+      topbar.style.left = "0";
+      return;
+    }
+
+    if (isMobileViewport()) {
+      topbar.style.left = "0";
+      return;
+    }
+
+    const sidebarWidth =
+      sidebar?.getBoundingClientRect?.().width ||
+      parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue("--sidebar-width")
+      ) ||
+      0;
+
+    topbar.style.left = `${Math.max(0, Math.round(sidebarWidth))}px`;
   }
 
   /* =========================================================
@@ -387,11 +423,13 @@ export const TopbarUI = (() => {
   ========================================================= */
   function setMobileToggleState() {
     const { mobileToggle, sidebar } = getDom();
-    if (!mobileToggle || !sidebar) return;
+    if (!mobileToggle) return;
 
-    const isOpen =
-      sidebar.classList.contains("open") ||
-      sidebar.classList.contains("is-open");
+    const isDesktop = !isMobileViewport();
+    const isOpen = Boolean(
+      sidebar &&
+      (sidebar.classList.contains("open") || sidebar.classList.contains("is-open"))
+    );
 
     mobileToggle.setAttribute("aria-expanded", String(isOpen));
     mobileToggle.setAttribute(
@@ -399,6 +437,7 @@ export const TopbarUI = (() => {
       isOpen ? "Cerrar navegación" : "Abrir navegación"
     );
     mobileToggle.classList.toggle("is-active", isOpen);
+    mobileToggle.hidden = isDesktop;
   }
 
   function openSidebarMobile() {
@@ -406,7 +445,10 @@ export const TopbarUI = (() => {
 
     if (sidebarModule?.openSidebar && typeof sidebarModule.openSidebar === "function") {
       sidebarModule.openSidebar();
-      window.setTimeout(setMobileToggleState, 0);
+      window.setTimeout(() => {
+        setMobileToggleState();
+        syncFixedTopbarOffset();
+      }, 0);
       return;
     }
 
@@ -416,6 +458,7 @@ export const TopbarUI = (() => {
     sidebar.classList.add("open", "is-open");
     document.body?.classList.add("sidebar-open");
     setMobileToggleState();
+    syncFixedTopbarOffset();
   }
 
   function closeSidebarMobile() {
@@ -423,7 +466,10 @@ export const TopbarUI = (() => {
 
     if (sidebarModule?.closeSidebar && typeof sidebarModule.closeSidebar === "function") {
       sidebarModule.closeSidebar();
-      window.setTimeout(setMobileToggleState, 0);
+      window.setTimeout(() => {
+        setMobileToggleState();
+        syncFixedTopbarOffset();
+      }, 0);
       return;
     }
 
@@ -433,6 +479,7 @@ export const TopbarUI = (() => {
     sidebar.classList.remove("open", "is-open");
     document.body?.classList.remove("sidebar-open");
     setMobileToggleState();
+    syncFixedTopbarOffset();
   }
 
   function toggleSidebarMobile() {
@@ -440,7 +487,10 @@ export const TopbarUI = (() => {
 
     if (sidebarModule?.toggleSidebar && typeof sidebarModule.toggleSidebar === "function") {
       sidebarModule.toggleSidebar();
-      window.setTimeout(setMobileToggleState, 0);
+      window.setTimeout(() => {
+        setMobileToggleState();
+        syncFixedTopbarOffset();
+      }, 0);
       return;
     }
 
@@ -455,6 +505,7 @@ export const TopbarUI = (() => {
     sidebar.classList.toggle("is-open", nextOpen);
     document.body?.classList.toggle("sidebar-open", nextOpen);
     setMobileToggleState();
+    syncFixedTopbarOffset();
   }
 
   function handleMobileToggleClick(event) {
@@ -491,6 +542,8 @@ export const TopbarUI = (() => {
     } else {
       setMobileToggleState();
     }
+
+    syncFixedTopbarOffset();
   }
 
   /* =========================================================
@@ -1272,6 +1325,8 @@ export const TopbarUI = (() => {
   function handleRouteVisualSync() {
     syncDomCache();
     syncTitle(getCurrentPublicPath());
+    setMobileToggleState();
+    syncFixedTopbarOffset();
     closeSidebarMobile();
   }
 
@@ -1356,25 +1411,37 @@ export const TopbarUI = (() => {
       hideResultsContainer(searchResults);
       syncTitle(getCurrentPublicPath());
       closeSidebarMobile();
+      setMobileToggleState();
+      syncFixedTopbarOffset();
     });
 
     AppCore.cleanup.event(SCOPE, "app:public-path:change", () => {
       const { searchResults } = getDom();
       hideResultsContainer(searchResults);
       syncTitle(getCurrentPublicPath());
+      syncFixedTopbarOffset();
     });
 
     AppCore.cleanup.event(SCOPE, "router:shell:change", () => {
       syncDomCache();
       setMobileToggleState();
+      syncFixedTopbarOffset();
     });
 
     AppCore.cleanup.event(SCOPE, "app:user-ui:sync", () => {
       syncDomCache();
+      syncFixedTopbarOffset();
     });
 
     AppCore.cleanup.event(SCOPE, "sidebar:state:synced", () => {
-      window.setTimeout(setMobileToggleState, 0);
+      window.setTimeout(() => {
+        setMobileToggleState();
+        syncFixedTopbarOffset();
+      }, 0);
+    });
+
+    AppCore.cleanup.event(SCOPE, "app:theme:change", () => {
+      window.setTimeout(syncFixedTopbarOffset, 0);
     });
   }
 
@@ -1399,6 +1466,7 @@ export const TopbarUI = (() => {
 
     syncTitle(getCurrentPublicPath());
     setMobileToggleState();
+    syncFixedTopbarOffset();
 
     if (AppCore.config?.debug) {
       AppCore.utils.log?.("TopbarUI inicializado correctamente.");
@@ -1426,6 +1494,7 @@ export const TopbarUI = (() => {
       syncDomCache();
       syncTitle(getCurrentPublicPath());
       setMobileToggleState();
+      syncFixedTopbarOffset();
       return true;
     }
 
@@ -1460,6 +1529,7 @@ export const TopbarUI = (() => {
     openSidebarMobile,
     closeSidebarMobile,
     toggleSidebarMobile,
+    syncFixedTopbarOffset,
     get initialized() {
       return initialized;
     },

@@ -11,7 +11,7 @@
    - conectada a i18n real
 ========================================================= */
 
-import { AppCore } from "../core/core.js";
+import { AppCore } from "../core/index.js";
 import { I18n } from "../i18n/index.js";
 
 export const AjustesView = (() => {

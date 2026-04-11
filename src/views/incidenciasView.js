@@ -13,9 +13,9 @@
    - reducir ruido al máximo
 ========================================================= */
 
-import { AppCore } from "../core/core.js";
-import { Store } from "../store/store.js";
-import { Http } from "../services/http.js";
+import { AppCore } from "../core/index.js";
+import { Store } from "../store/index.js";
+import { Http } from "../services/index.js";
 
 export const IncidenciasView = (() => {
   "use strict";

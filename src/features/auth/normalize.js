@@ -9,7 +9,7 @@
    - validar respuesta de login / refresh
 ========================================================= */
 
-import { AppCore } from "../../core/core.js";
+import { AppCore } from "../../core/index.js";
 
 import {
   sanitizeUsername,

@@ -21,6 +21,9 @@ import { AppCore } from "../core/core.js";
 export const I18n = (() => {
   "use strict";
 
+  /* =========================================================
+     CONFIG
+  ========================================================= */
   const STORAGE_KEY = "lang";
 
   const DEFAULT_LANG =
@@ -38,7 +41,6 @@ export const I18n = (() => {
   /* =========================================================
      HELPERS
   ========================================================= */
-
   function hasLang(lang = "") {
     return Object.prototype.hasOwnProperty.call(
       dictionaries,
@@ -119,10 +121,45 @@ export const I18n = (() => {
     }
   }
 
+  function syncLangToDocument(lang) {
+    try {
+      document.documentElement.setAttribute("lang", lang);
+    } catch {
+      /* noop */
+    }
+  }
+
+  function syncLangToState(lang) {
+    try {
+      if (typeof AppCore?.setState === "function") {
+        AppCore.setState({ lang });
+        return;
+      }
+
+      if (AppCore?.state) {
+        AppCore.state.lang = lang;
+      }
+    } catch {
+      /* noop */
+    }
+  }
+
+  function emitLangChange(lang) {
+    try {
+      AppCore?.events?.emit?.(
+        "app:lang:change",
+        {
+          lang,
+        }
+      );
+    } catch {
+      /* noop */
+    }
+  }
+
   /* =========================================================
      CORE
   ========================================================= */
-
   function getBrowserLang() {
     try {
       return normalizeLang(
@@ -153,32 +190,17 @@ export const I18n = (() => {
     const nextLang = normalizeLang(lang);
 
     if (nextLang === currentLang) {
+      syncLangToDocument(nextLang);
+      syncLangToState(nextLang);
       return currentLang;
     }
 
     currentLang = nextLang;
 
     safeStorageSet(nextLang);
-
-    document.documentElement.setAttribute(
-      "lang",
-      nextLang
-    );
-
-    if (AppCore?.state) {
-      AppCore.state.lang = nextLang;
-    }
-
-    try {
-      AppCore?.events?.emit?.(
-        "app:lang:change",
-        {
-          lang: nextLang,
-        }
-      );
-    } catch {
-      /* noop */
-    }
+    syncLangToDocument(nextLang);
+    syncLangToState(nextLang);
+    emitLangChange(nextLang);
 
     return currentLang;
   }
@@ -210,17 +232,32 @@ export const I18n = (() => {
       getNested(
         dictionaries[currentLang],
         key
+      ) !== undefined ||
+      getNested(
+        dictionaries[DEFAULT_LANG],
+        key
       ) !== undefined
     );
   }
 
   function register(lang, data = {}) {
     const code = normalizeLang(lang);
+
+    if (!code || typeof data !== "object" || data === null) {
+      return false;
+    }
+
     dictionaries[code] = data;
+    return true;
   }
 
   function getAvailable() {
     return Object.keys(dictionaries);
+  }
+
+  function getDictionary(lang = currentLang) {
+    const code = normalizeLang(lang);
+    return dictionaries[code] || dictionaries[DEFAULT_LANG] || {};
   }
 
   function boot() {
@@ -228,14 +265,8 @@ export const I18n = (() => {
 
     currentLang = normalizeLang(initial);
 
-    document.documentElement.setAttribute(
-      "lang",
-      currentLang
-    );
-
-    if (AppCore?.state) {
-      AppCore.state.lang = currentLang;
-    }
+    syncLangToDocument(currentLang);
+    syncLangToState(currentLang);
 
     return currentLang;
   }
@@ -243,7 +274,6 @@ export const I18n = (() => {
   /* =========================================================
      INIT
   ========================================================= */
-
   boot();
 
   return {
@@ -254,5 +284,6 @@ export const I18n = (() => {
     exists,
     register,
     getAvailable,
+    getDictionary,
   };
 })();

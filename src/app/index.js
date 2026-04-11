@@ -21,7 +21,10 @@ import { TopbarUI } from "../ui/topbar/index.js";
 import { Toast } from "../ui/toast.js";
 import { I18n } from "../i18n/index.js";
 
-import { ensureScope, clearScope } from "./helpers.js";
+import {
+  ensureScope,
+  clearScope,
+} from "./helpers.js";
 
 import {
   showLoader,
@@ -108,15 +111,25 @@ export const App = (() => {
   ========================================================= */
   function initServices() {
     if (!state.servicesInitialized) {
-      if (typeof Http?.init === "function") {
+      if (
+        typeof Http?.init ===
+        "function"
+      ) {
         Http.init();
       }
 
       state.servicesInitialized = true;
     }
 
-    if (!AppCore.modules.has("http")) {
-      AppCore.modules.register("http", Http);
+    if (
+      !AppCore.modules.has(
+        "http"
+      )
+    ) {
+      AppCore.modules.register(
+        "http",
+        Http
+      );
     }
   }
 
@@ -125,23 +138,47 @@ export const App = (() => {
   ========================================================= */
   function initStore() {
     if (!state.storeInitialized) {
-      if (typeof Store?.init === "function") {
+      if (
+        typeof Store?.init ===
+        "function"
+      ) {
         Store.init();
       }
 
       state.storeInitialized = true;
     }
 
-    if (!AppCore.modules.has("store")) {
-      AppCore.modules.register("store", Store);
+    if (
+      !AppCore.modules.has(
+        "store"
+      )
+    ) {
+      AppCore.modules.register(
+        "store",
+        Store
+      );
     }
 
-    if (!AppCore.modules.has("auth")) {
-      AppCore.modules.register("auth", Auth);
+    if (
+      !AppCore.modules.has(
+        "auth"
+      )
+    ) {
+      AppCore.modules.register(
+        "auth",
+        Auth
+      );
     }
 
-    if (!AppCore.modules.has("router")) {
-      AppCore.modules.register("router", Router);
+    if (
+      !AppCore.modules.has(
+        "router"
+      )
+    ) {
+      AppCore.modules.register(
+        "router",
+        Router
+      );
     }
   }
 
@@ -166,39 +203,73 @@ export const App = (() => {
      FINALIZACIÓN BOOT
   ========================================================= */
   function finalizeBoot() {
-    clearBootFailsafeTimer(state);
+    clearBootFailsafeTimer(
+      state
+    );
 
-    markStoreBootState(Store, {
-      ready: true,
-      booted: true,
-    });
+    markStoreBootState(
+      Store,
+      {
+        ready: true,
+        booted: true,
+      }
+    );
 
     state.booted = true;
     state.booting = false;
 
-    markAppBootState(AppCore, {
-      booted: true,
-      booting: false,
-    });
+    markAppBootState(
+      AppCore,
+      {
+        booted: true,
+        booting: false,
+      }
+    );
 
     hideLoader(AppCore);
-    updateShellVisibilityByRoute(AppCore, Router);
 
-    AppCore.events.emit("app:ready", {
-      route: AppCore.state.route,
-      publicPath: AppCore.state.publicPath,
-      user: AppCore.state.user,
-      authenticated: AppCore.state.authenticated,
-      lang: AppCore.state.lang,
-    });
+    updateShellVisibilityByRoute(
+      AppCore,
+      Router
+    );
 
-    AppCore.utils.log("🔥 Aplicación arrancada correctamente.", {
-      route: AppCore.state.route,
-      publicPath: AppCore.state.publicPath,
-      username: AppCore.state.user?.username || null,
-      authenticated: AppCore.state.authenticated,
-      lang: AppCore.state.lang,
-    });
+    AppCore.events.emit(
+      "app:ready",
+      {
+        route:
+          AppCore.state.route,
+        publicPath:
+          AppCore.state
+            .publicPath,
+        user:
+          AppCore.state.user,
+        authenticated:
+          AppCore.state
+            .authenticated,
+        lang:
+          AppCore.state.lang,
+      }
+    );
+
+    AppCore.utils.log(
+      "🔥 Aplicación arrancada correctamente.",
+      {
+        route:
+          AppCore.state.route,
+        publicPath:
+          AppCore.state
+            .publicPath,
+        username:
+          AppCore.state.user
+            ?.username ||
+          null,
+        authenticated:
+          AppCore.state
+            .authenticated,
+        lang:
+          AppCore.state.lang,
+      }
+    );
   }
 
   /* =========================================================
@@ -206,23 +277,32 @@ export const App = (() => {
   ========================================================= */
   async function boot() {
     if (state.booted) {
-      AppCore.utils.warn("App ya arrancada.");
+      AppCore.utils.warn(
+        "App ya arrancada."
+      );
       return api;
     }
 
     if (state.booting) {
-      AppCore.utils.warn("App ya está arrancando.");
+      AppCore.utils.warn(
+        "App ya está arrancando."
+      );
       return api;
     }
 
     state.booting = true;
 
-    markAppBootState(AppCore, {
-      booted: false,
-      booting: true,
-    });
+    markAppBootState(
+      AppCore,
+      {
+        booted: false,
+        booting: true,
+      }
+    );
 
-    clearBootFailsafeTimer(state);
+    clearBootFailsafeTimer(
+      state
+    );
 
     try {
       clearScope(AppCore);
@@ -238,22 +318,32 @@ export const App = (() => {
         state,
       });
 
-      AppCore.setError(null);
+      AppCore.setError(
+        null
+      );
+
       showLoader(AppCore);
 
-      armBootFailsafeLoader({
-        AppCore,
-        state,
-        hideLoader,
-      });
+      armBootFailsafeLoader(
+        {
+          AppCore,
+          state,
+          hideLoader,
+        }
+      );
 
-      const scope = ensureScope(AppCore);
+      const scope =
+        ensureScope(
+          AppCore
+        );
 
-      bindGlobalErrorHandlers({
-        AppCore,
-        Toast,
-        scope,
-      });
+      bindGlobalErrorHandlers(
+        {
+          AppCore,
+          Toast,
+          scope,
+        }
+      );
 
       bindAppEvents({
         AppCore,
@@ -262,41 +352,70 @@ export const App = (() => {
         scope,
         syncUserUI,
 
-        rerenderCurrentRoute: () =>
-          rerenderCurrentRoute({
-            AppCore,
-            Router,
-            I18n,
-            applyPostRenderLoaderPolicy: () =>
-              applyPostRenderLoaderPolicy({
+        rerenderCurrentRoute:
+          () =>
+            rerenderCurrentRoute(
+              {
+                AppCore,
+                Router,
+                I18n,
+
+                applyPostRenderLoaderPolicy:
+                  () =>
+                    applyPostRenderLoaderPolicy(
+                      {
+                        AppCore,
+                        Router,
+                        hideLoader,
+                      }
+                    ),
+
+                syncUserUI,
+              }
+            ),
+
+        applyPostRenderLoaderPolicy:
+          () =>
+            applyPostRenderLoaderPolicy(
+              {
                 AppCore,
                 Router,
                 hideLoader,
-              }),
-            syncUserUI,
-          }),
-
-        applyPostRenderLoaderPolicy: () =>
-          applyPostRenderLoaderPolicy({
-            AppCore,
-            Router,
-            hideLoader,
-          }),
+              }
+            ),
       });
 
+      /* ======================
+         I18N READY FIRST
+      ====================== */
+      syncLangState(
+        AppCore,
+        I18n
+      );
+
+      /* ======================
+         ROUTER
+      ====================== */
       initRouter();
 
       renderInitialRoute({
         AppCore,
         Router,
-        applyPostRenderLoaderPolicy: () =>
-          applyPostRenderLoaderPolicy({
-            AppCore,
-            Router,
-            hideLoader,
-          }),
+
+        applyPostRenderLoaderPolicy:
+          () =>
+            applyPostRenderLoaderPolicy(
+              {
+                AppCore,
+                Router,
+                hideLoader,
+              }
+            ),
       });
 
+      /* ======================
+         UI SYSTEMS
+      ====================== */
       initUISystems({
         AppCore,
         Toast,
@@ -305,48 +424,64 @@ export const App = (() => {
         state,
       });
 
-      syncUserUI(AppCore);
-      syncLangState(AppCore, I18n);
-
       finalizeBoot();
 
-      void restoreSessionInBackground({
-        AppCore,
-        Auth,
-        Router,
-        Toast,
-        state,
-        syncUserUI,
-        warmup,
-        navigateAfterSessionRestore,
+      void restoreSessionInBackground(
+        {
+          AppCore,
+          Auth,
+          Router,
+          Toast,
+          state,
+          syncUserUI,
+          warmup,
+          navigateAfterSessionRestore,
 
-        applyPostRenderLoaderPolicy: () =>
-          applyPostRenderLoaderPolicy({
-            AppCore,
-            Router,
-            hideLoader,
-          }),
-      });
+          applyPostRenderLoaderPolicy:
+            () =>
+              applyPostRenderLoaderPolicy(
+                {
+                  AppCore,
+                  Router,
+                  hideLoader,
+                }
+              ),
+        }
+      );
 
       return api;
     } catch (error) {
-      clearBootFailsafeTimer(state);
+      clearBootFailsafeTimer(
+        state
+      );
 
       state.booted = false;
       state.booting = false;
 
-      markStoreBootState(Store, {
-        ready: false,
-        booted: false,
-      });
+      markStoreBootState(
+        Store,
+        {
+          ready: false,
+          booted: false,
+        }
+      );
 
-      markAppBootState(AppCore, {
-        booted: false,
-        booting: false,
-      });
+      markAppBootState(
+        AppCore,
+        {
+          booted: false,
+          booting: false,
+        }
+      );
 
-      AppCore.setError(error);
-      AppCore.utils.error("💥 Fallo en boot()", error);
+      AppCore.setError(
+        error
+      );
+
+      AppCore.utils.error(
+        "💥 Fallo en boot()",
+        error
+      );
 
       hideLoader(AppCore);
 
@@ -362,7 +497,9 @@ export const App = (() => {
 
       return api;
     } finally {
-      clearBootFailsafeTimer(state);
+      clearBootFailsafeTimer(
+        state
+      );
 
       state.booting = false;
 
@@ -370,19 +507,25 @@ export const App = (() => {
         booting: false,
       });
 
-      applyPostRenderLoaderPolicy({
-        AppCore,
-        Router,
-        hideLoader,
-      });
+      applyPostRenderLoaderPolicy(
+        {
+          AppCore,
+          Router,
+          hideLoader,
+        }
+      );
     }
   }
 
   /* =========================================================
      REBOOT
   ========================================================= */
-  async function reboot(options = {}) {
-    const { preserveError = false } = options;
+  async function reboot(
+    options = {}
+  ) {
+    const {
+      preserveError = false,
+    } = options;
 
     state.booted = false;
     state.booting = false;
@@ -396,19 +539,30 @@ export const App = (() => {
     state.uiInitialized = false;
     state.i18nInitialized = false;
 
-    state.sessionRestorePromise = null;
+    state.sessionRestorePromise =
+      null;
 
-    clearBootFailsafeTimer(state);
+    clearBootFailsafeTimer(
+      state
+    );
+
     clearScope(AppCore);
 
-    if (!preserveError) {
-      AppCore.setError(null);
+    if (
+      !preserveError
+    ) {
+      AppCore.setError(
+        null
+      );
     }
 
-    markStoreBootState(Store, {
-      ready: false,
-      booted: false,
-    });
+    markStoreBootState(
+      Store,
+      {
+        ready: false,
+        booted: false,
+      }
+    );
 
     hideLoader(AppCore);
 

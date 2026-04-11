@@ -11,7 +11,7 @@
    - soportar submit directo desde formularios HTML
 ========================================================= */
 
-import { AppCore } from "../../core/core.js";
+import { AppCore } from "../../core/index.js";
 
 import {
   isBrowser,

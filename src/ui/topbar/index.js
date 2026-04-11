@@ -21,13 +21,12 @@
    - NO pisar offsets del shell con inline styles
 ========================================================= */
 
-import { AppCore } from "../core/index.js";
-import { Router } from "../router/index.js";
+import { AppCore } from "../../core/index.js";
+import { Router } from "../../router/index.js";
 
 import {
   TOPBAR_SCOPE,
   TOPBAR_SEARCH_SCOPE,
-  TOPBAR_SEARCH_CONFIG,
   safeNormalizePath,
   safeNormalizeCanonicalPath,
   getCurrentPublicPath,
@@ -211,6 +210,7 @@ export const TopbarUI = (() => {
     syncFixedTopbarOffset: syncFixedTopbarOffsetSafe,
     closeSidebarMobile: closeSidebarMobileSafe,
     toggleSidebarMobile: toggleSidebarMobileSafe,
+    syncDomCache,
   });
 
   /* =========================================================
@@ -251,7 +251,6 @@ export const TopbarUI = (() => {
     bindTopbarAppEvents({
       AppCore,
       scope: SCOPE,
-      searchScope: SEARCH_SCOPE,
       getDom,
       handlers,
       hideResults: () => hideResultsContainer(runtime, getDom),
@@ -259,6 +258,8 @@ export const TopbarUI = (() => {
       setMobileToggleState: setMobileToggleStateSafe,
       syncFixedTopbarOffset: syncFixedTopbarOffsetSafe,
       closeSidebarMobile: closeSidebarMobileSafe,
+      syncDomCache,
+      rebind,
     });
 
     syncTitle(getCurrentPublicPath(AppCore));

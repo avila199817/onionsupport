@@ -16,6 +16,7 @@
    - loading spinner real vía CSS
    - progreso visual refinado
    - preparado para i18n
+   - rehidratación live al cambiar idioma
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
@@ -251,6 +252,38 @@ export const Toast = (() => {
 
   function getCloseLabel() {
     return t("toast.close", "Cerrar notificación");
+  }
+
+  function resolveTitle(type, title, useDefaultTitle = false) {
+    const normalizedTitle = String(title ?? "").trim();
+
+    if (normalizedTitle) return normalizedTitle;
+    if (useDefaultTitle) return getDefaultTitle(type);
+
+    return "";
+  }
+
+  function resolveMessage(
+    type,
+    message,
+    text,
+    useDefaultMessage = false
+  ) {
+    const normalizedMessage = String(message ?? text ?? "").trim();
+
+    if (normalizedMessage) return normalizedMessage;
+
+    if (useDefaultMessage) {
+      return type === "loading"
+        ? getDefaultLoadingMessage()
+        : getDefaultMessage(type);
+    }
+
+    if (type === "loading") {
+      return getDefaultLoadingMessage();
+    }
+
+    return "";
   }
 
   function getContainer() {
@@ -505,8 +538,69 @@ export const Toast = (() => {
       message: item?.message || "",
       duration: item?.duration ?? 0,
       closable: Boolean(item?.closable),
+      useDefaultTitle: Boolean(item?.useDefaultTitle),
+      useDefaultMessage: Boolean(item?.useDefaultMessage),
       ...extra,
     };
+  }
+
+  function patchToastNode(item) {
+    if (!item?.toastEl || !item.toastEl.isConnected) return;
+
+    const toastEl = item.toastEl;
+    toastEl.className = `toast ${item.type}`;
+    toastEl.setAttribute("role", getAriaRole(item.type));
+    toastEl.setAttribute("aria-live", getAriaLive(item.type));
+
+    const closeBtn = toastEl.querySelector(".toast-close");
+    if (closeBtn) {
+      closeBtn.setAttribute("aria-label", getCloseLabel());
+      closeBtn.setAttribute("data-toast-dismiss", item.id);
+    }
+
+    const contentEl = toastEl.querySelector(".toast-content");
+    if (!contentEl) return;
+
+    let titleEl = toastEl.querySelector(".toast-title");
+    const messageEl = toastEl.querySelector(".toast-message");
+
+    if (item.title) {
+      if (!titleEl) {
+        titleEl = document.createElement("h4");
+        titleEl.className = "toast-title";
+        contentEl.prepend(titleEl);
+      }
+      titleEl.textContent = item.title;
+    } else if (titleEl) {
+      titleEl.remove();
+    }
+
+    if (messageEl) {
+      messageEl.textContent = item.message;
+    }
+  }
+
+  function refreshToastLanguage(item) {
+    if (!item || item.dismissed) return;
+
+    if (item.useDefaultTitle) {
+      item.title = getDefaultTitle(item.type);
+    }
+
+    if (item.useDefaultMessage) {
+      item.message =
+        item.type === "loading"
+          ? getDefaultLoadingMessage()
+          : getDefaultMessage(item.type);
+    }
+
+    patchToastNode(item);
+  }
+
+  function refreshAllToastsLanguage() {
+    [...store.values()].forEach((item) => {
+      refreshToastLanguage(item);
+    });
   }
 
   /* =========================================================
@@ -514,19 +608,25 @@ export const Toast = (() => {
   ========================================================= */
   function show(options = {}) {
     const type = normalizeType(options.type);
-    const title =
-      String(options.title ?? "").trim() ||
-      (options.useDefaultTitle === true ? getDefaultTitle(type) : "");
 
-    const message = String(
-      options.message ||
-      options.text ||
-      (options.useDefaultMessage === true
-        ? getDefaultMessage(type)
-        : type === "loading"
-          ? getDefaultLoadingMessage()
-          : "")
-    ).trim();
+    const useDefaultTitle = options.useDefaultTitle === true;
+    const useDefaultMessage =
+      options.useDefaultMessage === true ||
+      (type === "loading" &&
+        !String(options.message ?? options.text ?? "").trim());
+
+    const title = resolveTitle(
+      type,
+      options.title,
+      useDefaultTitle
+    );
+
+    const message = resolveMessage(
+      type,
+      options.message,
+      options.text,
+      useDefaultMessage
+    );
 
     if (!message) {
       AppCore.utils?.warn?.("Toast.show requiere message/text.");
@@ -548,6 +648,8 @@ export const Toast = (() => {
         message,
         duration,
         closable,
+        useDefaultTitle,
+        useDefaultMessage,
       });
     }
 
@@ -575,6 +677,8 @@ export const Toast = (() => {
       progressEl,
       createdAt: Date.now(),
       dismissed: false,
+      useDefaultTitle,
+      useDefaultMessage,
     };
 
     store.set(id, item);
@@ -603,14 +707,29 @@ export const Toast = (() => {
 
     const nextType = patch.type ? normalizeType(patch.type) : item.type;
 
+    const nextUseDefaultTitle =
+      patch.useDefaultTitle !== undefined
+        ? patch.useDefaultTitle === true
+        : item.useDefaultTitle;
+
+    const nextUseDefaultMessage =
+      patch.useDefaultMessage !== undefined
+        ? patch.useDefaultMessage === true
+        : item.useDefaultMessage;
+
     const nextTitle =
       patch.title !== undefined
-        ? String(patch.title || "").trim()
+        ? resolveTitle(nextType, patch.title, nextUseDefaultTitle)
         : item.title;
 
     const nextMessage =
       patch.message !== undefined || patch.text !== undefined
-        ? String(patch.message || patch.text || "").trim()
+        ? resolveMessage(
+            nextType,
+            patch.message,
+            patch.text,
+            nextUseDefaultMessage
+          )
         : item.message;
 
     if (!nextMessage) {
@@ -633,6 +752,8 @@ export const Toast = (() => {
     item.remaining = nextDuration;
     item.startedAt = 0;
     item.closable = nextClosable;
+    item.useDefaultTitle = nextUseDefaultTitle;
+    item.useDefaultMessage = nextUseDefaultMessage;
 
     const newEl = createToastElement({
       id: item.id,
@@ -708,42 +829,57 @@ export const Toast = (() => {
      SHORTCUTS
   ========================================================= */
   function success(message = "", options = {}) {
+    const normalizedMessage = String(message || "").trim();
+
     return show({
       ...options,
       type: "success",
-      message: String(message || "").trim() || getDefaultMessage("success"),
+      message: normalizedMessage,
+      useDefaultMessage: !normalizedMessage,
     });
   }
 
   function error(message = "", options = {}) {
+    const normalizedMessage = String(message || "").trim();
+
     return show({
       ...options,
       type: "error",
-      message: String(message || "").trim() || getDefaultMessage("error"),
+      message: normalizedMessage,
+      useDefaultMessage: !normalizedMessage,
     });
   }
 
   function warning(message = "", options = {}) {
+    const normalizedMessage = String(message || "").trim();
+
     return show({
       ...options,
       type: "warning",
-      message: String(message || "").trim() || getDefaultMessage("warning"),
+      message: normalizedMessage,
+      useDefaultMessage: !normalizedMessage,
     });
   }
 
   function info(message = "", options = {}) {
+    const normalizedMessage = String(message || "").trim();
+
     return show({
       ...options,
       type: "info",
-      message: String(message || "").trim() || getDefaultMessage("info"),
+      message: normalizedMessage,
+      useDefaultMessage: !normalizedMessage,
     });
   }
 
   function loading(message = "", options = {}) {
+    const normalizedMessage = String(message || "").trim();
+
     return show({
       ...options,
       type: "loading",
-      message: String(message || "").trim() || getDefaultLoadingMessage(),
+      message: normalizedMessage,
+      useDefaultMessage: !normalizedMessage,
       duration: 0,
       closable: options.closable ?? false,
     });
@@ -800,6 +936,10 @@ export const Toast = (() => {
 
     AppCore.cleanup.event(scope, "toast:clear", () => {
       clear();
+    });
+
+    AppCore.cleanup.event(scope, "app:lang:change", () => {
+      refreshAllToastsLanguage();
     });
   }
 
@@ -877,6 +1017,7 @@ export const Toast = (() => {
     warning,
     info,
     loading,
+    refreshAllToastsLanguage,
   };
 
   return api;

@@ -11,6 +11,7 @@
    - sincronización opcional con AppCore
    - evento global app:lang:change
    - helpers para refresco de UI
+   - soporte extendido para atributos
    - evitar dependencia circular con Core
 ========================================================= */
 
@@ -220,13 +221,55 @@ export const I18n = (() => {
         "app:lang:change",
         {
           lang,
-          dictionary:
-            getDictionary(lang),
+          dictionary: getDictionary(lang),
         }
       );
     } catch {
       /* noop */
     }
+  }
+
+  function getScope(root = document) {
+    try {
+      if (
+        typeof document ===
+        "undefined"
+      ) {
+        return null;
+      }
+
+      if (
+        root instanceof Element ||
+        root instanceof Document
+      ) {
+        return root;
+      }
+
+      return document;
+    } catch {
+      return document;
+    }
+  }
+
+  function translateAttr(
+    scope,
+    selector,
+    targetAttr,
+    dataAttr
+  ) {
+    scope
+      .querySelectorAll(selector)
+      .forEach((node) => {
+        const key =
+          node.getAttribute(dataAttr);
+
+        if (!key) return;
+
+        node.setAttribute(
+          targetAttr,
+          t(key)
+        );
+      });
   }
 
   function updateDOM(root = document) {
@@ -238,16 +281,12 @@ export const I18n = (() => {
         return;
       }
 
-      const scope =
-        root instanceof Element ||
-        root instanceof Document
-          ? root
-          : document;
+      const scope = getScope(root);
+
+      if (!scope) return;
 
       scope
-        .querySelectorAll(
-          "[data-i18n]"
-        )
+        .querySelectorAll("[data-i18n]")
         .forEach((node) => {
           const key =
             node.getAttribute(
@@ -274,59 +313,68 @@ export const I18n = (() => {
           node.innerHTML = t(key);
         });
 
-      scope
-        .querySelectorAll(
-          "[data-i18n-placeholder]"
-        )
-        .forEach((node) => {
-          const key =
-            node.getAttribute(
-              "data-i18n-placeholder"
-            );
+      translateAttr(
+        scope,
+        "[data-i18n-placeholder]",
+        "placeholder",
+        "data-i18n-placeholder"
+      );
 
-          if (!key) return;
+      translateAttr(
+        scope,
+        "[data-i18n-title]",
+        "title",
+        "data-i18n-title"
+      );
 
-          node.setAttribute(
-            "placeholder",
-            t(key)
-          );
-        });
+      translateAttr(
+        scope,
+        "[data-i18n-aria-label]",
+        "aria-label",
+        "data-i18n-aria-label"
+      );
 
-      scope
-        .querySelectorAll(
-          "[data-i18n-title]"
-        )
-        .forEach((node) => {
-          const key =
-            node.getAttribute(
-              "data-i18n-title"
-            );
+      translateAttr(
+        scope,
+        "[data-i18n-data-tooltip]",
+        "data-tooltip",
+        "data-i18n-data-tooltip"
+      );
 
-          if (!key) return;
+      translateAttr(
+        scope,
+        "[data-i18n-alt]",
+        "alt",
+        "data-i18n-alt"
+      );
 
-          node.setAttribute(
-            "title",
-            t(key)
-          );
-        });
+      translateAttr(
+        scope,
+        "[data-i18n-value]",
+        "value",
+        "data-i18n-value"
+      );
 
-      scope
-        .querySelectorAll(
-          "[data-i18n-aria-label]"
-        )
-        .forEach((node) => {
-          const key =
-            node.getAttribute(
-              "data-i18n-aria-label"
-            );
+      translateAttr(
+        scope,
+        "[data-i18n-label]",
+        "label",
+        "data-i18n-label"
+      );
 
-          if (!key) return;
+      translateAttr(
+        scope,
+        "[data-i18n-aria-description]",
+        "aria-description",
+        "data-i18n-aria-description"
+      );
 
-          node.setAttribute(
-            "aria-label",
-            t(key)
-          );
-        });
+      translateAttr(
+        scope,
+        "[data-i18n-aria-placeholder]",
+        "aria-placeholder",
+        "data-i18n-aria-placeholder"
+      );
     } catch {
       /* noop */
     }
@@ -348,8 +396,7 @@ export const I18n = (() => {
   }
 
   function detectInitialLang() {
-    const saved =
-      safeStorageGet();
+    const saved = safeStorageGet();
 
     if (saved) {
       return normalizeLang(saved);
@@ -370,6 +417,7 @@ export const I18n = (() => {
       force = false,
       silent = false,
       updateUi = true,
+      root = document,
     } = options || {};
 
     const nextLang =
@@ -389,7 +437,7 @@ export const I18n = (() => {
       typeof document !==
         "undefined"
     ) {
-      updateDOM(document);
+      updateDOM(root);
     }
 
     if (
@@ -508,6 +556,7 @@ export const I18n = (() => {
     const {
       updateUi = true,
       emit = false,
+      root = document,
     } = options || {};
 
     const initial =
@@ -529,7 +578,7 @@ export const I18n = (() => {
       typeof document !==
         "undefined"
     ) {
-      updateDOM(document);
+      updateDOM(root);
     }
 
     if (emit) {

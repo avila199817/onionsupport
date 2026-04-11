@@ -19,14 +19,31 @@ import { Toast } from "../ui/toast.js";
 import { I18n } from "../i18n/index.js";
 
 import { ensureScope, clearScope } from "./helpers.js";
-import { showLoader, hideLoader, clearBootFailsafeTimer, armBootFailsafeLoader } from "./loader.js";
-import { getViewContainer, setShellVisibility, applyPostRenderLoaderPolicy, updateShellVisibilityByRoute } from "./shell.js";
+import {
+  showLoader,
+  hideLoader,
+  clearBootFailsafeTimer,
+  armBootFailsafeLoader,
+} from "./loader.js";
+import {
+  getViewContainer,
+  setShellVisibility,
+  applyPostRenderLoaderPolicy,
+  updateShellVisibilityByRoute,
+} from "./shell.js";
 import { markAppBootState, markStoreBootState } from "./boot-state.js";
 import { syncLangState, initI18n, rerenderCurrentRoute } from "./i18n.js";
 import { syncUserUI, initUISystems } from "./ui.js";
-import { bindRouter, renderInitialRoute } from "./router.js";
+import {
+  configureRouter,
+  bindRouter,
+  renderInitialRoute,
+} from "./router.js";
 import { warmup } from "./warmup.js";
-import { navigateAfterSessionRestore, restoreSessionInBackground } from "./session.js";
+import {
+  navigateAfterSessionRestore,
+  restoreSessionInBackground,
+} from "./session.js";
 import { renderBootError, bindGlobalErrorHandlers } from "./errors.js";
 import { bindAppEvents } from "./events.js";
 
@@ -40,6 +57,7 @@ export const App = (() => {
     booted: false,
     booting: false,
     storeInitialized: false,
+    routerConfigured: false,
     routerBound: false,
     uiInitialized: false,
     i18nInitialized: false,
@@ -74,6 +92,20 @@ export const App = (() => {
     if (!AppCore.modules.has("router")) {
       AppCore.modules.register("router", Router);
     }
+  }
+
+  function initRouter() {
+    configureRouter({
+      Router,
+      AppCore,
+      Auth,
+      state,
+    });
+
+    bindRouter({
+      Router,
+      state,
+    });
   }
 
   /* =========================================================
@@ -194,11 +226,7 @@ export const App = (() => {
       });
 
       initStore();
-
-      bindRouter({
-        Router,
-        state,
-      });
+      initRouter();
 
       renderInitialRoute({
         AppCore,
@@ -296,6 +324,7 @@ export const App = (() => {
     state.booted = false;
     state.booting = false;
     state.storeInitialized = false;
+    state.routerConfigured = false;
     state.routerBound = false;
     state.uiInitialized = false;
     state.i18nInitialized = false;

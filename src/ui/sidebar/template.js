@@ -8,7 +8,8 @@
    - consumir constantes del sidebar
    - evitar ids hardcodeados fuera del módulo
    - preparado para i18n real
-   - tooltips live refresh
+   - tooltips custom con refresh live
+   - evitar tooltips nativos del navegador
    - accesibilidad consistente
 ========================================================= */
 
@@ -176,8 +177,6 @@ export function getSidebarTemplate() {
           id="homeLink"
           aria-label="${labels.logoLink}"
           data-i18n-aria-label="sidebar.logo.ariaLabel"
-          title="${labels.logoTooltip}"
-          data-i18n-title="sidebar.logo.tooltip"
           data-tooltip="${labels.logoTooltip}"
           data-i18n-data-tooltip="sidebar.logo.tooltip"
         >
@@ -206,8 +205,6 @@ export function getSidebarTemplate() {
           type="button"
           class="sidebar-toggle"
           id="toggleSidebar"
-          title="${labels.collapseSidebar}"
-          data-i18n-title="sidebar.toggle.collapse"
           data-tooltip="${labels.collapseSidebar}"
           data-i18n-data-tooltip="sidebar.toggle.collapse"
           aria-label="${labels.collapseSidebar}"
@@ -251,8 +248,6 @@ export function getSidebarTemplate() {
           href="/"
           data-spa
           class="menu-item"
-          title="${labels.home}"
-          data-i18n-title="sidebar.menu.home"
           data-tooltip="${labels.home}"
           data-i18n-data-tooltip="sidebar.menu.home"
           aria-label="${labels.home}"
@@ -276,8 +271,6 @@ export function getSidebarTemplate() {
           href="/incidencias"
           data-spa
           class="menu-item"
-          title="${labels.tickets}"
-          data-i18n-title="sidebar.menu.tickets"
           data-tooltip="${labels.tickets}"
           data-i18n-data-tooltip="sidebar.menu.tickets"
           aria-label="${labels.tickets}"
@@ -308,8 +301,6 @@ export function getSidebarTemplate() {
           href="/facturas"
           data-spa
           class="menu-item"
-          title="${labels.invoices}"
-          data-i18n-title="sidebar.menu.invoices"
           data-tooltip="${labels.invoices}"
           data-i18n-data-tooltip="sidebar.menu.invoices"
           aria-label="${labels.invoices}"
@@ -330,8 +321,6 @@ export function getSidebarTemplate() {
           data-spa
           class="menu-item"
           data-role="admin"
-          title="${labels.users}"
-          data-i18n-title="sidebar.menu.users"
           data-tooltip="${labels.users}"
           data-i18n-data-tooltip="sidebar.menu.users"
           aria-label="${labels.users}"
@@ -352,8 +341,6 @@ export function getSidebarTemplate() {
           data-spa
           class="menu-item"
           data-role="admin"
-          title="${labels.clients}"
-          data-i18n-title="sidebar.menu.clients"
           data-tooltip="${labels.clients}"
           data-i18n-data-tooltip="sidebar.menu.clients"
           aria-label="${labels.clients}"
@@ -375,8 +362,6 @@ export function getSidebarTemplate() {
           href="/cuenta"
           data-spa
           class="menu-item"
-          title="${labels.account}"
-          data-i18n-title="sidebar.menu.account"
           data-tooltip="${labels.account}"
           data-i18n-data-tooltip="sidebar.menu.account"
           aria-label="${labels.account}"
@@ -396,8 +381,6 @@ export function getSidebarTemplate() {
           href="/ajustes"
           data-spa
           class="menu-item"
-          title="${labels.settings}"
-          data-i18n-title="sidebar.menu.settings"
           data-tooltip="${labels.settings}"
           data-i18n-data-tooltip="sidebar.menu.settings"
           aria-label="${labels.settings}"

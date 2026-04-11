@@ -12,7 +12,7 @@
    - neutral graphite / enterprise shell
    - compatible con sidebar fixed montado desde JS
    - compatible con topbar montado desde JS
-   - arquitectura sticky dentro de main-content
+   - topbar fija como parte real del layout SPA
 ========================================================= */
 
 
@@ -40,12 +40,15 @@
 
 /* =========================
    TOPBAR BASE
+   FIJA COMO PARTE DEL LAYOUT
 ========================= */
 .topbar{
-  position:sticky;
+  position:fixed;
   top:0;
+  left:var(--sidebar-width);
+  right:0;
 
-  inline-size:100%;
+  inline-size:auto;
   min-inline-size:0;
 
   block-size:calc(var(--topbar-height) + var(--topbar-safe-top));
@@ -73,6 +76,8 @@
   z-index:var(--z-topbar);
 
   transition:
+    left var(--duration-slow) var(--ease-emphasis),
+    width var(--duration-slow) var(--ease-emphasis),
     background var(--duration-normal) var(--ease-standard),
     border-color var(--duration-normal) var(--ease-standard),
     box-shadow var(--duration-normal) var(--ease-standard),
@@ -115,6 +120,22 @@
 .topbar > *{
   position:relative;
   z-index:1;
+}
+
+
+/* =========================
+   TOPBAR VS SIDEBAR STATES
+========================= */
+body.sidebar-collapsed .topbar{
+  left:var(--sidebar-collapsed);
+}
+
+body.route-shell-hidden .topbar{
+  left:0;
+}
+
+body.sidebar-open .topbar{
+  left:var(--sidebar-width);
 }
 
 
@@ -587,6 +608,8 @@ mark,
 ========================= */
 @media (max-width: 900px){
   .topbar{
+    left:0;
+    right:0;
     gap:var(--space-md);
     padding-inline-end:calc(var(--space-md) + var(--topbar-safe-right));
     padding-inline-start:calc(var(--space-md) + var(--topbar-safe-left));

@@ -1,12 +1,13 @@
 [data-theme="light"]{
   /* =========================================================
      ONION SUPPORT — LIGHT THEME / PRO SAAS PANEL
-     EXTREME LEVEL
+     EXTREME LEVEL / FINAL CLEAN SYSTEM
      - light premium ui
      - enterprise clarity
      - glass limpio
      - contraste fino
      - coherente con design tokens globales
+     - alineado con sidebar / topbar / layout final
   ========================================================= */
 
   /* =========================
@@ -271,8 +272,7 @@
   --sidebar-bg: rgba(255,255,255,.90);
   --sidebar-bg-strong: rgba(255,255,255,.97);
   --sidebar-border: rgba(15,23,42,.07);
-  --sidebar-shadow:
-    0 18px 40px rgba(15,23,42,.08);
+  --sidebar-shadow: 0 18px 40px rgba(15,23,42,.08);
 
   --sidebar-hover: rgba(15,23,42,.04);
   --sidebar-active: rgba(124,58,237,.10);
@@ -295,8 +295,7 @@
   ========================= */
   --topbar-bg: rgba(255,255,255,.78);
   --topbar-border: rgba(15,23,42,.06);
-  --topbar-shadow:
-    0 10px 22px rgba(15,23,42,.05);
+  --topbar-shadow: 0 10px 22px rgba(15,23,42,.05);
   --topbar-blur: blur(18px);
 
   /* =========================

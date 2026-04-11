@@ -109,7 +109,7 @@ a{
     background var(--duration-slow) var(--ease-standard),
     color var(--duration-normal) var(--ease-standard);
 
-  overflow:clip;
+  overflow:visible;
 }
 
 .layout::before{

@@ -15,9 +15,11 @@
    - compatible con ui.css
    - loading spinner real vía CSS
    - progreso visual refinado
+   - preparado para i18n
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
+import { I18n } from "../i18n/index.js";
 
 export const Toast = (() => {
   "use strict";
@@ -39,6 +41,17 @@ export const Toast = (() => {
 
   const store = new Map();
   const dismissing = new Set();
+
+  /* =========================================================
+     I18N
+  ========================================================= */
+  function t(key, fallback, params = {}) {
+    try {
+      return I18n.t(key, params, fallback);
+    } catch {
+      return fallback;
+    }
+  }
 
   /* =========================================================
      HELPERS
@@ -183,6 +196,30 @@ export const Toast = (() => {
 
   function getAriaLive(type) {
     return type === "error" || type === "warning" ? "assertive" : "polite";
+  }
+
+  function getDefaultTitle(type) {
+    switch (type) {
+      case "success":
+        return t("toast.successTitle", "Éxito");
+      case "error":
+        return t("toast.errorTitle", "Error");
+      case "warning":
+        return t("toast.warningTitle", "Aviso");
+      case "loading":
+        return t("toast.loadingTitle", "Cargando");
+      case "info":
+      default:
+        return t("toast.infoTitle", "Información");
+    }
+  }
+
+  function getDefaultLoadingMessage() {
+    return t("toast.loadingMessage", "Cargando...");
+  }
+
+  function getCloseLabel() {
+    return t("toast.close", "Cerrar notificación");
   }
 
   function getContainer() {
@@ -384,7 +421,7 @@ export const Toast = (() => {
               type="button"
               class="toast-close"
               data-toast-dismiss="${escapeHtml(id)}"
-              aria-label="Cerrar notificación"
+              aria-label="${escapeHtml(getCloseLabel())}"
             >
               <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18">
                 <path d="M15 9 9 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
@@ -446,8 +483,14 @@ export const Toast = (() => {
   ========================================================= */
   function show(options = {}) {
     const type = normalizeType(options.type);
-    const title = String(options.title || "").trim();
-    const message = String(options.message || options.text || "").trim();
+    const title =
+      String(options.title ?? "").trim() ||
+      (options.useDefaultTitle === true ? getDefaultTitle(type) : "");
+    const message = String(
+      options.message ||
+      options.text ||
+      (type === "loading" ? getDefaultLoadingMessage() : "")
+    ).trim();
 
     if (!message) {
       AppCore.utils?.warn?.("Toast.show requiere message/text.");
@@ -524,7 +567,9 @@ export const Toast = (() => {
 
     const nextType = patch.type ? normalizeType(patch.type) : item.type;
     const nextTitle =
-      patch.title !== undefined ? String(patch.title || "").trim() : item.title;
+      patch.title !== undefined
+        ? String(patch.title || "").trim()
+        : item.title;
     const nextMessage =
       patch.message !== undefined || patch.text !== undefined
         ? String(patch.message || patch.text || "").trim()
@@ -656,11 +701,11 @@ export const Toast = (() => {
     });
   }
 
-  function loading(message = "Cargando...", options = {}) {
+  function loading(message = "", options = {}) {
     return show({
       ...options,
       type: "loading",
-      message,
+      message: message || getDefaultLoadingMessage(),
       duration: 0,
       closable: options.closable ?? false,
     });
@@ -702,7 +747,7 @@ export const Toast = (() => {
 
     AppCore.cleanup.event(scope, "toast:loading", ({ detail }) => {
       if (!detail) return;
-      loading(detail.message || detail.text || "Cargando...", detail);
+      loading(detail.message || detail.text || "", detail);
     });
 
     AppCore.cleanup.event(scope, "toast:update", ({ detail }) => {

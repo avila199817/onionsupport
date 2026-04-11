@@ -21,8 +21,8 @@
    - NO pisar offsets del shell con inline styles
 ========================================================= */
 
-import { AppCore } from "../core/core.js";
-import { Router } from "../router/router.js";
+import { AppCore } from "../core/index.js";
+import { Router } from "../router/index.js";
 
 export const TopbarUI = (() => {
   "use strict";

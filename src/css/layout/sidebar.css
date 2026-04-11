@@ -157,13 +157,7 @@
   gap:12px;
 
   min-height:var(--sidebar-top-height);
-  padding:16px 14px 12px;
-}
-
-.sidebar.collapsed .sidebar-top,
-.sidebar.is-collapsed .sidebar-top{
-  justify-content:center;
-  padding-inline:0;
+  padding:14px;
 }
 
 
@@ -172,10 +166,10 @@
 ========================= */
 .logo{
   position:relative;
-  z-index:1;
+  z-index:2;
 
-  width:44px;
-  height:44px;
+  width:40px;
+  height:40px;
   flex:0 0 auto;
 
   display:inline-flex;
@@ -197,8 +191,8 @@
 }
 
 .logo img{
-  width:28px;
-  height:28px;
+  width:26px;
+  height:26px;
   object-fit:contain;
   user-select:none;
   -webkit-user-drag:none;
@@ -237,13 +231,12 @@
    TOGGLE BUTTON
 ========================= */
 .sidebar-toggle{
-  position:absolute;
-  top:16px;
-  right:14px;
-  z-index:3;
+  position:relative;
+  z-index:2;
 
   width:40px;
   height:40px;
+  margin-left:auto;
   flex:0 0 auto;
 
   display:inline-flex;
@@ -291,16 +284,30 @@
 /* =========================
    COLLAPSED TOP BEHAVIOUR
 ========================= */
+.sidebar.collapsed .sidebar-top,
+.sidebar.is-collapsed .sidebar-top{
+  display:block;
+  min-height:var(--sidebar-top-height);
+  padding:14px 0;
+}
+
 .sidebar.collapsed .logo,
 .sidebar.is-collapsed .logo{
+  position:absolute;
+  top:50%;
+  left:50%;
+  transform:translate(-50%, -50%);
   opacity:1;
 }
 
 .sidebar.collapsed .sidebar-toggle,
 .sidebar.is-collapsed .sidebar-toggle{
+  position:absolute;
   top:50%;
-  right:50%;
-  transform:translate(50%, -50%);
+  left:50%;
+  right:auto;
+  margin-left:0;
+  transform:translate(-50%, -50%);
   width:34px;
   height:34px;
   opacity:0;
@@ -323,14 +330,14 @@
 
 .sidebar.collapsed .sidebar-toggle:hover,
 .sidebar.is-collapsed .sidebar-toggle:hover{
-  transform:translate(50%, -50%) scale(1.02);
+  transform:translate(-50%, -50%) scale(1.02);
   background:rgba(255,255,255,.024);
   color:var(--text-strong);
 }
 
 .sidebar.collapsed .sidebar-toggle:active,
 .sidebar.is-collapsed .sidebar-toggle:active{
-  transform:translate(50%, -50%) scale(.98);
+  transform:translate(-50%, -50%) scale(.98);
 }
 
 
@@ -619,8 +626,15 @@
 
 .sidebar.collapsed .menu-item,
 .sidebar.is-collapsed .menu-item{
-  justify-content:flex-start;
-  padding-inline:calc((var(--sidebar-collapsed) - 20px - var(--sidebar-icon-size)) / 2);
+  justify-content:center;
+  align-items:center;
+  padding-left:0;
+  padding-right:0;
+}
+
+.sidebar.collapsed .menu-item span:first-child,
+.sidebar.is-collapsed .menu-item span:first-child{
+  margin:0;
 }
 
 .sidebar.collapsed .menu-item span:last-child,
@@ -635,7 +649,7 @@
 .sidebar.collapsed .menu-item[aria-current="page"]::before,
 .sidebar.is-collapsed .menu-item.active::before,
 .sidebar.is-collapsed .menu-item[aria-current="page"]::before{
-  left:1px;
+  display:none;
 }
 
 
@@ -1155,13 +1169,26 @@
   }
 
   .sidebar .sidebar-top{
+    display:flex;
+    align-items:center;
     justify-content:space-between;
-    padding-inline:14px;
+    padding:14px;
+  }
+
+  .sidebar .logo{
+    position:relative;
+    top:auto;
+    left:auto;
+    transform:none;
+    opacity:1 !important;
   }
 
   .sidebar .sidebar-toggle{
-    top:16px;
-    right:14px;
+    position:relative;
+    top:auto;
+    left:auto;
+    right:auto;
+    margin-left:auto;
     width:40px;
     height:40px;
     opacity:1;
@@ -1169,12 +1196,13 @@
     transform:none;
   }
 
-  .sidebar .logo{
-    opacity:1 !important;
+  .sidebar .menu-item{
+    justify-content:flex-start;
+    padding-inline:var(--sidebar-item-padding-x);
   }
 
-  .sidebar .menu-item{
-    padding-inline:var(--sidebar-item-padding-x);
+  .sidebar .menu-item span:first-child{
+    margin:0;
   }
 
   .sidebar .menu-item span:last-child{
@@ -1182,6 +1210,11 @@
     opacity:1 !important;
     transform:none !important;
     pointer-events:auto !important;
+  }
+
+  .sidebar .menu-item.active::before,
+  .sidebar .menu-item[aria-current="page"]::before{
+    display:block;
   }
 
   .sidebar .sidebar-section{

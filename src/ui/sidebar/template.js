@@ -55,11 +55,6 @@ export function getSidebarTemplate() {
       "Inicio"
     ),
 
-    logoAlt: t(
-      "sidebar.logo.alt",
-      "Onion Support"
-    ),
-
     collapseSidebar: t(
       "sidebar.toggle.collapse",
       "Contraer barra lateral"
@@ -174,7 +169,6 @@ export function getSidebarTemplate() {
       data-i18n-aria-label="sidebar.aria.main"
     >
       <div class="sidebar-top">
-
         <a
           href="/"
           data-spa
@@ -191,8 +185,7 @@ export function getSidebarTemplate() {
             class="logo-dark"
             draggable="false"
             src="/src/media/img/favicon_white.png"
-            alt="${labels.logoAlt}"
-            data-i18n-alt="sidebar.logo.alt"
+            alt="Onion Support"
             width="36"
             height="36"
             decoding="async"
@@ -202,8 +195,7 @@ export function getSidebarTemplate() {
             class="logo-light"
             draggable="false"
             src="/src/media/img/favicon_black.png"
-            alt="${labels.logoAlt}"
-            data-i18n-alt="sidebar.logo.alt"
+            alt="Onion Support"
             width="36"
             height="36"
             decoding="async"
@@ -247,7 +239,6 @@ export function getSidebarTemplate() {
             />
           </svg>
         </button>
-
       </div>
 
       <nav
@@ -256,7 +247,6 @@ export function getSidebarTemplate() {
         aria-label="${labels.navAria}"
         data-i18n-aria-label="sidebar.aria.navigation"
       >
-
         <a
           href="/"
           data-spa
@@ -426,7 +416,6 @@ export function getSidebarTemplate() {
 
           <span data-i18n="sidebar.menu.settings">${labels.settings}</span>
         </a>
-
       </nav>
 
       <section
@@ -442,7 +431,6 @@ export function getSidebarTemplate() {
       </section>
 
       <div class="sidebar-footer">
-
         <div
           class="user"
           id="${USER_TOGGLE_ID}"
@@ -502,28 +490,73 @@ export function getSidebarTemplate() {
           aria-hidden="true"
           hidden
         >
-
-          <button type="button" class="dropdown-item" role="menuitem" tabindex="-1">
+          <button
+            type="button"
+            class="dropdown-item"
+            role="menuitem"
+            tabindex="-1"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.6"/>
+            </svg>
             <span data-i18n="sidebar.user.addAccount">${labels.addAccount}</span>
           </button>
 
           <div class="dropdown-divider" role="separator"></div>
 
-          <button type="button" class="dropdown-item" role="menuitem" tabindex="-1">
+          <button
+            type="button"
+            class="dropdown-item"
+            role="menuitem"
+            tabindex="-1"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 4v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+              <path d="M8 8l4-4 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M5 20h14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            </svg>
             <span data-i18n="sidebar.user.changePlan">${labels.changePlan}</span>
           </button>
 
-          <button type="button" class="dropdown-item" role="menuitem" tabindex="-1">
+          <button
+            type="button"
+            class="dropdown-item"
+            role="menuitem"
+            tabindex="-1"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.6"/>
+              <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" stroke-width="1.6" fill="none"/>
+            </svg>
             <span data-i18n="sidebar.user.profile">${labels.profile}</span>
           </button>
 
-          <button type="button" class="dropdown-item" role="menuitem" tabindex="-1">
+          <button
+            type="button"
+            class="dropdown-item"
+            role="menuitem"
+            tabindex="-1"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M4 12h16" stroke="currentColor" stroke-width="1.6"/>
+              <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/>
+            </svg>
             <span data-i18n="sidebar.user.settings">${labels.userSettings}</span>
           </button>
 
           <div class="dropdown-divider" role="separator"></div>
 
-          <button type="button" class="dropdown-item" role="menuitem" tabindex="-1">
+          <button
+            type="button"
+            class="dropdown-item"
+            role="menuitem"
+            tabindex="-1"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/>
+              <path d="M12 16v-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <circle cx="12" cy="8" r="1" fill="currentColor"/>
+            </svg>
             <span data-i18n="sidebar.user.help">${labels.help}</span>
           </button>
 
@@ -534,11 +567,13 @@ export function getSidebarTemplate() {
             role="menuitem"
             tabindex="-1"
           >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="1.6"/>
+              <path d="M4 4h5v16H4z" stroke="currentColor" stroke-width="1.6"/>
+            </svg>
             <span data-i18n="sidebar.user.logout">${labels.logout}</span>
           </button>
-
         </div>
-
       </div>
     </aside>
   `;

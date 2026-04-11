@@ -856,77 +856,81 @@ export const SidebarUI = (() => {
     return serverLink;
   }
 
-  /* =========================================================
-     DROPDOWN
-  ========================================================= */
-  function syncDropdownA11y(open) {
-    const { userToggle, userDropdown } = getElements();
-
-    if (userToggle) {
-      userToggle.setAttribute("aria-haspopup", "menu");
-      userToggle.setAttribute("aria-expanded", String(open));
-    }
-
-    if (userDropdown) {
-      userDropdown.setAttribute("aria-hidden", String(!open));
-    }
-  }
-
-  function setDropdownOpen(value) {
-    const { userDropdown, userToggle } = getElements();
-
-    state.dropdownOpen = Boolean(value);
-
-    if (!userDropdown) {
-      syncDropdownA11y(state.dropdownOpen);
-      return;
-    }
-
-    if (!state.dropdownOpen) {
-      blurIfInside(userDropdown);
-    }
-
-    userDropdown.classList.toggle("open", state.dropdownOpen);
-    userDropdown.classList.toggle("active", state.dropdownOpen);
-    userDropdown.hidden = !state.dropdownOpen;
-
-    if (userToggle) {
-      userToggle.classList.toggle("active", state.dropdownOpen);
-    }
-
-    syncDropdownA11y(state.dropdownOpen);
-
-    AppCore.events.emit("sidebar:dropdown:change", {
-      open: state.dropdownOpen,
-    });
-  }
-
-  function openDropdown() {
-    if (isShellHidden()) return;
-    ensureSidebarOpenForUserMenu();
-    setDropdownOpen(true);
-  }
-
-  function closeDropdown() {
-    setDropdownOpen(false);
-  }
-
-  function toggleDropdown() {
-    if (isShellHidden()) {
-      closeDropdown();
-      return;
-    }
-
-    const sidebarWasForcedOpen = ensureSidebarOpenForUserMenu();
-
-    if (sidebarWasForcedOpen) {
-      setDropdownOpen(true);
-      return;
-    }
-
-    setDropdownOpen(!state.dropdownOpen);
-  }
-
+    /* =========================================================
+      DROPDOWN
+   ========================================================= */
+   function syncDropdownA11y(open) {
+     const { userToggle, userDropdown } = getElements();
+   
+     if (userToggle) {
+       userToggle.setAttribute("aria-haspopup", "menu");
+       userToggle.setAttribute("aria-expanded", String(open));
+       userToggle.removeAttribute("data-tooltip");
+       userToggle.removeAttribute("title");
+     }
+   
+     if (userDropdown) {
+       userDropdown.setAttribute("aria-hidden", String(!open));
+     }
+   }
+   
+   function setDropdownOpen(value) {
+     const { userDropdown, userToggle } = getElements();
+   
+     state.dropdownOpen = Boolean(value);
+   
+     if (!userDropdown) {
+       syncDropdownA11y(state.dropdownOpen);
+       return;
+     }
+   
+     if (!state.dropdownOpen) {
+       blurIfInside(userDropdown);
+     }
+   
+     userDropdown.classList.toggle("open", state.dropdownOpen);
+     userDropdown.classList.toggle("active", state.dropdownOpen);
+     userDropdown.hidden = !state.dropdownOpen;
+   
+     if (userToggle) {
+       userToggle.classList.toggle("active", state.dropdownOpen);
+       userToggle.removeAttribute("data-tooltip");
+       userToggle.removeAttribute("title");
+     }
+   
+     syncDropdownA11y(state.dropdownOpen);
+   
+     AppCore.events.emit("sidebar:dropdown:change", {
+       open: state.dropdownOpen,
+     });
+   }
+   
+   function openDropdown() {
+     if (isShellHidden()) return;
+     ensureSidebarOpenForUserMenu();
+     setDropdownOpen(true);
+   }
+   
+   function closeDropdown() {
+     setDropdownOpen(false);
+   }
+   
+   function toggleDropdown() {
+     if (isShellHidden()) {
+       closeDropdown();
+       return;
+     }
+   
+     const sidebarWasForcedOpen = ensureSidebarOpenForUserMenu();
+   
+     if (sidebarWasForcedOpen) {
+       setDropdownOpen(true);
+       return;
+     }
+   
+     setDropdownOpen(!state.dropdownOpen);
+   }
+   
    /* =========================================================
       USER UI
    ========================================================= */

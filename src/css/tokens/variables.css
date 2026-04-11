@@ -408,6 +408,22 @@
   --topbar-shadow: 0 12px 30px rgba(0,0,0,.16);
   --topbar-blur: blur(18px);
 
+  --topbar-safe-top: var(--app-safe-top);
+  --topbar-safe-right: var(--app-safe-right);
+  --topbar-safe-left: var(--app-safe-left);
+
+  --topbar-inline-padding: var(--space-lg);
+
+  --topbar-search-height: 46px;
+  --topbar-search-max-width: 520px;
+  --topbar-search-radius: 999px;
+
+  --topbar-search-results-offset: 10px;
+  --topbar-search-results-max-height: 320px;
+
+  --topbar-overlay-accent: rgba(255,255,255,.018);
+  --topbar-overlay-shine: rgba(255,255,255,.032);
+
   /* =========================
      TABLES / DATA UI
   ========================= */

@@ -70,6 +70,22 @@
   );
 
   /* =========================
+     SAFE AREAS / SHELL
+     SOLO LO JUSTO PARA EL LAYOUT
+  ========================= */
+  --app-safe-top: env(safe-area-inset-top, 0px);
+  --app-safe-right: env(safe-area-inset-right, 0px);
+  --app-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --app-safe-left: env(safe-area-inset-left, 0px);
+
+  /* ancho real usado por el shell */
+  --sidebar-current-width: var(--sidebar-width);
+
+  /* offsets reales del layout */
+  --app-offset-topbar: calc(var(--topbar-height) + var(--app-safe-top));
+  --app-offset-tablehead: 0px;
+
+  /* =========================
      Z-INDEX
   ========================= */
   --z-base: 1;
@@ -585,9 +601,8 @@
   --auth-logo-glow: 0 0 40px rgba(255,255,255,.04);
 
   /* =========================
-    TOAST
+     TOAST
   ========================= */
-  
   --ui-toast-top: 24px;
   --ui-toast-right: 24px;
   --ui-toast-width: min(520px, calc(100vw - 32px));
@@ -608,7 +623,7 @@
   --ui-toast-shadow:
     var(--shadow-lg),
     0 0 0 1px rgba(255,255,255,.03) inset;
-  
+
   /* =========================
      LOADER
   ========================= */

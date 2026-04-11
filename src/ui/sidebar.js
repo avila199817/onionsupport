@@ -268,17 +268,16 @@ export const SidebarUI = (() => {
         </section>
 
         <div class="sidebar-footer">
-          <div
-            class="user"
-            id="userToggle"
-            role="button"
-            tabindex="0"
-            aria-haspopup="menu"
-            aria-expanded="false"
-            aria-controls="userDropdown"
-            aria-label="Abrir menú de usuario"
-            data-tooltip="Cuenta"
-          >
+         <div
+           class="user"
+           id="userToggle"
+           role="button"
+           tabindex="0"
+           aria-haspopup="menu"
+           aria-expanded="false"
+           aria-controls="userDropdown"
+           aria-label="Abrir menú de usuario"
+         >
             <div
               class="avatar"
               id="sidebar-avatar"
@@ -928,98 +927,101 @@ export const SidebarUI = (() => {
     setDropdownOpen(!state.dropdownOpen);
   }
 
-  /* =========================================================
-     USER UI
-  ========================================================= */
-  function renderAvatarFallback(avatarEl, displayName, avatarText) {
-    if (!avatarEl) return;
-
-    avatarEl.innerHTML = "";
-    avatarEl.textContent = avatarText;
-    avatarEl.classList.remove("has-image");
-    avatarEl.setAttribute("aria-label", `Avatar ${displayName}`);
-  }
-
-  function renderAvatarImage(avatarEl, avatarUrl, displayName, avatarText) {
-    if (!avatarEl) return;
-
-    const safeUrl = String(avatarUrl || "").trim();
-
-    if (!safeUrl) {
-      renderAvatarFallback(avatarEl, displayName, avatarText);
-      return;
-    }
-
-    avatarEl.classList.add("has-image");
-    avatarEl.setAttribute("aria-label", `Avatar ${displayName}`);
-
-    const img = document.createElement("img");
-    img.src = safeUrl;
-    img.alt = `Avatar de ${displayName}`;
-    img.loading = "eager";
-    img.decoding = "async";
-    img.draggable = false;
-    img.referrerPolicy = "no-referrer";
-
-    img.style.width = "100%";
-    img.style.height = "100%";
-    img.style.objectFit = "cover";
-    img.style.borderRadius = "50%";
-    img.style.display = "block";
-
-    img.onerror = () => {
-      renderAvatarFallback(avatarEl, displayName, avatarText);
-    };
-
-    avatarEl.innerHTML = "";
-    avatarEl.appendChild(img);
-  }
-
-  function renderUser() {
-    const { nameEl, avatarEl, userToggle } = getElements();
-    const user = getUser();
-
-    const displayName = getDisplayName(user);
-    const avatarText = getAvatarText(user);
-    const username = getUsername(user);
-    const avatarUrl = getAvatarUrl(user);
-
-    if (nameEl) {
-      nameEl.textContent = displayName;
-
-      if (username) {
-        nameEl.dataset.username = username;
-      } else {
-        delete nameEl.dataset.username;
-      }
-    }
-
-    if (avatarEl) {
-      renderAvatarImage(avatarEl, avatarUrl, displayName, avatarText);
-
-      if (username) {
-        avatarEl.dataset.username = username;
-      } else {
-        delete avatarEl.dataset.username;
-      }
-    }
-
-    if (userToggle) {
-      userToggle.setAttribute(
-        "aria-label",
-        `Abrir menú de usuario de ${displayName}`
-      );
-      userToggle.dataset.tooltip = displayName || "Cuenta";
-    }
-
-    AppCore.events.emit("sidebar:user:rendered", {
-      user,
-      displayName,
-      avatarText,
-      avatarUrl: avatarUrl || null,
-      username: username || null,
-    });
-  }
+   /* =========================================================
+      USER UI
+   ========================================================= */
+   function renderAvatarFallback(avatarEl, displayName, avatarText) {
+     if (!avatarEl) return;
+   
+     avatarEl.innerHTML = "";
+     avatarEl.textContent = avatarText;
+     avatarEl.classList.remove("has-image");
+     avatarEl.setAttribute("aria-label", `Avatar ${displayName}`);
+   }
+   
+   function renderAvatarImage(avatarEl, avatarUrl, displayName, avatarText) {
+     if (!avatarEl) return;
+   
+     const safeUrl = String(avatarUrl || "").trim();
+   
+     if (!safeUrl) {
+       renderAvatarFallback(avatarEl, displayName, avatarText);
+       return;
+     }
+   
+     avatarEl.classList.add("has-image");
+     avatarEl.setAttribute("aria-label", `Avatar ${displayName}`);
+   
+     const img = document.createElement("img");
+     img.src = safeUrl;
+     img.alt = `Avatar de ${displayName}`;
+     img.loading = "eager";
+     img.decoding = "async";
+     img.draggable = false;
+     img.referrerPolicy = "no-referrer";
+   
+     img.style.width = "100%";
+     img.style.height = "100%";
+     img.style.objectFit = "cover";
+     img.style.borderRadius = "50%";
+     img.style.display = "block";
+   
+     img.onerror = () => {
+       renderAvatarFallback(avatarEl, displayName, avatarText);
+     };
+   
+     avatarEl.innerHTML = "";
+     avatarEl.appendChild(img);
+   }
+   
+   function renderUser() {
+     const { nameEl, avatarEl, userToggle } = getElements();
+     const user = getUser();
+   
+     const displayName = getDisplayName(user);
+     const avatarText = getAvatarText(user);
+     const username = getUsername(user);
+     const avatarUrl = getAvatarUrl(user);
+   
+     if (nameEl) {
+       nameEl.textContent = displayName;
+   
+       if (username) {
+         nameEl.dataset.username = username;
+       } else {
+         delete nameEl.dataset.username;
+       }
+     }
+   
+     if (avatarEl) {
+       renderAvatarImage(avatarEl, avatarUrl, displayName, avatarText);
+   
+       if (username) {
+         avatarEl.dataset.username = username;
+       } else {
+         delete avatarEl.dataset.username;
+       }
+     }
+   
+     if (userToggle) {
+       userToggle.setAttribute(
+         "aria-label",
+         `Abrir menú de usuario de ${displayName}`
+       );
+   
+       if (userToggle.hasAttribute("data-tooltip")) {
+         userToggle.removeAttribute("data-tooltip");
+       }
+     }
+   
+     AppCore.events.emit("sidebar:user:rendered", {
+       user,
+       displayName,
+       avatarText,
+       avatarUrl: avatarUrl || null,
+       username: username || null,
+     });
+   }
 
   /* =========================================================
      ROLE VISIBILITY

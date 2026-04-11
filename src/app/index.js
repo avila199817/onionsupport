@@ -57,7 +57,7 @@ import {
   configureRouter,
   bindRouter,
   renderInitialRoute,
-} from "./index.js";
+} from "./router.js";
 
 import { warmup } from "./warmup.js";
 
@@ -267,14 +267,12 @@ export const App = (() => {
             AppCore,
             Router,
             I18n,
-
             applyPostRenderLoaderPolicy: () =>
               applyPostRenderLoaderPolicy({
                 AppCore,
                 Router,
                 hideLoader,
               }),
-
             syncUserUI,
           }),
 
@@ -291,7 +289,6 @@ export const App = (() => {
       renderInitialRoute({
         AppCore,
         Router,
-
         applyPostRenderLoaderPolicy: () =>
           applyPostRenderLoaderPolicy({
             AppCore,
@@ -322,7 +319,6 @@ export const App = (() => {
         syncUserUI,
         warmup,
         navigateAfterSessionRestore,
-
         applyPostRenderLoaderPolicy: () =>
           applyPostRenderLoaderPolicy({
             AppCore,

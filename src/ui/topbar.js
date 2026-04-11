@@ -16,6 +16,7 @@
    - mezclar resultados remotos + fallback local
    - tolerar distintos formatos del backend search
    - cleanup sólido anti duplicados
+   - integrarse de forma robusta con SidebarUI
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
@@ -32,6 +33,7 @@ export const TopbarUI = (() => {
   const MAX_RESULTS_TOTAL = 24;
   const MAX_RESULTS_PER_GROUP = 6;
   const CACHE_TTL_MS = 20 * 1000;
+  const MOBILE_BREAKPOINT = 900;
 
   let initialized = false;
   let searchController = null;
@@ -253,20 +255,8 @@ export const TopbarUI = (() => {
     );
   }
 
-  function getCurrentCanonicalPath() {
-    if (typeof Router?.getCurrentCanonicalPath === "function") {
-      try {
-        return Router.getCurrentCanonicalPath();
-      } catch {
-        /* noop */
-      }
-    }
-
-    return safeNormalizeCanonicalPath(getCurrentPublicPath());
-  }
-
   function isMobileViewport() {
-    return window.matchMedia("(max-width: 900px)").matches;
+    return window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`).matches;
   }
 
   function clearSearchDebounce() {
@@ -293,6 +283,33 @@ export const TopbarUI = (() => {
     activeIndex = -1;
     currentItems = [];
     currentQuery = "";
+  }
+
+  function getSidebarModule() {
+    try {
+      if (AppCore?.modules?.get && typeof AppCore.modules.get === "function") {
+        const found = AppCore.modules.get("sidebar");
+        if (found) return found;
+      }
+
+      if (AppCore?.modules && typeof AppCore.modules === "object") {
+        if (AppCore.modules.sidebar) {
+          return AppCore.modules.sidebar;
+        }
+
+        if (AppCore.modules.get?.("SidebarUI")) {
+          return AppCore.modules.get("SidebarUI");
+        }
+      }
+
+      if (AppCore?.sidebar) {
+        return AppCore.sidebar;
+      }
+
+      return null;
+    } catch {
+      return null;
+    }
   }
 
   /* =========================================================
@@ -385,22 +402,48 @@ export const TopbarUI = (() => {
   }
 
   function openSidebarMobile() {
+    const sidebarModule = getSidebarModule();
+
+    if (sidebarModule?.openSidebar && typeof sidebarModule.openSidebar === "function") {
+      sidebarModule.openSidebar();
+      window.setTimeout(setMobileToggleState, 0);
+      return;
+    }
+
     const { sidebar } = getDom();
     if (!sidebar) return;
 
     sidebar.classList.add("open", "is-open");
+    document.body?.classList.add("sidebar-open");
     setMobileToggleState();
   }
 
   function closeSidebarMobile() {
+    const sidebarModule = getSidebarModule();
+
+    if (sidebarModule?.closeSidebar && typeof sidebarModule.closeSidebar === "function") {
+      sidebarModule.closeSidebar();
+      window.setTimeout(setMobileToggleState, 0);
+      return;
+    }
+
     const { sidebar } = getDom();
     if (!sidebar) return;
 
     sidebar.classList.remove("open", "is-open");
+    document.body?.classList.remove("sidebar-open");
     setMobileToggleState();
   }
 
   function toggleSidebarMobile() {
+    const sidebarModule = getSidebarModule();
+
+    if (sidebarModule?.toggleSidebar && typeof sidebarModule.toggleSidebar === "function") {
+      sidebarModule.toggleSidebar();
+      window.setTimeout(setMobileToggleState, 0);
+      return;
+    }
+
     const { sidebar } = getDom();
     if (!sidebar) return;
 
@@ -410,16 +453,13 @@ export const TopbarUI = (() => {
 
     sidebar.classList.toggle("open", nextOpen);
     sidebar.classList.toggle("is-open", nextOpen);
+    document.body?.classList.toggle("sidebar-open", nextOpen);
     setMobileToggleState();
   }
 
-  function handleMobileToggleClick() {
-    if (AppCore.modules?.get?.("sidebar")?.toggleSidebar) {
-      AppCore.modules.get("sidebar").toggleSidebar();
-      setMobileToggleState();
-      return;
-    }
-
+  function handleMobileToggleClick(event) {
+    event.preventDefault();
+    event.stopPropagation();
     toggleSidebarMobile();
   }
 
@@ -1334,7 +1374,7 @@ export const TopbarUI = (() => {
     });
 
     AppCore.cleanup.event(SCOPE, "sidebar:state:synced", () => {
-      setMobileToggleState();
+      window.setTimeout(setMobileToggleState, 0);
     });
   }
 

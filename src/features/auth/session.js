@@ -10,7 +10,7 @@
    - exponer header Authorization
 ========================================================= */
 
-import { AppCore } from "../../core/core.js";
+import { AppCore } from "../../core/index.js";
 
 import {
   extractMessage,

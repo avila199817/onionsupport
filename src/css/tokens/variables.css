@@ -400,6 +400,22 @@
   --sidebar-icon: rgba(245,245,245,.60);
   --sidebar-icon-active: #ffffff;
 
+  --sidebar-safe-top: env(safe-area-inset-top, 0px);
+  --sidebar-safe-right: env(safe-area-inset-right, 0px);
+  --sidebar-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --sidebar-safe-left: env(safe-area-inset-left, 0px);
+
+  --sidebar-top-height: 72px;
+  --sidebar-inline-padding: 10px;
+  --sidebar-section-gap: 6px;
+
+  --sidebar-tooltip-offset: 14px;
+  --sidebar-tooltip-arrow-offset: 9px;
+
+  --sidebar-dropdown-bottom: 72px;
+  --sidebar-mobile-width: min(86vw, 320px);
+  --sidebar-mobile-width-xs: min(92vw, 320px);
+  
   /* =========================
      TOPBAR
   ========================= */

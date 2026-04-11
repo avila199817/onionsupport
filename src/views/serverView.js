@@ -16,7 +16,7 @@
    - mantener histórico local sin librerías externas
 ========================================================= */
 
-import { AppCore } from "../core/core.js";
+import { AppCore } from "../core/index.js";
 
 export const ServerView = (() => {
   "use strict";

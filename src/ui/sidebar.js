@@ -19,6 +19,7 @@
    - init seguro una sola vez
    - sincronización robusta con AppCore
    - inyectar acceso admin a estado del servidor
+   - tooltips nativos automáticos cuando el sidebar está collapsed
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
@@ -613,13 +614,37 @@ export const SidebarUI = (() => {
   }
 
   function getDesiredSidebarOpenState() {
-    const mobile = isMobileViewport();
+    return Boolean(AppCore.state.sidebarOpen);
+  }
 
-    if (mobile) {
-      return Boolean(AppCore.state.sidebarOpen);
-    }
+  function syncTooltipTitles(forceOpen = null) {
+    const { sidebar } = getElements();
+    if (!sidebar) return;
 
-    return !getSavedSidebarCollapsed();
+    const open =
+      typeof forceOpen === "boolean"
+        ? forceOpen
+        : !sidebar.classList.contains("collapsed") &&
+          !sidebar.classList.contains("is-collapsed");
+
+    const shouldShowNativeTitle =
+      !isMobileViewport() &&
+      !open;
+
+    sidebar.querySelectorAll("[data-tooltip]").forEach((element) => {
+      const tooltipText = String(element.dataset.tooltip || "").trim();
+
+      if (!tooltipText) {
+        element.removeAttribute("title");
+        return;
+      }
+
+      if (shouldShowNativeTitle) {
+        element.setAttribute("title", tooltipText);
+      } else {
+        element.removeAttribute("title");
+      }
+    });
   }
 
   function updateToggleLabel(isOpen = null) {
@@ -634,12 +659,11 @@ export const SidebarUI = (() => {
             !sidebar.classList.contains("is-collapsed")
           );
 
-    const desktopText = open ? "Cerrar barra lateral" : "Abrir barra lateral";
+    const desktopText = open ? "Contraer barra lateral" : "Expandir barra lateral";
     const mobileText = open ? "Cerrar navegación" : "Abrir navegación";
 
     if (toggleBtn) {
       toggleBtn.dataset.tooltip = desktopText;
-      toggleBtn.removeAttribute("title");
       toggleBtn.setAttribute("aria-label", desktopText);
       toggleBtn.setAttribute("aria-expanded", String(open));
       toggleBtn.classList.toggle("is-active", open);
@@ -650,6 +674,8 @@ export const SidebarUI = (() => {
       mobileToggleBtn.setAttribute("aria-expanded", String(open));
       mobileToggleBtn.classList.toggle("is-active", open);
     }
+
+    syncTooltipTitles(open);
   }
 
   function syncSidebarState() {
@@ -801,6 +827,7 @@ export const SidebarUI = (() => {
       serverLink.hidden = !isAdmin();
       serverLink.setAttribute("aria-hidden", String(!isAdmin()));
       serverLink.style.display = isAdmin() ? "" : "none";
+      syncTooltipTitles();
       return serverLink;
     }
 
@@ -822,6 +849,8 @@ export const SidebarUI = (() => {
       serverLink.setAttribute("aria-hidden", String(!isAdmin()));
       serverLink.style.display = isAdmin() ? "" : "none";
     }
+
+    syncTooltipTitles();
 
     return serverLink;
   }
@@ -980,6 +1009,8 @@ export const SidebarUI = (() => {
       );
     }
 
+    syncTooltipTitles();
+
     AppCore.events.emit("sidebar:user:rendered", {
       user,
       displayName,
@@ -1005,6 +1036,8 @@ export const SidebarUI = (() => {
       element.setAttribute("aria-hidden", String(!admin));
       element.style.display = admin ? "" : "none";
     });
+
+    syncTooltipTitles();
 
     AppCore.events.emit("sidebar:roles:applied", {
       isAdmin: admin,

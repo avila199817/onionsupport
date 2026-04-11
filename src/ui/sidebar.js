@@ -51,7 +51,7 @@ export const SidebarUI = (() => {
     return `
       <aside
         class="sidebar"
-        id="sidebar"
+        id="${SIDEBAR_ROOT_ID}"
         aria-label="Barra lateral principal"
       >
         <div class="sidebar-top">
@@ -268,16 +268,16 @@ export const SidebarUI = (() => {
         </section>
 
         <div class="sidebar-footer">
-         <div
-           class="user"
-           id="userToggle"
-           role="button"
-           tabindex="0"
-           aria-haspopup="menu"
-           aria-expanded="false"
-           aria-controls="userDropdown"
-           aria-label="Abrir menú de usuario"
-         >
+          <div
+            class="user"
+            id="userToggle"
+            role="button"
+            tabindex="0"
+            aria-haspopup="menu"
+            aria-expanded="false"
+            aria-controls="userDropdown"
+            aria-label="Abrir menú de usuario"
+          >
             <div
               class="avatar"
               id="sidebar-avatar"
@@ -416,7 +416,7 @@ export const SidebarUI = (() => {
   }
 
   function cacheDomRefs() {
-    const sidebar = document.getElementById("sidebar");
+    const sidebar = document.getElementById(SIDEBAR_ROOT_ID);
     const sidebarMenu = document.getElementById(SIDEBAR_MENU_ID);
     const sidebarRecents = document.getElementById("sidebar-recents");
     const sidebarToggle = document.getElementById("toggleSidebar");
@@ -509,6 +509,26 @@ export const SidebarUI = (() => {
     } catch {
       /* noop */
     }
+  }
+
+  function sanitizeFooterTooltipState() {
+    const { sidebar, userToggle, userDropdown, avatarEl, nameEl } = getElements();
+    if (!sidebar) return;
+
+    [userToggle, userDropdown, avatarEl, nameEl].forEach((element) => {
+      if (!element) return;
+      element.removeAttribute("data-tooltip");
+      element.removeAttribute("title");
+    });
+
+    sidebar
+      .querySelectorAll(
+        ".sidebar-footer [data-tooltip], .sidebar-footer [title]"
+      )
+      .forEach((element) => {
+        element.removeAttribute("data-tooltip");
+        element.removeAttribute("title");
+      });
   }
 
   /* =========================================================
@@ -643,6 +663,8 @@ export const SidebarUI = (() => {
 
     sidebar.classList.toggle("sidebar-tooltips-active", enableCssTooltipMode);
     body.classList.toggle("sidebar-tooltips-active", enableCssTooltipMode);
+
+    sanitizeFooterTooltipState();
   }
 
   function updateToggleLabel(isOpen = null) {
@@ -670,12 +692,14 @@ export const SidebarUI = (() => {
       toggleBtn.setAttribute("aria-label", desktopText);
       toggleBtn.setAttribute("aria-expanded", String(open));
       toggleBtn.classList.toggle("is-active", open);
+      toggleBtn.removeAttribute("title");
     }
 
     if (mobileToggleBtn) {
       mobileToggleBtn.setAttribute("aria-label", mobileText);
       mobileToggleBtn.setAttribute("aria-expanded", String(open));
       mobileToggleBtn.classList.toggle("is-active", open);
+      mobileToggleBtn.removeAttribute("title");
     }
 
     syncTooltipMode(open);
@@ -831,6 +855,7 @@ export const SidebarUI = (() => {
       serverLink.hidden = !isAdmin();
       serverLink.setAttribute("aria-hidden", String(!isAdmin()));
       serverLink.style.display = isAdmin() ? "" : "none";
+      serverLink.removeAttribute("title");
       return serverLink;
     }
 
@@ -851,181 +876,200 @@ export const SidebarUI = (() => {
       serverLink.hidden = !isAdmin();
       serverLink.setAttribute("aria-hidden", String(!isAdmin()));
       serverLink.style.display = isAdmin() ? "" : "none";
+      serverLink.removeAttribute("title");
     }
 
     return serverLink;
   }
 
-    /* =========================================================
-      DROPDOWN
-   ========================================================= */
-   function syncDropdownA11y(open) {
-     const { userToggle, userDropdown } = getElements();
-   
-     if (userToggle) {
-       userToggle.setAttribute("aria-haspopup", "menu");
-       userToggle.setAttribute("aria-expanded", String(open));
-       userToggle.removeAttribute("data-tooltip");
-       userToggle.removeAttribute("title");
-     }
-   
-     if (userDropdown) {
-       userDropdown.setAttribute("aria-hidden", String(!open));
-     }
-   }
-   
-   function setDropdownOpen(value) {
-     const { userDropdown, userToggle } = getElements();
-   
-     state.dropdownOpen = Boolean(value);
-   
-     if (!userDropdown) {
-       syncDropdownA11y(state.dropdownOpen);
-       return;
-     }
-   
-     if (!state.dropdownOpen) {
-       blurIfInside(userDropdown);
-     }
-   
-     userDropdown.classList.toggle("open", state.dropdownOpen);
-     userDropdown.classList.toggle("active", state.dropdownOpen);
-     userDropdown.hidden = !state.dropdownOpen;
-   
-     if (userToggle) {
-       userToggle.classList.toggle("active", state.dropdownOpen);
-       userToggle.removeAttribute("data-tooltip");
-       userToggle.removeAttribute("title");
-     }
-   
-     syncDropdownA11y(state.dropdownOpen);
-   
-     AppCore.events.emit("sidebar:dropdown:change", {
-       open: state.dropdownOpen,
-     });
-   }
-   
-   function openDropdown() {
-     if (isShellHidden()) return;
-     ensureSidebarOpenForUserMenu();
-     setDropdownOpen(true);
-   }
-   
-   function closeDropdown() {
-     setDropdownOpen(false);
-   }
-   
-   function toggleDropdown() {
-     if (isShellHidden()) {
-       closeDropdown();
-       return;
-     }
-   
-     const sidebarWasForcedOpen = ensureSidebarOpenForUserMenu();
-   
-     if (sidebarWasForcedOpen) {
-       setDropdownOpen(true);
-       return;
-     }
-   
-     setDropdownOpen(!state.dropdownOpen);
-   }
-   
-   /* =========================================================
-      USER UI
-   ========================================================= */
-   function renderAvatarFallback(avatarEl, displayName, avatarText) {
-     if (!avatarEl) return;
-   
-     avatarEl.innerHTML = "";
-     avatarEl.textContent = avatarText;
-     avatarEl.classList.remove("has-image");
-     avatarEl.setAttribute("aria-label", `Avatar ${displayName}`);
-   }
-   
-   function renderAvatarImage(avatarEl, avatarUrl, displayName, avatarText) {
-     if (!avatarEl) return;
-   
-     const safeUrl = String(avatarUrl || "").trim();
-   
-     if (!safeUrl) {
-       renderAvatarFallback(avatarEl, displayName, avatarText);
-       return;
-     }
-   
-     avatarEl.classList.add("has-image");
-     avatarEl.setAttribute("aria-label", `Avatar ${displayName}`);
-   
-     const img = document.createElement("img");
-     img.src = safeUrl;
-     img.alt = `Avatar de ${displayName}`;
-     img.loading = "eager";
-     img.decoding = "async";
-     img.draggable = false;
-     img.referrerPolicy = "no-referrer";
-   
-     img.style.width = "100%";
-     img.style.height = "100%";
-     img.style.objectFit = "cover";
-     img.style.borderRadius = "50%";
-     img.style.display = "block";
-   
-     img.onerror = () => {
-       renderAvatarFallback(avatarEl, displayName, avatarText);
-     };
-   
-     avatarEl.innerHTML = "";
-     avatarEl.appendChild(img);
-   }
-   
-   function renderUser() {
-     const { nameEl, avatarEl, userToggle } = getElements();
-     const user = getUser();
-   
-     const displayName = getDisplayName(user);
-     const avatarText = getAvatarText(user);
-     const username = getUsername(user);
-     const avatarUrl = getAvatarUrl(user);
-   
-     if (nameEl) {
-       nameEl.textContent = displayName;
-   
-       if (username) {
-         nameEl.dataset.username = username;
-       } else {
-         delete nameEl.dataset.username;
-       }
-     }
-   
-     if (avatarEl) {
-       renderAvatarImage(avatarEl, avatarUrl, displayName, avatarText);
-   
-       if (username) {
-         avatarEl.dataset.username = username;
-       } else {
-         delete avatarEl.dataset.username;
-       }
-     }
-   
-     if (userToggle) {
-       userToggle.setAttribute(
-         "aria-label",
-         `Abrir menú de usuario de ${displayName}`
-       );
-   
-       if (userToggle.hasAttribute("data-tooltip")) {
-         userToggle.removeAttribute("data-tooltip");
-       }
-     }
-   
-     AppCore.events.emit("sidebar:user:rendered", {
-       user,
-       displayName,
-       avatarText,
-       avatarUrl: avatarUrl || null,
-       username: username || null,
-     });
-   }
+  /* =========================================================
+     DROPDOWN
+  ========================================================= */
+  function syncDropdownA11y(open) {
+    const { userToggle, userDropdown } = getElements();
+
+    if (userToggle) {
+      userToggle.setAttribute("aria-haspopup", "menu");
+      userToggle.setAttribute("aria-expanded", String(open));
+      userToggle.removeAttribute("data-tooltip");
+      userToggle.removeAttribute("title");
+    }
+
+    if (userDropdown) {
+      userDropdown.setAttribute("aria-hidden", String(!open));
+      userDropdown.removeAttribute("data-tooltip");
+      userDropdown.removeAttribute("title");
+    }
+
+    sanitizeFooterTooltipState();
+  }
+
+  function setDropdownOpen(value) {
+    const { userDropdown, userToggle } = getElements();
+
+    state.dropdownOpen = Boolean(value);
+
+    if (!userDropdown) {
+      syncDropdownA11y(state.dropdownOpen);
+      return;
+    }
+
+    if (!state.dropdownOpen) {
+      blurIfInside(userDropdown);
+    }
+
+    userDropdown.classList.toggle("open", state.dropdownOpen);
+    userDropdown.classList.toggle("active", state.dropdownOpen);
+    userDropdown.hidden = !state.dropdownOpen;
+
+    if (userToggle) {
+      userToggle.classList.toggle("active", state.dropdownOpen);
+      userToggle.removeAttribute("data-tooltip");
+      userToggle.removeAttribute("title");
+    }
+
+    userDropdown.removeAttribute("data-tooltip");
+    userDropdown.removeAttribute("title");
+
+    syncDropdownA11y(state.dropdownOpen);
+
+    AppCore.events.emit("sidebar:dropdown:change", {
+      open: state.dropdownOpen,
+    });
+  }
+
+  function openDropdown() {
+    if (isShellHidden()) return;
+    ensureSidebarOpenForUserMenu();
+    setDropdownOpen(true);
+  }
+
+  function closeDropdown() {
+    setDropdownOpen(false);
+  }
+
+  function toggleDropdown() {
+    if (isShellHidden()) {
+      closeDropdown();
+      return;
+    }
+
+    const sidebarWasForcedOpen = ensureSidebarOpenForUserMenu();
+
+    if (sidebarWasForcedOpen) {
+      setDropdownOpen(true);
+      return;
+    }
+
+    setDropdownOpen(!state.dropdownOpen);
+  }
+
+  /* =========================================================
+     USER UI
+  ========================================================= */
+  function renderAvatarFallback(avatarEl, displayName, avatarText) {
+    if (!avatarEl) return;
+
+    avatarEl.innerHTML = "";
+    avatarEl.textContent = avatarText;
+    avatarEl.classList.remove("has-image");
+    avatarEl.setAttribute("aria-label", `Avatar ${displayName}`);
+    avatarEl.removeAttribute("data-tooltip");
+    avatarEl.removeAttribute("title");
+  }
+
+  function renderAvatarImage(avatarEl, avatarUrl, displayName, avatarText) {
+    if (!avatarEl) return;
+
+    const safeUrl = String(avatarUrl || "").trim();
+
+    if (!safeUrl) {
+      renderAvatarFallback(avatarEl, displayName, avatarText);
+      return;
+    }
+
+    avatarEl.classList.add("has-image");
+    avatarEl.setAttribute("aria-label", `Avatar ${displayName}`);
+    avatarEl.removeAttribute("data-tooltip");
+    avatarEl.removeAttribute("title");
+
+    const img = document.createElement("img");
+    img.src = safeUrl;
+    img.alt = `Avatar de ${displayName}`;
+    img.loading = "eager";
+    img.decoding = "async";
+    img.draggable = false;
+    img.referrerPolicy = "no-referrer";
+
+    img.style.width = "100%";
+    img.style.height = "100%";
+    img.style.objectFit = "cover";
+    img.style.borderRadius = "50%";
+    img.style.display = "block";
+
+    img.onerror = () => {
+      renderAvatarFallback(avatarEl, displayName, avatarText);
+    };
+
+    avatarEl.innerHTML = "";
+    avatarEl.appendChild(img);
+  }
+
+  function renderUser() {
+    const { nameEl, avatarEl, userToggle, userDropdown } = getElements();
+    const user = getUser();
+
+    const displayName = getDisplayName(user);
+    const avatarText = getAvatarText(user);
+    const username = getUsername(user);
+    const avatarUrl = getAvatarUrl(user);
+
+    if (nameEl) {
+      nameEl.textContent = displayName;
+      nameEl.removeAttribute("data-tooltip");
+      nameEl.removeAttribute("title");
+
+      if (username) {
+        nameEl.dataset.username = username;
+      } else {
+        delete nameEl.dataset.username;
+      }
+    }
+
+    if (avatarEl) {
+      renderAvatarImage(avatarEl, avatarUrl, displayName, avatarText);
+
+      if (username) {
+        avatarEl.dataset.username = username;
+      } else {
+        delete avatarEl.dataset.username;
+      }
+    }
+
+    if (userToggle) {
+      userToggle.setAttribute(
+        "aria-label",
+        `Abrir menú de usuario de ${displayName}`
+      );
+      userToggle.removeAttribute("data-tooltip");
+      userToggle.removeAttribute("title");
+    }
+
+    if (userDropdown) {
+      userDropdown.removeAttribute("data-tooltip");
+      userDropdown.removeAttribute("title");
+    }
+
+    sanitizeFooterTooltipState();
+
+    AppCore.events.emit("sidebar:user:rendered", {
+      user,
+      displayName,
+      avatarText,
+      avatarUrl: avatarUrl || null,
+      username: username || null,
+    });
+  }
 
   /* =========================================================
      ROLE VISIBILITY
@@ -1042,7 +1086,10 @@ export const SidebarUI = (() => {
       element.hidden = !admin;
       element.setAttribute("aria-hidden", String(!admin));
       element.style.display = admin ? "" : "none";
+      element.removeAttribute("title");
     });
+
+    sanitizeFooterTooltipState();
 
     AppCore.events.emit("sidebar:roles:applied", {
       isAdmin: admin,
@@ -1310,6 +1357,7 @@ export const SidebarUI = (() => {
     if (initialized) {
       cacheDomRefs();
       ensureServerNavItem();
+      sanitizeFooterTooltipState();
       syncSidebarState();
       renderUser();
       applyRoleVisibility();
@@ -1328,6 +1376,7 @@ export const SidebarUI = (() => {
     const scope = AppCore.cleanup.scope(SCOPE);
 
     ensureServerNavItem();
+    sanitizeFooterTooltipState();
 
     if (logoutBtn) {
       logoutBtn.classList.add("dropdown-item-danger");
@@ -1337,12 +1386,16 @@ export const SidebarUI = (() => {
       userToggle.setAttribute("aria-haspopup", "menu");
       userToggle.setAttribute("aria-expanded", "false");
       userToggle.setAttribute("tabindex", "0");
+      userToggle.removeAttribute("data-tooltip");
+      userToggle.removeAttribute("title");
     }
 
     if (userDropdown) {
       userDropdown.setAttribute("role", "menu");
       userDropdown.setAttribute("aria-hidden", "true");
       userDropdown.hidden = true;
+      userDropdown.removeAttribute("data-tooltip");
+      userDropdown.removeAttribute("title");
     }
 
     if (typeof AppCore.state.sidebarOpen !== "boolean") {

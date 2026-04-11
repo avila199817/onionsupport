@@ -8,9 +8,8 @@
    - registrar módulos UI en AppCore
    - enlazar refresco UI ante cambio de idioma
    - evitar roturas si falta AppCore o eventos
+   - sin dependencia externa de registerModule
 ========================================================= */
-
-import { registerModule } from "./helpers.js";
 
 export function syncUserUI(AppCore) {
   if (!AppCore) {
@@ -21,7 +20,8 @@ export function syncUserUI(AppCore) {
   }
 
   if (
-    typeof AppCore.syncUserUI === "function"
+    typeof AppCore.syncUserUI ===
+    "function"
   ) {
     AppCore.syncUserUI();
   }
@@ -30,30 +30,47 @@ export function syncUserUI(AppCore) {
     "app:user-ui:sync",
     {
       user:
-        AppCore.state?.user || null,
-      authenticated: Boolean(
-        AppCore.state?.authenticated
-      ),
+        AppCore.state?.user ||
+        null,
+
+      authenticated:
+        Boolean(
+          AppCore.state
+            ?.authenticated
+        ),
+
       role:
-        AppCore.state?.role || null,
+        AppCore.state?.role ||
+        null,
     }
   );
 }
 
+/* =========================================================
+   LANG CHANGE BIND
+========================================================= */
 export function bindAppLanguageSync(
   AppCore
 ) {
-  if (!AppCore?.events?.on) return;
+  if (!AppCore?.events?.on)
+    return;
 
-  if (AppCore.__appLangUiBound) return;
+  if (
+    AppCore.__appLangUiBound
+  ) {
+    return;
+  }
 
   AppCore.events.on(
     "app:lang:change",
     () => {
-      syncUserUI(AppCore);
+      syncUserUI(
+        AppCore
+      );
 
       if (
-        AppCore.dom?.topbarTitle &&
+        AppCore.dom
+          ?.topbarTitle &&
         typeof document !==
           "undefined" &&
         document.title
@@ -64,9 +81,49 @@ export function bindAppLanguageSync(
     }
   );
 
-  AppCore.__appLangUiBound = true;
+  AppCore.__appLangUiBound =
+    true;
 }
 
+/* =========================================================
+   INTERNAL MODULE REGISTER
+========================================================= */
+function registerAppModule(
+  AppCore,
+  name,
+  moduleRef
+) {
+  if (!AppCore) return;
+  if (!name) return;
+  if (!moduleRef) return;
+
+  const registry =
+    AppCore.modules;
+
+  if (!registry) return;
+
+  if (
+    typeof registry.has ===
+      "function" &&
+    registry.has(name)
+  ) {
+    return;
+  }
+
+  if (
+    typeof registry.register ===
+    "function"
+  ) {
+    registry.register(
+      name,
+      moduleRef
+    );
+  }
+}
+
+/* =========================================================
+   UI SYSTEMS INIT
+========================================================= */
 export function initUISystems({
   AppCore,
   Toast,
@@ -81,19 +138,25 @@ export function initUISystems({
     return;
   }
 
-  if (state?.uiInitialized) return;
+  if (
+    state?.uiInitialized
+  ) {
+    return;
+  }
 
-  registerModule(
+  registerAppModule(
     AppCore,
     "toast",
     Toast
   );
-  registerModule(
+
+  registerAppModule(
     AppCore,
     "sidebar",
     SidebarUI
   );
-  registerModule(
+
+  registerAppModule(
     AppCore,
     "topbar",
     TopbarUI
@@ -101,7 +164,8 @@ export function initUISystems({
 
   if (
     Toast &&
-    typeof Toast.init === "function"
+    typeof Toast.init ===
+      "function"
   ) {
     Toast.init();
   }
@@ -122,10 +186,16 @@ export function initUISystems({
     TopbarUI.init();
   }
 
-  bindAppLanguageSync(AppCore);
-  syncUserUI(AppCore);
+  bindAppLanguageSync(
+    AppCore
+  );
+
+  syncUserUI(
+    AppCore
+  );
 
   if (state) {
-    state.uiInitialized = true;
+    state.uiInitialized =
+      true;
   }
 }

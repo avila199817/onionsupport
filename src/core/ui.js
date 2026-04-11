@@ -1,201 +1,227 @@
 /* =========================================================
-   Onion SPA - App UI Systems
-   Archivo: src/app/ui.js
+   Onion SPA - Core UI
+   Archivo: src/core/ui.js
 
    Responsabilidades:
-   - sincronizar UI de usuario global
-   - inicializar sistemas UI compartidos
-   - registrar módulos UI en AppCore
-   - enlazar refresco UI ante cambio de idioma
-   - evitar roturas si falta AppCore o eventos
-   - sin dependencia externa de registerModule
+   - helpers UI globales del core
+   - sincronizar título del documento
+   - limpiar contenedores dinámicos del shell
+   - sincronizar bloque visual de usuario
+   - refresco reactivo con i18n
 ========================================================= */
 
-export function syncUserUI(AppCore) {
-  if (!AppCore) {
-    console.warn(
-      "[Onion App UI] syncUserUI llamado sin AppCore"
-    );
+import { config } from "./config.js";
+
+import {
+  getUserDisplayName,
+  getUserUsername,
+  getUserAvatarUrl,
+  getInitials,
+} from "./helpers.js";
+
+import { I18n } from "../i18n/index.js";
+
+/* =========================================================
+   DOCUMENT TITLE
+========================================================= */
+export function setDocumentTitle({
+  dom,
+  events,
+  title = config.appName,
+  titleKey = "",
+  titleParams = {},
+}) {
+  if (typeof document === "undefined") {
     return;
   }
 
-  if (
-    typeof AppCore.syncUserUI ===
-    "function"
-  ) {
-    AppCore.syncUserUI();
+  let finalTitle = title;
+
+  if (titleKey) {
+    finalTitle = I18n.t(
+      titleKey,
+      titleParams,
+      title
+    );
   }
 
-  AppCore.events?.emit?.(
+  finalTitle = String(
+    finalTitle || config.appName
+  );
+
+  document.title = finalTitle;
+
+  if (dom?.topbarTitle) {
+    dom.topbarTitle.textContent =
+      finalTitle;
+  }
+
+  events?.emit?.(
+    "app:title:change",
+    {
+      title: finalTitle,
+    }
+  );
+}
+
+/* =========================================================
+   CLEAR DYNAMIC CONTAINERS
+========================================================= */
+export function clearDynamicContainers({
+  dom,
+  events,
+}) {
+  if (
+    dom?.topbarViewContainer
+  ) {
+    dom.topbarViewContainer.innerHTML =
+      "";
+  }
+
+  if (
+    dom?.tableheadContainer
+  ) {
+    dom.tableheadContainer.innerHTML =
+      "";
+  }
+
+  events?.emit?.(
+    "app:dynamic:cleared",
+    {}
+  );
+}
+
+/* =========================================================
+   USER UI
+========================================================= */
+export function syncUserUI({
+  state,
+  dom,
+  events,
+}) {
+  const user =
+    state?.user || null;
+
+  const displayName =
+    getUserDisplayName(user);
+
+  const username =
+    getUserUsername(user);
+
+  const avatarText =
+    getInitials(displayName) ||
+    (
+      username
+        ? username
+            .slice(0, 2)
+            .toUpperCase()
+        : "ON"
+    );
+
+  const avatarUrl =
+    getUserAvatarUrl(user);
+
+  const avatarAlt =
+    I18n.t(
+      "common.user",
+      {},
+      "User"
+    ) +
+    " " +
+    displayName;
+
+  if (dom?.sidebarName) {
+    dom.sidebarName.textContent =
+      displayName;
+
+    if (username) {
+      dom.sidebarName.dataset.username =
+        username;
+    } else {
+      delete dom.sidebarName
+        .dataset.username;
+    }
+  }
+
+  if (dom?.sidebarAvatar) {
+    if (!avatarUrl) {
+      const oldImg =
+        dom.sidebarAvatar.querySelector(
+          "img[data-avatar-image]"
+        );
+
+      if (oldImg) {
+        oldImg.remove();
+      }
+
+      dom.sidebarAvatar.textContent =
+        avatarText;
+
+      dom.sidebarAvatar.classList.remove(
+        "has-image"
+      );
+    } else {
+      let img =
+        dom.sidebarAvatar.querySelector(
+          "img[data-avatar-image]"
+        );
+
+      if (!img) {
+        img =
+          document.createElement(
+            "img"
+          );
+
+        img.dataset.avatarImage =
+          "true";
+
+        img.loading =
+          "lazy";
+
+        dom.sidebarAvatar.innerHTML =
+          "";
+
+        dom.sidebarAvatar.appendChild(
+          img
+        );
+      }
+
+      img.src = avatarUrl;
+      img.alt = avatarAlt;
+
+      dom.sidebarAvatar.classList.add(
+        "has-image"
+      );
+    }
+
+    dom.sidebarAvatar.setAttribute(
+      "aria-label",
+      avatarAlt
+    );
+
+    dom.sidebarAvatar.setAttribute(
+      "title",
+      displayName
+    );
+
+    if (username) {
+      dom.sidebarAvatar.dataset.username =
+        username;
+    } else {
+      delete dom.sidebarAvatar
+        .dataset.username;
+    }
+  }
+
+  events?.emit?.(
     "app:user-ui:sync",
     {
-      user:
-        AppCore.state?.user ||
-        null,
-
-      authenticated:
-        Boolean(
-          AppCore.state
-            ?.authenticated
-        ),
-
-      role:
-        AppCore.state?.role ||
-        null,
+      displayName,
+      avatarText,
+      avatarUrl:
+        avatarUrl || null,
+      username:
+        username || null,
     }
   );
-}
-
-/* =========================================================
-   LANG CHANGE BIND
-========================================================= */
-export function bindAppLanguageSync(
-  AppCore
-) {
-  if (!AppCore?.events?.on)
-    return;
-
-  if (
-    AppCore.__appLangUiBound
-  ) {
-    return;
-  }
-
-  AppCore.events.on(
-    "app:lang:change",
-    () => {
-      syncUserUI(
-        AppCore
-      );
-
-      if (
-        AppCore.dom
-          ?.topbarTitle &&
-        typeof document !==
-          "undefined" &&
-        document.title
-      ) {
-        AppCore.dom.topbarTitle.textContent =
-          document.title;
-      }
-    }
-  );
-
-  AppCore.__appLangUiBound =
-    true;
-}
-
-/* =========================================================
-   INTERNAL MODULE REGISTER
-========================================================= */
-function registerAppModule(
-  AppCore,
-  name,
-  moduleRef
-) {
-  if (!AppCore) return;
-  if (!name) return;
-  if (!moduleRef) return;
-
-  const registry =
-    AppCore.modules;
-
-  if (!registry) return;
-
-  if (
-    typeof registry.has ===
-      "function" &&
-    registry.has(name)
-  ) {
-    return;
-  }
-
-  if (
-    typeof registry.register ===
-    "function"
-  ) {
-    registry.register(
-      name,
-      moduleRef
-    );
-  }
-}
-
-/* =========================================================
-   UI SYSTEMS INIT
-========================================================= */
-export function initUISystems({
-  AppCore,
-  Toast,
-  SidebarUI,
-  TopbarUI,
-  state,
-}) {
-  if (!AppCore) {
-    console.warn(
-      "[Onion App UI] initUISystems llamado sin AppCore"
-    );
-    return;
-  }
-
-  if (
-    state?.uiInitialized
-  ) {
-    return;
-  }
-
-  registerAppModule(
-    AppCore,
-    "toast",
-    Toast
-  );
-
-  registerAppModule(
-    AppCore,
-    "sidebar",
-    SidebarUI
-  );
-
-  registerAppModule(
-    AppCore,
-    "topbar",
-    TopbarUI
-  );
-
-  if (
-    Toast &&
-    typeof Toast.init ===
-      "function"
-  ) {
-    Toast.init();
-  }
-
-  if (
-    SidebarUI &&
-    typeof SidebarUI.init ===
-      "function"
-  ) {
-    SidebarUI.init();
-  }
-
-  if (
-    TopbarUI &&
-    typeof TopbarUI.init ===
-      "function"
-  ) {
-    TopbarUI.init();
-  }
-
-  bindAppLanguageSync(
-    AppCore
-  );
-
-  syncUserUI(
-    AppCore
-  );
-
-  if (state) {
-    state.uiInitialized =
-      true;
-  }
 }

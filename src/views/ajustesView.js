@@ -9,6 +9,7 @@
    - consistencia visual SaaS panel
    - lista para backend
    - conectada a i18n real
+   - cambio de idioma robusto sin romper la SPA
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -23,18 +24,28 @@ export const AjustesView = (() => {
      HELPERS
   ========================================================= */
   function getContainer() {
-    return AppCore.dom.viewContainer;
+    return AppCore.dom.viewContainer || null;
   }
 
   function escapeHtml(value = "") {
-    return AppCore.utils.escapeHtml(String(value ?? ""));
+    return AppCore.utils.escapeHtml(
+      String(value ?? "")
+    );
   }
 
-  function t(key, fallback = "", params = {}) {
+  function t(
+    key,
+    fallback = "",
+    params = {}
+  ) {
     try {
-      return I18n.t(key, params, fallback);
+      return I18n.t(
+        key,
+        params,
+        fallback
+      );
     } catch {
-      return fallback;
+      return fallback || key;
     }
   }
 
@@ -42,16 +53,126 @@ export const AjustesView = (() => {
     try {
       return I18n.getLang();
     } catch {
-      return AppCore.state?.lang || "es";
+      return (
+        AppCore.state?.lang ||
+        "es"
+      );
     }
   }
 
+  function getToast() {
+    if (
+      AppCore.modules?.has?.(
+        "toast"
+      )
+    ) {
+      return AppCore.modules.get(
+        "toast"
+      );
+    }
+
+    return null;
+  }
+
+  function showInfo(
+    message,
+    title = ""
+  ) {
+    const Toast = getToast();
+
+    if (
+      Toast &&
+      typeof Toast.info ===
+        "function"
+    ) {
+      Toast.info(message, {
+        title,
+      });
+      return;
+    }
+
+    AppCore.utils.log(
+      "[AjustesView][info]",
+      title,
+      message
+    );
+  }
+
+  function showSuccess(
+    message,
+    title = ""
+  ) {
+    const Toast = getToast();
+
+    if (
+      Toast &&
+      typeof Toast.success ===
+        "function"
+    ) {
+      Toast.success(message, {
+        title,
+      });
+      return;
+    }
+
+    AppCore.utils.log(
+      "[AjustesView][success]",
+      title,
+      message
+    );
+  }
+
+  function showError(
+    message,
+    title = ""
+  ) {
+    const Toast = getToast();
+
+    if (
+      Toast &&
+      typeof Toast.error ===
+        "function"
+    ) {
+      Toast.error(message, {
+        title,
+      });
+      return;
+    }
+
+    AppCore.utils.error(
+      "[AjustesView][error]",
+      title,
+      message
+    );
+  }
+
   function setLang(lang) {
+    const nextLang = String(
+      lang || "es"
+    )
+      .trim()
+      .toLowerCase();
+
     try {
-      return I18n.setLang(lang);
-    } catch {
-      AppCore.state.lang = lang;
-      return lang;
+      return I18n.setLang(
+        nextLang,
+        {
+          force: true,
+          updateUi: true,
+        }
+      );
+    } catch (error) {
+      AppCore.utils.error(
+        "[AjustesView] Error cambiando idioma",
+        error
+      );
+
+      if (AppCore?.state) {
+        AppCore.state.lang =
+          nextLang;
+      }
+
+      return nextLang;
     }
   }
 
@@ -63,7 +184,12 @@ export const AjustesView = (() => {
       <header class="page-header">
         <div class="page-header-main">
           <h1 class="page-title">
-            ${escapeHtml(t("settings.title", "Ajustes"))}
+            ${escapeHtml(
+              t(
+                "settings.title",
+                "Ajustes"
+              )
+            )}
           </h1>
 
           <p class="page-subtitle">
@@ -80,7 +206,8 @@ export const AjustesView = (() => {
   }
 
   function renderLanguageCard() {
-    const current = getCurrentLang();
+    const current =
+      getCurrentLang();
 
     return `
       <section class="grid cols-auto" style="margin-bottom:var(--space-lg);">
@@ -109,7 +236,12 @@ export const AjustesView = (() => {
                 font-weight:var(--weight-semibold);
                 letter-spacing:var(--letter-wide);
               ">
-                ${escapeHtml(t("settings.languageCardEyebrow", "IDIOMA"))}
+                ${escapeHtml(
+                  t(
+                    "settings.languageCardEyebrow",
+                    "IDIOMA"
+                  )
+                )}
               </span>
 
               <h2 style="
@@ -119,7 +251,12 @@ export const AjustesView = (() => {
                 color:var(--text-strong);
                 font-weight:var(--weight-black);
               ">
-                ${escapeHtml(t("settings.languageCardTitle", "Cambiar idioma"))}
+                ${escapeHtml(
+                  t(
+                    "settings.languageCardTitle",
+                    "Cambiar idioma"
+                  )
+                )}
               </h2>
             </div>
 
@@ -168,14 +305,20 @@ export const AjustesView = (() => {
                 font-weight:var(--weight-semibold);
               ">
                 ${escapeHtml(
-                  t("settings.languageSelectLabel", "Idioma disponible")
+                  t(
+                    "settings.languageSelectLabel",
+                    "Idioma disponible"
+                  )
                 )}
               </span>
 
               <select
                 id="ajustes-language-select"
                 aria-label="${escapeHtml(
-                  t("settings.languageSelectLabel", "Idioma disponible")
+                  t(
+                    "settings.languageSelectLabel",
+                    "Idioma disponible"
+                  )
                 )}"
                 style="
                   min-height:46px;
@@ -189,15 +332,27 @@ export const AjustesView = (() => {
                   cursor:pointer;
                 "
               >
-                <option value="es" ${current === "es" ? "selected" : ""}>
+                <option value="es" ${
+                  current === "es"
+                    ? "selected"
+                    : ""
+                }>
                   Español
                 </option>
 
-                <option value="en" ${current === "en" ? "selected" : ""}>
+                <option value="en" ${
+                  current === "en"
+                    ? "selected"
+                    : ""
+                }>
                   English
                 </option>
 
-                <option value="ca" ${current === "ca" ? "selected" : ""}>
+                <option value="ca" ${
+                  current === "ca"
+                    ? "selected"
+                    : ""
+                }>
                   Català
                 </option>
               </select>
@@ -236,7 +391,12 @@ export const AjustesView = (() => {
                 font-weight:var(--weight-semibold);
                 letter-spacing:var(--letter-wide);
               ">
-                ${escapeHtml(t("settings.passwordCardEyebrow", "SEGURIDAD"))}
+                ${escapeHtml(
+                  t(
+                    "settings.passwordCardEyebrow",
+                    "SEGURIDAD"
+                  )
+                )}
               </span>
 
               <h2 style="
@@ -247,7 +407,10 @@ export const AjustesView = (() => {
                 font-weight:var(--weight-black);
               ">
                 ${escapeHtml(
-                  t("settings.passwordCardTitle", "Cambiar contraseña")
+                  t(
+                    "settings.passwordCardTitle",
+                    "Cambiar contraseña"
+                  )
                 )}
               </h2>
             </div>
@@ -344,7 +507,10 @@ export const AjustesView = (() => {
               "
             >
               ${escapeHtml(
-                t("settings.changePasswordAction", "Cambiar contraseña")
+                t(
+                  "settings.changePasswordAction",
+                  "Cambiar contraseña"
+                )
               )}
             </button>
           </div>
@@ -357,13 +523,22 @@ export const AjustesView = (() => {
      RENDER
   ========================================================= */
   function render() {
-    const container = getContainer();
+    const container =
+      getContainer();
+
     if (!container) return;
 
-    AppCore.cleanup.run(SCOPE);
-    AppCore.setDocumentTitle(
-      t("settings.title", "Ajustes")
+    AppCore.cleanup.run(
+      SCOPE
     );
+
+    AppCore.setDocumentTitle(
+      t(
+        "settings.title",
+        "Ajustes"
+      )
+    );
+
     AppCore.clearDynamicContainers?.();
 
     container.innerHTML = `
@@ -383,38 +558,110 @@ export const AjustesView = (() => {
      BIND
   ========================================================= */
   function bind() {
-    const scope = AppCore.cleanup.scope(SCOPE);
+    const scope =
+      AppCore.cleanup.scope(
+        SCOPE
+      );
 
-    const changePasswordBtn = document.getElementById(
-      "ajustes-change-password-btn"
-    );
+    const changePasswordBtn =
+      document.getElementById(
+        "ajustes-change-password-btn"
+      );
 
-    const languageSelect = document.getElementById(
-      "ajustes-language-select"
-    );
+    const languageSelect =
+      document.getElementById(
+        "ajustes-language-select"
+      );
 
     if (changePasswordBtn) {
-      AppCore.cleanup.on(scope, changePasswordBtn, "click", () => {
-        AppCore.utils?.toast?.info?.(
-          t(
-            "settings.passwordFlowSoon",
-            "Aquí irá el flujo de cambio de contraseña."
-          ),
-          {
-            title: t(
+      AppCore.cleanup.on(
+        scope,
+        changePasswordBtn,
+        "click",
+        () => {
+          showInfo(
+            t(
+              "settings.passwordFlowSoon",
+              "Aquí irá el flujo de cambio de contraseña."
+            ),
+            t(
               "settings.passwordCardTitle",
               "Cambiar contraseña"
-            ),
-          }
-        );
-      });
+            )
+          );
+        }
+      );
     }
 
     if (languageSelect) {
-      AppCore.cleanup.on(scope, languageSelect, "change", (event) => {
-        const nextLang = String(event.target.value || "es");
-        setLang(nextLang);
-      });
+      AppCore.cleanup.on(
+        scope,
+        languageSelect,
+        "change",
+        (event) => {
+          const select =
+            event?.target;
+
+          const previousLang =
+            getCurrentLang();
+
+          const nextLang =
+            String(
+              select?.value || "es"
+            );
+
+          if (
+            nextLang ===
+            previousLang
+          ) {
+            return;
+          }
+
+          try {
+            const appliedLang =
+              setLang(
+                nextLang
+              );
+
+            if (select) {
+              select.value =
+                appliedLang;
+            }
+
+            showSuccess(
+              t(
+                "settings.languageChanged",
+                "Idioma actualizado"
+              ),
+              t(
+                "settings.languageCardTitle",
+                "Cambiar idioma"
+              )
+            );
+          } catch (error) {
+            AppCore.utils.error(
+              "[AjustesView] Error en cambio de idioma",
+              error
+            );
+
+            if (select) {
+              select.value =
+                previousLang;
+            }
+
+            showError(
+              t(
+                "feedback.error.generic",
+                "Ha ocurrido un error inesperado"
+              ),
+              t(
+                "settings.languageCardTitle",
+                "Cambiar idioma"
+              )
+            );
+          }
+        }
+      );
     }
   }
 

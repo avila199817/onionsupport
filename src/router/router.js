@@ -31,6 +31,7 @@ import { ServerView } from "../views/serverView.js";
 import { UsuariosView } from "../views/usuariosView.js";
 import { ClientesView } from "../views/clientesView.js";
 import { CuentaView } from "../views/cuentaView.js";
+import { AjustesView } from "../views/ajustesView.js";
 
 export const Router = (() => {
   "use strict";
@@ -129,7 +130,7 @@ export const Router = (() => {
       public: false,
       roles: [],
       hideShell: false,
-      render: renderGenericView,
+      render: renderAjustesView,
     },
     {
       path: "/login",
@@ -724,6 +725,11 @@ export const Router = (() => {
   function renderCuentaView() {
      CuentaView.render();
   }
+   
+  function renderAjustesView() {
+     AjustesView.render();
+  }
+
 
   function renderGenericView(route) {
     const view = getViewContainer();

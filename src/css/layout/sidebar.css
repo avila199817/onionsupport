@@ -320,9 +320,27 @@
 
 /* =========================
    TOOLTIP SYSTEM — FINAL
-   SOLO PARA ELEMENTOS CON data-tooltip
+   Z-INDEX ABSOLUTO / POR ENCIMA DE TOPBAR
+   SOLO PARA data-tooltip
    EXCLUYE FOOTER / USER / DROPDOWN
 ========================= */
+
+/* IMPORTANTÍSIMO:
+   El sidebar tenía isolation:isolate + z-index menor que topbar.
+   Los pseudo-elementos no podían salir de ese stacking context.
+   Solución:
+   - elevar sidebar cuando tooltips activos
+   - permitir stacking limpio
+*/
+
+body.sidebar-tooltips-active .sidebar{
+  z-index:9997 !important;
+}
+
+body.sidebar-tooltips-active .topbar{
+  z-index:9996 !important;
+}
+
 .sidebar,
 .sidebar-top,
 .sidebar-menu,
@@ -335,16 +353,29 @@
   overflow:visible;
 }
 
+/* stacking context limpio en items tooltip */
 .logo[data-tooltip],
 .sidebar-toggle[data-tooltip],
 .menu-item[data-tooltip]{
   position:relative;
+  z-index:1;
 }
 
+/* hover sube item por encima */
+.logo[data-tooltip]:hover,
+.sidebar-toggle[data-tooltip]:hover,
+.menu-item[data-tooltip]:hover{
+  z-index:9998;
+}
+
+/* =========================
+   TOOLTIP BOX
+========================= */
 .logo[data-tooltip]::after,
 .sidebar-toggle[data-tooltip]::after,
 .menu-item[data-tooltip]::after{
   content:attr(data-tooltip);
+
   position:absolute;
   top:50%;
   left:calc(100% + var(--sidebar-tooltip-offset));
@@ -353,11 +384,16 @@
   transform-origin:left center;
 
   padding:9px 12px;
+
   border-radius:12px;
   border:1px solid var(--border-default);
 
   background:
-    linear-gradient(180deg, rgba(255,255,255,.032), rgba(255,255,255,.010)),
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.032),
+      rgba(255,255,255,.010)
+    ),
     var(--tooltip-bg);
 
   color:var(--text-soft);
@@ -368,7 +404,7 @@
   white-space:nowrap;
 
   box-shadow:
-    0 14px 34px rgba(0,0,0,.28),
+    0 18px 40px rgba(0,0,0,.34),
     inset 0 1px 0 rgba(255,255,255,.04);
 
   opacity:0;
@@ -380,13 +416,17 @@
     visibility var(--duration-fast) var(--ease-standard),
     transform var(--duration-fast) var(--ease-out);
 
-  z-index:9999;
+  z-index:99999;
 }
 
+/* =========================
+   TOOLTIP ARROW
+========================= */
 .logo[data-tooltip]::before,
 .sidebar-toggle[data-tooltip]::before,
 .menu-item[data-tooltip]::before{
   content:"";
+
   position:absolute;
   top:50%;
   left:calc(100% + var(--sidebar-tooltip-arrow-offset));
@@ -397,10 +437,11 @@
   transform:translateY(-50%) rotate(45deg);
 
   background:var(--tooltip-bg);
+
   border-top:1px solid var(--border-default);
   border-left:1px solid var(--border-default);
 
-  box-shadow:-2px -2px 8px rgba(0,0,0,.04);
+  box-shadow:-2px -2px 8px rgba(0,0,0,.05);
 
   opacity:0;
   visibility:hidden;
@@ -411,9 +452,12 @@
     visibility var(--duration-fast) var(--ease-standard),
     transform var(--duration-fast) var(--ease-out);
 
-  z-index:9998;
+  z-index:99998;
 }
 
+/* =========================
+   DESKTOP NORMAL
+========================= */
 .sidebar-toggle[data-tooltip]:hover::after,
 .sidebar-toggle[data-tooltip]:hover::before{
   opacity:1;
@@ -424,6 +468,9 @@
   transform:translateY(-50%) translateX(0);
 }
 
+/* =========================
+   COLLAPSED MODE
+========================= */
 .sidebar.collapsed .logo[data-tooltip]:hover::after,
 .sidebar.collapsed .logo[data-tooltip]:hover::before,
 .sidebar.is-collapsed .logo[data-tooltip]:hover::after,
@@ -443,6 +490,9 @@
   transform:translateY(-50%) translateX(0);
 }
 
+/* =========================
+   BLOQUEADOS EN FOOTER
+========================= */
 .sidebar-footer [data-tooltip]::before,
 .sidebar-footer [data-tooltip]::after,
 .user::before,

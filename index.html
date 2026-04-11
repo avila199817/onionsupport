@@ -16,6 +16,8 @@
        - loader limpio
        - topbar / tablehead / dynamic slots
        - base href coherente
+       - preparado para dark / light premium
+       - preparado para i18n live en loader
   ========================================================= -->
 
   <!-- =========================
@@ -164,8 +166,14 @@
 >
   <!-- =========================================================
        APP LOADER
+       - logos separados por tema
+       - label preparado para i18n
+       - accesible sin interferir en el runtime SPA
   ========================================================= -->
-  <div id="app-loader" aria-hidden="true">
+  <div
+    id="app-loader"
+    aria-hidden="true"
+  >
     <div class="loader-center">
       <div class="loader-core"></div>
 
@@ -189,7 +197,12 @@
         draggable="false"
       >
 
-      <span class="loader-label">Cargando panel</span>
+      <span
+        class="loader-label"
+        data-i18n="app.loading"
+      >
+        Cargando panel
+      </span>
     </div>
   </div>
 
@@ -198,7 +211,11 @@
   ========================================================= -->
   <noscript>
     <div class="layout">
-      <main class="main-content" role="main" aria-label="Contenido principal">
+      <main
+        class="main-content"
+        role="main"
+        aria-label="Contenido principal"
+      >
         <div id="app-content">
           <div id="view-container">
             <section class="noscript-box">
@@ -216,16 +233,19 @@
 
   <!-- =========================================================
        APP LAYOUT
-       Sidebar montado dinámicamente desde src/ui/sidebar.js
-       Topbar montado dinámicamente desde src/ui/topbar.js
+       Sidebar montado dinámicamente desde src/ui/sidebar/index.js
+       Topbar montado dinámicamente desde src/ui/topbar/index.js
   ========================================================= -->
-  <div class="layout" id="app-shell">
+  <div
+    class="layout"
+    id="app-shell"
+  >
     <!-- SIDEBAR -->
     <!-- se monta por JS aquí -->
-  
+
     <!-- TOPBAR -->
     <!-- se monta por JS aquí -->
-  
+
     <!-- MAIN CONTENT SHELL -->
     <main
       class="main-content"

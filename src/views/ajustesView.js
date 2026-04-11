@@ -4,13 +4,14 @@
 
    Objetivo actual:
    - vista mínima de ajustes
-   - mostrar únicamente cambio de contraseña
-   - mantener consistencia con el shell SaaS
-   - cero ruido
-   - lista para conectar backend después
+   - cambio de contraseña
+   - cambio de idioma
+   - consistencia visual SaaS panel
+   - lista para backend
 ========================================================= */
 
 import { AppCore } from "../core/core.js";
+import { I18n } from "../i18n/index.js";
 
 export const AjustesView = (() => {
   "use strict";
@@ -28,6 +29,22 @@ export const AjustesView = (() => {
     return AppCore.utils.escapeHtml(String(value ?? ""));
   }
 
+  function getCurrentLang() {
+    try {
+      return I18n.getLang();
+    } catch {
+      return AppCore.state?.lang || "es";
+    }
+  }
+
+  function setLang(lang) {
+    try {
+      I18n.setLang(lang);
+    } catch {
+      AppCore.state.lang = lang;
+    }
+  }
+
   /* =========================================================
      UI
   ========================================================= */
@@ -37,10 +54,129 @@ export const AjustesView = (() => {
         <div class="page-header-main">
           <h1 class="page-title">Ajustes</h1>
           <p class="page-subtitle">
-            Configuración básica de seguridad de la cuenta.
+            Configuración básica de la cuenta y preferencias.
           </p>
         </div>
       </header>
+    `;
+  }
+
+  function renderLanguageCard() {
+    const current = getCurrentLang();
+
+    return `
+      <section class="grid cols-auto" style="margin-bottom:var(--space-lg);">
+        <article
+          class="card-surface"
+          style="
+            display:grid;
+            gap:var(--space-lg);
+            padding:var(--space-xl);
+          "
+        >
+          <div style="
+            display:flex;
+            align-items:flex-start;
+            justify-content:space-between;
+            gap:var(--space-md);
+            flex-wrap:wrap;
+          ">
+            <div style="display:grid; gap:var(--space-xs); min-width:0;">
+              <span style="
+                display:inline-flex;
+                align-items:center;
+                gap:8px;
+                font-size:var(--font-sm);
+                color:var(--text-dim);
+                font-weight:var(--weight-semibold);
+                letter-spacing:var(--letter-wide);
+              ">
+                IDIOMA
+              </span>
+
+              <h2 style="
+                margin:0;
+                font-size:var(--font-xl);
+                line-height:var(--line-snug);
+                color:var(--text-strong);
+                font-weight:var(--weight-black);
+              ">
+                Cambiar idioma
+              </h2>
+            </div>
+
+            <div style="
+              inline-size:52px;
+              block-size:52px;
+              display:grid;
+              place-items:center;
+              border-radius:var(--radius-xl);
+              border:1px solid var(--border-soft);
+              background:var(--avatar-bg);
+              color:var(--avatar-text);
+              font-size:22px;
+              box-shadow:var(--shadow-xs);
+              flex:0 0 auto;
+            ">
+              🌍
+            </div>
+          </div>
+
+          <p style="
+            margin:0;
+            font-size:var(--font-md);
+            line-height:var(--line-relaxed);
+            color:var(--text-muted);
+          ">
+            Selecciona el idioma principal de la interfaz.
+          </p>
+
+          <div style="
+            display:grid;
+            gap:var(--space-md);
+          ">
+            <label style="
+              display:grid;
+              gap:8px;
+            ">
+              <span style="
+                font-size:var(--font-sm);
+                color:var(--text-dim);
+                font-weight:var(--weight-semibold);
+              ">
+                Idioma disponible
+              </span>
+
+              <select
+                id="ajustes-language-select"
+                style="
+                  min-height:46px;
+                  padding:0 14px;
+                  border-radius:var(--radius-lg);
+                  border:1px solid var(--border-soft);
+                  background:var(--surface-raised);
+                  color:var(--text-strong);
+                  font-size:var(--font-md);
+                  outline:none;
+                  cursor:pointer;
+                "
+              >
+                <option value="es" ${current === "es" ? "selected" : ""}>
+                  Español
+                </option>
+
+                <option value="en" ${current === "en" ? "selected" : ""}>
+                  English
+                </option>
+
+                <option value="ca" ${current === "ca" ? "selected" : ""}>
+                  Català
+                </option>
+              </select>
+            </label>
+          </div>
+        </article>
+      </section>
     `;
   }
 
@@ -121,10 +257,7 @@ export const AjustesView = (() => {
             background:var(--surface-glass);
             box-shadow:var(--shadow-inner);
           ">
-            <div style="
-              display:grid;
-              gap:4px;
-            ">
+            <div style="display:grid; gap:4px;">
               <strong style="
                 font-size:var(--font-lg);
                 color:var(--text-strong);
@@ -188,6 +321,7 @@ export const AjustesView = (() => {
       <section class="panel-content dashboard ready">
         <div class="content-wrapper">
           ${renderHeader()}
+          ${renderLanguageCard()}
           ${renderPasswordCard()}
         </div>
       </section>
@@ -201,11 +335,34 @@ export const AjustesView = (() => {
   ========================================================= */
   function bind() {
     const scope = AppCore.cleanup.scope(SCOPE);
-    const changePasswordBtn = document.getElementById("ajustes-change-password-btn");
+
+    const changePasswordBtn = document.getElementById(
+      "ajustes-change-password-btn"
+    );
+
+    const languageSelect = document.getElementById(
+      "ajustes-language-select"
+    );
 
     if (changePasswordBtn) {
       AppCore.cleanup.on(scope, changePasswordBtn, "click", () => {
-        AppCore.utils?.toast?.info?.("Aquí irá el flujo de cambio de contraseña.");
+        AppCore.utils?.toast?.info?.(
+          "Aquí irá el flujo de cambio de contraseña."
+        );
+      });
+    }
+
+    if (languageSelect) {
+      AppCore.cleanup.on(scope, languageSelect, "change", (event) => {
+        const nextLang = String(event.target.value || "es");
+
+        setLang(nextLang);
+
+        AppCore.utils?.toast?.success?.(
+          "Idioma actualizado correctamente."
+        );
+
+        window.location.reload();
       });
     }
   }

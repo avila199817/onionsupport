@@ -15,6 +15,12 @@
    - table-head visible solo cuando tenga contenido real
    - compensación robusta con sidebar fixed montado desde JS
    - compatible con topbar fixed montado desde JS
+
+   FIXES INCLUIDOS:
+   - coherencia total con sidebar / topbar nuevos
+   - offsets sólidos del shell
+   - capas limpias para topbar / table-head / content
+   - overflow controlado sin romper dropdowns ni tooltips
 ========================================================= */
 
 
@@ -189,7 +195,7 @@ a{
 }
 
 body.sidebar-collapsed{
-  --app-sidebar-current-width: var(--sidebar-collapsed);
+  --app-sidebar-current-width:var(--sidebar-collapsed);
 }
 
 
@@ -214,14 +220,15 @@ body.sidebar-collapsed{
   padding-inline-start:var(--app-safe-left);
 
   isolation:isolate;
+  overflow:visible;
 }
 
 .main-content:has(.table-head:not(:has(#tablehead-container:empty))) #app-content{
-  --app-offset-tablehead: var(--tablehead-height);
+  --app-offset-tablehead:var(--tablehead-height);
 }
 
 .main-content:has(.table-head:has(#tablehead-container:empty)) #app-content{
-  --app-offset-tablehead: 0px;
+  --app-offset-tablehead:0px;
 }
 
 #app-content::before{
@@ -278,6 +285,8 @@ body.sidebar-collapsed{
     background var(--duration-normal) var(--ease-standard),
     border-color var(--duration-normal) var(--ease-standard),
     box-shadow var(--duration-normal) var(--ease-standard);
+
+  overflow:visible;
 }
 
 .table-head::before{
@@ -723,7 +732,7 @@ body.sidebar-collapsed{
    AUTH / FULLSCREEN LOGIN MODE
 ========================= */
 body.auth-screen{
-  --app-sidebar-current-width: 0px;
+  --app-sidebar-current-width:0px;
 
   background:var(--main-bg);
   background-image:var(--body-bg);
@@ -819,7 +828,7 @@ body.auth-screen .content-wrapper{
 ========================= */
 @media (max-width: 1280px){
   :root{
-    --content-padding-inline: 24px;
+    --content-padding-inline:24px;
   }
 
   .container,
@@ -856,7 +865,7 @@ body.auth-screen .content-wrapper{
   body,
   body.sidebar-collapsed,
   body.sidebar-open{
-    --app-sidebar-current-width: 0px;
+    --app-sidebar-current-width:0px;
   }
 
   .main-content{
@@ -911,8 +920,8 @@ body.auth-screen .content-wrapper{
 ========================= */
 @media (max-width: 640px){
   :root{
-    --tablehead-height: 44px;
-    --content-padding-inline: 16px;
+    --tablehead-height:44px;
+    --content-padding-inline:16px;
   }
 
   .container,

@@ -319,6 +319,7 @@ export const App = (() => {
         syncUserUI,
         warmup,
         navigateAfterSessionRestore,
+
         applyPostRenderLoaderPolicy: () =>
           applyPostRenderLoaderPolicy({
             AppCore,

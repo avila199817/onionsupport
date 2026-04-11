@@ -12,6 +12,7 @@
    - dropdown sólido
    - sin scroll horizontal fantasma
    - neutral graphite / enterprise shell
+   - compatible con sidebar montado desde JS
 ========================================================= */
 
 
@@ -46,6 +47,7 @@
 
   width:var(--sidebar-width);
   height:100dvh;
+  max-width:100vw;
 
   display:flex;
   flex-direction:column;
@@ -71,11 +73,17 @@
     transform var(--duration-slow) var(--ease-emphasis),
     background var(--duration-normal) var(--ease-standard),
     border-color var(--duration-normal) var(--ease-standard),
-    box-shadow var(--duration-normal) var(--ease-standard);
+    box-shadow var(--duration-normal) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
 
   overflow:visible;
   z-index:var(--z-sidebar);
   isolation:isolate;
+  will-change:width, transform;
+}
+
+.sidebar[hidden]{
+  display:none !important;
 }
 
 .sidebar::before{
@@ -194,6 +202,18 @@
   object-fit:contain;
   user-select:none;
   -webkit-user-drag:none;
+}
+
+.logo .logo-light{
+  display:none;
+}
+
+[data-theme="light"] .logo .logo-dark{
+  display:none;
+}
+
+[data-theme="light"] .logo .logo-light{
+  display:block;
 }
 
 .logo:hover{
@@ -318,7 +338,8 @@
    TOOLTIP SYSTEM — FINAL
 ========================= */
 .sidebar-toggle::after,
-.menu-item::after{
+.menu-item::after,
+.user::after{
   content:attr(data-tooltip);
   position:absolute;
   top:50%;
@@ -359,7 +380,8 @@
 }
 
 .sidebar-toggle::before,
-.menu-item::before{
+.menu-item::before,
+.user::before{
   content:"";
   position:absolute;
   top:50%;
@@ -407,14 +429,25 @@
 .sidebar.collapsed .menu-item:hover::after,
 .sidebar.collapsed .menu-item:hover::before,
 .sidebar.is-collapsed .menu-item:hover::after,
-.sidebar.is-collapsed .menu-item:hover::before{
+.sidebar.is-collapsed .menu-item:hover::before,
+.sidebar.collapsed .user:hover::after,
+.sidebar.collapsed .user:hover::before,
+.sidebar.is-collapsed .user:hover::after,
+.sidebar.is-collapsed .user:hover::before{
   opacity:1;
   visibility:visible;
 }
 
 .sidebar.collapsed .menu-item:hover::after,
-.sidebar.is-collapsed .menu-item:hover::after{
+.sidebar.is-collapsed .menu-item:hover::after,
+.sidebar.collapsed .user:hover::after,
+.sidebar.is-collapsed .user:hover::after{
   transform:translateY(-50%) translateX(0);
+}
+
+.sidebar:not(.collapsed):not(.is-collapsed) .user::before,
+.sidebar:not(.collapsed):not(.is-collapsed) .user::after{
+  display:none;
 }
 
 
@@ -620,6 +653,7 @@
   font-size:12px;
   font-weight:var(--weight-medium);
   color:var(--text-muted);
+  text-decoration:none;
 
   white-space:nowrap;
   overflow:hidden;
@@ -683,6 +717,7 @@
   color:var(--text);
   cursor:pointer;
   user-select:none;
+  -webkit-tap-highlight-color:transparent;
 
   transition:
     background var(--duration-fast) var(--ease-standard),
@@ -694,6 +729,12 @@
 .user:hover{
   background:var(--sidebar-hover);
   border-color:rgba(255,255,255,.04);
+}
+
+.user.active,
+.user[aria-expanded="true"]{
+  background:var(--sidebar-hover);
+  border-color:rgba(255,255,255,.05);
 }
 
 .user:focus-visible{
@@ -777,6 +818,14 @@
     0 6px 14px rgba(0,0,0,.18);
 }
 
+.avatar.has-image{
+  background:transparent;
+  color:transparent;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.10),
+    0 6px 14px rgba(0,0,0,.18);
+}
+
 .avatar img{
   width:100%;
   height:100%;
@@ -829,6 +878,10 @@
   z-index:var(--z-dropdown);
 }
 
+.user-dropdown[hidden]{
+  display:block;
+}
+
 .user-dropdown.open,
 .user-dropdown.active{
   opacity:1;
@@ -843,15 +896,18 @@
   right:auto;
   bottom:10px;
   width:240px;
+  max-width:min(240px, calc(100vw - 24px));
 }
 
 
 /* =========================
    DROPDOWN ITEMS
-   PRO / CLEAN / SOLID / TOKEN-DRIVEN
 ========================= */
 .dropdown-item{
   position:relative;
+
+  appearance:none;
+  -webkit-appearance:none;
 
   display:flex;
   align-items:center;
@@ -933,8 +989,9 @@
   box-shadow:var(--focus-ring);
 }
 
-/* variante destructiva */
-.dropdown-item-danger{
+.dropdown-item-danger,
+.dropdown-item-danger span,
+.dropdown-item-danger svg{
   color:var(--error);
 }
 
@@ -944,28 +1001,22 @@
   color:var(--error-hover);
 }
 
-.dropdown-item-danger:focus-visible{
-  outline:none;
-  box-shadow:
-    0 0 0 4px rgba(239,68,68,.16);
+.dropdown-item-danger:hover span,
+.dropdown-item-danger:hover svg{
+  color:var(--error-hover);
 }
 
-/* divisor */
+.dropdown-item-danger:focus-visible{
+  outline:none;
+  box-shadow:0 0 0 4px rgba(239,68,68,.16);
+}
+
 .dropdown-divider{
   height:1px;
   margin:6px 4px;
   background:var(--border-soft);
 }
 
-/* light mode polish */
-[data-theme="light"] .dropdown-item:hover{
-  border-color:rgba(15,23,42,.06);
-}
-
-[data-theme="light"] .dropdown-item-danger:hover{
-  background:rgba(239,68,68,.08);
-  border-color:rgba(239,68,68,.18);
-}
 
 /* =========================
    SCROLLBAR POLISH
@@ -986,6 +1037,10 @@
 .sidebar-section::-webkit-scrollbar-thumb{
   background:var(--scrollbar-thumb);
   border-radius:999px;
+}
+
+.sidebar-section::-webkit-scrollbar-thumb:hover{
+  background:var(--scrollbar-thumb-hover);
 }
 
 
@@ -1024,7 +1079,9 @@
     0 10px 20px rgba(0,0,0,.05);
 }
 
-[data-theme="light"] .user:hover{
+[data-theme="light"] .user:hover,
+[data-theme="light"] .user.active,
+[data-theme="light"] .user[aria-expanded="true"]{
   border-color:rgba(15,23,42,.05);
 }
 
@@ -1033,6 +1090,15 @@
   box-shadow:
     0 16px 40px rgba(15,23,42,.10),
     0 4px 12px rgba(15,23,42,.06);
+}
+
+[data-theme="light"] .dropdown-item:hover{
+  border-color:rgba(15,23,42,.06);
+}
+
+[data-theme="light"] .dropdown-item-danger:hover{
+  background:rgba(239,68,68,.08);
+  border-color:rgba(239,68,68,.18);
 }
 
 
@@ -1115,12 +1181,15 @@
     right:10px;
     bottom:var(--sidebar-dropdown-bottom);
     width:auto;
+    max-width:none;
   }
 
   .sidebar .menu-item::after,
   .sidebar .menu-item::before,
   .sidebar .sidebar-toggle::after,
-  .sidebar .sidebar-toggle::before{
+  .sidebar .sidebar-toggle::before,
+  .sidebar .user::after,
+  .sidebar .user::before{
     display:none !important;
   }
 }

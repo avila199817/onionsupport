@@ -9,6 +9,8 @@
    - reforzar accesibilidad, focus y consistencia
    - aportar utilidades premium sin contaminar vistas
    - convivir limpio con reset.css + layout.css + tokens
+   - respetar sidebar fixed + topbar + table-head
+   - evitar overrides agresivos sobre componentes específicos
 ========================================================= */
 
 
@@ -30,10 +32,8 @@ body{
   font-weight:var(--weight-regular);
 
   color:var(--text);
-  background:
-    radial-gradient(circle at top left, rgba(124,58,237,.04), transparent 24%),
-    radial-gradient(circle at top right, rgba(6,182,212,.03), transparent 22%),
-    var(--main-bg);
+  background:var(--main-bg);
+  background-image:var(--body-bg);
 
   text-rendering:optimizeLegibility;
   -webkit-font-smoothing:antialiased;
@@ -98,8 +98,8 @@ img{
    SELECTION
 ========================= */
 ::selection{
-  background:var(--accent-soft);
-  color:var(--text-strong);
+  background:var(--selection-bg);
+  color:var(--selection-text);
 }
 
 
@@ -155,6 +155,8 @@ body,
 
 /* =========================
    THEME TRANSITIONS
+   Moderadas para no pelearse con
+   layout / sidebar / topbar
 ========================= */
 .layout,
 .sidebar,
@@ -169,20 +171,34 @@ body,
 .table-head,
 input,
 select,
-textarea,
-button,
-a,
-svg,
-path{
+textarea{
   transition:
     background-color var(--duration-slow) var(--ease-standard),
     color var(--duration-slow) var(--ease-standard),
     border-color var(--duration-slow) var(--ease-standard),
     box-shadow var(--duration-slow) var(--ease-standard),
-    opacity var(--duration-normal) var(--ease-standard),
-    transform var(--duration-fast) var(--ease-out),
-    fill var(--duration-normal) var(--ease-standard),
-    stroke var(--duration-normal) var(--ease-standard);
+    opacity var(--duration-normal) var(--ease-standard);
+}
+
+button,
+a{
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-out);
+}
+
+svg,
+path{
+  transition:
+    color var(--duration-fast) var(--ease-standard),
+    fill var(--duration-fast) var(--ease-standard),
+    stroke var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-out);
 }
 
 
@@ -195,7 +211,6 @@ path{
 
 :focus:not(:focus-visible){
   outline:none;
-  box-shadow:none;
 }
 
 :focus-visible{
@@ -252,6 +267,8 @@ a:hover{
 
 /* =========================
    BUTTON SYSTEM
+   Base neutra para no romper
+   botones específicos del shell
 ========================= */
 button{
   appearance:none;
@@ -261,30 +278,12 @@ button{
   color:inherit;
   font:inherit;
   cursor:pointer;
-
-  transition:
-    transform var(--duration-fast) var(--ease-out),
-    box-shadow var(--duration-normal) var(--ease-standard),
-    background-color var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard),
-    opacity var(--duration-fast) var(--ease-standard),
-    filter var(--duration-fast) var(--ease-standard);
-}
-
-button:hover{
-  transform:translateY(-1px);
-}
-
-button:active{
-  transform:scale(.985);
 }
 
 button:disabled,
 button[aria-disabled="true"]{
   cursor:not-allowed;
   opacity:.58;
-  transform:none;
   box-shadow:none;
   filter:none;
 }
@@ -298,7 +297,7 @@ button[aria-disabled="true"]{
   transition:
     transform var(--duration-fast) var(--ease-out),
     box-shadow var(--duration-normal) var(--ease-standard),
-    opacity var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease.standard),
     filter var(--duration-fast) var(--ease-standard);
 }
 
@@ -378,8 +377,13 @@ label{
 [disabled],
 [aria-disabled="true"]{
   opacity:.5;
-  pointer-events:none;
   user-select:none;
+}
+
+button.disabled,
+a.disabled,
+[role="button"][aria-disabled="true"]{
+  pointer-events:none;
 }
 
 

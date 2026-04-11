@@ -10,7 +10,7 @@
    - limpiar storage local de auth
 ========================================================= */
 
-import { AppCore } from "../../core/core.js";
+import { AppCore } from "../../core/index.js";
 
 import {
   normalizeTokenValue,

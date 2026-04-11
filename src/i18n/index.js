@@ -8,16 +8,15 @@
    - fallback robusto a español
    - cambio live de idioma
    - persistencia local
-   - sincronización con AppCore
+   - sincronización opcional con AppCore
    - evento global app:lang:change
    - helpers para refresco de UI
+   - evitar dependencia circular con Core
 ========================================================= */
 
 import es from "./es.js";
 import en from "./en.js";
 import ca from "./ca.js";
-
-import { AppCore } from "../core/index.js";
 
 export const I18n = (() => {
   "use strict";
@@ -26,10 +25,7 @@ export const I18n = (() => {
      CONFIG
   ========================================================= */
   const STORAGE_KEY = "lang";
-
-  const DEFAULT_LANG =
-    AppCore?.config?.defaultLang ||
-    "es";
+  const FALLBACK_LANG = "es";
 
   const dictionaries = {
     es,
@@ -37,7 +33,34 @@ export const I18n = (() => {
     ca,
   };
 
-  let currentLang = DEFAULT_LANG;
+  let coreRef = null;
+  let currentLang = FALLBACK_LANG;
+
+  /* =========================================================
+     CORE REF
+  ========================================================= */
+  function getCore() {
+    return coreRef;
+  }
+
+  function bindCore(AppCore) {
+    coreRef = AppCore || null;
+    return api;
+  }
+
+  function getDefaultLang() {
+    return (
+      getCore()?.config?.defaultLang ||
+      FALLBACK_LANG
+    );
+  }
+
+  function getStoragePrefix() {
+    return (
+      getCore()?.config?.storagePrefix ||
+      "onion"
+    );
+  }
 
   /* =========================================================
      HELPERS
@@ -54,7 +77,9 @@ export const I18n = (() => {
       .trim()
       .toLowerCase();
 
-    if (!raw) return DEFAULT_LANG;
+    const defaultLang = getDefaultLang();
+
+    if (!raw) return defaultLang;
 
     if (hasLang(raw)) return raw;
 
@@ -62,7 +87,7 @@ export const I18n = (() => {
 
     if (hasLang(short)) return short;
 
-    return DEFAULT_LANG;
+    return defaultLang;
   }
 
   function getNested(obj, path = "") {
@@ -73,7 +98,10 @@ export const I18n = (() => {
       .reduce((acc, key) => {
         if (
           acc &&
-          Object.prototype.hasOwnProperty.call(acc, key)
+          Object.prototype.hasOwnProperty.call(
+            acc,
+            key
+          )
         ) {
           return acc[key];
         }
@@ -82,7 +110,10 @@ export const I18n = (() => {
       }, obj);
   }
 
-  function interpolate(text = "", params = {}) {
+  function interpolate(
+    text = "",
+    params = {}
+  ) {
     return String(text).replace(
       /\{([a-zA-Z0-9_]+)\}/g,
       (_, key) =>
@@ -94,13 +125,24 @@ export const I18n = (() => {
 
   function safeStorageGet() {
     try {
-      if (AppCore?.storage?.get) {
-        return AppCore.storage.get(STORAGE_KEY);
+      const core = getCore();
+
+      if (core?.storage?.get) {
+        return core.storage.get(
+          STORAGE_KEY
+        );
       }
 
-      return localStorage.getItem(
-        `${AppCore?.config?.storagePrefix || "onion"}:${STORAGE_KEY}`
-      );
+      if (
+        typeof localStorage !==
+        "undefined"
+      ) {
+        return localStorage.getItem(
+          `${getStoragePrefix()}:${STORAGE_KEY}`
+        );
+      }
+
+      return null;
     } catch {
       return null;
     }
@@ -108,15 +150,25 @@ export const I18n = (() => {
 
   function safeStorageSet(lang) {
     try {
-      if (AppCore?.storage?.set) {
-        AppCore.storage.set(STORAGE_KEY, lang);
+      const core = getCore();
+
+      if (core?.storage?.set) {
+        core.storage.set(
+          STORAGE_KEY,
+          lang
+        );
         return;
       }
 
-      localStorage.setItem(
-        `${AppCore?.config?.storagePrefix || "onion"}:${STORAGE_KEY}`,
-        lang
-      );
+      if (
+        typeof localStorage !==
+        "undefined"
+      ) {
+        localStorage.setItem(
+          `${getStoragePrefix()}:${STORAGE_KEY}`,
+          lang
+        );
+      }
     } catch {
       /* noop */
     }
@@ -124,6 +176,13 @@ export const I18n = (() => {
 
   function syncLangToDocument(lang) {
     try {
+      if (
+        typeof document ===
+        "undefined"
+      ) {
+        return;
+      }
+
       document.documentElement.setAttribute(
         "lang",
         lang
@@ -135,13 +194,18 @@ export const I18n = (() => {
 
   function syncLangToState(lang) {
     try {
-      if (typeof AppCore?.setState === "function") {
-        AppCore.setState({ lang });
+      const core = getCore();
+
+      if (
+        typeof core?.setState ===
+        "function"
+      ) {
+        core.setState({ lang });
         return;
       }
 
-      if (AppCore?.state) {
-        AppCore.state.lang = lang;
+      if (core?.state) {
+        core.state.lang = lang;
       }
     } catch {
       /* noop */
@@ -150,11 +214,14 @@ export const I18n = (() => {
 
   function emitLangChange(lang) {
     try {
-      AppCore?.events?.emit?.(
+      const core = getCore();
+
+      core?.events?.emit?.(
         "app:lang:change",
         {
           lang,
-          dictionary: getDictionary(lang),
+          dictionary:
+            getDictionary(lang),
         }
       );
     } catch {
@@ -164,27 +231,38 @@ export const I18n = (() => {
 
   function updateDOM(root = document) {
     try {
+      if (
+        typeof document ===
+        "undefined"
+      ) {
+        return;
+      }
+
       const scope =
         root instanceof Element ||
         root instanceof Document
           ? root
           : document;
 
-      /* text */
       scope
-        .querySelectorAll("[data-i18n]")
+        .querySelectorAll(
+          "[data-i18n]"
+        )
         .forEach((node) => {
           const key =
-            node.getAttribute("data-i18n");
+            node.getAttribute(
+              "data-i18n"
+            );
 
           if (!key) return;
 
           node.textContent = t(key);
         });
 
-      /* html */
       scope
-        .querySelectorAll("[data-i18n-html]")
+        .querySelectorAll(
+          "[data-i18n-html]"
+        )
         .forEach((node) => {
           const key =
             node.getAttribute(
@@ -196,7 +274,6 @@ export const I18n = (() => {
           node.innerHTML = t(key);
         });
 
-      /* placeholder */
       scope
         .querySelectorAll(
           "[data-i18n-placeholder]"
@@ -215,9 +292,10 @@ export const I18n = (() => {
           );
         });
 
-      /* title */
       scope
-        .querySelectorAll("[data-i18n-title]")
+        .querySelectorAll(
+          "[data-i18n-title]"
+        )
         .forEach((node) => {
           const key =
             node.getAttribute(
@@ -232,7 +310,6 @@ export const I18n = (() => {
           );
         });
 
-      /* aria-label */
       scope
         .querySelectorAll(
           "[data-i18n-aria-label]"
@@ -263,15 +340,16 @@ export const I18n = (() => {
       return normalizeLang(
         navigator.language ||
           navigator.userLanguage ||
-          DEFAULT_LANG
+          getDefaultLang()
       );
     } catch {
-      return DEFAULT_LANG;
+      return getDefaultLang();
     }
   }
 
   function detectInitialLang() {
-    const saved = safeStorageGet();
+    const saved =
+      safeStorageGet();
 
     if (saved) {
       return normalizeLang(saved);
@@ -285,7 +363,7 @@ export const I18n = (() => {
   }
 
   function setLang(
-    lang = DEFAULT_LANG,
+    lang = getDefaultLang(),
     options = {}
   ) {
     const {
@@ -306,7 +384,11 @@ export const I18n = (() => {
     syncLangToDocument(nextLang);
     syncLangToState(nextLang);
 
-    if (updateUi) {
+    if (
+      updateUi &&
+      typeof document !==
+        "undefined"
+    ) {
       updateDOM(document);
     }
 
@@ -325,19 +407,29 @@ export const I18n = (() => {
     params = {},
     fallback = ""
   ) {
+    const defaultLang =
+      getDefaultLang();
+
     const active = getNested(
       dictionaries[currentLang],
       key
     );
 
     const base = getNested(
-      dictionaries[DEFAULT_LANG],
+      dictionaries[defaultLang],
       key
     );
+
+    const fallbackBase =
+      getNested(
+        dictionaries[FALLBACK_LANG],
+        key
+      );
 
     const resolved =
       active ??
       base ??
+      fallbackBase ??
       fallback ??
       key;
 
@@ -348,13 +440,20 @@ export const I18n = (() => {
   }
 
   function exists(key = "") {
+    const defaultLang =
+      getDefaultLang();
+
     return (
       getNested(
         dictionaries[currentLang],
         key
       ) !== undefined ||
       getNested(
-        dictionaries[DEFAULT_LANG],
+        dictionaries[defaultLang],
+        key
+      ) !== undefined ||
+      getNested(
+        dictionaries[FALLBACK_LANG],
         key
       ) !== undefined
     );
@@ -364,19 +463,21 @@ export const I18n = (() => {
     lang,
     data = {}
   ) {
-    const code =
-      normalizeLang(lang);
+    const rawCode = String(
+      lang || ""
+    )
+      .trim()
+      .toLowerCase();
 
     if (
-      !code ||
+      !rawCode ||
       typeof data !== "object" ||
       data === null
     ) {
       return false;
     }
 
-    dictionaries[code] = data;
-
+    dictionaries[rawCode] = data;
     return true;
   }
 
@@ -392,16 +493,23 @@ export const I18n = (() => {
     const code =
       normalizeLang(lang);
 
+    const defaultLang =
+      getDefaultLang();
+
     return (
       dictionaries[code] ||
-      dictionaries[
-        DEFAULT_LANG
-      ] ||
+      dictionaries[defaultLang] ||
+      dictionaries[FALLBACK_LANG] ||
       {}
     );
   }
 
-  function boot() {
+  function boot(options = {}) {
+    const {
+      updateUi = true,
+      emit = false,
+    } = options || {};
+
     const initial =
       detectInitialLang();
 
@@ -416,7 +524,19 @@ export const I18n = (() => {
       currentLang
     );
 
-    updateDOM(document);
+    if (
+      updateUi &&
+      typeof document !==
+        "undefined"
+    ) {
+      updateDOM(document);
+    }
+
+    if (emit) {
+      emitLangChange(
+        currentLang
+      );
+    }
 
     return currentLang;
   }
@@ -424,9 +544,18 @@ export const I18n = (() => {
   /* =========================================================
      INIT
   ========================================================= */
-  boot();
+  if (
+    typeof document !==
+    "undefined"
+  ) {
+    boot({
+      updateUi: true,
+      emit: false,
+    });
+  }
 
-  return {
+  const api = {
+    bindCore,
     boot,
     t,
     setLang,
@@ -437,4 +566,6 @@ export const I18n = (() => {
     getDictionary,
     updateDOM,
   };
+
+  return api;
 })();

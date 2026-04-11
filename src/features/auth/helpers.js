@@ -11,7 +11,7 @@
    - validación de redirects internos seguros
 ========================================================= */
 
-import { AppCore } from "../../core/core.js";
+import { AppCore } from "../../core/index.js";
 import { AUTH_CONSTANTS } from "./constants.js";
 
 /* =========================================================

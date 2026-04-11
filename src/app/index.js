@@ -11,7 +11,7 @@
 
 import { AppCore } from "../core/core.js";
 import { Store } from "../store/store.js";
-import { Auth } from "../features/auth.js";
+import { Auth } from "../features/index.js";
 import { Router } from "../router/router.js";
 import { SidebarUI } from "../ui/sidebar/index.js";
 import { TopbarUI } from "../ui/topbar.js";

@@ -3,6 +3,7 @@
    Archivo: src/app/router.js
 
    Responsabilidades:
+   - configurar dependencias del router
    - bind del router una sola vez
    - lanzar la primera renderización inmediata
    - sincronizar publicPath tras el render inicial
@@ -10,6 +11,26 @@
 ========================================================= */
 
 import { getCurrentPath, getCurrentPublicPath } from "./helpers.js";
+
+export function configureRouter({
+  Router,
+  AppCore,
+  Auth,
+  state,
+}) {
+  if (state?.routerConfigured) return;
+
+  if (typeof Router?.configure === "function") {
+    Router.configure({
+      core: AppCore,
+      auth: Auth,
+    });
+  }
+
+  if (state) {
+    state.routerConfigured = true;
+  }
+}
 
 export function bindRouter({
   Router,

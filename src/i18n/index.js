@@ -16,7 +16,7 @@ import es from "./es.js";
 import en from "./en.js";
 import ca from "./ca.js";
 
-import { AppCore } from "../core/core.js";
+import { AppCore } from "../core/index.js";
 
 export const I18n = (() => {
   "use strict";

@@ -333,7 +333,8 @@
    EXCLUYE FOOTER / USER / DROPDOWN
    SIN ROMPER BOTONES
    SIN CONFLICTO CON ACTIVE
-   TOPSIDEBAR: TOOLTIP DEBAJO DEL MOUSE
+   TOPSIDEBAR: TOOLTIP DEBAJO DEL TRIGGER
+   MÁS SÓLIDO + SIN RECORTE EN COLLAPSED
 ========================= */
 
 .sidebar,
@@ -355,7 +356,9 @@
 
 /* =========================================================
    TOPSIDEBAR (logo + toggle)
-   Tooltip por debajo del trigger, no a la derecha
+   Tooltip por debajo del trigger
+   Alineado al borde izquierdo del botón para evitar clipping
+   cuando el sidebar está colapsado y pegado al viewport
 ========================================================= */
 
 /* logo / toggle: caja tooltip */
@@ -365,20 +368,18 @@
   position:absolute;
 
   top:calc(100% + 10px);
-  left:50%;
+  left:0;
 
-  transform:translateX(-50%) translateY(8px);
-  transform-origin:top center;
+  transform:translateY(8px);
+  transform-origin:top left;
 
-  padding:9px 12px;
-  border-radius:12px;
-  border:1px solid var(--border-default);
+  padding:10px 13px;
+  border-radius:14px;
+  border:1px solid rgba(255,255,255,.10);
 
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.032), rgba(255,255,255,.010)),
-    var(--tooltip-bg);
+  background:rgba(28,28,31,.98);
+  color:var(--text-strong);
 
-  color:var(--text-soft);
   font-size:12px;
   line-height:1;
   font-weight:var(--weight-semibold);
@@ -386,8 +387,11 @@
   white-space:nowrap;
 
   box-shadow:
-    0 14px 34px rgba(0,0,0,.28),
-    inset 0 1px 0 rgba(255,255,255,.04);
+    0 18px 40px rgba(0,0,0,.34),
+    0 0 0 1px rgba(255,255,255,.03) inset;
+
+  backdrop-filter:blur(16px);
+  -webkit-backdrop-filter:blur(16px);
 
   opacity:0;
   visibility:hidden;
@@ -408,18 +412,18 @@
   position:absolute;
 
   top:calc(100% + 5px);
-  left:50%;
+  left:16px;
 
   width:10px;
   height:10px;
 
-  transform:translateX(-50%) rotate(45deg);
+  transform:rotate(45deg);
 
-  background:var(--tooltip-bg);
-  border-top:1px solid var(--border-default);
-  border-left:1px solid var(--border-default);
+  background:rgba(28,28,31,.98);
+  border-top:1px solid rgba(255,255,255,.10);
+  border-left:1px solid rgba(255,255,255,.10);
 
-  box-shadow:-2px -2px 8px rgba(0,0,0,.04);
+  box-shadow:-2px -2px 8px rgba(0,0,0,.05);
 
   opacity:0;
   visibility:hidden;
@@ -488,7 +492,7 @@
 }
 
 .sidebar-toggle[data-tooltip]:hover::after{
-  transform:translateX(-50%) translateY(0);
+  transform:translateY(0);
 }
 
 .sidebar.collapsed .logo[data-tooltip]:hover::after,
@@ -501,7 +505,7 @@
 
 .sidebar.collapsed .logo[data-tooltip]:hover::after,
 .sidebar.is-collapsed .logo[data-tooltip]:hover::after{
-  transform:translateX(-50%) translateY(0);
+  transform:translateY(0);
 }
 
 /* =========================================================

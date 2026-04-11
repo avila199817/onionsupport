@@ -57,7 +57,7 @@ import {
   configureRouter,
   bindRouter,
   renderInitialRoute,
-} from "./router.js";
+} from "./index.js";
 
 import { warmup } from "./warmup.js";
 

@@ -12,7 +12,7 @@
    - cero ruido
 ========================================================= */
 
-import { AppCore } from "../core/core.js";
+import { AppCore } from "../core/index.js";
 
 export const CuentaView = (() => {
   "use strict";

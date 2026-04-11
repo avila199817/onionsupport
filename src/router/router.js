@@ -30,6 +30,7 @@ import { FacturasView } from "../views/facturasView.js";
 import { ServerView } from "../views/serverView.js";
 import { UsuariosView } from "../views/usuariosView.js";
 import { ClientesView } from "../views/clientesView.js";
+import { CuentaView } from "../views/cuentaView.js";
 
 export const Router = (() => {
   "use strict";
@@ -119,7 +120,7 @@ export const Router = (() => {
       public: false,
       roles: [],
       hideShell: false,
-      render: renderGenericView,
+      render: renderCuentaView,
     },
     {
       path: "/ajustes",

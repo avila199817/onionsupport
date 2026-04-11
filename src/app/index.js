@@ -17,7 +17,7 @@ import { Router } from "../router/index.js";
 import { Http } from "../services/index.js";
 
 import { SidebarUI } from "../ui/sidebar/index.js";
-import { TopbarUI } from "../ui/topbar.js";
+import { TopbarUI } from "../ui/topbar/index.js";
 import { Toast } from "../ui/toast.js";
 import { I18n } from "../i18n/index.js";
 

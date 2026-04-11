@@ -55,7 +55,7 @@
 
   overflow:visible;
   z-index:var(--z-sidebar);
-  isolation:isolate;
+  isolation:auto;
   will-change:width, transform;
 }
 

@@ -21,8 +21,8 @@
    - render serializado para evitar race conditions
 ========================================================= */
 
-import { AppCore } from "../core/core.js";
-import { Auth } from "../features/auth.js";
+import { AppCore } from "../core/index.js";
+import { Auth } from "../features/auth/index.js";
 import { LoginView } from "../views/loginView.js";
 import { HomeView } from "../views/homeView.js";
 import { IncidenciasView } from "../views/incidenciasView.js";

@@ -3,6 +3,7 @@
    Archivo: src/ui/topbar.js
 
    Responsabilidades:
+   - montar el HTML del topbar desde JS
    - controlar la UI global del topbar
    - sincronizar título de la vista actual
    - gestionar toggle mobile de sidebar
@@ -32,13 +33,100 @@ export const TopbarUI = (() => {
   const MAX_RESULTS_PER_GROUP = 6;
   const CACHE_TTL_MS = 20 * 1000;
 
-  let isBound = false;
+  let initialized = false;
   let searchController = null;
   let searchDebounceTimer = null;
   let activeIndex = -1;
   let currentItems = [];
   let currentQuery = "";
   let cache = new Map();
+
+  /* =========================================================
+     TEMPLATE / MOUNT
+  ========================================================= */
+  function getTopbarTemplate() {
+    return `
+      <header class="topbar" id="topbar">
+        <div class="topbar-left">
+          <button
+            type="button"
+            class="topbar-mobile-toggle"
+            id="toggleSidebarMobile"
+            aria-label="Abrir navegación"
+            aria-controls="sidebar-menu"
+            aria-expanded="false"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path d="M4 7h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+              <path d="M4 12h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+              <path d="M4 17h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+          </button>
+
+          <h1 class="topbar-title" id="topbar-title">Onion Support</h1>
+        </div>
+
+        <div class="topbar-right">
+          <div class="topbar-search-wrap">
+            <svg
+              class="topbar-search-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              aria-hidden="true"
+            >
+              <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>
+              <path d="M20 20l-3-3" stroke="currentColor" stroke-width="2"/>
+            </svg>
+
+            <input
+              type="search"
+              id="topbar-search"
+              class="topbar-search"
+              placeholder="Buscar..."
+              autocomplete="off"
+              inputmode="search"
+              aria-label="Buscar en la aplicación"
+              aria-controls="topbar-search-results"
+              aria-expanded="false"
+              aria-autocomplete="list"
+            >
+
+            <div
+              id="topbar-search-results"
+              class="topbar-search-results"
+              hidden
+              aria-live="polite"
+            ></div>
+          </div>
+        </div>
+      </header>
+    `;
+  }
+
+  function getMainContentEl() {
+    return (
+      AppCore.dom.mainContent ||
+      document.getElementById("main-content") ||
+      document.querySelector(".main-content")
+    );
+  }
+
+  function mountTopbar() {
+    let topbar = document.getElementById("topbar");
+    if (topbar) return topbar;
+
+    const mainContent = getMainContentEl();
+    if (!mainContent) return null;
+
+    mainContent.insertAdjacentHTML("afterbegin", getTopbarTemplate());
+    return document.getElementById("topbar");
+  }
 
   /* =========================================================
      HELPERS BASE
@@ -132,13 +220,11 @@ export const TopbarUI = (() => {
   function syncDomCache() {
     const dom = getDom();
 
-    AppCore.dom.topbar = dom.topbar || AppCore.dom.topbar || null;
-    AppCore.dom.topbarTitle = dom.title || AppCore.dom.topbarTitle || null;
-    AppCore.dom.toggleSidebarMobile =
-      dom.mobileToggle || AppCore.dom.toggleSidebarMobile || null;
-    AppCore.dom.searchInput = dom.searchInput || AppCore.dom.searchInput || null;
-    AppCore.dom.searchResults =
-      dom.searchResults || AppCore.dom.searchResults || null;
+    AppCore.dom.topbar = dom.topbar || null;
+    AppCore.dom.topbarTitle = dom.title || null;
+    AppCore.dom.toggleSidebarMobile = dom.mobileToggle || null;
+    AppCore.dom.searchInput = dom.searchInput || null;
+    AppCore.dom.searchResults = dom.searchResults || null;
   }
 
   function safeNormalizePath(path = "/") {
@@ -172,7 +258,7 @@ export const TopbarUI = (() => {
       try {
         return Router.getCurrentCanonicalPath();
       } catch {
-        /* no-op */
+        /* noop */
       }
     }
 
@@ -195,7 +281,7 @@ export const TopbarUI = (() => {
       try {
         searchController.abort();
       } catch {
-        /* no-op */
+        /* noop */
       }
       searchController = null;
     }
@@ -224,6 +310,7 @@ export const TopbarUI = (() => {
       "/cuenta": "Cuenta",
       "/ajustes": "Ajustes",
       "/login": "Acceso",
+      "/servidor": "Servidor",
     };
 
     if (staticMap[canonicalPath]) {
@@ -285,15 +372,23 @@ export const TopbarUI = (() => {
     const { mobileToggle, sidebar } = getDom();
     if (!mobileToggle || !sidebar) return;
 
-    const isOpen = sidebar.classList.contains("open");
+    const isOpen =
+      sidebar.classList.contains("open") ||
+      sidebar.classList.contains("is-open");
+
     mobileToggle.setAttribute("aria-expanded", String(isOpen));
+    mobileToggle.setAttribute(
+      "aria-label",
+      isOpen ? "Cerrar navegación" : "Abrir navegación"
+    );
+    mobileToggle.classList.toggle("is-active", isOpen);
   }
 
   function openSidebarMobile() {
     const { sidebar } = getDom();
     if (!sidebar) return;
 
-    sidebar.classList.add("open");
+    sidebar.classList.add("open", "is-open");
     setMobileToggleState();
   }
 
@@ -301,7 +396,7 @@ export const TopbarUI = (() => {
     const { sidebar } = getDom();
     if (!sidebar) return;
 
-    sidebar.classList.remove("open");
+    sidebar.classList.remove("open", "is-open");
     setMobileToggleState();
   }
 
@@ -309,11 +404,22 @@ export const TopbarUI = (() => {
     const { sidebar } = getDom();
     if (!sidebar) return;
 
-    sidebar.classList.toggle("open");
+    const nextOpen =
+      !sidebar.classList.contains("open") &&
+      !sidebar.classList.contains("is-open");
+
+    sidebar.classList.toggle("open", nextOpen);
+    sidebar.classList.toggle("is-open", nextOpen);
     setMobileToggleState();
   }
 
   function handleMobileToggleClick() {
+    if (AppCore.modules?.get?.("sidebar")?.toggleSidebar) {
+      AppCore.modules.get("sidebar").toggleSidebar();
+      setMobileToggleState();
+      return;
+    }
+
     toggleSidebarMobile();
   }
 
@@ -322,7 +428,12 @@ export const TopbarUI = (() => {
 
     const { sidebar, mobileToggle } = getDom();
     if (!sidebar || !mobileToggle) return;
-    if (!sidebar.classList.contains("open")) return;
+
+    const isOpen =
+      sidebar.classList.contains("open") ||
+      sidebar.classList.contains("is-open");
+
+    if (!isOpen) return;
 
     const clickedSidebar = event.target?.closest?.("#sidebar, .sidebar");
     const clickedToggle = event.target?.closest?.("#toggleSidebarMobile");
@@ -614,6 +725,13 @@ export const TopbarUI = (() => {
         title: "Ajustes",
         subtitle: "Configuración del sistema",
         url: "/ajustes",
+      },
+      {
+        id: "nav:/servidor",
+        type: "nav",
+        title: "Servidor",
+        subtitle: "Estado del servidor",
+        url: "/servidor",
       },
     ];
   }
@@ -1214,18 +1332,26 @@ export const TopbarUI = (() => {
     AppCore.cleanup.event(SCOPE, "app:user-ui:sync", () => {
       syncDomCache();
     });
+
+    AppCore.cleanup.event(SCOPE, "sidebar:state:synced", () => {
+      setMobileToggleState();
+    });
   }
 
   function destroy() {
     AppCore.cleanup.run(SCOPE);
     AppCore.cleanup.run(SEARCH_SCOPE);
     clearSearchState();
-    isBound = false;
   }
 
   function bind() {
     destroy();
     syncDomCache();
+
+    const { topbar } = getDom();
+    if (!topbar) {
+      return false;
+    }
 
     bindTopbarDomEvents();
     bindSearchDomEvents();
@@ -1233,8 +1359,6 @@ export const TopbarUI = (() => {
 
     syncTitle(getCurrentPublicPath());
     setMobileToggleState();
-
-    isBound = true;
 
     if (AppCore.config?.debug) {
       AppCore.utils.log?.("TopbarUI inicializado correctamente.");
@@ -1248,7 +1372,6 @@ export const TopbarUI = (() => {
 
     const { topbar } = getDom();
     if (!topbar) {
-      isBound = false;
       return false;
     }
 
@@ -1259,15 +1382,28 @@ export const TopbarUI = (() => {
      INIT
   ========================================================= */
   function init() {
+    if (initialized) {
+      syncDomCache();
+      syncTitle(getCurrentPublicPath());
+      setMobileToggleState();
+      return true;
+    }
+
+    mountTopbar();
+    syncDomCache();
+
     const done = bind();
 
     if (!done) {
       window.setTimeout(() => {
+        mountTopbar();
+        syncDomCache();
         bind();
       }, 120);
     }
 
-    return done;
+    initialized = true;
+    return true;
   }
 
   /* =========================================================
@@ -1278,13 +1414,14 @@ export const TopbarUI = (() => {
     bind,
     rebind,
     destroy,
+    mountTopbar,
     runSearch,
     syncTitle,
     openSidebarMobile,
     closeSidebarMobile,
     toggleSidebarMobile,
-    get isBound() {
-      return isBound;
+    get initialized() {
+      return initialized;
     },
   };
 })();

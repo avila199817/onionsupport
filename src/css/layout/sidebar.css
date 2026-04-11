@@ -354,6 +354,34 @@
   position:relative;
 }
 
+
+/* =========================
+   TOOLTIP SYSTEM — FINAL FIX
+   SOLO PARA ELEMENTOS CON data-tooltip
+   EXCLUYE FOOTER / USER / DROPDOWN
+   SIN ROMPER BOTONES
+   SIN CONFLICTO CON ACTIVE
+   TOPSIDEBAR: TOOLTIP DEBAJO DEL TRIGGER
+   MÁS SÓLIDO + SIN RECORTE EN COLLAPSED
+========================= */
+
+.sidebar,
+.sidebar-top,
+.sidebar-menu{
+  overflow:visible;
+}
+
+.sidebar-footer,
+.user-dropdown{
+  overflow:visible;
+}
+
+.logo[data-tooltip],
+.sidebar-toggle[data-tooltip],
+.menu-item[data-tooltip]{
+  position:relative;
+}
+
 /* =========================================================
    TOPSIDEBAR (logo + toggle)
    Tooltip por debajo del trigger
@@ -377,8 +405,11 @@
   border-radius:14px;
   border:1px solid rgba(255,255,255,.10);
 
-  background:rgba(28,28,31,.98);
-  color:var(--text-strong);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.028), rgba(255,255,255,.006)),
+    rgba(28,28,31,.98);
+
+  color:var(--tooltip-text, #ffffff);
 
   font-size:12px;
   line-height:1;
@@ -459,7 +490,7 @@
     linear-gradient(180deg, rgba(255,255,255,.032), rgba(255,255,255,.010)),
     var(--tooltip-bg);
 
-  color:var(--text-soft);
+  color:var(--tooltip-text, var(--text-soft));
   font-size:12px;
   line-height:1;
   font-weight:var(--weight-semibold);

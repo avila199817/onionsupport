@@ -8,4 +8,4 @@
    - compatibilidad con import default y named
 ========================================================= */
 
-export { es as default, es } from "./es.js";
+export { es as default, es } from "./sidebar.js";

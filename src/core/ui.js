@@ -8,6 +8,7 @@
    - limpiar contenedores dinámicos shell
    - sincronizar bloque visual usuario
    - refresco reactivo con i18n
+   - pintar avatar robusto en sidebar sin romper fallback
 ========================================================= */
 
 import { config } from "./config.js";
@@ -31,10 +32,7 @@ export function setDocumentTitle({
   titleKey = "",
   titleParams = {},
 }) {
-  if (
-    typeof document ===
-    "undefined"
-  ) {
+  if (typeof document === "undefined") {
     return;
   }
 
@@ -101,6 +99,140 @@ export function clearDynamicContainers({
 }
 
 /* =========================================================
+   INTERNAL AVATAR HELPERS
+========================================================= */
+function removeAvatarImage(
+  avatarRoot
+) {
+  if (!avatarRoot) return;
+
+  const oldImg =
+    avatarRoot.querySelector(
+      'img[data-avatar-image="true"]'
+    );
+
+  oldImg?.remove();
+}
+
+function renderAvatarFallback(
+  avatarRoot,
+  avatarText,
+  avatarAlt,
+  displayName
+) {
+  if (!avatarRoot) return;
+
+  removeAvatarImage(
+    avatarRoot
+  );
+
+  avatarRoot.textContent =
+    avatarText;
+
+  avatarRoot.classList.remove(
+    "has-image"
+  );
+
+  avatarRoot.setAttribute(
+    "aria-label",
+    avatarAlt
+  );
+
+  avatarRoot.setAttribute(
+    "title",
+    displayName
+  );
+}
+
+function renderAvatarImage(
+  avatarRoot,
+  avatarUrl,
+  avatarAlt,
+  displayName,
+  avatarText
+) {
+  if (!avatarRoot) return;
+
+  const safeUrl = String(
+    avatarUrl || ""
+  ).trim();
+
+  if (!safeUrl) {
+    renderAvatarFallback(
+      avatarRoot,
+      avatarText,
+      avatarAlt,
+      displayName
+    );
+    return;
+  }
+
+  let img =
+    avatarRoot.querySelector(
+      'img[data-avatar-image="true"]'
+    );
+
+  if (!img) {
+    img =
+      document.createElement(
+        "img"
+      );
+
+    img.dataset.avatarImage =
+      "true";
+
+    img.loading = "eager";
+    img.decoding = "async";
+    img.draggable = false;
+    img.referrerPolicy =
+      "no-referrer";
+
+    img.style.width =
+      "100%";
+    img.style.height =
+      "100%";
+    img.style.objectFit =
+      "cover";
+    img.style.borderRadius =
+      "50%";
+    img.style.display =
+      "block";
+
+    img.onerror = () => {
+      renderAvatarFallback(
+        avatarRoot,
+        avatarText,
+        avatarAlt,
+        displayName
+      );
+    };
+
+    avatarRoot.innerHTML =
+      "";
+    avatarRoot.appendChild(
+      img
+    );
+  }
+
+  img.src = safeUrl;
+  img.alt = avatarAlt;
+
+  avatarRoot.classList.add(
+    "has-image"
+  );
+
+  avatarRoot.setAttribute(
+    "aria-label",
+    avatarAlt
+  );
+
+  avatarRoot.setAttribute(
+    "title",
+    displayName
+  );
+}
+
+/* =========================================================
    USER UI
 ========================================================= */
 export function syncUserUI({
@@ -133,10 +265,7 @@ export function syncUserUI({
     ) ||
     (username
       ? username
-          .slice(
-            0,
-            2
-          )
+          .slice(0, 2)
           .toUpperCase()
       : "ON");
 
@@ -175,67 +304,21 @@ export function syncUserUI({
     dom?.sidebarAvatar
   ) {
     if (!avatarUrl) {
-      const oldImg =
-        dom.sidebarAvatar.querySelector(
-          'img[data-avatar-image="true"]'
-        );
-
-      oldImg?.remove();
-
-      dom.sidebarAvatar.textContent =
-        avatarText;
-
-      dom.sidebarAvatar.classList.remove(
-        "has-image"
+      renderAvatarFallback(
+        dom.sidebarAvatar,
+        avatarText,
+        avatarAlt,
+        displayName
       );
     } else {
-      let img =
-        dom.sidebarAvatar.querySelector(
-          'img[data-avatar-image="true"]'
-        );
-
-      if (!img) {
-        img =
-          document.createElement(
-            "img"
-          );
-
-        img.dataset.avatarImage =
-          "true";
-
-        img.loading =
-          "lazy";
-
-        img.decoding =
-          "async";
-
-        dom.sidebarAvatar.innerHTML =
-          "";
-
-        dom.sidebarAvatar.appendChild(
-          img
-        );
-      }
-
-      img.src =
-        avatarUrl;
-      img.alt =
-        avatarAlt;
-
-      dom.sidebarAvatar.classList.add(
-        "has-image"
+      renderAvatarImage(
+        dom.sidebarAvatar,
+        avatarUrl,
+        avatarAlt,
+        displayName,
+        avatarText
       );
     }
-
-    dom.sidebarAvatar.setAttribute(
-      "aria-label",
-      avatarAlt
-    );
-
-    dom.sidebarAvatar.setAttribute(
-      "title",
-      displayName
-    );
 
     if (username) {
       dom.sidebarAvatar.dataset.username =

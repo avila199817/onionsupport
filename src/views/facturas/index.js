@@ -4,10 +4,10 @@
 
    Responsabilidades:
    - punto único de entrada del módulo facturas
-   - exportar vista principal
-   - exportar modelo público
-   - exportar utilidades reutilizables
-   - mantener imports limpios en toda la app
+   - exportar la vista principal
+   - exportar el modelo público del módulo
+   - exportar utilidades y helpers reutilizables
+   - centralizar la superficie pública del módulo
 ========================================================= */
 
 /* =========================================================
@@ -17,7 +17,7 @@
 export { FacturasView } from "./facturasView.js";
 
 /* =========================================================
-   MODEL
+   MODEL PÚBLICO
 ========================================================= */
 
 export {
@@ -62,7 +62,7 @@ export {
 } from "./facturas.model.js";
 
 /* =========================================================
-   HELPERS PÚBLICOS
+   UTILS REUTILIZABLES
 ========================================================= */
 
 export {
@@ -74,7 +74,75 @@ export {
 } from "./facturas.utils.js";
 
 /* =========================================================
-   API (opcional público)
+   STATE
+========================================================= */
+
+export {
+  createFacturasState,
+  resetFacturasViewState,
+  resetFacturasDetailState,
+  resetFacturasInflightState,
+  resetFacturasState,
+  getFacturasViewState,
+  getFacturasDetailState,
+  getFacturasActionsState,
+  getFacturasInflightState,
+  isFacturasHydrated,
+  isFacturasLoading,
+  isFacturasLoaded,
+  isFacturasRefreshing,
+  isFacturasBootstrapped,
+  getFacturasError,
+  getFacturasRemoteCount,
+  isFacturasDetailOpen,
+  isFacturasDetailLoading,
+  getFacturasDetailData,
+  getFacturasSendingFacturaId,
+  getFacturasDownloadingFacturaId,
+  getFacturasViewingFacturaId,
+  getFacturasInflightLoad,
+  getFacturasInflightDetail,
+  setFacturasHydrated,
+  setFacturasLoading,
+  setFacturasLoaded,
+  setFacturasError,
+  clearFacturasError,
+  setFacturasRefreshing,
+  setFacturasBootstrapped,
+  setFacturasRemoteCount,
+  setFacturasDetailOpen,
+  setFacturasDetailLoading,
+  setFacturasDetailData,
+  openFacturasDetail,
+  closeFacturasDetail,
+  setFacturasSendingFacturaId,
+  setFacturasDownloadingFacturaId,
+  setFacturasViewingFacturaId,
+  clearFacturasActionIds,
+  setFacturasInflightLoad,
+  setFacturasInflightDetail,
+  getFacturasTemplateState,
+} from "./facturas.state.js";
+
+/* =========================================================
+   STORE
+========================================================= */
+
+export {
+  getFacturasStore,
+  getSortedFacturasStore,
+  getFacturaByIdStore,
+  hasFacturasStore,
+  countFacturasStore,
+  setFacturasStore,
+  appendFacturasStore,
+  upsertFacturaStore,
+  removeFacturaByIdStore,
+  clearFacturasStore,
+} from "./facturas.store.js";
+
+/* =========================================================
+   API
 ========================================================= */
 
 export {
@@ -85,19 +153,16 @@ export {
 } from "./facturas.api.js";
 
 /* =========================================================
-   STORE (opcional público)
+   LOADERS
 ========================================================= */
 
 export {
-  getFacturasStore,
-  getSortedFacturasStore,
-  getFacturaByIdStore,
-  setFacturasStore,
-  clearFacturasStore,
-} from "./facturas.store.js";
+  loadFacturasCollection,
+  loadFacturaDetailById,
+} from "./facturas.loaders.js";
 
 /* =========================================================
-   ACTIONS (opcional público)
+   ACTIONS
 ========================================================= */
 
 export {
@@ -109,22 +174,25 @@ export {
 } from "./facturas.actions.js";
 
 /* =========================================================
-   LOADERS (opcional público)
+   BINDINGS
 ========================================================= */
 
-export {
-  loadFacturasCollection,
-  loadFacturaDetailById,
-} from "./facturas.loaders.js";
+export { bindFacturasView } from "./facturas.bindings.js";
 
 /* =========================================================
-   STATE (opcional público)
+   TEMPLATES
 ========================================================= */
 
 export {
-  createFacturasState,
-  closeFacturasDetail,
-  resetFacturasViewState,
-  resetFacturasDetailState,
-  resetFacturasInflightState,
-} from "./facturas.state.js";
+  renderHeader,
+  renderCards,
+  renderLoadingState,
+  renderErrorState,
+} from "./facturas.template.js";
+
+export {
+  renderMiniMeta,
+  renderDetailStat,
+  renderFacturasDetailContent,
+  renderFacturasDetailModal,
+} from "./facturas.detail.template.js";

@@ -1,1161 +1,497 @@
 /* =========================================================
-   Onion SPA - Facturas View (FULL PRO SAAS PANEL · GOD MODE)
-   Archivo: src/views/facturas/index.js
+   Onion SPA - Facturas Template (FULL PRO SAAS PANEL · FINAL PRO)
+   Archivo: src/views/facturas/facturas.template.js
 
    Responsabilidades:
-   - montar la vista de facturas de extremo a extremo
-   - cargar listado, stats y detalle
-   - aplicar filtros y ordenación en cliente
-   - bind de acciones reales: refresh / filter / sort / view / pdf / download / send
-   - renderizar tabla/cards con facturas.template.js
-   - abrir modal premium de detalle
-   - usar showToast / Toast de forma consistente
-   - integrarse con AppCore y Router
+   - renderizar header premium de la vista
+   - renderizar estados loading / error / empty
+   - renderizar grid de cards de facturas
+   - exponer helpers visuales consistentes
+   - mantener compatibilidad directa con src/views/facturas/index.js
 ========================================================= */
 
-import { AppCore } from "../../core/index.js";
-import { Router } from "../../router/index.js";
-import { Toast } from "../../ui/toast.js";
+function escapeHtml(value = "") {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
 
-import {
-  renderHeader,
-  renderCards,
-  renderLoadingState,
-  renderErrorState,
-} from "./facturas.template.js";
+function safeText(value, fallback = "—") {
+  if (value === null || value === undefined) return fallback;
+  const text = String(value).trim();
+  return text || fallback;
+}
 
-/* =========================================================
-   VISTA
-========================================================= */
-export const FacturasView = (() => {
-  "use strict";
+function safeNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
 
-  const SCOPE = "view:facturas";
-  const API_BASE = "/facturas";
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
 
-  const state = {
-    mounted: false,
-    loading: false,
-    refreshing: false,
-    error: "",
-    items: [],
-    filteredItems: [],
-    stats: null,
-    detail: null,
-    detailLoading: false,
-    remoteCount: 0,
-    lastLoadedAt: null,
+function formatMoney(value, currency = "EUR") {
+  const amount = safeNumber(value, 0);
+  const code = safeText(currency, "EUR") || "EUR";
 
-    filters: {
-      query: "",
-      estadoPago: "all",
-      estado: "all",
-      formaPago: "all",
-    },
+  try {
+    return new Intl.NumberFormat("es-ES", {
+      style: "currency",
+      currency: code,
+    }).format(amount);
+  } catch {
+    return `${amount.toFixed(2)} ${code}`;
+  }
+}
 
-    sort: {
-      field: "fecha",
-      direction: "desc",
-    },
+function formatDate(value) {
+  if (!value) return "—";
 
-    ui: {
-      filtersOpen: false,
-      sortOpen: false,
-      detailOpen: false,
-      sendingFacturaId: "",
-      downloadingFacturaId: "",
-      viewingFacturaId: "",
-    },
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
 
-    abortControllers: {
-      list: null,
-      stats: null,
-      detail: null,
-      file: null,
-      send: null,
-    },
+  return new Intl.DateTimeFormat("es-ES", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function formatRelativeDate(value) {
+  if (!value) return "Sin fecha";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Sin fecha";
+
+  const now = new Date();
+  const diffMs = date.getTime() - now.getTime();
+  const diffMinutes = Math.round(diffMs / 60000);
+  const absMinutes = Math.abs(diffMinutes);
+
+  if (absMinutes < 1) return "Ahora mismo";
+  if (absMinutes < 60) {
+    return diffMinutes > 0
+      ? `En ${absMinutes} min`
+      : `Hace ${absMinutes} min`;
+  }
+
+  const diffHours = Math.round(diffMinutes / 60);
+  const absHours = Math.abs(diffHours);
+
+  if (absHours < 24) {
+    return diffHours > 0
+      ? `En ${absHours} h`
+      : `Hace ${absHours} h`;
+  }
+
+  const diffDays = Math.round(diffHours / 24);
+  const absDays = Math.abs(diffDays);
+
+  if (absDays < 7) {
+    return diffDays > 0
+      ? `En ${absDays} día${absDays === 1 ? "" : "s"}`
+      : `Hace ${absDays} día${absDays === 1 ? "" : "s"}`;
+  }
+
+  return formatDate(value);
+}
+
+function getEstadoPagoLabel(value = "") {
+  const key = String(value || "").trim().toLowerCase();
+
+  switch (key) {
+    case "paid":
+    case "pagada":
+    case "pagado":
+    case "cobrada":
+      return "Pagada";
+
+    case "pending":
+    case "pendiente":
+      return "Pendiente";
+
+    case "overdue":
+    case "vencida":
+      return "Vencida";
+
+    case "cancelled":
+    case "cancelada":
+      return "Cancelada";
+
+    case "draft":
+    case "borrador":
+      return "Borrador";
+
+    case "partial":
+    case "parcial":
+      return "Pago parcial";
+
+    default:
+      return safeText(value, "Pendiente");
+  }
+}
+
+function getEstadoLabel(value = "") {
+  const key = String(value || "").trim().toLowerCase();
+
+  switch (key) {
+    case "emitida":
+    case "issued":
+      return "Emitida";
+
+    case "borrador":
+    case "draft":
+      return "Borrador";
+
+    case "cancelada":
+    case "cancelled":
+      return "Cancelada";
+
+    case "abonada":
+      return "Abonada";
+
+    default:
+      return safeText(value, "Emitida");
+  }
+}
+
+function getEstadoPagoChipStyle(value = "") {
+  const key = String(value || "").trim().toLowerCase();
+
+  if (["paid", "pagada", "pagado", "cobrada"].includes(key)) {
+    return `
+      color:var(--success-strong, #36c690);
+      background:color-mix(in srgb, var(--success-strong, #36c690) 14%, transparent);
+      border:1px solid color-mix(in srgb, var(--success-strong, #36c690) 26%, transparent);
+    `;
+  }
+
+  if (["pending", "pendiente", "partial", "parcial"].includes(key)) {
+    return `
+      color:var(--warning-strong, #ffbc42);
+      background:color-mix(in srgb, var(--warning-strong, #ffbc42) 14%, transparent);
+      border:1px solid color-mix(in srgb, var(--warning-strong, #ffbc42) 26%, transparent);
+    `;
+  }
+
+  if (["overdue", "vencida"].includes(key)) {
+    return `
+      color:var(--danger-strong, #ff6b6b);
+      background:color-mix(in srgb, var(--danger-strong, #ff6b6b) 14%, transparent);
+      border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, transparent);
+    `;
+  }
+
+  if (["cancelled", "cancelada"].includes(key)) {
+    return `
+      color:var(--text-dim);
+      background:var(--surface-glass);
+      border:1px solid var(--border-soft);
+    `;
+  }
+
+  return `
+    color:var(--text-soft);
+    background:var(--surface-glass);
+    border:1px solid var(--border-soft);
+  `;
+}
+
+function getEstadoChipStyle(value = "") {
+  const key = String(value || "").trim().toLowerCase();
+
+  if (["emitida", "issued"].includes(key)) {
+    return `
+      color:var(--accent-strong, var(--accent, #7c5cff));
+      background:color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent);
+      border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 26%, transparent);
+    `;
+  }
+
+  if (["borrador", "draft"].includes(key)) {
+    return `
+      color:var(--warning-strong, #ffbc42);
+      background:color-mix(in srgb, var(--warning-strong, #ffbc42) 14%, transparent);
+      border:1px solid color-mix(in srgb, var(--warning-strong, #ffbc42) 26%, transparent);
+    `;
+  }
+
+  if (["cancelada", "cancelled"].includes(key)) {
+    return `
+      color:var(--danger-strong, #ff6b6b);
+      background:color-mix(in srgb, var(--danger-strong, #ff6b6b) 14%, transparent);
+      border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, transparent);
+    `;
+  }
+
+  return `
+    color:var(--text-soft);
+    background:var(--surface-glass);
+    border:1px solid var(--border-soft);
+  `;
+}
+
+function renderStatCard({
+  label = "",
+  value = "0",
+  caption = "",
+  accent = false,
+} = {}) {
+  return `
+    <article
+      class="facturas-stat-card panel-surface"
+      style="
+        position:relative;
+        overflow:hidden;
+        display:grid;
+        gap:10px;
+        min-height:132px;
+        padding:20px;
+        border-radius:var(--panel-radius);
+        border:1px solid ${accent ? "color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft))" : "var(--border-soft)"};
+        background:${accent ? "linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 72%), var(--surface-1, var(--surface-glass))" : "var(--surface-1, var(--surface-glass))"};
+        box-shadow:var(--shadow-sm);
+      "
+    >
+      <span
+        style="
+          font-size:12px;
+          line-height:1;
+          letter-spacing:.08em;
+          text-transform:uppercase;
+          color:var(--text-dim);
+          font-weight:var(--weight-bold);
+        "
+      >
+        ${escapeHtml(label)}
+      </span>
+
+      <strong
+        style="
+          font-size:clamp(24px, 3vw, 34px);
+          line-height:1;
+          letter-spacing:-.04em;
+          color:var(--text-strong);
+          font-weight:var(--weight-black);
+        "
+      >
+        ${escapeHtml(value)}
+      </strong>
+
+      <p
+        style="
+          margin:0;
+          color:var(--text-dim);
+          font-size:var(--font-sm);
+          line-height:1.45;
+        "
+      >
+        ${escapeHtml(caption)}
+      </p>
+    </article>
+  `;
+}
+
+function computeStats(items = []) {
+  const list = safeArray(items);
+
+  const totalFacturas = list.length;
+  const totalImporte = list.reduce((acc, item) => acc + safeNumber(item?.total, 0), 0);
+
+  const paidCount = list.filter((item) => {
+    const estado = String(item?.estadoPago || "").toLowerCase();
+    return ["paid", "pagada", "pagado", "cobrada"].includes(estado);
+  }).length;
+
+  const pendingCount = list.filter((item) => {
+    const estado = String(item?.estadoPago || "").toLowerCase();
+    return ["pending", "pendiente", "partial", "parcial"].includes(estado);
+  }).length;
+
+  const overdueCount = list.filter((item) => {
+    const estado = String(item?.estadoPago || "").toLowerCase();
+    return ["overdue", "vencida"].includes(estado);
+  }).length;
+
+  return {
+    totalFacturas,
+    totalImporte,
+    paidCount,
+    pendingCount,
+    overdueCount,
   };
-
-  /* =========================================================
-     HELPERS BASE
-  ========================================================= */
-  function getContainer() {
-    return AppCore?.dom?.viewContainer || null;
-  }
-
-  function safeText(value, fallback = "—") {
-    if (value === null || value === undefined) return fallback;
-    const text = String(value).trim();
-    return text || fallback;
-  }
-
-  function safeNumber(value, fallback = 0) {
-    const n = Number(value);
-    return Number.isFinite(n) ? n : fallback;
-  }
-
-  function safeArray(value) {
-    return Array.isArray(value) ? value : [];
-  }
-
-  function escapeHtml(value = "") {
-    if (AppCore?.utils?.escapeHtml) {
-      return AppCore.utils.escapeHtml(String(value ?? ""));
-    }
-
-    return String(value ?? "")
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#39;");
-  }
-
-  function normalizeText(value = "") {
-    return String(value || "")
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .trim();
-  }
-
-  function showToast(message = "", type = "info") {
-    const text = safeText(message, "Acción completada");
-
-    try {
-      if (typeof AppCore?.showToast === "function") {
-        AppCore.showToast(text, type);
-        return;
-      }
-
-      if (typeof Toast?.show === "function") {
-        Toast.show({ message: text, type });
-        return;
-      }
-
-      if (typeof Toast === "function") {
-        Toast({ message: text, type });
-        return;
-      }
-    } catch (error) {
-      console.warn("[FacturasView] showToast fallback", error);
-    }
-
-    console.log(`[${type.toUpperCase()}] ${text}`);
-  }
-
-  function getToken() {
-    return (
-      safeText(AppCore?.state?.token, "") ||
-      safeText(AppCore?.session?.token, "") ||
-      safeText(AppCore?.getToken?.(), "")
-    );
-  }
-
-  function getApiBase() {
-    return safeText(AppCore?.config?.apiBase, "");
-  }
-
-  function buildApiUrl(pathname = "") {
-    const base = getApiBase();
-    const path = pathname.startsWith("/") ? pathname : `/${pathname}`;
-    return `${base}${path}`;
-  }
-
-  function getHeaders(extra = {}) {
-    const headers = {
-      Accept: "application/json",
-      ...extra,
-    };
-
-    const token = getToken();
-
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-
-    return headers;
-  }
-
-  function abortControllerByKey(key) {
-    if (state.abortControllers[key]) {
-      try {
-        state.abortControllers[key].abort();
-      } catch {}
-    }
-
-    state.abortControllers[key] = new AbortController();
-    return state.abortControllers[key];
-  }
-
-  function clearAbortController(key) {
-    state.abortControllers[key] = null;
-  }
-
-  function setLoading(value) {
-    state.loading = Boolean(value);
-  }
-
-  function setRefreshing(value) {
-    state.refreshing = Boolean(value);
-  }
-
-  function setError(message = "") {
-    state.error = safeText(message, "");
-  }
-
-  function setDetailOpen(value) {
-    state.ui.detailOpen = Boolean(value);
-  }
-
-  function closeMenus() {
-    state.ui.filtersOpen = false;
-    state.ui.sortOpen = false;
-  }
-
-  /* =========================================================
-     FORMATTERS
-  ========================================================= */
-  function formatMoney(value, currency = "EUR") {
-    const amount = safeNumber(value, 0);
-    const code = safeText(currency, "EUR") || "EUR";
-
-    try {
-      return new Intl.NumberFormat("es-ES", {
-        style: "currency",
-        currency: code,
-      }).format(amount);
-    } catch {
-      return `${amount.toFixed(2)} ${code}`;
-    }
-  }
-
-  function formatDate(value) {
-    if (!value) return "—";
-
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return "—";
-
-    return new Intl.DateTimeFormat("es-ES", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(date);
-  }
-
-  function formatDateTime(value) {
-    if (!value) return "—";
-
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return "—";
-
-    return new Intl.DateTimeFormat("es-ES", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(date);
-  }
-
-  /* =========================================================
-     NORMALIZACIÓN DE DATOS
-  ========================================================= */
-  function normalizeFactura(raw = {}) {
-    const clienteNombre =
-      safeText(raw?.cliente?.empresa, "") ||
-      safeText(raw?.cliente?.nombre, "") ||
-      safeText(raw?.cliente?.nombreContacto, "") ||
-      safeText(raw?.owner?.name, "") ||
-      "Cliente";
-
-    const clienteEmail =
-      safeText(raw?.cliente?.email, "") ||
-      safeText(raw?.emailCliente, "") ||
-      safeText(raw?.owner?.email, "");
-
-    const initials =
-      safeText(raw?.cliente?.initials, "") ||
-      clienteNombre
-        .split(/\s+/)
-        .filter(Boolean)
-        .slice(0, 2)
-        .map((chunk) => chunk.charAt(0).toUpperCase())
-        .join("") ||
-      "ON";
-
-    return {
-      id: safeText(raw.id, ""),
-      numero:
-        safeText(raw.numero, "") ||
-        safeText(raw.numeroFacturaLegal, "") ||
-        safeText(raw.numeroFacturaSistema, "") ||
-        safeText(raw.id, "—"),
-      fecha:
-        safeText(raw.fecha, "") ||
-        safeText(raw.fechaFactura, "") ||
-        null,
-      fechaEnvio: safeText(raw.fechaEnvio, "") || null,
-      fechaServicio: safeText(raw.fechaServicio, "") || null,
-
-      estado: safeText(raw.estado, "emitida"),
-      estadoPago: safeText(raw.estadoPago, "pending"),
-      estadoDetalle: safeText(raw.estadoDetalle, ""),
-
-      moneda: safeText(raw.moneda, "EUR"),
-      total: safeNumber(raw.total, 0),
-      baseImponible: safeNumber(raw.baseImponible, 0),
-      subtotal: safeNumber(raw.subtotal, 0),
-      descuentoTotal: safeNumber(raw.descuentoTotal, 0),
-      impuestosTotal: safeNumber(raw.impuestosTotal, 0),
-
-      formaPago:
-        safeText(raw.formaPago, "") ||
-        safeText(raw.metodoPago, "") ||
-        "—",
-
-      cuentaPago: safeText(raw.cuentaPago, "") || "",
-      blobPath: safeText(raw.blobPath, "") || "",
-      pdfAvailable: Boolean(raw.pdfAvailable || raw.blobPath),
-
-      preview:
-        safeText(raw.preview, "") ||
-        safeText(raw.descripcion, "") ||
-        safeText(raw.concepto, "") ||
-        "Documento fiscal disponible para consulta.",
-
-      attachmentsCount: safeNumber(raw.attachmentsCount, 0),
-      updatedAt: safeText(raw.updatedAt, "") || safeText(raw.createdAt, "") || "",
-
-      clienteId: safeText(raw.clienteId, "") || safeText(raw?.cliente?.id, "") || "",
-      cliente: {
-        id: safeText(raw?.cliente?.id, "") || safeText(raw.clienteId, "") || "",
-        nombre:
-          safeText(raw?.cliente?.nombre, "") ||
-          safeText(raw?.cliente?.nombreContacto, "") ||
-          clienteNombre,
-        empresa:
-          safeText(raw?.cliente?.empresa, "") ||
-          safeText(raw?.cliente?.razonSocial, "") ||
-          clienteNombre,
-        email: clienteEmail,
-        initials,
-        avatar: safeText(raw?.cliente?.avatar, "") || null,
-        telefono: safeText(raw?.cliente?.telefono, "") || "",
-        nif: safeText(raw?.cliente?.nif, "") || "",
-        direccion: {
-          calle: safeText(raw?.cliente?.direccion?.calle, ""),
-          linea2: safeText(raw?.cliente?.direccion?.linea2, ""),
-          cp: safeText(raw?.cliente?.direccion?.cp, ""),
-          ciudad: safeText(raw?.cliente?.direccion?.ciudad, ""),
-          provincia: safeText(raw?.cliente?.direccion?.provincia, ""),
-          pais: safeText(raw?.cliente?.direccion?.pais, ""),
-        },
-      },
-
-      concepto: safeText(raw.concepto, "Factura"),
-      descripcion: safeText(raw.descripcion, ""),
-      lineas: safeArray(raw.lineas).map((linea, index) => ({
-        id: safeText(linea?.id, "") || `linea-${index + 1}`,
-        concepto: safeText(linea?.concepto, ""),
-        descripcion: safeText(linea?.descripcion, ""),
-        cantidad: safeNumber(linea?.cantidad, 0),
-        precioUnitario: safeNumber(linea?.precioUnitario, 0),
-        subtotal: safeNumber(linea?.subtotal, 0),
-        impuesto: safeNumber(linea?.impuesto, 0),
-        descuento: safeNumber(linea?.descuento, 0),
-        totalLinea: safeNumber(linea?.totalLinea, 0),
-      })),
-
-      impuestos: safeArray(raw.impuestos).map((item) => ({
-        tipo: safeText(item?.tipo, ""),
-        nombre: safeText(item?.nombre, "") || safeText(item?.tipo, ""),
-        porcentaje: safeNumber(item?.porcentaje, 0),
-        base: safeNumber(item?.base, 0),
-        importe: safeNumber(item?.importe, 0),
-      })),
-
-      notas: safeText(raw.notas, "") || "",
-      createdAt: safeText(raw.createdAt, "") || "",
-      updatedBy: safeText(raw.updatedBy, "") || "",
-      createdBy: safeText(raw.createdBy, "") || "",
-      enviadoA: safeText(raw.enviadoA, "") || "",
-      sendHistory: safeArray(raw.sendHistory),
-      owner: {
-        id: safeText(raw?.owner?.id, ""),
-        name: safeText(raw?.owner?.name, ""),
-        email: safeText(raw?.owner?.email, ""),
-        avatar: safeText(raw?.owner?.avatar, "") || null,
-      },
-    };
-  }
-
-  function normalizeListResponse(payload = {}) {
-    const rawItems =
-      safeArray(payload.items) ||
-      safeArray(payload.facturas) ||
-      safeArray(payload.data) ||
-      [];
-
-    return rawItems.map(normalizeFactura);
-  }
-
-  /* =========================================================
-     FILTROS Y ORDEN
-  ========================================================= */
-  function applyFilters(items = []) {
-    const query = normalizeText(state.filters.query);
-    const estadoPago = normalizeText(state.filters.estadoPago);
-    const estado = normalizeText(state.filters.estado);
-    const formaPago = normalizeText(state.filters.formaPago);
-
-    return items.filter((item) => {
-      const matchQuery =
-        !query ||
-        normalizeText(item.numero).includes(query) ||
-        normalizeText(item.cliente?.empresa).includes(query) ||
-        normalizeText(item.cliente?.nombre).includes(query) ||
-        normalizeText(item.cliente?.email).includes(query) ||
-        normalizeText(item.concepto).includes(query);
-
-      const matchEstadoPago =
-        !estadoPago ||
-        estadoPago === "all" ||
-        normalizeText(item.estadoPago) === estadoPago;
-
-      const matchEstado =
-        !estado ||
-        estado === "all" ||
-        normalizeText(item.estado) === estado;
-
-      const matchFormaPago =
-        !formaPago ||
-        formaPago === "all" ||
-        normalizeText(item.formaPago) === formaPago;
-
-      return matchQuery && matchEstadoPago && matchEstado && matchFormaPago;
-    });
-  }
-
-  function sortItems(items = []) {
-    const cloned = [...items];
-    const field = safeText(state.sort.field, "fecha");
-    const direction = state.sort.direction === "asc" ? 1 : -1;
-
-    cloned.sort((a, b) => {
-      if (field === "cliente") {
-        return (
-          normalizeText(a?.cliente?.empresa || a?.cliente?.nombre).localeCompare(
-            normalizeText(b?.cliente?.empresa || b?.cliente?.nombre),
-            "es"
-          ) * direction
-        );
-      }
-
-      if (field === "total") {
-        return (safeNumber(a?.total, 0) - safeNumber(b?.total, 0)) * direction;
-      }
-
-      if (field === "updatedAt" || field === "fecha") {
-        return (
-          (new Date(a?.[field] || 0).getTime() -
-            new Date(b?.[field] || 0).getTime()) *
-          direction
-        );
-      }
-
-      return (
-        normalizeText(a?.[field]).localeCompare(normalizeText(b?.[field]), "es") *
-        direction
-      );
-    });
-
-    return cloned;
-  }
-
-  function syncDerivedState() {
-    state.filteredItems = sortItems(applyFilters(state.items));
-  }
-
-  /* =========================================================
-     HTTP
-  ========================================================= */
-  async function requestJson(url, options = {}) {
-    const response = await fetch(url, {
-      credentials: "include",
-      ...options,
-      headers: {
-        ...getHeaders(options.headers || {}),
-      },
-    });
-
-    let payload = null;
-
-    try {
-      payload = await response.json();
-    } catch {
-      payload = null;
-    }
-
-    if (!response.ok) {
-      const message =
-        safeText(payload?.error, "") ||
-        safeText(payload?.message, "") ||
-        `HTTP_${response.status}`;
-
-      const error = new Error(message);
-      error.status = response.status;
-      error.payload = payload;
-      throw error;
-    }
-
-    return payload || {};
-  }
-
-  /* =========================================================
-     API
-  ========================================================= */
-  async function fetchFacturasList({ silent = false } = {}) {
-    const controller = abortControllerByKey("list");
-
-    if (!silent) {
-      setLoading(true);
-      setError("");
-      render();
-    }
-
-    try {
-      const payload = await requestJson(buildApiUrl(API_BASE), {
-        method: "GET",
-        signal: controller.signal,
-      });
-
-      state.items = normalizeListResponse(payload);
-      state.remoteCount = safeNumber(
-        payload?.count,
-        safeNumber(payload?.remoteCount, state.items.length)
-      );
-
-      syncDerivedState();
-      state.lastLoadedAt = new Date().toISOString();
-
-      return state.items;
-    } finally {
-      setLoading(false);
-      clearAbortController("list");
-    }
-  }
-
-  async function fetchFacturasStats({ silent = true } = {}) {
-    const controller = abortControllerByKey("stats");
-
-    try {
-      const payload = await requestJson(buildApiUrl(`${API_BASE}/stats`), {
-        method: "GET",
-        signal: controller.signal,
-      });
-
-      state.stats = payload?.stats || null;
-      return state.stats;
-    } catch (error) {
-      if (!silent) {
-        throw error;
-      }
-
-      console.warn("[FacturasView] stats fallback", error);
-      return null;
-    } finally {
-      clearAbortController("stats");
-    }
-  }
-
-  async function fetchFacturaDetail(facturaId = "") {
-    const id = safeText(facturaId, "");
-    if (!id) return null;
-
-    const controller = abortControllerByKey("detail");
-    state.detailLoading = true;
-    renderDetail();
-
-    try {
-      const payload = await requestJson(
-        buildApiUrl(`${API_BASE}/${encodeURIComponent(id)}`),
-        {
-          method: "GET",
-          signal: controller.signal,
-        }
-      );
-
-      state.detail = normalizeFactura(payload?.factura || {});
-      setDetailOpen(true);
-      renderDetail();
-
-      return state.detail;
-    } finally {
-      state.detailLoading = false;
-      clearAbortController("detail");
-    }
-  }
-
-  async function fetchFacturaFileUrl(facturaId = "", mode = "attachment") {
-    const id = safeText(facturaId, "");
-    if (!id) {
-      throw new Error("FACTURA_ID_REQUIRED");
-    }
-
-    const controller = abortControllerByKey("file");
-    const endpoint =
-      mode === "inline"
-        ? `${API_BASE}/${encodeURIComponent(id)}/pdf?disposition=inline`
-        : `${API_BASE}/${encodeURIComponent(id)}/descargar?disposition=attachment`;
-
-    try {
-      const payload = await requestJson(buildApiUrl(endpoint), {
-        method: "GET",
-        signal: controller.signal,
-      });
-
-      const url = safeText(payload?.file?.url, "");
-
-      if (!url) {
-        throw new Error("FACTURA_FILE_URL_MISSING");
-      }
-
-      return payload;
-    } finally {
-      clearAbortController("file");
-    }
-  }
-
-  async function sendFactura(facturaId = "") {
-    const id = safeText(facturaId, "");
-    if (!id) {
-      throw new Error("FACTURA_ID_REQUIRED");
-    }
-
-    const controller = abortControllerByKey("send");
-
-    try {
-      const payload = await requestJson(
-        buildApiUrl(`${API_BASE}/${encodeURIComponent(id)}/enviar`),
-        {
-          method: "POST",
-          signal: controller.signal,
-          headers: {
-            "Content-Type": "application/json",
-          },
-        }
-      );
-
-      return payload;
-    } finally {
-      clearAbortController("send");
-    }
-  }
-
-  /* =========================================================
-     RENDER BASE
-  ========================================================= */
-  function render() {
-    const container = getContainer();
-    if (!container) return;
-
-    const items = state.filteredItems;
-    const headerState = {
-      loading: state.loading,
-      refreshing: state.refreshing,
-      remoteCount: state.remoteCount || state.items.length,
-    };
-
-    const toolbarPanels = renderTopPanels();
-    const detailModal = renderDetailModal();
-
-    let bodyHtml = "";
-
-    if (state.loading && !state.items.length) {
-      bodyHtml = renderLoadingState();
-    } else if (state.error && !state.items.length) {
-      bodyHtml = renderErrorState(state.error);
-    } else {
-      bodyHtml = renderCards({
-        items,
-        state: {
-          loading: state.loading,
-          refreshing: state.refreshing,
-          error: state.error,
-          remoteCount: state.remoteCount || items.length,
-        },
-      });
-    }
-
-    container.innerHTML = `
-      <section class="view-shell view-facturas" data-scope="${escapeHtml(SCOPE)}">
-        <div class="view-stack" style="display:grid; gap:var(--space-lg);">
-          ${renderHeader({ items, state: headerState })}
-          ${toolbarPanels}
-          ${bodyHtml}
-        </div>
-
-        ${detailModal}
-      </section>
-    `;
-
-    bindDom();
-  }
-
-  function renderTopPanels() {
-    return `
-      <div style="display:grid; gap:var(--space-md);">
-        ${renderFilterPanel()}
-        ${renderSortPanel()}
-      </div>
-    `;
-  }
-
-  function renderFilterPanel() {
-    const open = state.ui.filtersOpen;
-
-    return `
-      <section
-        class="panel-surface facturas-filters-panel"
-        style="
-          display:${open ? "block" : "none"};
-          padding:var(--space-lg);
-          border-radius:var(--panel-radius);
-        "
-      >
-        <div style="display:grid; gap:var(--space-md);">
-          <div style="display:grid; gap:6px;">
-            <h3 style="margin:0; font-size:var(--font-lg); color:var(--text-strong);">
-              Filtros
-            </h3>
-            <p style="margin:0; font-size:var(--font-sm); color:var(--text-dim);">
-              Ajusta el listado por búsqueda, estado de pago, estado y método de pago.
-            </p>
-          </div>
-
-          <div
-            style="
-              display:grid;
-              grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));
-              gap:var(--space-md);
-            "
-          >
-            ${renderInputField({
-              label: "Buscar",
-              inputId: "facturas-filter-query",
-              value: state.filters.query,
-              placeholder: "Cliente, factura, email...",
-            })}
-
-            ${renderSelectField({
-              label: "Estado pago",
-              inputId: "facturas-filter-estado-pago",
-              value: state.filters.estadoPago,
-              options: [
-                ["all", "Todos"],
-                ["paid", "Pagadas"],
-                ["pending", "Pendientes"],
-                ["overdue", "Vencidas"],
-                ["cancelled", "Canceladas"],
-                ["draft", "Borrador"],
-              ],
-            })}
-
-            ${renderSelectField({
-              label: "Estado",
-              inputId: "facturas-filter-estado",
-              value: state.filters.estado,
-              options: [
-                ["all", "Todos"],
-                ["emitida", "Emitida"],
-                ["borrador", "Borrador"],
-                ["cancelada", "Cancelada"],
-              ],
-            })}
-
-            ${renderInputField({
-              label: "Forma pago",
-              inputId: "facturas-filter-forma-pago",
-              value: state.filters.formaPago === "all" ? "" : state.filters.formaPago,
-              placeholder: "Tarjeta, transferencia...",
-            })}
-          </div>
-
-          <div style="display:flex; gap:10px; flex-wrap:wrap;">
-            <button
-              type="button"
-              data-action="apply-filters"
-              style="
-                min-height:40px;
-                padding:0 14px;
-                border-radius:var(--btn-radius);
-                border:1px solid var(--btn-primary-border);
-                background:var(--btn-primary-bg);
-                color:var(--btn-primary-text);
-                font-weight:var(--weight-bold);
-                cursor:pointer;
-              "
-            >
-              Aplicar filtros
-            </button>
-
-            <button
-              type="button"
-              data-action="reset-filters"
-              style="
-                min-height:40px;
-                padding:0 14px;
-                border-radius:var(--btn-radius);
-                border:1px solid var(--btn-secondary-border);
-                background:var(--btn-secondary-bg);
-                color:var(--btn-secondary-text);
-                font-weight:var(--weight-bold);
-                cursor:pointer;
-              "
-            >
-              Limpiar
-            </button>
-          </div>
-        </div>
-      </section>
-    `;
-  }
-
-  function renderSortPanel() {
-    const open = state.ui.sortOpen;
-
-    return `
-      <section
-        class="panel-surface facturas-sort-panel"
-        style="
-          display:${open ? "block" : "none"};
-          padding:var(--space-lg);
-          border-radius:var(--panel-radius);
-        "
-      >
-        <div style="display:grid; gap:var(--space-md);">
-          <div style="display:grid; gap:6px;">
-            <h3 style="margin:0; font-size:var(--font-lg); color:var(--text-strong);">
-              Ordenación
-            </h3>
-            <p style="margin:0; font-size:var(--font-sm); color:var(--text-dim);">
-              Define cómo quieres ver la colección actual.
-            </p>
-          </div>
-
-          <div
-            style="
-              display:grid;
-              grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));
-              gap:var(--space-md);
-            "
-          >
-            ${renderSelectField({
-              label: "Campo",
-              inputId: "facturas-sort-field",
-              value: state.sort.field,
-              options: [
-                ["fecha", "Fecha"],
-                ["updatedAt", "Última actividad"],
-                ["total", "Importe"],
-                ["cliente", "Cliente"],
-              ],
-            })}
-
-            ${renderSelectField({
-              label: "Dirección",
-              inputId: "facturas-sort-direction",
-              value: state.sort.direction,
-              options: [
-                ["desc", "Descendente"],
-                ["asc", "Ascendente"],
-              ],
-            })}
-          </div>
-
-          <div style="display:flex; gap:10px; flex-wrap:wrap;">
-            <button
-              type="button"
-              data-action="apply-sort"
-              style="
-                min-height:40px;
-                padding:0 14px;
-                border-radius:var(--btn-radius);
-                border:1px solid var(--btn-primary-border);
-                background:var(--btn-primary-bg);
-                color:var(--btn-primary-text);
-                font-weight:var(--weight-bold);
-                cursor:pointer;
-              "
-            >
-              Aplicar orden
-            </button>
-          </div>
-        </div>
-      </section>
-    `;
-  }
-
-  function renderInputField({
-    label = "",
-    inputId = "",
-    value = "",
-    placeholder = "",
-  } = {}) {
-    return `
-      <label style="display:grid; gap:8px;">
-        <span style="font-size:var(--font-sm); color:var(--text-dim); font-weight:var(--weight-semibold);">
-          ${escapeHtml(label)}
-        </span>
-        <input
-          id="${escapeHtml(inputId)}"
-          type="text"
-          value="${escapeHtml(value)}"
-          placeholder="${escapeHtml(placeholder)}"
-          style="
-            min-height:46px;
-            padding:0 14px;
-            border-radius:var(--input-radius);
-            border:1px solid var(--input-border);
-            background:var(--input-bg);
-            color:var(--input-text);
-            outline:none;
-          "
-        />
-      </label>
-    `;
-  }
-
-  function renderSelectField({
-    label = "",
-    inputId = "",
-    value = "",
-    options = [],
-  } = {}) {
-    return `
-      <label style="display:grid; gap:8px;">
-        <span style="font-size:var(--font-sm); color:var(--text-dim); font-weight:var(--weight-semibold);">
-          ${escapeHtml(label)}
-        </span>
-        <select
-          id="${escapeHtml(inputId)}"
-          style="
-            min-height:46px;
-            padding:0 14px;
-            border-radius:var(--input-radius);
-            border:1px solid var(--input-border);
-            background:var(--input-bg);
-            color:var(--input-text);
-            outline:none;
-          "
-        >
-          ${options
-            .map(
-              ([optionValue, optionLabel]) => `
-                <option
-                  value="${escapeHtml(optionValue)}"
-                  ${String(optionValue) === String(value) ? "selected" : ""}
-                >
-                  ${escapeHtml(optionLabel)}
-                </option>
-              `
-            )
-            .join("")}
-        </select>
-      </label>
-    `;
-  }
-
-  /* =========================================================
-     DETALLE MODAL
-  ========================================================= */
-  function renderDetailModal() {
-    if (!state.ui.detailOpen) {
-      return "";
-    }
-
-    const factura = state.detail;
-    const loading = state.detailLoading;
-
-    return `
+}
+
+export function renderHeader({ items = [], state = {} } = {}) {
+  const stats = computeStats(items);
+  const loading = Boolean(state?.loading);
+  const refreshing = Boolean(state?.refreshing);
+  const remoteCount = safeNumber(
+    state?.remoteCount,
+    safeArray(items).length
+  );
+
+  return `
+    <section
+      class="facturas-hero"
+      style="
+        position:relative;
+        overflow:hidden;
+        border-radius:calc(var(--panel-radius) + 6px);
+        border:1px solid var(--border-soft);
+        background:
+          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent), transparent 34%),
+          linear-gradient(180deg, var(--surface-2, var(--surface-glass)), var(--surface-1, var(--surface-glass)));
+        box-shadow:var(--shadow-md);
+      "
+    >
       <div
-        class="facturas-detail-overlay"
-        data-action="close-detail"
         style="
-          position:fixed;
-          inset:0;
-          z-index:var(--z-modal);
-          background:var(--backdrop-bg);
           display:grid;
-          place-items:center;
-          padding:24px;
+          gap:var(--space-lg);
+          padding:clamp(20px, 3vw, 30px);
         "
       >
-        <div
-          class="facturas-detail-modal"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Detalle de factura"
-          style="
-            width:min(1080px, 100%);
-            max-height:min(90vh, 920px);
-            overflow:auto;
-            border-radius:var(--modal-radius);
-            border:1px solid var(--border-soft);
-            background:var(--modal-bg);
-            box-shadow:var(--shadow-lg);
-          "
-          onclick="event.stopPropagation()"
-        >
-          ${
-            loading
-              ? `
-                <div style="padding:24px; display:grid; gap:16px;">
-                  <div style="height:30px; width:220px; border-radius:12px; background:var(--surface-glass);"></div>
-                  <div style="height:90px; border-radius:18px; background:var(--surface-glass);"></div>
-                  <div style="height:220px; border-radius:18px; background:var(--surface-glass);"></div>
-                </div>
-              `
-              : renderDetailContent(factura)
-          }
-        </div>
-      </div>
-    `;
-  }
-
-  function renderDetailContent(factura = null) {
-    if (!factura) {
-      return `
-        <div style="padding:24px;">
-          <p style="margin:0; color:var(--text-dim);">No hay detalle disponible.</p>
-        </div>
-      `;
-    }
-
-    const lineas = safeArray(factura.lineas);
-    const impuestos = safeArray(factura.impuestos);
-    const sending = state.ui.sendingFacturaId === factura.id;
-
-    return `
-      <div style="display:grid; gap:var(--space-lg); padding:24px;">
         <div
           style="
             display:flex;
-            justify-content:space-between;
-            gap:16px;
             align-items:flex-start;
+            justify-content:space-between;
+            gap:18px;
             flex-wrap:wrap;
           "
         >
-          <div style="display:grid; gap:8px;">
+          <div style="display:grid; gap:10px; min-width:min(100%, 560px);">
             <span
               style="
                 display:inline-flex;
                 align-items:center;
+                width:max-content;
                 min-height:28px;
-                padding:0 10px;
+                padding:0 12px;
                 border-radius:999px;
-                border:1px solid var(--border-soft);
-                background:var(--surface-glass);
-                color:var(--text-dim);
+                border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft));
+                background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
+                color:var(--text-soft);
                 font-size:12px;
                 font-weight:var(--weight-bold);
-                letter-spacing:.05em;
+                letter-spacing:.06em;
                 text-transform:uppercase;
-                width:max-content;
               "
             >
-              Factura ${escapeHtml(factura.numero)}
+              Facturación
             </span>
 
-            <h2
-              style="
-                margin:0;
-                font-size:clamp(26px, 4vw, 36px);
-                line-height:1.05;
-                color:var(--text-strong);
-                letter-spacing:-.03em;
-              "
-            >
-              ${escapeHtml(factura.cliente?.empresa || factura.cliente?.nombre || "Cliente")}
-            </h2>
+            <div style="display:grid; gap:8px;">
+              <h1
+                class="page-title"
+                style="
+                  margin:0;
+                  font-size:clamp(30px, 5vw, 48px);
+                  line-height:.98;
+                  letter-spacing:-.05em;
+                  color:var(--text-strong);
+                "
+              >
+                Centro de control de facturas
+              </h1>
 
-            <p style="margin:0; color:var(--text-muted);">
-              ${escapeHtml(factura.preview || "Documento fiscal listo para consulta.")}
-            </p>
+              <p
+                class="page-subtitle"
+                style="
+                  margin:0;
+                  max-width:860px;
+                  color:var(--text-dim);
+                  font-size:clamp(14px, 2vw, 16px);
+                  line-height:1.6;
+                "
+              >
+                Gestiona emisión, seguimiento, consulta y descarga de documentos fiscales
+                desde una vista unificada con lectura rápida y acciones directas.
+              </p>
+            </div>
           </div>
 
-          <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <div
+            style="
+              display:flex;
+              gap:10px;
+              flex-wrap:wrap;
+              align-items:center;
+            "
+          >
             <button
+              id="facturas-filter-btn"
               type="button"
-              data-action="view-factura-pdf"
-              data-factura-id="${escapeHtml(factura.id)}"
               style="
-                min-height:40px;
+                min-height:42px;
                 padding:0 14px;
                 border-radius:var(--btn-radius);
-                border:1px solid var(--btn-secondary-border);
-                background:var(--btn-secondary-bg);
-                color:var(--btn-secondary-text);
+                border:1px solid var(--btn-secondary-border, var(--border-soft));
+                background:var(--btn-secondary-bg, var(--surface-glass));
+                color:var(--btn-secondary-text, var(--text-soft));
                 font-weight:var(--weight-bold);
                 cursor:pointer;
               "
             >
-              Ver PDF
+              Filtros
             </button>
 
             <button
+              id="facturas-sort-btn"
               type="button"
-              data-action="download-factura"
-              data-factura-id="${escapeHtml(factura.id)}"
               style="
-                min-height:40px;
+                min-height:42px;
                 padding:0 14px;
                 border-radius:var(--btn-radius);
-                border:1px solid var(--btn-primary-border);
-                background:var(--btn-primary-bg);
-                color:var(--btn-primary-text);
+                border:1px solid var(--btn-secondary-border, var(--border-soft));
+                background:var(--btn-secondary-bg, var(--surface-glass));
+                color:var(--btn-secondary-text, var(--text-soft));
                 font-weight:var(--weight-bold);
                 cursor:pointer;
               "
             >
-              Descargar
+              Ordenar
             </button>
 
             <button
+              id="facturas-export-btn"
               type="button"
-              data-action="send-factura"
-              data-factura-id="${escapeHtml(factura.id)}"
               style="
-                min-height:40px;
+                min-height:42px;
                 padding:0 14px;
                 border-radius:var(--btn-radius);
-                border:1px solid var(--btn-secondary-border);
-                background:var(--btn-secondary-bg);
-                color:var(--btn-secondary-text);
+                border:1px solid var(--btn-secondary-border, var(--border-soft));
+                background:var(--btn-secondary-bg, var(--surface-glass));
+                color:var(--btn-secondary-text, var(--text-soft));
                 font-weight:var(--weight-bold);
                 cursor:pointer;
               "
             >
-              ${sending ? "Enviando..." : "Enviar"}
+              Exportar CSV
             </button>
 
             <button
+              id="facturas-refresh-btn"
               type="button"
-              data-action="close-detail"
+              ${loading || refreshing ? "disabled" : ""}
               style="
-                min-height:40px;
+                min-height:42px;
                 padding:0 14px;
                 border-radius:var(--btn-radius);
-                border:1px solid var(--border-soft);
-                background:var(--surface-glass);
-                color:var(--text-soft);
+                border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
+                background:var(--btn-primary-bg, var(--accent, #7c5cff));
+                color:var(--btn-primary-text, #fff);
                 font-weight:var(--weight-bold);
-                cursor:pointer;
+                cursor:${loading || refreshing ? "not-allowed" : "pointer"};
+                opacity:${loading || refreshing ? ".72" : "1"};
               "
             >
-              Cerrar
+              ${refreshing ? "Actualizando..." : "Actualizar"}
             </button>
           </div>
         </div>
@@ -1163,756 +499,685 @@ export const FacturasView = (() => {
         <div
           style="
             display:grid;
-            grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));
+            grid-template-columns:repeat(4, minmax(0, 1fr));
             gap:var(--space-md);
           "
+          class="facturas-hero-stats"
         >
-          ${renderDetailStat("Fecha", formatDate(factura.fecha))}
-          ${renderDetailStat("Estado pago", safeText(factura.estadoPago, "—"))}
-          ${renderDetailStat("Estado", safeText(factura.estado, "—"))}
-          ${renderDetailStat("Método pago", safeText(factura.formaPago, "—"))}
-          ${renderDetailStat("Total", formatMoney(factura.total, factura.moneda))}
-          ${renderDetailStat("Base", formatMoney(factura.baseImponible, factura.moneda))}
-        </div>
+          ${renderStatCard({
+            label: "Facturas visibles",
+            value: String(stats.totalFacturas),
+            caption: `${remoteCount} registros totales cargados en la colección.`,
+            accent: true,
+          })}
 
-        <div
-          style="
-            display:grid;
-            grid-template-columns:1.15fr .85fr;
-            gap:var(--space-lg);
-          "
-          class="facturas-detail-grid"
-        >
-          <section
-            class="panel-surface"
-            style="padding:20px; border-radius:var(--panel-radius);"
-          >
-            <div style="display:grid; gap:var(--space-md);">
-              <div>
-                <h3 style="margin:0 0 6px; color:var(--text-strong);">Líneas</h3>
-                <p style="margin:0; color:var(--text-dim); font-size:var(--font-sm);">
-                  Desglose principal del documento.
-                </p>
-              </div>
+          ${renderStatCard({
+            label: "Importe agregado",
+            value: formatMoney(stats.totalImporte, "EUR"),
+            caption: "Suma de la colección actualmente visible.",
+          })}
 
-              ${
-                lineas.length
-                  ? `
-                    <div style="display:grid; gap:12px;">
-                      ${lineas
-                        .map(
-                          (linea) => `
-                            <article
-                              style="
-                                display:grid;
-                                gap:10px;
-                                padding:16px;
-                                border-radius:18px;
-                                border:1px solid var(--border-soft);
-                                background:var(--surface-glass);
-                              "
-                            >
-                              <div
-                                style="
-                                  display:flex;
-                                  justify-content:space-between;
-                                  gap:12px;
-                                  align-items:flex-start;
-                                  flex-wrap:wrap;
-                                "
-                              >
-                                <div style="display:grid; gap:4px;">
-                                  <strong style="color:var(--text-strong); font-size:var(--font-base);">
-                                    ${escapeHtml(linea.concepto || "Línea")}
-                                  </strong>
-                                  <span style="color:var(--text-dim); font-size:var(--font-sm);">
-                                    ${escapeHtml(linea.descripcion || "Sin descripción")}
-                                  </span>
-                                </div>
+          ${renderStatCard({
+            label: "Pendientes",
+            value: String(stats.pendingCount),
+            caption: "Facturas con cobro pendiente o parcial.",
+          })}
 
-                                <strong style="color:var(--text-strong); font-size:var(--font-lg);">
-                                  ${escapeHtml(formatMoney(linea.totalLinea, factura.moneda))}
-                                </strong>
-                              </div>
-
-                              <div
-                                style="
-                                  display:grid;
-                                  grid-template-columns:repeat(auto-fit, minmax(120px,1fr));
-                                  gap:10px;
-                                "
-                              >
-                                ${renderMiniMeta("Cantidad", String(linea.cantidad))}
-                                ${renderMiniMeta("Unitario", formatMoney(linea.precioUnitario, factura.moneda))}
-                                ${renderMiniMeta("Subtotal", formatMoney(linea.subtotal, factura.moneda))}
-                                ${renderMiniMeta("Impuesto", formatMoney(linea.impuesto, factura.moneda))}
-                              </div>
-                            </article>
-                          `
-                        )
-                        .join("")}
-                    </div>
-                  `
-                  : `
-                    <p style="margin:0; color:var(--text-dim);">No hay líneas disponibles.</p>
-                  `
-              }
-            </div>
-          </section>
-
-          <div style="display:grid; gap:var(--space-lg);">
-            <section
-              class="panel-surface"
-              style="padding:20px; border-radius:var(--panel-radius);"
-            >
-              <div style="display:grid; gap:var(--space-md);">
-                <div>
-                  <h3 style="margin:0 0 6px; color:var(--text-strong);">Cliente</h3>
-                  <p style="margin:0; color:var(--text-dim); font-size:var(--font-sm);">
-                    Datos de facturación del destinatario.
-                  </p>
-                </div>
-
-                ${renderMiniMeta("Empresa", factura.cliente?.empresa || factura.cliente?.nombre || "—")}
-                ${renderMiniMeta("Email", factura.cliente?.email || "—")}
-                ${renderMiniMeta("NIF", factura.cliente?.nif || "—")}
-                ${renderMiniMeta("Teléfono", factura.cliente?.telefono || "—")}
-                ${renderMiniMeta(
-                  "Dirección",
-                  [
-                    factura.cliente?.direccion?.calle,
-                    factura.cliente?.direccion?.cp,
-                    factura.cliente?.direccion?.ciudad,
-                    factura.cliente?.direccion?.provincia,
-                    factura.cliente?.direccion?.pais,
-                  ]
-                    .filter(Boolean)
-                    .join(", ") || "—"
-                )}
-              </div>
-            </section>
-
-            <section
-              class="panel-surface"
-              style="padding:20px; border-radius:var(--panel-radius);"
-            >
-              <div style="display:grid; gap:var(--space-md);">
-                <div>
-                  <h3 style="margin:0 0 6px; color:var(--text-strong);">Resumen</h3>
-                  <p style="margin:0; color:var(--text-dim); font-size:var(--font-sm);">
-                    Totales y trazabilidad.
-                  </p>
-                </div>
-
-                ${renderMiniMeta("Subtotal", formatMoney(factura.subtotal || factura.baseImponible, factura.moneda))}
-                ${renderMiniMeta("Impuestos", formatMoney(factura.impuestosTotal, factura.moneda))}
-                ${renderMiniMeta("Descuento", formatMoney(factura.descuentoTotal, factura.moneda))}
-                ${renderMiniMeta("Total", formatMoney(factura.total, factura.moneda))}
-                ${renderMiniMeta("Actualizado", formatDateTime(factura.updatedAt))}
-                ${renderMiniMeta("Enviado a", factura.enviadoA || "—")}
-
-                ${
-                  impuestos.length
-                    ? `
-                      <div style="display:grid; gap:10px;">
-                        <strong style="color:var(--text-strong);">Impuestos</strong>
-                        ${impuestos
-                          .map(
-                            (item) => `
-                              <div
-                                style="
-                                  display:flex;
-                                  justify-content:space-between;
-                                  gap:12px;
-                                  padding:12px;
-                                  border-radius:14px;
-                                  border:1px solid var(--border-soft);
-                                  background:var(--surface-glass);
-                                "
-                              >
-                                <span style="color:var(--text-soft);">
-                                  ${escapeHtml(item.nombre || item.tipo || "Impuesto")} · ${escapeHtml(String(item.porcentaje || 0))}%
-                                </span>
-                                <strong style="color:var(--text-strong);">
-                                  ${escapeHtml(formatMoney(item.importe, factura.moneda))}
-                                </strong>
-                              </div>
-                            `
-                          )
-                          .join("")}
-                      </div>
-                    `
-                    : ""
-                }
-              </div>
-            </section>
-          </div>
+          ${renderStatCard({
+            label: "Vencidas / pagadas",
+            value: `${stats.overdueCount} / ${stats.paidCount}`,
+            caption: "Balance rápido entre deuda vencida y cobros cerrados.",
+          })}
         </div>
       </div>
 
       <style>
-        @media (max-width: 980px) {
-          .facturas-detail-grid {
+        @media (max-width: 1100px) {
+          .facturas-hero-stats {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+          }
+        }
+
+        @media (max-width: 720px) {
+          .facturas-hero-stats {
             grid-template-columns: 1fr !important;
           }
         }
       </style>
-    `;
-  }
+    </section>
+  `;
+}
 
-  function renderDetailStat(label = "", value = "") {
-    return `
-      <article
-        style="
-          display:grid;
-          gap:6px;
-          min-height:96px;
-          padding:16px;
-          border-radius:20px;
-          border:1px solid var(--border-soft);
-          background:var(--surface-glass);
-        "
-      >
+export function renderLoadingState() {
+  return `
+    <section
+      class="facturas-loading-grid"
+      style="
+        display:grid;
+        grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));
+        gap:var(--space-lg);
+      "
+    >
+      ${Array.from({ length: 6 })
+        .map(
+          () => `
+            <article
+              class="panel-surface"
+              style="
+                display:grid;
+                gap:16px;
+                min-height:260px;
+                padding:20px;
+                border-radius:var(--panel-radius);
+                border:1px solid var(--border-soft);
+                background:var(--surface-1, var(--surface-glass));
+                box-shadow:var(--shadow-sm);
+              "
+            >
+              <div style="display:flex; justify-content:space-between; gap:12px;">
+                <div style="display:grid; gap:10px; flex:1;">
+                  <div style="height:14px; width:90px; border-radius:999px; background:var(--surface-glass);"></div>
+                  <div style="height:28px; width:68%; border-radius:12px; background:var(--surface-glass);"></div>
+                  <div style="height:12px; width:52%; border-radius:999px; background:var(--surface-glass);"></div>
+                </div>
+
+                <div style="height:44px; width:92px; border-radius:14px; background:var(--surface-glass);"></div>
+              </div>
+
+              <div style="display:grid; gap:10px;">
+                <div style="height:12px; width:100%; border-radius:999px; background:var(--surface-glass);"></div>
+                <div style="height:12px; width:82%; border-radius:999px; background:var(--surface-glass);"></div>
+              </div>
+
+              <div
+                style="
+                  display:grid;
+                  grid-template-columns:repeat(3, minmax(0, 1fr));
+                  gap:10px;
+                "
+              >
+                <div style="height:70px; border-radius:16px; background:var(--surface-glass);"></div>
+                <div style="height:70px; border-radius:16px; background:var(--surface-glass);"></div>
+                <div style="height:70px; border-radius:16px; background:var(--surface-glass);"></div>
+              </div>
+
+              <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                <div style="height:40px; width:110px; border-radius:12px; background:var(--surface-glass);"></div>
+                <div style="height:40px; width:100px; border-radius:12px; background:var(--surface-glass);"></div>
+                <div style="height:40px; width:96px; border-radius:12px; background:var(--surface-glass);"></div>
+              </div>
+            </article>
+          `
+        )
+        .join("")}
+    </section>
+  `;
+}
+
+export function renderErrorState(message = "No se pudo cargar la colección.") {
+  return `
+    <section
+      class="panel-surface facturas-error-state"
+      style="
+        display:grid;
+        gap:18px;
+        padding:28px;
+        border-radius:var(--panel-radius);
+        border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, var(--border-soft));
+        background:
+          linear-gradient(180deg, color-mix(in srgb, var(--danger-strong, #ff6b6b) 10%, transparent), transparent 72%),
+          var(--surface-1, var(--surface-glass));
+        box-shadow:var(--shadow-sm);
+      "
+    >
+      <div style="display:grid; gap:8px;">
         <span
           style="
+            display:inline-flex;
+            width:max-content;
+            min-height:28px;
+            align-items:center;
+            padding:0 12px;
+            border-radius:999px;
+            border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, transparent);
+            background:color-mix(in srgb, var(--danger-strong, #ff6b6b) 12%, transparent);
+            color:var(--danger-strong, #ff6b6b);
             font-size:12px;
-            color:var(--text-dim);
-            font-weight:var(--weight-bold);
-            letter-spacing:.05em;
+            letter-spacing:.06em;
             text-transform:uppercase;
+            font-weight:var(--weight-bold);
           "
         >
-          ${escapeHtml(label)}
+          Error de carga
         </span>
 
-        <strong
+        <h3
           style="
-            font-size:var(--font-xl);
-            line-height:1.1;
+            margin:0;
+            font-size:clamp(24px, 3vw, 34px);
+            line-height:1.05;
             color:var(--text-strong);
-            font-weight:var(--weight-black);
+            letter-spacing:-.04em;
           "
         >
-          ${escapeHtml(value)}
-        </strong>
-      </article>
-    `;
-  }
+          No se pudo renderizar la vista de facturas
+        </h3>
 
-  function renderMiniMeta(label = "", value = "") {
-    return `
+        <p
+          style="
+            margin:0;
+            color:var(--text-dim);
+            font-size:var(--font-base);
+            line-height:1.65;
+            max-width:780px;
+          "
+        >
+          ${escapeHtml(safeText(message, "Error desconocido al cargar la vista."))}
+        </p>
+      </div>
+
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button
+          id="facturas-retry-btn"
+          type="button"
+          style="
+            min-height:42px;
+            padding:0 14px;
+            border-radius:var(--btn-radius);
+            border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
+            background:var(--btn-primary-bg, var(--accent, #7c5cff));
+            color:var(--btn-primary-text, #fff);
+            font-weight:var(--weight-bold);
+            cursor:pointer;
+          "
+        >
+          Reintentar
+        </button>
+      </div>
+    </section>
+  `;
+}
+
+function renderEmptyState() {
+  return `
+    <section
+      class="panel-surface facturas-empty-state"
+      style="
+        display:grid;
+        gap:18px;
+        padding:28px;
+        border-radius:var(--panel-radius);
+        border:1px solid var(--border-soft);
+        background:var(--surface-1, var(--surface-glass));
+        box-shadow:var(--shadow-sm);
+      "
+    >
+      <div style="display:grid; gap:8px;">
+        <span
+          style="
+            display:inline-flex;
+            width:max-content;
+            min-height:28px;
+            align-items:center;
+            padding:0 12px;
+            border-radius:999px;
+            border:1px solid var(--border-soft);
+            background:var(--surface-glass);
+            color:var(--text-dim);
+            font-size:12px;
+            letter-spacing:.06em;
+            text-transform:uppercase;
+            font-weight:var(--weight-bold);
+          "
+        >
+          Sin resultados
+        </span>
+
+        <h3
+          style="
+            margin:0;
+            font-size:clamp(24px, 3vw, 34px);
+            line-height:1.05;
+            color:var(--text-strong);
+            letter-spacing:-.04em;
+          "
+        >
+          No hay facturas para mostrar
+        </h3>
+
+        <p
+          style="
+            margin:0;
+            color:var(--text-dim);
+            font-size:var(--font-base);
+            line-height:1.65;
+            max-width:760px;
+          "
+        >
+          Ajusta los filtros, cambia la ordenación o vuelve a cargar la colección para
+          recuperar resultados.
+        </p>
+      </div>
+
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button
+          id="facturas-filter-btn"
+          type="button"
+          style="
+            min-height:42px;
+            padding:0 14px;
+            border-radius:var(--btn-radius);
+            border:1px solid var(--btn-secondary-border, var(--border-soft));
+            background:var(--btn-secondary-bg, var(--surface-glass));
+            color:var(--btn-secondary-text, var(--text-soft));
+            font-weight:var(--weight-bold);
+            cursor:pointer;
+          "
+        >
+          Revisar filtros
+        </button>
+
+        <button
+          id="facturas-refresh-btn"
+          type="button"
+          style="
+            min-height:42px;
+            padding:0 14px;
+            border-radius:var(--btn-radius);
+            border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
+            background:var(--btn-primary-bg, var(--accent, #7c5cff));
+            color:var(--btn-primary-text, #fff);
+            font-weight:var(--weight-bold);
+            cursor:pointer;
+          "
+        >
+          Recargar
+        </button>
+      </div>
+    </section>
+  `;
+}
+
+function renderMetaTile(label = "", value = "") {
+  return `
+    <div
+      style="
+        display:grid;
+        gap:6px;
+        min-height:78px;
+        padding:14px;
+        border-radius:16px;
+        border:1px solid var(--border-soft);
+        background:var(--surface-glass);
+      "
+    >
+      <span
+        style="
+          font-size:11px;
+          color:var(--text-faint);
+          font-weight:var(--weight-bold);
+          letter-spacing:.05em;
+          text-transform:uppercase;
+        "
+      >
+        ${escapeHtml(label)}
+      </span>
+
+      <strong
+        style="
+          color:var(--text-strong);
+          font-size:var(--font-base);
+          line-height:1.25;
+        "
+      >
+        ${escapeHtml(value)}
+      </strong>
+    </div>
+  `;
+}
+
+function renderFacturaCard(item = {}) {
+  const facturaId = safeText(item?.id, "");
+  const numero = safeText(item?.numero, "—");
+  const cliente = safeText(item?.cliente?.empresa || item?.cliente?.nombre, "Cliente");
+  const email = safeText(item?.cliente?.email, "Sin email");
+  const fecha = formatDate(item?.fecha);
+  const updatedAt = formatRelativeDate(item?.updatedAt);
+  const total = formatMoney(item?.total, item?.moneda || "EUR");
+  const formaPago = safeText(item?.formaPago, "—");
+  const preview = safeText(
+    item?.preview || item?.descripcion || item?.concepto,
+    "Documento fiscal disponible para consulta."
+  );
+  const estadoPago = getEstadoPagoLabel(item?.estadoPago);
+  const estado = getEstadoLabel(item?.estado);
+  const initials = safeText(item?.cliente?.initials, "ON").slice(0, 2).toUpperCase();
+  const pdfAvailable = Boolean(item?.pdfAvailable || item?.blobPath);
+
+  return `
+    <article
+      class="factura-card panel-surface"
+      data-factura-id="${escapeHtml(facturaId)}"
+      style="
+        position:relative;
+        overflow:hidden;
+        display:grid;
+        gap:18px;
+        min-height:290px;
+        padding:20px;
+        border-radius:var(--panel-radius);
+        border:1px solid var(--border-soft);
+        background:
+          linear-gradient(180deg, color-mix(in srgb, var(--surface-2, transparent) 68%, transparent), transparent),
+          var(--surface-1, var(--surface-glass));
+        box-shadow:var(--shadow-sm);
+        cursor:pointer;
+        transition:
+          transform .18s ease,
+          box-shadow .18s ease,
+          border-color .18s ease;
+      "
+      onmouseenter="this.style.transform='translateY(-2px)'; this.style.boxShadow='var(--shadow-md)';"
+      onmouseleave="this.style.transform='translateY(0)'; this.style.boxShadow='var(--shadow-sm)';"
+    >
+      <div
+        style="
+          display:flex;
+          justify-content:space-between;
+          gap:14px;
+          align-items:flex-start;
+          flex-wrap:wrap;
+        "
+      >
+        <div style="display:flex; gap:14px; min-width:0; flex:1;">
+          <div
+            aria-hidden="true"
+            style="
+              flex:0 0 48px;
+              width:48px;
+              height:48px;
+              border-radius:16px;
+              display:grid;
+              place-items:center;
+              background:
+                linear-gradient(135deg, color-mix(in srgb, var(--accent, #7c5cff) 22%, transparent), transparent),
+                var(--surface-glass);
+              border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft));
+              color:var(--text-strong);
+              font-weight:var(--weight-black);
+              letter-spacing:.03em;
+            "
+          >
+            ${escapeHtml(initials)}
+          </div>
+
+          <div style="display:grid; gap:8px; min-width:0; flex:1;">
+            <div style="display:grid; gap:4px;">
+              <span
+                style="
+                  font-size:12px;
+                  color:var(--text-dim);
+                  font-weight:var(--weight-bold);
+                  letter-spacing:.06em;
+                  text-transform:uppercase;
+                "
+              >
+                Factura
+              </span>
+
+              <h3
+                style="
+                  margin:0;
+                  color:var(--text-strong);
+                  font-size:clamp(20px, 3vw, 28px);
+                  line-height:1.05;
+                  letter-spacing:-.04em;
+                  word-break:break-word;
+                "
+              >
+                ${escapeHtml(numero)}
+              </h3>
+
+              <p
+                style="
+                  margin:0;
+                  color:var(--text-soft);
+                  font-size:var(--font-base);
+                  font-weight:var(--weight-semibold);
+                  word-break:break-word;
+                "
+              >
+                ${escapeHtml(cliente)}
+              </p>
+
+              <p
+                style="
+                  margin:0;
+                  color:var(--text-dim);
+                  font-size:var(--font-sm);
+                  word-break:break-word;
+                "
+              >
+                ${escapeHtml(email)}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:grid; gap:8px; justify-items:end;">
+          <span
+            style="
+              display:inline-flex;
+              align-items:center;
+              min-height:30px;
+              padding:0 10px;
+              border-radius:999px;
+              font-size:12px;
+              font-weight:var(--weight-bold);
+              letter-spacing:.05em;
+              text-transform:uppercase;
+              ${getEstadoPagoChipStyle(item?.estadoPago)}
+            "
+          >
+            ${escapeHtml(estadoPago)}
+          </span>
+
+          <span
+            style="
+              display:inline-flex;
+              align-items:center;
+              min-height:28px;
+              padding:0 10px;
+              border-radius:999px;
+              font-size:11px;
+              font-weight:var(--weight-bold);
+              letter-spacing:.05em;
+              text-transform:uppercase;
+              ${getEstadoChipStyle(item?.estado)}
+            "
+          >
+            ${escapeHtml(estado)}
+          </span>
+        </div>
+      </div>
+
+      <p
+        style="
+          margin:0;
+          color:var(--text-dim);
+          line-height:1.65;
+          font-size:var(--font-sm);
+        "
+      >
+        ${escapeHtml(preview)}
+      </p>
+
       <div
         style="
           display:grid;
-          gap:4px;
-          padding:12px;
-          border-radius:14px;
-          border:1px solid var(--border-soft);
-          background:var(--surface-glass);
+          grid-template-columns:repeat(3, minmax(0, 1fr));
+          gap:10px;
+        "
+        class="factura-card-metas"
+      >
+        ${renderMetaTile("Fecha", fecha)}
+        ${renderMetaTile("Total", total)}
+        ${renderMetaTile("Pago", formaPago)}
+      </div>
+
+      <div
+        style="
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          gap:12px;
+          flex-wrap:wrap;
+          margin-top:auto;
         "
       >
-        <span
-          style="
-            font-size:11px;
-            color:var(--text-faint);
-            font-weight:var(--weight-bold);
-            letter-spacing:.04em;
-            text-transform:uppercase;
-          "
-        >
-          ${escapeHtml(label)}
-        </span>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <span
+            style="
+              display:inline-flex;
+              align-items:center;
+              min-height:28px;
+              padding:0 10px;
+              border-radius:999px;
+              border:1px solid var(--border-soft);
+              background:var(--surface-glass);
+              color:var(--text-dim);
+              font-size:12px;
+              font-weight:var(--weight-bold);
+            "
+          >
+            Actualizado ${escapeHtml(updatedAt)}
+          </span>
 
-        <span style="color:var(--text-strong); font-weight:var(--weight-semibold);">
-          ${escapeHtml(value)}
-        </span>
+          ${
+            pdfAvailable
+              ? `
+                <span
+                  style="
+                    display:inline-flex;
+                    align-items:center;
+                    min-height:28px;
+                    padding:0 10px;
+                    border-radius:999px;
+                    border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 20%, var(--border-soft));
+                    background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
+                    color:var(--text-soft);
+                    font-size:12px;
+                    font-weight:var(--weight-bold);
+                  "
+                >
+                  PDF disponible
+                </span>
+              `
+              : ""
+          }
+        </div>
+
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <button
+            type="button"
+            data-action="open-factura"
+            data-factura-id="${escapeHtml(facturaId)}"
+            style="
+              min-height:40px;
+              padding:0 14px;
+              border-radius:var(--btn-radius);
+              border:1px solid var(--btn-secondary-border, var(--border-soft));
+              background:var(--btn-secondary-bg, var(--surface-glass));
+              color:var(--btn-secondary-text, var(--text-soft));
+              font-weight:var(--weight-bold);
+              cursor:pointer;
+            "
+          >
+            Detalle
+          </button>
+
+          <button
+            type="button"
+            data-action="view-factura-pdf"
+            data-factura-id="${escapeHtml(facturaId)}"
+            ${pdfAvailable ? "" : "disabled"}
+            style="
+              min-height:40px;
+              padding:0 14px;
+              border-radius:var(--btn-radius);
+              border:1px solid var(--btn-secondary-border, var(--border-soft));
+              background:var(--btn-secondary-bg, var(--surface-glass));
+              color:var(--btn-secondary-text, var(--text-soft));
+              font-weight:var(--weight-bold);
+              cursor:${pdfAvailable ? "pointer" : "not-allowed"};
+              opacity:${pdfAvailable ? "1" : ".56"};
+            "
+          >
+            Ver PDF
+          </button>
+
+          <button
+            type="button"
+            data-action="download-factura"
+            data-factura-id="${escapeHtml(facturaId)}"
+            ${pdfAvailable ? "" : "disabled"}
+            style="
+              min-height:40px;
+              padding:0 14px;
+              border-radius:var(--btn-radius);
+              border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
+              background:var(--btn-primary-bg, var(--accent, #7c5cff));
+              color:var(--btn-primary-text, #fff);
+              font-weight:var(--weight-bold);
+              cursor:${pdfAvailable ? "pointer" : "not-allowed"};
+              opacity:${pdfAvailable ? "1" : ".56"};
+            "
+          >
+            Descargar
+          </button>
+        </div>
       </div>
-    `;
+
+      <style>
+        @media (max-width: 640px) {
+          .factura-card-metas {
+            grid-template-columns: 1fr !important;
+          }
+        }
+      </style>
+    </article>
+  `;
+}
+
+export function renderCards({ items = [], state = {} } = {}) {
+  const list = safeArray(items);
+  const loading = Boolean(state?.loading);
+  const error = safeText(state?.error, "");
+
+  if (!loading && error && !list.length) {
+    return renderErrorState(error);
   }
 
-  function renderDetail() {
-    const container = getContainer();
-    if (!container) return;
-
-    const existing = container.querySelector(".facturas-detail-overlay");
-    if (existing) {
-      existing.remove();
-    }
-
-    const html = renderDetailModal();
-    if (!html) return;
-
-    container.insertAdjacentHTML("beforeend", html);
-    bindDom();
+  if (!list.length) {
+    return renderEmptyState();
   }
 
-  /* =========================================================
-     BINDINGS
-  ========================================================= */
-  function bindDom() {
-    const container = getContainer();
-    if (!container) return;
-
-    const scope = container.querySelector(`[data-scope="${SCOPE}"]`);
-    if (!scope) return;
-
-    if (scope.dataset.bound === "true") return;
-    scope.dataset.bound = "true";
-
-    scope.addEventListener("click", handleClick);
-    scope.addEventListener("change", handleChange);
-    scope.addEventListener("input", handleInput);
-
-    document.addEventListener("keydown", handleKeydown, { passive: false });
-  }
-
-  function unbindDom() {
-    const container = getContainer();
-    if (!container) return;
-
-    const scope = container.querySelector(`[data-scope="${SCOPE}"]`);
-    if (scope) {
-      scope.removeEventListener("click", handleClick);
-      scope.removeEventListener("change", handleChange);
-      scope.removeEventListener("input", handleInput);
-      delete scope.dataset.bound;
-    }
-
-    document.removeEventListener("keydown", handleKeydown, { passive: false });
-  }
-
-  function handleKeydown(event) {
-    if (!state.mounted) return;
-
-    if (event.key === "Escape") {
-      if (state.ui.detailOpen) {
-        event.preventDefault();
-        handleCloseDetail();
-        return;
-      }
-
-      if (state.ui.filtersOpen || state.ui.sortOpen) {
-        event.preventDefault();
-        closeMenus();
-        render();
-      }
-    }
-  }
-
-  function handleClick(event) {
-    const actionTarget = event.target.closest("[data-action]");
-    const rowTarget = event.target.closest("[data-factura-id]");
-    const refreshBtn = event.target.closest("#facturas-refresh-btn");
-    const exportBtn = event.target.closest("#facturas-export-btn");
-    const filterBtn = event.target.closest("#facturas-filter-btn");
-    const sortBtn = event.target.closest("#facturas-sort-btn");
-    const retryBtn = event.target.closest("#facturas-retry-btn");
-
-    if (refreshBtn) {
-      void handleRefresh();
-      return;
-    }
-
-    if (exportBtn) {
-      handleExport();
-      return;
-    }
-
-    if (filterBtn) {
-      state.ui.filtersOpen = !state.ui.filtersOpen;
-      state.ui.sortOpen = false;
-      render();
-      return;
-    }
-
-    if (sortBtn) {
-      state.ui.sortOpen = !state.ui.sortOpen;
-      state.ui.filtersOpen = false;
-      render();
-      return;
-    }
-
-    if (retryBtn) {
-      void bootstrapData({ force: true });
-      return;
-    }
-
-    if (!actionTarget && rowTarget && !event.target.closest("button")) {
-      const facturaId = safeText(rowTarget.dataset.facturaId, "");
-      if (facturaId) {
-        void handleOpenFactura(facturaId);
-      }
-      return;
-    }
-
-    if (!actionTarget) return;
-
-    const action = safeText(actionTarget.dataset.action, "");
-    const facturaId = safeText(actionTarget.dataset.facturaId, "");
-
-    switch (action) {
-      case "open-factura":
-        void handleOpenFactura(facturaId);
-        break;
-
-      case "view-factura-pdf":
-        void handleViewFacturaPdf(facturaId);
-        break;
-
-      case "download-factura":
-        void handleDownloadFactura(facturaId);
-        break;
-
-      case "send-factura":
-        void handleSendFactura(facturaId);
-        break;
-
-      case "close-detail":
-        handleCloseDetail();
-        break;
-
-      case "apply-filters":
-        handleApplyFilters();
-        break;
-
-      case "reset-filters":
-        handleResetFilters();
-        break;
-
-      case "apply-sort":
-        handleApplySort();
-        break;
-
-      default:
-        break;
-    }
-  }
-
-  function handleInput(event) {
-    const target = event.target;
-
-    if (!target) return;
-
-    if (target.id === "facturas-filter-query") {
-      state.filters.query = safeText(target.value, "");
-    }
-
-    if (target.id === "facturas-filter-forma-pago") {
-      state.filters.formaPago = safeText(target.value, "") || "all";
-    }
-  }
-
-  function handleChange(event) {
-    const target = event.target;
-    if (!target) return;
-
-    if (target.id === "facturas-filter-estado-pago") {
-      state.filters.estadoPago = safeText(target.value, "all");
-      return;
-    }
-
-    if (target.id === "facturas-filter-estado") {
-      state.filters.estado = safeText(target.value, "all");
-      return;
-    }
-
-    if (target.id === "facturas-sort-field") {
-      state.sort.field = safeText(target.value, "fecha");
-      return;
-    }
-
-    if (target.id === "facturas-sort-direction") {
-      state.sort.direction = safeText(target.value, "desc");
-    }
-  }
-
-  /* =========================================================
-     HANDLERS DE ACCIÓN
-  ========================================================= */
-  async function handleRefresh() {
-    try {
-      setRefreshing(true);
-      setError("");
-      render();
-
-      await Promise.all([
-        fetchFacturasList({ silent: true }),
-        fetchFacturasStats({ silent: true }),
-      ]);
-
-      render();
-      showToast("Facturas actualizadas correctamente.", "success");
-    } catch (error) {
-      console.error("[FacturasView] refresh", error);
-      setError("No se pudo actualizar la colección.");
-      render();
-      showToast("No se pudo actualizar el listado.", "error");
-    } finally {
-      setRefreshing(false);
-      render();
-    }
-  }
-
-  function handleApplyFilters() {
-    syncDerivedState();
-    closeMenus();
-    render();
-    showToast("Filtros aplicados.", "success");
-  }
-
-  function handleResetFilters() {
-    state.filters = {
-      query: "",
-      estadoPago: "all",
-      estado: "all",
-      formaPago: "all",
-    };
-
-    syncDerivedState();
-    closeMenus();
-    render();
-    showToast("Filtros restablecidos.", "info");
-  }
-
-  function handleApplySort() {
-    syncDerivedState();
-    closeMenus();
-    render();
-    showToast("Orden aplicado.", "success");
-  }
-
-  async function handleOpenFactura(facturaId = "") {
-    const id = safeText(facturaId, "");
-    if (!id) return;
-
-    try {
-      await fetchFacturaDetail(id);
-    } catch (error) {
-      console.error("[FacturasView] open detail", error);
-      showToast("No se pudo abrir el detalle de la factura.", "error");
-    }
-  }
-
-  async function handleViewFacturaPdf(facturaId = "") {
-    const id = safeText(facturaId, "");
-    if (!id) return;
-
-    try {
-      state.ui.viewingFacturaId = id;
-      const payload = await fetchFacturaFileUrl(id, "inline");
-      window.open(payload.file.url, "_blank", "noopener,noreferrer");
-      showToast("Abriendo PDF de la factura.", "success");
-    } catch (error) {
-      console.error("[FacturasView] view pdf", error);
-      showToast("No se pudo abrir el PDF.", "error");
-    } finally {
-      state.ui.viewingFacturaId = "";
-    }
-  }
-
-  async function handleDownloadFactura(facturaId = "") {
-    const id = safeText(facturaId, "");
-    if (!id) return;
-
-    try {
-      state.ui.downloadingFacturaId = id;
-      const payload = await fetchFacturaFileUrl(id, "attachment");
-      window.open(payload.file.url, "_blank", "noopener,noreferrer");
-      showToast("Preparando descarga de factura.", "success");
-    } catch (error) {
-      console.error("[FacturasView] download pdf", error);
-      showToast("No se pudo descargar la factura.", "error");
-    } finally {
-      state.ui.downloadingFacturaId = "";
-    }
-  }
-
-  async function handleSendFactura(facturaId = "") {
-    const id = safeText(facturaId, "");
-    if (!id) return;
-
-    const factura =
-      state.detail?.id === id
-        ? state.detail
-        : state.items.find((item) => String(item.id) === String(id)) || null;
-
-    const email = factura?.cliente?.email || factura?.enviadoA || "cliente";
-    const confirmed = window.confirm(
-      `Se va a enviar la factura ${factura?.numero || id} a ${email}. ¿Continuar?`
-    );
-
-    if (!confirmed) return;
-
-    try {
-      state.ui.sendingFacturaId = id;
-      renderDetail();
-
-      const payload = await sendFactura(id);
-      showToast("Factura enviada correctamente.", "success");
-
-      if (state.detail?.id === id) {
-        state.detail.enviadoA = safeText(payload?.sent?.to, state.detail.enviadoA);
-        state.detail.fechaEnvio = safeText(payload?.sent?.at, state.detail.fechaEnvio);
-      }
-
-      await fetchFacturasList({ silent: true });
-      render();
-      renderDetail();
-    } catch (error) {
-      console.error("[FacturasView] send factura", error);
-      showToast("No se pudo enviar la factura.", "error");
-    } finally {
-      state.ui.sendingFacturaId = "";
-      renderDetail();
-    }
-  }
-
-  function handleCloseDetail() {
-    setDetailOpen(false);
-    state.detail = null;
-    state.detailLoading = false;
-    render();
-  }
-
-  function handleExport() {
-    const rows = state.filteredItems.map((item) => ({
-      numero: item.numero,
-      cliente: item.cliente?.empresa || item.cliente?.nombre || "",
-      email: item.cliente?.email || "",
-      fecha: item.fecha || "",
-      estadoPago: item.estadoPago || "",
-      estado: item.estado || "",
-      total: item.total || 0,
-      moneda: item.moneda || "EUR",
-    }));
-
-    if (!rows.length) {
-      showToast("No hay facturas para exportar.", "info");
-      return;
-    }
-
-    const header = [
-      "numero",
-      "cliente",
-      "email",
-      "fecha",
-      "estadoPago",
-      "estado",
-      "total",
-      "moneda",
-    ];
-
-    const csv = [
-      header.join(","),
-      ...rows.map((row) =>
-        header
-          .map((key) => {
-            const value = String(row[key] ?? "").replaceAll('"', '""');
-            return `"${value}"`;
-          })
-          .join(",")
-      ),
-    ].join("\n");
-
-    const blob = new Blob([csv], {
-      type: "text/csv;charset=utf-8;",
-    });
-
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `facturas_${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-
-    showToast("Exportación CSV generada.", "success");
-  }
-
-  /* =========================================================
-     BOOTSTRAP
-  ========================================================= */
-  async function bootstrapData({ force = false } = {}) {
-    try {
-      setError("");
-      setLoading(true);
-      render();
-
-      await Promise.all([
-        fetchFacturasList({ silent: true }),
-        fetchFacturasStats({ silent: true }),
-      ]);
-
-      syncDerivedState();
-      render();
-
-      if (force) {
-        showToast("Facturación cargada correctamente.", "success");
-      }
-    } catch (error) {
-      console.error("[FacturasView] bootstrap", error);
-      setError("No se pudo cargar la facturación.");
-      state.items = [];
-      state.filteredItems = [];
-      render();
-      showToast("No se pudo cargar la vista de facturas.", "error");
-    } finally {
-      setLoading(false);
-      render();
-    }
-  }
-
-  /* =========================================================
-     API PÚBLICA
-  ========================================================= */
-  async function mount() {
-    state.mounted = true;
-
-    if (AppCore?.setLoading) {
-      AppCore.setLoading(true);
-    }
-
-    try {
-      render();
-      await bootstrapData();
-    } finally {
-      if (AppCore?.setLoading) {
-        AppCore.setLoading(false);
-      }
-    }
-  }
-
-  function unmount() {
-    state.mounted = false;
-
-    Object.keys(state.abortControllers).forEach((key) => {
-      if (state.abortControllers[key]) {
-        try {
-          state.abortControllers[key].abort();
-        } catch {}
-      }
-      state.abortControllers[key] = null;
-    });
-
-    unbindDom();
-    closeMenus();
-    setDetailOpen(false);
-    state.detail = null;
-  }
-
-  function reload() {
-    return bootstrapData({ force: true });
-  }
-
-  function openById(facturaId = "") {
-    return handleOpenFactura(facturaId);
-  }
-
-  return {
-    mount,
-    unmount,
-    reload,
-    openById,
-  };
-})();
+  return `
+    <section
+      class="facturas-cards-wrap"
+      style="display:grid; gap:var(--space-lg);"
+    >
+      <div
+        class="facturas-cards-grid"
+        style="
+          display:grid;
+          grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));
+          gap:var(--space-lg);
+          align-items:start;
+        "
+      >
+        ${list.map((item) => renderFacturaCard(item)).join("")}
+      </div>
+    </section>
+  `;
+}

@@ -12,7 +12,7 @@
 import { LoginView } from "../views/loginView.js";
 import { HomeView } from "../views/homeView.js";
 import { IncidenciasView } from "../views/incidenciasView.js";
-import { FacturasView } from "../views/facturasView.js";
+import { FacturasView } from "../views/facturas/index.js";
 import { ServerView } from "../views/serverView.js";
 import { UsuariosView } from "../views/usuariosView.js";
 import { ClientesView } from "../views/clientesView.js";

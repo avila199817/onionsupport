@@ -7,6 +7,7 @@
    - cargar detalle individual de factura
    - sincronizar Store y estado local del módulo
    - controlar flags de loading / refresh / error / inflight
+   - apoyarse en helpers centralizados de state
 ========================================================= */
 
 import {
@@ -21,13 +22,15 @@ import {
 } from "./facturas.api.js";
 
 import { setFacturasStore } from "./facturas.store.js";
-
 import { safeText } from "./facturas.utils.js";
 
 import {
+  getFacturasInflightLoad,
+  getFacturasInflightDetail,
   setFacturasLoading,
   setFacturasLoaded,
   setFacturasError,
+  clearFacturasError,
   setFacturasRefreshing,
   setFacturasRemoteCount,
   setFacturasDetailOpen,
@@ -46,13 +49,14 @@ export async function loadFacturasCollection({
     throw new Error("FACTURAS_STATE_REQUIRED");
   }
 
-  if (state.inflight.load) {
-    return state.inflight.load;
+  const inflight = getFacturasInflightLoad(state);
+  if (inflight) {
+    return inflight;
   }
 
   if (!silent) {
     setFacturasLoading(state, true);
-    setFacturasError(state, null);
+    clearFacturasError(state);
     render?.();
   } else {
     setFacturasRefreshing(state, true);
@@ -69,7 +73,7 @@ export async function loadFacturasCollection({
       setFacturasLoading(state, false);
       setFacturasRefreshing(state, false);
       setFacturasLoaded(state, true);
-      setFacturasError(state, null);
+      clearFacturasError(state);
 
       render?.();
       return items;
@@ -77,6 +81,7 @@ export async function loadFacturasCollection({
       setFacturasLoading(state, false);
       setFacturasRefreshing(state, false);
       setFacturasLoaded(state, true);
+
       setFacturasError(
         state,
         error?.data?.message ||
@@ -92,7 +97,7 @@ export async function loadFacturasCollection({
   })();
 
   setFacturasInflightLoad(state, promise);
-  return state.inflight.load;
+  return getFacturasInflightLoad(state);
 }
 
 export async function loadFacturaDetailById({
@@ -107,8 +112,9 @@ export async function loadFacturaDetailById({
   const id = safeText(facturaId, "");
   if (!id) return null;
 
-  if (state.inflight.detail) {
-    return state.inflight.detail;
+  const inflight = getFacturasInflightDetail(state);
+  if (inflight) {
+    return inflight;
   }
 
   setFacturasDetailOpen(state, true);
@@ -140,5 +146,5 @@ export async function loadFacturaDetailById({
   })();
 
   setFacturasInflightDetail(state, promise);
-  return state.inflight.detail;
+  return getFacturasInflightDetail(state);
 }

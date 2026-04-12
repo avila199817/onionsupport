@@ -1,13 +1,12 @@
 /* =========================================================
-   Onion SPA - Facturas Template (FULL PRO SAAS PANEL · FINAL PRO)
+   Onion SPA - Facturas Template (FINAL PRO CLEAN)
    Archivo: src/views/facturas/facturas.template.js
 
    Responsabilidades:
    - renderizar header premium de la vista
    - renderizar estados loading / error / empty
    - renderizar grid de cards de facturas
-   - exponer helpers visuales consistentes
-   - mantener compatibilidad directa con src/views/facturas/index.js
+   - mantener compatibilidad directa con facturasView.js
 ========================================================= */
 
 function escapeHtml(value = "") {
@@ -74,18 +73,14 @@ function formatRelativeDate(value) {
 
   if (absMinutes < 1) return "Ahora mismo";
   if (absMinutes < 60) {
-    return diffMinutes > 0
-      ? `En ${absMinutes} min`
-      : `Hace ${absMinutes} min`;
+    return diffMinutes > 0 ? `En ${absMinutes} min` : `Hace ${absMinutes} min`;
   }
 
   const diffHours = Math.round(diffMinutes / 60);
   const absHours = Math.abs(diffHours);
 
   if (absHours < 24) {
-    return diffHours > 0
-      ? `En ${absHours} h`
-      : `Hace ${absHours} h`;
+    return diffHours > 0 ? `En ${absHours} h` : `Hace ${absHours} h`;
   }
 
   const diffDays = Math.round(diffHours / 24);
@@ -109,27 +104,21 @@ function getEstadoPagoLabel(value = "") {
     case "pagado":
     case "cobrada":
       return "Pagada";
-
     case "pending":
     case "pendiente":
       return "Pendiente";
-
     case "overdue":
     case "vencida":
       return "Vencida";
-
     case "cancelled":
     case "cancelada":
       return "Cancelada";
-
     case "draft":
     case "borrador":
       return "Borrador";
-
     case "partial":
     case "parcial":
       return "Pago parcial";
-
     default:
       return safeText(value, "Pendiente");
   }
@@ -142,18 +131,14 @@ function getEstadoLabel(value = "") {
     case "emitida":
     case "issued":
       return "Emitida";
-
     case "borrador":
     case "draft":
       return "Borrador";
-
     case "cancelada":
     case "cancelled":
       return "Cancelada";
-
     case "abonada":
       return "Abonada";
-
     default:
       return safeText(value, "Emitida");
   }
@@ -330,10 +315,7 @@ export function renderHeader({ items = [], state = {} } = {}) {
   const stats = computeStats(items);
   const loading = Boolean(state?.loading);
   const refreshing = Boolean(state?.refreshing);
-  const remoteCount = safeNumber(
-    state?.remoteCount,
-    safeArray(items).length
-  );
+  const remoteCount = safeNumber(state?.remoteCount, safeArray(items).length);
 
   return `
     <section
@@ -424,40 +406,6 @@ export function renderHeader({ items = [], state = {} } = {}) {
               align-items:center;
             "
           >
-            <button
-              id="facturas-filter-btn"
-              type="button"
-              style="
-                min-height:42px;
-                padding:0 14px;
-                border-radius:var(--btn-radius);
-                border:1px solid var(--btn-secondary-border, var(--border-soft));
-                background:var(--btn-secondary-bg, var(--surface-glass));
-                color:var(--btn-secondary-text, var(--text-soft));
-                font-weight:var(--weight-bold);
-                cursor:pointer;
-              "
-            >
-              Filtros
-            </button>
-
-            <button
-              id="facturas-sort-btn"
-              type="button"
-              style="
-                min-height:42px;
-                padding:0 14px;
-                border-radius:var(--btn-radius);
-                border:1px solid var(--btn-secondary-border, var(--border-soft));
-                background:var(--btn-secondary-bg, var(--surface-glass));
-                color:var(--btn-secondary-text, var(--text-soft));
-                font-weight:var(--weight-bold);
-                cursor:pointer;
-              "
-            >
-              Ordenar
-            </button>
-
             <button
               id="facturas-export-btn"
               type="button"
@@ -754,29 +702,11 @@ function renderEmptyState() {
             max-width:760px;
           "
         >
-          Ajusta los filtros, cambia la ordenación o vuelve a cargar la colección para
-          recuperar resultados.
+          Todavía no hay facturas disponibles en la colección actual.
         </p>
       </div>
 
       <div style="display:flex; gap:10px; flex-wrap:wrap;">
-        <button
-          id="facturas-filter-btn"
-          type="button"
-          style="
-            min-height:42px;
-            padding:0 14px;
-            border-radius:var(--btn-radius);
-            border:1px solid var(--btn-secondary-border, var(--border-soft));
-            background:var(--btn-secondary-bg, var(--surface-glass));
-            color:var(--btn-secondary-text, var(--text-soft));
-            font-weight:var(--weight-bold);
-            cursor:pointer;
-          "
-        >
-          Revisar filtros
-        </button>
-
         <button
           id="facturas-refresh-btn"
           type="button"

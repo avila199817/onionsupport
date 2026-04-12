@@ -6,12 +6,12 @@
    - generar el HTML base del sidebar
    - centralizar el marcado del módulo
    - consumir constantes del sidebar
-   - evitar ids hardcodeados fuera del módulo
    - preparado para i18n real
    - tooltips custom con refresh live
    - evitar tooltips nativos del navegador
    - accesibilidad consistente
    - separar textos estáticos i18n de valores dinámicos de sesión
+   - incluir la vista Servidor en el menú lateral
 ========================================================= */
 
 import { I18n } from "../../i18n/index.js";
@@ -90,11 +90,6 @@ export function getSidebarTemplate() {
       "sidebar.menu.invoices",
       "Facturas"
     ),
-     
-    server: t(
-      "sidebar.menu.server",
-      "Servidor"
-    ),
 
     users: t(
       "sidebar.menu.users",
@@ -114,6 +109,11 @@ export function getSidebarTemplate() {
     settings: t(
       "sidebar.menu.settings",
       "Ajustes"
+    ),
+
+    server: t(
+      "sidebar.menu.server",
+      "Servidor"
     ),
 
     recentsAria: t(
@@ -415,6 +415,56 @@ export function getSidebarTemplate() {
           </span>
 
           <span data-i18n="sidebar.menu.settings">${escapeHtml(labels.settings)}</span>
+        </a>
+
+        <a
+          href="/servidor"
+          data-spa
+          class="menu-item"
+          data-role="admin"
+          data-tooltip="${escapeHtml(labels.server)}"
+          data-i18n-data-tooltip="sidebar.menu.server"
+          aria-label="${escapeHtml(labels.server)}"
+          data-i18n-aria-label="sidebar.menu.server"
+        >
+          <span aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <rect
+                x="4"
+                y="5"
+                width="16"
+                height="5"
+                rx="1.5"
+                stroke="currentColor"
+                stroke-width="1.6"
+              />
+              <rect
+                x="4"
+                y="14"
+                width="16"
+                height="5"
+                rx="1.5"
+                stroke="currentColor"
+                stroke-width="1.6"
+              />
+              <circle cx="8" cy="7.5" r="1" fill="currentColor" />
+              <circle cx="8" cy="16.5" r="1" fill="currentColor" />
+              <path
+                d="M11 7.5h5"
+                stroke="currentColor"
+                stroke-width="1.4"
+                stroke-linecap="round"
+              />
+              <path
+                d="M11 16.5h5"
+                stroke="currentColor"
+                stroke-width="1.4"
+                stroke-linecap="round"
+              />
+            </svg>
+          </span>
+
+          <span data-i18n="sidebar.menu.server">${escapeHtml(labels.server)}</span>
         </a>
       </nav>
 

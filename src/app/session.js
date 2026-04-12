@@ -3,10 +3,10 @@
    Archivo: src/app/session.js
 
    Responsabilidades:
-   - restaurar sesión sin bloquear el primer paint
-   - navegar tras restaurar sesión si corresponde
+   - restaurar sesión de forma bloqueante durante el boot
    - evitar restores duplicados en paralelo
-   - coordinar toast de progreso / éxito / fallback
+   - sincronizar UI de usuario tras restore
+   - exponer navegación post-restore solo para usos explícitos
 ========================================================= */
 
 import {
@@ -14,24 +14,40 @@ import {
   getCurrentPublicPath,
 } from "./helpers.js";
 
+/* =========================================================
+   NAVEGACIÓN POST-RESTORE
+   Nota:
+   - durante el boot normal ya no debe forzar rerender si la ruta
+     inicial se pinta después del restore
+   - se mantiene como helper por compatibilidad para flujos explícitos
+========================================================= */
 export function navigateAfterSessionRestore({
   AppCore,
   Auth,
   Router,
-}) {
+  forceRender = false,
+} = {}) {
+  if (!AppCore || !Router) return;
   if (!AppCore.state.authenticated) return;
+  if (!forceRender) return;
 
-  const currentCanonicalPath = getCurrentCanonicalPath(AppCore, Router);
+  const currentCanonicalPath =
+    getCurrentCanonicalPath(AppCore, Router);
 
   if (currentCanonicalPath === "/login") {
     const target =
       typeof Router.goAfterLogin === "function"
         ? null
-        : typeof Auth.getPostLoginTarget === "function"
-          ? Auth.getPostLoginTarget(AppCore.state.user)
+        : typeof Auth?.getPostLoginTarget === "function"
+          ? Auth.getPostLoginTarget(
+              AppCore.state.user
+            )
           : "/";
 
-    if (typeof Router.goAfterLogin === "function") {
+    if (
+      typeof Router.goAfterLogin ===
+      "function"
+    ) {
       Router.goAfterLogin("/");
       return;
     }
@@ -44,54 +60,100 @@ export function navigateAfterSessionRestore({
     return;
   }
 
-  Router.render(getCurrentPublicPath(AppCore), {
-    skipHistory: true,
-    replaceState: true,
-    force: true,
-  });
+  Router.render(
+    getCurrentPublicPath(AppCore),
+    {
+      skipHistory: true,
+      replaceState: true,
+      force: true,
+    }
+  );
 }
 
+/* =========================================================
+   RESTORE AUTH SESSION
+========================================================= */
 export async function restoreAuthSession({
   AppCore,
   Auth,
   syncUserUI,
   state,
-}) {
+} = {}) {
   if (state?.sessionRestorePromise) {
     return state.sessionRestorePromise;
   }
 
-  if (typeof Auth.restoreSession !== "function") {
+  if (
+    !Auth ||
+    typeof Auth.restoreSession !==
+      "function"
+  ) {
     return {
       ok: false,
       user: null,
     };
   }
 
-  state.sessionRestorePromise = (async () => {
-    try {
-      const result = await Auth.restoreSession();
+  state.sessionRestorePromise =
+    (async () => {
+      try {
+        const result =
+          await Auth.restoreSession();
 
-      syncUserUI?.(AppCore);
+        syncUserUI?.(AppCore);
 
-      AppCore.utils.log("Resultado restoreSession():", {
-        ok: Boolean(result?.ok),
-        authenticated: AppCore.state.authenticated,
-        user:
-          AppCore.state.user?.username ||
-          AppCore.state.user?.email ||
-          null,
-      });
+        AppCore?.utils?.log?.(
+          "Resultado restoreSession():",
+          {
+            ok: Boolean(result?.ok),
+            authenticated:
+              AppCore?.state
+                ?.authenticated,
+            user:
+              AppCore?.state?.user
+                ?.username ||
+              AppCore?.state?.user
+                ?.email ||
+              null,
+          }
+        );
 
-      return result;
-    } finally {
-      state.sessionRestorePromise = null;
-    }
-  })();
+        return result || {
+          ok: false,
+          user: null,
+        };
+      } catch (error) {
+        AppCore?.utils?.warn?.(
+          "restoreAuthSession() falló.",
+          error
+        );
+
+        syncUserUI?.(AppCore);
+
+        return {
+          ok: false,
+          user: null,
+          error,
+        };
+      } finally {
+        if (state) {
+          state.sessionRestorePromise =
+            null;
+        }
+      }
+    })();
 
   return state.sessionRestorePromise;
 }
 
+/* =========================================================
+   RESTORE SESSION DURANTE BOOT
+   Nota:
+   - esta función YA NO trabaja "en background"
+   - no debe navegar ni rerenderizar durante el boot
+   - warmup se ejecuta después del restore para que ya exista el estado
+     auth resuelto antes del primer render real
+========================================================= */
 export async function restoreSessionInBackground({
   AppCore,
   Auth,
@@ -102,77 +164,27 @@ export async function restoreSessionInBackground({
   warmup,
   navigateAfterSessionRestore,
   applyPostRenderLoaderPolicy,
-}) {
-  let loadingToastId = null;
-
+} = {}) {
   try {
-    loadingToastId = Toast?.loading?.("Restaurando sesión...", {
-      title: "Inicializando",
-      closable: false,
-    });
-
-    const result = await restoreAuthSession({
-      AppCore,
-      Auth,
-      syncUserUI,
-      state,
-    });
+    const result =
+      await restoreAuthSession({
+        AppCore,
+        Auth,
+        syncUserUI,
+        state,
+      });
 
     await warmup?.(AppCore);
 
-    if (result?.ok && AppCore.state.authenticated) {
-      if (loadingToastId && typeof Toast?.update === "function") {
-        Toast.update(loadingToastId, {
-          type: "success",
-          title: "Sesión restaurada",
-          message: "Tu sesión se ha recuperado correctamente.",
-          duration: 1800,
-          closable: true,
-        });
-      }
-
-      navigateAfterSessionRestore?.({
-        AppCore,
-        Auth,
-        Router,
-      });
-    } else {
-      if (loadingToastId) {
-        if (typeof Toast?.dismiss === "function") {
-          Toast.dismiss(loadingToastId);
-        } else if (typeof Toast?.update === "function") {
-          Toast.update(loadingToastId, {
-            type: "info",
-            title: "Inicialización completada",
-            message: "Se continuará sin restaurar la sesión.",
-            duration: 1800,
-            closable: true,
-          });
-        }
-      }
-
-      applyPostRenderLoaderPolicy?.();
-    }
-
-    return result;
+    return result || {
+      ok: false,
+      user: null,
+    };
   } catch (error) {
-    AppCore.utils.warn("restoreSession en background falló.", error);
-
-    if (loadingToastId) {
-      if (typeof Toast?.update === "function") {
-        Toast.update(loadingToastId, {
-          type: "warning",
-          title: "Sesión no restaurada",
-          message: "Se continuará sin restaurar la sesión.",
-          duration: 2600,
-          closable: true,
-        });
-      } else if (typeof Toast?.dismiss === "function") {
-        Toast.dismiss(loadingToastId);
-      }
-    }
-
-    applyPostRenderLoaderPolicy?.();
+    AppCore?.utils?.warn?.(
+      "restoreSession() falló durante boot.",
+      error
+    );
 
     return {
       ok: false,

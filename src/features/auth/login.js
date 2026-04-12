@@ -3,12 +3,12 @@
    Archivo: src/features/auth/login.js
 
    Responsabilidades:
-   - preparar credenciales de login
-   - construir payload robusto para backend heterogéneo
-   - resolver redirects post-login seguros
+   - preparar credenciales login
+   - construir payload robusto
+   - redirects post-login seguros
    - ejecutar login
-   - soportar 2FA opcional con tempToken
-   - soportar submit directo desde formularios HTML
+   - soportar 2FA opcional
+   - submit desde formularios HTML
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -45,7 +45,9 @@ import {
 /* =========================================================
    IDENTIFIER / PAYLOAD
 ========================================================= */
-export function resolveLoginIdentifier(credentials = {}) {
+export function resolveLoginIdentifier(
+  credentials = {}
+) {
   return String(
     credentials.identifier ??
       credentials.username ??
@@ -55,42 +57,79 @@ export function resolveLoginIdentifier(credentials = {}) {
   ).trim();
 }
 
-export function normalizeLoginPayload(credentials = {}) {
-  const rawIdentifier = resolveLoginIdentifier(credentials);
-  const cleanIdentifier = String(rawIdentifier || "")
-    .trim()
-    .replace(/\s+/g, " ");
+export function normalizeLoginPayload(
+  credentials = {}
+) {
+  const rawIdentifier =
+    resolveLoginIdentifier(
+      credentials
+    );
 
-  const identifier = cleanIdentifier.slice(
+  const cleanIdentifier =
+    String(
+      rawIdentifier || ""
+    )
+      .trim()
+      .replace(
+        /\s+/g,
+        " "
+      )
+      .slice(
+        0,
+        AUTH_CONSTANTS.identifierMaxLength
+      );
+
+  const password = String(
+    credentials.password ??
+      credentials.pass ??
+      ""
+  ).slice(
     0,
-    AUTH_CONSTANTS.identifierMaxLength
+    AUTH_CONSTANTS.passwordMaxLength
   );
 
-  const rawPassword = String(credentials.password ?? credentials.pass ?? "");
-  const password = rawPassword.slice(0, AUTH_CONSTANTS.passwordMaxLength);
-
-  const remember = Boolean(credentials.remember);
-
   return {
-    identifier,
+    identifier:
+      cleanIdentifier,
     password,
-    remember,
+    remember: Boolean(
+      credentials.remember
+    ),
   };
 }
 
-export function buildLoginRequestBody(credentials = {}) {
-  const { identifier, password, remember } =
-    normalizeLoginPayload(credentials);
+export function buildLoginRequestBody(
+  credentials = {}
+) {
+  const {
+    identifier,
+    password,
+    remember,
+  } =
+    normalizeLoginPayload(
+      credentials
+    );
 
-  const cleanIdentifier = String(identifier || "").trim();
-  const looksLikeEmail = cleanIdentifier.includes("@");
+  const clean =
+    String(
+      identifier || ""
+    ).trim();
+
+  const looksLikeEmail =
+    clean.includes("@");
 
   return {
-    identifier,
-    email: looksLikeEmail ? cleanIdentifier.toLowerCase() : undefined,
-    username: looksLikeEmail
-      ? undefined
-      : sanitizeUsername(cleanIdentifier),
+    identifier: clean,
+    email:
+      looksLikeEmail
+        ? clean.toLowerCase()
+        : undefined,
+    username:
+      looksLikeEmail
+        ? undefined
+        : sanitizeUsername(
+            clean
+          ),
     password,
     remember,
   };
@@ -99,16 +138,37 @@ export function buildLoginRequestBody(credentials = {}) {
 /* =========================================================
    REDIRECTS
 ========================================================= */
-export function buildLoginRedirectPath(targetPath = null) {
-  const loginPath = configLikeRoute(
-    AppCore.config?.routes?.login || "/login"
-  );
+export function buildLoginRedirectPath(
+  targetPath = null
+) {
+  const loginPath =
+    configLikeRoute(
+      AppCore.config
+        ?.routes
+        ?.login ||
+        "/login"
+    );
 
-  const canonicalTarget = configLikeRoute(
-    targetPath || getCurrentCanonicalPath() || "/"
-  );
+  const canonicalTarget =
+    configLikeRoute(
+      targetPath ||
+        getCurrentCanonicalPath() ||
+        "/"
+    );
 
-  if (!canonicalTarget || canonicalTarget === "/login") {
+  if (
+    !canonicalTarget ||
+    canonicalTarget ===
+      loginPath
+  ) {
+    return loginPath;
+  }
+
+  if (
+    !isSafeRelativePath(
+      canonicalTarget
+    )
+  ) {
     return loginPath;
   }
 
@@ -116,22 +176,44 @@ export function buildLoginRedirectPath(targetPath = null) {
     return `${loginPath}?redirect=${encodeURIComponent(canonicalTarget)}`;
   }
 
-  const url = new URL(window.location.origin + loginPath);
-  url.searchParams.set("redirect", canonicalTarget);
+  const url = new URL(
+    loginPath,
+    window.location.origin
+  );
+
+  url.searchParams.set(
+    "redirect",
+    canonicalTarget
+  );
 
   return `${url.pathname}${url.search}`;
 }
 
-export function getPostLoginTarget(user = AppCore.state.user) {
+export function getPostLoginTarget(
+  user = AppCore.state.user
+) {
   if (isBrowser()) {
-    const redirectParam = new URLSearchParams(window.location.search).get(
-      "redirect"
-    );
+    const redirect =
+      new URLSearchParams(
+        window.location.search
+      ).get(
+        "redirect"
+      );
 
-    if (redirectParam) {
-      const candidate = normalizePath(redirectParam);
+    if (redirect) {
+      const candidate =
+        normalizePath(
+          redirect
+        );
 
-      if (isSafeRelativePath(candidate) && !isAuthRoute(candidate)) {
+      if (
+        isSafeRelativePath(
+          candidate
+        ) &&
+        !isAuthRoute(
+          candidate
+        )
+      ) {
         return candidate;
       }
     }
@@ -139,94 +221,163 @@ export function getPostLoginTarget(user = AppCore.state.user) {
 
   const slug =
     user?.slug ||
-    AppCore.utils?.slugify?.(user?.username || user?.name || "") ||
+    AppCore.utils?.slugify?.(
+      user?.username ||
+        user?.name ||
+        ""
+    ) ||
     "";
 
   if (slug) {
     return `/@${slug}`;
   }
 
-  return AppCore.config?.routes?.home || "/";
+  return (
+    AppCore.config
+      ?.routes?.home ||
+    "/"
+  );
 }
 
 /* =========================================================
    LOGIN
 ========================================================= */
-export async function login(credentials = {}) {
-  const payload = normalizeLoginPayload(credentials);
-
-  if (!payload.identifier || !payload.password) {
-    const error = new Error(
-      "Usuario/email y contraseña son obligatorios."
+export async function login(
+  credentials = {}
+) {
+  const payload =
+    normalizeLoginPayload(
+      credentials
     );
 
-    AppCore.setError(error);
+  if (
+    !payload.identifier ||
+    !payload.password
+  ) {
+    const error =
+      new Error(
+        "Usuario/email y contraseña son obligatorios."
+      );
+
+    AppCore.setError(
+      error
+    );
+
     throw error;
   }
 
-  AppCore.events.emit("auth:login:start", {
-    identifier: payload.identifier,
-    apiBase: AppCore.config.apiBase,
-    endpoint: AUTH_ENDPOINTS.login,
-  });
+  AppCore.events.emit(
+    "auth:login:start",
+    {
+      identifier:
+        payload.identifier,
+      apiBase:
+        AppCore.config
+          .apiBase,
+      endpoint:
+        AUTH_ENDPOINTS.login,
+    }
+  );
 
   try {
-    const response = await AppCore.apiClient.post(
-      AUTH_ENDPOINTS.login,
-      buildLoginRequestBody(credentials),
-      {
-        auth: false,
-      }
-    );
+    const response =
+      await AppCore.apiClient.post(
+        AUTH_ENDPOINTS.login,
+        buildLoginRequestBody(
+          credentials
+        ),
+        {
+          auth: false,
+        }
+      );
 
-    const authData = validateAuthResponse(response);
+    const authData =
+      validateAuthResponse(
+        response
+      );
 
-    if (authData.status === "2fa_required" && authData.tempToken) {
-      persistTempToken(authData.tempToken);
+    /* 2FA */
+    if (
+      authData.status ===
+        "2fa_required" &&
+      authData.tempToken
+    ) {
+      persistTempToken(
+        authData.tempToken
+      );
 
-      AppCore.events.emit("auth:login:2fa-required", {
-        identifier: payload.identifier,
-        tempToken: authData.tempToken,
-        response,
-      });
+      AppCore.events.emit(
+        "auth:login:2fa-required",
+        {
+          identifier:
+            payload.identifier,
+          response,
+        }
+      );
 
       return {
         ok: true,
-        status: "2fa_required",
-        requires2FA: true,
-        tempToken: authData.tempToken,
-        redirectTo: "/2fa",
+        status:
+          "2fa_required",
+        requires2FA:
+          true,
+        tempToken:
+          authData.tempToken,
+        redirectTo:
+          "/2fa",
         response,
       };
     }
 
-    persistTempToken(null);
+    /* login normal */
+    persistTempToken(
+      null
+    );
 
-    const snapshot = applySession({
-      token: authData.token ?? null,
-      user: authData.user ?? null,
-      refreshToken: authData.refreshToken ?? null,
-      sessionData: authData.sessionData ?? null,
-    });
+    const snapshot =
+      applySession({
+        token:
+          authData.token ??
+          null,
+        user:
+          authData.user ??
+          null,
+        refreshToken:
+          authData.refreshToken ??
+          null,
+        sessionData:
+          authData.sessionData ??
+          null,
+      });
 
-    if (!snapshot.token) {
+    if (
+      !snapshot.token
+    ) {
       throw new Error(
-        "El login devolvió usuario pero no devolvió token."
+        "El login devolvió usuario pero no token."
       );
     }
 
-    const redirectTo = getPostLoginTarget(snapshot.user);
+    const redirectTo =
+      getPostLoginTarget(
+        snapshot.user
+      );
 
-    AppCore.events.emit("auth:login:success", {
-      ...snapshot,
-      redirectTo,
-      response,
-    });
+    AppCore.events.emit(
+      "auth:login:success",
+      {
+        ...snapshot,
+        redirectTo,
+        response,
+      }
+    );
 
     return {
       ok: true,
-      status: "authenticated",
-      requires2FA: false,
+      status:
+        "authenticated",
+      requires2FA:
+        false,
       ...snapshot,
       redirectTo,
       response,
@@ -234,10 +385,16 @@ export async function login(credentials = {}) {
   } catch (error) {
     clearSessionLocal();
 
-    AppCore.events.emit("auth:login:error", {
-      error,
-      message: extractMessage(error),
-    });
+    AppCore.events.emit(
+      "auth:login:error",
+      {
+        error,
+        message:
+          extractMessage(
+            error
+          ),
+      }
+    );
 
     throw error;
   }
@@ -246,29 +403,66 @@ export async function login(credentials = {}) {
 /* =========================================================
    FORM HELPER
 ========================================================= */
-export async function handleLoginFormSubmit(formElement, options = {}) {
-  if (!(formElement instanceof HTMLFormElement)) {
-    throw new Error("Se esperaba un formulario HTML válido.");
+export async function handleLoginFormSubmit(
+  formElement,
+  options = {}
+) {
+  if (
+    !(
+      formElement instanceof
+      HTMLFormElement
+    )
+  ) {
+    throw new Error(
+      "Se esperaba un formulario HTML válido."
+    );
   }
 
-  const formData = new FormData(formElement);
+  const formData =
+    new FormData(
+      formElement
+    );
 
   const credentials = {
     identifier:
-      formData.get("identifier") ||
-      formData.get("username") ||
-      formData.get("email") ||
-      formData.get("user") ||
+      formData.get(
+        "identifier"
+      ) ||
+      formData.get(
+        "username"
+      ) ||
+      formData.get(
+        "email"
+      ) ||
+      formData.get(
+        "user"
+      ) ||
       "",
-    password: formData.get("password") || "",
+
+    password:
+      formData.get(
+        "password"
+      ) || "",
+
     remember:
-      formData.get("remember") === "on" ||
-      formData.get("remember") === "true",
+      formData.get(
+        "remember"
+      ) === "on" ||
+      formData.get(
+        "remember"
+      ) === "true",
   };
 
-  const result = await login(credentials);
+  const result =
+    await login(
+      credentials
+    );
 
-  if (options.resetOnSuccess && result?.status === "authenticated") {
+  if (
+    options.resetOnSuccess &&
+    result?.status ===
+      "authenticated"
+  ) {
     formElement.reset();
   }
 

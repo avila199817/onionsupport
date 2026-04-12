@@ -1,43 +1,72 @@
+/* =========================================================
+   Onion SPA - Facturas API
+   Archivo: src/views/facturas/facturas.api.js
+
+   Responsabilidades:
+   - centralizar las llamadas HTTP del módulo de facturas
+   - exponer operaciones de listado, detalle, pdf y envío
+   - aislar la vista del acceso directo al apiClient
+   - mantener endpoints y timeouts en un único punto
+========================================================= */
+
 import { AppCore } from "../../core/index.js";
 
-const ENDPOINT = "/api/facturas";
+const FACTURAS_ENDPOINT = "/api/facturas";
+const FACTURAS_TIMEOUT = 15000;
+const FACTURAS_SEND_TIMEOUT = 20000;
 
 function getApiClient() {
-  return AppCore.apiClient;
+  const client = AppCore?.apiClient;
+
+  if (!client) {
+    throw new Error("FACTURAS_API_CLIENT_UNAVAILABLE");
+  }
+
+  return client;
 }
 
-export async function fetchFacturas() {
-  return getApiClient().get(ENDPOINT, {
-    timeout: 15000,
+function getFacturaEndpoint(id = "") {
+  const facturaId = String(id ?? "").trim();
+
+  if (!facturaId) {
+    throw new Error("FACTURA_ID_REQUIRED");
+  }
+
+  return `${FACTURAS_ENDPOINT}/${encodeURIComponent(facturaId)}`;
+}
+
+export async function fetchFacturasRequest() {
+  return getApiClient().get(FACTURAS_ENDPOINT, {
+    timeout: FACTURAS_TIMEOUT,
     auth: true,
   });
 }
 
-export async function fetchFacturaDetail(id) {
-  return getApiClient().get(`${ENDPOINT}/${encodeURIComponent(id)}`, {
-    timeout: 15000,
+export async function fetchFacturaDetailRequest(id) {
+  return getApiClient().get(getFacturaEndpoint(id), {
+    timeout: FACTURAS_TIMEOUT,
     auth: true,
   });
 }
 
-export async function fetchFacturaPdfUrl(id, disposition = "attachment") {
+export async function fetchFacturaPdfUrlRequest(id, disposition = "attachment") {
   const endpoint =
     disposition === "inline"
-      ? `${ENDPOINT}/${encodeURIComponent(id)}/pdf?disposition=inline`
-      : `${ENDPOINT}/${encodeURIComponent(id)}/descargar?disposition=attachment`;
+      ? `${getFacturaEndpoint(id)}/pdf?disposition=inline`
+      : `${getFacturaEndpoint(id)}/descargar?disposition=attachment`;
 
   return getApiClient().get(endpoint, {
-    timeout: 15000,
+    timeout: FACTURAS_TIMEOUT,
     auth: true,
   });
 }
 
 export async function sendFacturaRequest(id) {
   return getApiClient().post(
-    `${ENDPOINT}/${encodeURIComponent(id)}/enviar`,
+    `${getFacturaEndpoint(id)}/enviar`,
     {},
     {
-      timeout: 20000,
+      timeout: FACTURAS_SEND_TIMEOUT,
       auth: true,
     }
   );

@@ -14,9 +14,9 @@
    - registro de módulos
    - sesión base
    - preferencias base
-   - utilidades de request
+   - request/api client robusto
    - helpers UI / lifecycle
-   - init idempotente y robusta
+   - init idempotente
 ========================================================= */
 
 import { config } from "./config.js";
@@ -54,25 +54,11 @@ import {
   validateRequiredDom,
 } from "./dom.js";
 
-import {
-  createStorage,
-} from "./storage.js";
-
-import {
-  createEvents,
-} from "./events.js";
-
-import {
-  createCleanup,
-} from "./cleanup.js";
-
-import {
-  createModules,
-} from "./modules.js";
-
-import {
-  createHooks,
-} from "./hooks.js";
+import { createStorage } from "./storage.js";
+import { createEvents } from "./events.js";
+import { createCleanup } from "./cleanup.js";
+import { createModules } from "./modules.js";
+import { createHooks } from "./hooks.js";
 
 import {
   setRoute as setRouteBase,
@@ -110,27 +96,32 @@ export const AppCore = (() => {
   "use strict";
 
   /* =========================================================
-     PRIVADOS / FLAGS
+     FLAGS
   ========================================================= */
   let initPromise = null;
   let initDone = false;
 
   /* =========================================================
-     ESTADO GLOBAL
+     STATE
   ========================================================= */
-  const state = createInitialState({ config });
+  const state =
+    createInitialState({
+      config,
+    });
 
   /* =========================================================
-     CACHE DOM
+     DOM CACHE
   ========================================================= */
-  const dom = createDomCache();
+  const dom =
+    createDomCache();
 
   /* =========================================================
-     REGISTRO INTERNO
+     REGISTRY
   ========================================================= */
   const registry = {
     modules: new Map(),
     scopes: new Map(),
+
     hooks: {
       beforeInit: [],
       afterInit: [],
@@ -141,163 +132,404 @@ export const AppCore = (() => {
   };
 
   /* =========================================================
-     EVENT BUS / CLEANUP / MODULES / HOOKS
+     BUS / MODULES / HOOKS
   ========================================================= */
-  const events = createEvents();
-  const modules = createModules({
-    registry,
-    events,
-  });
-  const hooks = createHooks({
-    registry,
-  });
+  const events =
+    createEvents();
+
+  const modules =
+    createModules({
+      registry,
+      events,
+    });
+
+  const hooks =
+    createHooks({
+      registry,
+    });
 
   /* =========================================================
      UTILS
   ========================================================= */
   const utils = {
-    qs(selector, scope = document) {
-      if (typeof document === "undefined") return null;
-      if (!selector || !scope?.querySelector) return null;
-      return scope.querySelector(selector);
+    qs(
+      selector,
+      scope = document
+    ) {
+      if (
+        typeof document ===
+        "undefined"
+      )
+        return null;
+
+      if (
+        !selector ||
+        !scope?.querySelector
+      )
+        return null;
+
+      return scope.querySelector(
+        selector
+      );
     },
 
-    qsa(selector, scope = document) {
-      if (typeof document === "undefined") return [];
-      if (!selector || !scope?.querySelectorAll) return [];
-      return Array.from(scope.querySelectorAll(selector));
+    qsa(
+      selector,
+      scope = document
+    ) {
+      if (
+        typeof document ===
+        "undefined"
+      )
+        return [];
+
+      if (
+        !selector ||
+        !scope?.querySelectorAll
+      )
+        return [];
+
+      return Array.from(
+        scope.querySelectorAll(
+          selector
+        )
+      );
     },
 
-    create(tag, options = {}) {
-      if (typeof document === "undefined") return null;
+    create(
+      tag,
+      options = {}
+    ) {
+      if (
+        typeof document ===
+        "undefined"
+      )
+        return null;
 
-      const el = document.createElement(tag);
+      const el =
+        document.createElement(
+          tag
+        );
 
-      if (options.className) el.className = options.className;
-      if (options.id) el.id = options.id;
-      if (options.text !== undefined) el.textContent = options.text;
-      if (options.html !== undefined) el.innerHTML = options.html;
+      if (
+        options.className
+      )
+        el.className =
+          options.className;
 
-      if (options.attrs && typeof options.attrs === "object" && !Array.isArray(options.attrs)) {
-        Object.entries(options.attrs).forEach(([key, value]) => {
-          if (value !== undefined && value !== null) {
-            el.setAttribute(key, String(value));
+      if (options.id)
+        el.id =
+          options.id;
+
+      if (
+        options.text !==
+        undefined
+      ) {
+        el.textContent =
+          options.text;
+      }
+
+      if (
+        options.html !==
+        undefined
+      ) {
+        el.innerHTML =
+          options.html;
+      }
+
+      if (
+        options.attrs &&
+        typeof options.attrs ===
+          "object" &&
+        !Array.isArray(
+          options.attrs
+        )
+      ) {
+        Object.entries(
+          options.attrs
+        ).forEach(
+          ([key, value]) => {
+            if (
+              value !==
+                undefined &&
+              value !== null
+            ) {
+              el.setAttribute(
+                key,
+                String(value)
+              );
+            }
           }
-        });
+        );
       }
 
       return el;
     },
 
-    on(target, event, handler, options = false) {
-      if (!target || !event || typeof handler !== "function") {
+    on(
+      target,
+      event,
+      handler,
+      options = false
+    ) {
+      if (
+        !target ||
+        !event ||
+        typeof handler !==
+          "function"
+      ) {
         return () => {};
       }
 
-      target.addEventListener(event, handler, options);
+      target.addEventListener(
+        event,
+        handler,
+        options
+      );
 
       return () => {
-        target.removeEventListener(event, handler, options);
+        target.removeEventListener(
+          event,
+          handler,
+          options
+        );
       };
     },
 
-    off(target, event, handler, options = false) {
-      if (!target || !event || typeof handler !== "function") return;
-      target.removeEventListener(event, handler, options);
+    off(
+      target,
+      event,
+      handler,
+      options = false
+    ) {
+      if (
+        !target ||
+        !event ||
+        typeof handler !==
+          "function"
+      )
+        return;
+
+      target.removeEventListener(
+        event,
+        handler,
+        options
+      );
     },
 
-    once(target, event, handler, options = false) {
-      if (!target || !event || typeof handler !== "function") {
+    once(
+      target,
+      event,
+      handler,
+      options = false
+    ) {
+      if (
+        !target ||
+        !event ||
+        typeof handler !==
+          "function"
+      ) {
         return () => {};
       }
 
       const finalOptions =
-        typeof options === "boolean"
-          ? { capture: options, once: true }
-          : { ...(options || {}), once: true };
+        typeof options ===
+        "boolean"
+          ? {
+              capture:
+                options,
+              once: true,
+            }
+          : {
+              ...(options ||
+                {}),
+              once: true,
+            };
 
-      target.addEventListener(event, handler, finalOptions);
+      target.addEventListener(
+        event,
+        handler,
+        finalOptions
+      );
 
       return () => {
-        target.removeEventListener(event, handler, finalOptions);
+        target.removeEventListener(
+          event,
+          handler,
+          finalOptions
+        );
       };
     },
 
     log(...args) {
-      if (!config.debug) return;
-      console.log(`[${config.appName}]`, ...args);
+      if (!config.debug)
+        return;
+
+      console.log(
+        `[${config.appName}]`,
+        ...args
+      );
     },
 
     warn(...args) {
-      if (!config.debug) return;
-      console.warn(`[${config.appName}]`, ...args);
+      if (!config.debug)
+        return;
+
+      console.warn(
+        `[${config.appName}]`,
+        ...args
+      );
     },
 
     error(...args) {
-      console.error(`[${config.appName}]`, ...args);
+      console.error(
+        `[${config.appName}]`,
+        ...args
+      );
     },
 
     sleep(ms = 0) {
-      return new Promise((resolve) => setTimeout(resolve, ms));
+      return new Promise(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            ms
+          )
+      );
     },
 
-    clamp(value, min, max) {
-      return Math.min(Math.max(value, min), max);
+    clamp(
+      value,
+      min,
+      max
+    ) {
+      return Math.min(
+        Math.max(
+          value,
+          min
+        ),
+        max
+      );
     },
 
-    capitalize(value = "") {
-      if (!value) return "";
-      return value.charAt(0).toUpperCase() + value.slice(1);
+    capitalize(
+      value = ""
+    ) {
+      if (!value)
+        return "";
+
+      return (
+        value
+          .charAt(0)
+          .toUpperCase() +
+        value.slice(1)
+      );
     },
 
-    debounce(fn, delay = 250) {
-      let timeoutId = null;
+    debounce(
+      fn,
+      delay = 250
+    ) {
+      let timeoutId =
+        null;
 
       return (...args) => {
-        clearTimeout(timeoutId);
-        timeoutId = setTimeout(() => {
-          fn(...args);
-        }, delay);
+        clearTimeout(
+          timeoutId
+        );
+
+        timeoutId =
+          setTimeout(
+            () =>
+              fn(...args),
+            delay
+          );
       };
     },
 
-    throttle(fn, limit = 250) {
-      let inThrottle = false;
-      let lastArgs = null;
+    throttle(
+      fn,
+      limit = 250
+    ) {
+      let inThrottle =
+        false;
+
+      let lastArgs =
+        null;
 
       return (...args) => {
-        if (inThrottle) {
-          lastArgs = args;
+        if (
+          inThrottle
+        ) {
+          lastArgs =
+            args;
           return;
         }
 
-        inThrottle = true;
+        inThrottle =
+          true;
+
         fn(...args);
 
-        setTimeout(() => {
-          inThrottle = false;
+        setTimeout(
+          () => {
+            inThrottle =
+              false;
 
-          if (lastArgs) {
-            const queuedArgs = lastArgs;
-            lastArgs = null;
-            fn(...queuedArgs);
-            inThrottle = true;
+            if (
+              lastArgs
+            ) {
+              const queued =
+                lastArgs;
 
-            setTimeout(() => {
-              inThrottle = false;
-            }, limit);
-          }
-        }, limit);
+              lastArgs =
+                null;
+
+              fn(...queued);
+
+              inThrottle =
+                true;
+
+              setTimeout(
+                () => {
+                  inThrottle =
+                    false;
+                },
+                limit
+              );
+            }
+          },
+          limit
+        );
       };
     },
 
-    escapeHtml(value = "") {
-      return String(value)
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
+    escapeHtml(
+      value = ""
+    ) {
+      return String(
+        value
+      )
+        .replaceAll(
+          "&",
+          "&amp;"
+        )
+        .replaceAll(
+          "<",
+          "&lt;"
+        )
+        .replaceAll(
+          ">",
+          "&gt;"
+        )
+        .replaceAll(
+          '"',
+          "&quot;"
+        )
+        .replaceAll(
+          "'",
+          "&#039;"
+        );
     },
 
     safeClone,
@@ -318,21 +550,27 @@ export const AppCore = (() => {
     isPublicApiPath,
   };
 
-  const cleanup = createCleanup({
-    registry,
-    events,
-    utils,
-  });
+  const cleanup =
+    createCleanup({
+      registry,
+      events,
+      utils,
+    });
 
   /* =========================================================
      STORAGE
   ========================================================= */
-  const storage = createStorage(utils);
+  const storage =
+    createStorage(
+      utils
+    );
 
   /* =========================================================
      STATE API
   ========================================================= */
-  function setState(patch = {}) {
+  function setState(
+    patch = {}
+  ) {
     return setStateBase({
       state,
       events,
@@ -341,39 +579,52 @@ export const AppCore = (() => {
   }
 
   function getState() {
-    return getStateBase(state);
+    return getStateBase(
+      state
+    );
   }
 
   /* =========================================================
      UI HELPERS
   ========================================================= */
-  function setDocumentTitle(title = config.appName) {
-    return setDocumentTitleBase({
-      dom,
-      events,
-      title,
-    });
+  function setDocumentTitle(
+    title =
+      config.appName
+  ) {
+    return setDocumentTitleBase(
+      {
+        dom,
+        events,
+        title,
+      }
+    );
   }
 
   function clearDynamicContainers() {
-    return clearDynamicContainersBase({
-      dom,
-      events,
-    });
+    return clearDynamicContainersBase(
+      {
+        dom,
+        events,
+      }
+    );
   }
 
   function syncUserUI() {
-    return syncUserUIBase({
-      state,
-      dom,
-      events,
-    });
+    return syncUserUIBase(
+      {
+        state,
+        dom,
+        events,
+      }
+    );
   }
 
   /* =========================================================
-     SESSION / PREFERENCES / ROUTING
+     SESSION / PREFS
   ========================================================= */
-  function setRoute(route = "/") {
+  function setRoute(
+    route = "/"
+  ) {
     return setRouteBase({
       state,
       setState,
@@ -382,16 +633,22 @@ export const AppCore = (() => {
     });
   }
 
-  function setPublicPath(path = "/") {
-    return setPublicPathBase({
-      storage,
-      setState,
-      events,
-      path,
-    });
+  function setPublicPath(
+    path = "/"
+  ) {
+    return setPublicPathBase(
+      {
+        storage,
+        setState,
+        events,
+        path,
+      }
+    );
   }
 
-  function setUser(user = null) {
+  function setUser(
+    user = null
+  ) {
     return setUserBase({
       state,
       storage,
@@ -402,7 +659,9 @@ export const AppCore = (() => {
     });
   }
 
-  function setToken(token = null) {
+  function setToken(
+    token = null
+  ) {
     return setTokenBase({
       state,
       storage,
@@ -412,29 +671,55 @@ export const AppCore = (() => {
     });
   }
 
-  function applySession({ token = undefined, user = undefined } = {}) {
-    return applySessionBase({
-      state,
-      events,
-      setUser: ({ user: nextUser }) => setUser(nextUser),
-      setToken: ({ token: nextToken }) => setToken(nextToken),
-      token,
-      user,
-    });
+  function applySession({
+    token = undefined,
+    user = undefined,
+  } = {}) {
+    return applySessionBase(
+      {
+        state,
+        events,
+        setUser:
+          ({
+            user:
+              nextUser,
+          }) =>
+            setUser(
+              nextUser
+            ),
+
+        setToken:
+          ({
+            token:
+              nextToken,
+          }) =>
+            setToken(
+              nextToken
+            ),
+
+        token,
+        user,
+      }
+    );
   }
 
   function clearSession() {
-    return clearSessionBase({
-      state,
-      storage,
-      events,
-      setState,
-      syncUserUI,
-      utils,
-    });
+    return clearSessionBase(
+      {
+        state,
+        storage,
+        events,
+        setState,
+        syncUserUI,
+        utils,
+      }
+    );
   }
 
-  function setTheme(theme = config.defaultTheme) {
+  function setTheme(
+    theme =
+      config.defaultTheme
+  ) {
     return setThemeBase({
       dom,
       storage,
@@ -444,7 +729,10 @@ export const AppCore = (() => {
     });
   }
 
-  function setLang(lang = config.defaultLang) {
+  function setLang(
+    lang =
+      config.defaultLang
+  ) {
     return setLangBase({
       dom,
       storage,
@@ -454,17 +742,23 @@ export const AppCore = (() => {
     });
   }
 
-  function setSidebarOpen(value) {
-    return setSidebarOpenBase({
-      dom,
-      storage,
-      events,
-      setState,
-      value,
-    });
+  function setSidebarOpen(
+    value
+  ) {
+    return setSidebarOpenBase(
+      {
+        dom,
+        storage,
+        events,
+        setState,
+        value,
+      }
+    );
   }
 
-  function setLoading(value) {
+  function setLoading(
+    value
+  ) {
     return setLoadingBase({
       dom,
       events,
@@ -473,7 +767,9 @@ export const AppCore = (() => {
     });
   }
 
-  function setError(error = null) {
+  function setError(
+    error = null
+  ) {
     return setErrorBase({
       events,
       setState,
@@ -483,27 +779,51 @@ export const AppCore = (() => {
   }
 
   /* =========================================================
-     REQUEST / API CLIENT
+     REQUEST
   ========================================================= */
-  const request = createRequest({
-    state,
-    events,
-    setError,
-    utils,
-    registry,
-  });
+  const request =
+    createRequest({
+      state,
+      events,
+      setError,
+      utils,
+      registry,
+    });
 
-  const apiClient = createApiClient(request);
+  const apiClient =
+    createApiClient(
+      request
+    );
 
   /* =========================================================
      READY
   ========================================================= */
-  function ready(callback) {
-    if (typeof callback !== "function") return;
-    if (typeof document === "undefined") return;
+  function ready(
+    callback
+  ) {
+    if (
+      typeof callback !==
+      "function"
+    )
+      return;
 
-    if (!isDocumentReady()) {
-      document.addEventListener("DOMContentLoaded", callback, { once: true });
+    if (
+      typeof document ===
+      "undefined"
+    )
+      return;
+
+    if (
+      !isDocumentReady()
+    ) {
+      document.addEventListener(
+        "DOMContentLoaded",
+        callback,
+        {
+          once: true,
+        }
+      );
+
       return;
     }
 
@@ -517,30 +837,41 @@ export const AppCore = (() => {
     state.booting = true;
 
     try {
-      for (const hook of registry.hooks.beforeInit) {
+      for (const hook of registry
+        .hooks
+        .beforeInit) {
         try {
-          const result = await hook(api);
-          if (result !== undefined) {
-            void result;
-          }
+          await hook(api);
         } catch (error) {
-          if (config.debug) {
-            console.error(`[${config.appName}] Error ejecutando hook`, error);
-          }
+          utils.error(
+            "Error hook beforeInit",
+            error
+          );
         }
       }
 
-      config.apiBase = String(config.apiBase || "").trim().replace(/\/+$/, "");
+      config.apiBase =
+        String(
+          config.apiBase ||
+            ""
+        )
+          .trim()
+          .replace(
+            /\/+$/,
+            ""
+          );
 
       cacheDom({
         dom,
         utils,
       });
 
-      validateRequiredDom({
-        dom,
-        utils,
-      });
+      validateRequiredDom(
+        {
+          dom,
+          utils,
+        }
+      );
 
       loadPreferences({
         state,
@@ -565,71 +896,116 @@ export const AppCore = (() => {
         utils,
       });
 
-      state.initialized = true;
-      state.booting = false;
+      state.initialized =
+        true;
+
+      state.booting =
+        false;
+
       state.ready = true;
 
       initDone = true;
 
-      utils.log("Core inicializado correctamente.", {
-        version: config.version,
-        apiBase: config.apiBase,
-        route: state.route,
-        publicPath: state.publicPath,
-        lang: state.lang,
-        theme: state.theme,
-        authenticated: state.authenticated,
-        username: getUserUsername(state.user) || null,
-        online: state.online,
-      });
+      utils.log(
+        "Core inicializado correctamente.",
+        {
+          version:
+            config.version,
+          apiBase:
+            config.apiBase,
+          route:
+            state.route,
+          publicPath:
+            state.publicPath,
+          lang:
+            state.lang,
+          theme:
+            state.theme,
+          authenticated:
+            state.authenticated,
+          username:
+            getUserUsername(
+              state.user
+            ) || null,
+          online:
+            state.online,
+        }
+      );
 
-      events.emit("app:core:ready", {
-        state: cloneState(state),
-        config: { ...config },
-      });
+      events.emit(
+        "app:core:ready",
+        {
+          state:
+            cloneState(
+              state
+            ),
+          config: {
+            ...config,
+          },
+        }
+      );
 
-      for (const hook of registry.hooks.afterInit) {
+      for (const hook of registry
+        .hooks
+        .afterInit) {
         try {
-          const result = await hook(api);
-          if (result !== undefined) {
-            void result;
-          }
+          await hook(api);
         } catch (error) {
-          if (config.debug) {
-            console.error(`[${config.appName}] Error ejecutando hook`, error);
-          }
+          utils.error(
+            "Error hook afterInit",
+            error
+          );
         }
       }
 
       return api;
     } catch (error) {
-      state.booting = false;
-      state.ready = false;
-      state.initialized = false;
+      state.booting =
+        false;
+
+      state.ready =
+        false;
+
+      state.initialized =
+        false;
+
       setError(error);
+
       throw error;
     } finally {
-      initPromise = null;
+      initPromise =
+        null;
     }
   }
 
   async function init() {
-    if (initDone || state.initialized) {
-      utils.warn("AppCore ya fue inicializado.");
+    if (
+      initDone ||
+      state.initialized
+    ) {
+      utils.warn(
+        "AppCore ya fue inicializado."
+      );
+
       return api;
     }
 
     if (initPromise) {
-      utils.warn("AppCore ya está arrancando.");
+      utils.warn(
+        "AppCore ya está arrancando."
+      );
+
       return initPromise;
     }
 
-    initPromise = doInit();
+    initPromise =
+      doInit();
+
     return initPromise;
   }
 
   /* =========================================================
-     API PÚBLICA
+     PUBLIC API
   ========================================================= */
   const api = {
     config,
@@ -648,12 +1024,14 @@ export const AppCore = (() => {
 
     getState,
     setState,
+
     setRoute,
     setPublicPath,
     setUser,
     setToken,
     applySession,
     clearSession,
+
     setTheme,
     setLang,
     setSidebarOpen,

@@ -1,9 +1,10 @@
 /* =========================================================
-   Onion SPA - Incidencias View
+   Onion SPA - Incidencias Entry
    Archivo: src/views/incidencias/index.js
 
    Responsabilidades:
-   - componer módulos de incidencias
+   - punto de entrada de la vista incidencias
+   - componer módulos internos
    - render principal
    - cargar datos
    - bind de eventos
@@ -36,7 +37,7 @@ export const IncidenciasView = (() => {
   "use strict";
 
   /* =====================================================
-     RENDER ROOT
+     RENDER
   ===================================================== */
 
   function render() {
@@ -69,7 +70,7 @@ export const IncidenciasView = (() => {
   }
 
   /* =====================================================
-     BOOT
+     INIT
   ===================================================== */
 
   async function init() {
@@ -84,9 +85,17 @@ export const IncidenciasView = (() => {
     render();
   }
 
+  /* =====================================================
+     API
+  ===================================================== */
+
   return {
     init,
     render,
+    reload: () =>
+      loadIncidencias({
+        force: true,
+      }),
     loadIncidencias,
   };
 })();

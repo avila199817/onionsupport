@@ -7,7 +7,23 @@
    - exponer factory de estado aislado por instancia
    - gestionar flags de loading / refresh / detalle
    - controlar referencias inflight del módulo
+   - ofrecer helpers de lectura y escritura consistentes
 ========================================================= */
+
+function asBoolean(value) {
+  return Boolean(value);
+}
+
+function asNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function asText(value, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const text = String(value).trim();
+  return text || fallback;
+}
 
 export function createFacturasState() {
   return {
@@ -39,6 +55,10 @@ export function createFacturasState() {
     },
   };
 }
+
+/* =========================================================
+   RESET
+========================================================= */
 
 export function resetFacturasViewState(state) {
   if (!state) return state;
@@ -79,21 +99,115 @@ export function resetFacturasInflightState(state) {
   return state;
 }
 
+export function resetFacturasState(state) {
+  if (!state) return state;
+
+  resetFacturasViewState(state);
+  resetFacturasDetailState(state);
+  resetFacturasInflightState(state);
+
+  return state;
+}
+
+/* =========================================================
+   GETTERS
+========================================================= */
+
+export function getFacturasViewState(state) {
+  return state?.view || null;
+}
+
+export function getFacturasDetailState(state) {
+  return state?.detail || null;
+}
+
+export function getFacturasActionsState(state) {
+  return state?.actions || null;
+}
+
+export function getFacturasInflightState(state) {
+  return state?.inflight || null;
+}
+
+export function isFacturasHydrated(state) {
+  return Boolean(state?.view?.hydrated);
+}
+
+export function isFacturasLoading(state) {
+  return Boolean(state?.view?.loading);
+}
+
+export function isFacturasLoaded(state) {
+  return Boolean(state?.view?.loaded);
+}
+
+export function isFacturasRefreshing(state) {
+  return Boolean(state?.view?.refreshing);
+}
+
+export function isFacturasBootstrapped(state) {
+  return Boolean(state?.view?.bootstrapped);
+}
+
+export function getFacturasError(state) {
+  return state?.view?.error || null;
+}
+
+export function getFacturasRemoteCount(state) {
+  return asNumber(state?.view?.remoteCount, 0);
+}
+
+export function isFacturasDetailOpen(state) {
+  return Boolean(state?.detail?.open);
+}
+
+export function isFacturasDetailLoading(state) {
+  return Boolean(state?.detail?.loading);
+}
+
+export function getFacturasDetailData(state) {
+  return state?.detail?.data || null;
+}
+
+export function getFacturasSendingFacturaId(state) {
+  return asText(state?.actions?.sendingFacturaId, "");
+}
+
+export function getFacturasDownloadingFacturaId(state) {
+  return asText(state?.actions?.downloadingFacturaId, "");
+}
+
+export function getFacturasViewingFacturaId(state) {
+  return asText(state?.actions?.viewingFacturaId, "");
+}
+
+export function getFacturasInflightLoad(state) {
+  return state?.inflight?.load || null;
+}
+
+export function getFacturasInflightDetail(state) {
+  return state?.inflight?.detail || null;
+}
+
+/* =========================================================
+   SETTERS VIEW
+========================================================= */
+
 export function setFacturasHydrated(state, value) {
   if (!state) return state;
-  state.view.hydrated = Boolean(value);
+  state.view.hydrated = asBoolean(value);
   return state;
 }
 
 export function setFacturasLoading(state, value) {
   if (!state) return state;
-  state.view.loading = Boolean(value);
+  state.view.loading = asBoolean(value);
   return state;
 }
 
 export function setFacturasLoaded(state, value) {
   if (!state) return state;
-  state.view.loaded = Boolean(value);
+  state.view.loaded = asBoolean(value);
   return state;
 }
 
@@ -103,39 +217,59 @@ export function setFacturasError(state, value = null) {
   return state;
 }
 
+export function clearFacturasError(state) {
+  if (!state) return state;
+  state.view.error = null;
+  return state;
+}
+
 export function setFacturasRefreshing(state, value) {
   if (!state) return state;
-  state.view.refreshing = Boolean(value);
+  state.view.refreshing = asBoolean(value);
   return state;
 }
 
 export function setFacturasBootstrapped(state, value) {
   if (!state) return state;
-  state.view.bootstrapped = Boolean(value);
+  state.view.bootstrapped = asBoolean(value);
   return state;
 }
 
 export function setFacturasRemoteCount(state, value = 0) {
   if (!state) return state;
-  state.view.remoteCount = Number.isFinite(Number(value)) ? Number(value) : 0;
+  state.view.remoteCount = asNumber(value, 0);
   return state;
 }
 
+/* =========================================================
+   SETTERS DETAIL
+========================================================= */
+
 export function setFacturasDetailOpen(state, value) {
   if (!state) return state;
-  state.detail.open = Boolean(value);
+  state.detail.open = asBoolean(value);
   return state;
 }
 
 export function setFacturasDetailLoading(state, value) {
   if (!state) return state;
-  state.detail.loading = Boolean(value);
+  state.detail.loading = asBoolean(value);
   return state;
 }
 
 export function setFacturasDetailData(state, value = null) {
   if (!state) return state;
   state.detail.data = value || null;
+  return state;
+}
+
+export function openFacturasDetail(state, factura = null) {
+  if (!state) return state;
+
+  state.detail.open = true;
+  state.detail.loading = false;
+  state.detail.data = factura || null;
+
   return state;
 }
 
@@ -153,23 +287,41 @@ export function closeFacturasDetail(state) {
   return state;
 }
 
+/* =========================================================
+   SETTERS ACTIONS
+========================================================= */
+
 export function setFacturasSendingFacturaId(state, value = "") {
   if (!state) return state;
-  state.actions.sendingFacturaId = String(value ?? "").trim();
+  state.actions.sendingFacturaId = asText(value, "");
   return state;
 }
 
 export function setFacturasDownloadingFacturaId(state, value = "") {
   if (!state) return state;
-  state.actions.downloadingFacturaId = String(value ?? "").trim();
+  state.actions.downloadingFacturaId = asText(value, "");
   return state;
 }
 
 export function setFacturasViewingFacturaId(state, value = "") {
   if (!state) return state;
-  state.actions.viewingFacturaId = String(value ?? "").trim();
+  state.actions.viewingFacturaId = asText(value, "");
   return state;
 }
+
+export function clearFacturasActionIds(state) {
+  if (!state) return state;
+
+  state.actions.sendingFacturaId = "";
+  state.actions.downloadingFacturaId = "";
+  state.actions.viewingFacturaId = "";
+
+  return state;
+}
+
+/* =========================================================
+   SETTERS INFLIGHT
+========================================================= */
 
 export function setFacturasInflightLoad(state, promise = null) {
   if (!state) return state;
@@ -181,4 +333,44 @@ export function setFacturasInflightDetail(state, promise = null) {
   if (!state) return state;
   state.inflight.detail = promise || null;
   return state;
+}
+
+/* =========================================================
+   SNAPSHOT HELPERS
+========================================================= */
+
+export function getFacturasTemplateState(state) {
+  if (!state) {
+    return {
+      loading: false,
+      loaded: false,
+      error: null,
+      refreshing: false,
+      bootstrapped: false,
+      remoteCount: 0,
+      detailOpen: false,
+      detailLoading: false,
+      detail: null,
+      sendingFacturaId: "",
+      downloadingFacturaId: "",
+      viewingFacturaId: "",
+    };
+  }
+
+  return {
+    loading: Boolean(state.view.loading),
+    loaded: Boolean(state.view.loaded),
+    error: state.view.error || null,
+    refreshing: Boolean(state.view.refreshing),
+    bootstrapped: Boolean(state.view.bootstrapped),
+    remoteCount: asNumber(state.view.remoteCount, 0),
+
+    detailOpen: Boolean(state.detail.open),
+    detailLoading: Boolean(state.detail.loading),
+    detail: state.detail.data || null,
+
+    sendingFacturaId: asText(state.actions.sendingFacturaId, ""),
+    downloadingFacturaId: asText(state.actions.downloadingFacturaId, ""),
+    viewingFacturaId: asText(state.actions.viewingFacturaId, ""),
+  };
 }

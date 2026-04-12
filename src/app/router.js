@@ -5,22 +5,35 @@
    Responsabilidades:
    - configurar dependencias del router
    - bind del router una sola vez
-   - lanzar la primera renderización inmediata
-   - sincronizar publicPath tras el render inicial
+   - lanzar la primera renderización controlada
+   - sincronizar publicPath tras render
    - aplicar política visual post-render
 ========================================================= */
 
-import { getCurrentPath, getCurrentPublicPath } from "./helpers.js";
+import {
+  getCurrentPath,
+  getCurrentPublicPath,
+} from "./helpers.js";
 
+/* =========================================================
+   CONFIGURE
+========================================================= */
 export function configureRouter({
   Router,
   AppCore,
   Auth,
   state,
-}) {
-  if (state?.routerConfigured) return;
+} = {}) {
+  if (!Router) return;
 
-  if (typeof Router?.configure === "function") {
+  if (state?.routerConfigured) {
+    return;
+  }
+
+  if (
+    typeof Router.configure ===
+    "function"
+  ) {
     Router.configure({
       core: AppCore,
       auth: Auth,
@@ -32,32 +45,70 @@ export function configureRouter({
   }
 }
 
+/* =========================================================
+   BIND
+========================================================= */
 export function bindRouter({
   Router,
   state,
-}) {
-  if (state?.routerBound) return;
+} = {}) {
+  if (!Router) return;
 
-  Router.bind();
+  if (state?.routerBound) {
+    return;
+  }
+
+  if (
+    typeof Router.bind ===
+    "function"
+  ) {
+    Router.bind();
+  }
 
   if (state) {
     state.routerBound = true;
   }
 }
 
+/* =========================================================
+   FIRST RENDER
+========================================================= */
 export function renderInitialRoute({
   AppCore,
   Router,
   applyPostRenderLoaderPolicy,
-}) {
-  const currentPath = getCurrentPath(AppCore);
+} = {}) {
+  if (!AppCore || !Router) {
+    return;
+  }
 
-  Router.render(currentPath, {
-    skipHistory: true,
-    replaceState: true,
-    force: true,
-  });
+  const currentPath =
+    getCurrentPath(AppCore);
 
-  AppCore.setPublicPath(getCurrentPublicPath(AppCore));
+  if (
+    typeof Router.render ===
+    "function"
+  ) {
+    Router.render(
+      currentPath,
+      {
+        skipHistory: true,
+        replaceState: true,
+        force: true,
+      }
+    );
+  }
+
+  if (
+    typeof AppCore.setPublicPath ===
+    "function"
+  ) {
+    AppCore.setPublicPath(
+      getCurrentPublicPath(
+        AppCore
+      )
+    );
+  }
+
   applyPostRenderLoaderPolicy?.();
 }

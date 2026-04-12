@@ -6,10 +6,15 @@
    - punto de entrada del módulo auth
    - composición de login / logout / restore / guards
    - exponer helpers auth para toda la SPA
+   - serializar restore / refresh / me
    - mantener compatibilidad con backend heterogéneo
 ========================================================= */
 
-import { AUTH_ENDPOINTS, AUTH_STORAGE_KEYS, AUTH_CONSTANTS } from "./constants.js";
+import {
+  AUTH_ENDPOINTS,
+  AUTH_STORAGE_KEYS,
+  AUTH_CONSTANTS,
+} from "./constants.js";
 
 import {
   isAuthRoute,
@@ -69,7 +74,7 @@ export const Auth = (() => {
   "use strict";
 
   /* =========================================================
-     ESTADO INTERNO
+     INTERNAL SESSION STATE
   ========================================================= */
   const session = {
     restoring: false,
@@ -88,40 +93,73 @@ export const Auth = (() => {
   };
 
   /* =========================================================
-     API PÚBLICA
+     WRAPPERS SERIALIZADOS
+  ========================================================= */
+  function runFetchMe() {
+    return fetchMe(session);
+  }
+
+  function runRefreshSession() {
+    return refreshSession(session);
+  }
+
+  function runRestoreSession() {
+    return restoreSession(session);
+  }
+
+  /* =========================================================
+     PUBLIC API
   ========================================================= */
   return {
     AUTH_ENDPOINTS,
     AUTH_STORAGE_KEYS,
     AUTH_CONSTANTS,
+
     session,
 
+    /* auth actions */
     login,
     logout,
-    fetchMe: () => fetchMe(session),
-    refreshSession: () => refreshSession(session),
-    restoreSession: () => restoreSession(session),
     handleLoginFormSubmit,
 
+    /* session recovery */
+    fetchMe: runFetchMe,
+    refreshSession:
+      runRefreshSession,
+    restoreSession:
+      runRestoreSession,
+
+    /* auth state */
     isAuthenticated,
     isAuthRoute,
+
+    /* roles / guards */
     hasRole,
     requireRole,
     guardAuthenticated,
     guardRole,
+    getCurrentRole,
+
+    /* headers */
     getAuthHeader,
+
+    /* session local */
     clearSessionLocal,
-    normalizeUser,
     applySession,
     buildSessionSnapshot,
-    buildLoginRedirectPath,
-    buildLoginRequestBody,
-    normalizeLoginPayload,
-    resolveLoginIdentifier,
-    getPostLoginTarget,
-    getCurrentRole,
     getSessionDebugSnapshot,
 
+    /* normalize */
+    normalizeUser,
+
+    /* login helpers */
+    resolveLoginIdentifier,
+    normalizeLoginPayload,
+    buildLoginRequestBody,
+    buildLoginRedirectPath,
+    getPostLoginTarget,
+
+    /* storage helpers */
     hasRefreshToken,
     hasRefreshContext,
     getStoredRefreshToken,

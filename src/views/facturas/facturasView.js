@@ -1,5 +1,5 @@
 /* =========================================================
-   Onion SPA - Facturas View (FINAL PRO CLEAN V2)
+   Onion SPA - Facturas View (FINAL PRO CLEAN V3)
    Archivo: src/views/facturas/facturasView.js
 
    Responsabilidades:
@@ -25,6 +25,12 @@ import { getSortedFacturasStore } from "./facturas.store.js";
 import {
   createFacturasState,
   getFacturasTemplateState,
+  isFacturasHydrated,
+  isFacturasBootstrapped,
+  isFacturasLoading,
+  isFacturasRefreshing,
+  isFacturasDetailOpen,
+  getFacturasDetailData,
   setFacturasHydrated,
   setFacturasBootstrapped,
   setFacturasDetailData,
@@ -164,24 +170,26 @@ export const FacturasView = (() => {
   async function sendFacturaToClient(id) {
     return sendFacturaToClientAction({
       facturaId: id,
-      detail: state.detail.data,
+      detail: getFacturasDetailData(state),
       onStart(facturaId) {
         setSendingFacturaId(facturaId);
         renderDetailOnly();
       },
       onSent({ facturaId, response }) {
-        if (state.detail.data?.id === facturaId) {
-          state.detail.data.enviadoA = safeText(
+        const detail = getFacturasDetailData(state);
+
+        if (detail?.id === facturaId) {
+          detail.enviadoA = safeText(
             response?.sent?.to,
-            state.detail.data.enviadoA
+            detail.enviadoA
           );
 
-          state.detail.data.fechaEnvio = safeText(
+          detail.fechaEnvio = safeText(
             response?.sent?.at,
-            state.detail.data.fechaEnvio
+            detail.fechaEnvio
           );
 
-          setDetail(state.detail.data);
+          setDetail(detail);
         }
       },
       async reloadFacturas() {
@@ -255,7 +263,7 @@ export const FacturasView = (() => {
   }
 
   function renderDetailOnly() {
-    if (!state.view.hydrated) return;
+    if (!isFacturasHydrated(state)) return;
     render();
   }
 
@@ -267,10 +275,10 @@ export const FacturasView = (() => {
       scopeName: SCOPE,
       getContainer,
       getState: () => ({
-        loading: state.view.loading,
-        refreshing: state.view.refreshing,
-        detailOpen: state.detail.open,
-        bootstrapped: state.view.bootstrapped,
+        loading: isFacturasLoading(state),
+        refreshing: isFacturasRefreshing(state),
+        detailOpen: isFacturasDetailOpen(state),
+        bootstrapped: isFacturasBootstrapped(state),
       }),
       render,
       loadFacturas,
@@ -296,7 +304,7 @@ export const FacturasView = (() => {
   function mount() {
     render();
 
-    if (!state.view.bootstrapped) {
+    if (!isFacturasBootstrapped(state)) {
       bind();
     }
   }

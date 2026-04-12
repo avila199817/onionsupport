@@ -28,7 +28,7 @@ export const ServerView = (() => {
     health: "/health/internal",
   };
 
-  const REFRESH_INTERVAL_MS = 3000;
+  const REFRESH_INTERVAL_MS = 0;
   const HISTORY_LIMIT = 40;
 
   const state = {

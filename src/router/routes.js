@@ -15,7 +15,7 @@ import { I18n } from "../i18n/index.js";
 
 import { LoginView } from "../views/loginView.js";
 import { HomeView } from "../views/homeView.js";
-import { IncidenciasView } from "../views/incidenciasView.js";
+import { IncidenciasView } from "../views/incidencias/index.js";
 import { FacturasView } from "../views/facturas/index.js";
 import { ServerView } from "../views/serverView.js";
 import { UsuariosView } from "../views/usuariosView.js";

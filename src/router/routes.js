@@ -7,7 +7,10 @@
    - encapsular los adapters de render de vistas
    - exponer rutas inmutables
    - validar la estructura mínima de cada ruta
+   - resolver títulos vía i18n
 ========================================================= */
+
+import { I18n } from "../i18n/index.js";
 
 import { LoginView } from "../views/loginView.js";
 import { HomeView } from "../views/homeView.js";
@@ -18,6 +21,14 @@ import { UsuariosView } from "../views/usuariosView.js";
 import { ClientesView } from "../views/clientesView.js";
 import { CuentaView } from "../views/cuentaView.js";
 import { AjustesView } from "../views/ajustesView.js";
+
+function t(key, fallback = "", params = {}) {
+  try {
+    return I18n.t(key, params, fallback);
+  } catch {
+    return fallback || key;
+  }
+}
 
 function renderHomeView() {
   HomeView.render();
@@ -60,7 +71,7 @@ export function createRoutes() {
     {
       path: "/",
       name: "home",
-      title: "Onion Support",
+      title: t("routes.home", "Onion Support"),
       public: false,
       roles: [],
       hideShell: false,
@@ -69,7 +80,7 @@ export function createRoutes() {
     {
       path: "/incidencias",
       name: "incidencias",
-      title: "Incidencias",
+      title: t("routes.incidencias", "Incidencias"),
       public: false,
       roles: [],
       hideShell: false,
@@ -78,7 +89,7 @@ export function createRoutes() {
     {
       path: "/facturas",
       name: "facturas",
-      title: "Facturas",
+      title: t("routes.facturas", "Facturas"),
       public: false,
       roles: [],
       hideShell: false,
@@ -87,7 +98,7 @@ export function createRoutes() {
     {
       path: "/servidor",
       name: "servidor",
-      title: "Servidor",
+      title: t("routes.servidor", "Servidor"),
       public: false,
       roles: ["admin"],
       hideShell: false,
@@ -96,7 +107,7 @@ export function createRoutes() {
     {
       path: "/usuarios",
       name: "usuarios",
-      title: "Usuarios",
+      title: t("routes.usuarios", "Usuarios"),
       public: false,
       roles: ["admin"],
       hideShell: false,
@@ -105,7 +116,7 @@ export function createRoutes() {
     {
       path: "/clientes",
       name: "clientes",
-      title: "Clientes",
+      title: t("routes.clientes", "Clientes"),
       public: false,
       roles: ["admin"],
       hideShell: false,
@@ -114,7 +125,7 @@ export function createRoutes() {
     {
       path: "/cuenta",
       name: "cuenta",
-      title: "Cuenta",
+      title: t("routes.cuenta", "Cuenta"),
       public: false,
       roles: [],
       hideShell: false,
@@ -123,7 +134,7 @@ export function createRoutes() {
     {
       path: "/ajustes",
       name: "ajustes",
-      title: "Ajustes",
+      title: t("routes.ajustes", "Ajustes"),
       public: false,
       roles: [],
       hideShell: false,
@@ -132,7 +143,7 @@ export function createRoutes() {
     {
       path: "/login",
       name: "login",
-      title: "Acceso",
+      title: t("routes.login", "Acceso"),
       public: true,
       roles: [],
       hideShell: true,

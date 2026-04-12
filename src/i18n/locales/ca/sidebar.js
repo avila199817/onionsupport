@@ -5,6 +5,7 @@
    Responsabilidades:
    - definir traducciones en catalán
    - cubrir las keys del sidebar
+   - cubrir títulos de rutas
    - mantener estructura consistente con el resto de locales
    - preparado para i18n runtime live
 ========================================================= */
@@ -34,6 +35,7 @@ export const ca = {
       clients: "Clients",
       account: "Compte",
       settings: "Configuració",
+      server: "Servidor",
     },
 
     recents: {
@@ -54,6 +56,18 @@ export const ca = {
       help: "Ajuda",
       logout: "Tancar sessió",
     },
+  },
+
+  routes: {
+    home: "Onion Support",
+    incidencias: "Incidències",
+    facturas: "Factures",
+    usuarios: "Usuaris",
+    clientes: "Clients",
+    cuenta: "Compte",
+    ajustes: "Configuració",
+    servidor: "Servidor",
+    login: "Accés",
   },
 };
 

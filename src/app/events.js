@@ -3,14 +3,16 @@
    Archivo: src/app/events.js
 
    Responsabilidades:
-   - bind de eventos globales de la aplicación
-   - sincronizar UI tras cambios de sesión
-   - rerenderizar ruta al cambiar idioma
-   - gestionar notificaciones de auth
-   - reaccionar a eventos del router
+   - bind eventos globales app
+   - sincronizar UI tras sesión
+   - rerender ruta al cambiar idioma
+   - gestionar notificaciones auth
+   - reaccionar eventos router
 ========================================================= */
 
-import { getCurrentPublicPath } from "./helpers.js";
+import {
+  getCurrentPublicPath,
+} from "./helpers.js";
 
 export function bindAppEvents({
   AppCore,
@@ -21,80 +23,217 @@ export function bindAppEvents({
   rerenderCurrentRoute,
   applyPostRenderLoaderPolicy,
 }) {
-  AppCore.cleanup.event(scope, "app:user:change", () => {
-    syncUserUI?.(AppCore);
-  });
+  if (!AppCore?.cleanup?.event) {
+    return;
+  }
 
-  AppCore.cleanup.event(scope, "app:session:cleared", () => {
-    syncUserUI?.(AppCore);
-  });
+  /* ======================================================
+     USER / SESSION
+  ====================================================== */
+  AppCore.cleanup.event(
+    scope,
+    "app:user:change",
+    () => {
+      syncUserUI?.(
+        AppCore
+      );
+    }
+  );
 
-  AppCore.cleanup.event(scope, "app:lang:change", ({ detail }) => {
-    const lang = String(detail?.lang || I18n.getLang?.() || "es");
+  AppCore.cleanup.event(
+    scope,
+    "app:session:cleared",
+    () => {
+      syncUserUI?.(
+        AppCore
+      );
+    }
+  );
 
-    AppCore.setState({
-      lang,
-    });
+  /* ======================================================
+     LANGUAGE
+  ====================================================== */
+  AppCore.cleanup.event(
+    scope,
+    "app:lang:change",
+    ({
+      detail,
+    }) => {
+      const lang =
+        String(
+          detail?.lang ||
+            I18n?.getLang?.() ||
+            "es"
+        ).trim() ||
+        "es";
 
-    document.documentElement.setAttribute("lang", lang);
+      AppCore.setState({
+        lang,
+      });
 
-    rerenderCurrentRoute?.();
-
-    Toast?.success?.(
-      I18n.t("settings.languageChanged", {}, "Idioma actualizado"),
-      {
-        title: I18n.t("settings.language", {}, "Idioma"),
-        duration: 2200,
+      if (
+        typeof document !==
+        "undefined"
+      ) {
+        document.documentElement.setAttribute(
+          "lang",
+          lang
+        );
       }
-    );
 
-    AppCore.utils.log("Idioma cambiado.", {
-      lang,
-      route: getCurrentPublicPath(AppCore),
-    });
-  });
+      rerenderCurrentRoute?.();
 
-  AppCore.cleanup.event(scope, "auth:login:success", () => {
-    syncUserUI?.(AppCore);
+      Toast?.success?.(
+        I18n?.t?.(
+          "settings.languageChanged",
+          {},
+          "Idioma actualizado"
+        ) ||
+          "Idioma actualizado",
+        {
+          title:
+            I18n?.t?.(
+              "settings.language",
+              {},
+              "Idioma"
+            ) || "Idioma",
+          duration: 2200,
+        }
+      );
 
-    Toast?.success?.("Sesión iniciada correctamente.", {
-      title: "Bienvenido",
-      duration: 2800,
-    });
-  });
+      AppCore.utils.log(
+        "Idioma cambiado.",
+        {
+          lang,
+          route:
+            getCurrentPublicPath(
+              AppCore
+            ),
+        }
+      );
+    }
+  );
 
-  AppCore.cleanup.event(scope, "auth:logout:success", () => {
-    Toast?.info?.("Sesión cerrada correctamente.", {
-      title: "Sesión finalizada",
-      duration: 2200,
-    });
-  });
+  /* ======================================================
+     AUTH
+  ====================================================== */
+  AppCore.cleanup.event(
+    scope,
+    "auth:login:success",
+    () => {
+      syncUserUI?.(
+        AppCore
+      );
 
-  AppCore.cleanup.event(scope, "router:before-render", ({ detail }) => {
-    AppCore.utils.log("Router before render:", {
-      path: detail?.path || null,
-      canonicalPath: detail?.canonicalPath || null,
-      username: detail?.username || null,
-    });
-  });
+      Toast?.success?.(
+        "Sesión iniciada correctamente.",
+        {
+          title:
+            "Bienvenido",
+          duration: 2800,
+        }
+      );
+    }
+  );
 
-  AppCore.cleanup.event(scope, "router:rendered", ({ detail }) => {
-    const publicPath = getCurrentPublicPath(AppCore);
+  AppCore.cleanup.event(
+    scope,
+    "auth:logout:success",
+    () => {
+      syncUserUI?.(
+        AppCore
+      );
 
-    AppCore.setPublicPath(publicPath);
-    applyPostRenderLoaderPolicy?.();
+      Toast?.info?.(
+        "Sesión cerrada correctamente.",
+        {
+          title:
+            "Sesión finalizada",
+          duration: 2200,
+        }
+      );
+    }
+  );
 
-    AppCore.events.emit("app:user-ui:sync", {
-      route: publicPath,
-    });
+  /* ======================================================
+     ROUTER
+  ====================================================== */
+  AppCore.cleanup.event(
+    scope,
+    "router:before-render",
+    ({
+      detail,
+    }) => {
+      AppCore.utils.log(
+        "Router before render:",
+        {
+          path:
+            detail?.path ??
+            null,
+          canonicalPath:
+            detail?.canonicalPath ??
+            null,
+          username:
+            detail?.username ??
+            null,
+        }
+      );
+    }
+  );
 
-    AppCore.utils.log("Ruta renderizada:", {
-      publicPath,
-      canonicalPath: detail?.canonicalPath || detail?.path || null,
-      username: detail?.username || null,
-      found: Boolean(detail?.found),
-      forbidden: Boolean(detail?.forbidden),
-      lang: AppCore.state.lang,
-    });
-  });
+  AppCore.cleanup.event(
+    scope,
+    "router:rendered",
+    ({
+      detail,
+    }) => {
+      const publicPath =
+        getCurrentPublicPath(
+          AppCore
+        );
+
+      AppCore.setPublicPath(
+        publicPath
+      );
+
+      applyPostRenderLoaderPolicy?.();
+
+      syncUserUI?.(
+        AppCore
+      );
+
+      AppCore.events.emit(
+        "app:user-ui:sync",
+        {
+          route:
+            publicPath,
+        }
+      );
+
+      AppCore.utils.log(
+        "Ruta renderizada:",
+        {
+          publicPath,
+          canonicalPath:
+            detail?.canonicalPath ??
+            detail?.path ??
+            null,
+          username:
+            detail?.username ??
+            null,
+          found:
+            Boolean(
+              detail?.found
+            ),
+          forbidden:
+            Boolean(
+              detail?.forbidden
+            ),
+          lang:
+            AppCore.state
+              .lang,
+        }
+      );
+    }
+  );
 }

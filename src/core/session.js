@@ -3,15 +3,16 @@
    Archivo: src/core/session.js
 
    Responsabilidades:
-   - cargar preferencias persistidas de la app
+   - cargar preferencias persistidas
    - cargar sesión persistida
-   - sincronizar ruta y publicPath
-   - aplicar usuario / token / sesión completa
+   - sincronizar route/publicPath
+   - aplicar usuario/token
    - limpiar sesión local
-   - sincronizar estado auth y eventos asociados
+   - mantener auth consistente
 ========================================================= */
 
 import { config } from "./config.js";
+
 import {
   normalizePath,
   normalizeCanonicalPath,
@@ -20,8 +21,14 @@ import {
   getUserUsername,
   getThemeColor,
 } from "./helpers.js";
-import { computeAuthenticated } from "./state.js";
-import { removeLegacySessionKeys } from "./storage.js";
+
+import {
+  computeAuthenticated,
+} from "./state.js";
+
+import {
+  removeLegacySessionKeys,
+} from "./storage.js";
 
 /* =========================================================
    ROUTE
@@ -31,18 +38,30 @@ export function setRoute({
   setState,
   events,
   route = "/",
-}) {
-  const normalizedRoute = normalizeCanonicalPath(route);
+} = {}) {
+  const previousRoute =
+    state.route;
+
+  const normalizedRoute =
+    normalizeCanonicalPath(
+      route
+    );
 
   setState({
-    lastRoute: state.route,
-    route: normalizedRoute,
+    lastRoute:
+      previousRoute,
+    route:
+      normalizedRoute,
   });
 
-  events?.emit?.("app:route:change", {
-    route: normalizedRoute,
-    previousRoute: state.lastRoute,
-  });
+  events?.emit?.(
+    "app:route:change",
+    {
+      route:
+        normalizedRoute,
+      previousRoute,
+    }
+  );
 
   return normalizedRoute;
 }
@@ -52,20 +71,30 @@ export function setPublicPath({
   setState,
   events,
   path = "/",
-}) {
-  const normalizedPath = normalizePath(path);
+} = {}) {
+  const normalized =
+    normalizePath(path);
 
   setState({
-    publicPath: normalizedPath,
+    publicPath:
+      normalized,
   });
 
-  storage?.set?.(config.storageKeys.lastPublicPath, normalizedPath);
+  storage?.set?.(
+    config.storageKeys
+      .lastPublicPath,
+    normalized
+  );
 
-  events?.emit?.("app:public-path:change", {
-    publicPath: normalizedPath,
-  });
+  events?.emit?.(
+    "app:public-path:change",
+    {
+      publicPath:
+        normalized,
+    }
+  );
 
-  return normalizedPath;
+  return normalized;
 }
 
 /* =========================================================
@@ -78,30 +107,61 @@ export function setUser({
   setState,
   syncUserUI,
   user = null,
-}) {
-  const normalizedUser = normalizeUser(user);
-  const authenticated = computeAuthenticated(normalizedUser, state.token);
+} = {}) {
+  const normalizedUser =
+    normalizeUser(user);
+
+  const authenticated =
+    computeAuthenticated(
+      normalizedUser,
+      state.token
+    );
 
   setState({
-    user: normalizedUser,
-    role: normalizedUser?.role || null,
+    user:
+      normalizedUser,
+    role:
+      normalizedUser
+        ?.role ||
+      null,
     authenticated,
   });
 
-  if (normalizedUser) {
-    storage?.set?.(config.storageKeys.user, normalizedUser);
+  if (
+    normalizedUser
+  ) {
+    storage?.set?.(
+      config
+        .storageKeys
+        .user,
+      normalizedUser
+    );
   } else {
-    storage?.remove?.(config.storageKeys.user);
+    storage?.remove?.(
+      config
+        .storageKeys
+        .user
+    );
   }
 
   syncUserUI?.();
 
-  events?.emit?.("app:user:change", {
-    user: normalizedUser,
-    authenticated,
-    username: normalizedUser?.username || null,
-    avatarUrl: normalizedUser?.avatar || null,
-  });
+  events?.emit?.(
+    "app:user:change",
+    {
+      user:
+        normalizedUser,
+      authenticated,
+      username:
+        normalizedUser
+          ?.username ||
+        null,
+      avatarUrl:
+        normalizedUser
+          ?.avatar ||
+        null,
+    }
+  );
 
   return normalizedUser;
 }
@@ -112,25 +172,49 @@ export function setToken({
   events,
   setState,
   token = null,
-}) {
-  const normalizedToken = hasValidToken(token) ? String(token).trim() : null;
-  const authenticated = computeAuthenticated(state.user, normalizedToken);
+} = {}) {
+  const normalizedToken =
+    hasValidToken(token)
+      ? String(token).trim()
+      : null;
+
+  const authenticated =
+    computeAuthenticated(
+      state.user,
+      normalizedToken
+    );
 
   setState({
-    token: normalizedToken,
+    token:
+      normalizedToken,
     authenticated,
   });
 
-  if (normalizedToken) {
-    storage?.set?.(config.storageKeys.token, normalizedToken);
+  if (
+    normalizedToken
+  ) {
+    storage?.set?.(
+      config
+        .storageKeys
+        .token,
+      normalizedToken
+    );
   } else {
-    storage?.remove?.(config.storageKeys.token);
+    storage?.remove?.(
+      config
+        .storageKeys
+        .token
+    );
   }
 
-  events?.emit?.("app:token:change", {
-    token: normalizedToken,
-    authenticated,
-  });
+  events?.emit?.(
+    "app:token:change",
+    {
+      token:
+        normalizedToken,
+      authenticated,
+    }
+  );
 
   return normalizedToken;
 }
@@ -142,23 +226,42 @@ export function applySession({
   setToken,
   token = undefined,
   user = undefined,
-}) {
-  if (token !== undefined) {
-    setToken({ token });
+} = {}) {
+  /* token first */
+  if (
+    token !==
+    undefined
+  ) {
+    setToken({
+      token,
+    });
   }
 
-  if (user !== undefined) {
-    setUser({ user });
+  /* user second */
+  if (
+    user !==
+    undefined
+  ) {
+    setUser({
+      user,
+    });
   }
 
   const snapshot = {
-    authenticated: state.authenticated,
-    token: state.token,
-    user: state.user,
-    role: state.role,
+    authenticated:
+      state.authenticated,
+    token:
+      state.token,
+    user:
+      state.user,
+    role:
+      state.role,
   };
 
-  events?.emit?.("app:session:applied", snapshot);
+  events?.emit?.(
+    "app:session:applied",
+    snapshot
+  );
 
   return snapshot;
 }
@@ -170,10 +273,20 @@ export function clearSession({
   setState,
   syncUserUI,
   utils,
-}) {
-  storage?.remove?.(config.storageKeys.user);
-  storage?.remove?.(config.storageKeys.token);
-  removeLegacySessionKeys(utils);
+} = {}) {
+  storage?.remove?.(
+    config
+      .storageKeys.user
+  );
+
+  storage?.remove?.(
+    config
+      .storageKeys.token
+  );
+
+  removeLegacySessionKeys(
+    utils
+  );
 
   setState({
     user: null,
@@ -184,135 +297,272 @@ export function clearSession({
 
   syncUserUI?.();
 
-  events?.emit?.("app:session:cleared", {
-    authenticated: false,
-    token: null,
-    user: null,
-    role: null,
-  });
+  events?.emit?.(
+    "app:session:cleared",
+    {
+      authenticated:
+        false,
+      token: null,
+      user: null,
+      role: null,
+    }
+  );
 }
 
 /* =========================================================
-   LOAD PREFERENCES / SESSION
+   LOAD PREFS / SESSION
 ========================================================= */
 export function syncThemeMetaColor({
   dom,
-  theme = config.defaultTheme,
-}) {
-  if (!dom?.themeColorMeta) return;
-  dom.themeColorMeta.setAttribute("content", getThemeColor(theme));
+  theme =
+    config.defaultTheme,
+} = {}) {
+  if (
+    !dom?.themeColorMeta
+  )
+    return;
+
+  dom.themeColorMeta.setAttribute(
+    "content",
+    getThemeColor(
+      theme
+    )
+  );
 }
 
 export function loadPreferences({
   state,
   storage,
   dom,
-}) {
-  const savedTheme = storage?.get?.(
-    config.storageKeys.theme,
-    config.defaultTheme
-  );
+} = {}) {
+  const savedTheme =
+    storage?.get?.(
+      config
+        .storageKeys
+        .theme,
+      config.defaultTheme
+    );
 
-  const savedLang = storage?.get?.(
-    config.storageKeys.lang,
-    config.defaultLang
-  );
+  const savedLang =
+    storage?.get?.(
+      config
+        .storageKeys
+        .lang,
+      config.defaultLang
+    );
 
-  const savedSidebarOpen = storage?.get?.(
-    config.storageKeys.sidebarOpen,
-    true
-  );
+  const savedSidebarOpen =
+    storage?.get?.(
+      config
+        .storageKeys
+        .sidebarOpen,
+      true
+    );
 
-  state.theme = savedTheme === "light" ? "light" : "dark";
-  state.lang = savedLang || config.defaultLang;
+  state.theme =
+    savedTheme ===
+    "light"
+      ? "light"
+      : "dark";
+
+  state.lang =
+    savedLang ||
+    config.defaultLang;
+
   state.sidebarOpen =
-    typeof savedSidebarOpen === "boolean" ? savedSidebarOpen : true;
+    typeof savedSidebarOpen ===
+    "boolean"
+      ? savedSidebarOpen
+      : true;
 
   if (dom?.html) {
-    dom.html.setAttribute("data-theme", state.theme);
-    dom.html.setAttribute("lang", state.lang);
+    dom.html.setAttribute(
+      "data-theme",
+      state.theme
+    );
+
+    dom.html.setAttribute(
+      "lang",
+      state.lang
+    );
   }
 
   syncThemeMetaColor({
     dom,
-    theme: state.theme,
+    theme:
+      state.theme,
   });
 
   if (dom?.body) {
-    dom.body.classList.toggle("sidebar-collapsed", !state.sidebarOpen);
-    dom.body.classList.toggle("sidebar-open", state.sidebarOpen);
-    dom.body.classList.toggle("loading", state.loading);
+    dom.body.classList.toggle(
+      "sidebar-collapsed",
+      !state.sidebarOpen
+    );
+
+    dom.body.classList.toggle(
+      "sidebar-open",
+      state.sidebarOpen
+    );
+
+    dom.body.classList.toggle(
+      "loading",
+      state.loading
+    );
   }
 
   if (dom?.sidebar) {
-    dom.sidebar.classList.toggle("collapsed", !state.sidebarOpen);
-    dom.sidebar.classList.toggle("open", state.sidebarOpen);
-    dom.sidebar.classList.toggle("is-collapsed", !state.sidebarOpen);
-    dom.sidebar.classList.toggle("is-open", state.sidebarOpen);
+    dom.sidebar.classList.toggle(
+      "collapsed",
+      !state.sidebarOpen
+    );
+
+    dom.sidebar.classList.toggle(
+      "open",
+      state.sidebarOpen
+    );
+
+    dom.sidebar.classList.toggle(
+      "is-collapsed",
+      !state.sidebarOpen
+    );
+
+    dom.sidebar.classList.toggle(
+      "is-open",
+      state.sidebarOpen
+    );
   }
 
-  if (dom?.sidebarToggle) {
-    dom.sidebarToggle.setAttribute("aria-expanded", String(state.sidebarOpen));
+  if (
+    dom?.sidebarToggle
+  ) {
+    dom.sidebarToggle.setAttribute(
+      "aria-expanded",
+      String(
+        state.sidebarOpen
+      )
+    );
   }
 
-  if (dom?.sidebarMobileToggle) {
+  if (
+    dom?.sidebarMobileToggle
+  ) {
     dom.sidebarMobileToggle.setAttribute(
       "aria-expanded",
-      String(state.sidebarOpen)
+      String(
+        state.sidebarOpen
+      )
     );
   }
 
   if (dom?.loader) {
-    dom.loader.hidden = !state.loading;
-    dom.loader.setAttribute("aria-hidden", String(!state.loading));
+    dom.loader.hidden =
+      !state.loading;
+
+    dom.loader.setAttribute(
+      "aria-hidden",
+      String(
+        !state.loading
+      )
+    );
   }
 }
 
 export function loadSession({
   state,
   storage,
-}) {
-  const savedUser = normalizeUser(
-    storage?.get?.(config.storageKeys.user, null)
-  );
+} = {}) {
+  const savedUser =
+    normalizeUser(
+      storage?.get?.(
+        config
+          .storageKeys
+          .user,
+        null
+      )
+    );
 
-  const savedToken = storage?.get?.(config.storageKeys.token, null);
+  const savedToken =
+    storage?.get?.(
+      config
+        .storageKeys
+        .token,
+      null
+    );
 
-  state.user = savedUser;
-  state.token = hasValidToken(savedToken) ? String(savedToken).trim() : null;
-  state.role = savedUser?.role || null;
-  state.authenticated = computeAuthenticated(savedUser, state.token);
+  state.user =
+    savedUser;
+
+  state.token =
+    hasValidToken(
+      savedToken
+    )
+      ? String(
+          savedToken
+        ).trim()
+      : null;
+
+  state.role =
+    savedUser?.role ||
+    null;
+
+  state.authenticated =
+    computeAuthenticated(
+      savedUser,
+      state.token
+    );
 }
 
 /* =========================================================
-   THEME / LANG / SIDEBAR / LOADING / ERROR
+   UI STATE
 ========================================================= */
 export function setTheme({
   dom,
   storage,
   events,
   setState,
-  theme = config.defaultTheme,
-}) {
-  const normalizedTheme = theme === "light" ? "light" : "dark";
+  theme =
+    config.defaultTheme,
+} = {}) {
+  const normalized =
+    theme ===
+    "light"
+      ? "light"
+      : "dark";
 
-  setState({ theme: normalizedTheme });
-  storage?.set?.(config.storageKeys.theme, normalizedTheme);
+  setState({
+    theme:
+      normalized,
+  });
+
+  storage?.set?.(
+    config
+      .storageKeys
+      .theme,
+    normalized
+  );
 
   if (dom?.html) {
-    dom.html.setAttribute("data-theme", normalizedTheme);
+    dom.html.setAttribute(
+      "data-theme",
+      normalized
+    );
   }
 
   syncThemeMetaColor({
     dom,
-    theme: normalizedTheme,
+    theme:
+      normalized,
   });
 
-  events?.emit?.("app:theme:change", {
-    theme: normalizedTheme,
-  });
+  events?.emit?.(
+    "app:theme:change",
+    {
+      theme:
+        normalized,
+    }
+  );
 
-  return normalizedTheme;
+  return normalized;
 }
 
 export function setLang({
@@ -320,23 +570,44 @@ export function setLang({
   storage,
   events,
   setState,
-  lang = config.defaultLang,
-}) {
-  const normalizedLang =
-    String(lang || config.defaultLang).trim() || config.defaultLang;
+  lang =
+    config.defaultLang,
+} = {}) {
+  const normalized =
+    String(
+      lang ||
+        config.defaultLang
+    ).trim() ||
+    config.defaultLang;
 
-  setState({ lang: normalizedLang });
-  storage?.set?.(config.storageKeys.lang, normalizedLang);
-
-  if (dom?.html) {
-    dom.html.setAttribute("lang", normalizedLang);
-  }
-
-  events?.emit?.("app:lang:change", {
-    lang: normalizedLang,
+  setState({
+    lang:
+      normalized,
   });
 
-  return normalizedLang;
+  storage?.set?.(
+    config
+      .storageKeys
+      .lang,
+    normalized
+  );
+
+  if (dom?.html) {
+    dom.html.setAttribute(
+      "lang",
+      normalized
+    );
+  }
+
+  events?.emit?.(
+    "app:lang:change",
+    {
+      lang:
+        normalized,
+    }
+  );
+
+  return normalized;
 }
 
 export function setSidebarOpen({
@@ -345,35 +616,85 @@ export function setSidebarOpen({
   events,
   setState,
   value,
-}) {
-  const nextValue = Boolean(value);
+} = {}) {
+  const nextValue =
+    Boolean(value);
 
-  setState({ sidebarOpen: nextValue });
-  storage?.set?.(config.storageKeys.sidebarOpen, nextValue);
+  setState({
+    sidebarOpen:
+      nextValue,
+  });
+
+  storage?.set?.(
+    config
+      .storageKeys
+      .sidebarOpen,
+    nextValue
+  );
 
   if (dom?.body) {
-    dom.body.classList.toggle("sidebar-collapsed", !nextValue);
-    dom.body.classList.toggle("sidebar-open", nextValue);
+    dom.body.classList.toggle(
+      "sidebar-collapsed",
+      !nextValue
+    );
+
+    dom.body.classList.toggle(
+      "sidebar-open",
+      nextValue
+    );
   }
 
   if (dom?.sidebar) {
-    dom.sidebar.classList.toggle("collapsed", !nextValue);
-    dom.sidebar.classList.toggle("open", nextValue);
-    dom.sidebar.classList.toggle("is-collapsed", !nextValue);
-    dom.sidebar.classList.toggle("is-open", nextValue);
+    dom.sidebar.classList.toggle(
+      "collapsed",
+      !nextValue
+    );
+
+    dom.sidebar.classList.toggle(
+      "open",
+      nextValue
+    );
+
+    dom.sidebar.classList.toggle(
+      "is-collapsed",
+      !nextValue
+    );
+
+    dom.sidebar.classList.toggle(
+      "is-open",
+      nextValue
+    );
   }
 
-  if (dom?.sidebarToggle) {
-    dom.sidebarToggle.setAttribute("aria-expanded", String(nextValue));
+  if (
+    dom?.sidebarToggle
+  ) {
+    dom.sidebarToggle.setAttribute(
+      "aria-expanded",
+      String(
+        nextValue
+      )
+    );
   }
 
-  if (dom?.sidebarMobileToggle) {
-    dom.sidebarMobileToggle.setAttribute("aria-expanded", String(nextValue));
+  if (
+    dom?.sidebarMobileToggle
+  ) {
+    dom.sidebarMobileToggle.setAttribute(
+      "aria-expanded",
+      String(
+        nextValue
+      )
+    );
   }
 
-  events?.emit?.("app:sidebar:change", {
-    open: nextValue,
-  });
+  events?.emit?.(
+    "app:sidebar:change",
+    {
+      open:
+        nextValue,
+    }
+  );
 
   return nextValue;
 }
@@ -383,23 +704,41 @@ export function setLoading({
   events,
   setState,
   value,
-}) {
-  const nextValue = Boolean(value);
+} = {}) {
+  const nextValue =
+    Boolean(value);
 
-  setState({ loading: nextValue });
+  setState({
+    loading:
+      nextValue,
+  });
 
   if (dom?.body) {
-    dom.body.classList.toggle("loading", nextValue);
+    dom.body.classList.toggle(
+      "loading",
+      nextValue
+    );
   }
 
   if (dom?.loader) {
-    dom.loader.hidden = !nextValue;
-    dom.loader.setAttribute("aria-hidden", String(!nextValue));
+    dom.loader.hidden =
+      !nextValue;
+
+    dom.loader.setAttribute(
+      "aria-hidden",
+      String(
+        !nextValue
+      )
+    );
   }
 
-  events?.emit?.("app:loading:change", {
-    loading: nextValue,
-  });
+  events?.emit?.(
+    "app:loading:change",
+    {
+      loading:
+        nextValue,
+    }
+  );
 
   return nextValue;
 }
@@ -409,36 +748,59 @@ export function setError({
   setState,
   cloneError,
   error = null,
-}) {
-  const normalized = error ? cloneError(error) || error : null;
+} = {}) {
+  const normalized =
+    error
+      ? cloneError(
+          error
+        ) || error
+      : null;
 
   setState({
-    lastError: normalized,
+    lastError:
+      normalized,
   });
 
-  events?.emit?.("app:error", {
-    error: normalized,
-  });
+  events?.emit?.(
+    "app:error",
+    {
+      error:
+        normalized,
+    }
+  );
 
   return normalized;
 }
 
 /* =========================================================
-   BASE UI SYNC
+   BASE UI
 ========================================================= */
 export function syncBaseUI({
   setDocumentTitle,
   syncUserUI,
-}) {
-  setDocumentTitle?.(config.appName);
+} = {}) {
+  setDocumentTitle?.(
+    config.appName
+  );
+
   syncUserUI?.();
 }
 
-export function getSessionDebugSnapshot(state) {
+export function getSessionDebugSnapshot(
+  state
+) {
   return {
-    authenticated: state?.authenticated,
-    role: state?.role,
-    username: getUserUsername(state?.user) || null,
-    hasToken: Boolean(state?.token),
+    authenticated:
+      state?.authenticated,
+    role:
+      state?.role,
+    username:
+      getUserUsername(
+        state?.user
+      ) || null,
+    hasToken:
+      Boolean(
+        state?.token
+      ),
   };
 }

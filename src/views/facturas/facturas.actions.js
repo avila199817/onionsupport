@@ -22,40 +22,11 @@ import {
   getSortedFacturasStore,
 } from "./facturas.store.js";
 
-function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
-  const text = String(value).trim();
-  return text || fallback;
-}
-
-function safeNumber(value, fallback = 0) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-function showToast(message = "", type = "info") {
-  const text = safeText(message, "Acción completada");
-
-  try {
-    if (typeof AppCore?.showToast === "function") {
-      AppCore.showToast(text, type);
-      return;
-    }
-  } catch {
-    /* noop */
-  }
-
-  try {
-    if (typeof window.showToast === "function") {
-      window.showToast(text, type);
-      return;
-    }
-  } catch {
-    /* noop */
-  }
-
-  console.log(`[${type.toUpperCase()}] ${text}`);
-}
+import {
+  safeText,
+  safeNumber,
+  showToast,
+} from "./facturas.utils.js";
 
 export async function openFacturaAction({
   facturaId = "",
@@ -63,17 +34,18 @@ export async function openFacturaAction({
   loadFacturaDetail,
 } = {}) {
   const id = safeText(facturaId, "");
-  if (!id || typeof loadFacturaDetail !== "function") return;
+  if (!id || typeof loadFacturaDetail !== "function") return null;
 
   try {
     if (emitOpenEvent && typeof AppCore?.events?.emit === "function") {
       AppCore.events.emit("facturas:open", { facturaId: id });
     }
 
-    await loadFacturaDetail(id);
+    return await loadFacturaDetail(id);
   } catch (error) {
     console.error("❌ FACTURAS OPEN DETAIL:", error);
     showToast("No se pudo abrir el detalle de la factura.", "error");
+    return null;
   }
 }
 
@@ -83,12 +55,10 @@ export async function openFacturaPdfAction({
   onEnd,
 } = {}) {
   const id = safeText(facturaId, "");
-  if (!id) return;
+  if (!id) return null;
 
   try {
-    if (typeof onStart === "function") {
-      onStart(id);
-    }
+    onStart?.(id);
 
     const response = await fetchFacturaPdfUrlRequest(id, "inline");
     const url = safeText(response?.file?.url, "");
@@ -99,13 +69,14 @@ export async function openFacturaPdfAction({
 
     window.open(url, "_blank", "noopener,noreferrer");
     showToast("Abriendo PDF de la factura.", "success");
+
+    return response;
   } catch (error) {
     console.error("❌ FACTURAS VIEW PDF:", error);
     showToast("No se pudo abrir el PDF.", "error");
+    return null;
   } finally {
-    if (typeof onEnd === "function") {
-      onEnd(id);
-    }
+    onEnd?.(id);
   }
 }
 
@@ -115,12 +86,10 @@ export async function downloadFacturaPdfAction({
   onEnd,
 } = {}) {
   const id = safeText(facturaId, "");
-  if (!id) return;
+  if (!id) return null;
 
   try {
-    if (typeof onStart === "function") {
-      onStart(id);
-    }
+    onStart?.(id);
 
     const response = await fetchFacturaPdfUrlRequest(id, "attachment");
     const url = safeText(response?.file?.url, "");
@@ -131,13 +100,14 @@ export async function downloadFacturaPdfAction({
 
     window.open(url, "_blank", "noopener,noreferrer");
     showToast("Preparando descarga de factura.", "success");
+
+    return response;
   } catch (error) {
     console.error("❌ FACTURAS DOWNLOAD PDF:", error);
     showToast("No se pudo descargar la factura.", "error");
+    return null;
   } finally {
-    if (typeof onEnd === "function") {
-      onEnd(id);
-    }
+    onEnd?.(id);
   }
 }
 
@@ -148,9 +118,10 @@ export async function sendFacturaToClientAction({
   onEnd,
   onSent,
   reloadFacturas,
+  confirmSend = true,
 } = {}) {
   const id = safeText(facturaId, "");
-  if (!id) return;
+  if (!id) return null;
 
   const factura =
     detail?.id === id
@@ -162,47 +133,52 @@ export async function sendFacturaToClientAction({
     factura?.enviadoA ||
     "el cliente";
 
-  const confirmed = window.confirm(
-    `Se va a enviar la factura ${factura?.numero || id} a ${targetEmail}. ¿Continuar?`
-  );
+  if (confirmSend) {
+    const confirmed = window.confirm(
+      `Se va a enviar la factura ${factura?.numero || id} a ${targetEmail}. ¿Continuar?`
+    );
 
-  if (!confirmed) return;
+    if (!confirmed) {
+      return null;
+    }
+  }
 
   try {
-    if (typeof onStart === "function") {
-      onStart(id);
-    }
+    onStart?.(id);
 
     const response = await sendFacturaRequest(id);
 
-    if (typeof onSent === "function") {
-      onSent({
-        facturaId: id,
-        response,
-      });
-    }
+    onSent?.({
+      facturaId: id,
+      response,
+      factura,
+    });
 
     showToast("Factura enviada correctamente.", "success");
 
     if (typeof reloadFacturas === "function") {
       await reloadFacturas();
     }
+
+    return response;
   } catch (error) {
     console.error("❌ FACTURAS SEND:", error);
     showToast("No se pudo enviar la factura.", "error");
+    return null;
   } finally {
-    if (typeof onEnd === "function") {
-      onEnd(id);
-    }
+    onEnd?.(id);
   }
 }
 
-export function exportFacturasCsvAction() {
-  const items = getSortedFacturasStore();
+export function exportFacturasCsvAction({
+  items = null,
+  filenamePrefix = "facturas",
+} = {}) {
+  const list = Array.isArray(items) ? items : getSortedFacturasStore();
 
-  if (!items.length) {
+  if (!list.length) {
     showToast("No hay facturas para exportar.", "info");
-    return;
+    return false;
   }
 
   const headers = [
@@ -217,16 +193,16 @@ export function exportFacturasCsvAction() {
     "moneda",
   ];
 
-  const rows = items.map((item) => ({
-    numero: item.numero || "",
-    cliente: item.cliente?.empresa || item.cliente?.nombre || "",
-    email: item.cliente?.email || "",
-    fecha: item.fecha || "",
-    estadoPago: item.estadoPago || "",
-    estado: item.estado || "",
-    formaPago: item.formaPago || "",
-    total: safeNumber(item.total, 0),
-    moneda: item.moneda || "EUR",
+  const rows = list.map((item) => ({
+    numero: item?.numero || "",
+    cliente: item?.cliente?.empresa || item?.cliente?.nombre || "",
+    email: item?.cliente?.email || "",
+    fecha: item?.fecha || "",
+    estadoPago: item?.estadoPago || "",
+    estado: item?.estado || "",
+    formaPago: item?.formaPago || "",
+    total: safeNumber(item?.total, 0),
+    moneda: item?.moneda || "EUR",
   }));
 
   const csv = [
@@ -238,12 +214,17 @@ export function exportFacturasCsvAction() {
     ),
   ].join("\n");
 
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
+  const blob = new Blob([csv], {
+    type: "text/csv;charset=utf-8;",
+  });
 
+  const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
+
   anchor.href = url;
-  anchor.download = `facturas_${new Date().toISOString().slice(0, 10)}.csv`;
+  anchor.download = `${safeText(filenamePrefix, "facturas")}_${new Date()
+    .toISOString()
+    .slice(0, 10)}.csv`;
 
   document.body.appendChild(anchor);
   anchor.click();
@@ -251,4 +232,5 @@ export function exportFacturasCsvAction() {
   URL.revokeObjectURL(url);
 
   showToast("Exportación CSV generada.", "success");
+  return true;
 }

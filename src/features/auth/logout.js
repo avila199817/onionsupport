@@ -5,8 +5,8 @@
    Responsabilidades:
    - cerrar sesión local y remota
    - mantener logout robusto aunque falle backend
-   - emitir eventos de logout
-   - redirigir tras logout cuando proceda
+   - emitir eventos logout
+   - redirigir tras logout
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -24,17 +24,36 @@ import {
   clearSessionLocal,
 } from "./session.js";
 
-export async function logout(options = {}) {
+export async function logout(
+  options = {}
+) {
   const {
     silent = false,
     redirectTo = "/",
     notifyServer = true,
   } = options;
 
-  AppCore.events.emit("auth:logout:start", {});
+  const nextPath =
+    configLikeRoute(
+      redirectTo
+    );
+
+  AppCore.events.emit(
+    "auth:logout:start",
+    {
+      redirectTo:
+        nextPath,
+      notifyServer,
+    }
+  );
+
+  let remoteError = null;
 
   try {
-    if (notifyServer && hasValidToken()) {
+    if (
+      notifyServer &&
+      hasValidToken()
+    ) {
       await AppCore.apiClient.post(
         AUTH_ENDPOINTS.logout,
         null,
@@ -44,35 +63,65 @@ export async function logout(options = {}) {
       );
     }
   } catch (error) {
+    remoteError =
+      error;
+
     AppCore.utils.warn(
-      "Logout remoto falló, se limpiará sesión local igualmente.",
+      "Logout remoto falló. Se limpiará sesión local igualmente.",
       error
     );
   } finally {
     clearSessionLocal();
 
-    AppCore.events.emit("auth:logout:success", {
-      redirectTo,
-    });
+    AppCore.events.emit(
+      "auth:logout:success",
+      {
+        redirectTo:
+          nextPath,
+        remoteError,
+      }
+    );
 
-    if (!silent && typeof window !== "undefined") {
-      const nextPath = configLikeRoute(redirectTo);
+    if (
+      !silent &&
+      typeof window !==
+        "undefined"
+    ) {
+      const router =
+        AppCore.modules?.get?.(
+          "router"
+        );
 
-      const router = AppCore.modules?.get?.("router");
-
-      if (router && typeof router.navigate === "function") {
-        router.navigate(nextPath, {
-          replaceState: true,
-          force: true,
-        });
+      if (
+        router &&
+        typeof router.navigate ===
+          "function"
+      ) {
+        router.navigate(
+          nextPath,
+          {
+            replaceState: true,
+            force: true,
+          }
+        );
       } else {
-        window.history.replaceState({}, "", nextPath);
-        window.dispatchEvent(new PopStateEvent("popstate"));
+        window.history.replaceState(
+          {},
+          "",
+          nextPath
+        );
+
+        window.dispatchEvent(
+          new PopStateEvent(
+            "popstate"
+          )
+        );
       }
     }
   }
 
   return {
     ok: true,
+    remoteError,
   };
 }

@@ -7,6 +7,7 @@
    - normalizar payload de sesión
    - extraer tokens desde respuestas variables
    - validar respuesta de login / refresh
+   - normalizar avatar robusto para sidebar / topbar
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -19,6 +20,59 @@ import {
 } from "./helpers.js";
 
 import { AUTH_CONSTANTS } from "./constants.js";
+
+/* =========================================================
+   HELPERS
+========================================================= */
+function normalizeString(value = "") {
+  return String(value ?? "").trim();
+}
+
+function normalizeBoolean(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (value === 1 || value === "1") return true;
+  if (value === 0 || value === "0") return false;
+  return fallback;
+}
+
+function normalizeAvatarUrl(rawUser = null) {
+  if (!rawUser || typeof rawUser !== "object") {
+    return null;
+  }
+
+  const hasAvatar =
+    rawUser.hasAvatar ??
+    rawUser.has_avatar ??
+    rawUser.avatarEnabled ??
+    rawUser.avatar_enabled;
+
+  const rawAvatar =
+    rawUser.avatar ??
+    rawUser.avatarUrl ??
+    rawUser.avatar_url ??
+    rawUser.photo ??
+    rawUser.photoUrl ??
+    rawUser.photo_url ??
+    rawUser.image ??
+    rawUser.imageUrl ??
+    rawUser.image_url ??
+    rawUser.picture ??
+    rawUser.pictureUrl ??
+    rawUser.picture_url ??
+    null;
+
+  const avatar = normalizeString(rawAvatar);
+
+  if (!avatar) {
+    return null;
+  }
+
+  if (hasAvatar !== undefined && !normalizeBoolean(hasAvatar, false)) {
+    return null;
+  }
+
+  return avatar;
+}
 
 /* =========================================================
    USER
@@ -79,8 +133,13 @@ export function normalizeUser(
   const userSlug =
     rawUser.slug ??
     slugify(
-      username || displayName || "usuario"
+      username ||
+        displayName ||
+        "usuario"
     );
+
+  const avatar =
+    normalizeAvatarUrl(rawUser);
 
   return {
     id:
@@ -101,25 +160,73 @@ export function normalizeUser(
 
     username,
     slug: userSlug,
+
     name: displayName,
+
     email:
       rawUser.email ??
       rawUser.mail ??
       "",
-    role,
 
-    avatar:
-      rawUser.avatar ??
-      rawUser.photo ??
-      rawUser.image ??
-      rawUser.picture ??
+    phone:
+      rawUser.phone ??
+      rawUser.telefono ??
+      rawUser.mobile ??
+      rawUser.cellphone ??
       null,
 
-    active:
+    role,
+
+    permissions:
+      Array.isArray(
+        rawUser.permissions
+      )
+        ? rawUser.permissions
+        : [],
+
+    clienteId:
+      rawUser.clienteId ??
+      rawUser.clientId ??
+      rawUser.cliente_id ??
+      null,
+
+    privacyMode: normalizeBoolean(
+      rawUser.privacyMode ??
+        rawUser.privacy_mode,
+      false
+    ),
+
+    hasAvatar: Boolean(avatar),
+    avatar,
+    avatarUpdatedAt:
+      rawUser.avatarUpdatedAt ??
+      rawUser.avatar_updated_at ??
+      null,
+
+    active: normalizeBoolean(
       rawUser.active ??
-      rawUser.is_active ??
-      rawUser.isActive ??
-      true,
+        rawUser.is_active ??
+        rawUser.isActive,
+      true
+    ),
+
+    darkMode: normalizeBoolean(
+      rawUser.darkMode ??
+        rawUser.dark_mode,
+      false
+    ),
+
+    emailVerified: normalizeBoolean(
+      rawUser.emailVerified ??
+        rawUser.email_verified,
+      false
+    ),
+
+    twofa_enabled: normalizeBoolean(
+      rawUser.twofa_enabled ??
+        rawUser.twofaEnabled,
+      false
+    ),
 
     raw: safeClone(rawUser),
   };
@@ -165,10 +272,18 @@ export function normalizeSessionPayload(
   return {
     sessionId: sessionId || null,
     userId: userId || null,
-    expiresAt: sessionNode.expiresAt ?? null,
-    createdAt: sessionNode.createdAt ?? null,
-    lastActiveAt: sessionNode.lastActiveAt ?? null,
-    lastRefreshAt: sessionNode.lastRefreshAt ?? null,
+    expiresAt:
+      sessionNode.expiresAt ??
+      null,
+    createdAt:
+      sessionNode.createdAt ??
+      null,
+    lastActiveAt:
+      sessionNode.lastActiveAt ??
+      null,
+    lastRefreshAt:
+      sessionNode.lastRefreshAt ??
+      null,
   };
 }
 
@@ -271,12 +386,16 @@ export function validateAuthResponse(
 ) {
   const token = extractToken(response);
   const user = extractUser(response);
-  const refreshToken = extractRefreshToken(response);
-  const requires2FA = extractRequires2FA(response);
-  const tempToken = extractTempToken(response);
-  const sessionData = normalizeSessionPayload(
-    response
-  );
+  const refreshToken =
+    extractRefreshToken(response);
+  const requires2FA =
+    extractRequires2FA(response);
+  const tempToken =
+    extractTempToken(response);
+  const sessionData =
+    normalizeSessionPayload(
+      response
+    );
 
   if (requires2FA && tempToken) {
     return {

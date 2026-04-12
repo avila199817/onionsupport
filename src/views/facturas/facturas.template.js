@@ -1,13 +1,15 @@
 /* =========================================================
-   Onion SPA - Facturas Template (FULL PRO SAAS PANEL)
+   Onion SPA - Facturas Template (LEGENDARY CLIENT PORTAL UX)
    Archivo: src/views/facturas/facturas.template.js
 
    Responsabilidades:
-   - renderizar header de la vista
-   - renderizar estados loading / error / vacío
-   - renderizar grid y cards de facturas
-   - encapsular helpers visuales reutilizables
-   - mantener el markup limpio, escalable y consistente
+   - render premium invoices portal UI
+   - experiencia tipo empresa seria / SaaS enterprise
+   - cards avanzadas con jerarquía visual
+   - estados inteligentes
+   - métricas de negocio
+   - CTA claros para cliente final
+   - markup limpio / escalable
 ========================================================= */
 
 import {
@@ -44,171 +46,207 @@ function safeNumber(value, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function joinHtml(parts = []) {
+function sum(items = [], key = "") {
+  return items.reduce((acc, item) => acc + safeNumber(item?.[key], 0), 0);
+}
+
+function join(parts = []) {
   return parts.filter(Boolean).join("");
 }
 
 /* =========================================================
-   TOKENS INLINE REUTILIZABLES
+   TOKENS INLINE
 ========================================================= */
 const styles = {
-  btnSecondary: `
-    min-height:var(--btn-height-sm);
-    padding:10px 14px;
-    border-radius:var(--btn-radius);
-    border:1px solid var(--btn-secondary-border);
-    background:var(--btn-secondary-bg);
-    color:var(--btn-secondary-text);
-    box-shadow:var(--btn-secondary-shadow);
-    font-weight:var(--weight-bold);
-    cursor:pointer;
-  `,
   btnPrimary: `
-    min-height:var(--btn-height-sm);
-    padding:10px 14px;
-    border-radius:var(--btn-radius);
+    min-height:42px;
+    padding:0 14px;
+    border-radius:14px;
     border:1px solid var(--btn-primary-border);
     background:var(--btn-primary-bg);
     color:var(--btn-primary-text);
+    font-weight:700;
+    cursor:pointer;
     box-shadow:var(--btn-primary-shadow);
-    font-weight:var(--weight-bold);
+  `,
+
+  btnSecondary: `
+    min-height:42px;
+    padding:0 14px;
+    border-radius:14px;
+    border:1px solid var(--btn-secondary-border);
+    background:var(--btn-secondary-bg);
+    color:var(--btn-secondary-text);
+    font-weight:700;
     cursor:pointer;
   `,
-  cardRoot: `
+
+  statCard: `
+    padding:18px;
+    border-radius:20px;
+    border:1px solid var(--border-soft);
+    background:linear-gradient(
+      180deg,
+      var(--surface-2),
+      var(--surface-1)
+    );
     display:grid;
-    gap:var(--space-md);
-    padding:var(--space-lg);
-    cursor:pointer;
+    gap:6px;
   `,
-  cardTop: `
+
+  statLabel: `
+    font-size:12px;
+    color:var(--text-dim);
+    font-weight:700;
+    letter-spacing:.04em;
+    text-transform:uppercase;
+  `,
+
+  statValue: `
+    font-size:24px;
+    line-height:1;
+    font-weight:800;
+    color:var(--text-strong);
+  `,
+
+  card: `
+    padding:20px;
+    border-radius:24px;
+    border:1px solid var(--border-soft);
+    background:
+      radial-gradient(circle at top right, rgba(255,255,255,.04), transparent 32%),
+      linear-gradient(180deg,var(--surface-2),var(--surface-1));
+    display:grid;
+    gap:16px;
+    position:relative;
+    overflow:hidden;
+  `,
+
+  top: `
     display:flex;
-    align-items:flex-start;
     justify-content:space-between;
-    gap:var(--space-sm);
+    gap:12px;
+    align-items:flex-start;
   `,
-  titleBlock: `
+
+  titleWrap: `
     display:grid;
-    gap:var(--space-xs);
+    gap:5px;
     min-width:0;
   `,
-  invoiceNumber: `
-    font-size:var(--font-sm);
+
+  code: `
+    font-size:12px;
     color:var(--text-dim);
-    font-weight:var(--weight-semibold);
-    letter-spacing:var(--letter-wide);
+    font-weight:700;
+    letter-spacing:.06em;
+    text-transform:uppercase;
   `,
-  companyTitle: `
+
+  company: `
     margin:0;
-    font-size:var(--font-lg);
-    line-height:var(--line-snug);
+    font-size:22px;
+    line-height:1.1;
     color:var(--text-strong);
-    font-weight:var(--weight-bold);
+    font-weight:800;
   `,
+
   avatar: `
-    inline-size:44px;
-    block-size:44px;
-    flex:0 0 auto;
+    width:48px;
+    height:48px;
+    border-radius:16px;
     display:grid;
     place-items:center;
-    border-radius:var(--radius-lg);
+    font-weight:800;
     border:1px solid var(--border-soft);
-    background:var(--avatar-bg);
-    color:var(--avatar-text);
-    font-size:var(--font-sm);
-    font-weight:var(--weight-black);
-    box-shadow:var(--shadow-xs);
-  `,
-  preview: `
-    margin:0;
-    font-size:var(--font-md);
-    line-height:var(--line-relaxed);
-    color:var(--text-muted);
-  `,
-  metaList: `
-    display:grid;
-    gap:var(--space-xs);
-    font-size:var(--font-md);
-    color:var(--text-soft);
-  `,
-  summaryRow: `
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:var(--space-sm);
-    flex-wrap:wrap;
-  `,
-  amountBlock: `
-    display:grid;
-    gap:2px;
-  `,
-  amountMain: `
-    font-size:var(--font-xl);
-    line-height:1;
+    background:var(--surface-glass);
     color:var(--text-strong);
   `,
+
+  amountMain: `
+    font-size:34px;
+    line-height:1;
+    font-weight:900;
+    color:var(--text-strong);
+  `,
+
   amountSub: `
-    font-size:var(--font-sm);
+    font-size:13px;
     color:var(--text-dim);
   `,
-  chipsRow: `
+
+  row: `
     display:flex;
-    gap:var(--space-xs);
+    gap:10px;
     flex-wrap:wrap;
+    align-items:center;
+    justify-content:space-between;
   `,
-  chipBase: `
+
+  metaGrid: `
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+    gap:10px;
+  `,
+
+  metaBox: `
+    padding:12px;
+    border-radius:16px;
+    background:var(--surface-glass);
+    border:1px solid var(--border-soft);
+    display:grid;
+    gap:4px;
+  `,
+
+  metaLabel: `
+    font-size:11px;
+    text-transform:uppercase;
+    font-weight:700;
+    color:var(--text-faint);
+    letter-spacing:.04em;
+  `,
+
+  metaValue: `
+    font-size:14px;
+    font-weight:700;
+    color:var(--text-strong);
+  `,
+
+  chip: `
     display:inline-flex;
     align-items:center;
     justify-content:center;
     min-height:30px;
     padding:6px 10px;
-    border-radius:var(--radius-pill);
+    border-radius:999px;
     border:1px solid var(--border-soft);
-    font-size:var(--font-sm);
-    font-weight:var(--weight-semibold);
+    font-size:12px;
+    font-weight:700;
   `,
-  footerRow: `
+
+  footer: `
     display:flex;
-    align-items:center;
     justify-content:space-between;
-    gap:var(--space-sm);
+    align-items:center;
+    gap:12px;
     flex-wrap:wrap;
-  `,
-  footerMeta: `
-    display:grid;
-    gap:2px;
-  `,
-  footerPrimaryText: `
-    font-size:var(--font-sm);
-    color:var(--text-dim);
-  `,
-  footerSecondaryText: `
-    font-size:var(--font-xs);
-    color:var(--text-faint);
-  `,
-  emptyPanel: `
-    display:grid;
-    place-items:center;
-    min-height:320px;
-  `,
-  skeletonCard: `
-    padding:var(--space-lg);
-    display:grid;
-    gap:var(--space-md);
-    min-height:230px;
+    padding-top:6px;
   `,
 };
 
 /* =========================================================
-   HELPERS VISUALES
+   COMPONENTES
 ========================================================= */
-function renderButton({
-  id = "",
-  action = "",
-  facturaId = "",
-  label = "",
-  variant = "secondary",
-} = {}) {
-  const style = variant === "primary" ? styles.btnPrimary : styles.btnSecondary;
+function button(label, opts = {}) {
+  const {
+    id = "",
+    action = "",
+    facturaId = "",
+    variant = "secondary",
+  } = opts;
+
+  const style =
+    variant === "primary" ? styles.btnPrimary : styles.btnSecondary;
 
   return `
     <button
@@ -223,274 +261,243 @@ function renderButton({
   `;
 }
 
-function renderMetaLine(label, value) {
+function chip(label, tone = "") {
   return `
-    <span>
-      <strong style="color:var(--text-strong);">${escapeHtml(label)}:</strong>
-      ${escapeHtml(safeText(value))}
-    </span>
-  `;
-}
-
-function renderChip(label, toneStyle = "") {
-  return `
-    <span style="${styles.chipBase} ${toneStyle}">
+    <span style="${styles.chip} ${tone}">
       ${escapeHtml(label)}
     </span>
   `;
 }
 
-function renderStatText(primary = "", secondary = "") {
+function metric(label, value) {
   return `
-    <div style="${styles.footerMeta}">
-      <span style="${styles.footerPrimaryText}">
-        ${escapeHtml(primary)}
+    <article style="${styles.statCard}">
+      <span style="${styles.statLabel}">
+        ${escapeHtml(label)}
       </span>
-      <span style="${styles.footerSecondaryText}">
-        ${escapeHtml(secondary)}
+      <strong style="${styles.statValue}">
+        ${escapeHtml(value)}
+      </strong>
+    </article>
+  `;
+}
+
+function meta(label, value) {
+  return `
+    <div style="${styles.metaBox}">
+      <span style="${styles.metaLabel}">
+        ${escapeHtml(label)}
+      </span>
+      <span style="${styles.metaValue}">
+        ${escapeHtml(value)}
       </span>
     </div>
   `;
 }
 
-function renderAvatar(initials = "ON") {
+function avatar(name = "ON") {
   return `
     <div style="${styles.avatar}">
-      ${escapeHtml(initials)}
+      ${escapeHtml(name)}
     </div>
-  `;
-}
-
-function renderHeaderSummary({ items = [], state = {} } = {}) {
-  return `
-    <section class="section">
-      <div class="section-header">
-        <div class="section-header-main">
-          <h2 class="section-title">${items.length} factura(s)</h2>
-          <p class="section-subtitle">
-            ${escapeHtml(String(state.remoteCount || items.length))} visibles en la colección actual
-          </p>
-        </div>
-      </div>
-    </section>
-  `;
-}
-
-function renderSkeletonCard() {
-  return `
-    <article class="card-surface" style="${styles.skeletonCard}">
-      <div style="display:flex; justify-content:space-between; gap:var(--space-sm);">
-        <div style="display:grid; gap:var(--space-xs); flex:1;">
-          <div style="width:110px; height:14px; border-radius:var(--radius-pill); background:var(--surface-glass-strong);"></div>
-          <div style="width:72%; height:16px; border-radius:var(--radius-pill); background:var(--surface-hover-strong);"></div>
-        </div>
-        <div style="width:44px; height:44px; border-radius:var(--radius-lg); background:var(--surface-glass);"></div>
-      </div>
-
-      <div style="display:grid; gap:var(--space-xs);">
-        <div style="width:100%; height:12px; border-radius:var(--radius-pill); background:var(--surface-glass);"></div>
-        <div style="width:84%; height:12px; border-radius:var(--radius-pill); background:var(--surface-glass);"></div>
-        <div style="width:62%; height:12px; border-radius:var(--radius-pill); background:var(--surface-glass);"></div>
-      </div>
-
-      <div style="display:flex; gap:var(--space-xs); flex-wrap:wrap;">
-        <div style="width:96px; height:30px; border-radius:var(--radius-pill); background:var(--surface-glass);"></div>
-        <div style="width:96px; height:30px; border-radius:var(--radius-pill); background:var(--surface-glass);"></div>
-      </div>
-    </article>
-  `;
-}
-
-function renderSurfaceMessage({
-  icon = "",
-  title = "",
-  text = "",
-  actionHtml = "",
-} = {}) {
-  return `
-    <section class="panel-surface" style="${styles.emptyPanel}">
-      <div class="empty-state">
-        <div class="empty-state-icon">${icon}</div>
-        <h3 class="empty-state-title">${escapeHtml(title)}</h3>
-        <p class="empty-state-text">${escapeHtml(text)}</p>
-        ${actionHtml || ""}
-      </div>
-    </section>
   `;
 }
 
 /* =========================================================
-   FACTURA CARD
-========================================================= */
-function renderFacturaTop(item) {
-  const numero = safeText(item.numero || item.id);
-  const empresa = safeText(item.cliente?.empresa || item.cliente?.nombre, "Cliente");
-  const initials = safeText(item.cliente?.initials, "ON");
-
-  return `
-    <div style="${styles.cardTop}">
-      <div style="${styles.titleBlock}">
-        <span style="${styles.invoiceNumber}">
-          ${escapeHtml(numero)}
-        </span>
-
-        <h3 style="${styles.companyTitle}">
-          ${escapeHtml(empresa)}
-        </h3>
-      </div>
-
-      ${renderAvatar(initials)}
-    </div>
-  `;
-}
-
-function renderFacturaPreview(item) {
-  return `
-    <p style="${styles.preview}">
-      ${escapeHtml(truncate(item.preview || "Sin detalle", 160))}
-    </p>
-  `;
-}
-
-function renderFacturaMeta(item) {
-  return `
-    <div style="${styles.metaList}">
-      ${renderMetaLine("Cliente", item.cliente?.nombre || "—")}
-      ${renderMetaLine("Email", item.cliente?.email || "-")}
-      ${renderMetaLine("Fecha", formatDate(item.fecha))}
-      ${renderMetaLine("Pago", item.formaPago || "-")}
-    </div>
-  `;
-}
-
-function renderFacturaAmount(item) {
-  return `
-    <div style="${styles.amountBlock}">
-      <strong style="${styles.amountMain}">
-        ${escapeHtml(formatMoney(item.total, item.moneda))}
-      </strong>
-
-      <span style="${styles.amountSub}">
-        Base ${escapeHtml(formatMoney(item.baseImponible, item.moneda))}
-      </span>
-    </div>
-  `;
-}
-
-function renderFacturaChips(item) {
-  return `
-    <div style="${styles.chipsRow}">
-      ${renderChip(
-        getEstadoPagoLabel(item.estadoPago),
-        getEstadoPagoChipStyle(item.estadoPago)
-      )}
-      ${renderChip(
-        getEstadoLabel(item.estado),
-        getEstadoChipStyle(item.estado)
-      )}
-    </div>
-  `;
-}
-
-function renderFacturaSummary(item) {
-  return `
-    <div style="${styles.summaryRow}">
-      ${renderFacturaAmount(item)}
-      ${renderFacturaChips(item)}
-    </div>
-  `;
-}
-
-function renderFacturaFooter(item) {
-  const relative = formatRelativeDate(item.updatedAt);
-  const attachments = `Adjuntos: ${safeNumber(item.attachmentsCount, 0)}`;
-
-  return `
-    <div style="${styles.footerRow}">
-      ${renderStatText(relative, attachments)}
-
-      ${renderButton({
-        action: "open-factura",
-        facturaId: item.id || "",
-        label: "Ver factura",
-        variant: "secondary",
-      })}
-    </div>
-  `;
-}
-
-function renderFacturaCard(item = {}) {
-  return `
-    <article
-      class="card-surface hover-lift factura-card"
-      data-factura-id="${escapeHtml(item.id || "")}"
-      style="${styles.cardRoot}"
-    >
-      ${renderFacturaTop(item)}
-      ${renderFacturaPreview(item)}
-      ${renderFacturaMeta(item)}
-      ${renderFacturaSummary(item)}
-      <div class="divider"></div>
-      ${renderFacturaFooter(item)}
-    </article>
-  `;
-}
-
-/* =========================================================
-   EXPORTS PÚBLICOS
+   HEADER PREMIUM
 ========================================================= */
 export function renderHeader({ items = [], state = {} } = {}) {
+  const total = sum(items, "total");
+  const paid = items.filter((x) => x.estadoPago === "paid").length;
+  const pending = items.length - paid;
+
   return `
     <header class="page-header">
       <div class="page-header-main">
-        <h1 class="page-title">Facturas</h1>
+        <h1 class="page-title">Centro de Facturación</h1>
+
         <p class="page-subtitle">
-          Listado simple de facturas existentes. Solo cards, sin ruido y sin inventar otro layout.
+          Consulta, descarga y revisa todas tus facturas emitidas.
+          Portal premium para clientes.
         </p>
       </div>
 
       <div class="page-header-actions">
-        ${renderButton({
-          id: "facturas-refresh-btn",
-          label: state.loading || state.refreshing ? "Actualizando..." : "Actualizar",
-          variant: "secondary",
-        })}
+        ${button(
+          state.loading || state.refreshing
+            ? "Actualizando..."
+            : "Actualizar",
+          { id: "facturas-refresh-btn" }
+        )}
       </div>
     </header>
 
-    ${renderHeaderSummary({ items, state })}
+    <section
+      class="grid cols-auto"
+      style="margin-top:18px;"
+    >
+      ${metric("Facturas", String(items.length))}
+      ${metric("Pagadas", String(paid))}
+      ${metric("Pendientes", String(pending))}
+      ${metric("Facturado", formatMoney(total, "EUR"))}
+    </section>
   `;
 }
 
+/* =========================================================
+   STATES
+========================================================= */
 export function renderLoadingState() {
   return `
-    <section class="grid cols-auto dense">
-      ${Array.from({ length: 6 }).map(() => renderSkeletonCard()).join("")}
+    <section class="grid cols-auto" style="margin-top:18px;">
+      ${Array.from({ length: 6 })
+        .map(
+          () => `
+        <article class="card-surface" style="min-height:260px;"></article>
+      `
+        )
+        .join("")}
     </section>
   `;
 }
 
 export function renderErrorState(error = "") {
-  return renderSurfaceMessage({
-    icon: "⚠️",
-    title: "No se pudo cargar el listado",
-    text: error || "Error desconocido",
-    actionHtml: renderButton({
-      id: "facturas-retry-btn",
-      label: "Reintentar",
-      variant: "primary",
-    }),
-  });
+  return `
+    <section class="panel-surface" style="padding:40px;">
+      <div class="empty-state">
+        <div class="empty-state-icon">⚠️</div>
+        <h3 class="empty-state-title">
+          No se pudo cargar la facturación
+        </h3>
+        <p class="empty-state-text">
+          ${escapeHtml(error || "Error inesperado")}
+        </p>
+        ${button("Reintentar", {
+          id: "facturas-retry-btn",
+          variant: "primary",
+        })}
+      </div>
+    </section>
+  `;
 }
 
 export function renderEmptyState() {
-  return renderSurfaceMessage({
-    icon: "🧾",
-    title: "Sin facturas",
-    text: "No hay facturas registradas en este momento.",
-  });
+  return `
+    <section class="panel-surface" style="padding:40px;">
+      <div class="empty-state">
+        <div class="empty-state-icon">🧾</div>
+        <h3 class="empty-state-title">
+          No hay facturas disponibles
+        </h3>
+        <p class="empty-state-text">
+          Cuando se generen nuevas facturas aparecerán aquí.
+        </p>
+      </div>
+    </section>
+  `;
 }
 
+/* =========================================================
+   CARD LEGENDARIA
+========================================================= */
+function renderFacturaCard(item = {}) {
+  const id = safeText(item.numero || item.id);
+  const empresa = safeText(
+    item.cliente?.empresa || item.cliente?.nombre,
+    "Cliente"
+  );
+
+  const initials = safeText(
+    item.cliente?.initials,
+    empresa.slice(0, 2).toUpperCase()
+  );
+
+  const total = formatMoney(item.total, item.moneda);
+  const base = formatMoney(item.baseImponible, item.moneda);
+
+  return `
+    <article
+      class="hover-lift factura-card"
+      data-factura-id="${escapeHtml(item.id || "")}"
+      style="${styles.card}"
+    >
+      <div style="${styles.top}">
+        <div style="${styles.titleWrap}">
+          <span style="${styles.code}">
+            Factura ${escapeHtml(id)}
+          </span>
+
+          <h3 style="${styles.company}">
+            ${escapeHtml(empresa)}
+          </h3>
+        </div>
+
+        ${avatar(initials)}
+      </div>
+
+      <div>
+        <div style="${styles.amountMain}">
+          ${escapeHtml(total)}
+        </div>
+
+        <div style="${styles.amountSub}">
+          Base imponible ${escapeHtml(base)}
+        </div>
+      </div>
+
+      <div style="${styles.row}">
+        ${chip(
+          getEstadoPagoLabel(item.estadoPago),
+          getEstadoPagoChipStyle(item.estadoPago)
+        )}
+
+        ${chip(
+          getEstadoLabel(item.estado),
+          getEstadoChipStyle(item.estado)
+        )}
+      </div>
+
+      <div style="${styles.metaGrid}">
+        ${meta("Fecha emisión", formatDate(item.fecha))}
+        ${meta("Método pago", safeText(item.formaPago, "—"))}
+        ${meta("Actualizado", formatRelativeDate(item.updatedAt))}
+        ${meta(
+          "Adjuntos",
+          String(safeNumber(item.attachmentsCount, 0))
+        )}
+      </div>
+
+      <div style="${styles.footer}">
+        <span class="text-dim">
+          ${escapeHtml(
+            truncate(
+              item.preview ||
+                "Documento fiscal emitido y disponible para consulta.",
+              80
+            )
+          )}
+        </span>
+
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          ${button("Ver", {
+            action: "open-factura",
+            facturaId: item.id,
+          })}
+
+          ${button("Descargar PDF", {
+            action: "download-factura",
+            facturaId: item.id,
+            variant: "primary",
+          })}
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+/* =========================================================
+   LISTADO
+========================================================= */
 export function renderCards({ items = [], state = {} } = {}) {
   if (state.loading && !items.length) {
     return renderLoadingState();
@@ -505,8 +512,11 @@ export function renderCards({ items = [], state = {} } = {}) {
   }
 
   return `
-    <section class="grid cols-auto">
-      ${items.map((item) => renderFacturaCard(item)).join("")}
+    <section
+      class="grid cols-auto"
+      style="margin-top:18px;"
+    >
+      ${items.map(renderFacturaCard).join("")}
     </section>
   `;
 }

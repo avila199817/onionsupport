@@ -3,9 +3,12 @@
    Archivo: src/i18n/locales/es/index.js
 
    Responsabilidades:
-   - reexportar locale español
-   - punto de entrada limpio para es
-   - compatibilidad con import default y named
+   - importar el locale español desde sidebar.js
+   - exponer compatibilidad con export default y named
+   - mantener un punto de entrada limpio para es
 ========================================================= */
 
-export { es as default, es } from "./sidebar.js";
+import sidebar from "./sidebar.js";
+
+export const es = sidebar;
+export default es;

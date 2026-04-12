@@ -1,12 +1,12 @@
 /* =========================================================
-   Onion SPA - Facturas Detail Template (FULL PRO SAAS PANEL · FINAL PRO)
+   Onion SPA - Facturas Detail Template (FINAL PRO CLEAN)
    Archivo: src/views/facturas/facturas.detail.template.js
 
    Responsabilidades:
    - renderizar el modal de detalle de factura
    - renderizar bloques meta reutilizables del detalle
-   - mantener el HTML del detalle desacoplado de la vista principal
    - soportar loading / vacío / detalle completo
+   - mantener coherencia visual con facturas.template.js
 ========================================================= */
 
 function safeText(value, fallback = "—") {
@@ -99,7 +99,14 @@ export function renderMiniMeta(label = "", value = "") {
         ${escapeHtml(label)}
       </span>
 
-      <span style="color:var(--text-strong); font-weight:var(--weight-semibold);">
+      <span
+        style="
+          color:var(--text-strong);
+          font-weight:var(--weight-semibold);
+          line-height:1.45;
+          word-break:break-word;
+        "
+      >
         ${escapeHtml(value)}
       </span>
     </div>
@@ -137,11 +144,206 @@ export function renderDetailStat(label = "", value = "") {
           line-height:1.1;
           color:var(--text-strong);
           font-weight:var(--weight-black);
+          word-break:break-word;
         "
       >
         ${escapeHtml(value)}
       </strong>
     </article>
+  `;
+}
+
+function renderLoadingContent() {
+  return `
+    <div style="padding:24px; display:grid; gap:16px;">
+      <div style="height:30px; width:220px; border-radius:12px; background:var(--surface-glass);"></div>
+      <div style="height:90px; border-radius:18px; background:var(--surface-glass);"></div>
+      <div style="height:220px; border-radius:18px; background:var(--surface-glass);"></div>
+    </div>
+  `;
+}
+
+function renderEmptyContent() {
+  return `
+    <div style="padding:24px;">
+      <p style="margin:0; color:var(--text-dim);">No hay detalle disponible.</p>
+    </div>
+  `;
+}
+
+function renderLineasSection({ factura, lineas }) {
+  return `
+    <section
+      class="panel-surface"
+      style="padding:20px; border-radius:var(--panel-radius);"
+    >
+      <div style="display:grid; gap:var(--space-md);">
+        <div>
+          <h3 style="margin:0 0 6px; color:var(--text-strong);">Líneas</h3>
+          <p style="margin:0; color:var(--text-dim); font-size:var(--font-sm);">
+            Desglose principal del documento.
+          </p>
+        </div>
+
+        ${
+          lineas.length
+            ? `
+              <div style="display:grid; gap:12px;">
+                ${lineas
+                  .map(
+                    (linea) => `
+                      <article
+                        style="
+                          display:grid;
+                          gap:10px;
+                          padding:16px;
+                          border-radius:18px;
+                          border:1px solid var(--border-soft);
+                          background:var(--surface-glass);
+                        "
+                      >
+                        <div
+                          style="
+                            display:flex;
+                            justify-content:space-between;
+                            gap:12px;
+                            align-items:flex-start;
+                            flex-wrap:wrap;
+                          "
+                        >
+                          <div style="display:grid; gap:4px;">
+                            <strong style="color:var(--text-strong); font-size:var(--font-base);">
+                              ${escapeHtml(linea.concepto || "Línea")}
+                            </strong>
+                            <span style="color:var(--text-dim); font-size:var(--font-sm);">
+                              ${escapeHtml(linea.descripcion || "Sin descripción")}
+                            </span>
+                          </div>
+
+                          <strong style="color:var(--text-strong); font-size:var(--font-lg);">
+                            ${escapeHtml(formatMoney(linea.totalLinea, factura.moneda))}
+                          </strong>
+                        </div>
+
+                        <div
+                          style="
+                            display:grid;
+                            grid-template-columns:repeat(auto-fit, minmax(120px,1fr));
+                            gap:10px;
+                          "
+                        >
+                          ${renderMiniMeta("Cantidad", String(linea.cantidad))}
+                          ${renderMiniMeta("Unitario", formatMoney(linea.precioUnitario, factura.moneda))}
+                          ${renderMiniMeta("Subtotal", formatMoney(linea.subtotal, factura.moneda))}
+                          ${renderMiniMeta("Impuesto", formatMoney(linea.impuesto, factura.moneda))}
+                        </div>
+                      </article>
+                    `
+                  )
+                  .join("")}
+              </div>
+            `
+            : `
+              <p style="margin:0; color:var(--text-dim);">No hay líneas disponibles.</p>
+            `
+        }
+      </div>
+    </section>
+  `;
+}
+
+function renderClienteSection({ factura }) {
+  return `
+    <section
+      class="panel-surface"
+      style="padding:20px; border-radius:var(--panel-radius);"
+    >
+      <div style="display:grid; gap:var(--space-md);">
+        <div>
+          <h3 style="margin:0 0 6px; color:var(--text-strong);">Cliente</h3>
+          <p style="margin:0; color:var(--text-dim); font-size:var(--font-sm);">
+            Datos de facturación del destinatario.
+          </p>
+        </div>
+
+        ${renderMiniMeta("Empresa", factura.cliente?.empresa || factura.cliente?.nombre || "—")}
+        ${renderMiniMeta("Email", factura.cliente?.email || "—")}
+        ${renderMiniMeta("NIF", factura.cliente?.nif || "—")}
+        ${renderMiniMeta("Teléfono", factura.cliente?.telefono || "—")}
+        ${renderMiniMeta(
+          "Dirección",
+          [
+            factura.cliente?.direccion?.calle,
+            factura.cliente?.direccion?.linea2,
+            factura.cliente?.direccion?.cp,
+            factura.cliente?.direccion?.ciudad,
+            factura.cliente?.direccion?.provincia,
+            factura.cliente?.direccion?.pais,
+          ]
+            .filter(Boolean)
+            .join(", ") || "—"
+        )}
+      </div>
+    </section>
+  `;
+}
+
+function renderResumenSection({ factura, impuestos }) {
+  return `
+    <section
+      class="panel-surface"
+      style="padding:20px; border-radius:var(--panel-radius);"
+    >
+      <div style="display:grid; gap:var(--space-md);">
+        <div>
+          <h3 style="margin:0 0 6px; color:var(--text-strong);">Resumen</h3>
+          <p style="margin:0; color:var(--text-dim); font-size:var(--font-sm);">
+            Totales y trazabilidad.
+          </p>
+        </div>
+
+        ${renderMiniMeta("Subtotal", formatMoney(factura.subtotal || factura.baseImponible, factura.moneda))}
+        ${renderMiniMeta("Impuestos", formatMoney(factura.impuestosTotal || factura.iva, factura.moneda))}
+        ${renderMiniMeta("Descuento", formatMoney(factura.descuentoTotal, factura.moneda))}
+        ${renderMiniMeta("Total", formatMoney(factura.total, factura.moneda))}
+        ${renderMiniMeta("Actualizado", formatDateTime(factura.updatedAt))}
+        ${renderMiniMeta("Enviado a", factura.enviadoA || "—")}
+
+        ${
+          impuestos.length
+            ? `
+              <div style="display:grid; gap:10px;">
+                <strong style="color:var(--text-strong);">Impuestos</strong>
+                ${impuestos
+                  .map(
+                    (item) => `
+                      <div
+                        style="
+                          display:flex;
+                          justify-content:space-between;
+                          gap:12px;
+                          padding:12px;
+                          border-radius:14px;
+                          border:1px solid var(--border-soft);
+                          background:var(--surface-glass);
+                        "
+                      >
+                        <span style="color:var(--text-soft);">
+                          ${escapeHtml(item.nombre || item.tipo || "Impuesto")} · ${escapeHtml(String(item.porcentaje || 0))}%
+                        </span>
+                        <strong style="color:var(--text-strong);">
+                          ${escapeHtml(formatMoney(item.importe, factura.moneda))}
+                        </strong>
+                      </div>
+                    `
+                  )
+                  .join("")}
+              </div>
+            `
+            : ""
+        }
+      </div>
+    </section>
   `;
 }
 
@@ -151,21 +353,11 @@ export function renderFacturasDetailContent({
   sendingFacturaId = "",
 } = {}) {
   if (loading) {
-    return `
-      <div style="padding:24px; display:grid; gap:16px;">
-        <div style="height:30px; width:220px; border-radius:12px; background:var(--surface-glass);"></div>
-        <div style="height:90px; border-radius:18px; background:var(--surface-glass);"></div>
-        <div style="height:220px; border-radius:18px; background:var(--surface-glass);"></div>
-      </div>
-    `;
+    return renderLoadingContent();
   }
 
   if (!factura) {
-    return `
-      <div style="padding:24px;">
-        <p style="margin:0; color:var(--text-dim);">No hay detalle disponible.</p>
-      </div>
-    `;
+    return renderEmptyContent();
   }
 
   const lineas = safeArray(factura.lineas);
@@ -318,170 +510,11 @@ export function renderFacturasDetailContent({
           gap:var(--space-lg);
         "
       >
-        <section
-          class="panel-surface"
-          style="padding:20px; border-radius:var(--panel-radius);"
-        >
-          <div style="display:grid; gap:var(--space-md);">
-            <div>
-              <h3 style="margin:0 0 6px; color:var(--text-strong);">Líneas</h3>
-              <p style="margin:0; color:var(--text-dim); font-size:var(--font-sm);">
-                Desglose principal del documento.
-              </p>
-            </div>
-
-            ${
-              lineas.length
-                ? `
-                  <div style="display:grid; gap:12px;">
-                    ${lineas
-                      .map(
-                        (linea) => `
-                          <article
-                            style="
-                              display:grid;
-                              gap:10px;
-                              padding:16px;
-                              border-radius:18px;
-                              border:1px solid var(--border-soft);
-                              background:var(--surface-glass);
-                            "
-                          >
-                            <div
-                              style="
-                                display:flex;
-                                justify-content:space-between;
-                                gap:12px;
-                                align-items:flex-start;
-                                flex-wrap:wrap;
-                              "
-                            >
-                              <div style="display:grid; gap:4px;">
-                                <strong style="color:var(--text-strong); font-size:var(--font-base);">
-                                  ${escapeHtml(linea.concepto || "Línea")}
-                                </strong>
-                                <span style="color:var(--text-dim); font-size:var(--font-sm);">
-                                  ${escapeHtml(linea.descripcion || "Sin descripción")}
-                                </span>
-                              </div>
-
-                              <strong style="color:var(--text-strong); font-size:var(--font-lg);">
-                                ${escapeHtml(formatMoney(linea.totalLinea, factura.moneda))}
-                              </strong>
-                            </div>
-
-                            <div
-                              style="
-                                display:grid;
-                                grid-template-columns:repeat(auto-fit, minmax(120px,1fr));
-                                gap:10px;
-                              "
-                            >
-                              ${renderMiniMeta("Cantidad", String(linea.cantidad))}
-                              ${renderMiniMeta("Unitario", formatMoney(linea.precioUnitario, factura.moneda))}
-                              ${renderMiniMeta("Subtotal", formatMoney(linea.subtotal, factura.moneda))}
-                              ${renderMiniMeta("Impuesto", formatMoney(linea.impuesto, factura.moneda))}
-                            </div>
-                          </article>
-                        `
-                      )
-                      .join("")}
-                  </div>
-                `
-                : `
-                  <p style="margin:0; color:var(--text-dim);">No hay líneas disponibles.</p>
-                `
-            }
-          </div>
-        </section>
+        ${renderLineasSection({ factura, lineas })}
 
         <div style="display:grid; gap:var(--space-lg);">
-          <section
-            class="panel-surface"
-            style="padding:20px; border-radius:var(--panel-radius);"
-          >
-            <div style="display:grid; gap:var(--space-md);">
-              <div>
-                <h3 style="margin:0 0 6px; color:var(--text-strong);">Cliente</h3>
-                <p style="margin:0; color:var(--text-dim); font-size:var(--font-sm);">
-                  Datos de facturación del destinatario.
-                </p>
-              </div>
-
-              ${renderMiniMeta("Empresa", factura.cliente?.empresa || factura.cliente?.nombre || "—")}
-              ${renderMiniMeta("Email", factura.cliente?.email || "—")}
-              ${renderMiniMeta("NIF", factura.cliente?.nif || "—")}
-              ${renderMiniMeta("Teléfono", factura.cliente?.telefono || "—")}
-              ${renderMiniMeta(
-                "Dirección",
-                [
-                  factura.cliente?.direccion?.calle,
-                  factura.cliente?.direccion?.linea2,
-                  factura.cliente?.direccion?.cp,
-                  factura.cliente?.direccion?.ciudad,
-                  factura.cliente?.direccion?.provincia,
-                  factura.cliente?.direccion?.pais,
-                ]
-                  .filter(Boolean)
-                  .join(", ") || "—"
-              )}
-            </div>
-          </section>
-
-          <section
-            class="panel-surface"
-            style="padding:20px; border-radius:var(--panel-radius);"
-          >
-            <div style="display:grid; gap:var(--space-md);">
-              <div>
-                <h3 style="margin:0 0 6px; color:var(--text-strong);">Resumen</h3>
-                <p style="margin:0; color:var(--text-dim); font-size:var(--font-sm);">
-                  Totales y trazabilidad.
-                </p>
-              </div>
-
-              ${renderMiniMeta("Subtotal", formatMoney(factura.subtotal || factura.baseImponible, factura.moneda))}
-              ${renderMiniMeta("Impuestos", formatMoney(factura.impuestosTotal || factura.iva, factura.moneda))}
-              ${renderMiniMeta("Descuento", formatMoney(factura.descuentoTotal, factura.moneda))}
-              ${renderMiniMeta("Total", formatMoney(factura.total, factura.moneda))}
-              ${renderMiniMeta("Actualizado", formatDateTime(factura.updatedAt))}
-              ${renderMiniMeta("Enviado a", factura.enviadoA || "—")}
-
-              ${
-                impuestos.length
-                  ? `
-                    <div style="display:grid; gap:10px;">
-                      <strong style="color:var(--text-strong);">Impuestos</strong>
-                      ${impuestos
-                        .map(
-                          (item) => `
-                            <div
-                              style="
-                                display:flex;
-                                justify-content:space-between;
-                                gap:12px;
-                                padding:12px;
-                                border-radius:14px;
-                                border:1px solid var(--border-soft);
-                                background:var(--surface-glass);
-                              "
-                            >
-                              <span style="color:var(--text-soft);">
-                                ${escapeHtml(item.nombre || item.tipo || "Impuesto")} · ${escapeHtml(String(item.porcentaje || 0))}%
-                              </span>
-                              <strong style="color:var(--text-strong);">
-                                ${escapeHtml(formatMoney(item.importe, factura.moneda))}
-                              </strong>
-                            </div>
-                          `
-                        )
-                        .join("")}
-                    </div>
-                  `
-                  : ""
-              }
-            </div>
-          </section>
+          ${renderClienteSection({ factura })}
+          ${renderResumenSection({ factura, impuestos })}
         </div>
       </div>
     </div>

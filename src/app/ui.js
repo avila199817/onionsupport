@@ -8,6 +8,7 @@
    - registrar módulos UI en AppCore
    - enlazar refresco UI ante cambio de idioma
    - evitar roturas si falta AppCore o eventos
+   - exponer bridge global de toast en AppCore
 ========================================================= */
 
 export function syncUserUI(AppCore) {
@@ -91,6 +92,68 @@ function registerAppModule(
   }
 }
 
+function bindToastBridge(AppCore, Toast) {
+  if (!AppCore || !Toast) return;
+
+  AppCore.showToast = (
+    message = "",
+    type = "info",
+    options = {}
+  ) => {
+    const normalizedType = String(type || "info")
+      .trim()
+      .toLowerCase();
+
+    switch (normalizedType) {
+      case "success":
+        return typeof Toast.success === "function"
+          ? Toast.success(message, options)
+          : Toast.show({
+              ...options,
+              type: "success",
+              message,
+            });
+
+      case "error":
+        return typeof Toast.error === "function"
+          ? Toast.error(message, options)
+          : Toast.show({
+              ...options,
+              type: "error",
+              message,
+            });
+
+      case "warning":
+        return typeof Toast.warning === "function"
+          ? Toast.warning(message, options)
+          : Toast.show({
+              ...options,
+              type: "warning",
+              message,
+            });
+
+      case "loading":
+        return typeof Toast.loading === "function"
+          ? Toast.loading(message, options)
+          : Toast.show({
+              ...options,
+              type: "loading",
+              message,
+            });
+
+      case "info":
+      default:
+        return typeof Toast.info === "function"
+          ? Toast.info(message, options)
+          : Toast.show({
+              ...options,
+              type: "info",
+              message,
+            });
+    }
+  };
+}
+
 export function initUISystems({
   AppCore,
   Toast,
@@ -130,6 +193,7 @@ export function initUISystems({
     typeof Toast.init === "function"
   ) {
     Toast.init();
+    bindToastBridge(AppCore, Toast);
   }
 
   if (

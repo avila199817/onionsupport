@@ -7,4 +7,4 @@
    - mantener un punto de entrada limpio para ca
 ========================================================= */
 
-export { ca as default, ca } from "./ca.js";
+export { ca as default, ca } from "./sidebar.js";

@@ -23,16 +23,27 @@ import { AUTH_CONSTANTS } from "./constants.js";
 /* =========================================================
    USER
 ========================================================= */
-export function normalizeUser(rawUser = null) {
-  if (typeof AppCore.normalizeUser === "function") {
-    const normalizedByCore = AppCore.normalizeUser(rawUser);
+export function normalizeUser(
+  rawUser = null
+) {
+  if (
+    typeof AppCore.normalizeUser ===
+    "function"
+  ) {
+    const normalizedByCore =
+      AppCore.normalizeUser(
+        rawUser
+      );
 
     if (normalizedByCore) {
       return normalizedByCore;
     }
   }
 
-  if (!rawUser || typeof rawUser !== "object") {
+  if (
+    !rawUser ||
+    typeof rawUser !== "object"
+  ) {
     return null;
   }
 
@@ -66,8 +77,10 @@ export function normalizeUser(rawUser = null) {
     "user";
 
   const userSlug =
-    rawUser.slug ||
-    slugify(username || displayName || "usuario");
+    rawUser.slug ??
+    slugify(
+      username || displayName || "usuario"
+    );
 
   return {
     id:
@@ -89,7 +102,10 @@ export function normalizeUser(rawUser = null) {
     username,
     slug: userSlug,
     name: displayName,
-    email: rawUser.email ?? rawUser.mail ?? "",
+    email:
+      rawUser.email ??
+      rawUser.mail ??
+      "",
     role,
 
     avatar:
@@ -112,15 +128,17 @@ export function normalizeUser(rawUser = null) {
 /* =========================================================
    SESSION PAYLOAD
 ========================================================= */
-export function normalizeSessionPayload(payload = null) {
+export function normalizeSessionPayload(
+  payload = null
+) {
   if (!payload || typeof payload !== "object") {
     return null;
   }
 
   const sessionNode =
-    payload.session ||
-    payload.data?.session ||
-    payload.meta?.session ||
+    payload.session ??
+    payload.data?.session ??
+    payload.meta?.session ??
     null;
 
   if (!sessionNode || typeof sessionNode !== "object") {
@@ -147,71 +165,79 @@ export function normalizeSessionPayload(payload = null) {
   return {
     sessionId: sessionId || null,
     userId: userId || null,
-    expiresAt: sessionNode.expiresAt || null,
-    createdAt: sessionNode.createdAt || null,
-    lastActiveAt: sessionNode.lastActiveAt || null,
-    lastRefreshAt: sessionNode.lastRefreshAt || null,
+    expiresAt: sessionNode.expiresAt ?? null,
+    createdAt: sessionNode.createdAt ?? null,
+    lastActiveAt: sessionNode.lastActiveAt ?? null,
+    lastRefreshAt: sessionNode.lastRefreshAt ?? null,
   };
 }
 
 /* =========================================================
    TOKEN EXTRACTORS
 ========================================================= */
-export function extractToken(payload = null) {
+export function extractToken(
+  payload = null
+) {
   if (!payload) return null;
 
   return (
-    payload.token ||
-    payload.access_token ||
-    payload.accessToken ||
-    payload.jwt ||
-    payload.id_token ||
-    payload.data?.token ||
-    payload.data?.access_token ||
-    payload.data?.accessToken ||
-    payload.data?.jwt ||
-    payload.meta?.token ||
+    payload.token ??
+    payload.access_token ??
+    payload.accessToken ??
+    payload.jwt ??
+    payload.id_token ??
+    payload.data?.token ??
+    payload.data?.access_token ??
+    payload.data?.accessToken ??
+    payload.data?.jwt ??
+    payload.meta?.token ??
     null
   );
 }
 
-export function extractRefreshToken(payload = null) {
+export function extractRefreshToken(
+  payload = null
+) {
   if (!payload) return null;
 
   return (
-    payload.refresh_token ||
-    payload.refreshToken ||
-    payload.data?.refresh_token ||
-    payload.data?.refreshToken ||
-    payload.meta?.refreshToken ||
-    payload.meta?.refresh_token ||
+    payload.refresh_token ??
+    payload.refreshToken ??
+    payload.data?.refresh_token ??
+    payload.data?.refreshToken ??
+    payload.meta?.refreshToken ??
+    payload.meta?.refresh_token ??
     null
   );
 }
 
-export function extractTempToken(payload = null) {
+export function extractTempToken(
+  payload = null
+) {
   if (!payload) return null;
 
   return (
-    payload.tempToken ||
-    payload.temp_token ||
-    payload.data?.tempToken ||
-    payload.data?.temp_token ||
-    payload.meta?.tempToken ||
-    payload.meta?.temp_token ||
+    payload.tempToken ??
+    payload.temp_token ??
+    payload.data?.tempToken ??
+    payload.data?.temp_token ??
+    payload.meta?.tempToken ??
+    payload.meta?.temp_token ??
     null
   );
 }
 
-export function extractRequires2FA(payload = null) {
+export function extractRequires2FA(
+  payload = null
+) {
   if (!payload) return false;
 
   return Boolean(
-    payload.requires2FA ||
-      payload.requires_2fa ||
-      payload.requiresTwoFactor ||
-      payload.data?.requires2FA ||
-      payload.data?.requires_2fa ||
+    payload.requires2FA ??
+      payload.requires_2fa ??
+      payload.requiresTwoFactor ??
+      payload.data?.requires2FA ??
+      payload.data?.requires_2fa ??
       payload.data?.requiresTwoFactor
   );
 }
@@ -219,18 +245,20 @@ export function extractRequires2FA(payload = null) {
 /* =========================================================
    USER EXTRACTOR
 ========================================================= */
-export function extractUser(payload = null) {
+export function extractUser(
+  payload = null
+) {
   if (!payload) return null;
 
   return normalizeUser(
-    payload.user ||
-      payload.data?.user ||
-      payload.me ||
-      payload.data?.me ||
-      payload.profile ||
-      payload.data?.profile ||
-      payload.account ||
-      payload.data?.account ||
+    payload.user ??
+      payload.data?.user ??
+      payload.me ??
+      payload.data?.me ??
+      payload.profile ??
+      payload.data?.profile ??
+      payload.account ??
+      payload.data?.account ??
       null
   );
 }
@@ -238,13 +266,17 @@ export function extractUser(payload = null) {
 /* =========================================================
    AUTH RESPONSE VALIDATION
 ========================================================= */
-export function validateAuthResponse(response = null) {
+export function validateAuthResponse(
+  response = null
+) {
   const token = extractToken(response);
   const user = extractUser(response);
   const refreshToken = extractRefreshToken(response);
   const requires2FA = extractRequires2FA(response);
   const tempToken = extractTempToken(response);
-  const sessionData = normalizeSessionPayload(response);
+  const sessionData = normalizeSessionPayload(
+    response
+  );
 
   if (requires2FA && tempToken) {
     return {

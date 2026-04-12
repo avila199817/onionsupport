@@ -7,15 +7,24 @@
    - bind de refresh / retry / export
    - delegación de eventos sobre cards y modal
    - bind de Escape para cierre de detalle
+   - delegar bootstrap inicial a la vista
    - mantener la vista principal más limpia
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import { safeText } from "./facturas.utils.js";
 
-function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
-  const text = String(value).trim();
-  return text || fallback;
+function showBindingToast(message = "", type = "info") {
+  try {
+    if (typeof AppCore?.showToast === "function") {
+      AppCore.showToast(message, type);
+      return;
+    }
+  } catch {
+    /* noop */
+  }
+
+  console.log(`[${String(type).toUpperCase()}] ${String(message ?? "")}`);
 }
 
 export function bindFacturasView({
@@ -34,11 +43,11 @@ export function bindFacturasView({
 } = {}) {
   if (typeof getContainer !== "function") return;
 
-  const scope = AppCore.cleanup.scope(scopeName);
+  const scope = AppCore?.cleanup?.scope?.(scopeName);
   const container = getContainer();
   const state = typeof getState === "function" ? getState() : null;
 
-  if (!container || !state) return;
+  if (!scope || !container || !state) return;
 
   const root = container.querySelector(`[data-facturas-scope="${scopeName}"]`);
   if (!root) return;
@@ -52,10 +61,10 @@ export function bindFacturasView({
       if (state.loading || state.refreshing) return;
 
       try {
-        await loadFacturas({ silent: true });
-        AppCore?.showToast?.("Facturas actualizadas correctamente.", "success");
+        await loadFacturas?.({ silent: true });
+        showBindingToast("Facturas actualizadas correctamente.", "success");
       } catch {
-        AppCore?.showToast?.("No se pudo actualizar el listado.", "error");
+        showBindingToast("No se pudo actualizar el listado.", "error");
       }
     });
   }
@@ -63,18 +72,16 @@ export function bindFacturasView({
   if (retryBtn) {
     AppCore.cleanup.on(scope, retryBtn, "click", async () => {
       try {
-        await loadFacturas();
+        await loadFacturas?.({ silent: false });
       } catch {
-        AppCore?.showToast?.("No se pudo recargar la facturación.", "error");
+        showBindingToast("No se pudo recargar la facturación.", "error");
       }
     });
   }
 
   if (exportBtn) {
     AppCore.cleanup.on(scope, exportBtn, "click", () => {
-      if (typeof exportFacturasCsv === "function") {
-        exportFacturasCsv();
-      }
+      exportFacturasCsv?.();
     });
   }
 
@@ -138,15 +145,13 @@ export function bindFacturasView({
   });
 
   if (!state.bootstrapped) {
-    state.bootstrapped = true;
-
     if (typeof onBootstrap === "function") {
       onBootstrap();
       return;
     }
 
-    loadFacturas?.().catch(() => {
-      AppCore?.showToast?.("No se pudieron cargar las facturas.", "error");
+    loadFacturas?.({ silent: false }).catch(() => {
+      showBindingToast("No se pudieron cargar las facturas.", "error");
     });
   }
 }

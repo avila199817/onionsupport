@@ -90,6 +90,11 @@ export function getSidebarTemplate() {
       "sidebar.menu.invoices",
       "Facturas"
     ),
+     
+    server: t(
+      "sidebar.menu.server",
+      "Servidor"
+    ),
 
     users: t(
       "sidebar.menu.users",

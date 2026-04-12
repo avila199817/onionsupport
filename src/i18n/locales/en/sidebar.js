@@ -4,6 +4,7 @@
 
    Responsabilidades:
    - English translations for Sidebar
+   - route titles translations
    - exact key parity with es / ca
    - prepared for live i18n runtime
 ========================================================= */
@@ -33,6 +34,7 @@ export const en = {
       clients: "Clients",
       account: "Account",
       settings: "Settings",
+      server: "Server",
     },
 
     recents: {
@@ -53,6 +55,18 @@ export const en = {
       help: "Help",
       logout: "Log out",
     },
+  },
+
+  routes: {
+    home: "Onion Support",
+    incidencias: "Tickets",
+    facturas: "Invoices",
+    usuarios: "Users",
+    clientes: "Clients",
+    cuenta: "Account",
+    ajustes: "Settings",
+    servidor: "Server",
+    login: "Login",
   },
 };
 

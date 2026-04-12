@@ -1,11 +1,11 @@
 /* =========================================================
-   Onion SPA - Facturas Template (FINAL PRO CLEAN)
+   Onion SPA - Facturas Template (FINAL PRO TABLE GOD MODE)
    Archivo: src/views/facturas/facturas.template.js
 
    Responsabilidades:
    - renderizar header premium de la vista
    - renderizar estados loading / error / empty
-   - renderizar grid de cards de facturas
+   - renderizar tabla premium de facturas
    - mantener compatibilidad directa con facturasView.js
 ========================================================= */
 
@@ -72,6 +72,7 @@ function formatRelativeDate(value) {
   const absMinutes = Math.abs(diffMinutes);
 
   if (absMinutes < 1) return "Ahora mismo";
+
   if (absMinutes < 60) {
     return diffMinutes > 0 ? `En ${absMinutes} min` : `Hace ${absMinutes} min`;
   }
@@ -104,21 +105,27 @@ function getEstadoPagoLabel(value = "") {
     case "pagado":
     case "cobrada":
       return "Pagada";
+
     case "pending":
     case "pendiente":
       return "Pendiente";
+
     case "overdue":
     case "vencida":
       return "Vencida";
+
     case "cancelled":
     case "cancelada":
       return "Cancelada";
+
     case "draft":
     case "borrador":
       return "Borrador";
+
     case "partial":
     case "parcial":
       return "Pago parcial";
+
     default:
       return safeText(value, "Pendiente");
   }
@@ -131,14 +138,18 @@ function getEstadoLabel(value = "") {
     case "emitida":
     case "issued":
       return "Emitida";
+
     case "borrador":
     case "draft":
       return "Borrador";
+
     case "cancelada":
     case "cancelled":
       return "Cancelada";
+
     case "abonada":
       return "Abonada";
+
     default:
       return safeText(value, "Emitida");
   }
@@ -285,7 +296,10 @@ function computeStats(items = []) {
   const list = safeArray(items);
 
   const totalFacturas = list.length;
-  const totalImporte = list.reduce((acc, item) => acc + safeNumber(item?.total, 0), 0);
+  const totalImporte = list.reduce(
+    (acc, item) => acc + safeNumber(item?.total, 0),
+    0
+  );
 
   const paidCount = list.filter((item) => {
     const estado = String(item?.estadoPago || "").toLowerCase();
@@ -309,6 +323,47 @@ function computeStats(items = []) {
     pendingCount,
     overdueCount,
   };
+}
+
+function getClientInitials(item = {}) {
+  const raw =
+    item?.cliente?.initials ||
+    item?.cliente?.empresa ||
+    item?.cliente?.nombre ||
+    item?.cliente?.name ||
+    "ON";
+
+  const clean = String(raw).trim();
+
+  if (!clean) return "ON";
+
+  const parts = clean.split(/\s+/).filter(Boolean);
+  const initials = parts.slice(0, 2).map((part) => part[0]).join("");
+
+  return (initials || clean.slice(0, 2) || "ON").toUpperCase();
+}
+
+function renderStatusChip(label = "", style = "") {
+  return `
+    <span
+      style="
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        min-height:30px;
+        padding:0 10px;
+        border-radius:999px;
+        font-size:12px;
+        font-weight:var(--weight-bold);
+        letter-spacing:.05em;
+        text-transform:uppercase;
+        white-space:nowrap;
+        ${style}
+      "
+    >
+      ${escapeHtml(label)}
+    </span>
+  `;
 }
 
 export function renderHeader({ items = [], state = {} } = {}) {
@@ -393,7 +448,7 @@ export function renderHeader({ items = [], state = {} } = {}) {
                 "
               >
                 Gestiona emisión, seguimiento, consulta y descarga de documentos fiscales
-                desde una vista unificada con lectura rápida y acciones directas.
+                desde una tabla premium con lectura rápida, contexto financiero y acciones directas.
               </p>
             </div>
           </div>
@@ -445,12 +500,12 @@ export function renderHeader({ items = [], state = {} } = {}) {
         </div>
 
         <div
+          class="facturas-hero-stats"
           style="
             display:grid;
             grid-template-columns:repeat(4, minmax(0, 1fr));
             gap:var(--space-md);
           "
-          class="facturas-hero-stats"
         >
           ${renderStatCard({
             label: "Facturas visibles",
@@ -499,65 +554,88 @@ export function renderHeader({ items = [], state = {} } = {}) {
 export function renderLoadingState() {
   return `
     <section
-      class="facturas-loading-grid"
+      class="panel-surface facturas-table-shell"
       style="
-        display:grid;
-        grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));
-        gap:var(--space-lg);
+        overflow:hidden;
+        border-radius:var(--panel-radius);
+        border:1px solid var(--border-soft);
+        background:var(--surface-1, var(--surface-glass));
+        box-shadow:var(--shadow-sm);
       "
     >
-      ${Array.from({ length: 6 })
-        .map(
-          () => `
-            <article
-              class="panel-surface"
-              style="
-                display:grid;
-                gap:16px;
-                min-height:260px;
-                padding:20px;
-                border-radius:var(--panel-radius);
-                border:1px solid var(--border-soft);
-                background:var(--surface-1, var(--surface-glass));
-                box-shadow:var(--shadow-sm);
-              "
-            >
-              <div style="display:flex; justify-content:space-between; gap:12px;">
-                <div style="display:grid; gap:10px; flex:1;">
-                  <div style="height:14px; width:90px; border-radius:999px; background:var(--surface-glass);"></div>
-                  <div style="height:28px; width:68%; border-radius:12px; background:var(--surface-glass);"></div>
-                  <div style="height:12px; width:52%; border-radius:999px; background:var(--surface-glass);"></div>
+      <div
+        style="
+          display:grid;
+          gap:0;
+          overflow:auto;
+        "
+      >
+        <div
+          style="
+            min-width:1180px;
+          "
+        >
+          <div
+            style="
+              display:grid;
+              grid-template-columns: 1.6fr .9fr .8fr .8fr .8fr 1fr 1.2fr;
+              gap:0;
+              border-bottom:1px solid var(--border-soft);
+              background:var(--surface-2, var(--surface-glass));
+            "
+          >
+            ${Array.from({ length: 7 })
+              .map(
+                () => `
+                  <div style="padding:16px 18px;">
+                    <div style="height:12px; width:70%; border-radius:999px; background:var(--surface-glass);"></div>
+                  </div>
+                `
+              )
+              .join("")}
+          </div>
+
+          ${Array.from({ length: 8 })
+            .map(
+              () => `
+                <div
+                  style="
+                    display:grid;
+                    grid-template-columns: 1.6fr .9fr .8fr .8fr .8fr 1fr 1.2fr;
+                    gap:0;
+                    border-bottom:1px solid var(--border-soft);
+                  "
+                >
+                  <div style="padding:18px;">
+                    <div style="display:flex; gap:12px; align-items:center;">
+                      <div style="width:42px; height:42px; border-radius:14px; background:var(--surface-glass);"></div>
+                      <div style="display:grid; gap:8px; flex:1;">
+                        <div style="height:14px; width:130px; border-radius:999px; background:var(--surface-glass);"></div>
+                        <div style="height:12px; width:200px; border-radius:999px; background:var(--surface-glass);"></div>
+                        <div style="height:12px; width:170px; border-radius:999px; background:var(--surface-glass);"></div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style="padding:18px;"><div style="height:34px; width:96px; border-radius:999px; background:var(--surface-glass);"></div></div>
+                  <div style="padding:18px;"><div style="height:34px; width:92px; border-radius:999px; background:var(--surface-glass);"></div></div>
+                  <div style="padding:18px;"><div style="height:14px; width:86px; border-radius:999px; background:var(--surface-glass);"></div></div>
+                  <div style="padding:18px;"><div style="height:14px; width:116px; border-radius:999px; background:var(--surface-glass);"></div></div>
+                  <div style="padding:18px;"><div style="height:14px; width:92px; border-radius:999px; background:var(--surface-glass);"></div></div>
+
+                  <div style="padding:18px;">
+                    <div style="display:flex; gap:8px; justify-content:flex-end;">
+                      <div style="height:38px; width:82px; border-radius:12px; background:var(--surface-glass);"></div>
+                      <div style="height:38px; width:82px; border-radius:12px; background:var(--surface-glass);"></div>
+                      <div style="height:38px; width:96px; border-radius:12px; background:var(--surface-glass);"></div>
+                    </div>
+                  </div>
                 </div>
-
-                <div style="height:44px; width:92px; border-radius:14px; background:var(--surface-glass);"></div>
-              </div>
-
-              <div style="display:grid; gap:10px;">
-                <div style="height:12px; width:100%; border-radius:999px; background:var(--surface-glass);"></div>
-                <div style="height:12px; width:82%; border-radius:999px; background:var(--surface-glass);"></div>
-              </div>
-
-              <div
-                style="
-                  display:grid;
-                  grid-template-columns:repeat(3, minmax(0, 1fr));
-                  gap:10px;
-                "
-              >
-                <div style="height:70px; border-radius:16px; background:var(--surface-glass);"></div>
-                <div style="height:70px; border-radius:16px; background:var(--surface-glass);"></div>
-                <div style="height:70px; border-radius:16px; background:var(--surface-glass);"></div>
-              </div>
-
-              <div style="display:flex; gap:10px; flex-wrap:wrap;">
-                <div style="height:40px; width:110px; border-radius:12px; background:var(--surface-glass);"></div>
-                <div style="height:40px; width:100px; border-radius:12px; background:var(--surface-glass);"></div>
-                <div style="height:40px; width:96px; border-radius:12px; background:var(--surface-glass);"></div>
-              </div>
-            </article>
-          `
-        )
-        .join("")}
+              `
+            )
+            .join("")}
+        </div>
+      </div>
     </section>
   `;
 }
@@ -728,45 +806,76 @@ function renderEmptyState() {
   `;
 }
 
-function renderMetaTile(label = "", value = "") {
+function renderTableToolbar({ total = 0 } = {}) {
   return `
     <div
+      class="facturas-table-toolbar"
       style="
-        display:grid;
-        gap:6px;
-        min-height:78px;
-        padding:14px;
-        border-radius:16px;
-        border:1px solid var(--border-soft);
-        background:var(--surface-glass);
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:14px;
+        padding:16px 18px;
+        border-bottom:1px solid var(--border-soft);
+        background:
+          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 6%, transparent), transparent),
+          var(--surface-1, var(--surface-glass));
+        flex-wrap:wrap;
       "
     >
-      <span
-        style="
-          font-size:11px;
-          color:var(--text-faint);
-          font-weight:var(--weight-bold);
-          letter-spacing:.05em;
-          text-transform:uppercase;
-        "
-      >
-        ${escapeHtml(label)}
-      </span>
+      <div style="display:grid; gap:4px;">
+        <strong
+          style="
+            color:var(--text-strong);
+            font-size:var(--font-base);
+            letter-spacing:-.02em;
+          "
+        >
+          Tabla de facturas
+        </strong>
 
-      <strong
+        <span
+          style="
+            color:var(--text-dim);
+            font-size:var(--font-sm);
+          "
+        >
+          ${escapeHtml(String(total))} registro${total === 1 ? "" : "s"} visible${total === 1 ? "" : "s"} en pantalla.
+        </span>
+      </div>
+
+      <div
         style="
-          color:var(--text-strong);
-          font-size:var(--font-base);
-          line-height:1.25;
+          display:flex;
+          align-items:center;
+          gap:8px;
+          flex-wrap:wrap;
         "
       >
-        ${escapeHtml(value)}
-      </strong>
+        <span
+          style="
+            display:inline-flex;
+            align-items:center;
+            min-height:30px;
+            padding:0 10px;
+            border-radius:999px;
+            border:1px solid var(--border-soft);
+            background:var(--surface-glass);
+            color:var(--text-dim);
+            font-size:12px;
+            font-weight:var(--weight-bold);
+            letter-spacing:.04em;
+            text-transform:uppercase;
+          "
+        >
+          Vista tabla
+        </span>
+      </div>
     </div>
   `;
 }
 
-function renderFacturaCard(item = {}) {
+function renderFacturaRow(item = {}) {
   const facturaId = safeText(item?.id, "");
   const numero = safeText(item?.numero, "—");
   const cliente = safeText(item?.cliente?.empresa || item?.cliente?.nombre, "Cliente");
@@ -775,58 +884,34 @@ function renderFacturaCard(item = {}) {
   const updatedAt = formatRelativeDate(item?.updatedAt);
   const total = formatMoney(item?.total, item?.moneda || "EUR");
   const formaPago = safeText(item?.formaPago, "—");
-  const preview = safeText(
-    item?.preview || item?.descripcion || item?.concepto,
-    "Documento fiscal disponible para consulta."
-  );
   const estadoPago = getEstadoPagoLabel(item?.estadoPago);
   const estado = getEstadoLabel(item?.estado);
-  const initials = safeText(item?.cliente?.initials, "ON").slice(0, 2).toUpperCase();
   const pdfAvailable = Boolean(item?.pdfAvailable || item?.blobPath);
+  const initials = getClientInitials(item);
 
   return `
-    <article
-      class="factura-card panel-surface"
+    <tr
+      class="facturas-row"
       data-factura-id="${escapeHtml(facturaId)}"
       style="
-        position:relative;
-        overflow:hidden;
-        display:grid;
-        gap:18px;
-        min-height:290px;
-        padding:20px;
-        border-radius:var(--panel-radius);
-        border:1px solid var(--border-soft);
-        background:
-          linear-gradient(180deg, color-mix(in srgb, var(--surface-2, transparent) 68%, transparent), transparent),
-          var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-sm);
-        cursor:pointer;
-        transition:
-          transform .18s ease,
-          box-shadow .18s ease,
-          border-color .18s ease;
+        transition:background .18s ease, transform .18s ease;
       "
-      onmouseenter="this.style.transform='translateY(-2px)'; this.style.boxShadow='var(--shadow-md)';"
-      onmouseleave="this.style.transform='translateY(0)'; this.style.boxShadow='var(--shadow-sm)';"
     >
-      <div
+      <td
         style="
-          display:flex;
-          justify-content:space-between;
-          gap:14px;
-          align-items:flex-start;
-          flex-wrap:wrap;
+          padding:18px;
+          border-bottom:1px solid var(--border-soft);
+          vertical-align:middle;
         "
       >
-        <div style="display:flex; gap:14px; min-width:0; flex:1;">
+        <div style="display:flex; gap:14px; align-items:center; min-width:280px;">
           <div
             aria-hidden="true"
             style="
-              flex:0 0 48px;
-              width:48px;
-              height:48px;
-              border-radius:16px;
+              flex:0 0 44px;
+              width:44px;
+              height:44px;
+              border-radius:14px;
               display:grid;
               place-items:center;
               background:
@@ -836,151 +921,163 @@ function renderFacturaCard(item = {}) {
               color:var(--text-strong);
               font-weight:var(--weight-black);
               letter-spacing:.03em;
+              box-shadow:var(--shadow-xs, 0 4px 14px rgba(0,0,0,.08));
             "
           >
             ${escapeHtml(initials)}
           </div>
 
-          <div style="display:grid; gap:8px; min-width:0; flex:1;">
-            <div style="display:grid; gap:4px;">
-              <span
-                style="
-                  font-size:12px;
-                  color:var(--text-dim);
-                  font-weight:var(--weight-bold);
-                  letter-spacing:.06em;
-                  text-transform:uppercase;
-                "
-              >
-                Factura
-              </span>
+          <div style="display:grid; gap:5px; min-width:0;">
+            <button
+              type="button"
+              data-action="open-factura"
+              data-factura-id="${escapeHtml(facturaId)}"
+              style="
+                margin:0;
+                padding:0;
+                border:none;
+                background:transparent;
+                text-align:left;
+                color:var(--text-strong);
+                font-size:var(--font-base);
+                font-weight:var(--weight-black);
+                letter-spacing:-.02em;
+                line-height:1.2;
+                cursor:pointer;
+              "
+              title="Abrir detalle de factura"
+            >
+              ${escapeHtml(numero)}
+            </button>
 
-              <h3
-                style="
-                  margin:0;
-                  color:var(--text-strong);
-                  font-size:clamp(20px, 3vw, 28px);
-                  line-height:1.05;
-                  letter-spacing:-.04em;
-                  word-break:break-word;
-                "
-              >
-                ${escapeHtml(numero)}
-              </h3>
+            <span
+              style="
+                color:var(--text-soft);
+                font-size:var(--font-sm);
+                font-weight:var(--weight-semibold);
+                line-height:1.35;
+                word-break:break-word;
+              "
+            >
+              ${escapeHtml(cliente)}
+            </span>
 
-              <p
-                style="
-                  margin:0;
-                  color:var(--text-soft);
-                  font-size:var(--font-base);
-                  font-weight:var(--weight-semibold);
-                  word-break:break-word;
-                "
-              >
-                ${escapeHtml(cliente)}
-              </p>
-
-              <p
-                style="
-                  margin:0;
-                  color:var(--text-dim);
-                  font-size:var(--font-sm);
-                  word-break:break-word;
-                "
-              >
-                ${escapeHtml(email)}
-              </p>
-            </div>
+            <span
+              style="
+                color:var(--text-dim);
+                font-size:12px;
+                line-height:1.35;
+                word-break:break-word;
+              "
+            >
+              ${escapeHtml(email)}
+            </span>
           </div>
         </div>
+      </td>
 
-        <div style="display:grid; gap:8px; justify-items:end;">
-          <span
+      <td
+        style="
+          padding:18px;
+          border-bottom:1px solid var(--border-soft);
+          vertical-align:middle;
+          white-space:nowrap;
+        "
+      >
+        ${renderStatusChip(estadoPago, getEstadoPagoChipStyle(item?.estadoPago))}
+      </td>
+
+      <td
+        style="
+          padding:18px;
+          border-bottom:1px solid var(--border-soft);
+          vertical-align:middle;
+          white-space:nowrap;
+        "
+      >
+        ${renderStatusChip(estado, getEstadoChipStyle(item?.estado))}
+      </td>
+
+      <td
+        style="
+          padding:18px;
+          border-bottom:1px solid var(--border-soft);
+          vertical-align:middle;
+          white-space:nowrap;
+        "
+      >
+        <div style="display:grid; gap:4px;">
+          <strong
             style="
-              display:inline-flex;
-              align-items:center;
-              min-height:30px;
-              padding:0 10px;
-              border-radius:999px;
-              font-size:12px;
-              font-weight:var(--weight-bold);
-              letter-spacing:.05em;
-              text-transform:uppercase;
-              ${getEstadoPagoChipStyle(item?.estadoPago)}
+              color:var(--text-strong);
+              font-size:var(--font-sm);
+              line-height:1.2;
             "
           >
-            ${escapeHtml(estadoPago)}
-          </span>
+            ${escapeHtml(fecha)}
+          </strong>
 
           <span
             style="
-              display:inline-flex;
-              align-items:center;
-              min-height:28px;
-              padding:0 10px;
-              border-radius:999px;
-              font-size:11px;
-              font-weight:var(--weight-bold);
-              letter-spacing:.05em;
-              text-transform:uppercase;
-              ${getEstadoChipStyle(item?.estado)}
-            "
-          >
-            ${escapeHtml(estado)}
-          </span>
-        </div>
-      </div>
-
-      <p
-        style="
-          margin:0;
-          color:var(--text-dim);
-          line-height:1.65;
-          font-size:var(--font-sm);
-        "
-      >
-        ${escapeHtml(preview)}
-      </p>
-
-      <div
-        style="
-          display:grid;
-          grid-template-columns:repeat(3, minmax(0, 1fr));
-          gap:10px;
-        "
-        class="factura-card-metas"
-      >
-        ${renderMetaTile("Fecha", fecha)}
-        ${renderMetaTile("Total", total)}
-        ${renderMetaTile("Pago", formaPago)}
-      </div>
-
-      <div
-        style="
-          display:flex;
-          align-items:center;
-          justify-content:space-between;
-          gap:12px;
-          flex-wrap:wrap;
-          margin-top:auto;
-        "
-      >
-        <div style="display:flex; gap:8px; flex-wrap:wrap;">
-          <span
-            style="
-              display:inline-flex;
-              align-items:center;
-              min-height:28px;
-              padding:0 10px;
-              border-radius:999px;
-              border:1px solid var(--border-soft);
-              background:var(--surface-glass);
               color:var(--text-dim);
               font-size:12px;
-              font-weight:var(--weight-bold);
+              line-height:1.2;
             "
           >
-            Actualizado ${escapeHtml(updatedAt)}
+            Emisión
+          </span>
+        </div>
+      </td>
+
+      <td
+        style="
+          padding:18px;
+          border-bottom:1px solid var(--border-soft);
+          vertical-align:middle;
+          white-space:nowrap;
+        "
+      >
+        <div style="display:grid; gap:4px;">
+          <strong
+            style="
+              color:var(--text-strong);
+              font-size:var(--font-sm);
+              line-height:1.2;
+            "
+          >
+            ${escapeHtml(total)}
+          </strong>
+
+          <span
+            style="
+              color:var(--text-dim);
+              font-size:12px;
+              line-height:1.2;
+            "
+          >
+            ${escapeHtml(formaPago)}
+          </span>
+        </div>
+      </td>
+
+      <td
+        style="
+          padding:18px;
+          border-bottom:1px solid var(--border-soft);
+          vertical-align:middle;
+          white-space:nowrap;
+        "
+      >
+        <div style="display:grid; gap:6px;">
+          <span
+            style="
+              color:var(--text-soft);
+              font-size:var(--font-sm);
+              line-height:1.2;
+              font-weight:var(--weight-semibold);
+            "
+          >
+            ${escapeHtml(updatedAt)}
           </span>
 
           ${
@@ -990,37 +1087,77 @@ function renderFacturaCard(item = {}) {
                   style="
                     display:inline-flex;
                     align-items:center;
-                    min-height:28px;
-                    padding:0 10px;
+                    width:max-content;
+                    min-height:24px;
+                    padding:0 8px;
                     border-radius:999px;
                     border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 20%, var(--border-soft));
                     background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
                     color:var(--text-soft);
-                    font-size:12px;
+                    font-size:11px;
                     font-weight:var(--weight-bold);
+                    letter-spacing:.04em;
+                    text-transform:uppercase;
                   "
                 >
-                  PDF disponible
+                  PDF
                 </span>
               `
-              : ""
+              : `
+                <span
+                  style="
+                    display:inline-flex;
+                    align-items:center;
+                    width:max-content;
+                    min-height:24px;
+                    padding:0 8px;
+                    border-radius:999px;
+                    border:1px solid var(--border-soft);
+                    background:var(--surface-glass);
+                    color:var(--text-dim);
+                    font-size:11px;
+                    font-weight:var(--weight-bold);
+                    letter-spacing:.04em;
+                    text-transform:uppercase;
+                  "
+                >
+                  Sin PDF
+                </span>
+              `
           }
         </div>
+      </td>
 
-        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      <td
+        style="
+          padding:18px;
+          border-bottom:1px solid var(--border-soft);
+          vertical-align:middle;
+          text-align:right;
+        "
+      >
+        <div
+          style="
+            display:flex;
+            justify-content:flex-end;
+            gap:8px;
+            flex-wrap:wrap;
+          "
+        >
           <button
             type="button"
             data-action="open-factura"
             data-factura-id="${escapeHtml(facturaId)}"
             style="
-              min-height:40px;
-              padding:0 14px;
-              border-radius:var(--btn-radius);
+              min-height:38px;
+              padding:0 12px;
+              border-radius:12px;
               border:1px solid var(--btn-secondary-border, var(--border-soft));
               background:var(--btn-secondary-bg, var(--surface-glass));
               color:var(--btn-secondary-text, var(--text-soft));
               font-weight:var(--weight-bold);
               cursor:pointer;
+              white-space:nowrap;
             "
           >
             Detalle
@@ -1032,15 +1169,16 @@ function renderFacturaCard(item = {}) {
             data-factura-id="${escapeHtml(facturaId)}"
             ${pdfAvailable ? "" : "disabled"}
             style="
-              min-height:40px;
-              padding:0 14px;
-              border-radius:var(--btn-radius);
+              min-height:38px;
+              padding:0 12px;
+              border-radius:12px;
               border:1px solid var(--btn-secondary-border, var(--border-soft));
               background:var(--btn-secondary-bg, var(--surface-glass));
               color:var(--btn-secondary-text, var(--text-soft));
               font-weight:var(--weight-bold);
               cursor:${pdfAvailable ? "pointer" : "not-allowed"};
               opacity:${pdfAvailable ? "1" : ".56"};
+              white-space:nowrap;
             "
           >
             Ver PDF
@@ -1052,30 +1190,476 @@ function renderFacturaCard(item = {}) {
             data-factura-id="${escapeHtml(facturaId)}"
             ${pdfAvailable ? "" : "disabled"}
             style="
-              min-height:40px;
-              padding:0 14px;
-              border-radius:var(--btn-radius);
+              min-height:38px;
+              padding:0 12px;
+              border-radius:12px;
               border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
               background:var(--btn-primary-bg, var(--accent, #7c5cff));
               color:var(--btn-primary-text, #fff);
               font-weight:var(--weight-bold);
               cursor:${pdfAvailable ? "pointer" : "not-allowed"};
               opacity:${pdfAvailable ? "1" : ".56"};
+              white-space:nowrap;
             "
           >
             Descargar
           </button>
         </div>
+      </td>
+    </tr>
+  `;
+}
+
+function renderMobileFacturaCard(item = {}) {
+  const facturaId = safeText(item?.id, "");
+  const numero = safeText(item?.numero, "—");
+  const cliente = safeText(item?.cliente?.empresa || item?.cliente?.nombre, "Cliente");
+  const email = safeText(item?.cliente?.email, "Sin email");
+  const fecha = formatDate(item?.fecha);
+  const updatedAt = formatRelativeDate(item?.updatedAt);
+  const total = formatMoney(item?.total, item?.moneda || "EUR");
+  const formaPago = safeText(item?.formaPago, "—");
+  const estadoPago = getEstadoPagoLabel(item?.estadoPago);
+  const estado = getEstadoLabel(item?.estado);
+  const pdfAvailable = Boolean(item?.pdfAvailable || item?.blobPath);
+  const initials = getClientInitials(item);
+
+  return `
+    <article
+      class="facturas-mobile-card panel-surface"
+      data-factura-id="${escapeHtml(facturaId)}"
+      style="
+        display:grid;
+        gap:16px;
+        padding:18px;
+        border-radius:18px;
+        border:1px solid var(--border-soft);
+        background:var(--surface-1, var(--surface-glass));
+        box-shadow:var(--shadow-sm);
+      "
+    >
+      <div
+        style="
+          display:flex;
+          align-items:flex-start;
+          justify-content:space-between;
+          gap:12px;
+        "
+      >
+        <div style="display:flex; gap:12px; min-width:0; flex:1;">
+          <div
+            aria-hidden="true"
+            style="
+              flex:0 0 42px;
+              width:42px;
+              height:42px;
+              border-radius:14px;
+              display:grid;
+              place-items:center;
+              background:
+                linear-gradient(135deg, color-mix(in srgb, var(--accent, #7c5cff) 22%, transparent), transparent),
+                var(--surface-glass);
+              border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft));
+              color:var(--text-strong);
+              font-weight:var(--weight-black);
+            "
+          >
+            ${escapeHtml(initials)}
+          </div>
+
+          <div style="display:grid; gap:5px; min-width:0;">
+            <button
+              type="button"
+              data-action="open-factura"
+              data-factura-id="${escapeHtml(facturaId)}"
+              style="
+                margin:0;
+                padding:0;
+                border:none;
+                background:transparent;
+                text-align:left;
+                color:var(--text-strong);
+                font-size:var(--font-base);
+                font-weight:var(--weight-black);
+                letter-spacing:-.02em;
+                line-height:1.2;
+                cursor:pointer;
+              "
+            >
+              ${escapeHtml(numero)}
+            </button>
+
+            <span
+              style="
+                color:var(--text-soft);
+                font-size:var(--font-sm);
+                font-weight:var(--weight-semibold);
+                line-height:1.35;
+                word-break:break-word;
+              "
+            >
+              ${escapeHtml(cliente)}
+            </span>
+
+            <span
+              style="
+                color:var(--text-dim);
+                font-size:12px;
+                line-height:1.35;
+                word-break:break-word;
+              "
+            >
+              ${escapeHtml(email)}
+            </span>
+          </div>
+        </div>
+
+        <div style="display:grid; gap:8px; justify-items:end;">
+          ${renderStatusChip(estadoPago, getEstadoPagoChipStyle(item?.estadoPago))}
+          ${renderStatusChip(estado, getEstadoChipStyle(item?.estado))}
+        </div>
       </div>
 
-      <style>
-        @media (max-width: 640px) {
-          .factura-card-metas {
-            grid-template-columns: 1fr !important;
-          }
-        }
-      </style>
+      <div
+        style="
+          display:grid;
+          grid-template-columns:repeat(2, minmax(0, 1fr));
+          gap:10px;
+        "
+      >
+        <div
+          style="
+            display:grid;
+            gap:4px;
+            padding:12px;
+            border-radius:14px;
+            border:1px solid var(--border-soft);
+            background:var(--surface-glass);
+          "
+        >
+          <span
+            style="
+              font-size:11px;
+              color:var(--text-faint);
+              font-weight:var(--weight-bold);
+              letter-spacing:.05em;
+              text-transform:uppercase;
+            "
+          >
+            Fecha
+          </span>
+          <strong style="color:var(--text-strong); font-size:var(--font-sm);">
+            ${escapeHtml(fecha)}
+          </strong>
+        </div>
+
+        <div
+          style="
+            display:grid;
+            gap:4px;
+            padding:12px;
+            border-radius:14px;
+            border:1px solid var(--border-soft);
+            background:var(--surface-glass);
+          "
+        >
+          <span
+            style="
+              font-size:11px;
+              color:var(--text-faint);
+              font-weight:var(--weight-bold);
+              letter-spacing:.05em;
+              text-transform:uppercase;
+            "
+          >
+            Total
+          </span>
+          <strong style="color:var(--text-strong); font-size:var(--font-sm);">
+            ${escapeHtml(total)}
+          </strong>
+        </div>
+
+        <div
+          style="
+            display:grid;
+            gap:4px;
+            padding:12px;
+            border-radius:14px;
+            border:1px solid var(--border-soft);
+            background:var(--surface-glass);
+          "
+        >
+          <span
+            style="
+              font-size:11px;
+              color:var(--text-faint);
+              font-weight:var(--weight-bold);
+              letter-spacing:.05em;
+              text-transform:uppercase;
+            "
+          >
+            Pago
+          </span>
+          <strong style="color:var(--text-strong); font-size:var(--font-sm);">
+            ${escapeHtml(formaPago)}
+          </strong>
+        </div>
+
+        <div
+          style="
+            display:grid;
+            gap:4px;
+            padding:12px;
+            border-radius:14px;
+            border:1px solid var(--border-soft);
+            background:var(--surface-glass);
+          "
+        >
+          <span
+            style="
+              font-size:11px;
+              color:var(--text-faint);
+              font-weight:var(--weight-bold);
+              letter-spacing:.05em;
+              text-transform:uppercase;
+            "
+          >
+            Actualizada
+          </span>
+          <strong style="color:var(--text-strong); font-size:var(--font-sm);">
+            ${escapeHtml(updatedAt)}
+          </strong>
+        </div>
+      </div>
+
+      <div
+        style="
+          display:flex;
+          gap:8px;
+          flex-wrap:wrap;
+          justify-content:flex-start;
+        "
+      >
+        <button
+          type="button"
+          data-action="open-factura"
+          data-factura-id="${escapeHtml(facturaId)}"
+          style="
+            min-height:38px;
+            padding:0 12px;
+            border-radius:12px;
+            border:1px solid var(--btn-secondary-border, var(--border-soft));
+            background:var(--btn-secondary-bg, var(--surface-glass));
+            color:var(--btn-secondary-text, var(--text-soft));
+            font-weight:var(--weight-bold);
+            cursor:pointer;
+          "
+        >
+          Detalle
+        </button>
+
+        <button
+          type="button"
+          data-action="view-factura-pdf"
+          data-factura-id="${escapeHtml(facturaId)}"
+          ${pdfAvailable ? "" : "disabled"}
+          style="
+            min-height:38px;
+            padding:0 12px;
+            border-radius:12px;
+            border:1px solid var(--btn-secondary-border, var(--border-soft));
+            background:var(--btn-secondary-bg, var(--surface-glass));
+            color:var(--btn-secondary-text, var(--text-soft));
+            font-weight:var(--weight-bold);
+            cursor:${pdfAvailable ? "pointer" : "not-allowed"};
+            opacity:${pdfAvailable ? "1" : ".56"};
+          "
+        >
+          Ver PDF
+        </button>
+
+        <button
+          type="button"
+          data-action="download-factura"
+          data-factura-id="${escapeHtml(facturaId)}"
+          ${pdfAvailable ? "" : "disabled"}
+          style="
+            min-height:38px;
+            padding:0 12px;
+            border-radius:12px;
+            border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
+            background:var(--btn-primary-bg, var(--accent, #7c5cff));
+            color:var(--btn-primary-text, #fff);
+            font-weight:var(--weight-bold);
+            cursor:${pdfAvailable ? "pointer" : "not-allowed"};
+            opacity:${pdfAvailable ? "1" : ".56"};
+          "
+        >
+          Descargar
+        </button>
+      </div>
     </article>
+  `;
+}
+
+function renderDesktopTable(items = []) {
+  return `
+    <div
+      class="facturas-table-scroll"
+      style="
+        width:100%;
+        overflow:auto;
+      "
+    >
+      <table
+        class="facturas-table"
+        style="
+          width:100%;
+          min-width:1180px;
+          border-collapse:separate;
+          border-spacing:0;
+        "
+      >
+        <thead>
+          <tr
+            style="
+              background:var(--surface-2, var(--surface-glass));
+            "
+          >
+            <th
+              style="
+                padding:16px 18px;
+                text-align:left;
+                font-size:12px;
+                letter-spacing:.08em;
+                text-transform:uppercase;
+                color:var(--text-dim);
+                font-weight:var(--weight-bold);
+                border-bottom:1px solid var(--border-soft);
+                white-space:nowrap;
+              "
+            >
+              Factura / cliente
+            </th>
+
+            <th
+              style="
+                padding:16px 18px;
+                text-align:left;
+                font-size:12px;
+                letter-spacing:.08em;
+                text-transform:uppercase;
+                color:var(--text-dim);
+                font-weight:var(--weight-bold);
+                border-bottom:1px solid var(--border-soft);
+                white-space:nowrap;
+              "
+            >
+              Pago
+            </th>
+
+            <th
+              style="
+                padding:16px 18px;
+                text-align:left;
+                font-size:12px;
+                letter-spacing:.08em;
+                text-transform:uppercase;
+                color:var(--text-dim);
+                font-weight:var(--weight-bold);
+                border-bottom:1px solid var(--border-soft);
+                white-space:nowrap;
+              "
+            >
+              Estado
+            </th>
+
+            <th
+              style="
+                padding:16px 18px;
+                text-align:left;
+                font-size:12px;
+                letter-spacing:.08em;
+                text-transform:uppercase;
+                color:var(--text-dim);
+                font-weight:var(--weight-bold);
+                border-bottom:1px solid var(--border-soft);
+                white-space:nowrap;
+              "
+            >
+              Fecha
+            </th>
+
+            <th
+              style="
+                padding:16px 18px;
+                text-align:left;
+                font-size:12px;
+                letter-spacing:.08em;
+                text-transform:uppercase;
+                color:var(--text-dim);
+                font-weight:var(--weight-bold);
+                border-bottom:1px solid var(--border-soft);
+                white-space:nowrap;
+              "
+            >
+              Total
+            </th>
+
+            <th
+              style="
+                padding:16px 18px;
+                text-align:left;
+                font-size:12px;
+                letter-spacing:.08em;
+                text-transform:uppercase;
+                color:var(--text-dim);
+                font-weight:var(--weight-bold);
+                border-bottom:1px solid var(--border-soft);
+                white-space:nowrap;
+              "
+            >
+              Actualización
+            </th>
+
+            <th
+              style="
+                padding:16px 18px;
+                text-align:right;
+                font-size:12px;
+                letter-spacing:.08em;
+                text-transform:uppercase;
+                color:var(--text-dim);
+                font-weight:var(--weight-bold);
+                border-bottom:1px solid var(--border-soft);
+                white-space:nowrap;
+              "
+            >
+              Acciones
+            </th>
+          </tr>
+        </thead>
+
+        <tbody>
+          ${safeArray(items).map((item) => renderFacturaRow(item)).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderMobileCards(items = []) {
+  return `
+    <div
+      class="facturas-mobile-list"
+      style="
+        display:none;
+        gap:14px;
+        padding:14px;
+      "
+    >
+      ${safeArray(items).map((item) => renderMobileFacturaCard(item)).join("")}
+    </div>
   `;
 }
 
@@ -1094,20 +1678,58 @@ export function renderCards({ items = [], state = {} } = {}) {
 
   return `
     <section
-      class="facturas-cards-wrap"
-      style="display:grid; gap:var(--space-lg);"
+      class="facturas-table-wrap panel-surface"
+      style="
+        overflow:hidden;
+        border-radius:var(--panel-radius);
+        border:1px solid var(--border-soft);
+        background:
+          linear-gradient(180deg, color-mix(in srgb, var(--surface-2, transparent) 60%, transparent), transparent),
+          var(--surface-1, var(--surface-glass));
+        box-shadow:var(--shadow-sm);
+      "
     >
-      <div
-        class="facturas-cards-grid"
-        style="
-          display:grid;
-          grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));
-          gap:var(--space-lg);
-          align-items:start;
-        "
-      >
-        ${list.map((item) => renderFacturaCard(item)).join("")}
+      ${renderTableToolbar({ total: list.length })}
+
+      <div class="facturas-desktop-table">
+        ${renderDesktopTable(list)}
       </div>
+
+      ${renderMobileCards(list)}
+
+      <style>
+        .facturas-table tbody tr:hover {
+          background: color-mix(in srgb, var(--accent, #7c5cff) 4%, transparent);
+        }
+
+        .facturas-table tbody tr:last-child td {
+          border-bottom: none;
+        }
+
+        .facturas-table-scroll::-webkit-scrollbar {
+          height: 10px;
+          width: 10px;
+        }
+
+        .facturas-table-scroll::-webkit-scrollbar-thumb {
+          background: color-mix(in srgb, var(--accent, #7c5cff) 20%, var(--border-soft));
+          border-radius: 999px;
+        }
+
+        .facturas-table-scroll::-webkit-scrollbar-track {
+          background: transparent;
+        }
+
+        @media (max-width: 980px) {
+          .facturas-desktop-table {
+            display: none !important;
+          }
+
+          .facturas-mobile-list {
+            display: grid !important;
+          }
+        }
+      </style>
     </section>
   `;
 }

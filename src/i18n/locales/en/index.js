@@ -1,11 +1,14 @@
 /* =========================================================
-   Onion SPA - I18n Español Index
-   Archivo: src/i18n/locales/es/index.js
+   Onion SPA - I18n English Index
+   Archivo: src/i18n/locales/en/index.js
 
    Responsabilidades:
-   - reexportar locale español
-   - punto de entrada limpio para es
-   - compatibilidad con import default y named
+   - importar locale inglés desde sidebar.js
+   - exponer compatibilidad default + named
+   - mantener punto de entrada limpio para en
 ========================================================= */
 
-export { es as default, es } from "./sidebar.js";
+import sidebar from "./sidebar.js";
+
+export const en = sidebar;
+export default en;

@@ -1,12 +1,11 @@
 /* =========================================================
-   Onion SPA - Facturas Module Index (FULL PRO SAAS PANEL)
+   Onion SPA - Facturas Module Index
    Archivo: src/views/facturas/index.js
 
    Responsabilidades:
    - punto de entrada del módulo de facturas
-   - reexportar vista principal
-   - reexportar helpers de modelo
-   - dejar API pública del módulo preparada para crecer
+   - reexportar la vista principal
+   - reexportar helpers del modelo
 ========================================================= */
 
 export { FacturasView } from "./facturasView.js";

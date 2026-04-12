@@ -3,11 +3,11 @@
    Archivo: src/features/auth/storage.js
 
    Responsabilidades:
-   - centralizar storage auxiliar de auth
-   - leer refresh token / temp token / contexto de sesión
-   - persistir datos auxiliares de usuario
-   - persistir contexto de refresh robusto
-   - limpiar storage local de auth
+   - centralizar storage auxiliar auth
+   - leer refresh/temp/contexto sesión
+   - persistir datos auxiliares usuario
+   - persistir refresh context robusto
+   - limpiar storage auth
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -17,119 +17,255 @@ import {
   normalizeSessionValue,
 } from "./helpers.js";
 
-import { AUTH_STORAGE_KEYS, AUTH_CONSTANTS } from "./constants.js";
+import {
+  AUTH_STORAGE_KEYS,
+  AUTH_CONSTANTS,
+} from "./constants.js";
+
+/* =========================================================
+   INTERNAL
+========================================================= */
+function getRaw(
+  key,
+  fallback = null
+) {
+  return AppCore.storage.getRaw(
+    key,
+    fallback
+  );
+}
+
+function setRaw(
+  key,
+  value
+) {
+  AppCore.storage.setRaw(
+    key,
+    value
+  );
+}
+
+function remove(
+  key
+) {
+  AppCore.storage.remove(
+    key
+  );
+}
 
 /* =========================================================
    READ HELPERS
 ========================================================= */
 export function getStoredRefreshToken() {
-  return AppCore.storage.getRaw(AUTH_STORAGE_KEYS.refreshToken, null);
+  return getRaw(
+    AUTH_STORAGE_KEYS.refreshToken,
+    null
+  );
 }
 
 export function getStoredTempToken() {
-  return AppCore.storage.getRaw(AUTH_STORAGE_KEYS.tempToken, null);
+  return getRaw(
+    AUTH_STORAGE_KEYS.tempToken,
+    null
+  );
 }
 
 export function getStoredSessionId() {
-  return AppCore.storage.getRaw(AUTH_STORAGE_KEYS.sessionId, null);
+  return getRaw(
+    AUTH_STORAGE_KEYS.sessionId,
+    null
+  );
 }
 
 export function getStoredSessionUserId() {
-  return AppCore.storage.getRaw(AUTH_STORAGE_KEYS.sessionUserId, null);
+  return getRaw(
+    AUTH_STORAGE_KEYS.sessionUserId,
+    null
+  );
 }
 
 export function hasRefreshToken() {
-  const refreshToken = getStoredRefreshToken();
-  return Boolean(refreshToken && String(refreshToken).trim());
+  const token =
+    getStoredRefreshToken();
+
+  return Boolean(
+    token &&
+      String(token).trim()
+  );
 }
 
 export function hasRefreshContext() {
+  const sessionId = String(
+    getStoredSessionId() ||
+      ""
+  ).trim();
+
+  const userId = String(
+    getStoredSessionUserId() ||
+      ""
+  ).trim();
+
   return Boolean(
     hasRefreshToken() &&
-      String(getStoredSessionId() || "").trim() &&
-      String(getStoredSessionUserId() || "").trim()
+      sessionId &&
+      userId
   );
 }
 
 /* =========================================================
    WRITE HELPERS
 ========================================================= */
-export function persistAuxSessionData(normalizedUser = null) {
-  if (normalizedUser?.slug) {
-    AppCore.storage.setRaw(AUTH_STORAGE_KEYS.userSlug, normalizedUser.slug);
+export function persistAuxSessionData(
+  normalizedUser = null
+) {
+  const slug =
+    String(
+      normalizedUser?.slug ||
+        ""
+    ).trim();
+
+  const name =
+    String(
+      normalizedUser?.name ||
+        ""
+    ).trim();
+
+  const role =
+    String(
+      normalizedUser?.role ||
+        ""
+    ).trim();
+
+  if (slug) {
+    setRaw(
+      AUTH_STORAGE_KEYS.userSlug,
+      slug
+    );
   } else {
-    AppCore.storage.remove(AUTH_STORAGE_KEYS.userSlug);
+    remove(
+      AUTH_STORAGE_KEYS.userSlug
+    );
   }
 
-  if (normalizedUser?.name) {
-    AppCore.storage.setRaw(AUTH_STORAGE_KEYS.userName, normalizedUser.name);
+  if (name) {
+    setRaw(
+      AUTH_STORAGE_KEYS.userName,
+      name
+    );
   } else {
-    AppCore.storage.remove(AUTH_STORAGE_KEYS.userName);
+    remove(
+      AUTH_STORAGE_KEYS.userName
+    );
   }
 
-  if (normalizedUser?.role) {
-    AppCore.storage.setRaw(AUTH_STORAGE_KEYS.role, normalizedUser.role);
+  if (role) {
+    setRaw(
+      AUTH_STORAGE_KEYS.role,
+      role
+    );
   } else {
-    AppCore.storage.remove(AUTH_STORAGE_KEYS.role);
+    remove(
+      AUTH_STORAGE_KEYS.role
+    );
   }
 }
 
-export function persistRefreshToken(refreshToken = null) {
-  const normalized = normalizeTokenValue(refreshToken);
+export function persistRefreshToken(
+  refreshToken = null
+) {
+  const normalized =
+    normalizeTokenValue(
+      refreshToken
+    );
 
   if (normalized) {
-    AppCore.storage.setRaw(AUTH_STORAGE_KEYS.refreshToken, normalized);
+    setRaw(
+      AUTH_STORAGE_KEYS.refreshToken,
+      normalized
+    );
   } else {
-    AppCore.storage.remove(AUTH_STORAGE_KEYS.refreshToken);
+    remove(
+      AUTH_STORAGE_KEYS.refreshToken
+    );
   }
 }
 
-export function persistTempToken(tempToken = null) {
-  const normalized = normalizeTokenValue(tempToken);
+export function persistTempToken(
+  tempToken = null
+) {
+  const normalized =
+    normalizeTokenValue(
+      tempToken
+    );
 
   if (normalized) {
-    AppCore.storage.setRaw(AUTH_STORAGE_KEYS.tempToken, normalized);
+    setRaw(
+      AUTH_STORAGE_KEYS.tempToken,
+      normalized
+    );
   } else {
-    AppCore.storage.remove(AUTH_STORAGE_KEYS.tempToken);
+    remove(
+      AUTH_STORAGE_KEYS.tempToken
+    );
   }
 }
 
-export function persistSessionContext(sessionData = null, fallbackUser = null) {
-  const sessionId = normalizeSessionValue(
-    sessionData?.sessionId,
-    AUTH_CONSTANTS.sessionValueMaxLength
-  );
+export function persistSessionContext(
+  sessionData = null,
+  fallbackUser = null
+) {
+  const max =
+    AUTH_CONSTANTS.sessionValueMaxLength;
 
-  const sessionUserId = normalizeSessionValue(
-    sessionData?.userId ||
-      fallbackUser?.userId ||
-      fallbackUser?.id ||
-      "",
-    AUTH_CONSTANTS.sessionValueMaxLength
-  );
+  const sessionId =
+    normalizeSessionValue(
+      sessionData?.sessionId,
+      max
+    );
+
+  const sessionUserId =
+    normalizeSessionValue(
+      sessionData?.userId ||
+        fallbackUser?.userId ||
+        fallbackUser?.id ||
+        "",
+      max
+    );
 
   if (sessionId) {
-    AppCore.storage.setRaw(AUTH_STORAGE_KEYS.sessionId, sessionId);
+    setRaw(
+      AUTH_STORAGE_KEYS.sessionId,
+      sessionId
+    );
   } else {
-    AppCore.storage.remove(AUTH_STORAGE_KEYS.sessionId);
+    remove(
+      AUTH_STORAGE_KEYS.sessionId
+    );
   }
 
   if (sessionUserId) {
-    AppCore.storage.setRaw(AUTH_STORAGE_KEYS.sessionUserId, sessionUserId);
+    setRaw(
+      AUTH_STORAGE_KEYS.sessionUserId,
+      sessionUserId
+    );
   } else {
-    AppCore.storage.remove(AUTH_STORAGE_KEYS.sessionUserId);
+    remove(
+      AUTH_STORAGE_KEYS.sessionUserId
+    );
   }
 }
 
 /* =========================================================
-   BULK HELPERS
+   BULK
 ========================================================= */
 export function clearAuthStorage() {
-  AppCore.storage.remove(AUTH_STORAGE_KEYS.tempToken);
-  AppCore.storage.remove(AUTH_STORAGE_KEYS.refreshToken);
-  AppCore.storage.remove(AUTH_STORAGE_KEYS.userSlug);
-  AppCore.storage.remove(AUTH_STORAGE_KEYS.userName);
-  AppCore.storage.remove(AUTH_STORAGE_KEYS.role);
-  AppCore.storage.remove(AUTH_STORAGE_KEYS.sessionId);
-  AppCore.storage.remove(AUTH_STORAGE_KEYS.sessionUserId);
+  [
+    AUTH_STORAGE_KEYS.tempToken,
+    AUTH_STORAGE_KEYS.refreshToken,
+    AUTH_STORAGE_KEYS.userSlug,
+    AUTH_STORAGE_KEYS.userName,
+    AUTH_STORAGE_KEYS.role,
+    AUTH_STORAGE_KEYS.sessionId,
+    AUTH_STORAGE_KEYS.sessionUserId,
+  ].forEach(remove);
 }

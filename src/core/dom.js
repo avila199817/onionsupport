@@ -3,11 +3,14 @@
    Archivo: src/core/dom.js
 
    Responsabilidades:
-   - centralizar cache de nodos del shell SPA
-   - validar nodos mínimos del layout
-   - resolver referencias DOM reutilizables
+   - centralizar cache nodos shell SPA
+   - validar nodos mínimos layout
+   - resolver referencias reutilizables
 ========================================================= */
 
+/* =========================================================
+   FACTORY
+========================================================= */
 export function createDomCache() {
   return {
     html: null,
@@ -32,66 +35,188 @@ export function createDomCache() {
     userToggle: null,
     userDropdown: null,
     logoutBtn: null,
+
     sidebarToggle: null,
     sidebarMobileToggle: null,
+
     sidebarAvatar: null,
     sidebarName: null,
   };
 }
 
+/* =========================================================
+   CACHE DOM
+========================================================= */
 export function cacheDom({
   dom,
   utils,
 }) {
-  if (!dom || !utils || typeof document === "undefined") return dom;
+  if (
+    !dom ||
+    !utils ||
+    typeof document ===
+      "undefined"
+  ) {
+    return dom;
+  }
 
-  dom.html = document.documentElement || null;
-  dom.body = document.body || null;
-  dom.themeColorMeta = utils.qs('meta[name="theme-color"]');
+  const qs = (
+    selector
+  ) =>
+    utils.qs(
+      selector
+    );
 
-  dom.layout = utils.qs(".layout");
-  dom.loader = utils.qs("#app-loader");
-  dom.sidebar = utils.qs(".sidebar");
-  dom.sidebarMenu = utils.qs("#sidebar-menu") || utils.qs(".sidebar-menu");
-  dom.mainContent = utils.qs("#app-content");
-  dom.viewContainer = utils.qs("#view-container");
+  dom.html =
+    document.documentElement ??
+    null;
 
-  dom.topbar = utils.qs(".topbar");
-  dom.topbarTitle = utils.qs("#topbar-title");
-  dom.topbarViewContainer = utils.qs("#topbarview-container");
-  dom.tableheadContainer = utils.qs("#tablehead-container");
+  dom.body =
+    document.body ??
+    null;
 
-  dom.searchInput = utils.qs("#topbar-search");
-  dom.searchResults = utils.qs("#topbar-search-results");
+  dom.themeColorMeta =
+    qs(
+      'meta[name="theme-color"]'
+    );
 
-  dom.userToggle = utils.qs("#userToggle");
-  dom.userDropdown = utils.qs("#userDropdown");
-  dom.logoutBtn = utils.qs("#logoutBtn");
-  dom.sidebarToggle = utils.qs("#toggleSidebar");
-  dom.sidebarMobileToggle = utils.qs("#toggleSidebarMobile");
-  dom.sidebarAvatar = utils.qs("#sidebar-avatar");
-  dom.sidebarName = utils.qs("#sidebar-name");
+  /* layout */
+  dom.layout =
+    qs(".layout");
+
+  dom.loader =
+    qs("#app-loader");
+
+  dom.sidebar =
+    qs(".sidebar");
+
+  dom.sidebarMenu =
+    qs(
+      "#sidebar-menu"
+    ) ||
+    qs(
+      ".sidebar-menu"
+    );
+
+  dom.mainContent =
+    qs(
+      "#app-content"
+    );
+
+  dom.viewContainer =
+    qs(
+      "#view-container"
+    );
+
+  /* topbar */
+  dom.topbar =
+    qs(".topbar");
+
+  dom.topbarTitle =
+    qs(
+      "#topbar-title"
+    );
+
+  dom.topbarViewContainer =
+    qs(
+      "#topbarview-container"
+    );
+
+  dom.tableheadContainer =
+    qs(
+      "#tablehead-container"
+    );
+
+  /* search */
+  dom.searchInput =
+    qs(
+      "#topbar-search"
+    );
+
+  dom.searchResults =
+    qs(
+      "#topbar-search-results"
+    );
+
+  /* user */
+  dom.userToggle =
+    qs("#userToggle");
+
+  dom.userDropdown =
+    qs("#userDropdown");
+
+  dom.logoutBtn =
+    qs("#logoutBtn");
+
+  /* sidebar actions */
+  dom.sidebarToggle =
+    qs(
+      "#toggleSidebar"
+    );
+
+  dom.sidebarMobileToggle =
+    qs(
+      "#toggleSidebarMobile"
+    );
+
+  dom.sidebarAvatar =
+    qs(
+      "#sidebar-avatar"
+    );
+
+  dom.sidebarName =
+    qs(
+      "#sidebar-name"
+    );
 
   return dom;
 }
 
+/* =========================================================
+   VALIDATION
+========================================================= */
 export function validateRequiredDom({
   dom,
   utils,
 }) {
   const required = [
-    ["body", dom?.body],
-    ["layout", dom?.layout],
-    ["mainContent", dom?.mainContent],
-    ["viewContainer", dom?.viewContainer],
+    [
+      "body",
+      dom?.body,
+    ],
+    [
+      "layout",
+      dom?.layout,
+    ],
+    [
+      "mainContent",
+      dom?.mainContent,
+    ],
+    [
+      "viewContainer",
+      dom?.viewContainer,
+    ],
   ];
 
-  const missing = required
-    .filter(([, value]) => !value)
-    .map(([key]) => key);
+  const missing =
+    required
+      .filter(
+        ([, value]) =>
+          !value
+      )
+      .map(
+        ([key]) =>
+          key
+      );
 
-  if (missing.length > 0) {
-    utils?.warn?.("Faltan nodos importantes del layout:", missing);
+  if (
+    missing.length >
+    0
+  ) {
+    utils?.warn?.(
+      "Faltan nodos importantes del layout:",
+      missing
+    );
   }
 
   return missing;

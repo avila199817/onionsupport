@@ -4,9 +4,9 @@
 
    Responsabilidades:
    - helpers UI globales del core
-   - sincronizar título del documento
-   - limpiar contenedores dinámicos del shell
-   - sincronizar bloque visual de usuario
+   - sincronizar título documento
+   - limpiar contenedores dinámicos shell
+   - sincronizar bloque visual usuario
    - refresco reactivo con i18n
 ========================================================= */
 
@@ -31,27 +31,35 @@ export function setDocumentTitle({
   titleKey = "",
   titleParams = {},
 }) {
-  if (typeof document === "undefined") {
+  if (
+    typeof document ===
+    "undefined"
+  ) {
     return;
   }
 
   let finalTitle = title;
 
   if (titleKey) {
-    finalTitle = I18n.t(
-      titleKey,
-      titleParams,
-      title
-    );
+    finalTitle =
+      I18n.t(
+        titleKey,
+        titleParams,
+        title
+      ) || title;
   }
 
   finalTitle = String(
-    finalTitle || config.appName
+    finalTitle ||
+      config.appName
   );
 
-  document.title = finalTitle;
+  document.title =
+    finalTitle;
 
-  if (dom?.topbarTitle) {
+  if (
+    dom?.topbarTitle
+  ) {
     dom.topbarTitle.textContent =
       finalTitle;
   }
@@ -59,7 +67,8 @@ export function setDocumentTitle({
   events?.emit?.(
     "app:title:change",
     {
-      title: finalTitle,
+      title:
+        finalTitle,
     }
   );
 }
@@ -100,37 +109,51 @@ export function syncUserUI({
   events,
 }) {
   const user =
-    state?.user || null;
+    state?.user ??
+    null;
 
   const displayName =
-    getUserDisplayName(user);
+    getUserDisplayName(
+      user
+    ) || "Usuario";
 
   const username =
-    getUserUsername(user);
-
-  const avatarText =
-    getInitials(displayName) ||
-    (
-      username
-        ? username
-            .slice(0, 2)
-            .toUpperCase()
-        : "ON"
-    );
+    getUserUsername(
+      user
+    ) || "";
 
   const avatarUrl =
-    getUserAvatarUrl(user);
+    getUserAvatarUrl(
+      user
+    );
 
-  const avatarAlt =
+  const avatarText =
+    getInitials(
+      displayName
+    ) ||
+    (username
+      ? username
+          .slice(
+            0,
+            2
+          )
+          .toUpperCase()
+      : "ON");
+
+  const avatarAlt = `${
     I18n.t(
       "common.user",
       {},
       "User"
-    ) +
-    " " +
-    displayName;
+    )
+  } ${displayName}`;
 
-  if (dom?.sidebarName) {
+  /* =====================
+     SIDEBAR NAME
+  ===================== */
+  if (
+    dom?.sidebarName
+  ) {
     dom.sidebarName.textContent =
       displayName;
 
@@ -138,21 +161,26 @@ export function syncUserUI({
       dom.sidebarName.dataset.username =
         username;
     } else {
-      delete dom.sidebarName
-        .dataset.username;
+      delete dom
+        .sidebarName
+        .dataset
+        .username;
     }
   }
 
-  if (dom?.sidebarAvatar) {
+  /* =====================
+     SIDEBAR AVATAR
+  ===================== */
+  if (
+    dom?.sidebarAvatar
+  ) {
     if (!avatarUrl) {
       const oldImg =
         dom.sidebarAvatar.querySelector(
-          "img[data-avatar-image]"
+          'img[data-avatar-image="true"]'
         );
 
-      if (oldImg) {
-        oldImg.remove();
-      }
+      oldImg?.remove();
 
       dom.sidebarAvatar.textContent =
         avatarText;
@@ -163,7 +191,7 @@ export function syncUserUI({
     } else {
       let img =
         dom.sidebarAvatar.querySelector(
-          "img[data-avatar-image]"
+          'img[data-avatar-image="true"]'
         );
 
       if (!img) {
@@ -178,6 +206,9 @@ export function syncUserUI({
         img.loading =
           "lazy";
 
+        img.decoding =
+          "async";
+
         dom.sidebarAvatar.innerHTML =
           "";
 
@@ -186,8 +217,10 @@ export function syncUserUI({
         );
       }
 
-      img.src = avatarUrl;
-      img.alt = avatarAlt;
+      img.src =
+        avatarUrl;
+      img.alt =
+        avatarAlt;
 
       dom.sidebarAvatar.classList.add(
         "has-image"
@@ -208,8 +241,10 @@ export function syncUserUI({
       dom.sidebarAvatar.dataset.username =
         username;
     } else {
-      delete dom.sidebarAvatar
-        .dataset.username;
+      delete dom
+        .sidebarAvatar
+        .dataset
+        .username;
     }
   }
 
@@ -217,11 +252,13 @@ export function syncUserUI({
     "app:user-ui:sync",
     {
       displayName,
+      username:
+        username ||
+        null,
       avatarText,
       avatarUrl:
-        avatarUrl || null,
-      username:
-        username || null,
+        avatarUrl ||
+        null,
     }
   );
 }

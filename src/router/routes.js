@@ -36,7 +36,7 @@ function renderHomeView() {
 }
 
 function renderIncidenciasView() {
-  IncidenciasView.render();
+  IncidenciasView.init();
 }
 
 function renderFacturasView() {

@@ -11,6 +11,7 @@
    - tooltips custom con refresh live
    - evitar tooltips nativos del navegador
    - accesibilidad consistente
+   - separar textos estáticos i18n de valores dinámicos de sesión
 ========================================================= */
 
 import { I18n } from "../../i18n/index.js";
@@ -34,6 +35,15 @@ function t(key, fallback = "", params = {}) {
   }
 }
 
+function escapeHtml(value = "") {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 export function getSidebarTemplate() {
   const labels = {
     sidebarAria: t(
@@ -54,6 +64,11 @@ export function getSidebarTemplate() {
     logoTooltip: t(
       "sidebar.logo.tooltip",
       "Inicio"
+    ),
+
+    logoAlt: t(
+      "sidebar.logo.alt",
+      "Onion Support"
     ),
 
     collapseSidebar: t(
@@ -116,14 +131,9 @@ export function getSidebarTemplate() {
       "Avatar usuario"
     ),
 
-    userName: t(
+    userDefaultName: t(
       "sidebar.user.defaultName",
       "Usuario"
-    ),
-
-    userPlan: t(
-      "sidebar.user.plan",
-      "Go Plan"
     ),
 
     userMenu: t(
@@ -166,7 +176,7 @@ export function getSidebarTemplate() {
     <aside
       class="sidebar"
       id="${SIDEBAR_ROOT_ID}"
-      aria-label="${labels.sidebarAria}"
+      aria-label="${escapeHtml(labels.sidebarAria)}"
       data-i18n-aria-label="sidebar.aria.main"
     >
       <div class="sidebar-top">
@@ -175,16 +185,17 @@ export function getSidebarTemplate() {
           data-spa
           class="logo"
           id="homeLink"
-          aria-label="${labels.logoLink}"
+          aria-label="${escapeHtml(labels.logoLink)}"
           data-i18n-aria-label="sidebar.logo.ariaLabel"
-          data-tooltip="${labels.logoTooltip}"
+          data-tooltip="${escapeHtml(labels.logoTooltip)}"
           data-i18n-data-tooltip="sidebar.logo.tooltip"
         >
           <img
             class="logo-dark"
             draggable="false"
             src="/src/media/img/favicon_white.png"
-            alt="Onion Support"
+            alt="${escapeHtml(labels.logoAlt)}"
+            data-i18n-alt="sidebar.logo.alt"
             width="36"
             height="36"
             decoding="async"
@@ -194,7 +205,8 @@ export function getSidebarTemplate() {
             class="logo-light"
             draggable="false"
             src="/src/media/img/favicon_black.png"
-            alt="Onion Support"
+            alt="${escapeHtml(labels.logoAlt)}"
+            data-i18n-alt="sidebar.logo.alt"
             width="36"
             height="36"
             decoding="async"
@@ -205,9 +217,9 @@ export function getSidebarTemplate() {
           type="button"
           class="sidebar-toggle"
           id="toggleSidebar"
-          data-tooltip="${labels.collapseSidebar}"
+          data-tooltip="${escapeHtml(labels.collapseSidebar)}"
           data-i18n-data-tooltip="sidebar.toggle.collapse"
-          aria-label="${labels.collapseSidebar}"
+          aria-label="${escapeHtml(labels.collapseSidebar)}"
           data-i18n-aria-label="sidebar.toggle.collapse"
           aria-controls="${SIDEBAR_MENU_ID}"
           aria-expanded="true"
@@ -241,16 +253,16 @@ export function getSidebarTemplate() {
       <nav
         class="sidebar-menu"
         id="${SIDEBAR_MENU_ID}"
-        aria-label="${labels.navAria}"
+        aria-label="${escapeHtml(labels.navAria)}"
         data-i18n-aria-label="sidebar.aria.navigation"
       >
         <a
           href="/"
           data-spa
           class="menu-item"
-          data-tooltip="${labels.home}"
+          data-tooltip="${escapeHtml(labels.home)}"
           data-i18n-data-tooltip="sidebar.menu.home"
-          aria-label="${labels.home}"
+          aria-label="${escapeHtml(labels.home)}"
           data-i18n-aria-label="sidebar.menu.home"
         >
           <span aria-hidden="true">
@@ -264,16 +276,16 @@ export function getSidebarTemplate() {
             </svg>
           </span>
 
-          <span data-i18n="sidebar.menu.home">${labels.home}</span>
+          <span data-i18n="sidebar.menu.home">${escapeHtml(labels.home)}</span>
         </a>
 
         <a
           href="/incidencias"
           data-spa
           class="menu-item"
-          data-tooltip="${labels.tickets}"
+          data-tooltip="${escapeHtml(labels.tickets)}"
           data-i18n-data-tooltip="sidebar.menu.tickets"
-          aria-label="${labels.tickets}"
+          aria-label="${escapeHtml(labels.tickets)}"
           data-i18n-aria-label="sidebar.menu.tickets"
         >
           <span aria-hidden="true">
@@ -294,16 +306,16 @@ export function getSidebarTemplate() {
             </svg>
           </span>
 
-          <span data-i18n="sidebar.menu.tickets">${labels.tickets}</span>
+          <span data-i18n="sidebar.menu.tickets">${escapeHtml(labels.tickets)}</span>
         </a>
 
         <a
           href="/facturas"
           data-spa
           class="menu-item"
-          data-tooltip="${labels.invoices}"
+          data-tooltip="${escapeHtml(labels.invoices)}"
           data-i18n-data-tooltip="sidebar.menu.invoices"
-          aria-label="${labels.invoices}"
+          aria-label="${escapeHtml(labels.invoices)}"
           data-i18n-aria-label="sidebar.menu.invoices"
         >
           <span aria-hidden="true">
@@ -313,7 +325,7 @@ export function getSidebarTemplate() {
             </svg>
           </span>
 
-          <span data-i18n="sidebar.menu.invoices">${labels.invoices}</span>
+          <span data-i18n="sidebar.menu.invoices">${escapeHtml(labels.invoices)}</span>
         </a>
 
         <a
@@ -321,9 +333,9 @@ export function getSidebarTemplate() {
           data-spa
           class="menu-item"
           data-role="admin"
-          data-tooltip="${labels.users}"
+          data-tooltip="${escapeHtml(labels.users)}"
           data-i18n-data-tooltip="sidebar.menu.users"
-          aria-label="${labels.users}"
+          aria-label="${escapeHtml(labels.users)}"
           data-i18n-aria-label="sidebar.menu.users"
         >
           <span aria-hidden="true">
@@ -333,7 +345,7 @@ export function getSidebarTemplate() {
             </svg>
           </span>
 
-          <span data-i18n="sidebar.menu.users">${labels.users}</span>
+          <span data-i18n="sidebar.menu.users">${escapeHtml(labels.users)}</span>
         </a>
 
         <a
@@ -341,9 +353,9 @@ export function getSidebarTemplate() {
           data-spa
           class="menu-item"
           data-role="admin"
-          data-tooltip="${labels.clients}"
+          data-tooltip="${escapeHtml(labels.clients)}"
           data-i18n-data-tooltip="sidebar.menu.clients"
-          aria-label="${labels.clients}"
+          aria-label="${escapeHtml(labels.clients)}"
           data-i18n-aria-label="sidebar.menu.clients"
         >
           <span aria-hidden="true">
@@ -355,16 +367,16 @@ export function getSidebarTemplate() {
             </svg>
           </span>
 
-          <span data-i18n="sidebar.menu.clients">${labels.clients}</span>
+          <span data-i18n="sidebar.menu.clients">${escapeHtml(labels.clients)}</span>
         </a>
 
         <a
           href="/cuenta"
           data-spa
           class="menu-item"
-          data-tooltip="${labels.account}"
+          data-tooltip="${escapeHtml(labels.account)}"
           data-i18n-data-tooltip="sidebar.menu.account"
-          aria-label="${labels.account}"
+          aria-label="${escapeHtml(labels.account)}"
           data-i18n-aria-label="sidebar.menu.account"
         >
           <span aria-hidden="true">
@@ -374,16 +386,16 @@ export function getSidebarTemplate() {
             </svg>
           </span>
 
-          <span data-i18n="sidebar.menu.account">${labels.account}</span>
+          <span data-i18n="sidebar.menu.account">${escapeHtml(labels.account)}</span>
         </a>
 
         <a
           href="/ajustes"
           data-spa
           class="menu-item"
-          data-tooltip="${labels.settings}"
+          data-tooltip="${escapeHtml(labels.settings)}"
           data-i18n-data-tooltip="sidebar.menu.settings"
-          aria-label="${labels.settings}"
+          aria-label="${escapeHtml(labels.settings)}"
           data-i18n-aria-label="sidebar.menu.settings"
         >
           <span aria-hidden="true">
@@ -397,20 +409,20 @@ export function getSidebarTemplate() {
             </svg>
           </span>
 
-          <span data-i18n="sidebar.menu.settings">${labels.settings}</span>
+          <span data-i18n="sidebar.menu.settings">${escapeHtml(labels.settings)}</span>
         </a>
       </nav>
 
       <section
         class="sidebar-section"
         id="${SIDEBAR_RECENTS_ID}"
-        aria-label="${labels.recentsAria}"
+        aria-label="${escapeHtml(labels.recentsAria)}"
         data-i18n-aria-label="sidebar.recents.ariaLabel"
       >
         <span
           class="section-title"
           data-i18n="sidebar.recents.title"
-        >${labels.recentsTitle}</span>
+        >${escapeHtml(labels.recentsTitle)}</span>
       </section>
 
       <div class="sidebar-footer">
@@ -422,13 +434,13 @@ export function getSidebarTemplate() {
           aria-haspopup="menu"
           aria-expanded="false"
           aria-controls="${USER_DROPDOWN_ID}"
-          aria-label="${labels.userToggle}"
+          aria-label="${escapeHtml(labels.userToggle)}"
           data-i18n-aria-label="sidebar.user.toggleAriaLabel"
         >
           <div
             class="avatar"
             id="${SIDEBAR_AVATAR_ID}"
-            aria-label="${labels.userAvatar}"
+            aria-label="${escapeHtml(labels.userAvatar)}"
             data-i18n-aria-label="sidebar.user.avatarAriaLabel"
           >
             ON
@@ -438,13 +450,13 @@ export function getSidebarTemplate() {
             <span
               class="name"
               id="${SIDEBAR_NAME_ID}"
-              data-i18n="sidebar.user.defaultName"
-            >${labels.userName}</span>
+              data-default-i18n="${escapeHtml(labels.userDefaultName)}"
+            >${escapeHtml(labels.userDefaultName)}</span>
 
             <span
               class="plan"
-              data-i18n="sidebar.user.plan"
-            >${labels.userPlan}</span>
+              id="sidebarUserPlan"
+            >Go Plan</span>
           </div>
 
           <svg
@@ -468,7 +480,7 @@ export function getSidebarTemplate() {
           class="user-dropdown"
           id="${USER_DROPDOWN_ID}"
           role="menu"
-          aria-label="${labels.userMenu}"
+          aria-label="${escapeHtml(labels.userMenu)}"
           data-i18n-aria-label="sidebar.user.dropdownAriaLabel"
           aria-hidden="true"
           hidden
@@ -482,7 +494,7 @@ export function getSidebarTemplate() {
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.6"/>
             </svg>
-            <span data-i18n="sidebar.user.addAccount">${labels.addAccount}</span>
+            <span data-i18n="sidebar.user.addAccount">${escapeHtml(labels.addAccount)}</span>
           </button>
 
           <div class="dropdown-divider" role="separator"></div>
@@ -498,7 +510,7 @@ export function getSidebarTemplate() {
               <path d="M8 8l4-4 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
               <path d="M5 20h14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
             </svg>
-            <span data-i18n="sidebar.user.changePlan">${labels.changePlan}</span>
+            <span data-i18n="sidebar.user.changePlan">${escapeHtml(labels.changePlan)}</span>
           </button>
 
           <button
@@ -511,7 +523,7 @@ export function getSidebarTemplate() {
               <circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.6"/>
               <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" stroke-width="1.6" fill="none"/>
             </svg>
-            <span data-i18n="sidebar.user.profile">${labels.profile}</span>
+            <span data-i18n="sidebar.user.profile">${escapeHtml(labels.profile)}</span>
           </button>
 
           <button
@@ -524,7 +536,7 @@ export function getSidebarTemplate() {
               <path d="M4 12h16" stroke="currentColor" stroke-width="1.6"/>
               <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/>
             </svg>
-            <span data-i18n="sidebar.user.settings">${labels.userSettings}</span>
+            <span data-i18n="sidebar.user.settings">${escapeHtml(labels.userSettings)}</span>
           </button>
 
           <div class="dropdown-divider" role="separator"></div>
@@ -540,7 +552,7 @@ export function getSidebarTemplate() {
               <path d="M12 16v-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
               <circle cx="12" cy="8" r="1" fill="currentColor"/>
             </svg>
-            <span data-i18n="sidebar.user.help">${labels.help}</span>
+            <span data-i18n="sidebar.user.help">${escapeHtml(labels.help)}</span>
           </button>
 
           <button
@@ -554,7 +566,7 @@ export function getSidebarTemplate() {
               <path d="M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="1.6"/>
               <path d="M4 4h5v16H4z" stroke="currentColor" stroke-width="1.6"/>
             </svg>
-            <span data-i18n="sidebar.user.logout">${labels.logout}</span>
+            <span data-i18n="sidebar.user.logout">${escapeHtml(labels.logout)}</span>
           </button>
         </div>
       </div>

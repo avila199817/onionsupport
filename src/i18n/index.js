@@ -15,9 +15,9 @@
    - evitar dependencia circular con Core
 ========================================================= */
 
-import es from "./es.js";
-import en from "./en.js";
-import ca from "./ca.js";
+import es from "./locales/es/index.js";
+import en from "./locales/en/index.js";
+import ca from "./locales/ca/index.js";
 
 export const I18n = (() => {
   "use strict";
@@ -81,11 +81,9 @@ export const I18n = (() => {
     const defaultLang = getDefaultLang();
 
     if (!raw) return defaultLang;
-
     if (hasLang(raw)) return raw;
 
     const short = raw.split("-")[0];
-
     if (hasLang(short)) return short;
 
     return defaultLang;
@@ -135,8 +133,7 @@ export const I18n = (() => {
       }
 
       if (
-        typeof localStorage !==
-        "undefined"
+        typeof localStorage !== "undefined"
       ) {
         return localStorage.getItem(
           `${getStoragePrefix()}:${STORAGE_KEY}`
@@ -162,8 +159,7 @@ export const I18n = (() => {
       }
 
       if (
-        typeof localStorage !==
-        "undefined"
+        typeof localStorage !== "undefined"
       ) {
         localStorage.setItem(
           `${getStoragePrefix()}:${STORAGE_KEY}`,
@@ -178,8 +174,7 @@ export const I18n = (() => {
   function syncLangToDocument(lang) {
     try {
       if (
-        typeof document ===
-        "undefined"
+        typeof document === "undefined"
       ) {
         return;
       }
@@ -232,8 +227,7 @@ export const I18n = (() => {
   function getScope(root = document) {
     try {
       if (
-        typeof document ===
-        "undefined"
+        typeof document === "undefined"
       ) {
         return null;
       }
@@ -275,8 +269,7 @@ export const I18n = (() => {
   function updateDOM(root = document) {
     try {
       if (
-        typeof document ===
-        "undefined"
+        typeof document === "undefined"
       ) {
         return;
       }
@@ -434,8 +427,7 @@ export const I18n = (() => {
 
     if (
       updateUi &&
-      typeof document !==
-        "undefined"
+      typeof document !== "undefined"
     ) {
       updateDOM(root);
     }
@@ -468,11 +460,10 @@ export const I18n = (() => {
       key
     );
 
-    const fallbackBase =
-      getNested(
-        dictionaries[FALLBACK_LANG],
-        key
-      );
+    const fallbackBase = getNested(
+      dictionaries[FALLBACK_LANG],
+      key
+    );
 
     const resolved =
       active ??
@@ -575,8 +566,7 @@ export const I18n = (() => {
 
     if (
       updateUi &&
-      typeof document !==
-        "undefined"
+      typeof document !== "undefined"
     ) {
       updateDOM(root);
     }
@@ -594,8 +584,7 @@ export const I18n = (() => {
      INIT
   ========================================================= */
   if (
-    typeof document !==
-    "undefined"
+    typeof document !== "undefined"
   ) {
     boot({
       updateUi: true,

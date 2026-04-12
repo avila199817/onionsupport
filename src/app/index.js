@@ -8,6 +8,11 @@
    - inicialización ordenada del runtime
    - controlar boot / reboot
    - mantener la API pública App
+
+   FIX CRÍTICO:
+   - restaurar sesión ANTES del primer render
+   - evitar pintar rutas protegidas sin auth resuelta
+   - no marcar app ready antes de tiempo
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -111,25 +116,15 @@ export const App = (() => {
   ========================================================= */
   function initServices() {
     if (!state.servicesInitialized) {
-      if (
-        typeof Http?.init ===
-        "function"
-      ) {
+      if (typeof Http?.init === "function") {
         Http.init();
       }
 
       state.servicesInitialized = true;
     }
 
-    if (
-      !AppCore.modules.has(
-        "http"
-      )
-    ) {
-      AppCore.modules.register(
-        "http",
-        Http
-      );
+    if (!AppCore.modules.has("http")) {
+      AppCore.modules.register("http", Http);
     }
   }
 
@@ -138,47 +133,23 @@ export const App = (() => {
   ========================================================= */
   function initStore() {
     if (!state.storeInitialized) {
-      if (
-        typeof Store?.init ===
-        "function"
-      ) {
+      if (typeof Store?.init === "function") {
         Store.init();
       }
 
       state.storeInitialized = true;
     }
 
-    if (
-      !AppCore.modules.has(
-        "store"
-      )
-    ) {
-      AppCore.modules.register(
-        "store",
-        Store
-      );
+    if (!AppCore.modules.has("store")) {
+      AppCore.modules.register("store", Store);
     }
 
-    if (
-      !AppCore.modules.has(
-        "auth"
-      )
-    ) {
-      AppCore.modules.register(
-        "auth",
-        Auth
-      );
+    if (!AppCore.modules.has("auth")) {
+      AppCore.modules.register("auth", Auth);
     }
 
-    if (
-      !AppCore.modules.has(
-        "router"
-      )
-    ) {
-      AppCore.modules.register(
-        "router",
-        Router
-      );
+    if (!AppCore.modules.has("router")) {
+      AppCore.modules.register("router", Router);
     }
   }
 
@@ -200,56 +171,77 @@ export const App = (() => {
   }
 
   /* =========================================================
+     SESSION RESTORE (WAITED)
+  ========================================================= */
+  async function restoreSessionBeforeRender() {
+    try {
+      state.sessionRestorePromise =
+        Promise.resolve(
+          restoreSessionInBackground({
+            AppCore,
+            Auth,
+            Router,
+            Toast,
+            state,
+            syncUserUI,
+            warmup,
+            navigateAfterSessionRestore,
+
+            applyPostRenderLoaderPolicy: () =>
+              applyPostRenderLoaderPolicy({
+                AppCore,
+                Router,
+                hideLoader,
+              }),
+          })
+        );
+
+      await state.sessionRestorePromise;
+    } catch (error) {
+      AppCore.utils.warn(
+        "restoreSession falló durante boot.",
+        error
+      );
+    } finally {
+      state.sessionRestorePromise = null;
+    }
+  }
+
+  /* =========================================================
      FINALIZACIÓN BOOT
   ========================================================= */
   function finalizeBoot() {
-    clearBootFailsafeTimer(
-      state
-    );
+    clearBootFailsafeTimer(state);
 
-    markStoreBootState(
-      Store,
-      {
-        ready: true,
-        booted: true,
-      }
-    );
+    markStoreBootState(Store, {
+      ready: true,
+      booted: true,
+    });
 
     state.booted = true;
     state.booting = false;
 
-    markAppBootState(
-      AppCore,
-      {
-        booted: true,
-        booting: false,
-      }
-    );
-
-    hideLoader(AppCore);
+    markAppBootState(AppCore, {
+      booted: true,
+      booting: false,
+    });
 
     updateShellVisibilityByRoute(
       AppCore,
       Router
     );
 
-    AppCore.events.emit(
-      "app:ready",
-      {
-        route:
-          AppCore.state.route,
-        publicPath:
-          AppCore.state
-            .publicPath,
-        user:
-          AppCore.state.user,
-        authenticated:
-          AppCore.state
-            .authenticated,
-        lang:
-          AppCore.state.lang,
-      }
-    );
+    hideLoader(AppCore);
+
+    AppCore.events.emit("app:ready", {
+      route: AppCore.state.route,
+      publicPath:
+        AppCore.state.publicPath,
+      user: AppCore.state.user,
+      authenticated:
+        AppCore.state.authenticated,
+      lang: AppCore.state.lang,
+    });
 
     AppCore.utils.log(
       "🔥 Aplicación arrancada correctamente.",
@@ -257,15 +249,12 @@ export const App = (() => {
         route:
           AppCore.state.route,
         publicPath:
-          AppCore.state
-            .publicPath,
+          AppCore.state.publicPath,
         username:
           AppCore.state.user
-            ?.username ||
-          null,
+            ?.username || null,
         authenticated:
-          AppCore.state
-            .authenticated,
+          AppCore.state.authenticated,
         lang:
           AppCore.state.lang,
       }
@@ -292,17 +281,12 @@ export const App = (() => {
 
     state.booting = true;
 
-    markAppBootState(
-      AppCore,
-      {
-        booted: false,
-        booting: true,
-      }
-    );
+    markAppBootState(AppCore, {
+      booted: false,
+      booting: true,
+    });
 
-    clearBootFailsafeTimer(
-      state
-    );
+    clearBootFailsafeTimer(state);
 
     try {
       clearScope(AppCore);
@@ -318,32 +302,24 @@ export const App = (() => {
         state,
       });
 
-      AppCore.setError(
-        null
-      );
+      AppCore.setError(null);
 
       showLoader(AppCore);
 
-      armBootFailsafeLoader(
-        {
-          AppCore,
-          state,
-          hideLoader,
-        }
-      );
+      armBootFailsafeLoader({
+        AppCore,
+        state,
+        hideLoader,
+      });
 
       const scope =
-        ensureScope(
-          AppCore
-        );
+        ensureScope(AppCore);
 
-      bindGlobalErrorHandlers(
-        {
-          AppCore,
-          Toast,
-          scope,
-        }
-      );
+      bindGlobalErrorHandlers({
+        AppCore,
+        Toast,
+        scope,
+      });
 
       bindAppEvents({
         AppCore,
@@ -352,27 +328,24 @@ export const App = (() => {
         scope,
         syncUserUI,
 
-        rerenderCurrentRoute:
-          () =>
-            rerenderCurrentRoute(
-              {
-                AppCore,
-                Router,
-                I18n,
+        rerenderCurrentRoute: () =>
+          rerenderCurrentRoute({
+            AppCore,
+            Router,
+            I18n,
 
-                applyPostRenderLoaderPolicy:
-                  () =>
-                    applyPostRenderLoaderPolicy(
-                      {
-                        AppCore,
-                        Router,
-                        hideLoader,
-                      }
-                    ),
+            applyPostRenderLoaderPolicy:
+              () =>
+                applyPostRenderLoaderPolicy(
+                  {
+                    AppCore,
+                    Router,
+                    hideLoader,
+                  }
+                ),
 
-                syncUserUI,
-              }
-            ),
+            syncUserUI,
+          }),
 
         applyPostRenderLoaderPolicy:
           () =>
@@ -394,10 +367,29 @@ export const App = (() => {
       );
 
       /* ======================
-         ROUTER
+         ROUTER INIT
       ====================== */
       initRouter();
 
+      /* ======================
+         UI SYSTEMS
+      ====================== */
+      initUISystems({
+        AppCore,
+        Toast,
+        SidebarUI,
+        TopbarUI,
+        state,
+      });
+
+      /* ======================
+         AUTH READY FIRST
+      ====================== */
+      await restoreSessionBeforeRender();
+
+      /* ======================
+         FIRST ROUTE RENDER
+      ====================== */
       renderInitialRoute({
         AppCore,
         Router,
@@ -413,41 +405,7 @@ export const App = (() => {
             ),
       });
 
-      /* ======================
-         UI SYSTEMS
-      ====================== */
-      initUISystems({
-        AppCore,
-        Toast,
-        SidebarUI,
-        TopbarUI,
-        state,
-      });
-
       finalizeBoot();
-
-      void restoreSessionInBackground(
-        {
-          AppCore,
-          Auth,
-          Router,
-          Toast,
-          state,
-          syncUserUI,
-          warmup,
-          navigateAfterSessionRestore,
-
-          applyPostRenderLoaderPolicy:
-            () =>
-              applyPostRenderLoaderPolicy(
-                {
-                  AppCore,
-                  Router,
-                  hideLoader,
-                }
-              ),
-        }
-      );
 
       return api;
     } catch (error) {
@@ -548,12 +506,8 @@ export const App = (() => {
 
     clearScope(AppCore);
 
-    if (
-      !preserveError
-    ) {
-      AppCore.setError(
-        null
-      );
+    if (!preserveError) {
+      AppCore.setError(null);
     }
 
     markStoreBootState(

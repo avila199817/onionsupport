@@ -3,8 +3,12 @@
    Archivo: src/i18n/locales/ca/index.js
 
    Responsabilidades:
-   - reexportar el locale catalán
-   - mantener un punto de entrada limpio para ca
+   - importar locale catalán desde sidebar.js
+   - exponer compatibilidad default + named
+   - mantener punto de entrada limpio para ca
 ========================================================= */
 
-export { ca as default, ca } from "./sidebar.js";
+import sidebar from "./sidebar.js";
+
+export const ca = sidebar;
+export default ca;

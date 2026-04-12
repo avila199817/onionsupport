@@ -1,5 +1,5 @@
 /* =========================================================
-   Onion SPA - Facturas View (FINAL PRO CLEAN)
+   Onion SPA - Facturas View (FINAL PRO CLEAN V2)
    Archivo: src/views/facturas/facturasView.js
 
    Responsabilidades:
@@ -24,13 +24,14 @@ import { getSortedFacturasStore } from "./facturas.store.js";
 
 import {
   createFacturasState,
+  getFacturasTemplateState,
   setFacturasHydrated,
   setFacturasBootstrapped,
-  closeFacturasDetail,
   setFacturasDetailData,
   setFacturasSendingFacturaId,
   setFacturasDownloadingFacturaId,
   setFacturasViewingFacturaId,
+  closeFacturasDetail,
 } from "./facturas.state.js";
 
 import {
@@ -58,7 +59,7 @@ export const FacturasView = (() => {
   "use strict";
 
   const SCOPE = "view:facturas";
-  const localState = createFacturasState();
+  const state = createFacturasState();
 
   /* =========================================================
      HELPERS BASE
@@ -67,55 +68,40 @@ export const FacturasView = (() => {
     return AppCore?.dom?.viewContainer || null;
   }
 
-  function getStateForTemplate() {
-    return {
-      loading: localState.view.loading,
-      loaded: localState.view.loaded,
-      error: localState.view.error,
-      refreshing: localState.view.refreshing,
-      bootstrapped: localState.view.bootstrapped,
-      remoteCount: localState.view.remoteCount,
-
-      detailOpen: localState.detail.open,
-      detailLoading: localState.detail.loading,
-      detail: localState.detail.data,
-
-      sendingFacturaId: localState.actions.sendingFacturaId,
-      downloadingFacturaId: localState.actions.downloadingFacturaId,
-      viewingFacturaId: localState.actions.viewingFacturaId,
-    };
-  }
-
   function getItems() {
     return getSortedFacturasStore();
   }
 
-  function setDetail(factura = null) {
-    setFacturasDetailData(localState, factura || null);
-  }
-
-  function closeDetail() {
-    closeFacturasDetail(localState);
+  function getTemplateState() {
+    return getFacturasTemplateState(state);
   }
 
   function setHydrated(value) {
-    setFacturasHydrated(localState, value);
+    setFacturasHydrated(state, value);
   }
 
   function setBootstrapped(value) {
-    setFacturasBootstrapped(localState, value);
+    setFacturasBootstrapped(state, value);
+  }
+
+  function setDetail(factura = null) {
+    setFacturasDetailData(state, factura || null);
   }
 
   function setSendingFacturaId(value = "") {
-    setFacturasSendingFacturaId(localState, value);
+    setFacturasSendingFacturaId(state, value);
   }
 
   function setDownloadingFacturaId(value = "") {
-    setFacturasDownloadingFacturaId(localState, value);
+    setFacturasDownloadingFacturaId(state, value);
   }
 
   function setViewingFacturaId(value = "") {
-    setFacturasViewingFacturaId(localState, value);
+    setFacturasViewingFacturaId(state, value);
+  }
+
+  function closeDetail() {
+    closeFacturasDetail(state);
   }
 
   /* =========================================================
@@ -123,7 +109,7 @@ export const FacturasView = (() => {
   ========================================================= */
   async function loadFacturas({ silent = false } = {}) {
     return loadFacturasCollection({
-      state: localState,
+      state,
       render,
       silent,
     });
@@ -131,7 +117,7 @@ export const FacturasView = (() => {
 
   async function loadFacturaDetail(id) {
     return loadFacturaDetailById({
-      state: localState,
+      state,
       render,
       facturaId: id,
     });
@@ -178,22 +164,24 @@ export const FacturasView = (() => {
   async function sendFacturaToClient(id) {
     return sendFacturaToClientAction({
       facturaId: id,
-      detail: localState.detail.data,
+      detail: state.detail.data,
       onStart(facturaId) {
         setSendingFacturaId(facturaId);
         renderDetailOnly();
       },
       onSent({ facturaId, response }) {
-        if (localState.detail.data?.id === facturaId) {
-          localState.detail.data.enviadoA = safeText(
+        if (state.detail.data?.id === facturaId) {
+          state.detail.data.enviadoA = safeText(
             response?.sent?.to,
-            localState.detail.data.enviadoA
+            state.detail.data.enviadoA
           );
-          localState.detail.data.fechaEnvio = safeText(
+
+          state.detail.data.fechaEnvio = safeText(
             response?.sent?.at,
-            localState.detail.data.fechaEnvio
+            state.detail.data.fechaEnvio
           );
-          setDetail(localState.detail.data);
+
+          setDetail(state.detail.data);
         }
       },
       async reloadFacturas() {
@@ -208,24 +196,27 @@ export const FacturasView = (() => {
   }
 
   function exportFacturasCsv() {
-    exportFacturasCsvAction();
+    return exportFacturasCsvAction({
+      items: getItems(),
+      filenamePrefix: "facturas",
+    });
   }
 
   /* =========================================================
      RENDER
   ========================================================= */
-  function renderBody({ items = [], state = {} } = {}) {
-    if (state.loading && !items.length) {
+  function renderBody({ items = [], templateState = {} } = {}) {
+    if (templateState.loading && !items.length) {
       return renderLoadingState();
     }
 
-    if (state.error && !items.length) {
-      return renderErrorState(state.error);
+    if (templateState.error && !items.length) {
+      return renderErrorState(templateState.error);
     }
 
     return renderCards({
       items,
-      state,
+      state: templateState,
     });
   }
 
@@ -234,7 +225,7 @@ export const FacturasView = (() => {
     if (!container) return;
 
     const items = getItems();
-    const templateState = getStateForTemplate();
+    const templateState = getTemplateState();
 
     AppCore?.cleanup?.run?.(SCOPE);
     AppCore?.setDocumentTitle?.("Facturas");
@@ -247,15 +238,15 @@ export const FacturasView = (() => {
       >
         <div class="content-wrapper" style="display:grid; gap:var(--space-lg);">
           ${renderHeader({ items, state: templateState })}
-          ${renderBody({ items, state: templateState })}
+          ${renderBody({ items, templateState })}
         </div>
       </section>
 
       ${renderFacturasDetailModal({
-        detailOpen: localState.detail.open,
-        detailLoading: localState.detail.loading,
-        factura: localState.detail.data,
-        sendingFacturaId: localState.actions.sendingFacturaId,
+        detailOpen: templateState.detailOpen,
+        detailLoading: templateState.detailLoading,
+        factura: templateState.detail,
+        sendingFacturaId: templateState.sendingFacturaId,
       })}
     `;
 
@@ -264,7 +255,7 @@ export const FacturasView = (() => {
   }
 
   function renderDetailOnly() {
-    if (!localState.view.hydrated) return;
+    if (!state.view.hydrated) return;
     render();
   }
 
@@ -276,10 +267,10 @@ export const FacturasView = (() => {
       scopeName: SCOPE,
       getContainer,
       getState: () => ({
-        loading: localState.view.loading,
-        refreshing: localState.view.refreshing,
-        detailOpen: localState.detail.open,
-        bootstrapped: localState.view.bootstrapped,
+        loading: state.view.loading,
+        refreshing: state.view.refreshing,
+        detailOpen: state.detail.open,
+        bootstrapped: state.view.bootstrapped,
       }),
       render,
       loadFacturas,
@@ -292,7 +283,7 @@ export const FacturasView = (() => {
       onBootstrap() {
         setBootstrapped(true);
 
-        loadFacturas().catch(() => {
+        loadFacturas({ silent: false }).catch(() => {
           showToast("No se pudieron cargar las facturas.", "error");
         });
       },
@@ -305,7 +296,7 @@ export const FacturasView = (() => {
   function mount() {
     render();
 
-    if (!localState.view.bootstrapped) {
+    if (!state.view.bootstrapped) {
       bind();
     }
   }

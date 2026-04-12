@@ -8,6 +8,7 @@
    - exponer rutas inmutables
    - validar la estructura mínima de cada ruta
    - resolver títulos vía i18n
+   - mantener orden consistente con sidebar y navegación real
 ========================================================= */
 
 import { I18n } from "../i18n/index.js";
@@ -42,10 +43,6 @@ function renderFacturasView() {
   FacturasView.render();
 }
 
-function renderServidorView() {
-  ServerView.render();
-}
-
 function renderUsuariosView() {
   UsuariosView.render();
 }
@@ -60,6 +57,10 @@ function renderCuentaView() {
 
 function renderAjustesView() {
   AjustesView.render();
+}
+
+function renderServidorView() {
+  ServerView.render();
 }
 
 function renderLoginView() {
@@ -94,15 +95,6 @@ export function createRoutes() {
       roles: [],
       hideShell: false,
       render: renderFacturasView,
-    },
-    {
-      path: "/servidor",
-      name: "servidor",
-      title: t("routes.servidor", "Servidor"),
-      public: false,
-      roles: ["admin"],
-      hideShell: false,
-      render: renderServidorView,
     },
     {
       path: "/usuarios",
@@ -141,6 +133,15 @@ export function createRoutes() {
       render: renderAjustesView,
     },
     {
+      path: "/servidor",
+      name: "servidor",
+      title: t("routes.servidor", "Servidor"),
+      public: false,
+      roles: ["admin"],
+      hideShell: false,
+      render: renderServidorView,
+    },
+    {
       path: "/login",
       name: "login",
       title: t("routes.login", "Acceso"),
@@ -166,7 +167,10 @@ export function validateRoutesTable(AppCore, routes, normalizeCanonicalPath) {
       throw new Error("Router: existe una ruta inválida en la tabla.");
     }
 
-    const normalizedPath = normalizeCanonicalPath(AppCore, route.path || "/");
+    const normalizedPath = normalizeCanonicalPath(
+      AppCore,
+      route.path || "/"
+    );
 
     if (!normalizedPath.startsWith("/")) {
       throw new Error(`Router: ruta inválida "${route.path}".`);

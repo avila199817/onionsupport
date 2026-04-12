@@ -6,8 +6,9 @@
    - parsear respuestas HTTP
    - construir errores normalizados de request
    - decidir reintentos
-   - ejecutar fetch con retry
+   - ejecutar fetch con retry real
    - exponer request base y apiClient
+   - no duplicar setError / eventos en reintentos
 ========================================================= */
 
 import { config } from "./config.js";
@@ -28,16 +29,31 @@ import {
 /* =========================================================
    RESPONSE PARSING
 ========================================================= */
-export async function parseResponseBody(response, responseType = "auto") {
+export async function parseResponseBody(
+  response,
+  responseType = "auto"
+) {
   if (!response) return null;
   if (response.status === 204) return null;
 
-  const contentType = String(response.headers.get("content-type") || "")
+  const contentType = String(
+    response.headers.get(
+      "content-type"
+    ) || ""
+  )
     .trim()
     .toLowerCase();
 
-  if (responseType === "blob") return response.blob();
-  if (responseType === "arrayBuffer") return response.arrayBuffer();
+  if (responseType === "blob") {
+    return response.blob();
+  }
+
+  if (
+    responseType ===
+    "arrayBuffer"
+  ) {
+    return response.arrayBuffer();
+  }
 
   if (responseType === "text") {
     try {
@@ -55,7 +71,11 @@ export async function parseResponseBody(response, responseType = "auto") {
     }
   }
 
-  if (contentType.includes("application/json")) {
+  if (
+    contentType.includes(
+      "application/json"
+    )
+  ) {
     try {
       return await response.json();
     } catch {
@@ -81,9 +101,10 @@ export function buildRequestError({
   timeout = false,
   aborted = false,
   raw = null,
-}) {
+} = {}) {
   if (!response) {
-    const hints = detectNetworkHints(url);
+    const hints =
+      detectNetworkHints(url);
 
     return {
       status: 0,
@@ -109,7 +130,8 @@ export function buildRequestError({
 
   return {
     status: response.status,
-    statusText: response.statusText,
+    statusText:
+      response.statusText,
     data,
     url,
     method,
@@ -126,55 +148,130 @@ export function buildRequestError({
 }
 
 /* =========================================================
-   RETRY
+   RETRY POLICY
 ========================================================= */
-export function shouldRetryRequest(error, requestConfig) {
-  const method = String(requestConfig?.method || "GET").toUpperCase();
+export function shouldRetryRequest(
+  error,
+  requestConfig
+) {
+  const method = String(
+    requestConfig?.method ||
+      "GET"
+  ).toUpperCase();
+
   const retries = Number(
-    requestConfig?.retries ?? config.requestRetries ?? 0
+    requestConfig?.retries ??
+      config.requestRetries ??
+      0
   );
 
   if (retries <= 0) return false;
-  if (!["GET", "HEAD"].includes(method)) return false;
+  if (!["GET", "HEAD"].includes(method)) {
+    return false;
+  }
 
-  if (error?.status >= 500) return true;
-  if (error?.status === 0) return true;
+  if (error?.aborted) {
+    return false;
+  }
+
+  if (error?.timeout) {
+    return true;
+  }
+
+  if (error?.status >= 500) {
+    return true;
+  }
+
+  if (error?.status === 0) {
+    return true;
+  }
 
   return false;
 }
 
 export async function executeFetchWithRetry(
   url,
-  fetchConfig,
+  fetchFactory,
   requestConfig,
   utils
 ) {
   const retries = Number(
-    requestConfig?.retries ?? config.requestRetries ?? 0
+    requestConfig?.retries ??
+      config.requestRetries ??
+      0
   );
-  const baseDelay = Number(requestConfig?.retryDelay ?? 250);
-  const maxDelay = Number(requestConfig?.retryMaxDelay ?? 3000);
+
+  const baseDelay = Number(
+    requestConfig?.retryDelay ??
+      250
+  );
+
+  const maxDelay = Number(
+    requestConfig?.retryMaxDelay ??
+      3000
+  );
 
   let attempt = 0;
   let lastError = null;
 
   while (attempt <= retries) {
     try {
-      return await fetch(url, fetchConfig);
+      return await fetchFactory();
     } catch (error) {
       lastError = error;
 
-      if (attempt >= retries) {
-        throw error;
+      const normalizedError =
+        error?.status !== undefined
+          ? error
+          : buildRequestError({
+              response: null,
+              data: null,
+              url,
+              method:
+                requestConfig?.method ||
+                "GET",
+              timeout:
+                isProbablyTimeoutError(
+                  error
+                ),
+              aborted:
+                isAbortError(error),
+              raw:
+                error?.message ||
+                error,
+            });
+
+      if (
+        attempt >= retries ||
+        !shouldRetryRequest(
+          normalizedError,
+          requestConfig
+        )
+      ) {
+        throw normalizedError;
       }
 
       const backoff = Math.min(
         maxDelay,
-        Math.max(baseDelay, baseDelay * 2 ** attempt)
+        Math.max(
+          baseDelay,
+          baseDelay *
+            2 ** attempt
+        )
       );
-      const jitter = Math.floor(Math.random() * Math.max(1, baseDelay));
 
-      await utils.sleep(backoff + jitter);
+      const jitter =
+        Math.floor(
+          Math.random() *
+            Math.max(
+              1,
+              baseDelay
+            )
+        );
+
+      await utils.sleep(
+        backoff + jitter
+      );
     }
 
     attempt += 1;
@@ -193,181 +290,262 @@ export function createRequest({
   utils,
   registry,
 }) {
-  async function request(path, options = {}) {
+  async function request(
+    path,
+    options = {}
+  ) {
     let requestConfig = {
       method: "GET",
       headers: {},
       body: null,
       auth: !isPublicApiPath(path),
-      timeout: config.requestTimeout,
+      timeout:
+        config.requestTimeout,
       raw: false,
       responseType: "auto",
       query: null,
       credentials: "omit",
       signal: null,
-      retries: config.requestRetries,
+      retries:
+        config.requestRetries,
       ...options,
       path,
     };
 
-    requestConfig = await runHookSeries(
-      registry.hooks.beforeRequest,
-      requestConfig
-    );
+    requestConfig =
+      await runHookSeries(
+        registry.hooks
+          .beforeRequest,
+        requestConfig
+      );
 
     const {
       method = "GET",
       headers = {},
       body = null,
-      auth = !isPublicApiPath(requestConfig.path),
-      timeout = config.requestTimeout,
+      auth = !isPublicApiPath(
+        requestConfig.path
+      ),
+      timeout =
+        config.requestTimeout,
       raw = false,
       responseType = "auto",
       query = null,
       credentials = "omit",
       signal = null,
-      retries = config.requestRetries,
+      retries =
+        config.requestRetries,
     } = requestConfig;
 
-    const url = buildUrl(requestConfig.path, query);
-    const upperMethod = String(method || "GET").toUpperCase();
+    const url = buildUrl(
+      requestConfig.path,
+      query
+    );
 
-    const finalHeaders = normalizeHeaders({
-      Accept: "application/json",
-      ...headers,
-    });
+    const upperMethod = String(
+      method || "GET"
+    ).toUpperCase();
 
-    if (auth && hasValidToken(state.token)) {
-      finalHeaders.Authorization =
-        `${config.auth.bearerPrefix} ${state.token}`;
+    const finalHeaders =
+      normalizeHeaders({
+        Accept:
+          "application/json",
+        ...headers,
+      });
+
+    if (
+      auth &&
+      hasValidToken(
+        state.token
+      )
+    ) {
+      finalHeaders.Authorization = `${config.auth.bearerPrefix} ${state.token}`;
     }
 
     const isFormData =
-      typeof window !== "undefined" &&
-      typeof FormData !== "undefined" &&
+      typeof window !==
+        "undefined" &&
+      typeof FormData !==
+        "undefined" &&
       body instanceof FormData;
 
-    const isBodyAllowed = !["GET", "HEAD"].includes(upperMethod);
+    const isBodyAllowed =
+      !["GET", "HEAD"].includes(
+        upperMethod
+      );
 
     if (
       !isFormData &&
       body !== null &&
       isBodyAllowed &&
-      !finalHeaders["Content-Type"]
+      !finalHeaders[
+        "Content-Type"
+      ]
     ) {
-      finalHeaders["Content-Type"] = "application/json";
+      finalHeaders[
+        "Content-Type"
+      ] = "application/json";
     }
 
-    const payload = !isBodyAllowed
-      ? undefined
-      : body === null
-        ? null
-        : isFormData
-          ? body
-          : finalHeaders["Content-Type"]?.includes("application/json")
-            ? JSON.stringify(body)
-            : body;
+    const payload =
+      !isBodyAllowed
+        ? undefined
+        : body === null
+          ? null
+          : isFormData
+            ? body
+            : finalHeaders[
+                  "Content-Type"
+                ]?.includes(
+                  "application/json"
+                )
+              ? JSON.stringify(
+                  body
+                )
+              : body;
 
-    const { controller, timeoutId } = createAbortTimeout(timeout);
-    const mergedSignal = mergeAbortSignals([controller.signal, signal]);
-
-    events?.emit?.("app:request:start", {
-      url,
-      method: upperMethod,
-      auth,
-      hasBody: body !== null,
-    });
+    events?.emit?.(
+      "app:request:start",
+      {
+        url,
+        method: upperMethod,
+        auth,
+        hasBody:
+          body !== null,
+      }
+    );
 
     try {
-      state.lastRequestAt = now();
-      state.lastRequestUrl = url;
+      state.lastRequestAt =
+        now();
 
-      const response = await executeFetchWithRetry(
-        url,
-        {
-          method: upperMethod,
-          headers: finalHeaders,
-          body: payload,
-          signal: mergedSignal,
-          credentials,
-        },
-        {
-          ...requestConfig,
-          retries,
-          method: upperMethod,
-        },
-        utils
-      );
+      state.lastRequestUrl =
+        url;
 
-      clearTimeout(timeoutId);
+      const response =
+        await executeFetchWithRetry(
+          url,
+          async () => {
+            const {
+              controller,
+              timeoutId,
+            } =
+              createAbortTimeout(
+                timeout
+              );
 
-      if (raw) {
-        const hookedRaw = await runHookSeries(
-          registry.hooks.afterResponse,
-          response
+            const mergedSignal =
+              mergeAbortSignals([
+                controller.signal,
+                signal,
+              ]);
+
+            try {
+              return await fetch(
+                url,
+                {
+                  method:
+                    upperMethod,
+                  headers:
+                    finalHeaders,
+                  body: payload,
+                  signal:
+                    mergedSignal,
+                  credentials,
+                }
+              );
+            } finally {
+              clearTimeout(
+                timeoutId
+              );
+            }
+          },
+          {
+            ...requestConfig,
+            retries,
+            method:
+              upperMethod,
+          },
+          utils
         );
 
-        events?.emit?.("app:request:success", {
-          url,
-          method: upperMethod,
-          status: response.status,
-          response: hookedRaw,
-        });
+      if (raw) {
+        const hookedRaw =
+          await runHookSeries(
+            registry.hooks
+              .afterResponse,
+            response
+          );
+
+        events?.emit?.(
+          "app:request:success",
+          {
+            url,
+            method:
+              upperMethod,
+            status:
+              response.status,
+            response:
+              hookedRaw,
+          }
+        );
 
         return hookedRaw;
       }
 
-      const data = await parseResponseBody(response, responseType);
+      const data =
+        await parseResponseBody(
+          response,
+          responseType
+        );
 
       if (!response.ok) {
-        const error = buildRequestError({
-          response,
-          data,
-          url,
-          method: upperMethod,
-        });
+        const error =
+          buildRequestError({
+            response,
+            data,
+            url,
+            method:
+              upperMethod,
+          });
 
         setError(error);
-        await runHookSeries(registry.hooks.onRequestError, error);
-        events?.emit?.("app:request:error", error);
+
+        await runHookSeries(
+          registry.hooks
+            .onRequestError,
+          error
+        );
+
+        events?.emit?.(
+          "app:request:error",
+          error
+        );
+
         throw error;
       }
 
-      const hookedData = await runHookSeries(
-        registry.hooks.afterResponse,
-        data
-      );
+      const hookedData =
+        await runHookSeries(
+          registry.hooks
+            .afterResponse,
+          data
+        );
 
-      events?.emit?.("app:request:success", {
-        url,
-        method: upperMethod,
-        status: response.status,
-        data: hookedData,
-      });
+      events?.emit?.(
+        "app:request:success",
+        {
+          url,
+          method:
+            upperMethod,
+          status:
+            response.status,
+          data: hookedData,
+        }
+      );
 
       return hookedData;
     } catch (error) {
-      clearTimeout(timeoutId);
-
-      if (isAbortError(error)) {
-        const abortedByExternalSignal = signal?.aborted === true;
-
-        const abortError = buildRequestError({
-          response: null,
-          data: null,
-          url,
-          method: upperMethod,
-          timeout: !abortedByExternalSignal,
-          aborted: abortedByExternalSignal,
-          raw: error?.reason || error?.message || error,
-        });
-
-        setError(abortError);
-        await runHookSeries(registry.hooks.onRequestError, abortError);
-        events?.emit?.("app:request:error", abortError);
-        throw abortError;
-      }
-
       const normalizedError =
         error?.status !== undefined
           ? error
@@ -375,21 +553,47 @@ export function createRequest({
               response: null,
               data: null,
               url,
-              method: upperMethod,
-              timeout: isProbablyTimeoutError(error),
-              raw: error?.message || error,
+              method:
+                upperMethod,
+              timeout:
+                isProbablyTimeoutError(
+                  error
+                ),
+              aborted:
+                isAbortError(error),
+              raw:
+                error?.message ||
+                error,
             });
 
-      if (shouldRetryRequest(normalizedError, { ...requestConfig, retries })) {
-        normalizedError.retryable = true;
+      if (
+        shouldRetryRequest(
+          normalizedError,
+          {
+            ...requestConfig,
+            retries,
+          }
+        )
+      ) {
+        normalizedError.retryable =
+          true;
       }
 
-      setError(normalizedError);
-      await runHookSeries(
-        registry.hooks.onRequestError,
+      setError(
         normalizedError
       );
-      events?.emit?.("app:request:error", normalizedError);
+
+      await runHookSeries(
+        registry.hooks
+          .onRequestError,
+        normalizedError
+      );
+
+      events?.emit?.(
+        "app:request:error",
+        normalizedError
+      );
+
       throw normalizedError;
     }
   }
@@ -400,26 +604,64 @@ export function createRequest({
 /* =========================================================
    API CLIENT FACTORY
 ========================================================= */
-export function createApiClient(request) {
+export function createApiClient(
+  request
+) {
   return {
-    get(path, options = {}) {
-      return request(path, { ...options, method: "GET" });
+    get(
+      path,
+      options = {}
+    ) {
+      return request(path, {
+        ...options,
+        method: "GET",
+      });
     },
 
-    post(path, body = null, options = {}) {
-      return request(path, { ...options, method: "POST", body });
+    post(
+      path,
+      body = null,
+      options = {}
+    ) {
+      return request(path, {
+        ...options,
+        method: "POST",
+        body,
+      });
     },
 
-    put(path, body = null, options = {}) {
-      return request(path, { ...options, method: "PUT", body });
+    put(
+      path,
+      body = null,
+      options = {}
+    ) {
+      return request(path, {
+        ...options,
+        method: "PUT",
+        body,
+      });
     },
 
-    patch(path, body = null, options = {}) {
-      return request(path, { ...options, method: "PATCH", body });
+    patch(
+      path,
+      body = null,
+      options = {}
+    ) {
+      return request(path, {
+        ...options,
+        method: "PATCH",
+        body,
+      });
     },
 
-    delete(path, options = {}) {
-      return request(path, { ...options, method: "DELETE" });
+    delete(
+      path,
+      options = {}
+    ) {
+      return request(path, {
+        ...options,
+        method: "DELETE",
+      });
     },
 
     request,

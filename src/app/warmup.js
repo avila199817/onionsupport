@@ -3,31 +3,85 @@
    Archivo: src/app/warmup.js
 
    Responsabilidades:
-   - ejecutar diagnóstico inicial no bloqueante
-   - registrar información útil de sesión y estado
+   - ejecutar diagnóstico inicial seguro
+   - registrar estado real tras restoreSession
    - facilitar trazabilidad del arranque
+   - cero side effects
 ========================================================= */
 
-export async function warmup(AppCore) {
-  AppCore.utils.log("Warmup app iniciado.");
-  AppCore.utils.log("API configurada:", AppCore.config.apiBase);
+export async function warmup(
+  AppCore
+) {
+  if (!AppCore) return;
 
-  if (AppCore.state.token) {
-    AppCore.utils.log("Token detectado en storage.");
-  } else {
-    AppCore.utils.log("No hay token en storage.");
-  }
+  const log =
+    AppCore?.utils?.log ||
+    console.log;
 
-  if (AppCore.state.user?.username) {
-    AppCore.utils.log("Username detectado:", AppCore.state.user.username);
-  }
+  const state =
+    AppCore.state || {};
 
-  AppCore.utils.log("Estado app:", {
-    authenticated: AppCore.state.authenticated,
-    role: AppCore.state.role,
-    route: AppCore.state.route,
-    publicPath: AppCore.state.publicPath,
-    theme: AppCore.state.theme,
-    lang: AppCore.state.lang,
-  });
+  const config =
+    AppCore.config || {};
+
+  log(
+    "Warmup app iniciado."
+  );
+
+  log(
+    "API configurada:",
+    config.apiBase || null
+  );
+
+  log(
+    "Diagnóstico sesión:",
+    {
+      hasToken: Boolean(
+        state.token
+      ),
+
+      authenticated:
+        Boolean(
+          state.authenticated
+        ),
+
+      username:
+        state.user
+          ?.username ||
+        state.user?.email ||
+        null,
+
+      role:
+        state.role || null,
+    }
+  );
+
+  log(
+    "Estado app:",
+    {
+      route:
+        state.route || "/",
+
+      publicPath:
+        state.publicPath ||
+        "/",
+
+      theme:
+        state.theme ||
+        "dark",
+
+      lang:
+        state.lang || "es",
+
+      booted:
+        Boolean(
+          state.booted
+        ),
+
+      booting:
+        Boolean(
+          state.booting
+        ),
+    }
+  );
 }

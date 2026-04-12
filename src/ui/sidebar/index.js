@@ -8,6 +8,8 @@
    - API pública del sidebar
    - init seguro una sola vez
    - sidebar limpio sin server-nav legacy
+   - rehidratar referencias DOM del sidebar tras mount
+   - sincronizar avatar/nombre también en AppCore.dom para compatibilidad
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -87,6 +89,49 @@ export const SidebarUI = (() => {
   }
 
   /* =========================================================
+     DOM REFS SYNC
+     Muy importante:
+     - AppCore.cacheDom() corre antes de montar el sidebar
+     - aquí rehidratamos refs para que AppCore.syncUserUI() funcione
+  ========================================================= */
+  function syncSidebarDomIntoAppCore() {
+    const elements =
+      getElements(AppCore);
+
+    AppCore.dom.sidebar =
+      elements.sidebar || AppCore.dom.sidebar || null;
+
+    AppCore.dom.sidebarMenu =
+      elements.sidebarMenu || AppCore.dom.sidebarMenu || null;
+
+    AppCore.dom.sidebarAvatar =
+      elements.avatarEl || AppCore.dom.sidebarAvatar || null;
+
+    AppCore.dom.sidebarName =
+      elements.nameEl || AppCore.dom.sidebarName || null;
+
+    AppCore.dom.userToggle =
+      elements.userToggle || AppCore.dom.userToggle || null;
+
+    AppCore.dom.userDropdown =
+      elements.userDropdown || AppCore.dom.userDropdown || null;
+
+    AppCore.dom.logoutBtn =
+      elements.logoutBtn || AppCore.dom.logoutBtn || null;
+
+    AppCore.dom.sidebarToggle =
+      elements.sidebarToggle || AppCore.dom.sidebarToggle || null;
+
+    AppCore.dom.sidebarMobileToggle =
+      elements.sidebarMobileToggle || AppCore.dom.sidebarMobileToggle || null;
+  }
+
+  function refreshSidebarDomRefs() {
+    cacheDomRefs(AppCore);
+    syncSidebarDomIntoAppCore();
+  }
+
+  /* =========================================================
      ROLE HELPERS
   ========================================================= */
   function isAdmin() {
@@ -96,13 +141,17 @@ export const SidebarUI = (() => {
       AppCore?.state?.user?.rol ||
       "";
 
-    return String(role).toLowerCase() === "admin";
+    return String(role)
+      .trim()
+      .toLowerCase() === "admin";
   }
 
   /* =========================================================
      USER RENDER
   ========================================================= */
   function renderUser() {
+    refreshSidebarDomRefs();
+
     const {
       nameEl,
       avatarEl,
@@ -136,6 +185,16 @@ export const SidebarUI = (() => {
         avatarUrl,
         displayName,
         avatarText
+      );
+
+      avatarEl.setAttribute(
+        "title",
+        displayName
+      );
+
+      avatarEl.setAttribute(
+        "aria-label",
+        `Avatar de ${displayName}`
       );
 
       if (username) {
@@ -187,6 +246,8 @@ export const SidebarUI = (() => {
   function openDropdown() {
     if (isShellHidden(AppCore)) return;
 
+    refreshSidebarDomRefs();
+
     return openDropdownBase(
       AppCore,
       state,
@@ -195,6 +256,8 @@ export const SidebarUI = (() => {
   }
 
   function toggleDropdown() {
+    refreshSidebarDomRefs();
+
     return toggleDropdownBase(
       AppCore,
       state,
@@ -206,6 +269,8 @@ export const SidebarUI = (() => {
      SIDEBAR STATE
   ========================================================= */
   function syncSidebarState() {
+    refreshSidebarDomRefs();
+
     return syncSidebarStateBase(
       AppCore,
       closeDropdown
@@ -314,6 +379,8 @@ export const SidebarUI = (() => {
      ROLE VISIBILITY
   ========================================================= */
   function applyRoleVisibility() {
+    refreshSidebarDomRefs();
+
     return applyRoleVisibilityBase(
       AppCore,
       null,
@@ -345,7 +412,7 @@ export const SidebarUI = (() => {
   ========================================================= */
   function init() {
     if (initialized) {
-      cacheDomRefs(AppCore);
+      refreshSidebarDomRefs();
       sanitizeFooterTooltipState(
         AppCore
       );
@@ -356,7 +423,7 @@ export const SidebarUI = (() => {
     }
 
     mountSidebar(AppCore);
-    cacheDomRefs(AppCore);
+    refreshSidebarDomRefs();
 
     if (!hasSidebarShell(AppCore)) {
       AppCore?.utils?.warn?.(
@@ -382,6 +449,15 @@ export const SidebarUI = (() => {
     renderUser();
     applyRoleVisibility();
     closeDropdown();
+
+    /* compatibilidad extra:
+       si existe syncUserUI global, ahora ya tiene refs válidas */
+    if (
+      typeof AppCore.syncUserUI ===
+      "function"
+    ) {
+      AppCore.syncUserUI();
+    }
 
     const scope =
       AppCore.cleanup.scope(SCOPE);

@@ -8,6 +8,7 @@
    - restaurar sesión con token o refresh context
    - serializar me / refresh / restore
    - endurecer recuperación de sesión
+   - priorizar refresh cuando exista contexto válido para evitar 401 iniciales
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -70,7 +71,9 @@ export async function fetchMe(
         const response =
           await AppCore.apiClient.get(
             AUTH_ENDPOINTS.me,
-            { auth: true }
+            {
+              auth: true,
+            }
           );
 
         const user =
@@ -121,7 +124,6 @@ export async function fetchMe(
       } finally {
         session.checking =
           false;
-
         session.mePromise =
           null;
       }
@@ -186,13 +188,11 @@ export async function refreshSession(
               storedRefreshToken ||
                 ""
             ).trim(),
-
           sessionId:
             String(
               storedSessionId ||
                 ""
             ).trim(),
-
           userId:
             String(
               storedSessionUserId ||
@@ -244,19 +244,15 @@ export async function refreshSession(
               nextToken ??
               AppCore.state
                 .token,
-
             user:
               nextUser ??
               AppCore.state
                 .user,
-
             refreshToken:
               nextRefreshToken ??
               storedRefreshToken,
-
             sessionData:
-              nextSessionData ??
-              {
+              nextSessionData ?? {
                 sessionId:
                   storedSessionId,
                 userId:
@@ -274,10 +270,8 @@ export async function refreshSession(
 
         session.lastRefreshAt =
           Date.now();
-
         session.refreshFailCount =
           0;
-
         session.refreshBlockedUntil =
           0;
 
@@ -326,7 +320,6 @@ export async function refreshSession(
       } finally {
         session.refreshing =
           false;
-
         session.refreshPromise =
           null;
       }
@@ -336,7 +329,7 @@ export async function refreshSession(
 }
 
 /* =========================================================
-   HELPERS RESTORE
+   RESTORE HELPERS
 ========================================================= */
 export async function restoreUsingRefreshOnly(
   session
@@ -447,7 +440,7 @@ export async function restoreAfterMeFailure(
         user:
           AppCore.state.user,
         source:
-          "refresh",
+          "refresh-after-me-failure",
       }
     );
 
@@ -483,8 +476,47 @@ export async function restoreAfterMeFailure(
   }
 }
 
+export async function restoreUsingRefreshPreferred(
+  session
+) {
+  const refreshed =
+    await refreshSession(
+      session
+    );
+
+  if (
+    !AppCore.state.user &&
+    hasValidToken()
+  ) {
+    await fetchMe(
+      session
+    );
+  }
+
+  AppCore.events.emit(
+    "auth:restore:success",
+    {
+      user:
+        AppCore.state.user,
+      source:
+        "refresh-preferred",
+    }
+  );
+
+  return {
+    ok: true,
+    user:
+      AppCore.state.user,
+    refreshed,
+  };
+}
+
 /* =========================================================
    RESTORE SESSION
+   Política:
+   - si existe refresh context, refrescar primero
+   - así evitamos el 401 inicial de /me con access token expirado
+   - solo usar /me directo cuando NO exista refresh context
 ========================================================= */
 export async function restoreSession(
   session
@@ -513,47 +545,102 @@ export async function restoreSession(
   session.restorePromise =
     (async () => {
       try {
-        /* no token + no refresh */
+        const tokenAvailable =
+          hasValidToken();
+
+        const refreshAvailable =
+          hasRefreshContext();
+
+        /* =========================================
+           1) Nada disponible
+        ========================================= */
         if (
-          !hasValidToken()
+          !tokenAvailable &&
+          !refreshAvailable
         ) {
-          if (
-            !hasRefreshContext()
-          ) {
-            clearSessionLocal(
-              {
-                silent: true,
-              }
-            );
+          clearSessionLocal({
+            silent: true,
+          });
 
-            AppCore.events.emit(
-              "auth:restore:empty",
-              {
-                reason:
-                  "missing-token-and-refresh-context",
-              }
-            );
+          AppCore.events.emit(
+            "auth:restore:empty",
+            {
+              reason:
+                "missing-token-and-refresh-context",
+            }
+          );
 
-            return {
-              ok: false,
-              user: null,
-            };
-          }
+          return {
+            ok: false,
+            user: null,
+          };
+        }
 
+        /* =========================================
+           2) Preferir refresh si existe contexto
+              elimina el 401 inicial de /me
+        ========================================= */
+        if (refreshAvailable) {
           try {
-            return await restoreUsingRefreshOnly(
+            return await restoreUsingRefreshPreferred(
               session
             );
-          } catch (error) {
+          } catch (
+            refreshPreferredError
+          ) {
+            AppCore.utils.warn(
+              "Refresh preferente falló en restoreSession().",
+              refreshPreferredError
+            );
+
+            /*
+              Fallback:
+              si aún queda token válido local, intentamos /me.
+              Esto cubre backend de refresh caído pero token todavía usable.
+            */
+            if (
+              hasValidToken()
+            ) {
+              try {
+                return await restoreUsingMe(
+                  session
+                );
+              } catch (
+                meAfterRefreshError
+              ) {
+                clearSessionLocal();
+
+                AppCore.events.emit(
+                  "auth:restore:error",
+                  {
+                    error:
+                      meAfterRefreshError,
+                    message:
+                      extractMessage(
+                        meAfterRefreshError
+                      ),
+                  }
+                );
+
+                return {
+                  ok: false,
+                  user: null,
+                  error:
+                    meAfterRefreshError,
+                };
+              }
+            }
+
             clearSessionLocal();
 
             AppCore.events.emit(
               "auth:restore:error",
               {
-                error,
+                error:
+                  refreshPreferredError,
                 message:
                   extractMessage(
-                    error
+                    refreshPreferredError
                   ),
               }
             );
@@ -561,12 +648,15 @@ export async function restoreSession(
             return {
               ok: false,
               user: null,
-              error,
+              error:
+                refreshPreferredError,
             };
           }
         }
 
-        /* token path */
+        /* =========================================
+           3) Solo token, sin refresh context
+        ========================================= */
         try {
           return await restoreUsingMe(
             session
@@ -582,7 +672,6 @@ export async function restoreSession(
       } finally {
         session.restoring =
           false;
-
         session.restorePromise =
           null;
       }

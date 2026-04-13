@@ -5,10 +5,11 @@
    Responsabilidades:
    - helpers puros del login
    - validación de credenciales
-   - persistencia de email recordado
+   - persistencia del identificador recordado
    - normalización de respuesta auth
    - sincronización de sesión con AppCore real
    - resolución de redirect post-login
+   - compatibilidad con login por usuario o correo
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -17,7 +18,7 @@ import { AppCore } from "../../core/index.js";
    CONST
 ========================================================= */
 
-export const LOGIN_REMEMBER_KEY = "auth:last-email";
+export const LOGIN_REMEMBER_KEY = "auth:last-identifier";
 
 /* =========================================================
    BASICS
@@ -41,6 +42,10 @@ export function escapeHtml(value = "") {
     .replaceAll("'", "&#39;");
 }
 
+export function normalizeIdentifier(value = "") {
+  return safeText(value, "");
+}
+
 export function isValidEmail(value = "") {
   const email = safeText(value, "").toLowerCase();
 
@@ -49,6 +54,61 @@ export function isValidEmail(value = "") {
   }
 
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+export function looksLikeEmail(value = "") {
+  return safeText(value, "").includes("@");
+}
+
+export function slugify(value = "") {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/[^a-zA-Z0-9-_]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+}
+
+export function normalizePath(path = "/") {
+  const raw = safeText(path, "/") || "/";
+
+  if (typeof AppCore?.utils?.normalizePath === "function") {
+    try {
+      return AppCore.utils.normalizePath(raw);
+    } catch {}
+  }
+
+  if (raw === "/") {
+    return "/";
+  }
+
+  return raw
+    .replace(/\/{2,}/g, "/")
+    .replace(/\/+$/g, "") || "/";
+}
+
+export function isSafeInternalRedirect(path = "") {
+  const value = safeText(path, "").trim();
+
+  if (!value) return false;
+  if (!value.startsWith("/")) return false;
+  if (value.startsWith("//")) return false;
+  if (/^\/login(?:[/?#]|$)/i.test(value)) return false;
+
+  return true;
+}
+
+export function ensureSafeRedirect(path = "", fallback = "/") {
+  const normalizedFallback = normalizePath(fallback || "/");
+  const normalizedPath = normalizePath(path || "");
+
+  if (!isSafeInternalRedirect(normalizedPath)) {
+    return normalizedFallback;
+  }
+
+  return normalizedPath;
 }
 
 /* =========================================================
@@ -79,16 +139,11 @@ export function readStorage(key, fallback = "") {
     const storage = getStorage();
 
     if (typeof storage?.get === "function") {
-      return safeText(
-        storage.get(key),
-        fallback
-      );
+      return safeText(storage.get(key), fallback);
     }
 
     return safeText(
-      window.localStorage.getItem(
-        getNamespacedKey(key)
-      ),
+      window.localStorage.getItem(getNamespacedKey(key)),
       fallback
     );
   } catch {
@@ -137,27 +192,44 @@ export function removeStorage(key) {
 }
 
 /* =========================================================
-   REMEMBER EMAIL
+   REMEMBER IDENTIFIER
 ========================================================= */
 
-export function loadRememberedEmail() {
+export function loadRememberedIdentifier() {
   return readStorage(
     LOGIN_REMEMBER_KEY,
     ""
   );
 }
 
-export function saveRememberedEmail(email = "") {
+/*
+  Compat legacy:
+  mantenemos loadRememberedEmail para no romper imports existentes,
+  pero internamente ya trabajamos con identifier.
+*/
+export function loadRememberedEmail() {
+  return loadRememberedIdentifier();
+}
+
+export function saveRememberedIdentifier(identifier = "") {
   return writeStorage(
     LOGIN_REMEMBER_KEY,
-    safeText(email, "").toLowerCase()
+    normalizeIdentifier(identifier)
+  );
+}
+
+export function saveRememberedEmail(email = "") {
+  return saveRememberedIdentifier(email);
+}
+
+export function clearRememberedIdentifier() {
+  return removeStorage(
+    LOGIN_REMEMBER_KEY
   );
 }
 
 export function clearRememberedEmail() {
-  return removeStorage(
-    LOGIN_REMEMBER_KEY
-  );
+  return clearRememberedIdentifier();
 }
 
 /* =========================================================
@@ -165,14 +237,26 @@ export function clearRememberedEmail() {
 ========================================================= */
 
 export function createLoginPayload({
+  identifier = "",
   email = "",
   password = "",
   remember = false,
+  redirect = "",
 } = {}) {
+  const normalizedIdentifier =
+    normalizeIdentifier(identifier) ||
+    normalizeIdentifier(email);
+
+  const normalizedPassword = safeText(password, "");
+
   return {
-    email: safeText(email, "").toLowerCase(),
-    password: safeText(password, ""),
+    identifier: normalizedIdentifier,
+    email: looksLikeEmail(normalizedIdentifier)
+      ? normalizedIdentifier.toLowerCase()
+      : "",
+    password: normalizedPassword,
     remember: Boolean(remember),
+    redirect: safeText(redirect, ""),
   };
 }
 
@@ -181,10 +265,9 @@ export function createLoginPayload({
 ========================================================= */
 
 export function validateLoginPayload(payload = {}) {
-  const email = safeText(
-    payload.email,
-    ""
-  ).toLowerCase();
+  const identifier = normalizeIdentifier(
+    payload.identifier || payload.email || ""
+  );
 
   const password = safeText(
     payload.password,
@@ -193,17 +276,23 @@ export function validateLoginPayload(payload = {}) {
 
   const errors = {};
 
-  if (!email) {
-    errors.email =
-      "Introduce tu email.";
-  } else if (!isValidEmail(email)) {
-    errors.email =
-      "Introduce un email válido.";
+  if (!identifier) {
+    errors.identifier =
+      "Introduce tu email o nombre de usuario.";
+  } else if (
+    looksLikeEmail(identifier) &&
+    !isValidEmail(identifier)
+  ) {
+    errors.identifier =
+      "El formato del email no es válido.";
   }
 
   if (!password) {
     errors.password =
       "Introduce tu contraseña.";
+  } else if (password.length < 6) {
+    errors.password =
+      "La contraseña debe tener al menos 6 caracteres.";
   }
 
   return errors;
@@ -211,6 +300,7 @@ export function validateLoginPayload(payload = {}) {
 
 export function getFirstLoginError(errors = {}) {
   return (
+    safeText(errors.identifier, "") ||
     safeText(errors.email, "") ||
     safeText(errors.password, "") ||
     ""
@@ -226,8 +316,11 @@ export function normalizeAuthResult(result = {}) {
     result?.token ||
     result?.accessToken ||
     result?.authToken ||
+    result?.jwt ||
     result?.data?.token ||
     result?.data?.accessToken ||
+    result?.data?.authToken ||
+    result?.data?.jwt ||
     "";
 
   const user =
@@ -253,22 +346,52 @@ export function normalizeAuthResult(result = {}) {
     result?.data?.mensaje ||
     "";
 
+  const redirectTo =
+    result?.redirectTo ||
+    result?.redirect ||
+    result?.data?.redirectTo ||
+    result?.data?.redirect ||
+    "";
+
+  const tempToken =
+    result?.tempToken ||
+    result?.temporaryToken ||
+    result?.data?.tempToken ||
+    result?.data?.temporaryToken ||
+    "";
+
+  const requires2FA = Boolean(
+    result?.requires2FA ||
+    result?.require2FA ||
+    result?.twoFactorRequired ||
+    result?.mfaRequired ||
+    result?.data?.requires2FA ||
+    result?.data?.require2FA ||
+    result?.data?.twoFactorRequired ||
+    result?.data?.mfaRequired ||
+    tempToken
+  );
+
   return {
     raw: result,
     token: safeText(token, ""),
     user,
     role: safeText(role, ""),
     message: safeText(message, ""),
+    redirectTo: safeText(redirectTo, ""),
+    tempToken: safeText(tempToken, ""),
+    requires2FA,
   };
 }
 
 export function resolveAuthErrorMessage(error) {
   return (
-    safeText(error?.message, "") ||
     safeText(error?.data?.message, "") ||
     safeText(error?.data?.mensaje, "") ||
     safeText(error?.response?.data?.message, "") ||
     safeText(error?.response?.data?.mensaje, "") ||
+    safeText(error?.message, "") ||
+    safeText(error?.statusText, "") ||
     "No se ha podido iniciar sesión."
   );
 }
@@ -283,8 +406,7 @@ export function syncSession(auth = {}) {
     ""
   );
 
-  const user =
-    auth?.user || null;
+  const user = auth?.user || null;
 
   const role = safeText(
     auth?.role ||
@@ -300,74 +422,67 @@ export function syncSession(auth = {}) {
     );
   }
 
-  /* =========================
-     CORE REAL API
-  ========================= */
-
-  if (
-    typeof AppCore?.applySession ===
-    "function"
-  ) {
+  if (typeof AppCore?.applySession === "function") {
     AppCore.applySession({
       token,
       user,
     });
   } else {
-    AppCore.state =
-      AppCore.state || {};
-
-    AppCore.state.token =
-      token;
-
-    AppCore.state.user =
-      user;
-
-    AppCore.state.role =
-      role;
-
-    AppCore.state.authenticated =
-      true;
+    AppCore.state = AppCore.state || {};
+    AppCore.state.token = token;
+    AppCore.state.user = user;
+    AppCore.state.role = role;
+    AppCore.state.authenticated = true;
   }
 
   try {
-    if (
-      typeof AppCore?.setState ===
-      "function"
-    ) {
+    if (typeof AppCore?.setToken === "function") {
+      AppCore.setToken(token);
+    }
+  } catch {}
+
+  try {
+    if (typeof AppCore?.setUser === "function") {
+      AppCore.setUser(user);
+    }
+  } catch {}
+
+  try {
+    if (typeof AppCore?.setState === "function") {
       AppCore.setState({
         role,
         authenticated: true,
       });
     } else {
-      AppCore.state.role =
-        role;
-
-      AppCore.state.authenticated =
-        true;
+      AppCore.state = AppCore.state || {};
+      AppCore.state.role = role;
+      AppCore.state.authenticated = true;
     }
   } catch {}
 
   try {
-    AppCore?.events?.emit?.(
-      "app:user:change",
-      {
-        user,
-        token,
-        role,
-        authenticated: true,
-      }
-    );
+    AppCore?.events?.emit?.("app:user:change", {
+      user,
+      token,
+      role,
+      authenticated: true,
+    });
   } catch {}
 
   try {
-    AppCore?.events?.emit?.(
-      "auth:login:success",
-      {
-        user,
-        token,
-        role,
-      }
-    );
+    AppCore?.events?.emit?.("auth:login:success", {
+      user,
+      token,
+      role,
+    });
+  } catch {}
+
+  try {
+    AppCore?.events?.emit?.("login:success", {
+      user,
+      token,
+      role,
+    });
   } catch {}
 
   try {
@@ -391,31 +506,37 @@ export function resolveLoginRedirect(
   options = {}
 ) {
   const explicitRedirect =
-    safeText(
-      options.redirectTo,
-      ""
-    ) ||
-    safeText(
-      options.successRedirect,
-      ""
-    );
+    safeText(options.redirectTo, "") ||
+    safeText(options.successRedirect, "") ||
+    safeText(options.redirect, "");
 
   if (explicitRedirect) {
-    return explicitRedirect;
+    return ensureSafeRedirect(explicitRedirect, "/");
   }
 
   const responseRedirect =
-    safeText(
-      auth?.raw?.redirectTo,
-      ""
-    ) ||
-    safeText(
-      auth?.raw?.data?.redirectTo,
+    safeText(auth?.redirectTo, "") ||
+    safeText(auth?.raw?.redirectTo, "") ||
+    safeText(auth?.raw?.redirect, "") ||
+    safeText(auth?.raw?.data?.redirectTo, "") ||
+    safeText(auth?.raw?.data?.redirect, "");
+
+  if (responseRedirect) {
+    return ensureSafeRedirect(responseRedirect, "/");
+  }
+
+  const user = auth?.user || {};
+  const slug =
+    safeText(user?.slug, "") ||
+    slugify(
+      user?.username ||
+      user?.name ||
+      user?.nombre ||
       ""
     );
 
-  if (responseRedirect) {
-    return responseRedirect;
+  if (slug) {
+    return ensureSafeRedirect(`/@${slug}`, "/");
   }
 
   const role = safeText(
@@ -431,8 +552,7 @@ export function resolveLoginRedirect(
     case "tecnico":
     case "agent":
     case "cliente":
-      return "/";
-
+    case "user":
     default:
       return "/";
   }
@@ -442,14 +562,36 @@ export function resolveLoginRedirect(
    REMEMBER FLOW
 ========================================================= */
 
-export function persistRememberedEmail({
+export function persistRememberedIdentifier({
+  identifier = "",
   email = "",
   remember = false,
 } = {}) {
+  const finalIdentifier =
+    normalizeIdentifier(identifier) ||
+    normalizeIdentifier(email);
+
   if (remember) {
-    saveRememberedEmail(email);
+    saveRememberedIdentifier(finalIdentifier);
     return;
   }
 
-  clearRememberedEmail();
+  clearRememberedIdentifier();
+}
+
+/*
+  Compat legacy:
+  mantenemos el nombre antiguo para index.js y otros módulos
+  que todavía llamen persistRememberedEmail().
+*/
+export function persistRememberedEmail({
+  identifier = "",
+  email = "",
+  remember = false,
+} = {}) {
+  persistRememberedIdentifier({
+    identifier,
+    email,
+    remember,
+  });
 }

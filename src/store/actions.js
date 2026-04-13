@@ -7,6 +7,7 @@
    - agrupar mutaciones de app / session / ui / flags
    - centralizar operaciones sobre colecciones
    - hidratar slices desde AppCore
+   - validaciones defensivas
 ========================================================= */
 
 import {
@@ -32,56 +33,122 @@ export function createActions({
   patch,
   update,
 }) {
+  function cloneIfAny(
+    value
+  ) {
+    return value
+      ? deepClone(value)
+      : null;
+  }
+
   return {
     /* =========================================================
        APP
     ========================================================= */
-    markReady(value = true) {
-      set("app.ready", Boolean(value));
+    markReady(
+      value = true
+    ) {
+      set(
+        "app.ready",
+        Boolean(value)
+      );
     },
 
-    markBooted(value = true) {
-      set("app.booted", Boolean(value));
+    markBooted(
+      value = true
+    ) {
+      set(
+        "app.booted",
+        Boolean(value)
+      );
     },
 
-    setInitialized(value = true) {
-      set("app.initialized", Boolean(value));
+    setInitialized(
+      value = true
+    ) {
+      set(
+        "app.initialized",
+        Boolean(value)
+      );
     },
 
-    setBooting(value = false) {
-      set("app.booting", Boolean(value));
+    setBooting(
+      value = false
+    ) {
+      set(
+        "app.booting",
+        Boolean(value)
+      );
     },
 
-    setRoute(route = "/") {
-      set("app.route", route || "/");
+    setRoute(
+      route = "/"
+    ) {
+      set(
+        "app.route",
+        route || "/"
+      );
     },
 
-    setPublicPath(publicPath = "/") {
-      set("app.publicPath", publicPath || "/");
+    setPublicPath(
+      publicPath = "/"
+    ) {
+      set(
+        "app.publicPath",
+        publicPath || "/"
+      );
     },
 
-    setLoading(value) {
-      set("app.loading", Boolean(value));
+    setLoading(
+      value
+    ) {
+      set(
+        "app.loading",
+        Boolean(value)
+      );
     },
 
-    setError(error = null) {
-      set("app.lastError", error || null);
+    setError(
+      error = null
+    ) {
+      set(
+        "app.lastError",
+        error || null
+      );
     },
 
     clearError() {
-      set("app.lastError", null);
+      set(
+        "app.lastError",
+        null
+      );
     },
 
     /* =========================================================
        SESSION
     ========================================================= */
-    setSession({ authenticated, token, user, role } = {}) {
+    setSession({
+      authenticated,
+      token,
+      user,
+      role,
+    } = {}) {
       patch({
         session: {
-          authenticated: Boolean(authenticated),
-          token: token ?? null,
-          user: user ? deepClone(user) : null,
-          role: role ?? user?.role ?? null,
+          authenticated:
+            Boolean(
+              authenticated
+            ),
+          token:
+            token ?? null,
+          user:
+            cloneIfAny(
+              user
+            ),
+          role:
+            role ??
+            user?.role ??
+            null,
         },
       });
     },
@@ -89,7 +156,8 @@ export function createActions({
     clearSession() {
       patch({
         session: {
-          authenticated: false,
+          authenticated:
+            false,
           token: null,
           user: null,
           role: null,
@@ -97,191 +165,475 @@ export function createActions({
       });
     },
 
-    setAuthenticated(value = false) {
-      set("session.authenticated", Boolean(value));
+    setAuthenticated(
+      value = false
+    ) {
+      set(
+        "session.authenticated",
+        Boolean(value)
+      );
     },
 
-    setToken(token = null) {
-      set("session.token", token ?? null);
+    setToken(
+      token = null
+    ) {
+      set(
+        "session.token",
+        token ?? null
+      );
     },
 
-    setUser(user = null) {
+    setUser(
+      user = null
+    ) {
       patch({
         session: {
-          user: user ? deepClone(user) : null,
-          role: user?.role ?? state.session.role ?? null,
+          user:
+            cloneIfAny(
+              user
+            ),
+          role:
+            user?.role ??
+            state.session
+              ?.role ??
+            null,
         },
       });
     },
 
-    setRole(role = null) {
-      set("session.role", role ?? null);
+    setRole(
+      role = null
+    ) {
+      set(
+        "session.role",
+        role ?? null
+      );
     },
 
     /* =========================================================
        UI
     ========================================================= */
-    setTheme(theme = "dark") {
-      set("ui.theme", theme);
+    setTheme(
+      theme = "dark"
+    ) {
+      set(
+        "ui.theme",
+        theme
+      );
     },
 
-    setLang(lang = "es") {
-      set("ui.lang", lang);
+    setLang(
+      lang = "es"
+    ) {
+      set(
+        "ui.lang",
+        lang
+      );
     },
 
-    setSidebarOpen(value) {
-      set("ui.sidebarOpen", Boolean(value));
+    setSidebarOpen(
+      value
+    ) {
+      set(
+        "ui.sidebarOpen",
+        Boolean(value)
+      );
     },
 
-    setPageTitle(title = AppCore.config.appName) {
+    setPageTitle(
+      title =
+        AppCore.config
+          .appName
+    ) {
+      const finalTitle =
+        title ||
+        AppCore.config
+          .appName;
+
       patch({
         ui: {
-          pageTitle: title || AppCore.config.appName,
-          topbarTitle: title || AppCore.config.appName,
+          pageTitle:
+            finalTitle,
+          topbarTitle:
+            finalTitle,
         },
       });
     },
 
-    setTopbarTitle(title = AppCore.config.appName) {
-      set("ui.topbarTitle", title || AppCore.config.appName);
+    setTopbarTitle(
+      title =
+        AppCore.config
+          .appName
+    ) {
+      set(
+        "ui.topbarTitle",
+        title ||
+          AppCore.config
+            .appName
+      );
     },
 
     /* =========================================================
        FLAGS
     ========================================================= */
-    setFlag(flag, value) {
+    setFlag(
+      flag,
+      value
+    ) {
       if (!flag) {
-        throw new Error("actions.setFlag(flag, value) requiere flag");
+        throw new Error(
+          "actions.setFlag(flag, value) requiere flag"
+        );
       }
 
-      set(`flags.${flag}`, Boolean(value));
+      set(
+        `flags.${flag}`,
+        Boolean(value)
+      );
     },
 
     /* =========================================================
-       COLECCIONES
+       COLLECTIONS
     ========================================================= */
-    setCollection(key, items = []) {
-      ensureCollectionKey(state, key);
-      set(`entities.${key}`, normalizeCollection(items));
+    setCollection(
+      key,
+      items = []
+    ) {
+      ensureCollectionKey(
+        state,
+        key
+      );
+
+      set(
+        `entities.${key}`,
+        normalizeCollection(
+          items
+        )
+      );
     },
 
-    appendToCollection(key, item) {
-      ensureCollectionKey(state, key);
+    appendToCollection(
+      key,
+      item
+    ) {
+      ensureCollectionKey(
+        state,
+        key
+      );
 
-      update(`entities.${key}`, (list = []) => {
-        const next = Array.isArray(list) ? [...list] : [];
-        next.push(item);
-        return next;
-      });
+      update(
+        `entities.${key}`,
+        (list = []) => {
+          const next =
+            Array.isArray(
+              list
+            )
+              ? [...list]
+              : [];
+
+          next.push(item);
+
+          return next;
+        }
+      );
     },
 
-    prependToCollection(key, item) {
-      ensureCollectionKey(state, key);
+    prependToCollection(
+      key,
+      item
+    ) {
+      ensureCollectionKey(
+        state,
+        key
+      );
 
-      update(`entities.${key}`, (list = []) => {
-        const next = Array.isArray(list) ? [...list] : [];
-        next.unshift(item);
-        return next;
-      });
+      update(
+        `entities.${key}`,
+        (list = []) => {
+          const next =
+            Array.isArray(
+              list
+            )
+              ? [...list]
+              : [];
+
+          next.unshift(
+            item
+          );
+
+          return next;
+        }
+      );
     },
 
-    replaceCollectionItem(key, matcher, nextItem) {
-      ensureCollectionKey(state, key);
-      const match = normalizeMatcher(matcher);
+    replaceCollectionItem(
+      key,
+      matcher,
+      nextItem
+    ) {
+      ensureCollectionKey(
+        state,
+        key
+      );
 
-      update(`entities.${key}`, (list = []) => {
-        if (!Array.isArray(list)) return [];
+      const match =
+        normalizeMatcher(
+          matcher
+        );
 
-        return list.map((item) => (match(item) ? nextItem : item));
-      });
+      update(
+        `entities.${key}`,
+        (list = []) => {
+          if (
+            !Array.isArray(
+              list
+            )
+          ) {
+            return [];
+          }
+
+          return list.map(
+            (item) =>
+              match(item)
+                ? nextItem
+                : item
+          );
+        }
+      );
     },
 
-    updateCollectionItem(key, matcher, updater) {
-      ensureCollectionKey(state, key);
+    updateCollectionItem(
+      key,
+      matcher,
+      updater
+    ) {
+      ensureCollectionKey(
+        state,
+        key
+      );
 
-      if (!isFunction(updater)) {
-        throw new Error("updateCollectionItem requiere updater function");
+      if (
+        !isFunction(
+          updater
+        )
+      ) {
+        throw new Error(
+          "updateCollectionItem requiere updater function"
+        );
       }
 
-      const match = normalizeMatcher(matcher);
+      const match =
+        normalizeMatcher(
+          matcher
+        );
 
-      update(`entities.${key}`, (list = []) => {
-        if (!Array.isArray(list)) return [];
+      update(
+        `entities.${key}`,
+        (list = []) => {
+          if (
+            !Array.isArray(
+              list
+            )
+          ) {
+            return [];
+          }
 
-        return list.map((item) => {
-          if (!match(item)) return item;
-          return updater(deepClone(item));
-        });
-      });
-    },
+          return list.map(
+            (item) => {
+              if (
+                !match(item)
+              ) {
+                return item;
+              }
 
-    upsertCollectionItem(key, item, matcher = null) {
-      ensureCollectionKey(state, key);
-
-      update(`entities.${key}`, (list = []) => {
-        const next = Array.isArray(list) ? [...list] : [];
-        const match = matcher
-          ? normalizeMatcher(matcher)
-          : (current) => current?.id === item?.id;
-
-        const index = next.findIndex((current) => match(current));
-
-        if (index >= 0) {
-          next[index] = item;
-        } else {
-          next.push(item);
+              return updater(
+                deepClone(
+                  item
+                )
+              );
+            }
+          );
         }
-
-        return next;
-      });
+      );
     },
 
-    removeCollectionItem(key, matcher) {
-      ensureCollectionKey(state, key);
-      const match = normalizeMatcher(matcher);
+    upsertCollectionItem(
+      key,
+      item,
+      matcher = null
+    ) {
+      ensureCollectionKey(
+        state,
+        key
+      );
 
-      update(`entities.${key}`, (list = []) => {
-        if (!Array.isArray(list)) return [];
-        return list.filter((item) => !match(item));
-      });
+      update(
+        `entities.${key}`,
+        (list = []) => {
+          const next =
+            Array.isArray(
+              list
+            )
+              ? [...list]
+              : [];
+
+          const match =
+            matcher
+              ? normalizeMatcher(
+                  matcher
+                )
+              : (
+                  current
+                ) =>
+                  current?.id ===
+                  item?.id;
+
+          const index =
+            next.findIndex(
+              (current) =>
+                match(
+                  current
+                )
+            );
+
+          if (
+            index >= 0
+          ) {
+            next[index] =
+              item;
+          } else {
+            next.push(
+              item
+            );
+          }
+
+          return next;
+        }
+      );
     },
 
-    clearCollection(key) {
-      ensureCollectionKey(state, key);
-      set(`entities.${key}`, []);
+    removeCollectionItem(
+      key,
+      matcher
+    ) {
+      ensureCollectionKey(
+        state,
+        key
+      );
+
+      const match =
+        normalizeMatcher(
+          matcher
+        );
+
+      update(
+        `entities.${key}`,
+        (list = []) => {
+          if (
+            !Array.isArray(
+              list
+            )
+          ) {
+            return [];
+          }
+
+          return list.filter(
+            (item) =>
+              !match(
+                item
+              )
+          );
+        }
+      );
+    },
+
+    clearCollection(
+      key
+    ) {
+      ensureCollectionKey(
+        state,
+        key
+      );
+
+      set(
+        `entities.${key}`,
+        []
+      );
     },
 
     /* =========================================================
-       HIDRATACIÓN
+       HYDRATE
     ========================================================= */
     hydrateFromCore() {
       patch({
         app: {
-          ready: state.app.ready,
-          booted: state.app.booted,
-          route: AppCore.state.route,
-          publicPath: AppCore.state.publicPath,
-          loading: AppCore.state.loading,
-          initialized: AppCore.state.initialized,
-          booting: AppCore.state.booting,
-          lastError: AppCore.state.lastError,
+          ready:
+            state.app
+              .ready,
+          booted:
+            state.app
+              .booted,
+          route:
+            AppCore.state
+              .route,
+          publicPath:
+            AppCore.state
+              .publicPath,
+          loading:
+            AppCore.state
+              .loading,
+          initialized:
+            AppCore.state
+              .initialized,
+          booting:
+            AppCore.state
+              .booting,
+          lastError:
+            AppCore.state
+              .lastError,
         },
+
         session: {
-          authenticated: AppCore.state.authenticated,
-          token: AppCore.state.token,
-          user: AppCore.state.user ? deepClone(AppCore.state.user) : null,
-          role: AppCore.state.role,
+          authenticated:
+            AppCore.state
+              .authenticated,
+          token:
+            AppCore.state
+              .token,
+          user:
+            cloneIfAny(
+              AppCore.state
+                .user
+            ),
+          role:
+            AppCore.state
+              .role,
         },
+
         ui: {
-          theme: AppCore.state.theme,
-          lang: AppCore.state.lang,
-          sidebarOpen: AppCore.state.sidebarOpen,
-          pageTitle: safeTitle(AppCore),
-          topbarTitle: safeTopbarTitle(AppCore),
+          theme:
+            AppCore.state
+              .theme,
+          lang:
+            AppCore.state
+              .lang,
+          sidebarOpen:
+            AppCore.state
+              .sidebarOpen,
+          pageTitle:
+            safeTitle(
+              AppCore
+            ),
+          topbarTitle:
+            safeTopbarTitle(
+              AppCore
+            ),
         },
+
         meta: {
           hydrated: true,
-          updatedAt: Date.now(),
+          updatedAt:
+            Date.now(),
         },
       });
     },

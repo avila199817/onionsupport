@@ -9,6 +9,12 @@
    - sincronizar route/publicPath
    - flujos success / forbidden / 404 / login / runtime
    - soportar route.render async
+
+   HARDENING:
+   - guards de browser
+   - sync de estado consistente
+   - payloads estables
+   - 404 desacoplable más adelante
 ========================================================= */
 
 import {
@@ -26,20 +32,56 @@ import {
 } from "./helpers.js";
 
 /* =========================================================
+   INTERNAL
+========================================================= */
+function isBrowser() {
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
+}
+
+function safeEmit(AppCore, eventName, payload) {
+  AppCore?.events?.emit?.(eventName, payload);
+}
+
+function safeSetDocumentTitle(setDocumentTitle, title) {
+  if (typeof setDocumentTitle === "function") {
+    setDocumentTitle(title);
+  }
+}
+
+function safeSetShellMode(setShellMode, route) {
+  if (typeof setShellMode === "function") {
+    setShellMode(route);
+  }
+}
+
+function safeClearDynamicContainers(clearDynamicContainers) {
+  if (typeof clearDynamicContainers === "function") {
+    clearDynamicContainers();
+  }
+}
+
+function safeSetActiveMenu(setActiveMenu, path) {
+  if (typeof setActiveMenu === "function") {
+    setActiveMenu(path);
+  }
+}
+
+/* =========================================================
    VIEW CONTAINER
 ========================================================= */
-export function getViewContainer(
-  AppCore
-) {
+export function getViewContainer(AppCore) {
+  if (!isBrowser()) {
+    return null;
+  }
+
   return (
-    AppCore.dom
-      .viewContainer ||
-    document.getElementById(
-      "view-container"
-    ) ||
-    document.querySelector(
-      "#view-container"
-    )
+    AppCore?.dom?.viewContainer ||
+    document.getElementById("view-container") ||
+    document.querySelector("#view-container") ||
+    null
   );
 }
 
@@ -68,27 +110,19 @@ export function buildRenderPayload({
   };
 }
 
-export function emitBeforeRender(
-  AppCore,
-  payload = {}
-) {
-  AppCore.events.emit(
+export function emitBeforeRender(AppCore, payload = {}) {
+  safeEmit(
+    AppCore,
     "router:before-render",
-    buildRenderPayload(
-      payload
-    )
+    buildRenderPayload(payload)
   );
 }
 
-export function emitRendered(
-  AppCore,
-  payload = {}
-) {
-  AppCore.events.emit(
+export function emitRendered(AppCore, payload = {}) {
+  safeEmit(
+    AppCore,
     "router:rendered",
-    buildRenderPayload(
-      payload
-    )
+    buildRenderPayload(payload)
   );
 }
 
@@ -100,26 +134,26 @@ export function syncRouteState(
   canonicalPath = "/",
   publicPath = null
 ) {
-  const finalCanonical =
-    normalizeCanonicalPath(
-      AppCore,
-      canonicalPath
-    );
-
-  const finalPublicPath =
-    AppCore.utils.normalizePath(
-      publicPath ||
-        `${window.location.pathname || "/"}${window.location.search || ""}` ||
-        finalCanonical
-    );
-
-  AppCore.setRoute?.(
-    finalCanonical
+  const finalCanonical = normalizeCanonicalPath(
+    AppCore,
+    canonicalPath
   );
 
-  AppCore.setPublicPath?.(
-    finalPublicPath
+  const browserPublicPath = isBrowser()
+    ? `${window.location.pathname || "/"}${window.location.search || ""}`
+    : finalCanonical;
+
+  const finalPublicPath = AppCore.utils.normalizePath(
+    publicPath || browserPublicPath || finalCanonical
   );
+
+  AppCore.setRoute?.(finalCanonical);
+  AppCore.setPublicPath?.(finalPublicPath);
+
+  return {
+    canonicalPath: finalCanonical,
+    publicPath: finalPublicPath,
+  };
 }
 
 export function applyResolvedRouteState(
@@ -127,47 +161,30 @@ export function applyResolvedRouteState(
   canonicalPath,
   fallbackPublicPath
 ) {
-  const resolvedPublicPath =
-    getResolvedPublicPath(
-      fallbackPublicPath
-    );
+  const resolvedPublicPath = getResolvedPublicPath(
+    fallbackPublicPath
+  );
 
-  syncRouteState(
+  const synced = syncRouteState(
     AppCore,
     canonicalPath,
     resolvedPublicPath
   );
 
-  return resolvedPublicPath;
+  return synced.publicPath;
 }
 
 /* =========================================================
    INTERNAL VIEWS
 ========================================================= */
-export function renderGenericView(
-  AppCore,
-  route
-) {
-  const view =
-    getViewContainer(
-      AppCore
-    );
+export function renderGenericView(AppCore, route) {
+  const view = getViewContainer(AppCore);
 
   if (!view) return;
 
-  const canonicalPath =
-    AppCore.state.route ||
-    "/";
-
-  const publicPath =
-    getCurrentPublicPath(
-      AppCore
-    );
-
-  const resolvedUsername =
-    getCurrentResolvedUsername(
-      AppCore
-    );
+  const canonicalPath = AppCore.state.route || "/";
+  const publicPath = getCurrentPublicPath(AppCore);
+  const resolvedUsername = getCurrentResolvedUsername(AppCore);
 
   view.innerHTML = `
 <section class="content-wrapper">
@@ -196,18 +213,14 @@ export function renderForbiddenView(
   getRoute,
   route = null
 ) {
-  const view =
-    getViewContainer(
-      AppCore
-    );
+  const view = getViewContainer(AppCore);
 
   if (!view) return;
 
-  const homeHref =
-    getDefaultHomeTarget(
-      AppCore,
-      getRoute
-    );
+  const homeHref = getDefaultHomeTarget(
+    AppCore,
+    getRoute
+  );
 
   view.innerHTML = `
 <section class="content-wrapper">
@@ -231,37 +244,22 @@ export function renderNotFoundView(
   requestedPath = "/",
   getRoute
 ) {
-  const routeNames =
-    getRouteNames(
-      AppCore
-    );
-
-  const view =
-    getViewContainer(
-      AppCore
-    );
+  const routeNames = getRouteNames(AppCore);
+  const view = getViewContainer(AppCore);
 
   if (!view) return;
 
-  const homeHref =
-    buildPublicPath(
-      AppCore,
-      getRoute,
-      routeNames.HOME,
-      {
-        username:
-          extractUsernameFromPath(
-            AppCore,
-            requestedPath
-          ) ||
-          getCurrentResolvedUsername(
-            AppCore
-          ) ||
-          getCurrentUsername(
-            AppCore
-          ),
-      }
-    );
+  const homeHref = buildPublicPath(
+    AppCore,
+    getRoute,
+    routeNames.HOME,
+    {
+      username:
+        extractUsernameFromPath(AppCore, requestedPath) ||
+        getCurrentResolvedUsername(AppCore) ||
+        getCurrentUsername(AppCore),
+    }
+  );
 
   view.innerHTML = `
 <section class="content-wrapper">
@@ -287,10 +285,7 @@ export function renderRuntimeErrorView(
   requestedPath = "/",
   getRoute
 ) {
-  const view =
-    getViewContainer(
-      AppCore
-    );
+  const view = getViewContainer(AppCore);
 
   if (!view) return;
 
@@ -324,44 +319,32 @@ export async function renderRouteSuccess({
   setShellMode,
   setDocumentTitle,
 } = {}) {
-  const resolvedPublicPath =
-    applyResolvedRouteState(
-      AppCore,
-      canonicalPath,
-      requestedPath
-    );
-
-  setShellMode(route);
-
-  setDocumentTitle(
-    route.title ||
-      AppCore.config
-        .appName
-  );
-
-  await Promise.resolve(
-    route.render?.(route)
-  );
-
-  emitRendered(
+  const resolvedPublicPath = applyResolvedRouteState(
     AppCore,
-    {
-      path:
-        requestedPath,
-      canonicalPath,
-      publicPath:
-        resolvedPublicPath,
-      username:
-        requestedUsername ||
-        getCurrentResolvedUsername(
-          AppCore
-        ) ||
-        null,
-      found: true,
-      forbidden: false,
-      route,
-    }
+    canonicalPath,
+    requestedPath
   );
+
+  safeSetShellMode(setShellMode, route);
+  safeSetDocumentTitle(
+    setDocumentTitle,
+    route?.title || AppCore.config.appName
+  );
+
+  await Promise.resolve(route?.render?.(route));
+
+  emitRendered(AppCore, {
+    path: requestedPath,
+    canonicalPath,
+    publicPath: resolvedPublicPath,
+    username:
+      requestedUsername ||
+      getCurrentResolvedUsername(AppCore) ||
+      null,
+    found: true,
+    forbidden: false,
+    route,
+  });
 }
 
 export function renderRouteForbidden({
@@ -379,54 +362,41 @@ export function renderRouteForbidden({
   updateHistory({
     AppCore,
     getRoute,
-    pathname:
-      canonicalPath,
+    pathname: canonicalPath,
     options: {
       ...options,
       username:
         requestedUsername ||
-        getCurrentUsername(
-          AppCore
-        ),
+        getCurrentUsername(AppCore),
     },
   });
 
-  const resolvedPublicPath =
-    applyResolvedRouteState(
-      AppCore,
-      canonicalPath,
-      requestedPath
-    );
+  const resolvedPublicPath = applyResolvedRouteState(
+    AppCore,
+    canonicalPath,
+    requestedPath
+  );
 
-  setShellMode(route);
-  setDocumentTitle(
+  safeSetShellMode(setShellMode, route);
+  safeSetDocumentTitle(
+    setDocumentTitle,
     "Acceso denegado"
   );
 
-  renderForbiddenView(
-    AppCore,
-    getRoute,
-    route
-  );
+  renderForbiddenView(AppCore, getRoute, route);
 
-  emitRendered(
-    AppCore,
-    {
-      path:
-        requestedPath,
-      canonicalPath,
-      publicPath:
-        resolvedPublicPath,
-      username:
-        requestedUsername ||
-        getCurrentResolvedUsername(
-          AppCore
-        ),
-      found: true,
-      forbidden: true,
-      route,
-    }
-  );
+  emitRendered(AppCore, {
+    path: requestedPath,
+    canonicalPath,
+    publicPath: resolvedPublicPath,
+    username:
+      requestedUsername ||
+      getCurrentResolvedUsername(AppCore) ||
+      null,
+    found: true,
+    forbidden: true,
+    route,
+  });
 }
 
 export function renderRouteNotFound({
@@ -443,50 +413,36 @@ export function renderRouteNotFound({
   updateHistory({
     AppCore,
     getRoute,
-    pathname:
-      requestedPath,
+    pathname: requestedPath,
     options: {
       ...options,
-      preservePath:
-        true,
+      preservePath: true,
     },
   });
 
-  const resolvedPublicPath =
-    applyResolvedRouteState(
-      AppCore,
-      canonicalPath,
-      requestedPath
-    );
-
-  setShellMode(null);
-  setDocumentTitle("404");
-
-  renderNotFoundView(
+  const resolvedPublicPath = applyResolvedRouteState(
     AppCore,
-    requestedPath,
-    getRoute
+    canonicalPath,
+    requestedPath
   );
 
-  emitRendered(
-    AppCore,
-    {
-      path:
-        requestedPath,
-      canonicalPath,
-      publicPath:
-        resolvedPublicPath,
-      username:
-        requestedUsername ||
-        getCurrentResolvedUsername(
-          AppCore
-        ) ||
-        null,
-      found: false,
-      forbidden: false,
-      route: null,
-    }
-  );
+  safeSetShellMode(setShellMode, null);
+  safeSetDocumentTitle(setDocumentTitle, "404");
+
+  renderNotFoundView(AppCore, requestedPath, getRoute);
+
+  emitRendered(AppCore, {
+    path: requestedPath,
+    canonicalPath,
+    publicPath: resolvedPublicPath,
+    username:
+      requestedUsername ||
+      getCurrentResolvedUsername(AppCore) ||
+      null,
+    found: false,
+    forbidden: false,
+    route: null,
+  });
 }
 
 export async function renderLoginRedirect({
@@ -499,79 +455,47 @@ export async function renderLoginRedirect({
   setShellMode,
   setDocumentTitle,
 } = {}) {
-  const routeNames =
-    getRouteNames(
-      AppCore
-    );
-
-  const loginRoute =
-    getRoute(
-      routeNames.LOGIN
-    );
-
-  const loginUrl =
-    buildLoginUrl(
-      AppCore,
-      canonicalPath
-    );
+  const routeNames = getRouteNames(AppCore);
+  const loginRoute = getRoute(routeNames.LOGIN);
+  const loginUrl = buildLoginUrl(AppCore, canonicalPath);
 
   updateHistory({
     AppCore,
     getRoute,
     pathname: loginUrl,
     options: {
-      replaceState:
-        true,
-      preservePath:
-        true,
-      redirectedFrom:
-        canonicalPath,
+      replaceState: true,
+      preservePath: true,
+      redirectedFrom: canonicalPath,
     },
   });
 
-  const resolvedPublicPath =
-    applyResolvedRouteState(
-      AppCore,
-      routeNames.LOGIN,
-      loginUrl
-    );
-
-  clearDynamicContainers();
-  setActiveMenu(
-    routeNames.LOGIN
-  );
-  setShellMode(
-    loginRoute
-  );
-
-  setDocumentTitle(
-    loginRoute?.title ||
-      "Acceso"
-  );
-
-  await Promise.resolve(
-    loginRoute?.render?.(
-      loginRoute
-    )
-  );
-
-  emitRendered(
+  const resolvedPublicPath = applyResolvedRouteState(
     AppCore,
-    {
-      path: loginUrl,
-      canonicalPath:
-        routeNames.LOGIN,
-      publicPath:
-        resolvedPublicPath,
-      username: null,
-      found: true,
-      forbidden: false,
-      redirectedFrom:
-        canonicalPath,
-      route:
-        loginRoute,
-    }
+    routeNames.LOGIN,
+    loginUrl
   );
+
+  safeClearDynamicContainers(clearDynamicContainers);
+  safeSetActiveMenu(setActiveMenu, routeNames.LOGIN);
+  safeSetShellMode(setShellMode, loginRoute);
+  safeSetDocumentTitle(
+    setDocumentTitle,
+    loginRoute?.title || "Acceso"
+  );
+
+  await Promise.resolve(loginRoute?.render?.(loginRoute));
+
+  emitRendered(AppCore, {
+    path: loginUrl,
+    canonicalPath: routeNames.LOGIN,
+    publicPath: resolvedPublicPath,
+    username: null,
+    found: true,
+    forbidden: false,
+    redirectedFrom: canonicalPath,
+    route: loginRoute,
+  });
 }
 
 export function renderRouteRuntimeError({
@@ -587,14 +511,10 @@ export function renderRouteRuntimeError({
   setShellMode,
   setDocumentTitle,
 } = {}) {
-  if (
-    cycleId !==
-    renderCycle
-  ) {
+  if (cycleId !== renderCycle) {
     AppCore.utils.warn?.(
       "Router: render antiguo descartado."
     );
-
     return;
   }
 
@@ -603,17 +523,14 @@ export function renderRouteRuntimeError({
     error
   );
 
-  const resolvedPublicPath =
-    applyResolvedRouteState(
-      AppCore,
-      canonicalPath,
-      requestedPath
-    );
-
-  setShellMode(route);
-  setDocumentTitle(
-    "Error"
+  const resolvedPublicPath = applyResolvedRouteState(
+    AppCore,
+    canonicalPath,
+    requestedPath
   );
+
+  safeSetShellMode(setShellMode, route);
+  safeSetDocumentTitle(setDocumentTitle, "Error");
 
   renderRuntimeErrorView(
     AppCore,
@@ -623,23 +540,16 @@ export function renderRouteRuntimeError({
     getRoute
   );
 
-  emitRendered(
-    AppCore,
-    {
-      path:
-        requestedPath,
-      canonicalPath,
-      publicPath:
-        resolvedPublicPath,
-      username:
-        requestedUsername ||
-        getCurrentResolvedUsername(
-          AppCore
-        ) ||
-        null,
-      found: true,
-      forbidden: false,
-      route,
-    }
-  );
+  emitRendered(AppCore, {
+    path: requestedPath,
+    canonicalPath,
+    publicPath: resolvedPublicPath,
+    username:
+      requestedUsername ||
+      getCurrentResolvedUsername(AppCore) ||
+      null,
+    found: true,
+    forbidden: false,
+    route,
+  });
 }

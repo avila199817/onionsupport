@@ -3,17 +3,15 @@
    Archivo: src/views/login/login.template.js
 
    Responsabilidades:
-   - generar el html del login con el layout visual clásico
-   - conservar el bloque lateral izquierdo de estado
-   - mantener el card principal a la derecha
-   - respetar clases reales del css auth/login.css
-   - mantener ids estables para login.dom.js / login.view.js
+   - generar el html premium del login alineado con el layout clásico
+   - soportar acceso con usuario o email
+   - mantener ids reales para la lógica del login
+   - soportar show/hide password con iconos dedicados
+   - soportar indicador de caps lock visual
    - incluir toast superior derecho desacoplado
-   - incluir logo fade con secuencia de imágenes
-   - incluir toggle password con eye / eye-off
-   - incluir indicador caps lock visual
-   - soportar redirect oculto y remember checkbox
-   - mantener footer inferior del card
+   - conservar panel lateral izquierdo y card a la derecha
+   - respetar el sistema visual auth-screen / login-grid / login-card
+   - dejar el markup listo para login.view.js / login.dom.js
 ========================================================= */
 
 import { escapeHtml } from "./login.helpers.js";
@@ -22,7 +20,7 @@ import { escapeHtml } from "./login.helpers.js";
    ICONS
 ========================================================= */
 
-function getInfoToastIcon() {
+function getToastInfoIcon() {
   return `
     <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
       <path
@@ -117,7 +115,7 @@ function renderToast() {
 
         <div class="login-toast-body">
           <div id="loginToastIcon" class="login-toast-icon" aria-hidden="true">
-            ${getInfoToastIcon()}
+            ${getToastInfoIcon()}
           </div>
 
           <div class="login-toast-content">
@@ -152,12 +150,12 @@ function renderSignalItem(text = "") {
 }
 
 function renderLeftPanel({
-  eyebrow = "Entorno seguro",
-  title = "Tu acceso entra en un panel más vivo y con más presencia visual.",
-  signals = [],
+  heroEyebrow = "Entorno seguro",
+  heroTitle = "Tu acceso entra en un panel más vivo y con más presencia visual.",
+  bullets = [],
 } = {}) {
-  const finalSignals = Array.isArray(signals) && signals.length
-    ? signals.filter(Boolean)
+  const finalBullets = Array.isArray(bullets) && bullets.length
+    ? bullets.filter(Boolean)
     : [
         "Sesión cifrada",
         "Controles de acceso activos",
@@ -167,11 +165,11 @@ function renderLeftPanel({
   return `
     <aside class="login-side login-side-left login-side-left--raised" aria-hidden="true">
       <div class="login-side-panel login-side-panel--status login-side-panel--compact">
-        <div class="login-side-eyebrow">${escapeHtml(eyebrow)}</div>
-        <h3>${escapeHtml(title)}</h3>
+        <div class="login-side-eyebrow">${escapeHtml(heroEyebrow)}</div>
+        <h3>${escapeHtml(heroTitle)}</h3>
 
         <div class="login-signal-list">
-          ${finalSignals.map(renderSignalItem).join("")}
+          ${finalBullets.map(renderSignalItem).join("")}
         </div>
       </div>
     </aside>
@@ -179,17 +177,20 @@ function renderLeftPanel({
 }
 
 function renderLogoFade({
-  logoBlack = "/src/media/img/favicon_black.png",
-  logoBlackCircle = "/src/media/img/favicon_black_circle.png",
-  logoSupport = "/src/media/img/favicon_support.png",
-  logoWhite = "/src/media/img/favicon_white.png",
+  logos = [],
 } = {}) {
+  const finalLogos = Array.isArray(logos) && logos.length
+    ? logos
+    : [
+        "/src/media/img/favicon_black.png",
+        "/src/media/img/favicon_black_circle.png",
+        "/src/media/img/favicon_support.png",
+        "/src/media/img/favicon_white.png",
+      ];
+
   return `
     <div class="logo-fade" aria-hidden="true">
-      <img src="${escapeHtml(logoBlack)}" alt="">
-      <img src="${escapeHtml(logoBlackCircle)}" alt="">
-      <img src="${escapeHtml(logoSupport)}" alt="">
-      <img src="${escapeHtml(logoWhite)}" alt="">
+      ${finalLogos.map((src) => `<img src="${escapeHtml(src)}" alt="">`).join("")}
     </div>
   `;
 }
@@ -208,10 +209,7 @@ function renderForm({
   submitLabel = "Acceder",
   forgotLabel = "¿Has olvidado tu contraseña?",
   forgotPasswordHref = "/reset-password",
-  logoBlack,
-  logoBlackCircle,
-  logoSupport,
-  logoWhite,
+  logos = [],
 } = {}) {
   const finalTitle = title || `Iniciar sesión con la cuenta ${appName}`;
 
@@ -220,12 +218,7 @@ function renderForm({
       <div class="login-card-shell login-card-shell--right">
         <div class="login-card login-card--clean login-card--offset" id="loginCard">
           <div class="login-header">
-            ${renderLogoFade({
-              logoBlack,
-              logoBlackCircle,
-              logoSupport,
-              logoWhite,
-            })}
+            ${renderLogoFade({ logos })}
 
             <h2>${escapeHtml(finalTitle)}</h2>
 
@@ -254,6 +247,7 @@ function renderForm({
                 autocapitalize="off"
                 required
                 aria-invalid="false"
+                data-auth-identifier="true"
               >
             </div>
 
@@ -268,6 +262,7 @@ function renderForm({
                 required
                 minlength="6"
                 aria-invalid="false"
+                data-auth-password="true"
               >
 
               <button
@@ -277,6 +272,7 @@ function renderForm({
                 aria-label="Mostrar contraseña"
                 aria-pressed="false"
                 title="Mostrar contraseña"
+                data-toggle-password="true"
               >
                 ${getEyeOpenIcon()}
                 ${getEyeClosedIcon()}
@@ -290,7 +286,6 @@ function renderForm({
                 hidden
               >
                 ${getCapsIcon()}
-
                 <span id="capsLabel" class="caps-label" hidden>
                   Bloq mayús
                 </span>

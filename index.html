@@ -3,21 +3,14 @@
 <head>
   <!-- =========================================================
        ONION SUPPORT — INDEX / SPA SHELL
-       PRO SAAS PANEL / FINAL PRO SYSTEM
-       Shell SPA final alineado con:
-       - layout.css final
-       - sidebar.css final
-       - topbar.css final
-       - loader.css final
-       - tooltips custom por data-tooltip
-       - sidebar montado desde JS
-       - topbar montado desde JS
-       - sidebar desktop / mobile
-       - loader limpio
-       - topbar / tablehead / dynamic slots
-       - base href coherente
-       - preparado para dark / light premium
-       - preparado para i18n live en loader
+       FINAL PRO SYSTEM v4
+
+       FIX CRÍTICO:
+       - loader ya NO viene hardcodeado
+       - no fuerza dark al cargar
+       - theme se resuelve antes del runtime
+       - loader será montado desde JS
+       - evita flash dark inicial
   ========================================================= -->
 
   <!-- =========================
@@ -25,16 +18,19 @@
   ========================= -->
   <meta charset="UTF-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
+
   <meta
     name="viewport"
     content="width=device-width, initial-scale=1.0, viewport-fit=cover"
   >
 
   <title>Onion Support</title>
+
   <meta
     name="description"
     content="Onion Support · Panel SaaS de soporte, incidencias, facturación y gestión interna."
   >
+
   <meta name="robots" content="noindex, nofollow">
   <meta name="color-scheme" content="dark light">
   <meta name="theme-color" content="#1f1f1f">
@@ -54,7 +50,11 @@
        PERFORMANCE
   ========================= -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    rel="preconnect"
+    href="https://fonts.gstatic.com"
+    crossorigin
+  >
 
   <!-- =========================
        FONTS
@@ -65,6 +65,56 @@
   >
 
   <!-- =========================
+       PREBOOT THEME FIX
+       ejecuta ANTES del CSS paint final
+  ========================= -->
+  <script>
+    (() => {
+      try {
+        const keys = [
+          "onion_theme",
+          "onion:theme",
+          "theme"
+        ];
+
+        let theme = null;
+
+        for (const key of keys) {
+          const value = localStorage.getItem(key);
+
+          if (
+            value === "dark" ||
+            value === "light"
+          ) {
+            theme = value;
+            break;
+          }
+        }
+
+        if (!theme) {
+          theme =
+            window.matchMedia &&
+            window.matchMedia(
+              "(prefers-color-scheme: light)"
+            ).matches
+              ? "light"
+              : "dark";
+        }
+
+        document.documentElement.setAttribute(
+          "data-theme",
+          theme
+        );
+      } catch (error) {
+        document.documentElement.setAttribute(
+          "data-theme",
+          "dark"
+        );
+      }
+    })();
+  </script>
+
+  <!-- =========================
        CSS ORDER
   ========================= -->
 
@@ -72,7 +122,7 @@
   <link rel="stylesheet" href="/src/css/tokens/variables.css">
   <link rel="stylesheet" href="/src/css/tokens/light.css">
 
-  <!-- CORE / RESET -->
+  <!-- CORE -->
   <link rel="stylesheet" href="/src/css/core/reset.css">
   <link rel="stylesheet" href="/src/css/core/layout.css">
   <link rel="stylesheet" href="/src/css/core/core.css">
@@ -97,13 +147,9 @@
       body{
         margin:0;
         min-height:100%;
-        background:#1f1f1f;
+        background:#111111;
         color:#ffffff;
-        font-family:Inter, system-ui, sans-serif;
-      }
-
-      #app-loader{
-        display:none !important;
+        font-family:Inter,system-ui,sans-serif;
       }
 
       .layout{
@@ -123,8 +169,8 @@
       #app-content,
       #view-container{
         display:block !important;
-        min-height:100vh;
         width:100%;
+        min-height:100vh;
         margin:0;
         padding:0;
       }
@@ -140,18 +186,16 @@
         border-radius:18px;
         border:1px solid rgba(255,255,255,.08);
         background:rgba(255,255,255,.04);
-        box-shadow:0 18px 40px rgba(0,0,0,.24);
       }
 
       .noscript-box h1{
         margin:0 0 12px;
         font-size:28px;
-        line-height:1.1;
       }
 
       .noscript-box p{
         margin:0;
-        line-height:1.55;
+        line-height:1.6;
         color:rgba(255,255,255,.78);
       }
     </style>
@@ -159,53 +203,9 @@
 </head>
 
 <body
-  class="loading"
   data-app="onion"
-  data-theme="dark"
   data-density="default"
 >
-  <!-- =========================================================
-       APP LOADER
-       - logos separados por tema
-       - label preparado para i18n
-       - accesible sin interferir en el runtime SPA
-  ========================================================= -->
-  <div
-    id="app-loader"
-    aria-hidden="true"
-  >
-    <div class="loader-center">
-      <div class="loader-core"></div>
-
-      <img
-        class="loader-logo loader-dark"
-        src="/src/media/img/favicon_white.png"
-        alt="Onion Support"
-        width="64"
-        height="64"
-        decoding="async"
-        draggable="false"
-      >
-
-      <img
-        class="loader-logo loader-light"
-        src="/src/media/img/favicon_black.png"
-        alt="Onion Support"
-        width="64"
-        height="64"
-        decoding="async"
-        draggable="false"
-      >
-
-      <span
-        class="loader-label"
-        data-i18n="app.loading"
-      >
-        Cargando panel
-      </span>
-    </div>
-  </div>
-
   <!-- =========================================================
        NOSCRIPT FALLBACK
   ========================================================= -->
@@ -220,8 +220,10 @@
           <div id="view-container">
             <section class="noscript-box">
               <h1>JavaScript es necesario</h1>
+
               <p>
-                Onion Support necesita JavaScript para cargar la navegación SPA,
+                Onion Support necesita JavaScript
+                para cargar la navegación SPA,
                 el panel, las vistas y la autenticación.
               </p>
             </section>
@@ -233,29 +235,23 @@
 
   <!-- =========================================================
        APP LAYOUT
-       Sidebar montado dinámicamente desde src/ui/sidebar/index.js
-       Topbar montado dinámicamente desde src/ui/topbar/index.js
+       Sidebar y Topbar montados por JS
   ========================================================= -->
   <div
     class="layout"
     id="app-shell"
   >
-    <!-- SIDEBAR -->
-    <!-- se monta por JS aquí -->
+    <!-- sidebar mount -->
 
-    <!-- TOPBAR -->
-    <!-- se monta por JS aquí -->
+    <!-- topbar mount -->
 
-    <!-- MAIN CONTENT SHELL -->
     <main
       class="main-content"
       id="main-content"
       role="main"
       aria-label="Contenido principal"
     >
-      <!-- APP CONTENT -->
       <div id="app-content">
-        <!-- VIEW ROOT -->
         <div
           id="view-container"
           data-view-root
@@ -268,6 +264,9 @@
   <!-- =========================
        APP ENTRY
   ========================= -->
-  <script type="module" src="/src/app.js"></script>
+  <script
+    type="module"
+    src="/src/app.js"
+  ></script>
 </body>
 </html>

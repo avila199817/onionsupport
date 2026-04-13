@@ -5,15 +5,16 @@
    Responsabilidades:
    - orquestar la vista de login
    - renderizar template + estilos
-   - conectar dom, helpers, toast y auth
+   - conectar dom, auth, core y toast
    - gestionar submit y feedback visual
    - sincronizar sesión y redirigir
    - mantener cleanup de listeners
+   - exponer compatibilidad default + named export
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 import { Auth } from "../../features/auth/index.js";
-import ToastBridge from "../../ui/toast/index.js";
+import Toast from "../../ui/toast/index.js";
 
 import {
   loadRememberedEmail,
@@ -50,12 +51,22 @@ import {
    HELPERS
 ========================================================= */
 
+function resolveToastApi(deps = {}) {
+  const customToast = deps.toast;
+
+  if (customToast && typeof customToast === "object") {
+    return customToast;
+  }
+
+  return Toast;
+}
+
 function resolveLoginExecutor(deps = {}) {
   const candidates = [
     deps.onSubmit,
     deps.submitLogin,
     deps.login,
-    loginRequest,
+    Auth?.login,
     AppCore?.services?.auth?.login,
     AppCore?.auth?.login,
   ];
@@ -78,12 +89,14 @@ function resolveForgotPasswordHref(deps = {}) {
 }
 
 function navigateTo(path = "/") {
+  const finalPath = safeText(path, "/") || "/";
+
   if (typeof AppCore?.navigate === "function") {
-    AppCore.navigate(path);
+    AppCore.navigate(finalPath);
     return;
   }
 
-  window.location.assign(path);
+  window.location.assign(finalPath);
 }
 
 function toggleTheme() {
@@ -110,11 +123,30 @@ function toggleTheme() {
   return next;
 }
 
+function safeToastCall(toast, method, ...args) {
+  try {
+    if (typeof toast?.[method] === "function") {
+      return toast[method](...args);
+    }
+  } catch {}
+
+  return null;
+}
+
+function emitRouteRendered() {
+  try {
+    AppCore?.events?.emit?.("app:route:rendered", {
+      route: "/login",
+      view: "login",
+    });
+  } catch {}
+}
+
 /* =========================================================
    VIEW
 ========================================================= */
 
-export default function renderLoginView(container, deps = {}) {
+function renderLoginView(container, deps = {}) {
   if (!container) {
     throw new Error("[LoginView] container es obligatorio.");
   }
@@ -133,18 +165,19 @@ export default function renderLoginView(container, deps = {}) {
   });
 
   const refs = getLoginRefs(container);
-  const toast = ToastBridge.of(deps.toast);
+  const toast = resolveToastApi(deps);
   const executeLogin = resolveLoginExecutor(deps);
+
+  safeToastCall(toast, "init");
 
   if (!executeLogin) {
     const message =
       "No se encontró un executor de login. Revisa src/features/auth/index.js o pasa deps.login.";
 
     setGlobalLoginError(refs, message);
+    safeToastCall(toast, "error", message);
 
-    try {
-      toast?.error?.(message);
-    } catch {}
+    emitRouteRendered();
 
     return {
       destroy() {},
@@ -167,10 +200,7 @@ export default function renderLoginView(container, deps = {}) {
 
   const onThemeToggle = () => {
     const nextTheme = toggleTheme();
-
-    try {
-      toast?.info?.(`Tema ${nextTheme} activado.`);
-    } catch {}
+    safeToastCall(toast, "info", `Tema ${nextTheme} activado.`);
   };
 
   const onSubmit = async (event) => {
@@ -185,11 +215,11 @@ export default function renderLoginView(container, deps = {}) {
     if (Object.keys(errors).length > 0) {
       applyLoginErrors(refs, errors);
 
-      try {
-        toast?.error?.(
-          getFirstLoginError(errors) || "Revisa el formulario."
-        );
-      } catch {}
+      safeToastCall(
+        toast,
+        "error",
+        getFirstLoginError(errors) || "Revisa el formulario."
+      );
 
       return;
     }
@@ -204,44 +234,36 @@ export default function renderLoginView(container, deps = {}) {
         loadingLabel,
       });
 
-      try {
-        loadingToastId = toast?.loading?.(
-          "Validando credenciales…",
-          {
-            persist: true,
-          }
-        );
-      } catch {}
+      loadingToastId = safeToastCall(
+        toast,
+        "loading",
+        "Validando credenciales…",
+        {
+          persist: true,
+        }
+      );
 
       const rawResult = await executeLogin(payload);
       const auth = normalizeAuthResult(rawResult);
 
       syncSession(auth);
 
-      try {
-        toast?.dismiss?.(loadingToastId);
-      } catch {}
-
-      try {
-        toast?.success?.(
-          auth.message || "Sesión iniciada correctamente."
-        );
-      } catch {}
+      safeToastCall(toast, "dismiss", loadingToastId);
+      safeToastCall(
+        toast,
+        "success",
+        auth.message || "Sesión iniciada correctamente."
+      );
 
       const redirectTo = resolveLoginRedirect(auth, deps);
       navigateTo(redirectTo);
     } catch (error) {
-      try {
-        toast?.dismiss?.(loadingToastId);
-      } catch {}
+      safeToastCall(toast, "dismiss", loadingToastId);
 
       const message = resolveAuthErrorMessage(error);
 
       setGlobalLoginError(refs, message);
-
-      try {
-        toast?.error?.(message);
-      } catch {}
+      safeToastCall(toast, "error", message);
 
       try {
         AppCore?.events?.emit?.("auth:login:error", {
@@ -285,12 +307,7 @@ export default function renderLoginView(container, deps = {}) {
     rememberedEmail,
   });
 
-  try {
-    AppCore?.events?.emit?.("app:route:rendered", {
-      route: "/login",
-      view: "login",
-    });
-  } catch {}
+  emitRouteRendered();
 
   return {
     destroy() {
@@ -301,3 +318,6 @@ export default function renderLoginView(container, deps = {}) {
     },
   };
 }
+
+export { renderLoginView as LoginView };
+export default renderLoginView;

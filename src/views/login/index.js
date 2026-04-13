@@ -1,9 +1,17 @@
 /* =========================================================
    Onion SPA - Login View
    Archivo: src/views/login/index.js
+
+   Responsabilidades:
+   - orquestar la vista de login
+   - renderizar template + estilos
+   - conectar dom, helpers, toast y auth
+   - gestionar submit y feedback visual
+   - sincronizar sesión y redirigir
+   - mantener cleanup de listeners
 ========================================================= */
 
-import AppCore from "../../core/index.js";
+import { AppCore } from "../../core/index.js";
 import { login as loginRequest } from "../../features/auth/index.js";
 import ToastBridge from "../../ui/toast.js";
 
@@ -37,6 +45,10 @@ import {
   bindThemeToggle,
   bindLoginSubmit,
 } from "./login.dom.js";
+
+/* =========================================================
+   HELPERS
+========================================================= */
 
 function resolveLoginExecutor(deps = {}) {
   const candidates = [
@@ -98,6 +110,10 @@ function toggleTheme() {
   return next;
 }
 
+/* =========================================================
+   VIEW
+========================================================= */
+
 export default function renderLoginView(container, deps = {}) {
   if (!container) {
     throw new Error("[LoginView] container es obligatorio.");
@@ -122,10 +138,13 @@ export default function renderLoginView(container, deps = {}) {
 
   if (!executeLogin) {
     const message =
-      "No se encontró un executor de login. Revisa src/features/auth.js o pasa deps.login.";
+      "No se encontró un executor de login. Revisa src/features/auth/index.js o pasa deps.login.";
 
     setGlobalLoginError(refs, message);
-    toast.error(message);
+
+    try {
+      toast?.error?.(message);
+    } catch {}
 
     return {
       destroy() {},
@@ -148,7 +167,10 @@ export default function renderLoginView(container, deps = {}) {
 
   const onThemeToggle = () => {
     const nextTheme = toggleTheme();
-    toast.info(`Tema ${nextTheme} activado.`);
+
+    try {
+      toast?.info?.(`Tema ${nextTheme} activado.`);
+    } catch {}
   };
 
   const onSubmit = async (event) => {
@@ -162,9 +184,13 @@ export default function renderLoginView(container, deps = {}) {
 
     if (Object.keys(errors).length > 0) {
       applyLoginErrors(refs, errors);
-      toast.error(
-        getFirstLoginError(errors) || "Revisa el formulario."
-      );
+
+      try {
+        toast?.error?.(
+          getFirstLoginError(errors) || "Revisa el formulario."
+        );
+      } catch {}
+
       return;
     }
 
@@ -178,27 +204,44 @@ export default function renderLoginView(container, deps = {}) {
         loadingLabel,
       });
 
-      loadingToastId = toast.loading("Validando credenciales…", {
-        persist: true,
-      });
+      try {
+        loadingToastId = toast?.loading?.(
+          "Validando credenciales…",
+          {
+            persist: true,
+          }
+        );
+      } catch {}
 
       const rawResult = await executeLogin(payload);
       const auth = normalizeAuthResult(rawResult);
 
       syncSession(auth);
 
-      toast.dismiss(loadingToastId);
-      toast.success(auth.message || "Sesión iniciada correctamente.");
+      try {
+        toast?.dismiss?.(loadingToastId);
+      } catch {}
+
+      try {
+        toast?.success?.(
+          auth.message || "Sesión iniciada correctamente."
+        );
+      } catch {}
 
       const redirectTo = resolveLoginRedirect(auth, deps);
       navigateTo(redirectTo);
     } catch (error) {
-      toast.dismiss(loadingToastId);
+      try {
+        toast?.dismiss?.(loadingToastId);
+      } catch {}
 
       const message = resolveAuthErrorMessage(error);
 
       setGlobalLoginError(refs, message);
-      toast.error(message);
+
+      try {
+        toast?.error?.(message);
+      } catch {}
 
       try {
         AppCore?.events?.emit?.("auth:login:error", {
@@ -208,7 +251,7 @@ export default function renderLoginView(container, deps = {}) {
       } catch {}
 
       try {
-        AppCore?.utils?.log?.error?.("[LoginView] login error", error);
+        AppCore?.utils?.error?.("[LoginView] login error", error);
       } catch {}
     } finally {
       setLoginLoading(refs, false, {
@@ -218,10 +261,25 @@ export default function renderLoginView(container, deps = {}) {
     }
   };
 
-  const unbindInputClearers = bindLoginInputClearers(refs, onClearErrors);
-  const unbindPasswordToggle = bindPasswordToggle(refs, onTogglePassword);
-  const unbindThemeToggle = bindThemeToggle(refs, onThemeToggle);
-  const unbindSubmit = bindLoginSubmit(refs, onSubmit);
+  const unbindInputClearers = bindLoginInputClearers(
+    refs,
+    onClearErrors
+  );
+
+  const unbindPasswordToggle = bindPasswordToggle(
+    refs,
+    onTogglePassword
+  );
+
+  const unbindThemeToggle = bindThemeToggle(
+    refs,
+    onThemeToggle
+  );
+
+  const unbindSubmit = bindLoginSubmit(
+    refs,
+    onSubmit
+  );
 
   focusLoginPrimaryField(refs, {
     rememberedEmail,

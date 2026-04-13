@@ -10,6 +10,7 @@
    - gestionar focus inicial
    - exponer lectura robusta del formulario
    - facilitar bind / unbind desacoplado
+   - endurecer acceso al DOM y consistencia visual
 ========================================================= */
 
 /* =========================================================
@@ -21,7 +22,10 @@ function qs(root, selector) {
 }
 
 function toText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+
   const text = String(value).trim();
   return text || fallback;
 }
@@ -36,6 +40,16 @@ function setHidden(node, hidden) {
   node.hidden = Boolean(hidden);
 }
 
+function setDisabled(node, disabled) {
+  if (!node) return;
+  node.disabled = Boolean(disabled);
+}
+
+function setText(node, value = "") {
+  if (!node) return;
+  node.textContent = toText(value, "");
+}
+
 /* =========================================================
    REFS
 ========================================================= */
@@ -48,43 +62,66 @@ export function getResetPasswordRefs(container) {
     null;
 
   const identifierInput =
-    qs(container, "#resetIdentifier");
+    qs(root, "#resetIdentifier") ||
+    qs(root, 'input[name="identifier"]') ||
+    qs(root, 'input[name="email"]');
 
   const submitButton =
-    qs(container, "#resetPasswordButton");
+    qs(root, "#resetPasswordButton") ||
+    qs(root, 'button[type="submit"]');
 
   const fieldIdentifier =
     identifierInput?.closest?.(".login-field") ||
-    qs(container, '[data-field="identifier"]') ||
-    qs(container, '[data-field="email"]');
+    qs(root, '[data-field="identifier"]') ||
+    qs(root, '[data-field="email"]') ||
+    null;
 
   return {
     container,
     root,
 
-    form: qs(container, "#resetPasswordForm"),
-    card: qs(container, "#resetPasswordCard"),
-    stage: qs(container, "#resetPasswordStage"),
-    grid: qs(container, "#resetPasswordGrid"),
+    form:
+      qs(root, "#resetPasswordForm") ||
+      qs(root, "form"),
+
+    card:
+      qs(root, "#resetPasswordCard") ||
+      qs(root, ".login-card"),
+
+    stage:
+      qs(root, "#resetPasswordStage") ||
+      qs(root, ".login-stage"),
+
+    grid:
+      qs(root, "#resetPasswordGrid") ||
+      qs(root, ".login-grid"),
 
     identifierInput,
     emailInput: identifierInput,
 
     submitButton,
-    backToLoginLink: qs(container, "#backToLoginLink"),
-    themeToggleButton: qs(container, "#resetPasswordThemeToggle"),
+
+    backToLoginLink:
+      qs(root, "#backToLoginLink") ||
+      qs(root, 'a[data-spa]'),
+
+    themeToggleButton:
+      qs(root, "#resetPasswordThemeToggle") ||
+      qs(root, '[data-action="theme-toggle"]'),
 
     fieldIdentifier,
     fieldEmail: fieldIdentifier,
 
-    errorBox: qs(container, "#resetPasswordError"),
+    errorBox:
+      qs(root, "#resetPasswordError") ||
+      qs(root, '[role="alert"]'),
 
-    toastRoot: qs(container, "#resetPasswordToast"),
-    toastIcon: qs(container, "#resetPasswordToastIcon"),
-    toastTitle: qs(container, "#resetPasswordToastTitle"),
-    toastText: qs(container, "#resetPasswordToastText"),
-    toastClose: qs(container, "#resetPasswordToastClose"),
-    toastProgress: qs(container, "#resetPasswordToastProgress"),
+    toastRoot: qs(root, "#resetPasswordToast"),
+    toastIcon: qs(root, "#resetPasswordToastIcon"),
+    toastTitle: qs(root, "#resetPasswordToastTitle"),
+    toastText: qs(root, "#resetPasswordToastText"),
+    toastClose: qs(root, "#resetPasswordToastClose"),
+    toastProgress: qs(root, "#resetPasswordToastProgress"),
   };
 }
 
@@ -119,14 +156,13 @@ export function clearResetPasswordErrors(refs = {}) {
   setInputInvalid(refs.identifierInput, false);
   setInputInvalid(refs.emailInput, false);
 
-  if (refs.errorBox) {
-    refs.errorBox.textContent = "";
-  }
+  setText(refs.errorBox, "");
 }
 
 export function applyResetPasswordErrors(refs = {}, errors = {}) {
   const identifierError =
-    toText(errors.identifier, "") || toText(errors.email, "");
+    toText(errors.identifier, "") ||
+    toText(errors.email, "");
 
   const firstError = identifierError || "";
 
@@ -136,14 +172,11 @@ export function applyResetPasswordErrors(refs = {}, errors = {}) {
   setInputInvalid(refs.identifierInput, Boolean(identifierError));
   setInputInvalid(refs.emailInput, Boolean(identifierError));
 
-  if (refs.errorBox) {
-    refs.errorBox.textContent = firstError;
-  }
+  setText(refs.errorBox, firstError);
 }
 
 export function setGlobalResetPasswordError(refs = {}, message = "") {
-  if (!refs?.errorBox) return;
-  refs.errorBox.textContent = toText(message, "");
+  setText(refs.errorBox, message);
 }
 
 /* =========================================================
@@ -180,13 +213,8 @@ export function setResetPasswordLoading(
     form.dataset.submitting = String(isLoading);
   }
 
-  if (identifierInput) {
-    identifierInput.disabled = isLoading;
-  }
-
-  if (themeToggleButton) {
-    themeToggleButton.disabled = isLoading;
-  }
+  setDisabled(identifierInput, isLoading);
+  setDisabled(themeToggleButton, isLoading);
 
   if (backToLoginLink) {
     backToLoginLink.setAttribute("aria-disabled", String(isLoading));
@@ -237,6 +265,8 @@ export function setResetPasswordSuccessState(
   if (form) {
     form.setAttribute("data-success", "true");
     form.classList.add("is-success");
+    form.setAttribute("aria-busy", "false");
+    form.dataset.submitting = "false";
   }
 
   if (card) {
@@ -244,8 +274,13 @@ export function setResetPasswordSuccessState(
     card.classList.add("is-success");
   }
 
-  if (refs?.identifierInput) {
-    refs.identifierInput.disabled = true;
+  setDisabled(refs.identifierInput, true);
+  setDisabled(refs.themeToggleButton, true);
+
+  if (refs?.backToLoginLink) {
+    refs.backToLoginLink.setAttribute("aria-disabled", "false");
+    refs.backToLoginLink.classList.remove("is-disabled");
+    refs.backToLoginLink.tabIndex = 0;
   }
 
   if (refs?.submitButton) {
@@ -255,9 +290,7 @@ export function setResetPasswordSuccessState(
       `<span class="login-submit-text">${title}</span>`;
   }
 
-  if (refs?.errorBox) {
-    refs.errorBox.textContent = message;
-  }
+  setText(refs.errorBox, message);
 }
 
 export function setResetPasswordNeutralState(refs = {}) {
@@ -344,9 +377,11 @@ export function focusResetPasswordPrimaryField(
     try {
       refs.identifierInput?.focus?.();
 
-      if (!rememberedIdentifier) {
-        refs.identifierInput?.select?.();
+      if (rememberedIdentifier) {
+        return;
       }
+
+      refs.identifierInput?.select?.();
     } catch {}
   });
 }
@@ -356,9 +391,11 @@ export function focusResetPasswordPrimaryField(
 ========================================================= */
 
 export function readResetPasswordFormState(refs = {}) {
+  const identifier = toText(refs?.identifierInput?.value, "");
+
   return {
-    identifier: toText(refs?.identifierInput?.value, ""),
-    email: toText(refs?.identifierInput?.value, "").toLowerCase(),
+    identifier,
+    email: identifier.toLowerCase(),
   };
 }
 

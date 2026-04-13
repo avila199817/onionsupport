@@ -9,12 +9,14 @@
    - ejecutar petición de recuperación de acceso
    - normalizar la respuesta del backend
    - tolerar AppCore.request o fetch nativo
+   - endurecer validaciones y resolución de endpoint
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 import {
   AUTH_ENDPOINTS,
   AUTH_CONSTANTS,
+  getRequestPasswordResetEndpoint as getRequestPasswordResetEndpointFromConstants,
 } from "./constants.js";
 
 /* =========================================================
@@ -34,12 +36,32 @@ function isObject(value) {
   return value !== null && typeof value === "object";
 }
 
+function isAbsoluteUrl(value = "") {
+  return /^https?:\/\//i.test(String(value || ""));
+}
+
 function looksLikeEmail(value = "") {
   return safeText(value, "").includes("@");
 }
 
-function isAbsoluteUrl(value = "") {
-  return /^https?:\/\//i.test(String(value || ""));
+function getResetIdentifierMaxLength() {
+  return Number(
+    AUTH_CONSTANTS?.resetIdentifierMaxLength ??
+      AUTH_CONSTANTS?.identifierMaxLength ??
+      160
+  ) || 160;
+}
+
+function getRequestTimeout() {
+  return Number(
+    AUTH_CONSTANTS?.requestTimeout ??
+      AppCore?.config?.requestTimeout ??
+      15000
+  ) || 15000;
+}
+
+function getDefaultSuccessMessage() {
+  return "Si el identificador existe, te enviaremos las instrucciones para restablecer la contraseña.";
 }
 
 /* =========================================================
@@ -48,6 +70,9 @@ function isAbsoluteUrl(value = "") {
 
 function getConfiguredEndpoint() {
   const candidates = [
+    typeof getRequestPasswordResetEndpointFromConstants === "function"
+      ? getRequestPasswordResetEndpointFromConstants()
+      : "",
     AUTH_ENDPOINTS?.resetPasswordRequest,
     AUTH_ENDPOINTS?.requestPasswordReset,
     "/api/auth/reset-password-request",
@@ -104,12 +129,6 @@ export function normalizeResetPasswordPayload(payload = {}) {
 export function buildResetPasswordRequestBody(payload = {}) {
   const normalized = normalizeResetPasswordPayload(payload);
 
-  /*
-    Alineado con backend actual:
-    - backend puede consumir email
-    - mantenemos identifier por estabilidad de front
-    - mantenemos username/user como compat auxiliar
-  */
   const body = {
     identifier: normalized.identifier,
   };
@@ -182,10 +201,7 @@ export function normalizeResetPasswordResponse(response = {}) {
     raw: response,
     ok: Boolean(ok),
     success: Boolean(ok),
-    message: safeText(
-      message,
-      "Si el identificador existe, te enviaremos las instrucciones para restablecer la contraseña."
-    ),
+    message: safeText(message, getDefaultSuccessMessage()),
     redirectTo: safeText(redirectTo, ""),
     retryAfter: Math.max(0, retryAfter),
     cooldownSeconds: Math.max(0, retryAfter),
@@ -241,10 +257,7 @@ async function requestWithAppCore(endpoint, body) {
     method: "POST",
     body,
     auth: false,
-    timeout:
-      Number(AUTH_CONSTANTS?.requestTimeout) ||
-      Number(AppCore?.config?.requestTimeout) ||
-      15000,
+    timeout: getRequestTimeout(),
   });
 }
 
@@ -304,6 +317,15 @@ export async function requestPasswordReset(payload = {}) {
     );
   }
 
+  if (
+    normalizedPayload.identifier.length >
+    getResetIdentifierMaxLength()
+  ) {
+    throw new Error(
+      "El identificador de recuperación es demasiado largo."
+    );
+  }
+
   const endpoint = getRequestPasswordResetEndpoint();
   const body = buildResetPasswordRequestBody(normalizedPayload);
 
@@ -312,6 +334,7 @@ export async function requestPasswordReset(payload = {}) {
       "[Auth] requestPasswordReset",
       {
         endpoint,
+        finalUrl: buildFinalUrl(endpoint),
         identifier: normalizedPayload.identifier,
         mode: normalizedPayload.email ? "email" : "username",
       }

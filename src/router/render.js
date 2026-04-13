@@ -14,7 +14,8 @@
    - guards de browser
    - sync de estado consistente
    - payloads estables
-   - 404 desacoplable más adelante
+   - paso explícito de viewContainer al render
+   - compatibilidad con vistas tipo función y adapters del router
 ========================================================= */
 
 import {
@@ -34,6 +35,7 @@ import {
 /* =========================================================
    INTERNAL
 ========================================================= */
+
 function isBrowser() {
   return (
     typeof window !== "undefined" &&
@@ -72,6 +74,7 @@ function safeSetActiveMenu(setActiveMenu, path) {
 /* =========================================================
    VIEW CONTAINER
 ========================================================= */
+
 export function getViewContainer(AppCore) {
   if (!isBrowser()) {
     return null;
@@ -88,6 +91,7 @@ export function getViewContainer(AppCore) {
 /* =========================================================
    PAYLOADS
 ========================================================= */
+
 export function buildRenderPayload({
   path = null,
   canonicalPath = null,
@@ -129,6 +133,7 @@ export function emitRendered(AppCore, payload = {}) {
 /* =========================================================
    STATE SYNC
 ========================================================= */
+
 export function syncRouteState(
   AppCore,
   canonicalPath = "/",
@@ -175,8 +180,54 @@ export function applyResolvedRouteState(
 }
 
 /* =========================================================
+   RENDER CONTEXT
+========================================================= */
+
+export function buildRouteRenderContext({
+  AppCore,
+  route = null,
+  requestedPath = "/",
+  canonicalPath = "/",
+  requestedUsername = null,
+  publicPath = null,
+  redirectedFrom = null,
+  found = true,
+  forbidden = false,
+} = {}) {
+  return Object.freeze({
+    AppCore,
+    route,
+    path: requestedPath,
+    requestedPath,
+    canonicalPath,
+    publicPath,
+    username: requestedUsername,
+    requestedUsername,
+    redirectedFrom,
+    found,
+    forbidden,
+    viewContainer: getViewContainer(AppCore),
+  });
+}
+
+async function runRouteRender(
+  route,
+  viewContainer,
+  context
+) {
+  if (typeof route?.render !== "function") {
+    return null;
+  }
+
+  return await Promise.resolve(
+    route.render(viewContainer, context)
+  );
+}
+
+/* =========================================================
    INTERNAL VIEWS
 ========================================================= */
+
 export function renderGenericView(AppCore, route) {
   const view = getViewContainer(AppCore);
 
@@ -310,6 +361,7 @@ export function renderRuntimeErrorView(
 /* =========================================================
    FLOWS
 ========================================================= */
+
 export async function renderRouteSuccess({
   AppCore,
   route,
@@ -331,7 +383,24 @@ export async function renderRouteSuccess({
     route?.title || AppCore.config.appName
   );
 
-  await Promise.resolve(route?.render?.(route));
+  const viewContainer = getViewContainer(AppCore);
+
+  const renderContext = buildRouteRenderContext({
+    AppCore,
+    route,
+    requestedPath,
+    canonicalPath,
+    requestedUsername,
+    publicPath: resolvedPublicPath,
+    found: true,
+    forbidden: false,
+  });
+
+  await runRouteRender(
+    route,
+    viewContainer,
+    renderContext
+  );
 
   emitRendered(AppCore, {
     path: requestedPath,
@@ -484,7 +553,25 @@ export async function renderLoginRedirect({
     loginRoute?.title || "Acceso"
   );
 
-  await Promise.resolve(loginRoute?.render?.(loginRoute));
+  const viewContainer = getViewContainer(AppCore);
+
+  const renderContext = buildRouteRenderContext({
+    AppCore,
+    route: loginRoute,
+    requestedPath: loginUrl,
+    canonicalPath: routeNames.LOGIN,
+    requestedUsername: null,
+    publicPath: resolvedPublicPath,
+    redirectedFrom: canonicalPath,
+    found: true,
+    forbidden: false,
+  });
+
+  await runRouteRender(
+    loginRoute,
+    viewContainer,
+    renderContext
+  );
 
   emitRendered(AppCore, {
     path: loginUrl,

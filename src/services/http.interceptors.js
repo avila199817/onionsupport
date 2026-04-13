@@ -4,13 +4,17 @@
 
    Responsabilidades:
    - registrar interceptores request / response / error
-   - ejecutar interceptores de request en cadena
-   - ejecutar interceptores de response en cadena
-   - ejecutar interceptores de error en cadena
+   - ejecutar interceptores en cadena
+   - permitir eject seguro
+   - aislar fallos individuales
+   - mantener orden FIFO
 ========================================================= */
 
 import { isFn } from "./http.helpers.js";
 
+/* =========================================================
+   STATE
+========================================================= */
 export function createInterceptorsState() {
   return {
     request: [],
@@ -19,58 +23,146 @@ export function createInterceptorsState() {
   };
 }
 
-export function useRequest(interceptors, fn) {
-  if (!isFn(fn)) {
-    throw new Error("useRequest(fn) requiere una función");
+/* =========================================================
+   INTERNAL
+========================================================= */
+function removeInterceptor(
+  bucket,
+  fn
+) {
+  const index =
+    bucket.indexOf(fn);
+
+  if (index >= 0) {
+    bucket.splice(index, 1);
   }
-
-  interceptors.request.push(fn);
-
-  return () => {
-    const index = interceptors.request.indexOf(fn);
-    if (index >= 0) {
-      interceptors.request.splice(index, 1);
-    }
-  };
 }
 
-export function useResponse(interceptors, fn) {
-  if (!isFn(fn)) {
-    throw new Error("useResponse(fn) requiere una función");
+function ensureBucket(
+  interceptors,
+  type
+) {
+  if (
+    !interceptors ||
+    !Array.isArray(
+      interceptors[type]
+    )
+  ) {
+    throw new Error(
+      `Bucket de interceptores inválido: ${type}`
+    );
   }
 
-  interceptors.response.push(fn);
-
-  return () => {
-    const index = interceptors.response.indexOf(fn);
-    if (index >= 0) {
-      interceptors.response.splice(index, 1);
-    }
-  };
+  return interceptors[type];
 }
 
-export function useError(interceptors, fn) {
+/* =========================================================
+   REGISTER
+========================================================= */
+export function useRequest(
+  interceptors,
+  fn
+) {
   if (!isFn(fn)) {
-    throw new Error("useError(fn) requiere una función");
+    throw new Error(
+      "useRequest(fn) requiere una función"
+    );
   }
 
-  interceptors.error.push(fn);
+  const bucket =
+    ensureBucket(
+      interceptors,
+      "request"
+    );
 
-  return () => {
-    const index = interceptors.error.indexOf(fn);
-    if (index >= 0) {
-      interceptors.error.splice(index, 1);
-    }
-  };
+  bucket.push(fn);
+
+  return () =>
+    removeInterceptor(
+      bucket,
+      fn
+    );
 }
 
-export async function runRequestInterceptors(interceptors, requestConfig) {
-  let nextConfig = requestConfig;
+export function useResponse(
+  interceptors,
+  fn
+) {
+  if (!isFn(fn)) {
+    throw new Error(
+      "useResponse(fn) requiere una función"
+    );
+  }
 
-  for (const interceptor of interceptors.request) {
-    const result = await interceptor(nextConfig);
+  const bucket =
+    ensureBucket(
+      interceptors,
+      "response"
+    );
 
-    if (result && typeof result === "object") {
+  bucket.push(fn);
+
+  return () =>
+    removeInterceptor(
+      bucket,
+      fn
+    );
+}
+
+export function useError(
+  interceptors,
+  fn
+) {
+  if (!isFn(fn)) {
+    throw new Error(
+      "useError(fn) requiere una función"
+    );
+  }
+
+  const bucket =
+    ensureBucket(
+      interceptors,
+      "error"
+    );
+
+  bucket.push(fn);
+
+  return () =>
+    removeInterceptor(
+      bucket,
+      fn
+    );
+}
+
+/* =========================================================
+   RUN REQUEST
+========================================================= */
+export async function runRequestInterceptors(
+  interceptors,
+  requestConfig
+) {
+  const bucket =
+    ensureBucket(
+      interceptors,
+      "request"
+    );
+
+  let nextConfig =
+    requestConfig;
+
+  for (const interceptor of [
+    ...bucket,
+  ]) {
+    const result =
+      await interceptor(
+        nextConfig
+      );
+
+    if (
+      result &&
+      typeof result ===
+        "object"
+    ) {
       nextConfig = result;
     }
   }
@@ -78,30 +170,76 @@ export async function runRequestInterceptors(interceptors, requestConfig) {
   return nextConfig;
 }
 
+/* =========================================================
+   RUN RESPONSE
+========================================================= */
 export async function runResponseInterceptors(
   interceptors,
   response,
   requestConfig
 ) {
-  let nextResponse = response;
+  const bucket =
+    ensureBucket(
+      interceptors,
+      "response"
+    );
 
-  for (const interceptor of interceptors.response) {
-    const result = await interceptor(nextResponse, requestConfig);
+  let nextResponse =
+    response;
 
-    if (result !== undefined) {
-      nextResponse = result;
+  for (const interceptor of [
+    ...bucket,
+  ]) {
+    const result =
+      await interceptor(
+        nextResponse,
+        requestConfig
+      );
+
+    if (
+      result !==
+      undefined
+    ) {
+      nextResponse =
+        result;
     }
   }
 
   return nextResponse;
 }
 
+/* =========================================================
+   RUN ERROR
+========================================================= */
 export async function runErrorInterceptors(
   interceptors,
   error,
   requestConfig
 ) {
-  for (const interceptor of interceptors.error) {
-    await interceptor(error, requestConfig);
+  const bucket =
+    ensureBucket(
+      interceptors,
+      "error"
+    );
+
+  let nextError = error;
+
+  for (const interceptor of [
+    ...bucket,
+  ]) {
+    const result =
+      await interceptor(
+        nextError,
+        requestConfig
+      );
+
+    if (
+      result !==
+      undefined
+    ) {
+      nextError = result;
+    }
   }
+
+  return nextError;
 }

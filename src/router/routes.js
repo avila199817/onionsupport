@@ -15,6 +15,7 @@
    - safe render wrappers
    - validación extendida
    - metadata estable
+   - soporte para vistas tipo objeto y vistas tipo función
 ========================================================= */
 
 import { I18n } from "../i18n/index.js";
@@ -32,6 +33,7 @@ import { AjustesView } from "../views/ajustesView.js";
 /* =========================================================
    I18N
 ========================================================= */
+
 function t(
   key,
   fallback = "",
@@ -55,6 +57,7 @@ function t(
 /* =========================================================
    HELPERS
 ========================================================= */
+
 function safeRun(fn) {
   return async function wrappedRouteRender(...args) {
     return await Promise.resolve(
@@ -74,6 +77,7 @@ function resolveRouteTitle(route) {
 
 function normalizeRoles(roles) {
   if (!Array.isArray(roles)) return [];
+
   return roles
     .filter(Boolean)
     .map((role) =>
@@ -136,54 +140,61 @@ function createRoute(definition = {}) {
 /* =========================================================
    VIEW ADAPTERS
 ========================================================= */
+
 const renderHomeView =
-  safeRun(() =>
-    HomeView.render?.()
+  safeRun((...args) =>
+    HomeView?.render?.(...args)
   );
 
 const renderIncidenciasView =
-  safeRun(() =>
-    IncidenciasView.init?.()
+  safeRun((...args) =>
+    IncidenciasView?.init?.(...args)
   );
 
 const renderFacturasView =
-  safeRun(() =>
-    FacturasView.render?.()
+  safeRun((...args) =>
+    FacturasView?.render?.(...args)
   );
 
 const renderUsuariosView =
-  safeRun(() =>
-    UsuariosView.render?.()
+  safeRun((...args) =>
+    UsuariosView?.render?.(...args)
   );
 
 const renderClientesView =
-  safeRun(() =>
-    ClientesView.render?.()
+  safeRun((...args) =>
+    ClientesView?.render?.(...args)
   );
 
 const renderCuentaView =
-  safeRun(() =>
-    CuentaView.render?.()
+  safeRun((...args) =>
+    CuentaView?.render?.(...args)
   );
 
 const renderAjustesView =
-  safeRun(() =>
-    AjustesView.render?.()
+  safeRun((...args) =>
+    AjustesView?.render?.(...args)
   );
 
 const renderServidorView =
-  safeRun(() =>
-    ServerView.render?.()
+  safeRun((...args) =>
+    ServerView?.render?.(...args)
   );
 
+/* =========================================================
+   LOGIN VIEW
+   LoginView es una función, no un objeto con .render()
+========================================================= */
+
 const renderLoginView =
-  safeRun(() =>
-    LoginView.render?.()
+  safeRun((...args) =>
+    LoginView(...args)
   );
 
 /* =========================================================
    ROUTES FACTORY
 ========================================================= */
+
 export function createRoutes() {
   return [
     createRoute({
@@ -315,6 +326,7 @@ export function createRoutes() {
 /* =========================================================
    IMMUTABLE TABLE
 ========================================================= */
+
 export function getImmutableRoutes() {
   return Object.freeze(
     createRoutes()
@@ -324,6 +336,7 @@ export function getImmutableRoutes() {
 /* =========================================================
    VALIDATION
 ========================================================= */
+
 export function validateRoutesTable(
   AppCore,
   routes,

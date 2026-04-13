@@ -5,14 +5,23 @@
    Responsabilidades:
    - orquestar la vista de recuperación de acceso
    - renderizar template auth pro
-   - conectar dom, helpers, core y toast
+   - conectar dom, helpers, core, auth y toast
    - gestionar submit y feedback visual
    - activar / limpiar modo auth-screen del body
    - mantener cleanup de listeners
    - exponer compatibilidad default + named export
+
+   HARDENING:
+   - evita reactivar ui al navegar
+   - soporta executor desde deps o Auth
+   - tolera back link SPA / router / location
+   - evita dobles submits
+   - mantiene loader global apagado en auth
+   - fija ruta pública /reset-password
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import { Auth } from "../../features/auth/index.js";
 import Toast from "../../ui/toast/index.js";
 
 import getResetPasswordTemplate from "./reset-password.template.js";
@@ -75,6 +84,16 @@ function safeToastCall(toast, method, ...args) {
   return null;
 }
 
+function resolveRequestPasswordResetExecutor(deps = {}) {
+  return (
+    resolveResetPasswordExecutor(deps) ||
+    Auth?.requestPasswordReset ||
+    Auth?.resetPasswordRequest ||
+    Auth?.forgotPassword ||
+    null
+  );
+}
+
 function resolveAppName() {
   return safeText(AppCore?.config?.appName, "") || "Onion Support";
 }
@@ -84,9 +103,29 @@ function resolveAppVersion() {
 }
 
 function resolveBackToLoginHref(deps = {}) {
-  return safeText(deps?.backHref, "") ||
+  return (
+    safeText(deps?.backHref, "") ||
     safeText(deps?.backToLoginHref, "") ||
-    "/login";
+    "/login"
+  );
+}
+
+function normalizePath(path = "/") {
+  const raw = safeText(path, "/") || "/";
+
+  if (typeof AppCore?.utils?.normalizePath === "function") {
+    try {
+      return AppCore.utils.normalizePath(raw);
+    } catch {}
+  }
+
+  if (raw === "/") {
+    return "/";
+  }
+
+  return raw
+    .replace(/\/{2,}/g, "/")
+    .replace(/\/+$/g, "") || "/";
 }
 
 function getShellElements() {
@@ -179,7 +218,7 @@ function hideGlobalLoader() {
 }
 
 function navigateTo(path = "/login") {
-  const finalPath = safeText(path, "/login") || "/login";
+  const finalPath = normalizePath(path || "/login");
 
   if (typeof AppCore?.navigate === "function") {
     AppCore.navigate(finalPath);
@@ -224,6 +263,32 @@ function emitRouteRendered() {
       route: "/reset-password",
       view: "reset-password",
     });
+  } catch {}
+}
+
+function emitResetPasswordRequested(detail = {}) {
+  try {
+    AppCore?.events?.emit?.("auth:reset-password:requested", detail);
+  } catch {}
+}
+
+function emitResetPasswordError(detail = {}) {
+  try {
+    AppCore?.events?.emit?.("auth:reset-password:error", detail);
+  } catch {}
+}
+
+function restoreInitialUiState(refs) {
+  try {
+    hideResetPasswordToast(refs);
+  } catch {}
+
+  try {
+    setResetPasswordNeutralState(refs);
+  } catch {}
+
+  try {
+    clearResetPasswordErrors(refs);
   } catch {}
 }
 
@@ -279,9 +344,10 @@ function renderResetPasswordView(container, deps = {}) {
 
   const refs = getResetPasswordRefs(container);
   const toast = resolveToastApi(deps);
-  const executeResetPassword = resolveResetPasswordExecutor(deps);
+  const executeResetPassword = resolveRequestPasswordResetExecutor(deps);
 
   safeToastCall(toast, "init");
+  restoreInitialUiState(refs);
 
   if (!executeResetPassword) {
     const message =
@@ -324,12 +390,11 @@ function renderResetPasswordView(container, deps = {}) {
   };
 
   const onBackToLogin = (event) => {
+    event?.preventDefault?.();
+
     if (destroyed || isSubmitting) {
-      event?.preventDefault?.();
       return;
     }
-
-    event?.preventDefault?.();
 
     isNavigatingAway = true;
     disableAuthScreenMode();
@@ -338,7 +403,7 @@ function renderResetPasswordView(container, deps = {}) {
   };
 
   const onThemeToggle = () => {
-    if (destroyed || isNavigatingAway) return;
+    if (destroyed || isNavigatingAway || isSubmitting) return;
 
     const nextTheme = toggleTheme();
     safeToastCall(toast, "info", `Tema ${nextTheme} activado.`);
@@ -417,6 +482,7 @@ function renderResetPasswordView(container, deps = {}) {
       }
 
       successLocked = true;
+      isSubmitting = false;
 
       const successMessage = buildResetPasswordSuccessMessage(result);
 
@@ -435,12 +501,22 @@ function renderResetPasswordView(container, deps = {}) {
         );
       }
 
-      try {
-        AppCore?.events?.emit?.("auth:reset-password:requested", {
-          identifier: payload.identifier,
-          result,
-        });
-      } catch {}
+      emitResetPasswordRequested({
+        identifier: payload.identifier,
+        result,
+      });
+
+      const redirectTo = resolveResetPasswordRedirect(result, {
+        ...deps,
+        backToLoginHref: backHref,
+      });
+
+      if (deps.navigateAfterSuccess === true) {
+        isNavigatingAway = true;
+        disableAuthScreenMode();
+        navigateTo(redirectTo);
+        return;
+      }
     } catch (error) {
       safeToastCall(toast, "dismiss", loadingToastId);
 
@@ -451,15 +527,16 @@ function renderResetPasswordView(container, deps = {}) {
 
       safeToastCall(toast, "error", message);
 
-      try {
-        AppCore?.events?.emit?.("auth:reset-password:error", {
-          message,
-          error,
-        });
-      } catch {}
+      emitResetPasswordError({
+        message,
+        error,
+      });
 
       try {
-        AppCore?.utils?.error?.("[ResetPasswordView] reset password error", error);
+        AppCore?.utils?.error?.(
+          "[ResetPasswordView] reset password error",
+          error
+        );
       } catch {}
 
       isSubmitting = false;
@@ -476,11 +553,12 @@ function renderResetPasswordView(container, deps = {}) {
       return;
     }
 
-    isSubmitting = false;
-    setResetPasswordLoading(refs, false, {
-      submitLabel,
-      loadingLabel,
-    });
+    if (!isNavigatingAway) {
+      setResetPasswordLoading(refs, false, {
+        submitLabel,
+        loadingLabel,
+      });
+    }
   };
 
   const unbindInputClearers = bindResetPasswordInputClearers(

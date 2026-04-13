@@ -16,11 +16,13 @@
    - validación extendida
    - metadata estable
    - soporte para vistas tipo objeto y vistas tipo función
+   - integración de rutas auth públicas
 ========================================================= */
 
 import { I18n } from "../i18n/index.js";
 
 import { LoginView } from "../views/login/index.js";
+import { ResetPasswordView } from "../views/reset-password/index.js";
 import { HomeView } from "../views/homeView.js";
 import { IncidenciasView } from "../views/incidencias/index.js";
 import { FacturasView } from "../views/facturas/index.js";
@@ -137,58 +139,67 @@ function createRoute(definition = {}) {
   return Object.freeze(route);
 }
 
+function resolveViewRenderer(view) {
+  if (typeof view === "function") {
+    return view;
+  }
+
+  if (
+    view &&
+    typeof view.render === "function"
+  ) {
+    return view.render.bind(view);
+  }
+
+  if (
+    view &&
+    typeof view.init === "function"
+  ) {
+    return view.init.bind(view);
+  }
+
+  return () => {};
+}
+
+function createViewAdapter(view) {
+  const renderer = resolveViewRenderer(view);
+  return safeRun((...args) => renderer(...args));
+}
+
 /* =========================================================
    VIEW ADAPTERS
 ========================================================= */
 
 const renderHomeView =
-  safeRun((...args) =>
-    HomeView?.render?.(...args)
-  );
+  createViewAdapter(HomeView);
 
 const renderIncidenciasView =
-  safeRun((...args) =>
-    IncidenciasView?.init?.(...args)
-  );
+  createViewAdapter(IncidenciasView);
 
 const renderFacturasView =
-  safeRun((...args) =>
-    FacturasView?.render?.(...args)
-  );
+  createViewAdapter(FacturasView);
 
 const renderUsuariosView =
-  safeRun((...args) =>
-    UsuariosView?.render?.(...args)
-  );
+  createViewAdapter(UsuariosView);
 
 const renderClientesView =
-  safeRun((...args) =>
-    ClientesView?.render?.(...args)
-  );
+  createViewAdapter(ClientesView);
 
 const renderCuentaView =
-  safeRun((...args) =>
-    CuentaView?.render?.(...args)
-  );
+  createViewAdapter(CuentaView);
 
 const renderAjustesView =
-  safeRun((...args) =>
-    AjustesView?.render?.(...args)
-  );
+  createViewAdapter(AjustesView);
 
 const renderServidorView =
-  safeRun((...args) =>
-    ServerView?.render?.(...args)
-  );
-
-/* =========================================================
-   LOGIN VIEW
-   LoginView es una función, no un objeto con .render()
-========================================================= */
+  createViewAdapter(ServerView);
 
 const renderLoginView =
-  safeRun((...args) =>
-    LoginView(...args)
+  createViewAdapter(LoginView);
+
+const renderResetPasswordView =
+  createViewAdapter(
+    ResetPasswordView
   );
 
 /* =========================================================
@@ -320,6 +331,20 @@ export function createRoutes() {
       render:
         renderLoginView,
     }),
+
+    createRoute({
+      path: "/reset-password",
+      name: "reset-password",
+      titleKey:
+        "routes.resetPassword",
+      titleFallback:
+        "Recuperar acceso",
+      public: true,
+      roles: [],
+      hideShell: true,
+      render:
+        renderResetPasswordView,
+    }),
   ];
 }
 
@@ -417,6 +442,24 @@ export function validateRoutesTable(
       ) {
         throw new Error(
           `Router: la ruta "${normalizedPath}" tiene roles inválidos.`
+        );
+      }
+
+      if (
+        typeof route.public !==
+        "boolean"
+      ) {
+        throw new Error(
+          `Router: la ruta "${normalizedPath}" tiene public inválido.`
+        );
+      }
+
+      if (
+        typeof route.hideShell !==
+        "boolean"
+      ) {
+        throw new Error(
+          `Router: la ruta "${normalizedPath}" tiene hideShell inválido.`
         );
       }
 

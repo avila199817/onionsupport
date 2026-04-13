@@ -1,6 +1,6 @@
 /* =========================================================
    Onion SPA - Reset Password View
-   Archivo: src/views/reset-password/index.js
+   Archivo: src/views/password-reset/index.js
 
    Responsabilidades:
    - orquestar la vista de recuperación de acceso
@@ -18,6 +18,7 @@
    - evita dobles submits
    - mantiene loader global apagado en auth
    - fija ruta pública /reset-password
+   - endurece navegación y cleanup
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -130,14 +131,19 @@ function normalizePath(path = "/") {
 
 function getShellElements() {
   return {
-    sidebar: AppCore?.dom?.sidebar || document.getElementById("sidebar"),
+    sidebar:
+      AppCore?.dom?.sidebar ||
+      document.getElementById("sidebar"),
+
     topbar:
       AppCore?.dom?.topbar ||
       document.getElementById("topbar") ||
       document.querySelector(".topbar"),
+
     topbarViewContainer:
       AppCore?.dom?.topbarViewContainer ||
       document.getElementById("topbarview-container"),
+
     tableheadContainer:
       AppCore?.dom?.tableheadContainer ||
       document.getElementById("tablehead-container"),
@@ -337,7 +343,6 @@ function renderResetPasswordView(container, deps = {}) {
             "Flujo desacoplado del login principal",
             "Recuperación protegida y guiada",
           ],
-    ...deps,
   });
 
   hideGlobalLoader();
@@ -355,7 +360,6 @@ function renderResetPasswordView(container, deps = {}) {
 
     setGlobalResetPasswordError(refs, message);
     safeToastCall(toast, "error", message);
-
     emitRouteRendered();
 
     return {
@@ -366,10 +370,10 @@ function renderResetPasswordView(container, deps = {}) {
   }
 
   const submitLabel =
-    safeText(deps.submitLabel, "") || "Enviar enlace";
+    safeText(deps?.submitLabel, "") || "Enviar enlace";
 
   const loadingLabel =
-    safeText(deps.loadingLabel, "") || "Enviando...";
+    safeText(deps?.loadingLabel, "") || "Enviando...";
 
   let destroyed = false;
   let isSubmitting = false;
@@ -377,7 +381,9 @@ function renderResetPasswordView(container, deps = {}) {
   let successLocked = false;
 
   const onClearErrors = () => {
-    if (destroyed || isNavigatingAway || successLocked) return;
+    if (destroyed || isNavigatingAway || successLocked) {
+      return;
+    }
 
     clearResetPasswordErrors(refs);
     setResetPasswordNeutralState(refs);
@@ -385,7 +391,10 @@ function renderResetPasswordView(container, deps = {}) {
   };
 
   const onToastClose = () => {
-    if (destroyed || isNavigatingAway) return;
+    if (destroyed || isNavigatingAway) {
+      return;
+    }
+
     hideResetPasswordToast(refs);
   };
 
@@ -398,21 +407,27 @@ function renderResetPasswordView(container, deps = {}) {
 
     isNavigatingAway = true;
     disableAuthScreenMode();
-
     navigateTo(backHref);
   };
 
   const onThemeToggle = () => {
-    if (destroyed || isNavigatingAway || isSubmitting) return;
+    if (destroyed || isNavigatingAway || isSubmitting) {
+      return;
+    }
 
     const nextTheme = toggleTheme();
     safeToastCall(toast, "info", `Tema ${nextTheme} activado.`);
   };
 
   const onSubmit = async (event) => {
-    event.preventDefault();
+    event?.preventDefault?.();
 
-    if (destroyed || isSubmitting || isNavigatingAway || successLocked) {
+    if (
+      destroyed ||
+      isSubmitting ||
+      isNavigatingAway ||
+      successLocked
+    ) {
       return;
     }
 
@@ -484,7 +499,8 @@ function renderResetPasswordView(container, deps = {}) {
       successLocked = true;
       isSubmitting = false;
 
-      const successMessage = buildResetPasswordSuccessMessage(result);
+      const successMessage =
+        buildResetPasswordSuccessMessage(result);
 
       setResetPasswordSuccessState(refs, {
         title: "Enlace enviado",
@@ -497,7 +513,9 @@ function renderResetPasswordView(container, deps = {}) {
         safeToastCall(
           toast,
           "info",
-          buildResetPasswordCooldownMessage(result.cooldownSeconds)
+          buildResetPasswordCooldownMessage(
+            result.cooldownSeconds
+          )
         );
       }
 
@@ -524,7 +542,6 @@ function renderResetPasswordView(container, deps = {}) {
 
       setGlobalResetPasswordError(refs, message);
       shakeResetPasswordCard(refs);
-
       safeToastCall(toast, "error", message);
 
       emitResetPasswordError({
@@ -550,6 +567,7 @@ function renderResetPasswordView(container, deps = {}) {
         refs?.identifierInput?.focus?.();
         refs?.identifierInput?.select?.();
       } catch {}
+
       return;
     }
 
@@ -561,30 +579,20 @@ function renderResetPasswordView(container, deps = {}) {
     }
   };
 
-  const unbindInputClearers = bindResetPasswordInputClearers(
-    refs,
-    onClearErrors
-  );
+  const unbindInputClearers =
+    bindResetPasswordInputClearers(refs, onClearErrors);
 
-  const unbindSubmit = bindResetPasswordSubmit(
-    refs,
-    onSubmit
-  );
+  const unbindSubmit =
+    bindResetPasswordSubmit(refs, onSubmit);
 
-  const unbindToastClose = bindResetPasswordToastClose(
-    refs,
-    onToastClose
-  );
+  const unbindToastClose =
+    bindResetPasswordToastClose(refs, onToastClose);
 
-  const unbindBackLink = bindResetPasswordBackLink(
-    refs,
-    onBackToLogin
-  );
+  const unbindBackLink =
+    bindResetPasswordBackLink(refs, onBackToLogin);
 
-  const unbindThemeToggle = bindResetPasswordThemeToggle(
-    refs,
-    onThemeToggle
-  );
+  const unbindThemeToggle =
+    bindResetPasswordThemeToggle(refs, onThemeToggle);
 
   focusResetPasswordPrimaryField(refs, {
     rememberedIdentifier,
@@ -614,6 +622,10 @@ function renderResetPasswordView(container, deps = {}) {
 
       try {
         unbindThemeToggle?.();
+      } catch {}
+
+      try {
+        hideResetPasswordToast(refs);
       } catch {}
 
       if (!isNavigatingAway) {

@@ -14,6 +14,9 @@
    - await real en render/navigate
    - bloqueo de renders obsoletos
    - popstate seguro
+   - redirect centralizado
+   - helpers internos desacoplados
+   - preparado para externalizar 404 aparte
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -74,23 +77,64 @@ export const Router = (() => {
      STATE
   ========================================================= */
   let isBound = false;
-  let lastRenderPromise =
-    Promise.resolve();
-
+  let lastRenderPromise = Promise.resolve();
   let renderCycle = 0;
 
   const immutableRoutes =
     getImmutableRoutes();
 
   /* =========================================================
-     ROUTE LOOKUP
+     INTERNAL HELPERS
   ========================================================= */
+  function getCanonicalPath(
+    pathname = "/"
+  ) {
+    return normalizeCanonicalPath(
+      AppCore,
+      pathname
+    );
+  }
+
+  function getRequestedPathData(
+    pathname = "/"
+  ) {
+    const requestedPath =
+      resolveSpaHref(
+        AppCore,
+        pathname
+      );
+
+    const canonicalPath =
+      getCanonicalPath(
+        requestedPath
+      );
+
+    const requestedUsername =
+      extractUsernameFromPath(
+        AppCore,
+        requestedPath
+      );
+
+    const resolvedUsername =
+      requestedUsername ||
+      getCurrentResolvedUsername(
+        AppCore
+      ) ||
+      null;
+
+    return {
+      requestedPath,
+      canonicalPath,
+      requestedUsername,
+      resolvedUsername,
+    };
+  }
+
   function getRoute(
     pathname = "/"
   ) {
     const canonical =
-      normalizeCanonicalPath(
-        AppCore,
+      getCanonicalPath(
         pathname
       );
 
@@ -123,11 +167,13 @@ export const Router = (() => {
     if (
       route.path ===
       routeNames.LOGIN
-    )
+    ) {
       return false;
+    }
 
-    if (route.hideShell)
+    if (route.hideShell) {
       return false;
+    }
 
     return true;
   }
@@ -156,10 +202,63 @@ export const Router = (() => {
     );
   }
 
-  /* =========================================================
-     REDIRECT
-  ========================================================= */
-  function performRedirect(
+  function getCurrentComparablePaths() {
+    const currentCanonicalPath =
+      getCanonicalPath(
+        AppCore.state.route ||
+          "/"
+      );
+
+    const currentPublicPath =
+      getCurrentPublicPath(
+        AppCore
+      );
+
+    const normalizedCurrentPath =
+      resolveSpaHref(
+        AppCore,
+        currentPublicPath
+      );
+
+    return {
+      currentCanonicalPath,
+      currentPublicPath,
+      normalizedCurrentPath,
+    };
+  }
+
+  function applyCommonPreRenderUI(
+    canonicalPath
+  ) {
+    clearDynamicContainers(
+      AppCore
+    );
+
+    setActiveMenu(
+      AppCore,
+      canonicalPath
+    );
+  }
+
+  function setShellModeSafe(
+    routeArg
+  ) {
+    return setShellMode(
+      AppCore,
+      routeArg
+    );
+  }
+
+  function setDocumentTitleSafe(
+    title
+  ) {
+    return setDocumentTitle(
+      AppCore,
+      title
+    );
+  }
+
+  function redirectTo(
     targetPath,
     meta = {},
     navOptions = {}
@@ -178,6 +277,113 @@ export const Router = (() => {
   }
 
   /* =========================================================
+     ACCESS RESOLUTION
+  ========================================================= */
+  function resolveRouteAccess({
+    route,
+    canonicalPath,
+  }) {
+    return shouldAllowRoute({
+      AppCore,
+      Auth,
+      route,
+      requestedCanonicalPath:
+        canonicalPath,
+      getRoute,
+    });
+  }
+
+  async function handleDeniedAccess({
+    access,
+    route,
+    requestedPath,
+    canonicalPath,
+    requestedUsername,
+    options,
+  }) {
+    if (
+      access.reason ===
+      "not-authenticated"
+    ) {
+      renderLoginRedirect({
+        AppCore,
+        getRoute,
+        updateHistory,
+        canonicalPath,
+        clearDynamicContainers:
+          () =>
+            clearDynamicContainers(
+              AppCore
+            ),
+        setActiveMenu:
+          (pathArg) =>
+            setActiveMenu(
+              AppCore,
+              pathArg
+            ),
+        setShellMode:
+          (routeArg) =>
+            setShellModeSafe(
+              routeArg
+            ),
+        setDocumentTitle:
+          (title) =>
+            setDocumentTitleSafe(
+              title
+            ),
+      });
+
+      return true;
+    }
+
+    if (
+      access.reason ===
+      "already-authenticated"
+    ) {
+      await redirectTo(
+        access.redirectTo ||
+          getDefaultHomeTarget(),
+        {
+          redirectedFrom:
+            canonicalPath,
+        }
+      );
+
+      return true;
+    }
+
+    if (
+      access.reason ===
+      "insufficient-role"
+    ) {
+      renderRouteForbidden({
+        AppCore,
+        getRoute,
+        updateHistory,
+        route,
+        requestedPath,
+        canonicalPath,
+        requestedUsername,
+        options,
+        setShellMode:
+          (routeArg) =>
+            setShellModeSafe(
+              routeArg
+            ),
+        setDocumentTitle:
+          (title) =>
+            setDocumentTitleSafe(
+              title
+            ),
+      });
+
+      return true;
+    }
+
+    return false;
+  }
+
+  /* =========================================================
      CORE RENDER
   ========================================================= */
   async function executeRender(
@@ -187,23 +393,14 @@ export const Router = (() => {
     const cycleId =
       ++renderCycle;
 
-    const requestedPath =
-      resolveSpaHref(
-        AppCore,
-        pathname
-      );
-
-    const canonicalPath =
-      normalizeCanonicalPath(
-        AppCore,
-        requestedPath
-      );
-
-    const requestedUsername =
-      extractUsernameFromPath(
-        AppCore,
-        requestedPath
-      );
+    const {
+      requestedPath,
+      canonicalPath,
+      requestedUsername,
+      resolvedUsername,
+    } = getRequestedPathData(
+      pathname
+    );
 
     const route =
       getRoute(
@@ -218,21 +415,12 @@ export const Router = (() => {
         publicPath:
           requestedPath,
         username:
-          requestedUsername ||
-          getCurrentResolvedUsername(
-            AppCore
-          ) ||
-          null,
+          resolvedUsername,
         route,
       }
     );
 
-    clearDynamicContainers(
-      AppCore
-    );
-
-    setActiveMenu(
-      AppCore,
+    applyCommonPreRenderUI(
       canonicalPath
     );
 
@@ -243,6 +431,14 @@ export const Router = (() => {
       return;
     }
 
+    /* =====================================
+       ROUTE NOT FOUND
+       Nota:
+       - de momento seguimos delegando a render.js
+       - luego podrás externalizarlo a una vista 404 aparte
+       - si quieres estilo "Google", aquí podrás redirigir
+         a una ruta dedicada /404 sin tocar el resto
+    ===================================== */
     if (!route) {
       renderRouteNotFound({
         AppCore,
@@ -254,14 +450,12 @@ export const Router = (() => {
         options,
         setShellMode:
           (routeArg) =>
-            setShellMode(
-              AppCore,
+            setShellModeSafe(
               routeArg
             ),
         setDocumentTitle:
           (title) =>
-            setDocumentTitle(
-              AppCore,
+            setDocumentTitleSafe(
               title
             ),
       });
@@ -270,94 +464,23 @@ export const Router = (() => {
     }
 
     const access =
-      shouldAllowRoute({
-        AppCore,
-        Auth,
+      resolveRouteAccess({
         route,
-        requestedCanonicalPath:
-          canonicalPath,
-        getRoute,
+        canonicalPath,
       });
 
     if (!access.allowed) {
-      if (
-        access.reason ===
-        "not-authenticated"
-      ) {
-        renderLoginRedirect({
-          AppCore,
-          getRoute,
-          updateHistory,
-          canonicalPath,
-          clearDynamicContainers:
-            () =>
-              clearDynamicContainers(
-                AppCore
-              ),
-          setActiveMenu:
-            (pathArg) =>
-              setActiveMenu(
-                AppCore,
-                pathArg
-              ),
-          setShellMode:
-            (routeArg) =>
-              setShellMode(
-                AppCore,
-                routeArg
-              ),
-          setDocumentTitle:
-            (title) =>
-              setDocumentTitle(
-                AppCore,
-                title
-              ),
-        });
-
-        return;
-      }
-
-      if (
-        access.reason ===
-        "already-authenticated"
-      ) {
-        return performRedirect(
-          access.redirectTo ||
-            getDefaultHomeTarget(),
-          {
-            redirectedFrom:
-              canonicalPath,
-          }
-        );
-      }
-
-      if (
-        access.reason ===
-        "insufficient-role"
-      ) {
-        renderRouteForbidden({
-          AppCore,
-          getRoute,
-          updateHistory,
+      const handled =
+        await handleDeniedAccess({
+          access,
           route,
           requestedPath,
           canonicalPath,
           requestedUsername,
           options,
-          setShellMode:
-            (routeArg) =>
-              setShellMode(
-                AppCore,
-                routeArg
-              ),
-          setDocumentTitle:
-            (title) =>
-              setDocumentTitle(
-                AppCore,
-                title
-              ),
         });
 
+      if (handled) {
         return;
       }
     }
@@ -387,14 +510,12 @@ export const Router = (() => {
           requestedUsername,
           setShellMode:
             (routeArg) =>
-              setShellMode(
-                AppCore,
+              setShellModeSafe(
                 routeArg
               ),
           setDocumentTitle:
             (title) =>
-              setDocumentTitle(
-                AppCore,
+              setDocumentTitleSafe(
                 title
               ),
         })
@@ -412,14 +533,12 @@ export const Router = (() => {
         renderCycle,
         setShellMode:
           (routeArg) =>
-            setShellMode(
-              AppCore,
+            setShellModeSafe(
               routeArg
             ),
         setDocumentTitle:
           (title) =>
-            setDocumentTitle(
-              AppCore,
+            setDocumentTitleSafe(
               title
             ),
       });
@@ -450,35 +569,18 @@ export const Router = (() => {
     pathname = "/",
     options = {}
   ) {
-    const requestedPath =
-      resolveSpaHref(
-        AppCore,
-        pathname
-      );
+    const {
+      requestedPath,
+      canonicalPath,
+    } = getRequestedPathData(
+      pathname
+    );
 
-    const canonicalPath =
-      normalizeCanonicalPath(
-        AppCore,
-        requestedPath
-      );
-
-    const currentCanonicalPath =
-      normalizeCanonicalPath(
-        AppCore,
-        AppCore.state.route ||
-          "/"
-      );
-
-    const currentPath =
-      getCurrentPublicPath(
-        AppCore
-      );
-
-    const normalizedCurrentPath =
-      resolveSpaHref(
-        AppCore,
-        currentPath
-      );
+    const {
+      currentCanonicalPath,
+      normalizedCurrentPath,
+    } =
+      getCurrentComparablePaths();
 
     if (
       canonicalPath ===
@@ -531,10 +633,8 @@ export const Router = (() => {
       );
 
     const nextCanonicalPath =
-      normalizeCanonicalPath(
-        AppCore,
-        redirect ||
-          fallback
+      getCanonicalPath(
+        redirect || fallback
       );
 
     const nextPublicPath =
@@ -572,39 +672,48 @@ export const Router = (() => {
   ) {
     if (
       event.defaultPrevented
-    )
+    ) {
       return;
+    }
 
-    if (event.button !== 0)
+    if (event.button !== 0) {
       return;
+    }
 
     if (
       event.metaKey ||
       event.ctrlKey ||
       event.shiftKey ||
       event.altKey
-    )
+    ) {
       return;
+    }
 
     const link =
       event.target?.closest?.(
         "a[data-spa]"
       );
 
-    if (!link) return;
+    if (!link) {
+      return;
+    }
 
     const href =
       link.getAttribute(
         "href"
       ) || "";
 
-    if (!href) return;
+    if (!href) {
+      return;
+    }
+
     if (
       link.hasAttribute(
         "download"
       )
-    )
+    ) {
       return;
+    }
 
     if (
       (
@@ -613,13 +722,15 @@ export const Router = (() => {
         ) || ""
       ).toLowerCase() ===
       "_blank"
-    )
+    ) {
       return;
+    }
 
     if (
       isHashOnlyHref(href)
-    )
+    ) {
       return;
+    }
 
     if (
       isUnsafeHref(href)
@@ -662,8 +773,9 @@ export const Router = (() => {
      BIND
   ========================================================= */
   function bind() {
-    if (isBound)
+    if (isBound) {
       return api;
+    }
 
     validateRoutesTable(
       AppCore,
@@ -685,11 +797,9 @@ export const Router = (() => {
       handlePopState
     );
 
-    ensureInitialHistoryState(
-      {
-        AppCore,
-      }
-    );
+    ensureInitialHistoryState({
+      AppCore,
+    });
 
     AppCore.events.emit(
       "router:bound",

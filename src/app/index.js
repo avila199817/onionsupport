@@ -25,7 +25,7 @@ import { Http } from "../services/index.js";
 
 import { SidebarUI } from "../ui/sidebar/index.js";
 import { TopbarUI } from "../ui/topbar/index.js";
-import { Toast } from "../ui/toast.js";
+import { Toast } from "../ui/toast/index.js";
 import { I18n } from "../i18n/index.js";
 
 import {

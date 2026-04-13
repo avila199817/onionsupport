@@ -4,11 +4,11 @@
 
    Responsabilidades:
    - resolver identificador de recuperación
-   - normalizar payload de reset-password
-   - construir body de request compatible con backend heterogéneo
+   - normalizar payload de reset-password-request
+   - construir body de request alineado con backend real
    - ejecutar petición de recuperación de acceso
    - normalizar la respuesta del backend
-   - tolerar múltiples formas de transporte HTTP
+   - tolerar AppCore.request o fetch nativo
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -34,16 +34,12 @@ function isObject(value) {
   return value !== null && typeof value === "object";
 }
 
-function isValidEmail(value = "") {
-  const email = safeText(value, "").toLowerCase();
-
-  if (!email) return false;
-
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
 function looksLikeEmail(value = "") {
   return safeText(value, "").includes("@");
+}
+
+function isAbsoluteUrl(value = "") {
+  return /^https?:\/\//i.test(String(value || ""));
 }
 
 /* =========================================================
@@ -52,18 +48,9 @@ function looksLikeEmail(value = "") {
 
 function getConfiguredEndpoint() {
   const candidates = [
-    AUTH_ENDPOINTS?.requestPasswordReset,
     AUTH_ENDPOINTS?.resetPasswordRequest,
-    AUTH_ENDPOINTS?.forgotPassword,
-    AUTH_ENDPOINTS?.passwordReset,
-    AUTH_ENDPOINTS?.passwordResetRequest,
-    AUTH_ENDPOINTS?.recoverPassword,
-    AUTH_ENDPOINTS?.recover,
-    AUTH_ENDPOINTS?.forgot,
-    "/auth/forgot-password",
-    "/auth/reset-password",
-    "/api/auth/forgot-password",
-    "/api/auth/reset-password",
+    AUTH_ENDPOINTS?.requestPasswordReset,
+    "/api/auth/reset-password-request",
   ];
 
   for (const candidate of candidates) {
@@ -73,7 +60,7 @@ function getConfiguredEndpoint() {
     }
   }
 
-  return "/api/auth/forgot-password";
+  return "/api/auth/reset-password-request";
 }
 
 export function getRequestPasswordResetEndpoint() {
@@ -97,16 +84,15 @@ export function resolveResetPasswordIdentifier(payload = {}) {
 
 export function normalizeResetPasswordPayload(payload = {}) {
   const identifier = resolveResetPasswordIdentifier(payload);
+  const email = looksLikeEmail(identifier)
+    ? identifier.toLowerCase()
+    : "";
+  const username = email ? "" : identifier;
 
   return {
     identifier,
-    email: looksLikeEmail(identifier)
-      ? identifier.toLowerCase()
-      : "",
-    username: looksLikeEmail(identifier)
-      ? ""
-      : identifier,
-    remember: Boolean(payload?.remember),
+    email,
+    username,
     redirect: safeText(payload?.redirect, ""),
   };
 }
@@ -118,15 +104,16 @@ export function normalizeResetPasswordPayload(payload = {}) {
 export function buildResetPasswordRequestBody(payload = {}) {
   const normalized = normalizeResetPasswordPayload(payload);
 
+  /*
+    Alineado con backend actual:
+    - backend puede consumir email
+    - mantenemos identifier por estabilidad de front
+    - mantenemos username/user como compat auxiliar
+  */
   const body = {
     identifier: normalized.identifier,
   };
 
-  /*
-    Compat con backends heterogéneos:
-    enviamos siempre identifier y además email/username
-    cuando podemos inferirlos.
-  */
   if (normalized.email) {
     body.email = normalized.email;
   }
@@ -207,6 +194,35 @@ export function normalizeResetPasswordResponse(response = {}) {
 }
 
 /* =========================================================
+   URL RESOLUTION
+========================================================= */
+
+function buildFinalUrl(endpoint = "") {
+  const cleanEndpoint = safeText(endpoint, "");
+
+  if (!cleanEndpoint) {
+    return "/api/auth/reset-password-request";
+  }
+
+  if (isAbsoluteUrl(cleanEndpoint)) {
+    return cleanEndpoint;
+  }
+
+  const apiBase = safeText(AppCore?.config?.apiBase, "");
+
+  if (!apiBase) {
+    return cleanEndpoint;
+  }
+
+  const left = apiBase.replace(/\/+$/, "");
+  const right = cleanEndpoint.startsWith("/")
+    ? cleanEndpoint
+    : `/${cleanEndpoint}`;
+
+  return `${left}${right}`;
+}
+
+/* =========================================================
    TRANSPORT
 ========================================================= */
 
@@ -233,11 +249,7 @@ async function requestWithAppCore(endpoint, body) {
 }
 
 async function requestWithFetch(endpoint, body) {
-  const apiBase = safeText(AppCore?.config?.apiBase, "");
-  const isAbsolute = /^https?:\/\//i.test(endpoint);
-  const finalUrl = isAbsolute
-    ? endpoint
-    : `${apiBase}${endpoint}`;
+  const finalUrl = buildFinalUrl(endpoint);
 
   const response = await fetch(finalUrl, {
     method: "POST",
@@ -261,6 +273,7 @@ async function requestWithFetch(endpoint, body) {
       safeText(
         data?.message ||
           data?.mensaje ||
+          data?.error ||
           response.statusText,
         "No se pudo iniciar la recuperación de acceso."
       )
@@ -314,10 +327,6 @@ export async function requestPasswordReset(payload = {}) {
       rawResponse = await requestWithFetch(endpoint, body);
     }
   } catch (error) {
-    /*
-      Propagamos el error intacto para que reset-password.helpers.js
-      pueda resolver el mensaje correctamente.
-    */
     throw error;
   }
 

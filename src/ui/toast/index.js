@@ -9,6 +9,8 @@
    - auto-init transparente al primer uso
    - bind de eventos globales
    - registro en AppCore.modules
+   - compatibilidad bridge para Login / Auth Views
+   - aliases legacy (warn / dismissAll / exists / ready)
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -49,6 +51,12 @@ const Toast = (() => {
      INTERNAL
   ========================================================= */
 
+  function safeLog(...args) {
+    try {
+      AppCore?.utils?.log?.(...args);
+    } catch {}
+  }
+
   function ensureReady() {
     if (!initialized) {
       init();
@@ -65,7 +73,10 @@ const Toast = (() => {
         typeof AppCore.modules.register === "function" &&
         !AppCore.modules.has("toast")
       ) {
-        AppCore.modules.register("toast", api);
+        AppCore.modules.register(
+          "toast",
+          api
+        );
       }
     } catch {}
   }
@@ -76,11 +87,14 @@ const Toast = (() => {
       update: updateToast,
       dismiss: dismissToast,
       clear: clearToasts,
+
       success: successToast,
       error: errorToast,
       warning: warningToast,
+      warn: warningToast,
       info: infoToast,
       loading: loadingToast,
+
       refreshAllToastsLanguage,
     });
 
@@ -89,30 +103,30 @@ const Toast = (() => {
     });
   }
 
+  function ensureDom() {
+    ensureToastKeyframes();
+    ensureToastContainer();
+  }
+
   /* =========================================================
      LIFECYCLE
   ========================================================= */
 
   function init() {
     if (initialized) {
-      ensureToastKeyframes();
-      ensureToastContainer();
+      ensureDom();
       return api;
     }
 
-    ensureToastKeyframes();
-    ensureToastContainer();
-
+    ensureDom();
     bindEvents();
     registerModule();
 
     initialized = true;
 
-    try {
-      AppCore?.utils?.log?.(
-        "Toast UI inicializado correctamente."
-      );
-    } catch {}
+    safeLog(
+      "Toast UI inicializado correctamente."
+    );
 
     return api;
   }
@@ -120,6 +134,10 @@ const Toast = (() => {
   function destroy() {
     try {
       unbindToastEvents();
+    } catch {}
+
+    try {
+      clearToasts();
     } catch {}
 
     try {
@@ -132,22 +150,80 @@ const Toast = (() => {
   }
 
   /* =========================================================
+     NORMALIZERS
+  ========================================================= */
+
+  function normalizeOptions(
+    options = {}
+  ) {
+    return options &&
+      typeof options === "object"
+      ? options
+      : {};
+  }
+
+  function normalizeShowInput(
+    input = {}
+  ) {
+    if (
+      typeof input === "string"
+    ) {
+      return {
+        message: input,
+      };
+    }
+
+    return normalizeOptions(
+      input
+    );
+  }
+
+  /* =========================================================
      SAFE PUBLIC API
   ========================================================= */
 
-  function show(options = {}) {
+  function show(
+    options = {}
+  ) {
     ensureReady();
-    return showToast(options);
+
+    return showToast(
+      normalizeShowInput(
+        options
+      )
+    );
   }
 
-  function update(id, patch = {}) {
+  function update(
+    id,
+    patch = {}
+  ) {
     ensureReady();
-    return updateToast(id, patch);
+
+    return updateToast(
+      id,
+      normalizeOptions(
+        patch
+      )
+    );
   }
 
-  function dismiss(id) {
+  function dismiss(id = null) {
     ensureReady();
+
+    if (
+      id === null ||
+      id === undefined
+    ) {
+      return clearToasts();
+    }
+
     return dismissToast(id);
+  }
+
+  function dismissAll() {
+    ensureReady();
+    return clearToasts();
   }
 
   function clear() {
@@ -155,34 +231,105 @@ const Toast = (() => {
     return clearToasts();
   }
 
-  function success(message = "", options = {}) {
+  function success(
+    message = "",
+    options = {}
+  ) {
     ensureReady();
-    return successToast(message, options);
+
+    return successToast(
+      message,
+      normalizeOptions(
+        options
+      )
+    );
   }
 
-  function error(message = "", options = {}) {
+  function error(
+    message = "",
+    options = {}
+  ) {
     ensureReady();
-    return errorToast(message, options);
+
+    return errorToast(
+      message,
+      normalizeOptions(
+        options
+      )
+    );
   }
 
-  function warning(message = "", options = {}) {
+  function warning(
+    message = "",
+    options = {}
+  ) {
     ensureReady();
-    return warningToast(message, options);
+
+    return warningToast(
+      message,
+      normalizeOptions(
+        options
+      )
+    );
   }
 
-  function info(message = "", options = {}) {
-    ensureReady();
-    return infoToast(message, options);
+  function warn(
+    message = "",
+    options = {}
+  ) {
+    return warning(
+      message,
+      options
+    );
   }
 
-  function loading(message = "", options = {}) {
+  function info(
+    message = "",
+    options = {}
+  ) {
     ensureReady();
-    return loadingToast(message, options);
+
+    return infoToast(
+      message,
+      normalizeOptions(
+        options
+      )
+    );
+  }
+
+  function loading(
+    message = "",
+    options = {}
+  ) {
+    ensureReady();
+
+    return loadingToast(
+      message,
+      {
+        persist: true,
+        ...normalizeOptions(
+          options
+        ),
+      }
+    );
   }
 
   function refreshLanguage() {
     ensureReady();
+
     return refreshAllToastsLanguage();
+  }
+
+  function exists() {
+    return true;
+  }
+
+  function ready() {
+    return initialized;
+  }
+
+  function resolve() {
+    return api;
   }
 
   /* =========================================================
@@ -195,16 +342,24 @@ const Toast = (() => {
 
     show,
     update,
+
     dismiss,
+    dismissAll,
     clear,
 
     success,
     error,
     warning,
+    warn,
     info,
     loading,
 
-    refreshAllToastsLanguage: refreshLanguage,
+    refreshAllToastsLanguage:
+      refreshLanguage,
+
+    exists,
+    ready,
+    resolve,
 
     scope: TOAST_SCOPE,
 

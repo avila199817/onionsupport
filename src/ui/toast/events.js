@@ -14,6 +14,26 @@ import { AppCore } from "../../core/index.js";
 import { TOAST_SCOPE } from "./constants.js";
 
 /* =========================================================
+   HELPERS
+========================================================= */
+
+function resolveCleanupScope() {
+  try {
+    const cleanup = AppCore?.cleanup;
+
+    if (typeof cleanup?.scope === "function") {
+      return cleanup.scope(TOAST_SCOPE);
+    }
+  } catch {}
+
+  return TOAST_SCOPE;
+}
+
+function getEventDetail(event) {
+  return event?.detail || null;
+}
+
+/* =========================================================
    PAYLOAD
 ========================================================= */
 
@@ -83,17 +103,18 @@ export function bindToastGlobalEvents({
 } = {}) {
   const cleanup = AppCore?.cleanup;
 
-  if (!cleanup?.event) {
+  if (typeof cleanup?.event !== "function") {
     return null;
   }
 
-  const scope =
-    cleanup?.scope?.(TOAST_SCOPE) || TOAST_SCOPE;
+  const scope = resolveCleanupScope();
 
   cleanup.event(
     scope,
     "toast:show",
-    ({ detail }) => {
+    (event) => {
+      const detail = getEventDetail(event);
+
       if (!detail || typeof show !== "function") {
         return;
       }
@@ -107,7 +128,9 @@ export function bindToastGlobalEvents({
   cleanup.event(
     scope,
     "toast:success",
-    ({ detail }) => {
+    (event) => {
+      const detail = getEventDetail(event);
+
       if (!detail || typeof success !== "function") {
         return;
       }
@@ -122,7 +145,9 @@ export function bindToastGlobalEvents({
   cleanup.event(
     scope,
     "toast:error",
-    ({ detail }) => {
+    (event) => {
+      const detail = getEventDetail(event);
+
       if (!detail || typeof error !== "function") {
         return;
       }
@@ -137,7 +162,9 @@ export function bindToastGlobalEvents({
   cleanup.event(
     scope,
     "toast:warning",
-    ({ detail }) => {
+    (event) => {
+      const detail = getEventDetail(event);
+
       if (!detail || typeof warning !== "function") {
         return;
       }
@@ -152,7 +179,9 @@ export function bindToastGlobalEvents({
   cleanup.event(
     scope,
     "toast:info",
-    ({ detail }) => {
+    (event) => {
+      const detail = getEventDetail(event);
+
       if (!detail || typeof info !== "function") {
         return;
       }
@@ -167,7 +196,9 @@ export function bindToastGlobalEvents({
   cleanup.event(
     scope,
     "toast:loading",
-    ({ detail }) => {
+    (event) => {
+      const detail = getEventDetail(event);
+
       if (!detail || typeof loading !== "function") {
         return;
       }
@@ -182,11 +213,10 @@ export function bindToastGlobalEvents({
   cleanup.event(
     scope,
     "toast:update",
-    ({ detail }) => {
-      if (
-        !detail?.id ||
-        typeof update !== "function"
-      ) {
+    (event) => {
+      const detail = getEventDetail(event);
+
+      if (!detail?.id || typeof update !== "function") {
         return;
       }
 
@@ -197,11 +227,10 @@ export function bindToastGlobalEvents({
   cleanup.event(
     scope,
     "toast:dismiss",
-    ({ detail }) => {
-      if (
-        !detail?.id ||
-        typeof dismiss !== "function"
-      ) {
+    (event) => {
+      const detail = getEventDetail(event);
+
+      if (!detail?.id || typeof dismiss !== "function") {
         return;
       }
 
@@ -248,12 +277,11 @@ export function bindToastDomEvents({
 } = {}) {
   const cleanup = AppCore?.cleanup;
 
-  if (!cleanup?.on) {
+  if (typeof cleanup?.on !== "function") {
     return null;
   }
 
-  const scope =
-    cleanup?.scope?.(TOAST_SCOPE) || TOAST_SCOPE;
+  const scope = resolveCleanupScope();
 
   cleanup.on(
     scope,

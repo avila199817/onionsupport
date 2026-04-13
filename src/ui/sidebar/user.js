@@ -13,6 +13,7 @@
    - pintar avatar real o fallback
    - soportar hasAvatar / avatarUpdatedAt
    - evitar que una URL vacía o rota rompa el footer
+   - respetar la estructura DOM del template
 ========================================================= */
 
 import {
@@ -218,6 +219,35 @@ export function isAdmin(
 }
 
 /* =========================================================
+   AVATAR DOM HELPERS
+========================================================= */
+function getAvatarNodes(
+  avatarEl
+) {
+  if (!avatarEl) {
+    return {
+      imgEl: null,
+      fallbackEl: null,
+    };
+  }
+
+  const imgEl =
+    avatarEl.querySelector(
+      "#sidebarAvatarImage, .avatar-image"
+    );
+
+  const fallbackEl =
+    avatarEl.querySelector(
+      "#sidebarAvatarFallback, .avatar-fallback"
+    );
+
+  return {
+    imgEl,
+    fallbackEl,
+  };
+}
+
+/* =========================================================
    AVATAR RENDER
 ========================================================= */
 export function renderAvatarFallback(
@@ -227,9 +257,12 @@ export function renderAvatarFallback(
 ) {
   if (!avatarEl) return;
 
-  avatarEl.innerHTML = "";
-  avatarEl.textContent =
-    avatarText;
+  const {
+    imgEl,
+    fallbackEl,
+  } = getAvatarNodes(
+    avatarEl
+  );
 
   avatarEl.classList.remove(
     "has-image"
@@ -248,6 +281,20 @@ export function renderAvatarFallback(
   avatarEl.removeAttribute(
     "data-tooltip"
   );
+
+  if (imgEl) {
+    imgEl.hidden = true;
+    imgEl.removeAttribute("src");
+  }
+
+  if (fallbackEl) {
+    fallbackEl.hidden = false;
+    fallbackEl.textContent =
+      avatarText;
+  } else {
+    avatarEl.textContent =
+      avatarText;
+  }
 }
 
 export function renderAvatarImage(
@@ -272,6 +319,13 @@ export function renderAvatarImage(
     return;
   }
 
+  const {
+    imgEl,
+    fallbackEl,
+  } = getAvatarNodes(
+    avatarEl
+  );
+
   avatarEl.classList.add(
     "has-image"
   );
@@ -290,25 +344,23 @@ export function renderAvatarImage(
     "data-tooltip"
   );
 
-  const img =
-    document.createElement(
-      "img"
+  if (!imgEl) {
+    renderAvatarFallback(
+      avatarEl,
+      displayName,
+      avatarText
     );
+    return;
+  }
 
-  img.src = safeUrl;
-  img.alt = `Avatar de ${displayName}`;
-  img.loading = "eager";
-  img.decoding = "async";
-  img.draggable = false;
-  img.referrerPolicy = "no-referrer";
+  imgEl.alt = `Avatar de ${displayName}`;
+  imgEl.loading = "eager";
+  imgEl.decoding = "async";
+  imgEl.draggable = false;
+  imgEl.referrerPolicy =
+    "no-referrer";
 
-  img.style.width = "100%";
-  img.style.height = "100%";
-  img.style.objectFit = "cover";
-  img.style.borderRadius = "50%";
-  img.style.display = "block";
-
-  img.onerror = () => {
+  imgEl.onerror = () => {
     renderAvatarFallback(
       avatarEl,
       displayName,
@@ -316,8 +368,14 @@ export function renderAvatarImage(
     );
   };
 
-  avatarEl.innerHTML = "";
-  avatarEl.appendChild(img);
+  imgEl.src = safeUrl;
+  imgEl.hidden = false;
+
+  if (fallbackEl) {
+    fallbackEl.hidden = true;
+    fallbackEl.textContent =
+      avatarText;
+  }
 }
 
 /* =========================================================
@@ -379,12 +437,20 @@ export function renderUser(
   }
 
   if (avatarEl) {
-    renderAvatarImage(
-      avatarEl,
-      avatarUrl,
-      displayName,
-      avatarText
-    );
+    if (avatarUrl) {
+      renderAvatarImage(
+        avatarEl,
+        avatarUrl,
+        displayName,
+        avatarText
+      );
+    } else {
+      renderAvatarFallback(
+        avatarEl,
+        displayName,
+        avatarText
+      );
+    }
 
     if (username) {
       avatarEl.dataset.username =

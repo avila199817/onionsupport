@@ -503,16 +503,34 @@ export function getSidebarTemplate() {
           aria-label="${escapeHtml(labels.userToggle)}"
           data-i18n-aria-label="sidebar.user.toggleAriaLabel"
         >
-          <div
-            class="avatar"
-            id="${SIDEBAR_AVATAR_ID}"
-            aria-label="${escapeHtml(labels.userAvatar)}"
-            data-i18n-aria-label="sidebar.user.avatarAriaLabel"
-            title="${escapeHtml(labels.userDefaultName)}"
-            data-default-avatar="ON"
-          >
-            ON
-          </div>
+        
+      <div
+        class="avatar"
+        id="${SIDEBAR_AVATAR_ID}"
+        aria-label="${escapeHtml(labels.userAvatar)}"
+        data-i18n-aria-label="sidebar.user.avatarAriaLabel"
+        title="${escapeHtml(labels.userDefaultName)}"
+        data-default-avatar="ON"
+        data-avatar-root="true"
+      >
+        <img
+          class="avatar-image"
+          id="sidebarAvatarImage"
+          src=""
+          alt="${escapeHtml(labels.userDefaultName)}"
+          draggable="false"
+          decoding="async"
+          hidden
+        >
+      
+        <span
+          class="avatar-fallback"
+          id="sidebarAvatarFallback"
+          aria-hidden="true"
+        >
+          ON
+        </span>
+      </div>
 
           <div class="user-info">
             <span

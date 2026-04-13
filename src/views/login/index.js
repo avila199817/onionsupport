@@ -5,7 +5,7 @@
 
 import AppCore from "../../core/core.js";
 import { login as loginRequest } from "../../features/auth.js";
-import ToastBridge from "../../ui/toast/toast.bridge.js";
+import ToastBridge from "../../ui/toast.js";
 
 import {
   loadRememberedEmail,

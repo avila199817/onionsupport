@@ -11,7 +11,7 @@
    - resolución de redirect post-login
 ========================================================= */
 
-import AppCore from "../../core/core.js";
+import AppCore from "../../core/index.js";
 
 /* =========================================================
    CONST

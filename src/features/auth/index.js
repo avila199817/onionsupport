@@ -8,6 +8,8 @@
    - exponer helpers auth para toda la SPA
    - serializar restore / refresh / me
    - mantener compatibilidad con backend heterogéneo
+   - exponer aliases públicos estables para auth flows
+   - preparar el módulo para reset-password / forgot-password
 ========================================================= */
 
 import {
@@ -70,6 +72,59 @@ import {
   guardRole,
 } from "./guards.js";
 
+/* =========================================================
+   INTERNAL HELPERS
+========================================================= */
+
+function createNotImplementedError(methodName = "authMethod") {
+  return new Error(
+    `[Auth] ${methodName} no está implementado todavía. ` +
+    `Conecta el flujo real en src/features/auth/password-reset.js ` +
+    `o expón el método desde AppCore.services.auth.`
+  );
+}
+
+function resolveExternalResetExecutor() {
+  const candidates = [
+    globalThis?.AppCore?.services?.auth?.requestPasswordReset,
+    globalThis?.AppCore?.services?.auth?.resetPasswordRequest,
+    globalThis?.AppCore?.services?.auth?.forgotPassword,
+    globalThis?.AppCore?.auth?.requestPasswordReset,
+    globalThis?.AppCore?.auth?.resetPasswordRequest,
+    globalThis?.AppCore?.auth?.forgotPassword,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "function") {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+async function requestPasswordReset(payload = {}) {
+  const externalExecutor = resolveExternalResetExecutor();
+
+  if (typeof externalExecutor === "function") {
+    return externalExecutor(payload);
+  }
+
+  throw createNotImplementedError("requestPasswordReset");
+}
+
+async function resetPasswordRequest(payload = {}) {
+  return requestPasswordReset(payload);
+}
+
+async function forgotPassword(payload = {}) {
+  return requestPasswordReset(payload);
+}
+
+/* =========================================================
+   AUTH MODULE
+========================================================= */
+
 export const Auth = (() => {
   "use strict";
 
@@ -122,12 +177,20 @@ export const Auth = (() => {
     logout,
     handleLoginFormSubmit,
 
+    /*
+      reset password / forgot password
+      - requestPasswordReset: nombre principal recomendado
+      - resetPasswordRequest: alias legacy / semántico
+      - forgotPassword: alias común de backend heterogéneo
+    */
+    requestPasswordReset,
+    resetPasswordRequest,
+    forgotPassword,
+
     /* session recovery */
     fetchMe: runFetchMe,
-    refreshSession:
-      runRefreshSession,
-    restoreSession:
-      runRestoreSession,
+    refreshSession: runRefreshSession,
+    restoreSession: runRestoreSession,
 
     /* auth state */
     isAuthenticated,

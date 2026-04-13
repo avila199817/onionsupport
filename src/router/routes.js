@@ -4,11 +4,17 @@
 
    Responsabilidades:
    - definir la tabla de rutas canónicas de la SPA
-   - encapsular los adapters de render de vistas
+   - encapsular adapters de render
    - exponer rutas inmutables
-   - validar la estructura mínima de cada ruta
-   - resolver títulos vía i18n
-   - mantener orden consistente con sidebar y navegación real
+   - validar estructura mínima
+   - resolver títulos reactivos vía i18n
+   - mantener orden consistente con sidebar/router
+
+   HARDENING:
+   - lazy title getter
+   - safe render wrappers
+   - validación extendida
+   - metadata estable
 ========================================================= */
 
 import { I18n } from "../i18n/index.js";
@@ -23,167 +29,387 @@ import { ClientesView } from "../views/clientesView.js";
 import { CuentaView } from "../views/cuentaView.js";
 import { AjustesView } from "../views/ajustesView.js";
 
-function t(key, fallback = "", params = {}) {
+/* =========================================================
+   I18N
+========================================================= */
+function t(
+  key,
+  fallback = "",
+  params = {}
+) {
   try {
-    return I18n.t(key, params, fallback);
+    return (
+      I18n.t(
+        key,
+        params,
+        fallback
+      ) ||
+      fallback ||
+      key
+    );
   } catch {
     return fallback || key;
   }
 }
 
-function renderHomeView() {
-  HomeView.render();
+/* =========================================================
+   HELPERS
+========================================================= */
+function safeRun(fn) {
+  return async function wrappedRouteRender(...args) {
+    return await Promise.resolve(
+      fn(...args)
+    );
+  };
 }
 
-function renderIncidenciasView() {
-  IncidenciasView.init();
+function resolveRouteTitle(route) {
+  if (!route) return "";
+
+  return t(
+    route.titleKey,
+    route.titleFallback || route.name || ""
+  );
 }
 
-function renderFacturasView() {
-  FacturasView.render();
+function normalizeRoles(roles) {
+  if (!Array.isArray(roles)) return [];
+  return roles
+    .filter(Boolean)
+    .map((role) =>
+      String(role).trim()
+    )
+    .filter(Boolean);
 }
 
-function renderUsuariosView() {
-  UsuariosView.render();
+function createRoute(definition = {}) {
+  const route = {
+    path:
+      definition.path || "/",
+
+    name:
+      definition.name || "route",
+
+    titleKey:
+      definition.titleKey || "",
+
+    titleFallback:
+      definition.titleFallback ||
+      definition.name ||
+      "",
+
+    public:
+      definition.public === true,
+
+    roles:
+      normalizeRoles(
+        definition.roles
+      ),
+
+    hideShell:
+      definition.hideShell === true,
+
+    render:
+      safeRun(
+        definition.render ||
+          (() => {})
+      ),
+  };
+
+  Object.defineProperty(
+    route,
+    "title",
+    {
+      enumerable: true,
+      configurable: false,
+      get() {
+        return resolveRouteTitle(
+          route
+        );
+      },
+    }
+  );
+
+  return Object.freeze(route);
 }
 
-function renderClientesView() {
-  ClientesView.render();
-}
+/* =========================================================
+   VIEW ADAPTERS
+========================================================= */
+const renderHomeView =
+  safeRun(() =>
+    HomeView.render?.()
+  );
 
-function renderCuentaView() {
-  CuentaView.render();
-}
+const renderIncidenciasView =
+  safeRun(() =>
+    IncidenciasView.init?.()
+  );
 
-function renderAjustesView() {
-  AjustesView.render();
-}
+const renderFacturasView =
+  safeRun(() =>
+    FacturasView.render?.()
+  );
 
-function renderServidorView() {
-  ServerView.render();
-}
+const renderUsuariosView =
+  safeRun(() =>
+    UsuariosView.render?.()
+  );
 
-function renderLoginView() {
-  LoginView.render();
-}
+const renderClientesView =
+  safeRun(() =>
+    ClientesView.render?.()
+  );
 
+const renderCuentaView =
+  safeRun(() =>
+    CuentaView.render?.()
+  );
+
+const renderAjustesView =
+  safeRun(() =>
+    AjustesView.render?.()
+  );
+
+const renderServidorView =
+  safeRun(() =>
+    ServerView.render?.()
+  );
+
+const renderLoginView =
+  safeRun(() =>
+    LoginView.render?.()
+  );
+
+/* =========================================================
+   ROUTES FACTORY
+========================================================= */
 export function createRoutes() {
   return [
-    {
+    createRoute({
       path: "/",
       name: "home",
-      title: t("routes.home", "Onion Support"),
+      titleKey: "routes.home",
+      titleFallback:
+        "Onion Support",
       public: false,
       roles: [],
       hideShell: false,
       render: renderHomeView,
-    },
-    {
+    }),
+
+    createRoute({
       path: "/incidencias",
       name: "incidencias",
-      title: t("routes.incidencias", "Incidencias"),
+      titleKey:
+        "routes.incidencias",
+      titleFallback:
+        "Incidencias",
       public: false,
       roles: [],
       hideShell: false,
-      render: renderIncidenciasView,
-    },
-    {
+      render:
+        renderIncidenciasView,
+    }),
+
+    createRoute({
       path: "/facturas",
       name: "facturas",
-      title: t("routes.facturas", "Facturas"),
+      titleKey:
+        "routes.facturas",
+      titleFallback:
+        "Facturas",
       public: false,
       roles: [],
       hideShell: false,
-      render: renderFacturasView,
-    },
-    {
+      render:
+        renderFacturasView,
+    }),
+
+    createRoute({
       path: "/usuarios",
       name: "usuarios",
-      title: t("routes.usuarios", "Usuarios"),
+      titleKey:
+        "routes.usuarios",
+      titleFallback:
+        "Usuarios",
       public: false,
       roles: ["admin"],
       hideShell: false,
-      render: renderUsuariosView,
-    },
-    {
+      render:
+        renderUsuariosView,
+    }),
+
+    createRoute({
       path: "/clientes",
       name: "clientes",
-      title: t("routes.clientes", "Clientes"),
+      titleKey:
+        "routes.clientes",
+      titleFallback:
+        "Clientes",
       public: false,
       roles: ["admin"],
       hideShell: false,
-      render: renderClientesView,
-    },
-    {
+      render:
+        renderClientesView,
+    }),
+
+    createRoute({
       path: "/cuenta",
       name: "cuenta",
-      title: t("routes.cuenta", "Cuenta"),
+      titleKey:
+        "routes.cuenta",
+      titleFallback:
+        "Cuenta",
       public: false,
       roles: [],
       hideShell: false,
-      render: renderCuentaView,
-    },
-    {
+      render:
+        renderCuentaView,
+    }),
+
+    createRoute({
       path: "/ajustes",
       name: "ajustes",
-      title: t("routes.ajustes", "Ajustes"),
+      titleKey:
+        "routes.ajustes",
+      titleFallback:
+        "Ajustes",
       public: false,
       roles: [],
       hideShell: false,
-      render: renderAjustesView,
-    },
-    {
+      render:
+        renderAjustesView,
+    }),
+
+    createRoute({
       path: "/servidor",
       name: "servidor",
-      title: t("routes.servidor", "Servidor"),
+      titleKey:
+        "routes.servidor",
+      titleFallback:
+        "Servidor",
       public: false,
       roles: ["admin"],
       hideShell: false,
-      render: renderServidorView,
-    },
-    {
+      render:
+        renderServidorView,
+    }),
+
+    createRoute({
       path: "/login",
       name: "login",
-      title: t("routes.login", "Acceso"),
+      titleKey:
+        "routes.login",
+      titleFallback:
+        "Acceso",
       public: true,
       roles: [],
       hideShell: true,
-      render: renderLoginView,
-    },
+      render:
+        renderLoginView,
+    }),
   ];
 }
 
+/* =========================================================
+   IMMUTABLE TABLE
+========================================================= */
 export function getImmutableRoutes() {
   return Object.freeze(
-    createRoutes().map((route) => Object.freeze({ ...route }))
+    createRoutes()
   );
 }
 
-export function validateRoutesTable(AppCore, routes, normalizeCanonicalPath) {
+/* =========================================================
+   VALIDATION
+========================================================= */
+export function validateRoutesTable(
+  AppCore,
+  routes,
+  normalizeCanonicalPath
+) {
+  if (
+    !Array.isArray(routes)
+  ) {
+    throw new Error(
+      "Router: tabla de rutas inválida."
+    );
+  }
+
   const seen = new Set();
 
-  routes.forEach((route) => {
-    if (!route || typeof route !== "object") {
-      throw new Error("Router: existe una ruta inválida en la tabla.");
+  routes.forEach(
+    (route, index) => {
+      if (
+        !route ||
+        typeof route !==
+          "object"
+      ) {
+        throw new Error(
+          `Router: ruta inválida en índice ${index}.`
+        );
+      }
+
+      const normalizedPath =
+        normalizeCanonicalPath(
+          AppCore,
+          route.path || "/"
+        );
+
+      if (
+        !normalizedPath ||
+        !normalizedPath.startsWith(
+          "/"
+        )
+      ) {
+        throw new Error(
+          `Router: path inválido "${route.path}".`
+        );
+      }
+
+      if (
+        seen.has(
+          normalizedPath
+        )
+      ) {
+        throw new Error(
+          `Router: ruta duplicada "${normalizedPath}".`
+        );
+      }
+
+      if (
+        typeof route.name !==
+          "string" ||
+        !route.name.trim()
+      ) {
+        throw new Error(
+          `Router: la ruta "${normalizedPath}" no tiene name válido.`
+        );
+      }
+
+      if (
+        typeof route.render !==
+        "function"
+      ) {
+        throw new Error(
+          `Router: la ruta "${normalizedPath}" no tiene render().`
+        );
+      }
+
+      if (
+        !Array.isArray(
+          route.roles
+        )
+      ) {
+        throw new Error(
+          `Router: la ruta "${normalizedPath}" tiene roles inválidos.`
+        );
+      }
+
+      seen.add(
+        normalizedPath
+      );
     }
-
-    const normalizedPath = normalizeCanonicalPath(
-      AppCore,
-      route.path || "/"
-    );
-
-    if (!normalizedPath.startsWith("/")) {
-      throw new Error(`Router: ruta inválida "${route.path}".`);
-    }
-
-    if (seen.has(normalizedPath)) {
-      throw new Error(`Router: ruta duplicada detectada "${normalizedPath}".`);
-    }
-
-    if (typeof route.render !== "function") {
-      throw new Error(`Router: la ruta "${normalizedPath}" no tiene render().`);
-    }
-
-    seen.add(normalizedPath);
-  });
+  );
 }

@@ -3,14 +3,13 @@
    Archivo: src/views/login/login.dom.js
 
    Responsabilidades:
-   - resolver refs reales del dom del login
+   - resolver refs del dom del login
    - encapsular estados visuales del formulario
    - aplicar y limpiar errores
    - controlar loading ui
-   - controlar toggle visual de contraseña
+   - controlar toggle de contraseña
    - gestionar focus inicial
-   - exponer lectura robusta del formulario
-   - tolerar compatibilidad parcial con markup legacy
+   - soportar usuario o email
 ========================================================= */
 
 /* =========================================================
@@ -18,7 +17,7 @@
 ========================================================= */
 
 function qs(root, selector) {
-  return root?.querySelector?.(selector) || null;
+  return root?.querySelector(selector) || null;
 }
 
 function toText(value, fallback = "") {
@@ -27,73 +26,12 @@ function toText(value, fallback = "") {
   return text || fallback;
 }
 
-function setHidden(node, hidden) {
-  if (!node) return;
-  node.hidden = Boolean(hidden);
-}
-
-function setAriaInvalid(node, active = false) {
-  if (!node) return;
-  node.setAttribute("aria-invalid", active ? "true" : "false");
-}
-
 /* =========================================================
    REFS
 ========================================================= */
 
 export function getLoginRefs(container) {
-  const root =
-    qs(container, ".login-view") ||
-    qs(container, '[data-view="login"]') ||
-    container ||
-    null;
-
-  const identifierInput =
-    qs(container, "#username") ||
-    qs(container, "#loginEmail");
-
-  const passwordInput =
-    qs(container, "#password") ||
-    qs(container, "#loginPassword");
-
-  const submitButton =
-    qs(container, "#loginButton") ||
-    qs(container, "#loginSubmit");
-
-  const togglePasswordButton =
-    qs(container, "#togglePassword");
-
-  const eyeOpenIcon =
-    qs(container, "#eyeOpenIcon");
-
-  const eyeClosedIcon =
-    qs(container, "#eyeClosedIcon");
-
-  const capsIndicator =
-    qs(container, "#capsIndicator") ||
-    qs(container, "#loginCapsIndicator");
-
-  const capsIcon =
-    qs(container, "#capsIcon");
-
-  const capsLabel =
-    qs(container, "#capsLabel");
-
-  const forgotPasswordLink =
-    qs(container, "#forgotPasswordLink");
-
-  const redirectInput =
-    qs(container, 'input[name="redirect"]');
-
-  const fieldIdentifier =
-    identifierInput?.closest?.(".login-field") ||
-    qs(container, '[data-field="identifier"]') ||
-    qs(container, '[data-field="email"]');
-
-  const fieldPassword =
-    passwordInput?.closest?.(".login-field") ||
-    passwordInput?.closest?.(".password-wrapper") ||
-    qs(container, '[data-field="password"]');
+  const root = qs(container, ".login-view");
 
   return {
     container,
@@ -101,40 +39,24 @@ export function getLoginRefs(container) {
 
     form: qs(container, "#loginForm"),
 
-    identifierInput,
-    emailInput: identifierInput,
-
-    passwordInput,
+    emailInput: qs(container, "#loginEmail"),
+    identifierInput: qs(container, "#loginEmail"),
+    passwordInput: qs(container, "#loginPassword"),
     rememberInput: qs(container, "#loginRemember"),
-
-    redirectInput,
-
-    submitButton,
-    themeToggleButton: qs(container, "#loginThemeToggle"),
-    togglePasswordButton,
-
-    eyeOpenIcon,
-    eyeClosedIcon,
-
-    capsIndicator,
-    capsWrap: capsIndicator,
-    capsIcon,
-    capsLabel,
-
-    forgotPasswordLink,
 
     errorBox: qs(container, "#loginError"),
 
-    fieldIdentifier,
-    fieldEmail: fieldIdentifier,
-    fieldPassword,
+    submitButton: qs(container, "#loginSubmit"),
+    themeToggleButton: qs(container, "#loginThemeToggle"),
+    togglePasswordButton: qs(container, "#togglePassword"),
 
-    toastRoot: qs(container, "#loginToast"),
-    toastIcon: qs(container, "#loginToastIcon"),
-    toastTitle: qs(container, "#loginToastTitle"),
-    toastText: qs(container, "#loginToastText"),
-    toastClose: qs(container, "#loginToastClose"),
-    toastProgress: qs(container, "#loginToastProgress"),
+    capsIndicator: qs(container, "#loginCapsIndicator"),
+
+    forgotPasswordLink: qs(container, "#forgotPasswordLink"),
+
+    fieldEmail: qs(container, '[data-field="email"]'),
+    fieldIdentifier: qs(container, '[data-field="email"]'),
+    fieldPassword: qs(container, '[data-field="password"]'),
   };
 }
 
@@ -149,9 +71,8 @@ export function setFieldInvalid(fieldNode, invalid = false) {
 
 export function setInputInvalid(inputNode, invalid = false) {
   if (!inputNode) return;
-
   inputNode.classList.toggle("is-invalid", Boolean(invalid));
-  setAriaInvalid(inputNode, Boolean(invalid));
+  inputNode.setAttribute("aria-invalid", invalid ? "true" : "false");
 }
 
 export function setFieldError(fieldNode, message = "") {
@@ -163,12 +84,12 @@ export function clearFieldError(fieldNode) {
 }
 
 export function clearLoginErrors(refs = {}) {
-  clearFieldError(refs.fieldIdentifier);
   clearFieldError(refs.fieldEmail);
+  clearFieldError(refs.fieldIdentifier);
   clearFieldError(refs.fieldPassword);
 
-  setInputInvalid(refs.identifierInput, false);
   setInputInvalid(refs.emailInput, false);
+  setInputInvalid(refs.identifierInput, false);
   setInputInvalid(refs.passwordInput, false);
 
   if (refs.errorBox) {
@@ -178,7 +99,8 @@ export function clearLoginErrors(refs = {}) {
 
 export function applyLoginErrors(refs = {}, errors = {}) {
   const identifierError =
-    toText(errors.identifier, "") || toText(errors.email, "");
+    toText(errors.identifier, "") ||
+    toText(errors.email, "");
 
   const passwordError =
     toText(errors.password, "");
@@ -186,12 +108,12 @@ export function applyLoginErrors(refs = {}, errors = {}) {
   const firstError =
     identifierError || passwordError || "";
 
-  setFieldError(refs.fieldIdentifier, identifierError);
   setFieldError(refs.fieldEmail, identifierError);
+  setFieldError(refs.fieldIdentifier, identifierError);
   setFieldError(refs.fieldPassword, passwordError);
 
-  setInputInvalid(refs.identifierInput, Boolean(identifierError));
   setInputInvalid(refs.emailInput, Boolean(identifierError));
+  setInputInvalid(refs.identifierInput, Boolean(identifierError));
   setInputInvalid(refs.passwordInput, Boolean(passwordError));
 
   if (refs.errorBox) {
@@ -217,7 +139,7 @@ export function setLoginLoading(
 
   const submitLabel = toText(
     options.submitLabel,
-    "Acceder"
+    "Entrar al panel"
   );
 
   const loadingLabel = toText(
@@ -227,7 +149,7 @@ export function setLoginLoading(
 
   const {
     form,
-    identifierInput,
+    emailInput,
     passwordInput,
     rememberInput,
     submitButton,
@@ -241,14 +163,13 @@ export function setLoginLoading(
     form.dataset.submitting = String(isLoading);
   }
 
-  if (identifierInput) {
-    identifierInput.disabled = isLoading;
+  if (emailInput) {
+    emailInput.disabled = isLoading;
   }
 
   /*
-    No deshabilitamos password ni toggle del ojo
-    para mantener la experiencia visual estable
-    y evitar sensaciones raras durante submit.
+    No deshabilitamos password ni toggle para no romper
+    la experiencia visual del campo durante el submit.
   */
   if (passwordInput) {
     passwordInput.disabled = false;
@@ -276,7 +197,10 @@ export function setLoginLoading(
     submitButton.disabled = isLoading;
     submitButton.dataset.loading = String(isLoading);
     submitButton.innerHTML = isLoading
-      ? `<span class="login-submit-text">${loadingLabel}</span>`
+      ? `
+        <span class="login-view__spinner" aria-hidden="true"></span>
+        <span class="login-submit-text">${loadingLabel}</span>
+      `
       : `<span class="login-submit-text">${submitLabel}</span>`;
   }
 }
@@ -291,32 +215,36 @@ export function getPasswordVisibilityState(refs = {}) {
 
 export function setPasswordVisibility(refs = {}, visible = false) {
   const isVisible = Boolean(visible);
-
   const passwordInput = refs?.passwordInput;
   const togglePasswordButton = refs?.togglePasswordButton;
-  const eyeOpenIcon = refs?.eyeOpenIcon;
-  const eyeClosedIcon = refs?.eyeClosedIcon;
 
   if (!passwordInput || !togglePasswordButton) {
     return isVisible;
   }
 
-  passwordInput.type = isVisible ? "text" : "password";
+  const showLabel =
+    toText(
+      togglePasswordButton.getAttribute("data-show-label"),
+      "Mostrar contraseña"
+    );
 
-  togglePasswordButton.classList.toggle("active", isVisible);
+  const hideLabel =
+    toText(
+      togglePasswordButton.getAttribute("data-hide-label"),
+      "Ocultar contraseña"
+    );
+
+  const showIcon =
+    togglePasswordButton.getAttribute("data-show-icon") || "";
+
+  const hideIcon =
+    togglePasswordButton.getAttribute("data-hide-icon") || "";
+
+  passwordInput.type = isVisible ? "text" : "password";
 
   togglePasswordButton.setAttribute(
     "aria-label",
-    isVisible
-      ? "Ocultar contraseña"
-      : "Mostrar contraseña"
-  );
-
-  togglePasswordButton.setAttribute(
-    "title",
-    isVisible
-      ? "Ocultar contraseña"
-      : "Mostrar contraseña"
+    isVisible ? hideLabel : showLabel
   );
 
   togglePasswordButton.setAttribute(
@@ -324,13 +252,10 @@ export function setPasswordVisibility(refs = {}, visible = false) {
     String(isVisible)
   );
 
-  if (eyeOpenIcon) {
-    setHidden(eyeOpenIcon, isVisible);
-  }
-
-  if (eyeClosedIcon) {
-    setHidden(eyeClosedIcon, !isVisible);
-  }
+  togglePasswordButton.innerHTML =
+    isVisible
+      ? (hideIcon || "Ocultar")
+      : (showIcon || "Ver");
 
   return isVisible;
 }
@@ -338,29 +263,6 @@ export function setPasswordVisibility(refs = {}, visible = false) {
 export function togglePasswordVisibility(refs = {}) {
   const current = getPasswordVisibilityState(refs);
   return setPasswordVisibility(refs, !current);
-}
-
-/* =========================================================
-   CAPS
-========================================================= */
-
-export function setCapsIndicatorState(refs = {}, visible = false) {
-  const isVisible = Boolean(visible);
-
-  if (refs.capsIndicator) {
-    refs.capsIndicator.hidden = !isVisible;
-    refs.capsIndicator.classList.toggle("is-visible", isVisible);
-  }
-
-  if (refs.capsIcon) {
-    refs.capsIcon.hidden = !isVisible;
-  }
-
-  if (refs.capsLabel) {
-    refs.capsLabel.hidden = !isVisible;
-  }
-
-  return isVisible;
 }
 
 /* =========================================================
@@ -382,8 +284,8 @@ export function focusLoginPrimaryField(
         return;
       }
 
-      refs.identifierInput?.focus?.();
-      refs.identifierInput?.select?.();
+      refs.emailInput?.focus();
+      refs.emailInput?.select?.();
     } catch {}
   });
 }
@@ -393,12 +295,13 @@ export function focusLoginPrimaryField(
 ========================================================= */
 
 export function readLoginFormState(refs = {}) {
+  const identifier = toText(refs?.emailInput?.value, "");
+
   return {
-    identifier: toText(refs?.identifierInput?.value, ""),
-    email: toText(refs?.identifierInput?.value, "").toLowerCase(),
+    identifier,
+    email: identifier.toLowerCase(),
     password: toText(refs?.passwordInput?.value, ""),
     remember: Boolean(refs?.rememberInput?.checked),
-    redirect: toText(refs?.redirectInput?.value, ""),
   };
 }
 
@@ -411,11 +314,11 @@ export function bindLoginInputClearers(refs = {}, handler = null) {
     return () => {};
   }
 
-  refs.identifierInput?.addEventListener("input", handler);
+  refs.emailInput?.addEventListener("input", handler);
   refs.passwordInput?.addEventListener("input", handler);
 
   return () => {
-    refs.identifierInput?.removeEventListener("input", handler);
+    refs.emailInput?.removeEventListener("input", handler);
     refs.passwordInput?.removeEventListener("input", handler);
   };
 }

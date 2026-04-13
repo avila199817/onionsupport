@@ -4,68 +4,163 @@
 
    Responsabilidades:
    - helpers base puros del store
-   - clones / igualdad profunda
-   - acceso por path
-   - mutación por path
-   - merge profundo
+   - clones robustos / igualdad profunda
+   - acceso seguro por path
+   - escritura / borrado por path
+   - merge profundo inmutable
    - detección de paths cambiados
    - normalización de colecciones
+   - helpers internos reutilizables
 ========================================================= */
 
+/* =========================================================
+   RUNTIME
+========================================================= */
 export function isBrowser() {
-  return typeof window !== "undefined" && typeof document !== "undefined";
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
 }
 
 export function isObject(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  );
 }
 
 export function isFunction(value) {
   return typeof value === "function";
 }
 
+export function isPrimitive(value) {
+  return (
+    value === null ||
+    (typeof value !== "object" &&
+      typeof value !== "function")
+  );
+}
+
+/* =========================================================
+   CLONE
+========================================================= */
 export function deepClone(value) {
-  try {
-    if (typeof structuredClone === "function") {
-      return structuredClone(value);
-    }
-  } catch {
-    /* no-op */
+  if (value === undefined) {
+    return undefined;
   }
 
   try {
-    return JSON.parse(JSON.stringify(value));
+    if (
+      typeof structuredClone ===
+      "function"
+    ) {
+      return structuredClone(value);
+    }
+  } catch {
+    /* fallback */
+  }
+
+  try {
+    return JSON.parse(
+      JSON.stringify(value)
+    );
   } catch {
     return value;
   }
 }
 
+/* =========================================================
+   EQUALITY
+========================================================= */
 export function deepEqual(a, b) {
-  if (a === b) return true;
+  if (Object.is(a, b)) {
+    return true;
+  }
 
-  if (typeof a !== typeof b) return false;
+  if (
+    typeof a !== typeof b
+  ) {
+    return false;
+  }
 
-  if (a === null || b === null) return a === b;
+  if (
+    isPrimitive(a) ||
+    isPrimitive(b)
+  ) {
+    return false;
+  }
 
-  if (Array.isArray(a) && Array.isArray(b)) {
-    if (a.length !== b.length) return false;
+  /* arrays */
+  if (
+    Array.isArray(a) ||
+    Array.isArray(b)
+  ) {
+    if (
+      !Array.isArray(a) ||
+      !Array.isArray(b)
+    ) {
+      return false;
+    }
 
-    for (let i = 0; i < a.length; i += 1) {
-      if (!deepEqual(a[i], b[i])) return false;
+    if (a.length !== b.length) {
+      return false;
+    }
+
+    for (
+      let i = 0;
+      i < a.length;
+      i += 1
+    ) {
+      if (
+        !deepEqual(
+          a[i],
+          b[i]
+        )
+      ) {
+        return false;
+      }
     }
 
     return true;
   }
 
-  if (isObject(a) && isObject(b)) {
-    const aKeys = Object.keys(a);
-    const bKeys = Object.keys(b);
+  /* objects */
+  if (
+    isObject(a) &&
+    isObject(b)
+  ) {
+    const aKeys =
+      Object.keys(a);
+    const bKeys =
+      Object.keys(b);
 
-    if (aKeys.length !== bKeys.length) return false;
+    if (
+      aKeys.length !==
+      bKeys.length
+    ) {
+      return false;
+    }
 
     for (const key of aKeys) {
-      if (!Object.prototype.hasOwnProperty.call(b, key)) return false;
-      if (!deepEqual(a[key], b[key])) return false;
+      if (
+        !Object.prototype.hasOwnProperty.call(
+          b,
+          key
+        )
+      ) {
+        return false;
+      }
+
+      if (
+        !deepEqual(
+          a[key],
+          b[key]
+        )
+      ) {
+        return false;
+      }
     }
 
     return true;
@@ -74,111 +169,251 @@ export function deepEqual(a, b) {
   return false;
 }
 
-export function getByPath(obj, path) {
-  if (!path) return obj;
-
-  return String(path)
+/* =========================================================
+   PATH HELPERS
+========================================================= */
+function normalizePath(path) {
+  return String(path || "")
     .split(".")
-    .filter(Boolean)
-    .reduce((acc, key) => {
-      if (acc == null) return undefined;
-      return acc[key];
-    }, obj);
+    .map((part) =>
+      part.trim()
+    )
+    .filter(Boolean);
 }
 
-export function setByPath(obj, path, value) {
-  const keys = String(path).split(".").filter(Boolean);
-  const lastKey = keys.pop();
+export function getByPath(
+  obj,
+  path
+) {
+  if (!path) {
+    return obj;
+  }
 
-  if (!lastKey) return obj;
+  const keys =
+    normalizePath(path);
 
   let current = obj;
 
   for (const key of keys) {
-    if (!isObject(current[key]) && !Array.isArray(current[key])) {
+    if (current == null) {
+      return undefined;
+    }
+
+    current =
+      current[key];
+  }
+
+  return current;
+}
+
+export function setByPath(
+  obj,
+  path,
+  value
+) {
+  const keys =
+    normalizePath(path);
+
+  const lastKey =
+    keys.pop();
+
+  if (!lastKey) {
+    return obj;
+  }
+
+  let current = obj;
+
+  for (const key of keys) {
+    const next =
+      current[key];
+
+    if (
+      !isObject(next) &&
+      !Array.isArray(next)
+    ) {
       current[key] = {};
     }
 
-    current = current[key];
+    current =
+      current[key];
   }
 
   current[lastKey] = value;
+
   return obj;
 }
 
-export function deleteByPath(obj, path) {
-  const keys = String(path).split(".").filter(Boolean);
-  const lastKey = keys.pop();
+export function deleteByPath(
+  obj,
+  path
+) {
+  const keys =
+    normalizePath(path);
 
-  if (!lastKey) return obj;
+  const lastKey =
+    keys.pop();
+
+  if (!lastKey) {
+    return obj;
+  }
 
   let current = obj;
 
   for (const key of keys) {
-    if (!isObject(current[key])) {
+    if (
+      current == null ||
+      (!isObject(
+        current[key]
+      ) &&
+        !Array.isArray(
+          current[key]
+        ))
+    ) {
       return obj;
     }
 
-    current = current[key];
+    current =
+      current[key];
   }
 
-  if (isObject(current) || Array.isArray(current)) {
+  if (
+    isObject(current) ||
+    Array.isArray(current)
+  ) {
     delete current[lastKey];
   }
 
   return obj;
 }
 
-export function mergeDeep(target, source) {
-  if (Array.isArray(source)) {
-    return [...source];
+/* =========================================================
+   MERGE
+========================================================= */
+export function mergeDeep(
+  target,
+  source
+) {
+  if (
+    Array.isArray(source)
+  ) {
+    return source.map(
+      (item) =>
+        deepClone(item)
+    );
   }
 
   if (!isObject(source)) {
     return source;
   }
 
-  const output = isObject(target) ? { ...target } : {};
+  const output =
+    isObject(target)
+      ? { ...target }
+      : {};
 
-  Object.keys(source).forEach((key) => {
-    const sourceValue = source[key];
-    const targetValue = output[key];
+  Object.keys(source).forEach(
+    (key) => {
+      const sourceValue =
+        source[key];
 
-    if (Array.isArray(sourceValue)) {
-      output[key] = [...sourceValue];
-      return;
+      const targetValue =
+        output[key];
+
+      if (
+        Array.isArray(
+          sourceValue
+        )
+      ) {
+        output[key] =
+          sourceValue.map(
+            (item) =>
+              deepClone(item)
+          );
+        return;
+      }
+
+      if (
+        isObject(
+          sourceValue
+        )
+      ) {
+        output[key] =
+          mergeDeep(
+            targetValue,
+            sourceValue
+          );
+        return;
+      }
+
+      output[key] =
+        sourceValue;
     }
-
-    if (isObject(sourceValue)) {
-      output[key] = mergeDeep(targetValue, sourceValue);
-      return;
-    }
-
-    output[key] = sourceValue;
-  });
+  );
 
   return output;
 }
 
-export function collectChangedPaths(input, prefix = "") {
-  if (!isObject(input) && !Array.isArray(input)) {
-    return prefix ? [prefix] : [];
+/* =========================================================
+   CHANGED PATHS
+========================================================= */
+export function collectChangedPaths(
+  input,
+  prefix = ""
+) {
+  if (
+    !isObject(input) &&
+    !Array.isArray(input)
+  ) {
+    return prefix
+      ? [prefix]
+      : [];
   }
 
   const paths = [];
 
-  Object.entries(input).forEach(([key, value]) => {
-    const nextPath = prefix ? `${prefix}.${key}` : key;
-    paths.push(nextPath);
+  Object.entries(input).forEach(
+    ([key, value]) => {
+      const nextPath =
+        prefix
+          ? `${prefix}.${key}`
+          : key;
 
-    if (isObject(value) && !Array.isArray(value)) {
-      paths.push(...collectChangedPaths(value, nextPath));
+      paths.push(nextPath);
+
+      if (
+        isObject(value)
+      ) {
+        paths.push(
+          ...collectChangedPaths(
+            value,
+            nextPath
+          )
+        );
+      }
     }
-  });
+  );
 
-  return Array.from(new Set(paths));
+  return Array.from(
+    new Set(paths)
+  );
 }
 
-export function normalizeCollection(items, fallback = []) {
-  return Array.isArray(items) ? [...items] : fallback;
+/* =========================================================
+   COLLECTIONS
+========================================================= */
+export function normalizeCollection(
+  items,
+  fallback = []
+) {
+  if (
+    !Array.isArray(items)
+  ) {
+    return Array.isArray(
+      fallback
+    )
+      ? [...fallback]
+      : [];
+  }
+
+  return [...items];
 }

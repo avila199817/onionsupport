@@ -3,11 +3,17 @@
    Archivo: src/views/login/login.template.js
 
    Responsabilidades:
-   - generar el html del login alineado con /src/css/auth/login.css
-   - centralizar el markup premium de la vista
-   - mantener ids y data-hooks estables para login.dom.js
-   - respetar el sistema visual auth-screen / login-grid / login-card
-   - usar clases reales del css pro externo
+   - generar el html del login con el layout visual clásico
+   - conservar el bloque lateral izquierdo de estado
+   - mantener el card principal a la derecha
+   - respetar clases reales del css auth/login.css
+   - mantener ids estables para login.dom.js / login.view.js
+   - incluir toast superior derecho desacoplado
+   - incluir logo fade con secuencia de imágenes
+   - incluir toggle password con eye / eye-off
+   - incluir indicador caps lock visual
+   - soportar redirect oculto y remember checkbox
+   - mantener footer inferior del card
 ========================================================= */
 
 import { escapeHtml } from "./login.helpers.js";
@@ -16,82 +22,58 @@ import { escapeHtml } from "./login.helpers.js";
    ICONS
 ========================================================= */
 
-function getLogoIcon() {
+function getInfoToastIcon() {
   return `
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" width="44" height="44">
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
       <path
-        d="M12 3.5 4.5 7.75 12 12l7.5-4.25L12 3.5Z"
-        stroke="currentColor"
-        stroke-width="1.6"
-        stroke-linejoin="round"
-      />
-      <path
-        d="M4.5 12.25 12 16.5l7.5-4.25"
-        stroke="currentColor"
-        stroke-width="1.6"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
-      <path
-        d="M4.5 16.25 12 20.5l7.5-4.25"
-        stroke="currentColor"
-        stroke-width="1.6"
-        stroke-linecap="round"
-        stroke-linejoin="round"
+        fill="currentColor"
+        d="M11 7h2V5h-2v2Zm0 12h2V9h-2v10Zm1-17C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2Z"
       />
     </svg>
   `;
 }
 
-function getEyeIcon() {
+function getToastCloseIcon() {
   return `
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18">
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
       <path
-        d="M2.75 12s3.25-6 9.25-6 9.25 6 9.25 6-3.25 6-9.25 6-9.25-6-9.25-6Z"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linejoin="round"
-      />
-      <circle
-        cx="12"
-        cy="12"
-        r="2.7"
-        stroke="currentColor"
-        stroke-width="1.8"
+        fill="currentColor"
+        d="M18.3 5.71 12 12.01l-6.3-6.3-1.41 1.41 6.3 6.3-6.3 6.29 1.41 1.41 6.3-6.29 6.29 6.29 1.41-1.41-6.29-6.29 6.29-6.3-1.41-1.41Z"
       />
     </svg>
   `;
 }
 
-function getEyeOffIcon() {
+function getEyeOpenIcon() {
   return `
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18">
+    <svg
+      id="eyeOpenIcon"
+      viewBox="0 0 24 24"
+      width="20"
+      height="20"
+      aria-hidden="true"
+    >
       <path
-        d="M3.5 4.5 20.5 19.5"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
+        fill="currentColor"
+        d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7Zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8Z"
       />
+    </svg>
+  `;
+}
+
+function getEyeClosedIcon() {
+  return `
+    <svg
+      id="eyeClosedIcon"
+      viewBox="0 0 24 24"
+      width="20"
+      height="20"
+      aria-hidden="true"
+      hidden
+    >
       <path
-        d="M10.58 5.63A10.5 10.5 0 0 1 12 5.55c6 0 9.25 6 9.25 6a15.72 15.72 0 0 1-3.48 4.11"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
-      <path
-        d="M6.2 8.12A15.18 15.18 0 0 0 2.75 11.55s3.25 6 9.25 6c1.36 0 2.59-.3 3.7-.79"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
-      <path
-        d="M9.88 9.96A2.9 2.9 0 0 0 9.3 11.7a2.7 2.7 0 0 0 4.57 1.96"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-        stroke-linejoin="round"
+        fill="currentColor"
+        d="M3.27 2 2 3.27l3.05 3.05C3.18 7.86 2 10 2 10s3 7 10 7c2.06 0 3.82-.6 5.3-1.48L20.73 19 22 17.73 3.27 2Zm8.77 8.77 2.19 2.19A3.96 3.96 0 0 1 12 13a4 4 0 0 1-4-4c0-.77.22-1.49.6-2.1l1.59 1.59A2 2 0 0 0 12 11c.01 0 .03 0 .04-.23ZM12 5c7 0 10 7 10 7a17.73 17.73 0 0 1-2.92 3.81l-1.42-1.42A15.1 15.1 0 0 0 19.82 12c-.87-1.28-3.35-4-7.82-4-.86 0-1.66.1-2.4.28L7.83 6.51C9.03 5.95 10.43 5.62 12 5Z"
       />
     </svg>
   `;
@@ -100,24 +82,17 @@ function getEyeOffIcon() {
 function getCapsIcon() {
   return `
     <svg
+      id="capsIcon"
       class="caps-icon"
       viewBox="0 0 24 24"
-      fill="none"
+      width="18"
+      height="18"
       aria-hidden="true"
-      width="16"
-      height="16"
+      hidden
     >
       <path
-        d="M12 4.5 6.5 10H10v6h4v-6h3.5L12 4.5Z"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linejoin="round"
-      />
-      <path
-        d="M8 18.5h8"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
+        fill="currentColor"
+        d="M12 3.2 18.8 10h-4.2v5.2h-5.2V10H5.2L12 3.2Zm-4.9 14h9.8a1.1 1.1 0 0 1 0 2.2H7.1a1.1 1.1 0 0 1 0-2.2Z"
       />
     </svg>
   `;
@@ -127,50 +102,73 @@ function getCapsIcon() {
    PARTIALS
 ========================================================= */
 
+function renderToast() {
+  return `
+    <div class="login-toast-stack login-toast-stack--top-right" aria-live="polite" aria-atomic="true">
+      <div
+        id="loginToast"
+        class="login-toast"
+        role="status"
+        aria-hidden="true"
+        data-state="default"
+        hidden
+      >
+        <div class="login-toast-glow" aria-hidden="true"></div>
+
+        <div class="login-toast-body">
+          <div id="loginToastIcon" class="login-toast-icon" aria-hidden="true">
+            ${getInfoToastIcon()}
+          </div>
+
+          <div class="login-toast-content">
+            <div id="loginToastTitle" class="login-toast-title">Aviso</div>
+            <div id="loginToastText" class="login-toast-text"></div>
+          </div>
+
+          <button
+            type="button"
+            id="loginToastClose"
+            class="login-toast-close"
+            aria-label="Cerrar aviso"
+            title="Cerrar aviso"
+          >
+            ${getToastCloseIcon()}
+          </button>
+        </div>
+
+        <span id="loginToastProgress" class="login-toast-progress" aria-hidden="true"></span>
+      </div>
+    </div>
+  `;
+}
+
 function renderSignalItem(text = "") {
   return `
     <div class="login-signal-item">
-      <span class="dot" aria-hidden="true"></span>
+      <span class="dot"></span>
       <span>${escapeHtml(text)}</span>
     </div>
   `;
 }
 
 function renderLeftPanel({
-  appName = "Onion Support",
-  heroEyebrow = "Acceso seguro · Panel operativo",
-  heroTitle = "Acceso corporativo seguro",
-  heroSubtitle = "",
-  bullets = [],
+  eyebrow = "Entorno seguro",
+  title = "Tu acceso entra en un panel más vivo y con más presencia visual.",
+  signals = [],
 } = {}) {
-  const finalSignals = Array.isArray(bullets) && bullets.length
-    ? bullets.map((item) => item?.title || item?.text || item).filter(Boolean)
+  const finalSignals = Array.isArray(signals) && signals.length
+    ? signals.filter(Boolean)
     : [
-        "Autenticación desacoplada del sistema toast",
-        "Consumo directo del Core y Auth reales",
-        "Interfaz premium alineada con tokens globales",
+        "Sesión cifrada",
+        "Controles de acceso activos",
+        "Shell SPA preparado",
       ];
 
   return `
-    <aside class="login-side login-side-left login-side-left--raised" aria-label="Estado del acceso">
-      <div class="login-side-panel login-side-panel--status">
-        <div class="login-side-eyebrow">
-          ${escapeHtml(heroEyebrow)}
-        </div>
-
-        <h3>
-          ${escapeHtml(heroTitle || appName)}
-        </h3>
-
-        ${
-          heroSubtitle
-            ? `
-              <p class="login-subtitle" style="margin-top:12px;max-width:34ch;text-align:left;">
-                ${escapeHtml(heroSubtitle)}
-              </p>
-            `
-            : ""
-        }
+    <aside class="login-side login-side-left login-side-left--raised" aria-hidden="true">
+      <div class="login-side-panel login-side-panel--status login-side-panel--compact">
+        <div class="login-side-eyebrow">${escapeHtml(eyebrow)}</div>
+        <h3>${escapeHtml(title)}</h3>
 
         <div class="login-signal-list">
           ${finalSignals.map(renderSignalItem).join("")}
@@ -180,124 +178,151 @@ function renderLeftPanel({
   `;
 }
 
-function renderForm({
-  email = "",
-  appName = "Onion Support",
-  title = "Acceso",
-  subtitle = "Introduce tus credenciales para entrar al panel.",
-  submitLabel = "Entrar al panel",
-  rememberLabel = "Recordar email",
-  forgotLabel = "¿Has olvidado tu contraseña?",
-  forgotPasswordHref = "/recuperar-acceso",
-  footerText = "Acceso protegido. Usa tus credenciales corporativas autorizadas.",
+function renderLogoFade({
+  logoBlack = "/src/media/img/favicon_black.png",
+  logoBlackCircle = "/src/media/img/favicon_black_circle.png",
+  logoSupport = "/src/media/img/favicon_support.png",
+  logoWhite = "/src/media/img/favicon_white.png",
 } = {}) {
-  const hasEmail = Boolean(String(email || "").trim());
+  return `
+    <div class="logo-fade" aria-hidden="true">
+      <img src="${escapeHtml(logoBlack)}" alt="">
+      <img src="${escapeHtml(logoBlackCircle)}" alt="">
+      <img src="${escapeHtml(logoSupport)}" alt="">
+      <img src="${escapeHtml(logoWhite)}" alt="">
+    </div>
+  `;
+}
+
+function renderForm({
+  appName = "Onion Support",
+  appVersion = "1.0.0",
+  currentYear = new Date().getFullYear(),
+  redirect = "",
+  title,
+  subtitle = "Accede a tu espacio de soporte, incidencias y gestión interna.",
+  identifierPlaceholder = "Usuario o email",
+  passwordPlaceholder = "Contraseña",
+  rememberLabel = "Recordarme",
+  secureMeta = "Acceso seguro",
+  submitLabel = "Acceder",
+  forgotLabel = "¿Has olvidado tu contraseña?",
+  forgotPasswordHref = "/reset-password",
+  logoBlack,
+  logoBlackCircle,
+  logoSupport,
+  logoWhite,
+} = {}) {
+  const finalTitle = title || `Iniciar sesión con la cuenta ${appName}`;
 
   return `
-    <section class="login-stage login-stage--right" aria-label="Formulario de acceso">
+    <div class="login-stage login-stage--right" id="loginStage">
       <div class="login-card-shell login-card-shell--right">
-        <div class="login-card login-card--offset login-card--clean">
-          <header class="login-header">
-            <div class="logo-fade" aria-hidden="true">
-              ${getLogoIcon()}
-            </div>
+        <div class="login-card login-card--clean login-card--offset" id="loginCard">
+          <div class="login-header">
+            ${renderLogoFade({
+              logoBlack,
+              logoBlackCircle,
+              logoSupport,
+              logoWhite,
+            })}
 
-            <h2>${escapeHtml(title)}</h2>
+            <h2>${escapeHtml(finalTitle)}</h2>
 
             <p class="login-subtitle">
-              ${escapeHtml(subtitle || `Acceso seguro a ${appName}.`)}
+              ${escapeHtml(subtitle)}
             </p>
-          </header>
+          </div>
 
-          <form class="login-form" id="loginForm" novalidate>
-            <div class="login-field" data-field="email">
+          <form id="loginForm" class="login-form" novalidate>
+            <input
+              type="hidden"
+              name="redirect"
+              value="${escapeHtml(redirect || "")}"
+            >
+
+            <div class="login-field">
               <input
+                type="text"
+                id="username"
+                name="identifier"
                 class="input-text"
-                id="loginEmail"
-                name="email"
-                type="email"
-                inputmode="email"
+                placeholder="${escapeHtml(identifierPlaceholder)}"
                 autocomplete="username"
-                placeholder="nombre@empresa.com"
-                value="${escapeHtml(email)}"
-                aria-label="Email"
+                inputmode="email"
+                spellcheck="false"
+                autocapitalize="off"
                 required
-              />
+                aria-invalid="false"
+              >
             </div>
 
-            <div class="login-field" data-field="password">
-              <div class="password-wrapper">
-                <input
-                  class="input-text"
-                  id="loginPassword"
-                  name="password"
-                  type="password"
-                  autocomplete="current-password"
-                  placeholder="Contraseña"
-                  aria-label="Contraseña"
-                  required
-                />
+            <div class="login-field password-wrapper">
+              <input
+                type="password"
+                id="password"
+                name="password"
+                class="input-text"
+                placeholder="${escapeHtml(passwordPlaceholder)}"
+                autocomplete="current-password"
+                required
+                minlength="6"
+                aria-invalid="false"
+              >
 
-                <span
-                  class="caps-indicator"
-                  id="loginCapsIndicator"
-                  aria-hidden="true"
-                >
-                  ${getCapsIcon()}
-                  <span class="caps-label">Bloq Mayús</span>
+              <button
+                type="button"
+                class="password-toggle"
+                id="togglePassword"
+                aria-label="Mostrar contraseña"
+                aria-pressed="false"
+                title="Mostrar contraseña"
+              >
+                ${getEyeOpenIcon()}
+                ${getEyeClosedIcon()}
+              </button>
+
+              <div
+                id="capsIndicator"
+                class="caps-indicator"
+                aria-live="polite"
+                aria-atomic="true"
+                hidden
+              >
+                ${getCapsIcon()}
+
+                <span id="capsLabel" class="caps-label" hidden>
+                  Bloq mayús
                 </span>
-
-                <button
-                  class="password-toggle"
-                  type="button"
-                  id="togglePassword"
-                  aria-label="Mostrar contraseña"
-                  aria-pressed="false"
-                  data-show-label="Mostrar contraseña"
-                  data-hide-label="Ocultar contraseña"
-                  data-show-icon="${escapeHtml(getEyeIcon())}"
-                  data-hide-icon="${escapeHtml(getEyeOffIcon())}"
-                >
-                  ${getEyeIcon()}
-                </button>
               </div>
             </div>
 
             <div class="login-options">
-              <label class="login-check">
+              <label class="login-check" for="loginRemember">
                 <input
                   id="loginRemember"
-                  name="remember"
                   type="checkbox"
-                  ${hasEmail ? "checked" : ""}
-                />
+                  name="remember"
+                >
                 <span>${escapeHtml(rememberLabel)}</span>
               </label>
 
-              <div class="login-meta">
-                <span>Conexión segura</span>
-              </div>
+              <span class="login-meta">${escapeHtml(secureMeta)}</span>
             </div>
 
-            <div
-              class="login-error"
-              id="loginError"
-              role="alert"
-              aria-live="polite"
-            ></div>
-
             <button
-              class="login-button"
-              id="loginSubmit"
               type="submit"
+              class="login-button"
+              id="loginButton"
             >
               <span class="login-submit-text">${escapeHtml(submitLabel)}</span>
             </button>
 
             <div class="login-reset">
               <a
-                class="login-reset-link"
                 href="${escapeHtml(forgotPasswordHref)}"
+                id="forgotPasswordLink"
+                class="login-reset-link"
                 data-spa
               >
                 ${escapeHtml(forgotLabel)}
@@ -305,12 +330,12 @@ function renderForm({
             </div>
           </form>
 
-          <footer class="login-footer">
-            <span>${escapeHtml(footerText)}</span>
-          </footer>
+          <div class="login-footer">
+            © ${escapeHtml(currentYear)} ${escapeHtml(appName)} · v${escapeHtml(appVersion)}
+          </div>
         </div>
       </div>
-    </section>
+    </div>
   `;
 }
 
@@ -321,20 +346,30 @@ function renderForm({
 export function getLoginTemplate(options = {}) {
   const {
     appName = "Onion Support",
+    appVersion = "1.0.0",
+    currentYear = new Date().getFullYear(),
+    redirect = "",
   } = options;
 
   return `
-    <section class="login-view" data-view="login" data-login-view="true">
+    <section
+      class="login-view login-view--clean"
+      data-view="login"
+      data-login-view="true"
+      aria-label="Pantalla de acceso"
+    >
+      ${renderToast()}
+
       <div class="login-scene">
-        <div class="login-grid">
-          ${renderLeftPanel({
-            ...options,
-            appName,
-          })}
+        <div class="login-grid login-grid--clean" id="loginGrid">
+          ${renderLeftPanel(options)}
 
           ${renderForm({
             ...options,
             appName,
+            appVersion,
+            currentYear,
+            redirect,
           })}
         </div>
       </div>

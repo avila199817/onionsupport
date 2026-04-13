@@ -1,20 +1,10 @@
 /* =========================================================
    Onion SPA - Login View
    Archivo: src/views/login/index.js
-
-   Responsabilidades:
-   - orquestar la vista de login
-   - renderizar template + estilos
-   - conectar dom, helpers, toast y auth
-   - gestionar submit y feedback visual
-   - sincronizar sesión y redirigir
-   - mantener cleanup de listeners
 ========================================================= */
 
 import AppCore from "../../core/core.js";
-
 import { login as loginRequest } from "../../features/auth.js";
-
 import ToastBridge from "../../ui/toast/toast.bridge.js";
 
 import {
@@ -48,10 +38,6 @@ import {
   bindLoginSubmit,
 } from "./login.dom.js";
 
-/* =========================================================
-   HELPERS
-========================================================= */
-
 function resolveLoginExecutor(deps = {}) {
   const candidates = [
     deps.onSubmit,
@@ -72,17 +58,11 @@ function resolveLoginExecutor(deps = {}) {
 }
 
 function resolveAppName() {
-  return (
-    safeText(AppCore?.config?.appName, "") ||
-    "Onion Support"
-  );
+  return safeText(AppCore?.config?.appName, "") || "Onion Support";
 }
 
 function resolveForgotPasswordHref(deps = {}) {
-  return (
-    safeText(deps?.forgotPasswordHref, "") ||
-    "/recuperar-acceso"
-  );
+  return safeText(deps?.forgotPasswordHref, "") || "/recuperar-acceso";
 }
 
 function navigateTo(path = "/") {
@@ -117,10 +97,6 @@ function toggleTheme() {
 
   return next;
 }
-
-/* =========================================================
-   VIEW
-========================================================= */
 
 export default function renderLoginView(container, deps = {}) {
   if (!container) {
@@ -172,7 +148,6 @@ export default function renderLoginView(container, deps = {}) {
 
   const onThemeToggle = () => {
     const nextTheme = toggleTheme();
-
     toast.info(`Tema ${nextTheme} activado.`);
   };
 
@@ -182,7 +157,6 @@ export default function renderLoginView(container, deps = {}) {
     clearLoginErrors(refs);
 
     const formState = readLoginFormState(refs);
-
     const payload = createLoginPayload(formState);
     const errors = validateLoginPayload(payload);
 
@@ -204,12 +178,9 @@ export default function renderLoginView(container, deps = {}) {
         loadingLabel,
       });
 
-      loadingToastId = toast.loading(
-        "Validando credenciales…",
-        {
-          persist: true,
-        }
-      );
+      loadingToastId = toast.loading("Validando credenciales…", {
+        persist: true,
+      });
 
       const rawResult = await executeLogin(payload);
       const auth = normalizeAuthResult(rawResult);
@@ -217,10 +188,7 @@ export default function renderLoginView(container, deps = {}) {
       syncSession(auth);
 
       toast.dismiss(loadingToastId);
-
-      toast.success(
-        auth.message || "Sesión iniciada correctamente."
-      );
+      toast.success(auth.message || "Sesión iniciada correctamente.");
 
       const redirectTo = resolveLoginRedirect(auth, deps);
       navigateTo(redirectTo);
@@ -240,10 +208,7 @@ export default function renderLoginView(container, deps = {}) {
       } catch {}
 
       try {
-        AppCore?.utils?.log?.error?.(
-          "[LoginView] login error",
-          error
-        );
+        AppCore?.utils?.log?.error?.("[LoginView] login error", error);
       } catch {}
     } finally {
       setLoginLoading(refs, false, {
@@ -253,25 +218,10 @@ export default function renderLoginView(container, deps = {}) {
     }
   };
 
-  const unbindInputClearers = bindLoginInputClearers(
-    refs,
-    onClearErrors
-  );
-
-  const unbindPasswordToggle = bindPasswordToggle(
-    refs,
-    onTogglePassword
-  );
-
-  const unbindThemeToggle = bindThemeToggle(
-    refs,
-    onThemeToggle
-  );
-
-  const unbindSubmit = bindLoginSubmit(
-    refs,
-    onSubmit
-  );
+  const unbindInputClearers = bindLoginInputClearers(refs, onClearErrors);
+  const unbindPasswordToggle = bindPasswordToggle(refs, onTogglePassword);
+  const unbindThemeToggle = bindThemeToggle(refs, onThemeToggle);
+  const unbindSubmit = bindLoginSubmit(refs, onSubmit);
 
   focusLoginPrimaryField(refs, {
     rememberedEmail,

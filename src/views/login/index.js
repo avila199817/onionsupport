@@ -12,7 +12,7 @@
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
-import { login as loginRequest } from "../../features/auth/index.js";
+import { Auth } from "../../features/auth/index.js";
 import ToastBridge from "../../ui/toast/index.js";
 
 import {

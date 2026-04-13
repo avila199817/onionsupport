@@ -4,16 +4,16 @@
 
    Responsabilidades:
    - generar el html premium de recuperación de acceso
-   - mantener el layout auth-screen alineado con login
+   - mantener layout auth-screen alineado con login
    - conservar bloque lateral izquierdo de estado
    - renderizar card principal a la derecha
    - soportar input de usuario o email
    - incluir toast superior derecho desacoplado
+   - incluir bloque inline de error / estado
    - exponer ids estables para dom.js e index.js
-   - mantener consistencia visual con login.template.js
 ========================================================= */
 
-import { escapeHtml } from "../login/login.helpers.js";
+import { escapeHtml } from "./reset-password.helpers.js";
 
 /* =========================================================
    ICONS
@@ -47,6 +47,33 @@ function getBackArrowIcon() {
       <path
         fill="currentColor"
         d="M14.71 6.29a1 1 0 0 1 0 1.41L11.41 11H20a1 1 0 1 1 0 2h-8.59l3.3 3.29a1 1 0 0 1-1.41 1.42l-5-5a1 1 0 0 1 0-1.42l5-5a1 1 0 0 1 1.41 0Z"
+      />
+    </svg>
+  `;
+}
+
+function getLogoIcon() {
+  return `
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" width="44" height="44">
+      <path
+        d="M12 3.5 4.5 7.75 12 12l7.5-4.25L12 3.5Z"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M4.5 12.25 12 16.5l7.5-4.25"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M4.5 16.25 12 20.5l7.5-4.25"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
       />
     </svg>
   `;
@@ -90,7 +117,11 @@ function renderToast() {
           </button>
         </div>
 
-        <span id="resetPasswordToastProgress" class="login-toast-progress" aria-hidden="true"></span>
+        <span
+          id="resetPasswordToastProgress"
+          class="login-toast-progress"
+          aria-hidden="true"
+        ></span>
       </div>
     </div>
   `;
@@ -99,7 +130,7 @@ function renderToast() {
 function renderSignalItem(text = "") {
   return `
     <div class="login-signal-item">
-      <span class="dot"></span>
+      <span class="dot" aria-hidden="true"></span>
       <span>${escapeHtml(text)}</span>
     </div>
   `;
@@ -110,18 +141,20 @@ function renderLeftPanel({
   heroTitle = "Recupera el acceso sin salir del flujo protegido del panel.",
   bullets = [],
 } = {}) {
-  const finalBullets = Array.isArray(bullets) && bullets.length
-    ? bullets.filter(Boolean)
-    : [
-        "Verificación del identificador de acceso",
-        "Flujo desacoplado del login principal",
-        "Recuperación protegida y guiada",
-      ];
+  const finalBullets =
+    Array.isArray(bullets) && bullets.length
+      ? bullets.filter(Boolean)
+      : [
+          "Verificación del identificador de acceso",
+          "Flujo desacoplado del login principal",
+          "Recuperación protegida y guiada",
+        ];
 
   return `
-    <aside class="login-side login-side-left login-side-left--raised" aria-hidden="true">
-      <div class="login-side-panel login-side-panel--status login-side-panel--compact">
+    <aside class="login-side login-side-left login-side-left--raised" aria-label="Estado de recuperación">
+      <div class="login-side-panel login-side-panel--status">
         <div class="login-side-eyebrow">${escapeHtml(heroEyebrow)}</div>
+
         <h3>${escapeHtml(heroTitle)}</h3>
 
         <div class="login-signal-list">
@@ -132,88 +165,75 @@ function renderLeftPanel({
   `;
 }
 
-function renderLogoFade({
-  logos = [],
-} = {}) {
-  const finalLogos = Array.isArray(logos) && logos.length
-    ? logos
-    : [
-        "/src/media/img/favicon_black.png",
-        "/src/media/img/favicon_black_circle.png",
-        "/src/media/img/favicon_support.png",
-        "/src/media/img/favicon_white.png",
-      ];
-
-  return `
-    <div class="logo-fade" aria-hidden="true">
-      ${finalLogos.map((src) => `<img src="${escapeHtml(src)}" alt="">`).join("")}
-    </div>
-  `;
-}
-
 function renderForm({
+  rememberedIdentifier = "",
   appName = "Onion Support",
-  appVersion = "1.0.0",
-  currentYear = new Date().getFullYear(),
-  title,
+  title = "Recuperar acceso",
   subtitle = "Introduce tu usuario o email y te enviaremos las instrucciones para restablecer el acceso.",
-  identifierPlaceholder = "Usuario o email",
   submitLabel = "Enviar enlace",
   backLabel = "Volver al acceso",
   backHref = "/login",
-  footerText = "",
-  rememberedIdentifier = "",
-  logos = [],
+  footerText = "Recuperación protegida. Usa un identificador válido de tu cuenta.",
 } = {}) {
-  const finalTitle = title || `Recuperar acceso a ${appName}`;
-  const finalFooterText =
-    footerText || `© ${currentYear} ${appName} · v${appVersion}`;
-
   return `
-    <div class="login-stage login-stage--right" id="resetPasswordStage">
+    <section class="login-stage login-stage--right" aria-label="Formulario de recuperación">
       <div class="login-card-shell login-card-shell--right">
-        <div class="login-card login-card--clean login-card--offset" id="resetPasswordCard">
-          <div class="login-header">
-            ${renderLogoFade({ logos })}
-
-            <h2>${escapeHtml(finalTitle)}</h2>
-
-            <p class="login-subtitle">
-              ${escapeHtml(subtitle)}
-            </p>
-          </div>
-
-          <form id="resetPasswordForm" class="login-form" novalidate>
-            <div class="login-field">
-              <input
-                type="text"
-                id="resetIdentifier"
-                name="identifier"
-                class="input-text"
-                placeholder="${escapeHtml(identifierPlaceholder)}"
-                autocomplete="username"
-                inputmode="email"
-                spellcheck="false"
-                autocapitalize="off"
-                value="${escapeHtml(rememberedIdentifier)}"
-                required
-                aria-invalid="false"
-              >
+        <div
+          class="login-card login-card--offset login-card--clean"
+          id="resetPasswordCard"
+        >
+          <header class="login-header">
+            <div class="logo-fade" aria-hidden="true">
+              ${getLogoIcon()}
             </div>
 
+            <h2>${escapeHtml(title)}</h2>
+
+            <p class="login-subtitle">
+              ${escapeHtml(subtitle || `Recupera el acceso a ${appName}.`)}
+            </p>
+          </header>
+
+          <form
+            class="login-form"
+            id="resetPasswordForm"
+            novalidate
+          >
+            <div class="login-field" data-field="identifier">
+              <input
+                class="input-text"
+                id="resetIdentifier"
+                name="identifier"
+                type="text"
+                autocomplete="username"
+                inputmode="email"
+                placeholder="Usuario o email"
+                value="${escapeHtml(rememberedIdentifier)}"
+                aria-label="Usuario o email"
+                required
+              />
+            </div>
+
+            <div
+              class="login-error"
+              id="resetPasswordError"
+              role="alert"
+              aria-live="polite"
+            ></div>
+
             <button
-              type="submit"
               class="login-button"
               id="resetPasswordButton"
+              type="submit"
             >
               <span class="login-submit-text">${escapeHtml(submitLabel)}</span>
             </button>
 
             <div class="login-reset login-reset--back">
               <a
+                class="login-reset-link login-reset-link--back"
                 href="${escapeHtml(backHref)}"
                 id="backToLoginLink"
-                class="login-reset-link login-reset-link--back"
                 data-spa
               >
                 <span class="login-reset-link-icon" aria-hidden="true">
@@ -224,12 +244,12 @@ function renderForm({
             </div>
           </form>
 
-          <div class="login-footer">
-            ${escapeHtml(finalFooterText)}
-          </div>
+          <footer class="login-footer">
+            <span>${escapeHtml(footerText)}</span>
+          </footer>
         </div>
       </div>
-    </div>
+    </section>
   `;
 }
 
@@ -240,28 +260,26 @@ function renderForm({
 export function getResetPasswordTemplate(options = {}) {
   const {
     appName = "Onion Support",
-    appVersion = "1.0.0",
-    currentYear = new Date().getFullYear(),
   } = options;
 
   return `
     <section
-      class="login-view login-view--clean reset-password-view"
+      class="login-view reset-password-view"
       data-view="reset-password"
       data-reset-password-view="true"
-      aria-label="Recuperación de acceso"
     >
       ${renderToast()}
 
       <div class="login-scene">
-        <div class="login-grid login-grid--clean" id="resetPasswordGrid">
-          ${renderLeftPanel(options)}
+        <div class="login-grid" id="resetPasswordGrid">
+          ${renderLeftPanel({
+            ...options,
+            appName,
+          })}
 
           ${renderForm({
             ...options,
             appName,
-            appVersion,
-            currentYear,
           })}
         </div>
       </div>

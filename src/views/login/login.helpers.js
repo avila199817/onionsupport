@@ -205,7 +205,7 @@ export function loadRememberedIdentifier() {
 /*
   Compat legacy:
   mantenemos loadRememberedEmail para no romper imports existentes,
-  pero internamente ya trabajamos con identifier.
+  aunque ya trabajamos con identifier.
 */
 export function loadRememberedEmail() {
   return loadRememberedIdentifier();

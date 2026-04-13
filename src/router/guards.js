@@ -8,6 +8,7 @@
    - redirigir a login cuando falta auth
    - validar acceso por rol
    - soportar boot/restoring seguro
+   - devolver motivos normalizados
 ========================================================= */
 
 import {
@@ -23,7 +24,7 @@ import {
 function isAuthReady(
   AppCore
 ) {
-  /* Si no existe flag, asumimos ready para compatibilidad */
+  /* compatibilidad legacy */
   if (
     typeof AppCore?.state
       ?.booting ===
@@ -34,6 +35,143 @@ function isAuthReady(
   }
 
   return true;
+}
+
+function buildAllowed() {
+  return {
+    allowed: true,
+    reason: null,
+    redirectTo: null,
+  };
+}
+
+function buildDenied(
+  reason,
+  redirectTo = null
+) {
+  return {
+    allowed: false,
+    reason,
+    redirectTo,
+  };
+}
+
+function hasRouteRoles(
+  route
+) {
+  return Array.isArray(
+    route?.roles
+  ) && route.roles.length > 0;
+}
+
+function isLoginRoute(
+  route,
+  routeNames
+) {
+  return (
+    route?.path ===
+    routeNames.LOGIN
+  );
+}
+
+function isPublicRoute(
+  route
+) {
+  return Boolean(
+    route?.public
+  );
+}
+
+function isAuthenticated(
+  Auth
+) {
+  return Boolean(
+    Auth?.isAuthenticated?.()
+  );
+}
+
+function hasRequiredRole(
+  Auth,
+  route
+) {
+  if (!hasRouteRoles(route)) {
+    return true;
+  }
+
+  return Boolean(
+    Auth?.hasRole?.(
+      ...route.roles
+    )
+  );
+}
+
+/* =========================================================
+   LOGIN GUARD
+========================================================= */
+function evaluateLoginRoute({
+  AppCore,
+  authenticated,
+  authReady,
+  getRoute,
+}) {
+  if (
+    authenticated &&
+    authReady
+  ) {
+    return buildDenied(
+      "already-authenticated",
+      getRedirectPath(
+        AppCore
+      ) ||
+        getDefaultHomeTarget(
+          AppCore,
+          getRoute
+        )
+    );
+  }
+
+  return buildAllowed();
+}
+
+/* =========================================================
+   PRIVATE GUARD
+========================================================= */
+function evaluatePrivateRoute({
+  AppCore,
+  Auth,
+  route,
+  authenticated,
+  requestedCanonicalPath,
+  getRoute,
+}) {
+  if (
+    !authenticated
+  ) {
+    return buildDenied(
+      "not-authenticated",
+      buildLoginUrl(
+        AppCore,
+        requestedCanonicalPath
+      )
+    );
+  }
+
+  if (
+    !hasRequiredRole(
+      Auth,
+      route
+    )
+  ) {
+    return buildDenied(
+      "insufficient-role",
+      getDefaultHomeTarget(
+        AppCore,
+        getRoute
+      )
+    );
+  }
+
+  return buildAllowed();
 }
 
 /* =========================================================
@@ -52,18 +190,15 @@ export function shouldAllowRoute({
     );
 
   if (!route) {
-    return {
-      allowed: false,
-      reason:
-        "not-found",
-      redirectTo:
-        null,
-    };
+    return buildDenied(
+      "not-found",
+      null
+    );
   }
 
   const authenticated =
-    Boolean(
-      Auth?.isAuthenticated?.()
+    isAuthenticated(
+      Auth
     );
 
   const authReady =
@@ -71,96 +206,43 @@ export function shouldAllowRoute({
       AppCore
     );
 
-  /* =====================================================
-     LOGIN ROUTE
-  ===================================================== */
+  /* =====================================
+     LOGIN
+  ===================================== */
   if (
-    route.path ===
-    routeNames.LOGIN
-  ) {
-    if (
-      authenticated &&
-      authReady
-    ) {
-      return {
-        allowed: false,
-        reason:
-          "already-authenticated",
-        redirectTo:
-          getRedirectPath(
-            AppCore
-          ) ||
-          getDefaultHomeTarget(
-            AppCore,
-            getRoute
-          ),
-      };
-    }
-
-    return {
-      allowed: true,
-      reason: null,
-      redirectTo:
-        null,
-    };
-  }
-
-  /* =====================================================
-     PUBLIC ROUTE
-  ===================================================== */
-  if (route.public) {
-    return {
-      allowed: true,
-      reason: null,
-      redirectTo:
-        null,
-    };
-  }
-
-  /* =====================================================
-     PRIVATE ROUTE
-  ===================================================== */
-  if (
-    !authenticated
-  ) {
-    return {
-      allowed: false,
-      reason:
-        "not-authenticated",
-      redirectTo:
-        buildLoginUrl(
-          AppCore,
-          requestedCanonicalPath
-        ),
-    };
-  }
-
-  /* =====================================================
-     ROLE CHECK
-  ===================================================== */
-  if (
-    route.roles
-      ?.length &&
-    !Auth.hasRole(
-      ...route.roles
+    isLoginRoute(
+      route,
+      routeNames
     )
   ) {
-    return {
-      allowed: false,
-      reason:
-        "insufficient-role",
-      redirectTo:
-        getDefaultHomeTarget(
-          AppCore,
-          getRoute
-        ),
-    };
+    return evaluateLoginRoute({
+      AppCore,
+      authenticated,
+      authReady,
+      getRoute,
+    });
   }
 
-  return {
-    allowed: true,
-    reason: null,
-    redirectTo:
-      null,
-  };
+  /* =====================================
+     PUBLIC
+  ===================================== */
+  if (
+    isPublicRoute(
+      route
+    )
+  ) {
+    return buildAllowed();
+  }
+
+  /* =====================================
+     PRIVATE
+  ===================================== */
+  return evaluatePrivateRoute({
+    AppCore,
+    Auth,
+    route,
+    authenticated,
+    requestedCanonicalPath,
+    getRoute,
+  });
 }

@@ -6,6 +6,7 @@
    - ensamblar el módulo toast
    - exponer api pública única
    - inicialización segura
+   - auto-init transparente al primer uso
    - bind de eventos globales
    - registro en AppCore.modules
 ========================================================= */
@@ -44,16 +45,32 @@ const Toast = (() => {
 
   let initialized = false;
 
-  function init() {
-    if (initialized) {
-      ensureToastKeyframes();
-      ensureToastContainer();
-      return api;
+  /* =========================================================
+     INTERNAL
+  ========================================================= */
+
+  function ensureReady() {
+    if (!initialized) {
+      init();
     }
 
-    ensureToastKeyframes();
-    ensureToastContainer();
+    return true;
+  }
 
+  function registerModule() {
+    try {
+      if (
+        AppCore?.modules &&
+        typeof AppCore.modules.has === "function" &&
+        typeof AppCore.modules.register === "function" &&
+        !AppCore.modules.has("toast")
+      ) {
+        AppCore.modules.register("toast", api);
+      }
+    } catch {}
+  }
+
+  function bindEvents() {
     bindToastGlobalEvents({
       show: showToast,
       update: updateToast,
@@ -70,19 +87,26 @@ const Toast = (() => {
     bindToastDomEvents({
       dismiss: dismissToast,
     });
+  }
+
+  /* =========================================================
+     LIFECYCLE
+  ========================================================= */
+
+  function init() {
+    if (initialized) {
+      ensureToastKeyframes();
+      ensureToastContainer();
+      return api;
+    }
+
+    ensureToastKeyframes();
+    ensureToastContainer();
+
+    bindEvents();
+    registerModule();
 
     initialized = true;
-
-    try {
-      if (
-        AppCore?.modules &&
-        typeof AppCore.modules.has === "function" &&
-        typeof AppCore.modules.register === "function" &&
-        !AppCore.modules.has("toast")
-      ) {
-        AppCore.modules.register("toast", api);
-      }
-    } catch {}
 
     try {
       AppCore?.utils?.log?.(
@@ -99,10 +123,6 @@ const Toast = (() => {
     } catch {}
 
     try {
-      clearToasts();
-    } catch {}
-
-    try {
       resetToastApiState();
     } catch {}
 
@@ -111,24 +131,86 @@ const Toast = (() => {
     return true;
   }
 
+  /* =========================================================
+     SAFE PUBLIC API
+  ========================================================= */
+
+  function show(options = {}) {
+    ensureReady();
+    return showToast(options);
+  }
+
+  function update(id, patch = {}) {
+    ensureReady();
+    return updateToast(id, patch);
+  }
+
+  function dismiss(id) {
+    ensureReady();
+    return dismissToast(id);
+  }
+
+  function clear() {
+    ensureReady();
+    return clearToasts();
+  }
+
+  function success(message = "", options = {}) {
+    ensureReady();
+    return successToast(message, options);
+  }
+
+  function error(message = "", options = {}) {
+    ensureReady();
+    return errorToast(message, options);
+  }
+
+  function warning(message = "", options = {}) {
+    ensureReady();
+    return warningToast(message, options);
+  }
+
+  function info(message = "", options = {}) {
+    ensureReady();
+    return infoToast(message, options);
+  }
+
+  function loading(message = "", options = {}) {
+    ensureReady();
+    return loadingToast(message, options);
+  }
+
+  function refreshLanguage() {
+    ensureReady();
+    return refreshAllToastsLanguage();
+  }
+
+  /* =========================================================
+     API
+  ========================================================= */
+
   const api = {
     init,
     destroy,
 
-    show: showToast,
-    update: updateToast,
-    dismiss: dismissToast,
-    clear: clearToasts,
+    show,
+    update,
+    dismiss,
+    clear,
 
-    success: successToast,
-    error: errorToast,
-    warning: warningToast,
-    info: infoToast,
-    loading: loadingToast,
+    success,
+    error,
+    warning,
+    info,
+    loading,
 
-    refreshAllToastsLanguage,
+    refreshAllToastsLanguage: refreshLanguage,
 
     scope: TOAST_SCOPE,
+
+    get initialized() {
+      return initialized;
+    },
   };
 
   return api;

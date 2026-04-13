@@ -7,11 +7,11 @@
    - validación de credenciales
    - persistencia de email recordado
    - normalización de respuesta auth
-   - sincronización de sesión con AppCore
+   - sincronización de sesión con AppCore real
    - resolución de redirect post-login
 ========================================================= */
 
-import AppCore from "../../core/index.js";
+import { AppCore } from "../../core/index.js";
 
 /* =========================================================
    CONST
@@ -24,7 +24,9 @@ export const LOGIN_REMEMBER_KEY = "auth:last-email";
 ========================================================= */
 
 export function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
+  if (value === null || value === undefined) {
+    return fallback;
+  }
 
   const text = String(value).trim();
   return text || fallback;
@@ -41,7 +43,10 @@ export function escapeHtml(value = "") {
 
 export function isValidEmail(value = "") {
   const email = safeText(value, "").toLowerCase();
-  if (!email) return false;
+
+  if (!email) {
+    return false;
+  }
 
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
@@ -52,27 +57,38 @@ export function isValidEmail(value = "") {
 
 export function getStorage() {
   try {
-    if (AppCore?.storage) return AppCore.storage;
+    if (AppCore?.storage) {
+      return AppCore.storage;
+    }
   } catch {}
 
   return null;
 }
 
-export function getNamespacedKey(key) {
-  const prefix = safeText(AppCore?.config?.storagePrefix, "onion");
-  return `${prefix}:${key}`;
+export function getNamespacedKey(key = "") {
+  const prefix = safeText(
+    AppCore?.config?.storagePrefix,
+    "onion"
+  );
+
+  return `${prefix}:${safeText(key, "")}`;
 }
 
 export function readStorage(key, fallback = "") {
   try {
     const storage = getStorage();
 
-    if (storage?.get) {
-      return safeText(storage.get(key), fallback);
+    if (typeof storage?.get === "function") {
+      return safeText(
+        storage.get(key),
+        fallback
+      );
     }
 
     return safeText(
-      window.localStorage.getItem(getNamespacedKey(key)),
+      window.localStorage.getItem(
+        getNamespacedKey(key)
+      ),
       fallback
     );
   } catch {
@@ -85,7 +101,7 @@ export function writeStorage(key, value = "") {
     const storage = getStorage();
     const finalValue = safeText(value, "");
 
-    if (storage?.set) {
+    if (typeof storage?.set === "function") {
       storage.set(key, finalValue);
       return true;
     }
@@ -105,7 +121,7 @@ export function removeStorage(key) {
   try {
     const storage = getStorage();
 
-    if (storage?.remove) {
+    if (typeof storage?.remove === "function") {
       storage.remove(key);
       return true;
     }
@@ -125,7 +141,10 @@ export function removeStorage(key) {
 ========================================================= */
 
 export function loadRememberedEmail() {
-  return readStorage(LOGIN_REMEMBER_KEY, "");
+  return readStorage(
+    LOGIN_REMEMBER_KEY,
+    ""
+  );
 }
 
 export function saveRememberedEmail(email = "") {
@@ -136,7 +155,9 @@ export function saveRememberedEmail(email = "") {
 }
 
 export function clearRememberedEmail() {
-  return removeStorage(LOGIN_REMEMBER_KEY);
+  return removeStorage(
+    LOGIN_REMEMBER_KEY
+  );
 }
 
 /* =========================================================
@@ -160,19 +181,29 @@ export function createLoginPayload({
 ========================================================= */
 
 export function validateLoginPayload(payload = {}) {
-  const email = safeText(payload.email, "").toLowerCase();
-  const password = safeText(payload.password, "");
+  const email = safeText(
+    payload.email,
+    ""
+  ).toLowerCase();
+
+  const password = safeText(
+    payload.password,
+    ""
+  );
 
   const errors = {};
 
   if (!email) {
-    errors.email = "Introduce tu email.";
+    errors.email =
+      "Introduce tu email.";
   } else if (!isValidEmail(email)) {
-    errors.email = "Introduce un email válido.";
+    errors.email =
+      "Introduce un email válido.";
   }
 
   if (!password) {
-    errors.password = "Introduce tu contraseña.";
+    errors.password =
+      "Introduce tu contraseña.";
   }
 
   return errors;
@@ -247,50 +278,96 @@ export function resolveAuthErrorMessage(error) {
 ========================================================= */
 
 export function syncSession(auth = {}) {
-  const token = safeText(auth?.token, "");
-  const user = auth?.user || null;
+  const token = safeText(
+    auth?.token,
+    ""
+  );
+
+  const user =
+    auth?.user || null;
+
   const role = safeText(
     auth?.role ||
-    auth?.user?.role ||
-    auth?.user?.rol ||
-    "",
+      auth?.user?.role ||
+      auth?.user?.rol ||
+      "",
     ""
   );
 
   if (!token) {
-    throw new Error("No se recibió token de autenticación.");
+    throw new Error(
+      "No se recibió token de autenticación."
+    );
   }
 
-  if (typeof AppCore?.setSession === "function") {
-    AppCore.setSession({
+  /* =========================
+     CORE REAL API
+  ========================= */
+
+  if (
+    typeof AppCore?.applySession ===
+    "function"
+  ) {
+    AppCore.applySession({
       token,
       user,
-      role,
-      authenticated: true,
     });
   } else {
-    AppCore.state = AppCore.state || {};
-    AppCore.state.token = token;
-    AppCore.state.user = user;
-    AppCore.state.role = role;
-    AppCore.state.authenticated = true;
+    AppCore.state =
+      AppCore.state || {};
+
+    AppCore.state.token =
+      token;
+
+    AppCore.state.user =
+      user;
+
+    AppCore.state.role =
+      role;
+
+    AppCore.state.authenticated =
+      true;
   }
 
   try {
-    AppCore?.events?.emit?.("app:user:change", {
-      user,
-      token,
-      role,
-      authenticated: true,
-    });
+    if (
+      typeof AppCore?.setState ===
+      "function"
+    ) {
+      AppCore.setState({
+        role,
+        authenticated: true,
+      });
+    } else {
+      AppCore.state.role =
+        role;
+
+      AppCore.state.authenticated =
+        true;
+    }
   } catch {}
 
   try {
-    AppCore?.events?.emit?.("auth:login:success", {
-      user,
-      token,
-      role,
-    });
+    AppCore?.events?.emit?.(
+      "app:user:change",
+      {
+        user,
+        token,
+        role,
+        authenticated: true,
+      }
+    );
+  } catch {}
+
+  try {
+    AppCore?.events?.emit?.(
+      "auth:login:success",
+      {
+        user,
+        token,
+        role,
+      }
+    );
   } catch {}
 
   try {
@@ -309,18 +386,33 @@ export function syncSession(auth = {}) {
    REDIRECT
 ========================================================= */
 
-export function resolveLoginRedirect(auth = {}, options = {}) {
+export function resolveLoginRedirect(
+  auth = {},
+  options = {}
+) {
   const explicitRedirect =
-    safeText(options.redirectTo, "") ||
-    safeText(options.successRedirect, "");
+    safeText(
+      options.redirectTo,
+      ""
+    ) ||
+    safeText(
+      options.successRedirect,
+      ""
+    );
 
   if (explicitRedirect) {
     return explicitRedirect;
   }
 
   const responseRedirect =
-    safeText(auth?.raw?.redirectTo, "") ||
-    safeText(auth?.raw?.data?.redirectTo, "");
+    safeText(
+      auth?.raw?.redirectTo,
+      ""
+    ) ||
+    safeText(
+      auth?.raw?.data?.redirectTo,
+      ""
+    );
 
   if (responseRedirect) {
     return responseRedirect;
@@ -328,21 +420,19 @@ export function resolveLoginRedirect(auth = {}, options = {}) {
 
   const role = safeText(
     auth?.role ||
-    auth?.user?.role ||
-    auth?.user?.rol ||
-    "",
+      auth?.user?.role ||
+      auth?.user?.rol ||
+      "",
     ""
   ).toLowerCase();
 
   switch (role) {
     case "admin":
-      return "/";
     case "tecnico":
-      return "/";
     case "agent":
-      return "/";
     case "cliente":
       return "/";
+
     default:
       return "/";
   }

@@ -4,10 +4,11 @@
 
    Responsabilidades:
    - orquestar la vista de login
-   - renderizar template + estilos
+   - renderizar template auth pro
    - conectar dom, auth, core y toast
    - gestionar submit y feedback visual
    - sincronizar sesión y redirigir
+   - activar / limpiar modo auth-screen del body
    - mantener cleanup de listeners
    - exponer compatibilidad default + named export
 ========================================================= */
@@ -30,7 +31,6 @@ import {
 } from "./login.helpers.js";
 
 import getLoginTemplate from "./login.template.js";
-import injectLoginStylesOnce from "./login.styles.js";
 
 import {
   getLoginRefs,
@@ -142,6 +142,56 @@ function emitRouteRendered() {
   } catch {}
 }
 
+function enableAuthScreenMode() {
+  try {
+    document.body.classList.add("auth-screen");
+    document.body.classList.add("login-no-scroll");
+  } catch {}
+}
+
+function disableAuthScreenMode() {
+  try {
+    document.body.classList.remove("auth-screen");
+    document.body.classList.remove("login-no-scroll");
+  } catch {}
+}
+
+function syncCapsIndicator(refs = {}) {
+  const passwordInput = refs?.passwordInput;
+  const capsIndicator = refs?.container?.querySelector?.("#loginCapsIndicator");
+
+  if (!passwordInput || !capsIndicator) {
+    return () => {};
+  }
+
+  const updateCapsState = (event) => {
+    const isCapsOn = Boolean(
+      event?.getModifierState?.("CapsLock")
+    );
+
+    capsIndicator.classList.toggle(
+      "is-visible",
+      isCapsOn
+    );
+  };
+
+  const hideCapsState = () => {
+    capsIndicator.classList.remove("is-visible");
+  };
+
+  passwordInput.addEventListener("keydown", updateCapsState);
+  passwordInput.addEventListener("keyup", updateCapsState);
+  passwordInput.addEventListener("focus", updateCapsState);
+  passwordInput.addEventListener("blur", hideCapsState);
+
+  return () => {
+    passwordInput.removeEventListener("keydown", updateCapsState);
+    passwordInput.removeEventListener("keyup", updateCapsState);
+    passwordInput.removeEventListener("focus", updateCapsState);
+    passwordInput.removeEventListener("blur", hideCapsState);
+  };
+}
+
 /* =========================================================
    VIEW
 ========================================================= */
@@ -151,7 +201,7 @@ function renderLoginView(container, deps = {}) {
     throw new Error("[LoginView] container es obligatorio.");
   }
 
-  injectLoginStylesOnce();
+  enableAuthScreenMode();
 
   const rememberedEmail = loadRememberedEmail();
   const appName = resolveAppName();
@@ -180,7 +230,9 @@ function renderLoginView(container, deps = {}) {
     emitRouteRendered();
 
     return {
-      destroy() {},
+      destroy() {
+        disableAuthScreenMode();
+      },
     };
   }
 
@@ -255,6 +307,8 @@ function renderLoginView(container, deps = {}) {
         auth.message || "Sesión iniciada correctamente."
       );
 
+      disableAuthScreenMode();
+
       const redirectTo = resolveLoginRedirect(auth, deps);
       navigateTo(redirectTo);
     } catch (error) {
@@ -303,6 +357,8 @@ function renderLoginView(container, deps = {}) {
     onSubmit
   );
 
+  const unbindCapsIndicator = syncCapsIndicator(refs);
+
   focusLoginPrimaryField(refs, {
     rememberedEmail,
   });
@@ -315,6 +371,8 @@ function renderLoginView(container, deps = {}) {
       unbindPasswordToggle();
       unbindThemeToggle();
       unbindSubmit();
+      unbindCapsIndicator();
+      disableAuthScreenMode();
     },
   };
 }

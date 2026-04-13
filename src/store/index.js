@@ -11,6 +11,7 @@
    - actualización inmutable por slices
    - helpers de colecciones
    - prevención de notificaciones inútiles
+   - init idempotente
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -45,6 +46,7 @@ import {
 
 import { createSelectors } from "./selectors.js";
 import { createActions } from "./actions.js";
+
 import {
   bindCoreEvents,
   unbindCoreEvents,
@@ -58,62 +60,96 @@ export const Store = (() => {
   /* =========================================================
      ESTADO INTERNO
   ========================================================= */
-  const state = buildInitialState(AppCore);
+  const state =
+    buildInitialState(
+      AppCore
+    );
 
   /* =========================================================
      LISTENERS
   ========================================================= */
-  const listeners = new Set();
-  const keyListeners = new Map();
-  const coreUnsubscribers = [];
-  const selectorListeners = new Set();
+  const listeners =
+    new Set();
+
+  const keyListeners =
+    new Map();
+
+  const selectorListeners =
+    new Set();
+
+  const coreUnsubscribers =
+    [];
 
   /* =========================================================
-     SNAPSHOTS / LECTURA
+     READ HELPERS
   ========================================================= */
   function snapshot() {
     return deepClone(state);
   }
 
-  function get(path = null, fallback = undefined) {
-    if (!path) return shallowCloneRoot(state);
+  function get(
+    path = null,
+    fallback = undefined
+  ) {
+    if (!path) {
+      return shallowCloneRoot(
+        state
+      );
+    }
 
-    const value = getByPath(state, path);
-    return value === undefined ? fallback : value;
+    const value =
+      getByPath(
+        state,
+        path
+      );
+
+    return value ===
+      undefined
+      ? fallback
+      : value;
   }
 
-  function select(selector, fallback = undefined) {
-    if (!isFunction(selector)) {
-      throw new Error("select(selector) requiere una función");
+  function select(
+    selector,
+    fallback = undefined
+  ) {
+    if (
+      !isFunction(selector)
+    ) {
+      throw new Error(
+        "select(selector) requiere una función"
+      );
     }
 
     try {
-      const result = selector(shallowCloneRoot(state));
-      return result === undefined ? fallback : result;
+      const result =
+        selector(
+          shallowCloneRoot(
+            state
+          )
+        );
+
+      return result ===
+        undefined
+        ? fallback
+        : result;
     } catch (error) {
-      AppCore.utils.error("Store select error", error);
+      AppCore.utils.error(
+        "Store select error",
+        error
+      );
+
       return fallback;
     }
   }
 
   /* =========================================================
-     ESCRITURA
+     INTERNAL NOTIFY
   ========================================================= */
-  function set(path, value) {
-    if (!path) {
-      throw new Error("Store.set(path, value) requiere path");
-    }
-
-    const currentValue = get(path);
-
-    if (deepEqual(currentValue, value)) {
-      return currentValue;
-    }
-
-    const previousState = snapshot();
-    setByPath(state, path, deepClone(value));
-    touchMeta(state);
-
+  function emitChange(
+    changedPaths = [],
+    previousState = {}
+  ) {
     notify({
       AppCore,
       listeners,
@@ -123,179 +159,312 @@ export const Store = (() => {
       snapshot,
       shallowCloneRoot,
       state,
-      payload: buildPayload(snapshot, [path], previousState),
+      payload:
+        buildPayload(
+          snapshot,
+          changedPaths,
+          previousState
+        ),
     });
+  }
+
+  /* =========================================================
+     WRITE API
+  ========================================================= */
+  function set(
+    path,
+    value
+  ) {
+    if (!path) {
+      throw new Error(
+        "Store.set(path, value) requiere path"
+      );
+    }
+
+    const currentValue =
+      get(path);
+
+    if (
+      deepEqual(
+        currentValue,
+        value
+      )
+    ) {
+      return currentValue;
+    }
+
+    const previousState =
+      snapshot();
+
+    setByPath(
+      state,
+      path,
+      deepClone(value)
+    );
+
+    touchMeta(state);
+
+    emitChange(
+      [path],
+      previousState
+    );
 
     return get(path);
   }
 
-  function patch(partialState = {}) {
+  function patch(
+    partialState = {}
+  ) {
     if (
-      partialState === null ||
-      typeof partialState !== "object" ||
-      Array.isArray(partialState)
+      partialState ===
+        null ||
+      typeof partialState !==
+        "object" ||
+      Array.isArray(
+        partialState
+      )
     ) {
-      throw new Error("Store.patch(partialState) requiere un objeto");
+      throw new Error(
+        "Store.patch(partialState) requiere un objeto"
+      );
     }
 
-    const previousState = snapshot();
-    const nextState = mergeDeep(state, partialState);
+    const previousState =
+      snapshot();
 
-    if (deepEqual(state, nextState)) {
-      return shallowCloneRoot(state);
+    const nextState =
+      mergeDeep(
+        state,
+        partialState
+      );
+
+    if (
+      deepEqual(
+        state,
+        nextState
+      )
+    ) {
+      return shallowCloneRoot(
+        state
+      );
     }
 
-    Object.keys(nextState).forEach((key) => {
-      state[key] = nextState[key];
+    Object.keys(
+      state
+    ).forEach((key) => {
+      if (
+        !(key in nextState)
+      ) {
+        delete state[key];
+      }
+    });
+
+    Object.keys(
+      nextState
+    ).forEach((key) => {
+      state[key] =
+        nextState[key];
     });
 
     touchMeta(state);
 
-    const changedPaths = collectChangedPaths(partialState);
+    emitChange(
+      collectChangedPaths(
+        partialState
+      ),
+      previousState
+    );
 
-    notify({
-      AppCore,
-      listeners,
-      keyListeners,
-      selectorListeners,
-      get,
-      snapshot,
-      shallowCloneRoot,
-      state,
-      payload: buildPayload(snapshot, changedPaths, previousState),
-    });
-
-    return shallowCloneRoot(state);
+    return shallowCloneRoot(
+      state
+    );
   }
 
-  function update(path, updater) {
-    if (!path || !isFunction(updater)) {
-      throw new Error("update(path, updater) requiere path y función");
+  function update(
+    path,
+    updater
+  ) {
+    if (
+      !path ||
+      !isFunction(
+        updater
+      )
+    ) {
+      throw new Error(
+        "update(path, updater) requiere path y función"
+      );
     }
 
-    const currentValue = get(path);
-    const nextValue = updater(deepClone(currentValue));
+    const currentValue =
+      get(path);
 
-    return set(path, nextValue);
+    const nextValue =
+      updater(
+        deepClone(
+          currentValue
+        )
+      );
+
+    return set(
+      path,
+      nextValue
+    );
   }
 
-  function remove(path) {
+  function remove(
+    path
+  ) {
     if (!path) {
-      throw new Error("Store.remove(path) requiere path");
+      throw new Error(
+        "Store.remove(path) requiere path"
+      );
     }
 
-    const currentValue = get(path);
+    const currentValue =
+      get(path);
 
-    if (currentValue === undefined) {
-      return undefined;
+    if (
+      currentValue ===
+      undefined
+    ) {
+      return false;
     }
 
-    const previousState = snapshot();
-    deleteByPath(state, path);
+    const previousState =
+      snapshot();
+
+    deleteByPath(
+      state,
+      path
+    );
+
     touchMeta(state);
 
-    notify({
-      AppCore,
-      listeners,
-      keyListeners,
-      selectorListeners,
-      get,
-      snapshot,
-      shallowCloneRoot,
-      state,
-      payload: buildPayload(snapshot, [path], previousState),
-    });
+    emitChange(
+      [path],
+      previousState
+    );
 
     return true;
   }
 
   function reset() {
-    const previousState = snapshot();
-    const next = buildInitialState(AppCore);
+    const previousState =
+      snapshot();
 
-    Object.keys(state).forEach((key) => {
+    const next =
+      buildInitialState(
+        AppCore
+      );
+
+    Object.keys(
+      state
+    ).forEach((key) => {
       delete state[key];
     });
 
-    Object.keys(next).forEach((key) => {
-      state[key] = next[key];
+    Object.keys(
+      next
+    ).forEach((key) => {
+      state[key] =
+        next[key];
     });
 
     touchMeta(state);
 
-    notify({
+    emitChange(
+      [
+        "app",
+        "session",
+        "ui",
+        "entities",
+        "flags",
+        "meta",
+      ],
+      previousState
+    );
+
+    return shallowCloneRoot(
+      state
+    );
+  }
+
+  /* =========================================================
+     ACTIONS / SELECTORS
+  ========================================================= */
+  const actions =
+    createActions({
       AppCore,
+      state,
+      set,
+      patch,
+      update,
+    });
+
+  const selectors =
+    createSelectors({
+      AppCore,
+      state,
+    });
+
+  /* =========================================================
+     SUBSCRIPTIONS
+  ========================================================= */
+  function subscribe(
+    listener
+  ) {
+    return createSubscription(
       listeners,
-      keyListeners,
-      selectorListeners,
-      get,
-      snapshot,
-      shallowCloneRoot,
-      state,
-      payload: buildPayload(
+      listener
+    );
+  }
+
+  function subscribeKey(
+    path,
+    listener,
+    options = {}
+  ) {
+    return createKeySubscription(
+      {
+        AppCore,
+        keyListeners,
+        path,
+        listener,
+        get,
         snapshot,
-        ["app", "session", "ui", "entities", "flags", "meta"],
-        previousState
-      ),
-    });
+        options,
+      }
+    );
+  }
 
-    return shallowCloneRoot(state);
+  function subscribeSelector(
+    selector,
+    listener,
+    options = {}
+  ) {
+    return createSelectorSubscription(
+      {
+        AppCore,
+        selectorListeners,
+        selector,
+        listener,
+        snapshot,
+        shallowCloneRoot,
+        state,
+        options,
+      }
+    );
   }
 
   /* =========================================================
-     ACCIONES / SELECTORES
-  ========================================================= */
-  const actions = createActions({
-    AppCore,
-    state,
-    set,
-    patch,
-    update,
-  });
-
-  const selectors = createSelectors({
-    AppCore,
-    state,
-  });
-
-  /* =========================================================
-     SUBSCRIPCIONES
-  ========================================================= */
-  function subscribe(listener) {
-    return createSubscription(listeners, listener);
-  }
-
-  function subscribeKey(path, listener, options = {}) {
-    return createKeySubscription({
-      AppCore,
-      keyListeners,
-      path,
-      listener,
-      get,
-      snapshot,
-      options,
-    });
-  }
-
-  function subscribeSelector(selector, listener, options = {}) {
-    return createSelectorSubscription({
-      AppCore,
-      selectorListeners,
-      selector,
-      listener,
-      snapshot,
-      shallowCloneRoot,
-      state,
-      options,
-    });
-  }
-
-  /* =========================================================
-     INIT / DESTROY
+     LIFECYCLE
   ========================================================= */
   function init() {
     if (initialized) {
-      AppCore.utils.warn("Store ya estaba inicializado.");
+      AppCore.utils.warn(
+        "Store ya estaba inicializado."
+      );
+
       return api;
     }
 
@@ -311,13 +480,26 @@ export const Store = (() => {
 
     initialized = true;
 
-    AppCore.utils.log("Store inicializado correctamente.", {
-      route: state.app.route,
-      publicPath: state.app.publicPath,
-      authenticated: state.session.authenticated,
-      theme: state.ui.theme,
-      lang: state.ui.lang,
-    });
+    AppCore.utils.log(
+      "Store inicializado correctamente.",
+      {
+        route:
+          state.app
+            ?.route,
+        publicPath:
+          state.app
+            ?.publicPath,
+        authenticated:
+          state.session
+            ?.authenticated,
+        theme:
+          state.ui
+            ?.theme,
+        lang:
+          state.ui
+            ?.lang,
+      }
+    );
 
     return api;
   }
@@ -331,13 +513,14 @@ export const Store = (() => {
     listeners.clear();
     keyListeners.clear();
     selectorListeners.clear();
+
     initialized = false;
 
     return true;
   }
 
   /* =========================================================
-     API PÚBLICA
+     PUBLIC API
   ========================================================= */
   const api = {
     state,
@@ -351,6 +534,7 @@ export const Store = (() => {
     update,
     remove,
     reset,
+
     snapshot,
     select,
 

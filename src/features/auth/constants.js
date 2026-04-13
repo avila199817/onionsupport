@@ -6,8 +6,9 @@
    - centralizar endpoints auth
    - centralizar claves storage auxiliar
    - centralizar límites y constantes sesión
-   - exponer endpoints password-reset / recovery
+   - exponer endpoints password-reset alineados con backend
    - endurecer límites comunes del módulo auth
+   - eliminar rutas legacy conflictivas
 ========================================================= */
 
 /* =========================================================
@@ -15,35 +16,54 @@
 ========================================================= */
 
 export const AUTH_ENDPOINTS = Object.freeze({
-  /* sesión */
+  /* =======================================================
+     SESIÓN
+  ======================================================= */
   login: "/api/auth/login",
   logout: "/api/auth/logout",
   me: "/api/auth/me",
   refresh: "/api/auth/refresh",
 
-  /* recuperación acceso */
+  /* =======================================================
+     PASSWORD RESET REQUEST
+     Backend real:
+     POST /api/auth/reset-password-request
+  ======================================================= */
   requestPasswordReset:
-    "/api/auth/forgot-password",
+    "/api/auth/reset-password-request",
 
   resetPasswordRequest:
-    "/api/auth/forgot-password",
+    "/api/auth/reset-password-request",
 
   forgotPassword:
-    "/api/auth/forgot-password",
+    "/api/auth/reset-password-request",
 
-  /*
-    fase confirmación futura:
-    token + nueva contraseña
-  */
+  recoverPassword:
+    "/api/auth/reset-password-request",
+
+  recover:
+    "/api/auth/reset-password-request",
+
+  forgot:
+    "/api/auth/reset-password-request",
+
+  /* =======================================================
+     PASSWORD RESET CONFIRM
+     Backend real:
+     POST /api/auth/reset-password-confirm
+  ======================================================= */
   confirmPasswordReset:
-    "/api/auth/reset-password",
+    "/api/auth/reset-password-confirm",
 
   resetPasswordConfirm:
-    "/api/auth/reset-password",
+    "/api/auth/reset-password-confirm",
 
-  /*
-    validación opcional token
-  */
+  passwordResetConfirm:
+    "/api/auth/reset-password-confirm",
+
+  /* =======================================================
+     VALIDATE TOKEN (futuro/opcional)
+  ======================================================= */
   validateResetToken:
     "/api/auth/reset-password/validate",
 });
@@ -53,20 +73,28 @@ export const AUTH_ENDPOINTS = Object.freeze({
 ========================================================= */
 
 export const AUTH_STORAGE_KEYS = Object.freeze({
-  /* tokens */
+  /* =======================================================
+     TOKENS
+  ======================================================= */
   refreshToken: "refresh_token",
   tempToken: "temp_token",
 
-  /* sesión */
+  /* =======================================================
+     SESIÓN
+  ======================================================= */
   sessionId: "session_id",
   sessionUserId: "session_user_id",
 
-  /* usuario */
+  /* =======================================================
+     USER
+  ======================================================= */
   userSlug: "user_slug",
   userName: "user_name",
   role: "role",
 
-  /* helpers auth ui */
+  /* =======================================================
+     UI HELPERS
+  ======================================================= */
   lastLoginIdentifier:
     "last_login_identifier",
 
@@ -82,25 +110,35 @@ export const AUTH_STORAGE_KEYS = Object.freeze({
 ========================================================= */
 
 export const AUTH_CONSTANTS = Object.freeze({
-  /* inputs */
+  /* =======================================================
+     INPUTS
+  ======================================================= */
   identifierMaxLength: 160,
   passwordMaxLength: 1024,
 
-  /* tokens / storage */
+  /* =======================================================
+     TOKENS / STORAGE
+  ======================================================= */
   tokenMaxLength: 4096,
   sessionValueMaxLength: 128,
 
-  /* refresh */
+  /* =======================================================
+     REFRESH
+  ======================================================= */
   refreshRetryCooldownMs:
     30_000,
 
   maxSequentialRefreshFailures:
     3,
 
-  /* requests */
+  /* =======================================================
+     REQUESTS
+  ======================================================= */
   requestTimeout: 15_000,
 
-  /* reset password */
+  /* =======================================================
+     RESET PASSWORD
+  ======================================================= */
   resetIdentifierMaxLength:
     160,
 
@@ -113,7 +151,9 @@ export const AUTH_CONSTANTS = Object.freeze({
   resetTokenMaxLength:
     4096,
 
-  /* ui */
+  /* =======================================================
+     UI
+  ======================================================= */
   loginRedirectDelayMs: 0,
 });
 
@@ -129,8 +169,7 @@ export function getAuthEndpoint(
     AUTH_ENDPOINTS?.[key];
 
   if (
-    typeof endpoint ===
-      "string" &&
+    typeof endpoint === "string" &&
     endpoint.trim()
   ) {
     return endpoint.trim();
@@ -149,8 +188,7 @@ export function getAuthStorageKey(
     AUTH_STORAGE_KEYS?.[key];
 
   if (
-    typeof storageKey ===
-      "string" &&
+    typeof storageKey === "string" &&
     storageKey.trim()
   ) {
     return storageKey.trim();
@@ -175,4 +213,22 @@ export function getAuthConstant(
   }
 
   return fallback;
+}
+
+/* =========================================================
+   SPECIALIZED HELPERS
+========================================================= */
+
+export function getRequestPasswordResetEndpoint() {
+  return getAuthEndpoint(
+    "resetPasswordRequest",
+    "/api/auth/reset-password-request"
+  );
+}
+
+export function getConfirmPasswordResetEndpoint() {
+  return getAuthEndpoint(
+    "resetPasswordConfirm",
+    "/api/auth/reset-password-confirm"
+  );
 }

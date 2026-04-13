@@ -19,7 +19,7 @@
 
 import { I18n } from "../i18n/index.js";
 
-import { LoginView } from "../views/loginView.js";
+import { LoginView } from "../views/login/index.js";
 import { HomeView } from "../views/homeView.js";
 import { IncidenciasView } from "../views/incidencias/index.js";
 import { FacturasView } from "../views/facturas/index.js";

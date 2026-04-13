@@ -3,10 +3,12 @@
    Archivo: src/store/notify.js
 
    Responsabilidades:
-   - construir payloads de cambio del store
+   - construir payloads consistentes del store
    - notificar listeners globales
    - notificar listeners por path
    - notificar listeners por selector
+   - aislar errores de subscribers
+   - evitar mutaciones accidentales
 ========================================================= */
 
 import {
@@ -14,15 +16,87 @@ import {
   deepEqual,
 } from "./helpers.js";
 
-export function buildPayload(snapshot, changedPaths = [], previousState = null) {
+/* =========================================================
+   INTERNAL
+========================================================= */
+function uniquePaths(
+  changedPaths = []
+) {
+  return Array.from(
+    new Set(
+      Array.isArray(
+        changedPaths
+      )
+        ? changedPaths.filter(
+            Boolean
+          )
+        : []
+    )
+  );
+}
+
+function safeRun(
+  AppCore,
+  label,
+  fn
+) {
+  try {
+    fn();
+  } catch (error) {
+    AppCore?.utils?.error?.(
+      label,
+      error
+    );
+  }
+}
+
+function pathMatches(
+  watchedPath = "",
+  changedPath = ""
+) {
+  return (
+    changedPath ===
+      watchedPath ||
+    changedPath.startsWith(
+      `${watchedPath}.`
+    ) ||
+    watchedPath.startsWith(
+      `${changedPath}.`
+    )
+  );
+}
+
+/* =========================================================
+   PAYLOAD
+========================================================= */
+export function buildPayload(
+  snapshot,
+  changedPaths = [],
+  previousState = null
+) {
+  const nextState =
+    typeof snapshot ===
+    "function"
+      ? snapshot()
+      : snapshot;
+
   return {
-    state: snapshot(),
-    previousState,
-    changedPaths: Array.from(new Set(changedPaths)).filter(Boolean),
-    timestamp: Date.now(),
+    state: nextState,
+    previousState:
+      previousState ??
+      null,
+    changedPaths:
+      uniquePaths(
+        changedPaths
+      ),
+    timestamp:
+      Date.now(),
   };
 }
 
+/* =========================================================
+   SELECTOR LISTENERS
+========================================================= */
 export function notifySelectorListeners({
   AppCore,
   selectorListeners,
@@ -30,28 +104,62 @@ export function notifySelectorListeners({
   state,
   payload,
 }) {
-  selectorListeners.forEach((entry) => {
-    try {
-      const nextValue = entry.selector(shallowCloneRoot(state));
+  if (
+    !selectorListeners
+      ?.size
+  ) {
+    return;
+  }
 
-      if (deepEqual(nextValue, entry.lastValue)) {
-        return;
-      }
+  selectorListeners.forEach(
+    (entry) => {
+      safeRun(
+        AppCore,
+        "Store selector listener error",
+        () => {
+          const nextValue =
+            entry.selector(
+              shallowCloneRoot(
+                state
+              )
+            );
 
-      const previousValue = deepClone(entry.lastValue);
-      entry.lastValue = deepClone(nextValue);
+          if (
+            deepEqual(
+              nextValue,
+              entry.lastValue
+            )
+          ) {
+            return;
+          }
 
-      entry.listener({
-        ...payload,
-        value: nextValue,
-        previousValue,
-      });
-    } catch (error) {
-      AppCore.utils.error("Store selector listener error", error);
+          const previousValue =
+            deepClone(
+              entry.lastValue
+            );
+
+          entry.lastValue =
+            deepClone(
+              nextValue
+            );
+
+          entry.listener({
+            ...payload,
+            value:
+              deepClone(
+                nextValue
+              ),
+            previousValue,
+          });
+        }
+      );
     }
-  });
+  );
 }
 
+/* =========================================================
+   MAIN NOTIFY
+========================================================= */
 export function notify({
   AppCore,
   listeners,
@@ -63,48 +171,103 @@ export function notify({
   state,
   payload,
 }) {
-  listeners.forEach((listener) => {
-    try {
-      listener(payload);
-    } catch (error) {
-      AppCore.utils.error("Store listener error", error);
-    }
-  });
+  const finalPayload = {
+    ...payload,
+    state:
+      payload?.state ??
+      snapshot(),
+    changedPaths:
+      uniquePaths(
+        payload
+          ?.changedPaths
+      ),
+    timestamp:
+      payload
+        ?.timestamp ??
+      Date.now(),
+  };
 
-  if (payload?.changedPaths?.length) {
-    Array.from(keyListeners.entries()).forEach(([watchedPath, bucket]) => {
-      const matched = payload.changedPaths.some((changedPath) => {
-        return (
-          changedPath === watchedPath ||
-          changedPath.startsWith(`${watchedPath}.`) ||
-          watchedPath.startsWith(`${changedPath}.`)
-        );
-      });
-
-      if (!matched) return;
-
-      bucket.forEach((listener) => {
-        try {
-          listener({
-            ...payload,
-            value: get(watchedPath),
-            path: watchedPath,
-          });
-        } catch (error) {
-          AppCore.utils.error(
-            `Store key listener error (${watchedPath})`,
-            error
+  /* =========================================
+     GLOBAL LISTENERS
+  ========================================= */
+  listeners.forEach(
+    (listener) => {
+      safeRun(
+        AppCore,
+        "Store listener error",
+        () => {
+          listener(
+            finalPayload
           );
         }
-      });
-    });
+      );
+    }
+  );
+
+  /* =========================================
+     KEY LISTENERS
+  ========================================= */
+  if (
+    finalPayload
+      .changedPaths
+      .length
+  ) {
+    Array.from(
+      keyListeners.entries()
+    ).forEach(
+      ([
+        watchedPath,
+        bucket,
+      ]) => {
+        const matched =
+          finalPayload.changedPaths.some(
+            (
+              changedPath
+            ) =>
+              pathMatches(
+                watchedPath,
+                changedPath
+              )
+          );
+
+        if (!matched) {
+          return;
+        }
+
+        bucket.forEach(
+          (listener) => {
+            safeRun(
+              AppCore,
+              `Store key listener error (${watchedPath})`,
+              () => {
+                listener({
+                  ...finalPayload,
+                  path:
+                    watchedPath,
+                  value:
+                    deepClone(
+                      get(
+                        watchedPath
+                      )
+                    ),
+                });
+              }
+            );
+          }
+        );
+      }
+    );
   }
 
+  /* =========================================
+     SELECTORS
+  ========================================= */
   notifySelectorListeners({
     AppCore,
     selectorListeners,
     shallowCloneRoot,
     state,
-    payload,
+    payload:
+      finalPayload,
   });
 }

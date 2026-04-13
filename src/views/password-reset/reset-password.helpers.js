@@ -1,6 +1,6 @@
 /* =========================================================
    Onion SPA - Reset Password Helpers
-   Archivo: src/views/reset-password/reset-password.helpers.js
+   Archivo: src/views/password-reset/reset-password.helpers.js
 
    Responsabilidades:
    - helpers puros de recuperación de acceso
@@ -10,15 +10,28 @@
    - resolución de mensajes de error
    - persistencia opcional del identificador recordado
    - compatibilidad con usuario o email
+   - endurecer redirects y consistencia UX
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import {
+  AUTH_STORAGE_KEYS,
+  AUTH_CONSTANTS,
+} from "../../features/auth/constants.js";
 
 /* =========================================================
    CONST
 ========================================================= */
 
-export const RESET_PASSWORD_IDENTIFIER_KEY = "auth:last-identifier";
+export const RESET_PASSWORD_IDENTIFIER_KEY =
+  AUTH_STORAGE_KEYS?.lastResetIdentifier ||
+  "auth:last-identifier";
+
+const DEFAULT_SUCCESS_MESSAGE =
+  "Si el identificador existe, te enviaremos las instrucciones para restablecer la contraseña.";
+
+const DEFAULT_ERROR_MESSAGE =
+  "No se pudo procesar la recuperación de acceso.";
 
 /* =========================================================
    BASICS
@@ -42,6 +55,10 @@ export function escapeHtml(value = "") {
     .replaceAll("'", "&#39;");
 }
 
+export function isObject(value) {
+  return value !== null && typeof value === "object";
+}
+
 export function normalizeIdentifier(value = "") {
   return safeText(value, "");
 }
@@ -60,6 +77,14 @@ export function looksLikeEmail(value = "") {
   return safeText(value, "").includes("@");
 }
 
+export function getResetIdentifierMaxLength() {
+  return Number(
+    AUTH_CONSTANTS?.resetIdentifierMaxLength ??
+      AUTH_CONSTANTS?.identifierMaxLength ??
+      160
+  ) || 160;
+}
+
 export function normalizePath(path = "/") {
   const raw = safeText(path, "/") || "/";
 
@@ -73,17 +98,21 @@ export function normalizePath(path = "/") {
     return "/";
   }
 
-  return raw
-    .replace(/\/{2,}/g, "/")
-    .replace(/\/+$/g, "") || "/";
+  return (
+    raw
+      .replace(/\/{2,}/g, "/")
+      .replace(/\/+$/g, "") || "/"
+  );
 }
 
 export function isSafeInternalRedirect(path = "") {
-  const value = safeText(path, "").trim();
+  const value = safeText(path, "");
 
   if (!value) return false;
   if (!value.startsWith("/")) return false;
   if (value.startsWith("//")) return false;
+  if (/^\/https?:/i.test(value)) return false;
+  if (/[\r\n]/.test(value)) return false;
 
   return true;
 }
@@ -127,16 +156,11 @@ export function readStorage(key, fallback = "") {
     const storage = getStorage();
 
     if (typeof storage?.get === "function") {
-      return safeText(
-        storage.get(key),
-        fallback
-      );
+      return safeText(storage.get(key), fallback);
     }
 
     return safeText(
-      window.localStorage.getItem(
-        getNamespacedKey(key)
-      ),
+      window.localStorage.getItem(getNamespacedKey(key)),
       fallback
     );
   } catch {
@@ -215,6 +239,7 @@ export function clearRememberedIdentifier() {
 export function createResetPasswordPayload({
   identifier = "",
   email = "",
+  redirect = "",
 } = {}) {
   const normalizedIdentifier =
     normalizeIdentifier(identifier) ||
@@ -225,6 +250,7 @@ export function createResetPasswordPayload({
     email: looksLikeEmail(normalizedIdentifier)
       ? normalizedIdentifier.toLowerCase()
       : "",
+    redirect: safeText(redirect, ""),
   };
 }
 
@@ -234,7 +260,11 @@ export function createResetPasswordPayload({
 
 export function validateResetPasswordPayload(payload = {}) {
   const identifier = normalizeIdentifier(
-    payload.identifier || payload.email || ""
+    payload.identifier ||
+      payload.email ||
+      payload.username ||
+      payload.user ||
+      ""
   );
 
   const errors = {};
@@ -242,6 +272,12 @@ export function validateResetPasswordPayload(payload = {}) {
   if (!identifier) {
     errors.identifier =
       "Introduce tu email o nombre de usuario.";
+    return errors;
+  }
+
+  if (identifier.length > getResetIdentifierMaxLength()) {
+    errors.identifier =
+      "El identificador es demasiado largo.";
     return errors;
   }
 
@@ -299,10 +335,10 @@ export function normalizeResetPasswordResult(result = {}) {
   const cooldown =
     Number(
       result?.cooldownSeconds ??
-      result?.retryAfter ??
-      result?.data?.cooldownSeconds ??
-      result?.data?.retryAfter ??
-      0
+        result?.retryAfter ??
+        result?.data?.cooldownSeconds ??
+        result?.data?.retryAfter ??
+        0
     ) || 0;
 
   const emailMasked =
@@ -315,26 +351,39 @@ export function normalizeResetPasswordResult(result = {}) {
   return {
     raw: result,
     ok: Boolean(ok),
-    message: safeText(
-      message,
-      "Si el identificador existe, te enviaremos las instrucciones para restablecer la contraseña."
-    ),
+    success: Boolean(ok),
+    message: safeText(message, DEFAULT_SUCCESS_MESSAGE),
     redirectTo: safeText(redirectTo, ""),
     cooldownSeconds: Math.max(0, cooldown),
+    retryAfter: Math.max(0, cooldown),
     emailMasked: safeText(emailMasked, ""),
   };
 }
 
 export function resolveResetPasswordErrorMessage(error) {
-  return (
+  const status = Number(
+    error?.status ??
+      error?.response?.status ??
+      0
+  ) || 0;
+
+  const backendMessage =
     safeText(error?.data?.message, "") ||
     safeText(error?.data?.mensaje, "") ||
     safeText(error?.response?.data?.message, "") ||
     safeText(error?.response?.data?.mensaje, "") ||
     safeText(error?.message, "") ||
-    safeText(error?.statusText, "") ||
-    "No se pudo procesar la recuperación de acceso."
-  );
+    safeText(error?.statusText, "");
+
+  if (status === 429) {
+    return "Has alcanzado el límite temporal. Espera un momento antes de volver a intentarlo.";
+  }
+
+  if (status >= 500) {
+    return "Ahora mismo no se pudo procesar la recuperación de acceso. Inténtalo de nuevo en unos minutos.";
+  }
+
+  return backendMessage || DEFAULT_ERROR_MESSAGE;
 }
 
 /* =========================================================
@@ -385,10 +434,16 @@ export function resolveResetPasswordRedirect(
     safeText(result?.raw?.data?.redirect, "");
 
   if (responseRedirect) {
-    return ensureSafeRedirect(responseRedirect, explicitRedirect);
+    return ensureSafeRedirect(
+      responseRedirect,
+      explicitRedirect
+    );
   }
 
-  return ensureSafeRedirect(explicitRedirect, "/login");
+  return ensureSafeRedirect(
+    explicitRedirect,
+    "/login"
+  );
 }
 
 /* =========================================================
@@ -396,18 +451,24 @@ export function resolveResetPasswordRedirect(
 ========================================================= */
 
 export function buildResetPasswordSuccessMessage(result = {}) {
-  const normalized = normalizeResetPasswordResult(result);
+  const normalized =
+    normalizeResetPasswordResult(result);
 
   if (normalized.emailMasked) {
     return `Te hemos enviado las instrucciones a ${normalized.emailMasked}.`;
   }
 
-  return normalized.message ||
-    "Si el identificador existe, te enviaremos las instrucciones para restablecer la contraseña.";
+  return (
+    normalized.message ||
+    DEFAULT_SUCCESS_MESSAGE
+  );
 }
 
 export function buildResetPasswordCooldownMessage(seconds = 0) {
-  const safeSeconds = Math.max(0, Number(seconds) || 0);
+  const safeSeconds = Math.max(
+    0,
+    Number(seconds) || 0
+  );
 
   if (!safeSeconds) {
     return "Espera un momento antes de volver a intentarlo.";
@@ -417,7 +478,17 @@ export function buildResetPasswordCooldownMessage(seconds = 0) {
     return "Espera 1 segundo antes de volver a intentarlo.";
   }
 
-  return `Espera ${safeSeconds} segundos antes de volver a intentarlo.`;
+  if (safeSeconds < 60) {
+    return `Espera ${safeSeconds} segundos antes de volver a intentarlo.`;
+  }
+
+  const minutes = Math.ceil(safeSeconds / 60);
+
+  if (minutes === 1) {
+    return "Espera 1 minuto antes de volver a intentarlo.";
+  }
+
+  return `Espera ${minutes} minutos antes de volver a intentarlo.`;
 }
 
 /* =========================================================

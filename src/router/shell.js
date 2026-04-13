@@ -8,6 +8,11 @@
    - actualizar título del documento
    - activar menú SPA según ruta actual
    - mostrar u ocultar shell por ruta
+
+   HARDENING:
+   - guards de browser
+   - sync robusto de aria-current
+   - compatibilidad con mount dinámico
 ========================================================= */
 
 import {
@@ -15,49 +20,149 @@ import {
   resolveSpaHref,
 } from "./helpers.js";
 
+/* =========================================================
+   INTERNAL
+========================================================= */
+function isBrowser() {
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
+}
+
+function safeToggleHidden(element, hidden) {
+  if (!element) return;
+  element.hidden = Boolean(hidden);
+}
+
+function safeEmit(AppCore, eventName, payload) {
+  AppCore?.events?.emit?.(eventName, payload);
+}
+
+/* =========================================================
+   ELEMENTS
+========================================================= */
 export function getShellElements(AppCore) {
+  if (!isBrowser()) {
+    return {
+      sidebar: null,
+      topbar: null,
+      tableheadContainer: null,
+      body: null,
+      mobileToggle: null,
+    };
+  }
+
   return {
-    sidebar: AppCore.dom.sidebar || document.querySelector(".sidebar"),
-    topbar: AppCore.dom.topbar || document.querySelector(".topbar"),
+    sidebar:
+      AppCore?.dom?.sidebar ||
+      document.querySelector(".sidebar") ||
+      null,
+
+    topbar:
+      AppCore?.dom?.topbar ||
+      document.querySelector(".topbar") ||
+      null,
+
     tableheadContainer:
-      AppCore.dom.tableheadContainer ||
-      document.getElementById("tablehead-container"),
-    body: AppCore.dom.body || document.body,
+      AppCore?.dom?.tableheadContainer ||
+      document.getElementById("tablehead-container") ||
+      null,
+
+    body:
+      AppCore?.dom?.body ||
+      document.body ||
+      null,
+
     mobileToggle:
-      AppCore.dom.sidebarMobileToggle ||
-      document.getElementById("toggleSidebarMobile"),
+      AppCore?.dom?.sidebarMobileToggle ||
+      AppCore?.dom?.mobileSidebarToggle ||
+      document.getElementById("toggleSidebarMobile") ||
+      null,
   };
 }
 
+/* =========================================================
+   CORE BRIDGES
+========================================================= */
 export function clearDynamicContainers(AppCore) {
-  AppCore.clearDynamicContainers?.();
+  AppCore?.clearDynamicContainers?.();
 }
 
-export function setDocumentTitle(AppCore, title = AppCore.config.appName) {
-  AppCore.setDocumentTitle?.(title);
+export function setDocumentTitle(
+  AppCore,
+  title = AppCore?.config?.appName
+) {
+  AppCore?.setDocumentTitle?.(title);
 }
 
-export function setActiveMenu(AppCore, pathname = "/") {
-  const currentCanonical = normalizeCanonicalPath(AppCore, pathname);
-  const links = AppCore.utils.qsa("a[data-spa]");
+/* =========================================================
+   ACTIVE MENU
+========================================================= */
+export function setActiveMenu(
+  AppCore,
+  pathname = "/"
+) {
+  if (!isBrowser()) {
+    return;
+  }
+
+  const currentCanonical =
+    normalizeCanonicalPath(
+      AppCore,
+      pathname
+    );
+
+  const links =
+    AppCore?.utils?.qsa?.("a[data-spa]") ||
+    Array.from(
+      document.querySelectorAll("a[data-spa]")
+    );
 
   links.forEach((link) => {
-    const href = resolveSpaHref(AppCore, link.getAttribute("href") || "/");
-    const hrefCanonical = normalizeCanonicalPath(AppCore, href);
-    const active = hrefCanonical === currentCanonical;
+    const href =
+      resolveSpaHref(
+        AppCore,
+        link.getAttribute("href") || "/"
+      );
 
-    link.classList.toggle("active", active);
+    const hrefCanonical =
+      normalizeCanonicalPath(
+        AppCore,
+        href
+      );
+
+    const active =
+      hrefCanonical === currentCanonical;
+
+    link.classList.toggle(
+      "active",
+      active
+    );
 
     if (active) {
-      link.setAttribute("aria-current", "page");
+      link.setAttribute(
+        "aria-current",
+        "page"
+      );
     } else {
-      link.removeAttribute("aria-current");
+      link.removeAttribute(
+        "aria-current"
+      );
     }
   });
 }
 
-export function setShellMode(AppCore, route = null) {
-  const hideShell = Boolean(route?.hideShell);
+/* =========================================================
+   SHELL MODE
+========================================================= */
+export function setShellMode(
+  AppCore,
+  route = null
+) {
+  const hideShell =
+    Boolean(route?.hideShell);
+
   const {
     sidebar,
     topbar,
@@ -66,23 +171,54 @@ export function setShellMode(AppCore, route = null) {
     mobileToggle,
   } = getShellElements(AppCore);
 
-  if (sidebar) sidebar.hidden = hideShell;
-  if (topbar) topbar.hidden = hideShell;
-  if (tableheadContainer) tableheadContainer.hidden = hideShell;
+  safeToggleHidden(
+    sidebar,
+    hideShell
+  );
+
+  safeToggleHidden(
+    topbar,
+    hideShell
+  );
+
+  safeToggleHidden(
+    tableheadContainer,
+    hideShell
+  );
 
   if (mobileToggle) {
-    mobileToggle.hidden = hideShell;
-    mobileToggle.setAttribute("aria-expanded", String(!hideShell));
+    mobileToggle.hidden =
+      hideShell;
+
+    mobileToggle.setAttribute(
+      "aria-expanded",
+      String(!hideShell)
+    );
   }
 
   if (body) {
-    body.classList.toggle("route-auth", hideShell);
-    body.classList.toggle("route-shell-hidden", hideShell);
-    body.classList.toggle("auth-screen", hideShell);
+    body.classList.toggle(
+      "route-auth",
+      hideShell
+    );
+
+    body.classList.toggle(
+      "route-shell-hidden",
+      hideShell
+    );
+
+    body.classList.toggle(
+      "auth-screen",
+      hideShell
+    );
   }
 
-  AppCore.events.emit("router:shell:change", {
-    hidden: hideShell,
-    route: route?.path || null,
-  });
+  safeEmit(
+    AppCore,
+    "router:shell:change",
+    {
+      hidden: hideShell,
+      route: route?.path || null,
+    }
+  );
 }

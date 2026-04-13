@@ -6,7 +6,8 @@
    - registrar subscripciones globales
    - registrar subscripciones por path
    - registrar subscripciones por selector
-   - encapsular altas y bajas de listeners del store
+   - encapsular altas / bajas seguras
+   - soporte immediate inicial
 ========================================================= */
 
 import {
@@ -14,18 +15,55 @@ import {
   deepClone,
 } from "./helpers.js";
 
-export function subscribe(listeners, listener) {
-  if (!isFunction(listener)) {
-    throw new Error("subscribe(listener) requiere una función");
+/* =========================================================
+   INTERNAL
+========================================================= */
+function safeRun(
+  AppCore,
+  label,
+  fn
+) {
+  try {
+    fn();
+  } catch (error) {
+    AppCore?.utils?.error?.(
+      label,
+      error
+    );
+  }
+}
+
+/* =========================================================
+   GLOBAL
+========================================================= */
+export function subscribe(
+  listeners,
+  listener
+) {
+  if (
+    !isFunction(
+      listener
+    )
+  ) {
+    throw new Error(
+      "subscribe(listener) requiere una función"
+    );
   }
 
-  listeners.add(listener);
+  listeners.add(
+    listener
+  );
 
   return () => {
-    listeners.delete(listener);
+    listeners.delete(
+      listener
+    );
   };
 }
 
+/* =========================================================
+   KEY / PATH
+========================================================= */
 export function subscribeKey({
   AppCore,
   keyListeners,
@@ -35,43 +73,103 @@ export function subscribeKey({
   snapshot,
   options = {},
 }) {
-  if (!path || !isFunction(listener)) {
-    throw new Error("subscribeKey(path, listener) requiere path y función");
+  if (
+    !path ||
+    !isFunction(
+      listener
+    )
+  ) {
+    throw new Error(
+      "subscribeKey(path, listener) requiere path y función"
+    );
   }
 
-  if (!keyListeners.has(path)) {
-    keyListeners.set(path, new Set());
+  const watchedPath =
+    String(path)
+      .trim();
+
+  if (
+    !keyListeners.has(
+      watchedPath
+    )
+  ) {
+    keyListeners.set(
+      watchedPath,
+      new Set()
+    );
   }
 
-  keyListeners.get(path).add(listener);
+  const bucket =
+    keyListeners.get(
+      watchedPath
+    );
 
-  if (options.immediate === true) {
-    try {
-      listener({
-        state: snapshot(),
-        previousState: null,
-        changedPaths: [path],
-        timestamp: Date.now(),
-        value: get(path),
-        path,
-      });
-    } catch (error) {
-      AppCore.utils.error(`Store key listener immediate error (${path})`, error);
-    }
+  bucket.add(
+    listener
+  );
+
+  if (
+    options.immediate ===
+    true
+  ) {
+    safeRun(
+      AppCore,
+      `Store key listener immediate error (${watchedPath})`,
+      () => {
+        listener({
+          state:
+            snapshot(),
+          previousState:
+            null,
+          changedPaths:
+            [
+              watchedPath,
+            ],
+          timestamp:
+            Date.now(),
+          value:
+            deepClone(
+              get(
+                watchedPath
+              )
+            ),
+          path:
+            watchedPath,
+        });
+      }
+    );
   }
 
   return () => {
-    const bucket = keyListeners.get(path);
-    if (!bucket) return;
+    const currentBucket =
+      keyListeners.get(
+        watchedPath
+      );
 
-    bucket.delete(listener);
+    if (
+      !currentBucket
+    ) {
+      return;
+    }
 
-    if (bucket.size === 0) {
-      keyListeners.delete(path);
+    currentBucket.delete(
+      listener
+    );
+
+    if (
+      currentBucket.size ===
+      0
+    ) {
+      keyListeners.delete(
+        watchedPath
+      );
     }
   };
 }
 
+/* =========================================================
+   SELECTOR
+========================================================= */
 export function subscribeSelector({
   AppCore,
   selectorListeners,
@@ -82,7 +180,14 @@ export function subscribeSelector({
   state,
   options = {},
 }) {
-  if (!isFunction(selector) || !isFunction(listener)) {
+  if (
+    !isFunction(
+      selector
+    ) ||
+    !isFunction(
+      listener
+    )
+  ) {
     throw new Error(
       "subscribeSelector(selector, listener) requiere dos funciones"
     );
@@ -91,27 +196,51 @@ export function subscribeSelector({
   const entry = {
     selector,
     listener,
-    lastValue: deepClone(selector(shallowCloneRoot(state))),
+    lastValue:
+      deepClone(
+        selector(
+          shallowCloneRoot(
+            state
+          )
+        )
+      ),
   };
 
-  selectorListeners.add(entry);
+  selectorListeners.add(
+    entry
+  );
 
-  if (options.immediate === true) {
-    try {
-      listener({
-        state: snapshot(),
-        previousState: null,
-        changedPaths: [],
-        timestamp: Date.now(),
-        value: deepClone(entry.lastValue),
-        previousValue: undefined,
-      });
-    } catch (error) {
-      AppCore.utils.error("Store selector immediate error", error);
-    }
+  if (
+    options.immediate ===
+    true
+  ) {
+    safeRun(
+      AppCore,
+      "Store selector immediate error",
+      () => {
+        listener({
+          state:
+            snapshot(),
+          previousState:
+            null,
+          changedPaths:
+            [],
+          timestamp:
+            Date.now(),
+          value:
+            deepClone(
+              entry.lastValue
+            ),
+          previousValue:
+            undefined,
+        });
+      }
+    );
   }
 
   return () => {
-    selectorListeners.delete(entry);
+    selectorListeners.delete(
+      entry
+    );
   };
 }

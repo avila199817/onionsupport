@@ -10,6 +10,7 @@
    - mantener compatibilidad con backend heterogéneo
    - exponer aliases públicos estables para auth flows
    - integrar reset-password / forgot-password
+   - ofrecer api pública coherente y endurecida
 ========================================================= */
 
 import {
@@ -83,13 +84,12 @@ import {
   guardRole,
 } from "./guards.js";
 
-export const Auth = (() => {
-  "use strict";
+/* =========================================================
+   INTERNAL HELPERS
+========================================================= */
 
-  /* =========================================================
-     INTERNAL SESSION STATE
-  ========================================================= */
-  const session = {
+function createInitialSessionState() {
+  return {
     restoring: false,
     checking: false,
     refreshing: false,
@@ -104,6 +104,37 @@ export const Auth = (() => {
     refreshFailCount: 0,
     refreshBlockedUntil: 0,
   };
+}
+
+function safeCloneSessionState(session = {}) {
+  return {
+    restoring: Boolean(session.restoring),
+    checking: Boolean(session.checking),
+    refreshing: Boolean(session.refreshing),
+
+    lastCheckAt: session.lastCheckAt || null,
+    lastRefreshAt: session.lastRefreshAt || null,
+
+    refreshPromise: session.refreshPromise || null,
+    mePromise: session.mePromise || null,
+    restorePromise: session.restorePromise || null,
+
+    refreshFailCount: Number(session.refreshFailCount || 0),
+    refreshBlockedUntil: Number(session.refreshBlockedUntil || 0),
+  };
+}
+
+/* =========================================================
+   AUTH SINGLETON
+========================================================= */
+
+export const Auth = (() => {
+  "use strict";
+
+  /* =========================================================
+     INTERNAL SESSION STATE
+  ========================================================= */
+  const session = createInitialSessionState();
 
   /* =========================================================
      WRAPPERS SERIALIZADOS
@@ -121,16 +152,35 @@ export const Auth = (() => {
   }
 
   /* =========================================================
+     DEBUG / SNAPSHOT
+  ========================================================= */
+  function getAuthModuleSnapshot() {
+    return {
+      endpoints: AUTH_ENDPOINTS,
+      storageKeys: AUTH_STORAGE_KEYS,
+      constants: AUTH_CONSTANTS,
+      session: safeCloneSessionState(session),
+      authenticated: Boolean(isAuthenticated?.()),
+      role: getCurrentRole?.() || null,
+      sessionDebug: typeof getSessionDebugSnapshot === "function"
+        ? getSessionDebugSnapshot()
+        : null,
+    };
+  }
+
+  /* =========================================================
      PUBLIC API
   ========================================================= */
-  return {
+  return Object.freeze({
     AUTH_ENDPOINTS,
     AUTH_STORAGE_KEYS,
     AUTH_CONSTANTS,
 
     session,
 
-    /* auth actions */
+    /* =======================================================
+       AUTH ACTIONS
+    ======================================================= */
     login,
     logout,
     handleLoginFormSubmit,
@@ -145,54 +195,75 @@ export const Auth = (() => {
     resetPasswordRequest,
     forgotPassword,
 
-    /* reset password helpers */
+    /* =======================================================
+       RESET PASSWORD HELPERS
+    ======================================================= */
     getRequestPasswordResetEndpoint,
     resolveResetPasswordIdentifier,
     normalizeResetPasswordPayload,
     buildResetPasswordRequestBody,
     normalizeResetPasswordResponse,
 
-    /* session recovery */
+    /* =======================================================
+       SESSION RECOVERY
+    ======================================================= */
     fetchMe: runFetchMe,
     refreshSession: runRefreshSession,
     restoreSession: runRestoreSession,
 
-    /* auth state */
+    /* =======================================================
+       AUTH STATE
+    ======================================================= */
     isAuthenticated,
     isAuthRoute,
 
-    /* roles / guards */
+    /* =======================================================
+       ROLES / GUARDS
+    ======================================================= */
     hasRole,
     requireRole,
     guardAuthenticated,
     guardRole,
     getCurrentRole,
 
-    /* headers */
+    /* =======================================================
+       HEADERS / SESSION LOCAL
+    ======================================================= */
     getAuthHeader,
-
-    /* session local */
     clearSessionLocal,
     applySession,
     buildSessionSnapshot,
     getSessionDebugSnapshot,
 
-    /* normalize */
+    /* =======================================================
+       NORMALIZATION
+    ======================================================= */
     normalizeUser,
 
-    /* login helpers */
+    /* =======================================================
+       LOGIN HELPERS
+    ======================================================= */
     resolveLoginIdentifier,
     normalizeLoginPayload,
     buildLoginRequestBody,
     buildLoginRedirectPath,
     getPostLoginTarget,
 
-    /* storage helpers */
+    /* =======================================================
+       STORAGE HELPERS
+    ======================================================= */
     hasRefreshToken,
     hasRefreshContext,
     getStoredRefreshToken,
     getStoredTempToken,
     getStoredSessionId,
     getStoredSessionUserId,
-  };
+
+    /* =======================================================
+       DEBUG
+    ======================================================= */
+    getAuthModuleSnapshot,
+  });
 })();
+
+export default Auth;

@@ -1,18 +1,29 @@
 /* =========================================================
-   Onion SPA - Toast Bridge
+   Onion SPA - Toast Bridge (FULL PRO SYSTEM)
    Archivo: src/ui/toast/toast.bridge.js
 
    Responsabilidades:
    - resolver el servicio de toast global
    - exponer una api uniforme para las vistas
-   - evitar acoplar loginView al montaje real del toast
-   - tolerar distintos nombres de método y providers legacy
-   - resolver providers en caliente
+   - evitar acoplar módulos al provider real
+   - tolerar providers legacy / múltiples firmas
+   - deduplicar toasts por id / key
+   - reemplazar toast existente si comparte id
    - soportar dismiss individual o global
-   - soportar providers con firmas distintas
+   - cooldown anti-spam por mensaje
+   - robustez enterprise production ready
 ========================================================= */
 
 import AppCore from "../../core/core.js";
+
+/* =========================================================
+   INTERNAL STATE
+========================================================= */
+
+const ACTIVE_TOASTS = new Map();
+const LAST_EMITTED = new Map();
+
+const DEFAULT_DEDUPE_MS = 1200;
 
 /* =========================================================
    HELPERS
@@ -34,6 +45,19 @@ function safeOptions(options = {}) {
   return isObject(options) ? options : {};
 }
 
+function safeText(value, fallback = "") {
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+
+  const text = String(value).trim();
+  return text || fallback;
+}
+
+function now() {
+  return Date.now();
+}
+
 function safeLogWarn(...args) {
   try {
     const warn =
@@ -47,18 +71,39 @@ function safeLogWarn(...args) {
   } catch {}
 }
 
+function safeLog(...args) {
+  try {
+    const log =
+      AppCore?.utils?.log ||
+      console?.log;
+
+    if (isFunction(log)) {
+      log(...args);
+    }
+  } catch {}
+}
+
 function tryCall(fn, ...args) {
   try {
-    if (!isFunction(fn)) return null;
+    if (!isFunction(fn)) {
+      return null;
+    }
+
     return fn(...args);
   } catch (error) {
-    safeLogWarn("[ToastBridge] provider call error", error);
+    safeLogWarn(
+      "[ToastBridge] provider call error",
+      error
+    );
+
     return null;
   }
 }
 
 function hasToastShape(candidate) {
-  if (!isObject(candidate)) return false;
+  if (!isObject(candidate)) {
+    return false;
+  }
 
   return [
     "init",
@@ -81,24 +126,119 @@ function hasToastShape(candidate) {
     "clearAll",
     "remove",
     "removeAll",
-  ].some((key) => isFunction(candidate?.[key]));
+  ].some((key) =>
+    isFunction(candidate?.[key])
+  );
 }
 
-function buildToastPayload(type, message, options = {}) {
+function normalizeType(type = "info") {
+  const value = safeText(type, "info")
+    .toLowerCase();
+
+  const map = {
+    warn: "warning",
+    danger: "error",
+  };
+
+  return map[value] || value;
+}
+
+function normalizeId(
+  type,
+  message,
+  options = {}
+) {
+  const payload = safeOptions(options);
+
+  return safeText(
+    payload.id ||
+    payload.toastId ||
+    payload.key ||
+    `${normalizeType(type)}:${safeText(message, "")}`,
+    ""
+  );
+}
+
+function buildToastPayload(
+  type,
+  message,
+  options = {}
+) {
   const payload = safeOptions(options);
 
   return {
     ...payload,
-    type,
-    message: isNonEmptyString(message) ? message.trim() : "",
+    id: normalizeId(type, message, payload),
+    type: normalizeType(type),
+    message: safeText(message, ""),
   };
+}
+
+function getDedupeMs(options = {}) {
+  const payload = safeOptions(options);
+
+  return Number(
+    payload.dedupeMs ??
+    payload.cooldownMs ??
+    DEFAULT_DEDUPE_MS
+  ) || DEFAULT_DEDUPE_MS;
+}
+
+function shouldSkipDuplicate(
+  type,
+  message,
+  options = {}
+) {
+  const id = normalizeId(
+    type,
+    message,
+    options
+  );
+
+  const ms = getDedupeMs(options);
+
+  const previous =
+    LAST_EMITTED.get(id) || 0;
+
+  const diff =
+    now() - previous;
+
+  if (diff < ms) {
+    return true;
+  }
+
+  LAST_EMITTED.set(id, now());
+
+  return false;
+}
+
+function rememberActiveToast(
+  logicalId,
+  providerToastId = null
+) {
+  if (!logicalId) return;
+
+  ACTIVE_TOASTS.set(
+    logicalId,
+    providerToastId ?? logicalId
+  );
+}
+
+function getActiveToastId(id = "") {
+  return ACTIVE_TOASTS.get(id) || id;
+}
+
+function forgetActiveToast(id = "") {
+  ACTIVE_TOASTS.delete(id);
 }
 
 /* =========================================================
    PROVIDER RESOLUTION
 ========================================================= */
 
-export function resolveToastProvider(customProvider = null) {
+export function resolveToastProvider(
+  customProvider = null
+) {
   const candidates = [
     customProvider,
     AppCore?.services?.toast,
@@ -120,29 +260,35 @@ export function resolveToastProvider(customProvider = null) {
 }
 
 /* =========================================================
-   CORE DISPATCH
+   DISPATCH CORE
 ========================================================= */
 
-function callDirectMethod(provider, methodName, message, options = {}) {
-  if (!provider || !isFunction(provider?.[methodName])) {
+function callDirectMethod(
+  provider,
+  methodName,
+  message,
+  options = {}
+) {
+  if (
+    !provider ||
+    !isFunction(provider?.[methodName])
+  ) {
     return null;
   }
 
-  const payload = safeOptions(options);
+  const payload =
+    safeOptions(options);
 
-  /*
-    Intentamos varias firmas comunes:
-    1) method(message, options)
-    2) method({ message, ...options })
-    3) method(message)
-  */
   let result = tryCall(
     provider[methodName].bind(provider),
     message,
     payload
   );
 
-  if (result !== null && result !== undefined) {
+  if (
+    result !== null &&
+    result !== undefined
+  ) {
     return result;
   }
 
@@ -154,7 +300,10 @@ function callDirectMethod(provider, methodName, message, options = {}) {
     }
   );
 
-  if (result !== null && result !== undefined) {
+  if (
+    result !== null &&
+    result !== undefined
+  ) {
     return result;
   }
 
@@ -164,29 +313,47 @@ function callDirectMethod(provider, methodName, message, options = {}) {
   );
 }
 
-function dispatchWithShowLike(provider, type, message, options = {}) {
-  if (!provider) return null;
+function dispatchWithShowLike(
+  provider,
+  type,
+  message,
+  options = {}
+) {
+  if (!provider) {
+    return null;
+  }
 
-  const payload = buildToastPayload(type, message, options);
+  const payload =
+    buildToastPayload(
+      type,
+      message,
+      options
+    );
 
-  const showLikeMethods = ["show", "open", "push", "notify"];
+  const methods = [
+    "show",
+    "open",
+    "push",
+    "notify",
+  ];
 
-  for (const methodName of showLikeMethods) {
-    if (!isFunction(provider?.[methodName])) continue;
+  for (const methodName of methods) {
+    if (
+      !isFunction(provider?.[methodName])
+    ) {
+      continue;
+    }
 
-    /*
-      Intentamos varias firmas comunes:
-      1) show(message, { type, ...options })
-      2) show({ message, type, ...options })
-      3) show(type, message, options)
-    */
     let result = tryCall(
       provider[methodName].bind(provider),
       message,
       payload
     );
 
-    if (result !== null && result !== undefined) {
+    if (
+      result !== null &&
+      result !== undefined
+    ) {
       return result;
     }
 
@@ -195,7 +362,10 @@ function dispatchWithShowLike(provider, type, message, options = {}) {
       payload
     );
 
-    if (result !== null && result !== undefined) {
+    if (
+      result !== null &&
+      result !== undefined
+    ) {
       return result;
     }
 
@@ -203,10 +373,13 @@ function dispatchWithShowLike(provider, type, message, options = {}) {
       provider[methodName].bind(provider),
       type,
       message,
-      safeOptions(options)
+      payload
     );
 
-    if (result !== null && result !== undefined) {
+    if (
+      result !== null &&
+      result !== undefined
+    ) {
       return result;
     }
   }
@@ -214,10 +387,119 @@ function dispatchWithShowLike(provider, type, message, options = {}) {
   return null;
 }
 
-function dispatch(provider, type, message, options = {}) {
-  if (!provider) return null;
+function dismissToast(
+  provider,
+  toastId = null
+) {
+  if (!provider) {
+    return null;
+  }
 
-  const payload = safeOptions(options);
+  const hasId =
+    toastId !== null &&
+    toastId !== undefined &&
+    toastId !== "";
+
+  if (hasId) {
+    const finalId =
+      getActiveToastId(toastId);
+
+    const methods = [
+      "dismiss",
+      "hide",
+      "close",
+      "remove",
+    ];
+
+    for (const methodName of methods) {
+      if (
+        !isFunction(provider?.[methodName])
+      ) {
+        continue;
+      }
+
+      const result = tryCall(
+        provider[methodName].bind(provider),
+        finalId
+      );
+
+      if (
+        result !== null &&
+        result !== undefined
+      ) {
+        forgetActiveToast(toastId);
+        return result;
+      }
+    }
+  }
+
+  const globalMethods = [
+    "dismissAll",
+    "clear",
+    "clearAll",
+    "removeAll",
+  ];
+
+  for (const methodName of globalMethods) {
+    if (
+      !isFunction(provider?.[methodName])
+    ) {
+      continue;
+    }
+
+    const result = tryCall(
+      provider[methodName].bind(provider)
+    );
+
+    if (
+      result !== null &&
+      result !== undefined
+    ) {
+      ACTIVE_TOASTS.clear();
+      return result;
+    }
+  }
+
+  return null;
+}
+
+function dispatch(
+  provider,
+  type,
+  message,
+  options = {}
+) {
+  if (!provider) {
+    return null;
+  }
+
+  const payload =
+    buildToastPayload(
+      type,
+      message,
+      options
+    );
+
+  const normalizedType =
+    payload.type;
+
+  const logicalId =
+    payload.id;
+
+  if (
+    shouldSkipDuplicate(
+      normalizedType,
+      message,
+      payload
+    )
+  ) {
+    return logicalId;
+  }
+
+  dismissToast(
+    provider,
+    logicalId
+  );
 
   const directMethodMap = {
     success: ["success"],
@@ -227,110 +509,60 @@ function dispatch(provider, type, message, options = {}) {
     loading: ["loading"],
   };
 
-  const directMethods = directMethodMap[type] || [];
+  const directMethods =
+    directMethodMap[
+      normalizedType
+    ] || [];
 
   for (const methodName of directMethods) {
-    const result = callDirectMethod(
+    const result =
+      callDirectMethod(
+        provider,
+        methodName,
+        message,
+        payload
+      );
+
+    if (
+      result !== null &&
+      result !== undefined
+    ) {
+      rememberActiveToast(
+        logicalId,
+        result
+      );
+
+      return result;
+    }
+  }
+
+  const result =
+    dispatchWithShowLike(
       provider,
-      methodName,
+      normalizedType,
       message,
       payload
     );
 
-    if (result !== null && result !== undefined) {
-      return result;
-    }
-  }
-
-  return dispatchWithShowLike(
-    provider,
-    type,
-    message,
-    payload
+  rememberActiveToast(
+    logicalId,
+    result
   );
-}
 
-function dismissToast(provider, toastId = null) {
-  if (!provider) return null;
-
-  const hasId = toastId !== null && toastId !== undefined;
-
-  if (hasId) {
-    const itemDismissMethods = [
-      "dismiss",
-      "hide",
-      "close",
-      "remove",
-    ];
-
-    for (const methodName of itemDismissMethods) {
-      if (!isFunction(provider?.[methodName])) continue;
-
-      const result = tryCall(
-        provider[methodName].bind(provider),
-        toastId
-      );
-
-      if (result !== null && result !== undefined) {
-        return result;
-      }
-    }
-  }
-
-  const globalDismissMethods = [
-    "dismissAll",
-    "clear",
-    "clearAll",
-    "removeAll",
-  ];
-
-  for (const methodName of globalDismissMethods) {
-    if (!isFunction(provider?.[methodName])) continue;
-
-    const result = tryCall(
-      provider[methodName].bind(provider)
-    );
-
-    if (result !== null && result !== undefined) {
-      return result;
-    }
-  }
-
-  /*
-    Fallback: si no hay clear global pero sí dismiss/hide/close/remove,
-    intentamos llamarlos sin id por compatibilidad legacy.
-  */
-  if (!hasId) {
-    const fallbackMethods = [
-      "dismiss",
-      "hide",
-      "close",
-      "remove",
-    ];
-
-    for (const methodName of fallbackMethods) {
-      if (!isFunction(provider?.[methodName])) continue;
-
-      const result = tryCall(
-        provider[methodName].bind(provider)
-      );
-
-      if (result !== null && result !== undefined) {
-        return result;
-      }
-    }
-  }
-
-  return null;
+  return result;
 }
 
 /* =========================================================
-   PUBLIC API
+   PUBLIC FACTORY
 ========================================================= */
 
-export function createToastBridge(customProvider = null) {
+export function createToastBridge(
+  customProvider = null
+) {
   function getProvider() {
-    return resolveToastProvider(customProvider);
+    return resolveToastProvider(
+      customProvider
+    );
   }
 
   return {
@@ -343,23 +575,45 @@ export function createToastBridge(customProvider = null) {
     },
 
     exists() {
-      return Boolean(getProvider());
+      return Boolean(
+        getProvider()
+      );
     },
 
     ready() {
-      return Boolean(getProvider());
+      return Boolean(
+        getProvider()
+      );
     },
 
     init(...args) {
-      const provider = getProvider();
+      const provider =
+        getProvider();
 
-      if (!provider) return null;
-      if (!isFunction(provider?.init)) return null;
+      if (!provider) {
+        return null;
+      }
 
-      return tryCall(provider.init.bind(provider), ...args);
+      if (
+        !isFunction(
+          provider?.init
+        )
+      ) {
+        return null;
+      }
+
+      return tryCall(
+        provider.init.bind(
+          provider
+        ),
+        ...args
+      );
     },
 
-    success(message, options = {}) {
+    success(
+      message,
+      options = {}
+    ) {
       return dispatch(
         getProvider(),
         "success",
@@ -368,7 +622,10 @@ export function createToastBridge(customProvider = null) {
       );
     },
 
-    error(message, options = {}) {
+    error(
+      message,
+      options = {}
+    ) {
       return dispatch(
         getProvider(),
         "error",
@@ -377,7 +634,10 @@ export function createToastBridge(customProvider = null) {
       );
     },
 
-    info(message, options = {}) {
+    info(
+      message,
+      options = {}
+    ) {
       return dispatch(
         getProvider(),
         "info",
@@ -386,7 +646,10 @@ export function createToastBridge(customProvider = null) {
       );
     },
 
-    warning(message, options = {}) {
+    warning(
+      message,
+      options = {}
+    ) {
       return dispatch(
         getProvider(),
         "warning",
@@ -395,7 +658,10 @@ export function createToastBridge(customProvider = null) {
       );
     },
 
-    warn(message, options = {}) {
+    warn(
+      message,
+      options = {}
+    ) {
       return dispatch(
         getProvider(),
         "warning",
@@ -404,23 +670,35 @@ export function createToastBridge(customProvider = null) {
       );
     },
 
-    loading(message, options = {}) {
+    loading(
+      message,
+      options = {}
+    ) {
       return dispatch(
         getProvider(),
         "loading",
         message,
         {
           persist: true,
-          ...safeOptions(options),
+          ...safeOptions(
+            options
+          ),
         }
       );
     },
 
-    show(message, options = {}) {
-      const payload = safeOptions(options);
-      const type = isNonEmptyString(payload.type)
-        ? payload.type.trim().toLowerCase()
-        : "info";
+    show(
+      message,
+      options = {}
+    ) {
+      const payload =
+        safeOptions(options);
+
+      const type =
+        normalizeType(
+          payload.type ||
+          "info"
+        );
 
       return dispatch(
         getProvider(),
@@ -430,35 +708,71 @@ export function createToastBridge(customProvider = null) {
       );
     },
 
-    dismiss(toastId = null) {
-      return dismissToast(getProvider(), toastId);
+    dismiss(
+      toastId = null
+    ) {
+      return dismissToast(
+        getProvider(),
+        toastId
+      );
     },
 
     clear() {
-      return dismissToast(getProvider(), null);
+      return dismissToast(
+        getProvider(),
+        null
+      );
     },
   };
 }
 
 /* =========================================================
-   DEFAULT INSTANCE
+   DEFAULT EXPORT
 ========================================================= */
 
 const ToastBridge = {
-  of(customProvider = null) {
-    return createToastBridge(customProvider);
+  of(
+    customProvider = null
+  ) {
+    return createToastBridge(
+      customProvider
+    );
   },
 
-  create(customProvider = null) {
-    return createToastBridge(customProvider);
+  create(
+    customProvider = null
+  ) {
+    return createToastBridge(
+      customProvider
+    );
   },
 
-  resolve(customProvider = null) {
-    return resolveToastProvider(customProvider);
+  resolve(
+    customProvider = null
+  ) {
+    return resolveToastProvider(
+      customProvider
+    );
   },
 
-  exists(customProvider = null) {
-    return Boolean(resolveToastProvider(customProvider));
+  exists(
+    customProvider = null
+  ) {
+    return Boolean(
+      resolveToastProvider(
+        customProvider
+      )
+    );
+  },
+
+  dismiss(id = null) {
+    return createToastBridge()
+      .dismiss(id);
+  },
+
+  clear() {
+    return createToastBridge()
+      .clear();
   },
 };
 

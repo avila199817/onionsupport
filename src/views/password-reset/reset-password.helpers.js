@@ -11,6 +11,7 @@
    - persistencia opcional del identificador recordado
    - compatibilidad con usuario o email
    - endurecer redirects y consistencia UX
+   - distinguir success real de cooldown / rate limit
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -32,6 +33,9 @@ const DEFAULT_SUCCESS_MESSAGE =
 
 const DEFAULT_ERROR_MESSAGE =
   "No se pudo procesar la recuperación de acceso.";
+
+const DEFAULT_COOLDOWN_MESSAGE =
+  "Espera un momento antes de volver a intentarlo.";
 
 /* =========================================================
    BASICS
@@ -296,6 +300,8 @@ export function getFirstResetPasswordError(errors = {}) {
   return (
     safeText(errors.identifier, "") ||
     safeText(errors.email, "") ||
+    safeText(errors.global, "") ||
+    safeText(errors.message, "") ||
     ""
   );
 }
@@ -305,57 +311,92 @@ export function getFirstResetPasswordError(errors = {}) {
 ========================================================= */
 
 export function normalizeResetPasswordResult(result = {}) {
+  const raw = isObject(result) ? result : {};
+
+  const explicitOk =
+    typeof raw?.ok === "boolean"
+      ? raw.ok
+      : typeof raw?.success === "boolean"
+        ? raw.success
+        : typeof raw?.data?.ok === "boolean"
+          ? raw.data.ok
+          : typeof raw?.data?.success === "boolean"
+            ? raw.data.success
+            : null;
+
+  const status =
+    Number(
+      raw?.status ??
+      raw?.statusCode ??
+      raw?.data?.status ??
+      raw?.data?.statusCode ??
+      0
+    ) || 0;
+
+  const cooldownSeconds =
+    Number(
+      raw?.cooldownSeconds ??
+      raw?.retryAfter ??
+      raw?.data?.cooldownSeconds ??
+      raw?.data?.retryAfter ??
+      0
+    ) || 0;
+
+  const retryAfter = Math.max(0, cooldownSeconds);
+
+  const cooldown =
+    Boolean(raw?.cooldown) ||
+    status === 429 ||
+    retryAfter > 0;
+
   const ok =
-    typeof result?.ok === "boolean"
-      ? result.ok
-      : typeof result?.success === "boolean"
-        ? result.success
-        : typeof result?.data?.ok === "boolean"
-          ? result.data.ok
-          : typeof result?.data?.success === "boolean"
-            ? result.data.success
-            : true;
+    explicitOk === null
+      ? false
+      : Boolean(explicitOk);
 
   const message =
-    result?.message ||
-    result?.mensaje ||
-    result?.detail ||
-    result?.data?.message ||
-    result?.data?.mensaje ||
-    result?.data?.detail ||
+    raw?.message ||
+    raw?.mensaje ||
+    raw?.detail ||
+    raw?.error ||
+    raw?.data?.message ||
+    raw?.data?.mensaje ||
+    raw?.data?.detail ||
+    raw?.data?.error ||
     "";
 
   const redirectTo =
-    result?.redirectTo ||
-    result?.redirect ||
-    result?.data?.redirectTo ||
-    result?.data?.redirect ||
+    raw?.redirectTo ||
+    raw?.redirect ||
+    raw?.data?.redirectTo ||
+    raw?.data?.redirect ||
     "";
 
-  const cooldown =
-    Number(
-      result?.cooldownSeconds ??
-        result?.retryAfter ??
-        result?.data?.cooldownSeconds ??
-        result?.data?.retryAfter ??
-        0
-    ) || 0;
-
   const emailMasked =
-    result?.emailMasked ||
-    result?.maskedEmail ||
-    result?.data?.emailMasked ||
-    result?.data?.maskedEmail ||
+    raw?.emailMasked ||
+    raw?.maskedEmail ||
+    raw?.data?.emailMasked ||
+    raw?.data?.maskedEmail ||
     "";
 
   return {
-    raw: result,
-    ok: Boolean(ok),
-    success: Boolean(ok),
-    message: safeText(message, DEFAULT_SUCCESS_MESSAGE),
+    raw,
+    ok,
+    success: ok,
+    error: !ok,
+    cooldown,
+    status,
+    message: safeText(
+      message,
+      ok
+        ? DEFAULT_SUCCESS_MESSAGE
+        : cooldown
+          ? DEFAULT_COOLDOWN_MESSAGE
+          : DEFAULT_ERROR_MESSAGE
+    ),
     redirectTo: safeText(redirectTo, ""),
-    cooldownSeconds: Math.max(0, cooldown),
-    retryAfter: Math.max(0, cooldown),
+    cooldownSeconds: retryAfter,
+    retryAfter,
     emailMasked: safeText(emailMasked, ""),
   };
 }
@@ -364,19 +405,34 @@ export function resolveResetPasswordErrorMessage(error) {
   const status = Number(
     error?.status ??
       error?.response?.status ??
+      error?.data?.status ??
+      error?.data?.statusCode ??
+      0
+  ) || 0;
+
+  const retryAfter = Number(
+    error?.retryAfter ??
+      error?.data?.retryAfter ??
+      error?.data?.cooldownSeconds ??
+      error?.response?.data?.retryAfter ??
+      error?.response?.data?.cooldownSeconds ??
       0
   ) || 0;
 
   const backendMessage =
     safeText(error?.data?.message, "") ||
     safeText(error?.data?.mensaje, "") ||
+    safeText(error?.data?.detail, "") ||
+    safeText(error?.data?.error, "") ||
     safeText(error?.response?.data?.message, "") ||
     safeText(error?.response?.data?.mensaje, "") ||
+    safeText(error?.response?.data?.detail, "") ||
+    safeText(error?.response?.data?.error, "") ||
     safeText(error?.message, "") ||
     safeText(error?.statusText, "");
 
-  if (status === 429) {
-    return "Has alcanzado el límite temporal. Espera un momento antes de volver a intentarlo.";
+  if (status === 429 || retryAfter > 0) {
+    return buildResetPasswordCooldownMessage(retryAfter);
   }
 
   if (status >= 500) {
@@ -459,7 +515,7 @@ export function buildResetPasswordSuccessMessage(result = {}) {
   }
 
   return (
-    normalized.message ||
+    safeText(normalized.message, "") ||
     DEFAULT_SUCCESS_MESSAGE
   );
 }

@@ -9,6 +9,7 @@
    - ejecutar login
    - soportar 2FA opcional
    - submit desde formularios HTML
+   - endurecer respuestas heterogéneas backend
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -43,18 +44,71 @@ import {
 } from "./session.js";
 
 /* =========================================================
+   HELPERS
+========================================================= */
+
+function safeText(value, fallback = "") {
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+
+  const text = String(value).trim();
+  return text || fallback;
+}
+
+function safeBool(value) {
+  return value === true;
+}
+
+function safeEmit(eventName, payload = {}) {
+  try {
+    AppCore?.events?.emit?.(
+      eventName,
+      payload
+    );
+  } catch {}
+}
+
+function safeSetError(error) {
+  try {
+    AppCore?.setError?.(error);
+  } catch {}
+}
+
+function getApiClient() {
+  return (
+    AppCore?.apiClient ||
+    AppCore?.services?.http ||
+    AppCore?.services?.api ||
+    null
+  );
+}
+
+function resolveLoginEndpoint() {
+  return (
+    safeText(
+      AUTH_ENDPOINTS?.login,
+      ""
+    ) ||
+    "/api/auth/login"
+  );
+}
+
+/* =========================================================
    IDENTIFIER / PAYLOAD
 ========================================================= */
+
 export function resolveLoginIdentifier(
   credentials = {}
 ) {
-  return String(
+  return safeText(
     credentials.identifier ??
       credentials.username ??
       credentials.user ??
       credentials.email ??
-      ""
-  ).trim();
+      "",
+    ""
+  );
 }
 
 export function normalizeLoginPayload(
@@ -65,18 +119,25 @@ export function normalizeLoginPayload(
       credentials
     );
 
+  const maxIdentifier =
+    Number(
+      AUTH_CONSTANTS?.identifierMaxLength
+    ) || 160;
+
+  const maxPassword =
+    Number(
+      AUTH_CONSTANTS?.passwordMaxLength
+    ) || 256;
+
   const cleanIdentifier =
-    String(
-      rawIdentifier || ""
+    safeText(
+      rawIdentifier,
+      ""
     )
-      .trim()
-      .replace(
-        /\s+/g,
-        " "
-      )
+      .replace(/\s+/g, " ")
       .slice(
         0,
-        AUTH_CONSTANTS.identifierMaxLength
+        maxIdentifier
       );
 
   const password = String(
@@ -85,7 +146,7 @@ export function normalizeLoginPayload(
       ""
   ).slice(
     0,
-    AUTH_CONSTANTS.passwordMaxLength
+    maxPassword
   );
 
   return {
@@ -111,9 +172,10 @@ export function buildLoginRequestBody(
     );
 
   const clean =
-    String(
-      identifier || ""
-    ).trim();
+    safeText(
+      identifier,
+      ""
+    );
 
   const looksLikeEmail =
     clean.includes("@");
@@ -124,12 +186,21 @@ export function buildLoginRequestBody(
       looksLikeEmail
         ? clean.toLowerCase()
         : undefined,
+
     username:
       looksLikeEmail
         ? undefined
         : sanitizeUsername(
             clean
           ),
+
+    user:
+      looksLikeEmail
+        ? undefined
+        : sanitizeUsername(
+            clean
+          ),
+
     password,
     remember,
   };
@@ -138,12 +209,13 @@ export function buildLoginRequestBody(
 /* =========================================================
    REDIRECTS
 ========================================================= */
+
 export function buildLoginRedirectPath(
   targetPath = null
 ) {
   const loginPath =
     configLikeRoute(
-      AppCore.config
+      AppCore?.config
         ?.routes
         ?.login ||
         "/login"
@@ -190,40 +262,43 @@ export function buildLoginRedirectPath(
 }
 
 export function getPostLoginTarget(
-  user = AppCore.state.user
+  user = AppCore?.state?.user
 ) {
   if (isBrowser()) {
-    const redirect =
-      new URLSearchParams(
-        window.location.search
-      ).get(
-        "redirect"
-      );
-
-    if (redirect) {
-      const candidate =
-        normalizePath(
-          redirect
+    try {
+      const redirect =
+        new URLSearchParams(
+          window.location.search
+        ).get(
+          "redirect"
         );
 
-      if (
-        isSafeRelativePath(
-          candidate
-        ) &&
-        !isAuthRoute(
-          candidate
-        )
-      ) {
-        return candidate;
+      if (redirect) {
+        const candidate =
+          normalizePath(
+            redirect
+          );
+
+        if (
+          isSafeRelativePath(
+            candidate
+          ) &&
+          !isAuthRoute(
+            candidate
+          )
+        ) {
+          return candidate;
+        }
       }
-    }
+    } catch {}
   }
 
   const slug =
     user?.slug ||
-    AppCore.utils?.slugify?.(
+    AppCore?.utils?.slugify?.(
       user?.username ||
         user?.name ||
+        user?.nombre ||
         ""
     ) ||
     "";
@@ -233,7 +308,7 @@ export function getPostLoginTarget(
   }
 
   return (
-    AppCore.config
+    AppCore?.config
       ?.routes?.home ||
     "/"
   );
@@ -242,6 +317,7 @@ export function getPostLoginTarget(
 /* =========================================================
    LOGIN
 ========================================================= */
+
 export async function login(
   credentials = {}
 ) {
@@ -259,30 +335,46 @@ export async function login(
         "Usuario/email y contraseña son obligatorios."
       );
 
-    AppCore.setError(
-      error
-    );
-
+    safeSetError(error);
     throw error;
   }
 
-  AppCore.events.emit(
+  const endpoint =
+    resolveLoginEndpoint();
+
+  safeEmit(
     "auth:login:start",
     {
       identifier:
         payload.identifier,
       apiBase:
-        AppCore.config
-          .apiBase,
-      endpoint:
-        AUTH_ENDPOINTS.login,
+        AppCore?.config
+          ?.apiBase,
+      endpoint,
     }
   );
 
+  const apiClient =
+    getApiClient();
+
+  if (
+    !apiClient ||
+    typeof apiClient.post !==
+      "function"
+  ) {
+    const error =
+      new Error(
+        "No hay cliente API disponible para login."
+      );
+
+    safeSetError(error);
+    throw error;
+  }
+
   try {
     const response =
-      await AppCore.apiClient.post(
-        AUTH_ENDPOINTS.login,
+      await apiClient.post(
+        endpoint,
         buildLoginRequestBody(
           credentials
         ),
@@ -296,17 +388,25 @@ export async function login(
         response
       );
 
-    /* 2FA */
+    const requires2FA =
+      authData?.status ===
+        "2fa_required" ||
+      authData?.requires2FA ===
+        true;
+
+    /* =====================================================
+       2FA
+    ===================================================== */
+
     if (
-      authData.status ===
-        "2fa_required" &&
-      authData.tempToken
+      requires2FA &&
+      authData?.tempToken
     ) {
       persistTempToken(
         authData.tempToken
       );
 
-      AppCore.events.emit(
+      safeEmit(
         "auth:login:2fa-required",
         {
           identifier:
@@ -317,6 +417,7 @@ export async function login(
 
       return {
         ok: true,
+        success: true,
         status:
           "2fa_required",
         requires2FA:
@@ -324,37 +425,44 @@ export async function login(
         tempToken:
           authData.tempToken,
         redirectTo:
-          "/2fa",
+          safeText(
+            authData.redirectTo,
+            "/2fa"
+          ),
         response,
       };
     }
 
-    /* login normal */
-    persistTempToken(
-      null
-    );
+    /* =====================================================
+       LOGIN NORMAL
+    ===================================================== */
+
+    persistTempToken(null);
 
     const snapshot =
       applySession({
         token:
-          authData.token ??
+          authData?.token ??
           null,
+
         user:
-          authData.user ??
+          authData?.user ??
           null,
+
         refreshToken:
-          authData.refreshToken ??
+          authData?.refreshToken ??
           null,
+
         sessionData:
-          authData.sessionData ??
+          authData?.sessionData ??
           null,
       });
 
     if (
-      !snapshot.token
+      !snapshot?.token
     ) {
       throw new Error(
-        "El login devolvió usuario pero no token."
+        "El login devolvió sesión inválida."
       );
     }
 
@@ -363,7 +471,7 @@ export async function login(
         snapshot.user
       );
 
-    AppCore.events.emit(
+    safeEmit(
       "auth:login:success",
       {
         ...snapshot,
@@ -374,6 +482,7 @@ export async function login(
 
     return {
       ok: true,
+      success: true,
       status:
         "authenticated",
       requires2FA:
@@ -385,7 +494,7 @@ export async function login(
   } catch (error) {
     clearSessionLocal();
 
-    AppCore.events.emit(
+    safeEmit(
       "auth:login:error",
       {
         error,
@@ -403,6 +512,7 @@ export async function login(
 /* =========================================================
    FORM HELPER
 ========================================================= */
+
 export async function handleLoginFormSubmit(
   formElement,
   options = {}
@@ -459,7 +569,9 @@ export async function handleLoginFormSubmit(
     );
 
   if (
-    options.resetOnSuccess &&
+    safeBool(
+      options.resetOnSuccess
+    ) &&
     result?.status ===
       "authenticated"
   ) {

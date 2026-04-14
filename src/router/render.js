@@ -16,6 +16,8 @@
    - payloads estables
    - paso explícito de viewContainer al render
    - compatibilidad con vistas tipo función y adapters del router
+   - return explícito de view instance cuando exista
+   - fallbacks seguros si una ruta no tiene render
 ========================================================= */
 
 import {
@@ -44,7 +46,21 @@ function isBrowser() {
 }
 
 function safeEmit(AppCore, eventName, payload) {
-  AppCore?.events?.emit?.(eventName, payload);
+  try {
+    AppCore?.events?.emit?.(eventName, payload);
+  } catch {}
+}
+
+function safeWarn(AppCore, ...args) {
+  try {
+    AppCore?.utils?.warn?.(...args);
+  } catch {}
+}
+
+function safeError(AppCore, ...args) {
+  try {
+    AppCore?.utils?.error?.(...args);
+  } catch {}
 }
 
 function safeSetDocumentTitle(setDocumentTitle, title) {
@@ -69,6 +85,15 @@ function safeSetActiveMenu(setActiveMenu, path) {
   if (typeof setActiveMenu === "function") {
     setActiveMenu(path);
   }
+}
+
+function resolveUsernameForPayload(AppCore, requestedUsername = null) {
+  return (
+    requestedUsername ||
+    getCurrentResolvedUsername(AppCore) ||
+    getCurrentUsername(AppCore) ||
+    null
+  );
 }
 
 /* =========================================================
@@ -148,12 +173,14 @@ export function syncRouteState(
     ? `${window.location.pathname || "/"}${window.location.search || ""}`
     : finalCanonical;
 
-  const finalPublicPath = AppCore.utils.normalizePath(
-    publicPath || browserPublicPath || finalCanonical
-  );
+  const finalPublicPath = AppCore?.utils?.normalizePath
+    ? AppCore.utils.normalizePath(
+        publicPath || browserPublicPath || finalCanonical
+      )
+    : publicPath || browserPublicPath || finalCanonical;
 
-  AppCore.setRoute?.(finalCanonical);
-  AppCore.setPublicPath?.(finalPublicPath);
+  AppCore?.setRoute?.(finalCanonical);
+  AppCore?.setPublicPath?.(finalPublicPath);
 
   return {
     canonicalPath: finalCanonical,
@@ -211,11 +238,18 @@ export function buildRouteRenderContext({
 }
 
 async function runRouteRender(
+  AppCore,
   route,
   viewContainer,
   context
 ) {
   if (typeof route?.render !== "function") {
+    safeWarn(
+      AppCore,
+      "[Router] ruta sin render():",
+      route?.path || "(sin path)"
+    );
+
     return null;
   }
 
@@ -231,9 +265,9 @@ async function runRouteRender(
 export function renderGenericView(AppCore, route) {
   const view = getViewContainer(AppCore);
 
-  if (!view) return;
+  if (!view) return null;
 
-  const canonicalPath = AppCore.state.route || "/";
+  const canonicalPath = AppCore?.state?.route || "/";
   const publicPath = getCurrentPublicPath(AppCore);
   const resolvedUsername = getCurrentResolvedUsername(AppCore);
 
@@ -257,6 +291,8 @@ export function renderGenericView(AppCore, route) {
   </div>
 </section>
 `;
+
+  return null;
 }
 
 export function renderForbiddenView(
@@ -266,7 +302,7 @@ export function renderForbiddenView(
 ) {
   const view = getViewContainer(AppCore);
 
-  if (!view) return;
+  if (!view) return null;
 
   const homeHref = getDefaultHomeTarget(
     AppCore,
@@ -288,6 +324,8 @@ export function renderForbiddenView(
   </div>
 </section>
 `;
+
+  return null;
 }
 
 export function renderNotFoundView(
@@ -298,7 +336,7 @@ export function renderNotFoundView(
   const routeNames = getRouteNames(AppCore);
   const view = getViewContainer(AppCore);
 
-  if (!view) return;
+  if (!view) return null;
 
   const homeHref = buildPublicPath(
     AppCore,
@@ -327,6 +365,8 @@ export function renderNotFoundView(
   </div>
 </section>
 `;
+
+  return null;
 }
 
 export function renderRuntimeErrorView(
@@ -338,7 +378,7 @@ export function renderRuntimeErrorView(
 ) {
   const view = getViewContainer(AppCore);
 
-  if (!view) return;
+  if (!view) return null;
 
   view.innerHTML = `
 <section class="content-wrapper">
@@ -356,6 +396,8 @@ export function renderRuntimeErrorView(
   </div>
 </section>
 `;
+
+  return null;
 }
 
 /* =========================================================
@@ -380,7 +422,7 @@ export async function renderRouteSuccess({
   safeSetShellMode(setShellMode, route);
   safeSetDocumentTitle(
     setDocumentTitle,
-    route?.title || AppCore.config.appName
+    route?.title || AppCore?.config?.appName
   );
 
   const viewContainer = getViewContainer(AppCore);
@@ -396,24 +438,33 @@ export async function renderRouteSuccess({
     forbidden: false,
   });
 
-  await runRouteRender(
-    route,
-    viewContainer,
-    renderContext
-  );
+  let renderedView = null;
+
+  if (typeof route?.render === "function") {
+    renderedView = await runRouteRender(
+      AppCore,
+      route,
+      viewContainer,
+      renderContext
+    );
+  } else {
+    renderedView = renderGenericView(AppCore, route);
+  }
 
   emitRendered(AppCore, {
     path: requestedPath,
     canonicalPath,
     publicPath: resolvedPublicPath,
-    username:
-      requestedUsername ||
-      getCurrentResolvedUsername(AppCore) ||
-      null,
+    username: resolveUsernameForPayload(
+      AppCore,
+      requestedUsername
+    ),
     found: true,
     forbidden: false,
     route,
   });
+
+  return renderedView || null;
 }
 
 export function renderRouteForbidden({
@@ -458,14 +509,16 @@ export function renderRouteForbidden({
     path: requestedPath,
     canonicalPath,
     publicPath: resolvedPublicPath,
-    username:
-      requestedUsername ||
-      getCurrentResolvedUsername(AppCore) ||
-      null,
+    username: resolveUsernameForPayload(
+      AppCore,
+      requestedUsername
+    ),
     found: true,
     forbidden: true,
     route,
   });
+
+  return null;
 }
 
 export function renderRouteNotFound({
@@ -504,14 +557,16 @@ export function renderRouteNotFound({
     path: requestedPath,
     canonicalPath,
     publicPath: resolvedPublicPath,
-    username:
-      requestedUsername ||
-      getCurrentResolvedUsername(AppCore) ||
-      null,
+    username: resolveUsernameForPayload(
+      AppCore,
+      requestedUsername
+    ),
     found: false,
     forbidden: false,
     route: null,
   });
+
+  return null;
 }
 
 export async function renderLoginRedirect({
@@ -567,11 +622,23 @@ export async function renderLoginRedirect({
     forbidden: false,
   });
 
-  await runRouteRender(
-    loginRoute,
-    viewContainer,
-    renderContext
-  );
+  let renderedView = null;
+
+  if (typeof loginRoute?.render === "function") {
+    renderedView = await runRouteRender(
+      AppCore,
+      loginRoute,
+      viewContainer,
+      renderContext
+    );
+  } else {
+    safeWarn(
+      AppCore,
+      "[Router] loginRoute sin render(), fallback genérico."
+    );
+
+    renderedView = renderGenericView(AppCore, loginRoute);
+  }
 
   emitRendered(AppCore, {
     path: loginUrl,
@@ -583,6 +650,8 @@ export async function renderLoginRedirect({
     redirectedFrom: canonicalPath,
     route: loginRoute,
   });
+
+  return renderedView || null;
 }
 
 export function renderRouteRuntimeError({
@@ -599,13 +668,15 @@ export function renderRouteRuntimeError({
   setDocumentTitle,
 } = {}) {
   if (cycleId !== renderCycle) {
-    AppCore.utils.warn?.(
+    safeWarn(
+      AppCore,
       "Router: render antiguo descartado."
     );
-    return;
+    return null;
   }
 
-  AppCore.utils.error?.(
+  safeError(
+    AppCore,
     "Router render error:",
     error
   );
@@ -631,12 +702,14 @@ export function renderRouteRuntimeError({
     path: requestedPath,
     canonicalPath,
     publicPath: resolvedPublicPath,
-    username:
-      requestedUsername ||
-      getCurrentResolvedUsername(AppCore) ||
-      null,
+    username: resolveUsernameForPayload(
+      AppCore,
+      requestedUsername
+    ),
     found: true,
     forbidden: false,
     route,
   });
+
+  return null;
 }

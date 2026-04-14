@@ -10,13 +10,14 @@
    - conectar history, shell y render del router
    - exponer la API pública de navegación
 
-   HARDENING:
-   - await real en render/navigate
-   - bloqueo de renders obsoletos
-   - popstate seguro
+   HARDENING EXTREMO:
+   - destroy seguro de vista anterior
+   - cancelación de renders obsoletos
+   - anti double-navigation burst
+   - protección popstate robusta
    - redirect centralizado
-   - helpers internos desacoplados
-   - preparado para externalizar 404 aparte
+   - fallbacks seguros sin romper SPA
+   - métricas / eventos enriquecidos
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -76,16 +77,56 @@ export const Router = (() => {
   /* =========================================================
      STATE
   ========================================================= */
+
   let isBound = false;
   let lastRenderPromise = Promise.resolve();
+
   let renderCycle = 0;
+  let activeViewInstance = null;
+
+  let lastNavigationAt = 0;
+  let lastNavigationKey = "";
 
   const immutableRoutes =
     getImmutableRoutes();
 
+  const NAV_BURST_MS = 140;
+
+  /* =========================================================
+     SAFE HELPERS
+  ========================================================= */
+
+  function safeLog(...args) {
+    try {
+      AppCore?.utils?.log?.(...args);
+    } catch {}
+  }
+
+  function safeWarn(...args) {
+    try {
+      AppCore?.utils?.warn?.(...args);
+    } catch {}
+  }
+
+  function safeError(...args) {
+    try {
+      AppCore?.utils?.error?.(...args);
+    } catch {}
+  }
+
+  function safeEmit(eventName, payload = {}) {
+    try {
+      AppCore?.events?.emit?.(
+        eventName,
+        payload
+      );
+    } catch {}
+  }
+
   /* =========================================================
      INTERNAL HELPERS
   ========================================================= */
+
   function getCanonicalPath(
     pathname = "/"
   ) {
@@ -164,6 +205,7 @@ export const Router = (() => {
       );
 
     if (!route) return false;
+
     if (
       route.path ===
       routeNames.LOGIN
@@ -258,6 +300,53 @@ export const Router = (() => {
     );
   }
 
+  function destroyActiveView() {
+    if (
+      !activeViewInstance ||
+      typeof activeViewInstance
+        .destroy !==
+        "function"
+    ) {
+      activeViewInstance =
+        null;
+      return;
+    }
+
+    try {
+      activeViewInstance.destroy();
+    } catch (error) {
+      safeWarn(
+        "[Router] destroy view error:",
+        error
+      );
+    }
+
+    activeViewInstance =
+      null;
+  }
+
+  function rememberNavigationKey(
+    key = ""
+  ) {
+    lastNavigationKey =
+      String(key || "");
+    lastNavigationAt =
+      Date.now();
+  }
+
+  function isNavigationBurst(
+    key = ""
+  ) {
+    const now = Date.now();
+
+    return (
+      key &&
+      key === lastNavigationKey &&
+      now - lastNavigationAt <
+        NAV_BURST_MS
+    );
+  }
+
   function redirectTo(
     targetPath,
     meta = {},
@@ -277,8 +366,9 @@ export const Router = (() => {
   }
 
   /* =========================================================
-     ACCESS RESOLUTION
+     ACCESS
   ========================================================= */
+
   function resolveRouteAccess({
     route,
     canonicalPath,
@@ -305,6 +395,8 @@ export const Router = (() => {
       access.reason ===
       "not-authenticated"
     ) {
+      destroyActiveView();
+
       renderLoginRedirect({
         AppCore,
         getRoute,
@@ -356,6 +448,8 @@ export const Router = (() => {
       access.reason ===
       "insufficient-role"
     ) {
+      destroyActiveView();
+
       renderRouteForbidden({
         AppCore,
         getRoute,
@@ -386,12 +480,16 @@ export const Router = (() => {
   /* =========================================================
      CORE RENDER
   ========================================================= */
+
   async function executeRender(
     pathname = "/",
     options = {}
   ) {
     const cycleId =
       ++renderCycle;
+
+    const startedAt =
+      performance.now();
 
     const {
       requestedPath,
@@ -424,22 +522,15 @@ export const Router = (() => {
       canonicalPath
     );
 
-    /* stale render guard */
     if (
       cycleId !== renderCycle
     ) {
       return;
     }
 
-    /* =====================================
-       ROUTE NOT FOUND
-       Nota:
-       - de momento seguimos delegando a render.js
-       - luego podrás externalizarlo a una vista 404 aparte
-       - si quieres estilo "Google", aquí podrás redirigir
-         a una ruta dedicada /404 sin tocar el resto
-    ===================================== */
     if (!route) {
+      destroyActiveView();
+
       renderRouteNotFound({
         AppCore,
         getRoute,
@@ -501,26 +592,57 @@ export const Router = (() => {
     });
 
     try {
-      await Promise.resolve(
-        renderRouteSuccess({
-          AppCore,
-          route,
-          requestedPath,
+      destroyActiveView();
+
+      const maybeView =
+        await Promise.resolve(
+          renderRouteSuccess({
+            AppCore,
+            route,
+            requestedPath,
+            canonicalPath,
+            requestedUsername,
+            setShellMode:
+              (routeArg) =>
+                setShellModeSafe(
+                  routeArg
+                ),
+            setDocumentTitle:
+              (title) =>
+                setDocumentTitleSafe(
+                  title
+                ),
+          })
+        );
+
+      if (
+        cycleId !== renderCycle
+      ) {
+        try {
+          maybeView?.destroy?.();
+        } catch {}
+
+        return;
+      }
+
+      activeViewInstance =
+        maybeView || null;
+
+      safeEmit(
+        "router:rendered",
+        {
+          path: requestedPath,
           canonicalPath,
-          requestedUsername,
-          setShellMode:
-            (routeArg) =>
-              setShellModeSafe(
-                routeArg
-              ),
-          setDocumentTitle:
-            (title) =>
-              setDocumentTitleSafe(
-                title
-              ),
-        })
+          durationMs:
+            Math.round(
+              performance.now() -
+                startedAt
+            ),
+        }
       );
     } catch (error) {
+      destroyActiveView();
+
       renderRouteRuntimeError({
         AppCore,
         getRoute,
@@ -542,6 +664,11 @@ export const Router = (() => {
               title
             ),
       });
+
+      safeError(
+        "[Router] render error:",
+        error
+      );
     }
   }
 
@@ -565,6 +692,7 @@ export const Router = (() => {
   /* =========================================================
      NAVIGATION
   ========================================================= */
+
   function navigate(
     pathname = "/",
     options = {}
@@ -574,6 +702,22 @@ export const Router = (() => {
       canonicalPath,
     } = getRequestedPathData(
       pathname
+    );
+
+    const navKey =
+      `${requestedPath}|${canonicalPath}`;
+
+    if (
+      isNavigationBurst(
+        navKey
+      ) &&
+      !options.force
+    ) {
+      return lastRenderPromise;
+    }
+
+    rememberNavigationKey(
+      navKey
     );
 
     const {
@@ -667,6 +811,7 @@ export const Router = (() => {
   /* =========================================================
      LISTENERS
   ========================================================= */
+
   function handleDocumentClick(
     event
   ) {
@@ -737,7 +882,7 @@ export const Router = (() => {
     ) {
       event.preventDefault();
 
-      AppCore.utils.warn(
+      safeWarn(
         "Router bloqueó href inseguro:",
         href
       );
@@ -772,6 +917,7 @@ export const Router = (() => {
   /* =========================================================
      BIND
   ========================================================= */
+
   function bind() {
     if (isBound) {
       return api;
@@ -801,7 +947,7 @@ export const Router = (() => {
       AppCore,
     });
 
-    AppCore.events.emit(
+    safeEmit(
       "router:bound",
       {
         routes:
@@ -812,12 +958,18 @@ export const Router = (() => {
       }
     );
 
+    safeLog(
+      "[Router] ready",
+      immutableRoutes.length
+    );
+
     return api;
   }
 
   /* =========================================================
-     PUBLIC API
+     API
   ========================================================= */
+
   const api = {
     routes:
       immutableRoutes,
@@ -907,3 +1059,5 @@ export const Router = (() => {
 
   return api;
 })();
+
+export default Router;

@@ -15,6 +15,13 @@
    - aplicar theme real ANTES de mostrar loader
    - evitar pintar rutas protegidas sin auth resuelta
    - no marcar app ready antes de tiempo
+
+   HARDENING:
+   - boot serializado
+   - finalize único
+   - render inicial await real
+   - limpieza robusta en reboot
+   - guards de módulos idempotentes
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -104,7 +111,69 @@ export const App = (() => {
 
     bootFailsafeTimer: null,
     sessionRestorePromise: null,
+
+    bootPromise: null,
   };
+
+  /* =========================================================
+     HELPERS
+  ========================================================= */
+  function safeWarn(...args) {
+    try {
+      AppCore?.utils?.warn?.(...args);
+    } catch {
+      console.warn(...args);
+    }
+  }
+
+  function safeError(...args) {
+    try {
+      AppCore?.utils?.error?.(...args);
+    } catch {
+      console.error(...args);
+    }
+  }
+
+  function safeSetState(patch = {}) {
+    try {
+      AppCore?.setState?.(patch);
+    } catch {}
+  }
+
+  function safeSetError(error = null) {
+    try {
+      AppCore?.setError?.(error);
+    } catch {}
+  }
+
+  function safeEmit(eventName, payload = {}) {
+    try {
+      AppCore?.events?.emit?.(eventName, payload);
+    } catch {}
+  }
+
+  function setBootFlags({
+    booted = state.booted,
+    booting = state.booting,
+  } = {}) {
+    state.booted = Boolean(booted);
+    state.booting = Boolean(booting);
+
+    markAppBootState(AppCore, {
+      booted: state.booted,
+      booting: state.booting,
+    });
+
+    safeSetState({
+      booted: state.booted,
+      booting: state.booting,
+    });
+  }
+
+  function clearTransientBootState() {
+    state.sessionRestorePromise = null;
+    clearBootFailsafeTimer(state);
+  }
 
   /* =========================================================
      PREBOOT THEME FIX
@@ -122,13 +191,9 @@ export const App = (() => {
       let savedTheme = null;
 
       for (const key of storageKeys) {
-        const value =
-          localStorage.getItem(key);
+        const value = localStorage.getItem(key);
 
-        if (
-          value === "dark" ||
-          value === "light"
-        ) {
+        if (value === "dark" || value === "light") {
           savedTheme = value;
           break;
         }
@@ -137,9 +202,7 @@ export const App = (() => {
       if (!savedTheme) {
         savedTheme =
           window.matchMedia &&
-          window.matchMedia(
-            "(prefers-color-scheme: light)"
-          ).matches
+          window.matchMedia("(prefers-color-scheme: light)").matches
             ? "light"
             : "dark";
       }
@@ -154,23 +217,15 @@ export const App = (() => {
         savedTheme
       );
 
-      if (
-        typeof AppCore?.setTheme ===
-        "function"
-      ) {
-        AppCore.setTheme(
-          savedTheme
-        );
+      if (typeof AppCore?.setTheme === "function") {
+        AppCore.setTheme(savedTheme);
       } else {
-        AppCore?.setState?.({
+        safeSetState({
           theme: savedTheme,
         });
       }
     } catch (error) {
-      console.warn(
-        "Theme preboot fallback error:",
-        error
-      );
+      safeWarn("Theme preboot fallback error:", error);
     }
   }
 
@@ -186,26 +241,15 @@ export const App = (() => {
   ========================================================= */
   function initServices() {
     if (!state.servicesInitialized) {
-      if (
-        typeof Http?.init ===
-        "function"
-      ) {
+      if (typeof Http?.init === "function") {
         Http.init();
       }
 
-      state.servicesInitialized =
-        true;
+      state.servicesInitialized = true;
     }
 
-    if (
-      !AppCore.modules.has(
-        "http"
-      )
-    ) {
-      AppCore.modules.register(
-        "http",
-        Http
-      );
+    if (!AppCore.modules.has("http")) {
+      AppCore.modules.register("http", Http);
     }
   }
 
@@ -214,48 +258,23 @@ export const App = (() => {
   ========================================================= */
   function initStore() {
     if (!state.storeInitialized) {
-      if (
-        typeof Store?.init ===
-        "function"
-      ) {
+      if (typeof Store?.init === "function") {
         Store.init();
       }
 
-      state.storeInitialized =
-        true;
+      state.storeInitialized = true;
     }
 
-    if (
-      !AppCore.modules.has(
-        "store"
-      )
-    ) {
-      AppCore.modules.register(
-        "store",
-        Store
-      );
+    if (!AppCore.modules.has("store")) {
+      AppCore.modules.register("store", Store);
     }
 
-    if (
-      !AppCore.modules.has(
-        "auth"
-      )
-    ) {
-      AppCore.modules.register(
-        "auth",
-        Auth
-      );
+    if (!AppCore.modules.has("auth")) {
+      AppCore.modules.register("auth", Auth);
     }
 
-    if (
-      !AppCore.modules.has(
-        "router"
-      )
-    ) {
-      AppCore.modules.register(
-        "router",
-        Router
-      );
+    if (!AppCore.modules.has("router")) {
+      AppCore.modules.register("router", Router);
     }
   }
 
@@ -281,41 +300,31 @@ export const App = (() => {
   ========================================================= */
   async function restoreSessionBeforeRender() {
     try {
-      state.sessionRestorePromise =
-        Promise.resolve(
-          restoreSessionInBackground(
-            {
-              AppCore,
-              Auth,
-              Router,
-              Toast,
-              state,
-              syncUserUI,
-              warmup,
-              navigateAfterSessionRestore,
+      state.sessionRestorePromise = Promise.resolve(
+        restoreSessionInBackground({
+          AppCore,
+          Auth,
+          Router,
+          Toast,
+          state,
+          syncUserUI,
+          warmup,
+          navigateAfterSessionRestore,
 
-              applyPostRenderLoaderPolicy:
-                () =>
-                  applyPostRenderLoaderPolicy(
-                    {
-                      AppCore,
-                      Router,
-                      hideLoader,
-                    }
-                  ),
-            }
-          )
-        );
+          applyPostRenderLoaderPolicy: () =>
+            applyPostRenderLoaderPolicy({
+              AppCore,
+              Router,
+              hideLoader,
+            }),
+        })
+      );
 
       await state.sessionRestorePromise;
     } catch (error) {
-      AppCore.utils.warn(
-        "restoreSession falló durante boot.",
-        error
-      );
+      safeWarn("restoreSession falló durante boot.", error);
     } finally {
-      state.sessionRestorePromise =
-        null;
+      state.sessionRestorePromise = null;
     }
   }
 
@@ -323,28 +332,17 @@ export const App = (() => {
      FINALIZE
   ========================================================= */
   function finalizeBoot() {
-    clearBootFailsafeTimer(
-      state
-    );
+    clearBootFailsafeTimer(state);
 
-    markStoreBootState(
-      Store,
-      {
-        ready: true,
-        booted: true,
-      }
-    );
+    markStoreBootState(Store, {
+      ready: true,
+      booted: true,
+    });
 
-    state.booted = true;
-    state.booting = false;
-
-    markAppBootState(
-      AppCore,
-      {
-        booted: true,
-        booting: false,
-      }
-    );
+    setBootFlags({
+      booted: true,
+      booting: false,
+    });
 
     updateShellVisibilityByRoute(
       AppCore,
@@ -353,50 +351,25 @@ export const App = (() => {
 
     hideLoader(AppCore);
 
-    AppCore.events.emit(
-      "app:ready",
-      {
-        route:
-          AppCore.state.route,
-        publicPath:
-          AppCore.state
-            .publicPath,
-        user:
-          AppCore.state.user,
-        authenticated:
-          AppCore.state
-            .authenticated,
-        lang:
-          AppCore.state.lang,
-      }
-    );
+    safeEmit("app:ready", {
+      route: AppCore.state.route,
+      publicPath: AppCore.state.publicPath,
+      user: AppCore.state.user,
+      authenticated: AppCore.state.authenticated,
+      lang: AppCore.state.lang,
+    });
   }
 
   /* =========================================================
      BOOT
   ========================================================= */
-  async function boot() {
-    if (state.booted) {
-      return api;
-    }
+  async function doBoot() {
+    setBootFlags({
+      booted: false,
+      booting: true,
+    });
 
-    if (state.booting) {
-      return api;
-    }
-
-    state.booting = true;
-
-    markAppBootState(
-      AppCore,
-      {
-        booted: false,
-        booting: true,
-      }
-    );
-
-    clearBootFailsafeTimer(
-      state
-    );
+    clearBootFailsafeTimer(state);
 
     try {
       /* ======================
@@ -417,7 +390,7 @@ export const App = (() => {
         state,
       });
 
-      AppCore.setError(null);
+      safeSetError(null);
 
       /* ======================
          LOADER YA CON TEMA REAL
@@ -430,16 +403,13 @@ export const App = (() => {
         hideLoader,
       });
 
-      const scope =
-        ensureScope(AppCore);
+      const scope = ensureScope(AppCore);
 
-      bindGlobalErrorHandlers(
-        {
-          AppCore,
-          Toast,
-          scope,
-        }
-      );
+      bindGlobalErrorHandlers({
+        AppCore,
+        Toast,
+        scope,
+      });
 
       bindAppEvents({
         AppCore,
@@ -448,43 +418,31 @@ export const App = (() => {
         scope,
         syncUserUI,
 
-        rerenderCurrentRoute:
-          () =>
-            rerenderCurrentRoute(
-              {
-                AppCore,
-                Router,
-                I18n,
+        rerenderCurrentRoute: () =>
+          rerenderCurrentRoute({
+            AppCore,
+            Router,
+            I18n,
 
-                applyPostRenderLoaderPolicy:
-                  () =>
-                    applyPostRenderLoaderPolicy(
-                      {
-                        AppCore,
-                        Router,
-                        hideLoader,
-                      }
-                    ),
-
-                syncUserUI,
-              }
-            ),
-
-        applyPostRenderLoaderPolicy:
-          () =>
-            applyPostRenderLoaderPolicy(
-              {
+            applyPostRenderLoaderPolicy: () =>
+              applyPostRenderLoaderPolicy({
                 AppCore,
                 Router,
                 hideLoader,
-              }
-            ),
+              }),
+
+            syncUserUI,
+          }),
+
+        applyPostRenderLoaderPolicy: () =>
+          applyPostRenderLoaderPolicy({
+            AppCore,
+            Router,
+            hideLoader,
+          }),
       });
 
-      syncLangState(
-        AppCore,
-        I18n
-      );
+      syncLangState(AppCore, I18n);
 
       initRouter();
 
@@ -498,51 +456,37 @@ export const App = (() => {
 
       await restoreSessionBeforeRender();
 
-      renderInitialRoute({
-        AppCore,
-        Router,
+      await Promise.resolve(
+        renderInitialRoute({
+          AppCore,
+          Router,
 
-        applyPostRenderLoaderPolicy:
-          () =>
-            applyPostRenderLoaderPolicy(
-              {
-                AppCore,
-                Router,
-                hideLoader,
-              }
-            ),
-      });
+          applyPostRenderLoaderPolicy: () =>
+            applyPostRenderLoaderPolicy({
+              AppCore,
+              Router,
+              hideLoader,
+            }),
+        })
+      );
 
       finalizeBoot();
 
       return api;
     } catch (error) {
-      clearBootFailsafeTimer(
-        state
-      );
+      clearBootFailsafeTimer(state);
 
-      state.booted = false;
-      state.booting = false;
+      markStoreBootState(Store, {
+        ready: false,
+        booted: false,
+      });
 
-      markStoreBootState(
-        Store,
-        {
-          ready: false,
-          booted: false,
-        }
-      );
+      setBootFlags({
+        booted: false,
+        booting: false,
+      });
 
-      markAppBootState(
-        AppCore,
-        {
-          booted: false,
-          booting: false,
-        }
-      );
-
-      AppCore.setError(
-        error
-      );
+      safeSetError(error);
 
       hideLoader(AppCore);
 
@@ -556,34 +500,47 @@ export const App = (() => {
         hideLoader,
       });
 
+      safeError("Boot error:", error);
+
       return api;
     } finally {
-      clearBootFailsafeTimer(
-        state
-      );
+      clearTransientBootState();
 
-      state.booting = false;
+      if (!state.booted) {
+        setBootFlags({
+          booted: false,
+          booting: false,
+        });
+      }
 
-      AppCore.setState({
-        booting: false,
+      applyPostRenderLoaderPolicy({
+        AppCore,
+        Router,
+        hideLoader,
       });
 
-      applyPostRenderLoaderPolicy(
-        {
-          AppCore,
-          Router,
-          hideLoader,
-        }
-      );
+      state.bootPromise = null;
     }
+  }
+
+  async function boot() {
+    if (state.booted) {
+      return api;
+    }
+
+    if (state.bootPromise) {
+      return state.bootPromise;
+    }
+
+    state.bootPromise = doBoot();
+
+    return state.bootPromise;
   }
 
   /* =========================================================
      REBOOT
   ========================================================= */
-  async function reboot(
-    options = {}
-  ) {
+  async function reboot(options = {}) {
     const {
       preserveError = false,
     } = options;
@@ -591,44 +548,32 @@ export const App = (() => {
     state.booted = false;
     state.booting = false;
 
-    state.servicesInitialized =
-      false;
+    state.servicesInitialized = false;
+    state.storeInitialized = false;
+    state.routerConfigured = false;
+    state.routerBound = false;
+    state.uiInitialized = false;
+    state.i18nInitialized = false;
+    state.sessionRestorePromise = null;
+    state.bootPromise = null;
 
-    state.storeInitialized =
-      false;
-
-    state.routerConfigured =
-      false;
-
-    state.routerBound =
-      false;
-
-    state.uiInitialized =
-      false;
-
-    state.i18nInitialized =
-      false;
-
-    state.sessionRestorePromise =
-      null;
-
-    clearBootFailsafeTimer(
-      state
-    );
+    clearBootFailsafeTimer(state);
 
     clearScope(AppCore);
 
     if (!preserveError) {
-      AppCore.setError(null);
+      safeSetError(null);
     }
 
-    markStoreBootState(
-      Store,
-      {
-        ready: false,
-        booted: false,
-      }
-    );
+    markStoreBootState(Store, {
+      ready: false,
+      booted: false,
+    });
+
+    setBootFlags({
+      booted: false,
+      booting: false,
+    });
 
     hideLoader(AppCore);
 
@@ -645,3 +590,5 @@ export const App = (() => {
 
   return api;
 })();
+
+export default App;

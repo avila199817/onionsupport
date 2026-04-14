@@ -10,6 +10,11 @@
    - builders de publicPath / loginUrl / historyUrl
    - payload base de history state
    - hardening contra inputs inválidos
+   - FIXES:
+     * preserve query/hash en canonical cuando aplica
+     * redirects internos seguros
+     * soporte href relativo robusto
+     * usernames saneados estrictamente
 ========================================================= */
 
 export const ROUTER_CONFIG = Object.freeze({
@@ -45,9 +50,12 @@ export function normalizePath(
   AppCore,
   path = "/"
 ) {
-  return AppCore.utils.normalizePath(
-    path
-  );
+  return AppCore?.utils?.normalizePath
+    ? AppCore.utils.normalizePath(
+        path
+      )
+    : String(path || "/").trim() ||
+        "/";
 }
 
 export function normalizeRouteInput(
@@ -71,9 +79,11 @@ export function escapeHtml(
   AppCore,
   value = ""
 ) {
-  return AppCore.utils.escapeHtml(
-    String(value ?? "")
-  );
+  return AppCore?.utils?.escapeHtml
+    ? AppCore.utils.escapeHtml(
+        String(value ?? "")
+      )
+    : String(value ?? "");
 }
 
 export function isBrowser() {
@@ -129,6 +139,44 @@ export function stripSearchAndHash(
     : raw || "/";
 }
 
+export function getSearchAndHash(
+  path = "/"
+) {
+  const raw = String(
+    path || "/"
+  );
+
+  const hashIndex =
+    raw.indexOf("#");
+
+  const searchIndex =
+    raw.indexOf("?");
+
+  let cutIndex = -1;
+
+  if (
+    searchIndex >= 0 &&
+    hashIndex >= 0
+  ) {
+    cutIndex = Math.min(
+      searchIndex,
+      hashIndex
+    );
+  } else if (
+    searchIndex >= 0
+  ) {
+    cutIndex = searchIndex;
+  } else if (
+    hashIndex >= 0
+  ) {
+    cutIndex = hashIndex;
+  }
+
+  return cutIndex >= 0
+    ? raw.slice(cutIndex)
+    : "";
+}
+
 /* =========================================================
    USERNAME
 ========================================================= */
@@ -137,8 +185,8 @@ export function sanitizeUsername(
   value = ""
 ) {
   const normalized =
-    AppCore.utils
-      .sanitizeUsername
+    AppCore?.utils
+      ?.sanitizeUsername
       ? AppCore.utils.sanitizeUsername(
           value
         )
@@ -158,10 +206,12 @@ export function sanitizeUsername(
           )
           .toLowerCase();
 
-  return normalized.slice(
-    0,
-    ROUTER_CONFIG.maxUsernameLength
-  );
+  return normalized
+    .slice(
+      0,
+      ROUTER_CONFIG.maxUsernameLength
+    )
+    .trim();
 }
 
 export function extractUsernameFromPath(
@@ -188,26 +238,31 @@ export function extractUsernameFromPath(
     return null;
   }
 
-  return sanitizeUsername(
-    AppCore,
-    match[1]
-  );
+  const username =
+    sanitizeUsername(
+      AppCore,
+      match[1]
+    );
+
+  return username || null;
 }
 
 export function getCurrentUsername(
   AppCore
 ) {
-  return sanitizeUsername(
-    AppCore,
-    AppCore.state.user
-      ?.username ||
-      AppCore.state.user
-        ?.userName ||
-      AppCore.state.user
-        ?.nick ||
-      AppCore.state.user
-        ?.alias ||
-      ""
+  return (
+    sanitizeUsername(
+      AppCore,
+      AppCore?.state?.user
+        ?.username ||
+        AppCore?.state?.user
+          ?.userName ||
+        AppCore?.state?.user
+          ?.nick ||
+        AppCore?.state?.user
+          ?.alias ||
+        ""
+    ) || null
   );
 }
 
@@ -248,46 +303,15 @@ export function stripUsernamePrefix(
       pathname
     );
 
-  const hashIndex =
-    normalized.indexOf("#");
-
-  const queryIndex =
-    normalized.indexOf("?");
-
-  let splitIndex = -1;
-
-  if (
-    queryIndex >= 0 &&
-    hashIndex >= 0
-  ) {
-    splitIndex = Math.min(
-      queryIndex,
-      hashIndex
+  const suffix =
+    getSearchAndHash(
+      normalized
     );
-  } else if (
-    queryIndex >= 0
-  ) {
-    splitIndex = queryIndex;
-  } else if (
-    hashIndex >= 0
-  ) {
-    splitIndex = hashIndex;
-  }
 
   const pathOnly =
-    splitIndex >= 0
-      ? normalized.slice(
-          0,
-          splitIndex
-        )
-      : normalized;
-
-  const suffix =
-    splitIndex >= 0
-      ? normalized.slice(
-          splitIndex
-        )
-      : "";
+    stripSearchAndHash(
+      normalized
+    );
 
   const stripped =
     (
@@ -307,28 +331,29 @@ export function normalizeCanonicalPath(
   AppCore,
   path = "/"
 ) {
-  if (
-    typeof AppCore.utils
-      .normalizeCanonicalPath ===
-    "function"
-  ) {
-    return AppCore.utils.normalizeCanonicalPath(
-      path
-    );
-  }
-
   const stripped =
     stripUsernamePrefix(
       AppCore,
       path
     );
 
-  return normalizePath(
-    AppCore,
+  const suffix =
+    getSearchAndHash(
+      stripped
+    );
+
+  const pathOnly =
     stripSearchAndHash(
       stripped
-    )
-  );
+    );
+
+  const normalized =
+    normalizePath(
+      AppCore,
+      pathOnly
+    );
+
+  return `${normalized}${suffix}`;
 }
 
 export function isSameCanonicalPath(
@@ -337,13 +362,17 @@ export function isSameCanonicalPath(
   b = "/"
 ) {
   return (
-    normalizeCanonicalPath(
-      AppCore,
-      a
+    stripSearchAndHash(
+      normalizeCanonicalPath(
+        AppCore,
+        a
+      )
     ) ===
-    normalizeCanonicalPath(
-      AppCore,
-      b
+    stripSearchAndHash(
+      normalizeCanonicalPath(
+        AppCore,
+        b
+      )
     )
   );
 }
@@ -372,15 +401,7 @@ export function getCurrentPath(
 
   return normalizePath(
     AppCore,
-    normalizeRouteInput(
-      `${
-        window.location
-          .pathname || "/"
-      }${
-        window.location
-          .search || ""
-      }`
-    )
+    `${window.location.pathname || "/"}${window.location.search || ""}`
   );
 }
 
@@ -393,34 +414,15 @@ export function getCurrentCanonicalPath(
 
   return normalizeCanonicalPath(
     AppCore,
-    normalizeRouteInput(
-      `${
-        window.location
-          .pathname || "/"
-      }${
-        window.location
-          .search || ""
-      }`
-    )
+    `${window.location.pathname || "/"}${window.location.search || ""}`
   );
 }
 
 export function getCurrentPublicPath(
   AppCore
 ) {
-  if (!isBrowser()) {
-    return "/";
-  }
-
-  return normalizePath(
-    AppCore,
-    `${
-      window.location
-        .pathname || "/"
-    }${
-      window.location
-        .search || ""
-    }`
+  return getCurrentPath(
+    AppCore
   );
 }
 
@@ -431,15 +433,7 @@ export function getResolvedPublicPath(
     return fallback;
   }
 
-  return (
-    `${
-      window.location
-        .pathname || ""
-    }${
-      window.location
-        .search || ""
-    }` || fallback
-  );
+  return `${window.location.pathname || "/"}${window.location.search || ""}`;
 }
 
 /* =========================================================
@@ -481,13 +475,10 @@ export function isSlugCandidatePath(
       pathname
     );
 
-  const pathOnly =
+  return /^\/@[^/]+(?:\/|$)/i.test(
     stripSearchAndHash(
       normalized
-    );
-
-  return /^\/@[^/]+(?:\/|$)/i.test(
-    pathOnly
+    )
   );
 }
 
@@ -498,10 +489,7 @@ export function canUsePublicSlugForRoute(
   route,
   routeNames
 ) {
-  if (!route) {
-    return false;
-  }
-
+  if (!route) return false;
   if (
     route.path ===
     routeNames.LOGIN
@@ -556,24 +544,6 @@ export function resolveSpaHref(
   }
 
   if (
-    /^https?:\/\//i.test(
-      raw
-    )
-  ) {
-    try {
-      const url =
-        new URL(raw);
-
-      return normalizePath(
-        AppCore,
-        `${url.pathname}${url.search}${url.hash}`
-      );
-    } catch {
-      return routeNames.HOME;
-    }
-  }
-
-  if (
     raw.startsWith("/")
   ) {
     return normalizePath(
@@ -588,30 +558,6 @@ export function resolveSpaHref(
     return normalizePath(
       AppCore,
       `/${raw}`
-    );
-  }
-
-  if (
-    raw.startsWith("./")
-  ) {
-    return normalizePath(
-      AppCore,
-      `/${raw.slice(2)}`
-    );
-  }
-
-  if (
-    raw.startsWith("../")
-  ) {
-    const cleaned =
-      raw.replace(
-        /^(\.\.\/)+/,
-        ""
-      );
-
-    return normalizePath(
-      AppCore,
-      `/${cleaned}`
     );
   }
 
@@ -641,8 +587,20 @@ export function buildPublicPath(
       canonicalPath
     );
 
+  const cleanCanonical =
+    stripSearchAndHash(
+      canonical
+    );
+
+  const suffix =
+    getSearchAndHash(
+      canonical
+    );
+
   const route =
-    getRoute(canonical);
+    getRoute(
+      cleanCanonical
+    );
 
   if (!route) {
     return canonical;
@@ -679,13 +637,13 @@ export function buildPublicPath(
   }
 
   if (
-    canonical ===
+    cleanCanonical ===
     routeNames.HOME
   ) {
-    return `/@${username}`;
+    return `/@${username}${suffix}`;
   }
 
-  return `/@${username}${canonical}`;
+  return `/@${username}${cleanCanonical}${suffix}`;
 }
 
 export function getRedirectPath(
@@ -720,9 +678,14 @@ export function getRedirectPath(
       resolved
     );
 
+  const clean =
+    stripSearchAndHash(
+      canonical
+    );
+
   if (
-    !canonical ||
-    canonical ===
+    !clean ||
+    clean ===
       routeNames.LOGIN
   ) {
     return null;
@@ -746,33 +709,31 @@ export function buildLoginUrl(
       routeNames.LOGIN
     );
 
-  if (
-    !redirectPath ||
+  if (!redirectPath) {
+    return loginPath;
+  }
+
+  const redirectCanonical =
     normalizeCanonicalPath(
       AppCore,
       redirectPath
-    ) === routeNames.LOGIN
+    );
+
+  if (
+    stripSearchAndHash(
+      redirectCanonical
+    ) === loginPath
   ) {
     return loginPath;
   }
 
-  const baseOrigin =
-    isBrowser()
-      ? window.location
-          .origin
-      : "http://localhost";
-
   const url = new URL(
-    baseOrigin +
-      loginPath
+    `http://localhost${loginPath}`
   );
 
   url.searchParams.set(
     "redirect",
-    normalizeCanonicalPath(
-      AppCore,
-      redirectPath
-    )
+    redirectCanonical
   );
 
   return `${url.pathname}${url.search}`;
@@ -784,16 +745,17 @@ export function buildHistoryUrl(
   pathname = "/",
   options = {}
 ) {
-  const routeNames =
-    getRouteNames(
-      AppCore
-    );
-
   const normalized =
     resolveSpaHref(
       AppCore,
       pathname
     );
+
+  if (
+    options.preservePath
+  ) {
+    return normalized;
+  }
 
   const canonical =
     normalizeCanonicalPath(
@@ -801,75 +763,17 @@ export function buildHistoryUrl(
       normalized
     );
 
-  const route =
-    getRoute(
-      canonical
-    );
-
-  let finalPath =
-    normalized;
-
-  if (
-    !options.preservePath
-  ) {
-    if (
-      route &&
-      canUsePublicSlugForRoute(
-        route,
-        routeNames
-      )
-    ) {
-      finalPath =
-        buildPublicPath(
-          AppCore,
-          getRoute,
-          canonical,
-          {
-            username:
-              options.username,
-            fromPath:
-              normalized,
-          }
-        );
-    } else {
-      finalPath =
-        canonical;
+  return buildPublicPath(
+    AppCore,
+    getRoute,
+    canonical,
+    {
+      username:
+        options.username,
+      fromPath:
+        normalized,
     }
-  }
-
-  const baseOrigin =
-    isBrowser()
-      ? window.location
-          .origin
-      : "http://localhost";
-
-  const url = new URL(
-    baseOrigin +
-      finalPath
   );
-
-  if (
-    options.withRedirect
-  ) {
-    const redirectCanonical =
-      normalizeCanonicalPath(
-        AppCore,
-        options.withRedirect
-      );
-
-    if (
-      redirectCanonical &&
-      redirectCanonical !==
-        routeNames.LOGIN
-    ) {
-      url.searchParams.set(
-        "redirect",
-        redirectCanonical
-      );
-    }
-  }
-
-  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 export function buildStatePayload(
@@ -883,22 +787,18 @@ export function buildStatePayload(
       pathname
     );
 
-  const canonicalPath =
-    normalizeCanonicalPath(
-      AppCore,
-      normalized
-    );
-
-  const username =
-    extractUsernameFromPath(
-      AppCore,
-      normalized
-    ) || null;
-
   return {
     path: normalized,
-    canonicalPath,
-    username,
+    canonicalPath:
+      normalizeCanonicalPath(
+        AppCore,
+        normalized
+      ),
+    username:
+      extractUsernameFromPath(
+        AppCore,
+        normalized
+      ) || null,
     ...extras,
   };
 }
@@ -917,15 +817,7 @@ export function getDefaultHomeTarget(
       AppCore,
       getRoute,
       routeNames.HOME,
-      {
-        username:
-          getCurrentResolvedUsername(
-            AppCore
-          ) ||
-          getCurrentUsername(
-            AppCore
-          ),
-      }
+      {}
     ) || routeNames.HOME
   );
 }

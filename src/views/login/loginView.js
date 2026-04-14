@@ -7,7 +7,7 @@
    - activar modo fullscreen auth
    - validar credenciales en cliente
    - enviar login a Auth
-   - mostrar feedback visual mediante toast
+   - mostrar feedback visual local mediante toast inline
    - soportar login con username o email
    - soportar flujo opcional 2FA
    - redirigir correctamente tras login
@@ -26,6 +26,14 @@
    - mantener layout estable sin generar scroll
    - reducir efectos para un resultado más limpio
    - renderizar usando src/views/login/login.template.js
+
+   HARDENING:
+   - guards de browser
+   - timers centralizados
+   - toast inline robusto
+   - navegación segura post-login
+   - sync de sesión estable
+   - cleanup completo de la vista
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -51,6 +59,8 @@ export const LoginView = (() => {
   const LOGIN_LOADING_TOAST_MESSAGE =
     "Comprobando credenciales y preparando tu sesión...";
 
+  const LOGIN_ROUTE_PREFIX = "/login";
+
   let logoIntervalId = null;
   let redirectTimerId = null;
   let toastTimerId = null;
@@ -59,35 +69,36 @@ export const LoginView = (() => {
   let isSubmitting = false;
 
   /* =========================================================
-     HELPERS BASE
+     BASICS
   ========================================================= */
-  function getContainer() {
+  function isBrowser() {
     return (
-      AppCore?.dom?.viewContainer ||
-      document.getElementById("view-container") ||
-      document.querySelector("#view-container")
+      typeof window !== "undefined" &&
+      typeof document !== "undefined"
     );
   }
 
-  function escapeHtml(value = "") {
-    if (typeof AppCore?.utils?.escapeHtml === "function") {
-      return AppCore.utils.escapeHtml(String(value ?? ""));
+  function isNonEmptyString(value) {
+    return typeof value === "string" && value.trim().length > 0;
+  }
+
+  function safeText(value, fallback = "") {
+    if (value === null || value === undefined) {
+      return fallback;
     }
 
-    return String(value ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
+    const text = String(value).trim();
+    return text || fallback;
   }
 
   function normalizeIdentifier(value = "") {
-    return String(value || "").trim();
+    return safeText(value, "");
   }
 
   function isEmail(value = "") {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+      String(value || "").trim()
+    );
   }
 
   function slugify(value = "") {
@@ -107,57 +118,99 @@ export const LoginView = (() => {
     }
 
     const value = String(path || "/").trim() || "/";
-    if (value === "/") return "/";
+    if (value === "/") {
+      return "/";
+    }
 
-    return value.replace(/\/{2,}/g, "/").replace(/\/+$/, "") || "/";
+    return value
+      .replace(/\/{2,}/g, "/")
+      .replace(/\/+$/, "") || "/";
   }
 
+  function escapeHtml(value = "") {
+    if (typeof AppCore?.utils?.escapeHtml === "function") {
+      return AppCore.utils.escapeHtml(String(value ?? ""));
+    }
+
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function safeErrorLog(...args) {
+    try {
+      AppCore?.utils?.error?.(...args);
+    } catch {}
+  }
+
+  function safeWarnLog(...args) {
+    try {
+      AppCore?.utils?.warn?.(...args);
+    } catch {}
+  }
+
+  /* =========================================================
+     TIMERS
+  ========================================================= */
   function clearRedirectTimer() {
-    if (!redirectTimerId) return;
+    if (!redirectTimerId || !isBrowser()) {
+      return;
+    }
+
     window.clearTimeout(redirectTimerId);
     redirectTimerId = null;
   }
 
   function clearToastTimer() {
-    if (!toastTimerId) return;
+    if (!toastTimerId || !isBrowser()) {
+      return;
+    }
+
     window.clearTimeout(toastTimerId);
     toastTimerId = null;
   }
 
-  function getCurrentRedirectPath() {
-    try {
-      const url = new URL(window.location.href);
-      const redirect = url.searchParams.get("redirect");
-      return redirect ? normalizePath(redirect) : null;
-    } catch {
+  function stopLogoAnimation() {
+    if (!logoIntervalId || !isBrowser()) {
+      return;
+    }
+
+    window.clearInterval(logoIntervalId);
+    logoIntervalId = null;
+  }
+
+  /* =========================================================
+     DOM HELPERS
+  ========================================================= */
+  function getContainer() {
+    if (!isBrowser()) {
       return null;
     }
-  }
 
-  function getSafeRedirectPath() {
-    const redirectPath = getCurrentRedirectPath();
-
-    if (!redirectPath) return "/";
-    if (redirectPath === "/login" || redirectPath.startsWith("/login?")) {
-      return "/";
-    }
-
-    return normalizePath(redirectPath);
-  }
-
-  function getErrorMessage(error) {
     return (
-      error?.data?.message ||
-      error?.data?.error ||
-      error?.message ||
-      error?.statusText ||
-      "No se pudo iniciar sesión."
+      AppCore?.dom?.viewContainer ||
+      document.getElementById("view-container") ||
+      document.querySelector("#view-container")
     );
   }
 
   function getShellElements() {
+    if (!isBrowser()) {
+      return {
+        sidebar: null,
+        topbar: null,
+        topbarViewContainer: null,
+        tableheadContainer: null,
+      };
+    }
+
     return {
-      sidebar: AppCore?.dom?.sidebar || document.getElementById("sidebar"),
+      sidebar:
+        AppCore?.dom?.sidebar ||
+        document.getElementById("sidebar"),
       topbar:
         AppCore?.dom?.topbar ||
         document.getElementById("topbar") ||
@@ -171,95 +224,69 @@ export const LoginView = (() => {
     };
   }
 
-  function forceHideGlobalLoader() {
-    const loader = AppCore?.dom?.loader || document.getElementById("app-loader");
-
-    if (typeof AppCore?.setLoading === "function") {
-      AppCore.setLoading(false);
+  function getToastElements() {
+    if (!isBrowser()) {
+      return {
+        toastRoot: null,
+        toastIcon: null,
+        toastTitle: null,
+        toastText: null,
+        toastClose: null,
+        toastProgress: null,
+      };
     }
 
-    if (document?.body) {
-      document.body.classList.remove("loading");
+    return {
+      toastRoot: document.getElementById("loginToast"),
+      toastIcon: document.getElementById("loginToastIcon"),
+      toastTitle: document.getElementById("loginToastTitle"),
+      toastText: document.getElementById("loginToastText"),
+      toastClose: document.getElementById("loginToastClose"),
+      toastProgress: document.getElementById("loginToastProgress"),
+    };
+  }
+
+  /* =========================================================
+     ROUTING / REDIRECT
+  ========================================================= */
+  function getCurrentRedirectPath() {
+    if (!isBrowser()) {
+      return null;
     }
 
-    if (!loader) return;
-
-    loader.hidden = true;
-    loader.setAttribute("aria-hidden", "true");
-    loader.style.display = "none";
-    loader.style.opacity = "0";
-    loader.style.visibility = "hidden";
-    loader.style.pointerEvents = "none";
+    try {
+      const url = new URL(window.location.href);
+      const redirect = url.searchParams.get("redirect");
+      return redirect
+        ? normalizePath(redirect)
+        : null;
+    } catch {
+      return null;
+    }
   }
 
-  function restoreGlobalLoaderStyles() {
-    const loader = AppCore?.dom?.loader || document.getElementById("app-loader");
-    if (!loader) return;
+  function getSafeRedirectPath() {
+    const redirectPath = getCurrentRedirectPath();
 
-    loader.hidden = false;
-    loader.setAttribute("aria-hidden", "true");
-    loader.style.display = "";
-    loader.style.opacity = "";
-    loader.style.visibility = "";
-    loader.style.pointerEvents = "";
-  }
-
-  function setAuthScreen(active) {
-    if (!document?.body) return;
-
-    const enabled = Boolean(active);
-    const {
-      sidebar,
-      topbar,
-      topbarViewContainer,
-      tableheadContainer,
-    } = getShellElements();
-
-    document.body.classList.toggle("auth-screen", enabled);
-    document.body.classList.toggle("route-auth", enabled);
-    document.body.classList.toggle("route-shell-hidden", enabled);
-    document.body.classList.toggle("login-no-scroll", enabled);
-
-    if (enabled) {
-      document.documentElement.style.overflow = "hidden";
-      document.body.style.overflow = "hidden";
-    } else {
-      document.documentElement.style.overflow = "";
-      document.body.style.overflow = "";
+    if (!redirectPath) {
+      return "/";
     }
 
-    if (sidebar) sidebar.hidden = enabled;
-    if (topbar) topbar.hidden = enabled;
-    if (topbarViewContainer) topbarViewContainer.hidden = enabled;
-    if (tableheadContainer) tableheadContainer.hidden = enabled;
-  }
-
-  function stopLogoAnimation() {
-    if (!logoIntervalId) return;
-    window.clearInterval(logoIntervalId);
-    logoIntervalId = null;
-  }
-
-  function destroyViewState({ preserveToast = false } = {}) {
-    stopLogoAnimation();
-    clearRedirectTimer();
-    clearToastTimer();
-
-    if (!preserveToast) {
-      hideToast();
+    if (
+      redirectPath === LOGIN_ROUTE_PREFIX ||
+      redirectPath.startsWith(`${LOGIN_ROUTE_PREFIX}?`)
+    ) {
+      return "/";
     }
 
-    AppCore?.cleanup?.run?.(SCOPE);
-  }
-
-  function focusInitialField(identifierInput) {
-    window.setTimeout(() => {
-      identifierInput?.focus?.();
-      identifierInput?.select?.();
-    }, 0);
+    return normalizePath(redirectPath);
   }
 
   function navigateTo(path) {
+    if (!isBrowser()) {
+      return;
+    }
+
     const target = normalizePath(path || "/");
 
     setAuthScreen(false);
@@ -283,9 +310,15 @@ export const LoginView = (() => {
   }
 
   function navigateSoon(path, delay = 0) {
+    if (!isBrowser()) {
+      return;
+    }
+
     clearRedirectTimer();
 
-    const safeDelay = Math.max(0, Number(delay) || 0) + NAVIGATION_BUFFER_MS;
+    const safeDelay =
+      Math.max(0, Number(delay) || 0) +
+      NAVIGATION_BUFFER_MS;
 
     if (safeDelay <= 0) {
       navigateTo(path);
@@ -297,6 +330,143 @@ export const LoginView = (() => {
     }, safeDelay);
   }
 
+  /* =========================================================
+     GLOBAL LOADER / SHELL
+  ========================================================= */
+  function forceHideGlobalLoader() {
+    if (!isBrowser()) {
+      return;
+    }
+
+    const loader =
+      AppCore?.dom?.loader ||
+      document.getElementById("app-loader");
+
+    if (typeof AppCore?.setLoading === "function") {
+      AppCore.setLoading(false);
+    }
+
+    if (document?.body) {
+      document.body.classList.remove("loading");
+    }
+
+    if (!loader) {
+      return;
+    }
+
+    loader.hidden = true;
+    loader.setAttribute("aria-hidden", "true");
+    loader.style.display = "none";
+    loader.style.opacity = "0";
+    loader.style.visibility = "hidden";
+    loader.style.pointerEvents = "none";
+  }
+
+  function restoreGlobalLoaderStyles() {
+    if (!isBrowser()) {
+      return;
+    }
+
+    const loader =
+      AppCore?.dom?.loader ||
+      document.getElementById("app-loader");
+
+    if (!loader) {
+      return;
+    }
+
+    loader.hidden = false;
+    loader.setAttribute("aria-hidden", "true");
+    loader.style.display = "";
+    loader.style.opacity = "";
+    loader.style.visibility = "";
+    loader.style.pointerEvents = "";
+  }
+
+  function setAuthScreen(active) {
+    if (!isBrowser() || !document?.body) {
+      return;
+    }
+
+    const enabled = Boolean(active);
+    const {
+      sidebar,
+      topbar,
+      topbarViewContainer,
+      tableheadContainer,
+    } = getShellElements();
+
+    document.body.classList.toggle(
+      "auth-screen",
+      enabled
+    );
+    document.body.classList.toggle(
+      "route-auth",
+      enabled
+    );
+    document.body.classList.toggle(
+      "route-shell-hidden",
+      enabled
+    );
+    document.body.classList.toggle(
+      "login-no-scroll",
+      enabled
+    );
+
+    if (enabled) {
+      document.documentElement.style.overflow =
+        "hidden";
+      document.body.style.overflow = "hidden";
+    } else {
+      document.documentElement.style.overflow = "";
+      document.body.style.overflow = "";
+    }
+
+    if (sidebar) {
+      sidebar.hidden = enabled;
+    }
+
+    if (topbar) {
+      topbar.hidden = enabled;
+    }
+
+    if (topbarViewContainer) {
+      topbarViewContainer.hidden = enabled;
+    }
+
+    if (tableheadContainer) {
+      tableheadContainer.hidden = enabled;
+    }
+  }
+
+  /* =========================================================
+     VIEW STATE
+  ========================================================= */
+  function destroyViewState({
+    preserveToast = false,
+  } = {}) {
+    stopLogoAnimation();
+    clearRedirectTimer();
+    clearToastTimer();
+
+    if (!preserveToast) {
+      hideToast();
+    }
+
+    AppCore?.cleanup?.run?.(SCOPE);
+  }
+
+  function focusInitialField(identifierInput) {
+    if (!isBrowser()) {
+      return;
+    }
+
+    window.setTimeout(() => {
+      identifierInput?.focus?.();
+      identifierInput?.select?.();
+    }, 0);
+  }
+
   function clampToastDuration(duration) {
     return Math.max(
       TOAST_MIN_DURATION,
@@ -304,20 +474,19 @@ export const LoginView = (() => {
     );
   }
 
-  /* =========================================================
-     TOAST SYSTEM
-  ========================================================= */
-  function getToastElements() {
-    return {
-      toastRoot: document.getElementById("loginToast"),
-      toastIcon: document.getElementById("loginToastIcon"),
-      toastTitle: document.getElementById("loginToastTitle"),
-      toastText: document.getElementById("loginToastText"),
-      toastClose: document.getElementById("loginToastClose"),
-      toastProgress: document.getElementById("loginToastProgress"),
-    };
+  function getErrorMessage(error) {
+    return (
+      error?.data?.message ||
+      error?.data?.error ||
+      error?.message ||
+      error?.statusText ||
+      "No se pudo iniciar sesión."
+    );
   }
 
+  /* =========================================================
+     TOAST INLINE SYSTEM
+  ========================================================= */
   function getToastGlyph(type = "default") {
     if (type === "success") {
       return `
@@ -351,11 +520,16 @@ export const LoginView = (() => {
   }
 
   function hideToast() {
-    const { toastRoot, toastProgress } = getToastElements();
+    const {
+      toastRoot,
+      toastProgress,
+    } = getToastElements();
 
     clearToastTimer();
 
-    if (!toastRoot) return;
+    if (!toastRoot) {
+      return;
+    }
 
     toastRoot.classList.remove(
       "is-visible",
@@ -393,47 +567,73 @@ export const LoginView = (() => {
       toastProgress,
     } = getToastElements();
 
-    if (!toastRoot || !toastTitle || !toastText) return;
+    if (!toastRoot || !toastTitle || !toastText) {
+      return;
+    }
 
-    const safeDuration = clampToastDuration(duration);
+    const safeDuration =
+      clampToastDuration(duration);
 
     clearToastTimer();
 
     toastRoot.hidden = false;
-    toastRoot.setAttribute("aria-hidden", "false");
+    toastRoot.setAttribute(
+      "aria-hidden",
+      "false"
+    );
     toastRoot.dataset.state = type;
 
-    toastRoot.classList.remove("is-success", "is-error", "is-info", "is-warning");
-    toastRoot.classList.add("is-visible", `is-${type}`);
+    toastRoot.classList.remove(
+      "is-success",
+      "is-error",
+      "is-info",
+      "is-warning"
+    );
+    toastRoot.classList.add(
+      "is-visible",
+      `is-${type}`
+    );
 
-    toastTitle.textContent = title || "Aviso";
-    toastText.textContent = message || "";
+    toastTitle.textContent =
+      title || "Aviso";
+    toastText.textContent =
+      message || "";
 
     if (toastIcon) {
-      toastIcon.innerHTML = getToastGlyph(type);
+      toastIcon.innerHTML =
+        getToastGlyph(type);
     }
 
     if (toastClose) {
       toastClose.hidden = !closable;
       toastClose.disabled = !closable;
-      toastClose.setAttribute("aria-hidden", String(!closable));
-      toastClose.tabIndex = closable ? 0 : -1;
-      toastClose.style.pointerEvents = closable ? "" : "none";
-      toastClose.style.opacity = closable ? "" : "0";
+      toastClose.setAttribute(
+        "aria-hidden",
+        String(!closable)
+      );
+      toastClose.tabIndex = closable
+        ? 0
+        : -1;
+      toastClose.style.pointerEvents =
+        closable ? "" : "none";
+      toastClose.style.opacity =
+        closable ? "" : "0";
     }
 
     if (toastProgress) {
-      toastProgress.style.animation = "none";
+      toastProgress.style.animation =
+        "none";
       toastProgress.style.transform = "";
       toastProgress.style.opacity = "";
 
       if (!persistent) {
         void toastProgress.offsetWidth;
-        toastProgress.style.animation = `loginToastProgress ${safeDuration}ms linear forwards`;
+        toastProgress.style.animation =
+          `loginToastProgress ${safeDuration}ms linear forwards`;
       }
     }
 
-    if (!persistent) {
+    if (!persistent && isBrowser()) {
       toastTimerId = window.setTimeout(() => {
         hideToast();
       }, safeDuration);
@@ -441,17 +641,30 @@ export const LoginView = (() => {
   }
 
   /* =========================================================
-     FEEDBACK / STATE
+     FORM STATE
   ========================================================= */
-  function setFieldError(input, active = false) {
-    if (!input) return;
+  function setFieldError(
+    input,
+    active = false
+  ) {
+    if (!input) {
+      return;
+    }
 
-    input.setAttribute("aria-invalid", active ? "true" : "false");
-    input.classList.toggle("is-invalid", Boolean(active));
+    input.setAttribute(
+      "aria-invalid",
+      active ? "true" : "false"
+    );
+    input.classList.toggle(
+      "is-invalid",
+      Boolean(active)
+    );
   }
 
   function clearFieldErrors(inputs = []) {
-    inputs.forEach((input) => setFieldError(input, false));
+    inputs.forEach((input) => {
+      setFieldError(input, false);
+    });
   }
 
   function setSubmitting(controls, nextValue) {
@@ -468,30 +681,55 @@ export const LoginView = (() => {
     isSubmitting = Boolean(nextValue);
 
     if (form) {
-      form.setAttribute("aria-busy", String(isSubmitting));
-      form.dataset.submitting = String(isSubmitting);
+      form.setAttribute(
+        "aria-busy",
+        String(isSubmitting)
+      );
+      form.dataset.submitting =
+        String(isSubmitting);
     }
 
-    if (identifierInput) identifierInput.disabled = isSubmitting;
-    if (rememberInput) rememberInput.disabled = isSubmitting;
+    if (identifierInput) {
+      identifierInput.disabled =
+        isSubmitting;
+    }
+
+    if (rememberInput) {
+      rememberInput.disabled =
+        isSubmitting;
+    }
 
     /*
       No deshabilitamos el input password ni el toggle
       para evitar pérdida visual / problemas de lectura
       mientras el usuario ve el estado del acceso.
     */
-    if (passwordInput) passwordInput.disabled = false;
-    if (toggleBtn) toggleBtn.disabled = false;
+    if (passwordInput) {
+      passwordInput.disabled = false;
+    }
+
+    if (toggleBtn) {
+      toggleBtn.disabled = false;
+    }
 
     if (forgotLink) {
-      forgotLink.setAttribute("aria-disabled", String(isSubmitting));
-      forgotLink.classList.toggle("is-disabled", isSubmitting);
-      forgotLink.tabIndex = isSubmitting ? -1 : 0;
+      forgotLink.setAttribute(
+        "aria-disabled",
+        String(isSubmitting)
+      );
+      forgotLink.classList.toggle(
+        "is-disabled",
+        isSubmitting
+      );
+      forgotLink.tabIndex = isSubmitting
+        ? -1
+        : 0;
     }
 
     if (submitBtn) {
       submitBtn.disabled = isSubmitting;
-      submitBtn.dataset.loading = String(isSubmitting);
+      submitBtn.dataset.loading =
+        String(isSubmitting);
       submitBtn.innerHTML = isSubmitting
         ? `<span class="login-submit-text">Accediendo...</span>`
         : `<span class="login-submit-text">Acceder</span>`;
@@ -499,7 +737,9 @@ export const LoginView = (() => {
   }
 
   function shakeCard(cardEl) {
-    if (!cardEl) return;
+    if (!cardEl) {
+      return;
+    }
 
     cardEl.classList.remove("shake");
     void cardEl.offsetWidth;
@@ -517,7 +757,8 @@ export const LoginView = (() => {
 
     showToast({
       title: "Acceso denegado",
-      message: message || "No se pudo iniciar sesión.",
+      message:
+        message || "No se pudo iniciar sesión.",
       type: "error",
       duration: ERROR_TOAST_DURATION,
       persistent: false,
@@ -526,85 +767,122 @@ export const LoginView = (() => {
 
     shakeCard(cardEl);
 
-    window.setTimeout(() => {
-      passwordInput?.focus?.();
-      passwordInput?.select?.();
-    }, 0);
+    if (isBrowser()) {
+      window.setTimeout(() => {
+        passwordInput?.focus?.();
+        passwordInput?.select?.();
+      }, 0);
+    }
   }
 
-  /* =========================================================
-     LECTURA ROBUSTA DEL FORM
-  ========================================================= */
   function getFormPayload({
     identifierInput,
     passwordInput,
     rememberInput,
     form,
   }) {
-    const redirectInput = form?.querySelector('input[name="redirect"]');
+    const redirectInput =
+      form?.querySelector(
+        'input[name="redirect"]'
+      );
 
     return {
-      identifier: normalizeIdentifier(identifierInput?.value || ""),
-      password: String(passwordInput?.value || ""),
-      remember: Boolean(rememberInput?.checked),
-      redirect: normalizeIdentifier(redirectInput?.value || ""),
+      identifier: normalizeIdentifier(
+        identifierInput?.value || ""
+      ),
+      password: String(
+        passwordInput?.value || ""
+      ),
+      remember: Boolean(
+        rememberInput?.checked
+      ),
+      redirect: normalizeIdentifier(
+        redirectInput?.value || ""
+      ),
     };
   }
 
-  function validate({ identifierInput, passwordInput }) {
-    const identifier = normalizeIdentifier(identifierInput?.value || "");
-    const password = String(passwordInput?.value || "");
+  function validate({
+    identifierInput,
+    passwordInput,
+  }) {
+    const identifier =
+      normalizeIdentifier(
+        identifierInput?.value || ""
+      );
 
-    clearFieldErrors([identifierInput, passwordInput]);
+    const password = String(
+      passwordInput?.value || ""
+    );
+
+    clearFieldErrors([
+      identifierInput,
+      passwordInput,
+    ]);
 
     if (!identifier) {
       setFieldError(identifierInput, true);
+
       showToast({
         title: "Campo requerido",
-        message: "Introduce tu email o nombre de usuario.",
+        message:
+          "Introduce tu email o nombre de usuario.",
         type: "error",
         duration: 3400,
         closable: true,
       });
+
       identifierInput?.focus?.();
       return false;
     }
 
-    if (identifier.includes("@") && !isEmail(identifier)) {
+    if (
+      identifier.includes("@") &&
+      !isEmail(identifier)
+    ) {
       setFieldError(identifierInput, true);
+
       showToast({
         title: "Email no válido",
-        message: "El formato del email no es válido.",
+        message:
+          "El formato del email no es válido.",
         type: "error",
         duration: 3400,
         closable: true,
       });
+
       identifierInput?.focus?.();
       return false;
     }
 
     if (!password.trim()) {
       setFieldError(passwordInput, true);
+
       showToast({
         title: "Campo requerido",
-        message: "Introduce tu contraseña.",
+        message:
+          "Introduce tu contraseña.",
         type: "error",
         duration: 3400,
         closable: true,
       });
+
       passwordInput?.focus?.();
       return false;
     }
 
     if (password.length < 6) {
       setFieldError(passwordInput, true);
+
       showToast({
         title: "Contraseña demasiado corta",
-        message: "La contraseña debe tener al menos 6 caracteres.",
+        message:
+          "La contraseña debe tener al menos 6 caracteres.",
         type: "error",
         duration: 3600,
         closable: true,
       });
+
       passwordInput?.focus?.();
       return false;
     }
@@ -621,24 +899,45 @@ export const LoginView = (() => {
     eyeOpenIcon,
     eyeClosedIcon
   ) {
-    if (!passwordInput || !toggleBtn) return;
+    if (!passwordInput || !toggleBtn) {
+      return;
+    }
 
-    const willShow = passwordInput.type === "password";
-    passwordInput.type = willShow ? "text" : "password";
+    const willShow =
+      passwordInput.type === "password";
 
-    toggleBtn.classList.toggle("active", willShow);
-    toggleBtn.setAttribute("aria-pressed", String(willShow));
+    passwordInput.type = willShow
+      ? "text"
+      : "password";
+
+    toggleBtn.classList.toggle(
+      "active",
+      willShow
+    );
+    toggleBtn.setAttribute(
+      "aria-pressed",
+      String(willShow)
+    );
     toggleBtn.setAttribute(
       "aria-label",
-      willShow ? "Ocultar contraseña" : "Mostrar contraseña"
+      willShow
+        ? "Ocultar contraseña"
+        : "Mostrar contraseña"
     );
     toggleBtn.setAttribute(
       "title",
-      willShow ? "Ocultar contraseña" : "Mostrar contraseña"
+      willShow
+        ? "Ocultar contraseña"
+        : "Mostrar contraseña"
     );
 
-    if (eyeOpenIcon) eyeOpenIcon.hidden = willShow;
-    if (eyeClosedIcon) eyeClosedIcon.hidden = !willShow;
+    if (eyeOpenIcon) {
+      eyeOpenIcon.hidden = willShow;
+    }
+
+    if (eyeClosedIcon) {
+      eyeClosedIcon.hidden = !willShow;
+    }
 
     passwordInput.focus();
   }
@@ -653,11 +952,16 @@ export const LoginView = (() => {
     passwordFocused,
     capsActive
   ) {
-    const visible = Boolean(passwordFocused && capsActive);
+    const visible = Boolean(
+      passwordFocused && capsActive
+    );
 
     if (capsWrap) {
       capsWrap.hidden = !visible;
-      capsWrap.classList.toggle("is-visible", visible);
+      capsWrap.classList.toggle(
+        "is-visible",
+        visible
+      );
     }
 
     if (capsIcon) {
@@ -670,18 +974,28 @@ export const LoginView = (() => {
   }
 
   /* =========================================================
-     LOGO FADE
+     LOGO ANIMATION
   ========================================================= */
-  function startLogoAnimation(logoImages = []) {
+  function startLogoAnimation(
+    logoImages = []
+  ) {
     stopLogoAnimation();
 
-    if (!Array.isArray(logoImages) || logoImages.length <= 1) return;
+    if (
+      !isBrowser() ||
+      !Array.isArray(logoImages) ||
+      logoImages.length <= 1
+    ) {
+      return;
+    }
 
     let index = 0;
 
     logoImages.forEach((img, i) => {
-      img.style.opacity = i === 0 ? "1" : "0";
-      img.style.transition = `opacity ${LOGO_FADE_DURATION}ms ease`;
+      img.style.opacity =
+        i === 0 ? "1" : "0";
+      img.style.transition =
+        `opacity ${LOGO_FADE_DURATION}ms ease`;
     });
 
     logoIntervalId = window.setInterval(() => {
@@ -692,7 +1006,10 @@ export const LoginView = (() => {
         stopLogoAnimation();
 
         logoImages.forEach((img, i) => {
-          img.style.opacity = i === logoImages.length - 1 ? "1" : "0";
+          img.style.opacity =
+            i === logoImages.length - 1
+              ? "1"
+              : "0";
         });
 
         return;
@@ -705,22 +1022,41 @@ export const LoginView = (() => {
   }
 
   /* =========================================================
-     REDIRECCIONES
+     LOGIN FLOW
   ========================================================= */
-  function resolvePostLoginPath(result, fallbackIdentifier = "") {
+  function resolvePostLoginPath(
+    result,
+    fallbackIdentifier = ""
+  ) {
     if (result?.redirectTo) {
-      return normalizePath(result.redirectTo);
+      return normalizePath(
+        result.redirectTo
+      );
     }
 
-    const explicitRedirect = getSafeRedirectPath();
-    if (explicitRedirect && explicitRedirect !== "/") {
+    const explicitRedirect =
+      getSafeRedirectPath();
+
+    if (
+      explicitRedirect &&
+      explicitRedirect !== "/"
+    ) {
       return explicitRedirect;
     }
 
-    const user = result?.user || AppCore?.state?.user || {};
+    const user =
+      result?.user ||
+      AppCore?.state?.user ||
+      {};
+
     const slug =
       user?.slug ||
-      slugify(user?.username || user?.name || fallbackIdentifier || "");
+      slugify(
+        user?.username ||
+        user?.name ||
+        fallbackIdentifier ||
+        ""
+      );
 
     if (slug) {
       return `/@${slug}`;
@@ -729,34 +1065,75 @@ export const LoginView = (() => {
     return "/";
   }
 
-  function persistLegacyUserInfo(result, identifier = "") {
+  function persistLegacyUserInfo(
+    result,
+    identifier = ""
+  ) {
     try {
-      const user = result?.user || AppCore?.state?.user || {};
+      if (!isBrowser()) {
+        return;
+      }
+
+      const user =
+        result?.user ||
+        AppCore?.state?.user ||
+        {};
+
       const slug =
         user?.slug ||
-        slugify(user?.username || user?.name || identifier || "");
+        slugify(
+          user?.username ||
+          user?.name ||
+          identifier ||
+          ""
+        );
 
       if (result?.token) {
-        localStorage.setItem("onion_token", String(result.token));
+        localStorage.setItem(
+          "onion_token",
+          String(result.token)
+        );
       }
 
       if (slug) {
-        localStorage.setItem("onion_user_slug", slug);
+        localStorage.setItem(
+          "onion_user_slug",
+          slug
+        );
       }
 
-      localStorage.setItem("onion_user_name", user?.name || user?.nombre || "");
-      localStorage.setItem("onion_role", user?.role || "user");
+      localStorage.setItem(
+        "onion_user_name",
+        user?.name ||
+          user?.nombre ||
+          ""
+      );
+
+      localStorage.setItem(
+        "onion_role",
+        user?.role || "user"
+      );
     } catch (error) {
-      AppCore?.utils?.error?.(
+      safeErrorLog(
         "No se pudo persistir el estado legado del login",
         error
       );
     }
   }
 
-  function syncUserStateAfterLogin(result, payload) {
-    const normalizedUser = result?.user || AppCore?.state?.user || null;
-    const token = result?.token ?? AppCore?.state?.token ?? null;
+  function syncUserStateAfterLogin(
+    result,
+    payload
+  ) {
+    const normalizedUser =
+      result?.user ||
+      AppCore?.state?.user ||
+      null;
+
+    const token =
+      result?.token ??
+      AppCore?.state?.token ??
+      null;
 
     if (typeof AppCore?.applySession === "function") {
       AppCore.applySession({
@@ -764,55 +1141,102 @@ export const LoginView = (() => {
         user: normalizedUser,
       });
     } else {
-      if (typeof AppCore?.setToken === "function" && token !== undefined) {
+      if (
+        typeof AppCore?.setToken === "function" &&
+        token !== undefined
+      ) {
         AppCore.setToken(token);
       }
 
-      if (typeof AppCore?.setUser === "function" && normalizedUser !== undefined) {
+      if (
+        typeof AppCore?.setUser === "function" &&
+        normalizedUser !== undefined
+      ) {
         AppCore.setUser(normalizedUser);
       }
     }
 
     AppCore?.syncUserUI?.();
 
-    AppCore?.events?.emit?.("login:success", {
-      user: normalizedUser,
-      identifier: payload?.identifier || "",
-      redirectTo: resolvePostLoginPath(result, payload?.identifier || ""),
-    });
+    AppCore?.events?.emit?.(
+      "login:success",
+      {
+        user: normalizedUser,
+        identifier:
+          payload?.identifier || "",
+        redirectTo: resolvePostLoginPath(
+          result,
+          payload?.identifier || ""
+        ),
+      }
+    );
   }
 
-  function handleSuccessfulLogin(result, payload, controls) {
-    const redirectTo = resolvePostLoginPath(result, payload?.identifier || "");
+  function handleSuccessfulLogin(
+    result,
+    payload,
+    controls
+  ) {
+    const redirectTo =
+      resolvePostLoginPath(
+        result,
+        payload?.identifier || ""
+      );
+
     isNavigatingAway = true;
 
-    persistLegacyUserInfo(result, payload?.identifier || "");
-    syncUserStateAfterLogin(result, payload);
-    setSubmitting(controls, true);
+    persistLegacyUserInfo(
+      result,
+      payload?.identifier || ""
+    );
+    syncUserStateAfterLogin(
+      result,
+      payload
+    );
 
+    setSubmitting(controls, true);
     navigateTo(redirectTo);
   }
 
-  function handle2FARequired(result, controls) {
-    const redirectTo = result?.redirectTo || "/2fa";
+  function handle2FARequired(
+    result,
+    controls
+  ) {
+    const redirectTo =
+      result?.redirectTo || "/2fa";
+
     isNavigatingAway = true;
 
     try {
-      if (result?.tempToken) {
-        localStorage.setItem("onion_temp_token", String(result.tempToken));
+      if (
+        isBrowser() &&
+        result?.tempToken
+      ) {
+        localStorage.setItem(
+          "onion_temp_token",
+          String(result.tempToken)
+        );
       }
     } catch (error) {
-      AppCore?.utils?.error?.("No se pudo guardar el temp token 2FA", error);
+      safeErrorLog(
+        "No se pudo guardar el temp token 2FA",
+        error
+      );
     }
 
-    AppCore?.events?.emit?.("login:2fa-required", {
-      redirectTo,
-      tempToken: result?.tempToken || null,
-    });
+    AppCore?.events?.emit?.(
+      "login:2fa-required",
+      {
+        redirectTo,
+        tempToken:
+          result?.tempToken || null,
+      }
+    );
 
     showToast({
       title: "Verificación adicional",
-      message: "Se requiere una comprobación extra. Redirigiendo...",
+      message:
+        "Se requiere una comprobación extra. Redirigiendo...",
       type: "info",
       duration: TWO_FA_TOAST_DURATION,
       persistent: false,
@@ -820,17 +1244,20 @@ export const LoginView = (() => {
     });
 
     setSubmitting(controls, true);
-    navigateSoon(redirectTo, TWO_FA_TOAST_DURATION);
+    navigateSoon(
+      redirectTo,
+      TWO_FA_TOAST_DURATION
+    );
   }
 
   /* =========================================================
-     TEMPLATE
+     RENDER
   ========================================================= */
   function render() {
     const container = getContainer();
 
     if (!container) {
-      AppCore?.utils?.warn?.(
+      safeWarnLog(
         "LoginView: no se encontró #view-container para renderizar."
       );
       forceHideGlobalLoader();
@@ -840,46 +1267,72 @@ export const LoginView = (() => {
     isNavigatingAway = false;
     isSubmitting = false;
 
-    destroyViewState({ preserveToast: false });
+    destroyViewState({
+      preserveToast: false,
+    });
+
     restoreGlobalLoaderStyles();
     setAuthScreen(true);
 
     AppCore?.clearDynamicContainers?.();
-    AppCore?.setDocumentTitle?.("Onion Support");
+    AppCore?.setDocumentTitle?.(
+      "Onion Support"
+    );
 
-    const redirectPath = getCurrentRedirectPath();
-    const appName = AppCore?.config?.appName || "Onion Support";
-    const appVersion = AppCore?.config?.version || "1.0.0";
-    const currentYear = new Date().getFullYear();
+    const redirectPath =
+      getCurrentRedirectPath();
 
-    container.innerHTML = getLoginTemplate({
-      appName: escapeHtml(appName),
-      appVersion: escapeHtml(appVersion),
-      currentYear,
-      redirect: escapeHtml(redirectPath || ""),
-      heroEyebrow: "Entorno seguro",
-      heroTitle: "Tu acceso entra en un panel más vivo y con más presencia visual.",
-      bullets: [
-        "Sesión cifrada",
-        "Controles de acceso activos",
-        "Shell SPA preparado",
-      ],
-      title: `Iniciar sesión con la cuenta ${appName}`,
-      subtitle: "Accede a tu espacio de soporte, incidencias y gestión interna.",
-      identifierPlaceholder: "Usuario o email",
-      passwordPlaceholder: "Contraseña",
-      rememberLabel: "Recordarme",
-      secureMeta: "Acceso seguro",
-      submitLabel: "Acceder",
-      forgotLabel: "¿Has olvidado tu contraseña?",
-      forgotPasswordHref: "/reset-password",
-      logos: [
-        "/src/media/img/favicon_black.png",
-        "/src/media/img/favicon_black_circle.png",
-        "/src/media/img/favicon_support.png",
-        "/src/media/img/favicon_white.png",
-      ],
-    });
+    const appName =
+      AppCore?.config?.appName ||
+      "Onion Support";
+
+    const appVersion =
+      AppCore?.config?.version ||
+      "1.0.0";
+
+    const currentYear =
+      new Date().getFullYear();
+
+    container.innerHTML =
+      getLoginTemplate({
+        appName: escapeHtml(appName),
+        appVersion:
+          escapeHtml(appVersion),
+        currentYear,
+        redirect: escapeHtml(
+          redirectPath || ""
+        ),
+        heroEyebrow:
+          "Entorno seguro",
+        heroTitle:
+          "Tu acceso entra en un panel más vivo y con más presencia visual.",
+        bullets: [
+          "Sesión cifrada",
+          "Controles de acceso activos",
+          "Shell SPA preparado",
+        ],
+        title:
+          `Iniciar sesión con la cuenta ${appName}`,
+        subtitle:
+          "Accede a tu espacio de soporte, incidencias y gestión interna.",
+        identifierPlaceholder:
+          "Usuario o email",
+        passwordPlaceholder:
+          "Contraseña",
+        rememberLabel: "Recordarme",
+        secureMeta: "Acceso seguro",
+        submitLabel: "Acceder",
+        forgotLabel:
+          "¿Has olvidado tu contraseña?",
+        forgotPasswordHref:
+          "/reset-password",
+        logos: [
+          "/src/media/img/favicon_black.png",
+          "/src/media/img/favicon_black_circle.png",
+          "/src/media/img/favicon_support.png",
+          "/src/media/img/favicon_white.png",
+        ],
+      });
 
     forceHideGlobalLoader();
     bind();
@@ -889,34 +1342,63 @@ export const LoginView = (() => {
      BIND
   ========================================================= */
   function bind() {
-    const scope = AppCore?.cleanup?.scope?.(SCOPE);
+    if (!isBrowser()) {
+      return;
+    }
 
-    const form = document.getElementById("loginForm");
-    const card = document.getElementById("loginCard");
-    const button = document.getElementById("loginButton");
+    const scope =
+      AppCore?.cleanup?.scope?.(SCOPE);
 
-    const identifierInput = document.getElementById("username");
-    const passwordInput = document.getElementById("password");
-    const rememberInput = document.getElementById("loginRemember");
+    const form =
+      document.getElementById("loginForm");
+    const card =
+      document.getElementById("loginCard");
+    const button =
+      document.getElementById("loginButton");
 
-    const toggleBtn = document.getElementById("togglePassword");
-    const eyeOpenIcon = document.getElementById("eyeOpenIcon");
-    const eyeClosedIcon = document.getElementById("eyeClosedIcon");
+    const identifierInput =
+      document.getElementById("username");
+    const passwordInput =
+      document.getElementById("password");
+    const rememberInput =
+      document.getElementById("loginRemember");
 
-    const capsWrap = document.getElementById("capsIndicator");
-    const capsIcon = document.getElementById("capsIcon");
-    const capsLabel = document.getElementById("capsLabel");
+    const toggleBtn =
+      document.getElementById("togglePassword");
+    const eyeOpenIcon =
+      document.getElementById("eyeOpenIcon");
+    const eyeClosedIcon =
+      document.getElementById("eyeClosedIcon");
 
-    const forgotLink = document.getElementById("forgotPasswordLink");
-    const toastClose = document.getElementById("loginToastClose");
+    const capsWrap =
+      document.getElementById("capsIndicator");
+    const capsIcon =
+      document.getElementById("capsIcon");
+    const capsLabel =
+      document.getElementById("capsLabel");
 
-    const logoContainer = document.querySelector(".logo-fade");
+    const forgotLink =
+      document.getElementById("forgotPasswordLink");
+    const toastClose =
+      document.getElementById("loginToastClose");
+
+    const logoContainer =
+      document.querySelector(".logo-fade");
+
     const logoImages = logoContainer
-      ? Array.from(logoContainer.querySelectorAll("img"))
+      ? Array.from(
+          logoContainer.querySelectorAll("img")
+        )
       : [];
 
-    if (!scope || !form || !identifierInput || !passwordInput || !button) {
-      AppCore?.utils?.warn?.(
+    if (
+      !scope ||
+      !form ||
+      !identifierInput ||
+      !passwordInput ||
+      !button
+    ) {
+      safeWarnLog(
         "LoginView: faltan nodos críticos del formulario de acceso."
       );
       forceHideGlobalLoader();
@@ -938,42 +1420,88 @@ export const LoginView = (() => {
 
     startLogoAnimation(logoImages);
     focusInitialField(identifierInput);
-    updateCapsVisual(capsWrap, capsIcon, capsLabel, passwordFocused, capsActive);
+    updateCapsVisual(
+      capsWrap,
+      capsIcon,
+      capsLabel,
+      passwordFocused,
+      capsActive
+    );
     setSubmitting(controls, false);
     forceHideGlobalLoader();
 
     if (toastClose) {
-      AppCore.cleanup.on(scope, toastClose, "click", () => {
-        if (isSubmitting && isNavigatingAway) return;
-        hideToast();
-      });
+      AppCore.cleanup.on(
+        scope,
+        toastClose,
+        "click",
+        () => {
+          if (
+            isSubmitting &&
+            isNavigatingAway
+          ) {
+            return;
+          }
+
+          hideToast();
+        }
+      );
     }
 
     if (toggleBtn) {
-      AppCore.cleanup.on(scope, toggleBtn, "click", () => {
-        if (isSubmitting && isNavigatingAway) return;
+      AppCore.cleanup.on(
+        scope,
+        toggleBtn,
+        "click",
+        () => {
+          if (
+            isSubmitting &&
+            isNavigatingAway
+          ) {
+            return;
+          }
 
-        togglePasswordVisibility(
-          passwordInput,
-          toggleBtn,
-          eyeOpenIcon,
-          eyeClosedIcon
-        );
-      });
+          togglePasswordVisibility(
+            passwordInput,
+            toggleBtn,
+            eyeOpenIcon,
+            eyeClosedIcon
+          );
+        }
+      );
     }
 
-    AppCore.cleanup.on(scope, identifierInput, "input", () => {
-      setFieldError(identifierInput, false);
-    });
+    AppCore.cleanup.on(
+      scope,
+      identifierInput,
+      "input",
+      () => {
+        setFieldError(
+          identifierInput,
+          false
+        );
+      }
+    );
 
-    AppCore.cleanup.on(scope, passwordInput, "input", () => {
-      setFieldError(passwordInput, false);
-    });
+    AppCore.cleanup.on(
+      scope,
+      passwordInput,
+      "input",
+      () => {
+        setFieldError(
+          passwordInput,
+          false
+        );
+      }
+    );
 
     function updateCapsState(event) {
-      if (!event?.getModifierState) return;
+      if (!event?.getModifierState) {
+        return;
+      }
 
-      const nextState = event.getModifierState("CapsLock");
+      const nextState =
+        event.getModifierState("CapsLock");
 
       if (nextState !== capsActive) {
         capsActive = nextState;
@@ -987,115 +1515,192 @@ export const LoginView = (() => {
       }
     }
 
-    AppCore.cleanup.on(scope, document, "keydown", updateCapsState);
-    AppCore.cleanup.on(scope, document, "keyup", updateCapsState);
+    AppCore.cleanup.on(
+      scope,
+      document,
+      "keydown",
+      updateCapsState
+    );
 
-    AppCore.cleanup.on(scope, passwordInput, "focus", (event) => {
-      passwordFocused = true;
+    AppCore.cleanup.on(
+      scope,
+      document,
+      "keyup",
+      updateCapsState
+    );
 
-      if (event?.getModifierState) {
-        capsActive = event.getModifierState("CapsLock");
+    AppCore.cleanup.on(
+      scope,
+      passwordInput,
+      "focus",
+      (event) => {
+        passwordFocused = true;
+
+        if (event?.getModifierState) {
+          capsActive =
+            event.getModifierState(
+              "CapsLock"
+            );
+        }
+
+        updateCapsVisual(
+          capsWrap,
+          capsIcon,
+          capsLabel,
+          passwordFocused,
+          capsActive
+        );
       }
+    );
 
-      updateCapsVisual(
-        capsWrap,
-        capsIcon,
-        capsLabel,
-        passwordFocused,
-        capsActive
-      );
-    });
-
-    AppCore.cleanup.on(scope, passwordInput, "blur", () => {
-      passwordFocused = false;
-      updateCapsVisual(
-        capsWrap,
-        capsIcon,
-        capsLabel,
-        passwordFocused,
-        capsActive
-      );
-    });
-
-    AppCore.cleanup.on(scope, form, "submit", async (event) => {
-      event.preventDefault();
-
-      if (isSubmitting || isNavigatingAway) {
-        return;
+    AppCore.cleanup.on(
+      scope,
+      passwordInput,
+      "blur",
+      () => {
+        passwordFocused = false;
+        updateCapsVisual(
+          capsWrap,
+          capsIcon,
+          capsLabel,
+          passwordFocused,
+          capsActive
+        );
       }
+    );
 
-      hideToast();
-      clearFieldErrors([identifierInput, passwordInput]);
+    AppCore.cleanup.on(
+      scope,
+      form,
+      "submit",
+      async (event) => {
+        event.preventDefault();
 
-      const isValid = validate({
-        identifierInput,
-        passwordInput,
-      });
-
-      if (!isValid) {
-        shakeCard(card);
-        return;
-      }
-
-      const payload = getFormPayload({
-        identifierInput,
-        passwordInput,
-        rememberInput,
-        form,
-      });
-
-      setSubmitting(controls, true);
-
-      showToast({
-        title: LOGIN_LOADING_TOAST_TITLE,
-        message: LOGIN_LOADING_TOAST_MESSAGE,
-        type: "info",
-        persistent: true,
-        closable: false,
-      });
-
-      try {
-        const result = await Auth.login({
-          identifier: payload.identifier,
-          password: payload.password,
-          remember: payload.remember,
-        });
-
-        if (result?.requires2FA) {
-          handle2FARequired(result, controls);
+        if (
+          isSubmitting ||
+          isNavigatingAway
+        ) {
           return;
         }
 
-        handleSuccessfulLogin(result, payload, controls);
-      } catch (error) {
-        const message = getErrorMessage(error);
-
-        AppCore?.utils?.error?.("Login error", error);
-
-        showErrorState({
-          cardEl: card,
+        hideToast();
+        clearFieldErrors([
           identifierInput,
           passwordInput,
-          message,
+        ]);
+
+        const isValid = validate({
+          identifierInput,
+          passwordInput,
         });
 
-        setSubmitting(controls, false);
-        isNavigatingAway = false;
+        if (!isValid) {
+          shakeCard(card);
+          return;
+        }
+
+        const payload = getFormPayload({
+          identifierInput,
+          passwordInput,
+          rememberInput,
+          form,
+        });
+
+        setSubmitting(controls, true);
+
+        showToast({
+          title:
+            LOGIN_LOADING_TOAST_TITLE,
+          message:
+            LOGIN_LOADING_TOAST_MESSAGE,
+          type: "info",
+          persistent: true,
+          closable: false,
+        });
+
+        try {
+          const result =
+            await Auth.login({
+              identifier:
+                payload.identifier,
+              password:
+                payload.password,
+              remember:
+                payload.remember,
+            });
+
+          if (result?.requires2FA) {
+            handle2FARequired(
+              result,
+              controls
+            );
+            return;
+          }
+
+          handleSuccessfulLogin(
+            result,
+            payload,
+            controls
+          );
+        } catch (error) {
+          const message =
+            getErrorMessage(error);
+
+          safeErrorLog(
+            "Login error",
+            error
+          );
+
+          showErrorState({
+            cardEl: card,
+            identifierInput,
+            passwordInput,
+            message,
+          });
+
+          setSubmitting(
+            controls,
+            false
+          );
+          isNavigatingAway = false;
+        }
       }
-    });
+    );
 
-    AppCore.cleanup.event(scope, "auth:login:error", () => {
-      if (isNavigatingAway) return;
-      setSubmitting(controls, false);
-    });
+    AppCore.cleanup.event(
+      scope,
+      "auth:login:error",
+      () => {
+        if (isNavigatingAway) {
+          return;
+        }
 
-    AppCore.cleanup.event(scope, "router:before-render", ({ detail }) => {
-      const nextPath = detail?.path || detail?.canonicalPath || "";
-
-      if (nextPath && !String(nextPath).startsWith("/login")) {
-        setAuthScreen(false);
+        setSubmitting(
+          controls,
+          false
+        );
       }
-    });
+    );
+
+    AppCore.cleanup.event(
+      scope,
+      "router:before-render",
+      ({ detail }) => {
+        const nextPath =
+          detail?.path ||
+          detail?.canonicalPath ||
+          "";
+
+        if (
+          nextPath &&
+          !String(nextPath).startsWith(
+            LOGIN_ROUTE_PREFIX
+          )
+        ) {
+          setAuthScreen(false);
+        }
+      }
+    );
 
     AppCore.cleanup.add(scope, () => {
       stopLogoAnimation();

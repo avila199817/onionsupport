@@ -3,180 +3,142 @@
    Archivo: src/router/guards.js
 
    Responsabilidades:
-   - evaluar acceso a rutas públicas / privadas
-   - redirigir fuera de /login si existe sesión
-   - redirigir a login cuando falta auth
-   - validar acceso por rol
-   - soportar boot/restoring seguro
-   - devolver motivos normalizados
+   - resolver acceso a rutas
+   - guards auth / guest / roles
+   - redirects centralizados
+   - tolerancia config heterogénea
+   - salida estable para Router
+
+   HARDENING:
+   - rutas públicas por defecto
+   - normalización robusta de roles
+   - soporte meta.requiresAuth / guestOnly / roles
 ========================================================= */
 
 import {
   getRouteNames,
-  getRedirectPath,
-  getDefaultHomeTarget,
-  buildLoginUrl,
+  normalizeCanonicalPath,
 } from "./helpers.js";
 
 /* =========================================================
    HELPERS
 ========================================================= */
-function isAuthReady(
-  AppCore
-) {
-  /* compatibilidad legacy */
-  if (
-    typeof AppCore?.state
-      ?.booting ===
-    "boolean"
-  ) {
-    return !AppCore.state
-      .booting;
+
+function toArray(value) {
+  if (Array.isArray(value)) {
+    return value;
   }
 
-  return true;
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return [];
+  }
+
+  return [value];
 }
 
-function buildAllowed() {
-  return {
-    allowed: true,
-    reason: null,
-    redirectTo: null,
-  };
+function normalizeRole(value) {
+  return String(
+    value || ""
+  )
+    .trim()
+    .toLowerCase();
 }
 
-function buildDenied(
-  reason,
-  redirectTo = null
-) {
-  return {
-    allowed: false,
-    reason,
-    redirectTo,
-  };
+function normalizeRoles(value) {
+  return toArray(value)
+    .flat()
+    .map(normalizeRole)
+    .filter(Boolean);
 }
 
-function hasRouteRoles(
-  route
-) {
-  return Array.isArray(
-    route?.roles
-  ) && route.roles.length > 0;
-}
-
-function isLoginRoute(
-  route,
-  routeNames
-) {
-  return (
-    route?.path ===
-    routeNames.LOGIN
-  );
-}
-
-function isPublicRoute(
-  route
-) {
-  return Boolean(
-    route?.public
+function getUserRole(AppCore) {
+  return normalizeRole(
+    AppCore?.state?.role ||
+      AppCore?.state?.user?.role ||
+      AppCore?.state?.user?.rol ||
+      ""
   );
 }
 
 function isAuthenticated(
+  AppCore,
   Auth
 ) {
+  if (
+    typeof Auth
+      ?.isAuthenticated ===
+    "function"
+  ) {
+    try {
+      return Boolean(
+        Auth.isAuthenticated()
+      );
+    } catch {}
+  }
+
   return Boolean(
-    Auth?.isAuthenticated?.()
+    AppCore?.state
+      ?.authenticated
   );
 }
 
-function hasRequiredRole(
-  Auth,
+function routeMeta(route) {
+  return route?.meta &&
+    typeof route.meta ===
+      "object"
+    ? route.meta
+    : {};
+}
+
+function getRouteRoles(route) {
+  const meta =
+    routeMeta(route);
+
+  return normalizeRoles(
+    route?.roles ??
+      route?.allowRoles ??
+      meta.roles ??
+      meta.allowRoles ??
+      meta.requireRoles ??
+      []
+  );
+}
+
+function routeRequiresAuth(
   route
 ) {
-  if (!hasRouteRoles(route)) {
-    return true;
-  }
+  const meta =
+    routeMeta(route);
 
   return Boolean(
-    Auth?.hasRole?.(
-      ...route.roles
-    )
+    route?.requiresAuth ??
+      route?.private ??
+      meta.requiresAuth ??
+      meta.private ??
+      false
+  );
+}
+
+function routeGuestOnly(route) {
+  const meta =
+    routeMeta(route);
+
+  return Boolean(
+    route?.guestOnly ??
+      route?.publicOnly ??
+      meta.guestOnly ??
+      meta.publicOnly ??
+      false
   );
 }
 
 /* =========================================================
-   LOGIN GUARD
+   MAIN
 ========================================================= */
-function evaluateLoginRoute({
-  AppCore,
-  authenticated,
-  authReady,
-  getRoute,
-}) {
-  if (
-    authenticated &&
-    authReady
-  ) {
-    return buildDenied(
-      "already-authenticated",
-      getRedirectPath(
-        AppCore
-      ) ||
-        getDefaultHomeTarget(
-          AppCore,
-          getRoute
-        )
-    );
-  }
 
-  return buildAllowed();
-}
-
-/* =========================================================
-   PRIVATE GUARD
-========================================================= */
-function evaluatePrivateRoute({
-  AppCore,
-  Auth,
-  route,
-  authenticated,
-  requestedCanonicalPath,
-  getRoute,
-}) {
-  if (
-    !authenticated
-  ) {
-    return buildDenied(
-      "not-authenticated",
-      buildLoginUrl(
-        AppCore,
-        requestedCanonicalPath
-      )
-    );
-  }
-
-  if (
-    !hasRequiredRole(
-      Auth,
-      route
-    )
-  ) {
-    return buildDenied(
-      "insufficient-role",
-      getDefaultHomeTarget(
-        AppCore,
-        getRoute
-      )
-    );
-  }
-
-  return buildAllowed();
-}
-
-/* =========================================================
-   MAIN GUARD
-========================================================= */
 export function shouldAllowRoute({
   AppCore,
   Auth,
@@ -189,60 +151,132 @@ export function shouldAllowRoute({
       AppCore
     );
 
-  if (!route) {
-    return buildDenied(
-      "not-found",
-      null
+  const canonicalPath =
+    normalizeCanonicalPath(
+      AppCore,
+      requestedCanonicalPath
     );
+
+  /* ruta inexistente:
+     no bloquear aquí */
+  if (!route) {
+    return {
+      allowed: true,
+      reason: null,
+      route: null,
+      redirectTo: null,
+      canonicalPath,
+    };
   }
 
-  const authenticated =
+  const logged =
     isAuthenticated(
+      AppCore,
       Auth
     );
 
-  const authReady =
-    isAuthReady(
-      AppCore
+  const currentRole =
+    getUserRole(AppCore);
+
+  const requiresAuth =
+    routeRequiresAuth(
+      route
     );
 
-  /* =====================================
-     LOGIN
-  ===================================== */
-  if (
-    isLoginRoute(
-      route,
-      routeNames
-    )
-  ) {
-    return evaluateLoginRoute({
-      AppCore,
-      authenticated,
-      authReady,
-      getRoute,
-    });
-  }
-
-  /* =====================================
-     PUBLIC
-  ===================================== */
-  if (
-    isPublicRoute(
+  const guestOnly =
+    routeGuestOnly(
       route
-    )
+    );
+
+  const allowedRoles =
+    getRouteRoles(route);
+
+  /* guest only */
+  if (
+    guestOnly &&
+    logged
   ) {
-    return buildAllowed();
+    return {
+      allowed: false,
+      reason:
+        "already-authenticated",
+      route,
+      redirectTo:
+        route.redirectAuthenticated ||
+        route.redirectIfAuth ||
+        routeNames.HOME,
+      canonicalPath,
+    };
   }
 
-  /* =====================================
-     PRIVATE
-  ===================================== */
-  return evaluatePrivateRoute({
-    AppCore,
-    Auth,
+  /* requires auth */
+  if (
+    requiresAuth &&
+    !logged
+  ) {
+    return {
+      allowed: false,
+      reason:
+        "not-authenticated",
+      route,
+      redirectTo:
+        routeNames.LOGIN,
+      canonicalPath,
+    };
+  }
+
+  /* roles */
+  if (
+    allowedRoles.length >
+      0 &&
+    logged
+  ) {
+    const ok =
+      allowedRoles.includes(
+        currentRole
+      );
+
+    if (!ok) {
+      return {
+        allowed: false,
+        reason:
+          "insufficient-role",
+        route,
+        redirectTo:
+          route.redirectForbidden ||
+          null,
+        canonicalPath,
+      };
+    }
+  }
+
+  /* si define roles y no está logueado */
+  if (
+    allowedRoles.length >
+      0 &&
+    !logged
+  ) {
+    return {
+      allowed: false,
+      reason:
+        "not-authenticated",
+      route,
+      redirectTo:
+        routeNames.LOGIN,
+      canonicalPath,
+    };
+  }
+
+  return {
+    allowed: true,
+    reason: null,
     route,
-    authenticated,
-    requestedCanonicalPath,
-    getRoute,
-  });
+    redirectTo: null,
+    canonicalPath,
+    getRoute:
+      typeof getRoute ===
+      "function"
+        ? getRoute
+        : null,
+  };
 }

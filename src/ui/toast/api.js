@@ -9,6 +9,8 @@
    - integrar store + dom + timers + events
    - limitar máximo de toasts
    - refresco live de idioma
+   - soportar replace por id de forma estable
+   - endurecer dismiss / clear / reset
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -104,13 +106,59 @@ function buildToastItem({
     dismissed: false,
     useDefaultTitle: Boolean(useDefaultTitle),
     useDefaultMessage: Boolean(useDefaultMessage),
+    interactionsBound: false,
   };
+}
+
+function safeWarn(...args) {
+  try {
+    AppCore?.utils?.warn?.(...args);
+  } catch {}
+}
+
+function isPersistedToast(item) {
+  return Number(item?.duration || 0) <= 0;
+}
+
+function syncToastProgress(item) {
+  if (!item || item.dismissed) {
+    return;
+  }
+
+  if (isPersistedToast(item)) {
+    if (item?.progressEl) {
+      item.progressEl.style.animation = "none";
+      item.progressEl.style.opacity = "0";
+      item.progressEl.style.transform = "";
+    }
+    return;
+  }
+
+  runToastProgress(item, item.duration);
+}
+
+function syncToastTimer(item) {
+  if (!item || item.dismissed) {
+    return;
+  }
+
+  clearToastTimer(item);
+
+  if (isPersistedToast(item)) {
+    item.remaining = 0;
+    item.startedAt = 0;
+    return;
+  }
+
+  item.remaining = item.duration;
+  item.startedAt = 0;
+  startToastTimer(item);
 }
 
 function registerToastInteractions(item) {
   const toastEl = item?.toastEl;
 
-  if (!toastEl) {
+  if (!toastEl || item?.interactionsBound) {
     return;
   }
 
@@ -121,6 +169,8 @@ function registerToastInteractions(item) {
   toastEl.addEventListener("mouseleave", () => {
     resumeToastTimer(item);
   });
+
+  item.interactionsBound = true;
 }
 
 function destroyToastItem(item) {
@@ -166,6 +216,7 @@ function createOrReplaceToastNode(item) {
 
   item.toastEl = nextNode;
   item.progressEl = nextNode.querySelector(".toast-progress");
+  item.interactionsBound = false;
 
   return item;
 }
@@ -242,12 +293,7 @@ export function showToast(options = {}) {
   );
 
   if (!message) {
-    try {
-      AppCore?.utils?.warn?.(
-        "[Toast] show requiere message/text."
-      );
-    } catch {}
-
+    safeWarn("[Toast] show requiere message/text.");
     return null;
   }
 
@@ -297,8 +343,8 @@ export function showToast(options = {}) {
   container.appendChild(toastEl);
 
   registerToastInteractions(item);
-  runToastProgress(item, duration);
-  startToastTimer(item);
+  syncToastProgress(item);
+  syncToastTimer(item);
   enforceToastLimit();
 
   requestAnimationFrame(() => {
@@ -358,12 +404,7 @@ export function updateToast(id, patch = {}) {
       : item.message;
 
   if (!nextMessage) {
-    try {
-      AppCore?.utils?.warn?.(
-        "[Toast] update requiere message/text."
-      );
-    } catch {}
-
+    safeWarn("[Toast] update requiere message/text.");
     return null;
   }
 
@@ -399,8 +440,8 @@ export function updateToast(id, patch = {}) {
   }
 
   registerToastInteractions(item);
-  runToastProgress(item, nextDuration);
-  startToastTimer(item);
+  syncToastProgress(item);
+  syncToastTimer(item);
 
   requestAnimationFrame(() => {
     if (item.toastEl?.isConnected && !item.dismissed) {
@@ -470,7 +511,7 @@ export function dismissToast(id) {
 ========================================================= */
 
 export function clearToasts() {
-  const ids = getToastIds();
+  const ids = [...getToastIds()];
 
   ids.forEach((id) => {
     dismissToast(id);
@@ -545,7 +586,15 @@ export function loadingToast(message = "", options = {}) {
 ========================================================= */
 
 export function resetToastApiState() {
-  clearToasts();
+  const items = getToastItems();
+
+  items.forEach((item) => {
+    try {
+      clearToastTimer(item);
+      removeToastNode(item);
+    } catch {}
+  });
+
   resetToastStore();
 
   return true;

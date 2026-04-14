@@ -19,6 +19,8 @@
    - mantiene loader global apagado en auth
    - fija ruta pública /reset-password
    - endurece navegación y cleanup
+   - evita mensajes contradictorios success/cooldown
+   - unifica ids de toast por flujo
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -62,6 +64,16 @@ import {
 } from "./reset-password.helpers.js";
 
 /* =========================================================
+   CONSTANTS
+========================================================= */
+
+const RESET_TOAST_IDS = {
+  loading: "reset-password-loading",
+  result: "reset-password-result",
+  theme: "reset-password-theme",
+};
+
+/* =========================================================
    HELPERS
 ========================================================= */
 
@@ -83,6 +95,57 @@ function safeToastCall(toast, method, ...args) {
   } catch {}
 
   return null;
+}
+
+function dismissResetFlowToasts(toast) {
+  safeToastCall(toast, "dismiss", RESET_TOAST_IDS.loading);
+  safeToastCall(toast, "dismiss", RESET_TOAST_IDS.result);
+}
+
+function showResetLoadingToast(toast) {
+  return safeToastCall(
+    toast,
+    "loading",
+    "Comprobando identificador y preparando recuperación...",
+    {
+      id: RESET_TOAST_IDS.loading,
+      persist: true,
+      dedupeMs: 0,
+    }
+  );
+}
+
+function showResetErrorToast(toast, message) {
+  return safeToastCall(
+    toast,
+    "error",
+    message,
+    {
+      id: RESET_TOAST_IDS.result,
+    }
+  );
+}
+
+function showResetWarningToast(toast, message) {
+  return safeToastCall(
+    toast,
+    "warning",
+    message,
+    {
+      id: RESET_TOAST_IDS.result,
+    }
+  );
+}
+
+function showResetSuccessToast(toast, message) {
+  return safeToastCall(
+    toast,
+    "success",
+    message,
+    {
+      id: RESET_TOAST_IDS.result,
+    }
+  );
 }
 
 function resolveRequestPasswordResetExecutor(deps = {}) {
@@ -284,7 +347,7 @@ function emitResetPasswordError(detail = {}) {
   } catch {}
 }
 
-function restoreInitialUiState(refs) {
+function restoreInitialUiState(refs, toast) {
   try {
     hideResetPasswordToast(refs);
   } catch {}
@@ -295,6 +358,10 @@ function restoreInitialUiState(refs) {
 
   try {
     clearResetPasswordErrors(refs);
+  } catch {}
+
+  try {
+    dismissResetFlowToasts(toast);
   } catch {}
 }
 
@@ -352,18 +419,19 @@ function renderResetPasswordView(container, deps = {}) {
   const executeResetPassword = resolveRequestPasswordResetExecutor(deps);
 
   safeToastCall(toast, "init");
-  restoreInitialUiState(refs);
+  restoreInitialUiState(refs, toast);
 
   if (!executeResetPassword) {
     const message =
       "No se encontró un executor para recuperación de acceso. Revisa src/features/auth/index.js o pasa deps.requestResetPassword.";
 
     setGlobalResetPasswordError(refs, message);
-    safeToastCall(toast, "error", message);
+    showResetErrorToast(toast, message);
     emitRouteRendered();
 
     return {
       destroy() {
+        dismissResetFlowToasts(toast);
         disableAuthScreenMode();
       },
     };
@@ -388,6 +456,7 @@ function renderResetPasswordView(container, deps = {}) {
     clearResetPasswordErrors(refs);
     setResetPasswordNeutralState(refs);
     hideResetPasswordToast(refs);
+    dismissResetFlowToasts(toast);
   };
 
   const onToastClose = () => {
@@ -396,6 +465,7 @@ function renderResetPasswordView(container, deps = {}) {
     }
 
     hideResetPasswordToast(refs);
+    dismissResetFlowToasts(toast);
   };
 
   const onBackToLogin = (event) => {
@@ -406,6 +476,7 @@ function renderResetPasswordView(container, deps = {}) {
     }
 
     isNavigatingAway = true;
+    dismissResetFlowToasts(toast);
     disableAuthScreenMode();
     navigateTo(backHref);
   };
@@ -416,7 +487,13 @@ function renderResetPasswordView(container, deps = {}) {
     }
 
     const nextTheme = toggleTheme();
-    safeToastCall(toast, "info", `Tema ${nextTheme} activado.`);
+
+    safeToastCall(
+      toast,
+      "info",
+      `Tema ${nextTheme} activado.`,
+      { id: RESET_TOAST_IDS.theme }
+    );
   };
 
   const onSubmit = async (event) => {
@@ -435,6 +512,7 @@ function renderResetPasswordView(container, deps = {}) {
 
     clearResetPasswordErrors(refs);
     setResetPasswordNeutralState(refs);
+    dismissResetFlowToasts(toast);
 
     const formState = readResetPasswordFormState(refs);
     const payload = createResetPasswordPayload(formState);
@@ -444,9 +522,8 @@ function renderResetPasswordView(container, deps = {}) {
       applyResetPasswordErrors(refs, errors);
       shakeResetPasswordCard(refs);
 
-      safeToastCall(
+      showResetErrorToast(
         toast,
-        "error",
         getFirstResetPasswordError(errors) ||
           "Revisa el identificador introducido."
       );
@@ -457,45 +534,65 @@ function renderResetPasswordView(container, deps = {}) {
 
     persistResetPasswordIdentifier(payload.identifier);
 
-    let loadingToastId = null;
-
     try {
       setResetPasswordLoading(refs, true, {
         submitLabel,
         loadingLabel,
       });
 
-      loadingToastId = safeToastCall(
-        toast,
-        "loading",
-        "Comprobando identificador y preparando recuperación...",
-        {
-          persist: true,
-        }
-      );
+      showResetLoadingToast(toast);
 
       const rawResult = await executeResetPassword(payload);
       const result = normalizeResetPasswordResult(rawResult);
 
-      safeToastCall(toast, "dismiss", loadingToastId);
+      safeToastCall(toast, "dismiss", RESET_TOAST_IDS.loading);
 
+      /* =====================================================
+         RESULTADO NO OK
+      ===================================================== */
       if (!result.ok) {
-        const message =
-          result.message ||
-          "No se pudo iniciar la recuperación de acceso.";
+        const isCooldown =
+          Boolean(result?.cooldown) ||
+          Number(result?.retryAfter || 0) > 0 ||
+          Number(result?.cooldownSeconds || 0) > 0 ||
+          Number(result?.status || 0) === 429;
+
+        const message = isCooldown
+          ? buildResetPasswordCooldownMessage(
+              result.retryAfter || result.cooldownSeconds || 60
+            )
+          : (
+              result.message ||
+              "No se pudo iniciar la recuperación de acceso."
+            );
 
         setGlobalResetPasswordError(refs, message);
         shakeResetPasswordCard(refs);
-        safeToastCall(toast, "error", message);
+
+        if (isCooldown) {
+          showResetWarningToast(toast, message);
+        } else {
+          showResetErrorToast(toast, message);
+        }
 
         isSubmitting = false;
+
         setResetPasswordLoading(refs, false, {
           submitLabel,
           loadingLabel,
         });
+
+        emitResetPasswordError({
+          message,
+          result,
+        });
+
         return;
       }
 
+      /* =====================================================
+         RESULTADO OK REAL
+      ===================================================== */
       successLocked = true;
       isSubmitting = false;
 
@@ -507,17 +604,7 @@ function renderResetPasswordView(container, deps = {}) {
         message: successMessage,
       });
 
-      safeToastCall(toast, "success", successMessage);
-
-      if (result.cooldownSeconds > 0) {
-        safeToastCall(
-          toast,
-          "info",
-          buildResetPasswordCooldownMessage(
-            result.cooldownSeconds
-          )
-        );
-      }
+      showResetSuccessToast(toast, successMessage);
 
       emitResetPasswordRequested({
         identifier: payload.identifier,
@@ -531,18 +618,42 @@ function renderResetPasswordView(container, deps = {}) {
 
       if (deps.navigateAfterSuccess === true) {
         isNavigatingAway = true;
+        dismissResetFlowToasts(toast);
         disableAuthScreenMode();
         navigateTo(redirectTo);
         return;
       }
     } catch (error) {
-      safeToastCall(toast, "dismiss", loadingToastId);
+      safeToastCall(toast, "dismiss", RESET_TOAST_IDS.loading);
 
-      const message = resolveResetPasswordErrorMessage(error);
+      const normalizedMessage =
+        resolveResetPasswordErrorMessage(error);
+
+      const retryAfter =
+        Number(
+          error?.retryAfter ??
+          error?.data?.retryAfter ??
+          error?.data?.cooldownSeconds ??
+          0
+        ) || 0;
+
+      const isCooldown =
+        Number(error?.status || 0) === 429 ||
+        Boolean(error?.cooldown) ||
+        retryAfter > 0;
+
+      const message = isCooldown
+        ? buildResetPasswordCooldownMessage(retryAfter || 60)
+        : normalizedMessage;
 
       setGlobalResetPasswordError(refs, message);
       shakeResetPasswordCard(refs);
-      safeToastCall(toast, "error", message);
+
+      if (isCooldown) {
+        showResetWarningToast(toast, message);
+      } else {
+        showResetErrorToast(toast, message);
+      }
 
       emitResetPasswordError({
         message,
@@ -626,6 +737,10 @@ function renderResetPasswordView(container, deps = {}) {
 
       try {
         hideResetPasswordToast(refs);
+      } catch {}
+
+      try {
+        dismissResetFlowToasts(toast);
       } catch {}
 
       if (!isNavigatingAway) {

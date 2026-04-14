@@ -8,6 +8,9 @@
    - render principal
    - cargar datos
    - bind de eventos
+   - evitar doble bind de listeners
+   - soportar destroy limpio del router
+   - permitir reload con rerender
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -36,21 +39,66 @@ import {
 export const IncidenciasView = (() => {
   "use strict";
 
+  const SCOPE = "view:incidencias";
+
+  let initialized = false;
+  let bindingsCleanup = null;
+
+  /* =====================================================
+     HELPERS
+  ===================================================== */
+
+  function getContainer() {
+    return (
+      AppCore?.dom?.viewContainer ||
+      document.getElementById("view-container") ||
+      null
+    );
+  }
+
+  function cleanupBindings() {
+    try {
+      bindingsCleanup?.();
+    } catch {}
+
+    bindingsCleanup = null;
+
+    try {
+      AppCore?.cleanup?.run?.(SCOPE);
+    } catch {}
+  }
+
+  function bind() {
+    cleanupBindings();
+
+    const maybeCleanup =
+      bindIncidenciasEvents({
+        loadIncidencias,
+        openTicket,
+        scope: SCOPE,
+      });
+
+    if (typeof maybeCleanup === "function") {
+      bindingsCleanup = maybeCleanup;
+    }
+  }
+
   /* =====================================================
      RENDER
   ===================================================== */
 
   function render() {
-    const container =
-      AppCore.dom.viewContainer;
+    const container = getContainer();
 
-    if (!container) return;
+    if (!container) {
+      return null;
+    }
 
-    AppCore.setDocumentTitle(
+    AppCore?.setDocumentTitle?.(
       "Incidencias"
     );
 
-    AppCore.clearDynamicContainers?.();
+    AppCore?.clearDynamicContainers?.();
 
     container.innerHTML = `
       <section class="panel-content dashboard ready">
@@ -63,10 +111,42 @@ export const IncidenciasView = (() => {
 
     setHydrated(true);
 
-    bindIncidenciasEvents({
-      loadIncidencias,
-      openTicket,
-    });
+    return container;
+  }
+
+  /* =====================================================
+     LOAD + RENDER
+  ===================================================== */
+
+  async function renderAndLoad() {
+    render();
+
+    try {
+      await loadIncidencias();
+    } catch (error) {
+      AppCore?.utils?.warn?.(
+        "[IncidenciasView] loadIncidencias falló",
+        error
+      );
+    }
+
+    render();
+  }
+
+  async function reload(options = {}) {
+    try {
+      await loadIncidencias({
+        force: true,
+        ...options,
+      });
+    } catch (error) {
+      AppCore?.utils?.warn?.(
+        "[IncidenciasView] reload falló",
+        error
+      );
+    }
+
+    render();
   }
 
   /* =====================================================
@@ -74,28 +154,37 @@ export const IncidenciasView = (() => {
   ===================================================== */
 
   async function init() {
-    render();
+    initialized = true;
 
-    try {
-      await loadIncidencias();
-    } catch {
-      /* noop */
-    }
+    await renderAndLoad();
+    bind();
 
-    render();
+    return api;
+  }
+
+  /* =====================================================
+     DESTROY
+  ===================================================== */
+
+  function destroy() {
+    initialized = false;
+    cleanupBindings();
   }
 
   /* =====================================================
      API
   ===================================================== */
 
-  return {
+  const api = {
     init,
     render,
-    reload: () =>
-      loadIncidencias({
-        force: true,
-      }),
+    reload,
+    destroy,
     loadIncidencias,
+    get initialized() {
+      return initialized;
+    },
   };
+
+  return api;
 })();

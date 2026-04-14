@@ -5,13 +5,13 @@
    Responsabilidades:
    - resolver identificador de recuperación
    - normalizar payload de reset-password-request
-   - construir body de request alineado con backend real
-   - ejecutar petición de recuperación de acceso
-   - normalizar la respuesta del backend
-   - tolerar AppCore.request o fetch nativo
-   - endurecer validaciones y resolución de endpoint
-   - soportar cooldown / rate limit correctamente
-   - no asumir success por defecto
+   - construir body robusto compatible con backends legacy
+   - ejecutar petición recovery vía AppCore o fetch
+   - normalizar respuestas y errores
+   - soportar cooldown / rate-limit sin romper UX
+   - nunca asumir success por defecto
+   - endurecer urls / timeout / payload
+   - api pública estable para Auth module
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -39,6 +39,10 @@ function isObject(value) {
   return value !== null && typeof value === "object";
 }
 
+function isFunction(value) {
+  return typeof value === "function";
+}
+
 function isAbsoluteUrl(value = "") {
   return /^https?:\/\//i.test(String(value || ""));
 }
@@ -47,20 +51,27 @@ function looksLikeEmail(value = "") {
   return safeText(value, "").includes("@");
 }
 
+function safeNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 function getResetIdentifierMaxLength() {
-  return Number(
+  return safeNumber(
     AUTH_CONSTANTS?.resetIdentifierMaxLength ??
     AUTH_CONSTANTS?.identifierMaxLength ??
+    160,
     160
-  ) || 160;
+  );
 }
 
 function getRequestTimeout() {
-  return Number(
+  return safeNumber(
     AUTH_CONSTANTS?.requestTimeout ??
     AppCore?.config?.requestTimeout ??
+    15000,
     15000
-  ) || 15000;
+  );
 }
 
 function getDefaultSuccessMessage() {
@@ -72,21 +83,25 @@ function getDefaultErrorMessage() {
 }
 
 /* =========================================================
-   ENDPOINT RESOLUTION
+   ENDPOINT
 ========================================================= */
 
 function getConfiguredEndpoint() {
   const candidates = [
-    typeof getRequestPasswordResetEndpointFromConstants === "function"
+    isFunction(getRequestPasswordResetEndpointFromConstants)
       ? getRequestPasswordResetEndpointFromConstants()
       : "",
+
     AUTH_ENDPOINTS?.resetPasswordRequest,
     AUTH_ENDPOINTS?.requestPasswordReset,
+    AUTH_ENDPOINTS?.forgotPassword,
+
     "/api/auth/reset-password-request",
   ];
 
   for (const candidate of candidates) {
     const value = safeText(candidate, "");
+
     if (value) {
       return value;
     }
@@ -105,17 +120,19 @@ export function getRequestPasswordResetEndpoint() {
 
 export function resolveResetPasswordIdentifier(payload = {}) {
   return safeText(
-    payload?.identifier ||
-    payload?.email ||
-    payload?.username ||
-    payload?.user ||
+    payload?.identifier ??
+    payload?.email ??
+    payload?.username ??
+    payload?.user ??
     "",
     ""
   );
 }
 
 export function normalizeResetPasswordPayload(payload = {}) {
-  const identifier = resolveResetPasswordIdentifier(payload);
+  const identifier =
+    resolveResetPasswordIdentifier(payload)
+      .slice(0, getResetIdentifierMaxLength());
 
   const email = looksLikeEmail(identifier)
     ? identifier.toLowerCase()
@@ -165,88 +182,137 @@ export function buildResetPasswordRequestBody(payload = {}) {
    RESPONSE NORMALIZATION
 ========================================================= */
 
-export function normalizeResetPasswordResponse(response = {}) {
-  const explicitOk =
-    typeof response?.ok === "boolean"
-      ? response.ok
-      : typeof response?.success === "boolean"
-        ? response.success
-        : typeof response?.data?.ok === "boolean"
-          ? response.data.ok
-          : typeof response?.data?.success === "boolean"
-            ? response.data.success
-            : null;
+function resolveExplicitOk(response = {}) {
+  const values = [
+    response?.ok,
+    response?.success,
+    response?.data?.ok,
+    response?.data?.success,
+  ];
 
-  const retryAfter =
-    Number(
+  for (const value of values) {
+    if (typeof value === "boolean") {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function resolveRetryAfter(response = {}) {
+  return Math.max(
+    0,
+    safeNumber(
       response?.retryAfter ??
       response?.cooldownSeconds ??
       response?.data?.retryAfter ??
       response?.data?.cooldownSeconds ??
+      0,
       0
-    ) || 0;
+    )
+  );
+}
+
+function resolveStatus(response = {}) {
+  return safeNumber(
+    response?.status ??
+    response?.statusCode ??
+    response?.data?.status ??
+    0,
+    0
+  );
+}
+
+function resolveMessage(response = {}, ok = false, cooldown = false) {
+  const raw =
+    response?.message ??
+    response?.mensaje ??
+    response?.detail ??
+    response?.error ??
+    response?.data?.message ??
+    response?.data?.mensaje ??
+    response?.data?.detail ??
+    response?.data?.error ??
+    "";
+
+  const message = safeText(raw, "");
+
+  if (message) {
+    return message;
+  }
+
+  if (ok) {
+    return getDefaultSuccessMessage();
+  }
+
+  if (cooldown) {
+    return "Espera un momento antes de volver a intentarlo.";
+  }
+
+  return getDefaultErrorMessage();
+}
+
+export function normalizeResetPasswordResponse(response = {}) {
+  const explicitOk =
+    resolveExplicitOk(response);
 
   const status =
-    Number(
-      response?.status ??
-      response?.statusCode ??
-      response?.data?.status ??
-      0
-    ) || 0;
+    resolveStatus(response);
 
-  const isCooldown =
+  const retryAfter =
+    resolveRetryAfter(response);
+
+  const cooldown =
     status === 429 ||
-    retryAfter > 0;
+    retryAfter > 0 ||
+    response?.cooldown === true;
 
   const ok =
     explicitOk === null
       ? false
       : Boolean(explicitOk);
 
+  const redirectTo = safeText(
+    response?.redirectTo ??
+    response?.redirect ??
+    response?.data?.redirectTo ??
+    response?.data?.redirect ??
+    "",
+    ""
+  );
+
+  const emailMasked = safeText(
+    response?.emailMasked ??
+    response?.maskedEmail ??
+    response?.data?.emailMasked ??
+    response?.data?.maskedEmail ??
+    "",
+    ""
+  );
+
   const message =
-    safeText(
-      response?.message ||
-      response?.mensaje ||
-      response?.detail ||
-      response?.error ||
-      response?.data?.message ||
-      response?.data?.mensaje ||
-      response?.data?.detail ||
-      response?.data?.error ||
-      "",
-      ok
-        ? getDefaultSuccessMessage()
-        : isCooldown
-          ? "Espera 1 minuto antes de volver a intentarlo."
-          : getDefaultErrorMessage()
+    resolveMessage(
+      response,
+      ok,
+      cooldown
     );
-
-  const redirectTo =
-    response?.redirectTo ||
-    response?.redirect ||
-    response?.data?.redirectTo ||
-    response?.data?.redirect ||
-    "";
-
-  const emailMasked =
-    response?.emailMasked ||
-    response?.maskedEmail ||
-    response?.data?.emailMasked ||
-    response?.data?.maskedEmail ||
-    "";
 
   return {
     raw: response,
+
     ok,
     success: ok,
     error: !ok,
-    cooldown: isCooldown,
-    retryAfter: Math.max(0, retryAfter),
-    cooldownSeconds: Math.max(0, retryAfter),
+
     status,
+
+    cooldown,
+    retryAfter,
+    cooldownSeconds: retryAfter,
+
     message,
-    redirectTo: safeText(redirectTo, ""),
-    emailMasked: safeText(emailMasked, ""),
+    redirectTo,
+    emailMasked,
   };
 }
 
@@ -255,29 +321,34 @@ export function normalizeResetPasswordResponse(response = {}) {
 ========================================================= */
 
 function buildFinalUrl(endpoint = "") {
-  const cleanEndpoint = safeText(endpoint, "");
+  const clean =
+    safeText(endpoint, "");
 
-  if (!cleanEndpoint) {
+  if (!clean) {
     return "/api/auth/reset-password-request";
   }
 
-  if (isAbsoluteUrl(cleanEndpoint)) {
-    return cleanEndpoint;
+  if (isAbsoluteUrl(clean)) {
+    return clean;
   }
 
-  const apiBase = safeText(
-    AppCore?.config?.apiBase,
-    ""
-  );
+  const apiBase =
+    safeText(
+      AppCore?.config?.apiBase,
+      ""
+    );
 
   if (!apiBase) {
-    return cleanEndpoint;
+    return clean;
   }
 
-  const left = apiBase.replace(/\/+$/, "");
-  const right = cleanEndpoint.startsWith("/")
-    ? cleanEndpoint
-    : `/${cleanEndpoint}`;
+  const left =
+    apiBase.replace(/\/+$/, "");
+
+  const right =
+    clean.startsWith("/")
+      ? clean
+      : `/${clean}`;
 
   return `${left}${right}`;
 }
@@ -288,12 +359,12 @@ function buildFinalUrl(endpoint = "") {
 
 async function requestWithAppCore(endpoint, body) {
   const requestFn =
-    AppCore?.utils?.request ||
-    AppCore?.request ||
-    AppCore?.services?.http?.request ||
+    AppCore?.utils?.request ??
+    AppCore?.request ??
+    AppCore?.services?.http?.request ??
     null;
 
-  if (typeof requestFn !== "function") {
+  if (!isFunction(requestFn)) {
     return null;
   }
 
@@ -310,14 +381,14 @@ async function requestWithAppCore(endpoint, body) {
 ========================================================= */
 
 async function requestWithFetch(endpoint, body) {
-  const finalUrl =
+  const url =
     buildFinalUrl(endpoint);
 
-  const response = await fetch(finalUrl, {
+  const response = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Accept": "application/json",
+      Accept: "application/json",
     },
     body: JSON.stringify(body),
   });
@@ -330,12 +401,17 @@ async function requestWithFetch(endpoint, body) {
     data = null;
   }
 
+  const payload =
+    isObject(data)
+      ? data
+      : {};
+
   if (!response.ok) {
     const error = new Error(
       safeText(
-        data?.message ||
-        data?.mensaje ||
-        data?.error ||
+        payload?.message ??
+        payload?.mensaje ??
+        payload?.error ??
         response.statusText,
         getDefaultErrorMessage()
       )
@@ -343,35 +419,23 @@ async function requestWithFetch(endpoint, body) {
 
     error.status = response.status;
     error.statusText = response.statusText;
-    error.data = data;
-
-    error.retryAfter = Number(
-      data?.retryAfter ??
-      data?.cooldownSeconds ??
-      0
-    ) || 0;
-
+    error.retryAfter = resolveRetryAfter(payload);
     error.cooldown =
       response.status === 429 ||
       error.retryAfter > 0;
+    error.data = payload;
 
     throw error;
   }
 
-  return isObject(data)
-    ? {
-        ...data,
-        ok:
-          typeof data?.ok === "boolean"
-            ? data.ok
-            : true,
-        status: response.status,
-      }
-    : {
-        ok: true,
-        status: response.status,
-        data,
-      };
+  return {
+    ...payload,
+    ok:
+      typeof payload?.ok === "boolean"
+        ? payload.ok
+        : true,
+    status: response.status,
+  };
 }
 
 /* =========================================================
@@ -379,22 +443,26 @@ async function requestWithFetch(endpoint, body) {
 ========================================================= */
 
 export async function requestPasswordReset(payload = {}) {
-  const normalizedPayload =
+  const normalized =
     normalizeResetPasswordPayload(payload);
 
-  if (!normalizedPayload.identifier) {
-    throw new Error(
-      "No se recibió identificador para recuperación de acceso."
-    );
+  if (!normalized.identifier) {
+    return normalizeResetPasswordResponse({
+      ok: false,
+      message:
+        "No se recibió identificador para recuperación de acceso.",
+    });
   }
 
   if (
-    normalizedPayload.identifier.length >
+    normalized.identifier.length >
     getResetIdentifierMaxLength()
   ) {
-    throw new Error(
-      "El identificador de recuperación es demasiado largo."
-    );
+    return normalizeResetPasswordResponse({
+      ok: false,
+      message:
+        "El identificador de recuperación es demasiado largo.",
+    });
   }
 
   const endpoint =
@@ -402,7 +470,7 @@ export async function requestPasswordReset(payload = {}) {
 
   const body =
     buildResetPasswordRequestBody(
-      normalizedPayload
+      normalized
     );
 
   try {
@@ -410,44 +478,42 @@ export async function requestPasswordReset(payload = {}) {
       "[Auth] requestPasswordReset",
       {
         endpoint,
-        finalUrl: buildFinalUrl(endpoint),
+        finalUrl:
+          buildFinalUrl(endpoint),
         identifier:
-          normalizedPayload.identifier,
+          normalized.identifier,
         mode:
-          normalizedPayload.email
+          normalized.email
             ? "email"
             : "username",
       }
     );
   } catch {}
 
-  let rawResponse = null;
-
   try {
-    rawResponse =
+    let raw =
       await requestWithAppCore(
         endpoint,
         body
       );
 
     if (
-      rawResponse === null ||
-      rawResponse === undefined
+      raw === null ||
+      raw === undefined
     ) {
-      rawResponse =
+      raw =
         await requestWithFetch(
           endpoint,
           body
         );
     }
 
-    return normalizeResetPasswordResponse(
-      rawResponse
-    );
+    return normalizeResetPasswordResponse(raw);
   } catch (error) {
     return normalizeResetPasswordResponse({
       ok: false,
-      status: error?.status || 0,
+      status:
+        error?.status || 0,
       retryAfter:
         error?.retryAfter || 0,
       cooldown:
@@ -455,7 +521,8 @@ export async function requestPasswordReset(payload = {}) {
       message:
         error?.message ||
         getDefaultErrorMessage(),
-      data: error?.data || null,
+      data:
+        error?.data || null,
     });
   }
 }

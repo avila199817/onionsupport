@@ -17,6 +17,7 @@
    - metadata estable
    - soporte para vistas tipo objeto y vistas tipo función
    - integración de rutas auth públicas
+   - priorizar init() sobre render() en vistas objeto
 ========================================================= */
 
 import { I18n } from "../i18n/index.js";
@@ -180,22 +181,28 @@ function resolveViewRenderer(
     return view;
   }
 
-  if (
-    view &&
-    typeof view.render ===
-      "function"
-  ) {
-    return view.render.bind(
-      view
-    );
-  }
-
+  /*
+    IMPORTANTE:
+    Priorizamos init() antes que render()
+    porque vistas como IncidenciasView
+    cargan datos dentro de init().
+  */
   if (
     view &&
     typeof view.init ===
       "function"
   ) {
     return view.init.bind(
+      view
+    );
+  }
+
+  if (
+    view &&
+    typeof view.render ===
+      "function"
+  ) {
+    return view.render.bind(
       view
     );
   }

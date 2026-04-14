@@ -8,6 +8,8 @@
    - exponer helpers auth de estado / rol
    - construir snapshots consistentes
    - exponer Authorization header
+   - endurecer sync con AppCore.state
+   - evitar estados auth fantasma
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -32,42 +34,116 @@ import {
 } from "./storage.js";
 
 /* =========================================================
+   BASICS
+========================================================= */
+
+function safeText(value, fallback = "") {
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+
+  const text = String(value).trim();
+  return text || fallback;
+}
+
+function safeBool(value) {
+  return value === true;
+}
+
+function safeEmit(eventName, payload = {}) {
+  try {
+    AppCore?.events?.emit?.(eventName, payload);
+  } catch {}
+}
+
+function ensureCoreState() {
+  if (!AppCore.state || typeof AppCore.state !== "object") {
+    AppCore.state = {};
+  }
+
+  return AppCore.state;
+}
+
+function resolveRoleFromUser(user = null) {
+  return safeText(
+    user?.role ??
+    user?.rol ??
+    "",
+    ""
+  )
+    .toLowerCase();
+}
+
+function syncDerivedState() {
+  const state = ensureCoreState();
+
+  state.authenticated = Boolean(state.token);
+  state.role = state.authenticated
+    ? resolveRoleFromUser(state.user)
+    : "";
+
+  return state;
+}
+
+function safeSetToken(token = null) {
+  if (typeof AppCore?.setToken === "function") {
+    AppCore.setToken(token || null);
+    return;
+  }
+
+  const state = ensureCoreState();
+  state.token = token || null;
+  syncDerivedState();
+}
+
+function safeSetUser(user = null) {
+  if (typeof AppCore?.setUser === "function") {
+    AppCore.setUser(user || null);
+    return;
+  }
+
+  const state = ensureCoreState();
+  state.user = user || null;
+  syncDerivedState();
+}
+
+function safeClearSession() {
+  if (typeof AppCore?.clearSession === "function") {
+    AppCore.clearSession();
+    return;
+  }
+
+  const state = ensureCoreState();
+  state.token = null;
+  state.user = null;
+  state.role = "";
+  state.authenticated = false;
+}
+
+function getCurrentStateSnapshotBase() {
+  const state = ensureCoreState();
+  syncDerivedState();
+
+  return {
+    authenticated: Boolean(state.authenticated),
+    token: state.token || null,
+    user: state.user || null,
+    role: state.role || null,
+  };
+}
+
+/* =========================================================
    SNAPSHOT
 ========================================================= */
-export function buildSessionSnapshot(
-  extra = {}
-) {
+
+export function buildSessionSnapshot(extra = {}) {
+  const base = getCurrentStateSnapshotBase();
+
   return {
-    authenticated:
-      Boolean(
-        AppCore.state
-          .authenticated
-      ),
-
-    token:
-      AppCore.state.token ||
-      null,
-
-    user:
-      AppCore.state.user ||
-      null,
-
-    role:
-      AppCore.state.role ||
-      null,
-
-    refreshToken:
-      getStoredRefreshToken() ||
-      null,
-
-    sessionId:
-      getStoredSessionId() ||
-      null,
-
-    sessionUserId:
-      getStoredSessionUserId() ||
-      null,
-
+    ...base,
+    refreshToken: getStoredRefreshToken() || null,
+    sessionId: getStoredSessionId() || null,
+    sessionUserId: getStoredSessionUserId() || null,
     ...extra,
   };
 }
@@ -75,6 +151,7 @@ export function buildSessionSnapshot(
 /* =========================================================
    APPLY SESSION
 ========================================================= */
+
 export function applySession({
   token = undefined,
   user = undefined,
@@ -85,80 +162,66 @@ export function applySession({
   const normalizedUser =
     user === undefined
       ? undefined
-      : normalizeUser(
-          user
-        );
+      : normalizeUser(user);
 
-  /* token first */
-  if (
-    token !== undefined
-  ) {
-    AppCore.setToken(
-      token || null
-    );
+  /* =======================================================
+     TOKEN
+  ======================================================= */
+  if (token !== undefined) {
+    safeSetToken(token || null);
   }
 
-  /* user second */
-  if (
-    user !== undefined
-  ) {
-    AppCore.setUser(
-      normalizedUser ||
-        null
-    );
+  /* =======================================================
+     USER
+  ======================================================= */
+  if (user !== undefined) {
+    safeSetUser(normalizedUser || null);
   }
 
-  /* storage auth */
-  if (
-    refreshToken !==
-    undefined
-  ) {
-    persistRefreshToken(
-      refreshToken ||
-        null
-    );
+  /* =======================================================
+     STORAGE AUTH
+  ======================================================= */
+  if (refreshToken !== undefined) {
+    persistRefreshToken(refreshToken || null);
   }
 
-  if (
-    tempToken !==
-    undefined
-  ) {
-    persistTempToken(
-      tempToken ||
-        null
-    );
+  if (tempToken !== undefined) {
+    persistTempToken(tempToken || null);
   }
 
-  /* context */
-  if (
-    sessionData !==
-    undefined
-  ) {
+  /* =======================================================
+     CONTEXT
+  ======================================================= */
+  if (sessionData !== undefined) {
     persistSessionContext(
-      sessionData ||
-        null,
-      normalizedUser ||
-        AppCore.state
-          .user
+      sessionData || null,
+      normalizedUser === undefined
+        ? AppCore?.state?.user || null
+        : normalizedUser
     );
   }
 
-  /* aux user data */
+  /* =======================================================
+     AUX USER DATA
+  ======================================================= */
   persistAuxSessionData(
-    normalizedUser ===
-      undefined
-      ? AppCore.state
-          .user
+    normalizedUser === undefined
+      ? AppCore?.state?.user || null
       : normalizedUser
   );
 
-  const snapshot =
-    buildSessionSnapshot();
+  /* =======================================================
+     DERIVED STATE / UI
+  ======================================================= */
+  syncDerivedState();
 
-  AppCore.events.emit(
-    "auth:session:applied",
-    snapshot
-  );
+  try {
+    AppCore?.syncUserUI?.();
+  } catch {}
+
+  const snapshot = buildSessionSnapshot();
+
+  safeEmit("auth:session:applied", snapshot);
 
   return snapshot;
 }
@@ -166,120 +229,93 @@ export function applySession({
 /* =========================================================
    CLEAR SESSION LOCAL
 ========================================================= */
-export function clearSessionLocal(
-  options = {}
-) {
-  const {
-    silent = false,
-  } = options;
+
+export function clearSessionLocal(options = {}) {
+  const { silent = false } = options;
+
+  const before = buildSessionSnapshot();
 
   const hadSomething =
-    Boolean(
-      AppCore.state.token
-    ) ||
-    Boolean(
-      AppCore.state.user
-    ) ||
-    Boolean(
-      getStoredRefreshToken()
-    ) ||
-    Boolean(
-      getStoredSessionId()
-    ) ||
-    Boolean(
-      getStoredSessionUserId()
-    );
+    Boolean(before.token) ||
+    Boolean(before.user) ||
+    Boolean(before.refreshToken) ||
+    Boolean(before.sessionId) ||
+    Boolean(before.sessionUserId);
 
-  AppCore.clearSession();
-
+  safeClearSession();
   clearAuthStorage();
+  syncDerivedState();
 
-  if (
-    !silent &&
-    hadSomething
-  ) {
-    AppCore.events.emit(
-      "auth:session:cleared",
-      {
-        authenticated:
-          false,
-        token: null,
-        user: null,
-        role: null,
-        refreshToken:
-          null,
-        sessionId: null,
-        sessionUserId:
-          null,
-      }
-    );
+  try {
+    AppCore?.syncUserUI?.();
+  } catch {}
+
+  if (!safeBool(silent) && hadSomething) {
+    safeEmit("auth:session:cleared", {
+      authenticated: false,
+      token: null,
+      user: null,
+      role: null,
+      refreshToken: null,
+      sessionId: null,
+      sessionUserId: null,
+    });
   }
+
+  return true;
 }
 
 /* =========================================================
    AUTH HELPERS
 ========================================================= */
+
 export function isAuthenticated() {
-  return Boolean(
-    AppCore.state
-      .authenticated
-  );
+  const state = ensureCoreState();
+  syncDerivedState();
+
+  return Boolean(state.authenticated && state.token);
 }
 
 export function getCurrentRole() {
-  return String(
-    AppCore.state.role ||
-      ""
-  )
-    .trim()
-    .toLowerCase();
+  const state = ensureCoreState();
+  syncDerivedState();
+
+  return safeText(state.role, "").toLowerCase();
 }
 
-export function hasRole(
-  ...roles
-) {
-  if (!roles.length)
+export function hasRole(...roles) {
+  if (!roles.length) {
     return true;
+  }
 
-  const currentRole =
-    getCurrentRole();
+  const currentRole = getCurrentRole();
 
-  if (!currentRole)
+  if (!currentRole) {
     return false;
+  }
 
   return roles
     .flat()
     .map((role) =>
-      String(
-        role || ""
-      )
-        .trim()
-        .toLowerCase()
+      safeText(role, "").toLowerCase()
     )
     .filter(Boolean)
-    .includes(
-      currentRole
-    );
+    .includes(currentRole);
 }
 
-export function requireRole(
-  ...roles
-) {
-  return (
-    isAuthenticated() &&
-    hasRole(...roles)
-  );
+export function requireRole(...roles) {
+  return isAuthenticated() && hasRole(...roles);
 }
 
 /* =========================================================
    AUTH HEADER
 ========================================================= */
+
 export function getAuthHeader() {
-  const token =
-    String(
-      AppCore.state.token ||
-        ""
-    ).trim();
+  const token = safeText(
+    AppCore?.state?.token,
+    ""
+  );
 
   if (!token) {
     return {};
@@ -293,50 +329,28 @@ export function getAuthHeader() {
 /* =========================================================
    DEBUG
 ========================================================= */
+
 export function getSessionDebugSnapshot() {
+  const snapshot = buildSessionSnapshot();
+
   return {
-    authenticated:
-      Boolean(
-        AppCore.state
-          .authenticated
-      ),
-
-    role:
-      AppCore.state.role ||
-      null,
-
+    authenticated: Boolean(snapshot.authenticated),
+    role: snapshot.role || null,
     username:
-      AppCore.state.user
-        ?.username ||
+      snapshot.user?.username ||
+      snapshot.user?.name ||
+      snapshot.user?.nombre ||
       null,
-
-    hasToken:
-      Boolean(
-        AppCore.state.token
-      ),
-
-    refreshToken:
-      getStoredRefreshToken() ||
-      null,
-
-    sessionId:
-      getStoredSessionId() ||
-      null,
-
-    sessionUserId:
-      getStoredSessionUserId() ||
-      null,
+    hasToken: Boolean(snapshot.token),
+    refreshToken: snapshot.refreshToken || null,
+    sessionId: snapshot.sessionId || null,
+    sessionUserId: snapshot.sessionUserId || null,
   };
 }
 
-export function buildAuthErrorPayload(
-  error
-) {
+export function buildAuthErrorPayload(error) {
   return {
     error,
-    message:
-      extractMessage(
-        error
-      ),
+    message: extractMessage(error),
   };
 }

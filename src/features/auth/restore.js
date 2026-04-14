@@ -5,10 +5,11 @@
    Responsabilidades:
    - cargar usuario actual desde /me
    - refrescar access token
-   - restaurar sesión con token o refresh context
+   - restaurar sesión desde token o refresh context
    - serializar me / refresh / restore
-   - endurecer recuperación de sesión
-   - priorizar refresh cuando exista contexto válido para evitar 401 iniciales
+   - evitar carreras concurrentes
+   - priorizar refresh cuando exista contexto válido
+   - endurecer errores y limpieza de sesión
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -43,27 +44,65 @@ import {
 } from "./session.js";
 
 /* =========================================================
+   BASICS
+========================================================= */
+
+function safeNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function safeBool(value) {
+  return value === true;
+}
+
+function emit(eventName, payload = {}) {
+  try {
+    AppCore?.events?.emit?.(
+      eventName,
+      payload
+    );
+  } catch {}
+}
+
+function warn(...args) {
+  try {
+    AppCore?.utils?.warn?.(...args);
+  } catch {}
+}
+
+function getMaxSequentialFailures() {
+  return safeNumber(
+    AUTH_CONSTANTS?.maxSequentialRefreshFailures,
+    3
+  );
+}
+
+function getRefreshRetryCooldownMs() {
+  return safeNumber(
+    AUTH_CONSTANTS?.refreshRetryCooldownMs,
+    60000
+  );
+}
+
+/* =========================================================
    /ME
 ========================================================= */
-export async function fetchMe(
-  session
-) {
+
+export async function fetchMe(session) {
   if (!hasValidToken()) {
     throw new Error(
       "No hay token disponible para /me."
     );
   }
 
-  if (session.mePromise) {
+  if (session?.mePromise) {
     return session.mePromise;
   }
 
   session.checking = true;
 
-  AppCore.events.emit(
-    "auth:me:start",
-    {}
-  );
+  emit("auth:me:start", {});
 
   session.mePromise =
     (async () => {
@@ -77,12 +116,8 @@ export async function fetchMe(
           );
 
         const user =
-          extractUser(
-            response
-          ) ||
-          extractUser(
-            response?.data
-          ) ||
+          extractUser(response) ||
+          extractUser(response?.data) ||
           null;
 
         if (!user) {
@@ -99,7 +134,7 @@ export async function fetchMe(
         session.lastCheckAt =
           Date.now();
 
-        AppCore.events.emit(
+        emit(
           "auth:me:success",
           {
             user:
@@ -109,7 +144,7 @@ export async function fetchMe(
 
         return snapshot.user;
       } catch (error) {
-        AppCore.events.emit(
+        emit(
           "auth:me:error",
           {
             error,
@@ -122,10 +157,8 @@ export async function fetchMe(
 
         throw error;
       } finally {
-        session.checking =
-          false;
-        session.mePromise =
-          null;
+        session.checking = false;
+        session.mePromise = null;
       }
     })();
 
@@ -135,28 +168,25 @@ export async function fetchMe(
 /* =========================================================
    REFRESH
 ========================================================= */
-export async function refreshSession(
-  session
-) {
-  if (
-    !hasRefreshContext()
-  ) {
+
+export async function refreshSession(session) {
+  if (!hasRefreshContext()) {
     throw new Error(
       "No hay contexto de refresh disponible."
     );
   }
 
-  if (
-    session.refreshPromise
-  ) {
+  if (session?.refreshPromise) {
     return session.refreshPromise;
   }
 
   const now = Date.now();
 
   if (
-    session.refreshBlockedUntil >
-    now
+    safeNumber(
+      session?.refreshBlockedUntil,
+      0
+    ) > now
   ) {
     throw new Error(
       "Refresh temporalmente bloqueado."
@@ -165,7 +195,7 @@ export async function refreshSession(
 
   session.refreshing = true;
 
-  AppCore.events.emit(
+  emit(
     "auth:refresh:start",
     {}
   );
@@ -185,18 +215,17 @@ export async function refreshSession(
         const requestBody = {
           refreshToken:
             String(
-              storedRefreshToken ||
-                ""
+              storedRefreshToken || ""
             ).trim(),
+
           sessionId:
             String(
-              storedSessionId ||
-                ""
+              storedSessionId || ""
             ).trim(),
+
           userId:
             String(
-              storedSessionUserId ||
-                ""
+              storedSessionUserId || ""
             ).trim(),
         };
 
@@ -210,19 +239,13 @@ export async function refreshSession(
           );
 
         const nextToken =
-          extractToken(
-            response
-          );
+          extractToken(response);
 
         const nextUser =
-          extractUser(
-            response
-          );
+          extractUser(response);
 
         const nextRefreshToken =
-          extractRefreshToken(
-            response
-          );
+          extractRefreshToken(response);
 
         const nextSessionData =
           normalizeSessionPayload(
@@ -242,15 +265,16 @@ export async function refreshSession(
           applySession({
             token:
               nextToken ??
-              AppCore.state
-                .token,
+              AppCore.state.token,
+
             user:
               nextUser ??
-              AppCore.state
-                .user,
+              AppCore.state.user,
+
             refreshToken:
               nextRefreshToken ??
               storedRefreshToken,
+
             sessionData:
               nextSessionData ?? {
                 sessionId:
@@ -260,9 +284,7 @@ export async function refreshSession(
               },
           });
 
-        if (
-          !snapshot.token
-        ) {
+        if (!snapshot.token) {
           throw new Error(
             "Refresh completado sin token."
           );
@@ -270,12 +292,11 @@ export async function refreshSession(
 
         session.lastRefreshAt =
           Date.now();
-        session.refreshFailCount =
-          0;
-        session.refreshBlockedUntil =
-          0;
 
-        AppCore.events.emit(
+        session.refreshFailCount = 0;
+        session.refreshBlockedUntil = 0;
+
+        emit(
           "auth:refresh:success",
           {
             ...snapshot,
@@ -289,18 +310,22 @@ export async function refreshSession(
           response,
         };
       } catch (error) {
-        session.refreshFailCount += 1;
+        session.refreshFailCount =
+          safeNumber(
+            session.refreshFailCount,
+            0
+          ) + 1;
 
         if (
           session.refreshFailCount >=
-          AUTH_CONSTANTS.maxSequentialRefreshFailures
+          getMaxSequentialFailures()
         ) {
           session.refreshBlockedUntil =
             Date.now() +
-            AUTH_CONSTANTS.refreshRetryCooldownMs;
+            getRefreshRetryCooldownMs();
         }
 
-        AppCore.events.emit(
+        emit(
           "auth:refresh:error",
           {
             error,
@@ -318,10 +343,8 @@ export async function refreshSession(
 
         throw error;
       } finally {
-        session.refreshing =
-          false;
-        session.refreshPromise =
-          null;
+        session.refreshing = false;
+        session.refreshPromise = null;
       }
     })();
 
@@ -331,6 +354,7 @@ export async function refreshSession(
 /* =========================================================
    RESTORE HELPERS
 ========================================================= */
+
 export async function restoreUsingRefreshOnly(
   session
 ) {
@@ -343,18 +367,16 @@ export async function restoreUsingRefreshOnly(
     !AppCore.state.user &&
     hasValidToken()
   ) {
-    await fetchMe(
-      session
-    );
+    await fetchMe(session);
   }
 
-  AppCore.events.emit(
+  emit(
     "auth:restore:success",
     {
       user:
         AppCore.state.user,
       source:
-        "refresh-without-token",
+        "refresh-only",
     }
   );
 
@@ -370,11 +392,9 @@ export async function restoreUsingMe(
   session
 ) {
   const user =
-    await fetchMe(
-      session
-    );
+    await fetchMe(session);
 
-  AppCore.events.emit(
+  emit(
     "auth:restore:success",
     {
       user,
@@ -392,17 +412,17 @@ export async function restoreAfterMeFailure(
   session,
   meError
 ) {
-  AppCore.utils.warn(
-    "fetchMe() falló en restoreSession(), intentando refresh.",
+  warn(
+    "fetchMe() falló en restoreSession().",
     meError
   );
 
-  if (
-    !hasRefreshContext()
-  ) {
-    clearSessionLocal();
+  if (!hasRefreshContext()) {
+    clearSessionLocal({
+      silent: true,
+    });
 
-    AppCore.events.emit(
+    emit(
       "auth:restore:error",
       {
         error: meError,
@@ -427,14 +447,13 @@ export async function restoreAfterMeFailure(
       );
 
     if (
-      !AppCore.state.user
+      !AppCore.state.user &&
+      hasValidToken()
     ) {
-      await fetchMe(
-        session
-      );
+      await fetchMe(session);
     }
 
-    AppCore.events.emit(
+    emit(
       "auth:restore:success",
       {
         user:
@@ -450,12 +469,12 @@ export async function restoreAfterMeFailure(
         AppCore.state.user,
       refreshed,
     };
-  } catch (
-    refreshError
-  ) {
-    clearSessionLocal();
+  } catch (refreshError) {
+    clearSessionLocal({
+      silent: true,
+    });
 
-    AppCore.events.emit(
+    emit(
       "auth:restore:error",
       {
         error:
@@ -488,12 +507,10 @@ export async function restoreUsingRefreshPreferred(
     !AppCore.state.user &&
     hasValidToken()
   ) {
-    await fetchMe(
-      session
-    );
+    await fetchMe(session);
   }
 
-  AppCore.events.emit(
+  emit(
     "auth:restore:success",
     {
       user:
@@ -513,30 +530,26 @@ export async function restoreUsingRefreshPreferred(
 
 /* =========================================================
    RESTORE SESSION
-   Política:
-   - si existe refresh context, refrescar primero
-   - así evitamos el 401 inicial de /me con access token expirado
-   - solo usar /me directo cuando NO exista refresh context
 ========================================================= */
+
 export async function restoreSession(
   session
 ) {
-  if (
-    session.restorePromise
-  ) {
+  if (session?.restorePromise) {
     return session.restorePromise;
   }
 
   session.restoring = true;
 
-  AppCore.events.emit(
+  emit(
     "auth:restore:start",
     {
       hasToken:
         hasValidToken(),
-      hasUser: Boolean(
-        AppCore.state.user
-      ),
+      hasUser:
+        Boolean(
+          AppCore.state.user
+        ),
       hasRefreshContext:
         hasRefreshContext(),
     }
@@ -551,9 +564,9 @@ export async function restoreSession(
         const refreshAvailable =
           hasRefreshContext();
 
-        /* =========================================
+        /* =====================================
            1) Nada disponible
-        ========================================= */
+        ===================================== */
         if (
           !tokenAvailable &&
           !refreshAvailable
@@ -562,7 +575,7 @@ export async function restoreSession(
             silent: true,
           });
 
-          AppCore.events.emit(
+          emit(
             "auth:restore:empty",
             {
               reason:
@@ -576,48 +589,38 @@ export async function restoreSession(
           };
         }
 
-        /* =========================================
-           2) Preferir refresh si existe contexto
-              elimina el 401 inicial de /me
-        ========================================= */
+        /* =====================================
+           2) Prefer refresh
+        ===================================== */
         if (refreshAvailable) {
           try {
             return await restoreUsingRefreshPreferred(
               session
             );
-          } catch (
-            refreshPreferredError
-          ) {
-            AppCore.utils.warn(
-              "Refresh preferente falló en restoreSession().",
-              refreshPreferredError
+          } catch (refreshError) {
+            warn(
+              "Refresh preferente falló.",
+              refreshError
             );
 
-            /*
-              Fallback:
-              si aún queda token válido local, intentamos /me.
-              Esto cubre backend de refresh caído pero token todavía usable.
-            */
-            if (
-              hasValidToken()
-            ) {
+            if (hasValidToken()) {
               try {
                 return await restoreUsingMe(
                   session
                 );
-              } catch (
-                meAfterRefreshError
-              ) {
-                clearSessionLocal();
+              } catch (meError) {
+                clearSessionLocal({
+                  silent: true,
+                });
 
-                AppCore.events.emit(
+                emit(
                   "auth:restore:error",
                   {
                     error:
-                      meAfterRefreshError,
+                      meError,
                     message:
                       extractMessage(
-                        meAfterRefreshError
+                        meError
                       ),
                   }
                 );
@@ -626,21 +629,23 @@ export async function restoreSession(
                   ok: false,
                   user: null,
                   error:
-                    meAfterRefreshError,
+                    meError,
                 };
               }
             }
 
-            clearSessionLocal();
+            clearSessionLocal({
+              silent: true,
+            });
 
-            AppCore.events.emit(
+            emit(
               "auth:restore:error",
               {
                 error:
-                  refreshPreferredError,
+                  refreshError,
                 message:
                   extractMessage(
-                    refreshPreferredError
+                    refreshError
                   ),
               }
             );
@@ -649,31 +654,27 @@ export async function restoreSession(
               ok: false,
               user: null,
               error:
-                refreshPreferredError,
+                refreshError,
             };
           }
         }
 
-        /* =========================================
-           3) Solo token, sin refresh context
-        ========================================= */
+        /* =====================================
+           3) Solo token
+        ===================================== */
         try {
           return await restoreUsingMe(
             session
           );
-        } catch (
-          meError
-        ) {
+        } catch (meError) {
           return await restoreAfterMeFailure(
             session,
             meError
           );
         }
       } finally {
-        session.restoring =
-          false;
-        session.restorePromise =
-          null;
+        session.restoring = false;
+        session.restorePromise = null;
       }
     })();
 

@@ -10,9 +10,12 @@
    - normalizar la respuesta del backend
    - tolerar AppCore.request o fetch nativo
    - endurecer validaciones y resolución de endpoint
+   - soportar cooldown / rate limit correctamente
+   - no asumir success por defecto
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+
 import {
   AUTH_ENDPOINTS,
   AUTH_CONSTANTS,
@@ -47,21 +50,25 @@ function looksLikeEmail(value = "") {
 function getResetIdentifierMaxLength() {
   return Number(
     AUTH_CONSTANTS?.resetIdentifierMaxLength ??
-      AUTH_CONSTANTS?.identifierMaxLength ??
-      160
+    AUTH_CONSTANTS?.identifierMaxLength ??
+    160
   ) || 160;
 }
 
 function getRequestTimeout() {
   return Number(
     AUTH_CONSTANTS?.requestTimeout ??
-      AppCore?.config?.requestTimeout ??
-      15000
+    AppCore?.config?.requestTimeout ??
+    15000
   ) || 15000;
 }
 
 function getDefaultSuccessMessage() {
   return "Si el identificador existe, te enviaremos las instrucciones para restablecer la contraseña.";
+}
+
+function getDefaultErrorMessage() {
+  return "No se pudo iniciar la recuperación de acceso.";
 }
 
 /* =========================================================
@@ -99,20 +106,24 @@ export function getRequestPasswordResetEndpoint() {
 export function resolveResetPasswordIdentifier(payload = {}) {
   return safeText(
     payload?.identifier ||
-      payload?.email ||
-      payload?.username ||
-      payload?.user ||
-      "",
+    payload?.email ||
+    payload?.username ||
+    payload?.user ||
+    "",
     ""
   );
 }
 
 export function normalizeResetPasswordPayload(payload = {}) {
   const identifier = resolveResetPasswordIdentifier(payload);
+
   const email = looksLikeEmail(identifier)
     ? identifier.toLowerCase()
     : "";
-  const username = email ? "" : identifier;
+
+  const username = email
+    ? ""
+    : identifier;
 
   return {
     identifier,
@@ -127,7 +138,8 @@ export function normalizeResetPasswordPayload(payload = {}) {
 ========================================================= */
 
 export function buildResetPasswordRequestBody(payload = {}) {
-  const normalized = normalizeResetPasswordPayload(payload);
+  const normalized =
+    normalizeResetPasswordPayload(payload);
 
   const body = {
     identifier: normalized.identifier,
@@ -154,7 +166,7 @@ export function buildResetPasswordRequestBody(payload = {}) {
 ========================================================= */
 
 export function normalizeResetPasswordResponse(response = {}) {
-  const ok =
+  const explicitOk =
     typeof response?.ok === "boolean"
       ? response.ok
       : typeof response?.success === "boolean"
@@ -163,23 +175,7 @@ export function normalizeResetPasswordResponse(response = {}) {
           ? response.data.ok
           : typeof response?.data?.success === "boolean"
             ? response.data.success
-            : true;
-
-  const message =
-    response?.message ||
-    response?.mensaje ||
-    response?.detail ||
-    response?.data?.message ||
-    response?.data?.mensaje ||
-    response?.data?.detail ||
-    "";
-
-  const redirectTo =
-    response?.redirectTo ||
-    response?.redirect ||
-    response?.data?.redirectTo ||
-    response?.data?.redirect ||
-    "";
+            : null;
 
   const retryAfter =
     Number(
@@ -190,6 +186,48 @@ export function normalizeResetPasswordResponse(response = {}) {
       0
     ) || 0;
 
+  const status =
+    Number(
+      response?.status ??
+      response?.statusCode ??
+      response?.data?.status ??
+      0
+    ) || 0;
+
+  const isCooldown =
+    status === 429 ||
+    retryAfter > 0;
+
+  const ok =
+    explicitOk === null
+      ? false
+      : Boolean(explicitOk);
+
+  const message =
+    safeText(
+      response?.message ||
+      response?.mensaje ||
+      response?.detail ||
+      response?.error ||
+      response?.data?.message ||
+      response?.data?.mensaje ||
+      response?.data?.detail ||
+      response?.data?.error ||
+      "",
+      ok
+        ? getDefaultSuccessMessage()
+        : isCooldown
+          ? "Espera 1 minuto antes de volver a intentarlo."
+          : getDefaultErrorMessage()
+    );
+
+  const redirectTo =
+    response?.redirectTo ||
+    response?.redirect ||
+    response?.data?.redirectTo ||
+    response?.data?.redirect ||
+    "";
+
   const emailMasked =
     response?.emailMasked ||
     response?.maskedEmail ||
@@ -199,12 +237,15 @@ export function normalizeResetPasswordResponse(response = {}) {
 
   return {
     raw: response,
-    ok: Boolean(ok),
-    success: Boolean(ok),
-    message: safeText(message, getDefaultSuccessMessage()),
-    redirectTo: safeText(redirectTo, ""),
+    ok,
+    success: ok,
+    error: !ok,
+    cooldown: isCooldown,
     retryAfter: Math.max(0, retryAfter),
     cooldownSeconds: Math.max(0, retryAfter),
+    status,
+    message,
+    redirectTo: safeText(redirectTo, ""),
     emailMasked: safeText(emailMasked, ""),
   };
 }
@@ -224,7 +265,10 @@ function buildFinalUrl(endpoint = "") {
     return cleanEndpoint;
   }
 
-  const apiBase = safeText(AppCore?.config?.apiBase, "");
+  const apiBase = safeText(
+    AppCore?.config?.apiBase,
+    ""
+  );
 
   if (!apiBase) {
     return cleanEndpoint;
@@ -239,7 +283,7 @@ function buildFinalUrl(endpoint = "") {
 }
 
 /* =========================================================
-   TRANSPORT
+   TRANSPORT APPCORE
 ========================================================= */
 
 async function requestWithAppCore(endpoint, body) {
@@ -261,8 +305,13 @@ async function requestWithAppCore(endpoint, body) {
   });
 }
 
+/* =========================================================
+   TRANSPORT FETCH
+========================================================= */
+
 async function requestWithFetch(endpoint, body) {
-  const finalUrl = buildFinalUrl(endpoint);
+  const finalUrl =
+    buildFinalUrl(endpoint);
 
   const response = await fetch(finalUrl, {
     method: "POST",
@@ -285,22 +334,44 @@ async function requestWithFetch(endpoint, body) {
     const error = new Error(
       safeText(
         data?.message ||
-          data?.mensaje ||
-          data?.error ||
-          response.statusText,
-        "No se pudo iniciar la recuperación de acceso."
+        data?.mensaje ||
+        data?.error ||
+        response.statusText,
+        getDefaultErrorMessage()
       )
     );
 
     error.status = response.status;
     error.statusText = response.statusText;
     error.data = data;
+
+    error.retryAfter = Number(
+      data?.retryAfter ??
+      data?.cooldownSeconds ??
+      0
+    ) || 0;
+
+    error.cooldown =
+      response.status === 429 ||
+      error.retryAfter > 0;
+
     throw error;
   }
 
   return isObject(data)
-    ? { ...data, ok: true }
-    : { ok: true, data };
+    ? {
+        ...data,
+        ok:
+          typeof data?.ok === "boolean"
+            ? data.ok
+            : true,
+        status: response.status,
+      }
+    : {
+        ok: true,
+        status: response.status,
+        data,
+      };
 }
 
 /* =========================================================
@@ -326,8 +397,13 @@ export async function requestPasswordReset(payload = {}) {
     );
   }
 
-  const endpoint = getRequestPasswordResetEndpoint();
-  const body = buildResetPasswordRequestBody(normalizedPayload);
+  const endpoint =
+    getRequestPasswordResetEndpoint();
+
+  const body =
+    buildResetPasswordRequestBody(
+      normalizedPayload
+    );
 
   try {
     AppCore?.utils?.log?.(
@@ -335,8 +411,12 @@ export async function requestPasswordReset(payload = {}) {
       {
         endpoint,
         finalUrl: buildFinalUrl(endpoint),
-        identifier: normalizedPayload.identifier,
-        mode: normalizedPayload.email ? "email" : "username",
+        identifier:
+          normalizedPayload.identifier,
+        mode:
+          normalizedPayload.email
+            ? "email"
+            : "username",
       }
     );
   } catch {}
@@ -344,27 +424,55 @@ export async function requestPasswordReset(payload = {}) {
   let rawResponse = null;
 
   try {
-    rawResponse = await requestWithAppCore(endpoint, body);
+    rawResponse =
+      await requestWithAppCore(
+        endpoint,
+        body
+      );
 
-    if (rawResponse === null || rawResponse === undefined) {
-      rawResponse = await requestWithFetch(endpoint, body);
+    if (
+      rawResponse === null ||
+      rawResponse === undefined
+    ) {
+      rawResponse =
+        await requestWithFetch(
+          endpoint,
+          body
+        );
     }
-  } catch (error) {
-    throw error;
-  }
 
-  return normalizeResetPasswordResponse(rawResponse);
+    return normalizeResetPasswordResponse(
+      rawResponse
+    );
+  } catch (error) {
+    return normalizeResetPasswordResponse({
+      ok: false,
+      status: error?.status || 0,
+      retryAfter:
+        error?.retryAfter || 0,
+      cooldown:
+        error?.cooldown || false,
+      message:
+        error?.message ||
+        getDefaultErrorMessage(),
+      data: error?.data || null,
+    });
+  }
 }
 
 /* =========================================================
    ALIASES
 ========================================================= */
 
-export async function resetPasswordRequest(payload = {}) {
+export async function resetPasswordRequest(
+  payload = {}
+) {
   return requestPasswordReset(payload);
 }
 
-export async function forgotPassword(payload = {}) {
+export async function forgotPassword(
+  payload = {}
+) {
   return requestPasswordReset(payload);
 }
 

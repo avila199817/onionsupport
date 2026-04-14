@@ -7,26 +7,78 @@
    - refresh / retry
    - abrir ticket
    - cleanup seguro por scope
+   - soportar rebind limpio tras rerender
+   - tolerar scope externo
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 
-const SCOPE = "view:incidencias";
+const DEFAULT_SCOPE = "view:incidencias";
 
 /* =========================================================
    HELPERS
 ========================================================= */
 
-function getScope() {
-  AppCore.cleanup.run(SCOPE);
-  return AppCore.cleanup.scope(SCOPE);
+function safeText(value, fallback = "") {
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+
+  const text = String(value).trim();
+  return text || fallback;
+}
+
+function resolveScopeName(scope = DEFAULT_SCOPE) {
+  return safeText(scope, DEFAULT_SCOPE);
+}
+
+function getScope(scopeName = DEFAULT_SCOPE) {
+  const finalScope = resolveScopeName(scopeName);
+
+  try {
+    AppCore?.cleanup?.run?.(finalScope);
+  } catch {}
+
+  try {
+    return AppCore?.cleanup?.scope?.(finalScope) || finalScope;
+  } catch {
+    return finalScope;
+  }
 }
 
 function getTicketIdFromElement(element) {
-  return (
+  return safeText(
     element?.getAttribute?.("data-ticket-id") ||
+    element?.dataset?.ticketId ||
+    "",
     ""
   );
+}
+
+function getContainer() {
+  return (
+    AppCore?.dom?.viewContainer ||
+    document.getElementById("view-container") ||
+    document
+  );
+}
+
+async function safeReload(loadIncidencias, options = {}) {
+  if (typeof loadIncidencias !== "function") {
+    return;
+  }
+
+  try {
+    await loadIncidencias({
+      force: true,
+      ...options,
+    });
+  } catch (error) {
+    AppCore?.utils?.warn?.(
+      "[IncidenciasBindings] loadIncidencias falló",
+      error
+    );
+  }
 }
 
 /* =========================================================
@@ -36,8 +88,10 @@ function getTicketIdFromElement(element) {
 export function bindIncidenciasEvents({
   loadIncidencias,
   openTicket,
+  scope = DEFAULT_SCOPE,
 } = {}) {
-  const scope = getScope();
+  const scopeRef = getScope(scope);
+  const root = getContainer();
 
   const refreshBtn = document.getElementById(
     "incidencias-refresh-btn"
@@ -49,48 +103,70 @@ export function bindIncidenciasEvents({
 
   if (refreshBtn) {
     AppCore.cleanup.on(
-      scope,
+      scopeRef,
       refreshBtn,
       "click",
-      async () => {
-        await loadIncidencias?.({
-          force: true,
-        });
+      async (event) => {
+        event.preventDefault();
+        await safeReload(loadIncidencias);
       }
     );
   }
 
   if (retryBtn) {
     AppCore.cleanup.on(
-      scope,
+      scopeRef,
       retryBtn,
       "click",
-      async () => {
-        await loadIncidencias?.({
-          force: true,
-        });
+      async (event) => {
+        event.preventDefault();
+        await safeReload(loadIncidencias);
       }
     );
   }
 
-  const openButtons =
-    document.querySelectorAll(
-      '[data-action="open-ticket"]'
-    );
+  /*
+    Delegación para soportar rerender sin rebinding
+    individual de cada botón.
+  */
+  AppCore.cleanup.on(
+    scopeRef,
+    root,
+    "click",
+    (event) => {
+      const openBtn =
+        event.target?.closest?.('[data-action="open-ticket"]');
 
-  openButtons.forEach((button) => {
-    AppCore.cleanup.on(
-      scope,
-      button,
-      "click",
-      (event) => {
-        event.preventDefault();
-        event.stopPropagation();
+      if (!openBtn) {
+        return;
+      }
 
-        openTicket?.(
-          getTicketIdFromElement(button)
+      event.preventDefault();
+      event.stopPropagation();
+
+      const ticketId =
+        getTicketIdFromElement(openBtn);
+
+      if (!ticketId) {
+        return;
+      }
+
+      try {
+        openTicket?.(ticketId);
+      } catch (error) {
+        AppCore?.utils?.warn?.(
+          "[IncidenciasBindings] openTicket falló",
+          error
         );
       }
-    );
-  });
+    }
+  );
+
+  return () => {
+    try {
+      AppCore?.cleanup?.run?.(
+        resolveScopeName(scope)
+      );
+    } catch {}
+  };
 }

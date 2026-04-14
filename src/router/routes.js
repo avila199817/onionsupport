@@ -61,43 +61,71 @@ function t(
 ========================================================= */
 
 function safeRun(fn) {
-  return async function wrappedRouteRender(...args) {
-    return await Promise.resolve(
-      fn(...args)
-    );
+  return async function wrappedRouteRender(
+    ...args
+  ) {
+    try {
+      return await Promise.resolve(
+        fn(...args)
+      );
+    } catch (error) {
+      console.error(
+        "[Router Route Error]",
+        error
+      );
+      throw error;
+    }
   };
 }
 
-function resolveRouteTitle(route) {
-  if (!route) return "";
+function resolveRouteTitle(
+  route
+) {
+  if (!route) {
+    return "";
+  }
 
   return t(
     route.titleKey,
-    route.titleFallback || route.name || ""
+    route.titleFallback ||
+      route.name ||
+      ""
   );
 }
 
-function normalizeRoles(roles) {
-  if (!Array.isArray(roles)) return [];
+function normalizeRoles(
+  roles
+) {
+  if (
+    !Array.isArray(roles)
+  ) {
+    return [];
+  }
 
   return roles
     .filter(Boolean)
     .map((role) =>
-      String(role).trim()
+      String(role)
+        .trim()
+        .toLowerCase()
     )
     .filter(Boolean);
 }
 
-function createRoute(definition = {}) {
+function createRoute(
+  definition = {}
+) {
   const route = {
     path:
       definition.path || "/",
 
     name:
-      definition.name || "route",
+      definition.name ||
+      "route",
 
     titleKey:
-      definition.titleKey || "",
+      definition.titleKey ||
+      "",
 
     titleFallback:
       definition.titleFallback ||
@@ -105,7 +133,8 @@ function createRoute(definition = {}) {
       "",
 
     public:
-      definition.public === true,
+      definition.public ===
+      true,
 
     roles:
       normalizeRoles(
@@ -113,13 +142,13 @@ function createRoute(definition = {}) {
       ),
 
     hideShell:
-      definition.hideShell === true,
+      definition.hideShell ===
+      true,
 
-    render:
-      safeRun(
-        definition.render ||
-          (() => {})
-      ),
+    render: safeRun(
+      definition.render ||
+        (() => {})
+    ),
   };
 
   Object.defineProperty(
@@ -136,34 +165,56 @@ function createRoute(definition = {}) {
     }
   );
 
-  return Object.freeze(route);
+  return Object.freeze(
+    route
+  );
 }
 
-function resolveViewRenderer(view) {
-  if (typeof view === "function") {
+function resolveViewRenderer(
+  view
+) {
+  if (
+    typeof view ===
+    "function"
+  ) {
     return view;
   }
 
   if (
     view &&
-    typeof view.render === "function"
+    typeof view.render ===
+      "function"
   ) {
-    return view.render.bind(view);
+    return view.render.bind(
+      view
+    );
   }
 
   if (
     view &&
-    typeof view.init === "function"
+    typeof view.init ===
+      "function"
   ) {
-    return view.init.bind(view);
+    return view.init.bind(
+      view
+    );
   }
 
   return () => {};
 }
 
-function createViewAdapter(view) {
-  const renderer = resolveViewRenderer(view);
-  return safeRun((...args) => renderer(...args));
+function createViewAdapter(
+  view
+) {
+  const renderer =
+    resolveViewRenderer(
+      view
+    );
+
+  return safeRun(
+    (...args) =>
+      renderer(...args)
+  );
 }
 
 /* =========================================================
@@ -171,31 +222,49 @@ function createViewAdapter(view) {
 ========================================================= */
 
 const renderHomeView =
-  createViewAdapter(HomeView);
+  createViewAdapter(
+    HomeView
+  );
 
 const renderIncidenciasView =
-  createViewAdapter(IncidenciasView);
+  createViewAdapter(
+    IncidenciasView
+  );
 
 const renderFacturasView =
-  createViewAdapter(FacturasView);
+  createViewAdapter(
+    FacturasView
+  );
 
 const renderUsuariosView =
-  createViewAdapter(UsuariosView);
+  createViewAdapter(
+    UsuariosView
+  );
 
 const renderClientesView =
-  createViewAdapter(ClientesView);
+  createViewAdapter(
+    ClientesView
+  );
 
 const renderCuentaView =
-  createViewAdapter(CuentaView);
+  createViewAdapter(
+    CuentaView
+  );
 
 const renderAjustesView =
-  createViewAdapter(AjustesView);
+  createViewAdapter(
+    AjustesView
+  );
 
 const renderServidorView =
-  createViewAdapter(ServerView);
+  createViewAdapter(
+    ServerView
+  );
 
 const renderLoginView =
-  createViewAdapter(LoginView);
+  createViewAdapter(
+    LoginView
+  );
 
 const renderResetPasswordView =
   createViewAdapter(
@@ -211,18 +280,22 @@ export function createRoutes() {
     createRoute({
       path: "/",
       name: "home",
-      titleKey: "routes.home",
+      titleKey:
+        "routes.home",
       titleFallback:
         "Onion Support",
       public: false,
       roles: [],
       hideShell: false,
-      render: renderHomeView,
+      render:
+        renderHomeView,
     }),
 
     createRoute({
-      path: "/incidencias",
-      name: "incidencias",
+      path:
+        "/incidencias",
+      name:
+        "incidencias",
       titleKey:
         "routes.incidencias",
       titleFallback:
@@ -235,8 +308,10 @@ export function createRoutes() {
     }),
 
     createRoute({
-      path: "/facturas",
-      name: "facturas",
+      path:
+        "/facturas",
+      name:
+        "facturas",
       titleKey:
         "routes.facturas",
       titleFallback:
@@ -249,8 +324,10 @@ export function createRoutes() {
     }),
 
     createRoute({
-      path: "/usuarios",
-      name: "usuarios",
+      path:
+        "/usuarios",
+      name:
+        "usuarios",
       titleKey:
         "routes.usuarios",
       titleFallback:
@@ -263,8 +340,10 @@ export function createRoutes() {
     }),
 
     createRoute({
-      path: "/clientes",
-      name: "clientes",
+      path:
+        "/clientes",
+      name:
+        "clientes",
       titleKey:
         "routes.clientes",
       titleFallback:
@@ -277,8 +356,10 @@ export function createRoutes() {
     }),
 
     createRoute({
-      path: "/cuenta",
-      name: "cuenta",
+      path:
+        "/cuenta",
+      name:
+        "cuenta",
       titleKey:
         "routes.cuenta",
       titleFallback:
@@ -291,8 +372,10 @@ export function createRoutes() {
     }),
 
     createRoute({
-      path: "/ajustes",
-      name: "ajustes",
+      path:
+        "/ajustes",
+      name:
+        "ajustes",
       titleKey:
         "routes.ajustes",
       titleFallback:
@@ -305,8 +388,10 @@ export function createRoutes() {
     }),
 
     createRoute({
-      path: "/servidor",
-      name: "servidor",
+      path:
+        "/servidor",
+      name:
+        "servidor",
       titleKey:
         "routes.servidor",
       titleFallback:
@@ -319,7 +404,8 @@ export function createRoutes() {
     }),
 
     createRoute({
-      path: "/login",
+      path:
+        "/login",
       name: "login",
       titleKey:
         "routes.login",
@@ -333,8 +419,10 @@ export function createRoutes() {
     }),
 
     createRoute({
-      path: "/reset-password",
-      name: "reset-password",
+      path:
+        "/reset-password",
+      name:
+        "reset-password",
       titleKey:
         "routes.resetPassword",
       titleFallback:
@@ -352,10 +440,22 @@ export function createRoutes() {
    IMMUTABLE TABLE
 ========================================================= */
 
+let ROUTES_CACHE =
+  null;
+
 export function getImmutableRoutes() {
-  return Object.freeze(
-    createRoutes()
-  );
+  if (
+    ROUTES_CACHE
+  ) {
+    return ROUTES_CACHE;
+  }
+
+  ROUTES_CACHE =
+    Object.freeze(
+      createRoutes()
+    );
+
+  return ROUTES_CACHE;
 }
 
 /* =========================================================
@@ -375,10 +475,14 @@ export function validateRoutesTable(
     );
   }
 
-  const seen = new Set();
+  const seen =
+    new Set();
 
   routes.forEach(
-    (route, index) => {
+    (
+      route,
+      index
+    ) => {
       if (
         !route ||
         typeof route !==
@@ -468,4 +572,6 @@ export function validateRoutesTable(
       );
     }
   );
+
+  return true;
 }

@@ -1,5 +1,5 @@
 /* =========================================================
-   Onion SPA - Reset Password DOM
+   Onion SPA - Reset Password DOM (FULL PRO SYSTEM)
    Archivo: src/views/reset-password/reset-password.dom.js
 
    Responsabilidades:
@@ -11,6 +11,8 @@
    - exponer lectura robusta del formulario
    - facilitar bind / unbind desacoplado
    - endurecer acceso al DOM y consistencia visual
+   - soportar toast inline sin inconsistencias
+   - evitar doble estado success / neutral / loading
 ========================================================= */
 
 /* =========================================================
@@ -19,6 +21,14 @@
 
 function qs(root, selector) {
   return root?.querySelector?.(selector) || null;
+}
+
+function isObject(value) {
+  return value !== null && typeof value === "object";
+}
+
+function isFunction(value) {
+  return typeof value === "function";
 }
 
 function toText(value, fallback = "") {
@@ -30,9 +40,35 @@ function toText(value, fallback = "") {
   return text || fallback;
 }
 
+function toBool(value, fallback = false) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  return Boolean(fallback);
+}
+
+function toNumber(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function getMicrotaskScheduler() {
+  if (typeof queueMicrotask === "function") {
+    return queueMicrotask;
+  }
+
+  return (fn) => Promise.resolve().then(fn);
+}
+
 function setAriaInvalid(node, active = false) {
   if (!node) return;
   node.setAttribute("aria-invalid", active ? "true" : "false");
+}
+
+function setAriaBusy(node, active = false) {
+  if (!node) return;
+  node.setAttribute("aria-busy", active ? "true" : "false");
 }
 
 function setHidden(node, hidden) {
@@ -50,6 +86,48 @@ function setText(node, value = "") {
   node.textContent = toText(value, "");
 }
 
+function setHtml(node, value = "") {
+  if (!node) return;
+  node.innerHTML = String(value ?? "");
+}
+
+function toggleClass(node, className, active = false) {
+  if (!node || !className) return;
+  node.classList.toggle(className, Boolean(active));
+}
+
+function removeClasses(node, classNames = []) {
+  if (!node || !Array.isArray(classNames) || classNames.length === 0) {
+    return;
+  }
+
+  node.classList.remove(...classNames);
+}
+
+function resolveFieldNode(inputNode, root, selectors = []) {
+  const parentField =
+    inputNode?.closest?.(".login-field") ||
+    inputNode?.closest?.("[data-field]") ||
+    null;
+
+  if (parentField) {
+    return parentField;
+  }
+
+  for (const selector of selectors) {
+    const found = qs(root, selector);
+    if (found) {
+      return found;
+    }
+  }
+
+  return null;
+}
+
+function resolveSubmitMarkup(label = "") {
+  return `<span class="login-submit-text">${toText(label, "")}</span>`;
+}
+
 /* =========================================================
    REFS
 ========================================================= */
@@ -64,37 +142,54 @@ export function getResetPasswordRefs(container) {
   const identifierInput =
     qs(root, "#resetIdentifier") ||
     qs(root, 'input[name="identifier"]') ||
-    qs(root, 'input[name="email"]');
+    qs(root, 'input[name="email"]') ||
+    null;
 
   const submitButton =
     qs(root, "#resetPasswordButton") ||
-    qs(root, 'button[type="submit"]');
-
-  const fieldIdentifier =
-    identifierInput?.closest?.(".login-field") ||
-    qs(root, '[data-field="identifier"]') ||
-    qs(root, '[data-field="email"]') ||
+    qs(root, 'button[type="submit"]') ||
     null;
 
-  return {
+  const fieldIdentifier = resolveFieldNode(
+    identifierInput,
+    root,
+    [
+      '[data-field="identifier"]',
+      '[data-field="email"]',
+    ]
+  );
+
+  const errorBox =
+    qs(root, "#resetPasswordError") ||
+    qs(root, '[role="alert"]') ||
+    null;
+
+  const form =
+    qs(root, "#resetPasswordForm") ||
+    qs(root, "form") ||
+    null;
+
+  const card =
+    qs(root, "#resetPasswordCard") ||
+    qs(root, ".login-card") ||
+    null;
+
+  const refs = {
     container,
     root,
 
-    form:
-      qs(root, "#resetPasswordForm") ||
-      qs(root, "form"),
-
-    card:
-      qs(root, "#resetPasswordCard") ||
-      qs(root, ".login-card"),
+    form,
+    card,
 
     stage:
       qs(root, "#resetPasswordStage") ||
-      qs(root, ".login-stage"),
+      qs(root, ".login-stage") ||
+      null,
 
     grid:
       qs(root, "#resetPasswordGrid") ||
-      qs(root, ".login-grid"),
+      qs(root, ".login-grid") ||
+      null,
 
     identifierInput,
     emailInput: identifierInput,
@@ -103,26 +198,45 @@ export function getResetPasswordRefs(container) {
 
     backToLoginLink:
       qs(root, "#backToLoginLink") ||
-      qs(root, 'a[data-spa]'),
+      qs(root, 'a[data-spa]') ||
+      null,
 
     themeToggleButton:
       qs(root, "#resetPasswordThemeToggle") ||
-      qs(root, '[data-action="theme-toggle"]'),
+      qs(root, '[data-action="theme-toggle"]') ||
+      null,
 
     fieldIdentifier,
     fieldEmail: fieldIdentifier,
 
-    errorBox:
-      qs(root, "#resetPasswordError") ||
-      qs(root, '[role="alert"]'),
+    errorBox,
 
-    toastRoot: qs(root, "#resetPasswordToast"),
-    toastIcon: qs(root, "#resetPasswordToastIcon"),
-    toastTitle: qs(root, "#resetPasswordToastTitle"),
-    toastText: qs(root, "#resetPasswordToastText"),
-    toastClose: qs(root, "#resetPasswordToastClose"),
-    toastProgress: qs(root, "#resetPasswordToastProgress"),
+    toastRoot:
+      qs(root, "#resetPasswordToast") ||
+      null,
+
+    toastIcon:
+      qs(root, "#resetPasswordToastIcon") ||
+      null,
+
+    toastTitle:
+      qs(root, "#resetPasswordToastTitle") ||
+      null,
+
+    toastText:
+      qs(root, "#resetPasswordToastText") ||
+      null,
+
+    toastClose:
+      qs(root, "#resetPasswordToastClose") ||
+      null,
+
+    toastProgress:
+      qs(root, "#resetPasswordToastProgress") ||
+      null,
   };
+
+  return refs;
 }
 
 /* =========================================================
@@ -131,13 +245,13 @@ export function getResetPasswordRefs(container) {
 
 export function setFieldInvalid(fieldNode, invalid = false) {
   if (!fieldNode) return;
-  fieldNode.classList.toggle("is-invalid", Boolean(invalid));
+  toggleClass(fieldNode, "is-invalid", Boolean(invalid));
 }
 
 export function setInputInvalid(inputNode, invalid = false) {
   if (!inputNode) return;
 
-  inputNode.classList.toggle("is-invalid", Boolean(invalid));
+  toggleClass(inputNode, "is-invalid", Boolean(invalid));
   setAriaInvalid(inputNode, Boolean(invalid));
 }
 
@@ -160,11 +274,20 @@ export function clearResetPasswordErrors(refs = {}) {
 }
 
 export function applyResetPasswordErrors(refs = {}, errors = {}) {
-  const identifierError =
-    toText(errors.identifier, "") ||
-    toText(errors.email, "");
+  const safeErrors = isObject(errors) ? errors : {};
 
-  const firstError = identifierError || "";
+  const identifierError =
+    toText(safeErrors.identifier, "") ||
+    toText(safeErrors.email, "");
+
+  const globalError =
+    toText(safeErrors.global, "") ||
+    toText(safeErrors.message, "");
+
+  const firstError =
+    identifierError ||
+    globalError ||
+    "";
 
   setFieldError(refs.fieldIdentifier, identifierError);
   setFieldError(refs.fieldEmail, identifierError);
@@ -180,7 +303,7 @@ export function setGlobalResetPasswordError(refs = {}, message = "") {
 }
 
 /* =========================================================
-   LOADING STATE
+   LOADING / NEUTRAL / SUCCESS STATE
 ========================================================= */
 
 export function setResetPasswordLoading(
@@ -206,34 +329,42 @@ export function setResetPasswordLoading(
     submitButton,
     themeToggleButton,
     backToLoginLink,
+    card,
   } = refs;
 
   if (form) {
-    form.setAttribute("aria-busy", String(isLoading));
+    setAriaBusy(form, isLoading);
     form.dataset.submitting = String(isLoading);
+  }
+
+  if (card) {
+    card.dataset.submitting = String(isLoading);
+    toggleClass(card, "is-loading", isLoading);
   }
 
   setDisabled(identifierInput, isLoading);
   setDisabled(themeToggleButton, isLoading);
 
   if (backToLoginLink) {
-    backToLoginLink.setAttribute("aria-disabled", String(isLoading));
-    backToLoginLink.classList.toggle("is-disabled", isLoading);
+    backToLoginLink.setAttribute(
+      "aria-disabled",
+      String(isLoading)
+    );
+    toggleClass(backToLoginLink, "is-disabled", isLoading);
     backToLoginLink.tabIndex = isLoading ? -1 : 0;
   }
 
   if (submitButton) {
     submitButton.disabled = isLoading;
     submitButton.dataset.loading = String(isLoading);
-    submitButton.innerHTML = isLoading
-      ? `<span class="login-submit-text">${loadingLabel}</span>`
-      : `<span class="login-submit-text">${submitLabel}</span>`;
+    setHtml(
+      submitButton,
+      resolveSubmitMarkup(
+        isLoading ? loadingLabel : submitLabel
+      )
+    );
   }
 }
-
-/* =========================================================
-   VISUAL HELPERS
-========================================================= */
 
 export function shakeResetPasswordCard(refs = {}) {
   const card = refs?.card;
@@ -265,13 +396,16 @@ export function setResetPasswordSuccessState(
   if (form) {
     form.setAttribute("data-success", "true");
     form.classList.add("is-success");
-    form.setAttribute("aria-busy", "false");
+    form.classList.remove("is-loading");
+    setAriaBusy(form, false);
     form.dataset.submitting = "false";
   }
 
   if (card) {
     card.setAttribute("data-success", "true");
     card.classList.add("is-success");
+    card.classList.remove("is-loading");
+    card.dataset.submitting = "false";
   }
 
   setDisabled(refs.identifierInput, true);
@@ -286,25 +420,56 @@ export function setResetPasswordSuccessState(
   if (refs?.submitButton) {
     refs.submitButton.disabled = true;
     refs.submitButton.dataset.loading = "false";
-    refs.submitButton.innerHTML =
-      `<span class="login-submit-text">${title}</span>`;
+    setHtml(
+      refs.submitButton,
+      resolveSubmitMarkup(title)
+    );
   }
 
   setText(refs.errorBox, message);
 }
 
-export function setResetPasswordNeutralState(refs = {}) {
+export function setResetPasswordNeutralState(
+  refs = {},
+  options = {}
+) {
+  const submitLabel = toText(
+    options.submitLabel,
+    "Enviar enlace"
+  );
+
   const form = refs?.form;
   const card = refs?.card;
 
   if (form) {
     form.removeAttribute("data-success");
-    form.classList.remove("is-success");
+    form.classList.remove("is-success", "is-loading");
+    setAriaBusy(form, false);
+    form.dataset.submitting = "false";
   }
 
   if (card) {
     card.removeAttribute("data-success");
-    card.classList.remove("is-success");
+    card.classList.remove("is-success", "is-loading");
+    card.dataset.submitting = "false";
+  }
+
+  setDisabled(refs.identifierInput, false);
+  setDisabled(refs.themeToggleButton, false);
+
+  if (refs?.backToLoginLink) {
+    refs.backToLoginLink.setAttribute("aria-disabled", "false");
+    refs.backToLoginLink.classList.remove("is-disabled");
+    refs.backToLoginLink.tabIndex = 0;
+  }
+
+  if (refs?.submitButton) {
+    refs.submitButton.disabled = false;
+    refs.submitButton.dataset.loading = "false";
+    setHtml(
+      refs.submitButton,
+      resolveSubmitMarkup(submitLabel)
+    );
   }
 }
 
@@ -314,27 +479,30 @@ export function setResetPasswordNeutralState(refs = {}) {
 
 export function getResetPasswordToastRefs(refs = {}) {
   return {
-    toastRoot: refs.toastRoot,
-    toastIcon: refs.toastIcon,
-    toastTitle: refs.toastTitle,
-    toastText: refs.toastText,
-    toastClose: refs.toastClose,
-    toastProgress: refs.toastProgress,
+    toastRoot: refs.toastRoot || null,
+    toastIcon: refs.toastIcon || null,
+    toastTitle: refs.toastTitle || null,
+    toastText: refs.toastText || null,
+    toastClose: refs.toastClose || null,
+    toastProgress: refs.toastProgress || null,
   };
 }
 
 export function hideResetPasswordToast(refs = {}) {
-  const { toastRoot, toastProgress } = getResetPasswordToastRefs(refs);
+  const {
+    toastRoot,
+    toastProgress,
+  } = getResetPasswordToastRefs(refs);
 
   if (!toastRoot) return;
 
-  toastRoot.classList.remove(
+  removeClasses(toastRoot, [
     "is-visible",
     "is-success",
     "is-error",
     "is-info",
-    "is-warning"
-  );
+    "is-warning",
+  ]);
 
   toastRoot.hidden = true;
   toastRoot.setAttribute("aria-hidden", "true");
@@ -347,18 +515,96 @@ export function hideResetPasswordToast(refs = {}) {
   }
 }
 
-export function setResetPasswordToastVisibility(refs = {}, visible = false) {
+export function setResetPasswordToastVisibility(
+  refs = {},
+  visible = false
+) {
   const toastRoot = refs?.toastRoot;
   if (!toastRoot) return Boolean(visible);
 
   setHidden(toastRoot, !visible);
-  toastRoot.setAttribute("aria-hidden", visible ? "false" : "true");
+  toastRoot.setAttribute(
+    "aria-hidden",
+    visible ? "false" : "true"
+  );
 
   if (!visible) {
     toastRoot.dataset.state = "default";
   }
 
   return Boolean(visible);
+}
+
+export function setResetPasswordToastContent(
+  refs = {},
+  options = {}
+) {
+  const {
+    toastRoot,
+    toastTitle,
+    toastText,
+  } = getResetPasswordToastRefs(refs);
+
+  if (!toastRoot) {
+    return false;
+  }
+
+  const title = toText(options.title, "Aviso");
+  const message = toText(options.message, "");
+  const type = toText(options.type, "info").toLowerCase();
+
+  removeClasses(toastRoot, [
+    "is-success",
+    "is-error",
+    "is-info",
+    "is-warning",
+  ]);
+
+  toastRoot.dataset.state = type;
+  toastRoot.classList.add(`is-${type}`);
+
+  setText(toastTitle, title);
+  setText(toastText, message);
+
+  return true;
+}
+
+export function resetResetPasswordToastProgress(refs = {}) {
+  const { toastProgress } = getResetPasswordToastRefs(refs);
+
+  if (!toastProgress) {
+    return;
+  }
+
+  toastProgress.style.animation = "none";
+  toastProgress.style.transform = "";
+  toastProgress.style.opacity = "";
+}
+
+export function startResetPasswordToastProgress(
+  refs = {},
+  duration = 0,
+  animationName = "loginToastProgress"
+) {
+  const { toastProgress } = getResetPasswordToastRefs(refs);
+
+  if (!toastProgress) {
+    return false;
+  }
+
+  const safeDuration = Math.max(0, toNumber(duration, 0));
+
+  resetResetPasswordToastProgress(refs);
+
+  if (safeDuration <= 0) {
+    return true;
+  }
+
+  void toastProgress.offsetWidth;
+  toastProgress.style.animation =
+    `${animationName} ${safeDuration}ms linear forwards`;
+
+  return true;
 }
 
 /* =========================================================
@@ -373,7 +619,9 @@ export function focusResetPasswordPrimaryField(
     options.rememberedIdentifier || options.rememberedEmail
   );
 
-  queueMicrotask(() => {
+  const schedule = getMicrotaskScheduler();
+
+  schedule(() => {
     try {
       refs.identifierInput?.focus?.();
 
@@ -400,65 +648,72 @@ export function readResetPasswordFormState(refs = {}) {
 }
 
 /* =========================================================
-   BIND HELPERS
+   EVENT BIND HELPERS
 ========================================================= */
 
-export function bindResetPasswordInputClearers(refs = {}, handler = null) {
-  if (typeof handler !== "function") {
+function bindDomEvent(node, eventName, handler, options) {
+  if (!node || !isFunction(handler) || !toText(eventName, "")) {
     return () => {};
   }
 
-  refs.identifierInput?.addEventListener("input", handler);
+  node.addEventListener(eventName, handler, options);
 
   return () => {
-    refs.identifierInput?.removeEventListener("input", handler);
+    node.removeEventListener(eventName, handler, options);
   };
 }
 
-export function bindResetPasswordSubmit(refs = {}, handler = null) {
-  if (typeof handler !== "function") {
-    return () => {};
-  }
-
-  refs.form?.addEventListener("submit", handler);
-
-  return () => {
-    refs.form?.removeEventListener("submit", handler);
-  };
+export function bindResetPasswordInputClearers(
+  refs = {},
+  handler = null
+) {
+  return bindDomEvent(
+    refs.identifierInput,
+    "input",
+    handler
+  );
 }
 
-export function bindResetPasswordToastClose(refs = {}, handler = null) {
-  if (typeof handler !== "function") {
-    return () => {};
-  }
-
-  refs.toastClose?.addEventListener("click", handler);
-
-  return () => {
-    refs.toastClose?.removeEventListener("click", handler);
-  };
+export function bindResetPasswordSubmit(
+  refs = {},
+  handler = null
+) {
+  return bindDomEvent(
+    refs.form,
+    "submit",
+    handler
+  );
 }
 
-export function bindResetPasswordBackLink(refs = {}, handler = null) {
-  if (typeof handler !== "function") {
-    return () => {};
-  }
-
-  refs.backToLoginLink?.addEventListener("click", handler);
-
-  return () => {
-    refs.backToLoginLink?.removeEventListener("click", handler);
-  };
+export function bindResetPasswordToastClose(
+  refs = {},
+  handler = null
+) {
+  return bindDomEvent(
+    refs.toastClose,
+    "click",
+    handler
+  );
 }
 
-export function bindResetPasswordThemeToggle(refs = {}, handler = null) {
-  if (typeof handler !== "function") {
-    return () => {};
-  }
+export function bindResetPasswordBackLink(
+  refs = {},
+  handler = null
+) {
+  return bindDomEvent(
+    refs.backToLoginLink,
+    "click",
+    handler
+  );
+}
 
-  refs.themeToggleButton?.addEventListener("click", handler);
-
-  return () => {
-    refs.themeToggleButton?.removeEventListener("click", handler);
-  };
+export function bindResetPasswordThemeToggle(
+  refs = {},
+  handler = null
+) {
+  return bindDomEvent(
+    refs.themeToggleButton,
+    "click",
+    handler
+  );
 }

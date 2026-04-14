@@ -3,197 +3,283 @@
    Archivo: src/router/history.js
 
    Responsabilidades:
-   - actualizar el historial del navegador
-   - inicializar el state base de la SPA
-   - exponer navegación nativa hacia atrás
-   - proteger entorno no-browser
-   - evitar pushes redundantes
+   - centralizar pushState / replaceState
+   - construir state payload consistente
+   - init state inicial idempotente
+   - navegación back segura
+   - helpers reutilizables para router
+
+   HARDENING:
+   - guards browser
+   - fallback silencioso si History API falla
+   - normalización de URL/state
+   - no duplicar estados innecesarios
 ========================================================= */
 
 import {
+  isBrowser,
+  getCurrentPath,
+  getCurrentCanonicalPath,
+  getCurrentResolvedUsername,
   buildHistoryUrl,
   buildStatePayload,
-  normalizeCanonicalPath,
-  getCurrentPublicPath,
 } from "./helpers.js";
 
 /* =========================================================
-   INTERNAL
+   BASICS
 ========================================================= */
-function isBrowser() {
+
+function canUseHistory() {
   return (
-    typeof window !==
-      "undefined" &&
-    typeof document !==
+    isBrowser() &&
+    typeof window.history !==
       "undefined"
   );
 }
 
-function getHistoryApi() {
-  if (!isBrowser()) {
-    return null;
-  }
-
-  return window.history || null;
-}
-
-function safeCurrentUrl() {
-  if (!isBrowser()) {
-    return "/";
-  }
-
-  return `${window.location.pathname || "/"}${
-    window.location.search || ""
-  }${window.location.hash || ""}`;
-}
-
-function isSameUrl(
-  targetUrl = ""
+function safeHistoryCall(
+  method,
+  state,
+  url
 ) {
-  return (
-    safeCurrentUrl() ===
-    String(targetUrl || "")
+  if (!canUseHistory()) {
+    return false;
+  }
+
+  try {
+    window.history[method](
+      state,
+      "",
+      url
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/* =========================================================
+   BUILDERS
+========================================================= */
+
+export function createHistoryState({
+  AppCore,
+  pathname = "/",
+  extras = {},
+} = {}) {
+  return buildStatePayload(
+    AppCore,
+    pathname,
+    {
+      ts: Date.now(),
+      ...extras,
+    }
   );
 }
 
 /* =========================================================
-   UPDATE HISTORY
+   WRITE
 ========================================================= */
+
+export function pushState({
+  AppCore,
+  pathname = "/",
+  options = {},
+} = {}) {
+  const url =
+    buildHistoryUrl(
+      AppCore,
+      options.getRoute,
+      pathname,
+      options
+    );
+
+  const state =
+    createHistoryState({
+      AppCore,
+      pathname: url,
+      extras: {
+        mode: "push",
+        redirectedFrom:
+          options.redirectedFrom ||
+          null,
+      },
+    });
+
+  return safeHistoryCall(
+    "pushState",
+    state,
+    url
+  );
+}
+
+export function replaceState({
+  AppCore,
+  pathname = "/",
+  options = {},
+} = {}) {
+  const url =
+    buildHistoryUrl(
+      AppCore,
+      options.getRoute,
+      pathname,
+      options
+    );
+
+  const state =
+    createHistoryState({
+      AppCore,
+      pathname: url,
+      extras: {
+        mode: "replace",
+        redirectedFrom:
+          options.redirectedFrom ||
+          null,
+      },
+    });
+
+  return safeHistoryCall(
+    "replaceState",
+    state,
+    url
+  );
+}
+
+/* =========================================================
+   MAIN UPDATE
+========================================================= */
+
 export function updateHistory({
   AppCore,
   getRoute,
   pathname = "/",
   options = {},
-}) {
+} = {}) {
   if (
+    !canUseHistory() ||
     options.skipHistory
   ) {
     return false;
   }
 
-  const history =
-    getHistoryApi();
+  const finalOptions = {
+    ...options,
+    getRoute,
+  };
 
-  if (!history) {
-    return false;
-  }
-
-  const targetUrl =
+  const nextUrl =
     buildHistoryUrl(
       AppCore,
       getRoute,
       pathname,
-      {
-        username:
-          options.username,
-        preservePath:
-          Boolean(
-            options.preservePath
-          ),
-        withRedirect:
-          options.withRedirect ||
-          null,
-      }
+      finalOptions
     );
 
-  const payload =
-    buildStatePayload(
-      AppCore,
-      targetUrl,
-      {
-        redirectedFrom:
-          options.redirectedFrom
-            ? normalizeCanonicalPath(
-                AppCore,
-                options.redirectedFrom
-              )
-            : null,
-
-        redirectTo:
-          options.withRedirect
-            ? normalizeCanonicalPath(
-                AppCore,
-                options.withRedirect
-              )
-            : null,
-      }
+  const currentUrl =
+    getCurrentPath(
+      AppCore
     );
 
-  const useReplace =
-    Boolean(
-      options.replaceState
-    ) ||
-    isSameUrl(
-      targetUrl
-    );
+  const sameUrl =
+    nextUrl === currentUrl;
 
-  if (useReplace) {
-    history.replaceState(
-      payload,
-      "",
-      targetUrl
-    );
-  } else {
-    history.pushState(
-      payload,
-      "",
-      targetUrl
-    );
+  if (
+    sameUrl &&
+    !options.force &&
+    !options.replaceState
+  ) {
+    return false;
   }
 
-  return true;
+  if (
+    sameUrl ||
+    options.replaceState
+  ) {
+    return replaceState({
+      AppCore,
+      pathname,
+      options:
+        finalOptions,
+    });
+  }
+
+  return pushState({
+    AppCore,
+    pathname,
+    options:
+      finalOptions,
+  });
 }
 
 /* =========================================================
    INITIAL STATE
 ========================================================= */
+
 export function ensureInitialHistoryState({
   AppCore,
-}) {
-  const history =
-    getHistoryApi();
-
-  if (!history) {
+} = {}) {
+  if (!canUseHistory()) {
     return false;
   }
 
-  if (
-    history.state
-  ) {
-    return false;
-  }
+  try {
+    if (
+      window.history.state &&
+      typeof window.history.state ===
+        "object"
+    ) {
+      return true;
+    }
 
-  const initialPath =
-    getCurrentPublicPath(
-      AppCore
-    ) || "/";
+    const currentPath =
+      getCurrentPath(
+        AppCore
+      );
 
-  const payload =
-    buildStatePayload(
-      AppCore,
-      initialPath
+    const state =
+      createHistoryState({
+        AppCore,
+        pathname:
+          currentPath,
+        extras: {
+          mode: "initial",
+          canonicalPath:
+            getCurrentCanonicalPath(
+              AppCore
+            ),
+          username:
+            getCurrentResolvedUsername(
+              AppCore
+            ),
+        },
+      });
+
+    window.history.replaceState(
+      state,
+      "",
+      currentPath
     );
 
-  history.replaceState(
-    payload,
-    "",
-    initialPath
-  );
-
-  return true;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
-   NATIVE BACK
+   NAVIGATION
 ========================================================= */
-export function back() {
-  const history =
-    getHistoryApi();
 
-  if (!history) {
+export function back() {
+  if (!canUseHistory()) {
     return false;
   }
 
-  history.back();
-  return true;
+  try {
+    window.history.back();
+    return true;
+  } catch {
+    return false;
+  }
 }

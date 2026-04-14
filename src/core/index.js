@@ -17,6 +17,14 @@
    - request/api client robusto
    - helpers UI / lifecycle
    - init idempotente
+
+   HARDENING:
+   - sync derivada de sesión más robusta
+   - guards de browser
+   - init serializado
+   - request/api expuesto también en api pública
+   - helpers seguros y consistentes
+   - estado ready/booting/initialized blindado
 ========================================================= */
 
 import { config } from "./config.js";
@@ -149,6 +157,70 @@ export const AppCore = (() => {
     });
 
   /* =========================================================
+     INTERNAL HELPERS
+  ========================================================= */
+  function isBrowser() {
+    return (
+      typeof window !== "undefined" &&
+      typeof document !== "undefined"
+    );
+  }
+
+  function safeText(value, fallback = "") {
+    if (value === null || value === undefined) {
+      return fallback;
+    }
+
+    const text = String(value).trim();
+    return text || fallback;
+  }
+
+  function safeBoolean(value) {
+    return value === true;
+  }
+
+  function safeLog(...args) {
+    if (!config.debug) return;
+
+    console.log(
+      `[${config.appName}]`,
+      ...args
+    );
+  }
+
+  function safeWarn(...args) {
+    if (!config.debug) return;
+
+    console.warn(
+      `[${config.appName}]`,
+      ...args
+    );
+  }
+
+  function safeError(...args) {
+    console.error(
+      `[${config.appName}]`,
+      ...args
+    );
+  }
+
+  function syncDerivedAuthState() {
+    const hasTokenNow = Boolean(
+      state.token &&
+      String(state.token).trim()
+    );
+
+    state.authenticated = hasTokenNow;
+    state.role =
+      state.user?.role ||
+      state.user?.rol ||
+      state.role ||
+      "";
+
+    return state;
+  }
+
+  /* =========================================================
      UTILS
   ========================================================= */
   const utils = {
@@ -156,43 +228,21 @@ export const AppCore = (() => {
       selector,
       scope = document
     ) {
-      if (
-        typeof document ===
-        "undefined"
-      )
-        return null;
+      if (!isBrowser()) return null;
+      if (!selector || !scope?.querySelector) return null;
 
-      if (
-        !selector ||
-        !scope?.querySelector
-      )
-        return null;
-
-      return scope.querySelector(
-        selector
-      );
+      return scope.querySelector(selector);
     },
 
     qsa(
       selector,
       scope = document
     ) {
-      if (
-        typeof document ===
-        "undefined"
-      )
-        return [];
-
-      if (
-        !selector ||
-        !scope?.querySelectorAll
-      )
-        return [];
+      if (!isBrowser()) return [];
+      if (!selector || !scope?.querySelectorAll) return [];
 
       return Array.from(
-        scope.querySelectorAll(
-          selector
-        )
+        scope.querySelectorAll(selector)
       );
     },
 
@@ -200,60 +250,35 @@ export const AppCore = (() => {
       tag,
       options = {}
     ) {
-      if (
-        typeof document ===
-        "undefined"
-      )
-        return null;
+      if (!isBrowser()) return null;
 
       const el =
-        document.createElement(
-          tag
-        );
+        document.createElement(tag);
 
-      if (
-        options.className
-      )
-        el.className =
-          options.className;
-
-      if (options.id)
-        el.id =
-          options.id;
-
-      if (
-        options.text !==
-        undefined
-      ) {
-        el.textContent =
-          options.text;
+      if (options.className) {
+        el.className = options.className;
       }
 
-      if (
-        options.html !==
-        undefined
-      ) {
-        el.innerHTML =
-          options.html;
+      if (options.id) {
+        el.id = options.id;
+      }
+
+      if (options.text !== undefined) {
+        el.textContent = options.text;
+      }
+
+      if (options.html !== undefined) {
+        el.innerHTML = options.html;
       }
 
       if (
         options.attrs &&
-        typeof options.attrs ===
-          "object" &&
-        !Array.isArray(
-          options.attrs
-        )
+        typeof options.attrs === "object" &&
+        !Array.isArray(options.attrs)
       ) {
-        Object.entries(
-          options.attrs
-        ).forEach(
+        Object.entries(options.attrs).forEach(
           ([key, value]) => {
-            if (
-              value !==
-                undefined &&
-              value !== null
-            ) {
+            if (value !== undefined && value !== null) {
               el.setAttribute(
                 key,
                 String(value)
@@ -275,8 +300,7 @@ export const AppCore = (() => {
       if (
         !target ||
         !event ||
-        typeof handler !==
-          "function"
+        typeof handler !== "function"
       ) {
         return () => {};
       }
@@ -305,10 +329,10 @@ export const AppCore = (() => {
       if (
         !target ||
         !event ||
-        typeof handler !==
-          "function"
-      )
+        typeof handler !== "function"
+      ) {
         return;
+      }
 
       target.removeEventListener(
         event,
@@ -326,23 +350,19 @@ export const AppCore = (() => {
       if (
         !target ||
         !event ||
-        typeof handler !==
-          "function"
+        typeof handler !== "function"
       ) {
         return () => {};
       }
 
       const finalOptions =
-        typeof options ===
-        "boolean"
+        typeof options === "boolean"
           ? {
-              capture:
-                options,
+              capture: options,
               once: true,
             }
           : {
-              ...(options ||
-                {}),
+              ...(options || {}),
               once: true,
             };
 
@@ -361,32 +381,9 @@ export const AppCore = (() => {
       };
     },
 
-    log(...args) {
-      if (!config.debug)
-        return;
-
-      console.log(
-        `[${config.appName}]`,
-        ...args
-      );
-    },
-
-    warn(...args) {
-      if (!config.debug)
-        return;
-
-      console.warn(
-        `[${config.appName}]`,
-        ...args
-      );
-    },
-
-    error(...args) {
-      console.error(
-        `[${config.appName}]`,
-        ...args
-      );
-    },
+    log: safeLog,
+    warn: safeWarn,
+    error: safeError,
 
     sleep(ms = 0) {
       return new Promise(
@@ -404,24 +401,16 @@ export const AppCore = (() => {
       max
     ) {
       return Math.min(
-        Math.max(
-          value,
-          min
-        ),
+        Math.max(value, min),
         max
       );
     },
 
-    capitalize(
-      value = ""
-    ) {
-      if (!value)
-        return "";
+    capitalize(value = "") {
+      if (!value) return "";
 
       return (
-        value
-          .charAt(0)
-          .toUpperCase() +
+        value.charAt(0).toUpperCase() +
         value.slice(1)
       );
     },
@@ -430,20 +419,15 @@ export const AppCore = (() => {
       fn,
       delay = 250
     ) {
-      let timeoutId =
-        null;
+      let timeoutId = null;
 
       return (...args) => {
-        clearTimeout(
-          timeoutId
-        );
+        clearTimeout(timeoutId);
 
-        timeoutId =
-          setTimeout(
-            () =>
-              fn(...args),
-            delay
-          );
+        timeoutId = setTimeout(
+          () => fn(...args),
+          delay
+        );
       };
     },
 
@@ -451,85 +435,43 @@ export const AppCore = (() => {
       fn,
       limit = 250
     ) {
-      let inThrottle =
-        false;
-
-      let lastArgs =
-        null;
+      let inThrottle = false;
+      let lastArgs = null;
 
       return (...args) => {
-        if (
-          inThrottle
-        ) {
-          lastArgs =
-            args;
+        if (inThrottle) {
+          lastArgs = args;
           return;
         }
 
-        inThrottle =
-          true;
-
+        inThrottle = true;
         fn(...args);
 
-        setTimeout(
-          () => {
-            inThrottle =
-              false;
+        setTimeout(() => {
+          inThrottle = false;
 
-            if (
-              lastArgs
-            ) {
-              const queued =
-                lastArgs;
+          if (lastArgs) {
+            const queued = lastArgs;
+            lastArgs = null;
 
-              lastArgs =
-                null;
+            fn(...queued);
+            inThrottle = true;
 
-              fn(...queued);
-
-              inThrottle =
-                true;
-
-              setTimeout(
-                () => {
-                  inThrottle =
-                    false;
-                },
-                limit
-              );
-            }
-          },
-          limit
-        );
+            setTimeout(() => {
+              inThrottle = false;
+            }, limit);
+          }
+        }, limit);
       };
     },
 
-    escapeHtml(
-      value = ""
-    ) {
-      return String(
-        value
-      )
-        .replaceAll(
-          "&",
-          "&amp;"
-        )
-        .replaceAll(
-          "<",
-          "&lt;"
-        )
-        .replaceAll(
-          ">",
-          "&gt;"
-        )
-        .replaceAll(
-          '"',
-          "&quot;"
-        )
-        .replaceAll(
-          "'",
-          "&#039;"
-        );
+    escapeHtml(value = "") {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
     },
 
     safeClone,
@@ -561,70 +503,60 @@ export const AppCore = (() => {
      STORAGE
   ========================================================= */
   const storage =
-    createStorage(
-      utils
-    );
+    createStorage(utils);
 
   /* =========================================================
      STATE API
   ========================================================= */
-  function setState(
-    patch = {}
-  ) {
-    return setStateBase({
+  function setState(patch = {}) {
+    const nextState = setStateBase({
       state,
       events,
       patch,
     });
+
+    syncDerivedAuthState();
+
+    return nextState;
   }
 
   function getState() {
-    return getStateBase(
-      state
-    );
+    syncDerivedAuthState();
+    return getStateBase(state);
   }
 
   /* =========================================================
      UI HELPERS
   ========================================================= */
   function setDocumentTitle(
-    title =
-      config.appName
+    title = config.appName
   ) {
-    return setDocumentTitleBase(
-      {
-        dom,
-        events,
-        title,
-      }
-    );
+    return setDocumentTitleBase({
+      dom,
+      events,
+      title,
+    });
   }
 
   function clearDynamicContainers() {
-    return clearDynamicContainersBase(
-      {
-        dom,
-        events,
-      }
-    );
+    return clearDynamicContainersBase({
+      dom,
+      events,
+    });
   }
 
   function syncUserUI() {
-    return syncUserUIBase(
-      {
-        state,
-        dom,
-        events,
-      }
-    );
+    return syncUserUIBase({
+      state,
+      dom,
+      events,
+    });
   }
 
   /* =========================================================
      SESSION / PREFS
   ========================================================= */
-  function setRoute(
-    route = "/"
-  ) {
+  function setRoute(route = "/") {
     return setRouteBase({
       state,
       setState,
@@ -633,23 +565,17 @@ export const AppCore = (() => {
     });
   }
 
-  function setPublicPath(
-    path = "/"
-  ) {
-    return setPublicPathBase(
-      {
-        storage,
-        setState,
-        events,
-        path,
-      }
-    );
+  function setPublicPath(path = "/") {
+    return setPublicPathBase({
+      storage,
+      setState,
+      events,
+      path,
+    });
   }
 
-  function setUser(
-    user = null
-  ) {
-    return setUserBase({
+  function setUser(user = null) {
+    const result = setUserBase({
       state,
       storage,
       events,
@@ -657,68 +583,65 @@ export const AppCore = (() => {
       syncUserUI,
       user,
     });
+
+    syncDerivedAuthState();
+
+    return result;
   }
 
-  function setToken(
-    token = null
-  ) {
-    return setTokenBase({
+  function setToken(token = null) {
+    const result = setTokenBase({
       state,
       storage,
       events,
       setState,
       token,
     });
+
+    syncDerivedAuthState();
+
+    return result;
   }
 
   function applySession({
     token = undefined,
     user = undefined,
   } = {}) {
-    return applySessionBase(
-      {
-        state,
-        events,
-        setUser:
-          ({
-            user:
-              nextUser,
-          }) =>
-            setUser(
-              nextUser
-            ),
+    const result = applySessionBase({
+      state,
+      events,
+      setUser: ({ user: nextUser }) =>
+        setUser(nextUser),
 
-        setToken:
-          ({
-            token:
-              nextToken,
-          }) =>
-            setToken(
-              nextToken
-            ),
+      setToken: ({ token: nextToken }) =>
+        setToken(nextToken),
 
-        token,
-        user,
-      }
-    );
+      token,
+      user,
+    });
+
+    syncDerivedAuthState();
+
+    return result;
   }
 
   function clearSession() {
-    return clearSessionBase(
-      {
-        state,
-        storage,
-        events,
-        setState,
-        syncUserUI,
-        utils,
-      }
-    );
+    const result = clearSessionBase({
+      state,
+      storage,
+      events,
+      setState,
+      syncUserUI,
+      utils,
+    });
+
+    syncDerivedAuthState();
+
+    return result;
   }
 
   function setTheme(
-    theme =
-      config.defaultTheme
+    theme = config.defaultTheme
   ) {
     return setThemeBase({
       dom,
@@ -730,8 +653,7 @@ export const AppCore = (() => {
   }
 
   function setLang(
-    lang =
-      config.defaultLang
+    lang = config.defaultLang
   ) {
     return setLangBase({
       dom,
@@ -742,23 +664,17 @@ export const AppCore = (() => {
     });
   }
 
-  function setSidebarOpen(
-    value
-  ) {
-    return setSidebarOpenBase(
-      {
-        dom,
-        storage,
-        events,
-        setState,
-        value,
-      }
-    );
+  function setSidebarOpen(value) {
+    return setSidebarOpenBase({
+      dom,
+      storage,
+      events,
+      setState,
+      value,
+    });
   }
 
-  function setLoading(
-    value
-  ) {
+  function setLoading(value) {
     return setLoadingBase({
       dom,
       events,
@@ -767,9 +683,7 @@ export const AppCore = (() => {
     });
   }
 
-  function setError(
-    error = null
-  ) {
+  function setError(error = null) {
     return setErrorBase({
       events,
       setState,
@@ -791,37 +705,25 @@ export const AppCore = (() => {
     });
 
   const apiClient =
-    createApiClient(
-      request
-    );
+    createApiClient(request);
 
   /* =========================================================
      READY
   ========================================================= */
-  function ready(
-    callback
-  ) {
-    if (
-      typeof callback !==
-      "function"
-    )
+  function ready(callback) {
+    if (typeof callback !== "function") {
       return;
+    }
 
-    if (
-      typeof document ===
-      "undefined"
-    )
+    if (!isBrowser()) {
       return;
+    }
 
-    if (
-      !isDocumentReady()
-    ) {
+    if (!isDocumentReady()) {
       document.addEventListener(
         "DOMContentLoaded",
         callback,
-        {
-          once: true,
-        }
+        { once: true }
       );
 
       return;
@@ -835,11 +737,10 @@ export const AppCore = (() => {
   ========================================================= */
   async function doInit() {
     state.booting = true;
+    state.ready = false;
 
     try {
-      for (const hook of registry
-        .hooks
-        .beforeInit) {
+      for (const hook of registry.hooks.beforeInit) {
         try {
           await hook(api);
         } catch (error) {
@@ -850,28 +751,20 @@ export const AppCore = (() => {
         }
       }
 
-      config.apiBase =
-        String(
-          config.apiBase ||
-            ""
-        )
-          .trim()
-          .replace(
-            /\/+$/,
-            ""
-          );
+      config.apiBase = safeText(
+        config.apiBase,
+        ""
+      ).replace(/\/+$/, "");
 
       cacheDom({
         dom,
         utils,
       });
 
-      validateRequiredDom(
-        {
-          dom,
-          utils,
-        }
-      );
+      validateRequiredDom({
+        dom,
+        utils,
+      });
 
       loadPreferences({
         state,
@@ -883,6 +776,8 @@ export const AppCore = (() => {
         state,
         storage,
       });
+
+      syncDerivedAuthState();
 
       syncBaseUI({
         setDocumentTitle,
@@ -896,12 +791,8 @@ export const AppCore = (() => {
         utils,
       });
 
-      state.initialized =
-        true;
-
-      state.booting =
-        false;
-
+      state.initialized = true;
+      state.booting = false;
       state.ready = true;
 
       initDone = true;
@@ -909,45 +800,27 @@ export const AppCore = (() => {
       utils.log(
         "Core inicializado correctamente.",
         {
-          version:
-            config.version,
-          apiBase:
-            config.apiBase,
-          route:
-            state.route,
-          publicPath:
-            state.publicPath,
-          lang:
-            state.lang,
-          theme:
-            state.theme,
-          authenticated:
-            state.authenticated,
+          version: config.version,
+          apiBase: config.apiBase,
+          route: state.route,
+          publicPath: state.publicPath,
+          lang: state.lang,
+          theme: state.theme,
+          authenticated: state.authenticated,
           username:
-            getUserUsername(
-              state.user
-            ) || null,
-          online:
-            state.online,
+            getUserUsername(state.user) || null,
+          online: state.online,
         }
       );
 
-      events.emit(
-        "app:core:ready",
-        {
-          state:
-            cloneState(
-              state
-            ),
-          config: {
-            ...config,
-          },
-        }
-      );
+      events.emit("app:core:ready", {
+        state: cloneState(state),
+        config: {
+          ...config,
+        },
+      });
 
-      for (const hook of registry
-        .hooks
-        .afterInit) {
+      for (const hook of registry.hooks.afterInit) {
         try {
           await hook(api);
         } catch (error) {
@@ -960,29 +833,20 @@ export const AppCore = (() => {
 
       return api;
     } catch (error) {
-      state.booting =
-        false;
-
-      state.ready =
-        false;
-
-      state.initialized =
-        false;
+      state.booting = false;
+      state.ready = false;
+      state.initialized = false;
 
       setError(error);
 
       throw error;
     } finally {
-      initPromise =
-        null;
+      initPromise = null;
     }
   }
 
   async function init() {
-    if (
-      initDone ||
-      state.initialized
-    ) {
+    if (initDone || safeBoolean(state.initialized)) {
       utils.warn(
         "AppCore ya fue inicializado."
       );
@@ -998,8 +862,7 @@ export const AppCore = (() => {
       return initPromise;
     }
 
-    initPromise =
-      doInit();
+    initPromise = doInit();
 
     return initPromise;
   }
@@ -1017,6 +880,8 @@ export const AppCore = (() => {
     cleanup,
     modules,
     hooks,
+
+    request,
     apiClient,
 
     init,
@@ -1050,3 +915,5 @@ export const AppCore = (() => {
 
   return api;
 })();
+
+export default AppCore;

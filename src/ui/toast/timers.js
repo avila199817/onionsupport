@@ -8,10 +8,55 @@
    - resume
    - progress animation
    - clear timers
+   - endurecer race conditions / updates / hover spam
 ========================================================= */
 
 import { dismissToast } from "./api.js";
 import { prefersReducedMotion } from "./helpers.js";
+
+/* =========================================================
+   HELPERS
+========================================================= */
+
+function isFiniteNumber(value) {
+  return Number.isFinite(
+    Number(value)
+  );
+}
+
+function getSafeDuration(
+  value,
+  fallback = 0
+) {
+  const n = Number(value);
+
+  if (!Number.isFinite(n)) {
+    return fallback;
+  }
+
+  return Math.max(0, n);
+}
+
+function isPersistent(item) {
+  return (
+    !item ||
+    getSafeDuration(
+      item.duration,
+      0
+    ) <= 0
+  );
+}
+
+function getRemaining(item) {
+  if (!item) {
+    return 0;
+  }
+
+  return getSafeDuration(
+    item.remaining,
+    item.duration
+  );
+}
 
 /* =========================================================
    TIMER
@@ -21,17 +66,18 @@ export function clearToastTimer(
   item
 ) {
   if (!item) {
-    return;
+    return false;
   }
 
   if (item.timeoutId) {
     window.clearTimeout(
       item.timeoutId
     );
-
-    item.timeoutId =
-      null;
   }
+
+  item.timeoutId = null;
+
+  return true;
 }
 
 /* =========================================================
@@ -45,7 +91,7 @@ export function freezeToastProgress(
     item?.progressEl;
 
   if (!el) {
-    return;
+    return false;
   }
 
   const computed =
@@ -60,6 +106,52 @@ export function freezeToastProgress(
     computed === "none"
       ? "scaleX(1)"
       : computed;
+
+  return true;
+}
+
+export function resetToastProgress(
+  item
+) {
+  const el =
+    item?.progressEl;
+
+  if (!el) {
+    return false;
+  }
+
+  el.style.animation =
+    "none";
+
+  el.style.transform =
+    "scaleX(1)";
+
+  el.style.opacity = "";
+  el.style.display = "";
+
+  return true;
+}
+
+export function hideToastProgress(
+  item
+) {
+  const el =
+    item?.progressEl;
+
+  if (!el) {
+    return false;
+  }
+
+  el.style.display =
+    "none";
+
+  el.style.animation =
+    "none";
+
+  el.style.transform =
+    "scaleX(1)";
+
+  return true;
 }
 
 export function runToastProgress(
@@ -70,25 +162,25 @@ export function runToastProgress(
     item?.progressEl;
 
   if (!el) {
-    return;
+    return false;
   }
 
+  const safeDuration =
+    getSafeDuration(
+      duration,
+      0
+    );
+
   if (
-    !duration ||
-    duration <= 0 ||
-    item.type ===
+    safeDuration <= 0 ||
+    item?.type ===
       "loading"
   ) {
-    el.style.display =
-      "none";
+    hideToastProgress(
+      item
+    );
 
-    el.style.animation =
-      "none";
-
-    el.style.transform =
-      "scaleX(1)";
-
-    return;
+    return true;
   }
 
   el.style.display = "";
@@ -104,13 +196,15 @@ export function runToastProgress(
   if (
     prefersReducedMotion()
   ) {
-    return;
+    return true;
   }
 
   void el.offsetWidth;
 
   el.style.animation =
-    `toastProgress ${duration}ms linear forwards`;
+    `toastProgress ${safeDuration}ms linear forwards`;
+
+  return true;
 }
 
 /* =========================================================
@@ -122,14 +216,26 @@ export function startToastTimer(
 ) {
   if (
     !item ||
-    !item.duration ||
-    item.duration <= 0
+    item.dismissed
   ) {
-    return;
+    return false;
   }
 
-  if (item.dismissed) {
-    return;
+  if (
+    isPersistent(item)
+  ) {
+    clearToastTimer(
+      item
+    );
+
+    hideToastProgress(
+      item
+    );
+
+    item.startedAt = 0;
+    item.remaining = 0;
+
+    return false;
   }
 
   clearToastTimer(item);
@@ -137,18 +243,47 @@ export function startToastTimer(
   const remaining =
     Math.max(
       0,
-      item.remaining ??
-        item.duration
+      getRemaining(item)
     );
+
+  if (
+    remaining <= 0
+  ) {
+    dismissToast(
+      item.id
+    );
+
+    return false;
+  }
+
+  item.remaining =
+    remaining;
 
   item.startedAt =
     Date.now();
 
+  const currentId =
+    item.id;
+
   item.timeoutId =
     window.setTimeout(
       () => {
+        /*
+          Blindaje:
+          si el toast cambió de id,
+          fue dismiss,
+          o mutó raro, no actuamos.
+        */
+        if (
+          item.dismissed ||
+          item.id !==
+            currentId
+        ) {
+          return;
+        }
+
         dismissToast(
-          item.id
+          currentId
         );
       },
       remaining
@@ -158,6 +293,8 @@ export function startToastTimer(
     item,
     remaining
   );
+
+  return true;
 }
 
 /* =========================================================
@@ -169,37 +306,49 @@ export function pauseToastTimer(
 ) {
   if (
     !item ||
-    !item.duration ||
-    item.duration <= 0
+    item.dismissed ||
+    isPersistent(item)
   ) {
-    return;
+    return false;
   }
 
   if (
-    !item.startedAt
+    !isFiniteNumber(
+      item.startedAt
+    ) ||
+    item.startedAt <= 0
   ) {
-    return;
+    return false;
   }
 
   const elapsed =
-    Date.now() -
-    item.startedAt;
-
-  item.remaining =
     Math.max(
       0,
-      (
-        item.remaining ??
-        item.duration
-      ) - elapsed
+      Date.now() -
+        item.startedAt
     );
+
+  const remaining =
+    Math.max(
+      0,
+      getRemaining(item) -
+        elapsed
+    );
+
+  item.remaining =
+    remaining;
 
   item.startedAt = 0;
 
-  clearToastTimer(item);
+  clearToastTimer(
+    item
+  );
+
   freezeToastProgress(
     item
   );
+
+  return true;
 }
 
 /* =========================================================
@@ -211,30 +360,26 @@ export function resumeToastTimer(
 ) {
   if (
     !item ||
-    !item.duration ||
-    item.duration <= 0
+    item.dismissed ||
+    isPersistent(item)
   ) {
-    return;
+    return false;
   }
 
-  if (item.dismissed) {
-    return;
-  }
+  const remaining =
+    getRemaining(item);
 
   if (
-    (
-      item.remaining ??
-      item.duration
-    ) <= 0
+    remaining <= 0
   ) {
     dismissToast(
       item.id
     );
 
-    return;
+    return false;
   }
 
-  startToastTimer(
+  return startToastTimer(
     item
   );
 }

@@ -1,18 +1,16 @@
 /* =========================================================
-   Onion SPA - Reset Password DOM (FULL PRO SYSTEM)
-   Archivo: src/views/reset-password/reset-password.dom.js
+   Onion SPA - Reset Password DOM
+   Archivo: src/views/password-reset/reset-password.dom.js
 
    Responsabilidades:
-   - resolver refs reales del dom de recuperación
+   - resolver refs del dom de recuperación
    - encapsular estados visuales del formulario
    - aplicar y limpiar errores
    - controlar loading ui
    - gestionar focus inicial
-   - exponer lectura robusta del formulario
    - facilitar bind / unbind desacoplado
-   - endurecer acceso al DOM y consistencia visual
-   - soportar toast inline sin inconsistencias
-   - evitar doble estado success / neutral / loading
+   - soportar toast inline del reset
+   - mantener consistencia con login.css
 ========================================================= */
 
 /* =========================================================
@@ -21,14 +19,6 @@
 
 function qs(root, selector) {
   return root?.querySelector?.(selector) || null;
-}
-
-function isObject(value) {
-  return value !== null && typeof value === "object";
-}
-
-function isFunction(value) {
-  return typeof value === "function";
 }
 
 function toText(value, fallback = "") {
@@ -40,35 +30,23 @@ function toText(value, fallback = "") {
   return text || fallback;
 }
 
-function toBool(value, fallback = false) {
-  if (typeof value === "boolean") {
-    return value;
-  }
-
-  return Boolean(fallback);
-}
-
 function toNumber(value, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function getMicrotaskScheduler() {
-  if (typeof queueMicrotask === "function") {
-    return queueMicrotask;
-  }
-
-  return (fn) => Promise.resolve().then(fn);
+function isFunction(value) {
+  return typeof value === "function";
 }
 
-function setAriaInvalid(node, active = false) {
+function setText(node, value = "") {
   if (!node) return;
-  node.setAttribute("aria-invalid", active ? "true" : "false");
+  node.textContent = toText(value, "");
 }
 
-function setAriaBusy(node, active = false) {
+function setHtml(node, value = "") {
   if (!node) return;
-  node.setAttribute("aria-busy", active ? "true" : "false");
+  node.innerHTML = String(value ?? "");
 }
 
 function setHidden(node, hidden) {
@@ -81,14 +59,14 @@ function setDisabled(node, disabled) {
   node.disabled = Boolean(disabled);
 }
 
-function setText(node, value = "") {
+function setAriaInvalid(node, active = false) {
   if (!node) return;
-  node.textContent = toText(value, "");
+  node.setAttribute("aria-invalid", active ? "true" : "false");
 }
 
-function setHtml(node, value = "") {
+function setAriaBusy(node, active = false) {
   if (!node) return;
-  node.innerHTML = String(value ?? "");
+  node.setAttribute("aria-busy", active ? "true" : "false");
 }
 
 function toggleClass(node, className, active = false) {
@@ -102,6 +80,10 @@ function removeClasses(node, classNames = []) {
   }
 
   node.classList.remove(...classNames);
+}
+
+function resolveSubmitMarkup(label = "") {
+  return `<span class="login-submit-text">${toText(label, "")}</span>`;
 }
 
 function resolveFieldNode(inputNode, root, selectors = []) {
@@ -124,8 +106,16 @@ function resolveFieldNode(inputNode, root, selectors = []) {
   return null;
 }
 
-function resolveSubmitMarkup(label = "") {
-  return `<span class="login-submit-text">${toText(label, "")}</span>`;
+function bindDomEvent(node, eventName, handler, options) {
+  if (!node || !isFunction(handler) || !toText(eventName, "")) {
+    return () => {};
+  }
+
+  node.addEventListener(eventName, handler, options);
+
+  return () => {
+    node.removeEventListener(eventName, handler, options);
+  };
 }
 
 /* =========================================================
@@ -159,27 +149,19 @@ export function getResetPasswordRefs(container) {
     ]
   );
 
-  const errorBox =
-    qs(root, "#resetPasswordError") ||
-    qs(root, '[role="alert"]') ||
-    null;
-
-  const form =
-    qs(root, "#resetPasswordForm") ||
-    qs(root, "form") ||
-    null;
-
-  const card =
-    qs(root, "#resetPasswordCard") ||
-    qs(root, ".login-card") ||
-    null;
-
-  const refs = {
+  return {
     container,
     root,
 
-    form,
-    card,
+    form:
+      qs(root, "#resetPasswordForm") ||
+      qs(root, "form") ||
+      null,
+
+    card:
+      qs(root, "#resetPasswordCard") ||
+      qs(root, ".login-card") ||
+      null,
 
     stage:
       qs(root, "#resetPasswordStage") ||
@@ -209,7 +191,10 @@ export function getResetPasswordRefs(container) {
     fieldIdentifier,
     fieldEmail: fieldIdentifier,
 
-    errorBox,
+    errorBox:
+      qs(root, "#resetPasswordError") ||
+      qs(root, '[role="alert"]') ||
+      null,
 
     toastRoot:
       qs(root, "#resetPasswordToast") ||
@@ -235,8 +220,6 @@ export function getResetPasswordRefs(container) {
       qs(root, "#resetPasswordToastProgress") ||
       null,
   };
-
-  return refs;
 }
 
 /* =========================================================
@@ -245,7 +228,7 @@ export function getResetPasswordRefs(container) {
 
 export function setFieldInvalid(fieldNode, invalid = false) {
   if (!fieldNode) return;
-  toggleClass(fieldNode, "is-invalid", Boolean(invalid));
+  fieldNode.classList.toggle("is-invalid", Boolean(invalid));
 }
 
 export function setInputInvalid(inputNode, invalid = false) {
@@ -274,15 +257,13 @@ export function clearResetPasswordErrors(refs = {}) {
 }
 
 export function applyResetPasswordErrors(refs = {}, errors = {}) {
-  const safeErrors = isObject(errors) ? errors : {};
-
   const identifierError =
-    toText(safeErrors.identifier, "") ||
-    toText(safeErrors.email, "");
+    toText(errors.identifier, "") ||
+    toText(errors.email, "");
 
   const globalError =
-    toText(safeErrors.global, "") ||
-    toText(safeErrors.message, "");
+    toText(errors.global, "") ||
+    toText(errors.message, "");
 
   const firstError =
     identifierError ||
@@ -303,7 +284,7 @@ export function setGlobalResetPasswordError(refs = {}, message = "") {
 }
 
 /* =========================================================
-   LOADING / NEUTRAL / SUCCESS STATE
+   LOADING / SUCCESS / NEUTRAL
 ========================================================= */
 
 export function setResetPasswordLoading(
@@ -376,10 +357,7 @@ export function shakeResetPasswordCard(refs = {}) {
   card.classList.add("shake");
 }
 
-export function setResetPasswordSuccessState(
-  refs = {},
-  options = {}
-) {
+export function setResetPasswordSuccessState(refs = {}, options = {}) {
   const title = toText(
     options.title,
     "Revisa tu correo"
@@ -411,13 +389,13 @@ export function setResetPasswordSuccessState(
   setDisabled(refs.identifierInput, true);
   setDisabled(refs.themeToggleButton, true);
 
-  if (refs?.backToLoginLink) {
+  if (refs.backToLoginLink) {
     refs.backToLoginLink.setAttribute("aria-disabled", "false");
     refs.backToLoginLink.classList.remove("is-disabled");
     refs.backToLoginLink.tabIndex = 0;
   }
 
-  if (refs?.submitButton) {
+  if (refs.submitButton) {
     refs.submitButton.disabled = true;
     refs.submitButton.dataset.loading = "false";
     setHtml(
@@ -429,10 +407,7 @@ export function setResetPasswordSuccessState(
   setText(refs.errorBox, message);
 }
 
-export function setResetPasswordNeutralState(
-  refs = {},
-  options = {}
-) {
+export function setResetPasswordNeutralState(refs = {}, options = {}) {
   const submitLabel = toText(
     options.submitLabel,
     "Enviar enlace"
@@ -457,13 +432,13 @@ export function setResetPasswordNeutralState(
   setDisabled(refs.identifierInput, false);
   setDisabled(refs.themeToggleButton, false);
 
-  if (refs?.backToLoginLink) {
+  if (refs.backToLoginLink) {
     refs.backToLoginLink.setAttribute("aria-disabled", "false");
     refs.backToLoginLink.classList.remove("is-disabled");
     refs.backToLoginLink.tabIndex = 0;
   }
 
-  if (refs?.submitButton) {
+  if (refs.submitButton) {
     refs.submitButton.disabled = false;
     refs.submitButton.dataset.loading = "false";
     setHtml(
@@ -474,7 +449,7 @@ export function setResetPasswordNeutralState(
 }
 
 /* =========================================================
-   TOAST VIEW HELPERS
+   TOAST
 ========================================================= */
 
 export function getResetPasswordToastRefs(refs = {}) {
@@ -515,12 +490,12 @@ export function hideResetPasswordToast(refs = {}) {
   }
 }
 
-export function setResetPasswordToastVisibility(
-  refs = {},
-  visible = false
-) {
+export function setResetPasswordToastVisibility(refs = {}, visible = false) {
   const toastRoot = refs?.toastRoot;
-  if (!toastRoot) return Boolean(visible);
+
+  if (!toastRoot) {
+    return Boolean(visible);
+  }
 
   setHidden(toastRoot, !visible);
   toastRoot.setAttribute(
@@ -535,10 +510,7 @@ export function setResetPasswordToastVisibility(
   return Boolean(visible);
 }
 
-export function setResetPasswordToastContent(
-  refs = {},
-  options = {}
-) {
+export function setResetPasswordToastContent(refs = {}, options = {}) {
   const {
     toastRoot,
     toastTitle,
@@ -607,21 +579,47 @@ export function startResetPasswordToastProgress(
   return true;
 }
 
+export function showResetPasswordToast(refs = {}, options = {}) {
+  const duration = Math.max(
+    0,
+    toNumber(options.duration, 3200)
+  );
+
+  const autoHide =
+    Object.prototype.hasOwnProperty.call(options, "autoHide")
+      ? Boolean(options.autoHide)
+      : true;
+
+  setResetPasswordToastContent(refs, options);
+  setResetPasswordToastVisibility(refs, true);
+
+  if (refs.toastRoot) {
+    refs.toastRoot.classList.add("is-visible");
+  }
+
+  if (autoHide && duration > 0) {
+    startResetPasswordToastProgress(refs, duration);
+
+    window.setTimeout(() => {
+      hideResetPasswordToast(refs);
+    }, duration);
+  } else {
+    resetResetPasswordToastProgress(refs);
+  }
+
+  return true;
+}
+
 /* =========================================================
    FOCUS
 ========================================================= */
 
-export function focusResetPasswordPrimaryField(
-  refs = {},
-  options = {}
-) {
+export function focusResetPasswordPrimaryField(refs = {}, options = {}) {
   const rememberedIdentifier = Boolean(
     options.rememberedIdentifier || options.rememberedEmail
   );
 
-  const schedule = getMicrotaskScheduler();
-
-  schedule(() => {
+  queueMicrotask(() => {
     try {
       refs.identifierInput?.focus?.();
 
@@ -648,25 +646,10 @@ export function readResetPasswordFormState(refs = {}) {
 }
 
 /* =========================================================
-   EVENT BIND HELPERS
+   BIND HELPERS
 ========================================================= */
 
-function bindDomEvent(node, eventName, handler, options) {
-  if (!node || !isFunction(handler) || !toText(eventName, "")) {
-    return () => {};
-  }
-
-  node.addEventListener(eventName, handler, options);
-
-  return () => {
-    node.removeEventListener(eventName, handler, options);
-  };
-}
-
-export function bindResetPasswordInputClearers(
-  refs = {},
-  handler = null
-) {
+export function bindResetPasswordInputClearers(refs = {}, handler = null) {
   return bindDomEvent(
     refs.identifierInput,
     "input",
@@ -674,10 +657,7 @@ export function bindResetPasswordInputClearers(
   );
 }
 
-export function bindResetPasswordSubmit(
-  refs = {},
-  handler = null
-) {
+export function bindResetPasswordSubmit(refs = {}, handler = null) {
   return bindDomEvent(
     refs.form,
     "submit",
@@ -685,10 +665,7 @@ export function bindResetPasswordSubmit(
   );
 }
 
-export function bindResetPasswordToastClose(
-  refs = {},
-  handler = null
-) {
+export function bindResetPasswordToastClose(refs = {}, handler = null) {
   return bindDomEvent(
     refs.toastClose,
     "click",
@@ -696,10 +673,7 @@ export function bindResetPasswordToastClose(
   );
 }
 
-export function bindResetPasswordBackLink(
-  refs = {},
-  handler = null
-) {
+export function bindResetPasswordBackLink(refs = {}, handler = null) {
   return bindDomEvent(
     refs.backToLoginLink,
     "click",
@@ -707,10 +681,7 @@ export function bindResetPasswordBackLink(
   );
 }
 
-export function bindResetPasswordThemeToggle(
-  refs = {},
-  handler = null
-) {
+export function bindResetPasswordThemeToggle(refs = {}, handler = null) {
   return bindDomEvent(
     refs.themeToggleButton,
     "click",

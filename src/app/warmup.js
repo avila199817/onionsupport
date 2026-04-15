@@ -124,3 +124,5 @@ export async function warmup(
     return snapshot;
   }
 }
+
+export default warmup;

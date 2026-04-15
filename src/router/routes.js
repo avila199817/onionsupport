@@ -24,7 +24,7 @@ import { I18n } from "../i18n/index.js";
 
 import { LoginView } from "../views/login/index.js";
 import { ResetPasswordView } from "../views/password-reset/index.js";
-import { HomeView } from "../views/homeView.js";
+import { HomeView } from "../views/home/index.js";
 import { IncidenciasView } from "../views/incidencias/index.js";
 import { FacturasView } from "../views/facturas/index.js";
 import { ServerView } from "../views/serverView.js";

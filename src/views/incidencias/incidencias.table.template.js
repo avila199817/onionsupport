@@ -2,16 +2,20 @@
    Onion SPA - Incidencias Template (FINAL PRO TABLE GOD MODE)
    Archivo: src/views/incidencias/incidencias.table.template.js
 
+   EXTREME MODE · BACKEND REAL DATA READY · 10/10
+
    Responsabilidades:
    - renderizar header premium de la vista
    - renderizar estados loading / error / empty
    - renderizar tabla premium de incidencias
    - mantener compatibilidad directa con incidenciasView.js
+   - consumir datos reales del backend /api/tickets
    - compartir lenguaje visual y densidad con Facturas
 
    HARDENING PRO:
    - tolerancia a payloads heterogéneos
-   - helpers de lectura consistentes
+   - soporte para envelope backend { ok, count, tickets }
+   - lectura preferente del shape normalizado del backend
    - mismo lenguaje visual que Facturas
    - toolbar / skeleton / mobile cards consistentes
 ========================================================= */
@@ -49,6 +53,18 @@ function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function safeObject(value) {
+  return value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+    ? value
+    : {};
+}
+
+function safeLower(value, fallback = "") {
+  return safeText(value, fallback).toLowerCase();
+}
+
 function first(...values) {
   for (const value of values) {
     if (
@@ -61,6 +77,69 @@ function first(...values) {
   }
 
   return null;
+}
+
+/* =========================================================
+   BACKEND ENVELOPE / REAL DATA RESOLVE
+========================================================= */
+
+function looksLikeTicketsEnvelope(value) {
+  const obj = safeObject(value);
+
+  return Boolean(
+    Array.isArray(obj?.tickets) ||
+      Array.isArray(obj?.items) ||
+      Array.isArray(obj?.data) ||
+      Array.isArray(obj?.results)
+  );
+}
+
+function unwrapItemsEnvelope(value) {
+  const obj = safeObject(value);
+
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (Array.isArray(obj?.tickets)) {
+    return obj.tickets;
+  }
+
+  if (Array.isArray(obj?.items)) {
+    return obj.items;
+  }
+
+  if (Array.isArray(obj?.data)) {
+    return obj.data;
+  }
+
+  if (Array.isArray(obj?.results)) {
+    return obj.results;
+  }
+
+  if (looksLikeTicketsEnvelope(obj?.data)) {
+    return unwrapItemsEnvelope(obj.data);
+  }
+
+  return [];
+}
+
+function resolveRemoteCount(items, state = {}) {
+  const localState = safeObject(state);
+
+  return safeNumber(
+    first(
+      localState?.remoteCount,
+      localState?.count,
+      localState?.total,
+      safeObject(localState?.stats)?.total,
+      safeObject(localState?.response)?.count,
+      safeObject(localState?.payload)?.count,
+      safeObject(localState?.lastResponse)?.count,
+      safeObject(items)?.count
+    ),
+    safeArray(items).length
+  );
 }
 
 /* =========================================================
@@ -260,7 +339,16 @@ function getResolvedItems(items) {
   const direct = safeArray(items);
 
   if (direct.length) {
-    return direct;
+    return sortIncidenciasByUpdatedDesc(direct);
+  }
+
+  const fromEnvelope =
+    unwrapItemsEnvelope(items);
+
+  if (fromEnvelope.length) {
+    return sortIncidenciasByUpdatedDesc(
+      fromEnvelope
+    );
   }
 
   try {
@@ -286,10 +374,10 @@ function getTicketId(item = {}) {
 function getTicketCode(item = {}) {
   return safeText(
     first(
-      item.code,
-      item.ticketCode,
       item.ticketId,
-      item.id
+      item.id,
+      item.code,
+      item.ticketCode
     ),
     "—"
   );
@@ -298,11 +386,16 @@ function getTicketCode(item = {}) {
 function getClientName(item = {}) {
   return safeText(
     first(
+      item?.cliente?.nombre,
+      item?.cliente?.name,
       item.client,
       item.clientName,
       item.cliente,
       item.empresa,
-      item.company
+      item.company,
+      item.name,
+      item?.receptor?.name,
+      item?.createdBy?.name
     ),
     "Cliente"
   );
@@ -311,9 +404,12 @@ function getClientName(item = {}) {
 function getClientEmail(item = {}) {
   return safeText(
     first(
+      item?.cliente?.email,
       item.clientEmail,
       item.email,
-      item.clienteEmail
+      item.clienteEmail,
+      item?.receptor?.email,
+      item?.createdBy?.email
     ),
     "Sin email"
   );
@@ -322,8 +418,8 @@ function getClientEmail(item = {}) {
 function getTitle(item = {}) {
   return safeText(
     first(
-      item.title,
       item.subject,
+      item.title,
       item.asunto,
       item.name
     ),
@@ -335,33 +431,75 @@ function getPreview(item = {}) {
   return safeText(
     first(
       item.preview,
-      item.description,
       item.descripcion,
+      item.description,
       item.message
     ),
     "Sin descripción"
   );
 }
 
+function getStatusValue(item = {}) {
+  return safeText(
+    first(
+      item.status,
+      item.estado
+    ),
+    "open"
+  );
+}
+
+function getPriorityValue(item = {}) {
+  return safeText(
+    first(
+      item.priority,
+      item.prioridad
+    ),
+    "medium"
+  );
+}
+
 function getAssigned(item = {}) {
   return safeText(
     first(
-      item.assignedTo,
-      item.assignee,
-      item.tecnico
+      item?.tecnico?.name,
+      item?.assignedTo?.name,
+      item?.assignedTo,
+      item?.assignee,
+      item?.tecnico,
+      item?.meta?.assignedTo
     ),
     "No asignado"
+  );
+}
+
+function getUpdatedAt(item = {}) {
+  return first(
+    item.updatedAt,
+    item.closedAt,
+    item.createdAt
+  );
+}
+
+function getCreatedAt(item = {}) {
+  return first(
+    item.createdAt,
+    item.createdAtES,
+    item.updatedAt
   );
 }
 
 function getClientInitials(item = {}) {
   const raw =
     item?.clientInitials ||
+    item?.cliente?.nombre ||
+    item?.cliente?.name ||
     item?.client ||
     item?.clientName ||
     item?.cliente ||
     item?.empresa ||
     item?.company ||
+    item?.name ||
     "ON";
 
   const clean = String(raw).trim();
@@ -384,12 +522,16 @@ function computeStats(items = []) {
   const totalIncidencias = list.length;
 
   const openCount = list.filter((item) => {
-    const status = String(item?.status || "").toLowerCase();
+    const status = safeLower(
+      getStatusValue(item)
+    );
     return ["open", "abierta", "abierto"].includes(status);
   }).length;
 
   const inProgressCount = list.filter((item) => {
-    const status = String(item?.status || "").toLowerCase();
+    const status = safeLower(
+      getStatusValue(item)
+    );
     return [
       "pending",
       "pendiente",
@@ -402,18 +544,43 @@ function computeStats(items = []) {
   }).length;
 
   const urgentCount = list.filter((item) => {
-    const priority = String(item?.priority || "").toLowerCase();
-    return ["urgent", "urgente", "critical", "critica", "crítica"].includes(priority);
+    const priority = safeLower(
+      getPriorityValue(item)
+    );
+    return [
+      "urgent",
+      "urgente",
+      "critical",
+      "critica",
+      "crítica",
+    ].includes(priority);
   }).length;
 
   const assignedCount = list.filter((item) => {
+    const explicitAssigned =
+      safeObject(item?.meta)
+        ?.isAssigned === true;
+
+    if (explicitAssigned) {
+      return true;
+    }
+
     const assigned = getAssigned(item);
     return assigned !== "No asignado";
   }).length;
 
   const closedCount = list.filter((item) => {
-    const status = String(item?.status || "").toLowerCase();
-    return ["resolved", "resuelta", "resuelto", "closed", "cerrada", "cerrado"].includes(status);
+    const status = safeLower(
+      getStatusValue(item)
+    );
+    return [
+      "resolved",
+      "resuelta",
+      "resuelto",
+      "closed",
+      "cerrada",
+      "cerrado",
+    ].includes(status);
   }).length;
 
   return {
@@ -498,7 +665,7 @@ export function renderHeader({ items = [], state = {} } = {}) {
 
   const loading = Boolean(localState?.loading);
   const refreshing = Boolean(localState?.refreshing);
-  const remoteCount = safeNumber(localState?.remoteCount, list.length);
+  const remoteCount = resolveRemoteCount(items, localState);
   const lastSyncText = localState?.lastSyncAt
     ? formatRelativeDate(localState.lastSyncAt)
     : "Sin sincronización reciente";
@@ -1068,12 +1235,16 @@ function renderIncidenciaRow(item = {}) {
   const preview = truncate(getPreview(item), 110);
   const client = getClientName(item);
   const email = getClientEmail(item);
-  const status = getStatusLabel(item?.status);
-  const priority = getPriorityLabel(item?.priority);
+  const statusValue = getStatusValue(item);
+  const priorityValue = getPriorityValue(item);
+  const status = getStatusLabel(statusValue);
+  const priority = getPriorityLabel(priorityValue);
   const assignedTo = getAssigned(item);
-  const updatedAt = formatRelativeDate(item?.updatedAt);
-  const updatedAtDate = formatDate(item?.updatedAt);
-  const createdAt = formatDate(item?.createdAt);
+  const updatedAtRaw = getUpdatedAt(item);
+  const createdAtRaw = getCreatedAt(item);
+  const updatedAt = formatRelativeDate(updatedAtRaw);
+  const updatedAtDate = formatDate(updatedAtRaw);
+  const createdAt = formatDate(createdAtRaw);
   const initials = getClientInitials(item);
 
   return `
@@ -1171,7 +1342,7 @@ function renderIncidenciaRow(item = {}) {
           white-space:nowrap;
         "
       >
-        ${renderStatusChip(status, getStatusChipStyle(item?.status))}
+        ${renderStatusChip(status, getStatusChipStyle(statusValue))}
       </td>
 
       <td
@@ -1182,7 +1353,7 @@ function renderIncidenciaRow(item = {}) {
           white-space:nowrap;
         "
       >
-        ${renderStatusChip(priority, getPriorityChipStyle(item?.priority))}
+        ${renderStatusChip(priority, getPriorityChipStyle(priorityValue))}
       </td>
 
       <td
@@ -1386,11 +1557,13 @@ function renderMobileIncidenciaCard(item = {}) {
   const preview = truncate(getPreview(item), 120);
   const client = getClientName(item);
   const email = getClientEmail(item);
-  const status = getStatusLabel(item?.status);
-  const priority = getPriorityLabel(item?.priority);
+  const statusValue = getStatusValue(item);
+  const priorityValue = getPriorityValue(item);
+  const status = getStatusLabel(statusValue);
+  const priority = getPriorityLabel(priorityValue);
   const assignedTo = getAssigned(item);
-  const updatedAt = formatRelativeDate(item?.updatedAt);
-  const createdAt = formatDate(item?.createdAt);
+  const updatedAt = formatRelativeDate(getUpdatedAt(item));
+  const createdAt = formatDate(getCreatedAt(item));
   const initials = getClientInitials(item);
 
   return `
@@ -1484,8 +1657,8 @@ function renderMobileIncidenciaCard(item = {}) {
         </div>
 
         <div style="display:grid; gap:8px; justify-items:end;">
-          ${renderStatusChip(status, getStatusChipStyle(item?.status))}
-          ${renderStatusChip(priority, getPriorityChipStyle(item?.priority))}
+          ${renderStatusChip(status, getStatusChipStyle(statusValue))}
+          ${renderStatusChip(priority, getPriorityChipStyle(priorityValue))}
         </div>
       </div>
 

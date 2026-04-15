@@ -24,6 +24,7 @@ import { I18n } from "../i18n/index.js";
 
 import { LoginView } from "../views/login/index.js";
 import { ResetPasswordView } from "../views/password-reset/index.js";
+import { ConfirmResetPasswordView } from "../views/password-reset/confirm/index.js";
 import { HomeView } from "../views/home/index.js";
 import { IncidenciasView } from "../views/incidencias/index.js";
 import { FacturasView } from "../views/facturas/index.js";
@@ -184,8 +185,8 @@ function resolveViewRenderer(
   /*
     IMPORTANTE:
     Priorizamos init() antes que render()
-    porque vistas como IncidenciasView
-    cargan datos dentro de init().
+    porque vistas auth y otras vistas complejas
+    pueden necesitar preparar estado antes del paint.
   */
   if (
     view &&
@@ -276,6 +277,11 @@ const renderLoginView =
 const renderResetPasswordView =
   createViewAdapter(
     ResetPasswordView
+  );
+
+const renderConfirmResetPasswordView =
+  createViewAdapter(
+    ConfirmResetPasswordView
   );
 
 /* =========================================================
@@ -439,6 +445,22 @@ export function createRoutes() {
       hideShell: true,
       render:
         renderResetPasswordView,
+    }),
+
+    createRoute({
+      path:
+        "/reset-password/confirm",
+      name:
+        "reset-password-confirm",
+      titleKey:
+        "routes.resetPasswordConfirm",
+      titleFallback:
+        "Nueva contraseña",
+      public: true,
+      roles: [],
+      hideShell: true,
+      render:
+        renderConfirmResetPasswordView,
     }),
   ];
 }

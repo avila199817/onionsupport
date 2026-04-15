@@ -60,7 +60,24 @@ export function navigateAfterSessionRestore({
       Router
     );
 
-  /* si está en login -> salir */
+  const currentPublicPath =
+    getCurrentPublicPath(
+      AppCore,
+      Router
+    );
+
+  safeLog(
+    AppCore,
+    "navigateAfterSessionRestore()",
+    {
+      canonical:
+        currentCanonicalPath,
+      publicPath:
+        currentPublicPath,
+    }
+  );
+
+  /* Si está en login -> salir */
   if (
     currentCanonicalPath ===
     "/login"
@@ -138,17 +155,20 @@ export async function restoreAuthSession({
         const snapshot = {
           ok:
             Boolean(result?.ok),
+
           authenticated:
             Boolean(
               AppCore?.state
                 ?.authenticated
             ),
+
           user:
             AppCore?.state?.user
               ?.username ||
             AppCore?.state?.user
               ?.email ||
             null,
+
           role:
             AppCore?.state?.role ||
             null,
@@ -218,7 +238,7 @@ export async function restoreSessionInBackground({
 
     await warmup?.(AppCore);
 
-    /* solo navegación explícita si quedó en login */
+    /* Solo navegación explícita si quedó en login */
     navigateAfterSessionRestore({
       AppCore,
       Auth,

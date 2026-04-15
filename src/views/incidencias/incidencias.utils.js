@@ -12,6 +12,7 @@
    - texto
    - normalización
    - cero dependencias frágiles
+   - compatibilidad total con template / actions / api
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -74,6 +75,16 @@ export function safeString(
   return text || fallback;
 }
 
+export function safeText(
+  value,
+  fallback = ""
+) {
+  return safeString(
+    value,
+    fallback
+  );
+}
+
 export function safeArray(
   value,
   fallback = []
@@ -103,6 +114,107 @@ export function safeObject(
     !Array.isArray(value)
     ? value
     : fallback;
+}
+
+/* =========================================================
+   UI
+========================================================= */
+
+export function showToast(
+  message = "",
+  type = "info",
+  options = {}
+) {
+  const text =
+    safeText(message, "");
+
+  if (!text) {
+    return false;
+  }
+
+  try {
+    if (
+      typeof AppCore?.modules?.get ===
+      "function"
+    ) {
+      const toastModule =
+        AppCore.modules.get(
+          "toast"
+        );
+
+      if (
+        typeof toastModule?.show ===
+        "function"
+      ) {
+        toastModule.show({
+          message: text,
+          type,
+          ...options,
+        });
+        return true;
+      }
+    }
+  } catch {}
+
+  try {
+    if (
+      typeof AppCore?.ui?.toast?.show ===
+      "function"
+    ) {
+      AppCore.ui.toast.show({
+        message: text,
+        type,
+        ...options,
+      });
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (
+      typeof AppCore?.toast?.show ===
+      "function"
+    ) {
+      AppCore.toast.show({
+        message: text,
+        type,
+        ...options,
+      });
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (
+      typeof window !==
+        "undefined" &&
+      typeof window.Toast?.show ===
+        "function"
+    ) {
+      window.Toast.show({
+        message: text,
+        type,
+        ...options,
+      });
+      return true;
+    }
+  } catch {}
+
+  try {
+    const logger =
+      type === "error"
+        ? console.error
+        : type === "warning"
+          ? console.warn
+          : console.log;
+
+    logger(
+      `[IncidenciasToast:${type}]`,
+      text
+    );
+  } catch {}
+
+  return false;
 }
 
 /* =========================================================

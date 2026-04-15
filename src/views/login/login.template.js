@@ -10,9 +10,11 @@
    - unificar forgot password hacia /reset-password
    - soportar usuario o email
    - usar logo real de empresa según tema activo
+   - reutilizar el sistema compartido de password-field
 ========================================================= */
 
 import { escapeHtml } from "./login.helpers.js";
+import { renderPasswordField } from "../../shared/password-field/index.js";
 
 /* =========================================================
    BASICS
@@ -29,90 +31,6 @@ function safeText(value = "", fallback = "") {
 
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
-}
-
-/* =========================================================
-   ICONS
-========================================================= */
-
-function getEyeIcon() {
-  return `
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18">
-      <path
-        d="M2.75 12s3.25-6 9.25-6 9.25 6 9.25 6-3.25 6-9.25 6-9.25-6-9.25-6Z"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linejoin="round"
-      />
-      <circle
-        cx="12"
-        cy="12"
-        r="2.7"
-        stroke="currentColor"
-        stroke-width="1.8"
-      />
-    </svg>
-  `;
-}
-
-function getEyeOffIcon() {
-  return `
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18">
-      <path
-        d="M3.5 4.5 20.5 19.5"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-      />
-      <path
-        d="M10.58 5.63A10.5 10.5 0 0 1 12 5.55c6 0 9.25 6 9.25 6a15.72 15.72 0 0 1-3.48 4.11"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
-      <path
-        d="M6.2 8.12A15.18 15.18 0 0 0 2.75 11.55s3.25 6 9.25 6c1.36 0 2.59-.3 3.7-.79"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
-      <path
-        d="M9.88 9.96A2.9 2.9 0 0 0 9.3 11.7a2.7 2.7 0 0 0 4.57 1.96"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
-    </svg>
-  `;
-}
-
-function getCapsIcon() {
-  return `
-    <svg
-      class="caps-icon"
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden="true"
-      width="16"
-      height="16"
-    >
-      <path
-        d="M12 4.5 6.5 10H10v6h4v-6h3.5L12 4.5Z"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linejoin="round"
-      />
-      <path
-        d="M8 18.5h8"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-      />
-    </svg>
-  `;
 }
 
 /* =========================================================
@@ -300,43 +218,23 @@ function renderForm({
               />
             </div>
 
-            <div class="login-field" data-field="password">
-              <div class="password-wrapper">
-                <input
-                  class="input-text"
-                  id="loginPassword"
-                  name="password"
-                  type="password"
-                  autocomplete="current-password"
-                  placeholder="Contraseña"
-                  aria-label="Contraseña"
-                  required
-                />
-
-                <span
-                  class="caps-indicator"
-                  id="loginCapsIndicator"
-                  aria-hidden="true"
-                >
-                  ${getCapsIcon()}
-                  <span class="caps-label">Bloq Mayús</span>
-                </span>
-
-                <button
-                  class="password-toggle"
-                  type="button"
-                  id="togglePassword"
-                  aria-label="Mostrar contraseña"
-                  aria-pressed="false"
-                  data-show-label="Mostrar contraseña"
-                  data-hide-label="Ocultar contraseña"
-                  data-show-icon="${escapeHtml(getEyeIcon())}"
-                  data-hide-icon="${escapeHtml(getEyeOffIcon())}"
-                >
-                  ${getEyeIcon()}
-                </button>
-              </div>
-            </div>
+            ${renderPasswordField({
+              escapeHtml,
+              fieldId: "loginPassword",
+              fieldName: "password",
+              placeholder: "Contraseña",
+              ariaLabel: "Contraseña",
+              autocomplete: "current-password",
+              fieldClass: "login-field",
+              fieldDataName: "password",
+              wrapperClass: "password-wrapper",
+              inputClass: "input-text",
+              required: true,
+              showCapsIndicator: true,
+              capsLabel: "Bloq Mayús",
+              toggleLabelShow: "Mostrar contraseña",
+              toggleLabelHide: "Ocultar contraseña",
+            })}
 
             <div class="login-options">
               <label class="login-check">

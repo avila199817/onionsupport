@@ -2,13 +2,34 @@
    Onion SPA - Home API
    Archivo: src/views/home/home.api.js
 
+   EXTREME MODE · BACKEND REAL SUMMARY · CONTRACT SAFE
+
    Responsabilidades:
-   - cargar summary de la Home
+   - cargar summary real de la Home
+   - consumir /api/dashboard/summary
    - aplicar estrategia cache-first
    - hidratar store del módulo
    - persistir cache local
-   - tolerar ausencia de backend específico
+   - tolerar backend envuelto o plano
    - dejar preparado un punto único para resumen remoto
+   - preservar el contrato real esperado por home.template.js
+
+   CONTRATO OBJETIVO:
+   {
+     generatedAt: string,
+     kpis: {
+       ticketsOpen: number,
+       ticketsUrgent: number,
+       clientesTotal: number,
+       facturasPending: number,
+       usersTotal: number,
+       facturacionTotal: number
+     },
+     alerts: [],
+     recentActivity: [],
+     quickActions: [],
+     health: {}
+   }
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -235,61 +256,144 @@ function clearCache() {
 }
 
 /* =========================================================
-   NORMALIZATION
+   SUMMARY NORMALIZATION
 ========================================================= */
 
 function createFallbackSummary() {
+  const user =
+    getCurrentUser();
+
   return {
-    status: "idle",
-    cards: 1,
-    metrics: [
+    user: {
+      id: safeText(
+        user?.userId || user?.id,
+        null
+      ),
+      role: safeText(
+        user?.role || user?.rol,
+        "unknown"
+      ),
+    },
+
+    generatedAt: nowIso(),
+
+    kpis: {
+      ticketsOpen: 0,
+      ticketsUrgent: 0,
+      clientesTotal: 0,
+      facturasPending: 0,
+      usersTotal: 0,
+      facturacionTotal: 0,
+    },
+
+    alerts: [
       {
-        id: "home",
-        label: "Vista",
-        value: "Home",
-        hint: "Base inicial montada",
-      },
-      {
-        id: "shell",
-        label: "Sistema",
-        value: "Operativo",
-        hint: "Shell y router activos",
-      },
-      {
-        id: "project",
-        label: "Proyecto",
-        value: "Onion Support",
-        hint: "Preparado para crecer",
+        level: "info",
+        code: "HOME_FALLBACK",
+        message:
+          "Resumen local cargado sin datos remotos.",
       },
     ],
+
     recentActivity: [],
-    generatedAt: nowIso(),
+
+    quickActions: [],
+
+    health: {
+      tickets: false,
+      clientes: false,
+      facturas: false,
+      users: false,
+    },
   };
 }
 
-function normalizeMetric(
-  metric,
+function looksLikeDashboardSummary(
+  value = {}
+) {
+  const obj =
+    safeObject(value);
+
+  return Boolean(
+    obj?.generatedAt ||
+      obj?.kpis ||
+      obj?.alerts ||
+      obj?.recentActivity ||
+      obj?.quickActions ||
+      obj?.health
+  );
+}
+
+function unwrapDashboardPayload(
+  payload = {}
+) {
+  const raw =
+    safeObject(payload);
+
+  if (
+    looksLikeDashboardSummary(raw)
+  ) {
+    return raw;
+  }
+
+  const level1 =
+    safeObject(raw?.data);
+
+  if (
+    looksLikeDashboardSummary(level1)
+  ) {
+    return level1;
+  }
+
+  const level2 =
+    safeObject(level1?.data);
+
+  if (
+    looksLikeDashboardSummary(level2)
+  ) {
+    return level2;
+  }
+
+  if (
+    looksLikeDashboardSummary(
+      raw?.summary
+    )
+  ) {
+    return safeObject(raw.summary);
+  }
+
+  if (
+    looksLikeDashboardSummary(
+      level1?.summary
+    )
+  ) {
+    return safeObject(
+      level1.summary
+    );
+  }
+
+  return {};
+}
+
+function normalizeAlert(
+  alert,
   index = 0
 ) {
   const item =
-    safeObject(metric);
+    safeObject(alert);
 
   return {
-    id: safeText(
-      item.id,
-      `metric-${index + 1}`
+    level: safeText(
+      item.level,
+      "info"
     ),
-    label: safeText(
-      item.label,
-      "Métrica"
+    code: safeText(
+      item.code,
+      `ALERT_${index + 1}`
     ),
-    value: safeText(
-      item.value,
-      "—"
-    ),
-    hint: safeText(
-      item.hint,
-      ""
+    message: safeText(
+      item.message,
+      "Alerta"
     ),
   };
 }
@@ -306,17 +410,50 @@ function normalizeActivityItem(
       item.id,
       `activity-${index + 1}`
     ),
-    title: safeText(
-      item.title,
-      "Actividad"
+    text: safeText(
+      item.text ||
+        item.label ||
+        item.title,
+      "Movimiento"
     ),
-    description: safeText(
-      item.description,
+    label: safeText(
+      item.label ||
+        item.text ||
+        item.title,
+      "Movimiento"
+    ),
+    date: safeText(
+      item.date ||
+        item.createdAt,
       ""
     ),
     createdAt: safeText(
-      item.createdAt,
+      item.createdAt ||
+        item.date,
       ""
+    ),
+  };
+}
+
+function normalizeQuickAction(
+  action,
+  index = 0
+) {
+  const item =
+    safeObject(action);
+
+  return {
+    key: safeText(
+      item.key,
+      `action-${index + 1}`
+    ),
+    label: safeText(
+      item.label,
+      "Acción"
+    ),
+    href: safeText(
+      item.href,
+      "#"
     ),
   };
 }
@@ -325,42 +462,105 @@ function normalizeSummary(
   payload = {}
 ) {
   const source =
-    safeObject(payload);
+    unwrapDashboardPayload(
+      payload
+    );
 
   const fallback =
     createFallbackSummary();
 
-  const metrics =
-    safeArray(source.metrics)
-      .map(normalizeMetric)
+  const rawKpis =
+    safeObject(source.kpis);
+
+  const alerts =
+    safeArray(source.alerts)
+      .map(normalizeAlert)
       .filter(Boolean);
 
   const recentActivity =
     safeArray(
       source.recentActivity
     )
-      .map(normalizeActivityItem)
+      .map(
+        normalizeActivityItem
+      )
+      .filter(Boolean);
+
+  const quickActions =
+    safeArray(
+      source.quickActions
+    )
+      .map(normalizeQuickAction)
       .filter(Boolean);
 
   return {
-    status: safeText(
-      source.status,
-      fallback.status
-    ),
-    cards: safeNumber(
-      source.cards,
-      metrics.length ||
-        fallback.cards
-    ),
-    metrics:
-      metrics.length > 0
-        ? metrics
-        : fallback.metrics,
-    recentActivity,
+    user: {
+      id: safeText(
+        source?.user?.id,
+        fallback.user.id
+      ),
+      role: safeText(
+        source?.user?.role,
+        fallback.user.role
+      ),
+    },
+
     generatedAt: safeText(
       source.generatedAt,
       nowIso()
     ),
+
+    kpis: {
+      ticketsOpen: safeNumber(
+        rawKpis.ticketsOpen,
+        fallback.kpis.ticketsOpen
+      ),
+
+      ticketsUrgent: safeNumber(
+        rawKpis.ticketsUrgent,
+        fallback.kpis.ticketsUrgent
+      ),
+
+      clientesTotal: safeNumber(
+        rawKpis.clientesTotal,
+        fallback.kpis.clientesTotal
+      ),
+
+      facturasPending: safeNumber(
+        rawKpis.facturasPending,
+        fallback.kpis.facturasPending
+      ),
+
+      usersTotal: safeNumber(
+        rawKpis.usersTotal,
+        fallback.kpis.usersTotal
+      ),
+
+      facturacionTotal: safeNumber(
+        rawKpis.facturacionTotal,
+        fallback.kpis.facturacionTotal
+      ),
+    },
+
+    alerts:
+      alerts.length > 0
+        ? alerts
+        : fallback.alerts,
+
+    recentActivity,
+
+    quickActions,
+
+    health: {
+      tickets:
+        source?.health?.tickets === true,
+      clientes:
+        source?.health?.clientes === true,
+      facturas:
+        source?.health?.facturas === true,
+      users:
+        source?.health?.users === true,
+    },
   };
 }
 
@@ -369,12 +569,6 @@ function normalizeSummary(
 ========================================================= */
 
 async function fetchRemoteSummary() {
-  /*
-    Fase inicial:
-    intentamos endpoint real.
-    Si no existe o falla, degradamos a summary local.
-  */
-
   try {
     if (
       Http &&
@@ -393,9 +587,10 @@ async function fetchRemoteSummary() {
       if (
         Object.keys(data).length
       ) {
-        return normalizeSummary(
-          data.summary || data
-        );
+        const normalized =
+          normalizeSummary(data);
+
+        return normalized;
       }
     }
   } catch (error) {
@@ -418,35 +613,46 @@ function buildLocalSummary() {
   );
 
   return normalizeSummary({
-    status: "local",
-    cards: 1,
-    metrics: [
+    user: {
+      id: safeText(
+        user?.userId || user?.id,
+        null
+      ),
+      role: safeText(
+        user?.role || user?.rol,
+        "unknown"
+      ),
+    },
+
+    generatedAt: nowIso(),
+
+    kpis: {
+      ticketsOpen: 0,
+      ticketsUrgent: 0,
+      clientesTotal: 0,
+      facturasPending: 0,
+      usersTotal: 0,
+      facturacionTotal: 0,
+    },
+
+    alerts: [
       {
-        id: "home",
-        label: "Vista",
-        value: "Home",
-        hint: "Base inicial montada",
-      },
-      {
-        id: "session",
-        label: "Sesión",
-        value:
-          user
-            ? "Activa"
-            : "Sin sesión",
-        hint: user
-          ? "Usuario autenticado"
-          : "Sin usuario resuelto",
-      },
-      {
-        id: "project",
-        label: "Proyecto",
-        value: appName,
-        hint: "Dashboard preparado",
+        level: "info",
+        code: "LOCAL_SUMMARY",
+        message: `${appName} operativo sin resumen remoto disponible.`,
       },
     ],
+
     recentActivity: [],
-    generatedAt: nowIso(),
+
+    quickActions: [],
+
+    health: {
+      tickets: false,
+      clientes: false,
+      facturas: false,
+      users: false,
+    },
   });
 }
 

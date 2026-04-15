@@ -14,8 +14,8 @@
    - evitar delays artificiales tras login correcto
    - evitar pérdida de valores al deshabilitar inputs
    - respetar logo animado
-   - soportar caps lock indicator con icono tipo apple
-   - soportar toggle password tipo eye
+   - usar el sistema DOM refactorizado de login
+   - integrar password-field compartido
    - login limpio sin mensajes dentro del card
    - forzar apagado del loader al renderizar login
    - usar rutas absolutas coherentes con el shell SPA
@@ -39,7 +39,19 @@
 import { AppCore } from "../core/index.js";
 import { Auth } from "../features/auth/index.js";
 import { Router } from "../router/index.js";
+
 import { getLoginTemplate } from "./login/login.template.js";
+import {
+  getLoginRefs,
+  clearLoginErrors,
+  applyLoginErrors,
+  setGlobalLoginError,
+  setLoginLoading,
+  focusLoginPrimaryField,
+  readLoginFormState,
+  bindLoginSubmit,
+  bindLoginInputClearers,
+} from "./login/login.dom.js";
 
 export const LoginView = (() => {
   "use strict";
@@ -456,17 +468,6 @@ export const LoginView = (() => {
     AppCore?.cleanup?.run?.(SCOPE);
   }
 
-  function focusInitialField(identifierInput) {
-    if (!isBrowser()) {
-      return;
-    }
-
-    window.setTimeout(() => {
-      identifierInput?.focus?.();
-      identifierInput?.select?.();
-    }, 0);
-  }
-
   function clampToastDuration(duration) {
     return Math.max(
       TOAST_MIN_DURATION,
@@ -641,101 +642,8 @@ export const LoginView = (() => {
   }
 
   /* =========================================================
-     FORM STATE
+     FORM STATE / VALIDATION
   ========================================================= */
-  function setFieldError(
-    input,
-    active = false
-  ) {
-    if (!input) {
-      return;
-    }
-
-    input.setAttribute(
-      "aria-invalid",
-      active ? "true" : "false"
-    );
-    input.classList.toggle(
-      "is-invalid",
-      Boolean(active)
-    );
-  }
-
-  function clearFieldErrors(inputs = []) {
-    inputs.forEach((input) => {
-      setFieldError(input, false);
-    });
-  }
-
-  function setSubmitting(controls, nextValue) {
-    const {
-      form,
-      identifierInput,
-      passwordInput,
-      rememberInput,
-      toggleBtn,
-      submitBtn,
-      forgotLink,
-    } = controls;
-
-    isSubmitting = Boolean(nextValue);
-
-    if (form) {
-      form.setAttribute(
-        "aria-busy",
-        String(isSubmitting)
-      );
-      form.dataset.submitting =
-        String(isSubmitting);
-    }
-
-    if (identifierInput) {
-      identifierInput.disabled =
-        isSubmitting;
-    }
-
-    if (rememberInput) {
-      rememberInput.disabled =
-        isSubmitting;
-    }
-
-    /*
-      No deshabilitamos el input password ni el toggle
-      para evitar pérdida visual / problemas de lectura
-      mientras el usuario ve el estado del acceso.
-    */
-    if (passwordInput) {
-      passwordInput.disabled = false;
-    }
-
-    if (toggleBtn) {
-      toggleBtn.disabled = false;
-    }
-
-    if (forgotLink) {
-      forgotLink.setAttribute(
-        "aria-disabled",
-        String(isSubmitting)
-      );
-      forgotLink.classList.toggle(
-        "is-disabled",
-        isSubmitting
-      );
-      forgotLink.tabIndex = isSubmitting
-        ? -1
-        : 0;
-    }
-
-    if (submitBtn) {
-      submitBtn.disabled = isSubmitting;
-      submitBtn.dataset.loading =
-        String(isSubmitting);
-      submitBtn.innerHTML = isSubmitting
-        ? `<span class="login-submit-text">Accediendo...</span>`
-        : `<span class="login-submit-text">Acceder</span>`;
-    }
-  }
-
   function shakeCard(cardEl) {
     if (!cardEl) {
       return;
@@ -747,13 +655,14 @@ export const LoginView = (() => {
   }
 
   function showErrorState({
+    refs,
     cardEl,
-    identifierInput,
-    passwordInput,
     message,
   }) {
-    setFieldError(identifierInput, true);
-    setFieldError(passwordInput, true);
+    applyLoginErrors(refs, {
+      identifier: message,
+      password: message,
+    });
 
     showToast({
       title: "Acceso denegado",
@@ -769,59 +678,23 @@ export const LoginView = (() => {
 
     if (isBrowser()) {
       window.setTimeout(() => {
-        passwordInput?.focus?.();
-        passwordInput?.select?.();
+        refs?.passwordInput?.focus?.();
+        refs?.passwordInput?.select?.();
       }, 0);
     }
   }
 
-  function getFormPayload({
-    identifierInput,
-    passwordInput,
-    rememberInput,
-    form,
-  }) {
-    const redirectInput =
-      form?.querySelector(
-        'input[name="redirect"]'
-      );
+  function validate(refs = {}) {
+    const formState = readLoginFormState(refs);
+    const identifier = normalizeIdentifier(formState.identifier);
+    const password = String(formState.password || "");
 
-    return {
-      identifier: normalizeIdentifier(
-        identifierInput?.value || ""
-      ),
-      password: String(
-        passwordInput?.value || ""
-      ),
-      remember: Boolean(
-        rememberInput?.checked
-      ),
-      redirect: normalizeIdentifier(
-        redirectInput?.value || ""
-      ),
-    };
-  }
-
-  function validate({
-    identifierInput,
-    passwordInput,
-  }) {
-    const identifier =
-      normalizeIdentifier(
-        identifierInput?.value || ""
-      );
-
-    const password = String(
-      passwordInput?.value || ""
-    );
-
-    clearFieldErrors([
-      identifierInput,
-      passwordInput,
-    ]);
+    clearLoginErrors(refs);
 
     if (!identifier) {
-      setFieldError(identifierInput, true);
+      applyLoginErrors(refs, {
+        identifier: "Introduce tu email o nombre de usuario.",
+      });
 
       showToast({
         title: "Campo requerido",
@@ -832,7 +705,7 @@ export const LoginView = (() => {
         closable: true,
       });
 
-      identifierInput?.focus?.();
+      refs?.identifierInput?.focus?.();
       return false;
     }
 
@@ -840,7 +713,9 @@ export const LoginView = (() => {
       identifier.includes("@") &&
       !isEmail(identifier)
     ) {
-      setFieldError(identifierInput, true);
+      applyLoginErrors(refs, {
+        identifier: "El formato del email no es válido.",
+      });
 
       showToast({
         title: "Email no válido",
@@ -851,12 +726,14 @@ export const LoginView = (() => {
         closable: true,
       });
 
-      identifierInput?.focus?.();
+      refs?.identifierInput?.focus?.();
       return false;
     }
 
     if (!password.trim()) {
-      setFieldError(passwordInput, true);
+      applyLoginErrors(refs, {
+        password: "Introduce tu contraseña.",
+      });
 
       showToast({
         title: "Campo requerido",
@@ -867,12 +744,14 @@ export const LoginView = (() => {
         closable: true,
       });
 
-      passwordInput?.focus?.();
+      refs?.passwordInput?.focus?.();
       return false;
     }
 
     if (password.length < 6) {
-      setFieldError(passwordInput, true);
+      applyLoginErrors(refs, {
+        password: "La contraseña debe tener al menos 6 caracteres.",
+      });
 
       showToast({
         title: "Contraseña demasiado corta",
@@ -883,94 +762,11 @@ export const LoginView = (() => {
         closable: true,
       });
 
-      passwordInput?.focus?.();
+      refs?.passwordInput?.focus?.();
       return false;
     }
 
     return true;
-  }
-
-  /* =========================================================
-     PASSWORD TOGGLE
-  ========================================================= */
-  function togglePasswordVisibility(
-    passwordInput,
-    toggleBtn,
-    eyeOpenIcon,
-    eyeClosedIcon
-  ) {
-    if (!passwordInput || !toggleBtn) {
-      return;
-    }
-
-    const willShow =
-      passwordInput.type === "password";
-
-    passwordInput.type = willShow
-      ? "text"
-      : "password";
-
-    toggleBtn.classList.toggle(
-      "active",
-      willShow
-    );
-    toggleBtn.setAttribute(
-      "aria-pressed",
-      String(willShow)
-    );
-    toggleBtn.setAttribute(
-      "aria-label",
-      willShow
-        ? "Ocultar contraseña"
-        : "Mostrar contraseña"
-    );
-    toggleBtn.setAttribute(
-      "title",
-      willShow
-        ? "Ocultar contraseña"
-        : "Mostrar contraseña"
-    );
-
-    if (eyeOpenIcon) {
-      eyeOpenIcon.hidden = willShow;
-    }
-
-    if (eyeClosedIcon) {
-      eyeClosedIcon.hidden = !willShow;
-    }
-
-    passwordInput.focus();
-  }
-
-  /* =========================================================
-     CAPS LOCK
-  ========================================================= */
-  function updateCapsVisual(
-    capsWrap,
-    capsIcon,
-    capsLabel,
-    passwordFocused,
-    capsActive
-  ) {
-    const visible = Boolean(
-      passwordFocused && capsActive
-    );
-
-    if (capsWrap) {
-      capsWrap.hidden = !visible;
-      capsWrap.classList.toggle(
-        "is-visible",
-        visible
-      );
-    }
-
-    if (capsIcon) {
-      capsIcon.hidden = !visible;
-    }
-
-    if (capsLabel) {
-      capsLabel.hidden = !visible;
-    }
   }
 
   /* =========================================================
@@ -1175,7 +971,7 @@ export const LoginView = (() => {
   function handleSuccessfulLogin(
     result,
     payload,
-    controls
+    refs
   ) {
     const redirectTo =
       resolvePostLoginPath(
@@ -1194,13 +990,17 @@ export const LoginView = (() => {
       payload
     );
 
-    setSubmitting(controls, true);
+    setLoginLoading(refs, true, {
+      submitLabel: "Acceder",
+      loadingLabel: "Accediendo...",
+    });
+
     navigateTo(redirectTo);
   }
 
   function handle2FARequired(
     result,
-    controls
+    refs
   ) {
     const redirectTo =
       result?.redirectTo || "/2fa";
@@ -1243,7 +1043,11 @@ export const LoginView = (() => {
       closable: false,
     });
 
-    setSubmitting(controls, true);
+    setLoginLoading(refs, true, {
+      submitLabel: "Acceder",
+      loadingLabel: "Accediendo...",
+    });
+
     navigateSoon(
       redirectTo,
       TWO_FA_TOAST_DURATION
@@ -1349,40 +1153,18 @@ export const LoginView = (() => {
     const scope =
       AppCore?.cleanup?.scope?.(SCOPE);
 
-    const form =
-      document.getElementById("loginForm");
+    const container = getContainer();
+    const refs = getLoginRefs(container);
+
     const card =
-      document.getElementById("loginCard");
-    const button =
-      document.getElementById("loginButton");
+      refs?.root?.querySelector?.(".login-card") ||
+      null;
 
-    const identifierInput =
-      document.getElementById("username");
-    const passwordInput =
-      document.getElementById("password");
-    const rememberInput =
-      document.getElementById("loginRemember");
-
-    const toggleBtn =
-      document.getElementById("togglePassword");
-    const eyeOpenIcon =
-      document.getElementById("eyeOpenIcon");
-    const eyeClosedIcon =
-      document.getElementById("eyeClosedIcon");
-
-    const capsWrap =
-      document.getElementById("capsIndicator");
-    const capsIcon =
-      document.getElementById("capsIcon");
-    const capsLabel =
-      document.getElementById("capsLabel");
-
-    const forgotLink =
-      document.getElementById("forgotPasswordLink");
     const toastClose =
       document.getElementById("loginToastClose");
 
     const logoContainer =
+      refs?.root?.querySelector?.(".logo-fade") ||
       document.querySelector(".logo-fade");
 
     const logoImages = logoContainer
@@ -1393,10 +1175,10 @@ export const LoginView = (() => {
 
     if (
       !scope ||
-      !form ||
-      !identifierInput ||
-      !passwordInput ||
-      !button
+      !refs?.form ||
+      !refs?.identifierInput ||
+      !refs?.passwordInput ||
+      !refs?.submitButton
     ) {
       safeWarnLog(
         "LoginView: faltan nodos críticos del formulario de acceso."
@@ -1405,29 +1187,21 @@ export const LoginView = (() => {
       return;
     }
 
-    let capsActive = false;
-    let passwordFocused = false;
-
-    const controls = {
-      form,
-      identifierInput,
-      passwordInput,
-      rememberInput,
-      toggleBtn,
-      submitBtn: button,
-      forgotLink,
-    };
-
     startLogoAnimation(logoImages);
-    focusInitialField(identifierInput);
-    updateCapsVisual(
-      capsWrap,
-      capsIcon,
-      capsLabel,
-      passwordFocused,
-      capsActive
-    );
-    setSubmitting(controls, false);
+    focusLoginPrimaryField(refs, {
+      rememberedIdentifier: Boolean(
+        refs?.rememberInput?.checked &&
+        safeText(refs?.identifierInput?.value, "")
+      ),
+    });
+
+    clearLoginErrors(refs);
+
+    setLoginLoading(refs, false, {
+      submitLabel: "Acceder",
+      loadingLabel: "Accediendo...",
+    });
+
     forceHideGlobalLoader();
 
     if (toastClose) {
@@ -1448,132 +1222,13 @@ export const LoginView = (() => {
       );
     }
 
-    if (toggleBtn) {
-      AppCore.cleanup.on(
-        scope,
-        toggleBtn,
-        "click",
-        () => {
-          if (
-            isSubmitting &&
-            isNavigatingAway
-          ) {
-            return;
-          }
+    const unbindInputClearers =
+      bindLoginInputClearers(refs, () => {
+        clearLoginErrors(refs);
+      });
 
-          togglePasswordVisibility(
-            passwordInput,
-            toggleBtn,
-            eyeOpenIcon,
-            eyeClosedIcon
-          );
-        }
-      );
-    }
-
-    AppCore.cleanup.on(
-      scope,
-      identifierInput,
-      "input",
-      () => {
-        setFieldError(
-          identifierInput,
-          false
-        );
-      }
-    );
-
-    AppCore.cleanup.on(
-      scope,
-      passwordInput,
-      "input",
-      () => {
-        setFieldError(
-          passwordInput,
-          false
-        );
-      }
-    );
-
-    function updateCapsState(event) {
-      if (!event?.getModifierState) {
-        return;
-      }
-
-      const nextState =
-        event.getModifierState("CapsLock");
-
-      if (nextState !== capsActive) {
-        capsActive = nextState;
-        updateCapsVisual(
-          capsWrap,
-          capsIcon,
-          capsLabel,
-          passwordFocused,
-          capsActive
-        );
-      }
-    }
-
-    AppCore.cleanup.on(
-      scope,
-      document,
-      "keydown",
-      updateCapsState
-    );
-
-    AppCore.cleanup.on(
-      scope,
-      document,
-      "keyup",
-      updateCapsState
-    );
-
-    AppCore.cleanup.on(
-      scope,
-      passwordInput,
-      "focus",
-      (event) => {
-        passwordFocused = true;
-
-        if (event?.getModifierState) {
-          capsActive =
-            event.getModifierState(
-              "CapsLock"
-            );
-        }
-
-        updateCapsVisual(
-          capsWrap,
-          capsIcon,
-          capsLabel,
-          passwordFocused,
-          capsActive
-        );
-      }
-    );
-
-    AppCore.cleanup.on(
-      scope,
-      passwordInput,
-      "blur",
-      () => {
-        passwordFocused = false;
-        updateCapsVisual(
-          capsWrap,
-          capsIcon,
-          capsLabel,
-          passwordFocused,
-          capsActive
-        );
-      }
-    );
-
-    AppCore.cleanup.on(
-      scope,
-      form,
-      "submit",
-      async (event) => {
+    const unbindSubmit =
+      bindLoginSubmit(refs, async (event) => {
         event.preventDefault();
 
         if (
@@ -1584,29 +1239,39 @@ export const LoginView = (() => {
         }
 
         hideToast();
-        clearFieldErrors([
-          identifierInput,
-          passwordInput,
-        ]);
+        clearLoginErrors(refs);
 
-        const isValid = validate({
-          identifierInput,
-          passwordInput,
-        });
+        const isValid = validate(refs);
 
         if (!isValid) {
           shakeCard(card);
           return;
         }
 
-        const payload = getFormPayload({
-          identifierInput,
-          passwordInput,
-          rememberInput,
-          form,
-        });
+        const formState = readLoginFormState(refs);
 
-        setSubmitting(controls, true);
+        const payload = {
+          identifier: normalizeIdentifier(
+            formState.identifier
+          ),
+          password: String(
+            formState.password || ""
+          ),
+          remember: Boolean(
+            formState.remember
+          ),
+          redirect: safeText(
+            refs?.form?.querySelector?.('input[name="redirect"]')?.value,
+            ""
+          ),
+        };
+
+        isSubmitting = true;
+
+        setLoginLoading(refs, true, {
+          submitLabel: "Acceder",
+          loadingLabel: "Accediendo...",
+        });
 
         showToast({
           title:
@@ -1632,7 +1297,7 @@ export const LoginView = (() => {
           if (result?.requires2FA) {
             handle2FARequired(
               result,
-              controls
+              refs
             );
             return;
           }
@@ -1640,7 +1305,7 @@ export const LoginView = (() => {
           handleSuccessfulLogin(
             result,
             payload,
-            controls
+            refs
           );
         } catch (error) {
           const message =
@@ -1651,21 +1316,30 @@ export const LoginView = (() => {
             error
           );
 
+          setGlobalLoginError(
+            refs,
+            message
+          );
+
           showErrorState({
+            refs,
             cardEl: card,
-            identifierInput,
-            passwordInput,
             message,
           });
 
-          setSubmitting(
-            controls,
-            false
+          setLoginLoading(
+            refs,
+            false,
+            {
+              submitLabel: "Acceder",
+              loadingLabel: "Accediendo...",
+            }
           );
+
+          isSubmitting = false;
           isNavigatingAway = false;
         }
-      }
-    );
+      });
 
     AppCore.cleanup.event(
       scope,
@@ -1675,10 +1349,16 @@ export const LoginView = (() => {
           return;
         }
 
-        setSubmitting(
-          controls,
-          false
+        setLoginLoading(
+          refs,
+          false,
+          {
+            submitLabel: "Acceder",
+            loadingLabel: "Accediendo...",
+          }
         );
+
+        isSubmitting = false;
       }
     );
 
@@ -1703,6 +1383,9 @@ export const LoginView = (() => {
     );
 
     AppCore.cleanup.add(scope, () => {
+      unbindInputClearers?.();
+      unbindSubmit?.();
+
       stopLogoAnimation();
       clearRedirectTimer();
       clearToastTimer();
@@ -1722,3 +1405,5 @@ export const LoginView = (() => {
     render,
   };
 })();
+
+export default LoginView;

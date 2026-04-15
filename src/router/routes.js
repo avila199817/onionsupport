@@ -114,16 +114,59 @@ function normalizeRoles(
     .filter(Boolean);
 }
 
+function normalizeRoutePath(
+  path = "/"
+) {
+  const normalized = String(
+    path || "/"
+  )
+    .trim()
+    .replace(/\/{2,}/g, "/");
+
+  if (!normalized) {
+    return "/";
+  }
+
+  return normalized.startsWith("/")
+    ? normalized
+    : `/${normalized}`;
+}
+
+function buildRouteId({
+  path = "/",
+  name = "route",
+} = {}) {
+  const cleanPath =
+    normalizeRoutePath(path)
+      .replace(/^\//, "")
+      .replace(/\//g, "_") ||
+    "root";
+
+  return `${name}:${cleanPath}`;
+}
+
 function createRoute(
   definition = {}
 ) {
-  const route = {
-    path:
-      definition.path || "/",
+  const normalizedPath =
+    normalizeRoutePath(
+      definition.path || "/"
+    );
 
-    name:
-      definition.name ||
-      "route",
+  const normalizedName =
+    String(
+      definition.name || "route"
+    ).trim() || "route";
+
+  const route = {
+    id: buildRouteId({
+      path: normalizedPath,
+      name: normalizedName,
+    }),
+
+    path: normalizedPath,
+
+    name: normalizedName,
 
     titleKey:
       definition.titleKey ||
@@ -151,6 +194,15 @@ function createRoute(
       definition.render ||
         (() => {})
     ),
+
+    meta: Object.freeze({
+      order: Number(
+        definition.order || 0
+      ),
+      source:
+        definition.source ||
+        "router:routes",
+    }),
   };
 
   Object.defineProperty(
@@ -506,6 +558,8 @@ export function validateRoutesTable(
 
   const seen =
     new Set();
+  const seenNames =
+    new Set();
 
   routes.forEach(
     (
@@ -559,6 +613,21 @@ export function validateRoutesTable(
         );
       }
 
+      const normalizedName =
+        route.name
+          .trim()
+          .toLowerCase();
+
+      if (
+        seenNames.has(
+          normalizedName
+        )
+      ) {
+        throw new Error(
+          `Router: nombre de ruta duplicado "${route.name}".`
+        );
+      }
+
       if (
         typeof route.render !==
         "function"
@@ -575,6 +644,19 @@ export function validateRoutesTable(
       ) {
         throw new Error(
           `Router: la ruta "${normalizedPath}" tiene roles inválidos.`
+        );
+      }
+
+      if (
+        route.roles.some(
+          (role) =>
+            typeof role !==
+              "string" ||
+            !role.trim()
+        )
+      ) {
+        throw new Error(
+          `Router: la ruta "${normalizedPath}" tiene roles vacíos o inválidos.`
         );
       }
 
@@ -596,8 +678,20 @@ export function validateRoutesTable(
         );
       }
 
+      if (
+        route.public === true &&
+        route.roles.length > 0
+      ) {
+        throw new Error(
+          `Router: la ruta pública "${normalizedPath}" no debe declarar roles.`
+        );
+      }
+
       seen.add(
         normalizedPath
+      );
+      seenNames.add(
+        normalizedName
       );
     }
   );

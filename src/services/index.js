@@ -63,6 +63,8 @@ import {
 export const Http = (() => {
   "use strict";
 
+  let requestSeq = 0;
+
   /* =========================================================
      CONFIG
   ========================================================= */
@@ -142,6 +144,15 @@ export const Http = (() => {
     return true;
   }
 
+  function nowMs() {
+    return Date.now();
+  }
+
+  function nextRequestId() {
+    requestSeq += 1;
+    return `http_service_${requestSeq}`;
+  }
+
   /* =========================================================
      INTERCEPTOR API
   ========================================================= */
@@ -174,6 +185,11 @@ export const Http = (() => {
     path,
     options = {}
   ) {
+    const requestId =
+      options?.requestId ||
+      nextRequestId();
+    const startedAt = nowMs();
+
     let requestConfig =
       buildDefaultRequestConfig(
         config,
@@ -182,6 +198,7 @@ export const Http = (() => {
         path,
         {
           ...options,
+          requestId,
           signal: withSignal(
             options?.signal
           ),
@@ -225,7 +242,12 @@ export const Http = (() => {
       ) {
         incrementPendingRequests(
           AppCore,
-          state
+          state,
+          {
+            source:
+              "http.service:request:start",
+            requestId,
+          }
         );
 
         if (
@@ -241,6 +263,7 @@ export const Http = (() => {
       AppCore.events.emit(
         "http:request:start",
         {
+          requestId,
           method:
             requestConfig.method,
           path:
@@ -302,6 +325,7 @@ export const Http = (() => {
                 true,
               _authRefreshAttempted:
                 true,
+              requestId,
             };
 
           result =
@@ -327,11 +351,14 @@ export const Http = (() => {
       AppCore.events.emit(
         "http:request:success",
         {
+          requestId,
           method:
             requestConfig.method,
           path:
             requestConfig.path,
           response,
+          durationMs:
+            nowMs() - startedAt,
         }
       );
 
@@ -344,10 +371,14 @@ export const Http = (() => {
         AppCore.utils.log(
           "HTTP ✓",
           {
+            requestId,
             method:
               requestConfig.method,
             path:
               requestConfig.path,
+            durationMs:
+              nowMs() -
+              startedAt,
             response,
           }
         );
@@ -361,15 +392,23 @@ export const Http = (() => {
           requestConfig
         );
 
-      await runErrorInterceptors(
-        interceptors,
-        normalized,
-        requestConfig
-      );
+      const interceptedError =
+        await runErrorInterceptors(
+          interceptors,
+          normalized,
+          requestConfig
+        );
+
+      const finalError =
+        interceptedError !==
+        undefined
+          ? interceptedError
+          : normalized;
 
       AppCore.events.emit(
         "http:request:error",
         {
+          requestId,
           method:
             requestConfig?.method ||
             method,
@@ -377,7 +416,9 @@ export const Http = (() => {
             requestConfig?.path ||
             path,
           error:
-            normalized,
+            finalError,
+          durationMs:
+            nowMs() - startedAt,
         }
       );
 
@@ -388,7 +429,7 @@ export const Http = (() => {
       ) {
         AppCore.utils.error(
           "HTTP ✗",
-          normalized
+          finalError
         );
       }
 
@@ -397,7 +438,7 @@ export const Http = (() => {
       ===================== */
       if (
         shouldAutoLogout(
-          normalized,
+          finalError,
           requestConfig
         )
       ) {
@@ -420,7 +461,7 @@ export const Http = (() => {
         }
       }
 
-      throw normalized;
+      throw finalError;
     } finally {
       if (
         loaderEnabled
@@ -428,7 +469,12 @@ export const Http = (() => {
         const pending =
           decrementPendingRequests(
             AppCore,
-            state
+            state,
+            {
+              source:
+                "http.service:request:finalize",
+              requestId,
+            }
           );
 
         if (

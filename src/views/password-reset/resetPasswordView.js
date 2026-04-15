@@ -22,6 +22,7 @@
    - sync de modo auth estable
    - cleanup completo
    - handler resolution robusta
+   - compatibilidad con router que prioriza init()
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -67,7 +68,6 @@ export const ResetPasswordView = (() => {
   "use strict";
 
   const SCOPE = "view:reset-password";
-
   const SUCCESS_REDIRECT_DELAY = 2200;
   const RESET_ROUTE_PREFIX = "/reset-password";
 
@@ -110,6 +110,22 @@ export const ResetPasswordView = (() => {
 
     window.clearTimeout(redirectTimerId);
     redirectTimerId = null;
+  }
+
+  function isLikelyContainer(value) {
+    return Boolean(
+      value &&
+      typeof value === "object" &&
+      typeof value.querySelector === "function"
+    );
+  }
+
+  function resolveDeps(arg1, arg2) {
+    if (isLikelyContainer(arg1)) {
+      return arg2 && typeof arg2 === "object" ? arg2 : {};
+    }
+
+    return arg1 && typeof arg1 === "object" ? arg1 : {};
   }
 
   /* =========================================================
@@ -418,7 +434,9 @@ export const ResetPasswordView = (() => {
       submitLabel: "Enviar enlace",
     });
 
-    toast.warning(result.message || "Espera antes de volver a intentarlo.");
+    toast.warning(
+      result.message || "Espera antes de volver a intentarlo."
+    );
   }
 
   function handleSuccess(refs, toast, result, deps = {}) {
@@ -453,9 +471,9 @@ export const ResetPasswordView = (() => {
   }
 
   /* =========================================================
-     RENDER
+     RENDER CORE
   ========================================================= */
-  function render(deps = {}) {
+  function runRender(deps = {}) {
     const container = getContainer();
 
     if (!container) {
@@ -463,7 +481,10 @@ export const ResetPasswordView = (() => {
         "ResetPasswordView: no se encontró #view-container para renderizar."
       );
       forceHideGlobalLoader();
-      return;
+      return {
+        ok: false,
+        missingContainer: true,
+      };
     }
 
     isNavigatingAway = false;
@@ -505,6 +526,11 @@ export const ResetPasswordView = (() => {
 
     forceHideGlobalLoader();
     bind(deps);
+
+    return {
+      ok: true,
+      view: "reset-password",
+    };
   }
 
   /* =========================================================
@@ -734,10 +760,34 @@ export const ResetPasswordView = (() => {
   }
 
   /* =========================================================
-     API PÚBLICA
+     PUBLIC API
   ========================================================= */
+  function init(arg1 = {}, arg2 = {}) {
+    const deps = resolveDeps(arg1, arg2);
+    return runRender(deps);
+  }
+
+  function render(arg1 = {}, arg2 = {}) {
+    const deps = resolveDeps(arg1, arg2);
+    return runRender(deps);
+  }
+
+  function destroy() {
+    isNavigatingAway = false;
+    isSubmitting = false;
+
+    destroyViewState({
+      preserveToast: false,
+    });
+
+    setAuthScreen(false);
+    restoreGlobalLoaderStyles();
+  }
+
   return {
+    init,
     render,
+    destroy,
   };
 })();
 

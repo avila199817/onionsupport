@@ -426,7 +426,12 @@ export const ConfirmResetPasswordView = (() => {
     const container = getContainer();
     const refs = getConfirmRefs(container);
 
-    if (!scope || !refs?.form || !refs?.passwordInput || !refs?.confirmPasswordInput) {
+    if (
+      !scope ||
+      !refs?.form ||
+      !refs?.passwordInput ||
+      !refs?.confirmPasswordInput
+    ) {
       safeWarnLog(
         "ConfirmResetPasswordView: faltan nodos críticos del formulario."
       );
@@ -463,7 +468,7 @@ export const ConfirmResetPasswordView = (() => {
         "No se encontró handler de confirmación.";
 
       setGlobalConfirmError(refs, message);
-      toast.error(message);
+      toast.error?.(message);
 
       emitRouteRendered();
 
@@ -508,19 +513,21 @@ export const ConfirmResetPasswordView = (() => {
           safeText(formState.token, "") ||
           safeText(deps.token, "") ||
           getUrlToken(),
-        password: formState.password,
+        password:
+          safeText(formState.newPassword, "") ||
+          safeText(formState.password, ""),
         confirmPassword: formState.confirmPassword,
       });
 
       const errors = validateConfirmPayload(payload);
 
       if (Object.keys(errors).length > 0) {
+        const firstError =
+          getFirstConfirmError(errors);
+
         applyConfirmErrors(refs, errors);
-        setGlobalConfirmError(
-          refs,
-          getFirstConfirmError(errors)
-        );
-        toast.error(getFirstConfirmError(errors));
+        setGlobalConfirmError(refs, firstError);
+        toast.error?.(firstError);
         return;
       }
 
@@ -552,7 +559,7 @@ export const ConfirmResetPasswordView = (() => {
           safeText(result.message, "") || DEFAULT_SUCCESS_MESSAGE;
 
         setConfirmSuccessState(refs, successMessage);
-        toast.success(successMessage);
+        toast.success?.(successMessage);
 
         safeEmit("auth:reset-password:confirm:success", {
           result,
@@ -576,7 +583,7 @@ export const ConfirmResetPasswordView = (() => {
           resolveConfirmErrorMessage(error);
 
         setGlobalConfirmError(refs, message);
-        toast.error(message);
+        toast.error?.(message);
 
         safeEmit("auth:reset-password:confirm:error", {
           message,

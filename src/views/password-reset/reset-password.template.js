@@ -4,14 +4,14 @@
 
    Responsabilidades:
    - generar el html premium de recuperación de acceso
+   - reutilizar el MISMO sistema visual de /src/css/auth/login.css
    - mantener layout auth-screen alineado con login
    - conservar bloque lateral izquierdo de estado
    - renderizar card principal a la derecha
    - soportar input de usuario o email
    - incluir toast superior derecho desacoplado
-   - incluir bloque inline de error / estado
    - exponer ids estables para dom.js e index.js
-   - mantener compatibilidad con flujo SPA
+   - mantener compatibilidad total con flujo SPA
 ========================================================= */
 
 import { escapeHtml } from "./reset-password.helpers.js";
@@ -172,17 +172,18 @@ function renderSignalItem(text = "") {
 }
 
 function renderLeftPanel({
-  heroEyebrow = "Recuperación segura",
-  heroTitle = "Recupera el acceso sin salir del flujo protegido del panel.",
+  heroEyebrow = "Recuperación segura · Panel operativo",
+  heroTitle = "Recupera el acceso de forma protegida",
   bullets = [],
 } = {}) {
-  const finalBullets = safeArray(bullets).filter(Boolean).length
-    ? safeArray(bullets).filter(Boolean)
-    : [
-        "Verificación del identificador de acceso",
-        "Flujo desacoplado del login principal",
-        "Recuperación protegida y guiada",
-      ];
+  const finalSignals =
+    safeArray(bullets).filter(Boolean).length
+      ? safeArray(bullets).filter(Boolean)
+      : [
+          "Validación de usuario o email",
+          "Flujo seguro desacoplado del acceso principal",
+          "Recuperación guiada alineada al panel",
+        ];
 
   return `
     <aside
@@ -194,10 +195,12 @@ function renderLeftPanel({
           ${escapeHtml(heroEyebrow)}
         </div>
 
-        <h3>${escapeHtml(heroTitle)}</h3>
+        <h3>
+          ${escapeHtml(heroTitle)}
+        </h3>
 
         <div class="login-signal-list">
-          ${finalBullets.map(renderSignalItem).join("")}
+          ${finalSignals.map(renderSignalItem).join("")}
         </div>
       </div>
     </aside>
@@ -213,7 +216,7 @@ function renderForm({
   identifierPlaceholder = "Usuario o email",
   backLabel = "Volver al acceso",
   backHref = "/login",
-  footerText = "Recuperación protegida. Usa un identificador válido de tu cuenta.",
+  footerText = "Recuperación protegida. Usa un identificador válido de tu cuenta corporativa.",
 } = {}) {
   return `
     <section
@@ -279,9 +282,9 @@ function renderForm({
               </span>
             </button>
 
-            <div class="login-reset login-reset--back">
+            <div class="login-reset">
               <a
-                class="login-reset-link login-reset-link--back"
+                class="login-reset-link"
                 href="${escapeHtml(backHref)}"
                 id="backToLoginLink"
                 data-spa
@@ -289,10 +292,10 @@ function renderForm({
                 <span
                   class="login-reset-link-icon"
                   aria-hidden="true"
+                  style="display:inline-flex;align-items:center;justify-content:center;margin-right:8px;vertical-align:middle;"
                 >
                   ${getBackArrowIcon()}
                 </span>
-
                 <span>${escapeHtml(backLabel)}</span>
               </a>
             </div>

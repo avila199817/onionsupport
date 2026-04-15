@@ -20,6 +20,8 @@ export const HTTP_CONFIG = Object.freeze({
   retries: 1,
   retryDelay: 400,
   retryJitter: 120,
+  retryStrategy: "linear",
+  retryMaxDelay: 10_000,
 
   autoRefreshOn401: true,
   autoLogoutOn401: true,
@@ -142,6 +144,21 @@ export function buildRetryDelay(
   requestConfig = {},
   attempt = 0
 ) {
+  const strategy = String(
+    requestConfig.retryStrategy ||
+      config.retryStrategy ||
+      "linear"
+  ).toLowerCase();
+
+  const maxDelay = Math.max(
+    0,
+    Number(
+      requestConfig.retryMaxDelay ??
+        config.retryMaxDelay ??
+        0
+    ) || 0
+  );
+
   const baseDelay =
     typeof requestConfig.retryDelay ===
     "number"
@@ -169,10 +186,42 @@ export function buildRetryDelay(
       Math.random() * safeJitter
     );
 
-  return (
-    safeBase *
-      (attempt + 1) +
-    randomJitter
+  const computedDelay =
+    strategy ===
+    "exponential"
+      ? safeBase *
+        2 ** attempt
+      : safeBase *
+        (attempt + 1);
+
+  const delay =
+    computedDelay +
+    randomJitter;
+
+  return maxDelay > 0
+    ? Math.min(
+        maxDelay,
+        delay
+      )
+    : delay;
+}
+
+function matchesStatusRule(
+  status,
+  retryOnStatuses
+) {
+  if (
+    !Array.isArray(
+      retryOnStatuses
+    )
+  ) {
+    return null;
+  }
+
+  return retryOnStatuses.some(
+    (candidate) =>
+      Number(candidate) ===
+      Number(status)
   );
 }
 
@@ -200,6 +249,23 @@ export function shouldRetry(
     requestConfig._skipRetry === true
   ) {
     return false;
+  }
+
+  const retryOnStatuses =
+    requestConfig.retryOnStatuses;
+
+  if (
+    Array.isArray(
+      retryOnStatuses
+    )
+  ) {
+    const status = Number(
+      error?.status || 0
+    );
+    return matchesStatusRule(
+      status,
+      retryOnStatuses
+    );
   }
 
   const method = String(
@@ -297,6 +363,8 @@ export function normalizeError(
 
     timeout:
       isTimeoutError(error),
+    retryable:
+      isRetryableError(error),
   };
 }
 
@@ -370,6 +438,8 @@ export function buildDefaultRequestConfig(
 
     retries:
       config.retries,
+    retryStrategy:
+      config.retryStrategy,
 
     retryDelay:
       config.retryDelay,
@@ -377,11 +447,16 @@ export function buildDefaultRequestConfig(
     retryJitter:
       config.retryJitter,
 
+    retryMaxDelay:
+      config.retryMaxDelay,
+
     retry: true,
     retryUnsafe: false,
 
     signal: null,
     meta: null,
+    requestId: null,
+    maxElapsedMs: 0,
 
     _skipRetry: false,
     _skipAuthRefresh: false,
@@ -401,6 +476,12 @@ export function withSignal(
   if (
     controllerOrSignal instanceof
     AbortController
+  ) {
+    return controllerOrSignal.signal;
+  }
+
+  if (
+    controllerOrSignal?.signal
   ) {
     return controllerOrSignal.signal;
   }

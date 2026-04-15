@@ -16,28 +16,89 @@
 export function delay(
   AppCore,
   ms = 0,
-  signal = null
+  signal = null,
+  meta = {}
 ) {
   const waitMs = Math.max(
     0,
     Number(ms) || 0
   );
 
+  const requestId =
+    meta?.requestId ||
+    null;
+
+  AppCore?.events?.emit?.(
+    "http:delay:start",
+    {
+      ms: waitMs,
+      requestId,
+      at:
+        new Date().toISOString(),
+    }
+  );
+
   if (!signal) {
-    return AppCore.utils.sleep(
-      waitMs
-    );
+    return AppCore.utils
+      .sleep(waitMs)
+      .then((result) => {
+        AppCore?.events?.emit?.(
+          "http:delay:end",
+          {
+            ms: waitMs,
+            requestId,
+            at:
+              new Date().toISOString(),
+          }
+        );
+
+        return result;
+      });
+  }
+
+  function createAbortError(
+    sourceSignal
+  ) {
+    if (
+      sourceSignal?.reason
+    ) {
+      return sourceSignal.reason;
+    }
+
+    if (
+      typeof DOMException !==
+      "undefined"
+    ) {
+      return new DOMException(
+        "Aborted",
+        "AbortError"
+      );
+    }
+
+    const error =
+      new Error("Aborted");
+    error.name =
+      "AbortError";
+    return error;
   }
 
   return new Promise(
     (resolve, reject) => {
       if (signal.aborted) {
+        AppCore?.events?.emit?.(
+          "http:delay:abort",
+          {
+            ms: waitMs,
+            requestId,
+            at:
+              new Date().toISOString(),
+          }
+        );
+
         reject(
-          signal.reason ||
-            new DOMException(
-              "Aborted",
-              "AbortError"
-            )
+          createAbortError(
+            signal
+          )
         );
         return;
       }
@@ -45,6 +106,15 @@ export function delay(
       const timeoutId =
         setTimeout(() => {
           cleanup();
+          AppCore?.events?.emit?.(
+            "http:delay:end",
+            {
+              ms: waitMs,
+              requestId,
+              at:
+                new Date().toISOString(),
+            }
+          );
           resolve();
         }, waitMs);
 
@@ -55,12 +125,20 @@ export function delay(
 
         cleanup();
 
+        AppCore?.events?.emit?.(
+          "http:delay:abort",
+          {
+            ms: waitMs,
+            requestId,
+            at:
+              new Date().toISOString(),
+          }
+        );
+
         reject(
-          signal.reason ||
-            new DOMException(
-              "Aborted",
-              "AbortError"
-            )
+          createAbortError(
+            signal
+          )
         );
       }
 
@@ -85,21 +163,34 @@ export function delay(
 ========================================================= */
 export function incrementPendingRequests(
   AppCore,
-  state
+  state,
+  meta = {}
 ) {
-  state.pendingRequests =
+  const previous =
     Math.max(
       0,
       Number(
         state.pendingRequests
       ) || 0
-    ) + 1;
+    );
+
+  state.pendingRequests =
+    previous + 1;
 
   AppCore.events.emit(
     "http:pending:change",
     {
       pending:
         state.pendingRequests,
+      previous,
+      source:
+        meta.source ||
+        "http.runtime:increment",
+      requestId:
+        meta.requestId ||
+        null,
+      at:
+        new Date().toISOString(),
     }
   );
 
@@ -108,14 +199,21 @@ export function incrementPendingRequests(
 
 export function decrementPendingRequests(
   AppCore,
-  state
+  state,
+  meta = {}
 ) {
+  const previous =
+    Math.max(
+      0,
+      Number(
+        state.pendingRequests
+      ) || 0
+    );
+
   state.pendingRequests =
     Math.max(
       0,
-      (Number(
-        state.pendingRequests
-      ) || 0) - 1
+      previous - 1
     );
 
   AppCore.events.emit(
@@ -123,6 +221,17 @@ export function decrementPendingRequests(
     {
       pending:
         state.pendingRequests,
+      previous,
+      source:
+        meta.source ||
+        "http.runtime:decrement",
+      requestId:
+        meta.requestId ||
+        null,
+      at:
+        new Date().toISOString(),
+      underflowPrevented:
+        previous === 0,
     }
   );
 

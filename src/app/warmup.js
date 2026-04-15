@@ -7,81 +7,120 @@
    - registrar estado real tras restoreSession
    - facilitar trazabilidad del arranque
    - cero side effects
+   - snapshot útil para debug enterprise
+
+   HARDENING PRO:
+   - logs consistentes
+   - sin romper si faltan módulos
+   - tolerancia total a estructuras parciales
+   - métricas de sesión y shell
 ========================================================= */
 
 export async function warmup(
   AppCore
 ) {
-  if (!AppCore) return;
+  if (!AppCore) {
+    return false;
+  }
 
   const log =
     AppCore?.utils?.log ||
     console.log;
 
   const state =
-    AppCore.state || {};
+    AppCore?.state || {};
 
   const config =
-    AppCore.config || {};
+    AppCore?.config || {};
 
-  log(
-    "Warmup app iniciado."
-  );
+  const snapshot = {
+    apiBase:
+      config.apiBase || null,
 
-  log(
-    "API configurada:",
-    config.apiBase || null
-  );
+    authenticated:
+      Boolean(
+        state.authenticated
+      ),
 
-  log(
-    "Diagnóstico sesión:",
-    {
-      hasToken: Boolean(
+    hasToken:
+      Boolean(
         state.token
       ),
 
-      authenticated:
-        Boolean(
-          state.authenticated
-        ),
+    username:
+      state.user?.username ||
+      state.user?.email ||
+      state.user?.name ||
+      null,
 
-      username:
-        state.user
-          ?.username ||
-        state.user?.email ||
-        null,
+    role:
+      state.role || null,
 
-      role:
-        state.role || null,
+    route:
+      state.route || "/",
+
+    publicPath:
+      state.publicPath || "/",
+
+    theme:
+      state.theme || "dark",
+
+    lang:
+      state.lang || "es",
+
+    sidebarOpen:
+      typeof state.sidebarOpen ===
+      "boolean"
+        ? state.sidebarOpen
+        : null,
+
+    booting:
+      Boolean(
+        state.booting
+      ),
+
+    booted:
+      Boolean(
+        state.booted
+      ),
+
+    loading:
+      Boolean(
+        state.loading
+      ),
+  };
+
+  try {
+    log(
+      "Warmup app iniciado."
+    );
+
+    log(
+      "Diagnóstico inicial:",
+      snapshot
+    );
+
+    if (
+      snapshot.authenticated &&
+      !snapshot.username
+    ) {
+      log(
+        "Warmup aviso:",
+        "Sesión autenticada sin username visible."
+      );
     }
-  );
 
-  log(
-    "Estado app:",
-    {
-      route:
-        state.route || "/",
-
-      publicPath:
-        state.publicPath ||
-        "/",
-
-      theme:
-        state.theme ||
-        "dark",
-
-      lang:
-        state.lang || "es",
-
-      booted:
-        Boolean(
-          state.booted
-        ),
-
-      booting:
-        Boolean(
-          state.booting
-        ),
+    if (
+      !snapshot.apiBase
+    ) {
+      log(
+        "Warmup aviso:",
+        "apiBase no configurada."
+      );
     }
-  );
+
+    return snapshot;
+  } catch {
+    return snapshot;
+  }
 }

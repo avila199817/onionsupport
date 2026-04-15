@@ -101,45 +101,22 @@ export function isBrowser() {
 export function stripSearchAndHash(
   path = "/"
 ) {
-  const raw = String(
-    path || "/"
-  );
+  const { pathname } =
+    splitPathParts(path);
 
-  const hashIndex =
-    raw.indexOf("#");
-
-  const searchIndex =
-    raw.indexOf("?");
-
-  let cutIndex = -1;
-
-  if (
-    searchIndex >= 0 &&
-    hashIndex >= 0
-  ) {
-    cutIndex = Math.min(
-      searchIndex,
-      hashIndex
-    );
-  } else if (
-    searchIndex >= 0
-  ) {
-    cutIndex = searchIndex;
-  } else if (
-    hashIndex >= 0
-  ) {
-    cutIndex = hashIndex;
-  }
-
-  return cutIndex >= 0
-    ? raw.slice(
-        0,
-        cutIndex
-      ) || "/"
-    : raw || "/";
+  return pathname || "/";
 }
 
 export function getSearchAndHash(
+  path = "/"
+) {
+  const { suffix } =
+    splitPathParts(path);
+
+  return suffix;
+}
+
+function splitPathParts(
   path = "/"
 ) {
   const raw = String(
@@ -148,7 +125,6 @@ export function getSearchAndHash(
 
   const hashIndex =
     raw.indexOf("#");
-
   const searchIndex =
     raw.indexOf("?");
 
@@ -172,9 +148,19 @@ export function getSearchAndHash(
     cutIndex = hashIndex;
   }
 
-  return cutIndex >= 0
-    ? raw.slice(cutIndex)
-    : "";
+  return {
+    pathname:
+      cutIndex >= 0
+        ? raw.slice(
+            0,
+            cutIndex
+          ) || "/"
+        : raw || "/",
+    suffix:
+      cutIndex >= 0
+        ? raw.slice(cutIndex)
+        : "",
+  };
 }
 
 /* =========================================================
@@ -553,6 +539,29 @@ export function resolveSpaHref(
   }
 
   if (
+    raw.startsWith("./") ||
+    raw.startsWith("../")
+  ) {
+    try {
+      const base =
+        isBrowser()
+          ? window.location.href
+          : "http://localhost/";
+      const url = new URL(
+        raw,
+        base
+      );
+
+      return normalizePath(
+        AppCore,
+        `${url.pathname}${url.search}${url.hash}`
+      );
+    } catch {
+      return routeNames.HOME;
+    }
+  }
+
+  if (
     raw.startsWith("@")
   ) {
     return normalizePath(
@@ -666,10 +675,33 @@ export function getRedirectPath(
     return null;
   }
 
+  let safeRedirect = "";
+
+  try {
+    safeRedirect =
+      decodeURIComponent(
+        String(redirect)
+      ).trim();
+  } catch {
+    safeRedirect =
+      String(redirect).trim();
+  }
+
+  if (
+    isUnsafeHref(
+      safeRedirect
+    ) ||
+    isExternalHref(
+      safeRedirect
+    )
+  ) {
+    return null;
+  }
+
   const resolved =
     resolveSpaHref(
       AppCore,
-      redirect
+      safeRedirect
     );
 
   const canonical =
@@ -787,11 +819,18 @@ export function buildStatePayload(
       pathname
     );
 
+  const canonical =
+    normalizeCanonicalPath(
+      AppCore,
+      normalized
+    );
+
   return {
     path: normalized,
     canonicalPath:
-      normalizeCanonicalPath(
-        AppCore,
+      canonical,
+    searchAndHash:
+      getSearchAndHash(
         normalized
       ),
     username:

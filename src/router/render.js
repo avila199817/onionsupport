@@ -87,6 +87,34 @@ function safeSetActiveMenu(setActiveMenu, path) {
   }
 }
 
+function nowMs() {
+  try {
+    if (
+      typeof performance !== "undefined" &&
+      typeof performance.now === "function"
+    ) {
+      return performance.now();
+    }
+  } catch {}
+
+  return Date.now();
+}
+
+function emitFlowMetric(
+  AppCore,
+  flow = "unknown",
+  payload = {}
+) {
+  safeEmit(
+    AppCore,
+    "router:render:flow",
+    {
+      flow,
+      ...payload,
+    }
+  );
+}
+
 function resolveUsernameForPayload(AppCore, requestedUsername = null) {
   return (
     requestedUsername ||
@@ -243,6 +271,16 @@ async function runRouteRender(
   viewContainer,
   context
 ) {
+  if (!viewContainer) {
+    safeWarn(
+      AppCore,
+      "[Router] viewContainer no disponible para render:",
+      route?.path || "(sin path)"
+    );
+
+    return null;
+  }
+
   if (typeof route?.render !== "function") {
     safeWarn(
       AppCore,
@@ -413,6 +451,8 @@ export async function renderRouteSuccess({
   setShellMode,
   setDocumentTitle,
 } = {}) {
+  const startedAt = nowMs();
+
   const resolvedPublicPath = applyResolvedRouteState(
     AppCore,
     canonicalPath,
@@ -464,6 +504,17 @@ export async function renderRouteSuccess({
     route,
   });
 
+  emitFlowMetric(
+    AppCore,
+    "success",
+    {
+      path: requestedPath,
+      canonicalPath,
+      durationMs: Math.round(nowMs() - startedAt),
+      route: route?.path || null,
+    }
+  );
+
   return renderedView || null;
 }
 
@@ -479,6 +530,8 @@ export function renderRouteForbidden({
   setShellMode,
   setDocumentTitle,
 } = {}) {
+  const startedAt = nowMs();
+
   updateHistory({
     AppCore,
     getRoute,
@@ -518,6 +571,17 @@ export function renderRouteForbidden({
     route,
   });
 
+  emitFlowMetric(
+    AppCore,
+    "forbidden",
+    {
+      path: requestedPath,
+      canonicalPath,
+      durationMs: Math.round(nowMs() - startedAt),
+      route: route?.path || null,
+    }
+  );
+
   return null;
 }
 
@@ -532,6 +596,8 @@ export function renderRouteNotFound({
   setShellMode,
   setDocumentTitle,
 } = {}) {
+  const startedAt = nowMs();
+
   updateHistory({
     AppCore,
     getRoute,
@@ -566,6 +632,16 @@ export function renderRouteNotFound({
     route: null,
   });
 
+  emitFlowMetric(
+    AppCore,
+    "not-found",
+    {
+      path: requestedPath,
+      canonicalPath,
+      durationMs: Math.round(nowMs() - startedAt),
+    }
+  );
+
   return null;
 }
 
@@ -579,6 +655,8 @@ export async function renderLoginRedirect({
   setShellMode,
   setDocumentTitle,
 } = {}) {
+  const startedAt = nowMs();
+
   const routeNames = getRouteNames(AppCore);
   const loginRoute = getRoute(routeNames.LOGIN);
   const loginUrl = buildLoginUrl(AppCore, canonicalPath);
@@ -651,6 +729,17 @@ export async function renderLoginRedirect({
     route: loginRoute,
   });
 
+  emitFlowMetric(
+    AppCore,
+    "login-redirect",
+    {
+      path: loginUrl,
+      canonicalPath: routeNames.LOGIN,
+      durationMs: Math.round(nowMs() - startedAt),
+      redirectedFrom: canonicalPath,
+    }
+  );
+
   return renderedView || null;
 }
 
@@ -667,6 +756,8 @@ export function renderRouteRuntimeError({
   setShellMode,
   setDocumentTitle,
 } = {}) {
+  const startedAt = nowMs();
+
   if (cycleId !== renderCycle) {
     safeWarn(
       AppCore,
@@ -710,6 +801,18 @@ export function renderRouteRuntimeError({
     forbidden: false,
     route,
   });
+
+  emitFlowMetric(
+    AppCore,
+    "runtime-error",
+    {
+      path: requestedPath,
+      canonicalPath,
+      durationMs: Math.round(nowMs() - startedAt),
+      route: route?.path || null,
+      error: String(error?.message || error || ""),
+    }
+  );
 
   return null;
 }

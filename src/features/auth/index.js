@@ -12,6 +12,13 @@
    - integrar reset-password / forgot-password
    - integrar confirmación de reset-password
    - ofrecer api pública coherente y endurecida
+
+   HARDENING PRO:
+   - singleton inmutable
+   - wrappers robustos
+   - snapshot debug enterprise
+   - tolerancia total a módulos parciales
+   - aliases legacy estables
 ========================================================= */
 
 import {
@@ -77,44 +84,53 @@ import {
 } from "./guards.js";
 
 /* =========================================================
-   PASSWORD RESET API RESOLUTION
+   PASSWORD RESET RESOLUTION
 ========================================================= */
 
 const requestPasswordReset =
-  PasswordResetApi.requestPasswordReset;
+  PasswordResetApi?.requestPasswordReset ||
+  PasswordResetApi?.forgotPassword ||
+  null;
 
 const resetPasswordRequest =
-  PasswordResetApi.resetPasswordRequest;
+  PasswordResetApi?.resetPasswordRequest ||
+  requestPasswordReset ||
+  null;
 
 const forgotPassword =
-  PasswordResetApi.forgotPassword;
+  PasswordResetApi?.forgotPassword ||
+  requestPasswordReset ||
+  null;
 
 const getRequestPasswordResetEndpoint =
-  PasswordResetApi.getRequestPasswordResetEndpoint;
+  PasswordResetApi?.getRequestPasswordResetEndpoint ||
+  (() => AUTH_ENDPOINTS?.forgotPassword || null);
 
 const resolveResetPasswordIdentifier =
-  PasswordResetApi.resolveResetPasswordIdentifier;
+  PasswordResetApi?.resolveResetPasswordIdentifier ||
+  ((value) => String(value || "").trim());
 
 const normalizeResetPasswordPayload =
-  PasswordResetApi.normalizeResetPasswordPayload;
+  PasswordResetApi?.normalizeResetPasswordPayload ||
+  ((payload = {}) => payload);
 
 const buildResetPasswordRequestBody =
-  PasswordResetApi.buildResetPasswordRequestBody;
+  PasswordResetApi?.buildResetPasswordRequestBody ||
+  ((payload = {}) => payload);
 
 const normalizeResetPasswordResponse =
-  PasswordResetApi.normalizeResetPasswordResponse;
+  PasswordResetApi?.normalizeResetPasswordResponse ||
+  ((response = {}) => response);
 
-/*
-  CONFIRM RESET PASSWORD
-  ---------------------------------------------------------
-  Se resuelve de forma tolerante para soportar distintas
-  convenciones de nombres dentro de ./password-reset.js
-*/
+/* =========================================================
+   CONFIRM RESET PASSWORD
+========================================================= */
+
 function resolveConfirmResetPasswordHandler() {
   const candidates = [
-    PasswordResetApi.confirmResetPassword,
-    PasswordResetApi.resetPasswordConfirm,
-    PasswordResetApi.confirmPasswordReset,
+    PasswordResetApi?.confirmResetPassword,
+    PasswordResetApi?.resetPasswordConfirm,
+    PasswordResetApi?.confirmPasswordReset,
   ];
 
   for (const candidate of candidates) {
@@ -126,7 +142,9 @@ function resolveConfirmResetPasswordHandler() {
   return null;
 }
 
-async function confirmResetPassword(payload = {}) {
+async function confirmResetPassword(
+  payload = {}
+) {
   const executor =
     resolveConfirmResetPasswordHandler();
 
@@ -143,7 +161,7 @@ const resetPasswordConfirm =
   confirmResetPassword;
 
 /* =========================================================
-   INTERNAL HELPERS
+   INTERNAL SESSION STATE
 ========================================================= */
 
 function createInitialSessionState() {
@@ -164,22 +182,81 @@ function createInitialSessionState() {
   };
 }
 
-function safeCloneSessionState(session = {}) {
+function safeCloneSessionState(
+  source = {}
+) {
   return {
-    restoring: Boolean(session.restoring),
-    checking: Boolean(session.checking),
-    refreshing: Boolean(session.refreshing),
+    restoring:
+      Boolean(source.restoring),
 
-    lastCheckAt: session.lastCheckAt || null,
-    lastRefreshAt: session.lastRefreshAt || null,
+    checking:
+      Boolean(source.checking),
 
-    refreshPromise: session.refreshPromise || null,
-    mePromise: session.mePromise || null,
-    restorePromise: session.restorePromise || null,
+    refreshing:
+      Boolean(source.refreshing),
 
-    refreshFailCount: Number(session.refreshFailCount || 0),
-    refreshBlockedUntil: Number(session.refreshBlockedUntil || 0),
+    lastCheckAt:
+      source.lastCheckAt || null,
+
+    lastRefreshAt:
+      source.lastRefreshAt || null,
+
+    refreshPromise:
+      source.refreshPromise || null,
+
+    mePromise:
+      source.mePromise || null,
+
+    restorePromise:
+      source.restorePromise || null,
+
+    refreshFailCount:
+      Number(
+        source.refreshFailCount || 0
+      ),
+
+    refreshBlockedUntil:
+      Number(
+        source.refreshBlockedUntil || 0
+      ),
   };
+}
+
+/* =========================================================
+   HELPERS
+========================================================= */
+
+function safeRun(fn, fallback) {
+  return async (...args) => {
+    try {
+      if (typeof fn !== "function") {
+        return fallback;
+      }
+
+      return await Promise.resolve(
+        fn(...args)
+      );
+    } catch (error) {
+      console.warn(
+        "[Auth]",
+        error
+      );
+
+      return fallback;
+    }
+  };
+}
+
+function safeCall(fn, fallback, ...args) {
+  try {
+    if (typeof fn !== "function") {
+      return fallback;
+    }
+
+    return fn(...args);
+  } catch {
+    return fallback;
+  }
 }
 
 /* =========================================================
@@ -189,53 +266,86 @@ function safeCloneSessionState(session = {}) {
 export const Auth = (() => {
   "use strict";
 
-  /* =========================================================
-     INTERNAL SESSION STATE
-  ========================================================= */
-  const session = createInitialSessionState();
+  const session =
+    createInitialSessionState();
 
-  /* =========================================================
-     WRAPPERS SERIALIZADOS
-  ========================================================= */
-  function runFetchMe() {
-    return fetchMe(session);
-  }
+  /* =======================================================
+     SERIALIZED WRAPPERS
+  ======================================================= */
 
-  function runRefreshSession() {
-    return refreshSession(session);
-  }
+  const runFetchMe =
+    safeRun(fetchMe, {
+      ok: false,
+      user: null,
+    });
 
-  function runRestoreSession() {
-    return restoreSession(session);
-  }
+  const runRefreshSession =
+    safeRun(refreshSession, {
+      ok: false,
+    });
 
-  /* =========================================================
-     DEBUG / SNAPSHOT
-  ========================================================= */
+  const runRestoreSession =
+    safeRun(restoreSession, {
+      ok: false,
+      user: null,
+    });
+
+  /* =======================================================
+     SNAPSHOT DEBUG
+  ======================================================= */
+
   function getAuthModuleSnapshot() {
     return {
-      endpoints: AUTH_ENDPOINTS,
-      storageKeys: AUTH_STORAGE_KEYS,
-      constants: AUTH_CONSTANTS,
-      session: safeCloneSessionState(session),
-      authenticated: Boolean(isAuthenticated?.()),
-      role: getCurrentRole?.() || null,
+      endpoints:
+        AUTH_ENDPOINTS,
+
+      storageKeys:
+        AUTH_STORAGE_KEYS,
+
+      constants:
+        AUTH_CONSTANTS,
+
+      session:
+        safeCloneSessionState(
+          session
+        ),
+
+      authenticated:
+        Boolean(
+          safeCall(
+            isAuthenticated,
+            false
+          )
+        ),
+
+      role:
+        safeCall(
+          getCurrentRole,
+          null
+        ),
+
       sessionDebug:
-        typeof getSessionDebugSnapshot === "function"
-          ? getSessionDebugSnapshot()
-          : null,
+        safeCall(
+          getSessionDebugSnapshot,
+          null
+        ),
+
       passwordReset: {
         hasRequestPasswordReset:
-          typeof requestPasswordReset === "function",
+          typeof requestPasswordReset ===
+          "function",
+
         hasConfirmResetPassword:
-          typeof resolveConfirmResetPasswordHandler() === "function",
+          typeof resolveConfirmResetPasswordHandler() ===
+          "function",
       },
     };
   }
 
-  /* =========================================================
+  /* =======================================================
      PUBLIC API
-  ========================================================= */
+  ======================================================= */
+
   return Object.freeze({
     AUTH_ENDPOINTS,
     AUTH_STORAGE_KEYS,
@@ -243,88 +353,76 @@ export const Auth = (() => {
 
     session,
 
-    /* =======================================================
-       AUTH ACTIONS
-    ======================================================= */
+    /* AUTH ACTIONS */
     login,
     logout,
     handleLoginFormSubmit,
 
-    /*
-      reset password / forgot password
-      - requestPasswordReset: nombre principal recomendado
-      - resetPasswordRequest: alias compatible
-      - forgotPassword: alias común en backends legacy
-    */
+    /* PASSWORD RESET */
     requestPasswordReset,
     resetPasswordRequest,
     forgotPassword,
 
-    /*
-      confirm reset password
-      - confirmResetPassword: nombre principal recomendado
-      - resetPasswordConfirm: alias compatible
-    */
     confirmResetPassword,
     resetPasswordConfirm,
 
-    /* =======================================================
-       RESET PASSWORD HELPERS
-    ======================================================= */
     getRequestPasswordResetEndpoint,
     resolveResetPasswordIdentifier,
     normalizeResetPasswordPayload,
     buildResetPasswordRequestBody,
     normalizeResetPasswordResponse,
 
-    /* =======================================================
-       SESSION RECOVERY
-    ======================================================= */
-    fetchMe: runFetchMe,
-    refreshSession: runRefreshSession,
-    restoreSession: runRestoreSession,
+    /* SESSION */
+    fetchMe:
+      (...args) =>
+        runFetchMe(
+          session,
+          ...args
+        ),
 
-    /* =======================================================
-       AUTH STATE
-    ======================================================= */
+    refreshSession:
+      (...args) =>
+        runRefreshSession(
+          session,
+          ...args
+        ),
+
+    restoreSession:
+      (...args) =>
+        runRestoreSession(
+          session,
+          ...args
+        ),
+
+    /* STATE */
     isAuthenticated,
     isAuthRoute,
 
-    /* =======================================================
-       ROLES / GUARDS
-    ======================================================= */
+    /* ROLES */
     hasRole,
     requireRole,
     guardAuthenticated,
     guardRole,
     getCurrentRole,
 
-    /* =======================================================
-       HEADERS / SESSION LOCAL
-    ======================================================= */
+    /* SESSION HELPERS */
     getAuthHeader,
     clearSessionLocal,
     applySession,
     buildSessionSnapshot,
     getSessionDebugSnapshot,
 
-    /* =======================================================
-       NORMALIZATION
-    ======================================================= */
+    /* NORMALIZE */
     normalizeUser,
 
-    /* =======================================================
-       LOGIN HELPERS
-    ======================================================= */
+    /* LOGIN HELPERS */
     resolveLoginIdentifier,
     normalizeLoginPayload,
     buildLoginRequestBody,
     buildLoginRedirectPath,
     getPostLoginTarget,
 
-    /* =======================================================
-       STORAGE HELPERS
-    ======================================================= */
+    /* STORAGE */
     hasRefreshToken,
     hasRefreshContext,
     getStoredRefreshToken,
@@ -332,9 +430,7 @@ export const Auth = (() => {
     getStoredSessionId,
     getStoredSessionUserId,
 
-    /* =======================================================
-       DEBUG
-    ======================================================= */
+    /* DEBUG */
     getAuthModuleSnapshot,
   });
 })();

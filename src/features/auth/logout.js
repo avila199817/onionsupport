@@ -9,6 +9,13 @@
    - redirigir de forma segura
    - emitir eventos auth lifecycle
    - tolerar fallo de red sin bloquear logout local
+
+   HARDENING PRO:
+   - anti doble logout concurrente
+   - timeout remoto
+   - navegación robusta Router/AppCore/browser
+   - snapshot consistente
+   - no romper UI si backend falla
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -35,21 +42,53 @@ import {
 } from "./session.js";
 
 /* =========================================================
+   INTERNAL STATE
+========================================================= */
+
+let logoutPromise = null;
+
+/* =========================================================
    HELPERS
 ========================================================= */
 
-function safeText(value, fallback = "") {
-  if (value === null || value === undefined) {
+function safeText(
+  value,
+  fallback = ""
+) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text =
+    String(value).trim();
+
   return text || fallback;
 }
 
-function safeEmit(eventName, payload = {}) {
+function safeBool(value) {
+  return value === true;
+}
+
+function safeEmit(
+  eventName,
+  payload = {}
+) {
   try {
-    AppCore?.events?.emit?.(eventName, payload);
+    AppCore?.events?.emit?.(
+      eventName,
+      payload
+    );
+  } catch {}
+}
+
+function safeWarn(...args) {
+  try {
+    AppCore?.utils?.warn?.(
+      ...args
+    );
   } catch {}
 }
 
@@ -60,19 +99,24 @@ function resolveLogoutEndpoint() {
   );
 }
 
-function resolveRedirect(target = "") {
+function resolveRedirect(
+  target = ""
+) {
   const candidate =
     normalizePath(
       safeText(
         target ||
-        AppCore?.config?.routes?.login ||
-        "/login",
+          AppCore?.config
+            ?.routes?.login ||
+          "/login",
         "/login"
       )
     );
 
   if (
-    isSafeRelativePath(candidate)
+    isSafeRelativePath(
+      candidate
+    )
   ) {
     return candidate;
   }
@@ -80,28 +124,70 @@ function resolveRedirect(target = "") {
   return "/login";
 }
 
-function navigateTo(path = "/login") {
+function buildLogoutBody() {
+  return {
+    refreshToken:
+      safeText(
+        getStoredRefreshToken()
+      ),
+
+    sessionId:
+      safeText(
+        getStoredSessionId()
+      ),
+
+    userId:
+      safeText(
+        getStoredSessionUserId()
+      ),
+  };
+}
+
+function getRouter() {
+  return (
+    AppCore?.modules?.get?.(
+      "router"
+    ) ||
+    AppCore?.router ||
+    null
+  );
+}
+
+function navigateTo(
+  path = "/login"
+) {
   const finalPath =
     resolveRedirect(path);
 
   try {
+    const router =
+      getRouter();
+
     if (
-      typeof AppCore?.navigate ===
+      typeof router?.navigate ===
       "function"
     ) {
-      AppCore.navigate(finalPath);
+      router.navigate(
+        finalPath,
+        {
+          replaceState: true,
+          force: true,
+        }
+      );
+
       return true;
     }
   } catch {}
 
   try {
     if (
-      typeof AppCore?.router?.navigate ===
+      typeof AppCore?.navigate ===
       "function"
     ) {
-      AppCore.router.navigate(
+      AppCore.navigate(
         finalPath
       );
+
       return true;
     }
   } catch {}
@@ -118,25 +204,40 @@ function navigateTo(path = "/login") {
   return true;
 }
 
-function buildLogoutBody() {
-  return {
-    refreshToken:
-      safeText(
-        getStoredRefreshToken(),
-        ""
-      ),
-    sessionId:
-      safeText(
-        getStoredSessionId(),
-        ""
-      ),
-    userId:
-      safeText(
-        getStoredSessionUserId(),
-        ""
-      ),
-  };
+async function fetchWithTimeout(
+  url,
+  options = {},
+  timeout = 6000
+) {
+  const controller =
+    typeof AbortController !==
+    "undefined"
+      ? new AbortController()
+      : null;
+
+  const timer =
+    controller
+      ? setTimeout(
+          () =>
+            controller.abort(),
+          timeout
+        )
+      : null;
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal:
+        controller?.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 }
+
+/* =========================================================
+   REMOTE LOGOUT
+========================================================= */
 
 async function requestRemoteLogout() {
   const endpoint =
@@ -144,25 +245,6 @@ async function requestRemoteLogout() {
 
   const body =
     buildLogoutBody();
-
-  const requestFn =
-    AppCore?.utils?.request ||
-    AppCore?.request ||
-    null;
-
-  if (
-    typeof requestFn ===
-    "function"
-  ) {
-    return requestFn(
-      endpoint,
-      {
-        method: "POST",
-        auth: false,
-        body,
-      }
-    );
-  }
 
   if (
     typeof AppCore
@@ -174,6 +256,22 @@ async function requestRemoteLogout() {
       body,
       {
         auth: false,
+        timeout: 6000,
+      }
+    );
+  }
+
+  if (
+    typeof AppCore?.request ===
+    "function"
+  ) {
+    return AppCore.request(
+      endpoint,
+      {
+        method: "POST",
+        auth: false,
+        body,
+        timeout: 6000,
       }
     );
   }
@@ -182,23 +280,32 @@ async function requestRemoteLogout() {
     typeof fetch ===
     "function"
   ) {
-    const res =
-      await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type":
-            "application/json",
-          "Accept":
-            "application/json",
+    const response =
+      await fetchWithTimeout(
+        endpoint,
+        {
+          method: "POST",
+          headers: {
+            Accept:
+              "application/json",
+            "Content-Type":
+              "application/json",
+          },
+          body:
+            JSON.stringify(
+              body
+            ),
         },
-        body: JSON.stringify(
-          body
-        ),
-      });
+        6000
+      );
 
     return {
-      ok: res.ok,
-      status: res.status,
+      ok:
+        response?.ok ===
+        true,
+      status:
+        response?.status ||
+        0,
     };
   }
 
@@ -206,10 +313,10 @@ async function requestRemoteLogout() {
 }
 
 /* =========================================================
-   ACTION
+   CORE ACTION
 ========================================================= */
 
-export async function logout(
+async function executeLogout(
   options = {}
 ) {
   const {
@@ -235,11 +342,21 @@ export async function logout(
 
   let remoteError = null;
 
-  if (remote) {
+  if (safeBool(remote)) {
     try {
       await requestRemoteLogout();
+
+      safeEmit(
+        "auth:logout:remote-success",
+        {}
+      );
     } catch (error) {
       remoteError = error;
+
+      safeWarn(
+        "Logout remoto falló:",
+        error
+      );
 
       safeEmit(
         "auth:logout:remote-error",
@@ -258,6 +375,19 @@ export async function logout(
     silent,
   });
 
+  try {
+    AppCore?.setError?.(
+      null
+    );
+  } catch {}
+
+  const finalRedirect =
+    safeBool(navigate)
+      ? resolveRedirect(
+          redirectTo
+        )
+      : null;
+
   safeEmit(
     "auth:logout:success",
     {
@@ -265,12 +395,17 @@ export async function logout(
         before.authenticated,
       remoteOk:
         !remoteError,
+      redirectTo:
+        finalRedirect,
     }
   );
 
-  if (navigate) {
+  if (
+    safeBool(navigate) &&
+    finalRedirect
+  ) {
     navigateTo(
-      redirectTo
+      finalRedirect
     );
   }
 
@@ -282,12 +417,34 @@ export async function logout(
       remoteError ||
       null,
     redirectTo:
-      navigate
-        ? resolveRedirect(
-            redirectTo
-          )
-        : null,
+      finalRedirect,
   };
+}
+
+/* =========================================================
+   PUBLIC API
+========================================================= */
+
+export async function logout(
+  options = {}
+) {
+  if (logoutPromise) {
+    return logoutPromise;
+  }
+
+  logoutPromise =
+    (async () => {
+      try {
+        return await executeLogout(
+          options
+        );
+      } finally {
+        logoutPromise =
+          null;
+      }
+    })();
+
+  return logoutPromise;
 }
 
 export default logout;

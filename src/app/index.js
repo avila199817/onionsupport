@@ -346,6 +346,7 @@ export const App = (() => {
       });
 
       clearScope(AppCore);
+
       clearBootFailsafeTimer(
         state
       );
@@ -393,6 +394,7 @@ export const App = (() => {
         Toast,
         scope,
         syncUserUI,
+
         rerenderCurrentRoute:
           () =>
             rerenderCurrentRoute({
@@ -400,6 +402,7 @@ export const App = (() => {
               Router,
               I18n,
               syncUserUI,
+
               applyPostRenderLoaderPolicy:
                 () =>
                   applyPostRenderLoaderPolicy({
@@ -408,6 +411,7 @@ export const App = (() => {
                     hideLoader,
                   }),
             }),
+
         applyPostRenderLoaderPolicy:
           () =>
             applyPostRenderLoaderPolicy({
@@ -427,7 +431,7 @@ export const App = (() => {
         state,
       });
 
-      /* CRÍTICO */
+      /* FIX CRÍTICO */
       await restoreSessionBeforeRender();
 
       await renderInitialRoute();
@@ -509,8 +513,10 @@ export const App = (() => {
 
     state.booted = false;
     state.booting = false;
+
     state.servicesInitialized = false;
     state.storeInitialized = false;
+
     state.sessionRestorePromise = null;
     state.bootPromise = null;
 

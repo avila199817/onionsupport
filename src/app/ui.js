@@ -9,91 +9,115 @@
    - refresco UI ante cambio idioma
    - evitar roturas si faltan deps
    - bridge global Toast
+
+   HARDENING EXTREMO:
+   - init idempotente total
+   - mounts aislados por módulo
+   - tolerancia absoluta a fallos parciales
+   - logs seguros enterprise
+   - sync user serializada
+   - eventos consistentes
+   - no duplicar listeners globales
 ========================================================= */
 
 /* =========================================================
-   USER UI
+   INTERNAL STATE
 ========================================================= */
-export function syncUserUI(
-  AppCore
-) {
-  if (!AppCore) {
-    console.warn(
-      "[Onion App UI] syncUserUI sin AppCore"
-    );
-    return;
-  }
 
-  if (
-    typeof AppCore.syncUserUI ===
-    "function"
-  ) {
-    AppCore.syncUserUI();
-  }
+let syncingUserUI = false;
 
-  AppCore.events?.emit?.(
-    "app:user-ui:sync",
-    {
-      user:
-        AppCore.state?.user ??
-        null,
-      authenticated:
-        Boolean(
-          AppCore.state
-            ?.authenticated
-        ),
-      role:
-        AppCore.state?.role ??
-        null,
-    }
-  );
+/* =========================================================
+   HELPERS
+========================================================= */
+
+function safeLog(AppCore, ...args) {
+  try {
+    AppCore?.utils?.log?.(...args);
+  } catch {}
 }
 
-/* =========================================================
-   LANGUAGE BIND
-========================================================= */
-export function bindAppLanguageSync(
-  AppCore
+function safeWarn(AppCore, ...args) {
+  try {
+    AppCore?.utils?.warn?.(...args);
+  } catch {}
+}
+
+function safeError(AppCore, ...args) {
+  try {
+    AppCore?.utils?.error?.(...args);
+  } catch {
+    console.error(...args);
+  }
+}
+
+function safeEmit(
+  AppCore,
+  eventName,
+  payload = {}
+) {
+  try {
+    AppCore?.events?.emit?.(
+      eventName,
+      payload
+    );
+  } catch {}
+}
+
+function safeBool(value) {
+  return value === true;
+}
+
+function safeText(
+  value,
+  fallback = ""
 ) {
   if (
-    !AppCore?.events?.on
+    value === null ||
+    value === undefined
   ) {
-    return;
+    return fallback;
   }
 
-  if (
-    AppCore.__appLangUiBound
-  ) {
-    return;
-  }
+  const text =
+    String(value).trim();
 
-  AppCore.events.on(
-    "app:lang:change",
-    () => {
-      syncUserUI(
-        AppCore
-      );
+  return text || fallback;
+}
 
-      if (
-        AppCore.dom
-          ?.topbarTitle &&
-        typeof document !==
-          "undefined" &&
-        document.title
-      ) {
-        AppCore.dom.topbarTitle.textContent =
-          document.title;
-      }
-    }
-  );
+function isFunction(value) {
+  return typeof value === "function";
+}
 
-  AppCore.__appLangUiBound =
-    true;
+function getUserSnapshot(AppCore) {
+  const state =
+    AppCore?.state || {};
+
+  const user =
+    state.user || null;
+
+  return {
+    user,
+    authenticated:
+      Boolean(
+        state.authenticated
+      ),
+    role:
+      state.role ||
+      user?.role ||
+      null,
+
+    username:
+      user?.username ||
+      user?.email ||
+      user?.name ||
+      null,
+  };
 }
 
 /* =========================================================
    MODULE REGISTRY
 ========================================================= */
+
 function registerAppModule(
   AppCore,
   name,
@@ -104,34 +128,252 @@ function registerAppModule(
     !name ||
     !moduleRef
   ) {
-    return;
+    return false;
   }
 
+  try {
+    if (
+      isFunction(
+        AppCore.modules.has
+      ) &&
+      AppCore.modules.has(name)
+    ) {
+      return true;
+    }
+
+    if (
+      isFunction(
+        AppCore.modules.register
+      )
+    ) {
+      AppCore.modules.register(
+        name,
+        moduleRef
+      );
+
+      return true;
+    }
+  } catch (error) {
+    safeWarn(
+      AppCore,
+      "registerAppModule() error:",
+      name,
+      error
+    );
+  }
+
+  return false;
+}
+
+/* =========================================================
+   SAFE MODULE INIT
+========================================================= */
+
+function safeInitModule(
+  AppCore,
+  moduleRef,
+  label = "module"
+) {
   if (
-    typeof AppCore.modules.has ===
-      "function" &&
-    AppCore.modules.has(
-      name
+    !moduleRef ||
+    !isFunction(
+      moduleRef.init
     )
   ) {
-    return;
+    return false;
+  }
+
+  try {
+    moduleRef.init();
+
+    safeLog(
+      AppCore,
+      `${label} inicializado.`
+    );
+
+    return true;
+  } catch (error) {
+    safeError(
+      AppCore,
+      `Error init ${label}:`,
+      error
+    );
+
+    return false;
+  }
+}
+
+/* =========================================================
+   USER UI
+========================================================= */
+
+export function syncUserUI(
+  AppCore
+) {
+  if (!AppCore) {
+    console.warn(
+      "[Onion App UI] syncUserUI sin AppCore"
+    );
+
+    return false;
+  }
+
+  if (syncingUserUI) {
+    return false;
+  }
+
+  syncingUserUI = true;
+
+  try {
+    if (
+      isFunction(
+        AppCore.syncUserUI
+      )
+    ) {
+      AppCore.syncUserUI();
+    }
+
+    const snapshot =
+      getUserSnapshot(
+        AppCore
+      );
+
+    safeEmit(
+      AppCore,
+      "app:user-ui:sync",
+      snapshot
+    );
+
+    safeLog(
+      AppCore,
+      "UI usuario sincronizada.",
+      {
+        authenticated:
+          snapshot.authenticated,
+        username:
+          snapshot.username,
+        role:
+          snapshot.role,
+      }
+    );
+
+    return true;
+  } catch (error) {
+    safeError(
+      AppCore,
+      "syncUserUI() error:",
+      error
+    );
+
+    return false;
+  } finally {
+    syncingUserUI = false;
+  }
+}
+
+/* =========================================================
+   LANGUAGE BIND
+========================================================= */
+
+export function bindAppLanguageSync(
+  AppCore
+) {
+  if (
+    !AppCore?.events ||
+    !isFunction(
+      AppCore.events.on
+    )
+  ) {
+    return false;
   }
 
   if (
-    typeof AppCore.modules
-      .register ===
-    "function"
+    safeBool(
+      AppCore.__appLangUiBound
+    )
   ) {
-    AppCore.modules.register(
-      name,
-      moduleRef
+    return true;
+  }
+
+  try {
+    AppCore.events.on(
+      "app:lang:change",
+      () => {
+        syncUserUI(
+          AppCore
+        );
+
+        try {
+          const title =
+            document?.title ||
+            "";
+
+          if (
+            AppCore?.dom
+              ?.topbarTitle
+          ) {
+            AppCore.dom.topbarTitle.textContent =
+              title;
+          }
+        } catch {}
+      }
     );
+
+    AppCore.__appLangUiBound =
+      true;
+
+    safeLog(
+      AppCore,
+      "Language UI sync activo."
+    );
+
+    return true;
+  } catch (error) {
+    safeWarn(
+      AppCore,
+      "bindAppLanguageSync() error:",
+      error
+    );
+
+    return false;
   }
 }
 
 /* =========================================================
    TOAST BRIDGE
 ========================================================= */
+
+function resolveToastMethod(
+  Toast,
+  type = "info"
+) {
+  const normalized =
+    safeText(
+      type,
+      "info"
+    ).toLowerCase();
+
+  switch (
+    normalized
+  ) {
+    case "success":
+      return Toast.success;
+
+    case "error":
+      return Toast.error;
+
+    case "warning":
+      return Toast.warning;
+
+    case "loading":
+      return Toast.loading;
+
+    case "info":
+    default:
+      return Toast.info;
+  }
+}
+
 function bindToastBridge(
   AppCore,
   Toast
@@ -140,7 +382,15 @@ function bindToastBridge(
     !AppCore ||
     !Toast
   ) {
-    return;
+    return false;
+  }
+
+  if (
+    safeBool(
+      AppCore.__toastBridgeBound
+    )
+  ) {
+    return true;
   }
 
   AppCore.showToast = (
@@ -148,143 +398,162 @@ function bindToastBridge(
     type = "info",
     options = {}
   ) => {
-    const normalizedType =
-      String(type || "info")
-        .trim()
-        .toLowerCase();
+    try {
+      const method =
+        resolveToastMethod(
+          Toast,
+          type
+        );
 
-    const fallback =
-      () =>
-        Toast.show?.({
-          ...options,
-          type:
-            normalizedType,
+      if (
+        isFunction(
+          method
+        )
+      ) {
+        return method(
           message,
-        });
-
-    switch (
-      normalizedType
-    ) {
-      case "success":
-        return (
-          Toast.success?.(
-            message,
-            options
-          ) ?? fallback()
+          options
         );
+      }
 
-      case "error":
-        return (
-          Toast.error?.(
-            message,
-            options
-          ) ?? fallback()
-        );
+      return Toast.show?.({
+        ...options,
+        type,
+        message,
+      });
+    } catch (error) {
+      safeWarn(
+        AppCore,
+        "Toast bridge error:",
+        error
+      );
 
-      case "warning":
-        return (
-          Toast.warning?.(
-            message,
-            options
-          ) ?? fallback()
-        );
-
-      case "loading":
-        return (
-          Toast.loading?.(
-            message,
-            options
-          ) ?? fallback()
-        );
-
-      case "info":
-      default:
-        return (
-          Toast.info?.(
-            message,
-            options
-          ) ?? fallback()
-        );
+      return null;
     }
   };
+
+  AppCore.__toastBridgeBound =
+    true;
+
+  return true;
 }
 
 /* =========================================================
    INIT
 ========================================================= */
+
 export function initUISystems({
   AppCore,
   Toast,
   SidebarUI,
   TopbarUI,
   state,
-}) {
+} = {}) {
   if (!AppCore) {
     console.warn(
       "[Onion App UI] initUISystems sin AppCore"
     );
-    return;
+
+    return false;
   }
 
   if (
     state?.uiInitialized
   ) {
-    return;
+    safeLog(
+      AppCore,
+      "UISystems ya inicializados."
+    );
+
+    return true;
   }
 
-  registerAppModule(
+  safeEmit(
     AppCore,
-    "toast",
-    Toast
+    "app:ui:init:start"
   );
 
-  registerAppModule(
-    AppCore,
-    "sidebar",
-    SidebarUI
-  );
+  try {
+    registerAppModule(
+      AppCore,
+      "toast",
+      Toast
+    );
 
-  registerAppModule(
-    AppCore,
-    "topbar",
-    TopbarUI
-  );
+    registerAppModule(
+      AppCore,
+      "sidebar",
+      SidebarUI
+    );
 
-  if (
-    typeof Toast?.init ===
-    "function"
-  ) {
-    Toast.init();
+    registerAppModule(
+      AppCore,
+      "topbar",
+      TopbarUI
+    );
+
+    safeInitModule(
+      AppCore,
+      Toast,
+      "Toast"
+    );
+
     bindToastBridge(
       AppCore,
       Toast
     );
-  }
 
-  if (
-    typeof SidebarUI?.init ===
-    "function"
-  ) {
-    SidebarUI.init();
-  }
+    safeInitModule(
+      AppCore,
+      SidebarUI,
+      "SidebarUI"
+    );
 
-  if (
-    typeof TopbarUI?.init ===
-    "function"
-  ) {
-    TopbarUI.init();
-  }
+    safeInitModule(
+      AppCore,
+      TopbarUI,
+      "TopbarUI"
+    );
 
-  bindAppLanguageSync(
-    AppCore
-  );
+    bindAppLanguageSync(
+      AppCore
+    );
 
-  syncUserUI(
-    AppCore
-  );
+    syncUserUI(
+      AppCore
+    );
 
-  if (state) {
-    state.uiInitialized =
-      true;
+    if (state) {
+      state.uiInitialized =
+        true;
+    }
+
+    safeEmit(
+      AppCore,
+      "app:ui:init:success"
+    );
+
+    safeLog(
+      AppCore,
+      "UISystems listos."
+    );
+
+    return true;
+  } catch (error) {
+    safeError(
+      AppCore,
+      "initUISystems() fatal:",
+      error
+    );
+
+    safeEmit(
+      AppCore,
+      "app:ui:init:error",
+      {
+        error,
+      }
+    );
+
+    return false;
   }
 }

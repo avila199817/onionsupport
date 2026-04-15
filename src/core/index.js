@@ -3,28 +3,22 @@
    Archivo: src/core/index.js
 
    Qué centraliza:
-   - composición del núcleo de aplicación
    - configuración global
    - estado global
    - helpers
-   - cache de DOM
+   - cache DOM
    - storage namespaced
    - event bus
    - cleanup scopes
-   - registro de módulos
-   - sesión base
-   - preferencias base
-   - request/api client robusto
-   - helpers UI / lifecycle
+   - registro módulos
+   - request/api client
    - init idempotente
 
-   HARDENING:
-   - sync derivada de sesión más robusta
-   - guards de browser
+   HARDENING PRO:
    - init serializado
-   - request/api expuesto también en api pública
-   - helpers seguros y consistentes
-   - estado ready/booting/initialized blindado
+   - auth derivada robusta
+   - ready seguro
+   - helpers enterprise
 ========================================================= */
 
 import { config } from "./config.js";
@@ -103,33 +97,20 @@ import {
 export const AppCore = (() => {
   "use strict";
 
-  /* =========================================================
-     FLAGS
-  ========================================================= */
   let initPromise = null;
-  let initDone = false;
+  let initialized = false;
 
-  /* =========================================================
-     STATE
-  ========================================================= */
   const state =
     createInitialState({
       config,
     });
 
-  /* =========================================================
-     DOM CACHE
-  ========================================================= */
   const dom =
     createDomCache();
 
-  /* =========================================================
-     REGISTRY
-  ========================================================= */
   const registry = {
     modules: new Map(),
     scopes: new Map(),
-
     hooks: {
       beforeInit: [],
       afterInit: [],
@@ -139,9 +120,6 @@ export const AppCore = (() => {
     },
   };
 
-  /* =========================================================
-     BUS / MODULES / HOOKS
-  ========================================================= */
   const events =
     createEvents();
 
@@ -157,8 +135,9 @@ export const AppCore = (() => {
     });
 
   /* =========================================================
-     INTERNAL HELPERS
+     HELPERS
   ========================================================= */
+
   function isBrowser() {
     return (
       typeof window !== "undefined" &&
@@ -166,22 +145,8 @@ export const AppCore = (() => {
     );
   }
 
-  function safeText(value, fallback = "") {
-    if (value === null || value === undefined) {
-      return fallback;
-    }
-
-    const text = String(value).trim();
-    return text || fallback;
-  }
-
-  function safeBoolean(value) {
-    return value === true;
-  }
-
   function safeLog(...args) {
     if (!config.debug) return;
-
     console.log(
       `[${config.appName}]`,
       ...args
@@ -190,7 +155,6 @@ export const AppCore = (() => {
 
   function safeWarn(...args) {
     if (!config.debug) return;
-
     console.warn(
       `[${config.appName}]`,
       ...args
@@ -205,17 +169,20 @@ export const AppCore = (() => {
   }
 
   function syncDerivedAuthState() {
-    const hasTokenNow = Boolean(
-      state.token &&
-      String(state.token).trim()
-    );
+    state.authenticated =
+      Boolean(
+        state.token &&
+        String(state.token).trim()
+      );
 
-    state.authenticated = hasTokenNow;
     state.role =
-      state.user?.role ||
-      state.user?.rol ||
-      state.role ||
-      "";
+      state.authenticated
+        ? (
+            state.user?.role ||
+            state.user?.rol ||
+            ""
+          )
+        : "";
 
     return state;
   }
@@ -223,162 +190,49 @@ export const AppCore = (() => {
   /* =========================================================
      UTILS
   ========================================================= */
+
   const utils = {
-    qs(
-      selector,
-      scope = document
-    ) {
+    qs(selector, scope = document) {
       if (!isBrowser()) return null;
-      if (!selector || !scope?.querySelector) return null;
-
-      return scope.querySelector(selector);
+      return scope?.querySelector?.(
+        selector
+      ) || null;
     },
 
-    qsa(
-      selector,
-      scope = document
-    ) {
+    qsa(selector, scope = document) {
       if (!isBrowser()) return [];
-      if (!selector || !scope?.querySelectorAll) return [];
-
       return Array.from(
-        scope.querySelectorAll(selector)
+        scope?.querySelectorAll?.(
+          selector
+        ) || []
       );
     },
 
-    create(
-      tag,
-      options = {}
-    ) {
-      if (!isBrowser()) return null;
-
-      const el =
-        document.createElement(tag);
-
-      if (options.className) {
-        el.className = options.className;
-      }
-
-      if (options.id) {
-        el.id = options.id;
-      }
-
-      if (options.text !== undefined) {
-        el.textContent = options.text;
-      }
-
-      if (options.html !== undefined) {
-        el.innerHTML = options.html;
-      }
-
-      if (
-        options.attrs &&
-        typeof options.attrs === "object" &&
-        !Array.isArray(options.attrs)
-      ) {
-        Object.entries(options.attrs).forEach(
-          ([key, value]) => {
-            if (value !== undefined && value !== null) {
-              el.setAttribute(
-                key,
-                String(value)
-              );
-            }
-          }
-        );
-      }
-
-      return el;
-    },
-
-    on(
-      target,
-      event,
-      handler,
-      options = false
-    ) {
-      if (
-        !target ||
-        !event ||
-        typeof handler !== "function"
-      ) {
+    on(target, ev, fn, opts = false) {
+      if (!target || !ev || !fn) {
         return () => {};
       }
 
       target.addEventListener(
-        event,
-        handler,
-        options
+        ev,
+        fn,
+        opts
       );
 
-      return () => {
+      return () =>
         target.removeEventListener(
-          event,
-          handler,
-          options
+          ev,
+          fn,
+          opts
         );
-      };
     },
 
-    off(
-      target,
-      event,
-      handler,
-      options = false
-    ) {
-      if (
-        !target ||
-        !event ||
-        typeof handler !== "function"
-      ) {
-        return;
-      }
-
-      target.removeEventListener(
-        event,
-        handler,
-        options
+    off(target, ev, fn, opts = false) {
+      target?.removeEventListener?.(
+        ev,
+        fn,
+        opts
       );
-    },
-
-    once(
-      target,
-      event,
-      handler,
-      options = false
-    ) {
-      if (
-        !target ||
-        !event ||
-        typeof handler !== "function"
-      ) {
-        return () => {};
-      }
-
-      const finalOptions =
-        typeof options === "boolean"
-          ? {
-              capture: options,
-              once: true,
-            }
-          : {
-              ...(options || {}),
-              once: true,
-            };
-
-      target.addEventListener(
-        event,
-        handler,
-        finalOptions
-      );
-
-      return () => {
-        target.removeEventListener(
-          event,
-          handler,
-          finalOptions
-        );
-      };
     },
 
     log: safeLog,
@@ -387,91 +241,12 @@ export const AppCore = (() => {
 
     sleep(ms = 0) {
       return new Promise(
-        (resolve) =>
+        (r) =>
           setTimeout(
-            resolve,
+            r,
             ms
           )
       );
-    },
-
-    clamp(
-      value,
-      min,
-      max
-    ) {
-      return Math.min(
-        Math.max(value, min),
-        max
-      );
-    },
-
-    capitalize(value = "") {
-      if (!value) return "";
-
-      return (
-        value.charAt(0).toUpperCase() +
-        value.slice(1)
-      );
-    },
-
-    debounce(
-      fn,
-      delay = 250
-    ) {
-      let timeoutId = null;
-
-      return (...args) => {
-        clearTimeout(timeoutId);
-
-        timeoutId = setTimeout(
-          () => fn(...args),
-          delay
-        );
-      };
-    },
-
-    throttle(
-      fn,
-      limit = 250
-    ) {
-      let inThrottle = false;
-      let lastArgs = null;
-
-      return (...args) => {
-        if (inThrottle) {
-          lastArgs = args;
-          return;
-        }
-
-        inThrottle = true;
-        fn(...args);
-
-        setTimeout(() => {
-          inThrottle = false;
-
-          if (lastArgs) {
-            const queued = lastArgs;
-            lastArgs = null;
-
-            fn(...queued);
-            inThrottle = true;
-
-            setTimeout(() => {
-              inThrottle = false;
-            }, limit);
-          }
-        }, limit);
-      };
-    },
-
-    escapeHtml(value = "") {
-      return String(value)
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
     },
 
     safeClone,
@@ -499,35 +274,39 @@ export const AppCore = (() => {
       utils,
     });
 
-  /* =========================================================
-     STORAGE
-  ========================================================= */
   const storage =
     createStorage(utils);
 
   /* =========================================================
      STATE API
   ========================================================= */
-  function setState(patch = {}) {
-    const nextState = setStateBase({
-      state,
-      events,
-      patch,
-    });
+
+  function setState(
+    patch = {}
+  ) {
+    const next =
+      setStateBase({
+        state,
+        events,
+        patch,
+      });
 
     syncDerivedAuthState();
 
-    return nextState;
+    return next;
   }
 
   function getState() {
     syncDerivedAuthState();
-    return getStateBase(state);
+    return getStateBase(
+      state
+    );
   }
 
   /* =========================================================
-     UI HELPERS
+     UI
   ========================================================= */
+
   function setDocumentTitle(
     title = config.appName
   ) {
@@ -554,8 +333,9 @@ export const AppCore = (() => {
   }
 
   /* =========================================================
-     SESSION / PREFS
+     SESSION
   ========================================================= */
+
   function setRoute(route = "/") {
     return setRouteBase({
       state,
@@ -565,7 +345,9 @@ export const AppCore = (() => {
     });
   }
 
-  function setPublicPath(path = "/") {
+  function setPublicPath(
+    path = "/"
+  ) {
     return setPublicPathBase({
       storage,
       setState,
@@ -574,29 +356,35 @@ export const AppCore = (() => {
     });
   }
 
-  function setUser(user = null) {
-    const result = setUserBase({
-      state,
-      storage,
-      events,
-      setState,
-      syncUserUI,
-      user,
-    });
+  function setUser(
+    user = null
+  ) {
+    const result =
+      setUserBase({
+        state,
+        storage,
+        events,
+        setState,
+        syncUserUI,
+        user,
+      });
 
     syncDerivedAuthState();
 
     return result;
   }
 
-  function setToken(token = null) {
-    const result = setTokenBase({
-      state,
-      storage,
-      events,
-      setState,
-      token,
-    });
+  function setToken(
+    token = null
+  ) {
+    const result =
+      setTokenBase({
+        state,
+        storage,
+        events,
+        setState,
+        token,
+      });
 
     syncDerivedAuthState();
 
@@ -607,18 +395,19 @@ export const AppCore = (() => {
     token = undefined,
     user = undefined,
   } = {}) {
-    const result = applySessionBase({
-      state,
-      events,
-      setUser: ({ user: nextUser }) =>
-        setUser(nextUser),
-
-      setToken: ({ token: nextToken }) =>
-        setToken(nextToken),
-
-      token,
-      user,
-    });
+    const result =
+      applySessionBase({
+        state,
+        events,
+        setUser:
+          ({ user }) =>
+            setUser(user),
+        setToken:
+          ({ token }) =>
+            setToken(token),
+        token,
+        user,
+      });
 
     syncDerivedAuthState();
 
@@ -626,23 +415,22 @@ export const AppCore = (() => {
   }
 
   function clearSession() {
-    const result = clearSessionBase({
-      state,
-      storage,
-      events,
-      setState,
-      syncUserUI,
-      utils,
-    });
+    const result =
+      clearSessionBase({
+        state,
+        storage,
+        events,
+        setState,
+        syncUserUI,
+        utils,
+      });
 
     syncDerivedAuthState();
 
     return result;
   }
 
-  function setTheme(
-    theme = config.defaultTheme
-  ) {
+  function setTheme(theme) {
     return setThemeBase({
       dom,
       storage,
@@ -652,9 +440,7 @@ export const AppCore = (() => {
     });
   }
 
-  function setLang(
-    lang = config.defaultLang
-  ) {
+  function setLang(lang) {
     return setLangBase({
       dom,
       storage,
@@ -664,7 +450,9 @@ export const AppCore = (() => {
     });
   }
 
-  function setSidebarOpen(value) {
+  function setSidebarOpen(
+    value
+  ) {
     return setSidebarOpenBase({
       dom,
       storage,
@@ -674,7 +462,9 @@ export const AppCore = (() => {
     });
   }
 
-  function setLoading(value) {
+  function setLoading(
+    value
+  ) {
     return setLoadingBase({
       dom,
       events,
@@ -683,7 +473,9 @@ export const AppCore = (() => {
     });
   }
 
-  function setError(error = null) {
+  function setError(
+    error = null
+  ) {
     return setErrorBase({
       events,
       setState,
@@ -695,6 +487,7 @@ export const AppCore = (() => {
   /* =========================================================
      REQUEST
   ========================================================= */
+
   const request =
     createRequest({
       state,
@@ -705,56 +498,44 @@ export const AppCore = (() => {
     });
 
   const apiClient =
-    createApiClient(request);
+    createApiClient(
+      request
+    );
 
   /* =========================================================
      READY
   ========================================================= */
-  function ready(callback) {
-    if (typeof callback !== "function") {
+
+  function ready(fn) {
+    if (
+      typeof fn !== "function" ||
+      !isBrowser()
+    ) {
       return;
     }
 
-    if (!isBrowser()) {
-      return;
-    }
-
-    if (!isDocumentReady()) {
+    if (
+      !isDocumentReady()
+    ) {
       document.addEventListener(
         "DOMContentLoaded",
-        callback,
+        fn,
         { once: true }
       );
-
       return;
     }
 
-    callback();
+    fn();
   }
 
   /* =========================================================
      INIT
   ========================================================= */
+
   async function doInit() {
-    state.booting = true;
-    state.ready = false;
-
     try {
-      for (const hook of registry.hooks.beforeInit) {
-        try {
-          await hook(api);
-        } catch (error) {
-          utils.error(
-            "Error hook beforeInit",
-            error
-          );
-        }
-      }
-
-      config.apiBase = safeText(
-        config.apiBase,
-        ""
-      ).replace(/\/+$/, "");
+      state.booting = true;
+      state.ready = false;
 
       cacheDom({
         dom,
@@ -795,47 +576,25 @@ export const AppCore = (() => {
       state.booting = false;
       state.ready = true;
 
-      initDone = true;
+      initialized = true;
 
-      utils.log(
-        "Core inicializado correctamente.",
+      events.emit(
+        "app:core:ready",
         {
-          version: config.version,
-          apiBase: config.apiBase,
-          route: state.route,
-          publicPath: state.publicPath,
-          lang: state.lang,
-          theme: state.theme,
-          authenticated: state.authenticated,
-          username:
-            getUserUsername(state.user) || null,
-          online: state.online,
+          state:
+            cloneState(state),
         }
       );
 
-      events.emit("app:core:ready", {
-        state: cloneState(state),
-        config: {
-          ...config,
-        },
-      });
-
-      for (const hook of registry.hooks.afterInit) {
-        try {
-          await hook(api);
-        } catch (error) {
-          utils.error(
-            "Error hook afterInit",
-            error
-          );
-        }
-      }
+      safeLog(
+        "Core ready."
+      );
 
       return api;
     } catch (error) {
-      state.booting = false;
-      state.ready = false;
       state.initialized = false;
+      state.ready = false;
+      state.booting = false;
 
       setError(error);
 
@@ -846,30 +605,27 @@ export const AppCore = (() => {
   }
 
   async function init() {
-    if (initDone || safeBoolean(state.initialized)) {
-      utils.warn(
-        "AppCore ya fue inicializado."
-      );
-
+    if (
+      initialized ||
+      state.initialized
+    ) {
       return api;
     }
 
     if (initPromise) {
-      utils.warn(
-        "AppCore ya está arrancando."
-      );
-
       return initPromise;
     }
 
-    initPromise = doInit();
+    initPromise =
+      doInit();
 
     return initPromise;
   }
 
   /* =========================================================
-     PUBLIC API
+     API
   ========================================================= */
+
   const api = {
     config,
     state,

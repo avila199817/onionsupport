@@ -309,6 +309,19 @@ export async function executeFetchWithRetry(
             baseDelay
         );
 
+      try {
+        requestConfig?.onRetry?.({
+          url,
+          error: normalized,
+          attempt,
+          nextAttempt:
+            attempt + 1,
+          retries,
+          delayMs:
+            backoff + jitter,
+        });
+      } catch {}
+
       await utils.sleep(
         backoff + jitter
       );
@@ -331,10 +344,77 @@ export function createRequest({
   utils,
   registry,
 }) {
+  let requestSequence = 0;
+  const inFlightRequests =
+    new Map();
+
+  function stableStringify(value) {
+    if (
+      value === null ||
+      value === undefined
+    ) {
+      return "";
+    }
+
+    if (
+      typeof value !== "object"
+    ) {
+      return String(value);
+    }
+
+    if (Array.isArray(value)) {
+      return `[${value
+        .map((item) =>
+          stableStringify(item)
+        )
+        .join(",")}]`;
+    }
+
+    const keys =
+      Object.keys(value).sort();
+
+    return `{${keys
+      .map(
+        (key) =>
+          `${key}:${stableStringify(
+            value[key]
+          )}`
+      )
+      .join("|")}}`;
+  }
+
+  function buildFingerprint({
+    method,
+    url,
+    payload,
+    headers,
+    auth,
+  }) {
+    return [
+      method,
+      url,
+      auth ? "auth" : "public",
+      stableStringify(
+        headers || {}
+      ),
+      typeof payload === "string"
+        ? payload
+        : stableStringify(
+            payload
+          ),
+    ].join("::");
+  }
+
   async function request(
     path,
     options = {}
   ) {
+    const startedAt =
+      Date.now();
+
+    const requestId =
+      `req_${++requestSequence}`;
+
     let requestConfig = {
       method: "GET",
       headers: {},
@@ -351,6 +431,7 @@ export function createRequest({
         config.requestRetries,
       retryDelay: 300,
       retryMaxDelay: 4000,
+      dedupe: true,
       ...options,
       path,
     };
@@ -434,9 +515,55 @@ export function createRequest({
                 )
               : requestConfig.body;
 
+    const canDedupe =
+      requestConfig.dedupe !==
+        false &&
+      ["GET", "HEAD"].includes(
+        method
+      );
+
+    const requestFingerprint =
+      canDedupe
+        ? buildFingerprint({
+            method,
+            url,
+            payload,
+            headers:
+              finalHeaders,
+            auth:
+              requestConfig.auth,
+          })
+        : null;
+
+    if (
+      requestFingerprint &&
+      inFlightRequests.has(
+        requestFingerprint
+      )
+    ) {
+      const inFlight =
+        inFlightRequests.get(
+          requestFingerprint
+        );
+
+      events?.emit?.(
+        "app:request:deduped",
+        {
+          requestId,
+          url,
+          method,
+          dedupeKey:
+            requestFingerprint,
+        }
+      );
+
+      return inFlight;
+    }
+
     events?.emit?.(
       "app:request:start",
       {
+        requestId,
         url,
         method,
         auth:
@@ -447,160 +574,218 @@ export function createRequest({
       }
     );
 
-    try {
-      state.lastRequestAt =
-        now();
+    const requestPromise =
+      (async () => {
+        let retryCount = 0;
 
-      state.lastRequestUrl =
-        url;
+        try {
+          state.lastRequestAt =
+            now();
 
-      const response =
-        await executeFetchWithRetry(
-          url,
-          async () => {
-            const {
-              controller,
-              timeoutId,
-            } =
-              createAbortTimeout(
-                requestConfig.timeout
-              );
+          state.lastRequestUrl =
+            url;
 
-            const mergedSignal =
-              mergeAbortSignals(
-                [
-                  controller.signal,
-                  requestConfig.signal,
-                ]
-              );
+          const response =
+            await executeFetchWithRetry(
+              url,
+              async (attempt = 0) => {
+                retryCount = Math.max(
+                  retryCount,
+                  attempt
+                );
 
-            try {
-              return await fetch(
-                url,
-                {
-                  method,
-                  headers:
-                    finalHeaders,
-                  body: payload,
-                  credentials:
-                    requestConfig.credentials,
-                  signal:
-                    mergedSignal,
+                const {
+                  controller,
+                  timeoutId,
+                } =
+                  createAbortTimeout(
+                    requestConfig.timeout
+                  );
+
+                const mergedSignal =
+                  mergeAbortSignals(
+                    [
+                      controller.signal,
+                      requestConfig.signal,
+                    ]
+                  );
+
+                try {
+                  return await fetch(
+                    url,
+                    {
+                      method,
+                      headers:
+                        finalHeaders,
+                      body: payload,
+                      credentials:
+                        requestConfig.credentials,
+                      signal:
+                        mergedSignal,
+                    }
+                  );
+                } finally {
+                  clearTimeout(
+                    timeoutId
+                  );
                 }
-              );
-            } finally {
-              clearTimeout(
-                timeoutId
-              );
-            }
-          },
-          requestConfig,
-          utils
-        );
+              },
+              {
+                ...requestConfig,
+                onRetry:
+                  (retryMeta) => {
+                    events?.emit?.(
+                      "app:request:retry",
+                      {
+                        requestId,
+                        url,
+                        method,
+                        ...retryMeta,
+                      }
+                    );
+                  },
+              },
+              utils
+            );
 
-      if (
-        requestConfig.raw ===
-        true
-      ) {
-        const hookedRaw =
-          await runHookSeries(
-            registry.hooks
-              .afterResponse,
-            response
-          );
+          if (
+            requestConfig.raw ===
+            true
+          ) {
+            const hookedRaw =
+              await runHookSeries(
+                registry.hooks
+                  .afterResponse,
+                response
+              );
 
-        events?.emit?.(
-          "app:request:success",
-          {
-            url,
-            method,
-            status:
-              response.status,
-            response:
-              hookedRaw,
+            events?.emit?.(
+              "app:request:success",
+              {
+                requestId,
+                url,
+                method,
+                status:
+                  response.status,
+                response:
+                  hookedRaw,
+                attempts:
+                  retryCount + 1,
+                durationMs:
+                  Date.now() -
+                  startedAt,
+              }
+            );
+
+            return hookedRaw;
           }
-        );
 
-        return hookedRaw;
-      }
+          const data =
+            await parseResponseBody(
+              response,
+              requestConfig.responseType
+            );
 
-      const data =
-        await parseResponseBody(
-          response,
-          requestConfig.responseType
-        );
-
-      if (!response.ok) {
-        throw buildRequestError({
-          response,
-          data,
-          url,
-          method,
-        });
-      }
-
-      const hookedData =
-        await runHookSeries(
-          registry.hooks
-            .afterResponse,
-          data
-        );
-
-      events?.emit?.(
-        "app:request:success",
-        {
-          url,
-          method,
-          status:
-            response.status,
-          data: hookedData,
-        }
-      );
-
-      return hookedData;
-    } catch (error) {
-      const normalized =
-        error?.status !==
-        undefined
-          ? error
-          : buildRequestError({
+          if (!response.ok) {
+            throw buildRequestError({
+              response,
+              data,
               url,
               method,
-              timeout:
-                isProbablyTimeoutError(
-                  error
-                ),
-              aborted:
-                isAbortError(
-                  error
-                ),
-              raw:
-                error?.message ||
-                error,
             });
+          }
 
-      normalized.retryable =
-        shouldRetryRequest(
-          normalized,
-          requestConfig
+          const hookedData =
+            await runHookSeries(
+              registry.hooks
+                .afterResponse,
+              data
+            );
+
+          events?.emit?.(
+            "app:request:success",
+            {
+              requestId,
+              url,
+              method,
+              status:
+                response.status,
+              data: hookedData,
+              attempts:
+                retryCount + 1,
+              durationMs:
+                Date.now() -
+                startedAt,
+            }
+          );
+
+          return hookedData;
+        } catch (error) {
+          const normalized =
+            error?.status !==
+            undefined
+              ? error
+              : buildRequestError({
+                  url,
+                  method,
+                  timeout:
+                    isProbablyTimeoutError(
+                      error
+                    ),
+                  aborted:
+                    isAbortError(
+                      error
+                    ),
+                  raw:
+                    error?.message ||
+                    error,
+                });
+
+          normalized.retryable =
+            shouldRetryRequest(
+              normalized,
+              requestConfig
+            );
+
+          normalized.requestId =
+            requestId;
+          normalized.durationMs =
+            Date.now() - startedAt;
+
+          setError?.(
+            normalized
+          );
+
+          await runHookSeries(
+            registry.hooks
+              .onRequestError,
+            normalized
+          );
+
+          events?.emit?.(
+            "app:request:error",
+            normalized
+          );
+
+          throw normalized;
+        }
+      })();
+
+    if (requestFingerprint) {
+      inFlightRequests.set(
+        requestFingerprint,
+        requestPromise
+      );
+    }
+
+    try {
+      return await requestPromise;
+    } finally {
+      if (requestFingerprint) {
+        inFlightRequests.delete(
+          requestFingerprint
         );
-
-      setError?.(
-        normalized
-      );
-
-      await runHookSeries(
-        registry.hooks
-          .onRequestError,
-        normalized
-      );
-
-      events?.emit?.(
-        "app:request:error",
-        normalized
-      );
-
-      throw normalized;
+      }
     }
   }
 

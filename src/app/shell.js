@@ -52,7 +52,10 @@ export function getViewContainer(AppCore) {
 /* =========================================================
    SHELL VISIBILITY
 ========================================================= */
-export function setShellVisibility(AppCore, visible = true) {
+export function setShellVisibility(
+  AppCore,
+  visible = true
+) {
   const hidden = !visible;
 
   const {
@@ -142,6 +145,24 @@ export function isResetPasswordPath(
   );
 }
 
+export function isResetPasswordConfirmPath(
+  AppCore,
+  path = ""
+) {
+  const normalized =
+    AppCore.utils.normalizePath(
+      path || "/"
+    );
+
+  return (
+    normalized ===
+      "/reset-password/confirm" ||
+    normalized.startsWith(
+      "/reset-password/confirm?"
+    )
+  );
+}
+
 export function isAuthLikeRoute(
   AppCore,
   Router
@@ -160,11 +181,17 @@ export function isAuthLikeRoute(
   return (
     currentCanonicalPath === "/login" ||
     currentCanonicalPath === "/reset-password" ||
+    currentCanonicalPath ===
+      "/reset-password/confirm" ||
     isLoginPath(
       AppCore,
       currentPublicPath
     ) ||
     isResetPasswordPath(
+      AppCore,
+      currentPublicPath
+    ) ||
+    isResetPasswordConfirmPath(
       AppCore,
       currentPublicPath
     )

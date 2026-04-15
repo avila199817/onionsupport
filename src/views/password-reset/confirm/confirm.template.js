@@ -10,10 +10,12 @@
    - soportar token oculto + nueva contraseña + repetir contraseña
    - incluir bloque lateral izquierdo de estado
    - usar logo real de empresa según tema activo
+   - reutilizar el sistema compartido de password-field
    - exponer ids estables para confirm.dom.js y confirmView.js
 ========================================================= */
 
 import { escapeHtml } from "../reset-password.helpers.js";
+import { renderPasswordField } from "../../../shared/password-field/index.js";
 
 /* =========================================================
    BASICS
@@ -35,60 +37,6 @@ function safeArray(value) {
 /* =========================================================
    ICONS
 ========================================================= */
-
-function getEyeIcon() {
-  return `
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18">
-      <path
-        d="M2.75 12s3.25-6 9.25-6 9.25 6 9.25 6-3.25 6-9.25 6-9.25-6-9.25-6Z"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linejoin="round"
-      />
-      <circle
-        cx="12"
-        cy="12"
-        r="2.7"
-        stroke="currentColor"
-        stroke-width="1.8"
-      />
-    </svg>
-  `;
-}
-
-function getEyeOffIcon() {
-  return `
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18">
-      <path
-        d="M3.5 4.5 20.5 19.5"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-      />
-      <path
-        d="M10.58 5.63A10.5 10.5 0 0 1 12 5.55c6 0 9.25 6 9.25 6a15.72 15.72 0 0 1-3.48 4.11"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
-      <path
-        d="M6.2 8.12A15.18 15.18 0 0 0 2.75 11.55s3.25 6 9.25 6c1.36 0 2.59-.3 3.7-.79"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
-      <path
-        d="M9.88 9.96A2.9 2.9 0 0 0 9.3 11.7a2.7 2.7 0 0 0 4.57 1.96"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
-    </svg>
-  `;
-}
 
 function getBackArrowIcon() {
   return `
@@ -226,45 +174,6 @@ function renderLeftPanel({
   `;
 }
 
-function renderPasswordField({
-  inputId = "",
-  fieldName = "",
-  placeholder = "",
-  ariaLabel = "",
-  toggleId = "",
-} = {}) {
-  return `
-    <div class="login-field" data-field="${escapeHtml(fieldName)}">
-      <div class="password-wrapper">
-        <input
-          class="input-text"
-          id="${escapeHtml(inputId)}"
-          name="${escapeHtml(fieldName)}"
-          type="password"
-          autocomplete="new-password"
-          placeholder="${escapeHtml(placeholder)}"
-          aria-label="${escapeHtml(ariaLabel)}"
-          required
-        />
-
-        <button
-          class="password-toggle"
-          type="button"
-          id="${escapeHtml(toggleId)}"
-          aria-label="Mostrar contraseña"
-          aria-pressed="false"
-          data-show-label="Mostrar contraseña"
-          data-hide-label="Ocultar contraseña"
-          data-show-icon="${escapeHtml(getEyeIcon())}"
-          data-hide-icon="${escapeHtml(getEyeOffIcon())}"
-        >
-          ${getEyeIcon()}
-        </button>
-      </div>
-    </div>
-  `;
-}
-
 function renderForm({
   appName = "Onion Support",
   title = "Crear nueva contraseña",
@@ -323,19 +232,39 @@ function renderForm({
             />
 
             ${renderPasswordField({
-              inputId: "newPassword",
+              escapeHtml,
+              fieldId: "newPassword",
               fieldName: "password",
               placeholder: passwordPlaceholder,
               ariaLabel: "Nueva contraseña",
-              toggleId: "toggleNewPassword",
+              autocomplete: "new-password",
+              fieldClass: "login-field",
+              fieldDataName: "password",
+              wrapperClass: "password-wrapper",
+              inputClass: "input-text",
+              required: true,
+              showCapsIndicator: true,
+              capsLabel: "Bloq Mayús",
+              toggleLabelShow: "Mostrar contraseña",
+              toggleLabelHide: "Ocultar contraseña",
             })}
 
             ${renderPasswordField({
-              inputId: "confirmPassword",
+              escapeHtml,
+              fieldId: "confirmPassword",
               fieldName: "confirm-password",
               placeholder: confirmPasswordPlaceholder,
               ariaLabel: "Confirmar contraseña",
-              toggleId: "toggleConfirmPassword",
+              autocomplete: "new-password",
+              fieldClass: "login-field",
+              fieldDataName: "confirm-password",
+              wrapperClass: "password-wrapper",
+              inputClass: "input-text",
+              required: true,
+              showCapsIndicator: true,
+              capsLabel: "Bloq Mayús",
+              toggleLabelShow: "Mostrar contraseña",
+              toggleLabelHide: "Ocultar contraseña",
             })}
 
             <div

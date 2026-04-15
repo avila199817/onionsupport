@@ -80,6 +80,11 @@ export const Store = (() => {
   const coreUnsubscribers =
     [];
 
+  let batchDepth = 0;
+  let batchPreviousState = null;
+  const batchChangedPaths =
+    new Set();
+
   /* =========================================================
      READ HELPERS
   ========================================================= */
@@ -166,6 +171,114 @@ export const Store = (() => {
           previousState
         ),
     });
+
+    AppCore?.events?.emit?.(
+      "store:change",
+      {
+        changedPaths:
+          Array.isArray(
+            changedPaths
+          )
+            ? [
+                ...changedPaths,
+              ]
+            : [],
+      }
+    );
+  }
+
+  function startBatchIfNeeded() {
+    if (
+      batchDepth === 0 &&
+      !batchPreviousState
+    ) {
+      batchPreviousState =
+        snapshot();
+    }
+
+    batchDepth += 1;
+  }
+
+  function queueBatchPaths(
+    changedPaths = []
+  ) {
+    if (
+      !Array.isArray(
+        changedPaths
+      )
+    ) {
+      return;
+    }
+
+    changedPaths.forEach(
+      (path) => {
+        if (!path) return;
+        batchChangedPaths.add(
+          String(path)
+        );
+      }
+    );
+  }
+
+  function flushBatchIfReady() {
+    if (batchDepth > 0) {
+      return false;
+    }
+
+    if (
+      !batchPreviousState
+    ) {
+      return false;
+    }
+
+    const changedPaths =
+      Array.from(
+        batchChangedPaths
+      );
+
+    const previousState =
+      batchPreviousState;
+
+    batchPreviousState = null;
+    batchChangedPaths.clear();
+
+    if (
+      !changedPaths.length
+    ) {
+      return false;
+    }
+
+    emitChange(
+      changedPaths,
+      previousState
+    );
+
+    AppCore?.events?.emit?.(
+      "store:batch:flush",
+      {
+        changedCount:
+          changedPaths.length,
+      }
+    );
+
+    return true;
+  }
+
+  function emitOrQueueChange(
+    changedPaths = [],
+    previousState = {}
+  ) {
+    if (batchDepth > 0) {
+      queueBatchPaths(
+        changedPaths
+      );
+      return;
+    }
+
+    emitChange(
+      changedPaths,
+      previousState
+    );
   }
 
   /* =========================================================
@@ -204,7 +317,7 @@ export const Store = (() => {
 
     touchMeta(state);
 
-    emitChange(
+    emitOrQueueChange(
       [path],
       previousState
     );
@@ -268,7 +381,7 @@ export const Store = (() => {
 
     touchMeta(state);
 
-    emitChange(
+    emitOrQueueChange(
       collectChangedPaths(
         partialState
       ),
@@ -340,7 +453,7 @@ export const Store = (() => {
 
     touchMeta(state);
 
-    emitChange(
+    emitOrQueueChange(
       [path],
       previousState
     );
@@ -372,7 +485,7 @@ export const Store = (() => {
 
     touchMeta(state);
 
-    emitChange(
+    emitOrQueueChange(
       [
         "app",
         "session",
@@ -387,6 +500,67 @@ export const Store = (() => {
     return shallowCloneRoot(
       state
     );
+  }
+
+  function beginBatch() {
+    startBatchIfNeeded();
+
+    AppCore?.events?.emit?.(
+      "store:batch:start",
+      {
+        depth: batchDepth,
+      }
+    );
+
+    return batchDepth;
+  }
+
+  function endBatch() {
+    if (batchDepth === 0) {
+      return false;
+    }
+
+    batchDepth -= 1;
+
+    if (batchDepth > 0) {
+      return false;
+    }
+
+    return flushBatchIfReady();
+  }
+
+  function withBatch(fn) {
+    if (!isFunction(fn)) {
+      throw new Error(
+        "withBatch(fn) requiere una función"
+      );
+    }
+
+    beginBatch();
+
+    let result;
+
+    try {
+      result = fn(api);
+    } catch (error) {
+      endBatch();
+      throw error;
+    }
+
+    if (
+      result &&
+      typeof result.then ===
+        "function"
+    ) {
+      return result.finally(
+        () => {
+          endBatch();
+        }
+      );
+    }
+
+    endBatch();
+    return result;
   }
 
   /* =========================================================
@@ -480,6 +654,13 @@ export const Store = (() => {
 
     initialized = true;
 
+    AppCore?.events?.emit?.(
+      "store:init",
+      {
+        initialized: true,
+      }
+    );
+
     AppCore.utils.log(
       "Store inicializado correctamente.",
       {
@@ -514,9 +695,36 @@ export const Store = (() => {
     keyListeners.clear();
     selectorListeners.clear();
 
+    batchDepth = 0;
+    batchPreviousState =
+      null;
+    batchChangedPaths.clear();
+
     initialized = false;
 
+    AppCore?.events?.emit?.(
+      "store:destroy",
+      {
+        initialized: false,
+      }
+    );
+
     return true;
+  }
+
+  function getDiagnostics() {
+    return {
+      initialized,
+      listeners:
+        listeners.size,
+      keyListeners:
+        keyListeners.size,
+      selectorListeners:
+        selectorListeners.size,
+      batchDepth,
+      batchedPaths:
+        batchChangedPaths.size,
+    };
   }
 
   /* =========================================================
@@ -534,6 +742,9 @@ export const Store = (() => {
     update,
     remove,
     reset,
+    beginBatch,
+    endBatch,
+    withBatch,
 
     snapshot,
     select,
@@ -541,6 +752,8 @@ export const Store = (() => {
     subscribe,
     subscribeKey,
     subscribeSelector,
+
+    getDiagnostics,
 
     selectors,
     actions,

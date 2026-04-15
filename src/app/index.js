@@ -11,17 +11,15 @@
 
    FIX CRÍTICO:
    - restaurar sesión ANTES del primer render
-   - no cargar dark por defecto en loader
-   - aplicar theme real ANTES de mostrar loader
-   - evitar pintar rutas protegidas sin auth resuelta
-   - no marcar app ready antes de tiempo
+   - aplicar theme real antes loader
+   - evitar paint login/protected incorrecto
+   - no marcar ready antes de tiempo
 
-   HARDENING:
+   HARDENING PRO:
    - boot serializado
    - finalize único
-   - render inicial await real
-   - limpieza robusta en reboot
-   - guards de módulos idempotentes
+   - reboot limpio
+   - tolerancia total a fallos parciales
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -79,7 +77,6 @@ import {
 import { warmup } from "./warmup.js";
 
 import {
-  navigateAfterSessionRestore,
   restoreSessionInBackground,
 } from "./session.js";
 
@@ -93,9 +90,6 @@ import { bindAppEvents } from "./events.js";
 export const App = (() => {
   "use strict";
 
-  /* =========================================================
-     INTERNAL STATE
-  ========================================================= */
   const state = {
     booted: false,
     booting: false,
@@ -103,27 +97,25 @@ export const App = (() => {
     servicesInitialized: false,
     storeInitialized: false,
 
-    routerConfigured: false,
-    routerBound: false,
-
-    uiInitialized: false,
-    i18nInitialized: false,
-
     bootFailsafeTimer: null,
     sessionRestorePromise: null,
-
     bootPromise: null,
   };
 
   /* =========================================================
      HELPERS
   ========================================================= */
+
+  function safeLog(...args) {
+    try {
+      AppCore?.utils?.log?.(...args);
+    } catch {}
+  }
+
   function safeWarn(...args) {
     try {
       AppCore?.utils?.warn?.(...args);
-    } catch {
-      console.warn(...args);
-    }
+    } catch {}
   }
 
   function safeError(...args) {
@@ -134,21 +126,18 @@ export const App = (() => {
     }
   }
 
-  function safeSetState(patch = {}) {
+  function safeEmit(name, payload = {}) {
     try {
-      AppCore?.setState?.(patch);
+      AppCore?.events?.emit?.(
+        name,
+        payload
+      );
     } catch {}
   }
 
   function safeSetError(error = null) {
     try {
       AppCore?.setError?.(error);
-    } catch {}
-  }
-
-  function safeEmit(eventName, payload = {}) {
-    try {
-      AppCore?.events?.emit?.(eventName, payload);
     } catch {}
   }
 
@@ -164,175 +153,152 @@ export const App = (() => {
       booting: state.booting,
     });
 
-    safeSetState({
+    AppCore?.setState?.({
       booted: state.booted,
       booting: state.booting,
     });
   }
 
-  function clearTransientBootState() {
-    state.sessionRestorePromise = null;
-    clearBootFailsafeTimer(state);
-  }
-
-  /* =========================================================
-     PREBOOT THEME FIX
-     - evita flash dark inicial
-     - aplica tema real antes loader
-  ========================================================= */
   function applyThemeBeforeLoader() {
     try {
-      const storageKeys = [
-        "onion_theme",
-        "onion:theme",
-        "theme",
-      ];
+      const html =
+        document.documentElement;
 
-      let savedTheme = null;
+      const saved =
+        localStorage.getItem(
+          "onion:theme"
+        ) ||
+        localStorage.getItem(
+          "theme"
+        );
 
-      for (const key of storageKeys) {
-        const value = localStorage.getItem(key);
+      const theme =
+        saved === "light"
+          ? "light"
+          : saved === "dark"
+            ? "dark"
+            : (
+                window.matchMedia &&
+                window.matchMedia(
+                  "(prefers-color-scheme: light)"
+                ).matches
+              )
+              ? "light"
+              : "dark";
 
-        if (value === "dark" || value === "light") {
-          savedTheme = value;
-          break;
-        }
-      }
-
-      if (!savedTheme) {
-        savedTheme =
-          window.matchMedia &&
-          window.matchMedia("(prefers-color-scheme: light)").matches
-            ? "light"
-            : "dark";
-      }
-
-      document.documentElement.setAttribute(
+      html.setAttribute(
         "data-theme",
-        savedTheme
+        theme
       );
 
-      document.body?.setAttribute(
-        "data-theme",
-        savedTheme
+      AppCore?.setTheme?.(
+        theme
       );
-
-      if (typeof AppCore?.setTheme === "function") {
-        AppCore.setTheme(savedTheme);
-      } else {
-        safeSetState({
-          theme: savedTheme,
-        });
-      }
-    } catch (error) {
-      safeWarn("Theme preboot fallback error:", error);
-    }
+    } catch {}
   }
 
   /* =========================================================
-     CORE
+     INIT BLOCKS
   ========================================================= */
+
   async function initCore() {
     await AppCore.init();
   }
 
-  /* =========================================================
-     SERVICES
-  ========================================================= */
   function initServices() {
-    if (!state.servicesInitialized) {
-      if (typeof Http?.init === "function") {
-        Http.init();
-      }
+    if (
+      !state.servicesInitialized
+    ) {
+      Http?.init?.();
 
-      state.servicesInitialized = true;
+      state.servicesInitialized =
+        true;
     }
 
-    if (!AppCore.modules.has("http")) {
-      AppCore.modules.register("http", Http);
-    }
-  }
-
-  /* =========================================================
-     STORE / AUTH / ROUTER REGISTRY
-  ========================================================= */
-  function initStore() {
-    if (!state.storeInitialized) {
-      if (typeof Store?.init === "function") {
-        Store.init();
-      }
-
-      state.storeInitialized = true;
-    }
-
-    if (!AppCore.modules.has("store")) {
-      AppCore.modules.register("store", Store);
-    }
-
-    if (!AppCore.modules.has("auth")) {
-      AppCore.modules.register("auth", Auth);
-    }
-
-    if (!AppCore.modules.has("router")) {
-      AppCore.modules.register("router", Router);
-    }
-  }
-
-  /* =========================================================
-     ROUTER
-  ========================================================= */
-  function initRouter() {
-    configureRouter({
-      Router,
-      AppCore,
-      Auth,
-      state,
-    });
-
-    bindRouter({
-      Router,
-      state,
-    });
-  }
-
-  /* =========================================================
-     SESSION RESTORE
-  ========================================================= */
-  async function restoreSessionBeforeRender() {
-    try {
-      state.sessionRestorePromise = Promise.resolve(
-        restoreSessionInBackground({
-          AppCore,
-          Auth,
-          Router,
-          Toast,
-          state,
-          syncUserUI,
-          warmup,
-          navigateAfterSessionRestore,
-
-          applyPostRenderLoaderPolicy: () =>
-            applyPostRenderLoaderPolicy({
-              AppCore,
-              Router,
-              hideLoader,
-            }),
-        })
+    if (
+      !AppCore.modules.has(
+        "http"
+      )
+    ) {
+      AppCore.modules.register(
+        "http",
+        Http
       );
-
-      await state.sessionRestorePromise;
-    } catch (error) {
-      safeWarn("restoreSession falló durante boot.", error);
-    } finally {
-      state.sessionRestorePromise = null;
     }
   }
 
-  /* =========================================================
-     FINALIZE
-  ========================================================= */
+  function initStore() {
+    if (
+      !state.storeInitialized
+    ) {
+      Store?.init?.();
+
+      state.storeInitialized =
+        true;
+    }
+
+    if (
+      !AppCore.modules.has(
+        "store"
+      )
+    ) {
+      AppCore.modules.register(
+        "store",
+        Store
+      );
+    }
+
+    if (
+      !AppCore.modules.has(
+        "auth"
+      )
+    ) {
+      AppCore.modules.register(
+        "auth",
+        Auth
+      );
+    }
+
+    if (
+      !AppCore.modules.has(
+        "router"
+      )
+    ) {
+      AppCore.modules.register(
+        "router",
+        Router
+      );
+    }
+  }
+
+  function initRouter() {
+    configureRouter();
+    bindRouter();
+  }
+
+  async function restoreSessionBeforeRender() {
+    state.sessionRestorePromise =
+      restoreSessionInBackground({
+        AppCore,
+        Auth,
+        Router,
+        state,
+        syncUserUI,
+        warmup,
+      });
+
+    try {
+      await state.sessionRestorePromise;
+    } finally {
+      state.sessionRestorePromise =
+        null;
+    }
+  }
+
   function finalizeBoot() {
-    clearBootFailsafeTimer(state);
+    clearBootFailsafeTimer(
+      state
+    );
 
     markStoreBootState(Store, {
       ready: true,
@@ -351,33 +317,40 @@ export const App = (() => {
 
     hideLoader(AppCore);
 
-    safeEmit("app:ready", {
-      route: AppCore.state.route,
-      publicPath: AppCore.state.publicPath,
-      user: AppCore.state.user,
-      authenticated: AppCore.state.authenticated,
-      lang: AppCore.state.lang,
-    });
+    safeEmit(
+      "app:ready",
+      {
+        route:
+          AppCore.state.route,
+        authenticated:
+          AppCore.state.authenticated,
+        lang:
+          AppCore.state.lang,
+      }
+    );
+
+    safeLog(
+      "App ready."
+    );
   }
 
   /* =========================================================
      BOOT
   ========================================================= */
+
   async function doBoot() {
-    setBootFlags({
-      booted: false,
-      booting: true,
-    });
-
-    clearBootFailsafeTimer(state);
-
     try {
-      /* ======================
-         FIX CRÍTICO
-      ====================== */
-      applyThemeBeforeLoader();
+      setBootFlags({
+        booted: false,
+        booting: true,
+      });
 
       clearScope(AppCore);
+      clearBootFailsafeTimer(
+        state
+      );
+
+      applyThemeBeforeLoader();
 
       await initCore();
 
@@ -390,11 +363,13 @@ export const App = (() => {
         state,
       });
 
+      syncLangState(
+        AppCore,
+        I18n
+      );
+
       safeSetError(null);
 
-      /* ======================
-         LOADER YA CON TEMA REAL
-      ====================== */
       showLoader(AppCore);
 
       armBootFailsafeLoader({
@@ -403,7 +378,8 @@ export const App = (() => {
         hideLoader,
       });
 
-      const scope = ensureScope(AppCore);
+      const scope =
+        ensureScope(AppCore);
 
       bindGlobalErrorHandlers({
         AppCore,
@@ -417,32 +393,29 @@ export const App = (() => {
         Toast,
         scope,
         syncUserUI,
-
-        rerenderCurrentRoute: () =>
-          rerenderCurrentRoute({
-            AppCore,
-            Router,
-            I18n,
-
-            applyPostRenderLoaderPolicy: () =>
-              applyPostRenderLoaderPolicy({
-                AppCore,
-                Router,
-                hideLoader,
-              }),
-
-            syncUserUI,
-          }),
-
-        applyPostRenderLoaderPolicy: () =>
-          applyPostRenderLoaderPolicy({
-            AppCore,
-            Router,
-            hideLoader,
-          }),
+        rerenderCurrentRoute:
+          () =>
+            rerenderCurrentRoute({
+              AppCore,
+              Router,
+              I18n,
+              syncUserUI,
+              applyPostRenderLoaderPolicy:
+                () =>
+                  applyPostRenderLoaderPolicy({
+                    AppCore,
+                    Router,
+                    hideLoader,
+                  }),
+            }),
+        applyPostRenderLoaderPolicy:
+          () =>
+            applyPostRenderLoaderPolicy({
+              AppCore,
+              Router,
+              hideLoader,
+            }),
       });
-
-      syncLangState(AppCore, I18n);
 
       initRouter();
 
@@ -454,41 +427,33 @@ export const App = (() => {
         state,
       });
 
+      /* CRÍTICO */
       await restoreSessionBeforeRender();
 
-      await Promise.resolve(
-        renderInitialRoute({
-          AppCore,
-          Router,
-
-          applyPostRenderLoaderPolicy: () =>
-            applyPostRenderLoaderPolicy({
-              AppCore,
-              Router,
-              hideLoader,
-            }),
-        })
-      );
+      await renderInitialRoute();
 
       finalizeBoot();
 
       return api;
     } catch (error) {
-      clearBootFailsafeTimer(state);
+      safeError(
+        "Boot error:",
+        error
+      );
 
-      markStoreBootState(Store, {
-        ready: false,
-        booted: false,
-      });
+      hideLoader(AppCore);
 
       setBootFlags({
         booted: false,
         booting: false,
       });
 
-      safeSetError(error);
+      markStoreBootState(Store, {
+        ready: false,
+        booted: false,
+      });
 
-      hideLoader(AppCore);
+      safeSetError(error);
 
       renderBootError({
         AppCore,
@@ -500,26 +465,19 @@ export const App = (() => {
         hideLoader,
       });
 
-      safeError("Boot error:", error);
-
       return api;
     } finally {
-      clearTransientBootState();
+      clearBootFailsafeTimer(
+        state
+      );
 
-      if (!state.booted) {
-        setBootFlags({
-          booted: false,
-          booting: false,
-        });
-      }
+      state.bootPromise = null;
 
       applyPostRenderLoaderPolicy({
         AppCore,
         Router,
         hideLoader,
       });
-
-      state.bootPromise = null;
     }
   }
 
@@ -532,7 +490,8 @@ export const App = (() => {
       return state.bootPromise;
     }
 
-    state.bootPromise = doBoot();
+    state.bootPromise =
+      doBoot();
 
     return state.bootPromise;
   }
@@ -540,30 +499,20 @@ export const App = (() => {
   /* =========================================================
      REBOOT
   ========================================================= */
-  async function reboot(options = {}) {
-    const {
-      preserveError = false,
-    } = options;
+
+  async function reboot() {
+    clearScope(AppCore);
+
+    clearBootFailsafeTimer(
+      state
+    );
 
     state.booted = false;
     state.booting = false;
-
     state.servicesInitialized = false;
     state.storeInitialized = false;
-    state.routerConfigured = false;
-    state.routerBound = false;
-    state.uiInitialized = false;
-    state.i18nInitialized = false;
     state.sessionRestorePromise = null;
     state.bootPromise = null;
-
-    clearBootFailsafeTimer(state);
-
-    clearScope(AppCore);
-
-    if (!preserveError) {
-      safeSetError(null);
-    }
 
     markStoreBootState(Store, {
       ready: false,
@@ -580,9 +529,6 @@ export const App = (() => {
     return boot();
   }
 
-  /* =========================================================
-     API
-  ========================================================= */
   const api = {
     boot,
     reboot,

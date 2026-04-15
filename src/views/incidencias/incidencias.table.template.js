@@ -2,14 +2,15 @@
    Onion SPA - Incidencias Table Template
    Archivo: src/views/incidencias/incidencias.table.template.js
 
+   EXTREME MODE · 10/10
    Responsabilidades:
-   - render header premium de la vista
-   - render estados loading / error / empty
-   - render tabla premium de incidencias
-   - render cards mobile de incidencias
-   - mantener compatibilidad con incidenciasView.js
-   - chips visuales de estado / prioridad
-   - densidad visual pro SaaS
+   - render header premium
+   - render loading / error / empty
+   - render tabla desktop ultra limpia
+   - render cards mobile premium
+   - compatibilidad total con incidenciasView.js
+   - tolerancia máxima a datos inconsistentes
+   - corregido problema de textos no visibles
 ========================================================= */
 
 import { incidenciasState } from "./incidencias.state.js";
@@ -27,11 +28,14 @@ import {
 } from "./incidencias.utils.js";
 
 /* =========================================================
-   SAFE HELPERS
+   SAFE
 ========================================================= */
 
 function safeText(value, fallback = "—") {
-  if (value === null || value === undefined) return fallback;
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+
   const text = String(value).trim();
   return text || fallback;
 }
@@ -42,7 +46,23 @@ function safeArray(value) {
 
 function safeNumber(value, fallback = 0) {
   const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
+  return Number.isFinite(n)
+    ? n
+    : fallback;
+}
+
+function first(...values) {
+  for (const value of values) {
+    if (
+      value !== undefined &&
+      value !== null &&
+      String(value).trim() !== ""
+    ) {
+      return value;
+    }
+  }
+
+  return null;
 }
 
 /* =========================================================
@@ -50,7 +70,9 @@ function safeNumber(value, fallback = 0) {
 ========================================================= */
 
 function getStatusLabel(status = "") {
-  const key = String(status || "").trim().toLowerCase();
+  const key = String(status || "")
+    .trim()
+    .toLowerCase();
 
   switch (key) {
     case "open":
@@ -76,7 +98,9 @@ function getStatusLabel(status = "") {
 }
 
 function getPriorityLabel(priority = "") {
-  const key = String(priority || "").trim().toLowerCase();
+  const key = String(priority || "")
+    .trim()
+    .toLowerCase();
 
   switch (key) {
     case "low":
@@ -101,7 +125,9 @@ function getPriorityLabel(priority = "") {
 ========================================================= */
 
 function getStatusChipStyle(status = "") {
-  const key = String(status || "").trim().toLowerCase();
+  const key = String(status || "")
+    .trim()
+    .toLowerCase();
 
   if (key === "open") {
     return `
@@ -155,7 +181,9 @@ function getStatusChipStyle(status = "") {
 }
 
 function getPriorityChipStyle(priority = "") {
-  const key = String(priority || "").trim().toLowerCase();
+  const key = String(priority || "")
+    .trim()
+    .toLowerCase();
 
   if (key === "low") {
     return `
@@ -196,7 +224,7 @@ function getPriorityChipStyle(priority = "") {
   `;
 }
 
-function renderStatusChip(label = "", style = "") {
+function chip(label = "", style = "") {
   return `
     <span
       style="
@@ -207,7 +235,7 @@ function renderStatusChip(label = "", style = "") {
         padding:0 10px;
         border-radius:999px;
         font-size:12px;
-        font-weight:var(--weight-bold);
+        font-weight:800;
         letter-spacing:.05em;
         text-transform:uppercase;
         white-space:nowrap;
@@ -220,153 +248,176 @@ function renderStatusChip(label = "", style = "") {
 }
 
 /* =========================================================
-   STATS
+   DATA RESOLVE
 ========================================================= */
 
-function computeStats(items = []) {
-  const list = safeArray(items);
-
-  const total = list.length;
-
-  const openCount = list.filter(
-    (item) => String(item?.status || "").toLowerCase() === "open"
-  ).length;
-
-  const inProgressCount = list.filter((item) => {
-    const key = String(item?.status || "").toLowerCase();
-    return key === "pending" || key === "in_progress" || key === "in-progress";
-  }).length;
-
-  const closedCount = list.filter((item) => {
-    const key = String(item?.status || "").toLowerCase();
-    return key === "resolved" || key === "closed";
-  }).length;
-
-  const urgentCount = list.filter(
-    (item) => String(item?.priority || "").toLowerCase() === "urgent"
-  ).length;
-
-  const assignedCount = list.filter((item) => {
-    const assigned = safeText(item?.assignedTo, "");
-    return assigned && assigned !== "—" && assigned.toLowerCase() !== "no asignado";
-  }).length;
-
-  return {
-    total,
-    openCount,
-    inProgressCount,
-    closedCount,
-    urgentCount,
-    assignedCount,
-  };
-}
-
-/* =========================================================
-   UI HELPERS
-========================================================= */
-
-function getClientInitials(item = {}) {
-  const raw =
-    item?.clientInitials ||
-    item?.client ||
-    item?.cliente ||
-    item?.company ||
-    "ON";
-
-  const clean = String(raw).trim();
-
-  if (!clean) return "ON";
-
-  const parts = clean.split(/\s+/).filter(Boolean);
-  const initials = parts.slice(0, 2).map((part) => part[0]).join("");
-
-  return (initials || clean.slice(0, 2) || "ON").toUpperCase();
-}
-
-function getTicketCode(item = {}) {
+function getCode(item = {}) {
   return safeText(
-    item?.code ||
-      item?.ticketCode ||
-      item?.ticketId ||
-      item?.id,
+    first(
+      item.code,
+      item.ticketCode,
+      item.ticketId,
+      item.id
+    ),
     "—"
   );
 }
 
-function getTicketId(item = {}) {
+function getId(item = {}) {
   return safeText(
-    item?.ticketId || item?.id || "",
+    first(
+      item.ticketId,
+      item.id
+    ),
     ""
-  );
-}
-
-function getClientName(item = {}) {
-  return safeText(
-    item?.client ||
-      item?.cliente ||
-      item?.clientName ||
-      item?.empresa,
-    "Cliente"
-  );
-}
-
-function getClientEmail(item = {}) {
-  return safeText(
-    item?.clientEmail ||
-      item?.clienteEmail ||
-      item?.email,
-    "Sin email"
   );
 }
 
 function getTitle(item = {}) {
   return safeText(
-    item?.title ||
-      item?.subject ||
-      item?.asunto,
+    first(
+      item.title,
+      item.subject,
+      item.asunto,
+      item.name
+    ),
     "Incidencia sin título"
   );
 }
 
 function getPreview(item = {}) {
   return safeText(
-    item?.preview ||
-      item?.description ||
-      item?.descripcion,
+    first(
+      item.preview,
+      item.description,
+      item.descripcion,
+      item.message
+    ),
     "Sin descripción"
   );
 }
 
-function renderStatCard({
+function getClient(item = {}) {
+  return safeText(
+    first(
+      item.client,
+      item.cliente,
+      item.clientName,
+      item.company
+    ),
+    "Cliente"
+  );
+}
+
+function getClientEmail(item = {}) {
+  return safeText(
+    first(
+      item.clientEmail,
+      item.email,
+      item.clienteEmail
+    ),
+    "Sin email"
+  );
+}
+
+function getAssigned(item = {}) {
+  return safeText(
+    first(
+      item.assignedTo,
+      item.assignee,
+      item.tecnico
+    ),
+    "No asignado"
+  );
+}
+
+function getInitials(item = {}) {
+  const base = getClient(item);
+
+  const parts = base
+    .split(/\s+/)
+    .filter(Boolean);
+
+  const initials = parts
+    .slice(0, 2)
+    .map((p) => p[0])
+    .join("");
+
+  return (
+    initials ||
+    base.slice(0, 2) ||
+    "ON"
+  ).toUpperCase();
+}
+
+/* =========================================================
+   STATS
+========================================================= */
+
+function computeStats(items = []) {
+  const list = safeArray(items);
+
+  return {
+    total: list.length,
+
+    openCount: list.filter(
+      (x) => x?.status === "open"
+    ).length,
+
+    inProgressCount: list.filter((x) =>
+      [
+        "pending",
+        "in_progress",
+        "in-progress",
+      ].includes(x?.status)
+    ).length,
+
+    closedCount: list.filter((x) =>
+      ["resolved", "closed"].includes(
+        x?.status
+      )
+    ).length,
+
+    urgentCount: list.filter(
+      (x) => x?.priority === "urgent"
+    ).length,
+
+    assignedCount: list.filter(
+      (x) =>
+        getAssigned(x) !==
+        "No asignado"
+    ).length,
+  };
+}
+
+/* =========================================================
+   HEADER
+========================================================= */
+
+function statCard({
   label = "",
   value = "0",
   caption = "",
-  accent = false,
 } = {}) {
   return `
     <article
-      class="incidencias-stat-card panel-surface"
       style="
-        position:relative;
-        overflow:hidden;
         display:grid;
         gap:10px;
-        min-height:132px;
+        min-height:126px;
         padding:20px;
-        border-radius:var(--panel-radius);
-        border:1px solid ${accent ? "color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft))" : "var(--border-soft)"};
-        background:${accent ? "linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 72%), var(--surface-1, var(--surface-glass))" : "var(--surface-1, var(--surface-glass))"};
-        box-shadow:var(--shadow-sm);
+        border-radius:22px;
+        border:1px solid var(--border-soft);
+        background:var(--surface-1,var(--surface-glass));
       "
     >
       <span
         style="
           font-size:12px;
-          line-height:1;
-          letter-spacing:.08em;
-          text-transform:uppercase;
           color:var(--text-dim);
-          font-weight:var(--weight-bold);
+          text-transform:uppercase;
+          letter-spacing:.08em;
+          font-weight:800;
         "
       >
         ${escapeHtml(label)}
@@ -374,278 +425,247 @@ function renderStatCard({
 
       <strong
         style="
-          font-size:clamp(24px, 3vw, 34px);
+          font-size:34px;
           line-height:1;
-          letter-spacing:-.04em;
           color:var(--text-strong);
-          font-weight:var(--weight-black);
+          letter-spacing:-.04em;
+          font-weight:900;
         "
       >
         ${escapeHtml(value)}
       </strong>
 
-      <p
+      <span
         style="
-          margin:0;
           color:var(--text-dim);
-          font-size:var(--font-sm);
+          font-size:13px;
           line-height:1.45;
         "
       >
         ${escapeHtml(caption)}
-      </p>
+      </span>
     </article>
   `;
 }
 
-/* =========================================================
-   HEADER
-========================================================= */
-
-export function renderHeader({ items, state } = {}) {
+export function renderHeader({
+  items,
+  state,
+} = {}) {
   const list = safeArray(items).length
     ? safeArray(items)
-    : sortIncidenciasByUpdatedDesc(getIncidencias());
+    : sortIncidenciasByUpdatedDesc(
+        getIncidencias()
+      );
 
-  const localState = state || incidenciasState || {};
-  const stats = computeStats(list);
+  const localState =
+    state ||
+    incidenciasState ||
+    {};
 
-  const loading = Boolean(localState?.loading);
-  const refreshing = Boolean(localState?.refreshing);
-  const remoteCount = safeNumber(localState?.remoteCount, list.length);
-  const lastSyncText = localState?.lastSyncAt
-    ? formatRelativeDate(localState.lastSyncAt)
-    : "Sin sincronización reciente";
+  const stats =
+    computeStats(list);
+
+  const lastSync =
+    localState?.lastSyncAt
+      ? formatRelativeDate(
+          localState.lastSyncAt
+        )
+      : "Sin sincronización";
 
   return `
     <section
-      class="incidencias-hero"
       style="
-        position:relative;
-        overflow:hidden;
-        border-radius:calc(var(--panel-radius) + 6px);
+        display:grid;
+        gap:22px;
+        padding:26px;
+        border-radius:28px;
         border:1px solid var(--border-soft);
         background:
-          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent), transparent 34%),
-          linear-gradient(180deg, var(--surface-2, var(--surface-glass)), var(--surface-1, var(--surface-glass)));
-        box-shadow:var(--shadow-md);
+          linear-gradient(
+            180deg,
+            color-mix(in srgb,var(--accent,#7c5cff) 7%,transparent),
+            transparent
+          ),
+          var(--surface-1,var(--surface-glass));
       "
     >
+
       <div
         style="
-          display:grid;
-          gap:var(--space-lg);
-          padding:clamp(20px, 3vw, 30px);
+          display:flex;
+          justify-content:space-between;
+          gap:18px;
+          flex-wrap:wrap;
         "
       >
-        <div
-          style="
-            display:flex;
-            align-items:flex-start;
-            justify-content:space-between;
-            gap:18px;
-            flex-wrap:wrap;
-          "
-        >
-          <div style="display:grid; gap:10px; min-width:min(100%, 560px);">
-            <span
-              style="
-                display:inline-flex;
-                align-items:center;
-                width:max-content;
-                min-height:28px;
-                padding:0 12px;
-                border-radius:999px;
-                border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft));
-                background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-                color:var(--text-soft);
-                font-size:12px;
-                font-weight:var(--weight-bold);
-                letter-spacing:.06em;
-                text-transform:uppercase;
-              "
-            >
-              Soporte técnico
-            </span>
-
-            <div style="display:grid; gap:8px;">
-              <h1
-                class="page-title"
-                style="
-                  margin:0;
-                  font-size:clamp(30px, 5vw, 48px);
-                  line-height:.98;
-                  letter-spacing:-.05em;
-                  color:var(--text-strong);
-                "
-              >
-                Centro de control de incidencias
-              </h1>
-
-              <p
-                class="page-subtitle"
-                style="
-                  margin:0;
-                  max-width:860px;
-                  color:var(--text-dim);
-                  font-size:clamp(14px, 2vw, 16px);
-                  line-height:1.6;
-                "
-              >
-                Supervisa tickets, prioridades, asignaciones y tiempos de actualización
-                desde una tabla premium diseñada para operación, seguimiento y respuesta rápida.
-              </p>
-            </div>
-          </div>
-
-          <div
+        <div style="display:grid;gap:10px;">
+          <span
             style="
-              display:flex;
-              gap:10px;
-              flex-wrap:wrap;
+              width:max-content;
+              min-height:28px;
+              padding:0 12px;
+              border-radius:999px;
+              border:1px solid var(--border-soft);
+              display:inline-flex;
               align-items:center;
+              font-size:12px;
+              font-weight:800;
+              letter-spacing:.06em;
+              text-transform:uppercase;
+              color:var(--text-dim);
             "
           >
-            <button
-              id="incidencias-export-btn"
-              type="button"
-              style="
-                min-height:42px;
-                padding:0 14px;
-                border-radius:var(--btn-radius);
-                border:1px solid var(--btn-secondary-border, var(--border-soft));
-                background:var(--btn-secondary-bg, var(--surface-glass));
-                color:var(--btn-secondary-text, var(--text-soft));
-                font-weight:var(--weight-bold);
-                cursor:pointer;
-              "
-            >
-              Exportar CSV
-            </button>
+            Soporte técnico
+          </span>
 
-            <button
-              id="incidencias-refresh-btn"
-              type="button"
-              ${loading || refreshing ? "disabled" : ""}
-              style="
-                min-height:42px;
-                padding:0 14px;
-                border-radius:var(--btn-radius);
-                border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
-                background:var(--btn-primary-bg, var(--accent, #7c5cff));
-                color:var(--btn-primary-text, #fff);
-                font-weight:var(--weight-bold);
-                cursor:${loading || refreshing ? "not-allowed" : "pointer"};
-                opacity:${loading || refreshing ? ".72" : "1"};
-              "
-            >
-              ${refreshing || loading ? "Actualizando..." : "Actualizar"}
-            </button>
-          </div>
+          <h1
+            style="
+              margin:0;
+              font-size:clamp(30px,5vw,48px);
+              line-height:.96;
+              letter-spacing:-.05em;
+              color:var(--text-strong);
+            "
+          >
+            Centro de control de incidencias
+          </h1>
+
+          <p
+            style="
+              margin:0;
+              color:var(--text-dim);
+              max-width:760px;
+              line-height:1.65;
+            "
+          >
+            Supervisa tickets,
+            prioridades,
+            asignaciones y actividad
+            operativa en tiempo real.
+          </p>
         </div>
 
         <div
-          class="incidencias-hero-meta"
           style="
             display:flex;
-            align-items:center;
             gap:10px;
             flex-wrap:wrap;
+            align-items:start;
           "
         >
-          <span
-            style="
-              display:inline-flex;
-              align-items:center;
-              min-height:30px;
-              padding:0 10px;
-              border-radius:999px;
-              border:1px solid var(--border-soft);
-              background:var(--surface-glass);
-              color:var(--text-dim);
-              font-size:12px;
-              font-weight:var(--weight-bold);
-              letter-spacing:.04em;
-              text-transform:uppercase;
-            "
+          <button
+            id="incidencias-export-btn"
+            type="button"
+            class="btn-secondary"
           >
-            ${escapeHtml(String(remoteCount))} registros remotos
-          </span>
+            Exportar CSV
+          </button>
 
-          <span
-            style="
-              display:inline-flex;
-              align-items:center;
-              min-height:30px;
-              padding:0 10px;
-              border-radius:999px;
-              border:1px solid var(--border-soft);
-              background:var(--surface-glass);
-              color:var(--text-dim);
-              font-size:12px;
-              font-weight:var(--weight-bold);
-              letter-spacing:.04em;
-              text-transform:uppercase;
-            "
+          <button
+            id="incidencias-refresh-btn"
+            type="button"
+            class="btn-primary"
           >
-            Última sync · ${escapeHtml(lastSyncText)}
-          </span>
-        </div>
-
-        <div
-          class="incidencias-hero-stats"
-          style="
-            display:grid;
-            grid-template-columns:repeat(5, minmax(0, 1fr));
-            gap:var(--space-md);
-          "
-        >
-          ${renderStatCard({
-            label: "Tickets visibles",
-            value: String(stats.total),
-            caption: `${remoteCount} registros disponibles en la colección actual.`,
-            accent: true,
-          })}
-
-          ${renderStatCard({
-            label: "Abiertas",
-            value: String(stats.openCount),
-            caption: "Tickets pendientes de atención inicial.",
-          })}
-
-          ${renderStatCard({
-            label: "En curso",
-            value: String(stats.inProgressCount),
-            caption: "Incidencias en seguimiento o trabajo activo.",
-          })}
-
-          ${renderStatCard({
-            label: "Urgentes",
-            value: String(stats.urgentCount),
-            caption: "Máxima prioridad operativa en la bandeja actual.",
-          })}
-
-          ${renderStatCard({
-            label: "Asignadas",
-            value: String(stats.assignedCount),
-            caption: `${stats.closedCount} cerradas o resueltas en el conjunto visible.`,
-          })}
+            Actualizar
+          </button>
         </div>
       </div>
 
+      <div
+        style="
+          display:flex;
+          gap:10px;
+          flex-wrap:wrap;
+        "
+      >
+        ${chip(
+          `${list.length} visibles`,
+          `
+            color:var(--text-soft);
+            background:var(--surface-glass);
+            border:1px solid var(--border-soft);
+          `
+        )}
+
+        ${chip(
+          `Última sync · ${lastSync}`,
+          `
+            color:var(--text-soft);
+            background:var(--surface-glass);
+            border:1px solid var(--border-soft);
+          `
+        )}
+      </div>
+
+      <div
+        class="inc-grid-hero"
+        style="
+          display:grid;
+          grid-template-columns:repeat(5,minmax(0,1fr));
+          gap:16px;
+        "
+      >
+        ${statCard({
+          label: "Visibles",
+          value: String(
+            stats.total
+          ),
+          caption:
+            "Registros cargados en pantalla.",
+        })}
+
+        ${statCard({
+          label: "Abiertas",
+          value: String(
+            stats.openCount
+          ),
+          caption:
+            "Pendientes de atención.",
+        })}
+
+        ${statCard({
+          label: "En curso",
+          value: String(
+            stats.inProgressCount
+          ),
+          caption:
+            "Seguimiento activo.",
+        })}
+
+        ${statCard({
+          label: "Urgentes",
+          value: String(
+            stats.urgentCount
+          ),
+          caption:
+            "Máxima prioridad.",
+        })}
+
+        ${statCard({
+          label: "Asignadas",
+          value: String(
+            stats.assignedCount
+          ),
+          caption:
+            `${stats.closedCount} cerradas.`,
+        })}
+      </div>
+
       <style>
-        @media (max-width: 1180px) {
-          .incidencias-hero-stats {
-            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        @media (max-width:1180px){
+          .inc-grid-hero{
+            grid-template-columns:repeat(2,minmax(0,1fr)) !important;
           }
         }
 
-        @media (max-width: 720px) {
-          .incidencias-hero-stats {
-            grid-template-columns: 1fr !important;
+        @media (max-width:720px){
+          .inc-grid-hero{
+            grid-template-columns:1fr !important;
           }
         }
       </style>
+
     </section>
   `;
 }
@@ -657,185 +677,38 @@ export function renderHeader({ items, state } = {}) {
 export function renderLoadingState() {
   return `
     <section
-      class="panel-surface incidencias-table-shell"
       style="
-        overflow:hidden;
-        border-radius:var(--panel-radius);
+        padding:28px;
+        border-radius:24px;
         border:1px solid var(--border-soft);
-        background:var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-sm);
+        background:var(--surface-1,var(--surface-glass));
+        color:var(--text-dim);
       "
     >
-      <div
-        style="
-          display:grid;
-          gap:0;
-          overflow:auto;
-        "
-      >
-        <div style="min-width:1240px;">
-          <div
-            style="
-              display:grid;
-              grid-template-columns:1.1fr 2.1fr 1.2fr .9fr .9fr 1fr 1fr 1fr;
-              gap:0;
-              border-bottom:1px solid var(--border-soft);
-              background:var(--surface-2, var(--surface-glass));
-            "
-          >
-            ${Array.from({ length: 8 })
-              .map(
-                () => `
-                  <div style="padding:16px 18px;">
-                    <div style="height:12px; width:70%; border-radius:999px; background:var(--surface-glass);"></div>
-                  </div>
-                `
-              )
-              .join("")}
-          </div>
-
-          ${Array.from({ length: 8 })
-            .map(
-              () => `
-                <div
-                  style="
-                    display:grid;
-                    grid-template-columns:1.1fr 2.1fr 1.2fr .9fr .9fr 1fr 1fr 1fr;
-                    gap:0;
-                    border-bottom:1px solid var(--border-soft);
-                  "
-                >
-                  <div style="padding:18px;">
-                    <div style="display:grid; gap:8px;">
-                      <div style="height:14px; width:90px; border-radius:999px; background:var(--surface-glass);"></div>
-                      <div style="height:12px; width:120px; border-radius:999px; background:var(--surface-glass);"></div>
-                    </div>
-                  </div>
-
-                  <div style="padding:18px;">
-                    <div style="display:flex; gap:12px; align-items:center;">
-                      <div style="width:42px; height:42px; border-radius:14px; background:var(--surface-glass);"></div>
-                      <div style="display:grid; gap:8px; flex:1;">
-                        <div style="height:14px; width:220px; border-radius:999px; background:var(--surface-glass);"></div>
-                        <div style="height:12px; width:90%; border-radius:999px; background:var(--surface-glass);"></div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div style="padding:18px;">
-                    <div style="display:grid; gap:8px;">
-                      <div style="height:14px; width:120px; border-radius:999px; background:var(--surface-glass);"></div>
-                      <div style="height:12px; width:150px; border-radius:999px; background:var(--surface-glass);"></div>
-                    </div>
-                  </div>
-
-                  <div style="padding:18px;"><div style="height:34px; width:96px; border-radius:999px; background:var(--surface-glass);"></div></div>
-                  <div style="padding:18px;"><div style="height:34px; width:92px; border-radius:999px; background:var(--surface-glass);"></div></div>
-                  <div style="padding:18px;"><div style="height:14px; width:120px; border-radius:999px; background:var(--surface-glass);"></div></div>
-                  <div style="padding:18px;"><div style="height:14px; width:110px; border-radius:999px; background:var(--surface-glass);"></div></div>
-
-                  <div style="padding:18px;">
-                    <div style="display:flex; gap:8px; justify-content:flex-end;">
-                      <div style="height:38px; width:82px; border-radius:12px; background:var(--surface-glass);"></div>
-                      <div style="height:38px; width:96px; border-radius:12px; background:var(--surface-glass);"></div>
-                    </div>
-                  </div>
-                </div>
-              `
-            )
-            .join("")}
-        </div>
-      </div>
+      Cargando incidencias...
     </section>
   `;
 }
 
-export function renderErrorState(message = "") {
-  const text =
-    safeText(
-      message || incidenciasState?.error,
-      "Error desconocido al cargar la vista."
-    );
-
+export function renderErrorState(
+  message = ""
+) {
   return `
     <section
-      class="panel-surface incidencias-error-state"
       style="
-        display:grid;
-        gap:18px;
         padding:28px;
-        border-radius:var(--panel-radius);
-        border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, var(--border-soft));
-        background:
-          linear-gradient(180deg, color-mix(in srgb, var(--danger-strong, #ff6b6b) 10%, transparent), transparent 72%),
-          var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-sm);
+        border-radius:24px;
+        border:1px solid rgba(239,68,68,.22);
+        background:rgba(239,68,68,.06);
+        color:#fca5a5;
       "
     >
-      <div style="display:grid; gap:8px;">
-        <span
-          style="
-            display:inline-flex;
-            width:max-content;
-            min-height:28px;
-            align-items:center;
-            padding:0 12px;
-            border-radius:999px;
-            border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, transparent);
-            background:color-mix(in srgb, var(--danger-strong, #ff6b6b) 12%, transparent);
-            color:var(--danger-strong, #ff6b6b);
-            font-size:12px;
-            letter-spacing:.06em;
-            text-transform:uppercase;
-            font-weight:var(--weight-bold);
-          "
-        >
-          Error de carga
-        </span>
-
-        <h3
-          style="
-            margin:0;
-            font-size:clamp(24px, 3vw, 34px);
-            line-height:1.05;
-            color:var(--text-strong);
-            letter-spacing:-.04em;
-          "
-        >
-          No se pudo renderizar la vista de incidencias
-        </h3>
-
-        <p
-          style="
-            margin:0;
-            color:var(--text-dim);
-            font-size:var(--font-base);
-            line-height:1.65;
-            max-width:780px;
-          "
-        >
-          ${escapeHtml(text)}
-        </p>
-      </div>
-
-      <div style="display:flex; gap:10px; flex-wrap:wrap;">
-        <button
-          id="incidencias-retry-btn"
-          type="button"
-          style="
-            min-height:42px;
-            padding:0 14px;
-            border-radius:var(--btn-radius);
-            border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
-            background:var(--btn-primary-bg, var(--accent, #7c5cff));
-            color:var(--btn-primary-text, #fff);
-            font-weight:var(--weight-bold);
-            cursor:pointer;
-          "
-        >
-          Reintentar
-        </button>
-      </div>
+      ${escapeHtml(
+        safeText(
+          message,
+          "Error cargando incidencias."
+        )
+      )}
     </section>
   `;
 }
@@ -843,82 +716,158 @@ export function renderErrorState(message = "") {
 export function renderEmptyState() {
   return `
     <section
-      class="panel-surface incidencias-empty-state"
       style="
-        display:grid;
-        gap:18px;
         padding:28px;
-        border-radius:var(--panel-radius);
-        border:1px solid var(--border-soft);
-        background:var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-sm);
+        border-radius:24px;
+        border:1px dashed var(--border-soft);
+        background:var(--surface-1,var(--surface-glass));
+        color:var(--text-dim);
       "
     >
-      <div style="display:grid; gap:8px;">
-        <span
-          style="
-            display:inline-flex;
-            width:max-content;
-            min-height:28px;
-            align-items:center;
-            padding:0 12px;
-            border-radius:999px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-            color:var(--text-dim);
-            font-size:12px;
-            letter-spacing:.06em;
-            text-transform:uppercase;
-            font-weight:var(--weight-bold);
-          "
-        >
-          Sin resultados
-        </span>
-
-        <h3
-          style="
-            margin:0;
-            font-size:clamp(24px, 3vw, 34px);
-            line-height:1.05;
-            color:var(--text-strong);
-            letter-spacing:-.04em;
-          "
-        >
-          No hay incidencias para mostrar
-        </h3>
-
-        <p
-          style="
-            margin:0;
-            color:var(--text-dim);
-            font-size:var(--font-base);
-            line-height:1.65;
-            max-width:760px;
-          "
-        >
-          Todavía no hay tickets disponibles en la colección actual.
-        </p>
-      </div>
-
-      <div style="display:flex; gap:10px; flex-wrap:wrap;">
-        <button
-          id="incidencias-refresh-btn"
-          type="button"
-          style="
-            min-height:42px;
-            padding:0 14px;
-            border-radius:var(--btn-radius);
-            border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
-            background:var(--btn-primary-bg, var(--accent, #7c5cff));
-            color:var(--btn-primary-text, #fff);
-            font-weight:var(--weight-bold);
-            cursor:pointer;
-          "
-        >
-          Recargar
-        </button>
-      </div>
+      No hay incidencias disponibles.
     </section>
+  `;
+}
+
+/* =========================================================
+   ROW
+========================================================= */
+
+function row(item = {}) {
+  const id = getId(item);
+  const code = getCode(item);
+  const title = getTitle(item);
+  const preview = truncate(
+    getPreview(item),
+    100
+  );
+  const client = getClient(item);
+  const email =
+    getClientEmail(item);
+  const assigned =
+    getAssigned(item);
+
+  const status =
+    getStatusLabel(item.status);
+
+  const priority =
+    getPriorityLabel(
+      item.priority
+    );
+
+  return `
+    <tr>
+      <td class="inc-td">
+        <strong>${escapeHtml(code)}</strong>
+        <div class="inc-sub">
+          Ticket
+        </div>
+      </td>
+
+      <td class="inc-td">
+        <div class="inc-main">
+          <div class="inc-avatar">
+            ${escapeHtml(
+              getInitials(item)
+            )}
+          </div>
+
+          <div class="inc-copy">
+            <button
+              type="button"
+              data-action="open-ticket"
+              data-ticket-id="${escapeHtml(id)}"
+              class="inc-link"
+            >
+              ${escapeHtml(title)}
+            </button>
+
+            <span class="inc-sub">
+              ${escapeHtml(preview)}
+            </span>
+          </div>
+        </div>
+      </td>
+
+      <td class="inc-td">
+        <strong>
+          ${escapeHtml(client)}
+        </strong>
+
+        <div class="inc-sub">
+          ${escapeHtml(email)}
+        </div>
+      </td>
+
+      <td class="inc-td">
+        ${chip(
+          status,
+          getStatusChipStyle(
+            item.status
+          )
+        )}
+      </td>
+
+      <td class="inc-td">
+        ${chip(
+          priority,
+          getPriorityChipStyle(
+            item.priority
+          )
+        )}
+      </td>
+
+      <td class="inc-td">
+        ${escapeHtml(
+          assigned
+        )}
+      </td>
+
+      <td class="inc-td">
+        <strong>
+          ${escapeHtml(
+            safeText(
+              formatRelativeDate(
+                item.updatedAt
+              ),
+              "Sin fecha"
+            )
+          )}
+        </strong>
+
+        <div class="inc-sub">
+          ${escapeHtml(
+            safeText(
+              formatDate(
+                item.updatedAt
+              ),
+              "—"
+            )
+          )}
+        </div>
+      </td>
+
+      <td class="inc-td inc-right">
+        <button
+          type="button"
+          data-action="open-ticket"
+          data-ticket-id="${escapeHtml(id)}"
+          class="btn-secondary btn-sm"
+        >
+          Ver
+        </button>
+
+        <button
+          type="button"
+          data-action="copy-ticket-id"
+          data-ticket-id="${escapeHtml(id)}"
+          data-ticket-code="${escapeHtml(code)}"
+          class="btn-primary btn-sm"
+        >
+          Copiar ID
+        </button>
+      </td>
+    </tr>
   `;
 }
 
@@ -926,854 +875,140 @@ export function renderEmptyState() {
    TABLE
 ========================================================= */
 
-function renderTableToolbar({ total = 0 } = {}) {
+function desktop(items = []) {
   return `
-    <div
-      class="incidencias-table-toolbar"
-      style="
-        display:flex;
-        align-items:center;
-        justify-content:space-between;
-        gap:14px;
-        padding:16px 18px;
-        border-bottom:1px solid var(--border-soft);
-        background:
-          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 6%, transparent), transparent),
-          var(--surface-1, var(--surface-glass));
-        flex-wrap:wrap;
-      "
-    >
-      <div style="display:grid; gap:4px;">
-        <strong
-          style="
-            color:var(--text-strong);
-            font-size:var(--font-base);
-            letter-spacing:-.02em;
-          "
-        >
-          Tabla de incidencias
-        </strong>
-
-        <span
-          style="
-            color:var(--text-dim);
-            font-size:var(--font-sm);
-          "
-        >
-          ${escapeHtml(String(total))} registro${total === 1 ? "" : "s"} visible${total === 1 ? "" : "s"} en pantalla.
-        </span>
-      </div>
-
-      <div
-        style="
-          display:flex;
-          align-items:center;
-          gap:8px;
-          flex-wrap:wrap;
-        "
-      >
-        <span
-          style="
-            display:inline-flex;
-            align-items:center;
-            min-height:30px;
-            padding:0 10px;
-            border-radius:999px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-            color:var(--text-dim);
-            font-size:12px;
-            font-weight:var(--weight-bold);
-            letter-spacing:.04em;
-            text-transform:uppercase;
-          "
-        >
-          Vista tabla
-        </span>
-      </div>
-    </div>
-  `;
-}
-
-function renderIncidenciaRow(item = {}) {
-  const ticketId = getTicketId(item);
-  const code = getTicketCode(item);
-  const title = getTitle(item);
-  const preview = truncate(getPreview(item), 110);
-  const client = getClientName(item);
-  const email = getClientEmail(item);
-  const status = getStatusLabel(item?.status);
-  const priority = getPriorityLabel(item?.priority);
-  const assignedTo = safeText(item?.assignedTo, "No asignado");
-  const updatedAtRelative = safeText(
-    formatRelativeDate(item?.updatedAt),
-    "Sin fecha"
-  );
-  const updatedAtDate = safeText(
-    formatDate(item?.updatedAt),
-    "—"
-  );
-  const createdAtDate = safeText(
-    formatDate(item?.createdAt),
-    "—"
-  );
-  const initials = getClientInitials(item);
-
-  return `
-    <tr
-      class="incidencias-row"
-      data-ticket-id="${escapeHtml(ticketId)}"
-      style="
-        transition:background .18s ease, transform .18s ease;
-      "
-    >
-      <td
-        style="
-          padding:18px;
-          border-bottom:1px solid var(--border-soft);
-          vertical-align:middle;
-          white-space:nowrap;
-        "
-      >
-        <div style="display:grid; gap:4px;">
-          <strong
-            style="
-              color:var(--text-strong);
-              font-size:var(--font-sm);
-              line-height:1.2;
-              letter-spacing:-.02em;
-            "
-          >
-            ${escapeHtml(code)}
-          </strong>
-
-          <span
-            style="
-              color:var(--text-dim);
-              font-size:12px;
-              line-height:1.2;
-            "
-          >
-            Ticket
-          </span>
-        </div>
-      </td>
-
-      <td
-        style="
-          padding:18px;
-          border-bottom:1px solid var(--border-soft);
-          vertical-align:middle;
-        "
-      >
-        <div style="display:flex; gap:14px; align-items:flex-start; min-width:320px;">
-          <div
-            aria-hidden="true"
-            style="
-              flex:0 0 44px;
-              width:44px;
-              height:44px;
-              border-radius:14px;
-              display:grid;
-              place-items:center;
-              background:
-                linear-gradient(135deg, color-mix(in srgb, var(--accent, #7c5cff) 22%, transparent), transparent),
-                var(--surface-glass);
-              border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft));
-              color:var(--text-strong);
-              font-weight:var(--weight-black);
-              letter-spacing:.03em;
-              box-shadow:var(--shadow-xs, 0 4px 14px rgba(0,0,0,.08));
-            "
-          >
-            ${escapeHtml(initials)}
-          </div>
-
-          <div style="display:grid; gap:5px; min-width:0; flex:1;">
-            <button
-              type="button"
-              data-action="open-ticket"
-              data-ticket-id="${escapeHtml(ticketId)}"
-              style="
-                margin:0;
-                padding:0;
-                border:none;
-                background:transparent;
-                text-align:left;
-                color:var(--text-strong);
-                font-size:var(--font-base);
-                font-weight:var(--weight-black);
-                letter-spacing:-.02em;
-                line-height:1.2;
-                cursor:pointer;
-              "
-              title="Abrir detalle de incidencia"
-            >
-              ${escapeHtml(title)}
-            </button>
-
-            <span
-              style="
-                color:var(--text-dim);
-                font-size:var(--font-sm);
-                line-height:1.5;
-                word-break:break-word;
-              "
-            >
-              ${escapeHtml(preview)}
-            </span>
-          </div>
-        </div>
-      </td>
-
-      <td
-        style="
-          padding:18px;
-          border-bottom:1px solid var(--border-soft);
-          vertical-align:middle;
-        "
-      >
-        <div style="display:grid; gap:5px; min-width:180px;">
-          <strong
-            style="
-              color:var(--text-soft);
-              font-size:var(--font-sm);
-              font-weight:var(--weight-semibold);
-              line-height:1.35;
-              word-break:break-word;
-            "
-          >
-            ${escapeHtml(client)}
-          </strong>
-
-          <span
-            style="
-              color:var(--text-dim);
-              font-size:12px;
-              line-height:1.35;
-              word-break:break-word;
-            "
-          >
-            ${escapeHtml(email)}
-          </span>
-        </div>
-      </td>
-
-      <td
-        style="
-          padding:18px;
-          border-bottom:1px solid var(--border-soft);
-          vertical-align:middle;
-          white-space:nowrap;
-        "
-      >
-        ${renderStatusChip(status, getStatusChipStyle(item?.status))}
-      </td>
-
-      <td
-        style="
-          padding:18px;
-          border-bottom:1px solid var(--border-soft);
-          vertical-align:middle;
-          white-space:nowrap;
-        "
-      >
-        ${renderStatusChip(priority, getPriorityChipStyle(item?.priority))}
-      </td>
-
-      <td
-        style="
-          padding:18px;
-          border-bottom:1px solid var(--border-soft);
-          vertical-align:middle;
-        "
-      >
-        <div style="display:grid; gap:4px;">
-          <strong
-            style="
-              color:var(--text-strong);
-              font-size:var(--font-sm);
-              line-height:1.2;
-            "
-          >
-            ${escapeHtml(assignedTo)}
-          </strong>
-
-          <span
-            style="
-              color:var(--text-dim);
-              font-size:12px;
-              line-height:1.2;
-            "
-          >
-            Responsable
-          </span>
-        </div>
-      </td>
-
-      <td
-        style="
-          padding:18px;
-          border-bottom:1px solid var(--border-soft);
-          vertical-align:middle;
-          white-space:nowrap;
-        "
-      >
-        <div style="display:grid; gap:6px;">
-          <span
-            style="
-              color:var(--text-soft);
-              font-size:var(--font-sm);
-              line-height:1.2;
-              font-weight:var(--weight-semibold);
-            "
-          >
-            ${escapeHtml(updatedAtRelative)}
-          </span>
-
-          <span
-            style="
-              color:var(--text-dim);
-              font-size:12px;
-              line-height:1.2;
-            "
-          >
-            ${escapeHtml(updatedAtDate)}
-          </span>
-        </div>
-      </td>
-
-      <td
-        style="
-          padding:18px;
-          border-bottom:1px solid var(--border-soft);
-          vertical-align:middle;
-          text-align:right;
-        "
-      >
-        <div
-          style="
-            display:flex;
-            justify-content:flex-end;
-            gap:8px;
-            flex-wrap:wrap;
-          "
-        >
-          <button
-            type="button"
-            data-action="open-ticket"
-            data-ticket-id="${escapeHtml(ticketId)}"
-            style="
-              min-height:38px;
-              padding:0 12px;
-              border-radius:12px;
-              border:1px solid var(--btn-secondary-border, var(--border-soft));
-              background:var(--btn-secondary-bg, var(--surface-glass));
-              color:var(--btn-secondary-text, var(--text-soft));
-              font-weight:var(--weight-bold);
-              cursor:pointer;
-              white-space:nowrap;
-            "
-          >
-            Ver
-          </button>
-
-          <button
-            type="button"
-            data-action="copy-ticket-id"
-            data-ticket-id="${escapeHtml(ticketId)}"
-            data-ticket-code="${escapeHtml(code)}"
-            style="
-              min-height:38px;
-              padding:0 12px;
-              border-radius:12px;
-              border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
-              background:var(--btn-primary-bg, var(--accent, #7c5cff));
-              color:var(--btn-primary-text, #fff);
-              font-weight:var(--weight-bold);
-              cursor:pointer;
-              white-space:nowrap;
-            "
-          >
-            Copiar ID
-          </button>
-        </div>
-      </td>
-    </tr>
-  `;
-}
-
-function renderMobileIncidenciaCard(item = {}) {
-  const ticketId = getTicketId(item);
-  const code = getTicketCode(item);
-  const title = getTitle(item);
-  const preview = truncate(getPreview(item), 120);
-  const client = getClientName(item);
-  const email = getClientEmail(item);
-  const status = getStatusLabel(item?.status);
-  const priority = getPriorityLabel(item?.priority);
-  const assignedTo = safeText(item?.assignedTo, "No asignado");
-  const updatedAtRelative = safeText(formatRelativeDate(item?.updatedAt), "Sin fecha");
-  const updatedAtDate = safeText(formatDate(item?.updatedAt), "—");
-  const createdAtDate = safeText(formatDate(item?.createdAt), "—");
-  const initials = getClientInitials(item);
-
-  return `
-    <article
-      class="incidencias-mobile-card panel-surface"
-      data-ticket-id="${escapeHtml(ticketId)}"
-      style="
-        display:grid;
-        gap:16px;
-        padding:18px;
-        border-radius:18px;
-        border:1px solid var(--border-soft);
-        background:var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-sm);
-      "
-    >
-      <div
-        style="
-          display:flex;
-          align-items:flex-start;
-          justify-content:space-between;
-          gap:12px;
-        "
-      >
-        <div style="display:flex; gap:12px; min-width:0; flex:1;">
-          <div
-            aria-hidden="true"
-            style="
-              flex:0 0 42px;
-              width:42px;
-              height:42px;
-              border-radius:14px;
-              display:grid;
-              place-items:center;
-              background:
-                linear-gradient(135deg, color-mix(in srgb, var(--accent, #7c5cff) 22%, transparent), transparent),
-                var(--surface-glass);
-              border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft));
-              color:var(--text-strong);
-              font-weight:var(--weight-black);
-            "
-          >
-            ${escapeHtml(initials)}
-          </div>
-
-          <div style="display:grid; gap:5px; min-width:0;">
-            <span
-              style="
-                color:var(--text-dim);
-                font-size:12px;
-                font-weight:var(--weight-bold);
-                letter-spacing:.05em;
-                text-transform:uppercase;
-              "
-            >
-              ${escapeHtml(code)}
-            </span>
-
-            <button
-              type="button"
-              data-action="open-ticket"
-              data-ticket-id="${escapeHtml(ticketId)}"
-              style="
-                margin:0;
-                padding:0;
-                border:none;
-                background:transparent;
-                text-align:left;
-                color:var(--text-strong);
-                font-size:var(--font-base);
-                font-weight:var(--weight-black);
-                letter-spacing:-.02em;
-                line-height:1.2;
-                cursor:pointer;
-              "
-            >
-              ${escapeHtml(title)}
-            </button>
-
-            <span
-              style="
-                color:var(--text-dim);
-                font-size:12px;
-                line-height:1.45;
-                word-break:break-word;
-              "
-            >
-              ${escapeHtml(preview)}
-            </span>
-          </div>
-        </div>
-
-        <div style="display:grid; gap:8px; justify-items:end;">
-          ${renderStatusChip(status, getStatusChipStyle(item?.status))}
-          ${renderStatusChip(priority, getPriorityChipStyle(item?.priority))}
-        </div>
-      </div>
-
-      <div
-        style="
-          display:grid;
-          grid-template-columns:repeat(2, minmax(0, 1fr));
-          gap:10px;
-        "
-      >
-        <div
-          style="
-            display:grid;
-            gap:4px;
-            padding:12px;
-            border-radius:14px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-          "
-        >
-          <span
-            style="
-              font-size:11px;
-              color:var(--text-faint);
-              font-weight:var(--weight-bold);
-              letter-spacing:.05em;
-              text-transform:uppercase;
-            "
-          >
-            Cliente
-          </span>
-          <strong style="color:var(--text-strong); font-size:var(--font-sm);">
-            ${escapeHtml(client)}
-          </strong>
-          <span style="color:var(--text-dim); font-size:12px; line-height:1.35;">
-            ${escapeHtml(email)}
-          </span>
-        </div>
-
-        <div
-          style="
-            display:grid;
-            gap:4px;
-            padding:12px;
-            border-radius:14px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-          "
-        >
-          <span
-            style="
-              font-size:11px;
-              color:var(--text-faint);
-              font-weight:var(--weight-bold);
-              letter-spacing:.05em;
-              text-transform:uppercase;
-            "
-          >
-            Asignado
-          </span>
-          <strong style="color:var(--text-strong); font-size:var(--font-sm);">
-            ${escapeHtml(assignedTo)}
-          </strong>
-        </div>
-
-        <div
-          style="
-            display:grid;
-            gap:4px;
-            padding:12px;
-            border-radius:14px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-          "
-        >
-          <span
-            style="
-              font-size:11px;
-              color:var(--text-faint);
-              font-weight:var(--weight-bold);
-              letter-spacing:.05em;
-              text-transform:uppercase;
-            "
-          >
-            Actualizada
-          </span>
-          <strong style="color:var(--text-strong); font-size:var(--font-sm);">
-            ${escapeHtml(updatedAtRelative)}
-          </strong>
-          <span style="color:var(--text-dim); font-size:12px; line-height:1.35;">
-            ${escapeHtml(updatedAtDate)}
-          </span>
-        </div>
-
-        <div
-          style="
-            display:grid;
-            gap:4px;
-            padding:12px;
-            border-radius:14px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-          "
-        >
-          <span
-            style="
-              font-size:11px;
-              color:var(--text-faint);
-              font-weight:var(--weight-bold);
-              letter-spacing:.05em;
-              text-transform:uppercase;
-            "
-          >
-            Creada
-          </span>
-          <strong style="color:var(--text-strong); font-size:var(--font-sm);">
-            ${escapeHtml(createdAtDate)}
-          </strong>
-        </div>
-      </div>
-
-      <div
-        style="
-          display:flex;
-          gap:8px;
-          flex-wrap:wrap;
-          justify-content:flex-start;
-        "
-      >
-        <button
-          type="button"
-          data-action="open-ticket"
-          data-ticket-id="${escapeHtml(ticketId)}"
-          style="
-            min-height:38px;
-            padding:0 12px;
-            border-radius:12px;
-            border:1px solid var(--btn-secondary-border, var(--border-soft));
-            background:var(--btn-secondary-bg, var(--surface-glass));
-            color:var(--btn-secondary-text, var(--text-soft));
-            font-weight:var(--weight-bold);
-            cursor:pointer;
-          "
-        >
-          Ver detalle
-        </button>
-
-        <button
-          type="button"
-          data-action="copy-ticket-id"
-          data-ticket-id="${escapeHtml(ticketId)}"
-          data-ticket-code="${escapeHtml(code)}"
-          style="
-            min-height:38px;
-            padding:0 12px;
-            border-radius:12px;
-            border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
-            background:var(--btn-primary-bg, var(--accent, #7c5cff));
-            color:var(--btn-primary-text, #fff);
-            font-weight:var(--weight-bold);
-            cursor:pointer;
-          "
-        >
-          Copiar ID
-        </button>
-      </div>
-    </article>
-  `;
-}
-
-function renderDesktopTable(items = []) {
-  return `
-    <div
-      class="incidencias-table-scroll"
-      style="
-        width:100%;
-        overflow:auto;
-      "
-    >
-      <table
-        class="incidencias-table"
-        style="
-          width:100%;
-          min-width:1240px;
-          border-collapse:separate;
-          border-spacing:0;
-        "
-      >
+    <div class="inc-scroll">
+      <table class="inc-table">
         <thead>
-          <tr
-            style="
-              background:var(--surface-2, var(--surface-glass));
-            "
-          >
-            <th
-              style="
-                padding:16px 18px;
-                text-align:left;
-                font-size:12px;
-                letter-spacing:.08em;
-                text-transform:uppercase;
-                color:var(--text-dim);
-                font-weight:var(--weight-bold);
-                border-bottom:1px solid var(--border-soft);
-                white-space:nowrap;
-              "
-            >
-              ID
-            </th>
-
-            <th
-              style="
-                padding:16px 18px;
-                text-align:left;
-                font-size:12px;
-                letter-spacing:.08em;
-                text-transform:uppercase;
-                color:var(--text-dim);
-                font-weight:var(--weight-bold);
-                border-bottom:1px solid var(--border-soft);
-                white-space:nowrap;
-              "
-            >
-              Incidencia
-            </th>
-
-            <th
-              style="
-                padding:16px 18px;
-                text-align:left;
-                font-size:12px;
-                letter-spacing:.08em;
-                text-transform:uppercase;
-                color:var(--text-dim);
-                font-weight:var(--weight-bold);
-                border-bottom:1px solid var(--border-soft);
-                white-space:nowrap;
-              "
-            >
-              Cliente
-            </th>
-
-            <th
-              style="
-                padding:16px 18px;
-                text-align:left;
-                font-size:12px;
-                letter-spacing:.08em;
-                text-transform:uppercase;
-                color:var(--text-dim);
-                font-weight:var(--weight-bold);
-                border-bottom:1px solid var(--border-soft);
-                white-space:nowrap;
-              "
-            >
-              Estado
-            </th>
-
-            <th
-              style="
-                padding:16px 18px;
-                text-align:left;
-                font-size:12px;
-                letter-spacing:.08em;
-                text-transform:uppercase;
-                color:var(--text-dim);
-                font-weight:var(--weight-bold);
-                border-bottom:1px solid var(--border-soft);
-                white-space:nowrap;
-              "
-            >
-              Prioridad
-            </th>
-
-            <th
-              style="
-                padding:16px 18px;
-                text-align:left;
-                font-size:12px;
-                letter-spacing:.08em;
-                text-transform:uppercase;
-                color:var(--text-dim);
-                font-weight:var(--weight-bold);
-                border-bottom:1px solid var(--border-soft);
-                white-space:nowrap;
-              "
-            >
-              Asignado
-            </th>
-
-            <th
-              style="
-                padding:16px 18px;
-                text-align:left;
-                font-size:12px;
-                letter-spacing:.08em;
-                text-transform:uppercase;
-                color:var(--text-dim);
-                font-weight:var(--weight-bold);
-                border-bottom:1px solid var(--border-soft);
-                white-space:nowrap;
-              "
-            >
-              Actualización
-            </th>
-
-            <th
-              style="
-                padding:16px 18px;
-                text-align:right;
-                font-size:12px;
-                letter-spacing:.08em;
-                text-transform:uppercase;
-                color:var(--text-dim);
-                font-weight:var(--weight-bold);
-                border-bottom:1px solid var(--border-soft);
-                white-space:nowrap;
-              "
-            >
+          <tr>
+            <th>ID</th>
+            <th>Incidencia</th>
+            <th>Cliente</th>
+            <th>Estado</th>
+            <th>Prioridad</th>
+            <th>Asignado</th>
+            <th>Actualización</th>
+            <th class="inc-right">
               Acciones
             </th>
           </tr>
         </thead>
 
         <tbody>
-          ${safeArray(items).map((item) => renderIncidenciaRow(item)).join("")}
+          ${safeArray(items)
+            .map(row)
+            .join("")}
         </tbody>
       </table>
     </div>
   `;
 }
 
-function renderMobileCards(items = []) {
+function mobile(items = []) {
   return `
-    <div
-      class="incidencias-mobile-list"
-      style="
-        display:none;
-        gap:14px;
-        padding:14px;
-      "
-    >
-      ${safeArray(items).map((item) => renderMobileIncidenciaCard(item)).join("")}
+    <div class="inc-mobile">
+      ${safeArray(items)
+        .map((item) => `
+          <article class="inc-card">
+            <div class="inc-card-top">
+              <div>
+                <div class="inc-sub">
+                  ${escapeHtml(
+                    getCode(item)
+                  )}
+                </div>
+
+                <strong class="inc-card-title">
+                  ${escapeHtml(
+                    getTitle(item)
+                  )}
+                </strong>
+              </div>
+
+              <div class="inc-stack">
+                ${chip(
+                  getStatusLabel(
+                    item.status
+                  ),
+                  getStatusChipStyle(
+                    item.status
+                  )
+                )}
+
+                ${chip(
+                  getPriorityLabel(
+                    item.priority
+                  ),
+                  getPriorityChipStyle(
+                    item.priority
+                  )
+                )}
+              </div>
+            </div>
+
+            <div class="inc-card-body">
+              <div>
+                <span class="inc-sub">
+                  Cliente
+                </span>
+                <strong>
+                  ${escapeHtml(
+                    getClient(item)
+                  )}
+                </strong>
+              </div>
+
+              <div>
+                <span class="inc-sub">
+                  Asignado
+                </span>
+                <strong>
+                  ${escapeHtml(
+                    getAssigned(item)
+                  )}
+                </strong>
+              </div>
+            </div>
+          </article>
+        `)
+        .join("")}
     </div>
   `;
 }
 
 /* =========================================================
-   MAIN TABLE RENDER
+   MAIN
 ========================================================= */
 
-export function renderTable({ items, state } = {}) {
-  const localState = state || incidenciasState || {};
+export function renderTable({
+  items,
+  state,
+} = {}) {
+  const localState =
+    state ||
+    incidenciasState ||
+    {};
+
   const list = safeArray(items).length
     ? safeArray(items)
-    : sortIncidenciasByUpdatedDesc(getIncidencias());
+    : sortIncidenciasByUpdatedDesc(
+        getIncidencias()
+      );
 
-  if (localState.loading && !list.length) {
+  if (
+    localState.loading &&
+    !list.length
+  ) {
     return renderLoadingState();
   }
 
-  if (localState.error && !list.length) {
-    return renderErrorState(localState.error);
+  if (
+    localState.error &&
+    !list.length
+  ) {
+    return renderErrorState(
+      localState.error
+    );
   }
 
   if (!list.length) {
@@ -1782,55 +1017,203 @@ export function renderTable({ items, state } = {}) {
 
   return `
     <section
-      class="incidencias-table-wrap panel-surface"
       style="
         overflow:hidden;
-        border-radius:var(--panel-radius);
+        border-radius:26px;
         border:1px solid var(--border-soft);
-        background:
-          linear-gradient(180deg, color-mix(in srgb, var(--surface-2, transparent) 60%, transparent), transparent),
-          var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-sm);
+        background:var(--surface-1,var(--surface-glass));
       "
     >
-      ${renderTableToolbar({ total: list.length })}
+      <div
+        style="
+          padding:18px 20px;
+          border-bottom:1px solid var(--border-soft);
+          display:flex;
+          justify-content:space-between;
+          gap:12px;
+          flex-wrap:wrap;
+        "
+      >
+        <div>
+          <strong
+            style="
+              color:var(--text-strong);
+            "
+          >
+            Tabla de incidencias
+          </strong>
 
-      <div class="incidencias-desktop-table">
-        ${renderDesktopTable(list)}
+          <div class="inc-sub">
+            ${list.length}
+            registros visibles
+          </div>
+        </div>
+
+        ${chip(
+          "Vista tabla",
+          `
+            color:var(--text-soft);
+            background:var(--surface-glass);
+            border:1px solid var(--border-soft);
+          `
+        )}
       </div>
 
-      ${renderMobileCards(list)}
+      <div class="inc-desktop">
+        ${desktop(list)}
+      </div>
+
+      ${mobile(list)}
 
       <style>
-        .incidencias-table tbody tr:hover {
-          background: color-mix(in srgb, var(--accent, #7c5cff) 4%, transparent);
+        .inc-scroll{
+          overflow:auto;
+          width:100%;
         }
 
-        .incidencias-table tbody tr:last-child td {
-          border-bottom: none;
+        .inc-table{
+          width:100%;
+          min-width:1240px;
+          border-collapse:separate;
+          border-spacing:0;
         }
 
-        .incidencias-table-scroll::-webkit-scrollbar {
-          height: 10px;
-          width: 10px;
+        .inc-table th{
+          padding:16px 18px;
+          text-align:left;
+          font-size:12px;
+          letter-spacing:.08em;
+          text-transform:uppercase;
+          color:var(--text-dim);
+          border-bottom:1px solid var(--border-soft);
+          white-space:nowrap;
         }
 
-        .incidencias-table-scroll::-webkit-scrollbar-thumb {
-          background: color-mix(in srgb, var(--accent, #7c5cff) 20%, var(--border-soft));
-          border-radius: 999px;
+        .inc-td{
+          padding:18px;
+          border-bottom:1px solid var(--border-soft);
+          vertical-align:middle;
+          color:var(--text-soft);
         }
 
-        .incidencias-table-scroll::-webkit-scrollbar-track {
-          background: transparent;
+        .inc-right{
+          text-align:right;
+          white-space:nowrap;
         }
 
-        @media (max-width: 980px) {
-          .incidencias-desktop-table {
-            display: none !important;
+        .inc-sub{
+          color:var(--text-dim);
+          font-size:12px;
+          line-height:1.4;
+        }
+
+        .inc-main{
+          display:flex;
+          gap:14px;
+          min-width:320px;
+          align-items:flex-start;
+        }
+
+        .inc-avatar{
+          width:44px;
+          height:44px;
+          border-radius:14px;
+          display:grid;
+          place-items:center;
+          font-weight:900;
+          color:var(--text-strong);
+          background:
+            linear-gradient(
+              135deg,
+              color-mix(in srgb,var(--accent,#7c5cff) 22%,transparent),
+              transparent
+            ),
+            var(--surface-glass);
+          border:1px solid var(--border-soft);
+          flex:0 0 auto;
+        }
+
+        .inc-copy{
+          display:grid;
+          gap:5px;
+          min-width:0;
+          flex:1;
+        }
+
+        .inc-link{
+          margin:0;
+          padding:0;
+          border:none;
+          background:transparent;
+          text-align:left;
+          color:var(--text-strong);
+          font-weight:900;
+          cursor:pointer;
+          font-size:15px;
+          line-height:1.25;
+        }
+
+        .inc-table tbody tr:hover{
+          background:
+            color-mix(
+              in srgb,
+              var(--accent,#7c5cff) 4%,
+              transparent
+            );
+        }
+
+        .inc-mobile{
+          display:none;
+          gap:14px;
+          padding:14px;
+        }
+
+        .inc-card{
+          display:grid;
+          gap:14px;
+          padding:18px;
+          border-radius:18px;
+          border:1px solid var(--border-soft);
+          background:var(--surface-glass);
+        }
+
+        .inc-card-top{
+          display:flex;
+          justify-content:space-between;
+          gap:12px;
+        }
+
+        .inc-card-title{
+          color:var(--text-strong);
+          display:block;
+          margin-top:4px;
+        }
+
+        .inc-card-body{
+          display:grid;
+          grid-template-columns:repeat(2,minmax(0,1fr));
+          gap:12px;
+        }
+
+        .inc-stack{
+          display:grid;
+          gap:8px;
+          justify-items:end;
+        }
+
+        @media (max-width:980px){
+          .inc-desktop{
+            display:none !important;
           }
 
-          .incidencias-mobile-list {
-            display: grid !important;
+          .inc-mobile{
+            display:grid !important;
+          }
+        }
+
+        @media (max-width:680px){
+          .inc-card-body{
+            grid-template-columns:1fr;
           }
         }
       </style>
@@ -1838,10 +1221,12 @@ export function renderTable({ items, state } = {}) {
   `;
 }
 
-/* =========================================================
-   API DE COMPATIBILIDAD
-========================================================= */
-
-export function renderCards({ items, state } = {}) {
-  return renderTable({ items, state });
+export function renderCards({
+  items,
+  state,
+} = {}) {
+  return renderTable({
+    items,
+    state,
+  });
 }

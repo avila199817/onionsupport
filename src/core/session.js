@@ -9,6 +9,13 @@
    - aplicar usuario/token
    - limpiar sesión local
    - mantener auth consistente
+
+   HARDENING PRO:
+   - zero ghost auth
+   - persistencia robusta
+   - setters idempotentes
+   - sync UI estable
+   - eventos consistentes
 ========================================================= */
 
 import { config } from "./config.js";
@@ -31,8 +38,50 @@ import {
 } from "./storage.js";
 
 /* =========================================================
+   INTERNAL
+========================================================= */
+
+function resolveRole(user = null) {
+  return (
+    user?.role ||
+    user?.rol ||
+    null
+  );
+}
+
+function syncAuthState(state) {
+  state.authenticated =
+    computeAuthenticated(
+      state.user,
+      state.token
+    );
+
+  state.role =
+    state.authenticated
+      ? resolveRole(
+          state.user
+        )
+      : null;
+
+  return state;
+}
+
+function setAriaExpanded(
+  el,
+  value
+) {
+  if (!el) return;
+
+  el.setAttribute(
+    "aria-expanded",
+    String(Boolean(value))
+  );
+}
+
+/* =========================================================
    ROUTE
 ========================================================= */
+
 export function setRoute({
   state,
   setState,
@@ -40,30 +89,35 @@ export function setRoute({
   route = "/",
 } = {}) {
   const previousRoute =
-    state.route;
+    state.route || "/";
 
-  const normalizedRoute =
+  const normalized =
     normalizeCanonicalPath(
       route
     );
 
+  if (
+    previousRoute ===
+    normalized
+  ) {
+    return normalized;
+  }
+
   setState({
     lastRoute:
       previousRoute,
-    route:
-      normalizedRoute,
+    route: normalized,
   });
 
   events?.emit?.(
     "app:route:change",
     {
-      route:
-        normalizedRoute,
+      route: normalized,
       previousRoute,
     }
   );
 
-  return normalizedRoute;
+  return normalized;
 }
 
 export function setPublicPath({
@@ -98,8 +152,9 @@ export function setPublicPath({
 }
 
 /* =========================================================
-   SESSION WRITE
+   USER / TOKEN
 ========================================================= */
+
 export function setUser({
   state,
   storage,
@@ -111,36 +166,32 @@ export function setUser({
   const normalizedUser =
     normalizeUser(user);
 
-  const authenticated =
-    computeAuthenticated(
-      normalizedUser,
-      state.token
-    );
-
   setState({
     user:
       normalizedUser,
-    role:
-      normalizedUser
-        ?.role ||
-      null,
-    authenticated,
+  });
+
+  state.user =
+    normalizedUser;
+
+  syncAuthState(state);
+
+  setState({
+    role: state.role,
+    authenticated:
+      state.authenticated,
   });
 
   if (
     normalizedUser
   ) {
     storage?.set?.(
-      config
-        .storageKeys
-        .user,
+      config.storageKeys.user,
       normalizedUser
     );
   } else {
     storage?.remove?.(
-      config
-        .storageKeys
-        .user
+      config.storageKeys.user
     );
   }
 
@@ -151,7 +202,8 @@ export function setUser({
     {
       user:
         normalizedUser,
-      authenticated,
+      authenticated:
+        state.authenticated,
       username:
         normalizedUser
           ?.username ||
@@ -173,37 +225,35 @@ export function setToken({
   setState,
   token = null,
 } = {}) {
-  const normalizedToken =
+  const normalized =
     hasValidToken(token)
       ? String(token).trim()
       : null;
 
-  const authenticated =
-    computeAuthenticated(
-      state.user,
-      normalizedToken
-    );
-
   setState({
     token:
-      normalizedToken,
-    authenticated,
+      normalized,
   });
 
-  if (
-    normalizedToken
-  ) {
+  state.token =
+    normalized;
+
+  syncAuthState(state);
+
+  setState({
+    role: state.role,
+    authenticated:
+      state.authenticated,
+  });
+
+  if (normalized) {
     storage?.set?.(
-      config
-        .storageKeys
-        .token,
-      normalizedToken
+      config.storageKeys.token,
+      normalized
     );
   } else {
     storage?.remove?.(
-      config
-        .storageKeys
-        .token
+      config.storageKeys.token
     );
   }
 
@@ -211,13 +261,18 @@ export function setToken({
     "app:token:change",
     {
       token:
-        normalizedToken,
-      authenticated,
+        normalized,
+      authenticated:
+        state.authenticated,
     }
   );
 
-  return normalizedToken;
+  return normalized;
 }
+
+/* =========================================================
+   APPLY SESSION
+========================================================= */
 
 export function applySession({
   state,
@@ -227,7 +282,6 @@ export function applySession({
   token = undefined,
   user = undefined,
 } = {}) {
-  /* token first */
   if (
     token !==
     undefined
@@ -237,7 +291,6 @@ export function applySession({
     });
   }
 
-  /* user second */
   if (
     user !==
     undefined
@@ -246,6 +299,8 @@ export function applySession({
       user,
     });
   }
+
+  syncAuthState(state);
 
   const snapshot = {
     authenticated:
@@ -266,6 +321,10 @@ export function applySession({
   return snapshot;
 }
 
+/* =========================================================
+   CLEAR SESSION
+========================================================= */
+
 export function clearSession({
   state,
   storage,
@@ -275,13 +334,11 @@ export function clearSession({
   utils,
 } = {}) {
   storage?.remove?.(
-    config
-      .storageKeys.user
+    config.storageKeys.user
   );
 
   storage?.remove?.(
-    config
-      .storageKeys.token
+    config.storageKeys.token
   );
 
   removeLegacySessionKeys(
@@ -295,6 +352,11 @@ export function clearSession({
     authenticated: false,
   });
 
+  state.user = null;
+  state.token = null;
+
+  syncAuthState(state);
+
   syncUserUI?.();
 
   events?.emit?.(
@@ -307,11 +369,14 @@ export function clearSession({
       role: null,
     }
   );
+
+  return true;
 }
 
 /* =========================================================
-   LOAD PREFS / SESSION
+   PREFS LOAD
 ========================================================= */
+
 export function syncThemeMetaColor({
   dom,
   theme =
@@ -319,14 +384,13 @@ export function syncThemeMetaColor({
 } = {}) {
   if (
     !dom?.themeColorMeta
-  )
+  ) {
     return;
+  }
 
   dom.themeColorMeta.setAttribute(
     "content",
-    getThemeColor(
-      theme
-    )
+    getThemeColor(theme)
   );
 }
 
@@ -337,24 +401,21 @@ export function loadPreferences({
 } = {}) {
   const savedTheme =
     storage?.get?.(
-      config
-        .storageKeys
+      config.storageKeys
         .theme,
       config.defaultTheme
     );
 
   const savedLang =
     storage?.get?.(
-      config
-        .storageKeys
+      config.storageKeys
         .lang,
       config.defaultLang
     );
 
-  const savedSidebarOpen =
+  const savedSidebar =
     storage?.get?.(
-      config
-        .storageKeys
+      config.storageKeys
         .sidebarOpen,
       true
     );
@@ -366,13 +427,15 @@ export function loadPreferences({
       : "dark";
 
   state.lang =
-    savedLang ||
-    config.defaultLang;
+    String(
+      savedLang ||
+        config.defaultLang
+    ).trim();
 
   state.sidebarOpen =
-    typeof savedSidebarOpen ===
+    typeof savedSidebar ===
     "boolean"
-      ? savedSidebarOpen
+      ? savedSidebar
       : true;
 
   if (dom?.html) {
@@ -395,34 +458,24 @@ export function loadPreferences({
 
   if (dom?.body) {
     dom.body.classList.toggle(
-      "sidebar-collapsed",
-      !state.sidebarOpen
-    );
-
-    dom.body.classList.toggle(
       "sidebar-open",
       state.sidebarOpen
     );
 
     dom.body.classList.toggle(
-      "loading",
-      state.loading
+      "sidebar-collapsed",
+      !state.sidebarOpen
     );
   }
 
   if (dom?.sidebar) {
-    dom.sidebar.classList.toggle(
-      "collapsed",
-      !state.sidebarOpen
-    );
-
     dom.sidebar.classList.toggle(
       "open",
       state.sidebarOpen
     );
 
     dom.sidebar.classList.toggle(
-      "is-collapsed",
+      "collapsed",
       !state.sidebarOpen
     );
 
@@ -430,42 +483,27 @@ export function loadPreferences({
       "is-open",
       state.sidebarOpen
     );
-  }
 
-  if (
-    dom?.sidebarToggle
-  ) {
-    dom.sidebarToggle.setAttribute(
-      "aria-expanded",
-      String(
-        state.sidebarOpen
-      )
+    dom.sidebar.classList.toggle(
+      "is-collapsed",
+      !state.sidebarOpen
     );
   }
 
-  if (
-    dom?.sidebarMobileToggle
-  ) {
-    dom.sidebarMobileToggle.setAttribute(
-      "aria-expanded",
-      String(
-        state.sidebarOpen
-      )
-    );
-  }
+  setAriaExpanded(
+    dom?.sidebarToggle,
+    state.sidebarOpen
+  );
 
-  if (dom?.loader) {
-    dom.loader.hidden =
-      !state.loading;
-
-    dom.loader.setAttribute(
-      "aria-hidden",
-      String(
-        !state.loading
-      )
-    );
-  }
+  setAriaExpanded(
+    dom?.sidebarMobileToggle,
+    state.sidebarOpen
+  );
 }
+
+/* =========================================================
+   SESSION LOAD
+========================================================= */
 
 export function loadSession({
   state,
@@ -474,18 +512,14 @@ export function loadSession({
   const savedUser =
     normalizeUser(
       storage?.get?.(
-        config
-          .storageKeys
-          .user,
+        config.storageKeys.user,
         null
       )
     );
 
   const savedToken =
     storage?.get?.(
-      config
-        .storageKeys
-        .token,
+      config.storageKeys.token,
       null
     );
 
@@ -501,20 +535,15 @@ export function loadSession({
         ).trim()
       : null;
 
-  state.role =
-    savedUser?.role ||
-    null;
+  syncAuthState(state);
 
-  state.authenticated =
-    computeAuthenticated(
-      savedUser,
-      state.token
-    );
+  return state;
 }
 
 /* =========================================================
-   UI STATE
+   UI SETTERS
 ========================================================= */
+
 export function setTheme({
   dom,
   storage,
@@ -535,18 +564,14 @@ export function setTheme({
   });
 
   storage?.set?.(
-    config
-      .storageKeys
-      .theme,
+    config.storageKeys.theme,
     normalized
   );
 
-  if (dom?.html) {
-    dom.html.setAttribute(
-      "data-theme",
-      normalized
-    );
-  }
+  dom?.html?.setAttribute(
+    "data-theme",
+    normalized
+  );
 
   syncThemeMetaColor({
     dom,
@@ -586,18 +611,14 @@ export function setLang({
   });
 
   storage?.set?.(
-    config
-      .storageKeys
-      .lang,
+    config.storageKeys.lang,
     normalized
   );
 
-  if (dom?.html) {
-    dom.html.setAttribute(
-      "lang",
-      normalized
-    );
-  }
+  dom?.html?.setAttribute(
+    "lang",
+    normalized
+  );
 
   events?.emit?.(
     "app:lang:change",
@@ -617,86 +638,72 @@ export function setSidebarOpen({
   setState,
   value,
 } = {}) {
-  const nextValue =
+  const next =
     Boolean(value);
 
   setState({
     sidebarOpen:
-      nextValue,
+      next,
   });
 
   storage?.set?.(
-    config
-      .storageKeys
+    config.storageKeys
       .sidebarOpen,
-    nextValue
+    next
   );
 
   if (dom?.body) {
     dom.body.classList.toggle(
-      "sidebar-collapsed",
-      !nextValue
+      "sidebar-open",
+      next
     );
 
     dom.body.classList.toggle(
-      "sidebar-open",
-      nextValue
+      "sidebar-collapsed",
+      !next
     );
   }
 
   if (dom?.sidebar) {
     dom.sidebar.classList.toggle(
-      "collapsed",
-      !nextValue
-    );
-
-    dom.sidebar.classList.toggle(
       "open",
-      nextValue
+      next
     );
 
     dom.sidebar.classList.toggle(
-      "is-collapsed",
-      !nextValue
+      "collapsed",
+      !next
     );
 
     dom.sidebar.classList.toggle(
       "is-open",
-      nextValue
+      next
+    );
+
+    dom.sidebar.classList.toggle(
+      "is-collapsed",
+      !next
     );
   }
 
-  if (
-    dom?.sidebarToggle
-  ) {
-    dom.sidebarToggle.setAttribute(
-      "aria-expanded",
-      String(
-        nextValue
-      )
-    );
-  }
+  setAriaExpanded(
+    dom?.sidebarToggle,
+    next
+  );
 
-  if (
-    dom?.sidebarMobileToggle
-  ) {
-    dom.sidebarMobileToggle.setAttribute(
-      "aria-expanded",
-      String(
-        nextValue
-      )
-    );
-  }
+  setAriaExpanded(
+    dom?.sidebarMobileToggle,
+    next
+  );
 
   events?.emit?.(
     "app:sidebar:change",
     {
-      open:
-        nextValue,
+      open: next,
     }
   );
 
-  return nextValue;
+  return next;
 }
 
 export function setLoading({
@@ -705,42 +712,36 @@ export function setLoading({
   setState,
   value,
 } = {}) {
-  const nextValue =
+  const next =
     Boolean(value);
 
   setState({
-    loading:
-      nextValue,
+    loading: next,
   });
 
-  if (dom?.body) {
-    dom.body.classList.toggle(
-      "loading",
-      nextValue
-    );
-  }
+  dom?.body?.classList.toggle(
+    "loading",
+    next
+  );
 
   if (dom?.loader) {
     dom.loader.hidden =
-      !nextValue;
+      !next;
 
     dom.loader.setAttribute(
       "aria-hidden",
-      String(
-        !nextValue
-      )
+      String(!next)
     );
   }
 
   events?.emit?.(
     "app:loading:change",
     {
-      loading:
-        nextValue,
+      loading: next,
     }
   );
 
-  return nextValue;
+  return next;
 }
 
 export function setError({
@@ -775,6 +776,7 @@ export function setError({
 /* =========================================================
    BASE UI
 ========================================================= */
+
 export function syncBaseUI({
   setDocumentTitle,
   syncUserUI,
@@ -791,9 +793,12 @@ export function getSessionDebugSnapshot(
 ) {
   return {
     authenticated:
-      state?.authenticated,
+      Boolean(
+        state?.authenticated
+      ),
     role:
-      state?.role,
+      state?.role ||
+      null,
     username:
       getUserUsername(
         state?.user

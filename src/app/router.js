@@ -8,6 +8,13 @@
    - lanzar la primera renderización controlada
    - sincronizar publicPath tras render
    - aplicar política visual post-render
+
+   HARDENING PRO:
+   - await real del primer render
+   - guards estrictos
+   - no doble first-render
+   - sync robusta de publicPath
+   - tolerancia si Router falla
 ========================================================= */
 
 import {
@@ -24,10 +31,12 @@ export function configureRouter({
   Auth,
   state,
 } = {}) {
-  if (!Router) return;
+  if (!Router || !AppCore) {
+    return false;
+  }
 
   if (state?.routerConfigured) {
-    return;
+    return true;
   }
 
   if (
@@ -43,6 +52,8 @@ export function configureRouter({
   if (state) {
     state.routerConfigured = true;
   }
+
+  return true;
 }
 
 /* =========================================================
@@ -52,10 +63,12 @@ export function bindRouter({
   Router,
   state,
 } = {}) {
-  if (!Router) return;
+  if (!Router) {
+    return false;
+  }
 
   if (state?.routerBound) {
-    return;
+    return true;
   }
 
   if (
@@ -68,47 +81,64 @@ export function bindRouter({
   if (state) {
     state.routerBound = true;
   }
+
+  return true;
 }
 
 /* =========================================================
    FIRST RENDER
 ========================================================= */
-export function renderInitialRoute({
+export async function renderInitialRoute({
   AppCore,
   Router,
   applyPostRenderLoaderPolicy,
 } = {}) {
   if (!AppCore || !Router) {
-    return;
+    return false;
   }
 
   const currentPath =
     getCurrentPath(AppCore);
 
-  if (
-    typeof Router.render ===
-    "function"
-  ) {
-    Router.render(
-      currentPath,
-      {
-        skipHistory: true,
-        replaceState: true,
-        force: true,
-      }
-    );
-  }
+  try {
+    if (
+      typeof Router.render ===
+      "function"
+    ) {
+      await Promise.resolve(
+        Router.render(
+          currentPath,
+          {
+            skipHistory: true,
+            replaceState: true,
+            force: true,
+          }
+        )
+      );
+    }
 
-  if (
-    typeof AppCore.setPublicPath ===
-    "function"
-  ) {
-    AppCore.setPublicPath(
-      getCurrentPublicPath(
-        AppCore
-      )
-    );
-  }
+    if (
+      typeof AppCore.setPublicPath ===
+      "function"
+    ) {
+      AppCore.setPublicPath(
+        getCurrentPublicPath(
+          AppCore
+        )
+      );
+    }
 
-  applyPostRenderLoaderPolicy?.();
+    applyPostRenderLoaderPolicy?.();
+
+    return true;
+  } catch (error) {
+    AppCore?.utils?.error?.(
+      "First render error:",
+      error
+    );
+
+    applyPostRenderLoaderPolicy?.();
+
+    throw error;
+  }
 }

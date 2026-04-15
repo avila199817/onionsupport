@@ -10,6 +10,14 @@
    - soportar 2FA opcional
    - submit desde formularios HTML
    - endurecer respuestas heterogéneas backend
+
+   HARDENING PRO:
+   - anti doble submit concurrente
+   - sanitización fuerte
+   - soporte username/email/teléfono
+   - redirects blindados
+   - eventos consistentes
+   - errores normalizados
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -44,15 +52,26 @@ import {
 } from "./session.js";
 
 /* =========================================================
+   INTERNAL STATE
+========================================================= */
+
+let loginPromise = null;
+
+/* =========================================================
    HELPERS
 ========================================================= */
 
 function safeText(value, fallback = "") {
-  if (value === null || value === undefined) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text =
+    String(value).trim();
+
   return text || fallback;
 }
 
@@ -60,7 +79,10 @@ function safeBool(value) {
   return value === true;
 }
 
-function safeEmit(eventName, payload = {}) {
+function safeEmit(
+  eventName,
+  payload = {}
+) {
   try {
     AppCore?.events?.emit?.(
       eventName,
@@ -71,7 +93,9 @@ function safeEmit(eventName, payload = {}) {
 
 function safeSetError(error) {
   try {
-    AppCore?.setError?.(error);
+    AppCore?.setError?.(
+      error || null
+    );
   } catch {}
 }
 
@@ -94,6 +118,35 @@ function resolveLoginEndpoint() {
   );
 }
 
+function looksLikeEmail(
+  value = ""
+) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+    String(value).trim()
+  );
+}
+
+function looksLikePhone(
+  value = ""
+) {
+  const clean =
+    String(value)
+      .replace(/[^\d+]/g, "")
+      .trim();
+
+  return /^\+?\d{6,20}$/.test(
+    clean
+  );
+}
+
+function normalizePhone(
+  value = ""
+) {
+  return String(value)
+    .replace(/[^\d+]/g, "")
+    .trim();
+}
+
 /* =========================================================
    IDENTIFIER / PAYLOAD
 ========================================================= */
@@ -106,6 +159,7 @@ export function resolveLoginIdentifier(
       credentials.username ??
       credentials.user ??
       credentials.email ??
+      credentials.phone ??
       "",
     ""
   );
@@ -129,10 +183,9 @@ export function normalizeLoginPayload(
       AUTH_CONSTANTS?.passwordMaxLength
     ) || 256;
 
-  const cleanIdentifier =
+  const identifier =
     safeText(
-      rawIdentifier,
-      ""
+      rawIdentifier
     )
       .replace(/\s+/g, " ")
       .slice(
@@ -140,22 +193,23 @@ export function normalizeLoginPayload(
         maxIdentifier
       );
 
-  const password = String(
-    credentials.password ??
-      credentials.pass ??
-      ""
-  ).slice(
-    0,
-    maxPassword
-  );
+  const password =
+    String(
+      credentials.password ??
+        credentials.pass ??
+        ""
+    ).slice(
+      0,
+      maxPassword
+    );
 
   return {
-    identifier:
-      cleanIdentifier,
+    identifier,
     password,
-    remember: Boolean(
-      credentials.remember
-    ),
+    remember:
+      Boolean(
+        credentials.remember
+      ),
   };
 }
 
@@ -173,34 +227,34 @@ export function buildLoginRequestBody(
 
   const clean =
     safeText(
-      identifier,
-      ""
+      identifier
     );
 
-  const looksLikeEmail =
-    clean.includes("@");
+  const email =
+    looksLikeEmail(clean)
+      ? clean.toLowerCase()
+      : undefined;
+
+  const phone =
+    !email &&
+    looksLikePhone(clean)
+      ? normalizePhone(clean)
+      : undefined;
+
+  const username =
+    !email &&
+    !phone
+      ? sanitizeUsername(
+          clean
+        )
+      : undefined;
 
   return {
     identifier: clean,
-    email:
-      looksLikeEmail
-        ? clean.toLowerCase()
-        : undefined,
-
-    username:
-      looksLikeEmail
-        ? undefined
-        : sanitizeUsername(
-            clean
-          ),
-
-    user:
-      looksLikeEmail
-        ? undefined
-        : sanitizeUsername(
-            clean
-          ),
-
+    email,
+    phone,
+    username,
+    user: username,
     password,
     remember,
   };
@@ -216,12 +270,11 @@ export function buildLoginRedirectPath(
   const loginPath =
     configLikeRoute(
       AppCore?.config
-        ?.routes
-        ?.login ||
+        ?.routes?.login ||
         "/login"
     );
 
-  const canonicalTarget =
+  const target =
     configLikeRoute(
       targetPath ||
         getCurrentCanonicalPath() ||
@@ -229,33 +282,33 @@ export function buildLoginRedirectPath(
     );
 
   if (
-    !canonicalTarget ||
-    canonicalTarget ===
-      loginPath
+    !target ||
+    target === loginPath
   ) {
     return loginPath;
   }
 
   if (
     !isSafeRelativePath(
-      canonicalTarget
+      target
     )
   ) {
     return loginPath;
   }
 
   if (!isBrowser()) {
-    return `${loginPath}?redirect=${encodeURIComponent(canonicalTarget)}`;
+    return `${loginPath}?redirect=${encodeURIComponent(target)}`;
   }
 
-  const url = new URL(
-    loginPath,
-    window.location.origin
-  );
+  const url =
+    new URL(
+      loginPath,
+      window.location.origin
+    );
 
   url.searchParams.set(
     "redirect",
-    canonicalTarget
+    target
   );
 
   return `${url.pathname}${url.search}`;
@@ -293,6 +346,22 @@ export function getPostLoginTarget(
     } catch {}
   }
 
+  const role =
+    safeText(
+      user?.role ??
+        user?.rol
+    ).toLowerCase();
+
+  if (role === "admin") {
+    return "/usuarios";
+  }
+
+  if (
+    role === "billing"
+  ) {
+    return "/facturas";
+  }
+
   const slug =
     user?.slug ||
     AppCore?.utils?.slugify?.(
@@ -315,10 +384,10 @@ export function getPostLoginTarget(
 }
 
 /* =========================================================
-   LOGIN
+   LOGIN CORE
 ========================================================= */
 
-export async function login(
+async function executeLogin(
   credentials = {}
 ) {
   const payload =
@@ -339,21 +408,6 @@ export async function login(
     throw error;
   }
 
-  const endpoint =
-    resolveLoginEndpoint();
-
-  safeEmit(
-    "auth:login:start",
-    {
-      identifier:
-        payload.identifier,
-      apiBase:
-        AppCore?.config
-          ?.apiBase,
-      endpoint,
-    }
-  );
-
   const apiClient =
     getApiClient();
 
@@ -371,146 +425,181 @@ export async function login(
     throw error;
   }
 
-  try {
-    const response =
-      await apiClient.post(
-        endpoint,
-        buildLoginRequestBody(
-          credentials
-        ),
-        {
-          auth: false,
-        }
-      );
+  const endpoint =
+    resolveLoginEndpoint();
 
-    const authData =
-      validateAuthResponse(
-        response
-      );
+  safeSetError(null);
 
-    const requires2FA =
-      authData?.status ===
-        "2fa_required" ||
-      authData?.requires2FA ===
-        true;
-
-    /* =====================================================
-       2FA
-    ===================================================== */
-
-    if (
-      requires2FA &&
-      authData?.tempToken
-    ) {
-      persistTempToken(
-        authData.tempToken
-      );
-
-      safeEmit(
-        "auth:login:2fa-required",
-        {
-          identifier:
-            payload.identifier,
-          response,
-        }
-      );
-
-      return {
-        ok: true,
-        success: true,
-        status:
-          "2fa_required",
-        requires2FA:
-          true,
-        tempToken:
-          authData.tempToken,
-        redirectTo:
-          safeText(
-            authData.redirectTo,
-            "/2fa"
-          ),
-        response,
-      };
+  safeEmit(
+    "auth:login:start",
+    {
+      identifier:
+        payload.identifier,
+      endpoint,
     }
+  );
 
-    /* =====================================================
-       LOGIN NORMAL
-    ===================================================== */
-
-    persistTempToken(null);
-
-    const snapshot =
-      applySession({
-        token:
-          authData?.token ??
-          null,
-
-        user:
-          authData?.user ??
-          null,
-
-        refreshToken:
-          authData?.refreshToken ??
-          null,
-
-        sessionData:
-          authData?.sessionData ??
-          null,
-      });
-
-    if (
-      !snapshot?.token
-    ) {
-      throw new Error(
-        "El login devolvió sesión inválida."
-      );
-    }
-
-    const redirectTo =
-      getPostLoginTarget(
-        snapshot.user
-      );
-
-    safeEmit(
-      "auth:login:success",
+  const response =
+    await apiClient.post(
+      endpoint,
+      buildLoginRequestBody(
+        credentials
+      ),
       {
-        ...snapshot,
-        redirectTo,
-        response,
+        auth: false,
       }
     );
 
-    return {
+  const authData =
+    validateAuthResponse(
+      response
+    );
+
+  const requires2FA =
+    authData?.status ===
+      "2fa_required" ||
+    authData?.requires2FA ===
+      true;
+
+  /* =====================================================
+     2FA FLOW
+  ===================================================== */
+
+  if (
+    requires2FA &&
+    authData?.tempToken
+  ) {
+    persistTempToken(
+      authData.tempToken
+    );
+
+    const result = {
       ok: true,
       success: true,
       status:
-        "authenticated",
-      requires2FA:
-        false,
-      ...snapshot,
-      redirectTo,
+        "2fa_required",
+      requires2FA: true,
+      tempToken:
+        authData.tempToken,
+      redirectTo:
+        safeText(
+          authData.redirectTo,
+          "/2fa"
+        ),
       response,
     };
-  } catch (error) {
-    clearSessionLocal();
 
     safeEmit(
-      "auth:login:error",
-      {
-        error,
-        message:
-          extractMessage(
-            error
-          ),
-      }
+      "auth:login:2fa-required",
+      result
     );
 
-    throw error;
+    return result;
   }
+
+  /* =====================================================
+     NORMAL LOGIN
+  ===================================================== */
+
+  persistTempToken(null);
+
+  const snapshot =
+    applySession({
+      token:
+        authData?.token ??
+        null,
+
+      user:
+        authData?.user ??
+        null,
+
+      refreshToken:
+        authData?.refreshToken ??
+        null,
+
+      sessionData:
+        authData?.sessionData ??
+        null,
+    });
+
+  if (
+    !snapshot?.token
+  ) {
+    throw new Error(
+      "El login devolvió sesión inválida."
+    );
+  }
+
+  const redirectTo =
+    getPostLoginTarget(
+      snapshot.user
+    );
+
+  const result = {
+    ok: true,
+    success: true,
+    status:
+      "authenticated",
+    requires2FA: false,
+    ...snapshot,
+    redirectTo,
+    response,
+  };
+
+  safeEmit(
+    "auth:login:success",
+    result
+  );
+
+  return result;
 }
 
 /* =========================================================
-   FORM HELPER
+   PUBLIC LOGIN
+========================================================= */
+
+export async function login(
+  credentials = {}
+) {
+  if (loginPromise) {
+    return loginPromise;
+  }
+
+  loginPromise =
+    (async () => {
+      try {
+        return await executeLogin(
+          credentials
+        );
+      } catch (error) {
+        clearSessionLocal({
+          silent: true,
+        });
+
+        safeSetError(error);
+
+        safeEmit(
+          "auth:login:error",
+          {
+            error,
+            message:
+              extractMessage(
+                error
+              ),
+          }
+        );
+
+        throw error;
+      } finally {
+        loginPromise = null;
+      }
+    })();
+
+  return loginPromise;
+}
+
+/* =========================================================
+   FORM SUBMIT
 ========================================================= */
 
 export async function handleLoginFormSubmit(
@@ -543,6 +632,9 @@ export async function handleLoginFormSubmit(
       ) ||
       formData.get(
         "email"
+      ) ||
+      formData.get(
+        "phone"
       ) ||
       formData.get(
         "user"

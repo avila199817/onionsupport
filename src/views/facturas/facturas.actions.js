@@ -1,419 +1,236 @@
 /* =========================================================
-   Onion SPA - Incidencias Actions
-   Archivo: src/views/incidencias/incidencias.actions.js
+   Onion SPA - Facturas Actions
+   Archivo: src/views/facturas/facturas.actions.js
 
    Responsabilidades:
-   - centralizar acciones operativas del módulo de incidencias
-   - abrir detalle del ticket
-   - copiar id / código del ticket
+   - centralizar acciones operativas del módulo de facturas
+   - abrir detalle, pdf y descarga
+   - enviar factura al cliente
    - exportar colección a CSV
    - desacoplar la vista principal de la lógica de acciones
-   - dejar base limpia para futuras acciones de update / assign / close
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 
 import {
-  getIncidenciaByIdRequest,
-} from "./incidencias.api.js";
+  fetchFacturaPdfUrlRequest,
+  sendFacturaRequest,
+} from "./facturas.api.js";
 
 import {
-  getIncidenciaByIdStore,
-  getSortedIncidenciasStore,
-} from "./incidencias.store.js";
+  getFacturaByIdStore,
+  getSortedFacturasStore,
+} from "./facturas.store.js";
 
 import {
   safeText,
   safeNumber,
   showToast,
-} from "./incidencias.utils.js";
+} from "./facturas.utils.js";
 
-/* =========================================================
-   HELPERS
-========================================================= */
-
-function safeEmit(eventName = "", payload = {}) {
-  try {
-    AppCore?.events?.emit?.(
-      eventName,
-      payload
-    );
-  } catch {}
-}
-
-async function copyText(text = "") {
-  const value = safeText(text, "");
-
-  if (!value) {
-    return false;
-  }
-
-  try {
-    if (
-      navigator?.clipboard?.writeText
-    ) {
-      await navigator.clipboard.writeText(
-        value
-      );
-      return true;
-    }
-  } catch {}
-
-  try {
-    const textarea =
-      document.createElement(
-        "textarea"
-      );
-
-    textarea.value = value;
-    textarea.setAttribute(
-      "readonly",
-      "true"
-    );
-    textarea.style.position =
-      "fixed";
-    textarea.style.opacity =
-      "0";
-    textarea.style.pointerEvents =
-      "none";
-
-    document.body.appendChild(
-      textarea
-    );
-    textarea.select();
-    textarea.setSelectionRange(
-      0,
-      textarea.value.length
-    );
-
-    const success =
-      document.execCommand(
-        "copy"
-      );
-
-    textarea.remove();
-
-    return Boolean(success);
-  } catch {
-    return false;
-  }
-}
-
-/* =========================================================
-   OPEN DETAIL
-========================================================= */
-
-export async function openTicket({
-  ticketId = "",
+export async function openFacturaAction({
+  facturaId = "",
   emitOpenEvent = true,
-  loadTicketDetail,
-  useStoreFirst = true,
+  loadFacturaDetail,
 } = {}) {
-  const id = safeText(
-    ticketId,
-    ""
-  );
+  const id = safeText(facturaId, "");
+  if (!id || typeof loadFacturaDetail !== "function") return null;
 
-  if (!id) {
+  try {
+    if (emitOpenEvent && typeof AppCore?.events?.emit === "function") {
+      AppCore.events.emit("facturas:open", { facturaId: id });
+    }
+
+    return await loadFacturaDetail(id);
+  } catch (error) {
+    console.error("❌ FACTURAS OPEN DETAIL:", error);
+    showToast("No se pudo abrir el detalle de la factura.", "error");
     return null;
   }
+}
+
+export async function openFacturaPdfAction({
+  facturaId = "",
+  onStart,
+  onEnd,
+} = {}) {
+  const id = safeText(facturaId, "");
+  if (!id) return null;
 
   try {
-    if (
-      emitOpenEvent &&
-      typeof AppCore?.events?.emit ===
-        "function"
-    ) {
-      safeEmit(
-        "incidencias:open",
-        {
-          ticketId: id,
-        }
-      );
+    onStart?.(id);
+
+    const response = await fetchFacturaPdfUrlRequest(id, "inline");
+    const url = safeText(response?.file?.url, "");
+
+    if (!url) {
+      throw new Error("PDF_URL_MISSING");
     }
 
-    if (
-      typeof loadTicketDetail ===
-      "function"
-    ) {
-      return await loadTicketDetail(
-        id
-      );
-    }
-
-    if (useStoreFirst) {
-      const local =
-        getIncidenciaByIdStore(
-          id
-        );
-
-      if (local) {
-        safeEmit(
-          "incidencias:detail:ready",
-          {
-            ticketId: id,
-            detail: local,
-            source: "store",
-          }
-        );
-
-        return local;
-      }
-    }
-
-    const response =
-      await getIncidenciaByIdRequest(
-        id
-      );
-
-    safeEmit(
-      "incidencias:detail:ready",
-      {
-        ticketId: id,
-        detail: response,
-        source: "api",
-      }
-    );
+    window.open(url, "_blank", "noopener,noreferrer");
+    showToast("Abriendo PDF de la factura.", "success");
 
     return response;
   } catch (error) {
-    console.error(
-      "❌ INCIDENCIAS OPEN DETAIL:",
-      error
-    );
-
-    showToast(
-      "No se pudo abrir el detalle de la incidencia.",
-      "error"
-    );
-
+    console.error("❌ FACTURAS VIEW PDF:", error);
+    showToast("No se pudo abrir el PDF.", "error");
     return null;
+  } finally {
+    onEnd?.(id);
   }
 }
 
-/* =========================================================
-   COPY ID / CODE
-========================================================= */
-
-export async function copyTicketIdAction({
-  ticketId = "",
-  ticketCode = "",
+export async function downloadFacturaPdfAction({
+  facturaId = "",
+  onStart,
+  onEnd,
 } = {}) {
-  const raw =
-    safeText(
-      ticketCode,
-      ""
-    ) ||
-    safeText(
-      ticketId,
-      ""
+  const id = safeText(facturaId, "");
+  if (!id) return null;
+
+  try {
+    onStart?.(id);
+
+    const response = await fetchFacturaPdfUrlRequest(id, "attachment");
+    const url = safeText(response?.file?.url, "");
+
+    if (!url) {
+      throw new Error("DOWNLOAD_URL_MISSING");
+    }
+
+    window.open(url, "_blank", "noopener,noreferrer");
+    showToast("Preparando descarga de factura.", "success");
+
+    return response;
+  } catch (error) {
+    console.error("❌ FACTURAS DOWNLOAD PDF:", error);
+    showToast("No se pudo descargar la factura.", "error");
+    return null;
+  } finally {
+    onEnd?.(id);
+  }
+}
+
+export async function sendFacturaToClientAction({
+  facturaId = "",
+  detail = null,
+  onStart,
+  onEnd,
+  onSent,
+  reloadFacturas,
+  confirmSend = true,
+} = {}) {
+  const id = safeText(facturaId, "");
+  if (!id) return null;
+
+  const factura =
+    detail?.id === id
+      ? detail
+      : getFacturaByIdStore(id);
+
+  const targetEmail =
+    factura?.cliente?.email ||
+    factura?.enviadoA ||
+    "el cliente";
+
+  if (confirmSend) {
+    const confirmed = window.confirm(
+      `Se va a enviar la factura ${factura?.numero || id} a ${targetEmail}. ¿Continuar?`
     );
 
-  if (!raw) {
-    showToast(
-      "No se encontró identificador para copiar.",
-      "info"
-    );
-    return false;
+    if (!confirmed) {
+      return null;
+    }
   }
 
   try {
-    const ok =
-      await copyText(raw);
+    onStart?.(id);
 
-    if (!ok) {
-      throw new Error(
-        "COPY_FAILED"
-      );
+    const response = await sendFacturaRequest(id);
+
+    onSent?.({
+      facturaId: id,
+      response,
+      factura,
+    });
+
+    showToast("Factura enviada correctamente.", "success");
+
+    if (typeof reloadFacturas === "function") {
+      await reloadFacturas();
     }
 
-    showToast(
-      "Identificador copiado al portapapeles.",
-      "success"
-    );
-
-    safeEmit(
-      "incidencias:copied",
-      {
-        ticketId: safeText(
-          ticketId,
-          ""
-        ),
-        ticketCode: safeText(
-          ticketCode,
-          ""
-        ),
-        value: raw,
-      }
-    );
-
-    return true;
+    return response;
   } catch (error) {
-    console.error(
-      "❌ INCIDENCIAS COPY ID:",
-      error
-    );
-
-    showToast(
-      "No se pudo copiar el identificador.",
-      "error"
-    );
-
-    return false;
+    console.error("❌ FACTURAS SEND:", error);
+    showToast("No se pudo enviar la factura.", "error");
+    return null;
+  } finally {
+    onEnd?.(id);
   }
 }
 
-/* =========================================================
-   EXPORT CSV
-========================================================= */
-
-export function exportIncidenciasCsvAction({
+export function exportFacturasCsvAction({
   items = null,
-  filenamePrefix = "incidencias",
+  filenamePrefix = "facturas",
 } = {}) {
-  const list =
-    Array.isArray(items)
-      ? items
-      : getSortedIncidenciasStore();
+  const list = Array.isArray(items) ? items : getSortedFacturasStore();
 
   if (!list.length) {
-    showToast(
-      "No hay incidencias para exportar.",
-      "info"
-    );
+    showToast("No hay facturas para exportar.", "info");
     return false;
   }
 
   const headers = [
-    "ticketId",
-    "code",
-    "title",
-    "description",
-    "client",
-    "clientEmail",
-    "status",
-    "priority",
-    "assignedTo",
-    "createdAt",
-    "updatedAt",
-    "attachmentsCount",
+    "numero",
+    "cliente",
+    "email",
+    "fecha",
+    "estadoPago",
+    "estado",
+    "formaPago",
+    "total",
+    "moneda",
   ];
 
-  const rows = list.map(
-    (item) => ({
-      ticketId:
-        item?.ticketId ||
-        item?.id ||
-        "",
-      code:
-        item?.code ||
-        item?.ticketId ||
-        item?.id ||
-        "",
-      title:
-        item?.title ||
-        item?.subject ||
-        "",
-      description:
-        item?.description ||
-        item?.preview ||
-        "",
-      client:
-        item?.client ||
-        item?.clientName ||
-        item?.cliente ||
-        "",
-      clientEmail:
-        item?.clientEmail ||
-        item?.email ||
-        "",
-      status:
-        item?.status || "",
-      priority:
-        item?.priority || "",
-      assignedTo:
-        item?.assignedTo ||
-        "",
-      createdAt:
-        item?.createdAt ||
-        "",
-      updatedAt:
-        item?.updatedAt ||
-        "",
-      attachmentsCount:
-        safeNumber(
-          item?.attachmentsCount,
-          0
-        ),
-    })
-  );
+  const rows = list.map((item) => ({
+    numero: item?.numero || "",
+    cliente: item?.cliente?.empresa || item?.cliente?.nombre || "",
+    email: item?.cliente?.email || "",
+    fecha: item?.fecha || "",
+    estadoPago: item?.estadoPago || "",
+    estado: item?.estado || "",
+    formaPago: item?.formaPago || "",
+    total: safeNumber(item?.total, 0),
+    moneda: item?.moneda || "EUR",
+  }));
 
   const csv = [
     headers.join(","),
     ...rows.map((row) =>
       headers
-        .map(
-          (key) =>
-            `"${String(
-              row[key] ?? ""
-            ).replaceAll(
-              '"',
-              '""'
-            )}"`
-        )
+        .map((key) => `"${String(row[key] ?? "").replaceAll('"', '""')}"`)
         .join(",")
     ),
   ].join("\n");
 
-  const blob = new Blob(
-    [csv],
-    {
-      type: "text/csv;charset=utf-8;",
-    }
-  );
+  const blob = new Blob([csv], {
+    type: "text/csv;charset=utf-8;",
+  });
 
-  const url =
-    URL.createObjectURL(
-      blob
-    );
-
-  const anchor =
-    document.createElement(
-      "a"
-    );
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
 
   anchor.href = url;
-  anchor.download = `${safeText(
-    filenamePrefix,
-    "incidencias"
-  )}_${new Date()
+  anchor.download = `${safeText(filenamePrefix, "facturas")}_${new Date()
     .toISOString()
     .slice(0, 10)}.csv`;
 
-  document.body.appendChild(
-    anchor
-  );
+  document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
-
   URL.revokeObjectURL(url);
 
-  showToast(
-    "Exportación CSV generada.",
-    "success"
-  );
-
-  safeEmit(
-    "incidencias:exported",
-    {
-      total: list.length,
-      filenamePrefix:
-        safeText(
-          filenamePrefix,
-          "incidencias"
-        ),
-    }
-  );
-
+  showToast("Exportación CSV generada.", "success");
   return true;
 }

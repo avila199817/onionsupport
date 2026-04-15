@@ -7,13 +7,26 @@
    - renderizar el template principal en #view-container
    - coordinar init / render / destroy
    - enlazar bindings de la vista
+   - cargar summary inicial de la Home
    - mantener compatibilidad con router basado en init()
-   - dejar base preparada para futura carga de datos
+   - dejar base preparada para futura hidratación visual
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+
 import { getHomeTemplate } from "./home.template.js";
 import { bindHomeView } from "./home.bindings.js";
+
+import {
+  loadHomeSummary,
+} from "./home.api.js";
+
+import {
+  markHomeMounted,
+  setHomeAction,
+  resetHomeStore,
+  getHomeSnapshot,
+} from "./home.store.js";
 
 /* =========================================================
    INTERNAL STATE
@@ -21,13 +34,27 @@ import { bindHomeView } from "./home.bindings.js";
 
 let currentCleanup = null;
 let isInitialized = false;
+let currentRenderToken = 0;
 
 /* =========================================================
    HELPERS
 ========================================================= */
 
+function isBrowser() {
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
+}
+
 function getViewContainer() {
-  return document.getElementById("view-container");
+  if (!isBrowser()) {
+    return null;
+  }
+
+  return document.getElementById(
+    "view-container"
+  );
 }
 
 function runCleanup() {
@@ -45,14 +72,27 @@ function runCleanup() {
   currentCleanup = null;
 }
 
+function getRouteTitleFallback() {
+  return "Onion Support";
+}
+
 function setDocumentTitle() {
+  if (!isBrowser()) {
+    return;
+  }
+
   try {
     const routeTitle =
-      AppCore?.state?.routeMeta?.title ||
-      AppCore?.state?.routeTitle ||
-      "Onion Support";
+      AppCore?.state?.routeMeta
+        ?.title ||
+      AppCore?.state
+        ?.routeTitle ||
+      getRouteTitleFallback();
 
-    document.title = String(routeTitle || "Onion Support");
+    document.title = String(
+      routeTitle ||
+        getRouteTitleFallback()
+    );
   } catch (error) {
     console.warn(
       "[HomeView] document title warning",
@@ -61,15 +101,29 @@ function setDocumentTitle() {
   }
 }
 
-function renderIntoContainer(container) {
+function buildTemplatePayload() {
+  return {
+    appName:
+      AppCore?.config?.appName ||
+      "Onion Support",
+    user:
+      AppCore?.state?.user || null,
+    home:
+      getHomeSnapshot(),
+  };
+}
+
+function renderIntoContainer(
+  container
+) {
+  if (!container) {
+    return;
+  }
+
   container.innerHTML =
-    getHomeTemplate({
-      appName:
-        AppCore?.config?.appName ||
-        "Onion Support",
-      user:
-        AppCore?.state?.user || null,
-    });
+    getHomeTemplate(
+      buildTemplatePayload()
+    );
 }
 
 function bindView(container) {
@@ -88,6 +142,63 @@ function bindView(container) {
   }
 }
 
+async function hydrateHomeData(
+  renderToken
+) {
+  try {
+    setHomeAction("hydrate");
+
+    const result =
+      await loadHomeSummary({
+        force: false,
+        preferCache: true,
+      });
+
+    if (
+      renderToken !==
+      currentRenderToken
+    ) {
+      return {
+        ok: false,
+        stale: true,
+      };
+    }
+
+    if (result?.ok !== true) {
+      return result;
+    }
+
+    const container =
+      getViewContainer();
+
+    if (!container) {
+      return {
+        ok: false,
+        missingContainer: true,
+      };
+    }
+
+    renderIntoContainer(
+      container
+    );
+    runCleanup();
+    bindView(container);
+    setDocumentTitle();
+
+    return result;
+  } catch (error) {
+    console.error(
+      "[HomeView] hydrate error",
+      error
+    );
+
+    return {
+      ok: false,
+      error,
+    };
+  }
+}
+
 /* =========================================================
    VIEW API
 ========================================================= */
@@ -102,7 +213,14 @@ async function init() {
     );
   }
 
+  currentRenderToken += 1;
+  const renderToken =
+    currentRenderToken;
+
   runCleanup();
+  resetHomeStore();
+  markHomeMounted(true);
+  setHomeAction("init");
 
   renderIntoContainer(
     container
@@ -112,6 +230,10 @@ async function init() {
   setDocumentTitle();
 
   isInitialized = true;
+
+  await hydrateHomeData(
+    renderToken
+  );
 
   return {
     ok: true,
@@ -124,6 +246,9 @@ function render() {
 }
 
 function destroy() {
+  currentRenderToken += 1;
+  setHomeAction("destroy");
+  markHomeMounted(false);
   runCleanup();
   isInitialized = false;
 }
@@ -132,6 +257,10 @@ function getState() {
   return {
     initialized:
       isInitialized === true,
+    renderToken:
+      currentRenderToken,
+    home:
+      getHomeSnapshot(),
   };
 }
 

@@ -8,6 +8,12 @@
    - renderizar tabla premium de incidencias
    - mantener compatibilidad directa con incidenciasView.js
    - compartir lenguaje visual y densidad con Facturas
+
+   HARDENING PRO:
+   - tolerancia a payloads heterogéneos
+   - helpers de lectura consistentes
+   - mismo lenguaje visual que Facturas
+   - toolbar / skeleton / mobile cards consistentes
 ========================================================= */
 
 import { incidenciasState } from "./incidencias.state.js";
@@ -148,7 +154,9 @@ function getStatusChipStyle(value = "") {
     `;
   }
 
-  if (["in_progress", "in-progress", "progress", "en_proceso", "en proceso"].includes(key)) {
+  if (
+    ["in_progress", "in-progress", "progress", "en_proceso", "en proceso"].includes(key)
+  ) {
     return `
       color:#b388ff;
       background:color-mix(in srgb, #b388ff 14%, transparent);
@@ -247,6 +255,22 @@ function renderStatusChip(label = "", style = "") {
 /* =========================================================
    DATA RESOLVE
 ========================================================= */
+
+function getResolvedItems(items) {
+  const direct = safeArray(items);
+
+  if (direct.length) {
+    return direct;
+  }
+
+  try {
+    return sortIncidenciasByUpdatedDesc(
+      getIncidencias()
+    );
+  } catch {
+    return [];
+  }
+}
 
 function getTicketId(item = {}) {
   return safeText(
@@ -366,7 +390,15 @@ function computeStats(items = []) {
 
   const inProgressCount = list.filter((item) => {
     const status = String(item?.status || "").toLowerCase();
-    return ["pending", "pendiente", "in_progress", "in-progress", "progress", "en_proceso", "en proceso"].includes(status);
+    return [
+      "pending",
+      "pendiente",
+      "in_progress",
+      "in-progress",
+      "progress",
+      "en_proceso",
+      "en proceso",
+    ].includes(status);
   }).length;
 
   const urgentCount = list.filter((item) => {
@@ -459,11 +491,8 @@ function renderStatCard({
    HEADER
 ========================================================= */
 
-export function renderHeader({ items, state } = {}) {
-  const list = safeArray(items).length
-    ? safeArray(items)
-    : sortIncidenciasByUpdatedDesc(getIncidencias());
-
+export function renderHeader({ items = [], state = {} } = {}) {
+  const list = getResolvedItems(items);
   const localState = state || incidenciasState || {};
   const stats = computeStats(list);
 
@@ -877,7 +906,7 @@ export function renderErrorState(message = "No se pudo cargar la colección.") {
   `;
 }
 
-function renderEmptyState() {
+export function renderEmptyState() {
   return `
     <section
       class="panel-surface incidencias-empty-state"
@@ -1805,11 +1834,9 @@ function renderMobileCards(items = []) {
    MAIN
 ========================================================= */
 
-export function renderTable({ items, state } = {}) {
+export function renderTable({ items = [], state = {} } = {}) {
   const localState = state || incidenciasState || {};
-  const list = safeArray(items).length
-    ? safeArray(items)
-    : sortIncidenciasByUpdatedDesc(getIncidencias());
+  const list = getResolvedItems(items);
 
   if (localState.loading && !list.length) {
     return renderLoadingState();
@@ -1881,6 +1908,6 @@ export function renderTable({ items, state } = {}) {
   `;
 }
 
-export function renderCards({ items, state } = {}) {
+export function renderCards({ items = [], state = {} } = {}) {
   return renderTable({ items, state });
 }

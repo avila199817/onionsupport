@@ -100,6 +100,7 @@ export const App = (() => {
     bootFailsafeTimer: null,
     sessionRestorePromise: null,
     bootPromise: null,
+    bootCycleId: 0,
   };
 
   /* =========================================================
@@ -195,6 +196,15 @@ export const App = (() => {
         theme
       );
     } catch {}
+  }
+
+  function nextBootCycleId() {
+    state.bootCycleId += 1;
+    return state.bootCycleId;
+  }
+
+  function isStaleBootCycle(cycleId) {
+    return cycleId !== state.bootCycleId;
   }
 
   /* =========================================================
@@ -338,8 +348,12 @@ export const App = (() => {
      BOOT
   ========================================================= */
 
-  async function doBoot() {
+  async function doBoot(cycleId) {
     try {
+      if (isStaleBootCycle(cycleId)) {
+        return api;
+      }
+
       setBootFlags({
         booted: false,
         booting: true,
@@ -354,6 +368,10 @@ export const App = (() => {
       applyThemeBeforeLoader();
 
       await initCore();
+
+      if (isStaleBootCycle(cycleId)) {
+        return api;
+      }
 
       initServices();
       initStore();
@@ -434,7 +452,15 @@ export const App = (() => {
       /* FIX CRÍTICO */
       await restoreSessionBeforeRender();
 
+      if (isStaleBootCycle(cycleId)) {
+        return api;
+      }
+
       await renderInitialRoute();
+
+      if (isStaleBootCycle(cycleId)) {
+        return api;
+      }
 
       finalizeBoot();
 
@@ -494,8 +520,11 @@ export const App = (() => {
       return state.bootPromise;
     }
 
+    const cycleId =
+      nextBootCycleId();
+
     state.bootPromise =
-      doBoot();
+      doBoot(cycleId);
 
     return state.bootPromise;
   }
@@ -505,6 +534,8 @@ export const App = (() => {
   ========================================================= */
 
   async function reboot() {
+    nextBootCycleId();
+
     clearScope(AppCore);
 
     clearBootFailsafeTimer(

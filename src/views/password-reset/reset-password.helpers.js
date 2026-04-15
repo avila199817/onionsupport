@@ -236,6 +236,17 @@ export function clearRememberedIdentifier() {
   );
 }
 
+export function persistResetPasswordIdentifier(identifier = "") {
+  const value = normalizeIdentifier(identifier);
+
+  if (!value) {
+    clearRememberedIdentifier();
+    return false;
+  }
+
+  return saveRememberedIdentifier(value);
+}
+
 /* =========================================================
    PAYLOAD
 ========================================================= */
@@ -327,19 +338,19 @@ export function normalizeResetPasswordResult(result = {}) {
   const status =
     Number(
       raw?.status ??
-      raw?.statusCode ??
-      raw?.data?.status ??
-      raw?.data?.statusCode ??
-      0
+        raw?.statusCode ??
+        raw?.data?.status ??
+        raw?.data?.statusCode ??
+        0
     ) || 0;
 
   const cooldownSeconds =
     Number(
       raw?.cooldownSeconds ??
-      raw?.retryAfter ??
-      raw?.data?.cooldownSeconds ??
-      raw?.data?.retryAfter ??
-      0
+        raw?.retryAfter ??
+        raw?.data?.cooldownSeconds ??
+        raw?.data?.retryAfter ??
+        0
     ) || 0;
 
   const retryAfter = Math.max(0, cooldownSeconds);
@@ -399,6 +410,33 @@ export function normalizeResetPasswordResult(result = {}) {
     retryAfter,
     emailMasked: safeText(emailMasked, ""),
   };
+}
+
+export function buildResetPasswordCooldownMessage(seconds = 0) {
+  const safeSeconds = Math.max(
+    0,
+    Number(seconds) || 0
+  );
+
+  if (!safeSeconds) {
+    return "Espera un momento antes de volver a intentarlo.";
+  }
+
+  if (safeSeconds === 1) {
+    return "Espera 1 segundo antes de volver a intentarlo.";
+  }
+
+  if (safeSeconds < 60) {
+    return `Espera ${safeSeconds} segundos antes de volver a intentarlo.`;
+  }
+
+  const minutes = Math.ceil(safeSeconds / 60);
+
+  if (minutes === 1) {
+    return "Espera 1 minuto antes de volver a intentarlo.";
+  }
+
+  return `Espera ${minutes} minutos antes de volver a intentarlo.`;
 }
 
 export function resolveResetPasswordErrorMessage(error) {
@@ -518,46 +556,4 @@ export function buildResetPasswordSuccessMessage(result = {}) {
     safeText(normalized.message, "") ||
     DEFAULT_SUCCESS_MESSAGE
   );
-}
-
-export function buildResetPasswordCooldownMessage(seconds = 0) {
-  const safeSeconds = Math.max(
-    0,
-    Number(seconds) || 0
-  );
-
-  if (!safeSeconds) {
-    return "Espera un momento antes de volver a intentarlo.";
-  }
-
-  if (safeSeconds === 1) {
-    return "Espera 1 segundo antes de volver a intentarlo.";
-  }
-
-  if (safeSeconds < 60) {
-    return `Espera ${safeSeconds} segundos antes de volver a intentarlo.`;
-  }
-
-  const minutes = Math.ceil(safeSeconds / 60);
-
-  if (minutes === 1) {
-    return "Espera 1 minuto antes de volver a intentarlo.";
-  }
-
-  return `Espera ${minutes} minutos antes de volver a intentarlo.`;
-}
-
-/* =========================================================
-   MEMORY FLOW
-========================================================= */
-
-export function persistResetPasswordIdentifier(identifier = "") {
-  const value = normalizeIdentifier(identifier);
-
-  if (!value) {
-    clearRememberedIdentifier();
-    return;
-  }
-
-  saveRememberedIdentifier(value);
 }

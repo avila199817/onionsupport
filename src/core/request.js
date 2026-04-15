@@ -9,9 +9,18 @@
    - ejecutar fetch con retry real
    - exponer request base y apiClient
    - no duplicar setError / eventos en reintentos
+
+   HARDENING PRO:
+   - single emit final (sin duplicados en retries)
+   - timeout real con AbortController
+   - merge signals robusto
+   - payload seguro
+   - json/text/blob/arrayBuffer auto
+   - errores consistentes enterprise
 ========================================================= */
 
 import { config } from "./config.js";
+
 import {
   now,
   runHookSeries,
@@ -27,17 +36,19 @@ import {
 } from "./helpers.js";
 
 /* =========================================================
-   RESPONSE PARSING
+   RESPONSE PARSER
 ========================================================= */
+
 export async function parseResponseBody(
   response,
   responseType = "auto"
 ) {
   if (!response) return null;
   if (response.status === 204) return null;
+  if (response.status === 205) return null;
 
   const contentType = String(
-    response.headers.get(
+    response.headers?.get?.(
       "content-type"
     ) || ""
   )
@@ -74,6 +85,9 @@ export async function parseResponseBody(
   if (
     contentType.includes(
       "application/json"
+    ) ||
+    contentType.includes(
+      "+json"
     )
   ) {
     try {
@@ -91,13 +105,14 @@ export async function parseResponseBody(
 }
 
 /* =========================================================
-   REQUEST ERROR
+   ERROR FACTORY
 ========================================================= */
+
 export function buildRequestError({
   response = null,
   data = null,
   url = "",
-  method = "",
+  method = "GET",
   timeout = false,
   aborted = false,
   raw = null,
@@ -107,17 +122,18 @@ export function buildRequestError({
       detectNetworkHints(url);
 
     return {
+      ok: false,
       status: 0,
       statusText: timeout
         ? "Request Timeout"
         : aborted
           ? "Request Aborted"
           : "Network Error",
-      data,
       url,
       method,
       timeout,
       aborted,
+      data,
       raw,
       hints,
       message: timeout
@@ -129,14 +145,16 @@ export function buildRequestError({
   }
 
   return {
+    ok: false,
     status: response.status,
     statusText:
-      response.statusText,
-    data,
+      response.statusText ||
+      "Request Error",
     url,
     method,
     timeout,
     aborted,
+    data,
     raw,
     message:
       data?.message ||
@@ -150,23 +168,31 @@ export function buildRequestError({
 /* =========================================================
    RETRY POLICY
 ========================================================= */
+
 export function shouldRetryRequest(
   error,
-  requestConfig
+  requestConfig = {}
 ) {
-  const method = String(
-    requestConfig?.method ||
-      "GET"
-  ).toUpperCase();
-
   const retries = Number(
     requestConfig?.retries ??
       config.requestRetries ??
       0
   );
 
-  if (retries <= 0) return false;
-  if (!["GET", "HEAD"].includes(method)) {
+  if (retries <= 0) {
+    return false;
+  }
+
+  const method = String(
+    requestConfig?.method ||
+      "GET"
+  ).toUpperCase();
+
+  if (
+    !["GET", "HEAD"].includes(
+      method
+    )
+  ) {
     return false;
   }
 
@@ -178,16 +204,26 @@ export function shouldRetryRequest(
     return true;
   }
 
+  if (error?.status === 0) {
+    return true;
+  }
+
   if (error?.status >= 500) {
     return true;
   }
 
-  if (error?.status === 0) {
+  if (
+    error?.status === 429
+  ) {
     return true;
   }
 
   return false;
 }
+
+/* =========================================================
+   FETCH WITH RETRY
+========================================================= */
 
 export async function executeFetchWithRetry(
   url,
@@ -203,12 +239,12 @@ export async function executeFetchWithRetry(
 
   const baseDelay = Number(
     requestConfig?.retryDelay ??
-      250
+      300
   );
 
   const maxDelay = Number(
     requestConfig?.retryMaxDelay ??
-      3000
+      4000
   );
 
   let attempt = 0;
@@ -216,16 +252,17 @@ export async function executeFetchWithRetry(
 
   while (attempt <= retries) {
     try {
-      return await fetchFactory();
+      return await fetchFactory(
+        attempt
+      );
     } catch (error) {
       lastError = error;
 
-      const normalizedError =
-        error?.status !== undefined
+      const normalized =
+        error?.status !==
+        undefined
           ? error
           : buildRequestError({
-              response: null,
-              data: null,
               url,
               method:
                 requestConfig?.method ||
@@ -235,38 +272,41 @@ export async function executeFetchWithRetry(
                   error
                 ),
               aborted:
-                isAbortError(error),
+                isAbortError(
+                  error
+                ),
               raw:
                 error?.message ||
                 error,
             });
 
+      const canRetry =
+        shouldRetryRequest(
+          normalized,
+          requestConfig
+        );
+
       if (
         attempt >= retries ||
-        !shouldRetryRequest(
-          normalizedError,
-          requestConfig
-        )
+        !canRetry
       ) {
-        throw normalizedError;
+        throw normalized;
       }
 
-      const backoff = Math.min(
-        maxDelay,
-        Math.max(
-          baseDelay,
-          baseDelay *
-            2 ** attempt
-        )
-      );
+      const exponential =
+        baseDelay *
+        2 ** attempt;
+
+      const backoff =
+        Math.min(
+          maxDelay,
+          exponential
+        );
 
       const jitter =
         Math.floor(
           Math.random() *
-            Math.max(
-              1,
-              baseDelay
-            )
+            baseDelay
         );
 
       await utils.sleep(
@@ -283,6 +323,7 @@ export async function executeFetchWithRetry(
 /* =========================================================
    REQUEST FACTORY
 ========================================================= */
+
 export function createRequest({
   state,
   events,
@@ -308,6 +349,8 @@ export function createRequest({
       signal: null,
       retries:
         config.requestRetries,
+      retryDelay: 300,
+      retryMaxDelay: 4000,
       ...options,
       path,
     };
@@ -319,65 +362,49 @@ export function createRequest({
         requestConfig
       );
 
-    const {
-      method = "GET",
-      headers = {},
-      body = null,
-      auth = !isPublicApiPath(
-        requestConfig.path
-      ),
-      timeout =
-        config.requestTimeout,
-      raw = false,
-      responseType = "auto",
-      query = null,
-      credentials = "omit",
-      signal = null,
-      retries =
-        config.requestRetries,
-    } = requestConfig;
+    const method = String(
+      requestConfig.method ||
+        "GET"
+    ).toUpperCase();
 
     const url = buildUrl(
       requestConfig.path,
-      query
+      requestConfig.query
     );
-
-    const upperMethod = String(
-      method || "GET"
-    ).toUpperCase();
 
     const finalHeaders =
       normalizeHeaders({
         Accept:
           "application/json",
-        ...headers,
+        ...requestConfig.headers,
       });
 
     if (
-      auth &&
+      requestConfig.auth &&
       hasValidToken(
-        state.token
+        state?.token
       )
     ) {
-      finalHeaders.Authorization = `${config.auth.bearerPrefix} ${state.token}`;
+      finalHeaders.Authorization =
+        `${config.auth.bearerPrefix} ${state.token}`;
     }
 
     const isFormData =
-      typeof window !==
-        "undefined" &&
       typeof FormData !==
         "undefined" &&
-      body instanceof FormData;
+      requestConfig.body instanceof
+        FormData;
 
-    const isBodyAllowed =
+    const bodyAllowed =
       !["GET", "HEAD"].includes(
-        upperMethod
+        method
       );
 
     if (
+      bodyAllowed &&
+      requestConfig.body !==
+        null &&
       !isFormData &&
-      body !== null &&
-      isBodyAllowed &&
       !finalHeaders[
         "Content-Type"
       ]
@@ -388,30 +415,35 @@ export function createRequest({
     }
 
     const payload =
-      !isBodyAllowed
+      !bodyAllowed
         ? undefined
-        : body === null
+        : requestConfig.body ===
+          null
           ? null
           : isFormData
-            ? body
-            : finalHeaders[
+            ? requestConfig.body
+            : String(
+                finalHeaders[
                   "Content-Type"
-                ]?.includes(
+                ] || ""
+              ).includes(
                   "application/json"
                 )
               ? JSON.stringify(
-                  body
+                  requestConfig.body
                 )
-              : body;
+              : requestConfig.body;
 
     events?.emit?.(
       "app:request:start",
       {
         url,
-        method: upperMethod,
-        auth,
+        method,
+        auth:
+          requestConfig.auth,
         hasBody:
-          body !== null,
+          requestConfig.body !==
+          null,
       }
     );
 
@@ -431,27 +463,29 @@ export function createRequest({
               timeoutId,
             } =
               createAbortTimeout(
-                timeout
+                requestConfig.timeout
               );
 
             const mergedSignal =
-              mergeAbortSignals([
-                controller.signal,
-                signal,
-              ]);
+              mergeAbortSignals(
+                [
+                  controller.signal,
+                  requestConfig.signal,
+                ]
+              );
 
             try {
               return await fetch(
                 url,
                 {
-                  method:
-                    upperMethod,
+                  method,
                   headers:
                     finalHeaders,
                   body: payload,
+                  credentials:
+                    requestConfig.credentials,
                   signal:
                     mergedSignal,
-                  credentials,
                 }
               );
             } finally {
@@ -460,16 +494,14 @@ export function createRequest({
               );
             }
           },
-          {
-            ...requestConfig,
-            retries,
-            method:
-              upperMethod,
-          },
+          requestConfig,
           utils
         );
 
-      if (raw) {
+      if (
+        requestConfig.raw ===
+        true
+      ) {
         const hookedRaw =
           await runHookSeries(
             registry.hooks
@@ -481,8 +513,7 @@ export function createRequest({
           "app:request:success",
           {
             url,
-            method:
-              upperMethod,
+            method,
             status:
               response.status,
             response:
@@ -496,33 +527,16 @@ export function createRequest({
       const data =
         await parseResponseBody(
           response,
-          responseType
+          requestConfig.responseType
         );
 
       if (!response.ok) {
-        const error =
-          buildRequestError({
-            response,
-            data,
-            url,
-            method:
-              upperMethod,
-          });
-
-        setError(error);
-
-        await runHookSeries(
-          registry.hooks
-            .onRequestError,
-          error
-        );
-
-        events?.emit?.(
-          "app:request:error",
-          error
-        );
-
-        throw error;
+        throw buildRequestError({
+          response,
+          data,
+          url,
+          method,
+        });
       }
 
       const hookedData =
@@ -536,8 +550,7 @@ export function createRequest({
         "app:request:success",
         {
           url,
-          method:
-            upperMethod,
+          method,
           status:
             response.status,
           data: hookedData,
@@ -546,55 +559,48 @@ export function createRequest({
 
       return hookedData;
     } catch (error) {
-      const normalizedError =
-        error?.status !== undefined
+      const normalized =
+        error?.status !==
+        undefined
           ? error
           : buildRequestError({
-              response: null,
-              data: null,
               url,
-              method:
-                upperMethod,
+              method,
               timeout:
                 isProbablyTimeoutError(
                   error
                 ),
               aborted:
-                isAbortError(error),
+                isAbortError(
+                  error
+                ),
               raw:
                 error?.message ||
                 error,
             });
 
-      if (
+      normalized.retryable =
         shouldRetryRequest(
-          normalizedError,
-          {
-            ...requestConfig,
-            retries,
-          }
-        )
-      ) {
-        normalizedError.retryable =
-          true;
-      }
+          normalized,
+          requestConfig
+        );
 
-      setError(
-        normalizedError
+      setError?.(
+        normalized
       );
 
       await runHookSeries(
         registry.hooks
           .onRequestError,
-        normalizedError
+        normalized
       );
 
       events?.emit?.(
         "app:request:error",
-        normalizedError
+        normalized
       );
 
-      throw normalizedError;
+      throw normalized;
     }
   }
 
@@ -602,8 +608,9 @@ export function createRequest({
 }
 
 /* =========================================================
-   API CLIENT FACTORY
+   API CLIENT
 ========================================================= */
+
 export function createApiClient(
   request
 ) {

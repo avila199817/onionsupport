@@ -187,6 +187,45 @@ export const AppCore = (() => {
     return state;
   }
 
+  async function runInitHooks(
+    type,
+    payload = {}
+  ) {
+    const series =
+      registry?.hooks?.[type];
+
+    if (
+      !Array.isArray(series) ||
+      !series.length
+    ) {
+      return payload;
+    }
+
+    let current = payload;
+
+    for (const hook of series) {
+      if (
+        typeof hook !==
+        "function"
+      ) {
+        continue;
+      }
+
+      const maybeNext =
+        await hook(current);
+
+      if (
+        maybeNext &&
+        typeof maybeNext ===
+          "object"
+      ) {
+        current = maybeNext;
+      }
+    }
+
+    return current;
+  }
+
   /* =========================================================
      UTILS
   ========================================================= */
@@ -537,6 +576,25 @@ export const AppCore = (() => {
       state.booting = true;
       state.ready = false;
 
+      events.emit(
+        "app:core:init:start",
+        {
+          state:
+            cloneState(state),
+        }
+      );
+
+      await runInitHooks(
+        "beforeInit",
+        {
+          state,
+          dom,
+          config,
+          events,
+          utils,
+        }
+      );
+
       cacheDom({
         dom,
         utils,
@@ -578,6 +636,18 @@ export const AppCore = (() => {
 
       initialized = true;
 
+      await runInitHooks(
+        "afterInit",
+        {
+          state,
+          dom,
+          config,
+          events,
+          utils,
+          api,
+        }
+      );
+
       events.emit(
         "app:core:ready",
         {
@@ -595,6 +665,16 @@ export const AppCore = (() => {
       state.initialized = false;
       state.ready = false;
       state.booting = false;
+
+      events.emit(
+        "app:core:init:error",
+        {
+          error:
+            cloneError(error),
+          state:
+            cloneState(state),
+        }
+      );
 
       setError(error);
 

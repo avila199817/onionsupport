@@ -10,11 +10,29 @@
    - renderizar card principal a la derecha
    - soportar input de usuario o email
    - incluir toast superior derecho desacoplado
+   - usar logo real de empresa según tema activo
    - exponer ids estables para dom.js e index.js
    - mantener compatibilidad total con flujo SPA
 ========================================================= */
 
 import { escapeHtml } from "./reset-password.helpers.js";
+
+/* =========================================================
+   BASICS
+========================================================= */
+
+function safeText(value = "", fallback = "") {
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+
+  const text = String(value).trim();
+  return text || fallback;
+}
+
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
 
 /* =========================================================
    ICONS
@@ -53,48 +71,80 @@ function getBackArrowIcon() {
   `;
 }
 
-function getLogoIcon() {
+/* =========================================================
+   LOGO
+========================================================= */
+
+function renderThemeLogo({
+  darkSrc = "/src/media/img/favicon_white.png",
+  lightSrc = "/src/media/img/favicon_black.png",
+  alt = "Onion Support",
+} = {}) {
   return `
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" width="44" height="44">
-      <path
-        d="M12 3.5 4.5 7.75 12 12l7.5-4.25L12 3.5Z"
-        stroke="currentColor"
-        stroke-width="1.6"
-        stroke-linejoin="round"
+    <span class="login-logo-theme" aria-hidden="true">
+      <img
+        class="login-logo-theme-dark"
+        src="${escapeHtml(darkSrc)}"
+        alt="${escapeHtml(alt)}"
+        width="44"
+        height="44"
+        loading="eager"
+        decoding="async"
       />
-      <path
-        d="M4.5 12.25 12 16.5l7.5-4.25"
-        stroke="currentColor"
-        stroke-width="1.6"
-        stroke-linecap="round"
-        stroke-linejoin="round"
+      <img
+        class="login-logo-theme-light"
+        src="${escapeHtml(lightSrc)}"
+        alt="${escapeHtml(alt)}"
+        width="44"
+        height="44"
+        loading="eager"
+        decoding="async"
       />
-      <path
-        d="M4.5 16.25 12 20.5l7.5-4.25"
-        stroke="currentColor"
-        stroke-width="1.6"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
-    </svg>
+    </span>
   `;
 }
 
-/* =========================================================
-   BASICS
-========================================================= */
+function renderScopedThemeLogoStyle() {
+  return `
+    <style>
+      .login-logo-theme{
+        position:relative;
+        display:block;
+        width:44px;
+        height:44px;
+        z-index:1;
+      }
 
-function safeText(value = "", fallback = "") {
-  if (value === null || value === undefined) {
-    return fallback;
-  }
+      .login-logo-theme img{
+        position:absolute;
+        inset:0;
+        width:44px;
+        height:44px;
+        object-fit:contain;
+        display:block;
+      }
 
-  const text = String(value).trim();
-  return text || fallback;
-}
+      .login-logo-theme-dark{
+        opacity:1;
+        visibility:visible;
+      }
 
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
+      .login-logo-theme-light{
+        opacity:0;
+        visibility:hidden;
+      }
+
+      [data-theme="light"] .login-logo-theme-dark{
+        opacity:0;
+        visibility:hidden;
+      }
+
+      [data-theme="light"] .login-logo-theme-light{
+        opacity:1;
+        visibility:visible;
+      }
+    </style>
+  `;
 }
 
 /* =========================================================
@@ -172,17 +222,17 @@ function renderSignalItem(text = "") {
 }
 
 function renderLeftPanel({
-  heroEyebrow = "Recuperación segura · Panel operativo",
-  heroTitle = "Recupera el acceso de forma protegida",
+  heroEyebrow = "ONION SUPPORT · RECUPERACIÓN PROTEGIDA",
+  heroTitle = "Recuperación segura del acceso al panel",
   bullets = [],
 } = {}) {
   const finalSignals =
     safeArray(bullets).filter(Boolean).length
       ? safeArray(bullets).filter(Boolean)
       : [
-          "Validación de usuario o email",
-          "Flujo seguro desacoplado del acceso principal",
-          "Recuperación guiada alineada al panel",
+          "Validación segura de usuario o email",
+          "Flujo protegido desacoplado del acceso principal",
+          "Recuperación guiada alineada al entorno operativo",
         ];
 
   return `
@@ -210,14 +260,21 @@ function renderLeftPanel({
 function renderForm({
   appName = "Onion Support",
   title = "Recuperar acceso",
-  subtitle = "Introduce tu usuario o email y te enviaremos las instrucciones para restablecer el acceso.",
+  subtitle = "",
   rememberedIdentifier = "",
   submitLabel = "Enviar enlace",
   identifierPlaceholder = "Usuario o email",
   backLabel = "Volver al acceso",
   backHref = "/login",
-  footerText = "Recuperación protegida. Usa un identificador válido de tu cuenta corporativa.",
+  footerText = "Entorno protegido. Usa un identificador válido de tu cuenta corporativa.",
+  logoDarkSrc = "/src/media/img/favicon_white.png",
+  logoLightSrc = "/src/media/img/favicon_black.png",
 } = {}) {
+  const finalSubtitle = safeText(
+    subtitle,
+    `Recuperar acceso a ${appName}`
+  );
+
   return `
     <section
       class="login-stage login-stage--right"
@@ -230,18 +287,17 @@ function renderForm({
         >
           <header class="login-header">
             <div class="logo-fade" aria-hidden="true">
-              ${getLogoIcon()}
+              ${renderThemeLogo({
+                darkSrc: logoDarkSrc,
+                lightSrc: logoLightSrc,
+                alt: appName,
+              })}
             </div>
 
             <h2>${escapeHtml(title)}</h2>
 
             <p class="login-subtitle">
-              ${escapeHtml(
-                safeText(
-                  subtitle,
-                  `Recupera el acceso a ${appName}.`
-                )
-              )}
+              ${escapeHtml(finalSubtitle)}
             </p>
           </header>
 
@@ -321,6 +377,8 @@ export function getResetPasswordTemplate(options = {}) {
   );
 
   return `
+    ${renderScopedThemeLogoStyle()}
+
     <section
       class="login-view reset-password-view"
       data-view="reset-password"

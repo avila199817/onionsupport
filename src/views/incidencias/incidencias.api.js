@@ -1,16 +1,7 @@
 /* =========================================================
    Onion SPA - Incidencias API
    Archivo: src/views/incidencias/incidencias.api.js
-
-   Responsabilidades:
-   - cargar incidencias desde backend
-   - estrategia cache-first inteligente
-   - hidratar store
-   - persistir cache local
-   - controlar inflight requests
-   - tolerar respuestas heterogéneas
-   - debug extremo de carga
-   - fallback robusto cuando backend cambia payload
+   EXTREME MODE FIXED
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -28,9 +19,7 @@ import {
   setLastSyncAt,
 } from "./incidencias.state.js";
 
-import {
-  safeNumber,
-} from "./incidencias.utils.js";
+import { safeNumber } from "./incidencias.utils.js";
 
 import {
   extractItems,
@@ -53,26 +42,15 @@ function getStorageApi() {
 }
 
 function buildStorageKey() {
-  return `${
-    AppCore.config?.storagePrefix ||
-    "onion"
-  }:${CACHE_KEY}`;
+  return `${AppCore.config?.storagePrefix || "onion"}:${CACHE_KEY}`;
 }
 
 function saveCache(payload) {
   try {
-    const storage =
-      getStorageApi();
+    const storage = getStorageApi();
 
-    if (
-      storage &&
-      typeof storage.set ===
-        "function"
-    ) {
-      storage.set(
-        CACHE_KEY,
-        payload
-      );
+    if (storage?.set) {
+      storage.set(CACHE_KEY, payload);
       return;
     }
 
@@ -80,180 +58,85 @@ function saveCache(payload) {
       buildStorageKey(),
       JSON.stringify(payload)
     );
-  } catch (error) {
-    AppCore?.utils?.warn?.(
-      "[Incidencias] saveCache error:",
-      error
-    );
-  }
+  } catch {}
 }
 
 function readCache() {
   try {
-    const storage =
-      getStorageApi();
+    const storage = getStorageApi();
 
-    if (
-      storage &&
-      typeof storage.get ===
-        "function"
-    ) {
-      return storage.get(
-        CACHE_KEY
-      );
+    if (storage?.get) {
+      return storage.get(CACHE_KEY);
     }
 
-    const raw =
-      localStorage.getItem(
-        buildStorageKey()
-      );
+    const raw = localStorage.getItem(buildStorageKey());
 
-    return raw
-      ? JSON.parse(raw)
-      : null;
+    return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
   }
 }
 
 function isFreshCache(cache) {
-  if (!cache?.timestamp) {
-    return false;
-  }
-
   return (
-    Date.now() -
-      safeNumber(
-        cache.timestamp,
-        0
-      ) <
-    CACHE_TTL
+    cache?.timestamp &&
+    Date.now() - safeNumber(cache.timestamp, 0) < CACHE_TTL
   );
 }
 
 /* =========================================================
-   RESPONSE HELPERS
+   RESPONSE
 ========================================================= */
 
-function fallbackExtractItems(
-  response
-) {
-  if (!response) {
-    return [];
-  }
+function fallbackExtractItems(response) {
+  const candidates = [
+    response,
+    response?.items,
+    response?.data,
+    response?.data?.items,
+    response?.data?.data,
+    response?.data?.data?.items,
+    response?.rows,
+    response?.resources,
+    response?.result,
+  ];
 
-  if (
-    Array.isArray(response)
-  ) {
-    return response;
-  }
-
-  if (
-    Array.isArray(
-      response.items
-    )
-  ) {
-    return response.items;
-  }
-
-  if (
-    Array.isArray(
-      response.data
-    )
-  ) {
-    return response.data;
-  }
-
-  if (
-    Array.isArray(
-      response.resources
-    )
-  ) {
-    return response.resources;
-  }
-
-  if (
-    Array.isArray(
-      response.rows
-    )
-  ) {
-    return response.rows;
-  }
-
-  if (
-    Array.isArray(
-      response.data?.items
-    )
-  ) {
-    return response.data.items;
-  }
-
-  if (
-    Array.isArray(
-      response.data?.rows
-    )
-  ) {
-    return response.data.rows;
-  }
-
-  if (
-    Array.isArray(
-      response.result
-    )
-  ) {
-    return response.result;
+  for (const item of candidates) {
+    if (Array.isArray(item)) {
+      return item;
+    }
   }
 
   return [];
 }
 
-function resolveItems(
-  response
-) {
+function resolveItems(response) {
   try {
-    const items =
-      extractItems(
-        response
-      );
+    const items = extractItems(response);
 
-    if (
-      Array.isArray(items)
-    ) {
+    if (Array.isArray(items)) {
       return items;
     }
   } catch {}
 
-  return fallbackExtractItems(
-    response
-  );
+  return fallbackExtractItems(response);
 }
 
 /* =========================================================
-   CACHE HYDRATION
+   CACHE
 ========================================================= */
 
 export function hydrateFromCache() {
-  const cache =
-    readCache();
+  const cache = readCache();
 
-  if (
-    !cache ||
-    !Array.isArray(
-      cache.items
-    )
-  ) {
+  if (!Array.isArray(cache?.items)) {
     return false;
   }
 
-  const items =
-    cache.items.map(
-      normalizeIncidencia
-    );
+  /* YA ESTÁN NORMALIZADOS */
+  setIncidencias(cache.items);
 
-  setIncidencias(items);
-  setLastSyncAt(
-    cache.timestamp
-  );
+  setLastSyncAt(cache.timestamp || Date.now());
   setLoaded(true);
 
   return true;
@@ -266,120 +149,76 @@ export function hydrateFromCache() {
 export async function loadIncidencias({
   force = false,
 } = {}) {
-  const inflight =
-    getInflightLoad();
+  const inflight = getInflightLoad();
 
-  if (
-    inflight &&
-    !force
-  ) {
+  if (inflight && !force) {
     return inflight;
   }
 
-  const cache =
-    readCache();
+  const cache = readCache();
 
-  if (
-    !incidenciasState.loaded &&
-    cache?.items?.length
-  ) {
+  if (!incidenciasState.loaded && cache?.items?.length) {
     hydrateFromCache();
   }
 
-  if (
-    isFreshCache(
-      cache
-    ) &&
-    !force
-  ) {
-    return Promise.resolve(
-      getIncidencias()
-    );
+  if (isFreshCache(cache) && !force) {
+    return Promise.resolve(getIncidencias());
   }
 
   setLoading(true);
   setError(null);
 
-  const request =
-    (async () => {
-      try {
-        AppCore?.utils?.log?.(
-          "[Incidencias] GET",
-          ENDPOINT
-        );
+  const request = (async () => {
+    try {
+      AppCore?.utils?.log?.("[Incidencias] GET", ENDPOINT);
 
-        const response =
-          await Http.get(
-            ENDPOINT
-          );
+      const response = await Http.get(ENDPOINT);
 
-        AppCore?.utils?.log?.(
-          "[Incidencias] response:",
-          response
-        );
+      AppCore?.utils?.log?.("[Incidencias] RAW:", response);
 
-        const rawItems =
-          resolveItems(
-            response
-          );
+      const rawItems = resolveItems(response);
 
-        const items =
-          rawItems.map(
-            normalizeIncidencia
-          );
+      const items = Array.isArray(rawItems)
+        ? rawItems.map(normalizeIncidencia)
+        : [];
 
-        setIncidencias(
-          items
-        );
+      setIncidencias(items);
 
-        const now =
-          Date.now();
+      const now = Date.now();
 
-        setLastSyncAt(
-          now
-        );
-        setLoaded(true);
-        setLoading(false);
-        setError(null);
+      setLastSyncAt(now);
+      setLoaded(true);
+      setLoading(false);
+      setError(null);
 
-        saveCache({
-          timestamp: now,
-          items,
-        });
+      saveCache({
+        timestamp: now,
+        items,
+      });
 
-        AppCore?.utils?.log?.(
-          "[Incidencias] loaded:",
-          items.length
-        );
+      AppCore?.utils?.log?.(
+        "[Incidencias] loaded:",
+        items.length
+      );
 
-        return items;
-      } catch (error) {
-        AppCore?.utils?.error?.(
-          "[Incidencias] load error:",
-          error
-        );
+      return items;
+    } catch (error) {
+      setLoading(false);
+      setLoaded(true);
 
-        setLoading(false);
-        setLoaded(true);
+      setError(
+        error?.data?.message ||
+          error?.message ||
+          "No se pudieron cargar las incidencias."
+      );
 
-        setError(
-          error?.data
-            ?.message ||
-            error?.message ||
-            "No se pudieron cargar las incidencias."
-        );
+      throw error;
+    } finally {
+      setInflightLoad(null);
+    }
+  })();
 
-        throw error;
-      } finally {
-        setInflightLoad(
-          null
-        );
-      }
-    })();
-
-  setInflightLoad(
-    request
-  );
+  setInflightLoad(request);
 
   return request;
 }

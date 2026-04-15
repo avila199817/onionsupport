@@ -3,142 +3,222 @@
    Archivo: src/app/router.js
 
    Responsabilidades:
-   - configurar dependencias del router
-   - bind del router una sola vez
-   - lanzar la primera renderización controlada
-   - sincronizar publicPath tras render
-   - aplicar política visual post-render
+   - configurar Router con dependencias
+   - bind listeners una sola vez
+   - render inicial robusto
+   - sincronizar route/publicPath tras primer paint
+   - integrarse con loader boot
+   - tolerar fallos sin romper SPA
 
    HARDENING PRO:
-   - await real del primer render
-   - guards estrictos
-   - no doble first-render
-   - sync robusta de publicPath
-   - tolerancia si Router falla
+   - idempotencia total
+   - safe logs
+   - fallback route "/"
+   - render serializado
 ========================================================= */
+
+import { AppCore } from "../core/index.js";
+import { Router } from "../router/index.js";
+import { Auth } from "../features/auth/index.js";
 
 import {
   getCurrentPath,
   getCurrentPublicPath,
 } from "./helpers.js";
 
+import {
+  applyPostRenderLoaderPolicy,
+} from "./shell.js";
+
+/* =========================================================
+   STATE
+========================================================= */
+
+let configured = false;
+let bound = false;
+let firstRenderDone = false;
+
+/* =========================================================
+   HELPERS
+========================================================= */
+
+function safeLog(...args) {
+  try {
+    AppCore?.utils?.log?.(...args);
+  } catch {}
+}
+
+function safeWarn(...args) {
+  try {
+    AppCore?.utils?.warn?.(...args);
+  } catch {}
+}
+
+function safeError(...args) {
+  try {
+    AppCore?.utils?.error?.(...args);
+  } catch {
+    console.error(...args);
+  }
+}
+
 /* =========================================================
    CONFIGURE
 ========================================================= */
-export function configureRouter({
-  Router,
-  AppCore,
-  Auth,
-  state,
-} = {}) {
-  if (!Router || !AppCore) {
-    return false;
+
+export function configureRouter() {
+  if (configured) {
+    return Router;
   }
 
-  if (state?.routerConfigured) {
-    return true;
+  try {
+    if (
+      typeof Router?.configure ===
+      "function"
+    ) {
+      Router.configure({
+        core: AppCore,
+        auth: Auth,
+      });
+    }
+
+    configured = true;
+
+    safeLog(
+      "Router configurado."
+    );
+  } catch (error) {
+    safeError(
+      "Error configurando Router:",
+      error
+    );
   }
 
-  if (
-    typeof Router.configure ===
-    "function"
-  ) {
-    Router.configure({
-      core: AppCore,
-      auth: Auth,
-    });
-  }
-
-  if (state) {
-    state.routerConfigured = true;
-  }
-
-  return true;
+  return Router;
 }
 
 /* =========================================================
    BIND
 ========================================================= */
-export function bindRouter({
-  Router,
-  state,
-} = {}) {
-  if (!Router) {
-    return false;
+
+export function bindRouter() {
+  configureRouter();
+
+  if (bound) {
+    return Router;
   }
-
-  if (state?.routerBound) {
-    return true;
-  }
-
-  if (
-    typeof Router.bind ===
-    "function"
-  ) {
-    Router.bind();
-  }
-
-  if (state) {
-    state.routerBound = true;
-  }
-
-  return true;
-}
-
-/* =========================================================
-   FIRST RENDER
-========================================================= */
-export async function renderInitialRoute({
-  AppCore,
-  Router,
-  applyPostRenderLoaderPolicy,
-} = {}) {
-  if (!AppCore || !Router) {
-    return false;
-  }
-
-  const currentPath =
-    getCurrentPath(AppCore);
 
   try {
     if (
-      typeof Router.render ===
+      typeof Router?.bind ===
       "function"
     ) {
+      Router.bind();
+    }
+
+    bound = true;
+
+    safeLog(
+      "Router listeners activos."
+    );
+  } catch (error) {
+    safeError(
+      "Error bind Router:",
+      error
+    );
+  }
+
+  return Router;
+}
+
+/* =========================================================
+   INITIAL RENDER
+========================================================= */
+
+export async function renderInitialRoute() {
+  bindRouter();
+
+  const path =
+    getCurrentPath(
+      AppCore
+    ) || "/";
+
+  try {
+    safeLog(
+      "Render inicial:",
+      path
+    );
+
+    await Promise.resolve(
+      Router.render(
+        path,
+        {
+          replaceState: true,
+          force: true,
+        }
+      )
+    );
+
+    const publicPath =
+      getCurrentPublicPath(
+        AppCore
+      ) || path;
+
+    AppCore?.setRoute?.(path);
+    AppCore?.setPublicPath?.(
+      publicPath
+    );
+
+    applyPostRenderLoaderPolicy?.(
+      AppCore
+    );
+
+    firstRenderDone = true;
+
+    safeLog(
+      "Render inicial completado."
+    );
+
+    return true;
+  } catch (error) {
+    safeWarn(
+      "Fallo render inicial. Fallback '/'.",
+      error
+    );
+
+    try {
       await Promise.resolve(
         Router.render(
-          currentPath,
+          "/",
           {
-            skipHistory: true,
             replaceState: true,
             force: true,
           }
         )
       );
-    }
 
-    if (
-      typeof AppCore.setPublicPath ===
-      "function"
-    ) {
-      AppCore.setPublicPath(
-        getCurrentPublicPath(
-          AppCore
-        )
+      firstRenderDone = true;
+
+      return true;
+    } catch (fatal) {
+      safeError(
+        "Render inicial fatal:",
+        fatal
       );
+
+      return false;
     }
-
-    applyPostRenderLoaderPolicy?.();
-
-    return true;
-  } catch (error) {
-    AppCore?.utils?.error?.(
-      "First render error:",
-      error
-    );
-
-    applyPostRenderLoaderPolicy?.();
-
-    throw error;
   }
+}
+
+/* =========================================================
+   PUBLIC API
+========================================================= */
+
+export function getRouterBootstrapState() {
+  return {
+    configured,
+    bound,
+    firstRenderDone,
+  };
 }

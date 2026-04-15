@@ -94,8 +94,28 @@ export function safeParse(
   value,
   fallback = null
 ) {
+  if (value === undefined) {
+    return fallback;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  if (
+    typeof value === "object"
+  ) {
+    return value;
+  }
+
+  const raw = String(value).trim();
+
+  if (!raw) {
+    return fallback;
+  }
+
   try {
-    return JSON.parse(value);
+    return JSON.parse(raw);
   } catch {
     return fallback;
   }
@@ -247,6 +267,11 @@ export function normalizePath(
     "/"
   );
 
+  raw = raw.replace(
+    /\/\.(?=\/|$)/g,
+    "/"
+  );
+
   const hashIndex =
     raw.indexOf("#");
 
@@ -298,6 +323,43 @@ export function normalizePath(
 
   cleanPathname =
     cleanPathname || "/";
+
+  const segments =
+    cleanPathname.split("/");
+  const normalizedSegments =
+    [];
+
+  segments.forEach(
+    (segment) => {
+      if (
+        !segment ||
+        segment === "."
+      ) {
+        return;
+      }
+
+      if (segment === "..") {
+        normalizedSegments.pop();
+        return;
+      }
+
+      normalizedSegments.push(
+        segment
+      );
+    }
+  );
+
+  cleanPathname = `/${normalizedSegments.join(
+    "/"
+  )}` || "/";
+
+  if (cleanPathname !== "/") {
+    cleanPathname =
+      cleanPathname.replace(
+        /\/+$/,
+        ""
+      );
+  }
 
   return `${cleanPathname}${suffix}`;
 }
@@ -393,10 +455,7 @@ export function buildUrl(
         );
 
   if (
-    !query ||
-    !isPlainObject(query) ||
-    Object.keys(query)
-      .length === 0
+    !query
   ) {
     return baseUrl;
   }
@@ -411,7 +470,23 @@ export function buildUrl(
     origin
   );
 
-  Object.entries(query).forEach(
+  const queryEntries =
+    query instanceof
+    URLSearchParams
+      ? Array.from(
+          query.entries()
+        )
+      : isPlainObject(query)
+        ? Object.entries(query)
+        : [];
+
+  if (
+    !queryEntries.length
+  ) {
+    return baseUrl;
+  }
+
+  queryEntries.forEach(
     ([key, value]) => {
       if (
         value === undefined ||
@@ -439,6 +514,27 @@ export function buildUrl(
           }
         );
 
+        return;
+      }
+
+      if (value instanceof Date) {
+        url.searchParams.set(
+          key,
+          value.toISOString()
+        );
+        return;
+      }
+
+      if (
+        typeof value ===
+        "object"
+      ) {
+        url.searchParams.set(
+          key,
+          JSON.stringify(
+            value
+          )
+        );
         return;
       }
 
@@ -696,6 +792,13 @@ export async function runHookSeries(
   let current = payload;
 
   for (const hook of hooks) {
+    if (
+      typeof hook !==
+      "function"
+    ) {
+      continue;
+    }
+
     try {
       const result =
         await hook(current);
@@ -774,16 +877,33 @@ export function createAbortTimeout(
 export function normalizeHeaders(
   headers = {}
 ) {
-  return Object.entries(
-    headers || {}
-  ).reduce(
+  const source =
+    headers instanceof Headers
+      ? Array.from(
+          headers.entries()
+        )
+      : Array.isArray(headers)
+        ? headers
+        : Object.entries(
+            headers || {}
+          );
+
+  return source.reduce(
     (acc, [key, value]) => {
+      const normalizedKey =
+        String(key || "").trim();
+
+      if (!normalizedKey) {
+        return acc;
+      }
+
       if (
         value !== undefined &&
         value !== null &&
         value !== ""
       ) {
-        acc[key] = value;
+        acc[normalizedKey] =
+          value;
       }
 
       return acc;
@@ -812,6 +932,21 @@ export function mergeAbortSignals(
 
   const controller =
     new AbortController();
+  const cleanups = [];
+
+  function teardown() {
+    cleanups.forEach(
+      (cleanup) => {
+        try {
+          cleanup?.();
+        } catch {
+          /* noop */
+        }
+      }
+    );
+
+    cleanups.length = 0;
+  }
 
   function abortFrom(
     sourceSignal
@@ -830,6 +965,8 @@ export function mergeAbortSignals(
       );
     } catch {
       controller.abort();
+    } finally {
+      teardown();
     }
   }
 
@@ -842,13 +979,22 @@ export function mergeAbortSignals(
         return;
       }
 
+      const onAbort = () => {
+        abortFrom(signal);
+      };
+
       signal.addEventListener(
         "abort",
-        () => {
-          abortFrom(signal);
-        },
+        onAbort,
         { once: true }
       );
+
+      cleanups.push(() => {
+        signal.removeEventListener(
+          "abort",
+          onAbort
+        );
+      });
     }
   );
 

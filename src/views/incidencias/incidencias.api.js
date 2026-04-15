@@ -1,380 +1,285 @@
 /* =========================================================
-   Onion SPA - Incidencias View
-   Archivo: src/views/incidencias/IncidenciasView.js
+   Onion SPA - Incidencias API
+   Archivo: src/views/incidencias/incidencias.api.js
 
    Responsabilidades:
-   - actuar como visor principal de incidencias
-   - renderizar header + tabla premium del módulo
-   - cargar datos iniciales y refrescos
-   - bind de eventos de la vista
-   - evitar doble bind de listeners
-   - soportar destroy limpio del router
-   - permitir reload con rerender
-   - desacoplar la orquestación de la capa template
-
-   HARDENING PRO:
-   - init serializado
-   - anti-race con token de render
-   - tolerancia a hydrate cache + carga remota
-   - rerender seguro tras refresh
-   - cleanup sólido por scope
+   - centralizar las llamadas HTTP del módulo de incidencias
+   - exponer operaciones de listado y detalle
+   - soportar refresh forzado
+   - aislar la vista del acceso directo al apiClient
+   - mantener endpoints y timeouts en un único punto
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 
 import {
   incidenciasState,
-  setHydrated,
+  setLoading,
+  setRefreshing,
+  setError,
+  setItems,
+  setRemoteCount,
+  setLastSyncAt,
 } from "./incidencias.state.js";
 
 import {
-  loadIncidencias,
-  hydrateFromCache,
-} from "./incidencias.api.js";
-
-import {
-  getIncidencias,
-  sortIncidenciasByUpdatedDesc,
+  replaceIncidenciasStore,
 } from "./incidencias.store.js";
 
-import {
-  renderHeader,
-  renderTable,
-} from "./incidencias.table.template.js";
+/* =========================================================
+   CONFIG
+========================================================= */
 
-import {
-  bindIncidenciasEvents,
-} from "./incidencias.bindings.js";
+const INCIDENCIAS_ENDPOINT =
+  "/api/incidencias";
 
-import {
-  openTicket,
-} from "./incidencias.actions.js";
+const INCIDENCIAS_TIMEOUT =
+  15000;
 
-export const IncidenciasView = (() => {
-  "use strict";
+/* =========================================================
+   CORE HELPERS
+========================================================= */
 
-  const SCOPE = "view:incidencias";
+function getApiClient() {
+  const client =
+    AppCore?.apiClient;
 
-  let initialized = false;
-  let destroyed = false;
-  let bindingsCleanup = null;
-  let renderToken = 0;
-  let inflightInit = null;
-  let inflightReload = null;
-
-  /* =====================================================
-     HELPERS
-  ===================================================== */
-
-  function safeLog(...args) {
-    try {
-      AppCore?.utils?.log?.(
-        "[IncidenciasView]",
-        ...args
-      );
-    } catch {}
-  }
-
-  function safeWarn(...args) {
-    try {
-      AppCore?.utils?.warn?.(
-        "[IncidenciasView]",
-        ...args
-      );
-    } catch {}
-  }
-
-  function safeError(...args) {
-    try {
-      AppCore?.utils?.error?.(
-        "[IncidenciasView]",
-        ...args
-      );
-    } catch {}
-  }
-
-  function getContainer() {
-    return (
-      AppCore?.dom?.viewContainer ||
-      document.getElementById(
-        "view-container"
-      ) ||
-      null
+  if (!client) {
+    throw new Error(
+      "INCIDENCIAS_API_CLIENT_UNAVAILABLE"
     );
   }
 
-  function getItems() {
-    try {
-      return sortIncidenciasByUpdatedDesc(
-        getIncidencias()
-      );
-    } catch (error) {
-      safeWarn(
-        "getItems falló:",
-        error
-      );
-      return [];
-    }
-  }
+  return client;
+}
 
-  function nextRenderToken() {
-    renderToken += 1;
-    return renderToken;
-  }
+function getTicketEndpoint(
+  id = ""
+) {
+  const ticketId = String(
+    id ?? ""
+  ).trim();
 
-  function isActiveToken(token) {
-    return (
-      !destroyed &&
-      token === renderToken
+  if (!ticketId) {
+    throw new Error(
+      "INCIDENCIA_ID_REQUIRED"
     );
   }
 
-  function cleanupBindings() {
-    try {
-      bindingsCleanup?.();
-    } catch (error) {
-      safeWarn(
-        "cleanupBindings falló:",
-        error
-      );
-    }
+  return `${INCIDENCIAS_ENDPOINT}/${encodeURIComponent(
+    ticketId
+  )}`;
+}
 
-    bindingsCleanup = null;
+function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
+}
 
-    try {
-      AppCore?.cleanup?.run?.(
-        SCOPE
-      );
-    } catch {}
-  }
-
-  function bind() {
-    cleanupBindings();
-
-    const maybeCleanup =
-      bindIncidenciasEvents({
-        scope: SCOPE,
-        loadIncidencias,
-        openTicket,
-        rerender: render,
-        reload,
-      });
-
-    if (
-      typeof maybeCleanup ===
-      "function"
-    ) {
-      bindingsCleanup =
-        maybeCleanup;
-    }
-  }
-
-  function buildHtml() {
-    const items = getItems();
-
-    return `
-      <section class="panel-content dashboard ready">
-        <div class="content-wrapper">
-          ${renderHeader({
-            items,
-            state: incidenciasState,
-          })}
-
-          ${renderTable({
-            items,
-            state: incidenciasState,
-          })}
-        </div>
-      </section>
-    `;
-  }
-
-  /* =====================================================
-     RENDER
-  ===================================================== */
-
-  function render() {
-    const container =
-      getContainer();
-
-    if (!container) {
-      safeWarn(
-        "No se encontró #view-container."
-      );
-      return null;
-    }
-
-    AppCore?.setDocumentTitle?.(
-      "Incidencias"
-    );
-
-    AppCore?.clearDynamicContainers?.();
-
-    container.innerHTML =
-      buildHtml();
-
-    setHydrated(true);
-
-    return container;
-  }
-
-  /* =====================================================
-     LOAD + RENDER
-  ===================================================== */
-
-  async function renderAndLoad({
-    force = false,
-  } = {}) {
-    const token =
-      nextRenderToken();
-
-    try {
-      hydrateFromCache?.();
-    } catch (error) {
-      safeWarn(
-        "hydrateFromCache falló:",
-        error
-      );
-    }
-
-    render();
-
-    try {
-      await loadIncidencias({
-        force,
-      });
-    } catch (error) {
-      safeWarn(
-        "loadIncidencias falló:",
-        error
-      );
-    }
-
-    if (!isActiveToken(token)) {
-      return api;
-    }
-
-    render();
-
-    return api;
-  }
-
-  async function reload(
-    options = {}
+function pickItems(
+  payload = null
+) {
+  if (
+    Array.isArray(payload)
   ) {
-    if (destroyed) {
-      return api;
-    }
-
-    if (inflightReload) {
-      return inflightReload;
-    }
-
-    inflightReload =
-      (async () => {
-        try {
-          await renderAndLoad({
-            force: true,
-            ...options,
-          });
-        } catch (error) {
-          safeWarn(
-            "reload falló:",
-            error
-          );
-        }
-
-        if (!destroyed) {
-          bind();
-        }
-
-        return api;
-      })();
-
-    try {
-      return await inflightReload;
-    } finally {
-      inflightReload = null;
-    }
+    return payload;
   }
 
-  /* =====================================================
-     INIT
-  ===================================================== */
+  if (
+    Array.isArray(
+      payload?.items
+    )
+  ) {
+    return payload.items;
+  }
 
-  async function init() {
+  if (
+    Array.isArray(
+      payload?.data
+    )
+  ) {
+    return payload.data;
+  }
+
+  if (
+    Array.isArray(
+      payload?.results
+    )
+  ) {
+    return payload.results;
+  }
+
+  if (
+    Array.isArray(
+      payload?.rows
+    )
+  ) {
+    return payload.rows;
+  }
+
+  return [];
+}
+
+function pickTotal(
+  payload = null,
+  fallback = 0
+) {
+  const candidates = [
+    payload?.total,
+    payload?.count,
+    payload?.remoteCount,
+    payload?.pagination
+      ?.total,
+    fallback,
+  ];
+
+  for (const value of candidates) {
+    const num =
+      Number(value);
+
     if (
-      initialized &&
-      inflightInit
+      Number.isFinite(
+        num
+      )
     ) {
-      return inflightInit;
-    }
-
-    destroyed = false;
-    initialized = true;
-
-    inflightInit =
-      (async () => {
-        safeLog("init");
-
-        try {
-          await renderAndLoad();
-        } catch (error) {
-          safeError(
-            "init renderAndLoad falló:",
-            error
-          );
-        }
-
-        if (!destroyed) {
-          bind();
-        }
-
-        return api;
-      })();
-
-    try {
-      return await inflightInit;
-    } finally {
-      inflightInit = null;
+      return num;
     }
   }
 
-  /* =====================================================
-     DESTROY
-  ===================================================== */
+  return fallback;
+}
 
-  function destroy() {
-    destroyed = true;
-    initialized = false;
+/* =========================================================
+   RAW REQUESTS
+========================================================= */
 
-    nextRenderToken();
-    cleanupBindings();
+export async function fetchIncidenciasRequest() {
+  return getApiClient().get(
+    INCIDENCIAS_ENDPOINT,
+    {
+      timeout:
+        INCIDENCIAS_TIMEOUT,
+      auth: true,
+    }
+  );
+}
 
-    safeLog("destroy");
+export async function getIncidenciaByIdRequest(
+  id
+) {
+  return getApiClient().get(
+    getTicketEndpoint(
+      id
+    ),
+    {
+      timeout:
+        INCIDENCIAS_TIMEOUT,
+      auth: true,
+    }
+  );
+}
+
+/* =========================================================
+   CACHE HYDRATE
+========================================================= */
+
+export function hydrateFromCache() {
+  try {
+    const current =
+      safeArray(
+        incidenciasState?.items
+      );
+
+    if (
+      current.length
+    ) {
+      replaceIncidenciasStore(
+        current
+      );
+    }
+
+    return current;
+  } catch {
+    return [];
   }
+}
 
-  /* =====================================================
-     API
-  ===================================================== */
+/* =========================================================
+   HIGH LEVEL LOAD
+========================================================= */
 
-  const api = {
-    init,
-    render,
-    reload,
-    destroy,
-    loadIncidencias,
+export async function loadIncidencias({
+  force = false,
+} = {}) {
+  const firstLoad =
+    !incidenciasState?.hydrated;
 
-    get initialized() {
-      return initialized;
-    },
+  try {
+    setError("");
 
-    get destroyed() {
-      return destroyed;
-    },
-  };
+    if (
+      firstLoad &&
+      !force
+    ) {
+      setLoading(
+        true
+      );
+    } else {
+      setRefreshing(
+        true
+      );
+    }
 
-  return api;
-})();
+    const response =
+      await fetchIncidenciasRequest();
 
-export default IncidenciasView;
+    const items =
+      pickItems(
+        response
+      );
+
+    const list =
+      safeArray(
+        items
+      );
+
+    replaceIncidenciasStore(
+      list
+    );
+
+    setItems(list);
+
+    setRemoteCount(
+      pickTotal(
+        response,
+        list.length
+      )
+    );
+
+    setLastSyncAt(
+      Date.now()
+    );
+
+    return list;
+  } catch (error) {
+    console.error(
+      "❌ INCIDENCIAS LOAD:",
+      error
+    );
+
+    setError(
+      error?.message ||
+        "No se pudieron cargar las incidencias."
+    );
+
+    throw error;
+  } finally {
+    setLoading(
+      false
+    );
+    setRefreshing(
+      false
+    );
+  }
+}

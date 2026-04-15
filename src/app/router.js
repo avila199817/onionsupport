@@ -222,3 +222,10 @@ export function getRouterBootstrapState() {
     firstRenderDone,
   };
 }
+
+export default {
+  configureRouter,
+  bindRouter,
+  renderInitialRoute,
+  getRouterBootstrapState,
+};

@@ -5,73 +5,35 @@
    Responsabilidades:
    - orquestar la vista de recuperación de acceso
    - renderizar template auth pro
-   - conectar dom, helpers, core, auth y toast
+   - conectar dom, core, toast y flujo reset-password
    - gestionar submit y feedback visual
    - activar / limpiar modo auth-screen del body
    - mantener cleanup de listeners
    - exponer compatibilidad default + named export
-
-   HARDENING:
-   - evita reactivar ui al navegar
-   - soporta executor desde deps o Auth
-   - tolera back link SPA / router / location
-   - evita dobles submits
-   - mantiene loader global apagado en auth
-   - fija ruta pública /reset-password
-   - endurece navegación y cleanup
-   - evita mensajes contradictorios success/cooldown
-   - unifica ids de toast por flujo
+   - soportar recuperación con usuario o email
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
-import { Auth } from "../../features/auth/index.js";
 import Toast from "../../ui/toast/index.js";
 
 import getResetPasswordTemplate from "./reset-password.template.js";
 
 import {
+  safeText,
+} from "./reset-password.helpers.js";
+
+import {
   getResetPasswordRefs,
   clearResetPasswordErrors,
-  applyResetPasswordErrors,
   setGlobalResetPasswordError,
   setResetPasswordLoading,
-  shakeResetPasswordCard,
-  setResetPasswordSuccessState,
-  setResetPasswordNeutralState,
   focusResetPasswordPrimaryField,
   readResetPasswordFormState,
   bindResetPasswordInputClearers,
   bindResetPasswordSubmit,
-  bindResetPasswordToastClose,
-  bindResetPasswordBackLink,
-  bindResetPasswordThemeToggle,
+  showResetPasswordToast,
   hideResetPasswordToast,
 } from "./reset-password.dom.js";
-
-import {
-  safeText,
-  loadRememberedIdentifier,
-  createResetPasswordPayload,
-  validateResetPasswordPayload,
-  getFirstResetPasswordError,
-  normalizeResetPasswordResult,
-  resolveResetPasswordErrorMessage,
-  resolveResetPasswordExecutor,
-  resolveResetPasswordRedirect,
-  buildResetPasswordSuccessMessage,
-  buildResetPasswordCooldownMessage,
-  persistResetPasswordIdentifier,
-} from "./reset-password.helpers.js";
-
-/* =========================================================
-   CONSTANTS
-========================================================= */
-
-const RESET_TOAST_IDS = {
-  loading: "reset-password-loading",
-  result: "reset-password-result",
-  theme: "reset-password-theme",
-};
 
 /* =========================================================
    HELPERS
@@ -80,221 +42,60 @@ const RESET_TOAST_IDS = {
 function resolveToastApi(deps = {}) {
   const customToast = deps.toast;
 
-  if (customToast && typeof customToast === "object") {
+  if (
+    customToast &&
+    typeof customToast === "object"
+  ) {
     return customToast;
   }
 
   return Toast;
 }
 
-function safeToastCall(toast, method, ...args) {
-  try {
-    if (typeof toast?.[method] === "function") {
-      return toast[method](...args);
+function resolveResetExecutor(deps = {}) {
+  const candidates = [
+    deps.onSubmit,
+    deps.submitResetPassword,
+    deps.resetPasswordRequest,
+    deps.requestResetPassword,
+    AppCore?.services?.auth?.resetPasswordRequest,
+    AppCore?.auth?.resetPasswordRequest,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "function") {
+      return candidate;
     }
-  } catch {}
+  }
 
   return null;
 }
 
-function dismissResetFlowToasts(toast) {
-  safeToastCall(toast, "dismiss", RESET_TOAST_IDS.loading);
-  safeToastCall(toast, "dismiss", RESET_TOAST_IDS.result);
-}
-
-function showResetLoadingToast(toast) {
-  return safeToastCall(
-    toast,
-    "loading",
-    "Comprobando identificador y preparando recuperación...",
-    {
-      id: RESET_TOAST_IDS.loading,
-      persist: true,
-      dedupeMs: 0,
-    }
-  );
-}
-
-function showResetErrorToast(toast, message) {
-  return safeToastCall(
-    toast,
-    "error",
-    message,
-    {
-      id: RESET_TOAST_IDS.result,
-    }
-  );
-}
-
-function showResetWarningToast(toast, message) {
-  return safeToastCall(
-    toast,
-    "warning",
-    message,
-    {
-      id: RESET_TOAST_IDS.result,
-    }
-  );
-}
-
-function showResetSuccessToast(toast, message) {
-  return safeToastCall(
-    toast,
-    "success",
-    message,
-    {
-      id: RESET_TOAST_IDS.result,
-    }
-  );
-}
-
-function resolveRequestPasswordResetExecutor(deps = {}) {
-  return (
-    resolveResetPasswordExecutor(deps) ||
-    Auth?.requestPasswordReset ||
-    Auth?.resetPasswordRequest ||
-    Auth?.forgotPassword ||
-    null
-  );
-}
-
 function resolveAppName() {
-  return safeText(AppCore?.config?.appName, "") || "Onion Support";
-}
-
-function resolveAppVersion() {
-  return safeText(AppCore?.config?.version, "") || "1.0.0";
-}
-
-function resolveBackToLoginHref(deps = {}) {
   return (
-    safeText(deps?.backHref, "") ||
-    safeText(deps?.backToLoginHref, "") ||
-    "/login"
+    safeText(
+      AppCore?.config?.appName,
+      ""
+    ) || "Onion Support"
   );
-}
-
-function normalizePath(path = "/") {
-  const raw = safeText(path, "/") || "/";
-
-  if (typeof AppCore?.utils?.normalizePath === "function") {
-    try {
-      return AppCore.utils.normalizePath(raw);
-    } catch {}
-  }
-
-  if (raw === "/") {
-    return "/";
-  }
-
-  return raw
-    .replace(/\/{2,}/g, "/")
-    .replace(/\/+$/g, "") || "/";
-}
-
-function getShellElements() {
-  return {
-    sidebar:
-      AppCore?.dom?.sidebar ||
-      document.getElementById("sidebar"),
-
-    topbar:
-      AppCore?.dom?.topbar ||
-      document.getElementById("topbar") ||
-      document.querySelector(".topbar"),
-
-    topbarViewContainer:
-      AppCore?.dom?.topbarViewContainer ||
-      document.getElementById("topbarview-container"),
-
-    tableheadContainer:
-      AppCore?.dom?.tableheadContainer ||
-      document.getElementById("tablehead-container"),
-  };
-}
-
-function enableAuthScreenMode() {
-  try {
-    const {
-      sidebar,
-      topbar,
-      topbarViewContainer,
-      tableheadContainer,
-    } = getShellElements();
-
-    document.body.classList.add("auth-screen");
-    document.body.classList.add("route-auth");
-    document.body.classList.add("route-shell-hidden");
-    document.body.classList.add("login-no-scroll");
-
-    document.documentElement.style.overflow = "hidden";
-    document.body.style.overflow = "hidden";
-
-    if (sidebar) sidebar.hidden = true;
-    if (topbar) topbar.hidden = true;
-    if (topbarViewContainer) topbarViewContainer.hidden = true;
-    if (tableheadContainer) tableheadContainer.hidden = true;
-  } catch {}
-}
-
-function disableAuthScreenMode() {
-  try {
-    const {
-      sidebar,
-      topbar,
-      topbarViewContainer,
-      tableheadContainer,
-    } = getShellElements();
-
-    document.body.classList.remove("auth-screen");
-    document.body.classList.remove("route-auth");
-    document.body.classList.remove("route-shell-hidden");
-    document.body.classList.remove("login-no-scroll");
-
-    document.documentElement.style.overflow = "";
-    document.body.style.overflow = "";
-
-    if (sidebar) sidebar.hidden = false;
-    if (topbar) topbar.hidden = false;
-    if (topbarViewContainer) topbarViewContainer.hidden = false;
-    if (tableheadContainer) tableheadContainer.hidden = false;
-  } catch {}
-}
-
-function hideGlobalLoader() {
-  try {
-    AppCore?.setLoading?.(false);
-  } catch {}
-
-  try {
-    document.body?.classList?.remove?.("loading");
-  } catch {}
-
-  const loader =
-    AppCore?.dom?.loader ||
-    document.getElementById("app-loader");
-
-  if (!loader) return;
-
-  try {
-    loader.hidden = true;
-    loader.setAttribute("aria-hidden", "true");
-    loader.style.display = "none";
-    loader.style.opacity = "0";
-    loader.style.visibility = "hidden";
-    loader.style.pointerEvents = "none";
-  } catch {}
 }
 
 function navigateTo(path = "/login") {
-  const finalPath = normalizePath(path || "/login");
+  const finalPath =
+    safeText(path, "/login") || "/login";
 
-  if (typeof AppCore?.navigate === "function") {
+  if (
+    typeof AppCore?.navigate ===
+    "function"
+  ) {
     AppCore.navigate(finalPath);
     return;
   }
 
-  if (typeof AppCore?.router?.navigate === "function") {
+  if (
+    typeof AppCore?.router?.navigate ===
+    "function"
+  ) {
     AppCore.router.navigate(finalPath);
     return;
   }
@@ -302,453 +103,477 @@ function navigateTo(path = "/login") {
   window.location.assign(finalPath);
 }
 
-function toggleTheme() {
-  const current =
-    document.documentElement.getAttribute("data-theme") || "dark";
-
-  const next = current === "light" ? "dark" : "light";
-
-  document.documentElement.setAttribute("data-theme", next);
-
+function safeToastCall(
+  toast,
+  method,
+  ...args
+) {
   try {
-    AppCore?.setTheme?.(next);
-  } catch {
-    try {
-      AppCore.state = AppCore.state || {};
-      AppCore.state.theme = next;
-    } catch {}
-  }
-
-  try {
-    AppCore?.events?.emit?.("app:theme:change", next);
+    if (
+      typeof toast?.[method] ===
+      "function"
+    ) {
+      return toast[method](...args);
+    }
   } catch {}
 
-  return next;
+  return null;
 }
 
 function emitRouteRendered() {
   try {
-    AppCore?.events?.emit?.("app:route:rendered", {
-      route: "/reset-password",
-      view: "reset-password",
-    });
+    AppCore?.events?.emit?.(
+      "app:route:rendered",
+      {
+        route: "/reset-password",
+        view: "reset-password",
+      }
+    );
   } catch {}
 }
 
-function emitResetPasswordRequested(detail = {}) {
+function enableAuthScreenMode() {
   try {
-    AppCore?.events?.emit?.("auth:reset-password:requested", detail);
+    document.body.classList.add(
+      "auth-screen"
+    );
+
+    document.body.classList.add(
+      "login-no-scroll"
+    );
+
+    document.body.classList.add(
+      "route-auth"
+    );
   } catch {}
 }
 
-function emitResetPasswordError(detail = {}) {
+function disableAuthScreenMode() {
   try {
-    AppCore?.events?.emit?.("auth:reset-password:error", detail);
+    document.body.classList.remove(
+      "auth-screen"
+    );
+
+    document.body.classList.remove(
+      "login-no-scroll"
+    );
+
+    document.body.classList.remove(
+      "route-auth"
+    );
   } catch {}
 }
 
-function restoreInitialUiState(refs, toast) {
-  try {
-    hideResetPasswordToast(refs);
-  } catch {}
+function normalizeIdentifier(value = "") {
+  return safeText(value, "");
+}
 
-  try {
-    setResetPasswordNeutralState(refs);
-  } catch {}
+function validateResetPayload(payload = {}) {
+  const errors = {};
+  const identifier = normalizeIdentifier(
+    payload.identifier
+  );
 
-  try {
-    clearResetPasswordErrors(refs);
-  } catch {}
+  if (!identifier) {
+    errors.identifier =
+      "Introduce tu usuario o email.";
+  }
 
-  try {
-    dismissResetFlowToasts(toast);
-  } catch {}
+  return errors;
+}
+
+function getFirstResetError(errors = {}) {
+  return (
+    errors.identifier ||
+    errors.global ||
+    "Revisa el formulario."
+  );
+}
+
+function buildResetPayload(formState = {}) {
+  return {
+    identifier: normalizeIdentifier(
+      formState?.identifier
+    ),
+  };
+}
+
+function resolveResetSuccessMessage(result = {}) {
+  return (
+    safeText(
+      result?.message,
+      ""
+    ) ||
+    "Si el identificador existe, te enviaremos las instrucciones para restablecer el acceso."
+  );
+}
+
+function resolveResetErrorMessage(error) {
+  return (
+    safeText(
+      error?.message,
+      ""
+    ) ||
+    safeText(
+      error?.response?.data?.message,
+      ""
+    ) ||
+    "No se pudo procesar la recuperación de acceso."
+  );
 }
 
 /* =========================================================
    VIEW
 ========================================================= */
 
-function renderResetPasswordView(container, deps = {}) {
+function renderResetPasswordView(
+  container,
+  deps = {}
+) {
   if (!container) {
-    throw new Error("[ResetPasswordView] container es obligatorio.");
+    throw new Error(
+      "[ResetPasswordView] container es obligatorio."
+    );
   }
 
   enableAuthScreenMode();
-  hideGlobalLoader();
 
-  const rememberedIdentifier = loadRememberedIdentifier();
-  const appName = resolveAppName();
-  const appVersion = resolveAppVersion();
-  const backHref = resolveBackToLoginHref(deps);
+  const appName =
+    resolveAppName();
 
-  container.innerHTML = getResetPasswordTemplate({
-    appName,
-    appVersion,
-    currentYear: new Date().getFullYear(),
-    rememberedIdentifier,
-    backHref,
-    identifierPlaceholder:
-      safeText(deps?.identifierPlaceholder, "") || "Usuario o email",
-    submitLabel:
-      safeText(deps?.submitLabel, "") || "Enviar enlace",
-    backLabel:
-      safeText(deps?.backLabel, "") || "Volver al acceso",
-    subtitle:
-      safeText(deps?.subtitle, "") ||
-      "Introduce tu usuario o email y te enviaremos las instrucciones para restablecer el acceso.",
-    heroEyebrow:
-      safeText(deps?.heroEyebrow, "") || "Recuperación segura",
-    heroTitle:
-      safeText(deps?.heroTitle, "") ||
-      "Recupera el acceso sin salir del flujo protegido del panel.",
-    bullets:
-      Array.isArray(deps?.bullets) && deps.bullets.length
-        ? deps.bullets
-        : [
-            "Verificación del identificador de acceso",
-            "Flujo desacoplado del login principal",
-            "Recuperación protegida y guiada",
-          ],
-  });
+  container.innerHTML =
+    getResetPasswordTemplate({
+      appName,
+      ...deps,
+    });
 
-  hideGlobalLoader();
+  const refs =
+    getResetPasswordRefs(container);
 
-  const refs = getResetPasswordRefs(container);
-  const toast = resolveToastApi(deps);
-  const executeResetPassword = resolveRequestPasswordResetExecutor(deps);
+  const toast =
+    resolveToastApi(deps);
 
-  safeToastCall(toast, "init");
-  restoreInitialUiState(refs, toast);
+  const executeReset =
+    resolveResetExecutor(deps);
 
-  if (!executeResetPassword) {
+  safeToastCall(
+    toast,
+    "init"
+  );
+
+  if (!executeReset) {
     const message =
-      "No se encontró un executor para recuperación de acceso. Revisa src/features/auth/index.js o pasa deps.requestResetPassword.";
+      "No se encontró un executor de reset-password.";
 
-    setGlobalResetPasswordError(refs, message);
-    showResetErrorToast(toast, message);
+    setGlobalResetPasswordError(
+      refs,
+      message
+    );
+
+    showResetPasswordToast(
+      refs,
+      {
+        type: "error",
+        title: "Error",
+        message,
+        autoHide: false,
+      }
+    );
+
+    safeToastCall(
+      toast,
+      "error",
+      message
+    );
+
     emitRouteRendered();
 
     return {
       destroy() {
-        dismissResetFlowToasts(toast);
+        hideResetPasswordToast(
+          refs
+        );
         disableAuthScreenMode();
       },
     };
   }
 
   const submitLabel =
-    safeText(deps?.submitLabel, "") || "Enviar enlace";
+    safeText(
+      deps.submitLabel,
+      ""
+    ) ||
+    "Enviar enlace";
 
   const loadingLabel =
-    safeText(deps?.loadingLabel, "") || "Enviando...";
+    safeText(
+      deps.loadingLabel,
+      ""
+    ) ||
+    "Enviando...";
 
-  let destroyed = false;
-  let isSubmitting = false;
-  let isNavigatingAway = false;
-  let successLocked = false;
+  const successRedirectTo =
+    safeText(
+      deps.successRedirectTo,
+      ""
+    ) || "/login";
 
-  const onClearErrors = () => {
-    if (destroyed || isNavigatingAway || successLocked) {
-      return;
-    }
+  const onClearErrors =
+    () => {
+      clearResetPasswordErrors(
+        refs
+      );
+      hideResetPasswordToast(
+        refs
+      );
+    };
 
-    clearResetPasswordErrors(refs);
-    setResetPasswordNeutralState(refs);
-    hideResetPasswordToast(refs);
-    dismissResetFlowToasts(toast);
-  };
+  const onSubmit =
+    async (event) => {
+      event.preventDefault();
 
-  const onToastClose = () => {
-    if (destroyed || isNavigatingAway) {
-      return;
-    }
-
-    hideResetPasswordToast(refs);
-    dismissResetFlowToasts(toast);
-  };
-
-  const onBackToLogin = (event) => {
-    event?.preventDefault?.();
-
-    if (destroyed || isSubmitting) {
-      return;
-    }
-
-    isNavigatingAway = true;
-    dismissResetFlowToasts(toast);
-    disableAuthScreenMode();
-    navigateTo(backHref);
-  };
-
-  const onThemeToggle = () => {
-    if (destroyed || isNavigatingAway || isSubmitting) {
-      return;
-    }
-
-    const nextTheme = toggleTheme();
-
-    safeToastCall(
-      toast,
-      "info",
-      `Tema ${nextTheme} activado.`,
-      { id: RESET_TOAST_IDS.theme }
-    );
-  };
-
-  const onSubmit = async (event) => {
-    event?.preventDefault?.();
-
-    if (
-      destroyed ||
-      isSubmitting ||
-      isNavigatingAway ||
-      successLocked
-    ) {
-      return;
-    }
-
-    isSubmitting = true;
-
-    clearResetPasswordErrors(refs);
-    setResetPasswordNeutralState(refs);
-    dismissResetFlowToasts(toast);
-
-    const formState = readResetPasswordFormState(refs);
-    const payload = createResetPasswordPayload(formState);
-    const errors = validateResetPasswordPayload(payload);
-
-    if (Object.keys(errors).length > 0) {
-      applyResetPasswordErrors(refs, errors);
-      shakeResetPasswordCard(refs);
-
-      showResetErrorToast(
-        toast,
-        getFirstResetPasswordError(errors) ||
-          "Revisa el identificador introducido."
+      clearResetPasswordErrors(
+        refs
+      );
+      hideResetPasswordToast(
+        refs
       );
 
-      isSubmitting = false;
-      return;
-    }
-
-    persistResetPasswordIdentifier(payload.identifier);
-
-    try {
-      setResetPasswordLoading(refs, true, {
-        submitLabel,
-        loadingLabel,
-      });
-
-      showResetLoadingToast(toast);
-
-      const rawResult = await executeResetPassword(payload);
-      const result = normalizeResetPasswordResult(rawResult);
-
-      safeToastCall(toast, "dismiss", RESET_TOAST_IDS.loading);
-
-      /* =====================================================
-         RESULTADO NO OK
-      ===================================================== */
-      if (!result.ok) {
-        const isCooldown =
-          Boolean(result?.cooldown) ||
-          Number(result?.retryAfter || 0) > 0 ||
-          Number(result?.cooldownSeconds || 0) > 0 ||
-          Number(result?.status || 0) === 429;
-
-        const message = isCooldown
-          ? buildResetPasswordCooldownMessage(
-              result.retryAfter || result.cooldownSeconds || 60
-            )
-          : (
-              result.message ||
-              "No se pudo iniciar la recuperación de acceso."
-            );
-
-        setGlobalResetPasswordError(refs, message);
-        shakeResetPasswordCard(refs);
-
-        if (isCooldown) {
-          showResetWarningToast(toast, message);
-        } else {
-          showResetErrorToast(toast, message);
-        }
-
-        isSubmitting = false;
-
-        setResetPasswordLoading(refs, false, {
-          submitLabel,
-          loadingLabel,
-        });
-
-        emitResetPasswordError({
-          message,
-          result,
-        });
-
-        return;
-      }
-
-      /* =====================================================
-         RESULTADO OK REAL
-      ===================================================== */
-      successLocked = true;
-      isSubmitting = false;
-
-      const successMessage =
-        buildResetPasswordSuccessMessage(result);
-
-      setResetPasswordSuccessState(refs, {
-        title: "Enlace enviado",
-        message: successMessage,
-      });
-
-      showResetSuccessToast(toast, successMessage);
-
-      emitResetPasswordRequested({
-        identifier: payload.identifier,
-        result,
-      });
-
-      const redirectTo = resolveResetPasswordRedirect(result, {
-        ...deps,
-        backToLoginHref: backHref,
-      });
-
-      if (deps.navigateAfterSuccess === true) {
-        isNavigatingAway = true;
-        dismissResetFlowToasts(toast);
-        disableAuthScreenMode();
-        navigateTo(redirectTo);
-        return;
-      }
-    } catch (error) {
-      safeToastCall(toast, "dismiss", RESET_TOAST_IDS.loading);
-
-      const normalizedMessage =
-        resolveResetPasswordErrorMessage(error);
-
-      const retryAfter =
-        Number(
-          error?.retryAfter ??
-          error?.data?.retryAfter ??
-          error?.data?.cooldownSeconds ??
-          0
-        ) || 0;
-
-      const isCooldown =
-        Number(error?.status || 0) === 429 ||
-        Boolean(error?.cooldown) ||
-        retryAfter > 0;
-
-      const message = isCooldown
-        ? buildResetPasswordCooldownMessage(retryAfter || 60)
-        : normalizedMessage;
-
-      setGlobalResetPasswordError(refs, message);
-      shakeResetPasswordCard(refs);
-
-      if (isCooldown) {
-        showResetWarningToast(toast, message);
-      } else {
-        showResetErrorToast(toast, message);
-      }
-
-      emitResetPasswordError({
-        message,
-        error,
-      });
-
-      try {
-        AppCore?.utils?.error?.(
-          "[ResetPasswordView] reset password error",
-          error
+      const formState =
+        readResetPasswordFormState(
+          refs
         );
-      } catch {}
 
-      isSubmitting = false;
+      const payload =
+        buildResetPayload(
+          formState
+        );
 
-      setResetPasswordLoading(refs, false, {
-        submitLabel,
-        loadingLabel,
-      });
+      const errors =
+        validateResetPayload(
+          payload
+        );
+
+      if (
+        Object.keys(errors)
+          .length > 0
+      ) {
+        const message =
+          getFirstResetError(
+            errors
+          );
+
+        setGlobalResetPasswordError(
+          refs,
+          message
+        );
+
+        showResetPasswordToast(
+          refs,
+          {
+            type: "error",
+            title: "Error",
+            message,
+            autoHide: false,
+          }
+        );
+
+        safeToastCall(
+          toast,
+          "error",
+          message
+        );
+
+        return;
+      }
+
+      let loadingToastId =
+        null;
 
       try {
-        refs?.identifierInput?.focus?.();
-        refs?.identifierInput?.select?.();
-      } catch {}
+        setResetPasswordLoading(
+          refs,
+          true,
+          {
+            submitLabel,
+            loadingLabel,
+          }
+        );
 
-      return;
-    }
+        showResetPasswordToast(
+          refs,
+          {
+            type: "info",
+            title: "Procesando",
+            message:
+              "Validando identificador y preparando la solicitud...",
+            autoHide: false,
+          }
+        );
 
-    if (!isNavigatingAway) {
-      setResetPasswordLoading(refs, false, {
-        submitLabel,
-        loadingLabel,
-      });
-    }
-  };
+        loadingToastId =
+          safeToastCall(
+            toast,
+            "loading",
+            "Procesando recuperación de acceso...",
+            {
+              persist: true,
+            }
+          );
 
-  const unbindInputClearers =
-    bindResetPasswordInputClearers(refs, onClearErrors);
+        const rawResult =
+          await executeReset(
+            payload
+          );
+
+        const message =
+          resolveResetSuccessMessage(
+            rawResult
+          );
+
+        safeToastCall(
+          toast,
+          "dismiss",
+          loadingToastId
+        );
+
+        showResetPasswordToast(
+          refs,
+          {
+            type: "success",
+            title: "Solicitud enviada",
+            message,
+            autoHide: true,
+          }
+        );
+
+        safeToastCall(
+          toast,
+          "success",
+          message
+        );
+
+        try {
+          AppCore?.events?.emit?.(
+            "auth:reset-password:success",
+            {
+              identifier:
+                payload.identifier,
+              result: rawResult,
+            }
+          );
+        } catch {}
+
+        const shouldRedirect =
+          deps.redirectAfterSuccess ===
+          true;
+
+        if (shouldRedirect) {
+          window.setTimeout(
+            () => {
+              disableAuthScreenMode();
+              navigateTo(
+                successRedirectTo
+              );
+            },
+            900
+          );
+        }
+      } catch (error) {
+        safeToastCall(
+          toast,
+          "dismiss",
+          loadingToastId
+        );
+
+        const message =
+          resolveResetErrorMessage(
+            error
+          );
+
+        setGlobalResetPasswordError(
+          refs,
+          message
+        );
+
+        showResetPasswordToast(
+          refs,
+          {
+            type: "error",
+            title: "Error",
+            message,
+            autoHide: false,
+          }
+        );
+
+        safeToastCall(
+          toast,
+          "error",
+          message
+        );
+
+        try {
+          AppCore?.events?.emit?.(
+            "auth:reset-password:error",
+            {
+              message,
+              error,
+            }
+          );
+        } catch {}
+
+        try {
+          AppCore?.utils?.error?.(
+            "[ResetPasswordView] reset error",
+            error
+          );
+        } catch {}
+      } finally {
+        setResetPasswordLoading(
+          refs,
+          false,
+          {
+            submitLabel,
+            loadingLabel,
+          }
+        );
+      }
+    };
+
+  const unbindInputs =
+    bindResetPasswordInputClearers(
+      refs,
+      onClearErrors
+    );
 
   const unbindSubmit =
-    bindResetPasswordSubmit(refs, onSubmit);
+    bindResetPasswordSubmit(
+      refs,
+      onSubmit
+    );
 
-  const unbindToastClose =
-    bindResetPasswordToastClose(refs, onToastClose);
-
-  const unbindBackLink =
-    bindResetPasswordBackLink(refs, onBackToLogin);
-
-  const unbindThemeToggle =
-    bindResetPasswordThemeToggle(refs, onThemeToggle);
-
-  focusResetPasswordPrimaryField(refs, {
-    rememberedIdentifier,
-  });
+  focusResetPasswordPrimaryField(
+    refs
+  );
 
   emitRouteRendered();
 
   return {
     destroy() {
-      destroyed = true;
+      unbindInputs();
+      unbindSubmit();
 
-      try {
-        unbindInputClearers?.();
-      } catch {}
+      hideResetPasswordToast(
+        refs
+      );
 
-      try {
-        unbindSubmit?.();
-      } catch {}
-
-      try {
-        unbindToastClose?.();
-      } catch {}
-
-      try {
-        unbindBackLink?.();
-      } catch {}
-
-      try {
-        unbindThemeToggle?.();
-      } catch {}
-
-      try {
-        hideResetPasswordToast(refs);
-      } catch {}
-
-      try {
-        dismissResetFlowToasts(toast);
-      } catch {}
-
-      if (!isNavigatingAway) {
-        disableAuthScreenMode();
-      }
+      disableAuthScreenMode();
     },
   };
 }
 
-export { renderResetPasswordView as ResetPasswordView };
+export {
+  renderResetPasswordView as ResetPasswordView,
+};
+
 export default renderResetPasswordView;

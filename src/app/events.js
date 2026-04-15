@@ -8,11 +8,186 @@
    - rerender ruta al cambiar idioma
    - gestionar notificaciones auth
    - reaccionar eventos router
+
+   HARDENING EXTREMO:
+   - bind idempotente
+   - tolerancia total a módulos parciales
+   - logs seguros enterprise
+   - notificaciones sin duplicados agresivos
+   - sync route/UI robusta
+   - cero throws accidentales
 ========================================================= */
 
 import {
   getCurrentPublicPath,
 } from "./helpers.js";
+
+/* =========================================================
+   INTERNAL STATE
+========================================================= */
+
+let eventsBound = false;
+
+/* =========================================================
+   HELPERS
+========================================================= */
+
+function isBrowser() {
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
+}
+
+function safeText(value, fallback = "") {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return fallback;
+  }
+
+  const text =
+    String(value).trim();
+
+  return text || fallback;
+}
+
+function safeLog(AppCore, ...args) {
+  try {
+    AppCore?.utils?.log?.(...args);
+  } catch {}
+}
+
+function safeWarn(AppCore, ...args) {
+  try {
+    AppCore?.utils?.warn?.(...args);
+  } catch {}
+}
+
+function safeEmit(
+  AppCore,
+  eventName,
+  payload = {}
+) {
+  try {
+    AppCore?.events?.emit?.(
+      eventName,
+      payload
+    );
+  } catch {}
+}
+
+function safeSetState(
+  AppCore,
+  payload = {}
+) {
+  try {
+    AppCore?.setState?.(
+      payload
+    );
+  } catch {}
+
+  try {
+    if (
+      AppCore?.state &&
+      typeof AppCore.state ===
+        "object"
+    ) {
+      Object.assign(
+        AppCore.state,
+        payload
+      );
+    }
+  } catch {}
+}
+
+function safeSetPublicPath(
+  AppCore,
+  path = "/"
+) {
+  try {
+    AppCore?.setPublicPath?.(
+      path
+    );
+  } catch {}
+}
+
+function safeSetDocumentLang(
+  lang = "es"
+) {
+  if (!isBrowser()) {
+    return;
+  }
+
+  try {
+    document.documentElement.setAttribute(
+      "lang",
+      lang
+    );
+  } catch {}
+}
+
+function safeToast(
+  Toast,
+  type = "info",
+  message = "",
+  options = {}
+) {
+  try {
+    const method =
+      Toast?.[type];
+
+    if (
+      typeof method ===
+      "function"
+    ) {
+      return method(
+        message,
+        options
+      );
+    }
+
+    return Toast?.show?.({
+      ...options,
+      type,
+      message,
+    });
+  } catch {
+    return null;
+  }
+}
+
+function resolveLang(
+  detail,
+  I18n,
+  AppCore
+) {
+  return (
+    safeText(
+      detail?.lang,
+      ""
+    ) ||
+    safeText(
+      I18n?.getLang?.(),
+      ""
+    ) ||
+    safeText(
+      AppCore?.state?.lang,
+      ""
+    ) ||
+    safeText(
+      AppCore?.config
+        ?.defaultLang,
+      ""
+    ) ||
+    "es"
+  );
+}
+
+/* =========================================================
+   MAIN
+========================================================= */
 
 export function bindAppEvents({
   AppCore,
@@ -22,9 +197,15 @@ export function bindAppEvents({
   syncUserUI,
   rerenderCurrentRoute,
   applyPostRenderLoaderPolicy,
-}) {
-  if (!AppCore?.cleanup?.event) {
-    return;
+} = {}) {
+  if (
+    !AppCore?.cleanup?.event
+  ) {
+    return false;
+  }
+
+  if (eventsBound) {
+    return true;
   }
 
   /* ======================================================
@@ -34,9 +215,17 @@ export function bindAppEvents({
     scope,
     "app:user:change",
     () => {
-      syncUserUI?.(
-        AppCore
-      );
+      try {
+        syncUserUI?.(
+          AppCore
+        );
+      } catch (error) {
+        safeWarn(
+          AppCore,
+          "syncUserUI falló en app:user:change",
+          error
+        );
+      }
     }
   );
 
@@ -44,9 +233,17 @@ export function bindAppEvents({
     scope,
     "app:session:cleared",
     () => {
-      syncUserUI?.(
-        AppCore
-      );
+      try {
+        syncUserUI?.(
+          AppCore
+        );
+      } catch (error) {
+        safeWarn(
+          AppCore,
+          "syncUserUI falló en app:session:cleared",
+          error
+        );
+      }
     }
   );
 
@@ -56,34 +253,42 @@ export function bindAppEvents({
   AppCore.cleanup.event(
     scope,
     "app:lang:change",
-    ({
+    async ({
       detail,
-    }) => {
+    } = {}) => {
       const lang =
-        String(
-          detail?.lang ||
-            I18n?.getLang?.() ||
-            "es"
-        ).trim() ||
-        "es";
+        resolveLang(
+          detail,
+          I18n,
+          AppCore
+        );
 
-      AppCore.setState({
-        lang,
-      });
+      safeSetState(
+        AppCore,
+        {
+          lang,
+        }
+      );
 
-      if (
-        typeof document !==
-        "undefined"
-      ) {
-        document.documentElement.setAttribute(
-          "lang",
-          lang
+      safeSetDocumentLang(
+        lang
+      );
+
+      try {
+        await Promise.resolve(
+          rerenderCurrentRoute?.()
+        );
+      } catch (error) {
+        safeWarn(
+          AppCore,
+          "rerenderCurrentRoute() falló tras cambio de idioma.",
+          error
         );
       }
 
-      rerenderCurrentRoute?.();
-
-      Toast?.success?.(
+      safeToast(
+        Toast,
+        "success",
         I18n?.t?.(
           "settings.languageChanged",
           {},
@@ -101,7 +306,8 @@ export function bindAppEvents({
         }
       );
 
-      AppCore.utils.log(
+      safeLog(
+        AppCore,
         "Idioma cambiado.",
         {
           lang,
@@ -121,11 +327,21 @@ export function bindAppEvents({
     scope,
     "auth:login:success",
     () => {
-      syncUserUI?.(
-        AppCore
-      );
+      try {
+        syncUserUI?.(
+          AppCore
+        );
+      } catch (error) {
+        safeWarn(
+          AppCore,
+          "syncUserUI falló en auth:login:success",
+          error
+        );
+      }
 
-      Toast?.success?.(
+      safeToast(
+        Toast,
+        "success",
         "Sesión iniciada correctamente.",
         {
           title:
@@ -140,11 +356,21 @@ export function bindAppEvents({
     scope,
     "auth:logout:success",
     () => {
-      syncUserUI?.(
-        AppCore
-      );
+      try {
+        syncUserUI?.(
+          AppCore
+        );
+      } catch (error) {
+        safeWarn(
+          AppCore,
+          "syncUserUI falló en auth:logout:success",
+          error
+        );
+      }
 
-      Toast?.info?.(
+      safeToast(
+        Toast,
+        "info",
         "Sesión cerrada correctamente.",
         {
           title:
@@ -163,8 +389,9 @@ export function bindAppEvents({
     "router:before-render",
     ({
       detail,
-    }) => {
-      AppCore.utils.log(
+    } = {}) => {
+      safeLog(
+        AppCore,
         "Router before render:",
         {
           path:
@@ -186,23 +413,41 @@ export function bindAppEvents({
     "router:rendered",
     ({
       detail,
-    }) => {
+    } = {}) => {
       const publicPath =
         getCurrentPublicPath(
           AppCore
         );
 
-      AppCore.setPublicPath(
+      safeSetPublicPath(
+        AppCore,
         publicPath
       );
 
-      applyPostRenderLoaderPolicy?.();
+      try {
+        applyPostRenderLoaderPolicy?.();
+      } catch (error) {
+        safeWarn(
+          AppCore,
+          "applyPostRenderLoaderPolicy() falló.",
+          error
+        );
+      }
 
-      syncUserUI?.(
-        AppCore
-      );
+      try {
+        syncUserUI?.(
+          AppCore
+        );
+      } catch (error) {
+        safeWarn(
+          AppCore,
+          "syncUserUI falló en router:rendered",
+          error
+        );
+      }
 
-      AppCore.events.emit(
+      safeEmit(
+        AppCore,
         "app:user-ui:sync",
         {
           route:
@@ -210,7 +455,8 @@ export function bindAppEvents({
         }
       );
 
-      AppCore.utils.log(
+      safeLog(
+        AppCore,
         "Ruta renderizada:",
         {
           publicPath,
@@ -230,10 +476,23 @@ export function bindAppEvents({
               detail?.forbidden
             ),
           lang:
-            AppCore.state
-              .lang,
+            AppCore?.state
+              ?.lang,
         }
       );
     }
   );
+
+  eventsBound = true;
+
+  safeLog(
+    AppCore,
+    "App events bind completado."
+  );
+
+  return true;
 }
+
+export default {
+  bindAppEvents,
+};

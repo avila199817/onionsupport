@@ -33,7 +33,7 @@ import {
    INTERNAL
 ========================================================= */
 
-const ENDPOINT = "/api/home/summary";
+const ENDPOINT = "/api/dashboard/summary";
 
 let inflightLoad = null;
 

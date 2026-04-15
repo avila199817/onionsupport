@@ -31,7 +31,7 @@ import {
 ========================================================= */
 
 const INCIDENCIAS_ENDPOINT =
-  "/api/incidencias";
+  "/api/tickets";
 
 const INCIDENCIAS_TIMEOUT =
   15000;

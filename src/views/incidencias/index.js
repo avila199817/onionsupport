@@ -2,20 +2,23 @@
    Onion SPA - Incidencias Entry
    Archivo: src/views/incidencias/index.js
 
+   EXTREME MODE · 10/10
+
    Responsabilidades:
-   - punto de entrada de la vista incidencias
-   - componer módulos internos
-   - render principal
-   - cargar datos
-   - bind de eventos
-   - evitar doble bind de listeners
-   - soportar destroy limpio del router
-   - permitir reload con rerender
+   - entrypoint robusto de la vista incidencias
+   - render reactivo y limpio
+   - carga inicial + refresh inteligente
+   - evitar race conditions
+   - evitar doble bind
+   - destroy limpio router-safe
+   - reload premium
+   - trazabilidad debug
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 
 import {
+  incidenciasState,
   setHydrated,
 } from "./incidencias.state.js";
 
@@ -42,29 +45,62 @@ export const IncidenciasView = (() => {
   const SCOPE = "view:incidencias";
 
   let initialized = false;
+  let destroyed = false;
   let bindingsCleanup = null;
+  let renderToken = 0;
+  let inflightInit = null;
 
   /* =====================================================
      HELPERS
   ===================================================== */
 
+  function log(...args) {
+    AppCore?.utils?.log?.(
+      "[IncidenciasView]",
+      ...args
+    );
+  }
+
+  function warn(...args) {
+    AppCore?.utils?.warn?.(
+      "[IncidenciasView]",
+      ...args
+    );
+  }
+
   function getContainer() {
     return (
       AppCore?.dom?.viewContainer ||
-      document.getElementById("view-container") ||
+      document.getElementById(
+        "view-container"
+      ) ||
       null
+    );
+  }
+
+  function isAlive(token = 0) {
+    return (
+      !destroyed &&
+      token === renderToken
     );
   }
 
   function cleanupBindings() {
     try {
       bindingsCleanup?.();
-    } catch {}
+    } catch (error) {
+      warn(
+        "cleanup bindings error:",
+        error
+      );
+    }
 
     bindingsCleanup = null;
 
     try {
-      AppCore?.cleanup?.run?.(SCOPE);
+      AppCore?.cleanup?.run?.(
+        SCOPE
+      );
     } catch {}
   }
 
@@ -73,14 +109,36 @@ export const IncidenciasView = (() => {
 
     const maybeCleanup =
       bindIncidenciasEvents({
+        scope: SCOPE,
         loadIncidencias,
         openTicket,
-        scope: SCOPE,
+        rerender: render,
+        reload,
       });
 
-    if (typeof maybeCleanup === "function") {
-      bindingsCleanup = maybeCleanup;
+    if (
+      typeof maybeCleanup ===
+      "function"
+    ) {
+      bindingsCleanup =
+        maybeCleanup;
     }
+  }
+
+  function getShellHtml() {
+    return `
+      <section class="panel-content dashboard ready">
+        <div class="content-wrapper">
+          ${renderHeader({
+            state: incidenciasState,
+          })}
+
+          ${renderTable({
+            state: incidenciasState,
+          })}
+        </div>
+      </section>
+    `;
   }
 
   /* =====================================================
@@ -88,9 +146,13 @@ export const IncidenciasView = (() => {
   ===================================================== */
 
   function render() {
-    const container = getContainer();
+    const container =
+      getContainer();
 
     if (!container) {
+      warn(
+        "container no encontrado"
+      );
       return null;
     }
 
@@ -100,14 +162,8 @@ export const IncidenciasView = (() => {
 
     AppCore?.clearDynamicContainers?.();
 
-    container.innerHTML = `
-      <section class="panel-content dashboard ready">
-        <div class="content-wrapper">
-          ${renderHeader()}
-          ${renderTable()}
-        </div>
-      </section>
-    `;
+    container.innerHTML =
+      getShellHtml();
 
     setHydrated(true);
 
@@ -115,38 +171,57 @@ export const IncidenciasView = (() => {
   }
 
   /* =====================================================
-     LOAD + RENDER
+     LOAD FLOW
   ===================================================== */
 
-  async function renderAndLoad() {
+  async function renderAndLoad({
+    force = false,
+  } = {}) {
+    const token =
+      ++renderToken;
+
     render();
 
     try {
-      await loadIncidencias();
+      await loadIncidencias({
+        force,
+      });
     } catch (error) {
-      AppCore?.utils?.warn?.(
-        "[IncidenciasView] loadIncidencias falló",
+      warn(
+        "loadIncidencias falló:",
         error
       );
+    }
+
+    if (!isAlive(token)) {
+      return;
     }
 
     render();
   }
 
-  async function reload(options = {}) {
+  async function reload(
+    options = {}
+  ) {
+    if (destroyed) {
+      return api;
+    }
+
     try {
-      await loadIncidencias({
+      await renderAndLoad({
         force: true,
         ...options,
       });
     } catch (error) {
-      AppCore?.utils?.warn?.(
-        "[IncidenciasView] reload falló",
+      warn(
+        "reload error:",
         error
       );
     }
 
-    render();
+    bind();
+
+    return api;
   }
 
   /* =====================================================
@@ -154,12 +229,37 @@ export const IncidenciasView = (() => {
   ===================================================== */
 
   async function init() {
+    if (destroyed) {
+      destroyed = false;
+    }
+
+    if (
+      initialized &&
+      inflightInit
+    ) {
+      return inflightInit;
+    }
+
     initialized = true;
 
-    await renderAndLoad();
-    bind();
+    inflightInit =
+      (async () => {
+        log("init");
 
-    return api;
+        await renderAndLoad();
+
+        if (!destroyed) {
+          bind();
+        }
+
+        return api;
+      })();
+
+    try {
+      return await inflightInit;
+    } finally {
+      inflightInit = null;
+    }
   }
 
   /* =====================================================
@@ -167,8 +267,14 @@ export const IncidenciasView = (() => {
   ===================================================== */
 
   function destroy() {
+    destroyed = true;
     initialized = false;
+
+    renderToken++;
+
     cleanupBindings();
+
+    log("destroy");
   }
 
   /* =====================================================
@@ -181,8 +287,13 @@ export const IncidenciasView = (() => {
     reload,
     destroy,
     loadIncidencias,
+
     get initialized() {
       return initialized;
+    },
+
+    get destroyed() {
+      return destroyed;
     },
   };
 

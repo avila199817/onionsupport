@@ -10,7 +10,12 @@
    - focus inicial
    - lectura robusta del formulario
    - binds desacoplados
+   - integrar el sistema compartido de password-field
 ========================================================= */
+
+import {
+  bindPasswordFieldsInScope,
+} from "../../../shared/password-field/index.js";
 
 /* =========================================================
    HELPERS
@@ -109,6 +114,75 @@ function setInvalid(
   );
 }
 
+function setAriaDisabled(
+  node,
+  active = false
+) {
+  if (!node) {
+    return;
+  }
+
+  node.setAttribute(
+    "aria-disabled",
+    active
+      ? "true"
+      : "false"
+  );
+}
+
+function resolvePasswordFieldByInput(
+  root,
+  inputId = ""
+) {
+  const input = qs(
+    root,
+    `#${inputId}`
+  );
+
+  if (!input) {
+    return {
+      input: null,
+      field: null,
+      toggle: null,
+      caps: null,
+    };
+  }
+
+  const field =
+    input.closest(
+      '[data-password-field="true"]'
+    ) ||
+    input.closest(
+      ".login-field"
+    );
+
+  return {
+    input,
+    field,
+    toggle: qs(
+      field,
+      '[data-password-toggle="true"]'
+    ),
+    caps: qs(
+      field,
+      '[data-password-caps="true"]'
+    ),
+  };
+}
+
+function getBoundPasswordField(
+  bindings = [],
+  inputId = ""
+) {
+  return (
+    bindings.find(
+      (entry) =>
+        entry?.input?.id ===
+        inputId
+    ) || null
+  );
+}
+
 /* =========================================================
    REFS
 ========================================================= */
@@ -120,7 +194,51 @@ export function getConfirmRefs(
     qs(
       container,
       ".confirm-reset-view"
-    ) || container;
+    ) ||
+    qs(
+      container,
+      '[data-confirm-reset-view="true"]'
+    ) ||
+    qs(
+      container,
+      '[data-view="reset-password-confirm"]'
+    ) ||
+    container;
+
+  const passwordFieldBindings =
+    bindPasswordFieldsInScope(
+      root || container || document
+    );
+
+  const boundNewPasswordField =
+    getBoundPasswordField(
+      passwordFieldBindings,
+      "newPassword"
+    );
+
+  const boundConfirmPasswordField =
+    getBoundPasswordField(
+      passwordFieldBindings,
+      "confirmPassword"
+    );
+
+  const fallbackNewPasswordField =
+    resolvePasswordFieldByInput(
+      root,
+      "newPassword"
+    );
+
+  const fallbackConfirmPasswordField =
+    resolvePasswordFieldByInput(
+      root,
+      "confirmPassword"
+    );
+
+  const newPasswordField =
+    boundNewPasswordField || fallbackNewPasswordField;
+
+  const confirmPasswordField =
+    boundConfirmPasswordField || fallbackConfirmPasswordField;
 
   return {
     container,
@@ -132,6 +250,12 @@ export function getConfirmRefs(
         "#confirmResetForm"
       ),
 
+    card:
+      qs(
+        root,
+        "#confirmResetCard"
+      ),
+
     tokenInput:
       qs(
         root,
@@ -139,16 +263,16 @@ export function getConfirmRefs(
       ),
 
     passwordInput:
-      qs(
-        root,
-        "#newPassword"
-      ),
+      newPasswordField?.input ||
+      null,
+
+    newPasswordInput:
+      newPasswordField?.input ||
+      null,
 
     confirmPasswordInput:
-      qs(
-        root,
-        "#confirmPassword"
-      ),
+      confirmPasswordField?.input ||
+      null,
 
     submitButton:
       qs(
@@ -169,16 +293,55 @@ export function getConfirmRefs(
       ),
 
     fieldPassword:
+      newPasswordField?.field ||
+      qs(
+        root,
+        '[data-field="password"]'
+      ),
+
+    fieldNewPassword:
+      newPasswordField?.field ||
       qs(
         root,
         '[data-field="password"]'
       ),
 
     fieldConfirmPassword:
+      confirmPasswordField?.field ||
       qs(
         root,
         '[data-field="confirm-password"]'
       ),
+
+    togglePasswordButton:
+      newPasswordField?.toggle ||
+      null,
+
+    toggleNewPasswordButton:
+      newPasswordField?.toggle ||
+      null,
+
+    toggleConfirmPasswordButton:
+      confirmPasswordField?.toggle ||
+      null,
+
+    capsIndicator:
+      newPasswordField?.caps ||
+      null,
+
+    newPasswordCapsIndicator:
+      newPasswordField?.caps ||
+      null,
+
+    confirmCapsIndicator:
+      confirmPasswordField?.caps ||
+      null,
+
+    passwordFieldBindings,
+    passwordField:
+      boundNewPasswordField || null,
+    confirmPasswordField:
+      boundConfirmPasswordField || null,
   };
 }
 
@@ -195,12 +358,23 @@ export function clearConfirmErrors(
   );
 
   setInvalid(
+    refs.newPasswordInput,
+    false
+  );
+
+  setInvalid(
     refs.confirmPasswordInput,
     false
   );
 
   toggleClass(
     refs.fieldPassword,
+    "is-invalid",
+    false
+  );
+
+  toggleClass(
+    refs.fieldNewPassword,
     "is-invalid",
     false
   );
@@ -225,11 +399,25 @@ export function applyConfirmErrors(
     safeText(
       errors.password,
       ""
+    ) ||
+    safeText(
+      errors.newPassword,
+      ""
     );
 
   const confirmError =
     safeText(
       errors.confirmPassword,
+      ""
+    ) ||
+    safeText(
+      errors.confirm,
+      ""
+    );
+
+  const tokenError =
+    safeText(
+      errors.token,
       ""
     );
 
@@ -245,8 +433,19 @@ export function applyConfirmErrors(
       true
     );
 
+    setInvalid(
+      refs.newPasswordInput,
+      true
+    );
+
     toggleClass(
       refs.fieldPassword,
+      "is-invalid",
+      true
+    );
+
+    toggleClass(
+      refs.fieldNewPassword,
       "is-invalid",
       true
     );
@@ -268,6 +467,7 @@ export function applyConfirmErrors(
   setText(
     refs.errorBox,
     globalError ||
+      tokenError ||
       passwordError ||
       confirmError
   );
@@ -307,40 +507,6 @@ export function setConfirmLoading(
       "Procesando..."
     );
 
-  setDisabled(
-    refs.passwordInput,
-    isLoading
-  );
-
-  setDisabled(
-    refs.confirmPasswordInput,
-    isLoading
-  );
-
-  setDisabled(
-    refs.submitButton,
-    isLoading
-  );
-
-  setDisabled(
-    refs.backLink,
-    isLoading
-  );
-
-  if (
-    refs.submitButton
-  ) {
-    refs.submitButton.textContent =
-      isLoading
-        ? loadingLabel
-        : submitLabel;
-
-    refs.submitButton.dataset.loading =
-      String(
-        isLoading
-      );
-  }
-
   if (refs.form) {
     refs.form.setAttribute(
       "aria-busy",
@@ -348,6 +514,55 @@ export function setConfirmLoading(
         ? "true"
         : "false"
     );
+
+    refs.form.dataset.submitting =
+      String(isLoading);
+  }
+
+  /*
+    No deshabilitamos los campos password
+    ni los toggles del sistema compartido
+    para no romper eye / caps ni la UX.
+  */
+  setDisabled(
+    refs.tokenInput,
+    isLoading
+  );
+
+  if (refs.submitButton) {
+    refs.submitButton.disabled =
+      isLoading;
+
+    refs.submitButton.dataset.loading =
+      String(
+        isLoading
+      );
+
+    refs.submitButton.innerHTML =
+      isLoading
+        ? `
+          <span class="login-view__spinner" aria-hidden="true"></span>
+          <span class="login-submit-text">${loadingLabel}</span>
+        `
+        : `<span class="login-submit-text">${submitLabel}</span>`;
+  }
+
+  if (refs.backLink) {
+    setAriaDisabled(
+      refs.backLink,
+      isLoading
+    );
+
+    toggleClass(
+      refs.backLink,
+      "is-disabled",
+      isLoading
+    );
+
+    refs.backLink.tabIndex =
+      isLoading
+        ? -1
+        : 0;
   }
 }
 
@@ -370,7 +585,27 @@ export function setConfirmSuccessState(
   );
 
   setDisabled(
+    refs.newPasswordInput,
+    true
+  );
+
+  setDisabled(
     refs.confirmPasswordInput,
+    true
+  );
+
+  setDisabled(
+    refs.togglePasswordButton,
+    true
+  );
+
+  setDisabled(
+    refs.toggleNewPasswordButton,
+    true
+  );
+
+  setDisabled(
+    refs.toggleConfirmPasswordButton,
     true
   );
 
@@ -382,8 +617,11 @@ export function setConfirmSuccessState(
   if (
     refs.submitButton
   ) {
-    refs.submitButton.textContent =
-      "Actualizado";
+    refs.submitButton.dataset.loading =
+      "false";
+
+    refs.submitButton.innerHTML =
+      `<span class="login-submit-text">Actualizado</span>`;
   }
 
   setText(
@@ -431,6 +669,12 @@ export function readConfirmFormState(
     password:
       String(
         refs.passwordInput
+          ?.value || ""
+      ),
+
+    newPassword:
+      String(
+        refs.newPasswordInput
           ?.value || ""
       ),
 

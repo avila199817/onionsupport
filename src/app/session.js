@@ -3,10 +3,17 @@
    Archivo: src/app/session.js
 
    Responsabilidades:
-   - restaurar sesión de forma bloqueante durante el boot
+   - restaurar sesión ANTES del primer render
    - evitar restores duplicados en paralelo
    - sincronizar UI de usuario tras restore
-   - exponer navegación post-restore solo para usos explícitos
+   - helper de navegación post-login
+   - diagnóstico robusto de sesión
+
+   HARDENING PRO:
+   - restore serializado
+   - cero race conditions
+   - no repaint fantasma login/private
+   - tolerancia total si Auth falla
 ========================================================= */
 
 import {
@@ -15,71 +22,92 @@ import {
 } from "./helpers.js";
 
 /* =========================================================
-   NAVEGACIÓN POST-RESTORE
-   Nota:
-   - durante el boot normal ya no debe forzar rerender si la ruta
-     inicial se pinta después del restore
-   - se mantiene como helper por compatibilidad para flujos explícitos
+   HELPERS
 ========================================================= */
+
+function safeLog(AppCore, ...args) {
+  try {
+    AppCore?.utils?.log?.(...args);
+  } catch {}
+}
+
+function safeWarn(AppCore, ...args) {
+  try {
+    AppCore?.utils?.warn?.(...args);
+  } catch {}
+}
+
+/* =========================================================
+   NAVEGACIÓN POST RESTORE
+========================================================= */
+
 export function navigateAfterSessionRestore({
   AppCore,
   Auth,
   Router,
-  forceRender = false,
 } = {}) {
-  if (!AppCore || !Router) return;
-  if (!AppCore.state.authenticated) return;
-  if (!forceRender) return;
+  if (!AppCore || !Router) {
+    return false;
+  }
+
+  if (!AppCore?.state?.authenticated) {
+    return false;
+  }
 
   const currentCanonicalPath =
-    getCurrentCanonicalPath(AppCore, Router);
+    getCurrentCanonicalPath(
+      AppCore,
+      Router
+    );
 
-  if (currentCanonicalPath === "/login") {
-    const target =
-      typeof Router.goAfterLogin === "function"
-        ? null
-        : typeof Auth?.getPostLoginTarget === "function"
-          ? Auth.getPostLoginTarget(
-              AppCore.state.user
-            )
-          : "/";
-
+  /* si está en login -> salir */
+  if (
+    currentCanonicalPath ===
+    "/login"
+  ) {
     if (
       typeof Router.goAfterLogin ===
       "function"
     ) {
       Router.goAfterLogin("/");
-      return;
+      return true;
     }
 
-    Router.navigate(target || "/", {
-      replaceState: true,
-      force: true,
-    });
+    const target =
+      typeof Auth?.getPostLoginTarget ===
+      "function"
+        ? Auth.getPostLoginTarget(
+            AppCore.state.user
+          )
+        : "/";
 
-    return;
+    Router.navigate(
+      target || "/",
+      {
+        replaceState: true,
+        force: true,
+      }
+    );
+
+    return true;
   }
 
-  Router.render(
-    getCurrentPublicPath(AppCore),
-    {
-      skipHistory: true,
-      replaceState: true,
-      force: true,
-    }
-  );
+  return false;
 }
 
 /* =========================================================
    RESTORE AUTH SESSION
 ========================================================= */
+
 export async function restoreAuthSession({
   AppCore,
   Auth,
   syncUserUI,
   state,
 } = {}) {
-  if (state?.sessionRestorePromise) {
+  if (
+    state?.sessionRestorePromise
+  ) {
     return state.sessionRestorePromise;
   }
 
@@ -97,34 +125,51 @@ export async function restoreAuthSession({
   state.sessionRestorePromise =
     (async () => {
       try {
+        safeLog(
+          AppCore,
+          "Restore session iniciado..."
+        );
+
         const result =
           await Auth.restoreSession();
 
         syncUserUI?.(AppCore);
 
-        AppCore?.utils?.log?.(
-          "Resultado restoreSession():",
-          {
-            ok: Boolean(result?.ok),
-            authenticated:
+        const snapshot = {
+          ok:
+            Boolean(result?.ok),
+          authenticated:
+            Boolean(
               AppCore?.state
-                ?.authenticated,
-            user:
-              AppCore?.state?.user
-                ?.username ||
-              AppCore?.state?.user
-                ?.email ||
-              null,
-          }
+                ?.authenticated
+            ),
+          user:
+            AppCore?.state?.user
+              ?.username ||
+            AppCore?.state?.user
+              ?.email ||
+            null,
+          role:
+            AppCore?.state?.role ||
+            null,
+        };
+
+        safeLog(
+          AppCore,
+          "Restore session completado:",
+          snapshot
         );
 
-        return result || {
-          ok: false,
-          user: null,
-        };
+        return (
+          result || {
+            ok: false,
+            user: null,
+          }
+        );
       } catch (error) {
-        AppCore?.utils?.warn?.(
-          "restoreAuthSession() falló.",
+        safeWarn(
+          AppCore,
+          "restoreAuthSession() error:",
           error
         );
 
@@ -147,23 +192,20 @@ export async function restoreAuthSession({
 }
 
 /* =========================================================
-   RESTORE SESSION DURANTE BOOT
-   Nota:
-   - esta función YA NO trabaja "en background"
-   - no debe navegar ni rerenderizar durante el boot
-   - warmup se ejecuta después del restore para que ya exista el estado
-     auth resuelto antes del primer render real
+   RESTORE DURANTE BOOT
+   CRÍTICO:
+   - bloquear boot hasta resolver auth
+   - warmup después del restore
+   - sin renders intermedios
 ========================================================= */
+
 export async function restoreSessionInBackground({
   AppCore,
   Auth,
   Router,
-  Toast,
   state,
   syncUserUI,
   warmup,
-  navigateAfterSessionRestore,
-  applyPostRenderLoaderPolicy,
 } = {}) {
   try {
     const result =
@@ -176,13 +218,23 @@ export async function restoreSessionInBackground({
 
     await warmup?.(AppCore);
 
-    return result || {
-      ok: false,
-      user: null,
-    };
+    /* solo navegación explícita si quedó en login */
+    navigateAfterSessionRestore({
+      AppCore,
+      Auth,
+      Router,
+    });
+
+    return (
+      result || {
+        ok: false,
+        user: null,
+      }
+    );
   } catch (error) {
-    AppCore?.utils?.warn?.(
-      "restoreSession() falló durante boot.",
+    safeWarn(
+      AppCore,
+      "restoreSessionInBackground() falló:",
       error
     );
 

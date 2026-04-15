@@ -7,10 +7,16 @@
    - encapsular estados visuales del formulario
    - aplicar y limpiar errores
    - controlar loading ui
-   - controlar toggle de contraseña
+   - integrar el sistema compartido de password-field
    - gestionar focus inicial
    - soportar usuario o email
 ========================================================= */
+
+import {
+  bindPasswordFieldsInScope,
+  getEyeIcon,
+  getEyeOffIcon,
+} from "../../shared/password-field/index.js";
 
 /* =========================================================
    HELPERS
@@ -26,12 +32,69 @@ function toText(value, fallback = "") {
   return text || fallback;
 }
 
+function isFn(value) {
+  return typeof value === "function";
+}
+
+function setPasswordToggleUi(toggleButton, visible = false) {
+  if (!toggleButton) return;
+
+  const isVisible = Boolean(visible);
+
+  const showLabel = toText(
+    toggleButton.getAttribute("data-show-label"),
+    "Mostrar contraseña"
+  );
+
+  const hideLabel = toText(
+    toggleButton.getAttribute("data-hide-label"),
+    "Ocultar contraseña"
+  );
+
+  toggleButton.setAttribute(
+    "aria-label",
+    isVisible ? hideLabel : showLabel
+  );
+
+  toggleButton.setAttribute(
+    "aria-pressed",
+    String(isVisible)
+  );
+
+  toggleButton.innerHTML = isVisible
+    ? getEyeOffIcon()
+    : getEyeIcon();
+}
+
 /* =========================================================
    REFS
 ========================================================= */
 
 export function getLoginRefs(container) {
   const root = qs(container, ".login-view");
+
+  const passwordFieldBindings = bindPasswordFieldsInScope(
+    root || container || document
+  );
+
+  const primaryPasswordField =
+    Array.isArray(passwordFieldBindings) && passwordFieldBindings.length
+      ? passwordFieldBindings[0]
+      : null;
+
+  const passwordInput =
+    primaryPasswordField?.input ||
+    qs(container, "#loginPassword");
+
+  const togglePasswordButton =
+    primaryPasswordField?.toggle ||
+    qs(container, '[data-password-toggle="true"]') ||
+    qs(container, "#togglePassword");
+
+  const capsIndicator =
+    primaryPasswordField?.capsIndicator ||
+    qs(container, '[data-password-caps="true"]') ||
+    qs(container, "#loginCapsIndicator");
 
   return {
     container,
@@ -41,22 +104,25 @@ export function getLoginRefs(container) {
 
     emailInput: qs(container, "#loginEmail"),
     identifierInput: qs(container, "#loginEmail"),
-    passwordInput: qs(container, "#loginPassword"),
+    passwordInput,
     rememberInput: qs(container, "#loginRemember"),
 
     errorBox: qs(container, "#loginError"),
 
     submitButton: qs(container, "#loginSubmit"),
     themeToggleButton: qs(container, "#loginThemeToggle"),
-    togglePasswordButton: qs(container, "#togglePassword"),
+    togglePasswordButton,
 
-    capsIndicator: qs(container, "#loginCapsIndicator"),
+    capsIndicator,
 
     forgotPasswordLink: qs(container, "#forgotPasswordLink"),
 
     fieldEmail: qs(container, '[data-field="email"]'),
     fieldIdentifier: qs(container, '[data-field="email"]'),
     fieldPassword: qs(container, '[data-field="password"]'),
+
+    passwordFieldBindings,
+    passwordField: primaryPasswordField,
   };
 }
 
@@ -222,40 +288,8 @@ export function setPasswordVisibility(refs = {}, visible = false) {
     return isVisible;
   }
 
-  const showLabel =
-    toText(
-      togglePasswordButton.getAttribute("data-show-label"),
-      "Mostrar contraseña"
-    );
-
-  const hideLabel =
-    toText(
-      togglePasswordButton.getAttribute("data-hide-label"),
-      "Ocultar contraseña"
-    );
-
-  const showIcon =
-    togglePasswordButton.getAttribute("data-show-icon") || "";
-
-  const hideIcon =
-    togglePasswordButton.getAttribute("data-hide-icon") || "";
-
   passwordInput.type = isVisible ? "text" : "password";
-
-  togglePasswordButton.setAttribute(
-    "aria-label",
-    isVisible ? hideLabel : showLabel
-  );
-
-  togglePasswordButton.setAttribute(
-    "aria-pressed",
-    String(isVisible)
-  );
-
-  togglePasswordButton.innerHTML =
-    isVisible
-      ? (hideIcon || "Ocultar")
-      : (showIcon || "Ver");
+  setPasswordToggleUi(togglePasswordButton, isVisible);
 
   return isVisible;
 }
@@ -310,7 +344,7 @@ export function readLoginFormState(refs = {}) {
 ========================================================= */
 
 export function bindLoginInputClearers(refs = {}, handler = null) {
-  if (typeof handler !== "function") {
+  if (!isFn(handler)) {
     return () => {};
   }
 
@@ -324,19 +358,34 @@ export function bindLoginInputClearers(refs = {}, handler = null) {
 }
 
 export function bindPasswordToggle(refs = {}, handler = null) {
-  if (typeof handler !== "function") {
-    return () => {};
+  if (isFn(handler)) {
+    refs.togglePasswordButton?.addEventListener("click", handler);
+
+    return () => {
+      refs.togglePasswordButton?.removeEventListener("click", handler);
+    };
   }
 
-  refs.togglePasswordButton?.addEventListener("click", handler);
+  const defaultHandler = (event) => {
+    event?.preventDefault?.();
+    togglePasswordVisibility(refs);
+
+    try {
+      refs.passwordInput?.focus?.({ preventScroll: true });
+    } catch {
+      refs.passwordInput?.focus?.();
+    }
+  };
+
+  refs.togglePasswordButton?.addEventListener("click", defaultHandler);
 
   return () => {
-    refs.togglePasswordButton?.removeEventListener("click", handler);
+    refs.togglePasswordButton?.removeEventListener("click", defaultHandler);
   };
 }
 
 export function bindThemeToggle(refs = {}, handler = null) {
-  if (typeof handler !== "function") {
+  if (!isFn(handler)) {
     return () => {};
   }
 
@@ -348,7 +397,7 @@ export function bindThemeToggle(refs = {}, handler = null) {
 }
 
 export function bindLoginSubmit(refs = {}, handler = null) {
-  if (typeof handler !== "function") {
+  if (!isFn(handler)) {
     return () => {};
   }
 

@@ -10,6 +10,12 @@
    - detección rutas auth
    - validación redirects internos
    - endurecer strings / urls / payloads backend
+
+   HARDENING PRO:
+   - tolerancia total a AppCore parcial
+   - unicode safe
+   - anti open redirect
+   - helpers reutilizables SPA
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -21,98 +27,212 @@ import { AUTH_CONSTANTS } from "./constants.js";
 
 export function isBrowser() {
   return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
+    typeof window !==
+      "undefined" &&
+    typeof document !==
+      "undefined"
   );
 }
 
-export function safeText(value, fallback = "") {
-  if (value === null || value === undefined) {
+export function safeText(
+  value,
+  fallback = ""
+) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text =
+    String(value).trim();
+
   return text || fallback;
 }
 
-export function safeNumber(value, fallback = 0) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
+export function safeNumber(
+  value,
+  fallback = 0
+) {
+  const n =
+    Number(value);
+
+  return Number.isFinite(n)
+    ? n
+    : fallback;
 }
 
-export function isObject(value) {
+export function safeBool(
+  value
+) {
+  return value === true;
+}
+
+export function isObject(
+  value
+) {
   return (
     value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value)
+    typeof value ===
+      "object" &&
+    !Array.isArray(
+      value
+    )
   );
 }
 
-export function safeClone(value) {
+export function safeClone(
+  value
+) {
   try {
-    if (typeof AppCore?.utils?.safeClone === "function") {
-      return AppCore.utils.safeClone(value, value);
+    if (
+      typeof AppCore?.utils
+        ?.safeClone ===
+      "function"
+    ) {
+      return AppCore.utils.safeClone(
+        value
+      );
     }
   } catch {}
 
   try {
-    return structuredClone(value);
+    return structuredClone(
+      value
+    );
   } catch {}
 
   return value;
 }
 
 /* =========================================================
+   INTERNAL APPCORE HELPERS
+========================================================= */
+
+function coreNormalizePath(
+  value
+) {
+  try {
+    if (
+      typeof AppCore?.utils
+        ?.normalizePath ===
+      "function"
+    ) {
+      return AppCore.utils.normalizePath(
+        value
+      );
+    }
+  } catch {}
+
+  return null;
+}
+
+function coreNormalizeCanonicalPath(
+  value
+) {
+  try {
+    if (
+      typeof AppCore?.utils
+        ?.normalizeCanonicalPath ===
+      "function"
+    ) {
+      return AppCore.utils.normalizeCanonicalPath(
+        value
+      );
+    }
+  } catch {}
+
+  return null;
+}
+
+/* =========================================================
    PATH HELPERS
 ========================================================= */
 
-function fallbackNormalizePath(value = "/") {
-  const raw = safeText(value, "/") || "/";
+function fallbackNormalizePath(
+  value = "/"
+) {
+  const raw =
+    safeText(
+      value,
+      "/"
+    ) || "/";
 
-  if (raw === "/") {
-    return "/";
-  }
+  const noHash =
+    raw.split("#")[0];
 
-  return raw
-    .replace(/\/{2,}/g, "/")
-    .replace(/\/+$/g, "") || "/";
+  const [pathname, search] =
+    noHash.split("?");
+
+  const cleanPath =
+    String(
+      pathname || "/"
+    )
+      .replace(
+        /\/{2,}/g,
+        "/"
+      )
+      .replace(
+        /\/+$/g,
+        ""
+      ) || "/";
+
+  return search
+    ? `${cleanPath}?${search}`
+    : cleanPath;
 }
 
-export function normalizePath(path = "/") {
-  try {
-    if (typeof AppCore?.utils?.normalizePath === "function") {
-      return AppCore.utils.normalizePath(path);
-    }
-  } catch {}
-
-  return fallbackNormalizePath(path);
+export function normalizePath(
+  path = "/"
+) {
+  return (
+    coreNormalizePath(
+      path
+    ) ||
+    fallbackNormalizePath(
+      path
+    )
+  );
 }
 
-export function normalizeCanonicalPath(path = "/") {
-  try {
-    if (typeof AppCore?.utils?.normalizeCanonicalPath === "function") {
-      return AppCore.utils.normalizeCanonicalPath(path);
-    }
-  } catch {}
-
-  try {
-    if (typeof AppCore?.utils?.normalizePath === "function") {
-      return AppCore.utils.normalizePath(path);
-    }
-  } catch {}
-
-  return fallbackNormalizePath(path);
+export function normalizeCanonicalPath(
+  path = "/"
+) {
+  return (
+    coreNormalizeCanonicalPath(
+      path
+    ) ||
+    coreNormalizePath(
+      path
+    ) ||
+    fallbackNormalizePath(
+      path
+    )
+  );
 }
 
 export function getCurrentCanonicalPath() {
-  if (!isBrowser()) {
+  if (
+    !isBrowser()
+  ) {
     return "/";
   }
 
   const raw =
     `${window.location.pathname || "/"}${window.location.search || ""}`;
 
-  return normalizeCanonicalPath(raw);
+  return normalizeCanonicalPath(
+    raw
+  );
+}
+
+export function configLikeRoute(
+  path = "/"
+) {
+  return normalizePath(
+    path || "/"
+  );
 }
 
 export function isAuthRoute(
@@ -121,154 +241,288 @@ export function isAuthRoute(
     : "/"
 ) {
   const path =
-    normalizeCanonicalPath(pathname)
-      .toLowerCase();
+    normalizeCanonicalPath(
+      pathname
+    ).toLowerCase();
 
   return [
     "/login",
     "/signin",
     "/auth",
     "/auth/login",
-    "/reset-password",
     "/forgot-password",
+    "/reset-password",
+    "/recover",
     "/2fa",
+    "/otp",
   ].includes(path);
 }
 
-export function configLikeRoute(path = "/") {
-  return normalizePath(path || "/");
-}
-
-export function isSafeRelativePath(path = "") {
-  const raw = safeText(path, "");
+export function isSafeRelativePath(
+  path = ""
+) {
+  const raw =
+    safeText(path);
 
   if (!raw) {
     return false;
   }
 
-  if (!raw.startsWith("/")) {
+  if (
+    !raw.startsWith("/")
+  ) {
     return false;
   }
 
-  if (raw.startsWith("//")) {
+  if (
+    raw.startsWith("//")
+  ) {
     return false;
   }
 
-  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/i.test(raw)) {
+  if (
+    /^[a-z][a-z0-9+.-]*:/i.test(
+      raw
+    )
+  ) {
     return false;
   }
 
-  if (/[\r\n]/.test(raw)) {
+  if (
+    /[\r\n\t]/.test(
+      raw
+    )
+  ) {
     return false;
   }
 
   return true;
 }
 
+export function sanitizeRedirectPath(
+  path = "/"
+) {
+  const candidate =
+    normalizePath(
+      path
+    );
+
+  if (
+    isSafeRelativePath(
+      candidate
+    )
+  ) {
+    return candidate;
+  }
+
+  return "/";
+}
+
 /* =========================================================
    USER / TOKEN
 ========================================================= */
 
-export function sanitizeUsername(value = "") {
+export function sanitizeUsername(
+  value = ""
+) {
   try {
-    if (typeof AppCore?.utils?.sanitizeUsername === "function") {
-      return AppCore.utils.sanitizeUsername(value);
+    if (
+      typeof AppCore?.utils
+        ?.sanitizeUsername ===
+      "function"
+    ) {
+      return AppCore.utils.sanitizeUsername(
+        value
+      );
     }
   } catch {}
 
-  return String(value || "")
+  return String(
+    value || ""
+  )
     .trim()
-    .replace(/^@+/, "")
-    .replace(/\s+/g, "")
-    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .replace(
+      /^@+/,
+      ""
+    )
+    .replace(
+      /\s+/g,
+      ""
+    )
+    .replace(
+      /[^a-zA-Z0-9._-]/g,
+      ""
+    )
     .toLowerCase()
-    .slice(0, safeNumber(AUTH_CONSTANTS?.identifierMaxLength, 160));
+    .slice(
+      0,
+      safeNumber(
+        AUTH_CONSTANTS?.identifierMaxLength,
+        160
+      )
+    );
 }
 
-export function slugify(value = "") {
+export function slugify(
+  value = ""
+) {
   try {
-    if (typeof AppCore?.utils?.slugify === "function") {
-      return AppCore.utils.slugify(value);
+    if (
+      typeof AppCore?.utils
+        ?.slugify ===
+      "function"
+    ) {
+      return AppCore.utils.slugify(
+        value
+      );
     }
   } catch {}
 
-  return String(value || "")
+  return String(
+    value || ""
+  )
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
+    .replace(
+      /[\u0300-\u036f]/g,
+      ""
+    )
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+    .replace(
+      /[^a-z0-9._-]+/g,
+      "-"
+    )
+    .replace(
+      /-{2,}/g,
+      "-"
+    )
+    .replace(
+      /^-+|-+$/g,
+      ""
+    );
 }
 
-export function normalizeTokenValue(token = null) {
-  if (token === null || token === undefined) {
+export function normalizeTokenValue(
+  token = null
+) {
+  if (
+    token === null ||
+    token === undefined
+  ) {
     return null;
   }
 
-  const normalized = String(token).trim();
+  const normalized =
+    String(token)
+      .trim()
+      .slice(
+        0,
+        safeNumber(
+          AUTH_CONSTANTS?.tokenMaxLength,
+          4096
+        )
+      );
 
-  if (!normalized) {
-    return null;
-  }
-
-  return normalized.slice(
-    0,
-    safeNumber(AUTH_CONSTANTS?.tokenMaxLength, 4096)
-  );
+  return normalized ||
+    null;
 }
 
 export function normalizeSessionValue(
   value = null,
-  maxLength = AUTH_CONSTANTS?.sessionValueMaxLength
+  maxLength =
+    AUTH_CONSTANTS?.sessionValueMaxLength
 ) {
-  if (value === null || value === undefined) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
     return null;
   }
 
-  const normalized = String(value).trim();
+  const normalized =
+    String(value)
+      .trim()
+      .slice(
+        0,
+        safeNumber(
+          maxLength,
+          200
+        )
+      );
 
-  if (!normalized) {
-    return null;
-  }
-
-  return normalized.slice(
-    0,
-    safeNumber(maxLength, 200)
-  );
+  return normalized ||
+    null;
 }
 
 export function hasValidToken(
   token = AppCore?.state?.token
 ) {
-  return Boolean(normalizeTokenValue(token));
+  return Boolean(
+    normalizeTokenValue(
+      token
+    )
+  );
 }
 
 /* =========================================================
-   ERROR MESSAGE
+   ERROR HELPERS
 ========================================================= */
 
-export function extractMessage(error) {
+export function extractMessage(
+  error
+) {
   if (!error) {
     return "Error de autenticación";
   }
 
-  if (typeof error === "string") {
+  if (
+    typeof error ===
+    "string"
+  ) {
     return error;
   }
 
-  const message =
-    safeText(error?.data?.message, "") ||
-    safeText(error?.data?.mensaje, "") ||
-    safeText(error?.data?.detail, "") ||
-    safeText(error?.data?.error, "") ||
-    safeText(error?.response?.data?.message, "") ||
-    safeText(error?.response?.data?.mensaje, "") ||
-    safeText(error?.response?.data?.detail, "") ||
-    safeText(error?.response?.data?.error, "") ||
-    (typeof error?.data === "string" ? safeText(error.data, "") : "") ||
-    safeText(error?.message, "") ||
-    safeText(error?.statusText, "");
+  const candidates = [
+    error?.data?.message,
+    error?.data?.mensaje,
+    error?.data?.detail,
+    error?.data?.error,
 
-  return message || "Error de autenticación";
+    error?.response?.data
+      ?.message,
+    error?.response?.data
+      ?.mensaje,
+    error?.response?.data
+      ?.detail,
+    error?.response?.data
+      ?.error,
+
+    error?.message,
+    error?.statusText,
+  ];
+
+  for (const item of candidates) {
+    const text =
+      safeText(
+        item
+      );
+
+    if (text) {
+      return text;
+    }
+  }
+
+  return "Error de autenticación";
+}
+
+export function buildErrorPayload(
+  error
+) {
+  return {
+    error,
+    message:
+      extractMessage(
+        error
+      ),
+  };
 }

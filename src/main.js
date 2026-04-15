@@ -9,11 +9,13 @@
    - capturar errores fatales de arranque
    - integrar App + AppCore
 
-   HARDENING:
-   - evita doble boot
-   - fallback DOMContentLoaded
-   - logs debug
-   - error handler visible
+   HARDENING PRO:
+   - una sola vía de arranque
+   - anti doble boot
+   - CSP clean
+   - fallback robusto
+   - logs limpios
+   - error fatal visible
 ========================================================= */
 
 import { App } from "./app/index.js";
@@ -24,6 +26,7 @@ import { AppCore } from "./core/index.js";
 ========================================================= */
 
 let bootStarted = false;
+let bootPromise = null;
 
 /* =========================================================
    HELPERS
@@ -41,6 +44,33 @@ function safeError(...args) {
   } catch {
     console.error(...args);
   }
+}
+
+function createReloadButton() {
+  const button =
+    document.createElement("button");
+
+  button.type = "button";
+  button.textContent = "Recargar";
+
+  button.style.padding =
+    "10px 16px";
+
+  button.style.border = "0";
+  button.style.borderRadius =
+    "10px";
+
+  button.style.cursor =
+    "pointer";
+
+  button.addEventListener(
+    "click",
+    () => {
+      window.location.reload();
+    }
+  );
+
+  return button;
 }
 
 function showFatalBootError(error) {
@@ -63,27 +93,34 @@ function showFatalBootError(error) {
         margin:40px auto;
         font-family:Inter,Arial,sans-serif;
       ">
-        <h1 style="margin:0 0 12px;font-size:28px;">
+        <h1 style="
+          margin:0 0 12px;
+          font-size:28px;
+        ">
           Error de arranque
         </h1>
 
-        <p style="margin:0 0 12px;opacity:.8;">
-          ${message}
+        <p style="
+          margin:0 0 16px;
+          opacity:.8;
+        ">
+          ${String(message)}
         </p>
 
-        <button
-          type="button"
-          onclick="window.location.reload()"
-          style="
-            padding:10px 16px;
-            border:0;
-            border-radius:10px;
-            cursor:pointer;
-          ">
-          Recargar
-        </button>
+        <div id="fatal-boot-actions"></div>
       </section>
     `;
+
+    const actions =
+      document.getElementById(
+        "fatal-boot-actions"
+      );
+
+    if (actions) {
+      actions.appendChild(
+        createReloadButton()
+      );
+    }
   } catch {}
 }
 
@@ -93,30 +130,38 @@ function showFatalBootError(error) {
 
 async function boot() {
   if (bootStarted) {
-    safeLog(
-      "Boot ignorado: ya iniciado."
-    );
-    return;
+    return bootPromise;
   }
 
   bootStarted = true;
 
-  try {
-    safeLog("Boot iniciando...");
+  bootPromise =
+    Promise.resolve()
+      .then(async () => {
+        safeLog(
+          "Boot iniciando..."
+        );
 
-    await Promise.resolve(
-      App.boot()
-    );
+        await App.boot();
 
-    safeLog("Boot completado.");
-  } catch (error) {
-    safeError(
-      "Fallo crítico en boot:",
-      error
-    );
+        safeLog(
+          "Boot completado."
+        );
+      })
+      .catch((error) => {
+        safeError(
+          "Fallo crítico en boot:",
+          error
+        );
 
-    showFatalBootError(error);
-  }
+        showFatalBootError(
+          error
+        );
+
+        throw error;
+      });
+
+  return bootPromise;
 }
 
 /* =========================================================
@@ -128,16 +173,10 @@ function onReady() {
 }
 
 if (
-  typeof document !== "undefined" &&
-  document.readyState === "loading"
+  typeof document !==
+  "undefined"
 ) {
   AppCore.ready(onReady);
-
-  document.addEventListener(
-    "DOMContentLoaded",
-    onReady,
-    { once: true }
-  );
 } else {
   onReady();
 }

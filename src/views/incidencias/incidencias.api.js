@@ -1,224 +1,380 @@
 /* =========================================================
-   Onion SPA - Incidencias API
-   Archivo: src/views/incidencias/incidencias.api.js
-   EXTREME MODE FIXED
+   Onion SPA - Incidencias View
+   Archivo: src/views/incidencias/IncidenciasView.js
+
+   Responsabilidades:
+   - actuar como visor principal de incidencias
+   - renderizar header + tabla premium del módulo
+   - cargar datos iniciales y refrescos
+   - bind de eventos de la vista
+   - evitar doble bind de listeners
+   - soportar destroy limpio del router
+   - permitir reload con rerender
+   - desacoplar la orquestación de la capa template
+
+   HARDENING PRO:
+   - init serializado
+   - anti-race con token de render
+   - tolerancia a hydrate cache + carga remota
+   - rerender seguro tras refresh
+   - cleanup sólido por scope
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
-import { Http } from "../../services/index.js";
 
 import {
-  CACHE_KEY,
-  CACHE_TTL,
   incidenciasState,
-  getInflightLoad,
-  setInflightLoad,
-  setLoading,
-  setLoaded,
-  setError,
-  setLastSyncAt,
+  setHydrated,
 } from "./incidencias.state.js";
 
-import { safeNumber } from "./incidencias.utils.js";
-
 import {
-  extractItems,
-  normalizeIncidencia,
-} from "./incidencias.model.js";
+  loadIncidencias,
+  hydrateFromCache,
+} from "./incidencias.api.js";
 
 import {
   getIncidencias,
-  setIncidencias,
+  sortIncidenciasByUpdatedDesc,
 } from "./incidencias.store.js";
 
-const ENDPOINT = "/api/tickets";
+import {
+  renderHeader,
+  renderTable,
+} from "./incidencias.table.template.js";
 
-/* =========================================================
-   STORAGE
-========================================================= */
+import {
+  bindIncidenciasEvents,
+} from "./incidencias.bindings.js";
 
-function getStorageApi() {
-  return AppCore?.storage || null;
-}
+import {
+  openTicket,
+} from "./incidencias.actions.js";
 
-function buildStorageKey() {
-  return `${AppCore.config?.storagePrefix || "onion"}:${CACHE_KEY}`;
-}
+export const IncidenciasView = (() => {
+  "use strict";
 
-function saveCache(payload) {
-  try {
-    const storage = getStorageApi();
+  const SCOPE = "view:incidencias";
 
-    if (storage?.set) {
-      storage.set(CACHE_KEY, payload);
-      return;
-    }
+  let initialized = false;
+  let destroyed = false;
+  let bindingsCleanup = null;
+  let renderToken = 0;
+  let inflightInit = null;
+  let inflightReload = null;
 
-    localStorage.setItem(
-      buildStorageKey(),
-      JSON.stringify(payload)
-    );
-  } catch {}
-}
+  /* =====================================================
+     HELPERS
+  ===================================================== */
 
-function readCache() {
-  try {
-    const storage = getStorageApi();
-
-    if (storage?.get) {
-      return storage.get(CACHE_KEY);
-    }
-
-    const raw = localStorage.getItem(buildStorageKey());
-
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-function isFreshCache(cache) {
-  return (
-    cache?.timestamp &&
-    Date.now() - safeNumber(cache.timestamp, 0) < CACHE_TTL
-  );
-}
-
-/* =========================================================
-   RESPONSE
-========================================================= */
-
-function fallbackExtractItems(response) {
-  const candidates = [
-    response,
-    response?.items,
-    response?.data,
-    response?.data?.items,
-    response?.data?.data,
-    response?.data?.data?.items,
-    response?.rows,
-    response?.resources,
-    response?.result,
-  ];
-
-  for (const item of candidates) {
-    if (Array.isArray(item)) {
-      return item;
-    }
-  }
-
-  return [];
-}
-
-function resolveItems(response) {
-  try {
-    const items = extractItems(response);
-
-    if (Array.isArray(items)) {
-      return items;
-    }
-  } catch {}
-
-  return fallbackExtractItems(response);
-}
-
-/* =========================================================
-   CACHE
-========================================================= */
-
-export function hydrateFromCache() {
-  const cache = readCache();
-
-  if (!Array.isArray(cache?.items)) {
-    return false;
-  }
-
-  /* YA ESTÁN NORMALIZADOS */
-  setIncidencias(cache.items);
-
-  setLastSyncAt(cache.timestamp || Date.now());
-  setLoaded(true);
-
-  return true;
-}
-
-/* =========================================================
-   LOAD
-========================================================= */
-
-export async function loadIncidencias({
-  force = false,
-} = {}) {
-  const inflight = getInflightLoad();
-
-  if (inflight && !force) {
-    return inflight;
-  }
-
-  const cache = readCache();
-
-  if (!incidenciasState.loaded && cache?.items?.length) {
-    hydrateFromCache();
-  }
-
-  if (isFreshCache(cache) && !force) {
-    return Promise.resolve(getIncidencias());
-  }
-
-  setLoading(true);
-  setError(null);
-
-  const request = (async () => {
+  function safeLog(...args) {
     try {
-      AppCore?.utils?.log?.("[Incidencias] GET", ENDPOINT);
+      AppCore?.utils?.log?.(
+        "[IncidenciasView]",
+        ...args
+      );
+    } catch {}
+  }
 
-      const response = await Http.get(ENDPOINT);
+  function safeWarn(...args) {
+    try {
+      AppCore?.utils?.warn?.(
+        "[IncidenciasView]",
+        ...args
+      );
+    } catch {}
+  }
 
-      AppCore?.utils?.log?.("[Incidencias] RAW:", response);
+  function safeError(...args) {
+    try {
+      AppCore?.utils?.error?.(
+        "[IncidenciasView]",
+        ...args
+      );
+    } catch {}
+  }
 
-      const rawItems = resolveItems(response);
+  function getContainer() {
+    return (
+      AppCore?.dom?.viewContainer ||
+      document.getElementById(
+        "view-container"
+      ) ||
+      null
+    );
+  }
 
-      const items = Array.isArray(rawItems)
-        ? rawItems.map(normalizeIncidencia)
-        : [];
+  function getItems() {
+    try {
+      return sortIncidenciasByUpdatedDesc(
+        getIncidencias()
+      );
+    } catch (error) {
+      safeWarn(
+        "getItems falló:",
+        error
+      );
+      return [];
+    }
+  }
 
-      setIncidencias(items);
+  function nextRenderToken() {
+    renderToken += 1;
+    return renderToken;
+  }
 
-      const now = Date.now();
+  function isActiveToken(token) {
+    return (
+      !destroyed &&
+      token === renderToken
+    );
+  }
 
-      setLastSyncAt(now);
-      setLoaded(true);
-      setLoading(false);
-      setError(null);
+  function cleanupBindings() {
+    try {
+      bindingsCleanup?.();
+    } catch (error) {
+      safeWarn(
+        "cleanupBindings falló:",
+        error
+      );
+    }
 
-      saveCache({
-        timestamp: now,
-        items,
+    bindingsCleanup = null;
+
+    try {
+      AppCore?.cleanup?.run?.(
+        SCOPE
+      );
+    } catch {}
+  }
+
+  function bind() {
+    cleanupBindings();
+
+    const maybeCleanup =
+      bindIncidenciasEvents({
+        scope: SCOPE,
+        loadIncidencias,
+        openTicket,
+        rerender: render,
+        reload,
       });
 
-      AppCore?.utils?.log?.(
-        "[Incidencias] loaded:",
-        items.length
-      );
-
-      return items;
-    } catch (error) {
-      setLoading(false);
-      setLoaded(true);
-
-      setError(
-        error?.data?.message ||
-          error?.message ||
-          "No se pudieron cargar las incidencias."
-      );
-
-      throw error;
-    } finally {
-      setInflightLoad(null);
+    if (
+      typeof maybeCleanup ===
+      "function"
+    ) {
+      bindingsCleanup =
+        maybeCleanup;
     }
-  })();
+  }
 
-  setInflightLoad(request);
+  function buildHtml() {
+    const items = getItems();
 
-  return request;
-}
+    return `
+      <section class="panel-content dashboard ready">
+        <div class="content-wrapper">
+          ${renderHeader({
+            items,
+            state: incidenciasState,
+          })}
+
+          ${renderTable({
+            items,
+            state: incidenciasState,
+          })}
+        </div>
+      </section>
+    `;
+  }
+
+  /* =====================================================
+     RENDER
+  ===================================================== */
+
+  function render() {
+    const container =
+      getContainer();
+
+    if (!container) {
+      safeWarn(
+        "No se encontró #view-container."
+      );
+      return null;
+    }
+
+    AppCore?.setDocumentTitle?.(
+      "Incidencias"
+    );
+
+    AppCore?.clearDynamicContainers?.();
+
+    container.innerHTML =
+      buildHtml();
+
+    setHydrated(true);
+
+    return container;
+  }
+
+  /* =====================================================
+     LOAD + RENDER
+  ===================================================== */
+
+  async function renderAndLoad({
+    force = false,
+  } = {}) {
+    const token =
+      nextRenderToken();
+
+    try {
+      hydrateFromCache?.();
+    } catch (error) {
+      safeWarn(
+        "hydrateFromCache falló:",
+        error
+      );
+    }
+
+    render();
+
+    try {
+      await loadIncidencias({
+        force,
+      });
+    } catch (error) {
+      safeWarn(
+        "loadIncidencias falló:",
+        error
+      );
+    }
+
+    if (!isActiveToken(token)) {
+      return api;
+    }
+
+    render();
+
+    return api;
+  }
+
+  async function reload(
+    options = {}
+  ) {
+    if (destroyed) {
+      return api;
+    }
+
+    if (inflightReload) {
+      return inflightReload;
+    }
+
+    inflightReload =
+      (async () => {
+        try {
+          await renderAndLoad({
+            force: true,
+            ...options,
+          });
+        } catch (error) {
+          safeWarn(
+            "reload falló:",
+            error
+          );
+        }
+
+        if (!destroyed) {
+          bind();
+        }
+
+        return api;
+      })();
+
+    try {
+      return await inflightReload;
+    } finally {
+      inflightReload = null;
+    }
+  }
+
+  /* =====================================================
+     INIT
+  ===================================================== */
+
+  async function init() {
+    if (
+      initialized &&
+      inflightInit
+    ) {
+      return inflightInit;
+    }
+
+    destroyed = false;
+    initialized = true;
+
+    inflightInit =
+      (async () => {
+        safeLog("init");
+
+        try {
+          await renderAndLoad();
+        } catch (error) {
+          safeError(
+            "init renderAndLoad falló:",
+            error
+          );
+        }
+
+        if (!destroyed) {
+          bind();
+        }
+
+        return api;
+      })();
+
+    try {
+      return await inflightInit;
+    } finally {
+      inflightInit = null;
+    }
+  }
+
+  /* =====================================================
+     DESTROY
+  ===================================================== */
+
+  function destroy() {
+    destroyed = true;
+    initialized = false;
+
+    nextRenderToken();
+    cleanupBindings();
+
+    safeLog("destroy");
+  }
+
+  /* =====================================================
+     API
+  ===================================================== */
+
+  const api = {
+    init,
+    render,
+    reload,
+    destroy,
+    loadIncidencias,
+
+    get initialized() {
+      return initialized;
+    },
+
+    get destroyed() {
+      return destroyed;
+    },
+  };
+
+  return api;
+})();
+
+export default IncidenciasView;

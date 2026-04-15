@@ -7,9 +7,208 @@
    - bind de errores globales window.error
    - bind de promesas rechazadas sin control
    - notificar errores críticos con Toast
+
+   HARDENING EXTREMO:
+   - listeners idempotentes
+   - throttling visual de errores repetidos
+   - sanitizado robusto mensajes
+   - fallback total si faltan módulos
+   - cero loops recursivos de error
+   - telemetría interna por eventos
+   - recovery UX enterprise
 ========================================================= */
 
 import { escapeHtml } from "./helpers.js";
+
+/* =========================================================
+   INTERNAL STATE
+========================================================= */
+
+let handlersBound = false;
+
+const errorState = {
+  lastMessage: "",
+  lastAt: 0,
+};
+
+/* =========================================================
+   HELPERS
+========================================================= */
+
+function now() {
+  return Date.now();
+}
+
+function safeText(
+  value,
+  fallback = ""
+) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return fallback;
+  }
+
+  const text =
+    String(value).trim();
+
+  return text || fallback;
+}
+
+function isFunction(value) {
+  return typeof value === "function";
+}
+
+function safeLog(AppCore, ...args) {
+  try {
+    AppCore?.utils?.log?.(...args);
+  } catch {}
+}
+
+function safeWarn(AppCore, ...args) {
+  try {
+    AppCore?.utils?.warn?.(...args);
+  } catch {}
+}
+
+function safeError(AppCore, ...args) {
+  try {
+    AppCore?.utils?.error?.(...args);
+  } catch {
+    console.error(...args);
+  }
+}
+
+function safeEmit(
+  AppCore,
+  eventName,
+  payload = {}
+) {
+  try {
+    AppCore?.events?.emit?.(
+      eventName,
+      payload
+    );
+  } catch {}
+}
+
+function safeSetError(
+  AppCore,
+  error = null
+) {
+  try {
+    AppCore?.setError?.(
+      error
+    );
+  } catch {}
+}
+
+function safeToastError(
+  Toast,
+  message,
+  options = {}
+) {
+  try {
+    Toast?.error?.(
+      message,
+      options
+    );
+  } catch {}
+}
+
+function resolveErrorMessage(
+  error = null
+) {
+  if (!error) {
+    return "Se produjo un error inesperado.";
+  }
+
+  if (
+    typeof error ===
+    "string"
+  ) {
+    return safeText(
+      error,
+      "Se produjo un error inesperado."
+    );
+  }
+
+  return (
+    safeText(
+      error?.message,
+      ""
+    ) ||
+    safeText(
+      error?.statusText,
+      ""
+    ) ||
+    safeText(
+      error?.data?.message,
+      ""
+    ) ||
+    safeText(
+      error?.data?.error,
+      ""
+    ) ||
+    safeText(
+      error?.reason,
+      ""
+    ) ||
+    "Se produjo un error inesperado."
+  );
+}
+
+function shouldThrottleToast(
+  message = ""
+) {
+  const current =
+    safeText(message);
+
+  const time =
+    now();
+
+  if (
+    errorState.lastMessage ===
+      current &&
+    time -
+      errorState.lastAt <
+      2500
+  ) {
+    return true;
+  }
+
+  errorState.lastMessage =
+    current;
+
+  errorState.lastAt =
+    time;
+
+  return false;
+}
+
+function safeReload() {
+  try {
+    window.location.reload();
+  } catch {}
+}
+
+function safeRedirect(
+  path = "/login"
+) {
+  try {
+    window.location.assign(
+      path
+    );
+  } catch {
+    window.location.href =
+      path;
+  }
+}
+
+/* =========================================================
+   UI ERROR SCREEN
+========================================================= */
 
 export function renderBootError({
   AppCore,
@@ -19,28 +218,66 @@ export function renderBootError({
   getViewContainer,
   setShellVisibility,
   hideLoader,
-}) {
-  const container = typeof getViewContainer === "function"
-    ? getViewContainer(AppCore)
-    : null;
+} = {}) {
+  const container =
+    isFunction(
+      getViewContainer
+    )
+      ? getViewContainer(
+          AppCore
+        )
+      : null;
 
-  if (!container) return;
+  if (!container) {
+    safeError(
+      AppCore,
+      "renderBootError(): contenedor no disponible."
+    );
+
+    return false;
+  }
 
   const message =
-    error?.message ||
-    error?.statusText ||
-    error?.data?.message ||
-    "Se produjo un error al iniciar la aplicación.";
+    resolveErrorMessage(
+      error
+    );
 
-  AppCore.setDocumentTitle("Error de inicio");
-  AppCore.clearDynamicContainers?.();
-  setShellVisibility(AppCore, false);
-  hideLoader(AppCore);
+  try {
+    AppCore?.setDocumentTitle?.(
+      "Error de inicio"
+    );
+  } catch {}
+
+  try {
+    AppCore?.clearDynamicContainers?.();
+  } catch {}
+
+  try {
+    setShellVisibility?.(
+      AppCore,
+      false
+    );
+  } catch {}
+
+  try {
+    hideLoader?.(
+      AppCore
+    );
+  } catch {}
+
+  safeEmit(
+    AppCore,
+    "app:boot:error:render",
+    {
+      message,
+    }
+  );
 
   container.innerHTML = `
     <section class="content-wrapper">
       <div class="panel-block" style="padding:24px;">
-        <div style="display:grid; gap:18px;">
+        <div style="display:grid;gap:18px;">
+          
           <div
             style="
               width:56px;
@@ -56,14 +293,20 @@ export function renderBootError({
             ⚠️
           </div>
 
-          <div style="display:grid; gap:8px;">
-            <h2 style="margin:0;">Error al iniciar la aplicación</h2>
-            <p style="margin:0; color:var(--text-dim);">
-              ${escapeHtml(AppCore, message)}
+          <div style="display:grid;gap:8px;">
+            <h2 style="margin:0;">
+              Error al iniciar la aplicación
+            </h2>
+
+            <p style="margin:0;color:var(--text-dim);">
+              ${escapeHtml(
+                AppCore,
+                message
+              )}
             </p>
           </div>
 
-          <div style="display:flex; gap:12px; flex-wrap:wrap;">
+          <div style="display:flex;gap:12px;flex-wrap:wrap;">
             <button
               type="button"
               id="boot-retry-btn"
@@ -80,39 +323,119 @@ export function renderBootError({
               Limpiar sesión
             </button>
           </div>
+
         </div>
       </div>
     </section>
   `;
 
-  const retryBtn = document.getElementById("boot-retry-btn");
-  const resetSessionBtn = document.getElementById("boot-reset-session-btn");
+  const retryBtn =
+    document.getElementById(
+      "boot-retry-btn"
+    );
+
+  const resetBtn =
+    document.getElementById(
+      "boot-reset-session-btn"
+    );
 
   if (retryBtn) {
-    AppCore.utils.on(retryBtn, "click", () => {
-      window.location.reload();
-    });
-  }
-
-  if (resetSessionBtn) {
-    AppCore.utils.on(resetSessionBtn, "click", () => {
-      try {
-        Auth.clearSessionLocal?.();
-      } catch (sessionError) {
-        AppCore.utils.warn(
-          "No se pudo limpiar la sesión desde la pantalla de error.",
-          sessionError
-        );
-      } finally {
-        window.location.href = "/login";
+    retryBtn.addEventListener(
+      "click",
+      () => {
+        safeReload();
+      },
+      {
+        once: true,
       }
-    });
+    );
   }
 
-  Toast?.error?.(
-    message || "No se pudo arrancar la aplicación.",
+  if (resetBtn) {
+    resetBtn.addEventListener(
+      "click",
+      () => {
+        try {
+          Auth?.clearSessionLocal?.();
+        } catch (sessionError) {
+          safeWarn(
+            AppCore,
+            "No se pudo limpiar sesión:",
+            sessionError
+          );
+        } finally {
+          safeRedirect(
+            "/login"
+          );
+        }
+      },
+      {
+        once: true,
+      }
+    );
+  }
+
+  safeToastError(
+    Toast,
+    message,
     {
-      title: "Error de arranque",
+      title:
+        "Error de arranque",
+      duration: 5000,
+    }
+  );
+
+  return true;
+}
+
+/* =========================================================
+   GLOBAL HANDLERS
+========================================================= */
+
+function processRuntimeError({
+  AppCore,
+  Toast,
+  source = "runtime",
+  error = null,
+}) {
+  const message =
+    resolveErrorMessage(
+      error
+    );
+
+  safeSetError(
+    AppCore,
+    error
+  );
+
+  safeError(
+    AppCore,
+    source,
+    error
+  );
+
+  safeEmit(
+    AppCore,
+    "app:error",
+    {
+      source,
+      message,
+    }
+  );
+
+  if (
+    shouldThrottleToast(
+      message
+    )
+  ) {
+    return;
+  }
+
+  safeToastError(
+    Toast,
+    message,
+    {
+      title: "Error",
       duration: 5000,
     }
   );
@@ -122,38 +445,108 @@ export function bindGlobalErrorHandlers({
   AppCore,
   Toast,
   scope,
-}) {
-  AppCore.cleanup.on(scope, window, "error", (event) => {
-    const error = event?.error || {
-      message: event?.message || "Error global no controlado",
+} = {}) {
+  if (
+    handlersBound
+  ) {
+    return true;
+  }
+
+  if (
+    typeof window ===
+    "undefined"
+  ) {
+    return false;
+  }
+
+  const bindWithCleanup =
+    AppCore?.cleanup &&
+    isFunction(
+      AppCore.cleanup.on
+    );
+
+  const onError =
+    (event) => {
+      const error =
+        event?.error || {
+          message:
+            event?.message ||
+            "Error global no controlado",
+        };
+
+      processRuntimeError({
+        AppCore,
+        Toast,
+        source:
+          "window.error",
+        error,
+      });
     };
 
-    AppCore.setError(error);
-    AppCore.utils.error("window.error", error);
+  const onReject =
+    (event) => {
+      const reason =
+        event?.reason || {
+          message:
+            "Promise rechazada sin control",
+        };
 
-    Toast?.error?.(
-      error?.message || "Se ha producido un error inesperado.",
-      {
-        title: "Error",
-        duration: 5000,
-      }
-    );
-  });
-
-  AppCore.cleanup.on(scope, window, "unhandledrejection", (event) => {
-    const reason = event?.reason || {
-      message: "Promise rechazada sin control",
+      processRuntimeError({
+        AppCore,
+        Toast,
+        source:
+          "unhandledrejection",
+        error:
+          reason,
+      });
     };
 
-    AppCore.setError(reason);
-    AppCore.utils.error("unhandledrejection", reason);
+  try {
+    if (
+      bindWithCleanup &&
+      scope
+    ) {
+      AppCore.cleanup.on(
+        scope,
+        window,
+        "error",
+        onError
+      );
 
-    Toast?.error?.(
-      reason?.message || "Se ha producido un error inesperado.",
-      {
-        title: "Error",
-        duration: 5000,
-      }
+      AppCore.cleanup.on(
+        scope,
+        window,
+        "unhandledrejection",
+        onReject
+      );
+    } else {
+      window.addEventListener(
+        "error",
+        onError
+      );
+
+      window.addEventListener(
+        "unhandledrejection",
+        onReject
+      );
+    }
+
+    handlersBound =
+      true;
+
+    safeLog(
+      AppCore,
+      "Global error handlers activos."
     );
-  });
+
+    return true;
+  } catch (error) {
+    safeError(
+      AppCore,
+      "bindGlobalErrorHandlers() error:",
+      error
+    );
+
+    return false;
+  }
 }

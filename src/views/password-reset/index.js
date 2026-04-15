@@ -9,9 +9,7 @@
    - preservar una entrypoint limpia del módulo
 ========================================================= */
 
-import renderResetPasswordView from "./resetPasswordView.js";
+import ResetPasswordView from "./resetPasswordView.js";
 
-export const ResetPasswordView =
-  renderResetPasswordView;
-
-export default renderResetPasswordView;
+export { ResetPasswordView };
+export default ResetPasswordView;

@@ -20,6 +20,10 @@
    - finalize único
    - reboot limpio
    - tolerancia total a fallos parciales
+
+   UX PRO:
+   - loader global con visibilidad mínima garantizada
+   - anti-flicker real en primer boot
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -90,6 +94,8 @@ import { bindAppEvents } from "./events.js";
 export const App = (() => {
   "use strict";
 
+  const MIN_BOOT_LOADER_MS = 1000;
+
   const state = {
     booted: false,
     booting: false,
@@ -101,6 +107,8 @@ export const App = (() => {
     sessionRestorePromise: null,
     bootPromise: null,
     bootCycleId: 0,
+
+    loaderShownAt: 0,
   };
 
   /* =========================================================
@@ -140,6 +148,29 @@ export const App = (() => {
     try {
       AppCore?.setError?.(error);
     } catch {}
+  }
+
+  function delay(ms = 0) {
+    return new Promise((resolve) => {
+      setTimeout(resolve, Math.max(0, Number(ms) || 0));
+    });
+  }
+
+  function getRemainingBootLoaderMs() {
+    const shownAt =
+      Number(state.loaderShownAt) || 0;
+
+    if (!shownAt) {
+      return 0;
+    }
+
+    const elapsed =
+      Date.now() - shownAt;
+
+    return Math.max(
+      0,
+      MIN_BOOT_LOADER_MS - elapsed
+    );
   }
 
   function setBootFlags({
@@ -205,6 +236,11 @@ export const App = (() => {
 
   function isStaleBootCycle(cycleId) {
     return cycleId !== state.bootCycleId;
+  }
+
+  function markLoaderShownNow() {
+    state.loaderShownAt =
+      Date.now();
   }
 
   /* =========================================================
@@ -305,7 +341,7 @@ export const App = (() => {
     }
   }
 
-  function finalizeBoot() {
+  async function finalizeBoot() {
     clearBootFailsafeTimer(
       state
     );
@@ -324,6 +360,13 @@ export const App = (() => {
       AppCore,
       Router
     );
+
+    const remainingMs =
+      getRemainingBootLoaderMs();
+
+    if (remainingMs > 0) {
+      await delay(remainingMs);
+    }
 
     hideLoader(AppCore);
 
@@ -389,6 +432,7 @@ export const App = (() => {
 
       safeSetError(null);
 
+      markLoaderShownNow();
       showLoader(AppCore);
 
       armBootFailsafeLoader({
@@ -462,7 +506,7 @@ export const App = (() => {
         return api;
       }
 
-      finalizeBoot();
+      await finalizeBoot();
 
       return api;
     } catch (error) {
@@ -470,6 +514,15 @@ export const App = (() => {
         "Boot error:",
         error
       );
+
+      try {
+        const remainingMs =
+          getRemainingBootLoaderMs();
+
+        if (remainingMs > 0) {
+          await delay(remainingMs);
+        }
+      } catch {}
 
       hideLoader(AppCore);
 
@@ -550,6 +603,7 @@ export const App = (() => {
 
     state.sessionRestorePromise = null;
     state.bootPromise = null;
+    state.loaderShownAt = 0;
 
     markStoreBootState(Store, {
       ready: false,

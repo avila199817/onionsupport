@@ -10,6 +10,7 @@
    - normalizar avatar robusto para sidebar / topbar
    - endurecer tipos / strings / arrays
    - detectar 2FA con variantes comunes
+   - blindaje enterprise edge cases
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -67,9 +68,17 @@ function normalizeBoolean(
 }
 
 function normalizeArray(value) {
-  return Array.isArray(value)
-    ? value.filter(Boolean)
-    : [];
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) =>
+      String(item ?? "")
+        .trim()
+        .toLowerCase()
+    )
+    .filter(Boolean);
 }
 
 function isObject(value) {
@@ -99,10 +108,50 @@ function normalizeEmail(value = "") {
 }
 
 function normalizeRole(value = "user") {
-  return (
+  const role =
     safeLower(value) ||
-    "user"
+    "user";
+
+  const aliases = {
+    administrator: "admin",
+    superadmin: "admin",
+    super_admin: "admin",
+    customer: "client",
+    cliente: "client",
+  };
+
+  return (
+    aliases[role] ||
+    role
   );
+}
+
+function isSafeAvatarUrl(url = "") {
+  const value =
+    normalizeString(url);
+
+  if (!value) {
+    return false;
+  }
+
+  const lower =
+    value.toLowerCase();
+
+  if (
+    lower.startsWith(
+      "javascript:"
+    ) ||
+    lower.startsWith(
+      "vbscript:"
+    ) ||
+    lower.startsWith(
+      "data:text/html"
+    )
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 function normalizeAvatarUrl(
@@ -135,7 +184,9 @@ function normalizeAvatarUrl(
     );
 
   const avatar =
-    normalizeString(rawAvatar);
+    normalizeString(
+      rawAvatar
+    );
 
   if (!avatar) {
     return null;
@@ -151,6 +202,14 @@ function normalizeAvatarUrl(
     return null;
   }
 
+  if (
+    !isSafeAvatarUrl(
+      avatar
+    )
+  ) {
+    return null;
+  }
+
   return avatar;
 }
 
@@ -161,22 +220,6 @@ function normalizeAvatarUrl(
 export function normalizeUser(
   rawUser = null
 ) {
-  try {
-    if (
-      typeof AppCore?.normalizeUser ===
-      "function"
-    ) {
-      const external =
-        AppCore.normalizeUser(
-          rawUser
-        );
-
-      if (external) {
-        return external;
-      }
-    }
-  } catch {}
-
   if (!isObject(rawUser)) {
     return null;
   }
@@ -265,7 +308,7 @@ export function normalizeUser(
       rawUser._id
     );
 
-  return {
+  return Object.freeze({
     id: id || null,
     userId:
       userId || null,
@@ -351,7 +394,7 @@ export function normalizeUser(
 
     raw:
       safeClone(rawUser),
-  };
+  });
 }
 
 /* =========================================================
@@ -369,11 +412,7 @@ export function normalizeSessionPayload(
     payload.session ??
     payload.data?.session ??
     payload.meta?.session ??
-    null;
-
-  if (!isObject(sessionNode)) {
-    return null;
-  }
+    payload;
 
   const max =
     AUTH_CONSTANTS
@@ -411,7 +450,9 @@ export function normalizeSessionPayload(
     expiresAt:
       pickFirst(
         sessionNode.expiresAt,
-        sessionNode.expires_at
+        sessionNode.expires_at,
+        payload.expiresAt,
+        payload.exp
       ) || null,
 
     createdAt:
@@ -498,6 +539,10 @@ export function extractTempToken(
     ) || null
   );
 }
+
+/* =========================================================
+   2FA
+========================================================= */
 
 export function extractRequires2FA(
   payload = null
@@ -607,10 +652,8 @@ export function validateAuthResponse(
         "2fa_required",
       token: null,
       user: null,
-      refreshToken:
-        null,
-      sessionData:
-        null,
+      refreshToken: null,
+      sessionData: null,
       tempToken,
       response,
     };

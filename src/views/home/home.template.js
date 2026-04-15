@@ -3,12 +3,14 @@
    Archivo: src/views/home/home.template.js
 
    Responsabilidades:
-   - renderizar la vista Home premium
+   - renderizar la vista Home premium EXTREME MODE
    - consumir estado real del módulo Home
    - mostrar hero contextual con usuario autenticado
-   - renderizar métricas dinámicas
+   - renderizar KPIs dinámicos
+   - mostrar alertas operativas
+   - mostrar actividad reciente
    - soportar loading / error / empty states
-   - mantener estructura limpia y escalable
+   - mantener estructura limpia, premium y escalable
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -26,14 +28,8 @@ function escapeHtml(value = "") {
     .replaceAll("'", "&#39;");
 }
 
-function safeText(
-  value,
-  fallback = "—"
-) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
+function safeText(value, fallback = "—") {
+  if (value === null || value === undefined) {
     return fallback;
   }
 
@@ -41,12 +37,8 @@ function safeText(
   return text || fallback;
 }
 
-function safeNumber(
-  value,
-  fallback = 0
-) {
+function safeNumber(value, fallback = 0) {
   const number = Number(value);
-
   return Number.isFinite(number)
     ? number
     : fallback;
@@ -66,22 +58,35 @@ function safeObject(value) {
     : {};
 }
 
-function formatDateTime(
-  value = ""
-) {
+function formatNumber(value = 0) {
   try {
-    if (!value) {
-      return "—";
-    }
+    return new Intl.NumberFormat("es-ES").format(
+      safeNumber(value, 0)
+    );
+  } catch {
+    return "0";
+  }
+}
 
-    const date =
-      new Date(value);
+function formatMoney(value = 0) {
+  try {
+    return new Intl.NumberFormat("es-ES", {
+      style: "currency",
+      currency: "EUR",
+      maximumFractionDigits: 2,
+    }).format(safeNumber(value, 0));
+  } catch {
+    return `${safeNumber(value, 0)} €`;
+  }
+}
 
-    if (
-      Number.isNaN(
-        date.getTime()
-      )
-    ) {
+function formatDateTime(value = "") {
+  try {
+    if (!value) return "—";
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
       return "—";
     }
 
@@ -98,27 +103,16 @@ function formatDateTime(
 }
 
 function getGreetingByHour() {
-  const hour =
-    new Date().getHours();
+  const hour = new Date().getHours();
 
-  if (hour < 6) {
-    return "Buenas noches";
-  }
-
-  if (hour < 12) {
-    return "Buenos días";
-  }
-
-  if (hour < 20) {
-    return "Buenas tardes";
-  }
+  if (hour < 6) return "Buenas noches";
+  if (hour < 12) return "Buenos días";
+  if (hour < 20) return "Buenas tardes";
 
   return "Buenas noches";
 }
 
-function resolveDisplayName(
-  user
-) {
+function resolveDisplayName(user) {
   try {
     const byCore =
       typeof AppCore?.getUserDisplayName ===
@@ -126,11 +120,7 @@ function resolveDisplayName(
         ? AppCore.getUserDisplayName(user)
         : "";
 
-    if (
-      String(
-        byCore || ""
-      ).trim()
-    ) {
+    if (String(byCore || "").trim()) {
       return String(byCore).trim();
     }
   } catch {}
@@ -144,60 +134,86 @@ function resolveDisplayName(
 }
 
 /* =========================================================
-   STATE RESOLVE
+   STATE
 ========================================================= */
 
-function resolveHomeState(
-  options = {}
-) {
+function resolveHomeState(options = {}) {
   const home =
-    safeObject(
-      options?.home
-    );
+    safeObject(options?.home);
 
   const summary =
-    safeObject(
-      home.summary
-    );
+    safeObject(home.summary);
+
+  const kpis =
+    safeObject(summary.kpis);
 
   return {
     loading:
       home.loading === true,
+
     loaded:
       home.loaded === true,
+
     error:
       home.error || null,
+
+    cacheHit:
+      home.cacheHit === true,
+
     lastSyncAt:
       safeText(
         home.lastSyncAt,
         ""
       ),
-    cacheHit:
-      home.cacheHit === true,
+
     summary: {
-      status:
-        safeText(
-          summary.status,
-          "idle"
-        ),
-      cards:
-        safeNumber(
-          summary.cards,
-          0
-        ),
-      metrics:
-        safeArray(
-          summary.metrics
-        ),
-      recentActivity:
-        safeArray(
-          summary.recentActivity
-        ),
       generatedAt:
         safeText(
           summary.generatedAt,
           ""
         ),
+
+      alerts:
+        safeArray(
+          summary.alerts
+        ),
+
+      recentActivity:
+        safeArray(
+          summary.recentActivity
+        ),
+
+      kpis: {
+        ticketsOpen:
+          safeNumber(
+            kpis.ticketsOpen
+          ),
+
+        ticketsUrgent:
+          safeNumber(
+            kpis.ticketsUrgent
+          ),
+
+        clientesTotal:
+          safeNumber(
+            kpis.clientesTotal
+          ),
+
+        facturasPending:
+          safeNumber(
+            kpis.facturasPending
+          ),
+
+        usersTotal:
+          safeNumber(
+            kpis.usersTotal
+          ),
+
+        facturacionTotal:
+          safeNumber(
+            kpis.facturacionTotal
+          ),
+      },
     },
   };
 }
@@ -205,90 +221,6 @@ function resolveHomeState(
 /* =========================================================
    PARTIALS
 ========================================================= */
-
-function renderMiniStat({
-  label = "",
-  value = "",
-  hint = "",
-} = {}) {
-  return `
-    <article
-      class="home-mini-stat"
-      tabindex="0"
-    >
-      <div class="home-mini-stat__label">
-        ${escapeHtml(label)}
-      </div>
-
-      <div class="home-mini-stat__value">
-        ${escapeHtml(value)}
-      </div>
-
-      <div class="home-mini-stat__hint">
-        ${escapeHtml(hint)}
-      </div>
-    </article>
-  `;
-}
-
-function renderMetricsGrid(
-  metrics = []
-) {
-  const finalMetrics =
-    safeArray(metrics);
-
-  if (!finalMetrics.length) {
-    return `
-      <div class="home-empty">
-        No hay métricas disponibles.
-      </div>
-    `;
-  }
-
-  return `
-    <div class="home-mini-stats">
-      ${finalMetrics
-        .map(
-          (
-            item,
-            index
-          ) =>
-            renderMiniStat({
-              label:
-                item?.label ||
-                `Métrica ${index + 1}`,
-              value:
-                item?.value ||
-                "—",
-              hint:
-                item?.hint ||
-                "",
-            })
-        )
-        .join("")}
-    </div>
-  `;
-}
-
-function renderLoadingGrid() {
-  return `
-    <div class="home-mini-stats">
-      ${Array.from({
-        length: 3,
-      })
-        .map(
-          () => `
-          <div class="home-mini-stat home-skeleton">
-            <div class="home-skeleton-line home-skeleton-line--sm"></div>
-            <div class="home-skeleton-line home-skeleton-line--lg"></div>
-            <div class="home-skeleton-line home-skeleton-line--md"></div>
-          </div>
-        `
-        )
-        .join("")}
-    </div>
-  `;
-}
 
 function renderHero({
   user = null,
@@ -310,26 +242,26 @@ function renderHero({
   return `
     <section class="home-hero">
       <div class="home-hero__eyebrow">
-        Onion Support · Workspace
+        Onion Support · Dashboard
       </div>
 
-      <div class="home-hero__header">
+      <div class="home-hero__content">
         <div class="home-hero__copy">
+
           <h1 class="home-hero__title">
             ${escapeHtml(greeting)},
             ${escapeHtml(displayName)}
           </h1>
 
           <p class="home-hero__subtitle">
-            Panel principal de operaciones. Accesos rápidos,
-            métricas clave y visión general del sistema.
+            Centro operativo principal.
+            Control de tickets, facturación,
+            clientes y actividad global.
           </p>
 
           <div class="home-hero__meta">
             <span>
-              ${escapeHtml(
-                syncText
-              )}
+              ${escapeHtml(syncText)}
             </span>
 
             ${
@@ -346,59 +278,226 @@ function renderHero({
             `
             }
           </div>
+
         </div>
       </div>
     </section>
   `;
 }
 
-function renderMainCard({
-  appName = "Onion Support",
-  state = {},
+function renderKpi({
+  label = "",
+  value = "",
+  accent = "",
 } = {}) {
-  const hasError =
-    Boolean(
-      state.error
-    );
+  return `
+    <article class="home-kpi ${accent}">
+      <div class="home-kpi__label">
+        ${escapeHtml(label)}
+      </div>
+
+      <div class="home-kpi__value">
+        ${escapeHtml(value)}
+      </div>
+    </article>
+  `;
+}
+
+function renderKpis(state = {}) {
+  const k =
+    state.summary.kpis;
 
   return `
-    <section class="home-main-card">
-      <div class="home-main-card__surface">
+    <section class="home-grid home-grid--4">
 
-        <div class="home-main-card__top">
-          <div class="home-main-card__badge">
-            Dashboard
-          </div>
+      ${renderKpi({
+        label: "Tickets abiertos",
+        value: formatNumber(
+          k.ticketsOpen
+        ),
+      })}
 
-          <h2 class="home-main-card__title">
-            Bienvenido a ${escapeHtml(
-              appName
-            )}
-          </h2>
+      ${renderKpi({
+        label: "Urgentes",
+        value: formatNumber(
+          k.ticketsUrgent
+        ),
+        accent:
+          "is-warning",
+      })}
 
-          <p class="home-main-card__text">
-            Base inicial del panel premium.
-            Desde aquí crecerán widgets,
-            actividad reciente, negocio
-            y control operativo.
-          </p>
-        </div>
+      ${renderKpi({
+        label: "Facturas pendientes",
+        value: formatNumber(
+          k.facturasPending
+        ),
+      })}
 
-        ${
-          hasError
-            ? `
-          <div class="home-error">
-            Error cargando datos de la Home.
+      ${renderKpi({
+        label: "Facturación",
+        value: formatMoney(
+          k.facturacionTotal
+        ),
+        accent:
+          "is-success",
+      })}
+
+    </section>
+  `;
+}
+
+function renderAlerts(state = {}) {
+  const alerts =
+    safeArray(
+      state.summary.alerts
+    );
+
+  if (!alerts.length) {
+    return `
+      <div class="home-empty">
+        Sin alertas activas.
+      </div>
+    `;
+  }
+
+  return `
+    <section class="home-panel">
+      <div class="home-panel__top">
+        <h3 class="home-panel__title">
+          Alertas
+        </h3>
+      </div>
+
+      <div class="home-list">
+        ${alerts
+          .map(
+            (item) => `
+          <div class="home-row">
+            <span class="home-dot"></span>
+            <span>
+              ${escapeHtml(
+                item?.message ||
+                "Alerta"
+              )}
+            </span>
           </div>
         `
-            : state.loading
-            ? renderLoadingGrid()
-            : renderMetricsGrid(
-                state.summary
-                  .metrics
-              )
-        }
+          )
+          .join("")}
+      </div>
+    </section>
+  `;
+}
 
+function renderRecent(state = {}) {
+  const rows =
+    safeArray(
+      state.summary
+        .recentActivity
+    );
+
+  if (!rows.length) {
+    return `
+      <div class="home-empty">
+        Sin actividad reciente.
+      </div>
+    `;
+  }
+
+  return `
+    <section class="home-panel">
+      <div class="home-panel__top">
+        <h3 class="home-panel__title">
+          Actividad reciente
+        </h3>
+      </div>
+
+      <div class="home-list">
+        ${rows
+          .map(
+            (item) => `
+          <div class="home-row home-row--between">
+            <span>
+              ${escapeHtml(
+                item?.text ||
+                item?.label ||
+                "Movimiento"
+              )}
+            </span>
+
+            <span class="home-row__muted">
+              ${escapeHtml(
+                formatDateTime(
+                  item?.date ||
+                  item?.createdAt
+                )
+              )}
+            </span>
+          </div>
+        `
+          )
+          .join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderQuickStats(
+  state = {}
+) {
+  const k =
+    state.summary.kpis;
+
+  return `
+    <section class="home-grid home-grid--2">
+
+      <div class="home-panel">
+        <div class="home-panel__top">
+          <h3 class="home-panel__title">
+            Clientes
+          </h3>
+        </div>
+
+        <div class="home-big-number">
+          ${formatNumber(
+            k.clientesTotal
+          )}
+        </div>
+      </div>
+
+      <div class="home-panel">
+        <div class="home-panel__top">
+          <h3 class="home-panel__title">
+            Usuarios
+          </h3>
+        </div>
+
+        <div class="home-big-number">
+          ${formatNumber(
+            k.usersTotal
+          )}
+        </div>
+      </div>
+
+    </section>
+  `;
+}
+
+function renderLoading() {
+  return `
+    <section class="home-panel">
+      <div class="home-loading">
+        Cargando dashboard...
+      </div>
+    </section>
+  `;
+}
+
+function renderError() {
+  return `
+    <section class="home-panel">
+      <div class="home-error">
+        Error cargando datos del dashboard.
       </div>
     </section>
   `;
@@ -408,307 +507,272 @@ function renderMainCard({
    STYLES
 ========================================================= */
 
-function renderScopedStyles() {
+function renderStyles() {
   return `
-    <style>
+  <style>
+    .home-view{
+      width:100%;
+      display:grid;
+      gap:24px;
+      padding:24px;
+    }
+
+    .home-hero,
+    .home-panel,
+    .home-kpi{
+      border-radius:28px;
+      border:1px solid rgba(255,255,255,.08);
+      background:
+        linear-gradient(
+          180deg,
+          rgba(255,255,255,.03),
+          rgba(255,255,255,.01)
+        ),
+        rgba(24,24,27,.72);
+      box-shadow:
+        0 18px 48px rgba(0,0,0,.16),
+        inset 0 1px 0 rgba(255,255,255,.04);
+    }
+
+    .home-hero,
+    .home-panel{
+      padding:28px;
+    }
+
+    .home-hero__content,
+    .home-hero__copy{
+      display:grid;
+      gap:14px;
+    }
+
+    .home-hero__eyebrow,
+    .home-badge{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      width:max-content;
+      min-height:30px;
+      padding:0 12px;
+      border-radius:999px;
+      font-size:12px;
+      font-weight:800;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+    }
+
+    .home-hero__eyebrow{
+      color:var(--text-soft);
+      border:1px solid rgba(255,255,255,.08);
+      background:rgba(255,255,255,.03);
+    }
+
+    .home-badge{
+      background:rgba(34,197,94,.10);
+      color:#86efac;
+      border:1px solid rgba(34,197,94,.14);
+    }
+
+    .home-badge--cache{
+      background:rgba(245,158,11,.10);
+      color:#fcd34d;
+      border:1px solid rgba(245,158,11,.14);
+    }
+
+    .home-hero__title{
+      margin:0;
+      font-size:clamp(30px,4vw,46px);
+      line-height:1.04;
+      letter-spacing:-.03em;
+      font-weight:900;
+      color:var(--text-strong);
+    }
+
+    .home-hero__subtitle{
+      margin:0;
+      color:var(--text-dim);
+      line-height:1.65;
+      max-width:72ch;
+    }
+
+    .home-hero__meta{
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      color:var(--text-muted);
+      font-size:13px;
+    }
+
+    .home-grid{
+      display:grid;
+      gap:18px;
+    }
+
+    .home-grid--4{
+      grid-template-columns:repeat(4,minmax(0,1fr));
+    }
+
+    .home-grid--2{
+      grid-template-columns:repeat(2,minmax(0,1fr));
+    }
+
+    .home-kpi{
+      padding:22px;
+      display:grid;
+      gap:10px;
+    }
+
+    .home-kpi__label{
+      font-size:12px;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+      font-weight:800;
+      color:var(--text-dim);
+    }
+
+    .home-kpi__value{
+      font-size:30px;
+      line-height:1;
+      font-weight:900;
+      letter-spacing:-.03em;
+      color:var(--text-strong);
+    }
+
+    .is-warning{
+      border-color:rgba(245,158,11,.20);
+    }
+
+    .is-success{
+      border-color:rgba(34,197,94,.20);
+    }
+
+    .home-panel__title{
+      margin:0;
+      font-size:16px;
+      font-weight:800;
+      color:var(--text-strong);
+    }
+
+    .home-list{
+      display:grid;
+      gap:12px;
+      margin-top:18px;
+    }
+
+    .home-row{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      min-height:42px;
+      padding:0 14px;
+      border-radius:16px;
+      background:rgba(255,255,255,.025);
+      color:var(--text-dim);
+    }
+
+    .home-row--between{
+      justify-content:space-between;
+    }
+
+    .home-row__muted{
+      color:var(--text-muted);
+      font-size:12px;
+    }
+
+    .home-dot{
+      width:8px;
+      height:8px;
+      border-radius:50%;
+      background:#f59e0b;
+      flex:0 0 auto;
+    }
+
+    .home-big-number{
+      font-size:42px;
+      font-weight:900;
+      line-height:1;
+      color:var(--text-strong);
+      margin-top:18px;
+    }
+
+    .home-empty,
+    .home-loading,
+    .home-error{
+      min-height:120px;
+      display:grid;
+      place-items:center;
+      border-radius:20px;
+      text-align:center;
+      padding:18px;
+    }
+
+    .home-empty{
+      color:var(--text-dim);
+      border:1px dashed rgba(255,255,255,.08);
+    }
+
+    .home-loading{
+      color:var(--text-dim);
+    }
+
+    .home-error{
+      color:#fca5a5;
+      background:rgba(239,68,68,.05);
+      border:1px solid rgba(239,68,68,.12);
+    }
+
+    [data-theme="light"] .home-hero,
+    [data-theme="light"] .home-panel,
+    [data-theme="light"] .home-kpi{
+      border-color:rgba(15,23,42,.08);
+      background:
+        linear-gradient(
+          180deg,
+          rgba(255,255,255,.94),
+          rgba(255,255,255,.82)
+        ),
+        rgba(255,255,255,.92);
+      box-shadow:
+        0 18px 44px rgba(15,23,42,.08),
+        inset 0 1px 0 rgba(255,255,255,.82);
+    }
+
+    @media (max-width:1200px){
+      .home-grid--4{
+        grid-template-columns:repeat(2,minmax(0,1fr));
+      }
+    }
+
+    @media (max-width:760px){
       .home-view{
-        width:100%;
-        display:grid;
-        gap:24px;
-        padding:24px;
-      }
-
-      .home-hero,
-      .home-main-card__surface{
-        position:relative;
-        overflow:hidden;
-        border-radius:28px;
-        border:1px solid rgba(255,255,255,.08);
-        background:
-          linear-gradient(
-            180deg,
-            rgba(255,255,255,.03),
-            rgba(255,255,255,.01)
-          ),
-          rgba(24,24,27,.70);
-        box-shadow:
-          0 18px 48px rgba(0,0,0,.16),
-          inset 0 1px 0 rgba(255,255,255,.04);
-      }
-
-      .home-hero{
-        padding:28px;
-      }
-
-      .home-main-card__surface{
-        padding:28px;
-        display:grid;
-        gap:24px;
-      }
-
-      .home-hero__eyebrow,
-      .home-main-card__badge{
-        display:inline-flex;
-        align-items:center;
-        gap:10px;
-        width:max-content;
-        min-height:30px;
-        padding:0 12px;
-        border-radius:999px;
-        font-size:12px;
-        font-weight:700;
-        letter-spacing:.08em;
-        text-transform:uppercase;
-        color:var(--text-soft);
-        border:1px solid rgba(255,255,255,.08);
-        background:
-          rgba(255,255,255,.03);
-      }
-
-      .home-hero__eyebrow{
-        margin-bottom:14px;
-      }
-
-      .home-hero__title,
-      .home-main-card__title{
-        margin:0;
-        color:var(--text-strong);
-        font-weight:800;
-        letter-spacing:-0.03em;
-        line-height:1.04;
-      }
-
-      .home-hero__title{
-        font-size:clamp(28px,4vw,44px);
-      }
-
-      .home-main-card__title{
-        font-size:clamp(22px,2.4vw,30px);
-      }
-
-      .home-hero__subtitle,
-      .home-main-card__text{
-        margin:0;
-        color:var(--text-dim);
-        font-size:15px;
-        line-height:1.65;
-        max-width:72ch;
-      }
-
-      .home-hero__copy,
-      .home-main-card__top{
-        display:grid;
-        gap:14px;
-      }
-
-      .home-hero__meta{
-        display:flex;
-        flex-wrap:wrap;
-        gap:10px;
-        align-items:center;
-        margin-top:4px;
-        color:var(--text-muted);
-        font-size:13px;
-      }
-
-      .home-badge{
-        min-height:28px;
-        padding:0 10px;
-        border-radius:999px;
-        display:inline-flex;
-        align-items:center;
-        justify-content:center;
-        background:rgba(34,197,94,.10);
-        color:#86efac;
-        border:1px solid rgba(34,197,94,.14);
-        font-weight:700;
-      }
-
-      .home-badge--cache{
-        background:rgba(245,158,11,.10);
-        color:#fcd34d;
-        border:1px solid rgba(245,158,11,.14);
-      }
-
-      .home-mini-stats{
-        display:grid;
-        grid-template-columns:repeat(3,minmax(0,1fr));
+        padding:16px;
         gap:16px;
       }
 
-      .home-mini-stat{
-        min-width:0;
+      .home-grid--4,
+      .home-grid--2{
+        grid-template-columns:1fr;
+      }
+
+      .home-hero,
+      .home-panel,
+      .home-kpi{
         border-radius:22px;
-        border:1px solid rgba(255,255,255,.07);
-        background:
-          linear-gradient(
-            180deg,
-            rgba(255,255,255,.024),
-            rgba(255,255,255,.010)
-          ),
-          rgba(255,255,255,.015);
-        box-shadow:
-          inset 0 1px 0 rgba(255,255,255,.03);
+      }
+
+      .home-hero,
+      .home-panel{
+        padding:20px;
+      }
+
+      .home-kpi{
         padding:18px;
-        display:grid;
-        gap:8px;
-        transition:
-          transform .18s ease,
-          border-color .18s ease,
-          box-shadow .18s ease;
       }
 
-      .home-mini-stat:hover{
-        transform:translateY(-2px);
-        border-color:rgba(255,255,255,.12);
+      .home-big-number{
+        font-size:34px;
       }
-
-      .home-mini-stat__label{
-        color:var(--text-dim);
-        font-size:12px;
-        font-weight:700;
-        letter-spacing:.08em;
-        text-transform:uppercase;
-      }
-
-      .home-mini-stat__value{
-        color:var(--text-strong);
-        font-size:24px;
-        line-height:1;
-        font-weight:800;
-        letter-spacing:-0.02em;
-      }
-
-      .home-mini-stat__hint{
-        color:var(--text-muted);
-        font-size:13px;
-        line-height:1.45;
-      }
-
-      .home-empty,
-      .home-error{
-        min-height:110px;
-        border-radius:22px;
-        display:grid;
-        place-items:center;
-        text-align:center;
-        padding:18px;
-        font-size:14px;
-      }
-
-      .home-empty{
-        color:var(--text-dim);
-        border:1px dashed rgba(255,255,255,.10);
-      }
-
-      .home-error{
-        color:#fca5a5;
-        border:1px solid rgba(239,68,68,.12);
-        background:rgba(239,68,68,.05);
-      }
-
-      .home-skeleton{
-        pointer-events:none;
-      }
-
-      .home-skeleton-line{
-        height:12px;
-        border-radius:999px;
-        background:
-          linear-gradient(
-            90deg,
-            rgba(255,255,255,.04),
-            rgba(255,255,255,.10),
-            rgba(255,255,255,.04)
-          );
-        background-size:200% 100%;
-        animation:homeShimmer 1.2s linear infinite;
-      }
-
-      .home-skeleton-line--sm{
-        width:40%;
-      }
-
-      .home-skeleton-line--md{
-        width:62%;
-      }
-
-      .home-skeleton-line--lg{
-        width:74%;
-        height:22px;
-      }
-
-      @keyframes homeShimmer{
-        from{
-          background-position:200% 0;
-        }
-        to{
-          background-position:-200% 0;
-        }
-      }
-
-      [data-theme="light"] .home-hero,
-      [data-theme="light"] .home-main-card__surface{
-        border-color:rgba(15,23,42,.08);
-        background:
-          linear-gradient(
-            180deg,
-            rgba(255,255,255,.92),
-            rgba(255,255,255,.80)
-          ),
-          rgba(255,255,255,.88);
-        box-shadow:
-          0 18px 44px rgba(15,23,42,.08),
-          inset 0 1px 0 rgba(255,255,255,.82);
-      }
-
-      [data-theme="light"] .home-mini-stat{
-        border-color:rgba(15,23,42,.08);
-        background:rgba(255,255,255,.72);
-      }
-
-      @media (max-width:920px){
-        .home-view{
-          padding:18px;
-          gap:18px;
-        }
-
-        .home-hero,
-        .home-main-card__surface{
-          padding:22px;
-          border-radius:24px;
-        }
-
-        .home-mini-stats{
-          grid-template-columns:1fr;
-        }
-      }
-
-      @media (max-width:640px){
-        .home-view{
-          padding:14px;
-        }
-
-        .home-hero,
-        .home-main-card__surface{
-          padding:18px;
-          border-radius:22px;
-        }
-
-        .home-hero__title{
-          font-size:30px;
-        }
-
-        .home-hero__subtitle,
-        .home-main-card__text{
-          font-size:14px;
-        }
-
-        .home-mini-stat__value{
-          font-size:22px;
-        }
-      }
-    </style>
+    }
+  </style>
   `;
 }
 
@@ -719,12 +783,6 @@ function renderScopedStyles() {
 export function getHomeTemplate(
   options = {}
 ) {
-  const appName =
-    safeText(
-      options?.appName,
-      "Onion Support"
-    );
-
   const user =
     options?.user || null;
 
@@ -733,23 +791,44 @@ export function getHomeTemplate(
       options
     );
 
+  let body = "";
+
+  if (state.error) {
+    body = renderError();
+  } else if (
+    state.loading &&
+    !state.loaded
+  ) {
+    body = renderLoading();
+  } else {
+    body = `
+      ${renderKpis(state)}
+
+      <section class="home-grid home-grid--2">
+        ${renderAlerts(state)}
+        ${renderRecent(state)}
+      </section>
+
+      ${renderQuickStats(state)}
+    `;
+  }
+
   return `
-    ${renderScopedStyles()}
+    ${renderStyles()}
 
     <section
       class="home-view"
       data-view="home"
       data-home-view="true"
     >
+
       ${renderHero({
         user,
         state,
       })}
 
-      ${renderMainCard({
-        appName,
-        state,
-      })}
+      ${body}
+
     </section>
   `;
 }

@@ -19,15 +19,25 @@ import {
 ========================================================= */
 export function getShellElements(AppCore) {
   return {
-    sidebar: AppCore.dom.sidebar || document.querySelector(".sidebar"),
-    topbar: AppCore.dom.topbar || document.querySelector(".topbar"),
+    sidebar:
+      AppCore.dom.sidebar ||
+      document.querySelector(".sidebar"),
+
+    topbar:
+      AppCore.dom.topbar ||
+      document.querySelector(".topbar"),
+
     tablehead:
       document.getElementById("table-head") ||
       document.querySelector(".table-head"),
+
     tableheadContainer:
       AppCore.dom.tableheadContainer ||
       document.getElementById("tablehead-container"),
-    body: AppCore.dom.body || document.body,
+
+    body:
+      AppCore.dom.body ||
+      document.body,
   };
 }
 
@@ -44,6 +54,7 @@ export function getViewContainer(AppCore) {
 ========================================================= */
 export function setShellVisibility(AppCore, visible = true) {
   const hidden = !visible;
+
   const {
     sidebar,
     topbar,
@@ -52,47 +63,135 @@ export function setShellVisibility(AppCore, visible = true) {
     body,
   } = getShellElements(AppCore);
 
-  if (sidebar) sidebar.hidden = hidden;
-  if (topbar) topbar.hidden = hidden;
-  if (tablehead) tablehead.hidden = hidden;
-  if (tableheadContainer) tableheadContainer.hidden = hidden;
-
-  if (body) {
-    body.classList.toggle("route-shell-hidden", hidden);
-    body.classList.toggle("auth-screen", hidden);
-    body.classList.toggle("route-auth", hidden);
+  if (sidebar) {
+    sidebar.hidden = hidden;
   }
 
-  AppCore.events.emit("router:shell:change", {
-    hidden,
-  });
+  if (topbar) {
+    topbar.hidden = hidden;
+  }
+
+  if (tablehead) {
+    tablehead.hidden = hidden;
+  }
+
+  if (tableheadContainer) {
+    tableheadContainer.hidden = hidden;
+  }
+
+  if (body) {
+    body.classList.toggle(
+      "route-shell-hidden",
+      hidden
+    );
+
+    body.classList.toggle(
+      "auth-screen",
+      hidden
+    );
+
+    body.classList.toggle(
+      "route-auth",
+      hidden
+    );
+
+    body.classList.toggle(
+      "login-no-scroll",
+      hidden
+    );
+  }
+
+  AppCore.events.emit(
+    "router:shell:change",
+    {
+      hidden,
+    }
+  );
 }
 
 /* =========================================================
    ROUTE MODE
 ========================================================= */
-export function isLoginPath(AppCore, path = "") {
-  const normalized = AppCore.utils.normalizePath(path || "/");
-  return normalized === "/login" || normalized.startsWith("/login?");
-}
-
-export function isAuthLikeRoute(AppCore, Router) {
-  const currentCanonicalPath = getCurrentCanonicalPath(AppCore, Router);
-  const currentPublicPath = getCurrentPublicPath(AppCore);
+export function isLoginPath(
+  AppCore,
+  path = ""
+) {
+  const normalized =
+    AppCore.utils.normalizePath(
+      path || "/"
+    );
 
   return (
-    currentCanonicalPath === "/login" ||
-    isLoginPath(AppCore, currentPublicPath)
+    normalized === "/login" ||
+    normalized.startsWith("/login?")
   );
 }
 
-export function updateShellVisibilityByRoute(AppCore, Router) {
-  if (isAuthLikeRoute(AppCore, Router)) {
-    setShellVisibility(AppCore, false);
+export function isResetPasswordPath(
+  AppCore,
+  path = ""
+) {
+  const normalized =
+    AppCore.utils.normalizePath(
+      path || "/"
+    );
+
+  return (
+    normalized === "/reset-password" ||
+    normalized.startsWith("/reset-password?")
+  );
+}
+
+export function isAuthLikeRoute(
+  AppCore,
+  Router
+) {
+  const currentCanonicalPath =
+    getCurrentCanonicalPath(
+      AppCore,
+      Router
+    );
+
+  const currentPublicPath =
+    getCurrentPublicPath(
+      AppCore
+    );
+
+  return (
+    currentCanonicalPath === "/login" ||
+    currentCanonicalPath === "/reset-password" ||
+    isLoginPath(
+      AppCore,
+      currentPublicPath
+    ) ||
+    isResetPasswordPath(
+      AppCore,
+      currentPublicPath
+    )
+  );
+}
+
+export function updateShellVisibilityByRoute(
+  AppCore,
+  Router
+) {
+  if (
+    isAuthLikeRoute(
+      AppCore,
+      Router
+    )
+  ) {
+    setShellVisibility(
+      AppCore,
+      false
+    );
     return;
   }
 
-  setShellVisibility(AppCore, true);
+  setShellVisibility(
+    AppCore,
+    true
+  );
 }
 
 /* =========================================================
@@ -103,12 +202,25 @@ export function applyPostRenderLoaderPolicy({
   Router,
   hideLoader,
 }) {
-  const viewContainer = getViewContainer(AppCore);
-  const hasViewContent = Boolean(viewContainer?.innerHTML?.trim());
+  const viewContainer =
+    getViewContainer(AppCore);
 
-  updateShellVisibilityByRoute(AppCore, Router);
+  const hasViewContent =
+    Boolean(
+      viewContainer?.innerHTML?.trim()
+    );
 
-  if (isAuthLikeRoute(AppCore, Router)) {
+  updateShellVisibilityByRoute(
+    AppCore,
+    Router
+  );
+
+  if (
+    isAuthLikeRoute(
+      AppCore,
+      Router
+    )
+  ) {
     hideLoader(AppCore);
     return;
   }

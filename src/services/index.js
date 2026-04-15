@@ -40,6 +40,7 @@ import {
   useRequest as registerRequestInterceptor,
   useResponse as registerResponseInterceptor,
   useError as registerErrorInterceptor,
+  ejectInterceptor as ejectRegisteredInterceptor,
   runRequestInterceptors,
   runResponseInterceptors,
   runErrorInterceptors,
@@ -156,24 +157,60 @@ export const Http = (() => {
   /* =========================================================
      INTERCEPTOR API
   ========================================================= */
-  function useRequest(fn) {
+  function useRequest(
+    fn,
+    options = {}
+  ) {
     return registerRequestInterceptor(
       interceptors,
-      fn
+      fn,
+      options
     );
   }
 
-  function useResponse(fn) {
+  function useResponse(
+    fn,
+    options = {}
+  ) {
     return registerResponseInterceptor(
       interceptors,
-      fn
+      fn,
+      options
     );
   }
 
-  function useError(fn) {
+  function useError(
+    fn,
+    options = {}
+  ) {
     return registerErrorInterceptor(
       interceptors,
-      fn
+      fn,
+      options
+    );
+  }
+
+  function ejectRequest(ref) {
+    return ejectRegisteredInterceptor(
+      interceptors,
+      "request",
+      ref
+    );
+  }
+
+  function ejectResponse(ref) {
+    return ejectRegisteredInterceptor(
+      interceptors,
+      "response",
+      ref
+    );
+  }
+
+  function ejectError(ref) {
+    return ejectRegisteredInterceptor(
+      interceptors,
+      "error",
+      ref
     );
   }
 
@@ -680,6 +717,9 @@ export const Http = (() => {
     useRequest,
     useResponse,
     useError,
+    ejectRequest,
+    ejectResponse,
+    ejectError,
 
     createAbortController,
     withSignal,

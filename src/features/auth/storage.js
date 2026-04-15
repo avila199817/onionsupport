@@ -51,7 +51,9 @@ function getPrefix() {
   );
 }
 
-function buildKey(key = "") {
+function buildKey(
+  key = ""
+) {
   return `${getPrefix()}:${safeText(
     key,
     ""
@@ -130,7 +132,9 @@ function writeRaw(
   }
 }
 
-function removeRaw(key) {
+function removeRaw(
+  key
+) {
   try {
     const storage =
       getStorageApi();
@@ -264,8 +268,10 @@ export function persistSessionContext(
     sessionId:
       sessionId ||
       null,
+
     userId:
-      userId || null,
+      userId ||
+      null,
   };
 }
 
@@ -275,7 +281,7 @@ export function persistAuxSessionData(
   const userId =
     normalizeSessionValue(
       user?.userId ??
-      user?.id,
+        user?.id,
       maxLen()
     );
 
@@ -306,8 +312,8 @@ export function getStoredSessionUserId() {
 export function hasRefreshContext() {
   return Boolean(
     getStoredRefreshToken() &&
-    getStoredSessionId() &&
-    getStoredSessionUserId()
+      getStoredSessionId() &&
+      getStoredSessionUserId()
   );
 }
 

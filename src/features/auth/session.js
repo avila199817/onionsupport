@@ -77,6 +77,10 @@ function safeEmit(
   } catch {}
 }
 
+function nowMs() {
+  return Date.now();
+}
+
 function ensureCoreState() {
   if (
     !AppCore.state ||
@@ -216,6 +220,83 @@ function getCurrentStateSnapshotBase() {
   };
 }
 
+function buildSessionFingerprint(
+  snapshot = {}
+) {
+  const user =
+    snapshot?.user || {};
+
+  return JSON.stringify({
+    authenticated:
+      Boolean(
+        snapshot?.authenticated
+      ),
+    token:
+      safeText(
+        snapshot?.token,
+        ""
+      ),
+    role:
+      safeText(
+        snapshot?.role,
+        ""
+      ),
+    userId:
+      user.id ||
+      user.userId ||
+      user.user_id ||
+      null,
+    username:
+      user.username ||
+      user.userName ||
+      user.email ||
+      null,
+    refreshToken:
+      safeText(
+        snapshot?.refreshToken,
+        ""
+      ),
+    sessionId:
+      safeText(
+        snapshot?.sessionId,
+        ""
+      ),
+    sessionUserId:
+      safeText(
+        snapshot?.sessionUserId,
+        ""
+      ),
+  });
+}
+
+function emitSessionState({
+  reason = "unknown",
+  before = null,
+  after = null,
+  durationMs = 0,
+} = {}) {
+  safeEmit(
+    "auth:session:state",
+    {
+      reason,
+      durationMs,
+      before,
+      after,
+      changed:
+        buildSessionFingerprint(
+          before
+        ) !==
+        buildSessionFingerprint(
+          after
+        ),
+      at:
+        new Date().toISOString(),
+      timestamp:
+        nowMs(),
+    }
+  );
+}
+
 /* =========================================================
    SNAPSHOT
 ========================================================= */
@@ -256,6 +337,10 @@ export function applySession({
   tempToken = undefined,
   sessionData = undefined,
 } = {}) {
+  const startedAt = nowMs();
+  const before =
+    buildSessionSnapshot();
+
   const normalizedUser =
     user === undefined
       ? undefined
@@ -330,6 +415,14 @@ export function applySession({
   const snapshot =
     buildSessionSnapshot();
 
+  emitSessionState({
+    reason: "apply",
+    before,
+    after: snapshot,
+    durationMs:
+      nowMs() - startedAt,
+  });
+
   safeEmit(
     "auth:session:applied",
     snapshot
@@ -351,6 +444,7 @@ export function clearSessionLocal(
 
   const before =
     buildSessionSnapshot();
+  const startedAt = nowMs();
 
   const hadSomething =
     Boolean(before.token) ||
@@ -391,6 +485,20 @@ export function clearSessionLocal(
       }
     );
   }
+
+  const after =
+    buildSessionSnapshot();
+
+  emitSessionState({
+    reason:
+      safeBool(silent)
+        ? "clear:silent"
+        : "clear",
+    before,
+    after,
+    durationMs:
+      nowMs() - startedAt,
+  });
 
   return true;
 }

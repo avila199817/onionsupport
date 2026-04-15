@@ -78,6 +78,54 @@ function setAriaExpanded(
   );
 }
 
+function createSessionSnapshot(
+  state,
+  cause = "unknown"
+) {
+  return {
+    authenticated:
+      Boolean(
+        state?.authenticated
+      ),
+    token:
+      state?.token || null,
+    user:
+      state?.user || null,
+    role:
+      state?.role || null,
+    username:
+      getUserUsername(
+        state?.user
+      ) || null,
+    cause,
+    changedAt:
+      new Date().toISOString(),
+  };
+}
+
+function userFingerprint(
+  user = null
+) {
+  if (!user) return "";
+
+  return JSON.stringify({
+    id:
+      user.id ||
+      user.userId ||
+      null,
+    username:
+      user.username || null,
+    email:
+      user.email || null,
+    role:
+      user.role ||
+      user.rol ||
+      null,
+    avatar:
+      user.avatar || null,
+  });
+}
+
 /* =========================================================
    ROUTE
 ========================================================= */
@@ -166,6 +214,23 @@ export function setUser({
   const normalizedUser =
     normalizeUser(user);
 
+  const previousUserFingerprint =
+    userFingerprint(
+      state.user
+    );
+
+  const nextUserFingerprint =
+    userFingerprint(
+      normalizedUser
+    );
+
+  if (
+    previousUserFingerprint ===
+    nextUserFingerprint
+  ) {
+    return normalizedUser;
+  }
+
   setState({
     user:
       normalizedUser,
@@ -215,6 +280,14 @@ export function setUser({
     }
   );
 
+  events?.emit?.(
+    "app:session:state",
+    createSessionSnapshot(
+      state,
+      "setUser"
+    )
+  );
+
   return normalizedUser;
 }
 
@@ -229,6 +302,13 @@ export function setToken({
     hasValidToken(token)
       ? String(token).trim()
       : null;
+
+  if (
+    state.token ===
+    normalized
+  ) {
+    return normalized;
+  }
 
   setState({
     token:
@@ -267,6 +347,14 @@ export function setToken({
     }
   );
 
+  events?.emit?.(
+    "app:session:state",
+    createSessionSnapshot(
+      state,
+      "setToken"
+    )
+  );
+
   return normalized;
 }
 
@@ -303,14 +391,10 @@ export function applySession({
   syncAuthState(state);
 
   const snapshot = {
-    authenticated:
-      state.authenticated,
-    token:
-      state.token,
-    user:
-      state.user,
-    role:
-      state.role,
+    ...createSessionSnapshot(
+      state,
+      "applySession"
+    ),
   };
 
   events?.emit?.(
@@ -368,6 +452,14 @@ export function clearSession({
       user: null,
       role: null,
     }
+  );
+
+  events?.emit?.(
+    "app:session:state",
+    createSessionSnapshot(
+      state,
+      "clearSession"
+    )
   );
 
   return true;

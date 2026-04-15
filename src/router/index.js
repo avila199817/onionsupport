@@ -83,6 +83,7 @@ export const Router = (() => {
 
   let renderCycle = 0;
   let activeViewInstance = null;
+  const listenerDisposers = [];
 
   let lastNavigationAt = 0;
   let lastNavigationKey = "";
@@ -121,6 +122,21 @@ export const Router = (() => {
         payload
       );
     } catch {}
+  }
+
+  function nowMs() {
+    try {
+      if (
+        typeof performance !==
+          "undefined" &&
+        typeof performance.now ===
+          "function"
+      ) {
+        return performance.now();
+      }
+    } catch {}
+
+    return Date.now();
   }
 
   /* =========================================================
@@ -489,7 +505,7 @@ export const Router = (() => {
       ++renderCycle;
 
     const startedAt =
-      performance.now();
+      nowMs();
 
     const {
       requestedPath,
@@ -525,6 +541,17 @@ export const Router = (() => {
     if (
       cycleId !== renderCycle
     ) {
+      safeEmit(
+        "router:render:cancelled",
+        {
+          reason:
+            "stale-pre-route",
+          cycleId,
+          renderCycle,
+          path: requestedPath,
+          canonicalPath,
+        }
+      );
       return;
     }
 
@@ -551,6 +578,15 @@ export const Router = (() => {
             ),
       });
 
+      safeEmit(
+        "router:render:not-found",
+        {
+          path: requestedPath,
+          canonicalPath,
+          cycleId,
+        }
+      );
+
       return;
     }
 
@@ -572,6 +608,16 @@ export const Router = (() => {
         });
 
       if (handled) {
+        safeEmit(
+          "router:render:blocked",
+          {
+            reason:
+              access.reason,
+            path: requestedPath,
+            canonicalPath,
+            cycleId,
+          }
+        );
         return;
       }
     }
@@ -622,6 +668,18 @@ export const Router = (() => {
           maybeView?.destroy?.();
         } catch {}
 
+        safeEmit(
+          "router:render:cancelled",
+          {
+            reason:
+              "stale-post-render",
+            cycleId,
+            renderCycle,
+            path: requestedPath,
+            canonicalPath,
+          }
+        );
+
         return;
       }
 
@@ -635,7 +693,7 @@ export const Router = (() => {
           canonicalPath,
           durationMs:
             Math.round(
-              performance.now() -
+              nowMs() -
                 startedAt
             ),
         }
@@ -668,6 +726,25 @@ export const Router = (() => {
       safeError(
         "[Router] render error:",
         error
+      );
+
+      safeEmit(
+        "router:render:error",
+        {
+          path: requestedPath,
+          canonicalPath,
+          cycleId,
+          durationMs:
+            Math.round(
+              nowMs() -
+                startedAt
+            ),
+          error:
+            String(
+              error?.message ||
+                error
+            ),
+        }
       );
     }
   }
@@ -713,6 +790,16 @@ export const Router = (() => {
       ) &&
       !options.force
     ) {
+      safeEmit(
+        "router:navigate:skipped",
+        {
+          reason: "burst",
+          pathname,
+          requestedPath,
+          canonicalPath,
+          navKey,
+        }
+      );
       return lastRenderPromise;
     }
 
@@ -733,6 +820,16 @@ export const Router = (() => {
         normalizedCurrentPath &&
       !options.force
     ) {
+      safeEmit(
+        "router:navigate:same-route",
+        {
+          pathname,
+          requestedPath,
+          canonicalPath,
+          navKey,
+        }
+      );
+
       return render(
         requestedPath,
         {
@@ -931,16 +1028,23 @@ export const Router = (() => {
 
     isBound = true;
 
-    AppCore.utils.on(
-      document,
-      "click",
-      handleDocumentClick
-    );
+    const offClick =
+      AppCore.utils.on(
+        document,
+        "click",
+        handleDocumentClick
+      );
 
-    AppCore.utils.on(
-      window,
-      "popstate",
-      handlePopState
+    const offPopstate =
+      AppCore.utils.on(
+        window,
+        "popstate",
+        handlePopState
+      );
+
+    listenerDisposers.push(
+      offClick,
+      offPopstate
     );
 
     ensureInitialHistoryState({
@@ -966,6 +1070,38 @@ export const Router = (() => {
     return api;
   }
 
+  function unbind() {
+    if (!isBound) {
+      return api;
+    }
+
+    while (
+      listenerDisposers.length
+    ) {
+      const dispose =
+        listenerDisposers.pop();
+
+      try {
+        dispose?.();
+      } catch (error) {
+        safeWarn(
+          "[Router] dispose error:",
+          error
+        );
+      }
+    }
+
+    isBound = false;
+    destroyActiveView();
+
+    safeEmit(
+      "router:unbound",
+      {}
+    );
+
+    return api;
+  }
+
   /* =========================================================
      API
   ========================================================= */
@@ -975,6 +1111,7 @@ export const Router = (() => {
       immutableRoutes,
 
     bind,
+    unbind,
 
     getRoute,
     routeExists,

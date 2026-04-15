@@ -10,6 +10,7 @@
    - mantener compatibilidad con backend heterogéneo
    - exponer aliases públicos estables para auth flows
    - integrar reset-password / forgot-password
+   - integrar confirmación de reset-password
    - ofrecer api pública coherente y endurecida
 ========================================================= */
 
@@ -58,16 +59,7 @@ import {
   handleLoginFormSubmit,
 } from "./login.js";
 
-import {
-  requestPasswordReset,
-  resetPasswordRequest,
-  forgotPassword,
-  getRequestPasswordResetEndpoint,
-  resolveResetPasswordIdentifier,
-  normalizeResetPasswordPayload,
-  buildResetPasswordRequestBody,
-  normalizeResetPasswordResponse,
-} from "./password-reset.js";
+import * as PasswordResetApi from "./password-reset.js";
 
 import {
   fetchMe,
@@ -83,6 +75,72 @@ import {
   guardAuthenticated,
   guardRole,
 } from "./guards.js";
+
+/* =========================================================
+   PASSWORD RESET API RESOLUTION
+========================================================= */
+
+const requestPasswordReset =
+  PasswordResetApi.requestPasswordReset;
+
+const resetPasswordRequest =
+  PasswordResetApi.resetPasswordRequest;
+
+const forgotPassword =
+  PasswordResetApi.forgotPassword;
+
+const getRequestPasswordResetEndpoint =
+  PasswordResetApi.getRequestPasswordResetEndpoint;
+
+const resolveResetPasswordIdentifier =
+  PasswordResetApi.resolveResetPasswordIdentifier;
+
+const normalizeResetPasswordPayload =
+  PasswordResetApi.normalizeResetPasswordPayload;
+
+const buildResetPasswordRequestBody =
+  PasswordResetApi.buildResetPasswordRequestBody;
+
+const normalizeResetPasswordResponse =
+  PasswordResetApi.normalizeResetPasswordResponse;
+
+/*
+  CONFIRM RESET PASSWORD
+  ---------------------------------------------------------
+  Se resuelve de forma tolerante para soportar distintas
+  convenciones de nombres dentro de ./password-reset.js
+*/
+function resolveConfirmResetPasswordHandler() {
+  const candidates = [
+    PasswordResetApi.confirmResetPassword,
+    PasswordResetApi.resetPasswordConfirm,
+    PasswordResetApi.confirmPasswordReset,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "function") {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+async function confirmResetPassword(payload = {}) {
+  const executor =
+    resolveConfirmResetPasswordHandler();
+
+  if (typeof executor !== "function") {
+    throw new Error(
+      "Auth: falta implementar confirmResetPassword en ./password-reset.js"
+    );
+  }
+
+  return executor(payload);
+}
+
+const resetPasswordConfirm =
+  confirmResetPassword;
 
 /* =========================================================
    INTERNAL HELPERS
@@ -162,9 +220,16 @@ export const Auth = (() => {
       session: safeCloneSessionState(session),
       authenticated: Boolean(isAuthenticated?.()),
       role: getCurrentRole?.() || null,
-      sessionDebug: typeof getSessionDebugSnapshot === "function"
-        ? getSessionDebugSnapshot()
-        : null,
+      sessionDebug:
+        typeof getSessionDebugSnapshot === "function"
+          ? getSessionDebugSnapshot()
+          : null,
+      passwordReset: {
+        hasRequestPasswordReset:
+          typeof requestPasswordReset === "function",
+        hasConfirmResetPassword:
+          typeof resolveConfirmResetPasswordHandler() === "function",
+      },
     };
   }
 
@@ -194,6 +259,14 @@ export const Auth = (() => {
     requestPasswordReset,
     resetPasswordRequest,
     forgotPassword,
+
+    /*
+      confirm reset password
+      - confirmResetPassword: nombre principal recomendado
+      - resetPasswordConfirm: alias compatible
+    */
+    confirmResetPassword,
+    resetPasswordConfirm,
 
     /* =======================================================
        RESET PASSWORD HELPERS

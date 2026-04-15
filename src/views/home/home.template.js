@@ -2,15 +2,19 @@
    Onion SPA - Home Template
    Archivo: src/views/home/home.template.js
 
+   EXTREME MODE · FULL PRO · CONTRACT SAFE
+
    Responsabilidades:
    - renderizar la vista Home premium EXTREME MODE
    - consumir estado real del módulo Home
+   - soportar backend normalizado y backend con data envelope
    - mostrar hero contextual con usuario autenticado
    - renderizar KPIs dinámicos
    - mostrar alertas operativas
    - mostrar actividad reciente
    - soportar loading / error / empty states
    - mantener estructura limpia, premium y escalable
+   - tolerar payloads parciales sin romper pintado
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -74,7 +78,9 @@ function formatMoney(value = 0) {
       style: "currency",
       currency: "EUR",
       maximumFractionDigits: 2,
-    }).format(safeNumber(value, 0));
+    }).format(
+      safeNumber(value, 0)
+    );
   } catch {
     return `${safeNumber(value, 0)} €`;
   }
@@ -134,6 +140,50 @@ function resolveDisplayName(user) {
 }
 
 /* =========================================================
+   SUMMARY NORMALIZATION
+   FIX CRÍTICO:
+   - acepta home.summary normalizado
+   - acepta respuesta envuelta en { ok, requestId, data }
+   - evita KPIs a 0 por leer summary.kpis
+     cuando realmente viene summary.data.kpis
+========================================================= */
+
+function looksLikeSummaryPayload(value) {
+  const obj = safeObject(value);
+
+  return Boolean(
+    obj?.generatedAt ||
+      obj?.kpis ||
+      obj?.alerts ||
+      obj?.recentActivity ||
+      obj?.quickActions ||
+      obj?.health
+  );
+}
+
+function unwrapSummaryEnvelope(value) {
+  const raw =
+    safeObject(value);
+
+  if (
+    looksLikeSummaryPayload(raw)
+  ) {
+    return raw;
+  }
+
+  const data =
+    safeObject(raw?.data);
+
+  if (
+    looksLikeSummaryPayload(data)
+  ) {
+    return data;
+  }
+
+  return {};
+}
+
+/* =========================================================
    STATE
 ========================================================= */
 
@@ -142,7 +192,9 @@ function resolveHomeState(options = {}) {
     safeObject(options?.home);
 
   const summary =
-    safeObject(home.summary);
+    unwrapSummaryEnvelope(
+      home.summary
+    );
 
   const kpis =
     safeObject(summary.kpis);
@@ -162,7 +214,8 @@ function resolveHomeState(options = {}) {
 
     lastSyncAt:
       safeText(
-        home.lastSyncAt,
+        home.lastSyncAt ||
+          summary.generatedAt,
         ""
       ),
 
@@ -181,6 +234,16 @@ function resolveHomeState(options = {}) {
       recentActivity:
         safeArray(
           summary.recentActivity
+        ),
+
+      quickActions:
+        safeArray(
+          summary.quickActions
+        ),
+
+      health:
+        safeObject(
+          summary.health
         ),
 
       kpis: {
@@ -305,7 +368,9 @@ function renderKpi({
 
 function renderKpis(state = {}) {
   const k =
-    state.summary.kpis;
+    safeObject(
+      state.summary?.kpis
+    );
 
   return `
     <section class="home-grid home-grid--4">
@@ -349,14 +414,22 @@ function renderKpis(state = {}) {
 function renderAlerts(state = {}) {
   const alerts =
     safeArray(
-      state.summary.alerts
+      state.summary?.alerts
     );
 
   if (!alerts.length) {
     return `
-      <div class="home-empty">
-        Sin alertas activas.
-      </div>
+      <section class="home-panel">
+        <div class="home-panel__top">
+          <h3 class="home-panel__title">
+            Alertas
+          </h3>
+        </div>
+
+        <div class="home-empty">
+          Sin alertas activas.
+        </div>
+      </section>
     `;
   }
 
@@ -393,14 +466,22 @@ function renderRecent(state = {}) {
   const rows =
     safeArray(
       state.summary
-        .recentActivity
+        ?.recentActivity
     );
 
   if (!rows.length) {
     return `
-      <div class="home-empty">
-        Sin actividad reciente.
-      </div>
+      <section class="home-panel">
+        <div class="home-panel__top">
+          <h3 class="home-panel__title">
+            Actividad reciente
+          </h3>
+        </div>
+
+        <div class="home-empty">
+          Sin actividad reciente.
+        </div>
+      </section>
     `;
   }
 
@@ -446,7 +527,9 @@ function renderQuickStats(
   state = {}
 ) {
   const k =
-    state.summary.kpis;
+    safeObject(
+      state.summary?.kpis
+    );
 
   return `
     <section class="home-grid home-grid--2">
@@ -493,11 +576,19 @@ function renderLoading() {
   `;
 }
 
-function renderError() {
+function renderError(error = null) {
+  const message =
+    safeText(
+      error?.message ||
+        error ||
+        "Error cargando datos del dashboard.",
+      "Error cargando datos del dashboard."
+    );
+
   return `
     <section class="home-panel">
       <div class="home-error">
-        Error cargando datos del dashboard.
+        ${escapeHtml(message)}
       </div>
     </section>
   `;
@@ -676,6 +767,9 @@ function renderStyles() {
     .home-row__muted{
       color:var(--text-muted);
       font-size:12px;
+      text-align:right;
+      flex:0 0 auto;
+      padding-left:12px;
     }
 
     .home-dot{
@@ -703,6 +797,7 @@ function renderStyles() {
       border-radius:20px;
       text-align:center;
       padding:18px;
+      margin-top:18px;
     }
 
     .home-empty{
@@ -771,6 +866,17 @@ function renderStyles() {
       .home-big-number{
         font-size:34px;
       }
+
+      .home-row,
+      .home-row--between{
+        align-items:flex-start;
+        flex-direction:column;
+      }
+
+      .home-row__muted{
+        padding-left:0;
+        text-align:left;
+      }
     }
   </style>
   `;
@@ -794,7 +900,9 @@ export function getHomeTemplate(
   let body = "";
 
   if (state.error) {
-    body = renderError();
+    body = renderError(
+      state.error
+    );
   } else if (
     state.loading &&
     !state.loaded

@@ -3,11 +3,12 @@
    Archivo: src/views/home/home.template.js
 
    Responsabilidades:
-   - renderizar la vista Home base
-   - generar un hero premium simple
-   - mostrar una card principal de bienvenida
-   - exponer una estructura limpia y escalable
-   - mantener compatibilidad con futuras métricas / widgets
+   - renderizar la vista Home premium
+   - consumir estado real del módulo Home
+   - mostrar hero contextual con usuario autenticado
+   - renderizar métricas dinámicas
+   - soportar loading / error / empty states
+   - mantener estructura limpia y escalable
 ========================================================= */
 
 import { getUserDisplayName } from "../../core/index.js";
@@ -25,8 +26,14 @@ function escapeHtml(value = "") {
     .replaceAll("'", "&#39;");
 }
 
-function safeText(value, fallback = "—") {
-  if (value === null || value === undefined) {
+function safeText(
+  value,
+  fallback = "—"
+) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
     return fallback;
   }
 
@@ -34,15 +41,65 @@ function safeText(value, fallback = "—") {
   return text || fallback;
 }
 
-function safeNumber(value, fallback = 0) {
+function safeNumber(
+  value,
+  fallback = 0
+) {
   const number = Number(value);
+
   return Number.isFinite(number)
     ? number
     : fallback;
 }
 
+function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
+}
+
+function safeObject(value) {
+  return value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+    ? value
+    : {};
+}
+
+function formatDateTime(
+  value = ""
+) {
+  try {
+    if (!value) {
+      return "—";
+    }
+
+    const date =
+      new Date(value);
+
+    if (
+      Number.isNaN(
+        date.getTime()
+      )
+    ) {
+      return "—";
+    }
+
+    return new Intl.DateTimeFormat(
+      "es-ES",
+      {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }
+    ).format(date);
+  } catch {
+    return "—";
+  }
+}
+
 function getGreetingByHour() {
-  const hour = new Date().getHours();
+  const hour =
+    new Date().getHours();
 
   if (hour < 6) {
     return "Buenas noches";
@@ -59,7 +116,9 @@ function getGreetingByHour() {
   return "Buenas noches";
 }
 
-function resolveDisplayName(user) {
+function resolveDisplayName(
+  user
+) {
   try {
     const byCore =
       typeof getUserDisplayName ===
@@ -67,7 +126,11 @@ function resolveDisplayName(user) {
         ? getUserDisplayName(user)
         : "";
 
-    if (String(byCore || "").trim()) {
+    if (
+      String(
+        byCore || ""
+      ).trim()
+    ) {
       return String(byCore).trim();
     }
   } catch {}
@@ -81,6 +144,65 @@ function resolveDisplayName(user) {
 }
 
 /* =========================================================
+   STATE RESOLVE
+========================================================= */
+
+function resolveHomeState(
+  options = {}
+) {
+  const home =
+    safeObject(
+      options?.home
+    );
+
+  const summary =
+    safeObject(
+      home.summary
+    );
+
+  return {
+    loading:
+      home.loading === true,
+    loaded:
+      home.loaded === true,
+    error:
+      home.error || null,
+    lastSyncAt:
+      safeText(
+        home.lastSyncAt,
+        ""
+      ),
+    cacheHit:
+      home.cacheHit === true,
+    summary: {
+      status:
+        safeText(
+          summary.status,
+          "idle"
+        ),
+      cards:
+        safeNumber(
+          summary.cards,
+          0
+        ),
+      metrics:
+        safeArray(
+          summary.metrics
+        ),
+      recentActivity:
+        safeArray(
+          summary.recentActivity
+        ),
+      generatedAt:
+        safeText(
+          summary.generatedAt,
+          ""
+        ),
+    },
+  };
+}
+
+/* =========================================================
    PARTIALS
 ========================================================= */
 
@@ -90,7 +212,10 @@ function renderMiniStat({
   hint = "",
 } = {}) {
   return `
-    <article class="home-mini-stat">
+    <article
+      class="home-mini-stat"
+      tabindex="0"
+    >
       <div class="home-mini-stat__label">
         ${escapeHtml(label)}
       </div>
@@ -106,14 +231,81 @@ function renderMiniStat({
   `;
 }
 
+function renderMetricsGrid(
+  metrics = []
+) {
+  const finalMetrics =
+    safeArray(metrics);
+
+  if (!finalMetrics.length) {
+    return `
+      <div class="home-empty">
+        No hay métricas disponibles.
+      </div>
+    `;
+  }
+
+  return `
+    <div class="home-mini-stats">
+      ${finalMetrics
+        .map(
+          (
+            item,
+            index
+          ) =>
+            renderMiniStat({
+              label:
+                item?.label ||
+                `Métrica ${index + 1}`,
+              value:
+                item?.value ||
+                "—",
+              hint:
+                item?.hint ||
+                "",
+            })
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderLoadingGrid() {
+  return `
+    <div class="home-mini-stats">
+      ${Array.from({
+        length: 3,
+      })
+        .map(
+          () => `
+          <div class="home-mini-stat home-skeleton">
+            <div class="home-skeleton-line home-skeleton-line--sm"></div>
+            <div class="home-skeleton-line home-skeleton-line--lg"></div>
+            <div class="home-skeleton-line home-skeleton-line--md"></div>
+          </div>
+        `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
 function renderHero({
   user = null,
+  state = {},
 } = {}) {
   const displayName =
     resolveDisplayName(user);
 
   const greeting =
     getGreetingByHour();
+
+  const syncText =
+    state.lastSyncAt
+      ? `Última sincronización: ${formatDateTime(
+          state.lastSyncAt
+        )}`
+      : "Sincronización pendiente";
 
   return `
     <section class="home-hero">
@@ -124,13 +316,36 @@ function renderHero({
       <div class="home-hero__header">
         <div class="home-hero__copy">
           <h1 class="home-hero__title">
-            ${escapeHtml(greeting)}, ${escapeHtml(displayName)}
+            ${escapeHtml(greeting)},
+            ${escapeHtml(displayName)}
           </h1>
 
           <p class="home-hero__subtitle">
-            Panel principal de Onion Support. Desde aquí iremos montando
-            accesos rápidos, métricas operativas y actividad reciente.
+            Panel principal de operaciones. Accesos rápidos,
+            métricas clave y visión general del sistema.
           </p>
+
+          <div class="home-hero__meta">
+            <span>
+              ${escapeHtml(
+                syncText
+              )}
+            </span>
+
+            ${
+              state.cacheHit
+                ? `
+              <span class="home-badge home-badge--cache">
+                Cache
+              </span>
+            `
+                : `
+              <span class="home-badge">
+                Live
+              </span>
+            `
+            }
+          </div>
         </div>
       </div>
     </section>
@@ -139,49 +354,59 @@ function renderHero({
 
 function renderMainCard({
   appName = "Onion Support",
+  state = {},
 } = {}) {
+  const hasError =
+    Boolean(
+      state.error
+    );
+
   return `
     <section class="home-main-card">
       <div class="home-main-card__surface">
+
         <div class="home-main-card__top">
           <div class="home-main-card__badge">
-            Vista inicial
+            Dashboard
           </div>
 
           <h2 class="home-main-card__title">
-            Bienvenido al entorno de trabajo
+            Bienvenido a ${escapeHtml(
+              appName
+            )}
           </h2>
 
           <p class="home-main-card__text">
-            Esta home es la base inicial del panel. De momento dejamos una
-            estructura limpia, sólida y lista para escalar con widgets,
-            incidencias recientes, estado del sistema y resúmenes de negocio.
+            Base inicial del panel premium.
+            Desde aquí crecerán widgets,
+            actividad reciente, negocio
+            y control operativo.
           </p>
         </div>
 
-        <div class="home-mini-stats">
-          ${renderMiniStat({
-            label: "Vista",
-            value: "Home",
-            hint: "Base inicial montada",
-          })}
+        ${
+          hasError
+            ? `
+          <div class="home-error">
+            Error cargando datos de la Home.
+          </div>
+        `
+            : state.loading
+            ? renderLoadingGrid()
+            : renderMetricsGrid(
+                state.summary
+                  .metrics
+              )
+        }
 
-          ${renderMiniStat({
-            label: "Sistema",
-            value: "Operativo",
-            hint: "Shell y router activos",
-          })}
-
-          ${renderMiniStat({
-            label: "Proyecto",
-            value: appName,
-            hint: "Preparado para crecer",
-          })}
-        </div>
       </div>
     </section>
   `;
 }
+
+/* =========================================================
+   STYLES
+========================================================= */
 
 function renderScopedStyles() {
   return `
@@ -193,142 +418,121 @@ function renderScopedStyles() {
         padding:24px;
       }
 
-      .home-hero{
-        position:relative;
-        overflow:hidden;
-        border-radius:28px;
-        border:1px solid rgba(255,255,255,.08);
-        background:
-          radial-gradient(circle at top right, rgba(255,255,255,.06), transparent 24%),
-          linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.015)),
-          rgba(24,24,27,.72);
-        box-shadow:
-          0 20px 50px rgba(0,0,0,.18),
-          inset 0 1px 0 rgba(255,255,255,.04);
-        padding:28px 28px;
-      }
-
-      .home-hero__eyebrow{
-        display:inline-flex;
-        align-items:center;
-        gap:10px;
-        margin-bottom:14px;
-        color:var(--text-dim);
-        font-size:12px;
-        font-weight:700;
-        letter-spacing:.12em;
-        text-transform:uppercase;
-      }
-
-      .home-hero__eyebrow::before{
-        content:"";
-        width:10px;
-        height:10px;
-        border-radius:50%;
-        background:linear-gradient(180deg, #22c55e 0%, #16a34a 100%);
-        box-shadow:
-          0 0 0 4px rgba(34,197,94,.08),
-          0 0 12px rgba(34,197,94,.16);
-        flex:none;
-      }
-
-      .home-hero__header{
-        display:flex;
-        align-items:flex-start;
-        justify-content:space-between;
-        gap:18px;
-      }
-
-      .home-hero__copy{
-        min-width:0;
-        display:grid;
-        gap:12px;
-      }
-
-      .home-hero__title{
-        margin:0;
-        color:var(--text-strong);
-        font-size:clamp(28px, 4vw, 44px);
-        line-height:1.02;
-        font-weight:800;
-        letter-spacing:-0.03em;
-        text-wrap:balance;
-      }
-
-      .home-hero__subtitle{
-        margin:0;
-        max-width:72ch;
-        color:var(--text-dim);
-        font-size:15px;
-        line-height:1.65;
-        text-wrap:pretty;
-      }
-
-      .home-main-card{
-        width:100%;
-      }
-
+      .home-hero,
       .home-main-card__surface{
         position:relative;
         overflow:hidden;
         border-radius:28px;
         border:1px solid rgba(255,255,255,.08);
         background:
-          linear-gradient(180deg, rgba(255,255,255,.024), rgba(255,255,255,.010)),
-          rgba(24,24,27,.66);
+          linear-gradient(
+            180deg,
+            rgba(255,255,255,.03),
+            rgba(255,255,255,.01)
+          ),
+          rgba(24,24,27,.70);
         box-shadow:
-          0 18px 44px rgba(0,0,0,.14),
+          0 18px 48px rgba(0,0,0,.16),
           inset 0 1px 0 rgba(255,255,255,.04);
+      }
+
+      .home-hero{
+        padding:28px;
+      }
+
+      .home-main-card__surface{
         padding:28px;
         display:grid;
         gap:24px;
       }
 
+      .home-hero__eyebrow,
+      .home-main-card__badge{
+        display:inline-flex;
+        align-items:center;
+        gap:10px;
+        width:max-content;
+        min-height:30px;
+        padding:0 12px;
+        border-radius:999px;
+        font-size:12px;
+        font-weight:700;
+        letter-spacing:.08em;
+        text-transform:uppercase;
+        color:var(--text-soft);
+        border:1px solid rgba(255,255,255,.08);
+        background:
+          rgba(255,255,255,.03);
+      }
+
+      .home-hero__eyebrow{
+        margin-bottom:14px;
+      }
+
+      .home-hero__title,
+      .home-main-card__title{
+        margin:0;
+        color:var(--text-strong);
+        font-weight:800;
+        letter-spacing:-0.03em;
+        line-height:1.04;
+      }
+
+      .home-hero__title{
+        font-size:clamp(28px,4vw,44px);
+      }
+
+      .home-main-card__title{
+        font-size:clamp(22px,2.4vw,30px);
+      }
+
+      .home-hero__subtitle,
+      .home-main-card__text{
+        margin:0;
+        color:var(--text-dim);
+        font-size:15px;
+        line-height:1.65;
+        max-width:72ch;
+      }
+
+      .home-hero__copy,
       .home-main-card__top{
         display:grid;
         gap:14px;
       }
 
-      .home-main-card__badge{
-        width:max-content;
-        min-height:30px;
-        padding:0 12px;
+      .home-hero__meta{
+        display:flex;
+        flex-wrap:wrap;
+        gap:10px;
+        align-items:center;
+        margin-top:4px;
+        color:var(--text-muted);
+        font-size:13px;
+      }
+
+      .home-badge{
+        min-height:28px;
+        padding:0 10px;
         border-radius:999px;
         display:inline-flex;
         align-items:center;
         justify-content:center;
-        color:var(--text-soft);
-        font-size:12px;
+        background:rgba(34,197,94,.10);
+        color:#86efac;
+        border:1px solid rgba(34,197,94,.14);
         font-weight:700;
-        letter-spacing:.08em;
-        text-transform:uppercase;
-        border:1px solid rgba(255,255,255,.08);
-        background:
-          linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02)),
-          rgba(255,255,255,.02);
       }
 
-      .home-main-card__title{
-        margin:0;
-        color:var(--text-strong);
-        font-size:clamp(22px, 2.2vw, 30px);
-        line-height:1.08;
-        font-weight:800;
-        letter-spacing:-0.025em;
-        text-wrap:balance;
-      }
-
-      .home-main-card__text{
-        margin:0;
-        max-width:72ch;
-        color:var(--text-dim);
-        font-size:15px;
-        line-height:1.7;
+      .home-badge--cache{
+        background:rgba(245,158,11,.10);
+        color:#fcd34d;
+        border:1px solid rgba(245,158,11,.14);
       }
 
       .home-mini-stats{
         display:grid;
-        grid-template-columns:repeat(3, minmax(0, 1fr));
+        grid-template-columns:repeat(3,minmax(0,1fr));
         gap:16px;
       }
 
@@ -337,12 +541,26 @@ function renderScopedStyles() {
         border-radius:22px;
         border:1px solid rgba(255,255,255,.07);
         background:
-          linear-gradient(180deg, rgba(255,255,255,.024), rgba(255,255,255,.010)),
+          linear-gradient(
+            180deg,
+            rgba(255,255,255,.024),
+            rgba(255,255,255,.010)
+          ),
           rgba(255,255,255,.015);
-        box-shadow:inset 0 1px 0 rgba(255,255,255,.03);
-        padding:18px 18px;
+        box-shadow:
+          inset 0 1px 0 rgba(255,255,255,.03);
+        padding:18px;
         display:grid;
         gap:8px;
+        transition:
+          transform .18s ease,
+          border-color .18s ease,
+          box-shadow .18s ease;
+      }
+
+      .home-mini-stat:hover{
+        transform:translateY(-2px);
+        border-color:rgba(255,255,255,.12);
       }
 
       .home-mini-stat__label{
@@ -358,7 +576,7 @@ function renderScopedStyles() {
         font-size:24px;
         line-height:1;
         font-weight:800;
-        letter-spacing:-0.025em;
+        letter-spacing:-0.02em;
       }
 
       .home-mini-stat__hint{
@@ -367,21 +585,77 @@ function renderScopedStyles() {
         line-height:1.45;
       }
 
-      [data-theme="light"] .home-hero{
-        border-color:rgba(15,23,42,.08);
-        background:
-          radial-gradient(circle at top right, rgba(255,255,255,.75), transparent 24%),
-          linear-gradient(180deg, rgba(255,255,255,.88), rgba(255,255,255,.72)),
-          rgba(255,255,255,.84);
-        box-shadow:
-          0 20px 50px rgba(15,23,42,.08),
-          inset 0 1px 0 rgba(255,255,255,.8);
+      .home-empty,
+      .home-error{
+        min-height:110px;
+        border-radius:22px;
+        display:grid;
+        place-items:center;
+        text-align:center;
+        padding:18px;
+        font-size:14px;
       }
 
+      .home-empty{
+        color:var(--text-dim);
+        border:1px dashed rgba(255,255,255,.10);
+      }
+
+      .home-error{
+        color:#fca5a5;
+        border:1px solid rgba(239,68,68,.12);
+        background:rgba(239,68,68,.05);
+      }
+
+      .home-skeleton{
+        pointer-events:none;
+      }
+
+      .home-skeleton-line{
+        height:12px;
+        border-radius:999px;
+        background:
+          linear-gradient(
+            90deg,
+            rgba(255,255,255,.04),
+            rgba(255,255,255,.10),
+            rgba(255,255,255,.04)
+          );
+        background-size:200% 100%;
+        animation:homeShimmer 1.2s linear infinite;
+      }
+
+      .home-skeleton-line--sm{
+        width:40%;
+      }
+
+      .home-skeleton-line--md{
+        width:62%;
+      }
+
+      .home-skeleton-line--lg{
+        width:74%;
+        height:22px;
+      }
+
+      @keyframes homeShimmer{
+        from{
+          background-position:200% 0;
+        }
+        to{
+          background-position:-200% 0;
+        }
+      }
+
+      [data-theme="light"] .home-hero,
       [data-theme="light"] .home-main-card__surface{
         border-color:rgba(15,23,42,.08);
         background:
-          linear-gradient(180deg, rgba(255,255,255,.90), rgba(255,255,255,.78)),
+          linear-gradient(
+            180deg,
+            rgba(255,255,255,.92),
+            rgba(255,255,255,.80)
+          ),
           rgba(255,255,255,.88);
         box-shadow:
           0 18px 44px rgba(15,23,42,.08),
@@ -393,7 +667,7 @@ function renderScopedStyles() {
         background:rgba(255,255,255,.72);
       }
 
-      @media (max-width: 920px){
+      @media (max-width:920px){
         .home-view{
           padding:18px;
           gap:18px;
@@ -410,7 +684,7 @@ function renderScopedStyles() {
         }
       }
 
-      @media (max-width: 640px){
+      @media (max-width:640px){
         .home-view{
           padding:14px;
         }
@@ -442,14 +716,22 @@ function renderScopedStyles() {
    FULL TEMPLATE
 ========================================================= */
 
-export function getHomeTemplate(options = {}) {
-  const appName = safeText(
-    options?.appName,
-    "Onion Support"
-  );
+export function getHomeTemplate(
+  options = {}
+) {
+  const appName =
+    safeText(
+      options?.appName,
+      "Onion Support"
+    );
 
   const user =
     options?.user || null;
+
+  const state =
+    resolveHomeState(
+      options
+    );
 
   return `
     ${renderScopedStyles()}
@@ -461,14 +743,19 @@ export function getHomeTemplate(options = {}) {
     >
       ${renderHero({
         user,
+        state,
       })}
 
       ${renderMainCard({
         appName,
+        state,
       })}
     </section>
   `;
 }
 
-export { getHomeTemplate as HomeTemplate };
+export {
+  getHomeTemplate as HomeTemplate,
+};
+
 export default getHomeTemplate;

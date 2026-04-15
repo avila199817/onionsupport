@@ -6,9 +6,10 @@
    - centralizar endpoints auth
    - centralizar claves storage auxiliar
    - centralizar límites y constantes sesión
-   - exponer endpoints password-reset alineados con backend
+   - exponer endpoints password-reset request / confirm
+   - soportar aliases legacy sin romper compatibilidad
    - endurecer límites comunes del módulo auth
-   - eliminar rutas legacy conflictivas
+   - helpers públicos estables del módulo
 ========================================================= */
 
 /* =========================================================
@@ -55,14 +56,23 @@ export const AUTH_ENDPOINTS = Object.freeze({
   confirmPasswordReset:
     "/api/auth/reset-password-confirm",
 
+  confirmResetPassword:
+    "/api/auth/reset-password-confirm",
+
   resetPasswordConfirm:
     "/api/auth/reset-password-confirm",
 
   passwordResetConfirm:
     "/api/auth/reset-password-confirm",
 
+  resetPasswordUpdate:
+    "/api/auth/reset-password-confirm",
+
+  resetPasswordFinalize:
+    "/api/auth/reset-password-confirm",
+
   /* =======================================================
-     VALIDATE TOKEN (futuro/opcional)
+     VALIDATE TOKEN (opcional / futuro)
   ======================================================= */
   validateResetToken:
     "/api/auth/reset-password/validate",
@@ -76,21 +86,35 @@ export const AUTH_STORAGE_KEYS = Object.freeze({
   /* =======================================================
      TOKENS
   ======================================================= */
-  refreshToken: "refresh_token",
-  tempToken: "temp_token",
+  refreshToken:
+    "refresh_token",
+
+  tempToken:
+    "temp_token",
+
+  accessToken:
+    "access_token",
 
   /* =======================================================
      SESIÓN
   ======================================================= */
-  sessionId: "session_id",
-  sessionUserId: "session_user_id",
+  sessionId:
+    "session_id",
+
+  sessionUserId:
+    "session_user_id",
 
   /* =======================================================
      USER
   ======================================================= */
-  userSlug: "user_slug",
-  userName: "user_name",
-  role: "role",
+  userSlug:
+    "user_slug",
+
+  userName:
+    "user_name",
+
+  role:
+    "role",
 
   /* =======================================================
      UI HELPERS
@@ -113,14 +137,23 @@ export const AUTH_CONSTANTS = Object.freeze({
   /* =======================================================
      INPUTS
   ======================================================= */
-  identifierMaxLength: 160,
-  passwordMaxLength: 1024,
+  identifierMaxLength:
+    160,
+
+  passwordMinLength:
+    6,
+
+  passwordMaxLength:
+    1024,
 
   /* =======================================================
      TOKENS / STORAGE
   ======================================================= */
-  tokenMaxLength: 4096,
-  sessionValueMaxLength: 128,
+  tokenMaxLength:
+    4096,
+
+  sessionValueMaxLength:
+    128,
 
   /* =======================================================
      REFRESH
@@ -134,7 +167,8 @@ export const AUTH_CONSTANTS = Object.freeze({
   /* =======================================================
      REQUESTS
   ======================================================= */
-  requestTimeout: 15_000,
+  requestTimeout:
+    15_000,
 
   /* =======================================================
      RESET PASSWORD
@@ -154,12 +188,33 @@ export const AUTH_CONSTANTS = Object.freeze({
   /* =======================================================
      UI
   ======================================================= */
-  loginRedirectDelayMs: 0,
+  loginRedirectDelayMs:
+    0,
+
+  resetRedirectDelayMs:
+    2200,
 });
 
 /* =========================================================
-   HELPERS
+   HELPERS BASE
 ========================================================= */
+
+export function safeText(
+  value,
+  fallback = ""
+) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return fallback;
+  }
+
+  const text =
+    String(value).trim();
+
+  return text || fallback;
+}
 
 export function getAuthEndpoint(
   key = "",
@@ -169,15 +224,17 @@ export function getAuthEndpoint(
     AUTH_ENDPOINTS?.[key];
 
   if (
-    typeof endpoint === "string" &&
+    typeof endpoint ===
+      "string" &&
     endpoint.trim()
   ) {
     return endpoint.trim();
   }
 
-  return String(
-    fallback || ""
-  ).trim();
+  return safeText(
+    fallback,
+    ""
+  );
 }
 
 export function getAuthStorageKey(
@@ -188,15 +245,17 @@ export function getAuthStorageKey(
     AUTH_STORAGE_KEYS?.[key];
 
   if (
-    typeof storageKey === "string" &&
+    typeof storageKey ===
+      "string" &&
     storageKey.trim()
   ) {
     return storageKey.trim();
   }
 
-  return String(
-    fallback || ""
-  ).trim();
+  return safeText(
+    fallback,
+    ""
+  );
 }
 
 export function getAuthConstant(
@@ -219,6 +278,34 @@ export function getAuthConstant(
    SPECIALIZED HELPERS
 ========================================================= */
 
+export function getLoginEndpoint() {
+  return getAuthEndpoint(
+    "login",
+    "/api/auth/login"
+  );
+}
+
+export function getLogoutEndpoint() {
+  return getAuthEndpoint(
+    "logout",
+    "/api/auth/logout"
+  );
+}
+
+export function getMeEndpoint() {
+  return getAuthEndpoint(
+    "me",
+    "/api/auth/me"
+  );
+}
+
+export function getRefreshEndpoint() {
+  return getAuthEndpoint(
+    "refresh",
+    "/api/auth/refresh"
+  );
+}
+
 export function getRequestPasswordResetEndpoint() {
   return getAuthEndpoint(
     "resetPasswordRequest",
@@ -230,5 +317,12 @@ export function getConfirmPasswordResetEndpoint() {
   return getAuthEndpoint(
     "resetPasswordConfirm",
     "/api/auth/reset-password-confirm"
+  );
+}
+
+export function getValidateResetTokenEndpoint() {
+  return getAuthEndpoint(
+    "validateResetToken",
+    "/api/auth/reset-password/validate"
   );
 }

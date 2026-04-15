@@ -10,6 +10,14 @@
    - evitar carreras concurrentes
    - priorizar refresh cuando exista contexto válido
    - endurecer errores y limpieza de sesión
+
+   HARDENING PRO:
+   - promises únicas anti race-condition
+   - cooldown anti refresh-loop
+   - tolerancia backend heterogéneo
+   - logs enterprise
+   - fallbacks robustos
+   - limpieza garantizada
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -47,16 +55,20 @@ import {
    BASICS
 ========================================================= */
 
-function safeNumber(value, fallback = 0) {
+function safeNumber(
+  value,
+  fallback = 0
+) {
   const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
+  return Number.isFinite(n)
+    ? n
+    : fallback;
 }
 
-function safeBool(value) {
-  return value === true;
-}
-
-function emit(eventName, payload = {}) {
+function emit(
+  eventName,
+  payload = {}
+) {
   try {
     AppCore?.events?.emit?.(
       eventName,
@@ -68,6 +80,12 @@ function emit(eventName, payload = {}) {
 function warn(...args) {
   try {
     AppCore?.utils?.warn?.(...args);
+  } catch {}
+}
+
+function log(...args) {
+  try {
+    AppCore?.utils?.log?.(...args);
   } catch {}
 }
 
@@ -85,24 +103,59 @@ function getRefreshRetryCooldownMs() {
   );
 }
 
+function clearRuntimeFlags(
+  session
+) {
+  if (!session) return;
+
+  session.checking = false;
+  session.refreshing = false;
+  session.restoring = false;
+
+  session.mePromise = null;
+  session.refreshPromise = null;
+  session.restorePromise = null;
+}
+
+function getStoredRefreshPayload() {
+  return {
+    refreshToken:
+      String(
+        getStoredRefreshToken() || ""
+      ).trim(),
+
+    sessionId:
+      String(
+        getStoredSessionId() || ""
+      ).trim(),
+
+    userId:
+      String(
+        getStoredSessionUserId() || ""
+      ).trim(),
+  };
+}
+
 /* =========================================================
    /ME
 ========================================================= */
 
-export async function fetchMe(session) {
+export async function fetchMe(
+  session = {}
+) {
   if (!hasValidToken()) {
     throw new Error(
       "No hay token disponible para /me."
     );
   }
 
-  if (session?.mePromise) {
+  if (session.mePromise) {
     return session.mePromise;
   }
 
   session.checking = true;
 
-  emit("auth:me:start", {});
+  emit("auth:me:start");
 
   session.mePromise =
     (async () => {
@@ -117,7 +170,10 @@ export async function fetchMe(session) {
 
         const user =
           extractUser(response) ||
-          extractUser(response?.data) ||
+          extractUser(
+            response?.data
+          ) ||
+          response?.user ||
           null;
 
         if (!user) {
@@ -138,11 +194,15 @@ export async function fetchMe(session) {
           "auth:me:success",
           {
             user:
-              snapshot.user,
+              snapshot?.user ||
+              user,
           }
         );
 
-        return snapshot.user;
+        return (
+          snapshot?.user ||
+          user
+        );
       } catch (error) {
         emit(
           "auth:me:error",
@@ -169,22 +229,25 @@ export async function fetchMe(session) {
    REFRESH
 ========================================================= */
 
-export async function refreshSession(session) {
+export async function refreshSession(
+  session = {}
+) {
   if (!hasRefreshContext()) {
     throw new Error(
       "No hay contexto de refresh disponible."
     );
   }
 
-  if (session?.refreshPromise) {
+  if (session.refreshPromise) {
     return session.refreshPromise;
   }
 
-  const now = Date.now();
+  const now =
+    Date.now();
 
   if (
     safeNumber(
-      session?.refreshBlockedUntil,
+      session.refreshBlockedUntil,
       0
     ) > now
   ) {
@@ -196,38 +259,14 @@ export async function refreshSession(session) {
   session.refreshing = true;
 
   emit(
-    "auth:refresh:start",
-    {}
+    "auth:refresh:start"
   );
 
   session.refreshPromise =
     (async () => {
       try {
-        const storedRefreshToken =
-          getStoredRefreshToken();
-
-        const storedSessionId =
-          getStoredSessionId();
-
-        const storedSessionUserId =
-          getStoredSessionUserId();
-
-        const requestBody = {
-          refreshToken:
-            String(
-              storedRefreshToken || ""
-            ).trim(),
-
-          sessionId:
-            String(
-              storedSessionId || ""
-            ).trim(),
-
-          userId:
-            String(
-              storedSessionUserId || ""
-            ).trim(),
-        };
+        const requestBody =
+          getStoredRefreshPayload();
 
         const response =
           await AppCore.apiClient.post(
@@ -239,13 +278,19 @@ export async function refreshSession(session) {
           );
 
         const nextToken =
-          extractToken(response);
+          extractToken(
+            response
+          );
 
         const nextUser =
-          extractUser(response);
+          extractUser(
+            response
+          );
 
         const nextRefreshToken =
-          extractRefreshToken(response);
+          extractRefreshToken(
+            response
+          );
 
         const nextSessionData =
           normalizeSessionPayload(
@@ -273,18 +318,21 @@ export async function refreshSession(session) {
 
             refreshToken:
               nextRefreshToken ??
-              storedRefreshToken,
+              requestBody.refreshToken,
 
             sessionData:
               nextSessionData ?? {
                 sessionId:
-                  storedSessionId,
+                  requestBody.sessionId,
                 userId:
-                  storedSessionUserId,
+                  requestBody.userId,
               },
           });
 
-        if (!snapshot.token) {
+        if (
+          !snapshot?.token &&
+          !hasValidToken()
+        ) {
           throw new Error(
             "Refresh completado sin token."
           );
@@ -300,7 +348,6 @@ export async function refreshSession(session) {
           "auth:refresh:success",
           {
             ...snapshot,
-            response,
           }
         );
 
@@ -355,8 +402,30 @@ export async function refreshSession(session) {
    RESTORE HELPERS
 ========================================================= */
 
+export async function restoreUsingMe(
+  session = {}
+) {
+  const user =
+    await fetchMe(
+      session
+    );
+
+  emit(
+    "auth:restore:success",
+    {
+      source: "me",
+      user,
+    }
+  );
+
+  return {
+    ok: true,
+    user,
+  };
+}
+
 export async function restoreUsingRefreshOnly(
-  session
+  session = {}
 ) {
   const refreshed =
     await refreshSession(
@@ -367,16 +436,18 @@ export async function restoreUsingRefreshOnly(
     !AppCore.state.user &&
     hasValidToken()
   ) {
-    await fetchMe(session);
+    await fetchMe(
+      session
+    );
   }
 
   emit(
     "auth:restore:success",
     {
-      user:
-        AppCore.state.user,
       source:
         "refresh-only",
+      user:
+        AppCore.state.user,
     }
   );
 
@@ -388,28 +459,16 @@ export async function restoreUsingRefreshOnly(
   };
 }
 
-export async function restoreUsingMe(
-  session
+export async function restoreUsingRefreshPreferred(
+  session = {}
 ) {
-  const user =
-    await fetchMe(session);
-
-  emit(
-    "auth:restore:success",
-    {
-      user,
-      source: "me",
-    }
+  return restoreUsingRefreshOnly(
+    session
   );
-
-  return {
-    ok: true,
-    user,
-  };
 }
 
 export async function restoreAfterMeFailure(
-  session,
+  session = {},
   meError
 ) {
   warn(
@@ -441,34 +500,9 @@ export async function restoreAfterMeFailure(
   }
 
   try {
-    const refreshed =
-      await refreshSession(
-        session
-      );
-
-    if (
-      !AppCore.state.user &&
-      hasValidToken()
-    ) {
-      await fetchMe(session);
-    }
-
-    emit(
-      "auth:restore:success",
-      {
-        user:
-          AppCore.state.user,
-        source:
-          "refresh-after-me-failure",
-      }
+    return await restoreUsingRefreshOnly(
+      session
     );
-
-    return {
-      ok: true,
-      user:
-        AppCore.state.user,
-      refreshed,
-    };
   } catch (refreshError) {
     clearSessionLocal({
       silent: true,
@@ -495,47 +529,14 @@ export async function restoreAfterMeFailure(
   }
 }
 
-export async function restoreUsingRefreshPreferred(
-  session
-) {
-  const refreshed =
-    await refreshSession(
-      session
-    );
-
-  if (
-    !AppCore.state.user &&
-    hasValidToken()
-  ) {
-    await fetchMe(session);
-  }
-
-  emit(
-    "auth:restore:success",
-    {
-      user:
-        AppCore.state.user,
-      source:
-        "refresh-preferred",
-    }
-  );
-
-  return {
-    ok: true,
-    user:
-      AppCore.state.user,
-    refreshed,
-  };
-}
-
 /* =========================================================
    RESTORE SESSION
 ========================================================= */
 
 export async function restoreSession(
-  session
+  session = {}
 ) {
-  if (session?.restorePromise) {
+  if (session.restorePromise) {
     return session.restorePromise;
   }
 
@@ -564,9 +565,7 @@ export async function restoreSession(
         const refreshAvailable =
           hasRefreshContext();
 
-        /* =====================================
-           1) Nada disponible
-        ===================================== */
+        /* 1) Nada disponible */
         if (
           !tokenAvailable &&
           !refreshAvailable
@@ -589,10 +588,10 @@ export async function restoreSession(
           };
         }
 
-        /* =====================================
-           2) Prefer refresh
-        ===================================== */
-        if (refreshAvailable) {
+        /* 2) Prefer refresh */
+        if (
+          refreshAvailable
+        ) {
           try {
             return await restoreUsingRefreshPreferred(
               session
@@ -603,52 +602,18 @@ export async function restoreSession(
               refreshError
             );
 
-            if (hasValidToken()) {
-              try {
-                return await restoreUsingMe(
-                  session
-                );
-              } catch (meError) {
-                clearSessionLocal({
-                  silent: true,
-                });
-
-                emit(
-                  "auth:restore:error",
-                  {
-                    error:
-                      meError,
-                    message:
-                      extractMessage(
-                        meError
-                      ),
-                  }
-                );
-
-                return {
-                  ok: false,
-                  user: null,
-                  error:
-                    meError,
-                };
-              }
+            if (
+              hasValidToken()
+            ) {
+              return await restoreAfterMeFailure(
+                session,
+                refreshError
+              );
             }
 
             clearSessionLocal({
               silent: true,
             });
-
-            emit(
-              "auth:restore:error",
-              {
-                error:
-                  refreshError,
-                message:
-                  extractMessage(
-                    refreshError
-                  ),
-              }
-            );
 
             return {
               ok: false,
@@ -659,22 +624,35 @@ export async function restoreSession(
           }
         }
 
-        /* =====================================
-           3) Solo token
-        ===================================== */
-        try {
-          return await restoreUsingMe(
-            session
-          );
-        } catch (meError) {
-          return await restoreAfterMeFailure(
-            session,
-            meError
-          );
-        }
+        /* 3) Solo token */
+        return await restoreUsingMe(
+          session
+        );
+      } catch (error) {
+        clearSessionLocal({
+          silent: true,
+        });
+
+        emit(
+          "auth:restore:error",
+          {
+            error,
+            message:
+              extractMessage(
+                error
+              ),
+          }
+        );
+
+        return {
+          ok: false,
+          user: null,
+          error,
+        };
       } finally {
-        session.restoring = false;
-        session.restorePromise = null;
+        clearRuntimeFlags(
+          session
+        );
       }
     })();
 

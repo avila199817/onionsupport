@@ -11,7 +11,7 @@
    - mantener estructura limpia y escalable
 ========================================================= */
 
-import { getUserDisplayName } from "../../core/index.js";
+import { AppCore } from "../../core/index.js";
 
 /* =========================================================
    BASICS
@@ -121,9 +121,9 @@ function resolveDisplayName(
 ) {
   try {
     const byCore =
-      typeof getUserDisplayName ===
+      typeof AppCore?.getUserDisplayName ===
       "function"
-        ? getUserDisplayName(user)
+        ? AppCore.getUserDisplayName(user)
         : "";
 
     if (

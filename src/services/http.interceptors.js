@@ -14,6 +14,12 @@ import { isFn } from "./http.helpers.js";
 
 let interceptorSeq = 0;
 
+const INTERCEPTOR_TYPES = new Set([
+  "request",
+  "response",
+  "error",
+]);
+
 /* =========================================================
    STATE
 ========================================================= */
@@ -37,8 +43,7 @@ function removeInterceptor(
       (item) =>
         item === ref ||
         item?.id === ref ||
-        item?.handler ===
-          ref
+        item?.handler === ref
     );
 
   if (index >= 0) {
@@ -54,6 +59,14 @@ function ensureBucket(
   type
 ) {
   if (
+    !INTERCEPTOR_TYPES.has(type)
+  ) {
+    throw new Error(
+      `Tipo de interceptor inválido: ${type}`
+    );
+  }
+
+  if (
     !interceptors ||
     !Array.isArray(
       interceptors[type]
@@ -65,6 +78,34 @@ function ensureBucket(
   }
 
   return interceptors[type];
+}
+
+function toFiniteNumber(
+  value,
+  fallback = 0
+) {
+  const numeric = Number(value);
+
+  return Number.isFinite(
+    numeric
+  )
+    ? numeric
+    : fallback;
+}
+
+function toNonNegativeInt(
+  value,
+  fallback = 0
+) {
+  return Math.max(
+    0,
+    Math.trunc(
+      toFiniteNumber(
+        value,
+        fallback
+      )
+    )
+  );
 }
 
 function normalizeEntry(
@@ -81,6 +122,7 @@ function normalizeEntry(
       failOpen: true,
       once: false,
       order: index,
+      ref: candidate,
     };
   }
 
@@ -99,20 +141,26 @@ function normalizeEntry(
         `interceptor_${index}`,
       handler:
         candidate.handler,
-      priority: Number(
-        candidate.priority || 0
-      ),
-      timeoutMs: Number(
-        candidate.timeoutMs || 0
-      ),
+      priority:
+        toFiniteNumber(
+          candidate.priority,
+          0
+        ),
+      timeoutMs:
+        toNonNegativeInt(
+          candidate.timeoutMs,
+          0
+        ),
       failOpen:
         candidate.failOpen !==
         false,
       once:
         candidate.once === true,
-      order: Number(
-        candidate.order || index
+      order: toFiniteNumber(
+        candidate.order,
+        index
       ),
+      ref: candidate,
     };
   }
 
@@ -209,12 +257,15 @@ function registerInterceptor(
       fn.name ||
       `${type}_${interceptorSeq}`,
     handler: fn,
-    priority: Number(
-      options.priority || 0
+    priority: toFiniteNumber(
+      options.priority,
+      0
     ),
-    timeoutMs: Number(
-      options.timeoutMs || 0
-    ),
+    timeoutMs:
+      toNonNegativeInt(
+        options.timeoutMs,
+        0
+      ),
     failOpen:
       options.failOpen !==
       false,
@@ -341,7 +392,8 @@ export async function runRequestInterceptors(
       if (entry.once) {
         removeInterceptor(
           bucket,
-          entry.id
+          entry.ref ||
+            entry.id
         );
       }
     }
@@ -403,7 +455,8 @@ export async function runResponseInterceptors(
       if (entry.once) {
         removeInterceptor(
           bucket,
-          entry.id
+          entry.ref ||
+            entry.id
         );
       }
     }
@@ -464,7 +517,8 @@ export async function runErrorInterceptors(
       if (entry.once) {
         removeInterceptor(
           bucket,
-          entry.id
+          entry.ref ||
+            entry.id
         );
       }
     }

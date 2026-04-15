@@ -6,7 +6,9 @@
    - normalizar respuesta backend
    - mapear estados y prioridades
    - generar modelo UI consistente
-   - soportar múltiples formatos legacy/new api
+   - soportar formatos legacy / nuevos
+   - tolerar payloads heterogéneos reales
+   - blindar campos vacíos que rompen render
 ========================================================= */
 
 import {
@@ -17,6 +19,29 @@ import {
   getInitials,
   toMs,
 } from "./incidencias.utils.js";
+
+/* =========================================================
+   HELPERS
+========================================================= */
+
+function firstDefined(...values) {
+  for (const value of values) {
+    if (
+      value !== undefined &&
+      value !== null &&
+      String(value).trim() !== ""
+    ) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function safeText(value, fallback = "") {
+  const text = safeString(value, "");
+  return text || fallback;
+}
 
 /* =========================================================
    STATUS
@@ -34,6 +59,7 @@ export function normalizeStatus(value = "open") {
     "en proceso": "in_progress",
     en_proceso: "in_progress",
     in_progress: "in_progress",
+    progress: "in_progress",
 
     resuelta: "resolved",
     resuelto: "resolved",
@@ -45,7 +71,8 @@ export function normalizeStatus(value = "open") {
   };
 
   const key = normalizeText(
-    String(value ?? "").replaceAll("_", " ")
+    String(value ?? "")
+      .replaceAll("_", " ")
   );
 
   return map[key] || "open";
@@ -69,6 +96,7 @@ export function normalizePriority(value = "medium") {
 
     urgent: "urgent",
     urgente: "urgent",
+
     critical: "urgent",
     critica: "urgent",
     crítica: "urgent",
@@ -84,21 +112,34 @@ export function normalizePriority(value = "medium") {
 ========================================================= */
 
 export function extractItems(response) {
-  if (Array.isArray(response)) return response;
-
-  if (Array.isArray(response?.tickets)) return response.tickets;
-  if (Array.isArray(response?.items)) return response.items;
-  if (Array.isArray(response?.data)) return response.data;
-
-  if (Array.isArray(response?.data?.tickets)) {
-    return response.data.tickets;
+  if (Array.isArray(response)) {
+    return response;
   }
 
-  if (Array.isArray(response?.data?.items)) {
-    return response.data.items;
-  }
+  const candidates = [
+    response?.tickets,
+    response?.items,
+    response?.rows,
+    response?.resources,
+    response?.results,
 
-  if (Array.isArray(response?.results)) return response.results;
+    response?.data,
+    response?.data?.tickets,
+    response?.data?.items,
+    response?.data?.rows,
+    response?.data?.resources,
+    response?.data?.results,
+
+    response?.data?.data,
+    response?.data?.data?.tickets,
+    response?.data?.data?.items,
+  ];
+
+  for (const item of candidates) {
+    if (Array.isArray(item)) {
+      return item;
+    }
+  }
 
   return [];
 }
@@ -108,103 +149,182 @@ export function extractItems(response) {
 ========================================================= */
 
 export function normalizeIncidencia(item = {}) {
-  const id =
-    item.id ??
-    item.ticketId ??
-    item._id ??
-    null;
+  const id = firstDefined(
+    item.id,
+    item.ticketId,
+    item._id,
+    item.codigo
+  );
 
-  const ticketId =
-    item.ticketId ??
-    item.id ??
-    item._id ??
-    null;
+  const ticketId = firstDefined(
+    item.ticketId,
+    item.id,
+    item._id,
+    item.codigo
+  );
 
   const status = normalizeStatus(
-    item.status ??
-    item.estado ??
-    "open"
+    firstDefined(
+      item.status,
+      item.estado,
+      "open"
+    )
   );
 
   const priority = normalizePriority(
-    item.priority ??
-    item.prioridad ??
-    "medium"
+    firstDefined(
+      item.priority,
+      item.prioridad,
+      "medium"
+    )
   );
 
-  const clientName =
-    item.cliente?.nombre ??
-    item.name ??
-    item.receptor?.name ??
-    item.createdBy?.name ??
-    item.user?.name ??
-    "Usuario";
+  /* =======================================================
+     CLIENTE / USUARIO
+  ======================================================= */
 
-  const clientEmail =
-    item.cliente?.email ??
-    item.email ??
-    item.receptor?.email ??
-    item.createdBy?.email ??
-    item.user?.email ??
-    "-";
+  const clientName = safeText(
+    firstDefined(
+      item.cliente?.nombre,
+      item.cliente?.name,
+      item.client?.name,
+      item.clientName,
+      item.nombreCliente,
+      item.receptor?.name,
+      item.createdBy?.name,
+      item.user?.name,
+      item.name
+    ),
+    "Usuario"
+  );
 
-  const assignedName =
-    item.tecnico?.name ??
-    item.assignedTo?.name ??
-    item.assigned_to?.name ??
-    item.assignee?.name ??
-    "No asignado";
+  const clientEmail = safeText(
+    firstDefined(
+      item.cliente?.email,
+      item.client?.email,
+      item.email,
+      item.receptor?.email,
+      item.createdBy?.email,
+      item.user?.email
+    ),
+    "-"
+  );
 
-  const assignedEmail =
-    item.tecnico?.email ??
-    item.assignedTo?.email ??
-    item.assigned_to?.email ??
-    item.assignee?.email ??
-    "";
+  /* =======================================================
+     ASIGNADO
+  ======================================================= */
 
-  const createdAt =
-    item.createdAt ??
-    item.fechaCreacion ??
-    null;
+  const assignedName = safeText(
+    firstDefined(
+      item.tecnico?.name,
+      item.assignedTo?.name,
+      item.assigned_to?.name,
+      item.assignee?.name
+    ),
+    "No asignado"
+  );
 
-  const updatedAt =
-    item.updatedAt ??
-    item.fechaActualizacion ??
-    item.closedAt ??
-    createdAt ??
-    null;
+  const assignedEmail = safeText(
+    firstDefined(
+      item.tecnico?.email,
+      item.assignedTo?.email,
+      item.assigned_to?.email,
+      item.assignee?.email
+    ),
+    ""
+  );
 
-  const attachments = safeArray(item.attachments);
+  /* =======================================================
+     FECHAS
+  ======================================================= */
+
+  const createdAt = firstDefined(
+    item.createdAt,
+    item.created_at,
+    item.fechaCreacion,
+    item.fechaAlta,
+    item.date
+  );
+
+  const updatedAt = firstDefined(
+    item.updatedAt,
+    item.updated_at,
+    item.fechaActualizacion,
+    item.closedAt,
+    createdAt
+  );
+
+  /* =======================================================
+     ATTACHMENTS
+  ======================================================= */
+
+  const attachments = safeArray(
+    firstDefined(
+      item.attachments,
+      item.files,
+      []
+    )
+  );
+
+  /* =======================================================
+     TEXTO PRINCIPAL
+  ======================================================= */
+
+  const title = safeText(
+    firstDefined(
+      item.subject,
+      item.asunto,
+      item.title,
+      item.titulo,
+      item.name
+    ),
+    `Ticket ${ticketId || id || "sin asunto"}`
+  );
+
+  const description = safeText(
+    firstDefined(
+      item.descripcion,
+      item.description,
+      item.message,
+      item.body,
+      item.detalle
+    ),
+    ""
+  );
+
+  const preview =
+    description ||
+    title;
+
+  /* =======================================================
+     RETURN MODEL
+  ======================================================= */
 
   return {
     id,
     ticketId,
-    code: ticketId || id || null,
 
-    title:
-      item.subject ??
-      item.asunto ??
-      item.title ??
-      `Ticket ${ticketId || id || "sin asunto"}`,
+    code:
+      ticketId ||
+      id ||
+      null,
 
-    description:
-      item.descripcion ??
-      item.message ??
-      item.description ??
-      "",
-
-    preview:
-      item.preview ??
-      item.descripcion ??
-      item.message ??
-      item.description ??
-      "",
+    title,
+    description,
+    preview,
 
     status,
     priority,
 
-    tipo: safeString(item.tipo, "general"),
-    categoria: safeString(item.categoria, "general"),
+    tipo: safeText(
+      item.tipo,
+      "general"
+    ),
+
+    categoria: safeText(
+      item.categoria,
+      "general"
+    ),
 
     client: clientName,
     clientEmail,
@@ -227,7 +347,10 @@ export function normalizeIncidencia(item = {}) {
         toMs(createdAt) ||
         0,
 
-      initials: getInitials(clientName),
+      initials:
+        getInitials(
+          clientName
+        ),
     },
 
     raw: item,

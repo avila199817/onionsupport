@@ -1,810 +1,429 @@
 /* =========================================================
-   ONION SUPPORT — GLOBAL APP LOADER
-   FINAL PRO SAAS PANEL / GOD TIER SYSTEM / EXTREME LEVEL
-   Archivo: src/css/core/loader.css
+   Onion SPA - Loader CSS
+   Archivo: src/styles/loader.css
 
-   Objetivo:
-   - loader global premium enterprise
-   - profundidad visual extrema sin recargar
-   - respeta design tokens del sistema
-   - dark / light coherente
-   - entrada / salida elegantes
-   - table loader refinado
-   - sin flash agresivo
-   - alineado con paleta neutral graphite
-   - light mode refinado 10/10
+   Responsabilidades:
+   - loader global premium
+   - overlay de arranque
+   - anti flicker visual
+   - animaciones suaves
+   - soporte dark / light theme
+   - alineado con src/app/loader.js
+
+   REQUIERE:
+   #app-loader en DOM
+
+   ALINEADO CON loader.js:
+   - hidden / aria-hidden
+   - body.loading
+   - show/hide por inline style
+   - transición limpia
 ========================================================= */
-
 
 /* =========================================================
-   ROOT TUNING
+   TOKENS (fallback si variables.css no carga)
 ========================================================= */
-:root{
-  --loader-z: var(--z-loader, 9999);
 
-  --loader-size: 148px;
-  --loader-ring-size: 104px;
-  --loader-core-size: 64px;
-  --loader-logo-size: 48px;
-  --loader-label-gap: 18px;
+:root {
+  --loader-z: 99999;
 
-  --loader-film-opacity: .92;
-  --loader-grid-opacity: .18;
+  --loader-bg:
+    color-mix(
+      in srgb,
+      var(--color-bg, #0b1020) 92%,
+      black 8%
+    );
+
+  --loader-surface:
+    color-mix(
+      in srgb,
+      var(--color-surface, #121a2b) 88%,
+      white 12%
+    );
+
+  --loader-border:
+    color-mix(
+      in srgb,
+      var(--color-border, #24314f) 80%,
+      white 20%
+    );
+
+  --loader-text:
+    var(--color-text, #f8fafc);
+
+  --loader-muted:
+    var(--color-text-soft, #94a3b8);
+
+  --loader-accent:
+    var(--color-primary, #6366f1);
+
+  --loader-accent-2:
+    var(--color-primary-2, #22c55e);
+
+  --loader-shadow:
+    0 20px 60px rgb(0 0 0 / 0.45);
+
   --loader-blur: 18px;
+  --loader-radius: 26px;
 
-  --loader-safe-top: env(safe-area-inset-top, 0px);
-  --loader-safe-right: env(safe-area-inset-right, 0px);
-  --loader-safe-bottom: env(safe-area-inset-bottom, 0px);
-  --loader-safe-left: env(safe-area-inset-left, 0px);
+  --loader-size: 84px;
+  --loader-ring: 5px;
 
-  --loader-accent-soft: rgba(113,113,122,.14);
-  --loader-accent-soft-2: rgba(161,161,170,.08);
-  --loader-neutral-soft: rgba(255,255,255,.035);
-
-  --loader-overlay-top: rgba(255,255,255,.025);
-  --loader-overlay-bottom: rgba(0,0,0,.16);
-
-  --loader-ring-track: rgba(255,255,255,.08);
-  --loader-ring-track-strong: rgba(255,255,255,.12);
-  --loader-ring-active: var(--accent);
-  --loader-ring-active-2: rgba(113,113,122,.42);
-
-  --loader-core-border: rgba(255,255,255,.06);
-  --loader-core-bg:
-    linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.012)),
-    rgba(255,255,255,.020);
-
-  --loader-core-shadow:
-    inset 0 1px 0 rgba(255,255,255,.05),
-    inset 0 0 28px rgba(255,255,255,.012),
-    0 14px 34px rgba(0,0,0,.22);
-
-  --loader-logo-shadow:
-    drop-shadow(0 10px 20px rgba(0,0,0,.22))
-    drop-shadow(0 0 12px rgba(255,255,255,.04));
-
-  --table-loader-z: 12;
-  --table-loader-spinner-size: 32px;
+  --loader-speed: 1.2s;
+  --loader-fade: 0.28s;
 }
-
 
 /* =========================================================
-   APP LOADER ROOT
+   LIGHT THEME
 ========================================================= */
-#app-loader{
-  position:fixed;
-  inset:0;
-  z-index:var(--loader-z);
 
-  display:grid;
-  place-items:center;
+html[data-theme="light"] {
+  --loader-bg:
+    color-mix(
+      in srgb,
+      #ffffff 88%,
+      #e8eef8 12%
+    );
 
-  padding-top:var(--loader-safe-top);
-  padding-right:var(--loader-safe-right);
-  padding-bottom:var(--loader-safe-bottom);
-  padding-left:var(--loader-safe-left);
+  --loader-surface:
+    rgb(255 255 255 / 0.88);
 
-  background:
-    radial-gradient(circle at 12% 10%, var(--loader-accent-soft), transparent 24%),
-    radial-gradient(circle at 84% 12%, var(--loader-accent-soft-2), transparent 22%),
-    radial-gradient(circle at 50% 100%, var(--loader-neutral-soft), transparent 28%),
-    linear-gradient(180deg, rgba(255,255,255,.01), rgba(255,255,255,0)),
-    var(--main-bg);
+  --loader-border:
+    rgb(15 23 42 / 0.08);
 
-  opacity:0;
-  visibility:hidden;
-  pointer-events:none;
+  --loader-text:
+    #0f172a;
 
-  transition:
-    opacity var(--duration-normal) var(--ease-out),
-    visibility var(--duration-normal) var(--ease-out);
+  --loader-muted:
+    #475569;
 
-  isolation:isolate;
-  overflow:hidden;
-  contain:layout paint style;
+  --loader-shadow:
+    0 20px 60px rgb(15 23 42 / 0.14);
 }
-
-
-/* =========================================================
-   ACTIVE
-========================================================= */
-body.loading #app-loader{
-  opacity:1;
-  visibility:visible;
-  pointer-events:auto;
-}
-
-
-/* =========================================================
-   OVERLAY FILM
-========================================================= */
-#app-loader::before{
-  content:"";
-  position:absolute;
-  inset:0;
-  pointer-events:none;
-
-  background:
-    linear-gradient(180deg, var(--loader-overlay-top), transparent 24%),
-    radial-gradient(circle at 50% 0%, rgba(255,255,255,.035), transparent 62%),
-    linear-gradient(180deg, rgba(0,0,0,.03), var(--loader-overlay-bottom));
-
-  opacity:var(--loader-film-opacity);
-}
-
-
-/* =========================================================
-   GRID GLOW BACKDROP
-========================================================= */
-#app-loader::after{
-  content:"";
-  position:absolute;
-  inset:-10%;
-  pointer-events:none;
-  opacity:var(--loader-grid-opacity);
-
-  background:
-    linear-gradient(rgba(255,255,255,.014) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,.014) 1px, transparent 1px);
-  background-size:42px 42px;
-
-  mask-image:radial-gradient(circle at center, #000 30%, transparent 78%);
-  -webkit-mask-image:radial-gradient(circle at center, #000 30%, transparent 78%);
-
-  animation:loaderGridFloat 8s linear infinite;
-}
-
-
-/* =========================================================
-   LOADER CENTER
-========================================================= */
-#app-loader .loader-center{
-  position:relative;
-  z-index:2;
-
-  display:grid;
-  place-items:center;
-
-  width:var(--loader-size);
-  height:var(--loader-size);
-}
-
-
-/* =========================================================
-   LOADER CORE
-========================================================= */
-#app-loader .loader-center .loader-core{
-  position:absolute;
-  inset:calc((var(--loader-size) - var(--loader-core-size)) / 2);
-  border-radius:50%;
-
-  border:1px solid var(--loader-core-border);
-  background:var(--loader-core-bg);
-
-  box-shadow:var(--loader-core-shadow);
-
-  backdrop-filter:blur(12px);
-  -webkit-backdrop-filter:blur(12px);
-
-  animation:loaderCoreBreath 2.8s ease-in-out infinite;
-}
-
-
-/* =========================================================
-   OUTER HALO
-========================================================= */
-#app-loader .loader-center::before{
-  content:"";
-  position:absolute;
-  inset:0;
-  border-radius:50%;
-
-  background:
-    radial-gradient(circle at center, rgba(113,113,122,.18), transparent 58%),
-    radial-gradient(circle at 58% 44%, rgba(255,255,255,.045), transparent 62%);
-
-  filter:blur(16px);
-  opacity:.92;
-
-  animation:loaderHalo 2.6s ease-in-out infinite;
-}
-
-
-/* =========================================================
-   SPINNER RING
-========================================================= */
-#app-loader .loader-center::after{
-  content:"";
-  position:absolute;
-  inset:calc((var(--loader-size) - var(--loader-ring-size)) / 2);
-  border-radius:50%;
-
-  border:2px solid var(--loader-ring-track);
-  border-top-color:var(--loader-ring-active);
-  border-right-color:var(--loader-ring-active-2);
-  border-left-color:rgba(255,255,255,.06);
-
-  box-shadow:
-    0 0 0 1px rgba(255,255,255,.018),
-    0 0 16px rgba(0,0,0,.10),
-    inset 0 1px 0 rgba(255,255,255,.04);
-
-  animation:loaderSpin .84s linear infinite;
-}
-
-
-/* =========================================================
-   INNER DECORATIVE RING
-========================================================= */
-#app-loader .loader-center .loader-core::before{
-  content:"";
-  position:absolute;
-  inset:-13px;
-  border-radius:50%;
-  border:1px dashed rgba(255,255,255,.055);
-  opacity:.72;
-  animation:loaderSpinReverse 6.4s linear infinite;
-}
-
-#app-loader .loader-center .loader-core::after{
-  content:"";
-  position:absolute;
-  inset:10px;
-  border-radius:50%;
-
-  background:
-    radial-gradient(circle at 35% 30%, rgba(255,255,255,.06), transparent 32%),
-    linear-gradient(180deg, rgba(255,255,255,.025), transparent 60%);
-  opacity:.88;
-}
-
-
-/* =========================================================
-   LOGO
-========================================================= */
-.loader-logo{
-  position:relative;
-  z-index:3;
-
-  width:var(--loader-logo-size);
-  height:var(--loader-logo-size);
-  object-fit:contain;
-  user-select:none;
-  -webkit-user-drag:none;
-
-  filter:var(--loader-logo-shadow);
-
-  animation:loaderPulse 1.6s var(--ease-out) infinite;
-}
-
-
-/* =========================================================
-   THEME LOGO SWITCH
-========================================================= */
-.loader-dark{
-  display:block;
-}
-
-.loader-light{
-  display:none;
-}
-
-[data-theme="light"] .loader-dark{
-  display:none;
-}
-
-[data-theme="light"] .loader-light{
-  display:block;
-}
-
-
-/* =========================================================
-   LOADER LABEL
-========================================================= */
-#app-loader .loader-label{
-  position:absolute;
-  left:50%;
-  top:calc(100% + var(--loader-label-gap));
-  transform:translateX(-50%);
-
-  display:inline-flex;
-  align-items:center;
-  gap:9px;
-
-  white-space:nowrap;
-  font-size:var(--font-sm);
-  line-height:1;
-  color:var(--text-dim);
-  letter-spacing:.035em;
-
-  animation:loaderTextPulse 1.7s ease-in-out infinite;
-}
-
-#app-loader .loader-label::before{
-  content:"";
-  width:6px;
-  height:6px;
-  border-radius:999px;
-  background:currentColor;
-  opacity:.78;
-  box-shadow:0 0 8px currentColor;
-  animation:loaderDotBlink 1.2s ease-in-out infinite;
-}
-
-#app-loader .loader-label::after{
-  content:"";
-  position:absolute;
-  left:50%;
-  top:-10px;
-  transform:translateX(-50%);
-  width:48px;
-  height:1px;
-  background:linear-gradient(90deg, transparent, rgba(255,255,255,.14), transparent);
-  opacity:.68;
-}
-
 
 /* =========================================================
    BODY LOCK
 ========================================================= */
-body.loading{
-  overflow:hidden;
-  cursor:progress;
-}
 
+body.loading {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
 
 /* =========================================================
-   APP CONTENT TRANSITION
-   REFINADO: SIN DESAPARECER COMPLETAMENTE EL LAYOUT
-========================================================= */
-.layout,
-#app-content{
-  transition:
-    opacity var(--duration-fast) var(--ease-out),
-    filter var(--duration-fast) var(--ease-out),
-    transform var(--duration-fast) var(--ease-out);
-}
-
-body.loading .layout{
-  opacity:.94;
-  filter:blur(2px);
-  transform:scale(.998);
-  pointer-events:none;
-}
-
-
-/* =========================================================
-   INPUT CARET FIX
-========================================================= */
-body.loading input,
-body.loading textarea{
-  caret-color:transparent;
-}
-
-
-/* =========================================================
-   LIGHT THEME TUNING
-   REWORK 10/10:
-   - fondo más limpio y menos lavado
-   - más contraste en core / aro / label
-   - look SaaS premium, no blanco plano
-========================================================= */
-[data-theme="light"] #app-loader{
-  background:
-    radial-gradient(circle at 14% 12%, rgba(148,163,184,.14), transparent 24%),
-    radial-gradient(circle at 86% 10%, rgba(99,102,241,.06), transparent 20%),
-    radial-gradient(circle at 50% 100%, rgba(255,255,255,.24), transparent 34%),
-    linear-gradient(180deg, rgba(255,255,255,.72), rgba(248,250,252,.42)),
-    linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
-}
-
-[data-theme="light"] #app-loader::before{
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.38), transparent 24%),
-    radial-gradient(circle at 50% 0%, rgba(255,255,255,.18), transparent 60%),
-    linear-gradient(180deg, rgba(15,23,42,.015), rgba(15,23,42,.055));
-  opacity:.96;
-}
-
-[data-theme="light"] #app-loader::after{
-  opacity:.08;
-  background:
-    linear-gradient(rgba(15,23,42,.030) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(15,23,42,.030) 1px, transparent 1px);
-  background-size:42px 42px;
-}
-
-[data-theme="light"] #app-loader .loader-center::before{
-  background:
-    radial-gradient(circle at center, rgba(99,102,241,.08), transparent 56%),
-    radial-gradient(circle at 52% 46%, rgba(255,255,255,.42), transparent 64%);
-  filter:blur(18px);
-  opacity:.86;
-}
-
-[data-theme="light"] #app-loader .loader-center::after{
-  border-color:rgba(15,23,42,.12);
-  border-top-color:var(--accent);
-  border-right-color:rgba(99,102,241,.24);
-  border-left-color:rgba(15,23,42,.09);
-
-  box-shadow:
-    0 0 0 1px rgba(255,255,255,.58),
-    0 8px 24px rgba(15,23,42,.06),
-    inset 0 1px 0 rgba(255,255,255,.72);
-}
-
-[data-theme="light"] #app-loader .loader-center .loader-core{
-  border-color:rgba(148,163,184,.22);
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.96), rgba(248,250,252,.76)),
-    rgba(255,255,255,.88);
-
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.82),
-    inset 0 0 24px rgba(148,163,184,.06),
-    0 18px 34px rgba(15,23,42,.10);
-}
-
-[data-theme="light"] #app-loader .loader-center .loader-core::before{
-  border-color:rgba(148,163,184,.24);
-}
-
-[data-theme="light"] #app-loader .loader-center .loader-core::after{
-  background:
-    radial-gradient(circle at 35% 30%, rgba(255,255,255,.72), transparent 32%),
-    linear-gradient(180deg, rgba(148,163,184,.08), transparent 60%);
-}
-
-[data-theme="light"] .loader-logo{
-  filter:
-    drop-shadow(0 10px 20px rgba(15,23,42,.10))
-    drop-shadow(0 0 10px rgba(255,255,255,.42));
-}
-
-[data-theme="light"] #app-loader .loader-label{
-  color:rgba(51,65,85,.82);
-}
-
-[data-theme="light"] #app-loader .loader-label::after{
-  background:linear-gradient(
-    90deg,
-    transparent,
-    rgba(148,163,184,.38),
-    transparent
-  );
-}
-
-[data-theme="light"] body.loading .layout{
-  opacity:.96;
-  filter:blur(1.75px);
-}
-
-
-/* =========================================================
-   TABLE LOADER — PANEL / TABLE OVERLAY
+   ROOT OVERLAY
 ========================================================= */
 
+#app-loader {
+  position: fixed;
+  inset: 0;
+  z-index: var(--loader-z);
 
-/* =========================================================
-   LOADER HOST
-========================================================= */
-.table-container,
-.panel-content.incidencias,
-.panel-content.table-mode{
-  position:relative;
-}
+  display: grid;
+  place-items: center;
 
-
-/* =========================================================
-   HIDDEN ROW PLACEHOLDER
-========================================================= */
-.table-loading{
-  height:0;
-}
-
-.table-loading td{
-  padding:0 !important;
-  border:none !important;
-  background:transparent !important;
-}
-
-
-/* =========================================================
-   TABLE LOADER ROOT
-========================================================= */
-.table-loader{
-  position:absolute;
-  inset:0;
-  z-index:var(--table-loader-z);
-
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  justify-content:center;
-  gap:12px;
-
-  padding:24px;
-
-  color:var(--text-dim);
-  font-size:var(--font-sm);
-  text-align:center;
-
-  border-radius:inherit;
+  padding: 24px;
 
   background:
-    linear-gradient(180deg, rgba(255,255,255,.020), rgba(255,255,255,.010)),
-    rgba(39,39,42,.76);
+    radial-gradient(
+      circle at 20% 20%,
+      rgb(99 102 241 / 0.14),
+      transparent 35%
+    ),
+    radial-gradient(
+      circle at 80% 30%,
+      rgb(34 197 94 / 0.10),
+      transparent 32%
+    ),
+    radial-gradient(
+      circle at 50% 100%,
+      rgb(255 255 255 / 0.03),
+      transparent 30%
+    ),
+    var(--loader-bg);
 
-  backdrop-filter:blur(12px);
-  -webkit-backdrop-filter:blur(12px);
+  backdrop-filter:
+    blur(var(--loader-blur));
 
-  opacity:1;
-  visibility:visible;
-  pointer-events:none;
+  -webkit-backdrop-filter:
+    blur(var(--loader-blur));
+
+  opacity: 1;
+  visibility: visible;
 
   transition:
-    opacity .24s var(--ease-out),
-    visibility .24s var(--ease-out);
+    opacity var(--loader-fade) ease,
+    visibility var(--loader-fade) ease,
+    transform var(--loader-fade) ease;
 }
 
-.table-loader::before{
-  content:"";
-  position:absolute;
-  inset:0;
-  pointer-events:none;
-  border-radius:inherit;
+/* hidden compatible con JS */
+#app-loader[hidden],
+#app-loader[aria-hidden="true"] {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* =========================================================
+   PANEL
+========================================================= */
+
+#app-loader .loader-card {
+  position: relative;
+
+  min-width: min(92vw, 340px);
+  max-width: 340px;
+
+  padding: 28px 26px 24px;
+
+  border: 1px solid var(--loader-border);
+  border-radius: var(--loader-radius);
+
   background:
-    radial-gradient(circle at 50% 20%, rgba(113,113,122,.05), transparent 36%),
-    linear-gradient(180deg, rgba(255,255,255,.018), transparent 28%);
+    linear-gradient(
+      180deg,
+      rgb(255 255 255 / 0.08),
+      rgb(255 255 255 / 0.02)
+    ),
+    var(--loader-surface);
+
+  box-shadow: var(--loader-shadow);
+
+  text-align: center;
+
+  overflow: hidden;
 }
 
-.table-loader.hidden{
-  opacity:0;
-  visibility:hidden;
-}
+#app-loader .loader-card::before {
+  content: "";
 
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 140px;
 
-/* =========================================================
-   TABLE LOADER SPINNER
-========================================================= */
-.table-loader .spinner{
-  position:relative;
-  width:var(--table-loader-spinner-size);
-  height:var(--table-loader-spinner-size);
-  flex:0 0 auto;
-}
-
-.table-loader .spinner::before{
-  content:"";
-  position:absolute;
-  inset:0;
-  border-radius:50%;
-
-  border:2px solid rgba(255,255,255,.08);
-  box-shadow:
-    inset 0 0 0 1px rgba(255,255,255,.012),
-    0 0 12px rgba(0,0,0,.08);
-}
-
-.table-loader .spinner::after{
-  content:"";
-  position:absolute;
-  inset:0;
-  border-radius:50%;
-
-  border:2px solid transparent;
-  border-top-color:var(--accent);
-  border-right-color:rgba(113,113,122,.42);
-
-  filter:drop-shadow(0 0 6px rgba(0,0,0,.10));
-  animation:loaderSpin .72s linear infinite;
-}
-
-
-/* =========================================================
-   TABLE LOADER TEXT
-========================================================= */
-.table-loader span{
-  line-height:var(--line-normal);
-  animation:loaderTextPulse 1.6s ease-in-out infinite;
-}
-
-
-/* =========================================================
-   LIGHT TUNING
-========================================================= */
-[data-theme="light"] .table-loader{
-  color:rgba(51,65,85,.82);
   background:
-    linear-gradient(180deg, rgba(255,255,255,.92), rgba(248,250,252,.96)),
-    var(--panel-bg);
+    linear-gradient(
+      90deg,
+      rgb(255 255 255 / 0.10),
+      transparent
+    );
 
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.72),
-    0 8px 24px rgba(15,23,42,.06);
+  transform: skewX(-18deg)
+             translateX(-160%);
+  animation:
+    loaderSheen 2.4s linear infinite;
 }
 
-[data-theme="light"] .table-loader::before{
+/* =========================================================
+   SPINNER CORE
+========================================================= */
+
+#app-loader .loader-spinner {
+  position: relative;
+  width: var(--loader-size);
+  height: var(--loader-size);
+  margin: 0 auto 20px;
+}
+
+#app-loader .loader-spinner::before,
+#app-loader .loader-spinner::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+}
+
+#app-loader .loader-spinner::before {
+  border:
+    var(--loader-ring)
+    solid
+    rgb(255 255 255 / 0.08);
+}
+
+#app-loader .loader-spinner::after {
+  border:
+    var(--loader-ring)
+    solid transparent;
+
+  border-top-color:
+    var(--loader-accent);
+
+  border-right-color:
+    var(--loader-accent-2);
+
+  animation:
+    loaderSpin var(--loader-speed)
+    linear infinite;
+}
+
+#app-loader .loader-core {
+  position: absolute;
+  inset: 18%;
+  border-radius: 50%;
+
   background:
-    radial-gradient(circle at 50% 20%, rgba(99,102,241,.04), transparent 36%),
-    linear-gradient(180deg, rgba(255,255,255,.28), transparent 28%);
-}
+    radial-gradient(
+      circle,
+      rgb(255 255 255 / 0.28),
+      transparent 62%
+    ),
+    linear-gradient(
+      135deg,
+      var(--loader-accent),
+      var(--loader-accent-2)
+    );
 
-[data-theme="light"] .table-loader .spinner::before{
-  border-color:rgba(15,23,42,.10);
   box-shadow:
-    inset 0 0 0 1px rgba(255,255,255,.42),
-    0 0 10px rgba(15,23,42,.04);
-}
+    0 0 30px
+    rgb(99 102 241 / 0.35);
 
-[data-theme="light"] .table-loader .spinner::after{
-  border-top-color:var(--accent);
-  border-right-color:rgba(99,102,241,.24);
-  filter:drop-shadow(0 0 4px rgba(15,23,42,.05));
+  animation:
+    loaderPulse 1.8s ease-in-out infinite;
 }
-
 
 /* =========================================================
-   OPTIONAL: SKELETON FADE
+   BRAND / TEXT
 ========================================================= */
-.panel-content.is-loading .content-wrapper,
-.panel-content.is-loading .table-container > *:not(.table-loader){
-  opacity:.38;
-  transition:opacity var(--duration-fast) var(--ease-out);
+
+#app-loader .loader-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--loader-text);
 }
 
+#app-loader .loader-subtitle {
+  margin: 8px 0 0;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--loader-muted);
+}
+
+#app-loader .loader-dots::after {
+  content: "";
+  display: inline-block;
+  width: 1.2em;
+  text-align: left;
+  animation:
+    loaderDots 1.4s steps(4,end)
+    infinite;
+}
 
 /* =========================================================
-   SHIMMER HELPERS
+   PROGRESS BAR (opcional)
 ========================================================= */
-.loader-shimmer{
-  position:relative;
-  overflow:hidden;
+
+#app-loader .loader-progress {
+  position: relative;
+  margin-top: 18px;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+
+  background:
+    rgb(255 255 255 / 0.08);
 }
 
-.loader-shimmer::after{
-  content:"";
-  position:absolute;
-  inset:0;
-  transform:translateX(-100%);
-  background:linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(255,255,255,.04) 50%,
-    transparent 100%
-  );
-  animation:loaderShimmer 1.5s ease-in-out infinite;
-}
+#app-loader .loader-progress > span {
+  display: block;
+  width: 42%;
+  height: 100%;
+  border-radius: inherit;
 
+  background:
+    linear-gradient(
+      90deg,
+      var(--loader-accent),
+      var(--loader-accent-2)
+    );
+
+  animation:
+    loaderBar 1.3s ease-in-out infinite;
+}
 
 /* =========================================================
    ANIMATIONS
 ========================================================= */
-@keyframes loaderSpin{
-  to{
-    transform:rotate(360deg);
+
+@keyframes loaderSpin {
+  to {
+    transform: rotate(360deg);
   }
 }
 
-@keyframes loaderSpinReverse{
-  to{
-    transform:rotate(-360deg);
+@keyframes loaderPulse {
+  0%,100% {
+    transform: scale(0.92);
+    opacity: 0.82;
+  }
+
+  50% {
+    transform: scale(1);
+    opacity: 1;
   }
 }
 
-@keyframes loaderPulse{
-  0%{
-    transform:scale(.94);
-    opacity:.68;
+@keyframes loaderDots {
+  0%   { content: ""; }
+  25%  { content: "."; }
+  50%  { content: ".."; }
+  75%  { content: "..."; }
+  100% { content: ""; }
+}
+
+@keyframes loaderBar {
+  0% {
+    transform: translateX(-120%);
   }
-  50%{
-    transform:scale(1);
-    opacity:1;
-  }
-  100%{
-    transform:scale(.94);
-    opacity:.68;
+
+  100% {
+    transform: translateX(320%);
   }
 }
 
-@keyframes loaderHalo{
-  0%{
-    transform:scale(.90);
-    opacity:.40;
-  }
-  50%{
-    transform:scale(1.05);
-    opacity:.84;
-  }
-  100%{
-    transform:scale(.90);
-    opacity:.40;
+@keyframes loaderSheen {
+  to {
+    transform:
+      skewX(-18deg)
+      translateX(420%);
   }
 }
-
-@keyframes loaderCoreBreath{
-  0%{
-    transform:scale(.985);
-    box-shadow:
-      inset 0 1px 0 rgba(255,255,255,.045),
-      0 10px 24px rgba(0,0,0,.16);
-  }
-  50%{
-    transform:scale(1.02);
-    box-shadow:
-      inset 0 1px 0 rgba(255,255,255,.06),
-      0 16px 30px rgba(0,0,0,.22);
-  }
-  100%{
-    transform:scale(.985);
-    box-shadow:
-      inset 0 1px 0 rgba(255,255,255,.045),
-      0 10px 24px rgba(0,0,0,.16);
-  }
-}
-
-@keyframes loaderTextPulse{
-  0%, 100%{
-    opacity:.48;
-  }
-  50%{
-    opacity:1;
-  }
-}
-
-@keyframes loaderDotBlink{
-  0%, 100%{
-    transform:scale(.8);
-    opacity:.42;
-  }
-  50%{
-    transform:scale(1.15);
-    opacity:1;
-  }
-}
-
-@keyframes loaderGridFloat{
-  0%{
-    transform:translate3d(0, 0, 0);
-  }
-  50%{
-    transform:translate3d(0, 6px, 0);
-  }
-  100%{
-    transform:translate3d(0, 0, 0);
-  }
-}
-
-@keyframes loaderShimmer{
-  100%{
-    transform:translateX(100%);
-  }
-}
-
 
 /* =========================================================
    REDUCED MOTION
 ========================================================= */
-@media (prefers-reduced-motion: reduce){
+
+@media (prefers-reduced-motion: reduce) {
   #app-loader,
-  .layout,
-  #app-content,
-  .table-loader{
-    transition:none !important;
+  #app-loader * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* =========================================================
+   MOBILE
+========================================================= */
+
+@media (max-width: 640px) {
+  :root {
+    --loader-size: 72px;
+    --loader-radius: 22px;
   }
 
-  #app-loader::after,
-  #app-loader .loader-center::before,
-  #app-loader .loader-center::after,
-  #app-loader .loader-center .loader-core,
-  #app-loader .loader-center .loader-core::before,
-  .loader-logo,
-  .table-loader .spinner::after,
-  .table-loader span,
-  #app-loader .loader-label,
-  #app-loader .loader-label::before,
-  .loader-shimmer::after{
-    animation:none !important;
+  #app-loader .loader-card {
+    padding: 24px 18px 20px;
+    min-width: min(92vw, 300px);
+  }
+
+  #app-loader .loader-title {
+    font-size: 0.94rem;
+  }
+
+  #app-loader .loader-subtitle {
+    font-size: 0.86rem;
   }
 }

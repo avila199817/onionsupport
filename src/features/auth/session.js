@@ -2,7 +2,7 @@
    Onion SPA - Auth Session
    Archivo: src/features/auth/session.js
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - aplicar sesión autenticada sobre AppCore
    - limpiar sesión local y storage auxiliar
    - exponer helpers auth de estado / rol
@@ -11,12 +11,13 @@
    - endurecer sync con AppCore.state
    - evitar estados auth fantasma
 
-   HARDENING PRO:
+   HARDENING EXTREMO:
    - estado derivado robusto
    - persistencia ordenada
    - sync UI seguro
    - helpers enterprise
    - cero estados partidos
+   - emisiones sólo cuando cambian datos
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -65,6 +66,10 @@ function safeBool(value) {
   return value === true;
 }
 
+function nowMs() {
+  return Date.now();
+}
+
 function safeEmit(
   eventName,
   payload = {}
@@ -75,10 +80,6 @@ function safeEmit(
       payload
     );
   } catch {}
-}
-
-function nowMs() {
-  return Date.now();
 }
 
 function ensureCoreState() {
@@ -99,6 +100,7 @@ function resolveRoleFromUser(
   return safeText(
     user?.role ??
       user?.rol ??
+      user?.type ??
       "",
     ""
   ).toLowerCase();
@@ -108,13 +110,14 @@ function syncDerivedState() {
   const state =
     ensureCoreState();
 
-  const hasToken =
-    Boolean(
-      safeText(
-        state.token,
-        ""
-      )
+  const token =
+    safeText(
+      state.token,
+      ""
     );
+
+  const hasToken =
+    Boolean(token);
 
   state.authenticated =
     hasToken;
@@ -194,7 +197,8 @@ function safeClearSession() {
   state.token = null;
   state.user = null;
   state.role = "";
-  state.authenticated = false;
+  state.authenticated =
+    false;
 }
 
 function getCurrentStateSnapshotBase() {
@@ -208,17 +212,18 @@ function getCurrentStateSnapshotBase() {
       Boolean(
         state.authenticated
       ),
-
     token:
       state.token || null,
-
     user:
       state.user || null,
-
     role:
       state.role || null,
   };
 }
+
+/* =========================================================
+   FINGERPRINT
+========================================================= */
 
 function buildSessionFingerprint(
   snapshot = {}
@@ -233,13 +238,11 @@ function buildSessionFingerprint(
       ),
     token:
       safeText(
-        snapshot?.token,
-        ""
+        snapshot?.token
       ),
     role:
       safeText(
-        snapshot?.role,
-        ""
+        snapshot?.role
       ),
     userId:
       user.id ||
@@ -253,18 +256,15 @@ function buildSessionFingerprint(
       null,
     refreshToken:
       safeText(
-        snapshot?.refreshToken,
-        ""
+        snapshot?.refreshToken
       ),
     sessionId:
       safeText(
-        snapshot?.sessionId,
-        ""
+        snapshot?.sessionId
       ),
     sessionUserId:
       safeText(
-        snapshot?.sessionUserId,
-        ""
+        snapshot?.sessionUserId
       ),
   });
 }
@@ -337,7 +337,9 @@ export function applySession({
   tempToken = undefined,
   sessionData = undefined,
 } = {}) {
-  const startedAt = nowMs();
+  const startedAt =
+    nowMs();
+
   const before =
     buildSessionSnapshot();
 
@@ -346,7 +348,7 @@ export function applySession({
       ? undefined
       : normalizeUser(user);
 
-  /* TOKEN FIRST */
+  /* token primero */
   if (
     token !== undefined
   ) {
@@ -355,7 +357,7 @@ export function applySession({
     );
   }
 
-  /* USER SECOND */
+  /* user después */
   if (
     user !== undefined
   ) {
@@ -365,7 +367,7 @@ export function applySession({
     );
   }
 
-  /* TOKENS AUX */
+  /* auxiliares */
   if (
     refreshToken !==
     undefined
@@ -377,14 +379,15 @@ export function applySession({
   }
 
   if (
-    tempToken !== undefined
+    tempToken !==
+    undefined
   ) {
     persistTempToken(
-      tempToken || null
+      tempToken ||
+        null
     );
   }
 
-  /* CONTEXT */
   if (
     sessionData !==
     undefined
@@ -399,7 +402,6 @@ export function applySession({
     );
   }
 
-  /* AUX USER CACHE */
   persistAuxSessionData(
     normalizedUser ===
       undefined
@@ -412,23 +414,33 @@ export function applySession({
 
   safeSyncUserUI();
 
-  const snapshot =
+  const after =
     buildSessionSnapshot();
 
   emitSessionState({
     reason: "apply",
     before,
-    after: snapshot,
+    after,
     durationMs:
-      nowMs() - startedAt,
+      nowMs() -
+      startedAt,
   });
 
-  safeEmit(
-    "auth:session:applied",
-    snapshot
-  );
+  if (
+    buildSessionFingerprint(
+      before
+    ) !==
+    buildSessionFingerprint(
+      after
+    )
+  ) {
+    safeEmit(
+      "auth:session:applied",
+      after
+    );
+  }
 
-  return snapshot;
+  return after;
 }
 
 /* =========================================================
@@ -442,11 +454,13 @@ export function clearSessionLocal(
     silent = false,
   } = options;
 
+  const startedAt =
+    nowMs();
+
   const before =
     buildSessionSnapshot();
-  const startedAt = nowMs();
 
-  const hadSomething =
+  const hadData =
     Boolean(before.token) ||
     Boolean(before.user) ||
     Boolean(
@@ -467,27 +481,18 @@ export function clearSessionLocal(
 
   safeSyncUserUI();
 
+  const after =
+    buildSessionSnapshot();
+
   if (
     !safeBool(silent) &&
-    hadSomething
+    hadData
   ) {
     safeEmit(
       "auth:session:cleared",
-      {
-        authenticated:
-          false,
-        token: null,
-        user: null,
-        role: null,
-        refreshToken: null,
-        sessionId: null,
-        sessionUserId: null,
-      }
+      after
     );
   }
-
-  const after =
-    buildSessionSnapshot();
 
   emitSessionState({
     reason:
@@ -497,14 +502,15 @@ export function clearSessionLocal(
     before,
     after,
     durationMs:
-      nowMs() - startedAt,
+      nowMs() -
+      startedAt,
   });
 
   return true;
 }
 
 /* =========================================================
-   AUTH HELPERS
+   HELPERS AUTH
 ========================================================= */
 
 export function isAuthenticated() {
@@ -515,7 +521,9 @@ export function isAuthenticated() {
 
   return Boolean(
     state.authenticated &&
-      state.token
+      safeText(
+        state.token
+      )
   );
 }
 
@@ -526,8 +534,7 @@ export function getCurrentRole() {
   syncDerivedState();
 
   return safeText(
-    state.role,
-    ""
+    state.role
   ).toLowerCase();
 }
 
@@ -549,8 +556,7 @@ export function hasRole(
     .flat()
     .map((role) =>
       safeText(
-        role,
-        ""
+        role
       ).toLowerCase()
     )
     .filter(Boolean)
@@ -575,8 +581,7 @@ export function requireRole(
 export function getAuthHeader() {
   const token =
     safeText(
-      AppCore?.state?.token,
-      ""
+      AppCore?.state?.token
     );
 
   if (!token) {
@@ -602,11 +607,9 @@ export function getSessionDebugSnapshot() {
       Boolean(
         snapshot.authenticated
       ),
-
     role:
       snapshot.role ||
       null,
-
     username:
       snapshot.user
         ?.username ||
@@ -617,21 +620,17 @@ export function getSessionDebugSnapshot() {
       snapshot.user
         ?.nombre ||
       null,
-
     hasToken:
       Boolean(
         snapshot.token
       ),
-
     hasRefreshToken:
       Boolean(
         snapshot.refreshToken
       ),
-
     sessionId:
       snapshot.sessionId ||
       null,
-
     sessionUserId:
       snapshot.sessionUserId ||
       null,

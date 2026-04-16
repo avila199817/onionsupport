@@ -2,6 +2,8 @@
    Onion SPA - Sidebar UI
    Archivo: src/ui/sidebar/index.js
 
+   FINAL FIX · MANUAL SIDEBAR ONLY · STABLE MODE
+
    Responsabilidades:
    - punto de entrada del módulo sidebar
    - composición de submódulos internos
@@ -9,7 +11,10 @@
    - init seguro una sola vez
    - sidebar limpio sin server-nav legacy
    - rehidratar referencias DOM del sidebar tras mount
-   - sincronizar avatar/nombre también en AppCore.dom para compatibilidad
+   - sincronizar avatar/nombre también en AppCore.dom
+   - sidebar SOLO se colapsa manualmente
+   - sin restauración automática corrupta
+   - dropdown estable
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -40,7 +45,6 @@ import {
 } from "./user.js";
 
 import {
-  getSavedSidebarCollapsed,
   saveSidebarCollapsed,
   isMobileViewport,
   updateToggleLabel,
@@ -89,41 +93,37 @@ export const SidebarUI = (() => {
   }
 
   /* =========================================================
-     DOM REFS SYNC
-     Muy importante:
-     - AppCore.cacheDom() corre antes de montar el sidebar
-     - aquí rehidratamos refs para que AppCore.syncUserUI() funcione
+     DOM REFS
   ========================================================= */
   function syncSidebarDomIntoAppCore() {
-    const elements =
-      getElements(AppCore);
+    const elements = getElements(AppCore);
 
     AppCore.dom.sidebar =
-      elements.sidebar || AppCore.dom.sidebar || null;
+      elements.sidebar || null;
 
     AppCore.dom.sidebarMenu =
-      elements.sidebarMenu || AppCore.dom.sidebarMenu || null;
+      elements.sidebarMenu || null;
 
     AppCore.dom.sidebarAvatar =
-      elements.avatarEl || AppCore.dom.sidebarAvatar || null;
+      elements.avatarEl || null;
 
     AppCore.dom.sidebarName =
-      elements.nameEl || AppCore.dom.sidebarName || null;
+      elements.nameEl || null;
 
     AppCore.dom.userToggle =
-      elements.userToggle || AppCore.dom.userToggle || null;
+      elements.userToggle || null;
 
     AppCore.dom.userDropdown =
-      elements.userDropdown || AppCore.dom.userDropdown || null;
+      elements.userDropdown || null;
 
     AppCore.dom.logoutBtn =
-      elements.logoutBtn || AppCore.dom.logoutBtn || null;
+      elements.logoutBtn || null;
 
     AppCore.dom.sidebarToggle =
-      elements.sidebarToggle || AppCore.dom.sidebarToggle || null;
+      elements.toggleBtn || null;
 
     AppCore.dom.sidebarMobileToggle =
-      elements.sidebarMobileToggle || AppCore.dom.sidebarMobileToggle || null;
+      elements.mobileToggleBtn || null;
   }
 
   function refreshSidebarDomRefs() {
@@ -132,7 +132,7 @@ export const SidebarUI = (() => {
   }
 
   /* =========================================================
-     ROLE HELPERS
+     ROLE
   ========================================================= */
   function isAdmin() {
     const role =
@@ -161,22 +161,36 @@ export const SidebarUI = (() => {
 
     const user = getUser(AppCore);
 
-    const displayName = getDisplayName(AppCore, user);
-    const avatarText = getAvatarText(AppCore, user);
-    const username = getUsername(AppCore, user);
-    const avatarUrl = getAvatarUrl(user);
+    const displayName =
+      getDisplayName(AppCore, user);
+
+    const avatarText =
+      getAvatarText(AppCore, user);
+
+    const username =
+      getUsername(AppCore, user);
+
+    const avatarUrl =
+      getAvatarUrl(user);
 
     if (nameEl) {
-      nameEl.textContent = displayName;
+      nameEl.textContent =
+        displayName;
 
       if (username) {
-        nameEl.dataset.username = username;
+        nameEl.dataset.username =
+          username;
       } else {
         delete nameEl.dataset.username;
       }
 
-      nameEl.removeAttribute("data-tooltip");
-      nameEl.removeAttribute("title");
+      nameEl.removeAttribute(
+        "title"
+      );
+
+      nameEl.removeAttribute(
+        "data-tooltip"
+      );
     }
 
     if (avatarEl) {
@@ -188,17 +202,13 @@ export const SidebarUI = (() => {
       );
 
       avatarEl.setAttribute(
-        "title",
-        displayName
-      );
-
-      avatarEl.setAttribute(
         "aria-label",
         `Avatar de ${displayName}`
       );
 
       if (username) {
-        avatarEl.dataset.username = username;
+        avatarEl.dataset.username =
+          username;
       } else {
         delete avatarEl.dataset.username;
       }
@@ -209,26 +219,25 @@ export const SidebarUI = (() => {
         "aria-label",
         `Abrir menú de usuario de ${displayName}`
       );
-
-      userToggle.removeAttribute("data-tooltip");
-      userToggle.removeAttribute("title");
     }
 
-    if (userDropdown) {
-      userDropdown.removeAttribute("data-tooltip");
-      userDropdown.removeAttribute("title");
-    }
+    userToggle?.removeAttribute(
+      "title"
+    );
 
-    sanitizeFooterTooltipState(AppCore);
+    userDropdown?.removeAttribute(
+      "title"
+    );
+
+    sanitizeFooterTooltipState(
+      AppCore
+    );
 
     AppCore?.events?.emit?.(
       "sidebar:user:rendered",
       {
         user,
         displayName,
-        avatarText,
-        avatarUrl: avatarUrl || null,
-        username: username || null,
       }
     );
   }
@@ -244,7 +253,9 @@ export const SidebarUI = (() => {
   }
 
   function openDropdown() {
-    if (isShellHidden(AppCore)) return;
+    if (isShellHidden(AppCore)) {
+      return;
+    }
 
     refreshSidebarDomRefs();
 
@@ -278,24 +289,31 @@ export const SidebarUI = (() => {
   }
 
   function setSidebarOpen(open) {
-    const nextOpen = Boolean(open);
+    const nextOpen =
+      Boolean(open);
 
     const mobile =
       isMobileViewport(
         MOBILE_BREAKPOINT
       );
 
-    AppCore.state.sidebarOpen = nextOpen;
+    AppCore.state.sidebarOpen =
+      nextOpen;
 
     if (!mobile) {
-      saveSidebarCollapsed(!nextOpen);
+      saveSidebarCollapsed(
+        !nextOpen
+      );
     }
 
     syncSidebarState();
   }
 
   function openSidebar() {
-    if (isShellHidden(AppCore)) return;
+    if (isShellHidden(AppCore)) {
+      return;
+    }
+
     setSidebarOpen(true);
   }
 
@@ -304,13 +322,17 @@ export const SidebarUI = (() => {
   }
 
   function toggleSidebar() {
-    if (isShellHidden(AppCore)) return;
+    if (isShellHidden(AppCore)) {
+      return;
+    }
 
-    const currentOpen = Boolean(
-      AppCore.state.sidebarOpen
-    );
+    const currentOpen =
+      Boolean(
+        AppCore.state.sidebarOpen
+      );
 
-    const nextOpen = !currentOpen;
+    const nextOpen =
+      !currentOpen;
 
     setSidebarOpen(nextOpen);
 
@@ -319,45 +341,17 @@ export const SidebarUI = (() => {
     }
   }
 
+  /* =========================================================
+     AL ABRIR DROPDOWN:
+     SI SIDEBAR ESTÁ CERRADO -> ABRIR
+  ========================================================= */
   function ensureSidebarOpenForUserMenu() {
-    if (isShellHidden(AppCore)) {
-      return false;
-    }
-
-    const { sidebar } =
-      getElements(AppCore);
-
-    if (!sidebar) return false;
-
-    const mobile =
-      isMobileViewport(
-        MOBILE_BREAKPOINT
+    const isOpen =
+      Boolean(
+        AppCore?.state?.sidebarOpen
       );
 
-    const isCollapsedDesktop =
-      !mobile &&
-      (
-        sidebar.classList.contains(
-          "collapsed"
-        ) ||
-        sidebar.classList.contains(
-          "is-collapsed"
-        )
-      );
-
-    const isClosedMobile =
-      mobile &&
-      !sidebar.classList.contains(
-        "open"
-      ) &&
-      !sidebar.classList.contains(
-        "is-open"
-      );
-
-    if (
-      isCollapsedDesktop ||
-      isClosedMobile
-    ) {
+    if (!isOpen) {
       openSidebar();
       return true;
     }
@@ -365,6 +359,9 @@ export const SidebarUI = (() => {
     return false;
   }
 
+  /* =========================================================
+     SOLO MOBILE AUTO CLOSE
+  ========================================================= */
   function closeSidebarOnMobileAfterNavigation() {
     if (
       isMobileViewport(
@@ -376,7 +373,7 @@ export const SidebarUI = (() => {
   }
 
   /* =========================================================
-     ROLE VISIBILITY
+     VISIBILITY
   ========================================================= */
   function applyRoleVisibility() {
     refreshSidebarDomRefs();
@@ -413,9 +410,6 @@ export const SidebarUI = (() => {
   function init() {
     if (initialized) {
       refreshSidebarDomRefs();
-      sanitizeFooterTooltipState(
-        AppCore
-      );
       syncSidebarState();
       renderUser();
       applyRoleVisibility();
@@ -427,7 +421,7 @@ export const SidebarUI = (() => {
 
     if (!hasSidebarShell(AppCore)) {
       AppCore?.utils?.warn?.(
-        "No se pudo montar .sidebar desde SidebarUI."
+        "No se pudo montar sidebar."
       );
 
       return api;
@@ -437,21 +431,18 @@ export const SidebarUI = (() => {
       AppCore
     );
 
-    if (
-      typeof AppCore.state
-        .sidebarOpen !== "boolean"
-    ) {
-      AppCore.state.sidebarOpen =
-        !getSavedSidebarCollapsed();
-    }
+    /* =====================================
+       FIX DEFINITIVO:
+       siempre abierto al arrancar
+    ===================================== */
+    AppCore.state.sidebarOpen =
+      true;
 
     syncSidebarState();
     renderUser();
     applyRoleVisibility();
     closeDropdown();
 
-    /* compatibilidad extra:
-       si existe syncUserUI global, ahora ya tiene refs válidas */
     if (
       typeof AppCore.syncUserUI ===
       "function"
@@ -460,7 +451,9 @@ export const SidebarUI = (() => {
     }
 
     const scope =
-      AppCore.cleanup.scope(SCOPE);
+      AppCore.cleanup.scope(
+        SCOPE
+      );
 
     bindDomEvents({
       AppCore,
@@ -522,10 +515,6 @@ export const SidebarUI = (() => {
       {
         initialized: true,
       }
-    );
-
-    AppCore?.utils?.log?.(
-      "SidebarUI inicializado correctamente."
     );
 
     return api;

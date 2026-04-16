@@ -2,11 +2,18 @@
    Onion SPA - Core Storage
    Archivo: src/core/storage.js
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - encapsular acceso localStorage namespaced
    - leer / escribir valores serializados y raw
    - borrar claves legacy de sesión
    - limpiar namespace completo app
+
+   HARDENING EXTREMO:
+   - guard browser robusto
+   - JSON seguro
+   - fallback silencioso ante quota/private mode
+   - protección contra "undefined"/"null" corruptos
+   - namespace estable
 ========================================================= */
 
 import { config } from "./config.js";
@@ -18,12 +25,42 @@ import {
 } from "./helpers.js";
 
 /* =========================================================
+   INTERNAL
+========================================================= */
+
+function getStorage() {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  try {
+    return window.localStorage || null;
+  } catch {
+    return null;
+  }
+}
+
+function safeString(value) {
+  return String(value ?? "");
+}
+
+function isCorruptedRawValue(raw) {
+  return (
+    raw === "undefined" ||
+    raw === "null"
+  );
+}
+
+/* =========================================================
    LEGACY CLEANUP
 ========================================================= */
+
 export function removeLegacySessionKeys(
   utils
 ) {
-  if (!isBrowser()) {
+  const storage = getStorage();
+
+  if (!storage) {
     return;
   }
 
@@ -32,9 +69,7 @@ export function removeLegacySessionKeys(
       config.legacyStorageKeys || {}
     ).forEach((key) => {
       if (key) {
-        localStorage.removeItem(
-          key
-        );
+        storage.removeItem(key);
       }
     });
   } catch (error) {
@@ -55,15 +90,14 @@ export function removeLegacySessionKeys(
 /* =========================================================
    STORAGE FACTORY
 ========================================================= */
+
 export function createStorage(
   utils
 ) {
   function getNamespacedKey(
     key
   ) {
-    return buildStorageKey(
-      key
-    );
+    return buildStorageKey(key);
   }
 
   return {
@@ -74,19 +108,22 @@ export function createStorage(
       key,
       fallback = null
     ) {
-      if (!isBrowser()) {
+      const storage = getStorage();
+
+      if (!storage) {
         return fallback;
       }
 
       try {
         const raw =
-          localStorage.getItem(
-            getNamespacedKey(
-              key
-            )
+          storage.getItem(
+            getNamespacedKey(key)
           );
 
-        if (raw === null) {
+        if (
+          raw === null ||
+          isCorruptedRawValue(raw)
+        ) {
           return fallback;
         }
 
@@ -111,21 +148,26 @@ export function createStorage(
       key,
       fallback = null
     ) {
-      if (!isBrowser()) {
+      const storage = getStorage();
+
+      if (!storage) {
         return fallback;
       }
 
       try {
         const raw =
-          localStorage.getItem(
-            getNamespacedKey(
-              key
-            )
+          storage.getItem(
+            getNamespacedKey(key)
           );
 
-        return raw === null
-          ? fallback
-          : raw;
+        if (
+          raw === null ||
+          isCorruptedRawValue(raw)
+        ) {
+          return fallback;
+        }
+
+        return raw;
       } catch (error) {
         utils?.warn?.(
           `No se pudo leer storage raw: ${key}`,
@@ -143,18 +185,16 @@ export function createStorage(
       key,
       value
     ) {
-      if (!isBrowser()) {
+      const storage = getStorage();
+
+      if (!storage) {
         return false;
       }
 
       try {
-        localStorage.setItem(
-          getNamespacedKey(
-            key
-          ),
-          JSON.stringify(
-            value
-          )
+        storage.setItem(
+          getNamespacedKey(key),
+          JSON.stringify(value)
         );
 
         return true;
@@ -175,18 +215,16 @@ export function createStorage(
       key,
       value
     ) {
-      if (!isBrowser()) {
+      const storage = getStorage();
+
+      if (!storage) {
         return false;
       }
 
       try {
-        localStorage.setItem(
-          getNamespacedKey(
-            key
-          ),
-          String(
-            value
-          )
+        storage.setItem(
+          getNamespacedKey(key),
+          safeString(value)
         );
 
         return true;
@@ -206,15 +244,15 @@ export function createStorage(
     remove(
       key
     ) {
-      if (!isBrowser()) {
+      const storage = getStorage();
+
+      if (!storage) {
         return false;
       }
 
       try {
-        localStorage.removeItem(
-          getNamespacedKey(
-            key
-          )
+        storage.removeItem(
+          getNamespacedKey(key)
         );
 
         return true;
@@ -234,16 +272,16 @@ export function createStorage(
     has(
       key
     ) {
-      if (!isBrowser()) {
+      const storage = getStorage();
+
+      if (!storage) {
         return false;
       }
 
       try {
         return (
-          localStorage.getItem(
-            getNamespacedKey(
-              key
-            )
+          storage.getItem(
+            getNamespacedKey(key)
           ) !== null
         );
       } catch {
@@ -255,7 +293,9 @@ export function createStorage(
        CLEAR ALL APP NAMESPACE
     ============================================== */
     clearAll() {
-      if (!isBrowser()) {
+      const storage = getStorage();
+
+      if (!storage) {
         return false;
       }
 
@@ -268,14 +308,11 @@ export function createStorage(
 
         for (
           let i = 0;
-          i <
-          localStorage.length;
+          i < storage.length;
           i += 1
         ) {
           const currentKey =
-            localStorage.key(
-              i
-            );
+            storage.key(i);
 
           if (
             currentKey &&
@@ -291,9 +328,7 @@ export function createStorage(
 
         keysToRemove.forEach(
           (key) => {
-            localStorage.removeItem(
-              key
-            );
+            storage.removeItem(key);
           }
         );
 

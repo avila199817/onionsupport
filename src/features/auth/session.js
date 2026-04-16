@@ -18,6 +18,8 @@
    - helpers enterprise
    - cero estados partidos
    - emisiones sólo cuando cambian datos
+   - fingerprint robusto
+   - token/user desacoplados sin corrupción
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -101,29 +103,33 @@ function resolveRoleFromUser(
     user?.role ??
       user?.rol ??
       user?.type ??
+      user?.perfil ??
       "",
     ""
   ).toLowerCase();
+}
+
+function resolveAuthenticated(
+  state
+) {
+  return Boolean(
+    safeText(
+      state?.token
+    )
+  );
 }
 
 function syncDerivedState() {
   const state =
     ensureCoreState();
 
-  const token =
-    safeText(
-      state.token,
-      ""
+  state.authenticated =
+    resolveAuthenticated(
+      state
     );
 
-  const hasToken =
-    Boolean(token);
-
-  state.authenticated =
-    hasToken;
-
   state.role =
-    hasToken
+    state.authenticated
       ? resolveRoleFromUser(
           state.user
         )
@@ -138,6 +144,23 @@ function safeSyncUserUI() {
   } catch {}
 }
 
+function safeSetState(
+  patch = {}
+) {
+  try {
+    AppCore?.setState?.(
+      patch
+    );
+  } catch {}
+
+  try {
+    Object.assign(
+      ensureCoreState(),
+      patch
+    );
+  } catch {}
+}
+
 function safeSetToken(
   token = null
 ) {
@@ -145,19 +168,18 @@ function safeSetToken(
     typeof AppCore?.setToken ===
     "function"
   ) {
-    AppCore.setToken(
-      token || null
-    );
-    return;
+    try {
+      AppCore.setToken(
+        token || null
+      );
+      return;
+    } catch {}
   }
 
-  const state =
-    ensureCoreState();
-
-  state.token =
-    token || null;
-
-  syncDerivedState();
+  safeSetState({
+    token:
+      token || null,
+  });
 }
 
 function safeSetUser(
@@ -167,19 +189,18 @@ function safeSetUser(
     typeof AppCore?.setUser ===
     "function"
   ) {
-    AppCore.setUser(
-      user || null
-    );
-    return;
+    try {
+      AppCore.setUser(
+        user || null
+      );
+      return;
+    } catch {}
   }
 
-  const state =
-    ensureCoreState();
-
-  state.user =
-    user || null;
-
-  syncDerivedState();
+  safeSetState({
+    user:
+      user || null,
+  });
 }
 
 function safeClearSession() {
@@ -187,18 +208,19 @@ function safeClearSession() {
     typeof AppCore?.clearSession ===
     "function"
   ) {
-    AppCore.clearSession();
-    return;
+    try {
+      AppCore.clearSession();
+      return;
+    } catch {}
   }
 
-  const state =
-    ensureCoreState();
-
-  state.token = null;
-  state.user = null;
-  state.role = "";
-  state.authenticated =
-    false;
+  safeSetState({
+    token: null,
+    user: null,
+    role: "",
+    authenticated:
+      false,
+  });
 }
 
 function getCurrentStateSnapshotBase() {
@@ -234,15 +256,27 @@ function buildSessionFingerprint(
   return JSON.stringify({
     authenticated:
       Boolean(
-        snapshot?.authenticated
+        snapshot.authenticated
       ),
     token:
       safeText(
-        snapshot?.token
+        snapshot.token
       ),
     role:
       safeText(
-        snapshot?.role
+        snapshot.role
+      ),
+    refreshToken:
+      safeText(
+        snapshot.refreshToken
+      ),
+    sessionId:
+      safeText(
+        snapshot.sessionId
+      ),
+    sessionUserId:
+      safeText(
+        snapshot.sessionUserId
       ),
     userId:
       user.id ||
@@ -254,18 +288,6 @@ function buildSessionFingerprint(
       user.userName ||
       user.email ||
       null,
-    refreshToken:
-      safeText(
-        snapshot?.refreshToken
-      ),
-    sessionId:
-      safeText(
-        snapshot?.sessionId
-      ),
-    sessionUserId:
-      safeText(
-        snapshot?.sessionUserId
-      ),
   });
 }
 
@@ -279,7 +301,6 @@ function emitSessionState({
     "auth:session:state",
     {
       reason,
-      durationMs,
       before,
       after,
       changed:
@@ -289,10 +310,11 @@ function emitSessionState({
         buildSessionFingerprint(
           after
         ),
-      at:
-        new Date().toISOString(),
+      durationMs,
       timestamp:
         nowMs(),
+      at:
+        new Date().toISOString(),
     }
   );
 }
@@ -346,7 +368,9 @@ export function applySession({
   const normalizedUser =
     user === undefined
       ? undefined
-      : normalizeUser(user);
+      : normalizeUser(
+          user
+        );
 
   /* token primero */
   if (
@@ -367,7 +391,7 @@ export function applySession({
     );
   }
 
-  /* auxiliares */
+  /* persistencia */
   if (
     refreshToken !==
     undefined
@@ -388,26 +412,26 @@ export function applySession({
     );
   }
 
+  const effectiveUser =
+    normalizedUser ===
+    undefined
+      ? ensureCoreState()
+          .user || null
+      : normalizedUser;
+
   if (
     sessionData !==
     undefined
   ) {
     persistSessionContext(
-      sessionData || null,
-      normalizedUser ===
-        undefined
-        ? AppCore?.state
-            ?.user || null
-        : normalizedUser
+      sessionData ||
+        null,
+      effectiveUser
     );
   }
 
   persistAuxSessionData(
-    normalizedUser ===
-      undefined
-      ? AppCore?.state
-          ?.user || null
-      : normalizedUser
+    effectiveUser
   );
 
   syncDerivedState();
@@ -438,6 +462,11 @@ export function applySession({
       "auth:session:applied",
       after
     );
+
+    safeEmit(
+      "app:user:change",
+      after
+    );
   }
 
   return after;
@@ -461,8 +490,12 @@ export function clearSessionLocal(
     buildSessionSnapshot();
 
   const hadData =
-    Boolean(before.token) ||
-    Boolean(before.user) ||
+    Boolean(
+      before.token
+    ) ||
+    Boolean(
+      before.user
+    ) ||
     Boolean(
       before.refreshToken
     ) ||
@@ -485,18 +518,27 @@ export function clearSessionLocal(
     buildSessionSnapshot();
 
   if (
-    !safeBool(silent) &&
+    !safeBool(
+      silent
+    ) &&
     hadData
   ) {
     safeEmit(
       "auth:session:cleared",
       after
     );
+
+    safeEmit(
+      "app:user:change",
+      after
+    );
   }
 
   emitSessionState({
     reason:
-      safeBool(silent)
+      safeBool(
+        silent
+      )
         ? "clear:silent"
         : "clear",
     before,
@@ -528,13 +570,11 @@ export function isAuthenticated() {
 }
 
 export function getCurrentRole() {
-  const state =
-    ensureCoreState();
-
   syncDerivedState();
 
   return safeText(
-    state.role
+    ensureCoreState()
+      .role
   ).toLowerCase();
 }
 
@@ -581,7 +621,8 @@ export function requireRole(
 export function getAuthHeader() {
   const token =
     safeText(
-      AppCore?.state?.token
+      ensureCoreState()
+        .token
     );
 
   if (!token) {
@@ -648,3 +689,16 @@ export function buildAuthErrorPayload(
       ),
   };
 }
+
+export default {
+  applySession,
+  clearSessionLocal,
+  buildSessionSnapshot,
+  isAuthenticated,
+  getCurrentRole,
+  hasRole,
+  requireRole,
+  getAuthHeader,
+  getSessionDebugSnapshot,
+  buildAuthErrorPayload,
+};

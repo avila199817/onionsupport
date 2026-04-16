@@ -9,12 +9,14 @@
    - tolerancia config heterogénea
    - salida estable para Router
 
-   HARDENING:
+   HARDENING EXTREMO:
    - rutas públicas por defecto
    - normalización robusta de roles
    - soporte meta.requiresAuth / guestOnly / roles
    - redirects consistentes
    - prioridad clara entre auth / guest / roles
+   - compatibilidad route.public / route.private / meta.public
+   - fallback seguro si Auth falla
 ========================================================= */
 
 import {
@@ -57,6 +59,14 @@ function normalizeRoles(value) {
     .filter(Boolean);
 }
 
+function routeMeta(route) {
+  return route?.meta &&
+    typeof route.meta ===
+      "object"
+    ? route.meta
+    : {};
+}
+
 function getUserRole(AppCore) {
   return normalizeRole(
     AppCore?.state?.role ||
@@ -88,12 +98,27 @@ function isAuthenticated(
   );
 }
 
-function routeMeta(route) {
-  return route?.meta &&
-    typeof route.meta ===
-      "object"
-    ? route.meta
-    : {};
+function isRouteExplicitlyPublic(
+  route
+) {
+  const meta =
+    routeMeta(route);
+
+  if (
+    typeof route?.public ===
+    "boolean"
+  ) {
+    return route.public;
+  }
+
+  if (
+    typeof meta.public ===
+    "boolean"
+  ) {
+    return meta.public;
+  }
+
+  return false;
 }
 
 function getRouteRoles(route) {
@@ -116,13 +141,49 @@ function routeRequiresAuth(
   const meta =
     routeMeta(route);
 
-  return Boolean(
-    route?.requiresAuth ??
-      route?.private ??
-      meta.requiresAuth ??
-      meta.private ??
-      false
-  );
+  if (
+    typeof route?.requiresAuth ===
+    "boolean"
+  ) {
+    return route.requiresAuth;
+  }
+
+  if (
+    typeof route?.private ===
+    "boolean"
+  ) {
+    return route.private;
+  }
+
+  if (
+    typeof meta.requiresAuth ===
+    "boolean"
+  ) {
+    return meta.requiresAuth;
+  }
+
+  if (
+    typeof meta.private ===
+    "boolean"
+  ) {
+    return meta.private;
+  }
+
+  if (
+    getRouteRoles(route).length > 0
+  ) {
+    return true;
+  }
+
+  if (
+    isRouteExplicitlyPublic(
+      route
+    )
+  ) {
+    return false;
+  }
+
+  return false;
 }
 
 function routeGuestOnly(route) {
@@ -153,6 +214,42 @@ function getAuthenticatedRedirectTarget(
   );
 }
 
+function buildAllowResult({
+  route,
+  canonicalPath,
+  getRoute,
+} = {}) {
+  return {
+    allowed: true,
+    reason: null,
+    route: route || null,
+    redirectTo: null,
+    canonicalPath,
+    getRoute:
+      typeof getRoute ===
+      "function"
+        ? getRoute
+        : null,
+  };
+}
+
+function buildDenyResult({
+  reason,
+  route,
+  redirectTo = null,
+  canonicalPath,
+} = {}) {
+  return {
+    allowed: false,
+    reason:
+      reason || "blocked",
+    route: route || null,
+    redirectTo:
+      redirectTo || null,
+    canonicalPath,
+  };
+}
+
 /* =========================================================
    MAIN
 ========================================================= */
@@ -178,13 +275,11 @@ export function shouldAllowRoute({
   /* ruta inexistente:
      no bloquear aquí */
   if (!route) {
-    return {
-      allowed: true,
-      reason: null,
+    return buildAllowResult({
       route: null,
-      redirectTo: null,
       canonicalPath,
-    };
+      getRoute,
+    });
   }
 
   const logged =
@@ -196,11 +291,6 @@ export function shouldAllowRoute({
   const currentRole =
     getUserRole(AppCore);
 
-  const requiresAuth =
-    routeRequiresAuth(
-      route
-    );
-
   const guestOnly =
     routeGuestOnly(
       route
@@ -209,13 +299,17 @@ export function shouldAllowRoute({
   const allowedRoles =
     getRouteRoles(route);
 
+  const requiresAuth =
+    routeRequiresAuth(
+      route
+    );
+
   /* guest only */
   if (
     guestOnly &&
     logged
   ) {
-    return {
-      allowed: false,
+    return buildDenyResult({
       reason:
         "already-authenticated",
       route,
@@ -226,7 +320,7 @@ export function shouldAllowRoute({
           getRoute
         ) || routeNames.HOME,
       canonicalPath,
-    };
+    });
   }
 
   /* requires auth */
@@ -234,48 +328,43 @@ export function shouldAllowRoute({
     requiresAuth &&
     !logged
   ) {
-    return {
-      allowed: false,
+    return buildDenyResult({
       reason:
         "not-authenticated",
       route,
       redirectTo:
         routeNames.LOGIN,
       canonicalPath,
-    };
+    });
   }
 
-  /* si define roles y no está logueado */
+  /* roles y no logueado */
   if (
-    allowedRoles.length >
-      0 &&
+    allowedRoles.length > 0 &&
     !logged
   ) {
-    return {
-      allowed: false,
+    return buildDenyResult({
       reason:
         "not-authenticated",
       route,
       redirectTo:
         routeNames.LOGIN,
       canonicalPath,
-    };
+    });
   }
 
-  /* roles */
+  /* roles y logueado */
   if (
-    allowedRoles.length >
-      0 &&
+    allowedRoles.length > 0 &&
     logged
   ) {
-    const ok =
+    const hasAllowedRole =
       allowedRoles.includes(
         currentRole
       );
 
-    if (!ok) {
-      return {
-        allowed: false,
+    if (!hasAllowedRole) {
+      return buildDenyResult({
         reason:
           "insufficient-role",
         route,
@@ -283,20 +372,17 @@ export function shouldAllowRoute({
           route.redirectForbidden ||
           null,
         canonicalPath,
-      };
+      });
     }
   }
 
-  return {
-    allowed: true,
-    reason: null,
+  return buildAllowResult({
     route,
-    redirectTo: null,
     canonicalPath,
-    getRoute:
-      typeof getRoute ===
-      "function"
-        ? getRoute
-        : null,
-  };
+    getRoute,
+  });
 }
+
+export default {
+  shouldAllowRoute,
+};

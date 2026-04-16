@@ -7,11 +7,14 @@
    - composición de submódulos internos
    - API pública del sidebar
    - init seguro una sola vez
+   - sidebar limpio sin server-nav legacy
+   - rehidratar referencias DOM del sidebar tras mount
+   - sincronizar avatar/nombre también en AppCore.dom para compatibilidad
 ========================================================= */
 
-import { AppCore } from "../../core/core.js";
-import { Auth } from "../../features/auth.js";
-import { Router } from "../../router/router.js";
+import { AppCore } from "../../core/index.js";
+import { Auth } from "../../features/auth/index.js";
+import { Router } from "../../router/index.js";
 
 import {
   SCOPE,
@@ -33,12 +36,8 @@ import {
   getUsername,
   getAvatarText,
   getAvatarUrl,
-  isAdmin,
-} from "./user.js";
-
-import {
   renderAvatarImage,
-} from "./avatar.js";
+} from "./user.js";
 
 import {
   getSavedSidebarCollapsed,
@@ -46,14 +45,10 @@ import {
   isMobileViewport,
   updateToggleLabel,
   syncSidebarState as syncSidebarStateBase,
+  getDesiredSidebarOpenState,
 } from "./state.js";
 
 import {
-  ensureServerNavItem,
-} from "./server-nav.js";
-
-import {
-  setDropdownOpen,
   openDropdown as openDropdownBase,
   closeDropdown as closeDropdownBase,
   toggleDropdown as toggleDropdownBase,
@@ -82,8 +77,88 @@ export const SidebarUI = (() => {
     dropdownOpen: false,
   };
 
+  /* =========================================================
+     INTERNAL FLAGS
+  ========================================================= */
+  function setLogoutInFlight(value) {
+    logoutInFlight = Boolean(value);
+  }
+
+  function isLogoutInFlight() {
+    return Boolean(logoutInFlight);
+  }
+
+  /* =========================================================
+     DOM REFS SYNC
+     Muy importante:
+     - AppCore.cacheDom() corre antes de montar el sidebar
+     - aquí rehidratamos refs para que AppCore.syncUserUI() funcione
+  ========================================================= */
+  function syncSidebarDomIntoAppCore() {
+    const elements =
+      getElements(AppCore);
+
+    AppCore.dom.sidebar =
+      elements.sidebar || AppCore.dom.sidebar || null;
+
+    AppCore.dom.sidebarMenu =
+      elements.sidebarMenu || AppCore.dom.sidebarMenu || null;
+
+    AppCore.dom.sidebarAvatar =
+      elements.avatarEl || AppCore.dom.sidebarAvatar || null;
+
+    AppCore.dom.sidebarName =
+      elements.nameEl || AppCore.dom.sidebarName || null;
+
+    AppCore.dom.userToggle =
+      elements.userToggle || AppCore.dom.userToggle || null;
+
+    AppCore.dom.userDropdown =
+      elements.userDropdown || AppCore.dom.userDropdown || null;
+
+    AppCore.dom.logoutBtn =
+      elements.logoutBtn || AppCore.dom.logoutBtn || null;
+
+    AppCore.dom.sidebarToggle =
+      elements.sidebarToggle || AppCore.dom.sidebarToggle || null;
+
+    AppCore.dom.sidebarMobileToggle =
+      elements.sidebarMobileToggle || AppCore.dom.sidebarMobileToggle || null;
+  }
+
+  function refreshSidebarDomRefs() {
+    cacheDomRefs(AppCore);
+    syncSidebarDomIntoAppCore();
+  }
+
+  /* =========================================================
+     ROLE HELPERS
+  ========================================================= */
+  function isAdmin() {
+    const role =
+      AppCore?.state?.role ||
+      AppCore?.state?.user?.role ||
+      AppCore?.state?.user?.rol ||
+      "";
+
+    return String(role)
+      .trim()
+      .toLowerCase() === "admin";
+  }
+
+  /* =========================================================
+     USER RENDER
+  ========================================================= */
   function renderUser() {
-    const { nameEl, avatarEl, userToggle, userDropdown } = getElements(AppCore);
+    refreshSidebarDomRefs();
+
+    const {
+      nameEl,
+      avatarEl,
+      userToggle,
+      userDropdown,
+    } = getElements(AppCore);
+
     const user = getUser(AppCore);
 
     const displayName = getDisplayName(AppCore, user);
@@ -105,7 +180,22 @@ export const SidebarUI = (() => {
     }
 
     if (avatarEl) {
-      renderAvatarImage(avatarEl, avatarUrl, displayName, avatarText);
+      renderAvatarImage(
+        avatarEl,
+        avatarUrl,
+        displayName,
+        avatarText
+      );
+
+      avatarEl.setAttribute(
+        "title",
+        displayName
+      );
+
+      avatarEl.setAttribute(
+        "aria-label",
+        `Avatar de ${displayName}`
+      );
 
       if (username) {
         avatarEl.dataset.username = username;
@@ -119,6 +209,7 @@ export const SidebarUI = (() => {
         "aria-label",
         `Abrir menú de usuario de ${displayName}`
       );
+
       userToggle.removeAttribute("data-tooltip");
       userToggle.removeAttribute("title");
     }
@@ -130,36 +221,69 @@ export const SidebarUI = (() => {
 
     sanitizeFooterTooltipState(AppCore);
 
-    AppCore.events.emit("sidebar:user:rendered", {
-      user,
-      displayName,
-      avatarText,
-      avatarUrl: avatarUrl || null,
-      username: username || null,
-    });
+    AppCore?.events?.emit?.(
+      "sidebar:user:rendered",
+      {
+        user,
+        displayName,
+        avatarText,
+        avatarUrl: avatarUrl || null,
+        username: username || null,
+      }
+    );
   }
 
+  /* =========================================================
+     DROPDOWN
+  ========================================================= */
   function closeDropdown() {
-    return closeDropdownBase(AppCore, state);
+    return closeDropdownBase(
+      AppCore,
+      state
+    );
   }
 
   function openDropdown() {
     if (isShellHidden(AppCore)) return;
-    ensureSidebarOpenForUserMenu();
-    return openDropdownBase(AppCore, state, ensureSidebarOpenForUserMenu);
+
+    refreshSidebarDomRefs();
+
+    return openDropdownBase(
+      AppCore,
+      state,
+      ensureSidebarOpenForUserMenu
+    );
   }
 
   function toggleDropdown() {
-    return toggleDropdownBase(AppCore, state, ensureSidebarOpenForUserMenu);
+    refreshSidebarDomRefs();
+
+    return toggleDropdownBase(
+      AppCore,
+      state,
+      ensureSidebarOpenForUserMenu
+    );
   }
 
+  /* =========================================================
+     SIDEBAR STATE
+  ========================================================= */
   function syncSidebarState() {
-    return syncSidebarStateBase(AppCore, closeDropdown);
+    refreshSidebarDomRefs();
+
+    return syncSidebarStateBase(
+      AppCore,
+      closeDropdown
+    );
   }
 
   function setSidebarOpen(open) {
     const nextOpen = Boolean(open);
-    const mobile = isMobileViewport(MOBILE_BREAKPOINT);
+
+    const mobile =
+      isMobileViewport(
+        MOBILE_BREAKPOINT
+      );
 
     AppCore.state.sidebarOpen = nextOpen;
 
@@ -182,7 +306,10 @@ export const SidebarUI = (() => {
   function toggleSidebar() {
     if (isShellHidden(AppCore)) return;
 
-    const currentOpen = Boolean(AppCore.state.sidebarOpen);
+    const currentOpen = Boolean(
+      AppCore.state.sidebarOpen
+    );
+
     const nextOpen = !currentOpen;
 
     setSidebarOpen(nextOpen);
@@ -193,24 +320,44 @@ export const SidebarUI = (() => {
   }
 
   function ensureSidebarOpenForUserMenu() {
-    if (isShellHidden(AppCore)) return false;
+    if (isShellHidden(AppCore)) {
+      return false;
+    }
 
-    const { sidebar } = getElements(AppCore);
+    const { sidebar } =
+      getElements(AppCore);
+
     if (!sidebar) return false;
 
-    const mobile = isMobileViewport(MOBILE_BREAKPOINT);
+    const mobile =
+      isMobileViewport(
+        MOBILE_BREAKPOINT
+      );
 
     const isCollapsedDesktop =
       !mobile &&
-      (sidebar.classList.contains("collapsed") ||
-        sidebar.classList.contains("is-collapsed"));
+      (
+        sidebar.classList.contains(
+          "collapsed"
+        ) ||
+        sidebar.classList.contains(
+          "is-collapsed"
+        )
+      );
 
     const isClosedMobile =
       mobile &&
-      !sidebar.classList.contains("open") &&
-      !sidebar.classList.contains("is-open");
+      !sidebar.classList.contains(
+        "open"
+      ) &&
+      !sidebar.classList.contains(
+        "is-open"
+      );
 
-    if (isCollapsedDesktop || isClosedMobile) {
+    if (
+      isCollapsedDesktop ||
+      isClosedMobile
+    ) {
       openSidebar();
       return true;
     }
@@ -219,40 +366,56 @@ export const SidebarUI = (() => {
   }
 
   function closeSidebarOnMobileAfterNavigation() {
-    if (isMobileViewport(MOBILE_BREAKPOINT)) {
+    if (
+      isMobileViewport(
+        MOBILE_BREAKPOINT
+      )
+    ) {
       closeSidebar();
     }
   }
 
+  /* =========================================================
+     ROLE VISIBILITY
+  ========================================================= */
   function applyRoleVisibility() {
-    return applyRoleVisibilityBase(AppCore, ensureServerNavItem, isAdmin);
+    refreshSidebarDomRefs();
+
+    return applyRoleVisibilityBase(
+      AppCore,
+      null,
+      isAdmin
+    );
   }
 
+  /* =========================================================
+     ACTIONS
+  ========================================================= */
   async function handleLogout() {
-    if (logoutInFlight) return;
-    logoutInFlight = true;
-
-    try {
-      await handleLogoutBase({
-        AppCore,
-        Auth,
-        Router,
-        closeDropdown,
-        renderUser,
-        applyRoleVisibility,
-        closeSidebarOnMobileAfterNavigation,
-        getElements: () => getElements(AppCore),
-      });
-    } finally {
-      logoutInFlight = false;
-    }
+    return handleLogoutBase({
+      AppCore,
+      Auth,
+      Router,
+      closeDropdown,
+      renderUser,
+      applyRoleVisibility,
+      closeSidebarOnMobileAfterNavigation,
+      getElements: () =>
+        getElements(AppCore),
+      setLogoutInFlight,
+      isLogoutInFlight,
+    });
   }
 
+  /* =========================================================
+     INIT
+  ========================================================= */
   function init() {
     if (initialized) {
-      cacheDomRefs(AppCore);
-      ensureServerNavItem(AppCore, isAdmin);
-      sanitizeFooterTooltipState(AppCore);
+      refreshSidebarDomRefs();
+      sanitizeFooterTooltipState(
+        AppCore
+      );
       syncSidebarState();
       renderUser();
       applyRoleVisibility();
@@ -260,18 +423,26 @@ export const SidebarUI = (() => {
     }
 
     mountSidebar(AppCore);
-    cacheDomRefs(AppCore);
+    refreshSidebarDomRefs();
 
     if (!hasSidebarShell(AppCore)) {
-      AppCore.utils.warn?.("No se pudo montar .sidebar desde SidebarUI.");
+      AppCore?.utils?.warn?.(
+        "No se pudo montar .sidebar desde SidebarUI."
+      );
+
       return api;
     }
 
-    ensureServerNavItem(AppCore, isAdmin);
-    sanitizeFooterTooltipState(AppCore);
+    sanitizeFooterTooltipState(
+      AppCore
+    );
 
-    if (typeof AppCore.state.sidebarOpen !== "boolean") {
-      AppCore.state.sidebarOpen = !getSavedSidebarCollapsed();
+    if (
+      typeof AppCore.state
+        .sidebarOpen !== "boolean"
+    ) {
+      AppCore.state.sidebarOpen =
+        !getSavedSidebarCollapsed();
     }
 
     syncSidebarState();
@@ -279,7 +450,17 @@ export const SidebarUI = (() => {
     applyRoleVisibility();
     closeDropdown();
 
-    const scope = AppCore.cleanup.scope(SCOPE);
+    /* compatibilidad extra:
+       si existe syncUserUI global, ahora ya tiene refs válidas */
+    if (
+      typeof AppCore.syncUserUI ===
+      "function"
+    ) {
+      AppCore.syncUserUI();
+    }
+
+    const scope =
+      AppCore.cleanup.scope(SCOPE);
 
     bindDomEvents({
       AppCore,
@@ -291,11 +472,22 @@ export const SidebarUI = (() => {
       handleLogout,
       toggleSidebar,
       toggleDropdown,
+      openDropdown,
       closeDropdown,
       closeSidebar,
+      closeSidebarOnMobileAfterNavigation,
       syncSidebarState,
-      getElements: () => getElements(AppCore),
-      isMobileViewport: () => isMobileViewport(MOBILE_BREAKPOINT),
+      getElements: () =>
+        getElements(AppCore),
+      isMobileViewport: () =>
+        isMobileViewport(
+          MOBILE_BREAKPOINT
+        ),
+      getDesiredSidebarOpenState:
+        () =>
+          getDesiredSidebarOpenState(
+            AppCore
+          ),
     });
 
     bindCoreEvents({
@@ -307,7 +499,6 @@ export const SidebarUI = (() => {
       api,
       renderUser,
       applyRoleVisibility,
-      ensureServerNavItem: () => ensureServerNavItem(AppCore, isAdmin),
       syncSidebarState,
       closeDropdown,
       closeSidebarOnMobileAfterNavigation,
@@ -315,18 +506,34 @@ export const SidebarUI = (() => {
 
     initialized = true;
 
-    if (!AppCore.modules.has("sidebar")) {
-      AppCore.modules.register("sidebar", api);
+    if (
+      !AppCore.modules.has(
+        "sidebar"
+      )
+    ) {
+      AppCore.modules.register(
+        "sidebar",
+        api
+      );
     }
 
-    AppCore.events.emit("sidebar:ready", {
-      initialized: true,
-    });
+    AppCore?.events?.emit?.(
+      "sidebar:ready",
+      {
+        initialized: true,
+      }
+    );
 
-    AppCore.utils.log?.("SidebarUI inicializado correctamente.");
+    AppCore?.utils?.log?.(
+      "SidebarUI inicializado correctamente."
+    );
+
     return api;
   }
 
+  /* =========================================================
+     PUBLIC API
+  ========================================================= */
   const api = {
     init,
     renderUser,
@@ -338,8 +545,8 @@ export const SidebarUI = (() => {
     openSidebar,
     closeSidebar,
     toggleSidebar,
-    updateToggleLabel: () => updateToggleLabel(AppCore),
-    ensureServerNavItem: () => ensureServerNavItem(AppCore, isAdmin),
+    updateToggleLabel: () =>
+      updateToggleLabel(AppCore),
     handleLogout,
   };
 

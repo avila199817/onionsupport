@@ -1,6 +1,6 @@
 /* =========================================================
    Onion SPA - Incidencias View
-   Archivo: src/views/incidencias/index.js
+   Archivo: src/views/incidencias/incidenciasView.js
 
    Responsabilidades:
    - punto de entrada de la vista incidencias
@@ -11,14 +11,15 @@
    - evitar doble bind de listeners
    - soportar destroy limpio del router
    - permitir reload con rerender
-   - compartir flujo robusto con vistas premium del sistema
+   - compartir flujo robusto con vistas premium
 
    HARDENING PRO:
-   - render inicial inmediato con estado actual
-   - carga posterior con rerender seguro
-   - anti-race con token de render
-   - cleanup sólido por scope
-   - tolerancia total a fallos de carga
+   - render inicial inmediato
+   - carga posterior segura
+   - anti-race token
+   - cleanup total
+   - bind sólido del modal open-ticket
+   - delegación de eventos premium
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -130,25 +131,166 @@ export const IncidenciasView = (() => {
     } catch {}
   }
 
+  /* =====================================================
+     CLICK DELEGATION PRO
+  ===================================================== */
+
+  function bindNativeActions(container) {
+    if (!container) {
+      return () => {};
+    }
+
+    const onClick = async (event) => {
+      const openBtn =
+        event.target.closest(
+          '[data-action="open-ticket"]'
+        );
+
+      if (openBtn) {
+        event.preventDefault();
+
+        const ticketId =
+          String(
+            openBtn.dataset.ticketId ||
+            ""
+          ).trim();
+
+        if (!ticketId) {
+          safeWarn(
+            "open-ticket sin ticketId"
+          );
+          return;
+        }
+
+        try {
+          await openTicket(ticketId);
+        } catch (error) {
+          safeWarn(
+            "openTicket falló:",
+            error
+          );
+        }
+
+        return;
+      }
+
+      const copyBtn =
+        event.target.closest(
+          '[data-action="copy-ticket-id"]'
+        );
+
+      if (copyBtn) {
+        event.preventDefault();
+
+        const value =
+          String(
+            copyBtn.dataset.ticketId ||
+            copyBtn.dataset.ticketCode ||
+            ""
+          ).trim();
+
+        if (!value) {
+          return;
+        }
+
+        try {
+          await navigator.clipboard.writeText(
+            value
+          );
+
+          AppCore?.toast?.success?.(
+            "ID copiado"
+          );
+        } catch {
+          try {
+            const temp =
+              document.createElement(
+                "textarea"
+              );
+
+            temp.value = value;
+            document.body.appendChild(
+              temp
+            );
+            temp.select();
+            document.execCommand(
+              "copy"
+            );
+            temp.remove();
+          } catch {}
+        }
+
+        return;
+      }
+    };
+
+    container.addEventListener(
+      "click",
+      onClick
+    );
+
+    return () => {
+      container.removeEventListener(
+        "click",
+        onClick
+      );
+    };
+  }
+
+  /* =====================================================
+     BIND
+  ===================================================== */
+
   function bind() {
     cleanupBindings();
 
-    const maybeCleanup =
-      bindIncidenciasEvents({
-        scope: SCOPE,
-        loadIncidencias,
-        openTicket,
-        rerender: render,
-        reload,
-      });
+    const container =
+      getContainer();
 
-    if (
-      typeof maybeCleanup ===
-      "function"
-    ) {
-      bindingsCleanup =
-        maybeCleanup;
+    const cleanups = [];
+
+    const nativeCleanup =
+      bindNativeActions(
+        container
+      );
+
+    cleanups.push(
+      nativeCleanup
+    );
+
+    try {
+      const maybeCleanup =
+        bindIncidenciasEvents({
+          scope: SCOPE,
+          loadIncidencias,
+          openTicket,
+          rerender: render,
+          reload,
+        });
+
+      if (
+        typeof maybeCleanup ===
+        "function"
+      ) {
+        cleanups.push(
+          maybeCleanup
+        );
+      }
+    } catch (error) {
+      safeWarn(
+        "bindIncidenciasEvents error:",
+        error
+      );
     }
+
+    bindingsCleanup =
+      () => {
+        for (const fn of cleanups) {
+          try {
+            fn?.();
+          } catch {}
+        }
+      };
   }
 
   function buildHtml() {
@@ -157,6 +299,7 @@ export const IncidenciasView = (() => {
     return `
       <section class="panel-content dashboard ready">
         <div class="content-wrapper">
+
           ${renderHeader({
             items,
             state: incidenciasState,
@@ -166,6 +309,7 @@ export const IncidenciasView = (() => {
             items,
             state: incidenciasState,
           })}
+
         </div>
       </section>
     `;
@@ -306,6 +450,7 @@ export const IncidenciasView = (() => {
     initialized = false;
 
     nextRenderToken();
+
     cleanupBindings();
 
     safeLog("destroy");

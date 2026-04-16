@@ -2,21 +2,21 @@
    Onion SPA - Core Request
    Archivo: src/core/request.js
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - parsear respuestas HTTP
-   - construir errores normalizados de request
+   - construir errores normalizados
    - decidir reintentos
    - ejecutar fetch con retry real
    - exponer request base y apiClient
-   - no duplicar setError / eventos en reintentos
+   - no duplicar setError / eventos en retries
 
-   HARDENING PRO:
-   - single emit final (sin duplicados en retries)
+   HARDENING EXTREMO:
+   - single emit final
    - timeout real con AbortController
    - merge signals robusto
-   - payload seguro
    - json/text/blob/arrayBuffer auto
-   - errores consistentes enterprise
+   - dedupe GET/HEAD
+   - retry enterprise con backoff+jitter
 ========================================================= */
 
 import { config } from "./config.js";
@@ -44,8 +44,12 @@ export async function parseResponseBody(
   responseType = "auto"
 ) {
   if (!response) return null;
-  if (response.status === 204) return null;
-  if (response.status === 205) return null;
+  if (
+    response.status === 204 ||
+    response.status === 205
+  ) {
+    return null;
+  }
 
   const contentType = String(
     response.headers?.get?.(
@@ -133,8 +137,8 @@ export function buildRequestError({
       method,
       timeout,
       aborted,
-      data,
       raw,
+      data,
       hints,
       message: timeout
         ? "La petición excedió el tiempo máximo."
@@ -146,7 +150,8 @@ export function buildRequestError({
 
   return {
     ok: false,
-    status: response.status,
+    status:
+      response.status,
     statusText:
       response.statusText ||
       "Request Error",
@@ -154,8 +159,8 @@ export function buildRequestError({
     method,
     timeout,
     aborted,
-    data,
     raw,
+    data,
     message:
       data?.message ||
       data?.error ||
@@ -208,12 +213,12 @@ export function shouldRetryRequest(
     return true;
   }
 
-  if (error?.status >= 500) {
+  if (error?.status === 429) {
     return true;
   }
 
   if (
-    error?.status === 429
+    error?.status >= 500
   ) {
     return true;
   }
@@ -250,7 +255,9 @@ export async function executeFetchWithRetry(
   let attempt = 0;
   let lastError = null;
 
-  while (attempt <= retries) {
+  while (
+    attempt <= retries
+  ) {
     try {
       return await fetchFactory(
         attempt
@@ -309,21 +316,24 @@ export async function executeFetchWithRetry(
             baseDelay
         );
 
+      const delayMs =
+        backoff + jitter;
+
       try {
         requestConfig?.onRetry?.({
           url,
-          error: normalized,
+          error:
+            normalized,
           attempt,
           nextAttempt:
             attempt + 1,
           retries,
-          delayMs:
-            backoff + jitter,
+          delayMs,
         });
       } catch {}
 
       await utils.sleep(
-        backoff + jitter
+        delayMs
       );
     }
 
@@ -345,10 +355,13 @@ export function createRequest({
   registry,
 }) {
   let requestSequence = 0;
+
   const inFlightRequests =
     new Map();
 
-  function stableStringify(value) {
+  function stableStringify(
+    value
+  ) {
     if (
       value === null ||
       value === undefined
@@ -357,15 +370,20 @@ export function createRequest({
     }
 
     if (
-      typeof value !== "object"
+      typeof value !==
+      "object"
     ) {
       return String(value);
     }
 
-    if (Array.isArray(value)) {
+    if (
+      Array.isArray(value)
+    ) {
       return `[${value
         .map((item) =>
-          stableStringify(item)
+          stableStringify(
+            item
+          )
         )
         .join(",")}]`;
     }
@@ -393,11 +411,14 @@ export function createRequest({
     return [
       method,
       url,
-      auth ? "auth" : "public",
+      auth
+        ? "auth"
+        : "public",
       stableStringify(
         headers || {}
       ),
-      typeof payload === "string"
+      typeof payload ===
+      "string"
         ? payload
         : stableStringify(
             payload
@@ -419,13 +440,16 @@ export function createRequest({
       method: "GET",
       headers: {},
       body: null,
-      auth: !isPublicApiPath(path),
+      auth: !isPublicApiPath(
+        path
+      ),
       timeout:
         config.requestTimeout,
       raw: false,
       responseType: "auto",
       query: null,
-      credentials: "omit",
+      credentials:
+        "omit",
       signal: null,
       retries:
         config.requestRetries,
@@ -492,7 +516,8 @@ export function createRequest({
     ) {
       finalHeaders[
         "Content-Type"
-      ] = "application/json";
+      ] =
+        "application/json";
     }
 
     const payload =
@@ -541,11 +566,6 @@ export function createRequest({
         requestFingerprint
       )
     ) {
-      const inFlight =
-        inFlightRequests.get(
-          requestFingerprint
-        );
-
       events?.emit?.(
         "app:request:deduped",
         {
@@ -557,7 +577,9 @@ export function createRequest({
         }
       );
 
-      return inFlight;
+      return inFlightRequests.get(
+        requestFingerprint
+      );
     }
 
     events?.emit?.(
@@ -588,11 +610,14 @@ export function createRequest({
           const response =
             await executeFetchWithRetry(
               url,
-              async (attempt = 0) => {
-                retryCount = Math.max(
-                  retryCount,
-                  attempt
-                );
+              async (
+                attempt = 0
+              ) => {
+                retryCount =
+                  Math.max(
+                    retryCount,
+                    attempt
+                  );
 
                 const {
                   controller,
@@ -617,7 +642,8 @@ export function createRequest({
                       method,
                       headers:
                         finalHeaders,
-                      body: payload,
+                      body:
+                        payload,
                       credentials:
                         requestConfig.credentials,
                       signal:
@@ -633,7 +659,9 @@ export function createRequest({
               {
                 ...requestConfig,
                 onRetry:
-                  (retryMeta) => {
+                  (
+                    retryMeta
+                  ) => {
                     events?.emit?.(
                       "app:request:retry",
                       {
@@ -667,8 +695,6 @@ export function createRequest({
                 method,
                 status:
                   response.status,
-                response:
-                  hookedRaw,
                 attempts:
                   retryCount + 1,
                 durationMs:
@@ -686,7 +712,9 @@ export function createRequest({
               requestConfig.responseType
             );
 
-          if (!response.ok) {
+          if (
+            !response.ok
+          ) {
             throw buildRequestError({
               response,
               data,
@@ -710,7 +738,8 @@ export function createRequest({
               method,
               status:
                 response.status,
-              data: hookedData,
+              data:
+                hookedData,
               attempts:
                 retryCount + 1,
               durationMs:
@@ -749,8 +778,10 @@ export function createRequest({
 
           normalized.requestId =
             requestId;
+
           normalized.durationMs =
-            Date.now() - startedAt;
+            Date.now() -
+            startedAt;
 
           setError?.(
             normalized
@@ -771,7 +802,9 @@ export function createRequest({
         }
       })();
 
-    if (requestFingerprint) {
+    if (
+      requestFingerprint
+    ) {
       inFlightRequests.set(
         requestFingerprint,
         requestPromise
@@ -781,7 +814,9 @@ export function createRequest({
     try {
       return await requestPromise;
     } finally {
-      if (requestFingerprint) {
+      if (
+        requestFingerprint
+      ) {
         inFlightRequests.delete(
           requestFingerprint
         );

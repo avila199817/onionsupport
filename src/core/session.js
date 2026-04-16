@@ -2,7 +2,7 @@
    Onion SPA - Core Session
    Archivo: src/core/session.js
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - cargar preferencias persistidas
    - cargar sesión persistida
    - sincronizar route/publicPath
@@ -16,6 +16,8 @@
    - setters idempotentes
    - sync UI estable
    - eventos consistentes
+   - preserve currentResolvedUsername
+   - route/publicPath sync sin degradar contexto
 ========================================================= */
 
 import { config } from "./config.js";
@@ -27,6 +29,7 @@ import {
   hasValidToken,
   getUserUsername,
   getThemeColor,
+  sanitizeUsername,
 } from "./helpers.js";
 
 import {
@@ -49,6 +52,21 @@ function resolveRole(user = null) {
   );
 }
 
+function resolveResolvedUsername(
+  state = {},
+  user = null
+) {
+  return (
+    sanitizeUsername(
+      state?.currentResolvedUsername ||
+        state?.resolvedUsername ||
+        getUserUsername(user) ||
+        getUserUsername(state?.user) ||
+        ""
+    ) || null
+  );
+}
+
 function syncAuthState(state) {
   state.authenticated =
     computeAuthenticated(
@@ -62,6 +80,17 @@ function syncAuthState(state) {
           state.user
         )
       : null;
+
+  if (!state.authenticated) {
+    state.currentResolvedUsername =
+      null;
+  } else {
+    state.currentResolvedUsername =
+      resolveResolvedUsername(
+        state,
+        state.user
+      );
+  }
 
   return state;
 }
@@ -97,6 +126,9 @@ function createSessionSnapshot(
       getUserUsername(
         state?.user
       ) || null,
+    currentResolvedUsername:
+      state?.currentResolvedUsername ||
+      null,
     cause,
     changedAt:
       new Date().toISOString(),
@@ -124,6 +156,56 @@ function userFingerprint(
     avatar:
       user.avatar || null,
   });
+}
+
+function syncRouteFields({
+  state,
+  setState,
+  route,
+  publicPath,
+} = {}) {
+  const nextCanonical =
+    normalizeCanonicalPath(
+      route ||
+        state?.route ||
+        "/"
+    );
+
+  const nextPublicPath =
+    normalizePath(
+      publicPath ||
+        state?.publicPath ||
+        nextCanonical
+    );
+
+  const resolvedUsername =
+    sanitizeUsername(
+      state?.currentResolvedUsername ||
+        getUserUsername(
+          state?.user
+        ) ||
+        ""
+    ) || null;
+
+  setState({
+    route: nextCanonical,
+    publicPath: nextPublicPath,
+    currentResolvedUsername:
+      resolvedUsername,
+  });
+
+  state.route = nextCanonical;
+  state.publicPath =
+    nextPublicPath;
+  state.currentResolvedUsername =
+    resolvedUsername;
+
+  return {
+    route: nextCanonical,
+    publicPath: nextPublicPath,
+    currentResolvedUsername:
+      resolvedUsername,
+  };
 }
 
 /* =========================================================
@@ -157,11 +239,18 @@ export function setRoute({
     route: normalized,
   });
 
+  state.lastRoute =
+    previousRoute;
+  state.route = normalized;
+
   events?.emit?.(
     "app:route:change",
     {
       route: normalized,
       previousRoute,
+      publicPath:
+        state?.publicPath ||
+        normalized,
     }
   );
 
@@ -169,18 +258,32 @@ export function setRoute({
 }
 
 export function setPublicPath({
+  state,
   storage,
   setState,
   events,
   path = "/",
 } = {}) {
+  const previousPublicPath =
+    state?.publicPath || "/";
+
   const normalized =
     normalizePath(path);
+
+  if (
+    previousPublicPath ===
+    normalized
+  ) {
+    return normalized;
+  }
 
   setState({
     publicPath:
       normalized,
   });
+
+  state.publicPath =
+    normalized;
 
   storage?.set?.(
     config.storageKeys
@@ -193,6 +296,9 @@ export function setPublicPath({
     {
       publicPath:
         normalized,
+      previousPublicPath,
+      route:
+        state?.route || "/",
     }
   );
 
@@ -245,6 +351,8 @@ export function setUser({
     role: state.role,
     authenticated:
       state.authenticated,
+    currentResolvedUsername:
+      state.currentResolvedUsername,
   });
 
   if (
@@ -272,6 +380,9 @@ export function setUser({
       username:
         normalizedUser
           ?.username ||
+        null,
+      currentResolvedUsername:
+        state.currentResolvedUsername ||
         null,
       avatarUrl:
         normalizedUser
@@ -324,6 +435,8 @@ export function setToken({
     role: state.role,
     authenticated:
       state.authenticated,
+    currentResolvedUsername:
+      state.currentResolvedUsername,
   });
 
   if (normalized) {
@@ -344,6 +457,9 @@ export function setToken({
         normalized,
       authenticated:
         state.authenticated,
+      currentResolvedUsername:
+        state.currentResolvedUsername ||
+        null,
     }
   );
 
@@ -367,8 +483,11 @@ export function applySession({
   events,
   setUser,
   setToken,
+  setState,
   token = undefined,
   user = undefined,
+  route = undefined,
+  publicPath = undefined,
 } = {}) {
   if (
     token !==
@@ -390,11 +509,29 @@ export function applySession({
 
   syncAuthState(state);
 
+  if (
+    typeof setState ===
+    "function"
+  ) {
+    syncRouteFields({
+      state,
+      setState,
+      route,
+      publicPath,
+    });
+  }
+
   const snapshot = {
     ...createSessionSnapshot(
       state,
       "applySession"
     ),
+    route:
+      state?.route || "/",
+    publicPath:
+      state?.publicPath ||
+      state?.route ||
+      "/",
   };
 
   events?.emit?.(
@@ -434,10 +571,14 @@ export function clearSession({
     token: null,
     role: null,
     authenticated: false,
+    currentResolvedUsername:
+      null,
   });
 
   state.user = null;
   state.token = null;
+  state.currentResolvedUsername =
+    null;
 
   syncAuthState(state);
 
@@ -451,6 +592,8 @@ export function clearSession({
       token: null,
       user: null,
       role: null,
+      currentResolvedUsername:
+        null,
     }
   );
 
@@ -522,7 +665,8 @@ export function loadPreferences({
     String(
       savedLang ||
         config.defaultLang
-    ).trim();
+    ).trim() ||
+    config.defaultLang;
 
   state.sidebarOpen =
     typeof savedSidebar ===
@@ -628,6 +772,12 @@ export function loadSession({
       : null;
 
   syncAuthState(state);
+
+  state.currentResolvedUsername =
+    resolveResolvedUsername(
+      state,
+      savedUser
+    );
 
   return state;
 }
@@ -895,9 +1045,17 @@ export function getSessionDebugSnapshot(
       getUserUsername(
         state?.user
       ) || null,
+    currentResolvedUsername:
+      state?.currentResolvedUsername ||
+      null,
     hasToken:
       Boolean(
         state?.token
       ),
+    route:
+      state?.route || "/",
+    publicPath:
+      state?.publicPath ||
+      null,
   };
 }

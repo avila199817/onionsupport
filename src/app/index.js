@@ -3,29 +3,23 @@
    Archivo: src/app/index.js
 
    RESPONSABILIDADES:
-   - punto de entrada del bootstrap de la aplicación
-   - composición de módulos principales
-   - inicialización ordenada del runtime
-   - controlar boot / reboot
-   - mantener la API pública App
+   - entrypoint real del runtime
+   - composición total módulos principales
+   - boot / reboot serializado
+   - restore session antes del primer render
+   - ready real sólo cuando todo terminó
+   - API pública estable
 
-   FIX CRÍTICO:
-   - restaurar sesión ANTES del primer render
-   - aplicar theme real antes loader
-   - evitar paint login/protected incorrecto
-   - no marcar ready antes de tiempo
-
-   HARDENING PRO:
-   - boot serializado
-   - finalize único por ciclo
-   - reboot limpio
-   - tolerancia total a fallos parciales
-   - no contaminar ciclos viejos
-   - evitar doble hide/doble ready
-
-   UX PRO:
-   - loader global con visibilidad mínima garantizada
-   - anti-flicker real en primer boot
+   NIVEL EXTREMO / HARDENING:
+   - boot race-safe por ciclo
+   - finalize único
+   - stale cycles cancelados
+   - reboot limpio real
+   - anti double ready
+   - anti double hide loader
+   - tolerancia fallos parciales
+   - loader mínimo garantizado
+   - no login flash
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -91,7 +85,9 @@ import {
   bindGlobalErrorHandlers,
 } from "./errors.js";
 
-import { bindAppEvents } from "./events.js";
+import {
+  bindAppEvents,
+} from "./events.js";
 
 export const App = (() => {
   "use strict";
@@ -102,26 +98,29 @@ export const App = (() => {
     booted: false,
     booting: false,
 
-    servicesInitialized: false,
-    storeInitialized: false,
-    routerInitialized: false,
-    uiInitialized: false,
-    globalHandlersBound: false,
+    servicesReady: false,
+    storeReady: false,
+    routerReady: false,
+    uiReady: false,
+
+    handlersBound: false,
     appEventsBound: false,
 
-    bootFailsafeTimer: null,
-    sessionRestorePromise: null,
     bootPromise: null,
-    bootCycleId: 0,
+    restorePromise: null,
 
-    loaderShownAt: 0,
-    loaderVisible: false,
+    bootCycleId: 0,
     finalizedCycleId: 0,
+
+    loaderVisible: false,
+    loaderShownAt: 0,
+
+    bootFailsafeTimer: null,
   };
 
-  /* =========================================================
-     HELPERS
-  ========================================================= */
+  /* =====================================================
+     SAFE HELPERS
+  ===================================================== */
 
   function safeLog(...args) {
     try {
@@ -143,224 +142,321 @@ export const App = (() => {
     }
   }
 
-  function safeEmit(name, payload = {}) {
+  function safeEmit(
+    name,
+    payload = {}
+  ) {
     try {
-      AppCore?.events?.emit?.(name, payload);
+      AppCore?.events?.emit?.(
+        name,
+        payload
+      );
     } catch {}
   }
 
-  function safeSetError(error = null) {
+  function safeSetError(
+    error = null
+  ) {
     try {
-      AppCore?.setError?.(error);
+      AppCore?.setError?.(
+        error
+      );
     } catch {}
   }
 
-  function delay(ms = 0) {
-    return new Promise((resolve) => {
-      setTimeout(resolve, Math.max(0, Number(ms) || 0));
-    });
+  function wait(ms = 0) {
+    return new Promise(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          Math.max(
+            0,
+            Number(ms) || 0
+          )
+        )
+    );
   }
 
-  function nextBootCycleId() {
+  /* =====================================================
+     CYCLE HELPERS
+  ===================================================== */
+
+  function nextCycle() {
     state.bootCycleId += 1;
     return state.bootCycleId;
   }
 
-  function isStaleBootCycle(cycleId) {
-    return Number(cycleId) !== Number(state.bootCycleId);
-  }
-
-  function markLoaderShownNow() {
-    state.loaderShownAt = Date.now();
-  }
-
-  function getRemainingBootLoaderMs() {
-    const shownAt = Number(state.loaderShownAt) || 0;
-
-    if (!shownAt) {
-      return 0;
-    }
-
-    const elapsed = Date.now() - shownAt;
-
-    return Math.max(
-      0,
-      MIN_BOOT_LOADER_MS - elapsed
+  function isStale(
+    cycleId
+  ) {
+    return (
+      Number(cycleId) !==
+      Number(
+        state.bootCycleId
+      )
     );
   }
 
-  function setBootFlags({
-    booted = state.booted,
-    booting = state.booting,
-  } = {}) {
-    state.booted = Boolean(booted);
-    state.booting = Boolean(booting);
+  /* =====================================================
+     LOADER
+  ===================================================== */
 
-    markAppBootState(AppCore, {
-      booted: state.booted,
-      booting: state.booting,
-    });
-
-    AppCore?.setState?.({
-      booted: state.booted,
-      booting: state.booting,
-    });
+  function markLoaderShown() {
+    state.loaderShownAt =
+      Date.now();
   }
 
-  function applyThemeBeforeLoader() {
-    try {
-      const html = document.documentElement;
+  function getRemainingLoaderMs() {
+    const at =
+      Number(
+        state.loaderShownAt
+      ) || 0;
 
-      const saved =
-        localStorage.getItem("onion:theme") ||
-        localStorage.getItem("theme");
+    if (!at) {
+      return 0;
+    }
 
-      const theme =
-        saved === "light"
-          ? "light"
-          : saved === "dark"
-            ? "dark"
-            : (
-                window.matchMedia &&
-                window.matchMedia("(prefers-color-scheme: light)").matches
-              )
-              ? "light"
-              : "dark";
+    const elapsed =
+      Date.now() - at;
 
-      html.setAttribute("data-theme", theme);
-      AppCore?.setTheme?.(theme);
-    } catch {}
+    return Math.max(
+      0,
+      MIN_BOOT_LOADER_MS -
+        elapsed
+    );
   }
 
   function showBootLoader() {
-    markLoaderShownNow();
-    state.loaderVisible = true;
-    showLoader(AppCore);
-  }
-
-  function hideBootLoader() {
-    if (!state.loaderVisible) {
+    if (
+      state.loaderVisible
+    ) {
       return;
     }
 
-    state.loaderVisible = false;
-    hideLoader(AppCore);
+    markLoaderShown();
+
+    state.loaderVisible =
+      true;
+
+    showLoader(
+      AppCore
+    );
   }
 
-  function resetPerBootMarkers() {
+  function hideBootLoader() {
+    if (
+      !state.loaderVisible
+    ) {
+      return;
+    }
+
+    state.loaderVisible =
+      false;
+
+    hideLoader(
+      AppCore
+    );
+  }
+
+  function resetBootMarkers() {
     state.finalizedCycleId = 0;
     state.loaderShownAt = 0;
     state.loaderVisible = false;
   }
 
-  function registerCoreModules() {
-    if (!AppCore?.modules?.has?.("http")) {
-      AppCore.modules.register("http", Http);
-    }
+  /* =====================================================
+     FLAGS
+  ===================================================== */
 
-    if (!AppCore?.modules?.has?.("store")) {
-      AppCore.modules.register("store", Store);
-    }
+  function setBootFlags({
+    booted = state.booted,
+    booting = state.booting,
+  } = {}) {
+    state.booted =
+      Boolean(booted);
 
-    if (!AppCore?.modules?.has?.("auth")) {
-      AppCore.modules.register("auth", Auth);
-    }
+    state.booting =
+      Boolean(booting);
 
-    if (!AppCore?.modules?.has?.("router")) {
-      AppCore.modules.register("router", Router);
-    }
-  }
-
-  function bindGlobalHandlersOnce(scope) {
-    if (state.globalHandlersBound) {
-      return;
-    }
-
-    bindGlobalErrorHandlers({
+    markAppBootState(
       AppCore,
-      Toast,
-      scope,
-    });
+      {
+        booted:
+          state.booted,
+        booting:
+          state.booting,
+      }
+    );
 
-    state.globalHandlersBound = true;
+    AppCore?.setState?.({
+      booted:
+        state.booted,
+      booting:
+        state.booting,
+    });
   }
 
-  function bindAppEventsOnce(scope) {
-    if (state.appEventsBound) {
-      return;
-    }
+  /* =====================================================
+     THEME
+  ===================================================== */
 
-    bindAppEvents({
-      AppCore,
-      I18n,
-      Toast,
-      scope,
-      syncUserUI,
+  function applyThemeBeforeLoader() {
+    try {
+      const html =
+        document.documentElement;
 
-      rerenderCurrentRoute: () =>
-        rerenderCurrentRoute({
-          AppCore,
-          Router,
-          I18n,
-          syncUserUI,
-          applyPostRenderLoaderPolicy: () =>
-            applyPostRenderLoaderPolicy({
-              AppCore,
-              Router,
-              hideLoader,
-            }),
-        }),
+      const saved =
+        localStorage.getItem(
+          "onion:theme"
+        ) ||
+        localStorage.getItem(
+          "theme"
+        );
 
-      applyPostRenderLoaderPolicy: () =>
-        applyPostRenderLoaderPolicy({
-          AppCore,
-          Router,
-          hideLoader,
-        }),
-    });
+      let theme =
+        "dark";
 
-    state.appEventsBound = true;
+      if (
+        saved ===
+        "light"
+      ) {
+        theme =
+          "light";
+      } else if (
+        saved ===
+        "dark"
+      ) {
+        theme =
+          "dark";
+      } else if (
+        window.matchMedia &&
+        window.matchMedia(
+          "(prefers-color-scheme: light)"
+        ).matches
+      ) {
+        theme =
+          "light";
+      }
+
+      html.setAttribute(
+        "data-theme",
+        theme
+      );
+
+      AppCore?.setTheme?.(
+        theme
+      );
+    } catch {}
   }
 
-  /* =========================================================
+  /* =====================================================
+     MODULE REGISTRY
+  ===================================================== */
+
+  function registerModules() {
+    try {
+      if (
+        !AppCore?.modules
+      ) {
+        return;
+      }
+
+      if (
+        !AppCore.modules.has(
+          "http"
+        )
+      ) {
+        AppCore.modules.register(
+          "http",
+          Http
+        );
+      }
+
+      if (
+        !AppCore.modules.has(
+          "store"
+        )
+      ) {
+        AppCore.modules.register(
+          "store",
+          Store
+        );
+      }
+
+      if (
+        !AppCore.modules.has(
+          "auth"
+        )
+      ) {
+        AppCore.modules.register(
+          "auth",
+          Auth
+        );
+      }
+
+      if (
+        !AppCore.modules.has(
+          "router"
+        )
+      ) {
+        AppCore.modules.register(
+          "router",
+          Router
+        );
+      }
+    } catch {}
+  }
+
+  /* =====================================================
      INIT BLOCKS
-  ========================================================= */
+  ===================================================== */
 
   async function initCore() {
     await AppCore.init();
   }
 
   function initServices() {
-    if (!state.servicesInitialized) {
+    if (
+      !state.servicesReady
+    ) {
       Http?.init?.();
-      state.servicesInitialized = true;
+      state.servicesReady =
+        true;
     }
 
-    registerCoreModules();
+    registerModules();
   }
 
-  function initStore() {
-    if (!state.storeInitialized) {
+  function initStoreBlock() {
+    if (
+      !state.storeReady
+    ) {
       Store?.init?.();
-      state.storeInitialized = true;
+      state.storeReady =
+        true;
     }
 
-    registerCoreModules();
+    registerModules();
   }
 
-  function initRouter() {
-    if (state.routerInitialized) {
+  function initRouterBlock() {
+    if (
+      state.routerReady
+    ) {
       return;
     }
 
     configureRouter();
     bindRouter();
 
-    state.routerInitialized = true;
+    state.routerReady =
+      true;
   }
 
-  function initUI() {
-    if (state.uiInitialized) {
+  function initUIBlock() {
+    if (
+      state.uiReady
+    ) {
       return;
     }
 
@@ -372,55 +468,160 @@ export const App = (() => {
       state,
     });
 
-    state.uiInitialized = true;
+    state.uiReady =
+      true;
   }
 
-  async function restoreSessionBeforeRender(cycleId) {
-    if (state.sessionRestorePromise) {
-      return state.sessionRestorePromise;
+  function bindHandlersOnce(
+    scope
+  ) {
+    if (
+      !state.handlersBound
+    ) {
+      bindGlobalErrorHandlers({
+        AppCore,
+        Toast,
+        scope,
+      });
+
+      state.handlersBound =
+        true;
     }
 
-    state.sessionRestorePromise = restoreSessionInBackground({
-      AppCore,
-      Auth,
-      Router,
-      state,
-      syncUserUI,
-      warmup,
-    });
+    if (
+      !state.appEventsBound
+    ) {
+      bindAppEvents({
+        AppCore,
+        I18n,
+        Toast,
+        scope,
+        syncUserUI,
+
+        rerenderCurrentRoute:
+          () =>
+            rerenderCurrentRoute(
+              {
+                AppCore,
+                Router,
+                I18n,
+                syncUserUI,
+                applyPostRenderLoaderPolicy:
+                  () =>
+                    applyPostRenderLoaderPolicy(
+                      {
+                        AppCore,
+                        Router,
+                        hideLoader:
+                          hideBootLoader,
+                      }
+                    ),
+              }
+            ),
+
+        applyPostRenderLoaderPolicy:
+          () =>
+            applyPostRenderLoaderPolicy(
+              {
+                AppCore,
+                Router,
+                hideLoader:
+                  hideBootLoader,
+              }
+            ),
+      });
+
+      state.appEventsBound =
+        true;
+    }
+  }
+
+  /* =====================================================
+     SESSION RESTORE
+  ===================================================== */
+
+  async function restoreBeforeRender(
+    cycleId
+  ) {
+    if (
+      state.restorePromise
+    ) {
+      return state.restorePromise;
+    }
+
+    state.restorePromise =
+      restoreSessionInBackground(
+        {
+          AppCore,
+          Auth,
+          Router,
+          state,
+          syncUserUI,
+          warmup,
+        }
+      );
 
     try {
-      const result = await state.sessionRestorePromise;
+      const result =
+        await state.restorePromise;
 
-      if (isStaleBootCycle(cycleId)) {
+      if (
+        isStale(
+          cycleId
+        )
+      ) {
         return result;
       }
 
       return result;
     } finally {
-      if (!isStaleBootCycle(cycleId)) {
-        state.sessionRestorePromise = null;
+      if (
+        !isStale(
+          cycleId
+        )
+      ) {
+        state.restorePromise =
+          null;
       }
     }
   }
 
-  async function finalizeBoot(cycleId) {
-    if (isStaleBootCycle(cycleId)) {
+  /* =====================================================
+     FINALIZE
+  ===================================================== */
+
+  async function finalizeBoot(
+    cycleId
+  ) {
+    if (
+      isStale(
+        cycleId
+      )
+    ) {
       return;
     }
 
-    if (state.finalizedCycleId === cycleId) {
+    if (
+      state.finalizedCycleId ===
+      cycleId
+    ) {
       return;
     }
 
-    state.finalizedCycleId = cycleId;
+    state.finalizedCycleId =
+      cycleId;
 
-    clearBootFailsafeTimer(state);
+    clearBootFailsafeTimer(
+      state
+    );
 
-    markStoreBootState(Store, {
-      ready: true,
-      booted: true,
-    });
+    markStoreBootState(
+      Store,
+      {
+        ready: true,
+        booted: true,
+      }
+    );
 
     setBootFlags({
       booted: true,
@@ -432,63 +633,101 @@ export const App = (() => {
       Router
     );
 
-    const remainingMs = getRemainingBootLoaderMs();
+    const waitMs =
+      getRemainingLoaderMs();
 
-    if (remainingMs > 0) {
-      await delay(remainingMs);
+    if (waitMs > 0) {
+      await wait(
+        waitMs
+      );
     }
 
-    if (isStaleBootCycle(cycleId)) {
+    if (
+      isStale(
+        cycleId
+      )
+    ) {
       return;
     }
 
     hideBootLoader();
 
-    safeEmit("app:ready", {
-      route: AppCore?.state?.route,
-      publicPath: AppCore?.state?.publicPath,
-      authenticated: AppCore?.state?.authenticated,
-      lang: AppCore?.state?.lang,
-    });
+    safeEmit(
+      "app:ready",
+      {
+        route:
+          AppCore?.state
+            ?.route,
+        publicPath:
+          AppCore?.state
+            ?.publicPath,
+        authenticated:
+          AppCore?.state
+            ?.authenticated,
+        lang:
+          AppCore?.state
+            ?.lang,
+      }
+    );
 
-    safeLog("App ready.");
+    safeLog(
+      "App ready."
+    );
   }
 
-  /* =========================================================
-     BOOT
-  ========================================================= */
+  /* =====================================================
+     BOOT CORE
+  ===================================================== */
 
-  async function doBoot(cycleId) {
+  async function doBoot(
+    cycleId
+  ) {
     try {
-      if (isStaleBootCycle(cycleId)) {
+      if (
+        isStale(
+          cycleId
+        )
+      ) {
         return api;
       }
 
-      resetPerBootMarkers();
+      resetBootMarkers();
 
       setBootFlags({
         booted: false,
         booting: true,
       });
 
-      markStoreBootState(Store, {
-        ready: false,
-        booted: false,
-      });
+      markStoreBootState(
+        Store,
+        {
+          ready: false,
+          booted: false,
+        }
+      );
 
-      clearScope(AppCore);
-      clearBootFailsafeTimer(state);
+      clearScope(
+        AppCore
+      );
+
+      clearBootFailsafeTimer(
+        state
+      );
 
       applyThemeBeforeLoader();
 
       await initCore();
 
-      if (isStaleBootCycle(cycleId)) {
+      if (
+        isStale(
+          cycleId
+        )
+      ) {
         return api;
       }
 
       initServices();
-      initStore();
+      initStoreBlock();
 
       initI18n({
         AppCore,
@@ -496,51 +735,80 @@ export const App = (() => {
         state,
       });
 
-      syncLangState(AppCore, I18n);
-      safeSetError(null);
+      syncLangState(
+        AppCore,
+        I18n
+      );
+
+      safeSetError(
+        null
+      );
 
       showBootLoader();
 
       armBootFailsafeLoader({
         AppCore,
         state,
-        hideLoader: hideBootLoader,
+        hideLoader:
+          hideBootLoader,
       });
 
-      const scope = ensureScope(AppCore);
+      const scope =
+        ensureScope(
+          AppCore
+        );
 
-      bindGlobalHandlersOnce(scope);
-      bindAppEventsOnce(scope);
+      bindHandlersOnce(
+        scope
+      );
 
-      initRouter();
-      initUI();
+      initRouterBlock();
+      initUIBlock();
 
-      /* FIX CRÍTICO:
-         restaurar sesión ANTES del primer render */
-      await restoreSessionBeforeRender(cycleId);
+      /* FIX CRÍTICO */
+      await restoreBeforeRender(
+        cycleId
+      );
 
-      if (isStaleBootCycle(cycleId)) {
+      if (
+        isStale(
+          cycleId
+        )
+      ) {
         return api;
       }
 
-      /* único render inicial del ciclo */
       await renderInitialRoute();
 
-      if (isStaleBootCycle(cycleId)) {
+      if (
+        isStale(
+          cycleId
+        )
+      ) {
         return api;
       }
 
-      await finalizeBoot(cycleId);
+      await finalizeBoot(
+        cycleId
+      );
 
       return api;
     } catch (error) {
-      safeError("Boot error:", error);
+      safeError(
+        "Boot error:",
+        error
+      );
 
       try {
-        const remainingMs = getRemainingBootLoaderMs();
+        const waitMs =
+          getRemainingLoaderMs();
 
-        if (remainingMs > 0) {
-          await delay(remainingMs);
+        if (
+          waitMs > 0
+        ) {
+          await wait(
+            waitMs
+          );
         }
       } catch {}
 
@@ -551,12 +819,17 @@ export const App = (() => {
         booting: false,
       });
 
-      markStoreBootState(Store, {
-        ready: false,
-        booted: false,
-      });
+      markStoreBootState(
+        Store,
+        {
+          ready: false,
+          booted: false,
+        }
+      );
 
-      safeSetError(error);
+      safeSetError(
+        error
+      );
 
       renderBootError({
         AppCore,
@@ -565,67 +838,106 @@ export const App = (() => {
         error,
         getViewContainer,
         setShellVisibility,
-        hideLoader: hideBootLoader,
+        hideLoader:
+          hideBootLoader,
       });
 
       return api;
     } finally {
-      if (!isStaleBootCycle(cycleId)) {
-        clearBootFailsafeTimer(state);
-        state.bootPromise = null;
+      if (
+        !isStale(
+          cycleId
+        )
+      ) {
+        clearBootFailsafeTimer(
+          state
+        );
 
-        applyPostRenderLoaderPolicy({
-          AppCore,
-          Router,
-          hideLoader: hideBootLoader,
-        });
+        state.bootPromise =
+          null;
+
+        applyPostRenderLoaderPolicy(
+          {
+            AppCore,
+            Router,
+            hideLoader:
+              hideBootLoader,
+          }
+        );
       }
     }
   }
 
-  async function boot() {
-    if (state.booted) {
-      return api;
+  function boot() {
+    if (
+      state.booted
+    ) {
+      return Promise.resolve(
+        api
+      );
     }
 
-    if (state.bootPromise) {
+    if (
+      state.bootPromise
+    ) {
       return state.bootPromise;
     }
 
-    const cycleId = nextBootCycleId();
+    const cycleId =
+      nextCycle();
 
-    state.bootPromise = doBoot(cycleId);
+    state.bootPromise =
+      doBoot(
+        cycleId
+      );
 
     return state.bootPromise;
   }
 
-  /* =========================================================
+  /* =====================================================
      REBOOT
-  ========================================================= */
+  ===================================================== */
 
   async function reboot() {
-    nextBootCycleId();
+    nextCycle();
 
-    clearScope(AppCore);
-    clearBootFailsafeTimer(state);
+    clearScope(
+      AppCore
+    );
 
-    state.booted = false;
-    state.booting = false;
+    clearBootFailsafeTimer(
+      state
+    );
 
-    state.servicesInitialized = false;
-    state.storeInitialized = false;
-    state.routerInitialized = false;
-    state.uiInitialized = false;
+    state.bootPromise =
+      null;
 
-    state.sessionRestorePromise = null;
-    state.bootPromise = null;
+    state.restorePromise =
+      null;
 
-    resetPerBootMarkers();
+    state.booted =
+      false;
+    state.booting =
+      false;
 
-    markStoreBootState(Store, {
-      ready: false,
-      booted: false,
-    });
+    state.servicesReady =
+      false;
+    state.storeReady =
+      false;
+    state.routerReady =
+      false;
+    state.uiReady =
+      false;
+
+    resetBootMarkers();
+
+    markStoreBootState(
+      Store,
+      {
+        ready: false,
+        booted: false,
+      }
+    );
 
     setBootFlags({
       booted: false,

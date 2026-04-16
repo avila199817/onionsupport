@@ -1,895 +1,482 @@
 /* =========================================================
-   Onion SPA - Incidencias Actions
-   Archivo: src/views/incidencias/incidencias.actions.js
+   Onion SPA - Incidencias View
+   Archivo: src/views/incidencias/incidenciasView.js
 
-   RESPONSABILIDADES:
-   - abrir detalle ticket PRO
-   - modal premium enterprise
-   - soportar updates reales
-   - timeline / metadata
-   - adjuntos
-   - copiar id
-   - export csv
-   - cerrar limpio
-   - tolerancia payloads heterogéneos
+   Responsabilidades:
+   - punto de entrada de la vista incidencias
+   - componer módulos internos
+   - render principal
+   - cargar datos
+   - bind de eventos
+   - evitar doble bind de listeners
+   - soportar destroy limpio del router
+   - permitir reload con rerender
+   - compartir flujo robusto con vistas premium
 
-   FIX CRÍTICO:
-   - cliente object => nombre real
-   - attachments reales
-   - comments/history opcional
-   - botones update listos
+   HARDENING PRO:
+   - render inicial inmediato
+   - carga posterior segura
+   - anti-race token
+   - cleanup total
+   - bind sólido del modal open-ticket
+   - delegación de eventos premium
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 
 import {
-  getIncidenciaByIdRequest,
+  incidenciasState,
+  setHydrated,
+} from "./incidencias.state.js";
+
+import {
+  loadIncidencias,
+  hydrateFromCache,
 } from "./incidencias.api.js";
 
 import {
-  getIncidenciaByIdStore,
-  getSortedIncidenciasStore,
+  getIncidencias,
+  sortIncidenciasByUpdatedDesc,
 } from "./incidencias.store.js";
 
 import {
-  safeText,
-  safeNumber,
-  safeArray,
-  safeObject,
-  escapeHtml,
-  formatDate,
-  formatRelativeDate,
-  showToast,
-} from "./incidencias.utils.js";
+  renderHeader,
+  renderTable,
+} from "./incidencias.table.template.js";
 
-/* =========================================================
-   HELPERS
-========================================================= */
+import {
+  bindIncidenciasEvents,
+} from "./incidencias.bindings.js";
 
-function safeEmit(
-  event = "",
-  payload = {}
-) {
-  try {
-    AppCore?.events?.emit?.(
-      event,
-      payload
-    );
-  } catch {}
-}
+import {
+  openTicket,
+} from "./incidencias.actions.js";
 
-function modalId() {
-  return "incidencias-modal";
-}
+export const IncidenciasView = (() => {
+  "use strict";
 
-function getBody() {
-  return document.body;
-}
+  const SCOPE = "view:incidencias";
 
-function closeTicketModal() {
-  try {
-    document
-      .getElementById(
-        modalId()
-      )
-      ?.remove();
-  } catch {}
+  let initialized = false;
+  let destroyed = false;
+  let bindingsCleanup = null;
+  let renderToken = 0;
+  let inflightInit = null;
 
-  try {
-    document.body.classList.remove(
-      "modal-open"
-    );
-  } catch {}
+  /* =====================================================
+     HELPERS
+  ===================================================== */
 
-  return true;
-}
+  function safeLog(...args) {
+    try {
+      AppCore?.utils?.log?.(
+        "[IncidenciasView]",
+        ...args
+      );
+    } catch {}
+  }
 
-function pickDetail(
-  payload = null
-) {
-  if (!payload) return null;
-  if (payload.ticket) return payload.ticket;
-  if (payload.data) return payload.data;
-  if (payload.item) return payload.item;
-  return payload;
-}
+  function safeWarn(...args) {
+    try {
+      AppCore?.utils?.warn?.(
+        "[IncidenciasView]",
+        ...args
+      );
+    } catch {}
+  }
 
-function getId(item = {}) {
-  return safeText(
-    item.ticketId ||
-      item.id ||
-      item.code,
-    "—"
-  );
-}
-
-function getTitle(item = {}) {
-  return safeText(
-    item.title ||
-      item.subject ||
-      item.asunto,
-    "Incidencia"
-  );
-}
-
-function getDescription(
-  item = {}
-) {
-  return safeText(
-    item.description ||
-      item.descripcion ||
-      item.message ||
-      item.preview,
-    "Sin descripción."
-  );
-}
-
-function getClient(
-  item = {}
-) {
-  const c =
-    item.client ||
-    item.cliente ||
-    item.customer;
-
-  if (
-    c &&
-    typeof c === "object"
-  ) {
-    return safeText(
-      c.name ||
-        c.nombre ||
-        c.company,
-      "Cliente"
+  function getContainer() {
+    return (
+      AppCore?.dom?.viewContainer ||
+      document.getElementById(
+        "view-container"
+      ) ||
+      null
     );
   }
 
-  return safeText(
-    item.clientName ||
-      c,
-    "Cliente"
-  );
-}
+  function getItems() {
+    try {
+      return sortIncidenciasByUpdatedDesc(
+        getIncidencias()
+      );
+    } catch {
+      return [];
+    }
+  }
 
-function getEmail(
-  item = {}
-) {
-  const c =
-    item.client ||
-    item.cliente;
+  function nextRenderToken() {
+    renderToken += 1;
+    return renderToken;
+  }
 
-  if (
-    c &&
-    typeof c === "object"
-  ) {
-    return safeText(
-      c.email,
-      "Sin email"
+  function isActiveToken(token) {
+    return (
+      !destroyed &&
+      token === renderToken
     );
   }
 
-  return safeText(
-    item.clientEmail ||
-      item.email,
-    "Sin email"
-  );
-}
+  function cleanupBindings() {
+    try {
+      bindingsCleanup?.();
+    } catch {}
 
-function getAssigned(
-  item = {}
-) {
-  const a =
-    item.assignedTo ||
-    item.assignee ||
-    item.tecnico;
+    bindingsCleanup = null;
 
-  if (
-    a &&
-    typeof a === "object"
-  ) {
-    return safeText(
-      a.name,
-      "No asignado"
-    );
+    try {
+      AppCore?.cleanup?.run?.(
+        SCOPE
+      );
+    } catch {}
   }
 
-  return safeText(
-    a,
-    "No asignado"
-  );
-}
+  /* =====================================================
+     CLICK DELEGATION PRO
+  ===================================================== */
 
-function getStatus(
-  item = {}
-) {
-  return safeText(
-    item.status ||
-      item.estado,
-    "open"
-  );
-}
+  function bindNativeActions(container) {
+    if (!container) {
+      return () => {};
+    }
 
-function getPriority(
-  item = {}
-) {
-  return safeText(
-    item.priority ||
-      item.prioridad,
-    "medium"
-  );
-}
+    const onClick = async (event) => {
+      const openBtn =
+        event.target.closest(
+          '[data-action="open-ticket"]'
+        );
 
-function getAttachments(
-  item = {}
-) {
-  return safeArray(
-    item.attachments ||
-      item.files ||
-      item.adjuntos
-  );
-}
+      if (openBtn) {
+        event.preventDefault();
 
-function getHistory(
-  item = {}
-) {
-  return safeArray(
-    item.history ||
-      item.timeline ||
-      item.logs ||
-      item.comments
-  );
-}
+        const ticketId =
+          String(
+            openBtn.dataset.ticketId ||
+            ""
+          ).trim();
 
-function renderField(
-  label,
-  value
-) {
-  return `
-    <div style="display:grid;gap:6px;">
-      <span style="
-        font-size:11px;
-        color:var(--text-faint,#8b8b8b);
-        text-transform:uppercase;
-        letter-spacing:.08em;
-        font-weight:700;
-      ">
-        ${escapeHtml(label)}
-      </span>
+        if (!ticketId) {
+          safeWarn(
+            "open-ticket sin ticketId"
+          );
+          return;
+        }
 
-      <strong style="
-        color:var(--text-strong,#fff);
-        font-size:15px;
-        line-height:1.35;
-      ">
-        ${escapeHtml(value)}
-      </strong>
-    </div>
-  `;
-}
+        try {
+          await openTicket(ticketId);
+        } catch (error) {
+          safeWarn(
+            "openTicket falló:",
+            error
+          );
+        }
 
-function renderAttachments(
-  files = []
-) {
-  if (!files.length) {
+        return;
+      }
+
+      const copyBtn =
+        event.target.closest(
+          '[data-action="copy-ticket-id"]'
+        );
+
+      if (copyBtn) {
+        event.preventDefault();
+
+        const value =
+          String(
+            copyBtn.dataset.ticketId ||
+            copyBtn.dataset.ticketCode ||
+            ""
+          ).trim();
+
+        if (!value) {
+          return;
+        }
+
+        try {
+          await navigator.clipboard.writeText(
+            value
+          );
+
+          AppCore?.toast?.success?.(
+            "ID copiado"
+          );
+        } catch {
+          try {
+            const temp =
+              document.createElement(
+                "textarea"
+              );
+
+            temp.value = value;
+            document.body.appendChild(
+              temp
+            );
+            temp.select();
+            document.execCommand(
+              "copy"
+            );
+            temp.remove();
+          } catch {}
+        }
+
+        return;
+      }
+    };
+
+    container.addEventListener(
+      "click",
+      onClick
+    );
+
+    return () => {
+      container.removeEventListener(
+        "click",
+        onClick
+      );
+    };
+  }
+
+  /* =====================================================
+     BIND
+  ===================================================== */
+
+  function bind() {
+    cleanupBindings();
+
+    const container =
+      getContainer();
+
+    const cleanups = [];
+
+    const nativeCleanup =
+      bindNativeActions(
+        container
+      );
+
+    cleanups.push(
+      nativeCleanup
+    );
+
+    try {
+      const maybeCleanup =
+        bindIncidenciasEvents({
+          scope: SCOPE,
+          loadIncidencias,
+          openTicket,
+          rerender: render,
+          reload,
+        });
+
+      if (
+        typeof maybeCleanup ===
+        "function"
+      ) {
+        cleanups.push(
+          maybeCleanup
+        );
+      }
+    } catch (error) {
+      safeWarn(
+        "bindIncidenciasEvents error:",
+        error
+      );
+    }
+
+    bindingsCleanup =
+      () => {
+        for (const fn of cleanups) {
+          try {
+            fn?.();
+          } catch {}
+        }
+      };
+  }
+
+  function buildHtml() {
+    const items = getItems();
+
     return `
-      <div style="
-        padding:14px;
-        border-radius:16px;
-        border:1px solid var(--border-soft,#2b2b2b);
-        background:var(--surface-glass,#171717);
-        color:#9a9a9a;
-      ">
-        Sin adjuntos
-      </div>
+      <section class="panel-content dashboard ready">
+        <div class="content-wrapper">
+
+          ${renderHeader({
+            items,
+            state: incidenciasState,
+          })}
+
+          ${renderTable({
+            items,
+            state: incidenciasState,
+          })}
+
+        </div>
+      </section>
     `;
   }
 
-  return `
-    <div style="
-      display:grid;
-      gap:10px;
-    ">
-      ${files
-        .map((file, i) => {
-          const item =
-            safeObject(file);
+  /* =====================================================
+     RENDER
+  ===================================================== */
 
-          const name =
-            safeText(
-              item.name ||
-                item.filename ||
-                item.fileName,
-              `archivo_${i + 1}`
-            );
+  function render() {
+    const container =
+      getContainer();
 
-          const url =
-            safeText(
-              item.url ||
-                item.href ||
-                item.path,
-              "#"
-            );
+    if (!container) {
+      safeWarn(
+        "No se encontró #view-container."
+      );
+      return null;
+    }
 
-          const size =
-            safeNumber(
-              item.size,
-              0
-            );
+    AppCore?.setDocumentTitle?.(
+      "Incidencias"
+    );
 
-          return `
-            <a
-              href="${escapeHtml(url)}"
-              target="_blank"
-              rel="noopener"
-              style="
-                display:flex;
-                justify-content:space-between;
-                gap:14px;
-                padding:14px;
-                border-radius:16px;
-                border:1px solid var(--border-soft,#2b2b2b);
-                background:var(--surface-glass,#171717);
-                text-decoration:none;
-                color:#fff;
-              "
-            >
-              <span>${escapeHtml(name)}</span>
-              <span style="color:#8d8d8d;">
-                ${size ? `${size} bytes` : ""}
-              </span>
-            </a>
-          `;
-        })
-        .join("")}
-    </div>
-  `;
-}
+    AppCore?.clearDynamicContainers?.();
 
-function renderHistory(
-  logs = []
-) {
-  if (!logs.length) {
-    return "";
+    container.innerHTML =
+      buildHtml();
+
+    setHydrated(true);
+
+    return container;
   }
 
-  return `
-    <section style="display:grid;gap:12px;">
-      <h3 style="margin:0;">Actividad</h3>
+  /* =====================================================
+     LOAD + RENDER
+  ===================================================== */
 
-      <div style="
-        display:grid;
-        gap:10px;
-      ">
-        ${logs
-          .map((row) => {
-            const item =
-              safeObject(row);
+  async function renderAndLoad({
+    force = false,
+  } = {}) {
+    const token =
+      nextRenderToken();
 
-            return `
-              <div style="
-                padding:14px;
-                border-radius:16px;
-                border:1px solid var(--border-soft,#2b2b2b);
-                background:var(--surface-glass,#171717);
-              ">
-                <strong>${escapeHtml(
-                  safeText(
-                    item.title ||
-                      item.action ||
-                      item.message,
-                    "Evento"
-                  )
-                )}</strong>
+    try {
+      hydrateFromCache?.();
+    } catch {}
 
-                <div style="
-                  margin-top:6px;
-                  color:#8f8f8f;
-                  font-size:13px;
-                ">
-                  ${escapeHtml(
-                    formatDate(
-                      item.createdAt ||
-                        item.date
-                    )
-                  )}
-                </div>
-              </div>
-            `;
-          })
-          .join("")}
-      </div>
-    </section>
-  `;
-}
+    render();
 
-/* =========================================================
-   MODAL
-========================================================= */
-
-export function renderTicketModal(
-  detail = {}
-) {
-  closeTicketModal();
-
-  const id =
-    getId(detail);
-
-  const title =
-    getTitle(detail);
-
-  const desc =
-    getDescription(
-      detail
-    );
-
-  const client =
-    getClient(detail);
-
-  const email =
-    getEmail(detail);
-
-  const status =
-    getStatus(detail);
-
-  const priority =
-    getPriority(
-      detail
-    );
-
-  const assigned =
-    getAssigned(
-      detail
-    );
-
-  const created =
-    formatDate(
-      detail.createdAt
-    );
-
-  const updated =
-    formatDate(
-      detail.updatedAt
-    );
-
-  const updatedAgo =
-    formatRelativeDate(
-      detail.updatedAt
-    );
-
-  const files =
-    getAttachments(
-      detail
-    );
-
-  const history =
-    getHistory(detail);
-
-  const root =
-    document.createElement(
-      "div"
-    );
-
-  root.id =
-    modalId();
-
-  root.innerHTML = `
-    <div style="
-      position:fixed;
-      inset:0;
-      z-index:9999;
-      padding:28px;
-      display:grid;
-      place-items:center;
-      background:rgba(0,0,0,.68);
-      backdrop-filter:blur(10px);
-    ">
-      <div
-        data-panel="1"
-        style="
-          width:min(1100px,100%);
-          max-height:92vh;
-          overflow:auto;
-          border-radius:28px;
-          border:1px solid var(--border-soft,#2b2b2b);
-          background:#151515;
-          box-shadow:0 40px 100px rgba(0,0,0,.45);
-        "
-      >
-
-        <div style="
-          padding:26px;
-          border-bottom:1px solid var(--border-soft,#2b2b2b);
-          display:flex;
-          justify-content:space-between;
-          gap:20px;
-        ">
-          <div style="display:grid;gap:8px;">
-            <span style="
-              color:#8d8d8d;
-              font-size:12px;
-              text-transform:uppercase;
-              letter-spacing:.08em;
-            ">
-              Ticket ${escapeHtml(id)}
-            </span>
-
-            <h2 style="
-              margin:0;
-              font-size:42px;
-              line-height:1;
-              letter-spacing:-.04em;
-            ">
-              ${escapeHtml(title)}
-            </h2>
-
-            <span style="
-              color:#9d9d9d;
-              font-size:14px;
-            ">
-              Actualizado ${escapeHtml(updatedAgo)}
-            </span>
-          </div>
-
-          <button
-            data-close="1"
-            style="
-              width:54px;
-              height:54px;
-              border:none;
-              border-radius:16px;
-              cursor:pointer;
-              font-size:22px;
-              background:#242424;
-              color:#fff;
-            "
-          >✕</button>
-        </div>
-
-        <div style="
-          padding:26px;
-          display:grid;
-          gap:26px;
-        ">
-
-          <div style="
-            display:grid;
-            grid-template-columns:repeat(3,minmax(0,1fr));
-            gap:18px;
-          ">
-            ${renderField("Estado", status)}
-            ${renderField("Prioridad", priority)}
-            ${renderField("Asignado", assigned)}
-            ${renderField("Cliente", client)}
-            ${renderField("Email", email)}
-            ${renderField("Creado", created)}
-          </div>
-
-          <section style="display:grid;gap:10px;">
-            <h3 style="margin:0;">Descripción</h3>
-
-            <div style="
-              padding:18px;
-              border-radius:18px;
-              background:#1f1f1f;
-              border:1px solid #2a2a2a;
-              line-height:1.65;
-            ">
-              ${escapeHtml(desc)}
-            </div>
-          </section>
-
-          <section style="display:grid;gap:10px;">
-            <h3 style="margin:0;">
-              Adjuntos (${files.length})
-            </h3>
-
-            ${renderAttachments(files)}
-          </section>
-
-          ${renderHistory(history)}
-
-          <div style="
-            display:flex;
-            justify-content:space-between;
-            gap:12px;
-            flex-wrap:wrap;
-            padding-top:6px;
-          ">
-            <div style="
-              display:flex;
-              gap:10px;
-              flex-wrap:wrap;
-            ">
-              <button
-                data-action-modal="refresh"
-                data-ticket-id="${escapeHtml(id)}"
-                style="
-                  min-height:44px;
-                  padding:0 16px;
-                  border:none;
-                  border-radius:14px;
-                  cursor:pointer;
-                "
-              >
-                Actualizar
-              </button>
-
-              <button
-                data-action-modal="copy"
-                data-ticket-id="${escapeHtml(id)}"
-                style="
-                  min-height:44px;
-                  padding:0 16px;
-                  border:none;
-                  border-radius:14px;
-                  cursor:pointer;
-                "
-              >
-                Copiar ID
-              </button>
-            </div>
-
-            <button
-              data-close="1"
-              style="
-                min-height:44px;
-                padding:0 16px;
-                border:none;
-                border-radius:14px;
-                cursor:pointer;
-              "
-            >
-              Cerrar
-            </button>
-          </div>
-
-        </div>
-      </div>
-    </div>
-  `;
-
-  getBody().appendChild(
-    root
-  );
-
-  root.addEventListener(
-    "click",
-    async (event) => {
-      const close =
-        event.target.closest(
-          "[data-close]"
-        );
-
-      const panel =
-        event.target.closest(
-          "[data-panel]"
-        );
-
-      const refresh =
-        event.target.closest(
-          '[data-action-modal="refresh"]'
-        );
-
-      const copy =
-        event.target.closest(
-          '[data-action-modal="copy"]'
-        );
-
-      if (close) {
-        closeTicketModal();
-        return;
-      }
-
-      if (
-        refresh
-      ) {
-        const ticketId =
-          refresh.dataset.ticketId;
-
-        await openTicket(
-          ticketId
-        );
-        return;
-      }
-
-      if (copy) {
-        await navigator.clipboard.writeText(
-          copy.dataset.ticketId
-        );
-
-        showToast(
-          "ID copiado",
-          "success"
-        );
-
-        return;
-      }
-
-      if (
-        !panel &&
-        event.target ===
-          root.firstElementChild
-      ) {
-        closeTicketModal();
-      }
-    }
-  );
-
-  document.addEventListener(
-    "keydown",
-    function esc(ev) {
-      if (
-        ev.key === "Escape"
-      ) {
-        closeTicketModal();
-        document.removeEventListener(
-          "keydown",
-          esc
-        );
-      }
-    }
-  );
-
-  return true;
-}
-
-/* =========================================================
-   OPEN
-========================================================= */
-
-export async function openTicket(
-  payload = {}
-) {
-  const ticketId =
-    typeof payload ===
-    "string"
-      ? payload
-      : payload?.ticketId;
-
-  const id =
-    safeText(
-      ticketId,
-      ""
-    );
-
-  if (!id) {
-    return null;
-  }
-
-  try {
-    safeEmit(
-      "incidencias:open",
-      { ticketId: id }
-    );
-
-    let detail =
-      getIncidenciaByIdStore(
-        id
-      );
-
-    detail =
-      await getIncidenciaByIdRequest(
-        id
-      ).catch(
-        () => detail
-      );
-
-    detail =
-      pickDetail(detail);
-
-    if (!detail) {
-      throw new Error(
-        "EMPTY_DETAIL"
+    try {
+      await loadIncidencias({
+        force,
+      });
+    } catch (error) {
+      safeWarn(
+        "loadIncidencias falló:",
+        error
       );
     }
 
-    renderTicketModal(
-      detail
-    );
+    if (!isActiveToken(token)) {
+      return api;
+    }
 
-    return detail;
-  } catch (error) {
-    console.error(
-      error
-    );
+    render();
 
-    showToast(
-      "No se pudo abrir la incidencia.",
-      "error"
-    );
-
-    return null;
-  }
-}
-
-/* =========================================================
-   COPY ID
-========================================================= */
-
-export async function copyTicketIdAction({
-  ticketId = "",
-} = {}) {
-  const id =
-    safeText(
-      ticketId,
-      ""
-    );
-
-  if (!id) return false;
-
-  await navigator.clipboard.writeText(
-    id
-  );
-
-  showToast(
-    "ID copiado",
-    "success"
-  );
-
-  return true;
-}
-
-/* =========================================================
-   EXPORT
-========================================================= */
-
-export function exportIncidenciasCsvAction() {
-  const items =
-    getSortedIncidenciasStore();
-
-  if (!items.length) {
-    showToast(
-      "No hay incidencias.",
-      "info"
-    );
-    return false;
+    return api;
   }
 
-  const rows =
-    items.map(
-      (item) =>
-        `"${getId(item)}","${getTitle(item)}","${getStatus(item)}","${getPriority(item)}"`
-    );
+  async function reload(
+    options = {}
+  ) {
+    if (destroyed) {
+      return api;
+    }
 
-  const csv = [
-    "ticketId,title,status,priority",
-    ...rows,
-  ].join("\n");
+    try {
+      await renderAndLoad({
+        force: true,
+        ...options,
+      });
+    } catch (error) {
+      safeWarn(
+        "reload falló:",
+        error
+      );
+    }
 
-  const blob =
-    new Blob([csv], {
-      type: "text/csv;charset=utf-8;",
-    });
+    if (!destroyed) {
+      bind();
+    }
 
-  const url =
-    URL.createObjectURL(
-      blob
-    );
+    return api;
+  }
 
-  const a =
-    document.createElement(
-      "a"
-    );
+  /* =====================================================
+     INIT
+  ===================================================== */
 
-  a.href = url;
-  a.download =
-    "incidencias.csv";
+  async function init() {
+    if (
+      initialized &&
+      inflightInit
+    ) {
+      return inflightInit;
+    }
 
-  document.body.appendChild(
-    a
-  );
+    destroyed = false;
+    initialized = true;
 
-  a.click();
-  a.remove();
+    inflightInit =
+      (async () => {
+        safeLog("init");
 
-  URL.revokeObjectURL(
-    url
-  );
+        await renderAndLoad();
 
-  showToast(
-    "CSV exportado",
-    "success"
-  );
+        if (!destroyed) {
+          bind();
+        }
 
-  return true;
-}
+        return api;
+      })();
+
+    try {
+      return await inflightInit;
+    } finally {
+      inflightInit = null;
+    }
+  }
+
+  /* =====================================================
+     DESTROY
+  ===================================================== */
+
+  function destroy() {
+    destroyed = true;
+    initialized = false;
+
+    nextRenderToken();
+
+    cleanupBindings();
+
+    safeLog("destroy");
+  }
+
+  /* =====================================================
+     API
+  ===================================================== */
+
+  const api = {
+    init,
+    render,
+    reload,
+    destroy,
+    loadIncidencias,
+
+    get initialized() {
+      return initialized;
+    },
+
+    get destroyed() {
+      return destroyed;
+    },
+  };
+
+  return api;
+})();
+
+export default IncidenciasView;

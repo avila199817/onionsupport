@@ -22,7 +22,11 @@ import { bindUsuariosView } from "./usuarios.bindings.js";
 import {
   getUsuariosSnapshot,
   getUsuariosStatus,
-  readUsuariosData,
+  readUsuariosRows,
+  readUsuariosMeta,
+  readUsuariosStats,
+  readUsuariosAlerts,
+  readUsuariosParams,
   readUsuariosUi,
   markUsuariosMounted,
   patchUsuariosUi,
@@ -192,6 +196,16 @@ function getCurrentUser() {
   return AppCore?.state?.user || null;
 }
 
+function getUsuariosData() {
+  return {
+    rows: readUsuariosRows(),
+    meta: readUsuariosMeta(),
+    stats: readUsuariosStats(),
+    alerts: readUsuariosAlerts(),
+    params: readUsuariosParams(),
+  };
+}
+
 /* =========================================================
    DOM HELPERS
 ========================================================= */
@@ -330,6 +344,7 @@ function getRenderPayload(
 
   return {
     usuarios: snapshot,
+    data: getUsuariosData(),
     user: getCurrentUser(),
     ...safeObject(overrides),
   };
@@ -481,9 +496,10 @@ async function ensureUsuariosLoaded(
         const result =
           force === true
             ? await refreshUsuariosList({
-                query:
+                params:
                   safeObject(
-                    options.query
+                    options.params ||
+                      options.query
                   ),
               })
             : await hydrateUsuarios({
@@ -491,9 +507,10 @@ async function ensureUsuariosLoaded(
                 preferCache:
                   preferCache !==
                   false,
-                query:
+                params:
                   safeObject(
-                    options.query
+                    options.params ||
+                      options.query
                   ),
               });
 
@@ -604,9 +621,10 @@ export async function init(
         false,
       silent: false,
       notifyOnError: false,
-      query:
+      params:
         safeObject(
-          context.query
+          context.params ||
+            context.query
         ),
     });
 
@@ -616,7 +634,7 @@ export async function init(
     view: VIEW_NAME,
     element: rootElement,
     status: getUsuariosStatus(),
-    data: readUsuariosData(),
+    data: getUsuariosData(),
     ui: readUsuariosUi(),
     result,
   };
@@ -656,9 +674,10 @@ export async function render(
           false,
         silent: false,
         notifyOnError: false,
-        query:
+        params:
           safeObject(
-            context.query
+            context.params ||
+              context.query
           ),
       });
   }
@@ -692,9 +711,10 @@ export async function reload(
           false
         ) === true,
       notifyOnError: true,
-      query:
+      params:
         safeObject(
-          context.query
+          context.params ||
+            context.query
         ),
     });
 

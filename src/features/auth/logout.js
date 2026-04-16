@@ -2,7 +2,7 @@
    Onion SPA - Auth Logout
    Archivo: src/features/auth/logout.js
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - cerrar sesión local y remota
    - invalidar refresh/session context si backend existe
    - limpiar estado AppCore
@@ -10,12 +10,14 @@
    - emitir eventos auth lifecycle
    - tolerar fallo de red sin bloquear logout local
 
-   HARDENING PRO:
+   HARDENING EXTREMO:
    - anti doble logout concurrente
-   - timeout remoto
+   - timeout remoto real
    - navegación robusta Router/AppCore/browser
    - snapshot consistente
    - no romper UI si backend falla
+   - clear local garantizado
+   - cero throws accidentales
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -92,6 +94,16 @@ function safeWarn(...args) {
   } catch {}
 }
 
+function safeSetError(
+  error = null
+) {
+  try {
+    AppCore?.setError?.(
+      error
+    );
+  } catch {}
+}
+
 function resolveLogoutEndpoint() {
   return safeText(
     AUTH_ENDPOINTS?.logout,
@@ -130,12 +142,10 @@ function buildLogoutBody() {
       safeText(
         getStoredRefreshToken()
       ),
-
     sessionId:
       safeText(
         getStoredSessionId()
       ),
-
     userId:
       safeText(
         getStoredSessionUserId()
@@ -196,9 +206,14 @@ function navigateTo(
     typeof window !==
     "undefined"
   ) {
-    window.location.assign(
-      finalPath
-    );
+    try {
+      window.location.assign(
+        finalPath
+      );
+    } catch {
+      window.location.href =
+        finalPath;
+    }
   }
 
   return true;
@@ -231,7 +246,9 @@ async function fetchWithTimeout(
         controller?.signal,
     });
   } finally {
-    clearTimeout(timer);
+    if (timer) {
+      clearTimeout(timer);
+    }
   }
 }
 
@@ -371,15 +388,15 @@ async function executeLogout(
     }
   }
 
+  /* local clear SIEMPRE */
   clearSessionLocal({
     silent,
   });
 
-  try {
-    AppCore?.setError?.(
-      null
-    );
-  } catch {}
+  safeSetError(null);
+
+  const after =
+    buildSessionSnapshot();
 
   const finalRedirect =
     safeBool(navigate)
@@ -395,6 +412,8 @@ async function executeLogout(
         before.authenticated,
       remoteOk:
         !remoteError,
+      before,
+      after,
       redirectTo:
         finalRedirect,
     }
@@ -416,6 +435,8 @@ async function executeLogout(
     error:
       remoteError ||
       null,
+    before,
+    after,
     redirectTo:
       finalRedirect,
   };

@@ -1,35 +1,30 @@
 /* =========================================================
-   Onion SPA - Usuarios State
-   Archivo: src/views/usuarios/usuarios.state.js
+   Onion SPA - Home State
+   Archivo: src/views/home/home.state.js
 
    FINAL PRO SYSTEM · REAL CONTRACT · 10/10
 
    Responsabilidades:
-   - centralizar el estado interno de la vista Usuarios
+   - centralizar el estado interno de la vista Home
    - exponer snapshot inicial robusto e inmutable por copia
    - controlar loading / loaded / error
-   - almacenar rows, meta, stats y alerts
+   - almacenar summary real y metadatos de sincronización
    - modelar source / degraded / remoteOk / cacheHit
-   - mantener params de listado consistentes
-   - preservar contrato esperado por usuarios.api.js y usuarios.view.js
+   - mantener mutaciones predecibles y limpias
+   - preservar contrato esperado por home.api.js y home.template.js
 ========================================================= */
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
-export const USUARIOS_CACHE_KEY =
-  "onion.usuarios.list";
+export const HOME_CACHE_KEY =
+  "onion.home.summary";
 
-export const USUARIOS_CACHE_TTL =
+export const HOME_CACHE_TTL =
   1000 * 60 * 5;
 
-export const USUARIOS_DEFAULT_PAGE = 1;
-export const USUARIOS_DEFAULT_PAGE_SIZE = 20;
-export const USUARIOS_DEFAULT_SORT_BY = "createdAt";
-export const USUARIOS_DEFAULT_SORT_DIR = "desc";
-
-export const USUARIOS_SOURCES = Object.freeze({
+export const HOME_SOURCES = Object.freeze({
   IDLE: "idle",
   REMOTE: "remote",
   CACHE_FRESH: "cache:fresh",
@@ -81,17 +76,6 @@ function safeNumber(
     : fallback;
 }
 
-function safePositiveInt(
-  value,
-  fallback = 0
-) {
-  const number = Math.trunc(Number(value));
-  return Number.isFinite(number) &&
-    number > 0
-    ? number
-    : fallback;
-}
-
 function safeBoolean(
   value,
   fallback = false
@@ -130,84 +114,63 @@ function clone(value) {
 }
 
 /* =========================================================
-   FACTORIES
+   SUMMARY FACTORIES
 ========================================================= */
 
-export function createInitialUsuarioRow() {
+export function createInitialHomeUser() {
   return {
-    id: "",
-    userId: "",
-    username: "",
-    displayName: "",
-    email: "",
-    role: "user",
-    status: "unknown",
-    avatar: "",
-    hasAvatar: false,
-    phone: "",
-    emailVerified: false,
-    lastLoginAt: "",
-    createdAt: "",
-    updatedAt: "",
-    raw: {},
+    id: null,
+    role: "unknown",
   };
 }
 
-export function createInitialUsuariosMeta() {
+export function createInitialHomeKpis() {
   return {
-    page: USUARIOS_DEFAULT_PAGE,
-    pageSize: USUARIOS_DEFAULT_PAGE_SIZE,
-    total: 0,
-    totalPages: 0,
-    count: 0,
-    hasNextPage: false,
-    hasPrevPage: false,
-    sortBy: USUARIOS_DEFAULT_SORT_BY,
-    sortDir: USUARIOS_DEFAULT_SORT_DIR,
-    q: "",
-    role: "",
-    status: "",
+    ticketsOpen: 0,
+    ticketsUrgent: 0,
+    clientesTotal: 0,
+    facturasPending: 0,
+    usersTotal: 0,
+    facturacionTotal: 0,
   };
 }
 
-export function createInitialUsuariosStats() {
+export function createInitialHomeHealth() {
   return {
-    total: 0,
-    admins: 0,
-    active: 0,
-    inactive: 0,
-    withAvatar: 0,
+    tickets: false,
+    clientes: false,
+    facturas: false,
+    users: false,
   };
 }
 
-export function createInitialUsuariosParams() {
+export function createInitialHomeSummary() {
   return {
-    page: USUARIOS_DEFAULT_PAGE,
-    pageSize: USUARIOS_DEFAULT_PAGE_SIZE,
-    sortBy: USUARIOS_DEFAULT_SORT_BY,
-    sortDir: USUARIOS_DEFAULT_SORT_DIR,
-    q: "",
-    role: "",
-    status: "",
-    includeStats: false,
+    user: createInitialHomeUser(),
+    generatedAt: "",
+    kpis: createInitialHomeKpis(),
+    alerts: [],
+    recentActivity: [],
+    quickActions: [],
+    health: createInitialHomeHealth(),
   };
 }
 
-export function createInitialUsuariosState() {
+/* =========================================================
+   ROOT STATE FACTORY
+========================================================= */
+
+export function createInitialHomeState() {
   return {
     loading: false,
     loaded: false,
     error: null,
     lastError: null,
 
-    rows: [],
-    meta: createInitialUsuariosMeta(),
-    stats: createInitialUsuariosStats(),
-    alerts: [],
+    summary:
+      createInitialHomeSummary(),
 
-    params: createInitialUsuariosParams(),
-
-    source: USUARIOS_SOURCES.IDLE,
+    source: HOME_SOURCES.IDLE,
     remoteOk: false,
     degraded: false,
 
@@ -217,10 +180,8 @@ export function createInitialUsuariosState() {
 
     ui: {
       mounted: false,
-      selectedUserId: "",
-      activeFilter: "",
+      activeCard: "",
       lastAction: "",
-      searchDraft: "",
     },
   };
 }
@@ -229,215 +190,65 @@ export function createInitialUsuariosState() {
    STATE
 ========================================================= */
 
-export const usuariosState =
-  createInitialUsuariosState();
+export const homeState =
+  createInitialHomeState();
 
 /* =========================================================
    NORMALIZERS
 ========================================================= */
 
-function normalizeSource(
-  value = ""
-) {
-  const source = safeText(
-    value,
-    USUARIOS_SOURCES.IDLE
-  );
-
-  const allowed =
-    Object.values(USUARIOS_SOURCES);
-
-  return allowed.includes(source)
-    ? source
-    : USUARIOS_SOURCES.IDLE;
-}
-
-function normalizeSortDir(
-  value = USUARIOS_DEFAULT_SORT_DIR
-) {
-  const dir = safeText(
-    value,
-    USUARIOS_DEFAULT_SORT_DIR
-  ).toLowerCase();
-
-  return dir === "asc"
-    ? "asc"
-    : "desc";
-}
-
-function normalizeUsuarioRow(
+function normalizeHomeUser(
   value = {}
 ) {
-  const row =
+  const user =
     safeObject(value);
 
   return {
-    id: safeText(
-      row.id ||
-        row.userId,
-      ""
-    ),
-    userId: safeText(
-      row.userId ||
-        row.id,
-      ""
-    ),
-    username: safeText(
-      row.username,
-      ""
-    ),
-    displayName: safeText(
-      row.displayName ||
-        row.fullName ||
-        row.name,
-      ""
-    ),
-    email: safeText(
-      row.email,
-      ""
-    ).toLowerCase(),
+    id:
+      safeText(user.id, "") ||
+      null,
     role: safeText(
-      row.role,
-      "user"
-    ).toLowerCase(),
-    status: safeText(
-      row.status,
+      user.role,
       "unknown"
-    ).toLowerCase(),
-    avatar: safeText(
-      row.avatar,
-      ""
-    ),
-    hasAvatar: safeBoolean(
-      row.hasAvatar,
-      false
-    ),
-    phone: safeText(
-      row.phone,
-      ""
-    ),
-    emailVerified: safeBoolean(
-      row.emailVerified,
-      false
-    ),
-    lastLoginAt: safeText(
-      row.lastLoginAt,
-      ""
-    ),
-    createdAt: safeText(
-      row.createdAt,
-      ""
-    ),
-    updatedAt: safeText(
-      row.updatedAt,
-      ""
-    ),
-    raw: safeObject(row.raw || {}),
-  };
-}
-
-function normalizeUsuariosRows(
-  value = []
-) {
-  return safeArray(value)
-    .map(normalizeUsuarioRow)
-    .filter(Boolean);
-}
-
-function normalizeUsuariosMeta(
-  value = {}
-) {
-  const meta =
-    safeObject(value);
-
-  const page = safePositiveInt(
-    meta.page,
-    USUARIOS_DEFAULT_PAGE
-  );
-
-  const pageSize =
-    safePositiveInt(
-      meta.pageSize,
-      USUARIOS_DEFAULT_PAGE_SIZE
-    );
-
-  const total = safePositiveInt(
-    meta.total,
-    0
-  );
-
-  const totalPages =
-    safePositiveInt(
-      meta.totalPages,
-      pageSize > 0
-        ? Math.ceil(total / pageSize)
-        : 0
-    );
-
-  return {
-    page,
-    pageSize,
-    total,
-    totalPages,
-    count: safePositiveInt(
-      meta.count,
-      0
-    ),
-    hasNextPage: safeBoolean(
-      meta.hasNextPage,
-      page < totalPages
-    ),
-    hasPrevPage: safeBoolean(
-      meta.hasPrevPage,
-      page > 1
-    ),
-    sortBy: safeText(
-      meta.sortBy,
-      USUARIOS_DEFAULT_SORT_BY
-    ),
-    sortDir: normalizeSortDir(
-      meta.sortDir
-    ),
-    q: safeText(meta.q, ""),
-    role: safeText(meta.role, ""),
-    status: safeText(
-      meta.status,
-      ""
     ),
   };
 }
 
-function normalizeUsuariosStats(
+function normalizeHomeKpis(
   value = {}
 ) {
-  const stats =
+  const kpis =
     safeObject(value);
 
   return {
-    total: safePositiveInt(
-      stats.total,
+    ticketsOpen: safeNumber(
+      kpis.ticketsOpen,
       0
     ),
-    admins: safePositiveInt(
-      stats.admins,
+    ticketsUrgent: safeNumber(
+      kpis.ticketsUrgent,
       0
     ),
-    active: safePositiveInt(
-      stats.active,
+    clientesTotal: safeNumber(
+      kpis.clientesTotal,
       0
     ),
-    inactive: safePositiveInt(
-      stats.inactive,
+    facturasPending: safeNumber(
+      kpis.facturasPending,
       0
     ),
-    withAvatar: safePositiveInt(
-      stats.withAvatar,
+    usersTotal: safeNumber(
+      kpis.usersTotal,
+      0
+    ),
+    facturacionTotal: safeNumber(
+      kpis.facturacionTotal,
       0
     ),
   };
 }
 
-function normalizeUsuariosAlert(
+function normalizeHomeAlert(
   value = {},
   index = 0
 ) {
@@ -451,829 +262,692 @@ function normalizeUsuariosAlert(
     ),
     code: safeText(
       item.code,
-      `USERS_ALERT_${index + 1}`
+      `ALERT_${index + 1}`
     ),
     message: safeText(
       item.message,
-      "Aviso"
+      "Alerta"
     ),
   };
 }
 
-function normalizeUsuariosAlerts(
-  value = []
+function normalizeHomeActivityItem(
+  value = {},
+  index = 0
 ) {
-  return safeArray(value)
-    .map(normalizeUsuariosAlert)
-    .filter(Boolean);
-}
-
-function normalizeUsuariosParams(
-  value = {}
-) {
-  const params =
+  const item =
     safeObject(value);
 
   return {
-    page: safePositiveInt(
-      params.page,
-      USUARIOS_DEFAULT_PAGE
+    id: safeText(
+      item.id,
+      `activity-${index + 1}`
     ),
-    pageSize: safePositiveInt(
-      params.pageSize,
-      USUARIOS_DEFAULT_PAGE_SIZE
+    text: safeText(
+      item.text ||
+        item.label ||
+        item.title,
+      "Movimiento"
     ),
-    sortBy: safeText(
-      params.sortBy,
-      USUARIOS_DEFAULT_SORT_BY
+    label: safeText(
+      item.label ||
+        item.text ||
+        item.title,
+      "Movimiento"
     ),
-    sortDir: normalizeSortDir(
-      params.sortDir
-    ),
-    q: safeText(
-      params.q ||
-        params.search ||
-        params.query,
+    date: safeText(
+      item.date ||
+        item.createdAt,
       ""
     ),
-    role: safeText(
-      params.role,
+    createdAt: safeText(
+      item.createdAt ||
+        item.date,
       ""
     ),
-    status: safeText(
-      params.status,
-      ""
+  };
+}
+
+function normalizeHomeQuickAction(
+  value = {},
+  index = 0
+) {
+  const item =
+    safeObject(value);
+
+  return {
+    key: safeText(
+      item.key,
+      `action-${index + 1}`
     ),
-    includeStats: safeBoolean(
-      params.includeStats,
+    label: safeText(
+      item.label,
+      "Acción"
+    ),
+    href: safeText(
+      item.href,
+      "#"
+    ),
+  };
+}
+
+function normalizeHomeHealth(
+  value = {}
+) {
+  const health =
+    safeObject(value);
+
+  return {
+    tickets: safeBoolean(
+      health.tickets,
+      false
+    ),
+    clientes: safeBoolean(
+      health.clientes,
+      false
+    ),
+    facturas: safeBoolean(
+      health.facturas,
+      false
+    ),
+    users: safeBoolean(
+      health.users,
       false
     ),
   };
 }
 
-function normalizeUsuariosUiState(
-  value = {}
+function normalizeHomeSummary(
+  summary = {}
 ) {
-  const ui =
-    safeObject(value);
+  const next =
+    safeObject(summary);
 
   return {
-    mounted: safeBoolean(
-      ui.mounted,
-      false
+    user: normalizeHomeUser(
+      next.user
     ),
-    selectedUserId: safeText(
-      ui.selectedUserId,
+
+    generatedAt: safeText(
+      next.generatedAt,
       ""
     ),
-    activeFilter: safeText(
-      ui.activeFilter,
-      ""
+
+    kpis: normalizeHomeKpis(
+      next.kpis
     ),
-    lastAction: safeText(
-      ui.lastAction,
-      ""
-    ),
-    searchDraft: safeText(
-      ui.searchDraft,
-      ""
+
+    alerts: safeArray(next.alerts)
+      .map(normalizeHomeAlert)
+      .filter(Boolean),
+
+    recentActivity: safeArray(
+      next.recentActivity
+    )
+      .map(
+        normalizeHomeActivityItem
+      )
+      .filter(Boolean),
+
+    quickActions: safeArray(
+      next.quickActions
+    )
+      .map(
+        normalizeHomeQuickAction
+      )
+      .filter(Boolean),
+
+    health: normalizeHomeHealth(
+      next.health
     ),
   };
+}
+
+function normalizeSource(
+  value = ""
+) {
+  const source = safeText(
+    value,
+    HOME_SOURCES.IDLE
+  );
+
+  const allowed =
+    Object.values(HOME_SOURCES);
+
+  return allowed.includes(source)
+    ? source
+    : HOME_SOURCES.IDLE;
 }
 
 /* =========================================================
    READ HELPERS
 ========================================================= */
 
-export function getUsuariosState() {
-  return clone(usuariosState);
+export function getHomeState() {
+  return clone(homeState);
 }
 
-export function getUsuariosRows() {
-  return clone(usuariosState.rows);
-}
-
-export function getUsuariosMeta() {
-  return clone(usuariosState.meta);
-}
-
-export function getUsuariosStats() {
-  return clone(usuariosState.stats);
-}
-
-export function getUsuariosAlerts() {
+export function getHomeSummary() {
   return clone(
-    usuariosState.alerts
+    homeState.summary
   );
 }
 
-export function getUsuariosParams() {
-  return clone(
-    usuariosState.params
-  );
-}
-
-export function getUsuariosSource() {
+export function getHomeSource() {
   return normalizeSource(
-    usuariosState.source
+    homeState.source
   );
 }
 
-export function isUsuariosLoading() {
-  return usuariosState.loading === true;
+export function isHomeLoading() {
+  return homeState.loading === true;
 }
 
-export function isUsuariosLoaded() {
-  return usuariosState.loaded === true;
+export function isHomeLoaded() {
+  return homeState.loaded === true;
 }
 
-export function isUsuariosDegraded() {
-  return usuariosState.degraded === true;
+export function isHomeDegraded() {
+  return homeState.degraded === true;
 }
 
-export function isUsuariosRemoteOk() {
-  return usuariosState.remoteOk === true;
+export function isHomeRemoteOk() {
+  return homeState.remoteOk === true;
 }
 
-export function getUsuariosError() {
-  return usuariosState.error || null;
+export function getHomeError() {
+  return homeState.error || null;
 }
 
-export function getUsuariosLastError() {
-  return usuariosState.lastError || null;
+export function getHomeLastError() {
+  return homeState.lastError || null;
 }
 
-export function getUsuariosLastSyncAt() {
+export function getHomeLastSyncAt() {
   return safeText(
-    usuariosState.lastSyncAt,
+    homeState.lastSyncAt,
     ""
   );
 }
 
-export function getUsuariosHydratedAt() {
+export function getHomeHydratedAt() {
   return safeText(
-    usuariosState.hydratedAt,
+    homeState.hydratedAt,
     ""
   );
 }
 
-export function getUsuariosCacheHit() {
+export function getHomeCacheHit() {
   return safeBoolean(
-    usuariosState.cacheHit,
+    homeState.cacheHit,
     false
   );
 }
 
-export function getUsuariosUiState() {
+export function getHomeUiState() {
   return clone(
-    usuariosState.ui
+    homeState.ui
   );
 }
 
-export function getUsuarioByIdFromState(
-  userId = ""
-) {
-  const id = safeText(userId, "");
+export function getHomeKpis() {
+  return clone(
+    homeState.summary?.kpis ||
+      createInitialHomeKpis()
+  );
+}
 
-  if (!id) {
-    return null;
-  }
+export function getHomeAlerts() {
+  return clone(
+    homeState.summary?.alerts || []
+  );
+}
 
-  const found =
-    safeArray(usuariosState.rows).find(
-      (row) =>
-        safeText(
-          row?.userId ||
-            row?.id,
-          ""
-        ) === id
-    ) || null;
+export function getHomeRecentActivity() {
+  return clone(
+    homeState.summary
+      ?.recentActivity || []
+  );
+}
 
-  return found
-    ? clone(found)
-    : null;
+export function getHomeQuickActions() {
+  return clone(
+    homeState.summary
+      ?.quickActions || []
+  );
+}
+
+export function getHomeHealth() {
+  return clone(
+    homeState.summary?.health ||
+      createInitialHomeHealth()
+  );
 }
 
 /* =========================================================
    WRITE HELPERS
 ========================================================= */
 
-export function resetUsuariosState() {
+export function resetHomeState() {
   const next =
-    createInitialUsuariosState();
+    createInitialHomeState();
 
-  Object.keys(usuariosState).forEach(
+  Object.keys(homeState).forEach(
     (key) => {
-      delete usuariosState[key];
+      delete homeState[key];
     }
   );
 
-  Object.assign(
-    usuariosState,
-    next
-  );
+  Object.assign(homeState, next);
 
-  return getUsuariosState();
+  return getHomeState();
 }
 
-export function setUsuariosLoading(
+export function setHomeLoading(
   value = true
 ) {
-  usuariosState.loading =
+  homeState.loading =
     value === true;
 
   if (value === true) {
-    usuariosState.error = null;
+    homeState.error = null;
   }
 
-  return usuariosState.loading;
+  return homeState.loading;
 }
 
-export function setUsuariosLoaded(
+export function setHomeLoaded(
   value = true
 ) {
-  usuariosState.loaded =
+  homeState.loaded =
     value === true;
 
-  return usuariosState.loaded;
+  return homeState.loaded;
 }
 
-export function setUsuariosError(
+export function setHomeError(
   error = null
 ) {
-  usuariosState.error =
+  homeState.error =
     error || null;
 
   if (error) {
-    usuariosState.loading = false;
-    usuariosState.lastError =
+    homeState.loading = false;
+    homeState.lastError =
       error || null;
   }
 
-  return usuariosState.error;
+  return homeState.error;
 }
 
-export function clearUsuariosError() {
-  usuariosState.error = null;
+export function clearHomeError() {
+  homeState.error = null;
   return null;
 }
 
-export function clearUsuariosLastError() {
-  usuariosState.lastError = null;
+export function clearHomeLastError() {
+  homeState.lastError = null;
   return null;
 }
 
-export function setUsuariosRows(
-  rows = []
+export function setHomeSummary(
+  summary = {}
 ) {
-  usuariosState.rows =
-    normalizeUsuariosRows(rows);
+  homeState.summary =
+    normalizeHomeSummary(
+      summary
+    );
 
-  return getUsuariosRows();
+  return getHomeSummary();
 }
 
-export function patchUsuarioRow(
-  userId = "",
+export function patchHomeSummary(
   patch = {}
 ) {
-  const id = safeText(userId, "");
+  const current =
+    safeObject(homeState.summary);
 
-  if (!id) {
-    return getUsuariosRows();
-  }
-
-  usuariosState.rows =
-    safeArray(usuariosState.rows).map(
-      (row) => {
-        const currentId =
-          safeText(
-            row?.userId ||
-              row?.id,
-            ""
-          );
-
-        if (currentId !== id) {
-          return row;
-        }
-
-        return normalizeUsuarioRow({
-          ...safeObject(row),
-          ...safeObject(patch),
-        });
-      }
-    );
-
-  return getUsuariosRows();
-}
-
-export function prependUsuarioRow(
-  row = {}
-) {
-  const normalized =
-    normalizeUsuarioRow(row);
-
-  const existingId =
-    safeText(
-      normalized.userId ||
-        normalized.id,
-      ""
-    );
-
-  if (!existingId) {
-    return getUsuariosRows();
-  }
-
-  const filtered =
-    safeArray(usuariosState.rows).filter(
-      (item) =>
-        safeText(
-          item?.userId ||
-            item?.id,
-          ""
-        ) !== existingId
-    );
-
-  usuariosState.rows = [
-    normalized,
-    ...filtered,
-  ];
-
-  return getUsuariosRows();
-}
-
-export function removeUsuarioRow(
-  userId = ""
-) {
-  const id = safeText(userId, "");
-
-  usuariosState.rows =
-    safeArray(usuariosState.rows).filter(
-      (row) =>
-        safeText(
-          row?.userId ||
-            row?.id,
-          ""
-        ) !== id
-    );
-
-  return getUsuariosRows();
-}
-
-export function clearUsuariosRows() {
-  usuariosState.rows = [];
-  return getUsuariosRows();
-}
-
-export function setUsuariosMeta(
-  meta = {}
-) {
-  usuariosState.meta =
-    normalizeUsuariosMeta(meta);
-
-  return getUsuariosMeta();
-}
-
-export function patchUsuariosMeta(
-  patch = {}
-) {
-  return setUsuariosMeta({
-    ...safeObject(
-      usuariosState.meta
-    ),
+  return setHomeSummary({
+    ...current,
     ...safeObject(patch),
   });
 }
 
-export function setUsuariosStats(
-  stats = {}
-) {
-  usuariosState.stats =
-    normalizeUsuariosStats(stats);
+export function clearHomeSummary() {
+  homeState.summary =
+    createInitialHomeSummary();
 
-  return getUsuariosStats();
+  return getHomeSummary();
 }
 
-export function patchUsuariosStats(
-  patch = {}
+export function setHomeSource(
+  value = HOME_SOURCES.IDLE
 ) {
-  return setUsuariosStats({
-    ...safeObject(
-      usuariosState.stats
-    ),
-    ...safeObject(patch),
-  });
-}
-
-export function setUsuariosAlerts(
-  alerts = []
-) {
-  usuariosState.alerts =
-    normalizeUsuariosAlerts(alerts);
-
-  return getUsuariosAlerts();
-}
-
-export function clearUsuariosAlerts() {
-  usuariosState.alerts = [];
-  return [];
-}
-
-export function setUsuariosParams(
-  params = {}
-) {
-  usuariosState.params =
-    normalizeUsuariosParams(
-      params
-    );
-
-  return getUsuariosParams();
-}
-
-export function patchUsuariosParams(
-  patch = {}
-) {
-  return setUsuariosParams({
-    ...safeObject(
-      usuariosState.params
-    ),
-    ...safeObject(patch),
-  });
-}
-
-export function setUsuariosSource(
-  value = USUARIOS_SOURCES.IDLE
-) {
-  usuariosState.source =
+  homeState.source =
     normalizeSource(value);
 
-  return usuariosState.source;
+  return homeState.source;
 }
 
-export function setUsuariosRemoteOk(
+export function setHomeRemoteOk(
   value = false
 ) {
-  usuariosState.remoteOk =
+  homeState.remoteOk =
     value === true;
 
-  return usuariosState.remoteOk;
+  return homeState.remoteOk;
 }
 
-export function setUsuariosDegraded(
+export function setHomeDegraded(
   value = false
 ) {
-  usuariosState.degraded =
+  homeState.degraded =
     value === true;
 
-  return usuariosState.degraded;
+  return homeState.degraded;
 }
 
-export function setUsuariosLastSyncAt(
+export function setHomeLastSyncAt(
   value = ""
 ) {
-  usuariosState.lastSyncAt =
+  homeState.lastSyncAt =
     safeText(value, "");
 
-  return usuariosState.lastSyncAt;
+  return homeState.lastSyncAt;
 }
 
-export function setUsuariosHydratedAt(
+export function setHomeHydratedAt(
   value = ""
 ) {
-  usuariosState.hydratedAt =
+  homeState.hydratedAt =
     safeText(value, "");
 
-  return usuariosState.hydratedAt;
+  return homeState.hydratedAt;
 }
 
-export function setUsuariosCacheHit(
+export function setHomeCacheHit(
   value = false
 ) {
-  usuariosState.cacheHit =
+  homeState.cacheHit =
     value === true;
 
-  return usuariosState.cacheHit;
+  return homeState.cacheHit;
 }
 
-export function setUsuariosMounted(
+export function setHomeMounted(
   value = true
 ) {
-  usuariosState.ui.mounted =
+  homeState.ui.mounted =
     value === true;
 
-  return usuariosState.ui.mounted;
+  return homeState.ui.mounted;
 }
 
-export function setUsuariosSelectedUserId(
+export function setHomeActiveCard(
   value = ""
 ) {
-  usuariosState.ui.selectedUserId =
+  homeState.ui.activeCard =
     safeText(value, "");
 
-  return usuariosState.ui.selectedUserId;
+  return homeState.ui.activeCard;
 }
 
-export function setUsuariosActiveFilter(
+export function setHomeLastAction(
   value = ""
 ) {
-  usuariosState.ui.activeFilter =
+  homeState.ui.lastAction =
     safeText(value, "");
 
-  return usuariosState.ui.activeFilter;
+  return homeState.ui.lastAction;
 }
 
-export function setUsuariosLastAction(
-  value = ""
-) {
-  usuariosState.ui.lastAction =
-    safeText(value, "");
-
-  return usuariosState.ui.lastAction;
-}
-
-export function setUsuariosSearchDraft(
-  value = ""
-) {
-  usuariosState.ui.searchDraft =
-    safeText(value, "");
-
-  return usuariosState.ui.searchDraft;
-}
-
-export function patchUsuariosUiState(
+export function patchHomeUiState(
   patch = {}
 ) {
-  usuariosState.ui =
-    normalizeUsuariosUiState({
-      ...safeObject(
-        usuariosState.ui
-      ),
-      ...safeObject(patch),
-    });
+  const next =
+    safeObject(patch);
 
-  return getUsuariosUiState();
+  homeState.ui = {
+    ...homeState.ui,
+    ...next,
+    mounted: Object.prototype.hasOwnProperty.call(
+      next,
+      "mounted"
+    )
+      ? safeBoolean(
+          next.mounted,
+          homeState.ui.mounted
+        )
+      : homeState.ui.mounted,
+    activeCard:
+      Object.prototype.hasOwnProperty.call(
+        next,
+        "activeCard"
+      )
+        ? safeText(
+            next.activeCard,
+            ""
+          )
+        : homeState.ui.activeCard,
+    lastAction:
+      Object.prototype.hasOwnProperty.call(
+        next,
+        "lastAction"
+      )
+        ? safeText(
+            next.lastAction,
+            ""
+          )
+        : homeState.ui.lastAction,
+  };
+
+  return getHomeUiState();
 }
 
 /* =========================================================
    LIFECYCLE HELPERS
 ========================================================= */
 
-export function startUsuariosLoad(
-  params = {}
-) {
-  clearUsuariosError();
-  setUsuariosLoading(true);
-  setUsuariosLoaded(false);
-  setUsuariosCacheHit(false);
-  setUsuariosRemoteOk(false);
-  setUsuariosDegraded(false);
-  setUsuariosParams(params);
+export function startHomeLoad() {
+  clearHomeError();
+  setHomeLoading(true);
+  setHomeLoaded(false);
+  setHomeCacheHit(false);
+  setHomeRemoteOk(false);
+  setHomeDegraded(false);
 
   if (
-    getUsuariosSource() ===
-    USUARIOS_SOURCES.ERROR
+    getHomeSource() ===
+    HOME_SOURCES.ERROR
   ) {
-    setUsuariosSource(
-      USUARIOS_SOURCES.IDLE
+    setHomeSource(
+      HOME_SOURCES.IDLE
     );
   }
 
-  return getUsuariosState();
+  return getHomeState();
 }
 
-export function finishUsuariosLoad({
-  rows = [],
-  meta = {},
-  stats = {},
-  alerts = [],
-  params = {},
-  source = USUARIOS_SOURCES.REMOTE,
+export function finishHomeLoad({
+  summary = null,
+  source = HOME_SOURCES.REMOTE,
   remoteOk = false,
   degraded = false,
   syncedAt = "",
   hydratedAt = "",
   cacheHit = false,
-  error = null,
 } = {}) {
-  setUsuariosRows(rows);
-  setUsuariosMeta(meta);
-  setUsuariosStats(stats);
-  setUsuariosAlerts(alerts);
-  setUsuariosParams(params);
+  if (summary) {
+    setHomeSummary(summary);
+  }
 
-  setUsuariosLoading(false);
-  setUsuariosLoaded(true);
-  setUsuariosSource(source);
-  setUsuariosRemoteOk(
+  setHomeLoading(false);
+  setHomeLoaded(true);
+  setHomeSource(source);
+  setHomeRemoteOk(
     remoteOk === true
   );
-  setUsuariosDegraded(
+  setHomeDegraded(
     degraded === true
   );
-  setUsuariosCacheHit(
+  setHomeCacheHit(
     cacheHit === true
   );
 
   if (syncedAt) {
-    setUsuariosLastSyncAt(
+    setHomeLastSyncAt(
       syncedAt
     );
   }
 
   if (hydratedAt) {
-    setUsuariosHydratedAt(
+    setHomeHydratedAt(
       hydratedAt
     );
   }
 
-  if (error) {
-    setUsuariosError(error);
-    clearUsuariosError();
-  }
-
-  return getUsuariosState();
+  return getHomeState();
 }
 
-export function failUsuariosLoad(
+export function failHomeLoad(
   error = null
 ) {
-  setUsuariosLoading(false);
-  setUsuariosLoaded(false);
-  setUsuariosSource(
-    USUARIOS_SOURCES.ERROR
+  setHomeLoading(false);
+  setHomeLoaded(false);
+  setHomeSource(
+    HOME_SOURCES.ERROR
   );
-  setUsuariosRemoteOk(false);
-  setUsuariosDegraded(true);
-  setUsuariosError(error);
+  setHomeRemoteOk(false);
+  setHomeDegraded(true);
+  setHomeError(error);
 
-  return getUsuariosState();
+  return getHomeState();
 }
 
 /* =========================================================
    COMPAT API HELPERS
-   Alias explícito para mantener coherencia con usuarios.api.js
+   Alias explícito para mantener coherencia con home.api.js
 ========================================================= */
 
-export function beginUsuariosLoad(
-  params = {}
-) {
-  return startUsuariosLoad(params);
+export function beginHomeLoad() {
+  return startHomeLoad();
 }
 
-export function completeUsuariosLoad({
-  rows = [],
-  meta = {},
-  stats = {},
-  alerts = [],
-  params = {},
-  source = USUARIOS_SOURCES.REMOTE,
+export function completeHomeLoad({
+  summary = null,
+  source = HOME_SOURCES.REMOTE,
   remoteOk = false,
   degraded = false,
   syncedAt = "",
   hydratedAt = "",
   cacheHit = false,
-  error = null,
 } = {}) {
-  return finishUsuariosLoad({
-    rows,
-    meta,
-    stats,
-    alerts,
-    params,
+  return finishHomeLoad({
+    summary,
     source,
     remoteOk,
     degraded,
     syncedAt,
     hydratedAt,
     cacheHit,
-    error,
   });
 }
 
-export function rejectUsuariosLoad(
+export function rejectHomeLoad(
   error = null
 ) {
-  return failUsuariosLoad(error);
+  return failHomeLoad(error);
 }
 
-export function writeUsuariosRows(
-  rows = []
+export function writeHomeSummary(
+  summary = {}
 ) {
-  return setUsuariosRows(rows);
+  return setHomeSummary(summary);
 }
 
-export function writeUsuariosMeta(
-  meta = {}
-) {
-  return setUsuariosMeta(meta);
-}
-
-export function writeUsuariosStats(
-  stats = {}
-) {
-  return setUsuariosStats(stats);
-}
-
-export function setUsuariosSyncTimestamp(
+export function setHomeSyncTimestamp(
   value = ""
 ) {
-  return setUsuariosLastSyncAt(value);
+  return setHomeLastSyncAt(value);
 }
 
-export function setUsuariosHydrationTimestamp(
+export function setHomeHydrationTimestamp(
   value = ""
 ) {
-  return setUsuariosHydratedAt(value);
+  return setHomeHydratedAt(value);
 }
 
-export function markUsuariosCacheHit(
+export function markHomeCacheHit(
   value = false
 ) {
-  return setUsuariosCacheHit(value);
+  return setHomeCacheHit(value);
 }
 
 /* =========================================================
    EXPORT OBJECT
 ========================================================= */
 
-export const UsuariosState = {
-  USUARIOS_CACHE_KEY,
-  USUARIOS_CACHE_TTL,
-  USUARIOS_DEFAULT_PAGE,
-  USUARIOS_DEFAULT_PAGE_SIZE,
-  USUARIOS_DEFAULT_SORT_BY,
-  USUARIOS_DEFAULT_SORT_DIR,
-  USUARIOS_SOURCES,
+export const HomeState = {
+  HOME_CACHE_KEY,
+  HOME_CACHE_TTL,
+  HOME_SOURCES,
 
-  createInitialUsuarioRow,
-  createInitialUsuariosMeta,
-  createInitialUsuariosStats,
-  createInitialUsuariosParams,
-  createInitialUsuariosState,
+  createInitialHomeUser,
+  createInitialHomeKpis,
+  createInitialHomeHealth,
+  createInitialHomeSummary,
+  createInitialHomeState,
 
-  getUsuariosState,
-  getUsuariosRows,
-  getUsuariosMeta,
-  getUsuariosStats,
-  getUsuariosAlerts,
-  getUsuariosParams,
-  getUsuariosSource,
-  isUsuariosLoading,
-  isUsuariosLoaded,
-  isUsuariosDegraded,
-  isUsuariosRemoteOk,
-  getUsuariosError,
-  getUsuariosLastError,
-  getUsuariosLastSyncAt,
-  getUsuariosHydratedAt,
-  getUsuariosCacheHit,
-  getUsuariosUiState,
-  getUsuarioByIdFromState,
+  getHomeState,
+  getHomeSummary,
+  getHomeSource,
+  getHomeKpis,
+  getHomeAlerts,
+  getHomeRecentActivity,
+  getHomeQuickActions,
+  getHomeHealth,
+  isHomeLoading,
+  isHomeLoaded,
+  isHomeDegraded,
+  isHomeRemoteOk,
+  getHomeError,
+  getHomeLastError,
+  getHomeLastSyncAt,
+  getHomeHydratedAt,
+  getHomeCacheHit,
+  getHomeUiState,
 
-  resetUsuariosState,
-  setUsuariosLoading,
-  setUsuariosLoaded,
-  setUsuariosError,
-  clearUsuariosError,
-  clearUsuariosLastError,
-  setUsuariosRows,
-  patchUsuarioRow,
-  prependUsuarioRow,
-  removeUsuarioRow,
-  clearUsuariosRows,
-  setUsuariosMeta,
-  patchUsuariosMeta,
-  setUsuariosStats,
-  patchUsuariosStats,
-  setUsuariosAlerts,
-  clearUsuariosAlerts,
-  setUsuariosParams,
-  patchUsuariosParams,
-  setUsuariosSource,
-  setUsuariosRemoteOk,
-  setUsuariosDegraded,
-  setUsuariosLastSyncAt,
-  setUsuariosHydratedAt,
-  setUsuariosCacheHit,
-  setUsuariosMounted,
-  setUsuariosSelectedUserId,
-  setUsuariosActiveFilter,
-  setUsuariosLastAction,
-  setUsuariosSearchDraft,
-  patchUsuariosUiState,
+  resetHomeState,
+  setHomeLoading,
+  setHomeLoaded,
+  setHomeError,
+  clearHomeError,
+  clearHomeLastError,
+  setHomeSummary,
+  patchHomeSummary,
+  clearHomeSummary,
+  setHomeSource,
+  setHomeRemoteOk,
+  setHomeDegraded,
+  setHomeLastSyncAt,
+  setHomeHydratedAt,
+  setHomeCacheHit,
+  setHomeMounted,
+  setHomeActiveCard,
+  setHomeLastAction,
+  patchHomeUiState,
 
-  startUsuariosLoad,
-  finishUsuariosLoad,
-  failUsuariosLoad,
+  startHomeLoad,
+  finishHomeLoad,
+  failHomeLoad,
 
-  beginUsuariosLoad,
-  completeUsuariosLoad,
-  rejectUsuariosLoad,
-  writeUsuariosRows,
-  writeUsuariosMeta,
-  writeUsuariosStats,
-  setUsuariosSyncTimestamp,
-  setUsuariosHydrationTimestamp,
-  markUsuariosCacheHit,
+  beginHomeLoad,
+  completeHomeLoad,
+  rejectHomeLoad,
+  writeHomeSummary,
+  setHomeSyncTimestamp,
+  setHomeHydrationTimestamp,
+  markHomeCacheHit,
 };
 
-export default UsuariosState;
+export default HomeState;

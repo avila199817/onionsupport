@@ -3,23 +3,21 @@
    Archivo: src/views/incidencias/incidencias.actions.js
 
    RESPONSABILIDADES:
-   - centralizar acciones operativas del módulo
-   - abrir detalle ticket REAL
-   - pintar modal premium
-   - copiar id / código
+   - abrir detalle ticket PRO
+   - modal premium enterprise
+   - soportar updates reales
+   - timeline / metadata
+   - adjuntos
+   - copiar id
    - export csv
-   - desacoplar view de lógica
+   - cerrar limpio
+   - tolerancia payloads heterogéneos
 
    FIX CRÍTICO:
-   - apiClient devuelve payload directo
-   - openTicket recibía string pero esperaba object
-   - no existía modal renderer real
-   - fallback store/api robusto
-
-   HARDENING PRO:
-   - cero throws UI
-   - modal idempotente
-   - cleanup seguro
+   - cliente object => nombre real
+   - attachments reales
+   - comments/history opcional
+   - botones update listos
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -36,8 +34,11 @@ import {
 import {
   safeText,
   safeNumber,
+  safeArray,
+  safeObject,
   escapeHtml,
   formatDate,
+  formatRelativeDate,
   showToast,
 } from "./incidencias.utils.js";
 
@@ -46,117 +47,54 @@ import {
 ========================================================= */
 
 function safeEmit(
-  eventName = "",
+  event = "",
   payload = {}
 ) {
   try {
     AppCore?.events?.emit?.(
-      eventName,
+      event,
       payload
     );
   } catch {}
 }
 
+function modalId() {
+  return "incidencias-modal";
+}
+
 function getBody() {
-  try {
-    return document.body || null;
-  } catch {
-    return null;
-  }
+  return document.body;
 }
 
-function getModalId() {
-  return "incidencias-ticket-modal";
-}
-
-function removeExistingModal() {
+function closeTicketModal() {
   try {
     document
       .getElementById(
-        getModalId()
+        modalId()
       )
-      ?.remove?.();
-  } catch {}
-}
-
-async function copyText(
-  text = ""
-) {
-  const value =
-    safeText(text, "");
-
-  if (!value) {
-    return false;
-  }
-
-  try {
-    if (
-      navigator?.clipboard
-        ?.writeText
-    ) {
-      await navigator.clipboard.writeText(
-        value
-      );
-      return true;
-    }
+      ?.remove();
   } catch {}
 
   try {
-    const el =
-      document.createElement(
-        "textarea"
-      );
-
-    el.value = value;
-    el.style.position =
-      "fixed";
-    el.style.opacity =
-      "0";
-
-    document.body.appendChild(
-      el
+    document.body.classList.remove(
+      "modal-open"
     );
+  } catch {}
 
-    el.select();
-
-    const ok =
-      document.execCommand(
-        "copy"
-      );
-
-    el.remove();
-
-    return Boolean(ok);
-  } catch {
-    return false;
-  }
+  return true;
 }
-
-/* =========================================================
-   DETAIL HELPERS
-========================================================= */
 
 function pickDetail(
   payload = null
 ) {
-  if (!payload) {
-    return null;
-  }
-
-  if (payload.ticket) {
-    return payload.ticket;
-  }
-
-  if (payload.data) {
-    return payload.data;
-  }
-
+  if (!payload) return null;
+  if (payload.ticket) return payload.ticket;
+  if (payload.data) return payload.data;
+  if (payload.item) return payload.item;
   return payload;
 }
 
-function resolveId(
-  item = {}
-) {
+function getId(item = {}) {
   return safeText(
     item.ticketId ||
       item.id ||
@@ -165,9 +103,7 @@ function resolveId(
   );
 }
 
-function resolveTitle(
-  item = {}
-) {
+function getTitle(item = {}) {
   return safeText(
     item.title ||
       item.subject ||
@@ -176,7 +112,7 @@ function resolveTitle(
   );
 }
 
-function resolveDescription(
+function getDescription(
   item = {}
 ) {
   return safeText(
@@ -188,30 +124,82 @@ function resolveDescription(
   );
 }
 
-function resolveClient(
+function getClient(
   item = {}
 ) {
-  return safeText(
+  const c =
     item.client ||
-      item.clientName ||
-      item.cliente ||
-      item?.cliente?.nombre,
+    item.cliente ||
+    item.customer;
+
+  if (
+    c &&
+    typeof c === "object"
+  ) {
+    return safeText(
+      c.name ||
+        c.nombre ||
+        c.company,
+      "Cliente"
+    );
+  }
+
+  return safeText(
+    item.clientName ||
+      c,
     "Cliente"
   );
 }
 
-function resolveEmail(
+function getEmail(
   item = {}
 ) {
+  const c =
+    item.client ||
+    item.cliente;
+
+  if (
+    c &&
+    typeof c === "object"
+  ) {
+    return safeText(
+      c.email,
+      "Sin email"
+    );
+  }
+
   return safeText(
     item.clientEmail ||
-      item.email ||
-      item?.cliente?.email,
+      item.email,
     "Sin email"
   );
 }
 
-function resolveStatus(
+function getAssigned(
+  item = {}
+) {
+  const a =
+    item.assignedTo ||
+    item.assignee ||
+    item.tecnico;
+
+  if (
+    a &&
+    typeof a === "object"
+  ) {
+    return safeText(
+      a.name,
+      "No asignado"
+    );
+  }
+
+  return safeText(
+    a,
+    "No asignado"
+  );
+}
+
+function getStatus(
   item = {}
 ) {
   return safeText(
@@ -221,7 +209,7 @@ function resolveStatus(
   );
 }
 
-function resolvePriority(
+function getPriority(
   item = {}
 ) {
   return safeText(
@@ -231,218 +219,496 @@ function resolvePriority(
   );
 }
 
-function resolveAssigned(
+function getAttachments(
   item = {}
 ) {
-  return safeText(
-    item.assignedTo ||
-      item.assignee ||
-      item?.tecnico?.name,
-    "No asignado"
+  return safeArray(
+    item.attachments ||
+      item.files ||
+      item.adjuntos
   );
+}
+
+function getHistory(
+  item = {}
+) {
+  return safeArray(
+    item.history ||
+      item.timeline ||
+      item.logs ||
+      item.comments
+  );
+}
+
+function renderField(
+  label,
+  value
+) {
+  return `
+    <div style="display:grid;gap:6px;">
+      <span style="
+        font-size:11px;
+        color:var(--text-faint,#8b8b8b);
+        text-transform:uppercase;
+        letter-spacing:.08em;
+        font-weight:700;
+      ">
+        ${escapeHtml(label)}
+      </span>
+
+      <strong style="
+        color:var(--text-strong,#fff);
+        font-size:15px;
+        line-height:1.35;
+      ">
+        ${escapeHtml(value)}
+      </strong>
+    </div>
+  `;
+}
+
+function renderAttachments(
+  files = []
+) {
+  if (!files.length) {
+    return `
+      <div style="
+        padding:14px;
+        border-radius:16px;
+        border:1px solid var(--border-soft,#2b2b2b);
+        background:var(--surface-glass,#171717);
+        color:#9a9a9a;
+      ">
+        Sin adjuntos
+      </div>
+    `;
+  }
+
+  return `
+    <div style="
+      display:grid;
+      gap:10px;
+    ">
+      ${files
+        .map((file, i) => {
+          const item =
+            safeObject(file);
+
+          const name =
+            safeText(
+              item.name ||
+                item.filename ||
+                item.fileName,
+              `archivo_${i + 1}`
+            );
+
+          const url =
+            safeText(
+              item.url ||
+                item.href ||
+                item.path,
+              "#"
+            );
+
+          const size =
+            safeNumber(
+              item.size,
+              0
+            );
+
+          return `
+            <a
+              href="${escapeHtml(url)}"
+              target="_blank"
+              rel="noopener"
+              style="
+                display:flex;
+                justify-content:space-between;
+                gap:14px;
+                padding:14px;
+                border-radius:16px;
+                border:1px solid var(--border-soft,#2b2b2b);
+                background:var(--surface-glass,#171717);
+                text-decoration:none;
+                color:#fff;
+              "
+            >
+              <span>${escapeHtml(name)}</span>
+              <span style="color:#8d8d8d;">
+                ${size ? `${size} bytes` : ""}
+              </span>
+            </a>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderHistory(
+  logs = []
+) {
+  if (!logs.length) {
+    return "";
+  }
+
+  return `
+    <section style="display:grid;gap:12px;">
+      <h3 style="margin:0;">Actividad</h3>
+
+      <div style="
+        display:grid;
+        gap:10px;
+      ">
+        ${logs
+          .map((row) => {
+            const item =
+              safeObject(row);
+
+            return `
+              <div style="
+                padding:14px;
+                border-radius:16px;
+                border:1px solid var(--border-soft,#2b2b2b);
+                background:var(--surface-glass,#171717);
+              ">
+                <strong>${escapeHtml(
+                  safeText(
+                    item.title ||
+                      item.action ||
+                      item.message,
+                    "Evento"
+                  )
+                )}</strong>
+
+                <div style="
+                  margin-top:6px;
+                  color:#8f8f8f;
+                  font-size:13px;
+                ">
+                  ${escapeHtml(
+                    formatDate(
+                      item.createdAt ||
+                        item.date
+                    )
+                  )}
+                </div>
+              </div>
+            `;
+          })
+          .join("")}
+      </div>
+    </section>
+  `;
 }
 
 /* =========================================================
    MODAL
 ========================================================= */
 
-export function closeTicketModal() {
-  removeExistingModal();
-
-  try {
-    document.body.classList.remove(
-      "modal-open"
-    );
-  } catch {}
-
-  return true;
-}
-
 export function renderTicketModal(
   detail = {}
 ) {
-  const body = getBody();
-
-  if (!body) {
-    return false;
-  }
-
   closeTicketModal();
 
   const id =
-    resolveId(detail);
+    getId(detail);
 
   const title =
-    resolveTitle(detail);
+    getTitle(detail);
 
-  const description =
-    resolveDescription(
+  const desc =
+    getDescription(
       detail
     );
 
   const client =
-    resolveClient(detail);
+    getClient(detail);
 
   const email =
-    resolveEmail(detail);
+    getEmail(detail);
 
   const status =
-    resolveStatus(detail);
+    getStatus(detail);
 
   const priority =
-    resolvePriority(
+    getPriority(
       detail
     );
 
   const assigned =
-    resolveAssigned(
+    getAssigned(
       detail
     );
 
-  const createdAt =
+  const created =
     formatDate(
       detail.createdAt
     );
 
-  const updatedAt =
+  const updated =
     formatDate(
       detail.updatedAt
     );
 
-  const modal =
+  const updatedAgo =
+    formatRelativeDate(
+      detail.updatedAt
+    );
+
+  const files =
+    getAttachments(
+      detail
+    );
+
+  const history =
+    getHistory(detail);
+
+  const root =
     document.createElement(
       "div"
     );
 
-  modal.id =
-    getModalId();
+  root.id =
+    modalId();
 
-  modal.innerHTML = `
-    <div
-      data-role="overlay"
-      style="
-        position:fixed;
-        inset:0;
-        z-index:9999;
-        display:grid;
-        place-items:center;
-        padding:24px;
-        background:rgba(0,0,0,.62);
-        backdrop-filter:blur(8px);
-      "
-    >
+  root.innerHTML = `
+    <div style="
+      position:fixed;
+      inset:0;
+      z-index:9999;
+      padding:28px;
+      display:grid;
+      place-items:center;
+      background:rgba(0,0,0,.68);
+      backdrop-filter:blur(10px);
+    ">
       <div
+        data-panel="1"
         style="
-          width:min(860px,100%);
-          max-height:90vh;
+          width:min(1100px,100%);
+          max-height:92vh;
           overflow:auto;
-          border-radius:24px;
-          border:1px solid var(--border-soft,#2a2a2a);
-          background:var(--surface-1,#111);
-          box-shadow:0 30px 80px rgba(0,0,0,.45);
+          border-radius:28px;
+          border:1px solid var(--border-soft,#2b2b2b);
+          background:#151515;
+          box-shadow:0 40px 100px rgba(0,0,0,.45);
         "
       >
-        <div
-          style="
-            display:flex;
-            justify-content:space-between;
-            gap:16px;
-            padding:24px;
-            border-bottom:1px solid var(--border-soft,#2a2a2a);
-          "
-        >
+
+        <div style="
+          padding:26px;
+          border-bottom:1px solid var(--border-soft,#2b2b2b);
+          display:flex;
+          justify-content:space-between;
+          gap:20px;
+        ">
           <div style="display:grid;gap:8px;">
-            <span style="font-size:12px;color:#999;text-transform:uppercase;">
-              Ticket
+            <span style="
+              color:#8d8d8d;
+              font-size:12px;
+              text-transform:uppercase;
+              letter-spacing:.08em;
+            ">
+              Ticket ${escapeHtml(id)}
             </span>
 
-            <h2 style="margin:0;font-size:28px;">
-              ${escapeHtml(id)}
+            <h2 style="
+              margin:0;
+              font-size:42px;
+              line-height:1;
+              letter-spacing:-.04em;
+            ">
+              ${escapeHtml(title)}
             </h2>
 
-            <strong style="font-size:18px;">
-              ${escapeHtml(title)}
-            </strong>
+            <span style="
+              color:#9d9d9d;
+              font-size:14px;
+            ">
+              Actualizado ${escapeHtml(updatedAgo)}
+            </span>
           </div>
 
           <button
-            data-close-modal="1"
+            data-close="1"
             style="
-              width:42px;
-              height:42px;
+              width:54px;
+              height:54px;
               border:none;
-              border-radius:12px;
+              border-radius:16px;
               cursor:pointer;
+              font-size:22px;
+              background:#242424;
+              color:#fff;
             "
-          >
-            ✕
-          </button>
+          >✕</button>
         </div>
 
-        <div
-          style="
-            padding:24px;
+        <div style="
+          padding:26px;
+          display:grid;
+          gap:26px;
+        ">
+
+          <div style="
             display:grid;
+            grid-template-columns:repeat(3,minmax(0,1fr));
             gap:18px;
-          "
-        >
-          <div>
-            <strong>Descripción</strong>
-            <p>${escapeHtml(description)}</p>
+          ">
+            ${renderField("Estado", status)}
+            ${renderField("Prioridad", priority)}
+            ${renderField("Asignado", assigned)}
+            ${renderField("Cliente", client)}
+            ${renderField("Email", email)}
+            ${renderField("Creado", created)}
           </div>
 
-          <div
-            style="
-              display:grid;
-              grid-template-columns:repeat(2,minmax(0,1fr));
-              gap:14px;
-            "
-          >
-            <div><strong>Cliente:</strong> ${escapeHtml(client)}</div>
-            <div><strong>Email:</strong> ${escapeHtml(email)}</div>
-            <div><strong>Estado:</strong> ${escapeHtml(status)}</div>
-            <div><strong>Prioridad:</strong> ${escapeHtml(priority)}</div>
-            <div><strong>Asignado:</strong> ${escapeHtml(assigned)}</div>
-            <div><strong>Creado:</strong> ${escapeHtml(createdAt)}</div>
-            <div><strong>Actualizado:</strong> ${escapeHtml(updatedAt)}</div>
+          <section style="display:grid;gap:10px;">
+            <h3 style="margin:0;">Descripción</h3>
+
+            <div style="
+              padding:18px;
+              border-radius:18px;
+              background:#1f1f1f;
+              border:1px solid #2a2a2a;
+              line-height:1.65;
+            ">
+              ${escapeHtml(desc)}
+            </div>
+          </section>
+
+          <section style="display:grid;gap:10px;">
+            <h3 style="margin:0;">
+              Adjuntos (${files.length})
+            </h3>
+
+            ${renderAttachments(files)}
+          </section>
+
+          ${renderHistory(history)}
+
+          <div style="
+            display:flex;
+            justify-content:space-between;
+            gap:12px;
+            flex-wrap:wrap;
+            padding-top:6px;
+          ">
+            <div style="
+              display:flex;
+              gap:10px;
+              flex-wrap:wrap;
+            ">
+              <button
+                data-action-modal="refresh"
+                data-ticket-id="${escapeHtml(id)}"
+                style="
+                  min-height:44px;
+                  padding:0 16px;
+                  border:none;
+                  border-radius:14px;
+                  cursor:pointer;
+                "
+              >
+                Actualizar
+              </button>
+
+              <button
+                data-action-modal="copy"
+                data-ticket-id="${escapeHtml(id)}"
+                style="
+                  min-height:44px;
+                  padding:0 16px;
+                  border:none;
+                  border-radius:14px;
+                  cursor:pointer;
+                "
+              >
+                Copiar ID
+              </button>
+            </div>
+
+            <button
+              data-close="1"
+              style="
+                min-height:44px;
+                padding:0 16px;
+                border:none;
+                border-radius:14px;
+                cursor:pointer;
+              "
+            >
+              Cerrar
+            </button>
           </div>
+
         </div>
       </div>
     </div>
   `;
 
-  body.appendChild(modal);
-
-  body.classList.add(
-    "modal-open"
+  getBody().appendChild(
+    root
   );
 
-  modal.addEventListener(
+  root.addEventListener(
     "click",
-    (event) => {
-      const closeBtn =
+    async (event) => {
+      const close =
         event.target.closest(
-          "[data-close-modal]"
-        );
-
-      const overlay =
-        event.target.closest(
-          '[data-role="overlay"]'
+          "[data-close]"
         );
 
       const panel =
         event.target.closest(
-          '[style*="max-height:90vh"]'
+          "[data-panel]"
         );
 
-      if (closeBtn) {
+      const refresh =
+        event.target.closest(
+          '[data-action-modal="refresh"]'
+        );
+
+      const copy =
+        event.target.closest(
+          '[data-action-modal="copy"]'
+        );
+
+      if (close) {
         closeTicketModal();
         return;
       }
 
       if (
-        overlay &&
-        !panel
+        refresh
+      ) {
+        const ticketId =
+          refresh.dataset.ticketId;
+
+        await openTicket(
+          ticketId
+        );
+        return;
+      }
+
+      if (copy) {
+        await navigator.clipboard.writeText(
+          copy.dataset.ticketId
+        );
+
+        showToast(
+          "ID copiado",
+          "success"
+        );
+
+        return;
+      }
+
+      if (
+        !panel &&
+        event.target ===
+          root.firstElementChild
       ) {
         closeTicketModal();
       }
@@ -468,7 +734,7 @@ export function renderTicketModal(
 }
 
 /* =========================================================
-   OPEN DETAIL
+   OPEN
 ========================================================= */
 
 export async function openTicket(
@@ -501,19 +767,19 @@ export async function openTicket(
         id
       );
 
-    if (!detail) {
-      detail =
-        await getIncidenciaByIdRequest(
-          id
-        );
-    }
+    detail =
+      await getIncidenciaByIdRequest(
+        id
+      ).catch(
+        () => detail
+      );
 
     detail =
       pickDetail(detail);
 
     if (!detail) {
       throw new Error(
-        "DETAIL_EMPTY"
+        "EMPTY_DETAIL"
       );
     }
 
@@ -521,18 +787,9 @@ export async function openTicket(
       detail
     );
 
-    safeEmit(
-      "incidencias:detail:ready",
-      {
-        ticketId: id,
-        detail,
-      }
-    );
-
     return detail;
   } catch (error) {
     console.error(
-      "❌ openTicket:",
       error
     );
 
@@ -546,44 +803,34 @@ export async function openTicket(
 }
 
 /* =========================================================
-   COPY
+   COPY ID
 ========================================================= */
 
 export async function copyTicketIdAction({
   ticketId = "",
-  ticketCode = "",
 } = {}) {
-  const value =
-    safeText(
-      ticketCode,
-      ""
-    ) ||
+  const id =
     safeText(
       ticketId,
       ""
     );
 
-  if (!value) {
-    return false;
-  }
+  if (!id) return false;
 
-  const ok =
-    await copyText(value);
-
-  showToast(
-    ok
-      ? "Identificador copiado."
-      : "No se pudo copiar.",
-    ok
-      ? "success"
-      : "error"
+  await navigator.clipboard.writeText(
+    id
   );
 
-  return ok;
+  showToast(
+    "ID copiado",
+    "success"
+  );
+
+  return true;
 }
 
 /* =========================================================
-   EXPORT CSV
+   EXPORT
 ========================================================= */
 
 export function exportIncidenciasCsvAction() {
@@ -592,20 +839,16 @@ export function exportIncidenciasCsvAction() {
 
   if (!items.length) {
     showToast(
-      "No hay incidencias para exportar.",
+      "No hay incidencias.",
       "info"
     );
     return false;
   }
 
   const rows =
-    items.map((item) =>
-      [
-        resolveId(item),
-        resolveTitle(item),
-        resolveStatus(item),
-        resolvePriority(item),
-      ].join(",")
+    items.map(
+      (item) =>
+        `"${getId(item)}","${getTitle(item)}","${getStatus(item)}","${getPriority(item)}"`
     );
 
   const csv = [
@@ -629,9 +872,8 @@ export function exportIncidenciasCsvAction() {
     );
 
   a.href = url;
-  a.download = `incidencias_${new Date()
-    .toISOString()
-    .slice(0, 10)}.csv`;
+  a.download =
+    "incidencias.csv";
 
   document.body.appendChild(
     a
@@ -640,10 +882,12 @@ export function exportIncidenciasCsvAction() {
   a.click();
   a.remove();
 
-  URL.revokeObjectURL(url);
+  URL.revokeObjectURL(
+    url
+  );
 
   showToast(
-    "CSV exportado.",
+    "CSV exportado",
     "success"
   );
 

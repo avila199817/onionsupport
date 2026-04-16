@@ -17,6 +17,9 @@
    - json/text/blob/arrayBuffer auto
    - dedupe GET/HEAD
    - retry enterprise con backoff+jitter
+   - protección hooks
+   - cleanup total de inflight map
+   - errores consistentes
 ========================================================= */
 
 import { config } from "./config.js";
@@ -36,6 +39,77 @@ import {
 } from "./helpers.js";
 
 /* =========================================================
+   BASICS
+========================================================= */
+
+function safeNumber(
+  value,
+  fallback = 0
+) {
+  const n = Number(value);
+  return Number.isFinite(n)
+    ? n
+    : fallback;
+}
+
+function safeText(
+  value,
+  fallback = ""
+) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return fallback;
+  }
+
+  const text =
+    String(value).trim();
+
+  return text || fallback;
+}
+
+function safeEmit(
+  events,
+  eventName,
+  payload = {}
+) {
+  try {
+    events?.emit?.(
+      eventName,
+      payload
+    );
+  } catch {}
+}
+
+async function safeRunHooks(
+  hooks,
+  payload
+) {
+  try {
+    return await runHookSeries(
+      hooks,
+      payload
+    );
+  } catch {
+    return payload;
+  }
+}
+
+function sleep(ms = 0) {
+  return new Promise(
+    (resolve) =>
+      setTimeout(
+        resolve,
+        Math.max(
+          0,
+          safeNumber(ms, 0)
+        )
+      )
+  );
+}
+
+/* =========================================================
    RESPONSE PARSER
 ========================================================= */
 
@@ -43,7 +117,10 @@ export async function parseResponseBody(
   response,
   responseType = "auto"
 ) {
-  if (!response) return null;
+  if (!response) {
+    return null;
+  }
+
   if (
     response.status === 204 ||
     response.status === 205
@@ -51,57 +128,61 @@ export async function parseResponseBody(
     return null;
   }
 
-  const contentType = String(
+  const contentType = safeText(
     response.headers?.get?.(
       "content-type"
-    ) || ""
-  )
-    .trim()
-    .toLowerCase();
-
-  if (responseType === "blob") {
-    return response.blob();
-  }
-
-  if (
-    responseType ===
-    "arrayBuffer"
-  ) {
-    return response.arrayBuffer();
-  }
-
-  if (responseType === "text") {
-    try {
-      return await response.text();
-    } catch {
-      return "";
-    }
-  }
-
-  if (responseType === "json") {
-    try {
-      return await response.json();
-    } catch {
-      return null;
-    }
-  }
-
-  if (
-    contentType.includes(
-      "application/json"
-    ) ||
-    contentType.includes(
-      "+json"
-    )
-  ) {
-    try {
-      return await response.json();
-    } catch {
-      return null;
-    }
-  }
+    ),
+    ""
+  ).toLowerCase();
 
   try {
+    if (
+      responseType ===
+      "blob"
+    ) {
+      return await response.blob();
+    }
+
+    if (
+      responseType ===
+      "arrayBuffer"
+    ) {
+      return await response.arrayBuffer();
+    }
+
+    if (
+      responseType ===
+      "text"
+    ) {
+      return await response.text();
+    }
+
+    if (
+      responseType ===
+      "json"
+    ) {
+      return await response.json();
+    }
+
+    if (
+      contentType.includes(
+        "application/json"
+      ) ||
+      contentType.includes(
+        "+json"
+      )
+    ) {
+      return await response.json();
+    }
+
+    if (
+      contentType.includes(
+        "application/octet-stream"
+      )
+    ) {
+      return await response.arrayBuffer();
+    }
+
     return await response.text();
   } catch {
     return null;
@@ -121,52 +202,51 @@ export function buildRequestError({
   aborted = false,
   raw = null,
 } = {}) {
-  if (!response) {
-    const hints =
-      detectNetworkHints(url);
+  const status =
+    response?.status || 0;
 
-    return {
-      ok: false,
-      status: 0,
-      statusText: timeout
+  const statusText =
+    safeText(
+      response?.statusText,
+      timeout
         ? "Request Timeout"
         : aborted
           ? "Request Aborted"
-          : "Network Error",
-      url,
-      method,
-      timeout,
-      aborted,
-      raw,
-      data,
-      hints,
-      message: timeout
-        ? "La petición excedió el tiempo máximo."
-        : aborted
-          ? "La petición fue cancelada."
-          : "No se pudo completar la petición.",
-    };
-  }
+          : "Network Error"
+    );
+
+  const message =
+    safeText(
+      data?.message ||
+        data?.error ||
+        data?.detail ||
+        raw,
+      statusText
+    );
 
   return {
     ok: false,
-    status:
-      response.status,
-    statusText:
-      response.statusText ||
-      "Request Error",
+    status,
+    statusText,
     url,
-    method,
-    timeout,
-    aborted,
+    method:
+      safeText(
+        method,
+        "GET"
+      ).toUpperCase(),
+    timeout:
+      timeout === true,
+    aborted:
+      aborted === true,
     raw,
     data,
-    message:
-      data?.message ||
-      data?.error ||
-      data?.detail ||
-      response.statusText ||
-      "Error de petición",
+    hints:
+      status === 0
+        ? detectNetworkHints(
+            url
+          )
+        : null,
+    message,
   };
 }
 
@@ -178,20 +258,22 @@ export function shouldRetryRequest(
   error,
   requestConfig = {}
 ) {
-  const retries = Number(
-    requestConfig?.retries ??
-      config.requestRetries ??
+  const retries =
+    safeNumber(
+      requestConfig?.retries ??
+        config.requestRetries,
       0
-  );
+    );
 
   if (retries <= 0) {
     return false;
   }
 
-  const method = String(
-    requestConfig?.method ||
+  const method =
+    safeText(
+      requestConfig?.method,
       "GET"
-  ).toUpperCase();
+    ).toUpperCase();
 
   if (
     !["GET", "HEAD"].includes(
@@ -209,11 +291,16 @@ export function shouldRetryRequest(
     return true;
   }
 
-  if (error?.status === 0) {
+  if (
+    error?.status === 0
+  ) {
     return true;
   }
 
-  if (error?.status === 429) {
+  if (
+    error?.status === 408 ||
+    error?.status === 429
+  ) {
     return true;
   }
 
@@ -233,27 +320,33 @@ export function shouldRetryRequest(
 export async function executeFetchWithRetry(
   url,
   fetchFactory,
-  requestConfig,
-  utils
+  requestConfig = {},
+  utils = {}
 ) {
-  const retries = Number(
-    requestConfig?.retries ??
-      config.requestRetries ??
+  const retries =
+    safeNumber(
+      requestConfig?.retries ??
+        config.requestRetries,
       0
-  );
+    );
 
-  const baseDelay = Number(
-    requestConfig?.retryDelay ??
+  const baseDelay =
+    safeNumber(
+      requestConfig?.retryDelay,
       300
-  );
+    );
 
-  const maxDelay = Number(
-    requestConfig?.retryMaxDelay ??
+  const maxDelay =
+    safeNumber(
+      requestConfig?.retryMaxDelay,
       4000
-  );
+    );
+
+  const sleeper =
+    utils?.sleep ||
+    sleep;
 
   let attempt = 0;
-  let lastError = null;
 
   while (
     attempt <= retries
@@ -263,8 +356,6 @@ export async function executeFetchWithRetry(
         attempt
       );
     } catch (error) {
-      lastError = error;
-
       const normalized =
         error?.status !==
         undefined
@@ -272,8 +363,7 @@ export async function executeFetchWithRetry(
           : buildRequestError({
               url,
               method:
-                requestConfig?.method ||
-                "GET",
+                requestConfig.method,
               timeout:
                 isProbablyTimeoutError(
                   error
@@ -287,7 +377,7 @@ export async function executeFetchWithRetry(
                 error,
             });
 
-      const canRetry =
+      const retry =
         shouldRetryRequest(
           normalized,
           requestConfig
@@ -295,19 +385,16 @@ export async function executeFetchWithRetry(
 
       if (
         attempt >= retries ||
-        !canRetry
+        !retry
       ) {
         throw normalized;
       }
 
-      const exponential =
-        baseDelay *
-        2 ** attempt;
-
       const backoff =
         Math.min(
           maxDelay,
-          exponential
+          baseDelay *
+            2 ** attempt
         );
 
       const jitter =
@@ -332,15 +419,19 @@ export async function executeFetchWithRetry(
         });
       } catch {}
 
-      await utils.sleep(
+      await sleeper(
         delayMs
       );
-    }
 
-    attempt += 1;
+      attempt += 1;
+    }
   }
 
-  throw lastError;
+  throw buildRequestError({
+    url,
+    method:
+      requestConfig.method,
+  });
 }
 
 /* =========================================================
@@ -380,18 +471,16 @@ export function createRequest({
       Array.isArray(value)
     ) {
       return `[${value
-        .map((item) =>
-          stableStringify(
-            item
-          )
+        .map(
+          stableStringify
         )
         .join(",")}]`;
     }
 
-    const keys =
-      Object.keys(value).sort();
-
-    return `{${keys
+    return `{${Object.keys(
+      value
+    )
+      .sort()
       .map(
         (key) =>
           `${key}:${stableStringify(
@@ -404,8 +493,8 @@ export function createRequest({
   function buildFingerprint({
     method,
     url,
-    payload,
     headers,
+    payload,
     auth,
   }) {
     return [
@@ -415,14 +504,11 @@ export function createRequest({
         ? "auth"
         : "public",
       stableStringify(
-        headers || {}
+        headers
       ),
-      typeof payload ===
-      "string"
-        ? payload
-        : stableStringify(
-            payload
-          ),
+      stableStringify(
+        payload
+      ),
     ].join("::");
   }
 
@@ -446,7 +532,8 @@ export function createRequest({
       timeout:
         config.requestTimeout,
       raw: false,
-      responseType: "auto",
+      responseType:
+        "auto",
       query: null,
       credentials:
         "omit",
@@ -461,16 +548,17 @@ export function createRequest({
     };
 
     requestConfig =
-      await runHookSeries(
-        registry.hooks
-          .beforeRequest,
+      await safeRunHooks(
+        registry?.hooks
+          ?.beforeRequest,
         requestConfig
       );
 
-    const method = String(
-      requestConfig.method ||
+    const method =
+      safeText(
+        requestConfig.method,
         "GET"
-    ).toUpperCase();
+      ).toUpperCase();
 
     const url = buildUrl(
       requestConfig.path,
@@ -531,7 +619,7 @@ export function createRequest({
             : String(
                 finalHeaders[
                   "Content-Type"
-                ] || ""
+                ]
               ).includes(
                   "application/json"
                 )
@@ -547,58 +635,54 @@ export function createRequest({
         method
       );
 
-    const requestFingerprint =
+    const dedupeKey =
       canDedupe
         ? buildFingerprint({
             method,
             url,
-            payload,
             headers:
               finalHeaders,
+            payload,
             auth:
               requestConfig.auth,
           })
         : null;
 
     if (
-      requestFingerprint &&
+      dedupeKey &&
       inFlightRequests.has(
-        requestFingerprint
+        dedupeKey
       )
     ) {
-      events?.emit?.(
+      safeEmit(
+        events,
         "app:request:deduped",
         {
           requestId,
           url,
           method,
-          dedupeKey:
-            requestFingerprint,
+          dedupeKey,
         }
       );
 
       return inFlightRequests.get(
-        requestFingerprint
+        dedupeKey
       );
     }
 
-    events?.emit?.(
+    safeEmit(
+      events,
       "app:request:start",
       {
         requestId,
         url,
         method,
-        auth:
-          requestConfig.auth,
-        hasBody:
-          requestConfig.body !==
-          null,
       }
     );
 
-    const requestPromise =
+    const promise =
       (async () => {
-        let retryCount = 0;
+        let attempts = 1;
 
         try {
           state.lastRequestAt =
@@ -613,11 +697,8 @@ export function createRequest({
               async (
                 attempt = 0
               ) => {
-                retryCount =
-                  Math.max(
-                    retryCount,
-                    attempt
-                  );
+                attempts =
+                  attempt + 1;
 
                 const {
                   controller,
@@ -627,7 +708,7 @@ export function createRequest({
                     requestConfig.timeout
                   );
 
-                const mergedSignal =
+                const signal =
                   mergeAbortSignals(
                     [
                       controller.signal,
@@ -646,8 +727,7 @@ export function createRequest({
                         payload,
                       credentials:
                         requestConfig.credentials,
-                      signal:
-                        mergedSignal,
+                      signal,
                     }
                   );
                 } finally {
@@ -658,11 +738,13 @@ export function createRequest({
               },
               {
                 ...requestConfig,
+                method,
                 onRetry:
                   (
                     retryMeta
-                  ) => {
-                    events?.emit?.(
+                  ) =>
+                    safeEmit(
+                      events,
                       "app:request:retry",
                       {
                         requestId,
@@ -670,8 +752,7 @@ export function createRequest({
                         method,
                         ...retryMeta,
                       }
-                    );
-                  },
+                    ),
               },
               utils
             );
@@ -680,14 +761,8 @@ export function createRequest({
             requestConfig.raw ===
             true
           ) {
-            const hookedRaw =
-              await runHookSeries(
-                registry.hooks
-                  .afterResponse,
-                response
-              );
-
-            events?.emit?.(
+            safeEmit(
+              events,
               "app:request:success",
               {
                 requestId,
@@ -695,15 +770,14 @@ export function createRequest({
                 method,
                 status:
                   response.status,
-                attempts:
-                  retryCount + 1,
+                attempts,
                 durationMs:
                   Date.now() -
                   startedAt,
               }
             );
 
-            return hookedRaw;
+            return response;
           }
 
           const data =
@@ -723,14 +797,15 @@ export function createRequest({
             });
           }
 
-          const hookedData =
-            await runHookSeries(
-              registry.hooks
-                .afterResponse,
+          const finalData =
+            await safeRunHooks(
+              registry?.hooks
+                ?.afterResponse,
               data
             );
 
-          events?.emit?.(
+          safeEmit(
+            events,
             "app:request:success",
             {
               requestId,
@@ -738,17 +813,14 @@ export function createRequest({
               method,
               status:
                 response.status,
-              data:
-                hookedData,
-              attempts:
-                retryCount + 1,
+              attempts,
               durationMs:
                 Date.now() -
                 startedAt,
             }
           );
 
-          return hookedData;
+          return finalData;
         } catch (error) {
           const normalized =
             error?.status !==
@@ -770,12 +842,6 @@ export function createRequest({
                     error,
                 });
 
-          normalized.retryable =
-            shouldRetryRequest(
-              normalized,
-              requestConfig
-            );
-
           normalized.requestId =
             requestId;
 
@@ -783,17 +849,26 @@ export function createRequest({
             Date.now() -
             startedAt;
 
-          setError?.(
+          normalized.retryable =
+            shouldRetryRequest(
+              normalized,
+              requestConfig
+            );
+
+          try {
+            setError?.(
+              normalized
+            );
+          } catch {}
+
+          await safeRunHooks(
+            registry?.hooks
+              ?.onRequestError,
             normalized
           );
 
-          await runHookSeries(
-            registry.hooks
-              .onRequestError,
-            normalized
-          );
-
-          events?.emit?.(
+          safeEmit(
+            events,
             "app:request:error",
             normalized
           );
@@ -802,23 +877,19 @@ export function createRequest({
         }
       })();
 
-    if (
-      requestFingerprint
-    ) {
+    if (dedupeKey) {
       inFlightRequests.set(
-        requestFingerprint,
-        requestPromise
+        dedupeKey,
+        promise
       );
     }
 
     try {
-      return await requestPromise;
+      return await promise;
     } finally {
-      if (
-        requestFingerprint
-      ) {
+      if (dedupeKey) {
         inFlightRequests.delete(
-          requestFingerprint
+          dedupeKey
         );
       }
     }

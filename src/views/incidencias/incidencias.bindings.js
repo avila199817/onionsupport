@@ -3,103 +3,191 @@
    Archivo: src/views/incidencias/incidencias.bindings.js
 
    Responsabilidades:
-   - bind de eventos DOM
+   - bind DOM robusto
    - refresh / retry
-   - abrir ticket
-   - cleanup seguro por scope
-   - soportar rebind limpio tras rerender
-   - tolerar scope externo
+   - export CSV
+   - open ticket modal
+   - copy id
+   - rebind limpio tras rerender
+   - cleanup sólido por scope
+
+   FIX CRÍTICO:
+   - evita doble click handlers
+   - soporta botones dinámicos
+   - delegación premium
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 
-const DEFAULT_SCOPE = "view:incidencias";
+const DEFAULT_SCOPE =
+  "view:incidencias";
 
 /* =========================================================
    HELPERS
 ========================================================= */
 
-function safeText(value, fallback = "") {
-  if (value === null || value === undefined) {
+function safeText(
+  value,
+  fallback = ""
+) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text =
+    String(value).trim();
+
   return text || fallback;
 }
 
-function resolveScopeName(scope = DEFAULT_SCOPE) {
-  return safeText(scope, DEFAULT_SCOPE);
+function safeWarn(...args) {
+  try {
+    AppCore?.utils?.warn?.(
+      "[IncidenciasBindings]",
+      ...args
+    );
+  } catch {}
 }
 
-function getScope(scopeName = DEFAULT_SCOPE) {
-  const finalScope = resolveScopeName(scopeName);
+function resolveScopeName(
+  scope = DEFAULT_SCOPE
+) {
+  return safeText(
+    scope,
+    DEFAULT_SCOPE
+  );
+}
+
+function getScope(
+  scopeName = DEFAULT_SCOPE
+) {
+  const finalScope =
+    resolveScopeName(
+      scopeName
+    );
 
   try {
-    AppCore?.cleanup?.run?.(finalScope);
+    AppCore?.cleanup?.run?.(
+      finalScope
+    );
   } catch {}
 
   try {
-    return AppCore?.cleanup?.scope?.(finalScope) || finalScope;
+    return (
+      AppCore?.cleanup?.scope?.(
+        finalScope
+      ) || finalScope
+    );
   } catch {
     return finalScope;
   }
 }
 
-function getTicketIdFromElement(element) {
-  return safeText(
-    element?.getAttribute?.("data-ticket-id") ||
-    element?.dataset?.ticketId ||
-    "",
-    ""
-  );
-}
-
 function getContainer() {
   return (
-    AppCore?.dom?.viewContainer ||
-    document.getElementById("view-container") ||
+    AppCore?.dom
+      ?.viewContainer ||
+    document.getElementById(
+      "view-container"
+    ) ||
     document
   );
 }
 
-async function safeReload(loadIncidencias, options = {}) {
-  if (typeof loadIncidencias !== "function") {
-    return;
-  }
+function getTicketId(
+  element
+) {
+  return safeText(
+    element?.dataset
+      ?.ticketId ||
+      element?.getAttribute?.(
+        "data-ticket-id"
+      ),
+    ""
+  );
+}
 
+function getTicketCode(
+  element
+) {
+  return safeText(
+    element?.dataset
+      ?.ticketCode ||
+      element?.getAttribute?.(
+        "data-ticket-code"
+      ),
+    ""
+  );
+}
+
+async function safeReload(
+  reload,
+  loadIncidencias
+) {
   try {
-    await loadIncidencias({
-      force: true,
-      ...options,
-    });
+    if (
+      typeof reload ===
+      "function"
+    ) {
+      await reload();
+      return;
+    }
+
+    if (
+      typeof loadIncidencias ===
+      "function"
+    ) {
+      await loadIncidencias({
+        force: true,
+      });
+    }
   } catch (error) {
-    AppCore?.utils?.warn?.(
-      "[IncidenciasBindings] loadIncidencias falló",
+    safeWarn(
+      "reload falló",
       error
     );
   }
 }
 
 /* =========================================================
-   PUBLIC
+   MAIN
 ========================================================= */
 
 export function bindIncidenciasEvents({
   loadIncidencias,
   openTicket,
+  copyTicketIdAction,
+  exportIncidenciasCsvAction,
+  reload,
   scope = DEFAULT_SCOPE,
 } = {}) {
-  const scopeRef = getScope(scope);
-  const root = getContainer();
+  const scopeRef =
+    getScope(scope);
 
-  const refreshBtn = document.getElementById(
-    "incidencias-refresh-btn"
-  );
+  const root =
+    getContainer();
 
-  const retryBtn = document.getElementById(
-    "incidencias-retry-btn"
-  );
+  const refreshBtn =
+    document.getElementById(
+      "incidencias-refresh-btn"
+    );
+
+  const retryBtn =
+    document.getElementById(
+      "incidencias-retry-btn"
+    );
+
+  const exportBtn =
+    document.getElementById(
+      "incidencias-export-btn"
+    );
+
+  /* =========================================
+     DIRECT BUTTONS
+  ========================================= */
 
   if (refreshBtn) {
     AppCore.cleanup.on(
@@ -108,7 +196,10 @@ export function bindIncidenciasEvents({
       "click",
       async (event) => {
         event.preventDefault();
-        await safeReload(loadIncidencias);
+        await safeReload(
+          reload,
+          loadIncidencias
+        );
       }
     );
   }
@@ -120,53 +211,129 @@ export function bindIncidenciasEvents({
       "click",
       async (event) => {
         event.preventDefault();
-        await safeReload(loadIncidencias);
+        await safeReload(
+          reload,
+          loadIncidencias
+        );
       }
     );
   }
 
-  /*
-    Delegación para soportar rerender sin rebinding
-    individual de cada botón.
-  */
+  if (exportBtn) {
+    AppCore.cleanup.on(
+      scopeRef,
+      exportBtn,
+      "click",
+      async (event) => {
+        event.preventDefault();
+
+        try {
+          await exportIncidenciasCsvAction?.();
+        } catch (error) {
+          safeWarn(
+            "export falló",
+            error
+          );
+        }
+      }
+    );
+  }
+
+  /* =========================================
+     DELEGATED ACTIONS
+  ========================================= */
+
   AppCore.cleanup.on(
     scopeRef,
     root,
     "click",
-    (event) => {
+    async (event) => {
       const openBtn =
-        event.target?.closest?.('[data-action="open-ticket"]');
-
-      if (!openBtn) {
-        return;
-      }
-
-      event.preventDefault();
-      event.stopPropagation();
-
-      const ticketId =
-        getTicketIdFromElement(openBtn);
-
-      if (!ticketId) {
-        return;
-      }
-
-      try {
-        openTicket?.(ticketId);
-      } catch (error) {
-        AppCore?.utils?.warn?.(
-          "[IncidenciasBindings] openTicket falló",
-          error
+        event.target?.closest?.(
+          '[data-action="open-ticket"]'
         );
+
+      if (openBtn) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const ticketId =
+          getTicketId(
+            openBtn
+          );
+
+        if (!ticketId) {
+          safeWarn(
+            "open-ticket sin id"
+          );
+          return;
+        }
+
+        try {
+          await openTicket?.(
+            ticketId
+          );
+        } catch (error) {
+          safeWarn(
+            "openTicket falló",
+            error
+          );
+        }
+
+        return;
+      }
+
+      const copyBtn =
+        event.target?.closest?.(
+          '[data-action="copy-ticket-id"]'
+        );
+
+      if (copyBtn) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const ticketId =
+          getTicketId(
+            copyBtn
+          );
+
+        const ticketCode =
+          getTicketCode(
+            copyBtn
+          );
+
+        try {
+          await copyTicketIdAction?.({
+            ticketId,
+            ticketCode,
+          });
+        } catch (error) {
+          safeWarn(
+            "copyTicketIdAction falló",
+            error
+          );
+        }
+
+        return;
       }
     }
   );
 
+  /* =========================================
+     CLEANUP
+  ========================================= */
+
   return () => {
     try {
       AppCore?.cleanup?.run?.(
-        resolveScopeName(scope)
+        resolveScopeName(
+          scope
+        )
       );
     } catch {}
   };
 }
+
+export default {
+  bindIncidenciasEvents,
+};

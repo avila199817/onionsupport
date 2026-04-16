@@ -2,13 +2,20 @@
    Onion SPA - Core Helpers
    Archivo: src/core/helpers.js
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - utilidades base del core
    - normalización de paths, usernames y usuarios
    - helpers de clonación / parse seguro
    - helpers de URL / headers / abort / timeout
    - diagnóstico de red
    - soporte robusto de avatar backend /me
+
+   HARDENING PRO:
+   - sanitize estricto de username
+   - paths robustos con query/hash
+   - canonical consistente
+   - helpers seguros ante inputs raros
+   - preserve contexto público/canónico
 ========================================================= */
 
 import { config } from "./config.js";
@@ -16,17 +23,21 @@ import { config } from "./config.js";
 /* =========================================================
    BASE
 ========================================================= */
+
 export function isBrowser() {
   return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
+    typeof window !==
+      "undefined" &&
+    typeof document !==
+      "undefined"
   );
 }
 
 export function isDocumentReady() {
   return (
     isBrowser() &&
-    document.readyState !== "loading"
+    document.readyState !==
+      "loading"
   );
 }
 
@@ -55,7 +66,8 @@ export function isDomScope(
     scope === window ||
     scope instanceof Element ||
     scope instanceof Document ||
-    scope instanceof DocumentFragment
+    scope instanceof
+      DocumentFragment
   );
 }
 
@@ -63,16 +75,15 @@ export function normalizeListenerOptions(
   options
 ) {
   if (
-    typeof options === "boolean"
+    typeof options ===
+    "boolean"
   ) {
     return {
       capture: options,
     };
   }
 
-  if (
-    isPlainObject(options)
-  ) {
+  if (isPlainObject(options)) {
     return { ...options };
   }
 
@@ -84,6 +95,7 @@ export function normalizeListenerOptions(
 /* =========================================================
    SAFE HELPERS
 ========================================================= */
+
 export function buildStorageKey(
   key
 ) {
@@ -138,9 +150,7 @@ export function safeClone(
         value
       );
     }
-  } catch {
-    /* noop */
-  }
+  } catch {}
 
   try {
     return JSON.parse(
@@ -181,8 +191,78 @@ export function cloneError(
 }
 
 /* =========================================================
+   PATH PARTS
+========================================================= */
+
+function splitPathParts(
+  path = "/"
+) {
+  const raw = String(
+    path || "/"
+  );
+
+  const hashIndex =
+    raw.indexOf("#");
+  const searchIndex =
+    raw.indexOf("?");
+
+  let cutIndex = -1;
+
+  if (
+    searchIndex >= 0 &&
+    hashIndex >= 0
+  ) {
+    cutIndex = Math.min(
+      searchIndex,
+      hashIndex
+    );
+  } else if (
+    searchIndex >= 0
+  ) {
+    cutIndex = searchIndex;
+  } else if (
+    hashIndex >= 0
+  ) {
+    cutIndex = hashIndex;
+  }
+
+  return {
+    pathname:
+      cutIndex >= 0
+        ? raw.slice(
+            0,
+            cutIndex
+          ) || "/"
+        : raw || "/",
+    suffix:
+      cutIndex >= 0
+        ? raw.slice(cutIndex)
+        : "",
+  };
+}
+
+export function stripSearchAndHash(
+  path = "/"
+) {
+  return (
+    splitPathParts(path)
+      ?.pathname || "/"
+  );
+}
+
+export function getSearchAndHash(
+  path = "/"
+) {
+  return (
+    splitPathParts(path)
+      ?.suffix || ""
+  );
+}
+
+/* =========================================================
    USER / SLUG / PATH
 ========================================================= */
+
 export function sanitizeUsername(
   value = ""
 ) {
@@ -194,7 +274,8 @@ export function sanitizeUsername(
       /[^a-zA-Z0-9._-]/g,
       ""
     )
-    .toLowerCase();
+    .toLowerCase()
+    .slice(0, 64);
 }
 
 export function slugify(
@@ -238,14 +319,17 @@ export function normalizePath(
 
   let raw = String(path).trim();
 
-  if (!raw) return "/";
-  if (raw.startsWith("#"))
+  if (!raw) {
     return "/";
+  }
+
+  if (raw.startsWith("#")) {
+    return "/";
+  }
 
   if (/^https?:\/\//i.test(raw)) {
     try {
       const url = new URL(raw);
-
       raw =
         `${url.pathname}${url.search}${url.hash}`;
     } catch {
@@ -267,62 +351,13 @@ export function normalizePath(
     "/"
   );
 
-  raw = raw.replace(
-    /\/\.(?=\/|$)/g,
-    "/"
-  );
-
-  const hashIndex =
-    raw.indexOf("#");
-
-  const searchIndex =
-    raw.indexOf("?");
-
-  let cutIndex = -1;
-
-  if (
-    searchIndex >= 0 &&
-    hashIndex >= 0
-  ) {
-    cutIndex = Math.min(
-      searchIndex,
-      hashIndex
-    );
-  } else if (
-    searchIndex >= 0
-  ) {
-    cutIndex = searchIndex;
-  } else if (
-    hashIndex >= 0
-  ) {
-    cutIndex = hashIndex;
-  }
-
-  const pathname =
-    cutIndex >= 0
-      ? raw.slice(0, cutIndex)
-      : raw;
-
-  const suffix =
-    cutIndex >= 0
-      ? raw.slice(cutIndex)
-      : "";
+  const {
+    pathname,
+    suffix,
+  } = splitPathParts(raw);
 
   let cleanPathname =
     pathname || "/";
-
-  if (
-    cleanPathname.length > 1
-  ) {
-    cleanPathname =
-      cleanPathname.replace(
-        /\/+$/,
-        ""
-      );
-  }
-
-  cleanPathname =
-    cleanPathname || "/";
 
   const segments =
     cleanPathname.split("/");
@@ -353,7 +388,9 @@ export function normalizePath(
     "/"
   )}` || "/";
 
-  if (cleanPathname !== "/") {
+  if (
+    cleanPathname !== "/"
+  ) {
     cleanPathname =
       cleanPathname.replace(
         /\/+$/,
@@ -370,16 +407,15 @@ export function stripUsernamePrefix(
   const normalized =
     normalizePath(path);
 
-  const match =
-    normalized.match(
-      /^([^?#]*)(.*)$/
+  const pathOnly =
+    stripSearchAndHash(
+      normalized
     );
 
-  const pathOnly =
-    match?.[1] || "/";
-
   const suffix =
-    match?.[2] || "";
+    getSearchAndHash(
+      normalized
+    );
 
   const stripped =
     pathOnly.replace(
@@ -403,17 +439,20 @@ export function normalizeCanonicalPath(
       normalized
     );
 
-  const [pathOnly] =
-    noSlug.split(/[?#]/);
+  const pathOnly =
+    stripSearchAndHash(noSlug);
+  const suffix =
+    getSearchAndHash(noSlug);
 
-  return normalizePath(
+  return `${normalizePath(
     pathOnly || "/"
-  );
+  )}${suffix}`;
 }
 
 /* =========================================================
    URL / REQUEST
 ========================================================= */
+
 export function joinUrl(
   base,
   path = ""
@@ -454,9 +493,7 @@ export function buildUrl(
           rawPath
         );
 
-  if (
-    !query
-  ) {
+  if (!query) {
     return baseUrl;
   }
 
@@ -513,7 +550,6 @@ export function buildUrl(
             }
           }
         );
-
         return;
       }
 
@@ -561,14 +597,16 @@ export function isPublicApiPath(
   path = ""
 ) {
   const normalized =
-    normalizeCanonicalPath(
-      path
+    stripSearchAndHash(
+      normalizeCanonicalPath(path)
     );
 
   return config.auth.publicApiPaths.some(
     (publicPath) =>
-      normalizeCanonicalPath(
-        publicPath
+      stripSearchAndHash(
+        normalizeCanonicalPath(
+          publicPath
+        )
       ) === normalized
   );
 }
@@ -576,6 +614,7 @@ export function isPublicApiPath(
 /* =========================================================
    USER NORMALIZATION
 ========================================================= */
+
 export function normalizeUser(
   user = null
 ) {
@@ -617,11 +656,12 @@ export function normalizeUser(
     null;
 
   const slug =
-    user.slug ||
-    slugify(
-      username ||
-        name ||
-        "usuario"
+    sanitizeUsername(
+      user.slug ||
+        username ||
+        slugify(
+          name || "usuario"
+        )
     );
 
   const hasAvatar =
@@ -719,6 +759,7 @@ export function getUserUsername(
       user?.nick ||
       user?.alias ||
       user?.login ||
+      user?.slug ||
       ""
   );
 }
@@ -768,20 +809,22 @@ export function getInitials(
 }
 
 export function getCurrentLocationPath() {
-  if (!isBrowser())
+  if (!isBrowser()) {
     return "/";
+  }
 
   return normalizePath(
-    `${window.location.pathname || "/"}${window.location.search || ""}`
+    `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`
   );
 }
 
 export function getCurrentLocationCanonicalPath() {
-  if (!isBrowser())
+  if (!isBrowser()) {
     return "/";
+  }
 
   return normalizeCanonicalPath(
-    `${window.location.pathname || "/"}${window.location.search || ""}`
+    `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`
   );
 }
 
@@ -835,6 +878,7 @@ export function getThemeColor(
 /* =========================================================
    ABORT / HEADERS / NETWORK
 ========================================================= */
+
 export function createAbortTimeout(
   ms =
     config.requestTimeout
@@ -939,9 +983,7 @@ export function mergeAbortSignals(
       (cleanup) => {
         try {
           cleanup?.();
-        } catch {
-          /* noop */
-        }
+        } catch {}
       }
     );
 
@@ -952,8 +994,7 @@ export function mergeAbortSignals(
     sourceSignal
   ) {
     if (
-      controller.signal
-        .aborted
+      controller.signal.aborted
     ) {
       return;
     }
@@ -972,9 +1013,7 @@ export function mergeAbortSignals(
 
   validSignals.forEach(
     (signal) => {
-      if (
-        signal.aborted
-      ) {
+      if (signal.aborted) {
         abortFrom(signal);
         return;
       }
@@ -1053,8 +1092,7 @@ export function detectNetworkHints(
   }
 
   if (
-    navigator.onLine ===
-    false
+    navigator.onLine === false
   ) {
     hints.push(
       "El navegador parece estar offline."
@@ -1062,11 +1100,8 @@ export function detectNetworkHints(
   }
 
   if (
-    /^https:\/\//i.test(
-      url
-    ) &&
-    window.location
-      .protocol ===
+    /^https:\/\//i.test(url) &&
+    window.location.protocol ===
       "http:"
   ) {
     hints.push(
@@ -1075,11 +1110,8 @@ export function detectNetworkHints(
   }
 
   if (
-    /^http:\/\//i.test(
-      url
-    ) &&
-    window.location
-      .protocol ===
+    /^http:\/\//i.test(url) &&
+    window.location.protocol ===
       "https:"
   ) {
     hints.push(
@@ -1087,22 +1119,18 @@ export function detectNetworkHints(
     );
   }
 
-  const apiOrigin =
-    (() => {
-      try {
-        return new URL(
-          url
-        ).origin;
-      } catch {
-        return null;
-      }
-    })();
+  const apiOrigin = (() => {
+    try {
+      return new URL(url).origin;
+    } catch {
+      return null;
+    }
+  })();
 
   if (
     apiOrigin &&
     apiOrigin !==
-      window.location
-        .origin
+      window.location.origin
   ) {
     hints.push(
       "Petición cross-origin: revisa CORS y preflight OPTIONS."

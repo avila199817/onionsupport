@@ -195,7 +195,7 @@ function unwrapResponseEnvelope(payload = null) {
   if (Array.isArray(obj.tickets)) return obj.tickets;
   if (Array.isArray(obj.data)) return obj.data;
   if (Array.isArray(obj.results)) return obj.results;
-  if (Array.isArray(obj.rows)) return obj.rows);
+  if (Array.isArray(obj.rows)) return obj.rows;
 
   if (obj.ticket) return obj.ticket;
   if (obj.item) return obj.item;

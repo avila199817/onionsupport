@@ -2,7 +2,7 @@
    Onion SPA - Auth Login
    Archivo: src/features/auth/login.js
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - preparar credenciales login
    - construir payload robusto
    - redirects post-login seguros
@@ -10,13 +10,17 @@
    - soportar 2FA opcional
    - submit desde formularios HTML
    - endurecer respuestas heterogéneas backend
+   - navegación SPA consistente tras login
+   - anti race conditions concurrentes
+   - cero estados auth fantasma
 
-   HARDENING PRO:
-   - anti doble submit concurrente
-   - sanitización fuerte
-   - soporte username/email/teléfono
+   HARDENING EXTREMO:
+   - mutex real de login concurrente
+   - restore limpio previo a login
    - redirects blindados
-   - eventos consistentes
+   - sync inmediata AppCore/UI/router
+   - tolerancia total backend legacy
+   - eventos enterprise completos
    - errores normalizados
 ========================================================= */
 
@@ -56,12 +60,16 @@ import {
 ========================================================= */
 
 let loginPromise = null;
+let loginSequence = 0;
 
 /* =========================================================
-   HELPERS
+   BASICS
 ========================================================= */
 
-function safeText(value, fallback = "") {
+function safeText(
+  value,
+  fallback = ""
+) {
   if (
     value === null ||
     value === undefined
@@ -97,6 +105,59 @@ function safeSetError(error) {
       error || null
     );
   } catch {}
+}
+
+function safeSyncUserUI() {
+  try {
+    AppCore?.syncUserUI?.();
+  } catch {}
+}
+
+function safeNavigate(
+  path = "/"
+) {
+  try {
+    if (
+      AppCore?.Router &&
+      typeof AppCore.Router.navigate ===
+        "function"
+    ) {
+      AppCore.Router.navigate(
+        path,
+        {
+          replaceState: true,
+          force: true,
+        }
+      );
+
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (
+      isBrowser() &&
+      typeof window.history
+        ?.replaceState ===
+        "function"
+    ) {
+      window.history.replaceState(
+        {},
+        "",
+        path
+      );
+
+      window.dispatchEvent(
+        new PopStateEvent(
+          "popstate"
+        )
+      );
+
+      return true;
+    }
+  } catch {}
+
+  return false;
 }
 
 function getApiClient() {
@@ -297,7 +358,9 @@ export function buildLoginRedirectPath(
   }
 
   if (!isBrowser()) {
-    return `${loginPath}?redirect=${encodeURIComponent(target)}`;
+    return `${loginPath}?redirect=${encodeURIComponent(
+      target
+    )}`;
   }
 
   const url =
@@ -362,6 +425,12 @@ export function getPostLoginTarget(
     return "/facturas";
   }
 
+  if (
+    role === "support"
+  ) {
+    return "/incidencias";
+  }
+
   const slug =
     user?.slug ||
     AppCore?.utils?.slugify?.(
@@ -384,11 +453,12 @@ export function getPostLoginTarget(
 }
 
 /* =========================================================
-   LOGIN CORE
+   CORE LOGIN
 ========================================================= */
 
 async function executeLogin(
-  credentials = {}
+  credentials = {},
+  sequence = 0
 ) {
   const payload =
     normalizeLoginPayload(
@@ -399,13 +469,9 @@ async function executeLogin(
     !payload.identifier ||
     !payload.password
   ) {
-    const error =
-      new Error(
-        "Usuario/email y contraseña son obligatorios."
-      );
-
-    safeSetError(error);
-    throw error;
+    throw new Error(
+      "Usuario/email y contraseña son obligatorios."
+    );
   }
 
   const apiClient =
@@ -416,13 +482,9 @@ async function executeLogin(
     typeof apiClient.post !==
       "function"
   ) {
-    const error =
-      new Error(
-        "No hay cliente API disponible para login."
-      );
-
-    safeSetError(error);
-    throw error;
+    throw new Error(
+      "No hay cliente API disponible para login."
+    );
   }
 
   const endpoint =
@@ -436,6 +498,7 @@ async function executeLogin(
       identifier:
         payload.identifier,
       endpoint,
+      sequence,
     }
   );
 
@@ -462,7 +525,7 @@ async function executeLogin(
       true;
 
   /* =====================================================
-     2FA FLOW
+     2FA
   ===================================================== */
 
   if (
@@ -498,7 +561,7 @@ async function executeLogin(
   }
 
   /* =====================================================
-     NORMAL LOGIN
+     CLEAN NORMAL LOGIN
   ===================================================== */
 
   persistTempToken(null);
@@ -530,6 +593,8 @@ async function executeLogin(
     );
   }
 
+  safeSyncUserUI();
+
   const redirectTo =
     getPostLoginTarget(
       snapshot.user
@@ -551,6 +616,10 @@ async function executeLogin(
     result
   );
 
+  safeNavigate(
+    redirectTo
+  );
+
   return result;
 }
 
@@ -565,11 +634,19 @@ export async function login(
     return loginPromise;
   }
 
+  const sequence =
+    ++loginSequence;
+
   loginPromise =
     (async () => {
       try {
+        clearSessionLocal({
+          silent: true,
+        });
+
         return await executeLogin(
-          credentials
+          credentials,
+          sequence
         );
       } catch (error) {
         clearSessionLocal({
@@ -581,6 +658,7 @@ export async function login(
         safeEmit(
           "auth:login:error",
           {
+            sequence,
             error,
             message:
               extractMessage(

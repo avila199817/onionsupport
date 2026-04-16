@@ -10,13 +10,15 @@
    - integrarse con loader boot
    - tolerar fallos sin romper SPA
 
-   HARDENING PRO:
+   HARDENING EXTREMO:
    - idempotencia total
    - safe logs
    - fallback route "/"
    - render serializado
    - no doble initial render
-   - no sobrescribir route/publicPath con valores inconsistentes
+   - no sobrescribir route/publicPath inconsistentes
+   - anti stale boot calls
+   - snapshot debug enterprise
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -41,6 +43,7 @@ let configured = false;
 let bound = false;
 let firstRenderDone = false;
 let initialRenderPromise = null;
+let renderCycle = 0;
 
 /* =========================================================
    HELPERS
@@ -70,63 +73,114 @@ function isFunction(value) {
   return typeof value === "function";
 }
 
-function normalizeInitialPath(path) {
-  if (typeof path !== "string") {
+function normalizePath(path = "/") {
+  const raw =
+    typeof path === "string"
+      ? path.trim()
+      : "/";
+
+  if (!raw) {
     return "/";
   }
 
-  const trimmed = path.trim();
+  const normalized =
+    raw.startsWith("/")
+      ? raw
+      : `/${raw}`;
 
-  if (!trimmed) {
-    return "/";
-  }
-
-  return trimmed.startsWith("/")
-    ? trimmed
-    : `/${trimmed}`;
+  return (
+    normalized
+      .replace(/\/{2,}/g, "/")
+      .replace(/\/+$/g, "") || "/"
+  );
 }
 
 function getSafeInitialPath() {
-  return normalizeInitialPath(
-    getCurrentPath(AppCore) || "/"
+  return normalizePath(
+    getCurrentPath(
+      AppCore
+    ) || "/"
   );
 }
 
-function syncResolvedRouteState(fallbackPath) {
+function shouldUsePath(value) {
+  return (
+    typeof value ===
+      "string" &&
+    value.trim()
+  );
+}
+
+function syncResolvedRouteState(
+  fallbackPath = "/"
+) {
   const resolvedCanonicalPath =
-    normalizeInitialPath(
+    normalizePath(
       getCurrentCanonicalPath(
         AppCore,
         Router
-      ) || fallbackPath || "/"
+      ) ||
+        fallbackPath ||
+        "/"
     );
 
   const resolvedPublicPath =
-    normalizeInitialPath(
+    normalizePath(
       getCurrentPublicPath(
         AppCore,
         Router
-      ) || fallbackPath || resolvedCanonicalPath
+      ) ||
+        fallbackPath ||
+        resolvedCanonicalPath
     );
 
-  AppCore?.setRoute?.(
-    resolvedCanonicalPath
-  );
+  try {
+    AppCore?.setRoute?.(
+      resolvedCanonicalPath
+    );
+  } catch {}
 
-  AppCore?.setPublicPath?.(
-    resolvedPublicPath
-  );
+  try {
+    AppCore?.setPublicPath?.(
+      resolvedPublicPath
+    );
+  } catch {}
 
-  AppCore?.setState?.({
-    route: resolvedCanonicalPath,
-    publicPath: resolvedPublicPath,
-  });
+  try {
+    AppCore?.setState?.({
+      route:
+        resolvedCanonicalPath,
+      publicPath:
+        resolvedPublicPath,
+    });
+  } catch {}
 
   return {
     canonicalPath:
       resolvedCanonicalPath,
     publicPath:
       resolvedPublicPath,
+  };
+}
+
+function markInitialRenderDone(
+  value = true
+) {
+  firstRenderDone =
+    Boolean(value);
+
+  try {
+    AppCore?.setState?.({
+      initialRouteRendered:
+        Boolean(value),
+    });
+  } catch {}
+}
+
+function getRenderOptions() {
+  return {
+    replaceState: true,
+    force: true,
   };
 }
 
@@ -179,7 +233,9 @@ export function bindRouter() {
 
   try {
     if (
-      isFunction(Router?.bind)
+      isFunction(
+        Router?.bind
+      )
     ) {
       Router.bind();
     }
@@ -200,19 +256,72 @@ export function bindRouter() {
 }
 
 /* =========================================================
+   INTERNAL RENDER
+========================================================= */
+
+async function runInitialRender(
+  path = "/",
+  cycleId = 0
+) {
+  const target =
+    normalizePath(path);
+
+  await Promise.resolve(
+    Router.render(
+      target,
+      getRenderOptions()
+    )
+  );
+
+  if (
+    cycleId !== renderCycle
+  ) {
+    return false;
+  }
+
+  const resolved =
+    syncResolvedRouteState(
+      target
+    );
+
+  applyPostRenderLoaderPolicy({
+    AppCore,
+    Router,
+  });
+
+  markInitialRenderDone(
+    true
+  );
+
+  safeLog(
+    "Render inicial completado.",
+    resolved
+  );
+
+  return true;
+}
+
+/* =========================================================
    INITIAL RENDER
 ========================================================= */
 
 export async function renderInitialRoute() {
   bindRouter();
 
-  if (firstRenderDone) {
+  if (
+    firstRenderDone
+  ) {
     return true;
   }
 
-  if (initialRenderPromise) {
+  if (
+    initialRenderPromise
+  ) {
     return initialRenderPromise;
   }
+
+  const cycleId =
+    ++renderCycle;
 
   initialRenderPromise =
     (async () => {
@@ -225,35 +334,17 @@ export async function renderInitialRoute() {
           path
         );
 
-        await Promise.resolve(
-          Router.render(path, {
-            replaceState: true,
-            force: true,
-          })
-        );
-
-        const resolved =
-          syncResolvedRouteState(
-            path
+        const ok =
+          await runInitialRender(
+            path,
+            cycleId
           );
 
-        applyPostRenderLoaderPolicy({
-          AppCore,
-          Router,
-        });
+        if (ok) {
+          return true;
+        }
 
-        firstRenderDone = true;
-
-        AppCore?.setState?.({
-          initialRouteRendered: true,
-        });
-
-        safeLog(
-          "Render inicial completado.",
-          resolved
-        );
-
-        return true;
+        return false;
       } catch (error) {
         safeWarn(
           "Fallo render inicial. Fallback '/'.",
@@ -261,39 +352,34 @@ export async function renderInitialRoute() {
         );
 
         try {
-          await Promise.resolve(
-            Router.render("/", {
-              replaceState: true,
-              force: true,
-            })
-          );
-
-          const resolved =
-            syncResolvedRouteState(
+          const fallback =
+            shouldUsePath(
               "/"
+            )
+              ? "/"
+              : path;
+
+          const ok =
+            await runInitialRender(
+              fallback,
+              cycleId
             );
 
-          applyPostRenderLoaderPolicy({
-            AppCore,
-            Router,
-          });
+          if (ok) {
+            safeLog(
+              "Fallback render inicial completado."
+            );
+          }
 
-          firstRenderDone = true;
-
-          AppCore?.setState?.({
-            initialRouteRendered: true,
-          });
-
-          safeLog(
-            "Fallback render inicial completado.",
-            resolved
-          );
-
-          return true;
+          return ok;
         } catch (fatal) {
           safeError(
             "Render inicial fatal:",
             fatal
+          );
+
+          markInitialRenderDone(
+            false
           );
 
           return false;
@@ -308,8 +394,16 @@ export async function renderInitialRoute() {
 }
 
 /* =========================================================
-   PUBLIC API
+   RESET / DEBUG
 ========================================================= */
+
+export function resetRouterBootstrap() {
+  firstRenderDone = false;
+  initialRenderPromise = null;
+  renderCycle = 0;
+
+  return true;
+}
 
 export function getRouterBootstrapState() {
   return {
@@ -320,6 +414,14 @@ export function getRouterBootstrapState() {
       Boolean(
         initialRenderPromise
       ),
+    renderCycle,
+    route:
+      AppCore?.state
+        ?.route || "/",
+    publicPath:
+      AppCore?.state
+        ?.publicPath ||
+      "/",
   };
 }
 
@@ -327,5 +429,6 @@ export default {
   configureRouter,
   bindRouter,
   renderInitialRoute,
+  resetRouterBootstrap,
   getRouterBootstrapState,
 };

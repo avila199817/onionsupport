@@ -126,7 +126,9 @@ export const IncidenciasView = (() => {
   }
 
   function setState(patch = {}) {
-    if (!patch || typeof patch !== "object") return incidenciasState;
+    if (!patch || typeof patch !== "object") {
+      return incidenciasState;
+    }
 
     Object.assign(incidenciasState, patch);
 
@@ -225,12 +227,28 @@ export const IncidenciasView = (() => {
     } catch {}
   }
 
+  function safeErrorMessage(error = null) {
+    if (!error) {
+      return "No se pudo cargar la colección de incidencias.";
+    }
+
+    const message =
+      error?.message ||
+      error?.response?.message ||
+      error?.data?.message ||
+      "No se pudo cargar la colección de incidencias.";
+
+    return String(message).trim() || "No se pudo cargar la colección de incidencias.";
+  }
+
   /* =====================================================
      MODAL BRIDGE
   ===================================================== */
 
   function openTicketModalBridge(detail = null) {
-    if (!detail) return false;
+    if (!detail) {
+      return false;
+    }
 
     let handled = false;
 
@@ -269,6 +287,7 @@ export const IncidenciasView = (() => {
 
   function buildHtml() {
     const items = getItems();
+
     clampPageAgainstItems(items);
 
     return `
@@ -314,7 +333,9 @@ export const IncidenciasView = (() => {
   }
 
   function rerender() {
-    if (destroyed) return null;
+    if (destroyed) {
+      return null;
+    }
 
     const container = render();
 
@@ -356,6 +377,7 @@ export const IncidenciasView = (() => {
       });
 
       const itemsAfter = getItems();
+
       clampPageAgainstItems(itemsAfter);
 
       return itemsAfter;
@@ -376,18 +398,6 @@ export const IncidenciasView = (() => {
 
       return getItems();
     }
-  }
-
-  function safeErrorMessage(error = null) {
-    if (!error) return "No se pudo cargar la colección de incidencias.";
-
-    const message =
-      error?.message ||
-      error?.response?.message ||
-      error?.data?.message ||
-      "No se pudo cargar la colección de incidencias.";
-
-    return String(message).trim() || "No se pudo cargar la colección de incidencias.";
   }
 
   async function renderAndLoad({
@@ -426,6 +436,7 @@ export const IncidenciasView = (() => {
 
   function goToPage(page = 1) {
     const items = getItems();
+
     const pagination = paginateIncidencias(
       items,
       page,
@@ -500,7 +511,9 @@ export const IncidenciasView = (() => {
   async function handleRefreshTicketFromModal(ticketId = "") {
     const id = String(ticketId || "").trim();
 
-    if (!id) return null;
+    if (!id) {
+      return null;
+    }
 
     try {
       const detail = await refreshTicketDetailAction({
@@ -539,7 +552,9 @@ export const IncidenciasView = (() => {
   }
 
   async function handleCreateIncidencia() {
-    if (incidenciasState.creating) return false;
+    if (incidenciasState.creating) {
+      return false;
+    }
 
     setState({
       creating: true,
@@ -579,6 +594,7 @@ export const IncidenciasView = (() => {
         event.preventDefault();
 
         const ticketId = String(openBtn.dataset.ticketId || "").trim();
+
         await handleOpenTicket(ticketId);
         return;
       }
@@ -591,7 +607,9 @@ export const IncidenciasView = (() => {
           copyBtn.dataset.ticketId || copyBtn.dataset.ticketCode || ""
         ).trim();
 
-        if (!ticketId) return;
+        if (!ticketId) {
+          return;
+        }
 
         await handleCopyTicketId(ticketId);
         return;
@@ -653,7 +671,9 @@ export const IncidenciasView = (() => {
         event?.ticketId ||
         "";
 
-      if (!ticketId) return;
+      if (!ticketId) {
+        return;
+      }
 
       await handleRefreshTicketFromModal(ticketId);
     };
@@ -664,7 +684,9 @@ export const IncidenciasView = (() => {
         event?.ticketId ||
         "";
 
-      if (!ticketId) return;
+      if (!ticketId) {
+        return;
+      }
 
       await handleCopyTicketId(ticketId);
     };

@@ -4,14 +4,14 @@
 
    Responsabilidades:
    - detectar viewport mobile
-   - persistir collapsed/expanded en desktop
+   - mantener sidebar siempre abierto en desktop
    - resolver estado deseado open/closed
    - sincronizar clases visuales del sidebar
    - actualizar aria / labels de toggles
    - activar modo tooltip CSS cuando proceda
 ========================================================= */
 
-import { MOBILE_BREAKPOINT, DESKTOP_COLLAPSED_STORAGE_KEY } from "./constants.js";
+import { MOBILE_BREAKPOINT } from "./constants.js";
 import { getElements, isShellHidden, sanitizeFooterTooltipState } from "./dom.js";
 
 /* =========================================================
@@ -23,31 +23,25 @@ export function isMobileViewport(breakpoint = MOBILE_BREAKPOINT) {
 
 /* =========================================================
    PERSISTENCIA
+   DESACTIVADA: sidebar siempre abierto en desktop
 ========================================================= */
 export function getSavedSidebarCollapsed() {
-  try {
-    return localStorage.getItem(DESKTOP_COLLAPSED_STORAGE_KEY) === "true";
-  } catch {
-    return false;
-  }
+  return false;
 }
 
-export function saveSidebarCollapsed(value) {
-  try {
-    localStorage.setItem(
-      DESKTOP_COLLAPSED_STORAGE_KEY,
-      String(Boolean(value))
-    );
-  } catch {
-    /* noop */
-  }
+export function saveSidebarCollapsed() {
+  /* noop */
 }
 
 /* =========================================================
    STATE HELPERS
 ========================================================= */
 export function getDesiredSidebarOpenState(AppCore) {
-  return Boolean(AppCore?.state?.sidebarOpen);
+  if (isMobileViewport()) {
+    return Boolean(AppCore?.state?.sidebarOpen);
+  }
+
+  return true;
 }
 
 export function isSidebarCollapsedDesktop(AppCore) {
@@ -55,10 +49,7 @@ export function isSidebarCollapsedDesktop(AppCore) {
   if (!sidebar) return false;
   if (isMobileViewport()) return false;
 
-  return (
-    sidebar.classList.contains("collapsed") ||
-    sidebar.classList.contains("is-collapsed")
-  );
+  return false;
 }
 
 /* =========================================================
@@ -99,9 +90,7 @@ export function updateToggleLabel(AppCore, isOpen = null) {
           sidebar.classList.contains("is-collapsed")
         );
 
-  const desktopText = open
-    ? "Contraer barra lateral"
-    : "Expandir barra lateral";
+  const desktopText = "Barra lateral fija abierta";
 
   const mobileText = open
     ? "Cerrar navegación"
@@ -110,8 +99,8 @@ export function updateToggleLabel(AppCore, isOpen = null) {
   if (toggleBtn) {
     toggleBtn.dataset.tooltip = desktopText;
     toggleBtn.setAttribute("aria-label", desktopText);
-    toggleBtn.setAttribute("aria-expanded", String(open));
-    toggleBtn.classList.toggle("is-active", open);
+    toggleBtn.setAttribute("aria-expanded", "true");
+    toggleBtn.classList.add("is-active");
     toggleBtn.removeAttribute("title");
   }
 
@@ -140,7 +129,7 @@ export function syncSidebarState(AppCore, closeDropdown) {
 
     syncTooltipMode(AppCore, true);
     closeDropdown?.();
-    updateToggleLabel(AppCore, false);
+    updateToggleLabel(AppCore, true);
     return;
   }
 
@@ -157,18 +146,17 @@ export function syncSidebarState(AppCore, closeDropdown) {
     body?.classList.toggle("sidebar-open", isOpen);
     body?.classList.remove("sidebar-collapsed");
   } else {
-    sidebar.classList.toggle("collapsed", !isOpen);
-    sidebar.classList.toggle("is-collapsed", !isOpen);
-    sidebar.classList.remove("open", "is-open");
+    sidebar.classList.remove("collapsed", "is-collapsed");
+    sidebar.classList.add("open", "is-open");
 
-    body?.classList.toggle("sidebar-collapsed", !isOpen);
-    body?.classList.remove("sidebar-open");
+    body?.classList.remove("sidebar-collapsed");
+    body?.classList.add("sidebar-open");
   }
 
   updateToggleLabel(AppCore, isOpen);
 
   AppCore?.events?.emit?.("sidebar:state:synced", {
-    open: isOpen,
+    open: mobile ? isOpen : true,
     mobile,
   });
 }
@@ -177,15 +165,10 @@ export function syncSidebarState(AppCore, closeDropdown) {
    WRITE STATE
 ========================================================= */
 export function setSidebarOpen(AppCore, open, closeDropdown) {
-  const nextOpen = Boolean(open);
   const mobile = isMobileViewport();
 
   if (AppCore?.state) {
-    AppCore.state.sidebarOpen = nextOpen;
-  }
-
-  if (!mobile) {
-    saveSidebarCollapsed(!nextOpen);
+    AppCore.state.sidebarOpen = mobile ? Boolean(open) : true;
   }
 
   syncSidebarState(AppCore, closeDropdown);

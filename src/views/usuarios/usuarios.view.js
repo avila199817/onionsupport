@@ -8,6 +8,8 @@
    - carga inicial + refresh con loader de tabla
    - dedupe de requests en vuelo
    - cleanup de bindings sin duplicados
+   - repaint reactivo ante cambios del módulo
+   - bridge seguro entre actions / api / view
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -37,12 +39,36 @@ import {
 const VIEW_NAME = "usuarios";
 const SCOPE = "view:usuarios";
 
+const REACTIVE_EVENTS = [
+  "usuarios:list:loaded",
+  "usuarios:action:hydrate:start",
+  "usuarios:action:hydrate:success",
+  "usuarios:action:hydrate:error",
+  "usuarios:action:refresh:start",
+  "usuarios:action:refresh:success",
+  "usuarios:action:refresh:error",
+  "usuarios:action:search",
+  "usuarios:action:filter:role",
+  "usuarios:action:filter:status",
+  "usuarios:action:sort",
+  "usuarios:action:page",
+  "usuarios:action:page-size",
+  "usuarios:action:filters:reset",
+  "usuarios:action:select-user",
+  "usuarios:action:clear-selection",
+];
+
 let initialized = false;
 let destroyed = false;
 let inflightLoad = null;
 let bindingsCleanup = null;
+let reactiveCleanup = null;
 let renderToken = 0;
 let lastRenderContext = {};
+
+/* =========================================================
+   BASICS
+========================================================= */
 
 function safeObject(value) {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -90,7 +116,11 @@ function safeEmit(eventName = "", payload = {}) {
 function safeWarn(...args) {
   try {
     AppCore?.utils?.warn?.("[UsuariosView]", ...args);
-  } catch {}
+  } catch {
+    try {
+      console.warn("[UsuariosView]", ...args);
+    } catch {}
+  }
 }
 
 function notifySuccess(message = "Operación completada") {
@@ -116,12 +146,20 @@ function notifyError(message = "No se pudo completar la operación") {
 }
 
 function getContainer() {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
   return (
     AppCore?.dom?.viewContainer ||
     document.getElementById("view-container") ||
     null
   );
 }
+
+/* =========================================================
+   CLEANUP
+========================================================= */
 
 function cleanupBindings() {
   try {
@@ -134,6 +172,23 @@ function cleanupBindings() {
     AppCore?.cleanup?.run?.(SCOPE);
   } catch {}
 }
+
+function cleanupReactiveSubscriptions() {
+  try {
+    reactiveCleanup?.();
+  } catch {}
+
+  reactiveCleanup = null;
+}
+
+function cleanupAll() {
+  cleanupBindings();
+  cleanupReactiveSubscriptions();
+}
+
+/* =========================================================
+   TEMPLATE STATE
+========================================================= */
 
 function getTemplateState({
   forceLoading = false,
@@ -150,7 +205,9 @@ function getTemplateState({
         ? true
         : status.loading === true,
     refreshing:
-      refreshing === true,
+      refreshing === true
+        ? true
+        : snapshot?.refreshing === true,
     loaded: status.loaded === true,
     source: status.source || snapshot.source || "idle",
     degraded:
@@ -164,6 +221,10 @@ function getTemplateState({
   };
 }
 
+/* =========================================================
+   DOM BIND
+========================================================= */
+
 function bindDom(root) {
   cleanupBindings();
 
@@ -176,6 +237,10 @@ function bindDom(root) {
     bindingsCleanup = null;
   }
 }
+
+/* =========================================================
+   RENDER
+========================================================= */
 
 function renderShell({
   forceLoading = false,
@@ -254,6 +319,183 @@ function repaint(
   return root;
 }
 
+/* =========================================================
+   REACTIVE BRIDGE
+========================================================= */
+
+function safeSubscribe(eventName = "", handler = null) {
+  const events = AppCore?.events;
+
+  if (!events || typeof handler !== "function" || !safeText(eventName, "")) {
+    return () => {};
+  }
+
+  try {
+    if (typeof events.on === "function") {
+      const maybeDisposer = events.on(eventName, handler);
+
+      if (typeof maybeDisposer === "function") {
+        return maybeDisposer;
+      }
+    }
+  } catch (error) {
+    safeWarn("subscribe error", eventName, error);
+  }
+
+  return () => {
+    try {
+      if (typeof events.off === "function") {
+        events.off(eventName, handler);
+        return;
+      }
+    } catch {}
+
+    try {
+      if (typeof events.removeListener === "function") {
+        events.removeListener(eventName, handler);
+        return;
+      }
+    } catch {}
+
+    try {
+      if (typeof events.unsubscribe === "function") {
+        events.unsubscribe(eventName, handler);
+      }
+    } catch {}
+  };
+}
+
+function setupReactiveBridge() {
+  cleanupReactiveSubscriptions();
+
+  const unsubscribers = [];
+
+  const handleModuleEvent = (eventName, payload = {}) => {
+    if (destroyed) {
+      return;
+    }
+
+    const currentStatus = getUsuariosStatus();
+    const currentContext = safeObject(lastRenderContext);
+
+    if (eventName === "usuarios:action:hydrate:start") {
+      repaint(
+        {
+          ...currentContext,
+          forceLoading: isUsuariosReady() !== true,
+          refreshing: isUsuariosReady() === true,
+          error: null,
+        },
+        {
+          rememberContext: false,
+        }
+      );
+      return;
+    }
+
+    if (eventName === "usuarios:action:refresh:start") {
+      repaint(
+        {
+          ...currentContext,
+          refreshing: true,
+          error: null,
+        },
+        {
+          rememberContext: false,
+        }
+      );
+      return;
+    }
+
+    if (
+      eventName === "usuarios:action:hydrate:error" ||
+      eventName === "usuarios:action:refresh:error"
+    ) {
+      repaint(
+        {
+          ...currentContext,
+          refreshing: false,
+          forceLoading: false,
+          error:
+            payload?.error?.message ||
+            currentStatus?.error?.message ||
+            currentStatus?.error ||
+            "No se pudo cargar el listado de usuarios.",
+        },
+        {
+          rememberContext: false,
+        }
+      );
+      return;
+    }
+
+    if (
+      eventName === "usuarios:list:loaded" ||
+      eventName === "usuarios:action:hydrate:success" ||
+      eventName === "usuarios:action:refresh:success" ||
+      eventName === "usuarios:action:select-user" ||
+      eventName === "usuarios:action:clear-selection"
+    ) {
+      repaint(
+        {
+          ...currentContext,
+          forceLoading: false,
+          refreshing: false,
+          error: null,
+        },
+        {
+          rememberContext: false,
+        }
+      );
+      return;
+    }
+
+    if (
+      eventName === "usuarios:action:search" ||
+      eventName === "usuarios:action:filter:role" ||
+      eventName === "usuarios:action:filter:status" ||
+      eventName === "usuarios:action:sort" ||
+      eventName === "usuarios:action:page" ||
+      eventName === "usuarios:action:page-size" ||
+      eventName === "usuarios:action:filters:reset"
+    ) {
+      repaint(
+        {
+          ...currentContext,
+          refreshing: true,
+          error: null,
+        },
+        {
+          rememberContext: false,
+        }
+      );
+    }
+  };
+
+  REACTIVE_EVENTS.forEach((eventName) => {
+    const handler = (payload = {}) =>
+      handleModuleEvent(eventName, payload);
+
+    unsubscribers.push(
+      safeSubscribe(eventName, handler)
+    );
+  });
+
+  reactiveCleanup = () => {
+    while (unsubscribers.length) {
+      const unsubscribe = unsubscribers.pop();
+
+      try {
+        unsubscribe?.();
+      } catch {}
+    }
+  };
+}
+
+/* =========================================================
+   LOAD FLOW
+========================================================= */
+
 async function ensureLoaded(options = {}) {
   if (inflightLoad) {
     return inflightLoad;
@@ -264,7 +506,16 @@ async function ensureLoaded(options = {}) {
   inflightLoad = (async () => {
     try {
       if (config.showTableRefresh === true) {
-        repaint({ refreshing: true }, { rememberContext: false });
+        repaint(
+          {
+            ...safeObject(lastRenderContext),
+            refreshing: true,
+            error: null,
+          },
+          {
+            rememberContext: false,
+          }
+        );
       }
 
       const params = safeObject(config.params || config.query);
@@ -278,7 +529,23 @@ async function ensureLoaded(options = {}) {
           });
 
       if (!destroyed) {
-        repaint(lastRenderContext);
+        repaint(
+          {
+            ...safeObject(lastRenderContext),
+            forceLoading: false,
+            refreshing: false,
+            error:
+              result?.ok === false
+                ? safeText(
+                    result?.error?.message || result?.error,
+                    ""
+                  ) || null
+                : null,
+          },
+          {
+            rememberContext: false,
+          }
+        );
       }
 
       if (config.silent !== true) {
@@ -297,6 +564,8 @@ async function ensureLoaded(options = {}) {
         repaint(
           {
             ...safeObject(lastRenderContext),
+            forceLoading: false,
+            refreshing: false,
             error:
               error?.message ||
               "No se pudo cargar el listado de usuarios.",
@@ -333,19 +602,29 @@ async function ensureLoaded(options = {}) {
   return inflightLoad;
 }
 
+/* =========================================================
+   PUBLIC API
+========================================================= */
+
 export async function init(options = {}) {
   const context = safeObject(options);
 
   destroyed = false;
+
+  setupReactiveBridge();
+
   patchUsuariosUi({
     mounted: true,
     lastAction: "init",
   });
+
   markUsuariosMounted(true);
 
   repaint(
     {
       forceLoading: true,
+      refreshing: false,
+      error: null,
     },
     {
       rememberContext: false,
@@ -379,15 +658,24 @@ export async function render(options = {}) {
   const context = safeObject(options);
 
   destroyed = false;
+
+  setupReactiveBridge();
+
   patchUsuariosUi({
     mounted: true,
     lastAction: "render",
   });
+
   markUsuariosMounted(true);
 
   lastRenderContext = clone(context);
 
-  repaint(context);
+  repaint({
+    ...context,
+    forceLoading: false,
+    refreshing: false,
+    error: null,
+  });
 
   let result = null;
 
@@ -447,8 +735,10 @@ export async function reload(options = {}) {
 export function destroy() {
   destroyed = true;
 
-  cleanupBindings();
+  cleanupAll();
+
   markUsuariosMounted(false);
+
   patchUsuariosUi({
     mounted: false,
     lastAction: "destroy",
@@ -466,6 +756,7 @@ export function reset() {
   destroy();
   resetUsuariosStore();
   initialized = false;
+  lastRenderContext = {};
 
   safeEmit("usuarios:view:reset", {
     view: VIEW_NAME,
@@ -484,7 +775,10 @@ export function getStatus() {
 
 export function getElement() {
   const container = getContainer();
-  return container?.querySelector?.('[data-usuarios-view="true"]') || null;
+
+  return (
+    container?.querySelector?.('[data-usuarios-view="true"]') || null
+  );
 }
 
 export const UsuariosView = {

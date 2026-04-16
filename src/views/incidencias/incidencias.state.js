@@ -3,13 +3,18 @@
    Archivo: src/views/incidencias/incidencias.state.js
 
    Responsabilidades:
-   - centralizar estado local de incidencias
-   - flags de carga / refresh
+   - estado local centralizado
+   - loading / refresh
    - errores
-   - timestamps
+   - cache temporal
    - request inflight
-   - cache temporal de items
-   - compatibilidad total con View / API / Actions
+   - compatibilidad View/API/Actions
+
+   FIX CRÍTICO:
+   - setters robustos
+   - no loading infinito
+   - cache helpers
+   - snapshot debug
 ========================================================= */
 
 export const CACHE_KEY =
@@ -24,21 +29,27 @@ export const incidenciasState =
     loading: false,
     refreshing: false,
     loaded: false,
+
     error: null,
 
     items: [],
     remoteCount: 0,
 
     lastSyncAt: 0,
+
+    requestId: 0,
   };
 
-let inflightLoad = null;
+let inflightLoad =
+  null;
 
 /* =========================================================
    SAFE
 ========================================================= */
 
-function safeArray(value) {
+function safeArray(
+  value
+) {
   return Array.isArray(value)
     ? value
     : [];
@@ -57,7 +68,17 @@ function safeNumber(
 }
 
 /* =========================================================
-   GETTERS / SETTERS
+   INTERNAL
+========================================================= */
+
+function touchRequestId() {
+  incidenciasState.requestId += 1;
+
+  return incidenciasState.requestId;
+}
+
+/* =========================================================
+   INFLOW
 ========================================================= */
 
 export function getInflightLoad() {
@@ -69,21 +90,51 @@ export function setInflightLoad(
 ) {
   inflightLoad =
     value || null;
+
+  return inflightLoad;
 }
 
+export function clearInflightLoad() {
+  inflightLoad =
+    null;
+}
+
+/* =========================================================
+   RESET
+========================================================= */
+
 export function resetIncidenciasState() {
-  incidenciasState.hydrated = false;
-  incidenciasState.loading = false;
-  incidenciasState.refreshing = false;
-  incidenciasState.loaded = false;
-  incidenciasState.error = null;
+  incidenciasState.hydrated =
+    false;
 
-  incidenciasState.items = [];
-  incidenciasState.remoteCount = 0;
+  incidenciasState.loading =
+    false;
 
-  incidenciasState.lastSyncAt = 0;
+  incidenciasState.refreshing =
+    false;
 
-  inflightLoad = null;
+  incidenciasState.loaded =
+    false;
+
+  incidenciasState.error =
+    null;
+
+  incidenciasState.items =
+    [];
+
+  incidenciasState.remoteCount =
+    0;
+
+  incidenciasState.lastSyncAt =
+    0;
+
+  incidenciasState.requestId =
+    0;
+
+  inflightLoad =
+    null;
+
+  return incidenciasState;
 }
 
 /* =========================================================
@@ -95,6 +146,14 @@ export function setLoading(
 ) {
   incidenciasState.loading =
     Boolean(value);
+
+  if (
+    incidenciasState.loading
+  ) {
+    touchRequestId();
+  }
+
+  return incidenciasState.loading;
 }
 
 export function setRefreshing(
@@ -102,6 +161,8 @@ export function setRefreshing(
 ) {
   incidenciasState.refreshing =
     Boolean(value);
+
+  return incidenciasState.refreshing;
 }
 
 export function setLoaded(
@@ -109,6 +170,8 @@ export function setLoaded(
 ) {
   incidenciasState.loaded =
     Boolean(value);
+
+  return incidenciasState.loaded;
 }
 
 export function setHydrated(
@@ -116,6 +179,8 @@ export function setHydrated(
 ) {
   incidenciasState.hydrated =
     Boolean(value);
+
+  return incidenciasState.hydrated;
 }
 
 /* =========================================================
@@ -125,12 +190,25 @@ export function setHydrated(
 export function setItems(
   items = []
 ) {
-  incidenciasState.items =
+  const list =
     safeArray(items);
 
-  incidenciasState.loaded = true;
+  incidenciasState.items =
+    list;
 
-  return incidenciasState.items;
+  incidenciasState.loaded =
+    true;
+
+  incidenciasState.error =
+    null;
+
+  incidenciasState.remoteCount =
+    Math.max(
+      incidenciasState.remoteCount,
+      list.length
+    );
+
+  return list;
 }
 
 export function getItems() {
@@ -140,8 +218,13 @@ export function getItems() {
 }
 
 export function clearItems() {
-  incidenciasState.items = [];
-  incidenciasState.remoteCount = 0;
+  incidenciasState.items =
+    [];
+
+  incidenciasState.remoteCount =
+    0;
+
+  return [];
 }
 
 export function setRemoteCount(
@@ -152,6 +235,8 @@ export function setRemoteCount(
       value,
       0
     );
+
+  return incidenciasState.remoteCount;
 }
 
 /* =========================================================
@@ -163,6 +248,13 @@ export function setError(
 ) {
   incidenciasState.error =
     value || null;
+
+  return incidenciasState.error;
+}
+
+export function clearError() {
+  incidenciasState.error =
+    null;
 }
 
 export function setLastSyncAt(
@@ -173,4 +265,104 @@ export function setLastSyncAt(
       value,
       0
     );
+
+  return incidenciasState.lastSyncAt;
 }
+
+/* =========================================================
+   CACHE HELPERS
+========================================================= */
+
+export function getCachePayload() {
+  return {
+    savedAt:
+      Date.now(),
+    items:
+      getItems(),
+    remoteCount:
+      incidenciasState.remoteCount,
+    lastSyncAt:
+      incidenciasState.lastSyncAt,
+  };
+}
+
+export function isCacheFresh(
+  savedAt = 0
+) {
+  const ts =
+    safeNumber(
+      savedAt,
+      0
+    );
+
+  if (!ts) {
+    return false;
+  }
+
+  return (
+    Date.now() - ts <
+    CACHE_TTL
+  );
+}
+
+/* =========================================================
+   DEBUG
+========================================================= */
+
+export function getIncidenciasStateSnapshot() {
+  return {
+    hydrated:
+      incidenciasState.hydrated,
+    loading:
+      incidenciasState.loading,
+    refreshing:
+      incidenciasState.refreshing,
+    loaded:
+      incidenciasState.loaded,
+    error:
+      incidenciasState.error,
+    total:
+      incidenciasState.items
+        .length,
+    remoteCount:
+      incidenciasState.remoteCount,
+    lastSyncAt:
+      incidenciasState.lastSyncAt,
+    requestId:
+      incidenciasState.requestId,
+    hasInflight:
+      Boolean(
+        inflightLoad
+      ),
+  };
+}
+
+export default {
+  CACHE_KEY,
+  CACHE_TTL,
+  incidenciasState,
+
+  getInflightLoad,
+  setInflightLoad,
+  clearInflightLoad,
+
+  resetIncidenciasState,
+
+  setLoading,
+  setRefreshing,
+  setLoaded,
+  setHydrated,
+
+  setItems,
+  getItems,
+  clearItems,
+  setRemoteCount,
+
+  setError,
+  clearError,
+  setLastSyncAt,
+
+  getCachePayload,
+  isCacheFresh,
+  getIncidenciasStateSnapshot,
+};

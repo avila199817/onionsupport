@@ -2,17 +2,24 @@
    Onion SPA - Incidencias Actions
    Archivo: src/views/incidencias/incidencias.actions.js
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - centralizar acciones operativas del módulo
-   - abrir detalle del ticket EN MODAL REAL
+   - abrir detalle ticket REAL
+   - pintar modal premium
    - copiar id / código
-   - exportar CSV
-   - desacoplar vista de lógica
+   - export csv
+   - desacoplar view de lógica
 
    FIX CRÍTICO:
-   - openTicket ahora abre modal visual real
-   - soporta store + api
-   - fallback robusto
+   - apiClient devuelve payload directo
+   - openTicket recibía string pero esperaba object
+   - no existía modal renderer real
+   - fallback store/api robusto
+
+   HARDENING PRO:
+   - cero throws UI
+   - modal idempotente
+   - cleanup seguro
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -29,6 +36,8 @@ import {
 import {
   safeText,
   safeNumber,
+  escapeHtml,
+  formatDate,
   showToast,
 } from "./incidencias.utils.js";
 
@@ -48,15 +57,26 @@ function safeEmit(
   } catch {}
 }
 
-function escapeHtml(
-  value = ""
-) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+function getBody() {
+  try {
+    return document.body || null;
+  } catch {
+    return null;
+  }
+}
+
+function getModalId() {
+  return "incidencias-ticket-modal";
+}
+
+function removeExistingModal() {
+  try {
+    document
+      .getElementById(
+        getModalId()
+      )
+      ?.remove?.();
+  } catch {}
 }
 
 async function copyText(
@@ -82,29 +102,29 @@ async function copyText(
   } catch {}
 
   try {
-    const textarea =
+    const el =
       document.createElement(
         "textarea"
       );
 
-    textarea.value = value;
-    textarea.style.position =
+    el.value = value;
+    el.style.position =
       "fixed";
-    textarea.style.opacity =
+    el.style.opacity =
       "0";
 
     document.body.appendChild(
-      textarea
+      el
     );
 
-    textarea.select();
+    el.select();
 
     const ok =
       document.execCommand(
         "copy"
       );
 
-    textarea.remove();
+    el.remove();
 
     return Boolean(ok);
   } catch {
@@ -113,43 +133,318 @@ async function copyText(
 }
 
 /* =========================================================
-   MODAL CORE
+   DETAIL HELPERS
 ========================================================= */
 
-function removeTicketModal() {
-  try {
-    document
-      .getElementById(
-        "ticket-detail-modal"
-      )
-      ?.remove();
-  } catch {}
+function pickDetail(
+  payload = null
+) {
+  if (!payload) {
+    return null;
+  }
+
+  if (payload.ticket) {
+    return payload.ticket;
+  }
+
+  if (payload.data) {
+    return payload.data;
+  }
+
+  return payload;
 }
 
-function bindCloseEvents(
-  root
+function resolveId(
+  item = {}
 ) {
-  if (!root) return;
+  return safeText(
+    item.ticketId ||
+      item.id ||
+      item.code,
+    "—"
+  );
+}
 
-  const close =
-    () => removeTicketModal();
+function resolveTitle(
+  item = {}
+) {
+  return safeText(
+    item.title ||
+      item.subject ||
+      item.asunto,
+    "Incidencia"
+  );
+}
 
-  root
-    .querySelectorAll(
-      '[data-close-modal="true"]'
-    )
-    .forEach((el) =>
-      el.addEventListener(
-        "click",
-        close
-      )
+function resolveDescription(
+  item = {}
+) {
+  return safeText(
+    item.description ||
+      item.descripcion ||
+      item.message ||
+      item.preview,
+    "Sin descripción."
+  );
+}
+
+function resolveClient(
+  item = {}
+) {
+  return safeText(
+    item.client ||
+      item.clientName ||
+      item.cliente ||
+      item?.cliente?.nombre,
+    "Cliente"
+  );
+}
+
+function resolveEmail(
+  item = {}
+) {
+  return safeText(
+    item.clientEmail ||
+      item.email ||
+      item?.cliente?.email,
+    "Sin email"
+  );
+}
+
+function resolveStatus(
+  item = {}
+) {
+  return safeText(
+    item.status ||
+      item.estado,
+    "open"
+  );
+}
+
+function resolvePriority(
+  item = {}
+) {
+  return safeText(
+    item.priority ||
+      item.prioridad,
+    "medium"
+  );
+}
+
+function resolveAssigned(
+  item = {}
+) {
+  return safeText(
+    item.assignedTo ||
+      item.assignee ||
+      item?.tecnico?.name,
+    "No asignado"
+  );
+}
+
+/* =========================================================
+   MODAL
+========================================================= */
+
+export function closeTicketModal() {
+  removeExistingModal();
+
+  try {
+    document.body.classList.remove(
+      "modal-open"
+    );
+  } catch {}
+
+  return true;
+}
+
+export function renderTicketModal(
+  detail = {}
+) {
+  const body = getBody();
+
+  if (!body) {
+    return false;
+  }
+
+  closeTicketModal();
+
+  const id =
+    resolveId(detail);
+
+  const title =
+    resolveTitle(detail);
+
+  const description =
+    resolveDescription(
+      detail
     );
 
-  root.addEventListener(
+  const client =
+    resolveClient(detail);
+
+  const email =
+    resolveEmail(detail);
+
+  const status =
+    resolveStatus(detail);
+
+  const priority =
+    resolvePriority(
+      detail
+    );
+
+  const assigned =
+    resolveAssigned(
+      detail
+    );
+
+  const createdAt =
+    formatDate(
+      detail.createdAt
+    );
+
+  const updatedAt =
+    formatDate(
+      detail.updatedAt
+    );
+
+  const modal =
+    document.createElement(
+      "div"
+    );
+
+  modal.id =
+    getModalId();
+
+  modal.innerHTML = `
+    <div
+      data-role="overlay"
+      style="
+        position:fixed;
+        inset:0;
+        z-index:9999;
+        display:grid;
+        place-items:center;
+        padding:24px;
+        background:rgba(0,0,0,.62);
+        backdrop-filter:blur(8px);
+      "
+    >
+      <div
+        style="
+          width:min(860px,100%);
+          max-height:90vh;
+          overflow:auto;
+          border-radius:24px;
+          border:1px solid var(--border-soft,#2a2a2a);
+          background:var(--surface-1,#111);
+          box-shadow:0 30px 80px rgba(0,0,0,.45);
+        "
+      >
+        <div
+          style="
+            display:flex;
+            justify-content:space-between;
+            gap:16px;
+            padding:24px;
+            border-bottom:1px solid var(--border-soft,#2a2a2a);
+          "
+        >
+          <div style="display:grid;gap:8px;">
+            <span style="font-size:12px;color:#999;text-transform:uppercase;">
+              Ticket
+            </span>
+
+            <h2 style="margin:0;font-size:28px;">
+              ${escapeHtml(id)}
+            </h2>
+
+            <strong style="font-size:18px;">
+              ${escapeHtml(title)}
+            </strong>
+          </div>
+
+          <button
+            data-close-modal="1"
+            style="
+              width:42px;
+              height:42px;
+              border:none;
+              border-radius:12px;
+              cursor:pointer;
+            "
+          >
+            ✕
+          </button>
+        </div>
+
+        <div
+          style="
+            padding:24px;
+            display:grid;
+            gap:18px;
+          "
+        >
+          <div>
+            <strong>Descripción</strong>
+            <p>${escapeHtml(description)}</p>
+          </div>
+
+          <div
+            style="
+              display:grid;
+              grid-template-columns:repeat(2,minmax(0,1fr));
+              gap:14px;
+            "
+          >
+            <div><strong>Cliente:</strong> ${escapeHtml(client)}</div>
+            <div><strong>Email:</strong> ${escapeHtml(email)}</div>
+            <div><strong>Estado:</strong> ${escapeHtml(status)}</div>
+            <div><strong>Prioridad:</strong> ${escapeHtml(priority)}</div>
+            <div><strong>Asignado:</strong> ${escapeHtml(assigned)}</div>
+            <div><strong>Creado:</strong> ${escapeHtml(createdAt)}</div>
+            <div><strong>Actualizado:</strong> ${escapeHtml(updatedAt)}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  body.appendChild(modal);
+
+  body.classList.add(
+    "modal-open"
+  );
+
+  modal.addEventListener(
     "click",
-    (e) => {
-      if (e.target === root) {
-        close();
+    (event) => {
+      const closeBtn =
+        event.target.closest(
+          "[data-close-modal]"
+        );
+
+      const overlay =
+        event.target.closest(
+          '[data-role="overlay"]'
+        );
+
+      const panel =
+        event.target.closest(
+          '[style*="max-height:90vh"]'
+        );
+
+      if (closeBtn) {
+        closeTicketModal();
+        return;
+      }
+
+      if (
+        overlay &&
+        !panel
+      ) {
+        closeTicketModal();
       }
     }
   );
@@ -160,7 +455,7 @@ function bindCloseEvents(
       if (
         ev.key === "Escape"
       ) {
-        close();
+        closeTicketModal();
         document.removeEventListener(
           "keydown",
           esc
@@ -168,251 +463,8 @@ function bindCloseEvents(
       }
     }
   );
-}
 
-function renderTicketModal(
-  detail = {}
-) {
-  removeTicketModal();
-
-  const ticketId =
-    safeText(
-      detail.ticketId ||
-        detail.id,
-      "—"
-    );
-
-  const code =
-    safeText(
-      detail.code ||
-        ticketId,
-      ticketId
-    );
-
-  const title =
-    safeText(
-      detail.title ||
-        detail.subject,
-      "Incidencia"
-    );
-
-  const description =
-    safeText(
-      detail.description ||
-        detail.preview ||
-        detail.message,
-      "Sin descripción."
-    );
-
-  const client =
-    safeText(
-      detail.client ||
-        detail.clientName ||
-        detail.cliente,
-      "Cliente"
-    );
-
-  const email =
-    safeText(
-      detail.clientEmail ||
-        detail.email,
-      "Sin email"
-    );
-
-  const status =
-    safeText(
-      detail.status,
-      "open"
-    );
-
-  const priority =
-    safeText(
-      detail.priority,
-      "medium"
-    );
-
-  const assigned =
-    safeText(
-      detail.assignedTo,
-      "No asignado"
-    );
-
-  const createdAt =
-    safeText(
-      detail.createdAt,
-      "—"
-    );
-
-  const updatedAt =
-    safeText(
-      detail.updatedAt,
-      "—"
-    );
-
-  const wrapper =
-    document.createElement(
-      "div"
-    );
-
-  wrapper.id =
-    "ticket-detail-modal";
-
-  wrapper.innerHTML = `
-    <div
-      style="
-        position:fixed;
-        inset:0;
-        z-index:99999;
-        display:grid;
-        place-items:center;
-        padding:20px;
-        background:rgba(0,0,0,.68);
-        backdrop-filter:blur(8px);
-      "
-    >
-      <section
-        style="
-          width:min(920px,100%);
-          max-height:90vh;
-          overflow:auto;
-          border-radius:24px;
-          border:1px solid var(--border-soft,#2a2a2a);
-          background:var(--surface-1,#111827);
-          color:var(--text-strong,#fff);
-          box-shadow:0 30px 80px rgba(0,0,0,.45);
-        "
-      >
-        <header
-          style="
-            display:flex;
-            justify-content:space-between;
-            gap:12px;
-            padding:22px;
-            border-bottom:1px solid var(--border-soft,#2a2a2a);
-          "
-        >
-          <div style="display:grid;gap:6px;">
-            <span style="font-size:12px;opacity:.7;text-transform:uppercase;">
-              Ticket ${escapeHtml(code)}
-            </span>
-
-            <h3 style="margin:0;font-size:24px;">
-              ${escapeHtml(title)}
-            </h3>
-          </div>
-
-          <button
-            data-close-modal="true"
-            type="button"
-            style="
-              width:42px;
-              height:42px;
-              border:none;
-              border-radius:12px;
-              cursor:pointer;
-              background:rgba(255,255,255,.08);
-              color:#fff;
-              font-size:18px;
-            "
-          >
-            ✕
-          </button>
-        </header>
-
-        <div
-          style="
-            display:grid;
-            gap:18px;
-            padding:22px;
-          "
-        >
-          <div
-            style="
-              display:grid;
-              grid-template-columns:repeat(3,minmax(0,1fr));
-              gap:12px;
-            "
-          >
-            <div><strong>Estado:</strong><br>${escapeHtml(status)}</div>
-            <div><strong>Prioridad:</strong><br>${escapeHtml(priority)}</div>
-            <div><strong>Asignado:</strong><br>${escapeHtml(assigned)}</div>
-          </div>
-
-          <div
-            style="
-              display:grid;
-              grid-template-columns:repeat(2,minmax(0,1fr));
-              gap:12px;
-            "
-          >
-            <div><strong>Cliente:</strong><br>${escapeHtml(client)}</div>
-            <div><strong>Email:</strong><br>${escapeHtml(email)}</div>
-          </div>
-
-          <div>
-            <strong>Descripción</strong>
-            <div
-              style="
-                margin-top:8px;
-                padding:16px;
-                border-radius:16px;
-                background:rgba(255,255,255,.04);
-                line-height:1.6;
-              "
-            >
-              ${escapeHtml(description)}
-            </div>
-          </div>
-
-          <div
-            style="
-              display:grid;
-              grid-template-columns:repeat(2,minmax(0,1fr));
-              gap:12px;
-              font-size:14px;
-              opacity:.8;
-            "
-          >
-            <div>Creado: ${escapeHtml(createdAt)}</div>
-            <div>Actualizado: ${escapeHtml(updatedAt)}</div>
-          </div>
-
-          <div
-            style="
-              display:flex;
-              gap:10px;
-              justify-content:flex-end;
-              flex-wrap:wrap;
-            "
-          >
-            <button
-              data-close-modal="true"
-              type="button"
-              style="
-                min-height:42px;
-                padding:0 16px;
-                border-radius:12px;
-                border:1px solid var(--border-soft,#333);
-                background:transparent;
-                color:#fff;
-                cursor:pointer;
-              "
-            >
-              Cerrar
-            </button>
-          </div>
-        </div>
-      </section>
-    </div>
-  `;
-
-  document.body.appendChild(
-    wrapper
-  );
-
-  bindCloseEvents(
-    wrapper.firstElementChild
-  );
+  return true;
 }
 
 /* =========================================================
@@ -420,20 +472,17 @@ function renderTicketModal(
 ========================================================= */
 
 export async function openTicket(
-  ticketIdOrOptions = {}
+  payload = {}
 ) {
-  const options =
-    typeof ticketIdOrOptions ===
+  const ticketId =
+    typeof payload ===
     "string"
-      ? {
-          ticketId:
-            ticketIdOrOptions,
-        }
-      : ticketIdOrOptions;
+      ? payload
+      : payload?.ticketId;
 
   const id =
     safeText(
-      options.ticketId,
+      ticketId,
       ""
     );
 
@@ -444,9 +493,7 @@ export async function openTicket(
   try {
     safeEmit(
       "incidencias:open",
-      {
-        ticketId: id,
-      }
+      { ticketId: id }
     );
 
     let detail =
@@ -461,9 +508,12 @@ export async function openTicket(
         );
     }
 
+    detail =
+      pickDetail(detail);
+
     if (!detail) {
       throw new Error(
-        "NOT_FOUND"
+        "DETAIL_EMPTY"
       );
     }
 
@@ -482,7 +532,7 @@ export async function openTicket(
     return detail;
   } catch (error) {
     console.error(
-      "❌ OPEN TICKET:",
+      "❌ openTicket:",
       error
     );
 
@@ -496,14 +546,14 @@ export async function openTicket(
 }
 
 /* =========================================================
-   COPY ID
+   COPY
 ========================================================= */
 
 export async function copyTicketIdAction({
   ticketId = "",
   ticketCode = "",
 } = {}) {
-  const raw =
+  const value =
     safeText(
       ticketCode,
       ""
@@ -513,12 +563,12 @@ export async function copyTicketIdAction({
       ""
     );
 
-  if (!raw) {
+  if (!value) {
     return false;
   }
 
   const ok =
-    await copyText(raw);
+    await copyText(value);
 
   showToast(
     ok
@@ -537,10 +587,10 @@ export async function copyTicketIdAction({
 ========================================================= */
 
 export function exportIncidenciasCsvAction() {
-  const list =
+  const items =
     getSortedIncidenciasStore();
 
-  if (!list.length) {
+  if (!items.length) {
     showToast(
       "No hay incidencias para exportar.",
       "info"
@@ -548,19 +598,25 @@ export function exportIncidenciasCsvAction() {
     return false;
   }
 
-  const csv = JSON.stringify(
-    list,
-    null,
-    2
-  );
+  const rows =
+    items.map((item) =>
+      [
+        resolveId(item),
+        resolveTitle(item),
+        resolveStatus(item),
+        resolvePriority(item),
+      ].join(",")
+    );
+
+  const csv = [
+    "ticketId,title,status,priority",
+    ...rows,
+  ].join("\n");
 
   const blob =
-    new Blob(
-      [csv],
-      {
-        type: "application/json",
-      }
-    );
+    new Blob([csv], {
+      type: "text/csv;charset=utf-8;",
+    });
 
   const url =
     URL.createObjectURL(
@@ -573,8 +629,9 @@ export function exportIncidenciasCsvAction() {
     );
 
   a.href = url;
-  a.download =
-    "incidencias.json";
+  a.download = `incidencias_${new Date()
+    .toISOString()
+    .slice(0, 10)}.csv`;
 
   document.body.appendChild(
     a
@@ -583,12 +640,10 @@ export function exportIncidenciasCsvAction() {
   a.click();
   a.remove();
 
-  URL.revokeObjectURL(
-    url
-  );
+  URL.revokeObjectURL(url);
 
   showToast(
-    "Exportación generada.",
+    "CSV exportado.",
     "success"
   );
 

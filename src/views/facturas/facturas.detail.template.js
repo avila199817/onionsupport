@@ -2,16 +2,17 @@
    Onion SPA - Facturas Detail Template
    Archivo: src/views/facturas/facturas.detail.template.js
 
-   FULLSCREEN PRO EDITION
+   FULLSCREEN PRO EDITION 10/10
+   FIXED EXPORTS + COMPAT MODE
 
    RESPONSABILIDADES:
    - modal detalle factura fullscreen real
    - ocupa viewport útil como incidencias
    - offsets shell reales
-   - tamaño más equilibrado
-   - no gigante visualmente
+   - tamaño equilibrado
    - scroll interno premium
    - responsive enterprise
+   - mantiene exports legacy para evitar errores
 ========================================================= */
 
 function safeText(value, fallback = "—") {
@@ -247,6 +248,108 @@ function mini(label = "", value = "") {
   `;
 }
 
+/* =========================================================
+   EXPORTS LEGACY (FIX ERROR IMPORTS)
+========================================================= */
+
+export function renderMiniMeta(label = "", value = "") {
+  return mini(label, value);
+}
+
+export function renderDetailStat(label = "", value = "") {
+  return stat(label, value);
+}
+
+export function renderSectionCard({
+  title = "",
+  subtitle = "",
+  content = "",
+} = {}) {
+  return `
+    <section
+      style="
+        display:grid;
+        gap:14px;
+        padding:18px;
+        border-radius:22px;
+        border:1px solid var(--border-soft);
+        background:var(--surface-glass);
+      "
+    >
+      <div style="display:grid;gap:6px;">
+        <h3
+          style="
+            margin:0;
+            color:var(--text-strong);
+            font-size:20px;
+          "
+        >
+          ${escapeHtml(title)}
+        </h3>
+
+        ${
+          subtitle
+            ? `
+          <p
+            style="
+              margin:0;
+              color:var(--text-dim);
+              line-height:1.5;
+            "
+          >
+            ${escapeHtml(subtitle)}
+          </p>
+        `
+            : ""
+        }
+      </div>
+
+      ${content}
+    </section>
+  `;
+}
+
+export function renderHeaderActions({
+  factura = {},
+  sending = false,
+} = {}) {
+  return `
+    <div
+      style="
+        display:flex;
+        gap:10px;
+        flex-wrap:wrap;
+        align-items:center;
+      "
+    >
+      <button
+        data-action="view-factura-pdf"
+        data-factura-id="${escapeHtml(factura?.id || "")}"
+      >
+        Ver PDF
+      </button>
+
+      <button
+        data-action="download-factura"
+        data-factura-id="${escapeHtml(factura?.id || "")}"
+      >
+        Descargar
+      </button>
+
+      <button
+        data-action="send-factura"
+        data-factura-id="${escapeHtml(factura?.id || "")}"
+      >
+        ${sending ? "Enviando..." : "Enviar"}
+      </button>
+
+      <button data-action="close-factura-detail">
+        Cerrar
+      </button>
+    </div>
+  `;
+}
+
 function renderLineas(factura = {}) {
   const lineas = safeArray(factura?.lineas);
 
@@ -257,65 +360,61 @@ function renderLineas(factura = {}) {
   return lineas
     .map(
       (linea) => `
-        <article
+      <article
+        style="
+          display:grid;
+          gap:12px;
+          padding:16px;
+          border-radius:18px;
+          border:1px solid var(--border-soft);
+          background:var(--surface-glass);
+        "
+      >
+        <div
           style="
-            display:grid;
+            display:flex;
+            justify-content:space-between;
             gap:12px;
-            padding:16px;
-            border-radius:18px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
+            flex-wrap:wrap;
           "
         >
-          <div
-            style="
-              display:flex;
-              justify-content:space-between;
-              gap:12px;
-              flex-wrap:wrap;
-            "
-          >
-            <strong
-              style="
-                color:var(--text-strong);
-                font-size:15px;
-              "
-            >
-              ${escapeHtml(
-                safeText(
-                  linea?.concepto,
-                  "Línea"
-                )
-              )}
-            </strong>
+          <strong>
+            ${escapeHtml(
+              safeText(linea?.concepto, "Línea")
+            )}
+          </strong>
 
-            <strong>
-              ${escapeHtml(
-                formatMoney(
-                  linea?.totalLinea,
-                  factura?.moneda
-                )
-              )}
-            </strong>
-          </div>
+          <strong>
+            ${escapeHtml(
+              formatMoney(
+                linea?.totalLinea,
+                factura?.moneda
+              )
+            )}
+          </strong>
+        </div>
 
-          <div
-            style="
-              display:grid;
-              grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
-              gap:10px;
-            "
-          >
-            ${mini("Cantidad", safeText(linea?.cantidad, "0"))}
-            ${mini("Unitario", formatMoney(linea?.precioUnitario, factura?.moneda))}
-            ${mini("Subtotal", formatMoney(linea?.subtotal, factura?.moneda))}
-            ${mini("Impuesto", formatMoney(linea?.impuesto, factura?.moneda))}
-          </div>
-        </article>
-      `
+        <div
+          style="
+            display:grid;
+            grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+            gap:10px;
+          "
+        >
+          ${mini("Cantidad", safeText(linea?.cantidad, "0"))}
+          ${mini("Unitario", formatMoney(linea?.precioUnitario, factura?.moneda))}
+          ${mini("Subtotal", formatMoney(linea?.subtotal, factura?.moneda))}
+          ${mini("Impuesto", formatMoney(linea?.impuesto, factura?.moneda))}
+        </div>
+      </article>
+    `
     )
     .join("");
 }
+
+/* =========================================================
+   CONTENT
+========================================================= */
 
 export function renderFacturasDetailContent({
   factura = null,
@@ -352,7 +451,6 @@ export function renderFacturasDetailContent({
         min-height:0;
       "
     >
-
       <header
         class="facturas-detail-header"
         style="
@@ -363,13 +461,9 @@ export function renderFacturasDetailContent({
           gap:18px;
           padding:22px 24px 18px;
           border-bottom:1px solid var(--border-soft);
-          background:
-            linear-gradient(180deg, rgba(255,255,255,.03), transparent),
-            var(--modal-bg,var(--surface-1,#141414));
-          backdrop-filter:blur(14px);
+          background:var(--modal-bg,var(--surface-1,#141414));
         "
       >
-
         <div
           style="
             display:flex;
@@ -391,7 +485,6 @@ export function renderFacturasDetailContent({
                 color:var(--text-dim);
                 font-size:12px;
                 text-transform:uppercase;
-                letter-spacing:.05em;
                 font-weight:700;
               "
             >
@@ -403,7 +496,6 @@ export function renderFacturasDetailContent({
                 margin:0;
                 font-size:clamp(30px,4vw,42px);
                 line-height:.98;
-                letter-spacing:-.04em;
                 color:var(--text-strong);
               "
             >
@@ -411,69 +503,10 @@ export function renderFacturasDetailContent({
             </h2>
           </div>
 
-          <div
-            style="
-              display:flex;
-              gap:10px;
-              flex-wrap:wrap;
-              align-items:center;
-            "
-          >
-            <button
-              data-action="view-factura-pdf"
-              data-factura-id="${escapeHtml(factura?.id || "")}"
-              style="
-                min-height:42px;
-                padding:0 16px;
-                border:none;
-                border-radius:14px;
-                cursor:pointer;
-              "
-            >
-              Ver PDF
-            </button>
-
-            <button
-              data-action="download-factura"
-              data-factura-id="${escapeHtml(factura?.id || "")}"
-              style="
-                min-height:42px;
-                padding:0 16px;
-                border:none;
-                border-radius:14px;
-                cursor:pointer;
-              "
-            >
-              Descargar
-            </button>
-
-            <button
-              data-action="send-factura"
-              data-factura-id="${escapeHtml(factura?.id || "")}"
-              style="
-                min-height:42px;
-                padding:0 16px;
-                border:none;
-                border-radius:14px;
-                cursor:pointer;
-              "
-            >
-              ${sending ? "Enviando..." : "Enviar"}
-            </button>
-
-            <button
-              data-action="close-factura-detail"
-              style="
-                min-height:42px;
-                padding:0 16px;
-                border:none;
-                border-radius:14px;
-                cursor:pointer;
-              "
-            >
-              Cerrar
-            </button>
-          </div>
+          ${renderHeaderActions({
+            factura,
+            sending,
+          })}
         </div>
 
         <div
@@ -486,7 +519,6 @@ export function renderFacturasDetailContent({
           ${chip(getEstadoPagoLabel(factura?.estadoPago))}
           ${chip(getEstadoLabel(factura?.estado))}
         </div>
-
       </header>
 
       <div
@@ -504,7 +536,6 @@ export function renderFacturasDetailContent({
             gap:22px;
           "
         >
-
           <div
             style="
               display:grid;
@@ -527,33 +558,19 @@ export function renderFacturasDetailContent({
               align-items:start;
             "
           >
-
-            <section
-              style="
-                display:grid;
-                gap:14px;
-              "
-            >
+            <section style="display:grid;gap:14px;">
               ${renderLineas(factura)}
             </section>
 
-            <section
-              style="
-                display:grid;
-                gap:14px;
-              "
-            >
+            <section style="display:grid;gap:14px;">
               ${mini("Cliente", getClienteNombre(factura))}
               ${mini("Email", safeText(factura?.cliente?.email))}
               ${mini("Método pago", safeText(factura?.formaPago))}
               ${mini("Actualizado", formatDateTime(factura?.updatedAt))}
             </section>
-
           </div>
-
         </div>
       </div>
-
     </div>
 
     <style>
@@ -581,6 +598,10 @@ export function renderFacturasDetailContent({
     </style>
   `;
 }
+
+/* =========================================================
+   MODAL
+========================================================= */
 
 export function renderFacturasDetailModal({
   detailOpen = false,

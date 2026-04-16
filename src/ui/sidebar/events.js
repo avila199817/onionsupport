@@ -2,15 +2,19 @@
    Onion SPA - Sidebar Events
    Archivo: src/ui/sidebar/events.js
 
+   FINAL FIXED SYSTEM
+
    Responsabilidades:
    - centralizar handlers DOM del sidebar
    - bind de eventos DOM
-   - bind de eventos de AppCore / Router
-   - cierre inteligente de dropdown / sidebar
-   - soporte robusto para resize y teclado
+   - bind de eventos AppCore / Router
+   - evitar autocollapse por resize
+   - dropdown robusto
+   - teclado estable
+   - sidebar solo cambia por acción manual
 ========================================================= */
 
-import { getElements, isShellHidden } from "./dom.js";
+import { getElements } from "./dom.js";
 
 /* =========================================================
    DOM HANDLERS
@@ -33,52 +37,99 @@ export function handleDocumentClick({
     userToggle,
     userDropdown,
     logoutBtn,
-  } = typeof resolveElements === "function"
-    ? resolveElements()
-    : getElements(AppCore);
+  } =
+    typeof resolveElements ===
+    "function"
+      ? resolveElements()
+      : getElements(AppCore);
 
-  const target = event?.target;
-  if (!(target instanceof Node)) return;
+  const target =
+    event?.target;
 
-  if (toggleBtn && toggleBtn.contains(target)) {
+  if (!(target instanceof Node))
+    return;
+
+  /* desktop toggle */
+  if (
+    toggleBtn &&
+    toggleBtn.contains(target)
+  ) {
     event.preventDefault();
     event.stopPropagation();
+
     toggleSidebar?.();
     return;
   }
 
-  if (mobileToggleBtn && mobileToggleBtn.contains(target)) {
+  /* mobile toggle */
+  if (
+    mobileToggleBtn &&
+    mobileToggleBtn.contains(
+      target
+    )
+  ) {
     event.preventDefault();
     event.stopPropagation();
+
     toggleSidebar?.();
     return;
   }
 
-  if (userToggle && userToggle.contains(target)) {
+  /* user dropdown toggle */
+  if (
+    userToggle &&
+    userToggle.contains(target)
+  ) {
     event.preventDefault();
     event.stopPropagation();
+
     toggleDropdown?.();
     return;
   }
 
-  if (logoutBtn && logoutBtn.contains(target)) {
+  /* logout */
+  if (
+    logoutBtn &&
+    logoutBtn.contains(target)
+  ) {
     event.preventDefault();
     event.stopPropagation();
+
     handleLogout?.();
     return;
   }
 
-  if (userDropdown && userDropdown.contains(target)) {
+  /* click dentro dropdown */
+  if (
+    userDropdown &&
+    userDropdown.contains(
+      target
+    )
+  ) {
     return;
   }
 
+  /* mobile outside click close */
   if (
-    typeof isMobileViewport === "function" &&
+    typeof isMobileViewport ===
+      "function" &&
     isMobileViewport() &&
     sidebar &&
-    (sidebar.classList.contains("open") || sidebar.classList.contains("is-open")) &&
+    (
+      sidebar.classList.contains(
+        "open"
+      ) ||
+      sidebar.classList.contains(
+        "is-open"
+      )
+    ) &&
     !sidebar.contains(target) &&
-    !(mobileToggleBtn && mobileToggleBtn.contains(target))
+    !(
+      mobileToggleBtn &&
+      mobileToggleBtn.contains(
+        target
+      )
+    )
   ) {
     closeSidebar?.();
   }
@@ -86,6 +137,9 @@ export function handleDocumentClick({
   closeDropdown?.();
 }
 
+/* =========================================================
+   SIDEBAR MENU CLICK
+========================================================= */
 export function handleSidebarMenuClick({
   AppCore,
   event,
@@ -94,22 +148,39 @@ export function handleSidebarMenuClick({
   getElements: resolveElements,
 }) {
   const { sidebarMenu } =
-    typeof resolveElements === "function"
+    typeof resolveElements ===
+    "function"
       ? resolveElements()
       : getElements(AppCore);
 
   if (!sidebarMenu) return;
 
-  const target = event?.target;
-  if (!(target instanceof Element)) return;
+  const target =
+    event?.target;
 
-  const link = target.closest('a[data-spa]');
-  if (!link || !sidebarMenu.contains(link)) return;
+  if (
+    !(target instanceof Element)
+  )
+    return;
+
+  const link =
+    target.closest(
+      'a[data-spa]'
+    );
+
+  if (
+    !link ||
+    !sidebarMenu.contains(link)
+  )
+    return;
 
   closeDropdown?.();
   closeSidebarOnMobileAfterNavigation?.();
 }
 
+/* =========================================================
+   USER TOGGLE KEYBOARD
+========================================================= */
 export function handleUserToggleKeydown({
   AppCore,
   event,
@@ -119,30 +190,45 @@ export function handleUserToggleKeydown({
   getElements: resolveElements,
 }) {
   const { userToggle } =
-    typeof resolveElements === "function"
+    typeof resolveElements ===
+    "function"
       ? resolveElements()
       : getElements(AppCore);
 
-  if (!userToggle || event?.target !== userToggle) return;
+  if (
+    !userToggle ||
+    event?.target !== userToggle
+  )
+    return;
 
-  if (event.key === "Enter" || event.key === " ") {
+  if (
+    event.key === "Enter" ||
+    event.key === " "
+  ) {
     event.preventDefault();
     toggleDropdown?.();
     return;
   }
 
-  if (event.key === "Escape") {
+  if (
+    event.key === "Escape"
+  ) {
     event.preventDefault();
     closeDropdown?.();
     return;
   }
 
-  if (event.key === "ArrowDown") {
+  if (
+    event.key === "ArrowDown"
+  ) {
     event.preventDefault();
     openDropdown?.();
   }
 }
 
+/* =========================================================
+   GLOBAL KEYBOARD
+========================================================= */
 export function handleGlobalKeydown({
   event,
   closeDropdown,
@@ -150,13 +236,18 @@ export function handleGlobalKeydown({
   isMobileViewport,
   getDesiredSidebarOpenState,
 }) {
-  if (event?.key !== "Escape") return;
+  if (
+    event?.key !== "Escape"
+  )
+    return;
 
   closeDropdown?.();
 
   if (
-    typeof isMobileViewport === "function" &&
-    typeof getDesiredSidebarOpenState === "function" &&
+    typeof isMobileViewport ===
+      "function" &&
+    typeof getDesiredSidebarOpenState ===
+      "function" &&
     isMobileViewport() &&
     getDesiredSidebarOpenState()
   ) {
@@ -164,11 +255,15 @@ export function handleGlobalKeydown({
   }
 }
 
+/* =========================================================
+   RESIZE FIX
+   - no sync sidebar state
+   - no autocollapse
+   - solo cerrar dropdown
+========================================================= */
 export function handleResize({
-  syncSidebarState,
   closeDropdown,
 }) {
-  syncSidebarState?.();
   closeDropdown?.();
 }
 
@@ -186,81 +281,115 @@ export function bindDomEvents(ctx) {
     closeDropdown,
     closeSidebar,
     closeSidebarOnMobileAfterNavigation,
-    syncSidebarState,
     getElements: resolveElements,
     isMobileViewport,
     getDesiredSidebarOpenState,
   } = ctx;
 
-  AppCore.cleanup.on(scope, document, "click", (event) => {
-    handleDocumentClick({
-      AppCore,
-      event,
-      toggleSidebar,
-      toggleDropdown,
-      closeDropdown,
-      closeSidebar,
-      handleLogout,
-      isMobileViewport,
-      getElements: resolveElements,
-    });
-  });
+  AppCore.cleanup.on(
+    scope,
+    document,
+    "click",
+    (event) => {
+      handleDocumentClick({
+        AppCore,
+        event,
+        toggleSidebar,
+        toggleDropdown,
+        closeDropdown,
+        closeSidebar,
+        handleLogout,
+        isMobileViewport,
+        getElements:
+          resolveElements,
+      });
+    }
+  );
 
-  AppCore.cleanup.on(scope, document, "keydown", (event) => {
-    handleGlobalKeydown({
-      event,
-      closeDropdown,
-      closeSidebar,
-      isMobileViewport,
-      getDesiredSidebarOpenState,
-    });
-  });
+  AppCore.cleanup.on(
+    scope,
+    document,
+    "keydown",
+    (event) => {
+      handleGlobalKeydown({
+        event,
+        closeDropdown,
+        closeSidebar,
+        isMobileViewport,
+        getDesiredSidebarOpenState,
+      });
+    }
+  );
 
   const resizeHandler =
-    typeof AppCore?.utils?.debounce === "function"
-      ? AppCore.utils.debounce(() => {
-          handleResize({
-            syncSidebarState,
-            closeDropdown,
-          });
-        }, 120)
+    typeof AppCore?.utils
+      ?.debounce ===
+    "function"
+      ? AppCore.utils.debounce(
+          () => {
+            handleResize({
+              closeDropdown,
+            });
+          },
+          120
+        )
       : () => {
           handleResize({
-            syncSidebarState,
             closeDropdown,
           });
         };
 
-  AppCore.cleanup.on(scope, window, "resize", resizeHandler);
+  AppCore.cleanup.on(
+    scope,
+    window,
+    "resize",
+    resizeHandler
+  );
 
-  const { userToggle, sidebarMenu } =
-    typeof resolveElements === "function"
+  const {
+    userToggle,
+    sidebarMenu,
+  } =
+    typeof resolveElements ===
+    "function"
       ? resolveElements()
       : getElements(AppCore);
 
   if (userToggle) {
-    AppCore.cleanup.on(scope, userToggle, "keydown", (event) => {
-      handleUserToggleKeydown({
-        AppCore,
-        event,
-        toggleDropdown,
-        closeDropdown,
-        openDropdown,
-        getElements: resolveElements,
-      });
-    });
+    AppCore.cleanup.on(
+      scope,
+      userToggle,
+      "keydown",
+      (event) => {
+        handleUserToggleKeydown({
+          AppCore,
+          event,
+          toggleDropdown,
+          closeDropdown,
+          openDropdown,
+          getElements:
+            resolveElements,
+        });
+      }
+    );
   }
 
   if (sidebarMenu) {
-    AppCore.cleanup.on(scope, sidebarMenu, "click", (event) => {
-      handleSidebarMenuClick({
-        AppCore,
-        event,
-        closeDropdown,
-        closeSidebarOnMobileAfterNavigation,
-        getElements: resolveElements,
-      });
-    });
+    AppCore.cleanup.on(
+      scope,
+      sidebarMenu,
+      "click",
+      (event) => {
+        handleSidebarMenuClick({
+          AppCore,
+          event,
+          closeDropdown,
+          closeSidebarOnMobileAfterNavigation,
+          getElements:
+            resolveElements,
+        });
+      }
+    );
   }
 }
 
@@ -279,56 +408,91 @@ export function bindCoreEvents(ctx) {
     closeSidebarOnMobileAfterNavigation,
   } = ctx;
 
-  AppCore.cleanup.event(scope, "app:user:change", () => {
-    renderUser?.();
-    applyRoleVisibility?.();
-  });
+  AppCore.cleanup.event(
+    scope,
+    "app:user:change",
+    () => {
+      renderUser?.();
+      applyRoleVisibility?.();
+    }
+  );
 
-  AppCore.cleanup.event(scope, "app:session:cleared", () => {
-    renderUser?.();
-    applyRoleVisibility?.();
-    closeDropdown?.();
-  });
-
-  AppCore.cleanup.event(scope, "app:sidebar:change", () => {
-    syncSidebarState?.();
-  });
-
-  AppCore.cleanup.event(scope, "router:before-render", () => {
-    closeDropdown?.();
-  });
-
-  AppCore.cleanup.event(scope, "router:rendered", () => {
-    ensureServerNavItem?.();
-    renderUser?.();
-    applyRoleVisibility?.();
-    syncSidebarState?.();
-    closeDropdown?.();
-    closeSidebarOnMobileAfterNavigation?.();
-  });
-
-  AppCore.cleanup.event(scope, "router:shell:change", ({ detail }) => {
-    if (detail?.hidden) {
+  AppCore.cleanup.event(
+    scope,
+    "app:session:cleared",
+    () => {
+      renderUser?.();
+      applyRoleVisibility?.();
       closeDropdown?.();
     }
+  );
 
-    syncSidebarState?.();
-  });
+  AppCore.cleanup.event(
+    scope,
+    "app:sidebar:change",
+    () => {
+      syncSidebarState?.();
+    }
+  );
 
-  AppCore.cleanup.event(scope, "app:user-ui:sync", () => {
-    renderUser?.();
-  });
+  AppCore.cleanup.event(
+    scope,
+    "router:before-render",
+    () => {
+      closeDropdown?.();
+    }
+  );
 
-  AppCore.cleanup.event(scope, "app:theme:change", () => {
-    syncSidebarState?.();
-  });
-
-  AppCore.cleanup.event(scope, "login:success", () => {
-    window.setTimeout(() => {
+  AppCore.cleanup.event(
+    scope,
+    "router:rendered",
+    () => {
       ensureServerNavItem?.();
       renderUser?.();
       applyRoleVisibility?.();
-      syncSidebarState?.();
-    }, 0);
-  });
+      closeDropdown?.();
+      closeSidebarOnMobileAfterNavigation?.();
+    }
+  );
+
+  AppCore.cleanup.event(
+    scope,
+    "router:shell:change",
+    ({ detail }) => {
+      if (detail?.hidden) {
+        closeDropdown?.();
+      }
+    }
+  );
+
+  AppCore.cleanup.event(
+    scope,
+    "app:user-ui:sync",
+    () => {
+      renderUser?.();
+    }
+  );
+
+  AppCore.cleanup.event(
+    scope,
+    "app:theme:change",
+    () => {
+      /* no recolapsar */
+    }
+  );
+
+  AppCore.cleanup.event(
+    scope,
+    "login:success",
+    () => {
+      window.setTimeout(
+        () => {
+          ensureServerNavItem?.();
+          renderUser?.();
+          applyRoleVisibility?.();
+        },
+        0
+      );
+    }
+  );
 }

@@ -2,7 +2,7 @@
    Onion SPA - Auth / Session
    Archivo: src/features/auth/index.js
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - punto de entrada del módulo auth
    - composición de login / logout / restore / guards
    - exponer helpers auth para toda la SPA
@@ -13,12 +13,15 @@
    - integrar confirmación de reset-password
    - ofrecer api pública coherente y endurecida
 
-   HARDENING PRO:
+   HARDENING EXTREMO:
    - singleton inmutable
    - wrappers robustos
    - snapshot debug enterprise
    - tolerancia total a módulos parciales
    - aliases legacy estables
+   - métricas auth enriquecidas
+   - no race conditions restore/refresh/me
+   - estado runtime consistente
 ========================================================= */
 
 import {
@@ -29,6 +32,7 @@ import {
 
 import {
   isAuthRoute,
+  extractMessage,
 } from "./helpers.js";
 
 import {
@@ -104,11 +108,14 @@ const forgotPassword =
 
 const getRequestPasswordResetEndpoint =
   PasswordResetApi?.getRequestPasswordResetEndpoint ||
-  (() => AUTH_ENDPOINTS?.forgotPassword || null);
+  (() =>
+    AUTH_ENDPOINTS?.forgotPassword ||
+    null);
 
 const resolveResetPasswordIdentifier =
   PasswordResetApi?.resolveResetPasswordIdentifier ||
-  ((value) => String(value || "").trim());
+  ((value) =>
+    String(value || "").trim());
 
 const normalizeResetPasswordPayload =
   PasswordResetApi?.normalizeResetPasswordPayload ||
@@ -134,7 +141,10 @@ function resolveConfirmResetPasswordHandler() {
   ];
 
   for (const candidate of candidates) {
-    if (typeof candidate === "function") {
+    if (
+      typeof candidate ===
+      "function"
+    ) {
       return candidate;
     }
   }
@@ -148,7 +158,10 @@ async function confirmResetPassword(
   const executor =
     resolveConfirmResetPasswordHandler();
 
-  if (typeof executor !== "function") {
+  if (
+    typeof executor !==
+    "function"
+  ) {
     throw new Error(
       "Auth: falta implementar confirmResetPassword en ./password-reset.js"
     );
@@ -172,6 +185,7 @@ function createInitialSessionState() {
 
     lastCheckAt: null,
     lastRefreshAt: null,
+    lastRestoreAt: null,
 
     refreshPromise: null,
     mePromise: null,
@@ -179,6 +193,8 @@ function createInitialSessionState() {
 
     refreshFailCount: 0,
     refreshBlockedUntil: 0,
+
+    lastError: null,
   };
 }
 
@@ -201,6 +217,9 @@ function safeCloneSessionState(
     lastRefreshAt:
       source.lastRefreshAt || null,
 
+    lastRestoreAt:
+      source.lastRestoreAt || null,
+
     refreshPromise:
       source.refreshPromise || null,
 
@@ -219,6 +238,9 @@ function safeCloneSessionState(
       Number(
         source.refreshBlockedUntil || 0
       ),
+
+    lastError:
+      source.lastError || null,
   };
 }
 
@@ -226,10 +248,41 @@ function safeCloneSessionState(
    HELPERS
 ========================================================= */
 
-function safeRun(fn, fallback) {
+function nowMs() {
+  return Date.now();
+}
+
+function emit(
+  eventName,
+  payload = {}
+) {
+  try {
+    globalThis?.window?.AppCore
+      ?.events?.emit?.(
+        eventName,
+        payload
+      );
+  } catch {}
+
+  try {
+    globalThis?.AppCore
+      ?.events?.emit?.(
+        eventName,
+        payload
+      );
+  } catch {}
+}
+
+function safeRun(
+  fn,
+  fallback
+) {
   return async (...args) => {
     try {
-      if (typeof fn !== "function") {
+      if (
+        typeof fn !==
+        "function"
+      ) {
         return fallback;
       }
 
@@ -242,14 +295,30 @@ function safeRun(fn, fallback) {
         error
       );
 
-      return fallback;
+      return {
+        ...(fallback || {}),
+        ok: false,
+        error,
+        message:
+          extractMessage?.(
+            error
+          ) ||
+          String(error),
+      };
     }
   };
 }
 
-function safeCall(fn, fallback, ...args) {
+function safeCall(
+  fn,
+  fallback,
+  ...args
+) {
   try {
-    if (typeof fn !== "function") {
+    if (
+      typeof fn !==
+      "function"
+    ) {
       return fallback;
     }
 
@@ -257,6 +326,85 @@ function safeCall(fn, fallback, ...args) {
   } catch {
     return fallback;
   }
+}
+
+function withMetric(
+  session,
+  type,
+  executor
+) {
+  return async (...args) => {
+    const startedAt =
+      nowMs();
+
+    emit(
+      `auth:${type}:start`,
+      {}
+    );
+
+    try {
+      const result =
+        await executor(...args);
+
+      if (
+        type === "restore"
+      ) {
+        session.lastRestoreAt =
+          nowMs();
+      }
+
+      if (
+        type === "refresh"
+      ) {
+        session.lastRefreshAt =
+          nowMs();
+      }
+
+      if (
+        type === "me"
+      ) {
+        session.lastCheckAt =
+          nowMs();
+      }
+
+      emit(
+        `auth:${type}:success`,
+        {
+          durationMs:
+            nowMs() -
+            startedAt,
+          ok:
+            result?.ok !== false,
+        }
+      );
+
+      return result;
+    } catch (error) {
+      session.lastError = {
+        type,
+        message:
+          extractMessage?.(
+            error
+          ) ||
+          String(error),
+        at:
+          new Date().toISOString(),
+      };
+
+      emit(
+        `auth:${type}:error`,
+        {
+          durationMs:
+            nowMs() -
+            startedAt,
+          error:
+            session.lastError,
+        }
+      );
+
+      throw error;
+    }
+  };
 }
 
 /* =========================================================
@@ -274,21 +422,39 @@ export const Auth = (() => {
   ======================================================= */
 
   const runFetchMe =
-    safeRun(fetchMe, {
-      ok: false,
-      user: null,
-    });
+    withMetric(
+      session,
+      "me",
+      safeRun(fetchMe, {
+        ok: false,
+        user: null,
+      })
+    );
 
   const runRefreshSession =
-    safeRun(refreshSession, {
-      ok: false,
-    });
+    withMetric(
+      session,
+      "refresh",
+      safeRun(
+        refreshSession,
+        {
+          ok: false,
+        }
+      )
+    );
 
   const runRestoreSession =
-    safeRun(restoreSession, {
-      ok: false,
-      user: null,
-    });
+    withMetric(
+      session,
+      "restore",
+      safeRun(
+        restoreSession,
+        {
+          ok: false,
+          user: null,
+        }
+      )
+    );
 
   /* =======================================================
      SNAPSHOT DEBUG
@@ -329,6 +495,25 @@ export const Auth = (() => {
           getSessionDebugSnapshot,
           null
         ),
+
+      storage: {
+        hasRefreshToken:
+          hasRefreshToken(),
+        hasRefreshContext:
+          hasRefreshContext(),
+        refreshToken:
+          getStoredRefreshToken() ||
+          null,
+        tempToken:
+          getStoredTempToken() ||
+          null,
+        sessionId:
+          getStoredSessionId() ||
+          null,
+        sessionUserId:
+          getStoredSessionUserId() ||
+          null,
+      },
 
       passwordReset: {
         hasRequestPasswordReset:

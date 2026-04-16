@@ -10,6 +10,7 @@
    - sidebar limpio sin server-nav legacy
    - rehidratar referencias DOM del sidebar tras mount
    - sincronizar avatar/nombre también en AppCore.dom para compatibilidad
+   - mantener collapsed manual persistente sin autoapertura inteligente
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -95,8 +96,7 @@ export const SidebarUI = (() => {
      - aquí rehidratamos refs para que AppCore.syncUserUI() funcione
   ========================================================= */
   function syncSidebarDomIntoAppCore() {
-    const elements =
-      getElements(AppCore);
+    const elements = getElements(AppCore);
 
     AppCore.dom.sidebar =
       elements.sidebar || AppCore.dom.sidebar || null;
@@ -319,49 +319,13 @@ export const SidebarUI = (() => {
     }
   }
 
+  /* =========================================================
+     MANUAL COLLAPSE ONLY
+     - no autoabrir el sidebar al abrir el menú de usuario
+     - el botón collapsed sigue funcionando
+     - el estado sigue siendo persistente
+  ========================================================= */
   function ensureSidebarOpenForUserMenu() {
-    if (isShellHidden(AppCore)) {
-      return false;
-    }
-
-    const { sidebar } =
-      getElements(AppCore);
-
-    if (!sidebar) return false;
-
-    const mobile =
-      isMobileViewport(
-        MOBILE_BREAKPOINT
-      );
-
-    const isCollapsedDesktop =
-      !mobile &&
-      (
-        sidebar.classList.contains(
-          "collapsed"
-        ) ||
-        sidebar.classList.contains(
-          "is-collapsed"
-        )
-      );
-
-    const isClosedMobile =
-      mobile &&
-      !sidebar.classList.contains(
-        "open"
-      ) &&
-      !sidebar.classList.contains(
-        "is-open"
-      );
-
-    if (
-      isCollapsedDesktop ||
-      isClosedMobile
-    ) {
-      openSidebar();
-      return true;
-    }
-
     return false;
   }
 

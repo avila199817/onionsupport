@@ -2,7 +2,7 @@
    Onion SPA - Router History
    Archivo: src/router/history.js
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - centralizar pushState / replaceState
    - construir state payload consistente
    - init state inicial idempotente
@@ -14,12 +14,16 @@
    - fallback silencioso si History API falla
    - normalización de URL/state
    - no duplicar estados innecesarios
+   - preservar publicPath/canonicalPath/username
+   - no degradar URL contextualizada /@username
 ========================================================= */
 
 import {
   isBrowser,
+  normalizePath,
   getCurrentPath,
   getCurrentCanonicalPath,
+  getCurrentPublicPath,
   getCurrentResolvedUsername,
   buildHistoryUrl,
   buildStatePayload,
@@ -33,7 +37,11 @@ function canUseHistory() {
   return (
     isBrowser() &&
     typeof window.history !==
-      "undefined"
+      "undefined" &&
+    typeof window.history.pushState ===
+      "function" &&
+    typeof window.history.replaceState ===
+      "function"
   );
 }
 
@@ -57,6 +65,78 @@ function safeHistoryCall(
   } catch {
     return false;
   }
+}
+
+function normalizeUrl(
+  AppCore,
+  url = "/"
+) {
+  return normalizePath(
+    AppCore,
+    url
+  );
+}
+
+function getComparableCurrentUrl(
+  AppCore
+) {
+  return normalizeUrl(
+    AppCore,
+    getCurrentPublicPath(
+      AppCore
+    ) ||
+      getCurrentPath(
+        AppCore
+      ) ||
+      "/"
+  );
+}
+
+function getResolvedHistoryContext(
+  AppCore,
+  pathname = "/",
+  options = {}
+) {
+  const publicPath =
+    normalizeUrl(
+      AppCore,
+      buildHistoryUrl(
+        AppCore,
+        options.getRoute,
+        pathname,
+        options
+      )
+    );
+
+  const canonicalPath =
+    normalizeUrl(
+      AppCore,
+      options.canonicalPath ||
+        buildStatePayload(
+          AppCore,
+          publicPath
+        )?.canonicalPath ||
+        pathname ||
+        "/"
+    );
+
+  const username =
+    options.username ||
+    options.resolvedUsername ||
+    buildStatePayload(
+      AppCore,
+      publicPath
+    )?.username ||
+    getCurrentResolvedUsername(
+      AppCore
+    ) ||
+    null;
+
+  return {
+    publicPath,
+    canonicalPath,
+    username,
+  };
 }
 
 /* =========================================================
@@ -87,20 +167,25 @@ export function pushState({
   pathname = "/",
   options = {},
 } = {}) {
-  const url =
-    buildHistoryUrl(
-      AppCore,
-      options.getRoute,
-      pathname,
-      options
-    );
+  const {
+    publicPath,
+    canonicalPath,
+    username,
+  } = getResolvedHistoryContext(
+    AppCore,
+    pathname,
+    options
+  );
 
   const state =
     createHistoryState({
       AppCore,
-      pathname: url,
+      pathname: publicPath,
       extras: {
         mode: "push",
+        canonicalPath,
+        publicPath,
+        username,
         redirectedFrom:
           options.redirectedFrom ||
           null,
@@ -110,7 +195,7 @@ export function pushState({
   return safeHistoryCall(
     "pushState",
     state,
-    url
+    publicPath
   );
 }
 
@@ -119,20 +204,25 @@ export function replaceState({
   pathname = "/",
   options = {},
 } = {}) {
-  const url =
-    buildHistoryUrl(
-      AppCore,
-      options.getRoute,
-      pathname,
-      options
-    );
+  const {
+    publicPath,
+    canonicalPath,
+    username,
+  } = getResolvedHistoryContext(
+    AppCore,
+    pathname,
+    options
+  );
 
   const state =
     createHistoryState({
       AppCore,
-      pathname: url,
+      pathname: publicPath,
       extras: {
         mode: "replace",
+        canonicalPath,
+        publicPath,
+        username,
         redirectedFrom:
           options.redirectedFrom ||
           null,
@@ -142,7 +232,7 @@ export function replaceState({
   return safeHistoryCall(
     "replaceState",
     state,
-    url
+    publicPath
   );
 }
 
@@ -168,16 +258,18 @@ export function updateHistory({
     getRoute,
   };
 
-  const nextUrl =
-    buildHistoryUrl(
-      AppCore,
-      getRoute,
-      pathname,
-      finalOptions
-    );
+  const {
+    publicPath: nextUrl,
+    canonicalPath,
+    username,
+  } = getResolvedHistoryContext(
+    AppCore,
+    pathname,
+    finalOptions
+  );
 
   const currentUrl =
-    getCurrentPath(
+    getComparableCurrentUrl(
       AppCore
     );
 
@@ -192,23 +284,29 @@ export function updateHistory({
     return false;
   }
 
+  const writeOptions = {
+    ...finalOptions,
+    canonicalPath,
+    username,
+    resolvedUsername:
+      username,
+  };
+
   if (
     sameUrl ||
     options.replaceState
   ) {
     return replaceState({
       AppCore,
-      pathname,
-      options:
-        finalOptions,
+      pathname: nextUrl,
+      options: writeOptions,
     });
   }
 
   return pushState({
     AppCore,
-    pathname,
-    options:
-      finalOptions,
+    pathname: nextUrl,
+    options: writeOptions,
   });
 }
 
@@ -224,41 +322,76 @@ export function ensureInitialHistoryState({
   }
 
   try {
-    if (
-      window.history.state &&
-      typeof window.history.state ===
-        "object"
-    ) {
-      return true;
-    }
-
-    const currentPath =
-      getCurrentPath(
+    const currentUrl =
+      getComparableCurrentUrl(
         AppCore
       );
+
+    const currentCanonicalPath =
+      normalizeUrl(
+        AppCore,
+        getCurrentCanonicalPath(
+          AppCore
+        ) || "/"
+      );
+
+    const currentUsername =
+      getCurrentResolvedUsername(
+        AppCore
+      );
+
+    const currentState =
+      window.history.state;
+
+    if (
+      currentState &&
+      typeof currentState ===
+        "object"
+    ) {
+      const currentStatePath =
+        normalizeUrl(
+          AppCore,
+          currentState.publicPath ||
+            currentState.path ||
+            ""
+        );
+
+      const currentStateCanonical =
+        normalizeUrl(
+          AppCore,
+          currentState.canonicalPath ||
+            ""
+        );
+
+      if (
+        currentStatePath ===
+          currentUrl &&
+        currentStateCanonical ===
+          currentCanonicalPath
+      ) {
+        return true;
+      }
+    }
 
     const state =
       createHistoryState({
         AppCore,
-        pathname:
-          currentPath,
+        pathname: currentUrl,
         extras: {
           mode: "initial",
           canonicalPath:
-            getCurrentCanonicalPath(
-              AppCore
-            ),
+            currentCanonicalPath,
+          publicPath:
+            currentUrl,
           username:
-            getCurrentResolvedUsername(
-              AppCore
-            ),
+            currentUsername,
         },
       });
 
     window.history.replaceState(
       state,
       "",
-      currentPath
+      currentUrl
     );
 
     return true;

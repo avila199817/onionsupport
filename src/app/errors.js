@@ -2,13 +2,13 @@
    Onion SPA - App Errors
    Archivo: src/app/errors.js
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - renderizar pantalla de error de boot
    - bind de errores globales window.error
    - bind de promesas rechazadas sin control
    - notificar errores críticos con Toast
 
-   HARDENING EXTREMO:
+   HARDENING NIVEL DIOS:
    - listeners idempotentes
    - throttling visual de errores repetidos
    - sanitizado robusto mensajes
@@ -16,6 +16,8 @@
    - cero loops recursivos de error
    - telemetría interna por eventos
    - recovery UX enterprise
+   - no duplicar binds
+   - no reventar si falta cleanup
 ========================================================= */
 
 import { escapeHtml } from "./helpers.js";
@@ -29,6 +31,7 @@ let handlersBound = false;
 const errorState = {
   lastMessage: "",
   lastAt: 0,
+  handling: false,
 };
 
 /* =========================================================
@@ -50,9 +53,7 @@ function safeText(
     return fallback;
   }
 
-  const text =
-    String(value).trim();
-
+  const text = String(value).trim();
   return text || fallback;
 }
 
@@ -98,9 +99,7 @@ function safeSetError(
   error = null
 ) {
   try {
-    AppCore?.setError?.(
-      error
-    );
+    AppCore?.setError?.(error);
   } catch {}
 }
 
@@ -110,11 +109,29 @@ function safeToastError(
   options = {}
 ) {
   try {
-    Toast?.error?.(
-      message,
-      options
-    );
+    if (
+      typeof Toast?.error ===
+      "function"
+    ) {
+      return Toast.error(
+        message,
+        options
+      );
+    }
+
+    if (
+      typeof Toast?.show ===
+      "function"
+    ) {
+      return Toast.show({
+        ...options,
+        type: "error",
+        message,
+      });
+    }
   } catch {}
+
+  return null;
 }
 
 function resolveErrorMessage(
@@ -152,6 +169,10 @@ function resolveErrorMessage(
       ""
     ) ||
     safeText(
+      error?.reason?.message,
+      ""
+    ) ||
+    safeText(
       error?.reason,
       ""
     ) ||
@@ -164,25 +185,19 @@ function shouldThrottleToast(
 ) {
   const current =
     safeText(message);
-
-  const time =
-    now();
+  const time = now();
 
   if (
     errorState.lastMessage ===
       current &&
-    time -
-      errorState.lastAt <
-      2500
+    time - errorState.lastAt < 2500
   ) {
     return true;
   }
 
   errorState.lastMessage =
     current;
-
-  errorState.lastAt =
-    time;
+  errorState.lastAt = time;
 
   return false;
 }
@@ -197,13 +212,27 @@ function safeRedirect(
   path = "/login"
 ) {
   try {
-    window.location.assign(
-      path
-    );
+    window.location.assign(path);
   } catch {
-    window.location.href =
-      path;
+    try {
+      window.location.href = path;
+    } catch {}
   }
+}
+
+function safeClearViewContainer(
+  AppCore,
+  container
+) {
+  try {
+    AppCore?.clearDynamicContainers?.();
+  } catch {}
+
+  try {
+    if (container) {
+      container.innerHTML = "";
+    }
+  } catch {}
 }
 
 /* =========================================================
@@ -234,13 +263,25 @@ export function renderBootError({
       "renderBootError(): contenedor no disponible."
     );
 
+    try {
+      hideLoader?.(AppCore);
+    } catch {}
+
+    safeToastError(
+      Toast,
+      resolveErrorMessage(error),
+      {
+        title:
+          "Error de arranque",
+        duration: 5000,
+      }
+    );
+
     return false;
   }
 
   const message =
-    resolveErrorMessage(
-      error
-    );
+    resolveErrorMessage(error);
 
   try {
     AppCore?.setDocumentTitle?.(
@@ -248,9 +289,10 @@ export function renderBootError({
     );
   } catch {}
 
-  try {
-    AppCore?.clearDynamicContainers?.();
-  } catch {}
+  safeClearViewContainer(
+    AppCore,
+    container
+  );
 
   try {
     setShellVisibility?.(
@@ -260,9 +302,7 @@ export function renderBootError({
   } catch {}
 
   try {
-    hideLoader?.(
-      AppCore
-    );
+    hideLoader?.(AppCore);
   } catch {}
 
   safeEmit(
@@ -277,7 +317,6 @@ export function renderBootError({
     <section class="content-wrapper">
       <div class="panel-block" style="padding:24px;">
         <div style="display:grid;gap:18px;">
-          
           <div
             style="
               width:56px;
@@ -323,7 +362,6 @@ export function renderBootError({
               Limpiar sesión
             </button>
           </div>
-
         </div>
       </div>
     </section>
@@ -345,9 +383,7 @@ export function renderBootError({
       () => {
         safeReload();
       },
-      {
-        once: true,
-      }
+      { once: true }
     );
   }
 
@@ -356,7 +392,9 @@ export function renderBootError({
       "click",
       () => {
         try {
-          Auth?.clearSessionLocal?.();
+          Auth?.clearSessionLocal?.({
+            silent: true,
+          });
         } catch (sessionError) {
           safeWarn(
             AppCore,
@@ -369,21 +407,25 @@ export function renderBootError({
           );
         }
       },
-      {
-        once: true,
-      }
+      { once: true }
     );
   }
 
-  safeToastError(
-    Toast,
-    message,
-    {
-      title:
-        "Error de arranque",
-      duration: 5000,
-    }
-  );
+  if (
+    !shouldThrottleToast(
+      message
+    )
+  ) {
+    safeToastError(
+      Toast,
+      message,
+      {
+        title:
+          "Error de arranque",
+        duration: 5000,
+      }
+    );
+  }
 
   return true;
 }
@@ -398,47 +440,67 @@ function processRuntimeError({
   source = "runtime",
   error = null,
 }) {
-  const message =
-    resolveErrorMessage(
-      error
-    );
-
-  safeSetError(
-    AppCore,
-    error
-  );
-
-  safeError(
-    AppCore,
-    source,
-    error
-  );
-
-  safeEmit(
-    AppCore,
-    "app:error",
-    {
-      source,
-      message,
-    }
-  );
-
-  if (
-    shouldThrottleToast(
-      message
-    )
-  ) {
+  if (errorState.handling) {
     return;
   }
 
-  safeToastError(
-    Toast,
-    message,
-    {
-      title: "Error",
-      duration: 5000,
+  errorState.handling = true;
+
+  try {
+    const message =
+      resolveErrorMessage(
+        error
+      );
+
+    safeSetError(
+      AppCore,
+      error
+    );
+
+    safeError(
+      AppCore,
+      source,
+      error
+    );
+
+    safeEmit(
+      AppCore,
+      "app:error",
+      {
+        source,
+        message,
+      }
+    );
+
+    safeEmit(
+      AppCore,
+      "app:error:telemetry",
+      {
+        source,
+        message,
+        at: new Date().toISOString(),
+      }
+    );
+
+    if (
+      shouldThrottleToast(
+        message
+      )
+    ) {
+      return;
     }
-  );
+
+    safeToastError(
+      Toast,
+      message,
+      {
+        title: "Error",
+        duration: 5000,
+      }
+    );
+  } finally {
+    errorState.handling = false;
+  }
 }
 
 export function bindGlobalErrorHandlers({
@@ -446,9 +508,7 @@ export function bindGlobalErrorHandlers({
   Toast,
   scope,
 } = {}) {
-  if (
-    handlersBound
-  ) {
+  if (handlersBound) {
     return true;
   }
 
@@ -459,61 +519,57 @@ export function bindGlobalErrorHandlers({
     return false;
   }
 
-  const bindWithCleanup =
-    AppCore?.cleanup &&
+  const useCleanupEvent =
     isFunction(
-      AppCore.cleanup.on
+      AppCore?.cleanup?.event
     );
 
-  const onError =
-    (event) => {
-      const error =
-        event?.error || {
-          message:
-            event?.message ||
-            "Error global no controlado",
-        };
+  const onError = (event) => {
+    const error =
+      event?.error || {
+        message:
+          event?.message ||
+          "Error global no controlado",
+      };
 
-      processRuntimeError({
-        AppCore,
-        Toast,
-        source:
-          "window.error",
-        error,
-      });
-    };
+    processRuntimeError({
+      AppCore,
+      Toast,
+      source:
+        "window.error",
+      error,
+    });
+  };
 
-  const onReject =
-    (event) => {
-      const reason =
-        event?.reason || {
-          message:
-            "Promise rechazada sin control",
-        };
+  const onReject = (event) => {
+    const reason =
+      event?.reason || {
+        message:
+          "Promise rechazada sin control",
+      };
 
-      processRuntimeError({
-        AppCore,
-        Toast,
-        source:
-          "unhandledrejection",
-        error:
-          reason,
-      });
-    };
+    processRuntimeError({
+      AppCore,
+      Toast,
+      source:
+        "unhandledrejection",
+      error: reason,
+    });
+  };
 
   try {
     if (
-      bindWithCleanup &&
+      useCleanupEvent &&
       scope
     ) {
-      AppCore.cleanup.on(
+      AppCore.cleanup.event(
         scope,
         window,
         "error",
         onError
       );
 
-      AppCore.cleanup.on(
+      AppCore.cleanup.event(
         scope,
         window,
         "unhandledrejection",
@@ -531,8 +587,7 @@ export function bindGlobalErrorHandlers({
       );
     }
 
-    handlersBound =
-      true;
+    handlersBound = true;
 
     safeLog(
       AppCore,
@@ -550,3 +605,8 @@ export function bindGlobalErrorHandlers({
     return false;
   }
 }
+
+export default {
+  renderBootError,
+  bindGlobalErrorHandlers,
+};

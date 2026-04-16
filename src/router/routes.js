@@ -31,7 +31,7 @@ import { HomeView } from "../views/home/index.js";
 import { IncidenciasView } from "../views/incidencias/index.js";
 import { FacturasView } from "../views/facturas/index.js";
 import { ServerView } from "../views/serverView.js";
-import { UsuariosView } from "../views/usuariosView.js";
+import { UsuariosView } from "../views/usuarios/index.js";
 import { ClientesView } from "../views/clientesView.js";
 import { CuentaView } from "../views/cuentaView.js";
 import { AjustesView } from "../views/ajustesView.js";

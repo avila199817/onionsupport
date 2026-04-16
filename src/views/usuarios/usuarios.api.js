@@ -16,6 +16,13 @@
    - exponer helpers de stats, detalle, create y update
    - degradar con elegancia si falla backend
    - normalizar paginación, filtros, orden y errores
+
+   HARDENING REAL:
+   - compatible con actions actuales
+   - soporta options.params / options.query correctamente
+   - cache normalizada sin perder meta/stats
+   - store hydration consistente
+   - contrato estable { ok, source, remoteOk, degraded, cacheHit, list, error }
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -130,7 +137,9 @@ function safeWarn(...args) {
   try {
     AppCore?.utils?.warn?.(...args);
   } catch {
-    console.warn(...args);
+    try {
+      console.warn(...args);
+    } catch {}
   }
 }
 
@@ -138,7 +147,9 @@ function safeError(...args) {
   try {
     AppCore?.utils?.error?.(...args);
   } catch {
-    console.error(...args);
+    try {
+      console.error(...args);
+    } catch {}
   }
 }
 
@@ -282,6 +293,16 @@ function normalizeListParams(params = {}) {
   };
 }
 
+function resolveInputParams(options = {}) {
+  const source = safeObject(options);
+
+  return normalizeListParams(
+    source.params ||
+      source.query ||
+      source
+  );
+}
+
 function buildListRequestPath(params = {}) {
   const normalized = normalizeListParams(params);
 
@@ -300,6 +321,55 @@ function buildListRequestPath(params = {}) {
    CACHE
 ========================================================= */
 
+function createBaseMeta(params = {}) {
+  const normalized = normalizeListParams(params);
+
+  return {
+    page: normalized.page,
+    pageSize: normalized.pageSize,
+    total: 0,
+    totalPages: 0,
+    count: 0,
+    hasNextPage: false,
+    hasPrevPage: normalized.page > 1,
+    sortBy: normalized.sortBy,
+    sortDir: normalized.sortDir,
+    q: normalized.q,
+    role: normalized.role,
+    status: normalized.status,
+  };
+}
+
+function createBaseStats() {
+  return {
+    total: 0,
+    admins: 0,
+    active: 0,
+    inactive: 0,
+    withAvatar: 0,
+  };
+}
+
+function createFallbackListResult(params = {}) {
+  return {
+    rows: [],
+    meta: createBaseMeta(params),
+    stats: createBaseStats(),
+    alerts: [
+      {
+        level: "info",
+        code: "USUARIOS_FALLBACK",
+        message: "Listado local cargado sin datos remotos.",
+      },
+    ],
+    sourceDetails: {
+      endpoint: ENDPOINT,
+      contract: "fallback",
+    },
+    generatedAt: nowIso(),
+  };
+}
+
 function buildCachePayload(payload = {}) {
   const source = safeObject(payload);
 
@@ -307,7 +377,7 @@ function buildCachePayload(payload = {}) {
     savedAt: nowMs(),
     userId: getCurrentUserId(),
     params: clone(source.params || {}),
-    list: clone(source.list || createFallbackListResult()),
+    list: clone(source.list || createFallbackListResult(source.params || {})),
   };
 }
 
@@ -437,55 +507,6 @@ function readCache(params = {}) {
    USERS NORMALIZATION
 ========================================================= */
 
-function createBaseMeta(params = {}) {
-  const normalized = normalizeListParams(params);
-
-  return {
-    page: normalized.page,
-    pageSize: normalized.pageSize,
-    total: 0,
-    totalPages: 0,
-    count: 0,
-    hasNextPage: false,
-    hasPrevPage: normalized.page > 1,
-    sortBy: normalized.sortBy,
-    sortDir: normalized.sortDir,
-    q: normalized.q,
-    role: normalized.role,
-    status: normalized.status,
-  };
-}
-
-function createBaseStats() {
-  return {
-    total: 0,
-    admins: 0,
-    active: 0,
-    inactive: 0,
-    withAvatar: 0,
-  };
-}
-
-function createFallbackListResult(params = {}) {
-  return {
-    rows: [],
-    meta: createBaseMeta(params),
-    stats: createBaseStats(),
-    alerts: [
-      {
-        level: "info",
-        code: "USUARIOS_FALLBACK",
-        message: "Listado local cargado sin datos remotos.",
-      },
-    ],
-    sourceDetails: {
-      endpoint: ENDPOINT,
-      contract: "fallback",
-    },
-    generatedAt: nowIso(),
-  };
-}
-
 function safeEmail(value, fallback = "") {
   const text = safeText(value, fallback);
   return text.toLowerCase();
@@ -511,6 +532,7 @@ function getDisplayName(user = {}) {
 
 function getUserRole(user = {}) {
   const source = safeObject(user);
+
   return safeText(
     source.role ||
       source.rol ||
@@ -597,7 +619,10 @@ function normalizeUserRow(user = {}, index = 0) {
       source.avatar ||
         source.avatarUrl ||
         source.photoURL ||
-        source.photoUrl,
+        source.photoUrl ||
+        source.profileImage ||
+        source.image ||
+        source.picture,
       ""
     ) || "";
 
@@ -609,7 +634,8 @@ function normalizeUserRow(user = {}, index = 0) {
 
   const createdAt = safeText(
     source.createdAt ||
-      source.created_at,
+      source.created_at ||
+      source.insertedAt,
     ""
   );
 
@@ -631,7 +657,8 @@ function normalizeUserRow(user = {}, index = 0) {
     hasAvatar,
     phone: safeText(
       source.phone ||
-        source.telefono,
+        source.telefono ||
+        source.mobile,
       ""
     ),
     emailVerified: safeBool(
@@ -640,7 +667,9 @@ function normalizeUserRow(user = {}, index = 0) {
     ),
     lastLoginAt: safeText(
       source.lastLoginAt ||
-        source.last_login_at,
+        source.last_login_at ||
+        source.lastSeenAt ||
+        source.lastAccessAt,
       ""
     ),
     createdAt,
@@ -655,18 +684,20 @@ function normalizeUsersStats(rows = []) {
   return list.reduce(
     (acc, row) => {
       const item = safeObject(row);
+      const role = safeText(item.role, "").toLowerCase();
+      const status = safeText(item.status, "").toLowerCase();
 
       acc.total += 1;
 
-      if (safeText(item.role, "").toLowerCase() === "admin") {
+      if (role === "admin") {
         acc.admins += 1;
       }
 
-      if (safeText(item.status, "") === "active") {
+      if (status === "active") {
         acc.active += 1;
       }
 
-      if (safeText(item.status, "") === "inactive") {
+      if (status === "inactive") {
         acc.inactive += 1;
       }
 
@@ -677,6 +708,18 @@ function normalizeUsersStats(rows = []) {
       return acc;
     },
     createBaseStats()
+  );
+}
+
+function looksLikeNormalizedUsersList(value = {}) {
+  const obj = safeObject(value);
+
+  return Boolean(
+    Array.isArray(obj.rows) &&
+      obj.meta &&
+      typeof obj.meta === "object" &&
+      obj.stats &&
+      typeof obj.stats === "object"
   );
 }
 
@@ -692,7 +735,8 @@ function looksLikeUsersListPayload(value = {}) {
       obj.total !== undefined ||
       obj.page !== undefined ||
       obj.pageSize !== undefined ||
-      obj.count !== undefined
+      obj.count !== undefined ||
+      looksLikeNormalizedUsersList(obj)
   );
 }
 
@@ -723,6 +767,11 @@ function unwrapUsersPayload(payload = {}) {
     return users;
   }
 
+  const payloadObject = safeObject(raw.payload);
+  if (looksLikeUsersListPayload(payloadObject)) {
+    return payloadObject;
+  }
+
   return {};
 }
 
@@ -744,9 +793,80 @@ function extractUsersRows(source = {}) {
   );
 }
 
+function normalizeNormalizedUsersList(payload = {}, params = {}) {
+  const source = safeObject(payload);
+  const normalizedParams = normalizeListParams(
+    source.meta || params
+  );
+
+  const rows = safeArray(source.rows)
+    .map(normalizeUserRow)
+    .filter(Boolean);
+
+  const sourceMeta = safeObject(source.meta);
+  const sourceStats = safeObject(source.stats);
+  const computedStats = normalizeUsersStats(rows);
+
+  const total = safePositiveInt(
+    sourceMeta.total,
+    Math.max(rows.length, safePositiveInt(sourceStats.total, rows.length))
+  );
+
+  const page = safePositiveInt(
+    sourceMeta.page,
+    normalizedParams.page
+  );
+
+  const pageSize = safePositiveInt(
+    sourceMeta.pageSize,
+    normalizedParams.pageSize
+  );
+
+  const totalPages = safePositiveInt(
+    sourceMeta.totalPages,
+    pageSize > 0 ? Math.ceil(total / pageSize) : 0
+  );
+
+  return {
+    rows,
+    meta: {
+      page,
+      pageSize,
+      total,
+      totalPages,
+      count: safePositiveInt(sourceMeta.count, rows.length),
+      hasNextPage: safeBool(sourceMeta.hasNextPage, page < totalPages),
+      hasPrevPage: safeBool(sourceMeta.hasPrevPage, page > 1),
+      sortBy: safeText(sourceMeta.sortBy, normalizedParams.sortBy),
+      sortDir: normalizeSortDir(sourceMeta.sortDir || normalizedParams.sortDir),
+      q: safeText(sourceMeta.q, normalizedParams.q),
+      role: safeText(sourceMeta.role, normalizedParams.role),
+      status: safeText(sourceMeta.status, normalizedParams.status),
+    },
+    stats: {
+      total: safePositiveInt(sourceStats.total, computedStats.total),
+      admins: safePositiveInt(sourceStats.admins, computedStats.admins),
+      active: safePositiveInt(sourceStats.active, computedStats.active),
+      inactive: safePositiveInt(sourceStats.inactive, computedStats.inactive),
+      withAvatar: safePositiveInt(sourceStats.withAvatar, computedStats.withAvatar),
+    },
+    alerts: safeArray(source.alerts).map((item, index) => ({
+      level: safeText(item?.level, "info"),
+      code: safeText(item?.code, `USERS_ALERT_${index + 1}`),
+      message: safeText(item?.message, "Aviso"),
+    })),
+    sourceDetails: safeObject(source.sourceDetails),
+    generatedAt: safeText(source.generatedAt, nowIso()),
+  };
+}
+
 function normalizeUsersList(payload = {}, params = {}) {
   const source = unwrapUsersPayload(payload);
   const normalizedParams = normalizeListParams(params);
+
+  if (looksLikeNormalizedUsersList(source)) {
+    return normalizeNormalizedUsersList(source, normalizedParams);
+  }
 
   const rawRows = extractUsersRows(source);
   const rows = rawRows
@@ -758,51 +878,53 @@ function normalizeUsersList(payload = {}, params = {}) {
       source.totalItems ??
       source.totalCount ??
       source.count ??
+      source?.meta?.total ??
       rows.length,
     rows.length
   );
 
   const page = safePositiveInt(
-    source.page,
+    source.page ?? source?.meta?.page,
     normalizedParams.page
   );
 
   const pageSize = safePositiveInt(
     source.pageSize ??
-      source.limit,
+      source.limit ??
+      source?.meta?.pageSize,
     normalizedParams.pageSize
   );
 
-  const totalPages =
-    safePositiveInt(
-      source.totalPages,
-      pageSize > 0
-        ? Math.ceil(rawTotal / pageSize)
-        : 0
-    );
+  const totalPages = safePositiveInt(
+    source.totalPages ?? source?.meta?.totalPages,
+    pageSize > 0
+      ? Math.ceil(rawTotal / pageSize)
+      : 0
+  );
 
   const meta = {
     page,
     pageSize,
     total: rawTotal,
     totalPages,
-    count: rows.length,
-    hasNextPage:
-      safeBool(
-        source.hasNextPage,
-        page < totalPages
-      ),
-    hasPrevPage:
-      safeBool(
-        source.hasPrevPage,
-        page > 1
-      ),
+    count: safePositiveInt(
+      source.count ?? source?.meta?.count,
+      rows.length
+    ),
+    hasNextPage: safeBool(
+      source.hasNextPage ?? source?.meta?.hasNextPage,
+      page < totalPages
+    ),
+    hasPrevPage: safeBool(
+      source.hasPrevPage ?? source?.meta?.hasPrevPage,
+      page > 1
+    ),
     sortBy: safeText(
-      source.sortBy,
+      source.sortBy || source?.meta?.sortBy,
       normalizedParams.sortBy
     ),
     sortDir: normalizeSortDir(
-      source.sortDir || normalizedParams.sortDir
+      source.sortDir || source?.meta?.sortDir || normalizedParams.sortDir
     ),
     q: normalizedParams.q,
     role: normalizedParams.role,
@@ -816,26 +938,27 @@ function normalizeUsersList(payload = {}, params = {}) {
   }));
 
   const computedStats = normalizeUsersStats(rows);
+  const sourceStats = safeObject(source.stats);
 
   const stats = {
     total: safePositiveInt(
-      source?.stats?.total,
+      sourceStats.total,
       safePositiveInt(source.total, computedStats.total)
     ),
     admins: safePositiveInt(
-      source?.stats?.admins,
+      sourceStats.admins,
       computedStats.admins
     ),
     active: safePositiveInt(
-      source?.stats?.active,
+      sourceStats.active,
       computedStats.active
     ),
     inactive: safePositiveInt(
-      source?.stats?.inactive,
+      sourceStats.inactive,
       computedStats.inactive
     ),
     withAvatar: safePositiveInt(
-      source?.stats?.withAvatar,
+      sourceStats.withAvatar,
       computedStats.withAvatar
     ),
   };
@@ -888,6 +1011,14 @@ function normalizeSingleUser(payload = {}) {
 
   if (source.user && typeof source.user === "object") {
     return normalizeUserRow(source.user);
+  }
+
+  if (source.item && typeof source.item === "object") {
+    return normalizeUserRow(source.item);
+  }
+
+  if (source.result && typeof source.result === "object") {
+    return normalizeUserRow(source.result);
   }
 
   return normalizeUserRow(source);
@@ -962,7 +1093,9 @@ async function fetchRemoteUsersList(params = {}) {
   const client = getHttpClient();
 
   if (!client) {
-    const error = new Error("No hay cliente HTTP disponible.");
+    const error = normalizeError(
+      new Error("No hay cliente HTTP disponible.")
+    );
 
     return {
       ok: false,
@@ -1052,7 +1185,7 @@ function hydrateListIntoStore({
 
 export async function loadUsuariosList(options = {}) {
   const source = safeObject(options);
-  const params = normalizeListParams(source);
+  const params = resolveInputParams(source);
   const force = safeBool(source.force, false);
   const preferCache = safeBool(
     source.preferCache,
@@ -1150,7 +1283,7 @@ export async function loadUsuariosList(options = {}) {
       const syncedAt =
         remote.source === USUARIOS_SOURCES.REMOTE
           ? nowIso()
-          : list.generatedAt || nowIso();
+          : safeText(list.generatedAt, nowIso());
 
       const hydratedAt = nowIso();
 
@@ -1194,7 +1327,9 @@ export async function loadUsuariosList(options = {}) {
     } catch (error) {
       safeError("[UsuariosAPI] loadUsuariosList error", error);
 
-      rejectUsuariosLoad(error);
+      const normalizedError = normalizeError(error);
+
+      rejectUsuariosLoad(normalizedError);
 
       return {
         ok: false,
@@ -1202,7 +1337,7 @@ export async function loadUsuariosList(options = {}) {
         remoteOk: false,
         degraded: true,
         cacheHit: false,
-        error,
+        error: normalizedError,
         list: null,
       };
     } finally {
@@ -1213,9 +1348,12 @@ export async function loadUsuariosList(options = {}) {
   return inflightListLoad;
 }
 
-export async function refreshUsuariosList(params = {}) {
+export async function refreshUsuariosList(options = {}) {
+  const source = safeObject(options);
+
   return loadUsuariosList({
-    ...safeObject(params),
+    ...source,
+    params: source.params || source.query || source,
     force: true,
     preferCache: false,
   });
@@ -1232,10 +1370,11 @@ export function getCachedUsuariosList(params = {}) {
 }
 
 export function primeUsuariosCache(list = {}, params = {}) {
-  const normalizedList = normalizeUsersList(list, params);
+  const normalizedParams = normalizeListParams(params);
+  const normalizedList = normalizeUsersList(list, normalizedParams);
 
   saveCache({
-    params,
+    params: normalizedParams,
     list: normalizedList,
   });
 

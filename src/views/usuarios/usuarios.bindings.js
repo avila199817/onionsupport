@@ -11,6 +11,7 @@
    - conectar DOM con usuarios.actions.js
    - mantener la vista desacoplada del template
    - exponer cleanup robusto para re-render seguro
+   - mantener coherencia estricta con usuarios.actions.js y usuarios.store.js
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -26,10 +27,7 @@ import {
   nextUsuariosPage,
   prevUsuariosPage,
   resetUsuariosListFilters,
-  toggleUsuariosFiltersPanel,
   selectUsuario,
-  toggleUsuarioSelection,
-  selectAllVisibleUsuarios,
   clearUsuariosSelectionAction,
   openUsuarioDetail,
 } from "./usuarios.actions.js";
@@ -37,8 +35,8 @@ import {
 import {
   patchUsuariosUi,
   setUsuariosAction,
-  setUsuariosSearchInput,
-  readUsuariosQuery,
+  setUsuariosSearchDraftUi,
+  readUsuariosParams,
 } from "./usuarios.store.js";
 
 /* =========================================================
@@ -116,8 +114,7 @@ function addEventListenerSafe(
 ) {
   if (
     !target ||
-    typeof target.addEventListener !==
-      "function" ||
+    typeof target.addEventListener !== "function" ||
     typeof handler !== "function"
   ) {
     return () => {};
@@ -210,16 +207,16 @@ function getSearchInput(root) {
 function getSortDirForColumn(
   column = ""
 ) {
-  const query =
-    safeObject(readUsuariosQuery());
+  const params =
+    safeObject(readUsuariosParams());
 
   const currentBy = safeText(
-    query.sortBy,
+    params.sortBy,
     "createdAt"
   );
 
   const currentDir = safeText(
-    query.sortDir,
+    params.sortDir,
     "desc"
   );
 
@@ -236,9 +233,7 @@ function getSortDirForColumn(
    DOM SYNC
 ========================================================= */
 
-function syncSearchDraftFromDom(
-  root
-) {
+function syncSearchDraftFromDom(root) {
   const input =
     getSearchInput(root);
 
@@ -251,7 +246,7 @@ function syncSearchDraftFromDom(
     ""
   );
 
-  setUsuariosSearchInput(value);
+  setUsuariosSearchDraftUi(value);
   return value;
 }
 
@@ -289,41 +284,27 @@ async function handleUsuariosActionClick(
   let result = null;
 
   switch (normalized) {
+    case "hydrate":
+      setUsuariosAction("hydrate");
+      result =
+        await hydrateUsuarios();
+      break;
+
     case "refresh":
       setUsuariosAction("refresh");
       result =
         await refreshUsuariosList();
       break;
 
-    case "toggle-filters":
-      setUsuariosAction(
-        "toggle-filters"
-      );
-      result =
-        toggleUsuariosFiltersPanel();
-      break;
-
     case "submit-search": {
       setUsuariosAction("search");
       const search =
-        syncSearchDraftFromDom(
-          root
-        );
+        syncSearchDraftFromDom(root);
 
       result =
-        await searchUsuarios(
-          search
-        );
+        await searchUsuarios(search);
       break;
     }
-
-    case "select-all":
-      setUsuariosAction(
-        "select-all"
-      );
-      result =
-        selectAllVisibleUsuarios();
-      break;
 
     case "clear-selection":
       setUsuariosAction(
@@ -485,32 +466,6 @@ async function handleUsuariosSortClick(
   );
 }
 
-function handleUsuariosSelectionChange(
-  userId = ""
-) {
-  const normalized =
-    safeText(userId, "");
-
-  if (!normalized) {
-    return null;
-  }
-
-  setUsuariosAction(
-    "toggle-selection"
-  );
-
-  safeEmit(
-    "usuarios:bindings:selection:toggle",
-    {
-      userId: normalized,
-    }
-  );
-
-  return toggleUsuarioSelection(
-    normalized
-  );
-}
-
 /* =========================================================
    BINDERS
 ========================================================= */
@@ -667,29 +622,6 @@ function bindChangeDelegation({
             error
           );
         }
-
-        return;
-      }
-
-      const selectionUserId =
-        target.getAttribute?.(
-          "data-usuarios-select"
-        );
-
-      if (
-        selectionUserId &&
-        root.contains(target)
-      ) {
-        try {
-          handleUsuariosSelectionChange(
-            selectionUserId
-          );
-        } catch (error) {
-          console.error(
-            "[UsuariosBindings] selection change error",
-            error
-          );
-        }
       }
     };
 
@@ -714,7 +646,7 @@ function bindSearchInput({
   }
 
   const onInput = () => {
-    setUsuariosSearchInput(
+    setUsuariosSearchDraftUi(
       safeText(
         input.value,
         ""

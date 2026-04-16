@@ -1,85 +1,68 @@
 /* =========================================================
-   Onion SPA - Usuarios Store
-   Archivo: src/views/usuarios/usuarios.store.js
+   Onion SPA - Home Store
+   Archivo: src/views/home/home.store.js
 
    FINAL PRO SYSTEM · SEMANTIC STORE · 10/10
 
    Responsabilidades:
-   - exponer acceso semántico al estado Usuarios
-   - desacoplar consumers del shape interno de usuarios.state.js
+   - exponer acceso semántico al estado Home
+   - desacoplar consumers del shape interno de home.state.js
    - ofrecer getters y setters de alto nivel
    - facilitar integración con api / view / bindings
-   - centralizar lectura de flags, rows, meta y stats
-   - mantener coherencia con usuarios.api.js y usuarios.state.js
+   - centralizar lectura de flags y metadatos
+   - mantener coherencia con home.api.js y home.state.js
 ========================================================= */
 
 import {
-  USUARIOS_SOURCES,
+  HOME_SOURCES,
 
-  getUsuariosState,
-  getUsuariosRows,
-  getUsuariosMeta,
-  getUsuariosStats,
-  getUsuariosAlerts,
-  getUsuariosParams,
-  getUsuariosSource,
-  getUsuariosUiState,
-  getUsuariosError,
-  getUsuariosLastError,
-  getUsuariosLastSyncAt,
-  getUsuariosHydratedAt,
-  getUsuariosCacheHit,
-  getUsuarioByIdFromState,
+  getHomeState,
+  getHomeSummary,
+  getHomeSource,
+  getHomeKpis,
+  getHomeAlerts,
+  getHomeRecentActivity,
+  getHomeQuickActions,
+  getHomeHealth,
+  getHomeUiState,
+  getHomeError,
+  getHomeLastError,
+  getHomeLastSyncAt,
+  getHomeHydratedAt,
+  getHomeCacheHit,
+  isHomeLoading,
+  isHomeLoaded,
+  isHomeDegraded,
+  isHomeRemoteOk,
 
-  isUsuariosLoading,
-  isUsuariosLoaded,
-  isUsuariosDegraded,
-  isUsuariosRemoteOk,
+  setHomeSummary,
+  patchHomeSummary,
+  clearHomeSummary,
 
-  setUsuariosRows,
-  patchUsuarioRow,
-  prependUsuarioRow,
-  removeUsuarioRow,
-  clearUsuariosRows,
+  setHomeSource,
+  setHomeRemoteOk,
+  setHomeDegraded,
 
-  setUsuariosMeta,
-  patchUsuariosMeta,
+  setHomeMounted,
+  setHomeActiveCard,
+  setHomeLastAction,
+  patchHomeUiState,
 
-  setUsuariosStats,
-  patchUsuariosStats,
+  setHomeLastSyncAt,
+  setHomeHydratedAt,
+  setHomeCacheHit,
 
-  setUsuariosAlerts,
-  clearUsuariosAlerts,
+  setHomeLoading,
+  setHomeLoaded,
+  setHomeError,
+  clearHomeError,
+  clearHomeLastError,
 
-  setUsuariosParams,
-  patchUsuariosParams,
-
-  setUsuariosSource,
-  setUsuariosRemoteOk,
-  setUsuariosDegraded,
-
-  setUsuariosMounted,
-  setUsuariosSelectedUserId,
-  setUsuariosActiveFilter,
-  setUsuariosLastAction,
-  setUsuariosSearchDraft,
-  patchUsuariosUiState,
-
-  setUsuariosLastSyncAt,
-  setUsuariosHydratedAt,
-  setUsuariosCacheHit,
-
-  setUsuariosLoading,
-  setUsuariosLoaded,
-  setUsuariosError,
-  clearUsuariosError,
-  clearUsuariosLastError,
-
-  startUsuariosLoad,
-  finishUsuariosLoad,
-  failUsuariosLoad,
-  resetUsuariosState,
-} from "./usuarios.state.js";
+  startHomeLoad,
+  finishHomeLoad,
+  failHomeLoad,
+  resetHomeState,
+} from "./home.state.js";
 
 /* =========================================================
    BASICS
@@ -119,435 +102,208 @@ function safeObject(value) {
     : {};
 }
 
-function safePositiveInt(
-  value,
-  fallback = 0
-) {
-  const number = Math.trunc(Number(value));
-
-  return Number.isFinite(number) &&
-    number > 0
-    ? number
-    : fallback;
-}
-
-function normalizeUsuariosSource(
-  value = USUARIOS_SOURCES.IDLE
+function normalizeHomeSource(
+  value = HOME_SOURCES.IDLE
 ) {
   const source = safeText(
     value,
-    USUARIOS_SOURCES.IDLE
+    HOME_SOURCES.IDLE
   );
 
   const allowed =
-    Object.values(
-      USUARIOS_SOURCES
-    );
+    Object.values(HOME_SOURCES);
 
   return allowed.includes(source)
     ? source
-    : USUARIOS_SOURCES.IDLE;
+    : HOME_SOURCES.IDLE;
 }
 
 /* =========================================================
    SNAPSHOTS
 ========================================================= */
 
-export function getUsuariosSnapshot() {
-  return getUsuariosState();
+export function getHomeSnapshot() {
+  return getHomeState();
 }
 
-export function getUsuariosRowsSnapshot() {
-  return getUsuariosRows();
+export function getHomeSummarySnapshot() {
+  return getHomeSummary();
 }
 
-export function getUsuariosUiSnapshot() {
-  return getUsuariosUiState();
+export function getHomeUiSnapshot() {
+  return getHomeUiState();
 }
 
 /* =========================================================
    STATUS
 ========================================================= */
 
-export function getUsuariosStatus() {
+export function getHomeStatus() {
   return {
-    loading:
-      isUsuariosLoading(),
-    loaded:
-      isUsuariosLoaded(),
-    degraded:
-      isUsuariosDegraded(),
-    remoteOk:
-      isUsuariosRemoteOk(),
-    source:
-      getUsuariosSource(),
-    error:
-      getUsuariosError(),
-    lastError:
-      getUsuariosLastError(),
-    lastSyncAt:
-      getUsuariosLastSyncAt(),
-    hydratedAt:
-      getUsuariosHydratedAt(),
-    cacheHit:
-      getUsuariosCacheHit(),
+    loading: isHomeLoading(),
+    loaded: isHomeLoaded(),
+    degraded: isHomeDegraded(),
+    remoteOk: isHomeRemoteOk(),
+    source: getHomeSource(),
+    error: getHomeError(),
+    lastError: getHomeLastError(),
+    lastSyncAt: getHomeLastSyncAt(),
+    hydratedAt: getHomeHydratedAt(),
+    cacheHit: getHomeCacheHit(),
   };
 }
 
-export function getUsuariosSourceStatus() {
+export function getHomeSourceStatus() {
   return {
-    source:
-      getUsuariosSource(),
-    remoteOk:
-      isUsuariosRemoteOk(),
-    degraded:
-      isUsuariosDegraded(),
-    cacheHit:
-      getUsuariosCacheHit(),
+    source: getHomeSource(),
+    remoteOk: isHomeRemoteOk(),
+    degraded: isHomeDegraded(),
+    cacheHit: getHomeCacheHit(),
   };
 }
 
-export function hasUsuariosError() {
+export function hasHomeError() {
+  return Boolean(getHomeError());
+}
+
+export function hasHomeLastError() {
   return Boolean(
-    getUsuariosError()
+    getHomeLastError()
   );
 }
 
-export function hasUsuariosLastError() {
-  return Boolean(
-    getUsuariosLastError()
-  );
-}
-
-export function isUsuariosReady() {
+export function isHomeReady() {
   return (
-    isUsuariosLoaded() ===
-      true &&
-    isUsuariosLoading() !==
-      true &&
-    !getUsuariosError()
+    isHomeLoaded() === true &&
+    isHomeLoading() !== true &&
+    !getHomeError()
   );
 }
 
-export function isUsuariosIdleSource() {
+export function isHomeIdleSource() {
   return (
-    getUsuariosSource() ===
-    USUARIOS_SOURCES.IDLE
+    getHomeSource() ===
+    HOME_SOURCES.IDLE
   );
 }
 
-export function isUsuariosRemoteSource() {
+export function isHomeRemoteSource() {
   return (
-    getUsuariosSource() ===
-    USUARIOS_SOURCES.REMOTE
+    getHomeSource() ===
+    HOME_SOURCES.REMOTE
   );
 }
 
-export function isUsuariosFreshCacheSource() {
+export function isHomeFreshCacheSource() {
   return (
-    getUsuariosSource() ===
-    USUARIOS_SOURCES.CACHE_FRESH
+    getHomeSource() ===
+    HOME_SOURCES.CACHE_FRESH
   );
 }
 
-export function isUsuariosStaleCacheSource() {
+export function isHomeStaleCacheSource() {
   return (
-    getUsuariosSource() ===
-    USUARIOS_SOURCES.CACHE_STALE
+    getHomeSource() ===
+    HOME_SOURCES.CACHE_STALE
   );
 }
 
-export function isUsuariosFallbackSource() {
+export function isHomeFallbackSource() {
   return (
-    getUsuariosSource() ===
-    USUARIOS_SOURCES.FALLBACK_LOCAL
+    getHomeSource() ===
+    HOME_SOURCES.FALLBACK_LOCAL
   );
 }
 
-export function isUsuariosErrorSource() {
+export function isHomeErrorSource() {
   return (
-    getUsuariosSource() ===
-    USUARIOS_SOURCES.ERROR
+    getHomeSource() ===
+    HOME_SOURCES.ERROR
   );
 }
 
 /* =========================================================
-   DATA
+   SUMMARY
 ========================================================= */
 
-export function readUsuariosRows() {
-  return getUsuariosRows();
+export function readHomeSummary() {
+  return getHomeSummary();
 }
 
-export function readUsuariosMeta() {
-  return getUsuariosMeta();
+export function readHomeKpis() {
+  return getHomeKpis();
 }
 
-export function readUsuariosStats() {
-  return getUsuariosStats();
+export function readHomeAlerts() {
+  return getHomeAlerts();
 }
 
-export function readUsuariosAlerts() {
-  return getUsuariosAlerts();
+export function readHomeRecentActivity() {
+  return getHomeRecentActivity();
 }
 
-export function readUsuariosParams() {
-  return getUsuariosParams();
+export function readHomeQuickActions() {
+  return getHomeQuickActions();
 }
 
-export function readUsuarioById(
-  userId = ""
+export function readHomeHealth() {
+  return getHomeHealth();
+}
+
+export function writeHomeSummary(
+  summary = {}
 ) {
-  return getUsuarioByIdFromState(
-    safeText(userId, "")
-  );
+  return setHomeSummary(summary);
 }
 
-export function getUsuariosCount() {
-  return getUsuariosRows()
-    .length;
-}
-
-export function getUsuariosTotal() {
-  return safePositiveInt(
-    getUsuariosMeta()?.total,
-    0
-  );
-}
-
-/* =========================================================
-   ROWS
-========================================================= */
-
-export function writeUsuariosRows(
-  rows = []
-) {
-  return setUsuariosRows(rows);
-}
-
-export function patchUsuario(
-  userId = "",
+export function mergeHomeSummary(
   patch = {}
 ) {
-  return patchUsuarioRow(
-    safeText(userId, ""),
+  return patchHomeSummary(
     safeObject(patch)
   );
 }
 
-export function prependUsuario(
-  row = {}
-) {
-  return prependUsuarioRow(
-    safeObject(row)
-  );
-}
-
-export function removeUsuario(
-  userId = ""
-) {
-  return removeUsuarioRow(
-    safeText(userId, "")
-  );
-}
-
-export function clearUsuariosRowsStore() {
-  return clearUsuariosRows();
-}
-
-/* =========================================================
-   META / STATS / ALERTS
-========================================================= */
-
-export function writeUsuariosMeta(
-  meta = {}
-) {
-  return setUsuariosMeta(
-    safeObject(meta)
-  );
-}
-
-export function mergeUsuariosMeta(
-  patch = {}
-) {
-  return patchUsuariosMeta(
-    safeObject(patch)
-  );
-}
-
-export function writeUsuariosStats(
-  stats = {}
-) {
-  return setUsuariosStats(
-    safeObject(stats)
-  );
-}
-
-export function mergeUsuariosStats(
-  patch = {}
-) {
-  return patchUsuariosStats(
-    safeObject(patch)
-  );
-}
-
-export function writeUsuariosAlerts(
-  alerts = []
-) {
-  return setUsuariosAlerts(
-    alerts
-  );
-}
-
-export function clearUsuariosAlertsStore() {
-  return clearUsuariosAlerts();
-}
-
-/* =========================================================
-   PARAMS
-========================================================= */
-
-export function writeUsuariosParams(
-  params = {}
-) {
-  return setUsuariosParams(
-    safeObject(params)
-  );
-}
-
-export function mergeUsuariosParams(
-  patch = {}
-) {
-  return patchUsuariosParams(
-    safeObject(patch)
-  );
-}
-
-export function setUsuariosPage(
-  page = 1
-) {
-  return patchUsuariosParams({
-    page:
-      safePositiveInt(
-        page,
-        1
-      ),
-  });
-}
-
-export function setUsuariosPageSize(
-  pageSize = 20
-) {
-  return patchUsuariosParams({
-    pageSize:
-      safePositiveInt(
-        pageSize,
-        20
-      ),
-  });
-}
-
-export function setUsuariosSearch(
-  q = ""
-) {
-  return patchUsuariosParams({
-    q: safeText(q, ""),
-    page: 1,
-  });
-}
-
-export function setUsuariosRoleFilter(
-  role = ""
-) {
-  return patchUsuariosParams({
-    role: safeText(role, ""),
-    page: 1,
-  });
-}
-
-export function setUsuariosStatusFilter(
-  status = ""
-) {
-  return patchUsuariosParams({
-    status: safeText(
-      status,
-      ""
-    ),
-    page: 1,
-  });
-}
-
-export function setUsuariosSort(
-  sortBy = "createdAt",
-  sortDir = "desc"
-) {
-  return patchUsuariosParams({
-    sortBy: safeText(
-      sortBy,
-      "createdAt"
-    ),
-    sortDir:
-      safeText(
-        sortDir,
-        "desc"
-      ) === "asc"
-        ? "asc"
-        : "desc",
-  });
+export function clearHomeSummaryStore() {
+  return clearHomeSummary();
 }
 
 /* =========================================================
    UI
 ========================================================= */
 
-export function readUsuariosUi() {
-  return getUsuariosUiState();
+export function readHomeUi() {
+  return getHomeUiState();
 }
 
-export function markUsuariosMounted(
+export function markHomeMounted(
   value = true
 ) {
-  return setUsuariosMounted(
+  return setHomeMounted(
     value === true
   );
 }
 
-export function selectUsuario(
-  userId = ""
+export function setHomeSelectedCard(
+  card = ""
 ) {
-  return setUsuariosSelectedUserId(
-    safeText(userId, "")
+  return setHomeActiveCard(
+    safeText(card, "")
   );
 }
 
-export function setUsuariosActiveFilterUi(
-  value = ""
+export function setHomeAction(
+  action = ""
 ) {
-  return setUsuariosActiveFilter(
-    safeText(value, "")
+  return setHomeLastAction(
+    safeText(action, "")
   );
 }
 
-export function setUsuariosAction(
-  value = ""
-) {
-  return setUsuariosLastAction(
-    safeText(value, "")
-  );
-}
-
-export function setUsuariosSearchDraftUi(
-  value = ""
-) {
-  return setUsuariosSearchDraft(
-    safeText(value, "")
-  );
-}
-
-export function patchUsuariosUi(
+export function patchHomeUi(
   patch = {}
 ) {
-  return patchUsuariosUiState(
+  return patchHomeUiState(
     safeObject(patch)
   );
 }
@@ -556,69 +312,61 @@ export function patchUsuariosUi(
    METADATA
 ========================================================= */
 
-export function readUsuariosMetadata() {
+export function readHomeMetadata() {
   return {
-    source:
-      getUsuariosSource(),
-    remoteOk:
-      isUsuariosRemoteOk(),
-    degraded:
-      isUsuariosDegraded(),
-    lastSyncAt:
-      getUsuariosLastSyncAt(),
-    hydratedAt:
-      getUsuariosHydratedAt(),
-    cacheHit:
-      getUsuariosCacheHit(),
+    source: getHomeSource(),
+    remoteOk: isHomeRemoteOk(),
+    degraded: isHomeDegraded(),
+    lastSyncAt: getHomeLastSyncAt(),
+    hydratedAt: getHomeHydratedAt(),
+    cacheHit: getHomeCacheHit(),
   };
 }
 
-export function setUsuariosSourceState(
-  value = USUARIOS_SOURCES.IDLE
+export function setHomeSourceState(
+  value = HOME_SOURCES.IDLE
 ) {
-  return setUsuariosSource(
-    normalizeUsuariosSource(
-      value
-    )
+  return setHomeSource(
+    normalizeHomeSource(value)
   );
 }
 
-export function setUsuariosRemoteOkState(
+export function setHomeRemoteOkState(
   value = false
 ) {
-  return setUsuariosRemoteOk(
+  return setHomeRemoteOk(
     value === true
   );
 }
 
-export function setUsuariosDegradedState(
+export function setHomeDegradedState(
   value = false
 ) {
-  return setUsuariosDegraded(
+  return setHomeDegraded(
     value === true
   );
 }
 
-export function setUsuariosSyncTimestamp(
+export function setHomeSyncTimestamp(
   value = ""
 ) {
-  return setUsuariosLastSyncAt(
+  return setHomeLastSyncAt(
     safeText(value, "")
   );
 }
 
-export function setUsuariosHydrationTimestamp(
+export function setHomeHydrationTimestamp(
   value = ""
 ) {
-  return setUsuariosHydratedAt(
+  return setHomeHydratedAt(
     safeText(value, "")
   );
 }
 
-export function markUsuariosCacheHit(
+export function markHomeCacheHit(
   value = true
 ) {
-  return setUsuariosCacheHit(
+  return setHomeCacheHit(
     value === true
   );
 }
@@ -627,38 +375,24 @@ export function markUsuariosCacheHit(
    LOAD FLOW
 ========================================================= */
 
-export function beginUsuariosLoad(
-  params = {}
-) {
-  return startUsuariosLoad(
-    safeObject(params)
-  );
+export function beginHomeLoad() {
+  return startHomeLoad();
 }
 
-export function completeUsuariosLoad({
-  rows = [],
-  meta = {},
-  stats = {},
-  alerts = [],
-  params = {},
-  source = USUARIOS_SOURCES.REMOTE,
+export function completeHomeLoad({
+  summary = null,
+  source = HOME_SOURCES.REMOTE,
   remoteOk = false,
   degraded = false,
   syncedAt = "",
   hydratedAt = "",
   cacheHit = false,
-  error = null,
 } = {}) {
-  return finishUsuariosLoad({
-    rows,
-    meta,
-    stats,
-    alerts,
-    params,
-    source:
-      normalizeUsuariosSource(
-        source
-      ),
+  return finishHomeLoad({
+    summary,
+    source: normalizeHomeSource(
+      source
+    ),
     remoteOk:
       remoteOk === true,
     degraded:
@@ -673,144 +407,115 @@ export function completeUsuariosLoad({
     ),
     cacheHit:
       cacheHit === true,
-    error:
-      error || null,
   });
 }
 
-export function rejectUsuariosLoad(
+export function rejectHomeLoad(
   error = null
 ) {
-  return failUsuariosLoad(
-    error
-  );
+  return failHomeLoad(error);
 }
 
 /* =========================================================
    LOW LEVEL FLAGS
 ========================================================= */
 
-export function setUsuariosLoadingState(
+export function setHomeLoadingState(
   value = true
 ) {
-  return setUsuariosLoading(
+  return setHomeLoading(
     value === true
   );
 }
 
-export function setUsuariosLoadedState(
+export function setHomeLoadedState(
   value = true
 ) {
-  return setUsuariosLoaded(
+  return setHomeLoaded(
     value === true
   );
 }
 
-export function setUsuariosErrorState(
+export function setHomeErrorState(
   error = null
 ) {
-  return setUsuariosError(
-    error
-  );
+  return setHomeError(error);
 }
 
-export function clearUsuariosErrorState() {
-  return clearUsuariosError();
+export function clearHomeErrorState() {
+  return clearHomeError();
 }
 
-export function clearUsuariosLastErrorState() {
-  return clearUsuariosLastError();
+export function clearHomeLastErrorState() {
+  return clearHomeLastError();
 }
 
 /* =========================================================
    RESET
 ========================================================= */
 
-export function resetUsuariosStore() {
-  return resetUsuariosState();
+export function resetHomeStore() {
+  return resetHomeState();
 }
 
 /* =========================================================
    EXPORT OBJECT
 ========================================================= */
 
-export const UsuariosStore = {
-  USUARIOS_SOURCES,
+export const HomeStore = {
+  HOME_SOURCES,
 
-  getUsuariosSnapshot,
-  getUsuariosRowsSnapshot,
-  getUsuariosUiSnapshot,
+  getHomeSnapshot,
+  getHomeSummarySnapshot,
+  getHomeUiSnapshot,
 
-  getUsuariosStatus,
-  getUsuariosSourceStatus,
-  hasUsuariosError,
-  hasUsuariosLastError,
-  isUsuariosReady,
-  isUsuariosIdleSource,
-  isUsuariosRemoteSource,
-  isUsuariosFreshCacheSource,
-  isUsuariosStaleCacheSource,
-  isUsuariosFallbackSource,
-  isUsuariosErrorSource,
+  getHomeStatus,
+  getHomeSourceStatus,
+  hasHomeError,
+  hasHomeLastError,
+  isHomeReady,
+  isHomeIdleSource,
+  isHomeRemoteSource,
+  isHomeFreshCacheSource,
+  isHomeStaleCacheSource,
+  isHomeFallbackSource,
+  isHomeErrorSource,
 
-  readUsuariosRows,
-  readUsuariosMeta,
-  readUsuariosStats,
-  readUsuariosAlerts,
-  readUsuariosParams,
-  readUsuarioById,
-  getUsuariosCount,
-  getUsuariosTotal,
+  readHomeSummary,
+  readHomeKpis,
+  readHomeAlerts,
+  readHomeRecentActivity,
+  readHomeQuickActions,
+  readHomeHealth,
+  writeHomeSummary,
+  mergeHomeSummary,
+  clearHomeSummaryStore,
 
-  writeUsuariosRows,
-  patchUsuario,
-  prependUsuario,
-  removeUsuario,
-  clearUsuariosRowsStore,
+  readHomeUi,
+  markHomeMounted,
+  setHomeSelectedCard,
+  setHomeAction,
+  patchHomeUi,
 
-  writeUsuariosMeta,
-  mergeUsuariosMeta,
-  writeUsuariosStats,
-  mergeUsuariosStats,
-  writeUsuariosAlerts,
-  clearUsuariosAlertsStore,
+  readHomeMetadata,
+  setHomeSourceState,
+  setHomeRemoteOkState,
+  setHomeDegradedState,
+  setHomeSyncTimestamp,
+  setHomeHydrationTimestamp,
+  markHomeCacheHit,
 
-  writeUsuariosParams,
-  mergeUsuariosParams,
-  setUsuariosPage,
-  setUsuariosPageSize,
-  setUsuariosSearch,
-  setUsuariosRoleFilter,
-  setUsuariosStatusFilter,
-  setUsuariosSort,
+  beginHomeLoad,
+  completeHomeLoad,
+  rejectHomeLoad,
 
-  readUsuariosUi,
-  markUsuariosMounted,
-  selectUsuario,
-  setUsuariosActiveFilterUi,
-  setUsuariosAction,
-  setUsuariosSearchDraftUi,
-  patchUsuariosUi,
+  setHomeLoadingState,
+  setHomeLoadedState,
+  setHomeErrorState,
+  clearHomeErrorState,
+  clearHomeLastErrorState,
 
-  readUsuariosMetadata,
-  setUsuariosSourceState,
-  setUsuariosRemoteOkState,
-  setUsuariosDegradedState,
-  setUsuariosSyncTimestamp,
-  setUsuariosHydrationTimestamp,
-  markUsuariosCacheHit,
-
-  beginUsuariosLoad,
-  completeUsuariosLoad,
-  rejectUsuariosLoad,
-
-  setUsuariosLoadingState,
-  setUsuariosLoadedState,
-  setUsuariosErrorState,
-  clearUsuariosErrorState,
-  clearUsuariosLastErrorState,
-
-  resetUsuariosStore,
+  resetHomeStore,
 };
 
-export default UsuariosStore;
+export default HomeStore;

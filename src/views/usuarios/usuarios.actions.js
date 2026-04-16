@@ -11,52 +11,53 @@
    - gestionar selección y usuario activo
    - devolver resultados estables para la vista
    - emitir eventos consistentes para tracing
+   - mantener coherencia estricta con usuarios.api.js y usuarios.store.js
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 import { Router } from "../../router/index.js";
 
 import {
-  loadUsuarios,
-  refreshUsuarios,
+  loadUsuariosList,
+  refreshUsuariosList as refreshUsuariosListApi,
 } from "./usuarios.api.js";
 
 import {
   getUsuariosSnapshot,
   getUsuariosStatus,
-  readUsuariosData,
-  readUsuariosItems,
+
+  readUsuariosRows,
   readUsuariosMeta,
-  readUsuariosQuery,
-  readUsuariosSelection,
-  findUsuarioById,
+  readUsuariosStats,
+  readUsuariosAlerts,
+  readUsuariosParams,
+  readUsuariosUi,
+  readUsuarioById,
 
   beginUsuariosLoad,
   completeUsuariosLoad,
   rejectUsuariosLoad,
 
-  writeUsuariosData,
-  writeUsuariosQuery,
-  mergeUsuariosQuery,
+  writeUsuariosRows,
+  writeUsuariosMeta,
+  writeUsuariosStats,
+  writeUsuariosAlerts,
+  writeUsuariosParams,
 
-  setUsuariosSearchQuery,
+  mergeUsuariosParams,
+
+  setUsuariosSearch,
   setUsuariosRoleFilter,
   setUsuariosStatusFilter,
   setUsuariosSort,
   setUsuariosPage,
   setUsuariosPageSize,
-  resetUsuariosFilters,
 
   setUsuariosAction,
-  setUsuariosSearchInput,
-  openUsuariosFilters,
-  closeUsuariosFilters,
-  toggleUsuariosFilters,
+  setUsuariosSearchDraftUi,
+  setUsuariosActiveFilterUi,
 
-  setUsuariosActiveUser,
-  setUsuariosSelectionIds,
-  toggleUsuariosSelectionId,
-  selectAllUsuarios,
+  selectUsuario as selectUsuarioInStore,
   clearAllUsuariosSelected,
 } from "./usuarios.store.js";
 
@@ -94,6 +95,12 @@ function safeObject(value) {
     : {};
 }
 
+function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
+}
+
 function safeNumber(
   value,
   fallback = 0
@@ -121,21 +128,14 @@ function safeEmit(
   }
 }
 
-function safeWarn(...args) {
-  try {
-    AppCore?.utils?.warn?.(...args);
-  } catch {
-    console.warn(...args);
-  }
-}
-
 function buildMeta(
   extra = {}
 ) {
   return {
     usuariosStatus:
       getUsuariosStatus(),
-    query: readUsuariosQuery(),
+    params:
+      readUsuariosParams(),
     ...safeObject(extra),
   };
 }
@@ -195,28 +195,74 @@ function resolveUsuarioPath(
     : "/usuarios";
 }
 
-function applyApiResultToStore(
+function normalizeApiListResult(
   result = {}
 ) {
   const payload =
     safeObject(result);
 
-  if (!payload?.data) {
-    return null;
-  }
+  const list = safeObject(
+    payload.list
+  );
 
-  completeUsuariosLoad({
-    data: payload.data,
-    source: payload.source,
+  return {
+    rows: safeArray(list.rows),
+    meta: safeObject(list.meta),
+    stats: safeObject(list.stats),
+    alerts: safeArray(list.alerts),
+    source: safeText(
+      payload.source,
+      ""
+    ),
     remoteOk:
       payload.remoteOk === true,
     degraded:
       payload.degraded === true,
     cacheHit:
       payload.cacheHit === true,
+    error:
+      payload.error || null,
+  };
+}
+
+function applyApiResultToStore(
+  result = {}
+) {
+  const normalized =
+    normalizeApiListResult(result);
+
+  completeUsuariosLoad({
+    rows: normalized.rows,
+    meta: normalized.meta,
+    stats: normalized.stats,
+    alerts: normalized.alerts,
+    params: readUsuariosParams(),
+    source: normalized.source,
+    remoteOk:
+      normalized.remoteOk === true,
+    degraded:
+      normalized.degraded === true,
+    cacheHit:
+      normalized.cacheHit === true,
+    error:
+      normalized.error || null,
   });
 
-  return payload.data;
+  return {
+    rows: normalized.rows,
+    meta: normalized.meta,
+    stats: normalized.stats,
+    alerts: normalized.alerts,
+  };
+}
+
+function getCurrentData() {
+  return {
+    rows: readUsuariosRows(),
+    meta: readUsuariosMeta(),
+    stats: readUsuariosStats(),
+    alerts: readUsuariosAlerts(),
+  };
 }
 
 /* =========================================================
@@ -247,30 +293,28 @@ export async function hydrateUsuarios(
           }
         );
 
-        beginUsuariosLoad();
+        const currentParams =
+          readUsuariosParams();
 
-        const currentQuery =
-          readUsuariosQuery();
-
-        const finalQuery = {
-          ...currentQuery,
+        const finalParams = {
+          ...currentParams,
           ...safeObject(
-            config.query
+            config.params ||
+              config.query
           ),
         };
 
-        if (
-          Object.keys(finalQuery)
-            .length
-        ) {
-          writeUsuariosQuery(
-            finalQuery
-          );
-        }
+        writeUsuariosParams(
+          finalParams
+        );
+
+        beginUsuariosLoad(
+          finalParams
+        );
 
         const result =
-          await loadUsuarios({
-            ...finalQuery,
+          await loadUsuariosList({
+            ...finalParams,
             force:
               config.force === true,
             preferCache:
@@ -280,7 +324,7 @@ export async function hydrateUsuarios(
 
         if (
           result?.ok !== true ||
-          !result?.data
+          !result?.list
         ) {
           rejectUsuariosLoad(
             result?.error || null
@@ -289,7 +333,7 @@ export async function hydrateUsuarios(
           return createResult({
             ok: false,
             action: "hydrate",
-            data: result?.data || null,
+            data: null,
             error:
               result?.error ||
               new Error(
@@ -311,7 +355,11 @@ export async function hydrateUsuarios(
         safeEmit(
           "usuarios:action:hydrate:success",
           {
-            result,
+            source:
+              result?.source ||
+              "",
+            rows:
+              data?.rows?.length || 0,
           }
         );
 
@@ -382,23 +430,29 @@ export async function refreshUsuariosList(
           }
         );
 
-        beginUsuariosLoad();
-
-        const query = {
-          ...readUsuariosQuery(),
+        const params = {
+          ...readUsuariosParams(),
           ...safeObject(
-            config.query
+            config.params ||
+              config.query
           ),
         };
 
+        writeUsuariosParams(
+          params
+        );
+        beginUsuariosLoad(
+          params
+        );
+
         const result =
-          await refreshUsuarios(
-            query
+          await refreshUsuariosListApi(
+            params
           );
 
         if (
           result?.ok !== true ||
-          !result?.data
+          !result?.list
         ) {
           rejectUsuariosLoad(
             result?.error || null
@@ -407,7 +461,7 @@ export async function refreshUsuariosList(
           return createResult({
             ok: false,
             action: "refresh",
-            data: result?.data || null,
+            data: null,
             error:
               result?.error ||
               new Error(
@@ -429,7 +483,11 @@ export async function refreshUsuariosList(
         safeEmit(
           "usuarios:action:refresh:success",
           {
-            result,
+            source:
+              result?.source ||
+              "",
+            rows:
+              data?.rows?.length || 0,
           }
         );
 
@@ -488,12 +546,10 @@ export async function searchUsuarios(
     safeText(value, "");
 
   setUsuariosAction("search");
-  setUsuariosSearchInput(
+  setUsuariosSearchDraftUi(
     search
   );
-  setUsuariosSearchQuery(
-    search
-  );
+  setUsuariosSearch(search);
 
   safeEmit(
     "usuarios:action:search",
@@ -524,6 +580,9 @@ export async function applyUsuariosRoleFilter(
   setUsuariosAction(
     "filter-role"
   );
+  setUsuariosActiveFilterUi(
+    role ? "role" : ""
+  );
   setUsuariosRoleFilter(role);
 
   safeEmit(
@@ -552,6 +611,9 @@ export async function applyUsuariosStatusFilter(
 
   setUsuariosAction(
     "filter-status"
+  );
+  setUsuariosActiveFilterUi(
+    status ? "status" : ""
   );
   setUsuariosStatusFilter(
     status
@@ -671,7 +733,9 @@ export async function nextUsuariosPage(
 ) {
   const meta = readUsuariosMeta();
 
-  if (meta?.hasNext !== true) {
+  if (
+    meta?.hasNextPage !== true
+  ) {
     return createResult({
       ok: false,
       action: "next-page",
@@ -696,7 +760,9 @@ export async function prevUsuariosPage(
 ) {
   const meta = readUsuariosMeta();
 
-  if (meta?.hasPrev !== true) {
+  if (
+    meta?.hasPrevPage !== true
+  ) {
     return createResult({
       ok: false,
       action: "prev-page",
@@ -725,8 +791,22 @@ export async function resetUsuariosListFilters(
   setUsuariosAction(
     "reset-filters"
   );
-  resetUsuariosFilters();
-  closeUsuariosFilters();
+
+  const nextParams = {
+    ...readUsuariosParams(),
+    q: "",
+    role: "",
+    status: "",
+    page: 1,
+  };
+
+  writeUsuariosParams(
+    nextParams
+  );
+  setUsuariosSearchDraftUi("");
+  setUsuariosActiveFilterUi(
+    ""
+  );
 
   safeEmit(
     "usuarios:action:filters:reset",
@@ -744,61 +824,7 @@ export async function resetUsuariosListFilters(
 }
 
 /* =========================================================
-   UI FILTERS
-========================================================= */
-
-export function openUsuariosFiltersPanel() {
-  setUsuariosAction(
-    "open-filters"
-  );
-  openUsuariosFilters();
-
-  return createResult({
-    ok: true,
-    action: "open-filters",
-    data: {
-      filtersOpen: true,
-    },
-    meta: buildMeta(),
-  });
-}
-
-export function closeUsuariosFiltersPanel() {
-  setUsuariosAction(
-    "close-filters"
-  );
-  closeUsuariosFilters();
-
-  return createResult({
-    ok: true,
-    action: "close-filters",
-    data: {
-      filtersOpen: false,
-    },
-    meta: buildMeta(),
-  });
-}
-
-export function toggleUsuariosFiltersPanel() {
-  setUsuariosAction(
-    "toggle-filters"
-  );
-  toggleUsuariosFilters();
-
-  return createResult({
-    ok: true,
-    action: "toggle-filters",
-    data: {
-      filtersOpen:
-        readUsuariosSelection()
-          ?.filtersOpen === true,
-    },
-    meta: buildMeta(),
-  });
-}
-
-/* =========================================================
-   SELECTION
+   SELECTION / ACTIVE USER
 ========================================================= */
 
 export function selectUsuario(
@@ -821,7 +847,7 @@ export function selectUsuario(
   setUsuariosAction(
     "select-user"
   );
-  setUsuariosActiveUser(
+  selectUsuarioInStore(
     normalized
   );
 
@@ -835,105 +861,13 @@ export function selectUsuario(
   return createResult({
     ok: true,
     action: "select-user",
-    data: findUsuarioById(
+    data: readUsuarioById(
       normalized
     ),
     meta: buildMeta({
       activeUserId:
         normalized,
     }),
-  });
-}
-
-export function setUsuariosSelection(
-  ids = []
-) {
-  setUsuariosAction(
-    "set-selection"
-  );
-  setUsuariosSelectionIds(ids);
-
-  return createResult({
-    ok: true,
-    action: "set-selection",
-    data: {
-      selectedIds:
-        readUsuariosSelection()
-          ?.selectedIds || [],
-    },
-    meta: buildMeta(),
-  });
-}
-
-export function toggleUsuarioSelection(
-  userId = ""
-) {
-  const normalized =
-    safeText(userId, "");
-
-  if (!normalized) {
-    return createResult({
-      ok: false,
-      action:
-        "toggle-selection",
-      error: new Error(
-        "userId requerido."
-      ),
-      meta: buildMeta(),
-    });
-  }
-
-  setUsuariosAction(
-    "toggle-selection"
-  );
-  toggleUsuariosSelectionId(
-    normalized
-  );
-
-  safeEmit(
-    "usuarios:action:toggle-selection",
-    {
-      userId: normalized,
-    }
-  );
-
-  return createResult({
-    ok: true,
-    action:
-      "toggle-selection",
-    data: {
-      selectedIds:
-        readUsuariosSelection()
-          ?.selectedIds || [],
-    },
-    meta: buildMeta(),
-  });
-}
-
-export function selectAllVisibleUsuarios() {
-  setUsuariosAction(
-    "select-all"
-  );
-  selectAllUsuarios();
-
-  safeEmit(
-    "usuarios:action:select-all",
-    {
-      count:
-        readUsuariosItems()
-          .length,
-    }
-  );
-
-  return createResult({
-    ok: true,
-    action: "select-all",
-    data: {
-      selectedIds:
-        readUsuariosSelection()
-          ?.selectedIds || [],
-    },
-    meta: buildMeta(),
   });
 }
 
@@ -968,10 +902,10 @@ export function getUsuariosActionContext() {
     snapshot:
       getUsuariosSnapshot(),
     status: getUsuariosStatus(),
-    data: readUsuariosData(),
-    query: readUsuariosQuery(),
-    selection:
-      readUsuariosSelection(),
+    data: getCurrentData(),
+    params:
+      readUsuariosParams(),
+    ui: readUsuariosUi(),
   };
 }
 
@@ -996,7 +930,7 @@ export async function openUsuarioDetail(
   setUsuariosAction(
     "open-detail"
   );
-  setUsuariosActiveUser(
+  selectUsuarioInStore(
     normalized
   );
 
@@ -1029,7 +963,7 @@ export async function openUsuarioDetail(
         data: {
           target,
           user:
-            findUsuarioById(
+            readUsuarioById(
               normalized
             ),
         },
@@ -1061,7 +995,7 @@ export async function openUsuarioDetail(
           normalized
         ),
       user:
-        findUsuarioById(
+        readUsuarioById(
           normalized
         ),
     },
@@ -1069,6 +1003,73 @@ export async function openUsuarioDetail(
       activeUserId:
         normalized,
     }),
+  });
+}
+
+/* =========================================================
+   LOW LEVEL SYNC HELPERS
+========================================================= */
+
+export function hydrateUsuariosDataDirect(
+  payload = {}
+) {
+  const source =
+    safeObject(payload);
+
+  if (
+    Array.isArray(source.rows)
+  ) {
+    writeUsuariosRows(
+      source.rows
+    );
+  }
+
+  if (
+    source.meta &&
+    typeof source.meta ===
+      "object"
+  ) {
+    writeUsuariosMeta(
+      source.meta
+    );
+  }
+
+  if (
+    source.stats &&
+    typeof source.stats ===
+      "object"
+  ) {
+    writeUsuariosStats(
+      source.stats
+    );
+  }
+
+  if (
+    Array.isArray(
+      source.alerts
+    )
+  ) {
+    writeUsuariosAlerts(
+      source.alerts
+    );
+  }
+
+  if (
+    source.params &&
+    typeof source.params ===
+      "object"
+  ) {
+    mergeUsuariosParams(
+      source.params
+    );
+  }
+
+  return createResult({
+    ok: true,
+    action:
+      "hydrate-direct",
+    data: getCurrentData(),
+    meta: buildMeta(),
   });
 }
 
@@ -1090,18 +1091,12 @@ export const UsuariosActions = {
   prevUsuariosPage,
   resetUsuariosListFilters,
 
-  openUsuariosFiltersPanel,
-  closeUsuariosFiltersPanel,
-  toggleUsuariosFiltersPanel,
-
   selectUsuario,
-  setUsuariosSelection,
-  toggleUsuarioSelection,
-  selectAllVisibleUsuarios,
   clearUsuariosSelectionAction,
 
   openUsuarioDetail,
   getUsuariosActionContext,
+  hydrateUsuariosDataDirect,
 };
 
 export default UsuariosActions;

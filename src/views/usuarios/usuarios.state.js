@@ -2,37 +2,41 @@
    Onion SPA - Usuarios State
    Archivo: src/views/usuarios/usuarios.state.js
 
-   FINAL PRO SYSTEM · ADMIN USERS STATE · 10/10
+   FINAL PRO SYSTEM · REAL CONTRACT · 10/10
 
    Responsabilidades:
    - centralizar el estado interno de la vista Usuarios
    - exponer snapshot inicial robusto e inmutable por copia
    - controlar loading / loaded / error
-   - almacenar listado, stats, meta y query normalizados
+   - almacenar rows, meta, stats y alerts
    - modelar source / degraded / remoteOk / cacheHit
-   - mantener selección y estado UI predecibles
-   - preservar contrato esperado por usuarios.api.js, store y template
+   - mantener params de listado consistentes
+   - preservar contrato esperado por usuarios.api.js y usuarios.view.js
 ========================================================= */
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
-export const USUARIOS_SOURCES =
-  Object.freeze({
-    IDLE: "idle",
-    REMOTE: "remote",
-    CACHE_FRESH: "cache:fresh",
-    CACHE_STALE: "cache:stale",
-    FALLBACK_LOCAL: "fallback:local",
-    ERROR: "error",
-  });
+export const USUARIOS_CACHE_KEY =
+  "onion.usuarios.list";
 
-export const USUARIOS_VIEW_MODES =
-  Object.freeze({
-    TABLE: "table",
-    GRID: "grid",
-  });
+export const USUARIOS_CACHE_TTL =
+  1000 * 60 * 5;
+
+export const USUARIOS_DEFAULT_PAGE = 1;
+export const USUARIOS_DEFAULT_PAGE_SIZE = 20;
+export const USUARIOS_DEFAULT_SORT_BY = "createdAt";
+export const USUARIOS_DEFAULT_SORT_DIR = "desc";
+
+export const USUARIOS_SOURCES = Object.freeze({
+  IDLE: "idle",
+  REMOTE: "remote",
+  CACHE_FRESH: "cache:fresh",
+  CACHE_STALE: "cache:stale",
+  FALLBACK_LOCAL: "fallback:local",
+  ERROR: "error",
+});
 
 /* =========================================================
    BASICS
@@ -77,6 +81,17 @@ function safeNumber(
     : fallback;
 }
 
+function safePositiveInt(
+  value,
+  fallback = 0
+) {
+  const number = Math.trunc(Number(value));
+  return Number.isFinite(number) &&
+    number > 0
+    ? number
+    : fallback;
+}
+
 function safeBoolean(
   value,
   fallback = false
@@ -115,106 +130,68 @@ function clone(value) {
 }
 
 /* =========================================================
-   FACTORIES · USER ITEM
+   FACTORIES
 ========================================================= */
 
-export function createInitialUsuarioItem() {
+export function createInitialUsuarioRow() {
   return {
     id: "",
     userId: "",
     username: "",
     displayName: "",
-    name: "",
     email: "",
-    phone: "",
     role: "user",
     status: "unknown",
-    avatarUrl: "",
+    avatar: "",
+    hasAvatar: false,
+    phone: "",
+    emailVerified: false,
+    lastLoginAt: "",
     createdAt: "",
     updatedAt: "",
-    lastLoginAt: "",
-    emailVerified: false,
-    isActive: false,
     raw: {},
-  };
-}
-
-/* =========================================================
-   FACTORIES · DATA
-========================================================= */
-
-export function createInitialUsuariosStats() {
-  return {
-    total: 0,
-    active: 0,
-    inactive: 0,
-    blocked: 0,
-    pending: 0,
-    admins: 0,
   };
 }
 
 export function createInitialUsuariosMeta() {
   return {
+    page: USUARIOS_DEFAULT_PAGE,
+    pageSize: USUARIOS_DEFAULT_PAGE_SIZE,
     total: 0,
-    page: 1,
-    pageSize: 20,
-    totalPages: 1,
-    hasNext: false,
-    hasPrev: false,
-  };
-}
-
-export function createInitialUsuariosQuery() {
-  return {
-    page: 1,
-    pageSize: 20,
-    search: "",
+    totalPages: 0,
+    count: 0,
+    hasNextPage: false,
+    hasPrevPage: false,
+    sortBy: USUARIOS_DEFAULT_SORT_BY,
+    sortDir: USUARIOS_DEFAULT_SORT_DIR,
+    q: "",
     role: "",
     status: "",
-    sortBy: "createdAt",
-    sortDir: "desc",
   };
 }
 
-export function createInitialUsuariosData() {
+export function createInitialUsuariosStats() {
   return {
-    generatedAt: "",
-    items: [],
-    stats:
-      createInitialUsuariosStats(),
-    meta:
-      createInitialUsuariosMeta(),
-    query:
-      createInitialUsuariosQuery(),
+    total: 0,
+    admins: 0,
+    active: 0,
+    inactive: 0,
+    withAvatar: 0,
   };
 }
 
-/* =========================================================
-   FACTORIES · SELECTION / UI
-========================================================= */
-
-export function createInitialUsuariosSelection() {
+export function createInitialUsuariosParams() {
   return {
-    selectedIds: [],
-    activeUserId: "",
+    page: USUARIOS_DEFAULT_PAGE,
+    pageSize: USUARIOS_DEFAULT_PAGE_SIZE,
+    sortBy: USUARIOS_DEFAULT_SORT_BY,
+    sortDir: USUARIOS_DEFAULT_SORT_DIR,
+    q: "",
+    role: "",
+    status: "",
+    includeStats: false,
   };
 }
-
-export function createInitialUsuariosUiState() {
-  return {
-    mounted: false,
-    viewMode:
-      USUARIOS_VIEW_MODES.TABLE,
-    lastAction: "",
-    searchDraft: "",
-    filtersOpen: false,
-  };
-}
-
-/* =========================================================
-   ROOT STATE FACTORY
-========================================================= */
 
 export function createInitialUsuariosState() {
   return {
@@ -223,20 +200,28 @@ export function createInitialUsuariosState() {
     error: null,
     lastError: null,
 
-    source:
-      USUARIOS_SOURCES.IDLE,
+    rows: [],
+    meta: createInitialUsuariosMeta(),
+    stats: createInitialUsuariosStats(),
+    alerts: [],
+
+    params: createInitialUsuariosParams(),
+
+    source: USUARIOS_SOURCES.IDLE,
     remoteOk: false,
     degraded: false,
+
+    lastSyncAt: "",
+    hydratedAt: "",
     cacheHit: false,
 
-    data:
-      createInitialUsuariosData(),
-
-    selection:
-      createInitialUsuariosSelection(),
-
-    ui:
-      createInitialUsuariosUiState(),
+    ui: {
+      mounted: false,
+      selectedUserId: "",
+      activeFilter: "",
+      lastAction: "",
+      searchDraft: "",
+    },
   };
 }
 
@@ -251,83 +236,174 @@ export const usuariosState =
    NORMALIZERS
 ========================================================= */
 
-function normalizeUsuarioItem(
-  value = {}
+function normalizeSource(
+  value = ""
 ) {
-  const item =
-    safeObject(value);
+  const source = safeText(
+    value,
+    USUARIOS_SOURCES.IDLE
+  );
 
-  const id =
-    safeText(
-      item.id ||
-        item.userId,
-      ""
-    );
+  const allowed =
+    Object.values(USUARIOS_SOURCES);
 
-  const status = safeText(
-    item.status,
-    "unknown"
+  return allowed.includes(source)
+    ? source
+    : USUARIOS_SOURCES.IDLE;
+}
+
+function normalizeSortDir(
+  value = USUARIOS_DEFAULT_SORT_DIR
+) {
+  const dir = safeText(
+    value,
+    USUARIOS_DEFAULT_SORT_DIR
   ).toLowerCase();
 
+  return dir === "asc"
+    ? "asc"
+    : "desc";
+}
+
+function normalizeUsuarioRow(
+  value = {}
+) {
+  const row =
+    safeObject(value);
+
   return {
-    id,
+    id: safeText(
+      row.id ||
+        row.userId,
+      ""
+    ),
     userId: safeText(
-      item.userId || id,
+      row.userId ||
+        row.id,
       ""
     ),
     username: safeText(
-      item.username,
+      row.username,
       ""
     ),
     displayName: safeText(
-      item.displayName ||
-        item.name,
-      ""
-    ),
-    name: safeText(
-      item.name ||
-        item.displayName,
+      row.displayName ||
+        row.fullName ||
+        row.name,
       ""
     ),
     email: safeText(
-      item.email,
+      row.email,
       ""
-    ),
-    phone: safeText(
-      item.phone,
-      ""
-    ),
+    ).toLowerCase(),
     role: safeText(
-      item.role,
+      row.role,
       "user"
     ).toLowerCase(),
-    status,
-    avatarUrl: safeText(
-      item.avatarUrl,
+    status: safeText(
+      row.status,
+      "unknown"
+    ).toLowerCase(),
+    avatar: safeText(
+      row.avatar,
       ""
     ),
-    createdAt: safeText(
-      item.createdAt,
-      ""
+    hasAvatar: safeBoolean(
+      row.hasAvatar,
+      false
     ),
-    updatedAt: safeText(
-      item.updatedAt,
-      ""
-    ),
-    lastLoginAt: safeText(
-      item.lastLoginAt,
+    phone: safeText(
+      row.phone,
       ""
     ),
     emailVerified: safeBoolean(
-      item.emailVerified,
+      row.emailVerified,
       false
     ),
-    isActive:
-      safeBoolean(
-        item.isActive,
-        status === "active"
-      ) === true,
-    raw: safeObject(item.raw || item),
+    lastLoginAt: safeText(
+      row.lastLoginAt,
+      ""
+    ),
+    createdAt: safeText(
+      row.createdAt,
+      ""
+    ),
+    updatedAt: safeText(
+      row.updatedAt,
+      ""
+    ),
+    raw: safeObject(row.raw || {}),
+  };
+}
+
+function normalizeUsuariosRows(
+  value = []
+) {
+  return safeArray(value)
+    .map(normalizeUsuarioRow)
+    .filter(Boolean);
+}
+
+function normalizeUsuariosMeta(
+  value = {}
+) {
+  const meta =
+    safeObject(value);
+
+  const page = safePositiveInt(
+    meta.page,
+    USUARIOS_DEFAULT_PAGE
+  );
+
+  const pageSize =
+    safePositiveInt(
+      meta.pageSize,
+      USUARIOS_DEFAULT_PAGE_SIZE
+    );
+
+  const total = safePositiveInt(
+    meta.total,
+    0
+  );
+
+  const totalPages =
+    safePositiveInt(
+      meta.totalPages,
+      pageSize > 0
+        ? Math.ceil(total / pageSize)
+        : 0
+    );
+
+  return {
+    page,
+    pageSize,
+    total,
+    totalPages,
+    count: safePositiveInt(
+      meta.count,
+      0
+    ),
+    hasNextPage: safeBoolean(
+      meta.hasNextPage,
+      page < totalPages
+    ),
+    hasPrevPage: safeBoolean(
+      meta.hasPrevPage,
+      page > 1
+    ),
+    sortBy: safeText(
+      meta.sortBy,
+      USUARIOS_DEFAULT_SORT_BY
+    ),
+    sortDir: normalizeSortDir(
+      meta.sortDir
+    ),
+    q: safeText(meta.q, ""),
+    role: safeText(meta.role, ""),
+    status: safeText(
+      meta.status,
+      ""
+    ),
   };
 }
 
@@ -338,232 +414,101 @@ function normalizeUsuariosStats(
     safeObject(value);
 
   return {
-    total: safeNumber(
+    total: safePositiveInt(
       stats.total,
       0
     ),
-    active: safeNumber(
-      stats.active,
-      0
-    ),
-    inactive: safeNumber(
-      stats.inactive,
-      0
-    ),
-    blocked: safeNumber(
-      stats.blocked,
-      0
-    ),
-    pending: safeNumber(
-      stats.pending,
-      0
-    ),
-    admins: safeNumber(
+    admins: safePositiveInt(
       stats.admins,
       0
     ),
-  };
-}
-
-function normalizeUsuariosMeta(
-  value = {}
-) {
-  const meta =
-    safeObject(value);
-
-  const page = Math.max(
-    1,
-    safeNumber(meta.page, 1)
-  );
-
-  const pageSize = Math.max(
-    1,
-    safeNumber(
-      meta.pageSize,
-      20
-    )
-  );
-
-  const total = Math.max(
-    0,
-    safeNumber(meta.total, 0)
-  );
-
-  const totalPages = Math.max(
-    1,
-    safeNumber(
-      meta.totalPages,
-      1
-    )
-  );
-
-  return {
-    total,
-    page,
-    pageSize,
-    totalPages,
-    hasNext: safeBoolean(
-      meta.hasNext,
-      page < totalPages
+    active: safePositiveInt(
+      stats.active,
+      0
     ),
-    hasPrev: safeBoolean(
-      meta.hasPrev,
-      page > 1
+    inactive: safePositiveInt(
+      stats.inactive,
+      0
+    ),
+    withAvatar: safePositiveInt(
+      stats.withAvatar,
+      0
     ),
   };
 }
 
-function normalizeUsuariosQuery(
-  value = {}
+function normalizeUsuariosAlert(
+  value = {},
+  index = 0
 ) {
-  const query =
+  const item =
     safeObject(value);
 
   return {
-    page: Math.max(
-      1,
-      safeNumber(query.page, 1)
+    level: safeText(
+      item.level,
+      "info"
     ),
-    pageSize: Math.max(
-      1,
-      safeNumber(
-        query.pageSize,
-        20
-      )
+    code: safeText(
+      item.code,
+      `USERS_ALERT_${index + 1}`
     ),
-    search: safeText(
-      query.search,
+    message: safeText(
+      item.message,
+      "Aviso"
+    ),
+  };
+}
+
+function normalizeUsuariosAlerts(
+  value = []
+) {
+  return safeArray(value)
+    .map(normalizeUsuariosAlert)
+    .filter(Boolean);
+}
+
+function normalizeUsuariosParams(
+  value = {}
+) {
+  const params =
+    safeObject(value);
+
+  return {
+    page: safePositiveInt(
+      params.page,
+      USUARIOS_DEFAULT_PAGE
+    ),
+    pageSize: safePositiveInt(
+      params.pageSize,
+      USUARIOS_DEFAULT_PAGE_SIZE
+    ),
+    sortBy: safeText(
+      params.sortBy,
+      USUARIOS_DEFAULT_SORT_BY
+    ),
+    sortDir: normalizeSortDir(
+      params.sortDir
+    ),
+    q: safeText(
+      params.q ||
+        params.search ||
+        params.query,
       ""
     ),
     role: safeText(
-      query.role,
+      params.role,
       ""
     ),
     status: safeText(
-      query.status,
+      params.status,
       ""
     ),
-    sortBy: safeText(
-      query.sortBy,
-      "createdAt"
+    includeStats: safeBoolean(
+      params.includeStats,
+      false
     ),
-    sortDir:
-      safeText(
-        query.sortDir,
-        "desc"
-      ).toLowerCase() === "asc"
-        ? "asc"
-        : "desc",
   };
-}
-
-function normalizeUsuariosData(
-  value = {}
-) {
-  const data =
-    safeObject(value);
-
-  return {
-    generatedAt: safeText(
-      data.generatedAt,
-      ""
-    ),
-    items: safeArray(data.items)
-      .map(
-        normalizeUsuarioItem
-      )
-      .filter(Boolean),
-    stats:
-      normalizeUsuariosStats(
-        data.stats
-      ),
-    meta: normalizeUsuariosMeta(
-      data.meta
-    ),
-    query:
-      normalizeUsuariosQuery(
-        data.query
-      ),
-  };
-}
-
-function normalizeUsuariosSource(
-  value = ""
-) {
-  const source = safeText(
-    value,
-    USUARIOS_SOURCES.IDLE
-  );
-
-  const allowed =
-    Object.values(
-      USUARIOS_SOURCES
-    );
-
-  return allowed.includes(source)
-    ? source
-    : USUARIOS_SOURCES.IDLE;
-}
-
-function normalizeSelectedIds(
-  value = []
-) {
-  const seen = new Set();
-
-  return safeArray(value)
-    .map((id) =>
-      safeText(id, "")
-    )
-    .filter(Boolean)
-    .filter((id) => {
-      if (seen.has(id)) {
-        return false;
-      }
-
-      seen.add(id);
-      return true;
-    });
-}
-
-function normalizeUsuariosSelection(
-  value = {}
-) {
-  const selection =
-    safeObject(value);
-
-  const selectedIds =
-    normalizeSelectedIds(
-      selection.selectedIds
-    );
-
-  const activeUserId =
-    safeText(
-      selection.activeUserId,
-      ""
-    );
-
-  return {
-    selectedIds,
-    activeUserId,
-  };
-}
-
-function normalizeViewMode(
-  value = USUARIOS_VIEW_MODES.TABLE
-) {
-  const mode = safeText(
-    value,
-    USUARIOS_VIEW_MODES.TABLE
-  );
-
-  const allowed =
-    Object.values(
-      USUARIOS_VIEW_MODES
-    );
-
-  return allowed.includes(mode)
-    ? mode
-    : USUARIOS_VIEW_MODES.TABLE;
 }
 
 function normalizeUsuariosUiState(
@@ -577,8 +522,13 @@ function normalizeUsuariosUiState(
       ui.mounted,
       false
     ),
-    viewMode: normalizeViewMode(
-      ui.viewMode
+    selectedUserId: safeText(
+      ui.selectedUserId,
+      ""
+    ),
+    activeFilter: safeText(
+      ui.activeFilter,
+      ""
     ),
     lastAction: safeText(
       ui.lastAction,
@@ -587,10 +537,6 @@ function normalizeUsuariosUiState(
     searchDraft: safeText(
       ui.searchDraft,
       ""
-    ),
-    filtersOpen: safeBoolean(
-      ui.filtersOpen,
-      false
     ),
   };
 }
@@ -603,49 +549,33 @@ export function getUsuariosState() {
   return clone(usuariosState);
 }
 
-export function getUsuariosData() {
-  return clone(
-    usuariosState.data
-  );
-}
-
-export function getUsuariosItems() {
-  return clone(
-    usuariosState.data?.items ||
-      []
-  );
-}
-
-export function getUsuariosStats() {
-  return clone(
-    usuariosState.data?.stats ||
-      createInitialUsuariosStats()
-  );
+export function getUsuariosRows() {
+  return clone(usuariosState.rows);
 }
 
 export function getUsuariosMeta() {
+  return clone(usuariosState.meta);
+}
+
+export function getUsuariosStats() {
+  return clone(usuariosState.stats);
+}
+
+export function getUsuariosAlerts() {
   return clone(
-    usuariosState.data?.meta ||
-      createInitialUsuariosMeta()
+    usuariosState.alerts
   );
 }
 
-export function getUsuariosQuery() {
+export function getUsuariosParams() {
   return clone(
-    usuariosState.data?.query ||
-      createInitialUsuariosQuery()
+    usuariosState.params
   );
 }
 
-export function getUsuariosSelection() {
-  return clone(
-    usuariosState.selection
-  );
-}
-
-export function getUsuariosUiState() {
-  return clone(
-    usuariosState.ui
+export function getUsuariosSource() {
+  return normalizeSource(
+    usuariosState.source
   );
 }
 
@@ -658,15 +588,11 @@ export function isUsuariosLoaded() {
 }
 
 export function isUsuariosDegraded() {
-  return (
-    usuariosState.degraded === true
-  );
+  return usuariosState.degraded === true;
 }
 
 export function isUsuariosRemoteOk() {
-  return (
-    usuariosState.remoteOk === true
-  );
+  return usuariosState.remoteOk === true;
 }
 
 export function getUsuariosError() {
@@ -674,14 +600,20 @@ export function getUsuariosError() {
 }
 
 export function getUsuariosLastError() {
-  return (
-    usuariosState.lastError || null
+  return usuariosState.lastError || null;
+}
+
+export function getUsuariosLastSyncAt() {
+  return safeText(
+    usuariosState.lastSyncAt,
+    ""
   );
 }
 
-export function getUsuariosSource() {
-  return normalizeUsuariosSource(
-    usuariosState.source
+export function getUsuariosHydratedAt() {
+  return safeText(
+    usuariosState.hydratedAt,
+    ""
   );
 }
 
@@ -692,6 +624,36 @@ export function getUsuariosCacheHit() {
   );
 }
 
+export function getUsuariosUiState() {
+  return clone(
+    usuariosState.ui
+  );
+}
+
+export function getUsuarioByIdFromState(
+  userId = ""
+) {
+  const id = safeText(userId, "");
+
+  if (!id) {
+    return null;
+  }
+
+  const found =
+    safeArray(usuariosState.rows).find(
+      (row) =>
+        safeText(
+          row?.userId ||
+            row?.id,
+          ""
+        ) === id
+    ) || null;
+
+  return found
+    ? clone(found)
+    : null;
+}
+
 /* =========================================================
    WRITE HELPERS
 ========================================================= */
@@ -700,11 +662,11 @@ export function resetUsuariosState() {
   const next =
     createInitialUsuariosState();
 
-  Object.keys(
-    usuariosState
-  ).forEach((key) => {
-    delete usuariosState[key];
-  });
+  Object.keys(usuariosState).forEach(
+    (key) => {
+      delete usuariosState[key];
+    }
+  );
 
   Object.assign(
     usuariosState,
@@ -761,11 +723,188 @@ export function clearUsuariosLastError() {
   return null;
 }
 
+export function setUsuariosRows(
+  rows = []
+) {
+  usuariosState.rows =
+    normalizeUsuariosRows(rows);
+
+  return getUsuariosRows();
+}
+
+export function patchUsuarioRow(
+  userId = "",
+  patch = {}
+) {
+  const id = safeText(userId, "");
+
+  if (!id) {
+    return getUsuariosRows();
+  }
+
+  usuariosState.rows =
+    safeArray(usuariosState.rows).map(
+      (row) => {
+        const currentId =
+          safeText(
+            row?.userId ||
+              row?.id,
+            ""
+          );
+
+        if (currentId !== id) {
+          return row;
+        }
+
+        return normalizeUsuarioRow({
+          ...safeObject(row),
+          ...safeObject(patch),
+        });
+      }
+    );
+
+  return getUsuariosRows();
+}
+
+export function prependUsuarioRow(
+  row = {}
+) {
+  const normalized =
+    normalizeUsuarioRow(row);
+
+  const existingId =
+    safeText(
+      normalized.userId ||
+        normalized.id,
+      ""
+    );
+
+  if (!existingId) {
+    return getUsuariosRows();
+  }
+
+  const filtered =
+    safeArray(usuariosState.rows).filter(
+      (item) =>
+        safeText(
+          item?.userId ||
+            item?.id,
+          ""
+        ) !== existingId
+    );
+
+  usuariosState.rows = [
+    normalized,
+    ...filtered,
+  ];
+
+  return getUsuariosRows();
+}
+
+export function removeUsuarioRow(
+  userId = ""
+) {
+  const id = safeText(userId, "");
+
+  usuariosState.rows =
+    safeArray(usuariosState.rows).filter(
+      (row) =>
+        safeText(
+          row?.userId ||
+            row?.id,
+          ""
+        ) !== id
+    );
+
+  return getUsuariosRows();
+}
+
+export function clearUsuariosRows() {
+  usuariosState.rows = [];
+  return getUsuariosRows();
+}
+
+export function setUsuariosMeta(
+  meta = {}
+) {
+  usuariosState.meta =
+    normalizeUsuariosMeta(meta);
+
+  return getUsuariosMeta();
+}
+
+export function patchUsuariosMeta(
+  patch = {}
+) {
+  return setUsuariosMeta({
+    ...safeObject(
+      usuariosState.meta
+    ),
+    ...safeObject(patch),
+  });
+}
+
+export function setUsuariosStats(
+  stats = {}
+) {
+  usuariosState.stats =
+    normalizeUsuariosStats(stats);
+
+  return getUsuariosStats();
+}
+
+export function patchUsuariosStats(
+  patch = {}
+) {
+  return setUsuariosStats({
+    ...safeObject(
+      usuariosState.stats
+    ),
+    ...safeObject(patch),
+  });
+}
+
+export function setUsuariosAlerts(
+  alerts = []
+) {
+  usuariosState.alerts =
+    normalizeUsuariosAlerts(alerts);
+
+  return getUsuariosAlerts();
+}
+
+export function clearUsuariosAlerts() {
+  usuariosState.alerts = [];
+  return [];
+}
+
+export function setUsuariosParams(
+  params = {}
+) {
+  usuariosState.params =
+    normalizeUsuariosParams(
+      params
+    );
+
+  return getUsuariosParams();
+}
+
+export function patchUsuariosParams(
+  patch = {}
+) {
+  return setUsuariosParams({
+    ...safeObject(
+      usuariosState.params
+    ),
+    ...safeObject(patch),
+  });
+}
+
 export function setUsuariosSource(
   value = USUARIOS_SOURCES.IDLE
 ) {
   usuariosState.source =
-    normalizeUsuariosSource(value);
+    normalizeSource(value);
 
   return usuariosState.source;
 }
@@ -788,6 +927,24 @@ export function setUsuariosDegraded(
   return usuariosState.degraded;
 }
 
+export function setUsuariosLastSyncAt(
+  value = ""
+) {
+  usuariosState.lastSyncAt =
+    safeText(value, "");
+
+  return usuariosState.lastSyncAt;
+}
+
+export function setUsuariosHydratedAt(
+  value = ""
+) {
+  usuariosState.hydratedAt =
+    safeText(value, "");
+
+  return usuariosState.hydratedAt;
+}
+
 export function setUsuariosCacheHit(
   value = false
 ) {
@@ -795,191 +952,6 @@ export function setUsuariosCacheHit(
     value === true;
 
   return usuariosState.cacheHit;
-}
-
-export function setUsuariosData(
-  data = {}
-) {
-  usuariosState.data =
-    normalizeUsuariosData(data);
-
-  return getUsuariosData();
-}
-
-export function patchUsuariosData(
-  patch = {}
-) {
-  const current =
-    safeObject(
-      usuariosState.data
-    );
-
-  return setUsuariosData({
-    ...current,
-    ...safeObject(patch),
-  });
-}
-
-export function clearUsuariosData() {
-  usuariosState.data =
-    createInitialUsuariosData();
-
-  return getUsuariosData();
-}
-
-export function setUsuariosItems(
-  items = []
-) {
-  usuariosState.data.items =
-    safeArray(items)
-      .map(
-        normalizeUsuarioItem
-      )
-      .filter(Boolean);
-
-  return getUsuariosItems();
-}
-
-export function setUsuariosStats(
-  stats = {}
-) {
-  usuariosState.data.stats =
-    normalizeUsuariosStats(
-      stats
-    );
-
-  return getUsuariosStats();
-}
-
-export function setUsuariosMeta(
-  meta = {}
-) {
-  usuariosState.data.meta =
-    normalizeUsuariosMeta(
-      meta
-    );
-
-  return getUsuariosMeta();
-}
-
-export function setUsuariosQuery(
-  query = {}
-) {
-  usuariosState.data.query =
-    normalizeUsuariosQuery(
-      query
-    );
-
-  return getUsuariosQuery();
-}
-
-export function patchUsuariosQuery(
-  patch = {}
-) {
-  const current =
-    safeObject(
-      usuariosState.data?.query
-    );
-
-  return setUsuariosQuery({
-    ...current,
-    ...safeObject(patch),
-  });
-}
-
-export function setUsuariosSelection(
-  selection = {}
-) {
-  usuariosState.selection =
-    normalizeUsuariosSelection(
-      selection
-    );
-
-  return getUsuariosSelection();
-}
-
-export function patchUsuariosSelection(
-  patch = {}
-) {
-  const current =
-    safeObject(
-      usuariosState.selection
-    );
-
-  return setUsuariosSelection({
-    ...current,
-    ...safeObject(patch),
-  });
-}
-
-export function clearUsuariosSelection() {
-  usuariosState.selection =
-    createInitialUsuariosSelection();
-
-  return getUsuariosSelection();
-}
-
-export function setUsuariosSelectedIds(
-  ids = []
-) {
-  usuariosState.selection.selectedIds =
-    normalizeSelectedIds(ids);
-
-  return clone(
-    usuariosState.selection
-      .selectedIds
-  );
-}
-
-export function addUsuariosSelectedId(
-  id = ""
-) {
-  const next = new Set(
-    normalizeSelectedIds(
-      usuariosState.selection
-        ?.selectedIds
-    )
-  );
-
-  const normalized =
-    safeText(id, "");
-
-  if (normalized) {
-    next.add(normalized);
-  }
-
-  return setUsuariosSelectedIds(
-    Array.from(next)
-  );
-}
-
-export function removeUsuariosSelectedId(
-  id = ""
-) {
-  const normalized =
-    safeText(id, "");
-
-  const next =
-    normalizeSelectedIds(
-      usuariosState.selection
-        ?.selectedIds
-    ).filter(
-      (item) => item !== normalized
-    );
-
-  return setUsuariosSelectedIds(
-    next
-  );
-}
-
-export function setUsuariosActiveUserId(
-  value = ""
-) {
-  usuariosState.selection.activeUserId =
-    safeText(value, "");
-
-  return usuariosState.selection
-    .activeUserId;
 }
 
 export function setUsuariosMounted(
@@ -991,13 +963,22 @@ export function setUsuariosMounted(
   return usuariosState.ui.mounted;
 }
 
-export function setUsuariosViewMode(
-  value = USUARIOS_VIEW_MODES.TABLE
+export function setUsuariosSelectedUserId(
+  value = ""
 ) {
-  usuariosState.ui.viewMode =
-    normalizeViewMode(value);
+  usuariosState.ui.selectedUserId =
+    safeText(value, "");
 
-  return usuariosState.ui.viewMode;
+  return usuariosState.ui.selectedUserId;
+}
+
+export function setUsuariosActiveFilter(
+  value = ""
+) {
+  usuariosState.ui.activeFilter =
+    safeText(value, "");
+
+  return usuariosState.ui.activeFilter;
 }
 
 export function setUsuariosLastAction(
@@ -1018,24 +999,14 @@ export function setUsuariosSearchDraft(
   return usuariosState.ui.searchDraft;
 }
 
-export function setUsuariosFiltersOpen(
-  value = false
-) {
-  usuariosState.ui.filtersOpen =
-    value === true;
-
-  return usuariosState.ui.filtersOpen;
-}
-
 export function patchUsuariosUiState(
   patch = {}
 ) {
-  const current =
-    safeObject(usuariosState.ui);
-
   usuariosState.ui =
     normalizeUsuariosUiState({
-      ...current,
+      ...safeObject(
+        usuariosState.ui
+      ),
       ...safeObject(patch),
     });
 
@@ -1046,13 +1017,16 @@ export function patchUsuariosUiState(
    LIFECYCLE HELPERS
 ========================================================= */
 
-export function startUsuariosLoad() {
+export function startUsuariosLoad(
+  params = {}
+) {
   clearUsuariosError();
   setUsuariosLoading(true);
   setUsuariosLoaded(false);
+  setUsuariosCacheHit(false);
   setUsuariosRemoteOk(false);
   setUsuariosDegraded(false);
-  setUsuariosCacheHit(false);
+  setUsuariosParams(params);
 
   if (
     getUsuariosSource() ===
@@ -1067,15 +1041,24 @@ export function startUsuariosLoad() {
 }
 
 export function finishUsuariosLoad({
-  data = null,
+  rows = [],
+  meta = {},
+  stats = {},
+  alerts = [],
+  params = {},
   source = USUARIOS_SOURCES.REMOTE,
   remoteOk = false,
   degraded = false,
+  syncedAt = "",
+  hydratedAt = "",
   cacheHit = false,
+  error = null,
 } = {}) {
-  if (data) {
-    setUsuariosData(data);
-  }
+  setUsuariosRows(rows);
+  setUsuariosMeta(meta);
+  setUsuariosStats(stats);
+  setUsuariosAlerts(alerts);
+  setUsuariosParams(params);
 
   setUsuariosLoading(false);
   setUsuariosLoaded(true);
@@ -1089,6 +1072,23 @@ export function finishUsuariosLoad({
   setUsuariosCacheHit(
     cacheHit === true
   );
+
+  if (syncedAt) {
+    setUsuariosLastSyncAt(
+      syncedAt
+    );
+  }
+
+  if (hydratedAt) {
+    setUsuariosHydratedAt(
+      hydratedAt
+    );
+  }
+
+  if (error) {
+    setUsuariosError(error);
+    clearUsuariosError();
+  }
 
   return getUsuariosState();
 }
@@ -1110,25 +1110,42 @@ export function failUsuariosLoad(
 
 /* =========================================================
    COMPAT API HELPERS
+   Alias explícito para mantener coherencia con usuarios.api.js
 ========================================================= */
 
-export function beginUsuariosLoad() {
-  return startUsuariosLoad();
+export function beginUsuariosLoad(
+  params = {}
+) {
+  return startUsuariosLoad(params);
 }
 
 export function completeUsuariosLoad({
-  data = null,
+  rows = [],
+  meta = {},
+  stats = {},
+  alerts = [],
+  params = {},
   source = USUARIOS_SOURCES.REMOTE,
   remoteOk = false,
   degraded = false,
+  syncedAt = "",
+  hydratedAt = "",
   cacheHit = false,
+  error = null,
 } = {}) {
   return finishUsuariosLoad({
-    data,
+    rows,
+    meta,
+    stats,
+    alerts,
+    params,
     source,
     remoteOk,
     degraded,
+    syncedAt,
+    hydratedAt,
     cacheHit,
+    error,
   });
 }
 
@@ -1138,24 +1155,40 @@ export function rejectUsuariosLoad(
   return failUsuariosLoad(error);
 }
 
-export function writeUsuariosData(
-  data = {}
+export function writeUsuariosRows(
+  rows = []
 ) {
-  return setUsuariosData(data);
+  return setUsuariosRows(rows);
 }
 
-export function writeUsuariosQuery(
-  query = {}
+export function writeUsuariosMeta(
+  meta = {}
 ) {
-  return setUsuariosQuery(query);
+  return setUsuariosMeta(meta);
 }
 
-export function writeUsuariosSelection(
-  selection = {}
+export function writeUsuariosStats(
+  stats = {}
 ) {
-  return setUsuariosSelection(
-    selection
-  );
+  return setUsuariosStats(stats);
+}
+
+export function setUsuariosSyncTimestamp(
+  value = ""
+) {
+  return setUsuariosLastSyncAt(value);
+}
+
+export function setUsuariosHydrationTimestamp(
+  value = ""
+) {
+  return setUsuariosHydratedAt(value);
+}
+
+export function markUsuariosCacheHit(
+  value = false
+) {
+  return setUsuariosCacheHit(value);
 }
 
 /* =========================================================
@@ -1163,34 +1196,38 @@ export function writeUsuariosSelection(
 ========================================================= */
 
 export const UsuariosState = {
+  USUARIOS_CACHE_KEY,
+  USUARIOS_CACHE_TTL,
+  USUARIOS_DEFAULT_PAGE,
+  USUARIOS_DEFAULT_PAGE_SIZE,
+  USUARIOS_DEFAULT_SORT_BY,
+  USUARIOS_DEFAULT_SORT_DIR,
   USUARIOS_SOURCES,
-  USUARIOS_VIEW_MODES,
 
-  createInitialUsuarioItem,
-  createInitialUsuariosStats,
+  createInitialUsuarioRow,
   createInitialUsuariosMeta,
-  createInitialUsuariosQuery,
-  createInitialUsuariosData,
-  createInitialUsuariosSelection,
-  createInitialUsuariosUiState,
+  createInitialUsuariosStats,
+  createInitialUsuariosParams,
   createInitialUsuariosState,
 
   getUsuariosState,
-  getUsuariosData,
-  getUsuariosItems,
-  getUsuariosStats,
+  getUsuariosRows,
   getUsuariosMeta,
-  getUsuariosQuery,
-  getUsuariosSelection,
-  getUsuariosUiState,
+  getUsuariosStats,
+  getUsuariosAlerts,
+  getUsuariosParams,
+  getUsuariosSource,
   isUsuariosLoading,
   isUsuariosLoaded,
   isUsuariosDegraded,
   isUsuariosRemoteOk,
   getUsuariosError,
   getUsuariosLastError,
-  getUsuariosSource,
+  getUsuariosLastSyncAt,
+  getUsuariosHydratedAt,
   getUsuariosCacheHit,
+  getUsuariosUiState,
+  getUsuarioByIdFromState,
 
   resetUsuariosState,
   setUsuariosLoading,
@@ -1198,33 +1235,30 @@ export const UsuariosState = {
   setUsuariosError,
   clearUsuariosError,
   clearUsuariosLastError,
+  setUsuariosRows,
+  patchUsuarioRow,
+  prependUsuarioRow,
+  removeUsuarioRow,
+  clearUsuariosRows,
+  setUsuariosMeta,
+  patchUsuariosMeta,
+  setUsuariosStats,
+  patchUsuariosStats,
+  setUsuariosAlerts,
+  clearUsuariosAlerts,
+  setUsuariosParams,
+  patchUsuariosParams,
   setUsuariosSource,
   setUsuariosRemoteOk,
   setUsuariosDegraded,
+  setUsuariosLastSyncAt,
+  setUsuariosHydratedAt,
   setUsuariosCacheHit,
-
-  setUsuariosData,
-  patchUsuariosData,
-  clearUsuariosData,
-  setUsuariosItems,
-  setUsuariosStats,
-  setUsuariosMeta,
-  setUsuariosQuery,
-  patchUsuariosQuery,
-
-  setUsuariosSelection,
-  patchUsuariosSelection,
-  clearUsuariosSelection,
-  setUsuariosSelectedIds,
-  addUsuariosSelectedId,
-  removeUsuariosSelectedId,
-  setUsuariosActiveUserId,
-
   setUsuariosMounted,
-  setUsuariosViewMode,
+  setUsuariosSelectedUserId,
+  setUsuariosActiveFilter,
   setUsuariosLastAction,
   setUsuariosSearchDraft,
-  setUsuariosFiltersOpen,
   patchUsuariosUiState,
 
   startUsuariosLoad,
@@ -1234,9 +1268,12 @@ export const UsuariosState = {
   beginUsuariosLoad,
   completeUsuariosLoad,
   rejectUsuariosLoad,
-  writeUsuariosData,
-  writeUsuariosQuery,
-  writeUsuariosSelection,
+  writeUsuariosRows,
+  writeUsuariosMeta,
+  writeUsuariosStats,
+  setUsuariosSyncTimestamp,
+  setUsuariosHydrationTimestamp,
+  markUsuariosCacheHit,
 };
 
 export default UsuariosState;

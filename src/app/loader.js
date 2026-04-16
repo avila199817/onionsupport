@@ -2,7 +2,7 @@
    Onion SPA - App Loader
    Archivo: src/app/loader.js
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - resolver el loader global de la app
    - mostrar / ocultar loader de forma robusta
    - restaurar estilos inline del loader
@@ -19,11 +19,13 @@
    - show seguro aunque DOM parcial
    - snapshot útil para debug
 
-   HARDENING PRO:
+   HARDENING EXTREMO:
    - cero throws
    - race-safe timers
    - fallback si AppCore parcial
    - SSR safe
+   - no deja overlay dark pegado
+   - respeta state.bootFailsafeTimer
 ========================================================= */
 
 import {
@@ -52,6 +54,19 @@ function safeWarn(
   } catch {}
 }
 
+function safeEmit(
+  AppCore,
+  eventName,
+  payload = {}
+) {
+  try {
+    AppCore?.events?.emit?.(
+      eventName,
+      payload
+    );
+  } catch {}
+}
+
 function safeSetLoading(
   AppCore,
   value = false
@@ -70,7 +85,11 @@ function safeSetLoading(
   } catch {}
 
   try {
-    if (AppCore?.state) {
+    if (
+      AppCore?.state &&
+      typeof AppCore.state ===
+        "object"
+    ) {
       AppCore.state.loading =
         next;
     }
@@ -115,12 +134,13 @@ export function getLoaderElement(
     const el =
       document.getElementById(
         "app-loader"
-      );
+      ) ||
+      document.querySelector(
+        "#app-loader,.app-loader,.loader,[data-app-loader='true']"
+      ) ||
+      null;
 
-    if (
-      el &&
-      AppCore?.dom
-    ) {
+    if (el && AppCore?.dom) {
       AppCore.dom.loader = el;
     }
 
@@ -145,9 +165,17 @@ function setBodyLoading(
   }
 
   try {
+    const next =
+      Boolean(enabled);
+
     document.body.classList.toggle(
       "loading",
-      Boolean(enabled)
+      next
+    );
+
+    document.body.classList.toggle(
+      "app-loading",
+      next
     );
   } catch {}
 }
@@ -171,6 +199,16 @@ function setLoaderVisible(
       show
         ? "false"
         : "true"
+    );
+
+    loader.classList.toggle(
+      "is-hidden",
+      !show
+    );
+
+    loader.classList.toggle(
+      "is-visible",
+      show
     );
 
     if (show) {
@@ -222,6 +260,12 @@ export function forceHideLoader(
     false
   );
 
+  safeEmit(
+    AppCore,
+    "app:loader:hide",
+    {}
+  );
+
   return true;
 }
 
@@ -266,6 +310,12 @@ export function showLoader(
     true
   );
 
+  safeEmit(
+    AppCore,
+    "app:loader:show",
+    {}
+  );
+
   return true;
 }
 
@@ -291,7 +341,6 @@ export function clearBootFailsafeTimer(
       clearTimeout(
         state.bootFailsafeTimer
       );
-
       state.bootFailsafeTimer =
         null;
     }
@@ -313,6 +362,14 @@ export function armBootFailsafeLoader({
     state
   );
 
+  const timeout =
+    Math.max(
+      1000,
+      Number(
+        BOOT_FAILSAFE_LOADER_MS
+      ) || 12000
+    );
+
   const timer =
     window.setTimeout(
       () => {
@@ -325,7 +382,7 @@ export function armBootFailsafeLoader({
           const stillBooting =
             Boolean(
               state?.booting ||
-              coreState.booting
+                coreState.booting
             );
 
           const stillLoading =
@@ -360,14 +417,21 @@ export function armBootFailsafeLoader({
           hideFn(
             AppCore
           );
+
+          safeEmit(
+            AppCore,
+            "app:loader:failsafe",
+            {
+              timeout,
+              booting:
+                stillBooting,
+              loading:
+                stillLoading,
+            }
+          );
         } catch {}
       },
-      Math.max(
-        1000,
-        Number(
-          BOOT_FAILSAFE_LOADER_MS
-        ) || 12000
-      )
+      timeout
     );
 
   if (state) {
@@ -407,7 +471,7 @@ export function getLoaderSnapshot(
     visible:
       Boolean(
         loader &&
-        !loader.hidden
+          !loader.hidden
       ),
 
     loading:
@@ -427,6 +491,11 @@ export function getLoaderSnapshot(
     publicPath:
       coreState.publicPath ||
       "/",
+
+    hasFailsafeTimer:
+      Boolean(
+        coreState.bootFailsafeTimer
+      ),
   };
 }
 

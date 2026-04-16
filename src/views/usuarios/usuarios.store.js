@@ -100,17 +100,6 @@ function safeText(
   return text || fallback;
 }
 
-function safeBoolean(
-  value,
-  fallback = false
-) {
-  if (typeof value === "boolean") {
-    return value;
-  }
-
-  return fallback;
-}
-
 function safeObject(value) {
   return value &&
     typeof value === "object" &&
@@ -520,6 +509,10 @@ export function selectUsuario(
   );
 }
 
+export function clearAllUsuariosSelected() {
+  return setUsuariosSelectedUserId("");
+}
+
 export function setUsuariosActiveFilterUi(
   value = ""
 ) {
@@ -787,6 +780,7 @@ export const UsuariosStore = {
   readUsuariosUi,
   markUsuariosMounted,
   selectUsuario,
+  clearAllUsuariosSelected,
   setUsuariosActiveFilterUi,
   setUsuariosAction,
   setUsuariosSearchDraftUi,

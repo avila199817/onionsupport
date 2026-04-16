@@ -372,13 +372,9 @@ export const SidebarUI = (() => {
      SOLO MOBILE AUTO CLOSE
   ========================================================= */
   function closeSidebarOnMobileAfterNavigation() {
-    if (
-      isMobileViewport(
-        MOBILE_BREAKPOINT
-      )
-    ) {
-      closeSidebar();
-    }
+    return isMobileViewport(
+      MOBILE_BREAKPOINT
+    );
   }
 
   /* =========================================================

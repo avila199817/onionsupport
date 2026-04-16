@@ -43,42 +43,11 @@ export function createTopbarEventHandlers({
   }
 
   function handleOutsideSidebarClick(event) {
-    const { sidebar, mobileToggle } = getDom();
-    if (!sidebar || !mobileToggle) return;
-
-    const isMobile = window.matchMedia(
-      `(max-width: ${TOPBAR_SEARCH_CONFIG.mobileBreakpoint}px)`
-    ).matches;
-
-    if (!isMobile) return;
-
-    const isOpen =
-      sidebar.classList.contains("open") ||
-      sidebar.classList.contains("is-open");
-
-    if (!isOpen) return;
-
-    const clickedSidebar = event.target?.closest?.("#sidebar, .sidebar");
-    const clickedToggle = event.target?.closest?.("#toggleSidebarMobile");
-
-    if (clickedSidebar || clickedToggle) {
-      return;
-    }
-
-    closeSidebarMobile();
+    void event;
   }
 
   function handleViewportResize() {
-    const isMobile = window.matchMedia(
-      `(max-width: ${TOPBAR_SEARCH_CONFIG.mobileBreakpoint}px)`
-    ).matches;
-
-    if (!isMobile) {
-      closeSidebarMobile();
-    } else {
-      setMobileToggleState();
-    }
-
+    setMobileToggleState();
     syncFixedTopbarOffset();
   }
 
@@ -196,7 +165,6 @@ export function createTopbarEventHandlers({
     syncTitle(getCurrentPublicPath(AppCore));
     setMobileToggleState();
     syncFixedTopbarOffset();
-    closeSidebarMobile();
   }
 
   return {

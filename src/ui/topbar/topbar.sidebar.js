@@ -172,11 +172,8 @@ export function toggleSidebarMobile({
 }
 
 export function handleViewportResize(getDom, closeSidebarMobileFn) {
-  if (!isMobileViewport(TOPBAR_SEARCH_CONFIG.mobileBreakpoint)) {
-    closeSidebarMobileFn();
-  } else {
-    setMobileToggleState(getDom);
-  }
+  void closeSidebarMobileFn;
+  setMobileToggleState(getDom);
 
   syncFixedTopbarOffset(getDom);
 }

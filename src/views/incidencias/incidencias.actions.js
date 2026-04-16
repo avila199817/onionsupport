@@ -3,21 +3,21 @@
    Archivo: src/views/incidencias/incidencias.actions.js
 
    RESPONSABILIDADES:
-   - abrir detalle ticket PRO
-   - modal premium enterprise
-   - soportar updates reales
-   - timeline / metadata
-   - adjuntos
-   - copiar id
-   - export csv
-   - cerrar limpio
-   - tolerancia payloads heterogéneos
+   - centralizar acciones operativas del módulo de incidencias
+   - resolver detalle ticket desde store + backend
+   - abrir detalle a nivel de datos, no de UI
+   - copiar id de ticket
+   - exportar colección a CSV
+   - desacoplar la vista principal de la lógica operativa
+   - mantener compatibilidad con incidenciasView.js
 
-   FIX CRÍTICO:
-   - cliente object => nombre real
-   - attachments reales
-   - comments/history opcional
-   - botones update listos
+   HARDENING PRO:
+   - tolerancia a payloads heterogéneos
+   - fallback store -> backend
+   - soporte envelope backend
+   - export seguro con escape CSV
+   - clipboard robusto con fallback legacy
+   - eventos opcionales vía AppCore.events
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -36,770 +36,578 @@ import {
   safeNumber,
   safeArray,
   safeObject,
-  escapeHtml,
-  formatDate,
-  formatRelativeDate,
   showToast,
 } from "./incidencias.utils.js";
+
+/* =========================================================
+   CONSTANTS
+========================================================= */
+
+const CSV_FILENAME = "incidencias.csv";
 
 /* =========================================================
    HELPERS
 ========================================================= */
 
-function safeEmit(
-  event = "",
-  payload = {}
-) {
+function safeEmit(event = "", payload = {}) {
   try {
-    AppCore?.events?.emit?.(
-      event,
-      payload
-    );
+    AppCore?.events?.emit?.(event, payload);
   } catch {}
 }
 
-function modalId() {
-  return "incidencias-modal";
+function first(...values) {
+  for (const value of values) {
+    if (
+      value !== undefined &&
+      value !== null &&
+      String(value).trim() !== ""
+    ) {
+      return value;
+    }
+  }
+
+  return null;
 }
 
-function getBody() {
-  return document.body;
+function normalizeTicketId(value = "") {
+  return safeText(value, "");
 }
 
-function closeTicketModal() {
-  try {
-    document
-      .getElementById(
-        modalId()
-      )
-      ?.remove();
-  } catch {}
-
-  try {
-    document.body.classList.remove(
-      "modal-open"
-    );
-  } catch {}
-
-  return true;
+function isObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value);
 }
 
-function pickDetail(
-  payload = null
-) {
+function isLikelyTicket(value) {
+  if (!isObject(value)) return false;
+
+  return Boolean(
+    value.ticketId ||
+      value.id ||
+      value.code ||
+      value.ticketCode ||
+      value.title ||
+      value.subject ||
+      value.asunto
+  );
+}
+
+function looksLikeEnvelope(value) {
+  const obj = safeObject(value);
+
+  return Boolean(
+    obj.ticket ||
+      obj.item ||
+      obj.data ||
+      obj.result ||
+      obj.payload
+  );
+}
+
+function pickDetail(payload = null) {
   if (!payload) return null;
-  if (payload.ticket) return payload.ticket;
-  if (payload.data) return payload.data;
-  if (payload.item) return payload.item;
-  return payload;
+
+  if (isLikelyTicket(payload)) {
+    return payload;
+  }
+
+  const obj = safeObject(payload);
+
+  if (isLikelyTicket(obj.ticket)) {
+    return obj.ticket;
+  }
+
+  if (isLikelyTicket(obj.item)) {
+    return obj.item;
+  }
+
+  if (isLikelyTicket(obj.result)) {
+    return obj.result;
+  }
+
+  if (isLikelyTicket(obj.payload)) {
+    return obj.payload;
+  }
+
+  if (isLikelyTicket(obj.data)) {
+    return obj.data;
+  }
+
+  if (looksLikeEnvelope(obj.data)) {
+    return pickDetail(obj.data);
+  }
+
+  return null;
 }
 
 function getId(item = {}) {
   return safeText(
-    item.ticketId ||
-      item.id ||
+    first(
+      item.ticketId,
+      item.id,
       item.code,
-    "—"
+      item.ticketCode
+    ),
+    ""
   );
 }
 
 function getTitle(item = {}) {
   return safeText(
-    item.title ||
-      item.subject ||
+    first(
+      item.title,
+      item.subject,
       item.asunto,
+      item.name
+    ),
     "Incidencia"
   );
 }
 
-function getDescription(
-  item = {}
-) {
+function getDescription(item = {}) {
   return safeText(
-    item.description ||
-      item.descripcion ||
-      item.message ||
+    first(
+      item.description,
+      item.descripcion,
+      item.message,
       item.preview,
+      item.body
+    ),
     "Sin descripción."
   );
 }
 
-function getClient(
-  item = {}
-) {
-  const c =
-    item.client ||
-    item.cliente ||
-    item.customer;
+function getClient(item = {}) {
+  const clientObject = first(
+    item.client,
+    item.cliente,
+    item.customer,
+    item.receptor,
+    item.createdBy
+  );
 
-  if (
-    c &&
-    typeof c === "object"
-  ) {
+  if (isObject(clientObject)) {
     return safeText(
-      c.name ||
-        c.nombre ||
-        c.company,
+      first(
+        clientObject.name,
+        clientObject.nombre,
+        clientObject.company,
+        clientObject.empresa,
+        clientObject.displayName
+      ),
       "Cliente"
     );
   }
 
   return safeText(
-    item.clientName ||
-      c,
+    first(
+      item.clientName,
+      item.clienteNombre,
+      item.company,
+      item.empresa,
+      clientObject
+    ),
     "Cliente"
   );
 }
 
-function getEmail(
-  item = {}
-) {
-  const c =
-    item.client ||
-    item.cliente;
+function getEmail(item = {}) {
+  const clientObject = first(
+    item.client,
+    item.cliente,
+    item.customer,
+    item.receptor,
+    item.createdBy
+  );
 
-  if (
-    c &&
-    typeof c === "object"
-  ) {
+  if (isObject(clientObject)) {
     return safeText(
-      c.email,
+      first(
+        clientObject.email,
+        clientObject.mail
+      ),
       "Sin email"
     );
   }
 
   return safeText(
-    item.clientEmail ||
-      item.email,
+    first(
+      item.clientEmail,
+      item.clienteEmail,
+      item.email
+    ),
     "Sin email"
   );
 }
 
-function getAssigned(
-  item = {}
-) {
-  const a =
-    item.assignedTo ||
-    item.assignee ||
-    item.tecnico;
+function getAssigned(item = {}) {
+  const assignedObject = first(
+    item.assignedTo,
+    item.assignee,
+    item.tecnico
+  );
 
-  if (
-    a &&
-    typeof a === "object"
-  ) {
+  if (isObject(assignedObject)) {
     return safeText(
-      a.name,
+      first(
+        assignedObject.name,
+        assignedObject.nombre,
+        assignedObject.displayName
+      ),
       "No asignado"
     );
   }
 
-  return safeText(
-    a,
-    "No asignado"
-  );
+  return safeText(assignedObject, "No asignado");
 }
 
-function getStatus(
-  item = {}
-) {
+function getStatus(item = {}) {
   return safeText(
-    item.status ||
-      item.estado,
+    first(item.status, item.estado),
     "open"
   );
 }
 
-function getPriority(
-  item = {}
-) {
+function getPriority(item = {}) {
   return safeText(
-    item.priority ||
-      item.prioridad,
+    first(item.priority, item.prioridad),
     "medium"
   );
 }
 
-function getAttachments(
-  item = {}
-) {
+function getCreatedAt(item = {}) {
+  return first(
+    item.createdAt,
+    item.createdAtES,
+    item.fechaCreacion,
+    item.date
+  );
+}
+
+function getUpdatedAt(item = {}) {
+  return first(
+    item.updatedAt,
+    item.closedAt,
+    item.lastUpdate,
+    item.modifiedAt,
+    item.createdAt
+  );
+}
+
+function getAttachments(item = {}) {
   return safeArray(
-    item.attachments ||
-      item.files ||
+    first(
+      item.attachments,
+      item.files,
       item.adjuntos
-  );
+    )
+  ).map((file) => {
+    const entry = safeObject(file);
+
+    return {
+      name: safeText(
+        first(
+          entry.name,
+          entry.filename,
+          entry.fileName,
+          entry.originalname
+        ),
+        "archivo"
+      ),
+      url: safeText(
+        first(
+          entry.url,
+          entry.href,
+          entry.path,
+          entry.downloadUrl
+        ),
+        "#"
+      ),
+      size: safeNumber(entry.size, 0),
+      raw: entry,
+    };
+  });
 }
 
-function getHistory(
-  item = {}
-) {
+function getHistory(item = {}) {
   return safeArray(
-    item.history ||
-      item.timeline ||
-      item.logs ||
+    first(
+      item.history,
+      item.timeline,
+      item.logs,
       item.comments
-  );
+    )
+  ).map((row) => safeObject(row));
 }
 
-function renderField(
-  label,
-  value
-) {
-  return `
-    <div style="display:grid;gap:6px;">
-      <span style="
-        font-size:11px;
-        color:var(--text-faint,#8b8b8b);
-        text-transform:uppercase;
-        letter-spacing:.08em;
-        font-weight:700;
-      ">
-        ${escapeHtml(label)}
-      </span>
+function normalizeTicketDetail(detail = {}) {
+  const raw = safeObject(detail);
 
-      <strong style="
-        color:var(--text-strong,#fff);
-        font-size:15px;
-        line-height:1.35;
-      ">
-        ${escapeHtml(value)}
-      </strong>
-    </div>
-  `;
+  return {
+    ...raw,
+    ticketId: getId(raw),
+    title: getTitle(raw),
+    description: getDescription(raw),
+    clientName: getClient(raw),
+    clientEmail: getEmail(raw),
+    assignedToName: getAssigned(raw),
+    status: getStatus(raw),
+    priority: getPriority(raw),
+    createdAt: getCreatedAt(raw),
+    updatedAt: getUpdatedAt(raw),
+    attachments: getAttachments(raw),
+    history: getHistory(raw),
+  };
 }
 
-function renderAttachments(
-  files = []
-) {
-  if (!files.length) {
-    return `
-      <div style="
-        padding:14px;
-        border-radius:16px;
-        border:1px solid var(--border-soft,#2b2b2b);
-        background:var(--surface-glass,#171717);
-        color:#9a9a9a;
-      ">
-        Sin adjuntos
-      </div>
-    `;
-  }
+function escapeCsvCell(value = "") {
+  const text =
+    value === null || value === undefined
+      ? ""
+      : String(value);
 
-  return `
-    <div style="
-      display:grid;
-      gap:10px;
-    ">
-      ${files
-        .map((file, i) => {
-          const item =
-            safeObject(file);
-
-          const name =
-            safeText(
-              item.name ||
-                item.filename ||
-                item.fileName,
-              `archivo_${i + 1}`
-            );
-
-          const url =
-            safeText(
-              item.url ||
-                item.href ||
-                item.path,
-              "#"
-            );
-
-          const size =
-            safeNumber(
-              item.size,
-              0
-            );
-
-          return `
-            <a
-              href="${escapeHtml(url)}"
-              target="_blank"
-              rel="noopener"
-              style="
-                display:flex;
-                justify-content:space-between;
-                gap:14px;
-                padding:14px;
-                border-radius:16px;
-                border:1px solid var(--border-soft,#2b2b2b);
-                background:var(--surface-glass,#171717);
-                text-decoration:none;
-                color:#fff;
-              "
-            >
-              <span>${escapeHtml(name)}</span>
-              <span style="color:#8d8d8d;">
-                ${size ? `${size} bytes` : ""}
-              </span>
-            </a>
-          `;
-        })
-        .join("")}
-    </div>
-  `;
+  return `"${text.replace(/"/g, '""')}"`;
 }
 
-function renderHistory(
-  logs = []
-) {
-  if (!logs.length) {
-    return "";
-  }
+function buildCsvRows(items = []) {
+  const header = [
+    "ticketId",
+    "title",
+    "description",
+    "status",
+    "priority",
+    "client",
+    "email",
+    "assignedTo",
+    "createdAt",
+    "updatedAt",
+  ];
 
-  return `
-    <section style="display:grid;gap:12px;">
-      <h3 style="margin:0;">Actividad</h3>
+  const rows = safeArray(items).map((item) => [
+    getId(item),
+    getTitle(item),
+    getDescription(item),
+    getStatus(item),
+    getPriority(item),
+    getClient(item),
+    getEmail(item),
+    getAssigned(item),
+    getCreatedAt(item) || "",
+    getUpdatedAt(item) || "",
+  ]);
 
-      <div style="
-        display:grid;
-        gap:10px;
-      ">
-        ${logs
-          .map((row) => {
-            const item =
-              safeObject(row);
-
-            return `
-              <div style="
-                padding:14px;
-                border-radius:16px;
-                border:1px solid var(--border-soft,#2b2b2b);
-                background:var(--surface-glass,#171717);
-              ">
-                <strong>${escapeHtml(
-                  safeText(
-                    item.title ||
-                      item.action ||
-                      item.message,
-                    "Evento"
-                  )
-                )}</strong>
-
-                <div style="
-                  margin-top:6px;
-                  color:#8f8f8f;
-                  font-size:13px;
-                ">
-                  ${escapeHtml(
-                    formatDate(
-                      item.createdAt ||
-                        item.date
-                    )
-                  )}
-                </div>
-              </div>
-            `;
-          })
-          .join("")}
-      </div>
-    </section>
-  `;
+  return [
+    header.map(escapeCsvCell).join(","),
+    ...rows.map((row) => row.map(escapeCsvCell).join(",")),
+  ].join("\n");
 }
 
-/* =========================================================
-   MODAL
-========================================================= */
+async function writeClipboardText(text = "") {
+  const value = safeText(text, "");
 
-export function renderTicketModal(
-  detail = {}
-) {
-  closeTicketModal();
+  if (!value) return false;
 
-  const id =
-    getId(detail);
-
-  const title =
-    getTitle(detail);
-
-  const desc =
-    getDescription(
-      detail
-    );
-
-  const client =
-    getClient(detail);
-
-  const email =
-    getEmail(detail);
-
-  const status =
-    getStatus(detail);
-
-  const priority =
-    getPriority(
-      detail
-    );
-
-  const assigned =
-    getAssigned(
-      detail
-    );
-
-  const created =
-    formatDate(
-      detail.createdAt
-    );
-
-  const updated =
-    formatDate(
-      detail.updatedAt
-    );
-
-  const updatedAgo =
-    formatRelativeDate(
-      detail.updatedAt
-    );
-
-  const files =
-    getAttachments(
-      detail
-    );
-
-  const history =
-    getHistory(detail);
-
-  const root =
-    document.createElement(
-      "div"
-    );
-
-  root.id =
-    modalId();
-
-  root.innerHTML = `
-    <div style="
-      position:fixed;
-      inset:0;
-      z-index:9999;
-      padding:28px;
-      display:grid;
-      place-items:center;
-      background:rgba(0,0,0,.68);
-      backdrop-filter:blur(10px);
-    ">
-      <div
-        data-panel="1"
-        style="
-          width:min(1100px,100%);
-          max-height:92vh;
-          overflow:auto;
-          border-radius:28px;
-          border:1px solid var(--border-soft,#2b2b2b);
-          background:#151515;
-          box-shadow:0 40px 100px rgba(0,0,0,.45);
-        "
-      >
-
-        <div style="
-          padding:26px;
-          border-bottom:1px solid var(--border-soft,#2b2b2b);
-          display:flex;
-          justify-content:space-between;
-          gap:20px;
-        ">
-          <div style="display:grid;gap:8px;">
-            <span style="
-              color:#8d8d8d;
-              font-size:12px;
-              text-transform:uppercase;
-              letter-spacing:.08em;
-            ">
-              Ticket ${escapeHtml(id)}
-            </span>
-
-            <h2 style="
-              margin:0;
-              font-size:42px;
-              line-height:1;
-              letter-spacing:-.04em;
-            ">
-              ${escapeHtml(title)}
-            </h2>
-
-            <span style="
-              color:#9d9d9d;
-              font-size:14px;
-            ">
-              Actualizado ${escapeHtml(updatedAgo)}
-            </span>
-          </div>
-
-          <button
-            data-close="1"
-            style="
-              width:54px;
-              height:54px;
-              border:none;
-              border-radius:16px;
-              cursor:pointer;
-              font-size:22px;
-              background:#242424;
-              color:#fff;
-            "
-          >✕</button>
-        </div>
-
-        <div style="
-          padding:26px;
-          display:grid;
-          gap:26px;
-        ">
-
-          <div style="
-            display:grid;
-            grid-template-columns:repeat(3,minmax(0,1fr));
-            gap:18px;
-          ">
-            ${renderField("Estado", status)}
-            ${renderField("Prioridad", priority)}
-            ${renderField("Asignado", assigned)}
-            ${renderField("Cliente", client)}
-            ${renderField("Email", email)}
-            ${renderField("Creado", created)}
-          </div>
-
-          <section style="display:grid;gap:10px;">
-            <h3 style="margin:0;">Descripción</h3>
-
-            <div style="
-              padding:18px;
-              border-radius:18px;
-              background:#1f1f1f;
-              border:1px solid #2a2a2a;
-              line-height:1.65;
-            ">
-              ${escapeHtml(desc)}
-            </div>
-          </section>
-
-          <section style="display:grid;gap:10px;">
-            <h3 style="margin:0;">
-              Adjuntos (${files.length})
-            </h3>
-
-            ${renderAttachments(files)}
-          </section>
-
-          ${renderHistory(history)}
-
-          <div style="
-            display:flex;
-            justify-content:space-between;
-            gap:12px;
-            flex-wrap:wrap;
-            padding-top:6px;
-          ">
-            <div style="
-              display:flex;
-              gap:10px;
-              flex-wrap:wrap;
-            ">
-              <button
-                data-action-modal="refresh"
-                data-ticket-id="${escapeHtml(id)}"
-                style="
-                  min-height:44px;
-                  padding:0 16px;
-                  border:none;
-                  border-radius:14px;
-                  cursor:pointer;
-                "
-              >
-                Actualizar
-              </button>
-
-              <button
-                data-action-modal="copy"
-                data-ticket-id="${escapeHtml(id)}"
-                style="
-                  min-height:44px;
-                  padding:0 16px;
-                  border:none;
-                  border-radius:14px;
-                  cursor:pointer;
-                "
-              >
-                Copiar ID
-              </button>
-            </div>
-
-            <button
-              data-close="1"
-              style="
-                min-height:44px;
-                padding:0 16px;
-                border:none;
-                border-radius:14px;
-                cursor:pointer;
-              "
-            >
-              Cerrar
-            </button>
-          </div>
-
-        </div>
-      </div>
-    </div>
-  `;
-
-  getBody().appendChild(
-    root
-  );
-
-  root.addEventListener(
-    "click",
-    async (event) => {
-      const close =
-        event.target.closest(
-          "[data-close]"
-        );
-
-      const panel =
-        event.target.closest(
-          "[data-panel]"
-        );
-
-      const refresh =
-        event.target.closest(
-          '[data-action-modal="refresh"]'
-        );
-
-      const copy =
-        event.target.closest(
-          '[data-action-modal="copy"]'
-        );
-
-      if (close) {
-        closeTicketModal();
-        return;
-      }
-
-      if (
-        refresh
-      ) {
-        const ticketId =
-          refresh.dataset.ticketId;
-
-        await openTicket(
-          ticketId
-        );
-        return;
-      }
-
-      if (copy) {
-        await navigator.clipboard.writeText(
-          copy.dataset.ticketId
-        );
-
-        showToast(
-          "ID copiado",
-          "success"
-        );
-
-        return;
-      }
-
-      if (
-        !panel &&
-        event.target ===
-          root.firstElementChild
-      ) {
-        closeTicketModal();
-      }
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
     }
-  );
+  } catch {}
 
-  document.addEventListener(
-    "keydown",
-    function esc(ev) {
-      if (
-        ev.key === "Escape"
-      ) {
-        closeTicketModal();
-        document.removeEventListener(
-          "keydown",
-          esc
-        );
-      }
-    }
-  );
+  try {
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.setAttribute("readonly", "true");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    textarea.style.pointerEvents = "none";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+
+    const ok = document.execCommand("copy");
+
+    textarea.remove();
+
+    return Boolean(ok);
+  } catch {
+    return false;
+  }
+}
+
+function downloadTextFile({
+  filename = CSV_FILENAME,
+  content = "",
+  mimeType = "text/plain;charset=utf-8;",
+} = {}) {
+  const blob = new Blob([String(content || "")], {
+    type: mimeType,
+  });
+
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+
+  anchor.href = url;
+  anchor.download = filename;
+
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+
+  URL.revokeObjectURL(url);
 
   return true;
 }
 
 /* =========================================================
-   OPEN
+   DETAIL ACTIONS
 ========================================================= */
 
-export async function openTicket(
-  payload = {}
-) {
-  const ticketId =
-    typeof payload ===
-    "string"
-      ? payload
-      : payload?.ticketId;
+export function getTicketDetailFromStoreAction({
+  ticketId = "",
+} = {}) {
+  const id = normalizeTicketId(ticketId);
 
-  const id =
-    safeText(
-      ticketId,
-      ""
-    );
+  if (!id) return null;
+
+  try {
+    const detail = getIncidenciaByIdStore(id);
+    const picked = pickDetail(detail);
+
+    if (!picked) return null;
+
+    return normalizeTicketDetail(picked);
+  } catch {
+    return null;
+  }
+}
+
+export async function getTicketDetailAction({
+  ticketId = "",
+  preferFresh = true,
+  silent = false,
+} = {}) {
+  const id = normalizeTicketId(ticketId);
 
   if (!id) {
+    if (!silent) {
+      showToast("No se pudo resolver el ticket.", "error");
+    }
     return null;
+  }
+
+  const fallbackStoreDetail =
+    getTicketDetailFromStoreAction({
+      ticketId: id,
+    });
+
+  if (!preferFresh && fallbackStoreDetail) {
+    return fallbackStoreDetail;
   }
 
   try {
-    safeEmit(
-      "incidencias:open",
-      { ticketId: id }
-    );
+    safeEmit("incidencias:detail:request", {
+      ticketId: id,
+      source: "backend",
+    });
 
-    let detail =
-      getIncidenciaByIdStore(
-        id
-      );
+    const response =
+      await getIncidenciaByIdRequest(id);
 
-    detail =
-      await getIncidenciaByIdRequest(
-        id
-      ).catch(
-        () => detail
-      );
-
-    detail =
-      pickDetail(detail);
+    const detail = pickDetail(response);
 
     if (!detail) {
-      throw new Error(
-        "EMPTY_DETAIL"
+      if (fallbackStoreDetail) {
+        safeEmit("incidencias:detail:fallback", {
+          ticketId: id,
+          source: "store",
+        });
+        return fallbackStoreDetail;
+      }
+
+      throw new Error("EMPTY_TICKET_DETAIL");
+    }
+
+    const normalized = normalizeTicketDetail(detail);
+
+    safeEmit("incidencias:detail:success", {
+      ticketId: id,
+      source: "backend",
+      detail: normalized,
+    });
+
+    return normalized;
+  } catch (error) {
+    if (fallbackStoreDetail) {
+      safeEmit("incidencias:detail:fallback", {
+        ticketId: id,
+        source: "store",
+        error,
+      });
+
+      return fallbackStoreDetail;
+    }
+
+    safeEmit("incidencias:detail:error", {
+      ticketId: id,
+      error,
+    });
+
+    if (!silent) {
+      showToast(
+        "No se pudo cargar el detalle de la incidencia.",
+        "error"
       );
     }
 
-    renderTicketModal(
-      detail
-    );
-
-    return detail;
-  } catch (error) {
-    console.error(
-      error
-    );
-
-    showToast(
-      "No se pudo abrir la incidencia.",
-      "error"
-    );
-
     return null;
   }
+}
+
+export async function openTicketAction({
+  ticketId = "",
+  preferFresh = true,
+  silent = false,
+} = {}) {
+  const id = normalizeTicketId(ticketId);
+
+  if (!id) {
+    if (!silent) {
+      showToast("Ticket inválido.", "error");
+    }
+    return null;
+  }
+
+  safeEmit("incidencias:open", {
+    ticketId: id,
+  });
+
+  const detail = await getTicketDetailAction({
+    ticketId: id,
+    preferFresh,
+    silent,
+  });
+
+  if (!detail) {
+    return null;
+  }
+
+  safeEmit("incidencias:open:success", {
+    ticketId: id,
+    detail,
+  });
+
+  return detail;
+}
+
+export async function refreshTicketDetailAction({
+  ticketId = "",
+  silent = true,
+} = {}) {
+  return getTicketDetailAction({
+    ticketId,
+    preferFresh: true,
+    silent,
+  });
 }
 
 /* =========================================================
@@ -808,23 +616,33 @@ export async function openTicket(
 
 export async function copyTicketIdAction({
   ticketId = "",
+  silent = false,
 } = {}) {
-  const id =
-    safeText(
-      ticketId,
-      ""
-    );
+  const id = normalizeTicketId(ticketId);
 
-  if (!id) return false;
+  if (!id) {
+    if (!silent) {
+      showToast("No hay ID para copiar.", "error");
+    }
+    return false;
+  }
 
-  await navigator.clipboard.writeText(
-    id
-  );
+  const copied = await writeClipboardText(id);
 
-  showToast(
-    "ID copiado",
-    "success"
-  );
+  if (!copied) {
+    if (!silent) {
+      showToast("No se pudo copiar el ID.", "error");
+    }
+    return false;
+  }
+
+  safeEmit("incidencias:copy-id", {
+    ticketId: id,
+  });
+
+  if (!silent) {
+    showToast("ID copiado", "success");
+  }
 
   return true;
 }
@@ -833,63 +651,112 @@ export async function copyTicketIdAction({
    EXPORT
 ========================================================= */
 
-export function exportIncidenciasCsvAction() {
-  const items =
-    getSortedIncidenciasStore();
+export function exportIncidenciasCsvAction({
+  filename = CSV_FILENAME,
+  items = null,
+  silent = false,
+} = {}) {
+  const sourceItems = Array.isArray(items)
+    ? items
+    : getSortedIncidenciasStore();
 
-  if (!items.length) {
-    showToast(
-      "No hay incidencias.",
-      "info"
-    );
+  const list = safeArray(sourceItems);
+
+  if (!list.length) {
+    if (!silent) {
+      showToast("No hay incidencias para exportar.", "info");
+    }
     return false;
   }
 
-  const rows =
-    items.map(
-      (item) =>
-        `"${getId(item)}","${getTitle(item)}","${getStatus(item)}","${getPriority(item)}"`
-    );
+  try {
+    const csv = buildCsvRows(list);
 
-  const csv = [
-    "ticketId,title,status,priority",
-    ...rows,
-  ].join("\n");
-
-  const blob =
-    new Blob([csv], {
-      type: "text/csv;charset=utf-8;",
+    downloadTextFile({
+      filename: safeText(filename, CSV_FILENAME),
+      content: csv,
+      mimeType: "text/csv;charset=utf-8;",
     });
 
-  const url =
-    URL.createObjectURL(
-      blob
-    );
+    safeEmit("incidencias:export:csv", {
+      total: list.length,
+      filename: safeText(filename, CSV_FILENAME),
+    });
 
-  const a =
-    document.createElement(
-      "a"
-    );
+    if (!silent) {
+      showToast("CSV exportado", "success");
+    }
 
-  a.href = url;
-  a.download =
-    "incidencias.csv";
+    return true;
+  } catch (error) {
+    safeEmit("incidencias:export:error", {
+      type: "csv",
+      error,
+    });
 
-  document.body.appendChild(
-    a
-  );
+    if (!silent) {
+      showToast("No se pudo exportar el CSV.", "error");
+    }
 
-  a.click();
-  a.remove();
-
-  URL.revokeObjectURL(
-    url
-  );
-
-  showToast(
-    "CSV exportado",
-    "success"
-  );
-
-  return true;
+    return false;
+  }
 }
+
+/* =========================================================
+   CREATE
+========================================================= */
+
+export async function createIncidenciaAction({
+  route = "/incidencias/nueva",
+  fallbackEvent = "incidencias:create",
+  silent = false,
+} = {}) {
+  const targetRoute = safeText(route, "/incidencias/nueva");
+
+  try {
+    safeEmit(fallbackEvent, {
+      route: targetRoute,
+    });
+
+    if (AppCore?.router?.navigate) {
+      await AppCore.router.navigate(targetRoute);
+      return true;
+    }
+
+    if (AppCore?.Router?.navigate) {
+      await AppCore.Router.navigate(targetRoute);
+      return true;
+    }
+
+    return true;
+  } catch (error) {
+    if (!silent) {
+      showToast(
+        "No se pudo abrir el flujo de creación.",
+        "error"
+      );
+    }
+
+    return false;
+  }
+}
+
+/* =========================================================
+   DETAIL HELPERS EXPORT
+========================================================= */
+
+export {
+  getId as getIncidenciaIdAction,
+  getTitle as getIncidenciaTitleAction,
+  getDescription as getIncidenciaDescriptionAction,
+  getClient as getIncidenciaClientAction,
+  getEmail as getIncidenciaEmailAction,
+  getAssigned as getIncidenciaAssignedAction,
+  getStatus as getIncidenciaStatusAction,
+  getPriority as getIncidenciaPriorityAction,
+  getCreatedAt as getIncidenciaCreatedAtAction,
+  getUpdatedAt as getIncidenciaUpdatedAtAction,
+  getAttachments as getIncidenciaAttachmentsAction,
+  getHistory as getIncidenciaHistoryAction,
+  normalizeTicketDetail as normalizeIncidenciaDetailAction,
+};

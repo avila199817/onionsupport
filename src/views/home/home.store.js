@@ -2,27 +2,46 @@
    Onion SPA - Home Store
    Archivo: src/views/home/home.store.js
 
+   FINAL PRO SYSTEM · SEMANTIC STORE · 10/10
+
    Responsabilidades:
    - exponer acceso semántico al estado Home
    - desacoplar consumers del shape interno de home.state.js
    - ofrecer getters y setters de alto nivel
-   - facilitar integración con actions / api / bindings
+   - facilitar integración con api / view / bindings
+   - centralizar lectura de flags y metadatos
+   - mantener coherencia con home.api.js y home.state.js
 ========================================================= */
 
 import {
+  HOME_SOURCES,
+
   getHomeState,
   getHomeSummary,
+  getHomeSource,
+  getHomeKpis,
+  getHomeAlerts,
+  getHomeRecentActivity,
+  getHomeQuickActions,
+  getHomeHealth,
   getHomeUiState,
   getHomeError,
+  getHomeLastError,
   getHomeLastSyncAt,
   getHomeHydratedAt,
   getHomeCacheHit,
   isHomeLoading,
   isHomeLoaded,
+  isHomeDegraded,
+  isHomeRemoteOk,
 
   setHomeSummary,
   patchHomeSummary,
   clearHomeSummary,
+
+  setHomeSource,
+  setHomeRemoteOk,
+  setHomeDegraded,
 
   setHomeMounted,
   setHomeActiveCard,
@@ -37,6 +56,7 @@ import {
   setHomeLoaded,
   setHomeError,
   clearHomeError,
+  clearHomeLastError,
 
   startHomeLoad,
   finishHomeLoad,
@@ -48,13 +68,30 @@ import {
    BASICS
 ========================================================= */
 
-function safeText(value = "", fallback = "") {
-  if (value === null || value === undefined) {
+function safeText(
+  value = "",
+  fallback = ""
+) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
     return fallback;
   }
 
   const text = String(value).trim();
   return text || fallback;
+}
+
+function safeBoolean(
+  value,
+  fallback = false
+) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  return fallback;
 }
 
 function safeObject(value) {
@@ -63,6 +100,22 @@ function safeObject(value) {
     !Array.isArray(value)
     ? value
     : {};
+}
+
+function normalizeHomeSource(
+  value = HOME_SOURCES.IDLE
+) {
+  const source = safeText(
+    value,
+    HOME_SOURCES.IDLE
+  );
+
+  const allowed =
+    Object.values(HOME_SOURCES);
+
+  return allowed.includes(source)
+    ? source
+    : HOME_SOURCES.IDLE;
 }
 
 /* =========================================================
@@ -89,9 +142,22 @@ export function getHomeStatus() {
   return {
     loading: isHomeLoading(),
     loaded: isHomeLoaded(),
+    degraded: isHomeDegraded(),
+    remoteOk: isHomeRemoteOk(),
+    source: getHomeSource(),
     error: getHomeError(),
+    lastError: getHomeLastError(),
     lastSyncAt: getHomeLastSyncAt(),
     hydratedAt: getHomeHydratedAt(),
+    cacheHit: getHomeCacheHit(),
+  };
+}
+
+export function getHomeSourceStatus() {
+  return {
+    source: getHomeSource(),
+    remoteOk: isHomeRemoteOk(),
+    degraded: isHomeDegraded(),
     cacheHit: getHomeCacheHit(),
   };
 }
@@ -100,11 +166,59 @@ export function hasHomeError() {
   return Boolean(getHomeError());
 }
 
+export function hasHomeLastError() {
+  return Boolean(
+    getHomeLastError()
+  );
+}
+
 export function isHomeReady() {
   return (
     isHomeLoaded() === true &&
     isHomeLoading() !== true &&
     !getHomeError()
+  );
+}
+
+export function isHomeIdleSource() {
+  return (
+    getHomeSource() ===
+    HOME_SOURCES.IDLE
+  );
+}
+
+export function isHomeRemoteSource() {
+  return (
+    getHomeSource() ===
+    HOME_SOURCES.REMOTE
+  );
+}
+
+export function isHomeFreshCacheSource() {
+  return (
+    getHomeSource() ===
+    HOME_SOURCES.CACHE_FRESH
+  );
+}
+
+export function isHomeStaleCacheSource() {
+  return (
+    getHomeSource() ===
+    HOME_SOURCES.CACHE_STALE
+  );
+}
+
+export function isHomeFallbackSource() {
+  return (
+    getHomeSource() ===
+    HOME_SOURCES.FALLBACK_LOCAL
+  );
+}
+
+export function isHomeErrorSource() {
+  return (
+    getHomeSource() ===
+    HOME_SOURCES.ERROR
   );
 }
 
@@ -116,12 +230,38 @@ export function readHomeSummary() {
   return getHomeSummary();
 }
 
-export function writeHomeSummary(summary = {}) {
+export function readHomeKpis() {
+  return getHomeKpis();
+}
+
+export function readHomeAlerts() {
+  return getHomeAlerts();
+}
+
+export function readHomeRecentActivity() {
+  return getHomeRecentActivity();
+}
+
+export function readHomeQuickActions() {
+  return getHomeQuickActions();
+}
+
+export function readHomeHealth() {
+  return getHomeHealth();
+}
+
+export function writeHomeSummary(
+  summary = {}
+) {
   return setHomeSummary(summary);
 }
 
-export function mergeHomeSummary(patch = {}) {
-  return patchHomeSummary(patch);
+export function mergeHomeSummary(
+  patch = {}
+) {
+  return patchHomeSummary(
+    safeObject(patch)
+  );
 }
 
 export function clearHomeSummaryStore() {
@@ -136,23 +276,33 @@ export function readHomeUi() {
   return getHomeUiState();
 }
 
-export function markHomeMounted(value = true) {
-  return setHomeMounted(value);
+export function markHomeMounted(
+  value = true
+) {
+  return setHomeMounted(
+    value === true
+  );
 }
 
-export function setHomeSelectedCard(card = "") {
+export function setHomeSelectedCard(
+  card = ""
+) {
   return setHomeActiveCard(
     safeText(card, "")
   );
 }
 
-export function setHomeAction(action = "") {
+export function setHomeAction(
+  action = ""
+) {
   return setHomeLastAction(
     safeText(action, "")
   );
 }
 
-export function patchHomeUi(patch = {}) {
+export function patchHomeUi(
+  patch = {}
+) {
   return patchHomeUiState(
     safeObject(patch)
   );
@@ -161,6 +311,41 @@ export function patchHomeUi(patch = {}) {
 /* =========================================================
    METADATA
 ========================================================= */
+
+export function readHomeMetadata() {
+  return {
+    source: getHomeSource(),
+    remoteOk: isHomeRemoteOk(),
+    degraded: isHomeDegraded(),
+    lastSyncAt: getHomeLastSyncAt(),
+    hydratedAt: getHomeHydratedAt(),
+    cacheHit: getHomeCacheHit(),
+  };
+}
+
+export function setHomeSourceState(
+  value = HOME_SOURCES.IDLE
+) {
+  return setHomeSource(
+    normalizeHomeSource(value)
+  );
+}
+
+export function setHomeRemoteOkState(
+  value = false
+) {
+  return setHomeRemoteOk(
+    value === true
+  );
+}
+
+export function setHomeDegradedState(
+  value = false
+) {
+  return setHomeDegraded(
+    value === true
+  );
+}
 
 export function setHomeSyncTimestamp(
   value = ""
@@ -196,12 +381,22 @@ export function beginHomeLoad() {
 
 export function completeHomeLoad({
   summary = null,
+  source = HOME_SOURCES.REMOTE,
+  remoteOk = false,
+  degraded = false,
   syncedAt = "",
   hydratedAt = "",
   cacheHit = false,
 } = {}) {
   return finishHomeLoad({
     summary,
+    source: normalizeHomeSource(
+      source
+    ),
+    remoteOk:
+      remoteOk === true,
+    degraded:
+      degraded === true,
     syncedAt: safeText(
       syncedAt,
       ""
@@ -210,7 +405,8 @@ export function completeHomeLoad({
       hydratedAt,
       ""
     ),
-    cacheHit: cacheHit === true,
+    cacheHit:
+      cacheHit === true,
   });
 }
 
@@ -250,6 +446,10 @@ export function clearHomeErrorState() {
   return clearHomeError();
 }
 
+export function clearHomeLastErrorState() {
+  return clearHomeLastError();
+}
+
 /* =========================================================
    RESET
 ========================================================= */
@@ -263,15 +463,30 @@ export function resetHomeStore() {
 ========================================================= */
 
 export const HomeStore = {
+  HOME_SOURCES,
+
   getHomeSnapshot,
   getHomeSummarySnapshot,
   getHomeUiSnapshot,
 
   getHomeStatus,
+  getHomeSourceStatus,
   hasHomeError,
+  hasHomeLastError,
   isHomeReady,
+  isHomeIdleSource,
+  isHomeRemoteSource,
+  isHomeFreshCacheSource,
+  isHomeStaleCacheSource,
+  isHomeFallbackSource,
+  isHomeErrorSource,
 
   readHomeSummary,
+  readHomeKpis,
+  readHomeAlerts,
+  readHomeRecentActivity,
+  readHomeQuickActions,
+  readHomeHealth,
   writeHomeSummary,
   mergeHomeSummary,
   clearHomeSummaryStore,
@@ -282,6 +497,10 @@ export const HomeStore = {
   setHomeAction,
   patchHomeUi,
 
+  readHomeMetadata,
+  setHomeSourceState,
+  setHomeRemoteOkState,
+  setHomeDegradedState,
   setHomeSyncTimestamp,
   setHomeHydrationTimestamp,
   markHomeCacheHit,
@@ -294,6 +513,7 @@ export const HomeStore = {
   setHomeLoadedState,
   setHomeErrorState,
   clearHomeErrorState,
+  clearHomeLastErrorState,
 
   resetHomeStore,
 };

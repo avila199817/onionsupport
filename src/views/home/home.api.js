@@ -7,12 +7,13 @@
    Responsabilidades:
    - cargar summary real de la Home
    - consumir /api/dashboard/summary
-   - aplicar estrategia cache-first
+   - aplicar estrategia cache-first inteligente
    - hidratar store del módulo
    - persistir cache local
    - tolerar backend envuelto o plano
-   - dejar preparado un punto único para resumen remoto
-   - preservar el contrato real esperado por home.template.js
+   - preservar contrato esperado por home.template.js
+   - evitar dobles fetch concurrentes
+   - diferenciar origen real cache/remote/fallback
 
    CONTRATO OBJETIVO:
    {
@@ -80,7 +81,10 @@ function safeText(
   value = "",
   fallback = ""
 ) {
-  if (value === null || value === undefined) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
     return fallback;
   }
 
@@ -96,6 +100,14 @@ function safeNumber(
   return Number.isFinite(number)
     ? number
     : fallback;
+}
+
+function safeBool(value) {
+  return value === true;
+}
+
+function nowMs() {
+  return Date.now();
 }
 
 function nowIso() {
@@ -128,6 +140,40 @@ function clone(value) {
   }
 }
 
+function safeLog(...args) {
+  try {
+    AppCore?.utils?.log?.(...args);
+  } catch {}
+}
+
+function safeWarn(...args) {
+  try {
+    AppCore?.utils?.warn?.(...args);
+  } catch {
+    console.warn(...args);
+  }
+}
+
+function safeError(...args) {
+  try {
+    AppCore?.utils?.error?.(...args);
+  } catch {
+    console.error(...args);
+  }
+}
+
+function safeEmit(
+  eventName,
+  payload = {}
+) {
+  try {
+    AppCore?.events?.emit?.(
+      eventName,
+      payload
+    );
+  } catch {}
+}
+
 function getStorageApi() {
   return AppCore?.storage || null;
 }
@@ -136,13 +182,59 @@ function getCurrentUser() {
   return AppCore?.state?.user || null;
 }
 
+function getHttpClient() {
+  if (
+    Http &&
+    typeof Http.get ===
+      "function"
+  ) {
+    return Http;
+  }
+
+  if (
+    AppCore?.apiClient &&
+    typeof AppCore.apiClient.get ===
+      "function"
+  ) {
+    return AppCore.apiClient;
+  }
+
+  if (
+    AppCore?.request &&
+    typeof AppCore.request ===
+      "function"
+  ) {
+    return {
+      get(path, options = {}) {
+        return AppCore.request(path, {
+          ...options,
+          method: "GET",
+        });
+      },
+    };
+  }
+
+  return null;
+}
+
+function isFreshTimestamp(
+  savedAt = 0,
+  ttl = HOME_CACHE_TTL
+) {
+  return (
+    safeNumber(savedAt, 0) > 0 &&
+    nowMs() - safeNumber(savedAt, 0) <=
+      safeNumber(ttl, 0)
+  );
+}
+
 /* =========================================================
    CACHE
 ========================================================= */
 
 function buildCachePayload(summary) {
   return {
-    savedAt: Date.now(),
+    savedAt: nowMs(),
     summary: clone(summary),
   };
 }
@@ -167,7 +259,7 @@ function saveCache(summary) {
 
     return true;
   } catch (error) {
-    console.warn(
+    safeWarn(
       "[HomeAPI] saveCache warning",
       error
     );
@@ -189,20 +281,21 @@ function readCache() {
     }
 
     const payload =
-      storage.get(HOME_CACHE_KEY);
-
-    const normalized =
-      safeObject(payload);
+      safeObject(
+        storage.get(
+          HOME_CACHE_KEY
+        )
+      );
 
     const savedAt =
       safeNumber(
-        normalized.savedAt,
+        payload.savedAt,
         0
       );
 
     const summary =
       safeObject(
-        normalized.summary
+        payload.summary
       );
 
     if (
@@ -216,11 +309,13 @@ function readCache() {
       savedAt,
       summary,
       isFresh:
-        Date.now() - savedAt <=
-        HOME_CACHE_TTL,
+        isFreshTimestamp(
+          savedAt,
+          HOME_CACHE_TTL
+        ),
     };
   } catch (error) {
-    console.warn(
+    safeWarn(
       "[HomeAPI] readCache warning",
       error
     );
@@ -247,7 +342,7 @@ function clearCache() {
 
     return true;
   } catch (error) {
-    console.warn(
+    safeWarn(
       "[HomeAPI] clearCache warning",
       error
     );
@@ -265,12 +360,15 @@ function createFallbackSummary() {
 
   return {
     user: {
-      id: safeText(
-        user?.userId || user?.id,
-        null
-      ),
+      id:
+        safeText(
+          user?.userId ||
+            user?.id,
+          ""
+        ) || null,
       role: safeText(
-        user?.role || user?.rol,
+        user?.role ||
+          user?.rol,
         "unknown"
       ),
     },
@@ -296,7 +394,6 @@ function createFallbackSummary() {
     ],
 
     recentActivity: [],
-
     quickActions: [],
 
     health: {
@@ -315,12 +412,12 @@ function looksLikeDashboardSummary(
     safeObject(value);
 
   return Boolean(
-    obj?.generatedAt ||
-      obj?.kpis ||
-      obj?.alerts ||
-      obj?.recentActivity ||
-      obj?.quickActions ||
-      obj?.health
+    obj.generatedAt ||
+      obj.kpis ||
+      obj.alerts ||
+      obj.recentActivity ||
+      obj.quickActions ||
+      obj.health
   );
 }
 
@@ -336,40 +433,46 @@ function unwrapDashboardPayload(
     return raw;
   }
 
-  const level1 =
-    safeObject(raw?.data);
+  const rawData =
+    safeObject(raw.data);
 
   if (
-    looksLikeDashboardSummary(level1)
+    looksLikeDashboardSummary(rawData)
   ) {
-    return level1;
+    return rawData;
   }
 
-  const level2 =
-    safeObject(level1?.data);
-
-  if (
-    looksLikeDashboardSummary(level2)
-  ) {
-    return level2;
-  }
+  const rawDataData =
+    safeObject(rawData.data);
 
   if (
     looksLikeDashboardSummary(
-      raw?.summary
+      rawDataData
     )
   ) {
-    return safeObject(raw.summary);
+    return rawDataData;
   }
+
+  const rawSummary =
+    safeObject(raw.summary);
 
   if (
     looksLikeDashboardSummary(
-      level1?.summary
+      rawSummary
     )
   ) {
-    return safeObject(
-      level1.summary
-    );
+    return rawSummary;
+  }
+
+  const rawDataSummary =
+    safeObject(rawData.summary);
+
+  if (
+    looksLikeDashboardSummary(
+      rawDataSummary
+    )
+  ) {
+    return rawDataSummary;
   }
 
   return {};
@@ -458,6 +561,48 @@ function normalizeQuickAction(
   };
 }
 
+function normalizeHealth(
+  source = {},
+  fallback = {}
+) {
+  const health =
+    safeObject(source);
+
+  return {
+    tickets:
+      safeBool(
+        health.tickets
+      ) ||
+      safeBool(
+        fallback.tickets
+      ),
+
+    clientes:
+      safeBool(
+        health.clientes
+      ) ||
+      safeBool(
+        fallback.clientes
+      ),
+
+    facturas:
+      safeBool(
+        health.facturas
+      ) ||
+      safeBool(
+        fallback.facturas
+      ),
+
+    users:
+      safeBool(
+        health.users
+      ) ||
+      safeBool(
+        fallback.users
+      ),
+  };
+}
+
 function normalizeSummary(
   payload = {}
 ) {
@@ -490,15 +635,19 @@ function normalizeSummary(
     safeArray(
       source.quickActions
     )
-      .map(normalizeQuickAction)
+      .map(
+        normalizeQuickAction
+      )
       .filter(Boolean);
 
   return {
     user: {
-      id: safeText(
-        source?.user?.id,
-        fallback.user.id
-      ),
+      id:
+        safeText(
+          source?.user?.id,
+          ""
+        ) ||
+        fallback.user.id,
       role: safeText(
         source?.user?.role,
         fallback.user.role
@@ -548,60 +697,18 @@ function normalizeSummary(
         : fallback.alerts,
 
     recentActivity,
-
     quickActions,
 
-    health: {
-      tickets:
-        source?.health?.tickets === true,
-      clientes:
-        source?.health?.clientes === true,
-      facturas:
-        source?.health?.facturas === true,
-      users:
-        source?.health?.users === true,
-    },
+    health: normalizeHealth(
+      source.health,
+      fallback.health
+    ),
   };
 }
 
 /* =========================================================
-   REMOTE
+   FALLBACK / REMOTE
 ========================================================= */
-
-async function fetchRemoteSummary() {
-  try {
-    if (
-      Http &&
-      typeof Http.get ===
-        "function"
-    ) {
-      const response =
-        await Http.get(ENDPOINT);
-
-      const data =
-        safeObject(
-          response?.data ||
-            response
-        );
-
-      if (
-        Object.keys(data).length
-      ) {
-        const normalized =
-          normalizeSummary(data);
-
-        return normalized;
-      }
-    }
-  } catch (error) {
-    console.warn(
-      "[HomeAPI] remote summary unavailable",
-      error
-    );
-  }
-
-  return buildLocalSummary();
-}
 
 function buildLocalSummary() {
   const user =
@@ -614,12 +721,15 @@ function buildLocalSummary() {
 
   return normalizeSummary({
     user: {
-      id: safeText(
-        user?.userId || user?.id,
-        null
-      ),
+      id:
+        safeText(
+          user?.userId ||
+            user?.id,
+          ""
+        ) || null,
       role: safeText(
-        user?.role || user?.rol,
+        user?.role ||
+          user?.rol,
         "unknown"
       ),
     },
@@ -644,7 +754,6 @@ function buildLocalSummary() {
     ],
 
     recentActivity: [],
-
     quickActions: [],
 
     health: {
@@ -653,6 +762,125 @@ function buildLocalSummary() {
       facturas: false,
       users: false,
     },
+  });
+}
+
+async function fetchRemoteSummary() {
+  const client =
+    getHttpClient();
+
+  if (!client) {
+    safeWarn(
+      "[HomeAPI] no hay cliente HTTP disponible"
+    );
+    return {
+      ok: false,
+      source: "fallback",
+      summary:
+        buildLocalSummary(),
+      error: new Error(
+        "No hay cliente HTTP disponible."
+      ),
+    };
+  }
+
+  try {
+    const response =
+      await client.get(
+        ENDPOINT,
+        {
+          auth: true,
+          retries: 1,
+        }
+      );
+
+    const data =
+      safeObject(
+        response?.data ||
+          response
+      );
+
+    if (
+      !Object.keys(data).length
+    ) {
+      const summary =
+        buildLocalSummary();
+
+      return {
+        ok: true,
+        source: "fallback",
+        summary,
+      };
+    }
+
+    return {
+      ok: true,
+      source: "remote",
+      summary:
+        normalizeSummary(
+          data
+        ),
+    };
+  } catch (error) {
+    safeWarn(
+      "[HomeAPI] remote summary unavailable",
+      error
+    );
+
+    return {
+      ok: false,
+      source: "fallback",
+      summary:
+        buildLocalSummary(),
+      error,
+    };
+  }
+}
+
+/* =========================================================
+   STORE HYDRATION
+========================================================= */
+
+function hydrateSummaryIntoStore({
+  summary,
+  syncedAt,
+  hydratedAt,
+  cacheHit = false,
+} = {}) {
+  writeHomeSummary(
+    summary
+  );
+
+  markHomeCacheHit(
+    cacheHit === true
+  );
+
+  setHomeSyncTimestamp(
+    safeText(
+      syncedAt,
+      nowIso()
+    )
+  );
+
+  setHomeHydrationTimestamp(
+    safeText(
+      hydratedAt,
+      nowIso()
+    )
+  );
+
+  completeHomeLoad({
+    summary,
+    syncedAt: safeText(
+      syncedAt,
+      nowIso()
+    ),
+    hydratedAt: safeText(
+      hydratedAt,
+      nowIso()
+    ),
+    cacheHit:
+      cacheHit === true,
   });
 }
 
@@ -688,34 +916,32 @@ export async function loadHomeSummary(
             cached?.isFresh &&
             cached?.summary
           ) {
+            const hydratedAt =
+              nowIso();
+
             const summary =
               normalizeSummary(
                 cached.summary
               );
 
-            writeHomeSummary(
-              summary
-            );
-            markHomeCacheHit(
-              true
-            );
-            setHomeSyncTimestamp(
-              new Date(
-                cached.savedAt
-              ).toISOString()
-            );
-            setHomeHydrationTimestamp(
-              nowIso()
-            );
-
-            completeHomeLoad({
+            hydrateSummaryIntoStore({
               summary,
-              syncedAt: new Date(
-                cached.savedAt
-              ).toISOString(),
-              hydratedAt: nowIso(),
+              syncedAt:
+                new Date(
+                  cached.savedAt
+                ).toISOString(),
+              hydratedAt,
               cacheHit: true,
             });
+
+            safeEmit(
+              "home:summary:loaded",
+              {
+                source: "cache",
+                cachedAt:
+                  cached.savedAt,
+              }
+            );
 
             return {
               ok: true,
@@ -725,35 +951,63 @@ export async function loadHomeSummary(
           }
         }
 
-        const summary =
+        const remote =
           await fetchRemoteSummary();
 
-        writeHomeSummary(
-          summary
-        );
-        markHomeCacheHit(false);
-        setHomeSyncTimestamp(
-          nowIso()
-        );
-        setHomeHydrationTimestamp(
-          nowIso()
-        );
-        saveCache(summary);
+        const summary =
+          normalizeSummary(
+            remote.summary
+          );
 
-        completeHomeLoad({
+        const syncedAt =
+          remote.source ===
+          "remote"
+            ? nowIso()
+            : summary.generatedAt ||
+              nowIso();
+
+        const hydratedAt =
+          nowIso();
+
+        hydrateSummaryIntoStore({
           summary,
-          syncedAt: nowIso(),
-          hydratedAt: nowIso(),
+          syncedAt,
+          hydratedAt,
           cacheHit: false,
         });
 
+        if (
+          remote.source ===
+          "remote"
+        ) {
+          saveCache(summary);
+        }
+
+        safeEmit(
+          "home:summary:loaded",
+          {
+            source:
+              remote.source,
+            ok:
+              remote.ok ===
+              true,
+          }
+        );
+
         return {
           ok: true,
-          source: "remote",
+          source:
+            remote.source,
           summary,
+          fallback:
+            remote.source !==
+            "remote",
+          error:
+            remote.error ||
+            null,
         };
       } catch (error) {
-        console.error(
+        safeError(
           "[HomeAPI] loadHomeSummary error",
           error
         );

@@ -9,34 +9,35 @@
    - montar y renderizar la Home sobre el contenedor SPA
    - disparar carga inicial del summary
    - repintar la UI con estado real del módulo
-   - bindear acciones rápidas y refresh sin duplicar listeners
-   - exponer init / render / reload / destroy seguros
+   - enlazar bindings desacoplados sin listeners duplicados
+   - exponer init / render / reload / destroy / reset seguros
    - mantener compatibilidad con router legacy y moderna
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+
 import { HomeAPI } from "./home.api.js";
+import getHomeTemplate from "./home.template.js";
+import { bindHomeView } from "./home.bindings.js";
+
 import {
-  HomeStore,
   getHomeSnapshot,
   getHomeStatus,
   readHomeSummary,
   readHomeUi,
   markHomeMounted,
-  setHomeAction,
-  setHomeSelectedCard,
   patchHomeUi,
   resetHomeStore,
   isHomeReady,
 } from "./home.store.js";
-import getHomeTemplate from "./home.template.js";
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
 const VIEW_NAME = "home";
-const VIEW_SELECTOR = '[data-home-view="true"]';
+const VIEW_SELECTOR =
+  '[data-home-view="true"]';
 const VIEW_CONTAINER_SELECTOR =
   "#view-container";
 
@@ -46,15 +47,22 @@ const VIEW_CONTAINER_SELECTOR =
 
 let rootElement = null;
 let viewContainer = null;
-let bound = false;
+let currentCleanup = null;
 let destroyed = false;
 let renderToken = 0;
 let lastRenderContext = {};
-let refreshInFlight = null;
+let loadInFlight = null;
 
 /* =========================================================
    BASICS
 ========================================================= */
+
+function isBrowser() {
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
+}
 
 function safeObject(value) {
   return value &&
@@ -148,17 +156,53 @@ function safeEmit(
   } catch {}
 }
 
+function notifySuccess(
+  message = "Actualizado"
+) {
+  try {
+    AppCore?.modules?.Toast?.success?.(
+      message
+    );
+    return;
+  } catch {}
+
+  try {
+    AppCore?.toast?.success?.(
+      message
+    );
+  } catch {}
+}
+
+function notifyError(
+  message = "Se produjo un error."
+) {
+  try {
+    AppCore?.modules?.Toast?.error?.(
+      message
+    );
+    return;
+  } catch {}
+
+  try {
+    AppCore?.toast?.error?.(
+      message
+    );
+  } catch {}
+}
+
 function getCurrentUser() {
   return AppCore?.state?.user || null;
 }
 
-function getRouter() {
-  return AppCore?.modules?.Router ||
-    AppCore?.Router ||
-    null;
-}
+/* =========================================================
+   DOM HELPERS
+========================================================= */
 
 function getContainer() {
+  if (!isBrowser()) {
+    return null;
+  }
+
   const cached =
     viewContainer &&
     document.contains(
@@ -196,6 +240,79 @@ function resolveRootElement() {
   return existing || null;
 }
 
+function setDocumentTitle() {
+  if (!isBrowser()) {
+    return;
+  }
+
+  try {
+    const routeTitle =
+      AppCore?.state?.routeMeta
+        ?.title ||
+      AppCore?.state
+        ?.routeTitle ||
+      "Onion Support";
+
+    document.title = String(
+      routeTitle || "Onion Support"
+    );
+  } catch (error) {
+    safeWarn(
+      "[HomeView] document title warning",
+      error
+    );
+  }
+}
+
+function cleanupBindings() {
+  if (
+    typeof currentCleanup ===
+    "function"
+  ) {
+    try {
+      currentCleanup();
+    } catch (error) {
+      safeError(
+        "[HomeView] cleanup error",
+        error
+      );
+    }
+  }
+
+  currentCleanup = null;
+}
+
+function bindDom() {
+  const container =
+    getContainer();
+
+  if (!container) {
+    return false;
+  }
+
+  cleanupBindings();
+
+  try {
+    currentCleanup =
+      bindHomeView({
+        container,
+      }) || null;
+
+    return true;
+  } catch (error) {
+    safeError(
+      "[HomeView] bind error",
+      error
+    );
+    currentCleanup = null;
+    return false;
+  }
+}
+
+/* =========================================================
+   STATE -> VIEW
+========================================================= */
+
 function ensureViewMountedFlag(
   value = true
 ) {
@@ -207,138 +324,13 @@ function ensureViewMountedFlag(
 function getRenderPayload(
   overrides = {}
 ) {
-  const snapshot =
-    getHomeSnapshot();
-
   const payload = {
-    home: snapshot,
+    home: getHomeSnapshot(),
     user: getCurrentUser(),
     ...safeObject(overrides),
   };
 
   return payload;
-}
-
-function safeNavigate(
-  href = "#",
-  options = {}
-) {
-  const target = safeText(
-    href,
-    "#"
-  );
-
-  if (
-    !target ||
-    target === "#"
-  ) {
-    return false;
-  }
-
-  const router =
-    getRouter();
-
-  if (
-    router &&
-    typeof router.navigate ===
-      "function"
-  ) {
-    router.navigate(target, {
-      ...safeObject(options),
-      force: options?.force === true,
-    });
-    return true;
-  }
-
-  try {
-    window.location.assign(target);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function notifySuccess(
-  message = "Actualizado"
-) {
-  try {
-    AppCore?.modules?.Toast?.success?.(
-      message
-    );
-    return;
-  } catch {}
-
-  try {
-    AppCore?.toast?.success?.(
-      message
-    );
-  } catch {}
-}
-
-function notifyError(
-  message = "Se produjo un error."
-) {
-  try {
-    AppCore?.modules?.Toast?.error?.(
-      message
-    );
-    return;
-  } catch {}
-
-  try {
-    AppCore?.toast?.error?.(
-      message
-    );
-  } catch {}
-}
-
-function notifyInfo(
-  message = ""
-) {
-  try {
-    AppCore?.modules?.Toast?.info?.(
-      message
-    );
-    return;
-  } catch {}
-
-  try {
-    AppCore?.toast?.info?.(
-      message
-    );
-  } catch {}
-}
-
-/* =========================================================
-   RENDER
-========================================================= */
-
-function renderIntoContainer(
-  payload = {}
-) {
-  const container =
-    getContainer();
-
-  if (!container) {
-    throw new Error(
-      "No se encontró #view-container para renderizar Home."
-    );
-  }
-
-  const html =
-    getHomeTemplate(payload);
-
-  container.innerHTML = html;
-  rootElement =
-    resolveRootElement();
-
-  if (!rootElement) {
-    throw new Error(
-      "No se pudo resolver el root de la vista Home."
-    );
-  }
-
-  return rootElement;
 }
 
 function syncDatasetFromState() {
@@ -383,6 +375,41 @@ function syncDatasetFromState() {
   } catch {}
 }
 
+/* =========================================================
+   RENDER
+========================================================= */
+
+function renderIntoContainer(
+  payload = {}
+) {
+  const container =
+    getContainer();
+
+  if (!container) {
+    throw new Error(
+      'HomeView: no se encontró "#view-container".'
+    );
+  }
+
+  container.innerHTML =
+    getHomeTemplate(payload);
+
+  rootElement =
+    resolveRootElement();
+
+  if (!rootElement) {
+    throw new Error(
+      "HomeView: no se pudo resolver el root de la vista."
+    );
+  }
+
+  setDocumentTitle();
+  syncDatasetFromState();
+  bindDom();
+
+  return rootElement;
+}
+
 function repaint(
   overrides = {}
 ) {
@@ -400,9 +427,6 @@ function repaint(
 
   const mounted =
     renderIntoContainer(payload);
-
-  syncDatasetFromState();
-  bindDomEvents();
 
   safeEmit(
     "home:view:rendered",
@@ -431,227 +455,6 @@ function renderLoadingShell(
 }
 
 /* =========================================================
-   ACTIONS
-========================================================= */
-
-async function handleRefreshClick(
-  event
-) {
-  event?.preventDefault?.();
-
-  if (refreshInFlight) {
-    return refreshInFlight;
-  }
-
-  setHomeAction("refresh");
-  safeEmit(
-    "home:view:refresh:start",
-    {
-      view: VIEW_NAME,
-    }
-  );
-
-  notifyInfo(
-    "Actualizando dashboard..."
-  );
-
-  refreshInFlight =
-    (async () => {
-      try {
-        await HomeAPI.refreshHomeSummary();
-
-        if (destroyed !== true) {
-          repaint(
-            lastRenderContext
-          );
-        }
-
-        notifySuccess(
-          "Dashboard actualizado."
-        );
-
-        safeEmit(
-          "home:view:refresh:success",
-          {
-            view: VIEW_NAME,
-            status:
-              getHomeStatus(),
-          }
-        );
-
-        return true;
-      } catch (error) {
-        safeError(
-          "[HomeView] refresh error",
-          error
-        );
-
-        if (destroyed !== true) {
-          repaint(
-            lastRenderContext
-          );
-        }
-
-        notifyError(
-          safeText(
-            error?.message,
-            "No se pudo actualizar el dashboard."
-          )
-        );
-
-        safeEmit(
-          "home:view:refresh:error",
-          {
-            view: VIEW_NAME,
-            error,
-          }
-        );
-
-        return false;
-      } finally {
-        refreshInFlight =
-          null;
-      }
-    })();
-
-  return refreshInFlight;
-}
-
-function handleActionClick(event) {
-  const trigger =
-    event?.target?.closest?.(
-      "[data-home-action]"
-    );
-
-  if (!trigger) {
-    return;
-  }
-
-  const actionKey = safeText(
-    trigger.getAttribute(
-      "data-home-action"
-    ),
-    ""
-  );
-
-  const href = safeText(
-    trigger.getAttribute("href"),
-    "#"
-  );
-
-  setHomeAction(actionKey);
-  setHomeSelectedCard(actionKey);
-
-  safeEmit(
-    "home:view:action",
-    {
-      view: VIEW_NAME,
-      action: actionKey,
-      href,
-    }
-  );
-
-  if (
-    trigger.matches(
-      '[data-home-action="refresh"]'
-    )
-  ) {
-    handleRefreshClick(event);
-    return;
-  }
-
-  if (
-    trigger.hasAttribute(
-      "data-spa"
-    )
-  ) {
-    event.preventDefault();
-    safeNavigate(href);
-  }
-}
-
-function handleCardSelection(event) {
-  const card =
-    event?.target?.closest?.(
-      "[data-home-card]"
-    );
-
-  if (!card) {
-    return;
-  }
-
-  const cardKey = safeText(
-    card.getAttribute(
-      "data-home-card"
-    ),
-    ""
-  );
-
-  if (!cardKey) {
-    return;
-  }
-
-  setHomeSelectedCard(cardKey);
-
-  safeEmit(
-    "home:view:card:selected",
-    {
-      view: VIEW_NAME,
-      card: cardKey,
-    }
-  );
-}
-
-function handleDomClick(event) {
-  handleActionClick(event);
-  handleCardSelection(event);
-}
-
-/* =========================================================
-   BINDINGS
-========================================================= */
-
-function bindDomEvents() {
-  const root =
-    resolveRootElement();
-
-  if (!root) {
-    return false;
-  }
-
-  rootElement = root;
-
-  if (bound === true) {
-    rootElement.removeEventListener(
-      "click",
-      handleDomClick
-    );
-  }
-
-  rootElement.addEventListener(
-    "click",
-    handleDomClick
-  );
-
-  bound = true;
-  return true;
-}
-
-function unbindDomEvents() {
-  if (
-    rootElement &&
-    bound === true
-  ) {
-    rootElement.removeEventListener(
-      "click",
-      handleDomClick
-    );
-  }
-
-  bound = false;
-}
-
-/* =========================================================
    LOAD FLOW
 ========================================================= */
 
@@ -662,66 +465,89 @@ async function ensureHomeLoaded(
     force = false,
     preferCache = true,
     silent = false,
+    notifyOnError = false,
   } = safeObject(options);
 
-  try {
-    const result =
-      await HomeAPI.loadHomeSummary({
-        force: force === true,
-        preferCache:
-          preferCache !== false,
-      });
-
-    if (
-      destroyed !== true
-    ) {
-      repaint(
-        lastRenderContext
-      );
-    }
-
-    if (
-      silent !== true
-    ) {
-      safeEmit(
-        "home:view:data:loaded",
-        {
-          view: VIEW_NAME,
-          result,
-          status:
-            getHomeStatus(),
-        }
-      );
-    }
-
-    return result;
-  } catch (error) {
-    safeError(
-      "[HomeView] ensureHomeLoaded error",
-      error
-    );
-
-    if (
-      destroyed !== true
-    ) {
-      repaint(
-        lastRenderContext
-      );
-    }
-
-    safeEmit(
-      "home:view:data:error",
-      {
-        view: VIEW_NAME,
-        error,
-      }
-    );
-
-    return {
-      ok: false,
-      error,
-    };
+  if (loadInFlight) {
+    return loadInFlight;
   }
+
+  loadInFlight =
+    (async () => {
+      try {
+        const result =
+          await HomeAPI.loadHomeSummary({
+            force: force === true,
+            preferCache:
+              preferCache !== false,
+          });
+
+        if (
+          destroyed !== true
+        ) {
+          repaint(
+            lastRenderContext
+          );
+        }
+
+        if (
+          silent !== true
+        ) {
+          safeEmit(
+            "home:view:data:loaded",
+            {
+              view: VIEW_NAME,
+              result,
+              status:
+                getHomeStatus(),
+            }
+          );
+        }
+
+        return result;
+      } catch (error) {
+        safeError(
+          "[HomeView] ensureHomeLoaded error",
+          error
+        );
+
+        if (
+          destroyed !== true
+        ) {
+          repaint(
+            lastRenderContext
+          );
+        }
+
+        if (
+          notifyOnError === true
+        ) {
+          notifyError(
+            safeText(
+              error?.message,
+              "No se pudo cargar el resumen de inicio."
+            )
+          );
+        }
+
+        safeEmit(
+          "home:view:data:error",
+          {
+            view: VIEW_NAME,
+            error,
+          }
+        );
+
+        return {
+          ok: false,
+          error,
+        };
+      } finally {
+        loadInFlight = null;
+      }
+    })();
+
+  return loadInFlight;
 }
 
 /* =========================================================
@@ -741,6 +567,7 @@ export async function init(
 
   patchHomeUi({
     mounted: false,
+    activeCard: "",
     lastAction: "init",
   });
 
@@ -754,32 +581,37 @@ export async function init(
     }
   );
 
-  await ensureHomeLoaded({
-    force:
-      context.force === true,
-    preferCache:
-      context.preferCache !==
-      false,
-    silent: false,
-  });
+  const result =
+    await ensureHomeLoaded({
+      force:
+        context.force === true,
+      preferCache:
+        context.preferCache !==
+        false,
+      silent: false,
+      notifyOnError: false,
+    });
 
   return {
-    ok: true,
+    ok:
+      result?.ok !== false,
     view: VIEW_NAME,
     element: rootElement,
     status: getHomeStatus(),
     summary: readHomeSummary(),
     ui: readHomeUi(),
+    result,
   };
 }
 
 export async function render(
   options = {}
 ) {
+  destroyed = false;
+
   const context =
     safeObject(options);
 
-  destroyed = false;
   lastRenderContext =
     clone(context);
 
@@ -791,18 +623,22 @@ export async function render(
   repaint(context);
   ensureViewMountedFlag(true);
 
+  let result = null;
+
   if (
     context.load !== false &&
     isHomeReady() !== true
   ) {
-    await ensureHomeLoaded({
-      force:
-        context.force === true,
-      preferCache:
-        context.preferCache !==
-        false,
-      silent: false,
-    });
+    result =
+      await ensureHomeLoaded({
+        force:
+          context.force === true,
+        preferCache:
+          context.preferCache !==
+          false,
+        silent: false,
+        notifyOnError: false,
+      });
   }
 
   return {
@@ -810,6 +646,7 @@ export async function render(
     view: VIEW_NAME,
     element: rootElement,
     status: getHomeStatus(),
+    result,
   };
 }
 
@@ -823,28 +660,38 @@ export async function reload(
     lastAction: "reload",
   });
 
-  await ensureHomeLoaded({
-    force: true,
-    preferCache: false,
-    silent:
-      safeBool(
-        context.silent,
-        false
-      ) === true,
-  });
+  const result =
+    await ensureHomeLoaded({
+      force: true,
+      preferCache: false,
+      silent:
+        safeBool(
+          context.silent,
+          false
+        ) === true,
+      notifyOnError: true,
+    });
+
+  if (result?.ok === true) {
+    notifySuccess(
+      "Inicio actualizado."
+    );
+  }
 
   return {
-    ok: true,
+    ok:
+      result?.ok !== false,
     view: VIEW_NAME,
     element: rootElement,
     status: getHomeStatus(),
+    result,
   };
 }
 
 export function destroy() {
   destroyed = true;
 
-  unbindDomEvents();
+  cleanupBindings();
 
   try {
     patchHomeUi({
@@ -858,7 +705,7 @@ export function destroy() {
 
   rootElement = null;
   viewContainer = null;
-  refreshInFlight = null;
+  loadInFlight = null;
 
   safeEmit(
     "home:view:destroyed",

@@ -5,17 +5,20 @@
    RESPONSABILIDADES:
    - restaurar sesión ANTES del primer render
    - evitar restores duplicados en paralelo
-   - sincronizar UI de usuario tras restore
-   - helper de navegación post-login
+   - sincronizar UI usuario tras restore
+   - navegación post-login segura
    - diagnóstico robusto de sesión
+   - no romper rutas contextualizadas
 
-   HARDENING PRO:
-   - restore serializado
-   - cero race conditions
+   HARDENING EXTREMO:
+   - restore serializado real
+   - anti race conditions
    - no repaint fantasma login/private
    - tolerancia total si Auth falla
    - no doble navegación durante boot
-   - no contaminar el publicPath/canonicalPath
+   - no contaminar publicPath/canonicalPath
+   - warmup aislado
+   - snapshot consistente
 ========================================================= */
 
 import {
@@ -24,42 +27,194 @@ import {
 } from "./helpers.js";
 
 /* =========================================================
-   HELPERS
+   BASICS
 ========================================================= */
 
-function safeLog(AppCore, ...args) {
+function safeLog(
+  AppCore,
+  ...args
+) {
   try {
-    AppCore?.utils?.log?.(...args);
+    AppCore?.utils?.log?.(
+      ...args
+    );
   } catch {}
 }
 
-function safeWarn(AppCore, ...args) {
+function safeWarn(
+  AppCore,
+  ...args
+) {
   try {
-    AppCore?.utils?.warn?.(...args);
+    AppCore?.utils?.warn?.(
+      ...args
+    );
   } catch {}
 }
 
-function isFunction(value) {
-  return typeof value === "function";
-}
-
-function getResolvedSessionUser(AppCore) {
+function isFunction(
+  value
+) {
   return (
-    AppCore?.state?.user?.username ||
-    AppCore?.state?.user?.email ||
+    typeof value ===
+    "function"
+  );
+}
+
+function safeBool(
+  value
+) {
+  return value === true;
+}
+
+function getState(
+  AppCore
+) {
+  try {
+    return (
+      AppCore?.state ||
+      {}
+    );
+  } catch {
+    return {};
+  }
+}
+
+function getResolvedSessionUser(
+  AppCore
+) {
+  const state =
+    getState(
+      AppCore
+    );
+
+  return (
+    state?.user
+      ?.username ||
+    state?.user
+      ?.email ||
+    state?.user
+      ?.id ||
     null
   );
 }
 
-function getResolvedSessionRole(AppCore) {
-  return AppCore?.state?.role || null;
+function getResolvedSessionRole(
+  AppCore
+) {
+  return (
+    getState(
+      AppCore
+    )?.role || null
+  );
 }
 
-function shouldSkipNavigation(state) {
+function isAuthenticated(
+  AppCore
+) {
   return Boolean(
-    state?.bootNavigationHandled ||
-    state?.initialRouteRendered
+    getState(
+      AppCore
+    )?.authenticated
   );
+}
+
+function shouldSkipNavigation(
+  state
+) {
+  return Boolean(
+    state
+      ?.bootNavigationHandled ||
+    state
+      ?.initialRouteRendered
+  );
+}
+
+function markNavigationHandled(
+  state,
+  value = true
+) {
+  try {
+    if (
+      state &&
+      typeof state ===
+        "object"
+    ) {
+      state.bootNavigationHandled =
+        Boolean(
+          value
+        );
+    }
+  } catch {}
+}
+
+function buildSnapshot(
+  AppCore,
+  extras = {}
+) {
+  const state =
+    getState(
+      AppCore
+    );
+
+  return {
+    authenticated:
+      Boolean(
+        state.authenticated
+      ),
+    user:
+      state.user ||
+      null,
+    username:
+      getResolvedSessionUser(
+        AppCore
+      ),
+    role:
+      getResolvedSessionRole(
+        AppCore
+      ),
+    route:
+      state.route ||
+      "/",
+    publicPath:
+      state.publicPath ||
+      "/",
+    ...extras,
+  };
+}
+
+/* =========================================================
+   TARGET RESOLUTION
+========================================================= */
+
+function resolvePostLoginTarget({
+  AppCore,
+  Auth,
+} = {}) {
+  try {
+    if (
+      isFunction(
+        Auth?.getPostLoginTarget
+      )
+    ) {
+      const next =
+        Auth.getPostLoginTarget(
+          getState(
+            AppCore
+          ).user
+        );
+
+      if (
+        next &&
+        typeof next ===
+          "string"
+      ) {
+        return next;
+      }
+    }
+  } catch {}
+
+  return "/";
 }
 
 /* =========================================================
@@ -72,19 +227,31 @@ export function navigateAfterSessionRestore({
   Router,
   state,
 } = {}) {
-  if (!AppCore || !Router) {
+  if (
+    !AppCore ||
+    !Router
+  ) {
     return false;
   }
 
-  if (!AppCore?.state?.authenticated) {
+  if (
+    !isAuthenticated(
+      AppCore
+    )
+  ) {
     return false;
   }
 
-  if (shouldSkipNavigation(state)) {
+  if (
+    shouldSkipNavigation(
+      state
+    )
+  ) {
     safeLog(
       AppCore,
-      "navigateAfterSessionRestore() omitido: navegación ya resuelta en este ciclo."
+      "navigateAfterSessionRestore(): omitido (ya resuelto)."
     );
+
     return false;
   }
 
@@ -109,10 +276,7 @@ export function navigateAfterSessionRestore({
       publicPath:
         currentPublicPath,
       authenticated:
-        Boolean(
-          AppCore?.state
-            ?.authenticated
-        ),
+        true,
       user:
         getResolvedSessionUser(
           AppCore
@@ -124,9 +288,7 @@ export function navigateAfterSessionRestore({
     }
   );
 
-  /* Solo navegar si seguimos en login.
-     En cualquier otra ruta NO tocar nada:
-     el render inicial debe resolver la URL actual. */
+  /* Solo redirigir desde login */
   if (
     currentCanonicalPath !==
     "/login"
@@ -135,33 +297,61 @@ export function navigateAfterSessionRestore({
   }
 
   const target =
-    isFunction(
-      Auth?.getPostLoginTarget
-    )
-      ? Auth.getPostLoginTarget(
-          AppCore.state.user
-        ) || "/"
-      : "/";
+    resolvePostLoginTarget({
+      AppCore,
+      Auth,
+    });
 
-  state &&
-    (state.bootNavigationHandled =
-      true);
+  markNavigationHandled(
+    state,
+    true
+  );
 
-  if (
-    isFunction(
-      Router.goAfterLogin
-    )
-  ) {
-    Router.goAfterLogin(target);
-    return true;
+  try {
+    if (
+      isFunction(
+        Router.goAfterLogin
+      )
+    ) {
+      Router.goAfterLogin(
+        target
+      );
+
+      return true;
+    }
+  } catch (error) {
+    safeWarn(
+      AppCore,
+      "Router.goAfterLogin() falló:",
+      error
+    );
   }
 
-  Router.navigate(target, {
-    replaceState: true,
-    force: true,
-  });
+  try {
+    if (
+      isFunction(
+        Router.navigate
+      )
+    ) {
+      Router.navigate(
+        target,
+        {
+          replaceState: true,
+          force: true,
+        }
+      );
 
-  return true;
+      return true;
+    }
+  } catch (error) {
+    safeWarn(
+      AppCore,
+      "Router.navigate() falló:",
+      error
+    );
+  }
+
+  return false;
 }
 
 /* =========================================================
@@ -175,7 +365,8 @@ export async function restoreAuthSession({
   state,
 } = {}) {
   if (
-    state?.sessionRestorePromise
+    state
+      ?.sessionRestorePromise
   ) {
     return state.sessionRestorePromise;
   }
@@ -186,24 +377,22 @@ export async function restoreAuthSession({
       Auth.restoreSession
     )
   ) {
-    syncUserUI?.(AppCore);
+    try {
+      await Promise.resolve(
+        syncUserUI?.(
+          AppCore
+        )
+      );
+    } catch {}
 
-    return {
-      ok: false,
-      authenticated:
-        Boolean(
-          AppCore?.state
-            ?.authenticated
-        ),
-      user:
-        getResolvedSessionUser(
-          AppCore
-        ),
-      role:
-        getResolvedSessionRole(
-          AppCore
-        ),
-    };
+    return buildSnapshot(
+      AppCore,
+      {
+        ok: false,
+        reason:
+          "auth-module-missing",
+      }
+    );
   }
 
   state.sessionRestorePromise =
@@ -217,25 +406,22 @@ export async function restoreAuthSession({
         const result =
           await Auth.restoreSession();
 
-        syncUserUI?.(AppCore);
+        await Promise.resolve(
+          syncUserUI?.(
+            AppCore
+          )
+        );
 
-        const snapshot = {
-          ok:
-            Boolean(result?.ok),
-          authenticated:
-            Boolean(
-              AppCore?.state
-                ?.authenticated
-            ),
-          user:
-            getResolvedSessionUser(
-              AppCore
-            ),
-          role:
-            getResolvedSessionRole(
-              AppCore
-            ),
-        };
+        const snapshot =
+          buildSnapshot(
+            AppCore,
+            {
+              ok:
+                Boolean(
+                  result?.ok
+                ),
+            }
+          );
 
         safeLog(
           AppCore,
@@ -244,16 +430,9 @@ export async function restoreAuthSession({
         );
 
         return {
-          ...(result || {}),
-          ok:
-            Boolean(result?.ok),
-          authenticated:
-            snapshot.authenticated,
-          user:
-            AppCore?.state?.user ||
-            result?.user ||
-            null,
-          role: snapshot.role,
+          ...(result ||
+            {}),
+          ...snapshot,
         };
       } catch (error) {
         safeWarn(
@@ -262,26 +441,27 @@ export async function restoreAuthSession({
           error
         );
 
-        syncUserUI?.(AppCore);
-
-        return {
-          ok: false,
-          authenticated:
-            Boolean(
-              AppCore?.state
-                ?.authenticated
-            ),
-          user:
-            AppCore?.state?.user ||
-            null,
-          role:
-            getResolvedSessionRole(
+        try {
+          await Promise.resolve(
+            syncUserUI?.(
               AppCore
-            ),
-          error,
-        };
+            )
+          );
+        } catch {}
+
+        return buildSnapshot(
+          AppCore,
+          {
+            ok: false,
+            error,
+          }
+        );
       } finally {
-        if (state) {
+        if (
+          state &&
+          typeof state ===
+            "object"
+        ) {
           state.sessionRestorePromise =
             null;
         }
@@ -293,11 +473,6 @@ export async function restoreAuthSession({
 
 /* =========================================================
    RESTORE DURANTE BOOT
-   CRÍTICO:
-   - bloquear boot hasta resolver auth
-   - warmup después del restore
-   - sin renders intermedios
-   - sin navigate fantasma salvo login
 ========================================================= */
 
 export async function restoreSessionInBackground({
@@ -309,10 +484,10 @@ export async function restoreSessionInBackground({
   warmup,
 } = {}) {
   try {
-    if (state) {
-      state.bootNavigationHandled =
-        false;
-    }
+    markNavigationHandled(
+      state,
+      false
+    );
 
     const result =
       await restoreAuthSession({
@@ -322,11 +497,20 @@ export async function restoreSessionInBackground({
         state,
       });
 
-    await warmup?.(AppCore);
+    try {
+      await Promise.resolve(
+        warmup?.(
+          AppCore
+        )
+      );
+    } catch (error) {
+      safeWarn(
+        AppCore,
+        "warmup() falló:",
+        error
+      );
+    }
 
-    /* SOLO navegación explícita si quedó realmente en /login.
-       En rutas protegidas o contextualizadas NO navegar aquí,
-       para no provocar doble render ni perder username en URL. */
     navigateAfterSessionRestore({
       AppCore,
       Auth,
@@ -334,23 +518,30 @@ export async function restoreSessionInBackground({
       state,
     });
 
+    const snapshot =
+      buildSnapshot(
+        AppCore,
+        {
+          ok:
+            safeBool(
+              result?.ok
+            ) ||
+            Boolean(
+              result?.ok
+            ),
+        }
+      );
+
+    safeLog(
+      AppCore,
+      "restoreSessionInBackground() completado:",
+      snapshot
+    );
+
     return {
-      ...(result || {}),
-      ok:
-        Boolean(result?.ok),
-      authenticated:
-        Boolean(
-          AppCore?.state
-            ?.authenticated
-        ),
-      user:
-        AppCore?.state?.user ||
-        result?.user ||
-        null,
-      role:
-        getResolvedSessionRole(
-          AppCore
-        ),
+      ...(result ||
+        {}),
+      ...snapshot,
     };
   } catch (error) {
     safeWarn(
@@ -359,23 +550,57 @@ export async function restoreSessionInBackground({
       error
     );
 
-    syncUserUI?.(AppCore);
-
-    return {
-      ok: false,
-      authenticated:
-        Boolean(
-          AppCore?.state
-            ?.authenticated
-        ),
-      user:
-        AppCore?.state?.user ||
-        null,
-      role:
-        getResolvedSessionRole(
+    try {
+      await Promise.resolve(
+        syncUserUI?.(
           AppCore
-        ),
-      error,
-    };
+        )
+      );
+    } catch {}
+
+    return buildSnapshot(
+      AppCore,
+      {
+        ok: false,
+        error,
+      }
+    );
   }
 }
+
+/* =========================================================
+   DEBUG
+========================================================= */
+
+export function getSessionBootstrapSnapshot({
+  AppCore,
+  state,
+} = {}) {
+  return {
+    ...buildSnapshot(
+      AppCore
+    ),
+    restoring:
+      Boolean(
+        state
+          ?.sessionRestorePromise
+      ),
+    bootNavigationHandled:
+      Boolean(
+        state
+          ?.bootNavigationHandled
+      ),
+    initialRouteRendered:
+      Boolean(
+        state
+          ?.initialRouteRendered
+      ),
+  };
+}
+
+export default {
+  navigateAfterSessionRestore,
+  restoreAuthSession,
+  restoreSessionInBackground,
+  getSessionBootstrapSnapshot,
+};

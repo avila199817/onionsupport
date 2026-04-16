@@ -2,13 +2,13 @@
    Onion SPA - App UI Systems
    Archivo: src/app/ui.js
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - sincronizar UI usuario global
    - inicializar sistemas UI compartidos
    - registrar módulos UI en AppCore
    - refresco UI ante cambio idioma
    - evitar roturas si faltan deps
-   - bridge global Toast
+   - bridge global Toast robusto
 
    HARDENING EXTREMO:
    - init idempotente total
@@ -18,6 +18,8 @@
    - sync user serializada
    - eventos consistentes
    - no duplicar listeners globales
+   - no mutar objetos no extensibles
+   - descriptors seguros en bridges
 ========================================================= */
 
 /* =========================================================
@@ -88,6 +90,47 @@ function isFunction(value) {
   return typeof value === "function";
 }
 
+function isObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object"
+  );
+}
+
+function isExtensibleObject(value) {
+  try {
+    return (
+      isObject(value) &&
+      Object.isExtensible(value)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function safeDefineValue(
+  target,
+  key,
+  value
+) {
+  try {
+    Object.defineProperty(
+      target,
+      key,
+      {
+        value,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+      }
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function getUserSnapshot(AppCore) {
   const state =
     AppCore?.state || {};
@@ -97,10 +140,12 @@ function getUserSnapshot(AppCore) {
 
   return {
     user,
+
     authenticated:
       Boolean(
         state.authenticated
       ),
+
     role:
       state.role ||
       user?.role ||
@@ -211,10 +256,6 @@ export function syncUserUI(
   AppCore
 ) {
   if (!AppCore) {
-    console.warn(
-      "[Onion App UI] syncUserUI sin AppCore"
-    );
-
     return false;
   }
 
@@ -305,8 +346,7 @@ export function bindAppLanguageSync(
 
         try {
           const title =
-            document?.title ||
-            "";
+            document?.title || "";
 
           if (
             AppCore?.dom
@@ -319,8 +359,17 @@ export function bindAppLanguageSync(
       }
     );
 
-    AppCore.__appLangUiBound =
-      true;
+    if (
+      isExtensibleObject(
+        AppCore
+      )
+    ) {
+      safeDefineValue(
+        AppCore,
+        "__appLangUiBound",
+        true
+      );
+    }
 
     safeLog(
       AppCore,
@@ -353,25 +402,75 @@ function resolveToastMethod(
       "info"
     ).toLowerCase();
 
-  switch (
-    normalized
-  ) {
+  switch (normalized) {
     case "success":
-      return Toast.success;
+      return Toast?.success;
 
     case "error":
-      return Toast.error;
+      return Toast?.error;
 
     case "warning":
-      return Toast.warning;
+      return Toast?.warning;
 
     case "loading":
-      return Toast.loading;
+      return Toast?.loading;
 
     case "info":
     default:
-      return Toast.info;
+      return Toast?.info;
   }
+}
+
+function createToastBridge(
+  AppCore,
+  Toast
+) {
+  return function showToast(
+    message = "",
+    type = "info",
+    options = {}
+  ) {
+    try {
+      const method =
+        resolveToastMethod(
+          Toast,
+          type
+        );
+
+      if (
+        isFunction(
+          method
+        )
+      ) {
+        return method(
+          message,
+          options
+        );
+      }
+
+      if (
+        isFunction(
+          Toast?.show
+        )
+      ) {
+        return Toast.show({
+          ...options,
+          type,
+          message,
+        });
+      }
+
+      return null;
+    } catch (error) {
+      safeWarn(
+        AppCore,
+        "Toast bridge error:",
+        error
+      );
+
+      return null;
+    }
+  };
 }
 
 function bindToastBridge(
@@ -393,47 +492,85 @@ function bindToastBridge(
     return true;
   }
 
-  AppCore.showToast = (
-    message = "",
-    type = "info",
-    options = {}
-  ) => {
-    try {
-      const method =
-        resolveToastMethod(
-          Toast,
-          type
-        );
+  const bridge =
+    createToastBridge(
+      AppCore,
+      Toast
+    );
 
-      if (
-        isFunction(
-          method
-        )
-      ) {
-        return method(
-          message,
-          options
-        );
-      }
+  let attached =
+    false;
 
-      return Toast.show?.({
-        ...options,
-        type,
-        message,
-      });
-    } catch (error) {
-      safeWarn(
-        AppCore,
-        "Toast bridge error:",
-        error
+  /* prioridad: método nativo */
+  try {
+    if (
+      isFunction(
+        AppCore?.setShowToast
+      )
+    ) {
+      AppCore.setShowToast(
+        bridge
       );
 
-      return null;
+      attached = true;
     }
-  };
+  } catch {}
 
-  AppCore.__toastBridgeBound =
-    true;
+  /* attach directo seguro */
+  if (
+    !attached &&
+    isExtensibleObject(
+      AppCore
+    )
+  ) {
+    attached =
+      safeDefineValue(
+        AppCore,
+        "showToast",
+        bridge
+      );
+  }
+
+  /* fallback dentro de utils */
+  if (
+    !attached &&
+    isExtensibleObject(
+      AppCore?.utils
+    )
+  ) {
+    attached =
+      safeDefineValue(
+        AppCore.utils,
+        "showToast",
+        bridge
+      );
+  }
+
+  if (!attached) {
+    safeWarn(
+      AppCore,
+      "Toast bridge no pudo montarse: objeto no extensible."
+    );
+
+    return false;
+  }
+
+  if (
+    isExtensibleObject(
+      AppCore
+    )
+  ) {
+    safeDefineValue(
+      AppCore,
+      "__toastBridgeBound",
+      true
+    );
+  }
+
+  safeLog(
+    AppCore,
+    "Toast bridge activo."
+  );
 
   return true;
 }
@@ -450,10 +587,6 @@ export function initUISystems({
   state,
 } = {}) {
   if (!AppCore) {
-    console.warn(
-      "[Onion App UI] initUISystems sin AppCore"
-    );
-
     return false;
   }
 
@@ -557,3 +690,9 @@ export function initUISystems({
     return false;
   }
 }
+
+export default {
+  syncUserUI,
+  bindAppLanguageSync,
+  initUISystems,
+};

@@ -1,0 +1,911 @@
+/* =========================================================
+   Onion SPA - Usuarios Bindings
+   Archivo: src/views/usuarios/usuarios.bindings.js
+
+   FINAL PRO SYSTEM · ADMIN USERS BINDINGS · 10/10
+
+   Responsabilidades:
+   - enlazar eventos reales de la vista Usuarios
+   - registrar y limpiar listeners del DOM
+   - delegar acciones sobre toolbar, tabla y paginación
+   - conectar DOM con usuarios.actions.js
+   - mantener la vista desacoplada del template
+   - exponer cleanup robusto para re-render seguro
+========================================================= */
+
+import { AppCore } from "../../core/index.js";
+
+import {
+  hydrateUsuarios,
+  refreshUsuariosList,
+  searchUsuarios,
+  applyUsuariosRoleFilter,
+  applyUsuariosStatusFilter,
+  changeUsuariosSort,
+  changeUsuariosPageSize,
+  nextUsuariosPage,
+  prevUsuariosPage,
+  resetUsuariosListFilters,
+  toggleUsuariosFiltersPanel,
+  selectUsuario,
+  toggleUsuarioSelection,
+  selectAllVisibleUsuarios,
+  clearUsuariosSelectionAction,
+  openUsuarioDetail,
+} from "./usuarios.actions.js";
+
+import {
+  patchUsuariosUi,
+  setUsuariosAction,
+  setUsuariosSearchInput,
+  readUsuariosQuery,
+} from "./usuarios.store.js";
+
+/* =========================================================
+   HELPERS
+========================================================= */
+
+function isBrowser() {
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
+}
+
+function isElement(value) {
+  return (
+    value instanceof Element ||
+    value instanceof HTMLDocument
+  );
+}
+
+function safeText(
+  value = "",
+  fallback = ""
+) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return fallback;
+  }
+
+  const text = String(value).trim();
+  return text || fallback;
+}
+
+function safeObject(value) {
+  return value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+    ? value
+    : {};
+}
+
+function safeQuery(root, selector) {
+  if (!isElement(root) || !selector) {
+    return null;
+  }
+
+  try {
+    return root.querySelector(selector);
+  } catch {
+    return null;
+  }
+}
+
+function safeQueryAll(root, selector) {
+  if (!isElement(root) || !selector) {
+    return [];
+  }
+
+  try {
+    return Array.from(
+      root.querySelectorAll(selector)
+    );
+  } catch {
+    return [];
+  }
+}
+
+function addEventListenerSafe(
+  target,
+  eventName,
+  handler,
+  options
+) {
+  if (
+    !target ||
+    typeof target.addEventListener !==
+      "function" ||
+    typeof handler !== "function"
+  ) {
+    return () => {};
+  }
+
+  target.addEventListener(
+    eventName,
+    handler,
+    options
+  );
+
+  return () => {
+    try {
+      target.removeEventListener(
+        eventName,
+        handler,
+        options
+      );
+    } catch {}
+  };
+}
+
+function createDisposerBag() {
+  const disposers = [];
+
+  return {
+    add(disposer) {
+      if (typeof disposer === "function") {
+        disposers.push(disposer);
+      }
+    },
+
+    flush() {
+      while (disposers.length) {
+        const disposer =
+          disposers.pop();
+
+        try {
+          disposer?.();
+        } catch (error) {
+          console.error(
+            "[UsuariosBindings] cleanup error",
+            error
+          );
+        }
+      }
+    },
+  };
+}
+
+function safeEmit(
+  eventName,
+  payload = {}
+) {
+  try {
+    AppCore?.events?.emit?.(
+      eventName,
+      payload
+    );
+  } catch (error) {
+    console.warn(
+      "[UsuariosBindings] emit warning",
+      error
+    );
+  }
+}
+
+function getUsuariosRoot(container) {
+  return (
+    safeQuery(
+      container,
+      '[data-usuarios-view="true"]'
+    ) ||
+    safeQuery(
+      container,
+      ".usuarios-view"
+    ) ||
+    container ||
+    null
+  );
+}
+
+function getSearchInput(root) {
+  return safeQuery(
+    root,
+    '[data-usuarios-input="search"]'
+  );
+}
+
+function getSortDirForColumn(
+  column = ""
+) {
+  const query =
+    safeObject(readUsuariosQuery());
+
+  const currentBy = safeText(
+    query.sortBy,
+    "createdAt"
+  );
+
+  const currentDir = safeText(
+    query.sortDir,
+    "desc"
+  );
+
+  if (currentBy !== column) {
+    return "asc";
+  }
+
+  return currentDir === "asc"
+    ? "desc"
+    : "asc";
+}
+
+/* =========================================================
+   DOM SYNC
+========================================================= */
+
+function syncSearchDraftFromDom(
+  root
+) {
+  const input =
+    getSearchInput(root);
+
+  if (!input) {
+    return "";
+  }
+
+  const value = safeText(
+    input.value,
+    ""
+  );
+
+  setUsuariosSearchInput(value);
+  return value;
+}
+
+/* =========================================================
+   ACTION EXECUTORS
+========================================================= */
+
+async function handleUsuariosActionClick(
+  action = "",
+  element,
+  root
+) {
+  const normalized =
+    safeText(action, "");
+
+  if (!normalized) {
+    return null;
+  }
+
+  const userId = safeText(
+    element?.getAttribute?.(
+      "data-usuarios-user-id"
+    ),
+    ""
+  );
+
+  safeEmit(
+    "usuarios:bindings:action:start",
+    {
+      action: normalized,
+      userId,
+    }
+  );
+
+  let result = null;
+
+  switch (normalized) {
+    case "refresh":
+      setUsuariosAction("refresh");
+      result =
+        await refreshUsuariosList();
+      break;
+
+    case "toggle-filters":
+      setUsuariosAction(
+        "toggle-filters"
+      );
+      result =
+        toggleUsuariosFiltersPanel();
+      break;
+
+    case "submit-search": {
+      setUsuariosAction("search");
+      const search =
+        syncSearchDraftFromDom(
+          root
+        );
+
+      result =
+        await searchUsuarios(
+          search
+        );
+      break;
+    }
+
+    case "select-all":
+      setUsuariosAction(
+        "select-all"
+      );
+      result =
+        selectAllVisibleUsuarios();
+      break;
+
+    case "clear-selection":
+      setUsuariosAction(
+        "clear-selection"
+      );
+      result =
+        clearUsuariosSelectionAction();
+      break;
+
+    case "reset-filters":
+      setUsuariosAction(
+        "reset-filters"
+      );
+      result =
+        await resetUsuariosListFilters();
+      break;
+
+    case "prev-page":
+      setUsuariosAction("prev-page");
+      result =
+        await prevUsuariosPage();
+      break;
+
+    case "next-page":
+      setUsuariosAction("next-page");
+      result =
+        await nextUsuariosPage();
+      break;
+
+    case "select-user":
+      setUsuariosAction(
+        "select-user"
+      );
+      result =
+        selectUsuario(userId);
+      break;
+
+    case "open-detail":
+      setUsuariosAction(
+        "open-detail"
+      );
+      result =
+        await openUsuarioDetail(
+          userId
+        );
+      break;
+
+    default:
+      result = null;
+      break;
+  }
+
+  safeEmit(
+    result?.ok === true
+      ? "usuarios:bindings:action:success"
+      : "usuarios:bindings:action:error",
+    {
+      action: normalized,
+      userId,
+      result,
+    }
+  );
+
+  return result;
+}
+
+async function handleUsuariosFilterChange(
+  type = "",
+  value = ""
+) {
+  const normalizedType =
+    safeText(type, "");
+  const normalizedValue =
+    safeText(value, "");
+
+  safeEmit(
+    "usuarios:bindings:filter:change",
+    {
+      type: normalizedType,
+      value: normalizedValue,
+    }
+  );
+
+  if (normalizedType === "role") {
+    setUsuariosAction(
+      "filter-role"
+    );
+    return applyUsuariosRoleFilter(
+      normalizedValue
+    );
+  }
+
+  if (
+    normalizedType === "status"
+  ) {
+    setUsuariosAction(
+      "filter-status"
+    );
+    return applyUsuariosStatusFilter(
+      normalizedValue
+    );
+  }
+
+  return null;
+}
+
+async function handleUsuariosPageSizeChange(
+  value = ""
+) {
+  const pageSize = Math.max(
+    1,
+    Number(value) || 20
+  );
+
+  setUsuariosAction(
+    "page-size"
+  );
+
+  safeEmit(
+    "usuarios:bindings:page-size:change",
+    {
+      pageSize,
+    }
+  );
+
+  return changeUsuariosPageSize(
+    pageSize
+  );
+}
+
+async function handleUsuariosSortClick(
+  sortBy = ""
+) {
+  const normalized =
+    safeText(sortBy, "");
+
+  if (!normalized) {
+    return null;
+  }
+
+  const sortDir =
+    getSortDirForColumn(
+      normalized
+    );
+
+  setUsuariosAction("sort");
+
+  safeEmit(
+    "usuarios:bindings:sort",
+    {
+      sortBy: normalized,
+      sortDir,
+    }
+  );
+
+  return changeUsuariosSort(
+    normalized,
+    sortDir
+  );
+}
+
+function handleUsuariosSelectionChange(
+  userId = ""
+) {
+  const normalized =
+    safeText(userId, "");
+
+  if (!normalized) {
+    return null;
+  }
+
+  setUsuariosAction(
+    "toggle-selection"
+  );
+
+  safeEmit(
+    "usuarios:bindings:selection:toggle",
+    {
+      userId: normalized,
+    }
+  );
+
+  return toggleUsuarioSelection(
+    normalized
+  );
+}
+
+/* =========================================================
+   BINDERS
+========================================================= */
+
+function bindLifecycle({
+  root,
+  bag,
+}) {
+  safeEmit(
+    "usuarios:view:bound",
+    {
+      root,
+      rows:
+        safeQueryAll(
+          root,
+          "[data-usuarios-user-id]"
+        ).length,
+    }
+  );
+
+  bag.add(() => {
+    safeEmit(
+      "usuarios:view:unbound",
+      {
+        root,
+      }
+    );
+  });
+}
+
+function bindClickDelegation({
+  root,
+  bag,
+}) {
+  const onClick =
+    async (event) => {
+      const actionNode =
+        event?.target?.closest?.(
+          "[data-usuarios-action]"
+        );
+
+      if (
+        actionNode &&
+        root.contains(actionNode)
+      ) {
+        event.preventDefault();
+
+        try {
+          await handleUsuariosActionClick(
+            actionNode.getAttribute(
+              "data-usuarios-action"
+            ),
+            actionNode,
+            root
+          );
+        } catch (error) {
+          console.error(
+            "[UsuariosBindings] action click error",
+            error
+          );
+        }
+
+        return;
+      }
+
+      const sortNode =
+        event?.target?.closest?.(
+          "[data-usuarios-sort]"
+        );
+
+      if (
+        sortNode &&
+        root.contains(sortNode)
+      ) {
+        event.preventDefault();
+
+        try {
+          await handleUsuariosSortClick(
+            sortNode.getAttribute(
+              "data-usuarios-sort"
+            )
+          );
+        } catch (error) {
+          console.error(
+            "[UsuariosBindings] sort click error",
+            error
+          );
+        }
+      }
+    };
+
+  bag.add(
+    addEventListenerSafe(
+      root,
+      "click",
+      onClick
+    )
+  );
+}
+
+function bindChangeDelegation({
+  root,
+  bag,
+}) {
+  const onChange =
+    async (event) => {
+      const target =
+        event?.target;
+
+      if (!target) {
+        return;
+      }
+
+      const filterType =
+        target.getAttribute?.(
+          "data-usuarios-filter"
+        );
+
+      if (
+        filterType &&
+        root.contains(target)
+      ) {
+        try {
+          await handleUsuariosFilterChange(
+            filterType,
+            target.value
+          );
+        } catch (error) {
+          console.error(
+            "[UsuariosBindings] filter change error",
+            error
+          );
+        }
+
+        return;
+      }
+
+      const isPageSize =
+        target.getAttribute?.(
+          "data-usuarios-page-size"
+        ) === "true";
+
+      if (
+        isPageSize &&
+        root.contains(target)
+      ) {
+        try {
+          await handleUsuariosPageSizeChange(
+            target.value
+          );
+        } catch (error) {
+          console.error(
+            "[UsuariosBindings] page size change error",
+            error
+          );
+        }
+
+        return;
+      }
+
+      const selectionUserId =
+        target.getAttribute?.(
+          "data-usuarios-select"
+        );
+
+      if (
+        selectionUserId &&
+        root.contains(target)
+      ) {
+        try {
+          handleUsuariosSelectionChange(
+            selectionUserId
+          );
+        } catch (error) {
+          console.error(
+            "[UsuariosBindings] selection change error",
+            error
+          );
+        }
+      }
+    };
+
+  bag.add(
+    addEventListenerSafe(
+      root,
+      "change",
+      onChange
+    )
+  );
+}
+
+function bindSearchInput({
+  root,
+  bag,
+}) {
+  const input =
+    getSearchInput(root);
+
+  if (!input) {
+    return;
+  }
+
+  const onInput = () => {
+    setUsuariosSearchInput(
+      safeText(
+        input.value,
+        ""
+      )
+    );
+  };
+
+  const onKeydown =
+    async (event) => {
+      if (
+        event?.key !== "Enter"
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+
+      try {
+        setUsuariosAction(
+          "search"
+        );
+
+        await searchUsuarios(
+          safeText(
+            input.value,
+            ""
+          )
+        );
+      } catch (error) {
+        console.error(
+          "[UsuariosBindings] search enter error",
+          error
+        );
+      }
+    };
+
+  bag.add(
+    addEventListenerSafe(
+      input,
+      "input",
+      onInput
+    )
+  );
+
+  bag.add(
+    addEventListenerSafe(
+      input,
+      "keydown",
+      onKeydown
+    )
+  );
+}
+
+function bindWindowResize({
+  bag,
+}) {
+  if (!isBrowser()) {
+    return;
+  }
+
+  const onResize = () => {
+    safeEmit(
+      "usuarios:view:resize",
+      {
+        width:
+          window.innerWidth,
+        height:
+          window.innerHeight,
+      }
+    );
+  };
+
+  bag.add(
+    addEventListenerSafe(
+      window,
+      "resize",
+      onResize,
+      { passive: true }
+    )
+  );
+}
+
+function bindHoverTelemetry({
+  root,
+  bag,
+}) {
+  const hoverables =
+    safeQueryAll(
+      root,
+      ".usuarios-stat, .usuarios-panel, .usuarios-row-action, .usuarios-user-cell"
+    );
+
+  hoverables.forEach(
+    (node, index) => {
+      const onPointerEnter =
+        () => {
+          safeEmit(
+            "usuarios:hover:item",
+            {
+              index,
+              className:
+                node.className,
+            }
+          );
+        };
+
+      bag.add(
+        addEventListenerSafe(
+          node,
+          "pointerenter",
+          onPointerEnter,
+          { passive: true }
+        )
+      );
+    }
+  );
+}
+
+/* =========================================================
+   MAIN BIND
+========================================================= */
+
+export function bindUsuariosView({
+  container,
+} = {}) {
+  if (!isBrowser()) {
+    return () => {};
+  }
+
+  if (!isElement(container)) {
+    console.warn(
+      "[UsuariosBindings] container inválido"
+    );
+    return () => {};
+  }
+
+  const root =
+    getUsuariosRoot(
+      container
+    );
+
+  if (!root) {
+    console.warn(
+      "[UsuariosBindings] root no encontrado"
+    );
+    return () => {};
+  }
+
+  patchUsuariosUi({
+    mounted: true,
+  });
+
+  const bag =
+    createDisposerBag();
+
+  bindLifecycle({
+    root,
+    bag,
+  });
+
+  bindClickDelegation({
+    root,
+    bag,
+  });
+
+  bindChangeDelegation({
+    root,
+    bag,
+  });
+
+  bindSearchInput({
+    root,
+    bag,
+  });
+
+  bindWindowResize({
+    bag,
+  });
+
+  bindHoverTelemetry({
+    root,
+    bag,
+  });
+
+  return function cleanupUsuariosView() {
+    patchUsuariosUi({
+      mounted: false,
+    });
+
+    bag.flush();
+  };
+}
+
+export default bindUsuariosView;

@@ -11,11 +11,19 @@
    - evitar flicker visual
    - endurecer DOM access browser/server
 
+   ALINEADO CON index.js:
+   - respeta AppCore.state.loading
+   - respeta AppCore.state.booting
+   - mínimo riesgo visual en boot
+   - hide idempotente total
+   - show seguro aunque DOM parcial
+   - snapshot útil para debug
+
    HARDENING PRO:
-   - idempotencia total
    - cero throws
    - race-safe timers
    - fallback si AppCore parcial
+   - SSR safe
 ========================================================= */
 
 import {
@@ -48,26 +56,37 @@ function safeSetLoading(
   AppCore,
   value = false
 ) {
+  const next =
+    Boolean(value);
+
   try {
     if (
       typeof AppCore?.setLoading ===
       "function"
     ) {
-      AppCore.setLoading(
-        Boolean(value)
-      );
+      AppCore.setLoading(next);
       return;
     }
   } catch {}
 
   try {
-    if (
-      AppCore?.state
-    ) {
+    if (AppCore?.state) {
       AppCore.state.loading =
-        Boolean(value);
+        next;
     }
   } catch {}
+}
+
+function safeGetState(
+  AppCore
+) {
+  try {
+    return (
+      AppCore?.state || {}
+    );
+  } catch {
+    return {};
+  }
 }
 
 /* =========================================================
@@ -83,15 +102,32 @@ export function getLoaderElement(
 
   try {
     if (
-      AppCore?.dom?.loader
+      AppCore?.dom?.loader &&
+      document.contains(
+        AppCore.dom.loader
+      )
     ) {
       return AppCore.dom.loader;
     }
   } catch {}
 
-  return document.getElementById(
-    "app-loader"
-  );
+  try {
+    const el =
+      document.getElementById(
+        "app-loader"
+      );
+
+    if (
+      el &&
+      AppCore?.dom
+    ) {
+      AppCore.dom.loader = el;
+    }
+
+    return el;
+  } catch {
+    return null;
+  }
 }
 
 /* =========================================================
@@ -108,10 +144,12 @@ function setBodyLoading(
     return;
   }
 
-  document.body.classList.toggle(
-    "loading",
-    Boolean(enabled)
-  );
+  try {
+    document.body.classList.toggle(
+      "loading",
+      Boolean(enabled)
+    );
+  } catch {}
 }
 
 function setLoaderVisible(
@@ -119,42 +157,50 @@ function setLoaderVisible(
   visible = true
 ) {
   if (!loader) {
-    return;
+    return false;
   }
 
-  loader.hidden =
-    !visible;
+  const show =
+    Boolean(visible);
 
-  loader.setAttribute(
-    "aria-hidden",
-    visible
-      ? "false"
-      : "true"
-  );
+  try {
+    loader.hidden = !show;
 
-  if (visible) {
-    loader.style.display =
-      "";
-    loader.style.opacity =
-      "";
-    loader.style.visibility =
-      "";
-    loader.style.pointerEvents =
-      "";
-  } else {
-    loader.style.display =
-      "none";
-    loader.style.opacity =
-      "0";
-    loader.style.visibility =
-      "hidden";
-    loader.style.pointerEvents =
-      "none";
+    loader.setAttribute(
+      "aria-hidden",
+      show
+        ? "false"
+        : "true"
+    );
+
+    if (show) {
+      loader.style.display =
+        "";
+      loader.style.opacity =
+        "";
+      loader.style.visibility =
+        "";
+      loader.style.pointerEvents =
+        "";
+    } else {
+      loader.style.display =
+        "none";
+      loader.style.opacity =
+        "0";
+      loader.style.visibility =
+        "hidden";
+      loader.style.pointerEvents =
+        "none";
+    }
+
+    return true;
+  } catch {
+    return false;
   }
 }
 
 /* =========================================================
-   VISIBILITY
+   PUBLIC VISIBILITY API
 ========================================================= */
 
 export function forceHideLoader(
@@ -208,10 +254,12 @@ export function showLoader(
     );
 
   setBodyLoading(true);
-  setLoaderVisible(
-    loader,
-    true
-  );
+
+  if (loader) {
+    restoreLoaderInlineStyles(
+      AppCore
+    );
+  }
 
   safeSetLoading(
     AppCore,
@@ -224,11 +272,9 @@ export function showLoader(
 export function hideLoader(
   AppCore
 ) {
-  forceHideLoader(
+  return forceHideLoader(
     AppCore
   );
-
-  return true;
 }
 
 /* =========================================================
@@ -271,22 +317,25 @@ export function armBootFailsafeLoader({
     window.setTimeout(
       () => {
         try {
+          const coreState =
+            safeGetState(
+              AppCore
+            );
+
           const stillBooting =
             Boolean(
               state?.booting ||
-              AppCore?.state
-                ?.booting
+              coreState.booting
             );
 
-          const loaderStillVisible =
+          const stillLoading =
             Boolean(
-              AppCore?.state
-                ?.loading
+              coreState.loading
             );
 
           if (
             !stillBooting &&
-            !loaderStillVisible
+            !stillLoading
           ) {
             return;
           }
@@ -296,26 +345,14 @@ export function armBootFailsafeLoader({
             "Failsafe loader aplicado.",
             {
               booting:
-                Boolean(
-                  state?.booting
-                ),
-              coreBooting:
-                Boolean(
-                  AppCore?.state
-                    ?.booting
-                ),
+                stillBooting,
               loading:
-                Boolean(
-                  AppCore?.state
-                    ?.loading
-                ),
+                stillLoading,
               route:
-                AppCore?.state
-                  ?.route ||
+                coreState.route ||
                 "/",
               publicPath:
-                AppCore?.state
-                  ?.publicPath ||
+                coreState.publicPath ||
                 "/",
             }
           );
@@ -325,7 +362,12 @@ export function armBootFailsafeLoader({
           );
         } catch {}
       },
-      BOOT_FAILSAFE_LOADER_MS
+      Math.max(
+        1000,
+        Number(
+          BOOT_FAILSAFE_LOADER_MS
+        ) || 12000
+      )
     );
 
   if (state) {
@@ -348,23 +390,43 @@ export function getLoaderSnapshot(
       AppCore
     );
 
+  const coreState =
+    safeGetState(
+      AppCore
+    );
+
   return {
     exists:
       Boolean(loader),
+
     hidden:
       Boolean(
         loader?.hidden
       ),
+
+    visible:
+      Boolean(
+        loader &&
+        !loader.hidden
+      ),
+
     loading:
       Boolean(
-        AppCore?.state
-          ?.loading
+        coreState.loading
       ),
+
     booting:
       Boolean(
-        AppCore?.state
-          ?.booting
+        coreState.booting
       ),
+
+    route:
+      coreState.route ||
+      "/",
+
+    publicPath:
+      coreState.publicPath ||
+      "/",
   };
 }
 

@@ -9,13 +9,14 @@
    - navegación back segura
    - helpers reutilizables para router
 
-   HARDENING:
-   - guards browser
+   HARDENING EXTREMO:
+   - guards browser robustos
    - fallback silencioso si History API falla
-   - normalización de URL/state
+   - normalización estricta URL/state
    - no duplicar estados innecesarios
    - preservar publicPath/canonicalPath/username
    - no degradar URL contextualizada /@username
+   - timestamps estables
 ========================================================= */
 
 import {
@@ -36,13 +37,17 @@ import {
 function canUseHistory() {
   return (
     isBrowser() &&
-    typeof window.history !==
-      "undefined" &&
+    typeof window !== "undefined" &&
+    typeof window.history !== "undefined" &&
     typeof window.history.pushState ===
       "function" &&
     typeof window.history.replaceState ===
       "function"
   );
+}
+
+function nowTs() {
+  return Date.now();
 }
 
 function safeHistoryCall(
@@ -71,10 +76,14 @@ function normalizeUrl(
   AppCore,
   url = "/"
 ) {
-  return normalizePath(
-    AppCore,
-    url
-  );
+  try {
+    return normalizePath(
+      AppCore,
+      url || "/"
+    );
+  } catch {
+    return "/";
+  }
 }
 
 function getComparableCurrentUrl(
@@ -92,6 +101,10 @@ function getComparableCurrentUrl(
   );
 }
 
+/* =========================================================
+   CONTEXT RESOLUTION
+========================================================= */
+
 function getResolvedHistoryContext(
   AppCore,
   pathname = "/",
@@ -105,17 +118,20 @@ function getResolvedHistoryContext(
         options.getRoute,
         pathname,
         options
-      )
+      ) || pathname
     );
+
+  const payload =
+    buildStatePayload(
+      AppCore,
+      publicPath
+    ) || {};
 
   const canonicalPath =
     normalizeUrl(
       AppCore,
       options.canonicalPath ||
-        buildStatePayload(
-          AppCore,
-          publicPath
-        )?.canonicalPath ||
+        payload.canonicalPath ||
         pathname ||
         "/"
     );
@@ -123,10 +139,7 @@ function getResolvedHistoryContext(
   const username =
     options.username ||
     options.resolvedUsername ||
-    buildStatePayload(
-      AppCore,
-      publicPath
-    )?.username ||
+    payload.username ||
     getCurrentResolvedUsername(
       AppCore
     ) ||
@@ -152,7 +165,7 @@ export function createHistoryState({
     AppCore,
     pathname,
     {
-      ts: Date.now(),
+      ts: nowTs(),
       ...extras,
     }
   );
@@ -248,7 +261,7 @@ export function updateHistory({
 } = {}) {
   if (
     !canUseHistory() ||
-    options.skipHistory
+    options.skipHistory === true
   ) {
     return false;
   }
@@ -294,7 +307,7 @@ export function updateHistory({
 
   if (
     sameUrl ||
-    options.replaceState
+    options.replaceState === true
   ) {
     return replaceState({
       AppCore,
@@ -338,7 +351,7 @@ export function ensureInitialHistoryState({
     const currentUsername =
       getCurrentResolvedUsername(
         AppCore
-      );
+      ) || null;
 
     const currentState =
       window.history.state;
@@ -348,25 +361,25 @@ export function ensureInitialHistoryState({
       typeof currentState ===
         "object"
     ) {
-      const currentStatePath =
+      const statePublicPath =
         normalizeUrl(
           AppCore,
           currentState.publicPath ||
             currentState.path ||
-            ""
+            "/"
         );
 
-      const currentStateCanonical =
+      const stateCanonicalPath =
         normalizeUrl(
           AppCore,
           currentState.canonicalPath ||
-            ""
+            "/"
         );
 
       if (
-        currentStatePath ===
+        statePublicPath ===
           currentUrl &&
-        currentStateCanonical ===
+        stateCanonicalPath ===
           currentCanonicalPath
       ) {
         return true;

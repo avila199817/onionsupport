@@ -24,13 +24,10 @@ export function handleDocumentClick({
   toggleSidebar,
   toggleDropdown,
   closeDropdown,
-  closeSidebar,
   handleLogout,
-  isMobileViewport,
   getElements: resolveElements,
 }) {
   const {
-    sidebar,
     toggleBtn,
     mobileToggleBtn,
     userToggle,
@@ -85,24 +82,6 @@ export function handleDocumentClick({
     return;
   }
 
-  /* mobile outside click close */
-  if (
-    typeof isMobileViewport === "function" &&
-    isMobileViewport() &&
-    sidebar &&
-    (
-      sidebar.classList.contains("open") ||
-      sidebar.classList.contains("is-open")
-    ) &&
-    !sidebar.contains(target) &&
-    !(
-      mobileToggleBtn &&
-      mobileToggleBtn.contains(target)
-    )
-  ) {
-    closeSidebar?.();
-  }
-
   closeDropdown?.();
 }
 
@@ -110,7 +89,6 @@ export function handleSidebarMenuClick({
   AppCore,
   event,
   closeDropdown,
-  closeSidebarOnMobileAfterNavigation,
   getElements: resolveElements,
 }) {
   const { sidebarMenu } =
@@ -140,7 +118,6 @@ export function handleSidebarMenuClick({
   }
 
   closeDropdown?.();
-  closeSidebarOnMobileAfterNavigation?.();
 }
 
 export function handleUserToggleKeydown({
@@ -187,24 +164,12 @@ export function handleUserToggleKeydown({
 export function handleGlobalKeydown({
   event,
   closeDropdown,
-  closeSidebar,
-  isMobileViewport,
-  getDesiredSidebarOpenState,
 }) {
   if (event?.key !== "Escape") {
     return;
   }
 
   closeDropdown?.();
-
-  if (
-    typeof isMobileViewport === "function" &&
-    typeof getDesiredSidebarOpenState === "function" &&
-    isMobileViewport() &&
-    getDesiredSidebarOpenState()
-  ) {
-    closeSidebar?.();
-  }
 }
 
 export function handleResize({
@@ -227,12 +192,8 @@ export function bindDomEvents(ctx) {
     toggleDropdown,
     openDropdown,
     closeDropdown,
-    closeSidebar,
-    closeSidebarOnMobileAfterNavigation,
     syncSidebarState,
     getElements: resolveElements,
-    isMobileViewport,
-    getDesiredSidebarOpenState,
   } = ctx;
 
   AppCore.cleanup.on(
@@ -246,9 +207,7 @@ export function bindDomEvents(ctx) {
         toggleSidebar,
         toggleDropdown,
         closeDropdown,
-        closeSidebar,
         handleLogout,
-        isMobileViewport,
         getElements: resolveElements,
       });
     }
@@ -262,9 +221,6 @@ export function bindDomEvents(ctx) {
       handleGlobalKeydown({
         event,
         closeDropdown,
-        closeSidebar,
-        isMobileViewport,
-        getDesiredSidebarOpenState,
       });
     }
   );
@@ -331,7 +287,6 @@ export function bindDomEvents(ctx) {
           AppCore,
           event,
           closeDropdown,
-          closeSidebarOnMobileAfterNavigation,
           getElements: resolveElements,
         });
       }

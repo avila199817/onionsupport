@@ -12,9 +12,34 @@
    - init / render / reload / destroy seguros
    - evitar duplicidad de lógica en index.js
    - mantener superficie pública estable
+   - blindar acceso a métodos opcionales del módulo view
 ========================================================= */
 
 import UsuariosView from "./usuarios.view.js";
+
+/* =========================================================
+   INTERNAL
+========================================================= */
+
+function safeCall(
+  methodName = "",
+  args = []
+) {
+  const method =
+    UsuariosView?.[methodName];
+
+  if (
+    typeof method !== "function"
+  ) {
+    return null;
+  }
+
+  return method(...args);
+}
+
+/* =========================================================
+   PRIMARY EXPORT
+========================================================= */
 
 export { UsuariosView };
 export default UsuariosView;
@@ -24,28 +49,28 @@ export default UsuariosView;
 ========================================================= */
 
 export const init = (...args) =>
-  UsuariosView?.init?.(...args);
+  safeCall("init", args);
 
 export const render = (...args) =>
-  UsuariosView?.render?.(...args);
+  safeCall("render", args);
 
 export const reload = (...args) =>
-  UsuariosView?.reload?.(...args);
+  safeCall("reload", args);
 
 export const destroy = (...args) =>
-  UsuariosView?.destroy?.(...args);
+  safeCall("destroy", args);
 
 export const reset = (...args) =>
-  UsuariosView?.reset?.(...args);
+  safeCall("reset", args);
 
 export const getState = (...args) =>
-  UsuariosView?.getState?.(...args);
+  safeCall("getState", args);
 
 export const getStatus = (...args) =>
-  UsuariosView?.getStatus?.(...args);
+  safeCall("getStatus", args);
 
 export const getElement = (...args) =>
-  UsuariosView?.getElement?.(...args);
+  safeCall("getElement", args);
 
 /* =========================================================
    NAMED EXPORTS DE APOYO

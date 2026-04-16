@@ -2,7 +2,7 @@
    Onion SPA - App Events
    Archivo: src/app/events.js
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - bind eventos globales app
    - sincronizar UI tras sesión
    - rerender ruta al cambiar idioma
@@ -16,6 +16,8 @@
    - notificaciones sin duplicados agresivos
    - sync route/UI robusta
    - cero throws accidentales
+   - no forzar publicPath incorrecto tras render
+   - no duplicar rerenders por idioma
 ========================================================= */
 
 import {
@@ -27,6 +29,9 @@ import {
 ========================================================= */
 
 let eventsBound = false;
+let langChangeInFlight = false;
+let lastToastKey = "";
+let lastToastAt = 0;
 
 /* =========================================================
    HELPERS
@@ -47,9 +52,7 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text =
-    String(value).trim();
-
+  const text = String(value).trim();
   return text || fallback;
 }
 
@@ -83,16 +86,13 @@ function safeSetState(
   payload = {}
 ) {
   try {
-    AppCore?.setState?.(
-      payload
-    );
+    AppCore?.setState?.(payload);
   } catch {}
 
   try {
     if (
       AppCore?.state &&
-      typeof AppCore.state ===
-        "object"
+      typeof AppCore.state === "object"
     ) {
       Object.assign(
         AppCore.state,
@@ -107,10 +107,10 @@ function safeSetPublicPath(
   path = "/"
 ) {
   try {
-    AppCore?.setPublicPath?.(
-      path
-    );
-  } catch {}
+    return AppCore?.setPublicPath?.(path);
+  } catch {
+    return path;
+  }
 }
 
 function safeSetDocumentLang(
@@ -135,12 +135,10 @@ function safeToast(
   options = {}
 ) {
   try {
-    const method =
-      Toast?.[type];
+    const method = Toast?.[type];
 
     if (
-      typeof method ===
-      "function"
+      typeof method === "function"
     ) {
       return method(
         message,
@@ -156,6 +154,40 @@ function safeToast(
   } catch {
     return null;
   }
+}
+
+function toastOnce(
+  Toast,
+  type,
+  message,
+  options = {},
+  dedupeMs = 1200
+) {
+  const key = [
+    type,
+    safeText(options?.title, ""),
+    safeText(message, ""),
+  ].join("::");
+
+  const now = Date.now();
+
+  if (
+    key &&
+    key === lastToastKey &&
+    now - lastToastAt < dedupeMs
+  ) {
+    return null;
+  }
+
+  lastToastKey = key;
+  lastToastAt = now;
+
+  return safeToast(
+    Toast,
+    type,
+    message,
+    options
+  );
 }
 
 function resolveLang(
@@ -177,11 +209,33 @@ function resolveLang(
       ""
     ) ||
     safeText(
-      AppCore?.config
-        ?.defaultLang,
+      AppCore?.config?.defaultLang,
       ""
     ) ||
     "es"
+  );
+}
+
+function resolveRenderedPublicPath(
+  AppCore,
+  detail = {}
+) {
+  return (
+    safeText(
+      detail?.publicPath,
+      ""
+    ) ||
+    safeText(
+      detail?.path,
+      ""
+    ) ||
+    safeText(
+      getCurrentPublicPath(
+        AppCore
+      ),
+      ""
+    ) ||
+    "/"
   );
 }
 
@@ -216,9 +270,7 @@ export function bindAppEvents({
     "app:user:change",
     () => {
       try {
-        syncUserUI?.(
-          AppCore
-        );
+        syncUserUI?.(AppCore);
       } catch (error) {
         safeWarn(
           AppCore,
@@ -234,9 +286,7 @@ export function bindAppEvents({
     "app:session:cleared",
     () => {
       try {
-        syncUserUI?.(
-          AppCore
-        );
+        syncUserUI?.(AppCore);
       } catch (error) {
         safeWarn(
           AppCore,
@@ -253,26 +303,32 @@ export function bindAppEvents({
   AppCore.cleanup.event(
     scope,
     "app:lang:change",
-    async ({
-      detail,
-    } = {}) => {
-      const lang =
-        resolveLang(
-          detail,
-          I18n,
-          AppCore
-        );
+    async ({ detail } = {}) => {
+      const lang = resolveLang(
+        detail,
+        I18n,
+        AppCore
+      );
 
       safeSetState(
         AppCore,
-        {
-          lang,
-        }
+        { lang }
       );
 
       safeSetDocumentLang(
         lang
       );
+
+      if (langChangeInFlight) {
+        safeLog(
+          AppCore,
+          "Cambio de idioma omitido: ya hay rerender en curso.",
+          { lang }
+        );
+        return;
+      }
+
+      langChangeInFlight = true;
 
       try {
         await Promise.resolve(
@@ -284,17 +340,18 @@ export function bindAppEvents({
           "rerenderCurrentRoute() falló tras cambio de idioma.",
           error
         );
+      } finally {
+        langChangeInFlight = false;
       }
 
-      safeToast(
+      toastOnce(
         Toast,
         "success",
         I18n?.t?.(
           "settings.languageChanged",
           {},
           "Idioma actualizado"
-        ) ||
-          "Idioma actualizado",
+        ) || "Idioma actualizado",
         {
           title:
             I18n?.t?.(
@@ -328,9 +385,7 @@ export function bindAppEvents({
     "auth:login:success",
     () => {
       try {
-        syncUserUI?.(
-          AppCore
-        );
+        syncUserUI?.(AppCore);
       } catch (error) {
         safeWarn(
           AppCore,
@@ -339,13 +394,12 @@ export function bindAppEvents({
         );
       }
 
-      safeToast(
+      toastOnce(
         Toast,
         "success",
         "Sesión iniciada correctamente.",
         {
-          title:
-            "Bienvenido",
+          title: "Bienvenido",
           duration: 2800,
         }
       );
@@ -357,9 +411,7 @@ export function bindAppEvents({
     "auth:logout:success",
     () => {
       try {
-        syncUserUI?.(
-          AppCore
-        );
+        syncUserUI?.(AppCore);
       } catch (error) {
         safeWarn(
           AppCore,
@@ -368,7 +420,7 @@ export function bindAppEvents({
         );
       }
 
-      safeToast(
+      toastOnce(
         Toast,
         "info",
         "Sesión cerrada correctamente.",
@@ -387,18 +439,18 @@ export function bindAppEvents({
   AppCore.cleanup.event(
     scope,
     "router:before-render",
-    ({
-      detail,
-    } = {}) => {
+    ({ detail } = {}) => {
       safeLog(
         AppCore,
         "Router before render:",
         {
           path:
-            detail?.path ??
-            null,
+            detail?.path ?? null,
           canonicalPath:
             detail?.canonicalPath ??
+            null,
+          publicPath:
+            detail?.publicPath ??
             null,
           username:
             detail?.username ??
@@ -411,12 +463,11 @@ export function bindAppEvents({
   AppCore.cleanup.event(
     scope,
     "router:rendered",
-    ({
-      detail,
-    } = {}) => {
+    ({ detail } = {}) => {
       const publicPath =
-        getCurrentPublicPath(
-          AppCore
+        resolveRenderedPublicPath(
+          AppCore,
+          detail
         );
 
       safeSetPublicPath(
@@ -435,9 +486,7 @@ export function bindAppEvents({
       }
 
       try {
-        syncUserUI?.(
-          AppCore
-        );
+        syncUserUI?.(AppCore);
       } catch (error) {
         safeWarn(
           AppCore,
@@ -450,8 +499,7 @@ export function bindAppEvents({
         AppCore,
         "app:user-ui:sync",
         {
-          route:
-            publicPath,
+          route: publicPath,
         }
       );
 
@@ -462,22 +510,18 @@ export function bindAppEvents({
           publicPath,
           canonicalPath:
             detail?.canonicalPath ??
-            detail?.path ??
             null,
           username:
             detail?.username ??
             null,
-          found:
-            Boolean(
-              detail?.found
-            ),
-          forbidden:
-            Boolean(
-              detail?.forbidden
-            ),
+          found: Boolean(
+            detail?.found
+          ),
+          forbidden: Boolean(
+            detail?.forbidden
+          ),
           lang:
-            AppCore?.state
-              ?.lang,
+            AppCore?.state?.lang,
         }
       );
     }

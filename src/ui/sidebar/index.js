@@ -297,8 +297,17 @@ export const SidebarUI = (() => {
         MOBILE_BREAKPOINT
       );
 
-    AppCore.state.sidebarOpen =
-      nextOpen;
+    if (
+      typeof AppCore?.setSidebarOpen ===
+      "function"
+    ) {
+      AppCore.setSidebarOpen(
+        nextOpen
+      );
+    } else {
+      AppCore.state.sidebarOpen =
+        nextOpen;
+    }
 
     if (!mobile) {
       saveSidebarCollapsed(
@@ -363,13 +372,9 @@ export const SidebarUI = (() => {
      SOLO MOBILE AUTO CLOSE
   ========================================================= */
   function closeSidebarOnMobileAfterNavigation() {
-    if (
-      isMobileViewport(
-        MOBILE_BREAKPOINT
-      )
-    ) {
-      closeSidebar();
-    }
+    return isMobileViewport(
+      MOBILE_BREAKPOINT
+    );
   }
 
   /* =========================================================
@@ -431,12 +436,15 @@ export const SidebarUI = (() => {
       AppCore
     );
 
-    /* =====================================
-       FIX DEFINITIVO:
-       siempre abierto al arrancar
-    ===================================== */
-    AppCore.state.sidebarOpen =
-      true;
+    if (
+      typeof AppCore
+        .state
+        .sidebarOpen !==
+      "boolean"
+    ) {
+      AppCore.state.sidebarOpen =
+        true;
+    }
 
     syncSidebarState();
     renderUser();

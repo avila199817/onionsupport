@@ -1,44 +1,51 @@
 /* =========================================================
-   Onion SPA - Home API
-   Archivo: src/views/home/home.api.js
+   Onion SPA - Usuarios API
+   Archivo: src/views/usuarios/usuarios.api.js
 
-   FINAL PRO SYSTEM · BACKEND REAL SUMMARY · 10/10
+   FINAL PRO SYSTEM · USERS DOMAIN API · 10/10
 
    Responsabilidades:
-   - cargar summary real de la Home
-   - consumir /api/dashboard/summary
+   - cargar listado real de usuarios
+   - consumir backend /api/users con contrato tolerante
    - aplicar estrategia cache-first inteligente
    - hidratar store del módulo
-   - persistir cache local
-   - tolerar backend envuelto o plano
-   - preservar contrato esperado por home.template.js
+   - persistir cache local por usuario autenticado
+   - tolerar payload plano / envuelto / legacy
+   - preservar contrato esperado por template / view
    - evitar dobles fetch concurrentes
-   - diferenciar origen real remote / cache:fresh / cache:stale / fallback:local
+   - exponer helpers de stats, detalle, create y update
    - degradar con elegancia si falla backend
+   - normalizar paginación, filtros, orden y errores
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 import { Http } from "../../services/index.js";
 
 import {
-  HOME_CACHE_KEY,
-  HOME_CACHE_TTL,
-  HOME_SOURCES,
-} from "./home.state.js";
+  USUARIOS_CACHE_KEY,
+  USUARIOS_CACHE_TTL,
+  USUARIOS_DEFAULT_PAGE,
+  USUARIOS_DEFAULT_PAGE_SIZE,
+  USUARIOS_DEFAULT_SORT_BY,
+  USUARIOS_DEFAULT_SORT_DIR,
+  USUARIOS_SOURCES,
+} from "./usuarios.state.js";
 
 import {
-  beginHomeLoad,
-  completeHomeLoad,
-  rejectHomeLoad,
-} from "./home.store.js";
+  beginUsuariosLoad,
+  completeUsuariosLoad,
+  rejectUsuariosLoad,
+} from "./usuarios.store.js";
 
 /* =========================================================
    INTERNAL
 ========================================================= */
 
-const ENDPOINT = "/api/dashboard/summary";
+const ENDPOINT = "/api/users";
+const STATS_ENDPOINT = "/api/users/stats";
+const META_ENDPOINT = "/api/users/_meta";
 
-let inflightLoad = null;
+let inflightListLoad = null;
 
 /* =========================================================
    BASICS
@@ -58,14 +65,8 @@ function safeArray(value) {
     : [];
 }
 
-function safeText(
-  value = "",
-  fallback = ""
-) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
+function safeText(value = "", fallback = "") {
+  if (value === null || value === undefined) {
     return fallback;
   }
 
@@ -73,22 +74,23 @@ function safeText(
   return text || fallback;
 }
 
-function safeNumber(
-  value,
-  fallback = 0
-) {
+function safeNumber(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number)
     ? number
     : fallback;
 }
 
-function safeBool(
-  value,
-  fallback = false
-) {
+function safeBool(value, fallback = false) {
   return typeof value === "boolean"
     ? value
+    : fallback;
+}
+
+function safePositiveInt(value, fallback = 0) {
+  const number = Math.trunc(Number(value));
+  return Number.isFinite(number) && number > 0
+    ? number
     : fallback;
 }
 
@@ -101,26 +103,18 @@ function nowIso() {
 }
 
 function clone(value) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
+  if (value === null || value === undefined) {
     return value ?? null;
   }
 
   try {
-    if (
-      typeof structuredClone ===
-      "function"
-    ) {
+    if (typeof structuredClone === "function") {
       return structuredClone(value);
     }
   } catch {}
 
   try {
-    return JSON.parse(
-      JSON.stringify(value)
-    );
+    return JSON.parse(JSON.stringify(value));
   } catch {
     return value;
   }
@@ -148,15 +142,9 @@ function safeError(...args) {
   }
 }
 
-function safeEmit(
-  eventName,
-  payload = {}
-) {
+function safeEmit(eventName, payload = {}) {
   try {
-    AppCore?.events?.emit?.(
-      eventName,
-      payload
-    );
+    AppCore?.events?.emit?.(eventName, payload);
   } catch {}
 }
 
@@ -181,26 +169,20 @@ function getCurrentUserId() {
 }
 
 function getHttpClient() {
-  if (
-    Http &&
-    typeof Http.get ===
-      "function"
-  ) {
+  if (Http && typeof Http.get === "function") {
     return Http;
   }
 
   if (
     AppCore?.apiClient &&
-    typeof AppCore.apiClient.get ===
-      "function"
+    typeof AppCore.apiClient.get === "function"
   ) {
     return AppCore.apiClient;
   }
 
   if (
     AppCore?.request &&
-    typeof AppCore.request ===
-      "function"
+    typeof AppCore.request === "function"
   ) {
     return {
       get(path, options = {}) {
@@ -209,135 +191,221 @@ function getHttpClient() {
           method: "GET",
         });
       },
+      post(path, body, options = {}) {
+        return AppCore.request(path, {
+          ...options,
+          method: "POST",
+          body,
+        });
+      },
+      put(path, body, options = {}) {
+        return AppCore.request(path, {
+          ...options,
+          method: "PUT",
+          body,
+        });
+      },
+      delete(path, options = {}) {
+        return AppCore.request(path, {
+          ...options,
+          method: "DELETE",
+        });
+      },
     };
   }
 
   return null;
 }
 
-function isFreshTimestamp(
-  savedAt = 0,
-  ttl = HOME_CACHE_TTL
-) {
+function isFreshTimestamp(savedAt = 0, ttl = USUARIOS_CACHE_TTL) {
   return (
     safeNumber(savedAt, 0) > 0 &&
-    nowMs() - safeNumber(savedAt, 0) <=
-      safeNumber(ttl, 0)
+    nowMs() - safeNumber(savedAt, 0) <= safeNumber(ttl, 0)
   );
+}
+
+function joinSearchParams(params = {}) {
+  const query = new URLSearchParams();
+
+  Object.entries(safeObject(params)).forEach(([key, value]) => {
+    if (value === null || value === undefined) {
+      return;
+    }
+
+    if (typeof value === "string" && !value.trim()) {
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      value.forEach((entry) => {
+        const text = safeText(entry, "");
+        if (text) {
+          query.append(key, text);
+        }
+      });
+      return;
+    }
+
+    query.set(key, String(value));
+  });
+
+  const built = query.toString();
+  return built ? `?${built}` : "";
+}
+
+function normalizeSortDir(value = USUARIOS_DEFAULT_SORT_DIR) {
+  const dir = safeText(value, USUARIOS_DEFAULT_SORT_DIR).toLowerCase();
+  return dir === "asc" ? "asc" : "desc";
+}
+
+function normalizeListParams(params = {}) {
+  const source = safeObject(params);
+
+  return {
+    page: safePositiveInt(
+      source.page,
+      safePositiveInt(USUARIOS_DEFAULT_PAGE, 1)
+    ),
+    pageSize: safePositiveInt(
+      source.pageSize,
+      safePositiveInt(USUARIOS_DEFAULT_PAGE_SIZE, 20)
+    ),
+    sortBy: safeText(
+      source.sortBy,
+      safeText(USUARIOS_DEFAULT_SORT_BY, "createdAt")
+    ),
+    sortDir: normalizeSortDir(source.sortDir),
+    q: safeText(source.q || source.search || source.query, ""),
+    role: safeText(source.role, ""),
+    status: safeText(source.status, ""),
+    includeStats: safeBool(source.includeStats, false),
+  };
+}
+
+function buildListRequestPath(params = {}) {
+  const normalized = normalizeListParams(params);
+
+  return `${ENDPOINT}${joinSearchParams({
+    page: normalized.page,
+    pageSize: normalized.pageSize,
+    sortBy: normalized.sortBy,
+    sortDir: normalized.sortDir,
+    q: normalized.q || undefined,
+    role: normalized.role || undefined,
+    status: normalized.status || undefined,
+  })}`;
 }
 
 /* =========================================================
    CACHE
 ========================================================= */
 
-function buildCachePayload(summary) {
+function buildCachePayload(payload = {}) {
+  const source = safeObject(payload);
+
   return {
     savedAt: nowMs(),
     userId: getCurrentUserId(),
-    summary: clone(summary),
+    params: clone(source.params || {}),
+    list: clone(source.list || createFallbackListResult()),
   };
 }
 
-function saveCache(summary) {
-  try {
-    const storage =
-      getStorageApi();
+function buildCacheKey(params = {}) {
+  const normalized = normalizeListParams(params);
 
-    if (
-      !storage ||
-      typeof storage.set !==
-        "function"
-    ) {
+  return `${USUARIOS_CACHE_KEY}::${JSON.stringify({
+    page: normalized.page,
+    pageSize: normalized.pageSize,
+    sortBy: normalized.sortBy,
+    sortDir: normalized.sortDir,
+    q: normalized.q,
+    role: normalized.role,
+    status: normalized.status,
+  })}`;
+}
+
+function saveCache(payload = {}) {
+  try {
+    const storage = getStorageApi();
+
+    if (!storage || typeof storage.set !== "function") {
       return false;
     }
+
+    const params = normalizeListParams(payload.params);
+    const cacheKey = buildCacheKey(params);
 
     storage.set(
-      HOME_CACHE_KEY,
-      buildCachePayload(summary)
+      cacheKey,
+      buildCachePayload({
+        params,
+        list: payload.list,
+      })
     );
 
     return true;
   } catch (error) {
-    safeWarn(
-      "[HomeAPI] saveCache warning",
-      error
-    );
+    safeWarn("[UsuariosAPI] saveCache warning", error);
     return false;
   }
 }
 
-function clearCache() {
+function clearCache(params = null) {
   try {
-    const storage =
-      getStorageApi();
+    const storage = getStorageApi();
 
-    if (
-      !storage ||
-      typeof storage.remove !==
-        "function"
-    ) {
+    if (!storage || typeof storage.remove !== "function") {
       return false;
     }
 
-    storage.remove(
-      HOME_CACHE_KEY
-    );
+    if (params) {
+      storage.remove(buildCacheKey(params));
+      return true;
+    }
 
+    if (typeof storage.keys === "function") {
+      const keys = safeArray(storage.keys());
+
+      keys
+        .filter((key) => safeText(key, "").startsWith(`${USUARIOS_CACHE_KEY}::`))
+        .forEach((key) => {
+          try {
+            storage.remove(key);
+          } catch {}
+        });
+
+      return true;
+    }
+
+    storage.remove(USUARIOS_CACHE_KEY);
     return true;
   } catch (error) {
-    safeWarn(
-      "[HomeAPI] clearCache warning",
-      error
-    );
+    safeWarn("[UsuariosAPI] clearCache warning", error);
     return false;
   }
 }
 
-function readCache() {
+function readCache(params = {}) {
   try {
-    const storage =
-      getStorageApi();
+    const storage = getStorageApi();
 
-    if (
-      !storage ||
-      typeof storage.get !==
-        "function"
-    ) {
+    if (!storage || typeof storage.get !== "function") {
       return null;
     }
 
-    const payload =
-      safeObject(
-        storage.get(
-          HOME_CACHE_KEY
-        )
-      );
+    const normalizedParams = normalizeListParams(params);
+    const payload = safeObject(
+      storage.get(buildCacheKey(normalizedParams))
+    );
 
-    const savedAt =
-      safeNumber(
-        payload.savedAt,
-        0
-      );
+    const savedAt = safeNumber(payload.savedAt, 0);
+    const list = safeObject(payload.list);
+    const cachedUserId = safeText(payload.userId, "") || null;
+    const currentUserId = getCurrentUserId();
 
-    const summary =
-      safeObject(
-        payload.summary
-      );
-
-    const cachedUserId =
-      safeText(
-        payload.userId,
-        ""
-      ) || null;
-
-    const currentUserId =
-      getCurrentUserId();
-
-    if (
-      !savedAt ||
-      !Object.keys(summary).length
-    ) {
-      clearCache();
+    if (!savedAt || !Object.keys(list).length) {
+      clearCache(normalizedParams);
       return null;
     }
 
@@ -346,522 +414,603 @@ function readCache() {
       cachedUserId &&
       cachedUserId !== currentUserId
     ) {
-      clearCache();
+      clearCache(normalizedParams);
       return null;
     }
 
     return {
       savedAt,
       userId: cachedUserId,
-      summary,
-      isFresh:
-        isFreshTimestamp(
-          savedAt,
-          HOME_CACHE_TTL
-        ),
-      isStale:
-        !isFreshTimestamp(
-          savedAt,
-          HOME_CACHE_TTL
-        ),
+      params: normalizedParams,
+      list,
+      isFresh: isFreshTimestamp(savedAt, USUARIOS_CACHE_TTL),
+      isStale: !isFreshTimestamp(savedAt, USUARIOS_CACHE_TTL),
     };
   } catch (error) {
-    safeWarn(
-      "[HomeAPI] readCache warning",
-      error
-    );
-    clearCache();
+    safeWarn("[UsuariosAPI] readCache warning", error);
+    clearCache(params);
     return null;
   }
 }
 
 /* =========================================================
-   SUMMARY NORMALIZATION
+   USERS NORMALIZATION
 ========================================================= */
 
-function createBaseKpis() {
+function createBaseMeta(params = {}) {
+  const normalized = normalizeListParams(params);
+
   return {
-    ticketsOpen: 0,
-    ticketsUrgent: 0,
-    clientesTotal: 0,
-    facturasPending: 0,
-    usersTotal: 0,
-    facturacionTotal: 0,
+    page: normalized.page,
+    pageSize: normalized.pageSize,
+    total: 0,
+    totalPages: 0,
+    count: 0,
+    hasNextPage: false,
+    hasPrevPage: normalized.page > 1,
+    sortBy: normalized.sortBy,
+    sortDir: normalized.sortDir,
+    q: normalized.q,
+    role: normalized.role,
+    status: normalized.status,
   };
 }
 
-function createBaseHealth() {
+function createBaseStats() {
   return {
-    tickets: false,
-    clientes: false,
-    facturas: false,
-    users: false,
+    total: 0,
+    admins: 0,
+    active: 0,
+    inactive: 0,
+    withAvatar: 0,
   };
 }
 
-function createFallbackSummary() {
-  const user =
-    getCurrentUser();
-
+function createFallbackListResult(params = {}) {
   return {
-    user: {
-      id:
-        safeText(
-          user?.userId ||
-            user?.id,
-          ""
-        ) || null,
-      role: safeText(
-        user?.role ||
-          user?.rol,
-        "unknown"
-      ),
-    },
-
-    generatedAt: nowIso(),
-
-    kpis: createBaseKpis(),
-
+    rows: [],
+    meta: createBaseMeta(params),
+    stats: createBaseStats(),
     alerts: [
       {
         level: "info",
-        code: "HOME_FALLBACK",
-        message:
-          "Resumen local cargado sin datos remotos.",
+        code: "USUARIOS_FALLBACK",
+        message: "Listado local cargado sin datos remotos.",
       },
     ],
-
-    recentActivity: [],
-    quickActions: [],
-
-    health: createBaseHealth(),
+    sourceDetails: {
+      endpoint: ENDPOINT,
+      contract: "fallback",
+    },
+    generatedAt: nowIso(),
   };
 }
 
-function looksLikeDashboardSummary(
-  value = {}
-) {
-  const obj =
-    safeObject(value);
+function safeEmail(value, fallback = "") {
+  const text = safeText(value, fallback);
+  return text.toLowerCase();
+}
 
-  return Boolean(
-    obj.generatedAt ||
-      obj.kpis ||
-      obj.alerts ||
-      obj.recentActivity ||
-      obj.quickActions ||
-      obj.health ||
-      obj.user
+function getDisplayName(user = {}) {
+  const source = safeObject(user);
+
+  return (
+    safeText(source.displayName, "") ||
+    safeText(source.nombreCompleto, "") ||
+    safeText(source.fullName, "") ||
+    safeText(source.name, "") ||
+    safeText(
+      `${safeText(source.firstName, "")} ${safeText(source.lastName, "")}`,
+      ""
+    ) ||
+    safeText(source.username, "") ||
+    safeText(source.email, "") ||
+    "Usuario"
   );
 }
 
-function unwrapDashboardPayload(
-  payload = {}
-) {
+function getUserRole(user = {}) {
+  const source = safeObject(user);
+  return safeText(
+    source.role ||
+      source.rol ||
+      source.userRole,
+    "user"
+  ).toLowerCase();
+}
+
+function getUserStatus(user = {}) {
+  const source = safeObject(user);
+
   const raw =
-    safeObject(payload);
+    safeText(
+      source.status ||
+        source.estado ||
+        (safeBool(source.active, false) ? "active" : "") ||
+        (safeBool(source.isActive, false) ? "active" : ""),
+      ""
+    ).toLowerCase();
 
   if (
-    looksLikeDashboardSummary(raw)
+    raw === "activo" ||
+    raw === "active" ||
+    raw === "enabled" ||
+    raw === "habilitado"
   ) {
+    return "active";
+  }
+
+  if (
+    raw === "inactive" ||
+    raw === "inactivo" ||
+    raw === "disabled" ||
+    raw === "deshabilitado"
+  ) {
+    return "inactive";
+  }
+
+  if (
+    raw === "pending" ||
+    raw === "pendiente"
+  ) {
+    return "pending";
+  }
+
+  if (
+    raw === "blocked" ||
+    raw === "bloqueado"
+  ) {
+    return "blocked";
+  }
+
+  return raw || "unknown";
+}
+
+function normalizeUserRow(user = {}, index = 0) {
+  const source = safeObject(user);
+
+  const id =
+    safeText(
+      source.userId ||
+        source.id,
+      ""
+    ) || `user-${index + 1}`;
+
+  const username = safeText(
+    source.username ||
+      source.userName ||
+      source.nick,
+    ""
+  );
+
+  const email = safeEmail(
+    source.email ||
+      source.mail,
+    ""
+  );
+
+  const role = getUserRole(source);
+  const status = getUserStatus(source);
+
+  const avatar =
+    safeText(
+      source.avatar ||
+        source.avatarUrl ||
+        source.photoURL ||
+        source.photoUrl,
+      ""
+    ) || "";
+
+  const hasAvatar =
+    safeBool(
+      source.hasAvatar,
+      Boolean(avatar)
+    ) || Boolean(avatar);
+
+  const createdAt = safeText(
+    source.createdAt ||
+      source.created_at,
+    ""
+  );
+
+  const updatedAt = safeText(
+    source.updatedAt ||
+      source.updated_at,
+    createdAt
+  );
+
+  return {
+    id,
+    userId: id,
+    username,
+    displayName: getDisplayName(source),
+    email,
+    role,
+    status,
+    avatar,
+    hasAvatar,
+    phone: safeText(
+      source.phone ||
+        source.telefono,
+      ""
+    ),
+    emailVerified: safeBool(
+      source.emailVerified,
+      safeBool(source.isEmailVerified, false)
+    ),
+    lastLoginAt: safeText(
+      source.lastLoginAt ||
+        source.last_login_at,
+      ""
+    ),
+    createdAt,
+    updatedAt,
+    raw: clone(source),
+  };
+}
+
+function normalizeUsersStats(rows = []) {
+  const list = safeArray(rows);
+
+  return list.reduce(
+    (acc, row) => {
+      const item = safeObject(row);
+
+      acc.total += 1;
+
+      if (safeText(item.role, "").toLowerCase() === "admin") {
+        acc.admins += 1;
+      }
+
+      if (safeText(item.status, "") === "active") {
+        acc.active += 1;
+      }
+
+      if (safeText(item.status, "") === "inactive") {
+        acc.inactive += 1;
+      }
+
+      if (item.hasAvatar === true) {
+        acc.withAvatar += 1;
+      }
+
+      return acc;
+    },
+    createBaseStats()
+  );
+}
+
+function looksLikeUsersListPayload(value = {}) {
+  const obj = safeObject(value);
+
+  return Boolean(
+    Array.isArray(obj.items) ||
+      Array.isArray(obj.rows) ||
+      Array.isArray(obj.users) ||
+      Array.isArray(obj.data) ||
+      Array.isArray(obj.results) ||
+      obj.total !== undefined ||
+      obj.page !== undefined ||
+      obj.pageSize !== undefined ||
+      obj.count !== undefined
+  );
+}
+
+function unwrapUsersPayload(payload = {}) {
+  const raw = safeObject(payload);
+
+  if (looksLikeUsersListPayload(raw)) {
     return raw;
   }
 
-  const rawData =
-    safeObject(raw.data);
-
-  if (
-    looksLikeDashboardSummary(rawData)
-  ) {
-    return rawData;
+  const data = safeObject(raw.data);
+  if (looksLikeUsersListPayload(data)) {
+    return data;
   }
 
-  const rawDataData =
-    safeObject(rawData.data);
-
-  if (
-    looksLikeDashboardSummary(
-      rawDataData
-    )
-  ) {
-    return rawDataData;
+  const nestedData = safeObject(data.data);
+  if (looksLikeUsersListPayload(nestedData)) {
+    return nestedData;
   }
 
-  const rawSummary =
-    safeObject(raw.summary);
-
-  if (
-    looksLikeDashboardSummary(
-      rawSummary
-    )
-  ) {
-    return rawSummary;
+  const result = safeObject(raw.result);
+  if (looksLikeUsersListPayload(result)) {
+    return result;
   }
 
-  const rawDataSummary =
-    safeObject(rawData.summary);
-
-  if (
-    looksLikeDashboardSummary(
-      rawDataSummary
-    )
-  ) {
-    return rawDataSummary;
+  const users = safeObject(raw.users);
+  if (looksLikeUsersListPayload(users)) {
+    return users;
   }
 
   return {};
 }
 
-function normalizeAlert(
-  alert,
-  index = 0
-) {
-  const item =
-    safeObject(alert);
+function extractUsersRows(source = {}) {
+  const payload = safeObject(source);
 
-  return {
-    level: safeText(
-      item.level,
-      "info"
-    ),
-    code: safeText(
-      item.code,
-      `ALERT_${index + 1}`
-    ),
-    message: safeText(
-      item.message,
-      "Alerta"
-    ),
-  };
+  return (
+    safeArray(payload.items).length
+      ? safeArray(payload.items)
+      : safeArray(payload.rows).length
+      ? safeArray(payload.rows)
+      : safeArray(payload.users).length
+      ? safeArray(payload.users)
+      : safeArray(payload.results).length
+      ? safeArray(payload.results)
+      : Array.isArray(payload.data)
+      ? safeArray(payload.data)
+      : []
+  );
 }
 
-function normalizeActivityItem(
-  activity,
-  index = 0
-) {
-  const item =
-    safeObject(activity);
+function normalizeUsersList(payload = {}, params = {}) {
+  const source = unwrapUsersPayload(payload);
+  const normalizedParams = normalizeListParams(params);
 
-  return {
-    id: safeText(
-      item.id,
-      `activity-${index + 1}`
-    ),
-    text: safeText(
-      item.text ||
-        item.label ||
-        item.title,
-      "Movimiento"
-    ),
-    label: safeText(
-      item.label ||
-        item.text ||
-        item.title,
-      "Movimiento"
-    ),
-    date: safeText(
-      item.date ||
-        item.createdAt,
-      ""
-    ),
-    createdAt: safeText(
-      item.createdAt ||
-        item.date,
-      ""
-    ),
-  };
-}
+  const rawRows = extractUsersRows(source);
+  const rows = rawRows
+    .map(normalizeUserRow)
+    .filter(Boolean);
 
-function normalizeQuickAction(
-  action,
-  index = 0
-) {
-  const item =
-    safeObject(action);
+  const rawTotal = safePositiveInt(
+    source.total ??
+      source.totalItems ??
+      source.totalCount ??
+      source.count ??
+      rows.length,
+    rows.length
+  );
 
-  return {
-    key: safeText(
-      item.key,
-      `action-${index + 1}`
-    ),
-    label: safeText(
-      item.label,
-      "Acción"
-    ),
-    href: safeText(
-      item.href,
-      "#"
-    ),
-  };
-}
+  const page = safePositiveInt(
+    source.page,
+    normalizedParams.page
+  );
 
-function normalizeHealth(
-  source = {},
-  fallback = {}
-) {
-  const health =
-    safeObject(source);
+  const pageSize = safePositiveInt(
+    source.pageSize ??
+      source.limit,
+    normalizedParams.pageSize
+  );
 
-  return {
-    tickets: safeBool(
-      health.tickets,
-      safeBool(
-        fallback.tickets,
-        false
-      )
-    ),
-    clientes: safeBool(
-      health.clientes,
-      safeBool(
-        fallback.clientes,
-        false
-      )
-    ),
-    facturas: safeBool(
-      health.facturas,
-      safeBool(
-        fallback.facturas,
-        false
-      )
-    ),
-    users: safeBool(
-      health.users,
-      safeBool(
-        fallback.users,
-        false
-      )
-    ),
-  };
-}
-
-function normalizeSummary(
-  payload = {}
-) {
-  const source =
-    unwrapDashboardPayload(
-      payload
+  const totalPages =
+    safePositiveInt(
+      source.totalPages,
+      pageSize > 0
+        ? Math.ceil(rawTotal / pageSize)
+        : 0
     );
 
-  const fallback =
-    createFallbackSummary();
-
-  const rawKpis =
-    safeObject(source.kpis);
-
-  const alerts =
-    safeArray(source.alerts)
-      .map(normalizeAlert)
-      .filter(Boolean);
-
-  const recentActivity =
-    safeArray(
-      source.recentActivity
-    )
-      .map(
-        normalizeActivityItem
-      )
-      .filter(Boolean);
-
-  const quickActions =
-    safeArray(
-      source.quickActions
-    )
-      .map(
-        normalizeQuickAction
-      )
-      .filter(Boolean);
-
-  return {
-    user: {
-      id:
-        safeText(
-          source?.user?.id,
-          ""
-        ) ||
-        fallback.user.id,
-      role: safeText(
-        source?.user?.role,
-        fallback.user.role
+  const meta = {
+    page,
+    pageSize,
+    total: rawTotal,
+    totalPages,
+    count: rows.length,
+    hasNextPage:
+      safeBool(
+        source.hasNextPage,
+        page < totalPages
       ),
-    },
-
-    generatedAt: safeText(
-      source.generatedAt,
-      nowIso()
+    hasPrevPage:
+      safeBool(
+        source.hasPrevPage,
+        page > 1
+      ),
+    sortBy: safeText(
+      source.sortBy,
+      normalizedParams.sortBy
     ),
+    sortDir: normalizeSortDir(
+      source.sortDir || normalizedParams.sortDir
+    ),
+    q: normalizedParams.q,
+    role: normalizedParams.role,
+    status: normalizedParams.status,
+  };
 
-    kpis: {
-      ticketsOpen: safeNumber(
-        rawKpis.ticketsOpen,
-        fallback.kpis.ticketsOpen
-      ),
-      ticketsUrgent: safeNumber(
-        rawKpis.ticketsUrgent,
-        fallback.kpis.ticketsUrgent
-      ),
-      clientesTotal: safeNumber(
-        rawKpis.clientesTotal,
-        fallback.kpis.clientesTotal
-      ),
-      facturasPending: safeNumber(
-        rawKpis.facturasPending,
-        fallback.kpis.facturasPending
-      ),
-      usersTotal: safeNumber(
-        rawKpis.usersTotal,
-        fallback.kpis.usersTotal
-      ),
-      facturacionTotal: safeNumber(
-        rawKpis.facturacionTotal,
-        fallback.kpis.facturacionTotal
-      ),
-    },
+  const alerts = safeArray(source.alerts).map((item, index) => ({
+    level: safeText(item?.level, "info"),
+    code: safeText(item?.code, `USERS_ALERT_${index + 1}`),
+    message: safeText(item?.message, "Aviso"),
+  }));
 
-    alerts:
-      alerts.length > 0
-        ? alerts
-        : fallback.alerts,
+  const computedStats = normalizeUsersStats(rows);
 
-    recentActivity,
-    quickActions,
-
-    health: normalizeHealth(
-      source.health,
-      fallback.health
+  const stats = {
+    total: safePositiveInt(
+      source?.stats?.total,
+      safePositiveInt(source.total, computedStats.total)
+    ),
+    admins: safePositiveInt(
+      source?.stats?.admins,
+      computedStats.admins
+    ),
+    active: safePositiveInt(
+      source?.stats?.active,
+      computedStats.active
+    ),
+    inactive: safePositiveInt(
+      source?.stats?.inactive,
+      computedStats.inactive
+    ),
+    withAvatar: safePositiveInt(
+      source?.stats?.withAvatar,
+      computedStats.withAvatar
     ),
   };
+
+  return {
+    rows,
+    meta,
+    stats,
+    alerts,
+    sourceDetails: {
+      endpoint: ENDPOINT,
+      contract:
+        rows.length > 0
+          ? "remote:list"
+          : "remote:empty",
+    },
+    generatedAt: nowIso(),
+  };
+}
+
+function normalizeStatsPayload(payload = {}) {
+  const source = safeObject(
+    payload?.data || payload
+  );
+
+  return {
+    ok: safeBool(source.ok, true),
+    total: safePositiveInt(source.total, 0),
+  };
+}
+
+function normalizeMetaPayload(payload = {}) {
+  const source = safeObject(payload?.data || payload);
+
+  return {
+    ok: safeBool(source.ok, true),
+    scope: safeText(source.scope, "users"),
+    basePathHint: safeText(source.basePathHint, ENDPOINT),
+    endpoints: safeObject(source.endpoints),
+    authenticatedUserId: safeText(
+      source.authenticatedUserId,
+      ""
+    ) || null,
+    timestamp: safeText(source.timestamp, nowIso()),
+  };
+}
+
+function normalizeSingleUser(payload = {}) {
+  const source = safeObject(payload?.data || payload);
+
+  if (source.user && typeof source.user === "object") {
+    return normalizeUserRow(source.user);
+  }
+
+  return normalizeUserRow(source);
 }
 
 /* =========================================================
    FALLBACK / REMOTE
 ========================================================= */
 
-function buildLocalSummary() {
-  const user =
-    getCurrentUser();
-
+function buildLocalListResult(params = {}) {
   const appName = safeText(
     AppCore?.config?.appName,
     "Onion Support"
   );
 
-  return normalizeSummary({
-    user: {
-      id:
-        safeText(
-          user?.userId ||
-            user?.id,
-          ""
-        ) || null,
-      role: safeText(
-        user?.role ||
-          user?.rol,
-        "unknown"
-      ),
+  const fallback = createFallbackListResult(params);
+
+  fallback.alerts = [
+    {
+      level: "info",
+      code: "LOCAL_USERS_LIST",
+      message: `${appName} operativo sin listado remoto de usuarios.`,
     },
+  ];
 
-    generatedAt: nowIso(),
+  fallback.sourceDetails = {
+    endpoint: ENDPOINT,
+    contract: "fallback:local",
+  };
 
-    kpis: createBaseKpis(),
-
-    alerts: [
-      {
-        level: "info",
-        code: "LOCAL_SUMMARY",
-        message: `${appName} operativo sin resumen remoto disponible.`,
-      },
-    ],
-
-    recentActivity: [],
-    quickActions: [],
-
-    health: createBaseHealth(),
-  });
+  return fallback;
 }
 
-async function fetchRemoteSummary() {
-  const client =
-    getHttpClient();
+function getErrorStatus(error) {
+  return safePositiveInt(
+    error?.status ||
+      error?.statusCode ||
+      error?.response?.status ||
+      error?.data?.status,
+    0
+  );
+}
+
+function isNotFoundError(error) {
+  return getErrorStatus(error) === 404;
+}
+
+function normalizeError(error) {
+  const source = safeObject(error);
+
+  return {
+    name: safeText(source.name, "Error"),
+    code: safeText(
+      source.code ||
+        source.error ||
+        source.type,
+      "UNKNOWN_ERROR"
+    ),
+    message: safeText(
+      source.message ||
+        source?.data?.error ||
+        source?.data?.message,
+      "Ha ocurrido un error."
+    ),
+    status: getErrorStatus(source),
+    data: safeObject(source.data),
+    raw: source,
+  };
+}
+
+async function fetchRemoteUsersList(params = {}) {
+  const client = getHttpClient();
 
   if (!client) {
-    const error = new Error(
-      "No hay cliente HTTP disponible."
-    );
-
-    safeWarn(
-      "[HomeAPI] no hay cliente HTTP disponible"
-    );
+    const error = new Error("No hay cliente HTTP disponible.");
 
     return {
       ok: false,
       remoteOk: false,
       degraded: true,
-      source:
-        HOME_SOURCES.FALLBACK_LOCAL,
-      summary:
-        buildLocalSummary(),
+      source: USUARIOS_SOURCES.FALLBACK_LOCAL,
+      list: buildLocalListResult(params),
       error,
     };
   }
 
+  const requestPath = buildListRequestPath(params);
+
   try {
-    const response =
-      await client.get(
-        ENDPOINT,
-        {
-          auth: true,
-          retries: 1,
-        }
-      );
+    safeLog("[UsuariosAPI] list request", {
+      endpoint: requestPath,
+      params: normalizeListParams(params),
+    });
 
-    const data =
-      safeObject(
-        response?.data ||
-          response
-      );
+    const response = await client.get(requestPath, {
+      auth: true,
+      retries: 1,
+    });
 
-    if (
-      !Object.keys(data).length
-    ) {
-      return {
-        ok: true,
-        remoteOk: false,
-        degraded: true,
-        source:
-          HOME_SOURCES.FALLBACK_LOCAL,
-        summary:
-          buildLocalSummary(),
-        error: null,
-      };
-    }
-
-    const summary =
-      normalizeSummary(data);
+    const data = safeObject(response?.data || response);
+    const list = normalizeUsersList(data, params);
 
     return {
       ok: true,
       remoteOk: true,
       degraded: false,
-      source:
-        HOME_SOURCES.REMOTE,
-      summary,
+      source: USUARIOS_SOURCES.REMOTE,
+      list,
       error: null,
     };
   } catch (error) {
-    safeWarn(
-      "[HomeAPI] remote summary unavailable",
-      error
-    );
+    const normalizedError = normalizeError(error);
+
+    safeWarn("[UsuariosAPI] remote users list unavailable", normalizedError);
 
     return {
       ok: false,
       remoteOk: false,
       degraded: true,
-      source:
-        HOME_SOURCES.FALLBACK_LOCAL,
-      summary:
-        buildLocalSummary(),
-      error,
+      source: USUARIOS_SOURCES.FALLBACK_LOCAL,
+      list: buildLocalListResult(params),
+      error: normalizedError,
+      notFound: isNotFoundError(normalizedError),
     };
   }
 }
@@ -870,32 +1019,30 @@ async function fetchRemoteSummary() {
    STORE HYDRATION
 ========================================================= */
 
-function hydrateSummaryIntoStore({
-  summary,
-  source = HOME_SOURCES.IDLE,
+function hydrateListIntoStore({
+  list,
+  params = {},
+  source = USUARIOS_SOURCES.IDLE,
   remoteOk = false,
   degraded = false,
   syncedAt = "",
   hydratedAt = "",
   cacheHit = false,
+  error = null,
 } = {}) {
-  completeHomeLoad({
-    summary,
+  completeUsuariosLoad({
+    rows: safeArray(list?.rows),
+    meta: safeObject(list?.meta),
+    stats: safeObject(list?.stats),
+    alerts: safeArray(list?.alerts),
     source,
-    remoteOk:
-      remoteOk === true,
-    degraded:
-      degraded === true,
-    syncedAt: safeText(
-      syncedAt,
-      nowIso()
-    ),
-    hydratedAt: safeText(
-      hydratedAt,
-      nowIso()
-    ),
-    cacheHit:
-      cacheHit === true,
+    remoteOk: remoteOk === true,
+    degraded: degraded === true,
+    syncedAt: safeText(syncedAt, nowIso()),
+    hydratedAt: safeText(hydratedAt, nowIso()),
+    cacheHit: cacheHit === true,
+    params: normalizeListParams(params),
+    error: error || null,
   });
 }
 
@@ -903,276 +1050,504 @@ function hydrateSummaryIntoStore({
    LOADERS
 ========================================================= */
 
-export async function loadHomeSummary(
-  options = {}
-) {
-  const {
-    force = false,
-    preferCache = true,
-  } = safeObject(options);
+export async function loadUsuariosList(options = {}) {
+  const source = safeObject(options);
+  const params = normalizeListParams(source);
+  const force = safeBool(source.force, false);
+  const preferCache = safeBool(
+    source.preferCache,
+    true
+  );
 
-  if (inflightLoad) {
-    return inflightLoad;
+  if (inflightListLoad) {
+    return inflightListLoad;
   }
 
-  inflightLoad =
-    (async () => {
-      beginHomeLoad();
+  inflightListLoad = (async () => {
+    beginUsuariosLoad(params);
 
-      try {
-        const cached =
-          readCache();
+    try {
+      const cached = readCache(params);
 
-        if (
-          force !== true &&
-          preferCache === true &&
-          cached?.isFresh &&
-          cached?.summary
-        ) {
-          const summary =
-            normalizeSummary(
-              cached.summary
-            );
+      if (
+        force !== true &&
+        preferCache === true &&
+        cached?.isFresh &&
+        cached?.list
+      ) {
+        const list = normalizeUsersList(cached.list, params);
+        const hydratedAt = nowIso();
 
-          const hydratedAt =
-            nowIso();
-
-          hydrateSummaryIntoStore({
-            summary,
-            source:
-              HOME_SOURCES.CACHE_FRESH,
-            remoteOk: false,
-            degraded: false,
-            syncedAt:
-              new Date(
-                cached.savedAt
-              ).toISOString(),
-            hydratedAt,
-            cacheHit: true,
-          });
-
-          safeEmit(
-            "home:summary:loaded",
-            {
-              source:
-                HOME_SOURCES.CACHE_FRESH,
-              cachedAt:
-                cached.savedAt,
-              remoteOk: false,
-              degraded: false,
-            }
-          );
-
-          return {
-            ok: true,
-            source:
-              HOME_SOURCES.CACHE_FRESH,
-            remoteOk: false,
-            degraded: false,
-            cacheHit: true,
-            summary,
-            error: null,
-          };
-        }
-
-        const remote =
-          await fetchRemoteSummary();
-
-        if (
-          remote.remoteOk !== true &&
-          cached?.summary
-        ) {
-          const summary =
-            normalizeSummary(
-              cached.summary
-            );
-
-          const hydratedAt =
-            nowIso();
-
-          hydrateSummaryIntoStore({
-            summary,
-            source:
-              HOME_SOURCES.CACHE_STALE,
-            remoteOk: false,
-            degraded: true,
-            syncedAt:
-              new Date(
-                cached.savedAt
-              ).toISOString(),
-            hydratedAt,
-            cacheHit: true,
-          });
-
-          safeEmit(
-            "home:summary:loaded",
-            {
-              source:
-                HOME_SOURCES.CACHE_STALE,
-              cachedAt:
-                cached.savedAt,
-              remoteOk: false,
-              degraded: true,
-              error:
-                remote.error ||
-                null,
-            }
-          );
-
-          return {
-            ok: true,
-            source:
-              HOME_SOURCES.CACHE_STALE,
-            remoteOk: false,
-            degraded: true,
-            cacheHit: true,
-            summary,
-            error:
-              remote.error ||
-              null,
-          };
-        }
-
-        const summary =
-          normalizeSummary(
-            remote.summary
-          );
-
-        const syncedAt =
-          remote.source ===
-          HOME_SOURCES.REMOTE
-            ? nowIso()
-            : summary.generatedAt ||
-              nowIso();
-
-        const hydratedAt =
-          nowIso();
-
-        hydrateSummaryIntoStore({
-          summary,
-          source: remote.source,
-          remoteOk:
-            remote.remoteOk ===
-            true,
-          degraded:
-            remote.degraded ===
-            true,
-          syncedAt,
+        hydrateListIntoStore({
+          list,
+          params,
+          source: USUARIOS_SOURCES.CACHE_FRESH,
+          remoteOk: false,
+          degraded: false,
+          syncedAt: new Date(cached.savedAt).toISOString(),
           hydratedAt,
-          cacheHit: false,
+          cacheHit: true,
         });
 
-        if (
-          remote.source ===
-          HOME_SOURCES.REMOTE
-        ) {
-          saveCache(summary);
-        }
-
-        safeEmit(
-          "home:summary:loaded",
-          {
-            source:
-              remote.source,
-            ok:
-              remote.ok ===
-              true,
-            remoteOk:
-              remote.remoteOk ===
-              true,
-            degraded:
-              remote.degraded ===
-              true,
-          }
-        );
+        safeEmit("usuarios:list:loaded", {
+          source: USUARIOS_SOURCES.CACHE_FRESH,
+          cachedAt: cached.savedAt,
+          params,
+          remoteOk: false,
+          degraded: false,
+        });
 
         return {
           ok: true,
-          source:
-            remote.source,
-          remoteOk:
-            remote.remoteOk ===
-            true,
-          degraded:
-            remote.degraded ===
-            true,
-          cacheHit: false,
-          summary,
-          error:
-            remote.error ||
-            null,
+          source: USUARIOS_SOURCES.CACHE_FRESH,
+          remoteOk: false,
+          degraded: false,
+          cacheHit: true,
+          list,
+          error: null,
         };
-      } catch (error) {
-        safeError(
-          "[HomeAPI] loadHomeSummary error",
-          error
-        );
+      }
 
-        rejectHomeLoad(error);
+      const remote = await fetchRemoteUsersList(params);
 
-        return {
-          ok: false,
-          source:
-            HOME_SOURCES.ERROR,
+      if (remote.remoteOk !== true && cached?.list) {
+        const list = normalizeUsersList(cached.list, params);
+        const hydratedAt = nowIso();
+
+        hydrateListIntoStore({
+          list,
+          params,
+          source: USUARIOS_SOURCES.CACHE_STALE,
           remoteOk: false,
           degraded: true,
-          cacheHit: false,
-          error,
-          summary: null,
-        };
-      } finally {
-        inflightLoad = null;
-      }
-    })();
+          syncedAt: new Date(cached.savedAt).toISOString(),
+          hydratedAt,
+          cacheHit: true,
+          error: remote.error || null,
+        });
 
-  return inflightLoad;
+        safeEmit("usuarios:list:loaded", {
+          source: USUARIOS_SOURCES.CACHE_STALE,
+          cachedAt: cached.savedAt,
+          params,
+          remoteOk: false,
+          degraded: true,
+          error: remote.error || null,
+        });
+
+        return {
+          ok: true,
+          source: USUARIOS_SOURCES.CACHE_STALE,
+          remoteOk: false,
+          degraded: true,
+          cacheHit: true,
+          list,
+          error: remote.error || null,
+        };
+      }
+
+      const list = normalizeUsersList(remote.list, params);
+      const syncedAt =
+        remote.source === USUARIOS_SOURCES.REMOTE
+          ? nowIso()
+          : list.generatedAt || nowIso();
+
+      const hydratedAt = nowIso();
+
+      hydrateListIntoStore({
+        list,
+        params,
+        source: remote.source,
+        remoteOk: remote.remoteOk === true,
+        degraded: remote.degraded === true,
+        syncedAt,
+        hydratedAt,
+        cacheHit: false,
+        error: remote.error || null,
+      });
+
+      if (remote.source === USUARIOS_SOURCES.REMOTE) {
+        saveCache({
+          params,
+          list,
+        });
+      }
+
+      safeEmit("usuarios:list:loaded", {
+        source: remote.source,
+        ok: remote.ok === true,
+        remoteOk: remote.remoteOk === true,
+        degraded: remote.degraded === true,
+        params,
+        error: remote.error || null,
+      });
+
+      return {
+        ok: true,
+        source: remote.source,
+        remoteOk: remote.remoteOk === true,
+        degraded: remote.degraded === true,
+        cacheHit: false,
+        list,
+        error: remote.error || null,
+      };
+    } catch (error) {
+      safeError("[UsuariosAPI] loadUsuariosList error", error);
+
+      rejectUsuariosLoad(error);
+
+      return {
+        ok: false,
+        source: USUARIOS_SOURCES.ERROR,
+        remoteOk: false,
+        degraded: true,
+        cacheHit: false,
+        error,
+        list: null,
+      };
+    } finally {
+      inflightListLoad = null;
+    }
+  })();
+
+  return inflightListLoad;
 }
 
-export async function refreshHomeSummary() {
-  return loadHomeSummary({
+export async function refreshUsuariosList(params = {}) {
+  return loadUsuariosList({
+    ...safeObject(params),
     force: true,
     preferCache: false,
   });
 }
 
-export function getCachedHomeSummary() {
-  const cached =
-    readCache();
+export function getCachedUsuariosList(params = {}) {
+  const cached = readCache(params);
 
-  if (!cached?.summary) {
+  if (!cached?.list) {
     return null;
   }
 
-  return normalizeSummary(
-    cached.summary
-  );
+  return normalizeUsersList(cached.list, params);
 }
 
-export function primeHomeSummaryCache(
-  summary = {}
-) {
-  const normalized =
-    normalizeSummary(summary);
+export function primeUsuariosCache(list = {}, params = {}) {
+  const normalizedList = normalizeUsersList(list, params);
 
-  saveCache(normalized);
+  saveCache({
+    params,
+    list: normalizedList,
+  });
 
-  return normalized;
+  return normalizedList;
 }
 
-export function clearHomeSummaryCache() {
-  return clearCache();
+export function clearUsuariosCache(params = null) {
+  return clearCache(params);
+}
+
+/* =========================================================
+   STATS / META / DETAIL
+========================================================= */
+
+export async function fetchUsuariosStats() {
+  const client = getHttpClient();
+
+  if (!client) {
+    return {
+      ok: false,
+      error: normalizeError(
+        new Error("No hay cliente HTTP disponible.")
+      ),
+      stats: createBaseStats(),
+    };
+  }
+
+  try {
+    const response = await client.get(STATS_ENDPOINT, {
+      auth: true,
+      retries: 1,
+    });
+
+    const normalized = normalizeStatsPayload(response?.data || response);
+
+    return {
+      ok: true,
+      error: null,
+      stats: {
+        ...createBaseStats(),
+        total: normalized.total,
+      },
+    };
+  } catch (error) {
+    const normalizedError = normalizeError(error);
+
+    safeWarn("[UsuariosAPI] fetchUsuariosStats warning", normalizedError);
+
+    return {
+      ok: false,
+      error: normalizedError,
+      stats: createBaseStats(),
+    };
+  }
+}
+
+export async function fetchUsuariosMeta() {
+  const client = getHttpClient();
+
+  if (!client) {
+    return {
+      ok: false,
+      error: normalizeError(
+        new Error("No hay cliente HTTP disponible.")
+      ),
+      meta: null,
+    };
+  }
+
+  try {
+    const response = await client.get(META_ENDPOINT, {
+      auth: true,
+      retries: 1,
+    });
+
+    return {
+      ok: true,
+      error: null,
+      meta: normalizeMetaPayload(response?.data || response),
+    };
+  } catch (error) {
+    const normalizedError = normalizeError(error);
+
+    safeWarn("[UsuariosAPI] fetchUsuariosMeta warning", normalizedError);
+
+    return {
+      ok: false,
+      error: normalizedError,
+      meta: null,
+    };
+  }
+}
+
+export async function getUsuarioById(userId) {
+  const id = safeText(userId, "");
+  const client = getHttpClient();
+
+  if (!id) {
+    return {
+      ok: false,
+      error: {
+        code: "INVALID_USER_ID",
+        message: "userId inválido.",
+        status: 400,
+      },
+      user: null,
+    };
+  }
+
+  if (!client) {
+    return {
+      ok: false,
+      error: normalizeError(
+        new Error("No hay cliente HTTP disponible.")
+      ),
+      user: null,
+    };
+  }
+
+  try {
+    const response = await client.get(`${ENDPOINT}/${encodeURIComponent(id)}`, {
+      auth: true,
+      retries: 1,
+    });
+
+    return {
+      ok: true,
+      error: null,
+      user: normalizeSingleUser(response?.data || response),
+    };
+  } catch (error) {
+    const normalizedError = normalizeError(error);
+
+    safeWarn("[UsuariosAPI] getUsuarioById warning", normalizedError);
+
+    return {
+      ok: false,
+      error: normalizedError,
+      user: null,
+    };
+  }
+}
+
+/* =========================================================
+   CREATE / UPDATE
+========================================================= */
+
+function buildCreatePayload(payload = {}) {
+  const source = safeObject(payload);
+
+  return {
+    username: safeText(source.username, ""),
+    email: safeEmail(source.email, ""),
+    role: safeText(source.role, "user"),
+    displayName: safeText(
+      source.displayName ||
+        source.name,
+      ""
+    ),
+    phone: safeText(source.phone, ""),
+    password: safeText(source.password, ""),
+  };
+}
+
+function buildUpdatePayload(payload = {}) {
+  const source = safeObject(payload);
+
+  return {
+    username: safeText(source.username, ""),
+    email: safeEmail(source.email, ""),
+    role: safeText(source.role, ""),
+    displayName: safeText(
+      source.displayName ||
+        source.name,
+      ""
+    ),
+    phone: safeText(source.phone, ""),
+    status: safeText(source.status, ""),
+  };
+}
+
+function compactObject(value = {}) {
+  return Object.entries(safeObject(value)).reduce((acc, [key, entry]) => {
+    if (entry === null || entry === undefined) {
+      return acc;
+    }
+
+    if (typeof entry === "string" && !entry.trim()) {
+      return acc;
+    }
+
+    acc[key] = entry;
+    return acc;
+  }, {});
+}
+
+export async function createUsuario(payload = {}) {
+  const client = getHttpClient();
+
+  if (!client || typeof client.post !== "function") {
+    return {
+      ok: false,
+      error: normalizeError(
+        new Error("No hay cliente HTTP disponible.")
+      ),
+      user: null,
+    };
+  }
+
+  try {
+    const body = compactObject(buildCreatePayload(payload));
+
+    const response = await client.post(ENDPOINT, body, {
+      auth: true,
+      retries: 0,
+    });
+
+    clearUsuariosCache();
+
+    return {
+      ok: true,
+      error: null,
+      user: normalizeSingleUser(response?.data || response),
+      data: safeObject(response?.data || response),
+    };
+  } catch (error) {
+    const normalizedError = normalizeError(error);
+
+    safeWarn("[UsuariosAPI] createUsuario warning", normalizedError);
+
+    return {
+      ok: false,
+      error: normalizedError,
+      user: null,
+    };
+  }
+}
+
+export async function updateUsuario(userId, payload = {}) {
+  const id = safeText(userId, "");
+  const client = getHttpClient();
+
+  if (!id) {
+    return {
+      ok: false,
+      error: {
+        code: "INVALID_USER_ID",
+        message: "userId inválido.",
+        status: 400,
+      },
+      user: null,
+    };
+  }
+
+  if (!client || typeof client.put !== "function") {
+    return {
+      ok: false,
+      error: normalizeError(
+        new Error("No hay cliente HTTP disponible.")
+      ),
+      user: null,
+    };
+  }
+
+  try {
+    const body = compactObject(buildUpdatePayload(payload));
+
+    const response = await client.put(
+      `${ENDPOINT}/${encodeURIComponent(id)}`,
+      body,
+      {
+        auth: true,
+        retries: 0,
+      }
+    );
+
+    clearUsuariosCache();
+
+    return {
+      ok: true,
+      error: null,
+      user: normalizeSingleUser(response?.data || response),
+      data: safeObject(response?.data || response),
+    };
+  } catch (error) {
+    const normalizedError = normalizeError(error);
+
+    safeWarn("[UsuariosAPI] updateUsuario warning", normalizedError);
+
+    return {
+      ok: false,
+      error: normalizedError,
+      user: null,
+    };
+  }
 }
 
 /* =========================================================
    EXPORT OBJECT
 ========================================================= */
 
-export const HomeAPI = {
-  loadHomeSummary,
-  refreshHomeSummary,
-  getCachedHomeSummary,
-  primeHomeSummaryCache,
-  clearHomeSummaryCache,
+export const UsuariosAPI = {
+  loadUsuariosList,
+  refreshUsuariosList,
+  getCachedUsuariosList,
+  primeUsuariosCache,
+  clearUsuariosCache,
+  fetchUsuariosStats,
+  fetchUsuariosMeta,
+  getUsuarioById,
+  createUsuario,
+  updateUsuario,
 };
 
-export default HomeAPI;
+export default UsuariosAPI;

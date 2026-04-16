@@ -2,23 +2,26 @@
    Onion SPA - Core
    Archivo: src/core/index.js
 
-   Qué centraliza:
+   QUÉ CENTRALIZA:
    - configuración global
-   - estado global
-   - helpers
+   - estado global robusto
+   - helpers enterprise
    - cache DOM
    - storage namespaced
    - event bus
    - cleanup scopes
-   - registro módulos
+   - módulos
    - request/api client
-   - init idempotente
+   - init idempotente real
+   - wrappers seguros de session/ui
 
-   HARDENING PRO:
-   - init serializado
-   - auth derivada robusta
-   - ready seguro
-   - helpers enterprise
+   HARDENING EXTREMO:
+   - cero undefined setters
+   - estado siempre vivo
+   - boot serializado
+   - compat total con router/auth
+   - sync auth derivada robusta
+   - API congelada estable
 ========================================================= */
 
 import { config } from "./config.js";
@@ -94,19 +97,27 @@ import {
   bindNetworkEvents,
 } from "./network.js";
 
+/* =========================================================
+   SINGLETON
+========================================================= */
+
 export const AppCore = (() => {
   "use strict";
 
   let initPromise = null;
   let initialized = false;
 
+  /* =========================================================
+     ROOT STATE
+  ========================================================= */
+
   const state =
     createInitialState({
       config,
-    });
+    }) || {};
 
   const dom =
-    createDomCache();
+    createDomCache() || {};
 
   const registry = {
     modules: new Map(),
@@ -135,7 +146,7 @@ export const AppCore = (() => {
     });
 
   /* =========================================================
-     HELPERS
+     BASICS
   ========================================================= */
 
   function isBrowser() {
@@ -147,6 +158,7 @@ export const AppCore = (() => {
 
   function safeLog(...args) {
     if (!config.debug) return;
+
     console.log(
       `[${config.appName}]`,
       ...args
@@ -155,6 +167,7 @@ export const AppCore = (() => {
 
   function safeWarn(...args) {
     if (!config.debug) return;
+
     console.warn(
       `[${config.appName}]`,
       ...args
@@ -168,42 +181,58 @@ export const AppCore = (() => {
     );
   }
 
-  function syncDerivedAuthState() {
-    state.authenticated =
-      Boolean(
-        state.token &&
-        String(state.token).trim()
-      );
-
-    state.role =
-      state.authenticated
-        ? (
-            state.user?.role ||
-            state.user?.rol ||
-            ""
-          )
-        : "";
+  function ensureState() {
+    if (
+      !state ||
+      typeof state !== "object"
+    ) {
+      return {};
+    }
 
     return state;
+  }
+
+  function syncDerivedAuthState() {
+    const root =
+      ensureState();
+
+    root.authenticated =
+      Boolean(
+        root.token &&
+        String(root.token).trim()
+      );
+
+    root.role =
+      root.authenticated
+        ? String(
+            root.user?.role ||
+              root.user?.rol ||
+              ""
+          )
+            .trim()
+            .toLowerCase()
+        : "";
+
+    return root;
   }
 
   async function runInitHooks(
     type,
     payload = {}
   ) {
-    const series =
+    const list =
       registry?.hooks?.[type];
 
     if (
-      !Array.isArray(series) ||
-      !series.length
+      !Array.isArray(list) ||
+      !list.length
     ) {
       return payload;
     }
 
     let current = payload;
 
-    for (const hook of series) {
+    for (const hook of list) {
       if (
         typeof hook !==
         "function"
@@ -211,15 +240,23 @@ export const AppCore = (() => {
         continue;
       }
 
-      const maybeNext =
-        await hook(current);
+      try {
+        const next =
+          await hook(current);
 
-      if (
-        maybeNext &&
-        typeof maybeNext ===
-          "object"
-      ) {
-        current = maybeNext;
+        if (
+          next &&
+          typeof next ===
+            "object"
+        ) {
+          current = next;
+        }
+      } catch (error) {
+        safeWarn(
+          "Hook error:",
+          type,
+          error
+        );
       }
     }
 
@@ -232,14 +269,22 @@ export const AppCore = (() => {
 
   const utils = {
     qs(selector, scope = document) {
-      if (!isBrowser()) return null;
-      return scope?.querySelector?.(
-        selector
-      ) || null;
+      if (!isBrowser()) {
+        return null;
+      }
+
+      return (
+        scope?.querySelector?.(
+          selector
+        ) || null
+      );
     },
 
     qsa(selector, scope = document) {
-      if (!isBrowser()) return [];
+      if (!isBrowser()) {
+        return [];
+      }
+
       return Array.from(
         scope?.querySelectorAll?.(
           selector
@@ -247,8 +292,17 @@ export const AppCore = (() => {
       );
     },
 
-    on(target, ev, fn, opts = false) {
-      if (!target || !ev || !fn) {
+    on(
+      target,
+      ev,
+      fn,
+      opts = false
+    ) {
+      if (
+        !target ||
+        !ev ||
+        !fn
+      ) {
         return () => {};
       }
 
@@ -266,7 +320,12 @@ export const AppCore = (() => {
         );
     },
 
-    off(target, ev, fn, opts = false) {
+    off(
+      target,
+      ev,
+      fn,
+      opts = false
+    ) {
       target?.removeEventListener?.(
         ev,
         fn,
@@ -274,19 +333,19 @@ export const AppCore = (() => {
       );
     },
 
-    log: safeLog,
-    warn: safeWarn,
-    error: safeError,
-
     sleep(ms = 0) {
       return new Promise(
-        (r) =>
+        (resolve) =>
           setTimeout(
-            r,
+            resolve,
             ms
           )
       );
     },
+
+    log: safeLog,
+    warn: safeWarn,
+    error: safeError,
 
     safeClone,
     cloneError,
@@ -323,11 +382,19 @@ export const AppCore = (() => {
   function setState(
     patch = {}
   ) {
+    const root =
+      ensureState();
+
     const next =
       setStateBase({
-        state,
+        state: root,
         events,
-        patch,
+        patch:
+          patch &&
+          typeof patch ===
+            "object"
+            ? patch
+            : {},
       });
 
     syncDerivedAuthState();
@@ -337,13 +404,14 @@ export const AppCore = (() => {
 
   function getState() {
     syncDerivedAuthState();
+
     return getStateBase(
-      state
+      ensureState()
     );
   }
 
   /* =========================================================
-     UI
+     UI API
   ========================================================= */
 
   function setDocumentTitle(
@@ -372,10 +440,12 @@ export const AppCore = (() => {
   }
 
   /* =========================================================
-     SESSION
+     SESSION API
   ========================================================= */
 
-  function setRoute(route = "/") {
+  function setRoute(
+    route = "/"
+  ) {
     return setRouteBase({
       state,
       setState,
@@ -387,7 +457,10 @@ export const AppCore = (() => {
   function setPublicPath(
     path = "/"
   ) {
+    /* FIX CRÍTICO:
+       siempre pasar state */
     return setPublicPathBase({
+      state,
       storage,
       setState,
       events,
@@ -469,7 +542,9 @@ export const AppCore = (() => {
     return result;
   }
 
-  function setTheme(theme) {
+  function setTheme(
+    theme
+  ) {
     return setThemeBase({
       dom,
       storage,
@@ -479,7 +554,9 @@ export const AppCore = (() => {
     });
   }
 
-  function setLang(lang) {
+  function setLang(
+    lang
+  ) {
     return setLangBase({
       dom,
       storage,
@@ -547,7 +624,8 @@ export const AppCore = (() => {
 
   function ready(fn) {
     if (
-      typeof fn !== "function" ||
+      typeof fn !==
+        "function" ||
       !isBrowser()
     ) {
       return;
@@ -561,6 +639,7 @@ export const AppCore = (() => {
         fn,
         { once: true }
       );
+
       return;
     }
 
@@ -644,7 +723,6 @@ export const AppCore = (() => {
           config,
           events,
           utils,
-          api,
         }
       );
 
@@ -666,17 +744,15 @@ export const AppCore = (() => {
       state.ready = false;
       state.booting = false;
 
+      setError(error);
+
       events.emit(
         "app:core:init:error",
         {
           error:
             cloneError(error),
-          state:
-            cloneState(state),
         }
       );
-
-      setError(error);
 
       throw error;
     } finally {
@@ -703,13 +779,14 @@ export const AppCore = (() => {
   }
 
   /* =========================================================
-     API
+     PUBLIC API
   ========================================================= */
 
-  const api = {
+  const api = Object.freeze({
     config,
     state,
     dom,
+
     utils,
     storage,
     events,
@@ -747,7 +824,7 @@ export const AppCore = (() => {
     getUserUsername,
     getUserAvatarUrl,
     normalizeUser,
-  };
+  });
 
   return api;
 })();

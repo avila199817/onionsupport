@@ -11,6 +11,7 @@
    - rehidratar referencias DOM del sidebar tras mount
    - sincronizar avatar/nombre también en AppCore.dom para compatibilidad
    - mantener collapsed manual persistente sin autoapertura inteligente
+   - arrancar abierto por defecto sin restaurar colapsado previo
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -41,7 +42,6 @@ import {
 } from "./user.js";
 
 import {
-  getSavedSidebarCollapsed,
   saveSidebarCollapsed,
   isMobileViewport,
   updateToggleLabel,
@@ -323,20 +323,18 @@ export const SidebarUI = (() => {
      MANUAL COLLAPSE ONLY
      - no autoabrir el sidebar al abrir el menú de usuario
      - el botón collapsed sigue funcionando
-     - el estado sigue siendo persistente
+     - el estado sigue siendo persistente cuando pulsas el botón
   ========================================================= */
   function ensureSidebarOpenForUserMenu() {
     return false;
   }
 
+  /* =========================================================
+     MOBILE AUTO-CLOSE
+     Desactivado para evitar cierres automáticos no deseados
+  ========================================================= */
   function closeSidebarOnMobileAfterNavigation() {
-    if (
-      isMobileViewport(
-        MOBILE_BREAKPOINT
-      )
-    ) {
-      closeSidebar();
-    }
+    return;
   }
 
   /* =========================================================
@@ -405,8 +403,7 @@ export const SidebarUI = (() => {
       typeof AppCore.state
         .sidebarOpen !== "boolean"
     ) {
-      AppCore.state.sidebarOpen =
-        !getSavedSidebarCollapsed();
+      AppCore.state.sidebarOpen = true;
     }
 
     syncSidebarState();

@@ -2,7 +2,7 @@
    Onion SPA - Routes
    Archivo: src/router/routes.js
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - definir la tabla de rutas canónicas de la SPA
    - encapsular adapters de render
    - exponer rutas inmutables
@@ -10,7 +10,7 @@
    - resolver títulos reactivos vía i18n
    - mantener orden consistente con sidebar/router
 
-   HARDENING:
+   HARDENING EXTREMO:
    - lazy title getter
    - safe render wrappers
    - validación extendida
@@ -18,6 +18,8 @@
    - soporte para vistas tipo objeto y vistas tipo función
    - integración de rutas auth públicas
    - priorizar init() sobre render() en vistas objeto
+   - canonical paths estrictos
+   - meta auth consistente con guards
 ========================================================= */
 
 import { I18n } from "../i18n/index.js";
@@ -80,9 +82,7 @@ function safeRun(fn) {
   };
 }
 
-function resolveRouteTitle(
-  route
-) {
+function resolveRouteTitle(route) {
   if (!route) {
     return "";
   }
@@ -95,19 +95,26 @@ function resolveRouteTitle(
   );
 }
 
-function normalizeRoles(
-  roles
-) {
+function toArray(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
   if (
-    !Array.isArray(roles)
+    value === null ||
+    value === undefined
   ) {
     return [];
   }
 
-  return roles
-    .filter(Boolean)
+  return [value];
+}
+
+function normalizeRoles(roles) {
+  return toArray(roles)
+    .flat()
     .map((role) =>
-      String(role)
+      String(role || "")
         .trim()
         .toLowerCase()
     )
@@ -127,9 +134,24 @@ function normalizeRoutePath(
     return "/";
   }
 
-  return normalized.startsWith("/")
-    ? normalized
-    : `/${normalized}`;
+  const prefixed =
+    normalized.startsWith("/")
+      ? normalized
+      : `/${normalized}`;
+
+  if (
+    prefixed.length > 1 &&
+    prefixed.endsWith("/")
+  ) {
+    return (
+      prefixed.replace(
+        /\/+$/,
+        ""
+      ) || "/"
+    );
+  }
+
+  return prefixed;
 }
 
 function buildRouteId({
@@ -145,6 +167,48 @@ function buildRouteId({
   return `${name}:${cleanPath}`;
 }
 
+function normalizeMeta(
+  definition = {}
+) {
+  const publicRoute =
+    definition.public === true;
+
+  const guestOnly =
+    publicRoute &&
+    definition.hideShell === true &&
+    normalizeRoutePath(
+      definition.path || "/"
+    ) === "/login";
+
+  const roles =
+    normalizeRoles(
+      definition.roles
+    );
+
+  const requiresAuth =
+    publicRoute !== true;
+
+  return Object.freeze({
+    order: Number(
+      definition.order || 0
+    ),
+    source:
+      definition.source ||
+      "router:routes",
+    requiresAuth,
+    private:
+      requiresAuth,
+    guestOnly:
+      definition.guestOnly === true ||
+      guestOnly,
+    publicOnly:
+      definition.guestOnly === true ||
+      guestOnly,
+    roles,
+    allowRoles: roles,
+  });
+}
+
 function createRoute(
   definition = {}
 ) {
@@ -158,6 +222,22 @@ function createRoute(
       definition.name || "route"
     ).trim() || "route";
 
+  const normalizedRoles =
+    normalizeRoles(
+      definition.roles
+    );
+
+  const publicRoute =
+    definition.public === true;
+
+  const meta =
+    normalizeMeta({
+      ...definition,
+      roles: normalizedRoles,
+      public: publicRoute,
+      path: normalizedPath,
+    });
+
   const route = {
     id: buildRouteId({
       path: normalizedPath,
@@ -165,44 +245,36 @@ function createRoute(
     }),
 
     path: normalizedPath,
-
     name: normalizedName,
 
     titleKey:
-      definition.titleKey ||
-      "",
+      definition.titleKey || "",
 
     titleFallback:
       definition.titleFallback ||
       definition.name ||
       "",
 
-    public:
-      definition.public ===
-      true,
+    public: publicRoute,
+
+    requiresAuth:
+      meta.requiresAuth,
+
+    guestOnly:
+      meta.guestOnly,
 
     roles:
-      normalizeRoles(
-        definition.roles
-      ),
+      normalizedRoles,
 
     hideShell:
-      definition.hideShell ===
-      true,
+      definition.hideShell === true,
 
     render: safeRun(
       definition.render ||
-        (() => {})
+        (() => null)
     ),
 
-    meta: Object.freeze({
-      order: Number(
-        definition.order || 0
-      ),
-      source:
-        definition.source ||
-        "router:routes",
-    }),
+    meta,
   };
 
   Object.defineProperty(
@@ -219,14 +291,10 @@ function createRoute(
     }
   );
 
-  return Object.freeze(
-    route
-  );
+  return Object.freeze(route);
 }
 
-function resolveViewRenderer(
-  view
-) {
+function resolveViewRenderer(view) {
   if (
     typeof view ===
     "function"
@@ -245,9 +313,7 @@ function resolveViewRenderer(
     typeof view.init ===
       "function"
   ) {
-    return view.init.bind(
-      view
-    );
+    return view.init.bind(view);
   }
 
   if (
@@ -255,21 +321,15 @@ function resolveViewRenderer(
     typeof view.render ===
       "function"
   ) {
-    return view.render.bind(
-      view
-    );
+    return view.render.bind(view);
   }
 
-  return () => {};
+  return () => null;
 }
 
-function createViewAdapter(
-  view
-) {
+function createViewAdapter(view) {
   const renderer =
-    resolveViewRenderer(
-      view
-    );
+    resolveViewRenderer(view);
 
   return safeRun(
     (...args) =>
@@ -352,6 +412,7 @@ export function createRoutes() {
       public: false,
       roles: [],
       hideShell: false,
+      order: 10,
       render:
         renderHomeView,
     }),
@@ -368,6 +429,7 @@ export function createRoutes() {
       public: false,
       roles: [],
       hideShell: false,
+      order: 20,
       render:
         renderIncidenciasView,
     }),
@@ -384,6 +446,7 @@ export function createRoutes() {
       public: false,
       roles: [],
       hideShell: false,
+      order: 30,
       render:
         renderFacturasView,
     }),
@@ -400,6 +463,7 @@ export function createRoutes() {
       public: false,
       roles: ["admin"],
       hideShell: false,
+      order: 40,
       render:
         renderUsuariosView,
     }),
@@ -416,6 +480,7 @@ export function createRoutes() {
       public: false,
       roles: ["admin"],
       hideShell: false,
+      order: 50,
       render:
         renderClientesView,
     }),
@@ -432,6 +497,7 @@ export function createRoutes() {
       public: false,
       roles: [],
       hideShell: false,
+      order: 60,
       render:
         renderCuentaView,
     }),
@@ -448,6 +514,7 @@ export function createRoutes() {
       public: false,
       roles: [],
       hideShell: false,
+      order: 70,
       render:
         renderAjustesView,
     }),
@@ -464,6 +531,7 @@ export function createRoutes() {
       public: false,
       roles: ["admin"],
       hideShell: false,
+      order: 80,
       render:
         renderServidorView,
     }),
@@ -479,6 +547,8 @@ export function createRoutes() {
       public: true,
       roles: [],
       hideShell: true,
+      guestOnly: true,
+      order: 1000,
       render:
         renderLoginView,
     }),
@@ -495,6 +565,7 @@ export function createRoutes() {
       public: true,
       roles: [],
       hideShell: true,
+      order: 1010,
       render:
         renderResetPasswordView,
     }),
@@ -511,6 +582,7 @@ export function createRoutes() {
       public: true,
       roles: [],
       hideShell: true,
+      order: 1020,
       render:
         renderConfirmResetPasswordView,
     }),
@@ -521,8 +593,7 @@ export function createRoutes() {
    IMMUTABLE TABLE
 ========================================================= */
 
-let ROUTES_CACHE =
-  null;
+let ROUTES_CACHE = null;
 
 export function getImmutableRoutes() {
   if (
@@ -548,9 +619,7 @@ export function validateRoutesTable(
   routes,
   normalizeCanonicalPath
 ) {
-  if (
-    !Array.isArray(routes)
-  ) {
+  if (!Array.isArray(routes)) {
     throw new Error(
       "Router: tabla de rutas inválida."
     );
@@ -560,12 +629,15 @@ export function validateRoutesTable(
     new Set();
   const seenNames =
     new Set();
+  const allowedPublicAuthRoutes =
+    new Set([
+      "/login",
+      "/reset-password",
+      "/reset-password/confirm",
+    ]);
 
   routes.forEach(
-    (
-      route,
-      index
-    ) => {
+    (route, index) => {
       if (
         !route ||
         typeof route !==
@@ -687,6 +759,37 @@ export function validateRoutesTable(
         );
       }
 
+      if (
+        route.public === true &&
+        !route.hideShell &&
+        allowedPublicAuthRoutes.has(
+          normalizedPath
+        )
+      ) {
+        throw new Error(
+          `Router: la ruta auth pública "${normalizedPath}" debe ocultar shell.`
+        );
+      }
+
+      if (
+        route.public === false &&
+        route.hideShell === true
+      ) {
+        throw new Error(
+          `Router: la ruta privada "${normalizedPath}" no debería ocultar shell.`
+        );
+      }
+
+      if (
+        typeof route.meta !==
+          "object" ||
+        !route.meta
+      ) {
+        throw new Error(
+          `Router: la ruta "${normalizedPath}" no tiene meta válido.`
+        );
+      }
+
       seen.add(
         normalizedPath
       );
@@ -698,3 +801,9 @@ export function validateRoutesTable(
 
   return true;
 }
+
+export default {
+  createRoutes,
+  getImmutableRoutes,
+  validateRoutesTable,
+};

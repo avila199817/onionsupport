@@ -2,17 +2,19 @@
    Onion SPA - Sidebar State
    Archivo: src/ui/sidebar/state.js
 
+   FINAL STABLE VERSION
+
    Responsabilidades:
    - detectar viewport mobile
-   - persistir collapsed/expanded en desktop
-   - exponer helpers de estado puros
-   - sincronizar clases visuales del sidebar
-   - actualizar aria / labels de toggles
-   - activar modo tooltip CSS cuando proceda
+   - persistir collapsed manual en desktop
+   - helpers puros de estado
+   - pintar clases visuales
+   - labels accesibles
+   - tooltips coherentes
 
-   NOTA:
-   - La mutación real del estado vive en index.js
-   - Este archivo NO escribe AppCore.state.sidebarOpen
+   REGLA:
+   - el sidebar SOLO cambia cuando index.js modifica
+     AppCore.state.sidebarOpen
 ========================================================= */
 
 import {
@@ -38,7 +40,7 @@ export function isMobileViewport(
 }
 
 /* =========================================================
-   PERSISTENCIA DESKTOP
+   STORAGE
 ========================================================= */
 export function getSavedSidebarCollapsed() {
   try {
@@ -52,7 +54,9 @@ export function getSavedSidebarCollapsed() {
   }
 }
 
-export function saveSidebarCollapsed(value) {
+export function saveSidebarCollapsed(
+  value
+) {
   try {
     localStorage.setItem(
       DESKTOP_COLLAPSED_STORAGE_KEY,
@@ -64,7 +68,7 @@ export function saveSidebarCollapsed(value) {
 }
 
 /* =========================================================
-   STATE HELPERS
+   HELPERS
 ========================================================= */
 export function getDesiredSidebarOpenState(
   AppCore
@@ -81,7 +85,8 @@ export function isSidebarCollapsedDesktop(
     getElements(AppCore);
 
   if (!sidebar) return false;
-  if (isMobileViewport()) return false;
+  if (isMobileViewport())
+    return false;
 
   return (
     sidebar.classList.contains(
@@ -112,19 +117,19 @@ export function syncTooltipMode(
           AppCore
         );
 
-  const enableCssTooltipMode =
+  const enable =
     !isMobileViewport() &&
     !open &&
     !isShellHidden(AppCore);
 
   sidebar.classList.toggle(
     "sidebar-tooltips-active",
-    enableCssTooltipMode
+    enable
   );
 
   body.classList.toggle(
     "sidebar-tooltips-active",
-    enableCssTooltipMode
+    enable
   );
 
   sanitizeFooterTooltipState(
@@ -133,7 +138,7 @@ export function syncTooltipMode(
 }
 
 /* =========================================================
-   TOGGLE LABELS
+   LABELS
 ========================================================= */
 export function updateToggleLabel(
   AppCore,
@@ -219,7 +224,7 @@ export function updateToggleLabel(
 }
 
 /* =========================================================
-   SINCRONIZACIÓN VISUAL
+   VISUAL SYNC
 ========================================================= */
 export function syncSidebarState(
   AppCore,
@@ -248,15 +253,14 @@ export function syncSidebarState(
       "sidebar-collapsed"
     );
 
-    syncTooltipMode(
+    closeDropdown?.();
+
+    updateToggleLabel(
       AppCore,
       true
     );
 
-    closeDropdown?.();
-
-    /* no marcar collapsed falso */
-    updateToggleLabel(
+    syncTooltipMode(
       AppCore,
       true
     );
@@ -264,9 +268,6 @@ export function syncSidebarState(
     return;
   }
 
-  /* -----------------------------------------
-     SHELL VISIBLE
-  ----------------------------------------- */
   sidebar.hidden = false;
 
   const mobile =
@@ -277,6 +278,9 @@ export function syncSidebarState(
       AppCore
     );
 
+  /* -----------------------------------------
+     MOBILE
+  ----------------------------------------- */
   if (mobile) {
     sidebar.classList.toggle(
       "open",
@@ -301,7 +305,12 @@ export function syncSidebarState(
     body?.classList.remove(
       "sidebar-collapsed"
     );
-  } else {
+  }
+
+  /* -----------------------------------------
+     DESKTOP
+  ----------------------------------------- */
+  else {
     sidebar.classList.toggle(
       "collapsed",
       !isOpen

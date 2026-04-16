@@ -14,10 +14,12 @@
    HARDENING EXTREMO:
    - promises únicas anti race-condition
    - cooldown anti refresh-loop
-   - fallback token -> /me
+   - fallback refresh -> token -> /me
    - limpieza total garantizada
    - eventos enterprise
    - tolerancia backend heterogéneo
+   - snapshot consistente
+   - no romper boot aunque backend falle
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -49,7 +51,28 @@ import {
 import {
   applySession,
   clearSessionLocal,
+  buildSessionSnapshot,
 } from "./session.js";
+
+/* =========================================================
+   INTERNAL DEFAULT SESSION
+========================================================= */
+
+const runtimeSession = {
+  checking: false,
+  refreshing: false,
+  restoring: false,
+
+  mePromise: null,
+  refreshPromise: null,
+  restorePromise: null,
+
+  lastCheckAt: 0,
+  lastRefreshAt: 0,
+
+  refreshFailCount: 0,
+  refreshBlockedUntil: 0,
+};
 
 /* =========================================================
    BASICS
@@ -64,6 +87,16 @@ function safeNumber(
   return Number.isFinite(n)
     ? n
     : fallback;
+}
+
+function getSession(
+  session
+) {
+  return session &&
+    typeof session ===
+      "object"
+    ? session
+    : runtimeSession;
 }
 
 function emit(
@@ -107,17 +140,17 @@ function getRefreshRetryCooldownMs() {
 function clearRuntimeFlags(
   session
 ) {
-  if (!session) return;
+  if (!session) {
+    return;
+  }
 
   session.checking = false;
   session.refreshing = false;
   session.restoring = false;
 
   session.mePromise = null;
-  session.refreshPromise =
-    null;
-  session.restorePromise =
-    null;
+  session.refreshPromise = null;
+  session.restorePromise = null;
 }
 
 function getStoredRefreshPayload() {
@@ -153,16 +186,43 @@ function shouldClearForError(
   );
 }
 
+function hasApiGet() {
+  return (
+    typeof AppCore
+      ?.apiClient?.get ===
+    "function"
+  );
+}
+
+function hasApiPost() {
+  return (
+    typeof AppCore
+      ?.apiClient?.post ===
+    "function"
+  );
+}
+
 /* =========================================================
    /ME
 ========================================================= */
 
 export async function fetchMe(
-  session = {}
+  sessionArg = {}
 ) {
+  const session =
+    getSession(
+      sessionArg
+    );
+
   if (!hasValidToken()) {
     throw new Error(
       "No hay token disponible para /me."
+    );
+  }
+
+  if (!hasApiGet()) {
+    throw new Error(
+      "apiClient.get no disponible."
     );
   }
 
@@ -186,7 +246,9 @@ export async function fetchMe(
           );
 
         const user =
-          extractUser(response) ||
+          extractUser(
+            response
+          ) ||
           extractUser(
             response?.data
           ) ||
@@ -235,8 +297,7 @@ export async function fetchMe(
         throw error;
       } finally {
         session.checking = false;
-        session.mePromise =
-          null;
+        session.mePromise = null;
       }
     })();
 
@@ -248,11 +309,22 @@ export async function fetchMe(
 ========================================================= */
 
 export async function refreshSession(
-  session = {}
+  sessionArg = {}
 ) {
+  const session =
+    getSession(
+      sessionArg
+    );
+
   if (!hasRefreshContext()) {
     throw new Error(
       "No hay contexto refresh."
+    );
+  }
+
+  if (!hasApiPost()) {
+    throw new Error(
+      "apiClient.post no disponible."
     );
   }
 
@@ -330,18 +402,20 @@ export async function refreshSession(
           applySession({
             token:
               nextToken ??
-              AppCore.state.token,
+              AppCore?.state
+                ?.token,
 
             user:
               nextUser ??
-              AppCore.state.user,
+              AppCore?.state
+                ?.user,
 
             refreshToken:
               nextRefreshToken ??
               requestBody.refreshToken,
 
             sessionData:
-              nextSessionData ?? {
+              nextSessionData || {
                 sessionId:
                   requestBody.sessionId,
                 userId:
@@ -412,6 +486,7 @@ export async function refreshSession(
       } finally {
         session.refreshing =
           false;
+
         session.refreshPromise =
           null;
       }
@@ -443,6 +518,7 @@ export async function restoreUsingMe(
   return {
     ok: true,
     user,
+    source: "me",
   };
 }
 
@@ -455,7 +531,7 @@ export async function restoreUsingRefreshOnly(
     );
 
   if (
-    !AppCore.state.user &&
+    !AppCore?.state?.user &&
     hasValidToken()
   ) {
     await fetchMe(
@@ -469,14 +545,20 @@ export async function restoreUsingRefreshOnly(
       source:
         "refresh-only",
       user:
-        AppCore.state.user,
+        AppCore?.state
+          ?.user ||
+        null,
     }
   );
 
   return {
     ok: true,
+    source:
+      "refresh-only",
     user:
-      AppCore.state.user,
+      AppCore?.state
+        ?.user ||
+      null,
     refreshed,
   };
 }
@@ -558,8 +640,13 @@ export async function restoreAfterMeFailure(
 ========================================================= */
 
 export async function restoreSession(
-  session = {}
+  sessionArg = {}
 ) {
+  const session =
+    getSession(
+      sessionArg
+    );
+
   if (
     session.restorePromise
   ) {
@@ -575,7 +662,8 @@ export async function restoreSession(
         hasValidToken(),
       hasUser:
         Boolean(
-          AppCore.state.user
+          AppCore?.state
+            ?.user
         ),
       hasRefreshContext:
         hasRefreshContext(),
@@ -591,7 +679,6 @@ export async function restoreSession(
         const refreshAvailable =
           hasRefreshContext();
 
-        /* Nada guardado */
         if (
           !tokenAvailable &&
           !refreshAvailable
@@ -699,3 +786,63 @@ export async function restoreSession(
 
   return session.restorePromise;
 }
+
+/* =========================================================
+   DEBUG
+========================================================= */
+
+export function getRestoreSnapshot(
+  sessionArg = {}
+) {
+  const session =
+    getSession(
+      sessionArg
+    );
+
+  return {
+    ...buildSessionSnapshot(),
+    checking:
+      Boolean(
+        session.checking
+      ),
+    refreshing:
+      Boolean(
+        session.refreshing
+      ),
+    restoring:
+      Boolean(
+        session.restoring
+      ),
+    refreshFailCount:
+      safeNumber(
+        session.refreshFailCount,
+        0
+      ),
+    refreshBlockedUntil:
+      safeNumber(
+        session.refreshBlockedUntil,
+        0
+      ),
+    lastCheckAt:
+      safeNumber(
+        session.lastCheckAt,
+        0
+      ),
+    lastRefreshAt:
+      safeNumber(
+        session.lastRefreshAt,
+        0
+      ),
+  };
+}
+
+export default {
+  fetchMe,
+  refreshSession,
+  restoreUsingMe,
+  restoreUsingRefreshOnly,
+  restoreUsingRefreshPreferred,
+  restoreAfterMeFailure,
+  restoreSession,
+  getRestoreSnapshot,
+};

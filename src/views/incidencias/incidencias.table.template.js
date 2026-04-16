@@ -8,6 +8,9 @@
    - renderizar header premium de la vista
    - renderizar estados loading / error / empty
    - renderizar tabla premium de incidencias
+   - paginar a 5 incidencias por vista
+   - mostrar loader SOLO en la sección de tabla
+   - mostrar estado visual al abrir ticket lento
    - mantener compatibilidad directa con incidenciasView.js
    - consumir datos reales del backend /api/tickets
    - compartir lenguaje visual y densidad con Facturas
@@ -38,6 +41,8 @@ import {
    SAFE
 ========================================================= */
 
+const PAGE_SIZE = 5;
+
 function safeText(value, fallback = "—") {
   if (value === null || value === undefined) return fallback;
   const text = String(value).trim();
@@ -54,9 +59,7 @@ function safeArray(value) {
 }
 
 function safeObject(value) {
-  return value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
+  return value && typeof value === "object" && !Array.isArray(value)
     ? value
     : {};
 }
@@ -234,7 +237,9 @@ function getStatusChipStyle(value = "") {
   }
 
   if (
-    ["in_progress", "in-progress", "progress", "en_proceso", "en proceso"].includes(key)
+    ["in_progress", "in-progress", "progress", "en_proceso", "en proceso"].includes(
+      key
+    )
   ) {
     return `
       color:#b388ff;
@@ -342,43 +347,26 @@ function getResolvedItems(items) {
     return sortIncidenciasByUpdatedDesc(direct);
   }
 
-  const fromEnvelope =
-    unwrapItemsEnvelope(items);
+  const fromEnvelope = unwrapItemsEnvelope(items);
 
   if (fromEnvelope.length) {
-    return sortIncidenciasByUpdatedDesc(
-      fromEnvelope
-    );
+    return sortIncidenciasByUpdatedDesc(fromEnvelope);
   }
 
   try {
-    return sortIncidenciasByUpdatedDesc(
-      getIncidencias()
-    );
+    return sortIncidenciasByUpdatedDesc(getIncidencias());
   } catch {
     return [];
   }
 }
 
 function getTicketId(item = {}) {
-  return safeText(
-    first(
-      item.ticketId,
-      item.id,
-      item.code
-    ),
-    ""
-  );
+  return safeText(first(item.ticketId, item.id, item.code), "");
 }
 
 function getTicketCode(item = {}) {
   return safeText(
-    first(
-      item.ticketId,
-      item.id,
-      item.code,
-      item.ticketCode
-    ),
+    first(item.ticketId, item.id, item.code, item.ticketCode),
     "—"
   );
 }
@@ -417,46 +405,24 @@ function getClientEmail(item = {}) {
 
 function getTitle(item = {}) {
   return safeText(
-    first(
-      item.subject,
-      item.title,
-      item.asunto,
-      item.name
-    ),
+    first(item.subject, item.title, item.asunto, item.name),
     "Incidencia sin título"
   );
 }
 
 function getPreview(item = {}) {
   return safeText(
-    first(
-      item.preview,
-      item.descripcion,
-      item.description,
-      item.message
-    ),
+    first(item.preview, item.descripcion, item.description, item.message),
     "Sin descripción"
   );
 }
 
 function getStatusValue(item = {}) {
-  return safeText(
-    first(
-      item.status,
-      item.estado
-    ),
-    "open"
-  );
+  return safeText(first(item.status, item.estado), "open");
 }
 
 function getPriorityValue(item = {}) {
-  return safeText(
-    first(
-      item.priority,
-      item.prioridad
-    ),
-    "medium"
-  );
+  return safeText(first(item.priority, item.prioridad), "medium");
 }
 
 function getAssigned(item = {}) {
@@ -474,19 +440,11 @@ function getAssigned(item = {}) {
 }
 
 function getUpdatedAt(item = {}) {
-  return first(
-    item.updatedAt,
-    item.closedAt,
-    item.createdAt
-  );
+  return first(item.updatedAt, item.closedAt, item.createdAt);
 }
 
 function getCreatedAt(item = {}) {
-  return first(
-    item.createdAt,
-    item.createdAtES,
-    item.updatedAt
-  );
+  return first(item.createdAt, item.createdAtES, item.updatedAt);
 }
 
 function getClientInitials(item = {}) {
@@ -507,9 +465,130 @@ function getClientInitials(item = {}) {
   if (!clean) return "ON";
 
   const parts = clean.split(/\s+/).filter(Boolean);
-  const initials = parts.slice(0, 2).map((part) => part[0]).join("");
+  const initials = parts
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("");
 
   return (initials || clean.slice(0, 2) || "ON").toUpperCase();
+}
+
+function getClientAvatarUrl(item = {}) {
+  return safeText(
+    first(
+      item?.cliente?.avatar,
+      item?.cliente?.avatarUrl,
+      item?.clientAvatar,
+      item?.clientAvatarUrl,
+      item?.avatar,
+      item?.avatarUrl,
+      item?.createdBy?.avatar,
+      item?.createdBy?.avatarUrl,
+      item?.receptor?.avatar,
+      item?.receptor?.avatarUrl
+    ),
+    ""
+  );
+}
+
+function getAvatarToneSeed(item = {}) {
+  return safeText(
+    first(
+      getTicketId(item),
+      getClientName(item),
+      getClientEmail(item),
+      getTicketCode(item)
+    ),
+    "onion"
+  );
+}
+
+function getStableHash(value = "") {
+  const source = String(value || "onion");
+  let hash = 0;
+
+  for (let i = 0; i < source.length; i += 1) {
+    hash = (hash << 5) - hash + source.charCodeAt(i);
+    hash |= 0;
+  }
+
+  return Math.abs(hash);
+}
+
+function getFallbackAvatarTheme(seed = "") {
+  const themes = [
+    {
+      bg: "linear-gradient(135deg, rgba(124,92,255,.28), rgba(88,72,200,.12))",
+      border: "rgba(124,92,255,.28)",
+      text: "#efeaff",
+      glow: "rgba(124,92,255,.22)",
+    },
+    {
+      bg: "linear-gradient(135deg, rgba(54,198,144,.28), rgba(35,131,95,.12))",
+      border: "rgba(54,198,144,.28)",
+      text: "#ddfff1",
+      glow: "rgba(54,198,144,.22)",
+    },
+    {
+      bg: "linear-gradient(135deg, rgba(96,165,250,.28), rgba(37,99,235,.12))",
+      border: "rgba(96,165,250,.28)",
+      text: "#e7f2ff",
+      glow: "rgba(96,165,250,.22)",
+    },
+    {
+      bg: "linear-gradient(135deg, rgba(255,188,66,.28), rgba(217,119,6,.12))",
+      border: "rgba(255,188,66,.28)",
+      text: "#fff4d8",
+      glow: "rgba(255,188,66,.22)",
+    },
+    {
+      bg: "linear-gradient(135deg, rgba(255,107,107,.28), rgba(190,24,93,.12))",
+      border: "rgba(255,107,107,.28)",
+      text: "#ffe4e4",
+      glow: "rgba(255,107,107,.22)",
+    },
+    {
+      bg: "linear-gradient(135deg, rgba(179,136,255,.28), rgba(109,40,217,.12))",
+      border: "rgba(179,136,255,.28)",
+      text: "#f3e8ff",
+      glow: "rgba(179,136,255,.22)",
+    },
+  ];
+
+  return themes[getStableHash(seed) % themes.length];
+}
+
+/* =========================================================
+   PAGINATION
+========================================================= */
+
+function clampPage(page = 1, totalPages = 1) {
+  const current = safeNumber(page, 1);
+  return Math.min(Math.max(current, 1), Math.max(totalPages, 1));
+}
+
+function getPagination(items = [], state = {}) {
+  const list = safeArray(items);
+  const localState = safeObject(state);
+
+  const pageSize = Math.max(1, safeNumber(localState.pageSize, PAGE_SIZE));
+  const totalItems = list.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const page = clampPage(localState.page || 1, totalPages);
+  const start = (page - 1) * pageSize;
+  const end = start + pageSize;
+
+  return {
+    page,
+    pageSize,
+    totalItems,
+    totalPages,
+    start,
+    end,
+    items: list.slice(start, end),
+    from: totalItems ? start + 1 : 0,
+    to: Math.min(end, totalItems),
+  };
 }
 
 /* =========================================================
@@ -522,16 +601,12 @@ function computeStats(items = []) {
   const totalIncidencias = list.length;
 
   const openCount = list.filter((item) => {
-    const status = safeLower(
-      getStatusValue(item)
-    );
+    const status = safeLower(getStatusValue(item));
     return ["open", "abierta", "abierto"].includes(status);
   }).length;
 
   const inProgressCount = list.filter((item) => {
-    const status = safeLower(
-      getStatusValue(item)
-    );
+    const status = safeLower(getStatusValue(item));
     return [
       "pending",
       "pendiente",
@@ -544,35 +619,23 @@ function computeStats(items = []) {
   }).length;
 
   const urgentCount = list.filter((item) => {
-    const priority = safeLower(
-      getPriorityValue(item)
+    const priority = safeLower(getPriorityValue(item));
+    return ["urgent", "urgente", "critical", "critica", "crítica"].includes(
+      priority
     );
-    return [
-      "urgent",
-      "urgente",
-      "critical",
-      "critica",
-      "crítica",
-    ].includes(priority);
   }).length;
 
   const assignedCount = list.filter((item) => {
-    const explicitAssigned =
-      safeObject(item?.meta)
-        ?.isAssigned === true;
+    const explicitAssigned = safeObject(item?.meta)?.isAssigned === true;
 
-    if (explicitAssigned) {
-      return true;
-    }
+    if (explicitAssigned) return true;
 
     const assigned = getAssigned(item);
     return assigned !== "No asignado";
   }).length;
 
   const closedCount = list.filter((item) => {
-    const status = safeLower(
-      getStatusValue(item)
-    );
+    const status = safeLower(getStatusValue(item));
     return [
       "resolved",
       "resuelta",
@@ -610,8 +673,16 @@ function renderStatCard({
         min-height:132px;
         padding:20px;
         border-radius:var(--panel-radius);
-        border:1px solid ${accent ? "color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft))" : "var(--border-soft)"};
-        background:${accent ? "linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 72%), var(--surface-1, var(--surface-glass))" : "var(--surface-1, var(--surface-glass))"};
+        border:1px solid ${
+          accent
+            ? "color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft))"
+            : "var(--border-soft)"
+        };
+        background:${
+          accent
+            ? "linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 72%), var(--surface-1, var(--surface-glass))"
+            : "var(--surface-1, var(--surface-glass))"
+        };
         box-shadow:var(--shadow-sm);
       "
     >
@@ -665,6 +736,7 @@ export function renderHeader({ items = [], state = {} } = {}) {
 
   const loading = Boolean(localState?.loading);
   const refreshing = Boolean(localState?.refreshing);
+  const creating = Boolean(localState?.creating);
   const remoteCount = resolveRemoteCount(items, localState);
   const lastSyncText = localState?.lastSyncAt
     ? formatRelativeDate(localState.lastSyncAt)
@@ -777,22 +849,23 @@ export function renderHeader({ items = [], state = {} } = {}) {
             </button>
 
             <button
-              id="incidencias-refresh-btn"
+              id="incidencias-create-btn"
               type="button"
-              ${loading || refreshing ? "disabled" : ""}
+              ${creating ? "disabled" : ""}
               style="
                 min-height:42px;
-                padding:0 14px;
+                padding:0 16px;
                 border-radius:var(--btn-radius);
                 border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
                 background:var(--btn-primary-bg, var(--accent, #7c5cff));
                 color:var(--btn-primary-text, #fff);
                 font-weight:var(--weight-bold);
-                cursor:${loading || refreshing ? "not-allowed" : "pointer"};
-                opacity:${loading || refreshing ? ".72" : "1"};
+                cursor:${creating ? "not-allowed" : "pointer"};
+                opacity:${creating ? ".78" : "1"};
+                box-shadow:0 10px 24px color-mix(in srgb, var(--accent, #7c5cff) 22%, transparent);
               "
             >
-              ${refreshing || loading ? "Actualizando..." : "Actualizar"}
+              ${creating ? "Creando..." : "Nueva incidencia"}
             </button>
           </div>
         </div>
@@ -843,6 +916,43 @@ export function renderHeader({ items = [], state = {} } = {}) {
           >
             Última sync · ${escapeHtml(lastSyncText)}
           </span>
+
+          ${
+            refreshing || loading
+              ? `
+                <span
+                  style="
+                    display:inline-flex;
+                    align-items:center;
+                    gap:8px;
+                    min-height:30px;
+                    padding:0 10px;
+                    border-radius:999px;
+                    border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft));
+                    background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
+                    color:var(--text-soft);
+                    font-size:12px;
+                    font-weight:var(--weight-bold);
+                    letter-spacing:.04em;
+                    text-transform:uppercase;
+                  "
+                >
+                  <span
+                    aria-hidden="true"
+                    style="
+                      width:10px;
+                      height:10px;
+                      border-radius:999px;
+                      background:var(--accent, #7c5cff);
+                      box-shadow:0 0 0 0 color-mix(in srgb, var(--accent, #7c5cff) 30%, transparent);
+                      animation:incidenciasPulse 1.35s ease-in-out infinite;
+                    "
+                  ></span>
+                  Sincronizando
+                </span>
+              `
+              : ""
+          }
         </div>
 
         <div
@@ -881,6 +991,12 @@ export function renderHeader({ items = [], state = {} } = {}) {
       </div>
 
       <style>
+        @keyframes incidenciasPulse {
+          0% { transform:scale(.92); opacity:.75; }
+          50% { transform:scale(1.08); opacity:1; }
+          100% { transform:scale(.92); opacity:.75; }
+        }
+
         @media (max-width: 1100px) {
           .incidencias-hero-stats {
             grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
@@ -920,63 +1036,77 @@ export function renderLoadingState() {
           overflow:auto;
         "
       >
-        <div
-          style="
-            min-width:1180px;
-          "
-        >
+        <div style="min-width:1120px;">
           <div
             style="
               display:grid;
-              grid-template-columns: 1.6fr .9fr .8fr .8fr .8fr 1fr 1.2fr;
+              grid-template-columns: 2.2fr .85fr .85fr .9fr 1.05fr 1fr 1fr .95fr;
               gap:0;
               border-bottom:1px solid var(--border-soft);
               background:var(--surface-2, var(--surface-glass));
             "
           >
-            ${Array.from({ length: 7 })
+            ${Array.from({ length: 8 })
               .map(
                 () => `
                   <div style="padding:16px 18px;">
-                    <div style="height:12px; width:70%; border-radius:999px; background:var(--surface-glass);"></div>
+                    <div
+                      style="
+                        height:12px;
+                        width:70%;
+                        border-radius:999px;
+                        background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass));
+                        background-size:200% 100%;
+                        animation:incidenciasSkeleton 1.25s linear infinite;
+                      "
+                    ></div>
                   </div>
                 `
               )
               .join("")}
           </div>
 
-          ${Array.from({ length: 8 })
+          ${Array.from({ length: PAGE_SIZE })
             .map(
               () => `
                 <div
                   style="
                     display:grid;
-                    grid-template-columns: 1.6fr .9fr .8fr .8fr .8fr 1fr 1.2fr;
+                    grid-template-columns: 2.2fr .85fr .85fr .9fr 1.05fr 1fr 1fr .95fr;
                     gap:0;
                     border-bottom:1px solid var(--border-soft);
                   "
                 >
-                  <div style="padding:18px;">
+                  <div style="padding:16px 18px;">
                     <div style="display:flex; gap:12px; align-items:center;">
-                      <div style="width:42px; height:42px; border-radius:14px; background:var(--surface-glass);"></div>
+                      <div
+                        style="
+                          width:44px;
+                          height:44px;
+                          border-radius:14px;
+                          background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass));
+                          background-size:200% 100%;
+                          animation:incidenciasSkeleton 1.25s linear infinite;
+                        "
+                      ></div>
                       <div style="display:grid; gap:8px; flex:1;">
-                        <div style="height:14px; width:130px; border-radius:999px; background:var(--surface-glass);"></div>
-                        <div style="height:12px; width:200px; border-radius:999px; background:var(--surface-glass);"></div>
-                        <div style="height:12px; width:170px; border-radius:999px; background:var(--surface-glass);"></div>
+                        <div style="height:14px; width:140px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:incidenciasSkeleton 1.25s linear infinite;"></div>
+                        <div style="height:12px; width:220px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:incidenciasSkeleton 1.25s linear infinite;"></div>
+                        <div style="height:12px; width:170px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:incidenciasSkeleton 1.25s linear infinite;"></div>
                       </div>
                     </div>
                   </div>
 
-                  <div style="padding:18px;"><div style="height:34px; width:96px; border-radius:999px; background:var(--surface-glass);"></div></div>
-                  <div style="padding:18px;"><div style="height:34px; width:92px; border-radius:999px; background:var(--surface-glass);"></div></div>
-                  <div style="padding:18px;"><div style="height:14px; width:86px; border-radius:999px; background:var(--surface-glass);"></div></div>
-                  <div style="padding:18px;"><div style="height:14px; width:116px; border-radius:999px; background:var(--surface-glass);"></div></div>
-                  <div style="padding:18px;"><div style="height:14px; width:92px; border-radius:999px; background:var(--surface-glass);"></div></div>
+                  <div style="padding:16px 18px;"><div style="height:34px; width:96px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:incidenciasSkeleton 1.25s linear infinite;"></div></div>
+                  <div style="padding:16px 18px;"><div style="height:34px; width:92px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:incidenciasSkeleton 1.25s linear infinite;"></div></div>
+                  <div style="padding:16px 18px;"><div style="height:14px; width:86px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:incidenciasSkeleton 1.25s linear infinite;"></div></div>
+                  <div style="padding:16px 18px;"><div style="height:14px; width:116px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:incidenciasSkeleton 1.25s linear infinite;"></div></div>
+                  <div style="padding:16px 18px;"><div style="height:14px; width:92px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:incidenciasSkeleton 1.25s linear infinite;"></div></div>
+                  <div style="padding:16px 18px;"><div style="height:14px; width:92px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:incidenciasSkeleton 1.25s linear infinite;"></div></div>
 
-                  <div style="padding:18px;">
+                  <div style="padding:16px 18px;">
                     <div style="display:flex; gap:8px; justify-content:flex-end;">
-                      <div style="height:38px; width:82px; border-radius:12px; background:var(--surface-glass);"></div>
-                      <div style="height:38px; width:82px; border-radius:12px; background:var(--surface-glass);"></div>
+                      <div style="height:38px; width:82px; border-radius:12px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:incidenciasSkeleton 1.25s linear infinite;"></div>
                     </div>
                   </div>
                 </div>
@@ -985,6 +1115,13 @@ export function renderLoadingState() {
             .join("")}
         </div>
       </div>
+
+      <style>
+        @keyframes incidenciasSkeleton {
+          0% { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
+        }
+      </style>
     </section>
   `;
 }
@@ -1135,7 +1272,7 @@ export function renderEmptyState() {
 
       <div style="display:flex; gap:10px; flex-wrap:wrap;">
         <button
-          id="incidencias-refresh-btn"
+          id="incidencias-create-btn"
           type="button"
           style="
             min-height:42px;
@@ -1148,14 +1285,21 @@ export function renderEmptyState() {
             cursor:pointer;
           "
         >
-          Recargar
+          Crear incidencia
         </button>
       </div>
     </section>
   `;
 }
 
-function renderTableToolbar({ total = 0 } = {}) {
+function renderTableToolbar({
+  total = 0,
+  page = 1,
+  totalPages = 1,
+  from = 0,
+  to = 0,
+  refreshing = false,
+} = {}) {
   return `
     <div
       class="incidencias-table-toolbar"
@@ -1189,7 +1333,7 @@ function renderTableToolbar({ total = 0 } = {}) {
             font-size:var(--font-sm);
           "
         >
-          ${escapeHtml(String(total))} registro${total === 1 ? "" : "s"} visible${total === 1 ? "" : "s"} en pantalla.
+          Mostrando ${escapeHtml(String(from))}-${escapeHtml(String(to))} de ${escapeHtml(String(total))} · página ${escapeHtml(String(page))} de ${escapeHtml(String(totalPages))}
         </span>
       </div>
 
@@ -1219,7 +1363,167 @@ function renderTableToolbar({ total = 0 } = {}) {
         >
           Vista tabla
         </span>
+
+        ${
+          refreshing
+            ? `
+              <span
+                style="
+                  display:inline-flex;
+                  align-items:center;
+                  gap:8px;
+                  min-height:30px;
+                  padding:0 10px;
+                  border-radius:999px;
+                  border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 22%, var(--border-soft));
+                  background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
+                  color:var(--text-soft);
+                  font-size:12px;
+                  font-weight:var(--weight-bold);
+                  letter-spacing:.04em;
+                  text-transform:uppercase;
+                "
+              >
+                <span
+                  aria-hidden="true"
+                  style="
+                    width:8px;
+                    height:8px;
+                    border-radius:999px;
+                    background:var(--accent, #7c5cff);
+                    animation:incidenciasPulse 1.25s ease-in-out infinite;
+                  "
+                ></span>
+                Actualizando
+              </span>
+            `
+            : ""
+        }
+
+        <button
+          type="button"
+          data-action="prev-page"
+          ${page <= 1 ? "disabled" : ""}
+          style="
+            min-height:34px;
+            padding:0 12px;
+            border-radius:12px;
+            border:1px solid var(--border-soft);
+            background:var(--surface-glass);
+            color:var(--text-soft);
+            font-weight:var(--weight-bold);
+            cursor:${page <= 1 ? "not-allowed" : "pointer"};
+            opacity:${page <= 1 ? ".55" : "1"};
+          "
+        >
+          Anterior
+        </button>
+
+        <button
+          type="button"
+          data-action="next-page"
+          ${page >= totalPages ? "disabled" : ""}
+          style="
+            min-height:34px;
+            padding:0 12px;
+            border-radius:12px;
+            border:1px solid var(--border-soft);
+            background:var(--surface-glass);
+            color:var(--text-soft);
+            font-weight:var(--weight-bold);
+            cursor:${page >= totalPages ? "not-allowed" : "pointer"};
+            opacity:${page >= totalPages ? ".55" : "1"};
+          "
+        >
+          Siguiente
+        </button>
       </div>
+    </div>
+  `;
+}
+
+/* =========================================================
+   AVATAR
+========================================================= */
+
+function renderIdentityAvatar({
+  avatarUrl = "",
+  initials = "ON",
+  seed = "onion",
+  size = 44,
+  radius = 14,
+} = {}) {
+  const theme = getFallbackAvatarTheme(seed);
+  const safeUrl = safeText(avatarUrl, "");
+
+  if (safeUrl) {
+    return `
+      <div
+        aria-hidden="true"
+        style="
+          position:relative;
+          flex:0 0 ${size}px;
+          width:${size}px;
+          height:${size}px;
+          border-radius:${radius}px;
+          overflow:hidden;
+          border:1px solid var(--border-soft);
+          box-shadow:0 8px 24px rgba(0,0,0,.18);
+          background:var(--surface-glass);
+        "
+      >
+        <img
+          src="${escapeHtml(safeUrl)}"
+          alt=""
+          loading="lazy"
+          referrerpolicy="no-referrer"
+          style="
+            display:block;
+            width:100%;
+            height:100%;
+            object-fit:cover;
+          "
+          onerror="this.style.display='none'; this.parentNode.setAttribute('data-avatar-fallback','true');"
+        />
+        <span
+          style="
+            position:absolute;
+            inset:0;
+            display:none;
+            place-items:center;
+            background:${theme.bg};
+            color:${theme.text};
+            font-weight:var(--weight-black);
+            letter-spacing:.03em;
+            backdrop-filter:blur(8px);
+          "
+        >
+          ${escapeHtml(initials)}
+        </span>
+      </div>
+    `;
+  }
+
+  return `
+    <div
+      aria-hidden="true"
+      style="
+        position:relative;
+        flex:0 0 ${size}px;
+        width:${size}px;
+        height:${size}px;
+        border-radius:${radius}px;
+        display:grid;
+        place-items:center;
+        background:${theme.bg};
+        border:1px solid ${theme.border};
+        color:${theme.text};
+        font-weight:var(--weight-black);
+        letter-spacing:.03em;
+        box-shadow:0 8px 24px ${theme.glow};
+      "
+    >
+      ${escapeHtml(initials)}
     </div>
   `;
 }
@@ -1228,11 +1532,58 @@ function renderTableToolbar({ total = 0 } = {}) {
    ROW
 ========================================================= */
 
-function renderIncidenciaRow(item = {}) {
+function renderOpenTicketButton({ ticketId = "", isOpening = false } = {}) {
+  return `
+    <button
+      type="button"
+      data-action="open-ticket"
+      data-ticket-id="${escapeHtml(ticketId)}"
+      ${isOpening ? "disabled" : ""}
+      style="
+        min-height:38px;
+        min-width:96px;
+        padding:0 12px;
+        border-radius:12px;
+        border:1px solid var(--btn-secondary-border, var(--border-soft));
+        background:var(--btn-secondary-bg, var(--surface-glass));
+        color:var(--btn-secondary-text, var(--text-soft));
+        font-weight:var(--weight-bold);
+        cursor:${isOpening ? "wait" : "pointer"};
+        white-space:nowrap;
+        opacity:${isOpening ? ".88" : "1"};
+      "
+    >
+      ${
+        isOpening
+          ? `
+            <span style="display:inline-flex; align-items:center; gap:8px;">
+              <span
+                aria-hidden="true"
+                style="
+                  width:14px;
+                  height:14px;
+                  border-radius:999px;
+                  border:2px solid color-mix(in srgb, var(--text-soft) 22%, transparent);
+                  border-top-color:var(--text-soft);
+                  animation:incidenciasSpin .8s linear infinite;
+                "
+              ></span>
+              Abriendo...
+            </span>
+          `
+          : "Ver"
+      }
+    </button>
+  `;
+}
+
+function renderIncidenciaRow(item = {}, state = {}) {
+  const localState = safeObject(state);
+  const openingTicketId = safeText(localState?.openingTicketId, "");
   const ticketId = getTicketId(item);
   const code = getTicketCode(item);
   const title = getTitle(item);
-  const preview = truncate(getPreview(item), 110);
+  const preview = truncate(getPreview(item), 96);
   const client = getClientName(item);
   const email = getClientEmail(item);
   const statusValue = getStatusValue(item);
@@ -1246,50 +1597,41 @@ function renderIncidenciaRow(item = {}) {
   const updatedAtDate = formatDate(updatedAtRaw);
   const createdAt = formatDate(createdAtRaw);
   const initials = getClientInitials(item);
+  const avatarUrl = getClientAvatarUrl(item);
+  const avatarSeed = getAvatarToneSeed(item);
+  const isOpening = Boolean(openingTicketId && openingTicketId === ticketId);
 
   return `
     <tr
-      class="incidencias-row"
+      class="incidencias-row ${isOpening ? "is-opening" : ""}"
       data-ticket-id="${escapeHtml(ticketId)}"
       style="
-        transition:background .18s ease, transform .18s ease;
+        transition:background .18s ease, opacity .18s ease, transform .18s ease;
+        opacity:${isOpening ? ".72" : "1"};
       "
     >
       <td
         style="
-          padding:18px;
+          padding:14px 18px;
           border-bottom:1px solid var(--border-soft);
           vertical-align:middle;
         "
       >
-        <div style="display:flex; gap:14px; align-items:center; min-width:280px;">
-          <div
-            aria-hidden="true"
-            style="
-              flex:0 0 44px;
-              width:44px;
-              height:44px;
-              border-radius:14px;
-              display:grid;
-              place-items:center;
-              background:
-                linear-gradient(135deg, color-mix(in srgb, var(--accent, #7c5cff) 22%, transparent), transparent),
-                var(--surface-glass);
-              border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft));
-              color:var(--text-strong);
-              font-weight:var(--weight-black);
-              letter-spacing:.03em;
-              box-shadow:var(--shadow-xs, 0 4px 14px rgba(0,0,0,.08));
-            "
-          >
-            ${escapeHtml(initials)}
-          </div>
+        <div style="display:flex; gap:12px; align-items:center; min-width:320px;">
+          ${renderIdentityAvatar({
+            avatarUrl,
+            initials,
+            seed: avatarSeed,
+            size: 44,
+            radius: 14,
+          })}
 
-          <div style="display:grid; gap:5px; min-width:0;">
+          <div style="display:grid; gap:4px; min-width:0; flex:1;">
             <button
               type="button"
               data-action="open-ticket"
               data-ticket-id="${escapeHtml(ticketId)}"
+              ${isOpening ? "disabled" : ""}
               style="
                 margin:0;
                 padding:0;
@@ -1297,11 +1639,11 @@ function renderIncidenciaRow(item = {}) {
                 background:transparent;
                 text-align:left;
                 color:var(--text-strong);
-                font-size:var(--font-base);
+                font-size:15px;
                 font-weight:var(--weight-black);
                 letter-spacing:-.02em;
                 line-height:1.2;
-                cursor:pointer;
+                cursor:${isOpening ? "wait" : "pointer"};
               "
               title="Abrir detalle de incidencia"
             >
@@ -1311,9 +1653,9 @@ function renderIncidenciaRow(item = {}) {
             <span
               style="
                 color:var(--text-soft);
-                font-size:var(--font-sm);
+                font-size:13px;
                 font-weight:var(--weight-semibold);
-                line-height:1.35;
+                line-height:1.32;
                 word-break:break-word;
               "
             >
@@ -1324,7 +1666,7 @@ function renderIncidenciaRow(item = {}) {
               style="
                 color:var(--text-dim);
                 font-size:12px;
-                line-height:1.35;
+                line-height:1.32;
                 word-break:break-word;
               "
             >
@@ -1336,7 +1678,7 @@ function renderIncidenciaRow(item = {}) {
 
       <td
         style="
-          padding:18px;
+          padding:14px 14px;
           border-bottom:1px solid var(--border-soft);
           vertical-align:middle;
           white-space:nowrap;
@@ -1347,7 +1689,7 @@ function renderIncidenciaRow(item = {}) {
 
       <td
         style="
-          padding:18px;
+          padding:14px 14px;
           border-bottom:1px solid var(--border-soft);
           vertical-align:middle;
           white-space:nowrap;
@@ -1358,7 +1700,7 @@ function renderIncidenciaRow(item = {}) {
 
       <td
         style="
-          padding:18px;
+          padding:14px 14px;
           border-bottom:1px solid var(--border-soft);
           vertical-align:middle;
           white-space:nowrap;
@@ -1368,7 +1710,7 @@ function renderIncidenciaRow(item = {}) {
           <strong
             style="
               color:var(--text-strong);
-              font-size:var(--font-sm);
+              font-size:13px;
               line-height:1.2;
             "
           >
@@ -1378,8 +1720,10 @@ function renderIncidenciaRow(item = {}) {
           <span
             style="
               color:var(--text-dim);
-              font-size:12px;
+              font-size:11px;
               line-height:1.2;
+              text-transform:uppercase;
+              letter-spacing:.04em;
             "
           >
             Creación
@@ -1389,17 +1733,18 @@ function renderIncidenciaRow(item = {}) {
 
       <td
         style="
-          padding:18px;
+          padding:14px 14px;
           border-bottom:1px solid var(--border-soft);
           vertical-align:middle;
         "
       >
-        <div style="display:grid; gap:4px; min-width:180px;">
+        <div style="display:grid; gap:4px; min-width:170px;">
           <strong
             style="
               color:var(--text-strong);
-              font-size:var(--font-sm);
+              font-size:13px;
               line-height:1.2;
+              word-break:break-word;
             "
           >
             ${escapeHtml(client)}
@@ -1420,17 +1765,18 @@ function renderIncidenciaRow(item = {}) {
 
       <td
         style="
-          padding:18px;
+          padding:14px 14px;
           border-bottom:1px solid var(--border-soft);
           vertical-align:middle;
         "
       >
-        <div style="display:grid; gap:4px;">
+        <div style="display:grid; gap:4px; min-width:120px;">
           <strong
             style="
               color:var(--text-strong);
-              font-size:var(--font-sm);
+              font-size:13px;
               line-height:1.2;
+              word-break:break-word;
             "
           >
             ${escapeHtml(assignedTo)}
@@ -1439,8 +1785,10 @@ function renderIncidenciaRow(item = {}) {
           <span
             style="
               color:var(--text-dim);
-              font-size:12px;
+              font-size:11px;
               line-height:1.2;
+              text-transform:uppercase;
+              letter-spacing:.04em;
             "
           >
             Responsable
@@ -1450,7 +1798,7 @@ function renderIncidenciaRow(item = {}) {
 
       <td
         style="
-          padding:18px;
+          padding:14px 14px;
           border-bottom:1px solid var(--border-soft);
           vertical-align:middle;
           white-space:nowrap;
@@ -1460,7 +1808,7 @@ function renderIncidenciaRow(item = {}) {
           <span
             style="
               color:var(--text-soft);
-              font-size:var(--font-sm);
+              font-size:13px;
               line-height:1.2;
               font-weight:var(--weight-semibold);
             "
@@ -1492,7 +1840,7 @@ function renderIncidenciaRow(item = {}) {
 
       <td
         style="
-          padding:18px;
+          padding:14px 18px;
           border-bottom:1px solid var(--border-soft);
           vertical-align:middle;
           text-align:right;
@@ -1506,24 +1854,7 @@ function renderIncidenciaRow(item = {}) {
             flex-wrap:wrap;
           "
         >
-          <button
-            type="button"
-            data-action="open-ticket"
-            data-ticket-id="${escapeHtml(ticketId)}"
-            style="
-              min-height:38px;
-              padding:0 12px;
-              border-radius:12px;
-              border:1px solid var(--btn-secondary-border, var(--border-soft));
-              background:var(--btn-secondary-bg, var(--surface-glass));
-              color:var(--btn-secondary-text, var(--text-soft));
-              font-weight:var(--weight-bold);
-              cursor:pointer;
-              white-space:nowrap;
-            "
-          >
-            Ver
-          </button>
+          ${renderOpenTicketButton({ ticketId, isOpening })}
 
           <button
             type="button"
@@ -1550,7 +1881,9 @@ function renderIncidenciaRow(item = {}) {
   `;
 }
 
-function renderMobileIncidenciaCard(item = {}) {
+function renderMobileIncidenciaCard(item = {}, state = {}) {
+  const localState = safeObject(state);
+  const openingTicketId = safeText(localState?.openingTicketId, "");
   const ticketId = getTicketId(item);
   const code = getTicketCode(item);
   const title = getTitle(item);
@@ -1565,6 +1898,9 @@ function renderMobileIncidenciaCard(item = {}) {
   const updatedAt = formatRelativeDate(getUpdatedAt(item));
   const createdAt = formatDate(getCreatedAt(item));
   const initials = getClientInitials(item);
+  const avatarUrl = getClientAvatarUrl(item);
+  const avatarSeed = getAvatarToneSeed(item);
+  const isOpening = Boolean(openingTicketId && openingTicketId === ticketId);
 
   return `
     <article
@@ -1578,6 +1914,7 @@ function renderMobileIncidenciaCard(item = {}) {
         border:1px solid var(--border-soft);
         background:var(--surface-1, var(--surface-glass));
         box-shadow:var(--shadow-sm);
+        opacity:${isOpening ? ".72" : "1"};
       "
     >
       <div
@@ -1589,31 +1926,20 @@ function renderMobileIncidenciaCard(item = {}) {
         "
       >
         <div style="display:flex; gap:12px; min-width:0; flex:1;">
-          <div
-            aria-hidden="true"
-            style="
-              flex:0 0 42px;
-              width:42px;
-              height:42px;
-              border-radius:14px;
-              display:grid;
-              place-items:center;
-              background:
-                linear-gradient(135deg, color-mix(in srgb, var(--accent, #7c5cff) 22%, transparent), transparent),
-                var(--surface-glass);
-              border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft));
-              color:var(--text-strong);
-              font-weight:var(--weight-black);
-            "
-          >
-            ${escapeHtml(initials)}
-          </div>
+          ${renderIdentityAvatar({
+            avatarUrl,
+            initials,
+            seed: avatarSeed,
+            size: 42,
+            radius: 14,
+          })}
 
           <div style="display:grid; gap:5px; min-width:0;">
             <button
               type="button"
               data-action="open-ticket"
               data-ticket-id="${escapeHtml(ticketId)}"
+              ${isOpening ? "disabled" : ""}
               style="
                 margin:0;
                 padding:0;
@@ -1625,7 +1951,7 @@ function renderMobileIncidenciaCard(item = {}) {
                 font-weight:var(--weight-black);
                 letter-spacing:-.02em;
                 line-height:1.2;
-                cursor:pointer;
+                cursor:${isOpening ? "wait" : "pointer"};
               "
             >
               ${escapeHtml(code)}
@@ -1785,23 +2111,7 @@ function renderMobileIncidenciaCard(item = {}) {
           justify-content:flex-start;
         "
       >
-        <button
-          type="button"
-          data-action="open-ticket"
-          data-ticket-id="${escapeHtml(ticketId)}"
-          style="
-            min-height:38px;
-            padding:0 12px;
-            border-radius:12px;
-            border:1px solid var(--btn-secondary-border, var(--border-soft));
-            background:var(--btn-secondary-bg, var(--surface-glass));
-            color:var(--btn-secondary-text, var(--text-soft));
-            font-weight:var(--weight-bold);
-            cursor:pointer;
-          "
-        >
-          Ver detalle
-        </button>
+        ${renderOpenTicketButton({ ticketId, isOpening })}
 
         <button
           type="button"
@@ -1826,7 +2136,7 @@ function renderMobileIncidenciaCard(item = {}) {
   `;
 }
 
-function renderDesktopTable(items = []) {
+function renderDesktopTable(items = [], state = {}) {
   return `
     <div
       class="incidencias-table-scroll"
@@ -1839,11 +2149,23 @@ function renderDesktopTable(items = []) {
         class="incidencias-table"
         style="
           width:100%;
-          min-width:1180px;
+          min-width:1120px;
           border-collapse:separate;
           border-spacing:0;
+          table-layout:fixed;
         "
       >
+        <colgroup>
+          <col style="width:31%">
+          <col style="width:10%">
+          <col style="width:10%">
+          <col style="width:11%">
+          <col style="width:14%">
+          <col style="width:12%">
+          <col style="width:12%">
+          <col style="width:14%">
+        </colgroup>
+
         <thead>
           <tr
             style="
@@ -1868,7 +2190,7 @@ function renderDesktopTable(items = []) {
 
             <th
               style="
-                padding:16px 18px;
+                padding:16px 14px;
                 text-align:left;
                 font-size:12px;
                 letter-spacing:.08em;
@@ -1884,7 +2206,7 @@ function renderDesktopTable(items = []) {
 
             <th
               style="
-                padding:16px 18px;
+                padding:16px 14px;
                 text-align:left;
                 font-size:12px;
                 letter-spacing:.08em;
@@ -1900,7 +2222,7 @@ function renderDesktopTable(items = []) {
 
             <th
               style="
-                padding:16px 18px;
+                padding:16px 14px;
                 text-align:left;
                 font-size:12px;
                 letter-spacing:.08em;
@@ -1916,7 +2238,7 @@ function renderDesktopTable(items = []) {
 
             <th
               style="
-                padding:16px 18px;
+                padding:16px 14px;
                 text-align:left;
                 font-size:12px;
                 letter-spacing:.08em;
@@ -1932,7 +2254,7 @@ function renderDesktopTable(items = []) {
 
             <th
               style="
-                padding:16px 18px;
+                padding:16px 14px;
                 text-align:left;
                 font-size:12px;
                 letter-spacing:.08em;
@@ -1948,7 +2270,7 @@ function renderDesktopTable(items = []) {
 
             <th
               style="
-                padding:16px 18px;
+                padding:16px 14px;
                 text-align:left;
                 font-size:12px;
                 letter-spacing:.08em;
@@ -1981,14 +2303,16 @@ function renderDesktopTable(items = []) {
         </thead>
 
         <tbody>
-          ${safeArray(items).map((item) => renderIncidenciaRow(item)).join("")}
+          ${safeArray(items)
+            .map((item) => renderIncidenciaRow(item, state))
+            .join("")}
         </tbody>
       </table>
     </div>
   `;
 }
 
-function renderMobileCards(items = []) {
+function renderMobileCards(items = [], state = {}) {
   return `
     <div
       class="incidencias-mobile-list"
@@ -1998,7 +2322,74 @@ function renderMobileCards(items = []) {
         padding:14px;
       "
     >
-      ${safeArray(items).map((item) => renderMobileIncidenciaCard(item)).join("")}
+      ${safeArray(items)
+        .map((item) => renderMobileIncidenciaCard(item, state))
+        .join("")}
+    </div>
+  `;
+}
+
+function renderTableLoadingOverlay(message = "Actualizando incidencias...") {
+  return `
+    <div
+      class="incidencias-table-overlay"
+      aria-live="polite"
+      aria-busy="true"
+      style="
+        position:absolute;
+        inset:0;
+        display:grid;
+        place-items:center;
+        padding:18px;
+        background:color-mix(in srgb, var(--surface-1, #0f1115) 74%, transparent);
+        backdrop-filter:blur(4px);
+        z-index:4;
+      "
+    >
+      <div
+        style="
+          display:grid;
+          justify-items:center;
+          gap:12px;
+          min-width:min(100%, 240px);
+          padding:18px 20px;
+          border-radius:18px;
+          border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 22%, var(--border-soft));
+          background:linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent), transparent), var(--surface-1, var(--surface-glass));
+          box-shadow:0 20px 40px rgba(0,0,0,.22);
+        "
+      >
+        <span
+          aria-hidden="true"
+          style="
+            width:28px;
+            height:28px;
+            border-radius:999px;
+            border:3px solid color-mix(in srgb, var(--accent, #7c5cff) 16%, transparent);
+            border-top-color:var(--accent, #7c5cff);
+            animation:incidenciasSpin .8s linear infinite;
+          "
+        ></span>
+
+        <strong
+          style="
+            color:var(--text-strong);
+            font-size:14px;
+            letter-spacing:-.02em;
+          "
+        >
+          ${escapeHtml(message)}
+        </strong>
+
+        <span
+          style="
+            color:var(--text-dim);
+            font-size:12px;
+          "
+        >
+          Solo se está actualizando la tabla
+        </span>
+      </div>
     </div>
   `;
 }
@@ -2010,8 +2401,10 @@ function renderMobileCards(items = []) {
 export function renderTable({ items = [], state = {} } = {}) {
   const localState = state || incidenciasState || {};
   const list = getResolvedItems(items);
+  const refreshing = Boolean(localState?.refreshing);
+  const loading = Boolean(localState?.loading);
 
-  if (localState.loading && !list.length) {
+  if (loading && !list.length) {
     return renderLoadingState();
   }
 
@@ -2023,10 +2416,13 @@ export function renderTable({ items = [], state = {} } = {}) {
     return renderEmptyState();
   }
 
+  const pagination = getPagination(list, localState);
+
   return `
     <section
       class="incidencias-table-wrap panel-surface"
       style="
+        position:relative;
         overflow:hidden;
         border-radius:var(--panel-radius);
         border:1px solid var(--border-soft);
@@ -2036,21 +2432,38 @@ export function renderTable({ items = [], state = {} } = {}) {
         box-shadow:var(--shadow-sm);
       "
     >
-      ${renderTableToolbar({ total: list.length })}
+      ${renderTableToolbar({
+        total: pagination.totalItems,
+        page: pagination.page,
+        totalPages: pagination.totalPages,
+        from: pagination.from,
+        to: pagination.to,
+        refreshing,
+      })}
 
       <div class="incidencias-desktop-table">
-        ${renderDesktopTable(list)}
+        ${renderDesktopTable(pagination.items, localState)}
       </div>
 
-      ${renderMobileCards(list)}
+      ${renderMobileCards(pagination.items, localState)}
+
+      ${refreshing ? renderTableLoadingOverlay("Actualizando incidencias...") : ""}
 
       <style>
+        @keyframes incidenciasSpin {
+          to { transform:rotate(360deg); }
+        }
+
         .incidencias-table tbody tr:hover {
           background: color-mix(in srgb, var(--accent, #7c5cff) 4%, transparent);
         }
 
         .incidencias-table tbody tr:last-child td {
           border-bottom: none;
+        }
+
+        .incidencias-table tbody tr.is-opening:hover {
+          background: color-mix(in srgb, var(--warning-strong, #ffbc42) 5%, transparent);
         }
 
         .incidencias-table-scroll::-webkit-scrollbar {
@@ -2065,6 +2478,26 @@ export function renderTable({ items = [], state = {} } = {}) {
 
         .incidencias-table-scroll::-webkit-scrollbar-track {
           background: transparent;
+        }
+
+        .incidencias-table img + span {
+          display:none;
+        }
+
+        .incidencias-table [data-avatar-fallback="true"] > img {
+          display:none !important;
+        }
+
+        .incidencias-table [data-avatar-fallback="true"] > span {
+          display:grid !important;
+        }
+
+        .incidencias-mobile-list [data-avatar-fallback="true"] > img {
+          display:none !important;
+        }
+
+        .incidencias-mobile-list [data-avatar-fallback="true"] > span {
+          display:grid !important;
         }
 
         @media (max-width: 980px) {

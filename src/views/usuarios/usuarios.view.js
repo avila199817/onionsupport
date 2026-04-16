@@ -12,6 +12,7 @@
    - enlazar bindings desacoplados sin listeners duplicados
    - exponer init / render / reload / destroy / reset seguros
    - mantener compatibilidad con router legacy y moderna
+   - evitar que el loading shell contamine el contexto real de render
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -428,19 +429,28 @@ function renderIntoContainer(
 }
 
 function repaint(
-  overrides = {}
+  overrides = {},
+  options = {}
 ) {
   if (destroyed === true) {
     return null;
   }
+
+  const config =
+    safeObject(options);
+
+  const rememberContext =
+    config.rememberContext !== false;
 
   renderToken += 1;
 
   const payload =
     getRenderPayload(overrides);
 
-  lastRenderContext =
-    clone(overrides);
+  if (rememberContext) {
+    lastRenderContext =
+      clone(overrides);
+  }
 
   const mounted =
     renderIntoContainer(payload);
@@ -461,15 +471,20 @@ function repaint(
 function renderLoadingShell(
   overrides = {}
 ) {
-  return repaint({
-    ...safeObject(overrides),
-    usuarios: {
-      ...getUsuariosSnapshot(),
-      loading: true,
-      loaded: false,
-      error: null,
+  return repaint(
+    {
+      ...safeObject(overrides),
+      usuarios: {
+        ...getUsuariosSnapshot(),
+        loading: true,
+        loaded: false,
+        error: null,
+      },
     },
-  });
+    {
+      rememberContext: false,
+    }
+  );
 }
 
 /* =========================================================
@@ -493,14 +508,17 @@ async function ensureUsuariosLoaded(
   loadInFlight =
     (async () => {
       try {
+        const requestParams =
+          safeObject(
+            options.params ||
+              options.query
+          );
+
         const result =
           force === true
             ? await refreshUsuariosList({
                 params:
-                  safeObject(
-                    options.params ||
-                      options.query
-                  ),
+                  requestParams,
               })
             : await hydrateUsuarios({
                 force: false,
@@ -508,10 +526,7 @@ async function ensureUsuariosLoaded(
                   preferCache !==
                   false,
                 params:
-                  safeObject(
-                    options.params ||
-                      options.query
-                  ),
+                  requestParams,
               });
 
         if (

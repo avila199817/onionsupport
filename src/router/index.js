@@ -2,7 +2,7 @@
    Onion SPA - Router
    Archivo: src/router/index.js
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - coordinar navegación SPA
    - resolver rutas canónicas y públicas
    - serializar renders para evitar race conditions
@@ -18,6 +18,8 @@
    - redirect centralizado
    - fallbacks seguros sin romper SPA
    - métricas / eventos enriquecidos
+   - no perder username resuelto entre renders
+   - no degradar publicPath contextualizado a canonicalPath plano
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -112,10 +114,15 @@ export const Router = (() => {
   function safeError(...args) {
     try {
       AppCore?.utils?.error?.(...args);
-    } catch {}
+    } catch {
+      console.error(...args);
+    }
   }
 
-  function safeEmit(eventName, payload = {}) {
+  function safeEmit(
+    eventName,
+    payload = {}
+  ) {
     try {
       AppCore?.events?.emit?.(
         eventName,
@@ -139,6 +146,25 @@ export const Router = (() => {
     return Date.now();
   }
 
+  function isFunction(value) {
+    return typeof value === "function";
+  }
+
+  function normalizePath(path = "/") {
+    const normalized =
+      typeof path === "string"
+        ? path.trim()
+        : "/";
+
+    if (!normalized) {
+      return "/";
+    }
+
+    return normalized.startsWith("/")
+      ? normalized
+      : `/${normalized}`;
+  }
+
   /* =========================================================
      INTERNAL HELPERS
   ========================================================= */
@@ -152,18 +178,42 @@ export const Router = (() => {
     );
   }
 
+  function getStableResolvedUsername(
+    requestedPath = "/"
+  ) {
+    return (
+      extractUsernameFromPath(
+        AppCore,
+        requestedPath
+      ) ||
+      getCurrentResolvedUsername(
+        AppCore
+      ) ||
+      getCurrentUsername(
+        AppCore
+      ) ||
+      AppCore?.state?.user
+        ?.username ||
+      null
+    );
+  }
+
   function getRequestedPathData(
     pathname = "/"
   ) {
     const requestedPath =
-      resolveSpaHref(
-        AppCore,
-        pathname
+      normalizePath(
+        resolveSpaHref(
+          AppCore,
+          pathname
+        ) || pathname || "/"
       );
 
     const canonicalPath =
-      getCanonicalPath(
-        requestedPath
+      normalizePath(
+        getCanonicalPath(
+          requestedPath
+        )
       );
 
     const requestedUsername =
@@ -174,16 +224,38 @@ export const Router = (() => {
 
     const resolvedUsername =
       requestedUsername ||
-      getCurrentResolvedUsername(
-        AppCore
-      ) ||
-      null;
+      getStableResolvedUsername(
+        requestedPath
+      );
+
+    const route =
+      getRoute(canonicalPath);
+
+    const computedPublicPath =
+      canUsePublicSlugForRoute(route)
+        ? buildPublicPath(
+            AppCore,
+            getRoute,
+            canonicalPath,
+            {
+              username:
+                resolvedUsername,
+            }
+          ) ||
+          requestedPath
+        : canonicalPath;
 
     return {
       requestedPath,
       canonicalPath,
       requestedUsername,
       resolvedUsername,
+      route,
+      publicPath: normalizePath(
+        computedPublicPath ||
+          requestedPath ||
+          canonicalPath
+      ),
     };
   }
 
@@ -242,19 +314,16 @@ export const Router = (() => {
         AppCore
       );
 
+    const username =
+      getStableResolvedUsername("/");
+
     return (
       buildPublicPath(
         AppCore,
         getRoute,
         routeNames.HOME,
         {
-          username:
-            getCurrentResolvedUsername(
-              AppCore
-            ) ||
-            getCurrentUsername(
-              AppCore
-            ),
+          username,
         }
       ) || routeNames.HOME
     );
@@ -262,20 +331,30 @@ export const Router = (() => {
 
   function getCurrentComparablePaths() {
     const currentCanonicalPath =
-      getCanonicalPath(
-        AppCore.state.route ||
+      normalizePath(
+        getCurrentCanonicalPath(
+          AppCore
+        ) ||
+          AppCore?.state?.route ||
           "/"
       );
 
     const currentPublicPath =
-      getCurrentPublicPath(
-        AppCore
+      normalizePath(
+        getCurrentPublicPath(
+          AppCore
+        ) ||
+          AppCore?.state
+            ?.publicPath ||
+          currentCanonicalPath
       );
 
     const normalizedCurrentPath =
-      resolveSpaHref(
-        AppCore,
-        currentPublicPath
+      normalizePath(
+        resolveSpaHref(
+          AppCore,
+          currentPublicPath
+        ) || currentPublicPath
       );
 
     return {
@@ -319,9 +398,10 @@ export const Router = (() => {
   function destroyActiveView() {
     if (
       !activeViewInstance ||
-      typeof activeViewInstance
-        .destroy !==
-        "function"
+      !isFunction(
+        activeViewInstance
+          .destroy
+      )
     ) {
       activeViewInstance =
         null;
@@ -361,6 +441,82 @@ export const Router = (() => {
       now - lastNavigationAt <
         NAV_BURST_MS
     );
+  }
+
+  function syncResolvedRouteState({
+    canonicalPath = "/",
+    publicPath = "/",
+    username = null,
+    route = null,
+  } = {}) {
+    const safeCanonical =
+      normalizePath(
+        canonicalPath || "/"
+      );
+
+    const nextRoute =
+      route ||
+      getRoute(safeCanonical);
+
+    const safePublic =
+      normalizePath(
+        publicPath ||
+          (
+            canUsePublicSlugForRoute(
+              nextRoute
+            )
+              ? buildPublicPath(
+                  AppCore,
+                  getRoute,
+                  safeCanonical,
+                  {
+                    username:
+                      username ||
+                      getStableResolvedUsername(
+                        safeCanonical
+                      ),
+                  }
+                )
+              : safeCanonical
+          ) ||
+          safeCanonical
+      );
+
+    const resolvedUsername =
+      username ||
+      extractUsernameFromPath(
+        AppCore,
+        safePublic
+      ) ||
+      getStableResolvedUsername(
+        safePublic
+      );
+
+    AppCore?.setRoute?.(
+      safeCanonical
+    );
+
+    AppCore?.setPublicPath?.(
+      safePublic
+    );
+
+    AppCore?.setState?.({
+      route: safeCanonical,
+      publicPath: safePublic,
+      currentResolvedUsername:
+        resolvedUsername ||
+        null,
+    });
+
+    return {
+      canonicalPath:
+        safeCanonical,
+      publicPath:
+        safePublic,
+      username:
+        resolvedUsername ||
+        null,
+    };
   }
 
   function redirectTo(
@@ -405,6 +561,7 @@ export const Router = (() => {
     requestedPath,
     canonicalPath,
     requestedUsername,
+    resolvedUsername,
     options,
   }) {
     if (
@@ -439,6 +596,14 @@ export const Router = (() => {
             setDocumentTitleSafe(
               title
             ),
+      });
+
+      syncResolvedRouteState({
+        canonicalPath:
+          "/login",
+        publicPath: "/login",
+        username: null,
+        route: getRoute("/login"),
       });
 
       return true;
@@ -487,6 +652,16 @@ export const Router = (() => {
             ),
       });
 
+      syncResolvedRouteState({
+        canonicalPath,
+        publicPath:
+          requestedPath,
+        username:
+          requestedUsername ||
+          resolvedUsername,
+        route,
+      });
+
       return true;
     }
 
@@ -512,22 +687,18 @@ export const Router = (() => {
       canonicalPath,
       requestedUsername,
       resolvedUsername,
+      route,
+      publicPath,
     } = getRequestedPathData(
       pathname
     );
-
-    const route =
-      getRoute(
-        canonicalPath
-      );
 
     emitBeforeRender(
       AppCore,
       {
         path: requestedPath,
         canonicalPath,
-        publicPath:
-          requestedPath,
+        publicPath,
         username:
           resolvedUsername,
         route,
@@ -562,9 +733,12 @@ export const Router = (() => {
         AppCore,
         getRoute,
         updateHistory,
-        requestedPath,
+        requestedPath:
+          publicPath,
         canonicalPath,
-        requestedUsername,
+        requestedUsername:
+          requestedUsername ||
+          resolvedUsername,
         options,
         setShellMode:
           (routeArg) =>
@@ -578,12 +752,25 @@ export const Router = (() => {
             ),
       });
 
+      syncResolvedRouteState({
+        canonicalPath,
+        publicPath,
+        username:
+          requestedUsername ||
+          resolvedUsername,
+        route: null,
+      });
+
       safeEmit(
         "router:render:not-found",
         {
-          path: requestedPath,
+          path: publicPath,
           canonicalPath,
           cycleId,
+          username:
+            requestedUsername ||
+            resolvedUsername ||
+            null,
         }
       );
 
@@ -601,9 +788,11 @@ export const Router = (() => {
         await handleDeniedAccess({
           access,
           route,
-          requestedPath,
+          requestedPath:
+            publicPath,
           canonicalPath,
           requestedUsername,
+          resolvedUsername,
           options,
         });
 
@@ -613,9 +802,13 @@ export const Router = (() => {
           {
             reason:
               access.reason,
-            path: requestedPath,
+            path: publicPath,
             canonicalPath,
             cycleId,
+            username:
+              requestedUsername ||
+              resolvedUsername ||
+              null,
           }
         );
         return;
@@ -631,9 +824,11 @@ export const Router = (() => {
         ...options,
         username:
           requestedUsername ||
+          resolvedUsername ||
           getCurrentUsername(
             AppCore
-          ),
+          ) ||
+          null,
       },
     });
 
@@ -645,9 +840,12 @@ export const Router = (() => {
           renderRouteSuccess({
             AppCore,
             route,
-            requestedPath,
+            requestedPath:
+              publicPath,
             canonicalPath,
-            requestedUsername,
+            requestedUsername:
+              requestedUsername ||
+              resolvedUsername,
             setShellMode:
               (routeArg) =>
                 setShellModeSafe(
@@ -675,7 +873,7 @@ export const Router = (() => {
               "stale-post-render",
             cycleId,
             renderCycle,
-            path: requestedPath,
+            path: publicPath,
             canonicalPath,
           }
         );
@@ -686,16 +884,46 @@ export const Router = (() => {
       activeViewInstance =
         maybeView || null;
 
+      const synced =
+        syncResolvedRouteState({
+          canonicalPath,
+          publicPath,
+          username:
+            requestedUsername ||
+            resolvedUsername,
+          route,
+        });
+
       safeEmit(
         "router:rendered",
         {
-          path: requestedPath,
-          canonicalPath,
+          path:
+            synced.publicPath,
+          canonicalPath:
+            synced.canonicalPath,
+          publicPath:
+            synced.publicPath,
+          username:
+            synced.username,
           durationMs:
             Math.round(
               nowMs() -
                 startedAt
             ),
+        }
+      );
+
+      safeLog(
+        "[Router] render",
+        {
+          publicPath:
+            synced.publicPath,
+          canonicalPath:
+            synced.canonicalPath,
+          username:
+            synced.username,
+          found: true,
+          forbidden: false,
         }
       );
     } catch (error) {
@@ -706,9 +934,12 @@ export const Router = (() => {
         getRoute,
         route,
         error,
-        requestedPath,
+        requestedPath:
+          publicPath,
         canonicalPath,
-        requestedUsername,
+        requestedUsername:
+          requestedUsername ||
+          resolvedUsername,
         cycleId,
         renderCycle,
         setShellMode:
@@ -723,6 +954,15 @@ export const Router = (() => {
             ),
       });
 
+      syncResolvedRouteState({
+        canonicalPath,
+        publicPath,
+        username:
+          requestedUsername ||
+          resolvedUsername,
+        route,
+      });
+
       safeError(
         "[Router] render error:",
         error
@@ -731,8 +971,13 @@ export const Router = (() => {
       safeEmit(
         "router:render:error",
         {
-          path: requestedPath,
+          path: publicPath,
           canonicalPath,
+          publicPath,
+          username:
+            requestedUsername ||
+            resolvedUsername ||
+            null,
           cycleId,
           durationMs:
             Math.round(
@@ -777,12 +1022,13 @@ export const Router = (() => {
     const {
       requestedPath,
       canonicalPath,
+      publicPath,
     } = getRequestedPathData(
       pathname
     );
 
     const navKey =
-      `${requestedPath}|${canonicalPath}`;
+      `${publicPath}|${canonicalPath}`;
 
     if (
       isNavigationBurst(
@@ -795,7 +1041,8 @@ export const Router = (() => {
         {
           reason: "burst",
           pathname,
-          requestedPath,
+          requestedPath:
+            publicPath,
           canonicalPath,
           navKey,
         }
@@ -816,7 +1063,7 @@ export const Router = (() => {
     if (
       canonicalPath ===
         currentCanonicalPath &&
-      requestedPath ===
+      publicPath ===
         normalizedCurrentPath &&
       !options.force
     ) {
@@ -824,14 +1071,15 @@ export const Router = (() => {
         "router:navigate:same-route",
         {
           pathname,
-          requestedPath,
+          requestedPath:
+            publicPath,
           canonicalPath,
           navKey,
         }
       );
 
       return render(
-        requestedPath,
+        publicPath,
         {
           ...options,
           skipHistory: true,
@@ -840,7 +1088,7 @@ export const Router = (() => {
     }
 
     return render(
-      requestedPath,
+      publicPath,
       options
     );
   }
@@ -885,11 +1133,8 @@ export const Router = (() => {
         nextCanonicalPath,
         {
           username:
-            getCurrentResolvedUsername(
-              AppCore
-            ) ||
-            getCurrentUsername(
-              AppCore
+            getStableResolvedUsername(
+              nextCanonicalPath
             ),
         }
       );
@@ -999,16 +1244,18 @@ export const Router = (() => {
   }
 
   function handlePopState() {
-    render(
+    const path =
       getCurrentPublicPath(
         AppCore
-      ),
-      {
-        skipHistory: true,
-        replaceState: true,
-        force: true,
-      }
-    );
+      ) ||
+      window.location.pathname ||
+      "/";
+
+    render(path, {
+      skipHistory: true,
+      replaceState: true,
+      force: true,
+    });
   }
 
   /* =========================================================
@@ -1131,7 +1378,13 @@ export const Router = (() => {
       () =>
         getCurrentResolvedUsername(
           AppCore
-        ),
+        ) ||
+        getCurrentUsername(
+          AppCore
+        ) ||
+        AppCore?.state?.user
+          ?.username ||
+        null,
 
     navigate,
     replace,

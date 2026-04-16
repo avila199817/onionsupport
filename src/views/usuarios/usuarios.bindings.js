@@ -7,11 +7,12 @@
    Responsabilidades:
    - enlazar eventos reales de la vista Usuarios
    - registrar y limpiar listeners del DOM
-   - delegar acciones sobre toolbar, tabla y paginación
+   - delegar acciones sobre hero, toolbar, tabla y paginación
    - conectar DOM con usuarios.actions.js
    - mantener la vista desacoplada del template
    - exponer cleanup robusto para re-render seguro
    - mantener coherencia estricta con usuarios.actions.js y usuarios.store.js
+   - soportar el template premium tipo incidencias / facturas
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -57,14 +58,8 @@ function isElement(value) {
   );
 }
 
-function safeText(
-  value = "",
-  fallback = ""
-) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
+function safeText(value = "", fallback = "") {
+  if (value === null || value === undefined) {
     return fallback;
   }
 
@@ -98,9 +93,7 @@ function safeQueryAll(root, selector) {
   }
 
   try {
-    return Array.from(
-      root.querySelectorAll(selector)
-    );
+    return Array.from(root.querySelectorAll(selector));
   } catch {
     return [];
   }
@@ -149,8 +142,7 @@ function createDisposerBag() {
 
     flush() {
       while (disposers.length) {
-        const disposer =
-          disposers.pop();
+        const disposer = disposers.pop();
 
         try {
           disposer?.();
@@ -207,8 +199,9 @@ function getSearchInput(root) {
 function getSortDirForColumn(
   column = ""
 ) {
-  const params =
-    safeObject(readUsuariosParams());
+  const params = safeObject(
+    readUsuariosParams?.()
+  );
 
   const currentBy = safeText(
     params.sortBy,
@@ -218,7 +211,7 @@ function getSortDirForColumn(
   const currentDir = safeText(
     params.sortDir,
     "desc"
-  );
+  ).toLowerCase();
 
   if (currentBy !== column) {
     return "asc";
@@ -229,13 +222,57 @@ function getSortDirForColumn(
     : "asc";
 }
 
+function getActionNodeFromEvent(
+  event,
+  root
+) {
+  const node = event?.target?.closest?.(
+    "[data-usuarios-action]"
+  );
+
+  if (
+    node &&
+    root?.contains?.(node)
+  ) {
+    return node;
+  }
+
+  return null;
+}
+
+function getSortNodeFromEvent(
+  event,
+  root
+) {
+  const node = event?.target?.closest?.(
+    "[data-usuarios-sort]"
+  );
+
+  if (
+    node &&
+    root?.contains?.(node)
+  ) {
+    return node;
+  }
+
+  return null;
+}
+
+function getUserIdFromNode(node) {
+  return safeText(
+    node?.getAttribute?.(
+      "data-usuarios-user-id"
+    ),
+    ""
+  );
+}
+
 /* =========================================================
    DOM SYNC
 ========================================================= */
 
 function syncSearchDraftFromDom(root) {
-  const input =
-    getSearchInput(root);
+  const input = getSearchInput(root);
 
   if (!input) {
     return "";
@@ -250,6 +287,34 @@ function syncSearchDraftFromDom(root) {
   return value;
 }
 
+function syncSearchDraftToDom(root) {
+  const input = getSearchInput(root);
+
+  if (!input) {
+    return;
+  }
+
+  const params = safeObject(
+    readUsuariosParams?.()
+  );
+
+  const currentValue = safeText(
+    input.value,
+    ""
+  );
+
+  const storeValue = safeText(
+    params.q,
+    ""
+  );
+
+  if (currentValue !== storeValue) {
+    input.value = storeValue;
+  }
+
+  setUsuariosSearchDraftUi(storeValue);
+}
+
 /* =========================================================
    ACTION EXECUTORS
 ========================================================= */
@@ -259,19 +324,17 @@ async function handleUsuariosActionClick(
   element,
   root
 ) {
-  const normalized =
-    safeText(action, "");
+  const normalized = safeText(
+    action,
+    ""
+  );
 
   if (!normalized) {
     return null;
   }
 
-  const userId = safeText(
-    element?.getAttribute?.(
-      "data-usuarios-user-id"
-    ),
-    ""
-  );
+  const userId =
+    getUserIdFromNode(element);
 
   safeEmit(
     "usuarios:bindings:action:start",
@@ -286,14 +349,12 @@ async function handleUsuariosActionClick(
   switch (normalized) {
     case "hydrate":
       setUsuariosAction("hydrate");
-      result =
-        await hydrateUsuarios();
+      result = await hydrateUsuarios();
       break;
 
     case "refresh":
       setUsuariosAction("refresh");
-      result =
-        await refreshUsuariosList();
+      result = await refreshUsuariosList();
       break;
 
     case "submit-search": {
@@ -320,6 +381,8 @@ async function handleUsuariosActionClick(
       );
       result =
         await resetUsuariosListFilters();
+
+      syncSearchDraftToDom(root);
       break;
 
     case "prev-page":
@@ -350,6 +413,40 @@ async function handleUsuariosActionClick(
         await openUsuarioDetail(
           userId
         );
+      break;
+
+    case "export":
+      setUsuariosAction("export");
+      safeEmit(
+        "usuarios:export:requested",
+        {
+          action: normalized,
+          source: "template-button",
+        }
+      );
+      result = {
+        ok: true,
+        delegated: true,
+        action: "export",
+      };
+      break;
+
+    case "create-user":
+      setUsuariosAction(
+        "create-user"
+      );
+      safeEmit(
+        "usuarios:create:requested",
+        {
+          action: normalized,
+          source: "template-button",
+        }
+      );
+      result = {
+        ok: true,
+        delegated: true,
+        action: "create-user",
+      };
       break;
 
     default:
@@ -392,6 +489,7 @@ async function handleUsuariosFilterChange(
     setUsuariosAction(
       "filter-role"
     );
+
     return applyUsuariosRoleFilter(
       normalizedValue
     );
@@ -403,6 +501,7 @@ async function handleUsuariosFilterChange(
     setUsuariosAction(
       "filter-status"
     );
+
     return applyUsuariosStatusFilter(
       normalizedValue
     );
@@ -416,7 +515,7 @@ async function handleUsuariosPageSizeChange(
 ) {
   const pageSize = Math.max(
     1,
-    Number(value) || 20
+    Number(value) || 5
   );
 
   setUsuariosAction(
@@ -438,8 +537,10 @@ async function handleUsuariosPageSizeChange(
 async function handleUsuariosSortClick(
   sortBy = ""
 ) {
-  const normalized =
-    safeText(sortBy, "");
+  const normalized = safeText(
+    sortBy,
+    ""
+  );
 
   if (!normalized) {
     return null;
@@ -481,7 +582,12 @@ function bindLifecycle({
       rows:
         safeQueryAll(
           root,
-          "[data-usuarios-user-id]"
+          "[data-user-id]"
+        ).length,
+      actions:
+        safeQueryAll(
+          root,
+          "[data-usuarios-action]"
         ).length,
     }
   );
@@ -500,62 +606,57 @@ function bindClickDelegation({
   root,
   bag,
 }) {
-  const onClick =
-    async (event) => {
-      const actionNode =
-        event?.target?.closest?.(
-          "[data-usuarios-action]"
+  const onClick = async (event) => {
+    const actionNode =
+      getActionNodeFromEvent(
+        event,
+        root
+      );
+
+    if (actionNode) {
+      event.preventDefault();
+
+      try {
+        await handleUsuariosActionClick(
+          actionNode.getAttribute(
+            "data-usuarios-action"
+          ),
+          actionNode,
+          root
         );
-
-      if (
-        actionNode &&
-        root.contains(actionNode)
-      ) {
-        event.preventDefault();
-
-        try {
-          await handleUsuariosActionClick(
-            actionNode.getAttribute(
-              "data-usuarios-action"
-            ),
-            actionNode,
-            root
-          );
-        } catch (error) {
-          console.error(
-            "[UsuariosBindings] action click error",
-            error
-          );
-        }
-
-        return;
+      } catch (error) {
+        console.error(
+          "[UsuariosBindings] action click error",
+          error
+        );
       }
 
-      const sortNode =
-        event?.target?.closest?.(
-          "[data-usuarios-sort]"
+      return;
+    }
+
+    const sortNode =
+      getSortNodeFromEvent(
+        event,
+        root
+      );
+
+    if (sortNode) {
+      event.preventDefault();
+
+      try {
+        await handleUsuariosSortClick(
+          sortNode.getAttribute(
+            "data-usuarios-sort"
+          )
         );
-
-      if (
-        sortNode &&
-        root.contains(sortNode)
-      ) {
-        event.preventDefault();
-
-        try {
-          await handleUsuariosSortClick(
-            sortNode.getAttribute(
-              "data-usuarios-sort"
-            )
-          );
-        } catch (error) {
-          console.error(
-            "[UsuariosBindings] sort click error",
-            error
-          );
-        }
+      } catch (error) {
+        console.error(
+          "[UsuariosBindings] sort click error",
+          error
+        );
       }
-    };
+    }
+  };
 
   bag.add(
     addEventListenerSafe(
@@ -570,60 +671,58 @@ function bindChangeDelegation({
   root,
   bag,
 }) {
-  const onChange =
-    async (event) => {
-      const target =
-        event?.target;
+  const onChange = async (event) => {
+    const target = event?.target;
 
-      if (!target) {
-        return;
-      }
+    if (!target) {
+      return;
+    }
 
-      const filterType =
-        target.getAttribute?.(
-          "data-usuarios-filter"
+    const filterType =
+      target.getAttribute?.(
+        "data-usuarios-filter"
+      );
+
+    if (
+      filterType &&
+      root.contains(target)
+    ) {
+      try {
+        await handleUsuariosFilterChange(
+          filterType,
+          target.value
         );
-
-      if (
-        filterType &&
-        root.contains(target)
-      ) {
-        try {
-          await handleUsuariosFilterChange(
-            filterType,
-            target.value
-          );
-        } catch (error) {
-          console.error(
-            "[UsuariosBindings] filter change error",
-            error
-          );
-        }
-
-        return;
+      } catch (error) {
+        console.error(
+          "[UsuariosBindings] filter change error",
+          error
+        );
       }
 
-      const isPageSize =
-        target.getAttribute?.(
-          "data-usuarios-page-size"
-        ) === "true";
+      return;
+    }
 
-      if (
-        isPageSize &&
-        root.contains(target)
-      ) {
-        try {
-          await handleUsuariosPageSizeChange(
-            target.value
-          );
-        } catch (error) {
-          console.error(
-            "[UsuariosBindings] page size change error",
-            error
-          );
-        }
+    const isPageSize =
+      target.getAttribute?.(
+        "data-usuarios-page-size"
+      ) === "true";
+
+    if (
+      isPageSize &&
+      root.contains(target)
+    ) {
+      try {
+        await handleUsuariosPageSizeChange(
+          target.value
+        );
+      } catch (error) {
+        console.error(
+          "[UsuariosBindings] page size change error",
+          error
+        );
       }
-    };
+    }
+  };
 
   bag.add(
     addEventListenerSafe(
@@ -646,42 +745,50 @@ function bindSearchInput({
   }
 
   const onInput = () => {
-    setUsuariosSearchDraftUi(
-      safeText(
-        input.value,
-        ""
-      )
+    const value = safeText(
+      input.value,
+      ""
+    );
+
+    setUsuariosSearchDraftUi(value);
+
+    safeEmit(
+      "usuarios:bindings:search:draft",
+      {
+        value,
+      }
     );
   };
 
-  const onKeydown =
-    async (event) => {
-      if (
-        event?.key !== "Enter"
-      ) {
-        return;
-      }
+  const onKeydown = async (
+    event
+  ) => {
+    if (
+      event?.key !== "Enter"
+    ) {
+      return;
+    }
 
-      event.preventDefault();
+    event.preventDefault();
 
-      try {
-        setUsuariosAction(
-          "search"
-        );
+    try {
+      setUsuariosAction("search");
 
-        await searchUsuarios(
-          safeText(
-            input.value,
-            ""
-          )
-        );
-      } catch (error) {
-        console.error(
-          "[UsuariosBindings] search enter error",
-          error
-        );
-      }
-    };
+      const value = safeText(
+        input.value,
+        ""
+      );
+
+      setUsuariosSearchDraftUi(value);
+
+      await searchUsuarios(value);
+    } catch (error) {
+      console.error(
+        "[UsuariosBindings] search enter error",
+        error
+      );
+    }
+  };
 
   bag.add(
     addEventListenerSafe(
@@ -736,7 +843,15 @@ function bindHoverTelemetry({
   const hoverables =
     safeQueryAll(
       root,
-      ".usuarios-stat, .usuarios-panel, .usuarios-row-action, .usuarios-user-cell"
+      [
+        ".usuarios-hero",
+        ".usuarios-stat-card",
+        ".usuarios-table-wrap",
+        ".usuarios-mobile-card",
+        "[data-usuarios-action]",
+        "[data-usuarios-sort]",
+        "[data-user-id]",
+      ].join(", ")
     );
 
   hoverables.forEach(
@@ -747,8 +862,29 @@ function bindHoverTelemetry({
             "usuarios:hover:item",
             {
               index,
+              tagName:
+                node.tagName,
               className:
-                node.className,
+                safeText(
+                  node.className,
+                  ""
+                ),
+              action:
+                safeText(
+                  node.getAttribute?.(
+                    "data-usuarios-action"
+                  ),
+                  ""
+                ),
+              userId:
+                safeText(
+                  node.getAttribute?.(
+                    "data-user-id"
+                  ),
+                  node.getAttribute?.(
+                    "data-usuarios-user-id"
+                  ) || ""
+                ),
             }
           );
         };
@@ -759,6 +895,66 @@ function bindHoverTelemetry({
           "pointerenter",
           onPointerEnter,
           { passive: true }
+        )
+      );
+    }
+  );
+}
+
+function bindFocusTelemetry({
+  root,
+  bag,
+}) {
+  const focusables =
+    safeQueryAll(
+      root,
+      [
+        '[data-usuarios-input="search"]',
+        "[data-usuarios-filter]",
+        "[data-usuarios-page-size]",
+        "[data-usuarios-sort]",
+        "[data-usuarios-action]",
+      ].join(", ")
+    );
+
+  focusables.forEach(
+    (node) => {
+      const onFocus = () => {
+        safeEmit(
+          "usuarios:focus:item",
+          {
+            action: safeText(
+              node.getAttribute?.(
+                "data-usuarios-action"
+              ),
+              ""
+            ),
+            sort: safeText(
+              node.getAttribute?.(
+                "data-usuarios-sort"
+              ),
+              ""
+            ),
+            filter: safeText(
+              node.getAttribute?.(
+                "data-usuarios-filter"
+              ),
+              ""
+            ),
+            pageSize:
+              node.getAttribute?.(
+                "data-usuarios-page-size"
+              ) === "true",
+          }
+        );
+      };
+
+      bag.add(
+        addEventListenerSafe(
+          node,
+          "focus",
+          onFocus,
+          true
         )
       );
     }
@@ -799,6 +995,8 @@ export function bindUsuariosView({
     mounted: true,
   });
 
+  syncSearchDraftToDom(root);
+
   const bag =
     createDisposerBag();
 
@@ -827,6 +1025,11 @@ export function bindUsuariosView({
   });
 
   bindHoverTelemetry({
+    root,
+    bag,
+  });
+
+  bindFocusTelemetry({
     root,
     bag,
   });

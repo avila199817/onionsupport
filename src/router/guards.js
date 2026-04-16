@@ -2,7 +2,7 @@
    Onion SPA - Router Guards
    Archivo: src/router/guards.js
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - resolver acceso a rutas
    - guards auth / guest / roles
    - redirects centralizados
@@ -13,11 +13,14 @@
    - rutas públicas por defecto
    - normalización robusta de roles
    - soporte meta.requiresAuth / guestOnly / roles
+   - redirects consistentes
+   - prioridad clara entre auth / guest / roles
 ========================================================= */
 
 import {
   getRouteNames,
   normalizeCanonicalPath,
+  getDefaultHomeTarget,
 } from "./helpers.js";
 
 /* =========================================================
@@ -135,6 +138,21 @@ function routeGuestOnly(route) {
   );
 }
 
+function getAuthenticatedRedirectTarget(
+  AppCore,
+  route,
+  getRoute
+) {
+  return (
+    route?.redirectAuthenticated ||
+    route?.redirectIfAuth ||
+    getDefaultHomeTarget(
+      AppCore,
+      getRoute
+    )
+  );
+}
+
 /* =========================================================
    MAIN
 ========================================================= */
@@ -202,9 +220,11 @@ export function shouldAllowRoute({
         "already-authenticated",
       route,
       redirectTo:
-        route.redirectAuthenticated ||
-        route.redirectIfAuth ||
-        routeNames.HOME,
+        getAuthenticatedRedirectTarget(
+          AppCore,
+          route,
+          getRoute
+        ) || routeNames.HOME,
       canonicalPath,
     };
   }
@@ -212,6 +232,23 @@ export function shouldAllowRoute({
   /* requires auth */
   if (
     requiresAuth &&
+    !logged
+  ) {
+    return {
+      allowed: false,
+      reason:
+        "not-authenticated",
+      route,
+      redirectTo:
+        routeNames.LOGIN,
+      canonicalPath,
+    };
+  }
+
+  /* si define roles y no está logueado */
+  if (
+    allowedRoles.length >
+      0 &&
     !logged
   ) {
     return {
@@ -248,23 +285,6 @@ export function shouldAllowRoute({
         canonicalPath,
       };
     }
-  }
-
-  /* si define roles y no está logueado */
-  if (
-    allowedRoles.length >
-      0 &&
-    !logged
-  ) {
-    return {
-      allowed: false,
-      reason:
-        "not-authenticated",
-      route,
-      redirectTo:
-        routeNames.LOGIN,
-      canonicalPath,
-    };
   }
 
   return {

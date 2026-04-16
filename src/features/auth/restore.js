@@ -2,7 +2,7 @@
    Onion SPA - Auth Restore
    Archivo: src/features/auth/restore.js
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - cargar usuario actual desde /me
    - refrescar access token
    - restaurar sesión desde token o refresh context
@@ -11,13 +11,13 @@
    - priorizar refresh cuando exista contexto válido
    - endurecer errores y limpieza de sesión
 
-   HARDENING PRO:
+   HARDENING EXTREMO:
    - promises únicas anti race-condition
    - cooldown anti refresh-loop
+   - fallback token -> /me
+   - limpieza total garantizada
+   - eventos enterprise
    - tolerancia backend heterogéneo
-   - logs enterprise
-   - fallbacks robustos
-   - limpieza garantizada
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -60,6 +60,7 @@ function safeNumber(
   fallback = 0
 ) {
   const n = Number(value);
+
   return Number.isFinite(n)
     ? n
     : fallback;
@@ -77,15 +78,15 @@ function emit(
   } catch {}
 }
 
-function warn(...args) {
-  try {
-    AppCore?.utils?.warn?.(...args);
-  } catch {}
-}
-
 function log(...args) {
   try {
     AppCore?.utils?.log?.(...args);
+  } catch {}
+}
+
+function warn(...args) {
+  try {
+    AppCore?.utils?.warn?.(...args);
   } catch {}
 }
 
@@ -113,27 +114,43 @@ function clearRuntimeFlags(
   session.restoring = false;
 
   session.mePromise = null;
-  session.refreshPromise = null;
-  session.restorePromise = null;
+  session.refreshPromise =
+    null;
+  session.restorePromise =
+    null;
 }
 
 function getStoredRefreshPayload() {
   return {
-    refreshToken:
-      String(
-        getStoredRefreshToken() || ""
-      ).trim(),
+    refreshToken: String(
+      getStoredRefreshToken() ||
+        ""
+    ).trim(),
 
-    sessionId:
-      String(
-        getStoredSessionId() || ""
-      ).trim(),
+    sessionId: String(
+      getStoredSessionId() ||
+        ""
+    ).trim(),
 
-    userId:
-      String(
-        getStoredSessionUserId() || ""
-      ).trim(),
+    userId: String(
+      getStoredSessionUserId() ||
+        ""
+    ).trim(),
   };
+}
+
+function shouldClearForError(
+  error
+) {
+  const status =
+    error?.status ||
+    error?.response?.status ||
+    0;
+
+  return (
+    status === 401 ||
+    status === 403
+  );
 }
 
 /* =========================================================
@@ -178,7 +195,7 @@ export async function fetchMe(
 
         if (!user) {
           throw new Error(
-            "No se pudo resolver el usuario actual."
+            "No se pudo resolver usuario desde /me."
           );
         }
 
@@ -218,7 +235,8 @@ export async function fetchMe(
         throw error;
       } finally {
         session.checking = false;
-        session.mePromise = null;
+        session.mePromise =
+          null;
       }
     })();
 
@@ -234,11 +252,13 @@ export async function refreshSession(
 ) {
   if (!hasRefreshContext()) {
     throw new Error(
-      "No hay contexto de refresh disponible."
+      "No hay contexto refresh."
     );
   }
 
-  if (session.refreshPromise) {
+  if (
+    session.refreshPromise
+  ) {
     return session.refreshPromise;
   }
 
@@ -390,8 +410,10 @@ export async function refreshSession(
 
         throw error;
       } finally {
-        session.refreshing = false;
-        session.refreshPromise = null;
+        session.refreshing =
+          false;
+        session.refreshPromise =
+          null;
       }
     })();
 
@@ -399,7 +421,7 @@ export async function refreshSession(
 }
 
 /* =========================================================
-   RESTORE HELPERS
+   RESTORE MODES
 ========================================================= */
 
 export async function restoreUsingMe(
@@ -472,11 +494,13 @@ export async function restoreAfterMeFailure(
   meError
 ) {
   warn(
-    "fetchMe() falló en restoreSession().",
+    "fetchMe() falló durante restore.",
     meError
   );
 
-  if (!hasRefreshContext()) {
+  if (
+    !hasRefreshContext()
+  ) {
     clearSessionLocal({
       silent: true,
     });
@@ -536,7 +560,9 @@ export async function restoreAfterMeFailure(
 export async function restoreSession(
   session = {}
 ) {
-  if (session.restorePromise) {
+  if (
+    session.restorePromise
+  ) {
     return session.restorePromise;
   }
 
@@ -565,7 +591,7 @@ export async function restoreSession(
         const refreshAvailable =
           hasRefreshContext();
 
-        /* 1) Nada disponible */
+        /* Nada guardado */
         if (
           !tokenAvailable &&
           !refreshAvailable
@@ -578,7 +604,7 @@ export async function restoreSession(
             "auth:restore:empty",
             {
               reason:
-                "missing-token-and-refresh-context",
+                "missing-token-and-refresh",
             }
           );
 
@@ -588,11 +614,15 @@ export async function restoreSession(
           };
         }
 
-        /* 2) Prefer refresh */
+        /* Prefer refresh */
         if (
           refreshAvailable
         ) {
           try {
+            log(
+              "restoreSession(): refresh preferente."
+            );
+
             return await restoreUsingRefreshPreferred(
               session
             );
@@ -611,9 +641,15 @@ export async function restoreSession(
               );
             }
 
-            clearSessionLocal({
-              silent: true,
-            });
+            if (
+              shouldClearForError(
+                refreshError
+              )
+            ) {
+              clearSessionLocal({
+                silent: true,
+              });
+            }
 
             return {
               ok: false,
@@ -624,11 +660,16 @@ export async function restoreSession(
           }
         }
 
-        /* 3) Solo token */
+        /* Solo token */
         return await restoreUsingMe(
           session
         );
       } catch (error) {
+        warn(
+          "restoreSession() fatal:",
+          error
+        );
+
         clearSessionLocal({
           silent: true,
         });

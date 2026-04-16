@@ -7,13 +7,13 @@
    Responsabilidades:
    - renderizar la vista admin de usuarios
    - consumir estado real del módulo Usuarios
-   - soportar data normalizada y payloads parciales
+   - soportar snapshot + data desacoplada desde usuarios.view.js
    - mostrar hero contextual de administración
    - renderizar stats superiores
    - renderizar toolbar de búsqueda y acciones
    - renderizar tabla premium de usuarios
    - soportar loading / error / empty / degraded states
-   - exponer hooks DOM claros para bindings
+   - exponer hooks DOM claros y compatibles con usuarios.bindings.js
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -211,7 +211,7 @@ function resolveUsuariosState(
 
   const data =
     safeObject(
-      usuarios.data
+      options?.data
     );
 
   const stats =
@@ -220,17 +220,27 @@ function resolveUsuariosState(
   const meta =
     safeObject(data.meta);
 
-  const query =
-    safeObject(data.query);
+  const params =
+    safeObject(data.params);
 
-  const selection =
+  const ui =
     safeObject(
-      usuarios.selection
+      usuarios.ui ||
+        options?.ui
     );
 
-  const ui = safeObject(
-    usuarios.ui
-  );
+  const rows =
+    safeArray(
+      data.rows ||
+        data.items ||
+        data.usuarios
+    );
+
+  const selectedUserId =
+    safeText(
+      ui.selectedUserId,
+      ""
+    );
 
   return {
     loading:
@@ -256,129 +266,148 @@ function resolveUsuariosState(
     cacheHit:
       usuarios.cacheHit === true,
 
-    data: {
-      generatedAt: safeText(
-        data.generatedAt,
-        ""
+    syncedAt: safeText(
+      usuarios.lastSyncAt,
+      ""
+    ),
+
+    hydratedAt: safeText(
+      usuarios.hydratedAt,
+      ""
+    ),
+
+    rows,
+
+    stats: {
+      total: safeNumber(
+        stats.total,
+        safeNumber(meta.total, rows.length)
       ),
-      items: safeArray(
-        data.items
+      active: safeNumber(
+        stats.active,
+        rows.filter(
+          (row) =>
+            safeText(
+              row?.status,
+              row?.active === true
+                ? "active"
+                : "inactive"
+            ) === "active"
+        ).length
       ),
-      stats: {
-        total: safeNumber(
-          stats.total,
-          0
-        ),
-        active: safeNumber(
-          stats.active,
-          0
-        ),
-        inactive: safeNumber(
-          stats.inactive,
-          0
-        ),
-        blocked: safeNumber(
-          stats.blocked,
-          0
-        ),
-        pending: safeNumber(
-          stats.pending,
-          0
-        ),
-        admins: safeNumber(
-          stats.admins,
-          0
-        ),
-      },
-      meta: {
-        total: safeNumber(
-          meta.total,
-          0
-        ),
-        page: Math.max(
-          1,
-          safeNumber(
-            meta.page,
-            1
-          )
-        ),
-        pageSize: Math.max(
-          1,
-          safeNumber(
-            meta.pageSize,
-            20
-          )
-        ),
-        totalPages: Math.max(
-          1,
-          safeNumber(
-            meta.totalPages,
-            1
-          )
-        ),
-        hasNext:
-          meta.hasNext === true,
-        hasPrev:
-          meta.hasPrev === true,
-      },
-      query: {
-        page: Math.max(
-          1,
-          safeNumber(
-            query.page,
-            1
-          )
-        ),
-        pageSize: Math.max(
-          1,
-          safeNumber(
-            query.pageSize,
-            20
-          )
-        ),
-        search: safeText(
-          query.search,
-          ""
-        ),
-        role: safeText(
-          query.role,
-          ""
-        ),
-        status: safeText(
-          query.status,
-          ""
-        ),
-        sortBy: safeText(
-          query.sortBy,
-          "createdAt"
-        ),
-        sortDir:
-          safeText(
-            query.sortDir,
-            "desc"
-          ).toLowerCase() === "asc"
-            ? "asc"
-            : "desc",
-      },
+      inactive: safeNumber(
+        stats.inactive,
+        rows.filter(
+          (row) =>
+            safeText(
+              row?.status,
+              row?.active === true
+                ? "active"
+                : "inactive"
+            ) === "inactive"
+        ).length
+      ),
+      admins: safeNumber(
+        stats.admins,
+        rows.filter(
+          (row) =>
+            safeText(
+              row?.role,
+              ""
+            ).toLowerCase() === "admin"
+        ).length
+      ),
+      withAvatar: safeNumber(
+        stats.withAvatar,
+        rows.filter(
+          (row) =>
+            row?.hasAvatar === true
+        ).length
+      ),
     },
 
-    selection: {
-      selectedIds: safeArray(
-        selection.selectedIds
+    meta: {
+      total: safeNumber(
+        meta.total,
+        rows.length
       ),
-      activeUserId: safeText(
-        selection.activeUserId,
+      page: Math.max(
+        1,
+        safeNumber(
+          meta.page,
+          1
+        )
+      ),
+      pageSize: Math.max(
+        1,
+        safeNumber(
+          meta.pageSize,
+          20
+        )
+      ),
+      totalPages: Math.max(
+        1,
+        safeNumber(
+          meta.totalPages,
+          1
+        )
+      ),
+      count: Math.max(
+        0,
+        safeNumber(
+          meta.count,
+          rows.length
+        )
+      ),
+      hasNextPage:
+        meta.hasNextPage === true,
+      hasPrevPage:
+        meta.hasPrevPage === true,
+    },
+
+    params: {
+      page: Math.max(
+        1,
+        safeNumber(
+          params.page,
+          1
+        )
+      ),
+      pageSize: Math.max(
+        1,
+        safeNumber(
+          params.pageSize,
+          20
+        )
+      ),
+      q: safeText(
+        params.q,
         ""
       ),
+      role: safeText(
+        params.role,
+        ""
+      ),
+      status: safeText(
+        params.status,
+        ""
+      ),
+      sortBy: safeText(
+        params.sortBy,
+        "createdAt"
+      ),
+      sortDir:
+        safeText(
+          params.sortDir,
+          "desc"
+        ).toLowerCase() === "asc"
+          ? "asc"
+          : "desc",
     },
 
     ui: {
       mounted:
         ui.mounted === true,
-      viewMode: safeText(
-        ui.viewMode,
-        "table"
-      ),
       lastAction: safeText(
         ui.lastAction,
         ""
@@ -387,8 +416,11 @@ function resolveUsuariosState(
         ui.searchDraft,
         ""
       ),
-      filtersOpen:
-        ui.filtersOpen === true,
+      activeFilter: safeText(
+        ui.activeFilter,
+        ""
+      ),
+      selectedUserId,
     },
   };
 }
@@ -440,15 +472,11 @@ function getSourceBadgeClass(
     return "usuarios-badge--live";
   }
 
-  if (
-    source === "cache:fresh"
-  ) {
+  if (source === "cache:fresh") {
     return "usuarios-badge--cache";
   }
 
-  if (
-    source === "cache:stale"
-  ) {
+  if (source === "cache:stale") {
     return "usuarios-badge--warning";
   }
 
@@ -466,7 +494,7 @@ function renderStatusHint(
   state = {}
 ) {
   if (state.degraded === true) {
-    return "Visualizando datos degradados. El backend no está disponible ahora mismo.";
+    return "Visualizando datos degradados. El backend está respondiendo con calidad reducida o caché.";
   }
 
   if (state.cacheHit === true) {
@@ -481,27 +509,28 @@ function renderStatusHint(
 }
 
 function hasUsers(state = {}) {
-  return (
-    safeArray(
-      state.data?.items
-    ).length > 0
-  );
+  return safeArray(state.rows)
+    .length > 0;
 }
 
-function isSelected(
+function isActiveUser(
   state = {},
   userId = ""
 ) {
   const normalized =
     safeText(userId, "");
 
-  return safeArray(
-    state.selection?.selectedIds
-  ).includes(normalized);
+  return (
+    safeText(
+      state.ui?.selectedUserId,
+      ""
+    ) === normalized
+  );
 }
 
 function getStatusChipLabel(
-  status = ""
+  status = "",
+  activeValue = null
 ) {
   const normalized =
     safeText(status, "")
@@ -524,6 +553,14 @@ function getStatusChipLabel(
     return "Pendiente";
   }
 
+  if (activeValue === true) {
+    return "Activo";
+  }
+
+  if (activeValue === false) {
+    return "Inactivo";
+  }
+
   return safeText(
     status,
     "Unknown"
@@ -531,18 +568,25 @@ function getStatusChipLabel(
 }
 
 function getStatusChipClass(
-  status = ""
+  status = "",
+  activeValue = null
 ) {
   const normalized =
     safeText(status, "")
       .toLowerCase()
       .trim();
 
-  if (normalized === "active") {
+  if (
+    normalized === "active" ||
+    activeValue === true
+  ) {
     return "is-active";
   }
 
-  if (normalized === "inactive") {
+  if (
+    normalized === "inactive" ||
+    activeValue === false
+  ) {
     return "is-inactive";
   }
 
@@ -621,17 +665,15 @@ function getSortIndicator(
   state = {},
   sortBy = ""
 ) {
-  const currentBy =
-    safeText(
-      state.data?.query?.sortBy,
-      "createdAt"
-    );
+  const currentBy = safeText(
+    state.params?.sortBy,
+    "createdAt"
+  );
 
-  const currentDir =
-    safeText(
-      state.data?.query?.sortDir,
-      "desc"
-    );
+  const currentDir = safeText(
+    state.params?.sortDir,
+    "desc"
+  );
 
   if (currentBy !== sortBy) {
     return "";
@@ -675,8 +717,8 @@ function renderHero({
           </h1>
 
           <p class="usuarios-hero__subtitle">
-            Controla los usuarios de la plataforma, revisa estado, rol, actividad,
-            selección y navegación administrativa desde un único panel.
+            Controla los usuarios de la plataforma, revisa estado, rol y actividad
+            operativa desde un único panel premium.
           </p>
 
           <div class="usuarios-hero__meta">
@@ -687,7 +729,7 @@ function renderHero({
             <span class="usuarios-meta-pill">
               Total visible: ${escapeHtml(
                 formatNumber(
-                  state.data?.meta?.total || 0
+                  state.meta?.total || 0
                 )
               )}
             </span>
@@ -709,15 +751,6 @@ function renderHero({
               aria-label="Actualizar usuarios"
             >
               Actualizar
-            </button>
-
-            <button
-              type="button"
-              class="usuarios-toolbar-button"
-              data-usuarios-action="toggle-filters"
-              aria-label="Mostrar u ocultar filtros"
-            >
-              Filtros
             </button>
           </div>
         </div>
@@ -759,7 +792,7 @@ function renderStats(
   state = {}
 ) {
   const stats = safeObject(
-    state.data?.stats
+    state.stats
   );
 
   return `
@@ -793,13 +826,13 @@ function renderStats(
       })}
 
       ${renderStatCard({
-        label: "Bloqueados",
+        label: "Con avatar",
         value: formatNumber(
-          stats.blocked
+          stats.withAvatar
         ),
         helper:
-          "Acceso restringido",
-        accent: "is-danger",
+          "Perfil visual configurado",
+        accent: "is-warning",
       })}
 
       ${renderStatCard({
@@ -809,7 +842,7 @@ function renderStats(
         ),
         helper:
           "Privilegios elevados",
-        accent: "is-warning",
+        accent: "is-danger",
       })}
     </section>
   `;
@@ -818,19 +851,14 @@ function renderStats(
 function renderToolbar(
   state = {}
 ) {
-  const query = safeObject(
-    state.data?.query
+  const params = safeObject(
+    state.params
   );
-
-  const selectedCount =
-    safeArray(
-      state.selection?.selectedIds
-    ).length;
 
   const searchValue =
     safeText(
       state.ui?.searchDraft ||
-        query.search,
+        params.q,
       ""
     );
 
@@ -866,19 +894,19 @@ function renderToolbar(
             aria-label="Filtrar por rol"
           >
             <option value="" ${
-              !query.role ? "selected" : ""
+              !params.role ? "selected" : ""
             }>
               Todos los roles
             </option>
             <option value="admin" ${
-              query.role === "admin"
+              params.role === "admin"
                 ? "selected"
                 : ""
             }>
               Admin
             </option>
             <option value="user" ${
-              query.role === "user"
+              params.role === "user"
                 ? "selected"
                 : ""
             }>
@@ -892,39 +920,25 @@ function renderToolbar(
             aria-label="Filtrar por estado"
           >
             <option value="" ${
-              !query.status
+              !params.status
                 ? "selected"
                 : ""
             }>
               Todos los estados
             </option>
             <option value="active" ${
-              query.status === "active"
+              params.status === "active"
                 ? "selected"
                 : ""
             }>
               Activo
             </option>
             <option value="inactive" ${
-              query.status === "inactive"
+              params.status === "inactive"
                 ? "selected"
                 : ""
             }>
               Inactivo
-            </option>
-            <option value="blocked" ${
-              query.status === "blocked"
-                ? "selected"
-                : ""
-            }>
-              Bloqueado
-            </option>
-            <option value="pending" ${
-              query.status === "pending"
-                ? "selected"
-                : ""
-            }>
-              Pendiente
             </option>
           </select>
 
@@ -938,7 +952,7 @@ function renderToolbar(
                 (size) => `
               <option value="${size}" ${
                   safeNumber(
-                    query.pageSize,
+                    params.pageSize,
                     20
                   ) === size
                     ? "selected"
@@ -954,30 +968,25 @@ function renderToolbar(
           <button
             type="button"
             class="usuarios-toolbar-button"
-            data-usuarios-action="select-all"
-            aria-label="Seleccionar todos los usuarios visibles"
-          >
-            Seleccionar visibles
-          </button>
-
-          <button
-            type="button"
-            class="usuarios-toolbar-button"
             data-usuarios-action="clear-selection"
             aria-label="Limpiar selección"
           >
-            Limpiar selección
+            Limpiar foco
           </button>
         </div>
       </div>
 
       <div class="usuarios-toolbar__footer">
         <span class="usuarios-toolbar__hint">
-          Seleccionados: ${escapeHtml(
+          Página ${escapeHtml(
             formatNumber(
-              selectedCount
+              state.meta?.page || 1
             )
-          )}
+          )} · ${escapeHtml(
+            formatNumber(
+              state.meta?.count || 0
+            )
+          )} visibles
         </span>
 
         <button
@@ -994,12 +1003,16 @@ function renderToolbar(
 }
 
 function renderStatusChip(
-  status = ""
+  status = "",
+  activeValue = null
 ) {
   return `
-    <span class="usuarios-chip usuarios-chip--status ${escapeHtml(getStatusChipClass(status))}">
+    <span class="usuarios-chip usuarios-chip--status ${escapeHtml(getStatusChipClass(status, activeValue))}">
       ${escapeHtml(
-        getStatusChipLabel(status)
+        getStatusChipLabel(
+          status,
+          activeValue
+        )
       )}
     </span>
   `;
@@ -1020,8 +1033,8 @@ function renderRoleChip(
 function renderTable(
   state = {}
 ) {
-  const items = safeArray(
-    state.data?.items
+  const rows = safeArray(
+    state.rows
   );
 
   return `
@@ -1030,14 +1043,6 @@ function renderTable(
         <table class="usuarios-table">
           <thead>
             <tr>
-              <th class="usuarios-table__check">
-                <input
-                  type="checkbox"
-                  data-usuarios-action="select-all"
-                  aria-label="Seleccionar todos"
-                />
-              </th>
-
               <th>
                 Usuario
               </th>
@@ -1091,7 +1096,7 @@ function renderTable(
           </thead>
 
           <tbody>
-            ${items
+            ${rows
               .map((item) => {
                 const userId = safeText(
                   item?.id ||
@@ -1099,42 +1104,18 @@ function renderTable(
                   ""
                 );
 
-                const selected =
-                  isSelected(
+                const active =
+                  isActiveUser(
                     state,
                     userId
                   );
 
-                const active =
-                  safeText(
-                    state.selection
-                      ?.activeUserId,
-                    ""
-                  ) === userId;
-
                 return `
                   <tr class="${
-                    selected
-                      ? "is-selected"
-                      : ""
-                  } ${
                     active
                       ? "is-active-row"
                       : ""
                   }">
-                    <td class="usuarios-table__check">
-                      <input
-                        type="checkbox"
-                        ${
-                          selected
-                            ? "checked"
-                            : ""
-                        }
-                        data-usuarios-select="${escapeHtml(userId)}"
-                        aria-label="Seleccionar usuario ${escapeHtml(item?.displayName || item?.email || userId)}"
-                      />
-                    </td>
-
                     <td>
                       <button
                         type="button"
@@ -1144,11 +1125,17 @@ function renderTable(
                         aria-label="Abrir detalle de usuario"
                       >
                         <span class="usuarios-avatar">
-                          ${escapeHtml(
-                            getUserInitials(
-                              item
-                            )
-                          )}
+                          ${
+                            item?.hasAvatar ===
+                              true &&
+                            item?.avatar
+                              ? `<img class="usuarios-avatar__img" src="${escapeHtml(item.avatar)}" alt="${escapeHtml(safeText(item?.displayName || item?.username || "Usuario", "Usuario"))}" />`
+                              : escapeHtml(
+                                  getUserInitials(
+                                    item
+                                  )
+                                )
+                          }
                         </span>
 
                         <span class="usuarios-user-cell__text">
@@ -1192,7 +1179,8 @@ function renderTable(
 
                     <td>
                       ${renderStatusChip(
-                        item?.status
+                        item?.status,
+                        item?.active
                       )}
                     </td>
 
@@ -1254,7 +1242,7 @@ function renderPagination(
   state = {}
 ) {
   const meta = safeObject(
-    state.data?.meta
+    state.meta
   );
 
   return `
@@ -1278,7 +1266,8 @@ function renderPagination(
             class="usuarios-toolbar-button"
             data-usuarios-action="prev-page"
             ${
-              meta.hasPrev === true
+              meta.hasPrevPage ===
+              true
                 ? ""
                 : "disabled"
             }
@@ -1292,7 +1281,8 @@ function renderPagination(
             class="usuarios-toolbar-button"
             data-usuarios-action="next-page"
             ${
-              meta.hasNext === true
+              meta.hasNextPage ===
+              true
                 ? ""
                 : "disabled"
             }
@@ -1671,7 +1661,7 @@ function renderStyles() {
 
     .usuarios-table{
       width:100%;
-      min-width:1120px;
+      min-width:1080px;
       border-collapse:separate;
       border-spacing:0;
     }
@@ -1707,16 +1697,9 @@ function renderStyles() {
       background:rgba(255,255,255,.02);
     }
 
-    .usuarios-table tbody tr.is-selected{
-      background:rgba(59,130,246,.07);
-    }
-
     .usuarios-table tbody tr.is-active-row{
+      background:rgba(59,130,246,.05);
       box-shadow:inset 3px 0 0 rgba(59,130,246,.65);
-    }
-
-    .usuarios-table__check{
-      width:56px;
     }
 
     .usuarios-table__actions{
@@ -1747,6 +1730,14 @@ function renderStyles() {
       background:rgba(59,130,246,.18);
       border:1px solid rgba(59,130,246,.20);
       flex:0 0 auto;
+      overflow:hidden;
+    }
+
+    .usuarios-avatar__img{
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      display:block;
     }
 
     .usuarios-user-cell__text{
@@ -2017,7 +2008,7 @@ function renderStyles() {
     }
 
     [data-theme="light"] .usuarios-table tbody tr:hover,
-    [data-theme="light"] .usuarios-table tbody tr.is-selected{
+    [data-theme="light"] .usuarios-table tbody tr.is-active-row{
       background:rgba(15,23,42,.03);
     }
 

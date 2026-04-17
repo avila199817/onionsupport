@@ -2,26 +2,12 @@
    Onion SPA - Usuarios Model
    Archivo: src/views/usuarios/usuarios.model.js
 
-   FULL PRO 10/10
+   FULL PRO 10/10 · FIXED EXPORTS
 
-   RESPONSABILIDADES:
-   - normalizar payloads heterogéneos backend/store
-   - exponer modelo consistente Usuario
-   - labels estado / rol
-   - flags computados
-   - avatars / initials
-   - fechas base
-   - collections helpers
-   - sorting helpers
-   - stats helpers
-   - defensive parsing enterprise ready
-
-   USO:
-   import {
-     normalizeUsuarioModel,
-     normalizeUsuariosCollection,
-     computeUsuariosStats
-   } from "./usuarios.model.js";
+   PATCH CRÍTICO:
+   - añadido sortUsuariosByCreatedDesc
+   - añadido export en default
+   - compatibilidad total con usuariosView.js
 ========================================================= */
 
 /* =========================================================
@@ -258,9 +244,7 @@ export function getAvatarTheme(seed = "") {
    CORE NORMALIZER
 ========================================================= */
 
-export function normalizeUsuarioModel(
-  payload = {}
-) {
+export function normalizeUsuarioModel(payload = {}) {
   const item = safeObject(payload);
 
   const profile = safeObject(
@@ -394,104 +378,55 @@ export function normalizeUsuarioModel(
     item.lastAccessAt
   );
 
-  const initials =
-    getInitials(name);
-
-  const avatarTheme =
-    getAvatarTheme(
-      userId ||
-      email ||
-      username
-    );
-
-  const isActive =
-    status === STATUS.ACTIVE;
-
-  const isPending =
-    status === STATUS.PENDING;
-
-  const isBlocked =
-    status === STATUS.BLOCKED;
-
-  const isDisabled =
-    status === STATUS.DISABLED;
-
-  const isAdmin =
-    role === ROLE.ADMIN;
-
-  const isStaff =
-    role === ROLE.STAFF;
-
-  const isSupport =
-    role === ROLE.SUPPORT;
-
-  const createdAtTs =
-    toTimestamp(createdAt);
-
-  const updatedAtTs =
-    toTimestamp(updatedAt);
-
-  const lastLoginAtTs =
-    toTimestamp(lastLoginAt);
-
   return {
-    /* identity */
     userId,
     id: userId,
 
-    /* content */
     username,
     name,
     email,
     phone,
 
-    /* org */
     companyName,
 
-    /* enums */
     role,
-    roleLabel:
-      getRoleLabel(role),
+    roleLabel: getRoleLabel(role),
 
     status,
-    statusLabel:
-      getStatusLabel(status),
+    statusLabel: getStatusLabel(status),
 
-    /* dates */
     createdAt,
     updatedAt,
     lastLoginAt,
 
-    createdAtTs,
-    updatedAtTs,
-    lastLoginAtTs,
+    createdAtTs: toTimestamp(createdAt),
+    updatedAtTs: toTimestamp(updatedAt),
+    lastLoginAtTs: toTimestamp(lastLoginAt),
 
-    /* visuals */
     avatarUrl,
-    initials,
-    avatarTheme,
+    initials: getInitials(name),
+    avatarTheme: getAvatarTheme(
+      userId || email || username
+    ),
 
-    /* flags */
-    isActive,
-    isPending,
-    isBlocked,
-    isDisabled,
-    isAdmin,
-    isStaff,
-    isSupport,
+    isActive: status === STATUS.ACTIVE,
+    isPending: status === STATUS.PENDING,
+    isBlocked: status === STATUS.BLOCKED,
+    isDisabled: status === STATUS.DISABLED,
 
-    /* raw */
+    isAdmin: role === ROLE.ADMIN,
+    isStaff: role === ROLE.STAFF,
+    isSupport: role === ROLE.SUPPORT,
+
     raw: item,
   };
 }
 
 /* =========================================================
-   COLLECTION NORMALIZER
+   COLLECTION
 ========================================================= */
 
-export function unwrapUsuariosPayload(
-  payload = null
-) {
+export function unwrapUsuariosPayload(payload = null) {
   if (!payload) return [];
 
   if (Array.isArray(payload)) {
@@ -500,55 +435,21 @@ export function unwrapUsuariosPayload(
 
   const obj = safeObject(payload);
 
-  if (
-    Array.isArray(obj.users)
-  ) {
-    return obj.users;
-  }
+  if (Array.isArray(obj.users)) return obj.users;
+  if (Array.isArray(obj.usuarios)) return obj.usuarios;
+  if (Array.isArray(obj.items)) return obj.items;
+  if (Array.isArray(obj.data)) return obj.data;
+  if (Array.isArray(obj.results)) return obj.results;
 
-  if (
-    Array.isArray(obj.usuarios)
-  ) {
-    return obj.usuarios;
-  }
-
-  if (
-    Array.isArray(obj.items)
-  ) {
-    return obj.items;
-  }
-
-  if (
-    Array.isArray(obj.data)
-  ) {
-    return obj.data;
-  }
-
-  if (
-    Array.isArray(obj.results)
-  ) {
-    return obj.results;
-  }
-
-  if (
-    obj.data &&
-    typeof obj.data ===
-      "object"
-  ) {
-    return unwrapUsuariosPayload(
-      obj.data
-    );
+  if (obj.data && typeof obj.data === "object") {
+    return unwrapUsuariosPayload(obj.data);
   }
 
   return [];
 }
 
-export function normalizeUsuariosCollection(
-  payload = []
-) {
-  return unwrapUsuariosPayload(
-    payload
-  ).map(
+export function normalizeUsuariosCollection(payload = []) {
+  return unwrapUsuariosPayload(payload).map(
     normalizeUsuarioModel
   );
 }
@@ -557,48 +458,37 @@ export function normalizeUsuariosCollection(
    SORT
 ========================================================= */
 
-export function sortUsuariosByUpdatedDesc(
-  items = []
-) {
+export function sortUsuariosByCreatedDesc(items = []) {
   return [...safeArray(items)].sort(
     (a, b) =>
-      safeNumber(
-        b.updatedAtTs
-      ) -
-      safeNumber(
-        a.updatedAtTs
-      )
+      safeNumber(b.createdAtTs) -
+      safeNumber(a.createdAtTs)
   );
 }
 
-export function sortUsuariosByLastLoginDesc(
-  items = []
-) {
+export function sortUsuariosByUpdatedDesc(items = []) {
   return [...safeArray(items)].sort(
     (a, b) =>
-      safeNumber(
-        b.lastLoginAtTs
-      ) -
-      safeNumber(
-        a.lastLoginAtTs
-      )
+      safeNumber(b.updatedAtTs) -
+      safeNumber(a.updatedAtTs)
   );
 }
 
-export function sortUsuariosByNameAsc(
-  items = []
-) {
+export function sortUsuariosByLastLoginDesc(items = []) {
   return [...safeArray(items)].sort(
     (a, b) =>
-      safeText(
-        a.name
-      ).localeCompare(
+      safeNumber(b.lastLoginAtTs) -
+      safeNumber(a.lastLoginAtTs)
+  );
+}
+
+export function sortUsuariosByNameAsc(items = []) {
+  return [...safeArray(items)].sort(
+    (a, b) =>
+      safeText(a.name).localeCompare(
         safeText(b.name),
         "es",
-        {
-          sensitivity:
-            "base",
-        }
+        { sensitivity: "base" }
       )
   );
 }
@@ -612,58 +502,36 @@ export function paginateUsuarios(
   page = 1,
   pageSize = DEFAULT_PAGE_SIZE
 ) {
-  const list =
-    safeArray(items);
+  const list = safeArray(items);
 
   const size = Math.max(
     1,
-    safeNumber(
-      pageSize,
-      DEFAULT_PAGE_SIZE
-    )
+    safeNumber(pageSize, DEFAULT_PAGE_SIZE)
   );
 
-  const total =
-    list.length;
+  const total = list.length;
 
-  const totalPages =
-    Math.max(
-      1,
-      Math.ceil(total / size)
-    );
+  const totalPages = Math.max(
+    1,
+    Math.ceil(total / size)
+  );
 
   const current = Math.min(
-    Math.max(
-      1,
-      safeNumber(page, 1)
-    ),
+    Math.max(1, safeNumber(page, 1)),
     totalPages
   );
 
-  const start =
-    (current - 1) * size;
-
-  const end =
-    start + size;
+  const start = (current - 1) * size;
+  const end = start + size;
 
   return {
     page: current,
     pageSize: size,
     total,
     totalPages,
-    items:
-      list.slice(
-        start,
-        end
-      ),
-    from:
-      total === 0
-        ? 0
-        : start + 1,
-    to: Math.min(
-      end,
-      total
-    ),
+    items: list.slice(start, end),
+    from: total === 0 ? 0 : start + 1,
+    to: Math.min(end, total),
   };
 }
 
@@ -671,74 +539,34 @@ export function paginateUsuarios(
    STATS
 ========================================================= */
 
-export function computeUsuariosStats(
-  items = []
-) {
-  const list =
-    safeArray(items);
+export function computeUsuariosStats(items = []) {
+  const list = safeArray(items);
 
   return {
-    total:
-      list.length,
-
-    active:
-      list.filter(
-        (x) => x.isActive
-      ).length,
-
-    pending:
-      list.filter(
-        (x) => x.isPending
-      ).length,
-
-    blocked:
-      list.filter(
-        (x) => x.isBlocked
-      ).length,
-
-    disabled:
-      list.filter(
-        (x) => x.isDisabled
-      ).length,
-
-    admins:
-      list.filter(
-        (x) => x.isAdmin
-      ).length,
-
-    staff:
-      list.filter(
-        (x) => x.isStaff
-      ).length,
-
-    support:
-      list.filter(
-        (x) => x.isSupport
-      ).length,
+    total: list.length,
+    active: list.filter(x => x.isActive).length,
+    pending: list.filter(x => x.isPending).length,
+    blocked: list.filter(x => x.isBlocked).length,
+    disabled: list.filter(x => x.isDisabled).length,
+    admins: list.filter(x => x.isAdmin).length,
+    staff: list.filter(x => x.isStaff).length,
+    support: list.filter(x => x.isSupport).length,
   };
 }
 
 /* =========================================================
-   FINDERS
+   FINDER
 ========================================================= */
 
 export function findUsuarioById(
   items = [],
   userId = ""
 ) {
-  const id = safeText(
-    userId,
-    ""
-  );
-
-  if (!id) return null;
+  const id = safeText(userId);
 
   return (
     safeArray(items).find(
-      (item) =>
-        safeText(
-          item.userId
-        ) === id
+      item => safeText(item.userId) === id
     ) || null
   );
 }
@@ -752,12 +580,16 @@ export default {
   normalizeUsuarioModel,
   normalizeUsuariosCollection,
   unwrapUsuariosPayload,
+
+  sortUsuariosByCreatedDesc,
   sortUsuariosByUpdatedDesc,
   sortUsuariosByLastLoginDesc,
   sortUsuariosByNameAsc,
+
   paginateUsuarios,
   computeUsuariosStats,
   findUsuarioById,
+
   getStatusLabel,
   getRoleLabel,
   normalizeStatus,

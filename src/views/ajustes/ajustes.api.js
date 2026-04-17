@@ -2,26 +2,24 @@
    Onion SPA - Ajustes API
    Archivo: src/views/ajustes/ajustes.api.js
 
-   FINAL PRO SYSTEM · API LAYER · 10/10
+   FINAL PRO SYSTEM · API LAYER · SIMPLE /CLIENTES ONLY
 
    RESPONSABILIDADES:
    - centralizar llamadas HTTP del módulo ajustes
-   - listado + detalle + create + update + validate
+   - usar SOLO /api/clientes
+   - listado + detalle + create + update
    - refresh forzado
    - hidratar store/state
    - normalizar payloads backend heterogéneos
    - soportar adapters múltiples de request
    - anti-race soft para listado
-   - orientado a ajustes de cliente / métodos de pago / configuración operativa
-   - no tocar datos de cuenta de usuario
 
    HARDENING PRO:
+   - cero rutas inventadas
    - get detalle devuelve objeto limpio
-   - soporta { ok, data, setting, ajuste, item, payload, result }
    - soporta arrays / envelopes / nested envelopes
    - fallback AppCore.apiClient -> AppCore.request -> Http -> fetch
    - persistencia coherente en store/state
-   - tolerancia a backends con rutas distintas de cliente/ajustes
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -47,43 +45,7 @@ import {
    CONFIG
 ========================================================= */
 
-/**
- * Rutas base candidatas para ajustes de cliente.
- * El backend real mostrado en server.js confirma:
- * - /api/ajustes/validate
- * - /api/clientes/*
- *
- * Como no has pegado todavía el router real de ajustes/clientes,
- * dejo una estrategia multi-candidato para que el módulo sea
- * tolerante y no quede acoplado a una sola convención.
- */
-
-const AJUSTES_LIST_ENDPOINTS = [
-  "/api/clientes/ajustes",
-  "/api/clientes/settings",
-  "/api/clientes/configuracion",
-  "/api/clientes/preferences",
-  "/api/clientes/metodos-pago",
-  "/api/clientes/payment-methods",
-];
-
-const AJUSTES_CREATE_ENDPOINTS = [
-  "/api/clientes/ajustes",
-  "/api/clientes/settings",
-  "/api/clientes/configuracion",
-  "/api/clientes/metodos-pago",
-  "/api/clientes/payment-methods",
-];
-
-const AJUSTES_UPDATE_ENDPOINTS = [
-  "/api/clientes/ajustes",
-  "/api/clientes/settings",
-  "/api/clientes/configuracion",
-  "/api/clientes/metodos-pago",
-  "/api/clientes/payment-methods",
-];
-
-const AJUSTES_VALIDATE_ENDPOINT = "/api/ajustes/validate";
+const CLIENTES_ENDPOINT = "/api/clientes";
 const AJUSTES_TIMEOUT = 15000;
 
 let lastLoadToken = 0;
@@ -188,19 +150,14 @@ function getHttpModule() {
   );
 }
 
-function buildResourceEndpoint(base = "", id = "") {
-  const cleanBase = safeText(base, "").replace(/\/+$/, "");
-  const resourceId = safeText(id, "");
+function getClienteDetailEndpoint(id = "") {
+  const cleanId = safeText(id, "");
 
-  if (!cleanBase) {
-    throw new Error("AJUSTES_ENDPOINT_REQUIRED");
+  if (!cleanId) {
+    throw new Error("CLIENTE_ID_REQUIRED");
   }
 
-  if (!resourceId) {
-    throw new Error("AJUSTE_ID_REQUIRED");
-  }
-
-  return `${cleanBase}/${encodeURIComponent(resourceId)}`;
+  return `${CLIENTES_ENDPOINT}/${encodeURIComponent(cleanId)}`;
 }
 
 /* =========================================================
@@ -237,18 +194,14 @@ function unwrapResponseEnvelope(payload = null) {
   }
 
   if (Array.isArray(obj.items)) return obj.items;
-  if (Array.isArray(obj.settings)) return obj.settings;
-  if (Array.isArray(obj.ajustes)) return obj.ajustes;
-  if (Array.isArray(obj.paymentMethods)) return obj.paymentMethods;
-  if (Array.isArray(obj.metodosPago)) return obj.metodosPago;
+  if (Array.isArray(obj.clientes)) return obj.clientes;
+  if (Array.isArray(obj.clients)) return obj.clients;
   if (Array.isArray(obj.data)) return obj.data;
   if (Array.isArray(obj.results)) return obj.results;
   if (Array.isArray(obj.rows)) return obj.rows;
 
-  if (obj.setting) return obj.setting;
-  if (obj.ajuste) return obj.ajuste;
-  if (obj.paymentMethod) return obj.paymentMethod;
-  if (obj.metodoPago) return obj.metodoPago;
+  if (obj.cliente) return obj.cliente;
+  if (obj.client) return obj.client;
   if (obj.item) return obj.item;
   if (obj.result) return obj.result;
   if (obj.payload) return unwrapResponseEnvelope(obj.payload);
@@ -269,45 +222,13 @@ function pickItems(payload = null) {
 
   const obj = safeObject(payload);
 
-  if (Array.isArray(obj?.data?.items)) {
-    return obj.data.items;
-  }
+  if (Array.isArray(obj?.data?.items)) return obj.data.items;
+  if (Array.isArray(obj?.data?.clientes)) return obj.data.clientes;
+  if (Array.isArray(obj?.data?.clients)) return obj.data.clients;
 
-  if (Array.isArray(obj?.data?.settings)) {
-    return obj.data.settings;
-  }
-
-  if (Array.isArray(obj?.data?.ajustes)) {
-    return obj.data.ajustes;
-  }
-
-  if (Array.isArray(obj?.data?.paymentMethods)) {
-    return obj.data.paymentMethods;
-  }
-
-  if (Array.isArray(obj?.data?.metodosPago)) {
-    return obj.data.metodosPago;
-  }
-
-  if (Array.isArray(obj?.payload?.items)) {
-    return obj.payload.items;
-  }
-
-  if (Array.isArray(obj?.payload?.settings)) {
-    return obj.payload.settings;
-  }
-
-  if (Array.isArray(obj?.payload?.ajustes)) {
-    return obj.payload.ajustes;
-  }
-
-  if (Array.isArray(obj?.payload?.paymentMethods)) {
-    return obj.payload.paymentMethods;
-  }
-
-  if (Array.isArray(obj?.payload?.metodosPago)) {
-    return obj.payload.metodosPago;
-  }
+  if (Array.isArray(obj?.payload?.items)) return obj.payload.items;
+  if (Array.isArray(obj?.payload?.clientes)) return obj.payload.clientes;
+  if (Array.isArray(obj?.payload?.clients)) return obj.payload.clients;
 
   return [];
 }
@@ -338,22 +259,18 @@ function pickTotal(payload = null, fallback = 0) {
   return fallback;
 }
 
-function looksLikeAjuste(value = null) {
+function looksLikeCliente(value = null) {
   const obj = safeObject(value);
 
   return Boolean(
-    obj.settingId ||
-      obj.ajusteId ||
-      obj.id ||
-      obj.key ||
-      obj.slug ||
-      obj.code ||
-      obj.name ||
+    obj.id ||
+      obj.clienteId ||
+      obj.userId ||
       obj.nombre ||
-      obj.label ||
-      obj.title ||
-      obj.paymentMethodId ||
-      obj.metodoPagoId
+      obj.name ||
+      obj.empresa ||
+      obj.company ||
+      obj.email
   );
 }
 
@@ -366,20 +283,18 @@ function pickDetail(payload = null) {
     return payload[0] || null;
   }
 
-  if (looksLikeAjuste(payload)) {
+  if (looksLikeCliente(payload)) {
     return payload;
   }
 
   const obj = safeObject(payload);
 
-  if (looksLikeAjuste(obj.setting)) return obj.setting;
-  if (looksLikeAjuste(obj.ajuste)) return obj.ajuste;
-  if (looksLikeAjuste(obj.paymentMethod)) return obj.paymentMethod;
-  if (looksLikeAjuste(obj.metodoPago)) return obj.metodoPago;
-  if (looksLikeAjuste(obj.item)) return obj.item;
-  if (looksLikeAjuste(obj.result)) return obj.result;
-  if (looksLikeAjuste(obj.payload)) return obj.payload;
-  if (looksLikeAjuste(obj.data)) return obj.data;
+  if (looksLikeCliente(obj.cliente)) return obj.cliente;
+  if (looksLikeCliente(obj.client)) return obj.client;
+  if (looksLikeCliente(obj.item)) return obj.item;
+  if (looksLikeCliente(obj.result)) return obj.result;
+  if (looksLikeCliente(obj.payload)) return obj.payload;
+  if (looksLikeCliente(obj.data)) return obj.data;
 
   if (obj.data && typeof obj.data === "object") {
     return pickDetail(obj.data);
@@ -610,165 +525,107 @@ async function request(method = "GET", path = "", options = {}) {
   throw lastError || new Error("AJUSTES_REQUEST_FAILED");
 }
 
-async function requestFirstAvailable(
-  method = "GET",
-  paths = [],
-  options = {}
-) {
-  const candidates = safeArray(paths).filter(Boolean);
-
-  if (!candidates.length) {
-    throw new Error("AJUSTES_ENDPOINT_CANDIDATES_EMPTY");
-  }
-
-  let lastError = null;
-
-  for (const path of candidates) {
-    try {
-      return await request(method, path, options);
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  throw lastError || new Error("AJUSTES_ALL_ENDPOINTS_FAILED");
-}
-
 /* =========================================================
    NORMALIZE DOMAIN MODEL
 ========================================================= */
 
-function getAjusteId(item = {}) {
+function getClienteId(item = {}) {
   return safeText(
     first(
-      item.settingId,
-      item.ajusteId,
-      item.paymentMethodId,
-      item.metodoPagoId,
       item.id,
-      item.key,
-      item.slug,
-      item.code
+      item.clienteId,
+      item.userId
     ),
     ""
   );
 }
 
-function getAjusteKey(item = {}) {
+function getClienteKey(item = {}) {
   return safeText(
     first(
       item.key,
-      item.settingKey,
       item.slug,
-      item.code,
+      item.email,
       item.id
     ),
     ""
   );
 }
 
-function getAjusteTitle(item = {}) {
+function getClienteTitle(item = {}) {
   return safeText(
     first(
-      item.title,
-      item.titulo,
-      item.label,
-      item.name,
       item.nombre,
-      item.key
+      item.name,
+      item.empresa,
+      item.company,
+      item.label,
+      item.title,
+      item.email
     ),
-    "Ajuste"
+    "Cliente"
   );
 }
 
-function getAjusteCategory(item = {}) {
-  const categoryObject = first(
-    item.category,
-    item.categoria,
-    item.group,
-    item.section
+function getClienteCategory(item = {}) {
+  return "Cliente";
+}
+
+function getClienteValue(item = {}) {
+  const paymentCandidate = first(
+    item.metodoPago,
+    item.paymentMethod,
+    item.defaultPaymentMethod,
+    item.metodo_pago
   );
 
-  if (categoryObject && typeof categoryObject === "object") {
-    return safeText(
-      first(
-        categoryObject.name,
-        categoryObject.nombre,
-        categoryObject.label,
-        categoryObject.title
-      ),
-      "General"
-    );
+  if (paymentCandidate !== null && paymentCandidate !== undefined) {
+    return safeText(paymentCandidate, "");
   }
 
   return safeText(
     first(
-      item.categoryName,
-      item.categoriaNombre,
-      categoryObject
+      item.estado,
+      item.status,
+      item.email,
+      item.telefono,
+      item.phone
     ),
-    "General"
+    ""
   );
 }
 
-function getAjusteValue(item = {}) {
-  const rawValue = first(
-    item.value,
-    item.valor,
-    item.currentValue,
-    item.defaultValue
+function getClienteType(item = {}) {
+  const paymentCandidate = first(
+    item.metodoPago,
+    item.paymentMethod,
+    item.defaultPaymentMethod,
+    item.metodo_pago
   );
 
-  if (rawValue === null || rawValue === undefined) {
-    return "";
+  if (paymentCandidate !== null && paymentCandidate !== undefined) {
+    return "payment_method";
   }
 
-  if (typeof rawValue === "object") {
-    try {
-      return JSON.stringify(rawValue);
-    } catch {
-      return safeText(rawValue, "");
-    }
-  }
-
-  return safeText(rawValue, "");
+  return "text";
 }
 
-function getAjusteType(item = {}) {
-  return safeText(
-    first(
-      item.type,
-      item.tipo,
-      item.valueType,
-      item.inputType
-    ),
-    "text"
-  );
-}
-
-function getAjusteStatus(item = {}) {
+function getClienteStatus(item = {}) {
   return safeText(
     first(
       item.status,
       item.estado,
-      item.state
+      "active"
     ),
     "active"
   );
 }
 
-function getAjusteVisibility(item = {}) {
-  return safeText(
-    first(
-      item.visibility,
-      item.visibilidad,
-      item.scope
-    ),
-    "private"
-  );
+function getClienteVisibility(item = {}) {
+  return "private";
 }
 
-function getAjusteUpdatedAt(item = {}) {
+function getClienteUpdatedAt(item = {}) {
   return first(
     item.updatedAt,
     item.modifiedAt,
@@ -783,15 +640,15 @@ function normalizeAjuste(item = {}) {
 
   return {
     ...raw,
-    settingId: getAjusteId(raw),
-    key: getAjusteKey(raw),
-    title: getAjusteTitle(raw),
-    category: getAjusteCategory(raw),
-    value: getAjusteValue(raw),
-    type: getAjusteType(raw),
-    status: getAjusteStatus(raw),
-    visibility: getAjusteVisibility(raw),
-    updatedAt: getAjusteUpdatedAt(raw),
+    settingId: getClienteId(raw),
+    key: getClienteKey(raw),
+    title: getClienteTitle(raw),
+    category: getClienteCategory(raw),
+    value: getClienteValue(raw),
+    type: getClienteType(raw),
+    status: getClienteStatus(raw),
+    visibility: getClienteVisibility(raw),
+    updatedAt: getClienteUpdatedAt(raw),
   };
 }
 
@@ -800,87 +657,41 @@ function normalizeAjustesList(items = []) {
 }
 
 /* =========================================================
-   ENDPOINT RESOLVERS
-========================================================= */
-
-function buildDetailCandidates(id = "") {
-  const itemId = safeText(id, "");
-
-  if (!itemId) {
-    throw new Error("AJUSTE_ID_REQUIRED");
-  }
-
-  const paths = [];
-
-  for (const base of AJUSTES_LIST_ENDPOINTS) {
-    paths.push(buildResourceEndpoint(base, itemId));
-  }
-
-  return paths;
-}
-
-function buildUpdateCandidates(id = "") {
-  const itemId = safeText(id, "");
-
-  if (!itemId) {
-    throw new Error("AJUSTE_ID_REQUIRED");
-  }
-
-  const paths = [];
-
-  for (const base of AJUSTES_UPDATE_ENDPOINTS) {
-    paths.push(buildResourceEndpoint(base, itemId));
-  }
-
-  return paths;
-}
-
-/* =========================================================
    RAW REQUESTS
 ========================================================= */
 
 export async function fetchAjustesRequest() {
-  const response = await requestFirstAvailable("GET", AJUSTES_LIST_ENDPOINTS, {
+  return request("GET", CLIENTES_ENDPOINT, {
     timeout: AJUSTES_TIMEOUT,
   });
-
-  return response;
 }
 
 export async function getAjusteByIdRequest(id = "") {
-  const response = await requestFirstAvailable(
-    "GET",
-    buildDetailCandidates(id),
-    {
-      timeout: AJUSTES_TIMEOUT,
-    }
-  );
+  const response = await request("GET", getClienteDetailEndpoint(id), {
+    timeout: AJUSTES_TIMEOUT,
+  });
 
   return normalizeAjuste(pickDetail(response));
 }
 
 export async function createAjusteRequest(payload = {}) {
-  const response = await requestFirstAvailable(
-    "POST",
-    AJUSTES_CREATE_ENDPOINTS,
-    {
-      timeout: AJUSTES_TIMEOUT,
-      body: safeObject(payload),
-    }
-  );
+  const response = await request("POST", CLIENTES_ENDPOINT, {
+    timeout: AJUSTES_TIMEOUT,
+    body: safeObject(payload),
+  });
 
   return normalizeAjuste(pickCreatedAjuste(response) || response);
 }
 
 export async function updateAjusteRequest(id = "", payload = {}) {
-  const updatePaths = buildUpdateCandidates(id);
+  const detailPath = getClienteDetailEndpoint(id);
 
   let response = null;
   let lastError = null;
 
   for (const method of ["PATCH", "PUT"]) {
     try {
-      response = await requestFirstAvailable(method, updatePaths, {
+      response = await request(method, detailPath, {
         timeout: AJUSTES_TIMEOUT,
         body: safeObject(payload),
       });
@@ -898,11 +709,27 @@ export async function updateAjusteRequest(id = "", payload = {}) {
   return normalizeAjuste(pickDetail(response) || response);
 }
 
+/**
+ * Validación local para no depender de endpoints que no existen.
+ */
 export async function validateAjustesRequest(payload = {}) {
-  return request("GET", AJUSTES_VALIDATE_ENDPOINT, {
-    timeout: AJUSTES_TIMEOUT,
-    params: safeObject(payload),
-  });
+  const data = safeObject(payload);
+
+  const errors = {};
+
+  if (!safeText(data.key, "")) {
+    errors.key = "KEY_REQUIRED";
+  }
+
+  if (!safeText(data.title, "")) {
+    errors.title = "TITLE_REQUIRED";
+  }
+
+  return {
+    ok: Object.keys(errors).length === 0,
+    errors,
+    payload: data,
+  };
 }
 
 /* =========================================================
@@ -963,7 +790,7 @@ export async function loadAjustes({
   } catch (error) {
     const message = normalizeErrorMessage(
       error,
-      "No se pudieron cargar los ajustes."
+      "No se pudieron cargar los clientes."
     );
 
     if (!isActiveLoadToken(loadToken)) {

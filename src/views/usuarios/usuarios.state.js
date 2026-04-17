@@ -2,45 +2,50 @@
    Onion SPA - Usuarios State
    Archivo: src/views/usuarios/usuarios.state.js
 
-   FINAL PRO SYSTEM · REAL CONTRACT · 10/10
+   FINAL PRO SYSTEM · STATE LAYER · 10/10
 
-   Responsabilidades:
-   - centralizar el estado interno de la vista Usuarios
-   - exponer snapshot inicial robusto e inmutable por copia
-   - controlar loading / loaded / error
-   - almacenar rows, meta, stats y alerts
-   - modelar source / degraded / remoteOk / cacheHit
-   - mantener params de listado consistentes
-   - preservar contrato esperado por usuarios.api.js y usuarios.view.js
+   RESPONSABILIDADES:
+   - estado local centralizado del módulo usuarios
+   - loading / refresh / create / open detail
+   - errores
+   - cache temporal
+   - request inflight
+   - draft de creación
+   - compatibilidad View / API / Actions / Modal
+
+   HARDENING PRO:
+   - setters robustos
+   - no loading infinito
+   - estado preparado para paginación
+   - estado preparado para create view
+   - cache helpers
+   - snapshot debug
 ========================================================= */
+
+export const CACHE_KEY = "usuarios.cache";
+export const CACHE_TTL = 1000 * 60 * 3; // 3 min
+export const DEFAULT_PAGE_SIZE = 10;
 
 /* =========================================================
-   CONSTANTS
+   SAFE
 ========================================================= */
 
-export const USUARIOS_CACHE_KEY =
-  "onion.usuarios.list";
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
 
-export const USUARIOS_CACHE_TTL =
-  1000 * 60 * 5;
+function safeNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
 
-export const USUARIOS_DEFAULT_PAGE = 1;
-export const USUARIOS_DEFAULT_PAGE_SIZE = 20;
-export const USUARIOS_DEFAULT_SORT_BY = "createdAt";
-export const USUARIOS_DEFAULT_SORT_DIR = "desc";
+function safeText(value, fallback = "") {
+  if (value === null || value === undefined) return fallback;
 
-export const USUARIOS_SOURCES = Object.freeze({
-  IDLE: "idle",
-  REMOTE: "remote",
-  CACHE_FRESH: "cache:fresh",
-  CACHE_STALE: "cache:stale",
-  FALLBACK_LOCAL: "fallback:local",
-  ERROR: "error",
-});
+  const text = String(value).trim();
 
-/* =========================================================
-   BASICS
-========================================================= */
+  return text || fallback;
+}
 
 function safeObject(value) {
   return value &&
@@ -50,178 +55,75 @@ function safeObject(value) {
     : {};
 }
 
-function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
-}
-
-function safeText(
-  value = "",
-  fallback = ""
-) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
-
-  const text = String(value).trim();
-  return text || fallback;
-}
-
-function safeNumber(
-  value,
-  fallback = 0
-) {
-  const number = Number(value);
-  return Number.isFinite(number)
-    ? number
-    : fallback;
-}
-
-function safePositiveInt(
-  value,
-  fallback = 0
-) {
-  const number = Math.trunc(Number(value));
-  return Number.isFinite(number) &&
-    number > 0
-    ? number
-    : fallback;
-}
-
-function safeBoolean(
-  value,
-  fallback = false
-) {
-  if (typeof value === "boolean") {
-    return value;
-  }
-
+function safeBoolean(value, fallback = false) {
+  if (typeof value === "boolean") return value;
   return fallback;
 }
 
-function clone(value) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return value ?? null;
-  }
-
-  try {
-    if (
-      typeof structuredClone ===
-      "function"
-    ) {
-      return structuredClone(value);
+function firstDefined(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null) {
+      return value;
     }
-  } catch {}
-
-  try {
-    return JSON.parse(
-      JSON.stringify(value)
-    );
-  } catch {
-    return value;
   }
+
+  return null;
 }
 
 /* =========================================================
-   FACTORIES
+   DEFAULTS
 ========================================================= */
 
-export function createInitialUsuarioRow() {
+function createDefaultCreateDraft() {
   return {
-    id: "",
-    userId: "",
     username: "",
-    displayName: "",
+    name: "",
     email: "",
-    role: "user",
-    status: "unknown",
-    avatar: "",
-    hasAvatar: false,
     phone: "",
-    emailVerified: false,
-    lastLoginAt: "",
-    createdAt: "",
-    updatedAt: "",
-    raw: {},
+    password: "",
+    confirmPassword: "",
+    role: "user",
+    status: "active",
+    companyName: "",
+    sendInvite: true,
+    requirePasswordChange: false,
   };
 }
 
-export function createInitialUsuariosMeta() {
+function createDefaultCreateViewState() {
   return {
-    page: USUARIOS_DEFAULT_PAGE,
-    pageSize: USUARIOS_DEFAULT_PAGE_SIZE,
-    total: 0,
-    totalPages: 0,
-    count: 0,
-    hasNextPage: false,
-    hasPrevPage: false,
-    sortBy: USUARIOS_DEFAULT_SORT_BY,
-    sortDir: USUARIOS_DEFAULT_SORT_DIR,
-    q: "",
-    role: "",
-    status: "",
+    form: createDefaultCreateDraft(),
+    errors: {},
+    submitting: false,
+    serverError: "",
+    createdUserId: "",
+    successMessage: "",
   };
 }
 
-export function createInitialUsuariosStats() {
+function createInitialUsuariosState() {
   return {
-    total: 0,
-    admins: 0,
-    active: 0,
-    inactive: 0,
-    withAvatar: 0,
-  };
-}
-
-export function createInitialUsuariosParams() {
-  return {
-    page: USUARIOS_DEFAULT_PAGE,
-    pageSize: USUARIOS_DEFAULT_PAGE_SIZE,
-    sortBy: USUARIOS_DEFAULT_SORT_BY,
-    sortDir: USUARIOS_DEFAULT_SORT_DIR,
-    q: "",
-    role: "",
-    status: "",
-    includeStats: false,
-  };
-}
-
-export function createInitialUsuariosState() {
-  return {
+    hydrated: false,
     loading: false,
+    refreshing: false,
     loaded: false,
-    error: null,
-    lastError: null,
 
-    rows: [],
-    meta: createInitialUsuariosMeta(),
-    stats: createInitialUsuariosStats(),
-    alerts: [],
+    creating: false,
+    openingUserId: "",
 
-    params: createInitialUsuariosParams(),
+    error: "",
 
-    source: USUARIOS_SOURCES.IDLE,
-    remoteOk: false,
-    degraded: false,
+    items: [],
+    remoteCount: 0,
+    lastSyncAt: 0,
 
-    lastSyncAt: "",
-    hydratedAt: "",
-    cacheHit: false,
+    page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
 
-    ui: {
-      mounted: false,
-      selectedUserId: "",
-      activeFilter: "",
-      lastAction: "",
-      searchDraft: "",
-    },
+    requestId: 0,
+
+    createDraft: createDefaultCreateDraft(),
+    createView: createDefaultCreateViewState(),
   };
 }
 
@@ -232,1048 +134,707 @@ export function createInitialUsuariosState() {
 export const usuariosState =
   createInitialUsuariosState();
 
+let inflightLoad = null;
+
 /* =========================================================
-   NORMALIZERS
+   INTERNAL
 ========================================================= */
 
-function normalizeSource(
-  value = ""
-) {
-  const source = safeText(
-    value,
-    USUARIOS_SOURCES.IDLE
-  );
-
-  const allowed =
-    Object.values(USUARIOS_SOURCES);
-
-  return allowed.includes(source)
-    ? source
-    : USUARIOS_SOURCES.IDLE;
+function touchRequestId() {
+  usuariosState.requestId += 1;
+  return usuariosState.requestId;
 }
 
-function normalizeSortDir(
-  value = USUARIOS_DEFAULT_SORT_DIR
-) {
-  const dir = safeText(
-    value,
-    USUARIOS_DEFAULT_SORT_DIR
-  ).toLowerCase();
-
-  return dir === "asc"
-    ? "asc"
-    : "desc";
-}
-
-function normalizeUsuarioRow(
-  value = {}
-) {
-  const row =
-    safeObject(value);
+function normalizeCreateDraft(value = {}) {
+  const draft = safeObject(value);
+  const base = createDefaultCreateDraft();
 
   return {
-    id: safeText(
-      row.id ||
-        row.userId,
-      ""
+    ...base,
+    ...draft,
+    sendInvite: safeBoolean(
+      draft.sendInvite,
+      base.sendInvite
     ),
-    userId: safeText(
-      row.userId ||
-        row.id,
-      ""
-    ),
-    username: safeText(
-      row.username,
-      ""
-    ),
-    displayName: safeText(
-      row.displayName ||
-        row.fullName ||
-        row.name,
-      ""
-    ),
-    email: safeText(
-      row.email,
-      ""
-    ).toLowerCase(),
-    role: safeText(
-      row.role,
-      "user"
-    ).toLowerCase(),
-    status: safeText(
-      row.status,
-      "unknown"
-    ).toLowerCase(),
-    avatar: safeText(
-      row.avatar,
-      ""
-    ),
-    hasAvatar: safeBoolean(
-      row.hasAvatar,
-      false
-    ),
-    phone: safeText(
-      row.phone,
-      ""
-    ),
-    emailVerified: safeBoolean(
-      row.emailVerified,
-      false
-    ),
-    lastLoginAt: safeText(
-      row.lastLoginAt,
-      ""
-    ),
-    createdAt: safeText(
-      row.createdAt,
-      ""
-    ),
-    updatedAt: safeText(
-      row.updatedAt,
-      ""
-    ),
-    raw: safeObject(row.raw || {}),
-  };
-}
-
-function normalizeUsuariosRows(
-  value = []
-) {
-  return safeArray(value)
-    .map(normalizeUsuarioRow)
-    .filter(Boolean);
-}
-
-function normalizeUsuariosMeta(
-  value = {}
-) {
-  const meta =
-    safeObject(value);
-
-  const page = safePositiveInt(
-    meta.page,
-    USUARIOS_DEFAULT_PAGE
-  );
-
-  const pageSize =
-    safePositiveInt(
-      meta.pageSize,
-      USUARIOS_DEFAULT_PAGE_SIZE
-    );
-
-  const total = safePositiveInt(
-    meta.total,
-    0
-  );
-
-  const totalPages =
-    safePositiveInt(
-      meta.totalPages,
-      pageSize > 0
-        ? Math.ceil(total / pageSize)
-        : 0
-    );
-
-  return {
-    page,
-    pageSize,
-    total,
-    totalPages,
-    count: safePositiveInt(
-      meta.count,
-      0
-    ),
-    hasNextPage: safeBoolean(
-      meta.hasNextPage,
-      page < totalPages
-    ),
-    hasPrevPage: safeBoolean(
-      meta.hasPrevPage,
-      page > 1
-    ),
-    sortBy: safeText(
-      meta.sortBy,
-      USUARIOS_DEFAULT_SORT_BY
-    ),
-    sortDir: normalizeSortDir(
-      meta.sortDir
-    ),
-    q: safeText(meta.q, ""),
-    role: safeText(meta.role, ""),
-    status: safeText(
-      meta.status,
-      ""
+    requirePasswordChange: safeBoolean(
+      draft.requirePasswordChange,
+      base.requirePasswordChange
     ),
   };
 }
 
-function normalizeUsuariosStats(
-  value = {}
-) {
-  const stats =
-    safeObject(value);
+function normalizeCreateViewState(value = {}) {
+  const state = safeObject(value);
+  const base =
+    createDefaultCreateViewState();
 
   return {
-    total: safePositiveInt(
-      stats.total,
-      0
+    form: normalizeCreateDraft(
+      firstDefined(
+        state.form,
+        base.form
+      )
     ),
-    admins: safePositiveInt(
-      stats.admins,
-      0
-    ),
-    active: safePositiveInt(
-      stats.active,
-      0
-    ),
-    inactive: safePositiveInt(
-      stats.inactive,
-      0
-    ),
-    withAvatar: safePositiveInt(
-      stats.withAvatar,
-      0
-    ),
-  };
-}
 
-function normalizeUsuariosAlert(
-  value = {},
-  index = 0
-) {
-  const item =
-    safeObject(value);
+    errors: safeObject(
+      state.errors
+    ),
 
-  return {
-    level: safeText(
-      item.level,
-      "info"
+    submitting: safeBoolean(
+      state.submitting,
+      base.submitting
     ),
-    code: safeText(
-      item.code,
-      `USERS_ALERT_${index + 1}`
-    ),
-    message: safeText(
-      item.message,
-      "Aviso"
-    ),
-  };
-}
 
-function normalizeUsuariosAlerts(
-  value = []
-) {
-  return safeArray(value)
-    .map(normalizeUsuariosAlert)
-    .filter(Boolean);
-}
+    serverError: safeText(
+      state.serverError,
+      base.serverError
+    ),
 
-function normalizeUsuariosParams(
-  value = {}
-) {
-  const params =
-    safeObject(value);
+    createdUserId: safeText(
+      state.createdUserId,
+      base.createdUserId
+    ),
 
-  return {
-    page: safePositiveInt(
-      params.page,
-      USUARIOS_DEFAULT_PAGE
-    ),
-    pageSize: safePositiveInt(
-      params.pageSize,
-      USUARIOS_DEFAULT_PAGE_SIZE
-    ),
-    sortBy: safeText(
-      params.sortBy,
-      USUARIOS_DEFAULT_SORT_BY
-    ),
-    sortDir: normalizeSortDir(
-      params.sortDir
-    ),
-    q: safeText(
-      params.q ||
-        params.search ||
-        params.query,
-      ""
-    ),
-    role: safeText(
-      params.role,
-      ""
-    ),
-    status: safeText(
-      params.status,
-      ""
-    ),
-    includeStats: safeBoolean(
-      params.includeStats,
-      false
-    ),
-  };
-}
-
-function normalizeUsuariosUiState(
-  value = {}
-) {
-  const ui =
-    safeObject(value);
-
-  return {
-    mounted: safeBoolean(
-      ui.mounted,
-      false
-    ),
-    selectedUserId: safeText(
-      ui.selectedUserId,
-      ""
-    ),
-    activeFilter: safeText(
-      ui.activeFilter,
-      ""
-    ),
-    lastAction: safeText(
-      ui.lastAction,
-      ""
-    ),
-    searchDraft: safeText(
-      ui.searchDraft,
-      ""
+    successMessage: safeText(
+      state.successMessage,
+      base.successMessage
     ),
   };
 }
 
 /* =========================================================
-   READ HELPERS
+   INFLOW
 ========================================================= */
 
-export function getUsuariosState() {
-  return clone(usuariosState);
+export function getInflightLoad() {
+  return inflightLoad;
 }
 
-export function getUsuariosRows() {
-  return clone(usuariosState.rows);
+export function setInflightLoad(value) {
+  inflightLoad = value || null;
+  return inflightLoad;
 }
 
-export function getUsuariosMeta() {
-  return clone(usuariosState.meta);
-}
-
-export function getUsuariosStats() {
-  return clone(usuariosState.stats);
-}
-
-export function getUsuariosAlerts() {
-  return clone(
-    usuariosState.alerts
-  );
-}
-
-export function getUsuariosParams() {
-  return clone(
-    usuariosState.params
-  );
-}
-
-export function getUsuariosSource() {
-  return normalizeSource(
-    usuariosState.source
-  );
-}
-
-export function isUsuariosLoading() {
-  return usuariosState.loading === true;
-}
-
-export function isUsuariosLoaded() {
-  return usuariosState.loaded === true;
-}
-
-export function isUsuariosDegraded() {
-  return usuariosState.degraded === true;
-}
-
-export function isUsuariosRemoteOk() {
-  return usuariosState.remoteOk === true;
-}
-
-export function getUsuariosError() {
-  return usuariosState.error || null;
-}
-
-export function getUsuariosLastError() {
-  return usuariosState.lastError || null;
-}
-
-export function getUsuariosLastSyncAt() {
-  return safeText(
-    usuariosState.lastSyncAt,
-    ""
-  );
-}
-
-export function getUsuariosHydratedAt() {
-  return safeText(
-    usuariosState.hydratedAt,
-    ""
-  );
-}
-
-export function getUsuariosCacheHit() {
-  return safeBoolean(
-    usuariosState.cacheHit,
-    false
-  );
-}
-
-export function getUsuariosUiState() {
-  return clone(
-    usuariosState.ui
-  );
-}
-
-export function getUsuarioByIdFromState(
-  userId = ""
-) {
-  const id = safeText(userId, "");
-
-  if (!id) {
-    return null;
-  }
-
-  const found =
-    safeArray(usuariosState.rows).find(
-      (row) =>
-        safeText(
-          row?.userId ||
-            row?.id,
-          ""
-        ) === id
-    ) || null;
-
-  return found
-    ? clone(found)
-    : null;
+export function clearInflightLoad() {
+  inflightLoad = null;
+  return inflightLoad;
 }
 
 /* =========================================================
-   WRITE HELPERS
+   RESET
 ========================================================= */
 
 export function resetUsuariosState() {
   const next =
     createInitialUsuariosState();
 
-  Object.keys(usuariosState).forEach(
-    (key) => {
-      delete usuariosState[key];
-    }
-  );
-
   Object.assign(
     usuariosState,
     next
   );
 
-  return getUsuariosState();
+  inflightLoad = null;
+
+  return usuariosState;
 }
 
-export function setUsuariosLoading(
-  value = true
-) {
-  usuariosState.loading =
-    value === true;
+/* =========================================================
+   FLAGS
+========================================================= */
 
-  if (value === true) {
-    usuariosState.error = null;
+export function setLoading(value) {
+  usuariosState.loading =
+    Boolean(value);
+
+  if (
+    usuariosState.loading
+  ) {
+    touchRequestId();
   }
 
   return usuariosState.loading;
 }
 
-export function setUsuariosLoaded(
-  value = true
-) {
+export function setRefreshing(value) {
+  usuariosState.refreshing =
+    Boolean(value);
+
+  return usuariosState.refreshing;
+}
+
+export function setLoaded(value) {
   usuariosState.loaded =
-    value === true;
+    Boolean(value);
 
   return usuariosState.loaded;
 }
 
-export function setUsuariosError(
-  error = null
+export function setHydrated(value) {
+  usuariosState.hydrated =
+    Boolean(value);
+
+  return usuariosState.hydrated;
+}
+
+export function setCreating(value) {
+  usuariosState.creating =
+    Boolean(value);
+
+  return usuariosState.creating;
+}
+
+export function setOpeningUserId(
+  value = ""
+) {
+  usuariosState.openingUserId =
+    safeText(value, "");
+
+  return usuariosState.openingUserId;
+}
+
+/* =========================================================
+   PAGINATION
+========================================================= */
+
+export function setPage(
+  value = 1
+) {
+  usuariosState.page =
+    Math.max(
+      1,
+      safeNumber(
+        value,
+        1
+      )
+    );
+
+  return usuariosState.page;
+}
+
+export function setPageSize(
+  value = DEFAULT_PAGE_SIZE
+) {
+  usuariosState.pageSize =
+    Math.max(
+      1,
+      safeNumber(
+        value,
+        DEFAULT_PAGE_SIZE
+      )
+    );
+
+  return usuariosState.pageSize;
+}
+
+/* =========================================================
+   DATA
+========================================================= */
+
+export function setItems(
+  items = []
+) {
+  const list =
+    safeArray(items);
+
+  usuariosState.items =
+    list;
+
+  usuariosState.loaded =
+    true;
+
+  usuariosState.error =
+    "";
+
+  usuariosState.remoteCount =
+    Math.max(
+      safeNumber(
+        usuariosState.remoteCount,
+        0
+      ),
+      list.length
+    );
+
+  return list;
+}
+
+export function getItems() {
+  return safeArray(
+    usuariosState.items
+  );
+}
+
+export function clearItems() {
+  usuariosState.items = [];
+  usuariosState.remoteCount = 0;
+  usuariosState.page = 1;
+
+  return usuariosState.items;
+}
+
+export function setRemoteCount(
+  value = 0
+) {
+  usuariosState.remoteCount =
+    Math.max(
+      0,
+      safeNumber(
+        value,
+        0
+      )
+    );
+
+  return usuariosState.remoteCount;
+}
+
+/* =========================================================
+   META
+========================================================= */
+
+export function setError(
+  value = null
 ) {
   usuariosState.error =
-    error || null;
-
-  if (error) {
-    usuariosState.loading = false;
-    usuariosState.lastError =
-      error || null;
-  }
+    value
+      ? String(value).trim()
+      : "";
 
   return usuariosState.error;
 }
 
-export function clearUsuariosError() {
-  usuariosState.error = null;
-  return null;
+export function clearError() {
+  usuariosState.error =
+    "";
+
+  return usuariosState.error;
 }
 
-export function clearUsuariosLastError() {
-  usuariosState.lastError = null;
-  return null;
-}
-
-export function setUsuariosRows(
-  rows = []
-) {
-  usuariosState.rows =
-    normalizeUsuariosRows(rows);
-
-  return getUsuariosRows();
-}
-
-export function patchUsuarioRow(
-  userId = "",
-  patch = {}
-) {
-  const id = safeText(userId, "");
-
-  if (!id) {
-    return getUsuariosRows();
-  }
-
-  usuariosState.rows =
-    safeArray(usuariosState.rows).map(
-      (row) => {
-        const currentId =
-          safeText(
-            row?.userId ||
-              row?.id,
-            ""
-          );
-
-        if (currentId !== id) {
-          return row;
-        }
-
-        return normalizeUsuarioRow({
-          ...safeObject(row),
-          ...safeObject(patch),
-        });
-      }
-    );
-
-  return getUsuariosRows();
-}
-
-export function prependUsuarioRow(
-  row = {}
-) {
-  const normalized =
-    normalizeUsuarioRow(row);
-
-  const existingId =
-    safeText(
-      normalized.userId ||
-        normalized.id,
-      ""
-    );
-
-  if (!existingId) {
-    return getUsuariosRows();
-  }
-
-  const filtered =
-    safeArray(usuariosState.rows).filter(
-      (item) =>
-        safeText(
-          item?.userId ||
-            item?.id,
-          ""
-        ) !== existingId
-    );
-
-  usuariosState.rows = [
-    normalized,
-    ...filtered,
-  ];
-
-  return getUsuariosRows();
-}
-
-export function removeUsuarioRow(
-  userId = ""
-) {
-  const id = safeText(userId, "");
-
-  usuariosState.rows =
-    safeArray(usuariosState.rows).filter(
-      (row) =>
-        safeText(
-          row?.userId ||
-            row?.id,
-          ""
-        ) !== id
-    );
-
-  return getUsuariosRows();
-}
-
-export function clearUsuariosRows() {
-  usuariosState.rows = [];
-  return getUsuariosRows();
-}
-
-export function setUsuariosMeta(
-  meta = {}
-) {
-  usuariosState.meta =
-    normalizeUsuariosMeta(meta);
-
-  return getUsuariosMeta();
-}
-
-export function patchUsuariosMeta(
-  patch = {}
-) {
-  return setUsuariosMeta({
-    ...safeObject(
-      usuariosState.meta
-    ),
-    ...safeObject(patch),
-  });
-}
-
-export function setUsuariosStats(
-  stats = {}
-) {
-  usuariosState.stats =
-    normalizeUsuariosStats(stats);
-
-  return getUsuariosStats();
-}
-
-export function patchUsuariosStats(
-  patch = {}
-) {
-  return setUsuariosStats({
-    ...safeObject(
-      usuariosState.stats
-    ),
-    ...safeObject(patch),
-  });
-}
-
-export function setUsuariosAlerts(
-  alerts = []
-) {
-  usuariosState.alerts =
-    normalizeUsuariosAlerts(alerts);
-
-  return getUsuariosAlerts();
-}
-
-export function clearUsuariosAlerts() {
-  usuariosState.alerts = [];
-  return [];
-}
-
-export function setUsuariosParams(
-  params = {}
-) {
-  usuariosState.params =
-    normalizeUsuariosParams(
-      params
-    );
-
-  return getUsuariosParams();
-}
-
-export function patchUsuariosParams(
-  patch = {}
-) {
-  return setUsuariosParams({
-    ...safeObject(
-      usuariosState.params
-    ),
-    ...safeObject(patch),
-  });
-}
-
-export function setUsuariosSource(
-  value = USUARIOS_SOURCES.IDLE
-) {
-  usuariosState.source =
-    normalizeSource(value);
-
-  return usuariosState.source;
-}
-
-export function setUsuariosRemoteOk(
-  value = false
-) {
-  usuariosState.remoteOk =
-    value === true;
-
-  return usuariosState.remoteOk;
-}
-
-export function setUsuariosDegraded(
-  value = false
-) {
-  usuariosState.degraded =
-    value === true;
-
-  return usuariosState.degraded;
-}
-
-export function setUsuariosLastSyncAt(
-  value = ""
+export function setLastSyncAt(
+  value = 0
 ) {
   usuariosState.lastSyncAt =
-    safeText(value, "");
+    safeNumber(value, 0);
 
   return usuariosState.lastSyncAt;
 }
 
-export function setUsuariosHydratedAt(
-  value = ""
-) {
-  usuariosState.hydratedAt =
-    safeText(value, "");
+/* =========================================================
+   CREATE DRAFT
+========================================================= */
 
-  return usuariosState.hydratedAt;
+export function setCreateDraft(
+  value = {}
+) {
+  usuariosState.createDraft =
+    normalizeCreateDraft(
+      value
+    );
+
+  return usuariosState.createDraft;
 }
 
-export function setUsuariosCacheHit(
-  value = false
-) {
-  usuariosState.cacheHit =
-    value === true;
-
-  return usuariosState.cacheHit;
-}
-
-export function setUsuariosMounted(
-  value = true
-) {
-  usuariosState.ui.mounted =
-    value === true;
-
-  return usuariosState.ui.mounted;
-}
-
-export function setUsuariosSelectedUserId(
-  value = ""
-) {
-  usuariosState.ui.selectedUserId =
-    safeText(value, "");
-
-  return usuariosState.ui.selectedUserId;
-}
-
-export function setUsuariosActiveFilter(
-  value = ""
-) {
-  usuariosState.ui.activeFilter =
-    safeText(value, "");
-
-  return usuariosState.ui.activeFilter;
-}
-
-export function setUsuariosLastAction(
-  value = ""
-) {
-  usuariosState.ui.lastAction =
-    safeText(value, "");
-
-  return usuariosState.ui.lastAction;
-}
-
-export function setUsuariosSearchDraft(
-  value = ""
-) {
-  usuariosState.ui.searchDraft =
-    safeText(value, "");
-
-  return usuariosState.ui.searchDraft;
-}
-
-export function patchUsuariosUiState(
+export function patchCreateDraft(
   patch = {}
 ) {
-  usuariosState.ui =
-    normalizeUsuariosUiState({
+  usuariosState.createDraft =
+    normalizeCreateDraft({
       ...safeObject(
-        usuariosState.ui
+        usuariosState.createDraft
       ),
       ...safeObject(patch),
     });
 
-  return getUsuariosUiState();
+  return usuariosState.createDraft;
+}
+
+export function clearCreateDraft() {
+  usuariosState.createDraft =
+    createDefaultCreateDraft();
+
+  return usuariosState.createDraft;
 }
 
 /* =========================================================
-   LIFECYCLE HELPERS
+   CREATE VIEW STATE
 ========================================================= */
 
-export function startUsuariosLoad(
-  params = {}
+export function setCreateViewState(
+  value = {}
 ) {
-  clearUsuariosError();
-  setUsuariosLoading(true);
-  setUsuariosLoaded(false);
-  setUsuariosCacheHit(false);
-  setUsuariosRemoteOk(false);
-  setUsuariosDegraded(false);
-  setUsuariosParams(params);
-
-  if (
-    getUsuariosSource() ===
-    USUARIOS_SOURCES.ERROR
-  ) {
-    setUsuariosSource(
-      USUARIOS_SOURCES.IDLE
+  usuariosState.createView =
+    normalizeCreateViewState(
+      value
     );
-  }
 
-  return getUsuariosState();
+  return usuariosState.createView;
 }
 
-export function finishUsuariosLoad({
-  rows = [],
-  meta = {},
-  stats = {},
-  alerts = [],
-  params = {},
-  source = USUARIOS_SOURCES.REMOTE,
-  remoteOk = false,
-  degraded = false,
-  syncedAt = "",
-  hydratedAt = "",
-  cacheHit = false,
-  error = null,
-} = {}) {
-  setUsuariosRows(rows);
-  setUsuariosMeta(meta);
-  setUsuariosStats(stats);
-  setUsuariosAlerts(alerts);
-  setUsuariosParams(params);
-
-  setUsuariosLoading(false);
-  setUsuariosLoaded(true);
-  setUsuariosSource(source);
-  setUsuariosRemoteOk(
-    remoteOk === true
-  );
-  setUsuariosDegraded(
-    degraded === true
-  );
-  setUsuariosCacheHit(
-    cacheHit === true
-  );
-
-  if (syncedAt) {
-    setUsuariosLastSyncAt(
-      syncedAt
+export function patchCreateViewState(
+  patch = {}
+) {
+  const current =
+    normalizeCreateViewState(
+      usuariosState.createView
     );
-  }
 
-  if (hydratedAt) {
-    setUsuariosHydratedAt(
-      hydratedAt
+  const nextPatch =
+    safeObject(patch);
+
+  usuariosState.createView =
+    normalizeCreateViewState({
+      ...current,
+      ...nextPatch,
+      form:
+        nextPatch.form !==
+        undefined
+          ? nextPatch.form
+          : current.form,
+      errors:
+        nextPatch.errors !==
+        undefined
+          ? nextPatch.errors
+          : current.errors,
+    });
+
+  return usuariosState.createView;
+}
+
+export function setCreateViewForm(
+  form = {}
+) {
+  const current =
+    normalizeCreateViewState(
+      usuariosState.createView
     );
-  }
 
-  if (error) {
-    setUsuariosError(error);
-    clearUsuariosError();
-  }
+  usuariosState.createView =
+    {
+      ...current,
+      form: normalizeCreateDraft(
+        form
+      ),
+    };
 
-  return getUsuariosState();
+  return usuariosState
+    .createView.form;
 }
 
-export function failUsuariosLoad(
-  error = null
+export function patchCreateViewForm(
+  patch = {}
 ) {
-  setUsuariosLoading(false);
-  setUsuariosLoaded(false);
-  setUsuariosSource(
-    USUARIOS_SOURCES.ERROR
+  const current =
+    normalizeCreateViewState(
+      usuariosState.createView
+    );
+
+  usuariosState.createView =
+    {
+      ...current,
+      form: normalizeCreateDraft(
+        {
+          ...current.form,
+          ...safeObject(
+            patch
+          ),
+        }
+      ),
+    };
+
+  return usuariosState
+    .createView.form;
+}
+
+export function setCreateViewErrors(
+  errors = {}
+) {
+  const current =
+    normalizeCreateViewState(
+      usuariosState.createView
+    );
+
+  usuariosState.createView =
+    {
+      ...current,
+      errors: safeObject(
+        errors
+      ),
+    };
+
+  return usuariosState
+    .createView.errors;
+}
+
+export function clearCreateViewErrors() {
+  return setCreateViewErrors(
+    {}
   );
-  setUsuariosRemoteOk(false);
-  setUsuariosDegraded(true);
-  setUsuariosError(error);
-
-  return getUsuariosState();
 }
 
-/* =========================================================
-   COMPAT API HELPERS
-   Alias explícito para mantener coherencia con usuarios.api.js
-========================================================= */
-
-export function beginUsuariosLoad(
-  params = {}
-) {
-  return startUsuariosLoad(params);
-}
-
-export function completeUsuariosLoad({
-  rows = [],
-  meta = {},
-  stats = {},
-  alerts = [],
-  params = {},
-  source = USUARIOS_SOURCES.REMOTE,
-  remoteOk = false,
-  degraded = false,
-  syncedAt = "",
-  hydratedAt = "",
-  cacheHit = false,
-  error = null,
-} = {}) {
-  return finishUsuariosLoad({
-    rows,
-    meta,
-    stats,
-    alerts,
-    params,
-    source,
-    remoteOk,
-    degraded,
-    syncedAt,
-    hydratedAt,
-    cacheHit,
-    error,
-  });
-}
-
-export function rejectUsuariosLoad(
-  error = null
-) {
-  return failUsuariosLoad(error);
-}
-
-export function writeUsuariosRows(
-  rows = []
-) {
-  return setUsuariosRows(rows);
-}
-
-export function writeUsuariosMeta(
-  meta = {}
-) {
-  return setUsuariosMeta(meta);
-}
-
-export function writeUsuariosStats(
-  stats = {}
-) {
-  return setUsuariosStats(stats);
-}
-
-export function setUsuariosSyncTimestamp(
-  value = ""
-) {
-  return setUsuariosLastSyncAt(value);
-}
-
-export function setUsuariosHydrationTimestamp(
-  value = ""
-) {
-  return setUsuariosHydratedAt(value);
-}
-
-export function markUsuariosCacheHit(
+export function setCreateViewSubmitting(
   value = false
 ) {
-  return setUsuariosCacheHit(value);
+  const current =
+    normalizeCreateViewState(
+      usuariosState.createView
+    );
+
+  usuariosState.createView =
+    {
+      ...current,
+      submitting:
+        Boolean(value),
+    };
+
+  return usuariosState
+    .createView.submitting;
+}
+
+export function setCreateViewServerError(
+  value = ""
+) {
+  const current =
+    normalizeCreateViewState(
+      usuariosState.createView
+    );
+
+  usuariosState.createView =
+    {
+      ...current,
+      serverError:
+        safeText(
+          value,
+          ""
+        ),
+    };
+
+  return usuariosState
+    .createView.serverError;
+}
+
+export function setCreateViewSuccess({
+  createdUserId = "",
+  successMessage = "",
+} = {}) {
+  const current =
+    normalizeCreateViewState(
+      usuariosState.createView
+    );
+
+  usuariosState.createView =
+    {
+      ...current,
+      createdUserId:
+        safeText(
+          createdUserId,
+          ""
+        ),
+      successMessage:
+        safeText(
+          successMessage,
+          ""
+        ),
+    };
+
+  return usuariosState.createView;
+}
+
+export function clearCreateViewSuccess() {
+  return setCreateViewSuccess(
+    {
+      createdUserId: "",
+      successMessage: "",
+    }
+  );
+}
+
+export function resetCreateViewState() {
+  usuariosState.createView =
+    createDefaultCreateViewState();
+
+  return usuariosState.createView;
 }
 
 /* =========================================================
-   EXPORT OBJECT
+   CACHE HELPERS
 ========================================================= */
 
-export const UsuariosState = {
-  USUARIOS_CACHE_KEY,
-  USUARIOS_CACHE_TTL,
-  USUARIOS_DEFAULT_PAGE,
-  USUARIOS_DEFAULT_PAGE_SIZE,
-  USUARIOS_DEFAULT_SORT_BY,
-  USUARIOS_DEFAULT_SORT_DIR,
-  USUARIOS_SOURCES,
+export function getCachePayload() {
+  return {
+    savedAt: Date.now(),
+    items: getItems(),
+    remoteCount:
+      usuariosState.remoteCount,
+    lastSyncAt:
+      usuariosState.lastSyncAt,
+    page:
+      usuariosState.page,
+    pageSize:
+      usuariosState.pageSize,
+  };
+}
 
-  createInitialUsuarioRow,
-  createInitialUsuariosMeta,
-  createInitialUsuariosStats,
-  createInitialUsuariosParams,
-  createInitialUsuariosState,
+export function isCacheFresh(
+  savedAt = 0
+) {
+  const ts =
+    safeNumber(
+      savedAt,
+      0
+    );
 
-  getUsuariosState,
-  getUsuariosRows,
-  getUsuariosMeta,
-  getUsuariosStats,
-  getUsuariosAlerts,
-  getUsuariosParams,
-  getUsuariosSource,
-  isUsuariosLoading,
-  isUsuariosLoaded,
-  isUsuariosDegraded,
-  isUsuariosRemoteOk,
-  getUsuariosError,
-  getUsuariosLastError,
-  getUsuariosLastSyncAt,
-  getUsuariosHydratedAt,
-  getUsuariosCacheHit,
-  getUsuariosUiState,
-  getUsuarioByIdFromState,
+  if (!ts) {
+    return false;
+  }
+
+  return (
+    Date.now() - ts <
+    CACHE_TTL
+  );
+}
+
+/* =========================================================
+   DEBUG
+========================================================= */
+
+export function getUsuariosStateSnapshot() {
+  const createView =
+    normalizeCreateViewState(
+      usuariosState.createView
+    );
+
+  return {
+    hydrated:
+      usuariosState.hydrated,
+    loading:
+      usuariosState.loading,
+    refreshing:
+      usuariosState.refreshing,
+    loaded:
+      usuariosState.loaded,
+
+    creating:
+      usuariosState.creating,
+
+    openingUserId:
+      usuariosState.openingUserId,
+
+    error:
+      usuariosState.error,
+
+    total:
+      safeArray(
+        usuariosState.items
+      ).length,
+
+    remoteCount:
+      usuariosState.remoteCount,
+
+    lastSyncAt:
+      usuariosState.lastSyncAt,
+
+    page:
+      usuariosState.page,
+
+    pageSize:
+      usuariosState.pageSize,
+
+    requestId:
+      usuariosState.requestId,
+
+    hasInflight:
+      Boolean(
+        inflightLoad
+      ),
+
+    createDraft: {
+      ...safeObject(
+        usuariosState.createDraft
+      ),
+    },
+
+    createView: {
+      submitting:
+        createView.submitting,
+
+      serverError:
+        createView.serverError,
+
+      createdUserId:
+        createView.createdUserId,
+
+      successMessage:
+        createView.successMessage,
+
+      errorCount:
+        Object.keys(
+          safeObject(
+            createView.errors
+          )
+        ).length,
+
+      hasDraftEmail:
+        Boolean(
+          safeText(
+            createView?.form
+              ?.email,
+            ""
+          )
+        ),
+    },
+  };
+}
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
+export default {
+  CACHE_KEY,
+  CACHE_TTL,
+  DEFAULT_PAGE_SIZE,
+  usuariosState,
+
+  getInflightLoad,
+  setInflightLoad,
+  clearInflightLoad,
 
   resetUsuariosState,
-  setUsuariosLoading,
-  setUsuariosLoaded,
-  setUsuariosError,
-  clearUsuariosError,
-  clearUsuariosLastError,
-  setUsuariosRows,
-  patchUsuarioRow,
-  prependUsuarioRow,
-  removeUsuarioRow,
-  clearUsuariosRows,
-  setUsuariosMeta,
-  patchUsuariosMeta,
-  setUsuariosStats,
-  patchUsuariosStats,
-  setUsuariosAlerts,
-  clearUsuariosAlerts,
-  setUsuariosParams,
-  patchUsuariosParams,
-  setUsuariosSource,
-  setUsuariosRemoteOk,
-  setUsuariosDegraded,
-  setUsuariosLastSyncAt,
-  setUsuariosHydratedAt,
-  setUsuariosCacheHit,
-  setUsuariosMounted,
-  setUsuariosSelectedUserId,
-  setUsuariosActiveFilter,
-  setUsuariosLastAction,
-  setUsuariosSearchDraft,
-  patchUsuariosUiState,
 
-  startUsuariosLoad,
-  finishUsuariosLoad,
-  failUsuariosLoad,
+  setLoading,
+  setRefreshing,
+  setLoaded,
+  setHydrated,
+  setCreating,
+  setOpeningUserId,
 
-  beginUsuariosLoad,
-  completeUsuariosLoad,
-  rejectUsuariosLoad,
-  writeUsuariosRows,
-  writeUsuariosMeta,
-  writeUsuariosStats,
-  setUsuariosSyncTimestamp,
-  setUsuariosHydrationTimestamp,
-  markUsuariosCacheHit,
+  setPage,
+  setPageSize,
+
+  setItems,
+  getItems,
+  clearItems,
+  setRemoteCount,
+
+  setError,
+  clearError,
+  setLastSyncAt,
+
+  setCreateDraft,
+  patchCreateDraft,
+  clearCreateDraft,
+
+  setCreateViewState,
+  patchCreateViewState,
+  setCreateViewForm,
+  patchCreateViewForm,
+  setCreateViewErrors,
+  clearCreateViewErrors,
+  setCreateViewSubmitting,
+  setCreateViewServerError,
+  setCreateViewSuccess,
+  clearCreateViewSuccess,
+  resetCreateViewState,
+
+  getCachePayload,
+  isCacheFresh,
+  getUsuariosStateSnapshot,
 };
-
-export default UsuariosState;

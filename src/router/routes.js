@@ -34,7 +34,7 @@ import { ServerView } from "../views/serverView.js";
 import { UsuariosView } from "../views/usuarios/index.js";
 import { ClientesView } from "../views/clientes/index.js";
 import { CuentaView } from "../views/cuentaView.js";
-import { AjustesView } from "../views/ajustesView.js";
+import { AjustesView } from "../views/ajustes/index.js";
 
 /* =========================================================
    I18N

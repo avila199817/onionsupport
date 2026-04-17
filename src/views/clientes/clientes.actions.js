@@ -8,6 +8,7 @@
    - abrir detalle a nivel de datos, no de UI
    - copiar id de cliente
    - exportar colección a CSV
+   - refrescar detalle cliente (FIX IMPORT ERROR)
    - desacoplar la vista principal de la lógica operativa
    - mantener compatibilidad con clientesView.js
 
@@ -33,7 +34,6 @@ import {
 
 import {
   safeText,
-  safeNumber,
   safeArray,
   safeObject,
   showToast,
@@ -116,29 +116,12 @@ function pickDetail(payload = null) {
 
   const obj = safeObject(payload);
 
-  if (isLikelyCliente(obj.client)) {
-    return obj.client;
-  }
-
-  if (isLikelyCliente(obj.cliente)) {
-    return obj.cliente;
-  }
-
-  if (isLikelyCliente(obj.item)) {
-    return obj.item;
-  }
-
-  if (isLikelyCliente(obj.result)) {
-    return obj.result;
-  }
-
-  if (isLikelyCliente(obj.payload)) {
-    return obj.payload;
-  }
-
-  if (isLikelyCliente(obj.data)) {
-    return obj.data;
-  }
+  if (isLikelyCliente(obj.client)) return obj.client;
+  if (isLikelyCliente(obj.cliente)) return obj.cliente;
+  if (isLikelyCliente(obj.item)) return obj.item;
+  if (isLikelyCliente(obj.result)) return obj.result;
+  if (isLikelyCliente(obj.payload)) return obj.payload;
+  if (isLikelyCliente(obj.data)) return obj.data;
 
   if (looksLikeEnvelope(obj.data)) {
     return pickDetail(obj.data);
@@ -342,8 +325,7 @@ async function writeClipboardText(text = "") {
     textarea.focus();
     textarea.select();
 
-    const ok =
-      document.execCommand("copy");
+    const ok = document.execCommand("copy");
 
     textarea.remove();
 
@@ -363,11 +345,9 @@ function downloadTextFile({
     { type: mimeType }
   );
 
-  const url =
-    URL.createObjectURL(blob);
+  const url = URL.createObjectURL(blob);
 
-  const anchor =
-    document.createElement("a");
+  const anchor = document.createElement("a");
 
   anchor.href = url;
   anchor.download = filename;
@@ -388,23 +368,17 @@ function downloadTextFile({
 export function getClienteDetailFromStoreAction({
   clientId = "",
 } = {}) {
-  const id =
-    normalizeClienteId(clientId);
+  const id = normalizeClienteId(clientId);
 
   if (!id) return null;
 
   try {
-    const detail =
-      getClienteByIdStore(id);
-
-    const picked =
-      pickDetail(detail);
+    const detail = getClienteByIdStore(id);
+    const picked = pickDetail(detail);
 
     if (!picked) return null;
 
-    return normalizeClienteDetail(
-      picked
-    );
+    return normalizeClienteDetail(picked);
   } catch {
     return null;
   }
@@ -415,8 +389,7 @@ export async function getClienteDetailAction({
   preferFresh = true,
   silent = false,
 } = {}) {
-  const id =
-    normalizeClienteId(clientId);
+  const id = normalizeClienteId(clientId);
 
   if (!id) {
     if (!silent) {
@@ -434,53 +407,39 @@ export async function getClienteDetailAction({
       clientId: id,
     });
 
-  if (
-    !preferFresh &&
-    fallbackStoreDetail
-  ) {
+  if (!preferFresh && fallbackStoreDetail) {
     return fallbackStoreDetail;
   }
 
   try {
-    safeEmit(
-      "clientes:detail:request",
-      {
-        clientId: id,
-        source: "backend",
-      }
-    );
+    safeEmit("clientes:detail:request", {
+      clientId: id,
+      source: "backend",
+    });
 
     const response =
       await getClienteByIdRequest(id);
 
-    const detail =
-      pickDetail(response);
+    const detail = pickDetail(response);
 
     if (!detail) {
       if (fallbackStoreDetail) {
         return fallbackStoreDetail;
       }
 
-      throw new Error(
-        "EMPTY_CLIENT_DETAIL"
-      );
+      throw new Error("EMPTY_CLIENT_DETAIL");
     }
 
     const normalized =
-      normalizeClienteDetail(
-        detail
-      );
+      normalizeClienteDetail(detail);
 
-    safeEmit(
-      "clientes:detail:success",
-      {
-        clientId: id,
-        detail: normalized,
-      }
-    );
+    safeEmit("clientes:detail:success", {
+      clientId: id,
+      detail: normalized,
+    });
 
     return normalized;
-  } catch (error) {
+  } catch {
     if (fallbackStoreDetail) {
       return fallbackStoreDetail;
     }
@@ -511,8 +470,34 @@ export async function openClienteAction({
   if (!detail) return null;
 
   safeEmit("clientes:open", {
-    clientId:
-      detail.clientId,
+    clientId: detail.clientId,
+    detail,
+  });
+
+  return detail;
+}
+
+/* =========================================================
+   FIX CRÍTICO IMPORT ERROR
+   clientesView.js importa:
+   refreshClienteDetailAction
+========================================================= */
+
+export async function refreshClienteDetailAction({
+  clientId = "",
+  silent = false,
+} = {}) {
+  const detail =
+    await getClienteDetailAction({
+      clientId,
+      preferFresh: true,
+      silent,
+    });
+
+  if (!detail) return null;
+
+  safeEmit("clientes:detail:refresh", {
+    clientId: detail.clientId,
     detail,
   });
 
@@ -527,8 +512,7 @@ export async function copyClienteIdAction({
   clientId = "",
   silent = false,
 } = {}) {
-  const id =
-    normalizeClienteId(clientId);
+  const id = normalizeClienteId(clientId);
 
   if (!id) {
     if (!silent) {
@@ -579,8 +563,7 @@ export function exportClientesCsvAction({
       ? items
       : getSortedClientesStore();
 
-  const list =
-    safeArray(sourceItems);
+  const list = safeArray(sourceItems);
 
   if (!list.length) {
     if (!silent) {
@@ -594,15 +577,13 @@ export function exportClientesCsvAction({
   }
 
   try {
-    const csv =
-      buildCsvRows(list);
+    const csv = buildCsvRows(list);
 
     downloadTextFile({
-      filename:
-        safeText(
-          filename,
-          CSV_FILENAME
-        ),
+      filename: safeText(
+        filename,
+        CSV_FILENAME
+      ),
       content: csv,
       mimeType:
         "text/csv;charset=utf-8;",
@@ -634,21 +615,16 @@ export function exportClientesCsvAction({
 
 export async function createClienteAction({
   route = "/clientes/nuevo",
-  fallbackEvent =
-    "clientes:create",
+  fallbackEvent = "clientes:create",
   silent = false,
 } = {}) {
   const targetRoute =
-    safeText(
-      route,
-      "/clientes/nuevo"
-    );
+    safeText(route, "/clientes/nuevo");
 
   try {
-    safeEmit(
-      fallbackEvent,
-      { route: targetRoute }
-    );
+    safeEmit(fallbackEvent, {
+      route: targetRoute,
+    });
 
     if (AppCore?.router?.navigate) {
       await AppCore.router.navigate(

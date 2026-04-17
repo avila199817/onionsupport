@@ -2,1101 +2,834 @@
    Onion SPA - Usuarios Actions
    Archivo: src/views/usuarios/usuarios.actions.js
 
-   FINAL PRO SYSTEM · ADMIN USERS ACTIONS · 10/10
+   RESPONSABILIDADES:
+   - centralizar acciones operativas del módulo de usuarios
+   - resolver detalle usuario desde store + backend
+   - abrir detalle a nivel de datos, no de UI
+   - copiar id de usuario
+   - exportar colección a CSV
+   - desacoplar la vista principal de la lógica operativa
+   - mantener compatibilidad con usuariosView.js
 
-   Responsabilidades:
-   - centralizar acciones reales de la vista Usuarios
-   - coordinar API + Store del módulo
-   - encapsular hydrate / refresh / search / filtros / paginación
-   - gestionar selección y usuario activo
-   - devolver resultados estables para la vista
-   - emitir eventos consistentes para tracing
-   - mantener coherencia estricta con usuarios.api.js y usuarios.store.js
+   HARDENING PRO:
+   - tolerancia a payloads heterogéneos
+   - fallback store -> backend
+   - soporte envelope backend
+   - export seguro con escape CSV
+   - clipboard robusto con fallback legacy
+   - eventos opcionales vía AppCore.events
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
-import { Router } from "../../router/index.js";
 
 import {
-  loadUsuariosList,
-  refreshUsuariosList as refreshUsuariosListApi,
+  getUsuarioByIdRequest,
 } from "./usuarios.api.js";
 
 import {
-  getUsuariosSnapshot,
-  getUsuariosStatus,
-
-  readUsuariosRows,
-  readUsuariosMeta,
-  readUsuariosStats,
-  readUsuariosAlerts,
-  readUsuariosParams,
-  readUsuariosUi,
-  readUsuarioById,
-
-  beginUsuariosLoad,
-  completeUsuariosLoad,
-  rejectUsuariosLoad,
-
-  writeUsuariosRows,
-  writeUsuariosMeta,
-  writeUsuariosStats,
-  writeUsuariosAlerts,
-  writeUsuariosParams,
-
-  mergeUsuariosParams,
-
-  setUsuariosSearch,
-  setUsuariosRoleFilter,
-  setUsuariosStatusFilter,
-  setUsuariosSort,
-  setUsuariosPage,
-  setUsuariosPageSize,
-
-  setUsuariosAction,
-  setUsuariosSearchDraftUi,
-  setUsuariosActiveFilterUi,
-
-  selectUsuario as selectUsuarioInStore,
-  clearAllUsuariosSelected,
+  getUsuarioByIdStore,
+  getSortedUsuariosStore,
 } from "./usuarios.store.js";
 
+import {
+  safeText,
+  safeNumber,
+  safeArray,
+  safeObject,
+  showToast,
+} from "./usuarios.utils.js";
+
 /* =========================================================
-   INTERNAL
+   CONSTANTS
 ========================================================= */
 
-let inflightHydrate = null;
-let inflightRefresh = null;
+const CSV_FILENAME = "usuarios.csv";
 
 /* =========================================================
-   BASICS
+   HELPERS
 ========================================================= */
 
-function safeText(
-  value = "",
-  fallback = ""
-) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
-
-  const text = String(value).trim();
-  return text || fallback;
-}
-
-function safeObject(value) {
-  return value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-    ? value
-    : {};
-}
-
-function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
-}
-
-function safeNumber(
-  value,
-  fallback = 0
-) {
-  const number = Number(value);
-  return Number.isFinite(number)
-    ? number
-    : fallback;
-}
-
-function safeEmit(
-  eventName,
-  payload = {}
-) {
+function safeEmit(event = "", payload = {}) {
   try {
-    AppCore?.events?.emit?.(
-      eventName,
-      payload
-    );
-  } catch (error) {
-    console.warn(
-      "[UsuariosActions] emit warning",
-      error
-    );
-  }
+    AppCore?.events?.emit?.(event, payload);
+  } catch {}
 }
 
-function buildMeta(
-  extra = {}
-) {
-  return {
-    usuariosStatus:
-      getUsuariosStatus(),
-    params:
-      readUsuariosParams(),
-    ...safeObject(extra),
-  };
-}
-
-function createResult({
-  ok = true,
-  action = "",
-  data = null,
-  error = null,
-  meta = {},
-} = {}) {
-  return {
-    ok: ok === true,
-    action: safeText(action),
-    data,
-    error: error || null,
-    meta: safeObject(meta),
-  };
-}
-
-function getRouter() {
-  if (
-    Router &&
-    typeof Router.navigate ===
-      "function"
-  ) {
-    return Router;
-  }
-
-  if (
-    AppCore?.modules?.Router &&
-    typeof AppCore.modules.Router
-      .navigate === "function"
-  ) {
-    return AppCore.modules.Router;
-  }
-
-  if (
-    AppCore?.Router &&
-    typeof AppCore.Router.navigate ===
-      "function"
-  ) {
-    return AppCore.Router;
+function first(...values) {
+  for (const value of values) {
+    if (
+      value !== undefined &&
+      value !== null &&
+      String(value).trim() !== ""
+    ) {
+      return value;
+    }
   }
 
   return null;
 }
 
-function resolveUsuarioPath(
-  userId = ""
-) {
-  const normalized =
-    safeText(userId, "");
-
-  return normalized
-    ? `/usuarios/${normalized}`
-    : "/usuarios";
+function normalizeUserId(value = "") {
+  return safeText(value, "");
 }
 
-function normalizeApiListResult(
-  result = {}
-) {
-  const payload =
-    safeObject(result);
+function isObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value);
+}
 
-  const list = safeObject(
-    payload.list
+function isLikelyUser(value) {
+  if (!isObject(value)) return false;
+
+  return Boolean(
+    value.userId ||
+      value.id ||
+      value.uid ||
+      value.code ||
+      value.username ||
+      value.userName ||
+      value.name ||
+      value.nombre ||
+      value.email
+  );
+}
+
+function looksLikeEnvelope(value) {
+  const obj = safeObject(value);
+
+  return Boolean(
+    obj.user ||
+      obj.usuario ||
+      obj.item ||
+      obj.data ||
+      obj.result ||
+      obj.payload
+  );
+}
+
+function pickDetail(payload = null) {
+  if (!payload) return null;
+
+  if (isLikelyUser(payload)) {
+    return payload;
+  }
+
+  const obj = safeObject(payload);
+
+  if (isLikelyUser(obj.user)) {
+    return obj.user;
+  }
+
+  if (isLikelyUser(obj.usuario)) {
+    return obj.usuario;
+  }
+
+  if (isLikelyUser(obj.item)) {
+    return obj.item;
+  }
+
+  if (isLikelyUser(obj.result)) {
+    return obj.result;
+  }
+
+  if (isLikelyUser(obj.payload)) {
+    return obj.payload;
+  }
+
+  if (isLikelyUser(obj.data)) {
+    return obj.data;
+  }
+
+  if (looksLikeEnvelope(obj.data)) {
+    return pickDetail(obj.data);
+  }
+
+  return null;
+}
+
+function getId(item = {}) {
+  return safeText(
+    first(
+      item.userId,
+      item.id,
+      item.uid,
+      item.code
+    ),
+    ""
+  );
+}
+
+function getUsername(item = {}) {
+  return safeText(
+    first(
+      item.username,
+      item.userName,
+      item.nick,
+      item.slug,
+      item.login
+    ),
+    "usuario"
+  );
+}
+
+function getName(item = {}) {
+  const profileObject = first(
+    item.profile,
+    item.perfil,
+    item.user,
+    item.usuario
   );
 
-  return {
-    rows: safeArray(list.rows),
-    meta: safeObject(list.meta),
-    stats: safeObject(list.stats),
-    alerts: safeArray(list.alerts),
-    source: safeText(
-      payload.source,
+  if (isObject(profileObject)) {
+    return safeText(
+      first(
+        profileObject.name,
+        profileObject.nombre,
+        profileObject.displayName,
+        profileObject.fullName
+      ),
+      "Usuario"
+    );
+  }
+
+  return safeText(
+    first(
+      item.name,
+      item.nombre,
+      item.displayName,
+      item.fullName,
+      item.username,
+      item.userName
+    ),
+    "Usuario"
+  );
+}
+
+function getEmail(item = {}) {
+  const profileObject = first(
+    item.profile,
+    item.perfil,
+    item.user,
+    item.usuario
+  );
+
+  if (isObject(profileObject)) {
+    return safeText(
+      first(
+        profileObject.email,
+        profileObject.mail
+      ),
+      "Sin email"
+    );
+  }
+
+  return safeText(
+    first(
+      item.email,
+      item.mail,
+      item.correo
+    ),
+    "Sin email"
+  );
+}
+
+function getPhone(item = {}) {
+  const profileObject = first(
+    item.profile,
+    item.perfil,
+    item.user,
+    item.usuario,
+    item.contact,
+    item.contacto
+  );
+
+  if (isObject(profileObject)) {
+    return safeText(
+      first(
+        profileObject.phone,
+        profileObject.telefono,
+        profileObject.mobile,
+        profileObject.movil
+      ),
+      "Sin teléfono"
+    );
+  }
+
+  return safeText(
+    first(
+      item.phone,
+      item.telefono,
+      item.mobile,
+      item.movil
+    ),
+    "Sin teléfono"
+  );
+}
+
+function getRole(item = {}) {
+  const roles = safeArray(
+    first(item.roles, item.permisos)
+  );
+
+  if (roles.length) {
+    return safeText(
+      first(
+        roles[0]?.name,
+        roles[0]?.nombre,
+        roles[0],
+        item.role,
+        item.rol
+      ),
+      "user"
+    );
+  }
+
+  return safeText(
+    first(item.role, item.rol),
+    "user"
+  );
+}
+
+function getStatus(item = {}) {
+  return safeText(
+    first(
+      item.status,
+      item.estado,
+      item.state
+    ),
+    "active"
+  );
+}
+
+function getCompany(item = {}) {
+  const companyObject = first(
+    item.company,
+    item.empresa,
+    item.client,
+    item.cliente,
+    item.organization,
+    item.organizacion
+  );
+
+  if (isObject(companyObject)) {
+    return safeText(
+      first(
+        companyObject.name,
+        companyObject.nombre,
+        companyObject.company,
+        companyObject.empresa
+      ),
+      "Sin empresa"
+    );
+  }
+
+  return safeText(
+    first(
+      item.companyName,
+      item.empresaNombre,
+      item.company,
+      item.empresa,
+      companyObject
+    ),
+    "Sin empresa"
+  );
+}
+
+function getAvatar(item = {}) {
+  const profileObject = first(
+    item.profile,
+    item.perfil,
+    item.user,
+    item.usuario
+  );
+
+  if (isObject(profileObject)) {
+    return safeText(
+      first(
+        profileObject.avatar,
+        profileObject.avatarUrl,
+        profileObject.photoURL,
+        profileObject.photo,
+        profileObject.image
+      ),
       ""
+    );
+  }
+
+  return safeText(
+    first(
+      item.avatar,
+      item.avatarUrl,
+      item.photoURL,
+      item.photo,
+      item.image
     ),
-    remoteOk:
-      payload.remoteOk === true,
-    degraded:
-      payload.degraded === true,
-    cacheHit:
-      payload.cacheHit === true,
-    error:
-      payload.error || null,
-  };
-}
-
-function applyApiResultToStore(
-  result = {}
-) {
-  const normalized =
-    normalizeApiListResult(result);
-
-  completeUsuariosLoad({
-    rows: normalized.rows,
-    meta: normalized.meta,
-    stats: normalized.stats,
-    alerts: normalized.alerts,
-    params: readUsuariosParams(),
-    source: normalized.source,
-    remoteOk:
-      normalized.remoteOk === true,
-    degraded:
-      normalized.degraded === true,
-    cacheHit:
-      normalized.cacheHit === true,
-    error:
-      normalized.error || null,
-  });
-
-  return {
-    rows: normalized.rows,
-    meta: normalized.meta,
-    stats: normalized.stats,
-    alerts: normalized.alerts,
-  };
-}
-
-function getCurrentData() {
-  return {
-    rows: readUsuariosRows(),
-    meta: readUsuariosMeta(),
-    stats: readUsuariosStats(),
-    alerts: readUsuariosAlerts(),
-  };
-}
-
-/* =========================================================
-   LOAD / HYDRATE
-========================================================= */
-
-export async function hydrateUsuarios(
-  options = {}
-) {
-  if (inflightHydrate) {
-    return inflightHydrate;
-  }
-
-  const config =
-    safeObject(options);
-
-  inflightHydrate =
-    (async () => {
-      try {
-        setUsuariosAction(
-          "hydrate"
-        );
-
-        safeEmit(
-          "usuarios:action:hydrate:start",
-          {
-            options: config,
-          }
-        );
-
-        const currentParams =
-          readUsuariosParams();
-
-        const finalParams = {
-          ...currentParams,
-          ...safeObject(
-            config.params ||
-              config.query
-          ),
-        };
-
-        writeUsuariosParams(
-          finalParams
-        );
-
-        beginUsuariosLoad(
-          finalParams
-        );
-
-        const result =
-          await loadUsuariosList({
-            ...finalParams,
-            force:
-              config.force === true,
-            preferCache:
-              config.preferCache !==
-              false,
-          });
-
-        if (
-          result?.ok !== true ||
-          !result?.list
-        ) {
-          rejectUsuariosLoad(
-            result?.error || null
-          );
-
-          return createResult({
-            ok: false,
-            action: "hydrate",
-            data: null,
-            error:
-              result?.error ||
-              new Error(
-                "No se pudo cargar el listado de usuarios."
-              ),
-            meta: buildMeta({
-              source:
-                result?.source ||
-                "",
-            }),
-          });
-        }
-
-        const data =
-          applyApiResultToStore(
-            result
-          );
-
-        safeEmit(
-          "usuarios:action:hydrate:success",
-          {
-            source:
-              result?.source ||
-              "",
-            rows:
-              data?.rows?.length || 0,
-          }
-        );
-
-        return createResult({
-          ok: true,
-          action: "hydrate",
-          data,
-          meta: buildMeta({
-            source:
-              result?.source ||
-              "",
-            remoteOk:
-              result?.remoteOk ===
-              true,
-            degraded:
-              result?.degraded ===
-              true,
-            cacheHit:
-              result?.cacheHit ===
-              true,
-          }),
-        });
-      } catch (error) {
-        rejectUsuariosLoad(error);
-
-        safeEmit(
-          "usuarios:action:hydrate:error",
-          {
-            error,
-          }
-        );
-
-        return createResult({
-          ok: false,
-          action: "hydrate",
-          error,
-          meta: buildMeta(),
-        });
-      } finally {
-        inflightHydrate = null;
-      }
-    })();
-
-  return inflightHydrate;
-}
-
-export async function refreshUsuariosList(
-  options = {}
-) {
-  if (inflightRefresh) {
-    return inflightRefresh;
-  }
-
-  const config =
-    safeObject(options);
-
-  inflightRefresh =
-    (async () => {
-      try {
-        setUsuariosAction(
-          "refresh"
-        );
-
-        safeEmit(
-          "usuarios:action:refresh:start",
-          {
-            options: config,
-          }
-        );
-
-        const params = {
-          ...readUsuariosParams(),
-          ...safeObject(
-            config.params ||
-              config.query
-          ),
-        };
-
-        writeUsuariosParams(
-          params
-        );
-        beginUsuariosLoad(
-          params
-        );
-
-        const result =
-          await refreshUsuariosListApi(
-            params
-          );
-
-        if (
-          result?.ok !== true ||
-          !result?.list
-        ) {
-          rejectUsuariosLoad(
-            result?.error || null
-          );
-
-          return createResult({
-            ok: false,
-            action: "refresh",
-            data: null,
-            error:
-              result?.error ||
-              new Error(
-                "No se pudo refrescar el listado de usuarios."
-              ),
-            meta: buildMeta({
-              source:
-                result?.source ||
-                "",
-            }),
-          });
-        }
-
-        const data =
-          applyApiResultToStore(
-            result
-          );
-
-        safeEmit(
-          "usuarios:action:refresh:success",
-          {
-            source:
-              result?.source ||
-              "",
-            rows:
-              data?.rows?.length || 0,
-          }
-        );
-
-        return createResult({
-          ok: true,
-          action: "refresh",
-          data,
-          meta: buildMeta({
-            source:
-              result?.source ||
-              "",
-            remoteOk:
-              result?.remoteOk ===
-              true,
-            degraded:
-              result?.degraded ===
-              true,
-            cacheHit:
-              result?.cacheHit ===
-              true,
-          }),
-        });
-      } catch (error) {
-        rejectUsuariosLoad(error);
-
-        safeEmit(
-          "usuarios:action:refresh:error",
-          {
-            error,
-          }
-        );
-
-        return createResult({
-          ok: false,
-          action: "refresh",
-          error,
-          meta: buildMeta(),
-        });
-      } finally {
-        inflightRefresh = null;
-      }
-    })();
-
-  return inflightRefresh;
-}
-
-/* =========================================================
-   SEARCH / FILTERS / SORT / PAGINATION
-========================================================= */
-
-export async function searchUsuarios(
-  value = "",
-  options = {}
-) {
-  const search =
-    safeText(value, "");
-
-  setUsuariosAction("search");
-  setUsuariosSearchDraftUi(
-    search
-  );
-  setUsuariosSearch(search);
-
-  safeEmit(
-    "usuarios:action:search",
-    {
-      search,
-    }
-  );
-
-  return hydrateUsuarios({
-    ...safeObject(options),
-    force:
-      options?.force === true,
-    preferCache:
-      options?.preferCache !==
-      false,
-  });
-}
-
-export async function applyUsuariosRoleFilter(
-  value = "",
-  options = {}
-) {
-  const role = safeText(
-    value,
     ""
   );
-
-  setUsuariosAction(
-    "filter-role"
-  );
-  setUsuariosActiveFilterUi(
-    role ? "role" : ""
-  );
-  setUsuariosRoleFilter(role);
-
-  safeEmit(
-    "usuarios:action:filter:role",
-    {
-      role,
-    }
-  );
-
-  return hydrateUsuarios({
-    ...safeObject(options),
-    force:
-      options?.force === true,
-    preferCache:
-      options?.preferCache !==
-      false,
-  });
 }
 
-export async function applyUsuariosStatusFilter(
-  value = "",
-  options = {}
-) {
-  const status =
-    safeText(value, "");
-
-  setUsuariosAction(
-    "filter-status"
-  );
-  setUsuariosActiveFilterUi(
-    status ? "status" : ""
-  );
-  setUsuariosStatusFilter(
-    status
-  );
-
-  safeEmit(
-    "usuarios:action:filter:status",
-    {
-      status,
-    }
-  );
-
-  return hydrateUsuarios({
-    ...safeObject(options),
-    force:
-      options?.force === true,
-    preferCache:
-      options?.preferCache !==
-      false,
-  });
-}
-
-export async function changeUsuariosSort(
-  sortBy = "createdAt",
-  sortDir = "desc",
-  options = {}
-) {
-  setUsuariosAction("sort");
-  setUsuariosSort(
-    sortBy,
-    sortDir
-  );
-
-  safeEmit(
-    "usuarios:action:sort",
-    {
-      sortBy,
-      sortDir,
-    }
-  );
-
-  return hydrateUsuarios({
-    ...safeObject(options),
-    force:
-      options?.force === true,
-    preferCache:
-      options?.preferCache !==
-      false,
-  });
-}
-
-export async function changeUsuariosPage(
-  page = 1,
-  options = {}
-) {
-  const nextPage = Math.max(
-    1,
-    safeNumber(page, 1)
-  );
-
-  setUsuariosAction("page");
-  setUsuariosPage(nextPage);
-
-  safeEmit(
-    "usuarios:action:page",
-    {
-      page: nextPage,
-    }
-  );
-
-  return hydrateUsuarios({
-    ...safeObject(options),
-    force:
-      options?.force === true,
-    preferCache:
-      options?.preferCache !==
-      false,
-  });
-}
-
-export async function changeUsuariosPageSize(
-  pageSize = 20,
-  options = {}
-) {
-  const nextPageSize = Math.max(
-    1,
-    safeNumber(pageSize, 20)
-  );
-
-  setUsuariosAction(
-    "page-size"
-  );
-  setUsuariosPageSize(
-    nextPageSize
-  );
-
-  safeEmit(
-    "usuarios:action:page-size",
-    {
-      pageSize:
-        nextPageSize,
-    }
-  );
-
-  return hydrateUsuarios({
-    ...safeObject(options),
-    force:
-      options?.force === true,
-    preferCache:
-      options?.preferCache !==
-      false,
-  });
-}
-
-export async function nextUsuariosPage(
-  options = {}
-) {
-  const meta = readUsuariosMeta();
-
-  if (
-    meta?.hasNextPage !== true
-  ) {
-    return createResult({
-      ok: false,
-      action: "next-page",
-      error: new Error(
-        "No hay siguiente página."
-      ),
-      meta: buildMeta(),
-    });
-  }
-
-  return changeUsuariosPage(
-    safeNumber(
-      meta.page,
-      1
-    ) + 1,
-    options
+function getCreatedAt(item = {}) {
+  return first(
+    item.createdAt,
+    item.createdAtES,
+    item.fechaCreacion,
+    item.registeredAt,
+    item.date
   );
 }
 
-export async function prevUsuariosPage(
-  options = {}
-) {
-  const meta = readUsuariosMeta();
-
-  if (
-    meta?.hasPrevPage !== true
-  ) {
-    return createResult({
-      ok: false,
-      action: "prev-page",
-      error: new Error(
-        "No hay página anterior."
-      ),
-      meta: buildMeta(),
-    });
-  }
-
-  return changeUsuariosPage(
-    Math.max(
-      1,
-      safeNumber(
-        meta.page,
-        1
-      ) - 1
-    ),
-    options
+function getUpdatedAt(item = {}) {
+  return first(
+    item.updatedAt,
+    item.modifiedAt,
+    item.lastUpdate,
+    item.lastLoginAt,
+    item.createdAt
   );
 }
 
-export async function resetUsuariosListFilters(
-  options = {}
-) {
-  setUsuariosAction(
-    "reset-filters"
+function getLastLoginAt(item = {}) {
+  return first(
+    item.lastLoginAt,
+    item.lastLogin,
+    item.ultimoLogin,
+    item.lastAccessAt,
+    item.ultimoAcceso
   );
-
-  const nextParams = {
-    ...readUsuariosParams(),
-    q: "",
-    role: "",
-    status: "",
-    page: 1,
-  };
-
-  writeUsuariosParams(
-    nextParams
-  );
-  setUsuariosSearchDraftUi("");
-  setUsuariosActiveFilterUi(
-    ""
-  );
-
-  safeEmit(
-    "usuarios:action:filters:reset",
-    {}
-  );
-
-  return hydrateUsuarios({
-    ...safeObject(options),
-    force:
-      options?.force === true,
-    preferCache:
-      options?.preferCache !==
-      false,
-  });
 }
 
-/* =========================================================
-   SELECTION / ACTIVE USER
-========================================================= */
-
-export function selectUsuario(
-  userId = ""
-) {
-  const normalized =
-    safeText(userId, "");
-
-  if (!normalized) {
-    return createResult({
-      ok: false,
-      action: "select-user",
-      error: new Error(
-        "userId requerido."
-      ),
-      meta: buildMeta(),
-    });
-  }
-
-  setUsuariosAction(
-    "select-user"
-  );
-  selectUsuarioInStore(
-    normalized
-  );
-
-  safeEmit(
-    "usuarios:action:select-user",
-    {
-      userId: normalized,
-    }
-  );
-
-  return createResult({
-    ok: true,
-    action: "select-user",
-    data: readUsuarioById(
-      normalized
-    ),
-    meta: buildMeta({
-      activeUserId:
-        normalized,
-    }),
-  });
-}
-
-export function clearUsuariosSelectionAction() {
-  setUsuariosAction(
-    "clear-selection"
-  );
-  clearAllUsuariosSelected();
-
-  safeEmit(
-    "usuarios:action:clear-selection",
-    {}
-  );
-
-  return createResult({
-    ok: true,
-    action:
-      "clear-selection",
-    data: {
-      selectedIds: [],
-    },
-    meta: buildMeta(),
-  });
-}
-
-/* =========================================================
-   DETAIL / NAVIGATION
-========================================================= */
-
-export function getUsuariosActionContext() {
-  return {
-    snapshot:
-      getUsuariosSnapshot(),
-    status: getUsuariosStatus(),
-    data: getCurrentData(),
-    params:
-      readUsuariosParams(),
-    ui: readUsuariosUi(),
-  };
-}
-
-export async function openUsuarioDetail(
-  userId = "",
-  options = {}
-) {
-  const normalized =
-    safeText(userId, "");
-
-  if (!normalized) {
-    return createResult({
-      ok: false,
-      action: "open-detail",
-      error: new Error(
-        "userId requerido."
-      ),
-      meta: buildMeta(),
-    });
-  }
-
-  setUsuariosAction(
-    "open-detail"
-  );
-  selectUsuarioInStore(
-    normalized
-  );
-
-  const router =
-    getRouter();
-
-  if (
-    router &&
-    typeof router.navigate ===
-      "function"
-  ) {
-    try {
-      const target =
-        resolveUsuarioPath(
-          normalized
-        );
-
-      await Promise.resolve(
-        router.navigate(target, {
-          ...safeObject(options),
-          force:
-            options?.force ===
-            true,
-        })
-      );
-
-      return createResult({
-        ok: true,
-        action: "open-detail",
-        data: {
-          target,
-          user:
-            readUsuarioById(
-              normalized
-            ),
-        },
-        meta: buildMeta({
-          target,
-          activeUserId:
-            normalized,
-        }),
-      });
-    } catch (error) {
-      return createResult({
-        ok: false,
-        action: "open-detail",
-        error,
-        meta: buildMeta({
-          activeUserId:
-            normalized,
-        }),
-      });
-    }
-  }
-
-  return createResult({
-    ok: true,
-    action: "open-detail",
-    data: {
-      target:
-        resolveUsuarioPath(
-          normalized
-        ),
-      user:
-        readUsuarioById(
-          normalized
-        ),
-    },
-    meta: buildMeta({
-      activeUserId:
-        normalized,
-    }),
-  });
-}
-
-/* =========================================================
-   LOW LEVEL SYNC HELPERS
-========================================================= */
-
-export function hydrateUsuariosDataDirect(
-  payload = {}
-) {
-  const source =
-    safeObject(payload);
-
-  if (
-    Array.isArray(source.rows)
-  ) {
-    writeUsuariosRows(
-      source.rows
-    );
-  }
-
-  if (
-    source.meta &&
-    typeof source.meta ===
-      "object"
-  ) {
-    writeUsuariosMeta(
-      source.meta
-    );
-  }
-
-  if (
-    source.stats &&
-    typeof source.stats ===
-      "object"
-  ) {
-    writeUsuariosStats(
-      source.stats
-    );
-  }
-
-  if (
-    Array.isArray(
-      source.alerts
+function getMeta(item = {}) {
+  return safeObject(
+    first(
+      item.meta,
+      item.metadata,
+      item.extra,
+      item.details
     )
-  ) {
-    writeUsuariosAlerts(
-      source.alerts
-    );
+  );
+}
+
+function normalizeUserDetail(detail = {}) {
+  const raw = safeObject(detail);
+
+  return {
+    ...raw,
+    userId: getId(raw),
+    username: getUsername(raw),
+    name: getName(raw),
+    email: getEmail(raw),
+    phone: getPhone(raw),
+    role: getRole(raw),
+    status: getStatus(raw),
+    companyName: getCompany(raw),
+    avatarUrl: getAvatar(raw),
+    createdAt: getCreatedAt(raw),
+    updatedAt: getUpdatedAt(raw),
+    lastLoginAt: getLastLoginAt(raw),
+    meta: getMeta(raw),
+  };
+}
+
+function escapeCsvCell(value = "") {
+  const text =
+    value === null || value === undefined
+      ? ""
+      : String(value);
+
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function buildCsvRows(items = []) {
+  const header = [
+    "userId",
+    "username",
+    "name",
+    "email",
+    "phone",
+    "role",
+    "status",
+    "company",
+    "createdAt",
+    "updatedAt",
+    "lastLoginAt",
+  ];
+
+  const rows = safeArray(items).map((item) => [
+    getId(item),
+    getUsername(item),
+    getName(item),
+    getEmail(item),
+    getPhone(item),
+    getRole(item),
+    getStatus(item),
+    getCompany(item),
+    getCreatedAt(item) || "",
+    getUpdatedAt(item) || "",
+    getLastLoginAt(item) || "",
+  ]);
+
+  return [
+    header.map(escapeCsvCell).join(","),
+    ...rows.map((row) => row.map(escapeCsvCell).join(",")),
+  ].join("\n");
+}
+
+async function writeClipboardText(text = "") {
+  const value = safeText(text, "");
+
+  if (!value) return false;
+
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {}
+
+  try {
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.setAttribute("readonly", "true");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    textarea.style.pointerEvents = "none";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+
+    const ok = document.execCommand("copy");
+
+    textarea.remove();
+
+    return Boolean(ok);
+  } catch {
+    return false;
+  }
+}
+
+function downloadTextFile({
+  filename = CSV_FILENAME,
+  content = "",
+  mimeType = "text/plain;charset=utf-8;",
+} = {}) {
+  const blob = new Blob([String(content || "")], {
+    type: mimeType,
+  });
+
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+
+  anchor.href = url;
+  anchor.download = filename;
+
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+
+  URL.revokeObjectURL(url);
+
+  return true;
+}
+
+/* =========================================================
+   DETAIL ACTIONS
+========================================================= */
+
+export function getUsuarioDetailFromStoreAction({
+  userId = "",
+} = {}) {
+  const id = normalizeUserId(userId);
+
+  if (!id) return null;
+
+  try {
+    const detail = getUsuarioByIdStore(id);
+    const picked = pickDetail(detail);
+
+    if (!picked) return null;
+
+    return normalizeUserDetail(picked);
+  } catch {
+    return null;
+  }
+}
+
+export async function getUsuarioDetailAction({
+  userId = "",
+  preferFresh = true,
+  silent = false,
+} = {}) {
+  const id = normalizeUserId(userId);
+
+  if (!id) {
+    if (!silent) {
+      showToast("No se pudo resolver el usuario.", "error");
+    }
+    return null;
   }
 
-  if (
-    source.params &&
-    typeof source.params ===
-      "object"
-  ) {
-    mergeUsuariosParams(
-      source.params
-    );
+  const fallbackStoreDetail =
+    getUsuarioDetailFromStoreAction({
+      userId: id,
+    });
+
+  if (!preferFresh && fallbackStoreDetail) {
+    return fallbackStoreDetail;
   }
 
-  return createResult({
-    ok: true,
-    action:
-      "hydrate-direct",
-    data: getCurrentData(),
-    meta: buildMeta(),
+  try {
+    safeEmit("usuarios:detail:request", {
+      userId: id,
+      source: "backend",
+    });
+
+    const response =
+      await getUsuarioByIdRequest(id);
+
+    const detail = pickDetail(response);
+
+    if (!detail) {
+      if (fallbackStoreDetail) {
+        safeEmit("usuarios:detail:fallback", {
+          userId: id,
+          source: "store",
+        });
+        return fallbackStoreDetail;
+      }
+
+      throw new Error("EMPTY_USER_DETAIL");
+    }
+
+    const normalized = normalizeUserDetail(detail);
+
+    safeEmit("usuarios:detail:success", {
+      userId: id,
+      source: "backend",
+      detail: normalized,
+    });
+
+    return normalized;
+  } catch (error) {
+    if (fallbackStoreDetail) {
+      safeEmit("usuarios:detail:fallback", {
+        userId: id,
+        source: "store",
+        error,
+      });
+
+      return fallbackStoreDetail;
+    }
+
+    safeEmit("usuarios:detail:error", {
+      userId: id,
+      error,
+    });
+
+    if (!silent) {
+      showToast(
+        "No se pudo cargar el detalle del usuario.",
+        "error"
+      );
+    }
+
+    return null;
+  }
+}
+
+export async function openUsuarioAction({
+  userId = "",
+  preferFresh = true,
+  silent = false,
+} = {}) {
+  const id = normalizeUserId(userId);
+
+  if (!id) {
+    if (!silent) {
+      showToast("Usuario inválido.", "error");
+    }
+    return null;
+  }
+
+  safeEmit("usuarios:open", {
+    userId: id,
+  });
+
+  const detail = await getUsuarioDetailAction({
+    userId: id,
+    preferFresh,
+    silent,
+  });
+
+  if (!detail) {
+    return null;
+  }
+
+  safeEmit("usuarios:open:success", {
+    userId: id,
+    detail,
+  });
+
+  return detail;
+}
+
+export async function refreshUsuarioDetailAction({
+  userId = "",
+  silent = true,
+} = {}) {
+  return getUsuarioDetailAction({
+    userId,
+    preferFresh: true,
+    silent,
   });
 }
 
 /* =========================================================
-   EXPORTS
+   COPY ID
 ========================================================= */
 
-export const UsuariosActions = {
-  hydrateUsuarios,
-  refreshUsuariosList,
+export async function copyUsuarioIdAction({
+  userId = "",
+  silent = false,
+} = {}) {
+  const id = normalizeUserId(userId);
 
-  searchUsuarios,
-  applyUsuariosRoleFilter,
-  applyUsuariosStatusFilter,
-  changeUsuariosSort,
-  changeUsuariosPage,
-  changeUsuariosPageSize,
-  nextUsuariosPage,
-  prevUsuariosPage,
-  resetUsuariosListFilters,
+  if (!id) {
+    if (!silent) {
+      showToast("No hay ID para copiar.", "error");
+    }
+    return false;
+  }
 
-  selectUsuario,
-  clearUsuariosSelectionAction,
+  const copied = await writeClipboardText(id);
 
-  openUsuarioDetail,
-  getUsuariosActionContext,
-  hydrateUsuariosDataDirect,
+  if (!copied) {
+    if (!silent) {
+      showToast("No se pudo copiar el ID.", "error");
+    }
+    return false;
+  }
+
+  safeEmit("usuarios:copy-id", {
+    userId: id,
+  });
+
+  if (!silent) {
+    showToast("ID copiado", "success");
+  }
+
+  return true;
+}
+
+/* =========================================================
+   EXPORT
+========================================================= */
+
+export function exportUsuariosCsvAction({
+  filename = CSV_FILENAME,
+  items = null,
+  silent = false,
+} = {}) {
+  const sourceItems = Array.isArray(items)
+    ? items
+    : getSortedUsuariosStore();
+
+  const list = safeArray(sourceItems);
+
+  if (!list.length) {
+    if (!silent) {
+      showToast("No hay usuarios para exportar.", "info");
+    }
+    return false;
+  }
+
+  try {
+    const csv = buildCsvRows(list);
+
+    downloadTextFile({
+      filename: safeText(filename, CSV_FILENAME),
+      content: csv,
+      mimeType: "text/csv;charset=utf-8;",
+    });
+
+    safeEmit("usuarios:export:csv", {
+      total: list.length,
+      filename: safeText(filename, CSV_FILENAME),
+    });
+
+    if (!silent) {
+      showToast("CSV exportado", "success");
+    }
+
+    return true;
+  } catch (error) {
+    safeEmit("usuarios:export:error", {
+      type: "csv",
+      error,
+    });
+
+    if (!silent) {
+      showToast("No se pudo exportar el CSV.", "error");
+    }
+
+    return false;
+  }
+}
+
+/* =========================================================
+   CREATE
+========================================================= */
+
+export async function createUsuarioAction({
+  route = "/usuarios/nuevo",
+  fallbackEvent = "usuarios:create",
+  silent = false,
+} = {}) {
+  const targetRoute = safeText(route, "/usuarios/nuevo");
+
+  try {
+    safeEmit(fallbackEvent, {
+      route: targetRoute,
+    });
+
+    if (AppCore?.router?.navigate) {
+      await AppCore.router.navigate(targetRoute);
+      return true;
+    }
+
+    if (AppCore?.Router?.navigate) {
+      await AppCore.Router.navigate(targetRoute);
+      return true;
+    }
+
+    return true;
+  } catch (error) {
+    if (!silent) {
+      showToast(
+        "No se pudo abrir el flujo de creación.",
+        "error"
+      );
+    }
+
+    return false;
+  }
+}
+
+/* =========================================================
+   DETAIL HELPERS EXPORT
+========================================================= */
+
+export {
+  getId as getUsuarioIdAction,
+  getUsername as getUsuarioUsernameAction,
+  getName as getUsuarioNameAction,
+  getEmail as getUsuarioEmailAction,
+  getPhone as getUsuarioPhoneAction,
+  getRole as getUsuarioRoleAction,
+  getStatus as getUsuarioStatusAction,
+  getCompany as getUsuarioCompanyAction,
+  getAvatar as getUsuarioAvatarAction,
+  getCreatedAt as getUsuarioCreatedAtAction,
+  getUpdatedAt as getUsuarioUpdatedAtAction,
+  getLastLoginAt as getUsuarioLastLoginAtAction,
+  getMeta as getUsuarioMetaAction,
+  normalizeUserDetail as normalizeUsuarioDetailAction,
 };
-
-export default UsuariosActions;

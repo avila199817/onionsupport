@@ -24,6 +24,7 @@
    - click delegation sólida
    - fallback elegante si el modal aún no existe
    - single resource mode real para /api/user/preferences
+   - aplica el theme real al DOM / AppCore / storage
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -191,6 +192,78 @@ export const CuentaView = (() => {
   }
 
   /* =====================================================
+     THEME APPLY
+  ===================================================== */
+
+  function resolveThemeMode(value = true) {
+    return Boolean(value) ? "dark" : "light";
+  }
+
+  function applyCuentaThemeToDom(darkMode = true) {
+    const theme = resolveThemeMode(darkMode);
+    const isDark = theme === "dark";
+
+    try {
+      document.documentElement.dataset.theme = theme;
+    } catch {}
+
+    try {
+      document.documentElement.setAttribute("data-theme", theme);
+    } catch {}
+
+    try {
+      document.body?.setAttribute?.("data-theme", theme);
+    } catch {}
+
+    try {
+      document.documentElement.classList.toggle("theme-dark", isDark);
+      document.documentElement.classList.toggle("theme-light", !isDark);
+    } catch {}
+
+    try {
+      document.body?.classList?.toggle?.("theme-dark", isDark);
+      document.body?.classList?.toggle?.("theme-light", !isDark);
+    } catch {}
+
+    try {
+      AppCore.state = AppCore.state || {};
+      AppCore.state.theme = theme;
+      AppCore.state.darkMode = isDark;
+    } catch {}
+
+    try {
+      AppCore?.setTheme?.(theme);
+    } catch {}
+
+    try {
+      AppCore?.events?.emit?.("app:theme:change", {
+        theme,
+        darkMode: isDark,
+        source: "cuenta",
+      });
+    } catch {}
+
+    try {
+      localStorage.setItem("theme", theme);
+      localStorage.setItem("darkMode", String(isDark));
+    } catch {}
+
+    return theme;
+  }
+
+  function applyCuentaPreferencesSideEffects(detail = null) {
+    const item = detail || getCurrentItem();
+
+    if (!item) {
+      return null;
+    }
+
+    applyCuentaThemeToDom(Boolean(item.darkMode));
+
+    return item;
+  }
+
+  /* =====================================================
      MODAL BRIDGE
   ===================================================== */
 
@@ -303,6 +376,8 @@ export const CuentaView = (() => {
 
     try {
       const detail = await loadCuenta({ force });
+
+      applyCuentaPreferencesSideEffects(detail);
 
       setState({
         loading: false,
@@ -426,6 +501,8 @@ export const CuentaView = (() => {
         privacyMode: Boolean(nextPayload.privacyMode),
       });
 
+      applyCuentaPreferencesSideEffects(detail);
+
       syncViewFormFromItem?.();
 
       setViewSuccess?.({
@@ -483,6 +560,8 @@ export const CuentaView = (() => {
 
     try {
       const detail = await updateCuentaTheme(Boolean(darkMode));
+
+      applyCuentaPreferencesSideEffects(detail);
 
       patchViewForm?.({
         darkMode: Boolean(detail?.darkMode),
@@ -760,6 +839,7 @@ export const CuentaView = (() => {
       }
 
       syncViewFormFromItem?.();
+      applyCuentaPreferencesSideEffects(getCurrentItem());
 
       if (!destroyed) {
         bind();

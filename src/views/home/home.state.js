@@ -2,187 +2,108 @@
    Onion SPA - Home State
    Archivo: src/views/home/home.state.js
 
-   FINAL PRO SYSTEM · REAL CONTRACT · 10/10
+   FINAL PRO SYSTEM · STATE LAYER · 10/10
 
-   Responsabilidades:
-   - centralizar el estado interno de la vista Home
-   - exponer snapshot inicial robusto e inmutable por copia
-   - controlar loading / loaded / error
-   - almacenar summary real y metadatos de sincronización
-   - modelar source / degraded / remoteOk / cacheHit
-   - mantener mutaciones predecibles y limpias
-   - preservar contrato esperado por home.api.js y home.template.js
+   RESPONSABILIDADES:
+   - estado local centralizado del módulo home
+   - loading / refresh dashboard
+   - errores
+   - cache temporal
+   - request inflight
+   - widget seleccionado / abierto
+   - compatibilidad View / API / Actions / Modal
+
+   HARDENING PRO:
+   - setters robustos
+   - no loading infinito
+   - estado preparado para paginación local de widgets
+   - estado preparado para snapshot dashboard
+   - cache helpers
+   - snapshot debug
 ========================================================= */
+
+export const CACHE_KEY = "home.cache";
+export const CACHE_TTL = 1000 * 60 * 3; // 3 min
+export const DEFAULT_PAGE_SIZE = 6;
 
 /* =========================================================
-   CONSTANTS
+   SAFE
 ========================================================= */
-
-export const HOME_CACHE_KEY =
-  "onion.home.summary";
-
-export const HOME_CACHE_TTL =
-  1000 * 60 * 5;
-
-export const HOME_SOURCES = Object.freeze({
-  IDLE: "idle",
-  REMOTE: "remote",
-  CACHE_FRESH: "cache:fresh",
-  CACHE_STALE: "cache:stale",
-  FALLBACK_LOCAL: "fallback:local",
-  ERROR: "error",
-});
-
-/* =========================================================
-   BASICS
-========================================================= */
-
-function safeObject(value) {
-  return value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-    ? value
-    : {};
-}
 
 function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
+  return Array.isArray(value) ? value : [];
 }
 
-function safeText(
-  value = "",
-  fallback = ""
-) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
+function safeNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
 
+function safeText(value, fallback = "") {
+  if (value === null || value === undefined) return fallback;
   const text = String(value).trim();
   return text || fallback;
 }
 
-function safeNumber(
-  value,
-  fallback = 0
-) {
-  const number = Number(value);
-  return Number.isFinite(number)
-    ? number
-    : fallback;
+function safeObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
 }
 
-function safeBoolean(
-  value,
-  fallback = false
-) {
-  if (typeof value === "boolean") {
-    return value;
-  }
-
+function safeBoolean(value, fallback = false) {
+  if (typeof value === "boolean") return value;
   return fallback;
 }
 
-function clone(value) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return value ?? null;
-  }
-
-  try {
-    if (
-      typeof structuredClone ===
-      "function"
-    ) {
-      return structuredClone(value);
+function firstDefined(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null) {
+      return value;
     }
-  } catch {}
-
-  try {
-    return JSON.parse(
-      JSON.stringify(value)
-    );
-  } catch {
-    return value;
   }
+  return null;
 }
 
 /* =========================================================
-   SUMMARY FACTORIES
+   DEFAULTS
 ========================================================= */
 
-export function createInitialHomeUser() {
+function createDefaultHealthState() {
   return {
-    id: null,
-    role: "unknown",
+    ok: false,
+    service: "",
+    status: "",
+    timestamp: "",
   };
 }
 
-export function createInitialHomeKpis() {
+function createInitialHomeState() {
   return {
-    ticketsOpen: 0,
-    ticketsUrgent: 0,
-    clientesTotal: 0,
-    facturasPending: 0,
-    usersTotal: 0,
-    facturacionTotal: 0,
-  };
-}
-
-export function createInitialHomeHealth() {
-  return {
-    tickets: false,
-    clientes: false,
-    facturas: false,
-    users: false,
-  };
-}
-
-export function createInitialHomeSummary() {
-  return {
-    user: createInitialHomeUser(),
-    generatedAt: "",
-    kpis: createInitialHomeKpis(),
-    alerts: [],
-    recentActivity: [],
-    quickActions: [],
-    health: createInitialHomeHealth(),
-  };
-}
-
-/* =========================================================
-   ROOT STATE FACTORY
-========================================================= */
-
-export function createInitialHomeState() {
-  return {
+    hydrated: false,
     loading: false,
+    refreshing: false,
     loaded: false,
-    error: null,
-    lastError: null,
 
-    summary:
-      createInitialHomeSummary(),
+    openingWidgetId: "",
+    selectedWidgetId: "",
 
-    source: HOME_SOURCES.IDLE,
-    remoteOk: false,
-    degraded: false,
+    error: "",
 
-    lastSyncAt: "",
-    hydratedAt: "",
-    cacheHit: false,
+    dashboard: {},
+    widgets: [],
+    summary: {},
+    recent: [],
+    health: null,
 
-    ui: {
-      mounted: false,
-      activeCard: "",
-      lastAction: "",
-    },
+    widgetsCount: 0,
+    recentCount: 0,
+
+    lastSyncAt: 0,
+    requestId: "",
+
+    page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
   };
 }
 
@@ -190,764 +111,492 @@ export function createInitialHomeState() {
    STATE
 ========================================================= */
 
-export const homeState =
-  createInitialHomeState();
+export const homeState = createInitialHomeState();
+
+let inflightLoad = null;
 
 /* =========================================================
-   NORMALIZERS
+   INTERNAL
 ========================================================= */
 
-function normalizeHomeUser(
-  value = {}
-) {
-  const user =
-    safeObject(value);
+function normalizeHealthState(value = null) {
+  if (!value) return null;
+
+  const item = safeObject(value);
+  const base = createDefaultHealthState();
 
   return {
-    id:
-      safeText(user.id, "") ||
-      null,
-    role: safeText(
-      user.role,
-      "unknown"
-    ),
+    ...base,
+    ...item,
+    ok: safeBoolean(item.ok, base.ok),
+    service: safeText(item.service, base.service),
+    status: safeText(item.status, base.status),
+    timestamp: safeText(item.timestamp, base.timestamp),
   };
 }
 
-function normalizeHomeKpis(
-  value = {}
-) {
-  const kpis =
-    safeObject(value);
-
-  return {
-    ticketsOpen: safeNumber(
-      kpis.ticketsOpen,
-      0
-    ),
-    ticketsUrgent: safeNumber(
-      kpis.ticketsUrgent,
-      0
-    ),
-    clientesTotal: safeNumber(
-      kpis.clientesTotal,
-      0
-    ),
-    facturasPending: safeNumber(
-      kpis.facturasPending,
-      0
-    ),
-    usersTotal: safeNumber(
-      kpis.usersTotal,
-      0
-    ),
-    facturacionTotal: safeNumber(
-      kpis.facturacionTotal,
-      0
-    ),
-  };
+function normalizeDashboardState(value = {}) {
+  return safeObject(value);
 }
 
-function normalizeHomeAlert(
-  value = {},
-  index = 0
-) {
-  const item =
-    safeObject(value);
-
-  return {
-    level: safeText(
-      item.level,
-      "info"
-    ),
-    code: safeText(
-      item.code,
-      `ALERT_${index + 1}`
-    ),
-    message: safeText(
-      item.message,
-      "Alerta"
-    ),
-  };
+function normalizeSummaryState(value = {}) {
+  return safeObject(value);
 }
 
-function normalizeHomeActivityItem(
-  value = {},
-  index = 0
-) {
-  const item =
-    safeObject(value);
-
-  return {
-    id: safeText(
-      item.id,
-      `activity-${index + 1}`
-    ),
-    text: safeText(
-      item.text ||
-        item.label ||
-        item.title,
-      "Movimiento"
-    ),
-    label: safeText(
-      item.label ||
-        item.text ||
-        item.title,
-      "Movimiento"
-    ),
-    date: safeText(
-      item.date ||
-        item.createdAt,
-      ""
-    ),
-    createdAt: safeText(
-      item.createdAt ||
-        item.date,
-      ""
-    ),
-  };
+function normalizeWidgetsState(value = []) {
+  return safeArray(value);
 }
 
-function normalizeHomeQuickAction(
-  value = {},
-  index = 0
-) {
-  const item =
-    safeObject(value);
-
-  return {
-    key: safeText(
-      item.key,
-      `action-${index + 1}`
-    ),
-    label: safeText(
-      item.label,
-      "Acción"
-    ),
-    href: safeText(
-      item.href,
-      "#"
-    ),
-  };
-}
-
-function normalizeHomeHealth(
-  value = {}
-) {
-  const health =
-    safeObject(value);
-
-  return {
-    tickets: safeBoolean(
-      health.tickets,
-      false
-    ),
-    clientes: safeBoolean(
-      health.clientes,
-      false
-    ),
-    facturas: safeBoolean(
-      health.facturas,
-      false
-    ),
-    users: safeBoolean(
-      health.users,
-      false
-    ),
-  };
-}
-
-function normalizeHomeSummary(
-  summary = {}
-) {
-  const next =
-    safeObject(summary);
-
-  return {
-    user: normalizeHomeUser(
-      next.user
-    ),
-
-    generatedAt: safeText(
-      next.generatedAt,
-      ""
-    ),
-
-    kpis: normalizeHomeKpis(
-      next.kpis
-    ),
-
-    alerts: safeArray(next.alerts)
-      .map(normalizeHomeAlert)
-      .filter(Boolean),
-
-    recentActivity: safeArray(
-      next.recentActivity
-    )
-      .map(
-        normalizeHomeActivityItem
-      )
-      .filter(Boolean),
-
-    quickActions: safeArray(
-      next.quickActions
-    )
-      .map(
-        normalizeHomeQuickAction
-      )
-      .filter(Boolean),
-
-    health: normalizeHomeHealth(
-      next.health
-    ),
-  };
-}
-
-function normalizeSource(
-  value = ""
-) {
-  const source = safeText(
-    value,
-    HOME_SOURCES.IDLE
-  );
-
-  const allowed =
-    Object.values(HOME_SOURCES);
-
-  return allowed.includes(source)
-    ? source
-    : HOME_SOURCES.IDLE;
+function normalizeRecentState(value = []) {
+  return safeArray(value);
 }
 
 /* =========================================================
-   READ HELPERS
+   INFLOW
 ========================================================= */
 
-export function getHomeState() {
-  return clone(homeState);
+export function getInflightLoad() {
+  return inflightLoad;
 }
 
-export function getHomeSummary() {
-  return clone(
-    homeState.summary
-  );
+export function setInflightLoad(value) {
+  inflightLoad = value || null;
+  return inflightLoad;
 }
 
-export function getHomeSource() {
-  return normalizeSource(
-    homeState.source
-  );
-}
-
-export function isHomeLoading() {
-  return homeState.loading === true;
-}
-
-export function isHomeLoaded() {
-  return homeState.loaded === true;
-}
-
-export function isHomeDegraded() {
-  return homeState.degraded === true;
-}
-
-export function isHomeRemoteOk() {
-  return homeState.remoteOk === true;
-}
-
-export function getHomeError() {
-  return homeState.error || null;
-}
-
-export function getHomeLastError() {
-  return homeState.lastError || null;
-}
-
-export function getHomeLastSyncAt() {
-  return safeText(
-    homeState.lastSyncAt,
-    ""
-  );
-}
-
-export function getHomeHydratedAt() {
-  return safeText(
-    homeState.hydratedAt,
-    ""
-  );
-}
-
-export function getHomeCacheHit() {
-  return safeBoolean(
-    homeState.cacheHit,
-    false
-  );
-}
-
-export function getHomeUiState() {
-  return clone(
-    homeState.ui
-  );
-}
-
-export function getHomeKpis() {
-  return clone(
-    homeState.summary?.kpis ||
-      createInitialHomeKpis()
-  );
-}
-
-export function getHomeAlerts() {
-  return clone(
-    homeState.summary?.alerts || []
-  );
-}
-
-export function getHomeRecentActivity() {
-  return clone(
-    homeState.summary
-      ?.recentActivity || []
-  );
-}
-
-export function getHomeQuickActions() {
-  return clone(
-    homeState.summary
-      ?.quickActions || []
-  );
-}
-
-export function getHomeHealth() {
-  return clone(
-    homeState.summary?.health ||
-      createInitialHomeHealth()
-  );
+export function clearInflightLoad() {
+  inflightLoad = null;
+  return inflightLoad;
 }
 
 /* =========================================================
-   WRITE HELPERS
+   RESET
 ========================================================= */
 
 export function resetHomeState() {
-  const next =
-    createInitialHomeState();
-
-  Object.keys(homeState).forEach(
-    (key) => {
-      delete homeState[key];
-    }
-  );
+  const next = createInitialHomeState();
 
   Object.assign(homeState, next);
 
-  return getHomeState();
+  inflightLoad = null;
+
+  return homeState;
 }
 
-export function setHomeLoading(
-  value = true
-) {
-  homeState.loading =
-    value === true;
+/* =========================================================
+   FLAGS
+========================================================= */
 
-  if (value === true) {
-    homeState.error = null;
-  }
-
+export function setLoading(value) {
+  homeState.loading = Boolean(value);
   return homeState.loading;
 }
 
-export function setHomeLoaded(
-  value = true
-) {
-  homeState.loaded =
-    value === true;
+export function setRefreshing(value) {
+  homeState.refreshing = Boolean(value);
+  return homeState.refreshing;
+}
 
+export function setLoaded(value) {
+  homeState.loaded = Boolean(value);
   return homeState.loaded;
 }
 
-export function setHomeError(
-  error = null
-) {
-  homeState.error =
-    error || null;
+export function setHydrated(value) {
+  homeState.hydrated = Boolean(value);
+  return homeState.hydrated;
+}
 
-  if (error) {
-    homeState.loading = false;
-    homeState.lastError =
-      error || null;
-  }
+export function setOpeningWidgetId(value = "") {
+  homeState.openingWidgetId = safeText(value, "");
+  return homeState.openingWidgetId;
+}
 
+export function setSelectedWidgetId(value = "") {
+  homeState.selectedWidgetId = safeText(value, "");
+  return homeState.selectedWidgetId;
+}
+
+/* =========================================================
+   PAGINATION
+========================================================= */
+
+export function setPage(value = 1) {
+  homeState.page = Math.max(1, safeNumber(value, 1));
+  return homeState.page;
+}
+
+export function setPageSize(value = DEFAULT_PAGE_SIZE) {
+  homeState.pageSize = Math.max(1, safeNumber(value, DEFAULT_PAGE_SIZE));
+  return homeState.pageSize;
+}
+
+/* =========================================================
+   DATA
+========================================================= */
+
+export function setDashboard(value = {}) {
+  const dashboard = normalizeDashboardState(value);
+
+  homeState.dashboard = dashboard;
+  homeState.loaded = true;
+  homeState.error = "";
+
+  return homeState.dashboard;
+}
+
+export function getDashboard() {
+  return normalizeDashboardState(homeState.dashboard);
+}
+
+export function clearDashboard() {
+  homeState.dashboard = {};
+  return homeState.dashboard;
+}
+
+export function setWidgets(items = []) {
+  const list = normalizeWidgetsState(items);
+
+  homeState.widgets = list;
+  homeState.widgetsCount = list.length;
+  homeState.loaded = true;
+  homeState.error = "";
+
+  return list;
+}
+
+export function getWidgets() {
+  return normalizeWidgetsState(homeState.widgets);
+}
+
+export function clearWidgets() {
+  homeState.widgets = [];
+  homeState.widgetsCount = 0;
+  homeState.page = 1;
+
+  return homeState.widgets;
+}
+
+export function setSummary(value = {}) {
+  homeState.summary = normalizeSummaryState(value);
+  return homeState.summary;
+}
+
+export function getSummary() {
+  return normalizeSummaryState(homeState.summary);
+}
+
+export function clearSummary() {
+  homeState.summary = {};
+  return homeState.summary;
+}
+
+export function setRecent(items = []) {
+  const list = normalizeRecentState(items);
+
+  homeState.recent = list;
+  homeState.recentCount = list.length;
+
+  return list;
+}
+
+export function getRecent() {
+  return normalizeRecentState(homeState.recent);
+}
+
+export function clearRecent() {
+  homeState.recent = [];
+  homeState.recentCount = 0;
+
+  return homeState.recent;
+}
+
+export function setHealth(value = null) {
+  homeState.health = normalizeHealthState(value);
+  return homeState.health;
+}
+
+export function getHealth() {
+  return homeState.health
+    ? normalizeHealthState(homeState.health)
+    : null;
+}
+
+export function clearHealth() {
+  homeState.health = null;
+  return homeState.health;
+}
+
+/* =========================================================
+   COUNTS / META
+========================================================= */
+
+export function setWidgetsCount(value = 0) {
+  homeState.widgetsCount = Math.max(0, safeNumber(value, 0));
+  return homeState.widgetsCount;
+}
+
+export function setRecentCount(value = 0) {
+  homeState.recentCount = Math.max(0, safeNumber(value, 0));
+  return homeState.recentCount;
+}
+
+export function setRequestId(value = "") {
+  homeState.requestId = safeText(value, "");
+  return homeState.requestId;
+}
+
+export function setError(value = null) {
+  homeState.error = value ? String(value).trim() : "";
   return homeState.error;
 }
 
-export function clearHomeError() {
-  homeState.error = null;
-  return null;
+export function clearError() {
+  homeState.error = "";
+  return homeState.error;
 }
 
-export function clearHomeLastError() {
-  homeState.lastError = null;
-  return null;
-}
-
-export function setHomeSummary(
-  summary = {}
-) {
-  homeState.summary =
-    normalizeHomeSummary(
-      summary
-    );
-
-  return getHomeSummary();
-}
-
-export function patchHomeSummary(
-  patch = {}
-) {
-  const current =
-    safeObject(homeState.summary);
-
-  return setHomeSummary({
-    ...current,
-    ...safeObject(patch),
-  });
-}
-
-export function clearHomeSummary() {
-  homeState.summary =
-    createInitialHomeSummary();
-
-  return getHomeSummary();
-}
-
-export function setHomeSource(
-  value = HOME_SOURCES.IDLE
-) {
-  homeState.source =
-    normalizeSource(value);
-
-  return homeState.source;
-}
-
-export function setHomeRemoteOk(
-  value = false
-) {
-  homeState.remoteOk =
-    value === true;
-
-  return homeState.remoteOk;
-}
-
-export function setHomeDegraded(
-  value = false
-) {
-  homeState.degraded =
-    value === true;
-
-  return homeState.degraded;
-}
-
-export function setHomeLastSyncAt(
-  value = ""
-) {
-  homeState.lastSyncAt =
-    safeText(value, "");
-
+export function setLastSyncAt(value = 0) {
+  homeState.lastSyncAt = safeNumber(value, 0);
   return homeState.lastSyncAt;
 }
 
-export function setHomeHydratedAt(
-  value = ""
-) {
-  homeState.hydratedAt =
-    safeText(value, "");
+/* =========================================================
+   PATCHERS
+========================================================= */
 
-  return homeState.hydratedAt;
-}
-
-export function setHomeCacheHit(
-  value = false
-) {
-  homeState.cacheHit =
-    value === true;
-
-  return homeState.cacheHit;
-}
-
-export function setHomeMounted(
-  value = true
-) {
-  homeState.ui.mounted =
-    value === true;
-
-  return homeState.ui.mounted;
-}
-
-export function setHomeActiveCard(
-  value = ""
-) {
-  homeState.ui.activeCard =
-    safeText(value, "");
-
-  return homeState.ui.activeCard;
-}
-
-export function setHomeLastAction(
-  value = ""
-) {
-  homeState.ui.lastAction =
-    safeText(value, "");
-
-  return homeState.ui.lastAction;
-}
-
-export function patchHomeUiState(
-  patch = {}
-) {
-  const next =
-    safeObject(patch);
-
-  homeState.ui = {
-    ...homeState.ui,
-    ...next,
-    mounted: Object.prototype.hasOwnProperty.call(
-      next,
-      "mounted"
-    )
-      ? safeBoolean(
-          next.mounted,
-          homeState.ui.mounted
-        )
-      : homeState.ui.mounted,
-    activeCard:
-      Object.prototype.hasOwnProperty.call(
-        next,
-        "activeCard"
-      )
-        ? safeText(
-            next.activeCard,
-            ""
-          )
-        : homeState.ui.activeCard,
-    lastAction:
-      Object.prototype.hasOwnProperty.call(
-        next,
-        "lastAction"
-      )
-        ? safeText(
-            next.lastAction,
-            ""
-          )
-        : homeState.ui.lastAction,
+export function patchDashboard(patch = {}) {
+  homeState.dashboard = {
+    ...safeObject(homeState.dashboard),
+    ...safeObject(patch),
   };
 
-  return getHomeUiState();
+  return homeState.dashboard;
 }
 
-/* =========================================================
-   LIFECYCLE HELPERS
-========================================================= */
+export function patchSummary(patch = {}) {
+  homeState.summary = {
+    ...safeObject(homeState.summary),
+    ...safeObject(patch),
+  };
 
-export function startHomeLoad() {
-  clearHomeError();
-  setHomeLoading(true);
-  setHomeLoaded(false);
-  setHomeCacheHit(false);
-  setHomeRemoteOk(false);
-  setHomeDegraded(false);
-
-  if (
-    getHomeSource() ===
-    HOME_SOURCES.ERROR
-  ) {
-    setHomeSource(
-      HOME_SOURCES.IDLE
-    );
-  }
-
-  return getHomeState();
+  return homeState.summary;
 }
 
-export function finishHomeLoad({
-  summary = null,
-  source = HOME_SOURCES.REMOTE,
-  remoteOk = false,
-  degraded = false,
-  syncedAt = "",
-  hydratedAt = "",
-  cacheHit = false,
+export function replaceHomeSnapshot({
+  dashboard = {},
+  widgets = [],
+  summary = {},
+  recent = [],
+  health = null,
+  requestId = "",
+  lastSyncAt = 0,
 } = {}) {
-  if (summary) {
-    setHomeSummary(summary);
-  }
+  setDashboard(dashboard);
+  setWidgets(widgets);
+  setSummary(summary);
+  setRecent(recent);
+  setHealth(health);
+  setRequestId(requestId);
+  setLastSyncAt(lastSyncAt);
 
-  setHomeLoading(false);
-  setHomeLoaded(true);
-  setHomeSource(source);
-  setHomeRemoteOk(
-    remoteOk === true
-  );
-  setHomeDegraded(
-    degraded === true
-  );
-  setHomeCacheHit(
-    cacheHit === true
-  );
-
-  if (syncedAt) {
-    setHomeLastSyncAt(
-      syncedAt
-    );
-  }
-
-  if (hydratedAt) {
-    setHomeHydratedAt(
-      hydratedAt
-    );
-  }
-
-  return getHomeState();
-}
-
-export function failHomeLoad(
-  error = null
-) {
-  setHomeLoading(false);
-  setHomeLoaded(false);
-  setHomeSource(
-    HOME_SOURCES.ERROR
-  );
-  setHomeRemoteOk(false);
-  setHomeDegraded(true);
-  setHomeError(error);
-
-  return getHomeState();
+  return {
+    dashboard: getDashboard(),
+    widgets: getWidgets(),
+    summary: getSummary(),
+    recent: getRecent(),
+    health: getHealth(),
+    requestId: homeState.requestId,
+    lastSyncAt: homeState.lastSyncAt,
+  };
 }
 
 /* =========================================================
-   COMPAT API HELPERS
-   Alias explícito para mantener coherencia con home.api.js
+   SELECTION HELPERS
 ========================================================= */
 
-export function beginHomeLoad() {
-  return startHomeLoad();
+export function getSelectedWidget() {
+  const selectedId = safeText(homeState.selectedWidgetId, "");
+
+  if (!selectedId) return null;
+
+  return (
+    safeArray(homeState.widgets).find(
+      (item) =>
+        safeText(item?.widgetId, "") === selectedId
+    ) || null
+  );
 }
 
-export function completeHomeLoad({
-  summary = null,
-  source = HOME_SOURCES.REMOTE,
-  remoteOk = false,
-  degraded = false,
-  syncedAt = "",
-  hydratedAt = "",
-  cacheHit = false,
-} = {}) {
-  return finishHomeLoad({
-    summary,
-    source,
-    remoteOk,
-    degraded,
-    syncedAt,
-    hydratedAt,
-    cacheHit,
-  });
-}
+export function clearSelection() {
+  homeState.selectedWidgetId = "";
+  homeState.openingWidgetId = "";
 
-export function rejectHomeLoad(
-  error = null
-) {
-  return failHomeLoad(error);
-}
-
-export function writeHomeSummary(
-  summary = {}
-) {
-  return setHomeSummary(summary);
-}
-
-export function setHomeSyncTimestamp(
-  value = ""
-) {
-  return setHomeLastSyncAt(value);
-}
-
-export function setHomeHydrationTimestamp(
-  value = ""
-) {
-  return setHomeHydratedAt(value);
-}
-
-export function markHomeCacheHit(
-  value = false
-) {
-  return setHomeCacheHit(value);
+  return {
+    selectedWidgetId: homeState.selectedWidgetId,
+    openingWidgetId: homeState.openingWidgetId,
+  };
 }
 
 /* =========================================================
-   EXPORT OBJECT
+   CACHE HELPERS
 ========================================================= */
 
-export const HomeState = {
-  HOME_CACHE_KEY,
-  HOME_CACHE_TTL,
-  HOME_SOURCES,
+export function getCachePayload() {
+  return {
+    savedAt: Date.now(),
+    dashboard: getDashboard(),
+    widgets: getWidgets(),
+    summary: getSummary(),
+    recent: getRecent(),
+    health: getHealth(),
+    widgetsCount: homeState.widgetsCount,
+    recentCount: homeState.recentCount,
+    lastSyncAt: homeState.lastSyncAt,
+    requestId: homeState.requestId,
+    page: homeState.page,
+    pageSize: homeState.pageSize,
+  };
+}
 
-  createInitialHomeUser,
-  createInitialHomeKpis,
-  createInitialHomeHealth,
-  createInitialHomeSummary,
-  createInitialHomeState,
+export function isCacheFresh(savedAt = 0) {
+  const ts = safeNumber(savedAt, 0);
 
-  getHomeState,
-  getHomeSummary,
-  getHomeSource,
-  getHomeKpis,
-  getHomeAlerts,
-  getHomeRecentActivity,
-  getHomeQuickActions,
-  getHomeHealth,
-  isHomeLoading,
-  isHomeLoaded,
-  isHomeDegraded,
-  isHomeRemoteOk,
-  getHomeError,
-  getHomeLastError,
-  getHomeLastSyncAt,
-  getHomeHydratedAt,
-  getHomeCacheHit,
-  getHomeUiState,
+  if (!ts) {
+    return false;
+  }
+
+  return Date.now() - ts < CACHE_TTL;
+}
+
+/* =========================================================
+   DEBUG
+========================================================= */
+
+export function getHomeStateSnapshot() {
+  const dashboard = normalizeDashboardState(homeState.dashboard);
+  const widgets = normalizeWidgetsState(homeState.widgets);
+  const summary = normalizeSummaryState(homeState.summary);
+  const recent = normalizeRecentState(homeState.recent);
+  const health = firstDefined(homeState.health, null);
+
+  return {
+    hydrated: homeState.hydrated,
+    loading: homeState.loading,
+    refreshing: homeState.refreshing,
+    loaded: homeState.loaded,
+
+    openingWidgetId: homeState.openingWidgetId,
+    selectedWidgetId: homeState.selectedWidgetId,
+
+    error: homeState.error,
+
+    hasDashboard: Boolean(Object.keys(dashboard).length),
+    widgetsCount: widgets.length,
+    recentCount: recent.length,
+    summaryKeys: Object.keys(summary).length,
+
+    hasHealth: Boolean(health),
+    healthStatus: safeText(health?.status, ""),
+    healthService: safeText(health?.service, ""),
+
+    lastSyncAt: homeState.lastSyncAt,
+    requestId: homeState.requestId,
+
+    page: homeState.page,
+    pageSize: homeState.pageSize,
+
+    hasInflight: Boolean(inflightLoad),
+
+    dashboardPreview: {
+      updatedAt: safeText(
+        firstDefined(
+          dashboard.updatedAt,
+          dashboard.lastUpdate,
+          dashboard.generatedAt
+        ),
+        ""
+      ),
+      rawKeys: Object.keys(safeObject(dashboard.raw || dashboard)).length,
+    },
+
+    summaryPreview: {
+      ...summary,
+    },
+
+    selectedWidgetPreview: getSelectedWidget()
+      ? {
+          widgetId: safeText(getSelectedWidget()?.widgetId, ""),
+          title: safeText(getSelectedWidget()?.title, ""),
+          type: safeText(getSelectedWidget()?.type, ""),
+          status: safeText(getSelectedWidget()?.status, ""),
+        }
+      : null,
+  };
+}
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
+export default {
+  CACHE_KEY,
+  CACHE_TTL,
+  DEFAULT_PAGE_SIZE,
+  homeState,
+
+  getInflightLoad,
+  setInflightLoad,
+  clearInflightLoad,
 
   resetHomeState,
-  setHomeLoading,
-  setHomeLoaded,
-  setHomeError,
-  clearHomeError,
-  clearHomeLastError,
-  setHomeSummary,
-  patchHomeSummary,
-  clearHomeSummary,
-  setHomeSource,
-  setHomeRemoteOk,
-  setHomeDegraded,
-  setHomeLastSyncAt,
-  setHomeHydratedAt,
-  setHomeCacheHit,
-  setHomeMounted,
-  setHomeActiveCard,
-  setHomeLastAction,
-  patchHomeUiState,
 
-  startHomeLoad,
-  finishHomeLoad,
-  failHomeLoad,
+  setLoading,
+  setRefreshing,
+  setLoaded,
+  setHydrated,
+  setOpeningWidgetId,
+  setSelectedWidgetId,
 
-  beginHomeLoad,
-  completeHomeLoad,
-  rejectHomeLoad,
-  writeHomeSummary,
-  setHomeSyncTimestamp,
-  setHomeHydrationTimestamp,
-  markHomeCacheHit,
+  setPage,
+  setPageSize,
+
+  setDashboard,
+  getDashboard,
+  clearDashboard,
+
+  setWidgets,
+  getWidgets,
+  clearWidgets,
+
+  setSummary,
+  getSummary,
+  clearSummary,
+
+  setRecent,
+  getRecent,
+  clearRecent,
+
+  setHealth,
+  getHealth,
+  clearHealth,
+
+  setWidgetsCount,
+  setRecentCount,
+  setRequestId,
+
+  setError,
+  clearError,
+  setLastSyncAt,
+
+  patchDashboard,
+  patchSummary,
+  replaceHomeSnapshot,
+
+  getSelectedWidget,
+  clearSelection,
+
+  getCachePayload,
+  isCacheFresh,
+  getHomeStateSnapshot,
 };
-
-export default HomeState;

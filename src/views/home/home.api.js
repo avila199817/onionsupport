@@ -2,1177 +2,893 @@
    Onion SPA - Home API
    Archivo: src/views/home/home.api.js
 
-   FINAL PRO SYSTEM · BACKEND REAL SUMMARY · 10/10
+   FINAL PRO SYSTEM · API LAYER · DASHBOARD SUMMARY FIRST
 
-   Responsabilidades:
-   - cargar summary real de la Home
-   - consumir /api/dashboard/summary
-   - aplicar estrategia cache-first inteligente
-   - hidratar store del módulo
-   - persistir cache local
-   - tolerar backend envuelto o plano
-   - preservar contrato esperado por home.template.js
-   - evitar dobles fetch concurrentes
-   - diferenciar origen real remote / cache:fresh / cache:stale / fallback:local
-   - degradar con elegancia si falla backend
+   RESPONSABILIDADES:
+   - centralizar llamadas HTTP del módulo home
+   - cargar dashboard summary
+   - health local opcional del módulo dashboard
+   - refresh forzado
+   - hidratar store/state
+   - normalizar payloads backend heterogéneos
+   - soportar adapters múltiples de request
+   - anti-race soft para dashboard load
+
+   HARDENING PRO:
+   - soporta { ok, data, payload, result, summary, dashboard }
+   - soporta nested envelopes
+   - fallback AppCore.apiClient -> AppCore.request -> Http -> fetch
+   - persistencia coherente en store/state
+   - contrato alineado con /api/dashboard/summary
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
-import { Http } from "../../services/index.js";
 
 import {
-  HOME_CACHE_KEY,
-  HOME_CACHE_TTL,
-  HOME_SOURCES,
+  homeState,
+  setLoading,
+  setRefreshing,
+  setError,
+  setDashboard,
+  setWidgets,
+  setSummary,
+  setRecent,
+  setLastSyncAt,
+  setLoaded,
+  setRequestId,
+  setHealth,
 } from "./home.state.js";
 
 import {
-  beginHomeLoad,
-  completeHomeLoad,
-  rejectHomeLoad,
+  replaceHomeStore,
+  upsertHomeWidgetStore,
 } from "./home.store.js";
 
 /* =========================================================
-   INTERNAL
+   CONFIG
 ========================================================= */
 
-const ENDPOINT = "/api/dashboard/summary";
+const HOME_DASHBOARD_ENDPOINT = "/api/dashboard/summary";
+const HOME_DASHBOARD_LEGACY_ENDPOINT = "/api/dashboard";
+const HOME_DASHBOARD_PING_ENDPOINT = "/api/dashboard/ping";
+const HOME_TIMEOUT = 15000;
 
-let inflightLoad = null;
+let lastLoadToken = 0;
 
 /* =========================================================
-   BASICS
+   SAFE
 ========================================================= */
 
-function safeObject(value) {
-  return value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-    ? value
-    : {};
-}
-
-function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
-}
-
-function safeText(
-  value = "",
-  fallback = ""
-) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
-
+function safeText(value, fallback = "") {
+  if (value === null || value === undefined) return fallback;
   const text = String(value).trim();
   return text || fallback;
 }
 
-function safeNumber(
-  value,
-  fallback = 0
-) {
-  const number = Number(value);
-  return Number.isFinite(number)
-    ? number
-    : fallback;
+function safeNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
 }
 
-function safeBool(
-  value,
-  fallback = false
-) {
-  return typeof value === "boolean"
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function safeObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value)
     ? value
-    : fallback;
+    : {};
 }
 
-function nowMs() {
-  return Date.now();
-}
-
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function clone(value) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return value ?? null;
-  }
-
-  try {
+function first(...values) {
+  for (const value of values) {
     if (
-      typeof structuredClone ===
-      "function"
+      value !== undefined &&
+      value !== null &&
+      String(value).trim() !== ""
     ) {
-      return structuredClone(value);
+      return value;
     }
-  } catch {}
-
-  try {
-    return JSON.parse(
-      JSON.stringify(value)
-    );
-  } catch {
-    return value;
-  }
-}
-
-function safeLog(...args) {
-  try {
-    AppCore?.utils?.log?.(...args);
-  } catch {}
-}
-
-function safeWarn(...args) {
-  try {
-    AppCore?.utils?.warn?.(...args);
-  } catch {
-    console.warn(...args);
-  }
-}
-
-function safeError(...args) {
-  try {
-    AppCore?.utils?.error?.(...args);
-  } catch {
-    console.error(...args);
-  }
-}
-
-function safeEmit(
-  eventName,
-  payload = {}
-) {
-  try {
-    AppCore?.events?.emit?.(
-      eventName,
-      payload
-    );
-  } catch {}
-}
-
-function getStorageApi() {
-  return AppCore?.storage || null;
-}
-
-function getCurrentUser() {
-  return AppCore?.state?.user || null;
-}
-
-function getCurrentUserId() {
-  const user = getCurrentUser();
-
-  return (
-    safeText(
-      user?.userId ||
-        user?.id,
-      ""
-    ) || null
-  );
-}
-
-function getHttpClient() {
-  if (
-    Http &&
-    typeof Http.get ===
-      "function"
-  ) {
-    return Http;
-  }
-
-  if (
-    AppCore?.apiClient &&
-    typeof AppCore.apiClient.get ===
-      "function"
-  ) {
-    return AppCore.apiClient;
-  }
-
-  if (
-    AppCore?.request &&
-    typeof AppCore.request ===
-      "function"
-  ) {
-    return {
-      get(path, options = {}) {
-        return AppCore.request(path, {
-          ...options,
-          method: "GET",
-        });
-      },
-    };
   }
 
   return null;
 }
 
-function isFreshTimestamp(
-  savedAt = 0,
-  ttl = HOME_CACHE_TTL
-) {
+function nextLoadToken() {
+  lastLoadToken += 1;
+  return lastLoadToken;
+}
+
+function isActiveLoadToken(token) {
+  return token === lastLoadToken;
+}
+
+/* =========================================================
+   URL / AUTH HELPERS
+========================================================= */
+
+function getApiBase() {
+  const apiBase = safeText(AppCore?.config?.apiBase, "");
+  return apiBase.replace(/\/+$/, "");
+}
+
+function buildAbsoluteUrl(path = "") {
+  const cleanPath = String(path || "").trim();
+
+  if (!cleanPath) return getApiBase();
+  if (/^https?:\/\//i.test(cleanPath)) return cleanPath;
+
+  return `${getApiBase()}${cleanPath}`;
+}
+
+function getAuthToken() {
+  return safeText(
+    first(
+      AppCore?.state?.token,
+      AppCore?.state?.accessToken,
+      AppCore?.auth?.getToken?.(),
+      AppCore?.Auth?.getToken?.(),
+      localStorage.getItem("token"),
+      sessionStorage.getItem("token")
+    ),
+    ""
+  );
+}
+
+function getRequestHeaders(extraHeaders = {}) {
+  const token = getAuthToken();
+
+  return {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...extraHeaders,
+  };
+}
+
+function getApiClient() {
+  return AppCore?.apiClient || null;
+}
+
+function getHttpModule() {
   return (
-    safeNumber(savedAt, 0) > 0 &&
-    nowMs() - safeNumber(savedAt, 0) <=
-      safeNumber(ttl, 0)
+    AppCore?.modules?.Http ||
+    AppCore?.Http ||
+    window?.Http ||
+    null
   );
 }
 
 /* =========================================================
-   CACHE
+   ERROR NORMALIZATION
 ========================================================= */
 
-function buildCachePayload(summary) {
+function normalizeErrorMessage(error = null, fallback = "Error de API.") {
+  const message = safeText(
+    first(
+      error?.message,
+      error?.response?.message,
+      error?.response?.data?.message,
+      error?.response?.error,
+      error?.data?.message,
+      error?.data?.error,
+      error?.error,
+      fallback
+    ),
+    fallback
+  );
+
+  const status = Number(
+    first(
+      error?.status,
+      error?.response?.status,
+      error?.response?.data?.status
+    )
+  );
+
+  const errorCode = safeText(
+    first(
+      error?.code,
+      error?.response?.error,
+      error?.response?.data?.error,
+      error?.data?.error
+    ),
+    ""
+  );
+
+  if (status === 401 || errorCode === "UNAUTHORIZED") {
+    return "No autorizado. Inicia sesión de nuevo.";
+  }
+
+  if (status === 403 || errorCode === "FORBIDDEN") {
+    return "No tienes permisos para acceder al dashboard.";
+  }
+
+  if (status === 404 || errorCode === "DASHBOARD_ROUTE_NOT_FOUND") {
+    return "La ruta del dashboard no existe o no está disponible.";
+  }
+
+  if (errorCode === "DASHBOARD_ERROR") {
+    return "El dashboard devolvió un error interno.";
+  }
+
+  return message;
+}
+
+/* =========================================================
+   RESPONSE NORMALIZATION
+========================================================= */
+
+function looksLikeDashboard(value = null) {
+  const obj = safeObject(value);
+
+  return Boolean(
+    obj.summary ||
+      obj.stats ||
+      obj.metrics ||
+      obj.widgets ||
+      obj.cards ||
+      obj.kpis ||
+      obj.recent ||
+      obj.recentActivity ||
+      obj.activity ||
+      obj.timeline
+  );
+}
+
+function looksLikeWidget(value = null) {
+  const obj = safeObject(value);
+
+  return Boolean(
+    obj.widgetId ||
+      obj.id ||
+      obj.key ||
+      obj.slug ||
+      obj.code ||
+      obj.title ||
+      obj.name ||
+      obj.label
+  );
+}
+
+function unwrapResponseEnvelope(payload = null) {
+  if (payload === null || payload === undefined) {
+    return null;
+  }
+
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  const obj = safeObject(payload);
+
+  if (!Object.keys(obj).length) {
+    return payload;
+  }
+
+  if (obj.dashboard) return unwrapResponseEnvelope(obj.dashboard);
+  if (obj.summary && typeof obj.summary === "object" && !Array.isArray(obj.summary)) {
+    return obj;
+  }
+  if (obj.payload) return unwrapResponseEnvelope(obj.payload);
+  if (obj.result) return unwrapResponseEnvelope(obj.result);
+  if (obj.data) return unwrapResponseEnvelope(obj.data);
+
+  return obj;
+}
+
+function pickDashboard(payload = null) {
+  if (!payload) {
+    return null;
+  }
+
+  if (looksLikeDashboard(payload)) {
+    return payload;
+  }
+
+  const obj = safeObject(payload);
+
+  if (looksLikeDashboard(obj.dashboard)) return obj.dashboard;
+  if (looksLikeDashboard(obj.data)) return obj.data;
+  if (looksLikeDashboard(obj.result)) return obj.result;
+  if (looksLikeDashboard(obj.payload)) return obj.payload;
+  if (looksLikeDashboard(obj.summary)) return obj;
+
+  if (obj.data && typeof obj.data === "object") {
+    return pickDashboard(obj.data);
+  }
+
+  if (obj.payload && typeof obj.payload === "object") {
+    return pickDashboard(obj.payload);
+  }
+
+  if (obj.result && typeof obj.result === "object") {
+    return pickDashboard(obj.result);
+  }
+
+  return Object.keys(obj).length ? obj : null;
+}
+
+function getRequestIdFromPayload(payload = null) {
+  const obj = safeObject(payload);
+
+  return safeText(
+    first(
+      obj.requestId,
+      obj.data?.requestId,
+      obj.payload?.requestId,
+      obj.meta?.requestId
+    ),
+    ""
+  );
+}
+
+function getDashboardSummaryBlock(dashboard = {}) {
+  return safeObject(
+    first(
+      dashboard.summary,
+      dashboard.stats,
+      dashboard.metrics,
+      dashboard.totals
+    )
+  );
+}
+
+function getDashboardWidgetsBlock(dashboard = {}) {
+  return safeArray(
+    first(
+      dashboard.widgets,
+      dashboard.cards,
+      dashboard.kpis,
+      dashboard.items
+    )
+  );
+}
+
+function getDashboardRecentBlock(dashboard = {}) {
+  return safeArray(
+    first(
+      dashboard.recent,
+      dashboard.recentActivity,
+      dashboard.activity,
+      dashboard.timeline
+    )
+  );
+}
+
+function getWidgetId(item = {}) {
+  return safeText(
+    first(
+      item.widgetId,
+      item.id,
+      item.key,
+      item.slug,
+      item.code
+    ),
+    ""
+  );
+}
+
+function getWidgetTitle(item = {}) {
+  return safeText(
+    first(
+      item.title,
+      item.name,
+      item.label,
+      item.heading
+    ),
+    "Bloque"
+  );
+}
+
+function getWidgetDescription(item = {}) {
+  return safeText(
+    first(
+      item.description,
+      item.descripcion,
+      item.subtitle,
+      item.summary,
+      item.text
+    ),
+    ""
+  );
+}
+
+function getWidgetType(item = {}) {
+  return safeText(
+    first(
+      item.type,
+      item.kind,
+      item.variant,
+      item.category
+    ),
+    "widget"
+  );
+}
+
+function getWidgetValue(item = {}) {
+  return first(
+    item.value,
+    item.total,
+    item.amount,
+    item.count,
+    item.metric
+  );
+}
+
+function getWidgetTrend(item = {}) {
+  return first(
+    item.trend,
+    item.delta,
+    item.change,
+    item.variation
+  );
+}
+
+function getWidgetStatus(item = {}) {
+  return safeText(
+    first(
+      item.status,
+      item.estado,
+      item.state
+    ),
+    "active"
+  );
+}
+
+function getWidgetRoute(item = {}) {
+  return safeText(
+    first(
+      item.route,
+      item.href,
+      item.link,
+      item.to
+    ),
+    ""
+  );
+}
+
+function getWidgetUpdatedAt(item = {}) {
+  return first(
+    item.updatedAt,
+    item.lastUpdate,
+    item.modifiedAt,
+    item.createdAt
+  );
+}
+
+function normalizeWidget(item = {}) {
+  const raw = safeObject(item);
+
   return {
-    savedAt: nowMs(),
-    userId: getCurrentUserId(),
-    summary: clone(summary),
+    ...raw,
+    widgetId: getWidgetId(raw),
+    title: getWidgetTitle(raw),
+    description: getWidgetDescription(raw),
+    type: getWidgetType(raw),
+    value: getWidgetValue(raw),
+    trend: getWidgetTrend(raw),
+    status: getWidgetStatus(raw),
+    route: getWidgetRoute(raw),
+    updatedAt: getWidgetUpdatedAt(raw),
   };
 }
 
-function saveCache(summary) {
-  try {
-    const storage =
-      getStorageApi();
+function normalizeDashboard(payload = null) {
+  const raw = safeObject(pickDashboard(payload));
 
-    if (
-      !storage ||
-      typeof storage.set !==
-        "function"
-    ) {
-      return false;
-    }
+  const summary = getDashboardSummaryBlock(raw);
+  const widgets = getDashboardWidgetsBlock(raw).map((item) =>
+    normalizeWidget(item)
+  );
+  const recent = getDashboardRecentBlock(raw).map((item) =>
+    safeObject(item)
+  );
 
-    storage.set(
-      HOME_CACHE_KEY,
-      buildCachePayload(summary)
-    );
-
-    return true;
-  } catch (error) {
-    safeWarn(
-      "[HomeAPI] saveCache warning",
-      error
-    );
-    return false;
-  }
+  return {
+    ...raw,
+    summary,
+    widgets,
+    recent,
+    updatedAt: first(
+      raw.updatedAt,
+      raw.lastUpdate,
+      raw.generatedAt,
+      raw.createdAt
+    ),
+  };
 }
 
-function clearCache() {
-  try {
-    const storage =
-      getStorageApi();
+/* =========================================================
+   REQUEST ADAPTERS
+========================================================= */
 
-    if (
-      !storage ||
-      typeof storage.remove !==
-        "function"
-    ) {
-      return false;
-    }
+async function requestViaApiClient(method = "GET", path = "", options = {}) {
+  const client = getApiClient();
 
-    storage.remove(
-      HOME_CACHE_KEY
-    );
-
-    return true;
-  } catch (error) {
-    safeWarn(
-      "[HomeAPI] clearCache warning",
-      error
-    );
-    return false;
+  if (!client) {
+    throw new Error("HOME_API_CLIENT_UNAVAILABLE");
   }
+
+  const verb = String(method || "GET").toLowerCase();
+  const timeout = safeNumber(options.timeout, HOME_TIMEOUT);
+
+  if (verb === "get" && typeof client.get === "function") {
+    return client.get(path, {
+      timeout,
+      auth: true,
+      headers: options.headers,
+      params: options.params,
+    });
+  }
+
+  if (verb === "post" && typeof client.post === "function") {
+    return client.post(path, options.body, {
+      timeout,
+      auth: true,
+      headers: options.headers,
+      params: options.params,
+    });
+  }
+
+  if (typeof client.request === "function") {
+    return client.request(path, {
+      method: method.toUpperCase(),
+      timeout,
+      auth: true,
+      headers: options.headers,
+      params: options.params,
+      body: options.body,
+    });
+  }
+
+  throw new Error("HOME_API_CLIENT_METHOD_UNAVAILABLE");
 }
 
-function readCache() {
-  try {
-    const storage =
-      getStorageApi();
+async function requestViaAppCoreRequest(method = "GET", path = "", options = {}) {
+  if (typeof AppCore?.request !== "function") {
+    throw new Error("APP_CORE_REQUEST_UNAVAILABLE");
+  }
 
-    if (
-      !storage ||
-      typeof storage.get !==
-        "function"
-    ) {
-      return null;
+  return AppCore.request(path, {
+    method: method.toUpperCase(),
+    headers: options.headers,
+    params: options.params,
+    body:
+      options.body && typeof options.body !== "string"
+        ? JSON.stringify(options.body)
+        : options.body,
+  });
+}
+
+async function requestViaHttpModule(method = "GET", path = "", options = {}) {
+  const Http = getHttpModule();
+
+  if (!Http) {
+    throw new Error("HTTP_MODULE_UNAVAILABLE");
+  }
+
+  const verb = String(method || "GET").toLowerCase();
+
+  if (verb === "get" && typeof Http.get === "function") {
+    return Http.get(path, {
+      headers: options.headers,
+      params: options.params,
+      timeout: options.timeout,
+    });
+  }
+
+  if (verb === "post" && typeof Http.post === "function") {
+    return Http.post(path, options.body, {
+      headers: options.headers,
+      params: options.params,
+      timeout: options.timeout,
+    });
+  }
+
+  if (typeof Http.request === "function") {
+    return Http.request(path, {
+      method: method.toUpperCase(),
+      headers: options.headers,
+      params: options.params,
+      timeout: options.timeout,
+      body: options.body,
+    });
+  }
+
+  throw new Error("HTTP_MODULE_METHOD_UNAVAILABLE");
+}
+
+async function requestViaFetch(method = "GET", path = "", options = {}) {
+  const url = buildAbsoluteUrl(path);
+  const controller = new AbortController();
+  const timeout = safeNumber(options.timeout, HOME_TIMEOUT);
+
+  const timeoutId = setTimeout(() => {
+    try {
+      controller.abort();
+    } catch {}
+  }, timeout);
+
+  try {
+    const response = await fetch(url, {
+      method: method.toUpperCase(),
+      headers: options.headers,
+      body:
+        options.body === undefined || options.body === null
+          ? undefined
+          : JSON.stringify(options.body),
+      signal: controller.signal,
+    });
+
+    const text = await response.text();
+    let data = null;
+
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = { raw: text };
     }
 
-    const payload =
-      safeObject(
-        storage.get(
-          HOME_CACHE_KEY
+    if (!response.ok) {
+      const error = new Error(
+        normalizeErrorMessage(
+          {
+            ...safeObject(data),
+            status: response.status,
+          },
+          `HTTP ${response.status} en ${method.toUpperCase()} ${path}`
         )
       );
 
-    const savedAt =
-      safeNumber(
-        payload.savedAt,
-        0
-      );
+      error.response = data;
+      error.status = response.status;
 
-    const summary =
-      safeObject(
-        payload.summary
-      );
-
-    const cachedUserId =
-      safeText(
-        payload.userId,
-        ""
-      ) || null;
-
-    const currentUserId =
-      getCurrentUserId();
-
-    if (
-      !savedAt ||
-      !Object.keys(summary).length
-    ) {
-      clearCache();
-      return null;
+      throw error;
     }
 
-    if (
-      currentUserId &&
-      cachedUserId &&
-      cachedUserId !== currentUserId
-    ) {
-      clearCache();
-      return null;
-    }
+    return data;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
-    return {
-      savedAt,
-      userId: cachedUserId,
-      summary,
-      isFresh:
-        isFreshTimestamp(
-          savedAt,
-          HOME_CACHE_TTL
-        ),
-      isStale:
-        !isFreshTimestamp(
-          savedAt,
-          HOME_CACHE_TTL
-        ),
-    };
+async function request(method = "GET", path = "", options = {}) {
+  const requestOptions = {
+    timeout: safeNumber(options.timeout, HOME_TIMEOUT),
+    params: options.params,
+    body: options.body,
+    headers: getRequestHeaders({
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...(safeObject(options.headers)),
+    }),
+  };
+
+  const adapters = [
+    requestViaApiClient,
+    requestViaAppCoreRequest,
+    requestViaHttpModule,
+    requestViaFetch,
+  ];
+
+  let lastError = null;
+
+  for (const adapter of adapters) {
+    try {
+      return await adapter(method, path, requestOptions);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error("HOME_REQUEST_FAILED");
+}
+
+/* =========================================================
+   RAW REQUESTS
+========================================================= */
+
+export async function fetchHomeDashboardRequest({
+  allowLegacyFallback = true,
+} = {}) {
+  try {
+    return await request("GET", HOME_DASHBOARD_ENDPOINT, {
+      timeout: HOME_TIMEOUT,
+    });
   } catch (error) {
-    safeWarn(
-      "[HomeAPI] readCache warning",
-      error
-    );
-    clearCache();
-    return null;
+    if (!allowLegacyFallback) {
+      throw error;
+    }
+
+    const status = Number(error?.status);
+
+    if (status && status !== 404) {
+      throw error;
+    }
+
+    return request("GET", HOME_DASHBOARD_LEGACY_ENDPOINT, {
+      timeout: HOME_TIMEOUT,
+    });
   }
 }
 
-/* =========================================================
-   SUMMARY NORMALIZATION
-========================================================= */
-
-function createBaseKpis() {
-  return {
-    ticketsOpen: 0,
-    ticketsUrgent: 0,
-    clientesTotal: 0,
-    facturasPending: 0,
-    usersTotal: 0,
-    facturacionTotal: 0,
-  };
-}
-
-function createBaseHealth() {
-  return {
-    tickets: false,
-    clientes: false,
-    facturas: false,
-    users: false,
-  };
-}
-
-function createFallbackSummary() {
-  const user =
-    getCurrentUser();
-
-  return {
-    user: {
-      id:
-        safeText(
-          user?.userId ||
-            user?.id,
-          ""
-        ) || null,
-      role: safeText(
-        user?.role ||
-          user?.rol,
-        "unknown"
-      ),
-    },
-
-    generatedAt: nowIso(),
-
-    kpis: createBaseKpis(),
-
-    alerts: [
-      {
-        level: "info",
-        code: "HOME_FALLBACK",
-        message:
-          "Resumen local cargado sin datos remotos.",
-      },
-    ],
-
-    recentActivity: [],
-    quickActions: [],
-
-    health: createBaseHealth(),
-  };
-}
-
-function looksLikeDashboardSummary(
-  value = {}
-) {
-  const obj =
-    safeObject(value);
-
-  return Boolean(
-    obj.generatedAt ||
-      obj.kpis ||
-      obj.alerts ||
-      obj.recentActivity ||
-      obj.quickActions ||
-      obj.health ||
-      obj.user
-  );
-}
-
-function unwrapDashboardPayload(
-  payload = {}
-) {
-  const raw =
-    safeObject(payload);
-
-  if (
-    looksLikeDashboardSummary(raw)
-  ) {
-    return raw;
-  }
-
-  const rawData =
-    safeObject(raw.data);
-
-  if (
-    looksLikeDashboardSummary(rawData)
-  ) {
-    return rawData;
-  }
-
-  const rawDataData =
-    safeObject(rawData.data);
-
-  if (
-    looksLikeDashboardSummary(
-      rawDataData
-    )
-  ) {
-    return rawDataData;
-  }
-
-  const rawSummary =
-    safeObject(raw.summary);
-
-  if (
-    looksLikeDashboardSummary(
-      rawSummary
-    )
-  ) {
-    return rawSummary;
-  }
-
-  const rawDataSummary =
-    safeObject(rawData.summary);
-
-  if (
-    looksLikeDashboardSummary(
-      rawDataSummary
-    )
-  ) {
-    return rawDataSummary;
-  }
-
-  return {};
-}
-
-function normalizeAlert(
-  alert,
-  index = 0
-) {
-  const item =
-    safeObject(alert);
-
-  return {
-    level: safeText(
-      item.level,
-      "info"
-    ),
-    code: safeText(
-      item.code,
-      `ALERT_${index + 1}`
-    ),
-    message: safeText(
-      item.message,
-      "Alerta"
-    ),
-  };
-}
-
-function normalizeActivityItem(
-  activity,
-  index = 0
-) {
-  const item =
-    safeObject(activity);
-
-  return {
-    id: safeText(
-      item.id,
-      `activity-${index + 1}`
-    ),
-    text: safeText(
-      item.text ||
-        item.label ||
-        item.title,
-      "Movimiento"
-    ),
-    label: safeText(
-      item.label ||
-        item.text ||
-        item.title,
-      "Movimiento"
-    ),
-    date: safeText(
-      item.date ||
-        item.createdAt,
-      ""
-    ),
-    createdAt: safeText(
-      item.createdAt ||
-        item.date,
-      ""
-    ),
-  };
-}
-
-function normalizeQuickAction(
-  action,
-  index = 0
-) {
-  const item =
-    safeObject(action);
-
-  return {
-    key: safeText(
-      item.key,
-      `action-${index + 1}`
-    ),
-    label: safeText(
-      item.label,
-      "Acción"
-    ),
-    href: safeText(
-      item.href,
-      "#"
-    ),
-  };
-}
-
-function normalizeHealth(
-  source = {},
-  fallback = {}
-) {
-  const health =
-    safeObject(source);
-
-  return {
-    tickets: safeBool(
-      health.tickets,
-      safeBool(
-        fallback.tickets,
-        false
-      )
-    ),
-    clientes: safeBool(
-      health.clientes,
-      safeBool(
-        fallback.clientes,
-        false
-      )
-    ),
-    facturas: safeBool(
-      health.facturas,
-      safeBool(
-        fallback.facturas,
-        false
-      )
-    ),
-    users: safeBool(
-      health.users,
-      safeBool(
-        fallback.users,
-        false
-      )
-    ),
-  };
-}
-
-function normalizeSummary(
-  payload = {}
-) {
-  const source =
-    unwrapDashboardPayload(
-      payload
-    );
-
-  const fallback =
-    createFallbackSummary();
-
-  const rawKpis =
-    safeObject(source.kpis);
-
-  const alerts =
-    safeArray(source.alerts)
-      .map(normalizeAlert)
-      .filter(Boolean);
-
-  const recentActivity =
-    safeArray(
-      source.recentActivity
-    )
-      .map(
-        normalizeActivityItem
-      )
-      .filter(Boolean);
-
-  const quickActions =
-    safeArray(
-      source.quickActions
-    )
-      .map(
-        normalizeQuickAction
-      )
-      .filter(Boolean);
-
-  return {
-    user: {
-      id:
-        safeText(
-          source?.user?.id,
-          ""
-        ) ||
-        fallback.user.id,
-      role: safeText(
-        source?.user?.role,
-        fallback.user.role
-      ),
-    },
-
-    generatedAt: safeText(
-      source.generatedAt,
-      nowIso()
-    ),
-
-    kpis: {
-      ticketsOpen: safeNumber(
-        rawKpis.ticketsOpen,
-        fallback.kpis.ticketsOpen
-      ),
-      ticketsUrgent: safeNumber(
-        rawKpis.ticketsUrgent,
-        fallback.kpis.ticketsUrgent
-      ),
-      clientesTotal: safeNumber(
-        rawKpis.clientesTotal,
-        fallback.kpis.clientesTotal
-      ),
-      facturasPending: safeNumber(
-        rawKpis.facturasPending,
-        fallback.kpis.facturasPending
-      ),
-      usersTotal: safeNumber(
-        rawKpis.usersTotal,
-        fallback.kpis.usersTotal
-      ),
-      facturacionTotal: safeNumber(
-        rawKpis.facturacionTotal,
-        fallback.kpis.facturacionTotal
-      ),
-    },
-
-    alerts:
-      alerts.length > 0
-        ? alerts
-        : fallback.alerts,
-
-    recentActivity,
-    quickActions,
-
-    health: normalizeHealth(
-      source.health,
-      fallback.health
-    ),
-  };
-}
-
-/* =========================================================
-   FALLBACK / REMOTE
-========================================================= */
-
-function buildLocalSummary() {
-  const user =
-    getCurrentUser();
-
-  const appName = safeText(
-    AppCore?.config?.appName,
-    "Onion Support"
-  );
-
-  return normalizeSummary({
-    user: {
-      id:
-        safeText(
-          user?.userId ||
-            user?.id,
-          ""
-        ) || null,
-      role: safeText(
-        user?.role ||
-          user?.rol,
-        "unknown"
-      ),
-    },
-
-    generatedAt: nowIso(),
-
-    kpis: createBaseKpis(),
-
-    alerts: [
-      {
-        level: "info",
-        code: "LOCAL_SUMMARY",
-        message: `${appName} operativo sin resumen remoto disponible.`,
-      },
-    ],
-
-    recentActivity: [],
-    quickActions: [],
-
-    health: createBaseHealth(),
+export async function fetchHomeHealthRequest() {
+  return request("GET", HOME_DASHBOARD_PING_ENDPOINT, {
+    timeout: HOME_TIMEOUT,
   });
 }
 
-async function fetchRemoteSummary() {
-  const client =
-    getHttpClient();
+export async function getHomeDashboardRequest(options = {}) {
+  const response = await fetchHomeDashboardRequest(options);
+  return normalizeDashboard(response);
+}
 
-  if (!client) {
-    const error = new Error(
-      "No hay cliente HTTP disponible."
-    );
+/* =========================================================
+   CACHE HYDRATE
+========================================================= */
 
-    safeWarn(
-      "[HomeAPI] no hay cliente HTTP disponible"
-    );
+export function hydrateHomeFromCache() {
+  try {
+    const currentDashboard = safeObject(homeState?.dashboard);
+    const currentWidgets = safeArray(homeState?.widgets);
+
+    if (
+      Object.keys(currentDashboard).length ||
+      currentWidgets.length
+    ) {
+      replaceHomeStore({
+        dashboard: currentDashboard,
+        widgets: currentWidgets,
+        summary: safeObject(homeState?.summary),
+        recent: safeArray(homeState?.recent),
+        requestId: safeText(homeState?.requestId, ""),
+        lastSyncAt: first(homeState?.lastSyncAt, null),
+      });
+    }
 
     return {
-      ok: false,
-      remoteOk: false,
-      degraded: true,
-      source:
-        HOME_SOURCES.FALLBACK_LOCAL,
-      summary:
-        buildLocalSummary(),
-      error,
+      dashboard: currentDashboard,
+      widgets: currentWidgets,
+      summary: safeObject(homeState?.summary),
+      recent: safeArray(homeState?.recent),
+    };
+  } catch {
+    return {
+      dashboard: {},
+      widgets: [],
+      summary: {},
+      recent: [],
     };
   }
+}
+
+/* =========================================================
+   LOAD DASHBOARD
+========================================================= */
+
+export async function loadHomeDashboard({
+  force = false,
+  allowLegacyFallback = true,
+} = {}) {
+  const loadToken = nextLoadToken();
+  const firstLoad = !Boolean(homeState?.hydrated);
+  const shouldShowLoading = firstLoad && !force;
 
   try {
-    const response =
-      await client.get(
-        ENDPOINT,
-        {
-          auth: true,
-          retries: 1,
-        }
-      );
+    setError(null);
 
-    const data =
-      safeObject(
-        response?.data ||
-          response
-      );
-
-    if (
-      !Object.keys(data).length
-    ) {
-      return {
-        ok: true,
-        remoteOk: false,
-        degraded: true,
-        source:
-          HOME_SOURCES.FALLBACK_LOCAL,
-        summary:
-          buildLocalSummary(),
-        error: null,
-      };
+    if (shouldShowLoading) {
+      setLoading(true);
+    } else {
+      setRefreshing(true);
     }
 
-    const summary =
-      normalizeSummary(data);
+    const rawResponse = await fetchHomeDashboardRequest({
+      allowLegacyFallback,
+    });
 
-    return {
-      ok: true,
-      remoteOk: true,
-      degraded: false,
-      source:
-        HOME_SOURCES.REMOTE,
+    const requestId = getRequestIdFromPayload(rawResponse);
+    const dashboard = normalizeDashboard(rawResponse);
+    const widgets = safeArray(dashboard?.widgets);
+    const summary = safeObject(dashboard?.summary);
+    const recent = safeArray(dashboard?.recent);
+
+    if (!isActiveLoadToken(loadToken)) {
+      return safeObject(homeState?.dashboard);
+    }
+
+    replaceHomeStore({
+      dashboard,
+      widgets,
       summary,
-      error: null,
-    };
+      recent,
+      requestId,
+      lastSyncAt: Date.now(),
+    });
+
+    widgets.forEach((item) => {
+      if (looksLikeWidget(item)) {
+        upsertHomeWidgetStore?.(item);
+      }
+    });
+
+    setDashboard(dashboard);
+    setWidgets(widgets);
+    setSummary(summary);
+    setRecent(recent);
+    setRequestId(requestId);
+    setLastSyncAt(Date.now());
+    setLoaded(true);
+    setError(null);
+
+    return dashboard;
   } catch (error) {
-    safeWarn(
-      "[HomeAPI] remote summary unavailable",
-      error
+    const message = normalizeErrorMessage(
+      error,
+      "No se pudo cargar el dashboard de inicio."
     );
 
-    return {
-      ok: false,
-      remoteOk: false,
-      degraded: true,
-      source:
-        HOME_SOURCES.FALLBACK_LOCAL,
-      summary:
-        buildLocalSummary(),
-      error,
-    };
+    if (!isActiveLoadToken(loadToken)) {
+      return safeObject(homeState?.dashboard);
+    }
+
+    console.error("❌ HOME DASHBOARD LOAD:", error);
+
+    setError(message);
+    setLoaded(true);
+
+    throw error;
+  } finally {
+    if (isActiveLoadToken(loadToken)) {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }
 }
 
 /* =========================================================
-   STORE HYDRATION
+   LOAD HEALTH
 ========================================================= */
 
-function hydrateSummaryIntoStore({
-  summary,
-  source = HOME_SOURCES.IDLE,
-  remoteOk = false,
-  degraded = false,
-  syncedAt = "",
-  hydratedAt = "",
-  cacheHit = false,
+export async function loadHomeHealth({
+  silent = true,
 } = {}) {
-  completeHomeLoad({
-    summary,
-    source,
-    remoteOk:
-      remoteOk === true,
-    degraded:
-      degraded === true,
-    syncedAt: safeText(
-      syncedAt,
-      nowIso()
-    ),
-    hydratedAt: safeText(
-      hydratedAt,
-      nowIso()
-    ),
-    cacheHit:
-      cacheHit === true,
-  });
-}
+  try {
+    const health = await fetchHomeHealthRequest();
 
-/* =========================================================
-   LOADERS
-========================================================= */
+    setHealth?.(safeObject(health));
 
-export async function loadHomeSummary(
-  options = {}
-) {
-  const {
-    force = false,
-    preferCache = true,
-  } = safeObject(options);
+    return safeObject(health);
+  } catch (error) {
+    console.error("❌ HOME DASHBOARD PING:", error);
 
-  if (inflightLoad) {
-    return inflightLoad;
-  }
+    if (!silent) {
+      throw error;
+    }
 
-  inflightLoad =
-    (async () => {
-      beginHomeLoad();
-
-      try {
-        const cached =
-          readCache();
-
-        if (
-          force !== true &&
-          preferCache === true &&
-          cached?.isFresh &&
-          cached?.summary
-        ) {
-          const summary =
-            normalizeSummary(
-              cached.summary
-            );
-
-          const hydratedAt =
-            nowIso();
-
-          hydrateSummaryIntoStore({
-            summary,
-            source:
-              HOME_SOURCES.CACHE_FRESH,
-            remoteOk: false,
-            degraded: false,
-            syncedAt:
-              new Date(
-                cached.savedAt
-              ).toISOString(),
-            hydratedAt,
-            cacheHit: true,
-          });
-
-          safeEmit(
-            "home:summary:loaded",
-            {
-              source:
-                HOME_SOURCES.CACHE_FRESH,
-              cachedAt:
-                cached.savedAt,
-              remoteOk: false,
-              degraded: false,
-            }
-          );
-
-          return {
-            ok: true,
-            source:
-              HOME_SOURCES.CACHE_FRESH,
-            remoteOk: false,
-            degraded: false,
-            cacheHit: true,
-            summary,
-            error: null,
-          };
-        }
-
-        const remote =
-          await fetchRemoteSummary();
-
-        if (
-          remote.remoteOk !== true &&
-          cached?.summary
-        ) {
-          const summary =
-            normalizeSummary(
-              cached.summary
-            );
-
-          const hydratedAt =
-            nowIso();
-
-          hydrateSummaryIntoStore({
-            summary,
-            source:
-              HOME_SOURCES.CACHE_STALE,
-            remoteOk: false,
-            degraded: true,
-            syncedAt:
-              new Date(
-                cached.savedAt
-              ).toISOString(),
-            hydratedAt,
-            cacheHit: true,
-          });
-
-          safeEmit(
-            "home:summary:loaded",
-            {
-              source:
-                HOME_SOURCES.CACHE_STALE,
-              cachedAt:
-                cached.savedAt,
-              remoteOk: false,
-              degraded: true,
-              error:
-                remote.error ||
-                null,
-            }
-          );
-
-          return {
-            ok: true,
-            source:
-              HOME_SOURCES.CACHE_STALE,
-            remoteOk: false,
-            degraded: true,
-            cacheHit: true,
-            summary,
-            error:
-              remote.error ||
-              null,
-          };
-        }
-
-        const summary =
-          normalizeSummary(
-            remote.summary
-          );
-
-        const syncedAt =
-          remote.source ===
-          HOME_SOURCES.REMOTE
-            ? nowIso()
-            : summary.generatedAt ||
-              nowIso();
-
-        const hydratedAt =
-          nowIso();
-
-        hydrateSummaryIntoStore({
-          summary,
-          source: remote.source,
-          remoteOk:
-            remote.remoteOk ===
-            true,
-          degraded:
-            remote.degraded ===
-            true,
-          syncedAt,
-          hydratedAt,
-          cacheHit: false,
-        });
-
-        if (
-          remote.source ===
-          HOME_SOURCES.REMOTE
-        ) {
-          saveCache(summary);
-        }
-
-        safeEmit(
-          "home:summary:loaded",
-          {
-            source:
-              remote.source,
-            ok:
-              remote.ok ===
-              true,
-            remoteOk:
-              remote.remoteOk ===
-              true,
-            degraded:
-              remote.degraded ===
-              true,
-          }
-        );
-
-        return {
-          ok: true,
-          source:
-            remote.source,
-          remoteOk:
-            remote.remoteOk ===
-            true,
-          degraded:
-            remote.degraded ===
-            true,
-          cacheHit: false,
-          summary,
-          error:
-            remote.error ||
-            null,
-        };
-      } catch (error) {
-        safeError(
-          "[HomeAPI] loadHomeSummary error",
-          error
-        );
-
-        rejectHomeLoad(error);
-
-        return {
-          ok: false,
-          source:
-            HOME_SOURCES.ERROR,
-          remoteOk: false,
-          degraded: true,
-          cacheHit: false,
-          error,
-          summary: null,
-        };
-      } finally {
-        inflightLoad = null;
-      }
-    })();
-
-  return inflightLoad;
-}
-
-export async function refreshHomeSummary() {
-  return loadHomeSummary({
-    force: true,
-    preferCache: false,
-  });
-}
-
-export function getCachedHomeSummary() {
-  const cached =
-    readCache();
-
-  if (!cached?.summary) {
     return null;
   }
-
-  return normalizeSummary(
-    cached.summary
-  );
-}
-
-export function primeHomeSummaryCache(
-  summary = {}
-) {
-  const normalized =
-    normalizeSummary(summary);
-
-  saveCache(normalized);
-
-  return normalized;
-}
-
-export function clearHomeSummaryCache() {
-  return clearCache();
 }
 
 /* =========================================================
-   EXPORT OBJECT
+   REFRESH
 ========================================================= */
 
-export const HomeAPI = {
-  loadHomeSummary,
-  refreshHomeSummary,
-  getCachedHomeSummary,
-  primeHomeSummaryCache,
-  clearHomeSummaryCache,
-};
+export async function refreshHomeDashboard(options = {}) {
+  return loadHomeDashboard({
+    ...safeObject(options),
+    force: true,
+  });
+}
 
-export default HomeAPI;
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
+export default {
+  fetchHomeDashboardRequest,
+  fetchHomeHealthRequest,
+  getHomeDashboardRequest,
+  hydrateHomeFromCache,
+  loadHomeDashboard,
+  loadHomeHealth,
+  refreshHomeDashboard,
+};

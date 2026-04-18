@@ -7,6 +7,7 @@
    RESPONSABILIDADES:
    - centralizar llamadas HTTP del módulo home
    - cargar dashboard summary
+   - resolver widget individual desde snapshot dashboard
    - health local opcional del módulo dashboard
    - refresh forzado
    - hidratar store/state
@@ -37,6 +38,7 @@ import {
   setLoaded,
   setRequestId,
   setHealth,
+  setHydrated,
 } from "./home.state.js";
 
 import {
@@ -265,7 +267,11 @@ function unwrapResponseEnvelope(payload = null) {
   }
 
   if (obj.dashboard) return unwrapResponseEnvelope(obj.dashboard);
-  if (obj.summary && typeof obj.summary === "object" && !Array.isArray(obj.summary)) {
+  if (
+    obj.summary &&
+    typeof obj.summary === "object" &&
+    !Array.isArray(obj.summary)
+  ) {
     return obj;
   }
   if (obj.payload) return unwrapResponseEnvelope(obj.payload);
@@ -497,6 +503,21 @@ function normalizeDashboard(payload = null) {
   };
 }
 
+function findWidgetInCollection(items = [], widgetId = "") {
+  const target = safeText(widgetId, "");
+
+  if (!target) {
+    return null;
+  }
+
+  return (
+    safeArray(items).find((item) => {
+      const currentId = getWidgetId(item);
+      return currentId === target;
+    }) || null
+  );
+}
+
 /* =========================================================
    REQUEST ADAPTERS
 ========================================================= */
@@ -721,6 +742,22 @@ export async function getHomeDashboardRequest(options = {}) {
   return normalizeDashboard(response);
 }
 
+export async function getHomeWidgetByIdRequest(
+  widgetId = "",
+  options = {}
+) {
+  const id = safeText(widgetId, "");
+
+  if (!id) {
+    return null;
+  }
+
+  const dashboard = await getHomeDashboardRequest(options);
+  const widgets = safeArray(dashboard?.widgets);
+
+  return findWidgetInCollection(widgets, id);
+}
+
 /* =========================================================
    CACHE HYDRATE
 ========================================================= */
@@ -742,6 +779,8 @@ export function hydrateHomeFromCache() {
         requestId: safeText(homeState?.requestId, ""),
         lastSyncAt: first(homeState?.lastSyncAt, null),
       });
+
+      setHydrated?.(true);
     }
 
     return {
@@ -817,6 +856,7 @@ export async function loadHomeDashboard({
     setRequestId(requestId);
     setLastSyncAt(Date.now());
     setLoaded(true);
+    setHydrated?.(true);
     setError(null);
 
     return dashboard;
@@ -887,6 +927,7 @@ export default {
   fetchHomeDashboardRequest,
   fetchHomeHealthRequest,
   getHomeDashboardRequest,
+  getHomeWidgetByIdRequest,
   hydrateHomeFromCache,
   loadHomeDashboard,
   loadHomeHealth,

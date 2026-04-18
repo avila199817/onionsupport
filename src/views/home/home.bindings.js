@@ -2,56 +2,32 @@
    Onion SPA - Home Bindings
    Archivo: src/views/home/home.bindings.js
 
-   FINAL PRO SYSTEM · DOM BINDINGS REAL · 10/10
-
    Responsabilidades:
-   - enlazar eventos reales de la vista Home
-   - registrar y limpiar listeners del DOM
-   - delegar acciones sobre data-home-action y data-home-card
-   - mantener la vista desacoplada del template
-   - conectar DOM con home.actions.js
-   - exponer cleanup robusto para re-render seguro
+   - bind DOM robusto
+   - refresh / retry dashboard
+   - export CSV
+   - open widget / bloque
+   - copy widget id
+   - quick actions / navegación
+   - rebind limpio tras rerender
+   - cleanup sólido por scope
+
+   FIX CRÍTICO:
+   - evita doble click handlers
+   - soporta botones dinámicos
+   - delegación premium
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 
-import {
-  handleHomeCardAction,
-  handleHomeQuickAction,
-} from "./home.actions.js";
-
-import {
-  patchHomeUi,
-  setHomeAction,
-  setHomeSelectedCard,
-} from "./home.store.js";
+const DEFAULT_SCOPE = "view:home";
 
 /* =========================================================
    HELPERS
 ========================================================= */
 
-function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
-}
-
-function isElement(value) {
-  return (
-    value instanceof Element ||
-    value instanceof HTMLDocument
-  );
-}
-
-function safeText(
-  value = "",
-  fallback = ""
-) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
+function safeText(value, fallback = "") {
+  if (value === null || value === undefined) {
     return fallback;
   }
 
@@ -60,698 +36,307 @@ function safeText(
 }
 
 function safeObject(value) {
-  return value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
+  return value && typeof value === "object" && !Array.isArray(value)
     ? value
     : {};
 }
 
-function safeQuery(
-  root,
-  selector
-) {
-  if (
-    !isElement(root) ||
-    !selector
-  ) {
-    return null;
-  }
-
+function safeWarn(...args) {
   try {
-    return root.querySelector(selector);
-  } catch {
-    return null;
-  }
-}
-
-function safeQueryAll(
-  root,
-  selector
-) {
-  if (
-    !isElement(root) ||
-    !selector
-  ) {
-    return [];
-  }
-
-  try {
-    return Array.from(
-      root.querySelectorAll(selector)
-    );
-  } catch {
-    return [];
-  }
-}
-
-function createDisposerBag() {
-  const disposers = [];
-
-  return {
-    add(disposer) {
-      if (typeof disposer === "function") {
-        disposers.push(disposer);
-      }
-    },
-
-    flush() {
-      while (disposers.length) {
-        const disposer =
-          disposers.pop();
-
-        try {
-          disposer?.();
-        } catch (error) {
-          console.error(
-            "[HomeBindings] cleanup error",
-            error
-          );
-        }
-      }
-    },
-  };
-}
-
-function addEventListenerSafe(
-  target,
-  eventName,
-  handler,
-  options
-) {
-  if (
-    !target ||
-    typeof target.addEventListener !==
-      "function" ||
-    typeof handler !== "function"
-  ) {
-    return () => {};
-  }
-
-  target.addEventListener(
-    eventName,
-    handler,
-    options
-  );
-
-  return () => {
-    try {
-      target.removeEventListener(
-        eventName,
-        handler,
-        options
-      );
-    } catch {}
-  };
-}
-
-function safeEmit(
-  eventName,
-  payload = {}
-) {
-  try {
-    AppCore?.events?.emit?.(
-      eventName,
-      payload
-    );
-  } catch (error) {
-    console.warn(
-      "[HomeBindings] emit warning",
-      error
-    );
-  }
-}
-
-/* =========================================================
-   DOM HELPERS
-========================================================= */
-
-function getHomeRoot(container) {
-  return (
-    safeQuery(
-      container,
-      '[data-home-view="true"]'
-    ) ||
-    safeQuery(
-      container,
-      ".home-view"
-    ) ||
-    container ||
-    null
-  );
-}
-
-function collectDom(root) {
-  return {
-    root,
-
-    hero: safeQuery(
-      root,
-      ".home-hero"
-    ),
-
-    kpis: safeQueryAll(
-      root,
-      ".home-kpi"
-    ),
-
-    panels: safeQueryAll(
-      root,
-      ".home-panel"
-    ),
-
-    actions: safeQueryAll(
-      root,
-      "[data-home-action]"
-    ),
-
-    cards: safeQueryAll(
-      root,
-      "[data-home-card]"
-    ),
-  };
-}
-
-function extractActionPayload(
-  element
-) {
-  if (!element) {
-    return {
-      action: "",
-      href: "",
-      card: "",
-      source: "",
-    };
-  }
-
-  return {
-    action: safeText(
-      element.getAttribute(
-        "data-home-action"
-      ),
-      ""
-    ),
-    href: safeText(
-      element.getAttribute("href"),
-      ""
-    ),
-    card: safeText(
-      element.getAttribute(
-        "data-home-card"
-      ),
-      ""
-    ),
-    source: safeText(
-      element.getAttribute(
-        "data-home-source"
-      ),
-      ""
-    ),
-  };
-}
-
-function extractCardPayload(
-  element
-) {
-  if (!element) {
-    return {
-      card: "",
-      action: "",
-    };
-  }
-
-  return {
-    card: safeText(
-      element.getAttribute(
-        "data-home-card"
-      ),
-      ""
-    ),
-    action: safeText(
-      element.getAttribute(
-        "data-home-action"
-      ),
-      ""
-    ),
-  };
-}
-
-/* =========================================================
-   VISUAL STATE
-========================================================= */
-
-function clearSelectedCards(root) {
-  safeQueryAll(
-    root,
-    '[data-home-card].is-active'
-  ).forEach((node) => {
-    try {
-      node.classList.remove(
-        "is-active"
-      );
-      node.setAttribute(
-        "aria-pressed",
-        "false"
-      );
-    } catch {}
-  });
-}
-
-function markSelectedCard(
-  root,
-  cardKey = ""
-) {
-  const normalized =
-    safeText(cardKey, "");
-
-  if (!normalized) {
-    return;
-  }
-
-  const selector = `[data-home-card="${CSS?.escape ? CSS.escape(normalized) : normalized}"]`;
-  const node =
-    safeQuery(root, selector);
-
-  if (!node) {
-    return;
-  }
-
-  try {
-    node.classList.add(
-      "is-active"
-    );
-    node.setAttribute(
-      "aria-pressed",
-      "true"
-    );
+    AppCore?.utils?.warn?.("[HomeBindings]", ...args);
   } catch {}
 }
 
-function syncSelectedCardVisual(
-  root,
-  cardKey = ""
-) {
-  clearSelectedCards(root);
-  markSelectedCard(root, cardKey);
+function resolveScopeName(scope = DEFAULT_SCOPE) {
+  return safeText(scope, DEFAULT_SCOPE);
+}
+
+function getScope(scopeName = DEFAULT_SCOPE) {
+  const finalScope = resolveScopeName(scopeName);
+
+  try {
+    AppCore?.cleanup?.run?.(finalScope);
+  } catch {}
+
+  try {
+    return AppCore?.cleanup?.scope?.(finalScope) || finalScope;
+  } catch {
+    return finalScope;
+  }
+}
+
+function getContainer() {
+  return (
+    AppCore?.dom?.viewContainer ||
+    document.getElementById("view-container") ||
+    document
+  );
+}
+
+function getWidgetId(element) {
+  return safeText(
+    element?.dataset?.widgetId ||
+      element?.getAttribute?.("data-widget-id"),
+    ""
+  );
+}
+
+function getWidgetKey(element) {
+  return safeText(
+    element?.dataset?.widgetKey ||
+      element?.getAttribute?.("data-widget-key"),
+    ""
+  );
+}
+
+function getWidgetRoute(element) {
+  return safeText(
+    element?.dataset?.route ||
+      element?.getAttribute?.("data-route") ||
+      element?.dataset?.href ||
+      element?.getAttribute?.("data-href"),
+    ""
+  );
+}
+
+function getQuickActionName(element) {
+  return safeText(
+    element?.dataset?.quickAction ||
+      element?.getAttribute?.("data-quick-action") ||
+      element?.dataset?.actionName ||
+      element?.getAttribute?.("data-action-name"),
+    ""
+  );
+}
+
+function getPayloadFromDataset(element) {
+  const raw =
+    element?.dataset?.payload ||
+    element?.getAttribute?.("data-payload") ||
+    "";
+
+  const text = safeText(raw, "");
+
+  if (!text) return {};
+
+  try {
+    const parsed = JSON.parse(text);
+    return safeObject(parsed);
+  } catch (error) {
+    safeWarn("payload JSON inválido", error);
+    return {};
+  }
+}
+
+async function safeReload(reload, loadHomeDashboard) {
+  try {
+    if (typeof reload === "function") {
+      await reload();
+      return;
+    }
+
+    if (typeof loadHomeDashboard === "function") {
+      await loadHomeDashboard({
+        force: true,
+      });
+    }
+  } catch (error) {
+    safeWarn("reload falló", error);
+  }
 }
 
 /* =========================================================
-   ACTION EXECUTION
+   MAIN
 ========================================================= */
 
-async function runQuickActionFromElement(
-  element,
-  root
-) {
-  const payload =
-    extractActionPayload(
-      element
-    );
+export function bindHomeEvents({
+  loadHomeDashboard,
+  openHomeWidgetAction,
+  copyHomeWidgetIdAction,
+  exportHomeCsvAction,
+  navigateFromHomeAction,
+  runHomeQuickAction,
+  reload,
+  scope = DEFAULT_SCOPE,
+} = {}) {
+  const scopeRef = getScope(scope);
+  const root = getContainer();
 
-  if (!payload.action) {
-    return {
-      ok: false,
-      error: new Error(
-        "Quick action sin data-home-action."
-      ),
-    };
-  }
+  const refreshBtn = document.getElementById("home-refresh-btn");
+  const retryBtn = document.getElementById("home-retry-btn");
+  const exportBtn = document.getElementById("home-export-btn");
 
-  setHomeAction(
-    payload.action
-  );
+  /* =========================================
+     DIRECT BUTTONS
+  ========================================= */
 
-  if (payload.card) {
-    setHomeSelectedCard(
-      payload.card
-    );
-    syncSelectedCardVisual(
-      root,
-      payload.card
-    );
-  }
-
-  patchHomeUi({
-    lastAction:
-      payload.action,
-    activeCard:
-      payload.card ||
-      payload.action,
-  });
-
-  safeEmit(
-    "home:bindings:action:start",
-    {
-      action:
-        payload.action,
-      href: payload.href,
-      card: payload.card,
-      source:
-        payload.source ||
-        "dom",
-    }
-  );
-
-  const result =
-    await handleHomeQuickAction(
-      payload.action,
-      {
-        href: payload.href,
-        card:
-          payload.card ||
-          payload.action,
-        source:
-          payload.source ||
-          "dom",
-        trigger: "binding",
+  if (refreshBtn) {
+    AppCore.cleanup.on(
+      scopeRef,
+      refreshBtn,
+      "click",
+      async (event) => {
+        event.preventDefault();
+        await safeReload(reload, loadHomeDashboard);
       }
     );
-
-  safeEmit(
-    result?.ok === true
-      ? "home:bindings:action:success"
-      : "home:bindings:action:error",
-    {
-      action:
-        payload.action,
-      href: payload.href,
-      card: payload.card,
-      result,
-    }
-  );
-
-  return result;
-}
-
-async function runCardActionFromElement(
-  element,
-  root
-) {
-  const payload =
-    extractCardPayload(
-      element
-    );
-
-  const cardKey =
-    payload.card ||
-    payload.action;
-
-  if (!cardKey) {
-    return {
-      ok: false,
-      error: new Error(
-        "Card action sin data-home-card ni data-home-action."
-      ),
-    };
   }
 
-  setHomeSelectedCard(
-    cardKey
-  );
-  setHomeAction(
-    payload.action ||
-      cardKey
-  );
-
-  patchHomeUi({
-    activeCard: cardKey,
-    lastAction:
-      payload.action ||
-      cardKey,
-  });
-
-  syncSelectedCardVisual(
-    root,
-    cardKey
-  );
-
-  safeEmit(
-    "home:bindings:card:start",
-    {
-      card: cardKey,
-      action:
-        payload.action ||
-        cardKey,
-    }
-  );
-
-  const result =
-    await handleHomeCardAction(
-      payload.action ||
-        cardKey,
-      {
-        card: cardKey,
-        source: "card",
-        trigger: "binding",
+  if (retryBtn) {
+    AppCore.cleanup.on(
+      scopeRef,
+      retryBtn,
+      "click",
+      async (event) => {
+        event.preventDefault();
+        await safeReload(reload, loadHomeDashboard);
       }
     );
-
-  safeEmit(
-    result?.ok === true
-      ? "home:bindings:card:success"
-      : "home:bindings:card:error",
-    {
-      card: cardKey,
-      action:
-        payload.action ||
-        cardKey,
-      result,
-    }
-  );
-
-  return result;
-}
-
-/* =========================================================
-   BINDERS
-========================================================= */
-
-function bindViewLifecycle({
-  root,
-  dom,
-  bag,
-}) {
-  safeEmit(
-    "home:view:bound",
-    {
-      root,
-      hasHero: Boolean(
-        dom.hero
-      ),
-      actionCount:
-        dom.actions.length,
-      cardCount:
-        dom.cards.length,
-      panelCount:
-        dom.panels.length,
-      kpiCount:
-        dom.kpis.length,
-    }
-  );
-
-  bag.add(() => {
-    safeEmit(
-      "home:view:unbound",
-      {
-        root,
-      }
-    );
-  });
-}
-
-function bindWindowResize({
-  root,
-  bag,
-}) {
-  if (!isBrowser()) {
-    return;
   }
 
-  const onResize = () => {
-    safeEmit(
-      "home:view:resize",
-      {
-        width:
-          window.innerWidth,
-        height:
-          window.innerHeight,
-        root,
-      }
-    );
-  };
-
-  bag.add(
-    addEventListenerSafe(
-      window,
-      "resize",
-      onResize,
-      { passive: true }
-    )
-  );
-}
-
-function bindRootClickDelegation({
-  root,
-  bag,
-}) {
-  const onClick =
-    async (event) => {
-      const quickActionNode =
-        event?.target?.closest?.(
-          "[data-home-action]"
-        );
-
-      if (
-        quickActionNode &&
-        root.contains(
-          quickActionNode
-        )
-      ) {
+  if (exportBtn) {
+    AppCore.cleanup.on(
+      scopeRef,
+      exportBtn,
+      "click",
+      async (event) => {
         event.preventDefault();
 
         try {
-          await runQuickActionFromElement(
-            quickActionNode,
-            root
-          );
+          await exportHomeCsvAction?.();
         } catch (error) {
-          console.error(
-            "[HomeBindings] quick action error",
-            error
-          );
+          safeWarn("export falló", error);
+        }
+      }
+    );
+  }
+
+  /* =========================================
+     DELEGATED ACTIONS
+  ========================================= */
+
+  AppCore.cleanup.on(
+    scopeRef,
+    root,
+    "click",
+    async (event) => {
+      const openWidgetBtn = event.target?.closest?.(
+        '[data-action="open-home-widget"]'
+      );
+
+      if (openWidgetBtn) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const widgetId =
+          getWidgetId(openWidgetBtn) ||
+          getWidgetKey(openWidgetBtn);
+
+        if (!widgetId) {
+          safeWarn("open-home-widget sin id");
+          return;
+        }
+
+        try {
+          await openHomeWidgetAction?.({
+            widgetId,
+          });
+        } catch (error) {
+          safeWarn("openHomeWidgetAction falló", error);
         }
 
         return;
       }
 
-      const cardNode =
-        event?.target?.closest?.(
-          "[data-home-card]"
-        );
+      const copyWidgetBtn = event.target?.closest?.(
+        '[data-action="copy-home-widget-id"]'
+      );
 
-      if (
-        cardNode &&
-        root.contains(cardNode)
-      ) {
+      if (copyWidgetBtn) {
         event.preventDefault();
+        event.stopPropagation();
+
+        const widgetId =
+          getWidgetId(copyWidgetBtn) ||
+          getWidgetKey(copyWidgetBtn);
 
         try {
-          await runCardActionFromElement(
-            cardNode,
-            root
-          );
+          await copyHomeWidgetIdAction?.({
+            widgetId,
+          });
         } catch (error) {
-          console.error(
-            "[HomeBindings] card action error",
-            error
-          );
+          safeWarn("copyHomeWidgetIdAction falló", error);
         }
+
+        return;
       }
-    };
 
-  bag.add(
-    addEventListenerSafe(
-      root,
-      "click",
-      onClick
-    )
-  );
-}
-
-function bindHoverTelemetry({
-  root,
-  bag,
-}) {
-  const hoverables =
-    safeQueryAll(
-      root,
-      ".home-kpi, .home-panel, .home-action, .home-health-card"
-    );
-
-  hoverables.forEach(
-    (node, index) => {
-      const onPointerEnter =
-        () => {
-          safeEmit(
-            "home:hover:item",
-            {
-              index,
-              className:
-                node.className,
-            }
-          );
-        };
-
-      bag.add(
-        addEventListenerSafe(
-          node,
-          "pointerenter",
-          onPointerEnter,
-          { passive: true }
-        )
+      const quickActionBtn = event.target?.closest?.(
+        '[data-action="run-home-quick-action"]'
       );
+
+      if (quickActionBtn) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const action = getQuickActionName(quickActionBtn);
+        const route = getWidgetRoute(quickActionBtn);
+        const payload = getPayloadFromDataset(quickActionBtn);
+
+        try {
+          await runHomeQuickAction?.({
+            action,
+            route,
+            payload,
+          });
+        } catch (error) {
+          safeWarn("runHomeQuickAction falló", error);
+        }
+
+        return;
+      }
+
+      const navigateBtn = event.target?.closest?.(
+        '[data-action="navigate-home"]'
+      );
+
+      if (navigateBtn) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const route = getWidgetRoute(navigateBtn);
+
+        if (!route) {
+          safeWarn("navigate-home sin route");
+          return;
+        }
+
+        try {
+          await navigateFromHomeAction?.({
+            route,
+          });
+        } catch (error) {
+          safeWarn("navigateFromHomeAction falló", error);
+        }
+
+        return;
+      }
     }
   );
-}
 
-/* =========================================================
-   MAIN BIND
-========================================================= */
+  /* =========================================
+     CLEANUP
+  ========================================= */
 
-export function bindHomeView({
-  container,
-} = {}) {
-  if (!isBrowser()) {
-    return () => {};
-  }
-
-  if (!isElement(container)) {
-    console.warn(
-      "[HomeBindings] container inválido"
-    );
-    return () => {};
-  }
-
-  const root =
-    getHomeRoot(container);
-
-  if (!root) {
-    console.warn(
-      "[HomeBindings] root no encontrado"
-    );
-    return () => {};
-  }
-
-  const dom =
-    collectDom(root);
-
-  const bag =
-    createDisposerBag();
-
-  bindViewLifecycle({
-    root,
-    dom,
-    bag,
-  });
-
-  bindWindowResize({
-    root,
-    bag,
-  });
-
-  bindRootClickDelegation({
-    root,
-    bag,
-  });
-
-  bindHoverTelemetry({
-    root,
-    bag,
-  });
-
-  return function cleanupHomeView() {
-    bag.flush();
+  return () => {
+    try {
+      AppCore?.cleanup?.run?.(
+        resolveScopeName(scope)
+      );
+    } catch {}
   };
 }
 
-export default bindHomeView;
+export default {
+  bindHomeEvents,
+};

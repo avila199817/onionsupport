@@ -57,7 +57,6 @@ import {
   setFacturasLoading,
   setFacturasRefreshing,
   setFacturasLoaded,
-  setFacturasError,
   clearFacturasError,
   clearFacturasActionIds,
   closeFacturasDetail,
@@ -237,6 +236,10 @@ export const FacturasView = (() => {
     if (typeof state.actions.openingFacturaId !== "string") {
       setFacturasOpeningFacturaId(state, "");
     }
+
+    if (typeof state.view.error !== "string") {
+      state.view.error = "";
+    }
   }
 
   function getItems() {
@@ -253,6 +256,7 @@ export const FacturasView = (() => {
 
     return {
       ...snapshot,
+      error: safeText(state?.view?.error, ""),
       lastSyncAt: getFacturasLastSyncAt(state),
       selectedFacturaId: safeText(state?.view?.selectedFacturaId, ""),
     };
@@ -294,19 +298,13 @@ export const FacturasView = (() => {
   }
 
   function setError(value = "") {
-    const text = safeText(value, "");
-
-    if (text) {
-      setFacturasError(state, text);
-      return text;
-    }
-
-    clearFacturasError(state);
-    return "";
+    state.view.error = safeText(value, "");
+    return state.view.error;
   }
 
   function clearError() {
     clearFacturasError(state);
+    state.view.error = "";
     return "";
   }
 
@@ -403,7 +401,7 @@ export const FacturasView = (() => {
       const result = await loadFacturasCollection({
         state,
         render: () => {},
-        silent: Boolean(silent || force || asRefresh),
+        silent: Boolean(silent || asRefresh),
       });
 
       setLoading(false);

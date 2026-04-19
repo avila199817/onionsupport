@@ -23,8 +23,9 @@ import { AppCore } from "../../core/index.js";
 
 /**
  * FIX CRÍTICO:
- * fallback local si AppCore.utils.escapeHtml
- * no existe o falla.
+ * Antes dependía de AppCore.utils.escapeHtml.
+ * Si no existía o fallaba => devolvía "".
+ * Eso explica textos invisibles.
  */
 export function escapeHtml(value = "") {
   const text = String(value ?? "");
@@ -150,7 +151,6 @@ export function showToast(
           type,
           ...options,
         });
-
         return true;
       }
     }
@@ -166,7 +166,6 @@ export function showToast(
         type,
         ...options,
       });
-
       return true;
     }
   } catch {}
@@ -181,7 +180,6 @@ export function showToast(
         type,
         ...options,
       });
-
       return true;
     }
   } catch {}
@@ -198,7 +196,6 @@ export function showToast(
         type,
         ...options,
       });
-
       return true;
     }
   } catch {}
@@ -267,7 +264,7 @@ export function getInitials(
     safeString(value, "");
 
   if (!text) {
-    return "ON";
+    return "US";
   }
 
   const initials = text
@@ -282,7 +279,7 @@ export function getInitials(
     .join("")
     .slice(0, 2);
 
-  return initials || "ON";
+  return initials || "US";
 }
 
 /* =========================================================
@@ -390,147 +387,4 @@ export function formatRelativeDate(
   }
 
   return formatDate(value);
-}
-
-/* =========================================================
-   USERS EXTRA
-========================================================= */
-
-export function normalizeRole(
-  value = ""
-) {
-  const role =
-    normalizeText(value);
-
-  if (
-    [
-      "admin",
-      "administrator",
-    ].includes(role)
-  ) {
-    return "admin";
-  }
-
-  if (
-    [
-      "manager",
-      "gestor",
-    ].includes(role)
-  ) {
-    return "manager";
-  }
-
-  if (
-    [
-      "support",
-      "agent",
-      "soporte",
-    ].includes(role)
-  ) {
-    return "support";
-  }
-
-  return "user";
-}
-
-export function normalizeStatus(
-  value = ""
-) {
-  const status =
-    normalizeText(value);
-
-  if (
-    [
-      "inactive",
-      "disabled",
-      "blocked",
-      "suspended",
-      "inactivo",
-    ].includes(status)
-  ) {
-    return "inactive";
-  }
-
-  if (
-    [
-      "pending",
-      "pendiente",
-    ].includes(status)
-  ) {
-    return "pending";
-  }
-
-  return "active";
-}
-
-export function normalizeUser(
-  item = {}
-) {
-  const user =
-    safeObject(item);
-
-  return {
-    id: safeText(
-      user.id ||
-        user.userId ||
-        user.uid
-    ),
-
-    username: safeText(
-      user.username ||
-        user.user
-    ),
-
-    name: safeText(
-      user.name ||
-        user.fullName ||
-        user.nombre
-    ),
-
-    email: safeText(
-      user.email ||
-        user.mail
-    ),
-
-    phone: safeText(
-      user.phone ||
-        user.telefono
-    ),
-
-    company: safeText(
-      user.company ||
-        user.empresa
-    ),
-
-    avatar: safeText(
-      user.avatar ||
-        user.avatarUrl
-    ),
-
-    role: normalizeRole(
-      user.role ||
-        user.rol
-    ),
-
-    status:
-      normalizeStatus(
-        user.status ||
-          user.estado
-      ),
-
-    createdAt:
-      user.createdAt ||
-      user.created_at ||
-      null,
-
-    updatedAt:
-      user.updatedAt ||
-      user.updated_at ||
-      null,
-
-    lastLogin:
-      user.lastLogin ||
-      user.last_login ||
-      null,
-  };
 }

@@ -23,7 +23,7 @@
 ========================================================= */
 
 import IncidenciasView from "./incidenciasView.js";
-import IncidenciasCreateView from "./incidenciasCreateView.js";
+import IncidenciasCreateModal from "./incidencias.create.modal.js";
 import IncidenciasModal from "./incidencias.modal.js";
 
 /* =========================================================
@@ -31,7 +31,7 @@ import IncidenciasModal from "./incidencias.modal.js";
 ========================================================= */
 
 export { IncidenciasView };
-export { IncidenciasCreateView };
+export { IncidenciasCreateModal };
 export { IncidenciasModal };
 
 export default IncidenciasView;
@@ -81,6 +81,9 @@ export const createIncidencia = (...args) =>
 export const exportCsv = (...args) =>
   safeCall(IncidenciasView, "exportCsv", args);
 
+export const copyTicketId = (...args) =>
+  safeCall(IncidenciasView, "copyTicketId", args);
+
 /* =========================================================
    PAGINATION API
 ========================================================= */
@@ -108,20 +111,26 @@ export const getTicketById = (...args) =>
   safeCall(IncidenciasView, "getTicketById", args, null);
 
 /* =========================================================
-   CREATE VIEW API
+   CREATE MODAL API
 ========================================================= */
 
-export const initCreate = (...args) =>
-  safeCall(IncidenciasCreateView, "init", args);
-
 export const openCreate = (...args) =>
-  safeCall(IncidenciasCreateView, "open", args);
+  safeCall(IncidenciasCreateModal, "open", args);
 
 export const closeCreate = (...args) =>
-  safeCall(IncidenciasCreateView, "close", args);
+  safeCall(IncidenciasCreateModal, "close", args);
+
+export const updateCreate = (...args) =>
+  safeCall(IncidenciasCreateModal, "update", args);
+
+export const destroyCreate = (...args) =>
+  safeCall(IncidenciasCreateModal, "destroy", args);
+
+export const getCreateState = (...args) =>
+  safeCall(IncidenciasCreateModal, "getState", args, null);
 
 /* =========================================================
-   MODAL API
+   DETAIL MODAL API
 ========================================================= */
 
 export const openModal = (...args) =>
@@ -130,8 +139,14 @@ export const openModal = (...args) =>
 export const closeModal = (...args) =>
   safeCall(IncidenciasModal, "close", args);
 
-export const refreshModal = (...args) =>
-  safeCall(IncidenciasModal, "refresh", args);
+export const updateModal = (...args) =>
+  safeCall(IncidenciasModal, "update", args);
+
+export const destroyModal = (...args) =>
+  safeCall(IncidenciasModal, "destroy", args);
+
+export const getModalState = (...args) =>
+  safeCall(IncidenciasModal, "getState", args, null);
 
 /* =========================================================
    FLAGS
@@ -158,6 +173,7 @@ try {
       openTicket,
       createIncidencia,
       exportCsv,
+      copyTicketId,
 
       goToPage,
       goPrevPage,
@@ -169,9 +185,15 @@ try {
 
       openModal,
       closeModal,
+      updateModal,
+      destroyModal,
+      getModalState,
 
       openCreate,
       closeCreate,
+      updateCreate,
+      destroyCreate,
+      getCreateState,
     };
   }
 } catch {}

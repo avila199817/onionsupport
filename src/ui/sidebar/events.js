@@ -306,7 +306,11 @@ export function bindCoreEvents(ctx) {
     ensureServerNavItem,
     syncSidebarState,
     closeDropdown,
+    getSidebarSnapshot,
+    restoreSidebarState,
   } = ctx;
+
+  let sidebarSnapshot = null;
 
   AppCore.cleanup.event(
     scope,
@@ -339,6 +343,11 @@ export function bindCoreEvents(ctx) {
     scope,
     "router:before-render",
     () => {
+      sidebarSnapshot =
+        typeof getSidebarSnapshot === "function"
+          ? getSidebarSnapshot()
+          : null;
+
       closeDropdown?.();
     }
   );
@@ -351,6 +360,14 @@ export function bindCoreEvents(ctx) {
     scope,
     "router:rendered",
     () => {
+      if (
+        sidebarSnapshot &&
+        typeof restoreSidebarState === "function"
+      ) {
+        restoreSidebarState(sidebarSnapshot);
+      }
+
+      syncSidebarState?.();
       ensureServerNavItem?.();
       renderUser?.();
       applyRoleVisibility?.();

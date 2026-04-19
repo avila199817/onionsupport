@@ -35,116 +35,70 @@ const STORE_COLLECTION_KEY = "usuarios";
 ========================================================= */
 
 function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
+  return Array.isArray(value) ? value : [];
 }
 
 function safeObject(value) {
-  return value &&
-    typeof value ===
-      "object" &&
-    !Array.isArray(value)
+  return value && typeof value === "object" && !Array.isArray(value)
     ? value
     : {};
 }
 
-function safeText(
-  value,
-  fallback = ""
-) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
-
-  const text =
-    String(value).trim();
-
+function safeText(value, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  const text = String(value).trim();
   return text || fallback;
 }
 
 function safeId(value) {
-  return safeText(
-    value,
-    ""
-  );
+  return safeText(value, "");
 }
 
-function safeTimestamp(
-  value,
-  fallback = 0
-) {
-  const n =
-    Number(value);
-
-  if (
-    Number.isFinite(n)
-  ) {
+function safeTimestamp(value, fallback = 0) {
+  const n = Number(value);
+  if (Number.isFinite(n)) {
     return n;
   }
 
-  const date =
-    new Date(value);
+  const date = new Date(value);
+  const ts = date.getTime();
 
-  const ts =
-    date.getTime();
-
-  return Number.isFinite(ts)
-    ? ts
-    : fallback;
+  return Number.isFinite(ts) ? ts : fallback;
 }
 
 /* =========================================================
    ID HELPERS
 ========================================================= */
 
-export function getItemId(
-  item = {}
-) {
-  const row =
-    safeObject(item);
+export function getItemId(item = {}) {
+  const row = safeObject(item);
 
   return safeId(
     row.userId ||
+      row.usuarioId ||
+      row.clientId ||
       row.id ||
-      row._id ||
-      row.uid ||
+      row.code ||
       row.username ||
-      row.email
+      row.userName
   );
 }
 
-function isSameItemId(
-  item = {},
-  id = ""
-) {
-  const target =
-    safeId(id);
+function isSameItemId(item = {}, id = "") {
+  const target = safeId(id);
+  if (!target) return false;
 
-  if (!target) {
-    return false;
-  }
-
-  const row =
-    safeObject(item);
+  const row = safeObject(item);
 
   return (
-    getItemId(row) ===
-      target ||
-    safeId(row.userId) ===
-      target ||
-    safeId(row.id) ===
-      target ||
-    safeId(row._id) ===
-      target ||
-    safeId(
-      row.username
-    ) === target ||
-    safeId(row.email) ===
-      target
+    getItemId(row) === target ||
+    safeId(row.id) === target ||
+    safeId(row.userId) === target ||
+    safeId(row.usuarioId) === target ||
+    safeId(row.clientId) === target ||
+    safeId(row.code) === target ||
+    safeId(row.username) === target ||
+    safeId(row.userName) === target
   );
 }
 
@@ -152,24 +106,22 @@ function isSameItemId(
    TIMESTAMP HELPERS
 ========================================================= */
 
-function getUpdatedTimestamp(
-  item = {}
-) {
-  const row =
-    safeObject(item);
+function getUpdatedTimestamp(item = {}) {
+  const row = safeObject(item);
 
   return safeTimestamp(
     row.updatedAtMs ??
       row.updatedAtTs ??
-      row.meta
-        ?.timestampMs ??
-      row.meta
-        ?.updatedAtMs ??
+      row.meta?.timestampMs ??
+      row.meta?.updatedAtMs ??
       row.updatedAt ??
+      row.updated_at ??
       row.modifiedAt ??
       row.lastUpdate ??
       row.lastLoginAt ??
+      row.last_login_at ??
       row.createdAt ??
+      row.created_at ??
       0,
     0
   );
@@ -181,51 +133,27 @@ function getUpdatedTimestamp(
 
 function readStoreCollection() {
   try {
-    if (
-      typeof Store?.get ===
-      "function"
-    ) {
-      return safeArray(
-        Store.get(
-          STORE_PATH
-        )
-      );
+    if (typeof Store?.get === "function") {
+      return safeArray(Store.get(STORE_PATH));
     }
   } catch {}
 
   return [];
 }
 
-function writeStoreCollection(
-  items = []
-) {
-  const list =
-    safeArray(items);
+function writeStoreCollection(items = []) {
+  const list = safeArray(items);
 
   try {
-    if (
-      Store?.actions
-        ?.setCollection
-    ) {
-      Store.actions.setCollection(
-        STORE_COLLECTION_KEY,
-        list
-      );
-
+    if (Store?.actions?.setCollection) {
+      Store.actions.setCollection(STORE_COLLECTION_KEY, list);
       return list;
     }
   } catch {}
 
   try {
-    if (
-      typeof Store?.set ===
-      "function"
-    ) {
-      Store.set(
-        STORE_PATH,
-        list
-      );
-
+    if (typeof Store?.set === "function") {
+      Store.set(STORE_PATH, list);
       return list;
     }
   } catch {}
@@ -237,76 +165,41 @@ function writeStoreCollection(
    NORMALIZE COLLECTION
 ========================================================= */
 
-function mergeUsuario(
-  base = {},
-  patch = {}
-) {
+function mergeUsuario(base = {}, patch = {}) {
   return {
     ...safeObject(base),
     ...safeObject(patch),
   };
 }
 
-function dedupeUsuarios(
-  items = []
-) {
-  const list =
-    safeArray(items);
-
-  const map =
-    new Map();
-
-  const anonymous =
-    [];
+function dedupeUsuarios(items = []) {
+  const list = safeArray(items);
+  const map = new Map();
+  const anonymous = [];
 
   for (const rawItem of list) {
-    const item =
-      safeObject(
-        rawItem
-      );
-
-    const id =
-      getItemId(item);
+    const item = safeObject(rawItem);
+    const id = getItemId(item);
 
     if (!id) {
-      anonymous.push(
-        item
-      );
+      anonymous.push(item);
       continue;
     }
 
     if (!map.has(id)) {
-      map.set(
-        id,
-        item
-      );
+      map.set(id, item);
       continue;
     }
 
-    const current =
-      map.get(id);
-
-    map.set(
-      id,
-      mergeUsuario(
-        current,
-        item
-      )
-    );
+    const current = map.get(id);
+    map.set(id, mergeUsuario(current, item));
   }
 
-  return [
-    ...map.values(),
-    ...anonymous,
-  ];
+  return [...map.values(), ...anonymous];
 }
 
-function normalizeCollection(
-  items = []
-) {
-  return dedupeUsuarios(
-    safeArray(items)
-  );
+function normalizeCollection(items = []) {
+  return dedupeUsuarios(safeArray(items));
 }
 
 /* =========================================================
@@ -314,149 +207,84 @@ function normalizeCollection(
 ========================================================= */
 
 export function getUsuarios() {
-  return normalizeCollection(
-    readStoreCollection()
-  );
+  return normalizeCollection(readStoreCollection());
 }
 
 export function getSortedUsuariosStore() {
-  return sortUsuariosByUpdatedDesc(
-    getUsuarios()
-  );
+  return sortUsuariosByUpdatedDesc(getUsuarios());
 }
 
-export function getUsuarioById(
-  id = ""
-) {
-  const target =
-    safeId(id);
+export function getUsuarioById(id = "") {
+  const target = safeId(id);
 
   if (!target) {
     return null;
   }
 
-  const items =
-    getUsuarios();
+  const items = getUsuarios();
 
-  return (
-    items.find((item) =>
-      isSameItemId(
-        item,
-        target
-      )
-    ) || null
-  );
+  return items.find((item) => isSameItemId(item, target)) || null;
 }
 
-export function getUsuarioByIdStore(
-  id = ""
-) {
-  return getUsuarioById(
-    id
-  );
+export function getUsuarioByIdStore(id = "") {
+  return getUsuarioById(id);
 }
 
 export function hasUsuarios() {
-  return (
-    getUsuarios()
-      .length > 0
-  );
+  return getUsuarios().length > 0;
 }
 
 export function getUsuariosCount() {
-  return getUsuarios()
-    .length;
+  return getUsuarios().length;
 }
 
 /* =========================================================
    SETTERS
 ========================================================= */
 
-export function setUsuarios(
-  items = []
-) {
-  const next =
-    normalizeCollection(
-      items
-    );
-
-  writeStoreCollection(
-    next
-  );
-
+export function setUsuarios(items = []) {
+  const next = normalizeCollection(items);
+  writeStoreCollection(next);
   return next;
 }
 
-export function replaceUsuariosStore(
-  items = []
-) {
-  return setUsuarios(
-    items
-  );
+export function replaceUsuariosStore(items = []) {
+  return setUsuarios(items);
 }
 
 export function clearUsuarios() {
   return setUsuarios([]);
 }
 
-export function appendUsuarioStore(
-  item = null
-) {
+export function appendUsuarioStore(item = null) {
   if (!item) {
     return getUsuarios();
   }
 
-  const current =
-    getUsuarios();
+  const current = getUsuarios();
+  const next = normalizeCollection([...current, safeObject(item)]);
 
-  const next =
-    normalizeCollection(
-      [
-        ...current,
-        safeObject(
-          item
-        ),
-      ]
-    );
-
-  writeStoreCollection(
-    next
-  );
+  writeStoreCollection(next);
 
   return next;
 }
 
-export function updateUsuarioStore(
-  id = "",
-  patch = {}
-) {
-  const target =
-    safeId(id);
+export function updateUsuarioStore(id = "", patch = {}) {
+  const target = safeId(id);
 
   if (!target) {
     return getUsuarios();
   }
 
-  const current =
-    getUsuarios();
+  const current = getUsuarios();
 
-  const next =
-    current.map(
-      (item) =>
-        isSameItemId(
-          item,
-          target
-        )
-          ? mergeUsuario(
-              item,
-              patch
-            )
-          : item
-    );
-
-  writeStoreCollection(
-    next
+  const next = current.map((item) =>
+    isSameItemId(item, target)
+      ? mergeUsuario(item, patch)
+      : item
   );
+
+  writeStoreCollection(next);
 
   return next;
 }
@@ -465,79 +293,34 @@ export function updateUsuarioStore(
    UPSERT
 ========================================================= */
 
-export function upsertUsuarioStore(
-  item = null
-) {
+export function upsertUsuarioStore(item = null) {
   if (!item) {
     return getUsuarios();
   }
 
-  const incoming =
-    safeObject(item);
-
-  const targetId =
-    getItemId(
-      incoming
-    );
-
-  const current =
-    getUsuarios();
+  const incoming = safeObject(item);
+  const targetId = getItemId(incoming);
+  const current = getUsuarios();
 
   if (!targetId) {
-    const next =
-      normalizeCollection(
-        [
-          incoming,
-          ...current,
-        ]
-      );
-
-    writeStoreCollection(
-      next
-    );
-
+    const next = normalizeCollection([incoming, ...current]);
+    writeStoreCollection(next);
     return next;
   }
 
-  const index =
-    current.findIndex(
-      (row) =>
-        getItemId(
-          row
-        ) ===
-        targetId
-    );
+  const index = current.findIndex((row) => getItemId(row) === targetId);
 
   let next = [];
 
   if (index === -1) {
-    next =
-      normalizeCollection(
-        [
-          incoming,
-          ...current,
-        ]
-      );
+    next = normalizeCollection([incoming, ...current]);
   } else {
-    next = [
-      ...current,
-    ];
-
-    next[index] =
-      mergeUsuario(
-        next[index],
-        incoming
-      );
-
-    next =
-      normalizeCollection(
-        next
-      );
+    next = [...current];
+    next[index] = mergeUsuario(next[index], incoming);
+    next = normalizeCollection(next);
   }
 
-  writeStoreCollection(
-    next
-  );
+  writeStoreCollection(next);
 
   return next;
 }
@@ -546,28 +329,18 @@ export function upsertUsuarioStore(
    REMOVE
 ========================================================= */
 
-export function removeUsuarioStore(
-  id = ""
-) {
-  const target =
-    safeId(id);
+export function removeUsuarioStore(id = "") {
+  const target = safeId(id);
 
   if (!target) {
     return getUsuarios();
   }
 
-  const next =
-    getUsuarios().filter(
-      (item) =>
-        !isSameItemId(
-          item,
-          target
-        )
-    );
-
-  writeStoreCollection(
-    next
+  const next = getUsuarios().filter(
+    (item) => !isSameItemId(item, target)
   );
+
+  writeStoreCollection(next);
 
   return next;
 }
@@ -576,57 +349,34 @@ export function removeUsuarioStore(
    HELPERS
 ========================================================= */
 
-export function sortUsuariosByUpdatedDesc(
-  items = []
-) {
-  return [
-    ...safeArray(items),
-  ].sort((a, b) => {
-    const aTime =
-      getUpdatedTimestamp(
-        a
-      );
+export function sortUsuariosByUpdatedDesc(items = []) {
+  return [...safeArray(items)].sort((a, b) => {
+    const aTime = getUpdatedTimestamp(a);
+    const bTime = getUpdatedTimestamp(b);
 
-    const bTime =
-      getUpdatedTimestamp(
-        b
-      );
-
-    return (
-      bTime - aTime
-    );
+    return bTime - aTime;
   });
 }
 
-export function sortUsuariosByCreatedDesc(
-  items = []
-) {
-  return [
-    ...safeArray(items),
-  ].sort((a, b) => {
-    const aTime =
-      safeTimestamp(
-        safeObject(a)
-          .createdAt ??
-          safeObject(a)
-            .createdAtMs ??
-          0,
-        0
-      );
-
-    const bTime =
-      safeTimestamp(
-        safeObject(b)
-          .createdAt ??
-          safeObject(b)
-            .createdAtMs ??
-          0,
-        0
-      );
-
-    return (
-      bTime - aTime
+export function sortUsuariosByCreatedDesc(items = []) {
+  return [...safeArray(items)].sort((a, b) => {
+    const aTime = safeTimestamp(
+      safeObject(a).createdAt ??
+        safeObject(a).created_at ??
+        safeObject(a).createdAtMs ??
+        0,
+      0
     );
+
+    const bTime = safeTimestamp(
+      safeObject(b).createdAt ??
+        safeObject(b).created_at ??
+        safeObject(b).createdAtMs ??
+        0,
+      0
+    );
+
+    return bTime - aTime;
   });
 }
 

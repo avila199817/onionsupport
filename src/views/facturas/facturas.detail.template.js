@@ -173,6 +173,7 @@ function getClienteNombre(factura = {}) {
       factura?.cliente?.nombreCompleto,
       factura?.cliente?.nombre,
       factura?.cliente?.name,
+      factura?.clienteEmpresa,
       factura?.clienteNombre,
       factura?.clientName
     ),
@@ -185,6 +186,7 @@ function getClienteEmail(factura = {}) {
     first(
       factura?.cliente?.email,
       factura?.cliente?.mail,
+      factura?.clienteEmail,
       factura?.email,
       factura?.clientEmail
     ),
@@ -279,7 +281,6 @@ function getFacturaImpuestos(factura = {}) {
   return safeNumber(
     first(
       factura?.impuestosTotal,
-      factura?.impuestos,
       factura?.tax,
       factura?.iva
     ),
@@ -357,6 +358,14 @@ function getEstadoLabel(value = "") {
     case "issued":
       return "Emitida";
 
+    case "enviada":
+    case "sent":
+      return "Enviada";
+
+    case "anulada":
+    case "void":
+      return "Anulada";
+
     case "borrador":
     case "draft":
       return "Borrador";
@@ -366,6 +375,7 @@ function getEstadoLabel(value = "") {
       return "Cancelada";
 
     case "abonada":
+    case "paid":
       return "Abonada";
 
     default:
@@ -426,6 +436,22 @@ function getEstadoChipStyle(value = "") {
     `;
   }
 
+  if (["enviada", "sent"].includes(key)) {
+    return `
+      color:var(--success-strong, #36c690);
+      background:color-mix(in srgb, var(--success-strong, #36c690) 14%, transparent);
+      border:1px solid color-mix(in srgb, var(--success-strong, #36c690) 26%, transparent);
+    `;
+  }
+
+  if (["anulada", "void", "cancelada", "cancelled"].includes(key)) {
+    return `
+      color:var(--danger-strong, #ff6b6b);
+      background:color-mix(in srgb, var(--danger-strong, #ff6b6b) 14%, transparent);
+      border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, transparent);
+    `;
+  }
+
   if (["borrador", "draft"].includes(key)) {
     return `
       color:var(--warning-strong, #ffbc42);
@@ -434,11 +460,11 @@ function getEstadoChipStyle(value = "") {
     `;
   }
 
-  if (["cancelada", "cancelled"].includes(key)) {
+  if (["abonada", "paid"].includes(key)) {
     return `
-      color:var(--danger-strong, #ff6b6b);
-      background:color-mix(in srgb, var(--danger-strong, #ff6b6b) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, transparent);
+      color:var(--success-strong, #36c690);
+      background:color-mix(in srgb, var(--success-strong, #36c690) 14%, transparent);
+      border:1px solid color-mix(in srgb, var(--success-strong, #36c690) 26%, transparent);
     `;
   }
 

@@ -154,7 +154,12 @@ export {
   safeText,
   safeNumber,
   safeArray,
+  safeObject,
+  safeBoolean,
+  first,
+  normalizeWhitespace,
   escapeHtml,
+  truncate as truncateText,
   showToast,
 } from "./facturas.utils.js";
 
@@ -163,7 +168,6 @@ export {
 ========================================================= */
 
 export {
-  DEFAULT_PAGE_SIZE,
   createFacturasState,
   resetFacturasViewState,
   resetFacturasDetailState,
@@ -357,6 +361,9 @@ try {
       exportFacturasCsv,
 
       getItems,
+
+      isInitialized,
+      isDestroyed,
     };
   }
 } catch {}

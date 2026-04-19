@@ -7,7 +7,7 @@
    RESPONSABILIDADES:
    - punto de entrada real de la vista usuarios
    - render principal de header + tabla
-   - paginación fija a 5 usuarios por vista
+   - paginación fija por vista
    - carga inicial robusta
    - refresh con loader SOLO en tabla
    - apertura de usuario con estado visual de loading
@@ -15,7 +15,7 @@
    - evitar doble bind de listeners
    - soportar destroy limpio del router
    - permitir reload con rerender seguro
-   - coordinar acciones sin mezclar responsabilidades
+   - coordinar acciones y modal sin mezclar responsabilidades
 
    HARDENING PRO:
    - render inicial inmediato
@@ -23,6 +23,7 @@
    - anti-race token
    - cleanup total
    - click delegation sólida
+   - fallback elegante si el modal aún no existe
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -49,7 +50,7 @@ import {
 import {
   DEFAULT_PAGE_SIZE,
   normalizeUsuariosCollection,
-  sortUsuariosByCreatedDesc,
+  sortUsuariosByUpdatedDesc,
   paginateUsuarios,
   findUsuarioById,
 } from "./usuarios.model.js";
@@ -59,6 +60,7 @@ import {
   copyUsuarioIdAction,
   exportUsuariosCsvAction,
   createUsuarioAction,
+  refreshUsuarioDetailAction,
 } from "./usuarios.actions.js";
 
 export const UsuariosView = (() => {
@@ -73,7 +75,7 @@ export const UsuariosView = (() => {
   let renderToken = 0;
 
   /* =====================================================
-     HELPERS
+     HELPERS CORE
   ===================================================== */
 
   function safeLog(...args) {
@@ -85,6 +87,12 @@ export const UsuariosView = (() => {
   function safeWarn(...args) {
     try {
       AppCore?.utils?.warn?.("[UsuariosView]", ...args);
+    } catch {}
+  }
+
+  function safeEmit(event = "", payload = {}) {
+    try {
+      AppCore?.events?.emit?.(event, payload);
     } catch {}
   }
 
@@ -118,25 +126,26 @@ export const UsuariosView = (() => {
   }
 
   function setState(patch = {}) {
+    if (!patch || typeof patch !== "object") {
+      return usuariosState;
+    }
+
     Object.assign(usuariosState, patch);
+
     return usuariosState;
   }
 
   function ensureBaseState() {
     const pageSize = Math.max(
       1,
-      Number(
-        usuariosState?.pageSize ||
-        DEFAULT_PAGE_SIZE ||
-        5
-      )
+      Number(usuariosState?.pageSize || DEFAULT_PAGE_SIZE)
     );
 
-    usuariosState.page = Math.max(
-      1,
-      Number(usuariosState?.page || 1)
-    );
+    if (!Number.isFinite(Number(usuariosState?.page))) {
+      usuariosState.page = 1;
+    }
 
+    usuariosState.page = Math.max(1, Number(usuariosState.page || 1));
     usuariosState.pageSize = pageSize;
 
     if (typeof usuariosState.loading !== "boolean") {
@@ -162,52 +171,114 @@ export const UsuariosView = (() => {
         : "";
   }
 
-  function showToast(message = "", type = "info") {
+  function getRawItems() {
     try {
-      AppCore?.toast?.show?.(message, type);
-      return;
-    } catch {}
-
-    try {
-      console.log(`[Usuarios:${type}]`, message);
-    } catch {}
+      return getUsuarios();
+    } catch {
+      return [];
+    }
   }
-
-  function safeErrorMessage(error = null) {
-    return String(
-      error?.message ||
-      error?.response?.message ||
-      "No se pudo cargar la colección de usuarios."
-    ).trim();
-  }
-
-  /* =====================================================
-     DATA
-  ===================================================== */
 
   function getItems() {
     try {
-      const raw = getUsuarios();
-      const normalized =
-        normalizeUsuariosCollection(raw);
+      const raw = getRawItems();
+      const normalized = normalizeUsuariosCollection(raw);
 
-      return sortUsuariosByCreatedDesc(normalized);
+      return sortUsuariosByUpdatedDesc(normalized);
     } catch (error) {
       safeWarn("getItems falló:", error);
       return [];
     }
   }
 
-  function clampPage(items = []) {
-    const meta = paginateUsuarios(
+  function getPaginationMeta(items = []) {
+    return paginateUsuarios(
       items,
-      usuariosState.page,
-      usuariosState.pageSize
+      usuariosState.page || 1,
+      usuariosState.pageSize || DEFAULT_PAGE_SIZE
     );
+  }
 
-    usuariosState.page = meta.page;
+  function clampPageAgainstItems(items = []) {
+    const pagination = getPaginationMeta(items);
 
-    return meta;
+    if (usuariosState.page !== pagination.page) {
+      usuariosState.page = pagination.page;
+    }
+
+    return pagination;
+  }
+
+  function showToast(message = "", type = "info") {
+    try {
+      if (typeof AppCore?.toast?.[type] === "function") {
+        AppCore.toast[type](message);
+        return;
+      }
+    } catch {}
+
+    try {
+      AppCore?.toast?.show?.(message, type);
+      return;
+    } catch {}
+
+    try {
+      AppCore?.ui?.toast?.[type]?.(message);
+    } catch {}
+  }
+
+  function safeErrorMessage(error = null) {
+    if (!error) {
+      return "No se pudo cargar la colección de usuarios.";
+    }
+
+    const message =
+      error?.message ||
+      error?.response?.message ||
+      error?.data?.message ||
+      "No se pudo cargar la colección de usuarios.";
+
+    return String(message).trim() || "No se pudo cargar la colección de usuarios.";
+  }
+
+  /* =====================================================
+     MODAL BRIDGE
+  ===================================================== */
+
+  function openUsuarioModalBridge(detail = null) {
+    if (!detail) {
+      return false;
+    }
+
+    let handled = false;
+
+    try {
+      safeEmit("usuarios:modal:open", { detail });
+      handled = true;
+    } catch {}
+
+    try {
+      const globalHook =
+        window?.OnionUsuariosModal?.open ||
+        window?.renderUsuarioDetailModal ||
+        window?.renderUsuarioModal;
+
+      if (typeof globalHook === "function") {
+        globalHook(detail);
+        handled = true;
+      }
+    } catch (error) {
+      safeWarn("modal bridge hook falló:", error);
+    }
+
+    if (!handled) {
+      showToast(
+        "Detalle cargado. Falta conectar usuarios.modal.js para abrir el popup.",
+        "info"
+      );
+    }
+
+    return handled;
   }
 
   /* =====================================================
@@ -217,12 +288,11 @@ export const UsuariosView = (() => {
   function buildHtml() {
     const items = getItems();
 
-    clampPage(items);
+    clampPageAgainstItems(items);
 
     return `
       <section class="panel-content dashboard ready">
         <div class="content-wrapper">
-
           ${renderHeader({
             items,
             state: usuariosState,
@@ -232,7 +302,6 @@ export const UsuariosView = (() => {
             items,
             state: usuariosState,
           })}
-
         </div>
       </section>
     `;
@@ -242,7 +311,7 @@ export const UsuariosView = (() => {
     const container = getContainer();
 
     if (!container) {
-      safeWarn("No existe #view-container");
+      safeWarn("No se encontró #view-container.");
       return null;
     }
 
@@ -264,7 +333,9 @@ export const UsuariosView = (() => {
   }
 
   function rerender() {
-    if (destroyed) return null;
+    if (destroyed) {
+      return null;
+    }
 
     const container = render();
 
@@ -276,20 +347,21 @@ export const UsuariosView = (() => {
   }
 
   /* =====================================================
-     LOAD
+     DATA LOAD
   ===================================================== */
 
   async function loadData({
     force = false,
+    silent = false,
     asRefresh = false,
   } = {}) {
-    const before = getItems();
-    const hasData = before.length > 0;
+    const itemsBefore = getItems();
+    const hasVisibleData = itemsBefore.length > 0;
 
     setState({
-      loading: !hasData,
-      refreshing: hasData && asRefresh,
       error: "",
+      loading: !hasVisibleData && !silent,
+      refreshing: hasVisibleData && asRefresh,
     });
 
     render();
@@ -304,9 +376,15 @@ export const UsuariosView = (() => {
         lastSyncAt: new Date().toISOString(),
       });
 
-      return getItems();
+      const itemsAfter = getItems();
+
+      clampPageAgainstItems(itemsAfter);
+
+      return itemsAfter;
     } catch (error) {
       const message = safeErrorMessage(error);
+
+      safeWarn("loadUsuarios falló:", error);
 
       setState({
         loading: false,
@@ -314,7 +392,9 @@ export const UsuariosView = (() => {
         error: message,
       });
 
-      showToast(message, "error");
+      if (!silent) {
+        showToast(message, "error");
+      }
 
       return getItems();
     }
@@ -328,12 +408,16 @@ export const UsuariosView = (() => {
 
     try {
       hydrateFromCache?.();
-    } catch {}
+    } catch (error) {
+      safeWarn("hydrateFromCache falló:", error);
+    }
 
+    ensureBaseState();
     render();
 
     await loadData({
       force,
+      silent: false,
       asRefresh,
     });
 
@@ -347,62 +431,76 @@ export const UsuariosView = (() => {
   }
 
   /* =====================================================
-     PAGE
+     PAGE ACTIONS
   ===================================================== */
 
   function goToPage(page = 1) {
     const items = getItems();
 
-    const meta = paginateUsuarios(
+    const pagination = paginateUsuarios(
       items,
       page,
-      usuariosState.pageSize
+      usuariosState.pageSize || DEFAULT_PAGE_SIZE
     );
 
-    usuariosState.page = meta.page;
+    setState({
+      page: pagination.page,
+    });
 
     rerender();
 
-    return meta.page;
+    return pagination.page;
   }
 
   function goPrevPage() {
-    return goToPage(
-      Number(usuariosState.page || 1) - 1
-    );
+    return goToPage((usuariosState.page || 1) - 1);
   }
 
   function goNextPage() {
-    return goToPage(
-      Number(usuariosState.page || 1) + 1
-    );
+    return goToPage((usuariosState.page || 1) + 1);
   }
 
   /* =====================================================
-     ACTIONS
+     ACTION FLOWS
   ===================================================== */
 
-  async function handleOpenUser(userId = "") {
+  async function handleOpenUsuario(userId = "") {
     const id = String(userId || "").trim();
 
-    if (!id) return null;
+    if (!id) {
+      showToast("Usuario inválido.", "error");
+      return null;
+    }
 
-    usuariosState.openingUserId = id;
+    setState({
+      openingUserId: id,
+    });
+
     rerender();
 
     try {
-      return await openUsuarioAction({
+      const detail = await openUsuarioAction({
         userId: id,
-        silent: false,
+        preferFresh: true,
+        silent: true,
       });
+
+      if (!detail) {
+        showToast("No se pudo abrir el usuario.", "error");
+        return null;
+      }
+
+      openUsuarioModalBridge(detail);
+
+      return detail;
     } catch (error) {
-      showToast(
-        "No se pudo abrir el usuario.",
-        "error"
-      );
+      safeWarn("handleOpenUsuario falló:", error);
+      showToast("No se pudo abrir el usuario.", "error");
       return null;
     } finally {
-      usuariosState.openingUserId = "";
+      setState({
+        openingUserId: "",
+      });
 
       if (!destroyed) {
         rerender();
@@ -410,33 +508,70 @@ export const UsuariosView = (() => {
     }
   }
 
-  async function handleCopyId(userId = "") {
-    return copyUsuarioIdAction({
+  async function handleRefreshUsuarioFromModal(userId = "") {
+    const id = String(userId || "").trim();
+
+    if (!id) {
+      return null;
+    }
+
+    try {
+      const detail = await refreshUsuarioDetailAction({
+        userId: id,
+        silent: true,
+      });
+
+      if (!detail) {
+        showToast("No se pudo refrescar el usuario.", "error");
+        return null;
+      }
+
+      openUsuarioModalBridge(detail);
+
+      return detail;
+    } catch (error) {
+      safeWarn("handleRefreshUsuarioFromModal falló:", error);
+      showToast("No se pudo refrescar el usuario.", "error");
+      return null;
+    }
+  }
+
+  async function handleCopyUsuarioId(userId = "") {
+    const ok = await copyUsuarioIdAction({
       userId,
       silent: false,
     });
+
+    return ok;
   }
 
-  function handleExport() {
+  function handleExportCsv() {
     return exportUsuariosCsvAction({
       silent: false,
     });
   }
 
-  async function handleCreate() {
+  async function handleCreateUsuario() {
     if (usuariosState.creating) {
       return false;
     }
 
-    usuariosState.creating = true;
+    setState({
+      creating: true,
+    });
+
     rerender();
 
     try {
-      return await createUsuarioAction({
+      const ok = await createUsuarioAction({
         silent: false,
       });
+
+      return ok;
     } finally {
-      usuariosState.creating = false;
+      setState({
+        creating: false,
+      });
 
       if (!destroyed) {
         rerender();
@@ -445,111 +580,144 @@ export const UsuariosView = (() => {
   }
 
   /* =====================================================
-     EVENTS
+     CLICK DELEGATION
   ===================================================== */
 
-  function bindNative(container) {
-    if (!container) return () => {};
+  function bindNativeActions(container) {
+    if (!container) {
+      return () => {};
+    }
 
     const onClick = async (event) => {
-      const openBtn =
-        event.target.closest(
-          '[data-action="open-user"]'
-        );
-
+      const openBtn = event.target.closest('[data-action="open-user"]');
       if (openBtn) {
         event.preventDefault();
 
-        await handleOpenUser(
-          openBtn.dataset.userId
-        );
+        const userId = String(
+          openBtn.dataset.userId ||
+          openBtn.dataset.usuarioId ||
+          ""
+        ).trim();
 
+        await handleOpenUsuario(userId);
         return;
       }
 
-      const copyBtn =
-        event.target.closest(
-          '[data-action="copy-user-id"]'
-        );
-
+      const copyBtn = event.target.closest('[data-action="copy-user-id"]');
       if (copyBtn) {
         event.preventDefault();
 
-        await handleCopyId(
-          copyBtn.dataset.userId
-        );
+        const userId = String(
+          copyBtn.dataset.userId ||
+          copyBtn.dataset.username ||
+          ""
+        ).trim();
 
+        if (!userId) {
+          return;
+        }
+
+        await handleCopyUsuarioId(userId);
         return;
       }
 
-      const prevBtn =
-        event.target.closest(
-          '[data-action="prev-page"]'
-        );
-
+      const prevBtn = event.target.closest('[data-action="prev-page"]');
       if (prevBtn) {
         event.preventDefault();
         goPrevPage();
         return;
       }
 
-      const nextBtn =
-        event.target.closest(
-          '[data-action="next-page"]'
-        );
-
+      const nextBtn = event.target.closest('[data-action="next-page"]');
       if (nextBtn) {
         event.preventDefault();
         goNextPage();
         return;
       }
 
-      const exportBtn =
-        event.target.closest(
-          "#usuarios-export-btn"
-        );
-
+      const exportBtn = event.target.closest("#usuarios-export-btn");
       if (exportBtn) {
         event.preventDefault();
-        handleExport();
+        handleExportCsv();
         return;
       }
 
-      const createBtn =
-        event.target.closest(
-          "#usuarios-create-btn"
-        );
-
+      const createBtn = event.target.closest("#usuarios-create-btn");
       if (createBtn) {
         event.preventDefault();
-        await handleCreate();
+        await handleCreateUsuario();
         return;
       }
 
-      const retryBtn =
-        event.target.closest(
-          "#usuarios-retry-btn"
-        );
-
+      const retryBtn = event.target.closest("#usuarios-retry-btn");
       if (retryBtn) {
         event.preventDefault();
-        await reload({
-          force: true,
-          asRefresh: false,
-        });
+        await reload({ force: true, asRefresh: false });
+        return;
+      }
+
+      const refreshBtn = event.target.closest("#usuarios-refresh-btn");
+      if (refreshBtn) {
+        event.preventDefault();
+        await reload({ force: true, asRefresh: true });
       }
     };
 
-    container.addEventListener(
-      "click",
-      onClick
-    );
+    container.addEventListener("click", onClick);
 
     return () => {
-      container.removeEventListener(
-        "click",
-        onClick
-      );
+      container.removeEventListener("click", onClick);
+    };
+  }
+
+  function bindModalBridgeEvents() {
+    const onRefresh = async (event) => {
+      const userId =
+        event?.detail?.userId ||
+        event?.userId ||
+        "";
+
+      if (!userId) {
+        return;
+      }
+
+      await handleRefreshUsuarioFromModal(userId);
+    };
+
+    const onCopy = async (event) => {
+      const userId =
+        event?.detail?.userId ||
+        event?.userId ||
+        "";
+
+      if (!userId) {
+        return;
+      }
+
+      await handleCopyUsuarioId(userId);
+    };
+
+    const eventBus = AppCore?.events;
+
+    if (!eventBus?.on) {
+      return () => {};
+    }
+
+    try {
+      eventBus.on("usuarios:modal:refresh", onRefresh);
+      eventBus.on("usuarios:modal:copy", onCopy);
+    } catch (error) {
+      safeWarn("bind modal bridge error:", error);
+    }
+
+    return () => {
+      try {
+        eventBus?.off?.("usuarios:modal:refresh", onRefresh);
+      } catch {}
+
+      try {
+        eventBus?.off?.("usuarios:modal:copy", onCopy);
+      } catch {}
     };
   }
 
@@ -557,23 +725,42 @@ export const UsuariosView = (() => {
     cleanupBindings();
 
     const container = getContainer();
+    const cleanups = [];
 
-    bindingsCleanup = bindNative(container);
+    cleanups.push(bindNativeActions(container));
+    cleanups.push(bindModalBridgeEvents());
+
+    bindingsCleanup = () => {
+      for (const cleanup of cleanups) {
+        try {
+          cleanup?.();
+        } catch {}
+      }
+    };
   }
 
   /* =====================================================
-     PUBLIC
+     PUBLIC FLOWS
   ===================================================== */
 
   async function reload(options = {}) {
-    if (destroyed) return api;
+    if (destroyed) {
+      return api;
+    }
 
-    await renderAndLoad({
-      force:
-        options.force !== false,
-      asRefresh:
-        options.asRefresh !== false,
-    });
+    const {
+      force = true,
+      asRefresh = true,
+    } = options || {};
+
+    try {
+      await renderAndLoad({
+        force,
+        asRefresh,
+      });
+    } catch (error) {
+      safeWarn("reload falló:", error);
+    }
 
     if (!destroyed) {
       bind();
@@ -583,10 +770,7 @@ export const UsuariosView = (() => {
   }
 
   async function init() {
-    if (
-      initialized &&
-      inflightInit
-    ) {
+    if (initialized && inflightInit) {
       return inflightInit;
     }
 
@@ -635,26 +819,28 @@ export const UsuariosView = (() => {
     safeLog("destroy");
   }
 
+  /* =====================================================
+     EXTRAS ÚTILES
+  ===================================================== */
+
   function getCurrentItems() {
     return getItems();
   }
 
   function getCurrentPageItems() {
     const items = getItems();
-
-    return paginateUsuarios(
-      items,
-      usuariosState.page,
-      usuariosState.pageSize
-    ).items;
+    const pagination = getPaginationMeta(items);
+    return pagination.items;
   }
 
-  function getCurrentUser(userId = "") {
-    return findUsuarioById(
-      getItems(),
-      userId
-    );
+  function getCurrentUsuario(userId = "") {
+    const items = getItems();
+    return findUsuarioById(items, userId);
   }
+
+  /* =====================================================
+     API
+  ===================================================== */
 
   const api = {
     init,
@@ -662,10 +848,10 @@ export const UsuariosView = (() => {
     reload,
     destroy,
 
-    openUser: handleOpenUser,
-    copyUserId: handleCopyId,
-    exportCsv: handleExport,
-    createUsuario: handleCreate,
+    openUsuario: handleOpenUsuario,
+    copyUsuarioId: handleCopyUsuarioId,
+    exportCsv: handleExportCsv,
+    createUsuario: handleCreateUsuario,
 
     goToPage,
     goPrevPage,
@@ -673,7 +859,7 @@ export const UsuariosView = (() => {
 
     getItems: getCurrentItems,
     getPageItems: getCurrentPageItems,
-    getUserById: getCurrentUser,
+    getUsuarioById: getCurrentUsuario,
 
     get initialized() {
       return initialized;

@@ -2,6 +2,8 @@
    Onion SPA - Facturas Loaders
    Archivo: src/views/facturas/facturas.loaders.js
 
+   FINAL PRO SYSTEM · LOADERS REAL · 10/10
+
    RESPONSABILIDADES:
    - cargar colección de facturas desde backend
    - cargar detalle individual de factura
@@ -17,6 +19,7 @@
    - remoteCount robusto
    - detalle con apertura previa segura
    - error de detalle no rompe el estado principal
+   - no ensucia error global con fallos de detalle
 ========================================================= */
 
 import {
@@ -38,7 +41,6 @@ import {
   getFacturasInflightDetail,
   getFacturasDetailData,
   isFacturasLoaded,
-  getFacturasRemoteCount,
 
   setFacturasLoading,
   setFacturasLoaded,
@@ -85,8 +87,8 @@ function resolveDetailPayload(response = null) {
     return response.factura;
   }
 
-  if (response.data && typeof response.data === "object") {
-    return resolveDetailPayload(response.data);
+  if (response.item && typeof response.item === "object") {
+    return response.item;
   }
 
   if (response.result && typeof response.result === "object") {
@@ -97,11 +99,21 @@ function resolveDetailPayload(response = null) {
     return resolveDetailPayload(response.payload);
   }
 
-  if (response.item && typeof response.item === "object") {
-    return resolveDetailPayload(response.item);
+  if (response.data && typeof response.data === "object") {
+    return resolveDetailPayload(response.data);
   }
 
   return response;
+}
+
+function getFacturaIdentity(item = null) {
+  return safeText(
+    item?.id ||
+      item?._id ||
+      item?.facturaId ||
+      item?.numero,
+    ""
+  );
 }
 
 /* =========================================================
@@ -112,6 +124,7 @@ export async function loadFacturasCollection({
   state,
   render,
   silent = false,
+  force = false,
 } = {}) {
   if (!state) {
     throw new Error("FACTURAS_STATE_REQUIRED");
@@ -122,7 +135,7 @@ export async function loadFacturasCollection({
     return inflight;
   }
 
-  const shouldRefresh = Boolean(silent || isFacturasLoaded(state));
+  const shouldRefresh = Boolean(silent || isFacturasLoaded(state) || force);
 
   clearFacturasError(state);
 
@@ -201,7 +214,7 @@ export async function loadFacturaDetailById({
   }
 
   const currentDetail = getFacturasDetailData(state);
-  const currentDetailId = safeText(currentDetail?.id || currentDetail?.facturaId, "");
+  const currentDetailId = getFacturaIdentity(currentDetail);
 
   if (!force && currentDetail && currentDetailId === id) {
     setFacturasDetailOpen(state, true);
@@ -217,7 +230,6 @@ export async function loadFacturaDetailById({
 
   setFacturasDetailOpen(state, true);
   setFacturasDetailLoading(state, true);
-  clearFacturasError(state);
 
   safeRender(render);
 
@@ -228,6 +240,7 @@ export async function loadFacturaDetailById({
       const factura = normalizeFactura(payload);
 
       setFacturasDetailData(state, factura);
+      setFacturasDetailOpen(state, true);
       setFacturasDetailLoading(state, false);
 
       safeRender(render);

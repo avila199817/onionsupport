@@ -40,12 +40,7 @@ export default UsuariosView;
    INTERNAL SAFE CALL
 ========================================================= */
 
-function safeCall(
-  target,
-  method,
-  args = [],
-  fallback = undefined
-) {
+function safeCall(target, method, args = [], fallback = undefined) {
   try {
     const fn = target?.[method];
 
@@ -62,191 +57,105 @@ function safeCall(
 ========================================================= */
 
 export const init = (...args) =>
-  safeCall(
-    UsuariosView,
-    "init",
-    args
-  );
+  safeCall(UsuariosView, "init", args);
 
 export const render = (...args) =>
-  safeCall(
-    UsuariosView,
-    "render",
-    args
-  );
+  safeCall(UsuariosView, "render", args);
 
 export const reload = (...args) =>
-  safeCall(
-    UsuariosView,
-    "reload",
-    args
-  );
+  safeCall(UsuariosView, "reload", args);
 
 export const destroy = (...args) =>
-  safeCall(
-    UsuariosView,
-    "destroy",
-    args
-  );
+  safeCall(UsuariosView, "destroy", args);
 
 /* =========================================================
    ACTIONS API
 ========================================================= */
 
-export const openUser = (...args) =>
-  safeCall(
-    UsuariosView,
-    "openUser",
-    args
-  );
+export const openUsuario = (...args) =>
+  safeCall(UsuariosView, "openUsuario", args);
 
 export const createUsuario = (...args) =>
-  safeCall(
-    UsuariosView,
-    "createUsuario",
-    args
-  );
+  safeCall(UsuariosView, "createUsuario", args);
 
 export const exportCsv = (...args) =>
-  safeCall(
-    UsuariosView,
-    "exportCsv",
-    args
-  );
+  safeCall(UsuariosView, "exportCsv", args);
 
 /* =========================================================
    PAGINATION API
 ========================================================= */
 
 export const goToPage = (...args) =>
-  safeCall(
-    UsuariosView,
-    "goToPage",
-    args
-  );
+  safeCall(UsuariosView, "goToPage", args);
 
 export const goPrevPage = (...args) =>
-  safeCall(
-    UsuariosView,
-    "goPrevPage",
-    args
-  );
+  safeCall(UsuariosView, "goPrevPage", args);
 
 export const goNextPage = (...args) =>
-  safeCall(
-    UsuariosView,
-    "goNextPage",
-    args
-  );
+  safeCall(UsuariosView, "goNextPage", args);
 
 /* =========================================================
    DATA API
 ========================================================= */
 
 export const getItems = (...args) =>
-  safeCall(
-    UsuariosView,
-    "getItems",
-    args,
-    []
-  );
+  safeCall(UsuariosView, "getItems", args, []);
 
 export const getPageItems = (...args) =>
-  safeCall(
-    UsuariosView,
-    "getPageItems",
-    args,
-    []
-  );
+  safeCall(UsuariosView, "getPageItems", args, []);
 
-export const getUserById = (...args) =>
-  safeCall(
-    UsuariosView,
-    "getUserById",
-    args,
-    null
-  );
+export const getUsuarioById = (...args) =>
+  safeCall(UsuariosView, "getUsuarioById", args, null);
 
 /* =========================================================
    CREATE VIEW API
 ========================================================= */
 
 export const initCreate = (...args) =>
-  safeCall(
-    UsuariosCreateView,
-    "init",
-    args
-  );
+  safeCall(UsuariosCreateView, "init", args);
 
 export const openCreate = (...args) =>
-  safeCall(
-    UsuariosCreateView,
-    "open",
-    args
-  );
+  safeCall(UsuariosCreateView, "open", args);
 
 export const closeCreate = (...args) =>
-  safeCall(
-    UsuariosCreateView,
-    "close",
-    args
-  );
+  safeCall(UsuariosCreateView, "close", args);
 
 /* =========================================================
    MODAL API
 ========================================================= */
 
 export const openModal = (...args) =>
-  safeCall(
-    UsuariosModal,
-    "open",
-    args
-  );
+  safeCall(UsuariosModal, "open", args);
 
 export const closeModal = (...args) =>
-  safeCall(
-    UsuariosModal,
-    "close",
-    args
-  );
+  safeCall(UsuariosModal, "close", args);
 
 export const refreshModal = (...args) =>
-  safeCall(
-    UsuariosModal,
-    "refresh",
-    args
-  );
+  safeCall(UsuariosModal, "refresh", args);
 
 /* =========================================================
    FLAGS
 ========================================================= */
 
 export const isInitialized = () =>
-  Boolean(
-    UsuariosView?.initialized
-  );
+  Boolean(UsuariosView?.initialized);
 
 export const isDestroyed = () =>
-  Boolean(
-    UsuariosView?.destroyed
-  );
+  Boolean(UsuariosView?.destroyed);
 
 /* =========================================================
    LEGACY GLOBAL BRIDGE (OPTIONAL)
 ========================================================= */
 
 try {
-  if (
-    typeof window !==
-    "undefined"
-  ) {
+  if (typeof window !== "undefined") {
     window.OnionUsuarios = {
       init,
       render,
       reload,
       destroy,
 
-      openUser,
+      openUsuario,
       createUsuario,
       exportCsv,
 
@@ -256,7 +165,7 @@ try {
 
       getItems,
       getPageItems,
-      getUserById,
+      getUsuarioById,
 
       openModal,
       closeModal,

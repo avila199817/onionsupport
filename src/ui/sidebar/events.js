@@ -308,6 +308,21 @@ export function bindCoreEvents(ctx) {
     closeDropdown,
   } = ctx;
 
+  function setRouteTransitionLock(
+    value
+  ) {
+    if (
+      !AppCore?.state ||
+      typeof AppCore.state !==
+        "object"
+    ) {
+      return;
+    }
+
+    AppCore.state.sidebarRouteTransition =
+      Boolean(value);
+  }
+
   AppCore.cleanup.event(
     scope,
     "app:user:change",
@@ -339,6 +354,7 @@ export function bindCoreEvents(ctx) {
     scope,
     "router:before-render",
     () => {
+      setRouteTransitionLock(true);
       closeDropdown?.();
     }
   );
@@ -355,6 +371,13 @@ export function bindCoreEvents(ctx) {
       renderUser?.();
       applyRoleVisibility?.();
       closeDropdown?.();
+
+      window.setTimeout(() => {
+        setRouteTransitionLock(
+          false
+        );
+        syncSidebarState?.();
+      }, 0);
     }
   );
 
@@ -373,14 +396,6 @@ export function bindCoreEvents(ctx) {
     "app:user-ui:sync",
     () => {
       renderUser?.();
-    }
-  );
-
-  AppCore.cleanup.event(
-    scope,
-    "app:theme:change",
-    () => {
-      syncSidebarState?.();
     }
   );
 

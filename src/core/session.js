@@ -107,6 +107,87 @@ function setAriaExpanded(
   );
 }
 
+function hasOwn(
+  obj,
+  key
+) {
+  return Boolean(
+    obj &&
+      typeof obj === "object" &&
+      Object.prototype.hasOwnProperty.call(
+        obj,
+        key
+      )
+  );
+}
+
+function resolveThemeFromUser(
+  user = null
+) {
+  if (
+    !user ||
+    typeof user !== "object"
+  ) {
+    return null;
+  }
+
+  const explicitTheme =
+    String(
+      user.theme ??
+        user?.preferences?.theme ??
+        user?.settings?.theme ??
+        user?.raw?.theme ??
+        user?.raw?.preferences
+          ?.theme ??
+        user?.raw?.settings
+          ?.theme ??
+        ""
+    )
+      .trim()
+      .toLowerCase();
+
+  if (
+    explicitTheme === "light" ||
+    explicitTheme === "dark"
+  ) {
+    return explicitTheme;
+  }
+
+  const hasExplicitDarkMode =
+    hasOwn(user, "darkMode") ||
+    hasOwn(user, "dark_mode") ||
+    hasOwn(user?.raw, "darkMode") ||
+    hasOwn(user?.raw, "dark_mode") ||
+    hasOwn(
+      user?.preferences,
+      "darkMode"
+    ) ||
+    hasOwn(
+      user?.settings,
+      "darkMode"
+    ) ||
+    hasOwn(
+      user?.raw?.preferences,
+      "darkMode"
+    ) ||
+    hasOwn(
+      user?.raw?.settings,
+      "darkMode"
+    );
+
+  if (
+    hasExplicitDarkMode &&
+    typeof user.darkMode ===
+      "boolean"
+  ) {
+    return user.darkMode
+      ? "dark"
+      : "light";
+  }
+
+  return null;
+}
+
 function createSessionSnapshot(
   state,
   cause = "unknown"
@@ -744,6 +825,7 @@ export function loadPreferences({
 export function loadSession({
   state,
   storage,
+  dom,
 } = {}) {
   const savedUser =
     normalizeUser(
@@ -778,6 +860,33 @@ export function loadSession({
       state,
       savedUser
     );
+
+  const userTheme =
+    resolveThemeFromUser(
+      savedUser
+    );
+
+  if (
+    userTheme === "light" ||
+    userTheme === "dark"
+  ) {
+    state.theme = userTheme;
+
+    storage?.set?.(
+      config.storageKeys.theme,
+      userTheme
+    );
+
+    dom?.html?.setAttribute(
+      "data-theme",
+      userTheme
+    );
+
+    syncThemeMetaColor({
+      dom,
+      theme: userTheme,
+    });
+  }
 
   return state;
 }

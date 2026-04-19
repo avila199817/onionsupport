@@ -8,6 +8,7 @@
    - abrir detalle a nivel de datos, no de UI
    - copiar id de ticket
    - exportar colección a CSV
+   - abrir modal de creación premium
    - desacoplar la vista principal de la lógica operativa
    - mantener compatibilidad con incidenciasView.js
 
@@ -18,6 +19,7 @@
    - export seguro con escape CSV
    - clipboard robusto con fallback legacy
    - eventos opcionales vía AppCore.events
+   - create modal bridge multi-entorno
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -112,25 +114,11 @@ function pickDetail(payload = null) {
 
   const obj = safeObject(payload);
 
-  if (isLikelyTicket(obj.ticket)) {
-    return obj.ticket;
-  }
-
-  if (isLikelyTicket(obj.item)) {
-    return obj.item;
-  }
-
-  if (isLikelyTicket(obj.result)) {
-    return obj.result;
-  }
-
-  if (isLikelyTicket(obj.payload)) {
-    return obj.payload;
-  }
-
-  if (isLikelyTicket(obj.data)) {
-    return obj.data;
-  }
+  if (isLikelyTicket(obj.ticket)) return obj.ticket;
+  if (isLikelyTicket(obj.item)) return obj.item;
+  if (isLikelyTicket(obj.result)) return obj.result;
+  if (isLikelyTicket(obj.payload)) return obj.payload;
+  if (isLikelyTicket(obj.data)) return obj.data;
 
   if (looksLikeEnvelope(obj.data)) {
     return pickDetail(obj.data);
@@ -416,12 +404,9 @@ async function writeClipboardText(text = "") {
   try {
     const textarea = document.createElement("textarea");
     textarea.value = value;
-    textarea.setAttribute("readonly", "true");
     textarea.style.position = "fixed";
     textarea.style.opacity = "0";
-    textarea.style.pointerEvents = "none";
     document.body.appendChild(textarea);
-    textarea.focus();
     textarea.select();
 
     const ok = document.execCommand("copy");
@@ -489,9 +474,7 @@ export async function getTicketDetailAction({
   const id = normalizeTicketId(ticketId);
 
   if (!id) {
-    if (!silent) {
-      showToast("No se pudo resolver el ticket.", "error");
-    }
+    if (!silent) showToast("No se pudo resolver el ticket.", "error");
     return null;
   }
 
@@ -571,9 +554,7 @@ export async function openTicketAction({
   const id = normalizeTicketId(ticketId);
 
   if (!id) {
-    if (!silent) {
-      showToast("Ticket inválido.", "error");
-    }
+    if (!silent) showToast("Ticket inválido.", "error");
     return null;
   }
 
@@ -587,9 +568,7 @@ export async function openTicketAction({
     silent,
   });
 
-  if (!detail) {
-    return null;
-  }
+  if (!detail) return null;
 
   safeEmit("incidencias:open:success", {
     ticketId: id,
@@ -621,18 +600,14 @@ export async function copyTicketIdAction({
   const id = normalizeTicketId(ticketId);
 
   if (!id) {
-    if (!silent) {
-      showToast("No hay ID para copiar.", "error");
-    }
+    if (!silent) showToast("No hay ID para copiar.", "error");
     return false;
   }
 
   const copied = await writeClipboardText(id);
 
   if (!copied) {
-    if (!silent) {
-      showToast("No se pudo copiar el ID.", "error");
-    }
+    if (!silent) showToast("No se pudo copiar el ID.", "error");
     return false;
   }
 
@@ -640,9 +615,7 @@ export async function copyTicketIdAction({
     ticketId: id,
   });
 
-  if (!silent) {
-    showToast("ID copiado", "success");
-  }
+  if (!silent) showToast("ID copiado", "success");
 
   return true;
 }
@@ -663,9 +636,7 @@ export function exportIncidenciasCsvAction({
   const list = safeArray(sourceItems);
 
   if (!list.length) {
-    if (!silent) {
-      showToast("No hay incidencias para exportar.", "info");
-    }
+    if (!silent) showToast("No hay incidencias para exportar.", "info");
     return false;
   }
 
@@ -683,9 +654,7 @@ export function exportIncidenciasCsvAction({
       filename: safeText(filename, CSV_FILENAME),
     });
 
-    if (!silent) {
-      showToast("CSV exportado", "success");
-    }
+    if (!silent) showToast("CSV exportado", "success");
 
     return true;
   } catch (error) {
@@ -694,9 +663,7 @@ export function exportIncidenciasCsvAction({
       error,
     });
 
-    if (!silent) {
-      showToast("No se pudo exportar el CSV.", "error");
-    }
+    if (!silent) showToast("No se pudo exportar el CSV.", "error");
 
     return false;
   }
@@ -706,17 +673,48 @@ export function exportIncidenciasCsvAction({
    CREATE
 ========================================================= */
 
+function openCreateModalBridge(payload = {}) {
+  const modal =
+    window?.OnionIncidenciasCreateModal ||
+    window?.OnionIncidencias?.createModal ||
+    null;
+
+  if (typeof modal?.open === "function") {
+    modal.open(payload);
+    return true;
+  }
+
+  if (typeof window?.renderIncidenciasCreateModal === "function") {
+    window.renderIncidenciasCreateModal(payload);
+    return true;
+  }
+
+  return false;
+}
+
 export async function createIncidenciaAction({
   route = "/incidencias/nueva",
   fallbackEvent = "incidencias:create",
   silent = false,
+  draft = {},
 } = {}) {
   const targetRoute = safeText(route, "/incidencias/nueva");
 
   try {
     safeEmit(fallbackEvent, {
       route: targetRoute,
+      draft,
     });
+
+    const opened = openCreateModalBridge(draft);
+
+    if (opened) {
+      safeEmit("incidencias:create:opened", {
+        mode: "modal",
+      });
+
+      return true;
+    }
 
     if (AppCore?.router?.navigate) {
       await AppCore.router.navigate(targetRoute);
@@ -730,6 +728,10 @@ export async function createIncidenciaAction({
 
     return true;
   } catch (error) {
+    safeEmit("incidencias:create:error", {
+      error,
+    });
+
     if (!silent) {
       showToast(
         "No se pudo abrir el flujo de creación.",

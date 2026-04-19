@@ -15,6 +15,7 @@
    - sort robusto sin mutar origen
    - upsert por id / _id / facturaId
    - deduplicación defensiva al append
+   - compat con colección normalizada actual
 ========================================================= */
 
 import { Store } from "../../store/index.js";
@@ -111,6 +112,20 @@ function getFacturaStoreId(item = {}) {
   );
 }
 
+function getFacturaStoreNumber(item = {}) {
+  const source = safeObject(item);
+
+  return safeText(
+    first(
+      source.numero,
+      source.code,
+      source.facturaNumero,
+      source.facturaCode
+    ),
+    ""
+  );
+}
+
 function normalizeFacturaCollection(items = []) {
   return safeArray(items)
     .map((item) => normalizeFactura(item))
@@ -124,9 +139,16 @@ function dedupeFacturas(items = []) {
     const normalized = normalizeFactura(item);
     const id = getFacturaStoreId(normalized);
 
-    if (!id) continue;
+    if (!id) {
+      continue;
+    }
 
-    map.set(id, normalized);
+    const current = map.get(id) || {};
+
+    map.set(id, {
+      ...current,
+      ...normalized,
+    });
   }
 
   return Array.from(map.values());
@@ -151,11 +173,56 @@ function resolveStoreCollectionShape(value) {
     return obj.data;
   }
 
+  if (Array.isArray(obj.results)) {
+    return obj.results;
+  }
+
+  if (Array.isArray(obj.rows)) {
+    return obj.rows;
+  }
+
   return [];
 }
 
+function readRawFacturasStore() {
+  const byPath = safeGet(FACTURAS_STORE_PATH, null);
+  const byCollection = safeGet(FACTURAS_COLLECTION_NAME, null);
+
+  const fromPath = resolveStoreCollectionShape(byPath);
+  const fromCollection = resolveStoreCollectionShape(byCollection);
+
+  if (fromPath.length) {
+    return fromPath;
+  }
+
+  if (fromCollection.length) {
+    return fromCollection;
+  }
+
+  return [];
+}
+
+function persistFacturasStore(items = []) {
+  const normalized = dedupeFacturas(items);
+
+  const collectionWritten = safeSetCollection(
+    FACTURAS_COLLECTION_NAME,
+    normalized
+  );
+
+  const pathWritten = safeSet(
+    FACTURAS_STORE_PATH,
+    normalized
+  );
+
+  return Boolean(collectionWritten || pathWritten);
+}
+
 function compareText(a, b) {
-  return safeText(a, "").localeCompare(safeText(b, ""), "es");
+  return safeText(a, "").localeCompare(
+    safeText(b, ""),
+    "es"
+  );
 }
 
 function compareNumber(a, b) {
@@ -174,13 +241,8 @@ function compareDate(a, b) {
 ========================================================= */
 
 export function getFacturasStore() {
-  const raw =
-    safeGet(FACTURAS_STORE_PATH, null) ??
-    safeGet(FACTURAS_COLLECTION_NAME, null);
-
-  const collection = resolveStoreCollectionShape(raw);
-
-  return normalizeFacturaCollection(collection);
+  const raw = readRawFacturasStore();
+  return normalizeFacturaCollection(raw);
 }
 
 export function getSortedFacturasStore({
@@ -248,12 +310,18 @@ export function getSortedFacturasStore({
 
 export function getFacturaByIdStore(id = "") {
   const facturaId = safeText(id, "");
-  if (!facturaId) return null;
+
+  if (!facturaId) {
+    return null;
+  }
 
   return (
-    getFacturasStore().find(
-      (item) => getFacturaStoreId(item) === facturaId
-    ) || null
+    getFacturasStore().find((item) => {
+      return (
+        getFacturaStoreId(item) === facturaId ||
+        getFacturaStoreNumber(item) === facturaId
+      );
+    }) || null
   );
 }
 
@@ -270,14 +338,7 @@ export function countFacturasStore() {
 ========================================================= */
 
 export function setFacturasStore(items = []) {
-  const normalized = dedupeFacturas(items);
-
-  if (safeSetCollection(FACTURAS_COLLECTION_NAME, normalized)) {
-    safeSet(FACTURAS_STORE_PATH, normalized);
-    return true;
-  }
-
-  return safeSet(FACTURAS_STORE_PATH, normalized);
+  return persistFacturasStore(items);
 }
 
 export function appendFacturasStore(items = []) {
@@ -286,14 +347,16 @@ export function appendFacturasStore(items = []) {
     ...safeArray(items),
   ]);
 
-  return setFacturasStore(merged);
+  return persistFacturasStore(merged);
 }
 
 export function upsertFacturaStore(factura = null) {
   const normalized = normalizeFactura(factura);
   const facturaId = getFacturaStoreId(normalized);
 
-  if (!facturaId) return false;
+  if (!facturaId) {
+    return false;
+  }
 
   const current = [...getFacturasStore()];
   const index = current.findIndex(
@@ -309,22 +372,28 @@ export function upsertFacturaStore(factura = null) {
     };
   }
 
-  return setFacturasStore(current);
+  return persistFacturasStore(current);
 }
 
 export function removeFacturaByIdStore(id = "") {
   const facturaId = safeText(id, "");
-  if (!facturaId) return false;
 
-  const filtered = getFacturasStore().filter(
-    (item) => getFacturaStoreId(item) !== facturaId
-  );
+  if (!facturaId) {
+    return false;
+  }
 
-  return setFacturasStore(filtered);
+  const filtered = getFacturasStore().filter((item) => {
+    return (
+      getFacturaStoreId(item) !== facturaId &&
+      getFacturaStoreNumber(item) !== facturaId
+    );
+  });
+
+  return persistFacturasStore(filtered);
 }
 
 export function clearFacturasStore() {
-  return setFacturasStore([]);
+  return persistFacturasStore([]);
 }
 
 /* =========================================================

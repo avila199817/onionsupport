@@ -2,18 +2,37 @@
    Onion SPA - Facturas Model (FULL PRO SAAS PANEL · GOD MODE)
    Archivo: src/views/facturas/facturas.model.js
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - helpers seguros de datos
    - formatters de facturas
    - normalización del backend
    - labels y estilos de estado
    - extracción robusta de payloads
    - utilidades de ordenación / métricas
+   - mantener paridad operativa con facturasView.js
+
+   HARDENING PRO:
+   - tolerancia a payloads heterogéneos
+   - normalización estable para store / actions / template
+   - soporte para envelope backend
+   - métricas robustas
+   - ordenación sin mutar origen
+   - filtros seguros y predecibles
 ========================================================= */
+
+/* =========================================================
+   CONSTANTS
+========================================================= */
+
+export const DEFAULT_FACTURAS_SORT = Object.freeze({
+  field: "updatedAt",
+  direction: "desc",
+});
 
 /* =========================================================
    HELPERS BASE
 ========================================================= */
+
 function safeString(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
   const text = String(value).trim();
@@ -25,8 +44,14 @@ function safeNumber(value, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
+function safeArray(value, fallback = []) {
+  return Array.isArray(value) ? value : fallback;
+}
+
+function safeObject(value, fallback = {}) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : fallback;
 }
 
 function normalizeText(value = "") {
@@ -57,13 +82,74 @@ function pickFirst(...values) {
   return undefined;
 }
 
+function isObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value);
+}
+
+function isLikelyFactura(value) {
+  if (!isObject(value)) return false;
+
+  return Boolean(
+    value.id ||
+      value._id ||
+      value.facturaId ||
+      value.numero ||
+      value.code ||
+      value.cliente ||
+      value.client ||
+      value.customer ||
+      value.total !== undefined ||
+      value.importeTotal !== undefined
+  );
+}
+
+function looksLikeFacturasEnvelope(value) {
+  const obj = safeObject(value);
+
+  return Boolean(
+    Array.isArray(obj.facturas) ||
+      Array.isArray(obj.items) ||
+      Array.isArray(obj.data) ||
+      Array.isArray(obj.results) ||
+      Array.isArray(obj.rows)
+  );
+}
+
+function resolveNestedArrayEnvelope(value) {
+  const obj = safeObject(value);
+
+  if (Array.isArray(value)) return value;
+  if (Array.isArray(obj.facturas)) return obj.facturas;
+  if (Array.isArray(obj.items)) return obj.items;
+  if (Array.isArray(obj.data)) return obj.data;
+  if (Array.isArray(obj.results)) return obj.results;
+  if (Array.isArray(obj.rows)) return obj.rows;
+
+  if (looksLikeFacturasEnvelope(obj.data)) {
+    return resolveNestedArrayEnvelope(obj.data);
+  }
+
+  if (looksLikeFacturasEnvelope(obj.payload)) {
+    return resolveNestedArrayEnvelope(obj.payload);
+  }
+
+  if (looksLikeFacturasEnvelope(obj.result)) {
+    return resolveNestedArrayEnvelope(obj.result);
+  }
+
+  return [];
+}
+
 /* =========================================================
    TEXTO / FORMATO
 ========================================================= */
+
 export function truncate(value = "", max = 140) {
   const text = safeString(value);
-  if (text.length <= max) return text;
-  return `${text.slice(0, max).trim()}…`;
+  const size = Math.max(1, safeNumber(max, 140));
+
+  if (text.length <= size) return text;
+  return `${text.slice(0, size).trim()}…`;
 }
 
 export function formatMoney(value, currency = "EUR") {
@@ -110,20 +196,38 @@ export function formatDateTime(value) {
 }
 
 export function formatRelativeDate(value) {
-  if (!value) return "—";
+  if (!value) return "Sin fecha";
 
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
+  if (Number.isNaN(date.getTime())) return "Sin fecha";
 
-  const diff = Date.now() - date.getTime();
-  const minute = 60 * 1000;
-  const hour = 60 * minute;
-  const day = 24 * hour;
+  const diffMs = date.getTime() - Date.now();
+  const diffMin = Math.round(diffMs / 60000);
+  const absMin = Math.abs(diffMin);
 
-  if (diff < minute) return "Hace un momento";
-  if (diff < hour) return `Hace ${Math.max(1, Math.floor(diff / minute))} min`;
-  if (diff < day) return `Hace ${Math.max(1, Math.floor(diff / hour))} h`;
-  if (diff < 7 * day) return `Hace ${Math.max(1, Math.floor(diff / day))} d`;
+  if (absMin < 1) return "Ahora mismo";
+
+  if (absMin < 60) {
+    return diffMin > 0
+      ? `En ${absMin} min`
+      : `Hace ${absMin} min`;
+  }
+
+  const diffHours = Math.round(absMin / 60);
+
+  if (diffHours < 24) {
+    return diffMin > 0
+      ? `En ${diffHours} h`
+      : `Hace ${diffHours} h`;
+  }
+
+  const diffDays = Math.round(diffHours / 24);
+
+  if (diffDays <= 7) {
+    return diffMin > 0
+      ? `En ${diffDays} día${diffDays === 1 ? "" : "s"}`
+      : `Hace ${diffDays} día${diffDays === 1 ? "" : "s"}`;
+  }
 
   return formatDate(value);
 }
@@ -143,18 +247,21 @@ export function getInitials(value = "") {
 /* =========================================================
    ESTADOS
 ========================================================= */
+
 export function normalizeEstadoPago(value = "pending") {
   const map = {
     pagada: "paid",
     pagado: "paid",
     paid: "paid",
+    cobrada: "paid",
     abonada: "paid",
 
     pendiente: "pending",
     pending: "pending",
     unpaid: "pending",
-    parcial: "pending",
-    partial: "pending",
+
+    parcial: "partial",
+    partial: "partial",
 
     vencida: "overdue",
     overdue: "overdue",
@@ -188,8 +295,14 @@ export function normalizeEstado(value = "issued") {
     borrador: "draft",
     draft: "draft",
 
-    cancelada: "void",
-    cancelado: "void",
+    cancelada: "cancelled",
+    cancelado: "cancelled",
+    cancelled: "cancelled",
+    canceled: "cancelled",
+
+    abonada: "paid",
+    pagada: "paid",
+    paid: "paid",
   };
 
   return map[normalizeText(value)] || "issued";
@@ -199,6 +312,7 @@ export function getEstadoPagoLabel(value = "pending") {
   const labels = {
     paid: "Pagada",
     pending: "Pendiente",
+    partial: "Pago parcial",
     overdue: "Vencida",
     draft: "Borrador",
     cancelled: "Cancelada",
@@ -213,115 +327,198 @@ export function getEstadoLabel(value = "issued") {
     sent: "Enviada",
     void: "Anulada",
     draft: "Borrador",
+    cancelled: "Cancelada",
+    paid: "Abonada",
   };
 
   return labels[normalizeEstado(value)] || "Emitida";
 }
 
 export function getEstadoPagoChipStyle(value = "pending") {
+  const normalized = normalizeEstadoPago(value);
+
   const tones = {
-    paid:
-      "background:var(--success-bg); border-color:var(--border-success); color:var(--text-soft);",
-    pending:
-      "background:var(--warning-bg); border-color:var(--border-warning); color:var(--text-soft);",
-    overdue:
-      "background:var(--error-bg); border-color:var(--border-error); color:var(--text-soft);",
-    draft:
-      "background:var(--info-bg); border-color:var(--border-info); color:var(--text-soft);",
-    cancelled:
-      "background:var(--surface-glass); border-color:var(--border-soft); color:var(--text-muted);",
+    paid: `
+      color:var(--success-strong, #36c690);
+      background:color-mix(in srgb, var(--success-strong, #36c690) 14%, transparent);
+      border:1px solid color-mix(in srgb, var(--success-strong, #36c690) 26%, transparent);
+    `,
+    pending: `
+      color:var(--warning-strong, #ffbc42);
+      background:color-mix(in srgb, var(--warning-strong, #ffbc42) 14%, transparent);
+      border:1px solid color-mix(in srgb, var(--warning-strong, #ffbc42) 26%, transparent);
+    `,
+    partial: `
+      color:var(--warning-strong, #ffbc42);
+      background:color-mix(in srgb, var(--warning-strong, #ffbc42) 14%, transparent);
+      border:1px solid color-mix(in srgb, var(--warning-strong, #ffbc42) 26%, transparent);
+    `,
+    overdue: `
+      color:var(--danger-strong, #ff6b6b);
+      background:color-mix(in srgb, var(--danger-strong, #ff6b6b) 14%, transparent);
+      border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, transparent);
+    `,
+    draft: `
+      color:var(--accent-strong, var(--accent, #7c5cff));
+      background:color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent);
+      border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 26%, transparent);
+    `,
+    cancelled: `
+      color:var(--text-dim);
+      background:var(--surface-glass);
+      border:1px solid var(--border-soft);
+    `,
   };
 
-  return tones[normalizeEstadoPago(value)] || tones.pending;
+  return tones[normalized] || tones.pending;
 }
 
 export function getEstadoChipStyle(value = "issued") {
+  const normalized = normalizeEstado(value);
+
   const tones = {
-    issued:
-      "background:var(--info-bg); border-color:var(--border-info); color:var(--text-soft);",
-    sent:
-      "background:var(--success-bg); border-color:var(--border-success); color:var(--text-soft);",
-    void:
-      "background:var(--surface-glass); border-color:var(--border-soft); color:var(--text-muted);",
-    draft:
-      "background:var(--accent-soft-2); border-color:var(--border-accent); color:var(--text-soft);",
+    issued: `
+      color:var(--accent-strong, var(--accent, #7c5cff));
+      background:color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent);
+      border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 26%, transparent);
+    `,
+    sent: `
+      color:var(--success-strong, #36c690);
+      background:color-mix(in srgb, var(--success-strong, #36c690) 14%, transparent);
+      border:1px solid color-mix(in srgb, var(--success-strong, #36c690) 26%, transparent);
+    `,
+    void: `
+      color:var(--danger-strong, #ff6b6b);
+      background:color-mix(in srgb, var(--danger-strong, #ff6b6b) 14%, transparent);
+      border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, transparent);
+    `,
+    cancelled: `
+      color:var(--danger-strong, #ff6b6b);
+      background:color-mix(in srgb, var(--danger-strong, #ff6b6b) 14%, transparent);
+      border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, transparent);
+    `,
+    draft: `
+      color:var(--warning-strong, #ffbc42);
+      background:color-mix(in srgb, var(--warning-strong, #ffbc42) 14%, transparent);
+      border:1px solid color-mix(in srgb, var(--warning-strong, #ffbc42) 26%, transparent);
+    `,
+    paid: `
+      color:var(--success-strong, #36c690);
+      background:color-mix(in srgb, var(--success-strong, #36c690) 14%, transparent);
+      border:1px solid color-mix(in srgb, var(--success-strong, #36c690) 26%, transparent);
+    `,
   };
 
-  return tones[normalizeEstado(value)] || tones.issued;
+  return tones[normalized] || tones.issued;
 }
 
 /* =========================================================
    HELPERS FACTURA
 ========================================================= */
+
 export function getFacturaNumero(item = {}) {
+  const source = safeObject(item);
+
   return (
-    safeString(item.numero) ||
-    safeString(item.numeroFacturaLegal) ||
-    safeString(item.numeroFacturaSistema) ||
-    safeString(item.numeroFactura) ||
-    safeString(item.id) ||
-    "--"
+    safeString(source.numero) ||
+    safeString(source.numeroFacturaLegal) ||
+    safeString(source.numeroFacturaSistema) ||
+    safeString(source.numeroFactura) ||
+    safeString(source.code) ||
+    safeString(source.facturaCode) ||
+    safeString(source.id) ||
+    safeString(source._id) ||
+    "—"
   );
 }
 
 export function getFacturaFecha(item = {}) {
+  const source = safeObject(item);
+
   return (
-    safeString(item.fecha) ||
-    safeString(item.fechaFactura) ||
+    safeString(source.fecha) ||
+    safeString(source.fechaFactura) ||
+    safeString(source.issuedAt) ||
+    safeString(source.createdAt) ||
     null
   );
 }
 
 export function getFacturaUpdatedAt(item = {}) {
+  const source = safeObject(item);
+
   return (
-    safeString(item.updatedAt) ||
-    safeString(item.fechaEnvio) ||
-    safeString(item.sentAt) ||
-    safeString(item.mailSentAt) ||
-    getFacturaFecha(item) ||
+    safeString(source.updatedAt) ||
+    safeString(source.fechaEnvio) ||
+    safeString(source.sentAt) ||
+    safeString(source.mailSentAt) ||
+    safeString(source.modifiedAt) ||
+    getFacturaFecha(source) ||
     null
   );
 }
 
 export function getFacturaClienteNombre(item = {}) {
+  const source = safeObject(item);
+  const cliente = safeObject(
+    pickFirst(source.cliente, source.client, source.customer)
+  );
+
   return (
-    safeString(item?.cliente?.nombre) ||
-    safeString(item?.cliente?.nombreContacto) ||
-    safeString(item?.cliente?.empresa) ||
-    safeString(item?.cliente?.razonSocial) ||
-    safeString(item?.owner?.name) ||
-    safeString(item?.name) ||
+    safeString(cliente.nombre) ||
+    safeString(cliente.nombreContacto) ||
+    safeString(cliente.empresa) ||
+    safeString(cliente.razonSocial) ||
+    safeString(cliente.name) ||
+    safeString(source.clientName) ||
+    safeString(source.customerName) ||
+    safeString(source.owner?.name) ||
+    safeString(source.name) ||
     "Cliente"
   );
 }
 
 export function getFacturaClienteEmpresa(item = {}) {
+  const source = safeObject(item);
+  const cliente = safeObject(
+    pickFirst(source.cliente, source.client, source.customer)
+  );
+
   return (
-    safeString(item?.cliente?.empresa) ||
-    safeString(item?.cliente?.razonSocial) ||
-    safeString(item?.cliente?.nombreFiscal) ||
-    safeString(item?.cliente?.nombre) ||
-    safeString(item?.cliente?.nombreContacto) ||
+    safeString(cliente.empresa) ||
+    safeString(cliente.razonSocial) ||
+    safeString(cliente.nombreFiscal) ||
+    safeString(cliente.nombre) ||
+    safeString(cliente.nombreContacto) ||
+    safeString(cliente.company) ||
     "-"
   );
 }
 
 export function getFacturaClienteEmail(item = {}) {
+  const source = safeObject(item);
+  const cliente = safeObject(
+    pickFirst(source.cliente, source.client, source.customer)
+  );
+
   return (
-    safeString(item?.cliente?.email) ||
-    safeString(item?.emailCliente) ||
-    safeString(item?.owner?.email) ||
+    safeString(cliente.email) ||
+    safeString(cliente.mail) ||
+    safeString(source.emailCliente) ||
+    safeString(source.clientEmail) ||
+    safeString(source.owner?.email) ||
     "-"
   );
 }
 
 export function getFacturaPreview(item = {}) {
-  const firstLinea = safeArray(item.lineas)[0] || {};
+  const source = safeObject(item);
+  const firstLinea = safeObject(safeArray(source.lineas)[0]);
 
   return (
-    safeString(item.preview) ||
-    safeString(item.descripcion) ||
-    safeString(item.concepto) ||
+    safeString(source.preview) ||
+    safeString(source.descripcion) ||
+    safeString(source.concepto) ||
     safeString(firstLinea.descripcion) ||
     safeString(firstLinea.concepto) ||
     "Sin detalle"
@@ -329,91 +526,126 @@ export function getFacturaPreview(item = {}) {
 }
 
 export function getFacturaCurrency(item = {}) {
-  return safeString(item.moneda, "EUR") || "EUR";
+  const source = safeObject(item);
+  return safeString(
+    pickFirst(source.moneda, source.currency),
+    "EUR"
+  ) || "EUR";
 }
 
 export function getFacturaTotal(item = {}) {
+  const source = safeObject(item);
+
   return round2(
     pickFirst(
-      item.total,
-      item.importeTotal,
-      item?.resumen?.total,
+      source.total,
+      source.importeTotal,
+      source.amount,
+      source.importe,
+      source.resumen?.total,
       0
     )
   );
 }
 
 export function getFacturaBaseImponible(item = {}) {
+  const source = safeObject(item);
+
   return round2(
     pickFirst(
-      item.baseImponible,
-      item.subtotal,
-      item?.resumen?.baseImponible,
-      item?.resumen?.subtotal,
+      source.baseImponible,
+      source.subtotal,
+      source.taxableBase,
+      source.resumen?.baseImponible,
+      source.resumen?.subtotal,
       0
     )
   );
 }
 
 export function getFacturaImpuestosTotal(item = {}) {
+  const source = safeObject(item);
+
   return round2(
     pickFirst(
-      item.impuestosTotal,
-      item.iva,
-      item?.resumen?.impuestosTotal,
+      source.impuestosTotal,
+      source.taxTotal,
+      source.iva,
+      source.resumen?.impuestosTotal,
       0
     )
   );
 }
 
 export function getFacturaDescuentoTotal(item = {}) {
+  const source = safeObject(item);
+
   return round2(
     pickFirst(
-      item.descuentoTotal,
-      item?.resumen?.descuentoTotal,
+      source.descuentoTotal,
+      source.discountTotal,
+      source.resumen?.descuentoTotal,
       0
     )
   );
 }
 
 export function isFacturaPaid(item = {}) {
-  return normalizeEstadoPago(item.estadoPago) === "paid";
+  return normalizeEstadoPago(item?.estadoPago) === "paid";
 }
 
 export function isFacturaPending(item = {}) {
-  return normalizeEstadoPago(item.estadoPago) === "pending";
+  const status = normalizeEstadoPago(item?.estadoPago);
+  return status === "pending" || status === "partial";
 }
 
 export function isFacturaOverdue(item = {}) {
-  return normalizeEstadoPago(item.estadoPago) === "overdue";
+  return normalizeEstadoPago(item?.estadoPago) === "overdue";
 }
 
 /* =========================================================
    NORMALIZACIÓN PRINCIPAL
 ========================================================= */
+
 export function normalizeFactura(item = {}) {
-  const estadoPago = normalizeEstadoPago(item.estadoPago || "pending");
-  const estado = normalizeEstado(item.estado || "issued");
+  const source = safeObject(item);
+  const estadoPago = normalizeEstadoPago(
+    pickFirst(source.estadoPago, source.paymentStatus, "pending")
+  );
+  const estado = normalizeEstado(
+    pickFirst(source.estado, source.status, "issued")
+  );
 
-  const clienteNombre = getFacturaClienteNombre(item);
-  const clienteEmpresa = getFacturaClienteEmpresa(item);
-  const clienteEmail = getFacturaClienteEmail(item);
+  const clienteNombre = getFacturaClienteNombre(source);
+  const clienteEmpresa = getFacturaClienteEmpresa(source);
+  const clienteEmail = getFacturaClienteEmail(source);
 
-  const currency = getFacturaCurrency(item);
-  const fecha = getFacturaFecha(item);
+  const currency = getFacturaCurrency(source);
+  const fecha = getFacturaFecha(source);
   const fechaEnvio =
-    safeString(item.fechaEnvio) ||
-    safeString(item.sentAt) ||
-    safeString(item.mailSentAt) ||
+    safeString(source.fechaEnvio) ||
+    safeString(source.sentAt) ||
+    safeString(source.mailSentAt) ||
     null;
 
-  const updatedAt = getFacturaUpdatedAt(item);
-  const lineas = safeArray(item.lineas);
-  const impuestos = safeArray(item.impuestos);
+  const updatedAt = getFacturaUpdatedAt(source);
+  const lineas = safeArray(source.lineas);
+  const impuestos = safeArray(source.impuestos);
+  const attachments = safeArray(
+    pickFirst(source.attachments, source.files, source.adjuntos)
+  );
+
+  const id =
+    source.id ??
+    source._id ??
+    source.facturaId ??
+    null;
 
   return {
-    id: item.id ?? null,
-    numero: getFacturaNumero(item),
+    id,
+    _id: source._id ?? null,
+    facturaId: id,
+    numero: getFacturaNumero(source),
 
     fecha,
     fechaEnvio,
@@ -422,162 +654,232 @@ export function normalizeFactura(item = {}) {
     estadoPago,
     estado,
 
-    total: getFacturaTotal(item),
+    total: getFacturaTotal(source),
     subtotal: round2(
-      pickFirst(item.subtotal, item?.resumen?.subtotal, 0)
+      pickFirst(source.subtotal, source.resumen?.subtotal, 0)
     ),
-    baseImponible: getFacturaBaseImponible(item),
-    descuentoTotal: getFacturaDescuentoTotal(item),
-    impuestosTotal: getFacturaImpuestosTotal(item),
-    iva: round2(item.iva),
-    irpf: round2(item.irpf),
+    baseImponible: getFacturaBaseImponible(source),
+    descuentoTotal: getFacturaDescuentoTotal(source),
+    impuestosTotal: getFacturaImpuestosTotal(source),
+    iva: round2(source.iva),
+    irpf: round2(source.irpf),
     moneda: currency,
+    currency,
 
     formaPago:
-      safeString(item.formaPago) ||
-      safeString(item.metodoPago) ||
-      "-",
+      safeString(source.formaPago) ||
+      safeString(source.metodoPago) ||
+      safeString(source.paymentMethod) ||
+      "—",
 
-    cuentaPago: safeString(item.cuentaPago) || "",
-    preview: getFacturaPreview(item),
+    cuentaPago:
+      safeString(source.cuentaPago) ||
+      safeString(source.paymentAccount) ||
+      "",
+
+    preview: getFacturaPreview(source),
 
     lineasCount: safeNumber(
-      item.lineasCount,
+      source.lineasCount,
       lineas.length
     ),
 
     attachmentsCount: safeNumber(
-      item.attachmentsCount,
-      safeArray(item.attachments).length
+      source.attachmentsCount,
+      attachments.length
     ),
 
     hasPdf:
-      item.hasPdf === true ||
-      item.pdfAvailable === true ||
-      Boolean(item.blobPath),
+      source.hasPdf === true ||
+      source.pdfAvailable === true ||
+      Boolean(source.blobPath),
 
     pdfAvailable:
-      item.pdfAvailable === true ||
-      item.hasPdf === true ||
-      Boolean(item.blobPath),
+      source.pdfAvailable === true ||
+      source.hasPdf === true ||
+      Boolean(source.blobPath),
 
-    blobPath: safeString(item.blobPath) || "",
+    blobPath: safeString(source.blobPath) || "",
 
     clienteId:
-      item.clienteId ??
-      item.cliente?.id ??
-      item.userId ??
+      source.clienteId ??
+      source.cliente?.id ??
+      source.client?.id ??
+      source.customer?.id ??
+      source.userId ??
       null,
 
     cliente: {
-      id: item.cliente?.id ?? item.clienteId ?? item.userId ?? null,
+      id:
+        source.cliente?.id ??
+        source.client?.id ??
+        source.customer?.id ??
+        source.clienteId ??
+        source.userId ??
+        null,
       nombre: clienteNombre,
       nombreContacto:
-        safeString(item?.cliente?.nombreContacto) ||
+        safeString(source?.cliente?.nombreContacto) ||
+        safeString(source?.client?.contactName) ||
         clienteNombre,
       empresa: clienteEmpresa,
+      razonSocial:
+        safeString(source?.cliente?.razonSocial) ||
+        safeString(source?.client?.company) ||
+        clienteEmpresa,
       email: clienteEmail,
       telefono:
-        safeString(item?.cliente?.telefono) ||
-        safeString(item?.telefonoCliente) ||
+        safeString(source?.cliente?.telefono) ||
+        safeString(source?.client?.phone) ||
+        safeString(source?.telefonoCliente) ||
         "",
-      nif: safeString(item?.cliente?.nif) || "",
+      nif:
+        safeString(source?.cliente?.nif) ||
+        safeString(source?.cliente?.vatId) ||
+        "",
       avatar:
-        item?.cliente?.avatar ??
-        item?.owner?.avatar ??
+        source?.cliente?.avatar ??
+        source?.client?.avatar ??
+        source?.owner?.avatar ??
         null,
       initials: getInitials(
         clienteEmpresa !== "-" ? clienteEmpresa : clienteNombre
       ),
       direccion: {
-        calle: safeString(item?.cliente?.direccion?.calle),
-        linea2: safeString(item?.cliente?.direccion?.linea2),
-        cp: safeString(item?.cliente?.direccion?.cp),
-        ciudad: safeString(item?.cliente?.direccion?.ciudad),
-        provincia: safeString(item?.cliente?.direccion?.provincia),
-        pais: safeString(item?.cliente?.direccion?.pais),
+        calle:
+          safeString(source?.cliente?.direccion?.calle) ||
+          safeString(source?.client?.address?.street),
+        linea2:
+          safeString(source?.cliente?.direccion?.linea2) ||
+          safeString(source?.client?.address?.line2),
+        cp:
+          safeString(source?.cliente?.direccion?.cp) ||
+          safeString(source?.client?.address?.zip),
+        ciudad:
+          safeString(source?.cliente?.direccion?.ciudad) ||
+          safeString(source?.client?.address?.city),
+        provincia:
+          safeString(source?.cliente?.direccion?.provincia) ||
+          safeString(source?.client?.address?.state),
+        pais:
+          safeString(source?.cliente?.direccion?.pais) ||
+          safeString(source?.client?.address?.country),
       },
     },
 
     owner: {
-      id: item?.owner?.id ?? item?.userId ?? null,
+      id: source?.owner?.id ?? source?.userId ?? null,
       name:
-        safeString(item?.owner?.name) ||
-        safeString(item?.name) ||
+        safeString(source?.owner?.name) ||
+        safeString(source?.name) ||
         "",
       email:
-        safeString(item?.owner?.email) ||
+        safeString(source?.owner?.email) ||
         "",
-      avatar: item?.owner?.avatar ?? null,
+      avatar: source?.owner?.avatar ?? null,
     },
 
     concepto:
-      safeString(item.concepto) ||
+      safeString(source.concepto) ||
       safeString(lineas[0]?.concepto) ||
       "Factura",
 
     descripcion:
-      safeString(item.descripcion) ||
+      safeString(source.descripcion) ||
       safeString(lineas[0]?.descripcion) ||
       "",
 
-    lineas: lineas.map((l, index) => ({
-      id: l.id ?? `linea-${index + 1}`,
-      concepto: safeString(l.concepto),
-      descripcion: safeString(l.descripcion),
-      cantidad: safeNumber(l.cantidad, 0),
-      precioUnitario: round2(l.precioUnitario),
-      subtotal: round2(l.subtotal),
-      descuento: round2(l.descuento),
-      impuesto: round2(l.impuesto),
-      totalLinea: round2(
-        pickFirst(l.totalLinea, l.total, l.importe, 0)
-      ),
-    })),
+    lineas: lineas.map((l, index) => {
+      const linea = safeObject(l);
 
-    impuestos: impuestos.map((i) => ({
-      tipo: safeString(i.tipo),
-      nombre: safeString(i.nombre || i.tipo),
-      porcentaje: safeNumber(i.porcentaje, 0),
-      base: round2(i.base),
-      importe: round2(i.importe),
-    })),
+      return {
+        id: linea.id ?? `linea-${index + 1}`,
+        concepto: safeString(linea.concepto),
+        descripcion: safeString(linea.descripcion),
+        cantidad: safeNumber(linea.cantidad, 0),
+        precioUnitario: round2(linea.precioUnitario),
+        subtotal: round2(linea.subtotal),
+        descuento: round2(linea.descuento),
+        impuesto: round2(linea.impuesto),
+        totalLinea: round2(
+          pickFirst(linea.totalLinea, linea.total, linea.importe, 0)
+        ),
+      };
+    }),
+
+    impuestos: impuestos.map((i) => {
+      const impuesto = safeObject(i);
+
+      return {
+        tipo: safeString(impuesto.tipo),
+        nombre: safeString(impuesto.nombre || impuesto.tipo),
+        porcentaje: safeNumber(impuesto.porcentaje, 0),
+        base: round2(impuesto.base),
+        importe: round2(impuesto.importe),
+      };
+    }),
+
+    attachments: attachments.map((entry, index) => {
+      const file = safeObject(entry);
+
+      return {
+        id: file.id ?? `attachment-${index + 1}`,
+        name:
+          safeString(file.name) ||
+          safeString(file.filename) ||
+          safeString(file.fileName) ||
+          `archivo_${index + 1}`,
+        url:
+          safeString(file.url) ||
+          safeString(file.href) ||
+          safeString(file.path) ||
+          safeString(file.downloadUrl) ||
+          "#",
+        size: safeNumber(file.size, 0),
+        raw: file,
+      };
+    }),
 
     notas:
-      safeString(item.notas) ||
-      safeString(item.observaciones) ||
+      safeString(source.notas) ||
+      safeString(source.observaciones) ||
       "",
 
     enviadoA:
-      safeString(item.enviadoA) ||
+      safeString(source.enviadoA) ||
+      safeString(source.sentTo) ||
       "",
 
-    sendHistory: safeArray(item.sendHistory).map((entry) => ({
-      at: safeString(entry?.at) || null,
-      to: safeString(entry?.to),
-      byUserId: safeString(entry?.byUserId),
-      byRole: safeString(entry?.byRole),
-      channel: safeString(entry?.channel, "email"),
-      requestId: safeString(entry?.requestId),
-    })),
+    sendHistory: safeArray(source.sendHistory).map((entry) => {
+      const itemHistory = safeObject(entry);
+
+      return {
+        at: safeString(itemHistory?.at) || null,
+        to: safeString(itemHistory?.to),
+        byUserId: safeString(itemHistory?.byUserId),
+        byRole: safeString(itemHistory?.byRole),
+        channel: safeString(itemHistory?.channel, "email"),
+        requestId: safeString(itemHistory?.requestId),
+      };
+    }),
 
     createdAt:
-      safeString(item.createdAt) ||
-      safeString(item?.auditoria?.createdAt) ||
+      safeString(source.createdAt) ||
+      safeString(source?.auditoria?.createdAt) ||
       null,
 
     updatedBy:
-      safeString(item.updatedBy) ||
-      safeString(item?.auditoria?.updatedBy) ||
+      safeString(source.updatedBy) ||
+      safeString(source?.auditoria?.updatedBy) ||
       "",
 
     createdBy:
-      safeString(item.createdBy) ||
-      safeString(item?.auditoria?.createdBy) ||
+      safeString(source.createdBy) ||
+      safeString(source?.auditoria?.createdBy) ||
       "",
 
     estadoDetalle:
-      safeString(item.estadoDetalle) ||
+      safeString(source.estadoDetalle) ||
       "",
 
     meta: {
@@ -585,24 +887,20 @@ export function normalizeFactura(item = {}) {
       fechaMs: toMs(fecha) || 0,
       updatedAtMs: toMs(updatedAt) || 0,
       isPaid: estadoPago === "paid",
-      isPending: estadoPago === "pending",
+      isPending: estadoPago === "pending" || estadoPago === "partial",
       isOverdue: estadoPago === "overdue",
     },
 
-    raw: item,
+    raw: source,
   };
 }
 
 /* =========================================================
    EXTRACCIÓN DE RESPUESTAS
 ========================================================= */
+
 export function extractFacturas(response) {
-  if (Array.isArray(response)) return response;
-  if (Array.isArray(response?.facturas)) return response.facturas;
-  if (Array.isArray(response?.items)) return response.items;
-  if (Array.isArray(response?.data?.facturas)) return response.data.facturas;
-  if (Array.isArray(response?.data?.items)) return response.data.items;
-  return [];
+  return resolveNestedArrayEnvelope(response);
 }
 
 export function extractNormalizedFacturas(response) {
@@ -614,17 +912,26 @@ export function getRemoteCount(response, fallback = 0) {
     safeNumber(response?.count, 0) ||
     safeNumber(response?.total, 0) ||
     safeNumber(response?.remoteCount, 0) ||
+    safeNumber(response?.data?.count, 0) ||
+    safeNumber(response?.data?.total, 0) ||
+    safeNumber(response?.meta?.count, 0) ||
     fallback
   );
 }
 
 export function extractStats(response) {
-  return response?.stats || response?.data?.stats || null;
+  return (
+    response?.stats ||
+    response?.data?.stats ||
+    response?.meta?.stats ||
+    null
+  );
 }
 
 /* =========================================================
    MÉTRICAS
 ========================================================= */
+
 export function sumFacturasTotal(items = []) {
   return round2(
     safeArray(items).reduce((acc, item) => acc + safeNumber(item?.total, 0), 0)
@@ -659,10 +966,14 @@ export function countFacturasByEstado(items = [], target = "issued") {
 /* =========================================================
    ORDENACIÓN
 ========================================================= */
-export function sortFacturas(items = [], sort = {}) {
+
+export function sortFacturas(items = [], sort = DEFAULT_FACTURAS_SORT) {
   const list = [...safeArray(items)];
-  const field = safeString(sort?.field, "fecha");
-  const direction = safeString(sort?.direction, "desc") === "asc" ? 1 : -1;
+  const field = safeString(sort?.field, DEFAULT_FACTURAS_SORT.field);
+  const direction =
+    safeString(sort?.direction, DEFAULT_FACTURAS_SORT.direction) === "asc"
+      ? 1
+      : -1;
 
   list.sort((a, b) => {
     const left = normalizeFactura(a);
@@ -675,8 +986,18 @@ export function sortFacturas(items = [], sort = {}) {
       return av.localeCompare(bv, "es") * direction;
     }
 
+    if (field === "numero") {
+      const av = normalizeText(left?.numero);
+      const bv = normalizeText(right?.numero);
+
+      return av.localeCompare(bv, "es") * direction;
+    }
+
     if (field === "total") {
-      return (safeNumber(left?.total, 0) - safeNumber(right?.total, 0)) * direction;
+      return (
+        (safeNumber(left?.total, 0) - safeNumber(right?.total, 0)) *
+        direction
+      );
     }
 
     if (field === "fecha") {
@@ -699,6 +1020,7 @@ export function sortFacturas(items = [], sort = {}) {
 /* =========================================================
    FILTRADO
 ========================================================= */
+
 export function filterFacturas(items = [], filters = {}) {
   const query = normalizeText(filters?.query);
   const estadoPago = normalizeText(filters?.estadoPago);
@@ -714,7 +1036,8 @@ export function filterFacturas(items = [], filters = {}) {
       normalizeText(factura.cliente?.empresa).includes(query) ||
       normalizeText(factura.cliente?.nombre).includes(query) ||
       normalizeText(factura.cliente?.email).includes(query) ||
-      normalizeText(factura.concepto).includes(query);
+      normalizeText(factura.concepto).includes(query) ||
+      normalizeText(factura.descripcion).includes(query);
 
     const matchEstadoPago =
       !estadoPago ||

@@ -278,6 +278,7 @@ function getFacturaBase(factura = {}) {
 function getFacturaImpuestos(factura = {}) {
   return safeNumber(
     first(
+      factura?.impuestosTotal,
       factura?.impuestos,
       factura?.tax,
       factura?.iva
@@ -307,6 +308,7 @@ function getFacturaFechaEnvio(factura = {}) {
 function getFacturaPdfAvailable(factura = {}) {
   return Boolean(
     factura?.pdfAvailable ||
+      factura?.hasPdf ||
       factura?.blobPath ||
       factura?.pdfUrl
   );
@@ -593,7 +595,7 @@ export function renderSectionCard({
         background:var(--surface-glass);
       "
     >
-      <div style="display:grid;gap:6px;">
+      <div style="display:grid; gap:6px;">
         <h3
           style="
             margin:0;
@@ -896,10 +898,10 @@ export function renderFacturasDetailContent({
 } = {}) {
   if (loading) {
     return `
-      <div style="padding:28px;display:grid;gap:18px;">
-        <div style="height:42px;border-radius:14px;background:var(--surface-glass);"></div>
-        <div style="height:140px;border-radius:20px;background:var(--surface-glass);"></div>
-        <div style="height:420px;border-radius:22px;background:var(--surface-glass);"></div>
+      <div style="padding:28px; display:grid; gap:18px;">
+        <div style="height:42px; border-radius:14px; background:var(--surface-glass);"></div>
+        <div style="height:140px; border-radius:20px; background:var(--surface-glass);"></div>
+        <div style="height:420px; border-radius:22px; background:var(--surface-glass);"></div>
       </div>
     `;
   }
@@ -936,7 +938,7 @@ export function renderFacturasDetailContent({
           gap:18px;
           padding:22px 24px 18px;
           border-bottom:1px solid var(--border-soft);
-          background:var(--modal-bg,var(--surface-1,#141414));
+          background:var(--modal-bg, var(--surface-1, #141414));
         "
       >
         <div
@@ -970,7 +972,7 @@ export function renderFacturasDetailContent({
             <h2
               style="
                 margin:0;
-                font-size:clamp(30px,4vw,42px);
+                font-size:clamp(30px, 4vw, 42px);
                 line-height:.98;
                 color:var(--text-strong);
                 letter-spacing:-.04em;
@@ -1037,12 +1039,12 @@ export function renderFacturasDetailContent({
             class="facturas-detail-grid"
             style="
               display:grid;
-              grid-template-columns:minmax(0,1.2fr) minmax(320px,.8fr);
+              grid-template-columns:minmax(0, 1.2fr) minmax(320px, .8fr);
               gap:20px;
               align-items:start;
             "
           >
-            <section style="display:grid;gap:14px;">
+            <section style="display:grid; gap:14px;">
               ${renderSectionCard({
                 title: "Líneas de factura",
                 subtitle: "Desglose de conceptos, cantidades, subtotales e impuestos.",
@@ -1050,7 +1052,7 @@ export function renderFacturasDetailContent({
               })}
             </section>
 
-            <section style="display:grid;gap:14px;">
+            <section style="display:grid; gap:14px;">
               ${renderClienteSection(factura)}
               ${renderMetaSection(factura)}
             </section>
@@ -1064,25 +1066,25 @@ export function renderFacturasDetailContent({
         to { transform: rotate(360deg); }
       }
 
-      .facturas-detail-body-shell{
-        scrollbar-width:thin;
+      .facturas-detail-body-shell {
+        scrollbar-width: thin;
       }
 
-      @media (max-width:1180px){
-        .facturas-detail-grid{
-          grid-template-columns:1fr !important;
+      @media (max-width: 1180px) {
+        .facturas-detail-grid {
+          grid-template-columns: 1fr !important;
         }
       }
 
-      @media (max-width:900px){
-        .facturas-detail-header{
-          padding:18px !important;
+      @media (max-width: 900px) {
+        .facturas-detail-header {
+          padding: 18px !important;
         }
       }
 
-      @media (max-width:640px){
-        .facturas-detail-body-shell > div{
-          padding:16px !important;
+      @media (max-width: 640px) {
+        .facturas-detail-body-shell > div {
+          padding: 16px !important;
         }
       }
     </style>
@@ -1121,55 +1123,64 @@ export function renderFacturasDetailModal({
       <div
         class="facturas-detail-modal"
         data-role="facturas-detail-modal"
-        data-role-panel="facturas-detail-panel"
         role="dialog"
         aria-modal="true"
         aria-label="Detalle factura"
         style="
-          width:min(1360px,100%);
+          width:min(1360px, 100%);
           height:92vh;
           max-height:92vh;
           overflow:hidden;
           border-radius:26px;
           border:1px solid var(--border-soft);
-          background:var(--modal-bg,var(--surface-1,#141414));
+          background:var(--modal-bg, var(--surface-1, #141414));
           box-shadow:0 40px 100px rgba(0,0,0,.45);
           display:flex;
           flex-direction:column;
         "
       >
-        ${renderFacturasDetailContent({
-          factura,
-          loading: detailLoading,
-          sendingFacturaId,
-          viewingFacturaId,
-          downloadingFacturaId,
-        })}
+        <div
+          data-role="facturas-detail-panel"
+          style="
+            display:flex;
+            flex-direction:column;
+            height:100%;
+            min-height:0;
+          "
+        >
+          ${renderFacturasDetailContent({
+            factura,
+            loading: detailLoading,
+            sendingFacturaId,
+            viewingFacturaId,
+            downloadingFacturaId,
+          })}
+        </div>
       </div>
 
       <style>
-        @media (max-width:900px){
-          .facturas-detail-overlay{
-            padding:12px !important;
+        @media (max-width: 900px) {
+          .facturas-detail-overlay {
+            padding: 12px !important;
           }
 
-          .facturas-detail-modal{
-            width:100% !important;
-            height:94vh !important;
-            max-height:94vh !important;
-            border-radius:20px !important;
+          .facturas-detail-modal {
+            width: 100% !important;
+            height: 94vh !important;
+            max-height: 94vh !important;
+            border-radius: 20px !important;
           }
         }
 
-        @media (max-width:640px){
-          .facturas-detail-overlay{
-            padding:8px !important;
+        @media (max-width: 640px) {
+          .facturas-detail-overlay {
+            padding: 8px !important;
           }
 
-          .facturas-detail-modal{
-            height:96vh !important;
-            max-height:96vh !important;
-            border-radius:18px !important;
+          .facturas-detail-modal {
+            height: 96vh !important;
+            max-height: 96vh !important;
+            border-radius: 18px !important;
           }
         }
       </style>

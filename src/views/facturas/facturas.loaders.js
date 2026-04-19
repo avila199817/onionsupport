@@ -20,12 +20,11 @@
    - detalle con apertura previa segura
    - error de detalle no rompe el estado principal
    - no ensucia error global con fallos de detalle
+   - compatible con API normalizada { items, total } / { item }
 ========================================================= */
 
 import {
-  extractFacturas,
   normalizeFactura,
-  getRemoteCount,
 } from "./facturas.model.js";
 
 import {
@@ -68,6 +67,21 @@ function safeRender(render) {
   } catch {}
 }
 
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function safeNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function safeObject(value, fallback = {}) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : fallback;
+}
+
 function safeErrorMessage(error = null, fallback = "") {
   return safeText(
     error?.data?.message ||
@@ -76,34 +90,6 @@ function safeErrorMessage(error = null, fallback = "") {
       error?.message,
     fallback
   );
-}
-
-function resolveDetailPayload(response = null) {
-  if (!response || typeof response !== "object") {
-    return response;
-  }
-
-  if (response.factura && typeof response.factura === "object") {
-    return response.factura;
-  }
-
-  if (response.item && typeof response.item === "object") {
-    return response.item;
-  }
-
-  if (response.result && typeof response.result === "object") {
-    return resolveDetailPayload(response.result);
-  }
-
-  if (response.payload && typeof response.payload === "object") {
-    return resolveDetailPayload(response.payload);
-  }
-
-  if (response.data && typeof response.data === "object") {
-    return resolveDetailPayload(response.data);
-  }
-
-  return response;
 }
 
 function getFacturaIdentity(item = null) {
@@ -116,6 +102,55 @@ function getFacturaIdentity(item = null) {
   );
 }
 
+function normalizeCollectionResponse(response = null) {
+  const obj = safeObject(response);
+
+  const rawItems = safeArray(
+    obj?.items ||
+      obj?.data?.items ||
+      obj?.result?.items ||
+      obj?.payload?.items ||
+      []
+  );
+
+  const items = rawItems.map((item) =>
+    normalizeFactura(item)
+  );
+
+  const total = safeNumber(
+    obj?.total ??
+      obj?.data?.total ??
+      obj?.result?.total ??
+      obj?.payload?.total,
+    items.length
+  );
+
+  return {
+    items,
+    total,
+    raw: response,
+  };
+}
+
+function normalizeDetailResponse(response = null) {
+  const obj = safeObject(response);
+
+  const payload =
+    obj?.item ||
+    obj?.data?.item ||
+    obj?.result?.item ||
+    obj?.payload?.item ||
+    obj?.factura ||
+    obj?.data?.factura ||
+    obj?.result?.factura ||
+    obj?.payload?.factura ||
+    null;
+
+  return payload
+    ? normalizeFactura(payload)
+    : null;
+}
+
 /* =========================================================
    COLLECTION
 ========================================================= */
@@ -125,17 +160,20 @@ export async function loadFacturasCollection({
   render,
   silent = false,
   force = false,
+  query = {},
 } = {}) {
   if (!state) {
     throw new Error("FACTURAS_STATE_REQUIRED");
   }
 
   const inflight = getFacturasInflightLoad(state);
+
   if (inflight) {
     return inflight;
   }
 
-  const shouldRefresh = Boolean(silent || isFacturasLoaded(state) || force);
+  const shouldRefresh =
+    Boolean(silent || isFacturasLoaded(state) || force);
 
   clearFacturasError(state);
 
@@ -151,19 +189,17 @@ export async function loadFacturasCollection({
 
   const promise = (async () => {
     try {
-      const response = await fetchFacturasRequest();
-
-      const items = extractFacturas(response).map((item) =>
-        normalizeFactura(item)
+      const response = await fetchFacturasRequest(
+        {
+          ...safeObject(query),
+        }
       );
+
+      const { items, total } =
+        normalizeCollectionResponse(response);
 
       setFacturasStore(items);
-
-      setFacturasRemoteCount(
-        state,
-        getRemoteCount(response, items.length)
-      );
-
+      setFacturasRemoteCount(state, total);
       setFacturasLoading(state, false);
       setFacturasRefreshing(state, false);
       setFacturasLoaded(state, true);
@@ -180,7 +216,10 @@ export async function loadFacturasCollection({
 
       setFacturasError(
         state,
-        safeErrorMessage(error, "No se pudieron cargar las facturas.")
+        safeErrorMessage(
+          error,
+          "No se pudieron cargar las facturas."
+        )
       );
 
       safeRender(render);
@@ -209,6 +248,7 @@ export async function loadFacturaDetailById({
   }
 
   const id = safeText(facturaId, "");
+
   if (!id) {
     return null;
   }
@@ -224,6 +264,7 @@ export async function loadFacturaDetailById({
   }
 
   const inflight = getFacturasInflightDetail(state);
+
   if (inflight) {
     return inflight;
   }
@@ -236,8 +277,11 @@ export async function loadFacturaDetailById({
   const promise = (async () => {
     try {
       const response = await fetchFacturaDetailRequest(id);
-      const payload = resolveDetailPayload(response);
-      const factura = normalizeFactura(payload);
+      const factura = normalizeDetailResponse(response);
+
+      if (!factura) {
+        throw new Error("FACTURA_DETAIL_EMPTY");
+      }
 
       setFacturasDetailData(state, factura);
       setFacturasDetailOpen(state, true);

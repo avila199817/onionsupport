@@ -11,11 +11,12 @@
    - carga inicial robusta
    - refresh con loader SOLO en tabla
    - apertura de ticket con estado visual de loading
+   - apertura de modal de creación de incidencia
    - bind de eventos de la pantalla
    - evitar doble bind de listeners
    - soportar destroy limpio del router
    - permitir reload con rerender seguro
-   - coordinar acciones y modal sin mezclar responsabilidades
+   - coordinar acciones y modales sin mezclar responsabilidades
 
    HARDENING PRO:
    - render inicial inmediato
@@ -23,7 +24,7 @@
    - anti-race token
    - cleanup total
    - click delegation sólida
-   - fallback elegante si el modal aún no existe
+   - fallback elegante si los modales aún no existen
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -59,9 +60,10 @@ import {
   openTicketAction,
   copyTicketIdAction,
   exportIncidenciasCsvAction,
-  createIncidenciaAction,
   refreshTicketDetailAction,
 } from "./incidencias.actions.js";
+
+import IncidenciasCreateView from "./incidencias.create.modal.js";
 
 export const IncidenciasView = (() => {
   "use strict";
@@ -242,7 +244,7 @@ export const IncidenciasView = (() => {
   }
 
   /* =====================================================
-     MODAL BRIDGE
+     MODAL BRIDGES
   ===================================================== */
 
   function openTicketModalBridge(detail = null) {
@@ -275,6 +277,38 @@ export const IncidenciasView = (() => {
       showToast(
         "Detalle cargado. Falta conectar incidencias.modal.js para abrir el popup.",
         "info"
+      );
+    }
+
+    return handled;
+  }
+
+  function openCreateModalBridge(draft = {}) {
+    let handled = false;
+
+    try {
+      safeEmit("incidencias:create-modal:open", { draft });
+      handled = true;
+    } catch {}
+
+    try {
+      const globalHook =
+        window?.OnionIncidenciasCreateModal?.open ||
+        window?.renderIncidenciaCreateModal ||
+        IncidenciasCreateView?.open;
+
+      if (typeof globalHook === "function") {
+        globalHook(draft);
+        handled = true;
+      }
+    } catch (error) {
+      safeWarn("create modal bridge hook falló:", error);
+    }
+
+    if (!handled) {
+      showToast(
+        "No se pudo abrir el modal de creación.",
+        "error"
       );
     }
 
@@ -563,11 +597,15 @@ export const IncidenciasView = (() => {
     rerender();
 
     try {
-      const ok = await createIncidenciaAction({
-        silent: false,
+      const opened = openCreateModalBridge({
+        priority: "medium",
+        status: "open",
+        source: "panel",
+        notifyClient: true,
+        internalOnly: false,
       });
 
-      return ok;
+      return opened;
     } finally {
       setState({
         creating: false,
@@ -691,6 +729,34 @@ export const IncidenciasView = (() => {
       await handleCopyTicketId(ticketId);
     };
 
+    const onCreated = async (event) => {
+      const detail =
+        event?.detail?.detail ||
+        event?.detail?.response?.ticket ||
+        event?.detail?.response?.item ||
+        event?.detail?.response?.data ||
+        event?.detail?.response?.result ||
+        event?.detail?.response?.payload ||
+        null;
+
+      try {
+        await reload({
+          force: true,
+          asRefresh: true,
+        });
+      } catch (error) {
+        safeWarn("reload tras create falló:", error);
+      }
+
+      if (detail) {
+        try {
+          openTicketModalBridge(detail);
+        } catch (error) {
+          safeWarn("openTicketModalBridge tras create falló:", error);
+        }
+      }
+    };
+
     const eventBus = AppCore?.events;
 
     if (!eventBus?.on) {
@@ -700,6 +766,7 @@ export const IncidenciasView = (() => {
     try {
       eventBus.on("incidencias:modal:refresh", onRefresh);
       eventBus.on("incidencias:modal:copy", onCopy);
+      eventBus.on("incidencias:create:success", onCreated);
     } catch (error) {
       safeWarn("bind modal bridge error:", error);
     }
@@ -711,6 +778,10 @@ export const IncidenciasView = (() => {
 
       try {
         eventBus?.off?.("incidencias:modal:copy", onCopy);
+      } catch {}
+
+      try {
+        eventBus?.off?.("incidencias:create:success", onCreated);
       } catch {}
     };
   }

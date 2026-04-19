@@ -1139,9 +1139,8 @@ export function renderFacturasDetailModal({
         position:fixed;
         inset:0;
         z-index:9999;
-        padding:24px;
-        display:grid;
-        place-items:center;
+        padding:0;
+        display:block;
         background:rgba(0,0,0,.66);
         backdrop-filter:blur(10px);
       "
@@ -1153,12 +1152,13 @@ export function renderFacturasDetailModal({
         aria-modal="true"
         aria-label="Detalle factura"
         style="
-          width:min(1360px, 100%);
-          height:92vh;
-          max-height:92vh;
+          width:100vw;
+          max-width:100vw;
+          height:100dvh;
+          max-height:100dvh;
           overflow:hidden;
-          border-radius:26px;
-          border:1px solid var(--border-soft);
+          border-radius:0;
+          border:0;
           background:var(--modal-bg, var(--surface-1, #141414));
           box-shadow:0 40px 100px rgba(0,0,0,.45);
           display:flex;
@@ -1185,28 +1185,15 @@ export function renderFacturasDetailModal({
       </div>
 
       <style>
-        @media (max-width: 900px) {
-          .facturas-detail-overlay {
-            padding: 12px !important;
-          }
-
-          .facturas-detail-modal {
-            width: 100% !important;
-            height: 94vh !important;
-            max-height: 94vh !important;
-            border-radius: 20px !important;
-          }
+        .facturas-detail-modal {
+          min-height: 100dvh;
         }
 
-        @media (max-width: 640px) {
-          .facturas-detail-overlay {
-            padding: 8px !important;
-          }
-
+        @supports not (height: 100dvh) {
           .facturas-detail-modal {
-            height: 96vh !important;
-            max-height: 96vh !important;
-            border-radius: 18px !important;
+            height: 100vh !important;
+            max-height: 100vh !important;
+            min-height: 100vh !important;
           }
         }
       </style>

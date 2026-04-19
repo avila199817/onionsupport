@@ -2,12 +2,21 @@
    Onion SPA - Facturas Loaders
    Archivo: src/views/facturas/facturas.loaders.js
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - cargar colección de facturas desde backend
    - cargar detalle individual de factura
    - sincronizar Store y estado local del módulo
    - controlar flags de loading / refresh / error / inflight
-   - apoyarse en helpers centralizados de state
+   - mantener paridad de flujo con incidenciasView
+   - evitar estados colgados en render / inflight
+
+   HARDENING PRO:
+   - anti-race básico por inflight
+   - loading inicial vs refreshing posterior
+   - lastSyncAt coherente
+   - remoteCount robusto
+   - detalle con apertura previa segura
+   - error de detalle no rompe el estado principal
 ========================================================= */
 
 import {
@@ -27,18 +36,77 @@ import { safeText } from "./facturas.utils.js";
 import {
   getFacturasInflightLoad,
   getFacturasInflightDetail,
+  getFacturasDetailData,
+  isFacturasLoaded,
+  getFacturasRemoteCount,
+
   setFacturasLoading,
   setFacturasLoaded,
   setFacturasError,
   clearFacturasError,
   setFacturasRefreshing,
   setFacturasRemoteCount,
+  setFacturasLastSyncAt,
+
   setFacturasDetailOpen,
   setFacturasDetailLoading,
   setFacturasDetailData,
+
   setFacturasInflightLoad,
   setFacturasInflightDetail,
 } from "./facturas.state.js";
+
+/* =========================================================
+   HELPERS
+========================================================= */
+
+function safeRender(render) {
+  try {
+    render?.();
+  } catch {}
+}
+
+function safeErrorMessage(error = null, fallback = "") {
+  return safeText(
+    error?.data?.message ||
+      error?.response?.data?.message ||
+      error?.response?.message ||
+      error?.message,
+    fallback
+  );
+}
+
+function resolveDetailPayload(response = null) {
+  if (!response || typeof response !== "object") {
+    return response;
+  }
+
+  if (response.factura && typeof response.factura === "object") {
+    return response.factura;
+  }
+
+  if (response.data && typeof response.data === "object") {
+    return resolveDetailPayload(response.data);
+  }
+
+  if (response.result && typeof response.result === "object") {
+    return resolveDetailPayload(response.result);
+  }
+
+  if (response.payload && typeof response.payload === "object") {
+    return resolveDetailPayload(response.payload);
+  }
+
+  if (response.item && typeof response.item === "object") {
+    return resolveDetailPayload(response.item);
+  }
+
+  return response;
+}
+
+/* =========================================================
+   COLLECTION
+========================================================= */
 
 export async function loadFacturasCollection({
   state,
@@ -54,28 +122,43 @@ export async function loadFacturasCollection({
     return inflight;
   }
 
-  if (!silent) {
-    setFacturasLoading(state, true);
-    clearFacturasError(state);
-    render?.();
-  } else {
+  const shouldRefresh = Boolean(silent || isFacturasLoaded(state));
+
+  clearFacturasError(state);
+
+  if (shouldRefresh) {
     setFacturasRefreshing(state, true);
-    render?.();
+    setFacturasLoading(state, false);
+  } else {
+    setFacturasLoading(state, true);
+    setFacturasRefreshing(state, false);
   }
+
+  safeRender(render);
 
   const promise = (async () => {
     try {
       const response = await fetchFacturasRequest();
-      const items = extractFacturas(response).map(normalizeFactura);
+
+      const items = extractFacturas(response).map((item) =>
+        normalizeFactura(item)
+      );
 
       setFacturasStore(items);
-      setFacturasRemoteCount(state, getRemoteCount(response, items.length));
+
+      setFacturasRemoteCount(
+        state,
+        getRemoteCount(response, items.length)
+      );
+
       setFacturasLoading(state, false);
       setFacturasRefreshing(state, false);
       setFacturasLoaded(state, true);
+      setFacturasLastSyncAt(state, new Date().toISOString());
       clearFacturasError(state);
 
-      render?.();
+      safeRender(render);
+
       return items;
     } catch (error) {
       setFacturasLoading(state, false);
@@ -84,12 +167,10 @@ export async function loadFacturasCollection({
 
       setFacturasError(
         state,
-        error?.data?.message ||
-          error?.message ||
-          "No se pudieron cargar las facturas."
+        safeErrorMessage(error, "No se pudieron cargar las facturas.")
       );
 
-      render?.();
+      safeRender(render);
       throw error;
     } finally {
       setFacturasInflightLoad(state, null);
@@ -97,20 +178,37 @@ export async function loadFacturasCollection({
   })();
 
   setFacturasInflightLoad(state, promise);
-  return getFacturasInflightLoad(state);
+  return promise;
 }
+
+/* =========================================================
+   DETAIL
+========================================================= */
 
 export async function loadFacturaDetailById({
   state,
   render,
   facturaId = "",
+  force = true,
 } = {}) {
   if (!state) {
     throw new Error("FACTURAS_STATE_REQUIRED");
   }
 
   const id = safeText(facturaId, "");
-  if (!id) return null;
+  if (!id) {
+    return null;
+  }
+
+  const currentDetail = getFacturasDetailData(state);
+  const currentDetailId = safeText(currentDetail?.id || currentDetail?.facturaId, "");
+
+  if (!force && currentDetail && currentDetailId === id) {
+    setFacturasDetailOpen(state, true);
+    setFacturasDetailLoading(state, false);
+    safeRender(render);
+    return currentDetail;
+  }
 
   const inflight = getFacturasInflightDetail(state);
   if (inflight) {
@@ -119,26 +217,30 @@ export async function loadFacturaDetailById({
 
   setFacturasDetailOpen(state, true);
   setFacturasDetailLoading(state, true);
-  render?.();
+  clearFacturasError(state);
+
+  safeRender(render);
 
   const promise = (async () => {
     try {
       const response = await fetchFacturaDetailRequest(id);
-
-      const factura = normalizeFactura(
-        response?.factura && typeof response.factura === "object"
-          ? response.factura
-          : response
-      );
+      const payload = resolveDetailPayload(response);
+      const factura = normalizeFactura(payload);
 
       setFacturasDetailData(state, factura);
       setFacturasDetailLoading(state, false);
 
-      render?.();
+      safeRender(render);
+
       return factura;
     } catch (error) {
       setFacturasDetailLoading(state, false);
-      render?.();
+
+      if (!getFacturasDetailData(state)) {
+        setFacturasDetailOpen(state, false);
+      }
+
+      safeRender(render);
       throw error;
     } finally {
       setFacturasInflightDetail(state, null);
@@ -146,5 +248,14 @@ export async function loadFacturaDetailById({
   })();
 
   setFacturasInflightDetail(state, promise);
-  return getFacturasInflightDetail(state);
+  return promise;
 }
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
+export default {
+  loadFacturasCollection,
+  loadFacturaDetailById,
+};

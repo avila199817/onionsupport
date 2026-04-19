@@ -2,12 +2,19 @@
    Onion SPA - Usuarios Model
    Archivo: src/views/usuarios/usuarios.model.js
 
-   FULL PRO 10/10 · FIXED EXPORTS
+   FULL PRO 10/10
 
-   PATCH CRÍTICO:
-   - añadido sortUsuariosByCreatedDesc
-   - añadido export en default
-   - compatibilidad total con usuariosView.js
+   RESPONSABILIDADES:
+   - normalizar payloads heterogéneos backend/store
+   - exponer modelo consistente Usuario
+   - labels estado / rol
+   - flags computados
+   - avatars / initials
+   - fechas base
+   - collections helpers
+   - sorting helpers
+   - stats helpers
+   - defensive parsing enterprise ready
 ========================================================= */
 
 /* =========================================================
@@ -18,16 +25,17 @@ export const DEFAULT_PAGE_SIZE = 10;
 
 export const STATUS = Object.freeze({
   ACTIVE: "active",
+  INACTIVE: "inactive",
   PENDING: "pending",
   BLOCKED: "blocked",
-  DISABLED: "disabled",
 });
 
 export const ROLE = Object.freeze({
-  ADMIN: "admin",
-  STAFF: "staff",
-  SUPPORT: "support",
   USER: "user",
+  ADMIN: "admin",
+  SUPPORT: "support",
+  MANAGER: "manager",
+  SUPERADMIN: "superadmin",
 });
 
 /* =========================================================
@@ -74,7 +82,7 @@ function first(...values) {
 }
 
 /* =========================================================
-   IDS / HASH
+   HASH
 ========================================================= */
 
 function hashString(value = "") {
@@ -90,7 +98,7 @@ function hashString(value = "") {
 }
 
 /* =========================================================
-   LABEL MAPS
+   LABELS
 ========================================================= */
 
 export function normalizeStatus(value = "") {
@@ -100,22 +108,29 @@ export function normalizeStatus(value = "") {
     case "active":
     case "activo":
     case "activa":
+    case "enabled":
+    case "habilitado":
       return STATUS.ACTIVE;
+
+    case "inactive":
+    case "inactivo":
+    case "inactiva":
+    case "disabled":
+    case "deshabilitado":
+      return STATUS.INACTIVE;
 
     case "pending":
     case "pendiente":
+    case "invited":
+    case "invitado":
       return STATUS.PENDING;
 
     case "blocked":
     case "bloqueado":
-    case "bloqueada":
+    case "blocked_user":
+    case "suspended":
+    case "suspendido":
       return STATUS.BLOCKED;
-
-    case "disabled":
-    case "inactive":
-    case "inactivo":
-    case "deshabilitado":
-      return STATUS.DISABLED;
 
     default:
       return STATUS.ACTIVE;
@@ -128,17 +143,27 @@ export function normalizeRole(value = "") {
   switch (key) {
     case "admin":
     case "administrator":
+    case "administrador":
       return ROLE.ADMIN;
-
-    case "staff":
-    case "empleado":
-      return ROLE.STAFF;
 
     case "support":
     case "soporte":
     case "agent":
+    case "agente":
       return ROLE.SUPPORT;
 
+    case "manager":
+    case "gestor":
+    case "gerente":
+      return ROLE.MANAGER;
+
+    case "superadmin":
+    case "super_admin":
+    case "root":
+      return ROLE.SUPERADMIN;
+
+    case "user":
+    case "usuario":
     default:
       return ROLE.USER;
   }
@@ -149,14 +174,14 @@ export function getStatusLabel(value = "") {
     case STATUS.ACTIVE:
       return "Activo";
 
+    case STATUS.INACTIVE:
+      return "Inactivo";
+
     case STATUS.PENDING:
       return "Pendiente";
 
     case STATUS.BLOCKED:
       return "Bloqueado";
-
-    case STATUS.DISABLED:
-      return "Deshabilitado";
 
     default:
       return "Activo";
@@ -165,14 +190,20 @@ export function getStatusLabel(value = "") {
 
 export function getRoleLabel(value = "") {
   switch (normalizeRole(value)) {
+    case ROLE.USER:
+      return "Usuario";
+
     case ROLE.ADMIN:
       return "Admin";
 
-    case ROLE.STAFF:
-      return "Staff";
-
     case ROLE.SUPPORT:
       return "Soporte";
+
+    case ROLE.MANAGER:
+      return "Manager";
+
+    case ROLE.SUPERADMIN:
+      return "Superadmin";
 
     default:
       return "Usuario";
@@ -201,26 +232,21 @@ export function toTimestamp(value = null) {
 }
 
 /* =========================================================
-   INITIALS / AVATAR
+   VISUALS
 ========================================================= */
 
 export function getInitials(value = "") {
   const text = safeText(value, "US");
 
-  const parts = text
-    .split(/\s+/)
-    .filter(Boolean);
+  const parts = text.split(/\s+/).filter(Boolean);
 
-  if (!parts.length) {
-    return "US";
-  }
+  if (!parts.length) return "US";
 
-  const initials = parts
+  return parts
     .slice(0, 2)
-    .map((part) => part[0])
-    .join("");
-
-  return (initials || "US").toUpperCase();
+    .map((x) => x[0])
+    .join("")
+    .toUpperCase();
 }
 
 export function getAvatarTheme(seed = "") {
@@ -244,33 +270,18 @@ export function getAvatarTheme(seed = "") {
    CORE NORMALIZER
 ========================================================= */
 
-export function normalizeUsuarioModel(payload = {}) {
+export function normalizeUsuarioModel(
+  payload = {}
+) {
   const item = safeObject(payload);
-
-  const profile = safeObject(
-    first(
-      item.profile,
-      item.perfil,
-      item.user,
-      item.usuario
-    )
-  );
-
-  const company = safeObject(
-    first(
-      item.company,
-      item.empresa,
-      item.client,
-      item.cliente,
-      item.organization
-    )
-  );
 
   const userId = safeText(
     first(
       item.userId,
+      item.usuarioId,
+      item.clientId,
       item.id,
-      item.uid
+      item.code
     ),
     ""
   );
@@ -279,28 +290,28 @@ export function normalizeUsuarioModel(payload = {}) {
     first(
       item.username,
       item.userName,
-      item.login,
-      item.nick
+      item.nick,
+      item.alias
     ),
-    "usuario"
+    "Sin username"
   );
 
   const name = safeText(
     first(
-      profile.name,
-      profile.nombre,
-      profile.displayName,
       item.name,
       item.nombre,
       item.fullName,
-      username
+      item.displayName,
+      [
+        safeText(item.firstName, ""),
+        safeText(item.lastName, ""),
+      ].filter(Boolean).join(" ")
     ),
     "Usuario"
   );
 
   const email = safeText(
     first(
-      profile.email,
       item.email,
       item.mail
     ),
@@ -309,8 +320,6 @@ export function normalizeUsuarioModel(payload = {}) {
 
   const phone = safeText(
     first(
-      profile.phone,
-      profile.mobile,
       item.phone,
       item.telefono,
       item.mobile
@@ -318,54 +327,65 @@ export function normalizeUsuarioModel(payload = {}) {
     "Sin teléfono"
   );
 
-  const role = normalizeRole(
+  const avatar = safeText(
     first(
-      item.role,
-      item.rol,
-      safeArray(item.roles)[0]
-    )
+      item.avatar,
+      item.avatarUrl,
+      item.photo,
+      item.photoUrl,
+      item.image,
+      item.imageUrl
+    ),
+    ""
+  );
+
+  const notes = safeText(
+    first(
+      item.notes,
+      item.notas,
+      item.internalNotes,
+      item.description,
+      item.descripcion
+    ),
+    ""
   );
 
   const status = normalizeStatus(
     first(
       item.status,
       item.estado,
-      item.state
+      typeof item.isActive === "boolean"
+        ? item.isActive
+          ? "active"
+          : "inactive"
+        : null,
+      typeof item.enabled === "boolean"
+        ? item.enabled
+          ? "active"
+          : "inactive"
+        : null
     )
   );
 
-  const companyName = safeText(
+  const role = normalizeRole(
     first(
-      company.name,
-      company.nombre,
-      item.companyName,
-      item.empresaNombre,
-      item.company
-    ),
-    "Sin empresa"
-  );
-
-  const avatarUrl = safeText(
-    first(
-      profile.avatar,
-      profile.avatarUrl,
-      item.avatar,
-      item.avatarUrl,
-      item.photo,
-      item.image
-    ),
-    ""
+      item.role,
+      item.rol,
+      item.userRole,
+      item.profile
+    )
   );
 
   const createdAt = first(
     item.createdAt,
-    item.registeredAt,
-    item.fechaCreacion,
-    item.date
+    item.created_at,
+    item.fechaAlta,
+    item.fechaCreacion
   );
 
   const updatedAt = first(
     item.updatedAt,
+    item.updated_at,
     item.modifiedAt,
     item.lastUpdate,
     createdAt
@@ -373,10 +393,50 @@ export function normalizeUsuarioModel(payload = {}) {
 
   const lastLoginAt = first(
     item.lastLoginAt,
-    item.lastLogin,
-    item.ultimoLogin,
-    item.lastAccessAt
+    item.last_login_at,
+    item.lastAccessAt,
+    item.ultimoAcceso
   );
+
+  const createdAtTs =
+    toTimestamp(createdAt);
+
+  const updatedAtTs =
+    toTimestamp(updatedAt);
+
+  const lastLoginAtTs =
+    toTimestamp(lastLoginAt);
+
+  const initials =
+    getInitials(
+      name !== "Usuario"
+        ? name
+        : username
+    );
+
+  const avatarTheme =
+    getAvatarTheme(
+      userId ||
+      email ||
+      username ||
+      name
+    );
+
+  const isActive =
+    status === STATUS.ACTIVE;
+
+  const isPending =
+    status === STATUS.PENDING;
+
+  const isBlocked =
+    status === STATUS.BLOCKED;
+
+  const isAdmin =
+    role === ROLE.ADMIN ||
+    role === ROLE.SUPERADMIN;
+
+  const isSupport =
+    role === ROLE.SUPPORT;
 
   return {
     userId,
@@ -386,37 +446,32 @@ export function normalizeUsuarioModel(payload = {}) {
     name,
     email,
     phone,
-
-    companyName,
-
-    role,
-    roleLabel: getRoleLabel(role),
+    avatar,
+    notes,
 
     status,
-    statusLabel: getStatusLabel(status),
+    statusLabel:
+      getStatusLabel(status),
+
+    role,
+    roleLabel:
+      getRoleLabel(role),
 
     createdAt,
     updatedAt,
     lastLoginAt,
+    createdAtTs,
+    updatedAtTs,
+    lastLoginAtTs,
 
-    createdAtTs: toTimestamp(createdAt),
-    updatedAtTs: toTimestamp(updatedAt),
-    lastLoginAtTs: toTimestamp(lastLoginAt),
+    initials,
+    avatarTheme,
 
-    avatarUrl,
-    initials: getInitials(name),
-    avatarTheme: getAvatarTheme(
-      userId || email || username
-    ),
-
-    isActive: status === STATUS.ACTIVE,
-    isPending: status === STATUS.PENDING,
-    isBlocked: status === STATUS.BLOCKED,
-    isDisabled: status === STATUS.DISABLED,
-
-    isAdmin: role === ROLE.ADMIN,
-    isStaff: role === ROLE.STAFF,
-    isSupport: role === ROLE.SUPPORT,
+    isActive,
+    isPending,
+    isBlocked,
+    isAdmin,
+    isSupport,
 
     raw: item,
   };
@@ -426,7 +481,9 @@ export function normalizeUsuarioModel(payload = {}) {
    COLLECTION
 ========================================================= */
 
-export function unwrapUsuariosPayload(payload = null) {
+export function unwrapUsuariosPayload(
+  payload = null
+) {
   if (!payload) return [];
 
   if (Array.isArray(payload)) {
@@ -435,21 +492,40 @@ export function unwrapUsuariosPayload(payload = null) {
 
   const obj = safeObject(payload);
 
-  if (Array.isArray(obj.users)) return obj.users;
-  if (Array.isArray(obj.usuarios)) return obj.usuarios;
-  if (Array.isArray(obj.items)) return obj.items;
-  if (Array.isArray(obj.data)) return obj.data;
-  if (Array.isArray(obj.results)) return obj.results;
+  if (Array.isArray(obj.items)) {
+    return obj.items;
+  }
 
-  if (obj.data && typeof obj.data === "object") {
-    return unwrapUsuariosPayload(obj.data);
+  if (Array.isArray(obj.usuarios)) {
+    return obj.usuarios;
+  }
+
+  if (Array.isArray(obj.users)) {
+    return obj.users;
+  }
+
+  if (Array.isArray(obj.data)) {
+    return obj.data;
+  }
+
+  if (
+    obj.data &&
+    typeof obj.data === "object"
+  ) {
+    return unwrapUsuariosPayload(
+      obj.data
+    );
   }
 
   return [];
 }
 
-export function normalizeUsuariosCollection(payload = []) {
-  return unwrapUsuariosPayload(payload).map(
+export function normalizeUsuariosCollection(
+  payload = []
+) {
+  return unwrapUsuariosPayload(
+    payload
+  ).map(
     normalizeUsuarioModel
   );
 }
@@ -458,38 +534,26 @@ export function normalizeUsuariosCollection(payload = []) {
    SORT
 ========================================================= */
 
-export function sortUsuariosByCreatedDesc(items = []) {
+export function sortUsuariosByUpdatedDesc(
+  items = []
+) {
   return [...safeArray(items)].sort(
     (a, b) =>
-      safeNumber(b.createdAtTs) -
-      safeNumber(a.createdAtTs)
+      b.updatedAtTs -
+      a.updatedAtTs
   );
 }
 
-export function sortUsuariosByUpdatedDesc(items = []) {
+export function sortUsuariosByNameAsc(
+  items = []
+) {
   return [...safeArray(items)].sort(
     (a, b) =>
-      safeNumber(b.updatedAtTs) -
-      safeNumber(a.updatedAtTs)
-  );
-}
-
-export function sortUsuariosByLastLoginDesc(items = []) {
-  return [...safeArray(items)].sort(
-    (a, b) =>
-      safeNumber(b.lastLoginAtTs) -
-      safeNumber(a.lastLoginAtTs)
-  );
-}
-
-export function sortUsuariosByNameAsc(items = []) {
-  return [...safeArray(items)].sort(
-    (a, b) =>
-      safeText(a.name).localeCompare(
-        safeText(b.name),
-        "es",
-        { sensitivity: "base" }
-      )
+      safeText(a.name)
+        .localeCompare(
+          safeText(b.name),
+          "es"
+        )
   );
 }
 
@@ -502,36 +566,51 @@ export function paginateUsuarios(
   page = 1,
   pageSize = DEFAULT_PAGE_SIZE
 ) {
-  const list = safeArray(items);
+  const list =
+    safeArray(items);
 
   const size = Math.max(
     1,
-    safeNumber(pageSize, DEFAULT_PAGE_SIZE)
+    safeNumber(
+      pageSize,
+      DEFAULT_PAGE_SIZE
+    )
   );
 
-  const total = list.length;
+  const total =
+    list.length;
 
-  const totalPages = Math.max(
-    1,
-    Math.ceil(total / size)
-  );
+  const totalPages =
+    Math.max(
+      1,
+      Math.ceil(total / size)
+    );
 
-  const current = Math.min(
-    Math.max(1, safeNumber(page, 1)),
-    totalPages
-  );
+  const current =
+    Math.min(
+      Math.max(
+        1,
+        safeNumber(page, 1)
+      ),
+      totalPages
+    );
 
-  const start = (current - 1) * size;
-  const end = start + size;
+  const start =
+    (current - 1) * size;
+
+  const end =
+    start + size;
 
   return {
     page: current,
     pageSize: size,
     total,
     totalPages,
-    items: list.slice(start, end),
-    from: total === 0 ? 0 : start + 1,
-    to: Math.min(end, total),
+    items:
+      list.slice(
+        start,
+        end
+      ),
   };
 }
 
@@ -539,18 +618,40 @@ export function paginateUsuarios(
    STATS
 ========================================================= */
 
-export function computeUsuariosStats(items = []) {
-  const list = safeArray(items);
+export function computeUsuariosStats(
+  items = []
+) {
+  const list =
+    safeArray(items);
 
   return {
-    total: list.length,
-    active: list.filter(x => x.isActive).length,
-    pending: list.filter(x => x.isPending).length,
-    blocked: list.filter(x => x.isBlocked).length,
-    disabled: list.filter(x => x.isDisabled).length,
-    admins: list.filter(x => x.isAdmin).length,
-    staff: list.filter(x => x.isStaff).length,
-    support: list.filter(x => x.isSupport).length,
+    total:
+      list.length,
+
+    active:
+      list.filter(
+        (x) => x.isActive
+      ).length,
+
+    pending:
+      list.filter(
+        (x) => x.isPending
+      ).length,
+
+    blocked:
+      list.filter(
+        (x) => x.isBlocked
+      ).length,
+
+    admins:
+      list.filter(
+        (x) => x.isAdmin
+      ).length,
+
+    support:
+      list.filter(
+        (x) => x.isSupport
+      ).length,
   };
 }
 
@@ -562,17 +663,23 @@ export function findUsuarioById(
   items = [],
   userId = ""
 ) {
-  const id = safeText(userId);
+  const id = safeText(
+    userId,
+    ""
+  );
 
   return (
     safeArray(items).find(
-      item => safeText(item.userId) === id
+      (item) =>
+        safeText(
+          item.userId
+        ) === id
     ) || null
   );
 }
 
 /* =========================================================
-   DEFAULT EXPORT
+   EXPORT
 ========================================================= */
 
 export default {
@@ -580,16 +687,11 @@ export default {
   normalizeUsuarioModel,
   normalizeUsuariosCollection,
   unwrapUsuariosPayload,
-
-  sortUsuariosByCreatedDesc,
   sortUsuariosByUpdatedDesc,
-  sortUsuariosByLastLoginDesc,
   sortUsuariosByNameAsc,
-
   paginateUsuarios,
   computeUsuariosStats,
   findUsuarioById,
-
   getStatusLabel,
   getRoleLabel,
   normalizeStatus,

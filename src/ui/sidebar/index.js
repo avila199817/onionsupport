@@ -303,7 +303,10 @@ export const SidebarUI = (() => {
           ?.sidebarOpen
       );
 
-    const domOpen = Boolean(
+    const domOpen =
+      sidebar == null
+        ? null
+        : Boolean(
       sidebar &&
         !sidebar.classList.contains(
           "collapsed"
@@ -315,9 +318,12 @@ export const SidebarUI = (() => {
 
     return {
       mobile,
-      open: mobile
-        ? stateOpen
-        : domOpen,
+      open:
+        typeof AppCore?.state
+          ?.sidebarOpen ===
+        "boolean"
+          ? stateOpen
+          : Boolean(domOpen),
     };
   }
 
@@ -327,6 +333,16 @@ export const SidebarUI = (() => {
     if (
       !snapshot ||
       snapshot.mobile
+    ) {
+      return;
+    }
+
+    if (
+      Boolean(
+        AppCore?.state
+          ?.sidebarOpen
+      ) ===
+      Boolean(snapshot.open)
     ) {
       return;
     }

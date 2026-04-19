@@ -126,6 +126,23 @@ function normalizeRole(value = "user") {
   );
 }
 
+function normalizeTheme(
+  value = ""
+) {
+  const theme =
+    safeLower(value);
+
+  if (theme === "light") {
+    return "light";
+  }
+
+  if (theme === "dark") {
+    return "dark";
+  }
+
+  return null;
+}
+
 function isSafeAvatarUrl(url = "") {
   const value =
     normalizeString(url);
@@ -290,6 +307,16 @@ export function normalizeUser(
       rawUser
     );
 
+  const normalizedTheme =
+    normalizeTheme(
+      pickFirst(
+        rawUser.theme,
+        rawUser?.preferences
+          ?.theme,
+        rawUser?.settings?.theme
+      )
+    );
+
   const id =
     pickFirst(
       rawUser.id,
@@ -376,6 +403,10 @@ export function normalizeUser(
         rawUser.dark_mode,
         false
       ),
+
+    theme:
+      normalizedTheme ||
+      null,
 
     emailVerified:
       normalizeBoolean(

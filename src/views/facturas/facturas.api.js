@@ -17,6 +17,7 @@
    - endpoints centralizados y extensibles
    - soporte inline / attachment robusto
    - normalización delegada al model del dominio
+   - compatibilidad con backends que devuelven facturas/factura
    - integración limpia con AppCore.apiClient
 ========================================================= */
 
@@ -51,37 +52,31 @@ export const FACTURAS_ENDPOINTS = Object.freeze({
    SAFE HELPERS
 ========================================================= */
 
-function safeText(
-  value,
-  fallback = ""
-) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
+function safeText(value, fallback = "") {
+  if (value === null || value === undefined) {
     return fallback;
   }
 
-  const text =
-    String(value).trim();
-
+  const text = String(value).trim();
   return text || fallback;
 }
 
-function safeObject(
-  value,
-  fallback = {}
-) {
-  return value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
+function safeNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function safeObject(value, fallback = {}) {
+  return value && typeof value === "object" && !Array.isArray(value)
     ? value
     : fallback;
 }
 
-function first(
-  ...values
-) {
+function first(...values) {
   for (const value of values) {
     if (
       value !== undefined &&
@@ -93,6 +88,124 @@ function first(
   }
 
   return null;
+}
+
+/* =========================================================
+   BACKEND SHAPE HELPERS
+========================================================= */
+
+function extractFacturasList(payload = null) {
+  const obj = safeObject(payload);
+
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (safeArray(obj.facturas).length) {
+    return obj.facturas;
+  }
+
+  if (safeArray(obj.items).length) {
+    return obj.items;
+  }
+
+  if (safeArray(obj.data).length) {
+    return obj.data;
+  }
+
+  if (safeArray(obj.results).length) {
+    return obj.results;
+  }
+
+  if (safeArray(obj.rows).length) {
+    return obj.rows;
+  }
+
+  if (safeArray(obj.records).length) {
+    return obj.records;
+  }
+
+  if (safeArray(obj.list).length) {
+    return obj.list;
+  }
+
+  if (safeArray(obj.collection).length) {
+    return obj.collection;
+  }
+
+  if (safeArray(obj.data?.facturas).length) {
+    return obj.data.facturas;
+  }
+
+  if (safeArray(obj.data?.items).length) {
+    return obj.data.items;
+  }
+
+  if (safeArray(obj.data?.results).length) {
+    return obj.data.results;
+  }
+
+  if (safeArray(obj.result?.facturas).length) {
+    return obj.result.facturas;
+  }
+
+  if (safeArray(obj.result?.items).length) {
+    return obj.result.items;
+  }
+
+  if (safeArray(obj.payload?.facturas).length) {
+    return obj.payload.facturas;
+  }
+
+  if (safeArray(obj.payload?.items).length) {
+    return obj.payload.items;
+  }
+
+  return [];
+}
+
+function extractFacturasTotal(payload = null, fallback = 0) {
+  const obj = safeObject(payload);
+
+  return safeNumber(
+    first(
+      obj.total,
+      obj.count,
+      obj.remoteCount,
+      obj.meta?.total,
+      obj.meta?.count,
+      obj.pagination?.total,
+      obj.pagination?.count,
+      obj.data?.total,
+      obj.data?.count,
+      obj.result?.total,
+      obj.result?.count,
+      obj.payload?.total,
+      obj.payload?.count,
+      fallback
+    ),
+    fallback
+  );
+}
+
+function extractFacturaDetail(payload = null) {
+  const obj = safeObject(payload);
+
+  return (
+    obj.factura ||
+    obj.item ||
+    obj.data?.factura ||
+    obj.data?.item ||
+    obj.result?.factura ||
+    obj.result?.item ||
+    obj.payload?.factura ||
+    obj.payload?.item ||
+    obj.data ||
+    obj.result ||
+    obj.payload ||
+    payload ||
+    null
+  );
 }
 
 /* =========================================================
@@ -108,30 +221,17 @@ export function getApiClient() {
     null;
 
   if (!client) {
-    throw new Error(
-      "FACTURAS_API_CLIENT_UNAVAILABLE"
-    );
+    throw new Error("FACTURAS_API_CLIENT_UNAVAILABLE");
   }
 
   return client;
 }
 
-function assertMethod(
-  client,
-  method = ""
-) {
-  const name = safeText(
-    method,
-    ""
-  ).toLowerCase();
+function assertMethod(client, method = "") {
+  const name = safeText(method, "").toLowerCase();
 
-  if (
-    !name ||
-    typeof client?.[name] !== "function"
-  ) {
-    throw new Error(
-      `FACTURAS_API_METHOD_UNAVAILABLE:${name || "unknown"}`
-    );
+  if (!name || typeof client?.[name] !== "function") {
+    throw new Error(`FACTURAS_API_METHOD_UNAVAILABLE:${name || "unknown"}`);
   }
 
   return client[name].bind(client);
@@ -141,43 +241,28 @@ function assertMethod(
    ENDPOINT HELPERS
 ========================================================= */
 
-export function normalizeFacturaId(
-  id = ""
-) {
-  const facturaId = safeText(
-    id,
-    ""
-  );
+export function normalizeFacturaId(id = "") {
+  const facturaId = safeText(id, "");
 
   if (!facturaId) {
-    throw new Error(
-      "FACTURA_ID_REQUIRED"
-    );
+    throw new Error("FACTURA_ID_REQUIRED");
   }
 
   return facturaId;
 }
 
-export function getFacturaEndpoint(
-  id = ""
-) {
-  const facturaId =
-    normalizeFacturaId(id);
-
+export function getFacturaEndpoint(id = "") {
+  const facturaId = normalizeFacturaId(id);
   return `${FACTURAS_ENDPOINT}/${encodeURIComponent(facturaId)}`;
 }
 
-export function normalizeFacturaPdfDisposition(
-  disposition = ""
-) {
+export function normalizeFacturaPdfDisposition(disposition = "") {
   const value = safeText(
     disposition,
     FACTURAS_DISPOSITIONS.ATTACHMENT
   ).toLowerCase();
 
-  if (
-    value === FACTURAS_DISPOSITIONS.INLINE
-  ) {
+  if (value === FACTURAS_DISPOSITIONS.INLINE) {
     return FACTURAS_DISPOSITIONS.INLINE;
   }
 
@@ -188,17 +273,10 @@ export function buildFacturaPdfEndpoint(
   id = "",
   disposition = FACTURAS_DISPOSITIONS.ATTACHMENT
 ) {
-  const facturaId =
-    normalizeFacturaId(id);
+  const facturaId = normalizeFacturaId(id);
+  const finalDisposition = normalizeFacturaPdfDisposition(disposition);
 
-  const finalDisposition =
-    normalizeFacturaPdfDisposition(
-      disposition
-    );
-
-  if (
-    finalDisposition === FACTURAS_DISPOSITIONS.INLINE
-  ) {
+  if (finalDisposition === FACTURAS_DISPOSITIONS.INLINE) {
     return `${getFacturaEndpoint(facturaId)}/pdf?disposition=inline`;
   }
 
@@ -225,37 +303,17 @@ function buildRequestOptions({
   };
 }
 
-async function apiGet(
-  endpoint = "",
-  options = {}
-) {
-  const client =
-    getApiClient();
+async function apiGet(endpoint = "", options = {}) {
+  const client = getApiClient();
+  const request = assertMethod(client, "get");
 
-  const request =
-    assertMethod(
-      client,
-      "get"
-    );
-
-  return request(
-    endpoint,
-    buildRequestOptions(options)
-  );
+  return request(endpoint, buildRequestOptions(options));
 }
 
-async function apiPost(
-  endpoint = "",
-  body = {},
-  options = {}
-) {
-  const client =
-    getApiClient();
+async function apiPost(endpoint = "", body = {}, options = {}) {
+  const client = getApiClient();
 
-  if (
-    typeof client?.post ===
-    "function"
-  ) {
+  if (typeof client?.post === "function") {
     return client.post(
       endpoint,
       body,
@@ -263,111 +321,115 @@ async function apiPost(
     );
   }
 
-  if (
-    typeof client?.request ===
-    "function"
-  ) {
-    return client.request(
-      endpoint,
-      {
-        method: "POST",
-        body,
-        ...buildRequestOptions(options),
-      }
-    );
+  if (typeof client?.request === "function") {
+    return client.request(endpoint, {
+      method: "POST",
+      body,
+      ...buildRequestOptions(options),
+    });
   }
 
-  throw new Error(
-    "FACTURAS_API_METHOD_UNAVAILABLE:post"
-  );
+  throw new Error("FACTURAS_API_METHOD_UNAVAILABLE:post");
 }
 
 /* =========================================================
    COLLECTION API BASE
 ========================================================= */
 
-const baseCollectionApi =
-  createCollectionApi(
-    FACTURAS_RESOURCE,
-    {
-      client: {
-        get: (...args) =>
-          getApiClient().get(...args),
-        post: (...args) =>
-          getApiClient().post(...args),
-        put: (...args) =>
-          getApiClient().put(...args),
-        patch: (...args) =>
-          getApiClient().patch(...args),
-        delete: (...args) =>
-          getApiClient().delete(...args),
-      },
+const baseCollectionApi = createCollectionApi(
+  FACTURAS_RESOURCE,
+  {
+    client: {
+      get: (...args) => getApiClient().get(...args),
+      post: (...args) => getApiClient().post(...args),
+      put: (...args) => getApiClient().put(...args),
+      patch: (...args) => getApiClient().patch(...args),
+      delete: (...args) => getApiClient().delete(...args),
+    },
 
-      basePath: FACTURAS_ENDPOINT,
+    basePath: FACTURAS_ENDPOINT,
 
-      mapItem: normalizeFactura,
-      mapDetail: normalizeFactura,
+    mapItem: normalizeFactura,
+    mapDetail: normalizeFactura,
 
-      listQueryConfig: {
-        pageParam: "page",
-        limitParam: "limit",
-        searchParam: "search",
-        sortByParam: "sortBy",
-        sortDirParam: "sortDir",
-        defaultPage: 1,
-        defaultLimit: 20,
-        includeDefaults: false,
-      },
+    normalizeListResponse(payload) {
+      const rawItems = extractFacturasList(payload);
+      const items = rawItems.map((item) => normalizeFactura(item));
+      const total = extractFacturasTotal(payload, items.length);
 
-      buildListOptions: ({
-        requestOptions,
-      }) => ({
-        timeout: FACTURAS_TIMEOUT,
-        auth: true,
-        ...safeObject(requestOptions),
-      }),
+      return {
+        ok: true,
+        items,
+        total,
+        page: 1,
+        limit: items.length,
+        hasItems: items.length > 0,
+        isEmpty: items.length === 0,
+        raw: payload,
+        meta: {},
+      };
+    },
 
-      buildDetailOptions: ({
-        requestOptions,
-      }) => ({
-        timeout: FACTURAS_TIMEOUT,
-        auth: true,
-        ...safeObject(requestOptions),
-      }),
+    normalizeDetail(payload) {
+      const detail = extractFacturaDetail(payload);
+      const item = detail ? normalizeFactura(detail) : null;
 
-      buildCreateOptions: ({
-        requestOptions,
-      }) => ({
-        timeout: FACTURAS_TIMEOUT,
-        auth: true,
-        ...safeObject(requestOptions),
-      }),
+      return {
+        ok: true,
+        item,
+        raw: payload,
+        meta: {},
+      };
+    },
 
-      buildUpdateOptions: ({
-        requestOptions,
-      }) => ({
-        timeout: FACTURAS_TIMEOUT,
-        auth: true,
-        ...safeObject(requestOptions),
-      }),
+    listQueryConfig: {
+      pageParam: "page",
+      limitParam: "limit",
+      searchParam: "search",
+      sortByParam: "sortBy",
+      sortDirParam: "sortDir",
+      defaultPage: 1,
+      defaultLimit: 20,
+      includeDefaults: false,
+    },
 
-      buildPatchOptions: ({
-        requestOptions,
-      }) => ({
-        timeout: FACTURAS_TIMEOUT,
-        auth: true,
-        ...safeObject(requestOptions),
-      }),
+    buildListOptions: ({ requestOptions }) => ({
+      timeout: FACTURAS_TIMEOUT,
+      auth: true,
+      ...safeObject(requestOptions),
+    }),
 
-      buildRemoveOptions: ({
-        requestOptions,
-      }) => ({
-        timeout: FACTURAS_TIMEOUT,
-        auth: true,
-        ...safeObject(requestOptions),
-      }),
-    }
-  );
+    buildDetailOptions: ({ requestOptions }) => ({
+      timeout: FACTURAS_TIMEOUT,
+      auth: true,
+      ...safeObject(requestOptions),
+    }),
+
+    buildCreateOptions: ({ requestOptions }) => ({
+      timeout: FACTURAS_TIMEOUT,
+      auth: true,
+      ...safeObject(requestOptions),
+    }),
+
+    buildUpdateOptions: ({ requestOptions }) => ({
+      timeout: FACTURAS_TIMEOUT,
+      auth: true,
+      ...safeObject(requestOptions),
+    }),
+
+    buildPatchOptions: ({ requestOptions }) => ({
+      timeout: FACTURAS_TIMEOUT,
+      auth: true,
+      ...safeObject(requestOptions),
+    }),
+
+    buildRemoveOptions: ({ requestOptions }) => ({
+      timeout: FACTURAS_TIMEOUT,
+      auth: true,
+      ...safeObject(requestOptions),
+    }),
+  }
+);
 
 /* =========================================================
    PUBLIC REQUESTS
@@ -409,14 +471,11 @@ export async function fetchFacturaDetailRequest(
     ...rest
   } = {}
 ) {
-  return baseCollectionApi.detail(
-    id,
-    {
-      timeout,
-      auth,
-      ...rest,
-    }
-  );
+  return baseCollectionApi.detail(id, {
+    timeout,
+    auth,
+    ...rest,
+  });
 }
 
 export async function fetchFacturaPdfUrlRequest(
@@ -429,10 +488,7 @@ export async function fetchFacturaPdfUrlRequest(
   } = {}
 ) {
   return apiGet(
-    FACTURAS_ENDPOINTS.pdf(
-      id,
-      disposition
-    ),
+    FACTURAS_ENDPOINTS.pdf(id, disposition),
     {
       timeout,
       auth,
@@ -465,11 +521,8 @@ export async function sendFacturaRequest(
    OPTIONAL HELPERS
 ========================================================= */
 
-export function resolveFacturaPdfUrl(
-  response = null
-) {
-  const obj =
-    safeObject(response);
+export function resolveFacturaPdfUrl(response = null) {
+  const obj = safeObject(response);
 
   return safeText(
     first(
@@ -491,24 +544,18 @@ export function resolveFacturaPdfUrl(
 ========================================================= */
 
 export const FacturasApi = Object.freeze({
-  resource:
-    FACTURAS_RESOURCE,
+  resource: FACTURAS_RESOURCE,
 
-  endpoint:
-    FACTURAS_ENDPOINT,
+  endpoint: FACTURAS_ENDPOINT,
 
   timeouts: Object.freeze({
-    default:
-      FACTURAS_TIMEOUT,
-    send:
-      FACTURAS_SEND_TIMEOUT,
+    default: FACTURAS_TIMEOUT,
+    send: FACTURAS_SEND_TIMEOUT,
   }),
 
-  dispositions:
-    FACTURAS_DISPOSITIONS,
+  dispositions: FACTURAS_DISPOSITIONS,
 
-  endpoints:
-    FACTURAS_ENDPOINTS,
+  endpoints: FACTURAS_ENDPOINTS,
 
   getApiClient,
 
@@ -520,17 +567,12 @@ export const FacturasApi = Object.freeze({
   resolveFacturaPdfUrl,
 
   list: fetchFacturasRequest,
-  detail:
-    fetchFacturaDetailRequest,
+  detail: fetchFacturaDetailRequest,
 
-  create:
-    baseCollectionApi.create,
-  update:
-    baseCollectionApi.update,
-  patch:
-    baseCollectionApi.patch,
-  remove:
-    baseCollectionApi.remove,
+  create: baseCollectionApi.create,
+  update: baseCollectionApi.update,
+  patch: baseCollectionApi.patch,
+  remove: baseCollectionApi.remove,
 
   fetchFacturasRequest,
   fetchFacturaDetailRequest,

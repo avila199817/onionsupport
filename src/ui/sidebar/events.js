@@ -306,6 +306,8 @@ export function bindCoreEvents(ctx) {
     ensureServerNavItem,
     syncSidebarState,
     closeDropdown,
+    getSidebarSnapshot,
+    restoreSidebarState,
   } = ctx;
 
   function setRouteTransitionLock(
@@ -367,6 +369,14 @@ export function bindCoreEvents(ctx) {
     scope,
     "router:rendered",
     () => {
+      if (
+        sidebarSnapshot &&
+        typeof restoreSidebarState === "function"
+      ) {
+        restoreSidebarState(sidebarSnapshot);
+      }
+
+      syncSidebarState?.();
       ensureServerNavItem?.();
       renderUser?.();
       applyRoleVisibility?.();

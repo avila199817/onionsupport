@@ -395,14 +395,6 @@ export function bindCoreEvents(ctx) {
 
   AppCore.cleanup.event(
     scope,
-    "app:theme:change",
-    () => {
-      syncSidebarState?.();
-    }
-  );
-
-  AppCore.cleanup.event(
-    scope,
     "login:success",
     () => {
       window.setTimeout(() => {

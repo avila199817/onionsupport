@@ -35,12 +35,6 @@ function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function safeObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : {};
-}
-
 function safeLower(value, fallback = "") {
   return safeText(value, fallback).toLowerCase();
 }
@@ -173,6 +167,14 @@ function getEstadoLabel(value = "") {
     case "issued":
       return "Emitida";
 
+    case "enviada":
+    case "sent":
+      return "Enviada";
+
+    case "anulada":
+    case "void":
+      return "Anulada";
+
     case "borrador":
     case "draft":
       return "Borrador";
@@ -182,6 +184,7 @@ function getEstadoLabel(value = "") {
       return "Cancelada";
 
     case "abonada":
+    case "paid":
       return "Abonada";
 
     default:
@@ -242,6 +245,22 @@ function getEstadoChipStyle(value = "") {
     `;
   }
 
+  if (["enviada", "sent"].includes(key)) {
+    return `
+      color:var(--success-strong, #36c690);
+      background:color-mix(in srgb, var(--success-strong, #36c690) 14%, transparent);
+      border:1px solid color-mix(in srgb, var(--success-strong, #36c690) 26%, transparent);
+    `;
+  }
+
+  if (["anulada", "void", "cancelada", "cancelled"].includes(key)) {
+    return `
+      color:var(--danger-strong, #ff6b6b);
+      background:color-mix(in srgb, var(--danger-strong, #ff6b6b) 14%, transparent);
+      border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, transparent);
+    `;
+  }
+
   if (["borrador", "draft"].includes(key)) {
     return `
       color:var(--warning-strong, #ffbc42);
@@ -250,11 +269,11 @@ function getEstadoChipStyle(value = "") {
     `;
   }
 
-  if (["cancelada", "cancelled"].includes(key)) {
+  if (["abonada", "paid"].includes(key)) {
     return `
-      color:var(--danger-strong, #ff6b6b);
-      background:color-mix(in srgb, var(--danger-strong, #ff6b6b) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, transparent);
+      color:var(--success-strong, #36c690);
+      background:color-mix(in srgb, var(--success-strong, #36c690) 14%, transparent);
+      border:1px solid color-mix(in srgb, var(--success-strong, #36c690) 26%, transparent);
     `;
   }
 
@@ -370,9 +389,10 @@ function computeStats(items = []) {
 function getClientInitials(item = {}) {
   const raw =
     item?.cliente?.initials ||
+    item?.clienteEmpresa ||
+    item?.clienteNombre ||
     item?.cliente?.empresa ||
     item?.cliente?.nombre ||
-    item?.cliente?.name ||
     "ON";
 
   const clean = String(raw).trim();
@@ -742,18 +762,8 @@ export function renderLoadingState() {
         box-shadow:var(--shadow-sm);
       "
     >
-      <div
-        style="
-          display:grid;
-          gap:0;
-          overflow:auto;
-        "
-      >
-        <div
-          style="
-            min-width:1180px;
-          "
-        >
+      <div style="display:grid; gap:0; overflow:auto;">
+        <div style="min-width:1180px;">
           <div
             style="
               display:grid;
@@ -1188,13 +1198,13 @@ function renderFacturaRow(item = {}, state = {}) {
   const busy = resolveBusyMeta(item, state);
 
   const facturaId = busy.facturaId;
-  const numero = safeText(first(item?.numero, item?.code), "—");
+  const numero = safeText(item?.numero, "—");
   const cliente = safeText(
-    first(item?.cliente?.empresa, item?.cliente?.nombre, item?.cliente?.name),
+    first(item?.clienteEmpresa, item?.cliente?.empresa, item?.clienteNombre, item?.cliente?.nombre),
     "Cliente"
   );
   const email = safeText(
-    first(item?.cliente?.email, item?.clientEmail),
+    first(item?.clienteEmail, item?.cliente?.email),
     "Sin email"
   );
   const fecha = formatDate(item?.fecha);
@@ -1203,7 +1213,7 @@ function renderFacturaRow(item = {}, state = {}) {
   const formaPago = safeText(item?.formaPago, "—");
   const estadoPago = getEstadoPagoLabel(item?.estadoPago);
   const estado = getEstadoLabel(item?.estado);
-  const pdfAvailable = Boolean(item?.pdfAvailable || item?.blobPath);
+  const pdfAvailable = Boolean(item?.pdfAvailable || item?.blobPath || item?.pdfUrl);
   const initials = getClientInitials(item);
 
   return `
@@ -1215,13 +1225,7 @@ function renderFacturaRow(item = {}, state = {}) {
         opacity:${busy.isOpening ? ".72" : "1"};
       "
     >
-      <td
-        style="
-          padding:18px;
-          border-bottom:1px solid var(--border-soft);
-          vertical-align:middle;
-        "
-      >
+      <td style="padding:18px; border-bottom:1px solid var(--border-soft); vertical-align:middle;">
         <div style="display:flex; gap:14px; align-items:center; min-width:280px;">
           <div
             aria-hidden="true"
@@ -1295,98 +1299,37 @@ function renderFacturaRow(item = {}, state = {}) {
         </div>
       </td>
 
-      <td
-        style="
-          padding:18px;
-          border-bottom:1px solid var(--border-soft);
-          vertical-align:middle;
-          white-space:nowrap;
-        "
-      >
+      <td style="padding:18px; border-bottom:1px solid var(--border-soft); vertical-align:middle; white-space:nowrap;">
         ${renderStatusChip(estadoPago, getEstadoPagoChipStyle(item?.estadoPago))}
       </td>
 
-      <td
-        style="
-          padding:18px;
-          border-bottom:1px solid var(--border-soft);
-          vertical-align:middle;
-          white-space:nowrap;
-        "
-      >
+      <td style="padding:18px; border-bottom:1px solid var(--border-soft); vertical-align:middle; white-space:nowrap;">
         ${renderStatusChip(estado, getEstadoChipStyle(item?.estado))}
       </td>
 
-      <td
-        style="
-          padding:18px;
-          border-bottom:1px solid var(--border-soft);
-          vertical-align:middle;
-          white-space:nowrap;
-        "
-      >
+      <td style="padding:18px; border-bottom:1px solid var(--border-soft); vertical-align:middle; white-space:nowrap;">
         <div style="display:grid; gap:4px;">
-          <strong
-            style="
-              color:var(--text-strong);
-              font-size:var(--font-sm);
-              line-height:1.2;
-            "
-          >
+          <strong style="color:var(--text-strong); font-size:var(--font-sm); line-height:1.2;">
             ${escapeHtml(fecha)}
           </strong>
-
-          <span
-            style="
-              color:var(--text-dim);
-              font-size:12px;
-              line-height:1.2;
-            "
-          >
+          <span style="color:var(--text-dim); font-size:12px; line-height:1.2;">
             Emisión
           </span>
         </div>
       </td>
 
-      <td
-        style="
-          padding:18px;
-          border-bottom:1px solid var(--border-soft);
-          vertical-align:middle;
-          white-space:nowrap;
-        "
-      >
+      <td style="padding:18px; border-bottom:1px solid var(--border-soft); vertical-align:middle; white-space:nowrap;">
         <div style="display:grid; gap:4px;">
-          <strong
-            style="
-              color:var(--text-strong);
-              font-size:var(--font-sm);
-              line-height:1.2;
-            "
-          >
+          <strong style="color:var(--text-strong); font-size:var(--font-sm); line-height:1.2;">
             ${escapeHtml(total)}
           </strong>
-
-          <span
-            style="
-              color:var(--text-dim);
-              font-size:12px;
-              line-height:1.2;
-            "
-          >
+          <span style="color:var(--text-dim); font-size:12px; line-height:1.2;">
             ${escapeHtml(formaPago)}
           </span>
         </div>
       </td>
 
-      <td
-        style="
-          padding:18px;
-          border-bottom:1px solid var(--border-soft);
-          vertical-align:middle;
-          white-space:nowrap;
-        "
-      >
+      <td style="padding:18px; border-bottom:1px solid var(--border-soft); vertical-align:middle; white-space:nowrap;">
         <div style="display:grid; gap:6px;">
           <span
             style="
@@ -1447,22 +1390,8 @@ function renderFacturaRow(item = {}, state = {}) {
         </div>
       </td>
 
-      <td
-        style="
-          padding:18px;
-          border-bottom:1px solid var(--border-soft);
-          vertical-align:middle;
-          text-align:right;
-        "
-      >
-        <div
-          style="
-            display:flex;
-            justify-content:flex-end;
-            gap:8px;
-            flex-wrap:wrap;
-          "
-        >
+      <td style="padding:18px; border-bottom:1px solid var(--border-soft); vertical-align:middle; text-align:right;">
+        <div style="display:flex; justify-content:flex-end; gap:8px; flex-wrap:wrap;">
           <button
             type="button"
             data-action="open-factura"
@@ -1482,11 +1411,7 @@ function renderFacturaRow(item = {}, state = {}) {
               white-space:nowrap;
             "
           >
-            ${
-              busy.isOpening
-                ? renderInlineSpinner("Abriendo...")
-                : "Detalle"
-            }
+            ${busy.isOpening ? renderInlineSpinner("Abriendo...") : "Detalle"}
           </button>
 
           <button
@@ -1508,11 +1433,7 @@ function renderFacturaRow(item = {}, state = {}) {
               white-space:nowrap;
             "
           >
-            ${
-              busy.isViewingPdf
-                ? renderInlineSpinner("Abriendo...")
-                : "Ver PDF"
-            }
+            ${busy.isViewingPdf ? renderInlineSpinner("Abriendo...") : "Ver PDF"}
           </button>
 
           <button
@@ -1534,11 +1455,29 @@ function renderFacturaRow(item = {}, state = {}) {
               white-space:nowrap;
             "
           >
-            ${
-              busy.isDownloading
-                ? renderInlineSpinner("Bajando...")
-                : "Descargar"
-            }
+            ${busy.isDownloading ? renderInlineSpinner("Bajando...") : "Descargar"}
+          </button>
+
+          <button
+            type="button"
+            data-action="send-factura"
+            data-factura-id="${escapeHtml(facturaId)}"
+            ${!busy.isSending ? "" : "disabled"}
+            style="
+              min-height:38px;
+              min-width:96px;
+              padding:0 12px;
+              border-radius:12px;
+              border:1px solid color-mix(in srgb, var(--success-strong, #36c690) 28%, transparent);
+              background:color-mix(in srgb, var(--success-strong, #36c690) 88%, transparent);
+              color:#fff;
+              font-weight:var(--weight-bold);
+              cursor:${busy.isSending ? "wait" : "pointer"};
+              opacity:${busy.isSending ? ".78" : "1"};
+              white-space:nowrap;
+            "
+          >
+            ${busy.isSending ? renderInlineSpinner("Enviando...") : "Enviar"}
           </button>
         </div>
       </td>
@@ -1550,13 +1489,13 @@ function renderMobileFacturaCard(item = {}, state = {}) {
   const busy = resolveBusyMeta(item, state);
 
   const facturaId = busy.facturaId;
-  const numero = safeText(first(item?.numero, item?.code), "—");
+  const numero = safeText(item?.numero, "—");
   const cliente = safeText(
-    first(item?.cliente?.empresa, item?.cliente?.nombre, item?.cliente?.name),
+    first(item?.clienteEmpresa, item?.cliente?.empresa, item?.clienteNombre, item?.cliente?.nombre),
     "Cliente"
   );
   const email = safeText(
-    first(item?.cliente?.email, item?.clientEmail),
+    first(item?.clienteEmail, item?.cliente?.email),
     "Sin email"
   );
   const fecha = formatDate(item?.fecha);
@@ -1565,7 +1504,7 @@ function renderMobileFacturaCard(item = {}, state = {}) {
   const formaPago = safeText(item?.formaPago, "—");
   const estadoPago = getEstadoPagoLabel(item?.estadoPago);
   const estado = getEstadoLabel(item?.estado);
-  const pdfAvailable = Boolean(item?.pdfAvailable || item?.blobPath);
+  const pdfAvailable = Boolean(item?.pdfAvailable || item?.blobPath || item?.pdfUrl);
   const initials = getClientInitials(item);
 
   return `
@@ -1803,11 +1742,7 @@ function renderMobileFacturaCard(item = {}, state = {}) {
             opacity:${busy.isOpening ? ".88" : "1"};
           "
         >
-          ${
-            busy.isOpening
-              ? renderInlineSpinner("Abriendo...")
-              : "Detalle"
-          }
+          ${busy.isOpening ? renderInlineSpinner("Abriendo...") : "Detalle"}
         </button>
 
         <button
@@ -1827,11 +1762,7 @@ function renderMobileFacturaCard(item = {}, state = {}) {
             opacity:${pdfAvailable ? (busy.isViewingPdf ? ".78" : "1") : ".56"};
           "
         >
-          ${
-            busy.isViewingPdf
-              ? renderInlineSpinner("Abriendo...")
-              : "Ver PDF"
-          }
+          ${busy.isViewingPdf ? renderInlineSpinner("Abriendo...") : "Ver PDF"}
         </button>
 
         <button
@@ -1851,11 +1782,27 @@ function renderMobileFacturaCard(item = {}, state = {}) {
             opacity:${pdfAvailable ? (busy.isDownloading ? ".78" : "1") : ".56"};
           "
         >
-          ${
-            busy.isDownloading
-              ? renderInlineSpinner("Bajando...")
-              : "Descargar"
-          }
+          ${busy.isDownloading ? renderInlineSpinner("Bajando...") : "Descargar"}
+        </button>
+
+        <button
+          type="button"
+          data-action="send-factura"
+          data-factura-id="${escapeHtml(facturaId)}"
+          ${!busy.isSending ? "" : "disabled"}
+          style="
+            min-height:38px;
+            padding:0 12px;
+            border-radius:12px;
+            border:1px solid color-mix(in srgb, var(--success-strong, #36c690) 28%, transparent);
+            background:color-mix(in srgb, var(--success-strong, #36c690) 88%, transparent);
+            color:#fff;
+            font-weight:var(--weight-bold);
+            cursor:${busy.isSending ? "wait" : "pointer"};
+            opacity:${busy.isSending ? ".78" : "1"};
+          "
+        >
+          ${busy.isSending ? renderInlineSpinner("Enviando...") : "Enviar"}
         </button>
       </div>
     </article>
@@ -1875,126 +1822,32 @@ function renderDesktopTable(items = [], state = {}) {
         class="facturas-table"
         style="
           width:100%;
-          min-width:1180px;
+          min-width:1280px;
           border-collapse:separate;
           border-spacing:0;
         "
       >
         <thead>
-          <tr
-            style="
-              background:var(--surface-2, var(--surface-glass));
-            "
-          >
-            <th
-              style="
-                padding:16px 18px;
-                text-align:left;
-                font-size:12px;
-                letter-spacing:.08em;
-                text-transform:uppercase;
-                color:var(--text-dim);
-                font-weight:var(--weight-bold);
-                border-bottom:1px solid var(--border-soft);
-                white-space:nowrap;
-              "
-            >
+          <tr style="background:var(--surface-2, var(--surface-glass));">
+            <th style="padding:16px 18px; text-align:left; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-dim); font-weight:var(--weight-bold); border-bottom:1px solid var(--border-soft); white-space:nowrap;">
               Factura / cliente
             </th>
-
-            <th
-              style="
-                padding:16px 18px;
-                text-align:left;
-                font-size:12px;
-                letter-spacing:.08em;
-                text-transform:uppercase;
-                color:var(--text-dim);
-                font-weight:var(--weight-bold);
-                border-bottom:1px solid var(--border-soft);
-                white-space:nowrap;
-              "
-            >
+            <th style="padding:16px 18px; text-align:left; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-dim); font-weight:var(--weight-bold); border-bottom:1px solid var(--border-soft); white-space:nowrap;">
               Pago
             </th>
-
-            <th
-              style="
-                padding:16px 18px;
-                text-align:left;
-                font-size:12px;
-                letter-spacing:.08em;
-                text-transform:uppercase;
-                color:var(--text-dim);
-                font-weight:var(--weight-bold);
-                border-bottom:1px solid var(--border-soft);
-                white-space:nowrap;
-              "
-            >
+            <th style="padding:16px 18px; text-align:left; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-dim); font-weight:var(--weight-bold); border-bottom:1px solid var(--border-soft); white-space:nowrap;">
               Estado
             </th>
-
-            <th
-              style="
-                padding:16px 18px;
-                text-align:left;
-                font-size:12px;
-                letter-spacing:.08em;
-                text-transform:uppercase;
-                color:var(--text-dim);
-                font-weight:var(--weight-bold);
-                border-bottom:1px solid var(--border-soft);
-                white-space:nowrap;
-              "
-            >
+            <th style="padding:16px 18px; text-align:left; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-dim); font-weight:var(--weight-bold); border-bottom:1px solid var(--border-soft); white-space:nowrap;">
               Fecha
             </th>
-
-            <th
-              style="
-                padding:16px 18px;
-                text-align:left;
-                font-size:12px;
-                letter-spacing:.08em;
-                text-transform:uppercase;
-                color:var(--text-dim);
-                font-weight:var(--weight-bold);
-                border-bottom:1px solid var(--border-soft);
-                white-space:nowrap;
-              "
-            >
+            <th style="padding:16px 18px; text-align:left; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-dim); font-weight:var(--weight-bold); border-bottom:1px solid var(--border-soft); white-space:nowrap;">
               Total
             </th>
-
-            <th
-              style="
-                padding:16px 18px;
-                text-align:left;
-                font-size:12px;
-                letter-spacing:.08em;
-                text-transform:uppercase;
-                color:var(--text-dim);
-                font-weight:var(--weight-bold);
-                border-bottom:1px solid var(--border-soft);
-                white-space:nowrap;
-              "
-            >
+            <th style="padding:16px 18px; text-align:left; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-dim); font-weight:var(--weight-bold); border-bottom:1px solid var(--border-soft); white-space:nowrap;">
               Actualización
             </th>
-
-            <th
-              style="
-                padding:16px 18px;
-                text-align:right;
-                font-size:12px;
-                letter-spacing:.08em;
-                text-transform:uppercase;
-                color:var(--text-dim);
-                font-weight:var(--weight-bold);
-                border-bottom:1px solid var(--border-soft);
-                white-space:nowrap;
-              "
-            >
+            <th style="padding:16px 18px; text-align:right; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-dim); font-weight:var(--weight-bold); border-bottom:1px solid var(--border-soft); white-space:nowrap;">
               Acciones
             </th>
           </tr>

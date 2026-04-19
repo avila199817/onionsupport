@@ -30,7 +30,7 @@ import { ConfirmResetPasswordView } from "../views/password-reset/confirm/index.
 import { HomeView } from "../views/home/index.js";
 import { IncidenciasView } from "../views/incidencias/index.js";
 import { FacturasView } from "../views/facturas/index.js";
-import { ServerView } from "../views/serverView.js";
+import { ServerView } from "../views/server/index.js";
 import { UsuariosView } from "../views/usuarios/index.js";
 import { ClientesView } from "../views/clientes/index.js";
 import { CuentaView } from "../views/cuenta/index.js";

@@ -22,6 +22,7 @@
    - clipboard con fallback legacy
    - eventos opcionales vía AppCore.events
    - tolerancia a payloads heterogéneos
+   - compatible con API normalizada actual
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -29,6 +30,7 @@ import { AppCore } from "../../core/index.js";
 import {
   fetchFacturaPdfUrlRequest,
   sendFacturaRequest,
+  resolveFacturaPdfUrl,
 } from "./facturas.api.js";
 
 import {
@@ -54,13 +56,21 @@ const CSV_FILENAME_PREFIX = "facturas";
    HELPERS
 ========================================================= */
 
-function safeEmit(eventName = "", payload = {}) {
+function safeEmit(
+  eventName = "",
+  payload = {}
+) {
   try {
-    AppCore?.events?.emit?.(eventName, payload);
+    AppCore?.events?.emit?.(
+      eventName,
+      payload
+    );
   } catch {}
 }
 
-function first(...values) {
+function first(
+  ...values
+) {
   for (const value of values) {
     if (
       value !== undefined &&
@@ -74,16 +84,26 @@ function first(...values) {
   return null;
 }
 
-function normalizeFacturaId(value = "") {
+function normalizeFacturaId(
+  value = ""
+) {
   return safeText(value, "");
 }
 
-function isObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value);
+function isObject(
+  value
+) {
+  return !!value &&
+    typeof value === "object" &&
+    !Array.isArray(value);
 }
 
-function isLikelyFactura(value) {
-  if (!isObject(value)) return false;
+function isLikelyFactura(
+  value
+) {
+  if (!isObject(value)) {
+    return false;
+  }
 
   return Boolean(
     value.id ||
@@ -91,16 +111,18 @@ function isLikelyFactura(value) {
       value.facturaId ||
       value.numero ||
       value.code ||
-      value.cliente ||
-      value.client ||
-      value.customer ||
       value.total !== undefined ||
       value.amount !== undefined ||
-      value.importe !== undefined
+      value.importe !== undefined ||
+      value.cliente ||
+      value.client ||
+      value.customer
   );
 }
 
-function looksLikeEnvelope(value) {
+function looksLikeEnvelope(
+  value
+) {
   const obj = safeObject(value);
 
   return Boolean(
@@ -112,8 +134,12 @@ function looksLikeEnvelope(value) {
   );
 }
 
-function pickDetail(payload = null) {
-  if (!payload) return null;
+function pickDetail(
+  payload = null
+) {
+  if (!payload) {
+    return null;
+  }
 
   if (isLikelyFactura(payload)) {
     return payload;
@@ -145,20 +171,16 @@ function pickDetail(payload = null) {
     return pickDetail(obj.data);
   }
 
+  if (looksLikeEnvelope(obj.payload)) {
+    return pickDetail(obj.payload);
+  }
+
   return null;
 }
 
-function resolvePdfUrl(response = null) {
-  return safeText(
-    response?.file?.url ||
-      response?.url ||
-      response?.data?.file?.url ||
-      response?.data?.url,
-    ""
-  );
-}
-
-function resolveFacturaId(detail = null) {
+function resolveFacturaId(
+  detail = null
+) {
   return safeText(
     detail?.id ||
       detail?._id ||
@@ -167,7 +189,9 @@ function resolveFacturaId(detail = null) {
   );
 }
 
-function getFacturaId(item = {}) {
+function getFacturaId(
+  item = {}
+) {
   return safeText(
     first(
       item.id,
@@ -178,7 +202,9 @@ function getFacturaId(item = {}) {
   );
 }
 
-function getFacturaNumber(item = {}) {
+function getFacturaNumber(
+  item = {}
+) {
   return safeText(
     first(
       item.numero,
@@ -190,18 +216,25 @@ function getFacturaNumber(item = {}) {
   );
 }
 
-function getFacturaClientObject(item = {}) {
+function getFacturaClientObject(
+  item = {}
+) {
   const client = first(
     item.cliente,
     item.client,
     item.customer
   );
 
-  return isObject(client) ? client : {};
+  return isObject(client)
+    ? client
+    : {};
 }
 
-function getFacturaClient(item = {}) {
-  const client = getFacturaClientObject(item);
+function getFacturaClient(
+  item = {}
+) {
+  const client =
+    getFacturaClientObject(item);
 
   if (Object.keys(client).length) {
     return safeText(
@@ -226,8 +259,11 @@ function getFacturaClient(item = {}) {
   );
 }
 
-function getFacturaEmail(item = {}) {
-  const client = getFacturaClientObject(item);
+function getFacturaEmail(
+  item = {}
+) {
+  const client =
+    getFacturaClientObject(item);
 
   if (Object.keys(client).length) {
     return safeText(
@@ -243,13 +279,16 @@ function getFacturaEmail(item = {}) {
     first(
       item.email,
       item.clienteEmail,
-      item.clientEmail
+      item.clientEmail,
+      item.customerEmail
     ),
     "Sin email"
   );
 }
 
-function getFacturaDate(item = {}) {
+function getFacturaDate(
+  item = {}
+) {
   return first(
     item.fecha,
     item.date,
@@ -258,7 +297,9 @@ function getFacturaDate(item = {}) {
   );
 }
 
-function getFacturaEstadoPago(item = {}) {
+function getFacturaEstadoPago(
+  item = {}
+) {
   return safeText(
     first(
       item.estadoPago,
@@ -268,7 +309,9 @@ function getFacturaEstadoPago(item = {}) {
   );
 }
 
-function getFacturaEstado(item = {}) {
+function getFacturaEstado(
+  item = {}
+) {
   return safeText(
     first(
       item.estado,
@@ -278,7 +321,9 @@ function getFacturaEstado(item = {}) {
   );
 }
 
-function getFacturaFormaPago(item = {}) {
+function getFacturaFormaPago(
+  item = {}
+) {
   return safeText(
     first(
       item.formaPago,
@@ -288,7 +333,9 @@ function getFacturaFormaPago(item = {}) {
   );
 }
 
-function getFacturaMoneda(item = {}) {
+function getFacturaMoneda(
+  item = {}
+) {
   return safeText(
     first(
       item.moneda,
@@ -298,7 +345,9 @@ function getFacturaMoneda(item = {}) {
   );
 }
 
-function getFacturaTotal(item = {}) {
+function getFacturaTotal(
+  item = {}
+) {
   return safeNumber(
     first(
       item.total,
@@ -309,19 +358,24 @@ function getFacturaTotal(item = {}) {
   );
 }
 
-function getFacturaSentTo(item = {}) {
+function getFacturaSentTo(
+  item = {}
+) {
   return safeText(
     first(
       item.enviadoA,
       item.sentTo,
       item?.cliente?.email,
-      item?.client?.email
+      item?.client?.email,
+      item?.customer?.email
     ),
     ""
   );
 }
 
-function getFacturaSentAt(item = {}) {
+function getFacturaSentAt(
+  item = {}
+) {
   return first(
     item.fechaEnvio,
     item.sentAt,
@@ -329,7 +383,9 @@ function getFacturaSentAt(item = {}) {
   );
 }
 
-function normalizeFacturaDetail(detail = {}) {
+function normalizeFacturaDetail(
+  detail = {}
+) {
   const raw = safeObject(detail);
   const facturaId = getFacturaId(raw);
 
@@ -342,10 +398,12 @@ function normalizeFacturaDetail(detail = {}) {
       ? raw.cliente
       : isObject(raw.client)
         ? raw.client
-        : {
-            empresa: getFacturaClient(raw),
-            email: getFacturaEmail(raw),
-          },
+        : isObject(raw.customer)
+          ? raw.customer
+          : {
+              empresa: getFacturaClient(raw),
+              email: getFacturaEmail(raw),
+            },
     fecha: getFacturaDate(raw),
     estadoPago: getFacturaEstadoPago(raw),
     estado: getFacturaEstado(raw),
@@ -358,7 +416,10 @@ function normalizeFacturaDetail(detail = {}) {
   };
 }
 
-function safeErrorMessage(error = null, fallback = "") {
+function safeErrorMessage(
+  error = null,
+  fallback = ""
+) {
   return safeText(
     error?.data?.message ||
       error?.response?.data?.message ||
@@ -368,16 +429,21 @@ function safeErrorMessage(error = null, fallback = "") {
   );
 }
 
-function escapeCsvCell(value = "") {
+function escapeCsvCell(
+  value = ""
+) {
   const text =
-    value === null || value === undefined
+    value === null ||
+    value === undefined
       ? ""
       : String(value);
 
   return `"${text.replace(/"/g, '""')}"`;
 }
 
-function buildCsvRows(items = []) {
+function buildCsvRows(
+  items = []
+) {
   const header = [
     "id",
     "numero",
@@ -393,51 +459,70 @@ function buildCsvRows(items = []) {
     "fechaEnvio",
   ];
 
-  const rows = safeArray(items).map((item) => [
-    getFacturaId(item),
-    getFacturaNumber(item),
-    getFacturaClient(item),
-    getFacturaEmail(item),
-    getFacturaDate(item) || "",
-    getFacturaEstadoPago(item),
-    getFacturaEstado(item),
-    getFacturaFormaPago(item),
-    getFacturaTotal(item),
-    getFacturaMoneda(item),
-    getFacturaSentTo(item),
-    getFacturaSentAt(item) || "",
-  ]);
+  const rows = safeArray(items).map(
+    (item) => [
+      getFacturaId(item),
+      getFacturaNumber(item),
+      getFacturaClient(item),
+      getFacturaEmail(item),
+      getFacturaDate(item) || "",
+      getFacturaEstadoPago(item),
+      getFacturaEstado(item),
+      getFacturaFormaPago(item),
+      getFacturaTotal(item),
+      getFacturaMoneda(item),
+      getFacturaSentTo(item),
+      getFacturaSentAt(item) || "",
+    ]
+  );
 
   return [
     header.map(escapeCsvCell).join(","),
-    ...rows.map((row) => row.map(escapeCsvCell).join(",")),
+    ...rows.map((row) =>
+      row.map(escapeCsvCell).join(",")
+    ),
   ].join("\n");
 }
 
-async function writeClipboardText(text = "") {
+async function writeClipboardText(
+  text = ""
+) {
   const value = safeText(text, "");
 
-  if (!value) return false;
+  if (!value) {
+    return false;
+  }
 
   try {
-    if (navigator?.clipboard?.writeText) {
-      await navigator.clipboard.writeText(value);
+    if (
+      navigator?.clipboard?.writeText
+    ) {
+      await navigator.clipboard.writeText(
+        value
+      );
       return true;
     }
   } catch {}
 
   try {
-    const textarea = document.createElement("textarea");
+    const textarea =
+      document.createElement("textarea");
+
     textarea.value = value;
-    textarea.setAttribute("readonly", "true");
+    textarea.setAttribute(
+      "readonly",
+      "true"
+    );
     textarea.style.position = "fixed";
     textarea.style.opacity = "0";
     textarea.style.pointerEvents = "none";
+
     document.body.appendChild(textarea);
     textarea.focus();
     textarea.select();
 
-    const ok = document.execCommand("copy");
+    const ok =
+      document.execCommand("copy");
 
     textarea.remove();
 
@@ -452,12 +537,18 @@ function downloadTextFile({
   content = "",
   mimeType = "text/plain;charset=utf-8;",
 } = {}) {
-  const blob = new Blob([String(content || "")], {
-    type: mimeType,
-  });
+  const blob = new Blob(
+    [String(content || "")],
+    {
+      type: mimeType,
+    }
+  );
 
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
+  const url =
+    URL.createObjectURL(blob);
+
+  const anchor =
+    document.createElement("a");
 
   anchor.href = url;
   anchor.download = filename;
@@ -478,17 +569,28 @@ function downloadTextFile({
 export function getFacturaDetailFromStoreAction({
   facturaId = "",
 } = {}) {
-  const id = normalizeFacturaId(facturaId);
+  const id = normalizeFacturaId(
+    facturaId
+  );
 
-  if (!id) return null;
+  if (!id) {
+    return null;
+  }
 
   try {
-    const detail = getFacturaByIdStore(id);
-    const picked = pickDetail(detail);
+    const detail =
+      getFacturaByIdStore(id);
 
-    if (!picked) return null;
+    const picked =
+      pickDetail(detail);
 
-    return normalizeFacturaDetail(picked);
+    if (!picked) {
+      return null;
+    }
+
+    return normalizeFacturaDetail(
+      picked
+    );
   } catch {
     return null;
   }
@@ -500,75 +602,118 @@ export async function getFacturaDetailAction({
   preferFresh = true,
   silent = false,
 } = {}) {
-  const id = normalizeFacturaId(facturaId);
+  const id = normalizeFacturaId(
+    facturaId
+  );
 
   if (!id) {
     if (!silent) {
-      showToast("No se pudo resolver la factura.", "error");
+      showToast(
+        "No se pudo resolver la factura.",
+        "error"
+      );
     }
+
     return null;
   }
 
-  const fallbackStoreDetail = getFacturaDetailFromStoreAction({
-    facturaId: id,
-  });
+  const fallbackStoreDetail =
+    getFacturaDetailFromStoreAction({
+      facturaId: id,
+    });
 
-  if (!preferFresh && fallbackStoreDetail) {
+  if (
+    !preferFresh &&
+    fallbackStoreDetail
+  ) {
     return fallbackStoreDetail;
   }
 
   try {
-    safeEmit("facturas:detail:request", {
-      facturaId: id,
-      source: typeof loadFacturaDetail === "function" ? "loader" : "store",
-    });
+    safeEmit(
+      "facturas:detail:request",
+      {
+        facturaId: id,
+        source:
+          typeof loadFacturaDetail ===
+          "function"
+            ? "loader"
+            : "store",
+      }
+    );
 
     let detail = null;
 
-    if (typeof loadFacturaDetail === "function") {
-      detail = await loadFacturaDetail(id);
+    if (
+      typeof loadFacturaDetail ===
+      "function"
+    ) {
+      detail =
+        await loadFacturaDetail(id);
     } else {
-      detail = fallbackStoreDetail;
+      detail =
+        fallbackStoreDetail;
     }
 
-    const picked = pickDetail(detail);
+    const picked =
+      pickDetail(detail);
 
     if (!picked) {
       if (fallbackStoreDetail) {
-        safeEmit("facturas:detail:fallback", {
-          facturaId: id,
-          source: "store",
-        });
+        safeEmit(
+          "facturas:detail:fallback",
+          {
+            facturaId: id,
+            source: "store",
+          }
+        );
+
         return fallbackStoreDetail;
       }
 
-      throw new Error("EMPTY_FACTURA_DETAIL");
+      throw new Error(
+        "EMPTY_FACTURA_DETAIL"
+      );
     }
 
-    const normalized = normalizeFacturaDetail(picked);
+    const normalized =
+      normalizeFacturaDetail(picked);
 
-    safeEmit("facturas:detail:success", {
-      facturaId: id,
-      source: typeof loadFacturaDetail === "function" ? "loader" : "store",
-      detail: normalized,
-    });
+    safeEmit(
+      "facturas:detail:success",
+      {
+        facturaId: id,
+        source:
+          typeof loadFacturaDetail ===
+          "function"
+            ? "loader"
+            : "store",
+        detail: normalized,
+      }
+    );
 
     return normalized;
   } catch (error) {
     if (fallbackStoreDetail) {
-      safeEmit("facturas:detail:fallback", {
-        facturaId: id,
-        source: "store",
-        error,
-      });
+      safeEmit(
+        "facturas:detail:fallback",
+        {
+          facturaId: id,
+          source: "store",
+          error,
+        }
+      );
 
       return fallbackStoreDetail;
     }
 
-    safeEmit("facturas:detail:error", {
-      facturaId: id,
-      error,
-    });
+    safeEmit(
+      "facturas:detail:error",
+      {
+        facturaId: id,
+        error,
+      }
+    );
 
     if (!silent) {
       showToast(
@@ -587,12 +732,18 @@ export async function openFacturaAction({
   preferFresh = true,
   silent = false,
 } = {}) {
-  const id = normalizeFacturaId(facturaId);
+  const id = normalizeFacturaId(
+    facturaId
+  );
 
   if (!id) {
     if (!silent) {
-      showToast("Factura inválida.", "error");
+      showToast(
+        "Factura inválida.",
+        "error"
+      );
     }
+
     return null;
   }
 
@@ -600,21 +751,25 @@ export async function openFacturaAction({
     facturaId: id,
   });
 
-  const detail = await getFacturaDetailAction({
-    facturaId: id,
-    loadFacturaDetail,
-    preferFresh,
-    silent,
-  });
+  const detail =
+    await getFacturaDetailAction({
+      facturaId: id,
+      loadFacturaDetail,
+      preferFresh,
+      silent,
+    });
 
   if (!detail) {
     return null;
   }
 
-  safeEmit("facturas:open:success", {
-    facturaId: id,
-    detail,
-  });
+  safeEmit(
+    "facturas:open:success",
+    {
+      facturaId: id,
+      detail,
+    }
+  );
 
   return detail;
 }
@@ -642,46 +797,81 @@ export async function openFacturaPdfAction({
   onEnd,
   silent = false,
 } = {}) {
-  const id = normalizeFacturaId(facturaId);
+  const id = normalizeFacturaId(
+    facturaId
+  );
 
   if (!id) {
     if (!silent) {
-      showToast("Factura inválida.", "error");
+      showToast(
+        "Factura inválida.",
+        "error"
+      );
     }
+
     return null;
   }
 
   try {
     onStart?.(id);
 
-    const response = await fetchFacturaPdfUrlRequest(id, "inline");
-    const url = resolvePdfUrl(response);
+    const response =
+      await fetchFacturaPdfUrlRequest(
+        id,
+        "inline"
+      );
+
+    const url =
+      safeText(
+        resolveFacturaPdfUrl(
+          response
+        ),
+        ""
+      );
 
     if (!url) {
-      throw new Error("PDF_URL_MISSING");
+      throw new Error(
+        "PDF_URL_MISSING"
+      );
     }
 
-    window.open(url, "_blank", "noopener,noreferrer");
-
-    safeEmit("facturas:pdf:opened", {
-      facturaId: id,
+    window.open(
       url,
-    });
+      "_blank",
+      "noopener,noreferrer"
+    );
+
+    safeEmit(
+      "facturas:pdf:opened",
+      {
+        facturaId: id,
+        url,
+      }
+    );
 
     if (!silent) {
-      showToast("Abriendo PDF de la factura.", "success");
+      showToast(
+        "Abriendo PDF de la factura.",
+        "success"
+      );
     }
 
     return response;
   } catch (error) {
-    safeEmit("facturas:pdf:error", {
-      facturaId: id,
-      error,
-      mode: "inline",
-    });
+    safeEmit(
+      "facturas:pdf:error",
+      {
+        facturaId: id,
+        error,
+        mode: "inline",
+      }
+    );
 
     if (!silent) {
-      showToast("No se pudo abrir el PDF.", "error");
+      showToast(
+        "No se pudo abrir el PDF.",
+        "error"
+      );
     }
 
     return null;
@@ -700,46 +890,81 @@ export async function downloadFacturaPdfAction({
   onEnd,
   silent = false,
 } = {}) {
-  const id = normalizeFacturaId(facturaId);
+  const id = normalizeFacturaId(
+    facturaId
+  );
 
   if (!id) {
     if (!silent) {
-      showToast("Factura inválida.", "error");
+      showToast(
+        "Factura inválida.",
+        "error"
+      );
     }
+
     return null;
   }
 
   try {
     onStart?.(id);
 
-    const response = await fetchFacturaPdfUrlRequest(id, "attachment");
-    const url = resolvePdfUrl(response);
+    const response =
+      await fetchFacturaPdfUrlRequest(
+        id,
+        "attachment"
+      );
+
+    const url =
+      safeText(
+        resolveFacturaPdfUrl(
+          response
+        ),
+        ""
+      );
 
     if (!url) {
-      throw new Error("DOWNLOAD_URL_MISSING");
+      throw new Error(
+        "DOWNLOAD_URL_MISSING"
+      );
     }
 
-    window.open(url, "_blank", "noopener,noreferrer");
-
-    safeEmit("facturas:pdf:download", {
-      facturaId: id,
+    window.open(
       url,
-    });
+      "_blank",
+      "noopener,noreferrer"
+    );
+
+    safeEmit(
+      "facturas:pdf:download",
+      {
+        facturaId: id,
+        url,
+      }
+    );
 
     if (!silent) {
-      showToast("Preparando descarga de factura.", "success");
+      showToast(
+        "Preparando descarga de factura.",
+        "success"
+      );
     }
 
     return response;
   } catch (error) {
-    safeEmit("facturas:pdf:error", {
-      facturaId: id,
-      error,
-      mode: "download",
-    });
+    safeEmit(
+      "facturas:pdf:error",
+      {
+        facturaId: id,
+        error,
+        mode: "download",
+      }
+    );
 
     if (!silent) {
-      showToast("No se pudo descargar la factura.", "error");
+      showToast(
+        "No se pudo descargar la factura.",
+        "error"
+      );
     }
 
     return null;
@@ -762,30 +987,43 @@ export async function sendFacturaToClientAction({
   confirmSend = true,
   silent = false,
 } = {}) {
-  const id = normalizeFacturaId(facturaId);
+  const id = normalizeFacturaId(
+    facturaId
+  );
 
   if (!id) {
     if (!silent) {
-      showToast("Factura inválida.", "error");
+      showToast(
+        "Factura inválida.",
+        "error"
+      );
     }
+
     return null;
   }
 
   const selectedDetail =
     resolveFacturaId(detail) === id
       ? detail
-      : getFacturaByIdStore(id) || detail || {};
+      : getFacturaByIdStore(id) ||
+        detail ||
+        {};
 
-  const factura = normalizeFacturaDetail(selectedDetail);
+  const factura =
+    normalizeFacturaDetail(
+      selectedDetail
+    );
+
   const targetEmail =
     factura?.cliente?.email ||
     factura?.enviadoA ||
     "el cliente";
 
   if (confirmSend) {
-    const confirmed = window.confirm(
-      `Se va a enviar la factura ${getFacturaNumber(factura)} a ${targetEmail}. ¿Continuar?`
-    );
+    const confirmed =
+      window.confirm(
+        `Se va a enviar la factura ${getFacturaNumber(factura)} a ${targetEmail}. ¿Continuar?`
+      );
 
     if (!confirmed) {
       return null;
@@ -795,7 +1033,10 @@ export async function sendFacturaToClientAction({
   try {
     onStart?.(id);
 
-    const response = await sendFacturaRequest(id);
+    const response =
+      await sendFacturaRequest(
+        id
+      );
 
     onSent?.({
       facturaId: id,
@@ -803,28 +1044,43 @@ export async function sendFacturaToClientAction({
       factura,
     });
 
-    safeEmit("facturas:sent", {
-      facturaId: id,
-      response,
-    });
+    safeEmit(
+      "facturas:sent",
+      {
+        facturaId: id,
+        response,
+      }
+    );
 
-    if (typeof reloadFacturas === "function") {
+    if (
+      typeof reloadFacturas ===
+      "function"
+    ) {
       await reloadFacturas();
     }
 
     if (!silent) {
-      showToast("Factura enviada correctamente.", "success");
+      showToast(
+        "Factura enviada correctamente.",
+        "success"
+      );
     }
 
     return response;
   } catch (error) {
-    safeEmit("facturas:send:error", {
-      facturaId: id,
-      error,
-    });
+    safeEmit(
+      "facturas:send:error",
+      {
+        facturaId: id,
+        error,
+      }
+    );
 
     if (!silent) {
-      showToast("No se pudo enviar la factura.", "error");
+      showToast(
+        "No se pudo enviar la factura.",
+        "error"
+      );
     }
 
     return null;
@@ -853,10 +1109,14 @@ export async function copyFacturaIdAction({
         "info"
       );
     }
+
     return false;
   }
 
-  const ok = await writeClipboardText(value);
+  const ok =
+    await writeClipboardText(
+      value
+    );
 
   if (!ok) {
     if (!silent) {
@@ -865,17 +1125,27 @@ export async function copyFacturaIdAction({
         "error"
       );
     }
+
     return false;
   }
 
   safeEmit("facturas:copied", {
-    facturaId: safeText(facturaId, ""),
-    numero: safeText(numero, ""),
+    facturaId: safeText(
+      facturaId,
+      ""
+    ),
+    numero: safeText(
+      numero,
+      ""
+    ),
     value,
   });
 
   if (!silent) {
-    showToast("Identificador copiado.", "success");
+    showToast(
+      "Identificador copiado.",
+      "success"
+    );
   }
 
   return true;
@@ -890,21 +1160,29 @@ export function exportFacturasCsvAction({
   filenamePrefix = CSV_FILENAME_PREFIX,
   silent = false,
 } = {}) {
-  const list = Array.isArray(items)
-    ? items
-    : getSortedFacturasStore();
+  const list =
+    Array.isArray(items)
+      ? items
+      : getSortedFacturasStore();
 
-  const safeList = safeArray(list);
+  const safeList =
+    safeArray(list);
 
   if (!safeList.length) {
     if (!silent) {
-      showToast("No hay facturas para exportar.", "info");
+      showToast(
+        "No hay facturas para exportar.",
+        "info"
+      );
     }
+
     return false;
   }
 
   try {
-    const csv = buildCsvRows(safeList);
+    const csv =
+      buildCsvRows(safeList);
+
     const filename = `${safeText(
       filenamePrefix,
       CSV_FILENAME_PREFIX
@@ -913,31 +1191,44 @@ export function exportFacturasCsvAction({
     downloadTextFile({
       filename,
       content: csv,
-      mimeType: "text/csv;charset=utf-8;",
+      mimeType:
+        "text/csv;charset=utf-8;",
     });
 
-    safeEmit("facturas:exported", {
-      total: safeList.length,
-      filename,
-      filenamePrefix: safeText(
-        filenamePrefix,
-        CSV_FILENAME_PREFIX
-      ),
-    });
+    safeEmit(
+      "facturas:exported",
+      {
+        total: safeList.length,
+        filename,
+        filenamePrefix: safeText(
+          filenamePrefix,
+          CSV_FILENAME_PREFIX
+        ),
+      }
+    );
 
     if (!silent) {
-      showToast("Exportación CSV generada.", "success");
+      showToast(
+        "Exportación CSV generada.",
+        "success"
+      );
     }
 
     return true;
   } catch (error) {
-    safeEmit("facturas:export:error", {
-      type: "csv",
-      error,
-    });
+    safeEmit(
+      "facturas:export:error",
+      {
+        type: "csv",
+        error,
+      }
+    );
 
     if (!silent) {
-      showToast("No se pudo exportar el CSV.", "error");
+      showToast(
+        "No se pudo exportar el CSV.",
+        "error"
+      );
     }
 
     return false;

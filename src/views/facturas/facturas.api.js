@@ -16,12 +16,13 @@
    - helpers comunes para requests GET/POST
    - endpoints centralizados y extensibles
    - soporte inline / attachment robusto
-   - normalización ligera de respuestas
+   - normalización delegada al model del dominio
    - integración limpia con AppCore.apiClient
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 import { createCollectionApi } from "../../shared/api/index.js";
+import { normalizeFactura } from "./facturas.model.js";
 
 /* =========================================================
    CONSTANTS
@@ -67,16 +68,6 @@ function safeText(
   return text || fallback;
 }
 
-function safeNumber(
-  value,
-  fallback = 0
-) {
-  const n = Number(value);
-  return Number.isFinite(n)
-    ? n
-    : fallback;
-}
-
 function safeObject(
   value,
   fallback = {}
@@ -102,108 +93,6 @@ function first(
   }
 
   return null;
-}
-
-/* =========================================================
-   DOMAIN NORMALIZATION
-========================================================= */
-
-export function normalizeFactura(
-  item = {}
-) {
-  const raw = safeObject(item);
-
-  return {
-    id: safeText(
-      first(
-        raw.id,
-        raw._id
-      ),
-      ""
-    ),
-    numero: safeText(
-      first(
-        raw.numero,
-        raw.number,
-        raw.invoiceNumber
-      ),
-      ""
-    ),
-    clienteId: safeText(
-      first(
-        raw.clienteId,
-        raw.clientId,
-        raw.customerId
-      ),
-      ""
-    ),
-    clienteNombre: safeText(
-      first(
-        raw.clienteNombre,
-        raw.clientName,
-        raw.customerName
-      ),
-      ""
-    ),
-    total: safeNumber(
-      first(
-        raw.total,
-        raw.amount,
-        raw.importeTotal
-      ),
-      0
-    ),
-    moneda: safeText(
-      first(
-        raw.moneda,
-        raw.currency
-      ),
-      "EUR"
-    ),
-    estado: safeText(
-      first(
-        raw.estado,
-        raw.status
-      ),
-      "emitida"
-    ),
-    estadoPago: safeText(
-      first(
-        raw.estadoPago,
-        raw.paymentStatus
-      ),
-      "pendiente"
-    ),
-    fecha: first(
-      raw.fecha,
-      raw.issueDate,
-      raw.createdAt,
-      null
-    ),
-    vencimiento: first(
-      raw.vencimiento,
-      raw.dueDate,
-      raw.fechaVencimiento,
-      null
-    ),
-    email: safeText(
-      first(
-        raw.email,
-        raw.clientEmail,
-        raw.customerEmail
-      ),
-      ""
-    ),
-    pdfUrl: safeText(
-      first(
-        raw.pdfUrl,
-        raw.file?.url,
-        raw.url
-      ),
-      ""
-    ),
-    raw,
-  };
 }
 
 /* =========================================================

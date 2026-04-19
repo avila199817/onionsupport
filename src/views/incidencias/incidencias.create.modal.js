@@ -235,15 +235,6 @@ function getInitialForm() {
   };
 }
 
-function resetLocalState({ preserveDraft = true } = {}) {
-  modalState.submitting = false;
-  modalState.errors = {};
-  modalState.serverError = "";
-  modalState.successMessage = "";
-  modalState.createdTicketId = "";
-  modalState.form = preserveDraft ? getInitialForm() : { ...DEFAULT_FORM };
-}
-
 function persistDraft() {
   incidenciasState.createDraft = { ...modalState.form };
 }
@@ -775,7 +766,7 @@ function renderCheckbox({
                 ${escapeHtml(hint)}
               </span>
             `
-            : ""
+          : ""
         }
       </span>
     </label>
@@ -1369,6 +1360,7 @@ function renderModal() {
   }
 
   root.innerHTML = renderModalInner();
+  modalState.bindingsAttached = false;
 
   return root;
 }
@@ -1453,6 +1445,7 @@ export function updateIncidenciasCreateModal(draft = {}) {
   persistDraft();
   renderModal();
   attachRootBindings();
+  focusPanel();
 
   return true;
 }
@@ -1486,6 +1479,7 @@ async function handleSubmit() {
   modalState.submitting = true;
   renderModal();
   attachRootBindings();
+  focusPanel();
 
   safeEmit("incidencias:create:submit", {
     payload,
@@ -1507,6 +1501,7 @@ async function handleSubmit() {
 
     renderModal();
     attachRootBindings();
+    focusPanel();
 
     showToast("Incidencia creada correctamente.", "success");
 
@@ -1656,4 +1651,149 @@ function attachRootBindings() {
   };
 
   root.__incidenciasCreateModalInputHandler = onInput;
-  root.__incidenciasCreateModalChangeHandler = onChange
+  root.__incidenciasCreateModalChangeHandler = onChange;
+  root.__incidenciasCreateModalSubmitHandler = onSubmit;
+  root.__incidenciasCreateModalClickHandler = onClick;
+
+  root.addEventListener("input", onInput);
+  root.addEventListener("change", onChange);
+  root.addEventListener("submit", onSubmit);
+  root.addEventListener("click", onClick);
+
+  modalState.bindingsAttached = true;
+}
+
+function detachRootBindings() {
+  const root = getRoot();
+  if (!root) {
+    modalState.bindingsAttached = false;
+    return;
+  }
+
+  if (root.__incidenciasCreateModalInputHandler) {
+    try {
+      root.removeEventListener("input", root.__incidenciasCreateModalInputHandler);
+    } catch {}
+    delete root.__incidenciasCreateModalInputHandler;
+  }
+
+  if (root.__incidenciasCreateModalChangeHandler) {
+    try {
+      root.removeEventListener("change", root.__incidenciasCreateModalChangeHandler);
+    } catch {}
+    delete root.__incidenciasCreateModalChangeHandler;
+  }
+
+  if (root.__incidenciasCreateModalSubmitHandler) {
+    try {
+      root.removeEventListener("submit", root.__incidenciasCreateModalSubmitHandler);
+    } catch {}
+    delete root.__incidenciasCreateModalSubmitHandler;
+  }
+
+  if (root.__incidenciasCreateModalClickHandler) {
+    try {
+      root.removeEventListener("click", root.__incidenciasCreateModalClickHandler);
+    } catch {}
+    delete root.__incidenciasCreateModalClickHandler;
+  }
+
+  modalState.bindingsAttached = false;
+}
+
+/* =========================================================
+   EVENT BUS BRIDGE
+========================================================= */
+
+function handleOpenEvent(event) {
+  const draft = event?.detail?.draft || event?.detail || event || {};
+  openIncidenciasCreateModal(safeObject(draft));
+}
+
+function handleCloseEvent() {
+  closeIncidenciasCreateModal();
+}
+
+function handleUpdateEvent(event) {
+  const draft = event?.detail?.draft || event?.detail || event || {};
+  updateIncidenciasCreateModal(safeObject(draft));
+}
+
+let busAttached = false;
+
+function attachBus() {
+  if (busAttached) return;
+
+  safeOn("incidencias:create-modal:open", handleOpenEvent);
+  safeOn("incidencias:create-modal:close", handleCloseEvent);
+  safeOn("incidencias:create-modal:update", handleUpdateEvent);
+
+  busAttached = true;
+}
+
+function detachBus() {
+  if (!busAttached) return;
+
+  safeOff("incidencias:create-modal:open", handleOpenEvent);
+  safeOff("incidencias:create-modal:close", handleCloseEvent);
+  safeOff("incidencias:create-modal:update", handleUpdateEvent);
+
+  busAttached = false;
+}
+
+/* =========================================================
+   GLOBAL BRIDGE
+========================================================= */
+
+export const OnionIncidenciasCreateModal = {
+  open(draft = {}) {
+    return openIncidenciasCreateModal(draft);
+  },
+
+  close() {
+    return closeIncidenciasCreateModal();
+  },
+
+  update(draft = {}) {
+    return updateIncidenciasCreateModal(draft);
+  },
+
+  getState() {
+    return {
+      ...modalState,
+      errors: { ...safeObject(modalState.errors) },
+      form: { ...safeObject(modalState.form) },
+    };
+  },
+
+  destroy() {
+    detachRootBindings();
+    closeIncidenciasCreateModal();
+    detachEscHandler();
+    detachBus();
+
+    const root = getRoot();
+    try {
+      root?.remove?.();
+    } catch {}
+
+    return true;
+  },
+};
+
+try {
+  window.OnionIncidenciasCreateModal = OnionIncidenciasCreateModal;
+  window.renderIncidenciasCreateModal = OnionIncidenciasCreateModal.open;
+} catch {}
+
+/* =========================================================
+   AUTO BOOT
+========================================================= */
+
+attachBus();
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
+export default OnionIncidenciasCreateModal;

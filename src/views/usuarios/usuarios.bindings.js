@@ -6,7 +6,7 @@
    - bind DOM robusto
    - refresh / retry
    - export CSV
-   - open usuario modal / detail
+   - open user modal
    - copy id
    - rebind limpio tras rerender
    - cleanup sólido por scope
@@ -103,8 +103,18 @@ function getUserId(
   return safeText(
     element?.dataset
       ?.userId ||
+      element?.dataset
+      ?.usuarioId ||
+      element?.dataset
+      ?.id ||
       element?.getAttribute?.(
         "data-user-id"
+      ) ||
+      element?.getAttribute?.(
+        "data-usuario-id"
+      ) ||
+      element?.getAttribute?.(
+        "data-id"
       ),
     ""
   );
@@ -116,8 +126,18 @@ function getUsername(
   return safeText(
     element?.dataset
       ?.username ||
+      element?.dataset
+      ?.userName ||
+      element?.dataset
+      ?.usuarioName ||
       element?.getAttribute?.(
         "data-username"
+      ) ||
+      element?.getAttribute?.(
+        "data-user-name"
+      ) ||
+      element?.getAttribute?.(
+        "data-usuario-name"
       ),
     ""
   );
@@ -253,6 +273,9 @@ export function bindUsuariosEvents({
       const openBtn =
         event.target?.closest?.(
           '[data-action="open-user"]'
+        ) ||
+        event.target?.closest?.(
+          '[data-action="open-usuario"]'
         );
 
       if (openBtn) {
@@ -288,6 +311,9 @@ export function bindUsuariosEvents({
       const copyBtn =
         event.target?.closest?.(
           '[data-action="copy-user-id"]'
+        ) ||
+        event.target?.closest?.(
+          '[data-action="copy-usuario-id"]'
         );
 
       if (copyBtn) {

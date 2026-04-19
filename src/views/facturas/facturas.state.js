@@ -2,16 +2,34 @@
    Onion SPA - Facturas State
    Archivo: src/views/facturas/facturas.state.js
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - centralizar el estado local del módulo de facturas
    - exponer factory de estado aislado por instancia
    - gestionar flags de loading / refresh / detalle
    - controlar referencias inflight del módulo
    - ofrecer helpers de lectura y escritura consistentes
+   - mantener paridad de comportamiento con incidenciasView
+
+   HARDENING PRO:
+   - setters defensivos
+   - helpers de snapshot estables
+   - close/open de detalle coherente
+   - clear de ids de acción robusto
+   - soporte para lastSyncAt / page / pageSize
 ========================================================= */
 
-function asBoolean(value) {
-  return Boolean(value);
+const DEFAULT_PAGE_SIZE = 6;
+
+/* =========================================================
+   SAFE
+========================================================= */
+
+function asBoolean(value, fallback = false) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  return fallback;
 }
 
 function asNumber(value, fallback = 0) {
@@ -21,9 +39,20 @@ function asNumber(value, fallback = 0) {
 
 function asText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
+
   const text = String(value).trim();
   return text || fallback;
 }
+
+function asObject(value, fallback = {}) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : fallback;
+}
+
+/* =========================================================
+   FACTORY
+========================================================= */
 
 export function createFacturasState() {
   return {
@@ -35,6 +64,9 @@ export function createFacturasState() {
       refreshing: false,
       bootstrapped: false,
       remoteCount: 0,
+      lastSyncAt: "",
+      page: 1,
+      pageSize: DEFAULT_PAGE_SIZE,
     },
 
     detail: {
@@ -47,6 +79,7 @@ export function createFacturasState() {
       sendingFacturaId: "",
       downloadingFacturaId: "",
       viewingFacturaId: "",
+      openingFacturaId: "",
     },
 
     inflight: {
@@ -70,6 +103,9 @@ export function resetFacturasViewState(state) {
   state.view.refreshing = false;
   state.view.bootstrapped = false;
   state.view.remoteCount = 0;
+  state.view.lastSyncAt = "";
+  state.view.page = 1;
+  state.view.pageSize = DEFAULT_PAGE_SIZE;
 
   return state;
 }
@@ -84,6 +120,7 @@ export function resetFacturasDetailState(state) {
   state.actions.sendingFacturaId = "";
   state.actions.downloadingFacturaId = "";
   state.actions.viewingFacturaId = "";
+  state.actions.openingFacturaId = "";
 
   state.inflight.detail = null;
 
@@ -157,6 +194,18 @@ export function getFacturasRemoteCount(state) {
   return asNumber(state?.view?.remoteCount, 0);
 }
 
+export function getFacturasLastSyncAt(state) {
+  return asText(state?.view?.lastSyncAt, "");
+}
+
+export function getFacturasPage(state) {
+  return Math.max(1, asNumber(state?.view?.page, 1));
+}
+
+export function getFacturasPageSize(state) {
+  return Math.max(1, asNumber(state?.view?.pageSize, DEFAULT_PAGE_SIZE));
+}
+
 export function isFacturasDetailOpen(state) {
   return Boolean(state?.detail?.open);
 }
@@ -179,6 +228,10 @@ export function getFacturasDownloadingFacturaId(state) {
 
 export function getFacturasViewingFacturaId(state) {
   return asText(state?.actions?.viewingFacturaId, "");
+}
+
+export function getFacturasOpeningFacturaId(state) {
+  return asText(state?.actions?.openingFacturaId, "");
 }
 
 export function getFacturasInflightLoad(state) {
@@ -213,7 +266,7 @@ export function setFacturasLoaded(state, value) {
 
 export function setFacturasError(state, value = null) {
   if (!state) return state;
-  state.view.error = value || null;
+  state.view.error = value ? String(value).trim() : null;
   return state;
 }
 
@@ -237,7 +290,25 @@ export function setFacturasBootstrapped(state, value) {
 
 export function setFacturasRemoteCount(state, value = 0) {
   if (!state) return state;
-  state.view.remoteCount = asNumber(value, 0);
+  state.view.remoteCount = Math.max(0, asNumber(value, 0));
+  return state;
+}
+
+export function setFacturasLastSyncAt(state, value = "") {
+  if (!state) return state;
+  state.view.lastSyncAt = asText(value, "");
+  return state;
+}
+
+export function setFacturasPage(state, value = 1) {
+  if (!state) return state;
+  state.view.page = Math.max(1, asNumber(value, 1));
+  return state;
+}
+
+export function setFacturasPageSize(state, value = DEFAULT_PAGE_SIZE) {
+  if (!state) return state;
+  state.view.pageSize = Math.max(1, asNumber(value, DEFAULT_PAGE_SIZE));
   return state;
 }
 
@@ -280,9 +351,7 @@ export function closeFacturasDetail(state) {
   state.detail.loading = false;
   state.detail.data = null;
 
-  state.actions.sendingFacturaId = "";
-  state.actions.downloadingFacturaId = "";
-  state.actions.viewingFacturaId = "";
+  clearFacturasActionIds(state);
 
   return state;
 }
@@ -309,12 +378,19 @@ export function setFacturasViewingFacturaId(state, value = "") {
   return state;
 }
 
+export function setFacturasOpeningFacturaId(state, value = "") {
+  if (!state) return state;
+  state.actions.openingFacturaId = asText(value, "");
+  return state;
+}
+
 export function clearFacturasActionIds(state) {
   if (!state) return state;
 
   state.actions.sendingFacturaId = "";
   state.actions.downloadingFacturaId = "";
   state.actions.viewingFacturaId = "";
+  state.actions.openingFacturaId = "";
 
   return state;
 }
@@ -336,34 +412,86 @@ export function setFacturasInflightDetail(state, promise = null) {
 }
 
 /* =========================================================
+   PATCHERS
+========================================================= */
+
+export function patchFacturasViewState(state, patch = {}) {
+  if (!state) return state;
+
+  state.view = {
+    ...asObject(state.view),
+    ...asObject(patch),
+  };
+
+  state.view.hydrated = asBoolean(state.view.hydrated, false);
+  state.view.loading = asBoolean(state.view.loading, false);
+  state.view.loaded = asBoolean(state.view.loaded, false);
+  state.view.refreshing = asBoolean(state.view.refreshing, false);
+  state.view.bootstrapped = asBoolean(state.view.bootstrapped, false);
+  state.view.remoteCount = Math.max(0, asNumber(state.view.remoteCount, 0));
+  state.view.lastSyncAt = asText(state.view.lastSyncAt, "");
+  state.view.page = Math.max(1, asNumber(state.view.page, 1));
+  state.view.pageSize = Math.max(
+    1,
+    asNumber(state.view.pageSize, DEFAULT_PAGE_SIZE)
+  );
+
+  return state;
+}
+
+export function patchFacturasDetailState(state, patch = {}) {
+  if (!state) return state;
+
+  state.detail = {
+    ...asObject(state.detail),
+    ...asObject(patch),
+  };
+
+  state.detail.open = asBoolean(state.detail.open, false);
+  state.detail.loading = asBoolean(state.detail.loading, false);
+  state.detail.data = state.detail.data || null;
+
+  return state;
+}
+
+/* =========================================================
    SNAPSHOT HELPERS
 ========================================================= */
 
 export function getFacturasTemplateState(state) {
   if (!state) {
     return {
+      hydrated: false,
       loading: false,
       loaded: false,
       error: null,
       refreshing: false,
       bootstrapped: false,
       remoteCount: 0,
+      lastSyncAt: "",
+      page: 1,
+      pageSize: DEFAULT_PAGE_SIZE,
       detailOpen: false,
       detailLoading: false,
       detail: null,
       sendingFacturaId: "",
       downloadingFacturaId: "",
       viewingFacturaId: "",
+      openingFacturaId: "",
     };
   }
 
   return {
+    hydrated: Boolean(state.view.hydrated),
     loading: Boolean(state.view.loading),
     loaded: Boolean(state.view.loaded),
     error: state.view.error || null,
     refreshing: Boolean(state.view.refreshing),
     bootstrapped: Boolean(state.view.bootstrapped),
-    remoteCount: asNumber(state.view.remoteCount, 0),
+    remoteCount: Math.max(0, asNumber(state.view.remoteCount, 0)),
+    lastSyncAt: asText(state.view.lastSyncAt, ""),
+    page: Math.max(1, asNumber(state.view.page, 1)),
+    pageSize: Math.max(1, asNumber(state.view.pageSize, DEFAULT_PAGE_SIZE)),
 
     detailOpen: Boolean(state.detail.open),
     detailLoading: Boolean(state.detail.loading),
@@ -372,5 +500,118 @@ export function getFacturasTemplateState(state) {
     sendingFacturaId: asText(state.actions.sendingFacturaId, ""),
     downloadingFacturaId: asText(state.actions.downloadingFacturaId, ""),
     viewingFacturaId: asText(state.actions.viewingFacturaId, ""),
+    openingFacturaId: asText(state.actions.openingFacturaId, ""),
   };
 }
+
+export function getFacturasStateSnapshot(state) {
+  return {
+    view: {
+      hydrated: isFacturasHydrated(state),
+      loading: isFacturasLoading(state),
+      loaded: isFacturasLoaded(state),
+      refreshing: isFacturasRefreshing(state),
+      bootstrapped: isFacturasBootstrapped(state),
+      error: getFacturasError(state),
+      remoteCount: getFacturasRemoteCount(state),
+      lastSyncAt: getFacturasLastSyncAt(state),
+      page: getFacturasPage(state),
+      pageSize: getFacturasPageSize(state),
+    },
+
+    detail: {
+      open: isFacturasDetailOpen(state),
+      loading: isFacturasDetailLoading(state),
+      hasData: Boolean(getFacturasDetailData(state)),
+    },
+
+    actions: {
+      openingFacturaId: getFacturasOpeningFacturaId(state),
+      sendingFacturaId: getFacturasSendingFacturaId(state),
+      downloadingFacturaId: getFacturasDownloadingFacturaId(state),
+      viewingFacturaId: getFacturasViewingFacturaId(state),
+    },
+
+    inflight: {
+      hasLoad: Boolean(getFacturasInflightLoad(state)),
+      hasDetail: Boolean(getFacturasInflightDetail(state)),
+    },
+  };
+}
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
+export default {
+  DEFAULT_PAGE_SIZE,
+
+  createFacturasState,
+
+  resetFacturasViewState,
+  resetFacturasDetailState,
+  resetFacturasInflightState,
+  resetFacturasState,
+
+  getFacturasViewState,
+  getFacturasDetailState,
+  getFacturasActionsState,
+  getFacturasInflightState,
+
+  isFacturasHydrated,
+  isFacturasLoading,
+  isFacturasLoaded,
+  isFacturasRefreshing,
+  isFacturasBootstrapped,
+
+  getFacturasError,
+  getFacturasRemoteCount,
+  getFacturasLastSyncAt,
+  getFacturasPage,
+  getFacturasPageSize,
+
+  isFacturasDetailOpen,
+  isFacturasDetailLoading,
+  getFacturasDetailData,
+
+  getFacturasSendingFacturaId,
+  getFacturasDownloadingFacturaId,
+  getFacturasViewingFacturaId,
+  getFacturasOpeningFacturaId,
+
+  getFacturasInflightLoad,
+  getFacturasInflightDetail,
+
+  setFacturasHydrated,
+  setFacturasLoading,
+  setFacturasLoaded,
+  setFacturasError,
+  clearFacturasError,
+  setFacturasRefreshing,
+  setFacturasBootstrapped,
+  setFacturasRemoteCount,
+  setFacturasLastSyncAt,
+  setFacturasPage,
+  setFacturasPageSize,
+
+  setFacturasDetailOpen,
+  setFacturasDetailLoading,
+  setFacturasDetailData,
+  openFacturasDetail,
+  closeFacturasDetail,
+
+  setFacturasSendingFacturaId,
+  setFacturasDownloadingFacturaId,
+  setFacturasViewingFacturaId,
+  setFacturasOpeningFacturaId,
+  clearFacturasActionIds,
+
+  setFacturasInflightLoad,
+  setFacturasInflightDetail,
+
+  patchFacturasViewState,
+  patchFacturasDetailState,
+
+  getFacturasTemplateState,
+  getFacturasStateSnapshot,
+};

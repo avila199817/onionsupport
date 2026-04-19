@@ -310,7 +310,20 @@ export function bindCoreEvents(ctx) {
     restoreSidebarState,
   } = ctx;
 
-  let sidebarSnapshot = null;
+  function setRouteTransitionLock(
+    value
+  ) {
+    if (
+      !AppCore?.state ||
+      typeof AppCore.state !==
+        "object"
+    ) {
+      return;
+    }
+
+    AppCore.state.sidebarRouteTransition =
+      Boolean(value);
+  }
 
   AppCore.cleanup.event(
     scope,
@@ -343,11 +356,7 @@ export function bindCoreEvents(ctx) {
     scope,
     "router:before-render",
     () => {
-      sidebarSnapshot =
-        typeof getSidebarSnapshot === "function"
-          ? getSidebarSnapshot()
-          : null;
-
+      setRouteTransitionLock(true);
       closeDropdown?.();
     }
   );
@@ -372,6 +381,13 @@ export function bindCoreEvents(ctx) {
       renderUser?.();
       applyRoleVisibility?.();
       closeDropdown?.();
+
+      window.setTimeout(() => {
+        setRouteTransitionLock(
+          false
+        );
+        syncSidebarState?.();
+      }, 0);
     }
   );
 

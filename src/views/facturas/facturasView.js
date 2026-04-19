@@ -53,6 +53,7 @@ import {
   setFacturasSendingFacturaId,
   setFacturasDownloadingFacturaId,
   setFacturasViewingFacturaId,
+  setFacturasOpeningFacturaId,
   setFacturasLoading,
   setFacturasRefreshing,
   setFacturasLoaded,
@@ -60,6 +61,8 @@ import {
   clearFacturasError,
   clearFacturasActionIds,
   closeFacturasDetail,
+  setFacturasLastSyncAt,
+  getFacturasLastSyncAt,
 } from "./facturas.state.js";
 
 import {
@@ -183,12 +186,12 @@ export const FacturasView = (() => {
       state.inflight = createFacturasState().inflight;
     }
 
-    if (typeof state.view.lastSyncAt !== "string") {
-      state.view.lastSyncAt = "";
-    }
-
     if (typeof state.view.selectedFacturaId !== "string") {
       state.view.selectedFacturaId = "";
+    }
+
+    if (typeof state.view.lastSyncAt !== "string") {
+      setFacturasLastSyncAt(state, "");
     }
 
     if (typeof state.view.hydrated !== "boolean") {
@@ -230,6 +233,10 @@ export const FacturasView = (() => {
     if (typeof state.actions.viewingFacturaId !== "string") {
       setFacturasViewingFacturaId(state, "");
     }
+
+    if (typeof state.actions.openingFacturaId !== "string") {
+      setFacturasOpeningFacturaId(state, "");
+    }
   }
 
   function getItems() {
@@ -246,7 +253,7 @@ export const FacturasView = (() => {
 
     return {
       ...snapshot,
-      lastSyncAt: safeText(state?.view?.lastSyncAt, ""),
+      lastSyncAt: getFacturasLastSyncAt(state),
       selectedFacturaId: safeText(state?.view?.selectedFacturaId, ""),
     };
   }
@@ -287,9 +294,11 @@ export const FacturasView = (() => {
   }
 
   function setError(value = "") {
-    if (safeText(value, "")) {
-      setFacturasError(state, safeText(value, ""));
-      return safeText(state?.view?.error, "");
+    const text = safeText(value, "");
+
+    if (text) {
+      setFacturasError(state, text);
+      return text;
     }
 
     clearFacturasError(state);
@@ -318,14 +327,18 @@ export const FacturasView = (() => {
     setFacturasViewingFacturaId(state, value);
   }
 
+  function setOpeningFacturaId(value = "") {
+    setFacturasOpeningFacturaId(state, value);
+  }
+
   function setSelectedFacturaId(value = "") {
     state.view.selectedFacturaId = safeText(value, "");
     return state.view.selectedFacturaId;
   }
 
   function setLastSyncAt(value = "") {
-    state.view.lastSyncAt = safeText(value, "");
-    return state.view.lastSyncAt;
+    setFacturasLastSyncAt(state, value);
+    return getFacturasLastSyncAt(state);
   }
 
   /* =====================================================
@@ -390,8 +403,7 @@ export const FacturasView = (() => {
       const result = await loadFacturasCollection({
         state,
         render: () => {},
-        silent,
-        force,
+        silent: Boolean(silent || force || asRefresh),
       });
 
       setLoading(false);
@@ -437,6 +449,7 @@ export const FacturasView = (() => {
         state,
         render: () => {},
         facturaId: id,
+        force: true,
       });
 
       setDetailLoading(false);
@@ -491,7 +504,7 @@ export const FacturasView = (() => {
     }
 
     setSelectedFacturaId(id);
-    setViewingFacturaId(id);
+    setOpeningFacturaId(id);
     setFacturasDetailOpen(state, true);
     setDetailLoading(true);
 
@@ -524,7 +537,7 @@ export const FacturasView = (() => {
       showToast("No se pudo abrir la factura.", "error");
       return null;
     } finally {
-      setViewingFacturaId("");
+      setOpeningFacturaId("");
       setDetailLoading(false);
 
       if (!destroyed) {
@@ -837,7 +850,7 @@ export const FacturasView = (() => {
 
     const cleanups = [];
 
-    bindFacturasView({
+    const bindingsCleanupFn = bindFacturasView({
       scopeName: SCOPE,
       getContainer,
       getState: () => ({
@@ -872,11 +885,9 @@ export const FacturasView = (() => {
       },
     });
 
-    cleanups.push(() => {
-      try {
-        AppCore?.cleanup?.run?.(SCOPE);
-      } catch {}
-    });
+    if (typeof bindingsCleanupFn === "function") {
+      cleanups.push(bindingsCleanupFn);
+    }
 
     cleanups.push(bindFacturasModalBridgeEvents());
 
@@ -961,9 +972,11 @@ export const FacturasView = (() => {
 
     closeDetail();
     clearFacturasActionIds(state);
+    setOpeningFacturaId("");
     setDetailLoading(false);
     setLoading(false);
     setRefreshing(false);
+    setLoaded(false);
     clearError();
     setHydrated(false);
     setBootstrapped(false);

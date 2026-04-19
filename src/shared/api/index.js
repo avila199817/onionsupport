@@ -13,10 +13,24 @@ export {
 } from "./query.js";
 
 export {
-  createCollectionApi,
-  default as createCollectionApiDefault,
-  normalizeCollectionResponse,
-  normalizeDetailResponse,
+  safeArray,
+  safeObject,
   extractCollectionItems,
   extractCollectionTotal,
+  extractCollectionPage,
+  extractCollectionLimit,
+  extractCollectionOffset,
+  extractCollectionMeta,
+  extractDetailItem,
+  normalizeCollectionResponse,
+  normalizeDetailResponse,
+  isCollectionResponseEmpty,
+  hasCollectionResponseItems,
+  getNormalizedCollectionCount,
+  getNormalizedCollectionTotal,
+} from "./response.js";
+
+export {
+  createCollectionApi,
+  default as createCollectionApiDefault,
 } from "./collectionApi.js";

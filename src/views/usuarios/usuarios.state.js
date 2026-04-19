@@ -41,16 +41,12 @@ function safeNumber(value, fallback = 0) {
 
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
-
   const text = String(value).trim();
-
   return text || fallback;
 }
 
 function safeObject(value) {
-  return value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
+  return value && typeof value === "object" && !Array.isArray(value)
     ? value
     : {};
 }
@@ -58,16 +54,6 @@ function safeObject(value) {
 function safeBoolean(value, fallback = false) {
   if (typeof value === "boolean") return value;
   return fallback;
-}
-
-function firstDefined(...values) {
-  for (const value of values) {
-    if (value !== undefined && value !== null) {
-      return value;
-    }
-  }
-
-  return null;
 }
 
 /* =========================================================
@@ -80,13 +66,14 @@ function createDefaultCreateDraft() {
     name: "",
     email: "",
     phone: "",
-    password: "",
-    confirmPassword: "",
     role: "user",
     status: "active",
-    companyName: "",
-    sendInvite: true,
-    requirePasswordChange: false,
+    notes: "",
+    source: "panel",
+    tags: "",
+    notifyUser: true,
+    internalOnly: false,
+    sendInvite: false,
   };
 }
 
@@ -131,8 +118,7 @@ function createInitialUsuariosState() {
    STATE
 ========================================================= */
 
-export const usuariosState =
-  createInitialUsuariosState();
+export const usuariosState = createInitialUsuariosState();
 
 let inflightLoad = null;
 
@@ -152,53 +138,32 @@ function normalizeCreateDraft(value = {}) {
   return {
     ...base,
     ...draft,
-    sendInvite: safeBoolean(
-      draft.sendInvite,
-      base.sendInvite
-    ),
-    requirePasswordChange: safeBoolean(
-      draft.requirePasswordChange,
-      base.requirePasswordChange
-    ),
+    notifyUser: safeBoolean(draft.notifyUser, base.notifyUser),
+    internalOnly: safeBoolean(draft.internalOnly, base.internalOnly),
+    sendInvite: safeBoolean(draft.sendInvite, base.sendInvite),
   };
+}
+
+function firstDefined(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null) {
+      return value;
+    }
+  }
+  return null;
 }
 
 function normalizeCreateViewState(value = {}) {
   const state = safeObject(value);
-  const base =
-    createDefaultCreateViewState();
+  const base = createDefaultCreateViewState();
 
   return {
-    form: normalizeCreateDraft(
-      firstDefined(
-        state.form,
-        base.form
-      )
-    ),
-
-    errors: safeObject(
-      state.errors
-    ),
-
-    submitting: safeBoolean(
-      state.submitting,
-      base.submitting
-    ),
-
-    serverError: safeText(
-      state.serverError,
-      base.serverError
-    ),
-
-    createdUserId: safeText(
-      state.createdUserId,
-      base.createdUserId
-    ),
-
-    successMessage: safeText(
-      state.successMessage,
-      base.successMessage
-    ),
+    form: normalizeCreateDraft(firstDefined(state.form, base.form)),
+    errors: safeObject(state.errors),
+    submitting: safeBoolean(state.submitting, base.submitting),
+    serverError: safeText(state.serverError, base.serverError),
+    createdUserId: safeText(state.createdUserId, base.createdUserId),
+    successMessage: safeText(state.successMessage, base.successMessage),
   };
 }
 
@@ -225,13 +190,9 @@ export function clearInflightLoad() {
 ========================================================= */
 
 export function resetUsuariosState() {
-  const next =
-    createInitialUsuariosState();
+  const next = createInitialUsuariosState();
 
-  Object.assign(
-    usuariosState,
-    next
-  );
+  Object.assign(usuariosState, next);
 
   inflightLoad = null;
 
@@ -243,12 +204,9 @@ export function resetUsuariosState() {
 ========================================================= */
 
 export function setLoading(value) {
-  usuariosState.loading =
-    Boolean(value);
+  usuariosState.loading = Boolean(value);
 
-  if (
-    usuariosState.loading
-  ) {
+  if (usuariosState.loading) {
     touchRequestId();
   }
 
@@ -256,39 +214,27 @@ export function setLoading(value) {
 }
 
 export function setRefreshing(value) {
-  usuariosState.refreshing =
-    Boolean(value);
-
+  usuariosState.refreshing = Boolean(value);
   return usuariosState.refreshing;
 }
 
 export function setLoaded(value) {
-  usuariosState.loaded =
-    Boolean(value);
-
+  usuariosState.loaded = Boolean(value);
   return usuariosState.loaded;
 }
 
 export function setHydrated(value) {
-  usuariosState.hydrated =
-    Boolean(value);
-
+  usuariosState.hydrated = Boolean(value);
   return usuariosState.hydrated;
 }
 
 export function setCreating(value) {
-  usuariosState.creating =
-    Boolean(value);
-
+  usuariosState.creating = Boolean(value);
   return usuariosState.creating;
 }
 
-export function setOpeningUserId(
-  value = ""
-) {
-  usuariosState.openingUserId =
-    safeText(value, "");
-
+export function setOpeningUserId(value = "") {
+  usuariosState.openingUserId = safeText(value, "");
   return usuariosState.openingUserId;
 }
 
@@ -296,33 +242,13 @@ export function setOpeningUserId(
    PAGINATION
 ========================================================= */
 
-export function setPage(
-  value = 1
-) {
-  usuariosState.page =
-    Math.max(
-      1,
-      safeNumber(
-        value,
-        1
-      )
-    );
-
+export function setPage(value = 1) {
+  usuariosState.page = Math.max(1, safeNumber(value, 1));
   return usuariosState.page;
 }
 
-export function setPageSize(
-  value = DEFAULT_PAGE_SIZE
-) {
-  usuariosState.pageSize =
-    Math.max(
-      1,
-      safeNumber(
-        value,
-        DEFAULT_PAGE_SIZE
-      )
-    );
-
+export function setPageSize(value = DEFAULT_PAGE_SIZE) {
+  usuariosState.pageSize = Math.max(1, safeNumber(value, DEFAULT_PAGE_SIZE));
   return usuariosState.pageSize;
 }
 
@@ -330,37 +256,23 @@ export function setPageSize(
    DATA
 ========================================================= */
 
-export function setItems(
-  items = []
-) {
-  const list =
-    safeArray(items);
+export function setItems(items = []) {
+  const list = safeArray(items);
 
-  usuariosState.items =
-    list;
+  usuariosState.items = list;
+  usuariosState.loaded = true;
+  usuariosState.error = "";
 
-  usuariosState.loaded =
-    true;
-
-  usuariosState.error =
-    "";
-
-  usuariosState.remoteCount =
-    Math.max(
-      safeNumber(
-        usuariosState.remoteCount,
-        0
-      ),
-      list.length
-    );
+  usuariosState.remoteCount = Math.max(
+    safeNumber(usuariosState.remoteCount, 0),
+    list.length
+  );
 
   return list;
 }
 
 export function getItems() {
-  return safeArray(
-    usuariosState.items
-  );
+  return safeArray(usuariosState.items);
 }
 
 export function clearItems() {
@@ -371,18 +283,8 @@ export function clearItems() {
   return usuariosState.items;
 }
 
-export function setRemoteCount(
-  value = 0
-) {
-  usuariosState.remoteCount =
-    Math.max(
-      0,
-      safeNumber(
-        value,
-        0
-      )
-    );
-
+export function setRemoteCount(value = 0) {
+  usuariosState.remoteCount = Math.max(0, safeNumber(value, 0));
   return usuariosState.remoteCount;
 }
 
@@ -390,30 +292,18 @@ export function setRemoteCount(
    META
 ========================================================= */
 
-export function setError(
-  value = null
-) {
-  usuariosState.error =
-    value
-      ? String(value).trim()
-      : "";
-
+export function setError(value = null) {
+  usuariosState.error = value ? String(value).trim() : "";
   return usuariosState.error;
 }
 
 export function clearError() {
-  usuariosState.error =
-    "";
-
+  usuariosState.error = "";
   return usuariosState.error;
 }
 
-export function setLastSyncAt(
-  value = 0
-) {
-  usuariosState.lastSyncAt =
-    safeNumber(value, 0);
-
+export function setLastSyncAt(value = 0) {
+  usuariosState.lastSyncAt = safeNumber(value, 0);
   return usuariosState.lastSyncAt;
 }
 
@@ -421,35 +311,22 @@ export function setLastSyncAt(
    CREATE DRAFT
 ========================================================= */
 
-export function setCreateDraft(
-  value = {}
-) {
-  usuariosState.createDraft =
-    normalizeCreateDraft(
-      value
-    );
-
+export function setCreateDraft(value = {}) {
+  usuariosState.createDraft = normalizeCreateDraft(value);
   return usuariosState.createDraft;
 }
 
-export function patchCreateDraft(
-  patch = {}
-) {
-  usuariosState.createDraft =
-    normalizeCreateDraft({
-      ...safeObject(
-        usuariosState.createDraft
-      ),
-      ...safeObject(patch),
-    });
+export function patchCreateDraft(patch = {}) {
+  usuariosState.createDraft = normalizeCreateDraft({
+    ...safeObject(usuariosState.createDraft),
+    ...safeObject(patch),
+  });
 
   return usuariosState.createDraft;
 }
 
 export function clearCreateDraft() {
-  usuariosState.createDraft =
-    createDefaultCreateDraft();
-
+  usuariosState.createDraft = createDefaultCreateDraft();
   return usuariosState.createDraft;
 }
 
@@ -457,199 +334,117 @@ export function clearCreateDraft() {
    CREATE VIEW STATE
 ========================================================= */
 
-export function setCreateViewState(
-  value = {}
-) {
-  usuariosState.createView =
-    normalizeCreateViewState(
-      value
-    );
+export function setCreateViewState(value = {}) {
+  usuariosState.createView = normalizeCreateViewState(value);
+  return usuariosState.createView;
+}
+
+export function patchCreateViewState(patch = {}) {
+  const current = normalizeCreateViewState(usuariosState.createView);
+  const nextPatch = safeObject(patch);
+
+  usuariosState.createView = normalizeCreateViewState({
+    ...current,
+    ...nextPatch,
+    form:
+      nextPatch.form !== undefined
+        ? nextPatch.form
+        : current.form,
+    errors:
+      nextPatch.errors !== undefined
+        ? nextPatch.errors
+        : current.errors,
+  });
 
   return usuariosState.createView;
 }
 
-export function patchCreateViewState(
-  patch = {}
-) {
-  const current =
-    normalizeCreateViewState(
-      usuariosState.createView
-    );
+export function setCreateViewForm(form = {}) {
+  const current = normalizeCreateViewState(usuariosState.createView);
 
-  const nextPatch =
-    safeObject(patch);
+  usuariosState.createView = {
+    ...current,
+    form: normalizeCreateDraft(form),
+  };
 
-  usuariosState.createView =
-    normalizeCreateViewState({
-      ...current,
-      ...nextPatch,
-      form:
-        nextPatch.form !==
-        undefined
-          ? nextPatch.form
-          : current.form,
-      errors:
-        nextPatch.errors !==
-        undefined
-          ? nextPatch.errors
-          : current.errors,
-    });
-
-  return usuariosState.createView;
+  return usuariosState.createView.form;
 }
 
-export function setCreateViewForm(
-  form = {}
-) {
-  const current =
-    normalizeCreateViewState(
-      usuariosState.createView
-    );
+export function patchCreateViewForm(patch = {}) {
+  const current = normalizeCreateViewState(usuariosState.createView);
 
-  usuariosState.createView =
-    {
-      ...current,
-      form: normalizeCreateDraft(
-        form
-      ),
-    };
+  usuariosState.createView = {
+    ...current,
+    form: normalizeCreateDraft({
+      ...current.form,
+      ...safeObject(patch),
+    }),
+  };
 
-  return usuariosState
-    .createView.form;
+  return usuariosState.createView.form;
 }
 
-export function patchCreateViewForm(
-  patch = {}
-) {
-  const current =
-    normalizeCreateViewState(
-      usuariosState.createView
-    );
+export function setCreateViewErrors(errors = {}) {
+  const current = normalizeCreateViewState(usuariosState.createView);
 
-  usuariosState.createView =
-    {
-      ...current,
-      form: normalizeCreateDraft(
-        {
-          ...current.form,
-          ...safeObject(
-            patch
-          ),
-        }
-      ),
-    };
+  usuariosState.createView = {
+    ...current,
+    errors: safeObject(errors),
+  };
 
-  return usuariosState
-    .createView.form;
-}
-
-export function setCreateViewErrors(
-  errors = {}
-) {
-  const current =
-    normalizeCreateViewState(
-      usuariosState.createView
-    );
-
-  usuariosState.createView =
-    {
-      ...current,
-      errors: safeObject(
-        errors
-      ),
-    };
-
-  return usuariosState
-    .createView.errors;
+  return usuariosState.createView.errors;
 }
 
 export function clearCreateViewErrors() {
-  return setCreateViewErrors(
-    {}
-  );
+  return setCreateViewErrors({});
 }
 
-export function setCreateViewSubmitting(
-  value = false
-) {
-  const current =
-    normalizeCreateViewState(
-      usuariosState.createView
-    );
+export function setCreateViewSubmitting(value = false) {
+  const current = normalizeCreateViewState(usuariosState.createView);
 
-  usuariosState.createView =
-    {
-      ...current,
-      submitting:
-        Boolean(value),
-    };
+  usuariosState.createView = {
+    ...current,
+    submitting: Boolean(value),
+  };
 
-  return usuariosState
-    .createView.submitting;
+  return usuariosState.createView.submitting;
 }
 
-export function setCreateViewServerError(
-  value = ""
-) {
-  const current =
-    normalizeCreateViewState(
-      usuariosState.createView
-    );
+export function setCreateViewServerError(value = "") {
+  const current = normalizeCreateViewState(usuariosState.createView);
 
-  usuariosState.createView =
-    {
-      ...current,
-      serverError:
-        safeText(
-          value,
-          ""
-        ),
-    };
+  usuariosState.createView = {
+    ...current,
+    serverError: safeText(value, ""),
+  };
 
-  return usuariosState
-    .createView.serverError;
+  return usuariosState.createView.serverError;
 }
 
 export function setCreateViewSuccess({
   createdUserId = "",
   successMessage = "",
 } = {}) {
-  const current =
-    normalizeCreateViewState(
-      usuariosState.createView
-    );
+  const current = normalizeCreateViewState(usuariosState.createView);
 
-  usuariosState.createView =
-    {
-      ...current,
-      createdUserId:
-        safeText(
-          createdUserId,
-          ""
-        ),
-      successMessage:
-        safeText(
-          successMessage,
-          ""
-        ),
-    };
+  usuariosState.createView = {
+    ...current,
+    createdUserId: safeText(createdUserId, ""),
+    successMessage: safeText(successMessage, ""),
+  };
 
   return usuariosState.createView;
 }
 
 export function clearCreateViewSuccess() {
-  return setCreateViewSuccess(
-    {
-      createdUserId: "",
-      successMessage: "",
-    }
-  );
+  return setCreateViewSuccess({
+    createdUserId: "",
+    successMessage: "",
+  });
 }
 
 export function resetCreateViewState() {
-  usuariosState.createView =
-    createDefaultCreateViewState();
-
+  usuariosState.createView = createDefaultCreateViewState();
   return usuariosState.createView;
 }
 
@@ -661,34 +456,21 @@ export function getCachePayload() {
   return {
     savedAt: Date.now(),
     items: getItems(),
-    remoteCount:
-      usuariosState.remoteCount,
-    lastSyncAt:
-      usuariosState.lastSyncAt,
-    page:
-      usuariosState.page,
-    pageSize:
-      usuariosState.pageSize,
+    remoteCount: usuariosState.remoteCount,
+    lastSyncAt: usuariosState.lastSyncAt,
+    page: usuariosState.page,
+    pageSize: usuariosState.pageSize,
   };
 }
 
-export function isCacheFresh(
-  savedAt = 0
-) {
-  const ts =
-    safeNumber(
-      savedAt,
-      0
-    );
+export function isCacheFresh(savedAt = 0) {
+  const ts = safeNumber(savedAt, 0);
 
   if (!ts) {
     return false;
   }
 
-  return (
-    Date.now() - ts <
-    CACHE_TTL
-  );
+  return Date.now() - ts < CACHE_TTL;
 }
 
 /* =========================================================
@@ -696,89 +478,41 @@ export function isCacheFresh(
 ========================================================= */
 
 export function getUsuariosStateSnapshot() {
-  const createView =
-    normalizeCreateViewState(
-      usuariosState.createView
-    );
+  const createView = normalizeCreateViewState(usuariosState.createView);
 
   return {
-    hydrated:
-      usuariosState.hydrated,
-    loading:
-      usuariosState.loading,
-    refreshing:
-      usuariosState.refreshing,
-    loaded:
-      usuariosState.loaded,
+    hydrated: usuariosState.hydrated,
+    loading: usuariosState.loading,
+    refreshing: usuariosState.refreshing,
+    loaded: usuariosState.loaded,
 
-    creating:
-      usuariosState.creating,
+    creating: usuariosState.creating,
+    openingUserId: usuariosState.openingUserId,
 
-    openingUserId:
-      usuariosState.openingUserId,
+    error: usuariosState.error,
 
-    error:
-      usuariosState.error,
+    total: safeArray(usuariosState.items).length,
+    remoteCount: usuariosState.remoteCount,
+    lastSyncAt: usuariosState.lastSyncAt,
 
-    total:
-      safeArray(
-        usuariosState.items
-      ).length,
+    page: usuariosState.page,
+    pageSize: usuariosState.pageSize,
 
-    remoteCount:
-      usuariosState.remoteCount,
-
-    lastSyncAt:
-      usuariosState.lastSyncAt,
-
-    page:
-      usuariosState.page,
-
-    pageSize:
-      usuariosState.pageSize,
-
-    requestId:
-      usuariosState.requestId,
-
-    hasInflight:
-      Boolean(
-        inflightLoad
-      ),
+    requestId: usuariosState.requestId,
+    hasInflight: Boolean(inflightLoad),
 
     createDraft: {
-      ...safeObject(
-        usuariosState.createDraft
-      ),
+      ...safeObject(usuariosState.createDraft),
     },
 
     createView: {
-      submitting:
-        createView.submitting,
-
-      serverError:
-        createView.serverError,
-
-      createdUserId:
-        createView.createdUserId,
-
-      successMessage:
-        createView.successMessage,
-
-      errorCount:
-        Object.keys(
-          safeObject(
-            createView.errors
-          )
-        ).length,
-
-      hasDraftEmail:
-        Boolean(
-          safeText(
-            createView?.form
-              ?.email,
-            ""
-          )
-        ),
+      submitting: createView.submitting,
+      serverError: createView.serverError,
+      createdUserId: createView.createdUserId,
+      successMessage: createView.successMessage,
+      errorCount: Object.keys(safeObject(createView.errors)).length,
+      hasDraftName: Boolean(safeText(createView?.form?.name, "")),
+      hasDraftUsername: Boolean(safeText(createView?.form?.username, "")),
     },
   };
 }

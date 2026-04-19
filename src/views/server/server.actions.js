@@ -13,6 +13,7 @@
    - controlar live refresh del módulo server
    - desacoplar serverView.js de la lógica operativa
    - mantener compatibilidad con una vista server pura
+   - exponer acciones UI-ready para detalle / copy / navegación
 
    HARDENING PRO:
    - tolerancia a payloads heterogéneos
@@ -21,9 +22,15 @@
    - histórico capado sin librerías externas
    - eventos opcionales vía AppCore.events
    - fallbacks seguros para browser APIs
+   - compatibilidad total con serverView.js
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+
+import {
+  getServerServiceByIdStore,
+  getServerServices,
+} from "./server.store.js";
 
 /* =========================================================
    CONSTANTS
@@ -205,6 +212,261 @@ function pickHealth(payload = null) {
   }
 
   return null;
+}
+
+function showToast(message = "", type = "info") {
+  const text = safeText(message, "");
+
+  if (!text) return false;
+
+  try {
+    if (typeof AppCore?.toast?.[type] === "function") {
+      AppCore.toast[type](text);
+      return true;
+    }
+  } catch {}
+
+  try {
+    AppCore?.toast?.show?.(text, type);
+    return true;
+  } catch {}
+
+  try {
+    AppCore?.ui?.toast?.[type]?.(text);
+    return true;
+  } catch {}
+
+  try {
+    AppCore?.services?.toast?.show?.({
+      message: text,
+      type,
+    });
+    return true;
+  } catch {}
+
+  return false;
+}
+
+async function writeClipboardText(text = "") {
+  const value = safeText(text, "");
+
+  if (!value) return false;
+
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {}
+
+  try {
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.setAttribute("readonly", "true");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    textarea.style.pointerEvents = "none";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+
+    const ok = document.execCommand("copy");
+
+    textarea.remove();
+
+    return Boolean(ok);
+  } catch {
+    return false;
+  }
+}
+
+function getDetailId(item = {}) {
+  const row = safeObject(item);
+
+  return safeText(
+    first(
+      row.serviceId,
+      row.detailId,
+      row.id,
+      row.key,
+      row.slug,
+      row.code,
+      row.name,
+      row.service
+    ),
+    ""
+  );
+}
+
+function getDetailTitle(item = {}) {
+  const row = safeObject(item);
+
+  return safeText(
+    first(
+      row.title,
+      row.name,
+      row.label,
+      row.heading,
+      row.service
+    ),
+    "Detalle técnico"
+  );
+}
+
+function getDetailDescription(item = {}) {
+  const row = safeObject(item);
+
+  return safeText(
+    first(
+      row.description,
+      row.descripcion,
+      row.subtitle,
+      row.summary,
+      row.text,
+      row.detail
+    ),
+    "Sin descripción."
+  );
+}
+
+function getDetailType(item = {}) {
+  const row = safeObject(item);
+
+  return safeText(
+    first(
+      row.type,
+      row.kind,
+      row.variant,
+      row.category,
+      row.sectionType
+    ),
+    "service"
+  );
+}
+
+function getDetailStatus(item = {}) {
+  const row = safeObject(item);
+
+  return safeText(
+    first(
+      row.status,
+      row.estado,
+      row.state
+    ),
+    "unknown"
+  );
+}
+
+function getDetailRoute(item = {}) {
+  const row = safeObject(item);
+
+  return safeText(
+    first(
+      row.route,
+      row.href,
+      row.link,
+      row.to
+    ),
+    ""
+  );
+}
+
+function getDetailUpdatedAt(item = {}) {
+  const row = safeObject(item);
+
+  return first(
+    row.updatedAt,
+    row.lastUpdate,
+    row.modifiedAt,
+    row.createdAt,
+    row.timestamp,
+    row.generatedAt,
+    row.loadedAt
+  );
+}
+
+function getDetailIcon(item = {}) {
+  const row = safeObject(item);
+
+  return safeText(
+    first(
+      row.icon,
+      row.emoji,
+      row.symbol
+    ),
+    ""
+  );
+}
+
+function buildServerDetailModel(item = {}) {
+  const row = safeObject(item);
+  const detailId = getDetailId(row);
+
+  return {
+    ...row,
+    serviceId: safeText(first(row.serviceId, detailId), detailId),
+    detailId,
+    id: safeText(first(row.id, detailId), detailId),
+    title: getDetailTitle(row),
+    description: getDetailDescription(row),
+    type: getDetailType(row),
+    status: getDetailStatus(row),
+    route: getDetailRoute(row),
+    updatedAt: getDetailUpdatedAt(row),
+    icon: getDetailIcon(row),
+    metadata: safeObject(
+      first(
+        row.metadata,
+        row.meta,
+        row.info,
+        row.raw
+      ),
+      {}
+    ),
+    items: safeArray(
+      first(
+        row.items,
+        row.rows,
+        row.list,
+        row.data
+      ),
+      []
+    ),
+    tags: Array.isArray(row.tags)
+      ? row.tags
+      : typeof row.tags === "string"
+        ? row.tags.split(",").map((tag) => safeText(tag, "")).filter(Boolean)
+        : [],
+    raw: safeObject(first(row.raw, row), row),
+  };
+}
+
+function getAllKnownServices() {
+  try {
+    return safeArray(getServerServices?.(), []);
+  } catch {
+    return [];
+  }
+}
+
+function resolveServerDetailById(detailId = "") {
+  const id = safeText(detailId, "");
+
+  if (!id) return null;
+
+  try {
+    const fromStore = getServerServiceByIdStore?.(id);
+    if (fromStore) {
+      return buildServerDetailModel(fromStore);
+    }
+  } catch {}
+
+  const items = getAllKnownServices();
+  const found =
+    items.find((item) => getDetailId(item) === id) ||
+    null;
+
+  return found ? buildServerDetailModel(found) : null;
 }
 
 /* =========================================================
@@ -679,12 +941,7 @@ export async function getServerSnapshotAction({
     });
 
     if (!silent) {
-      try {
-        AppCore?.services?.toast?.show?.({
-          message: "No se pudo cargar el estado del servidor.",
-          type: "error",
-        });
-      } catch {}
+      showToast("No se pudo cargar el estado del servidor.", "error");
     }
 
     return {
@@ -713,6 +970,284 @@ export async function refreshServerSnapshotAction({
     history,
     silent,
   });
+}
+
+/* =========================================================
+   DETAIL ACTIONS
+========================================================= */
+
+export function getServerDetailFromStoreAction({
+  detailId = "",
+} = {}) {
+  const id = safeText(detailId, "");
+
+  if (!id) {
+    return null;
+  }
+
+  const detail = resolveServerDetailById(id);
+
+  return detail ? buildServerDetailModel(detail) : null;
+}
+
+export async function getServerDetailAction({
+  detailId = "",
+  preferFresh = true,
+  silent = false,
+} = {}) {
+  const id = safeText(detailId, "");
+
+  if (!id) {
+    if (!silent) {
+      showToast("No se pudo resolver el detalle técnico.", "error");
+    }
+    return null;
+  }
+
+  const fallbackDetail = getServerDetailFromStoreAction({
+    detailId: id,
+  });
+
+  if (!preferFresh && fallbackDetail) {
+    return fallbackDetail;
+  }
+
+  try {
+    safeEmit("server:detail:request", {
+      detailId: id,
+      source: preferFresh ? "backend+store" : "store",
+    });
+
+    /*
+      Como el detalle server realmente cuelga del snapshot completo,
+      el "fresh" aquí significa refrescar snapshot y resolver luego.
+    */
+    if (preferFresh) {
+      await refreshServerSnapshotAction({
+        silent: true,
+      });
+    }
+
+    const detailAfterRefresh = getServerDetailFromStoreAction({
+      detailId: id,
+    });
+
+    if (detailAfterRefresh) {
+      safeEmit("server:detail:success", {
+        detailId: id,
+        detail: detailAfterRefresh,
+      });
+
+      return detailAfterRefresh;
+    }
+
+    if (fallbackDetail) {
+      safeEmit("server:detail:fallback", {
+        detailId: id,
+        detail: fallbackDetail,
+      });
+
+      return fallbackDetail;
+    }
+
+    throw new Error("EMPTY_SERVER_DETAIL");
+  } catch (error) {
+    safeEmit("server:detail:error", {
+      detailId: id,
+      error,
+    });
+
+    if (!silent) {
+      showToast("No se pudo cargar el detalle técnico.", "error");
+    }
+
+    return fallbackDetail || null;
+  }
+}
+
+export async function openServerDetailAction({
+  detailId = "",
+  preferFresh = true,
+  silent = false,
+} = {}) {
+  const id = safeText(detailId, "");
+
+  if (!id) {
+    if (!silent) {
+      showToast("Detalle inválido.", "error");
+    }
+    return null;
+  }
+
+  safeEmit("server:detail:open", {
+    detailId: id,
+  });
+
+  const detail = await getServerDetailAction({
+    detailId: id,
+    preferFresh,
+    silent,
+  });
+
+  if (!detail) {
+    return null;
+  }
+
+  safeEmit("server:detail:open:success", {
+    detailId: id,
+    detail,
+  });
+
+  return detail;
+}
+
+export async function refreshServerDetailAction({
+  detailId = "",
+  silent = true,
+} = {}) {
+  return getServerDetailAction({
+    detailId,
+    preferFresh: true,
+    silent,
+  });
+}
+
+/* =========================================================
+   COPY ID
+========================================================= */
+
+export async function copyServerDetailIdAction({
+  detailId = "",
+  silent = false,
+} = {}) {
+  const id = safeText(detailId, "");
+
+  if (!id) {
+    if (!silent) {
+      showToast("No hay ID para copiar.", "error");
+    }
+    return false;
+  }
+
+  const copied = await writeClipboardText(id);
+
+  if (!copied) {
+    if (!silent) {
+      showToast("No se pudo copiar el ID.", "error");
+    }
+    return false;
+  }
+
+  safeEmit("server:detail:copy-id", {
+    detailId: id,
+  });
+
+  if (!silent) {
+    showToast("ID copiado", "success");
+  }
+
+  return true;
+}
+
+/* =========================================================
+   QUICK ACTIONS / NAVIGATION
+========================================================= */
+
+export async function navigateFromServerAction({
+  route = "/server",
+  silent = false,
+} = {}) {
+  const targetRoute = safeText(route, "/server");
+
+  try {
+    safeEmit("server:navigate", {
+      route: targetRoute,
+    });
+
+    if (AppCore?.router?.navigate) {
+      await AppCore.router.navigate(targetRoute);
+      return true;
+    }
+
+    if (AppCore?.Router?.navigate) {
+      await AppCore.Router.navigate(targetRoute);
+      return true;
+    }
+
+    return true;
+  } catch (error) {
+    if (!silent) {
+      showToast("No se pudo navegar desde Server.", "error");
+    }
+
+    return false;
+  }
+}
+
+export async function runServerQuickAction({
+  action = "",
+  route = "",
+  payload = {},
+  silent = false,
+} = {}) {
+  const actionName = safeText(action, "");
+  const targetRoute = safeText(route, "");
+
+  if (!actionName && !targetRoute) {
+    if (!silent) {
+      showToast("Acción inválida.", "error");
+    }
+    return false;
+  }
+
+  try {
+    safeEmit("server:quick-action", {
+      action: actionName,
+      route: targetRoute,
+      payload: safeObject(payload),
+    });
+
+    /*
+      Acción especial: refrescar health.
+    */
+    if (actionName === "refresh-health") {
+      await getServerHealthRequest();
+      if (!silent) {
+        showToast("Health refrescado", "success");
+      }
+      return true;
+    }
+
+    /*
+      Acción especial: refrescar snapshot completo.
+    */
+    if (actionName === "refresh-server" || actionName === "refresh-snapshot") {
+      await refreshServerSnapshotAction({
+        silent: true,
+      });
+
+      if (!silent) {
+        showToast("Panel técnico actualizado", "success");
+      }
+
+      return true;
+    }
+
+    if (targetRoute) {
+      return await navigateFromServerAction({
+        route: targetRoute,
+        silent,
+      });
+    }
+
+    return true;
+  } catch (error) {
+    if (!silent) {
+      showToast("No se pudo ejecutar la acción rápida.", "error");
+    }
+
+    return false;
+  }
 }
 
 /* =========================================================

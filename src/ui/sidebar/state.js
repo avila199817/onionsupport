@@ -129,6 +129,13 @@ export function updateToggleLabel(AppCore, isOpen = null) {
    SINCRONIZACIÓN VISUAL
 ========================================================= */
 export function syncSidebarState(AppCore, closeDropdown) {
+  if (
+    AppCore?.state
+      ?.sidebarRouteTransition
+  ) {
+    return;
+  }
+
   const { sidebar, body } = getElements(AppCore);
   if (!sidebar) return;
 

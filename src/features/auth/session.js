@@ -203,6 +203,109 @@ function safeSetUser(
   });
 }
 
+function hasOwn(
+  obj,
+  key
+) {
+  return Boolean(
+    obj &&
+      typeof obj === "object" &&
+      Object.prototype.hasOwnProperty.call(
+        obj,
+        key
+      )
+  );
+}
+
+function resolveThemeFromUser(
+  user = null
+) {
+  if (
+    !user ||
+    typeof user !== "object"
+  ) {
+    return null;
+  }
+
+  const explicitTheme =
+    String(
+      user.theme ??
+        user?.preferences?.theme ??
+        user?.settings?.theme ??
+        user?.raw?.theme ??
+        user?.raw?.preferences
+          ?.theme ??
+        user?.raw?.settings
+          ?.theme ??
+        ""
+    )
+      .trim()
+      .toLowerCase();
+
+  if (
+    explicitTheme === "light" ||
+    explicitTheme === "dark"
+  ) {
+    return explicitTheme;
+  }
+
+  const hasExplicitDarkMode =
+    hasOwn(user, "darkMode") ||
+    hasOwn(user, "dark_mode") ||
+    hasOwn(user?.raw, "darkMode") ||
+    hasOwn(user?.raw, "dark_mode") ||
+    hasOwn(
+      user?.preferences,
+      "darkMode"
+    ) ||
+    hasOwn(
+      user?.settings,
+      "darkMode"
+    ) ||
+    hasOwn(
+      user?.raw?.preferences,
+      "darkMode"
+    ) ||
+    hasOwn(
+      user?.raw?.settings,
+      "darkMode"
+    );
+
+  if (
+    hasExplicitDarkMode &&
+    typeof user.darkMode ===
+      "boolean"
+  ) {
+    return user.darkMode
+      ? "dark"
+      : "light";
+  }
+
+  return null;
+}
+
+function applyThemeFromUser(
+  user = null
+) {
+  const theme =
+    resolveThemeFromUser(
+      user
+    );
+
+  if (
+    theme !== "light" &&
+    theme !== "dark"
+  ) {
+    return null;
+  }
+
+  try {
+    AppCore?.setTheme?.(theme);
+  } catch {}
+
+  return theme;
+}
+
 function safeClearSession() {
   if (
     typeof AppCore?.clearSession ===
@@ -431,6 +534,10 @@ export function applySession({
   }
 
   persistAuxSessionData(
+    effectiveUser
+  );
+
+  applyThemeFromUser(
     effectiveUser
   );
 

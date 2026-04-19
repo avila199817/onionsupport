@@ -1,17 +1,6 @@
 /* =========================================================
    Onion SPA - Reset Password Confirm View (FULL PRO SAAS PANEL)
    Archivo: src/views/password-reset/confirm/confirmView.js
-
-   Responsabilidades:
-   - pintar pantalla de confirmación del reset
-   - activar modo fullscreen auth
-   - leer token desde URL o deps
-   - validar nueva contraseña en cliente
-   - enviar confirmación al backend
-   - mostrar feedback visual con toast bridge
-   - redirigir a login tras success si aplica
-   - mantener cleanup completo de la vista
-   - compatibilidad con router que prioriza init()
 ========================================================= */
 
 import { AppCore } from "../../../core/index.js";
@@ -19,6 +8,7 @@ import { Auth } from "../../../features/auth/index.js";
 import { Router } from "../../../router/index.js";
 
 import { getConfirmTemplate } from "./confirm.template.js";
+
 import {
   getUrlToken,
   createConfirmPayload,
@@ -58,9 +48,13 @@ export const ConfirmResetPasswordView = (() => {
   let isSubmitting = false;
   let isNavigatingAway = false;
 
+  /* FIX CRÍTICO TOKEN */
+  let stableToken = "";
+
   /* =========================================================
      BASICS
   ========================================================= */
+
   function isBrowser() {
     return (
       typeof window !== "undefined" &&
@@ -78,15 +72,22 @@ export const ConfirmResetPasswordView = (() => {
 
   function resolveDeps(arg1, arg2) {
     if (isLikelyContainer(arg1)) {
-      return arg2 && typeof arg2 === "object" ? arg2 : {};
+      return arg2 && typeof arg2 === "object"
+        ? arg2
+        : {};
     }
 
-    return arg1 && typeof arg1 === "object" ? arg1 : {};
+    return arg1 && typeof arg1 === "object"
+      ? arg1
+      : {};
   }
 
   function safeEmit(eventName, payload = {}) {
     try {
-      AppCore?.events?.emit?.(eventName, payload);
+      AppCore?.events?.emit?.(
+        eventName,
+        payload
+      );
     } catch {}
   }
 
@@ -112,8 +113,9 @@ export const ConfirmResetPasswordView = (() => {
   }
 
   /* =========================================================
-     DOM / CONTAINER
+     DOM
   ========================================================= */
+
   function getContainer() {
     if (!isBrowser()) {
       return null;
@@ -140,28 +142,37 @@ export const ConfirmResetPasswordView = (() => {
       sidebar:
         AppCore?.dom?.sidebar ||
         document.getElementById("sidebar"),
+
       topbar:
         AppCore?.dom?.topbar ||
         document.getElementById("topbar") ||
         document.querySelector(".topbar"),
+
       topbarViewContainer:
         AppCore?.dom?.topbarViewContainer ||
-        document.getElementById("topbarview-container"),
+        document.getElementById(
+          "topbarview-container"
+        ),
+
       tableheadContainer:
         AppCore?.dom?.tableheadContainer ||
-        document.getElementById("tablehead-container"),
+        document.getElementById(
+          "tablehead-container"
+        ),
     };
   }
 
   /* =========================================================
-     SHELL / AUTH MODE
+     AUTH SCREEN
   ========================================================= */
+
   function setAuthScreen(active) {
     if (!isBrowser() || !document?.body) {
       return;
     }
 
     const enabled = Boolean(active);
+
     const {
       sidebar,
       topbar,
@@ -169,35 +180,48 @@ export const ConfirmResetPasswordView = (() => {
       tableheadContainer,
     } = getShellElements();
 
-    document.body.classList.toggle("auth-screen", enabled);
-    document.body.classList.toggle("route-auth", enabled);
-    document.body.classList.toggle("route-shell-hidden", enabled);
-    document.body.classList.toggle("login-no-scroll", enabled);
+    document.body.classList.toggle(
+      "auth-screen",
+      enabled
+    );
+
+    document.body.classList.toggle(
+      "route-auth",
+      enabled
+    );
+
+    document.body.classList.toggle(
+      "route-shell-hidden",
+      enabled
+    );
+
+    document.body.classList.toggle(
+      "login-no-scroll",
+      enabled
+    );
 
     if (enabled) {
-      document.documentElement.style.overflow = "hidden";
-      document.body.style.overflow = "hidden";
+      document.documentElement.style.overflow =
+        "hidden";
+      document.body.style.overflow =
+        "hidden";
     } else {
-      document.documentElement.style.overflow = "";
+      document.documentElement.style.overflow =
+        "";
       document.body.style.overflow = "";
     }
 
-    if (sidebar) {
-      sidebar.hidden = enabled;
-    }
-
-    if (topbar) {
-      topbar.hidden = enabled;
-    }
-
-    if (topbarViewContainer) {
+    if (sidebar) sidebar.hidden = enabled;
+    if (topbar) topbar.hidden = enabled;
+    if (topbarViewContainer)
       topbarViewContainer.hidden = enabled;
-    }
-
-    if (tableheadContainer) {
+    if (tableheadContainer)
       tableheadContainer.hidden = enabled;
-    }
   }
+
+  /* =========================================================
+     LOADER
+  ========================================================= */
 
   function forceHideGlobalLoader() {
     if (!isBrowser()) {
@@ -208,20 +232,15 @@ export const ConfirmResetPasswordView = (() => {
       AppCore?.dom?.loader ||
       document.getElementById("app-loader");
 
-    if (typeof AppCore?.setLoading === "function") {
-      AppCore.setLoading(false);
-    }
+    AppCore?.setLoading?.(false);
 
-    if (document?.body) {
-      document.body.classList.remove("loading");
-    }
+    document.body?.classList.remove("loading");
 
     if (!loader) {
       return;
     }
 
     loader.hidden = true;
-    loader.setAttribute("aria-hidden", "true");
     loader.style.display = "none";
     loader.style.opacity = "0";
     loader.style.visibility = "hidden";
@@ -242,7 +261,6 @@ export const ConfirmResetPasswordView = (() => {
     }
 
     loader.hidden = false;
-    loader.setAttribute("aria-hidden", "true");
     loader.style.display = "";
     loader.style.opacity = "";
     loader.style.visibility = "";
@@ -252,20 +270,30 @@ export const ConfirmResetPasswordView = (() => {
   /* =========================================================
      ROUTING
   ========================================================= */
+
   function normalizePath(path = "/login") {
-    if (typeof AppCore?.utils?.normalizePath === "function") {
+    if (
+      typeof AppCore?.utils?.normalizePath ===
+      "function"
+    ) {
       try {
         return AppCore.utils.normalizePath(path);
       } catch {}
     }
 
-    const value = String(path || "/login").trim() || "/login";
+    const value =
+      String(path || "/login").trim() ||
+      "/login";
 
     if (value === "/") {
       return "/";
     }
 
-    return value.replace(/\/{2,}/g, "/").replace(/\/+$/g, "") || "/";
+    return (
+      value
+        .replace(/\/{2,}/g, "/")
+        .replace(/\/+$/g, "") || "/"
+    );
   }
 
   function navigateTo(path = "/login") {
@@ -287,22 +315,23 @@ export const ConfirmResetPasswordView = (() => {
       return;
     }
 
-    if (typeof AppCore?.router?.navigate === "function") {
-      AppCore.router.navigate(target);
-      return;
-    }
-
     window.location.assign(target);
   }
 
-  function navigateSoon(path = "/login", delay = 0) {
+  function navigateSoon(
+    path = "/login",
+    delay = 0
+  ) {
     if (!isBrowser()) {
       return;
     }
 
     clearRedirectTimer();
 
-    const safeDelay = Math.max(0, Number(delay) || 0);
+    const safeDelay = Math.max(
+      0,
+      Number(delay) || 0
+    );
 
     if (safeDelay <= 0) {
       navigateTo(path);
@@ -324,6 +353,7 @@ export const ConfirmResetPasswordView = (() => {
   /* =========================================================
      EXECUTOR
   ========================================================= */
+
   function resolveExecutor(deps = {}) {
     const candidates = [
       deps.onSubmit,
@@ -332,13 +362,14 @@ export const ConfirmResetPasswordView = (() => {
       deps.resetPasswordConfirm,
       Auth?.confirmResetPassword,
       Auth?.resetPasswordConfirm,
-      AppCore?.services?.auth?.confirmResetPassword,
+      AppCore?.services?.auth
+        ?.confirmResetPassword,
       AppCore?.auth?.confirmResetPassword,
     ];
 
-    for (const candidate of candidates) {
-      if (typeof candidate === "function") {
-        return candidate;
+    for (const fn of candidates) {
+      if (typeof fn === "function") {
+        return fn;
       }
     }
 
@@ -346,24 +377,28 @@ export const ConfirmResetPasswordView = (() => {
   }
 
   /* =========================================================
-     VIEW STATE
+     CLEANUP
   ========================================================= */
+
   function destroyViewState() {
     clearRedirectTimer();
     AppCore?.cleanup?.run?.(SCOPE);
   }
 
   /* =========================================================
-     RENDER CORE
+     RENDER
   ========================================================= */
+
   function runRender(deps = {}) {
     const container = getContainer();
 
     if (!container) {
       safeWarnLog(
-        "ConfirmResetPasswordView: no se encontró #view-container."
+        "ConfirmResetPasswordView: no view-container."
       );
+
       forceHideGlobalLoader();
+
       return {
         ok: false,
         missingContainer: true,
@@ -378,30 +413,49 @@ export const ConfirmResetPasswordView = (() => {
     setAuthScreen(true);
 
     AppCore?.clearDynamicContainers?.();
-    AppCore?.setDocumentTitle?.("Nueva contraseña");
+    AppCore?.setDocumentTitle?.(
+      "Nueva contraseña"
+    );
 
     const appName =
-      safeText(AppCore?.config?.appName, "") || "Onion Support";
+      safeText(
+        AppCore?.config?.appName,
+        ""
+      ) || "Onion Support";
 
-    const token =
+    /* FIX TOKEN */
+    stableToken =
       safeText(deps.token, "") ||
       getUrlToken();
 
     container.innerHTML = getConfirmTemplate({
       appName,
-      token,
-      heroEyebrow: "ONION SUPPORT · NUEVA CONTRASEÑA",
-      heroTitle: "Configura una contraseña nueva de forma segura",
+      token: stableToken,
+
+      heroEyebrow:
+        "ONION SUPPORT · NUEVA CONTRASEÑA",
+
+      heroTitle:
+        "Configura una contraseña nueva de forma segura",
+
       bullets: [
         "Enlace temporal validado para cambio de contraseña",
         "Actualización segura de credenciales de acceso",
         "Flujo protegido alineado al entorno corporativo",
       ],
+
       title: "Crear nueva contraseña",
+
       subtitle: `Define una contraseña nueva para tu cuenta de ${appName}`,
-      submitLabel: "Actualizar contraseña",
-      backLabel: "Volver al acceso",
+
+      submitLabel:
+        "Actualizar contraseña",
+
+      backLabel:
+        "Volver al acceso",
+
       backHref: "/login",
+
       ...deps,
     });
 
@@ -417,12 +471,15 @@ export const ConfirmResetPasswordView = (() => {
   /* =========================================================
      BIND
   ========================================================= */
+
   function bind(deps = {}) {
     if (!isBrowser()) {
       return;
     }
 
-    const scope = AppCore?.cleanup?.scope?.(SCOPE);
+    const scope =
+      AppCore?.cleanup?.scope?.(SCOPE);
+
     const container = getContainer();
     const refs = getConfirmRefs(container);
 
@@ -433,8 +490,9 @@ export const ConfirmResetPasswordView = (() => {
       !refs?.confirmPasswordInput
     ) {
       safeWarnLog(
-        "ConfirmResetPasswordView: faltan nodos críticos del formulario."
+        "ConfirmResetPasswordView: nodos críticos ausentes."
       );
+
       forceHideGlobalLoader();
       return;
     }
@@ -445,15 +503,20 @@ export const ConfirmResetPasswordView = (() => {
 
     toast.init?.();
 
-    const executeConfirm = resolveExecutor(deps);
+    const executeConfirm =
+      resolveExecutor(deps);
 
     const submitLabel =
-      safeText(deps.submitLabel, "") ||
-      "Actualizar contraseña";
+      safeText(
+        deps.submitLabel,
+        ""
+      ) || "Actualizar contraseña";
 
     const loadingLabel =
-      safeText(deps.loadingLabel, "") ||
-      "Procesando...";
+      safeText(
+        deps.loadingLabel,
+        ""
+      ) || "Procesando...";
 
     setConfirmLoading(refs, false, {
       submitLabel,
@@ -472,61 +535,67 @@ export const ConfirmResetPasswordView = (() => {
 
       emitRouteRendered();
 
-      AppCore.cleanup.add(scope, () => {
-        setAuthScreen(false);
-        restoreGlobalLoaderStyles();
-      });
-
       return;
     }
-
-    const onClearErrors = () => {
-      clearConfirmErrors(refs);
-    };
-
-    const onBack = (event) => {
-      event.preventDefault();
-
-      if (isSubmitting || isNavigatingAway) {
-        return;
-      }
-
-      navigateTo(
-        safeText(deps.backHref, "") || "/login"
-      );
-    };
 
     const onSubmit = async (event) => {
       event.preventDefault();
 
-      if (isSubmitting || isNavigatingAway) {
+      if (
+        isSubmitting ||
+        isNavigatingAway
+      ) {
         return;
       }
 
       clearConfirmErrors(refs);
       toast.dismiss?.();
 
-      const formState = readConfirmFormState(refs);
+      const formState =
+        readConfirmFormState(refs);
 
-      const payload = createConfirmPayload({
-        token:
-          safeText(formState.token, "") ||
-          safeText(deps.token, "") ||
-          getUrlToken(),
-        password:
-          safeText(formState.newPassword, "") ||
-          safeText(formState.password, ""),
-        confirmPassword: formState.confirmPassword,
-      });
+      /* FIX TOKEN DEFINITIVO */
+      const payload =
+        createConfirmPayload({
+          token:
+            safeText(
+              formState.token,
+              ""
+            ) || stableToken,
 
-      const errors = validateConfirmPayload(payload);
+          password:
+            safeText(
+              formState.newPassword,
+              ""
+            ) ||
+            safeText(
+              formState.password,
+              ""
+            ),
 
-      if (Object.keys(errors).length > 0) {
+          confirmPassword:
+            formState.confirmPassword,
+        });
+
+      const errors =
+        validateConfirmPayload(payload);
+
+      if (
+        Object.keys(errors).length > 0
+      ) {
         const firstError =
           getFirstConfirmError(errors);
 
-        applyConfirmErrors(refs, errors);
-        setGlobalConfirmError(refs, firstError);
+        applyConfirmErrors(
+          refs,
+          errors
+        );
+
+        setGlobalConfirmError(
+          refs,
+          firstError
+        );
+
         toast.error?.(firstError);
         return;
       }
@@ -541,13 +610,21 @@ export const ConfirmResetPasswordView = (() => {
       let loadingId = null;
 
       try {
-        loadingId = toast.loading?.(
-          "Actualizando contraseña...",
-          { persist: true }
-        );
+        loadingId =
+          toast.loading?.(
+            "Actualizando contraseña...",
+            { persist: true }
+          );
 
-        const rawResult = await executeConfirm(payload);
-        const result = normalizeConfirmResult(rawResult);
+        const rawResult =
+          await executeConfirm(
+            payload
+          );
+
+        const result =
+          normalizeConfirmResult(
+            rawResult
+          );
 
         toast.dismiss?.(loadingId);
 
@@ -556,42 +633,55 @@ export const ConfirmResetPasswordView = (() => {
         }
 
         const successMessage =
-          safeText(result.message, "") || DEFAULT_SUCCESS_MESSAGE;
+          safeText(
+            result.message,
+            ""
+          ) ||
+          DEFAULT_SUCCESS_MESSAGE;
 
-        setConfirmSuccessState(refs, successMessage);
-        toast.success?.(successMessage);
+        setConfirmSuccessState(
+          refs,
+          successMessage
+        );
 
-        safeEmit("auth:reset-password:confirm:success", {
-          result,
-        });
+        toast.success?.(
+          successMessage
+        );
 
-        const shouldRedirect =
-          deps.redirectAfterSuccess !== false;
-
-        if (shouldRedirect) {
+        if (
+          deps.redirectAfterSuccess !==
+          false
+        ) {
           isNavigatingAway = true;
 
           navigateSoon(
-            resolveConfirmRedirect(result, deps),
-            Number(deps.redirectDelay) || SUCCESS_REDIRECT_DELAY
+            resolveConfirmRedirect(
+              result,
+              deps
+            ),
+            Number(
+              deps.redirectDelay
+            ) ||
+              SUCCESS_REDIRECT_DELAY
           );
         }
       } catch (error) {
+        const message =
+          resolveConfirmErrorMessage(
+            error
+          );
+
         toast.dismiss?.(loadingId);
 
-        const message =
-          resolveConfirmErrorMessage(error);
+        setGlobalConfirmError(
+          refs,
+          message
+        );
 
-        setGlobalConfirmError(refs, message);
         toast.error?.(message);
 
-        safeEmit("auth:reset-password:confirm:error", {
-          message,
-          error,
-        });
-
         safeErrorLog(
-          "[ConfirmResetPasswordView] confirm error",
+          "[ConfirmResetPasswordView]",
           error
         );
 
@@ -603,47 +693,67 @@ export const ConfirmResetPasswordView = (() => {
         if (!isNavigatingAway) {
           isSubmitting = false;
 
-          if (refs?.form?.getAttribute("data-success") !== "true") {
-            setConfirmLoading(refs, false, {
-              submitLabel,
-              loadingLabel,
-            });
+          if (
+            refs?.form?.getAttribute(
+              "data-success"
+            ) !== "true"
+          ) {
+            setConfirmLoading(
+              refs,
+              false,
+              {
+                submitLabel,
+                loadingLabel,
+              }
+            );
           }
         }
       }
     };
 
-    const unbindInputs =
-      bindConfirmInputClearers(refs, onClearErrors);
+    const onClearErrors = () =>
+      clearConfirmErrors(refs);
 
-    const unbindSubmit =
-      bindConfirmSubmit(refs, onSubmit);
+    const onBack = (event) => {
+      event.preventDefault();
 
-    const unbindBack =
-      bindConfirmBack(refs, onBack);
-
-    AppCore.cleanup.event(
-      scope,
-      "router:before-render",
-      ({ detail }) => {
-        const nextPath =
-          detail?.path ||
-          detail?.canonicalPath ||
-          "";
-
-        if (
-          nextPath &&
-          !String(nextPath).startsWith(CONFIRM_ROUTE_PREFIX)
-        ) {
-          setAuthScreen(false);
-        }
+      if (
+        isSubmitting ||
+        isNavigatingAway
+      ) {
+        return;
       }
-    );
+
+      navigateTo(
+        safeText(
+          deps.backHref,
+          ""
+        ) || "/login"
+      );
+    };
+
+    const offInputs =
+      bindConfirmInputClearers(
+        refs,
+        onClearErrors
+      );
+
+    const offSubmit =
+      bindConfirmSubmit(
+        refs,
+        onSubmit
+      );
+
+    const offBack =
+      bindConfirmBack(
+        refs,
+        onBack
+      );
 
     AppCore.cleanup.add(scope, () => {
-      unbindInputs?.();
-      unbindSubmit?.();
-      unbindBack?.();
+      offInputs?.();
+      offSubmit?.();
+      offBack?.();
 
       clearRedirectTimer();
 
@@ -660,19 +770,25 @@ export const ConfirmResetPasswordView = (() => {
   /* =========================================================
      PUBLIC API
   ========================================================= */
+
   function init(arg1 = {}, arg2 = {}) {
-    const deps = resolveDeps(arg1, arg2);
-    return runRender(deps);
+    return runRender(
+      resolveDeps(arg1, arg2)
+    );
   }
 
   function render(arg1 = {}, arg2 = {}) {
-    const deps = resolveDeps(arg1, arg2);
-    return runRender(deps);
+    return runRender(
+      resolveDeps(arg1, arg2)
+    );
   }
 
   function destroy() {
     isSubmitting = false;
     isNavigatingAway = false;
+
+    /* reset token */
+    stableToken = "";
 
     destroyViewState();
     setAuthScreen(false);

@@ -126,6 +126,27 @@ function isBusyState(state = {}) {
   return Boolean(state?.loading || state?.refreshing);
 }
 
+function isOpenBusyState(state = {}) {
+  return Boolean(
+    state?.loading ||
+      state?.refreshing ||
+      state?.openingFacturaId
+  );
+}
+
+function isActionBusyForFactura(state = {}, facturaId = "") {
+  const id = safeText(facturaId, "");
+
+  if (!id) return false;
+
+  return Boolean(
+    safeText(state?.sendingFacturaId, "") === id ||
+      safeText(state?.downloadingFacturaId, "") === id ||
+      safeText(state?.viewingFacturaId, "") === id ||
+      safeText(state?.openingFacturaId, "") === id
+  );
+}
+
 async function safeRefresh({
   loadFacturas,
   silent = true,
@@ -254,6 +275,11 @@ export function bindFacturasView({
       (event) => {
         event.preventDefault();
 
+        const state = getLiveState(getState);
+        if (isBusyState(state)) {
+          return;
+        }
+
         try {
           exportFacturasCsv?.();
         } catch {
@@ -277,7 +303,10 @@ export function bindFacturasView({
     async (event) => {
       const state = getLiveState(getState);
       const actionEl = event.target?.closest?.("[data-action]");
-      const cardEl = event.target?.closest?.(".factura-card");
+      const cardEl =
+        event.target?.closest?.(".factura-card") ||
+        event.target?.closest?.(".facturas-mobile-card") ||
+        event.target?.closest?.(".facturas-row");
 
       if (actionEl) {
         const action = safeText(
@@ -292,7 +321,7 @@ export function bindFacturasView({
           event.preventDefault();
           event.stopPropagation();
 
-          if (!facturaId || isBusyState(state)) {
+          if (!facturaId || isOpenBusyState(state)) {
             return;
           }
 
@@ -304,7 +333,7 @@ export function bindFacturasView({
           event.preventDefault();
           event.stopPropagation();
 
-          if (!facturaId) {
+          if (!facturaId || isActionBusyForFactura(state, facturaId)) {
             return;
           }
 
@@ -316,7 +345,7 @@ export function bindFacturasView({
           event.preventDefault();
           event.stopPropagation();
 
-          if (!facturaId) {
+          if (!facturaId || isActionBusyForFactura(state, facturaId)) {
             return;
           }
 
@@ -328,7 +357,7 @@ export function bindFacturasView({
           event.preventDefault();
           event.stopPropagation();
 
-          if (!facturaId) {
+          if (!facturaId || isActionBusyForFactura(state, facturaId)) {
             return;
           }
 
@@ -345,7 +374,7 @@ export function bindFacturasView({
       ) {
         const facturaId = getFacturaId(cardEl);
 
-        if (!facturaId || isBusyState(state)) {
+        if (!facturaId || isOpenBusyState(state)) {
           return;
         }
 

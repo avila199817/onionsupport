@@ -14,7 +14,7 @@
    HARDENING PRO:
    - tolerancia a payloads heterogéneos
    - normalización estable para store / actions / template
-   - soporte para envelope backend
+   - soporte para envelope backend legacy y API normalizada actual
    - métricas robustas
    - ordenación sin mutar origen
    - filtros seguros y predecibles
@@ -34,7 +34,10 @@ export const DEFAULT_FACTURAS_SORT = Object.freeze({
 ========================================================= */
 
 function safeString(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+
   const text = String(value).trim();
   return text || fallback;
 }
@@ -68,6 +71,7 @@ function round2(value) {
 
 function toMs(value) {
   if (!value) return 0;
+
   const ms = new Date(value).getTime();
   return Number.isFinite(ms) ? ms : 0;
 }
@@ -83,11 +87,13 @@ function pickFirst(...values) {
 }
 
 function isObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value);
+  return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
 function isLikelyFactura(value) {
-  if (!isObject(value)) return false;
+  if (!isObject(value)) {
+    return false;
+  }
 
   return Boolean(
     value.id ||
@@ -95,11 +101,13 @@ function isLikelyFactura(value) {
       value.facturaId ||
       value.numero ||
       value.code ||
+      value.invoiceNumber ||
+      value.total !== undefined ||
+      value.importeTotal !== undefined ||
+      value.amount !== undefined ||
       value.cliente ||
       value.client ||
-      value.customer ||
-      value.total !== undefined ||
-      value.importeTotal !== undefined
+      value.customer
   );
 }
 
@@ -111,7 +119,10 @@ function looksLikeFacturasEnvelope(value) {
       Array.isArray(obj.items) ||
       Array.isArray(obj.data) ||
       Array.isArray(obj.results) ||
-      Array.isArray(obj.rows)
+      Array.isArray(obj.rows) ||
+      Array.isArray(obj.records) ||
+      Array.isArray(obj.list) ||
+      Array.isArray(obj.collection)
   );
 }
 
@@ -124,6 +135,9 @@ function resolveNestedArrayEnvelope(value) {
   if (Array.isArray(obj.data)) return obj.data;
   if (Array.isArray(obj.results)) return obj.results;
   if (Array.isArray(obj.rows)) return obj.rows;
+  if (Array.isArray(obj.records)) return obj.records;
+  if (Array.isArray(obj.list)) return obj.list;
+  if (Array.isArray(obj.collection)) return obj.collection;
 
   if (looksLikeFacturasEnvelope(obj.data)) {
     return resolveNestedArrayEnvelope(obj.data);
@@ -148,7 +162,10 @@ export function truncate(value = "", max = 140) {
   const text = safeString(value);
   const size = Math.max(1, safeNumber(max, 140));
 
-  if (text.length <= size) return text;
+  if (text.length <= size) {
+    return text;
+  }
+
   return `${text.slice(0, size).trim()}…`;
 }
 
@@ -208,17 +225,13 @@ export function formatRelativeDate(value) {
   if (absMin < 1) return "Ahora mismo";
 
   if (absMin < 60) {
-    return diffMin > 0
-      ? `En ${absMin} min`
-      : `Hace ${absMin} min`;
+    return diffMin > 0 ? `En ${absMin} min` : `Hace ${absMin} min`;
   }
 
   const diffHours = Math.round(absMin / 60);
 
   if (diffHours < 24) {
-    return diffMin > 0
-      ? `En ${diffHours} h`
-      : `Hace ${diffHours} h`;
+    return diffMin > 0 ? `En ${diffHours} h` : `Hace ${diffHours} h`;
   }
 
   const diffDays = Math.round(diffHours / 24);
@@ -424,6 +437,7 @@ export function getFacturaNumero(item = {}) {
     safeString(source.numeroFacturaLegal) ||
     safeString(source.numeroFacturaSistema) ||
     safeString(source.numeroFactura) ||
+    safeString(source.invoiceNumber) ||
     safeString(source.code) ||
     safeString(source.facturaCode) ||
     safeString(source.id) ||
@@ -438,6 +452,7 @@ export function getFacturaFecha(item = {}) {
   return (
     safeString(source.fecha) ||
     safeString(source.fechaFactura) ||
+    safeString(source.issueDate) ||
     safeString(source.issuedAt) ||
     safeString(source.createdAt) ||
     null
@@ -470,6 +485,7 @@ export function getFacturaClienteNombre(item = {}) {
     safeString(cliente.empresa) ||
     safeString(cliente.razonSocial) ||
     safeString(cliente.name) ||
+    safeString(source.clienteNombre) ||
     safeString(source.clientName) ||
     safeString(source.customerName) ||
     safeString(source.owner?.name) ||
@@ -488,9 +504,10 @@ export function getFacturaClienteEmpresa(item = {}) {
     safeString(cliente.empresa) ||
     safeString(cliente.razonSocial) ||
     safeString(cliente.nombreFiscal) ||
+    safeString(cliente.company) ||
     safeString(cliente.nombre) ||
     safeString(cliente.nombreContacto) ||
-    safeString(cliente.company) ||
+    safeString(source.clienteEmpresa) ||
     "-"
   );
 }
@@ -504,8 +521,11 @@ export function getFacturaClienteEmail(item = {}) {
   return (
     safeString(cliente.email) ||
     safeString(cliente.mail) ||
+    safeString(source.email) ||
     safeString(source.emailCliente) ||
+    safeString(source.clienteEmail) ||
     safeString(source.clientEmail) ||
+    safeString(source.customerEmail) ||
     safeString(source.owner?.email) ||
     "-"
   );
@@ -527,6 +547,7 @@ export function getFacturaPreview(item = {}) {
 
 export function getFacturaCurrency(item = {}) {
   const source = safeObject(item);
+
   return safeString(
     pickFirst(source.moneda, source.currency),
     "EUR"
@@ -609,9 +630,21 @@ export function isFacturaOverdue(item = {}) {
 
 export function normalizeFactura(item = {}) {
   const source = safeObject(item);
+
+  const rawId = pickFirst(
+    source.id,
+    source._id,
+    source.facturaId,
+    source.ticketId
+  );
+
+  const id = safeString(rawId, "");
+  const numero = getFacturaNumero(source);
+
   const estadoPago = normalizeEstadoPago(
     pickFirst(source.estadoPago, source.paymentStatus, "pending")
   );
+
   const estado = normalizeEstado(
     pickFirst(source.estado, source.status, "issued")
   );
@@ -635,21 +668,20 @@ export function normalizeFactura(item = {}) {
     pickFirst(source.attachments, source.files, source.adjuntos)
   );
 
-  const id =
-    source.id ??
-    source._id ??
-    source.facturaId ??
-    null;
-
   return {
-    id,
-    _id: source._id ?? null,
-    facturaId: id,
-    numero: getFacturaNumero(source),
+    id: id || numero || "",
+    _id: safeString(source._id, "") || null,
+    facturaId: id || numero || "",
+
+    numero,
 
     fecha,
     fechaEnvio,
     updatedAt,
+    createdAt:
+      safeString(source.createdAt) ||
+      safeString(source?.auditoria?.createdAt) ||
+      null,
 
     estadoPago,
     estado,
@@ -679,35 +711,42 @@ export function normalizeFactura(item = {}) {
 
     preview: getFacturaPreview(source),
 
-    lineasCount: safeNumber(
-      source.lineasCount,
-      lineas.length
-    ),
-
-    attachmentsCount: safeNumber(
-      source.attachmentsCount,
-      attachments.length
-    ),
+    lineasCount: safeNumber(source.lineasCount, lineas.length),
+    attachmentsCount: safeNumber(source.attachmentsCount, attachments.length),
 
     hasPdf:
       source.hasPdf === true ||
       source.pdfAvailable === true ||
+      Boolean(source.pdfUrl) ||
       Boolean(source.blobPath),
 
     pdfAvailable:
       source.pdfAvailable === true ||
       source.hasPdf === true ||
+      Boolean(source.pdfUrl) ||
       Boolean(source.blobPath),
+
+    pdfUrl:
+      safeString(source.pdfUrl) ||
+      safeString(source.file?.url) ||
+      safeString(source.url) ||
+      "",
 
     blobPath: safeString(source.blobPath) || "",
 
     clienteId:
       source.clienteId ??
+      source.clientId ??
+      source.customerId ??
       source.cliente?.id ??
       source.client?.id ??
       source.customer?.id ??
       source.userId ??
       null,
+
+    clienteNombre,
+    clienteEmpresa,
+    clienteEmail,
 
     cliente: {
       id:
@@ -715,6 +754,8 @@ export function normalizeFactura(item = {}) {
         source.client?.id ??
         source.customer?.id ??
         source.clienteId ??
+        source.clientId ??
+        source.customerId ??
         source.userId ??
         null,
       nombre: clienteNombre,
@@ -740,6 +781,7 @@ export function normalizeFactura(item = {}) {
       avatar:
         source?.cliente?.avatar ??
         source?.client?.avatar ??
+        source?.customer?.avatar ??
         source?.owner?.avatar ??
         null,
       initials: getInitials(
@@ -863,11 +905,6 @@ export function normalizeFactura(item = {}) {
       };
     }),
 
-    createdAt:
-      safeString(source.createdAt) ||
-      safeString(source?.auditoria?.createdAt) ||
-      null,
-
     updatedBy:
       safeString(source.updatedBy) ||
       safeString(source?.auditoria?.updatedBy) ||
@@ -900,7 +937,21 @@ export function normalizeFactura(item = {}) {
 ========================================================= */
 
 export function extractFacturas(response) {
-  return resolveNestedArrayEnvelope(response);
+  if (Array.isArray(response)) {
+    return response;
+  }
+
+  const obj = safeObject(response);
+
+  if (Array.isArray(obj.items)) {
+    return obj.items;
+  }
+
+  if (looksLikeFacturasEnvelope(response)) {
+    return resolveNestedArrayEnvelope(response);
+  }
+
+  return [];
 }
 
 export function extractNormalizedFacturas(response) {
@@ -909,11 +960,12 @@ export function extractNormalizedFacturas(response) {
 
 export function getRemoteCount(response, fallback = 0) {
   return (
-    safeNumber(response?.count, 0) ||
     safeNumber(response?.total, 0) ||
+    safeNumber(response?.count, 0) ||
     safeNumber(response?.remoteCount, 0) ||
-    safeNumber(response?.data?.count, 0) ||
     safeNumber(response?.data?.total, 0) ||
+    safeNumber(response?.data?.count, 0) ||
+    safeNumber(response?.meta?.total, 0) ||
     safeNumber(response?.meta?.count, 0) ||
     fallback
   );
@@ -934,7 +986,10 @@ export function extractStats(response) {
 
 export function sumFacturasTotal(items = []) {
   return round2(
-    safeArray(items).reduce((acc, item) => acc + safeNumber(item?.total, 0), 0)
+    safeArray(items).reduce(
+      (acc, item) => acc + safeNumber(item?.total, 0),
+      0
+    )
   );
 }
 
@@ -982,22 +1037,17 @@ export function sortFacturas(items = [], sort = DEFAULT_FACTURAS_SORT) {
     if (field === "cliente") {
       const av = normalizeText(left?.cliente?.empresa || left?.cliente?.nombre);
       const bv = normalizeText(right?.cliente?.empresa || right?.cliente?.nombre);
-
       return av.localeCompare(bv, "es") * direction;
     }
 
     if (field === "numero") {
       const av = normalizeText(left?.numero);
       const bv = normalizeText(right?.numero);
-
       return av.localeCompare(bv, "es") * direction;
     }
 
     if (field === "total") {
-      return (
-        (safeNumber(left?.total, 0) - safeNumber(right?.total, 0)) *
-        direction
-      );
+      return (safeNumber(left?.total, 0) - safeNumber(right?.total, 0)) * direction;
     }
 
     if (field === "fecha") {

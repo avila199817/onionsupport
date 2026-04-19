@@ -2,6 +2,8 @@
    Onion SPA - Facturas Actions
    Archivo: src/views/facturas/facturas.actions.js
 
+   FINAL PRO SYSTEM · ACTIONS REAL · 10/10
+
    RESPONSABILIDADES:
    - centralizar acciones operativas del módulo de facturas
    - resolver detalle desde store + loader/backend
@@ -90,7 +92,11 @@ function isLikelyFactura(value) {
       value.numero ||
       value.code ||
       value.cliente ||
-      value.total !== undefined
+      value.client ||
+      value.customer ||
+      value.total !== undefined ||
+      value.amount !== undefined ||
+      value.importe !== undefined
   );
 }
 
@@ -152,6 +158,15 @@ function resolvePdfUrl(response = null) {
   );
 }
 
+function resolveFacturaId(detail = null) {
+  return safeText(
+    detail?.id ||
+      detail?._id ||
+      detail?.facturaId,
+    ""
+  );
+}
+
 function getFacturaId(item = {}) {
   return safeText(
     first(
@@ -168,20 +183,27 @@ function getFacturaNumber(item = {}) {
     first(
       item.numero,
       item.code,
-      item.facturaCode
+      item.facturaCode,
+      item.facturaNumero
     ),
     "—"
   );
 }
 
-function getFacturaClient(item = {}) {
+function getFacturaClientObject(item = {}) {
   const client = first(
     item.cliente,
     item.client,
     item.customer
   );
 
-  if (isObject(client)) {
+  return isObject(client) ? client : {};
+}
+
+function getFacturaClient(item = {}) {
+  const client = getFacturaClientObject(item);
+
+  if (Object.keys(client).length) {
     return safeText(
       first(
         client.empresa,
@@ -194,17 +216,20 @@ function getFacturaClient(item = {}) {
     );
   }
 
-  return safeText(client, "Cliente");
+  return safeText(
+    first(
+      item.clienteNombre,
+      item.clientName,
+      item.customerName
+    ),
+    "Cliente"
+  );
 }
 
 function getFacturaEmail(item = {}) {
-  const client = first(
-    item.cliente,
-    item.client,
-    item.customer
-  );
+  const client = getFacturaClientObject(item);
 
-  if (isObject(client)) {
+  if (Object.keys(client).length) {
     return safeText(
       first(
         client.email,
@@ -306,18 +331,21 @@ function getFacturaSentAt(item = {}) {
 
 function normalizeFacturaDetail(detail = {}) {
   const raw = safeObject(detail);
+  const facturaId = getFacturaId(raw);
 
   return {
     ...raw,
-    id: getFacturaId(raw),
-    facturaId: getFacturaId(raw),
+    id: facturaId,
+    facturaId,
     numero: getFacturaNumber(raw),
     cliente: isObject(raw.cliente)
       ? raw.cliente
-      : {
-          empresa: getFacturaClient(raw),
-          email: getFacturaEmail(raw),
-        },
+      : isObject(raw.client)
+        ? raw.client
+        : {
+            empresa: getFacturaClient(raw),
+            email: getFacturaEmail(raw),
+          },
     fecha: getFacturaDate(raw),
     estadoPago: getFacturaEstadoPago(raw),
     estado: getFacturaEstado(raw),
@@ -492,7 +520,7 @@ export async function getFacturaDetailAction({
   try {
     safeEmit("facturas:detail:request", {
       facturaId: id,
-      source: "loader",
+      source: typeof loadFacturaDetail === "function" ? "loader" : "store",
     });
 
     let detail = null;
@@ -743,13 +771,12 @@ export async function sendFacturaToClientAction({
     return null;
   }
 
-  const factura =
-    normalizeFacturaDetail(
-      resolveFacturaId(detail) === id
-        ? detail
-        : getFacturaByIdStore(id) || detail || {}
-    );
+  const selectedDetail =
+    resolveFacturaId(detail) === id
+      ? detail
+      : getFacturaByIdStore(id) || detail || {};
 
+  const factura = normalizeFacturaDetail(selectedDetail);
   const targetEmail =
     factura?.cliente?.email ||
     factura?.enviadoA ||
@@ -915,19 +942,6 @@ export function exportFacturasCsvAction({
 
     return false;
   }
-}
-
-/* =========================================================
-   PRIVATE HELPER
-========================================================= */
-
-function resolveFacturaId(detail = null) {
-  return safeText(
-    detail?.id ||
-      detail?._id ||
-      detail?.facturaId,
-    ""
-  );
 }
 
 /* =========================================================

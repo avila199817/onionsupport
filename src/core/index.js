@@ -693,6 +693,7 @@ export const AppCore = (() => {
       loadSession({
         state,
         storage,
+        dom,
       });
 
       syncDerivedAuthState();

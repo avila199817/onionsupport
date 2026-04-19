@@ -288,6 +288,54 @@ export const SidebarUI = (() => {
     );
   }
 
+  function getSidebarSnapshot() {
+    const { sidebar } =
+      getElements(AppCore);
+
+    const mobile =
+      isMobileViewport(
+        MOBILE_BREAKPOINT
+      );
+
+    const stateOpen =
+      Boolean(
+        AppCore?.state
+          ?.sidebarOpen
+      );
+
+    const domOpen = Boolean(
+      sidebar &&
+        !sidebar.classList.contains(
+          "collapsed"
+        ) &&
+        !sidebar.classList.contains(
+          "is-collapsed"
+        )
+    );
+
+    return {
+      mobile,
+      open: mobile
+        ? stateOpen
+        : domOpen,
+    };
+  }
+
+  function restoreSidebarState(
+    snapshot
+  ) {
+    if (
+      !snapshot ||
+      snapshot.mobile
+    ) {
+      return;
+    }
+
+    setSidebarOpen(
+      Boolean(snapshot.open)
+    );
+  }
+
   function setSidebarOpen(open) {
     const nextOpen =
       Boolean(open);
@@ -503,6 +551,8 @@ export const SidebarUI = (() => {
       syncSidebarState,
       closeDropdown,
       closeSidebarOnMobileAfterNavigation,
+      getSidebarSnapshot,
+      restoreSidebarState,
     });
 
     initialized = true;

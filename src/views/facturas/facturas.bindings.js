@@ -2,20 +2,23 @@
    Onion SPA - Facturas Bindings
    Archivo: src/views/facturas/facturas.bindings.js
 
+   FINAL PRO SYSTEM · BINDINGS REAL · 10/10
+
    RESPONSABILIDADES:
-   - registrar eventos de UI del módulo de facturas
+   - registrar eventos UI del módulo de facturas
    - bind de refresh / retry / export
-   - delegación de eventos sobre cards y modal
-   - bind de Escape para cierre de detalle
+   - delegación de eventos sobre cards y acciones de colección
+   - evitar dobles listeners por re-render
+   - re-evaluar estado vivo en cada interacción
    - delegar bootstrap inicial a la vista
-   - mantener la vista principal más limpia
+   - mantener facturasView.js limpio
 
    HARDENING PRO:
-   - evita dobles listeners
-   - reevalúa estado en cada interacción
-   - soporta refresh explícito con asRefresh
-   - tolera ausencia parcial de acciones
    - cleanup sólido por scope
+   - no mezcla lógica del modal global aquí
+   - no usa snapshots de estado congelados
+   - tolera ausencia parcial de acciones
+   - soporta refresh explícito con asRefresh
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -150,13 +153,11 @@ export function bindFacturasView({
   scopeName = DEFAULT_SCOPE,
   getContainer,
   getState,
-  render,
   loadFacturas,
   openFactura,
   openFacturaPdf,
   downloadFacturaPdf,
   sendFacturaToClient,
-  closeDetail,
   exportFacturasCsv,
   onBootstrap,
 } = {}) {
@@ -205,7 +206,7 @@ export function bindFacturasView({
             "Facturas actualizadas correctamente.",
             "success"
           );
-        } catch (error) {
+        } catch {
           showBindingToast(
             "No se pudo actualizar el listado.",
             "error"
@@ -266,7 +267,7 @@ export function bindFacturasView({
   }
 
   /* =========================================
-     DELEGATED ACTIONS
+     DELEGATED ACTIONS COLLECTION
   ========================================= */
 
   AppCore?.cleanup?.on?.(
@@ -275,12 +276,8 @@ export function bindFacturasView({
     "click",
     async (event) => {
       const state = getLiveState(getState);
-
       const actionEl = event.target?.closest?.("[data-action]");
       const cardEl = event.target?.closest?.(".factura-card");
-      const overlayEl = event.target?.closest?.(
-        '[data-action="close-factura-detail"]'
-      );
 
       if (actionEl) {
         const action = safeText(
@@ -295,7 +292,7 @@ export function bindFacturasView({
           event.preventDefault();
           event.stopPropagation();
 
-          if (isBusyState(state)) {
+          if (!facturaId || isBusyState(state)) {
             return;
           }
 
@@ -307,6 +304,10 @@ export function bindFacturasView({
           event.preventDefault();
           event.stopPropagation();
 
+          if (!facturaId) {
+            return;
+          }
+
           await openFacturaPdf?.(facturaId);
           return;
         }
@@ -314,6 +315,10 @@ export function bindFacturasView({
         if (action === "download-factura") {
           event.preventDefault();
           event.stopPropagation();
+
+          if (!facturaId) {
+            return;
+          }
 
           await downloadFacturaPdf?.(facturaId);
           return;
@@ -323,20 +328,21 @@ export function bindFacturasView({
           event.preventDefault();
           event.stopPropagation();
 
+          if (!facturaId) {
+            return;
+          }
+
           await sendFacturaToClient?.(facturaId);
-          return;
-        }
-
-        if (action === "close-factura-detail") {
-          event.preventDefault();
-
-          closeDetail?.();
-          render?.();
           return;
         }
       }
 
-      if (cardEl && !event.target?.closest?.("button, a, input, select, textarea")) {
+      if (
+        cardEl &&
+        !event.target?.closest?.(
+          "button, a, input, select, textarea, [data-action]"
+        )
+      ) {
         const facturaId = getFacturaId(cardEl);
 
         if (!facturaId || isBusyState(state)) {
@@ -344,37 +350,7 @@ export function bindFacturasView({
         }
 
         await openFactura?.(facturaId);
-        return;
       }
-
-      if (overlayEl && !event.target?.closest?.('[data-role="facturas-detail-panel"]')) {
-        closeDetail?.();
-        render?.();
-      }
-    }
-  );
-
-  /* =========================================
-     ESC CLOSE
-  ========================================= */
-
-  AppCore?.cleanup?.on?.(
-    scope,
-    document,
-    "keydown",
-    (event) => {
-      const state = getLiveState(getState);
-
-      if (event.key !== "Escape") {
-        return;
-      }
-
-      if (!state?.detailOpen) {
-        return;
-      }
-
-      closeDetail?.();
-      render?.();
     }
   );
 

@@ -2,21 +2,24 @@
    Onion SPA - Facturas Actions
    Archivo: src/views/facturas/facturas.actions.js
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - centralizar acciones operativas del módulo de facturas
-   - abrir detalle en modal global REAL sobre document.body
+   - resolver detalle desde store + loader/backend
+   - abrir detalle a nivel de datos, no de UI
    - abrir pdf inline / descarga
    - enviar factura al cliente
+   - copiar identificadores
    - exportar colección a CSV
-   - desacoplar la vista principal de la lógica de acciones
+   - desacoplar facturasView.js de la lógica operativa
 
    FULL PRO 10/10:
-   - modal global igual filosofía incidencias
-   - compat con renderFacturasDetailModal()
-   - cierre por overlay / ESC
-   - refresh de detalle
-   - safe cleanup
-   - tolerancia a fallos parciales
+   - misma filosofía que incidencias.actions.js
+   - sin acoplar modal global en actions
+   - fallback store -> loader
+   - export CSV robusto
+   - clipboard con fallback legacy
+   - eventos opcionales vía AppCore.events
+   - tolerancia a payloads heterogéneos
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -32,128 +35,114 @@ import {
 } from "./facturas.store.js";
 
 import {
-  renderFacturasDetailModal,
-} from "./facturas.detail.template.js";
-
-import {
   safeText,
   safeNumber,
+  safeArray,
+  safeObject,
   showToast,
 } from "./facturas.utils.js";
 
 /* =========================================================
-   MODAL GLOBAL ROOT
+   CONSTANTS
 ========================================================= */
 
-const FACTURAS_MODAL_ROOT_ID =
-  "facturas-detail-modal-root";
-
-function getBody() {
-  try {
-    return document.body || null;
-  } catch {
-    return null;
-  }
-}
-
-function getModalRoot() {
-  try {
-    return document.getElementById(
-      FACTURAS_MODAL_ROOT_ID
-    );
-  } catch {
-    return null;
-  }
-}
-
-function ensureModalRoot() {
-  const existing =
-    getModalRoot();
-
-  if (existing) {
-    return existing;
-  }
-
-  const body = getBody();
-
-  if (!body) {
-    return null;
-  }
-
-  const root =
-    document.createElement("div");
-
-  root.id =
-    FACTURAS_MODAL_ROOT_ID;
-
-  body.appendChild(root);
-
-  return root;
-}
-
-function removeModalRoot() {
-  try {
-    getModalRoot()?.remove?.();
-  } catch {}
-}
-
-function setBodyModalState(
-  enabled = false
-) {
-  try {
-    document.body.classList.toggle(
-      "modal-open",
-      Boolean(enabled)
-    );
-  } catch {}
-}
-
-function bindEscToClose() {
-  const onKeydown =
-    (event) => {
-      if (
-        event.key ===
-        "Escape"
-      ) {
-        closeFacturaDetailModal();
-      }
-    };
-
-  document.addEventListener(
-    "keydown",
-    onKeydown
-  );
-
-  return () => {
-    document.removeEventListener(
-      "keydown",
-      onKeydown
-    );
-  };
-}
-
-let removeEscHandler =
-  null;
+const CSV_FILENAME_PREFIX = "facturas";
 
 /* =========================================================
    HELPERS
 ========================================================= */
 
-function safeEmit(
-  eventName = "",
-  payload = {}
-) {
+function safeEmit(eventName = "", payload = {}) {
   try {
-    AppCore?.events?.emit?.(
-      eventName,
-      payload
-    );
+    AppCore?.events?.emit?.(eventName, payload);
   } catch {}
 }
 
-function resolvePdfUrl(
-  response = null
-) {
+function first(...values) {
+  for (const value of values) {
+    if (
+      value !== undefined &&
+      value !== null &&
+      String(value).trim() !== ""
+    ) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function normalizeFacturaId(value = "") {
+  return safeText(value, "");
+}
+
+function isObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value);
+}
+
+function isLikelyFactura(value) {
+  if (!isObject(value)) return false;
+
+  return Boolean(
+    value.id ||
+      value._id ||
+      value.facturaId ||
+      value.numero ||
+      value.code ||
+      value.cliente ||
+      value.total !== undefined
+  );
+}
+
+function looksLikeEnvelope(value) {
+  const obj = safeObject(value);
+
+  return Boolean(
+    obj.factura ||
+      obj.item ||
+      obj.data ||
+      obj.result ||
+      obj.payload
+  );
+}
+
+function pickDetail(payload = null) {
+  if (!payload) return null;
+
+  if (isLikelyFactura(payload)) {
+    return payload;
+  }
+
+  const obj = safeObject(payload);
+
+  if (isLikelyFactura(obj.factura)) {
+    return obj.factura;
+  }
+
+  if (isLikelyFactura(obj.item)) {
+    return obj.item;
+  }
+
+  if (isLikelyFactura(obj.result)) {
+    return obj.result;
+  }
+
+  if (isLikelyFactura(obj.payload)) {
+    return obj.payload;
+  }
+
+  if (isLikelyFactura(obj.data)) {
+    return obj.data;
+  }
+
+  if (looksLikeEnvelope(obj.data)) {
+    return pickDetail(obj.data);
+  }
+
+  return null;
+}
+
+function resolvePdfUrl(response = null) {
   return safeText(
     response?.file?.url ||
       response?.url ||
@@ -163,87 +152,266 @@ function resolvePdfUrl(
   );
 }
 
-function resolveFacturaId(
-  factura = null,
-  fallback = ""
-) {
+function getFacturaId(item = {}) {
   return safeText(
-    factura?.id ||
-      factura?._id ||
-      factura?.facturaId ||
-      fallback,
+    first(
+      item.id,
+      item._id,
+      item.facturaId
+    ),
     ""
   );
 }
 
-function resolveFacturaNumber(
-  factura = null,
-  fallback = ""
-) {
+function getFacturaNumber(item = {}) {
   return safeText(
-    factura?.numero ||
-      factura?.code ||
-      fallback,
-    fallback || "—"
+    first(
+      item.numero,
+      item.code,
+      item.facturaCode
+    ),
+    "—"
   );
 }
 
-async function copyText(
-  text = ""
-) {
-  const value =
-    safeText(text, "");
+function getFacturaClient(item = {}) {
+  const client = first(
+    item.cliente,
+    item.client,
+    item.customer
+  );
 
-  if (!value) {
-    return false;
+  if (isObject(client)) {
+    return safeText(
+      first(
+        client.empresa,
+        client.nombre,
+        client.name,
+        client.company,
+        client.displayName
+      ),
+      "Cliente"
+    );
   }
 
+  return safeText(client, "Cliente");
+}
+
+function getFacturaEmail(item = {}) {
+  const client = first(
+    item.cliente,
+    item.client,
+    item.customer
+  );
+
+  if (isObject(client)) {
+    return safeText(
+      first(
+        client.email,
+        client.mail
+      ),
+      "Sin email"
+    );
+  }
+
+  return safeText(
+    first(
+      item.email,
+      item.clienteEmail,
+      item.clientEmail
+    ),
+    "Sin email"
+  );
+}
+
+function getFacturaDate(item = {}) {
+  return first(
+    item.fecha,
+    item.date,
+    item.createdAt,
+    item.updatedAt
+  );
+}
+
+function getFacturaEstadoPago(item = {}) {
+  return safeText(
+    first(
+      item.estadoPago,
+      item.paymentStatus
+    ),
+    "pending"
+  );
+}
+
+function getFacturaEstado(item = {}) {
+  return safeText(
+    first(
+      item.estado,
+      item.status
+    ),
+    "emitida"
+  );
+}
+
+function getFacturaFormaPago(item = {}) {
+  return safeText(
+    first(
+      item.formaPago,
+      item.paymentMethod
+    ),
+    "—"
+  );
+}
+
+function getFacturaMoneda(item = {}) {
+  return safeText(
+    first(
+      item.moneda,
+      item.currency
+    ),
+    "EUR"
+  );
+}
+
+function getFacturaTotal(item = {}) {
+  return safeNumber(
+    first(
+      item.total,
+      item.amount,
+      item.importe
+    ),
+    0
+  );
+}
+
+function getFacturaSentTo(item = {}) {
+  return safeText(
+    first(
+      item.enviadoA,
+      item.sentTo,
+      item?.cliente?.email,
+      item?.client?.email
+    ),
+    ""
+  );
+}
+
+function getFacturaSentAt(item = {}) {
+  return first(
+    item.fechaEnvio,
+    item.sentAt,
+    item.updatedAt
+  );
+}
+
+function normalizeFacturaDetail(detail = {}) {
+  const raw = safeObject(detail);
+
+  return {
+    ...raw,
+    id: getFacturaId(raw),
+    facturaId: getFacturaId(raw),
+    numero: getFacturaNumber(raw),
+    cliente: isObject(raw.cliente)
+      ? raw.cliente
+      : {
+          empresa: getFacturaClient(raw),
+          email: getFacturaEmail(raw),
+        },
+    fecha: getFacturaDate(raw),
+    estadoPago: getFacturaEstadoPago(raw),
+    estado: getFacturaEstado(raw),
+    formaPago: getFacturaFormaPago(raw),
+    moneda: getFacturaMoneda(raw),
+    total: getFacturaTotal(raw),
+    enviadoA: getFacturaSentTo(raw),
+    fechaEnvio: getFacturaSentAt(raw),
+    raw,
+  };
+}
+
+function safeErrorMessage(error = null, fallback = "") {
+  return safeText(
+    error?.data?.message ||
+      error?.response?.data?.message ||
+      error?.response?.message ||
+      error?.message,
+    fallback
+  );
+}
+
+function escapeCsvCell(value = "") {
+  const text =
+    value === null || value === undefined
+      ? ""
+      : String(value);
+
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function buildCsvRows(items = []) {
+  const header = [
+    "id",
+    "numero",
+    "cliente",
+    "email",
+    "fecha",
+    "estadoPago",
+    "estado",
+    "formaPago",
+    "total",
+    "moneda",
+    "enviadoA",
+    "fechaEnvio",
+  ];
+
+  const rows = safeArray(items).map((item) => [
+    getFacturaId(item),
+    getFacturaNumber(item),
+    getFacturaClient(item),
+    getFacturaEmail(item),
+    getFacturaDate(item) || "",
+    getFacturaEstadoPago(item),
+    getFacturaEstado(item),
+    getFacturaFormaPago(item),
+    getFacturaTotal(item),
+    getFacturaMoneda(item),
+    getFacturaSentTo(item),
+    getFacturaSentAt(item) || "",
+  ]);
+
+  return [
+    header.map(escapeCsvCell).join(","),
+    ...rows.map((row) => row.map(escapeCsvCell).join(",")),
+  ].join("\n");
+}
+
+async function writeClipboardText(text = "") {
+  const value = safeText(text, "");
+
+  if (!value) return false;
+
   try {
-    if (
-      navigator?.clipboard
-        ?.writeText
-    ) {
-      await navigator.clipboard.writeText(
-        value
-      );
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
       return true;
     }
   } catch {}
 
   try {
-    const el =
-      document.createElement(
-        "textarea"
-      );
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.setAttribute("readonly", "true");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    textarea.style.pointerEvents = "none";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
 
-    el.value = value;
-    el.setAttribute(
-      "readonly",
-      "true"
-    );
-    el.style.position =
-      "fixed";
-    el.style.opacity =
-      "0";
-    el.style.pointerEvents =
-      "none";
+    const ok = document.execCommand("copy");
 
-    document.body.appendChild(
-      el
-    );
-
-    el.select();
-    el.setSelectionRange(
-      0,
-      value.length
-    );
-
-    const ok =
-      document.execCommand(
-        "copy"
-      );
-
-    el.remove();
+    textarea.remove();
 
     return Boolean(ok);
   } catch {
@@ -251,366 +419,189 @@ async function copyText(
   }
 }
 
-/* =========================================================
-   MODAL DETAIL
-========================================================= */
+function downloadTextFile({
+  filename = "",
+  content = "",
+  mimeType = "text/plain;charset=utf-8;",
+} = {}) {
+  const blob = new Blob([String(content || "")], {
+    type: mimeType,
+  });
 
-export function closeFacturaDetailModal() {
-  try {
-    removeEscHandler?.();
-  } catch {}
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
 
-  removeEscHandler = null;
+  anchor.href = url;
+  anchor.download = filename;
 
-  setBodyModalState(false);
-  removeModalRoot();
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
 
-  safeEmit(
-    "facturas:detail:closed",
-    {}
-  );
+  URL.revokeObjectURL(url);
 
   return true;
 }
 
-function bindFacturaModalEvents({
-  facturaId = "",
-  detail = null,
-  loadFacturaDetail,
-  sendingFacturaId = "",
-  onSendStart,
-  onSendEnd,
-  onSent,
-  reloadFacturas,
-} = {}) {
-  const root =
-    getModalRoot();
+/* =========================================================
+   DETAIL ACTIONS
+========================================================= */
 
-  if (!root) {
-    return () => {};
+export function getFacturaDetailFromStoreAction({
+  facturaId = "",
+} = {}) {
+  const id = normalizeFacturaId(facturaId);
+
+  if (!id) return null;
+
+  try {
+    const detail = getFacturaByIdStore(id);
+    const picked = pickDetail(detail);
+
+    if (!picked) return null;
+
+    return normalizeFacturaDetail(picked);
+  } catch {
+    return null;
+  }
+}
+
+export async function getFacturaDetailAction({
+  facturaId = "",
+  loadFacturaDetail,
+  preferFresh = true,
+  silent = false,
+} = {}) {
+  const id = normalizeFacturaId(facturaId);
+
+  if (!id) {
+    if (!silent) {
+      showToast("No se pudo resolver la factura.", "error");
+    }
+    return null;
   }
 
-  const onClick = async (
-    event
-  ) => {
-    const overlayClose =
-      event.target === root.firstElementChild;
+  const fallbackStoreDetail = getFacturaDetailFromStoreAction({
+    facturaId: id,
+  });
 
-    const closeBtn =
-      event.target.closest(
-        '[data-action="close-factura-detail"]'
-      );
+  if (!preferFresh && fallbackStoreDetail) {
+    return fallbackStoreDetail;
+  }
 
-    const pdfBtn =
-      event.target.closest(
-        '[data-action="view-factura-pdf"]'
-      );
+  try {
+    safeEmit("facturas:detail:request", {
+      facturaId: id,
+      source: "loader",
+    });
 
-    const downloadBtn =
-      event.target.closest(
-        '[data-action="download-factura"]'
-      );
+    let detail = null;
 
-    const sendBtn =
-      event.target.closest(
-        '[data-action="send-factura"]'
-      );
-
-    if (
-      overlayClose ||
-      closeBtn
-    ) {
-      event.preventDefault();
-      closeFacturaDetailModal();
-      return;
+    if (typeof loadFacturaDetail === "function") {
+      detail = await loadFacturaDetail(id);
+    } else {
+      detail = fallbackStoreDetail;
     }
 
-    if (pdfBtn) {
-      event.preventDefault();
+    const picked = pickDetail(detail);
 
-      await openFacturaPdfAction({
-        facturaId:
-          pdfBtn.dataset
-            .facturaId,
-      });
-
-      return;
-    }
-
-    if (downloadBtn) {
-      event.preventDefault();
-
-      await downloadFacturaPdfAction({
-        facturaId:
-          downloadBtn
-            .dataset
-            .facturaId,
-      });
-
-      return;
-    }
-
-    if (sendBtn) {
-      event.preventDefault();
-
-      const currentId =
-        safeText(
-          sendBtn.dataset
-            .facturaId,
-          ""
-        );
-
-      const currentDetail =
-        detail &&
-        resolveFacturaId(
-          detail
-        ) === currentId
-          ? detail
-          : getFacturaByIdStore(
-              currentId
-            );
-
-      const response =
-        await sendFacturaToClientAction(
-          {
-            facturaId:
-              currentId,
-            detail:
-              currentDetail,
-            onStart:
-              onSendStart,
-            onEnd: onSendEnd,
-            onSent,
-            reloadFacturas,
-            confirmSend: true,
-          }
-        );
-
-      if (!response) {
-        return;
+    if (!picked) {
+      if (fallbackStoreDetail) {
+        safeEmit("facturas:detail:fallback", {
+          facturaId: id,
+          source: "store",
+        });
+        return fallbackStoreDetail;
       }
 
-      const refreshed =
-        typeof loadFacturaDetail ===
-        "function"
-          ? await loadFacturaDetail(
-              currentId
-            ).catch(
-              () =>
-                currentDetail
-            )
-          : currentDetail;
-
-      await mountFacturaDetailModal(
-        {
-          factura:
-            refreshed ||
-            currentDetail,
-          detailLoading:
-            false,
-          sendingFacturaId,
-          loadFacturaDetail,
-          onSendStart,
-          onSendEnd,
-          onSent,
-          reloadFacturas,
-        }
-      );
-
-      return;
+      throw new Error("EMPTY_FACTURA_DETAIL");
     }
-  };
 
-  root.addEventListener(
-    "click",
-    onClick
-  );
+    const normalized = normalizeFacturaDetail(picked);
 
-  return () => {
-    root.removeEventListener(
-      "click",
-      onClick
-    );
-  };
-}
+    safeEmit("facturas:detail:success", {
+      facturaId: id,
+      source: typeof loadFacturaDetail === "function" ? "loader" : "store",
+      detail: normalized,
+    });
 
-let removeModalEvents =
-  null;
+    return normalized;
+  } catch (error) {
+    if (fallbackStoreDetail) {
+      safeEmit("facturas:detail:fallback", {
+        facturaId: id,
+        source: "store",
+        error,
+      });
 
-export async function mountFacturaDetailModal({
-  factura = null,
-  detailLoading = false,
-  sendingFacturaId = "",
-  loadFacturaDetail,
-  onSendStart,
-  onSendEnd,
-  onSent,
-  reloadFacturas,
-} = {}) {
-  const root =
-    ensureModalRoot();
+      return fallbackStoreDetail;
+    }
 
-  if (!root) {
-    return false;
+    safeEmit("facturas:detail:error", {
+      facturaId: id,
+      error,
+    });
+
+    if (!silent) {
+      showToast(
+        "No se pudo cargar el detalle de la factura.",
+        "error"
+      );
+    }
+
+    return null;
   }
-
-  try {
-    removeModalEvents?.();
-  } catch {}
-
-  removeModalEvents = null;
-
-  const html =
-    renderFacturasDetailModal({
-      detailOpen: true,
-      detailLoading,
-      factura,
-      sendingFacturaId,
-    });
-
-  root.innerHTML = html;
-
-  setBodyModalState(true);
-
-  try {
-    removeEscHandler?.();
-  } catch {}
-
-  removeEscHandler =
-    bindEscToClose();
-
-  removeModalEvents =
-    bindFacturaModalEvents({
-      facturaId:
-        resolveFacturaId(
-          factura
-        ),
-      detail: factura,
-      loadFacturaDetail,
-      sendingFacturaId,
-      onSendStart,
-      onSendEnd,
-      onSent,
-      reloadFacturas,
-    });
-
-  return true;
 }
-
-/* =========================================================
-   OPEN DETAIL
-========================================================= */
 
 export async function openFacturaAction({
   facturaId = "",
-  emitOpenEvent = true,
   loadFacturaDetail,
-  useStoreFirst = true,
-  mountModal = true,
-  onSendStart,
-  onSendEnd,
-  onSent,
-  reloadFacturas,
+  preferFresh = true,
+  silent = false,
 } = {}) {
-  const id =
-    safeText(
-      facturaId,
-      ""
-    );
+  const id = normalizeFacturaId(facturaId);
 
   if (!id) {
+    if (!silent) {
+      showToast("Factura inválida.", "error");
+    }
     return null;
   }
 
-  try {
-    if (
-      emitOpenEvent &&
-      typeof AppCore?.events?.emit ===
-        "function"
-    ) {
-      AppCore.events.emit(
-        "facturas:open",
-        {
-          facturaId: id,
-        }
-      );
-    }
+  safeEmit("facturas:open", {
+    facturaId: id,
+  });
 
-    let detail =
-      useStoreFirst
-        ? getFacturaByIdStore(
-            id
-          )
-        : null;
+  const detail = await getFacturaDetailAction({
+    facturaId: id,
+    loadFacturaDetail,
+    preferFresh,
+    silent,
+  });
 
-    if (mountModal) {
-      await mountFacturaDetailModal({
-        factura: detail,
-        detailLoading:
-          !detail,
-        loadFacturaDetail,
-        onSendStart,
-        onSendEnd,
-        onSent,
-        reloadFacturas,
-      });
-    }
-
-    if (
-      typeof loadFacturaDetail ===
-      "function"
-    ) {
-      detail =
-        await loadFacturaDetail(
-          id
-        );
-    } else if (!detail) {
-      detail =
-        getFacturaByIdStore(
-          id
-        );
-    }
-
-    if (
-      mountModal &&
-      detail
-    ) {
-      await mountFacturaDetailModal({
-        factura: detail,
-        detailLoading:
-          false,
-        loadFacturaDetail,
-        onSendStart,
-        onSendEnd,
-        onSent,
-        reloadFacturas,
-      });
-    }
-
-    safeEmit(
-      "facturas:detail:ready",
-      {
-        facturaId: id,
-        detail,
-      }
-    );
-
-    return detail;
-  } catch (error) {
-    console.error(
-      "❌ FACTURAS OPEN DETAIL:",
-      error
-    );
-
-    closeFacturaDetailModal();
-
-    showToast(
-      "No se pudo abrir el detalle de la factura.",
-      "error"
-    );
-
+  if (!detail) {
     return null;
   }
+
+  safeEmit("facturas:open:success", {
+    facturaId: id,
+    detail,
+  });
+
+  return detail;
+}
+
+export async function refreshFacturaDetailAction({
+  facturaId = "",
+  loadFacturaDetail,
+  silent = true,
+} = {}) {
+  return getFacturaDetailAction({
+    facturaId,
+    loadFacturaDetail,
+    preferFresh: true,
+    silent,
+  });
 }
 
 /* =========================================================
@@ -621,67 +612,49 @@ export async function openFacturaPdfAction({
   facturaId = "",
   onStart,
   onEnd,
+  silent = false,
 } = {}) {
-  const id =
-    safeText(
-      facturaId,
-      ""
-    );
+  const id = normalizeFacturaId(facturaId);
 
   if (!id) {
+    if (!silent) {
+      showToast("Factura inválida.", "error");
+    }
     return null;
   }
 
   try {
     onStart?.(id);
 
-    const response =
-      await fetchFacturaPdfUrlRequest(
-        id,
-        "inline"
-      );
-
-    const url =
-      resolvePdfUrl(
-        response
-      );
+    const response = await fetchFacturaPdfUrlRequest(id, "inline");
+    const url = resolvePdfUrl(response);
 
     if (!url) {
-      throw new Error(
-        "PDF_URL_MISSING"
-      );
+      throw new Error("PDF_URL_MISSING");
     }
 
-    window.open(
+    window.open(url, "_blank", "noopener,noreferrer");
+
+    safeEmit("facturas:pdf:opened", {
+      facturaId: id,
       url,
-      "_blank",
-      "noopener,noreferrer"
-    );
+    });
 
-    showToast(
-      "Abriendo PDF de la factura.",
-      "success"
-    );
-
-    safeEmit(
-      "facturas:pdf:opened",
-      {
-        facturaId: id,
-        url,
-      }
-    );
+    if (!silent) {
+      showToast("Abriendo PDF de la factura.", "success");
+    }
 
     return response;
   } catch (error) {
-    console.error(
-      "❌ FACTURAS VIEW PDF:",
-      error
-    );
+    safeEmit("facturas:pdf:error", {
+      facturaId: id,
+      error,
+      mode: "inline",
+    });
 
-    showToast(
-      "No se pudo abrir el PDF.",
-      "error"
-    );
+    if (!silent) {
+      showToast("No se pudo abrir el PDF.", "error");
+    }
 
     return null;
   } finally {
@@ -697,67 +670,49 @@ export async function downloadFacturaPdfAction({
   facturaId = "",
   onStart,
   onEnd,
+  silent = false,
 } = {}) {
-  const id =
-    safeText(
-      facturaId,
-      ""
-    );
+  const id = normalizeFacturaId(facturaId);
 
   if (!id) {
+    if (!silent) {
+      showToast("Factura inválida.", "error");
+    }
     return null;
   }
 
   try {
     onStart?.(id);
 
-    const response =
-      await fetchFacturaPdfUrlRequest(
-        id,
-        "attachment"
-      );
-
-    const url =
-      resolvePdfUrl(
-        response
-      );
+    const response = await fetchFacturaPdfUrlRequest(id, "attachment");
+    const url = resolvePdfUrl(response);
 
     if (!url) {
-      throw new Error(
-        "DOWNLOAD_URL_MISSING"
-      );
+      throw new Error("DOWNLOAD_URL_MISSING");
     }
 
-    window.open(
+    window.open(url, "_blank", "noopener,noreferrer");
+
+    safeEmit("facturas:pdf:download", {
+      facturaId: id,
       url,
-      "_blank",
-      "noopener,noreferrer"
-    );
+    });
 
-    showToast(
-      "Preparando descarga de factura.",
-      "success"
-    );
-
-    safeEmit(
-      "facturas:pdf:download",
-      {
-        facturaId: id,
-        url,
-      }
-    );
+    if (!silent) {
+      showToast("Preparando descarga de factura.", "success");
+    }
 
     return response;
   } catch (error) {
-    console.error(
-      "❌ FACTURAS DOWNLOAD PDF:",
-      error
-    );
+    safeEmit("facturas:pdf:error", {
+      facturaId: id,
+      error,
+      mode: "download",
+    });
 
-    showToast(
-      "No se pudo descargar la factura.",
-      "error"
-    );
+    if (!silent) {
+      showToast("No se pudo descargar la factura.", "error");
+    }
 
     return null;
   } finally {
@@ -777,25 +732,23 @@ export async function sendFacturaToClientAction({
   onSent,
   reloadFacturas,
   confirmSend = true,
+  silent = false,
 } = {}) {
-  const id =
-    safeText(
-      facturaId,
-      ""
-    );
+  const id = normalizeFacturaId(facturaId);
 
   if (!id) {
+    if (!silent) {
+      showToast("Factura inválida.", "error");
+    }
     return null;
   }
 
   const factura =
-    resolveFacturaId(
-      detail
-    ) === id
-      ? detail
-      : getFacturaByIdStore(
-          id
-        );
+    normalizeFacturaDetail(
+      resolveFacturaId(detail) === id
+        ? detail
+        : getFacturaByIdStore(id) || detail || {}
+    );
 
   const targetEmail =
     factura?.cliente?.email ||
@@ -803,15 +756,9 @@ export async function sendFacturaToClientAction({
     "el cliente";
 
   if (confirmSend) {
-    const confirmed =
-      window.confirm(
-        `Se va a enviar la factura ${
-          resolveFacturaNumber(
-            factura,
-            id
-          )
-        } a ${targetEmail}. ¿Continuar?`
-      );
+    const confirmed = window.confirm(
+      `Se va a enviar la factura ${getFacturaNumber(factura)} a ${targetEmail}. ¿Continuar?`
+    );
 
     if (!confirmed) {
       return null;
@@ -821,10 +768,7 @@ export async function sendFacturaToClientAction({
   try {
     onStart?.(id);
 
-    const response =
-      await sendFacturaRequest(
-        id
-      );
+    const response = await sendFacturaRequest(id);
 
     onSent?.({
       facturaId: id,
@@ -832,37 +776,29 @@ export async function sendFacturaToClientAction({
       factura,
     });
 
-    safeEmit(
-      "facturas:sent",
-      {
-        facturaId: id,
-        response,
-      }
-    );
+    safeEmit("facturas:sent", {
+      facturaId: id,
+      response,
+    });
 
-    showToast(
-      "Factura enviada correctamente.",
-      "success"
-    );
-
-    if (
-      typeof reloadFacturas ===
-      "function"
-    ) {
+    if (typeof reloadFacturas === "function") {
       await reloadFacturas();
+    }
+
+    if (!silent) {
+      showToast("Factura enviada correctamente.", "success");
     }
 
     return response;
   } catch (error) {
-    console.error(
-      "❌ FACTURAS SEND:",
-      error
-    );
+    safeEmit("facturas:send:error", {
+      facturaId: id,
+      error,
+    });
 
-    showToast(
-      "No se pudo enviar la factura.",
-      "error"
-    );
+    if (!silent) {
+      showToast("No se pudo enviar la factura.", "error");
+    }
 
     return null;
   } finally {
@@ -871,61 +807,49 @@ export async function sendFacturaToClientAction({
 }
 
 /* =========================================================
-   COPY FACTURA ID
+   COPY
 ========================================================= */
 
 export async function copyFacturaIdAction({
   facturaId = "",
   numero = "",
+  silent = false,
 } = {}) {
   const value =
-    safeText(
-      numero,
-      ""
-    ) ||
-    safeText(
-      facturaId,
-      ""
-    );
+    safeText(numero, "") ||
+    safeText(facturaId, "");
 
   if (!value) {
-    showToast(
-      "No se encontró identificador para copiar.",
-      "info"
-    );
+    if (!silent) {
+      showToast(
+        "No se encontró identificador para copiar.",
+        "info"
+      );
+    }
     return false;
   }
 
-  const ok =
-    await copyText(value);
+  const ok = await writeClipboardText(value);
 
   if (!ok) {
-    showToast(
-      "No se pudo copiar el identificador.",
-      "error"
-    );
+    if (!silent) {
+      showToast(
+        "No se pudo copiar el identificador.",
+        "error"
+      );
+    }
     return false;
   }
 
-  showToast(
-    "Identificador copiado.",
-    "success"
-  );
+  safeEmit("facturas:copied", {
+    facturaId: safeText(facturaId, ""),
+    numero: safeText(numero, ""),
+    value,
+  });
 
-  safeEmit(
-    "facturas:copied",
-    {
-      facturaId: safeText(
-        facturaId,
-        ""
-      ),
-      numero: safeText(
-        numero,
-        ""
-      ),
-      value,
-    }
-  );
+  if (!silent) {
+    showToast("Identificador copiado.", "success");
+  }
 
   return true;
 }
@@ -936,136 +860,103 @@ export async function copyFacturaIdAction({
 
 export function exportFacturasCsvAction({
   items = null,
-  filenamePrefix = "facturas",
+  filenamePrefix = CSV_FILENAME_PREFIX,
+  silent = false,
 } = {}) {
-  const list =
-    Array.isArray(items)
-      ? items
-      : getSortedFacturasStore();
+  const list = Array.isArray(items)
+    ? items
+    : getSortedFacturasStore();
 
-  if (!list.length) {
-    showToast(
-      "No hay facturas para exportar.",
-      "info"
-    );
+  const safeList = safeArray(list);
+
+  if (!safeList.length) {
+    if (!silent) {
+      showToast("No hay facturas para exportar.", "info");
+    }
     return false;
   }
 
-  const headers = [
-    "numero",
-    "cliente",
-    "email",
-    "fecha",
-    "estadoPago",
-    "estado",
-    "formaPago",
-    "total",
-    "moneda",
-  ];
+  try {
+    const csv = buildCsvRows(safeList);
+    const filename = `${safeText(
+      filenamePrefix,
+      CSV_FILENAME_PREFIX
+    )}_${new Date().toISOString().slice(0, 10)}.csv`;
 
-  const rows = list.map(
-    (item) => ({
-      numero:
-        item?.numero || "",
-      cliente:
-        item?.cliente
-          ?.empresa ||
-        item?.cliente
-          ?.nombre ||
-        "",
-      email:
-        item?.cliente
-          ?.email || "",
-      fecha:
-        item?.fecha || "",
-      estadoPago:
-        item?.estadoPago || "",
-      estado:
-        item?.estado || "",
-      formaPago:
-        item?.formaPago || "",
-      total: safeNumber(
-        item?.total,
-        0
-      ),
-      moneda:
-        item?.moneda || "EUR",
-    })
-  );
-
-  const csv = [
-    headers.join(","),
-    ...rows.map((row) =>
-      headers
-        .map(
-          (key) =>
-            `"${String(
-              row[key] ?? ""
-            ).replaceAll(
-              '"',
-              '""'
-            )}"`
-        )
-        .join(",")
-    ),
-  ].join("\n");
-
-  const blob =
-    new Blob([csv], {
-      type: "text/csv;charset=utf-8;",
+    downloadTextFile({
+      filename,
+      content: csv,
+      mimeType: "text/csv;charset=utf-8;",
     });
 
-  const url =
-    URL.createObjectURL(
-      blob
-    );
+    safeEmit("facturas:exported", {
+      total: safeList.length,
+      filename,
+      filenamePrefix: safeText(
+        filenamePrefix,
+        CSV_FILENAME_PREFIX
+      ),
+    });
 
-  const anchor =
-    document.createElement(
-      "a"
-    );
-
-  anchor.href = url;
-  anchor.download = `${safeText(
-    filenamePrefix,
-    "facturas"
-  )}_${new Date()
-    .toISOString()
-    .slice(0, 10)}.csv`;
-
-  document.body.appendChild(
-    anchor
-  );
-
-  anchor.click();
-  anchor.remove();
-
-  URL.revokeObjectURL(url);
-
-  showToast(
-    "Exportación CSV generada.",
-    "success"
-  );
-
-  safeEmit(
-    "facturas:exported",
-    {
-      total: list.length,
-      filenamePrefix:
-        safeText(
-          filenamePrefix,
-          "facturas"
-        ),
+    if (!silent) {
+      showToast("Exportación CSV generada.", "success");
     }
-  );
 
-  return true;
+    return true;
+  } catch (error) {
+    safeEmit("facturas:export:error", {
+      type: "csv",
+      error,
+    });
+
+    if (!silent) {
+      showToast("No se pudo exportar el CSV.", "error");
+    }
+
+    return false;
+  }
 }
 
+/* =========================================================
+   PRIVATE HELPER
+========================================================= */
+
+function resolveFacturaId(detail = null) {
+  return safeText(
+    detail?.id ||
+      detail?._id ||
+      detail?.facturaId,
+    ""
+  );
+}
+
+/* =========================================================
+   HELPERS EXPORT
+========================================================= */
+
+export {
+  getFacturaId as getFacturaIdAction,
+  getFacturaNumber as getFacturaNumberAction,
+  getFacturaClient as getFacturaClientAction,
+  getFacturaEmail as getFacturaEmailAction,
+  getFacturaDate as getFacturaDateAction,
+  getFacturaEstadoPago as getFacturaEstadoPagoAction,
+  getFacturaEstado as getFacturaEstadoAction,
+  getFacturaFormaPago as getFacturaFormaPagoAction,
+  getFacturaMoneda as getFacturaMonedaAction,
+  getFacturaTotal as getFacturaTotalAction,
+  normalizeFacturaDetail as normalizeFacturaDetailAction,
+};
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
 export default {
+  getFacturaDetailFromStoreAction,
+  getFacturaDetailAction,
   openFacturaAction,
-  closeFacturaDetailModal,
-  mountFacturaDetailModal,
+  refreshFacturaDetailAction,
   openFacturaPdfAction,
   downloadFacturaPdfAction,
   sendFacturaToClientAction,

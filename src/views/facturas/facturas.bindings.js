@@ -10,7 +10,6 @@
    - delegación de eventos sobre cards y acciones de colección
    - evitar dobles listeners por re-render
    - re-evaluar estado vivo en cada interacción
-   - delegar bootstrap inicial a la vista
    - mantener facturasView.js limpio
 
    HARDENING PRO:
@@ -19,6 +18,7 @@
    - no usa snapshots de estado congelados
    - tolera ausencia parcial de acciones
    - soporta refresh explícito con asRefresh
+   - no ejecuta bootstrap inicial: eso pertenece a la vista
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -130,6 +130,7 @@ function isOpenBusyState(state = {}) {
   return Boolean(
     state?.loading ||
       state?.refreshing ||
+      state?.detailLoading ||
       state?.openingFacturaId
   );
 }
@@ -179,8 +180,8 @@ export function bindFacturasView({
   openFacturaPdf,
   downloadFacturaPdf,
   sendFacturaToClient,
+  closeDetail,
   exportFacturasCsv,
-  onBootstrap,
 } = {}) {
   if (typeof getContainer !== "function") {
     return () => {};
@@ -197,10 +198,7 @@ export function bindFacturasView({
   const refreshBtn = container.querySelector("#facturas-refresh-btn");
   const retryBtn = container.querySelector("#facturas-retry-btn");
   const exportBtn = container.querySelector("#facturas-export-btn");
-
-  /* =========================================
-     DIRECT BUTTONS
-  ========================================= */
+  const closeDetailBtn = container.querySelector("[data-action='close-detail']");
 
   if (refreshBtn) {
     AppCore?.cleanup?.on?.(
@@ -292,9 +290,17 @@ export function bindFacturasView({
     );
   }
 
-  /* =========================================
-     DELEGATED ACTIONS COLLECTION
-  ========================================= */
+  if (closeDetailBtn) {
+    AppCore?.cleanup?.on?.(
+      scope,
+      closeDetailBtn,
+      "click",
+      (event) => {
+        event.preventDefault();
+        closeDetail?.();
+      }
+    );
+  }
 
   AppCore?.cleanup?.on?.(
     scope,
@@ -364,6 +370,13 @@ export function bindFacturasView({
           await sendFacturaToClient?.(facturaId);
           return;
         }
+
+        if (action === "close-detail") {
+          event.preventDefault();
+          event.stopPropagation();
+          closeDetail?.();
+          return;
+        }
       }
 
       if (
@@ -382,41 +395,6 @@ export function bindFacturasView({
       }
     }
   );
-
-  /* =========================================
-     BOOTSTRAP
-  ========================================= */
-
-  const liveState = getLiveState(getState);
-
-  if (!liveState?.bootstrapped) {
-    try {
-      if (typeof onBootstrap === "function") {
-        onBootstrap();
-      } else {
-        safeRefresh({
-          loadFacturas,
-          silent: false,
-          asRefresh: false,
-          force: false,
-        }).catch(() => {
-          showBindingToast(
-            "No se pudieron cargar las facturas.",
-            "error"
-          );
-        });
-      }
-    } catch {
-      showBindingToast(
-        "No se pudieron cargar las facturas.",
-        "error"
-      );
-    }
-  }
-
-  /* =========================================
-     CLEANUP
-  ========================================= */
 
   return () => {
     try {

@@ -1,12 +1,15 @@
 :root{
   /* =========================================================
      ONION SUPPORT — DESIGN TOKENS / ULTRA PRO SAAS PANEL
-     REFINADO PARA:
+     FINAL MASTER TOKENS / COPY-PASTE FULL
+
+     CALIBRADO PARA:
+     - 100% visual más cerca de tu 90% ideal
      - dashboard premium serio
      - mejor densidad operativa
-     - excelente lectura a 100%
-     - rendimiento visual brutal a 75%
-     - menos "hero UI", más "control center"
+     - shell más compacta
+     - lectura limpia
+     - menos hero ui, más control center
   ========================================================= */
 
   /* =========================
@@ -33,49 +36,42 @@
 
   /* =========================
      GLOBAL UI SCALE / DENSITY
-     BASE OPTIMIZADA PARA PANEL
+     100% visual ~= 90% actual
   ========================= */
-  --ui-scale: 1;
-  --density-factor: 1;
-
-  /*
-    PRESETS SUGERIDOS:
-    compact     -> .92
-    normal      -> 1
-    comfortable -> 1.08
-  */
+  --ui-scale: .97;
+  --density-factor: .93;
 
   /* =========================
      LAYOUT
   ========================= */
-  --content-max: 1360px;
-  --content-narrow: 1160px;
+  --content-max: 1340px;
+  --content-narrow: 1140px;
 
-  --content-padding: calc(24px * var(--ui-scale));
-  --content-padding-lg: calc(32px * var(--ui-scale));
-  --content-padding-xl: calc(40px * var(--ui-scale));
+  --content-padding: calc(22px * var(--ui-scale));
+  --content-padding-lg: calc(28px * var(--ui-scale));
+  --content-padding-xl: calc(36px * var(--ui-scale));
 
-  --sidebar-width: calc(258px * var(--ui-scale));
-  --sidebar-collapsed: calc(74px * var(--ui-scale));
-  --sidebar-item-height: calc(42px * var(--ui-scale));
+  --sidebar-width: calc(252px * var(--ui-scale));
+  --sidebar-collapsed: calc(72px * var(--ui-scale));
+  --sidebar-item-height: calc(40px * var(--ui-scale));
   --sidebar-icon-size: calc(18px * var(--ui-scale));
-  --sidebar-item-padding-x: calc(12px * var(--ui-scale));
+  --sidebar-item-padding-x: calc(11px * var(--ui-scale));
   --sidebar-icon-offset: calc(
     var(--sidebar-item-padding-x) + (var(--sidebar-icon-size) / 2)
   );
 
-  --topbar-height: calc(56px * var(--ui-scale));
-  --page-offset: calc(22px * var(--ui-scale));
-  --tablehead-height: calc(44px * var(--ui-scale));
+  --topbar-height: calc(54px * var(--ui-scale));
+  --page-offset: calc(20px * var(--ui-scale));
+  --tablehead-height: calc(42px * var(--ui-scale));
 
-  --view-radius: calc(22px * var(--ui-scale));
-  --panel-radius: calc(18px * var(--ui-scale));
-  --card-radius: calc(20px * var(--ui-scale));
-  --card-radius-lg: calc(24px * var(--ui-scale));
-  --modal-radius: calc(24px * var(--ui-scale));
-  --dropdown-radius: calc(16px * var(--ui-scale));
-  --input-radius: calc(14px * var(--ui-scale));
-  --btn-radius: calc(14px * var(--ui-scale));
+  --view-radius: calc(20px * var(--ui-scale));
+  --panel-radius: calc(17px * var(--ui-scale));
+  --card-radius: calc(18px * var(--ui-scale));
+  --card-radius-lg: calc(22px * var(--ui-scale));
+  --modal-radius: calc(22px * var(--ui-scale));
+  --dropdown-radius: calc(15px * var(--ui-scale));
+  --input-radius: calc(13px * var(--ui-scale));
+  --btn-radius: calc(13px * var(--ui-scale));
 
   --app-offset: calc(
     var(--topbar-height) + var(--tablehead-height)
@@ -98,7 +94,7 @@
   --app-offset-tablehead: 0px;
 
   --content-padding-inline: var(--content-padding);
-  --content-padding-block: var(--space-lg);
+  --content-padding-block: var(--space-md);
 
   --shell-blur: var(--blur-lg);
   --shell-border: var(--border-soft);
@@ -225,6 +221,7 @@
 
   --dropdown-bg: rgba(38,38,40,.98);
   --tooltip-bg: #242427;
+  --tooltip-text: #ffffff;
   --popover-bg: rgba(38,38,40,.98);
   --modal-bg: rgba(32,32,35,.96);
   --backdrop-bg: rgba(10,10,12,.68);
@@ -261,6 +258,10 @@
 
   --link: #d4d4d8;
   --link-hover: #f4f4f5;
+
+  /* compat legacy */
+  --muted: var(--text-muted);
+  --dim: var(--text-dim);
 
   /* =========================
      STATUS SYSTEM
@@ -320,9 +321,9 @@
   /* =========================
      INPUT SYSTEM
   ========================= */
-  --input-height: calc(46px * var(--ui-scale));
-  --input-height-sm: calc(38px * var(--ui-scale));
-  --input-height-lg: calc(52px * var(--ui-scale));
+  --input-height: calc(44px * var(--ui-scale));
+  --input-height-sm: calc(36px * var(--ui-scale));
+  --input-height-lg: calc(50px * var(--ui-scale));
 
   --input-bg: rgba(255,255,255,.028);
   --input-bg-hover: rgba(255,255,255,.040);
@@ -352,9 +353,9 @@
   /* =========================
      BUTTON SYSTEM
   ========================= */
-  --btn-height: calc(44px * var(--ui-scale));
-  --btn-height-sm: calc(36px * var(--ui-scale));
-  --btn-height-lg: calc(50px * var(--ui-scale));
+  --btn-height: calc(42px * var(--ui-scale));
+  --btn-height-sm: calc(34px * var(--ui-scale));
+  --btn-height-lg: calc(48px * var(--ui-scale));
 
   --btn-primary-bg:
     linear-gradient(180deg, #4a4a51 0%, #3f3f46 100%);
@@ -415,16 +416,16 @@
   --sidebar-safe-bottom: env(safe-area-inset-bottom, 0px);
   --sidebar-safe-left: env(safe-area-inset-left, 0px);
 
-  --sidebar-top-height: calc(64px * var(--ui-scale));
-  --sidebar-inline-padding: calc(10px * var(--ui-scale));
+  --sidebar-top-height: calc(60px * var(--ui-scale));
+  --sidebar-inline-padding: calc(9px * var(--ui-scale));
   --sidebar-section-gap: calc(4px * var(--ui-scale));
 
-  --sidebar-tooltip-offset: calc(12px * var(--ui-scale));
+  --sidebar-tooltip-offset: calc(11px * var(--ui-scale));
   --sidebar-tooltip-arrow-offset: calc(8px * var(--ui-scale));
 
-  --sidebar-dropdown-bottom: calc(64px * var(--ui-scale));
-  --sidebar-mobile-width: min(86vw, calc(308px * var(--ui-scale)));
-  --sidebar-mobile-width-xs: min(92vw, calc(308px * var(--ui-scale)));
+  --sidebar-dropdown-bottom: calc(60px * var(--ui-scale));
+  --sidebar-mobile-width: min(86vw, calc(300px * var(--ui-scale)));
+  --sidebar-mobile-width-xs: min(92vw, calc(300px * var(--ui-scale)));
 
   /* =========================
      TOPBAR
@@ -438,14 +439,14 @@
   --topbar-safe-right: var(--app-safe-right);
   --topbar-safe-left: var(--app-safe-left);
 
-  --topbar-inline-padding: var(--space-md);
+  --topbar-inline-padding: var(--space-sm);
 
-  --topbar-search-height: calc(40px * var(--ui-scale));
-  --topbar-search-max-width: calc(460px * var(--ui-scale));
+  --topbar-search-height: calc(38px * var(--ui-scale));
+  --topbar-search-max-width: calc(440px * var(--ui-scale));
   --topbar-search-radius: 999px;
 
   --topbar-search-results-offset: calc(8px * var(--ui-scale));
-  --topbar-search-results-max-height: calc(320px * var(--ui-scale));
+  --topbar-search-results-max-height: calc(300px * var(--ui-scale));
 
   --topbar-overlay-accent: rgba(255,255,255,.018);
   --topbar-overlay-shine: rgba(255,255,255,.030);
@@ -462,10 +463,10 @@
   --table-border: rgba(255,255,255,.052);
   --table-head-border: rgba(255,255,255,.075);
 
-  --table-cell-padding-y: calc(10px * var(--ui-scale));
-  --table-cell-padding-x: calc(12px * var(--ui-scale));
-  --table-cell-padding-y-compact: calc(8px * var(--ui-scale));
-  --table-cell-padding-x-compact: calc(10px * var(--ui-scale));
+  --table-cell-padding-y: calc(9px * var(--ui-scale));
+  --table-cell-padding-x: calc(11px * var(--ui-scale));
+  --table-cell-padding-y-compact: calc(7px * var(--ui-scale));
+  --table-cell-padding-x-compact: calc(9px * var(--ui-scale));
 
   /* =========================
      KPI COLORS
@@ -494,10 +495,10 @@
     linear-gradient(180deg, #71717a 0%, #52525b 100%);
   --avatar-text: #ffffff;
 
-  --avatar-size-xs: calc(24px * var(--ui-scale));
-  --avatar-size-sm: calc(30px * var(--ui-scale));
-  --avatar-size-md: calc(38px * var(--ui-scale));
-  --avatar-size-lg: calc(46px * var(--ui-scale));
+  --avatar-size-xs: calc(22px * var(--ui-scale));
+  --avatar-size-sm: calc(28px * var(--ui-scale));
+  --avatar-size-md: calc(36px * var(--ui-scale));
+  --avatar-size-lg: calc(44px * var(--ui-scale));
 
   --badge-bg: rgba(255,255,255,.048);
   --badge-border: rgba(255,255,255,.07);
@@ -507,8 +508,8 @@
   --chip-border: rgba(255,255,255,.07);
   --chip-text: var(--text-soft);
 
-  --chip-height: calc(28px * var(--ui-scale));
-  --chip-height-sm: calc(24px * var(--ui-scale));
+  --chip-height: calc(26px * var(--ui-scale));
+  --chip-height-sm: calc(22px * var(--ui-scale));
 
   /* =========================
      TYPOGRAPHY
@@ -521,11 +522,11 @@
   --font-md: calc(13px * var(--ui-scale));
   --font-base: calc(14px * var(--ui-scale));
   --font-lg: calc(15px * var(--ui-scale));
-  --font-xl: calc(17px * var(--ui-scale));
-  --font-2xl: calc(20px * var(--ui-scale));
-  --font-3xl: calc(26px * var(--ui-scale));
-  --font-4xl: calc(34px * var(--ui-scale));
-  --font-5xl: calc(42px * var(--ui-scale));
+  --font-xl: calc(16px * var(--ui-scale));
+  --font-2xl: calc(19px * var(--ui-scale));
+  --font-3xl: calc(24px * var(--ui-scale));
+  --font-4xl: calc(32px * var(--ui-scale));
+  --font-5xl: calc(40px * var(--ui-scale));
 
   --weight-regular: 400;
   --weight-medium: 500;
@@ -554,9 +555,9 @@
   --space-lg: calc(20px * var(--density-factor) * var(--ui-scale));
   --space-xl: calc(24px * var(--density-factor) * var(--ui-scale));
   --space-2xl: calc(28px * var(--density-factor) * var(--ui-scale));
-  --space-3xl: calc(36px * var(--density-factor) * var(--ui-scale));
-  --space-4xl: calc(48px * var(--density-factor) * var(--ui-scale));
-  --space-5xl: calc(64px * var(--density-factor) * var(--ui-scale));
+  --space-3xl: calc(34px * var(--density-factor) * var(--ui-scale));
+  --space-4xl: calc(44px * var(--density-factor) * var(--ui-scale));
+  --space-5xl: calc(56px * var(--density-factor) * var(--ui-scale));
 
   /* =========================
      DENSITY HELPERS
@@ -567,41 +568,41 @@
   --space-dynamic-lg: var(--space-lg);
   --space-dynamic-xl: var(--space-xl);
 
-  --section-gap: var(--space-xl);
-  --stack-gap: var(--space-lg);
+  --section-gap: var(--space-lg);
+  --stack-gap: var(--space-md);
   --cluster-gap: var(--space-sm);
 
   /* =========================
      RADIUS
   ========================= */
-  --radius-xs: calc(8px * var(--ui-scale));
+  --radius-xs: calc(7px * var(--ui-scale));
   --radius-sm: calc(10px * var(--ui-scale));
-  --radius-md: calc(14px * var(--ui-scale));
-  --radius-lg: calc(18px * var(--ui-scale));
-  --radius-xl: calc(20px * var(--ui-scale));
-  --radius-2xl: calc(24px * var(--ui-scale));
-  --radius-3xl: calc(30px * var(--ui-scale));
+  --radius-md: calc(13px * var(--ui-scale));
+  --radius-lg: calc(16px * var(--ui-scale));
+  --radius-xl: calc(18px * var(--ui-scale));
+  --radius-2xl: calc(22px * var(--ui-scale));
+  --radius-3xl: calc(28px * var(--ui-scale));
   --radius-pill: 999px;
 
   /* =========================
      SHADOW SYSTEM
   ========================= */
-  --shadow-xs: 0 2px 8px rgba(0,0,0,.14);
-  --shadow-sm: 0 6px 16px rgba(0,0,0,.18);
-  --shadow-md: 0 16px 34px rgba(0,0,0,.24);
-  --shadow-lg: 0 22px 52px rgba(0,0,0,.30);
-  --shadow-xl: 0 32px 80px rgba(0,0,0,.38);
+  --shadow-xs: 0 2px 8px rgba(0,0,0,.12);
+  --shadow-sm: 0 6px 14px rgba(0,0,0,.16);
+  --shadow-md: 0 14px 30px rgba(0,0,0,.22);
+  --shadow-lg: 0 20px 46px rgba(0,0,0,.28);
+  --shadow-xl: 0 28px 72px rgba(0,0,0,.36);
 
-  --shadow-soft: 0 8px 20px rgba(0,0,0,.14);
-  --shadow-strong: 0 28px 72px rgba(0,0,0,.42);
+  --shadow-soft: 0 8px 18px rgba(0,0,0,.13);
+  --shadow-strong: 0 24px 64px rgba(0,0,0,.38);
 
   --shadow-glow:
-    0 0 0 1px rgba(255,255,255,.03),
-    0 18px 42px rgba(0,0,0,.18);
+    0 0 0 1px rgba(255,255,255,.025),
+    0 16px 36px rgba(0,0,0,.16);
 
   --shadow-glow-cyan:
     0 0 0 1px rgba(255,255,255,.02),
-    0 18px 42px rgba(0,0,0,.16);
+    0 16px 36px rgba(0,0,0,.14);
 
   --shadow-inner:
     inset 0 1px 0 rgba(255,255,255,.04);
@@ -647,8 +648,8 @@
   /* =========================
      AUTH / LOGIN ESPECÍFICAS
   ========================= */
-  --auth-max-width: 1120px;
-  --auth-card-width: 440px;
+  --auth-max-width: 1080px;
+  --auth-card-width: 420px;
 
   --auth-card-bg:
     linear-gradient(180deg, rgba(255,255,255,.026) 0%, rgba(255,255,255,.010) 100%),
@@ -670,15 +671,15 @@
   /* =========================
      TOAST
   ========================= */
-  --ui-toast-top: calc(20px * var(--ui-scale));
-  --ui-toast-right: calc(20px * var(--ui-scale));
-  --ui-toast-width: min(500px, calc(100vw - 28px));
-  --ui-toast-padding-y: calc(16px * var(--ui-scale));
-  --ui-toast-padding-x: calc(18px * var(--ui-scale));
-  --ui-toast-gap: calc(14px * var(--ui-scale));
+  --ui-toast-top: calc(16px * var(--ui-scale));
+  --ui-toast-right: calc(16px * var(--ui-scale));
+  --ui-toast-width: min(460px, calc(100vw - 24px));
+  --ui-toast-padding-y: calc(14px * var(--ui-scale));
+  --ui-toast-padding-x: calc(16px * var(--ui-scale));
+  --ui-toast-gap: calc(12px * var(--ui-scale));
   --ui-toast-radius: var(--radius-xl);
-  --ui-toast-icon-size: calc(22px * var(--ui-scale));
-  --ui-toast-close-size: calc(26px * var(--ui-scale));
+  --ui-toast-icon-size: calc(20px * var(--ui-scale));
+  --ui-toast-close-size: calc(24px * var(--ui-scale));
 
   --ui-toast-loading-ring: rgba(255,255,255,.12);
   --ui-toast-loading-active: var(--accent);
@@ -698,4 +699,448 @@
   --loader-text: var(--text);
   --loader-ring: rgba(255,255,255,.12);
   --loader-ring-active: var(--accent);
+}
+
+
+/* =========================================================
+   LIGHT THEME
+========================================================= */
+[data-theme="light"]{
+  /* =========================
+     BRAND
+  ========================= */
+  --accent: #6f59d9;
+  --accent-hover: #624acb;
+  --accent-active: #533cb6;
+
+  --accent-2: #7c6ae6;
+  --accent-3: #3b82a6;
+  --accent-4: #1f9d68;
+  --accent-5: #c45a86;
+
+  --accent-soft: rgba(111,89,217,.12);
+  --accent-soft-2: rgba(124,106,230,.10);
+  --accent-ghost: rgba(111,89,217,.08);
+  --accent-subtle: rgba(111,89,217,.05);
+  --accent-ring: rgba(111,89,217,.16);
+  --accent-border: rgba(111,89,217,.24);
+  --accent-border-strong: rgba(111,89,217,.34);
+  --accent-glow: rgba(111,89,217,.10);
+  --accent-glow-strong: rgba(111,89,217,.16);
+
+  --brand-2: #1f9d68;
+  --brand-2-soft: rgba(31,157,104,.12);
+
+  --brand-3: #3b82a6;
+  --brand-3-soft: rgba(59,130,166,.12);
+
+  --brand-4: #c07a16;
+  --brand-4-soft: rgba(192,122,22,.12);
+
+  --brand-5: #c45a86;
+  --brand-5-soft: rgba(196,90,134,.12);
+
+  /* =========================
+     TEXT
+  ========================= */
+  --text: #172033;
+  --text-strong: #0b1220;
+  --text-soft: rgba(23,32,51,.88);
+  --text-muted: rgba(23,32,51,.70);
+  --text-dim: rgba(23,32,51,.52);
+  --text-faint: rgba(23,32,51,.36);
+  --text-disabled: rgba(23,32,51,.24);
+
+  --text-on-accent: #ffffff;
+  --text-on-light: #172033;
+
+  --link: var(--accent);
+  --link-hover: var(--accent-hover);
+
+  /* compat legacy */
+  --muted: var(--text-muted);
+  --dim: var(--text-dim);
+
+  /* =========================
+     BASE / BACKDROP
+  ========================= */
+  --main-bg: #f3f6fa;
+  --main-bg-2: #edf2f7;
+  --main-bg-3: #e7edf4;
+  --body-fallback: #f3f6fa;
+
+  --body-bg:
+    radial-gradient(circle at top left, rgba(111,89,217,.045), transparent 22%),
+    radial-gradient(circle at top right, rgba(59,130,166,.040), transparent 20%),
+    radial-gradient(circle at 50% 100%, rgba(196,90,134,.025), transparent 22%),
+    linear-gradient(180deg, #f8fbfe 0%, #f1f5f9 100%);
+
+  --gradient-main:
+    linear-gradient(180deg, #f8fbfe 0%, #eef3f8 100%);
+
+  --gradient-overlay:
+    radial-gradient(circle at 40% 0%, rgba(15,23,42,.035), transparent 68%);
+
+  --gradient-accent:
+    linear-gradient(135deg, #7c6ae6 0%, #6f59d9 52%, #4c7fa3 100%);
+
+  --gradient-accent-soft:
+    linear-gradient(135deg, rgba(124,106,230,.10) 0%, rgba(59,130,166,.08) 100%);
+
+  --gradient-success:
+    linear-gradient(180deg, #22c55e 0%, #16a34a 100%);
+
+  --gradient-warning:
+    linear-gradient(180deg, #f59e0b 0%, #d97706 100%);
+
+  --gradient-error:
+    linear-gradient(180deg, #ef4444 0%, #dc2626 100%);
+
+  --app-noise:
+    radial-gradient(circle at 50% 0%, rgba(255,255,255,.52), transparent 62%);
+
+  --panel-noise:
+    linear-gradient(180deg, rgba(255,255,255,.40), transparent 36%);
+
+  --glass-shine:
+    linear-gradient(180deg, rgba(255,255,255,.74), rgba(255,255,255,0) 32%);
+
+  /* =========================
+     SURFACE SYSTEM
+  ========================= */
+  --surface-0: #f3f6fa;
+  --surface-1: #f8fafc;
+  --surface-2: #ffffff;
+  --surface-3: #f8fbfd;
+  --surface-4: #eef3f7;
+  --surface-5: #e4ebf2;
+
+  --surface-elevated: rgba(255,255,255,.88);
+  --surface-elevated-strong: rgba(255,255,255,.94);
+
+  --surface-glass: rgba(255,255,255,.70);
+  --surface-glass-strong: rgba(255,255,255,.82);
+  --surface-glass-accent: rgba(111,89,217,.06);
+
+  --surface-hover: rgba(23,32,51,.030);
+  --surface-hover-strong: rgba(23,32,51,.048);
+  --surface-active: rgba(23,32,51,.068);
+  --surface-selected: rgba(111,89,217,.09);
+  --surface-disabled: rgba(23,32,51,.018);
+
+  --dropdown-bg: rgba(255,255,255,.96);
+  --tooltip-bg: #111827;
+  --tooltip-text: #ffffff;
+  --popover-bg: rgba(255,255,255,.97);
+  --modal-bg: rgba(255,255,255,.94);
+  --backdrop-bg: rgba(15,23,42,.24);
+
+  /* compat legacy */
+  --sb-bg: rgba(255,255,255,.90);
+  --dropdown-bg-legacy: var(--dropdown-bg);
+
+  /* =========================
+     BORDER SYSTEM
+  ========================= */
+  --border-soft: rgba(23,32,51,.055);
+  --border-default: rgba(23,32,51,.095);
+  --border-strong: rgba(23,32,51,.14);
+  --border-stronger: rgba(23,32,51,.20);
+  --border-glass: rgba(255,255,255,.52);
+
+  --border-accent: rgba(111,89,217,.24);
+  --border-accent-strong: rgba(111,89,217,.34);
+  --border-success: rgba(22,163,74,.24);
+  --border-warning: rgba(217,119,6,.24);
+  --border-error: rgba(220,38,38,.24);
+  --border-info: rgba(59,130,166,.24);
+
+  /* =========================
+     CARD / PANEL / BLOCK
+  ========================= */
+  --card-bg:
+    linear-gradient(180deg, rgba(255,255,255,.94) 0%, rgba(248,250,252,.98) 100%);
+  --card-bg-hover:
+    linear-gradient(180deg, rgba(255,255,255,.98) 0%, rgba(248,250,252,.99) 100%);
+
+  --card-border: rgba(23,32,51,.075);
+  --card-border-hover: rgba(23,32,51,.11);
+  --card-highlight: inset 0 1px 0 rgba(255,255,255,.78);
+
+  --card-shadow:
+    0 10px 26px rgba(15,23,42,.055),
+    0 2px 8px rgba(15,23,42,.035);
+
+  --panel-bg:
+    linear-gradient(180deg, rgba(255,255,255,.92) 0%, rgba(248,250,252,.98) 100%);
+  --panel-bg-hover:
+    linear-gradient(180deg, rgba(255,255,255,.96) 0%, rgba(248,250,252,1) 100%);
+
+  --panel-border: rgba(23,32,51,.075);
+  --panel-border-hover: rgba(23,32,51,.11);
+
+  --panel-shadow:
+    0 10px 24px rgba(15,23,42,.055),
+    0 2px 8px rgba(15,23,42,.035);
+
+  --block-bg: rgba(23,32,51,.026);
+  --block-bg-hover: rgba(23,32,51,.040);
+  --block-border: rgba(23,32,51,.075);
+
+  /* =========================
+     INPUT SYSTEM
+  ========================= */
+  --input-bg: rgba(255,255,255,.96);
+  --input-bg-hover: #ffffff;
+  --input-bg-focus: #ffffff;
+  --input-disabled-bg: rgba(23,32,51,.028);
+
+  --input-border: rgba(23,32,51,.10);
+  --input-border-hover: rgba(23,32,51,.16);
+  --input-border-focus: rgba(111,89,217,.42);
+  --input-border-error: rgba(220,38,38,.38);
+  --input-border-success: rgba(22,163,74,.34);
+
+  --input-text: var(--text);
+  --input-placeholder: #8b98ab;
+  --input-icon: rgba(23,32,51,.42);
+
+  --input-shadow:
+    inset 0 1px 0 rgba(255,255,255,.88);
+
+  --input-shadow-hover:
+    inset 0 1px 0 rgba(255,255,255,.96);
+
+  --input-shadow-focus:
+    0 0 0 4px rgba(111,89,217,.10),
+    0 10px 22px rgba(111,89,217,.06);
+
+  /* =========================
+     BUTTONS
+  ========================= */
+  --btn-primary-bg:
+    linear-gradient(180deg, #7864df 0%, #6f59d9 100%);
+  --btn-primary-bg-hover:
+    linear-gradient(180deg, #6f59d9 0%, #624acb 100%);
+  --btn-primary-bg-active:
+    linear-gradient(180deg, #624acb 0%, #533cb6 100%);
+  --btn-primary-text: #ffffff;
+  --btn-primary-border: rgba(255,255,255,.14);
+  --btn-primary-shadow:
+    0 10px 20px rgba(111,89,217,.16),
+    inset 0 1px 0 rgba(255,255,255,.18);
+
+  --btn-secondary-bg: rgba(23,32,51,.038);
+  --btn-secondary-bg-hover: rgba(23,32,51,.055);
+  --btn-secondary-bg-active: rgba(23,32,51,.08);
+  --btn-secondary-text: var(--text);
+  --btn-secondary-border: rgba(23,32,51,.075);
+  --btn-secondary-shadow: 0 5px 12px rgba(15,23,42,.05);
+
+  --btn-ghost-bg: rgba(23,32,51,.024);
+  --btn-ghost-bg-hover: rgba(23,32,51,.050);
+  --btn-ghost-bg-active: rgba(23,32,51,.072);
+  --btn-ghost-text: var(--text-muted);
+  --btn-ghost-border: rgba(23,32,51,.07);
+
+  --btn-danger-bg:
+    linear-gradient(180deg, #f26b7a 0%, #e64b5d 100%);
+  --btn-danger-bg-hover:
+    linear-gradient(180deg, #eb5e6d 0%, #d83c4d 100%);
+  --btn-danger-bg-active:
+    linear-gradient(180deg, #d83c4d 0%, #b52a39 100%);
+  --btn-danger-text: #ffffff;
+  --btn-danger-shadow:
+    0 8px 18px rgba(230,75,93,.14),
+    inset 0 1px 0 rgba(255,255,255,.12);
+
+  /* =========================
+     SIDEBAR
+  ========================= */
+  --sidebar-bg: rgba(255,255,255,.86);
+  --sidebar-bg-strong: rgba(255,255,255,.94);
+  --sidebar-border: rgba(23,32,51,.065);
+  --sidebar-shadow: 0 16px 34px rgba(15,23,42,.07);
+
+  --sidebar-hover: rgba(23,32,51,.035);
+  --sidebar-active: rgba(111,89,217,.09);
+  --sidebar-active-hover: rgba(111,89,217,.12);
+  --sidebar-active-border: rgba(111,89,217,.18);
+
+  --sidebar-text: rgba(23,32,51,.72);
+  --sidebar-text-active: #0f172a;
+  --sidebar-icon: rgba(23,32,51,.54);
+  --sidebar-icon-active: var(--accent);
+
+  /* compat legacy */
+  --sb-bg: var(--sidebar-bg);
+  --sb-hover: var(--sidebar-hover);
+  --sb-active: var(--sidebar-active);
+  --sb-border: var(--sidebar-border);
+
+  /* =========================
+     TOPBAR
+  ========================= */
+  --topbar-bg: rgba(255,255,255,.74);
+  --topbar-border: rgba(23,32,51,.055);
+  --topbar-shadow: 0 8px 18px rgba(15,23,42,.045);
+  --topbar-blur: blur(16px);
+
+  /* =========================
+     TABLES / DATA UI
+  ========================= */
+  --table-bg: transparent;
+  --table-head-bg: rgba(23,32,51,.022);
+  --table-row-bg: transparent;
+  --table-row-hover: rgba(23,32,51,.022);
+  --table-row-selected: rgba(111,89,217,.07);
+
+  --table-border: rgba(23,32,51,.055);
+  --table-head-border: rgba(23,32,51,.085);
+
+  /* =========================
+     STATUS
+  ========================= */
+  --success: #1f9d68;
+  --success-hover: #157a4f;
+  --success-soft: rgba(31,157,104,.12);
+  --success-bg: rgba(31,157,104,.09);
+
+  --warning: #c07a16;
+  --warning-hover: #9c6110;
+  --warning-soft: rgba(192,122,22,.12);
+  --warning-bg: rgba(192,122,22,.09);
+
+  --error: #d83c4d;
+  --error-hover: #b52a39;
+  --error-soft: rgba(216,60,77,.12);
+  --error-bg: rgba(216,60,77,.09);
+
+  --info: #3b82a6;
+  --info-hover: #2f6d8d;
+  --info-soft: rgba(59,130,166,.12);
+  --info-bg: rgba(59,130,166,.09);
+
+  /* compat legacy */
+  --warning-bg-legacy: var(--warning-soft);
+  --info-bg-legacy: var(--info-soft);
+
+  /* =========================
+     KPI COLORS
+  ========================= */
+  --color-iva: #c07a16;
+  --color-iva-glow: rgba(192,122,22,.16);
+
+  --color-irpf: #6f59d9;
+  --color-irpf-glow: rgba(111,89,217,.16);
+
+  --color-beneficio: #1f9d68;
+  --color-beneficio-glow: rgba(31,157,104,.16);
+
+  --color-pendiente: #e64b5d;
+  --color-pendiente-glow: rgba(230,75,93,.16);
+
+  --color-facturacion: #3b82a6;
+  --color-facturacion-glow: rgba(59,130,166,.16);
+
+  /* =========================
+     AVATAR / BADGES / CHIPS
+  ========================= */
+  --avatar-bg:
+    linear-gradient(180deg, #7c6ae6 0%, #6f59d9 100%);
+  --avatar-bg-2:
+    linear-gradient(180deg, #57a7c9 0%, #3b82a6 100%);
+  --avatar-text: #ffffff;
+
+  --badge-bg: rgba(23,32,51,.040);
+  --badge-border: rgba(23,32,51,.075);
+  --badge-text: var(--text-muted);
+
+  --chip-bg: rgba(23,32,51,.040);
+  --chip-border: rgba(23,32,51,.075);
+  --chip-text: var(--text-soft);
+
+  /* =========================
+     SHADOW SYSTEM
+  ========================= */
+  --shadow-xs: 0 2px 8px rgba(15,23,42,.035);
+  --shadow-sm: 0 6px 16px rgba(15,23,42,.05);
+  --shadow-md: 0 10px 24px rgba(15,23,42,.07);
+  --shadow-lg: 0 18px 40px rgba(15,23,42,.10);
+  --shadow-xl: 0 28px 64px rgba(15,23,42,.12);
+
+  --shadow-soft: 0 8px 18px rgba(15,23,42,.05);
+  --shadow-strong: 0 20px 44px rgba(15,23,42,.10);
+
+  --shadow-glow:
+    0 0 0 1px rgba(255,255,255,.40),
+    0 16px 38px rgba(111,89,217,.06);
+
+  --shadow-glow-cyan:
+    0 0 0 1px rgba(255,255,255,.44),
+    0 16px 36px rgba(59,130,166,.05);
+
+  --shadow-inner:
+    inset 0 1px 0 rgba(255,255,255,.70);
+
+  /* =========================
+     FOCUS / ACCESSIBILITY
+  ========================= */
+  --focus-ring: 0 0 0 4px rgba(111,89,217,.10);
+  --focus-ring-strong: 0 0 0 4px rgba(111,89,217,.16);
+
+  --selection-bg: rgba(111,89,217,.16);
+  --selection-text: #111827;
+
+  /* =========================
+     SCROLLBAR
+  ========================= */
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: rgba(23,32,51,.12);
+  --scrollbar-thumb-hover: rgba(23,32,51,.20);
+
+  /* =========================
+     AUTH / LOGIN ESPECÍFICAS
+  ========================= */
+  --auth-card-bg:
+    linear-gradient(180deg, rgba(255,255,255,.94) 0%, rgba(248,250,252,.98) 100%);
+  --auth-card-border: rgba(23,32,51,.075);
+  --auth-card-shadow:
+    0 20px 50px rgba(15,23,42,.09),
+    0 0 0 1px rgba(255,255,255,.54),
+    0 14px 36px rgba(111,89,217,.04);
+
+  --auth-input-bg: rgba(255,255,255,.98);
+  --auth-input-border: rgba(23,32,51,.10);
+  --auth-input-border-focus: rgba(111,89,217,.40);
+
+  --auth-logo-glow: 0 0 24px rgba(111,89,217,.08);
+
+  /* =========================
+     LOADER
+  ========================= */
+  --loader-bg: rgba(243,246,250,.92);
+  --loader-text: var(--text);
+  --loader-ring: rgba(23,32,51,.12);
+  --loader-ring-active: var(--accent);
+}
+
+
+/* =========================================================
+   DENSITY PRESETS OPCIONALES
+   Usa uno si quieres más control por atributo
+========================================================= */
+:root[data-density="compact"]{
+  --ui-scale: .95;
+  --density-factor: .91;
+}
+
+:root[data-density="normal"]{
+  --ui-scale: .97;
+  --density-factor: .93;
+}
+
+:root[data-density="comfortable"]{
+  --ui-scale: 1.02;
+  --density-factor: 1;
 }

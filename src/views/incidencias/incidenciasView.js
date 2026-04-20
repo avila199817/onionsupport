@@ -2,17 +2,17 @@
    Onion SPA - Incidencias View
    Archivo: src/views/incidencias/incidenciasView.js
 
-   FINAL PRO SYSTEM · VIEW REAL · 10/10
+   CLIENT EXPERIENCE MODE · VIEW REAL · 10/10
 
    RESPONSABILIDADES:
-   - punto de entrada real de la vista incidencias
-   - render principal de header + tabla
+   - punto de entrada real de la vista de incidencias
+   - render principal de header + historial
    - paginación fija a 5 incidencias por vista
-   - carga inicial robusta
-   - refresh con loader SOLO en tabla
-   - apertura de ticket con estado visual de loading
+   - carga inicial robusta con fallback a cache
+   - refresh con loader SOLO en la tabla
+   - apertura de incidencia con estado visual de loading
    - apertura de modal de creación de incidencia
-   - bind de eventos de la pantalla
+   - bind de eventos de pantalla
    - evitar doble bind de listeners
    - soportar destroy limpio del router
    - permitir reload con rerender seguro
@@ -25,6 +25,7 @@
    - cleanup total
    - click delegation sólida
    - fallback elegante si los modales aún no existen
+   - lenguaje orientado a cliente/usuario final
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -171,6 +172,11 @@ export const IncidenciasView = (() => {
       typeof incidenciasState.error === "string"
         ? incidenciasState.error
         : "";
+
+    incidenciasState.lastSyncAt =
+      typeof incidenciasState.lastSyncAt === "string"
+        ? incidenciasState.lastSyncAt
+        : "";
   }
 
   function getRawItems() {
@@ -231,16 +237,16 @@ export const IncidenciasView = (() => {
 
   function safeErrorMessage(error = null) {
     if (!error) {
-      return "No se pudo cargar la colección de incidencias.";
+      return "No se pudo cargar el historial de incidencias.";
     }
 
     const message =
       error?.message ||
       error?.response?.message ||
       error?.data?.message ||
-      "No se pudo cargar la colección de incidencias.";
+      "No se pudo cargar el historial de incidencias.";
 
-    return String(message).trim() || "No se pudo cargar la colección de incidencias.";
+    return String(message).trim() || "No se pudo cargar el historial de incidencias.";
   }
 
   /* =====================================================
@@ -275,7 +281,7 @@ export const IncidenciasView = (() => {
 
     if (!handled) {
       showToast(
-        "Detalle cargado. Falta conectar incidencias.modal.js para abrir el popup.",
+        "La incidencia se ha cargado, pero falta conectar el modal de detalle.",
         "info"
       );
     }
@@ -306,10 +312,7 @@ export const IncidenciasView = (() => {
     }
 
     if (!handled) {
-      showToast(
-        "No se pudo abrir el modal de creación.",
-        "error"
-      );
+      showToast("No se pudo abrir el formulario de nueva incidencia.", "error");
     }
 
     return handled;
@@ -326,7 +329,10 @@ export const IncidenciasView = (() => {
 
     return `
       <section class="panel-content dashboard ready">
-        <div class="content-wrapper">
+        <div
+          class="content-wrapper"
+          style="display:grid; gap:var(--space-lg);"
+        >
           ${renderHeader({
             items,
             state: incidenciasState,
@@ -361,7 +367,9 @@ export const IncidenciasView = (() => {
 
     container.innerHTML = buildHtml();
 
-    setHydrated?.(true);
+    try {
+      setHydrated?.(true);
+    } catch {}
 
     return container;
   }
@@ -502,7 +510,7 @@ export const IncidenciasView = (() => {
     const id = String(ticketId || "").trim();
 
     if (!id) {
-      showToast("Ticket inválido.", "error");
+      showToast("No se ha podido abrir la incidencia seleccionada.", "error");
       return null;
     }
 
@@ -556,7 +564,7 @@ export const IncidenciasView = (() => {
       });
 
       if (!detail) {
-        showToast("No se pudo refrescar el ticket.", "error");
+        showToast("No se pudo actualizar la incidencia.", "error");
         return null;
       }
 
@@ -565,18 +573,16 @@ export const IncidenciasView = (() => {
       return detail;
     } catch (error) {
       safeWarn("handleRefreshTicketFromModal falló:", error);
-      showToast("No se pudo refrescar el ticket.", "error");
+      showToast("No se pudo actualizar la incidencia.", "error");
       return null;
     }
   }
 
   async function handleCopyTicketId(ticketId = "") {
-    const ok = await copyTicketIdAction({
+    return copyTicketIdAction({
       ticketId,
       silent: false,
     });
-
-    return ok;
   }
 
   function handleExportCsv() {
@@ -597,15 +603,7 @@ export const IncidenciasView = (() => {
     rerender();
 
     try {
-      const opened = openCreateModalBridge({
-        priority: "medium",
-        status: "open",
-        source: "panel",
-        notifyClient: true,
-        internalOnly: false,
-      });
-
-      return opened;
+      return openCreateModalBridge({});
     } finally {
       setState({
         creating: false,

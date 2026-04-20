@@ -2,27 +2,18 @@
    Onion SPA - Incidencias Create Modal
    Archivo: src/views/incidencias/incidencias.create.modal.js
 
-   FINAL PRO SYSTEM · CREATE MODAL · 10/10
+   FINAL PRO SYSTEM · CREATE MODAL · MINIMAL REAL
 
    RESPONSABILIDADES:
    - renderizar modal premium de creación de incidencias
-   - gestionar formulario premium de alta
-   - validar campos clave
-   - construir payload limpio para backend
+   - pedir solo asunto, descripción y adjuntos
+   - validar campos mínimos
+   - construir FormData limpio para backend
    - enviar creación por adapters tolerantes
-   - mostrar estados loading / success / error dentro del modal
-   - evitar navegación a nueva URL
-   - evitar doble bind de listeners
+   - mostrar loading / success / error dentro del modal
+   - soportar close por overlay / escape / botón
+   - evitar doble bind
    - soportar destroy limpio
-
-   HARDENING PRO:
-   - validación defensiva
-   - serialización coherente
-   - adapter chain para create request
-   - fallback a fetch directo
-   - modal singleton
-   - escape / overlay close
-   - anti-race submit
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -38,16 +29,7 @@ const PANEL_ID = "incidencias-create-modal-panel";
 const DEFAULT_FORM = Object.freeze({
   subject: "",
   description: "",
-  priority: "medium",
-  status: "open",
-  clientName: "",
-  clientEmail: "",
-  assignedTo: "",
-  category: "",
-  source: "panel",
-  tags: "",
-  notifyClient: true,
-  internalOnly: false,
+  attachments: [],
 });
 
 /* =========================================================
@@ -64,7 +46,10 @@ const modalState = {
   serverError: "",
   successMessage: "",
   createdTicketId: "",
-  form: { ...DEFAULT_FORM },
+  form: {
+    ...DEFAULT_FORM,
+    attachments: [],
+  },
 };
 
 /* =========================================================
@@ -123,14 +108,14 @@ function safeText(value, fallback = "") {
   return text || fallback;
 }
 
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
 function safeObject(value) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value
     : {};
+}
+
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
 }
 
 function first(...values) {
@@ -156,25 +141,8 @@ function escapeHtml(value = "") {
     .replace(/'/g, "&#39;");
 }
 
-function isEmail(value = "") {
-  const text = safeText(value, "");
-  if (!text) return true;
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text);
-}
-
 function normalizeWhitespace(value = "") {
   return safeText(value, "").replace(/\s+/g, " ").trim();
-}
-
-function slugifyTag(value = "") {
-  return safeText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9-_ ]/g, "")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
 }
 
 function getApiBase() {
@@ -214,6 +182,24 @@ function safeErrorMessage(error = null) {
   );
 }
 
+function getFileListFromInput(target) {
+  try {
+    return Array.from(target?.files || []);
+  } catch {
+    return [];
+  }
+}
+
+function formatFileSize(bytes = 0) {
+  const size = Number(bytes);
+
+  if (!Number.isFinite(size) || size <= 0) return "0 B";
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
 /* =========================================================
    STATE HELPERS
 ========================================================= */
@@ -222,25 +208,24 @@ function getInitialForm() {
   const draft = safeObject(incidenciasState?.createDraft);
 
   return {
-    ...DEFAULT_FORM,
-    ...draft,
-    notifyClient:
-      typeof draft.notifyClient === "boolean"
-        ? draft.notifyClient
-        : DEFAULT_FORM.notifyClient,
-    internalOnly:
-      typeof draft.internalOnly === "boolean"
-        ? draft.internalOnly
-        : DEFAULT_FORM.internalOnly,
+    subject: safeText(draft.subject, ""),
+    description: safeText(draft.description, ""),
+    attachments: [],
   };
 }
 
 function persistDraft() {
-  incidenciasState.createDraft = { ...modalState.form };
+  incidenciasState.createDraft = {
+    subject: safeText(modalState.form?.subject, ""),
+    description: safeText(modalState.form?.description, ""),
+  };
 }
 
 function clearDraft() {
-  incidenciasState.createDraft = { ...DEFAULT_FORM };
+  incidenciasState.createDraft = {
+    subject: "",
+    description: "",
+  };
 }
 
 function setFormPatch(patch = {}) {
@@ -258,85 +243,23 @@ function setFormPatch(patch = {}) {
    VALIDATION / PAYLOAD
 ========================================================= */
 
-function buildPayload(form = {}) {
-  const current = safeObject(form);
-
-  const tags = safeText(current.tags, "")
-    .split(",")
-    .map((tag) => slugifyTag(tag))
-    .filter(Boolean);
-
-  const payload = {
-    subject: normalizeWhitespace(current.subject),
-    description: normalizeWhitespace(current.description),
-    priority: safeText(current.priority, "medium").toLowerCase(),
-    status: safeText(current.status, "open").toLowerCase(),
-    client: {
-      name: normalizeWhitespace(current.clientName),
-      email: safeText(current.clientEmail, ""),
-    },
-    assignedTo: safeText(current.assignedTo, ""),
-    category: safeText(current.category, ""),
-    source: safeText(current.source, "panel"),
-    tags,
-    meta: {
-      notifyClient: Boolean(current.notifyClient),
-      internalOnly: Boolean(current.internalOnly),
-      createdFrom: "onion-spa-panel",
-    },
-  };
-
-  if (!payload.client.email) {
-    delete payload.client.email;
-  }
-
-  if (!payload.assignedTo) {
-    delete payload.assignedTo;
-  }
-
-  if (!payload.category) {
-    delete payload.category;
-  }
-
-  if (!payload.tags.length) {
-    delete payload.tags;
-  }
-
-  return payload;
-}
-
 function validateForm(form = {}) {
   const current = safeObject(form);
   const errors = {};
 
-  if (!safeText(current.subject, "")) {
+  const subject = safeText(current.subject, "");
+  const description = safeText(current.description, "");
+
+  if (!subject) {
     errors.subject = "El asunto es obligatorio.";
-  } else if (safeText(current.subject, "").length < 4) {
+  } else if (subject.length < 4) {
     errors.subject = "El asunto debe tener al menos 4 caracteres.";
   }
 
-  if (!safeText(current.description, "")) {
+  if (!description) {
     errors.description = "La descripción es obligatoria.";
-  } else if (safeText(current.description, "").length < 12) {
+  } else if (description.length < 12) {
     errors.description = "La descripción debe tener al menos 12 caracteres.";
-  }
-
-  if (!safeText(current.clientName, "")) {
-    errors.clientName = "El nombre del cliente es obligatorio.";
-  }
-
-  if (!isEmail(current.clientEmail)) {
-    errors.clientEmail = "El email no tiene un formato válido.";
-  }
-
-  const validPriorities = ["low", "medium", "high", "urgent"];
-  if (!validPriorities.includes(safeText(current.priority, "medium").toLowerCase())) {
-    errors.priority = "Prioridad inválida.";
-  }
-
-  const validStatuses = ["open", "pending", "in_progress", "resolved", "closed"];
-  if (!validStatuses.includes(safeText(current.status, "open").toLowerCase())) {
-    errors.status = "Estado inválido.";
   }
 
   return {
@@ -345,25 +268,38 @@ function validateForm(form = {}) {
   };
 }
 
+function buildPayload(form = {}) {
+  const current = safeObject(form);
+  const fd = new FormData();
+
+  fd.append("subject", normalizeWhitespace(current.subject));
+  fd.append("description", normalizeWhitespace(current.description));
+
+  safeArray(current.attachments).forEach((file) => {
+    if (file instanceof File) {
+      fd.append("attachments", file, file.name);
+    }
+  });
+
+  return fd;
+}
+
 /* =========================================================
    CREATE ADAPTERS
 ========================================================= */
 
-async function createViaAppCoreRequest(payload = {}) {
+async function createViaAppCoreRequest(payload = null) {
   if (typeof AppCore?.request !== "function") {
     throw new Error("APP_CORE_REQUEST_UNAVAILABLE");
   }
 
   return AppCore.request("/api/tickets", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
+    body: payload,
   });
 }
 
-async function createViaHttpModule(payload = {}) {
+async function createViaHttpModule(payload = null) {
   const Http = AppCore?.modules?.Http || AppCore?.Http || window?.Http || null;
 
   if (!Http) {
@@ -384,7 +320,7 @@ async function createViaHttpModule(payload = {}) {
   throw new Error("HTTP_POST_UNAVAILABLE");
 }
 
-async function createViaFetch(payload = {}) {
+async function createViaFetch(payload = null) {
   const apiBase = getApiBase();
   const token = getAuthToken();
   const url = `${apiBase || ""}/api/tickets`;
@@ -392,10 +328,9 @@ async function createViaFetch(payload = {}) {
   const response = await fetch(url, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    body: JSON.stringify(payload),
+    body: payload,
   });
 
   const text = await response.text();
@@ -452,7 +387,7 @@ function resolveCreatedTicketId(response = null) {
   );
 }
 
-async function createIncidenciaRequest(payload = {}) {
+async function createIncidenciaRequest(payload = null) {
   const adapters = [
     createViaAppCoreRequest,
     createViaHttpModule,
@@ -597,7 +532,7 @@ function renderTextarea({
         placeholder="${escapeHtml(placeholder)}"
         style="
           width:100%;
-          min-height:160px;
+          min-height:220px;
           padding:14px;
           border-radius:16px;
           border:1px solid ${
@@ -635,16 +570,90 @@ function renderTextarea({
   `;
 }
 
-function renderSelect({
-  label = "",
-  name = "",
-  value = "",
-  options = [],
-  error = "",
-  hint = "",
-} = {}) {
+function renderFilesSummary(files = []) {
+  const items = safeArray(files);
+
+  if (!items.length) {
+    return `
+      <div
+        style="
+          color:var(--text-dim);
+          font-size:13px;
+          line-height:1.5;
+        "
+      >
+        No hay adjuntos seleccionados.
+      </div>
+    `;
+  }
+
   return `
-    <label style="display:grid; gap:8px;">
+    <div style="display:grid; gap:10px;">
+      ${items
+        .map(
+          (file, index) => `
+            <div
+              style="
+                display:flex;
+                justify-content:space-between;
+                gap:12px;
+                align-items:center;
+                padding:12px 14px;
+                border-radius:14px;
+                border:1px solid var(--border-soft);
+                background:var(--surface-1, var(--surface-glass));
+              "
+            >
+              <div style="display:grid; gap:4px; min-width:0;">
+                <strong
+                  style="
+                    color:var(--text-strong);
+                    font-size:13px;
+                    line-height:1.35;
+                    word-break:break-word;
+                  "
+                >
+                  ${escapeHtml(safeText(file?.name, `Adjunto ${index + 1}`))}
+                </strong>
+                <span
+                  style="
+                    color:var(--text-dim);
+                    font-size:12px;
+                    line-height:1.35;
+                  "
+                >
+                  ${escapeHtml(formatFileSize(file?.size))}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                data-remove-attachment="${index}"
+                style="
+                  min-height:36px;
+                  padding:0 12px;
+                  border-radius:12px;
+                  border:1px solid var(--border-soft);
+                  background:transparent;
+                  color:var(--text-dim);
+                  font-weight:var(--weight-bold, 700);
+                  cursor:pointer;
+                  flex:0 0 auto;
+                "
+              >
+                Quitar
+              </button>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderFileInput({ files = [] } = {}) {
+  return `
+    <div style="display:grid; gap:10px;">
       <span
         style="
           color:var(--text-soft);
@@ -654,122 +663,54 @@ function renderSelect({
           text-transform:uppercase;
         "
       >
-        ${escapeHtml(label)}
+        Adjuntos
       </span>
 
-      <select
-        data-field="${escapeHtml(name)}"
-        name="${escapeHtml(name)}"
+      <label
         style="
-          width:100%;
-          min-height:48px;
-          padding:0 14px;
-          border-radius:14px;
-          border:1px solid ${
-            error
-              ? "color-mix(in srgb, var(--danger-strong, #ff6b6b) 38%, var(--border-soft))"
-              : "var(--border-soft)"
-          };
+          display:grid;
+          gap:12px;
+          padding:16px;
+          border-radius:18px;
+          border:1px dashed var(--border-soft);
           background:var(--surface-1, var(--surface-glass));
-          color:var(--text-strong);
-          outline:none;
+          cursor:pointer;
         "
       >
-        ${safeArray(options)
-          .map((option) => {
-            const item = safeObject(option);
-            const optionValue = safeText(item.value, "");
-            const selected = optionValue === safeText(value, "") ? "selected" : "";
+        <input
+          id="incidencias-create-attachments-input"
+          data-field="attachments"
+          name="attachments"
+          type="file"
+          multiple
+          style="display:none;"
+        />
 
-            return `
-              <option value="${escapeHtml(optionValue)}" ${selected}>
-                ${escapeHtml(safeText(item.label, optionValue))}
-              </option>
-            `;
-          })
-          .join("")}
-      </select>
+        <div style="display:grid; gap:6px;">
+          <strong
+            style="
+              color:var(--text-strong);
+              font-size:14px;
+              line-height:1.35;
+            "
+          >
+            Añadir archivos
+          </strong>
 
-      ${
-        hint
-          ? `
-            <span
-              style="
-                color:var(--text-dim);
-                font-size:12px;
-                line-height:1.35;
-              "
-            >
-              ${escapeHtml(hint)}
-            </span>
-          `
-          : ""
-      }
+          <span
+            style="
+              color:var(--text-dim);
+              font-size:12px;
+              line-height:1.45;
+            "
+          >
+            Puedes adjuntar capturas, PDFs o archivos relevantes para la incidencia.
+          </span>
+        </div>
+      </label>
 
-      ${renderFieldError(error)}
-    </label>
-  `;
-}
-
-function renderCheckbox({
-  label = "",
-  name = "",
-  checked = false,
-  hint = "",
-} = {}) {
-  return `
-    <label
-      style="
-        display:flex;
-        align-items:flex-start;
-        gap:12px;
-        padding:14px;
-        border-radius:16px;
-        border:1px solid var(--border-soft);
-        background:var(--surface-1, var(--surface-glass));
-      "
-    >
-      <input
-        data-field="${escapeHtml(name)}"
-        name="${escapeHtml(name)}"
-        type="checkbox"
-        ${checked ? "checked" : ""}
-        style="
-          margin-top:2px;
-          width:16px;
-          height:16px;
-        "
-      />
-
-      <span style="display:grid; gap:4px;">
-        <span
-          style="
-            color:var(--text-strong);
-            font-size:14px;
-            font-weight:var(--weight-semibold, 600);
-            line-height:1.35;
-          "
-        >
-          ${escapeHtml(label)}
-        </span>
-
-        ${
-          hint
-            ? `
-              <span
-                style="
-                  color:var(--text-dim);
-                  font-size:12px;
-                  line-height:1.4;
-                "
-              >
-                ${escapeHtml(hint)}
-              </span>
-            `
-          : ""
-        }
-      </span>
-    </label>
+      ${renderFilesSummary(files)}
+    </div>
   `;
 }
 
@@ -808,7 +749,7 @@ function renderModalInner() {
         tabindex="-1"
         style="
           position:relative;
-          width:min(1120px, 100%);
+          width:min(900px, 100%);
           max-height:92vh;
           overflow:auto;
           border-radius:28px;
@@ -829,7 +770,7 @@ function renderModalInner() {
             flex-wrap:wrap;
           "
         >
-          <div style="display:grid; gap:10px; min-width:min(100%, 540px);">
+          <div style="display:grid; gap:10px; min-width:min(100%, 480px);">
             <span
               style="
                 display:inline-flex;
@@ -861,20 +802,19 @@ function renderModalInner() {
                   color:var(--text-strong);
                 "
               >
-                Alta manual de ticket
+                Crear incidencia
               </h2>
 
               <p
                 style="
                   margin:0;
-                  max-width:860px;
+                  max-width:760px;
                   color:var(--text-dim);
                   font-size:14px;
                   line-height:1.6;
                 "
               >
-                Registra una incidencia con contexto operativo, prioridad, cliente y asignación inicial
-                desde un formulario premium preparado para backend real.
+                Solo necesitamos asunto, descripción y adjuntos para registrar la incidencia correctamente.
               </p>
             </div>
           </div>
@@ -998,147 +938,31 @@ function renderModalInner() {
               gap:18px;
             "
           >
-            <div
-              style="
-                display:grid;
-                grid-template-columns:1.4fr .8fr .8fr;
-                gap:16px;
-              "
-              class="incidencias-create-grid-top"
-            >
-              ${renderInput({
-                label: "Asunto",
-                name: "subject",
-                value: form.subject,
-                placeholder: "Ej. Error en factura, acceso bloqueado, bug en dashboard...",
-                required: true,
-                error: errors.subject,
-                hint: "Usa un asunto corto pero muy reconocible para operación.",
-              })}
-
-              ${renderSelect({
-                label: "Prioridad",
-                name: "priority",
-                value: form.priority,
-                error: errors.priority,
-                options: [
-                  { value: "low", label: "Baja" },
-                  { value: "medium", label: "Media" },
-                  { value: "high", label: "Alta" },
-                  { value: "urgent", label: "Urgente" },
-                ],
-              })}
-
-              ${renderSelect({
-                label: "Estado inicial",
-                name: "status",
-                value: form.status,
-                error: errors.status,
-                options: [
-                  { value: "open", label: "Abierta" },
-                  { value: "pending", label: "Pendiente" },
-                  { value: "in_progress", label: "En proceso" },
-                  { value: "resolved", label: "Resuelta" },
-                  { value: "closed", label: "Cerrada" },
-                ],
-              })}
-            </div>
+            ${renderInput({
+              label: "Asunto",
+              name: "subject",
+              value: form.subject,
+              placeholder: "Ej. Error en factura, acceso bloqueado, problema en dashboard...",
+              required: true,
+              error: errors.subject,
+              hint: "Sé claro y reconocible.",
+            })}
 
             ${renderTextarea({
               label: "Descripción",
               name: "description",
               value: form.description,
               placeholder:
-                "Describe el problema con el mayor contexto posible: qué falla, desde cuándo, a quién afecta, pasos realizados y cualquier dato que acelere la respuesta.",
+                "Describe el problema con contexto: qué ocurre, desde cuándo, a quién afecta y cualquier dato útil para resolverlo.",
               required: true,
               error: errors.description,
-              hint: "Cuanto mejor venga el contexto, mejor quedará la operativa posterior.",
-              rows: 8,
+              hint: "Cuanto mejor venga el contexto, mejor irá la operativa.",
+              rows: 9,
             })}
 
-            <div
-              style="
-                display:grid;
-                grid-template-columns:1fr 1fr;
-                gap:16px;
-              "
-              class="incidencias-create-grid-client"
-            >
-              ${renderInput({
-                label: "Cliente",
-                name: "clientName",
-                value: form.clientName,
-                placeholder: "Nombre del cliente o empresa",
-                required: true,
-                error: errors.clientName,
-                autocomplete: "name",
-              })}
-
-              ${renderInput({
-                label: "Email cliente",
-                name: "clientEmail",
-                value: form.clientEmail,
-                type: "email",
-                placeholder: "cliente@dominio.com",
-                error: errors.clientEmail,
-                autocomplete: "email",
-              })}
-            </div>
-
-            <div
-              style="
-                display:grid;
-                grid-template-columns:1fr 1fr 1fr;
-                gap:16px;
-              "
-              class="incidencias-create-grid-meta"
-            >
-              ${renderInput({
-                label: "Asignado a",
-                name: "assignedTo",
-                value: form.assignedTo,
-                placeholder: "Usuario, técnico o responsable",
-                hint: "Puede quedar vacío si aún no se asigna.",
-              })}
-
-              ${renderInput({
-                label: "Categoría",
-                name: "category",
-                value: form.category,
-                placeholder: "facturación, soporte, acceso, traducción...",
-              })}
-
-              ${renderInput({
-                label: "Tags",
-                name: "tags",
-                value: form.tags,
-                placeholder: "vip, bug, backend, cliente-fr",
-                hint: "Separados por coma.",
-              })}
-            </div>
-
-            <div
-              style="
-                display:grid;
-                grid-template-columns:1fr 1fr;
-                gap:16px;
-              "
-              class="incidencias-create-grid-flags"
-            >
-              ${renderCheckbox({
-                label: "Notificar al cliente",
-                name: "notifyClient",
-                checked: Boolean(form.notifyClient),
-                hint: "Marca esta opción si el backend debe tratar el ticket como notificable al cliente.",
-              })}
-
-              ${renderCheckbox({
-                label: "Solo uso interno",
-                name: "internalOnly",
-                checked: Boolean(form.internalOnly),
-                hint: "Útil para incidencias operativas que no deben exponerse externamente.",
-              })}
-            </div>
+            ${renderFileInput({
+              files: safeArray(form.attachments),
+            })}
 
             <div
               style="
@@ -1211,7 +1035,7 @@ function renderModalInner() {
                     opacity:${submitting ? ".7" : "1"};
                   "
                 >
-                  Limpiar formulario
+                  Limpiar
                 </button>
               </div>
 
@@ -1248,20 +1072,6 @@ function renderModalInner() {
         <style>
           @keyframes incidenciasCreateSpin {
             to { transform: rotate(360deg); }
-          }
-
-          @media (max-width: 1080px) {
-            .incidencias-create-grid-top,
-            .incidencias-create-grid-meta {
-              grid-template-columns: 1fr !important;
-            }
-          }
-
-          @media (max-width: 860px) {
-            .incidencias-create-grid-client,
-            .incidencias-create-grid-flags {
-              grid-template-columns: 1fr !important;
-            }
           }
         </style>
       </div>
@@ -1356,9 +1166,11 @@ function renderModal() {
 
   if (!modalState.isOpen) {
     root.innerHTML = "";
+    detachRootBindings();
     return root;
   }
 
+  detachRootBindings();
   root.innerHTML = renderModalInner();
   modalState.bindingsAttached = false;
 
@@ -1384,10 +1196,10 @@ export function openIncidenciasCreateModal(draft = {}) {
   modalState.serverError = "";
   modalState.successMessage = "";
   modalState.createdTicketId = "";
-
   modalState.form = {
     ...getInitialForm(),
     ...safeObject(draft),
+    attachments: [],
   };
 
   persistDraft();
@@ -1399,7 +1211,10 @@ export function openIncidenciasCreateModal(draft = {}) {
   focusPanel();
 
   safeEmit("incidencias:create-modal:opened", {
-    draft: { ...modalState.form },
+    draft: {
+      subject: modalState.form.subject,
+      description: modalState.form.description,
+    },
   });
 
   return true;
@@ -1418,6 +1233,12 @@ export function closeIncidenciasCreateModal() {
   modalState.serverError = "";
   modalState.successMessage = "";
   modalState.createdTicketId = "";
+  modalState.form = {
+    ...DEFAULT_FORM,
+    attachments: [],
+  };
+
+  detachRootBindings();
 
   if (root) {
     root.innerHTML = "";
@@ -1440,6 +1261,7 @@ export function updateIncidenciasCreateModal(draft = {}) {
   modalState.form = {
     ...safeObject(modalState.form),
     ...safeObject(draft),
+    attachments: safeArray(modalState.form.attachments),
   };
 
   persistDraft();
@@ -1482,7 +1304,9 @@ async function handleSubmit() {
   focusPanel();
 
   safeEmit("incidencias:create:submit", {
-    payload,
+    subject: safeText(modalState.form.subject, ""),
+    description: safeText(modalState.form.description, ""),
+    attachmentsCount: safeArray(modalState.form.attachments).length,
   });
 
   try {
@@ -1497,7 +1321,11 @@ async function handleSubmit() {
     modalState.createdTicketId = createdTicketId;
 
     clearDraft();
-    modalState.form = { ...DEFAULT_FORM };
+
+    modalState.form = {
+      ...DEFAULT_FORM,
+      attachments: [],
+    };
 
     renderModal();
     attachRootBindings();
@@ -1508,7 +1336,6 @@ async function handleSubmit() {
     safeEmit("incidencias:create:success", {
       ticketId: createdTicketId,
       response,
-      payload,
       detail,
     });
 
@@ -1523,7 +1350,6 @@ async function handleSubmit() {
 
     safeEmit("incidencias:create:error", {
       error,
-      payload,
     });
 
     renderModal();
@@ -1544,14 +1370,17 @@ function handleFieldChange(target) {
   const field = safeText(target?.dataset?.field, "");
   if (!field) return;
 
-  const value =
-    target?.type === "checkbox"
-      ? Boolean(target.checked)
-      : target?.value;
+  if (field === "attachments") {
+    const files = getFileListFromInput(target);
 
-  setFormPatch({
-    [field]: value,
-  });
+    setFormPatch({
+      attachments: files,
+    });
+  } else {
+    setFormPatch({
+      [field]: target?.value,
+    });
+  }
 
   if (modalState.errors[field]) {
     const nextErrors = { ...modalState.errors };
@@ -1567,6 +1396,12 @@ function handleFieldChange(target) {
     modalState.successMessage = "";
     modalState.createdTicketId = "";
   }
+
+  if (field === "attachments") {
+    renderModal();
+    attachRootBindings();
+    focusPanel();
+  }
 }
 
 function attachRootBindings() {
@@ -1579,6 +1414,7 @@ function attachRootBindings() {
   const onInput = (event) => {
     const field = event.target.closest("[data-field]");
     if (!field) return;
+    if (field.type === "file") return;
 
     handleFieldChange(field);
   };
@@ -1621,11 +1457,32 @@ function attachRootBindings() {
       return;
     }
 
+    const removeAttachmentBtn = event.target.closest("[data-remove-attachment]");
+    if (removeAttachmentBtn) {
+      event.preventDefault();
+
+      const index = Number(removeAttachmentBtn.dataset.removeAttachment);
+      const files = safeArray(modalState.form.attachments).filter((_, i) => i !== index);
+
+      setFormPatch({
+        attachments: files,
+      });
+
+      renderModal();
+      attachRootBindings();
+      focusPanel();
+
+      return;
+    }
+
     const resetBtn = event.target.closest("#incidencias-create-reset-btn");
     if (resetBtn) {
       event.preventDefault();
 
-      modalState.form = { ...DEFAULT_FORM };
+      modalState.form = {
+        ...DEFAULT_FORM,
+        attachments: [],
+      };
       modalState.errors = {};
       modalState.serverError = "";
       modalState.successMessage = "";
@@ -1762,7 +1619,10 @@ export const OnionIncidenciasCreateModal = {
     return {
       ...modalState,
       errors: { ...safeObject(modalState.errors) },
-      form: { ...safeObject(modalState.form) },
+      form: {
+        ...safeObject(modalState.form),
+        attachments: [...safeArray(modalState.form.attachments)],
+      },
     };
   },
 

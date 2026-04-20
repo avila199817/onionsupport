@@ -1257,7 +1257,7 @@ function getClientInitials(item = {}) {
 
   if (!clean) return "ON";
 
-  const parts = clean.split(/\\s+/).filter(Boolean);
+  const parts = clean.split(/\s+/).filter(Boolean);
   const initials = parts
     .slice(0, 2)
     .map((part) => part[0])

@@ -3,15 +3,15 @@
    PRO SAAS PANEL / HIGH LEVEL / FINAL PRO SYSTEM
    Archivo: src/css/core/layout.css
 
-   REFINADO PRO:
-   - shell más compacto y operativo
-   - alineado con tokens densos
-   - offsets robustos para sidebar / topbar / table-head
-   - menos fragilidad visual
-   - menos coste decorativo
-   - responsive más consistente
+   REFINADO 10/10:
+   - shell compacto, robusto y operativo
+   - scroll principal real en #view-container
+   - offsets sólidos para sidebar / topbar / table-head
+   - sin clipping agresivo del contenido
+   - sin scroll fantasma ligado al sidebar
+   - responsive consistente
    - auth mode limpio
-   - superficies mejor integradas
+   - superficies integradas con el sistema de tokens
 ========================================================= */
 
 
@@ -106,7 +106,9 @@ a{
     background var(--duration-slow) var(--ease-standard),
     color var(--duration-normal) var(--ease-standard);
 
-  overflow:clip;
+  /* IMPORTANTE:
+     aquí NO usamos clip porque mataba el scroll del contenido */
+  overflow:hidden;
 }
 
 .layout::before{
@@ -119,6 +121,7 @@ a{
     linear-gradient(90deg, rgba(255,255,255,.012) 1px, transparent 1px);
   background-size:40px 40px;
   mask-image:linear-gradient(180deg, rgba(0,0,0,.14), transparent 82%);
+  -webkit-mask-image:linear-gradient(180deg, rgba(0,0,0,.14), transparent 82%);
   opacity:.10;
   z-index:0;
 }
@@ -172,6 +175,7 @@ a{
 
   min-inline-size:0;
   min-block-size:100dvh;
+  block-size:100dvh;
 
   margin-inline-start:var(--app-sidebar-current-width);
   inline-size:calc(100% - var(--app-sidebar-current-width));
@@ -182,7 +186,8 @@ a{
     inline-size var(--duration-slow) var(--ease-emphasis),
     max-inline-size var(--duration-slow) var(--ease-emphasis);
 
-  overflow:visible;
+  /* clave para que el scroll quede dentro del view-root */
+  overflow:hidden;
 }
 
 body.sidebar-collapsed{
@@ -211,7 +216,7 @@ body.sidebar-collapsed{
   padding-inline-start:var(--app-safe-left);
 
   isolation:isolate;
-  overflow:visible;
+  overflow:hidden;
 }
 
 .main-content:has(.table-head:not(:has(#tablehead-container:empty))) #app-content{
@@ -327,6 +332,37 @@ body.sidebar-collapsed{
   min-block-size:0;
 
   isolation:isolate;
+
+  /* SCROLL REAL DEL PANEL */
+  overflow-y:auto;
+  overflow-x:hidden;
+
+  overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;
+
+  scrollbar-width:thin;
+  scrollbar-color:var(--scrollbar-thumb) transparent;
+}
+
+#view-container::-webkit-scrollbar{
+  width:var(--scrollbar-size);
+  height:var(--scrollbar-size);
+}
+
+#view-container::-webkit-scrollbar-track{
+  background:transparent;
+}
+
+#view-container::-webkit-scrollbar-thumb{
+  background:var(--scrollbar-thumb);
+  border-radius:999px;
+  border:2px solid transparent;
+  background-clip:padding-box;
+}
+
+#view-container::-webkit-scrollbar-thumb:hover{
+  background:var(--scrollbar-thumb-hover);
+  background-clip:padding-box;
 }
 
 
@@ -411,10 +447,10 @@ body.sidebar-collapsed{
   overflow:hidden;
 }
 
+/* importante:
+   el scroll principal vive arriba, en #view-container */
 .panel-content.dashboard{
-  overflow:auto;
-  overscroll-behavior:contain;
-  -webkit-overflow-scrolling:touch;
+  overflow:visible;
 }
 
 .dashboard-container{
@@ -426,9 +462,7 @@ body.sidebar-collapsed{
 }
 
 .panel-content.form-mode{
-  overflow:auto;
-  overscroll-behavior:contain;
-  -webkit-overflow-scrolling:touch;
+  overflow:visible;
 }
 
 .panel-content.centered{
@@ -744,11 +778,13 @@ body.auth-screen .main-content{
   inline-size:100%;
   max-inline-size:100%;
   min-block-size:100dvh;
+  block-size:auto;
 }
 
 body.auth-screen #app-content{
   min-block-size:100dvh;
   padding:0;
+  overflow:visible;
 }
 
 body.auth-screen .sidebar,
@@ -761,6 +797,7 @@ body.auth-screen #tablehead-container{
 body.auth-screen #view-container{
   inline-size:100%;
   min-block-size:100dvh;
+  overflow:visible;
 }
 
 body.auth-screen .content-wrapper{
@@ -774,38 +811,28 @@ body.auth-screen .content-wrapper{
 /* =========================
    SCROLLBAR POLISH
 ========================= */
-.table-container,
-.panel-content.dashboard,
-.panel-content.form-mode{
+.table-container{
   scrollbar-width:thin;
   scrollbar-color:var(--scrollbar-thumb) transparent;
 }
 
-.table-container::-webkit-scrollbar,
-.panel-content.dashboard::-webkit-scrollbar,
-.panel-content.form-mode::-webkit-scrollbar{
+.table-container::-webkit-scrollbar{
   width:var(--scrollbar-size);
   height:var(--scrollbar-size);
 }
 
-.table-container::-webkit-scrollbar-track,
-.panel-content.dashboard::-webkit-scrollbar-track,
-.panel-content.form-mode::-webkit-scrollbar-track{
+.table-container::-webkit-scrollbar-track{
   background:transparent;
 }
 
-.table-container::-webkit-scrollbar-thumb,
-.panel-content.dashboard::-webkit-scrollbar-thumb,
-.panel-content.form-mode::-webkit-scrollbar-thumb{
+.table-container::-webkit-scrollbar-thumb{
   background:var(--scrollbar-thumb);
   border-radius:999px;
   border:2px solid transparent;
   background-clip:padding-box;
 }
 
-.table-container::-webkit-scrollbar-thumb:hover,
-.panel-content.dashboard::-webkit-scrollbar-thumb:hover,
-.panel-content.form-mode::-webkit-scrollbar-thumb:hover{
+.table-container::-webkit-scrollbar-thumb:hover{
   background:var(--scrollbar-thumb-hover);
   background-clip:padding-box;
 }
@@ -861,6 +888,7 @@ body.auth-screen .content-wrapper{
     inline-size:100%;
     max-inline-size:100%;
     min-block-size:100dvh;
+    block-size:100dvh;
   }
 
   body.sidebar-collapsed .main-content,

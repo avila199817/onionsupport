@@ -1,14 +1,14 @@
 /* =========================================================
-   Onion SPA - Loader CSS
+   Onion SPA — Loader CSS
    Archivo: src/styles/loader.css
 
-   Responsabilidades:
-   - loader global premium
-   - overlay de arranque
+   REFINADO PRO:
+   - loader global premium y sobrio
+   - overlay de arranque más enterprise
    - anti flicker visual
-   - animaciones suaves
+   - animaciones suaves y menos invasivas
    - soporte dark / light theme
-   - alineado con src/app/loader.js
+   - alineado con loader.js y con el sistema de tokens actual
 
    REQUIERE:
    #app-loader en DOM
@@ -16,414 +16,342 @@
    ALINEADO CON loader.js:
    - hidden / aria-hidden
    - body.loading
-   - show/hide por inline style
+   - show / hide por inline style
    - transición limpia
 ========================================================= */
 
+
 /* =========================================================
-   TOKENS (fallback si variables.css no carga)
+   TOKENS LOADER
+   Fallbacks conectados al sistema real
 ========================================================= */
+:root{
+  --loader-z: var(--z-loader, 9999);
 
-:root {
-  --loader-z: 99999;
-
-  --loader-bg:
-    color-mix(
-      in srgb,
-      var(--color-bg, #0b1020) 92%,
-      black 8%
-    );
-
+  --loader-bg: rgba(31,31,31,.94);
   --loader-surface:
-    color-mix(
-      in srgb,
-      var(--color-surface, #121a2b) 88%,
-      white 12%
-    );
+    linear-gradient(180deg, rgba(255,255,255,.022), rgba(255,255,255,.008)),
+    rgba(39,39,42,.92);
 
-  --loader-border:
-    color-mix(
-      in srgb,
-      var(--color-border, #24314f) 80%,
-      white 20%
-    );
+  --loader-border: var(--border-default, rgba(255,255,255,.08));
+  --loader-text: var(--text, #f5f5f5);
+  --loader-muted: var(--text-dim, rgba(245,245,245,.50));
 
-  --loader-text:
-    var(--color-text, #f8fafc);
-
-  --loader-muted:
-    var(--color-text-soft, #94a3b8);
-
-  --loader-accent:
-    var(--color-primary, #6366f1);
-
-  --loader-accent-2:
-    var(--color-primary-2, #22c55e);
+  --loader-accent: var(--accent, #3f3f46);
+  --loader-accent-2: var(--accent-3, #6b7280);
 
   --loader-shadow:
-    0 20px 60px rgb(0 0 0 / 0.45);
+    0 24px 60px rgba(0,0,0,.34),
+    0 0 0 1px rgba(255,255,255,.02) inset;
 
   --loader-blur: 18px;
-  --loader-radius: 26px;
+  --loader-radius: 24px;
 
-  --loader-size: 84px;
-  --loader-ring: 5px;
+  --loader-size: 72px;
+  --loader-ring: 4px;
 
-  --loader-speed: 1.2s;
-  --loader-fade: 0.28s;
+  --loader-speed: 1s;
+  --loader-pulse-speed: 1.6s;
+  --loader-fade: .22s;
+  --loader-card-width: 320px;
+  --loader-progress-height: 5px;
 }
 
 /* =========================================================
    LIGHT THEME
 ========================================================= */
-
-html[data-theme="light"] {
-  --loader-bg:
-    color-mix(
-      in srgb,
-      #ffffff 88%,
-      #e8eef8 12%
-    );
+html[data-theme="light"]{
+  --loader-bg: rgba(243,246,250,.92);
 
   --loader-surface:
-    rgb(255 255 255 / 0.88);
+    linear-gradient(180deg, rgba(255,255,255,.88), rgba(248,250,252,.96)),
+    rgba(255,255,255,.90);
 
-  --loader-border:
-    rgb(15 23 42 / 0.08);
+  --loader-border: rgba(23,32,51,.08);
+  --loader-text: var(--text, #172033);
+  --loader-muted: var(--text-dim, rgba(23,32,51,.52));
 
-  --loader-text:
-    #0f172a;
-
-  --loader-muted:
-    #475569;
+  --loader-accent: var(--accent, #6f59d9);
+  --loader-accent-2: var(--accent-3, #3b82a6);
 
   --loader-shadow:
-    0 20px 60px rgb(15 23 42 / 0.14);
+    0 20px 48px rgba(15,23,42,.10),
+    0 0 0 1px rgba(255,255,255,.42) inset;
 }
 
 /* =========================================================
    BODY LOCK
 ========================================================= */
-
-body.loading {
-  overflow: hidden;
-  overscroll-behavior: none;
+body.loading{
+  overflow:hidden;
+  overscroll-behavior:none;
 }
+
 
 /* =========================================================
    ROOT OVERLAY
 ========================================================= */
+#app-loader{
+  position:fixed;
+  inset:0;
+  z-index:var(--loader-z);
 
-#app-loader {
-  position: fixed;
-  inset: 0;
-  z-index: var(--loader-z);
+  display:grid;
+  place-items:center;
 
-  display: grid;
-  place-items: center;
-
-  padding: 24px;
+  padding:24px;
 
   background:
-    radial-gradient(
-      circle at 20% 20%,
-      rgb(99 102 241 / 0.14),
-      transparent 35%
-    ),
-    radial-gradient(
-      circle at 80% 30%,
-      rgb(34 197 94 / 0.10),
-      transparent 32%
-    ),
-    radial-gradient(
-      circle at 50% 100%,
-      rgb(255 255 255 / 0.03),
-      transparent 30%
-    ),
+    radial-gradient(circle at 20% 16%, rgba(255,255,255,.020), transparent 26%),
+    radial-gradient(circle at 80% 24%, rgba(255,255,255,.014), transparent 24%),
+    radial-gradient(circle at 50% 100%, rgba(255,255,255,.010), transparent 24%),
     var(--loader-bg);
 
-  backdrop-filter:
-    blur(var(--loader-blur));
+  backdrop-filter:blur(var(--loader-blur));
+  -webkit-backdrop-filter:blur(var(--loader-blur));
 
-  -webkit-backdrop-filter:
-    blur(var(--loader-blur));
-
-  opacity: 1;
-  visibility: visible;
+  opacity:1;
+  visibility:visible;
 
   transition:
-    opacity var(--loader-fade) ease,
-    visibility var(--loader-fade) ease,
-    transform var(--loader-fade) ease;
+    opacity var(--loader-fade) var(--ease-standard, ease),
+    visibility var(--loader-fade) var(--ease-standard, ease);
 }
 
 /* hidden compatible con JS */
 #app-loader[hidden],
-#app-loader[aria-hidden="true"] {
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
+#app-loader[aria-hidden="true"]{
+  opacity:0;
+  visibility:hidden;
+  pointer-events:none;
 }
+
 
 /* =========================================================
    PANEL
 ========================================================= */
+#app-loader .loader-card{
+  position:relative;
 
-#app-loader .loader-card {
-  position: relative;
+  inline-size:min(100%, var(--loader-card-width));
+  min-inline-size:min(92vw, 280px);
+  max-inline-size:var(--loader-card-width);
 
-  min-width: min(92vw, 340px);
-  max-width: 340px;
+  padding:24px 22px 20px;
 
-  padding: 28px 26px 24px;
+  border:1px solid var(--loader-border);
+  border-radius:var(--loader-radius);
 
-  border: 1px solid var(--loader-border);
-  border-radius: var(--loader-radius);
+  background:var(--loader-surface);
+  box-shadow:var(--loader-shadow);
 
-  background:
-    linear-gradient(
-      180deg,
-      rgb(255 255 255 / 0.08),
-      rgb(255 255 255 / 0.02)
-    ),
-    var(--loader-surface);
-
-  box-shadow: var(--loader-shadow);
-
-  text-align: center;
-
-  overflow: hidden;
+  text-align:center;
+  overflow:hidden;
 }
 
-#app-loader .loader-card::before {
-  content: "";
-
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 140px;
-
-  background:
-    linear-gradient(
-      90deg,
-      rgb(255 255 255 / 0.10),
-      transparent
-    );
-
-  transform: skewX(-18deg)
-             translateX(-160%);
-  animation:
-    loaderSheen 2.4s linear infinite;
+#app-loader .loader-card::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  background:linear-gradient(180deg, rgba(255,255,255,.032), transparent 34%);
+  opacity:.72;
 }
+
 
 /* =========================================================
    SPINNER CORE
 ========================================================= */
-
-#app-loader .loader-spinner {
-  position: relative;
-  width: var(--loader-size);
-  height: var(--loader-size);
-  margin: 0 auto 20px;
+#app-loader .loader-spinner{
+  position:relative;
+  inline-size:var(--loader-size);
+  block-size:var(--loader-size);
+  margin:0 auto 18px;
 }
 
 #app-loader .loader-spinner::before,
-#app-loader .loader-spinner::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
+#app-loader .loader-spinner::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  border-radius:50%;
 }
 
-#app-loader .loader-spinner::before {
-  border:
-    var(--loader-ring)
-    solid
-    rgb(255 255 255 / 0.08);
+#app-loader .loader-spinner::before{
+  border:var(--loader-ring) solid rgba(255,255,255,.08);
 }
 
-#app-loader .loader-spinner::after {
-  border:
-    var(--loader-ring)
-    solid transparent;
-
-  border-top-color:
-    var(--loader-accent);
-
-  border-right-color:
-    var(--loader-accent-2);
-
-  animation:
-    loaderSpin var(--loader-speed)
-    linear infinite;
+html[data-theme="light"] #app-loader .loader-spinner::before{
+  border-color:rgba(23,32,51,.08);
 }
 
-#app-loader .loader-core {
-  position: absolute;
-  inset: 18%;
-  border-radius: 50%;
+#app-loader .loader-spinner::after{
+  border:var(--loader-ring) solid transparent;
+  border-top-color:var(--loader-accent);
+  border-right-color:var(--loader-accent-2);
+  animation:loaderSpin var(--loader-speed) linear infinite;
+}
+
+#app-loader .loader-core{
+  position:absolute;
+  inset:20%;
+  border-radius:50%;
 
   background:
-    radial-gradient(
-      circle,
-      rgb(255 255 255 / 0.28),
-      transparent 62%
-    ),
-    linear-gradient(
-      135deg,
-      var(--loader-accent),
-      var(--loader-accent-2)
-    );
+    radial-gradient(circle, rgba(255,255,255,.18), transparent 62%),
+    linear-gradient(135deg, var(--loader-accent), var(--loader-accent-2));
 
   box-shadow:
-    0 0 30px
-    rgb(99 102 241 / 0.35);
+    0 0 22px rgba(255,255,255,.04),
+    0 0 28px color-mix(in srgb, var(--loader-accent), transparent 74%);
 
-  animation:
-    loaderPulse 1.8s ease-in-out infinite;
+  animation:loaderPulse var(--loader-pulse-speed) ease-in-out infinite;
 }
+
 
 /* =========================================================
    BRAND / TEXT
 ========================================================= */
-
-#app-loader .loader-title {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--loader-text);
+#app-loader .loader-title{
+  margin:0;
+  font-size:var(--font-sm, 12px);
+  font-weight:var(--weight-bold, 700);
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  color:var(--loader-text);
 }
 
-#app-loader .loader-subtitle {
-  margin: 8px 0 0;
-  font-size: 0.92rem;
-  font-weight: 600;
-  color: var(--loader-muted);
+#app-loader .loader-subtitle{
+  margin:8px 0 0;
+  font-size:var(--font-md, 13px);
+  line-height:1.4;
+  font-weight:var(--weight-medium, 500);
+  color:var(--loader-muted);
 }
 
-#app-loader .loader-dots::after {
-  content: "";
-  display: inline-block;
-  width: 1.2em;
-  text-align: left;
-  animation:
-    loaderDots 1.4s steps(4,end)
-    infinite;
+#app-loader .loader-dots::after{
+  content:"";
+  display:inline-block;
+  inline-size:1.2em;
+  text-align:start;
+  animation:loaderDots 1.4s steps(4, end) infinite;
 }
+
 
 /* =========================================================
    PROGRESS BAR (opcional)
 ========================================================= */
+#app-loader .loader-progress{
+  position:relative;
+  margin-block-start:16px;
+  block-size:var(--loader-progress-height);
+  border-radius:999px;
+  overflow:hidden;
 
-#app-loader .loader-progress {
-  position: relative;
-  margin-top: 18px;
-  height: 6px;
-  border-radius: 999px;
-  overflow: hidden;
-
-  background:
-    rgb(255 255 255 / 0.08);
+  background:rgba(255,255,255,.08);
 }
 
-#app-loader .loader-progress > span {
-  display: block;
-  width: 42%;
-  height: 100%;
-  border-radius: inherit;
-
-  background:
-    linear-gradient(
-      90deg,
-      var(--loader-accent),
-      var(--loader-accent-2)
-    );
-
-  animation:
-    loaderBar 1.3s ease-in-out infinite;
+html[data-theme="light"] #app-loader .loader-progress{
+  background:rgba(23,32,51,.08);
 }
+
+#app-loader .loader-progress > span{
+  display:block;
+  inline-size:38%;
+  block-size:100%;
+  border-radius:inherit;
+
+  background:linear-gradient(
+    90deg,
+    var(--loader-accent),
+    var(--loader-accent-2)
+  );
+
+  animation:loaderBar 1.3s ease-in-out infinite;
+}
+
 
 /* =========================================================
    ANIMATIONS
 ========================================================= */
-
-@keyframes loaderSpin {
-  to {
-    transform: rotate(360deg);
+@keyframes loaderSpin{
+  to{
+    transform:rotate(360deg);
   }
 }
 
-@keyframes loaderPulse {
-  0%,100% {
-    transform: scale(0.92);
-    opacity: 0.82;
+@keyframes loaderPulse{
+  0%,100%{
+    transform:scale(.92);
+    opacity:.82;
   }
 
-  50% {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
-
-@keyframes loaderDots {
-  0%   { content: ""; }
-  25%  { content: "."; }
-  50%  { content: ".."; }
-  75%  { content: "..."; }
-  100% { content: ""; }
-}
-
-@keyframes loaderBar {
-  0% {
-    transform: translateX(-120%);
-  }
-
-  100% {
-    transform: translateX(320%);
+  50%{
+    transform:scale(1);
+    opacity:1;
   }
 }
 
-@keyframes loaderSheen {
-  to {
-    transform:
-      skewX(-18deg)
-      translateX(420%);
+@keyframes loaderDots{
+  0%   { content:""; }
+  25%  { content:"."; }
+  50%  { content:".."; }
+  75%  { content:"..."; }
+  100% { content:""; }
+}
+
+@keyframes loaderBar{
+  0%{
+    transform:translateX(-120%);
+  }
+
+  100%{
+    transform:translateX(320%);
   }
 }
+
 
 /* =========================================================
    REDUCED MOTION
 ========================================================= */
-
-@media (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: reduce){
   #app-loader,
-  #app-loader * {
-    animation: none !important;
-    transition: none !important;
+  #app-loader *{
+    animation:none !important;
+    transition:none !important;
+  }
+
+  #app-loader .loader-core{
+    opacity:1;
+    transform:none;
   }
 }
+
 
 /* =========================================================
    MOBILE
 ========================================================= */
-
-@media (max-width: 640px) {
-  :root {
-    --loader-size: 72px;
-    --loader-radius: 22px;
+@media (max-width: 640px){
+  :root{
+    --loader-size: 64px;
+    --loader-radius: 20px;
+    --loader-card-width: 296px;
   }
 
-  #app-loader .loader-card {
-    padding: 24px 18px 20px;
-    min-width: min(92vw, 300px);
+  #app-loader{
+    padding:16px;
   }
 
-  #app-loader .loader-title {
-    font-size: 0.94rem;
+  #app-loader .loader-card{
+    padding:20px 16px 18px;
+    min-inline-size:min(92vw, 272px);
   }
 
-  #app-loader .loader-subtitle {
-    font-size: 0.86rem;
+  #app-loader .loader-title{
+    font-size:11px;
+  }
+
+  #app-loader .loader-subtitle{
+    font-size:12px;
   }
 }

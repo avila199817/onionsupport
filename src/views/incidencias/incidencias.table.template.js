@@ -1,25 +1,25 @@
 /* =========================================================
-   Onion SPA - Incidencias Template (FINAL PRO TABLE GOD MODE)
+   Onion SPA - Incidencias Template (CLIENT EXPERIENCE MODE)
    Archivo: src/views/incidencias/incidencias.table.template.js
 
-   EXTREME MODE · BACKEND REAL DATA READY · 10/10
+   FINAL PRO TABLE · CLIENT FIRST EDITION · 10/10
 
    Responsabilidades:
-   - renderizar header premium de la vista
+   - renderizar header premium orientado a clientes/usuarios
    - renderizar estados loading / error / empty
-   - renderizar tabla premium de incidencias
+   - renderizar tabla premium de incidencias con lenguaje claro
    - paginar a 5 incidencias por vista
    - mostrar loader SOLO en la sección de tabla
    - mostrar estado visual al abrir ticket lento
    - mantener compatibilidad directa con incidenciasView.js
    - consumir datos reales del backend /api/tickets
-   - compartir lenguaje visual y densidad con Facturas
+   - priorizar claridad, confianza y seguimiento para cliente final
 
    HARDENING PRO:
    - tolerancia a payloads heterogéneos
    - soporte para envelope backend { ok, count, tickets }
    - lectura preferente del shape normalizado del backend
-   - mismo lenguaje visual que Facturas
+   - lenguaje menos técnico y más humano
    - toolbar / skeleton / mobile cards consistentes
 ========================================================= */
 
@@ -156,7 +156,7 @@ function getStatusLabel(value = "") {
     case "open":
     case "abierta":
     case "abierto":
-      return "Abierta";
+      return "Recibida";
 
     case "pending":
     case "pendiente":
@@ -167,7 +167,7 @@ function getStatusLabel(value = "") {
     case "progress":
     case "en_proceso":
     case "en proceso":
-      return "En proceso";
+      return "En revisión";
 
     case "resolved":
     case "resuelta":
@@ -180,7 +180,7 @@ function getStatusLabel(value = "") {
       return "Cerrada";
 
     default:
-      return safeText(value, "Abierta");
+      return safeText(value, "Recibida");
   }
 }
 
@@ -242,9 +242,9 @@ function getStatusChipStyle(value = "") {
     )
   ) {
     return `
-      color:#b388ff;
-      background:color-mix(in srgb, #b388ff 14%, transparent);
-      border:1px solid color-mix(in srgb, #b388ff 26%, transparent);
+      color:#7dd3fc;
+      background:color-mix(in srgb, #7dd3fc 14%, transparent);
+      border:1px solid color-mix(in srgb, #7dd3fc 26%, transparent);
     `;
   }
 
@@ -406,7 +406,7 @@ function getClientEmail(item = {}) {
 function getTitle(item = {}) {
   return safeText(
     first(item.subject, item.title, item.asunto, item.name),
-    "Incidencia sin título"
+    "Incidencia sin asunto"
   );
 }
 
@@ -435,7 +435,7 @@ function getAssigned(item = {}) {
       item?.tecnico,
       item?.meta?.assignedTo
     ),
-    "No asignado"
+    "Equipo de soporte"
   );
 }
 
@@ -625,25 +625,14 @@ function computeStats(items = []) {
     );
   }).length;
 
-  const assignedCount = list.filter((item) => {
-    const explicitAssigned = safeObject(item?.meta)?.isAssigned === true;
-
-    if (explicitAssigned) return true;
-
-    const assigned = getAssigned(item);
-    return assigned !== "No asignado";
+  const resolvedCount = list.filter((item) => {
+    const status = safeLower(getStatusValue(item));
+    return ["resolved", "resuelta", "resuelto"].includes(status);
   }).length;
 
   const closedCount = list.filter((item) => {
     const status = safeLower(getStatusValue(item));
-    return [
-      "resolved",
-      "resuelta",
-      "resuelto",
-      "closed",
-      "cerrada",
-      "cerrado",
-    ].includes(status);
+    return ["closed", "cerrada", "cerrado"].includes(status);
   }).length;
 
   return {
@@ -651,7 +640,7 @@ function computeStats(items = []) {
     openCount,
     inProgressCount,
     urgentCount,
-    assignedCount,
+    resolvedCount,
     closedCount,
   };
 }
@@ -790,7 +779,7 @@ export function renderHeader({ items = [], state = {} } = {}) {
                 text-transform:uppercase;
               "
             >
-              Soporte técnico
+              Ayuda y seguimiento
             </span>
 
             <div style="display:grid; gap:8px;">
@@ -804,7 +793,7 @@ export function renderHeader({ items = [], state = {} } = {}) {
                   color:var(--text-strong);
                 "
               >
-                Centro de control de incidencias
+                Tus incidencias y solicitudes
               </h1>
 
               <p
@@ -817,8 +806,8 @@ export function renderHeader({ items = [], state = {} } = {}) {
                   line-height:1.6;
                 "
               >
-                Supervisa tickets, prioridades, asignaciones y tiempos de actualización
-                desde una tabla premium diseñada para operación, seguimiento y respuesta rápida.
+                Consulta el estado de tus incidencias, revisa las actualizaciones más recientes
+                y crea nuevas solicitudes desde una vista clara, cercana y fácil de seguir.
               </p>
             </div>
           </div>
@@ -845,7 +834,7 @@ export function renderHeader({ items = [], state = {} } = {}) {
                 cursor:pointer;
               "
             >
-              Exportar CSV
+              Exportar historial
             </button>
 
             <button
@@ -865,7 +854,7 @@ export function renderHeader({ items = [], state = {} } = {}) {
                 box-shadow:0 10px 24px color-mix(in srgb, var(--accent, #7c5cff) 22%, transparent);
               "
             >
-              ${creating ? "Creando..." : "Nueva incidencia"}
+              ${creating ? "Abriendo..." : "Crear nueva incidencia"}
             </button>
           </div>
         </div>
@@ -895,7 +884,7 @@ export function renderHeader({ items = [], state = {} } = {}) {
               text-transform:uppercase;
             "
           >
-            ${escapeHtml(String(remoteCount))} registros remotos
+            ${escapeHtml(String(remoteCount))} solicitudes registradas
           </span>
 
           <span
@@ -914,7 +903,7 @@ export function renderHeader({ items = [], state = {} } = {}) {
               text-transform:uppercase;
             "
           >
-            Última sync · ${escapeHtml(lastSyncText)}
+            Última actualización · ${escapeHtml(lastSyncText)}
           </span>
 
           ${
@@ -948,7 +937,7 @@ export function renderHeader({ items = [], state = {} } = {}) {
                       animation:incidenciasPulse 1.35s ease-in-out infinite;
                     "
                   ></span>
-                  Sincronizando
+                  Actualizando
                 </span>
               `
               : ""
@@ -964,28 +953,28 @@ export function renderHeader({ items = [], state = {} } = {}) {
           "
         >
           ${renderStatCard({
-            label: "Tickets visibles",
+            label: "Total visible",
             value: String(stats.totalIncidencias),
-            caption: `${remoteCount} registros totales cargados en la colección.`,
+            caption: `${remoteCount} incidencias disponibles en tu historial actual.`,
             accent: true,
           })}
 
           ${renderStatCard({
-            label: "Abiertas",
+            label: "Recibidas",
             value: String(stats.openCount),
-            caption: "Tickets pendientes de atención inicial.",
+            caption: "Casos que ya hemos recibido y están pendientes de atención.",
           })}
 
           ${renderStatCard({
-            label: "En curso / urgentes",
+            label: "En revisión / urgentes",
             value: `${stats.inProgressCount} / ${stats.urgentCount}`,
-            caption: "Balance rápido entre seguimiento activo y prioridad crítica.",
+            caption: "Seguimiento activo y solicitudes con prioridad alta.",
           })}
 
           ${renderStatCard({
-            label: "Asignadas / cerradas",
-            value: `${stats.assignedCount} / ${stats.closedCount}`,
-            caption: "Cobertura operativa y cierre del conjunto visible.",
+            label: "Resueltas / cerradas",
+            value: `${stats.resolvedCount} / ${stats.closedCount}`,
+            caption: "Incidencias ya solucionadas o cerradas definitivamente.",
           })}
         </div>
       </div>
@@ -1040,7 +1029,7 @@ export function renderLoadingState() {
           <div
             style="
               display:grid;
-              grid-template-columns: 2.2fr .85fr .85fr .9fr 1.05fr 1fr 1fr .95fr;
+              grid-template-columns: 2.25fr .9fr .9fr 1fr 1.1fr 1fr 1fr 1fr;
               gap:0;
               border-bottom:1px solid var(--border-soft);
               background:var(--surface-2, var(--surface-glass));
@@ -1072,7 +1061,7 @@ export function renderLoadingState() {
                 <div
                   style="
                     display:grid;
-                    grid-template-columns: 2.2fr .85fr .85fr .9fr 1.05fr 1fr 1fr .95fr;
+                    grid-template-columns: 2.25fr .9fr .9fr 1fr 1.1fr 1fr 1fr 1fr;
                     gap:0;
                     border-bottom:1px solid var(--border-soft);
                   "
@@ -1106,7 +1095,7 @@ export function renderLoadingState() {
 
                   <div style="padding:16px 18px;">
                     <div style="display:flex; gap:8px; justify-content:flex-end;">
-                      <div style="height:38px; width:82px; border-radius:12px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:incidenciasSkeleton 1.25s linear infinite;"></div>
+                      <div style="height:38px; width:96px; border-radius:12px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:incidenciasSkeleton 1.25s linear infinite;"></div>
                     </div>
                   </div>
                 </div>
@@ -1160,7 +1149,7 @@ export function renderErrorState(message = "No se pudo cargar la colección.") {
             font-weight:var(--weight-bold);
           "
         >
-          Error de carga
+          No se ha podido cargar
         </span>
 
         <h3
@@ -1172,7 +1161,7 @@ export function renderErrorState(message = "No se pudo cargar la colección.") {
             letter-spacing:-.04em;
           "
         >
-          No se pudo renderizar la vista de incidencias
+          No se ha podido mostrar tu historial de incidencias
         </h3>
 
         <p
@@ -1184,7 +1173,7 @@ export function renderErrorState(message = "No se pudo cargar la colección.") {
             max-width:780px;
           "
         >
-          ${escapeHtml(safeText(message, "Error desconocido al cargar la vista."))}
+          ${escapeHtml(safeText(message, "Ha ocurrido un error al cargar las incidencias."))}
         </p>
       </div>
 
@@ -1203,7 +1192,7 @@ export function renderErrorState(message = "No se pudo cargar la colección.") {
             cursor:pointer;
           "
         >
-          Reintentar
+          Volver a intentar
         </button>
       </div>
     </section>
@@ -1242,7 +1231,7 @@ export function renderEmptyState() {
             font-weight:var(--weight-bold);
           "
         >
-          Sin resultados
+          Sin incidencias
         </span>
 
         <h3
@@ -1254,7 +1243,7 @@ export function renderEmptyState() {
             letter-spacing:-.04em;
           "
         >
-          No hay incidencias para mostrar
+          Aún no tienes incidencias registradas
         </h3>
 
         <p
@@ -1266,7 +1255,7 @@ export function renderEmptyState() {
             max-width:760px;
           "
         >
-          Todavía no hay tickets disponibles en la colección actual.
+          Cuando envíes una nueva solicitud, podrás seguir aquí su estado y las actualizaciones del equipo.
         </p>
       </div>
 
@@ -1324,7 +1313,7 @@ function renderTableToolbar({
             letter-spacing:-.02em;
           "
         >
-          Tabla de incidencias
+          Historial de incidencias
         </strong>
 
         <span
@@ -1361,7 +1350,7 @@ function renderTableToolbar({
             text-transform:uppercase;
           "
         >
-          Vista tabla
+          Vista resumida
         </span>
 
         ${
@@ -1541,7 +1530,7 @@ function renderOpenTicketButton({ ticketId = "", isOpening = false } = {}) {
       ${isOpening ? "disabled" : ""}
       style="
         min-height:38px;
-        min-width:96px;
+        min-width:108px;
         padding:0 12px;
         border-radius:12px;
         border:1px solid var(--btn-secondary-border, var(--border-soft));
@@ -1550,7 +1539,6 @@ function renderOpenTicketButton({ ticketId = "", isOpening = false } = {}) {
         font-weight:var(--weight-bold);
         cursor:${isOpening ? "wait" : "pointer"};
         white-space:nowrap;
-        opacity:${isOpening ? ".88" : "1"};
       "
     >
       ${
@@ -1571,7 +1559,7 @@ function renderOpenTicketButton({ ticketId = "", isOpening = false } = {}) {
               Abriendo...
             </span>
           `
-          : "Ver"
+          : "Ver detalle"
       }
     </button>
   `;
@@ -1645,21 +1633,22 @@ function renderIncidenciaRow(item = {}, state = {}) {
                 line-height:1.2;
                 cursor:${isOpening ? "wait" : "pointer"};
               "
-              title="Abrir detalle de incidencia"
+              title="Abrir detalle de la incidencia"
             >
-              ${escapeHtml(code)}
+              ${escapeHtml(title)}
             </button>
 
             <span
               style="
                 color:var(--text-soft);
-                font-size:13px;
-                font-weight:var(--weight-semibold);
-                line-height:1.32;
-                word-break:break-word;
+                font-size:12px;
+                font-weight:var(--weight-bold);
+                line-height:1.3;
+                text-transform:uppercase;
+                letter-spacing:.04em;
               "
             >
-              ${escapeHtml(title)}
+              ${escapeHtml(code)}
             </span>
 
             <span
@@ -1726,7 +1715,7 @@ function renderIncidenciaRow(item = {}, state = {}) {
               letter-spacing:.04em;
             "
           >
-            Creación
+            Fecha de envío
           </span>
         </div>
       </td>
@@ -1791,7 +1780,7 @@ function renderIncidenciaRow(item = {}, state = {}) {
               letter-spacing:.04em;
             "
           >
-            Responsable
+            Seguimiento
           </span>
         </div>
       </td>
@@ -1873,7 +1862,7 @@ function renderIncidenciaRow(item = {}, state = {}) {
               white-space:nowrap;
             "
           >
-            Copiar ID
+            Copiar referencia
           </button>
         </div>
       </td>
@@ -1954,19 +1943,20 @@ function renderMobileIncidenciaCard(item = {}, state = {}) {
                 cursor:${isOpening ? "wait" : "pointer"};
               "
             >
-              ${escapeHtml(code)}
+              ${escapeHtml(title)}
             </button>
 
             <span
               style="
                 color:var(--text-soft);
-                font-size:var(--font-sm);
-                font-weight:var(--weight-semibold);
+                font-size:12px;
+                font-weight:var(--weight-bold);
                 line-height:1.35;
-                word-break:break-word;
+                text-transform:uppercase;
+                letter-spacing:.04em;
               "
             >
-              ${escapeHtml(title)}
+              ${escapeHtml(code)}
             </span>
 
             <span
@@ -2014,7 +2004,7 @@ function renderMobileIncidenciaCard(item = {}, state = {}) {
               text-transform:uppercase;
             "
           >
-            Cliente
+            Solicitante
           </span>
           <strong style="color:var(--text-strong); font-size:var(--font-sm);">
             ${escapeHtml(client)}
@@ -2043,7 +2033,7 @@ function renderMobileIncidenciaCard(item = {}, state = {}) {
               text-transform:uppercase;
             "
           >
-            Asignado
+            Seguimiento
           </span>
           <strong style="color:var(--text-strong); font-size:var(--font-sm);">
             ${escapeHtml(assignedTo)}
@@ -2069,7 +2059,7 @@ function renderMobileIncidenciaCard(item = {}, state = {}) {
               text-transform:uppercase;
             "
           >
-            Creada
+            Enviada
           </span>
           <strong style="color:var(--text-strong); font-size:var(--font-sm);">
             ${escapeHtml(createdAt)}
@@ -2129,7 +2119,7 @@ function renderMobileIncidenciaCard(item = {}, state = {}) {
             cursor:pointer;
           "
         >
-          Copiar ID
+          Copiar referencia
         </button>
       </div>
     </article>
@@ -2185,7 +2175,7 @@ function renderDesktopTable(items = [], state = {}) {
                 white-space:nowrap;
               "
             >
-              Ticket / detalle
+              Incidencia
             </th>
 
             <th
@@ -2233,7 +2223,7 @@ function renderDesktopTable(items = [], state = {}) {
                 white-space:nowrap;
               "
             >
-              Creación
+              Enviada
             </th>
 
             <th
@@ -2249,7 +2239,7 @@ function renderDesktopTable(items = [], state = {}) {
                 white-space:nowrap;
               "
             >
-              Cliente
+              Usuario
             </th>
 
             <th
@@ -2265,7 +2255,7 @@ function renderDesktopTable(items = [], state = {}) {
                 white-space:nowrap;
               "
             >
-              Asignado
+              Seguimiento
             </th>
 
             <th
@@ -2281,7 +2271,7 @@ function renderDesktopTable(items = [], state = {}) {
                 white-space:nowrap;
               "
             >
-              Actualización
+              Última novedad
             </th>
 
             <th
@@ -2387,7 +2377,7 @@ function renderTableLoadingOverlay(message = "Actualizando incidencias...") {
             font-size:12px;
           "
         >
-          Solo se está actualizando la tabla
+          Solo se está actualizando el historial
         </span>
       </div>
     </div>

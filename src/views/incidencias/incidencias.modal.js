@@ -2,24 +2,27 @@
    Onion SPA - Incidencias Modal
    Archivo: src/views/incidencias/incidencias.modal.js
 
-   FINAL PRO SYSTEM · DETAIL MODAL · 10/10
+   CLIENT EXPERIENCE PRO · DETAIL MODAL · 10/10
 
    RESPONSABILIDADES:
    - renderizar modal premium de detalle de incidencia
    - abrir / cerrar modal limpio
    - refrescar contenido del ticket desde el modal
-   - copiar ID desde el modal
-   - soportar timeline / adjuntos / metadata
+   - copiar referencia desde el modal
+   - permitir reabrir incidencia cuando proceda
+   - permitir añadir nuevos comentarios / detalles
+   - visualizar actividad, timeline y adjuntos
    - exponer bridge global para incidenciasView.js
    - integrarse con AppCore.events sin acoplar la vista
 
    HARDENING PRO:
    - tolerancia a payloads heterogéneos
-   - fallback avatar -> iniciales
+   - avatar fallback -> iniciales
    - modal singleton
    - escape / overlay close
    - render incremental seguro
-   - estado visual interno de refresh
+   - estado visual interno de refresh / comment / reopen
+   - bridge flexible para acciones externas
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -47,9 +50,14 @@ const modalState = {
   detail: null,
   isOpen: false,
   isRefreshing: false,
+  isCommentSubmitting: false,
+  isReopening: false,
   bindingsAttached: false,
   lastActiveElement: null,
   escHandler: null,
+  commentDraft: "",
+  feedbackMessage: "",
+  feedbackType: "info",
 };
 
 /* =========================================================
@@ -146,6 +154,31 @@ function showToast(message = "", type = "info") {
   } catch {}
 }
 
+function setFeedback(message = "", type = "info") {
+  modalState.feedbackMessage = safeText(message, "");
+  modalState.feedbackType = safeText(type, "info");
+}
+
+function clearFeedback() {
+  modalState.feedbackMessage = "";
+  modalState.feedbackType = "info";
+}
+
+function normalizeWhitespace(value = "") {
+  return safeText(value, "").replace(/\s+/g, " ").trim();
+}
+
+function formatBytes(bytes = 0) {
+  const size = Number(bytes);
+  if (!Number.isFinite(size) || size <= 0) return "";
+
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+
+  return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
 /* =========================================================
    DATE HELPERS
 ========================================================= */
@@ -180,6 +213,7 @@ function formatRelativeDate(value = null) {
   const absMin = Math.abs(diffMin);
 
   if (absMin < 1) return "Ahora mismo";
+
   if (absMin < 60) {
     return diffMin > 0
       ? `En ${absMin} min`
@@ -214,6 +248,18 @@ function getDetail(detail = {}) {
 function getTicketId(detail = {}) {
   return safeText(
     first(
+      detail.ticketId,
+      detail.id
+    ),
+    "—"
+  );
+}
+
+function getTicketCode(detail = {}) {
+  return safeText(
+    first(
+      detail.ticketCode,
+      detail.code,
       detail.ticketId,
       detail.id
     ),
@@ -298,6 +344,102 @@ function getTags(detail = {}) {
   return [];
 }
 
+function getAttachments(detail = {}) {
+  const attachments = first(
+    detail.attachments,
+    detail?.raw?.attachments,
+    detail?.raw?.files,
+    detail?.raw?.adjuntos
+  );
+
+  return safeArray(attachments).map((file, index) => {
+    const item = safeObject(file);
+
+    return {
+      id: safeText(first(item.id, item.fileId), `attachment-${index + 1}`),
+      name: safeText(
+        first(item.name, item.filename, item.fileName, item.title),
+        `archivo_${index + 1}`
+      ),
+      url: safeText(
+        first(item.url, item.href, item.path, item.downloadUrl),
+        "#"
+      ),
+      size: safeNumber(item.size, 0),
+      type: safeText(first(item.type, item.mimeType, item.mime), ""),
+    };
+  });
+}
+
+function getTimeline(detail = {}) {
+  const history = safeArray(first(
+    detail.history,
+    detail?.raw?.history,
+    detail?.raw?.timeline,
+    detail?.raw?.events
+  ));
+
+  const comments = safeArray(first(
+    detail.comments,
+    detail?.raw?.comments,
+    detail?.raw?.notes,
+    detail?.raw?.messages
+  ));
+
+  const normalizedHistory = history.map((entry, index) => {
+    const item = safeObject(entry);
+
+    return {
+      id: safeText(first(item.id, item.eventId), `h-${index + 1}`),
+      kind: "event",
+      title: safeText(
+        first(item.title, item.action, item.message, item.text),
+        "Actualización"
+      ),
+      body: safeText(
+        first(item.description, item.detail, item.body, item.text),
+        ""
+      ),
+      author: safeText(
+        first(item.user, item.author, item.name),
+        "Sistema"
+      ),
+      createdAt: first(item.createdAt, item.date, item.timestamp),
+    };
+  });
+
+  const normalizedComments = comments.map((entry, index) => {
+    const item = safeObject(entry);
+
+    return {
+      id: safeText(first(item.id, item.commentId), `c-${index + 1}`),
+      kind: "comment",
+      title: "Nuevo comentario",
+      body: safeText(
+        first(item.message, item.text, item.body, item.comment),
+        ""
+      ),
+      author: safeText(
+        first(item.user, item.author, item.name),
+        "Usuario"
+      ),
+      createdAt: first(item.createdAt, item.date, item.timestamp),
+    };
+  });
+
+  return [...normalizedHistory, ...normalizedComments]
+    .sort((a, b) => {
+      const timeA = new Date(a.createdAt || 0).getTime() || 0;
+      const timeB = new Date(b.createdAt || 0).getTime() || 0;
+      return timeB - timeA;
+    });
+}
+
+function canReopen(detail = {}) {
+  const status = safeText(detail.status, "").toLowerCase();
+  return ["resolved", "resuelta", "resuelto", "closed", "cerrada", "cerrado"].includes(status);
+}
+
 /* =========================================================
    VISUAL HELPERS
 ========================================================= */
@@ -323,9 +465,9 @@ function getStatusChipStyle(value = "") {
 
   if (["progress", "in_progress", "in-progress", "en_proceso", "en proceso"].includes(key)) {
     return `
-      color:#b388ff;
-      background:color-mix(in srgb, #b388ff 14%, transparent);
-      border:1px solid color-mix(in srgb, #b388ff 26%, transparent);
+      color:#7dd3fc;
+      background:color-mix(in srgb, #7dd3fc 14%, transparent);
+      border:1px solid color-mix(in srgb, #7dd3fc 26%, transparent);
     `;
   }
 
@@ -391,6 +533,35 @@ function getPriorityChipStyle(value = "") {
     color:var(--text-soft);
     background:var(--surface-glass);
     border:1px solid var(--border-soft);
+  `;
+}
+
+function getFeedbackStyle(type = "info") {
+  const key = safeText(type, "info").toLowerCase();
+
+  if (key === "success") {
+    return `
+      border:1px solid color-mix(in srgb, var(--success-strong, #36c690) 30%, var(--border-soft));
+      background:
+        linear-gradient(180deg, color-mix(in srgb, var(--success-strong, #36c690) 10%, transparent), transparent 85%),
+        var(--surface-1, var(--surface-glass));
+    `;
+  }
+
+  if (key === "error") {
+    return `
+      border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 30%, var(--border-soft));
+      background:
+        linear-gradient(180deg, color-mix(in srgb, var(--danger-strong, #ff6b6b) 10%, transparent), transparent 85%),
+        var(--surface-1, var(--surface-glass));
+    `;
+  }
+
+  return `
+    border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft));
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 85%),
+      var(--surface-1, var(--surface-glass));
   `;
 }
 
@@ -599,6 +770,39 @@ function renderMetaField(label = "", value = "") {
   `;
 }
 
+function renderFeedbackBox() {
+  const message = safeText(modalState.feedbackMessage, "");
+  if (!message) return "";
+
+  const type = safeText(modalState.feedbackType, "info");
+
+  return `
+    <div
+      style="
+        display:grid;
+        gap:6px;
+        padding:14px 16px;
+        border-radius:16px;
+        ${getFeedbackStyle(type)}
+      "
+    >
+      <strong style="color:var(--text-strong); font-size:14px;">
+        ${type === "error" ? "No se ha podido completar la acción" : type === "success" ? "Acción completada" : "Información"}
+      </strong>
+
+      <span
+        style="
+          color:var(--text-dim);
+          font-size:13px;
+          line-height:1.5;
+        "
+      >
+        ${escapeHtml(message)}
+      </span>
+    </div>
+  `;
+}
+
 function renderTags(detail = {}) {
   const tags = getTags(detail);
 
@@ -610,7 +814,7 @@ function renderTags(detail = {}) {
           font-size:13px;
         "
       >
-        Sin tags
+        Sin etiquetas
       </span>
     `;
   }
@@ -650,7 +854,7 @@ function renderTags(detail = {}) {
 }
 
 function renderAttachments(detail = {}) {
-  const files = safeArray(detail.attachments);
+  const files = getAttachments(detail);
 
   if (!files.length) {
     return `
@@ -663,7 +867,7 @@ function renderAttachments(detail = {}) {
           color:var(--text-dim);
         "
       >
-        Sin adjuntos
+        No hay archivos adjuntos en esta incidencia.
       </div>
     `;
   }
@@ -676,23 +880,12 @@ function renderAttachments(detail = {}) {
       "
     >
       ${files
-        .map((file, index) => {
-          const item = safeObject(file);
-          const name = safeText(
-            first(item.name, item.filename, item.fileName),
-            `archivo_${index + 1}`
-          );
-          const url = safeText(
-            first(item.url, item.href, item.path, item.downloadUrl),
-            "#"
-          );
-          const size = safeNumber(item.size, 0);
+        .map((file) => {
+          const hasLink = file.url && file.url !== "#";
 
           return `
-            <a
-              href="${escapeHtml(url)}"
-              target="_blank"
-              rel="noopener"
+            <${hasLink ? "a" : "div"}
+              ${hasLink ? `href="${escapeHtml(file.url)}" target="_blank" rel="noopener"` : ""}
               style="
                 display:flex;
                 justify-content:space-between;
@@ -706,26 +899,46 @@ function renderAttachments(detail = {}) {
                 color:var(--text-strong);
               "
             >
-              <span
-                style="
-                  min-width:0;
-                  font-weight:var(--weight-semibold, 600);
-                  word-break:break-word;
-                "
-              >
-                ${escapeHtml(name)}
-              </span>
+              <div style="display:grid; gap:4px; min-width:0;">
+                <strong
+                  style="
+                    min-width:0;
+                    font-weight:var(--weight-semibold, 600);
+                    word-break:break-word;
+                  "
+                >
+                  ${escapeHtml(file.name)}
+                </strong>
 
-              <span
-                style="
-                  flex:0 0 auto;
-                  color:var(--text-dim);
-                  font-size:12px;
-                "
-              >
-                ${size ? `${escapeHtml(String(size))} bytes` : ""}
-              </span>
-            </a>
+                <span
+                  style="
+                    color:var(--text-dim);
+                    font-size:12px;
+                  "
+                >
+                  ${escapeHtml(
+                    [file.type, formatBytes(file.size)].filter(Boolean).join(" · ") || "Archivo adjunto"
+                  )}
+                </span>
+              </div>
+
+              ${
+                hasLink
+                  ? `
+                    <span
+                      style="
+                        flex:0 0 auto;
+                        color:var(--text-soft);
+                        font-size:12px;
+                        font-weight:var(--weight-bold, 700);
+                      "
+                    >
+                      Abrir
+                    </span>
+                  `
+                  : ""
+              }
+            </${hasLink ? "a" : "div"}>
           `;
         })
         .join("")}
@@ -733,10 +946,10 @@ function renderAttachments(detail = {}) {
   `;
 }
 
-function renderHistory(detail = {}) {
-  const history = safeArray(detail.history);
+function renderTimeline(detail = {}) {
+  const timeline = getTimeline(detail);
 
-  if (!history.length) {
+  if (!timeline.length) {
     return `
       <div
         style="
@@ -747,7 +960,7 @@ function renderHistory(detail = {}) {
           color:var(--text-dim);
         "
       >
-        Sin actividad registrada
+        Todavía no hay actividad registrada en esta incidencia.
       </div>
     `;
   }
@@ -756,67 +969,126 @@ function renderHistory(detail = {}) {
     <div
       style="
         display:grid;
-        gap:10px;
+        gap:12px;
       "
     >
-      ${history
+      ${timeline
         .map((entry) => {
-          const item = safeObject(entry);
+          const kind = safeText(entry.kind, "event");
 
           return `
             <article
               style="
                 display:grid;
-                gap:8px;
+                gap:10px;
                 padding:14px;
                 border-radius:16px;
                 border:1px solid var(--border-soft);
                 background:var(--surface-glass);
               "
             >
-              <strong
-                style="
-                  color:var(--text-strong);
-                  font-size:14px;
-                  line-height:1.35;
-                "
-              >
-                ${escapeHtml(
-                  safeText(
-                    first(item.title, item.action, item.message, item.text),
-                    "Evento"
-                  )
-                )}
-              </strong>
-
               <div
                 style="
                   display:flex;
-                  align-items:center;
                   justify-content:space-between;
                   gap:10px;
+                  align-items:flex-start;
                   flex-wrap:wrap;
                 "
               >
-                <span
-                  style="
-                    color:var(--text-dim);
-                    font-size:12px;
-                  "
-                >
-                  ${escapeHtml(
-                    safeText(first(item.user, item.author, item.name), "Sistema")
-                  )}
-                </span>
+                <div style="display:grid; gap:6px;">
+                  <div
+                    style="
+                      display:flex;
+                      gap:8px;
+                      flex-wrap:wrap;
+                      align-items:center;
+                    "
+                  >
+                    <strong
+                      style="
+                        color:var(--text-strong);
+                        font-size:14px;
+                        line-height:1.35;
+                      "
+                    >
+                      ${escapeHtml(safeText(entry.title, "Actualización"))}
+                    </strong>
 
-                <span
+                    <span
+                      style="
+                        display:inline-flex;
+                        align-items:center;
+                        min-height:24px;
+                        padding:0 8px;
+                        border-radius:999px;
+                        border:1px solid ${
+                          kind === "comment"
+                            ? "color-mix(in srgb, var(--accent, #7c5cff) 20%, var(--border-soft))"
+                            : "var(--border-soft)"
+                        };
+                        background:${
+                          kind === "comment"
+                            ? "color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent)"
+                            : "var(--surface-1, var(--surface-glass))"
+                        };
+                        color:var(--text-soft);
+                        font-size:11px;
+                        font-weight:var(--weight-bold, 700);
+                        text-transform:uppercase;
+                        letter-spacing:.04em;
+                      "
+                    >
+                      ${kind === "comment" ? "Comentario" : "Histórico"}
+                    </span>
+                  </div>
+
+                  ${
+                    entry.body
+                      ? `
+                        <p
+                          style="
+                            margin:0;
+                            color:var(--text-dim);
+                            font-size:13px;
+                            line-height:1.6;
+                            white-space:pre-wrap;
+                            word-break:break-word;
+                          "
+                        >
+                          ${escapeHtml(entry.body)}
+                        </p>
+                      `
+                      : ""
+                  }
+                </div>
+
+                <div
                   style="
-                    color:var(--text-dim);
-                    font-size:12px;
+                    display:grid;
+                    gap:4px;
+                    justify-items:end;
                   "
                 >
-                  ${escapeHtml(formatDate(first(item.createdAt, item.date, item.timestamp)))}
-                </span>
+                  <span
+                    style="
+                      color:var(--text-soft);
+                      font-size:12px;
+                      font-weight:var(--weight-semibold, 600);
+                    "
+                  >
+                    ${escapeHtml(safeText(entry.author, "Sistema"))}
+                  </span>
+
+                  <span
+                    style="
+                      color:var(--text-dim);
+                      font-size:12px;
+                    "
+                  >
+                    ${escapeHtml(formatDate(entry.createdAt))}
+                  </span>
+                </div>
               </div>
             </article>
           `;
@@ -826,7 +1098,184 @@ function renderHistory(detail = {}) {
   `;
 }
 
-function renderLoadingOverlay() {
+function renderComposer(detail = {}) {
+  const ticketId = getTicketId(detail);
+  const canReopenTicket = canReopen(detail);
+  const draft = safeText(modalState.commentDraft, "");
+
+  return `
+    <section
+      style="
+        display:grid;
+        gap:12px;
+      "
+    >
+      <div
+        style="
+          display:flex;
+          justify-content:space-between;
+          gap:10px;
+          align-items:flex-start;
+          flex-wrap:wrap;
+        "
+      >
+        <div style="display:grid; gap:4px;">
+          <h3
+            style="
+              margin:0;
+              color:var(--text-strong);
+              font-size:20px;
+              letter-spacing:-.02em;
+            "
+          >
+            Añadir más información
+          </h3>
+
+          <span
+            style="
+              color:var(--text-dim);
+              font-size:13px;
+              line-height:1.5;
+            "
+          >
+            Puedes escribir nuevos detalles para ampliar el contexto de la incidencia.
+          </span>
+        </div>
+
+        ${
+          canReopenTicket
+            ? `
+              <button
+                type="button"
+                data-modal-action="reopen"
+                data-ticket-id="${escapeHtml(ticketId)}"
+                ${modalState.isReopening ? "disabled" : ""}
+                style="
+                  min-height:42px;
+                  padding:0 14px;
+                  border-radius:14px;
+                  border:1px solid var(--border-soft);
+                  background:var(--surface-glass);
+                  color:var(--text-soft);
+                  font-weight:var(--weight-bold, 700);
+                  cursor:${modalState.isReopening ? "wait" : "pointer"};
+                  opacity:${modalState.isReopening ? ".78" : "1"};
+                "
+              >
+                ${
+                  modalState.isReopening
+                    ? `
+                      <span style="display:inline-flex; align-items:center; gap:8px;">
+                        <span
+                          aria-hidden="true"
+                          style="
+                            width:14px;
+                            height:14px;
+                            border-radius:999px;
+                            border:2px solid color-mix(in srgb, var(--text-soft) 22%, transparent);
+                            border-top-color:var(--text-soft);
+                            animation:incidenciasModalSpin .8s linear infinite;
+                          "
+                        ></span>
+                        Reabriendo...
+                      </span>
+                    `
+                    : "Reabrir incidencia"
+                }
+              </button>
+            `
+            : ""
+        }
+      </div>
+
+      <div
+        style="
+          display:grid;
+          gap:10px;
+        "
+      >
+        <textarea
+          id="incidencias-modal-comment-input"
+          data-modal-field="comment"
+          placeholder="Escribe aquí nuevos detalles, contexto adicional o cualquier actualización que quieras añadir..."
+          ${modalState.isCommentSubmitting ? "disabled" : ""}
+          style="
+            width:100%;
+            min-height:140px;
+            padding:14px;
+            border-radius:16px;
+            border:1px solid var(--border-soft);
+            background:var(--surface-1, var(--surface-glass));
+            color:var(--text-strong);
+            outline:none;
+            resize:vertical;
+            line-height:1.6;
+          "
+        >${escapeHtml(draft)}</textarea>
+
+        <div
+          style="
+            display:flex;
+            justify-content:space-between;
+            gap:12px;
+            align-items:center;
+            flex-wrap:wrap;
+          "
+        >
+          <span
+            style="
+              color:var(--text-dim);
+              font-size:12px;
+            "
+          >
+            Esta acción añadirá una nueva actualización a la incidencia.
+          </span>
+
+          <button
+            type="button"
+            data-modal-action="comment"
+            data-ticket-id="${escapeHtml(ticketId)}"
+            ${modalState.isCommentSubmitting ? "disabled" : ""}
+            style="
+              min-height:42px;
+              padding:0 16px;
+              border-radius:14px;
+              border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
+              background:var(--btn-primary-bg, var(--accent, #7c5cff));
+              color:var(--btn-primary-text, #fff);
+              font-weight:var(--weight-bold, 700);
+              cursor:${modalState.isCommentSubmitting ? "wait" : "pointer"};
+              opacity:${modalState.isCommentSubmitting ? ".82" : "1"};
+            "
+          >
+            ${
+              modalState.isCommentSubmitting
+                ? `
+                  <span style="display:inline-flex; align-items:center; gap:8px;">
+                    <span
+                      aria-hidden="true"
+                      style="
+                        width:14px;
+                        height:14px;
+                        border-radius:999px;
+                        border:2px solid rgba(255,255,255,.28);
+                        border-top-color:#fff;
+                        animation:incidenciasModalSpin .8s linear infinite;
+                      "
+                    ></span>
+                    Enviando...
+                  </span>
+                `
+                : "Añadir comentario"
+            }
+          </button>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderLoadingOverlay(label = "Actualizando incidencia...") {
   return `
     <div
       style="
@@ -872,16 +1321,21 @@ function renderLoadingOverlay() {
             letter-spacing:-.02em;
           "
         >
-          Actualizando ticket...
+          ${escapeHtml(label)}
         </strong>
       </div>
     </div>
   `;
 }
 
-function renderModalInner(detail = {}, { isRefreshing = false } = {}) {
+function renderModalInner(detail = {}, {
+  isRefreshing = false,
+  isCommentSubmitting = false,
+  isReopening = false,
+} = {}) {
   const item = getDetail(detail);
   const ticketId = getTicketId(item);
+  const ticketCode = getTicketCode(item);
   const title = safeText(item.title, "Incidencia");
   const description = getDisplayDescription(item);
   const createdAt = formatDate(item.createdAt);
@@ -889,13 +1343,21 @@ function renderModalInner(detail = {}, { isRefreshing = false } = {}) {
   const updatedAgo = formatRelativeDate(item.updatedAt);
   const clientName = safeText(item.clientName, "Cliente");
   const clientEmail = safeText(item.clientEmail, "Sin email");
-  const assignedTo = safeText(item.assignedToName, "No asignado");
+  const assignedTo = safeText(item.assignedToName, "Equipo de soporte");
   const category = getCategory(item);
   const source = getSource(item);
+  const attachments = getAttachments(item);
   const statusRaw = safeText(item.status, "open");
   const priorityRaw = safeText(item.priority, "medium");
   const statusLabel = getStatusLabel(statusRaw);
   const priorityLabel = getPriorityLabel(priorityRaw);
+  const busyLabel = isRefreshing
+    ? "Actualizando incidencia..."
+    : isCommentSubmitting
+      ? "Enviando comentario..."
+      : isReopening
+        ? "Reabriendo incidencia..."
+        : "";
 
   return `
     <div
@@ -917,9 +1379,10 @@ function renderModalInner(detail = {}, { isRefreshing = false } = {}) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="incidencias-modal-title"
+        tabindex="-1"
         style="
           position:relative;
-          width:min(1160px, 100%);
+          width:min(1180px, 100%);
           max-height:92vh;
           overflow:auto;
           border-radius:28px;
@@ -930,7 +1393,7 @@ function renderModalInner(detail = {}, { isRefreshing = false } = {}) {
           box-shadow:0 40px 100px rgba(0,0,0,.45);
         "
       >
-        ${isRefreshing ? renderLoadingOverlay() : ""}
+        ${busyLabel ? renderLoadingOverlay(busyLabel) : ""}
 
         <div
           style="
@@ -947,7 +1410,7 @@ function renderModalInner(detail = {}, { isRefreshing = false } = {}) {
               display:flex;
               gap:16px;
               align-items:flex-start;
-              min-width:min(100%, 540px);
+              min-width:min(100%, 560px);
             "
           >
             ${renderAvatar(item)}
@@ -977,7 +1440,7 @@ function renderModalInner(detail = {}, { isRefreshing = false } = {}) {
                     text-transform:uppercase;
                   "
                 >
-                  Ticket ${escapeHtml(ticketId)}
+                  Referencia ${escapeHtml(ticketCode)}
                 </span>
 
                 ${renderChip(statusLabel, getStatusChipStyle(statusRaw))}
@@ -1003,9 +1466,10 @@ function renderModalInner(detail = {}, { isRefreshing = false } = {}) {
                   style="
                     color:var(--text-dim);
                     font-size:14px;
+                    line-height:1.5;
                   "
                 >
-                  Actualizado ${escapeHtml(updatedAgo)}
+                  Última actualización ${escapeHtml(updatedAgo)}
                 </span>
               </div>
             </div>
@@ -1023,7 +1487,7 @@ function renderModalInner(detail = {}, { isRefreshing = false } = {}) {
               type="button"
               data-modal-action="refresh"
               data-ticket-id="${escapeHtml(ticketId)}"
-              ${isRefreshing ? "disabled" : ""}
+              ${(isRefreshing || isCommentSubmitting || isReopening) ? "disabled" : ""}
               style="
                 min-height:44px;
                 padding:0 16px;
@@ -1032,30 +1496,11 @@ function renderModalInner(detail = {}, { isRefreshing = false } = {}) {
                 background:var(--surface-glass);
                 color:var(--text-soft);
                 font-weight:var(--weight-bold, 700);
-                cursor:${isRefreshing ? "wait" : "pointer"};
-                opacity:${isRefreshing ? ".78" : "1"};
+                cursor:${(isRefreshing || isCommentSubmitting || isReopening) ? "wait" : "pointer"};
+                opacity:${(isRefreshing || isCommentSubmitting || isReopening) ? ".78" : "1"};
               "
             >
-              ${
-                isRefreshing
-                  ? `
-                    <span style="display:inline-flex; align-items:center; gap:8px;">
-                      <span
-                        aria-hidden="true"
-                        style="
-                          width:14px;
-                          height:14px;
-                          border-radius:999px;
-                          border:2px solid color-mix(in srgb, var(--text-soft) 22%, transparent);
-                          border-top-color:var(--text-soft);
-                          animation:incidenciasModalSpin .8s linear infinite;
-                        "
-                      ></span>
-                      Refrescando...
-                    </span>
-                  `
-                  : "Actualizar"
-              }
+              Actualizar
             </button>
 
             <button
@@ -1073,7 +1518,7 @@ function renderModalInner(detail = {}, { isRefreshing = false } = {}) {
                 cursor:pointer;
               "
             >
-              Copiar ID
+              Copiar referencia
             </button>
 
             <button
@@ -1104,6 +1549,8 @@ function renderModalInner(detail = {}, { isRefreshing = false } = {}) {
             gap:22px;
           "
         >
+          ${renderFeedbackBox()}
+
           <div
             style="
               display:grid;
@@ -1112,14 +1559,14 @@ function renderModalInner(detail = {}, { isRefreshing = false } = {}) {
             "
             class="incidencias-modal-meta-grid"
           >
-            ${renderMetaField("Cliente", clientName)}
+            ${renderMetaField("Solicitante", clientName)}
             ${renderMetaField("Email", clientEmail)}
-            ${renderMetaField("Asignado", assignedTo)}
+            ${renderMetaField("Seguimiento", assignedTo)}
             ${renderMetaField("Categoría", category)}
-            ${renderMetaField("Creado", createdAt)}
-            ${renderMetaField("Actualizado", updatedAt)}
+            ${renderMetaField("Creada", createdAt)}
+            ${renderMetaField("Actualizada", updatedAt)}
             ${renderMetaField("Origen", source)}
-            ${renderMetaField("Adjuntos", String(safeArray(item.attachments).length))}
+            ${renderMetaField("Adjuntos", String(attachments.length))}
           </div>
 
           <section
@@ -1145,7 +1592,7 @@ function renderModalInner(detail = {}, { isRefreshing = false } = {}) {
                   letter-spacing:-.02em;
                 "
               >
-                Descripción
+                Descripción de la incidencia
               </h3>
 
               <span
@@ -1188,16 +1635,18 @@ function renderModalInner(detail = {}, { isRefreshing = false } = {}) {
                 letter-spacing:-.02em;
               "
             >
-              Tags
+              Etiquetas
             </h3>
 
             ${renderTags(item)}
           </section>
 
+          ${renderComposer(item)}
+
           <div
             style="
               display:grid;
-              grid-template-columns:1.05fr .95fr;
+              grid-template-columns:1fr 1fr;
               gap:18px;
             "
             class="incidencias-modal-lower-grid"
@@ -1236,10 +1685,10 @@ function renderModalInner(detail = {}, { isRefreshing = false } = {}) {
                   letter-spacing:-.02em;
                 "
               >
-                Actividad
+                Historial y actividad
               </h3>
 
-              ${renderHistory(item)}
+              ${renderTimeline(item)}
             </section>
           </div>
         </div>
@@ -1357,6 +1806,39 @@ function attachEscHandler() {
 }
 
 /* =========================================================
+   EXTERNAL ACTION BRIDGE
+========================================================= */
+
+async function callExternalAction(action = "", payload = {}) {
+  const actionName = safeText(action, "");
+
+  if (!actionName) return null;
+
+  const candidates = [
+    AppCore?.modules?.IncidenciasModalActions?.[actionName],
+    AppCore?.modules?.IncidenciasActions?.[actionName],
+    AppCore?.modules?.Incidencias?.[actionName],
+    window?.OnionIncidenciasModalActions?.[actionName],
+    window?.OnionIncidenciasActions?.[actionName],
+    window?.IncidenciasActions?.[actionName],
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate !== "function") {
+      continue;
+    }
+
+    try {
+      return await candidate(payload);
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  return null;
+}
+
+/* =========================================================
    RENDER CONTROL
 ========================================================= */
 
@@ -1364,13 +1846,20 @@ function renderModal() {
   const root = ensureRoot();
 
   if (!modalState.detail) {
+    detachRootBindings();
     root.innerHTML = "";
     return root;
   }
 
+  detachRootBindings();
+
   root.innerHTML = renderModalInner(modalState.detail, {
     isRefreshing: modalState.isRefreshing,
+    isCommentSubmitting: modalState.isCommentSubmitting,
+    isReopening: modalState.isReopening,
   });
+
+  modalState.bindingsAttached = false;
 
   return root;
 }
@@ -1391,6 +1880,10 @@ export function openIncidenciasModal(detail = {}) {
   modalState.detail = getDetail(detail);
   modalState.isOpen = true;
   modalState.isRefreshing = false;
+  modalState.isCommentSubmitting = false;
+  modalState.isReopening = false;
+  modalState.commentDraft = "";
+  clearFeedback();
 
   renderModal();
   lockBody();
@@ -1411,7 +1904,13 @@ export function closeIncidenciasModal() {
 
   modalState.isOpen = false;
   modalState.isRefreshing = false;
+  modalState.isCommentSubmitting = false;
+  modalState.isReopening = false;
   modalState.detail = null;
+  modalState.commentDraft = "";
+  clearFeedback();
+
+  detachRootBindings();
 
   if (root) {
     root.innerHTML = "";
@@ -1433,9 +1932,12 @@ export function updateIncidenciasModal(detail = {}) {
 
   modalState.detail = getDetail(detail);
   modalState.isRefreshing = false;
+  modalState.isCommentSubmitting = false;
+  modalState.isReopening = false;
 
   renderModal();
   attachRootBindings();
+  focusPanel();
 
   return true;
 }
@@ -1448,15 +1950,35 @@ async function handleCopy(ticketId = "") {
   const id = safeText(ticketId, "");
 
   if (!id) {
-    showToast("No hay ID para copiar.", "error");
+    setFeedback("No hay referencia disponible para copiar.", "error");
+    renderModal();
+    attachRootBindings();
     return false;
   }
+
+  let copied = false;
+
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(id);
+      copied = true;
+    }
+  } catch {}
 
   safeEmit("incidencias:modal:copy", {
     ticketId: id,
   });
 
-  showToast("ID copiado", "success");
+  if (copied) {
+    setFeedback(`Referencia ${id} copiada al portapapeles.`, "success");
+    showToast("Referencia copiada", "success");
+  } else {
+    setFeedback(`Se ha solicitado copiar la referencia ${id}.`, "info");
+    showToast("Referencia enviada a la acción de copia", "info");
+  }
+
+  renderModal();
+  attachRootBindings();
 
   return true;
 }
@@ -1469,14 +1991,217 @@ async function handleRefresh(ticketId = "") {
   }
 
   modalState.isRefreshing = true;
+  clearFeedback();
   renderModal();
   attachRootBindings();
 
-  safeEmit("incidencias:modal:refresh", {
-    ticketId: id,
-  });
+  try {
+    const response = await callExternalAction("refreshTicketDetail", {
+      ticketId: id,
+      silent: true,
+    });
 
-  return true;
+    safeEmit("incidencias:modal:refresh", {
+      ticketId: id,
+    });
+
+    if (response && typeof response === "object") {
+      modalState.detail = getDetail(response);
+      setFeedback("La incidencia se ha actualizado correctamente.", "success");
+    } else {
+      setFeedback("Se ha solicitado la actualización de la incidencia.", "info");
+    }
+
+    showToast("Incidencia actualizada", "success");
+    return true;
+  } catch (error) {
+    setFeedback(
+      safeText(
+        first(
+          error?.message,
+          error?.response?.message,
+          error?.data?.message,
+          "No se pudo actualizar la incidencia."
+        ),
+        "No se pudo actualizar la incidencia."
+      ),
+      "error"
+    );
+
+    showToast("No se pudo actualizar la incidencia.", "error");
+    return false;
+  } finally {
+    modalState.isRefreshing = false;
+    renderModal();
+    attachRootBindings();
+    focusPanel();
+  }
+}
+
+async function handleComment(ticketId = "") {
+  const id = safeText(ticketId, "");
+  const message = normalizeWhitespace(modalState.commentDraft);
+
+  if (!id) {
+    setFeedback("No se ha podido identificar la incidencia.", "error");
+    renderModal();
+    attachRootBindings();
+    return false;
+  }
+
+  if (!message) {
+    setFeedback("Escribe un comentario antes de enviarlo.", "error");
+    renderModal();
+    attachRootBindings();
+    return false;
+  }
+
+  if (message.length < 4) {
+    setFeedback("Añade un poco más de detalle antes de enviar el comentario.", "error");
+    renderModal();
+    attachRootBindings();
+    return false;
+  }
+
+  modalState.isCommentSubmitting = true;
+  clearFeedback();
+  renderModal();
+  attachRootBindings();
+
+  try {
+    const response = await callExternalAction("commentTicket", {
+      ticketId: id,
+      message,
+      detail: modalState.detail,
+    });
+
+    safeEmit("incidencias:modal:comment", {
+      ticketId: id,
+      message,
+    });
+
+    if (response && typeof response === "object") {
+      modalState.detail = getDetail(response);
+      modalState.commentDraft = "";
+      setFeedback("Tu comentario se ha añadido correctamente.", "success");
+    } else {
+      const currentDetail = getDetail(modalState.detail);
+      const raw = safeObject(currentDetail.raw);
+      const nextComments = [
+        {
+          id: `local-${Date.now()}`,
+          message,
+          author: "Tú",
+          createdAt: new Date().toISOString(),
+        },
+        ...safeArray(first(currentDetail.comments, raw.comments)),
+      ];
+
+      modalState.detail = getDetail({
+        ...currentDetail,
+        comments: nextComments,
+        raw: {
+          ...raw,
+          comments: nextComments,
+        },
+      });
+
+      modalState.commentDraft = "";
+      setFeedback("Comentario añadido y pendiente de sincronización externa.", "info");
+    }
+
+    showToast("Comentario añadido", "success");
+    return true;
+  } catch (error) {
+    setFeedback(
+      safeText(
+        first(
+          error?.message,
+          error?.response?.message,
+          error?.data?.message,
+          "No se pudo añadir el comentario."
+        ),
+        "No se pudo añadir el comentario."
+      ),
+      "error"
+    );
+
+    showToast("No se pudo añadir el comentario.", "error");
+    return false;
+  } finally {
+    modalState.isCommentSubmitting = false;
+    renderModal();
+    attachRootBindings();
+    focusPanel();
+  }
+}
+
+async function handleReopen(ticketId = "") {
+  const id = safeText(ticketId, "");
+
+  if (!id || modalState.isReopening) {
+    return false;
+  }
+
+  modalState.isReopening = true;
+  clearFeedback();
+  renderModal();
+  attachRootBindings();
+
+  try {
+    const response = await callExternalAction("reopenTicket", {
+      ticketId: id,
+      detail: modalState.detail,
+    });
+
+    safeEmit("incidencias:modal:reopen", {
+      ticketId: id,
+    });
+
+    if (response && typeof response === "object") {
+      modalState.detail = getDetail(response);
+      setFeedback("La incidencia se ha reabierto correctamente.", "success");
+    } else {
+      const currentDetail = getDetail(modalState.detail);
+      const raw = safeObject(currentDetail.raw);
+
+      modalState.detail = getDetail({
+        ...currentDetail,
+        status: "open",
+        raw: {
+          ...raw,
+          status: "open",
+          estado: "open",
+        },
+      });
+
+      setFeedback("La incidencia se ha marcado como reabierta.", "info");
+    }
+
+    showToast("Incidencia reabierta", "success");
+    return true;
+  } catch (error) {
+    setFeedback(
+      safeText(
+        first(
+          error?.message,
+          error?.response?.message,
+          error?.data?.message,
+          "No se pudo reabrir la incidencia."
+        ),
+        "No se pudo reabrir la incidencia."
+      ),
+      "error"
+    );
+
+    showToast("No se pudo reabrir la incidencia.", "error");
+    return false;
+  } finally {
+    modalState.isReopening = false;
+    renderModal();
+    attachRootBindings();
+    focusPanel();
+  }
 }
 
 /* =========================================================
@@ -1489,6 +2214,16 @@ function attachRootBindings() {
   }
 
   const root = ensureRoot();
+
+  const onInput = (event) => {
+    const field = event.target.closest("[data-modal-field]");
+    if (!field) return;
+
+    const fieldName = safeText(field.dataset.modalField, "");
+    if (fieldName !== "comment") return;
+
+    modalState.commentDraft = field.value || "";
+  };
 
   const onClick = async (event) => {
     const closeBtn = event.target.closest("[data-modal-close='true']");
@@ -1512,6 +2247,20 @@ function attachRootBindings() {
       return;
     }
 
+    const commentBtn = event.target.closest('[data-modal-action="comment"]');
+    if (commentBtn) {
+      event.preventDefault();
+      await handleComment(commentBtn.dataset.ticketId || "");
+      return;
+    }
+
+    const reopenBtn = event.target.closest('[data-modal-action="reopen"]');
+    if (reopenBtn) {
+      event.preventDefault();
+      await handleReopen(reopenBtn.dataset.ticketId || "");
+      return;
+    }
+
     const overlay = event.target.closest("[data-incidencias-modal-overlay='true']");
     const panel = event.target.closest("[data-incidencias-modal-panel='true']");
 
@@ -1520,7 +2269,10 @@ function attachRootBindings() {
     }
   };
 
+  root.__incidenciasModalInputHandler = onInput;
   root.__incidenciasModalClickHandler = onClick;
+
+  root.addEventListener("input", onInput);
   root.addEventListener("click", onClick);
 
   modalState.bindingsAttached = true;
@@ -1528,7 +2280,17 @@ function attachRootBindings() {
 
 function detachRootBindings() {
   const root = getRoot();
-  if (!root) return;
+  if (!root) {
+    modalState.bindingsAttached = false;
+    return;
+  }
+
+  if (root.__incidenciasModalInputHandler) {
+    try {
+      root.removeEventListener("input", root.__incidenciasModalInputHandler);
+    } catch {}
+    delete root.__incidenciasModalInputHandler;
+  }
 
   if (root.__incidenciasModalClickHandler) {
     try {
@@ -1563,6 +2325,29 @@ function handleOpenedDetailEvent(event) {
   }
 }
 
+function handleUpdateEvent(event) {
+  const detail = event?.detail?.detail || event?.detail || event || null;
+  if (!detail) return;
+  updateIncidenciasModal(detail);
+}
+
+function handleCommentSuccess(event) {
+  const detail = event?.detail?.detail || event?.detail || event || null;
+  if (!detail || !modalState.isOpen) return;
+
+  modalState.commentDraft = "";
+  setFeedback("Tu comentario se ha registrado correctamente.", "success");
+  updateIncidenciasModal(detail);
+}
+
+function handleReopenSuccess(event) {
+  const detail = event?.detail?.detail || event?.detail || event || null;
+  if (!detail || !modalState.isOpen) return;
+
+  setFeedback("La incidencia se ha reabierto correctamente.", "success");
+  updateIncidenciasModal(detail);
+}
+
 let busAttached = false;
 
 function attachBus() {
@@ -1570,7 +2355,10 @@ function attachBus() {
 
   safeOn("incidencias:modal:open", handleOpenEvent);
   safeOn("incidencias:modal:close", handleCloseEvent);
+  safeOn("incidencias:modal:update", handleUpdateEvent);
   safeOn("incidencias:open:success", handleOpenedDetailEvent);
+  safeOn("incidencias:comment:success", handleCommentSuccess);
+  safeOn("incidencias:reopen:success", handleReopenSuccess);
 
   busAttached = true;
 }
@@ -1580,7 +2368,10 @@ function detachBus() {
 
   safeOff("incidencias:modal:open", handleOpenEvent);
   safeOff("incidencias:modal:close", handleCloseEvent);
+  safeOff("incidencias:modal:update", handleUpdateEvent);
   safeOff("incidencias:open:success", handleOpenedDetailEvent);
+  safeOff("incidencias:comment:success", handleCommentSuccess);
+  safeOff("incidencias:reopen:success", handleReopenSuccess);
 
   busAttached = false;
 }
@@ -1600,6 +2391,15 @@ export const OnionIncidenciasModal = {
 
   update(detail = {}) {
     return updateIncidenciasModal(detail);
+  },
+
+  setFeedback(message = "", type = "info") {
+    setFeedback(message, type);
+    if (modalState.isOpen) {
+      renderModal();
+      attachRootBindings();
+    }
+    return true;
   },
 
   getState() {

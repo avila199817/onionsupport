@@ -1,14 +1,12 @@
 :root{
   /* =========================================================
      ONION SUPPORT — DESIGN TOKENS / ULTRA PRO SAAS PANEL
-     SISTEMA MAESTRO DE VARIABLES / EXTREME LEVEL
-     PALETA REHECHA:
-     - gris neutro
-     - sólida
-     - premium
-     - menos "space blue"
-     - menos template IA
-     - línea visual tipo producto serio / clean app
+     REFINADO PARA:
+     - dashboard premium serio
+     - mejor densidad operativa
+     - excelente lectura a 100%
+     - rendimiento visual brutal a 75%
+     - menos "hero UI", más "control center"
   ========================================================= */
 
   /* =========================
@@ -34,36 +32,50 @@
     monospace;
 
   /* =========================
+     GLOBAL UI SCALE / DENSITY
+     BASE OPTIMIZADA PARA PANEL
+  ========================= */
+  --ui-scale: 1;
+  --density-factor: 1;
+
+  /*
+    PRESETS SUGERIDOS:
+    compact     -> .92
+    normal      -> 1
+    comfortable -> 1.08
+  */
+
+  /* =========================
      LAYOUT
   ========================= */
-  --content-max: 1380px;
-  --content-narrow: 1180px;
+  --content-max: 1360px;
+  --content-narrow: 1160px;
 
-  --content-padding: 32px;
-  --content-padding-lg: 40px;
-  --content-padding-xl: 48px;
+  --content-padding: calc(24px * var(--ui-scale));
+  --content-padding-lg: calc(32px * var(--ui-scale));
+  --content-padding-xl: calc(40px * var(--ui-scale));
 
-  --sidebar-width: 268px;
-  --sidebar-collapsed: 78px;
-  --sidebar-item-height: 46px;
-  --sidebar-icon-size: 20px;
-  --sidebar-item-padding-x: 12px;
+  --sidebar-width: calc(258px * var(--ui-scale));
+  --sidebar-collapsed: calc(74px * var(--ui-scale));
+  --sidebar-item-height: calc(42px * var(--ui-scale));
+  --sidebar-icon-size: calc(18px * var(--ui-scale));
+  --sidebar-item-padding-x: calc(12px * var(--ui-scale));
   --sidebar-icon-offset: calc(
     var(--sidebar-item-padding-x) + (var(--sidebar-icon-size) / 2)
   );
 
-  --topbar-height: 60px;
-  --page-offset: 28px;
-  --tablehead-height: 48px;
+  --topbar-height: calc(56px * var(--ui-scale));
+  --page-offset: calc(22px * var(--ui-scale));
+  --tablehead-height: calc(44px * var(--ui-scale));
 
-  --view-radius: 26px;
-  --panel-radius: 22px;
-  --card-radius: 24px;
-  --card-radius-lg: 30px;
-  --modal-radius: 28px;
-  --dropdown-radius: 18px;
-  --input-radius: 16px;
-  --btn-radius: 16px;
+  --view-radius: calc(22px * var(--ui-scale));
+  --panel-radius: calc(18px * var(--ui-scale));
+  --card-radius: calc(20px * var(--ui-scale));
+  --card-radius-lg: calc(24px * var(--ui-scale));
+  --modal-radius: calc(24px * var(--ui-scale));
+  --dropdown-radius: calc(16px * var(--ui-scale));
+  --input-radius: calc(14px * var(--ui-scale));
+  --btn-radius: calc(14px * var(--ui-scale));
 
   --app-offset: calc(
     var(--topbar-height) + var(--tablehead-height)
@@ -71,7 +83,6 @@
 
   /* =========================
      SAFE AREAS / SHELL
-     SISTEMA BASE DEL LAYOUT
   ========================= */
   --app-safe-top: env(safe-area-inset-top, 0px);
   --app-safe-right: env(safe-area-inset-right, 0px);
@@ -93,7 +104,7 @@
   --shell-border: var(--border-soft);
 
   --shell-surface:
-    linear-gradient(180deg, rgba(255,255,255,.018), rgba(255,255,255,.006)),
+    linear-gradient(180deg, rgba(255,255,255,.016), rgba(255,255,255,.006)),
     transparent;
 
   /* =========================
@@ -112,7 +123,6 @@
 
   /* =========================
      BRAND SYSTEM
-     REBAJADO A TONO MÁS SOBRIO / PRODUCTO REAL
   ========================= */
   --accent: #3f3f46;
   --accent-hover: #4b4b52;
@@ -147,7 +157,6 @@
 
   /* =========================
      MAIN BACKGROUND / ATMOSPHERE
-     MUCHO MÁS NEUTRO / GRAFITO / CARBÓN
   ========================= */
   --main-bg: #1f1f1f;
   --main-bg-2: #232323;
@@ -155,17 +164,17 @@
   --body-fallback: #1f1f1f;
 
   --body-bg:
-    radial-gradient(circle at 0% 0%, rgba(255,255,255,.020), transparent 26%),
-    radial-gradient(circle at 100% 0%, rgba(255,255,255,.014), transparent 22%),
-    radial-gradient(circle at 50% 100%, rgba(255,255,255,.010), transparent 24%),
+    radial-gradient(circle at 0% 0%, rgba(255,255,255,.018), transparent 24%),
+    radial-gradient(circle at 100% 0%, rgba(255,255,255,.012), transparent 20%),
+    radial-gradient(circle at 50% 100%, rgba(255,255,255,.010), transparent 22%),
     linear-gradient(180deg, #242424 0%, #1f1f1f 100%);
 
   --gradient-main:
     linear-gradient(180deg, #242424 0%, #1f1f1f 100%);
 
   --gradient-overlay:
-    radial-gradient(circle at 20% 20%, rgba(255,255,255,.020), transparent 30%),
-    radial-gradient(circle at 80% 0%, rgba(255,255,255,.012), transparent 24%);
+    radial-gradient(circle at 20% 20%, rgba(255,255,255,.018), transparent 28%),
+    radial-gradient(circle at 80% 0%, rgba(255,255,255,.010), transparent 22%);
 
   --gradient-accent:
     linear-gradient(135deg, #55555d 0%, #3f3f46 55%, #2f2f35 100%);
@@ -183,13 +192,13 @@
     linear-gradient(180deg, #ef4444 0%, #dc2626 100%);
 
   --app-noise:
-    radial-gradient(circle at 50% 0%, rgba(255,255,255,.018), transparent 60%);
+    radial-gradient(circle at 50% 0%, rgba(255,255,255,.014), transparent 56%);
 
   --panel-noise:
-    linear-gradient(180deg, rgba(255,255,255,.016), transparent 38%);
+    linear-gradient(180deg, rgba(255,255,255,.014), transparent 34%);
 
   --glass-shine:
-    linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,0) 34%);
+    linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,0) 32%);
 
   /* =========================
      SURFACE SYSTEM
@@ -205,12 +214,12 @@
   --surface-elevated-strong: rgba(44,44,48,.94);
 
   --surface-glass: rgba(255,255,255,.030);
-  --surface-glass-strong: rgba(255,255,255,.050);
+  --surface-glass-strong: rgba(255,255,255,.048);
   --surface-glass-accent: rgba(82,82,91,.08);
 
-  --surface-hover: rgba(255,255,255,.038);
-  --surface-hover-strong: rgba(255,255,255,.055);
-  --surface-active: rgba(255,255,255,.070);
+  --surface-hover: rgba(255,255,255,.034);
+  --surface-hover-strong: rgba(255,255,255,.050);
+  --surface-active: rgba(255,255,255,.066);
   --surface-selected: rgba(113,113,122,.12);
   --surface-disabled: rgba(255,255,255,.018);
 
@@ -224,9 +233,9 @@
      BORDER SYSTEM
   ========================= */
   --border-soft: rgba(255,255,255,.05);
-  --border-default: rgba(255,255,255,.085);
-  --border-strong: rgba(255,255,255,.13);
-  --border-stronger: rgba(255,255,255,.18);
+  --border-default: rgba(255,255,255,.082);
+  --border-strong: rgba(255,255,255,.12);
+  --border-stronger: rgba(255,255,255,.16);
   --border-glass: rgba(255,255,255,.07);
 
   --border-accent: rgba(113,113,122,.30);
@@ -280,40 +289,40 @@
      CARD / PANEL / BLOCK
   ========================= */
   --card-bg:
-    linear-gradient(180deg, rgba(255,255,255,.022) 0%, rgba(255,255,255,.008) 100%),
+    linear-gradient(180deg, rgba(255,255,255,.020) 0%, rgba(255,255,255,.008) 100%),
     var(--surface-elevated);
 
   --card-bg-hover:
-    linear-gradient(180deg, rgba(255,255,255,.030) 0%, rgba(255,255,255,.010) 100%),
+    linear-gradient(180deg, rgba(255,255,255,.028) 0%, rgba(255,255,255,.010) 100%),
     rgba(45,45,48,.92);
 
   --card-border: var(--border-default);
   --card-border-hover: var(--border-strong);
-  --card-highlight: inset 0 1px 0 rgba(255,255,255,.05);
-  --card-shadow: 0 18px 40px rgba(0,0,0,.24);
+  --card-highlight: inset 0 1px 0 rgba(255,255,255,.045);
+  --card-shadow: 0 16px 36px rgba(0,0,0,.24);
 
   --panel-bg:
-    linear-gradient(180deg, rgba(255,255,255,.020) 0%, rgba(255,255,255,.008) 100%),
+    linear-gradient(180deg, rgba(255,255,255,.018) 0%, rgba(255,255,255,.008) 100%),
     var(--surface-2);
 
   --panel-bg-hover:
-    linear-gradient(180deg, rgba(255,255,255,.028) 0%, rgba(255,255,255,.010) 100%),
+    linear-gradient(180deg, rgba(255,255,255,.026) 0%, rgba(255,255,255,.010) 100%),
     #303034;
 
   --panel-border: var(--border-soft);
   --panel-border-hover: var(--border-default);
-  --panel-shadow: 0 10px 24px rgba(0,0,0,.14);
+  --panel-shadow: 0 8px 20px rgba(0,0,0,.14);
 
-  --block-bg: rgba(255,255,255,.024);
-  --block-bg-hover: rgba(255,255,255,.038);
-  --block-border: rgba(255,255,255,.055);
+  --block-bg: rgba(255,255,255,.022);
+  --block-bg-hover: rgba(255,255,255,.036);
+  --block-border: rgba(255,255,255,.052);
 
   /* =========================
      INPUT SYSTEM
   ========================= */
-  --input-height: 52px;
-  --input-height-sm: 42px;
-  --input-height-lg: 58px;
+  --input-height: calc(46px * var(--ui-scale));
+  --input-height-sm: calc(38px * var(--ui-scale));
+  --input-height-lg: calc(52px * var(--ui-scale));
 
   --input-bg: rgba(255,255,255,.028);
   --input-bg-hover: rgba(255,255,255,.040);
@@ -338,14 +347,14 @@
 
   --input-shadow-focus:
     0 0 0 4px rgba(113,113,122,.14),
-    0 12px 30px rgba(10,10,12,.24);
+    0 10px 24px rgba(10,10,12,.22);
 
   /* =========================
      BUTTON SYSTEM
   ========================= */
-  --btn-height: 52px;
-  --btn-height-sm: 40px;
-  --btn-height-lg: 58px;
+  --btn-height: calc(44px * var(--ui-scale));
+  --btn-height-sm: calc(36px * var(--ui-scale));
+  --btn-height-lg: calc(50px * var(--ui-scale));
 
   --btn-primary-bg:
     linear-gradient(180deg, #4a4a51 0%, #3f3f46 100%);
@@ -356,19 +365,19 @@
   --btn-primary-text: #ffffff;
   --btn-primary-border: rgba(255,255,255,.05);
   --btn-primary-shadow:
-    0 14px 34px rgba(0,0,0,.24),
+    0 12px 28px rgba(0,0,0,.22),
     inset 0 1px 0 rgba(255,255,255,.10);
 
   --btn-secondary-bg: rgba(255,255,255,.045);
   --btn-secondary-bg-hover: rgba(255,255,255,.062);
-  --btn-secondary-bg-active: rgba(255,255,255,.080);
+  --btn-secondary-bg-active: rgba(255,255,255,.078);
   --btn-secondary-text: var(--text);
   --btn-secondary-border: rgba(255,255,255,.09);
-  --btn-secondary-shadow: 0 8px 20px rgba(0,0,0,.12);
+  --btn-secondary-shadow: 0 6px 16px rgba(0,0,0,.12);
 
-  --btn-ghost-bg: rgba(255,255,255,.024);
-  --btn-ghost-bg-hover: rgba(255,255,255,.050);
-  --btn-ghost-bg-active: rgba(255,255,255,.065);
+  --btn-ghost-bg: rgba(255,255,255,.022);
+  --btn-ghost-bg-hover: rgba(255,255,255,.046);
+  --btn-ghost-bg-active: rgba(255,255,255,.062);
   --btn-ghost-text: var(--text-muted);
   --btn-ghost-border: rgba(255,255,255,.07);
 
@@ -380,7 +389,7 @@
     linear-gradient(180deg, #dc2626 0%, #991b1b 100%);
   --btn-danger-text: #ffffff;
   --btn-danger-shadow:
-    0 12px 28px rgba(239,68,68,.20),
+    0 10px 24px rgba(239,68,68,.20),
     inset 0 1px 0 rgba(255,255,255,.10);
 
   /* =========================
@@ -389,11 +398,11 @@
   --sidebar-bg: rgba(30,30,32,.94);
   --sidebar-bg-strong: rgba(26,26,28,.98);
   --sidebar-border: rgba(255,255,255,.055);
-  --sidebar-shadow: 0 24px 60px rgba(0,0,0,.30);
+  --sidebar-shadow: 0 20px 48px rgba(0,0,0,.30);
 
-  --sidebar-hover: rgba(255,255,255,.040);
-  --sidebar-active: rgba(255,255,255,.065);
-  --sidebar-active-hover: rgba(255,255,255,.085);
+  --sidebar-hover: rgba(255,255,255,.038);
+  --sidebar-active: rgba(255,255,255,.062);
+  --sidebar-active-hover: rgba(255,255,255,.080);
   --sidebar-active-border: rgba(255,255,255,.08);
 
   --sidebar-text: rgba(245,245,245,.76);
@@ -406,56 +415,60 @@
   --sidebar-safe-bottom: env(safe-area-inset-bottom, 0px);
   --sidebar-safe-left: env(safe-area-inset-left, 0px);
 
-  --sidebar-top-height: 72px;
-  --sidebar-inline-padding: 10px;
-  --sidebar-section-gap: 6px;
+  --sidebar-top-height: calc(64px * var(--ui-scale));
+  --sidebar-inline-padding: calc(10px * var(--ui-scale));
+  --sidebar-section-gap: calc(4px * var(--ui-scale));
 
-  --sidebar-tooltip-offset: 14px;
-  --sidebar-tooltip-arrow-offset: 9px;
+  --sidebar-tooltip-offset: calc(12px * var(--ui-scale));
+  --sidebar-tooltip-arrow-offset: calc(8px * var(--ui-scale));
 
-  --sidebar-dropdown-bottom: 72px;
-  --sidebar-mobile-width: min(86vw, 320px);
-  --sidebar-mobile-width-xs: min(92vw, 320px);
-  
+  --sidebar-dropdown-bottom: calc(64px * var(--ui-scale));
+  --sidebar-mobile-width: min(86vw, calc(308px * var(--ui-scale)));
+  --sidebar-mobile-width-xs: min(92vw, calc(308px * var(--ui-scale)));
+
   /* =========================
      TOPBAR
   ========================= */
   --topbar-bg: rgba(31,31,31,.78);
   --topbar-border: rgba(255,255,255,.055);
-  --topbar-shadow: 0 12px 30px rgba(0,0,0,.16);
-  --topbar-blur: blur(18px);
+  --topbar-shadow: 0 10px 24px rgba(0,0,0,.16);
+  --topbar-blur: blur(16px);
 
   --topbar-safe-top: var(--app-safe-top);
   --topbar-safe-right: var(--app-safe-right);
   --topbar-safe-left: var(--app-safe-left);
 
-  --topbar-inline-padding: var(--space-lg);
+  --topbar-inline-padding: var(--space-md);
 
-  --topbar-search-height: 46px;
-  --topbar-search-max-width: 520px;
+  --topbar-search-height: calc(40px * var(--ui-scale));
+  --topbar-search-max-width: calc(460px * var(--ui-scale));
   --topbar-search-radius: 999px;
 
-  --topbar-search-results-offset: 10px;
-  --topbar-search-results-max-height: 320px;
+  --topbar-search-results-offset: calc(8px * var(--ui-scale));
+  --topbar-search-results-max-height: calc(320px * var(--ui-scale));
 
   --topbar-overlay-accent: rgba(255,255,255,.018);
-  --topbar-overlay-shine: rgba(255,255,255,.032);
+  --topbar-overlay-shine: rgba(255,255,255,.030);
 
   /* =========================
      TABLES / DATA UI
   ========================= */
   --table-bg: transparent;
-  --table-head-bg: rgba(255,255,255,.022);
+  --table-head-bg: rgba(255,255,255,.020);
   --table-row-bg: transparent;
-  --table-row-hover: rgba(255,255,255,.026);
-  --table-row-selected: rgba(255,255,255,.042);
+  --table-row-hover: rgba(255,255,255,.024);
+  --table-row-selected: rgba(255,255,255,.040);
 
-  --table-border: rgba(255,255,255,.055);
-  --table-head-border: rgba(255,255,255,.08);
+  --table-border: rgba(255,255,255,.052);
+  --table-head-border: rgba(255,255,255,.075);
+
+  --table-cell-padding-y: calc(10px * var(--ui-scale));
+  --table-cell-padding-x: calc(12px * var(--ui-scale));
+  --table-cell-padding-y-compact: calc(8px * var(--ui-scale));
+  --table-cell-padding-x-compact: calc(10px * var(--ui-scale));
 
   /* =========================
      KPI COLORS
-     AJUSTADOS A GAMA MÁS SOBRIA
   ========================= */
   --color-iva: #eab308;
   --color-iva-glow: rgba(234,179,8,.22);
@@ -481,13 +494,21 @@
     linear-gradient(180deg, #71717a 0%, #52525b 100%);
   --avatar-text: #ffffff;
 
-  --badge-bg: rgba(255,255,255,.05);
+  --avatar-size-xs: calc(24px * var(--ui-scale));
+  --avatar-size-sm: calc(30px * var(--ui-scale));
+  --avatar-size-md: calc(38px * var(--ui-scale));
+  --avatar-size-lg: calc(46px * var(--ui-scale));
+
+  --badge-bg: rgba(255,255,255,.048);
   --badge-border: rgba(255,255,255,.07);
   --badge-text: var(--text-muted);
 
-  --chip-bg: rgba(255,255,255,.038);
+  --chip-bg: rgba(255,255,255,.034);
   --chip-border: rgba(255,255,255,.07);
   --chip-text: var(--text-soft);
+
+  --chip-height: calc(28px * var(--ui-scale));
+  --chip-height-sm: calc(24px * var(--ui-scale));
 
   /* =========================
      TYPOGRAPHY
@@ -495,16 +516,16 @@
   --font-family: var(--app-font-sans);
   --font-family-mono: var(--app-font-mono);
 
-  --font-xs: 11px;
-  --font-sm: 12px;
-  --font-md: 13px;
-  --font-base: 14px;
-  --font-lg: 16px;
-  --font-xl: 18px;
-  --font-2xl: 22px;
-  --font-3xl: 30px;
-  --font-4xl: 38px;
-  --font-5xl: 48px;
+  --font-xs: calc(11px * var(--ui-scale));
+  --font-sm: calc(12px * var(--ui-scale));
+  --font-md: calc(13px * var(--ui-scale));
+  --font-base: calc(14px * var(--ui-scale));
+  --font-lg: calc(15px * var(--ui-scale));
+  --font-xl: calc(17px * var(--ui-scale));
+  --font-2xl: calc(20px * var(--ui-scale));
+  --font-3xl: calc(26px * var(--ui-scale));
+  --font-4xl: calc(34px * var(--ui-scale));
+  --font-5xl: calc(42px * var(--ui-scale));
 
   --weight-regular: 400;
   --weight-medium: 500;
@@ -512,10 +533,10 @@
   --weight-bold: 700;
   --weight-black: 800;
 
-  --line-tight: 1.10;
-  --line-snug: 1.24;
-  --line-normal: 1.46;
-  --line-relaxed: 1.68;
+  --line-tight: 1.08;
+  --line-snug: 1.22;
+  --line-normal: 1.42;
+  --line-relaxed: 1.62;
 
   --letter-tight: -0.03em;
   --letter-normal: 0;
@@ -525,60 +546,62 @@
   /* =========================
      SPACING
   ========================= */
-  --space-3xs: 2px;
-  --space-2xs: 4px;
-  --space-xs: 8px;
-  --space-sm: 12px;
-  --space-md: 16px;
-  --space-lg: 20px;
-  --space-xl: 24px;
-  --space-2xl: 32px;
-  --space-3xl: 40px;
-  --space-4xl: 56px;
-  --space-5xl: 72px;
+  --space-3xs: calc(2px * var(--density-factor) * var(--ui-scale));
+  --space-2xs: calc(4px * var(--density-factor) * var(--ui-scale));
+  --space-xs: calc(8px * var(--density-factor) * var(--ui-scale));
+  --space-sm: calc(12px * var(--density-factor) * var(--ui-scale));
+  --space-md: calc(16px * var(--density-factor) * var(--ui-scale));
+  --space-lg: calc(20px * var(--density-factor) * var(--ui-scale));
+  --space-xl: calc(24px * var(--density-factor) * var(--ui-scale));
+  --space-2xl: calc(28px * var(--density-factor) * var(--ui-scale));
+  --space-3xl: calc(36px * var(--density-factor) * var(--ui-scale));
+  --space-4xl: calc(48px * var(--density-factor) * var(--ui-scale));
+  --space-5xl: calc(64px * var(--density-factor) * var(--ui-scale));
 
   /* =========================
-     DENSITY
+     DENSITY HELPERS
   ========================= */
-  --density-factor: 1;
+  --space-dynamic-xs: var(--space-xs);
+  --space-dynamic-sm: var(--space-sm);
+  --space-dynamic-md: var(--space-md);
+  --space-dynamic-lg: var(--space-lg);
+  --space-dynamic-xl: var(--space-xl);
 
-  --space-dynamic-xs: calc(var(--space-xs) * var(--density-factor));
-  --space-dynamic-sm: calc(var(--space-sm) * var(--density-factor));
-  --space-dynamic-md: calc(var(--space-md) * var(--density-factor));
-  --space-dynamic-lg: calc(var(--space-lg) * var(--density-factor));
-  --space-dynamic-xl: calc(var(--space-xl) * var(--density-factor));
+  --section-gap: var(--space-xl);
+  --stack-gap: var(--space-lg);
+  --cluster-gap: var(--space-sm);
 
   /* =========================
      RADIUS
   ========================= */
-  --radius-xs: 8px;
-  --radius-sm: 12px;
-  --radius-md: 16px;
-  --radius-lg: 20px;
-  --radius-xl: 24px;
-  --radius-2xl: 28px;
-  --radius-3xl: 34px;
+  --radius-xs: calc(8px * var(--ui-scale));
+  --radius-sm: calc(10px * var(--ui-scale));
+  --radius-md: calc(14px * var(--ui-scale));
+  --radius-lg: calc(18px * var(--ui-scale));
+  --radius-xl: calc(20px * var(--ui-scale));
+  --radius-2xl: calc(24px * var(--ui-scale));
+  --radius-3xl: calc(30px * var(--ui-scale));
   --radius-pill: 999px;
 
   /* =========================
      SHADOW SYSTEM
   ========================= */
   --shadow-xs: 0 2px 8px rgba(0,0,0,.14);
-  --shadow-sm: 0 8px 20px rgba(0,0,0,.18);
-  --shadow-md: 0 18px 40px rgba(0,0,0,.24);
-  --shadow-lg: 0 24px 60px rgba(0,0,0,.30);
-  --shadow-xl: 0 36px 90px rgba(0,0,0,.38);
+  --shadow-sm: 0 6px 16px rgba(0,0,0,.18);
+  --shadow-md: 0 16px 34px rgba(0,0,0,.24);
+  --shadow-lg: 0 22px 52px rgba(0,0,0,.30);
+  --shadow-xl: 0 32px 80px rgba(0,0,0,.38);
 
-  --shadow-soft: 0 10px 24px rgba(0,0,0,.14);
-  --shadow-strong: 0 30px 80px rgba(0,0,0,.42);
+  --shadow-soft: 0 8px 20px rgba(0,0,0,.14);
+  --shadow-strong: 0 28px 72px rgba(0,0,0,.42);
 
   --shadow-glow:
     0 0 0 1px rgba(255,255,255,.03),
-    0 20px 50px rgba(0,0,0,.18);
+    0 18px 42px rgba(0,0,0,.18);
 
   --shadow-glow-cyan:
     0 0 0 1px rgba(255,255,255,.02),
-    0 20px 50px rgba(0,0,0,.16);
+    0 18px 42px rgba(0,0,0,.16);
 
   --shadow-inner:
     inset 0 1px 0 rgba(255,255,255,.04);
@@ -587,9 +610,9 @@
      BLUR
   ========================= */
   --blur-sm: blur(8px);
-  --blur-md: blur(14px);
-  --blur-lg: blur(20px);
-  --blur-xl: blur(28px);
+  --blur-md: blur(12px);
+  --blur-lg: blur(18px);
+  --blur-xl: blur(24px);
 
   /* =========================
      MOTION
@@ -600,9 +623,9 @@
   --ease-emphasis: cubic-bezier(.16,1,.3,1);
 
   --duration-fast: .12s;
-  --duration-normal: .22s;
-  --duration-slow: .34s;
-  --duration-xslow: .48s;
+  --duration-normal: .20s;
+  --duration-slow: .30s;
+  --duration-xslow: .42s;
 
   /* =========================
      FOCUS / ACCESSIBILITY
@@ -624,45 +647,45 @@
   /* =========================
      AUTH / LOGIN ESPECÍFICAS
   ========================= */
-  --auth-max-width: 1180px;
-  --auth-card-width: 460px;
+  --auth-max-width: 1120px;
+  --auth-card-width: 440px;
 
   --auth-card-bg:
-    linear-gradient(180deg, rgba(255,255,255,.028) 0%, rgba(255,255,255,.010) 100%),
+    linear-gradient(180deg, rgba(255,255,255,.026) 0%, rgba(255,255,255,.010) 100%),
     rgba(39,39,42,.88);
 
   --auth-card-border: rgba(255,255,255,.08);
 
   --auth-card-shadow:
-    0 30px 90px rgba(0,0,0,.42),
+    0 28px 80px rgba(0,0,0,.42),
     0 0 0 1px rgba(255,255,255,.025),
-    0 20px 60px rgba(0,0,0,.16);
+    0 18px 48px rgba(0,0,0,.16);
 
   --auth-input-bg: rgba(255,255,255,.030);
   --auth-input-border: rgba(255,255,255,.10);
   --auth-input-border-focus: rgba(113,113,122,.48);
 
-  --auth-logo-glow: 0 0 40px rgba(255,255,255,.04);
+  --auth-logo-glow: 0 0 36px rgba(255,255,255,.04);
 
   /* =========================
      TOAST
   ========================= */
-  --ui-toast-top: 24px;
-  --ui-toast-right: 24px;
-  --ui-toast-width: min(520px, calc(100vw - 32px));
-  --ui-toast-padding-y: 18px;
-  --ui-toast-padding-x: 20px;
-  --ui-toast-gap: 16px;
+  --ui-toast-top: calc(20px * var(--ui-scale));
+  --ui-toast-right: calc(20px * var(--ui-scale));
+  --ui-toast-width: min(500px, calc(100vw - 28px));
+  --ui-toast-padding-y: calc(16px * var(--ui-scale));
+  --ui-toast-padding-x: calc(18px * var(--ui-scale));
+  --ui-toast-gap: calc(14px * var(--ui-scale));
   --ui-toast-radius: var(--radius-xl);
-  --ui-toast-icon-size: 24px;
-  --ui-toast-close-size: 28px;
+  --ui-toast-icon-size: calc(22px * var(--ui-scale));
+  --ui-toast-close-size: calc(26px * var(--ui-scale));
 
   --ui-toast-loading-ring: rgba(255,255,255,.12);
   --ui-toast-loading-active: var(--accent);
   --ui-toast-loading-active-2: rgba(113,113,122,.42);
 
   --ui-toast-overlay:
-    linear-gradient(180deg, rgba(255,255,255,.028), rgba(255,255,255,.010));
+    linear-gradient(180deg, rgba(255,255,255,.026), rgba(255,255,255,.010));
 
   --ui-toast-shadow:
     var(--shadow-lg),

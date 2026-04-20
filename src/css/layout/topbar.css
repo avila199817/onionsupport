@@ -3,13 +3,14 @@
    PRO SAAS PANEL / FINAL / GOD MODE
    Archivo: src/css/layout/topbar.css
 
-   REFINADO PRO:
-   - topbar premium más compacta y seria
+   REFINADO PRO 10/10:
+   - topbar premium compacta y seria
    - alineada con sidebar + layout + tokens refinados
-   - search global más sólido
+   - search global sólido y centrado visualmente
+   - overlay glass full-screen al enfocar búsqueda
    - dropdown de resultados mejor integrado
    - responsive consistente
-   - shell SPA más limpio y enterprise
+   - shell SPA limpio y enterprise
 ========================================================= */
 
 
@@ -54,7 +55,8 @@
     background var(--duration-normal) var(--ease-standard),
     border-color var(--duration-normal) var(--ease-standard),
     box-shadow var(--duration-normal) var(--ease-standard),
-    padding var(--duration-normal) var(--ease-standard);
+    padding var(--duration-normal) var(--ease-standard),
+    z-index var(--duration-fast) var(--ease-standard);
 
   isolation:isolate;
   overflow:visible;
@@ -102,6 +104,18 @@
 
 
 /* =========================
+   SEARCH FOCUS MODE
+   - eleva el topbar por encima del sidebar
+   - activa glass overlay full-screen
+========================= */
+.topbar:has(.topbar-search-wrap:focus-within),
+.topbar:has(.topbar-search-wrap .topbar-search-results.active),
+.topbar:has(.topbar-search-wrap .topbar-search-results:not([hidden])){
+  z-index:calc(var(--z-overlay) + 2);
+}
+
+
+/* =========================
    TOPBAR VS SHELL STATES
 ========================= */
 body.route-shell-hidden .topbar,
@@ -124,6 +138,11 @@ body.sidebar-open .topbar{
   gap:var(--space-sm);
   min-inline-size:0;
   flex:0 1 auto;
+
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    filter var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
 }
 
 .topbar-title{
@@ -164,7 +183,9 @@ body.sidebar-open .topbar{
     border-color var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard),
     transform var(--duration-fast) var(--ease-out),
-    box-shadow var(--duration-fast) var(--ease-standard);
+    box-shadow var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard),
+    filter var(--duration-fast) var(--ease-standard);
 }
 
 .topbar-mobile-toggle svg{
@@ -203,11 +224,22 @@ body.sidebar-open .topbar{
   overflow:visible;
 }
 
+.topbar-right > *:not(.topbar-search-wrap){
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    filter var(--duration-fast) var(--ease.standard),
+    transform var(--duration-fast) var(--ease-standard);
+}
+
 
 /* =========================
    SEARCH WRAP
 ========================= */
 .topbar-search-wrap{
+  --topbar-search-overlay-bg: rgba(10,12,18,.22);
+  --topbar-search-overlay-bg-2: rgba(10,12,18,.34);
+  --topbar-search-overlay-accent: rgba(255,255,255,.04);
+
   position:relative;
 
   inline-size:100%;
@@ -216,8 +248,67 @@ body.sidebar-open .topbar{
 
   margin-inline-start:auto;
 
-  z-index:2;
+  z-index:calc(var(--z-dropdown) + 1);
   overflow:visible;
+  isolation:isolate;
+}
+
+.topbar-search-wrap::before{
+  content:"";
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+
+  background:
+    radial-gradient(
+      circle at calc(100% - 220px) 76px,
+      color-mix(in srgb, var(--accent) 12%, transparent),
+      transparent 22%
+    ),
+    linear-gradient(
+      180deg,
+      var(--topbar-search-overlay-bg),
+      var(--topbar-search-overlay-bg-2)
+    );
+
+  backdrop-filter:blur(12px) saturate(120%);
+  -webkit-backdrop-filter:blur(12px) saturate(120%);
+
+  opacity:0;
+  visibility:hidden;
+
+  transition:
+    opacity var(--duration-normal) var(--ease-standard),
+    visibility var(--duration-normal) var(--ease-standard);
+
+  z-index:0;
+}
+
+.topbar-search-wrap > *{
+  position:relative;
+  z-index:2;
+}
+
+.topbar-search-wrap:focus-within::before,
+.topbar-search-wrap:has(.topbar-search-results.active)::before,
+.topbar-search-wrap:has(.topbar-search-results:not([hidden]))::before{
+  opacity:1;
+  visibility:visible;
+}
+
+
+/* =========================
+   RESTO DEL TOPBAR ATENUADO
+========================= */
+.topbar:has(.topbar-search-wrap:focus-within) .topbar-left,
+.topbar:has(.topbar-search-wrap .topbar-search-results.active) .topbar-left,
+.topbar:has(.topbar-search-wrap .topbar-search-results:not([hidden])) .topbar-left,
+.topbar:has(.topbar-search-wrap:focus-within) .topbar-right > *:not(.topbar-search-wrap),
+.topbar:has(.topbar-search-wrap .topbar-search-results.active) .topbar-right > *:not(.topbar-search-wrap),
+.topbar:has(.topbar-search-wrap .topbar-search-results:not([hidden])) .topbar-right > *:not(.topbar-search-wrap){
+  opacity:.34;
+  filter:blur(.5px);
+  pointer-events:none;
 }
 
 
@@ -249,7 +340,8 @@ body.sidebar-open .topbar{
     border-color var(--duration-normal) var(--ease-standard),
     background var(--duration-normal) var(--ease-standard),
     box-shadow var(--duration-normal) var(--ease-standard),
-    color var(--duration-normal) var(--ease-standard);
+    color var(--duration-normal) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-out);
 }
 
 .topbar-search::placeholder{
@@ -270,7 +362,10 @@ body.sidebar-open .topbar{
   background:
     linear-gradient(180deg, rgba(255,255,255,.026), rgba(255,255,255,.012)),
     var(--input-bg-focus);
-  box-shadow:var(--input-shadow-focus);
+  box-shadow:
+    var(--input-shadow-focus),
+    0 18px 42px color-mix(in srgb, var(--accent) 12%, transparent);
+  transform:translateY(-1px);
 }
 
 
@@ -291,11 +386,13 @@ body.sidebar-open .topbar{
 
   transition:
     color var(--duration-normal) var(--ease-standard),
-    opacity var(--duration-normal) var(--ease-standard);
+    opacity var(--duration-normal) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
 }
 
 .topbar-search-wrap:focus-within .topbar-search-icon{
   color:var(--accent);
+  transform:translateY(-50%) scale(1.04);
 }
 
 
@@ -335,7 +432,7 @@ body.sidebar-open .topbar{
     visibility var(--duration-fast) var(--ease-out),
     transform var(--duration-fast) var(--ease-out);
 
-  z-index:var(--z-dropdown);
+  z-index:calc(var(--z-dropdown) + 2);
 }
 
 .topbar-search-results[hidden]{
@@ -572,6 +669,26 @@ mark,
     linear-gradient(180deg, rgba(255,255,255,.26), transparent 34%);
 }
 
+[data-theme="light"] .topbar-search-wrap{
+  --topbar-search-overlay-bg: rgba(248,250,252,.18);
+  --topbar-search-overlay-bg-2: rgba(226,232,240,.48);
+  --topbar-search-overlay-accent: rgba(15,23,42,.04);
+}
+
+[data-theme="light"] .topbar-search-wrap::before{
+  background:
+    radial-gradient(
+      circle at calc(100% - 220px) 76px,
+      color-mix(in srgb, var(--accent) 8%, transparent),
+      transparent 22%
+    ),
+    linear-gradient(
+      180deg,
+      var(--topbar-search-overlay-bg),
+      var(--topbar-search-overlay-bg-2)
+    );
+}
+
 [data-theme="light"] .topbar-search-results{
   box-shadow:
     0 14px 34px rgba(15,23,42,.08),
@@ -670,14 +787,18 @@ mark,
   .topbar-search-icon,
   .topbar-search-results,
   .search-result,
-  .search-icon{
+  .search-icon,
+  .topbar-left,
+  .topbar-right > *:not(.topbar-search-wrap),
+  .topbar-search-wrap::before{
     transition:none !important;
   }
 
   .search-result:hover,
   .search-result.active,
   .search-result[aria-selected="true"],
-  .topbar-mobile-toggle:hover{
+  .topbar-mobile-toggle:hover,
+  .topbar-search-wrap:focus-within .topbar-search{
     transform:none !important;
   }
 }

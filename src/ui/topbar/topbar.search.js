@@ -32,6 +32,10 @@ import {
 
 /* =========================================================
    SEARCH FOCUS OVERLAY (JS)
+   - SOLO cubre el área de contenido
+   - NO tapa sidebar
+   - NO tapa topbar
+   - NO tapa toda la página
 ========================================================= */
 
 const SEARCH_GLASS_ID = "topbar-search-glass-overlay";
@@ -54,84 +58,108 @@ function getCssNumberVar(name = "", fallback = 0) {
   }
 }
 
-function getTopbarBaseZIndex() {
-  return getCssNumberVar("--z-topbar", 30);
-}
-
-function getDropdownBaseZIndex() {
-  return getCssNumberVar("--z-dropdown", 50);
+function getSearchGlassHost() {
+  return (
+    document.getElementById("app-content") ||
+    document.getElementById("main-content") ||
+    document.getElementById("app-shell") ||
+    document.body
+  );
 }
 
 function getSearchGlass() {
   return document.getElementById(SEARCH_GLASS_ID);
 }
 
-function buildSearchGlassStyles(glass) {
-  const topbarZ = getTopbarBaseZIndex();
+function ensureHostPosition(host) {
+  if (!host || host === document.body || host === document.documentElement) {
+    return;
+  }
+
+  try {
+    const computed = window.getComputedStyle(host).position;
+
+    if (!computed || computed === "static") {
+      host.style.position = "relative";
+    }
+  } catch {
+    /* noop */
+  }
+}
+
+function buildSearchGlassStyles(glass, host) {
+  const isBodyHost =
+    host === document.body || host === document.documentElement;
 
   Object.assign(glass.style, {
-    position: "fixed",
+    position: isBodyHost ? "fixed" : "absolute",
     inset: "0",
     opacity: "0",
     visibility: "hidden",
     pointerEvents: "none",
-    zIndex: String(Math.max(topbarZ - 1, 1)),
+
+    /* dentro de #app-content basta con estar por encima del view */
+    zIndex: isBodyHost ? String(getCssNumberVar("--z-overlay", 60) - 1) : "2",
+
     background: [
-      "radial-gradient(circle at calc(100% - 220px) 78px, rgba(124,92,255,.08), transparent 20%)",
-      "linear-gradient(180deg, rgba(15,18,28,.06), rgba(15,18,28,.14))",
+      "radial-gradient(circle at calc(100% - 220px) 54px, rgba(124,92,255,.06), transparent 18%)",
+      "linear-gradient(180deg, rgba(15,18,28,.05), rgba(15,18,28,.12))",
     ].join(", "),
+
     backdropFilter: "blur(4px) saturate(108%)",
     WebkitBackdropFilter: "blur(4px) saturate(108%)",
+
     transition:
       "opacity .16s cubic-bezier(.2,.8,.2,1), visibility .16s cubic-bezier(.2,.8,.2,1)",
   });
 }
 
 function ensureSearchGlass() {
+  const host = getSearchGlassHost();
+  ensureHostPosition(host);
+
   let glass = getSearchGlass();
 
-  if (glass) {
-    buildSearchGlassStyles(glass);
-    return glass;
+  if (!glass) {
+    glass = document.createElement("div");
+    glass.id = SEARCH_GLASS_ID;
+    glass.setAttribute("aria-hidden", "true");
+
+    glass.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+
+      const runtime = searchGlassRuntime.runtime;
+      const getDom = searchGlassRuntime.getDom;
+
+      if (!runtime || typeof getDom !== "function") return;
+
+      const { searchInput } = getDom();
+
+      hideResultsContainer(runtime, getDom);
+
+      try {
+        searchInput?.blur?.();
+      } catch {
+        /* noop */
+      }
+    });
   }
 
-  glass = document.createElement("div");
-  glass.id = SEARCH_GLASS_ID;
-  glass.setAttribute("aria-hidden", "true");
+  buildSearchGlassStyles(glass, host);
 
-  buildSearchGlassStyles(glass);
+  if (glass.parentNode !== host) {
+    host.appendChild(glass);
+  }
 
-  glass.addEventListener("pointerdown", (event) => {
-    event.preventDefault();
-
-    const runtime = searchGlassRuntime.runtime;
-    const getDom = searchGlassRuntime.getDom;
-
-    if (!runtime || typeof getDom !== "function") return;
-
-    const { searchInput } = getDom();
-
-    hideResultsContainer(runtime, getDom);
-
-    try {
-      searchInput?.blur?.();
-    } catch {
-      /* noop */
-    }
-  });
-
-  document.body.appendChild(glass);
   return glass;
 }
 
 function showSearchGlass(runtime, getDom) {
   const glass = ensureSearchGlass();
-  const topbarZ = getTopbarBaseZIndex();
 
   searchGlassRuntime.runtime = runtime || null;
   searchGlassRuntime.getDom = typeof getDom === "function" ? getDom : null;
 
-  glass.style.zIndex = String(Math.max(topbarZ - 1, 1));
   glass.style.opacity = "1";
   glass.style.visibility = "visible";
   glass.style.pointerEvents = "auto";
@@ -208,8 +236,8 @@ function unmuteNode(node) {
 }
 
 function applySearchFocusMode(getDom) {
-  const topbarZ = getTopbarBaseZIndex();
-  const dropdownZ = getDropdownBaseZIndex();
+  const topbarZ = getCssNumberVar("--z-topbar", 30);
+  const dropdownZ = getCssNumberVar("--z-dropdown", 50);
 
   const {
     topbar,

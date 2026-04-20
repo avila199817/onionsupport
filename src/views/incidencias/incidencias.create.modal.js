@@ -877,25 +877,6 @@ function renderModalInner() {
           >
             <button
               type="button"
-              data-create-modal-action="close"
-              ${submitting ? "disabled" : ""}
-              style="
-                min-height:44px;
-                padding:0 16px;
-                border-radius:14px;
-                border:1px solid var(--border-soft);
-                background:transparent;
-                color:var(--text-dim);
-                font-weight:var(--weight-bold, 700);
-                cursor:${submitting ? "not-allowed" : "pointer"};
-                opacity:${submitting ? ".7" : "1"};
-              "
-            >
-              Cancelar
-            </button>
-
-            <button
-              type="button"
               data-modal-close="true"
               aria-label="Cerrar modal"
               ${submitting ? "disabled" : ""}
@@ -993,7 +974,7 @@ function renderModalInner() {
               placeholder: "Ej. No puedo acceder, error al pagar, problema con mi factura...",
               required: true,
               error: errors.subject,
-              hint: "Resume el problema en una frase corta.",
+              hint: "",
             })}
 
             ${renderTextarea({
@@ -1004,7 +985,7 @@ function renderModalInner() {
                 "Explícanos con detalle qué está pasando, desde cuándo ocurre y qué pasos has seguido antes de llegar aquí.",
               required: true,
               error: errors.description,
-              hint: "Cuanto más claro sea el contexto, más rápido podrá revisarse.",
+              hint: "",
               rows: 9,
             })}
 
@@ -1016,104 +997,50 @@ function renderModalInner() {
             <div
               style="
                 display:flex;
-                justify-content:space-between;
+                justify-content:flex-end;
                 gap:12px;
                 flex-wrap:wrap;
                 padding-top:6px;
               "
             >
-              <div
+              <button
+                id="incidencias-create-submit-btn"
+                type="submit"
+                ${submitting ? "disabled" : ""}
                 style="
-                  display:flex;
-                  gap:10px;
-                  flex-wrap:wrap;
+                  min-height:46px;
+                  padding:0 18px;
+                  border-radius:14px;
+                  border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
+                  background:var(--btn-primary-bg, var(--accent, #7c5cff));
+                  color:var(--btn-primary-text, #fff);
+                  font-weight:var(--weight-bold, 700);
+                  cursor:${submitting ? "wait" : "pointer"};
+                  opacity:${submitting ? ".8" : "1"};
+                  box-shadow:0 12px 26px color-mix(in srgb, var(--accent, #7c5cff) 20%, transparent);
                 "
               >
-                <button
-                  id="incidencias-create-submit-btn"
-                  type="submit"
-                  ${submitting ? "disabled" : ""}
-                  style="
-                    min-height:46px;
-                    padding:0 18px;
-                    border-radius:14px;
-                    border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
-                    background:var(--btn-primary-bg, var(--accent, #7c5cff));
-                    color:var(--btn-primary-text, #fff);
-                    font-weight:var(--weight-bold, 700);
-                    cursor:${submitting ? "wait" : "pointer"};
-                    opacity:${submitting ? ".8" : "1"};
-                    box-shadow:0 12px 26px color-mix(in srgb, var(--accent, #7c5cff) 20%, transparent);
-                  "
-                >
-                  ${
-                    submitting
-                      ? `
-                        <span style="display:inline-flex; align-items:center; gap:8px;">
-                          <span
-                            aria-hidden="true"
-                            style="
-                              width:14px;
-                              height:14px;
-                              border-radius:999px;
-                              border:2px solid rgba(255,255,255,.28);
-                              border-top-color:#fff;
-                              animation:incidenciasCreateSpin .8s linear infinite;
-                            "
-                          ></span>
-                          Enviando...
-                        </span>
-                      `
-                      : "Enviar incidencia"
-                  }
-                </button>
-
-                <button
-                  id="incidencias-create-reset-btn"
-                  type="button"
-                  ${submitting ? "disabled" : ""}
-                  style="
-                    min-height:46px;
-                    padding:0 16px;
-                    border-radius:14px;
-                    border:1px solid var(--border-soft);
-                    background:var(--surface-glass);
-                    color:var(--text-soft);
-                    font-weight:var(--weight-bold, 700);
-                    cursor:${submitting ? "not-allowed" : "pointer"};
-                    opacity:${submitting ? ".7" : "1"};
-                  "
-                >
-                  Limpiar
-                </button>
-              </div>
-
-              <div
-                style="
-                  display:flex;
-                  gap:10px;
-                  flex-wrap:wrap;
-                "
-              >
-                <button
-                  id="incidencias-create-save-draft-btn"
-                  type="button"
-                  ${submitting ? "disabled" : ""}
-                  style="
-                    min-height:46px;
-                    padding:0 16px;
-                    border-radius:14px;
-                    border:1px solid var(--border-soft);
-                    background:var(--surface-glass);
-                    color:var(--text-soft);
-                    font-weight:var(--weight-bold, 700);
-                    cursor:${submitting ? "not-allowed" : "pointer"};
-                    opacity:${submitting ? ".7" : "1"};
-                  "
-                >
-                  Guardar borrador
-                </button>
-              </div>
+                ${
+                  submitting
+                    ? `
+                      <span style="display:inline-flex; align-items:center; gap:8px;">
+                        <span
+                          aria-hidden="true"
+                          style="
+                            width:14px;
+                            height:14px;
+                            border-radius:999px;
+                            border:2px solid rgba(255,255,255,.28);
+                            border-top-color:#fff;
+                            animation:incidenciasCreateSpin .8s linear infinite;
+                          "
+                        ></span>
+                        Enviando...
+                      </span>
+                    `
+                    : "Enviar incidencia"
+                }
+              </button>
             </div>
           </form>
         </div>
@@ -1559,13 +1486,6 @@ function attachRootBindings() {
       return;
     }
 
-    const cancelBtn = event.target.closest('[data-create-modal-action="close"]');
-    if (cancelBtn) {
-      event.preventDefault();
-      closeIncidenciasCreateModal();
-      return;
-    }
-
     const removeAttachmentBtn = event.target.closest("[data-remove-attachment]");
     if (removeAttachmentBtn) {
       event.preventDefault();
@@ -1581,31 +1501,6 @@ function attachRootBindings() {
       attachRootBindings();
       focusPanel();
 
-      return;
-    }
-
-    const resetBtn = event.target.closest("#incidencias-create-reset-btn");
-    if (resetBtn) {
-      event.preventDefault();
-
-      resetFormState();
-      modalState.dragActive = false;
-      resetFeedbackState();
-      clearDraft();
-
-      renderModal();
-      attachRootBindings();
-      focusPanel();
-
-      showToast("Formulario limpio.", "info");
-      return;
-    }
-
-    const draftBtn = event.target.closest("#incidencias-create-save-draft-btn");
-    if (draftBtn) {
-      event.preventDefault();
-      persistDraft();
-      showToast("Borrador guardado.", "success");
       return;
     }
   };

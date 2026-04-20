@@ -2,18 +2,21 @@
    Onion SPA - Incidencias Template (CLIENT EXPERIENCE MODE)
    Archivo: src/views/incidencias/incidencias.table.template.js
 
-   REFINADO PRO / CLIENT FIRST / COMPACT AIR MODE
+   DEFINITIVE PRO / AIR MODE / CLIENT FIRST
 
    Objetivo:
-   - header más fino y menos cargado
-   - consumo real de design tokens globales
-   - tabla más compacta, limpia y aireada
-   - menos columnas: incidencia / estado / fecha de creación / última novedad / importe / acciones
-   - acciones: solo "Ver detalle"
+   - header más fino y ordenado
+   - botones arriba derecha
+   - título ancho real
+   - resumen con 2 cajas: abiertas / cerradas
+   - tabla más compacta y limpia
+   - orden en incidencia: número -> asunto -> descripción
+   - columnas:
+     incidencia / estado / fecha de creación / última novedad / importe / acciones
+   - última novedad solo relativa
+   - acciones: solo ver detalle
+   - tooltip de avatar con nombre completo
    - paginación a 5 incidencias por vista
-   - loader solo en la sección de tabla
-   - soporte mobile cards consistente
-   - compatibilidad directa con incidenciasView.js
 ========================================================= */
 
 import { incidenciasState } from "./incidencias.state.js";
@@ -55,10 +58,6 @@ function safeObject(value) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value
     : {};
-}
-
-function safeLower(value, fallback = "") {
-  return safeText(value, fallback).toLowerCase();
 }
 
 function first(...values) {
@@ -135,21 +134,28 @@ function renderScopedStyles() {
       .incidencias-hero-inner{
         display:grid;
         gap:var(--space-lg);
-        padding:clamp(18px, 2.4vw, 26px);
+        padding:clamp(18px, 2.4vw, 28px);
       }
 
-      .incidencias-hero-top{
+      .incidencias-hero-actions-row{
         display:flex;
-        align-items:flex-start;
-        justify-content:space-between;
-        gap:16px;
+        justify-content:flex-end;
+        align-items:center;
+      }
+
+      .incidencias-hero-actions{
+        display:flex;
+        align-items:center;
+        justify-content:flex-end;
+        gap:10px;
         flex-wrap:wrap;
       }
 
       .incidencias-hero-copy{
         display:grid;
         gap:10px;
-        min-inline-size:min(100%, 520px);
+        min-inline-size:0;
+        width:100%;
       }
 
       .incidencias-eyebrow{
@@ -170,27 +176,21 @@ function renderScopedStyles() {
 
       .incidencias-hero-title{
         margin:0;
-        max-inline-size:14ch;
-        font-size:clamp(24px, 4vw, 42px);
+        max-inline-size:none;
+        width:100%;
+        font-size:clamp(26px, 4.8vw, 56px);
         line-height:1.02;
-        letter-spacing:-.045em;
+        letter-spacing:-.05em;
         color:var(--text-strong);
+        text-wrap:balance;
       }
 
       .incidencias-hero-subtitle{
         margin:0;
-        max-inline-size:860px;
+        max-inline-size:1040px;
         color:var(--text-dim);
         font-size:var(--font-lg);
-        line-height:1.55;
-      }
-
-      .incidencias-hero-actions{
-        display:flex;
-        align-items:center;
-        justify-content:flex-end;
-        gap:10px;
-        flex-wrap:wrap;
+        line-height:1.58;
       }
 
       .incidencias-meta{
@@ -232,7 +232,7 @@ function renderScopedStyles() {
 
       .incidencias-summary-grid{
         display:grid;
-        grid-template-columns:minmax(0, 310px);
+        grid-template-columns:repeat(2, minmax(0, 260px));
         gap:var(--space-md);
       }
 
@@ -244,11 +244,25 @@ function renderScopedStyles() {
         min-block-size:112px;
         padding:18px;
         border-radius:calc(var(--panel-radius) + 1px);
-        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft));
+        border:1px solid var(--border-soft);
+        background:
+          linear-gradient(180deg, rgba(255,255,255,.016), transparent 70%),
+          var(--surface-2, var(--surface-glass));
+        box-shadow:var(--shadow-xs);
+      }
+
+      .incidencias-summary-card.is-open{
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft));
         background:
           linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 70%),
           var(--surface-2, var(--surface-glass));
-        box-shadow:var(--shadow-xs);
+      }
+
+      .incidencias-summary-card.is-closed{
+        border-color:color-mix(in srgb, var(--success, #22c55e) 18%, var(--border-soft));
+        background:
+          linear-gradient(180deg, color-mix(in srgb, var(--success, #22c55e) 8%, transparent), transparent 70%),
+          var(--surface-2, var(--surface-glass));
       }
 
       .incidencias-summary-card::before{
@@ -402,7 +416,7 @@ function renderScopedStyles() {
 
       .incidencias-table{
         inline-size:100%;
-        min-inline-size:940px;
+        min-inline-size:900px;
         border-collapse:separate;
         border-spacing:0;
         table-layout:fixed;
@@ -433,7 +447,9 @@ function renderScopedStyles() {
       }
 
       .incidencias-table tbody tr{
-        transition:background var(--duration-fast) var(--ease-standard), opacity var(--duration-fast) var(--ease-standard);
+        transition:
+          background var(--duration-fast) var(--ease-standard),
+          opacity var(--duration-fast) var(--ease-standard);
       }
 
       .incidencias-table tbody tr:hover{
@@ -496,8 +512,17 @@ function renderScopedStyles() {
 
       .incidencias-identity-copy{
         display:grid;
-        gap:3px;
+        gap:2px;
         min-inline-size:0;
+      }
+
+      .incidencias-ticket-code{
+        color:var(--text-soft);
+        font-size:12px;
+        line-height:1.2;
+        font-weight:var(--weight-bold);
+        letter-spacing:.04em;
+        text-transform:uppercase;
       }
 
       .incidencias-title-btn{
@@ -507,8 +532,8 @@ function renderScopedStyles() {
         background:transparent;
         text-align:left;
         color:var(--text-strong);
-        font-size:var(--font-lg);
-        line-height:1.2;
+        font-size:var(--font-xl);
+        line-height:1.18;
         font-weight:var(--weight-black);
         letter-spacing:-.02em;
         cursor:pointer;
@@ -516,15 +541,6 @@ function renderScopedStyles() {
 
       .incidencias-title-btn[disabled]{
         cursor:wait;
-      }
-
-      .incidencias-ticket-code{
-        color:var(--text-soft);
-        font-size:12px;
-        line-height:1.3;
-        font-weight:var(--weight-bold);
-        letter-spacing:.04em;
-        text-transform:uppercase;
       }
 
       .incidencias-ticket-preview{
@@ -581,11 +597,6 @@ function renderScopedStyles() {
         border-color:var(--border-soft);
       }
 
-      .incidencias-date-stack{
-        display:grid;
-        gap:4px;
-      }
-
       .incidencias-date-main{
         color:var(--text-strong);
         font-size:13px;
@@ -593,41 +604,11 @@ function renderScopedStyles() {
         font-weight:var(--weight-semibold);
       }
 
-      .incidencias-date-sub{
-        color:var(--text-dim);
-        font-size:11px;
-        line-height:1.2;
-        text-transform:uppercase;
-        letter-spacing:.04em;
-      }
-
-      .incidencias-update-stack{
-        display:grid;
-        gap:6px;
-      }
-
       .incidencias-update-relative{
         color:var(--text-soft);
         font-size:13px;
         line-height:1.2;
         font-weight:var(--weight-semibold);
-      }
-
-      .incidencias-update-date{
-        display:inline-flex;
-        align-items:center;
-        inline-size:max-content;
-        min-block-size:24px;
-        padding-inline:8px;
-        border-radius:999px;
-        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft));
-        background:color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent);
-        color:var(--text-soft);
-        font-size:11px;
-        line-height:1;
-        font-weight:var(--weight-bold);
-        letter-spacing:.04em;
-        text-transform:uppercase;
       }
 
       .incidencias-amount{
@@ -777,7 +758,7 @@ function renderScopedStyles() {
       .incidencias-skeleton-head,
       .incidencias-skeleton-row{
         display:grid;
-        grid-template-columns: 2.6fr .9fr 1fr 1fr .9fr .9fr;
+        grid-template-columns: 2.8fr .9fr 1fr .9fr .9fr .9fr;
         gap:0;
       }
 
@@ -830,12 +811,8 @@ function renderScopedStyles() {
       }
 
       @media (max-width: 1120px){
-        .incidencias-hero-title{
-          max-inline-size:none;
-        }
-
         .incidencias-summary-grid{
-          grid-template-columns:minmax(0, 1fr);
+          grid-template-columns:repeat(2, minmax(0, 1fr));
         }
       }
 
@@ -859,15 +836,19 @@ function renderScopedStyles() {
         }
 
         .incidencias-hero-title{
-          font-size:clamp(22px, 7vw, 34px);
+          font-size:clamp(24px, 8vw, 38px);
         }
 
         .incidencias-hero-subtitle{
           font-size:var(--font-base);
         }
 
-        .incidencias-hero-actions{
+        .incidencias-hero-actions-row{
           justify-content:flex-start;
+        }
+
+        .incidencias-summary-grid{
+          grid-template-columns:1fr;
         }
 
         .incidencias-table-toolbar{
@@ -929,6 +910,35 @@ function resolveRemoteCount(items, state = {}) {
     ),
     safeArray(items).length
   );
+}
+
+/* =========================================================
+   STATS
+========================================================= */
+
+function computeStats(items = []) {
+  const list = safeArray(items);
+
+  let openCount = 0;
+  let closedCount = 0;
+
+  list.forEach((item) => {
+    const status = safeText(first(item.status, item.estado), "open")
+      .trim()
+      .toLowerCase();
+
+    if (["resolved", "resuelta", "resuelto", "closed", "cerrada", "cerrado"].includes(status)) {
+      closedCount += 1;
+      return;
+    }
+
+    openCount += 1;
+  });
+
+  return {
+    openCount,
+    closedCount,
+  };
 }
 
 /* =========================================================
@@ -1118,21 +1128,26 @@ function renderAmountPill(item = {}) {
   `;
 }
 
-function getClientInitials(item = {}) {
-  const raw =
-    item?.clientInitials ||
-    item?.cliente?.nombre ||
-    item?.cliente?.name ||
-    item?.client ||
-    item?.clientName ||
-    item?.cliente ||
-    item?.empresa ||
-    item?.company ||
-    item?.name ||
-    item?.receptor?.name ||
-    item?.createdBy?.name ||
-    "ON";
+function getClientDisplayName(item = {}) {
+  return safeText(
+    first(
+      item?.cliente?.nombre,
+      item?.cliente?.name,
+      item.client,
+      item.clientName,
+      item.cliente,
+      item.empresa,
+      item.company,
+      item.name,
+      item?.receptor?.name,
+      item?.createdBy?.name
+    ),
+    "Cliente"
+  );
+}
 
+function getClientInitials(item = {}) {
+  const raw = getClientDisplayName(item);
   const clean = String(raw).trim();
 
   if (!clean) return "ON";
@@ -1267,6 +1282,24 @@ function getPagination(items = [], state = {}) {
    HEADER
 ========================================================= */
 
+function renderSummaryCard({ label = "", value = "0", caption = "", tone = "" } = {}) {
+  return `
+    <article class="incidencias-summary-card ${tone}">
+      <span class="incidencias-summary-label">
+        ${escapeHtml(label)}
+      </span>
+
+      <strong class="incidencias-summary-value">
+        ${escapeHtml(String(value))}
+      </strong>
+
+      <p class="incidencias-summary-caption">
+        ${escapeHtml(caption)}
+      </p>
+    </article>
+  `;
+}
+
 export function renderHeader({ items = [], state = {} } = {}) {
   const list = getResolvedItems(items);
   const localState = state || incidenciasState || {};
@@ -1278,28 +1311,14 @@ export function renderHeader({ items = [], state = {} } = {}) {
     ? formatRelativeDate(localState.lastSyncAt)
     : "Sin sincronización reciente";
 
+  const stats = computeStats(list);
+
   return `
     ${renderScopedStyles()}
 
     <section class="incidencias-hero">
       <div class="incidencias-hero-inner">
-        <div class="incidencias-hero-top">
-          <div class="incidencias-hero-copy">
-            <span class="incidencias-eyebrow">
-              Ayuda y seguimiento
-            </span>
-
-            <div class="page-header-main">
-              <h1 class="incidencias-hero-title">
-                Tus incidencias y solicitudes
-              </h1>
-
-              <p class="incidencias-hero-subtitle">
-                Consulta el estado de tus incidencias, revisa las actualizaciones más recientes y crea nuevas solicitudes desde una vista clara, cercana y fácil de seguir.
-              </p>
-            </div>
-          </div>
-
+        <div class="incidencias-hero-actions-row">
           <div class="incidencias-hero-actions">
             <button
               id="incidencias-export-btn"
@@ -1317,6 +1336,22 @@ export function renderHeader({ items = [], state = {} } = {}) {
             >
               ${creating ? "Abriendo..." : "Crear nueva incidencia"}
             </button>
+          </div>
+        </div>
+
+        <div class="incidencias-hero-copy">
+          <span class="incidencias-eyebrow">
+            Ayuda y seguimiento
+          </span>
+
+          <div class="page-header-main">
+            <h1 class="incidencias-hero-title">
+              Tus incidencias y solicitudes
+            </h1>
+
+            <p class="incidencias-hero-subtitle">
+              Consulta el estado de tus incidencias, revisa las actualizaciones más recientes y crea nuevas solicitudes desde una vista clara, cercana y fácil de seguir.
+            </p>
           </div>
         </div>
 
@@ -1342,19 +1377,19 @@ export function renderHeader({ items = [], state = {} } = {}) {
         </div>
 
         <div class="incidencias-summary-grid">
-          <article class="incidencias-summary-card">
-            <span class="incidencias-summary-label">
-              Total visible
-            </span>
+          ${renderSummaryCard({
+            label: "Incidencias abiertas",
+            value: stats.openCount,
+            caption: "Solicitudes activas o pendientes de revisión.",
+            tone: "is-open",
+          })}
 
-            <strong class="incidencias-summary-value">
-              ${escapeHtml(String(remoteCount))}
-            </strong>
-
-            <p class="incidencias-summary-caption">
-              Incidencias disponibles en tu historial actual.
-            </p>
-          </article>
+          ${renderSummaryCard({
+            label: "Incidencias cerradas",
+            value: stats.closedCount,
+            caption: "Casos resueltos o ya cerrados.",
+            tone: "is-closed",
+          })}
         </div>
       </div>
     </section>
@@ -1390,9 +1425,9 @@ export function renderLoadingState() {
                 <div class="incidencias-skeleton-id">
                   <div class="incidencias-skeleton-bar incidencias-skeleton-avatar"></div>
                   <div class="incidencias-skeleton-stack">
-                    <div class="incidencias-skeleton-bar" style="height:14px; width:180px;"></div>
-                    <div class="incidencias-skeleton-bar" style="height:11px; width:150px;"></div>
-                    <div class="incidencias-skeleton-bar" style="height:11px; width:220px;"></div>
+                    <div class="incidencias-skeleton-bar" style="height:11px; width:120px;"></div>
+                    <div class="incidencias-skeleton-bar" style="height:14px; width:220px;"></div>
+                    <div class="incidencias-skeleton-bar" style="height:11px; width:200px;"></div>
                   </div>
                 </div>
               </div>
@@ -1402,17 +1437,15 @@ export function renderLoadingState() {
               </div>
 
               <div class="incidencias-skeleton-cell">
-                <div class="incidencias-skeleton-bar" style="height:12px; width:96px;"></div>
+                <div class="incidencias-skeleton-bar" style="height:12px; width:110px;"></div>
               </div>
 
               <div class="incidencias-skeleton-cell">
-                <div class="incidencias-skeleton-bar" style="height:12px; width:92px;"></div>
-                <div style="height:6px;"></div>
-                <div class="incidencias-skeleton-bar" style="height:22px; width:116px;"></div>
+                <div class="incidencias-skeleton-bar" style="height:12px; width:86px;"></div>
               </div>
 
               <div class="incidencias-skeleton-cell">
-                <div class="incidencias-skeleton-bar" style="height:28px; width:90px;"></div>
+                <div class="incidencias-skeleton-bar" style="height:28px; width:92px;"></div>
               </div>
 
               <div class="incidencias-skeleton-cell" style="display:flex; justify-content:flex-end;">
@@ -1512,10 +1545,6 @@ function renderTableToolbar({
       </div>
 
       <div class="incidencias-table-toolbar-actions">
-        <span class="incidencias-meta-pill">
-          Vista resumida
-        </span>
-
         ${
           refreshing
             ? `
@@ -1558,19 +1587,23 @@ function renderIdentityAvatar({
   initials = "ON",
   seed = "onion",
   size = 40,
+  title = "Cliente",
 } = {}) {
   const theme = getFallbackAvatarTheme(seed);
   const safeUrl = safeText(avatarUrl, "");
+  const safeTitle = escapeHtml(title);
 
   if (safeUrl) {
     return `
       <div
         class="incidencias-avatar"
+        title="${safeTitle}"
+        aria-label="${safeTitle}"
         style="inline-size:${size}px; block-size:${size}px;"
       >
         <img
           src="${escapeHtml(safeUrl)}"
-          alt=""
+          alt="${safeTitle}"
           loading="lazy"
           referrerpolicy="no-referrer"
           onerror="this.parentNode.setAttribute('data-avatar-fallback','true');"
@@ -1593,6 +1626,8 @@ function renderIdentityAvatar({
     <div
       class="incidencias-avatar"
       data-avatar-fallback="true"
+      title="${safeTitle}"
+      aria-label="${safeTitle}"
       style="
         inline-size:${size}px;
         block-size:${size}px;
@@ -1661,12 +1696,11 @@ function renderIncidenciaRow(item = {}, state = {}) {
   const preview = truncate(getPreview(item), 88);
   const statusValue = getStatusValue(item);
   const createdAt = formatDate(getCreatedAt(item));
-  const updatedAtRaw = getUpdatedAt(item);
-  const updatedAtRelative = formatRelativeDate(updatedAtRaw);
-  const updatedAtDate = formatDate(updatedAtRaw);
+  const updatedAtRelative = formatRelativeDate(getUpdatedAt(item));
   const initials = getClientInitials(item);
   const avatarUrl = getClientAvatarUrl(item);
   const avatarSeed = getAvatarToneSeed(item);
+  const avatarTitle = getClientDisplayName(item);
   const isOpening = Boolean(openingTicketId && openingTicketId === ticketId);
 
   return `
@@ -1678,9 +1712,14 @@ function renderIncidenciaRow(item = {}, state = {}) {
             initials,
             seed: avatarSeed,
             size: 40,
+            title: avatarTitle,
           })}
 
           <div class="incidencias-identity-copy">
+            <span class="incidencias-ticket-code">
+              ${escapeHtml(code)}
+            </span>
+
             <button
               type="button"
               data-action="open-ticket"
@@ -1691,10 +1730,6 @@ function renderIncidenciaRow(item = {}, state = {}) {
             >
               ${escapeHtml(title)}
             </button>
-
-            <span class="incidencias-ticket-code">
-              ${escapeHtml(code)}
-            </span>
 
             <span class="incidencias-ticket-preview">
               ${escapeHtml(preview)}
@@ -1708,27 +1743,15 @@ function renderIncidenciaRow(item = {}, state = {}) {
       </td>
 
       <td>
-        <div class="incidencias-date-stack">
-          <strong class="incidencias-date-main">
-            ${escapeHtml(createdAt)}
-          </strong>
-
-          <span class="incidencias-date-sub">
-            Fecha de creación
-          </span>
-        </div>
+        <strong class="incidencias-date-main">
+          ${escapeHtml(createdAt)}
+        </strong>
       </td>
 
       <td>
-        <div class="incidencias-update-stack">
-          <span class="incidencias-update-relative">
-            ${escapeHtml(updatedAtRelative)}
-          </span>
-
-          <span class="incidencias-update-date">
-            ${escapeHtml(updatedAtDate)}
-          </span>
-        </div>
+        <span class="incidencias-update-relative">
+          ${escapeHtml(updatedAtRelative)}
+        </span>
       </td>
 
       <td>
@@ -1754,10 +1777,10 @@ function renderMobileIncidenciaCard(item = {}, state = {}) {
   const statusValue = getStatusValue(item);
   const createdAt = formatDate(getCreatedAt(item));
   const updatedAtRelative = formatRelativeDate(getUpdatedAt(item));
-  const updatedAtDate = formatDate(getUpdatedAt(item));
   const initials = getClientInitials(item);
   const avatarUrl = getClientAvatarUrl(item);
   const avatarSeed = getAvatarToneSeed(item);
+  const avatarTitle = getClientDisplayName(item);
   const isOpening = Boolean(openingTicketId && openingTicketId === ticketId);
 
   return `
@@ -1773,9 +1796,14 @@ function renderMobileIncidenciaCard(item = {}, state = {}) {
             initials,
             seed: avatarSeed,
             size: 40,
+            title: avatarTitle,
           })}
 
           <div class="incidencias-identity-copy">
+            <span class="incidencias-ticket-code">
+              ${escapeHtml(code)}
+            </span>
+
             <button
               type="button"
               data-action="open-ticket"
@@ -1785,10 +1813,6 @@ function renderMobileIncidenciaCard(item = {}, state = {}) {
             >
               ${escapeHtml(title)}
             </button>
-
-            <span class="incidencias-ticket-code">
-              ${escapeHtml(code)}
-            </span>
 
             <span class="incidencias-ticket-preview">
               ${escapeHtml(preview)}
@@ -1812,11 +1836,6 @@ function renderMobileIncidenciaCard(item = {}, state = {}) {
           <span class="incidencias-mobile-box-label">Última novedad</span>
           <strong class="incidencias-mobile-box-value">${escapeHtml(updatedAtRelative)}</strong>
         </div>
-
-        <div class="incidencias-mobile-box">
-          <span class="incidencias-mobile-box-label">Fecha última actualización</span>
-          <strong class="incidencias-mobile-box-value">${escapeHtml(updatedAtDate)}</strong>
-        </div>
       </div>
 
       <div class="incidencias-mobile-actions">
@@ -1831,12 +1850,12 @@ function renderDesktopTable(items = [], state = {}) {
     <div class="incidencias-table-scroll">
       <table class="incidencias-table">
         <colgroup>
-          <col style="width:38%">
+          <col style="width:44%">
           <col style="width:12%">
-          <col style="width:15%">
-          <col style="width:15%">
-          <col style="width:10%">
-          <col style="width:10%">
+          <col style="width:16%">
+          <col style="width:13%">
+          <col style="width:7%">
+          <col style="width:8%">
         </colgroup>
 
         <thead>

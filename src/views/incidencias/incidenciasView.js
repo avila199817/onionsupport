@@ -2,7 +2,7 @@
    Onion SPA - Incidencias View
    Archivo: src/views/incidencias/incidenciasView.js
 
-   CLIENT EXPERIENCE MODE · VIEW REAL · 10/10
+   CLIENT EXPERIENCE MODE · VIEW REAL · HARDENED
 
    RESPONSABILIDADES:
    - punto de entrada real de la vista de incidencias
@@ -25,7 +25,8 @@
    - cleanup total
    - click delegation sólida
    - fallback elegante si los modales aún no existen
-   - lenguaje orientado a cliente/usuario final
+   - bloqueo de acciones antes de app ready
+   - anti spam click en apertura rápida
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -76,6 +77,8 @@ export const IncidenciasView = (() => {
   let inflightInit = null;
   let bindingsCleanup = null;
   let renderToken = 0;
+  let pendingCreateRequest = false;
+  let lastCreateClickAt = 0;
 
   /* =====================================================
      HELPERS CORE
@@ -144,11 +147,11 @@ export const IncidenciasView = (() => {
       Number(incidenciasState?.pageSize || DEFAULT_PAGE_SIZE)
     );
 
-    if (!Number.isFinite(Number(incidenciasState?.page))) {
-      incidenciasState.page = 1;
-    }
+    incidenciasState.page = Math.max(
+      1,
+      Number(incidenciasState?.page || 1)
+    );
 
-    incidenciasState.page = Math.max(1, Number(incidenciasState.page || 1));
     incidenciasState.pageSize = pageSize;
 
     if (typeof incidenciasState.loading !== "boolean") {
@@ -189,10 +192,9 @@ export const IncidenciasView = (() => {
 
   function getItems() {
     try {
-      const raw = getRawItems();
-      const normalized = normalizeIncidenciasCollection(raw);
-
-      return sortIncidenciasByUpdatedDesc(normalized);
+      return sortIncidenciasByUpdatedDesc(
+        normalizeIncidenciasCollection(getRawItems())
+      );
     } catch (error) {
       safeWarn("getItems falló:", error);
       return [];
@@ -240,13 +242,48 @@ export const IncidenciasView = (() => {
       return "No se pudo cargar el historial de incidencias.";
     }
 
-    const message =
+    return String(
       error?.message ||
       error?.response?.message ||
       error?.data?.message ||
-      "No se pudo cargar el historial de incidencias.";
+      "No se pudo cargar el historial de incidencias."
+    ).trim();
+  }
 
-    return String(message).trim() || "No se pudo cargar el historial de incidencias.";
+  /* =====================================================
+     APP READY HARDENING
+  ===================================================== */
+
+  function isDomReady() {
+    return Boolean(
+      typeof document !== "undefined" &&
+      document.body &&
+      document.readyState !== "loading"
+    );
+  }
+
+  function isAppReady() {
+    return Boolean(
+      AppCore?.state?.ready ||
+      AppCore?.state?.bootCompleted ||
+      AppCore?.state?.appReady ||
+      AppCore?.state?.authenticated !== undefined
+    );
+  }
+
+  function canInteract() {
+    return !destroyed && isDomReady() && isAppReady();
+  }
+
+  function throttleCreateClick() {
+    const now = Date.now();
+
+    if (now - lastCreateClickAt < 450) {
+      return false;
+    }
+
+    lastCreateClickAt = now;
+    return true;
   }
 
   /* =====================================================
@@ -254,9 +291,7 @@ export const IncidenciasView = (() => {
   ===================================================== */
 
   function openTicketModalBridge(detail = null) {
-    if (!detail) {
-      return false;
-    }
+    if (!detail) return false;
 
     let handled = false;
 
@@ -266,24 +301,17 @@ export const IncidenciasView = (() => {
     } catch {}
 
     try {
-      const globalHook =
+      const hook =
         window?.OnionIncidenciasModal?.open ||
         window?.renderIncidenciaTicketModal ||
         window?.renderTicketModal;
 
-      if (typeof globalHook === "function") {
-        globalHook(detail);
+      if (typeof hook === "function") {
+        hook(detail);
         handled = true;
       }
     } catch (error) {
-      safeWarn("modal bridge hook falló:", error);
-    }
-
-    if (!handled) {
-      showToast(
-        "La incidencia se ha cargado, pero falta conectar el modal de detalle.",
-        "info"
-      );
+      safeWarn("ticket modal bridge falló:", error);
     }
 
     return handled;
@@ -298,24 +326,30 @@ export const IncidenciasView = (() => {
     } catch {}
 
     try {
-      const globalHook =
+      const hook =
         window?.OnionIncidenciasCreateModal?.open ||
         window?.renderIncidenciaCreateModal ||
         IncidenciasCreateView?.open;
 
-      if (typeof globalHook === "function") {
-        globalHook(draft);
+      if (typeof hook === "function") {
+        hook(draft);
         handled = true;
       }
     } catch (error) {
-      safeWarn("create modal bridge hook falló:", error);
-    }
-
-    if (!handled) {
-      showToast("No se pudo abrir el formulario de nueva incidencia.", "error");
+      safeWarn("create modal bridge falló:", error);
     }
 
     return handled;
+  }
+
+  function flushPendingCreate() {
+    if (!pendingCreateRequest) return false;
+    if (!canInteract()) return false;
+
+    pendingCreateRequest = false;
+    handleCreateIncidencia();
+
+    return true;
   }
 
   /* =====================================================
@@ -329,19 +363,9 @@ export const IncidenciasView = (() => {
 
     return `
       <section class="panel-content dashboard ready">
-        <div
-          class="content-wrapper"
-          style="display:grid; gap:var(--space-lg);"
-        >
-          ${renderHeader({
-            items,
-            state: incidenciasState,
-          })}
-
-          ${renderTable({
-            items,
-            state: incidenciasState,
-          })}
+        <div class="content-wrapper" style="display:grid;gap:var(--space-lg);">
+          ${renderHeader({ items, state: incidenciasState })}
+          ${renderTable({ items, state: incidenciasState })}
         </div>
       </section>
     `;
@@ -350,10 +374,7 @@ export const IncidenciasView = (() => {
   function render() {
     const container = getContainer();
 
-    if (!container) {
-      safeWarn("No se encontró #view-container.");
-      return null;
-    }
+    if (!container) return null;
 
     ensureBaseState();
 
@@ -375,9 +396,7 @@ export const IncidenciasView = (() => {
   }
 
   function rerender() {
-    if (destroyed) {
-      return null;
-    }
+    if (destroyed) return null;
 
     const container = render();
 
@@ -389,7 +408,7 @@ export const IncidenciasView = (() => {
   }
 
   /* =====================================================
-     DATA LOAD
+     DATA
   ===================================================== */
 
   async function loadData({
@@ -418,15 +437,9 @@ export const IncidenciasView = (() => {
         lastSyncAt: new Date().toISOString(),
       });
 
-      const itemsAfter = getItems();
-
-      clampPageAgainstItems(itemsAfter);
-
-      return itemsAfter;
+      return getItems();
     } catch (error) {
       const message = safeErrorMessage(error);
-
-      safeWarn("loadIncidencias falló:", error);
 
       setState({
         loading: false,
@@ -450,9 +463,7 @@ export const IncidenciasView = (() => {
 
     try {
       hydrateFromCache?.();
-    } catch (error) {
-      safeWarn("hydrateFromCache falló:", error);
-    }
+    } catch {}
 
     ensureBaseState();
     render();
@@ -469,11 +480,13 @@ export const IncidenciasView = (() => {
 
     render();
 
+    flushPendingCreate();
+
     return api;
   }
 
   /* =====================================================
-     PAGE ACTIONS
+     ACTIONS
   ===================================================== */
 
   function goToPage(page = 1) {
@@ -502,17 +515,9 @@ export const IncidenciasView = (() => {
     return goToPage((incidenciasState.page || 1) + 1);
   }
 
-  /* =====================================================
-     ACTION FLOWS
-  ===================================================== */
-
   async function handleOpenTicket(ticketId = "") {
     const id = String(ticketId || "").trim();
-
-    if (!id) {
-      showToast("No se ha podido abrir la incidencia seleccionada.", "error");
-      return null;
-    }
+    if (!id) return null;
 
     setState({
       openingTicketId: id,
@@ -527,16 +532,12 @@ export const IncidenciasView = (() => {
         silent: true,
       });
 
-      if (!detail) {
-        showToast("No se pudo abrir la incidencia.", "error");
-        return null;
+      if (detail) {
+        openTicketModalBridge(detail);
       }
 
-      openTicketModalBridge(detail);
-
       return detail;
-    } catch (error) {
-      safeWarn("handleOpenTicket falló:", error);
+    } catch {
       showToast("No se pudo abrir la incidencia.", "error");
       return null;
     } finally {
@@ -544,18 +545,13 @@ export const IncidenciasView = (() => {
         openingTicketId: "",
       });
 
-      if (!destroyed) {
-        rerender();
-      }
+      if (!destroyed) rerender();
     }
   }
 
   async function handleRefreshTicketFromModal(ticketId = "") {
     const id = String(ticketId || "").trim();
-
-    if (!id) {
-      return null;
-    }
+    if (!id) return null;
 
     try {
       const detail = await refreshTicketDetailAction({
@@ -563,16 +559,12 @@ export const IncidenciasView = (() => {
         silent: true,
       });
 
-      if (!detail) {
-        showToast("No se pudo actualizar la incidencia.", "error");
-        return null;
+      if (detail) {
+        openTicketModalBridge(detail);
       }
 
-      openTicketModalBridge(detail);
-
       return detail;
-    } catch (error) {
-      safeWarn("handleRefreshTicketFromModal falló:", error);
+    } catch {
       showToast("No se pudo actualizar la incidencia.", "error");
       return null;
     }
@@ -596,6 +588,16 @@ export const IncidenciasView = (() => {
       return false;
     }
 
+    if (!throttleCreateClick()) {
+      return false;
+    }
+
+    if (!canInteract()) {
+      pendingCreateRequest = true;
+      showToast("La pantalla aún se está preparando.", "info");
+      return false;
+    }
+
     setState({
       creating: true,
     });
@@ -603,20 +605,22 @@ export const IncidenciasView = (() => {
     rerender();
 
     try {
-      return openCreateModalBridge({});
+      const opened = openCreateModalBridge({});
+      if (!opened) {
+        showToast("No se pudo abrir el formulario.", "error");
+      }
+      return opened;
     } finally {
       setState({
         creating: false,
       });
 
-      if (!destroyed) {
-        rerender();
-      }
+      if (!destroyed) rerender();
     }
   }
 
   /* =====================================================
-     CLICK DELEGATION
+     BINDINGS
   ===================================================== */
 
   function bindNativeActions(container) {
@@ -628,26 +632,18 @@ export const IncidenciasView = (() => {
       const openBtn = event.target.closest('[data-action="open-ticket"]');
       if (openBtn) {
         event.preventDefault();
-
-        const ticketId = String(openBtn.dataset.ticketId || "").trim();
-
-        await handleOpenTicket(ticketId);
+        await handleOpenTicket(openBtn.dataset.ticketId || "");
         return;
       }
 
       const copyBtn = event.target.closest('[data-action="copy-ticket-id"]');
       if (copyBtn) {
         event.preventDefault();
-
-        const ticketId = String(
-          copyBtn.dataset.ticketId || copyBtn.dataset.ticketCode || ""
-        ).trim();
-
-        if (!ticketId) {
-          return;
-        }
-
-        await handleCopyTicketId(ticketId);
+        await handleCopyTicketId(
+          copyBtn.dataset.ticketId ||
+          copyBtn.dataset.ticketCode ||
+          ""
+        );
         return;
       }
 
@@ -701,96 +697,56 @@ export const IncidenciasView = (() => {
   }
 
   function bindModalBridgeEvents() {
-    const onRefresh = async (event) => {
-      const ticketId =
-        event?.detail?.ticketId ||
-        event?.ticketId ||
-        "";
-
-      if (!ticketId) {
-        return;
-      }
-
-      await handleRefreshTicketFromModal(ticketId);
-    };
-
-    const onCopy = async (event) => {
-      const ticketId =
-        event?.detail?.ticketId ||
-        event?.ticketId ||
-        "";
-
-      if (!ticketId) {
-        return;
-      }
-
-      await handleCopyTicketId(ticketId);
-    };
-
-    const onCreated = async (event) => {
-      const detail =
-        event?.detail?.detail ||
-        event?.detail?.response?.ticket ||
-        event?.detail?.response?.item ||
-        event?.detail?.response?.data ||
-        event?.detail?.response?.result ||
-        event?.detail?.response?.payload ||
-        null;
-
-      try {
-        await reload({
-          force: true,
-          asRefresh: true,
-        });
-      } catch (error) {
-        safeWarn("reload tras create falló:", error);
-      }
-
-      if (detail) {
-        try {
-          openTicketModalBridge(detail);
-        } catch (error) {
-          safeWarn("openTicketModalBridge tras create falló:", error);
-        }
-      }
-    };
-
-    const eventBus = AppCore?.events;
-
-    if (!eventBus?.on) {
+    const bus = AppCore?.events;
+    if (!bus?.on) {
       return () => {};
     }
 
+    const onRefresh = async (event) => {
+      await handleRefreshTicketFromModal(
+        event?.detail?.ticketId ||
+        event?.ticketId ||
+        ""
+      );
+    };
+
+    const onCopy = async (event) => {
+      await handleCopyTicketId(
+        event?.detail?.ticketId ||
+        event?.ticketId ||
+        ""
+      );
+    };
+
+    const onCreated = async () => {
+      await reload({
+        force: true,
+        asRefresh: true,
+      });
+    };
+
     try {
-      eventBus.on("incidencias:modal:refresh", onRefresh);
-      eventBus.on("incidencias:modal:copy", onCopy);
-      eventBus.on("incidencias:create:success", onCreated);
-    } catch (error) {
-      safeWarn("bind modal bridge error:", error);
-    }
+      bus.on("incidencias:modal:refresh", onRefresh);
+      bus.on("incidencias:modal:copy", onCopy);
+      bus.on("incidencias:create:success", onCreated);
+      bus.on("app:ready", flushPendingCreate);
+      bus.on("router:rendered", flushPendingCreate);
+    } catch {}
 
     return () => {
-      try {
-        eventBus?.off?.("incidencias:modal:refresh", onRefresh);
-      } catch {}
-
-      try {
-        eventBus?.off?.("incidencias:modal:copy", onCopy);
-      } catch {}
-
-      try {
-        eventBus?.off?.("incidencias:create:success", onCreated);
-      } catch {}
+      try { bus.off("incidencias:modal:refresh", onRefresh); } catch {}
+      try { bus.off("incidencias:modal:copy", onCopy); } catch {}
+      try { bus.off("incidencias:create:success", onCreated); } catch {}
+      try { bus.off("app:ready", flushPendingCreate); } catch {}
+      try { bus.off("router:rendered", flushPendingCreate); } catch {}
     };
   }
 
   function bind() {
     cleanupBindings();
 
-    const container = getContainer();
     const cleanups = [];
-
-    cleanups.push(bindNativeActions(container));
+    cleanups.push(bindNativeActions(getContainer()));
     cleanups.push(bindModalBridgeEvents());
 
     bindingsCleanup = () => {
@@ -803,27 +759,13 @@ export const IncidenciasView = (() => {
   }
 
   /* =====================================================
-     PUBLIC FLOWS
+     PUBLIC
   ===================================================== */
 
   async function reload(options = {}) {
-    if (destroyed) {
-      return api;
-    }
+    if (destroyed) return api;
 
-    const {
-      force = true,
-      asRefresh = true,
-    } = options || {};
-
-    try {
-      await renderAndLoad({
-        force,
-        asRefresh,
-      });
-    } catch (error) {
-      safeWarn("reload falló:", error);
-    }
+    await renderAndLoad(options);
 
     if (!destroyed) {
       bind();
@@ -839,8 +781,6 @@ export const IncidenciasView = (() => {
 
     destroyed = false;
     initialized = true;
-
-    ensureBaseState();
 
     inflightInit = (async () => {
       safeLog("init");
@@ -879,26 +819,9 @@ export const IncidenciasView = (() => {
       loading: false,
     });
 
+    pendingCreateRequest = false;
+
     safeLog("destroy");
-  }
-
-  /* =====================================================
-     EXTRAS ÚTILES
-  ===================================================== */
-
-  function getCurrentItems() {
-    return getItems();
-  }
-
-  function getCurrentPageItems() {
-    const items = getItems();
-    const pagination = getPaginationMeta(items);
-    return pagination.items;
-  }
-
-  function getCurrentTicket(ticketId = "") {
-    const items = getItems();
-    return findIncidenciaById(items, ticketId);
   }
 
   /* =====================================================
@@ -920,9 +843,10 @@ export const IncidenciasView = (() => {
     goPrevPage,
     goNextPage,
 
-    getItems: getCurrentItems,
-    getPageItems: getCurrentPageItems,
-    getTicketById: getCurrentTicket,
+    getItems: () => getItems(),
+    getPageItems: () => getPaginationMeta(getItems()).items,
+    getTicketById: (ticketId = "") =>
+      findIncidenciaById(getItems(), ticketId),
 
     get initialized() {
       return initialized;

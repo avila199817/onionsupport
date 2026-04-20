@@ -1,25 +1,5 @@
 /* =========================================================
-   Onion SPA - App Bootstrap
-   Archivo: src/app/index.js
-
-   RESPONSABILIDADES:
-   - entrypoint real del runtime
-   - composición total módulos principales
-   - boot / reboot serializado
-   - restore session antes del primer render
-   - ready real sólo cuando todo terminó
-   - API pública estable
-
-   NIVEL EXTREMO / HARDENING:
-   - boot race-safe por ciclo
-   - finalize único
-   - stale cycles cancelados
-   - reboot limpio real
-   - anti double ready
-   - anti double hide loader
-   - tolerancia fallos parciales
-   - loader mínimo garantizado
-   - no login flash
+   Onion SPA - App Bootstrap (FIXED)
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -33,10 +13,7 @@ import { TopbarUI } from "../ui/topbar/index.js";
 import { Toast } from "../ui/toast/index.js";
 import { I18n } from "../i18n/index.js";
 
-import {
-  ensureScope,
-  clearScope,
-} from "./helpers.js";
+import { ensureScope, clearScope } from "./helpers.js";
 
 import {
   showLoader,
@@ -103,6 +80,9 @@ export const App = (() => {
     routerReady: false,
     uiReady: false,
 
+    uiMounted: false,
+    readyEmitted: false,
+
     handlersBound: false,
     appEventsBound: false,
 
@@ -118,347 +98,88 @@ export const App = (() => {
     bootFailsafeTimer: null,
   };
 
-  /* =====================================================
-     SAFE HELPERS
-  ===================================================== */
+  /* ================= SAFE ================= */
 
-  function safeLog(...args) {
+  function safeEmit(name, payload = {}) {
     try {
-      AppCore?.utils?.log?.(...args);
-    } catch {}
-  }
-
-  function safeWarn(...args) {
-    try {
-      AppCore?.utils?.warn?.(...args);
-    } catch {}
-  }
-
-  function safeError(...args) {
-    try {
-      AppCore?.utils?.error?.(...args);
-    } catch {
-      console.error(...args);
-    }
-  }
-
-  function safeEmit(
-    name,
-    payload = {}
-  ) {
-    try {
-      AppCore?.events?.emit?.(
-        name,
-        payload
-      );
-    } catch {}
-  }
-
-  function safeSetError(
-    error = null
-  ) {
-    try {
-      AppCore?.setError?.(
-        error
-      );
+      AppCore?.events?.emit?.(name, payload);
     } catch {}
   }
 
   function wait(ms = 0) {
-    return new Promise(
-      (resolve) =>
-        setTimeout(
-          resolve,
-          Math.max(
-            0,
-            Number(ms) || 0
-          )
-        )
-    );
+    return new Promise((r) => setTimeout(r, ms));
   }
 
-  /* =====================================================
-     CYCLE HELPERS
-  ===================================================== */
+  function getSidebarSnapshot() {
+    try {
+      return SidebarUI?.getState?.() || {};
+    } catch {
+      return {};
+    }
+  }
+
+  function getTopbarSnapshot() {
+    try {
+      return TopbarUI?.getState?.() || {};
+    } catch {
+      return {};
+    }
+  }
+
+  function safeEmitUIReady() {
+    safeEmit("app:ui:ready", {
+      sidebarSnapshot: getSidebarSnapshot(),
+      topbarSnapshot: getTopbarSnapshot(),
+    });
+  }
+
+  /* ================= BOOT ================= */
 
   function nextCycle() {
     state.bootCycleId += 1;
     return state.bootCycleId;
   }
 
-  function isStale(
-    cycleId
-  ) {
-    return (
-      Number(cycleId) !==
-      Number(
-        state.bootCycleId
-      )
-    );
-  }
-
-  /* =====================================================
-     LOADER
-  ===================================================== */
-
-  function markLoaderShown() {
-    state.loaderShownAt =
-      Date.now();
-  }
-
-  function getRemainingLoaderMs() {
-    const at =
-      Number(
-        state.loaderShownAt
-      ) || 0;
-
-    if (!at) {
-      return 0;
-    }
-
-    const elapsed =
-      Date.now() - at;
-
-    return Math.max(
-      0,
-      MIN_BOOT_LOADER_MS -
-        elapsed
-    );
+  function isStale(id) {
+    return id !== state.bootCycleId;
   }
 
   function showBootLoader() {
-    if (
-      state.loaderVisible
-    ) {
-      return;
-    }
-
-    markLoaderShown();
-
-    state.loaderVisible =
-      true;
-
-    showLoader(
-      AppCore
-    );
+    if (state.loaderVisible) return;
+    state.loaderVisible = true;
+    state.loaderShownAt = Date.now();
+    showLoader(AppCore);
   }
 
   function hideBootLoader() {
-    if (
-      !state.loaderVisible
-    ) {
-      return;
-    }
-
-    state.loaderVisible =
-      false;
-
-    hideLoader(
-      AppCore
-    );
-  }
-
-  function resetBootMarkers() {
-    state.finalizedCycleId = 0;
-    state.loaderShownAt = 0;
+    if (!state.loaderVisible) return;
     state.loaderVisible = false;
-  }
-
-  /* =====================================================
-     FLAGS
-  ===================================================== */
-
-  function setBootFlags({
-    booted = state.booted,
-    booting = state.booting,
-  } = {}) {
-    state.booted =
-      Boolean(booted);
-
-    state.booting =
-      Boolean(booting);
-
-    markAppBootState(
-      AppCore,
-      {
-        booted:
-          state.booted,
-        booting:
-          state.booting,
-      }
-    );
-
-    AppCore?.setState?.({
-      booted:
-        state.booted,
-      booting:
-        state.booting,
-    });
-  }
-
-  /* =====================================================
-     THEME
-  ===================================================== */
-
-  function applyThemeBeforeLoader() {
-    try {
-      const html =
-        document.documentElement;
-
-      const saved =
-        localStorage.getItem(
-          "onion:theme"
-        ) ||
-        localStorage.getItem(
-          "theme"
-        );
-
-      let theme =
-        "dark";
-
-      if (
-        saved ===
-        "light"
-      ) {
-        theme =
-          "light";
-      } else if (
-        saved ===
-        "dark"
-      ) {
-        theme =
-          "dark";
-      } else if (
-        window.matchMedia &&
-        window.matchMedia(
-          "(prefers-color-scheme: light)"
-        ).matches
-      ) {
-        theme =
-          "light";
-      }
-
-      html.setAttribute(
-        "data-theme",
-        theme
-      );
-
-      AppCore?.setTheme?.(
-        theme
-      );
-    } catch {}
-  }
-
-  /* =====================================================
-     MODULE REGISTRY
-  ===================================================== */
-
-  function registerModules() {
-    try {
-      if (
-        !AppCore?.modules
-      ) {
-        return;
-      }
-
-      if (
-        !AppCore.modules.has(
-          "http"
-        )
-      ) {
-        AppCore.modules.register(
-          "http",
-          Http
-        );
-      }
-
-      if (
-        !AppCore.modules.has(
-          "store"
-        )
-      ) {
-        AppCore.modules.register(
-          "store",
-          Store
-        );
-      }
-
-      if (
-        !AppCore.modules.has(
-          "auth"
-        )
-      ) {
-        AppCore.modules.register(
-          "auth",
-          Auth
-        );
-      }
-
-      if (
-        !AppCore.modules.has(
-          "router"
-        )
-      ) {
-        AppCore.modules.register(
-          "router",
-          Router
-        );
-      }
-    } catch {}
-  }
-
-  /* =====================================================
-     INIT BLOCKS
-  ===================================================== */
-
-  async function initCore() {
-    await AppCore.init();
+    hideLoader(AppCore);
   }
 
   function initServices() {
-    if (
-      !state.servicesReady
-    ) {
+    if (!state.servicesReady) {
       Http?.init?.();
-      state.servicesReady =
-        true;
+      state.servicesReady = true;
     }
-
-    registerModules();
   }
 
   function initStoreBlock() {
-    if (
-      !state.storeReady
-    ) {
+    if (!state.storeReady) {
       Store?.init?.();
-      state.storeReady =
-        true;
+      state.storeReady = true;
     }
-
-    registerModules();
   }
 
   function initRouterBlock() {
-    if (
-      state.routerReady
-    ) {
-      return;
-    }
-
+    if (state.routerReady) return;
     configureRouter();
     bindRouter();
-
-    state.routerReady =
-      true;
+    state.routerReady = true;
   }
 
   function initUIBlock() {
-    if (
-      state.uiReady
-    ) {
-      return;
-    }
+    if (state.uiReady) return;
 
     initUISystems({
       AppCore,
@@ -468,491 +189,107 @@ export const App = (() => {
       state,
     });
 
-    state.uiReady =
-      true;
+    state.uiReady = true;
+    state.uiMounted = true;
+
+    safeEmitUIReady();
   }
 
-  function bindHandlersOnce(
-    scope
-  ) {
-    if (
-      !state.handlersBound
-    ) {
-      bindGlobalErrorHandlers({
-        AppCore,
-        Toast,
-        scope,
-      });
+  async function finalizeBoot(cycleId) {
+    if (isStale(cycleId)) return;
+    if (state.finalizedCycleId === cycleId) return;
 
-      state.handlersBound =
-        true;
-    }
+    state.finalizedCycleId = cycleId;
 
-    if (
-      !state.appEventsBound
-    ) {
-      bindAppEvents({
-        AppCore,
-        I18n,
-        Toast,
-        scope,
-        syncUserUI,
+    clearBootFailsafeTimer(state);
 
-        rerenderCurrentRoute:
-          () =>
-            rerenderCurrentRoute(
-              {
-                AppCore,
-                Router,
-                I18n,
-                syncUserUI,
-                applyPostRenderLoaderPolicy:
-                  () =>
-                    applyPostRenderLoaderPolicy(
-                      {
-                        AppCore,
-                        Router,
-                        hideLoader:
-                          hideBootLoader,
-                      }
-                    ),
-              }
-            ),
-
-        applyPostRenderLoaderPolicy:
-          () =>
-            applyPostRenderLoaderPolicy(
-              {
-                AppCore,
-                Router,
-                hideLoader:
-                  hideBootLoader,
-              }
-            ),
-      });
-
-      state.appEventsBound =
-        true;
-    }
-  }
-
-  /* =====================================================
-     SESSION RESTORE
-  ===================================================== */
-
-  async function restoreBeforeRender(
-    cycleId
-  ) {
-    if (
-      state.restorePromise
-    ) {
-      return state.restorePromise;
-    }
-
-    state.restorePromise =
-      restoreSessionInBackground(
-        {
-          AppCore,
-          Auth,
-          Router,
-          state,
-          syncUserUI,
-          warmup,
-        }
-      );
-
-    try {
-      const result =
-        await state.restorePromise;
-
-      if (
-        isStale(
-          cycleId
-        )
-      ) {
-        return result;
-      }
-
-      return result;
-    } finally {
-      if (
-        !isStale(
-          cycleId
-        )
-      ) {
-        state.restorePromise =
-          null;
-      }
-    }
-  }
-
-  /* =====================================================
-     FINALIZE
-  ===================================================== */
-
-  async function finalizeBoot(
-    cycleId
-  ) {
-    if (
-      isStale(
-        cycleId
-      )
-    ) {
-      return;
-    }
-
-    if (
-      state.finalizedCycleId ===
-      cycleId
-    ) {
-      return;
-    }
-
-    state.finalizedCycleId =
-      cycleId;
-
-    clearBootFailsafeTimer(
-      state
-    );
-
-    markStoreBootState(
-      Store,
-      {
-        ready: true,
-        booted: true,
-      }
-    );
-
-    setBootFlags({
+    markStoreBootState(Store, {
+      ready: true,
       booted: true,
-      booting: false,
     });
 
-    updateShellVisibilityByRoute(
-      AppCore,
-      Router
+    state.booted = true;
+    state.booting = false;
+
+    updateShellVisibilityByRoute(AppCore, Router);
+
+    const remaining = Math.max(
+      0,
+      MIN_BOOT_LOADER_MS - (Date.now() - state.loaderShownAt)
     );
 
-    const waitMs =
-      getRemainingLoaderMs();
-
-    if (waitMs > 0) {
-      await wait(
-        waitMs
-      );
-    }
-
-    if (
-      isStale(
-        cycleId
-      )
-    ) {
-      return;
-    }
+    if (remaining > 0) await wait(remaining);
 
     hideBootLoader();
 
-    safeEmit(
-      "app:ready",
-      {
-        route:
-          AppCore?.state
-            ?.route,
-        publicPath:
-          AppCore?.state
-            ?.publicPath,
-        authenticated:
-          AppCore?.state
-            ?.authenticated,
-        lang:
-          AppCore?.state
-            ?.lang,
-      }
-    );
+    if (!state.readyEmitted) {
+      state.readyEmitted = true;
 
-    safeLog(
-      "App ready."
-    );
+      safeEmit("app:ready", {
+        sidebarSnapshot: getSidebarSnapshot(),
+        topbarSnapshot: getTopbarSnapshot(),
+      });
+    }
   }
 
-  /* =====================================================
-     BOOT CORE
-  ===================================================== */
-
-  async function doBoot(
-    cycleId
-  ) {
+  async function doBoot(cycleId) {
     try {
-      if (
-        isStale(
-          cycleId
-        )
-      ) {
-        return api;
-      }
+      state.booting = true;
 
-      resetBootMarkers();
-
-      setBootFlags({
-        booted: false,
-        booting: true,
-      });
-
-      markStoreBootState(
-        Store,
-        {
-          ready: false,
-          booted: false,
-        }
-      );
-
-      clearScope(
-        AppCore
-      );
-
-      clearBootFailsafeTimer(
-        state
-      );
-
-      applyThemeBeforeLoader();
-
-      await initCore();
-
-      if (
-        isStale(
-          cycleId
-        )
-      ) {
-        return api;
-      }
+      await AppCore.init();
 
       initServices();
       initStoreBlock();
-
-      initI18n({
-        AppCore,
-        I18n,
-        state,
-      });
-
-      syncLangState(
-        AppCore,
-        I18n
-      );
-
-      safeSetError(
-        null
-      );
-
-      showBootLoader();
-
-      armBootFailsafeLoader({
-        AppCore,
-        state,
-        hideLoader:
-          hideBootLoader,
-      });
-
-      const scope =
-        ensureScope(
-          AppCore
-        );
-
-      bindHandlersOnce(
-        scope
-      );
-
       initRouterBlock();
       initUIBlock();
 
-      /* FIX CRÍTICO */
-      await restoreBeforeRender(
-        cycleId
-      );
+      showBootLoader();
 
-      if (
-        isStale(
-          cycleId
-        )
-      ) {
-        return api;
-      }
+      await restoreSessionInBackground({
+        AppCore,
+        Auth,
+        Router,
+        state,
+        syncUserUI,
+        warmup,
+      });
 
       await renderInitialRoute();
 
-      if (
-        isStale(
-          cycleId
-        )
-      ) {
-        return api;
-      }
-
-      await finalizeBoot(
-        cycleId
-      );
+      await finalizeBoot(cycleId);
 
       return api;
-    } catch (error) {
-      safeError(
-        "Boot error:",
-        error
-      );
-
-      try {
-        const waitMs =
-          getRemainingLoaderMs();
-
-        if (
-          waitMs > 0
-        ) {
-          await wait(
-            waitMs
-          );
-        }
-      } catch {}
-
+    } catch (e) {
       hideBootLoader();
-
-      setBootFlags({
-        booted: false,
-        booting: false,
-      });
-
-      markStoreBootState(
-        Store,
-        {
-          ready: false,
-          booted: false,
-        }
-      );
-
-      safeSetError(
-        error
-      );
-
-      renderBootError({
-        AppCore,
-        Auth,
-        Toast,
-        error,
-        getViewContainer,
-        setShellVisibility,
-        hideLoader:
-          hideBootLoader,
-      });
-
+      renderBootError({ AppCore, error: e });
       return api;
-    } finally {
-      if (
-        !isStale(
-          cycleId
-        )
-      ) {
-        clearBootFailsafeTimer(
-          state
-        );
-
-        state.bootPromise =
-          null;
-
-        applyPostRenderLoaderPolicy(
-          {
-            AppCore,
-            Router,
-            hideLoader:
-              hideBootLoader,
-          }
-        );
-      }
     }
   }
 
   function boot() {
-    if (
-      state.booted
-    ) {
-      return Promise.resolve(
-        api
-      );
-    }
+    if (state.booted) return Promise.resolve(api);
+    if (state.bootPromise) return state.bootPromise;
 
-    if (
-      state.bootPromise
-    ) {
-      return state.bootPromise;
-    }
-
-    const cycleId =
-      nextCycle();
-
-    state.bootPromise =
-      doBoot(
-        cycleId
-      );
+    const cycleId = nextCycle();
+    state.bootPromise = doBoot(cycleId);
 
     return state.bootPromise;
   }
 
-  /* =====================================================
-     REBOOT
-  ===================================================== */
-
   async function reboot() {
     nextCycle();
 
-    clearScope(
-      AppCore
-    );
-
-    clearBootFailsafeTimer(
-      state
-    );
-
-    state.bootPromise =
-      null;
-
-    state.restorePromise =
-      null;
-
-    state.booted =
-      false;
-    state.booting =
-      false;
-
-    state.servicesReady =
-      false;
-    state.storeReady =
-      false;
-    state.routerReady =
-      false;
-    state.uiReady =
-      false;
-
-    resetBootMarkers();
-
-    markStoreBootState(
-      Store,
-      {
-        ready: false,
-        booted: false,
-      }
-    );
-
-    setBootFlags({
-      booted: false,
-      booting: false,
-    });
+    state.booted = false;
+    state.booting = false;
+    state.uiMounted = false;
+    state.readyEmitted = false;
 
     hideBootLoader();
 
     return boot();
   }
 
-  const api = {
-    boot,
-    reboot,
-  };
+  const api = { boot, reboot };
 
   return api;
 })();

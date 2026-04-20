@@ -3,11 +3,13 @@
    Archivo: src/views/facturas/facturasView.js
 
    FINAL PRO SYSTEM · VIEW REAL · FULL PATCH PORTAL MODAL
+   PATCH 2 · MODAL EVENTS FIX
 
    RESPONSABILIDADES:
    - render principal de facturas
    - modal detail en portal global (body)
    - rerender granular
+   - bindings de vista + bindings de portal modal
    - cero conflicto con shell SPA
    - performance pro
    - cleanup enterprise
@@ -89,6 +91,7 @@ export const FacturasView = (() => {
   let destroyed = false;
   let inflightInit = null;
   let bindingsCleanup = null;
+  let modalBindingsCleanup = null;
   let renderToken = 0;
 
   /* =====================================================
@@ -134,6 +137,14 @@ export const FacturasView = (() => {
     try {
       AppCore?.cleanup?.run?.(SCOPE);
     } catch {}
+  }
+
+  function cleanupModalBindings() {
+    try {
+      modalBindingsCleanup?.();
+    } catch {}
+
+    modalBindingsCleanup = null;
   }
 
   function safeErrorMessage(error = null) {
@@ -239,24 +250,112 @@ export const FacturasView = (() => {
         factura: detail,
 
         sendingFacturaId: safeText(
-          state?.actions
-            ?.sendingFacturaId,
+          state?.actions?.sendingFacturaId,
           ""
         ),
 
         viewingFacturaId: safeText(
-          state?.actions
-            ?.viewingFacturaId,
+          state?.actions?.viewingFacturaId,
           ""
         ),
 
-        downloadingFacturaId:
-          safeText(
-            state?.actions
-              ?.downloadingFacturaId,
-            ""
-          ),
+        downloadingFacturaId: safeText(
+          state?.actions?.downloadingFacturaId,
+          ""
+        ),
       });
+
+    bindModalPortal();
+  }
+
+  function bindModalPortal() {
+    cleanupModalBindings();
+
+    const root = getDetailRoot();
+    if (!root) return;
+
+    const onClick = async (event) => {
+      const closeAction = event.target.closest(
+        '[data-action="close-factura-detail"]'
+      );
+
+      if (closeAction) {
+        event.preventDefault();
+        closeDetail();
+        return;
+      }
+
+      const pdfBtn = event.target.closest(
+        '[data-action="view-factura-pdf"]'
+      );
+
+      if (pdfBtn) {
+        event.preventDefault();
+        const facturaId = safeText(
+          pdfBtn.dataset.facturaId,
+          ""
+        );
+
+        if (!facturaId) return;
+
+        await openFacturaPdf(facturaId);
+        return;
+      }
+
+      const downloadBtn = event.target.closest(
+        '[data-action="download-factura"]'
+      );
+
+      if (downloadBtn) {
+        event.preventDefault();
+        const facturaId = safeText(
+          downloadBtn.dataset.facturaId,
+          ""
+        );
+
+        if (!facturaId) return;
+
+        await downloadFacturaPdf(facturaId);
+        return;
+      }
+
+      const sendBtn = event.target.closest(
+        '[data-action="send-factura"]'
+      );
+
+      if (sendBtn) {
+        event.preventDefault();
+        const facturaId = safeText(
+          sendBtn.dataset.facturaId,
+          ""
+        );
+
+        if (!facturaId) return;
+
+        await sendFacturaToClient(facturaId);
+      }
+    };
+
+    const onKeydown = (event) => {
+      if (!isFacturasDetailOpen(state)) return;
+      if (event.key !== "Escape") return;
+
+      event.preventDefault();
+      closeDetail();
+    };
+
+    root.addEventListener("click", onClick);
+    document.addEventListener("keydown", onKeydown);
+
+    modalBindingsCleanup = () => {
+      try {
+        root.removeEventListener("click", onClick);
+      } catch {}
+
+      try {
+        document.removeEventListener("keydown", onKeydown);
+      } catch {}
+    };
   }
 
   /* =====================================================
@@ -768,6 +867,7 @@ export const FacturasView = (() => {
     initialized = false;
 
     cleanupBindings();
+    cleanupModalBindings();
 
     closeFacturasDetail(state);
 

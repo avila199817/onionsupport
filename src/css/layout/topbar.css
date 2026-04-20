@@ -3,28 +3,18 @@
    PRO SAAS PANEL / FINAL / GOD MODE
    Archivo: src/css/layout/topbar.css
 
-   Objetivo:
-   - topbar premium y ultra limpia
-   - alineada con sidebar + layout + tokens
-   - search global elegante
-   - dropdown de resultados sólido
-   - responsive real
-   - neutral graphite / enterprise shell
-   - compatible con sidebar fixed montado desde JS
-   - compatible con topbar montado desde JS
-   - topbar fija como parte real del layout SPA
-
-   FIXES INCLUIDOS:
-   - jerarquía de capas limpia con sidebar
-   - dropdown del buscador robusto
-   - stacking context controlado
+   REFINADO PRO:
+   - topbar premium más compacta y seria
+   - alineada con sidebar + layout + tokens refinados
+   - search global más sólido
+   - dropdown de resultados mejor integrado
    - responsive consistente
+   - shell SPA más limpio y enterprise
 ========================================================= */
 
 
 /* =========================
    TOPBAR BASE
-   FIJA COMO PARTE DEL LAYOUT
 ========================= */
 .topbar{
   position:fixed;
@@ -45,10 +35,10 @@
   display:flex;
   align-items:center;
   justify-content:space-between;
-  gap:var(--space-lg);
+  gap:var(--space-md);
 
   background:
-    linear-gradient(180deg, rgba(255,255,255,.022), transparent 42%),
+    linear-gradient(180deg, rgba(255,255,255,.018), transparent 40%),
     var(--topbar-bg);
 
   border-block-end:1px solid var(--topbar-border);
@@ -77,10 +67,10 @@
   pointer-events:none;
 
   background:
-    radial-gradient(circle at 0% 0%, var(--topbar-overlay-accent), transparent 22%),
-    linear-gradient(180deg, var(--topbar-overlay-shine), transparent 38%);
+    radial-gradient(circle at 0% 0%, var(--topbar-overlay-accent), transparent 20%),
+    linear-gradient(180deg, var(--topbar-overlay-shine), transparent 34%);
 
-  opacity:.92;
+  opacity:.84;
   z-index:0;
 }
 
@@ -95,13 +85,13 @@
   background:linear-gradient(
     90deg,
     transparent 0%,
-    rgba(255,255,255,.06) 16%,
-    rgba(255,255,255,.02) 50%,
-    rgba(255,255,255,.06) 84%,
+    rgba(255,255,255,.05) 16%,
+    rgba(255,255,255,.018) 50%,
+    rgba(255,255,255,.05) 84%,
     transparent 100%
   );
 
-  opacity:.72;
+  opacity:.64;
   z-index:0;
 }
 
@@ -119,10 +109,7 @@ body.auth-screen .topbar{
   inset-inline-start:0;
 }
 
-body.sidebar-collapsed .topbar{
-  inset-inline-start:var(--app-sidebar-current-width);
-}
-
+body.sidebar-collapsed .topbar,
 body.sidebar-open .topbar{
   inset-inline-start:var(--app-sidebar-current-width);
 }
@@ -134,7 +121,7 @@ body.sidebar-open .topbar{
 .topbar-left{
   display:flex;
   align-items:center;
-  gap:var(--space-md);
+  gap:var(--space-sm);
   min-inline-size:0;
   flex:0 1 auto;
 }
@@ -142,7 +129,7 @@ body.sidebar-open .topbar{
 .topbar-title{
   margin:0;
 
-  font-size:15px;
+  font-size:var(--font-lg);
   line-height:1;
   font-weight:var(--weight-semibold);
   letter-spacing:var(--letter-tight);
@@ -158,8 +145,8 @@ body.sidebar-open .topbar{
    MOBILE TOGGLE
 ========================= */
 .topbar-mobile-toggle{
-  inline-size:40px;
-  block-size:40px;
+  inline-size:36px;
+  block-size:36px;
   flex:0 0 auto;
 
   display:none;
@@ -167,7 +154,7 @@ body.sidebar-open .topbar{
   justify-content:center;
 
   border:1px solid transparent;
-  border-radius:14px;
+  border-radius:var(--radius-md);
 
   background:transparent;
   color:var(--text-muted);
@@ -181,8 +168,8 @@ body.sidebar-open .topbar{
 }
 
 .topbar-mobile-toggle svg{
-  inline-size:20px;
-  block-size:20px;
+  inline-size:18px;
+  block-size:18px;
   pointer-events:none;
 }
 
@@ -208,7 +195,7 @@ body.sidebar-open .topbar{
 .topbar-right{
   display:flex;
   align-items:center;
-  gap:var(--space-md);
+  gap:var(--space-sm);
 
   flex:1 1 auto;
   justify-content:flex-end;
@@ -242,20 +229,20 @@ body.sidebar-open .topbar{
   block-size:var(--topbar-search-height);
 
   padding-block:0;
-  padding-inline:16px 16px;
-  padding-inline-start:40px;
+  padding-inline:14px;
+  padding-inline-start:38px;
 
   border-radius:var(--topbar-search-radius);
   border:1px solid var(--input-border);
 
   background:
-    linear-gradient(180deg, rgba(255,255,255,.022), rgba(255,255,255,.010)),
+    linear-gradient(180deg, rgba(255,255,255,.018), rgba(255,255,255,.008)),
     var(--input-bg);
 
   color:var(--input-text);
   box-shadow:var(--input-shadow);
 
-  font-size:13.5px;
+  font-size:var(--font-md);
   font-weight:var(--weight-medium);
 
   transition:
@@ -271,21 +258,17 @@ body.sidebar-open .topbar{
 
 .topbar-search:hover{
   background:
-    linear-gradient(180deg, rgba(255,255,255,.030), rgba(255,255,255,.012)),
+    linear-gradient(180deg, rgba(255,255,255,.024), rgba(255,255,255,.010)),
     var(--input-bg-hover);
 
   border-color:var(--input-border-hover);
   box-shadow:var(--input-shadow-hover);
 }
 
-
-/* =========================
-   FOCUS (PRO)
-========================= */
 .topbar-search-wrap:focus-within .topbar-search{
   border-color:var(--input-border-focus);
   background:
-    linear-gradient(180deg, rgba(255,255,255,.032), rgba(255,255,255,.014)),
+    linear-gradient(180deg, rgba(255,255,255,.026), rgba(255,255,255,.012)),
     var(--input-bg-focus);
   box-shadow:var(--input-shadow-focus);
 }
@@ -300,8 +283,8 @@ body.sidebar-open .topbar{
   inset-block-start:50%;
   transform:translateY(-50%);
 
-  inline-size:16px;
-  block-size:16px;
+  inline-size:15px;
+  block-size:15px;
 
   color:var(--text-dim);
   pointer-events:none;
@@ -328,7 +311,7 @@ body.sidebar-open .topbar{
   padding:8px;
 
   background:
-    linear-gradient(180deg, rgba(255,255,255,.022), rgba(255,255,255,.008)),
+    linear-gradient(180deg, rgba(255,255,255,.018), rgba(255,255,255,.008)),
     var(--panel-bg);
 
   border:1px solid var(--panel-border);
@@ -365,8 +348,8 @@ body.sidebar-open .topbar{
   inset:0;
   pointer-events:none;
   border-radius:inherit;
-  background:linear-gradient(180deg, rgba(255,255,255,.022), transparent 38%);
-  opacity:.8;
+  background:linear-gradient(180deg, rgba(255,255,255,.018), transparent 34%);
+  opacity:.72;
 }
 
 .topbar-search-results.active,
@@ -403,12 +386,12 @@ body.sidebar-open .topbar{
   gap:10px;
 
   inline-size:100%;
-  padding:10px 12px;
+  padding:9px 10px;
 
   border:1px solid transparent;
   border-radius:var(--radius-md);
 
-  font-size:13px;
+  font-size:var(--font-md);
   color:var(--text);
 
   cursor:pointer;
@@ -424,7 +407,7 @@ body.sidebar-open .topbar{
 .search-result:hover{
   background:var(--surface-hover);
   border-color:var(--border-soft);
-  transform:translateX(2px);
+  transform:translateX(1px);
 }
 
 .search-result.active,
@@ -452,7 +435,7 @@ body.sidebar-open .topbar{
 
 .search-title{
   font-weight:var(--weight-semibold);
-  font-size:13px;
+  font-size:var(--font-md);
   color:var(--text-strong);
 
   overflow:hidden;
@@ -461,7 +444,7 @@ body.sidebar-open .topbar{
 }
 
 .search-subtitle{
-  font-size:12px;
+  font-size:var(--font-sm);
   color:var(--text-dim);
 
   overflow:hidden;
@@ -484,7 +467,7 @@ body.sidebar-open .topbar{
 
   font-size:14px;
   color:var(--text-dim);
-  opacity:.88;
+  opacity:.86;
 
   transition:
     color var(--duration-fast) var(--ease-standard),
@@ -506,7 +489,7 @@ body.sidebar-open .topbar{
 ========================= */
 mark,
 .search-result .highlight{
-  background:color-mix(in srgb, var(--accent), transparent 85%);
+  background:color-mix(in srgb, var(--accent), transparent 86%);
   color:var(--accent);
 
   padding:1px 5px;
@@ -527,13 +510,13 @@ mark,
 }
 
 .search-state-title{
-  font-size:13px;
+  font-size:var(--font-md);
   font-weight:var(--weight-semibold);
   color:var(--text-strong);
 }
 
 .search-state-text{
-  font-size:12px;
+  font-size:var(--font-sm);
   line-height:1.45;
   color:var(--text-dim);
 }
@@ -541,7 +524,7 @@ mark,
 .search-empty{
   padding:14px 12px;
 
-  font-size:13px;
+  font-size:var(--font-md);
   line-height:1.4;
   color:var(--text-dim);
   text-align:center;
@@ -557,7 +540,7 @@ mark,
 }
 
 .topbar-search-results::-webkit-scrollbar{
-  width:6px;
+  inline-size:6px;
 }
 
 .topbar-search-results::-webkit-scrollbar-track{
@@ -579,20 +562,20 @@ mark,
 ========================= */
 [data-theme="light"] .topbar{
   box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.42),
-    0 10px 22px rgba(15,23,42,.05);
+    inset 0 1px 0 rgba(255,255,255,.36),
+    0 8px 18px rgba(15,23,42,.045);
 }
 
 [data-theme="light"] .topbar::before{
   background:
-    radial-gradient(circle at 0% 0%, rgba(113,113,122,.04), transparent 20%),
-    linear-gradient(180deg, rgba(255,255,255,.34), transparent 38%);
+    radial-gradient(circle at 0% 0%, rgba(23,32,51,.035), transparent 18%),
+    linear-gradient(180deg, rgba(255,255,255,.26), transparent 34%);
 }
 
 [data-theme="light"] .topbar-search-results{
   box-shadow:
-    0 16px 40px rgba(15,23,42,.10),
-    0 4px 12px rgba(15,23,42,.06);
+    0 14px 34px rgba(15,23,42,.08),
+    0 4px 10px rgba(15,23,42,.05);
 }
 
 
@@ -603,7 +586,7 @@ mark,
   .topbar{
     inset-inline-start:0;
     inset-inline-end:0;
-    gap:var(--space-md);
+    gap:var(--space-sm);
     padding-inline-end:calc(var(--space-md) + var(--topbar-safe-right));
     padding-inline-start:calc(var(--space-md) + var(--topbar-safe-left));
   }
@@ -613,7 +596,7 @@ mark,
   }
 
   .topbar-title{
-    max-inline-size:180px;
+    max-inline-size:160px;
   }
 
   .topbar-search-wrap{
@@ -639,13 +622,13 @@ mark,
   }
 
   .topbar-search{
-    block-size:42px;
-    font-size:13px;
+    block-size:40px;
+    font-size:var(--font-md);
   }
 
   .topbar-search-results{
     inset-block-start:calc(100% + 8px);
-    max-block-size:280px;
+    max-block-size:260px;
   }
 }
 
@@ -660,15 +643,15 @@ mark,
   }
 
   .topbar-left{
-    gap:var(--space-sm);
+    gap:var(--space-xs);
   }
 
   .topbar-right{
-    gap:var(--space-sm);
+    gap:var(--space-xs);
   }
 
   .topbar-search{
-    padding-inline-start:38px;
+    padding-inline-start:36px;
   }
 
   .topbar-search-icon{

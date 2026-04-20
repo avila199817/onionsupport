@@ -2,7 +2,15 @@
    Onion SPA - Facturas View
    Archivo: src/views/facturas/facturasView.js
 
-   FINAL PRO SYSTEM · VIEW REAL · PATCH MODAL FIXED
+   FINAL PRO SYSTEM · VIEW REAL · FULL PATCH PORTAL MODAL
+
+   RESPONSABILIDADES:
+   - render principal de facturas
+   - modal detail en portal global (body)
+   - rerender granular
+   - cero conflicto con shell SPA
+   - performance pro
+   - cleanup enterprise
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -55,7 +63,6 @@ import {
 
 import {
   openFacturaAction,
-  refreshFacturaDetailAction,
   openFacturaPdfAction,
   downloadFacturaPdfAction,
   sendFacturaToClientAction,
@@ -74,6 +81,8 @@ export const FacturasView = (() => {
   "use strict";
 
   const SCOPE = "view:facturas";
+  const DETAIL_MODAL_ID = "facturas-detail-root";
+
   const state = createFacturasState();
 
   let initialized = false;
@@ -82,15 +91,13 @@ export const FacturasView = (() => {
   let bindingsCleanup = null;
   let renderToken = 0;
 
+  /* =====================================================
+     CORE HELPERS
+  ===================================================== */
+
   function safeLog(...args) {
     try {
       AppCore?.utils?.log?.("[FacturasView]", ...args);
-    } catch {}
-  }
-
-  function safeWarn(...args) {
-    try {
-      AppCore?.utils?.warn?.("[FacturasView]", ...args);
     } catch {}
   }
 
@@ -156,8 +163,15 @@ export const FacturasView = (() => {
   function getTemplateState() {
     return {
       ...getFacturasTemplateState(state),
-      error: safeText(state?.view?.error, ""),
-      lastSyncAt: getFacturasLastSyncAt(state),
+
+      error: safeText(
+        state?.view?.error,
+        ""
+      ),
+
+      lastSyncAt:
+        getFacturasLastSyncAt(state),
+
       selectedFacturaId: safeText(
         state?.view?.selectedFacturaId,
         ""
@@ -173,18 +187,100 @@ export const FacturasView = (() => {
   function closeDetail() {
     closeFacturasDetail(state);
     state.view.selectedFacturaId = "";
+    renderDetailPortal();
   }
+
+  /* =====================================================
+     PORTAL MODAL
+  ===================================================== */
+
+  function getDetailRoot() {
+    return document.getElementById(
+      DETAIL_MODAL_ID
+    );
+  }
+
+  function ensureDetailRoot() {
+    let root = getDetailRoot();
+
+    if (root) return root;
+
+    root = document.createElement("div");
+    root.id = DETAIL_MODAL_ID;
+
+    document.body.appendChild(root);
+
+    return root;
+  }
+
+  function destroyDetailRoot() {
+    try {
+      getDetailRoot()?.remove?.();
+    } catch {}
+  }
+
+  function renderDetailPortal() {
+    const root = ensureDetailRoot();
+
+    const detail =
+      getFacturasDetailData(state);
+
+    const detailOpen =
+      isFacturasDetailOpen(state);
+
+    root.innerHTML =
+      renderFacturasDetailModal({
+        detailOpen,
+
+        detailLoading: Boolean(
+          state?.detail?.loading
+        ),
+
+        factura: detail,
+
+        sendingFacturaId: safeText(
+          state?.actions
+            ?.sendingFacturaId,
+          ""
+        ),
+
+        viewingFacturaId: safeText(
+          state?.actions
+            ?.viewingFacturaId,
+          ""
+        ),
+
+        downloadingFacturaId:
+          safeText(
+            state?.actions
+              ?.downloadingFacturaId,
+            ""
+          ),
+      });
+  }
+
+  /* =====================================================
+     TEMPLATE
+  ===================================================== */
 
   function renderBody({
     items = [],
     templateState = {},
   } = {}) {
-    if (templateState.loading && !items.length) {
+    if (
+      templateState.loading &&
+      !items.length
+    ) {
       return renderLoadingState();
     }
 
-    if (templateState.error && !items.length) {
-      return renderErrorState(templateState.error);
+    if (
+      templateState.error &&
+      !items.length
+    ) {
+      return renderErrorState(
+        templateState.error
+      );
     }
 
     return renderCards({
@@ -193,25 +289,24 @@ export const FacturasView = (() => {
     });
   }
 
-  /* =====================================================
-     MODAL FIX REAL
-  ===================================================== */
-
   function buildHtml() {
     const items = getItems();
-    const templateState = getTemplateState();
-
-    const detail = getFacturasDetailData(state);
-    const detailOpen = isFacturasDetailOpen(state);
+    const templateState =
+      getTemplateState();
 
     return `
       <section
         class="panel-content dashboard ready"
-        data-facturas-scope="${escapeHtml(SCOPE)}"
+        data-facturas-scope="${escapeHtml(
+          SCOPE
+        )}"
       >
         <div
           class="content-wrapper"
-          style="display:grid; gap:var(--space-lg);"
+          style="
+            display:grid;
+            gap:var(--space-lg);
+          "
         >
           ${renderHeader({
             items,
@@ -224,39 +319,30 @@ export const FacturasView = (() => {
           })}
         </div>
       </section>
-
-      ${renderFacturasDetailModal({
-        detailOpen,
-        detailLoading: Boolean(
-          state?.detail?.loading
-        ),
-        factura: detail,
-        sendingFacturaId: safeText(
-          state?.actions?.sendingFacturaId,
-          ""
-        ),
-        viewingFacturaId: safeText(
-          state?.actions?.viewingFacturaId,
-          ""
-        ),
-        downloadingFacturaId: safeText(
-          state?.actions?.downloadingFacturaId,
-          ""
-        ),
-      })}
     `;
   }
 
+  /* =====================================================
+     RENDER
+  ===================================================== */
+
   function render() {
-    const container = getContainer();
+    const container =
+      getContainer();
 
     if (!container) return null;
 
     ensureBaseState();
 
-    container.innerHTML = buildHtml();
+    container.innerHTML =
+      buildHtml();
 
-    setFacturasHydrated(state, true);
+    renderDetailPortal();
+
+    setFacturasHydrated(
+      state,
+      true
+    );
 
     return container;
   }
@@ -278,16 +364,22 @@ export const FacturasView = (() => {
       return null;
     }
 
-    return rerender();
+    renderDetailPortal();
+
+    return true;
   }
+
+  /* =====================================================
+     DATA LOADERS
+  ===================================================== */
 
   async function loadFacturas({
     force = false,
     silent = false,
     asRefresh = false,
   } = {}) {
-    const itemsBefore = getItems();
-    const hasData = itemsBefore.length > 0;
+    const hasData =
+      getItems().length > 0;
 
     clearFacturasError(state);
 
@@ -311,16 +403,36 @@ export const FacturasView = (() => {
         force,
       });
 
-      setFacturasLoading(state, false);
-      setFacturasRefreshing(state, false);
-      setFacturasLoaded(state, true);
+      setFacturasLoading(
+        state,
+        false
+      );
+
+      setFacturasRefreshing(
+        state,
+        false
+      );
+
+      setFacturasLoaded(
+        state,
+        true
+      );
+
       setFacturasLastSyncAt(
         state,
         new Date().toISOString()
       );
     } catch (error) {
-      setFacturasLoading(state, false);
-      setFacturasRefreshing(state, false);
+      setFacturasLoading(
+        state,
+        false
+      );
+
+      setFacturasRefreshing(
+        state,
+        false
+      );
+
       state.view.error =
         safeErrorMessage(error);
 
@@ -335,13 +447,22 @@ export const FacturasView = (() => {
     render();
   }
 
-  async function loadFacturaDetail(id = "") {
+  async function loadFacturaDetail(
+    id = ""
+  ) {
     if (!id) return null;
 
-    setFacturasDetailOpen(state, true);
-    setFacturasDetailLoading(state, true);
+    setFacturasDetailOpen(
+      state,
+      true
+    );
 
-    render();
+    setFacturasDetailLoading(
+      state,
+      true
+    );
+
+    renderDetailOnly();
 
     try {
       const detail =
@@ -352,18 +473,25 @@ export const FacturasView = (() => {
           force: true,
         });
 
-      setFacturasDetailLoading(state, false);
+      setFacturasDetailLoading(
+        state,
+        false
+      );
 
       if (detail) {
         setDetail(detail);
       }
 
-      render();
+      renderDetailOnly();
 
       return detail;
     } catch {
-      setFacturasDetailLoading(state, false);
-      render();
+      setFacturasDetailLoading(
+        state,
+        false
+      );
+
+      renderDetailOnly();
 
       showToast(
         "No se pudo cargar detalle.",
@@ -374,8 +502,15 @@ export const FacturasView = (() => {
     }
   }
 
-  async function openFactura(id = "") {
-    const facturaId = safeText(id, "");
+  /* =====================================================
+     ACTIONS
+  ===================================================== */
+
+  async function openFactura(
+    id = ""
+  ) {
+    const facturaId =
+      safeText(id, "");
 
     if (!facturaId) return null;
 
@@ -384,10 +519,17 @@ export const FacturasView = (() => {
       facturaId
     );
 
-    setFacturasDetailOpen(state, true);
-    setFacturasDetailLoading(state, true);
+    setFacturasDetailOpen(
+      state,
+      true
+    );
 
-    render();
+    setFacturasDetailLoading(
+      state,
+      true
+    );
+
+    renderDetailOnly();
 
     try {
       const detail =
@@ -404,12 +546,15 @@ export const FacturasView = (() => {
 
       setDetail(detail);
 
-      safeEmit("facturas:open:success", {
-        facturaId,
-        detail,
-      });
+      safeEmit(
+        "facturas:open:success",
+        {
+          facturaId,
+          detail,
+        }
+      );
 
-      render();
+      renderDetailOnly();
 
       return detail;
     } catch {
@@ -430,13 +575,16 @@ export const FacturasView = (() => {
         false
       );
 
-      render();
+      renderDetailOnly();
     }
   }
 
-  async function openFacturaPdf(id = "") {
+  async function openFacturaPdf(
+    id = ""
+  ) {
     return openFacturaPdfAction({
       facturaId: id,
+
       onStart(value) {
         setFacturasViewingFacturaId(
           state,
@@ -444,6 +592,7 @@ export const FacturasView = (() => {
         );
         renderDetailOnly();
       },
+
       onEnd() {
         setFacturasViewingFacturaId(
           state,
@@ -454,9 +603,12 @@ export const FacturasView = (() => {
     });
   }
 
-  async function downloadFacturaPdf(id = "") {
+  async function downloadFacturaPdf(
+    id = ""
+  ) {
     return downloadFacturaPdfAction({
       facturaId: id,
+
       onStart(value) {
         setFacturasDownloadingFacturaId(
           state,
@@ -464,6 +616,7 @@ export const FacturasView = (() => {
         );
         renderDetailOnly();
       },
+
       onEnd() {
         setFacturasDownloadingFacturaId(
           state,
@@ -474,10 +627,13 @@ export const FacturasView = (() => {
     });
   }
 
-  async function sendFacturaToClient(id = "") {
+  async function sendFacturaToClient(
+    id = ""
+  ) {
     return sendFacturaToClientAction({
       facturaId: id,
-      detail: getFacturasDetailData(state),
+      detail:
+        getFacturasDetailData(state),
 
       onStart(value) {
         setFacturasSendingFacturaId(
@@ -500,74 +656,105 @@ export const FacturasView = (() => {
   function exportFacturasCsv() {
     return exportFacturasCsvAction({
       items: getItems(),
-      filenamePrefix: "facturas",
+      filenamePrefix:
+        "facturas",
     });
   }
+
+  /* =====================================================
+     BINDINGS
+  ===================================================== */
 
   function bind() {
     cleanupBindings();
 
-    const cleanup = bindFacturasView({
-      scopeName: SCOPE,
-      getContainer,
-      getState: () => ({
-        loading: isFacturasLoading(state),
-        refreshing:
-          isFacturasRefreshing(state),
-        detailOpen:
-          isFacturasDetailOpen(state),
-        bootstrapped:
-          isFacturasBootstrapped(state),
-      }),
+    const cleanup =
+      bindFacturasView({
+        scopeName: SCOPE,
 
-      render: rerender,
-      loadFacturas,
-      openFactura,
-      openFacturaPdf,
-      downloadFacturaPdf,
-      sendFacturaToClient,
-      closeDetail,
-      exportFacturasCsv,
+        getContainer,
 
-      onBootstrap() {
-        setFacturasBootstrapped(
-          state,
-          true
-        );
+        getState: () => ({
+          loading:
+            isFacturasLoading(state),
 
-        loadFacturas();
-      },
-    });
+          refreshing:
+            isFacturasRefreshing(
+              state
+            ),
+
+          detailOpen:
+            isFacturasDetailOpen(
+              state
+            ),
+
+          bootstrapped:
+            isFacturasBootstrapped(
+              state
+            ),
+        }),
+
+        render: rerender,
+
+        loadFacturas,
+        openFactura,
+        openFacturaPdf,
+        downloadFacturaPdf,
+        sendFacturaToClient,
+        closeDetail,
+        exportFacturasCsv,
+
+        onBootstrap() {
+          setFacturasBootstrapped(
+            state,
+            true
+          );
+
+          loadFacturas();
+        },
+      });
 
     bindingsCleanup =
-      typeof cleanup === "function"
+      typeof cleanup ===
+      "function"
         ? cleanup
         : null;
   }
 
+  /* =====================================================
+     LIFECYCLE
+  ===================================================== */
+
   async function init() {
-    if (initialized && inflightInit) {
+    if (
+      initialized &&
+      inflightInit
+    ) {
       return inflightInit;
     }
 
     destroyed = false;
     initialized = true;
 
-    inflightInit = (async () => {
-      safeLog("init");
+    inflightInit =
+      (async () => {
+        safeLog("init");
 
-      const token = nextRenderToken();
+        const token =
+          nextRenderToken();
 
-      render();
+        render();
 
-      await loadFacturas();
+        await loadFacturas();
 
-      if (isActiveToken(token)) {
-        bind();
-      }
+        if (
+          isActiveToken(token)
+        ) {
+          bind();
+        }
 
-      return api;
-    })();
+        return api;
+      })();
 
     try {
       return await inflightInit;
@@ -582,18 +769,27 @@ export const FacturasView = (() => {
 
     cleanupBindings();
 
-    closeDetail();
+    closeFacturasDetail(state);
 
-    clearFacturasActionIds(state);
+    clearFacturasActionIds(
+      state
+    );
+
+    destroyDetailRoot();
 
     safeLog("destroy");
   }
+
+  /* =====================================================
+     API
+  ===================================================== */
 
   const api = {
     init,
     mount: init,
     unmount: destroy,
     destroy,
+
     render: rerender,
 
     loadFacturas,

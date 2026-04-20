@@ -3,12 +3,13 @@
    PRO SAAS PANEL / HIGH LEVEL / FINAL PRO SYSTEM
    Archivo: src/css/core/layout.css
 
-   REFINADO 10/10:
+   REFINADO 10/10 FINAL:
    - shell compacto, robusto y operativo
-   - scroll principal real en #view-container
+   - scroll principal real en .main-content
    - offsets sólidos para sidebar / topbar / table-head
    - sin clipping agresivo del contenido
    - sin scroll fantasma ligado al sidebar
+   - sin compresión rara del hero / tablas / vistas
    - responsive consistente
    - auth mode limpio
    - superficies integradas con el sistema de tokens
@@ -106,8 +107,6 @@ a{
     background var(--duration-slow) var(--ease-standard),
     color var(--duration-normal) var(--ease-standard);
 
-  /* IMPORTANTE:
-     aquí NO usamos clip porque mataba el scroll del contenido */
   overflow:hidden;
 }
 
@@ -186,8 +185,35 @@ a{
     inline-size var(--duration-slow) var(--ease-emphasis),
     max-inline-size var(--duration-slow) var(--ease-emphasis);
 
-  /* clave para que el scroll quede dentro del view-root */
-  overflow:hidden;
+  overflow-y:auto;
+  overflow-x:hidden;
+
+  overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;
+
+  scrollbar-width:thin;
+  scrollbar-color:var(--scrollbar-thumb) transparent;
+}
+
+.main-content::-webkit-scrollbar{
+  width:var(--scrollbar-size);
+  height:var(--scrollbar-size);
+}
+
+.main-content::-webkit-scrollbar-track{
+  background:transparent;
+}
+
+.main-content::-webkit-scrollbar-thumb{
+  background:var(--scrollbar-thumb);
+  border-radius:999px;
+  border:2px solid transparent;
+  background-clip:padding-box;
+}
+
+.main-content::-webkit-scrollbar-thumb:hover{
+  background:var(--scrollbar-thumb-hover);
+  background-clip:padding-box;
 }
 
 body.sidebar-collapsed{
@@ -216,7 +242,7 @@ body.sidebar-collapsed{
   padding-inline-start:var(--app-safe-left);
 
   isolation:isolate;
-  overflow:hidden;
+  overflow:visible;
 }
 
 .main-content:has(.table-head:not(:has(#tablehead-container:empty))) #app-content{
@@ -323,46 +349,14 @@ body.sidebar-collapsed{
 #view-container{
   position:relative;
 
-  display:flex;
-  flex-direction:column;
-  flex:1 1 auto;
+  display:block;
 
   inline-size:100%;
   min-inline-size:0;
   min-block-size:0;
 
   isolation:isolate;
-
-  /* SCROLL REAL DEL PANEL */
-  overflow-y:auto;
-  overflow-x:hidden;
-
-  overscroll-behavior:contain;
-  -webkit-overflow-scrolling:touch;
-
-  scrollbar-width:thin;
-  scrollbar-color:var(--scrollbar-thumb) transparent;
-}
-
-#view-container::-webkit-scrollbar{
-  width:var(--scrollbar-size);
-  height:var(--scrollbar-size);
-}
-
-#view-container::-webkit-scrollbar-track{
-  background:transparent;
-}
-
-#view-container::-webkit-scrollbar-thumb{
-  background:var(--scrollbar-thumb);
-  border-radius:999px;
-  border:2px solid transparent;
-  background-clip:padding-box;
-}
-
-#view-container::-webkit-scrollbar-thumb:hover{
-  background:var(--scrollbar-thumb-hover);
-  background-clip:padding-box;
+  overflow:visible;
 }
 
 
@@ -447,8 +441,6 @@ body.sidebar-collapsed{
   overflow:hidden;
 }
 
-/* importante:
-   el scroll principal vive arriba, en #view-container */
 .panel-content.dashboard{
   overflow:visible;
 }
@@ -779,6 +771,7 @@ body.auth-screen .main-content{
   max-inline-size:100%;
   min-block-size:100dvh;
   block-size:auto;
+  overflow:visible;
 }
 
 body.auth-screen #app-content{

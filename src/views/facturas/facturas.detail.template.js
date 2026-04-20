@@ -2,12 +2,12 @@
    Onion SPA - Facturas Detail Template
    Archivo: src/views/facturas/facturas.detail.template.js
 
-   FULLSCREEN PRO EDITION 10/10
+   MODAL CENTRADO PRO EDITION
    FINAL PRO SYSTEM · DETAIL MODAL · COMPAT MODE
 
    RESPONSABILIDADES:
-   - renderizar modal premium fullscreen de detalle de factura
-   - ocupar viewport útil con scroll interno limpio
+   - renderizar modal premium centrado de detalle de factura
+   - ocupar viewport útil con caja modal centrada y scroll interno limpio
    - mantener compatibilidad con facturasView.js
    - soportar estado loading / sending / acciones del header
    - exponer exports legacy para imports antiguos
@@ -950,8 +950,9 @@ export function renderFacturasDetailContent({
       style="
         display:flex;
         flex-direction:column;
-        height:100%;
         min-height:0;
+        height:100%;
+        max-height:100%;
       "
     >
       <header
@@ -1139,8 +1140,9 @@ export function renderFacturasDetailModal({
         position:fixed;
         inset:0;
         z-index:9999;
-        padding:0;
-        display:block;
+        padding:24px;
+        display:grid;
+        place-items:center;
         background:rgba(0,0,0,.66);
         backdrop-filter:blur(10px);
       "
@@ -1152,14 +1154,16 @@ export function renderFacturasDetailModal({
         aria-modal="true"
         aria-label="Detalle factura"
         style="
-          width:100vw;
-          max-width:100vw;
-          height:100dvh;
-          max-height:100dvh;
+          position:relative;
+          width:min(1120px, 100%);
+          max-width:100%;
+          max-height:92vh;
           overflow:hidden;
-          border-radius:0;
-          border:0;
-          background:var(--modal-bg, var(--surface-1, #141414));
+          border-radius:28px;
+          border:1px solid var(--border-soft, #2b2b2b);
+          background:
+            radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 34%),
+            linear-gradient(180deg, var(--surface-2, #151515), var(--surface-1, #121212));
           box-shadow:0 40px 100px rgba(0,0,0,.45);
           display:flex;
           flex-direction:column;
@@ -1170,8 +1174,8 @@ export function renderFacturasDetailModal({
           style="
             display:flex;
             flex-direction:column;
-            height:100%;
             min-height:0;
+            height:min(92vh, 100%);
           "
         >
           ${renderFacturasDetailContent({
@@ -1186,14 +1190,30 @@ export function renderFacturasDetailModal({
 
       <style>
         .facturas-detail-modal {
-          min-height: 100dvh;
+          scrollbar-width: thin;
         }
 
-        @supports not (height: 100dvh) {
+        @media (max-width: 900px) {
+          .facturas-detail-overlay {
+            padding: 14px !important;
+          }
+
           .facturas-detail-modal {
-            height: 100vh !important;
-            max-height: 100vh !important;
-            min-height: 100vh !important;
+            width: 100% !important;
+            max-height: 94vh !important;
+            border-radius: 22px !important;
+          }
+        }
+
+        @media (max-width: 640px) {
+          .facturas-detail-overlay {
+            padding: 10px !important;
+          }
+
+          .facturas-detail-modal {
+            width: 100% !important;
+            max-height: 96vh !important;
+            border-radius: 18px !important;
           }
         }
       </style>

@@ -2,23 +2,13 @@
    Onion SPA - App Shell
    Archivo: src/app/shell.js
 
-   RESPONSABILIDADES:
-   - resolver elementos principales del shell SPA
-   - controlar visibilidad global del shell
-   - detectar rutas auth-like
-   - aplicar política visual post-render
-   - evitar flicker entre rutas
-   - tolerar AppCore parcial / SSR
-   - sincronizar estado shell en navegación
-
-   NIVEL DIOS 10/10:
-   - idempotencia total
-   - DOM safe extremo
-   - route detection robusta
-   - cero repaints innecesarios
+   HARDENED VERSION
+   FIX:
+   - cero referencias libres
+   - snapshot seguro
+   - eventos robustos
+   - shell visibility estable
    - loader anti-stuck
-   - compatibilidad legacy/full SPA
-   - snapshots enterprise
 ========================================================= */
 
 import {
@@ -37,85 +27,49 @@ function isBrowser() {
   );
 }
 
-function safeEmit(
-  AppCore,
-  eventName,
-  payload = {}
-) {
+function safeEmit(AppCore, name, payload = {}) {
   try {
-    AppCore?.events?.emit?.(
-      eventName,
-      payload
-    );
+    AppCore?.events?.emit?.(name, payload);
   } catch {}
 }
 
-function safeText(
-  value,
-  fallback = ""
-) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
+function safeText(value, fallback = "") {
+  if (value === null || value === undefined) {
     return fallback;
   }
 
-  const text =
-    String(value).trim();
-
+  const text = String(value).trim();
   return text || fallback;
 }
 
-function normalizePath(
-  AppCore,
-  path = "/"
-) {
+function normalizePath(AppCore, path = "/") {
   try {
-    if (
-      typeof AppCore?.utils
-        ?.normalizePath ===
-      "function"
-    ) {
-      return AppCore.utils.normalizePath(
-        path
-      );
+    if (typeof AppCore?.utils?.normalizePath === "function") {
+      return AppCore.utils.normalizePath(path);
     }
   } catch {}
 
-  let raw =
-    safeText(path, "/");
+  let raw = safeText(path, "/");
 
   if (!raw.startsWith("/")) {
     raw = `/${raw}`;
   }
 
-  raw = raw
-    .replace(/\/{2,}/g, "/")
-    .replace(/\/+$/g, "");
+  raw = raw.replace(/\/{2,}/g, "/").replace(/\/+$/g, "");
 
   return raw || "/";
 }
 
-function setDataset(
-  el,
-  key,
-  value
-) {
+function setDataset(el, key, value) {
   if (!el) return;
 
   try {
-    if (
-      value === null ||
-      value === undefined ||
-      value === ""
-    ) {
+    if (value === null || value === undefined || value === "") {
       delete el.dataset[key];
       return;
     }
 
-    el.dataset[key] =
-      String(value);
+    el.dataset[key] = String(value);
   } catch {}
 }
 
@@ -123,9 +77,7 @@ function setDataset(
    ELEMENTS
 ========================================================= */
 
-export function getShellElements(
-  AppCore
-) {
+export function getShellElements(AppCore) {
   if (!isBrowser()) {
     return {
       sidebar: null,
@@ -140,149 +92,59 @@ export function getShellElements(
   return {
     sidebar:
       AppCore?.dom?.sidebar ||
-      document.querySelector(
-        ".sidebar"
-      ) ||
+      document.querySelector(".sidebar") ||
       null,
 
     topbar:
       AppCore?.dom?.topbar ||
-      document.querySelector(
-        ".topbar"
-      ) ||
+      document.querySelector(".topbar") ||
       null,
 
     tablehead:
-      document.getElementById(
-        "table-head"
-      ) ||
-      document.querySelector(
-        ".table-head"
-      ) ||
+      document.getElementById("table-head") ||
+      document.querySelector(".table-head") ||
       null,
 
     tableheadContainer:
-      AppCore?.dom
-        ?.tableheadContainer ||
-      document.getElementById(
-        "tablehead-container"
-      ) ||
+      AppCore?.dom?.tableheadContainer ||
+      document.getElementById("tablehead-container") ||
       null,
 
-    body:
-      AppCore?.dom?.body ||
-      document.body ||
-      null,
-
-    html:
-      AppCore?.dom?.html ||
-      document.documentElement ||
-      null,
+    body: document.body || null,
+    html: document.documentElement || null,
   };
 }
 
-export function getViewContainer(
-  AppCore
-) {
-  if (!isBrowser()) {
-    return null;
-  }
+export function getViewContainer(AppCore) {
+  if (!isBrowser()) return null;
 
   return (
-    AppCore?.dom
-      ?.viewContainer ||
-    document.getElementById(
-      "view-container"
-    ) ||
-    document.querySelector(
-      "#view-container"
-    ) ||
+    AppCore?.dom?.viewContainer ||
+    document.getElementById("view-container") ||
     null
   );
 }
 
 /* =========================================================
-   VISIBILITY HELPERS
+   HELPERS
 ========================================================= */
 
-function applyHidden(
-  element,
-  hidden = false
-) {
-  if (!element) return;
+function applyHidden(el, hidden = false) {
+  if (!el) return;
 
-  const next =
-    Boolean(hidden);
-
-  if (element.hidden !== next) {
-    element.hidden = next;
-  }
-
-  if (
-    element.getAttribute(
-      "aria-hidden"
-    ) !==
-    String(next)
-  ) {
-    element.setAttribute(
-      "aria-hidden",
-      next
-        ? "true"
-        : "false"
-    );
-  }
+  el.hidden = Boolean(hidden);
+  el.setAttribute(
+    "aria-hidden",
+    hidden ? "true" : "false"
+  );
 }
 
-function toggleClass(
-  element,
-  className,
-  force
-) {
-  if (!element) return;
+function toggleClass(el, name, force) {
+  if (!el) return;
 
   try {
-    element.classList.toggle(
-      className,
-      force
-    );
+    el.classList.toggle(name, force);
   } catch {}
-}
-
-function applyBodyClasses(
-  body,
-  hidden = false
-) {
-  if (!body) return;
-
-  const hiddenClasses = [
-    "route-shell-hidden",
-    "auth-screen",
-    "route-auth",
-    "login-no-scroll",
-  ];
-
-  hiddenClasses.forEach(
-    (name) =>
-      toggleClass(
-        body,
-        name,
-        hidden
-      )
-  );
-
-  toggleClass(
-    body,
-    "route-shell-visible",
-    !hidden
-  );
-
-  setDataset(
-    body,
-    "shell",
-    hidden
-      ? "hidden"
-      : "visible"
-  );
 }
 
 /* =========================================================
@@ -293,8 +155,7 @@ export function setShellVisibility(
   AppCore,
   visible = true
 ) {
-  const hidden =
-    !Boolean(visible);
+  const hidden = !Boolean(visible);
 
   const {
     sidebar,
@@ -303,117 +164,48 @@ export function setShellVisibility(
     tableheadContainer,
     body,
     html,
-  } = getShellElements(
-    AppCore
-  );
+  } = getShellElements(AppCore);
 
-  const previous =
-    Boolean(
-      AppCore?.state
-        ?.shellVisible
-    );
+  applyHidden(sidebar, hidden);
+  applyHidden(topbar, hidden);
+  applyHidden(tablehead, hidden);
+  applyHidden(tableheadContainer, hidden);
 
-  const next =
-    !hidden;
+  toggleClass(body, "route-shell-hidden", hidden);
+  toggleClass(body, "route-shell-visible", !hidden);
 
-  if (previous === next) {
-    return next;
-  }
-
-  applyHidden(
-    sidebar,
-    hidden
-  );
-
-  applyHidden(
-    topbar,
-    hidden
-  );
-
-  applyHidden(
-    tablehead,
-    hidden
-  );
-
-  applyHidden(
-    tableheadContainer,
-    hidden
-  );
-
-  applyBodyClasses(
-    body,
-    hidden
-  );
-
-  setDataset(
-    html,
-    "shell",
-    hidden
-      ? "hidden"
-      : "visible"
-  );
+  setDataset(body, "shell", hidden ? "hidden" : "visible");
+  setDataset(html, "shell", hidden ? "hidden" : "visible");
 
   try {
-    if (
-      AppCore?.state &&
-      typeof AppCore.state ===
-        "object"
-    ) {
-      AppCore.state.shellVisible =
-        next;
-    }
+    AppCore.state.shellVisible = !hidden;
   } catch {}
 
-  safeEmit(
-    AppCore,
-    "router:shell:change",
-    {
-      hidden,
-      visible: next,
-    }
-  );
+  const shellSnapshot = getShellSnapshot(AppCore);
 
-  return next;
+  safeEmit(AppCore, "router:shell:change", {
+    hidden,
+    visible: !hidden,
+    snapshot: shellSnapshot,
+  });
+
+  return !hidden;
 }
 
 /* =========================================================
-   ROUTE HELPERS
+   ROUTES
 ========================================================= */
 
-export function isLoginPath(
-  AppCore,
-  path = ""
-) {
-  const normalized =
-    normalizePath(
-      AppCore,
-      path
-    );
-
-  return (
-    normalized === "/login" ||
-    normalized.startsWith(
-      "/login?"
-    )
-  );
+export function isLoginPath(AppCore, path = "") {
+  const p = normalizePath(AppCore, path);
+  return p === "/login" || p.startsWith("/login?");
 }
 
-export function isResetPasswordPath(
-  AppCore,
-  path = ""
-) {
-  const normalized =
-    normalizePath(
-      AppCore,
-      path
-    );
-
+export function isResetPasswordPath(AppCore, path = "") {
+  const p = normalizePath(AppCore, path);
   return (
-    normalized ===
-      "/reset-password" ||
-    normalized.startsWith(
-      "/reset-password?"
-    )
+    p === "/reset-password" ||
+    p.startsWith("/reset-password?")
   );
 }
 
@@ -421,61 +213,30 @@ export function isResetPasswordConfirmPath(
   AppCore,
   path = ""
 ) {
-  const normalized =
-    normalizePath(
-      AppCore,
-      path
-    );
+  const p = normalizePath(AppCore, path);
 
   return (
-    normalized ===
-      "/reset-password/confirm" ||
-    normalized.startsWith(
-      "/reset-password/confirm?"
-    )
+    p === "/reset-password/confirm" ||
+    p.startsWith("/reset-password/confirm?")
   );
 }
 
-export function isAuthLikeRoute(
-  AppCore,
-  Router
-) {
-  const canonical =
-    normalizePath(
-      AppCore,
-      getCurrentCanonicalPath(
-        AppCore,
-        Router
-      )
-    );
+export function isAuthLikeRoute(AppCore, Router) {
+  const canonical = normalizePath(
+    AppCore,
+    getCurrentCanonicalPath(AppCore, Router)
+  );
 
-  const publicPath =
-    normalizePath(
-      AppCore,
-      getCurrentPublicPath(
-        AppCore
-      )
-    );
+  const publicPath = normalizePath(
+    AppCore,
+    getCurrentPublicPath(AppCore)
+  );
 
-  const candidates = [
-    canonical,
-    publicPath,
-  ];
-
-  return candidates.some(
+  return [canonical, publicPath].some(
     (path) =>
-      isLoginPath(
-        AppCore,
-        path
-      ) ||
-      isResetPasswordPath(
-        AppCore,
-        path
-      ) ||
-      isResetPasswordConfirmPath(
-        AppCore,
-        path
-      )
+      isLoginPath(AppCore, path) ||
+      isResetPasswordPath(AppCore, path) ||
+      isResetPasswordConfirmPath(AppCore, path)
   );
 }
 
@@ -483,31 +244,18 @@ export function updateShellVisibilityByRoute(
   AppCore,
   Router
 ) {
-  const authLike =
-    isAuthLikeRoute(
-      AppCore,
-      Router
-    );
+  const authLike = isAuthLikeRoute(AppCore, Router);
 
-  return setShellVisibility(
-    AppCore,
-    !authLike
-  );
+  return setShellVisibility(AppCore, !authLike);
 }
 
 /* =========================================================
-   LOADER POLICY
+   LOADER
 ========================================================= */
 
-function hideLoaderSafe(
-  AppCore,
-  hideLoader
-) {
+function hideLoaderSafe(AppCore, hideLoader) {
   try {
-    if (
-      typeof hideLoader ===
-      "function"
-    ) {
+    if (typeof hideLoader === "function") {
       hideLoader(AppCore);
       return true;
     }
@@ -515,29 +263,19 @@ function hideLoaderSafe(
 
   const loader =
     AppCore?.dom?.loader ||
-    document.getElementById(
-      "app-loader"
-    );
+    document.getElementById("app-loader");
 
-  if (!loader) {
-    return false;
-  }
+  if (!loader) return false;
 
   loader.hidden = true;
-  loader.setAttribute(
-    "aria-hidden",
-    "true"
-  );
-
-  loader.classList.add(
-    "is-hidden"
-  );
+  loader.classList.add("is-hidden");
+  loader.setAttribute("aria-hidden", "true");
 
   return true;
 }
 
 /* =========================================================
-   POST RENDER POLICY
+   POST RENDER
 ========================================================= */
 
 export function applyPostRenderLoaderPolicy({
@@ -545,110 +283,77 @@ export function applyPostRenderLoaderPolicy({
   Router,
   hideLoader,
 } = {}) {
-  const viewContainer =
-    getViewContainer(
-      AppCore
-    );
+  const view = getViewContainer(AppCore);
 
-  const html =
-    safeText(
-      viewContainer?.innerHTML,
-      ""
-    );
+  const hasViewContent = Boolean(
+    safeText(view?.innerHTML, "").trim()
+  );
 
-  const hasViewContent =
-    html.trim().length > 0;
+  const authLike = isAuthLikeRoute(AppCore, Router);
 
-  const authLike =
-    isAuthLikeRoute(
-      AppCore,
-      Router
-    );
+  const shellVisible = updateShellVisibilityByRoute(
+    AppCore,
+    Router
+  );
 
-  const shellVisible =
-    updateShellVisibilityByRoute(
-      AppCore,
-      Router
-    );
+  const loaderHidden =
+    authLike || hasViewContent
+      ? hideLoaderSafe(AppCore, hideLoader)
+      : false;
 
-  let loaderHidden = false;
+  const shellSnapshot = getShellSnapshot(
+    AppCore,
+    Router
+  );
 
-  if (
-    authLike ||
-    hasViewContent
-  ) {
-    loaderHidden =
-      hideLoaderSafe(
-        AppCore,
-        hideLoader
-      );
-  }
-
-  const snapshot = {
+  safeEmit(AppCore, "app:shell:post-render", {
     authLike,
     hasViewContent,
     shellVisible,
     loaderHidden,
-  };
+    snapshot: shellSnapshot,
+  });
 
-  safeEmit(
-    AppCore,
-    "app:shell:post-render",
-    snapshot
-  );
-
-  return snapshot;
+  return shellSnapshot;
 }
 
 /* =========================================================
-   DEBUG
+   SNAPSHOT
 ========================================================= */
 
 export function getShellSnapshot(
   AppCore,
-  Router
+  Router = null
 ) {
-  const view =
-    getViewContainer(
-      AppCore
-    );
+  const view = getViewContainer(AppCore);
 
   return {
-    shellVisible:
-      Boolean(
-        AppCore?.state
-          ?.shellVisible
-      ),
+    shellVisible: Boolean(
+      AppCore?.state?.shellVisible
+    ),
 
-    authLike:
-      isAuthLikeRoute(
-        AppCore,
-        Router
-      ),
+    authLike: isAuthLikeRoute(
+      AppCore,
+      Router
+    ),
 
     canonical:
-      getCurrentCanonicalPath(
-        AppCore,
-        Router
-      ),
+      getCurrentCanonicalPath(AppCore, Router),
 
     publicPath:
-      getCurrentPublicPath(
-        AppCore
-      ),
+      getCurrentPublicPath(AppCore),
 
-    hasView:
-      Boolean(view),
+    hasView: Boolean(view),
 
-    hasViewContent:
-      Boolean(
-        safeText(
-          view?.innerHTML,
-          ""
-        ).trim()
-      ),
+    hasViewContent: Boolean(
+      safeText(view?.innerHTML, "").trim()
+    ),
   };
 }
+
+/* =========================================================
+   EXPORT
+========================================================= */
 
 export default {
   getShellElements,

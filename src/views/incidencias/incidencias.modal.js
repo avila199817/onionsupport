@@ -249,7 +249,9 @@ function getTicketId(detail = {}) {
   return safeText(
     first(
       detail.ticketId,
-      detail.id
+      detail.id,
+      detail?.raw?.ticketId,
+      detail?.raw?.id
     ),
     "—"
   );
@@ -261,7 +263,11 @@ function getTicketCode(detail = {}) {
       detail.ticketCode,
       detail.code,
       detail.ticketId,
-      detail.id
+      detail.id,
+      detail?.raw?.ticketCode,
+      detail?.raw?.code,
+      detail?.raw?.ticketId,
+      detail?.raw?.id
     ),
     "—"
   );
@@ -273,6 +279,9 @@ function getClientAvatar(detail = {}) {
       detail.clientAvatar,
       detail.avatar,
       detail.avatarUrl,
+      detail?.cliente?.avatar,
+      detail?.client?.avatar,
+      detail?.client?.avatarUrl,
       detail?.raw?.clientAvatar,
       detail?.raw?.avatar,
       detail?.raw?.avatarUrl,
@@ -285,10 +294,68 @@ function getClientAvatar(detail = {}) {
   );
 }
 
+function getClientName(detail = {}) {
+  return safeText(
+    first(
+      detail.clientName,
+      detail.name,
+      detail?.cliente?.nombre,
+      detail?.cliente?.name,
+      detail?.client?.name,
+      detail?.receptor?.name,
+      detail?.createdBy?.name,
+      detail?.raw?.clientName,
+      detail?.raw?.name,
+      detail?.raw?.cliente?.nombre,
+      detail?.raw?.cliente?.name,
+      detail?.raw?.client?.name,
+      detail?.raw?.receptor?.name,
+      detail?.raw?.createdBy?.name
+    ),
+    "Cliente"
+  );
+}
+
+function getClientEmail(detail = {}) {
+  return safeText(
+    first(
+      detail.clientEmail,
+      detail.email,
+      detail?.cliente?.email,
+      detail?.client?.email,
+      detail?.receptor?.email,
+      detail?.createdBy?.email,
+      detail?.raw?.clientEmail,
+      detail?.raw?.email,
+      detail?.raw?.cliente?.email,
+      detail?.raw?.client?.email,
+      detail?.raw?.receptor?.email,
+      detail?.raw?.createdBy?.email
+    ),
+    "Sin email"
+  );
+}
+
+function getAssignedTo(detail = {}) {
+  return safeText(
+    first(
+      detail.assignedToName,
+      detail?.tecnico?.name,
+      detail?.assignedTo?.name,
+      detail?.raw?.assignedToName,
+      detail?.raw?.tecnico?.name,
+      detail?.raw?.assignedTo?.name
+    ),
+    "No asignado"
+  );
+}
+
 function getDisplayDescription(detail = {}) {
   return safeText(
     first(
       detail.description,
+      detail.message,
+      detail.preview,
       detail?.raw?.description,
       detail?.raw?.descripcion,
       detail?.raw?.message,
@@ -302,8 +369,11 @@ function getCategory(detail = {}) {
   return safeText(
     first(
       detail.category,
+      detail.categoria,
+      detail.tipo,
       detail?.raw?.category,
-      detail?.raw?.categoria
+      detail?.raw?.categoria,
+      detail?.raw?.tipo
     ),
     "General"
   );
@@ -313,9 +383,12 @@ function getSource(detail = {}) {
   return safeText(
     first(
       detail.source,
+      detail.origen,
+      detail.channel,
       detail?.raw?.source,
       detail?.raw?.origen,
-      detail?.raw?.channel
+      detail?.raw?.channel,
+      "panel"
     ),
     "panel"
   );
@@ -356,35 +429,47 @@ function getAttachments(detail = {}) {
     const item = safeObject(file);
 
     return {
-      id: safeText(first(item.id, item.fileId), `attachment-${index + 1}`),
+      id: safeText(
+        first(item.id, item.fileId, item.blobName),
+        `attachment-${index + 1}`
+      ),
       name: safeText(
         first(item.name, item.filename, item.fileName, item.title),
         `archivo_${index + 1}`
       ),
       url: safeText(
-        first(item.url, item.href, item.path, item.downloadUrl),
-        "#"
+        first(item.url, item.href, item.downloadUrl),
+        ""
       ),
+      path: safeText(item.path, ""),
       size: safeNumber(item.size, 0),
-      type: safeText(first(item.type, item.mimeType, item.mime), ""),
+      type: safeText(
+        first(item.type, item.contentType, item.mimeType, item.mime),
+        ""
+      ),
+      uploadedAt: first(item.uploadedAt, item.createdAt, item.date, null),
     };
   });
 }
 
 function getTimeline(detail = {}) {
-  const history = safeArray(first(
-    detail.history,
-    detail?.raw?.history,
-    detail?.raw?.timeline,
-    detail?.raw?.events
-  ));
+  const history = safeArray(
+    first(
+      detail.history,
+      detail?.raw?.history,
+      detail?.raw?.timeline,
+      detail?.raw?.events
+    )
+  );
 
-  const comments = safeArray(first(
-    detail.comments,
-    detail?.raw?.comments,
-    detail?.raw?.notes,
-    detail?.raw?.messages
-  ));
+  const comments = safeArray(
+    first(
+      detail.comments,
+      detail?.raw?.comments,
+      detail?.raw?.notes,
+      detail?.raw?.messages
+    )
+  );
 
   const normalizedHistory = history.map((entry, index) => {
     const item = safeObject(entry);
@@ -393,15 +478,15 @@ function getTimeline(detail = {}) {
       id: safeText(first(item.id, item.eventId), `h-${index + 1}`),
       kind: "event",
       title: safeText(
-        first(item.title, item.action, item.message, item.text),
+        first(item.title, item.action, item.type, item.message, item.text),
         "Actualización"
       ),
       body: safeText(
-        first(item.description, item.detail, item.body, item.text),
+        first(item.description, item.detail, item.body, ""),
         ""
       ),
       author: safeText(
-        first(item.user, item.author, item.name),
+        first(item.byName, item.user, item.author, item.name),
         "Sistema"
       ),
       createdAt: first(item.createdAt, item.date, item.timestamp),
@@ -420,19 +505,18 @@ function getTimeline(detail = {}) {
         ""
       ),
       author: safeText(
-        first(item.user, item.author, item.name),
+        first(item.byName, item.user, item.author, item.name),
         "Usuario"
       ),
       createdAt: first(item.createdAt, item.date, item.timestamp),
     };
   });
 
-  return [...normalizedHistory, ...normalizedComments]
-    .sort((a, b) => {
-      const timeA = new Date(a.createdAt || 0).getTime() || 0;
-      const timeB = new Date(b.createdAt || 0).getTime() || 0;
-      return timeB - timeA;
-    });
+  return [...normalizedHistory, ...normalizedComments].sort((a, b) => {
+    const timeA = new Date(a.createdAt || 0).getTime() || 0;
+    const timeB = new Date(b.createdAt || 0).getTime() || 0;
+    return timeB - timeA;
+  });
 }
 
 function canReopen(detail = {}) {
@@ -589,14 +673,14 @@ function renderChip(label = "", style = "") {
 }
 
 function renderAvatar(detail = {}) {
-  const initials = safeText(detail.initials, getInitials(detail.clientName || "ON"));
+  const initials = safeText(detail.initials, getInitials(getClientName(detail) || "ON"));
   const avatarUrl = getClientAvatar(detail);
   const theme = getAvatarTheme(
     safeText(
       first(
         detail.ticketId,
-        detail.clientName,
-        detail.clientEmail
+        getClientName(detail),
+        getClientEmail(detail)
       ),
       "onion"
     )
@@ -881,7 +965,7 @@ function renderAttachments(detail = {}) {
     >
       ${files
         .map((file) => {
-          const hasLink = file.url && file.url !== "#";
+          const hasLink = Boolean(file.url);
 
           return `
             <${hasLink ? "a" : "div"}
@@ -917,7 +1001,11 @@ function renderAttachments(detail = {}) {
                   "
                 >
                   ${escapeHtml(
-                    [file.type, formatBytes(file.size)].filter(Boolean).join(" · ") || "Archivo adjunto"
+                    [
+                      file.type,
+                      formatBytes(file.size),
+                      file.uploadedAt ? formatDate(file.uploadedAt) : "",
+                    ].filter(Boolean).join(" · ") || "Archivo adjunto"
                   )}
                 </span>
               </div>
@@ -1336,19 +1424,28 @@ function renderModalInner(detail = {}, {
   const item = getDetail(detail);
   const ticketId = getTicketId(item);
   const ticketCode = getTicketCode(item);
-  const title = safeText(item.title, "Incidencia");
+  const title = safeText(
+    first(
+      item.title,
+      item.subject,
+      item?.raw?.title,
+      item?.raw?.subject,
+      item?.raw?.asunto
+    ),
+    "Incidencia"
+  );
   const description = getDisplayDescription(item);
-  const createdAt = formatDate(item.createdAt);
-  const updatedAt = formatDate(item.updatedAt);
-  const updatedAgo = formatRelativeDate(item.updatedAt);
-  const clientName = safeText(item.clientName, "Cliente");
-  const clientEmail = safeText(item.clientEmail, "Sin email");
-  const assignedTo = safeText(item.assignedToName, "Equipo de soporte");
+  const createdAt = formatDate(first(item.createdAt, item?.raw?.createdAt));
+  const updatedAt = formatDate(first(item.updatedAt, item?.raw?.updatedAt, item?.raw?.createdAt));
+  const updatedAgo = formatRelativeDate(first(item.updatedAt, item?.raw?.updatedAt, item?.raw?.createdAt));
+  const clientName = getClientName(item);
+  const clientEmail = getClientEmail(item);
+  const assignedTo = getAssignedTo(item);
   const category = getCategory(item);
   const source = getSource(item);
   const attachments = getAttachments(item);
-  const statusRaw = safeText(item.status, "open");
-  const priorityRaw = safeText(item.priority, "medium");
+  const statusRaw = safeText(first(item.status, item?.raw?.status, item?.raw?.estado), "open");
+  const priorityRaw = safeText(first(item.priority, item?.raw?.priority, item?.raw?.prioridad), "medium");
   const statusLabel = getStatusLabel(statusRaw);
   const priorityLabel = getPriorityLabel(priorityRaw);
   const busyLabel = isRefreshing

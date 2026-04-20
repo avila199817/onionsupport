@@ -2,20 +2,22 @@
    Onion SPA - Incidencias Template (CLIENT EXPERIENCE MODE)
    Archivo: src/views/incidencias/incidencias.table.template.js
 
-   DEFINITIVE PRO / AIR MODE / CLIENT FIRST
+   DEFINITIVE PRO / AIR MODE / CLIENT FIRST / POLISHED
 
    Objetivo:
-   - header más fino y ordenado
+   - hero superior fino y bien alineado
    - botones arriba derecha
-   - título ancho real
+   - título ancho real y sin caída rara
    - resumen con 2 cajas: abiertas / cerradas
-   - tabla más compacta y limpia
-   - orden en incidencia: número -> asunto -> descripción
+   - avatares limpios sin box feo detrás
+   - light mode más vivo
+   - tabla más aireada y mejor proporcionada
+   - orden incidencia: número -> asunto -> descripción
    - columnas:
      incidencia / estado / fecha de creación / última novedad / importe / acciones
    - última novedad solo relativa
    - acciones: solo ver detalle
-   - tooltip de avatar con nombre completo
+   - tooltip en avatar con nombre completo
    - paginación a 5 incidencias por vista
 ========================================================= */
 
@@ -84,7 +86,7 @@ function firstFiniteNumber(...values) {
 }
 
 /* =========================================================
-   SHARED STYLES
+   SCOPED STYLES
 ========================================================= */
 
 function renderScopedStyles() {
@@ -111,8 +113,8 @@ function renderScopedStyles() {
         border-radius:calc(var(--panel-radius) + 4px);
         border:1px solid var(--border-soft);
         background:
-          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 34%),
-          linear-gradient(180deg, rgba(255,255,255,.012), transparent 28%),
+          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 9%, transparent), transparent 34%),
+          linear-gradient(180deg, rgba(255,255,255,.014), transparent 28%),
           var(--surface-1, var(--surface-glass));
         box-shadow:var(--shadow-soft);
       }
@@ -122,8 +124,8 @@ function renderScopedStyles() {
         position:absolute;
         inset:0;
         pointer-events:none;
-        background:linear-gradient(180deg, rgba(255,255,255,.022), transparent 34%);
-        opacity:.84;
+        background:linear-gradient(180deg, rgba(255,255,255,.024), transparent 34%);
+        opacity:.88;
       }
 
       .incidencias-hero > *{
@@ -134,16 +136,26 @@ function renderScopedStyles() {
       .incidencias-hero-inner{
         display:grid;
         gap:var(--space-lg);
-        padding:clamp(18px, 2.4vw, 28px);
+        padding:clamp(18px, 2.2vw, 28px);
       }
 
-      .incidencias-hero-actions-row{
+      .incidencias-hero-head{
         display:flex;
-        justify-content:flex-end;
-        align-items:center;
+        align-items:flex-start;
+        justify-content:space-between;
+        gap:20px;
+        flex-wrap:wrap;
+      }
+
+      .incidencias-hero-copy{
+        flex:1 1 760px;
+        min-inline-size:0;
+        display:grid;
+        gap:10px;
       }
 
       .incidencias-hero-actions{
+        flex:0 0 auto;
         display:flex;
         align-items:center;
         justify-content:flex-end;
@@ -151,18 +163,11 @@ function renderScopedStyles() {
         flex-wrap:wrap;
       }
 
-      .incidencias-hero-copy{
-        display:grid;
-        gap:10px;
-        min-inline-size:0;
-        width:100%;
-      }
-
       .incidencias-eyebrow{
         display:inline-flex;
         align-items:center;
         width:max-content;
-        min-block-size:28px;
+        min-block-size:30px;
         padding-inline:12px;
         border-radius:999px;
         border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft));
@@ -176,18 +181,18 @@ function renderScopedStyles() {
 
       .incidencias-hero-title{
         margin:0;
+        inline-size:100%;
         max-inline-size:none;
-        width:100%;
-        font-size:clamp(26px, 4.8vw, 56px);
-        line-height:1.02;
-        letter-spacing:-.05em;
+        font-size:clamp(28px, 5vw, 58px);
+        line-height:.98;
+        letter-spacing:-.055em;
         color:var(--text-strong);
         text-wrap:balance;
       }
 
       .incidencias-hero-subtitle{
         margin:0;
-        max-inline-size:1040px;
+        max-inline-size:1120px;
         color:var(--text-dim);
         font-size:var(--font-lg);
         line-height:1.58;
@@ -232,7 +237,7 @@ function renderScopedStyles() {
 
       .incidencias-summary-grid{
         display:grid;
-        grid-template-columns:repeat(2, minmax(0, 260px));
+        grid-template-columns:repeat(2, minmax(0, 280px));
         gap:var(--space-md);
       }
 
@@ -241,28 +246,14 @@ function renderScopedStyles() {
         overflow:hidden;
         display:grid;
         gap:8px;
-        min-block-size:112px;
+        min-block-size:116px;
         padding:18px;
         border-radius:calc(var(--panel-radius) + 1px);
         border:1px solid var(--border-soft);
         background:
-          linear-gradient(180deg, rgba(255,255,255,.016), transparent 70%),
+          linear-gradient(180deg, rgba(255,255,255,.018), transparent 70%),
           var(--surface-2, var(--surface-glass));
         box-shadow:var(--shadow-xs);
-      }
-
-      .incidencias-summary-card.is-open{
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft));
-        background:
-          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 70%),
-          var(--surface-2, var(--surface-glass));
-      }
-
-      .incidencias-summary-card.is-closed{
-        border-color:color-mix(in srgb, var(--success, #22c55e) 18%, var(--border-soft));
-        background:
-          linear-gradient(180deg, color-mix(in srgb, var(--success, #22c55e) 8%, transparent), transparent 70%),
-          var(--surface-2, var(--surface-glass));
       }
 
       .incidencias-summary-card::before{
@@ -270,12 +261,26 @@ function renderScopedStyles() {
         position:absolute;
         inset:0;
         pointer-events:none;
-        background:linear-gradient(180deg, rgba(255,255,255,.020), transparent 30%);
+        background:linear-gradient(180deg, rgba(255,255,255,.022), transparent 30%);
       }
 
       .incidencias-summary-card > *{
         position:relative;
         z-index:1;
+      }
+
+      .incidencias-summary-card.is-open{
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 20%, var(--border-soft));
+        background:
+          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 9%, transparent), transparent 70%),
+          var(--surface-2, var(--surface-glass));
+      }
+
+      .incidencias-summary-card.is-closed{
+        border-color:color-mix(in srgb, var(--success, #22c55e) 20%, var(--border-soft));
+        background:
+          linear-gradient(180deg, color-mix(in srgb, var(--success, #22c55e) 8%, transparent), transparent 70%),
+          var(--surface-2, var(--surface-glass));
       }
 
       .incidencias-summary-label{
@@ -289,7 +294,7 @@ function renderScopedStyles() {
 
       .incidencias-summary-value{
         color:var(--text-strong);
-        font-size:clamp(28px, 4vw, 40px);
+        font-size:clamp(30px, 4vw, 42px);
         line-height:1;
         font-weight:var(--weight-black);
         letter-spacing:-.05em;
@@ -416,7 +421,7 @@ function renderScopedStyles() {
 
       .incidencias-table{
         inline-size:100%;
-        min-inline-size:900px;
+        min-inline-size:1120px;
         border-collapse:separate;
         border-spacing:0;
         table-layout:fixed;
@@ -438,6 +443,16 @@ function renderScopedStyles() {
 
       .incidencias-table thead th.is-right{
         text-align:right;
+      }
+
+      .incidencias-table thead th.is-amount,
+      .incidencias-table tbody td.is-amount{
+        padding-inline:18px 28px;
+      }
+
+      .incidencias-table thead th.is-actions,
+      .incidencias-table tbody td.is-actions{
+        padding-inline:24px 20px;
       }
 
       .incidencias-table tbody td{
@@ -479,10 +494,10 @@ function renderScopedStyles() {
         position:relative;
         flex:0 0 auto;
         overflow:hidden;
-        border-radius:14px;
-        border:1px solid var(--border-soft);
-        background:var(--surface-glass);
-        box-shadow:var(--shadow-xs);
+        border-radius:999px;
+        border:1px solid color-mix(in srgb, var(--border-soft) 76%, transparent);
+        background:transparent;
+        box-shadow:none;
       }
 
       .incidencias-avatar img{
@@ -499,7 +514,6 @@ function renderScopedStyles() {
         place-items:center;
         font-weight:var(--weight-black);
         letter-spacing:.03em;
-        backdrop-filter:blur(8px);
       }
 
       .incidencias-avatar[data-avatar-fallback="true"] img{
@@ -569,26 +583,26 @@ function renderScopedStyles() {
 
       .incidencias-chip.is-open{
         color:var(--accent, #7c5cff);
-        background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 24%, transparent);
+        background:color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent);
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent);
       }
 
       .incidencias-chip.is-pending{
         color:var(--warning, #f59e0b);
-        background:color-mix(in srgb, var(--warning, #f59e0b) 10%, transparent);
-        border-color:color-mix(in srgb, var(--warning, #f59e0b) 24%, transparent);
+        background:color-mix(in srgb, var(--warning, #f59e0b) 12%, transparent);
+        border-color:color-mix(in srgb, var(--warning, #f59e0b) 28%, transparent);
       }
 
       .incidencias-chip.is-progress{
         color:var(--info, #60a5fa);
-        background:color-mix(in srgb, var(--info, #60a5fa) 10%, transparent);
-        border-color:color-mix(in srgb, var(--info, #60a5fa) 24%, transparent);
+        background:color-mix(in srgb, var(--info, #60a5fa) 12%, transparent);
+        border-color:color-mix(in srgb, var(--info, #60a5fa) 28%, transparent);
       }
 
       .incidencias-chip.is-resolved{
         color:var(--success, #22c55e);
-        background:color-mix(in srgb, var(--success, #22c55e) 10%, transparent);
-        border-color:color-mix(in srgb, var(--success, #22c55e) 24%, transparent);
+        background:color-mix(in srgb, var(--success, #22c55e) 12%, transparent);
+        border-color:color-mix(in srgb, var(--success, #22c55e) 28%, transparent);
       }
 
       .incidencias-chip.is-closed{
@@ -615,8 +629,8 @@ function renderScopedStyles() {
         display:inline-flex;
         align-items:center;
         justify-content:center;
-        min-block-size:30px;
-        padding-inline:10px;
+        min-block-size:34px;
+        padding-inline:12px;
         border-radius:999px;
         border:1px solid color-mix(in srgb, var(--success, #22c55e) 20%, var(--border-soft));
         background:color-mix(in srgb, var(--success, #22c55e) 10%, transparent);
@@ -642,7 +656,7 @@ function renderScopedStyles() {
       }
 
       .incidencias-detail-btn{
-        min-inline-size:112px;
+        min-inline-size:132px;
       }
 
       .incidencias-mobile-list{
@@ -758,7 +772,7 @@ function renderScopedStyles() {
       .incidencias-skeleton-head,
       .incidencias-skeleton-row{
         display:grid;
-        grid-template-columns: 2.8fr .9fr 1fr .9fr .9fr .9fr;
+        grid-template-columns: 2.9fr .9fr 1fr .8fr .9fr 1fr;
         gap:0;
       }
 
@@ -801,7 +815,7 @@ function renderScopedStyles() {
       .incidencias-skeleton-avatar{
         inline-size:40px;
         block-size:40px;
-        border-radius:14px;
+        border-radius:999px;
       }
 
       .incidencias-skeleton-stack{
@@ -810,9 +824,104 @@ function renderScopedStyles() {
         flex:1;
       }
 
+      [data-theme="light"] .incidencias-hero{
+        background:
+          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent), transparent 34%),
+          linear-gradient(180deg, rgba(255,255,255,.52), rgba(255,255,255,.12) 34%, transparent 100%),
+          var(--surface-1, #ffffff);
+        box-shadow:
+          0 18px 42px rgba(15,23,42,.07),
+          inset 0 1px 0 rgba(255,255,255,.54);
+      }
+
+      [data-theme="light"] .incidencias-eyebrow{
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 26%, var(--border-soft));
+        background:color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent);
+        color:var(--text-strong);
+      }
+
+      [data-theme="light"] .incidencias-meta-pill{
+        background:rgba(255,255,255,.76);
+        border-color:rgba(15,23,42,.08);
+      }
+
+      [data-theme="light"] .incidencias-meta-pill.is-live{
+        background:color-mix(in srgb, var(--accent, #7c5cff) 12%, #ffffff);
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 24%, rgba(15,23,42,.08));
+        color:var(--text-strong);
+      }
+
+      [data-theme="light"] .incidencias-summary-card{
+        background:
+          linear-gradient(180deg, rgba(255,255,255,.88), rgba(255,255,255,.72)),
+          var(--surface-2, #ffffff);
+        box-shadow:
+          0 14px 30px rgba(15,23,42,.06),
+          inset 0 1px 0 rgba(255,255,255,.72);
+      }
+
+      [data-theme="light"] .incidencias-summary-card.is-open{
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 28%, rgba(15,23,42,.08));
+        background:
+          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 16%, #ffffff), rgba(255,255,255,.84) 72%),
+          var(--surface-2, #ffffff);
+      }
+
+      [data-theme="light"] .incidencias-summary-card.is-closed{
+        border-color:color-mix(in srgb, var(--success, #22c55e) 24%, rgba(15,23,42,.08));
+        background:
+          linear-gradient(180deg, color-mix(in srgb, var(--success, #22c55e) 12%, #ffffff), rgba(255,255,255,.84) 72%),
+          var(--surface-2, #ffffff);
+      }
+
+      [data-theme="light"] .incidencias-avatar{
+        border-color:rgba(15,23,42,.08);
+      }
+
+      [data-theme="light"] .incidencias-avatar[data-avatar-fallback="true"]{
+        box-shadow:0 8px 18px rgba(15,23,42,.06);
+      }
+
+      [data-theme="light"] .incidencias-chip.is-open{
+        background:color-mix(in srgb, var(--accent, #7c5cff) 16%, #ffffff);
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 32%, rgba(15,23,42,.08));
+      }
+
+      [data-theme="light"] .incidencias-chip.is-pending{
+        background:color-mix(in srgb, var(--warning, #f59e0b) 16%, #ffffff);
+        border-color:color-mix(in srgb, var(--warning, #f59e0b) 30%, rgba(15,23,42,.08));
+      }
+
+      [data-theme="light"] .incidencias-chip.is-progress{
+        background:color-mix(in srgb, var(--info, #60a5fa) 16%, #ffffff);
+        border-color:color-mix(in srgb, var(--info, #60a5fa) 30%, rgba(15,23,42,.08));
+      }
+
+      [data-theme="light"] .incidencias-chip.is-resolved{
+        background:color-mix(in srgb, var(--success, #22c55e) 16%, #ffffff);
+        border-color:color-mix(in srgb, var(--success, #22c55e) 30%, rgba(15,23,42,.08));
+      }
+
+      [data-theme="light"] .incidencias-table-wrap{
+        box-shadow:
+          0 14px 30px rgba(15,23,42,.05),
+          inset 0 1px 0 rgba(255,255,255,.58);
+      }
+
       @media (max-width: 1120px){
         .incidencias-summary-grid{
           grid-template-columns:repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 860px){
+        .incidencias-hero-head{
+          flex-direction:column;
+          align-items:stretch;
+        }
+
+        .incidencias-hero-actions{
+          justify-content:flex-start;
         }
       }
 
@@ -841,10 +950,6 @@ function renderScopedStyles() {
 
         .incidencias-hero-subtitle{
           font-size:var(--font-base);
-        }
-
-        .incidencias-hero-actions-row{
-          justify-content:flex-start;
         }
 
         .incidencias-summary-grid{
@@ -1106,7 +1211,7 @@ function formatMoney(amount, currency = "EUR") {
       maximumFractionDigits: 2,
     }).format(value);
   } catch {
-    return `${value.toFixed(2)} ${currency || "EUR"}`;
+    return \`\${value.toFixed(2)} \${currency || "EUR"}\`;
   }
 }
 
@@ -1152,7 +1257,7 @@ function getClientInitials(item = {}) {
 
   if (!clean) return "ON";
 
-  const parts = clean.split(/\s+/).filter(Boolean);
+  const parts = clean.split(/\\s+/).filter(Boolean);
   const initials = parts
     .slice(0, 2)
     .map((part) => part[0])
@@ -1205,40 +1310,28 @@ function getStableHash(value = "") {
 function getFallbackAvatarTheme(seed = "") {
   const themes = [
     {
-      bg: "linear-gradient(135deg, rgba(124,92,255,.24), rgba(88,72,200,.12))",
-      border: "rgba(124,92,255,.24)",
-      text: "#efeaff",
-      glow: "rgba(124,92,255,.18)",
+      bg: "linear-gradient(135deg, #8e7cff 0%, #c7b9ff 100%)",
+      text: "#ffffff",
     },
     {
-      bg: "linear-gradient(135deg, rgba(54,198,144,.24), rgba(35,131,95,.12))",
-      border: "rgba(54,198,144,.24)",
-      text: "#ddfff1",
-      glow: "rgba(54,198,144,.18)",
+      bg: "linear-gradient(135deg, #43c694 0%, #97efd1 100%)",
+      text: "#ffffff",
     },
     {
-      bg: "linear-gradient(135deg, rgba(96,165,250,.24), rgba(37,99,235,.12))",
-      border: "rgba(96,165,250,.24)",
-      text: "#e7f2ff",
-      glow: "rgba(96,165,250,.18)",
+      bg: "linear-gradient(135deg, #5ea9ff 0%, #b7d8ff 100%)",
+      text: "#ffffff",
     },
     {
-      bg: "linear-gradient(135deg, rgba(255,188,66,.24), rgba(217,119,6,.12))",
-      border: "rgba(255,188,66,.24)",
-      text: "#fff4d8",
-      glow: "rgba(255,188,66,.18)",
+      bg: "linear-gradient(135deg, #f3b457 0%, #ffdca3 100%)",
+      text: "#ffffff",
     },
     {
-      bg: "linear-gradient(135deg, rgba(255,107,107,.24), rgba(190,24,93,.12))",
-      border: "rgba(255,107,107,.24)",
-      text: "#ffe4e4",
-      glow: "rgba(255,107,107,.18)",
+      bg: "linear-gradient(135deg, #ef7d7d 0%, #ffc0c0 100%)",
+      text: "#ffffff",
     },
     {
-      bg: "linear-gradient(135deg, rgba(179,136,255,.24), rgba(109,40,217,.12))",
-      border: "rgba(179,136,255,.24)",
-      text: "#f3e8ff",
-      glow: "rgba(179,136,255,.18)",
+      bg: "linear-gradient(135deg, #b08cff 0%, #e0ccff 100%)",
+      text: "#ffffff",
     },
   ];
 
@@ -1318,7 +1411,23 @@ export function renderHeader({ items = [], state = {} } = {}) {
 
     <section class="incidencias-hero">
       <div class="incidencias-hero-inner">
-        <div class="incidencias-hero-actions-row">
+        <div class="incidencias-hero-head">
+          <div class="incidencias-hero-copy">
+            <span class="incidencias-eyebrow">
+              Ayuda y seguimiento
+            </span>
+
+            <div class="page-header-main">
+              <h1 class="incidencias-hero-title">
+                Tus incidencias y solicitudes
+              </h1>
+
+              <p class="incidencias-hero-subtitle">
+                Consulta el estado de tus incidencias, revisa las actualizaciones más recientes y crea nuevas solicitudes desde una vista clara, cercana y fácil de seguir.
+              </p>
+            </div>
+          </div>
+
           <div class="incidencias-hero-actions">
             <button
               id="incidencias-export-btn"
@@ -1336,22 +1445,6 @@ export function renderHeader({ items = [], state = {} } = {}) {
             >
               ${creating ? "Abriendo..." : "Crear nueva incidencia"}
             </button>
-          </div>
-        </div>
-
-        <div class="incidencias-hero-copy">
-          <span class="incidencias-eyebrow">
-            Ayuda y seguimiento
-          </span>
-
-          <div class="page-header-main">
-            <h1 class="incidencias-hero-title">
-              Tus incidencias y solicitudes
-            </h1>
-
-            <p class="incidencias-hero-subtitle">
-              Consulta el estado de tus incidencias, revisa las actualizaciones más recientes y crea nuevas solicitudes desde una vista clara, cercana y fácil de seguir.
-            </p>
           </div>
         </div>
 
@@ -1445,11 +1538,11 @@ export function renderLoadingState() {
               </div>
 
               <div class="incidencias-skeleton-cell">
-                <div class="incidencias-skeleton-bar" style="height:28px; width:92px;"></div>
+                <div class="incidencias-skeleton-bar" style="height:30px; width:96px;"></div>
               </div>
 
               <div class="incidencias-skeleton-cell" style="display:flex; justify-content:flex-end;">
-                <div class="incidencias-skeleton-bar" style="height:38px; width:112px; border-radius:12px;"></div>
+                <div class="incidencias-skeleton-bar" style="height:38px; width:128px; border-radius:12px;"></div>
               </div>
             </div>
           `
@@ -1613,7 +1706,6 @@ function renderIdentityAvatar({
           style="
             background:${theme.bg};
             color:${theme.text};
-            border-color:${theme.border};
           "
         >
           ${escapeHtml(initials)}
@@ -1631,9 +1723,6 @@ function renderIdentityAvatar({
       style="
         inline-size:${size}px;
         block-size:${size}px;
-        border-color:${theme.border};
-        background:${theme.bg};
-        box-shadow:0 8px 20px ${theme.glow};
       "
     >
       <span
@@ -1754,11 +1843,11 @@ function renderIncidenciaRow(item = {}, state = {}) {
         </span>
       </td>
 
-      <td>
+      <td class="is-amount">
         ${renderAmountPill(item)}
       </td>
 
-      <td>
+      <td class="is-actions">
         <div class="incidencias-actions">
           ${renderOpenTicketButton({ ticketId, isOpening })}
         </div>
@@ -1850,12 +1939,12 @@ function renderDesktopTable(items = [], state = {}) {
     <div class="incidencias-table-scroll">
       <table class="incidencias-table">
         <colgroup>
-          <col style="width:44%">
+          <col style="width:39%">
           <col style="width:12%">
           <col style="width:16%">
-          <col style="width:13%">
-          <col style="width:7%">
-          <col style="width:8%">
+          <col style="width:12%">
+          <col style="width:9%">
+          <col style="width:12%">
         </colgroup>
 
         <thead>
@@ -1864,8 +1953,8 @@ function renderDesktopTable(items = [], state = {}) {
             <th>Estado</th>
             <th>Fecha de creación</th>
             <th>Última novedad</th>
-            <th>Importe</th>
-            <th class="is-right">Acciones</th>
+            <th class="is-amount">Importe</th>
+            <th class="is-right is-actions">Acciones</th>
           </tr>
         </thead>
 

@@ -3,28 +3,6 @@
    Archivo: src/views/incidencias/incidencias.modal.js
 
    CLIENT EXPERIENCE PRO · DETAIL MODAL · 10/10
-
-   RESPONSABILIDADES:
-   - renderizar modal premium de detalle de incidencia
-   - abrir / cerrar modal limpio
-   - copiar el ID de la incidencia pulsando sobre el propio ID
-   - permitir añadir nuevos comentarios / detalles
-   - permitir adjuntar nuevos archivos desde el mismo modal
-   - usar un único CTA final en el footer: "Actualizar incidencia"
-   - al actualizar, subir adjuntos nuevos + comentar y forzar estado abierta
-   - visualizar actividad, timeline y adjuntos existentes
-   - abrir / descargar adjuntos existentes con bridge externo y toast
-   - exponer bridge global para incidenciasView.js
-   - integrarse con AppCore.events sin acoplar la vista
-
-   HARDENING PRO:
-   - tolerancia a payloads heterogéneos
-   - avatar fallback -> iniciales
-   - modal singleton
-   - escape / overlay close
-   - render incremental seguro
-   - estado visual interno de submit
-   - bridge flexible para acciones externas
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -179,7 +157,9 @@ function formatBytes(bytes = 0) {
 
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  if (size < 1024 * 1024 * 1024) {
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  }
 
   return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
@@ -301,6 +281,7 @@ function getClientAvatar(detail = {}) {
       detail.avatar,
       detail.avatarUrl,
       detail?.cliente?.avatar,
+      detail?.cliente?.avatarUrl,
       detail?.client?.avatar,
       detail?.client?.avatarUrl,
       detail?.raw?.clientAvatar,
@@ -386,12 +367,18 @@ function getFacturaRelacionada(detail = {}) {
   );
 }
 
+/* =========================================================
+   ATTACHMENTS / BLOB URL RESOLVE
+========================================================= */
+
 function resolveAttachmentUrl(item = {}, detail = {}) {
   const file = safeObject(item);
   const raw = safeObject(detail?.raw);
 
   const directUrl = safeText(
     first(
+      file.blobUrl,
+      file.blobURL,
       file.url,
       file.href,
       file.downloadUrl,
@@ -402,6 +389,7 @@ function resolveAttachmentUrl(item = {}, detail = {}) {
       file.openUrl,
       file?.links?.download,
       file?.links?.view,
+      file?.raw?.blobUrl,
       file?.raw?.url,
       file?.raw?.downloadUrl,
       file?.raw?.viewUrl,
@@ -425,11 +413,6 @@ function resolveAttachmentUrl(item = {}, detail = {}) {
 
   const ticketId = getTicketId(detail);
 
-  const relativeDirectUrl = safeText(directUrl, "");
-  if (relativeDirectUrl && apiBase) {
-    return buildUrl(apiBase, relativeDirectUrl);
-  }
-
   const candidatePath = safeText(
     first(
       file.path,
@@ -447,7 +430,27 @@ function resolveAttachmentUrl(item = {}, detail = {}) {
     ""
   );
 
-  if (candidatePath && apiBase) {
+  if (isAbsoluteUrl(candidatePath)) {
+    return candidatePath;
+  }
+
+  const blobBaseUrl = safeText(
+    first(
+      raw.blobBaseUrl,
+      raw.attachmentsBlobBaseUrl,
+      raw.filesBlobBaseUrl,
+      raw.storageBaseUrl,
+      raw.cdnBaseUrl,
+      raw.attachmentsBaseUrl
+    ),
+    ""
+  );
+
+  if (blobBaseUrl && candidatePath) {
+    return buildUrl(blobBaseUrl, candidatePath);
+  }
+
+  if (apiBase && candidatePath) {
     const normalized = candidatePath.replace(/^\/+/, "");
 
     const routeCandidates = [
@@ -463,25 +466,6 @@ function resolveAttachmentUrl(item = {}, detail = {}) {
       const built = buildUrl(apiBase, candidate);
       if (built) return built;
     }
-  }
-
-  const detailLevelDownloadBase = safeText(
-    first(
-      raw.attachmentsBaseUrl,
-      raw.filesBaseUrl,
-      raw.downloadBaseUrl
-    ),
-    ""
-  );
-
-  if (detailLevelDownloadBase) {
-    const output = file.id
-      ? buildUrl(detailLevelDownloadBase, file.id)
-      : candidatePath
-        ? buildUrl(detailLevelDownloadBase, candidatePath)
-        : "";
-
-    if (output) return output;
   }
 
   return "";
@@ -524,7 +508,11 @@ function getAttachments(detail = {}) {
   });
 }
 
-function getTimeline(detail = {}) {
+/* =========================================================
+   TIMELINE NORMALIZATION / CLEANUP
+========================================================= */
+
+function normalizeTimelineEntries(detail = {}) {
   const history = safeArray(
     first(
       detail.history,
@@ -586,6 +574,36 @@ function getTimeline(detail = {}) {
     const timeB = new Date(b.createdAt || 0).getTime() || 0;
     return timeB - timeA;
   });
+}
+
+function isNoiseTimelineEntry(entry = {}) {
+  const title = safeText(entry.title, "").toLowerCase();
+  const body = safeText(entry.body, "").toLowerCase();
+
+  const creationTerms = [
+    "created",
+    "creation",
+    "creada",
+    "creado",
+    "ticket created",
+    "ticket opened",
+    "open",
+    "abierta",
+    "abierto",
+  ];
+
+  if (entry.kind === "comment" && body) {
+    return false;
+  }
+
+  const titleLooksLikeCreation = creationTerms.includes(title);
+  const bodyIsEmpty = !safeText(entry.body, "");
+
+  return titleLooksLikeCreation && bodyIsEmpty;
+}
+
+function getTimeline(detail = {}) {
+  return normalizeTimelineEntries(detail).filter((entry) => !isNoiseTimelineEntry(entry));
 }
 
 /* =========================================================
@@ -720,10 +738,10 @@ function renderChip(label = "", style = "") {
         display:inline-flex;
         align-items:center;
         justify-content:center;
-        min-height:32px;
-        padding:0 12px;
+        min-height:28px;
+        padding:0 10px;
         border-radius:999px;
-        font-size:12px;
+        font-size:11px;
         font-weight:var(--weight-bold, 700);
         letter-spacing:.05em;
         text-transform:uppercase;
@@ -745,52 +763,52 @@ function renderAvatar(detail = {}) {
 
   const themeMap = {
     violet: {
-      bg: "linear-gradient(135deg, rgba(124,92,255,.28), rgba(88,72,200,.12))",
-      border: "rgba(124,92,255,.28)",
+      bg: "linear-gradient(135deg, rgba(124,92,255,.36), rgba(88,72,200,.18))",
+      border: "rgba(124,92,255,.32)",
       text: "#efeaff",
-      glow: "rgba(124,92,255,.22)",
+      glow: "rgba(124,92,255,.18)",
     },
     emerald: {
-      bg: "linear-gradient(135deg, rgba(54,198,144,.28), rgba(35,131,95,.12))",
-      border: "rgba(54,198,144,.28)",
+      bg: "linear-gradient(135deg, rgba(54,198,144,.36), rgba(35,131,95,.18))",
+      border: "rgba(54,198,144,.32)",
       text: "#ddfff1",
-      glow: "rgba(54,198,144,.22)",
+      glow: "rgba(54,198,144,.18)",
     },
     blue: {
-      bg: "linear-gradient(135deg, rgba(96,165,250,.28), rgba(37,99,235,.12))",
-      border: "rgba(96,165,250,.28)",
+      bg: "linear-gradient(135deg, rgba(96,165,250,.36), rgba(37,99,235,.18))",
+      border: "rgba(96,165,250,.32)",
       text: "#e7f2ff",
-      glow: "rgba(96,165,250,.22)",
+      glow: "rgba(96,165,250,.18)",
     },
     amber: {
-      bg: "linear-gradient(135deg, rgba(255,188,66,.28), rgba(217,119,6,.12))",
-      border: "rgba(255,188,66,.28)",
+      bg: "linear-gradient(135deg, rgba(255,188,66,.36), rgba(217,119,6,.18))",
+      border: "rgba(255,188,66,.32)",
       text: "#fff4d8",
-      glow: "rgba(255,188,66,.22)",
+      glow: "rgba(255,188,66,.18)",
     },
     rose: {
-      bg: "linear-gradient(135deg, rgba(255,107,107,.28), rgba(190,24,93,.12))",
-      border: "rgba(255,107,107,.28)",
+      bg: "linear-gradient(135deg, rgba(255,107,107,.36), rgba(190,24,93,.18))",
+      border: "rgba(255,107,107,.32)",
       text: "#ffe4e4",
-      glow: "rgba(255,107,107,.22)",
+      glow: "rgba(255,107,107,.18)",
     },
     purple: {
-      bg: "linear-gradient(135deg, rgba(179,136,255,.28), rgba(109,40,217,.12))",
-      border: "rgba(179,136,255,.28)",
+      bg: "linear-gradient(135deg, rgba(179,136,255,.36), rgba(109,40,217,.18))",
+      border: "rgba(179,136,255,.32)",
       text: "#f3e8ff",
-      glow: "rgba(179,136,255,.22)",
+      glow: "rgba(179,136,255,.18)",
     },
     cyan: {
-      bg: "linear-gradient(135deg, rgba(34,211,238,.28), rgba(8,145,178,.12))",
-      border: "rgba(34,211,238,.28)",
+      bg: "linear-gradient(135deg, rgba(34,211,238,.36), rgba(8,145,178,.18))",
+      border: "rgba(34,211,238,.32)",
       text: "#e6fcff",
-      glow: "rgba(34,211,238,.22)",
+      glow: "rgba(34,211,238,.18)",
     },
     orange: {
-      bg: "linear-gradient(135deg, rgba(251,146,60,.28), rgba(194,65,12,.12))",
-      border: "rgba(251,146,60,.28)",
+      bg: "linear-gradient(135deg, rgba(251,146,60,.36), rgba(194,65,12,.18))",
+      border: "rgba(251,146,60,.32)",
       text: "#fff0e4",
-      glow: "rgba(251,146,60,.22)",
+      glow: "rgba(251,146,60,.18)",
     },
   };
 
@@ -801,14 +819,14 @@ function renderAvatar(detail = {}) {
       <div
         style="
           position:relative;
-          flex:0 0 68px;
-          width:68px;
-          height:68px;
-          border-radius:20px;
+          flex:0 0 56px;
+          width:56px;
+          height:56px;
+          border-radius:16px;
           overflow:hidden;
           border:1px solid var(--border-soft);
-          background:var(--surface-glass);
-          box-shadow:0 16px 36px rgba(0,0,0,.24);
+          background:transparent;
+          box-shadow:none;
         "
       >
         <img
@@ -833,10 +851,10 @@ function renderAvatar(detail = {}) {
             background:${palette.bg};
             border:1px solid ${palette.border};
             color:${palette.text};
-            font-size:22px;
+            font-size:18px;
             font-weight:var(--weight-black, 800);
             letter-spacing:.03em;
-            box-shadow:0 12px 28px ${palette.glow};
+            box-shadow:0 10px 22px ${palette.glow};
           "
         >
           ${escapeHtml(initials)}
@@ -849,19 +867,19 @@ function renderAvatar(detail = {}) {
     <div
       style="
         position:relative;
-        flex:0 0 68px;
-        width:68px;
-        height:68px;
-        border-radius:20px;
+        flex:0 0 56px;
+        width:56px;
+        height:56px;
+        border-radius:16px;
         display:grid;
         place-items:center;
         background:${palette.bg};
         border:1px solid ${palette.border};
         color:${palette.text};
-        font-size:22px;
+        font-size:18px;
         font-weight:var(--weight-black, 800);
         letter-spacing:.03em;
-        box-shadow:0 12px 28px ${palette.glow};
+        box-shadow:0 10px 22px ${palette.glow};
       "
     >
       ${escapeHtml(initials)}
@@ -878,16 +896,16 @@ function renderMetaField(label = "", value = "") {
     <div
       style="
         display:grid;
-        gap:6px;
-        padding:14px;
-        border-radius:16px;
+        gap:5px;
+        padding:12px;
+        border-radius:14px;
         border:1px solid var(--border-soft);
         background:var(--surface-1, var(--surface-glass));
       "
     >
       <span
         style="
-          font-size:11px;
+          font-size:10px;
           color:var(--text-faint, #8b8b8b);
           text-transform:uppercase;
           letter-spacing:.08em;
@@ -900,8 +918,8 @@ function renderMetaField(label = "", value = "") {
       <strong
         style="
           color:var(--text-strong, #fff);
-          font-size:14px;
-          line-height:1.4;
+          font-size:13px;
+          line-height:1.35;
           word-break:break-word;
         "
       >
@@ -921,13 +939,13 @@ function renderFeedbackBox() {
     <div
       style="
         display:grid;
-        gap:6px;
-        padding:14px 16px;
-        border-radius:16px;
+        gap:5px;
+        padding:12px 14px;
+        border-radius:14px;
         ${getFeedbackStyle(type)}
       "
     >
-      <strong style="color:var(--text-strong); font-size:14px;">
+      <strong style="color:var(--text-strong); font-size:13px;">
         ${
           type === "error"
             ? "No se ha podido completar la acción"
@@ -940,7 +958,7 @@ function renderFeedbackBox() {
       <span
         style="
           color:var(--text-dim);
-          font-size:13px;
+          font-size:12px;
           line-height:1.5;
         "
       >
@@ -977,8 +995,8 @@ function renderPendingFiles() {
               justify-content:space-between;
               align-items:center;
               gap:12px;
-              padding:12px 14px;
-              border-radius:14px;
+              padding:10px 12px;
+              border-radius:12px;
               border:1px solid var(--border-soft);
               background:var(--surface-glass);
             "
@@ -987,7 +1005,7 @@ function renderPendingFiles() {
               <strong
                 style="
                   color:var(--text-strong);
-                  font-size:13px;
+                  font-size:12px;
                   line-height:1.35;
                   word-break:break-word;
                 "
@@ -998,7 +1016,7 @@ function renderPendingFiles() {
               <span
                 style="
                   color:var(--text-dim);
-                  font-size:12px;
+                  font-size:11px;
                 "
               >
                 ${escapeHtml(
@@ -1015,12 +1033,13 @@ function renderPendingFiles() {
               data-modal-action="remove-pending-file"
               data-file-index="${index}"
               style="
-                min-height:36px;
-                padding:0 12px;
-                border-radius:12px;
+                min-height:32px;
+                padding:0 10px;
+                border-radius:10px;
                 border:1px solid var(--border-soft);
                 background:transparent;
                 color:var(--text-dim);
+                font-size:12px;
                 font-weight:var(--weight-bold, 700);
                 cursor:pointer;
                 flex:0 0 auto;
@@ -1035,26 +1054,140 @@ function renderPendingFiles() {
   `;
 }
 
+function renderAttachmentActionButtons(file = {}) {
+  const href = safeText(file.url, "");
+  const hasLink = isAbsoluteUrl(href);
+
+  if (hasLink) {
+    return `
+      <div
+        style="
+          display:flex;
+          gap:8px;
+          flex-wrap:wrap;
+          justify-content:flex-end;
+          flex:0 0 auto;
+        "
+      >
+        <a
+          href="${escapeHtml(href)}"
+          target="_blank"
+          rel="noopener noreferrer"
+          style="
+            min-height:34px;
+            padding:0 12px;
+            border-radius:10px;
+            border:1px solid var(--border-soft);
+            background:transparent;
+            color:var(--text-soft);
+            font-size:12px;
+            font-weight:var(--weight-bold, 700);
+            cursor:pointer;
+            display:inline-flex;
+            align-items:center;
+            text-decoration:none;
+          "
+        >
+          Visualizar
+        </a>
+
+        <a
+          href="${escapeHtml(href)}"
+          target="_blank"
+          rel="noopener noreferrer"
+          download="${escapeHtml(file.name || "archivo")}"
+          style="
+            min-height:34px;
+            padding:0 12px;
+            border-radius:10px;
+            border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft));
+            background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
+            color:var(--text-strong);
+            font-size:12px;
+            font-weight:var(--weight-bold, 700);
+            cursor:pointer;
+            display:inline-flex;
+            align-items:center;
+            text-decoration:none;
+          "
+        >
+          Descargar
+        </a>
+      </div>
+    `;
+  }
+
+  return `
+    <div
+      style="
+        display:flex;
+        gap:8px;
+        flex-wrap:wrap;
+        justify-content:flex-end;
+        flex:0 0 auto;
+      "
+    >
+      <button
+        type="button"
+        data-modal-action="open-attachment"
+        data-attachment-id="${escapeHtml(file.id)}"
+        style="
+          min-height:34px;
+          padding:0 12px;
+          border-radius:10px;
+          border:1px solid var(--border-soft);
+          background:transparent;
+          color:var(--text-soft);
+          font-size:12px;
+          font-weight:var(--weight-bold, 700);
+          cursor:pointer;
+        "
+      >
+        Abrir
+      </button>
+
+      <button
+        type="button"
+        data-modal-action="download-attachment"
+        data-attachment-id="${escapeHtml(file.id)}"
+        style="
+          min-height:34px;
+          padding:0 12px;
+          border-radius:10px;
+          border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft));
+          background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
+          color:var(--text-strong);
+          font-size:12px;
+          font-weight:var(--weight-bold, 700);
+          cursor:pointer;
+        "
+      >
+        Descargar
+      </button>
+    </div>
+  `;
+}
+
 function renderAttachments(detail = {}) {
   const files = getAttachments(detail);
 
   return `
-    <div style="display:grid; gap:14px;">
+    <div style="display:grid; gap:12px;">
       <div
         style="
           display:grid;
           gap:10px;
-          padding:16px;
-          border-radius:18px;
+          padding:14px;
+          border-radius:16px;
           border:1px dashed var(--border-soft);
           background:var(--surface-1, var(--surface-glass));
         "
       >
-        <div style="display:grid; gap:6px;">
+        <div style="display:grid; gap:5px;">
           <strong
             style="
               color:var(--text-strong);
-              font-size:14px;
+              font-size:13px;
               line-height:1.35;
             "
           >
@@ -1087,7 +1220,7 @@ function renderAttachments(detail = {}) {
         ${renderPendingFiles()}
       </div>
 
-      <div style="display:grid; gap:10px;">
+      <div style="display:grid; gap:8px;">
         <h3
           style="
             margin:0;
@@ -1104,11 +1237,12 @@ function renderAttachments(detail = {}) {
             ? `
               <div
                 style="
-                  padding:14px;
-                  border-radius:16px;
+                  padding:12px 14px;
+                  border-radius:14px;
                   border:1px solid var(--border-soft);
                   background:var(--surface-glass);
                   color:var(--text-dim);
+                  font-size:12px;
                 "
               >
                 No hay archivos adjuntos en esta incidencia.
@@ -1118,38 +1252,39 @@ function renderAttachments(detail = {}) {
               <div
                 style="
                   display:grid;
-                  gap:10px;
+                  gap:8px;
                 "
               >
                 ${files
                   .map((file) => {
-                    const hasLink = isAbsoluteUrl(file.url);
-
                     return `
                       <article
                         style="
+                          width:100%;
                           display:grid;
-                          gap:12px;
-                          padding:14px 16px;
-                          border-radius:16px;
+                          gap:10px;
+                          padding:12px 14px;
+                          border-radius:14px;
                           border:1px solid var(--border-soft);
                           background:var(--surface-glass);
                         "
                       >
                         <div
                           style="
-                            display:flex;
-                            justify-content:space-between;
-                            align-items:flex-start;
-                            gap:14px;
-                            flex-wrap:wrap;
+                            display:grid;
+                            grid-template-columns:minmax(0, 1fr) auto;
+                            gap:12px;
+                            align-items:center;
                           "
+                          class="incidencias-modal-attachment-row"
                         >
-                          <div style="display:grid; gap:4px; min-width:0; flex:1 1 320px;">
+                          <div style="display:grid; gap:4px; min-width:0;">
                             <strong
                               style="
                                 min-width:0;
                                 font-weight:var(--weight-semibold, 600);
+                                font-size:13px;
+                                line-height:1.35;
                                 word-break:break-word;
                                 color:var(--text-strong);
                               "
@@ -1160,7 +1295,8 @@ function renderAttachments(detail = {}) {
                             <span
                               style="
                                 color:var(--text-dim);
-                                font-size:12px;
+                                font-size:11px;
+                                line-height:1.4;
                               "
                             >
                               ${escapeHtml(
@@ -1173,51 +1309,7 @@ function renderAttachments(detail = {}) {
                             </span>
                           </div>
 
-                          <div
-                            style="
-                              display:flex;
-                              gap:8px;
-                              flex-wrap:wrap;
-                              justify-content:flex-end;
-                              flex:0 0 auto;
-                            "
-                          >
-                            <button
-                              type="button"
-                              data-modal-action="open-attachment"
-                              data-attachment-id="${escapeHtml(file.id)}"
-                              style="
-                                min-height:38px;
-                                padding:0 12px;
-                                border-radius:12px;
-                                border:1px solid var(--border-soft);
-                                background:transparent;
-                                color:var(--text-soft);
-                                font-weight:var(--weight-bold, 700);
-                                cursor:pointer;
-                              "
-                            >
-                              ${hasLink ? "Visualizar" : "Abrir"}
-                            </button>
-
-                            <button
-                              type="button"
-                              data-modal-action="download-attachment"
-                              data-attachment-id="${escapeHtml(file.id)}"
-                              style="
-                                min-height:38px;
-                                padding:0 12px;
-                                border-radius:12px;
-                                border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft));
-                                background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-                                color:var(--text-strong);
-                                font-weight:var(--weight-bold, 700);
-                                cursor:pointer;
-                              "
-                            >
-                              Descargar
-                            </button>
-                          </div>
+                          ${renderAttachmentActionButtons(file)}
                         </div>
                       </article>
                     `;
@@ -1238,14 +1330,15 @@ function renderTimeline(detail = {}) {
     return `
       <div
         style="
-          padding:14px;
-          border-radius:16px;
+          padding:12px 14px;
+          border-radius:14px;
           border:1px solid var(--border-soft);
           background:var(--surface-glass);
           color:var(--text-dim);
+          font-size:12px;
         "
       >
-        Todavía no hay actividad registrada en esta incidencia.
+        Sin actividad
       </div>
     `;
   }
@@ -1254,7 +1347,7 @@ function renderTimeline(detail = {}) {
     <div
       style="
         display:grid;
-        gap:12px;
+        gap:8px;
       "
     >
       ${timeline
@@ -1274,9 +1367,9 @@ function renderTimeline(detail = {}) {
             <article
               style="
                 display:grid;
-                gap:10px;
-                padding:14px;
-                border-radius:16px;
+                gap:8px;
+                padding:12px 14px;
+                border-radius:14px;
                 border:1px solid var(--border-soft);
                 background:var(--surface-glass);
               "
@@ -1290,14 +1383,14 @@ function renderTimeline(detail = {}) {
                   flex-wrap:wrap;
                 "
               >
-                <div style="display:grid; gap:6px; min-width:0; flex:1 1 240px;">
+                <div style="display:grid; gap:4px; min-width:0; flex:1 1 240px;">
                   ${
                     showTitle
                       ? `
                         <strong
                           style="
                             color:var(--text-strong);
-                            font-size:14px;
+                            font-size:13px;
                             line-height:1.35;
                             word-break:break-word;
                           "
@@ -1312,8 +1405,8 @@ function renderTimeline(detail = {}) {
                     style="
                       margin:0;
                       color:${kind === "comment" ? "var(--text-soft)" : "var(--text-dim)"};
-                      font-size:13px;
-                      line-height:1.6;
+                      font-size:12px;
+                      line-height:1.55;
                       white-space:pre-wrap;
                       word-break:break-word;
                     "
@@ -1325,7 +1418,7 @@ function renderTimeline(detail = {}) {
                 <div
                   style="
                     display:grid;
-                    gap:4px;
+                    gap:3px;
                     justify-items:end;
                     flex:0 0 auto;
                   "
@@ -1333,7 +1426,7 @@ function renderTimeline(detail = {}) {
                   <span
                     style="
                       color:var(--text-soft);
-                      font-size:12px;
+                      font-size:11px;
                       font-weight:var(--weight-semibold, 600);
                     "
                   >
@@ -1343,7 +1436,7 @@ function renderTimeline(detail = {}) {
                   <span
                     style="
                       color:var(--text-dim);
-                      font-size:12px;
+                      font-size:11px;
                     "
                   >
                     ${escapeHtml(formatDate(entry.createdAt))}
@@ -1365,85 +1458,62 @@ function renderComposer() {
     <section
       style="
         display:grid;
-        gap:12px;
+        gap:10px;
       "
     >
-      <div
-        style="
-          display:flex;
-          justify-content:space-between;
-          gap:10px;
-          align-items:flex-start;
-          flex-wrap:wrap;
-        "
-      >
-        <div style="display:grid; gap:4px;">
-          <h3
-            style="
-              margin:0;
-              color:var(--text-strong);
-              font-size:20px;
-              letter-spacing:-.02em;
-            "
-          >
-            Añadir más información
-          </h3>
-
-          <span
-            style="
-              color:var(--text-dim);
-              font-size:13px;
-              line-height:1.5;
-            "
-          >
-            Puedes escribir una actualización, adjuntar archivos o hacer ambas cosas a la vez.
-          </span>
-        </div>
-      </div>
-
-      <div
-        style="
-          display:grid;
-          gap:10px;
-        "
-      >
-        <textarea
-          id="incidencias-modal-comment-input"
-          data-modal-field="comment"
-          placeholder="Escribe aquí nuevos detalles, contexto adicional o cualquier actualización que quieras añadir..."
-          ${modalState.isSubmitting ? "disabled" : ""}
+      <div style="display:grid; gap:4px;">
+        <h3
           style="
-            width:100%;
-            min-height:140px;
-            padding:14px;
-            border-radius:16px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-1, var(--surface-glass));
+            margin:0;
             color:var(--text-strong);
-            outline:none;
-            resize:vertical;
-            line-height:1.6;
-          "
-        >${escapeHtml(draft)}</textarea>
-
-        <div
-          style="
-            display:flex;
-            justify-content:space-between;
-            gap:12px;
-            align-items:center;
-            flex-wrap:wrap;
+            font-size:18px;
+            letter-spacing:-.02em;
           "
         >
-          <span
-            style="
-              color:var(--text-dim);
-              font-size:12px;
-            "
-          >
-            Al actualizar, la incidencia volverá a abierta y se procesarán también los documentos pendientes.
-          </span>
-        </div>
+          Añadir más información
+        </h3>
+
+        <span
+          style="
+            color:var(--text-dim);
+            font-size:12px;
+            line-height:1.5;
+          "
+        >
+          Puedes escribir una actualización, adjuntar archivos o hacer ambas cosas a la vez.
+        </span>
+      </div>
+
+      <textarea
+        id="incidencias-modal-comment-input"
+        data-modal-field="comment"
+        placeholder="Escribe aquí nuevos detalles, contexto adicional o cualquier actualización que quieras añadir..."
+        ${modalState.isSubmitting ? "disabled" : ""}
+        style="
+          width:100%;
+          min-height:120px;
+          padding:12px 14px;
+          border-radius:14px;
+          border:1px solid var(--border-soft);
+          background:var(--surface-1, var(--surface-glass));
+          color:var(--text-strong);
+          outline:none;
+          resize:vertical;
+          line-height:1.55;
+          font-size:13px;
+        "
+      >${escapeHtml(draft)}</textarea>
+
+      <div>
+        <span
+          style="
+            color:var(--text-dim);
+            font-size:11px;
+            line-height:1.5;
+          "
+        >
+          Al actualizar, la incidencia volverá a abierta y se procesarán también los documentos pendientes.
+        </span>
       </div>
     </section>
   `;
@@ -1467,10 +1537,10 @@ function renderLoadingOverlay(label = "Procesando...") {
         style="
           display:grid;
           justify-items:center;
-          gap:12px;
-          min-width:min(100%, 240px);
-          padding:18px 20px;
-          border-radius:18px;
+          gap:10px;
+          min-width:min(100%, 220px);
+          padding:16px 18px;
+          border-radius:16px;
           border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 22%, var(--border-soft));
           background:linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent), transparent), var(--surface-1, var(--surface-glass));
           box-shadow:0 20px 40px rgba(0,0,0,.22);
@@ -1479,8 +1549,8 @@ function renderLoadingOverlay(label = "Procesando...") {
         <span
           aria-hidden="true"
           style="
-            width:28px;
-            height:28px;
+            width:24px;
+            height:24px;
             border-radius:999px;
             border:3px solid color-mix(in srgb, var(--accent, #7c5cff) 16%, transparent);
             border-top-color:var(--accent, #7c5cff);
@@ -1491,7 +1561,7 @@ function renderLoadingOverlay(label = "Procesando...") {
         <strong
           style="
             color:var(--text-strong);
-            font-size:14px;
+            font-size:13px;
             letter-spacing:-.02em;
           "
         >
@@ -1508,18 +1578,10 @@ function renderFooter(detail = {}) {
   return `
     <div
       style="
-        position:sticky;
-        bottom:0;
-        z-index:3;
         display:flex;
         justify-content:flex-end;
         gap:10px;
-        padding:18px 24px 24px;
-        border-top:1px solid var(--border-soft);
-        background:
-          linear-gradient(180deg, rgba(18,18,18,.55), rgba(18,18,18,.92)),
-          var(--surface-1, #121212);
-        backdrop-filter:blur(12px);
+        padding-top:2px;
       "
     >
       <button
@@ -1528,16 +1590,17 @@ function renderFooter(detail = {}) {
         data-ticket-id="${escapeHtml(ticketId)}"
         ${modalState.isSubmitting ? "disabled" : ""}
         style="
-          min-height:46px;
-          padding:0 18px;
-          border-radius:14px;
+          min-height:42px;
+          padding:0 16px;
+          border-radius:12px;
           border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
           background:var(--btn-primary-bg, var(--accent, #7c5cff));
           color:var(--btn-primary-text, #fff);
+          font-size:13px;
           font-weight:var(--weight-bold, 700);
           cursor:${modalState.isSubmitting ? "wait" : "pointer"};
           opacity:${modalState.isSubmitting ? ".82" : "1"};
-          box-shadow:0 16px 36px color-mix(in srgb, var(--accent, #7c5cff) 22%, transparent);
+          box-shadow:0 12px 28px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
         "
       >
         ${
@@ -1583,7 +1646,6 @@ function renderModalInner(detail = {}) {
   const description = getDisplayDescription(item);
   const tecnico = getTecnico(item);
   const facturaRelacionada = getFacturaRelacionada(item);
-
   const createdAt = formatDate(first(item.createdAt, item?.raw?.createdAt));
   const updatedAgo = formatRelativeDate(
     first(item.updatedAt, item?.raw?.updatedAt, item?.raw?.createdAt)
@@ -1606,11 +1668,11 @@ function renderModalInner(detail = {}) {
         position:fixed;
         inset:0;
         z-index:9999;
-        padding:24px;
+        padding:20px;
         display:grid;
         place-items:center;
-        background:rgba(0,0,0,.68);
-        backdrop-filter:blur(10px);
+        background:rgba(0,0,0,.64);
+        backdrop-filter:blur(8px);
       "
     >
       <div
@@ -1622,45 +1684,45 @@ function renderModalInner(detail = {}) {
         tabindex="-1"
         style="
           position:relative;
-          width:min(1240px, 100%);
+          width:min(1080px, 100%);
           max-height:92vh;
           overflow:auto;
-          border-radius:28px;
+          border-radius:24px;
           border:1px solid var(--border-soft, #2b2b2b);
           background:
-            radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 34%),
+            radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 34%),
             linear-gradient(180deg, var(--surface-2, #151515), var(--surface-1, #121212));
-          box-shadow:0 40px 100px rgba(0,0,0,.45);
+          box-shadow:0 34px 84px rgba(0,0,0,.40);
         "
       >
         ${busyLabel ? renderLoadingOverlay(busyLabel) : ""}
 
         <div
           style="
-            padding:24px;
+            padding:18px 18px 14px;
             border-bottom:1px solid var(--border-soft);
             display:flex;
             justify-content:space-between;
-            gap:18px;
+            gap:16px;
             flex-wrap:wrap;
           "
         >
           <div
             style="
               display:flex;
-              gap:16px;
+              gap:14px;
               align-items:flex-start;
-              min-width:min(100%, 560px);
+              min-width:min(100%, 520px);
             "
           >
             ${renderAvatar(item)}
 
-            <div style="display:grid; gap:10px; min-width:0;">
+            <div style="display:grid; gap:8px; min-width:0;">
               <div
                 style="
                   display:flex;
                   align-items:center;
-                  gap:10px;
+                  gap:8px;
                   flex-wrap:wrap;
                 "
               >
@@ -1672,13 +1734,13 @@ function renderModalInner(detail = {}) {
                   style="
                     display:inline-flex;
                     align-items:center;
-                    min-height:28px;
-                    padding:0 10px;
+                    min-height:26px;
+                    padding:0 9px;
                     border-radius:999px;
                     border:1px solid var(--border-soft);
                     background:var(--surface-glass);
                     color:var(--text-dim);
-                    font-size:12px;
+                    font-size:11px;
                     font-weight:var(--weight-bold, 700);
                     letter-spacing:.04em;
                     text-transform:uppercase;
@@ -1692,14 +1754,14 @@ function renderModalInner(detail = {}) {
                 ${renderChip(priorityLabel, getPriorityChipStyle(priorityRaw))}
               </div>
 
-              <div style="display:grid; gap:6px; min-width:0;">
+              <div style="display:grid; gap:4px; min-width:0;">
                 <h2
                   id="incidencias-modal-title"
                   style="
                     margin:0;
                     color:var(--text-strong);
-                    font-size:clamp(28px, 4vw, 42px);
-                    line-height:1;
+                    font-size:clamp(24px, 3.8vw, 34px);
+                    line-height:1.02;
                     letter-spacing:-.04em;
                     word-break:break-word;
                   "
@@ -1710,8 +1772,8 @@ function renderModalInner(detail = {}) {
                 <span
                   style="
                     color:var(--text-dim);
-                    font-size:14px;
-                    line-height:1.5;
+                    font-size:12px;
+                    line-height:1.45;
                   "
                 >
                   Última actualización ${escapeHtml(updatedAgo)}
@@ -1723,7 +1785,7 @@ function renderModalInner(detail = {}) {
           <div
             style="
               display:flex;
-              gap:10px;
+              gap:8px;
               flex-wrap:wrap;
               align-items:flex-start;
             "
@@ -1733,12 +1795,12 @@ function renderModalInner(detail = {}) {
               data-modal-close="true"
               aria-label="Cerrar modal"
               style="
-                width:48px;
-                height:48px;
+                width:42px;
+                height:42px;
                 border:none;
-                border-radius:16px;
+                border-radius:14px;
                 cursor:pointer;
-                font-size:20px;
+                font-size:18px;
                 background:var(--surface-glass);
                 color:var(--text-strong);
                 border:1px solid var(--border-soft);
@@ -1751,9 +1813,9 @@ function renderModalInner(detail = {}) {
 
         <div
           style="
-            padding:24px;
+            padding:16px 18px 18px;
             display:grid;
-            gap:22px;
+            gap:16px;
           "
         >
           ${renderFeedbackBox()}
@@ -1762,7 +1824,7 @@ function renderModalInner(detail = {}) {
             style="
               display:grid;
               grid-template-columns:repeat(4, minmax(0, 1fr));
-              gap:14px;
+              gap:10px;
             "
             class="incidencias-modal-meta-grid"
           >
@@ -1775,38 +1837,29 @@ function renderModalInner(detail = {}) {
           <section
             style="
               display:grid;
-              gap:10px;
+              gap:8px;
             "
           >
-            <div
+            <h3
               style="
-                display:flex;
-                align-items:center;
-                justify-content:space-between;
-                gap:10px;
-                flex-wrap:wrap;
+                margin:0;
+                color:var(--text-strong);
+                font-size:18px;
+                letter-spacing:-.02em;
               "
             >
-              <h3
-                style="
-                  margin:0;
-                  color:var(--text-strong);
-                  font-size:20px;
-                  letter-spacing:-.02em;
-                "
-              >
-                Descripción de la incidencia
-              </h3>
-            </div>
+              Descripción de la incidencia
+            </h3>
 
             <div
               style="
-                padding:18px;
-                border-radius:18px;
+                padding:14px;
+                border-radius:16px;
                 background:var(--surface-glass);
                 border:1px solid var(--border-soft);
                 color:var(--text-soft);
-                line-height:1.7;
+                font-size:13px;
+                line-height:1.65;
                 white-space:pre-wrap;
                 word-break:break-word;
               "
@@ -1817,58 +1870,37 @@ function renderModalInner(detail = {}) {
 
           ${renderComposer(item)}
 
-          <div
+          <section
             style="
               display:grid;
-              grid-template-columns:minmax(0, 1.32fr) minmax(360px, .88fr);
-              gap:18px;
-              align-items:start;
+              gap:8px;
             "
-            class="incidencias-modal-lower-grid"
           >
-            <section
+            ${renderAttachments(item)}
+          </section>
+
+          <section
+            style="
+              display:grid;
+              gap:8px;
+            "
+          >
+            <h3
               style="
-                display:grid;
-                gap:10px;
+                margin:0;
+                color:var(--text-strong);
+                font-size:18px;
+                letter-spacing:-.02em;
               "
             >
-              <h3
-                style="
-                  margin:0;
-                  color:var(--text-strong);
-                  font-size:20px;
-                  letter-spacing:-.02em;
-                "
-              >
-                Documentos
-              </h3>
+              Historial y actividad
+            </h3>
 
-              ${renderAttachments(item)}
-            </section>
+            ${renderTimeline(item)}
+          </section>
 
-            <section
-              style="
-                display:grid;
-                gap:10px;
-              "
-            >
-              <h3
-                style="
-                  margin:0;
-                  color:var(--text-strong);
-                  font-size:20px;
-                  letter-spacing:-.02em;
-                "
-              >
-                Historial y actividad
-              </h3>
-
-              ${renderTimeline(item)}
-            </section>
-          </div>
+          ${renderFooter(item)}
         </div>
-
-        ${renderFooter(item)}
 
         <style>
           @keyframes incidenciasModalSpin {
@@ -1883,15 +1915,26 @@ function renderModalInner(detail = {}) {
             display:grid !important;
           }
 
-          @media (max-width: 1120px) {
-            .incidencias-modal-lower-grid {
-              grid-template-columns: 1fr !important;
-            }
+          [data-theme="light"] #${PANEL_ID}{
+            background:
+              radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 34%),
+              linear-gradient(180deg, rgba(255,255,255,.96), rgba(250,251,255,.94));
+            box-shadow:
+              0 30px 70px rgba(15,23,42,.14),
+              0 0 0 1px rgba(255,255,255,.65) inset;
+          }
+
+          [data-theme="light"] #${PANEL_ID} [style*="background:var(--surface-glass)"]{
+            backdrop-filter:none;
           }
 
           @media (max-width: 980px) {
             .incidencias-modal-meta-grid {
               grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            }
+
+            .incidencias-modal-attachment-row {
+              grid-template-columns: 1fr !important;
             }
           }
 
@@ -1917,9 +1960,7 @@ function getRoot() {
 function ensureRoot() {
   let root = getRoot();
 
-  if (root) {
-    return root;
-  }
+  if (root) return root;
 
   root = document.createElement("div");
   root.id = MODAL_ID;
@@ -1959,9 +2000,7 @@ function restoreFocus() {
 ========================================================= */
 
 function detachEscHandler() {
-  if (!modalState.escHandler) {
-    return;
-  }
+  if (!modalState.escHandler) return;
 
   try {
     document.removeEventListener("keydown", modalState.escHandler);
@@ -1990,7 +2029,6 @@ function attachEscHandler() {
 
 async function callExternalAction(action = "", payload = {}) {
   const actionName = safeText(action, "");
-
   if (!actionName) return null;
 
   const candidates = [
@@ -2003,9 +2041,7 @@ async function callExternalAction(action = "", payload = {}) {
   ];
 
   for (const candidate of candidates) {
-    if (typeof candidate !== "function") {
-      continue;
-    }
+    if (typeof candidate !== "function") continue;
 
     try {
       return await candidate(payload);
@@ -2031,7 +2067,6 @@ function renderModal() {
   }
 
   detachRootBindings();
-
   root.innerHTML = renderModalInner(modalState.detail);
   modalState.bindingsAttached = false;
 
@@ -2363,6 +2398,17 @@ async function handleAttachmentAction(attachmentId = "", mode = "open") {
 
   const resolvedUrl = safeText(attachment.url, "");
 
+  if (resolvedUrl && isAbsoluteUrl(resolvedUrl)) {
+    try {
+      window.open(resolvedUrl, "_blank", "noopener,noreferrer");
+      showToast(
+        mode === "download" ? "Descarga iniciada." : "Abriendo documento.",
+        "success"
+      );
+      return true;
+    } catch {}
+  }
+
   try {
     const response = await callExternalAction(
       mode === "download" ? "downloadTicketAttachment" : "openTicketAttachment",
@@ -2385,6 +2431,7 @@ async function handleAttachmentAction(attachmentId = "", mode = "open") {
     if (response && typeof response === "object") {
       const responseUrl = safeText(
         first(
+          response.blobUrl,
           response.url,
           response.downloadUrl,
           response.viewUrl,
@@ -2428,17 +2475,6 @@ async function handleAttachmentAction(attachmentId = "", mode = "open") {
     return false;
   }
 
-  if (resolvedUrl) {
-    try {
-      window.open(resolvedUrl, "_blank", "noopener,noreferrer");
-      showToast(
-        mode === "download" ? "Descarga iniciada." : "Abriendo documento.",
-        "success"
-      );
-      return true;
-    } catch {}
-  }
-
   safeEmit("incidencias:modal:attachment", {
     ticketId,
     attachment,
@@ -2446,14 +2482,11 @@ async function handleAttachmentAction(attachmentId = "", mode = "open") {
   });
 
   setFeedback(
-    "Este adjunto no trae una URL pública directa. Conecta el endpoint de apertura/descarga en el bridge de incidencias para resolverlo.",
+    "Este adjunto todavía no tiene blob URL resuelta. Revisa blobUrl / url / path / blobName en el payload o el bridge externo.",
     "info"
   );
 
-  showToast(
-    "Este adjunto todavía no tiene enlace resuelto.",
-    "info"
-  );
+  showToast("Este adjunto todavía no tiene enlace resuelto.", "info");
 
   renderModal();
   attachRootBindings();
@@ -2465,9 +2498,7 @@ async function handleAttachmentAction(attachmentId = "", mode = "open") {
 ========================================================= */
 
 function attachRootBindings() {
-  if (modalState.bindingsAttached) {
-    return;
-  }
+  if (modalState.bindingsAttached) return;
 
   const root = ensureRoot();
 
@@ -2479,8 +2510,14 @@ function attachRootBindings() {
 
     if (fieldName === "comment") {
       modalState.commentDraft = field.value || "";
-      return;
     }
+  };
+
+  const onChange = (event) => {
+    const field = event.target.closest("[data-modal-field]");
+    if (!field) return;
+
+    const fieldName = safeText(field.dataset.modalField, "");
 
     if (fieldName === "attachments") {
       modalState.pendingFiles = dedupeFiles([
@@ -2555,9 +2592,11 @@ function attachRootBindings() {
   };
 
   root.__incidenciasModalInputHandler = onInput;
+  root.__incidenciasModalChangeHandler = onChange;
   root.__incidenciasModalClickHandler = onClick;
 
   root.addEventListener("input", onInput);
+  root.addEventListener("change", onChange);
   root.addEventListener("click", onClick);
 
   modalState.bindingsAttached = true;
@@ -2575,6 +2614,13 @@ function detachRootBindings() {
       root.removeEventListener("input", root.__incidenciasModalInputHandler);
     } catch {}
     delete root.__incidenciasModalInputHandler;
+  }
+
+  if (root.__incidenciasModalChangeHandler) {
+    try {
+      root.removeEventListener("change", root.__incidenciasModalChangeHandler);
+    } catch {}
+    delete root.__incidenciasModalChangeHandler;
   }
 
   if (root.__incidenciasModalClickHandler) {

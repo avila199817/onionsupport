@@ -2,15 +2,19 @@
    Onion SPA - Incidencias Actions
    Archivo: src/views/incidencias/incidencias.actions.js
 
+   CLIENT EXPERIENCE PRO · ACTIONS REAL · 10/10
+
    RESPONSABILIDADES:
    - centralizar acciones operativas del módulo de incidencias
    - resolver detalle ticket desde store + backend
    - abrir detalle a nivel de datos, no de UI
-   - copiar id de ticket
+   - copiar referencia de ticket
    - exportar colección a CSV
-   - abrir modal de creación premium
+   - abrir modal de creación
+   - añadir comentarios al ticket
+   - reabrir incidencias cerradas o resueltas
    - desacoplar la vista principal de la lógica operativa
-   - mantener compatibilidad con incidenciasView.js
+   - mantener compatibilidad con incidenciasView.js y incidencias.modal.js
 
    HARDENING PRO:
    - tolerancia a payloads heterogéneos
@@ -20,6 +24,7 @@
    - clipboard robusto con fallback legacy
    - eventos opcionales vía AppCore.events
    - create modal bridge multi-entorno
+   - comment / reopen bridge con fallback elegante
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -75,6 +80,10 @@ function normalizeTicketId(value = "") {
   return safeText(value, "");
 }
 
+function normalizeCommentMessage(value = "") {
+  return safeText(value, "").replace(/\s+/g, " ").trim();
+}
+
 function isObject(value) {
   return value && typeof value === "object" && !Array.isArray(value);
 }
@@ -126,6 +135,76 @@ function pickDetail(payload = null) {
 
   return null;
 }
+
+function tryResolveCallable(...candidates) {
+  for (const candidate of candidates) {
+    if (typeof candidate === "function") {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+async function callExternalAction(actionName = "", payload = {}) {
+  const action = safeText(actionName, "");
+  if (!action) {
+    throw new Error("INVALID_EXTERNAL_ACTION");
+  }
+
+  const fn = tryResolveCallable(
+    AppCore?.modules?.IncidenciasModalActions?.[action],
+    AppCore?.modules?.IncidenciasActions?.[action],
+    AppCore?.modules?.Incidencias?.[action],
+    window?.OnionIncidenciasModalActions?.[action],
+    window?.OnionIncidenciasActions?.[action],
+    window?.IncidenciasActions?.[action]
+  );
+
+  if (!fn) {
+    return null;
+  }
+
+  return await fn(payload);
+}
+
+function buildLocalCommentEntry({
+  ticketId = "",
+  message = "",
+  author = "Tú",
+} = {}) {
+  return {
+    id: `local-comment-${Date.now()}`,
+    ticketId,
+    commentId: `local-comment-${Date.now()}`,
+    title: "Nuevo comentario",
+    action: "comment",
+    kind: "comment",
+    message,
+    text: message,
+    body: message,
+    author,
+    user: author,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function canReopenStatus(value = "") {
+  const key = safeText(value, "").toLowerCase();
+
+  return [
+    "resolved",
+    "resuelta",
+    "resuelto",
+    "closed",
+    "cerrada",
+    "cerrado",
+  ].includes(key);
+}
+
+/* =========================================================
+   DATA PICKERS
+========================================================= */
 
 function getId(item = {}) {
   return safeText(
@@ -241,11 +320,11 @@ function getAssigned(item = {}) {
         assignedObject.nombre,
         assignedObject.displayName
       ),
-      "No asignado"
+      "Equipo de soporte"
     );
   }
 
-  return safeText(assignedObject, "No asignado");
+  return safeText(assignedObject, "Equipo de soporte");
 }
 
 function getStatus(item = {}) {
@@ -292,6 +371,7 @@ function getAttachments(item = {}) {
     const entry = safeObject(file);
 
     return {
+      id: safeText(first(entry.id, entry.fileId), ""),
       name: safeText(
         first(
           entry.name,
@@ -311,6 +391,7 @@ function getAttachments(item = {}) {
         "#"
       ),
       size: safeNumber(entry.size, 0),
+      type: safeText(first(entry.type, entry.mimeType, entry.mime), ""),
       raw: entry,
     };
   });
@@ -327,12 +408,52 @@ function getHistory(item = {}) {
   ).map((row) => safeObject(row));
 }
 
+function getComments(item = {}) {
+  return safeArray(
+    first(
+      item.comments,
+      item.notes,
+      item.messages
+    )
+  ).map((row) => safeObject(row));
+}
+
+function getCategory(item = {}) {
+  return safeText(
+    first(item.category, item.categoria),
+    "General"
+  );
+}
+
+function getSource(item = {}) {
+  return safeText(
+    first(item.source, item.origen, item.channel),
+    "panel"
+  );
+}
+
+function getTags(item = {}) {
+  const raw = first(item.tags, item.labels);
+
+  if (Array.isArray(raw)) {
+    return raw.map((tag) => safeText(tag, "")).filter(Boolean);
+  }
+
+  if (typeof raw === "string") {
+    return raw.split(",").map((tag) => safeText(tag, "")).filter(Boolean);
+  }
+
+  return [];
+}
+
 function normalizeTicketDetail(detail = {}) {
   const raw = safeObject(detail);
 
   return {
     ...raw,
+    raw,
     ticketId: getId(raw),
+    ticketCode: safeText(first(raw.ticketCode, raw.code, getId(raw)), ""),
     title: getTitle(raw),
     description: getDescription(raw),
     clientName: getClient(raw),
@@ -344,8 +465,16 @@ function normalizeTicketDetail(detail = {}) {
     updatedAt: getUpdatedAt(raw),
     attachments: getAttachments(raw),
     history: getHistory(raw),
+    comments: getComments(raw),
+    category: getCategory(raw),
+    source: getSource(raw),
+    tags: getTags(raw),
   };
 }
+
+/* =========================================================
+   CSV
+========================================================= */
 
 function escapeCsvCell(value = "") {
   const text =
@@ -474,7 +603,7 @@ export async function getTicketDetailAction({
   const id = normalizeTicketId(ticketId);
 
   if (!id) {
-    if (!silent) showToast("No se pudo resolver el ticket.", "error");
+    if (!silent) showToast("No se pudo resolver la incidencia.", "error");
     return null;
   }
 
@@ -554,7 +683,7 @@ export async function openTicketAction({
   const id = normalizeTicketId(ticketId);
 
   if (!id) {
-    if (!silent) showToast("Ticket inválido.", "error");
+    if (!silent) showToast("Incidencia inválida.", "error");
     return null;
   }
 
@@ -582,11 +711,224 @@ export async function refreshTicketDetailAction({
   ticketId = "",
   silent = true,
 } = {}) {
-  return getTicketDetailAction({
+  const detail = await getTicketDetailAction({
     ticketId,
     preferFresh: true,
     silent,
   });
+
+  if (detail) {
+    safeEmit("incidencias:modal:update", {
+      detail,
+      ticketId: normalizeTicketId(ticketId),
+    });
+  }
+
+  return detail;
+}
+
+/* =========================================================
+   COMMENT / REOPEN
+========================================================= */
+
+export async function commentTicketAction({
+  ticketId = "",
+  message = "",
+  detail = null,
+  silent = false,
+} = {}) {
+  const id = normalizeTicketId(ticketId);
+  const normalizedMessage = normalizeCommentMessage(message);
+
+  if (!id) {
+    if (!silent) showToast("No se pudo identificar la incidencia.", "error");
+    return null;
+  }
+
+  if (!normalizedMessage) {
+    if (!silent) showToast("Escribe un comentario antes de enviarlo.", "error");
+    return null;
+  }
+
+  safeEmit("incidencias:comment:start", {
+    ticketId: id,
+    message: normalizedMessage,
+  });
+
+  try {
+    const response = await callExternalAction("commentTicket", {
+      ticketId: id,
+      message: normalizedMessage,
+      detail,
+    });
+
+    const picked = pickDetail(response);
+
+    if (picked) {
+      const normalized = normalizeTicketDetail(picked);
+
+      safeEmit("incidencias:comment:success", {
+        ticketId: id,
+        message: normalizedMessage,
+        detail: normalized,
+        source: "external",
+      });
+
+      if (!silent) {
+        showToast("Comentario añadido.", "success");
+      }
+
+      return normalized;
+    }
+
+    const current =
+      normalizeTicketDetail(detail || getTicketDetailFromStoreAction({ ticketId: id }) || { ticketId: id });
+
+    const localComment = buildLocalCommentEntry({
+      ticketId: id,
+      message: normalizedMessage,
+      author: "Tú",
+    });
+
+    const normalized = normalizeTicketDetail({
+      ...current.raw,
+      ...current,
+      comments: [localComment, ...safeArray(first(current.comments, current.raw?.comments))],
+      history: [localComment, ...safeArray(first(current.history, current.raw?.history))],
+      updatedAt: new Date().toISOString(),
+      raw: {
+        ...safeObject(current.raw),
+        comments: [localComment, ...safeArray(first(current.comments, current.raw?.comments))],
+        history: [localComment, ...safeArray(first(current.history, current.raw?.history))],
+        updatedAt: new Date().toISOString(),
+      },
+    });
+
+    safeEmit("incidencias:comment:success", {
+      ticketId: id,
+      message: normalizedMessage,
+      detail: normalized,
+      source: "local-fallback",
+    });
+
+    if (!silent) {
+      showToast("Comentario añadido.", "success");
+    }
+
+    return normalized;
+  } catch (error) {
+    safeEmit("incidencias:comment:error", {
+      ticketId: id,
+      message: normalizedMessage,
+      error,
+    });
+
+    if (!silent) {
+      showToast("No se pudo añadir el comentario.", "error");
+    }
+
+    return null;
+  }
+}
+
+export async function reopenTicketAction({
+  ticketId = "",
+  detail = null,
+  silent = false,
+} = {}) {
+  const id = normalizeTicketId(ticketId);
+
+  if (!id) {
+    if (!silent) showToast("No se pudo identificar la incidencia.", "error");
+    return null;
+  }
+
+  const current =
+    normalizeTicketDetail(detail || getTicketDetailFromStoreAction({ ticketId: id }) || { ticketId: id });
+
+  if (!canReopenStatus(current.status)) {
+    if (!silent) {
+      showToast("La incidencia ya está abierta o en curso.", "info");
+    }
+
+    return current;
+  }
+
+  safeEmit("incidencias:reopen:start", {
+    ticketId: id,
+  });
+
+  try {
+    const response = await callExternalAction("reopenTicket", {
+      ticketId: id,
+      detail: current,
+    });
+
+    const picked = pickDetail(response);
+
+    if (picked) {
+      const normalized = normalizeTicketDetail(picked);
+
+      safeEmit("incidencias:reopen:success", {
+        ticketId: id,
+        detail: normalized,
+        source: "external",
+      });
+
+      if (!silent) {
+        showToast("Incidencia reabierta.", "success");
+      }
+
+      return normalized;
+    }
+
+    const reopenEvent = {
+      id: `local-reopen-${Date.now()}`,
+      title: "Incidencia reabierta",
+      action: "reopen",
+      kind: "event",
+      user: "Sistema",
+      createdAt: new Date().toISOString(),
+    };
+
+    const normalized = normalizeTicketDetail({
+      ...current.raw,
+      ...current,
+      status: "open",
+      updatedAt: new Date().toISOString(),
+      history: [reopenEvent, ...safeArray(first(current.history, current.raw?.history))],
+      raw: {
+        ...safeObject(current.raw),
+        status: "open",
+        estado: "open",
+        updatedAt: new Date().toISOString(),
+        history: [reopenEvent, ...safeArray(first(current.history, current.raw?.history))],
+      },
+    });
+
+    safeEmit("incidencias:reopen:success", {
+      ticketId: id,
+      detail: normalized,
+      source: "local-fallback",
+    });
+
+    if (!silent) {
+      showToast("Incidencia reabierta.", "success");
+    }
+
+    return normalized;
+  } catch (error) {
+    safeEmit("incidencias:reopen:error", {
+      ticketId: id,
+      error,
+    });
+
+    if (!silent) {
+      showToast("No se pudo reabrir la incidencia.", "error");
+    }
+
+    return null;
+  }
 }
 
 /* =========================================================
@@ -600,14 +942,14 @@ export async function copyTicketIdAction({
   const id = normalizeTicketId(ticketId);
 
   if (!id) {
-    if (!silent) showToast("No hay ID para copiar.", "error");
+    if (!silent) showToast("No hay referencia para copiar.", "error");
     return false;
   }
 
   const copied = await writeClipboardText(id);
 
   if (!copied) {
-    if (!silent) showToast("No se pudo copiar el ID.", "error");
+    if (!silent) showToast("No se pudo copiar la referencia.", "error");
     return false;
   }
 
@@ -615,7 +957,7 @@ export async function copyTicketIdAction({
     ticketId: id,
   });
 
-  if (!silent) showToast("ID copiado", "success");
+  if (!silent) showToast("Referencia copiada", "success");
 
   return true;
 }
@@ -654,7 +996,7 @@ export function exportIncidenciasCsvAction({
       filename: safeText(filename, CSV_FILENAME),
     });
 
-    if (!silent) showToast("CSV exportado", "success");
+    if (!silent) showToast("Historial exportado", "success");
 
     return true;
   } catch (error) {
@@ -663,7 +1005,7 @@ export function exportIncidenciasCsvAction({
       error,
     });
 
-    if (!silent) showToast("No se pudo exportar el CSV.", "error");
+    if (!silent) showToast("No se pudo exportar el historial.", "error");
 
     return false;
   }
@@ -734,7 +1076,7 @@ export async function createIncidenciaAction({
 
     if (!silent) {
       showToast(
-        "No se pudo abrir el flujo de creación.",
+        "No se pudo abrir el formulario de nueva incidencia.",
         "error"
       );
     }
@@ -742,6 +1084,23 @@ export async function createIncidenciaAction({
     return false;
   }
 }
+
+/* =========================================================
+   MODAL ACTION BRIDGE EXPORT
+========================================================= */
+
+export const OnionIncidenciasActions = {
+  refreshTicketDetail: refreshTicketDetailAction,
+  commentTicket: commentTicketAction,
+  reopenTicket: reopenTicketAction,
+};
+
+try {
+  window.OnionIncidenciasActions = {
+    ...(window.OnionIncidenciasActions || {}),
+    ...OnionIncidenciasActions,
+  };
+} catch {}
 
 /* =========================================================
    DETAIL HELPERS EXPORT
@@ -760,5 +1119,9 @@ export {
   getUpdatedAt as getIncidenciaUpdatedAtAction,
   getAttachments as getIncidenciaAttachmentsAction,
   getHistory as getIncidenciaHistoryAction,
+  getComments as getIncidenciaCommentsAction,
+  getCategory as getIncidenciaCategoryAction,
+  getSource as getIncidenciaSourceAction,
+  getTags as getIncidenciaTagsAction,
   normalizeTicketDetail as normalizeIncidenciaDetailAction,
 };

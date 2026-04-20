@@ -7,11 +7,11 @@
    RESPONSABILIDADES:
    - renderizar modal premium de detalle de incidencia
    - abrir / cerrar modal limpio
-   - refrescar contenido del ticket desde el modal
-   - copiar referencia desde el modal
-   - permitir reabrir incidencia cuando proceda
+   - copiar el ID de la incidencia pulsando sobre el propio ID
    - permitir añadir nuevos comentarios / detalles
-   - visualizar actividad, timeline y adjuntos
+   - al comentar, forzar visualmente estado abierta
+   - visualizar actividad, timeline y adjuntos existentes
+   - permitir añadir nuevos adjuntos al ticket
    - exponer bridge global para incidenciasView.js
    - integrarse con AppCore.events sin acoplar la vista
 
@@ -21,7 +21,7 @@
    - modal singleton
    - escape / overlay close
    - render incremental seguro
-   - estado visual interno de refresh / comment / reopen
+   - estado visual interno de comment / upload
    - bridge flexible para acciones externas
 ========================================================= */
 
@@ -49,15 +49,15 @@ const PANEL_ID = "incidencias-detail-modal-panel";
 const modalState = {
   detail: null,
   isOpen: false,
-  isRefreshing: false,
   isCommentSubmitting: false,
-  isReopening: false,
+  isUploadSubmitting: false,
   bindingsAttached: false,
   lastActiveElement: null,
   escHandler: null,
   commentDraft: "",
   feedbackMessage: "",
   feedbackType: "info",
+  pendingFiles: [],
 };
 
 /* =========================================================
@@ -136,6 +136,10 @@ function escapeHtml(value = "") {
     .replace(/'/g, "&#39;");
 }
 
+function isAbsoluteUrl(value = "") {
+  return /^https?:\/\//i.test(String(value || "").trim());
+}
+
 function showToast(message = "", type = "info") {
   try {
     if (typeof AppCore?.toast?.[type] === "function") {
@@ -177,6 +181,27 @@ function formatBytes(bytes = 0) {
   if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 
   return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+function dedupeFiles(files = []) {
+  const map = new Map();
+
+  safeArray(files).forEach((file) => {
+    if (!(file instanceof File)) return;
+
+    const key = [
+      safeText(file.name, ""),
+      safeNumber(file.size, 0),
+      safeNumber(file.lastModified, 0),
+      safeText(file.type, ""),
+    ].join("::");
+
+    if (!map.has(key)) {
+      map.set(key, file);
+    }
+  });
+
+  return Array.from(map.values());
 }
 
 /* =========================================================
@@ -257,22 +282,6 @@ function getTicketId(detail = {}) {
   );
 }
 
-function getTicketCode(detail = {}) {
-  return safeText(
-    first(
-      detail.ticketCode,
-      detail.code,
-      detail.ticketId,
-      detail.id,
-      detail?.raw?.ticketCode,
-      detail?.raw?.code,
-      detail?.raw?.ticketId,
-      detail?.raw?.id
-    ),
-    "—"
-  );
-}
-
 function getClientAvatar(detail = {}) {
   return safeText(
     first(
@@ -316,40 +325,6 @@ function getClientName(detail = {}) {
   );
 }
 
-function getClientEmail(detail = {}) {
-  return safeText(
-    first(
-      detail.clientEmail,
-      detail.email,
-      detail?.cliente?.email,
-      detail?.client?.email,
-      detail?.receptor?.email,
-      detail?.createdBy?.email,
-      detail?.raw?.clientEmail,
-      detail?.raw?.email,
-      detail?.raw?.cliente?.email,
-      detail?.raw?.client?.email,
-      detail?.raw?.receptor?.email,
-      detail?.raw?.createdBy?.email
-    ),
-    "Sin email"
-  );
-}
-
-function getAssignedTo(detail = {}) {
-  return safeText(
-    first(
-      detail.assignedToName,
-      detail?.tecnico?.name,
-      detail?.assignedTo?.name,
-      detail?.raw?.assignedToName,
-      detail?.raw?.tecnico?.name,
-      detail?.raw?.assignedTo?.name
-    ),
-    "No asignado"
-  );
-}
-
 function getDisplayDescription(detail = {}) {
   return safeText(
     first(
@@ -365,56 +340,38 @@ function getDisplayDescription(detail = {}) {
   );
 }
 
-function getCategory(detail = {}) {
+function getTecnico(detail = {}) {
   return safeText(
     first(
-      detail.category,
-      detail.categoria,
-      detail.tipo,
-      detail?.raw?.category,
-      detail?.raw?.categoria,
-      detail?.raw?.tipo
+      detail.tecnico?.name,
+      detail.assignedToName,
+      detail?.raw?.tecnico?.name,
+      detail?.raw?.assignedTo?.name,
+      detail?.raw?.assignedToName
     ),
-    "General"
+    "No asignado"
   );
 }
 
-function getSource(detail = {}) {
+function getFacturaRelacionada(detail = {}) {
   return safeText(
     first(
-      detail.source,
-      detail.origen,
-      detail.channel,
-      detail?.raw?.source,
-      detail?.raw?.origen,
-      detail?.raw?.channel,
-      "panel"
+      detail.invoiceId,
+      detail.facturaId,
+      detail.factura,
+      detail.invoiceCode,
+      detail?.raw?.invoiceId,
+      detail?.raw?.facturaId,
+      detail?.raw?.factura,
+      detail?.raw?.invoiceCode,
+      detail?.raw?.facturaRelacionada,
+      detail?.raw?.invoice?.id,
+      detail?.raw?.factura?.id,
+      detail?.raw?.invoice?.code,
+      detail?.raw?.factura?.code
     ),
-    "panel"
+    "No vinculada"
   );
-}
-
-function getTags(detail = {}) {
-  const rawTags = first(
-    detail.tags,
-    detail?.raw?.tags,
-    detail?.raw?.labels
-  );
-
-  if (Array.isArray(rawTags)) {
-    return rawTags
-      .map((tag) => safeText(tag, ""))
-      .filter(Boolean);
-  }
-
-  if (typeof rawTags === "string") {
-    return rawTags
-      .split(",")
-      .map((tag) => safeText(tag, ""))
-      .filter(Boolean);
-  }
-
-  return [];
 }
 
 function getAttachments(detail = {}) {
@@ -517,11 +474,6 @@ function getTimeline(detail = {}) {
     const timeB = new Date(b.createdAt || 0).getTime() || 0;
     return timeB - timeA;
   });
-}
-
-function canReopen(detail = {}) {
-  const status = safeText(detail.status, "").toLowerCase();
-  return ["resolved", "resuelta", "resuelto", "closed", "cerrada", "cerrado"].includes(status);
 }
 
 /* =========================================================
@@ -679,8 +631,7 @@ function renderAvatar(detail = {}) {
     safeText(
       first(
         detail.ticketId,
-        getClientName(detail),
-        getClientEmail(detail)
+        getClientName(detail)
       ),
       "onion"
     )
@@ -887,51 +838,86 @@ function renderFeedbackBox() {
   `;
 }
 
-function renderTags(detail = {}) {
-  const tags = getTags(detail);
+function renderPendingFiles() {
+  const files = safeArray(modalState.pendingFiles);
 
-  if (!tags.length) {
+  if (!files.length) {
     return `
-      <span
+      <div
         style="
           color:var(--text-dim);
-          font-size:13px;
+          font-size:12px;
+          line-height:1.45;
         "
       >
-        Sin etiquetas
-      </span>
+        No has seleccionado archivos nuevos.
+      </div>
     `;
   }
 
   return `
-    <div
-      style="
-        display:flex;
-        flex-wrap:wrap;
-        gap:8px;
-      "
-    >
-      ${tags
-        .map(
-          (tag) => `
-            <span
+    <div style="display:grid; gap:8px;">
+      ${files
+        .map((file, index) => `
+          <div
+            style="
+              display:flex;
+              justify-content:space-between;
+              align-items:center;
+              gap:12px;
+              padding:12px 14px;
+              border-radius:14px;
+              border:1px solid var(--border-soft);
+              background:var(--surface-glass);
+            "
+          >
+            <div style="display:grid; gap:4px; min-width:0;">
+              <strong
+                style="
+                  color:var(--text-strong);
+                  font-size:13px;
+                  line-height:1.35;
+                  word-break:break-word;
+                "
+              >
+                ${escapeHtml(file.name || `archivo_${index + 1}`)}
+              </strong>
+
+              <span
+                style="
+                  color:var(--text-dim);
+                  font-size:12px;
+                "
+              >
+                ${escapeHtml(
+                  [
+                    safeText(file.type, ""),
+                    formatBytes(file.size),
+                  ].filter(Boolean).join(" · ") || "Archivo preparado"
+                )}
+              </span>
+            </div>
+
+            <button
+              type="button"
+              data-modal-action="remove-pending-file"
+              data-file-index="${index}"
               style="
-                display:inline-flex;
-                align-items:center;
-                min-height:28px;
-                padding:0 10px;
-                border-radius:999px;
-                border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 20%, var(--border-soft));
-                background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-                color:var(--text-soft);
-                font-size:12px;
+                min-height:36px;
+                padding:0 12px;
+                border-radius:12px;
+                border:1px solid var(--border-soft);
+                background:transparent;
+                color:var(--text-dim);
                 font-weight:var(--weight-bold, 700);
+                cursor:pointer;
+                flex:0 0 auto;
               "
             >
-              ${escapeHtml(tag)}
-            </span>
-          `
-        )
+              Quitar
+            </button>
+          </div>
+        `)
         .join("")}
     </div>
   `;
@@ -940,96 +926,218 @@ function renderTags(detail = {}) {
 function renderAttachments(detail = {}) {
   const files = getAttachments(detail);
 
-  if (!files.length) {
-    return `
+  return `
+    <div style="display:grid; gap:14px;">
       <div
         style="
-          padding:14px;
-          border-radius:16px;
-          border:1px solid var(--border-soft);
-          background:var(--surface-glass);
-          color:var(--text-dim);
+          display:grid;
+          gap:10px;
+          padding:16px;
+          border-radius:18px;
+          border:1px dashed var(--border-soft);
+          background:var(--surface-1, var(--surface-glass));
         "
       >
-        No hay archivos adjuntos en esta incidencia.
-      </div>
-    `;
-  }
+        <div style="display:grid; gap:6px;">
+          <strong
+            style="
+              color:var(--text-strong);
+              font-size:14px;
+              line-height:1.35;
+            "
+          >
+            Añadir documentos
+          </strong>
 
-  return `
-    <div
-      style="
-        display:grid;
-        gap:10px;
-      "
-    >
-      ${files
-        .map((file) => {
-          const hasLink = Boolean(file.url);
+          <span
+            style="
+              color:var(--text-dim);
+              font-size:12px;
+              line-height:1.5;
+            "
+          >
+            Puedes adjuntar capturas, PDFs u otros archivos útiles para ampliar la incidencia.
+          </span>
+        </div>
 
-          return `
-            <${hasLink ? "a" : "div"}
-              ${hasLink ? `href="${escapeHtml(file.url)}" target="_blank" rel="noopener"` : ""}
-              style="
-                display:flex;
-                justify-content:space-between;
-                align-items:center;
-                gap:14px;
-                padding:14px;
-                border-radius:16px;
-                border:1px solid var(--border-soft);
-                background:var(--surface-glass);
-                text-decoration:none;
-                color:var(--text-strong);
-              "
-            >
-              <div style="display:grid; gap:4px; min-width:0;">
-                <strong
-                  style="
-                    min-width:0;
-                    font-weight:var(--weight-semibold, 600);
-                    word-break:break-word;
-                  "
-                >
-                  ${escapeHtml(file.name)}
-                </strong>
+        <input
+          id="incidencias-modal-attachments-input"
+          type="file"
+          data-modal-field="attachments"
+          multiple
+          ${modalState.isUploadSubmitting ? "disabled" : ""}
+          style="
+            width:100%;
+            color:var(--text-soft);
+          "
+        />
 
-                <span
-                  style="
-                    color:var(--text-dim);
-                    font-size:12px;
-                  "
-                >
-                  ${escapeHtml(
-                    [
-                      file.type,
-                      formatBytes(file.size),
-                      file.uploadedAt ? formatDate(file.uploadedAt) : "",
-                    ].filter(Boolean).join(" · ") || "Archivo adjunto"
-                  )}
-                </span>
-              </div>
+        ${renderPendingFiles()}
 
-              ${
-                hasLink
-                  ? `
+        <div
+          style="
+            display:flex;
+            justify-content:flex-end;
+            gap:10px;
+            flex-wrap:wrap;
+          "
+        >
+          <button
+            type="button"
+            data-modal-action="upload-files"
+            ${modalState.isUploadSubmitting ? "disabled" : ""}
+            style="
+              min-height:42px;
+              padding:0 16px;
+              border-radius:14px;
+              border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
+              background:var(--btn-primary-bg, var(--accent, #7c5cff));
+              color:var(--btn-primary-text, #fff);
+              font-weight:var(--weight-bold, 700);
+              cursor:${modalState.isUploadSubmitting ? "wait" : "pointer"};
+              opacity:${modalState.isUploadSubmitting ? ".82" : "1"};
+            "
+          >
+            ${
+              modalState.isUploadSubmitting
+                ? `
+                  <span style="display:inline-flex; align-items:center; gap:8px;">
                     <span
+                      aria-hidden="true"
                       style="
-                        flex:0 0 auto;
-                        color:var(--text-soft);
-                        font-size:12px;
-                        font-weight:var(--weight-bold, 700);
+                        width:14px;
+                        height:14px;
+                        border-radius:999px;
+                        border:2px solid rgba(255,255,255,.28);
+                        border-top-color:#fff;
+                        animation:incidenciasModalSpin .8s linear infinite;
                       "
-                    >
-                      Abrir
-                    </span>
-                  `
-                  : ""
-              }
-            </${hasLink ? "a" : "div"}>
-          `;
-        })
-        .join("")}
+                    ></span>
+                    Subiendo...
+                  </span>
+                `
+                : "Subir documentos"
+            }
+          </button>
+        </div>
+      </div>
+
+      <div style="display:grid; gap:10px;">
+        <h3
+          style="
+            margin:0;
+            color:var(--text-strong);
+            font-size:18px;
+            letter-spacing:-.02em;
+          "
+        >
+          Documentos actuales
+        </h3>
+
+        ${
+          !files.length
+            ? `
+              <div
+                style="
+                  padding:14px;
+                  border-radius:16px;
+                  border:1px solid var(--border-soft);
+                  background:var(--surface-glass);
+                  color:var(--text-dim);
+                "
+              >
+                No hay archivos adjuntos en esta incidencia.
+              </div>
+            `
+            : `
+              <div
+                style="
+                  display:grid;
+                  gap:10px;
+                "
+              >
+                ${files
+                  .map((file) => {
+                    const hasLink = isAbsoluteUrl(file.url);
+
+                    return `
+                      <${hasLink ? "a" : "div"}
+                        ${hasLink ? `href="${escapeHtml(file.url)}" target="_blank" rel="noopener noreferrer"` : ""}
+                        style="
+                          display:flex;
+                          justify-content:space-between;
+                          align-items:center;
+                          gap:14px;
+                          padding:14px;
+                          border-radius:16px;
+                          border:1px solid var(--border-soft);
+                          background:var(--surface-glass);
+                          text-decoration:none;
+                          color:var(--text-strong);
+                        "
+                      >
+                        <div style="display:grid; gap:4px; min-width:0;">
+                          <strong
+                            style="
+                              min-width:0;
+                              font-weight:var(--weight-semibold, 600);
+                              word-break:break-word;
+                            "
+                          >
+                            ${escapeHtml(file.name)}
+                          </strong>
+
+                          <span
+                            style="
+                              color:var(--text-dim);
+                              font-size:12px;
+                            "
+                          >
+                            ${escapeHtml(
+                              [
+                                file.type,
+                                formatBytes(file.size),
+                                file.uploadedAt ? formatDate(file.uploadedAt) : "",
+                              ].filter(Boolean).join(" · ") || "Archivo adjunto"
+                            )}
+                          </span>
+                        </div>
+
+                        ${
+                          hasLink
+                            ? `
+                              <span
+                                style="
+                                  flex:0 0 auto;
+                                  color:var(--text-soft);
+                                  font-size:12px;
+                                  font-weight:var(--weight-bold, 700);
+                                "
+                              >
+                                Abrir
+                              </span>
+                            `
+                            : `
+                              <span
+                                style="
+                                  flex:0 0 auto;
+                                  color:var(--text-dim);
+                                  font-size:12px;
+                                  font-weight:var(--weight-bold, 700);
+                                "
+                              >
+                                Sin enlace
+                              </span>
+                            `
+                        }
+                      </${hasLink ? "a" : "div"}>
+                    `;
+                  })
+                  .join("")}
+              </div>
+            `
+        }
+      </div>
     </div>
   `;
 }
@@ -1188,7 +1296,6 @@ function renderTimeline(detail = {}) {
 
 function renderComposer(detail = {}) {
   const ticketId = getTicketId(detail);
-  const canReopenTicket = canReopen(detail);
   const draft = safeText(modalState.commentDraft, "");
 
   return `
@@ -1226,54 +1333,9 @@ function renderComposer(detail = {}) {
               line-height:1.5;
             "
           >
-            Puedes escribir nuevos detalles para ampliar el contexto de la incidencia.
+            Cuando el usuario actualiza su incidencia, el estado pasará automáticamente a abierta.
           </span>
         </div>
-
-        ${
-          canReopenTicket
-            ? `
-              <button
-                type="button"
-                data-modal-action="reopen"
-                data-ticket-id="${escapeHtml(ticketId)}"
-                ${modalState.isReopening ? "disabled" : ""}
-                style="
-                  min-height:42px;
-                  padding:0 14px;
-                  border-radius:14px;
-                  border:1px solid var(--border-soft);
-                  background:var(--surface-glass);
-                  color:var(--text-soft);
-                  font-weight:var(--weight-bold, 700);
-                  cursor:${modalState.isReopening ? "wait" : "pointer"};
-                  opacity:${modalState.isReopening ? ".78" : "1"};
-                "
-              >
-                ${
-                  modalState.isReopening
-                    ? `
-                      <span style="display:inline-flex; align-items:center; gap:8px;">
-                        <span
-                          aria-hidden="true"
-                          style="
-                            width:14px;
-                            height:14px;
-                            border-radius:999px;
-                            border:2px solid color-mix(in srgb, var(--text-soft) 22%, transparent);
-                            border-top-color:var(--text-soft);
-                            animation:incidenciasModalSpin .8s linear infinite;
-                          "
-                        ></span>
-                        Reabriendo...
-                      </span>
-                    `
-                    : "Reabrir incidencia"
-                }
-              </button>
-            `
-            : ""
-        }
       </div>
 
       <div
@@ -1316,7 +1378,7 @@ function renderComposer(detail = {}) {
               font-size:12px;
             "
           >
-            Esta acción añadirá una nueva actualización a la incidencia.
+            Esta acción añadirá una nueva actualización a la incidencia y la devolverá a abierta.
           </span>
 
           <button
@@ -1354,7 +1416,7 @@ function renderComposer(detail = {}) {
                     Enviando...
                   </span>
                 `
-                : "Añadir comentario"
+                : "Actualizar incidencia"
             }
           </button>
         </div>
@@ -1363,7 +1425,7 @@ function renderComposer(detail = {}) {
   `;
 }
 
-function renderLoadingOverlay(label = "Actualizando incidencia...") {
+function renderLoadingOverlay(label = "Procesando...") {
   return `
     <div
       style="
@@ -1417,13 +1479,12 @@ function renderLoadingOverlay(label = "Actualizando incidencia...") {
 }
 
 function renderModalInner(detail = {}, {
-  isRefreshing = false,
   isCommentSubmitting = false,
-  isReopening = false,
+  isUploadSubmitting = false,
 } = {}) {
   const item = getDetail(detail);
+
   const ticketId = getTicketId(item);
-  const ticketCode = getTicketCode(item);
   const title = safeText(
     first(
       item.title,
@@ -1434,27 +1495,27 @@ function renderModalInner(detail = {}, {
     ),
     "Incidencia"
   );
+
   const description = getDisplayDescription(item);
+  const tecnico = getTecnico(item);
+  const facturaRelacionada = getFacturaRelacionada(item);
+
   const createdAt = formatDate(first(item.createdAt, item?.raw?.createdAt));
-  const updatedAt = formatDate(first(item.updatedAt, item?.raw?.updatedAt, item?.raw?.createdAt));
   const updatedAgo = formatRelativeDate(first(item.updatedAt, item?.raw?.updatedAt, item?.raw?.createdAt));
-  const clientName = getClientName(item);
-  const clientEmail = getClientEmail(item);
-  const assignedTo = getAssignedTo(item);
-  const category = getCategory(item);
-  const source = getSource(item);
+
   const attachments = getAttachments(item);
+
   const statusRaw = safeText(first(item.status, item?.raw?.status, item?.raw?.estado), "open");
   const priorityRaw = safeText(first(item.priority, item?.raw?.priority, item?.raw?.prioridad), "medium");
+
   const statusLabel = getStatusLabel(statusRaw);
   const priorityLabel = getPriorityLabel(priorityRaw);
-  const busyLabel = isRefreshing
-    ? "Actualizando incidencia..."
-    : isCommentSubmitting
-      ? "Enviando comentario..."
-      : isReopening
-        ? "Reabriendo incidencia..."
-        : "";
+
+  const busyLabel = isCommentSubmitting
+    ? "Enviando actualización..."
+    : isUploadSubmitting
+      ? "Subiendo documentos..."
+      : "";
 
   return `
     <div
@@ -1521,7 +1582,11 @@ function renderModalInner(detail = {}, {
                   flex-wrap:wrap;
                 "
               >
-                <span
+                <button
+                  type="button"
+                  data-modal-action="copy"
+                  data-ticket-id="${escapeHtml(ticketId)}"
+                  title="Copiar ID"
                   style="
                     display:inline-flex;
                     align-items:center;
@@ -1535,10 +1600,11 @@ function renderModalInner(detail = {}, {
                     font-weight:var(--weight-bold, 700);
                     letter-spacing:.04em;
                     text-transform:uppercase;
+                    cursor:pointer;
                   "
                 >
-                  Referencia ${escapeHtml(ticketCode)}
-                </span>
+                  ${escapeHtml(ticketId)}
+                </button>
 
                 ${renderChip(statusLabel, getStatusChipStyle(statusRaw))}
                 ${renderChip(priorityLabel, getPriorityChipStyle(priorityRaw))}
@@ -1582,44 +1648,6 @@ function renderModalInner(detail = {}, {
           >
             <button
               type="button"
-              data-modal-action="refresh"
-              data-ticket-id="${escapeHtml(ticketId)}"
-              ${(isRefreshing || isCommentSubmitting || isReopening) ? "disabled" : ""}
-              style="
-                min-height:44px;
-                padding:0 16px;
-                border-radius:14px;
-                border:1px solid var(--border-soft);
-                background:var(--surface-glass);
-                color:var(--text-soft);
-                font-weight:var(--weight-bold, 700);
-                cursor:${(isRefreshing || isCommentSubmitting || isReopening) ? "wait" : "pointer"};
-                opacity:${(isRefreshing || isCommentSubmitting || isReopening) ? ".78" : "1"};
-              "
-            >
-              Actualizar
-            </button>
-
-            <button
-              type="button"
-              data-modal-action="copy"
-              data-ticket-id="${escapeHtml(ticketId)}"
-              style="
-                min-height:44px;
-                padding:0 16px;
-                border-radius:14px;
-                border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
-                background:var(--btn-primary-bg, var(--accent, #7c5cff));
-                color:var(--btn-primary-text, #fff);
-                font-weight:var(--weight-bold, 700);
-                cursor:pointer;
-              "
-            >
-              Copiar referencia
-            </button>
-
-            <button
-              type="button"
               data-modal-close="true"
               aria-label="Cerrar modal"
               style="
@@ -1656,13 +1684,9 @@ function renderModalInner(detail = {}, {
             "
             class="incidencias-modal-meta-grid"
           >
-            ${renderMetaField("Solicitante", clientName)}
-            ${renderMetaField("Email", clientEmail)}
-            ${renderMetaField("Seguimiento", assignedTo)}
-            ${renderMetaField("Categoría", category)}
+            ${renderMetaField("Técnico", tecnico)}
+            ${renderMetaField("Factura", facturaRelacionada)}
             ${renderMetaField("Creada", createdAt)}
-            ${renderMetaField("Actualizada", updatedAt)}
-            ${renderMetaField("Origen", source)}
             ${renderMetaField("Adjuntos", String(attachments.length))}
           </div>
 
@@ -1691,15 +1715,6 @@ function renderModalInner(detail = {}, {
               >
                 Descripción de la incidencia
               </h3>
-
-              <span
-                style="
-                  color:var(--text-dim);
-                  font-size:12px;
-                "
-              >
-                Ticket ${escapeHtml(ticketId)}
-              </span>
             </div>
 
             <div
@@ -1716,26 +1731,6 @@ function renderModalInner(detail = {}, {
             >
               ${escapeHtml(description)}
             </div>
-          </section>
-
-          <section
-            style="
-              display:grid;
-              gap:10px;
-            "
-          >
-            <h3
-              style="
-                margin:0;
-                color:var(--text-strong);
-                font-size:20px;
-                letter-spacing:-.02em;
-              "
-            >
-              Etiquetas
-            </h3>
-
-            ${renderTags(item)}
           </section>
 
           ${renderComposer(item)}
@@ -1762,7 +1757,7 @@ function renderModalInner(detail = {}, {
                   letter-spacing:-.02em;
                 "
               >
-                Adjuntos
+                Documentos
               </h3>
 
               ${renderAttachments(item)}
@@ -1951,9 +1946,8 @@ function renderModal() {
   detachRootBindings();
 
   root.innerHTML = renderModalInner(modalState.detail, {
-    isRefreshing: modalState.isRefreshing,
     isCommentSubmitting: modalState.isCommentSubmitting,
-    isReopening: modalState.isReopening,
+    isUploadSubmitting: modalState.isUploadSubmitting,
   });
 
   modalState.bindingsAttached = false;
@@ -1976,10 +1970,10 @@ export function openIncidenciasModal(detail = {}) {
   modalState.lastActiveElement = document.activeElement || null;
   modalState.detail = getDetail(detail);
   modalState.isOpen = true;
-  modalState.isRefreshing = false;
   modalState.isCommentSubmitting = false;
-  modalState.isReopening = false;
+  modalState.isUploadSubmitting = false;
   modalState.commentDraft = "";
+  modalState.pendingFiles = [];
   clearFeedback();
 
   renderModal();
@@ -2000,11 +1994,11 @@ export function closeIncidenciasModal() {
   const root = getRoot();
 
   modalState.isOpen = false;
-  modalState.isRefreshing = false;
   modalState.isCommentSubmitting = false;
-  modalState.isReopening = false;
+  modalState.isUploadSubmitting = false;
   modalState.detail = null;
   modalState.commentDraft = "";
+  modalState.pendingFiles = [];
   clearFeedback();
 
   detachRootBindings();
@@ -2028,9 +2022,8 @@ export function updateIncidenciasModal(detail = {}) {
   }
 
   modalState.detail = getDetail(detail);
-  modalState.isRefreshing = false;
   modalState.isCommentSubmitting = false;
-  modalState.isReopening = false;
+  modalState.isUploadSubmitting = false;
 
   renderModal();
   attachRootBindings();
@@ -2047,7 +2040,7 @@ async function handleCopy(ticketId = "") {
   const id = safeText(ticketId, "");
 
   if (!id) {
-    setFeedback("No hay referencia disponible para copiar.", "error");
+    setFeedback("No hay ID disponible para copiar.", "error");
     renderModal();
     attachRootBindings();
     return false;
@@ -2067,11 +2060,11 @@ async function handleCopy(ticketId = "") {
   });
 
   if (copied) {
-    setFeedback(`Referencia ${id} copiada al portapapeles.`, "success");
-    showToast("Referencia copiada", "success");
+    setFeedback(`ID ${id} copiado al portapapeles.`, "success");
+    showToast("ID copiado", "success");
   } else {
-    setFeedback(`Se ha solicitado copiar la referencia ${id}.`, "info");
-    showToast("Referencia enviada a la acción de copia", "info");
+    setFeedback(`Se ha solicitado copiar el ID ${id}.`, "info");
+    showToast("No se pudo copiar automáticamente el ID.", "info");
   }
 
   renderModal();
@@ -2080,33 +2073,91 @@ async function handleCopy(ticketId = "") {
   return true;
 }
 
-async function handleRefresh(ticketId = "") {
+async function handleComment(ticketId = "") {
   const id = safeText(ticketId, "");
+  const message = normalizeWhitespace(modalState.commentDraft);
 
-  if (!id || modalState.isRefreshing) {
+  if (!id) {
+    setFeedback("No se ha podido identificar la incidencia.", "error");
+    renderModal();
+    attachRootBindings();
     return false;
   }
 
-  modalState.isRefreshing = true;
+  if (!message) {
+    setFeedback("Escribe una actualización antes de enviarla.", "error");
+    renderModal();
+    attachRootBindings();
+    return false;
+  }
+
+  if (message.length < 4) {
+    setFeedback("Añade un poco más de detalle antes de enviar la actualización.", "error");
+    renderModal();
+    attachRootBindings();
+    return false;
+  }
+
+  modalState.isCommentSubmitting = true;
   clearFeedback();
   renderModal();
   attachRootBindings();
 
   try {
-    const response = await callExternalAction("refreshTicketDetail", {
+    const response = await callExternalAction("commentTicket", {
       ticketId: id,
-      silent: true,
+      message,
+      detail: modalState.detail,
+      status: "open",
     });
 
-    safeEmit("incidencias:modal:refresh", {
+    safeEmit("incidencias:modal:comment", {
       ticketId: id,
+      message,
+      status: "open",
     });
 
     if (response && typeof response === "object") {
-      modalState.detail = getDetail(response);
-      setFeedback("La incidencia se ha actualizado correctamente.", "success");
+      modalState.detail = getDetail({
+        ...response,
+        status: "open",
+        raw: {
+          ...safeObject(response?.raw || response),
+          status: "open",
+          estado: "open",
+        },
+      });
+
+      modalState.commentDraft = "";
+      setFeedback("Tu actualización se ha añadido correctamente y la incidencia vuelve a abierta.", "success");
     } else {
-      setFeedback("Se ha solicitado la actualización de la incidencia.", "info");
+      const currentDetail = getDetail(modalState.detail);
+      const raw = safeObject(currentDetail.raw);
+
+      const nextComments = [
+        {
+          id: `local-${Date.now()}`,
+          message,
+          author: "Tú",
+          createdAt: new Date().toISOString(),
+        },
+        ...safeArray(first(currentDetail.comments, raw.comments)),
+      ];
+
+      modalState.detail = getDetail({
+        ...currentDetail,
+        status: "open",
+        comments: nextComments,
+        raw: {
+          ...raw,
+          status: "open",
+          estado: "open",
+          comments: nextComments,
+        },
+      });
+
+      modalState.commentDraft = "";
+      setFeedback("Actualización añadida y la incidencia se ha marcado como abierta.", "info");
     }
 
     showToast("Incidencia actualizada", "success");
@@ -2128,104 +2179,6 @@ async function handleRefresh(ticketId = "") {
     showToast("No se pudo actualizar la incidencia.", "error");
     return false;
   } finally {
-    modalState.isRefreshing = false;
-    renderModal();
-    attachRootBindings();
-    focusPanel();
-  }
-}
-
-async function handleComment(ticketId = "") {
-  const id = safeText(ticketId, "");
-  const message = normalizeWhitespace(modalState.commentDraft);
-
-  if (!id) {
-    setFeedback("No se ha podido identificar la incidencia.", "error");
-    renderModal();
-    attachRootBindings();
-    return false;
-  }
-
-  if (!message) {
-    setFeedback("Escribe un comentario antes de enviarlo.", "error");
-    renderModal();
-    attachRootBindings();
-    return false;
-  }
-
-  if (message.length < 4) {
-    setFeedback("Añade un poco más de detalle antes de enviar el comentario.", "error");
-    renderModal();
-    attachRootBindings();
-    return false;
-  }
-
-  modalState.isCommentSubmitting = true;
-  clearFeedback();
-  renderModal();
-  attachRootBindings();
-
-  try {
-    const response = await callExternalAction("commentTicket", {
-      ticketId: id,
-      message,
-      detail: modalState.detail,
-    });
-
-    safeEmit("incidencias:modal:comment", {
-      ticketId: id,
-      message,
-    });
-
-    if (response && typeof response === "object") {
-      modalState.detail = getDetail(response);
-      modalState.commentDraft = "";
-      setFeedback("Tu comentario se ha añadido correctamente.", "success");
-    } else {
-      const currentDetail = getDetail(modalState.detail);
-      const raw = safeObject(currentDetail.raw);
-      const nextComments = [
-        {
-          id: `local-${Date.now()}`,
-          message,
-          author: "Tú",
-          createdAt: new Date().toISOString(),
-        },
-        ...safeArray(first(currentDetail.comments, raw.comments)),
-      ];
-
-      modalState.detail = getDetail({
-        ...currentDetail,
-        comments: nextComments,
-        raw: {
-          ...raw,
-          comments: nextComments,
-        },
-      });
-
-      modalState.commentDraft = "";
-      setFeedback("Comentario añadido y pendiente de sincronización externa.", "info");
-    }
-
-    showToast("Comentario añadido", "success");
-    return true;
-  } catch (error) {
-    setFeedback(
-      safeText(
-        first(
-          error?.message,
-          error?.response?.message,
-          error?.data?.message,
-          "No se pudo añadir el comentario."
-        ),
-        "No se pudo añadir el comentario."
-      ),
-      "error"
-    );
-
-    showToast("No se pudo añadir el comentario.", "error");
-    return false;
-  } finally {
     modalState.isCommentSubmitting = false;
     renderModal();
     attachRootBindings();
@@ -2233,49 +2186,78 @@ async function handleComment(ticketId = "") {
   }
 }
 
-async function handleReopen(ticketId = "") {
+async function handleUploadFiles(ticketId = "") {
   const id = safeText(ticketId, "");
+  const files = dedupeFiles(modalState.pendingFiles);
 
-  if (!id || modalState.isReopening) {
+  if (!id) {
+    setFeedback("No se ha podido identificar la incidencia para adjuntar documentos.", "error");
+    renderModal();
+    attachRootBindings();
     return false;
   }
 
-  modalState.isReopening = true;
+  if (!files.length) {
+    setFeedback("Selecciona al menos un archivo antes de subirlo.", "error");
+    renderModal();
+    attachRootBindings();
+    return false;
+  }
+
+  modalState.isUploadSubmitting = true;
   clearFeedback();
   renderModal();
   attachRootBindings();
 
   try {
-    const response = await callExternalAction("reopenTicket", {
+    const response = await callExternalAction("uploadTicketAttachments", {
       ticketId: id,
+      files,
       detail: modalState.detail,
     });
 
-    safeEmit("incidencias:modal:reopen", {
+    safeEmit("incidencias:modal:upload", {
       ticketId: id,
+      files,
     });
 
     if (response && typeof response === "object") {
       modalState.detail = getDetail(response);
-      setFeedback("La incidencia se ha reabierto correctamente.", "success");
+      modalState.pendingFiles = [];
+      setFeedback("Los documentos se han subido correctamente.", "success");
     } else {
       const currentDetail = getDetail(modalState.detail);
       const raw = safeObject(currentDetail.raw);
 
+      const localAttachments = files.map((file, index) => ({
+        id: `local-file-${Date.now()}-${index}`,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        uploadedAt: new Date().toISOString(),
+        url: "",
+        path: "",
+      }));
+
+      const nextAttachments = [
+        ...safeArray(first(currentDetail.attachments, raw.attachments)),
+        ...localAttachments,
+      ];
+
       modalState.detail = getDetail({
         ...currentDetail,
-        status: "open",
+        attachments: nextAttachments,
         raw: {
           ...raw,
-          status: "open",
-          estado: "open",
+          attachments: nextAttachments,
         },
       });
 
-      setFeedback("La incidencia se ha marcado como reabierta.", "info");
+      modalState.pendingFiles = [];
+      setFeedback("Archivos añadidos localmente y pendientes de sincronización externa.", "info");
     }
 
-    showToast("Incidencia reabierta", "success");
+    showToast("Documentos añadidos", "success");
     return true;
   } catch (error) {
     setFeedback(
@@ -2284,17 +2266,17 @@ async function handleReopen(ticketId = "") {
           error?.message,
           error?.response?.message,
           error?.data?.message,
-          "No se pudo reabrir la incidencia."
+          "No se pudieron subir los documentos."
         ),
-        "No se pudo reabrir la incidencia."
+        "No se pudieron subir los documentos."
       ),
       "error"
     );
 
-    showToast("No se pudo reabrir la incidencia.", "error");
+    showToast("No se pudieron subir los documentos.", "error");
     return false;
   } finally {
-    modalState.isReopening = false;
+    modalState.isUploadSubmitting = false;
     renderModal();
     attachRootBindings();
     focusPanel();
@@ -2317,9 +2299,22 @@ function attachRootBindings() {
     if (!field) return;
 
     const fieldName = safeText(field.dataset.modalField, "");
-    if (fieldName !== "comment") return;
 
-    modalState.commentDraft = field.value || "";
+    if (fieldName === "comment") {
+      modalState.commentDraft = field.value || "";
+      return;
+    }
+
+    if (fieldName === "attachments") {
+      modalState.pendingFiles = dedupeFiles([
+        ...safeArray(modalState.pendingFiles),
+        ...Array.from(field.files || []),
+      ]);
+
+      renderModal();
+      attachRootBindings();
+      focusPanel();
+    }
   };
 
   const onClick = async (event) => {
@@ -2327,13 +2322,6 @@ function attachRootBindings() {
     if (closeBtn) {
       event.preventDefault();
       closeIncidenciasModal();
-      return;
-    }
-
-    const refreshBtn = event.target.closest('[data-modal-action="refresh"]');
-    if (refreshBtn) {
-      event.preventDefault();
-      await handleRefresh(refreshBtn.dataset.ticketId || "");
       return;
     }
 
@@ -2351,10 +2339,26 @@ function attachRootBindings() {
       return;
     }
 
-    const reopenBtn = event.target.closest('[data-modal-action="reopen"]');
-    if (reopenBtn) {
+    const uploadBtn = event.target.closest('[data-modal-action="upload-files"]');
+    if (uploadBtn) {
       event.preventDefault();
-      await handleReopen(reopenBtn.dataset.ticketId || "");
+      await handleUploadFiles(getTicketId(modalState.detail));
+      return;
+    }
+
+    const removePendingBtn = event.target.closest('[data-modal-action="remove-pending-file"]');
+    if (removePendingBtn) {
+      event.preventDefault();
+
+      const index = safeNumber(removePendingBtn.dataset.fileIndex, -1);
+
+      if (index >= 0) {
+        modalState.pendingFiles = safeArray(modalState.pendingFiles).filter((_, i) => i !== index);
+        renderModal();
+        attachRootBindings();
+        focusPanel();
+      }
+
       return;
     }
 
@@ -2433,16 +2437,32 @@ function handleCommentSuccess(event) {
   if (!detail || !modalState.isOpen) return;
 
   modalState.commentDraft = "";
-  setFeedback("Tu comentario se ha registrado correctamente.", "success");
-  updateIncidenciasModal(detail);
+  modalState.detail = getDetail({
+    ...detail,
+    status: "open",
+    raw: {
+      ...safeObject(detail?.raw || detail),
+      status: "open",
+      estado: "open",
+    },
+  });
+
+  setFeedback("Tu actualización se ha registrado correctamente y la incidencia vuelve a abierta.", "success");
+  renderModal();
+  attachRootBindings();
+  focusPanel();
 }
 
-function handleReopenSuccess(event) {
+function handleUploadSuccess(event) {
   const detail = event?.detail?.detail || event?.detail || event || null;
   if (!detail || !modalState.isOpen) return;
 
-  setFeedback("La incidencia se ha reabierto correctamente.", "success");
-  updateIncidenciasModal(detail);
+  modalState.pendingFiles = [];
+  modalState.detail = getDetail(detail);
+  setFeedback("Los documentos se han añadido correctamente.", "success");
+  renderModal();
+  attachRootBindings();
+  focusPanel();
 }
 
 let busAttached = false;
@@ -2455,7 +2475,7 @@ function attachBus() {
   safeOn("incidencias:modal:update", handleUpdateEvent);
   safeOn("incidencias:open:success", handleOpenedDetailEvent);
   safeOn("incidencias:comment:success", handleCommentSuccess);
-  safeOn("incidencias:reopen:success", handleReopenSuccess);
+  safeOn("incidencias:upload:success", handleUploadSuccess);
 
   busAttached = true;
 }
@@ -2468,7 +2488,7 @@ function detachBus() {
   safeOff("incidencias:modal:update", handleUpdateEvent);
   safeOff("incidencias:open:success", handleOpenedDetailEvent);
   safeOff("incidencias:comment:success", handleCommentSuccess);
-  safeOff("incidencias:reopen:success", handleReopenSuccess);
+  safeOff("incidencias:upload:success", handleUploadSuccess);
 
   busAttached = false;
 }
@@ -2503,6 +2523,7 @@ export const OnionIncidenciasModal = {
     return {
       ...modalState,
       detail: modalState.detail ? { ...modalState.detail } : null,
+      pendingFiles: [...safeArray(modalState.pendingFiles)],
     };
   },
 

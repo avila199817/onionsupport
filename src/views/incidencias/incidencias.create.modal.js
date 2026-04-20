@@ -2,19 +2,7 @@
    Onion SPA - Incidencias Create Modal
    Archivo: src/views/incidencias/incidencias.create.modal.js
 
-   CLIENT EXPERIENCE PRO · CREATE MODAL · MINIMAL REAL
-
-   RESPONSABILIDADES:
-   - renderizar modal premium de creación de incidencias
-   - pedir solo asunto, descripción y adjuntos
-   - validar campos mínimos
-   - construir FormData limpio para backend
-   - enviar creación por adapters tolerantes
-   - mostrar loading / success / error dentro del modal
-   - soportar close por overlay / escape / botón
-   - evitar doble bind
-   - soportar destroy limpio
-   - mantener una UX clara y simple para cliente / usuario final
+   CLIENT EXPERIENCE PRO · CREATE MODAL · COMPACT 10/10
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -159,8 +147,8 @@ function getAuthToken() {
       AppCore?.state?.accessToken,
       AppCore?.auth?.getToken?.(),
       AppCore?.Auth?.getToken?.(),
-      localStorage.getItem("token"),
-      sessionStorage.getItem("token")
+      typeof localStorage !== "undefined" ? localStorage.getItem("token") : "",
+      typeof sessionStorage !== "undefined" ? sessionStorage.getItem("token") : ""
     ),
     ""
   );
@@ -401,26 +389,14 @@ async function createViaFetch(payload = null) {
 function pickCreatedTicket(response = null) {
   const obj = safeObject(response);
 
-  return (
-    obj.ticket ||
-    obj.item ||
-    obj.data ||
-    obj.result ||
-    obj.payload ||
-    obj
-  );
+  return obj.ticket || obj.item || obj.data || obj.result || obj.payload || obj;
 }
 
 function resolveCreatedTicketId(response = null) {
   const ticket = safeObject(pickCreatedTicket(response));
 
   return safeText(
-    first(
-      ticket.ticketId,
-      ticket.id,
-      ticket.code,
-      ticket.ticketCode
-    ),
+    first(ticket.ticketId, ticket.id, ticket.code, ticket.ticketCode),
     ""
   );
 }
@@ -453,20 +429,7 @@ function renderFieldError(message = "") {
   const text = safeText(message, "");
   if (!text) return "";
 
-  return `
-    <span
-      style="
-        display:block;
-        margin-top:8px;
-        color:var(--danger-strong, #ff6b6b);
-        font-size:12px;
-        line-height:1.35;
-        font-weight:var(--weight-semibold, 600);
-      "
-    >
-      ${escapeHtml(text)}
-    </span>
-  `;
+  return `<span class="inc-create-error">${escapeHtml(text)}</span>`;
 }
 
 function renderInput({
@@ -477,62 +440,23 @@ function renderInput({
   placeholder = "",
   required = false,
   error = "",
-  hint = "",
   autocomplete = "off",
 } = {}) {
   return `
-    <label style="display:grid; gap:8px;">
-      <span
-        style="
-          color:var(--text-soft);
-          font-size:12px;
-          font-weight:var(--weight-bold, 700);
-          letter-spacing:.05em;
-          text-transform:uppercase;
-        "
-      >
+    <label class="inc-create-field">
+      <span class="inc-create-label">
         ${escapeHtml(label)}${required ? " *" : ""}
       </span>
 
       <input
+        class="inc-create-input ${error ? "is-error" : ""}"
         data-field="${escapeHtml(name)}"
         name="${escapeHtml(name)}"
         type="${escapeHtml(type)}"
         value="${escapeHtml(value)}"
         placeholder="${escapeHtml(placeholder)}"
         autocomplete="${escapeHtml(autocomplete)}"
-        style="
-          width:100%;
-          min-height:52px;
-          padding:0 16px;
-          border-radius:16px;
-          border:1px solid ${
-            error
-              ? "color-mix(in srgb, var(--danger-strong, #ff6b6b) 38%, var(--border-soft))"
-              : "var(--border-soft)"
-          };
-          background:var(--surface-1, var(--surface-glass));
-          color:var(--text-strong);
-          outline:none;
-          box-shadow:${error ? "0 0 0 4px color-mix(in srgb, var(--danger-strong, #ff6b6b) 10%, transparent)" : "none"};
-        "
       />
-
-      ${
-        hint
-          ? `
-            <span
-              style="
-                color:var(--text-dim);
-                font-size:12px;
-                line-height:1.4;
-              "
-            >
-              ${escapeHtml(hint)}
-            </span>
-          `
-          : ""
-      }
 
       ${renderFieldError(error)}
     </label>
@@ -546,62 +470,21 @@ function renderTextarea({
   placeholder = "",
   required = false,
   error = "",
-  hint = "",
-  rows = 8,
+  rows = 6,
 } = {}) {
   return `
-    <label style="display:grid; gap:8px;">
-      <span
-        style="
-          color:var(--text-soft);
-          font-size:12px;
-          font-weight:var(--weight-bold, 700);
-          letter-spacing:.05em;
-          text-transform:uppercase;
-        "
-      >
+    <label class="inc-create-field">
+      <span class="inc-create-label">
         ${escapeHtml(label)}${required ? " *" : ""}
       </span>
 
       <textarea
+        class="inc-create-textarea ${error ? "is-error" : ""}"
         data-field="${escapeHtml(name)}"
         name="${escapeHtml(name)}"
-        rows="${Number(rows) || 8}"
+        rows="${Number(rows) || 6}"
         placeholder="${escapeHtml(placeholder)}"
-        style="
-          width:100%;
-          min-height:220px;
-          padding:16px;
-          border-radius:18px;
-          border:1px solid ${
-            error
-              ? "color-mix(in srgb, var(--danger-strong, #ff6b6b) 38%, var(--border-soft))"
-              : "var(--border-soft)"
-          };
-          background:var(--surface-1, var(--surface-glass));
-          color:var(--text-strong);
-          outline:none;
-          resize:vertical;
-          line-height:1.6;
-          box-shadow:${error ? "0 0 0 4px color-mix(in srgb, var(--danger-strong, #ff6b6b) 10%, transparent)" : "none"};
-        "
       >${escapeHtml(value)}</textarea>
-
-      ${
-        hint
-          ? `
-            <span
-              style="
-                color:var(--text-dim);
-                font-size:12px;
-                line-height:1.4;
-              "
-            >
-              ${escapeHtml(hint)}
-            </span>
-          `
-          : ""
-      }
 
       ${renderFieldError(error)}
     </label>
@@ -613,53 +496,23 @@ function renderFilesSummary(files = []) {
 
   if (!items.length) {
     return `
-      <div
-        style="
-          color:var(--text-dim);
-          font-size:13px;
-          line-height:1.5;
-        "
-      >
+      <div class="inc-create-files-empty">
         No has añadido archivos todavía.
       </div>
     `;
   }
 
   return `
-    <div style="display:grid; gap:10px;">
+    <div class="inc-create-files-list">
       ${items
         .map(
           (file, index) => `
-            <div
-              style="
-                display:flex;
-                justify-content:space-between;
-                gap:12px;
-                align-items:center;
-                padding:12px 14px;
-                border-radius:14px;
-                border:1px solid var(--border-soft);
-                background:var(--surface-1, var(--surface-glass));
-              "
-            >
-              <div style="display:grid; gap:4px; min-width:0;">
-                <strong
-                  style="
-                    color:var(--text-strong);
-                    font-size:13px;
-                    line-height:1.35;
-                    word-break:break-word;
-                  "
-                >
+            <div class="inc-create-file-row">
+              <div class="inc-create-file-meta">
+                <strong class="inc-create-file-name">
                   ${escapeHtml(safeText(file?.name, `Adjunto ${index + 1}`))}
                 </strong>
-                <span
-                  style="
-                    color:var(--text-dim);
-                    font-size:12px;
-                    line-height:1.35;
-                  "
-                >
+                <span class="inc-create-file-size">
                   ${escapeHtml(formatFileSize(file?.size))}
                 </span>
               </div>
@@ -667,17 +520,7 @@ function renderFilesSummary(files = []) {
               <button
                 type="button"
                 data-remove-attachment="${index}"
-                style="
-                  min-height:36px;
-                  padding:0 12px;
-                  border-radius:12px;
-                  border:1px solid var(--border-soft);
-                  background:transparent;
-                  color:var(--text-dim);
-                  font-weight:var(--weight-bold, 700);
-                  cursor:pointer;
-                  flex:0 0 auto;
-                "
+                class="inc-create-file-remove"
               >
                 Quitar
               </button>
@@ -690,40 +533,32 @@ function renderFilesSummary(files = []) {
 }
 
 function renderFileInput({ files = [], dragActive = false } = {}) {
+  const items = safeArray(files);
+  const countText =
+    items.length === 0
+      ? "Opcional"
+      : items.length === 1
+        ? "1 archivo"
+        : `${items.length} archivos`;
+
   return `
-    <div style="display:grid; gap:10px;">
-      <span
-        style="
-          color:var(--text-soft);
-          font-size:12px;
-          font-weight:var(--weight-bold, 700);
-          letter-spacing:.05em;
-          text-transform:uppercase;
-        "
-      >
-        Adjuntos
-      </span>
+    <section class="inc-create-side-card">
+      <div class="inc-create-side-head">
+        <div class="inc-create-side-head-copy">
+          <strong class="inc-create-side-title">Adjuntos</strong>
+          <span class="inc-create-side-text">
+            Añade capturas, PDFs u otros documentos útiles.
+          </span>
+        </div>
+
+        <span class="inc-create-side-pill">
+          ${escapeHtml(countText)}
+        </span>
+      </div>
 
       <label
         data-dropzone="attachments"
-        style="
-          display:grid;
-          gap:12px;
-          padding:18px;
-          border-radius:20px;
-          border:1px dashed ${
-            dragActive
-              ? "color-mix(in srgb, var(--accent, #7c5cff) 32%, var(--border-soft))"
-              : "var(--border-soft)"
-          };
-          background:${
-            dragActive
-              ? "linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent), var(--surface-1, var(--surface-glass))"
-              : "var(--surface-1, var(--surface-glass))"
-          };
-          cursor:pointer;
-          transition:border-color .18s ease, background .18s ease, transform .18s ease;
-        "
+        class="inc-create-dropzone ${dragActive ? "is-active" : ""}"
       >
         <input
           id="incidencias-create-attachments-input"
@@ -731,33 +566,43 @@ function renderFileInput({ files = [], dragActive = false } = {}) {
           name="attachments"
           type="file"
           multiple
-          style="display:none;"
+          class="inc-create-hidden-input"
         />
 
-        <div style="display:grid; gap:6px;">
-          <strong
-            style="
-              color:var(--text-strong);
-              font-size:14px;
-              line-height:1.35;
-            "
-          >
-            Añadir archivos
-          </strong>
-
-          <span
-            style="
-              color:var(--text-dim);
-              font-size:12px;
-              line-height:1.5;
-            "
-          >
-            Arrastra archivos aquí o pulsa para seleccionar capturas, PDFs u otros documentos útiles.
-          </span>
+        <div class="inc-create-dropzone-copy">
+          <strong>Arrastra archivos aquí</strong>
+          <span>o pulsa para seleccionarlos</span>
         </div>
       </label>
 
-      ${renderFilesSummary(files)}
+      ${renderFilesSummary(items)}
+    </section>
+  `;
+}
+
+function renderInfoCard() {
+  return `
+    <section class="inc-create-side-card inc-create-side-note">
+      <strong class="inc-create-side-title">Antes de enviar</strong>
+      <div class="inc-create-note-list">
+        <span>Se generará una referencia automáticamente.</span>
+        <span>Cuanto más claro sea el asunto, mejor.</span>
+        <span>Los adjuntos se enviarán junto con la incidencia.</span>
+      </div>
+    </section>
+  `;
+}
+
+function renderAlert(type = "info", title = "", text = "", extra = "") {
+  const safeTitle = safeText(title, "");
+  const safeBody = safeText(text, "");
+  if (!safeTitle && !safeBody) return "";
+
+  return `
+    <div class="inc-create-alert is-${escapeHtml(type)}">
+      ${safeTitle ? `<strong>${escapeHtml(safeTitle)}</strong>` : ""}
+      ${safeBody ? `<span>${escapeHtml(safeBody)}</span>` : ""}
+      ${extra || ""}
     </div>
   `;
 }
@@ -777,16 +622,7 @@ function renderModalInner() {
   return `
     <div
       data-incidencias-create-modal-overlay="true"
-      style="
-        position:fixed;
-        inset:0;
-        z-index:9999;
-        padding:24px;
-        display:grid;
-        place-items:center;
-        background:rgba(0,0,0,.68);
-        backdrop-filter:blur(10px);
-      "
+      class="inc-create-overlay"
     >
       <div
         id="${PANEL_ID}"
@@ -795,246 +631,103 @@ function renderModalInner() {
         aria-modal="true"
         aria-labelledby="incidencias-create-modal-title"
         tabindex="-1"
-        style="
-          position:relative;
-          width:min(920px, 100%);
-          max-height:92vh;
-          overflow:auto;
-          border-radius:28px;
-          border:1px solid var(--border-soft, #2b2b2b);
-          background:
-            radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 34%),
-            linear-gradient(180deg, var(--surface-2, #151515), var(--surface-1, #121212));
-          box-shadow:0 40px 100px rgba(0,0,0,.45);
-        "
+        class="inc-create-panel"
       >
-        <div
-          style="
-            padding:24px;
-            border-bottom:1px solid var(--border-soft);
-            display:flex;
-            justify-content:space-between;
-            gap:18px;
-            flex-wrap:wrap;
-          "
-        >
-          <div style="display:grid; gap:10px; min-width:min(100%, 500px);">
-            <span
-              style="
-                display:inline-flex;
-                align-items:center;
-                width:max-content;
-                min-height:28px;
-                padding:0 12px;
-                border-radius:999px;
-                border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft));
-                background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-                color:var(--text-soft);
-                font-size:12px;
-                font-weight:var(--weight-bold, 700);
-                letter-spacing:.06em;
-                text-transform:uppercase;
-              "
-            >
-              Nueva incidencia
-            </span>
+        <div class="inc-create-header">
+          <div class="inc-create-header-copy">
+            <span class="inc-create-badge">Nueva incidencia</span>
 
-            <div style="display:grid; gap:8px;">
-              <h2
-                id="incidencias-create-modal-title"
-                style="
-                  margin:0;
-                  font-size:clamp(28px, 4vw, 42px);
-                  line-height:.98;
-                  letter-spacing:-.05em;
-                  color:var(--text-strong);
-                "
-              >
+            <div class="inc-create-header-text">
+              <h2 id="incidencias-create-modal-title">
                 Cuéntanos qué ha ocurrido
               </h2>
 
-              <p
-                style="
-                  margin:0;
-                  max-width:760px;
-                  color:var(--text-dim);
-                  font-size:14px;
-                  line-height:1.6;
-                "
-              >
-                Describe el problema de la forma más clara posible y añade archivos si ayudan a entenderlo mejor.
+              <p>
+                Describe el problema de forma clara y añade archivos si ayudan a entenderlo mejor.
               </p>
             </div>
           </div>
 
-          <div
-            style="
-              display:flex;
-              gap:10px;
-              flex-wrap:wrap;
-              align-items:flex-start;
-            "
+          <button
+            type="button"
+            data-modal-close="true"
+            aria-label="Cerrar modal"
+            ${submitting ? "disabled" : ""}
+            class="inc-create-close"
           >
-            <button
-              type="button"
-              data-modal-close="true"
-              aria-label="Cerrar modal"
-              ${submitting ? "disabled" : ""}
-              style="
-                width:48px;
-                height:48px;
-                border:none;
-                border-radius:16px;
-                cursor:${submitting ? "not-allowed" : "pointer"};
-                font-size:20px;
-                background:var(--surface-glass);
-                color:var(--text-strong);
-                border:1px solid var(--border-soft);
-                opacity:${submitting ? ".7" : "1"};
-              "
-            >
-              ✕
-            </button>
-          </div>
+            ✕
+          </button>
         </div>
 
-        <div style="padding:20px 24px 24px;">
+        <div class="inc-create-body">
           ${
             successMessage
-              ? `
-                <div
-                  style="
-                    margin-bottom:18px;
-                    display:grid;
-                    gap:6px;
-                    padding:16px;
-                    border-radius:16px;
-                    border:1px solid color-mix(in srgb, var(--success-strong, #36c690) 30%, var(--border-soft));
-                    background:
-                      linear-gradient(180deg, color-mix(in srgb, var(--success-strong, #36c690) 10%, transparent), transparent 85%),
-                      var(--surface-1, var(--surface-glass));
-                  "
-                >
-                  <strong style="color:var(--text-strong);">
-                    ${escapeHtml(successMessage)}
-                  </strong>
-                  ${
-                    createdTicketId
-                      ? `
-                        <span style="color:var(--text-dim); font-size:13px;">
-                          Referencia generada: ${escapeHtml(createdTicketId)}
-                        </span>
-                      `
-                      : ""
-                  }
-                </div>
-              `
+              ? renderAlert(
+                  "success",
+                  "Tu incidencia se ha enviado correctamente.",
+                  createdTicketId
+                    ? `Referencia generada: ${createdTicketId}`
+                    : ""
+                )
               : ""
           }
 
           ${
             serverError
-              ? `
-                <div
-                  style="
-                    margin-bottom:18px;
-                    display:grid;
-                    gap:6px;
-                    padding:16px;
-                    border-radius:16px;
-                    border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 30%, var(--border-soft));
-                    background:
-                      linear-gradient(180deg, color-mix(in srgb, var(--danger-strong, #ff6b6b) 10%, transparent), transparent 85%),
-                      var(--surface-1, var(--surface-glass));
-                  "
-                >
-                  <strong style="color:var(--text-strong);">
-                    No se pudo enviar la incidencia
-                  </strong>
-                  <span style="color:var(--text-dim); font-size:13px; line-height:1.45;">
-                    ${escapeHtml(serverError)}
-                  </span>
-                </div>
-              `
+              ? renderAlert(
+                  "error",
+                  "No se pudo enviar la incidencia",
+                  serverError
+                )
               : ""
           }
 
-          <form
-            id="incidencias-create-form"
-            novalidate
-            style="
-              display:grid;
-              gap:18px;
-            "
-          >
-            ${renderInput({
-              label: "Asunto",
-              name: "subject",
-              value: form.subject,
-              placeholder: "Ej. No puedo acceder, error al pagar, problema con mi factura...",
-              required: true,
-              error: errors.subject,
-              hint: "",
-            })}
+          <form id="incidencias-create-form" novalidate class="inc-create-form">
+            <div class="inc-create-grid">
+              <div class="inc-create-main">
+                ${renderInput({
+                  label: "Asunto",
+                  name: "subject",
+                  value: form.subject,
+                  placeholder: "Ej. No puedo acceder, error al pagar, problema con mi factura...",
+                  required: true,
+                  error: errors.subject,
+                })}
 
-            ${renderTextarea({
-              label: "Descripción",
-              name: "description",
-              value: form.description,
-              placeholder:
-                "Explícanos con detalle qué está pasando, desde cuándo ocurre y qué pasos has seguido antes de llegar aquí.",
-              required: true,
-              error: errors.description,
-              hint: "",
-              rows: 9,
-            })}
+                ${renderTextarea({
+                  label: "Descripción",
+                  name: "description",
+                  value: form.description,
+                  placeholder:
+                    "Explícanos qué está pasando, desde cuándo ocurre y qué has intentado antes de llegar aquí.",
+                  required: true,
+                  error: errors.description,
+                  rows: 6,
+                })}
+              </div>
 
-            ${renderFileInput({
-              files: safeArray(form.attachments),
-              dragActive: Boolean(modalState.dragActive),
-            })}
+              <aside class="inc-create-side">
+                ${renderFileInput({
+                  files: safeArray(form.attachments),
+                  dragActive: Boolean(modalState.dragActive),
+                })}
 
-            <div
-              style="
-                display:flex;
-                justify-content:flex-end;
-                gap:12px;
-                flex-wrap:wrap;
-                padding-top:6px;
-              "
-            >
+                ${renderInfoCard()}
+              </aside>
+            </div>
+
+            <div class="inc-create-actions">
               <button
                 id="incidencias-create-submit-btn"
                 type="submit"
                 ${submitting ? "disabled" : ""}
-                style="
-                  min-height:46px;
-                  padding:0 18px;
-                  border-radius:14px;
-                  border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
-                  background:var(--btn-primary-bg, var(--accent, #7c5cff));
-                  color:var(--btn-primary-text, #fff);
-                  font-weight:var(--weight-bold, 700);
-                  cursor:${submitting ? "wait" : "pointer"};
-                  opacity:${submitting ? ".8" : "1"};
-                  box-shadow:0 12px 26px color-mix(in srgb, var(--accent, #7c5cff) 20%, transparent);
-                "
+                class="inc-create-submit"
               >
                 ${
                   submitting
                     ? `
-                      <span style="display:inline-flex; align-items:center; gap:8px;">
-                        <span
-                          aria-hidden="true"
-                          style="
-                            width:14px;
-                            height:14px;
-                            border-radius:999px;
-                            border:2px solid rgba(255,255,255,.28);
-                            border-top-color:#fff;
-                            animation:incidenciasCreateSpin .8s linear infinite;
-                          "
-                        ></span>
+                      <span class="inc-create-submit-inner">
+                        <span class="inc-create-spinner" aria-hidden="true"></span>
                         Enviando...
                       </span>
                     `
@@ -1048,6 +741,489 @@ function renderModalInner() {
         <style>
           @keyframes incidenciasCreateSpin {
             to { transform: rotate(360deg); }
+          }
+
+          .inc-create-overlay{
+            position:fixed;
+            inset:0;
+            z-index:9999;
+            padding:18px;
+            display:grid;
+            place-items:center;
+            background:rgba(0,0,0,.66);
+            backdrop-filter:blur(10px);
+            -webkit-backdrop-filter:blur(10px);
+          }
+
+          .inc-create-panel{
+            position:relative;
+            width:min(860px, 100%);
+            max-height:90vh;
+            overflow:auto;
+            border-radius:24px;
+            border:1px solid var(--border-soft, #2b2b2b);
+            background:
+              radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 34%),
+              linear-gradient(180deg, var(--surface-2, #151515), var(--surface-1, #121212));
+            box-shadow:0 34px 84px rgba(0,0,0,.42);
+          }
+
+          .inc-create-header{
+            display:flex;
+            align-items:flex-start;
+            justify-content:space-between;
+            gap:14px;
+            padding:18px 18px 14px;
+            border-bottom:1px solid var(--border-soft);
+          }
+
+          .inc-create-header-copy{
+            display:grid;
+            gap:10px;
+            min-width:0;
+            flex:1 1 auto;
+          }
+
+          .inc-create-badge{
+            display:inline-flex;
+            align-items:center;
+            width:max-content;
+            min-height:26px;
+            padding:0 10px;
+            border-radius:999px;
+            border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft));
+            background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
+            color:var(--text-soft);
+            font-size:11px;
+            font-weight:var(--weight-bold, 700);
+            letter-spacing:.06em;
+            text-transform:uppercase;
+          }
+
+          .inc-create-header-text{
+            display:grid;
+            gap:6px;
+          }
+
+          .inc-create-header-text h2{
+            margin:0;
+            color:var(--text-strong);
+            font-size:clamp(24px, 3.6vw, 34px);
+            line-height:1;
+            letter-spacing:-.045em;
+          }
+
+          .inc-create-header-text p{
+            margin:0;
+            max-width:680px;
+            color:var(--text-dim);
+            font-size:13px;
+            line-height:1.55;
+          }
+
+          .inc-create-close{
+            width:42px;
+            height:42px;
+            flex:0 0 auto;
+            border:none;
+            border-radius:14px;
+            cursor:pointer;
+            font-size:18px;
+            background:var(--surface-glass);
+            color:var(--text-strong);
+            border:1px solid var(--border-soft);
+            opacity:1;
+          }
+
+          .inc-create-close:disabled{
+            opacity:.7;
+            cursor:not-allowed;
+          }
+
+          .inc-create-body{
+            padding:16px 18px 18px;
+            display:grid;
+            gap:14px;
+          }
+
+          .inc-create-alert{
+            display:grid;
+            gap:4px;
+            padding:12px 14px;
+            border-radius:14px;
+            border:1px solid var(--border-soft);
+            background:var(--surface-1, var(--surface-glass));
+          }
+
+          .inc-create-alert strong{
+            color:var(--text-strong);
+            font-size:13px;
+            line-height:1.35;
+          }
+
+          .inc-create-alert span{
+            color:var(--text-dim);
+            font-size:12px;
+            line-height:1.5;
+          }
+
+          .inc-create-alert.is-success{
+            border-color:color-mix(in srgb, var(--success-strong, #36c690) 28%, var(--border-soft));
+            background:
+              linear-gradient(180deg, color-mix(in srgb, var(--success-strong, #36c690) 10%, transparent), transparent 85%),
+              var(--surface-1, var(--surface-glass));
+          }
+
+          .inc-create-alert.is-error{
+            border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 28%, var(--border-soft));
+            background:
+              linear-gradient(180deg, color-mix(in srgb, var(--danger-strong, #ff6b6b) 10%, transparent), transparent 85%),
+              var(--surface-1, var(--surface-glass));
+          }
+
+          .inc-create-form{
+            display:grid;
+            gap:14px;
+          }
+
+          .inc-create-grid{
+            display:grid;
+            grid-template-columns:minmax(0, 1.26fr) minmax(280px, .82fr);
+            gap:14px;
+            align-items:start;
+          }
+
+          .inc-create-main{
+            display:grid;
+            gap:14px;
+            min-width:0;
+          }
+
+          .inc-create-side{
+            display:grid;
+            gap:12px;
+            min-width:0;
+          }
+
+          .inc-create-field{
+            display:grid;
+            gap:8px;
+            min-width:0;
+          }
+
+          .inc-create-label{
+            color:var(--text-soft);
+            font-size:11px;
+            font-weight:var(--weight-bold, 700);
+            letter-spacing:.05em;
+            text-transform:uppercase;
+          }
+
+          .inc-create-input,
+          .inc-create-textarea{
+            width:100%;
+            outline:none;
+            color:var(--text-strong);
+            background:var(--surface-1, var(--surface-glass));
+            border:1px solid var(--border-soft);
+            transition:
+              border-color .18s ease,
+              box-shadow .18s ease,
+              background .18s ease;
+          }
+
+          .inc-create-input{
+            min-height:46px;
+            padding:0 14px;
+            border-radius:14px;
+            font-size:14px;
+          }
+
+          .inc-create-textarea{
+            min-height:168px;
+            padding:12px 14px;
+            border-radius:16px;
+            resize:vertical;
+            line-height:1.55;
+            font-size:13px;
+          }
+
+          .inc-create-input::placeholder,
+          .inc-create-textarea::placeholder{
+            color:var(--text-faint);
+          }
+
+          .inc-create-input:focus,
+          .inc-create-textarea:focus{
+            border-color:color-mix(in srgb, var(--accent, #7c5cff) 30%, var(--border-soft));
+            box-shadow:0 0 0 4px color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
+          }
+
+          .inc-create-input.is-error,
+          .inc-create-textarea.is-error{
+            border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 38%, var(--border-soft));
+            box-shadow:0 0 0 4px color-mix(in srgb, var(--danger-strong, #ff6b6b) 10%, transparent);
+          }
+
+          .inc-create-error{
+            color:var(--danger-strong, #ff6b6b);
+            font-size:11px;
+            line-height:1.35;
+            font-weight:var(--weight-semibold, 600);
+          }
+
+          .inc-create-side-card{
+            display:grid;
+            gap:10px;
+            padding:14px;
+            border-radius:16px;
+            border:1px solid var(--border-soft);
+            background:var(--surface-1, var(--surface-glass));
+          }
+
+          .inc-create-side-head{
+            display:flex;
+            align-items:flex-start;
+            justify-content:space-between;
+            gap:10px;
+          }
+
+          .inc-create-side-head-copy{
+            display:grid;
+            gap:4px;
+            min-width:0;
+          }
+
+          .inc-create-side-title{
+            color:var(--text-strong);
+            font-size:13px;
+            line-height:1.3;
+          }
+
+          .inc-create-side-text{
+            color:var(--text-dim);
+            font-size:11px;
+            line-height:1.45;
+          }
+
+          .inc-create-side-pill{
+            display:inline-flex;
+            align-items:center;
+            min-height:24px;
+            padding:0 8px;
+            border-radius:999px;
+            border:1px solid var(--border-soft);
+            background:var(--surface-glass);
+            color:var(--text-dim);
+            font-size:10px;
+            font-weight:var(--weight-bold, 700);
+            letter-spacing:.04em;
+            text-transform:uppercase;
+            white-space:nowrap;
+          }
+
+          .inc-create-dropzone{
+            display:grid;
+            gap:8px;
+            min-height:110px;
+            align-content:center;
+            padding:14px;
+            border-radius:14px;
+            border:1px dashed var(--border-soft);
+            background:transparent;
+            cursor:pointer;
+            transition:
+              border-color .18s ease,
+              background .18s ease,
+              transform .18s ease;
+          }
+
+          .inc-create-dropzone.is-active{
+            border-color:color-mix(in srgb, var(--accent, #7c5cff) 32%, var(--border-soft));
+            background:
+              linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent),
+              var(--surface-glass);
+          }
+
+          .inc-create-dropzone-copy{
+            display:grid;
+            gap:4px;
+          }
+
+          .inc-create-dropzone-copy strong{
+            color:var(--text-strong);
+            font-size:13px;
+            line-height:1.35;
+          }
+
+          .inc-create-dropzone-copy span{
+            color:var(--text-dim);
+            font-size:11px;
+            line-height:1.45;
+          }
+
+          .inc-create-hidden-input{
+            display:none;
+          }
+
+          .inc-create-files-empty{
+            color:var(--text-dim);
+            font-size:12px;
+            line-height:1.45;
+          }
+
+          .inc-create-files-list{
+            display:grid;
+            gap:8px;
+          }
+
+          .inc-create-file-row{
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+            gap:10px;
+            padding:10px 12px;
+            border-radius:12px;
+            border:1px solid var(--border-soft);
+            background:var(--surface-glass);
+          }
+
+          .inc-create-file-meta{
+            display:grid;
+            gap:3px;
+            min-width:0;
+          }
+
+          .inc-create-file-name{
+            color:var(--text-strong);
+            font-size:12px;
+            line-height:1.35;
+            word-break:break-word;
+          }
+
+          .inc-create-file-size{
+            color:var(--text-dim);
+            font-size:11px;
+            line-height:1.3;
+          }
+
+          .inc-create-file-remove{
+            min-height:32px;
+            padding:0 10px;
+            border-radius:10px;
+            border:1px solid var(--border-soft);
+            background:transparent;
+            color:var(--text-dim);
+            font-size:12px;
+            font-weight:var(--weight-bold, 700);
+            cursor:pointer;
+            flex:0 0 auto;
+          }
+
+          .inc-create-side-note{
+            gap:8px;
+          }
+
+          .inc-create-note-list{
+            display:grid;
+            gap:6px;
+          }
+
+          .inc-create-note-list span{
+            color:var(--text-dim);
+            font-size:11px;
+            line-height:1.45;
+          }
+
+          .inc-create-actions{
+            display:flex;
+            justify-content:flex-end;
+            gap:12px;
+            padding-top:2px;
+          }
+
+          .inc-create-submit{
+            min-height:42px;
+            padding:0 16px;
+            border-radius:12px;
+            border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
+            background:var(--btn-primary-bg, var(--accent, #7c5cff));
+            color:var(--btn-primary-text, #fff);
+            font-size:13px;
+            font-weight:var(--weight-bold, 700);
+            cursor:pointer;
+            box-shadow:0 12px 26px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
+          }
+
+          .inc-create-submit:disabled{
+            opacity:.8;
+            cursor:wait;
+          }
+
+          .inc-create-submit-inner{
+            display:inline-flex;
+            align-items:center;
+            gap:8px;
+          }
+
+          .inc-create-spinner{
+            width:14px;
+            height:14px;
+            border-radius:999px;
+            border:2px solid rgba(255,255,255,.28);
+            border-top-color:#fff;
+            animation:incidenciasCreateSpin .8s linear infinite;
+          }
+
+          [data-theme="light"] .inc-create-panel{
+            background:
+              radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 34%),
+              linear-gradient(180deg, rgba(255,255,255,.96), rgba(248,250,255,.94));
+            box-shadow:
+              0 28px 70px rgba(15,23,42,.14),
+              0 0 0 1px rgba(255,255,255,.65) inset;
+          }
+
+          [data-theme="light"] .inc-create-side-card,
+          [data-theme="light"] .inc-create-alert,
+          [data-theme="light"] .inc-create-input,
+          [data-theme="light"] .inc-create-textarea,
+          [data-theme="light"] .inc-create-file-row{
+            box-shadow:0 6px 16px rgba(15,23,42,.04);
+          }
+
+          @media (max-width: 920px){
+            .inc-create-grid{
+              grid-template-columns:1fr;
+            }
+          }
+
+          @media (max-width: 640px){
+            .inc-create-overlay{
+              padding:10px;
+            }
+
+            .inc-create-panel{
+              width:100%;
+              max-height:94vh;
+              border-radius:18px;
+            }
+
+            .inc-create-header{
+              padding:14px 14px 12px;
+            }
+
+            .inc-create-body{
+              padding:14px;
+            }
+
+            .inc-create-header-text h2{
+              font-size:28px;
+            }
+
+            .inc-create-textarea{
+              min-height:146px;
+            }
           }
         </style>
       </div>
@@ -1307,7 +1483,7 @@ async function handleSubmit() {
 
     setTimeout(() => {
       closeIncidenciasCreateModal();
-    }, 350);
+    }, 450);
 
     return true;
   } catch (error) {
@@ -1433,6 +1609,7 @@ function attachRootBindings() {
     if (!dropzone) return;
 
     event.preventDefault();
+
     if (!modalState.dragActive) {
       modalState.dragActive = true;
       renderModal();
@@ -1500,8 +1677,6 @@ function attachRootBindings() {
       renderModal();
       attachRootBindings();
       focusPanel();
-
-      return;
     }
   };
 

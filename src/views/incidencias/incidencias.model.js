@@ -51,9 +51,7 @@ export const PRIORITY = Object.freeze({
 
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
-
   const text = String(value).trim();
-
   return text || fallback;
 }
 
@@ -67,9 +65,7 @@ function safeArray(value) {
 }
 
 function safeObject(value) {
-  return value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
+  return value && typeof value === "object" && !Array.isArray(value)
     ? value
     : {};
 }
@@ -86,6 +82,10 @@ function first(...values) {
   }
 
   return null;
+}
+
+function uniqueStrings(values = []) {
+  return [...new Set(safeArray(values).map((v) => safeText(v, "")).filter(Boolean))];
 }
 
 /* =========================================================
@@ -240,7 +240,6 @@ export function toTimestamp(value = null) {
 
 export function getInitials(value = "") {
   const text = safeText(value, "ON");
-
   const parts = text.split(/\s+/).filter(Boolean);
 
   if (!parts.length) {
@@ -267,9 +266,7 @@ export function getAvatarTheme(seed = "") {
     "orange",
   ];
 
-  return themes[
-    hashString(seed) % themes.length
-  ];
+  return themes[hashString(seed) % themes.length];
 }
 
 /* =========================================================
@@ -283,7 +280,9 @@ function normalizeAttachment(file = {}) {
     id: safeText(
       first(
         item.id,
-        item.fileId
+        item.fileId,
+        item.blobName,
+        item.name
       ),
       ""
     ),
@@ -293,7 +292,8 @@ function normalizeAttachment(file = {}) {
         item.name,
         item.filename,
         item.fileName,
-        item.originalname
+        item.originalname,
+        item.title
       ),
       "archivo"
     ),
@@ -302,26 +302,47 @@ function normalizeAttachment(file = {}) {
       first(
         item.url,
         item.href,
-        item.path,
         item.downloadUrl
       ),
-      "#"
+      ""
+    ),
+
+    path: safeText(
+      first(
+        item.path
+      ),
+      ""
     ),
 
     size: safeNumber(item.size, 0),
+
+    type: safeText(
+      first(
+        item.type,
+        item.contentType,
+        item.mimeType,
+        item.mime
+      ),
+      ""
+    ),
+
+    uploadedAt: first(
+      item.uploadedAt,
+      item.createdAt,
+      item.date,
+      item.timestamp
+    ),
 
     raw: item,
   };
 }
 
 function normalizeAttachments(value) {
-  return safeArray(value).map(
-    normalizeAttachment
-  );
+  return safeArray(value).map(normalizeAttachment);
 }
 
 /* =========================================================
-   HISTORY
+   HISTORY / COMMENTS
 ========================================================= */
 
 function normalizeHistoryEntry(row = {}) {
@@ -329,18 +350,33 @@ function normalizeHistoryEntry(row = {}) {
 
   return {
     id: safeText(
-      first(item.id),
+      first(
+        item.id,
+        item.eventId
+      ),
       ""
     ),
+
+    kind: "event",
 
     title: safeText(
       first(
         item.title,
         item.action,
+        item.type,
         item.message,
         item.text
       ),
       "Evento"
+    ),
+
+    body: safeText(
+      first(
+        item.description,
+        item.detail,
+        item.body
+      ),
+      ""
     ),
 
     createdAt: first(
@@ -349,8 +385,55 @@ function normalizeHistoryEntry(row = {}) {
       item.timestamp
     ),
 
-    user: safeText(
+    author: safeText(
       first(
+        item.byName,
+        item.user,
+        item.author,
+        item.name
+      ),
+      ""
+    ),
+
+    raw: item,
+  };
+}
+
+function normalizeCommentEntry(row = {}) {
+  const item = safeObject(row);
+
+  return {
+    id: safeText(
+      first(
+        item.id,
+        item.commentId
+      ),
+      ""
+    ),
+
+    kind: "comment",
+
+    title: "Comentario",
+
+    body: safeText(
+      first(
+        item.message,
+        item.text,
+        item.body,
+        item.comment
+      ),
+      ""
+    ),
+
+    createdAt: first(
+      item.createdAt,
+      item.date,
+      item.timestamp
+    ),
+
+    author: safeText(
+      first(
+        item.byName,
         item.user,
         item.author,
         item.name
@@ -363,37 +446,50 @@ function normalizeHistoryEntry(row = {}) {
 }
 
 function normalizeHistory(value) {
-  return safeArray(value).map(
-    normalizeHistoryEntry
-  );
+  return safeArray(value).map(normalizeHistoryEntry);
+}
+
+function normalizeComments(value) {
+  return safeArray(value).map(normalizeCommentEntry);
 }
 
 /* =========================================================
    CORE NORMALIZER
 ========================================================= */
 
-export function normalizeIncidenciaModel(
-  payload = {}
-) {
-  const item = safeObject(payload);
-
-  const clientObject = safeObject(
+export function normalizeIncidenciaModel(payload = {}) {
+  const source = safeObject(payload);
+  const item = safeObject(
     first(
-      item.client,
+      source.ticket,
+      source.item,
+      source.data,
+      source.result,
+      source.payload,
+      source
+    )
+  );
+
+  const clienteObject = safeObject(
+    first(
       item.cliente,
+      item.client,
       item.customer,
       item.receptor,
       item.createdBy
     )
   );
 
-  const assignedObject = safeObject(
+  const tecnicoObject = safeObject(
     first(
+      item.tecnico,
       item.assignedTo,
-      item.assignee,
-      item.tecnico
+      item.assignee
     )
   );
+
+  const createdByObject = safeObject(item.createdBy);
+  const receptorObject = safeObject(item.receptor);
 
   const ticketId = safeText(
     first(
@@ -426,31 +522,47 @@ export function normalizeIncidenciaModel(
     "Sin descripción."
   );
 
+  const message = safeText(
+    first(
+      item.message,
+      item.descripcion,
+      item.description,
+      item.preview,
+      item.body
+    ),
+    ""
+  );
+
   const clientName = safeText(
     first(
-      clientObject.name,
-      clientObject.nombre,
-      clientObject.company,
+      clienteObject.nombre,
+      clienteObject.name,
+      clienteObject.company,
       item.clientName,
       item.company,
-      item.clienteNombre
+      item.clienteNombre,
+      item.name,
+      receptorObject.name,
+      createdByObject.name
     ),
     "Cliente"
   );
 
   const clientEmail = safeText(
     first(
-      clientObject.email,
+      clienteObject.email,
       item.clientEmail,
-      item.email
+      item.email,
+      receptorObject.email,
+      createdByObject.email
     ),
     "Sin email"
   );
 
   const clientAvatar = safeText(
     first(
-      clientObject.avatar,
-      clientObject.avatarUrl,
+      clienteObject.avatar,
+      clienteObject.avatarUrl,
       item.clientAvatar,
       item.avatar,
       item.avatarUrl
@@ -460,8 +572,9 @@ export function normalizeIncidenciaModel(
 
   const assignedToName = safeText(
     first(
-      assignedObject.name,
-      assignedObject.nombre,
+      tecnicoObject.name,
+      tecnicoObject.nombre,
+      item.assignedToName,
       item.assignedTo,
       item.assignee,
       item.tecnico
@@ -483,6 +596,24 @@ export function normalizeIncidenciaModel(
     )
   );
 
+  const category = safeText(
+    first(
+      item.category,
+      item.categoria,
+      item.tipo
+    ),
+    "general"
+  );
+
+  const sourceLabel = safeText(
+    first(
+      item.source,
+      item.origen,
+      item.channel
+    ),
+    "panel"
+  );
+
   const createdAt = first(
     item.createdAt,
     item.createdAtES,
@@ -498,74 +629,72 @@ export function normalizeIncidenciaModel(
     createdAt
   );
 
-  const attachments =
-    normalizeAttachments(
-      first(
-        item.attachments,
-        item.files,
-        item.adjuntos
-      )
-    );
+  const attachments = normalizeAttachments(
+    first(
+      item.attachments,
+      item.files,
+      item.adjuntos
+    )
+  );
 
-  const history =
-    normalizeHistory(
-      first(
-        item.history,
-        item.timeline,
-        item.logs,
-        item.comments
-      )
-    );
+  const history = normalizeHistory(
+    first(
+      item.history,
+      item.timeline,
+      item.logs
+    )
+  );
 
-  const initials =
-    getInitials(clientName);
+  const comments = normalizeComments(
+    first(
+      item.comments,
+      item.notes,
+      item.messages
+    )
+  );
 
-  const avatarTheme =
-    getAvatarTheme(
-      ticketId ||
-      clientName ||
-      clientEmail
-    );
+  const tagsRaw = first(
+    item.tags,
+    item.labels
+  );
 
-  const isAssigned =
-    assignedToName !==
-    "No asignado";
+  const tags = Array.isArray(tagsRaw)
+    ? tagsRaw.map((x) => safeText(x, "")).filter(Boolean)
+    : typeof tagsRaw === "string"
+      ? tagsRaw.split(",").map((x) => safeText(x, "")).filter(Boolean)
+      : [];
 
-  const isOpen =
-    status === STATUS.OPEN;
+  const initials = getInitials(clientName);
+  const avatarTheme = getAvatarTheme(ticketId || clientName || clientEmail);
 
-  const isPending =
-    status === STATUS.PENDING;
+  const isAssigned = safeText(assignedToName).toLowerCase() !== "no asignado";
+  const isOpen = status === STATUS.OPEN;
+  const isPending = status === STATUS.PENDING;
+  const isInProgress = status === STATUS.IN_PROGRESS;
+  const isResolved = status === STATUS.RESOLVED;
+  const isClosed = status === STATUS.CLOSED;
+  const isUrgent = priority === PRIORITY.URGENT;
+  const isHigh = priority === PRIORITY.HIGH;
 
-  const isInProgress =
-    status === STATUS.IN_PROGRESS;
+  const createdAtTs = toTimestamp(createdAt);
+  const updatedAtTs = toTimestamp(updatedAt);
 
-  const isResolved =
-    status === STATUS.RESOLVED;
-
-  const isClosed =
-    status === STATUS.CLOSED;
-
-  const isUrgent =
-    priority === PRIORITY.URGENT;
-
-  const isHigh =
-    priority === PRIORITY.HIGH;
-
-  const createdAtTs =
-    toTimestamp(createdAt);
-
-  const updatedAtTs =
-    toTimestamp(updatedAt);
+  const timeline = [...history, ...comments].sort(
+    (a, b) => safeNumber(toTimestamp(b.createdAt)) - safeNumber(toTimestamp(a.createdAt))
+  );
 
   return {
     /* identity */
     ticketId,
-    id: ticketId,
+    id: safeText(first(item.id, ticketId), ticketId),
+    ticketCode: safeText(first(item.ticketCode, item.code, ticketId), ticketId),
 
     /* content */
     title,
+    subject: safeText(first(item.subject, item.asunto, title), title),
     description,
+    message,
+    preview: safeText(first(item.preview, message, description), description),
 
     /* relations */
     clientName,
@@ -573,22 +702,53 @@ export function normalizeIncidenciaModel(
     clientAvatar,
     assignedToName,
 
+    cliente: {
+      id: safeText(first(clienteObject.id, item.clienteId, item.userId), ""),
+      nombre: clientName,
+      email: clientEmail,
+      avatar: clientAvatar,
+      raw: clienteObject,
+    },
+
+    tecnico: {
+      name: safeText(first(tecnicoObject.name, tecnicoObject.nombre), "No asignado"),
+      email: safeText(first(tecnicoObject.email), ""),
+      raw: tecnicoObject,
+    },
+
+    createdBy: {
+      userId: safeText(first(createdByObject.userId, createdByObject.id, item.userId, item.clienteId), ""),
+      name: safeText(first(createdByObject.name, item.name), ""),
+      email: safeText(first(createdByObject.email, item.email), ""),
+      raw: createdByObject,
+    },
+
+    receptor: {
+      userId: safeText(first(receptorObject.userId, receptorObject.id, item.userId, item.clienteId), ""),
+      name: safeText(first(receptorObject.name, item.name), ""),
+      email: safeText(first(receptorObject.email, item.email), ""),
+      raw: receptorObject,
+    },
+
     /* enums */
     status,
-    statusLabel:
-      getStatusLabel(status),
+    statusLabel: getStatusLabel(status),
 
     priority,
-    priorityLabel:
-      getPriorityLabel(
-        priority
-      ),
+    priorityLabel: getPriorityLabel(priority),
+
+    /* semantic fields */
+    category,
+    categoria: category,
+    tipo: safeText(first(item.tipo, item.categoria, category), category),
+    source: sourceLabel,
 
     /* dates */
     createdAt,
     updatedAt,
     createdAtTs,
     updatedAtTs,
+    closedAt: first(item.closedAt, null),
 
     /* visuals */
     initials,
@@ -596,12 +756,18 @@ export function normalizeIncidenciaModel(
 
     /* collections */
     attachments,
-    attachmentsCount:
-      attachments.length,
+    attachmentsCount: attachments.length,
 
     history,
-    historyCount:
-      history.length,
+    historyCount: history.length,
+
+    comments,
+    commentsCount: comments.length,
+
+    timeline,
+    timelineCount: timeline.length,
+
+    tags,
 
     /* flags */
     isAssigned,
@@ -613,6 +779,14 @@ export function normalizeIncidenciaModel(
     isUrgent,
     isHigh,
 
+    /* misc */
+    email: safeText(item.email, clientEmail),
+    name: safeText(item.name, clientName),
+    userId: safeText(first(item.userId, item.clienteId, createdByObject.userId), ""),
+    clienteId: safeText(first(item.clienteId, item.userId, createdByObject.userId), ""),
+    fechaProgramada: first(item.fechaProgramada, null),
+    ip: safeText(item.ip, ""),
+
     /* raw */
     raw: item,
   };
@@ -622,9 +796,7 @@ export function normalizeIncidenciaModel(
    COLLECTION NORMALIZER
 ========================================================= */
 
-export function unwrapIncidenciasPayload(
-  payload = null
-) {
+export function unwrapIncidenciasPayload(payload = null) {
   if (!payload) return [];
 
   if (Array.isArray(payload)) {
@@ -633,74 +805,44 @@ export function unwrapIncidenciasPayload(
 
   const obj = safeObject(payload);
 
-  if (
-    Array.isArray(obj.tickets)
-  ) {
+  if (Array.isArray(obj.tickets)) {
     return obj.tickets;
   }
 
-  if (
-    Array.isArray(obj.items)
-  ) {
+  if (Array.isArray(obj.items)) {
     return obj.items;
   }
 
-  if (
-    Array.isArray(obj.data)
-  ) {
+  if (Array.isArray(obj.data)) {
     return obj.data;
   }
 
-  if (
-    Array.isArray(obj.results)
-  ) {
+  if (Array.isArray(obj.results)) {
     return obj.results;
   }
 
-  if (
-    obj.data &&
-    typeof obj.data ===
-      "object"
-  ) {
-    return unwrapIncidenciasPayload(
-      obj.data
-    );
+  if (obj.data && typeof obj.data === "object") {
+    return unwrapIncidenciasPayload(obj.data);
   }
 
   return [];
 }
 
-export function normalizeIncidenciasCollection(
-  payload = []
-) {
-  return unwrapIncidenciasPayload(
-    payload
-  ).map(
-    normalizeIncidenciaModel
-  );
+export function normalizeIncidenciasCollection(payload = []) {
+  return unwrapIncidenciasPayload(payload).map(normalizeIncidenciaModel);
 }
 
 /* =========================================================
    SORT
 ========================================================= */
 
-export function sortIncidenciasByUpdatedDesc(
-  items = []
-) {
+export function sortIncidenciasByUpdatedDesc(items = []) {
   return [...safeArray(items)].sort(
-    (a, b) =>
-      safeNumber(
-        b.updatedAtTs
-      ) -
-      safeNumber(
-        a.updatedAtTs
-      )
+    (a, b) => safeNumber(b.updatedAtTs) - safeNumber(a.updatedAtTs)
   );
 }
 
-export function sortIncidenciasByPriorityDesc(
-  items = []
-) {
+export function sortIncidenciasByPriorityDesc(items = []) {
   const weight = {
     urgent: 4,
     high: 3,
@@ -709,13 +851,7 @@ export function sortIncidenciasByPriorityDesc(
   };
 
   return [...safeArray(items)].sort(
-    (a, b) =>
-      safeNumber(
-        weight[b.priority]
-      ) -
-      safeNumber(
-        weight[a.priority]
-      )
+    (a, b) => safeNumber(weight[b.priority]) - safeNumber(weight[a.priority])
   );
 }
 
@@ -728,58 +864,36 @@ export function paginateIncidencias(
   page = 1,
   pageSize = DEFAULT_PAGE_SIZE
 ) {
-  const list =
-    safeArray(items);
+  const list = safeArray(items);
 
   const size = Math.max(
     1,
-    safeNumber(
-      pageSize,
-      DEFAULT_PAGE_SIZE
-    )
+    safeNumber(pageSize, DEFAULT_PAGE_SIZE)
   );
 
-  const total =
-    list.length;
+  const total = list.length;
 
-  const totalPages =
-    Math.max(
-      1,
-      Math.ceil(total / size)
-    );
+  const totalPages = Math.max(
+    1,
+    Math.ceil(total / size)
+  );
 
   const current = Math.min(
-    Math.max(
-      1,
-      safeNumber(page, 1)
-    ),
+    Math.max(1, safeNumber(page, 1)),
     totalPages
   );
 
-  const start =
-    (current - 1) * size;
-
-  const end =
-    start + size;
+  const start = (current - 1) * size;
+  const end = start + size;
 
   return {
     page: current,
     pageSize: size,
     total,
     totalPages,
-    items:
-      list.slice(
-        start,
-        end
-      ),
-    from:
-      total === 0
-        ? 0
-        : start + 1,
-    to: Math.min(
-      end,
-      total
-    ),
+    items: list.slice(start, end),
+    from: total === 0 ? 0 : start + 1,
+    to: Math.min(end, total),
   };
 }
 
@@ -787,56 +901,18 @@ export function paginateIncidencias(
    STATS
 ========================================================= */
 
-export function computeIncidenciasStats(
-  items = []
-) {
-  const list =
-    safeArray(items);
+export function computeIncidenciasStats(items = []) {
+  const list = safeArray(items);
 
   return {
-    total:
-      list.length,
-
-    open:
-      list.filter(
-        (x) => x.isOpen
-      ).length,
-
-    pending:
-      list.filter(
-        (x) =>
-          x.isPending
-      ).length,
-
-    inProgress:
-      list.filter(
-        (x) =>
-          x.isInProgress
-      ).length,
-
-    resolved:
-      list.filter(
-        (x) =>
-          x.isResolved
-      ).length,
-
-    closed:
-      list.filter(
-        (x) =>
-          x.isClosed
-      ).length,
-
-    urgent:
-      list.filter(
-        (x) =>
-          x.isUrgent
-      ).length,
-
-    assigned:
-      list.filter(
-        (x) =>
-          x.isAssigned
-      ).length,
+    total: list.length,
+    open: list.filter((x) => x.isOpen).length,
+    pending: list.filter((x) => x.isPending).length,
+    inProgress: list.filter((x) => x.isInProgress).length,
+    resolved: list.filter((x) => x.isResolved).length,
+    closed: list.filter((x) => x.isClosed).length,
+    urgent: list.filter((x) => x.isUrgent).length,
+    assigned: list.filter((x) => x.isAssigned).length,
   };
 }
 
@@ -844,24 +920,21 @@ export function computeIncidenciasStats(
    FINDERS
 ========================================================= */
 
-export function findIncidenciaById(
-  items = [],
-  ticketId = ""
-) {
-  const id = safeText(
-    ticketId,
-    ""
-  );
+export function findIncidenciaById(items = [], ticketId = "") {
+  const id = safeText(ticketId, "");
 
   if (!id) return null;
 
   return (
-    safeArray(items).find(
-      (item) =>
-        safeText(
-          item.ticketId
-        ) === id
-    ) || null
+    safeArray(items).find((item) => {
+      const candidates = uniqueStrings([
+        item?.ticketId,
+        item?.id,
+        item?.ticketCode,
+      ]);
+
+      return candidates.includes(id);
+    }) || null
   );
 }
 
@@ -883,4 +956,6 @@ export default {
   getPriorityLabel,
   normalizeStatus,
   normalizePriority,
+  getInitials,
+  getAvatarTheme,
 };

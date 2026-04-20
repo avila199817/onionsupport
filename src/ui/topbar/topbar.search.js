@@ -41,30 +41,25 @@ const searchGlassRuntime = {
   getDom: null,
 };
 
-function getOverlayBaseZIndex() {
+function getCssNumberVar(name = "", fallback = 0) {
   try {
-    const styles = window.getComputedStyle(document.documentElement);
-    const zOverlay = Number.parseInt(
-      styles.getPropertyValue("--z-overlay") || "60",
-      10
-    );
-    const zDropdown = Number.parseInt(
-      styles.getPropertyValue("--z-dropdown") || "50",
-      10
-    );
+    const value = window
+      .getComputedStyle(document.documentElement)
+      .getPropertyValue(name);
 
-    if (Number.isFinite(zOverlay) && zOverlay > 0) {
-      return zOverlay;
-    }
-
-    if (Number.isFinite(zDropdown) && zDropdown > 0) {
-      return zDropdown + 10;
-    }
+    const parsed = Number.parseInt(String(value || "").trim(), 10);
+    return Number.isFinite(parsed) ? parsed : fallback;
   } catch {
-    /* noop */
+    return fallback;
   }
+}
 
-  return 60;
+function getTopbarBaseZIndex() {
+  return getCssNumberVar("--z-topbar", 30);
+}
+
+function getDropdownBaseZIndex() {
+  return getCssNumberVar("--z-dropdown", 50);
 }
 
 function getSearchGlass() {
@@ -72,7 +67,7 @@ function getSearchGlass() {
 }
 
 function buildSearchGlassStyles(glass) {
-  const overlayBase = getOverlayBaseZIndex();
+  const topbarZ = getTopbarBaseZIndex();
 
   Object.assign(glass.style, {
     position: "fixed",
@@ -80,15 +75,15 @@ function buildSearchGlassStyles(glass) {
     opacity: "0",
     visibility: "hidden",
     pointerEvents: "none",
-    zIndex: String(Math.max(overlayBase - 1, 1)),
+    zIndex: String(Math.max(topbarZ - 1, 1)),
     background: [
-      "radial-gradient(circle at calc(100% - 220px) 76px, rgba(124,92,255,.10), transparent 22%)",
-      "linear-gradient(180deg, rgba(9,12,18,.18), rgba(9,12,18,.34))",
+      "radial-gradient(circle at calc(100% - 220px) 78px, rgba(124,92,255,.08), transparent 20%)",
+      "linear-gradient(180deg, rgba(15,18,28,.06), rgba(15,18,28,.14))",
     ].join(", "),
-    backdropFilter: "blur(12px) saturate(120%)",
-    WebkitBackdropFilter: "blur(12px) saturate(120%)",
+    backdropFilter: "blur(4px) saturate(108%)",
+    WebkitBackdropFilter: "blur(4px) saturate(108%)",
     transition:
-      "opacity .18s cubic-bezier(.2,.8,.2,1), visibility .18s cubic-bezier(.2,.8,.2,1)",
+      "opacity .16s cubic-bezier(.2,.8,.2,1), visibility .16s cubic-bezier(.2,.8,.2,1)",
   });
 }
 
@@ -103,6 +98,7 @@ function ensureSearchGlass() {
   glass = document.createElement("div");
   glass.id = SEARCH_GLASS_ID;
   glass.setAttribute("aria-hidden", "true");
+
   buildSearchGlassStyles(glass);
 
   glass.addEventListener("pointerdown", (event) => {
@@ -130,12 +126,12 @@ function ensureSearchGlass() {
 
 function showSearchGlass(runtime, getDom) {
   const glass = ensureSearchGlass();
-  const overlayBase = getOverlayBaseZIndex();
+  const topbarZ = getTopbarBaseZIndex();
 
   searchGlassRuntime.runtime = runtime || null;
   searchGlassRuntime.getDom = typeof getDom === "function" ? getDom : null;
 
-  glass.style.zIndex = String(Math.max(overlayBase - 1, 1));
+  glass.style.zIndex = String(Math.max(topbarZ - 1, 1));
   glass.style.opacity = "1";
   glass.style.visibility = "visible";
   glass.style.pointerEvents = "auto";
@@ -199,23 +195,21 @@ function muteNode(node) {
   if (!node) return;
 
   node.style.opacity = ".34";
-  node.style.filter = "blur(.5px)";
   node.style.pointerEvents = "none";
-  node.style.transition =
-    "opacity .16s cubic-bezier(.2,.8,.2,1), filter .16s cubic-bezier(.2,.8,.2,1)";
+  node.style.transition = "opacity .16s cubic-bezier(.2,.8,.2,1)";
 }
 
 function unmuteNode(node) {
   if (!node) return;
 
   node.style.opacity = "";
-  node.style.filter = "";
   node.style.pointerEvents = "";
   node.style.transition = "";
 }
 
 function applySearchFocusMode(getDom) {
-  const overlayBase = getOverlayBaseZIndex();
+  const topbarZ = getTopbarBaseZIndex();
+  const dropdownZ = getDropdownBaseZIndex();
 
   const {
     topbar,
@@ -227,16 +221,16 @@ function applySearchFocusMode(getDom) {
 
   if (topbar) {
     topbar.dataset.searchFocus = "true";
-    topbar.style.zIndex = String(overlayBase + 2);
+    topbar.style.zIndex = String(Math.max(topbarZ, dropdownZ) + 1);
   }
 
   if (searchWrap) {
     searchWrap.dataset.searchFocus = "true";
-    searchWrap.style.zIndex = String(overlayBase + 3);
+    searchWrap.style.zIndex = String(Math.max(topbarZ, dropdownZ) + 2);
   }
 
   if (searchResults) {
-    searchResults.style.zIndex = String(overlayBase + 4);
+    searchResults.style.zIndex = String(Math.max(topbarZ, dropdownZ) + 3);
   }
 
   muteNode(topbarLeft);
@@ -303,13 +297,15 @@ export function abortSearch(runtime) {
   }
 }
 
-export function clearSearchState(runtime) {
+export function clearSearchState(runtime, getDom = searchGlassRuntime.getDom) {
   clearSearchDebounce(runtime);
   abortSearch(runtime);
 
   runtime.activeIndex = -1;
   runtime.currentItems = [];
   runtime.currentQuery = "";
+
+  deactivateSearchFocus(getDom);
 }
 
 export function getCacheKey(query = "") {
@@ -634,15 +630,12 @@ export function showResultsContainer(runtime, getDom) {
 export function hideResultsContainer(runtime, getDom) {
   const { searchResults, searchInput } = getDom();
 
-  if (!searchResults) {
-    deactivateSearchFocus(getDom);
-    return;
+  if (searchResults) {
+    searchResults.classList.remove("active");
+    searchResults.hidden = true;
+    searchResults.setAttribute("aria-hidden", "true");
+    searchResults.innerHTML = "";
   }
-
-  searchResults.classList.remove("active");
-  searchResults.hidden = true;
-  searchResults.setAttribute("aria-hidden", "true");
-  searchResults.innerHTML = "";
 
   runtime.activeIndex = -1;
   runtime.currentItems = [];

@@ -11,6 +11,8 @@
    - renderizar resultados del buscador
    - gestionar navegación a resultados
    - actualizar estados visuales del panel search
+   - activar overlay glass global desde JS
+   - centrar la atención visual en el buscador
 ========================================================= */
 
 import {
@@ -27,6 +29,260 @@ import {
   scoreResult,
   groupResults,
 } from "./topbar.helpers.js";
+
+/* =========================================================
+   SEARCH FOCUS OVERLAY (JS)
+========================================================= */
+
+const SEARCH_GLASS_ID = "topbar-search-glass-overlay";
+
+const searchGlassRuntime = {
+  runtime: null,
+  getDom: null,
+};
+
+function getOverlayBaseZIndex() {
+  try {
+    const styles = window.getComputedStyle(document.documentElement);
+    const zOverlay = Number.parseInt(
+      styles.getPropertyValue("--z-overlay") || "60",
+      10
+    );
+    const zDropdown = Number.parseInt(
+      styles.getPropertyValue("--z-dropdown") || "50",
+      10
+    );
+
+    if (Number.isFinite(zOverlay) && zOverlay > 0) {
+      return zOverlay;
+    }
+
+    if (Number.isFinite(zDropdown) && zDropdown > 0) {
+      return zDropdown + 10;
+    }
+  } catch {
+    /* noop */
+  }
+
+  return 60;
+}
+
+function getSearchGlass() {
+  return document.getElementById(SEARCH_GLASS_ID);
+}
+
+function buildSearchGlassStyles(glass) {
+  const overlayBase = getOverlayBaseZIndex();
+
+  Object.assign(glass.style, {
+    position: "fixed",
+    inset: "0",
+    opacity: "0",
+    visibility: "hidden",
+    pointerEvents: "none",
+    zIndex: String(Math.max(overlayBase - 1, 1)),
+    background: [
+      "radial-gradient(circle at calc(100% - 220px) 76px, rgba(124,92,255,.10), transparent 22%)",
+      "linear-gradient(180deg, rgba(9,12,18,.18), rgba(9,12,18,.34))",
+    ].join(", "),
+    backdropFilter: "blur(12px) saturate(120%)",
+    WebkitBackdropFilter: "blur(12px) saturate(120%)",
+    transition:
+      "opacity .18s cubic-bezier(.2,.8,.2,1), visibility .18s cubic-bezier(.2,.8,.2,1)",
+  });
+}
+
+function ensureSearchGlass() {
+  let glass = getSearchGlass();
+
+  if (glass) {
+    buildSearchGlassStyles(glass);
+    return glass;
+  }
+
+  glass = document.createElement("div");
+  glass.id = SEARCH_GLASS_ID;
+  glass.setAttribute("aria-hidden", "true");
+  buildSearchGlassStyles(glass);
+
+  glass.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+
+    const runtime = searchGlassRuntime.runtime;
+    const getDom = searchGlassRuntime.getDom;
+
+    if (!runtime || typeof getDom !== "function") return;
+
+    const { searchInput } = getDom();
+
+    hideResultsContainer(runtime, getDom);
+
+    try {
+      searchInput?.blur?.();
+    } catch {
+      /* noop */
+    }
+  });
+
+  document.body.appendChild(glass);
+  return glass;
+}
+
+function showSearchGlass(runtime, getDom) {
+  const glass = ensureSearchGlass();
+  const overlayBase = getOverlayBaseZIndex();
+
+  searchGlassRuntime.runtime = runtime || null;
+  searchGlassRuntime.getDom = typeof getDom === "function" ? getDom : null;
+
+  glass.style.zIndex = String(Math.max(overlayBase - 1, 1));
+  glass.style.opacity = "1";
+  glass.style.visibility = "visible";
+  glass.style.pointerEvents = "auto";
+}
+
+function hideSearchGlass() {
+  const glass = getSearchGlass();
+
+  searchGlassRuntime.runtime = null;
+  searchGlassRuntime.getDom = null;
+
+  if (!glass) return;
+
+  glass.style.opacity = "0";
+  glass.style.visibility = "hidden";
+  glass.style.pointerEvents = "none";
+}
+
+function getSearchFocusNodes(getDom) {
+  if (typeof getDom !== "function") {
+    return {
+      topbar: null,
+      searchWrap: null,
+      searchResults: null,
+      topbarLeft: null,
+      topbarRight: null,
+      mutedNodes: [],
+    };
+  }
+
+  const { searchInput, searchResults } = getDom();
+
+  const searchWrap =
+    searchInput?.closest?.(".topbar-search-wrap") ||
+    searchResults?.closest?.(".topbar-search-wrap") ||
+    null;
+
+  const topbar =
+    searchInput?.closest?.(".topbar") ||
+    searchResults?.closest?.(".topbar") ||
+    null;
+
+  const topbarLeft = topbar?.querySelector?.(".topbar-left") || null;
+  const topbarRight = topbar?.querySelector?.(".topbar-right") || null;
+
+  const mutedNodes = topbarRight
+    ? Array.from(topbarRight.children).filter((node) => node !== searchWrap)
+    : [];
+
+  return {
+    topbar,
+    searchWrap,
+    searchResults,
+    topbarLeft,
+    topbarRight,
+    mutedNodes,
+  };
+}
+
+function muteNode(node) {
+  if (!node) return;
+
+  node.style.opacity = ".34";
+  node.style.filter = "blur(.5px)";
+  node.style.pointerEvents = "none";
+  node.style.transition =
+    "opacity .16s cubic-bezier(.2,.8,.2,1), filter .16s cubic-bezier(.2,.8,.2,1)";
+}
+
+function unmuteNode(node) {
+  if (!node) return;
+
+  node.style.opacity = "";
+  node.style.filter = "";
+  node.style.pointerEvents = "";
+  node.style.transition = "";
+}
+
+function applySearchFocusMode(getDom) {
+  const overlayBase = getOverlayBaseZIndex();
+
+  const {
+    topbar,
+    searchWrap,
+    searchResults,
+    topbarLeft,
+    mutedNodes,
+  } = getSearchFocusNodes(getDom);
+
+  if (topbar) {
+    topbar.dataset.searchFocus = "true";
+    topbar.style.zIndex = String(overlayBase + 2);
+  }
+
+  if (searchWrap) {
+    searchWrap.dataset.searchFocus = "true";
+    searchWrap.style.zIndex = String(overlayBase + 3);
+  }
+
+  if (searchResults) {
+    searchResults.style.zIndex = String(overlayBase + 4);
+  }
+
+  muteNode(topbarLeft);
+  mutedNodes.forEach(muteNode);
+}
+
+function clearSearchFocusMode(getDom) {
+  const {
+    topbar,
+    searchWrap,
+    searchResults,
+    topbarLeft,
+    mutedNodes,
+  } = getSearchFocusNodes(getDom);
+
+  if (topbar) {
+    delete topbar.dataset.searchFocus;
+    topbar.style.zIndex = "";
+  }
+
+  if (searchWrap) {
+    delete searchWrap.dataset.searchFocus;
+    searchWrap.style.zIndex = "";
+  }
+
+  if (searchResults) {
+    searchResults.style.zIndex = "";
+  }
+
+  unmuteNode(topbarLeft);
+  mutedNodes.forEach(unmuteNode);
+}
+
+function activateSearchFocus(runtime, getDom) {
+  showSearchGlass(runtime, getDom);
+  applySearchFocusMode(getDom);
+}
+
+function deactivateSearchFocus(getDom) {
+  hideSearchGlass();
+  clearSearchFocusMode(getDom);
+}
+
+/* =========================================================
+   CONTROL
+========================================================= */
 
 export function clearSearchDebounce(runtime) {
   if (runtime.searchDebounceTimer) {
@@ -82,6 +338,10 @@ export function setCached(runtime, query = "", value = []) {
     createdAt: Date.now(),
   });
 }
+
+/* =========================================================
+   LOCAL INDEX
+========================================================= */
 
 export function getLocalIndex() {
   return [
@@ -164,6 +424,10 @@ export function searchLocal(query = "") {
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score);
 }
+
+/* =========================================================
+   API NORMALIZATION
+========================================================= */
 
 export function normalizeApiItem(AppCore, raw, index = 0) {
   if (!raw || typeof raw !== "object") return null;
@@ -280,6 +544,10 @@ export function normalizeApiPayload(AppCore, data) {
   return collected;
 }
 
+/* =========================================================
+   API SEARCH
+========================================================= */
+
 export async function searchAPI({
   AppCore,
   runtime,
@@ -314,12 +582,16 @@ export async function searchAPI({
       return [];
     }
 
-    AppCore.utils.warn?.("TopbarUI: fallo búsqueda API", error);
+    AppCore?.utils?.warn?.("TopbarUI: fallo búsqueda API", error);
     throw error;
   } finally {
     runtime.searchController = null;
   }
 }
+
+/* =========================================================
+   MERGE
+========================================================= */
 
 export function mergeResults(apiResults = [], localResults = [], query = "") {
   const merged = uniqBy(
@@ -337,6 +609,10 @@ export function mergeResults(apiResults = [], localResults = [], query = "") {
     .slice(0, TOPBAR_SEARCH_CONFIG.maxResultsTotal);
 }
 
+/* =========================================================
+   VISUAL STATE
+========================================================= */
+
 export function setSearchExpanded(input, expanded = false) {
   if (!input) return;
   input.setAttribute("aria-expanded", String(Boolean(expanded)));
@@ -352,12 +628,16 @@ export function showResultsContainer(runtime, getDom) {
   searchResults.setAttribute("aria-hidden", "false");
 
   setSearchExpanded(searchInput, true);
+  activateSearchFocus(runtime, getDom);
 }
 
 export function hideResultsContainer(runtime, getDom) {
   const { searchResults, searchInput } = getDom();
 
-  if (!searchResults) return;
+  if (!searchResults) {
+    deactivateSearchFocus(getDom);
+    return;
+  }
 
   searchResults.classList.remove("active");
   searchResults.hidden = true;
@@ -368,6 +648,7 @@ export function hideResultsContainer(runtime, getDom) {
   runtime.currentItems = [];
 
   setSearchExpanded(searchInput, false);
+  deactivateSearchFocus(getDom);
 }
 
 export function setLoadingState(AppCore, runtime, getDom, query = "") {
@@ -456,6 +737,10 @@ export function updateActiveVisuals(runtime, getDom) {
   }
 }
 
+/* =========================================================
+   NAVIGATION
+========================================================= */
+
 export function goToResult({
   AppCore,
   Router,
@@ -487,6 +772,10 @@ export function goToResult({
 
   window.location.href = target;
 }
+
+/* =========================================================
+   RENDER RESULTS
+========================================================= */
 
 export function renderResults({
   AppCore,
@@ -587,6 +876,10 @@ export function renderResults({
   searchResults.appendChild(fragment);
   showResultsContainer(runtime, getDom);
 }
+
+/* =========================================================
+   RUN SEARCH
+========================================================= */
 
 export async function runSearch({
   AppCore,

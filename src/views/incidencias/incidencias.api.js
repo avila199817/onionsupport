@@ -14,7 +14,7 @@
    - prevenir race conditions blandas en cargas de listado
 
    HARDENING PRO:
-   - get detalle devuelve objeto limpio
+   - get detalle devuelve objeto limpio y rico
    - soporta envelopes heterogéneos
    - soporta arrays / nested envelopes / payloads mixtos
    - fallback AppCore.apiClient -> AppCore.request -> Http -> fetch
@@ -55,55 +55,31 @@ let lastLoadToken = 0;
    SAFE HELPERS
 ========================================================= */
 
-function safeText(
-  value,
-  fallback = ""
-) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
+function safeText(value, fallback = "") {
+  if (value === null || value === undefined) {
     return fallback;
   }
 
-  const text =
-    String(value).trim();
-
+  const text = String(value).trim();
   return text || fallback;
 }
 
-function safeNumber(
-  value,
-  fallback = 0
-) {
+function safeNumber(value, fallback = 0) {
   const n = Number(value);
-  return Number.isFinite(n)
-    ? n
-    : fallback;
+  return Number.isFinite(n) ? n : fallback;
 }
 
-function safeArray(
-  value
-) {
-  return Array.isArray(value)
-    ? value
-    : [];
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
 }
 
-function safeObject(
-  value,
-  fallback = {}
-) {
-  return value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
+function safeObject(value, fallback = {}) {
+  return value && typeof value === "object" && !Array.isArray(value)
     ? value
     : fallback;
 }
 
-function first(
-  ...values
-) {
+function first(...values) {
   for (const value of values) {
     if (
       value !== undefined &&
@@ -117,12 +93,8 @@ function first(
   return null;
 }
 
-function isPlainObject(
-  value
-) {
-  return !!value &&
-    typeof value === "object" &&
-    !Array.isArray(value);
+function isPlainObject(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
 /* =========================================================
@@ -134,9 +106,7 @@ function nextLoadToken() {
   return lastLoadToken;
 }
 
-function isActiveLoadToken(
-  token
-) {
+function isActiveLoadToken(token) {
   return token === lastLoadToken;
 }
 
@@ -145,34 +115,18 @@ function isActiveLoadToken(
 ========================================================= */
 
 function getApiBase() {
-  const apiBase = safeText(
-    AppCore?.config?.apiBase,
-    ""
-  );
-
-  return apiBase.replace(
-    /\/+$/,
-    ""
-  );
+  const apiBase = safeText(AppCore?.config?.apiBase, "");
+  return apiBase.replace(/\/+$/, "");
 }
 
-function buildAbsoluteUrl(
-  path = ""
-) {
-  const cleanPath = safeText(
-    path,
-    ""
-  );
+function buildAbsoluteUrl(path = "") {
+  const cleanPath = safeText(path, "");
 
   if (!cleanPath) {
     return getApiBase();
   }
 
-  if (
-    /^https?:\/\//i.test(
-      cleanPath
-    )
-  ) {
+  if (/^https?:\/\//i.test(cleanPath)) {
     return cleanPath;
   }
 
@@ -186,22 +140,15 @@ function getAuthToken() {
       AppCore?.state?.accessToken,
       AppCore?.auth?.getToken?.(),
       AppCore?.Auth?.getToken?.(),
-      localStorage.getItem(
-        "token"
-      ),
-      sessionStorage.getItem(
-        "token"
-      )
+      localStorage.getItem("token"),
+      sessionStorage.getItem("token")
     ),
     ""
   );
 }
 
-function getRequestHeaders(
-  extraHeaders = {}
-) {
-  const token =
-    getAuthToken();
+function getRequestHeaders(extraHeaders = {}) {
+  const token = getAuthToken();
 
   return {
     ...(token
@@ -209,9 +156,7 @@ function getRequestHeaders(
           Authorization: `Bearer ${token}`,
         }
       : {}),
-    ...safeObject(
-      extraHeaders
-    ),
+    ...safeObject(extraHeaders),
   };
 }
 
@@ -228,29 +173,18 @@ function getHttpModule() {
   );
 }
 
-export function normalizeIncidenciaId(
-  id = ""
-) {
-  const ticketId = safeText(
-    id,
-    ""
-  );
+export function normalizeIncidenciaId(id = "") {
+  const ticketId = safeText(id, "");
 
   if (!ticketId) {
-    throw new Error(
-      "INCIDENCIA_ID_REQUIRED"
-    );
+    throw new Error("INCIDENCIA_ID_REQUIRED");
   }
 
   return ticketId;
 }
 
-export function getIncidenciaEndpoint(
-  id = ""
-) {
-  const ticketId =
-    normalizeIncidenciaId(id);
-
+export function getIncidenciaEndpoint(id = "") {
+  const ticketId = normalizeIncidenciaId(id);
   return `${INCIDENCIAS_ENDPOINT}/${encodeURIComponent(ticketId)}`;
 }
 
@@ -258,10 +192,7 @@ export function getIncidenciaEndpoint(
    ERROR HELPERS
 ========================================================= */
 
-function normalizeErrorMessage(
-  error = null,
-  fallback = "Error de API."
-) {
+function normalizeErrorMessage(error = null, fallback = "Error de API.") {
   return safeText(
     first(
       error?.message,
@@ -280,10 +211,51 @@ function normalizeErrorMessage(
    DOMAIN NORMALIZATION
 ========================================================= */
 
-export function normalizeIncidencia(
-  item = {}
-) {
+export function normalizeIncidencia(item = {}) {
   const raw = safeObject(item);
+
+  const cliente = safeObject(
+    first(
+      raw.cliente,
+      raw.client,
+      raw.customer
+    )
+  );
+
+  const tecnico = safeObject(
+    first(
+      raw.tecnico,
+      raw.assignedTo,
+      raw.assignee
+    )
+  );
+
+  const createdBy = safeObject(raw.createdBy);
+  const receptor = safeObject(raw.receptor);
+
+  const attachments = safeArray(
+    first(
+      raw.attachments,
+      raw.files,
+      raw.adjuntos
+    )
+  );
+
+  const history = safeArray(
+    first(
+      raw.history,
+      raw.timeline,
+      raw.logs
+    )
+  );
+
+  const comments = safeArray(
+    first(
+      raw.comments,
+      raw.notes,
+      raw.messages
+    )
+  );
 
   return {
     id: safeText(
@@ -294,14 +266,27 @@ export function normalizeIncidencia(
       ),
       ""
     ),
+
+    ticketId: safeText(
+      first(
+        raw.ticketId,
+        raw.id,
+        raw._id
+      ),
+      ""
+    ),
+
     code: safeText(
       first(
         raw.code,
         raw.ticketCode,
-        raw.codigo
+        raw.codigo,
+        raw.ticketId,
+        raw.id
       ),
       ""
     ),
+
     title: safeText(
       first(
         raw.title,
@@ -310,14 +295,48 @@ export function normalizeIncidencia(
       ),
       ""
     ),
+
+    subject: safeText(
+      first(
+        raw.subject,
+        raw.asunto,
+        raw.title
+      ),
+      ""
+    ),
+
     description: safeText(
       first(
         raw.description,
         raw.descripcion,
-        raw.body
+        raw.message,
+        raw.body,
+        raw.preview
       ),
       ""
     ),
+
+    message: safeText(
+      first(
+        raw.message,
+        raw.descripcion,
+        raw.description,
+        raw.body,
+        raw.preview
+      ),
+      ""
+    ),
+
+    preview: safeText(
+      first(
+        raw.preview,
+        raw.message,
+        raw.descripcion,
+        raw.description
+      ),
+      ""
+    ),
+
     status: safeText(
       first(
         raw.status,
@@ -325,6 +344,7 @@ export function normalizeIncidencia(
       ),
       "open"
     ),
+
     priority: safeText(
       first(
         raw.priority,
@@ -332,47 +352,157 @@ export function normalizeIncidencia(
       ),
       "normal"
     ),
+
     category: safeText(
       first(
         raw.category,
-        raw.categoria
+        raw.categoria,
+        raw.tipo
       ),
       ""
     ),
+
+    categoria: safeText(
+      first(
+        raw.categoria,
+        raw.category,
+        raw.tipo
+      ),
+      ""
+    ),
+
+    tipo: safeText(
+      first(
+        raw.tipo,
+        raw.categoria,
+        raw.category
+      ),
+      ""
+    ),
+
+    source: safeText(
+      first(
+        raw.source,
+        raw.origen,
+        raw.channel
+      ),
+      "panel"
+    ),
+
     createdAt: first(
       raw.createdAt,
       raw.fechaCreacion,
       raw.created_at,
+      raw.createdAtES,
       null
     ),
+
     updatedAt: first(
       raw.updatedAt,
       raw.fechaActualizacion,
       raw.updated_at,
+      raw.modifiedAt,
+      raw.lastUpdate,
+      raw.createdAt,
       null
     ),
+
+    closedAt: first(
+      raw.closedAt,
+      raw.closed_at,
+      null
+    ),
+
     assignedTo: first(
       raw.assignedTo,
       raw.assignee,
       raw.asignadoA,
+      tecnico,
       null
     ),
+
+    assignedToName: safeText(
+      first(
+        tecnico?.name,
+        tecnico?.nombre,
+        raw.assignedToName,
+        typeof raw.assignedTo === "string" ? raw.assignedTo : null,
+        typeof raw.assignee === "string" ? raw.assignee : null
+      ),
+      ""
+    ),
+
     requester: first(
       raw.requester,
       raw.user,
       raw.usuario,
+      cliente,
+      createdBy,
+      receptor,
       null
     ),
+
+    clientName: safeText(
+      first(
+        raw.clientName,
+        raw.name,
+        cliente?.nombre,
+        cliente?.name,
+        receptor?.name,
+        createdBy?.name
+      ),
+      ""
+    ),
+
+    clientEmail: safeText(
+      first(
+        raw.clientEmail,
+        raw.email,
+        cliente?.email,
+        receptor?.email,
+        createdBy?.email
+      ),
+      ""
+    ),
+
+    clientAvatar: safeText(
+      first(
+        raw.clientAvatar,
+        raw.avatar,
+        raw.avatarUrl,
+        cliente?.avatar,
+        cliente?.avatarUrl
+      ),
+      ""
+    ),
+
+    cliente,
+    tecnico,
+    createdBy,
+    receptor,
+
+    attachments,
+    attachmentsCount: attachments.length,
+
+    history,
+    historyCount: history.length,
+
+    comments,
+    commentsCount: comments.length,
+
+    email: safeText(raw.email, ""),
+    name: safeText(raw.name, ""),
+    userId: safeText(first(raw.userId, raw.clienteId), ""),
+    clienteId: safeText(first(raw.clienteId, raw.userId), ""),
+    fechaProgramada: first(raw.fechaProgramada, null),
+    ip: safeText(raw.ip, ""),
+
     raw,
   };
 }
 
-function looksLikeTicket(
-  value = null
-) {
-  const obj = safeObject(
-    value
-  );
+function looksLikeTicket(value = null) {
+  const obj = safeObject(value);
 
   return Boolean(
     obj.ticketId ||
@@ -390,13 +520,8 @@ function looksLikeTicket(
    RESPONSE NORMALIZATION
 ========================================================= */
 
-function unwrapResponseEnvelope(
-  payload = null
-) {
-  if (
-    payload === null ||
-    payload === undefined
-  ) {
+function unwrapResponseEnvelope(payload = null) {
+  if (payload === null || payload === undefined) {
     return null;
   }
 
@@ -404,12 +529,9 @@ function unwrapResponseEnvelope(
     return payload;
   }
 
-  const obj =
-    safeObject(payload);
+  const obj = safeObject(payload);
 
-  if (
-    !Object.keys(obj).length
-  ) {
+  if (!Object.keys(obj).length) {
     return payload;
   }
 
@@ -446,80 +568,46 @@ function unwrapResponseEnvelope(
   }
 
   if (obj.payload) {
-    return unwrapResponseEnvelope(
-      obj.payload
-    );
+    return unwrapResponseEnvelope(obj.payload);
   }
 
-  if (
-    obj.data &&
-    typeof obj.data ===
-      "object"
-  ) {
-    return unwrapResponseEnvelope(
-      obj.data
-    );
+  if (obj.data && typeof obj.data === "object") {
+    return unwrapResponseEnvelope(obj.data);
   }
 
   return obj;
 }
 
-function pickItems(
-  payload = null
-) {
-  const unwrapped =
-    unwrapResponseEnvelope(
-      payload
-    );
+function pickItems(payload = null) {
+  const unwrapped = unwrapResponseEnvelope(payload);
 
   if (Array.isArray(unwrapped)) {
     return unwrapped;
   }
 
-  const obj =
-    safeObject(payload);
+  const obj = safeObject(payload);
 
-  if (
-    Array.isArray(
-      obj?.data?.items
-    )
-  ) {
+  if (Array.isArray(obj?.data?.items)) {
     return obj.data.items;
   }
 
-  if (
-    Array.isArray(
-      obj?.data?.tickets
-    )
-  ) {
+  if (Array.isArray(obj?.data?.tickets)) {
     return obj.data.tickets;
   }
 
-  if (
-    Array.isArray(
-      obj?.payload?.items
-    )
-  ) {
+  if (Array.isArray(obj?.payload?.items)) {
     return obj.payload.items;
   }
 
-  if (
-    Array.isArray(
-      obj?.payload?.tickets
-    )
-  ) {
+  if (Array.isArray(obj?.payload?.tickets)) {
     return obj.payload.tickets;
   }
 
   return [];
 }
 
-function pickTotal(
-  payload = null,
-  fallback = 0
-) {
-  const obj =
-    safeObject(payload);
+function pickTotal(payload = null, fallback = 0) {
+  const obj = safeObject(payload);
 
   const candidates = [
     obj?.total,
@@ -536,10 +624,7 @@ function pickTotal(
 
   for (const value of candidates) {
     const n = Number(value);
-
-    if (
-      Number.isFinite(n)
-    ) {
+    if (Number.isFinite(n)) {
       return n;
     }
   }
@@ -547,9 +632,7 @@ function pickTotal(
   return fallback;
 }
 
-function pickDetail(
-  payload = null
-) {
+function pickDetail(payload = null) {
   if (!payload) {
     return null;
   }
@@ -562,98 +645,47 @@ function pickDetail(
     return payload;
   }
 
-  const obj =
-    safeObject(payload);
+  const obj = safeObject(payload);
 
-  if (
-    looksLikeTicket(
-      obj.ticket
-    )
-  ) {
+  if (looksLikeTicket(obj.ticket)) {
     return obj.ticket;
   }
 
-  if (
-    looksLikeTicket(
-      obj.item
-    )
-  ) {
+  if (looksLikeTicket(obj.item)) {
     return obj.item;
   }
 
-  if (
-    looksLikeTicket(
-      obj.result
-    )
-  ) {
+  if (looksLikeTicket(obj.result)) {
     return obj.result;
   }
 
-  if (
-    looksLikeTicket(
-      obj.payload
-    )
-  ) {
+  if (looksLikeTicket(obj.payload)) {
     return obj.payload;
   }
 
-  if (
-    looksLikeTicket(
-      obj.data
-    )
-  ) {
+  if (looksLikeTicket(obj.data)) {
     return obj.data;
   }
 
-  if (
-    obj.data &&
-    typeof obj.data ===
-      "object"
-  ) {
-    return pickDetail(
-      obj.data
-    );
+  if (obj.data && typeof obj.data === "object") {
+    return pickDetail(obj.data);
   }
 
-  if (
-    obj.payload &&
-    typeof obj.payload ===
-      "object"
-  ) {
-    return pickDetail(
-      obj.payload
-    );
+  if (obj.payload && typeof obj.payload === "object") {
+    return pickDetail(obj.payload);
   }
 
-  return Object.keys(obj)
-    .length
-    ? obj
-    : null;
+  return Object.keys(obj).length ? obj : null;
 }
 
-function pickCreatedTicket(
-  payload = null
-) {
+function pickCreatedTicket(payload = null) {
   return pickDetail(payload);
 }
 
-function normalizeIncidenciasListResponse(
-  response = null
-) {
-  const rawItems = safeArray(
-    pickItems(response)
-  );
-
-  const items =
-    rawItems.map(
-      normalizeIncidencia
-    );
-
-  const total =
-    pickTotal(
-      response,
-      items.length
-    );
+function normalizeIncidenciasListResponse(response = null) {
+  const rawItems = safeArray(pickItems(response));
+  const items = rawItems.map(normalizeIncidencia);
+  const total = pickTotal(response, items.length);
 
   return {
     ok: true,
@@ -663,18 +695,13 @@ function normalizeIncidenciasListResponse(
   };
 }
 
-function normalizeIncidenciaDetailResponse(
-  response = null
-) {
-  const detail =
-    pickDetail(response);
+function normalizeIncidenciaDetailResponse(response = null) {
+  const detail = pickDetail(response);
 
   return {
     ok: true,
     item: detail
-      ? normalizeIncidencia(
-          detail
-        )
+      ? normalizeIncidencia(detail)
       : null,
     raw: response,
   };
@@ -684,325 +711,174 @@ function normalizeIncidenciaDetailResponse(
    REQUEST ADAPTERS
 ========================================================= */
 
-async function requestViaApiClient(
-  method = "GET",
-  path = "",
-  options = {}
-) {
-  const client =
-    getApiClient();
+async function requestViaApiClient(method = "GET", path = "", options = {}) {
+  const client = getApiClient();
 
   if (!client) {
-    throw new Error(
-      "INCIDENCIAS_API_CLIENT_UNAVAILABLE"
-    );
+    throw new Error("INCIDENCIAS_API_CLIENT_UNAVAILABLE");
   }
 
-  const verb = safeText(
-    method,
-    "GET"
-  ).toLowerCase();
+  const verb = safeText(method, "GET").toLowerCase();
+  const timeout = safeNumber(options.timeout, INCIDENCIAS_TIMEOUT);
 
-  const timeout =
-    safeNumber(
-      options.timeout,
-      INCIDENCIAS_TIMEOUT
-    );
-
-  if (
-    verb === "get" &&
-    typeof client.get ===
-      "function"
-  ) {
+  if (verb === "get" && typeof client.get === "function") {
     return client.get(path, {
       timeout,
       auth: true,
-      headers:
-        options.headers,
-      query:
-        options.query,
-      params:
-        options.params,
+      headers: options.headers,
+      query: options.query,
+      params: options.params,
     });
   }
 
-  if (
-    verb === "post" &&
-    typeof client.post ===
-      "function"
-  ) {
-    return client.post(
-      path,
-      options.body,
-      {
-        timeout,
-        auth: true,
-        headers:
-          options.headers,
-        query:
-          options.query,
-        params:
-          options.params,
-      }
-    );
+  if (verb === "post" && typeof client.post === "function") {
+    return client.post(path, options.body, {
+      timeout,
+      auth: true,
+      headers: options.headers,
+      query: options.query,
+      params: options.params,
+    });
   }
 
-  if (
-    typeof client.request ===
-    "function"
-  ) {
-    return client.request(
-      path,
-      {
-        method:
-          method.toUpperCase(),
-        timeout,
-        auth: true,
-        headers:
-          options.headers,
-        query:
-          options.query,
-        params:
-          options.params,
-        body:
-          options.body,
-      }
-    );
-  }
-
-  throw new Error(
-    "INCIDENCIAS_API_CLIENT_METHOD_UNAVAILABLE"
-  );
-}
-
-async function requestViaAppCoreRequest(
-  method = "GET",
-  path = "",
-  options = {}
-) {
-  if (
-    typeof AppCore?.request !==
-    "function"
-  ) {
-    throw new Error(
-      "APP_CORE_REQUEST_UNAVAILABLE"
-    );
-  }
-
-  return AppCore.request(
-    path,
-    {
-      method:
-        method.toUpperCase(),
-      timeout:
-        options.timeout,
-      headers:
-        options.headers,
-      query:
-        options.query,
-      params:
-        options.params,
+  if (typeof client.request === "function") {
+    return client.request(path, {
+      method: method.toUpperCase(),
+      timeout,
+      auth: true,
+      headers: options.headers,
+      query: options.query,
+      params: options.params,
       body: options.body,
-    }
-  );
+    });
+  }
+
+  throw new Error("INCIDENCIAS_API_CLIENT_METHOD_UNAVAILABLE");
 }
 
-async function requestViaHttpModule(
-  method = "GET",
-  path = "",
-  options = {}
-) {
-  const Http =
-    getHttpModule();
+async function requestViaAppCoreRequest(method = "GET", path = "", options = {}) {
+  if (typeof AppCore?.request !== "function") {
+    throw new Error("APP_CORE_REQUEST_UNAVAILABLE");
+  }
+
+  return AppCore.request(path, {
+    method: method.toUpperCase(),
+    timeout: options.timeout,
+    headers: options.headers,
+    query: options.query,
+    params: options.params,
+    body: options.body,
+  });
+}
+
+async function requestViaHttpModule(method = "GET", path = "", options = {}) {
+  const Http = getHttpModule();
 
   if (!Http) {
-    throw new Error(
-      "HTTP_MODULE_UNAVAILABLE"
-    );
+    throw new Error("HTTP_MODULE_UNAVAILABLE");
   }
 
-  const verb = safeText(
-    method,
-    "GET"
-  ).toLowerCase();
+  const verb = safeText(method, "GET").toLowerCase();
 
-  if (
-    verb === "get" &&
-    typeof Http.get ===
-      "function"
-  ) {
+  if (verb === "get" && typeof Http.get === "function") {
     return Http.get(path, {
-      headers:
-        options.headers,
-      query:
-        options.query,
-      params:
-        options.params,
-      timeout:
-        options.timeout,
+      headers: options.headers,
+      query: options.query,
+      params: options.params,
+      timeout: options.timeout,
     });
   }
 
-  if (
-    verb === "post" &&
-    typeof Http.post ===
-      "function"
-  ) {
-    return Http.post(
-      path,
-      options.body,
-      {
-        headers:
-          options.headers,
-        query:
-          options.query,
-        params:
-          options.params,
-        timeout:
-          options.timeout,
-      }
-    );
+  if (verb === "post" && typeof Http.post === "function") {
+    return Http.post(path, options.body, {
+      headers: options.headers,
+      query: options.query,
+      params: options.params,
+      timeout: options.timeout,
+    });
   }
 
-  if (
-    typeof Http.request ===
-    "function"
-  ) {
-    return Http.request(
-      path,
-      {
-        method:
-          method.toUpperCase(),
-        headers:
-          options.headers,
-        query:
-          options.query,
-        params:
-          options.params,
-        timeout:
-          options.timeout,
-        body:
-          options.body,
-      }
-    );
+  if (typeof Http.request === "function") {
+    return Http.request(path, {
+      method: method.toUpperCase(),
+      headers: options.headers,
+      query: options.query,
+      params: options.params,
+      timeout: options.timeout,
+      body: options.body,
+    });
   }
 
-  throw new Error(
-    "HTTP_MODULE_METHOD_UNAVAILABLE"
-  );
+  throw new Error("HTTP_MODULE_METHOD_UNAVAILABLE");
 }
 
-async function requestViaFetch(
-  method = "GET",
-  path = "",
-  options = {}
-) {
-  const url =
-    buildAbsoluteUrl(path);
+async function requestViaFetch(method = "GET", path = "", options = {}) {
+  const url = buildAbsoluteUrl(path);
+  const controller = new AbortController();
 
-  const controller =
-    new AbortController();
+  const timeout = safeNumber(options.timeout, INCIDENCIAS_TIMEOUT);
 
-  const timeout =
-    safeNumber(
-      options.timeout,
-      INCIDENCIAS_TIMEOUT
-    );
-
-  const timeoutId =
-    setTimeout(() => {
-      try {
-        controller.abort();
-      } catch {}
-    }, timeout);
+  const timeoutId = setTimeout(() => {
+    try {
+      controller.abort();
+    } catch {}
+  }, timeout);
 
   try {
-    const response =
-      await fetch(url, {
-        method:
-          method.toUpperCase(),
-        headers:
-          options.headers,
-        body:
-          options.body ===
-            undefined ||
-          options.body === null
-            ? undefined
-            : JSON.stringify(
-                options.body
-              ),
-        signal:
-          controller.signal,
-      });
+    const response = await fetch(url, {
+      method: method.toUpperCase(),
+      headers: options.headers,
+      body:
+        options.body === undefined || options.body === null
+          ? undefined
+          : JSON.stringify(options.body),
+      signal: controller.signal,
+    });
 
-    const text =
-      await response.text();
+    const text = await response.text();
 
     let data = null;
 
     try {
-      data = text
-        ? JSON.parse(text)
-        : null;
+      data = text ? JSON.parse(text) : null;
     } catch {
       data = { raw: text };
     }
 
     if (!response.ok) {
-      const error =
-        new Error(
-          normalizeErrorMessage(
-            data,
-            `HTTP ${response.status} en ${method.toUpperCase()} ${path}`
-          )
-        );
+      const error = new Error(
+        normalizeErrorMessage(
+          data,
+          `HTTP ${response.status} en ${method.toUpperCase()} ${path}`
+        )
+      );
 
       error.response = data;
-      error.status =
-        response.status;
+      error.status = response.status;
 
       throw error;
     }
 
     return data;
   } finally {
-    clearTimeout(
-      timeoutId
-    );
+    clearTimeout(timeoutId);
   }
 }
 
-async function request(
-  method = "GET",
-  path = "",
-  options = {}
-) {
+async function request(method = "GET", path = "", options = {}) {
   const requestOptions = {
-    timeout: safeNumber(
-      options.timeout,
-      INCIDENCIAS_TIMEOUT
-    ),
-    query: safeObject(
-      options.query
-    ),
-    params: safeObject(
-      options.params
-    ),
+    timeout: safeNumber(options.timeout, INCIDENCIAS_TIMEOUT),
+    query: safeObject(options.query),
+    params: safeObject(options.params),
     body: options.body,
-    headers:
-      getRequestHeaders({
-        ...(options.body !==
-          undefined &&
-        options.body !== null
-          ? {
-              "Content-Type":
-                "application/json",
-            }
-          : {}),
-        ...safeObject(
-          options.headers
-        ),
-      }),
+    headers: getRequestHeaders({
+      ...(options.body !== undefined && options.body !== null
+        ? {
+            "Content-Type": "application/json",
+          }
+        : {}),
+      ...safeObject(options.headers),
+    }),
   };
 
   const adapters = [
@@ -1016,11 +892,7 @@ async function request(
 
   for (const adapter of adapters) {
     try {
-      return await adapter(
-        method,
-        path,
-        requestOptions
-      );
+      return await adapter(method, path, requestOptions);
     } catch (error) {
       lastError = error;
     }
@@ -1028,9 +900,7 @@ async function request(
 
   throw (
     lastError ||
-    new Error(
-      "INCIDENCIAS_REQUEST_FAILED"
-    )
+    new Error("INCIDENCIAS_REQUEST_FAILED")
   );
 }
 
@@ -1038,20 +908,14 @@ async function request(
    RAW REQUESTS
 ========================================================= */
 
-export async function fetchIncidenciasRequest(
-  {
-    timeout = INCIDENCIAS_TIMEOUT,
-    query = {},
-  } = {}
-) {
-  return request(
-    "GET",
-    INCIDENCIAS_ENDPOINT,
-    {
-      timeout,
-      query,
-    }
-  );
+export async function fetchIncidenciasRequest({
+  timeout = INCIDENCIAS_TIMEOUT,
+  query = {},
+} = {}) {
+  return request("GET", INCIDENCIAS_ENDPOINT, {
+    timeout,
+    query,
+  });
 }
 
 export async function getIncidenciaByIdRequest(
@@ -1060,20 +924,11 @@ export async function getIncidenciaByIdRequest(
     timeout = INCIDENCIAS_TIMEOUT,
   } = {}
 ) {
-  const response =
-    await request(
-      "GET",
-      getIncidenciaEndpoint(id),
-      {
-        timeout,
-      }
-    );
+  const response = await request("GET", getIncidenciaEndpoint(id), {
+    timeout,
+  });
 
-  return (
-    normalizeIncidenciaDetailResponse(
-      response
-    ).item
-  );
+  return normalizeIncidenciaDetailResponse(response).item;
 }
 
 export async function createIncidenciaRequest(
@@ -1082,27 +937,15 @@ export async function createIncidenciaRequest(
     timeout = INCIDENCIAS_TIMEOUT,
   } = {}
 ) {
-  const response =
-    await request(
-      "POST",
-      INCIDENCIAS_ENDPOINT,
-      {
-        timeout,
-        body: safeObject(
-          payload
-        ),
-      }
-    );
+  const response = await request("POST", INCIDENCIAS_ENDPOINT, {
+    timeout,
+    body: safeObject(payload),
+  });
 
-  const created =
-    pickCreatedTicket(
-      response
-    );
+  const created = pickCreatedTicket(response);
 
   return created
-    ? normalizeIncidencia(
-        created
-      )
+    ? normalizeIncidencia(created)
     : response;
 }
 
@@ -1112,15 +955,10 @@ export async function createIncidenciaRequest(
 
 export function hydrateFromCache() {
   try {
-    const current =
-      safeArray(
-        incidenciasState?.items
-      );
+    const current = safeArray(incidenciasState?.items);
 
     if (current.length) {
-      replaceIncidenciasStore(
-        current
-      );
+      replaceIncidenciasStore(current);
     }
 
     return current;
@@ -1133,30 +971,14 @@ export function hydrateFromCache() {
    STATE HYDRATION
 ========================================================= */
 
-function applyLoadedListToState(
-  normalized = {
-    items: [],
-    total: 0,
-  }
-) {
-  const items = safeArray(
-    normalized?.items
-  );
+function applyLoadedListToState(normalized = { items: [], total: 0 }) {
+  const items = safeArray(normalized?.items);
+  const total = safeNumber(normalized?.total, items.length);
 
-  const total =
-    safeNumber(
-      normalized?.total,
-      items.length
-    );
-
-  replaceIncidenciasStore(
-    items
-  );
+  replaceIncidenciasStore(items);
   setItems(items);
   setRemoteCount(total);
-  setLastSyncAt(
-    Date.now()
-  );
+  setLastSyncAt(Date.now());
   setLoaded(true);
   setError(null);
 
@@ -1167,22 +989,14 @@ function applyLoadedListToState(
    LOAD LIST
 ========================================================= */
 
-export async function loadIncidencias(
-  {
-    force = false,
-    query = {},
-  } = {}
-) {
-  const loadToken =
-    nextLoadToken();
+export async function loadIncidencias({
+  force = false,
+  query = {},
+} = {}) {
+  const loadToken = nextLoadToken();
 
-  const firstLoad =
-    !Boolean(
-      incidenciasState?.hydrated
-    );
-
-  const shouldShowLoading =
-    firstLoad && !force;
+  const firstLoad = !Boolean(incidenciasState?.hydrated);
+  const shouldShowLoading = firstLoad && !force;
 
   try {
     setError(null);
@@ -1193,65 +1007,36 @@ export async function loadIncidencias(
       setRefreshing(true);
     }
 
-    const response =
-      await fetchIncidenciasRequest(
-        {
-          timeout:
-            INCIDENCIAS_TIMEOUT,
-          query,
-        }
-      );
+    const response = await fetchIncidenciasRequest({
+      timeout: INCIDENCIAS_TIMEOUT,
+      query,
+    });
 
-    const normalized =
-      normalizeIncidenciasListResponse(
-        response
-      );
+    const normalized = normalizeIncidenciasListResponse(response);
 
-    if (
-      !isActiveLoadToken(
-        loadToken
-      )
-    ) {
-      return safeArray(
-        incidenciasState?.items
-      );
+    if (!isActiveLoadToken(loadToken)) {
+      return safeArray(incidenciasState?.items);
     }
 
-    return applyLoadedListToState(
-      normalized
-    );
+    return applyLoadedListToState(normalized);
   } catch (error) {
-    const message =
-      normalizeErrorMessage(
-        error,
-        "No se pudieron cargar las incidencias."
-      );
+    const message = normalizeErrorMessage(
+      error,
+      "No se pudieron cargar las incidencias."
+    );
 
-    if (
-      !isActiveLoadToken(
-        loadToken
-      )
-    ) {
-      return safeArray(
-        incidenciasState?.items
-      );
+    if (!isActiveLoadToken(loadToken)) {
+      return safeArray(incidenciasState?.items);
     }
 
-    console.error(
-      "❌ INCIDENCIAS LOAD:",
-      error
-    );
+    console.error("❌ INCIDENCIAS LOAD:", error);
 
     setError(message);
     setLoaded(true);
 
     throw error;
   } finally {
-    if (
-      isActiveLoadToken(
-        loadToken
-      )
-    ) {
+    if (isActiveLoadToken(loadToken)) {
       setLoading(false);
       setRefreshing(false);
     }
@@ -1262,27 +1047,17 @@ export async function loadIncidencias(
    LOAD DETAIL
 ========================================================= */
 
-export async function loadIncidenciaDetail(
-  ticketId = ""
-) {
+export async function loadIncidenciaDetail(ticketId = "") {
   try {
-    const detail =
-      await getIncidenciaByIdRequest(
-        ticketId
-      );
+    const detail = await getIncidenciaByIdRequest(ticketId);
 
     if (detail) {
-      upsertIncidenciaStore?.(
-        detail
-      );
+      upsertIncidenciaStore?.(detail);
     }
 
     return detail;
   } catch (error) {
-    console.error(
-      "❌ INCIDENCIA DETAIL:",
-      error
-    );
+    console.error("❌ INCIDENCIA DETAIL:", error);
     throw error;
   }
 }
@@ -1291,27 +1066,17 @@ export async function loadIncidenciaDetail(
    CREATE
 ========================================================= */
 
-export async function createIncidencia(
-  payload = {}
-) {
+export async function createIncidencia(payload = {}) {
   try {
-    const created =
-      await createIncidenciaRequest(
-        payload
-      );
+    const created = await createIncidenciaRequest(payload);
 
     if (created) {
-      upsertIncidenciaStore?.(
-        created
-      );
+      upsertIncidenciaStore?.(created);
     }
 
     return created;
   } catch (error) {
-    console.error(
-      "❌ INCIDENCIA CREATE:",
-      error
-    );
+    console.error("❌ INCIDENCIA CREATE:", error);
     throw error;
   }
 }
@@ -1320,27 +1085,23 @@ export async function createIncidencia(
    PUBLIC API
 ========================================================= */
 
-export const IncidenciasApi =
-  Object.freeze({
-    resource:
-      INCIDENCIAS_RESOURCE,
-    endpoint:
-      INCIDENCIAS_ENDPOINT,
-    timeout:
-      INCIDENCIAS_TIMEOUT,
+export const IncidenciasApi = Object.freeze({
+  resource: INCIDENCIAS_RESOURCE,
+  endpoint: INCIDENCIAS_ENDPOINT,
+  timeout: INCIDENCIAS_TIMEOUT,
 
-    normalizeIncidenciaId,
-    getIncidenciaEndpoint,
-    normalizeIncidencia,
+  normalizeIncidenciaId,
+  getIncidenciaEndpoint,
+  normalizeIncidencia,
 
-    fetchIncidenciasRequest,
-    getIncidenciaByIdRequest,
-    createIncidenciaRequest,
+  fetchIncidenciasRequest,
+  getIncidenciaByIdRequest,
+  createIncidenciaRequest,
 
-    hydrateFromCache,
-    loadIncidencias,
-    loadIncidenciaDetail,
-    createIncidencia,
-  });
+  hydrateFromCache,
+  loadIncidencias,
+  loadIncidenciaDetail,
+  createIncidencia,
+});
 
 export default IncidenciasApi;

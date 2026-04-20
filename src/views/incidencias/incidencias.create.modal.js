@@ -2,7 +2,7 @@
    Onion SPA - Incidencias Create Modal
    Archivo: src/views/incidencias/incidencias.create.modal.js
 
-   FINAL PRO SYSTEM · CREATE MODAL · MINIMAL REAL
+   CLIENT EXPERIENCE PRO · CREATE MODAL · MINIMAL REAL
 
    RESPONSABILIDADES:
    - renderizar modal premium de creación de incidencias
@@ -14,6 +14,7 @@
    - soportar close por overlay / escape / botón
    - evitar doble bind
    - soportar destroy limpio
+   - mantener una UX clara y simple para cliente / usuario final
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -42,6 +43,7 @@ const modalState = {
   escHandler: null,
   lastActiveElement: null,
   submitting: false,
+  dragActive: false,
   errors: {},
   serverError: "",
   successMessage: "",
@@ -166,7 +168,7 @@ function getAuthToken() {
 
 function safeErrorMessage(error = null) {
   if (!error) {
-    return "No se pudo crear la incidencia.";
+    return "No se pudo enviar la incidencia.";
   }
 
   return safeText(
@@ -176,9 +178,9 @@ function safeErrorMessage(error = null) {
       error?.response?.data?.message,
       error?.data?.message,
       error?.error,
-      "No se pudo crear la incidencia."
+      "No se pudo enviar la incidencia."
     ),
-    "No se pudo crear la incidencia."
+    "No se pudo enviar la incidencia."
   );
 }
 
@@ -198,6 +200,28 @@ function formatFileSize(bytes = 0) {
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
   if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
   return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+function dedupeFiles(files = []) {
+  const input = safeArray(files);
+  const map = new Map();
+
+  input.forEach((file) => {
+    if (!(file instanceof File)) return;
+
+    const key = [
+      safeText(file.name, ""),
+      Number(file.size) || 0,
+      Number(file.lastModified) || 0,
+      safeText(file.type, ""),
+    ].join("::");
+
+    if (!map.has(key)) {
+      map.set(key, file);
+    }
+  });
+
+  return Array.from(map.values());
 }
 
 /* =========================================================
@@ -237,6 +261,20 @@ function setFormPatch(patch = {}) {
   persistDraft();
 
   return modalState.form;
+}
+
+function resetFeedbackState() {
+  modalState.errors = {};
+  modalState.serverError = "";
+  modalState.successMessage = "";
+  modalState.createdTicketId = "";
+}
+
+function resetFormState() {
+  modalState.form = {
+    ...DEFAULT_FORM,
+    attachments: [],
+  };
 }
 
 /* =========================================================
@@ -350,7 +388,7 @@ async function createViaFetch(payload = null) {
           data?.error,
           `HTTP ${response.status} al crear incidencia.`
         ),
-        "No se pudo crear la incidencia."
+        "No se pudo enviar la incidencia."
       )
     );
     error.response = data;
@@ -465,9 +503,9 @@ function renderInput({
         autocomplete="${escapeHtml(autocomplete)}"
         style="
           width:100%;
-          min-height:48px;
-          padding:0 14px;
-          border-radius:14px;
+          min-height:52px;
+          padding:0 16px;
+          border-radius:16px;
           border:1px solid ${
             error
               ? "color-mix(in srgb, var(--danger-strong, #ff6b6b) 38%, var(--border-soft))"
@@ -487,7 +525,7 @@ function renderInput({
               style="
                 color:var(--text-dim);
                 font-size:12px;
-                line-height:1.35;
+                line-height:1.4;
               "
             >
               ${escapeHtml(hint)}
@@ -533,8 +571,8 @@ function renderTextarea({
         style="
           width:100%;
           min-height:220px;
-          padding:14px;
-          border-radius:16px;
+          padding:16px;
+          border-radius:18px;
           border:1px solid ${
             error
               ? "color-mix(in srgb, var(--danger-strong, #ff6b6b) 38%, var(--border-soft))"
@@ -544,7 +582,7 @@ function renderTextarea({
           color:var(--text-strong);
           outline:none;
           resize:vertical;
-          line-height:1.55;
+          line-height:1.6;
           box-shadow:${error ? "0 0 0 4px color-mix(in srgb, var(--danger-strong, #ff6b6b) 10%, transparent)" : "none"};
         "
       >${escapeHtml(value)}</textarea>
@@ -556,7 +594,7 @@ function renderTextarea({
               style="
                 color:var(--text-dim);
                 font-size:12px;
-                line-height:1.35;
+                line-height:1.4;
               "
             >
               ${escapeHtml(hint)}
@@ -582,7 +620,7 @@ function renderFilesSummary(files = []) {
           line-height:1.5;
         "
       >
-        No hay adjuntos seleccionados.
+        No has añadido archivos todavía.
       </div>
     `;
   }
@@ -651,7 +689,7 @@ function renderFilesSummary(files = []) {
   `;
 }
 
-function renderFileInput({ files = [] } = {}) {
+function renderFileInput({ files = [], dragActive = false } = {}) {
   return `
     <div style="display:grid; gap:10px;">
       <span
@@ -667,14 +705,24 @@ function renderFileInput({ files = [] } = {}) {
       </span>
 
       <label
+        data-dropzone="attachments"
         style="
           display:grid;
           gap:12px;
-          padding:16px;
-          border-radius:18px;
-          border:1px dashed var(--border-soft);
-          background:var(--surface-1, var(--surface-glass));
+          padding:18px;
+          border-radius:20px;
+          border:1px dashed ${
+            dragActive
+              ? "color-mix(in srgb, var(--accent, #7c5cff) 32%, var(--border-soft))"
+              : "var(--border-soft)"
+          };
+          background:${
+            dragActive
+              ? "linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent), var(--surface-1, var(--surface-glass))"
+              : "var(--surface-1, var(--surface-glass))"
+          };
           cursor:pointer;
+          transition:border-color .18s ease, background .18s ease, transform .18s ease;
         "
       >
         <input
@@ -701,10 +749,10 @@ function renderFileInput({ files = [] } = {}) {
             style="
               color:var(--text-dim);
               font-size:12px;
-              line-height:1.45;
+              line-height:1.5;
             "
           >
-            Puedes adjuntar capturas, PDFs o archivos relevantes para la incidencia.
+            Arrastra archivos aquí o pulsa para seleccionar capturas, PDFs u otros documentos útiles.
           </span>
         </div>
       </label>
@@ -749,7 +797,7 @@ function renderModalInner() {
         tabindex="-1"
         style="
           position:relative;
-          width:min(900px, 100%);
+          width:min(920px, 100%);
           max-height:92vh;
           overflow:auto;
           border-radius:28px;
@@ -770,7 +818,7 @@ function renderModalInner() {
             flex-wrap:wrap;
           "
         >
-          <div style="display:grid; gap:10px; min-width:min(100%, 480px);">
+          <div style="display:grid; gap:10px; min-width:min(100%, 500px);">
             <span
               style="
                 display:inline-flex;
@@ -802,7 +850,7 @@ function renderModalInner() {
                   color:var(--text-strong);
                 "
               >
-                Crear incidencia
+                Cuéntanos qué ha ocurrido
               </h2>
 
               <p
@@ -814,7 +862,7 @@ function renderModalInner() {
                   line-height:1.6;
                 "
               >
-                Solo necesitamos asunto, descripción y adjuntos para registrar la incidencia correctamente.
+                Describe el problema de la forma más clara posible y añade archivos si ayudan a entenderlo mejor.
               </p>
             </div>
           </div>
@@ -893,7 +941,7 @@ function renderModalInner() {
                     createdTicketId
                       ? `
                         <span style="color:var(--text-dim); font-size:13px;">
-                          Ticket generado: ${escapeHtml(createdTicketId)}
+                          Referencia generada: ${escapeHtml(createdTicketId)}
                         </span>
                       `
                       : ""
@@ -920,7 +968,7 @@ function renderModalInner() {
                   "
                 >
                   <strong style="color:var(--text-strong);">
-                    No se pudo crear la incidencia
+                    No se pudo enviar la incidencia
                   </strong>
                   <span style="color:var(--text-dim); font-size:13px; line-height:1.45;">
                     ${escapeHtml(serverError)}
@@ -942,10 +990,10 @@ function renderModalInner() {
               label: "Asunto",
               name: "subject",
               value: form.subject,
-              placeholder: "Ej. Error en factura, acceso bloqueado, problema en dashboard...",
+              placeholder: "Ej. No puedo acceder, error al pagar, problema con mi factura...",
               required: true,
               error: errors.subject,
-              hint: "Sé claro y reconocible.",
+              hint: "Resume el problema en una frase corta.",
             })}
 
             ${renderTextarea({
@@ -953,15 +1001,16 @@ function renderModalInner() {
               name: "description",
               value: form.description,
               placeholder:
-                "Describe el problema con contexto: qué ocurre, desde cuándo, a quién afecta y cualquier dato útil para resolverlo.",
+                "Explícanos con detalle qué está pasando, desde cuándo ocurre y qué pasos has seguido antes de llegar aquí.",
               required: true,
               error: errors.description,
-              hint: "Cuanto mejor venga el contexto, mejor irá la operativa.",
+              hint: "Cuanto más claro sea el contexto, más rápido podrá revisarse.",
               rows: 9,
             })}
 
             ${renderFileInput({
               files: safeArray(form.attachments),
+              dragActive: Boolean(modalState.dragActive),
             })}
 
             <div
@@ -985,7 +1034,7 @@ function renderModalInner() {
                   type="submit"
                   ${submitting ? "disabled" : ""}
                   style="
-                    min-height:44px;
+                    min-height:46px;
                     padding:0 18px;
                     border-radius:14px;
                     border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
@@ -1012,10 +1061,10 @@ function renderModalInner() {
                               animation:incidenciasCreateSpin .8s linear infinite;
                             "
                           ></span>
-                          Creando...
+                          Enviando...
                         </span>
                       `
-                      : "Crear incidencia"
+                      : "Enviar incidencia"
                   }
                 </button>
 
@@ -1024,7 +1073,7 @@ function renderModalInner() {
                   type="button"
                   ${submitting ? "disabled" : ""}
                   style="
-                    min-height:44px;
+                    min-height:46px;
                     padding:0 16px;
                     border-radius:14px;
                     border:1px solid var(--border-soft);
@@ -1051,7 +1100,7 @@ function renderModalInner() {
                   type="button"
                   ${submitting ? "disabled" : ""}
                   style="
-                    min-height:44px;
+                    min-height:46px;
                     padding:0 16px;
                     border-radius:14px;
                     border:1px solid var(--border-soft);
@@ -1165,8 +1214,8 @@ function renderModal() {
   const root = ensureRoot();
 
   if (!modalState.isOpen) {
-    root.innerHTML = "";
     detachRootBindings();
+    root.innerHTML = "";
     return root;
   }
 
@@ -1192,10 +1241,9 @@ export function openIncidenciasCreateModal(draft = {}) {
   modalState.lastActiveElement = document.activeElement || null;
   modalState.isOpen = true;
   modalState.submitting = false;
-  modalState.errors = {};
-  modalState.serverError = "";
-  modalState.successMessage = "";
-  modalState.createdTicketId = "";
+  modalState.dragActive = false;
+  resetFeedbackState();
+
   modalState.form = {
     ...getInitialForm(),
     ...safeObject(draft),
@@ -1229,14 +1277,9 @@ export function closeIncidenciasCreateModal() {
 
   modalState.isOpen = false;
   modalState.submitting = false;
-  modalState.errors = {};
-  modalState.serverError = "";
-  modalState.successMessage = "";
-  modalState.createdTicketId = "";
-  modalState.form = {
-    ...DEFAULT_FORM,
-    attachments: [],
-  };
+  modalState.dragActive = false;
+  resetFeedbackState();
+  resetFormState();
 
   detachRootBindings();
 
@@ -1317,21 +1360,17 @@ async function handleSubmit() {
     modalState.submitting = false;
     modalState.errors = {};
     modalState.serverError = "";
-    modalState.successMessage = "Incidencia creada correctamente.";
+    modalState.successMessage = "Tu incidencia se ha enviado correctamente.";
     modalState.createdTicketId = createdTicketId;
 
     clearDraft();
-
-    modalState.form = {
-      ...DEFAULT_FORM,
-      attachments: [],
-    };
+    resetFormState();
 
     renderModal();
     attachRootBindings();
     focusPanel();
 
-    showToast("Incidencia creada correctamente.", "success");
+    showToast("Incidencia enviada correctamente.", "success");
 
     safeEmit("incidencias:create:success", {
       ticketId: createdTicketId,
@@ -1341,7 +1380,7 @@ async function handleSubmit() {
 
     setTimeout(() => {
       closeIncidenciasCreateModal();
-    }, 250);
+    }, 350);
 
     return true;
   } catch (error) {
@@ -1366,16 +1405,34 @@ async function handleSubmit() {
    ROOT BINDINGS
 ========================================================= */
 
+function addAttachments(files = []) {
+  const merged = dedupeFiles([
+    ...safeArray(modalState.form.attachments),
+    ...safeArray(files),
+  ]);
+
+  setFormPatch({
+    attachments: merged,
+  });
+
+  if (modalState.errors.attachments) {
+    const nextErrors = { ...modalState.errors };
+    delete nextErrors.attachments;
+    modalState.errors = nextErrors;
+  }
+
+  modalState.serverError = "";
+  modalState.successMessage = "";
+  modalState.createdTicketId = "";
+}
+
 function handleFieldChange(target) {
   const field = safeText(target?.dataset?.field, "");
   if (!field) return;
 
   if (field === "attachments") {
     const files = getFileListFromInput(target);
-
-    setFormPatch({
-      attachments: files,
-    });
+    addAttachments(files);
   } else {
     setFormPatch({
       [field]: target?.value,
@@ -1434,6 +1491,58 @@ function attachRootBindings() {
     await handleSubmit();
   };
 
+  const onDragEnter = (event) => {
+    const dropzone = event.target.closest("[data-dropzone='attachments']");
+    if (!dropzone) return;
+
+    event.preventDefault();
+    modalState.dragActive = true;
+    renderModal();
+    attachRootBindings();
+  };
+
+  const onDragOver = (event) => {
+    const dropzone = event.target.closest("[data-dropzone='attachments']");
+    if (!dropzone) return;
+
+    event.preventDefault();
+    if (!modalState.dragActive) {
+      modalState.dragActive = true;
+      renderModal();
+      attachRootBindings();
+    }
+  };
+
+  const onDragLeave = (event) => {
+    const dropzone = event.target.closest("[data-dropzone='attachments']");
+    if (!dropzone) return;
+
+    const related = event.relatedTarget;
+    if (related && dropzone.contains(related)) {
+      return;
+    }
+
+    event.preventDefault();
+    modalState.dragActive = false;
+    renderModal();
+    attachRootBindings();
+  };
+
+  const onDrop = (event) => {
+    const dropzone = event.target.closest("[data-dropzone='attachments']");
+    if (!dropzone) return;
+
+    event.preventDefault();
+    modalState.dragActive = false;
+
+    const files = Array.from(event.dataTransfer?.files || []);
+    addAttachments(files);
+
+    renderModal();
+    attachRootBindings();
+    focusPanel();
+  };
+
   const onClick = async (event) => {
     const closeBtn = event.target.closest("[data-modal-close='true']");
     if (closeBtn) {
@@ -1479,15 +1588,9 @@ function attachRootBindings() {
     if (resetBtn) {
       event.preventDefault();
 
-      modalState.form = {
-        ...DEFAULT_FORM,
-        attachments: [],
-      };
-      modalState.errors = {};
-      modalState.serverError = "";
-      modalState.successMessage = "";
-      modalState.createdTicketId = "";
-
+      resetFormState();
+      modalState.dragActive = false;
+      resetFeedbackState();
       clearDraft();
 
       renderModal();
@@ -1510,11 +1613,19 @@ function attachRootBindings() {
   root.__incidenciasCreateModalInputHandler = onInput;
   root.__incidenciasCreateModalChangeHandler = onChange;
   root.__incidenciasCreateModalSubmitHandler = onSubmit;
+  root.__incidenciasCreateModalDragEnterHandler = onDragEnter;
+  root.__incidenciasCreateModalDragOverHandler = onDragOver;
+  root.__incidenciasCreateModalDragLeaveHandler = onDragLeave;
+  root.__incidenciasCreateModalDropHandler = onDrop;
   root.__incidenciasCreateModalClickHandler = onClick;
 
   root.addEventListener("input", onInput);
   root.addEventListener("change", onChange);
   root.addEventListener("submit", onSubmit);
+  root.addEventListener("dragenter", onDragEnter);
+  root.addEventListener("dragover", onDragOver);
+  root.addEventListener("dragleave", onDragLeave);
+  root.addEventListener("drop", onDrop);
   root.addEventListener("click", onClick);
 
   modalState.bindingsAttached = true;
@@ -1546,6 +1657,34 @@ function detachRootBindings() {
       root.removeEventListener("submit", root.__incidenciasCreateModalSubmitHandler);
     } catch {}
     delete root.__incidenciasCreateModalSubmitHandler;
+  }
+
+  if (root.__incidenciasCreateModalDragEnterHandler) {
+    try {
+      root.removeEventListener("dragenter", root.__incidenciasCreateModalDragEnterHandler);
+    } catch {}
+    delete root.__incidenciasCreateModalDragEnterHandler;
+  }
+
+  if (root.__incidenciasCreateModalDragOverHandler) {
+    try {
+      root.removeEventListener("dragover", root.__incidenciasCreateModalDragOverHandler);
+    } catch {}
+    delete root.__incidenciasCreateModalDragOverHandler;
+  }
+
+  if (root.__incidenciasCreateModalDragLeaveHandler) {
+    try {
+      root.removeEventListener("dragleave", root.__incidenciasCreateModalDragLeaveHandler);
+    } catch {}
+    delete root.__incidenciasCreateModalDragLeaveHandler;
+  }
+
+  if (root.__incidenciasCreateModalDropHandler) {
+    try {
+      root.removeEventListener("drop", root.__incidenciasCreateModalDropHandler);
+    } catch {}
+    delete root.__incidenciasCreateModalDropHandler;
   }
 
   if (root.__incidenciasCreateModalClickHandler) {

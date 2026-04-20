@@ -2,12 +2,13 @@
    Onion SPA - App Shell
    Archivo: src/app/shell.js
 
-   HARDENED VERSION
+   STABLE VERSION · NO FLICKER · NO SHELL RE-TOGGLE
+
    FIX:
-   - cero referencias libres
-   - snapshot seguro
-   - eventos robustos
-   - shell visibility estable
+   - setShellVisibility idempotente
+   - no reemitir router:shell:change si no cambia nada
+   - no tocar hidden/clases del shell en cada render
+   - snapshot robusto
    - loader anti-stuck
 ========================================================= */
 
@@ -147,15 +148,57 @@ function toggleClass(el, name, force) {
   } catch {}
 }
 
+function readShellVisibility(AppCore) {
+  const { body, html, sidebar, topbar } =
+    getShellElements(AppCore);
+
+  if (typeof AppCore?.state?.shellVisible === "boolean") {
+    return AppCore.state.shellVisible;
+  }
+
+  const bodyShell = safeText(body?.dataset?.shell, "");
+  if (bodyShell === "visible") return true;
+  if (bodyShell === "hidden") return false;
+
+  const htmlShell = safeText(html?.dataset?.shell, "");
+  if (htmlShell === "visible") return true;
+  if (htmlShell === "hidden") return false;
+
+  if (body?.classList?.contains("route-shell-hidden")) {
+    return false;
+  }
+
+  if (sidebar?.hidden || topbar?.hidden) {
+    return false;
+  }
+
+  return true;
+}
+
 /* =========================================================
    SHELL VISIBILITY
 ========================================================= */
 
 export function setShellVisibility(
   AppCore,
-  visible = true
+  visible = true,
+  options = {}
 ) {
-  const hidden = !Boolean(visible);
+  const nextVisible = Boolean(visible);
+  const force = Boolean(options?.force);
+  const emit = options?.emit !== false;
+
+  const prevVisible = readShellVisibility(AppCore);
+
+  if (!force && prevVisible === nextVisible) {
+    try {
+      AppCore.state.shellVisible = nextVisible;
+    } catch {}
+
+    return nextVisible;
+  }
+
+  const hidden = !nextVisible;
 
   const {
     sidebar,
@@ -169,7 +212,15 @@ export function setShellVisibility(
   applyHidden(sidebar, hidden);
   applyHidden(topbar, hidden);
   applyHidden(tablehead, hidden);
-  applyHidden(tableheadContainer, hidden);
+
+  /* el container no necesita hidden duro,
+     pero sí aria coherente si existe */
+  if (tableheadContainer) {
+    tableheadContainer.setAttribute(
+      "aria-hidden",
+      hidden ? "true" : "false"
+    );
+  }
 
   toggleClass(body, "route-shell-hidden", hidden);
   toggleClass(body, "route-shell-visible", !hidden);
@@ -178,18 +229,21 @@ export function setShellVisibility(
   setDataset(html, "shell", hidden ? "hidden" : "visible");
 
   try {
-    AppCore.state.shellVisible = !hidden;
+    AppCore.state.shellVisible = nextVisible;
   } catch {}
 
-  const shellSnapshot = getShellSnapshot(AppCore);
+  if (emit) {
+    const shellSnapshot = getShellSnapshot(AppCore);
 
-  safeEmit(AppCore, "router:shell:change", {
-    hidden,
-    visible: !hidden,
-    snapshot: shellSnapshot,
-  });
+    safeEmit(AppCore, "router:shell:change", {
+      hidden,
+      visible: nextVisible,
+      changed: prevVisible !== nextVisible,
+      snapshot: shellSnapshot,
+    });
+  }
 
-  return !hidden;
+  return nextVisible;
 }
 
 /* =========================================================
@@ -242,11 +296,16 @@ export function isAuthLikeRoute(AppCore, Router) {
 
 export function updateShellVisibilityByRoute(
   AppCore,
-  Router
+  Router,
+  options = {}
 ) {
   const authLike = isAuthLikeRoute(AppCore, Router);
 
-  return setShellVisibility(AppCore, !authLike);
+  return setShellVisibility(
+    AppCore,
+    !authLike,
+    options
+  );
 }
 
 /* =========================================================
@@ -328,9 +387,7 @@ export function getShellSnapshot(
   const view = getViewContainer(AppCore);
 
   return {
-    shellVisible: Boolean(
-      AppCore?.state?.shellVisible
-    ),
+    shellVisible: readShellVisibility(AppCore),
 
     authLike: isAuthLikeRoute(
       AppCore,

@@ -3,13 +3,11 @@
    PRO SAAS PANEL / CLEAN FOUNDATION / EXTREME LEVEL
    Archivo: src/css/core/reset.css
 
-   Objetivo:
-   - reset base premium y consistente
+   REFINADO PRO:
+   - reset base limpio y no invasivo
    - foundation robusta para SPA enterprise
-   - reducir diferencias entre navegadores
-   - mejorar formularios, media, tablas y tipografía
-   - respetar accesibilidad y rendering moderno
-   - convivir limpio con core.css + layout.css + tokens
+   - menos decisiones visuales en esta capa
+   - mejor convivencia con core.css + layout.css + tokens
 ========================================================= */
 
 
@@ -31,11 +29,6 @@ html{
   -webkit-text-size-adjust:100%;
   text-size-adjust:100%;
   tab-size:4;
-  scroll-behavior:smooth;
-}
-
-html:focus-within{
-  scroll-behavior:smooth;
 }
 
 html,
@@ -82,7 +75,10 @@ ul,
 ol{
   margin:0;
   padding:0;
-  list-style:none;
+}
+
+li{
+  margin:0;
 }
 
 b,
@@ -118,11 +114,6 @@ a{
   background-color:transparent;
 }
 
-a:active,
-a:hover{
-  outline-width:0;
-}
-
 
 /* =========================
    MEDIA
@@ -147,10 +138,6 @@ img{
   border-style:none;
 }
 
-svg{
-  overflow:hidden;
-}
-
 audio,
 video{
   display:block;
@@ -173,7 +160,7 @@ table{
 }
 
 caption{
-  text-align:left;
+  text-align:start;
 }
 
 
@@ -251,22 +238,11 @@ progress{
 
 
 /* =========================
-   PLACEHOLDER / FOCUS
+   PLACEHOLDER
 ========================= */
 ::placeholder{
   opacity:1;
   color:inherit;
-}
-
-input:focus,
-textarea:focus,
-select:focus,
-button:focus{
-  outline:none;
-}
-
-:focus:not(:focus-visible){
-  outline:none;
 }
 
 
@@ -326,7 +302,6 @@ details{
 }
 
 summary{
-  display:list-item;
   cursor:pointer;
 }
 
@@ -350,7 +325,7 @@ hr{
   block-size:0;
   color:inherit;
   border:0;
-  border-top:1px solid currentColor;
+  border-block-start:1px solid currentColor;
   opacity:.12;
   margin:0;
 }
@@ -436,7 +411,10 @@ dialog::backdrop{
   cursor:pointer;
 }
 
-:disabled{
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled{
   cursor:not-allowed;
 }
 
@@ -485,19 +463,6 @@ figcaption{
   overflow-wrap:break-word;
 }
 
-p{
-  text-wrap:pretty;
-}
-
-h1,
-h2,
-h3,
-h4,
-h5,
-h6{
-  text-wrap:balance;
-}
-
 
 /* =========================
    ROOT APP NODES
@@ -513,29 +478,16 @@ h6{
 
 /* =========================
    FLEX / GRID CHILD SAFETY
+   Foundation mínima
 ========================= */
 :where(
   .layout,
   .main-content,
-  .topbar,
-  .sidebar,
-  .sidebar-menu,
-  .sidebar-section,
-  .sidebar-footer,
-  .user,
-  .user-info,
-  .topbar-left,
-  .topbar-right,
-  .topbar-search-wrap,
   .panel-content,
   .content-wrapper,
   .container,
   .container-fluid,
-  .container-narrow,
-  .grid,
-  .section,
-  .section-header,
-  .page-header
+  .container-narrow
 ) > *{
   min-inline-size:0;
 }

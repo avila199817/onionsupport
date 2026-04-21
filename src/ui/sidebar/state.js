@@ -23,6 +23,8 @@ import {
   sanitizeFooterTooltipState,
 } from "./dom.js";
 
+const LEGACY_SIDEBAR_OPEN_STORAGE_KEY = "sidebarOpen";
+
 /* =========================================================
    INTERNAL SAFE HELPERS
 ========================================================= */
@@ -52,17 +54,42 @@ export function isMobileViewport(breakpoint = MOBILE_BREAKPOINT) {
 ========================================================= */
 export function getSavedSidebarCollapsed() {
   try {
-    return localStorage.getItem(DESKTOP_COLLAPSED_STORAGE_KEY) === "true";
+    const collapsedRaw = localStorage.getItem(
+      DESKTOP_COLLAPSED_STORAGE_KEY
+    );
+
+    if (collapsedRaw === "true") return true;
+    if (collapsedRaw === "false") return false;
+
+    const legacyOpenRaw = localStorage.getItem(
+      LEGACY_SIDEBAR_OPEN_STORAGE_KEY
+    );
+
+    if (legacyOpenRaw === "true") return false;
+    if (legacyOpenRaw === "false") return true;
+
+    return false;
   } catch {
     return false;
   }
 }
 
 export function saveSidebarCollapsed(value) {
+  const collapsed = Boolean(value);
+
   try {
     localStorage.setItem(
       DESKTOP_COLLAPSED_STORAGE_KEY,
-      String(Boolean(value))
+      String(collapsed)
+    );
+  } catch {
+    /* noop */
+  }
+
+  try {
+    localStorage.setItem(
+      LEGACY_SIDEBAR_OPEN_STORAGE_KEY,
+      String(!collapsed)
     );
   } catch {
     /* noop */
@@ -142,15 +169,10 @@ function getDesktopDesiredOpenState(AppCore) {
     return state.sidebarDesktopOpen;
   }
 
-  const fromDom = resolveDomSidebarOpenState(AppCore);
-  if (typeof fromDom === "boolean") {
-    setDesktopMemory(AppCore, fromDom);
-    return fromDom;
-  }
-
-  const fromStorage = !getSavedSidebarCollapsed();
-  setDesktopMemory(AppCore, fromStorage);
-  return fromStorage;
+  /* estado natural desktop: abierto.
+     no heredamos collapsed desde DOM/storage en cold start */
+  setDesktopMemory(AppCore, true);
+  return true;
 }
 
 function getMobileDesiredOpenState(AppCore) {

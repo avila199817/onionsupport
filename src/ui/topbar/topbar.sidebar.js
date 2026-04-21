@@ -78,10 +78,21 @@ export function setMobileToggleState(getDom) {
   mobileToggle.hidden = isDesktop;
 }
 
+function isMobileOnlyContext() {
+  return isMobileViewport(
+    TOPBAR_SEARCH_CONFIG.mobileBreakpoint
+  );
+}
+
 export function openSidebarMobile({
   AppCore,
   getDom,
 }) {
+  if (!isMobileOnlyContext()) {
+    setMobileToggleState(getDom);
+    return;
+  }
+
   const sidebarModule = getSidebarModule(AppCore);
 
   if (
@@ -112,6 +123,11 @@ export function closeSidebarMobile({
   AppCore,
   getDom,
 }) {
+  if (!isMobileOnlyContext()) {
+    setMobileToggleState(getDom);
+    return;
+  }
+
   const sidebarModule = getSidebarModule(AppCore);
 
   if (
@@ -142,6 +158,11 @@ export function toggleSidebarMobile({
   AppCore,
   getDom,
 }) {
+  if (!isMobileOnlyContext()) {
+    setMobileToggleState(getDom);
+    return;
+  }
+
   const sidebarModule = getSidebarModule(AppCore);
 
   if (

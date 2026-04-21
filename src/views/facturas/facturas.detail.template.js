@@ -2,16 +2,18 @@
    Onion SPA - Facturas Detail Template
    Archivo: src/views/facturas/facturas.detail.template.js
 
-   MODAL CENTRADO PRO EDITION
+   FACTURAS DETAIL MODAL · VISUAL 1:1 CON INCIDENCIAS MODE
    FINAL PRO SYSTEM · DETAIL MODAL · COMPAT MODE
 
    RESPONSABILIDADES:
    - renderizar modal premium centrado de detalle de factura
-   - ocupar viewport útil con caja modal centrada y scroll interno limpio
    - mantener compatibilidad con facturasView.js
    - soportar estado loading / sending / acciones del header
    - exponer exports legacy para imports antiguos
    - mantener data-action estables para bindings existentes
+   - separar visualmente resumen, cliente, metadata, líneas e impuestos
+   - mostrar IVA / IRPF cuando existan
+   - no meter impuestos en la descripción de líneas
 ========================================================= */
 
 function safeText(value, fallback = "—") {
@@ -56,6 +58,14 @@ function escapeHtml(value = "") {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function normalizeText(value = "") {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 }
 
 function formatMoney(value, currency = "EUR") {
@@ -121,16 +131,12 @@ function formatRelativeDate(value) {
   if (absMin < 1) return "Ahora mismo";
 
   if (absMin < 60) {
-    return diffMin > 0
-      ? `En ${absMin} min`
-      : `Hace ${absMin} min`;
+    return diffMin > 0 ? `En ${absMin} min` : `Hace ${absMin} min`;
   }
 
   const diffHours = Math.round(absMin / 60);
   if (diffHours < 24) {
-    return diffMin > 0
-      ? `En ${diffHours} h`
-      : `Hace ${diffHours} h`;
+    return diffMin > 0 ? `En ${diffHours} h` : `Hace ${diffHours} h`;
   }
 
   const diffDays = Math.round(diffHours / 24);
@@ -143,21 +149,20 @@ function formatRelativeDate(value) {
   return formatDate(value);
 }
 
+/* =========================================================
+   DOMAIN HELPERS
+========================================================= */
+
 function getFacturaId(factura = {}) {
-  return safeText(
-    first(
-      factura?.id,
-      factura?._id,
-      factura?.facturaId
-    ),
-    ""
-  );
+  return safeText(first(factura?.id, factura?._id, factura?.facturaId), "");
 }
 
 function getFacturaNumero(factura = {}) {
   return safeText(
     first(
       factura?.numero,
+      factura?.numeroFacturaLegal,
+      factura?.numeroFacturaSistema,
       factura?.code,
       factura?.facturaCode
     ),
@@ -168,6 +173,7 @@ function getFacturaNumero(factura = {}) {
 function getClienteNombre(factura = {}) {
   return safeText(
     first(
+      factura?.cliente?.nombreContacto,
       factura?.cliente?.empresa,
       factura?.cliente?.razonSocial,
       factura?.cliente?.nombreCompleto,
@@ -181,12 +187,26 @@ function getClienteNombre(factura = {}) {
   );
 }
 
+function getClienteEmpresa(factura = {}) {
+  return safeText(
+    first(
+      factura?.cliente?.empresa,
+      factura?.cliente?.razonSocial,
+      factura?.cliente?.nombre,
+      factura?.clienteEmpresa,
+      factura?.clienteNombre
+    ),
+    getClienteNombre(factura)
+  );
+}
+
 function getClienteEmail(factura = {}) {
   return safeText(
     first(
       factura?.cliente?.email,
       factura?.cliente?.mail,
       factura?.clienteEmail,
+      factura?.emailCliente,
       factura?.email,
       factura?.clientEmail
     ),
@@ -206,12 +226,31 @@ function getClienteDocumento(factura = {}) {
   );
 }
 
+function getClienteTelefono(factura = {}) {
+  return safeText(
+    first(
+      factura?.cliente?.telefono,
+      factura?.cliente?.phone,
+      factura?.telefonoCliente
+    ),
+    "—"
+  );
+}
+
 function getFacturaFecha(factura = {}) {
   return first(
     factura?.fecha,
+    factura?.fechaFactura,
     factura?.date,
     factura?.createdAt,
     factura?.updatedAt
+  );
+}
+
+function getFacturaFechaServicio(factura = {}) {
+  return first(
+    factura?.fechaServicio,
+    factura?.serviceDate
   );
 }
 
@@ -224,57 +263,39 @@ function getFacturaUpdatedAt(factura = {}) {
   );
 }
 
-function getFacturaEstadoPagoLabel(factura = {}) {
-  return getEstadoPagoLabel(
-    first(factura?.estadoPago, factura?.paymentStatus)
+function getFacturaFechaEnvio(factura = {}) {
+  return first(
+    factura?.fechaEnvio,
+    factura?.sentAt
   );
+}
+
+function getFacturaEstadoPagoLabel(factura = {}) {
+  return getEstadoPagoLabel(first(factura?.estadoPago, factura?.paymentStatus));
 }
 
 function getFacturaEstadoLabel(factura = {}) {
-  return getEstadoLabel(
-    first(factura?.estado, factura?.status)
-  );
+  return getEstadoLabel(first(factura?.estado, factura?.status));
 }
 
 function getFacturaFormaPago(factura = {}) {
-  return safeText(
-    first(
-      factura?.formaPago,
-      factura?.paymentMethod
-    ),
-    "—"
-  );
+  return safeText(first(factura?.formaPago, factura?.metodoPago, factura?.paymentMethod), "—");
 }
 
 function getFacturaMoneda(factura = {}) {
-  return safeText(
-    first(
-      factura?.moneda,
-      factura?.currency
-    ),
-    "EUR"
-  );
+  return safeText(first(factura?.moneda, factura?.currency), "EUR");
 }
 
 function getFacturaTotal(factura = {}) {
-  return safeNumber(
-    first(
-      factura?.total,
-      factura?.amount,
-      factura?.importe
-    ),
-    0
-  );
+  return safeNumber(first(factura?.total, factura?.amount, factura?.importe), 0);
+}
+
+function getFacturaSubtotal(factura = {}) {
+  return safeNumber(first(factura?.subtotal, factura?.baseImponible), 0);
 }
 
 function getFacturaBase(factura = {}) {
-  return safeNumber(
-    first(
-      factura?.baseImponible,
-      factura?.subtotal
-    ),
-    0
-  );
+  return safeNumber(first(factura?.baseImponible, factura?.subtotal), 0);
 }
 
 function getFacturaImpuestos(factura = {}) {
@@ -288,6 +309,10 @@ function getFacturaImpuestos(factura = {}) {
   );
 }
 
+function getFacturaDescuentoTotal(factura = {}) {
+  return safeNumber(first(factura?.descuentoTotal, factura?.discountTotal), 0);
+}
+
 function getFacturaEnviadoA(factura = {}) {
   return safeText(
     first(
@@ -296,13 +321,6 @@ function getFacturaEnviadoA(factura = {}) {
       factura?.cliente?.email
     ),
     "—"
-  );
-}
-
-function getFacturaFechaEnvio(factura = {}) {
-  return first(
-    factura?.fechaEnvio,
-    factura?.sentAt
   );
 }
 
@@ -315,6 +333,83 @@ function getFacturaPdfAvailable(factura = {}) {
   );
 }
 
+function getFacturaPreview(factura = {}) {
+  return safeText(
+    first(
+      factura?.descripcion,
+      factura?.concepto,
+      factura?.preview,
+      factura?.lineas?.[0]?.descripcion,
+      factura?.lineas?.[0]?.concepto
+    ),
+    "Factura disponible para consulta."
+  );
+}
+
+function getFacturaDireccionCliente(factura = {}) {
+  const direccion = safeObject(factura?.cliente?.direccion);
+
+  const parts = [
+    safeText(direccion?.calle, ""),
+    safeText(direccion?.linea2, ""),
+    safeText(direccion?.cp, ""),
+    safeText(direccion?.ciudad, ""),
+    safeText(direccion?.provincia, ""),
+    safeText(direccion?.pais, ""),
+  ].filter(Boolean);
+
+  return parts.length ? parts.join(", ") : "—";
+}
+
+function getFacturaDireccionServicio(factura = {}) {
+  const direccion = safeObject(factura?.direccionServicio);
+
+  const parts = [
+    safeText(direccion?.calle, ""),
+    safeText(direccion?.linea2, ""),
+    safeText(direccion?.cp, ""),
+    safeText(direccion?.ciudad, ""),
+    safeText(direccion?.provincia, ""),
+    safeText(direccion?.pais, ""),
+  ].filter(Boolean);
+
+  return parts.length ? parts.join(", ") : "—";
+}
+
+function getLineaConcepto(linea = {}) {
+  return safeText(first(linea?.concepto, linea?.descripcion), "Línea");
+}
+
+function getLineaDescripcion(linea = {}) {
+  return safeText(first(linea?.descripcion, linea?.detalle), "");
+}
+
+function getLineaCantidad(linea = {}) {
+  return safeNumber(first(linea?.cantidad, linea?.qty, linea?.quantity), 0);
+}
+
+function getLineaUnitario(linea = {}) {
+  return safeNumber(first(linea?.precioUnitario, linea?.unitPrice, linea?.precio), 0);
+}
+
+function getLineaSubtotal(linea = {}) {
+  const explicit = first(linea?.subtotal, linea?.base);
+  if (explicit !== null && explicit !== undefined && explicit !== "") {
+    return safeNumber(explicit, 0);
+  }
+
+  return getLineaCantidad(linea) * getLineaUnitario(linea);
+}
+
+function getLineaTotal(linea = {}) {
+  const explicit = first(linea?.totalLinea, linea?.total, linea?.importe);
+  if (explicit !== null && explicit !== undefined && explicit !== "") {
+    return safeNumber(explicit, 0);
+  }
+
+  return getLineaSubtotal(linea);
+}
+
 function getEstadoPagoLabel(value = "") {
   const key = String(value || "").trim().toLowerCase();
 
@@ -324,27 +419,21 @@ function getEstadoPagoLabel(value = "") {
     case "pagado":
     case "cobrada":
       return "Pagada";
-
     case "pending":
     case "pendiente":
       return "Pendiente";
-
     case "overdue":
     case "vencida":
       return "Vencida";
-
     case "cancelled":
     case "cancelada":
       return "Cancelada";
-
     case "draft":
     case "borrador":
       return "Borrador";
-
     case "partial":
     case "parcial":
       return "Pago parcial";
-
     default:
       return safeText(value, "Pendiente");
   }
@@ -357,27 +446,21 @@ function getEstadoLabel(value = "") {
     case "emitida":
     case "issued":
       return "Emitida";
-
     case "enviada":
     case "sent":
       return "Enviada";
-
     case "anulada":
     case "void":
       return "Anulada";
-
     case "borrador":
     case "draft":
       return "Borrador";
-
     case "cancelada":
     case "cancelled":
       return "Cancelada";
-
     case "abonada":
     case "paid":
       return "Abonada";
-
     default:
       return safeText(value, "Emitida");
   }
@@ -475,6 +558,44 @@ function getEstadoChipStyle(value = "") {
   `;
 }
 
+function getImpuestosBreakdown(factura = {}) {
+  const impuestos = safeArray(factura?.impuestos);
+
+  let iva = null;
+  let irpf = null;
+  let otros = [];
+
+  impuestos.forEach((item) => {
+    const impuesto = safeObject(item);
+    const tipo = normalizeText(first(impuesto?.tipo, impuesto?.nombre));
+
+    const normalized = {
+      tipo: safeText(first(impuesto?.tipo, impuesto?.nombre), "Impuesto"),
+      porcentaje: safeNumber(impuesto?.porcentaje, 0),
+      base: safeNumber(impuesto?.base, 0),
+      importe: safeNumber(impuesto?.importe, 0),
+    };
+
+    if (tipo.includes("iva")) {
+      iva = normalized;
+      return;
+    }
+
+    if (tipo.includes("irpf") || tipo.includes("retencion") || tipo.includes("retención")) {
+      irpf = normalized;
+      return;
+    }
+
+    otros.push(normalized);
+  });
+
+  return { iva, irpf, otros };
+}
+
+/* =========================================================
+   UI PARTIALS
+========================================================= */
+
 function chip(label = "", style = "") {
   return `
     <span
@@ -483,9 +604,9 @@ function chip(label = "", style = "") {
         align-items:center;
         justify-content:center;
         min-height:30px;
-        padding:0 12px;
+        padding:0 10px;
         border-radius:999px;
-        font-size:12px;
+        font-size:11px;
         font-weight:700;
         letter-spacing:.05em;
         text-transform:uppercase;
@@ -527,7 +648,7 @@ function stat(label = "", value = "") {
         padding:16px;
         border-radius:18px;
         border:1px solid var(--border-soft);
-        background:var(--surface-glass);
+        background:var(--surface-1, var(--surface-glass));
       "
     >
       <span
@@ -562,33 +683,117 @@ function mini(label = "", value = "") {
       style="
         display:grid;
         gap:6px;
-        padding:14px;
-        border-radius:16px;
+        padding:12px;
+        border-radius:14px;
         border:1px solid var(--border-soft);
-        background:var(--surface-glass);
+        background:var(--surface-1, var(--surface-glass));
       "
     >
       <span
         style="
-          font-size:11px;
+          font-size:10px;
           color:var(--text-faint);
           text-transform:uppercase;
           font-weight:700;
-          letter-spacing:.05em;
+          letter-spacing:.08em;
         "
       >
         ${escapeHtml(label)}
       </span>
 
-      <span
+      <strong
         style="
           color:var(--text-strong);
-          line-height:1.45;
+          font-size:13px;
+          line-height:1.4;
           word-break:break-word;
         "
       >
         ${escapeHtml(value)}
-      </span>
+      </strong>
+    </div>
+  `;
+}
+
+function renderSectionCard({
+  title = "",
+  subtitle = "",
+  content = "",
+} = {}) {
+  return `
+    <section
+      style="
+        display:grid;
+        gap:12px;
+        padding:16px;
+        border-radius:18px;
+        border:1px solid var(--border-soft);
+        background:var(--surface-glass);
+      "
+    >
+      <div style="display:grid; gap:4px;">
+        <h3
+          style="
+            margin:0;
+            color:var(--text-strong);
+            font-size:18px;
+            letter-spacing:-.02em;
+          "
+        >
+          ${escapeHtml(title)}
+        </h3>
+
+        ${
+          subtitle
+            ? `
+              <p
+                style="
+                  margin:0;
+                  color:var(--text-dim);
+                  line-height:1.55;
+                  font-size:12px;
+                "
+              >
+                ${escapeHtml(subtitle)}
+              </p>
+            `
+            : ""
+        }
+      </div>
+
+      ${content}
+    </section>
+  `;
+}
+
+function renderAvatar(factura = {}) {
+  const raw = safeText(getClienteNombre(factura), "ON");
+  const parts = raw.split(/\s+/).filter(Boolean);
+  const initials =
+    parts.length >= 2
+      ? `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase()
+      : raw.slice(0, 2).toUpperCase();
+
+  return `
+    <div
+      style="
+        position:relative;
+        flex:0 0 60px;
+        width:60px;
+        height:60px;
+        border-radius:18px;
+        display:grid;
+        place-items:center;
+        background:linear-gradient(135deg, rgba(124,92,255,.36), rgba(88,72,200,.18));
+        border:1px solid rgba(124,92,255,.28);
+        color:#efeaff;
+        font-size:18px;
+        font-weight:800;
+        letter-spacing:.03em;
+        box-shadow:0 10px 22px rgba(124,92,255,.18);
+      "
+    >
+      ${escapeHtml(initials || "ON")}
     </div>
   `;
 }
@@ -605,55 +810,11 @@ export function renderDetailStat(label = "", value = "") {
   return stat(label, value);
 }
 
-export function renderSectionCard({
-  title = "",
-  subtitle = "",
-  content = "",
-} = {}) {
-  return `
-    <section
-      style="
-        display:grid;
-        gap:14px;
-        padding:18px;
-        border-radius:22px;
-        border:1px solid var(--border-soft);
-        background:var(--surface-glass);
-      "
-    >
-      <div style="display:grid; gap:6px;">
-        <h3
-          style="
-            margin:0;
-            color:var(--text-strong);
-            font-size:20px;
-            letter-spacing:-.02em;
-          "
-        >
-          ${escapeHtml(title)}
-        </h3>
+export { renderSectionCard };
 
-        ${
-          subtitle
-            ? `
-              <p
-                style="
-                  margin:0;
-                  color:var(--text-dim);
-                  line-height:1.5;
-                "
-              >
-                ${escapeHtml(subtitle)}
-              </p>
-            `
-            : ""
-        }
-      </div>
-
-      ${content}
-    </section>
-  `;
-}
+/* =========================================================
+   HEADER ACTIONS
+========================================================= */
 
 export function renderHeaderActions({
   factura = {},
@@ -668,9 +829,9 @@ export function renderHeaderActions({
     <div
       style="
         display:flex;
-        gap:10px;
+        gap:8px;
         flex-wrap:wrap;
-        align-items:center;
+        align-items:flex-start;
       "
     >
       <button
@@ -679,22 +840,19 @@ export function renderHeaderActions({
         data-factura-id="${escapeHtml(facturaId)}"
         ${pdfAvailable && !viewingPdf ? "" : "disabled"}
         style="
-          min-height:42px;
-          padding:0 14px;
-          border-radius:14px;
+          min-height:38px;
+          padding:0 12px;
+          border-radius:12px;
           border:1px solid var(--border-soft);
           background:var(--surface-glass);
           color:var(--text-soft);
+          font-size:12px;
           font-weight:700;
           cursor:${pdfAvailable && !viewingPdf ? "pointer" : "not-allowed"};
           opacity:${pdfAvailable ? (viewingPdf ? ".78" : "1") : ".56"};
         "
       >
-        ${
-          viewingPdf
-            ? renderActionSpinner("Abriendo...")
-            : "Ver PDF"
-        }
+        ${viewingPdf ? renderActionSpinner("Abriendo...") : "Ver PDF"}
       </button>
 
       <button
@@ -703,22 +861,19 @@ export function renderHeaderActions({
         data-factura-id="${escapeHtml(facturaId)}"
         ${pdfAvailable && !downloading ? "" : "disabled"}
         style="
-          min-height:42px;
-          padding:0 14px;
-          border-radius:14px;
+          min-height:38px;
+          padding:0 12px;
+          border-radius:12px;
           border:1px solid var(--border-soft);
           background:var(--surface-glass);
           color:var(--text-soft);
+          font-size:12px;
           font-weight:700;
           cursor:${pdfAvailable && !downloading ? "pointer" : "not-allowed"};
           opacity:${pdfAvailable ? (downloading ? ".78" : "1") : ".56"};
         "
       >
-        ${
-          downloading
-            ? renderActionSpinner("Bajando...")
-            : "Descargar"
-        }
+        ${downloading ? renderActionSpinner("Bajando...") : "Descargar"}
       </button>
 
       <button
@@ -727,34 +882,33 @@ export function renderHeaderActions({
         data-factura-id="${escapeHtml(facturaId)}"
         ${sending ? "disabled" : ""}
         style="
-          min-height:42px;
-          padding:0 14px;
-          border-radius:14px;
-          border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
-          background:var(--btn-primary-bg, var(--accent, #7c5cff));
-          color:var(--btn-primary-text, #fff);
+          min-height:38px;
+          padding:0 12px;
+          border-radius:12px;
+          border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent);
+          background:var(--accent, #7c5cff);
+          color:#fff;
+          font-size:12px;
           font-weight:700;
           cursor:${sending ? "wait" : "pointer"};
           opacity:${sending ? ".82" : "1"};
+          box-shadow:0 12px 28px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
         "
       >
-        ${
-          sending
-            ? renderActionSpinner("Enviando...")
-            : "Enviar"
-        }
+        ${sending ? renderActionSpinner("Enviando...") : "Enviar"}
       </button>
 
       <button
         type="button"
         data-action="close-factura-detail"
         style="
-          min-height:42px;
-          padding:0 14px;
-          border-radius:14px;
+          min-height:38px;
+          padding:0 12px;
+          border-radius:12px;
           border:1px solid var(--border-soft);
           background:transparent;
           color:var(--text-dim);
+          font-size:12px;
           font-weight:700;
           cursor:pointer;
         "
@@ -763,6 +917,106 @@ export function renderHeaderActions({
       </button>
     </div>
   `;
+}
+
+/* =========================================================
+   CONTENT SECTIONS
+========================================================= */
+
+function renderHeroMeta(factura = {}) {
+  return `
+    <div
+      class="facturas-detail-meta-grid"
+      style="
+        display:grid;
+        grid-template-columns:repeat(4, minmax(0, 1fr));
+        gap:10px;
+      "
+    >
+      ${mini("Número", getFacturaNumero(factura))}
+      ${mini("Creada", formatDate(getFacturaFecha(factura)))}
+      ${mini("Servicio", formatDate(getFacturaFechaServicio(factura)))}
+      ${mini("Enviada", formatDateTime(getFacturaFechaEnvio(factura)))}
+    </div>
+  `;
+}
+
+function renderResumenSection(factura = {}) {
+  const moneda = getFacturaMoneda(factura);
+
+  return renderSectionCard({
+    title: "Resumen económico",
+    subtitle: "Vista principal del documento y del cierre financiero.",
+    content: `
+      <div
+        style="
+          display:grid;
+          grid-template-columns:repeat(4, minmax(0, 1fr));
+          gap:12px;
+        "
+        class="facturas-detail-stats-grid"
+      >
+        ${stat("Total", formatMoney(getFacturaTotal(factura), moneda))}
+        ${stat("Base", formatMoney(getFacturaBase(factura), moneda))}
+        ${stat("Impuestos", formatMoney(getFacturaImpuestos(factura), moneda))}
+        ${stat("Pago", getFacturaEstadoPagoLabel(factura))}
+      </div>
+    `,
+  });
+}
+
+function renderImpuestosSection(factura = {}) {
+  const moneda = getFacturaMoneda(factura);
+  const breakdown = getImpuestosBreakdown(factura);
+
+  const cards = [];
+
+  if (breakdown.iva) {
+    cards.push(
+      stat(
+        `IVA ${breakdown.iva.porcentaje ? `(${breakdown.iva.porcentaje}%)` : ""}`.trim(),
+        formatMoney(breakdown.iva.importe, moneda)
+      )
+    );
+  }
+
+  if (breakdown.irpf) {
+    cards.push(
+      stat(
+        `IRPF ${breakdown.irpf.porcentaje ? `(${breakdown.irpf.porcentaje}%)` : ""}`.trim(),
+        formatMoney(breakdown.irpf.importe, moneda)
+      )
+    );
+  }
+
+  breakdown.otros.forEach((item) => {
+    cards.push(
+      stat(
+        `${item.tipo}${item.porcentaje ? ` (${item.porcentaje}%)` : ""}`,
+        formatMoney(item.importe, moneda)
+      )
+    );
+  });
+
+  if (!cards.length) {
+    cards.push(mini("Impuestos", "Sin desglose de impuestos disponible"));
+  }
+
+  return renderSectionCard({
+    title: "Impuestos",
+    subtitle: "Desglose fiscal detectado en la factura. Se muestran IVA e IRPF cuando existen.",
+    content: `
+      <div
+        style="
+          display:grid;
+          grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));
+          gap:12px;
+        "
+      >
+        ${cards.join("")}
+      </div>
+    `,
+  });
 }
 
 function renderClienteSection(factura = {}) {
@@ -778,32 +1032,13 @@ function renderClienteSection(factura = {}) {
         "
       >
         ${mini("Cliente", getClienteNombre(factura))}
+        ${mini("Empresa", getClienteEmpresa(factura))}
         ${mini("Email", getClienteEmail(factura))}
         ${mini("Documento fiscal", getClienteDocumento(factura))}
+        ${mini("Teléfono", getClienteTelefono(factura))}
+        ${mini("Dirección cliente", getFacturaDireccionCliente(factura))}
+        ${mini("Dirección servicio", getFacturaDireccionServicio(factura))}
         ${mini("Enviado a", getFacturaEnviadoA(factura))}
-      </div>
-    `,
-  });
-}
-
-function renderResumenSection(factura = {}) {
-  const moneda = getFacturaMoneda(factura);
-
-  return renderSectionCard({
-    title: "Resumen económico",
-    subtitle: "Distribución principal de importes y estado financiero del documento.",
-    content: `
-      <div
-        style="
-          display:grid;
-          grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
-          gap:12px;
-        "
-      >
-        ${stat("Total", formatMoney(getFacturaTotal(factura), moneda))}
-        ${stat("Base", formatMoney(getFacturaBase(factura), moneda))}
-        ${stat("Impuestos", formatMoney(getFacturaImpuestos(factura), moneda))}
-        ${stat("Pago", getFacturaEstadoPagoLabel(factura))}
       </div>
     `,
   });
@@ -822,13 +1057,39 @@ function renderMetaSection(factura = {}) {
         "
       >
         ${mini("Número", getFacturaNumero(factura))}
-        ${mini("Estado", getFacturaEstadoLabel(factura))}
+        ${mini("Estado factura", getFacturaEstadoLabel(factura))}
+        ${mini("Estado pago", getFacturaEstadoPagoLabel(factura))}
         ${mini("Fecha emisión", formatDate(getFacturaFecha(factura)))}
         ${mini("Actualizado", formatDateTime(getFacturaUpdatedAt(factura)))}
         ${mini("Último cambio", formatRelativeDate(getFacturaUpdatedAt(factura)))}
         ${mini("Forma de pago", getFacturaFormaPago(factura))}
         ${mini("Moneda", getFacturaMoneda(factura))}
-        ${mini("Fecha envío", formatDateTime(getFacturaFechaEnvio(factura)))}
+        ${mini("PDF", getFacturaPdfAvailable(factura) ? "Disponible" : "No disponible")}
+        ${mini("Descuento total", formatMoney(getFacturaDescuentoTotal(factura), getFacturaMoneda(factura)))}
+      </div>
+    `,
+  });
+}
+
+function renderDescripcionSection(factura = {}) {
+  return renderSectionCard({
+    title: "Descripción de la factura",
+    subtitle: "Resumen general del documento sin mezclar el bloque fiscal.",
+    content: `
+      <div
+        style="
+          padding:14px;
+          border-radius:16px;
+          background:var(--surface-1, var(--surface-glass));
+          border:1px solid var(--border-soft);
+          color:var(--text-soft);
+          font-size:13px;
+          line-height:1.65;
+          white-space:pre-wrap;
+          word-break:break-word;
+        "
+      >
+        ${escapeHtml(getFacturaPreview(factura))}
       </div>
     `,
   });
@@ -836,16 +1097,17 @@ function renderMetaSection(factura = {}) {
 
 function renderLineaItem(linea = {}, moneda = "EUR") {
   const item = safeObject(linea);
+  const descripcion = getLineaDescripcion(item);
 
   return `
     <article
       style="
         display:grid;
         gap:12px;
-        padding:16px;
-        border-radius:18px;
+        padding:14px;
+        border-radius:16px;
         border:1px solid var(--border-soft);
-        background:var(--surface-glass);
+        background:var(--surface-1, var(--surface-glass));
       "
     >
       <div
@@ -854,26 +1116,48 @@ function renderLineaItem(linea = {}, moneda = "EUR") {
           justify-content:space-between;
           gap:12px;
           flex-wrap:wrap;
+          align-items:flex-start;
         "
       >
-        <strong
-          style="
-            color:var(--text-strong);
-            line-height:1.4;
-            word-break:break-word;
-          "
-        >
-          ${escapeHtml(safeText(item?.concepto, "Línea"))}
-        </strong>
+        <div style="display:grid; gap:4px; min-width:0;">
+          <strong
+            style="
+              color:var(--text-strong);
+              line-height:1.4;
+              word-break:break-word;
+              font-size:14px;
+            "
+          >
+            ${escapeHtml(getLineaConcepto(item))}
+          </strong>
+
+          ${
+            descripcion
+              ? `
+                <span
+                  style="
+                    color:var(--text-dim);
+                    font-size:12px;
+                    line-height:1.5;
+                    word-break:break-word;
+                  "
+                >
+                  ${escapeHtml(descripcion)}
+                </span>
+              `
+              : ""
+          }
+        </div>
 
         <strong
           style="
             color:var(--text-strong);
             line-height:1.4;
             white-space:nowrap;
+            font-size:14px;
           "
         >
-          ${escapeHtml(formatMoney(first(item?.totalLinea, item?.total), moneda))}
+          ${escapeHtml(formatMoney(getLineaTotal(item), moneda))}
         </strong>
       </div>
 
@@ -884,31 +1168,28 @@ function renderLineaItem(linea = {}, moneda = "EUR") {
           gap:10px;
         "
       >
-        ${mini("Cantidad", safeText(item?.cantidad, "0"))}
-        ${mini("Unitario", formatMoney(item?.precioUnitario, moneda))}
-        ${mini("Subtotal", formatMoney(first(item?.subtotal, item?.base), moneda))}
-        ${mini("Impuesto", formatMoney(first(item?.impuesto, item?.iva), moneda))}
+        ${mini("Cantidad", String(getLineaCantidad(item)))}
+        ${mini("Unitario", formatMoney(getLineaUnitario(item), moneda))}
+        ${mini("Subtotal", formatMoney(getLineaSubtotal(item), moneda))}
+        ${mini("Total línea", formatMoney(getLineaTotal(item), moneda))}
       </div>
     </article>
   `;
 }
 
-function renderLineas(factura = {}) {
-  const lineas = safeArray(
-    first(
-      factura?.lineas,
-      factura?.items,
-      factura?.conceptos
-    )
-  );
-
-  if (!lineas.length) {
-    return mini("Líneas", "Sin líneas");
-  }
-
+function renderLineasSection(factura = {}) {
+  const lineas = safeArray(first(factura?.lineas, factura?.items, factura?.conceptos));
   const moneda = getFacturaMoneda(factura);
 
-  return lineas.map((linea) => renderLineaItem(linea, moneda)).join("");
+  return renderSectionCard({
+    title: "Líneas de factura",
+    subtitle: "Desglose de conceptos, cantidades, precios unitarios y subtotales.",
+    content: lineas.length
+      ? `<div style="display:grid; gap:12px;">${lineas
+          .map((linea) => renderLineaItem(linea, moneda))
+          .join("")}</div>`
+      : mini("Líneas", "Sin líneas"),
+  });
 }
 
 /* =========================================================
@@ -924,17 +1205,17 @@ export function renderFacturasDetailContent({
 } = {}) {
   if (loading) {
     return `
-      <div style="padding:28px; display:grid; gap:18px;">
-        <div style="height:42px; border-radius:14px; background:var(--surface-glass);"></div>
-        <div style="height:140px; border-radius:20px; background:var(--surface-glass);"></div>
-        <div style="height:420px; border-radius:22px; background:var(--surface-glass);"></div>
+      <div style="padding:18px; display:grid; gap:16px;">
+        <div style="height:88px; border-radius:18px; background:var(--surface-glass); border:1px solid var(--border-soft);"></div>
+        <div style="height:120px; border-radius:18px; background:var(--surface-glass); border:1px solid var(--border-soft);"></div>
+        <div style="height:240px; border-radius:18px; background:var(--surface-glass); border:1px solid var(--border-soft);"></div>
       </div>
     `;
   }
 
   if (!factura) {
     return `
-      <div style="padding:28px;">
+      <div style="padding:18px;">
         ${mini("Detalle", "No disponible")}
       </div>
     `;
@@ -962,61 +1243,103 @@ export function renderFacturasDetailContent({
           top:0;
           z-index:4;
           display:grid;
-          gap:18px;
-          padding:22px 24px 18px;
+          gap:16px;
+          padding:18px 18px 14px;
           border-bottom:1px solid var(--border-soft);
           background:var(--modal-bg, var(--surface-1, #141414));
         "
       >
         <div
+          class="facturas-modal-hero"
           style="
             display:flex;
             justify-content:space-between;
-            gap:18px;
+            gap:16px;
             flex-wrap:wrap;
           "
         >
           <div
             style="
-              display:grid;
-              gap:10px;
-              min-width:0;
-              flex:1 1 520px;
+              display:flex;
+              gap:14px;
+              align-items:flex-start;
+              min-width:min(100%, 520px);
             "
           >
-            <span
-              style="
-                color:var(--text-dim);
-                font-size:12px;
-                text-transform:uppercase;
-                font-weight:700;
-                letter-spacing:.06em;
-              "
-            >
-              Factura ${escapeHtml(getFacturaNumero(factura))}
-            </span>
+            ${renderAvatar(factura)}
 
-            <h2
+            <div
               style="
-                margin:0;
-                font-size:clamp(30px, 4vw, 42px);
-                line-height:.98;
-                color:var(--text-strong);
-                letter-spacing:-.04em;
-                word-break:break-word;
+                display:grid;
+                gap:6px;
+                min-width:0;
+                flex:1 1 auto;
+                padding-top:1px;
               "
             >
-              ${escapeHtml(getClienteNombre(factura))}
-            </h2>
+              <div
+                style="
+                  display:flex;
+                  align-items:center;
+                  gap:8px;
+                  flex-wrap:wrap;
+                "
+              >
+                <span
+                  style="
+                    display:inline-flex;
+                    align-items:center;
+                    min-height:28px;
+                    padding:0 9px;
+                    border-radius:999px;
+                    border:1px solid var(--border-soft);
+                    background:var(--surface-glass);
+                    color:var(--text-dim);
+                    font-size:11px;
+                    font-weight:700;
+                    letter-spacing:.04em;
+                    text-transform:uppercase;
+                  "
+                >
+                  ${escapeHtml(getFacturaNumero(factura))}
+                </span>
 
-            <span
-              style="
-                color:var(--text-dim);
-                font-size:14px;
-              "
-            >
-              Actualizado ${escapeHtml(formatRelativeDate(getFacturaUpdatedAt(factura)))}
-            </span>
+                ${chip(
+                  getFacturaEstadoPagoLabel(factura),
+                  getEstadoPagoChipStyle(first(factura?.estadoPago, factura?.paymentStatus))
+                )}
+
+                ${chip(
+                  getFacturaEstadoLabel(factura),
+                  getEstadoChipStyle(first(factura?.estado, factura?.status))
+                )}
+              </div>
+
+              <div style="display:grid; gap:4px; min-width:0;">
+                <h2
+                  style="
+                    margin:0;
+                    color:var(--text-strong);
+                    font-size:clamp(20px, 3vw, 28px);
+                    line-height:1.02;
+                    letter-spacing:-.04em;
+                    word-break:break-word;
+                  "
+                >
+                  ${escapeHtml(getClienteNombre(factura))}
+                </h2>
+
+                <span
+                  style="
+                    color:var(--text-dim);
+                    font-size:12px;
+                    line-height:1.42;
+                  "
+                >
+                  Última actualización ${escapeHtml(formatRelativeDate(getFacturaUpdatedAt(factura)))}
+                </span>
+              </div>
+            </div>
           </div>
 
           ${renderHeaderActions({
@@ -1027,22 +1350,7 @@ export function renderFacturasDetailContent({
           })}
         </div>
 
-        <div
-          style="
-            display:flex;
-            gap:10px;
-            flex-wrap:wrap;
-          "
-        >
-          ${chip(
-            getFacturaEstadoPagoLabel(factura),
-            getEstadoPagoChipStyle(first(factura?.estadoPago, factura?.paymentStatus))
-          )}
-          ${chip(
-            getFacturaEstadoLabel(factura),
-            getEstadoChipStyle(first(factura?.estado, factura?.status))
-          )}
-        </div>
+        ${renderHeroMeta(factura)}
       </header>
 
       <div
@@ -1055,31 +1363,29 @@ export function renderFacturasDetailContent({
       >
         <div
           style="
-            padding:24px;
+            padding:16px 18px 18px;
             display:grid;
-            gap:22px;
+            gap:16px;
           "
         >
           ${renderResumenSection(factura)}
+          ${renderDescripcionSection(factura)}
 
           <div
             class="facturas-detail-grid"
             style="
               display:grid;
-              grid-template-columns:minmax(0, 1.2fr) minmax(320px, .8fr);
-              gap:20px;
+              grid-template-columns:minmax(0, 1.15fr) minmax(320px, .85fr);
+              gap:16px;
               align-items:start;
             "
           >
-            <section style="display:grid; gap:14px;">
-              ${renderSectionCard({
-                title: "Líneas de factura",
-                subtitle: "Desglose de conceptos, cantidades, subtotales e impuestos.",
-                content: renderLineas(factura),
-              })}
+            <section style="display:grid; gap:16px;">
+              ${renderLineasSection(factura)}
             </section>
 
-            <section style="display:grid; gap:14px;">
+            <section style="display:grid; gap:16px;">
+              ${renderImpuestosSection(factura)}
               ${renderClienteSection(factura)}
               ${renderMetaSection(factura)}
             </section>
@@ -1097,21 +1403,35 @@ export function renderFacturasDetailContent({
         scrollbar-width: thin;
       }
 
-      @media (max-width: 1180px) {
+      @media (max-width: 980px) {
+        .facturas-detail-meta-grid,
+        .facturas-detail-stats-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        }
+
         .facturas-detail-grid {
           grid-template-columns: 1fr !important;
         }
       }
 
-      @media (max-width: 900px) {
-        .facturas-detail-header {
-          padding: 18px !important;
+      @media (max-width: 720px) {
+        .facturas-modal-hero {
+          align-items:flex-start !important;
         }
       }
 
       @media (max-width: 640px) {
-        .facturas-detail-body-shell > div {
+        .facturas-detail-header {
           padding: 16px !important;
+        }
+
+        .facturas-detail-body-shell > div {
+          padding: 14px !important;
+        }
+
+        .facturas-detail-meta-grid,
+        .facturas-detail-stats-grid {
+          grid-template-columns: 1fr !important;
         }
       }
     </style>
@@ -1140,11 +1460,11 @@ export function renderFacturasDetailModal({
         position:fixed;
         inset:0;
         z-index:9999;
-        padding:24px;
+        padding:20px;
         display:grid;
         place-items:center;
-        background:rgba(0,0,0,.66);
-        backdrop-filter:blur(10px);
+        background:rgba(0,0,0,.64);
+        backdrop-filter:blur(8px);
       "
     >
       <div
@@ -1155,68 +1475,60 @@ export function renderFacturasDetailModal({
         aria-label="Detalle factura"
         style="
           position:relative;
-          width:min(1120px, 100%);
-          max-width:100%;
+          width:min(1080px, 100%);
           max-height:92vh;
-          overflow:hidden;
-          border-radius:28px;
+          overflow:auto;
+          border-radius:24px;
           border:1px solid var(--border-soft, #2b2b2b);
           background:
-            radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 34%),
+            radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 34%),
             linear-gradient(180deg, var(--surface-2, #151515), var(--surface-1, #121212));
-          box-shadow:0 40px 100px rgba(0,0,0,.45);
-          display:flex;
-          flex-direction:column;
+          box-shadow:0 34px 84px rgba(0,0,0,.40);
         "
       >
-        <div
-          data-role="facturas-detail-panel"
-          style="
-            display:flex;
-            flex-direction:column;
-            min-height:0;
-            height:min(92vh, 100%);
-          "
-        >
-          ${renderFacturasDetailContent({
-            factura,
-            loading: detailLoading,
-            sendingFacturaId,
-            viewingFacturaId,
-            downloadingFacturaId,
-          })}
-        </div>
+        ${renderFacturasDetailContent({
+          factura,
+          loading: detailLoading,
+          sendingFacturaId,
+          viewingFacturaId,
+          downloadingFacturaId,
+        })}
+
+        <style>
+          [data-theme="light"] .facturas-detail-modal{
+            background:
+              radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 34%),
+              linear-gradient(180deg, rgba(255,255,255,.96), rgba(250,251,255,.94));
+            box-shadow:
+              0 30px 70px rgba(15,23,42,.14),
+              0 0 0 1px rgba(255,255,255,.65) inset;
+          }
+
+          @media (max-width: 900px) {
+            .facturas-detail-overlay {
+              padding: 14px !important;
+            }
+
+            .facturas-detail-modal {
+              width: 100% !important;
+              max-height: 94vh !important;
+              border-radius: 22px !important;
+            }
+          }
+
+          @media (max-width: 640px) {
+            .facturas-detail-overlay {
+              padding: 10px !important;
+            }
+
+            .facturas-detail-modal {
+              width: 100% !important;
+              max-height: 96vh !important;
+              border-radius: 18px !important;
+            }
+          }
+        </style>
       </div>
-
-      <style>
-        .facturas-detail-modal {
-          scrollbar-width: thin;
-        }
-
-        @media (max-width: 900px) {
-          .facturas-detail-overlay {
-            padding: 14px !important;
-          }
-
-          .facturas-detail-modal {
-            width: 100% !important;
-            max-height: 94vh !important;
-            border-radius: 22px !important;
-          }
-        }
-
-        @media (max-width: 640px) {
-          .facturas-detail-overlay {
-            padding: 10px !important;
-          }
-
-          .facturas-detail-modal {
-            width: 100% !important;
-            max-height: 96vh !important;
-            border-radius: 18px !important;
-          }
-        }
-      </style>
     </div>
   `;
 }

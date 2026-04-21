@@ -1,26 +1,28 @@
 /* =========================================================
-   Onion SPA - Facturas Template (FINAL PRO TABLE GOD MODE)
+   Onion SPA - Facturas Table Template
    Archivo: src/views/facturas/facturas.template.js
 
+   FINAL PRODUCTION TEMPLATE · CLON 1:1 DE INCIDENCIAS · FACTURAS MODE
+
    RESPONSABILIDADES:
-   - renderizar header premium de la vista
-   - renderizar estados loading / error / empty
-   - renderizar tabla premium de facturas
-   - mantener compatibilidad directa con facturasView.js
-   - reflejar opening / refresh / sync igual que incidencias
-   - soportar estado visual por factura al abrir / descargar / ver / enviar
+   - render del hero/header de facturas
+   - render de tabla productiva con paginación real
+   - compatibilidad con facturasView.js
+   - estado loading visual en "Detalle"
+   - estado loading visual en "Descargar"
+   - estado loading visual en "Ver PDF"
+   - estado loading visual en "Enviar"
+   - evitar mostrar null en cliente
+   - quitar columna Estado
+   - quitar columna Actualización
+   - añadir columna Incidencia clicable para abrir incidencia relacionada
 ========================================================= */
 
-function escapeHtml(value = "") {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
+/* =========================================================
+   HELPERS
+========================================================= */
 
-function safeText(value, fallback = "—") {
+function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
   const text = String(value).trim();
   return text || fallback;
@@ -35,8 +37,10 @@ function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function safeLower(value, fallback = "") {
-  return safeText(value, fallback).toLowerCase();
+function safeObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
 }
 
 function first(...values) {
@@ -53,21 +57,42 @@ function first(...values) {
   return null;
 }
 
-function formatMoney(value, currency = "EUR") {
-  const amount = safeNumber(value, 0);
-  const code = safeText(currency, "EUR") || "EUR";
+function escapeHtml(value = "") {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function normalizeWhitespace(value = "") {
+  return safeText(value, "").replace(/\s+/g, " ").trim();
+}
+
+function safeLower(value, fallback = "") {
+  return safeText(value, fallback).toLowerCase();
+}
+
+function formatMoney(value = 0, currency = "EUR") {
+  const amount = Number(value);
+
+  if (!Number.isFinite(amount)) {
+    return "—";
+  }
 
   try {
     return new Intl.NumberFormat("es-ES", {
       style: "currency",
-      currency: code,
+      currency: safeText(currency, "EUR"),
+      maximumFractionDigits: 2,
     }).format(amount);
   } catch {
-    return `${amount.toFixed(2)} ${code}`;
+    return `${amount.toFixed(2)} ${safeText(currency, "EUR")}`;
   }
 }
 
-function formatDate(value) {
+function formatDateTime(value = null) {
   if (!value) return "—";
 
   const date = new Date(value);
@@ -75,1409 +100,597 @@ function formatDate(value) {
 
   try {
     return new Intl.DateTimeFormat("es-ES", {
-      year: "numeric",
-      month: "2-digit",
       day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
     }).format(date);
   } catch {
     return "—";
   }
 }
 
-function formatRelativeDate(value) {
+function formatDate(value = null) {
+  if (!value) return "—";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+
+  try {
+    return new Intl.DateTimeFormat("es-ES", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }).format(date);
+  } catch {
+    return "—";
+  }
+}
+
+function formatRelativeDate(value = null) {
   if (!value) return "Sin fecha";
 
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Sin fecha";
 
-  const now = new Date();
-  const diffMs = date.getTime() - now.getTime();
-  const diffMinutes = Math.round(diffMs / 60000);
-  const absMinutes = Math.abs(diffMinutes);
+  const diffMs = date.getTime() - Date.now();
+  const diffMin = Math.round(diffMs / 60000);
+  const absMin = Math.abs(diffMin);
 
-  if (absMinutes < 1) return "Ahora mismo";
+  if (absMin < 1) return "Ahora mismo";
 
-  if (absMinutes < 60) {
-    return diffMinutes > 0
-      ? `En ${absMinutes} min`
-      : `Hace ${absMinutes} min`;
+  if (absMin < 60) {
+    return diffMin > 0 ? `En ${absMin} min` : `Hace ${absMin} min`;
   }
 
-  const diffHours = Math.round(diffMinutes / 60);
-  const absHours = Math.abs(diffHours);
-
-  if (absHours < 24) {
-    return diffHours > 0
-      ? `En ${absHours} h`
-      : `Hace ${absHours} h`;
+  const diffHours = Math.round(absMin / 60);
+  if (diffHours < 24) {
+    return diffMin > 0 ? `En ${diffHours} h` : `Hace ${diffHours} h`;
   }
 
   const diffDays = Math.round(diffHours / 24);
-  const absDays = Math.abs(diffDays);
-
-  if (absDays < 7) {
-    return diffDays > 0
-      ? `En ${absDays} día${absDays === 1 ? "" : "s"}`
-      : `Hace ${absDays} día${absDays === 1 ? "" : "s"}`;
+  if (diffDays <= 7) {
+    return diffMin > 0
+      ? `En ${diffDays} día${diffDays === 1 ? "" : "s"}`
+      : `Hace ${diffDays} día${diffDays === 1 ? "" : "s"}`;
   }
 
-  return formatDate(value);
+  return formatDateTime(value);
+}
+
+function getFacturaId(item = {}) {
+  return safeText(
+    first(
+      item.id,
+      item._id,
+      item.facturaId,
+      item.numero,
+      item?.raw?.id,
+      item?.raw?._id,
+      item?.raw?.facturaId,
+      item?.raw?.numero
+    ),
+    "FAC-SIN-ID"
+  );
+}
+
+function getFacturaNumero(item = {}) {
+  return safeText(
+    first(
+      item.numero,
+      item.invoiceNumber,
+      item.code,
+      item.facturaId,
+      item.id,
+      item?.raw?.numero,
+      item?.raw?.invoiceNumber,
+      item?.raw?.code,
+      item?.raw?.facturaId,
+      item?.raw?.id
+    ),
+    "Factura sin número"
+  );
+}
+
+function getClientName(item = {}) {
+  return safeText(
+    first(
+      item.clienteNombre,
+      item.cliente?.nombre,
+      item.clientName,
+      item.client?.name,
+      item.name,
+      item.nombre,
+      item.clienteEmpresa,
+      item.cliente?.empresa,
+      item.company,
+      item?.raw?.clienteNombre,
+      item?.raw?.cliente?.nombre,
+      item?.raw?.clientName,
+      item?.raw?.client?.name,
+      item?.raw?.name,
+      item?.raw?.nombre,
+      item?.raw?.clienteEmpresa,
+      item?.raw?.cliente?.empresa
+    ),
+    "Cliente"
+  );
+}
+
+function getClientEmail(item = {}) {
+  return safeText(
+    first(
+      item.clienteEmail,
+      item.cliente?.email,
+      item.email,
+      item.clientEmail,
+      item.client?.email,
+      item?.raw?.clienteEmail,
+      item?.raw?.cliente?.email,
+      item?.raw?.email,
+      item?.raw?.clientEmail,
+      item?.raw?.client?.email
+    ),
+    "Sin email"
+  );
+}
+
+function getInitials(value = "") {
+  const text = normalizeWhitespace(value);
+  if (!text) return "ON";
+
+  const parts = text.split(" ").filter(Boolean);
+
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+
+  return `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase();
+}
+
+function getEstadoPagoKey(value = "") {
+  const key = safeText(value, "").toLowerCase();
+
+  if (["paid", "pagada", "pagado", "cobrada"].includes(key)) return "paid";
+  if (["pending", "pendiente"].includes(key)) return "pending";
+  if (["partial", "parcial"].includes(key)) return "partial";
+  if (["overdue", "vencida"].includes(key)) return "overdue";
+  if (["cancelled", "cancelada"].includes(key)) return "cancelled";
+  if (["draft", "borrador"].includes(key)) return "draft";
+
+  return "pending";
 }
 
 function getEstadoPagoLabel(value = "") {
-  const key = safeLower(value);
+  const key = getEstadoPagoKey(value);
 
-  switch (key) {
-    case "paid":
-    case "pagada":
-    case "pagado":
-    case "cobrada":
-      return "Pagada";
+  if (key === "paid") return "Pagada";
+  if (key === "pending") return "Pendiente";
+  if (key === "partial") return "Pago parcial";
+  if (key === "overdue") return "Vencida";
+  if (key === "cancelled") return "Cancelada";
+  if (key === "draft") return "Borrador";
 
-    case "pending":
-    case "pendiente":
-      return "Pendiente";
-
-    case "overdue":
-    case "vencida":
-      return "Vencida";
-
-    case "cancelled":
-    case "cancelada":
-      return "Cancelada";
-
-    case "draft":
-    case "borrador":
-      return "Borrador";
-
-    case "partial":
-    case "parcial":
-      return "Pago parcial";
-
-    default:
-      return safeText(value, "Pendiente");
-  }
+  return safeText(value, "Pendiente");
 }
 
-function getEstadoLabel(value = "") {
-  const key = safeLower(value);
+function getEstadoPagoChipClass(value = "") {
+  const key = getEstadoPagoKey(value);
 
-  switch (key) {
-    case "emitida":
-    case "issued":
-      return "Emitida";
+  if (key === "paid") return "facturas-chip--paid";
+  if (key === "pending") return "facturas-chip--pending";
+  if (key === "partial") return "facturas-chip--partial";
+  if (key === "overdue") return "facturas-chip--overdue";
+  if (key === "cancelled") return "facturas-chip--cancelled";
+  if (key === "draft") return "facturas-chip--draft";
 
-    case "enviada":
-    case "sent":
-      return "Enviada";
-
-    case "anulada":
-    case "void":
-      return "Anulada";
-
-    case "borrador":
-    case "draft":
-      return "Borrador";
-
-    case "cancelada":
-    case "cancelled":
-      return "Cancelada";
-
-    case "abonada":
-    case "paid":
-      return "Abonada";
-
-    default:
-      return safeText(value, "Emitida");
-  }
+  return "facturas-chip--pending";
 }
 
-function getEstadoPagoChipStyle(value = "") {
-  const key = safeLower(value);
-
-  if (["paid", "pagada", "pagado", "cobrada"].includes(key)) {
-    return `
-      color:var(--success-strong, #36c690);
-      background:color-mix(in srgb, var(--success-strong, #36c690) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--success-strong, #36c690) 26%, transparent);
-    `;
-  }
-
-  if (["pending", "pendiente", "partial", "parcial"].includes(key)) {
-    return `
-      color:var(--warning-strong, #ffbc42);
-      background:color-mix(in srgb, var(--warning-strong, #ffbc42) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--warning-strong, #ffbc42) 26%, transparent);
-    `;
-  }
-
-  if (["overdue", "vencida"].includes(key)) {
-    return `
-      color:var(--danger-strong, #ff6b6b);
-      background:color-mix(in srgb, var(--danger-strong, #ff6b6b) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, transparent);
-    `;
-  }
-
-  if (["cancelled", "cancelada"].includes(key)) {
-    return `
-      color:var(--text-dim);
-      background:var(--surface-glass);
-      border:1px solid var(--border-soft);
-    `;
-  }
-
-  return `
-    color:var(--text-soft);
-    background:var(--surface-glass);
-    border:1px solid var(--border-soft);
-  `;
+function getIncidenciaId(item = {}) {
+  return safeText(
+    first(
+      item.ticketId,
+      item.incidenciaId,
+      item.incidencia?.id,
+      item.incidencia?.ticketId,
+      item.ticket?.id,
+      item.ticket?.ticketId,
+      item.relatedTicketId,
+      item.relatedIncidentId,
+      item.supportTicketId,
+      item.caseId,
+      item?.raw?.ticketId,
+      item?.raw?.incidenciaId,
+      item?.raw?.incidencia?.id,
+      item?.raw?.incidencia?.ticketId,
+      item?.raw?.ticket?.id,
+      item?.raw?.ticket?.ticketId,
+      item?.raw?.relatedTicketId,
+      item?.raw?.relatedIncidentId,
+      item?.raw?.supportTicketId,
+      item?.raw?.caseId
+    ),
+    "—"
+  );
 }
 
-function getEstadoChipStyle(value = "") {
-  const key = safeLower(value);
-
-  if (["emitida", "issued"].includes(key)) {
-    return `
-      color:var(--accent-strong, var(--accent, #7c5cff));
-      background:color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 26%, transparent);
-    `;
-  }
-
-  if (["enviada", "sent"].includes(key)) {
-    return `
-      color:var(--success-strong, #36c690);
-      background:color-mix(in srgb, var(--success-strong, #36c690) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--success-strong, #36c690) 26%, transparent);
-    `;
-  }
-
-  if (["anulada", "void", "cancelada", "cancelled"].includes(key)) {
-    return `
-      color:var(--danger-strong, #ff6b6b);
-      background:color-mix(in srgb, var(--danger-strong, #ff6b6b) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, transparent);
-    `;
-  }
-
-  if (["borrador", "draft"].includes(key)) {
-    return `
-      color:var(--warning-strong, #ffbc42);
-      background:color-mix(in srgb, var(--warning-strong, #ffbc42) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--warning-strong, #ffbc42) 26%, transparent);
-    `;
-  }
-
-  if (["abonada", "paid"].includes(key)) {
-    return `
-      color:var(--success-strong, #36c690);
-      background:color-mix(in srgb, var(--success-strong, #36c690) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--success-strong, #36c690) 26%, transparent);
-    `;
-  }
-
-  return `
-    color:var(--text-soft);
-    background:var(--surface-glass);
-    border:1px solid var(--border-soft);
-  `;
+function getTotalLabel(item = {}) {
+  return formatMoney(
+    first(
+      item.total,
+      item.amount,
+      item.importe,
+      item?.raw?.total,
+      item?.raw?.amount,
+      item?.raw?.importe,
+      0
+    ),
+    first(
+      item.moneda,
+      item.currency,
+      item?.raw?.moneda,
+      item?.raw?.currency,
+      "EUR"
+    )
+  );
 }
 
-function renderStatCard({
-  label = "",
-  value = "0",
-  caption = "",
-  accent = false,
-} = {}) {
-  return `
-    <article
-      class="facturas-stat-card panel-surface"
-      style="
-        position:relative;
-        overflow:hidden;
-        display:grid;
-        gap:10px;
-        min-height:132px;
-        padding:20px;
-        border-radius:var(--panel-radius);
-        border:1px solid ${
-          accent
-            ? "color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft))"
-            : "var(--border-soft)"
-        };
-        background:${
-          accent
-            ? "linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 72%), var(--surface-1, var(--surface-glass))"
-            : "var(--surface-1, var(--surface-glass))"
-        };
-        box-shadow:var(--shadow-sm);
-      "
-    >
-      <span
-        style="
-          font-size:12px;
-          line-height:1;
-          letter-spacing:.08em;
-          text-transform:uppercase;
-          color:var(--text-dim);
-          font-weight:var(--weight-bold);
-        "
-      >
-        ${escapeHtml(label)}
-      </span>
+function getFormaPago(item = {}) {
+  return safeText(
+    first(
+      item.formaPago,
+      item.metodoPago,
+      item.paymentMethod,
+      item?.raw?.formaPago,
+      item?.raw?.metodoPago,
+      item?.raw?.paymentMethod
+    ),
+    "—"
+  );
+}
 
-      <strong
-        style="
-          font-size:clamp(24px, 3vw, 34px);
-          line-height:1;
-          letter-spacing:-.04em;
-          color:var(--text-strong);
-          font-weight:var(--weight-black);
-        "
-      >
-        ${escapeHtml(value)}
-      </strong>
+function getCreatedAt(item = {}) {
+  return first(
+    item.fecha,
+    item.createdAt,
+    item.fechaCreacion,
+    item.issueDate,
+    item?.raw?.fecha,
+    item?.raw?.createdAt,
+    item?.raw?.fechaCreacion,
+    item?.raw?.issueDate
+  );
+}
 
-      <p
-        style="
-          margin:0;
-          color:var(--text-dim);
-          font-size:var(--font-sm);
-          line-height:1.45;
-        "
-      >
-        ${escapeHtml(caption)}
-      </p>
-    </article>
-  `;
+function getUpdatedAt(item = {}) {
+  return first(
+    item.updatedAt,
+    item.fechaEnvio,
+    item.fechaActualizacion,
+    item.lastUpdateAt,
+    item?.raw?.updatedAt,
+    item?.raw?.fechaEnvio,
+    item?.raw?.fechaActualizacion,
+    item?.raw?.lastUpdateAt,
+    item?.raw?.createdAt
+  );
+}
+
+function hasPdf(item = {}) {
+  return Boolean(
+    first(
+      item.pdfAvailable,
+      item.blobPath,
+      item.pdfUrl,
+      item.pdf,
+      item?.raw?.pdfAvailable,
+      item?.raw?.blobPath,
+      item?.raw?.pdfUrl,
+      item?.raw?.pdf
+    )
+  );
 }
 
 function computeStats(items = []) {
-  const list = safeArray(items);
-
-  const totalFacturas = list.length;
-  const totalImporte = list.reduce(
-    (acc, item) => acc + safeNumber(item?.total, 0),
-    0
-  );
-
-  const paidCount = list.filter((item) => {
-    const estado = safeLower(item?.estadoPago);
-    return ["paid", "pagada", "pagado", "cobrada"].includes(estado);
-  }).length;
-
-  const pendingCount = list.filter((item) => {
-    const estado = safeLower(item?.estadoPago);
-    return ["pending", "pendiente", "partial", "parcial"].includes(estado);
-  }).length;
-
-  const overdueCount = list.filter((item) => {
-    const estado = safeLower(item?.estadoPago);
-    return ["overdue", "vencida"].includes(estado);
-  }).length;
+  const rows = safeArray(items);
 
   return {
-    totalFacturas,
-    totalImporte,
-    paidCount,
-    pendingCount,
-    overdueCount,
+    total: rows.length,
+    pendingCount: rows.filter((item) =>
+      ["pending", "partial", "draft"].includes(
+        getEstadoPagoKey(first(item.estadoPago, item?.raw?.estadoPago))
+      )
+    ).length,
+    paidCount: rows.filter((item) =>
+      ["paid"].includes(
+        getEstadoPagoKey(first(item.estadoPago, item?.raw?.estadoPago))
+      )
+    ).length,
+    overdueCount: rows.filter((item) =>
+      ["overdue"].includes(
+        getEstadoPagoKey(first(item.estadoPago, item?.raw?.estadoPago))
+      )
+    ).length,
+    totalImporte: rows.reduce(
+      (acc, item) =>
+        acc +
+        safeNumber(
+          first(
+            item.total,
+            item.amount,
+            item.importe,
+            item?.raw?.total,
+            item?.raw?.amount,
+            item?.raw?.importe,
+            0
+          ),
+          0
+        ),
+      0
+    ),
   };
 }
 
-function getClientInitials(item = {}) {
-  const raw =
-    item?.cliente?.initials ||
-    item?.clienteEmpresa ||
-    item?.clienteNombre ||
-    item?.cliente?.empresa ||
-    item?.cliente?.nombre ||
-    "ON";
+function getPagination(items = [], state = {}) {
+  const allItems = safeArray(items);
+  const runtime = safeObject(state);
 
-  const clean = String(raw).trim();
+  const pageSize = Math.max(
+    1,
+    safeNumber(first(runtime.pageSize, runtime.limit, 10), 10)
+  );
 
-  if (!clean) return "ON";
+  const reportedTotal = Math.max(
+    allItems.length,
+    safeNumber(
+      first(
+        runtime.totalCount,
+        runtime.remoteCount,
+        runtime.total,
+        allItems.length
+      ),
+      allItems.length
+    )
+  );
 
-  const parts = clean.split(/\s+/).filter(Boolean);
-  const initials = parts.slice(0, 2).map((part) => part[0]).join("");
+  const totalPages = Math.max(
+    1,
+    Math.ceil((reportedTotal || 1) / pageSize)
+  );
 
-  return (initials || clean.slice(0, 2) || "ON").toUpperCase();
+  const currentPage = Math.min(
+    Math.max(1, safeNumber(first(runtime.page, runtime.currentPage, 1), 1)),
+    totalPages
+  );
+
+  const startIndex = (currentPage - 1) * pageSize;
+  const pageItems = allItems.slice(startIndex, startIndex + pageSize);
+
+  const rangeStart = reportedTotal ? startIndex + 1 : 0;
+  const rangeEnd = reportedTotal
+    ? Math.min(startIndex + pageItems.length, reportedTotal)
+    : 0;
+
+  return {
+    allItems,
+    pageItems,
+    pageSize,
+    currentPage,
+    totalPages,
+    totalCount: reportedTotal,
+    rangeStart,
+    rangeEnd,
+  };
 }
 
-function renderStatusChip(label = "", style = "") {
+/* =========================================================
+   UI PARTIALS
+========================================================= */
+
+function renderSpinner(label = "") {
   return `
-    <span
-      style="
-        display:inline-flex;
-        align-items:center;
-        justify-content:center;
-        min-height:30px;
-        padding:0 10px;
-        border-radius:999px;
-        font-size:12px;
-        font-weight:var(--weight-bold);
-        letter-spacing:.05em;
-        text-transform:uppercase;
-        white-space:nowrap;
-        ${style}
-      "
+    <span class="facturas-inline-loading">
+      <span class="facturas-inline-spinner" aria-hidden="true"></span>
+      <span>${escapeHtml(label)}</span>
+    </span>
+  `;
+}
+
+function renderAvatar(item = {}) {
+  const fullName = getClientName(item);
+  const initials = getInitials(fullName);
+
+  return `
+    <div
+      class="facturas-avatar facturas-avatar--fallback"
+      title="${escapeHtml(fullName)}"
+      aria-label="${escapeHtml(fullName)}"
     >
+      <span class="facturas-avatar-fallback">${escapeHtml(initials)}</span>
+    </div>
+  `;
+}
+
+function renderEstadoPagoChip(item = {}) {
+  const rawStatus = first(
+    item.estadoPago,
+    item.paymentStatus,
+    item?.raw?.estadoPago,
+    item?.raw?.paymentStatus
+  );
+
+  const label = getEstadoPagoLabel(rawStatus);
+  const klass = getEstadoPagoChipClass(rawStatus);
+
+  return `
+    <span class="facturas-chip ${klass}">
       ${escapeHtml(label)}
     </span>
   `;
 }
 
-function renderInlineSpinner(label = "") {
+function renderPdfChip(item = {}) {
+  if (hasPdf(item)) {
+    return `<span class="facturas-pdf-badge facturas-pdf-badge--ok">PDF</span>`;
+  }
+
+  return `<span class="facturas-pdf-badge facturas-pdf-badge--off">Sin PDF</span>`;
+}
+
+function renderIncidenciaLink(item = {}) {
+  const incidenciaId = getIncidenciaId(item);
+
+  if (!incidenciaId || incidenciaId === "—") {
+    return `<span class="facturas-incidencia-empty">—</span>`;
+  }
+
   return `
-    <span style="display:inline-flex; align-items:center; gap:8px;">
-      <span
-        aria-hidden="true"
-        style="
-          width:14px;
-          height:14px;
-          border-radius:999px;
-          border:2px solid color-mix(in srgb, currentColor 22%, transparent);
-          border-top-color:currentColor;
-          animation:facturasSpin .8s linear infinite;
-        "
-      ></span>
-      ${escapeHtml(label)}
-    </span>
+    <button
+      type="button"
+      class="facturas-incidencia-link"
+      data-action="open-incidencia"
+      data-ticket-id="${escapeHtml(incidenciaId)}"
+      data-incidencia-id="${escapeHtml(incidenciaId)}"
+      title="Abrir incidencia relacionada"
+    >
+      ${escapeHtml(incidenciaId)}
+    </button>
   `;
 }
 
 function resolveBusyMeta(item = {}, state = {}) {
-  const facturaId = safeText(
-    first(item?.id, item?._id, item?.facturaId),
-    ""
-  );
+  const runtime = safeObject(state);
+  const facturaId = getFacturaId(item);
 
-  const openingFacturaId = safeText(state?.openingFacturaId, "");
-  const viewingFacturaId = safeText(state?.viewingFacturaId, "");
-  const downloadingFacturaId = safeText(state?.downloadingFacturaId, "");
-  const sendingFacturaId = safeText(state?.sendingFacturaId, "");
+  const openingFacturaId = safeText(runtime.openingFacturaId, "");
+  const viewingFacturaId = safeText(runtime.viewingFacturaId, "");
+  const downloadingFacturaId = safeText(runtime.downloadingFacturaId, "");
+  const sendingFacturaId = safeText(runtime.sendingFacturaId, "");
 
   return {
     facturaId,
-    isOpening: Boolean(facturaId && openingFacturaId === facturaId),
-    isViewingPdf: Boolean(facturaId && viewingFacturaId === facturaId),
-    isDownloading: Boolean(facturaId && downloadingFacturaId === facturaId),
-    isSending: Boolean(facturaId && sendingFacturaId === facturaId),
+    isOpening: openingFacturaId === facturaId,
+    isViewingPdf: viewingFacturaId === facturaId,
+    isDownloading: downloadingFacturaId === facturaId,
+    isSending: sendingFacturaId === facturaId,
   };
 }
 
-export function renderHeader({ items = [], state = {} } = {}) {
-  const stats = computeStats(items);
-  const loading = Boolean(state?.loading);
-  const refreshing = Boolean(state?.refreshing);
-  const remoteCount = safeNumber(state?.remoteCount, safeArray(items).length);
-  const lastSyncText = state?.lastSyncAt
-    ? formatRelativeDate(state.lastSyncAt)
-    : "Sin sincronización reciente";
-
-  return `
-    <section
-      class="facturas-hero"
-      style="
-        position:relative;
-        overflow:hidden;
-        border-radius:calc(var(--panel-radius) + 6px);
-        border:1px solid var(--border-soft);
-        background:
-          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent), transparent 34%),
-          linear-gradient(180deg, var(--surface-2, var(--surface-glass)), var(--surface-1, var(--surface-glass)));
-        box-shadow:var(--shadow-md);
-      "
-    >
-      <div
-        style="
-          display:grid;
-          gap:var(--space-lg);
-          padding:clamp(20px, 3vw, 30px);
-        "
-      >
-        <div
-          style="
-            display:flex;
-            align-items:flex-start;
-            justify-content:space-between;
-            gap:18px;
-            flex-wrap:wrap;
-          "
-        >
-          <div style="display:grid; gap:10px; min-width:min(100%, 560px);">
-            <span
-              style="
-                display:inline-flex;
-                align-items:center;
-                width:max-content;
-                min-height:28px;
-                padding:0 12px;
-                border-radius:999px;
-                border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft));
-                background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-                color:var(--text-soft);
-                font-size:12px;
-                font-weight:var(--weight-bold);
-                letter-spacing:.06em;
-                text-transform:uppercase;
-              "
-            >
-              Facturación
-            </span>
-
-            <div style="display:grid; gap:8px;">
-              <h1
-                class="page-title"
-                style="
-                  margin:0;
-                  font-size:clamp(30px, 5vw, 48px);
-                  line-height:.98;
-                  letter-spacing:-.05em;
-                  color:var(--text-strong);
-                "
-              >
-                Centro de control de facturas
-              </h1>
-
-              <p
-                class="page-subtitle"
-                style="
-                  margin:0;
-                  max-width:860px;
-                  color:var(--text-dim);
-                  font-size:clamp(14px, 2vw, 16px);
-                  line-height:1.6;
-                "
-              >
-                Gestiona emisión, seguimiento, consulta y descarga de documentos fiscales
-                desde una tabla premium con lectura rápida, contexto financiero y acciones directas.
-              </p>
-            </div>
-          </div>
-
-          <div
-            style="
-              display:flex;
-              gap:10px;
-              flex-wrap:wrap;
-              align-items:center;
-            "
-          >
-            <button
-              id="facturas-export-btn"
-              type="button"
-              style="
-                min-height:42px;
-                padding:0 14px;
-                border-radius:var(--btn-radius);
-                border:1px solid var(--btn-secondary-border, var(--border-soft));
-                background:var(--btn-secondary-bg, var(--surface-glass));
-                color:var(--btn-secondary-text, var(--text-soft));
-                font-weight:var(--weight-bold);
-                cursor:pointer;
-              "
-            >
-              Exportar CSV
-            </button>
-
-            <button
-              id="facturas-refresh-btn"
-              type="button"
-              ${loading || refreshing ? "disabled" : ""}
-              style="
-                min-height:42px;
-                padding:0 14px;
-                border-radius:var(--btn-radius);
-                border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
-                background:var(--btn-primary-bg, var(--accent, #7c5cff));
-                color:var(--btn-primary-text, #fff);
-                font-weight:var(--weight-bold);
-                cursor:${loading || refreshing ? "not-allowed" : "pointer"};
-                opacity:${loading || refreshing ? ".72" : "1"};
-              "
-            >
-              ${
-                refreshing
-                  ? renderInlineSpinner("Actualizando...")
-                  : "Actualizar"
-              }
-            </button>
-          </div>
-        </div>
-
-        <div
-          class="facturas-hero-meta"
-          style="
-            display:flex;
-            align-items:center;
-            gap:10px;
-            flex-wrap:wrap;
-          "
-        >
-          <span
-            style="
-              display:inline-flex;
-              align-items:center;
-              min-height:30px;
-              padding:0 10px;
-              border-radius:999px;
-              border:1px solid var(--border-soft);
-              background:var(--surface-glass);
-              color:var(--text-dim);
-              font-size:12px;
-              font-weight:var(--weight-bold);
-              letter-spacing:.04em;
-              text-transform:uppercase;
-            "
-          >
-            ${escapeHtml(String(remoteCount))} registros remotos
-          </span>
-
-          <span
-            style="
-              display:inline-flex;
-              align-items:center;
-              min-height:30px;
-              padding:0 10px;
-              border-radius:999px;
-              border:1px solid var(--border-soft);
-              background:var(--surface-glass);
-              color:var(--text-dim);
-              font-size:12px;
-              font-weight:var(--weight-bold);
-              letter-spacing:.04em;
-              text-transform:uppercase;
-            "
-          >
-            Última sync · ${escapeHtml(lastSyncText)}
-          </span>
-
-          ${
-            refreshing || loading
-              ? `
-                <span
-                  style="
-                    display:inline-flex;
-                    align-items:center;
-                    gap:8px;
-                    min-height:30px;
-                    padding:0 10px;
-                    border-radius:999px;
-                    border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft));
-                    background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-                    color:var(--text-soft);
-                    font-size:12px;
-                    font-weight:var(--weight-bold);
-                    letter-spacing:.04em;
-                    text-transform:uppercase;
-                  "
-                >
-                  <span
-                    aria-hidden="true"
-                    style="
-                      width:10px;
-                      height:10px;
-                      border-radius:999px;
-                      background:var(--accent, #7c5cff);
-                      box-shadow:0 0 0 0 color-mix(in srgb, var(--accent, #7c5cff) 30%, transparent);
-                      animation:facturasPulse 1.35s ease-in-out infinite;
-                    "
-                  ></span>
-                  Sincronizando
-                </span>
-              `
-              : ""
-          }
-        </div>
-
-        <div
-          class="facturas-hero-stats"
-          style="
-            display:grid;
-            grid-template-columns:repeat(4, minmax(0, 1fr));
-            gap:var(--space-md);
-          "
-        >
-          ${renderStatCard({
-            label: "Facturas visibles",
-            value: String(stats.totalFacturas),
-            caption: `${remoteCount} registros totales cargados en la colección.`,
-            accent: true,
-          })}
-
-          ${renderStatCard({
-            label: "Importe agregado",
-            value: formatMoney(stats.totalImporte, "EUR"),
-            caption: "Suma de la colección actualmente visible.",
-          })}
-
-          ${renderStatCard({
-            label: "Pendientes",
-            value: String(stats.pendingCount),
-            caption: "Facturas con cobro pendiente o parcial.",
-          })}
-
-          ${renderStatCard({
-            label: "Vencidas / pagadas",
-            value: `${stats.overdueCount} / ${stats.paidCount}`,
-            caption: "Balance rápido entre deuda vencida y cobros cerrados.",
-          })}
-        </div>
-      </div>
-
-      <style>
-        @keyframes facturasPulse {
-          0% { transform:scale(.92); opacity:.75; }
-          50% { transform:scale(1.08); opacity:1; }
-          100% { transform:scale(.92); opacity:.75; }
-        }
-
-        @media (max-width: 1100px) {
-          .facturas-hero-stats {
-            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-          }
-        }
-
-        @media (max-width: 720px) {
-          .facturas-hero-stats {
-            grid-template-columns: 1fr !important;
-          }
-        }
-      </style>
-    </section>
-  `;
-}
-
-export function renderLoadingState() {
-  return `
-    <section
-      class="panel-surface facturas-table-shell"
-      style="
-        overflow:hidden;
-        border-radius:var(--panel-radius);
-        border:1px solid var(--border-soft);
-        background:var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-sm);
-      "
-    >
-      <div style="display:grid; gap:0; overflow:auto;">
-        <div style="min-width:1180px;">
-          <div
-            style="
-              display:grid;
-              grid-template-columns: 1.6fr .9fr .8fr .8fr .8fr 1fr 1.2fr;
-              gap:0;
-              border-bottom:1px solid var(--border-soft);
-              background:var(--surface-2, var(--surface-glass));
-            "
-          >
-            ${Array.from({ length: 7 })
-              .map(
-                () => `
-                  <div style="padding:16px 18px;">
-                    <div
-                      style="
-                        height:12px;
-                        width:70%;
-                        border-radius:999px;
-                        background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass));
-                        background-size:200% 100%;
-                        animation:facturasSkeleton 1.25s linear infinite;
-                      "
-                    ></div>
-                  </div>
-                `
-              )
-              .join("")}
-          </div>
-
-          ${Array.from({ length: 8 })
-            .map(
-              () => `
-                <div
-                  style="
-                    display:grid;
-                    grid-template-columns: 1.6fr .9fr .8fr .8fr .8fr 1fr 1.2fr;
-                    gap:0;
-                    border-bottom:1px solid var(--border-soft);
-                  "
-                >
-                  <div style="padding:18px;">
-                    <div style="display:flex; gap:12px; align-items:center;">
-                      <div
-                        style="
-                          width:42px;
-                          height:42px;
-                          border-radius:14px;
-                          background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass));
-                          background-size:200% 100%;
-                          animation:facturasSkeleton 1.25s linear infinite;
-                        "
-                      ></div>
-
-                      <div style="display:grid; gap:8px; flex:1;">
-                        <div style="height:14px; width:130px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:facturasSkeleton 1.25s linear infinite;"></div>
-                        <div style="height:12px; width:200px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:facturasSkeleton 1.25s linear infinite;"></div>
-                        <div style="height:12px; width:170px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:facturasSkeleton 1.25s linear infinite;"></div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div style="padding:18px;"><div style="height:34px; width:96px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:facturasSkeleton 1.25s linear infinite;"></div></div>
-                  <div style="padding:18px;"><div style="height:34px; width:92px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:facturasSkeleton 1.25s linear infinite;"></div></div>
-                  <div style="padding:18px;"><div style="height:14px; width:86px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:facturasSkeleton 1.25s linear infinite;"></div></div>
-                  <div style="padding:18px;"><div style="height:14px; width:116px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:facturasSkeleton 1.25s linear infinite;"></div></div>
-                  <div style="padding:18px;"><div style="height:14px; width:92px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:facturasSkeleton 1.25s linear infinite;"></div></div>
-
-                  <div style="padding:18px;">
-                    <div style="display:flex; gap:8px; justify-content:flex-end;">
-                      <div style="height:38px; width:82px; border-radius:12px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:facturasSkeleton 1.25s linear infinite;"></div>
-                      <div style="height:38px; width:82px; border-radius:12px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:facturasSkeleton 1.25s linear infinite;"></div>
-                      <div style="height:38px; width:96px; border-radius:12px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:facturasSkeleton 1.25s linear infinite;"></div>
-                    </div>
-                  </div>
-                </div>
-              `
-            )
-            .join("")}
-        </div>
-      </div>
-
-      <style>
-        @keyframes facturasSkeleton {
-          0% { background-position: 200% 0; }
-          100% { background-position: -200% 0; }
-        }
-      </style>
-    </section>
-  `;
-}
-
-export function renderErrorState(message = "No se pudo cargar la colección.") {
-  return `
-    <section
-      class="panel-surface facturas-error-state"
-      style="
-        display:grid;
-        gap:18px;
-        padding:28px;
-        border-radius:var(--panel-radius);
-        border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, var(--border-soft));
-        background:
-          linear-gradient(180deg, color-mix(in srgb, var(--danger-strong, #ff6b6b) 10%, transparent), transparent 72%),
-          var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-sm);
-      "
-    >
-      <div style="display:grid; gap:8px;">
-        <span
-          style="
-            display:inline-flex;
-            width:max-content;
-            min-height:28px;
-            align-items:center;
-            padding:0 12px;
-            border-radius:999px;
-            border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, transparent);
-            background:color-mix(in srgb, var(--danger-strong, #ff6b6b) 12%, transparent);
-            color:var(--danger-strong, #ff6b6b);
-            font-size:12px;
-            letter-spacing:.06em;
-            text-transform:uppercase;
-            font-weight:var(--weight-bold);
-          "
-        >
-          Error de carga
-        </span>
-
-        <h3
-          style="
-            margin:0;
-            font-size:clamp(24px, 3vw, 34px);
-            line-height:1.05;
-            color:var(--text-strong);
-            letter-spacing:-.04em;
-          "
-        >
-          No se pudo renderizar la vista de facturas
-        </h3>
-
-        <p
-          style="
-            margin:0;
-            color:var(--text-dim);
-            font-size:var(--font-base);
-            line-height:1.65;
-            max-width:780px;
-          "
-        >
-          ${escapeHtml(safeText(message, "Error desconocido al cargar la vista."))}
-        </p>
-      </div>
-
-      <div style="display:flex; gap:10px; flex-wrap:wrap;">
-        <button
-          id="facturas-retry-btn"
-          type="button"
-          style="
-            min-height:42px;
-            padding:0 14px;
-            border-radius:var(--btn-radius);
-            border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
-            background:var(--btn-primary-bg, var(--accent, #7c5cff));
-            color:var(--btn-primary-text, #fff);
-            font-weight:var(--weight-bold);
-            cursor:pointer;
-          "
-        >
-          Reintentar
-        </button>
-      </div>
-    </section>
-  `;
-}
-
-function renderEmptyState() {
-  return `
-    <section
-      class="panel-surface facturas-empty-state"
-      style="
-        display:grid;
-        gap:18px;
-        padding:28px;
-        border-radius:var(--panel-radius);
-        border:1px solid var(--border-soft);
-        background:var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-sm);
-      "
-    >
-      <div style="display:grid; gap:8px;">
-        <span
-          style="
-            display:inline-flex;
-            width:max-content;
-            min-height:28px;
-            align-items:center;
-            padding:0 12px;
-            border-radius:999px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-            color:var(--text-dim);
-            font-size:12px;
-            letter-spacing:.06em;
-            text-transform:uppercase;
-            font-weight:var(--weight-bold);
-          "
-        >
-          Sin resultados
-        </span>
-
-        <h3
-          style="
-            margin:0;
-            font-size:clamp(24px, 3vw, 34px);
-            line-height:1.05;
-            color:var(--text-strong);
-            letter-spacing:-.04em;
-          "
-        >
-          No hay facturas para mostrar
-        </h3>
-
-        <p
-          style="
-            margin:0;
-            color:var(--text-dim);
-            font-size:var(--font-base);
-            line-height:1.65;
-            max-width:760px;
-          "
-        >
-          Todavía no hay facturas disponibles en la colección actual.
-        </p>
-      </div>
-
-      <div style="display:flex; gap:10px; flex-wrap:wrap;">
-        <button
-          id="facturas-refresh-btn"
-          type="button"
-          style="
-            min-height:42px;
-            padding:0 14px;
-            border-radius:var(--btn-radius);
-            border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
-            background:var(--btn-primary-bg, var(--accent, #7c5cff));
-            color:var(--btn-primary-text, #fff);
-            font-weight:var(--weight-bold);
-            cursor:pointer;
-          "
-        >
-          Recargar
-        </button>
-      </div>
-    </section>
-  `;
-}
-
-function renderTableToolbar({
-  total = 0,
-  refreshing = false,
-} = {}) {
-  return `
-    <div
-      class="facturas-table-toolbar"
-      style="
-        display:flex;
-        align-items:center;
-        justify-content:space-between;
-        gap:14px;
-        padding:16px 18px;
-        border-bottom:1px solid var(--border-soft);
-        background:
-          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 6%, transparent), transparent),
-          var(--surface-1, var(--surface-glass));
-        flex-wrap:wrap;
-      "
-    >
-      <div style="display:grid; gap:4px;">
-        <strong
-          style="
-            color:var(--text-strong);
-            font-size:var(--font-base);
-            letter-spacing:-.02em;
-          "
-        >
-          Tabla de facturas
-        </strong>
-
-        <span
-          style="
-            color:var(--text-dim);
-            font-size:var(--font-sm);
-          "
-        >
-          ${escapeHtml(String(total))} registro${total === 1 ? "" : "s"} visible${total === 1 ? "" : "s"} en pantalla.
-        </span>
-      </div>
-
-      <div
-        style="
-          display:flex;
-          align-items:center;
-          gap:8px;
-          flex-wrap:wrap;
-        "
-      >
-        <span
-          style="
-            display:inline-flex;
-            align-items:center;
-            min-height:30px;
-            padding:0 10px;
-            border-radius:999px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-            color:var(--text-dim);
-            font-size:12px;
-            font-weight:var(--weight-bold);
-            letter-spacing:.04em;
-            text-transform:uppercase;
-          "
-        >
-          Vista tabla
-        </span>
-
-        ${
-          refreshing
-            ? `
-              <span
-                style="
-                  display:inline-flex;
-                  align-items:center;
-                  gap:8px;
-                  min-height:30px;
-                  padding:0 10px;
-                  border-radius:999px;
-                  border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 22%, var(--border-soft));
-                  background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-                  color:var(--text-soft);
-                  font-size:12px;
-                  font-weight:var(--weight-bold);
-                  letter-spacing:.04em;
-                  text-transform:uppercase;
-                "
-              >
-                <span
-                  aria-hidden="true"
-                  style="
-                    width:8px;
-                    height:8px;
-                    border-radius:999px;
-                    background:var(--accent, #7c5cff);
-                    animation:facturasPulse 1.25s ease-in-out infinite;
-                  "
-                ></span>
-                Actualizando
-              </span>
-            `
-            : ""
-        }
-      </div>
-    </div>
-  `;
-}
-
-function renderTableLoadingOverlay(message = "Actualizando facturas...") {
-  return `
-    <div
-      class="facturas-table-overlay"
-      aria-live="polite"
-      aria-busy="true"
-      style="
-        position:absolute;
-        inset:0;
-        display:grid;
-        place-items:center;
-        padding:18px;
-        background:color-mix(in srgb, var(--surface-1, #0f1115) 74%, transparent);
-        backdrop-filter:blur(4px);
-        z-index:4;
-      "
-    >
-      <div
-        style="
-          display:grid;
-          justify-items:center;
-          gap:12px;
-          min-width:min(100%, 240px);
-          padding:18px 20px;
-          border-radius:18px;
-          border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 22%, var(--border-soft));
-          background:linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent), transparent), var(--surface-1, var(--surface-glass));
-          box-shadow:0 20px 40px rgba(0,0,0,.22);
-        "
-      >
-        <span
-          aria-hidden="true"
-          style="
-            width:28px;
-            height:28px;
-            border-radius:999px;
-            border:3px solid color-mix(in srgb, var(--accent, #7c5cff) 16%, transparent);
-            border-top-color:var(--accent, #7c5cff);
-            animation:facturasSpin .8s linear infinite;
-          "
-        ></span>
-
-        <strong
-          style="
-            color:var(--text-strong);
-            font-size:14px;
-            letter-spacing:-.02em;
-          "
-        >
-          ${escapeHtml(message)}
-        </strong>
-
-        <span
-          style="
-            color:var(--text-dim);
-            font-size:12px;
-          "
-        >
-          Solo se está actualizando la colección principal
-        </span>
-      </div>
-    </div>
-  `;
-}
-
-function renderFacturaRow(item = {}, state = {}) {
+function renderRow(item = {}, state = {}) {
   const busy = resolveBusyMeta(item, state);
 
-  const facturaId = busy.facturaId;
-  const numero = safeText(item?.numero, "—");
-  const cliente = safeText(
-    first(item?.clienteEmpresa, item?.cliente?.empresa, item?.clienteNombre, item?.cliente?.nombre),
-    "Cliente"
-  );
-  const email = safeText(
-    first(item?.clienteEmail, item?.cliente?.email),
-    "Sin email"
-  );
-  const fecha = formatDate(item?.fecha);
-  const updatedAt = formatRelativeDate(first(item?.updatedAt, item?.fechaEnvio, item?.fecha));
-  const total = formatMoney(item?.total, item?.moneda || "EUR");
-  const formaPago = safeText(item?.formaPago, "—");
-  const estadoPago = getEstadoPagoLabel(item?.estadoPago);
-  const estado = getEstadoLabel(item?.estado);
-  const pdfAvailable = Boolean(item?.pdfAvailable || item?.blobPath || item?.pdfUrl);
-  const initials = getClientInitials(item);
+  const facturaId = getFacturaId(item);
+  const numero = getFacturaNumero(item);
+  const clientName = getClientName(item);
+  const clientEmail = getClientEmail(item);
+  const createdAt = formatDateTime(getCreatedAt(item));
+  const total = getTotalLabel(item);
+  const formaPago = getFormaPago(item);
+  const pdfAvailable = hasPdf(item);
 
   return `
-    <tr
-      class="facturas-row ${busy.isOpening ? "is-opening" : ""}"
-      data-factura-id="${escapeHtml(facturaId)}"
-      style="
-        transition:background .18s ease, transform .18s ease, opacity .18s ease;
-        opacity:${busy.isOpening ? ".72" : "1"};
-      "
-    >
-      <td style="padding:18px; border-bottom:1px solid var(--border-soft); vertical-align:middle;">
-        <div style="display:flex; gap:14px; align-items:center; min-width:280px;">
-          <div
-            aria-hidden="true"
-            style="
-              flex:0 0 44px;
-              width:44px;
-              height:44px;
-              border-radius:14px;
-              display:grid;
-              place-items:center;
-              background:
-                linear-gradient(135deg, color-mix(in srgb, var(--accent, #7c5cff) 22%, transparent), transparent),
-                var(--surface-glass);
-              border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft));
-              color:var(--text-strong);
-              font-weight:var(--weight-black);
-              letter-spacing:.03em;
-              box-shadow:var(--shadow-xs, 0 4px 14px rgba(0,0,0,.08));
-            "
-          >
-            ${escapeHtml(initials)}
-          </div>
+    <tr class="facturas-row" data-factura-id="${escapeHtml(facturaId)}">
+      <td class="facturas-cell facturas-cell--main">
+        <div class="facturas-main">
+          ${renderAvatar(item)}
 
-          <div style="display:grid; gap:5px; min-width:0;">
-            <button
-              type="button"
-              data-action="open-factura"
-              data-factura-id="${escapeHtml(facturaId)}"
-              ${busy.isOpening ? "disabled" : ""}
-              style="
-                margin:0;
-                padding:0;
-                border:none;
-                background:transparent;
-                text-align:left;
-                color:var(--text-strong);
-                font-size:var(--font-base);
-                font-weight:var(--weight-black);
-                letter-spacing:-.02em;
-                line-height:1.2;
-                cursor:${busy.isOpening ? "wait" : "pointer"};
-              "
-              title="Abrir detalle de factura"
-            >
-              ${escapeHtml(numero)}
-            </button>
-
-            <span
-              style="
-                color:var(--text-soft);
-                font-size:var(--font-sm);
-                font-weight:var(--weight-semibold);
-                line-height:1.35;
-                word-break:break-word;
-              "
-            >
-              ${escapeHtml(cliente)}
-            </span>
-
-            <span
-              style="
-                color:var(--text-dim);
-                font-size:12px;
-                line-height:1.35;
-                word-break:break-word;
-              "
-            >
-              ${escapeHtml(email)}
-            </span>
+          <div class="facturas-main-copy">
+            <div class="facturas-factura-id">${escapeHtml(numero)}</div>
+            <div class="facturas-factura-client">${escapeHtml(clientName)}</div>
+            <div class="facturas-factura-email">${escapeHtml(clientEmail)}</div>
           </div>
         </div>
       </td>
 
-      <td style="padding:18px; border-bottom:1px solid var(--border-soft); vertical-align:middle; white-space:nowrap;">
-        ${renderStatusChip(estadoPago, getEstadoPagoChipStyle(item?.estadoPago))}
+      <td class="facturas-cell facturas-cell--status">
+        ${renderEstadoPagoChip(item)}
       </td>
 
-      <td style="padding:18px; border-bottom:1px solid var(--border-soft); vertical-align:middle; white-space:nowrap;">
-        ${renderStatusChip(estado, getEstadoChipStyle(item?.estado))}
+      <td class="facturas-cell facturas-cell--date">
+        <span class="facturas-date-inline">${escapeHtml(createdAt)}</span>
       </td>
 
-      <td style="padding:18px; border-bottom:1px solid var(--border-soft); vertical-align:middle; white-space:nowrap;">
-        <div style="display:grid; gap:4px;">
-          <strong style="color:var(--text-strong); font-size:var(--font-sm); line-height:1.2;">
-            ${escapeHtml(fecha)}
-          </strong>
-          <span style="color:var(--text-dim); font-size:12px; line-height:1.2;">
-            Emisión
-          </span>
+      <td class="facturas-cell facturas-cell--amount">
+        <div class="facturas-total-stack">
+          <span class="facturas-total-value">${escapeHtml(total)}</span>
+          <span class="facturas-total-meta">${escapeHtml(formaPago)}</span>
         </div>
       </td>
 
-      <td style="padding:18px; border-bottom:1px solid var(--border-soft); vertical-align:middle; white-space:nowrap;">
-        <div style="display:grid; gap:4px;">
-          <strong style="color:var(--text-strong); font-size:var(--font-sm); line-height:1.2;">
-            ${escapeHtml(total)}
-          </strong>
-          <span style="color:var(--text-dim); font-size:12px; line-height:1.2;">
-            ${escapeHtml(formaPago)}
-          </span>
-        </div>
+      <td class="facturas-cell facturas-cell--incidencia">
+        ${renderIncidenciaLink(item)}
       </td>
 
-      <td style="padding:18px; border-bottom:1px solid var(--border-soft); vertical-align:middle; white-space:nowrap;">
-        <div style="display:grid; gap:6px;">
-          <span
-            style="
-              color:var(--text-soft);
-              font-size:var(--font-sm);
-              line-height:1.2;
-              font-weight:var(--weight-semibold);
-            "
-          >
-            ${escapeHtml(updatedAt)}
-          </span>
-
-          ${
-            pdfAvailable
-              ? `
-                <span
-                  style="
-                    display:inline-flex;
-                    align-items:center;
-                    width:max-content;
-                    min-height:24px;
-                    padding:0 8px;
-                    border-radius:999px;
-                    border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 20%, var(--border-soft));
-                    background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-                    color:var(--text-soft);
-                    font-size:11px;
-                    font-weight:var(--weight-bold);
-                    letter-spacing:.04em;
-                    text-transform:uppercase;
-                  "
-                >
-                  PDF
-                </span>
-              `
-              : `
-                <span
-                  style="
-                    display:inline-flex;
-                    align-items:center;
-                    width:max-content;
-                    min-height:24px;
-                    padding:0 8px;
-                    border-radius:999px;
-                    border:1px solid var(--border-soft);
-                    background:var(--surface-glass);
-                    color:var(--text-dim);
-                    font-size:11px;
-                    font-weight:var(--weight-bold);
-                    letter-spacing:.04em;
-                    text-transform:uppercase;
-                  "
-                >
-                  Sin PDF
-                </span>
-              `
-          }
-        </div>
+      <td class="facturas-cell facturas-cell--pdf">
+        ${renderPdfChip(item)}
       </td>
 
-      <td style="padding:18px; border-bottom:1px solid var(--border-soft); vertical-align:middle; text-align:right;">
-        <div style="display:flex; justify-content:flex-end; gap:8px; flex-wrap:wrap;">
+      <td class="facturas-cell facturas-cell--actions">
+        <div class="facturas-actions">
           <button
             type="button"
+            class="facturas-action-btn"
             data-action="open-factura"
             data-factura-id="${escapeHtml(facturaId)}"
-            ${busy.isOpening ? "disabled" : ""}
-            style="
-              min-height:38px;
-              min-width:96px;
-              padding:0 12px;
-              border-radius:12px;
-              border:1px solid var(--btn-secondary-border, var(--border-soft));
-              background:var(--btn-secondary-bg, var(--surface-glass));
-              color:var(--btn-secondary-text, var(--text-soft));
-              font-weight:var(--weight-bold);
-              cursor:${busy.isOpening ? "wait" : "pointer"};
-              opacity:${busy.isOpening ? ".88" : "1"};
-              white-space:nowrap;
-            "
+            ${busy.isOpening ? 'disabled aria-busy="true"' : ""}
           >
-            ${busy.isOpening ? renderInlineSpinner("Abriendo...") : "Detalle"}
+            ${
+              busy.isOpening
+                ? renderSpinner("Abriendo...")
+                : '<span class="facturas-btn-text">Detalle</span>'
+            }
           </button>
 
           <button
             type="button"
+            class="facturas-action-btn"
             data-action="view-factura-pdf"
             data-factura-id="${escapeHtml(facturaId)}"
-            ${pdfAvailable && !busy.isViewingPdf ? "" : "disabled"}
-            style="
-              min-height:38px;
-              min-width:96px;
-              padding:0 12px;
-              border-radius:12px;
-              border:1px solid var(--btn-secondary-border, var(--border-soft));
-              background:var(--btn-secondary-bg, var(--surface-glass));
-              color:var(--btn-secondary-text, var(--text-soft));
-              font-weight:var(--weight-bold);
-              cursor:${pdfAvailable && !busy.isViewingPdf ? "pointer" : "not-allowed"};
-              opacity:${pdfAvailable ? (busy.isViewingPdf ? ".78" : "1") : ".56"};
-              white-space:nowrap;
-            "
+            ${
+              pdfAvailable && !busy.isViewingPdf
+                ? ""
+                : 'disabled aria-disabled="true"'
+            }
           >
-            ${busy.isViewingPdf ? renderInlineSpinner("Abriendo...") : "Ver PDF"}
+            ${
+              busy.isViewingPdf
+                ? renderSpinner("Abriendo...")
+                : '<span class="facturas-btn-text">Ver PDF</span>'
+            }
           </button>
 
           <button
             type="button"
+            class="facturas-action-btn facturas-action-btn--primary"
             data-action="download-factura"
             data-factura-id="${escapeHtml(facturaId)}"
-            ${pdfAvailable && !busy.isDownloading ? "" : "disabled"}
-            style="
-              min-height:38px;
-              min-width:108px;
-              padding:0 12px;
-              border-radius:12px;
-              border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
-              background:var(--btn-primary-bg, var(--accent, #7c5cff));
-              color:var(--btn-primary-text, #fff);
-              font-weight:var(--weight-bold);
-              cursor:${pdfAvailable && !busy.isDownloading ? "pointer" : "not-allowed"};
-              opacity:${pdfAvailable ? (busy.isDownloading ? ".78" : "1") : ".56"};
-              white-space:nowrap;
-            "
+            ${
+              pdfAvailable && !busy.isDownloading
+                ? ""
+                : 'disabled aria-disabled="true"'
+            }
           >
-            ${busy.isDownloading ? renderInlineSpinner("Bajando...") : "Descargar"}
+            ${
+              busy.isDownloading
+                ? renderSpinner("Bajando...")
+                : '<span class="facturas-btn-text">Descargar</span>'
+            }
           </button>
 
           <button
             type="button"
+            class="facturas-action-btn facturas-action-btn--success"
             data-action="send-factura"
             data-factura-id="${escapeHtml(facturaId)}"
-            ${!busy.isSending ? "" : "disabled"}
-            style="
-              min-height:38px;
-              min-width:96px;
-              padding:0 12px;
-              border-radius:12px;
-              border:1px solid color-mix(in srgb, var(--success-strong, #36c690) 28%, transparent);
-              background:color-mix(in srgb, var(--success-strong, #36c690) 88%, transparent);
-              color:#fff;
-              font-weight:var(--weight-bold);
-              cursor:${busy.isSending ? "wait" : "pointer"};
-              opacity:${busy.isSending ? ".78" : "1"};
-              white-space:nowrap;
-            "
+            ${busy.isSending ? 'disabled aria-busy="true"' : ""}
           >
-            ${busy.isSending ? renderInlineSpinner("Enviando...") : "Enviar"}
+            ${
+              busy.isSending
+                ? renderSpinner("Enviando...")
+                : '<span class="facturas-btn-text">Enviar</span>'
+            }
           </button>
         </div>
       </td>
@@ -1485,479 +698,1071 @@ function renderFacturaRow(item = {}, state = {}) {
   `;
 }
 
-function renderMobileFacturaCard(item = {}, state = {}) {
-  const busy = resolveBusyMeta(item, state);
-
-  const facturaId = busy.facturaId;
-  const numero = safeText(item?.numero, "—");
-  const cliente = safeText(
-    first(item?.clienteEmpresa, item?.cliente?.empresa, item?.clienteNombre, item?.cliente?.nombre),
-    "Cliente"
-  );
-  const email = safeText(
-    first(item?.clienteEmail, item?.cliente?.email),
-    "Sin email"
-  );
-  const fecha = formatDate(item?.fecha);
-  const updatedAt = formatRelativeDate(first(item?.updatedAt, item?.fechaEnvio, item?.fecha));
-  const total = formatMoney(item?.total, item?.moneda || "EUR");
-  const formaPago = safeText(item?.formaPago, "—");
-  const estadoPago = getEstadoPagoLabel(item?.estadoPago);
-  const estado = getEstadoLabel(item?.estado);
-  const pdfAvailable = Boolean(item?.pdfAvailable || item?.blobPath || item?.pdfUrl);
-  const initials = getClientInitials(item);
-
+function renderEmptyState() {
   return `
-    <article
-      class="facturas-mobile-card panel-surface"
-      data-factura-id="${escapeHtml(facturaId)}"
-      style="
+    <div class="facturas-empty">
+      <h3 class="facturas-empty-title">No hay facturas para mostrar</h3>
+      <p class="facturas-empty-text">
+        Cuando haya documentos registrados aparecerán aquí.
+      </p>
+    </div>
+  `;
+}
+
+function renderTableLoading(rows = 5) {
+  return `
+    <div class="facturas-table-loading" aria-hidden="true">
+      ${Array.from({ length: rows })
+        .map(
+          () => `
+            <div class="facturas-table-loading-row">
+              <div class="facturas-skeleton facturas-skeleton--avatar"></div>
+              <div class="facturas-table-loading-copy">
+                <div class="facturas-skeleton facturas-skeleton--xs"></div>
+                <div class="facturas-skeleton facturas-skeleton--lg"></div>
+                <div class="facturas-skeleton facturas-skeleton--md"></div>
+              </div>
+              <div class="facturas-skeleton facturas-skeleton--pill"></div>
+              <div class="facturas-skeleton facturas-skeleton--date"></div>
+              <div class="facturas-skeleton facturas-skeleton--pill"></div>
+              <div class="facturas-skeleton facturas-skeleton--pill"></div>
+              <div class="facturas-skeleton facturas-skeleton--pill"></div>
+              <div class="facturas-skeleton facturas-skeleton--actions"></div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderStyles() {
+  return `
+    <style>
+      .facturas-view-root{
         display:grid;
-        gap:16px;
-        padding:18px;
-        border-radius:18px;
-        border:1px solid var(--border-soft);
-        background:var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-sm);
-        opacity:${busy.isOpening ? ".72" : "1"};
-      "
-    >
-      <div
-        style="
-          display:flex;
-          align-items:flex-start;
-          justify-content:space-between;
-          gap:12px;
-        "
-      >
-        <div style="display:flex; gap:12px; min-width:0; flex:1;">
-          <div
-            aria-hidden="true"
-            style="
-              flex:0 0 42px;
-              width:42px;
-              height:42px;
-              border-radius:14px;
-              display:grid;
-              place-items:center;
-              background:
-                linear-gradient(135deg, color-mix(in srgb, var(--accent, #7c5cff) 22%, transparent), transparent),
-                var(--surface-glass);
-              border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft));
-              color:var(--text-strong);
-              font-weight:var(--weight-black);
-            "
-          >
-            ${escapeHtml(initials)}
-          </div>
+        gap:18px;
+      }
 
-          <div style="display:grid; gap:5px; min-width:0;">
-            <button
-              type="button"
-              data-action="open-factura"
-              data-factura-id="${escapeHtml(facturaId)}"
-              ${busy.isOpening ? "disabled" : ""}
-              style="
-                margin:0;
-                padding:0;
-                border:none;
-                background:transparent;
-                text-align:left;
-                color:var(--text-strong);
-                font-size:var(--font-base);
-                font-weight:var(--weight-black);
-                letter-spacing:-.02em;
-                line-height:1.2;
-                cursor:${busy.isOpening ? "wait" : "pointer"};
-              "
-            >
-              ${escapeHtml(numero)}
-            </button>
-
-            <span
-              style="
-                color:var(--text-soft);
-                font-size:var(--font-sm);
-                font-weight:var(--weight-semibold);
-                line-height:1.35;
-                word-break:break-word;
-              "
-            >
-              ${escapeHtml(cliente)}
-            </span>
-
-            <span
-              style="
-                color:var(--text-dim);
-                font-size:12px;
-                line-height:1.35;
-                word-break:break-word;
-              "
-            >
-              ${escapeHtml(email)}
-            </span>
-          </div>
-        </div>
-
-        <div style="display:grid; gap:8px; justify-items:end;">
-          ${renderStatusChip(estadoPago, getEstadoPagoChipStyle(item?.estadoPago))}
-          ${renderStatusChip(estado, getEstadoChipStyle(item?.estado))}
-        </div>
-      </div>
-
-      <div
-        style="
-          display:grid;
-          grid-template-columns:repeat(2, minmax(0, 1fr));
-          gap:10px;
-        "
-      >
-        <div
-          style="
-            display:grid;
-            gap:4px;
-            padding:12px;
-            border-radius:14px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-          "
-        >
-          <span
-            style="
-              font-size:11px;
-              color:var(--text-faint);
-              font-weight:var(--weight-bold);
-              letter-spacing:.05em;
-              text-transform:uppercase;
-            "
-          >
-            Fecha
-          </span>
-          <strong style="color:var(--text-strong); font-size:var(--font-sm);">
-            ${escapeHtml(fecha)}
-          </strong>
-        </div>
-
-        <div
-          style="
-            display:grid;
-            gap:4px;
-            padding:12px;
-            border-radius:14px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-          "
-        >
-          <span
-            style="
-              font-size:11px;
-              color:var(--text-faint);
-              font-weight:var(--weight-bold);
-              letter-spacing:.05em;
-              text-transform:uppercase;
-            "
-          >
-            Total
-          </span>
-          <strong style="color:var(--text-strong); font-size:var(--font-sm);">
-            ${escapeHtml(total)}
-          </strong>
-        </div>
-
-        <div
-          style="
-            display:grid;
-            gap:4px;
-            padding:12px;
-            border-radius:14px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-          "
-        >
-          <span
-            style="
-              font-size:11px;
-              color:var(--text-faint);
-              font-weight:var(--weight-bold);
-              letter-spacing:.05em;
-              text-transform:uppercase;
-            "
-          >
-            Pago
-          </span>
-          <strong style="color:var(--text-strong); font-size:var(--font-sm);">
-            ${escapeHtml(formaPago)}
-          </strong>
-        </div>
-
-        <div
-          style="
-            display:grid;
-            gap:4px;
-            padding:12px;
-            border-radius:14px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-          "
-        >
-          <span
-            style="
-              font-size:11px;
-              color:var(--text-faint);
-              font-weight:var(--weight-bold);
-              letter-spacing:.05em;
-              text-transform:uppercase;
-            "
-          >
-            Actualizada
-          </span>
-          <strong style="color:var(--text-strong); font-size:var(--font-sm);">
-            ${escapeHtml(updatedAt)}
-          </strong>
-        </div>
-      </div>
-
-      <div
-        style="
-          display:flex;
-          gap:8px;
-          flex-wrap:wrap;
-          justify-content:flex-start;
-        "
-      >
-        <button
-          type="button"
-          data-action="open-factura"
-          data-factura-id="${escapeHtml(facturaId)}"
-          ${busy.isOpening ? "disabled" : ""}
-          style="
-            min-height:38px;
-            padding:0 12px;
-            border-radius:12px;
-            border:1px solid var(--btn-secondary-border, var(--border-soft));
-            background:var(--btn-secondary-bg, var(--surface-glass));
-            color:var(--btn-secondary-text, var(--text-soft));
-            font-weight:var(--weight-bold);
-            cursor:${busy.isOpening ? "wait" : "pointer"};
-            opacity:${busy.isOpening ? ".88" : "1"};
-          "
-        >
-          ${busy.isOpening ? renderInlineSpinner("Abriendo...") : "Detalle"}
-        </button>
-
-        <button
-          type="button"
-          data-action="view-factura-pdf"
-          data-factura-id="${escapeHtml(facturaId)}"
-          ${pdfAvailable && !busy.isViewingPdf ? "" : "disabled"}
-          style="
-            min-height:38px;
-            padding:0 12px;
-            border-radius:12px;
-            border:1px solid var(--btn-secondary-border, var(--border-soft));
-            background:var(--btn-secondary-bg, var(--surface-glass));
-            color:var(--btn-secondary-text, var(--text-soft));
-            font-weight:var(--weight-bold);
-            cursor:${pdfAvailable && !busy.isViewingPdf ? "pointer" : "not-allowed"};
-            opacity:${pdfAvailable ? (busy.isViewingPdf ? ".78" : "1") : ".56"};
-          "
-        >
-          ${busy.isViewingPdf ? renderInlineSpinner("Abriendo...") : "Ver PDF"}
-        </button>
-
-        <button
-          type="button"
-          data-action="download-factura"
-          data-factura-id="${escapeHtml(facturaId)}"
-          ${pdfAvailable && !busy.isDownloading ? "" : "disabled"}
-          style="
-            min-height:38px;
-            padding:0 12px;
-            border-radius:12px;
-            border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
-            background:var(--btn-primary-bg, var(--accent, #7c5cff));
-            color:var(--btn-primary-text, #fff);
-            font-weight:var(--weight-bold);
-            cursor:${pdfAvailable && !busy.isDownloading ? "pointer" : "not-allowed"};
-            opacity:${pdfAvailable ? (busy.isDownloading ? ".78" : "1") : ".56"};
-          "
-        >
-          ${busy.isDownloading ? renderInlineSpinner("Bajando...") : "Descargar"}
-        </button>
-
-        <button
-          type="button"
-          data-action="send-factura"
-          data-factura-id="${escapeHtml(facturaId)}"
-          ${!busy.isSending ? "" : "disabled"}
-          style="
-            min-height:38px;
-            padding:0 12px;
-            border-radius:12px;
-            border:1px solid color-mix(in srgb, var(--success-strong, #36c690) 28%, transparent);
-            background:color-mix(in srgb, var(--success-strong, #36c690) 88%, transparent);
-            color:#fff;
-            font-weight:var(--weight-bold);
-            cursor:${busy.isSending ? "wait" : "pointer"};
-            opacity:${busy.isSending ? ".78" : "1"};
-          "
-        >
-          ${busy.isSending ? renderInlineSpinner("Enviando...") : "Enviar"}
-        </button>
-      </div>
-    </article>
-  `;
-}
-
-function renderDesktopTable(items = [], state = {}) {
-  return `
-    <div
-      class="facturas-table-scroll"
-      style="
-        width:100%;
-        overflow:auto;
-      "
-    >
-      <table
-        class="facturas-table"
-        style="
-          width:100%;
-          min-width:1280px;
-          border-collapse:separate;
-          border-spacing:0;
-        "
-      >
-        <thead>
-          <tr style="background:var(--surface-2, var(--surface-glass));">
-            <th style="padding:16px 18px; text-align:left; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-dim); font-weight:var(--weight-bold); border-bottom:1px solid var(--border-soft); white-space:nowrap;">
-              Factura / cliente
-            </th>
-            <th style="padding:16px 18px; text-align:left; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-dim); font-weight:var(--weight-bold); border-bottom:1px solid var(--border-soft); white-space:nowrap;">
-              Pago
-            </th>
-            <th style="padding:16px 18px; text-align:left; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-dim); font-weight:var(--weight-bold); border-bottom:1px solid var(--border-soft); white-space:nowrap;">
-              Estado
-            </th>
-            <th style="padding:16px 18px; text-align:left; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-dim); font-weight:var(--weight-bold); border-bottom:1px solid var(--border-soft); white-space:nowrap;">
-              Fecha
-            </th>
-            <th style="padding:16px 18px; text-align:left; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-dim); font-weight:var(--weight-bold); border-bottom:1px solid var(--border-soft); white-space:nowrap;">
-              Total
-            </th>
-            <th style="padding:16px 18px; text-align:left; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-dim); font-weight:var(--weight-bold); border-bottom:1px solid var(--border-soft); white-space:nowrap;">
-              Actualización
-            </th>
-            <th style="padding:16px 18px; text-align:right; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-dim); font-weight:var(--weight-bold); border-bottom:1px solid var(--border-soft); white-space:nowrap;">
-              Acciones
-            </th>
-          </tr>
-        </thead>
-
-        <tbody>
-          ${safeArray(items).map((item) => renderFacturaRow(item, state)).join("")}
-        </tbody>
-      </table>
-    </div>
-  `;
-}
-
-function renderMobileCards(items = [], state = {}) {
-  return `
-    <div
-      class="facturas-mobile-list"
-      style="
-        display:none;
-        gap:14px;
-        padding:14px;
-      "
-    >
-      ${safeArray(items).map((item) => renderMobileFacturaCard(item, state)).join("")}
-    </div>
-  `;
-}
-
-export function renderCards({ items = [], state = {} } = {}) {
-  const list = safeArray(items);
-  const loading = Boolean(state?.loading);
-  const refreshing = Boolean(state?.refreshing);
-  const error = safeText(state?.error, "");
-
-  if (!loading && error && !list.length) {
-    return renderErrorState(error);
-  }
-
-  if (!list.length) {
-    return renderEmptyState();
-  }
-
-  return `
-    <section
-      class="facturas-table-wrap panel-surface"
-      style="
+      .facturas-hero{
         position:relative;
         overflow:hidden;
-        border-radius:var(--panel-radius);
-        border:1px solid var(--border-soft);
+        border-radius:24px;
+        border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 88%, transparent);
         background:
-          linear-gradient(180deg, color-mix(in srgb, var(--surface-2, transparent) 60%, transparent), transparent),
-          var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-sm);
-      "
-    >
-      ${renderTableToolbar({
-        total: list.length,
-        refreshing,
-      })}
+          linear-gradient(180deg, rgba(255,255,255,.58), rgba(255,255,255,.36)),
+          color-mix(in srgb, var(--panel-bg, #ffffff) 92%, transparent);
+        box-shadow:
+          0 10px 30px rgba(15,23,42,.04),
+          0 1px 0 rgba(255,255,255,.55) inset;
+        padding:22px 24px 22px;
+      }
 
-      <div class="facturas-desktop-table">
-        ${renderDesktopTable(list, state)}
+      .facturas-hero-top{
+        display:grid;
+        grid-template-columns:minmax(0, 1fr) auto;
+        gap:18px;
+        align-items:start;
+      }
+
+      .facturas-hero-copy{
+        min-width:0;
+        display:grid;
+        gap:10px;
+      }
+
+      .facturas-page-title{
+        margin:0;
+        max-width:100%;
+        font-size:clamp(26px, 2.6vw, 42px);
+        line-height:.98;
+        letter-spacing:-.05em;
+        font-weight:780;
+        color:var(--text-strong, #0f172a);
+        white-space:nowrap;
+      }
+
+      .facturas-page-subtitle{
+        margin:0;
+        max-width:860px;
+        font-size:15px;
+        line-height:1.58;
+        color:var(--text-dim, #6b7280);
+      }
+
+      .facturas-hero-actions{
+        display:flex;
+        align-items:flex-start;
+        justify-content:flex-end;
+        gap:10px;
+        flex-wrap:wrap;
+      }
+
+      .facturas-btn{
+        min-height:44px;
+        padding:0 16px;
+        border-radius:14px;
+        border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 92%, transparent);
+        background:rgba(255,255,255,.72);
+        color:var(--text-strong, #111827);
+        font-size:13px;
+        font-weight:680;
+        line-height:1;
+        cursor:pointer;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        text-decoration:none;
+        box-shadow:0 4px 14px rgba(15,23,42,.04);
+        transition:
+          transform .16s ease,
+          box-shadow .16s ease,
+          border-color .16s ease,
+          background .16s ease,
+          opacity .16s ease;
+      }
+
+      .facturas-btn:hover{
+        transform:translateY(-1px);
+        box-shadow:0 8px 18px rgba(15,23,42,.06);
+      }
+
+      .facturas-btn--primary{
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 16%, rgba(15,23,42,.06));
+        background:linear-gradient(
+          180deg,
+          color-mix(in srgb, var(--accent, #7c5cff) 86%, white 14%),
+          color-mix(in srgb, var(--accent, #7c5cff) 92%, black 8%)
+        );
+        color:#fff;
+        box-shadow:0 8px 20px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
+      }
+
+      .facturas-btn.is-loading,
+      .facturas-action-btn.is-loading{
+        cursor:wait;
+        opacity:.9;
+      }
+
+      .facturas-btn:disabled,
+      .facturas-action-btn:disabled{
+        pointer-events:none;
+      }
+
+      .facturas-hero-meta{
+        margin-top:14px;
+        display:flex;
+        align-items:center;
+        gap:8px;
+        flex-wrap:wrap;
+      }
+
+      .facturas-meta-pill{
+        min-height:30px;
+        padding:0 12px;
+        border-radius:999px;
+        border:1px solid rgba(15,23,42,.06);
+        background:rgba(255,255,255,.52);
+        color:#7a8392;
+        font-size:11px;
+        font-weight:760;
+        letter-spacing:.045em;
+        text-transform:uppercase;
+        display:inline-flex;
+        align-items:center;
+        white-space:nowrap;
+      }
+
+      .facturas-stats{
+        margin-top:16px;
+        display:grid;
+        grid-template-columns:repeat(4, minmax(0, 1fr));
+        gap:12px;
+      }
+
+      .facturas-stat-card{
+        display:grid;
+        gap:8px;
+        min-height:124px;
+        padding:16px 18px;
+        border-radius:20px;
+        border:1px solid rgba(15,23,42,.06);
+        background:
+          linear-gradient(180deg, rgba(255,255,255,.58), rgba(255,255,255,.22)),
+          rgba(255,255,255,.46);
+        box-shadow:0 6px 20px rgba(15,23,42,.03);
+      }
+
+      .facturas-stat-card--accent{
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 16%, rgba(15,23,42,.06));
+      }
+
+      .facturas-stat-card--success{
+        border-color:color-mix(in srgb, var(--success-strong, #36c690) 18%, rgba(15,23,42,.06));
+      }
+
+      .facturas-stat-card--warning{
+        border-color:color-mix(in srgb, var(--warning-strong, #ffbc42) 18%, rgba(15,23,42,.06));
+      }
+
+      .facturas-stat-card--danger{
+        border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 18%, rgba(15,23,42,.06));
+      }
+
+      .facturas-stat-label{
+        font-size:11px;
+        font-weight:760;
+        letter-spacing:.08em;
+        text-transform:uppercase;
+        color:#7b8494;
+      }
+
+      .facturas-stat-value{
+        font-size:42px;
+        line-height:.92;
+        letter-spacing:-.045em;
+        font-weight:780;
+        color:var(--text-strong, #111827);
+      }
+
+      .facturas-stat-text{
+        font-size:14px;
+        line-height:1.45;
+        color:var(--text-dim, #6b7280);
+      }
+
+      .facturas-history{
+        overflow:hidden;
+        border-radius:24px;
+        border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 88%, transparent);
+        background:
+          linear-gradient(180deg, rgba(255,255,255,.6), rgba(255,255,255,.4)),
+          color-mix(in srgb, var(--panel-bg, #ffffff) 94%, transparent);
+        box-shadow:
+          0 10px 30px rgba(15,23,42,.04),
+          0 1px 0 rgba(255,255,255,.5) inset;
+      }
+
+      .facturas-history-head{
+        display:grid;
+        grid-template-columns:minmax(0, 1fr) auto;
+        gap:14px;
+        align-items:start;
+        padding:14px 18px 12px;
+        border-bottom:1px solid rgba(15,23,42,.06);
+      }
+
+      .facturas-history-copy{
+        min-width:0;
+        display:grid;
+        gap:2px;
+      }
+
+      .facturas-history-title{
+        margin:0;
+        font-size:16px;
+        line-height:1.2;
+        font-weight:760;
+        color:var(--text-strong, #111827);
+      }
+
+      .facturas-history-subtitle{
+        margin:0;
+        font-size:12px;
+        line-height:1.4;
+        color:var(--text-dim, #7b8494);
+      }
+
+      .facturas-pagination{
+        display:flex;
+        gap:8px;
+        flex-wrap:wrap;
+      }
+
+      .facturas-pagination-btn{
+        min-height:38px;
+        padding:0 14px;
+        border-radius:13px;
+        border:1px solid rgba(15,23,42,.06);
+        background:rgba(255,255,255,.66);
+        color:#273142;
+        font-size:12px;
+        font-weight:680;
+        cursor:pointer;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        text-decoration:none;
+        transition:
+          background .16s ease,
+          border-color .16s ease,
+          opacity .16s ease;
+      }
+
+      .facturas-pagination-btn:hover{
+        background:rgba(255,255,255,.9);
+        border-color:rgba(15,23,42,.10);
+      }
+
+      .facturas-pagination-btn[disabled],
+      .facturas-pagination-btn[aria-disabled="true"]{
+        opacity:.48;
+        cursor:not-allowed;
+      }
+
+      .facturas-table-wrap{
+        position:relative;
+      }
+
+      .facturas-table-wrap.is-refreshing .facturas-table-shell{
+        opacity:.58;
+        filter:blur(.8px);
+        transition:opacity .18s ease, filter .18s ease;
+      }
+
+      .facturas-table-shell{
+        width:100%;
+        overflow-x:auto;
+        overflow-y:hidden;
+        transition:opacity .18s ease, filter .18s ease;
+      }
+
+      .facturas-table{
+        width:100%;
+        border-collapse:separate;
+        border-spacing:0;
+        min-width:1260px;
+      }
+
+      .facturas-table thead th{
+        padding:12px 18px;
+        text-align:left;
+        font-size:11px;
+        font-weight:760;
+        letter-spacing:.08em;
+        text-transform:uppercase;
+        color:#97a0af;
+        background:rgba(248,250,252,.62);
+        border-bottom:1px solid rgba(15,23,42,.06);
+        white-space:nowrap;
+      }
+
+      .facturas-table tbody td{
+        padding:14px 18px;
+        vertical-align:middle;
+        border-bottom:1px solid rgba(15,23,42,.055);
+      }
+
+      .facturas-table tbody tr:last-child td{
+        border-bottom:none;
+      }
+
+      .facturas-row{
+        transition:background .16s ease;
+      }
+
+      .facturas-row:hover{
+        background:rgba(124,92,255,.018);
+      }
+
+      .facturas-main{
+        display:grid;
+        grid-template-columns:44px minmax(0, 1fr);
+        gap:12px;
+        align-items:center;
+        min-width:0;
+      }
+
+      .facturas-avatar{
+        position:relative;
+        width:44px;
+        height:44px;
+        border-radius:999px;
+        overflow:hidden;
+        flex:0 0 44px;
+        background:linear-gradient(135deg, rgba(124,92,255,.12), rgba(139,92,246,.24));
+      }
+
+      .facturas-avatar-fallback{
+        position:absolute;
+        inset:0;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-size:18px;
+        font-weight:780;
+        color:#fff;
+        letter-spacing:-.03em;
+      }
+
+      .facturas-main-copy{
+        min-width:0;
+        display:grid;
+        gap:3px;
+      }
+
+      .facturas-factura-id{
+        font-size:12px;
+        line-height:1.15;
+        font-weight:760;
+        letter-spacing:.055em;
+        color:#667084;
+        text-transform:uppercase;
+      }
+
+      .facturas-factura-client{
+        font-size:15px;
+        line-height:1.14;
+        font-weight:760;
+        letter-spacing:-.025em;
+        color:var(--text-strong, #111827);
+        overflow:hidden;
+        text-overflow:ellipsis;
+        display:-webkit-box;
+        -webkit-line-clamp:2;
+        -webkit-box-orient:vertical;
+      }
+
+      .facturas-factura-email{
+        font-size:13px;
+        line-height:1.3;
+        color:#8a93a3;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+      }
+
+      .facturas-chip{
+        min-height:32px;
+        padding:0 12px;
+        border-radius:999px;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        font-size:11px;
+        font-weight:760;
+        letter-spacing:.045em;
+        text-transform:uppercase;
+        white-space:nowrap;
+        border:1px solid transparent;
+      }
+
+      .facturas-chip--pending,
+      .facturas-chip--partial,
+      .facturas-chip--draft{
+        color:#b7791f;
+        background:rgba(255,188,66,.11);
+        border-color:rgba(255,188,66,.22);
+      }
+
+      .facturas-chip--paid{
+        color:#258a59;
+        background:rgba(54,198,144,.10);
+        border-color:rgba(54,198,144,.22);
+      }
+
+      .facturas-chip--overdue,
+      .facturas-chip--cancelled{
+        color:#c24141;
+        background:rgba(255,107,107,.10);
+        border-color:rgba(255,107,107,.22);
+      }
+
+      .facturas-date-inline{
+        display:inline-block;
+        white-space:nowrap;
+        font-size:13px;
+        line-height:1.2;
+        font-weight:650;
+        font-variant-numeric:tabular-nums;
+        color:#344054;
+      }
+
+      .facturas-total-stack{
+        display:grid;
+        gap:3px;
+      }
+
+      .facturas-total-value{
+        font-size:14px;
+        line-height:1.2;
+        font-weight:760;
+        color:var(--text-strong, #111827);
+        white-space:nowrap;
+      }
+
+      .facturas-total-meta{
+        font-size:12px;
+        line-height:1.2;
+        color:#8a93a3;
+        white-space:nowrap;
+      }
+
+      .facturas-incidencia-link{
+        min-height:32px;
+        padding:0 12px;
+        border-radius:999px;
+        border:1px solid rgba(124,92,255,.18);
+        background:rgba(124,92,255,.08);
+        color:#6d53d7;
+        font-size:11px;
+        font-weight:760;
+        letter-spacing:.045em;
+        text-transform:uppercase;
+        cursor:pointer;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        white-space:nowrap;
+        transition:
+          transform .16s ease,
+          background .16s ease,
+          border-color .16s ease;
+      }
+
+      .facturas-incidencia-link:hover{
+        transform:translateY(-1px);
+        background:rgba(124,92,255,.12);
+        border-color:rgba(124,92,255,.24);
+      }
+
+      .facturas-incidencia-empty{
+        color:#98a2b3;
+        font-size:13px;
+        font-weight:650;
+      }
+
+      .facturas-pdf-badge{
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        min-height:30px;
+        padding:0 12px;
+        border-radius:999px;
+        font-size:11px;
+        font-weight:760;
+        white-space:nowrap;
+        border:1px solid transparent;
+      }
+
+      .facturas-pdf-badge--ok{
+        color:#6d53d7;
+        background:rgba(124,92,255,.09);
+        border-color:rgba(124,92,255,.18);
+      }
+
+      .facturas-pdf-badge--off{
+        color:#8590a3;
+        background:rgba(15,23,42,.025);
+        border-color:rgba(15,23,42,.05);
+      }
+
+      .facturas-cell--actions{
+        width:1%;
+        white-space:nowrap;
+      }
+
+      .facturas-actions{
+        display:flex;
+        align-items:center;
+        gap:8px;
+        flex-wrap:wrap;
+        justify-content:flex-end;
+      }
+
+      .facturas-action-btn{
+        width:auto;
+        min-width:0;
+        min-height:34px;
+        padding:0 12px;
+        border-radius:12px;
+        border:1px solid rgba(15,23,42,.07);
+        background:rgba(255,255,255,.68);
+        color:#1f2937;
+        font-size:13px;
+        font-weight:700;
+        line-height:1;
+        cursor:pointer;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        white-space:nowrap;
+        box-shadow:none;
+        transition:
+          border-color .16s ease,
+          background .16s ease,
+          transform .16s ease,
+          opacity .16s ease;
+      }
+
+      .facturas-action-btn:hover{
+        border-color:rgba(15,23,42,.11);
+        background:rgba(255,255,255,.9);
+        transform:translateY(-1px);
+      }
+
+      .facturas-action-btn--primary{
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 16%, rgba(15,23,42,.06));
+        background:linear-gradient(
+          180deg,
+          color-mix(in srgb, var(--accent, #7c5cff) 86%, white 14%),
+          color-mix(in srgb, var(--accent, #7c5cff) 92%, black 8%)
+        );
+        color:#fff;
+      }
+
+      .facturas-action-btn--success{
+        border-color:color-mix(in srgb, var(--success-strong, #36c690) 16%, rgba(15,23,42,.06));
+        background:linear-gradient(
+          180deg,
+          color-mix(in srgb, var(--success-strong, #36c690) 86%, white 14%),
+          color-mix(in srgb, var(--success-strong, #36c690) 92%, black 8%)
+        );
+        color:#fff;
+      }
+
+      .facturas-inline-loading{
+        display:inline-flex;
+        align-items:center;
+        gap:7px;
+        white-space:nowrap;
+      }
+
+      .facturas-inline-spinner{
+        width:13px;
+        height:13px;
+        border-radius:999px;
+        border:2px solid rgba(255,255,255,.30);
+        border-top-color:currentColor;
+        animation:facturasSpin .78s linear infinite;
+        flex:0 0 auto;
+      }
+
+      .facturas-btn:not(.facturas-btn--primary) .facturas-inline-spinner,
+      .facturas-action-btn:not(.facturas-action-btn--primary):not(.facturas-action-btn--success) .facturas-inline-spinner{
+        border-color:rgba(15,23,42,.16);
+        border-top-color:currentColor;
+      }
+
+      .facturas-table-loading{
+        padding:12px 18px 16px;
+        display:grid;
+        gap:12px;
+      }
+
+      .facturas-table-loading-row{
+        display:grid;
+        grid-template-columns:44px minmax(220px, 1.6fr) 120px 140px 120px 90px 90px 260px;
+        gap:12px;
+        align-items:center;
+      }
+
+      .facturas-table-loading-copy{
+        display:grid;
+        gap:7px;
+      }
+
+      .facturas-skeleton{
+        position:relative;
+        overflow:hidden;
+        border-radius:999px;
+        background:rgba(148,163,184,.14);
+      }
+
+      .facturas-skeleton::after{
+        content:"";
+        position:absolute;
+        inset:0;
+        transform:translateX(-100%);
+        background:linear-gradient(
+          90deg,
+          transparent,
+          rgba(255,255,255,.55),
+          transparent
+        );
+        animation:facturasSkeleton 1.2s ease-in-out infinite;
+      }
+
+      .facturas-skeleton--avatar{
+        width:44px;
+        height:44px;
+        border-radius:999px;
+      }
+
+      .facturas-skeleton--xs{
+        width:120px;
+        height:10px;
+      }
+
+      .facturas-skeleton--lg{
+        width:74%;
+        height:14px;
+      }
+
+      .facturas-skeleton--md{
+        width:56%;
+        height:12px;
+      }
+
+      .facturas-skeleton--pill{
+        width:86px;
+        height:30px;
+      }
+
+      .facturas-skeleton--date{
+        width:124px;
+        height:12px;
+      }
+
+      .facturas-skeleton--actions{
+        width:240px;
+        height:34px;
+      }
+
+      .facturas-empty{
+        display:grid;
+        justify-items:center;
+        gap:8px;
+        padding:44px 20px 48px;
+        text-align:center;
+      }
+
+      .facturas-empty-title{
+        margin:0;
+        font-size:18px;
+        font-weight:760;
+        color:var(--text-strong, #111827);
+      }
+
+      .facturas-empty-text{
+        margin:0;
+        font-size:13px;
+        line-height:1.55;
+        color:var(--text-dim, #6b7280);
+      }
+
+      @keyframes facturasSpin{
+        to{ transform:rotate(360deg); }
+      }
+
+      @keyframes facturasSkeleton{
+        to{ transform:translateX(100%); }
+      }
+
+      [data-theme="light"] .facturas-hero,
+      [data-theme="light"] .facturas-history{
+        background:
+          linear-gradient(180deg, rgba(255,255,255,.82), rgba(248,250,252,.74)),
+          rgba(255,255,255,.82);
+        box-shadow:
+          0 12px 28px rgba(15,23,42,.035),
+          0 0 0 1px rgba(255,255,255,.72) inset;
+      }
+
+      [data-theme="light"] .facturas-stat-card{
+        background:
+          linear-gradient(180deg, rgba(255,255,255,.78), rgba(255,255,255,.48)),
+          rgba(255,255,255,.56);
+      }
+
+      @media (max-width: 1240px){
+        .facturas-page-title{
+          font-size:clamp(24px, 2.4vw, 36px);
+        }
+      }
+
+      @media (max-width: 1180px){
+        .facturas-hero{
+          padding:20px;
+        }
+
+        .facturas-hero-top{
+          grid-template-columns:1fr;
+        }
+
+        .facturas-hero-actions{
+          justify-content:flex-start;
+        }
+
+        .facturas-page-title{
+          white-space:normal;
+        }
+
+        .facturas-stats{
+          grid-template-columns:repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 760px){
+        .facturas-view-root{
+          gap:16px;
+        }
+
+        .facturas-hero{
+          padding:18px 16px;
+          border-radius:20px;
+        }
+
+        .facturas-history{
+          border-radius:20px;
+        }
+
+        .facturas-history-head{
+          grid-template-columns:1fr;
+          padding:14px 14px 12px;
+        }
+
+        .facturas-pagination{
+          justify-content:flex-start;
+        }
+
+        .facturas-stats{
+          grid-template-columns:1fr;
+        }
+
+        .facturas-page-title{
+          font-size:clamp(24px, 8vw, 34px);
+          line-height:1;
+          white-space:normal;
+        }
+
+        .facturas-page-subtitle{
+          font-size:14px;
+        }
+      }
+    </style>
+  `;
+}
+
+/* =========================================================
+   HEADER
+========================================================= */
+
+export function renderHeader(input = {}) {
+  const data = safeObject(input);
+  const items = safeArray(
+    first(data.items, data.rows, data.facturas, data.invoices)
+  );
+  const state = safeObject(data.state);
+
+  const stats = computeStats(items);
+
+  const updatedAt = first(
+    state.lastSyncAt,
+    data.lastUpdatedAt,
+    data.updatedAt,
+    ...items.map((item) => getUpdatedAt(item))
+  );
+
+  const remoteCount = safeNumber(
+    first(state.remoteCount, state.totalCount, items.length),
+    items.length
+  );
+
+  const title = safeText(
+    first(data.title, "Centro de control de facturas"),
+    "Centro de control de facturas"
+  );
+
+  const subtitle = safeText(
+    first(
+      data.subtitle,
+      "Gestiona emisión, seguimiento, consulta y descarga de documentos fiscales desde una vista clara, premium y conectada con sus incidencias relacionadas."
+    ),
+    ""
+  );
+
+  const refreshing = Boolean(state.refreshing);
+
+  return `
+    ${renderStyles()}
+
+    <section class="facturas-hero">
+      <div class="facturas-hero-top">
+        <div class="facturas-hero-copy">
+          <h1 class="facturas-page-title">${escapeHtml(title)}</h1>
+          <p class="facturas-page-subtitle">${escapeHtml(subtitle)}</p>
+        </div>
+
+        <div class="facturas-hero-actions">
+          <button
+            type="button"
+            id="facturas-export-btn"
+            class="facturas-btn"
+          >
+            <span class="facturas-btn-text">Exportar CSV</span>
+          </button>
+
+          <button
+            type="button"
+            id="facturas-refresh-btn"
+            class="facturas-btn facturas-btn--primary${refreshing ? " is-loading" : ""}"
+            ${refreshing ? 'disabled aria-busy="true"' : ""}
+          >
+            ${
+              refreshing
+                ? renderSpinner("Actualizando...")
+                : '<span class="facturas-btn-text">Actualizar</span>'
+            }
+          </button>
+        </div>
       </div>
 
-      ${renderMobileCards(list, state)}
+      <div class="facturas-hero-meta">
+        <span class="facturas-meta-pill">
+          ${escapeHtml(`${remoteCount} registros remotos`)}
+        </span>
 
-      ${refreshing ? renderTableLoadingOverlay("Actualizando facturas...") : ""}
-
-      <style>
-        @keyframes facturasSpin {
-          to { transform: rotate(360deg); }
-        }
-
-        .facturas-table tbody tr:hover {
-          background: color-mix(in srgb, var(--accent, #7c5cff) 4%, transparent);
-        }
-
-        .facturas-table tbody tr:last-child td {
-          border-bottom: none;
-        }
-
-        .facturas-table tbody tr.is-opening:hover {
-          background: color-mix(in srgb, var(--warning-strong, #ffbc42) 5%, transparent);
-        }
-
-        .facturas-table-scroll::-webkit-scrollbar {
-          height: 10px;
-          width: 10px;
-        }
-
-        .facturas-table-scroll::-webkit-scrollbar-thumb {
-          background: color-mix(in srgb, var(--accent, #7c5cff) 20%, var(--border-soft));
-          border-radius: 999px;
-        }
-
-        .facturas-table-scroll::-webkit-scrollbar-track {
-          background: transparent;
-        }
-
-        @media (max-width: 980px) {
-          .facturas-desktop-table {
-            display: none !important;
+        <span class="facturas-meta-pill">
+          ${
+            updatedAt
+              ? escapeHtml(`Última actualización · ${formatRelativeDate(updatedAt)}`)
+              : "Sin actualizaciones recientes"
           }
+        </span>
+      </div>
 
-          .facturas-mobile-list {
-            display: grid !important;
-          }
-        }
-      </style>
+      <div class="facturas-stats">
+        <article class="facturas-stat-card facturas-stat-card--accent">
+          <div class="facturas-stat-label">Facturas visibles</div>
+          <div class="facturas-stat-value">${escapeHtml(String(stats.total))}</div>
+          <div class="facturas-stat-text">Documentos actualmente cargados en pantalla.</div>
+        </article>
+
+        <article class="facturas-stat-card facturas-stat-card--success">
+          <div class="facturas-stat-label">Importe agregado</div>
+          <div class="facturas-stat-value">${escapeHtml(formatMoney(stats.totalImporte, "EUR"))}</div>
+          <div class="facturas-stat-text">Suma de la colección actualmente visible.</div>
+        </article>
+
+        <article class="facturas-stat-card facturas-stat-card--warning">
+          <div class="facturas-stat-label">Pendientes</div>
+          <div class="facturas-stat-value">${escapeHtml(String(stats.pendingCount))}</div>
+          <div class="facturas-stat-text">Facturas con cobro pendiente, parcial o en borrador.</div>
+        </article>
+
+        <article class="facturas-stat-card facturas-stat-card--danger">
+          <div class="facturas-stat-label">Vencidas / pagadas</div>
+          <div class="facturas-stat-value">${escapeHtml(`${stats.overdueCount} / ${stats.paidCount}`)}</div>
+          <div class="facturas-stat-text">Balance rápido entre deuda vencida y cobros cerrados.</div>
+        </article>
+      </div>
     </section>
   `;
 }
+
+/* =========================================================
+   TABLE
+========================================================= */
+
+export function renderTable(input = {}) {
+  const data = safeObject(input);
+  const items = safeArray(
+    first(data.items, data.rows, data.facturas, data.invoices)
+  );
+  const state = safeObject(data.state);
+
+  const pagination = getPagination(items, state);
+  const loading = Boolean(state.loading);
+  const refreshing = Boolean(state.refreshing);
+
+  return `
+    <section class="facturas-history">
+      <div class="facturas-history-head">
+        <div class="facturas-history-copy">
+          <h2 class="facturas-history-title">Historial de facturas</h2>
+          <p class="facturas-history-subtitle">
+            ${escapeHtml(`Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · página ${pagination.currentPage} de ${pagination.totalPages}`)}
+          </p>
+        </div>
+
+        <div class="facturas-pagination">
+          <button
+            type="button"
+            class="facturas-pagination-btn"
+            data-action="prev-page"
+            ${pagination.currentPage <= 1 || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
+          >
+            Anterior
+          </button>
+
+          <button
+            type="button"
+            class="facturas-pagination-btn"
+            data-action="next-page"
+            ${pagination.currentPage >= pagination.totalPages || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
+          >
+            Siguiente
+          </button>
+        </div>
+      </div>
+
+      ${
+        loading && !pagination.pageItems.length
+          ? renderTableLoading(Math.max(3, safeNumber(first(state.pageSize, 10), 10)))
+          : `
+            <div class="facturas-table-wrap${refreshing ? " is-refreshing" : ""}">
+              ${
+                refreshing
+                  ? renderTableLoading(Math.min(4, Math.max(3, pagination.pageItems.length || 3)))
+                  : ""
+              }
+
+              ${
+                pagination.pageItems.length
+                  ? `
+                    <div class="facturas-table-shell">
+                      <table class="facturas-table" role="table" aria-label="Listado de facturas">
+                        <colgroup>
+                          <col style="width:34%;">
+                          <col style="width:12%;">
+                          <col style="width:14%;">
+                          <col style="width:12%;">
+                          <col style="width:10%;">
+                          <col style="width:8%;">
+                          <col style="width:10%;">
+                        </colgroup>
+
+                        <thead>
+                          <tr>
+                            <th>Factura / cliente</th>
+                            <th>Pago</th>
+                            <th>Fecha de emisión</th>
+                            <th>Total</th>
+                            <th>Incidencia</th>
+                            <th>PDF</th>
+                            <th>Acciones</th>
+                          </tr>
+                        </thead>
+
+                        <tbody>
+                          ${pagination.pageItems.map((item) => renderRow(item, state)).join("")}
+                        </tbody>
+                      </table>
+                    </div>
+                  `
+                  : renderEmptyState()
+              }
+            </div>
+          `
+      }
+    </section>
+  `;
+}
+
+/* =========================================================
+   FULL TEMPLATE
+========================================================= */
+
+export function renderFacturasTemplate(input = {}) {
+  const data = safeObject(input);
+
+  return `
+    <section class="facturas-view-root">
+      ${renderHeader(data)}
+      ${renderTable(data)}
+    </section>
+  `;
+}
+
+export default renderFacturasTemplate;

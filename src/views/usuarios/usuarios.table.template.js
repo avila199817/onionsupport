@@ -534,7 +534,7 @@ function getFallbackAvatarTheme(seed = "") {
     },
   ];
 
-  return themes[getStableHash(value) % themes.length];
+  return themes[getStableHash(seed) % themes.length];
 }
 
 function renderSpinner(label = "") {

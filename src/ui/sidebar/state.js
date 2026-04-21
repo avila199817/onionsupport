@@ -4,10 +4,10 @@
 
    PRO HARDENED VERSION
    FIX:
-   - no colapsar por undefined durante cambios de ruta
-   - fallback robusto a DOM / body / localStorage
-   - desktop estable
-   - mobile separado
+   - separación real desktop / mobile
+   - desktop no depende de sidebarOpen transitorio
+   - persistencia robusta
+   - sync visual estable
    - tooltips coherentes
 ========================================================= */
 
@@ -58,6 +58,24 @@ export function saveSidebarCollapsed(value) {
 /* =========================================================
    INTERNAL HELPERS
 ========================================================= */
+function setDesktopMemory(AppCore, open) {
+  if (AppCore?.state && typeof AppCore.state === "object") {
+    AppCore.state.sidebarDesktopOpen = Boolean(open);
+  }
+}
+
+function setMobileMemory(AppCore, open) {
+  if (AppCore?.state && typeof AppCore.state === "object") {
+    AppCore.state.sidebarOpen = Boolean(open);
+  }
+}
+
+function syncSharedState(AppCore, open) {
+  if (AppCore?.state && typeof AppCore.state === "object") {
+    AppCore.state.sidebarOpen = Boolean(open);
+  }
+}
+
 function resolveDomSidebarOpenState(AppCore) {
   const { sidebar, body } = getElements(AppCore);
 
@@ -85,14 +103,6 @@ function resolveDomSidebarOpenState(AppCore) {
     return false;
   }
 
-  if (
-    sidebar?.classList.contains("open") ||
-    sidebar?.classList.contains("is-open") ||
-    body?.classList.contains("sidebar-open")
-  ) {
-    return true;
-  }
-
   if (sidebar) {
     return true;
   }
@@ -100,15 +110,25 @@ function resolveDomSidebarOpenState(AppCore) {
   return null;
 }
 
-function persistResolvedState(AppCore, open) {
-  if (!AppCore?.state || typeof AppCore.state !== "object") return;
-  AppCore.state.sidebarOpen = Boolean(open);
+function getDesktopDesiredOpenState(AppCore) {
+  const desktopMemory = AppCore?.state?.sidebarDesktopOpen;
+
+  if (typeof desktopMemory === "boolean") {
+    return desktopMemory;
+  }
+
+  const fromDom = resolveDomSidebarOpenState(AppCore);
+  if (typeof fromDom === "boolean") {
+    setDesktopMemory(AppCore, fromDom);
+    return fromDom;
+  }
+
+  const fromStorage = !getSavedSidebarCollapsed();
+  setDesktopMemory(AppCore, fromStorage);
+  return fromStorage;
 }
 
-/* =========================================================
-   STATE HELPERS
-========================================================= */
-export function getDesiredSidebarOpenState(AppCore) {
+function getMobileDesiredOpenState(AppCore) {
   const explicit = AppCore?.state?.sidebarOpen;
 
   if (typeof explicit === "boolean") {
@@ -117,19 +137,25 @@ export function getDesiredSidebarOpenState(AppCore) {
 
   const fromDom = resolveDomSidebarOpenState(AppCore);
   if (typeof fromDom === "boolean") {
+    setMobileMemory(AppCore, fromDom);
     return fromDom;
   }
 
-  if (isMobileViewport()) {
-    return false;
-  }
+  return false;
+}
 
-  return !getSavedSidebarCollapsed();
+/* =========================================================
+   STATE HELPERS
+========================================================= */
+export function getDesiredSidebarOpenState(AppCore) {
+  return isMobileViewport()
+    ? getMobileDesiredOpenState(AppCore)
+    : getDesktopDesiredOpenState(AppCore);
 }
 
 export function isSidebarCollapsedDesktop(AppCore) {
   if (isMobileViewport()) return false;
-  return !getDesiredSidebarOpenState(AppCore);
+  return !getDesktopDesiredOpenState(AppCore);
 }
 
 /* =========================================================
@@ -229,9 +255,9 @@ export function syncSidebarState(AppCore, closeDropdown) {
   const mobile = isMobileViewport();
   const isOpen = getDesiredSidebarOpenState(AppCore);
 
-  persistResolvedState(AppCore, isOpen);
-
   if (mobile) {
+    setMobileMemory(AppCore, isOpen);
+
     sidebar.classList.toggle("open", isOpen);
     sidebar.classList.toggle("is-open", isOpen);
     sidebar.classList.remove("collapsed", "is-collapsed");
@@ -239,6 +265,9 @@ export function syncSidebarState(AppCore, closeDropdown) {
     body?.classList.toggle("sidebar-open", isOpen);
     body?.classList.remove("sidebar-collapsed");
   } else {
+    setDesktopMemory(AppCore, isOpen);
+    syncSharedState(AppCore, isOpen);
+
     sidebar.classList.toggle("collapsed", !isOpen);
     sidebar.classList.toggle("is-collapsed", !isOpen);
     sidebar.classList.remove("open", "is-open");
@@ -262,11 +291,11 @@ export function setSidebarOpen(AppCore, open, closeDropdown) {
   const nextOpen = Boolean(open);
   const mobile = isMobileViewport();
 
-  if (AppCore?.state && typeof AppCore.state === "object") {
-    AppCore.state.sidebarOpen = nextOpen;
-  }
-
-  if (!mobile) {
+  if (mobile) {
+    setMobileMemory(AppCore, nextOpen);
+  } else {
+    setDesktopMemory(AppCore, nextOpen);
+    syncSharedState(AppCore, nextOpen);
     saveSidebarCollapsed(!nextOpen);
   }
 

@@ -1,26 +1,20 @@
 /* =========================================================
-   Onion SPA - Usuarios Template (FINAL PRO TABLE GOD MODE)
+   Onion SPA - Usuarios Template
    Archivo: src/views/usuarios/usuarios.table.template.js
 
-   EXTREME MODE · BACKEND REAL DATA READY · 10/10
+   FINAL PRODUCTION TEMPLATE · USERS VIEW · 10/10
 
-   Responsabilidades:
-   - renderizar header premium de la vista
-   - renderizar estados loading / error / empty
-   - renderizar tabla premium de usuarios
-   - paginar a 5 usuarios por vista
-   - mostrar loader SOLO en la sección de tabla
-   - mostrar estado visual al abrir usuario lento
-   - mantener compatibilidad directa con usuariosView.js
-   - consumir datos reales del backend /api/users
-   - compartir lenguaje visual y densidad con Facturas
-
-   HARDENING PRO:
-   - tolerancia a payloads heterogéneos
+   RESPONSABILIDADES:
+   - render del hero/header de usuarios
+   - render de estados loading / error / empty
+   - render de tabla productiva con paginación real
+   - compatibilidad con usuariosView.js
+   - estado loading visual en "Ver detalle"
+   - estado loading visual en "Nuevo usuario"
+   - soporte para payloads backend heterogéneos
    - soporte para envelope backend { ok, count, users }
-   - lectura preferente del shape normalizado del backend
-   - mismo lenguaje visual que Facturas
-   - toolbar / skeleton / mobile cards consistentes
+   - lenguaje visual alineado con incidencias
+   - versión desktop + cards mobile
 ========================================================= */
 
 import { usuariosState } from "./usuarios.state.js";
@@ -38,12 +32,16 @@ import {
 } from "./usuarios.utils.js";
 
 /* =========================================================
-   SAFE
+   CONSTANTS
 ========================================================= */
 
 const PAGE_SIZE = 5;
 
-function safeText(value, fallback = "—") {
+/* =========================================================
+   SAFE HELPERS
+========================================================= */
+
+function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
   const text = String(value).trim();
   return text || fallback;
@@ -82,8 +80,12 @@ function first(...values) {
   return null;
 }
 
+function normalizeWhitespace(value = "") {
+  return safeText(value, "").replace(/\s+/g, " ").trim();
+}
+
 /* =========================================================
-   BACKEND ENVELOPE / REAL DATA RESOLVE
+   ENVELOPE / BACKEND RESOLVE
 ========================================================= */
 
 function looksLikeUsuariosEnvelope(value) {
@@ -137,214 +139,18 @@ function resolveRemoteCount(items, state = {}) {
 
   return safeNumber(
     first(
-      localState?.remoteCount,
-      localState?.count,
-      localState?.total,
-      safeObject(localState?.stats)?.total,
-      safeObject(localState?.response)?.count,
-      safeObject(localState?.payload)?.count,
-      safeObject(localState?.lastResponse)?.count,
-      safeObject(items)?.count
+      localState.remoteCount,
+      localState.count,
+      localState.totalCount,
+      localState.total,
+      safeObject(localState.stats)?.total,
+      safeObject(localState.response)?.count,
+      safeObject(localState.payload)?.count,
+      safeObject(localState.lastResponse)?.count
     ),
     safeArray(items).length
   );
 }
-
-/* =========================================================
-   LABELS
-========================================================= */
-
-function getStatusLabel(value = "") {
-  const key = String(value || "").trim().toLowerCase();
-
-  switch (key) {
-    case "active":
-    case "activo":
-    case "activa":
-    case "enabled":
-    case "habilitado":
-      return "Activo";
-
-    case "pending":
-    case "pendiente":
-    case "invited":
-    case "invitado":
-      return "Pendiente";
-
-    case "blocked":
-    case "bloqueado":
-    case "bloqueada":
-    case "suspended":
-    case "suspendido":
-      return "Bloqueado";
-
-    case "disabled":
-    case "inactive":
-    case "inactivo":
-    case "deshabilitado":
-      return "Inactivo";
-
-    default:
-      return safeText(value, "Activo");
-  }
-}
-
-function getRoleLabel(value = "") {
-  const key = String(value || "").trim().toLowerCase();
-
-  switch (key) {
-    case "superadmin":
-    case "super_admin":
-    case "root":
-      return "Superadmin";
-
-    case "admin":
-    case "administrator":
-    case "administrador":
-      return "Admin";
-
-    case "support":
-    case "soporte":
-    case "agent":
-    case "agente":
-      return "Soporte";
-
-    case "manager":
-    case "gestor":
-    case "gerente":
-      return "Manager";
-
-    case "user":
-    case "usuario":
-      return "Usuario";
-
-    default:
-      return safeText(value, "Usuario");
-  }
-}
-
-/* =========================================================
-   CHIPS
-========================================================= */
-
-function getStatusChipStyle(value = "") {
-  const key = String(value || "").trim().toLowerCase();
-
-  if (["active", "activo", "activa", "enabled", "habilitado"].includes(key)) {
-    return `
-      color:var(--success-strong, #36c690);
-      background:color-mix(in srgb, var(--success-strong, #36c690) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--success-strong, #36c690) 26%, transparent);
-    `;
-  }
-
-  if (["pending", "pendiente", "invited", "invitado"].includes(key)) {
-    return `
-      color:var(--warning-strong, #ffbc42);
-      background:color-mix(in srgb, var(--warning-strong, #ffbc42) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--warning-strong, #ffbc42) 26%, transparent);
-    `;
-  }
-
-  if (["blocked", "bloqueado", "bloqueada", "suspended", "suspendido"].includes(key)) {
-    return `
-      color:var(--danger-strong, #ff6b6b);
-      background:color-mix(in srgb, var(--danger-strong, #ff6b6b) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, transparent);
-    `;
-  }
-
-  if (["disabled", "inactive", "inactivo", "deshabilitado"].includes(key)) {
-    return `
-      color:var(--text-dim);
-      background:var(--surface-glass);
-      border:1px solid var(--border-soft);
-    `;
-  }
-
-  return `
-    color:var(--text-soft);
-    background:var(--surface-glass);
-    border:1px solid var(--border-soft);
-  `;
-}
-
-function getRoleChipStyle(value = "") {
-  const key = String(value || "").trim().toLowerCase();
-
-  if (["superadmin", "super_admin", "root"].includes(key)) {
-    return `
-      color:#b388ff;
-      background:color-mix(in srgb, #b388ff 14%, transparent);
-      border:1px solid color-mix(in srgb, #b388ff 26%, transparent);
-    `;
-  }
-
-  if (["admin", "administrator", "administrador"].includes(key)) {
-    return `
-      color:var(--danger-strong, #ff6b6b);
-      background:color-mix(in srgb, var(--danger-strong, #ff6b6b) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, transparent);
-    `;
-  }
-
-  if (["support", "soporte", "agent", "agente"].includes(key)) {
-    return `
-      color:#60a5fa;
-      background:color-mix(in srgb, #60a5fa 14%, transparent);
-      border:1px solid color-mix(in srgb, #60a5fa 26%, transparent);
-    `;
-  }
-
-  if (["manager", "gestor", "gerente"].includes(key)) {
-    return `
-      color:var(--warning-strong, #ffbc42);
-      background:color-mix(in srgb, var(--warning-strong, #ffbc42) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--warning-strong, #ffbc42) 26%, transparent);
-    `;
-  }
-
-  if (["user", "usuario"].includes(key)) {
-    return `
-      color:var(--text-soft);
-      background:var(--surface-glass);
-      border:1px solid var(--border-soft);
-    `;
-  }
-
-  return `
-    color:var(--text-soft);
-    background:var(--surface-glass);
-    border:1px solid var(--border-soft);
-  `;
-}
-
-function renderStatusChip(label = "", style = "") {
-  return `
-    <span
-      style="
-        display:inline-flex;
-        align-items:center;
-        justify-content:center;
-        min-height:30px;
-        padding:0 10px;
-        border-radius:999px;
-        font-size:12px;
-        font-weight:var(--weight-bold);
-        letter-spacing:.05em;
-        text-transform:uppercase;
-        white-space:nowrap;
-        ${style}
-      "
-    >
-      ${escapeHtml(label)}
-    </span>
-  `;
-}
-
-/* =========================================================
-   DATA RESOLVE
-========================================================= */
 
 function getResolvedItems(items) {
   const direct = safeArray(items);
@@ -365,6 +171,10 @@ function getResolvedItems(items) {
     return [];
   }
 }
+
+/* =========================================================
+   DOMAIN HELPERS
+========================================================= */
 
 function getUsuarioId(item = {}) {
   return safeText(
@@ -390,7 +200,7 @@ function getUsuarioCode(item = {}) {
       item.id,
       item.code
     ),
-    "—"
+    "USR-SIN-ID"
   );
 }
 
@@ -480,11 +290,21 @@ function getDepartment(item = {}) {
       item?.department?.name,
       item?.team?.name,
       item?.area?.name,
-      item?.department,
-      item?.team,
-      item?.area
+      item.department,
+      item.team,
+      item.area
     ),
     "Sin equipo"
+  );
+}
+
+function getCreatedAt(item = {}) {
+  return first(
+    item.createdAt,
+    item.created_at,
+    item.fechaCreacion,
+    item.registeredAt,
+    item.updatedAt
   );
 }
 
@@ -497,16 +317,6 @@ function getUpdatedAt(item = {}) {
     item.modifiedAt,
     item.createdAt,
     item.created_at
-  );
-}
-
-function getCreatedAt(item = {}) {
-  return first(
-    item.createdAt,
-    item.created_at,
-    item.fechaCreacion,
-    item.registeredAt,
-    item.updatedAt
   );
 }
 
@@ -533,17 +343,16 @@ function getUsuarioInitials(item = {}) {
     item?.userName ||
     "US";
 
-  const clean = String(raw).trim();
-
+  const clean = normalizeWhitespace(raw);
   if (!clean) return "US";
 
-  const parts = clean.split(/\s+/).filter(Boolean);
-  const initials = parts
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("");
+  const parts = clean.split(" ").filter(Boolean);
 
-  return (initials || clean.slice(0, 2) || "US").toUpperCase();
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+
+  return `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase();
 }
 
 function getUsuarioAvatarUrl(item = {}) {
@@ -553,14 +362,14 @@ function getUsuarioAvatarUrl(item = {}) {
       item?.usuario?.avatarUrl,
       item?.profile?.avatar,
       item?.profile?.avatarUrl,
-      item?.userAvatar,
-      item?.userAvatarUrl,
-      item?.avatar,
-      item?.avatarUrl,
-      item?.photo,
-      item?.photoUrl,
-      item?.image,
-      item?.imageUrl
+      item.userAvatar,
+      item.userAvatarUrl,
+      item.avatar,
+      item.avatarUrl,
+      item.photo,
+      item.photoUrl,
+      item.image,
+      item.imageUrl
     ),
     ""
   );
@@ -578,59 +387,102 @@ function getAvatarToneSeed(item = {}) {
   );
 }
 
-function getStableHash(value = "") {
-  const source = String(value || "onion");
-  let hash = 0;
+/* =========================================================
+   LABELS / STATUS
+========================================================= */
 
-  for (let i = 0; i < source.length; i += 1) {
-    hash = (hash << 5) - hash + source.charCodeAt(i);
-    hash |= 0;
+function getStatusKey(value = "") {
+  const key = safeLower(value);
+
+  if (["active", "activo", "activa", "enabled", "habilitado"].includes(key)) {
+    return "active";
   }
 
-  return Math.abs(hash);
+  if (["pending", "pendiente", "invited", "invitado"].includes(key)) {
+    return "pending";
+  }
+
+  if (["blocked", "bloqueado", "bloqueada", "suspended", "suspendido"].includes(key)) {
+    return "blocked";
+  }
+
+  if (["disabled", "inactive", "inactivo", "deshabilitado"].includes(key)) {
+    return "inactive";
+  }
+
+  return "active";
 }
 
-function getFallbackAvatarTheme(seed = "") {
-  const themes = [
-    {
-      bg: "linear-gradient(135deg, rgba(124,92,255,.28), rgba(88,72,200,.12))",
-      border: "rgba(124,92,255,.28)",
-      text: "#efeaff",
-      glow: "rgba(124,92,255,.22)",
-    },
-    {
-      bg: "linear-gradient(135deg, rgba(54,198,144,.28), rgba(35,131,95,.12))",
-      border: "rgba(54,198,144,.28)",
-      text: "#ddfff1",
-      glow: "rgba(54,198,144,.22)",
-    },
-    {
-      bg: "linear-gradient(135deg, rgba(96,165,250,.28), rgba(37,99,235,.12))",
-      border: "rgba(96,165,250,.28)",
-      text: "#e7f2ff",
-      glow: "rgba(96,165,250,.22)",
-    },
-    {
-      bg: "linear-gradient(135deg, rgba(255,188,66,.28), rgba(217,119,6,.12))",
-      border: "rgba(255,188,66,.28)",
-      text: "#fff4d8",
-      glow: "rgba(255,188,66,.22)",
-    },
-    {
-      bg: "linear-gradient(135deg, rgba(255,107,107,.28), rgba(190,24,93,.12))",
-      border: "rgba(255,107,107,.28)",
-      text: "#ffe4e4",
-      glow: "rgba(255,107,107,.22)",
-    },
-    {
-      bg: "linear-gradient(135deg, rgba(179,136,255,.28), rgba(109,40,217,.12))",
-      border: "rgba(179,136,255,.28)",
-      text: "#f3e8ff",
-      glow: "rgba(179,136,255,.22)",
-    },
-  ];
+function getStatusLabel(value = "") {
+  const key = getStatusKey(value);
 
-  return themes[getStableHash(seed) % themes.length];
+  if (key === "active") return "Activo";
+  if (key === "pending") return "Pendiente";
+  if (key === "blocked") return "Bloqueado";
+  if (key === "inactive") return "Inactivo";
+
+  return safeText(value, "Activo");
+}
+
+function getRoleKey(value = "") {
+  const key = safeLower(value);
+
+  if (["superadmin", "super_admin", "root"].includes(key)) return "superadmin";
+  if (["admin", "administrator", "administrador"].includes(key)) return "admin";
+  if (["support", "soporte", "agent", "agente"].includes(key)) return "support";
+  if (["manager", "gestor", "gerente"].includes(key)) return "manager";
+  return "user";
+}
+
+function getRoleLabel(value = "") {
+  const key = getRoleKey(value);
+
+  if (key === "superadmin") return "Superadmin";
+  if (key === "admin") return "Admin";
+  if (key === "support") return "Soporte";
+  if (key === "manager") return "Manager";
+  return "Usuario";
+}
+
+/* =========================================================
+   STATS
+========================================================= */
+
+function isActiveLike(item = {}) {
+  return getStatusKey(getUsuarioStatusValue(item)) === "active";
+}
+
+function isPendingLike(item = {}) {
+  return getStatusKey(getUsuarioStatusValue(item)) === "pending";
+}
+
+function isBlockedLike(item = {}) {
+  return ["blocked", "inactive"].includes(
+    getStatusKey(getUsuarioStatusValue(item))
+  );
+}
+
+function isAdminLike(item = {}) {
+  return ["superadmin", "admin"].includes(
+    getRoleKey(getUsuarioRoleValue(item))
+  );
+}
+
+function hasDepartment(item = {}) {
+  return getDepartment(item) !== "Sin equipo";
+}
+
+function computeStats(items = []) {
+  const list = safeArray(items);
+
+  return {
+    totalUsuarios: list.length,
+    activeCount: list.filter((item) => isActiveLike(item)).length,
+    pendingCount: list.filter((item) => isPendingLike(item)).length,
+    adminCount: list.filter((item) => isAdminLike(item)).length,
+    assignedCount: list.filter((item) => hasDepartment(item)).length,
+    blockedCount: list.filter((item) => isBlockedLike(item)).length,
+  };
 }
 
 /* =========================================================
@@ -667,48 +519,897 @@ function getPagination(items = [], state = {}) {
 }
 
 /* =========================================================
-   STATS
+   VISUAL HELPERS
 ========================================================= */
 
-function computeStats(items = []) {
-  const list = safeArray(items);
+function getStableHash(value = "") {
+  const source = String(value || "onion");
+  let hash = 0;
 
-  const totalUsuarios = list.length;
+  for (let i = 0; i < source.length; i += 1) {
+    hash = (hash << 5) - hash + source.charCodeAt(i);
+    hash |= 0;
+  }
 
-  const activeCount = list.filter((item) => {
-    const status = safeLower(getUsuarioStatusValue(item));
-    return ["active", "activo", "activa", "enabled", "habilitado"].includes(status);
-  }).length;
-
-  const pendingCount = list.filter((item) => {
-    const status = safeLower(getUsuarioStatusValue(item));
-    return ["pending", "pendiente", "invited", "invitado"].includes(status);
-  }).length;
-
-  const adminCount = list.filter((item) => {
-    const role = safeLower(getUsuarioRoleValue(item));
-    return ["admin", "administrator", "administrador", "superadmin", "super_admin", "root"].includes(role);
-  }).length;
-
-  const assignedCount = list.filter((item) => {
-    const department = getDepartment(item);
-    return department !== "Sin equipo";
-  }).length;
-
-  const blockedCount = list.filter((item) => {
-    const status = safeLower(getUsuarioStatusValue(item));
-    return ["blocked", "bloqueado", "bloqueada", "suspended", "suspendido", "disabled", "inactive", "inactivo", "deshabilitado"].includes(status);
-  }).length;
-
-  return {
-    totalUsuarios,
-    activeCount,
-    pendingCount,
-    adminCount,
-    assignedCount,
-    blockedCount,
-  };
+  return Math.abs(hash);
 }
+
+function getFallbackAvatarTheme(seed = "") {
+  const themes = [
+    {
+      bg: "linear-gradient(135deg, rgba(124,92,255,.22), rgba(88,72,200,.10))",
+      border: "rgba(124,92,255,.20)",
+      text: "#f3eeff",
+    },
+    {
+      bg: "linear-gradient(135deg, rgba(54,198,144,.22), rgba(35,131,95,.10))",
+      border: "rgba(54,198,144,.20)",
+      text: "#e7fff4",
+    },
+    {
+      bg: "linear-gradient(135deg, rgba(96,165,250,.22), rgba(37,99,235,.10))",
+      border: "rgba(96,165,250,.20)",
+      text: "#edf5ff",
+    },
+    {
+      bg: "linear-gradient(135deg, rgba(255,188,66,.22), rgba(217,119,6,.10))",
+      border: "rgba(255,188,66,.20)",
+      text: "#fff6df",
+    },
+    {
+      bg: "linear-gradient(135deg, rgba(255,107,107,.22), rgba(190,24,93,.10))",
+      border: "rgba(255,107,107,.20)",
+      text: "#fff0f0",
+    },
+    {
+      bg: "linear-gradient(135deg, rgba(179,136,255,.22), rgba(109,40,217,.10))",
+      border: "rgba(179,136,255,.20)",
+      text: "#f7efff",
+    },
+  ];
+
+  return themes[getStableHash(seed) % themes.length];
+}
+
+function getStatusChipClass(value = "") {
+  const key = getStatusKey(value);
+  return `usuarios-chip usuarios-chip--${key}`;
+}
+
+function getRoleChipClass(value = "") {
+  const key = getRoleKey(value);
+  return `usuarios-chip usuarios-chip--role usuarios-chip--role-${key}`;
+}
+
+function renderSpinner(label = "") {
+  return `
+    <span class="usuarios-inline-loading">
+      <span class="usuarios-inline-spinner" aria-hidden="true"></span>
+      <span>${escapeHtml(label)}</span>
+    </span>
+  `;
+}
+
+function renderAvatar(item = {}, { size = 48, radius = 16 } = {}) {
+  const initials = getUsuarioInitials(item);
+  const avatarUrl = getUsuarioAvatarUrl(item);
+  const theme = getFallbackAvatarTheme(getAvatarToneSeed(item));
+
+  if (avatarUrl) {
+    return `
+      <div
+        class="usuarios-avatar"
+        style="
+          --avatar-size:${size}px;
+          --avatar-radius:${radius}px;
+          --avatar-fallback-bg:${theme.bg};
+          --avatar-fallback-border:${theme.border};
+          --avatar-fallback-text:${theme.text};
+        "
+        title="${escapeHtml(getUsuarioName(item))}"
+        aria-label="${escapeHtml(getUsuarioName(item))}"
+      >
+        <img
+          src="${escapeHtml(avatarUrl)}"
+          alt="${escapeHtml(getUsuarioName(item))}"
+          loading="lazy"
+          referrerpolicy="no-referrer"
+          onerror="this.style.display='none'; this.parentNode.setAttribute('data-fallback','true');"
+        />
+        <span class="usuarios-avatar-fallback">${escapeHtml(initials)}</span>
+      </div>
+    `;
+  }
+
+  return `
+    <div
+      class="usuarios-avatar usuarios-avatar--fallback"
+      style="
+        --avatar-size:${size}px;
+        --avatar-radius:${radius}px;
+        --avatar-fallback-bg:${theme.bg};
+        --avatar-fallback-border:${theme.border};
+        --avatar-fallback-text:${theme.text};
+      "
+      title="${escapeHtml(getUsuarioName(item))}"
+      aria-label="${escapeHtml(getUsuarioName(item))}"
+    >
+      <span class="usuarios-avatar-fallback">${escapeHtml(initials)}</span>
+    </div>
+  `;
+}
+
+/* =========================================================
+   STYLES
+========================================================= */
+
+function renderStyles() {
+  return `
+    <style>
+      .usuarios-view-root{
+        display:grid;
+        gap:24px;
+      }
+
+      .usuarios-hero{
+        position:relative;
+        overflow:hidden;
+        border-radius:28px;
+        border:1px solid var(--panel-border, rgba(255,255,255,.08));
+        background:
+          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 34%),
+          linear-gradient(180deg, var(--panel-bg, rgba(255,255,255,.84)), var(--panel-bg, rgba(255,255,255,.84)));
+        box-shadow:var(--shadow-soft, 0 20px 50px rgba(0,0,0,.08));
+        padding:28px 32px 30px;
+      }
+
+      .usuarios-hero-top{
+        display:grid;
+        grid-template-columns:minmax(0, 1fr) auto;
+        gap:20px;
+        align-items:start;
+      }
+
+      .usuarios-hero-copy{
+        min-width:0;
+        display:grid;
+        gap:12px;
+      }
+
+      .usuarios-page-title{
+        margin:0;
+        max-width:100%;
+        font-size:clamp(32px, 4.2vw, 58px);
+        line-height:.95;
+        letter-spacing:-.055em;
+        font-weight:800;
+        color:var(--text-strong, #0f172a);
+        white-space:nowrap;
+      }
+
+      .usuarios-page-subtitle{
+        margin:0;
+        max-width:980px;
+        font-size:16px;
+        line-height:1.62;
+        color:var(--text-dim, #6b7280);
+      }
+
+      .usuarios-hero-actions{
+        display:flex;
+        align-items:flex-start;
+        justify-content:flex-end;
+        gap:12px;
+        flex-wrap:wrap;
+      }
+
+      .usuarios-btn{
+        min-height:50px;
+        padding:0 18px;
+        border-radius:16px;
+        border:1px solid var(--border-soft, rgba(15,23,42,.08));
+        background:var(--surface-1, rgba(255,255,255,.74));
+        color:var(--text-strong, #111827);
+        font-size:14px;
+        font-weight:700;
+        line-height:1;
+        cursor:pointer;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        text-decoration:none;
+        box-shadow:0 10px 24px rgba(15,23,42,.04);
+        transition:
+          transform .18s ease,
+          box-shadow .18s ease,
+          border-color .18s ease,
+          background .18s ease,
+          opacity .18s ease;
+      }
+
+      .usuarios-btn:hover{
+        transform:translateY(-1px);
+        box-shadow:0 16px 32px rgba(15,23,42,.08);
+      }
+
+      .usuarios-btn--primary{
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent);
+        background:var(--accent, #7c5cff);
+        color:#fff;
+        box-shadow:0 14px 30px color-mix(in srgb, var(--accent, #7c5cff) 22%, transparent);
+      }
+
+      .usuarios-btn.is-loading,
+      .usuarios-open-btn.is-loading{
+        cursor:wait;
+        opacity:.9;
+      }
+
+      .usuarios-hero-meta{
+        margin-top:18px;
+        display:flex;
+        align-items:center;
+        gap:10px;
+        flex-wrap:wrap;
+      }
+
+      .usuarios-meta-pill{
+        min-height:34px;
+        padding:0 14px;
+        border-radius:999px;
+        border:1px solid var(--border-soft, rgba(15,23,42,.08));
+        background:var(--surface-1, rgba(255,255,255,.72));
+        color:var(--text-dim, #6b7280);
+        font-size:12px;
+        font-weight:800;
+        letter-spacing:.05em;
+        text-transform:uppercase;
+        display:inline-flex;
+        align-items:center;
+        white-space:nowrap;
+      }
+
+      .usuarios-stats{
+        margin-top:22px;
+        display:grid;
+        grid-template-columns:repeat(4, minmax(0, 1fr));
+        gap:16px;
+      }
+
+      .usuarios-stat-card{
+        display:grid;
+        gap:10px;
+        min-height:150px;
+        padding:22px 22px 20px;
+        border-radius:24px;
+        border:1px solid var(--border-soft, rgba(15,23,42,.08));
+        background:
+          linear-gradient(180deg, rgba(255,255,255,.22), rgba(255,255,255,.08)),
+          var(--surface-1, rgba(255,255,255,.68));
+      }
+
+      .usuarios-stat-card--accent{
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 22%, var(--border-soft, rgba(15,23,42,.08)));
+      }
+
+      .usuarios-stat-label{
+        font-size:12px;
+        font-weight:800;
+        letter-spacing:.08em;
+        text-transform:uppercase;
+        color:var(--text-dim, #6b7280);
+      }
+
+      .usuarios-stat-value{
+        font-size:52px;
+        line-height:.9;
+        letter-spacing:-.05em;
+        font-weight:800;
+        color:var(--text-strong, #111827);
+      }
+
+      .usuarios-stat-text{
+        font-size:14px;
+        line-height:1.5;
+        color:var(--text-dim, #6b7280);
+      }
+
+      .usuarios-history{
+        overflow:hidden;
+        border-radius:28px;
+        border:1px solid var(--panel-border, rgba(255,255,255,.08));
+        background:var(--panel-bg, rgba(255,255,255,.84));
+        box-shadow:var(--shadow-soft, 0 20px 50px rgba(0,0,0,.08));
+      }
+
+      .usuarios-history-head{
+        display:grid;
+        grid-template-columns:minmax(0, 1fr) auto;
+        gap:18px;
+        align-items:start;
+        padding:18px 20px 16px;
+        border-bottom:1px solid var(--border-soft, rgba(15,23,42,.08));
+      }
+
+      .usuarios-history-copy{
+        min-width:0;
+        display:grid;
+        gap:4px;
+      }
+
+      .usuarios-history-title{
+        margin:0;
+        font-size:18px;
+        line-height:1.2;
+        font-weight:800;
+        color:var(--text-strong, #111827);
+      }
+
+      .usuarios-history-subtitle{
+        margin:0;
+        font-size:13px;
+        line-height:1.45;
+        color:var(--text-dim, #6b7280);
+      }
+
+      .usuarios-pagination{
+        display:flex;
+        gap:10px;
+        flex-wrap:wrap;
+      }
+
+      .usuarios-pagination-btn{
+        min-height:42px;
+        padding:0 16px;
+        border-radius:14px;
+        border:1px solid var(--border-soft, rgba(15,23,42,.08));
+        background:var(--surface-1, rgba(255,255,255,.72));
+        color:var(--text-strong, #111827);
+        font-size:13px;
+        font-weight:700;
+        cursor:pointer;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        text-decoration:none;
+      }
+
+      .usuarios-pagination-btn[disabled],
+      .usuarios-pagination-btn[aria-disabled="true"]{
+        opacity:.48;
+        cursor:not-allowed;
+      }
+
+      .usuarios-table-shell{
+        position:relative;
+        width:100%;
+        overflow-x:auto;
+        overflow-y:hidden;
+      }
+
+      .usuarios-table{
+        width:100%;
+        border-collapse:separate;
+        border-spacing:0;
+        min-width:1240px;
+      }
+
+      .usuarios-table thead th{
+        padding:16px 18px;
+        text-align:left;
+        font-size:12px;
+        font-weight:800;
+        letter-spacing:.08em;
+        text-transform:uppercase;
+        color:var(--text-faint, #8a91a0);
+        background:color-mix(in srgb, var(--surface-1, #fff) 88%, transparent);
+        border-bottom:1px solid var(--border-soft, rgba(15,23,42,.08));
+        white-space:nowrap;
+      }
+
+      .usuarios-table tbody td{
+        padding:18px 18px;
+        vertical-align:middle;
+        border-bottom:1px solid var(--border-soft, rgba(15,23,42,.08));
+      }
+
+      .usuarios-table tbody tr:last-child td{
+        border-bottom:none;
+      }
+
+      .usuarios-row{
+        transition:background .18s ease, opacity .18s ease;
+      }
+
+      .usuarios-row:hover{
+        background:color-mix(in srgb, var(--accent, #7c5cff) 2.5%, transparent);
+      }
+
+      .usuarios-row.is-opening:hover{
+        background:color-mix(in srgb, var(--warning-strong, #ffbc42) 3.5%, transparent);
+      }
+
+      .usuarios-main{
+        display:grid;
+        grid-template-columns:48px minmax(0, 1fr);
+        gap:14px;
+        align-items:center;
+        min-width:0;
+      }
+
+      .usuarios-avatar{
+        position:relative;
+        width:var(--avatar-size, 48px);
+        height:var(--avatar-size, 48px);
+        border-radius:var(--avatar-radius, 16px);
+        overflow:hidden;
+        flex:0 0 var(--avatar-size, 48px);
+        background:var(--avatar-fallback-bg, rgba(124,92,255,.16));
+        border:1px solid var(--avatar-fallback-border, rgba(124,92,255,.20));
+      }
+
+      .usuarios-avatar img{
+        display:block;
+        width:100%;
+        height:100%;
+        object-fit:cover;
+      }
+
+      .usuarios-avatar-fallback{
+        position:absolute;
+        inset:0;
+        display:none;
+        align-items:center;
+        justify-content:center;
+        font-size:18px;
+        font-weight:800;
+        color:var(--avatar-fallback-text, #fff);
+        letter-spacing:-.03em;
+      }
+
+      .usuarios-avatar[data-fallback="true"] .usuarios-avatar-fallback{
+        display:flex;
+      }
+
+      .usuarios-avatar[data-fallback="true"] img{
+        display:none !important;
+      }
+
+      .usuarios-avatar--fallback .usuarios-avatar-fallback{
+        display:flex;
+      }
+
+      .usuarios-main-copy{
+        min-width:0;
+        display:grid;
+        gap:4px;
+      }
+
+      .usuarios-user-id{
+        font-size:12px;
+        line-height:1.2;
+        font-weight:800;
+        letter-spacing:.06em;
+        color:#4b5563;
+        text-transform:uppercase;
+      }
+
+      .usuarios-user-subject{
+        font-size:16px;
+        line-height:1.18;
+        font-weight:800;
+        letter-spacing:-.03em;
+        color:var(--text-strong, #111827);
+        overflow:hidden;
+        text-overflow:ellipsis;
+        display:-webkit-box;
+        -webkit-line-clamp:2;
+        -webkit-box-orient:vertical;
+      }
+
+      .usuarios-user-description{
+        font-size:13px;
+        line-height:1.35;
+        color:var(--text-dim, #6b7280);
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+      }
+
+      .usuarios-chip{
+        min-height:34px;
+        padding:0 14px;
+        border-radius:999px;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        font-size:12px;
+        font-weight:800;
+        letter-spacing:.05em;
+        text-transform:uppercase;
+        white-space:nowrap;
+        border:1px solid transparent;
+      }
+
+      .usuarios-chip--active{
+        color:#1f7a4d;
+        background:rgba(54,198,144,.14);
+        border-color:rgba(54,198,144,.28);
+      }
+
+      .usuarios-chip--pending{
+        color:#c57a13;
+        background:rgba(255,188,66,.14);
+        border-color:rgba(255,188,66,.30);
+      }
+
+      .usuarios-chip--blocked{
+        color:#c24a4a;
+        background:rgba(255,107,107,.14);
+        border-color:rgba(255,107,107,.28);
+      }
+
+      .usuarios-chip--inactive{
+        color:#7b8494;
+        background:rgba(15,23,42,.03);
+        border-color:rgba(15,23,42,.08);
+      }
+
+      .usuarios-chip--role-superadmin{
+        color:#8f63ff;
+        background:rgba(179,136,255,.14);
+        border-color:rgba(179,136,255,.28);
+      }
+
+      .usuarios-chip--role-admin{
+        color:#c24a4a;
+        background:rgba(255,107,107,.12);
+        border-color:rgba(255,107,107,.24);
+      }
+
+      .usuarios-chip--role-support{
+        color:#2563eb;
+        background:rgba(96,165,250,.12);
+        border-color:rgba(96,165,250,.24);
+      }
+
+      .usuarios-chip--role-manager{
+        color:#b7791f;
+        background:rgba(255,188,66,.12);
+        border-color:rgba(255,188,66,.24);
+      }
+
+      .usuarios-chip--role-user{
+        color:#6b7280;
+        background:rgba(15,23,42,.03);
+        border-color:rgba(15,23,42,.08);
+      }
+
+      .usuarios-date-inline{
+        display:inline-block;
+        white-space:nowrap;
+        font-size:13px;
+        line-height:1.2;
+        font-weight:700;
+        font-variant-numeric:tabular-nums;
+        color:#2f3747;
+      }
+
+      .usuarios-contact-block,
+      .usuarios-activity-block{
+        display:grid;
+        gap:4px;
+        min-width:0;
+      }
+
+      .usuarios-contact-primary,
+      .usuarios-activity-primary{
+        color:var(--text-strong, #111827);
+        font-size:13px;
+        line-height:1.3;
+        font-weight:700;
+        word-break:break-word;
+      }
+
+      .usuarios-contact-secondary,
+      .usuarios-activity-secondary{
+        color:var(--text-dim, #6b7280);
+        font-size:12px;
+        line-height:1.35;
+        word-break:break-word;
+      }
+
+      .usuarios-cell--actions{
+        width:1%;
+        white-space:nowrap;
+      }
+
+      .usuarios-actions{
+        display:flex;
+        justify-content:flex-end;
+        gap:8px;
+        flex-wrap:wrap;
+      }
+
+      .usuarios-open-btn,
+      .usuarios-copy-btn{
+        width:auto;
+        min-width:0;
+        min-height:40px;
+        padding:0 14px;
+        border-radius:14px;
+        font-size:13px;
+        font-weight:700;
+        line-height:1;
+        cursor:pointer;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        white-space:nowrap;
+        transition:
+          border-color .18s ease,
+          background .18s ease,
+          transform .18s ease,
+          opacity .18s ease;
+      }
+
+      .usuarios-open-btn{
+        border:1px solid var(--border-soft, rgba(15,23,42,.08));
+        background:var(--surface-1, rgba(255,255,255,.74));
+        color:var(--text-strong, #111827);
+      }
+
+      .usuarios-copy-btn{
+        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent);
+        background:var(--accent, #7c5cff);
+        color:#fff;
+      }
+
+      .usuarios-open-btn:hover,
+      .usuarios-copy-btn:hover{
+        transform:translateY(-1px);
+      }
+
+      .usuarios-inline-loading{
+        display:inline-flex;
+        align-items:center;
+        gap:8px;
+      }
+
+      .usuarios-inline-spinner{
+        width:14px;
+        height:14px;
+        border-radius:999px;
+        border:2px solid rgba(255,255,255,.28);
+        border-top-color:currentColor;
+        animation:usuariosSpin .78s linear infinite;
+      }
+
+      .usuarios-open-btn .usuarios-inline-spinner{
+        border-color:rgba(15,23,42,.18);
+        border-top-color:currentColor;
+      }
+
+      .usuarios-empty{
+        display:grid;
+        justify-items:center;
+        gap:8px;
+        padding:54px 24px 58px;
+        text-align:center;
+      }
+
+      .usuarios-empty-title{
+        margin:0;
+        font-size:20px;
+        font-weight:800;
+        color:var(--text-strong, #111827);
+      }
+
+      .usuarios-empty-text{
+        margin:0;
+        font-size:14px;
+        line-height:1.6;
+        color:var(--text-dim, #6b7280);
+      }
+
+      .usuarios-mobile-list{
+        display:none;
+        gap:14px;
+        padding:14px;
+      }
+
+      .usuarios-mobile-card{
+        display:grid;
+        gap:14px;
+        padding:18px;
+        border-radius:18px;
+        border:1px solid var(--border-soft, rgba(15,23,42,.08));
+        background:var(--surface-1, rgba(255,255,255,.76));
+      }
+
+      .usuarios-mobile-top{
+        display:flex;
+        align-items:flex-start;
+        justify-content:space-between;
+        gap:12px;
+      }
+
+      .usuarios-mobile-meta{
+        display:grid;
+        grid-template-columns:repeat(2, minmax(0, 1fr));
+        gap:10px;
+      }
+
+      .usuarios-mobile-meta-card{
+        display:grid;
+        gap:4px;
+        padding:12px;
+        border-radius:14px;
+        border:1px solid var(--border-soft, rgba(15,23,42,.08));
+        background:var(--surface-glass, rgba(255,255,255,.56));
+      }
+
+      .usuarios-mobile-meta-label{
+        font-size:11px;
+        color:var(--text-faint, #8a91a0);
+        font-weight:800;
+        letter-spacing:.05em;
+        text-transform:uppercase;
+      }
+
+      .usuarios-mobile-meta-value{
+        color:var(--text-strong, #111827);
+        font-size:13px;
+        line-height:1.35;
+        font-weight:700;
+        word-break:break-word;
+      }
+
+      .usuarios-mobile-actions{
+        display:flex;
+        gap:8px;
+        flex-wrap:wrap;
+      }
+
+      .usuarios-table-overlay{
+        position:absolute;
+        inset:0;
+        display:grid;
+        place-items:center;
+        padding:18px;
+        background:color-mix(in srgb, var(--surface-1, #fff) 74%, transparent);
+        backdrop-filter:blur(4px);
+        -webkit-backdrop-filter:blur(4px);
+        z-index:4;
+      }
+
+      .usuarios-table-shell::-webkit-scrollbar{
+        height:10px;
+        width:10px;
+      }
+
+      .usuarios-table-shell::-webkit-scrollbar-thumb{
+        background:color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft));
+        border-radius:999px;
+      }
+
+      .usuarios-table-shell::-webkit-scrollbar-track{
+        background:transparent;
+      }
+
+      @keyframes usuariosSpin{
+        to{ transform:rotate(360deg); }
+      }
+
+      @keyframes usuariosPulse{
+        0% { transform:scale(.92); opacity:.75; }
+        50% { transform:scale(1.08); opacity:1; }
+        100% { transform:scale(.92); opacity:.75; }
+      }
+
+      [data-theme="light"] .usuarios-hero,
+      [data-theme="light"] .usuarios-history{
+        background:
+          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 34%),
+          linear-gradient(180deg, rgba(255,255,255,.96), rgba(249,250,252,.94));
+        box-shadow:
+          0 16px 38px rgba(15,23,42,.05),
+          0 0 0 1px rgba(255,255,255,.74) inset;
+      }
+
+      [data-theme="light"] .usuarios-stat-card,
+      [data-theme="light"] .usuarios-mobile-card{
+        background:
+          linear-gradient(180deg, rgba(255,255,255,.72), rgba(255,255,255,.42)),
+          rgba(255,255,255,.58);
+      }
+
+      @media (max-width: 1240px){
+        .usuarios-hero{
+          padding:24px 24px 26px;
+        }
+
+        .usuarios-page-title{
+          font-size:clamp(30px, 4vw, 52px);
+        }
+      }
+
+      @media (max-width: 1180px){
+        .usuarios-hero-top{
+          grid-template-columns:1fr;
+        }
+
+        .usuarios-hero-actions{
+          justify-content:flex-start;
+        }
+
+        .usuarios-page-title{
+          white-space:normal;
+        }
+
+        .usuarios-stats{
+          grid-template-columns:repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 980px){
+        .usuarios-desktop-table{
+          display:none;
+        }
+
+        .usuarios-mobile-list{
+          display:grid;
+        }
+      }
+
+      @media (max-width: 760px){
+        .usuarios-view-root{
+          gap:18px;
+        }
+
+        .usuarios-hero{
+          padding:22px 18px 20px;
+          border-radius:22px;
+        }
+
+        .usuarios-history{
+          border-radius:22px;
+        }
+
+        .usuarios-history-head{
+          grid-template-columns:1fr;
+          padding:16px 16px 14px;
+        }
+
+        .usuarios-pagination{
+          justify-content:flex-start;
+        }
+
+        .usuarios-stats{
+          grid-template-columns:1fr;
+        }
+
+        .usuarios-page-title{
+          font-size:clamp(28px, 8.5vw, 44px);
+          line-height:.98;
+          white-space:normal;
+        }
+
+        .usuarios-page-subtitle{
+          font-size:15px;
+        }
+
+        .usuarios-mobile-meta{
+          grid-template-columns:1fr;
+        }
+      }
+    </style>
+  `;
+}
+
+/* =========================================================
+   HEADER
+========================================================= */
 
 function renderStatCard({
   label = "",
@@ -717,457 +1418,221 @@ function renderStatCard({
   accent = false,
 } = {}) {
   return `
-    <article
-      class="usuarios-stat-card panel-surface"
-      style="
-        position:relative;
-        overflow:hidden;
-        display:grid;
-        gap:10px;
-        min-height:132px;
-        padding:20px;
-        border-radius:var(--panel-radius);
-        border:1px solid ${
-          accent
-            ? "color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft))"
-            : "var(--border-soft)"
-        };
-        background:${
-          accent
-            ? "linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 72%), var(--surface-1, var(--surface-glass))"
-            : "var(--surface-1, var(--surface-glass))"
-        };
-        box-shadow:var(--shadow-sm);
-      "
-    >
-      <span
-        style="
-          font-size:12px;
-          line-height:1;
-          letter-spacing:.08em;
-          text-transform:uppercase;
-          color:var(--text-dim);
-          font-weight:var(--weight-bold);
-        "
-      >
-        ${escapeHtml(label)}
-      </span>
-
-      <strong
-        style="
-          font-size:clamp(24px, 3vw, 34px);
-          line-height:1;
-          letter-spacing:-.04em;
-          color:var(--text-strong);
-          font-weight:var(--weight-black);
-        "
-      >
-        ${escapeHtml(value)}
-      </strong>
-
-      <p
-        style="
-          margin:0;
-          color:var(--text-dim);
-          font-size:var(--font-sm);
-          line-height:1.45;
-        "
-      >
-        ${escapeHtml(caption)}
-      </p>
+    <article class="usuarios-stat-card ${accent ? "usuarios-stat-card--accent" : ""}">
+      <div class="usuarios-stat-label">${escapeHtml(label)}</div>
+      <div class="usuarios-stat-value">${escapeHtml(value)}</div>
+      <div class="usuarios-stat-text">${escapeHtml(caption)}</div>
     </article>
   `;
 }
-
-/* =========================================================
-   HEADER
-========================================================= */
 
 export function renderHeader({ items = [], state = {} } = {}) {
   const list = getResolvedItems(items);
   const localState = state || usuariosState || {};
   const stats = computeStats(list);
 
-  const loading = Boolean(localState?.loading);
-  const refreshing = Boolean(localState?.refreshing);
-  const creating = Boolean(localState?.creating);
+  const creating = Boolean(localState.creating);
+  const loading = Boolean(localState.loading);
+  const refreshing = Boolean(localState.refreshing);
+
   const remoteCount = resolveRemoteCount(items, localState);
-  const lastSyncText = localState?.lastSyncAt
+  const lastSyncText = localState.lastSyncAt
     ? formatRelativeDate(localState.lastSyncAt)
     : "Sin sincronización reciente";
 
   return `
-    <section
-      class="usuarios-hero"
-      style="
-        position:relative;
-        overflow:hidden;
-        border-radius:calc(var(--panel-radius) + 6px);
-        border:1px solid var(--border-soft);
-        background:
-          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent), transparent 34%),
-          linear-gradient(180deg, var(--surface-2, var(--surface-glass)), var(--surface-1, var(--surface-glass)));
-        box-shadow:var(--shadow-md);
-      "
-    >
-      <div
-        style="
-          display:grid;
-          gap:var(--space-lg);
-          padding:clamp(20px, 3vw, 30px);
-        "
-      >
-        <div
-          style="
-            display:flex;
-            align-items:flex-start;
-            justify-content:space-between;
-            gap:18px;
-            flex-wrap:wrap;
-          "
-        >
-          <div style="display:grid; gap:10px; min-width:min(100%, 560px);">
-            <span
-              style="
-                display:inline-flex;
-                align-items:center;
-                width:max-content;
-                min-height:28px;
-                padding:0 12px;
-                border-radius:999px;
-                border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft));
-                background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-                color:var(--text-soft);
-                font-size:12px;
-                font-weight:var(--weight-bold);
-                letter-spacing:.06em;
-                text-transform:uppercase;
-              "
-            >
-              Gestión de usuarios
-            </span>
+    ${renderStyles()}
 
-            <div style="display:grid; gap:8px;">
-              <h1
-                class="page-title"
-                style="
-                  margin:0;
-                  font-size:clamp(30px, 5vw, 48px);
-                  line-height:.98;
-                  letter-spacing:-.05em;
-                  color:var(--text-strong);
-                "
-              >
-                Centro de control de usuarios
-              </h1>
-
-              <p
-                class="page-subtitle"
-                style="
-                  margin:0;
-                  max-width:860px;
-                  color:var(--text-dim);
-                  font-size:clamp(14px, 2vw, 16px);
-                  line-height:1.6;
-                "
-              >
-                Supervisa usuarios, estado de acceso, rol operativo, equipo y actividad reciente
-                desde una tabla premium orientada a administración y soporte.
-              </p>
-            </div>
-          </div>
-
-          <div
-            style="
-              display:flex;
-              gap:10px;
-              flex-wrap:wrap;
-              align-items:center;
-            "
-          >
-            <button
-              id="usuarios-export-btn"
-              type="button"
-              style="
-                min-height:42px;
-                padding:0 14px;
-                border-radius:var(--btn-radius);
-                border:1px solid var(--btn-secondary-border, var(--border-soft));
-                background:var(--btn-secondary-bg, var(--surface-glass));
-                color:var(--btn-secondary-text, var(--text-soft));
-                font-weight:var(--weight-bold);
-                cursor:pointer;
-              "
-            >
-              Exportar CSV
-            </button>
-
-            <button
-              id="usuarios-create-btn"
-              type="button"
-              ${creating ? "disabled" : ""}
-              style="
-                min-height:42px;
-                padding:0 16px;
-                border-radius:var(--btn-radius);
-                border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
-                background:var(--btn-primary-bg, var(--accent, #7c5cff));
-                color:var(--btn-primary-text, #fff);
-                font-weight:var(--weight-bold);
-                cursor:${creating ? "not-allowed" : "pointer"};
-                opacity:${creating ? ".78" : "1"};
-                box-shadow:0 10px 24px color-mix(in srgb, var(--accent, #7c5cff) 22%, transparent);
-              "
-            >
-              ${creating ? "Creando..." : "Nuevo usuario"}
-            </button>
-          </div>
+    <section class="usuarios-hero">
+      <div class="usuarios-hero-top">
+        <div class="usuarios-hero-copy">
+          <h1 class="usuarios-page-title">Usuarios y accesos</h1>
+          <p class="usuarios-page-subtitle">
+            Supervisa usuarios, estado de acceso, rol operativo, equipo y actividad reciente desde una vista limpia, clara y pensada para administración.
+          </p>
         </div>
 
-        <div
-          class="usuarios-hero-meta"
-          style="
-            display:flex;
-            align-items:center;
-            gap:10px;
-            flex-wrap:wrap;
-          "
-        >
-          <span
-            style="
-              display:inline-flex;
-              align-items:center;
-              min-height:30px;
-              padding:0 10px;
-              border-radius:999px;
-              border:1px solid var(--border-soft);
-              background:var(--surface-glass);
-              color:var(--text-dim);
-              font-size:12px;
-              font-weight:var(--weight-bold);
-              letter-spacing:.04em;
-              text-transform:uppercase;
-            "
+        <div class="usuarios-hero-actions">
+          <button
+            id="usuarios-export-btn"
+            type="button"
+            class="usuarios-btn"
           >
-            ${escapeHtml(String(remoteCount))} registros remotos
-          </span>
+            <span>Exportar CSV</span>
+          </button>
 
-          <span
-            style="
-              display:inline-flex;
-              align-items:center;
-              min-height:30px;
-              padding:0 10px;
-              border-radius:999px;
-              border:1px solid var(--border-soft);
-              background:var(--surface-glass);
-              color:var(--text-dim);
-              font-size:12px;
-              font-weight:var(--weight-bold);
-              letter-spacing:.04em;
-              text-transform:uppercase;
-            "
+          <button
+            id="usuarios-create-btn"
+            type="button"
+            class="usuarios-btn usuarios-btn--primary${creating ? " is-loading" : ""}"
+            ${creating ? 'disabled aria-busy="true"' : ""}
           >
-            Última sync · ${escapeHtml(lastSyncText)}
-          </span>
-
-          ${
-            refreshing || loading
-              ? `
-                <span
-                  style="
-                    display:inline-flex;
-                    align-items:center;
-                    gap:8px;
-                    min-height:30px;
-                    padding:0 10px;
-                    border-radius:999px;
-                    border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft));
-                    background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-                    color:var(--text-soft);
-                    font-size:12px;
-                    font-weight:var(--weight-bold);
-                    letter-spacing:.04em;
-                    text-transform:uppercase;
-                  "
-                >
-                  <span
-                    aria-hidden="true"
-                    style="
-                      width:10px;
-                      height:10px;
-                      border-radius:999px;
-                      background:var(--accent, #7c5cff);
-                      box-shadow:0 0 0 0 color-mix(in srgb, var(--accent, #7c5cff) 30%, transparent);
-                      animation:usuariosPulse 1.35s ease-in-out infinite;
-                    "
-                  ></span>
-                  Sincronizando
-                </span>
-              `
-              : ""
-          }
-        </div>
-
-        <div
-          class="usuarios-hero-stats"
-          style="
-            display:grid;
-            grid-template-columns:repeat(4, minmax(0, 1fr));
-            gap:var(--space-md);
-          "
-        >
-          ${renderStatCard({
-            label: "Usuarios visibles",
-            value: String(stats.totalUsuarios),
-            caption: `${remoteCount} registros totales cargados en la colección.`,
-            accent: true,
-          })}
-
-          ${renderStatCard({
-            label: "Activos",
-            value: String(stats.activeCount),
-            caption: "Cuentas habilitadas y operativas.",
-          })}
-
-          ${renderStatCard({
-            label: "Pendientes / admins",
-            value: `${stats.pendingCount} / ${stats.adminCount}`,
-            caption: "Invitaciones pendientes y perfiles con privilegios elevados.",
-          })}
-
-          ${renderStatCard({
-            label: "Con equipo / bloqueados",
-            value: `${stats.assignedCount} / ${stats.blockedCount}`,
-            caption: "Cobertura organizativa y cuentas con acceso restringido.",
-          })}
+            ${
+              creating
+                ? renderSpinner("Abriendo...")
+                : "<span>Nuevo usuario</span>"
+            }
+          </button>
         </div>
       </div>
 
-      <style>
-        @keyframes usuariosPulse {
-          0% { transform:scale(.92); opacity:.75; }
-          50% { transform:scale(1.08); opacity:1; }
-          100% { transform:scale(.92); opacity:.75; }
-        }
+      <div class="usuarios-hero-meta">
+        <span class="usuarios-meta-pill">
+          ${escapeHtml(`${remoteCount} registros remotos`)}
+        </span>
 
-        @media (max-width: 1100px) {
-          .usuarios-hero-stats {
-            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-          }
-        }
+        <span class="usuarios-meta-pill">
+          ${escapeHtml(`Última sync · ${lastSyncText}`)}
+        </span>
 
-        @media (max-width: 720px) {
-          .usuarios-hero-stats {
-            grid-template-columns: 1fr !important;
-          }
+        ${
+          loading || refreshing
+            ? `
+              <span class="usuarios-meta-pill">
+                <span
+                  aria-hidden="true"
+                  style="
+                    width:8px;
+                    height:8px;
+                    border-radius:999px;
+                    background:var(--accent, #7c5cff);
+                    margin-right:8px;
+                    display:inline-block;
+                    animation:usuariosPulse 1.25s ease-in-out infinite;
+                  "
+                ></span>
+                Sincronizando
+              </span>
+            `
+            : ""
         }
-      </style>
+      </div>
+
+      <div class="usuarios-stats">
+        ${renderStatCard({
+          label: "Usuarios visibles",
+          value: String(stats.totalUsuarios),
+          caption: `${remoteCount} registros totales cargados en la colección.`,
+          accent: true,
+        })}
+
+        ${renderStatCard({
+          label: "Activos",
+          value: String(stats.activeCount),
+          caption: "Cuentas habilitadas y operativas.",
+        })}
+
+        ${renderStatCard({
+          label: "Pendientes / admins",
+          value: `${stats.pendingCount} / ${stats.adminCount}`,
+          caption: "Invitaciones pendientes y perfiles con privilegios elevados.",
+        })}
+
+        ${renderStatCard({
+          label: "Con equipo / bloqueados",
+          value: `${stats.assignedCount} / ${stats.blockedCount}`,
+          caption: "Cobertura organizativa y cuentas con acceso restringido.",
+        })}
+      </div>
     </section>
   `;
 }
 
 /* =========================================================
-   STATES
+   LOADING / ERROR / EMPTY
 ========================================================= */
 
 export function renderLoadingState() {
   return `
-    <section
-      class="panel-surface usuarios-table-shell"
-      style="
-        overflow:hidden;
-        border-radius:var(--panel-radius);
-        border:1px solid var(--border-soft);
-        background:var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-sm);
-      "
-    >
-      <div
-        style="
-          display:grid;
-          gap:0;
-          overflow:auto;
-        "
-      >
-        <div style="min-width:1120px;">
-          <div
-            style="
-              display:grid;
-              grid-template-columns: 2.2fr .85fr .85fr .9fr 1.05fr 1fr 1fr .95fr;
-              gap:0;
-              border-bottom:1px solid var(--border-soft);
-              background:var(--surface-2, var(--surface-glass));
-            "
-          >
-            ${Array.from({ length: 8 })
-              .map(
-                () => `
-                  <div style="padding:16px 18px;">
-                    <div
-                      style="
-                        height:12px;
-                        width:70%;
-                        border-radius:999px;
-                        background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass));
-                        background-size:200% 100%;
-                        animation:usuariosSkeleton 1.25s linear infinite;
-                      "
-                    ></div>
-                  </div>
-                `
-              )
-              .join("")}
-          </div>
+    ${renderStyles()}
 
-          ${Array.from({ length: PAGE_SIZE })
+    <section class="usuarios-history">
+      <div class="usuarios-history-head">
+        <div class="usuarios-history-copy">
+          <h2 class="usuarios-history-title">Tabla de usuarios</h2>
+          <p class="usuarios-history-subtitle">Cargando colección...</p>
+        </div>
+      </div>
+
+      <div style="min-width:1180px;">
+        <div
+          style="
+            display:grid;
+            grid-template-columns:2.4fr .9fr .9fr .95fr 1.2fr 1fr 1fr .95fr;
+            border-bottom:1px solid var(--border-soft);
+            background:color-mix(in srgb, var(--surface-1, #fff) 88%, transparent);
+          "
+        >
+          ${Array.from({ length: 8 })
             .map(
               () => `
-                <div
-                  style="
-                    display:grid;
-                    grid-template-columns: 2.2fr .85fr .85fr .9fr 1.05fr 1fr 1fr .95fr;
-                    gap:0;
-                    border-bottom:1px solid var(--border-soft);
-                  "
-                >
-                  <div style="padding:16px 18px;">
-                    <div style="display:flex; gap:12px; align-items:center;">
-                      <div
-                        style="
-                          width:44px;
-                          height:44px;
-                          border-radius:14px;
-                          background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass));
-                          background-size:200% 100%;
-                          animation:usuariosSkeleton 1.25s linear infinite;
-                        "
-                      ></div>
-                      <div style="display:grid; gap:8px; flex:1;">
-                        <div style="height:14px; width:140px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:usuariosSkeleton 1.25s linear infinite;"></div>
-                        <div style="height:12px; width:220px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:usuariosSkeleton 1.25s linear infinite;"></div>
-                        <div style="height:12px; width:170px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:usuariosSkeleton 1.25s linear infinite;"></div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div style="padding:16px 18px;"><div style="height:34px; width:96px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:usuariosSkeleton 1.25s linear infinite;"></div></div>
-                  <div style="padding:16px 18px;"><div style="height:34px; width:92px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:usuariosSkeleton 1.25s linear infinite;"></div></div>
-                  <div style="padding:16px 18px;"><div style="height:14px; width:86px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:usuariosSkeleton 1.25s linear infinite;"></div></div>
-                  <div style="padding:16px 18px;"><div style="height:14px; width:116px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:usuariosSkeleton 1.25s linear infinite;"></div></div>
-                  <div style="padding:16px 18px;"><div style="height:14px; width:92px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:usuariosSkeleton 1.25s linear infinite;"></div></div>
-                  <div style="padding:16px 18px;"><div style="height:14px; width:92px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:usuariosSkeleton 1.25s linear infinite;"></div></div>
-
-                  <div style="padding:16px 18px;">
-                    <div style="display:flex; gap:8px; justify-content:flex-end;">
-                      <div style="height:38px; width:82px; border-radius:12px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:usuariosSkeleton 1.25s linear infinite;"></div>
-                    </div>
-                  </div>
+                <div style="padding:16px 18px;">
+                  <div
+                    style="
+                      height:12px;
+                      width:68%;
+                      border-radius:999px;
+                      background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 8%, var(--surface-glass)), var(--surface-glass));
+                      background-size:200% 100%;
+                      animation:usuariosSkeleton 1.2s linear infinite;
+                    "
+                  ></div>
                 </div>
               `
             )
             .join("")}
         </div>
+
+        ${Array.from({ length: PAGE_SIZE })
+          .map(
+            () => `
+              <div
+                style="
+                  display:grid;
+                  grid-template-columns:2.4fr .9fr .9fr .95fr 1.2fr 1fr 1fr .95fr;
+                  border-bottom:1px solid var(--border-soft);
+                "
+              >
+                <div style="padding:18px;">
+                  <div style="display:flex; gap:14px; align-items:center;">
+                    <div
+                      style="
+                        width:48px;
+                        height:48px;
+                        border-radius:16px;
+                        background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 8%, var(--surface-glass)), var(--surface-glass));
+                        background-size:200% 100%;
+                        animation:usuariosSkeleton 1.2s linear infinite;
+                      "
+                    ></div>
+
+                    <div style="display:grid; gap:8px; flex:1;">
+                      <div style="height:13px; width:120px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 8%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:usuariosSkeleton 1.2s linear infinite;"></div>
+                      <div style="height:14px; width:180px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 8%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:usuariosSkeleton 1.2s linear infinite;"></div>
+                      <div style="height:12px; width:150px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 8%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:usuariosSkeleton 1.2s linear infinite;"></div>
+                    </div>
+                  </div>
+                </div>
+
+                ${Array.from({ length: 6 })
+                  .map(
+                    () => `
+                      <div style="padding:18px;">
+                        <div style="height:34px; width:92px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 8%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:usuariosSkeleton 1.2s linear infinite;"></div>
+                      </div>
+                    `
+                  )
+                  .join("")}
+
+                <div style="padding:18px;">
+                  <div style="display:flex; gap:8px; justify-content:flex-end;">
+                    <div style="height:40px; width:88px; border-radius:14px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 8%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:usuariosSkeleton 1.2s linear infinite;"></div>
+                  </div>
+                </div>
+              </div>
+            `
+          )
+          .join("")}
       </div>
 
       <style>
@@ -1182,80 +1647,19 @@ export function renderLoadingState() {
 
 export function renderErrorState(message = "No se pudo cargar la colección.") {
   return `
-    <section
-      class="panel-surface usuarios-error-state"
-      style="
-        display:grid;
-        gap:18px;
-        padding:28px;
-        border-radius:var(--panel-radius);
-        border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, var(--border-soft));
-        background:
-          linear-gradient(180deg, color-mix(in srgb, var(--danger-strong, #ff6b6b) 10%, transparent), transparent 72%),
-          var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-sm);
-      "
-    >
-      <div style="display:grid; gap:8px;">
-        <span
-          style="
-            display:inline-flex;
-            width:max-content;
-            min-height:28px;
-            align-items:center;
-            padding:0 12px;
-            border-radius:999px;
-            border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, transparent);
-            background:color-mix(in srgb, var(--danger-strong, #ff6b6b) 12%, transparent);
-            color:var(--danger-strong, #ff6b6b);
-            font-size:12px;
-            letter-spacing:.06em;
-            text-transform:uppercase;
-            font-weight:var(--weight-bold);
-          "
-        >
-          Error de carga
-        </span>
+    ${renderStyles()}
 
-        <h3
-          style="
-            margin:0;
-            font-size:clamp(24px, 3vw, 34px);
-            line-height:1.05;
-            color:var(--text-strong);
-            letter-spacing:-.04em;
-          "
-        >
-          No se pudo renderizar la vista de usuarios
-        </h3>
-
-        <p
-          style="
-            margin:0;
-            color:var(--text-dim);
-            font-size:var(--font-base);
-            line-height:1.65;
-            max-width:780px;
-          "
-        >
+    <section class="usuarios-history">
+      <div class="usuarios-empty">
+        <h3 class="usuarios-empty-title">No se pudo cargar la vista de usuarios</h3>
+        <p class="usuarios-empty-text">
           ${escapeHtml(safeText(message, "Error desconocido al cargar la vista."))}
         </p>
-      </div>
 
-      <div style="display:flex; gap:10px; flex-wrap:wrap;">
         <button
           id="usuarios-retry-btn"
           type="button"
-          style="
-            min-height:42px;
-            padding:0 14px;
-            border-radius:var(--btn-radius);
-            border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
-            background:var(--btn-primary-bg, var(--accent, #7c5cff));
-            color:var(--btn-primary-text, #fff);
-            font-weight:var(--weight-bold);
-            cursor:pointer;
-          "
+          class="usuarios-btn usuarios-btn--primary"
         >
           Reintentar
         </button>
@@ -1266,78 +1670,19 @@ export function renderErrorState(message = "No se pudo cargar la colección.") {
 
 export function renderEmptyState() {
   return `
-    <section
-      class="panel-surface usuarios-empty-state"
-      style="
-        display:grid;
-        gap:18px;
-        padding:28px;
-        border-radius:var(--panel-radius);
-        border:1px solid var(--border-soft);
-        background:var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-sm);
-      "
-    >
-      <div style="display:grid; gap:8px;">
-        <span
-          style="
-            display:inline-flex;
-            width:max-content;
-            min-height:28px;
-            align-items:center;
-            padding:0 12px;
-            border-radius:999px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-            color:var(--text-dim);
-            font-size:12px;
-            letter-spacing:.06em;
-            text-transform:uppercase;
-            font-weight:var(--weight-bold);
-          "
-        >
-          Sin resultados
-        </span>
+    ${renderStyles()}
 
-        <h3
-          style="
-            margin:0;
-            font-size:clamp(24px, 3vw, 34px);
-            line-height:1.05;
-            color:var(--text-strong);
-            letter-spacing:-.04em;
-          "
-        >
-          No hay usuarios para mostrar
-        </h3>
-
-        <p
-          style="
-            margin:0;
-            color:var(--text-dim);
-            font-size:var(--font-base);
-            line-height:1.65;
-            max-width:760px;
-          "
-        >
+    <section class="usuarios-history">
+      <div class="usuarios-empty">
+        <h3 class="usuarios-empty-title">No hay usuarios para mostrar</h3>
+        <p class="usuarios-empty-text">
           Todavía no hay usuarios disponibles en la colección actual.
         </p>
-      </div>
 
-      <div style="display:flex; gap:10px; flex-wrap:wrap;">
         <button
           id="usuarios-create-btn"
           type="button"
-          style="
-            min-height:42px;
-            padding:0 14px;
-            border-radius:var(--btn-radius);
-            border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
-            background:var(--btn-primary-bg, var(--accent, #7c5cff));
-            color:var(--btn-primary-text, #fff);
-            font-weight:var(--weight-bold);
-            cursor:pointer;
-          "
+          class="usuarios-btn usuarios-btn--primary"
         >
           Crear usuario
         </button>
@@ -1346,294 +1691,45 @@ export function renderEmptyState() {
   `;
 }
 
-function renderTableToolbar({
-  total = 0,
-  page = 1,
-  totalPages = 1,
-  from = 0,
-  to = 0,
-  refreshing = false,
-} = {}) {
-  return `
-    <div
-      class="usuarios-table-toolbar"
-      style="
-        display:flex;
-        align-items:center;
-        justify-content:space-between;
-        gap:14px;
-        padding:16px 18px;
-        border-bottom:1px solid var(--border-soft);
-        background:
-          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 6%, transparent), transparent),
-          var(--surface-1, var(--surface-glass));
-        flex-wrap:wrap;
-      "
-    >
-      <div style="display:grid; gap:4px;">
-        <strong
-          style="
-            color:var(--text-strong);
-            font-size:var(--font-base);
-            letter-spacing:-.02em;
-          "
-        >
-          Tabla de usuarios
-        </strong>
-
-        <span
-          style="
-            color:var(--text-dim);
-            font-size:var(--font-sm);
-          "
-        >
-          Mostrando ${escapeHtml(String(from))}-${escapeHtml(String(to))} de ${escapeHtml(String(total))} · página ${escapeHtml(String(page))} de ${escapeHtml(String(totalPages))}
-        </span>
-      </div>
-
-      <div
-        style="
-          display:flex;
-          align-items:center;
-          gap:8px;
-          flex-wrap:wrap;
-        "
-      >
-        <span
-          style="
-            display:inline-flex;
-            align-items:center;
-            min-height:30px;
-            padding:0 10px;
-            border-radius:999px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-            color:var(--text-dim);
-            font-size:12px;
-            font-weight:var(--weight-bold);
-            letter-spacing:.04em;
-            text-transform:uppercase;
-          "
-        >
-          Vista tabla
-        </span>
-
-        ${
-          refreshing
-            ? `
-              <span
-                style="
-                  display:inline-flex;
-                  align-items:center;
-                  gap:8px;
-                  min-height:30px;
-                  padding:0 10px;
-                  border-radius:999px;
-                  border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 22%, var(--border-soft));
-                  background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-                  color:var(--text-soft);
-                  font-size:12px;
-                  font-weight:var(--weight-bold);
-                  letter-spacing:.04em;
-                  text-transform:uppercase;
-                "
-              >
-                <span
-                  aria-hidden="true"
-                  style="
-                    width:8px;
-                    height:8px;
-                    border-radius:999px;
-                    background:var(--accent, #7c5cff);
-                    animation:usuariosPulse 1.25s ease-in-out infinite;
-                  "
-                ></span>
-                Actualizando
-              </span>
-            `
-            : ""
-        }
-
-        <button
-          type="button"
-          data-action="prev-page"
-          ${page <= 1 ? "disabled" : ""}
-          style="
-            min-height:34px;
-            padding:0 12px;
-            border-radius:12px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-            color:var(--text-soft);
-            font-weight:var(--weight-bold);
-            cursor:${page <= 1 ? "not-allowed" : "pointer"};
-            opacity:${page <= 1 ? ".55" : "1"};
-          "
-        >
-          Anterior
-        </button>
-
-        <button
-          type="button"
-          data-action="next-page"
-          ${page >= totalPages ? "disabled" : ""}
-          style="
-            min-height:34px;
-            padding:0 12px;
-            border-radius:12px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-            color:var(--text-soft);
-            font-weight:var(--weight-bold);
-            cursor:${page >= totalPages ? "not-allowed" : "pointer"};
-            opacity:${page >= totalPages ? ".55" : "1"};
-          "
-        >
-          Siguiente
-        </button>
-      </div>
-    </div>
-  `;
-}
-
 /* =========================================================
-   AVATAR
-========================================================= */
-
-function renderIdentityAvatar({
-  avatarUrl = "",
-  initials = "US",
-  seed = "onion",
-  size = 44,
-  radius = 14,
-} = {}) {
-  const theme = getFallbackAvatarTheme(seed);
-  const safeUrl = safeText(avatarUrl, "");
-
-  if (safeUrl) {
-    return `
-      <div
-        aria-hidden="true"
-        style="
-          position:relative;
-          flex:0 0 ${size}px;
-          width:${size}px;
-          height:${size}px;
-          border-radius:${radius}px;
-          overflow:hidden;
-          border:1px solid var(--border-soft);
-          box-shadow:0 8px 24px rgba(0,0,0,.18);
-          background:var(--surface-glass);
-        "
-      >
-        <img
-          src="${escapeHtml(safeUrl)}"
-          alt=""
-          loading="lazy"
-          referrerpolicy="no-referrer"
-          style="
-            display:block;
-            width:100%;
-            height:100%;
-            object-fit:cover;
-          "
-          onerror="this.style.display='none'; this.parentNode.setAttribute('data-avatar-fallback','true');"
-        />
-        <span
-          style="
-            position:absolute;
-            inset:0;
-            display:none;
-            place-items:center;
-            background:${theme.bg};
-            color:${theme.text};
-            font-weight:var(--weight-black);
-            letter-spacing:.03em;
-            backdrop-filter:blur(8px);
-          "
-        >
-          ${escapeHtml(initials)}
-        </span>
-      </div>
-    `;
-  }
-
-  return `
-    <div
-      aria-hidden="true"
-      style="
-        position:relative;
-        flex:0 0 ${size}px;
-        width:${size}px;
-        height:${size}px;
-        border-radius:${radius}px;
-        display:grid;
-        place-items:center;
-        background:${theme.bg};
-        border:1px solid ${theme.border};
-        color:${theme.text};
-        font-weight:var(--weight-black);
-        letter-spacing:.03em;
-        box-shadow:0 8px 24px ${theme.glow};
-      "
-    >
-      ${escapeHtml(initials)}
-    </div>
-  `;
-}
-
-/* =========================================================
-   ROW
+   TABLE PARTIALS
 ========================================================= */
 
 function renderOpenUsuarioButton({ userId = "", isOpening = false } = {}) {
   return `
     <button
       type="button"
+      class="usuarios-open-btn${isOpening ? " is-loading" : ""}"
       data-action="open-user"
       data-user-id="${escapeHtml(userId)}"
-      ${isOpening ? "disabled" : ""}
-      style="
-        min-height:38px;
-        min-width:96px;
-        padding:0 12px;
-        border-radius:12px;
-        border:1px solid var(--btn-secondary-border, var(--border-soft));
-        background:var(--btn-secondary-bg, var(--surface-glass));
-        color:var(--btn-secondary-text, var(--text-soft));
-        font-weight:var(--weight-bold);
-        cursor:${isOpening ? "wait" : "pointer"};
-        white-space:nowrap;
-        opacity:${isOpening ? ".88" : "1"};
-      "
+      ${isOpening ? 'disabled aria-busy="true"' : ""}
     >
       ${
         isOpening
-          ? `
-            <span style="display:inline-flex; align-items:center; gap:8px;">
-              <span
-                aria-hidden="true"
-                style="
-                  width:14px;
-                  height:14px;
-                  border-radius:999px;
-                  border:2px solid color-mix(in srgb, var(--text-soft) 22%, transparent);
-                  border-top-color:var(--text-soft);
-                  animation:usuariosSpin .8s linear infinite;
-                "
-              ></span>
-              Abriendo...
-            </span>
-          `
-          : "Ver"
+          ? renderSpinner("Abriendo...")
+          : "<span>Ver detalle</span>"
       }
+    </button>
+  `;
+}
+
+function renderCopyUsuarioButton({ userId = "", username = "" } = {}) {
+  return `
+    <button
+      type="button"
+      class="usuarios-copy-btn"
+      data-action="copy-user-id"
+      data-user-id="${escapeHtml(userId)}"
+      data-username="${escapeHtml(username)}"
+    >
+      Copiar ID
     </button>
   `;
 }
 
 function renderUsuarioRow(item = {}, state = {}) {
   const localState = safeObject(state);
-  const openingUserId = safeText(localState?.openingUserId, "");
+  const openingUserId = safeText(localState.openingUserId, "");
   const userId = getUsuarioId(item);
   const code = getUsuarioCode(item);
   const name = getUsuarioName(item);
@@ -1641,297 +1737,71 @@ function renderUsuarioRow(item = {}, state = {}) {
   const email = getUsuarioEmail(item);
   const statusValue = getUsuarioStatusValue(item);
   const roleValue = getUsuarioRoleValue(item);
-  const status = getStatusLabel(statusValue);
-  const role = getRoleLabel(roleValue);
   const department = getDepartment(item);
-  const updatedAtRaw = getUpdatedAt(item);
-  const createdAtRaw = getCreatedAt(item);
+  const createdAt = formatDate(getCreatedAt(item));
+  const updatedAtDate = formatDate(getUpdatedAt(item));
   const lastLoginAtRaw = getLastLoginAt(item);
-  const updatedAt = formatRelativeDate(updatedAtRaw);
-  const updatedAtDate = formatDate(updatedAtRaw);
-  const createdAt = formatDate(createdAtRaw);
   const lastLoginAt = lastLoginAtRaw
     ? formatRelativeDate(lastLoginAtRaw)
     : "Sin acceso";
-  const initials = getUsuarioInitials(item);
-  const avatarUrl = getUsuarioAvatarUrl(item);
-  const avatarSeed = getAvatarToneSeed(item);
+
   const isOpening = Boolean(openingUserId && openingUserId === userId);
 
   return `
-    <tr
-      class="usuarios-row ${isOpening ? "is-opening" : ""}"
-      data-user-id="${escapeHtml(userId)}"
-      style="
-        transition:background .18s ease, opacity .18s ease, transform .18s ease;
-        opacity:${isOpening ? ".72" : "1"};
-      "
-    >
-      <td
-        style="
-          padding:14px 18px;
-          border-bottom:1px solid var(--border-soft);
-          vertical-align:middle;
-        "
-      >
-        <div style="display:flex; gap:12px; align-items:center; min-width:320px;">
-          ${renderIdentityAvatar({
-            avatarUrl,
-            initials,
-            seed: avatarSeed,
-            size: 44,
-            radius: 14,
-          })}
+    <tr class="usuarios-row ${isOpening ? "is-opening" : ""}" data-user-id="${escapeHtml(userId)}">
+      <td>
+        <div class="usuarios-main">
+          ${renderAvatar(item, { size: 48, radius: 16 })}
 
-          <div style="display:grid; gap:4px; min-width:0; flex:1;">
-            <button
-              type="button"
-              data-action="open-user"
-              data-user-id="${escapeHtml(userId)}"
-              ${isOpening ? "disabled" : ""}
-              style="
-                margin:0;
-                padding:0;
-                border:none;
-                background:transparent;
-                text-align:left;
-                color:var(--text-strong);
-                font-size:15px;
-                font-weight:var(--weight-black);
-                letter-spacing:-.02em;
-                line-height:1.2;
-                cursor:${isOpening ? "wait" : "pointer"};
-              "
-              title="Abrir detalle de usuario"
-            >
-              ${escapeHtml(code)}
-            </button>
-
-            <span
-              style="
-                color:var(--text-soft);
-                font-size:13px;
-                font-weight:var(--weight-semibold);
-                line-height:1.32;
-                word-break:break-word;
-              "
-            >
-              ${escapeHtml(name)}
-            </span>
-
-            <span
-              style="
-                color:var(--text-dim);
-                font-size:12px;
-                line-height:1.32;
-                word-break:break-word;
-              "
-            >
-              ${escapeHtml(preview)}
-            </span>
+          <div class="usuarios-main-copy">
+            <div class="usuarios-user-id">${escapeHtml(code)}</div>
+            <div class="usuarios-user-subject">${escapeHtml(name)}</div>
+            <div class="usuarios-user-description">${escapeHtml(preview)}</div>
           </div>
         </div>
       </td>
 
-      <td
-        style="
-          padding:14px 14px;
-          border-bottom:1px solid var(--border-soft);
-          vertical-align:middle;
-          white-space:nowrap;
-        "
-      >
-        ${renderStatusChip(status, getStatusChipStyle(statusValue))}
+      <td>
+        <span class="${getStatusChipClass(statusValue)}">
+          ${escapeHtml(getStatusLabel(statusValue))}
+        </span>
       </td>
 
-      <td
-        style="
-          padding:14px 14px;
-          border-bottom:1px solid var(--border-soft);
-          vertical-align:middle;
-          white-space:nowrap;
-        "
-      >
-        ${renderStatusChip(role, getRoleChipStyle(roleValue))}
+      <td>
+        <span class="${getRoleChipClass(roleValue)}">
+          ${escapeHtml(getRoleLabel(roleValue))}
+        </span>
       </td>
 
-      <td
-        style="
-          padding:14px 14px;
-          border-bottom:1px solid var(--border-soft);
-          vertical-align:middle;
-          white-space:nowrap;
-        "
-      >
-        <div style="display:grid; gap:4px;">
-          <strong
-            style="
-              color:var(--text-strong);
-              font-size:13px;
-              line-height:1.2;
-            "
-          >
-            ${escapeHtml(createdAt)}
-          </strong>
+      <td>
+        <span class="usuarios-date-inline">${escapeHtml(createdAt)}</span>
+      </td>
 
-          <span
-            style="
-              color:var(--text-dim);
-              font-size:11px;
-              line-height:1.2;
-              text-transform:uppercase;
-              letter-spacing:.04em;
-            "
-          >
-            Alta
-          </span>
+      <td>
+        <div class="usuarios-contact-block">
+          <span class="usuarios-contact-primary">${escapeHtml(email)}</span>
+          <span class="usuarios-contact-secondary">${escapeHtml(getUsuarioPhone(item))}</span>
         </div>
       </td>
 
-      <td
-        style="
-          padding:14px 14px;
-          border-bottom:1px solid var(--border-soft);
-          vertical-align:middle;
-        "
-      >
-        <div style="display:grid; gap:4px; min-width:170px;">
-          <strong
-            style="
-              color:var(--text-strong);
-              font-size:13px;
-              line-height:1.2;
-              word-break:break-word;
-            "
-          >
-            ${escapeHtml(email)}
-          </strong>
-
-          <span
-            style="
-              color:var(--text-dim);
-              font-size:12px;
-              line-height:1.2;
-              word-break:break-word;
-            "
-          >
-            ${escapeHtml(getUsuarioPhone(item))}
-          </span>
+      <td>
+        <div class="usuarios-contact-block">
+          <span class="usuarios-contact-primary">${escapeHtml(department)}</span>
+          <span class="usuarios-contact-secondary">Equipo</span>
         </div>
       </td>
 
-      <td
-        style="
-          padding:14px 14px;
-          border-bottom:1px solid var(--border-soft);
-          vertical-align:middle;
-        "
-      >
-        <div style="display:grid; gap:4px; min-width:120px;">
-          <strong
-            style="
-              color:var(--text-strong);
-              font-size:13px;
-              line-height:1.2;
-              word-break:break-word;
-            "
-          >
-            ${escapeHtml(department)}
-          </strong>
-
-          <span
-            style="
-              color:var(--text-dim);
-              font-size:11px;
-              line-height:1.2;
-              text-transform:uppercase;
-              letter-spacing:.04em;
-            "
-          >
-            Equipo
-          </span>
+      <td>
+        <div class="usuarios-activity-block">
+          <span class="usuarios-activity-primary">${escapeHtml(lastLoginAt)}</span>
+          <span class="usuarios-activity-secondary">${escapeHtml(updatedAtDate)}</span>
         </div>
       </td>
 
-      <td
-        style="
-          padding:14px 14px;
-          border-bottom:1px solid var(--border-soft);
-          vertical-align:middle;
-          white-space:nowrap;
-        "
-      >
-        <div style="display:grid; gap:6px;">
-          <span
-            style="
-              color:var(--text-soft);
-              font-size:13px;
-              line-height:1.2;
-              font-weight:var(--weight-semibold);
-            "
-          >
-            ${escapeHtml(lastLoginAt)}
-          </span>
-
-          <span
-            style="
-              display:inline-flex;
-              align-items:center;
-              width:max-content;
-              min-height:24px;
-              padding:0 8px;
-              border-radius:999px;
-              border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 20%, var(--border-soft));
-              background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-              color:var(--text-soft);
-              font-size:11px;
-              font-weight:var(--weight-bold);
-              letter-spacing:.04em;
-              text-transform:uppercase;
-            "
-          >
-            ${escapeHtml(updatedAtDate)}
-          </span>
-        </div>
-      </td>
-
-      <td
-        style="
-          padding:14px 18px;
-          border-bottom:1px solid var(--border-soft);
-          vertical-align:middle;
-          text-align:right;
-        "
-      >
-        <div
-          style="
-            display:flex;
-            justify-content:flex-end;
-            gap:8px;
-            flex-wrap:wrap;
-          "
-        >
+      <td class="usuarios-cell--actions">
+        <div class="usuarios-actions">
           ${renderOpenUsuarioButton({ userId, isOpening })}
-
-          <button
-            type="button"
-            data-action="copy-user-id"
-            data-user-id="${escapeHtml(userId)}"
-            data-username="${escapeHtml(code)}"
-            style="
-              min-height:38px;
-              padding:0 12px;
-              border-radius:12px;
-              border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
-              background:var(--btn-primary-bg, var(--accent, #7c5cff));
-              color:var(--btn-primary-text, #fff);
-              font-weight:var(--weight-bold);
-              cursor:pointer;
-              white-space:nowrap;
-            "
-          >
-            Copiar ID
-          </button>
+          ${renderCopyUsuarioButton({ userId, username: code })}
         </div>
       </td>
     </tr>
@@ -1940,7 +1810,7 @@ function renderUsuarioRow(item = {}, state = {}) {
 
 function renderMobileUsuarioCard(item = {}, state = {}) {
   const localState = safeObject(state);
-  const openingUserId = safeText(localState?.openingUserId, "");
+  const openingUserId = safeText(localState.openingUserId, "");
   const userId = getUsuarioId(item);
   const code = getUsuarioCode(item);
   const name = getUsuarioName(item);
@@ -1948,248 +1818,65 @@ function renderMobileUsuarioCard(item = {}, state = {}) {
   const email = getUsuarioEmail(item);
   const statusValue = getUsuarioStatusValue(item);
   const roleValue = getUsuarioRoleValue(item);
-  const status = getStatusLabel(statusValue);
-  const role = getRoleLabel(roleValue);
   const department = getDepartment(item);
   const createdAt = formatDate(getCreatedAt(item));
   const lastLoginAtRaw = getLastLoginAt(item);
   const lastLoginAt = lastLoginAtRaw
     ? formatRelativeDate(lastLoginAtRaw)
     : "Sin acceso";
-  const initials = getUsuarioInitials(item);
-  const avatarUrl = getUsuarioAvatarUrl(item);
-  const avatarSeed = getAvatarToneSeed(item);
+
   const isOpening = Boolean(openingUserId && openingUserId === userId);
 
   return `
-    <article
-      class="usuarios-mobile-card panel-surface"
-      data-user-id="${escapeHtml(userId)}"
-      style="
-        display:grid;
-        gap:16px;
-        padding:18px;
-        border-radius:18px;
-        border:1px solid var(--border-soft);
-        background:var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-sm);
-        opacity:${isOpening ? ".72" : "1"};
-      "
-    >
-      <div
-        style="
-          display:flex;
-          align-items:flex-start;
-          justify-content:space-between;
-          gap:12px;
-        "
-      >
+    <article class="usuarios-mobile-card" data-user-id="${escapeHtml(userId)}" style="opacity:${isOpening ? ".72" : "1"};">
+      <div class="usuarios-mobile-top">
         <div style="display:flex; gap:12px; min-width:0; flex:1;">
-          ${renderIdentityAvatar({
-            avatarUrl,
-            initials,
-            seed: avatarSeed,
-            size: 42,
-            radius: 14,
-          })}
+          ${renderAvatar(item, { size: 44, radius: 16 })}
 
-          <div style="display:grid; gap:5px; min-width:0;">
-            <button
-              type="button"
-              data-action="open-user"
-              data-user-id="${escapeHtml(userId)}"
-              ${isOpening ? "disabled" : ""}
-              style="
-                margin:0;
-                padding:0;
-                border:none;
-                background:transparent;
-                text-align:left;
-                color:var(--text-strong);
-                font-size:var(--font-base);
-                font-weight:var(--weight-black);
-                letter-spacing:-.02em;
-                line-height:1.2;
-                cursor:${isOpening ? "wait" : "pointer"};
-              "
-            >
-              ${escapeHtml(code)}
-            </button>
-
-            <span
-              style="
-                color:var(--text-soft);
-                font-size:var(--font-sm);
-                font-weight:var(--weight-semibold);
-                line-height:1.35;
-                word-break:break-word;
-              "
-            >
-              ${escapeHtml(name)}
-            </span>
-
-            <span
-              style="
-                color:var(--text-dim);
-                font-size:12px;
-                line-height:1.35;
-                word-break:break-word;
-              "
-            >
-              ${escapeHtml(preview)}
-            </span>
+          <div class="usuarios-main-copy" style="flex:1;">
+            <div class="usuarios-user-id">${escapeHtml(code)}</div>
+            <div class="usuarios-user-subject">${escapeHtml(name)}</div>
+            <div class="usuarios-user-description">${escapeHtml(preview)}</div>
           </div>
         </div>
 
         <div style="display:grid; gap:8px; justify-items:end;">
-          ${renderStatusChip(status, getStatusChipStyle(statusValue))}
-          ${renderStatusChip(role, getRoleChipStyle(roleValue))}
+          <span class="${getStatusChipClass(statusValue)}">
+            ${escapeHtml(getStatusLabel(statusValue))}
+          </span>
+
+          <span class="${getRoleChipClass(roleValue)}">
+            ${escapeHtml(getRoleLabel(roleValue))}
+          </span>
         </div>
       </div>
 
-      <div
-        style="
-          display:grid;
-          grid-template-columns:repeat(2, minmax(0, 1fr));
-          gap:10px;
-        "
-      >
-        <div
-          style="
-            display:grid;
-            gap:4px;
-            padding:12px;
-            border-radius:14px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-          "
-        >
-          <span
-            style="
-              font-size:11px;
-              color:var(--text-faint);
-              font-weight:var(--weight-bold);
-              letter-spacing:.05em;
-              text-transform:uppercase;
-            "
-          >
-            Email
-          </span>
-          <strong style="color:var(--text-strong); font-size:var(--font-sm);">
-            ${escapeHtml(email)}
-          </strong>
-          <span style="color:var(--text-dim); font-size:12px; line-height:1.35;">
-            ${escapeHtml(getUsuarioPhone(item))}
-          </span>
+      <div class="usuarios-mobile-meta">
+        <div class="usuarios-mobile-meta-card">
+          <span class="usuarios-mobile-meta-label">Email</span>
+          <strong class="usuarios-mobile-meta-value">${escapeHtml(email)}</strong>
+          <span class="usuarios-contact-secondary">${escapeHtml(getUsuarioPhone(item))}</span>
         </div>
 
-        <div
-          style="
-            display:grid;
-            gap:4px;
-            padding:12px;
-            border-radius:14px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-          "
-        >
-          <span
-            style="
-              font-size:11px;
-              color:var(--text-faint);
-              font-weight:var(--weight-bold);
-              letter-spacing:.05em;
-              text-transform:uppercase;
-            "
-          >
-            Equipo
-          </span>
-          <strong style="color:var(--text-strong); font-size:var(--font-sm);">
-            ${escapeHtml(department)}
-          </strong>
+        <div class="usuarios-mobile-meta-card">
+          <span class="usuarios-mobile-meta-label">Equipo</span>
+          <strong class="usuarios-mobile-meta-value">${escapeHtml(department)}</strong>
         </div>
 
-        <div
-          style="
-            display:grid;
-            gap:4px;
-            padding:12px;
-            border-radius:14px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-          "
-        >
-          <span
-            style="
-              font-size:11px;
-              color:var(--text-faint);
-              font-weight:var(--weight-bold);
-              letter-spacing:.05em;
-              text-transform:uppercase;
-            "
-          >
-            Alta
-          </span>
-          <strong style="color:var(--text-strong); font-size:var(--font-sm);">
-            ${escapeHtml(createdAt)}
-          </strong>
+        <div class="usuarios-mobile-meta-card">
+          <span class="usuarios-mobile-meta-label">Alta</span>
+          <strong class="usuarios-mobile-meta-value">${escapeHtml(createdAt)}</strong>
         </div>
 
-        <div
-          style="
-            display:grid;
-            gap:4px;
-            padding:12px;
-            border-radius:14px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-          "
-        >
-          <span
-            style="
-              font-size:11px;
-              color:var(--text-faint);
-              font-weight:var(--weight-bold);
-              letter-spacing:.05em;
-              text-transform:uppercase;
-            "
-          >
-            Último acceso
-          </span>
-          <strong style="color:var(--text-strong); font-size:var(--font-sm);">
-            ${escapeHtml(lastLoginAt)}
-          </strong>
+        <div class="usuarios-mobile-meta-card">
+          <span class="usuarios-mobile-meta-label">Último acceso</span>
+          <strong class="usuarios-mobile-meta-value">${escapeHtml(lastLoginAt)}</strong>
         </div>
       </div>
 
-      <div
-        style="
-          display:flex;
-          gap:8px;
-          flex-wrap:wrap;
-          justify-content:flex-start;
-        "
-      >
+      <div class="usuarios-mobile-actions">
         ${renderOpenUsuarioButton({ userId, isOpening })}
-
-        <button
-          type="button"
-          data-action="copy-user-id"
-          data-user-id="${escapeHtml(userId)}"
-          data-username="${escapeHtml(code)}"
-          style="
-            min-height:38px;
-            padding:0 12px;
-            border-radius:12px;
-            border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
-            background:var(--btn-primary-bg, var(--accent, #7c5cff));
-            color:var(--btn-primary-text, #fff);
-            font-weight:var(--weight-bold);
-            cursor:pointer;
-          "
-        >
-          Copiar ID
-        </button>
+        ${renderCopyUsuarioButton({ userId, username: code })}
       </div>
     </article>
   `;
@@ -2197,214 +1884,53 @@ function renderMobileUsuarioCard(item = {}, state = {}) {
 
 function renderDesktopTable(items = [], state = {}) {
   return `
-    <div
-      class="usuarios-table-scroll"
-      style="
-        width:100%;
-        overflow:auto;
-      "
-    >
-      <table
-        class="usuarios-table"
-        style="
-          width:100%;
-          min-width:1120px;
-          border-collapse:separate;
-          border-spacing:0;
-          table-layout:fixed;
-        "
-      >
-        <colgroup>
-          <col style="width:31%">
-          <col style="width:10%">
-          <col style="width:10%">
-          <col style="width:11%">
-          <col style="width:14%">
-          <col style="width:12%">
-          <col style="width:12%">
-          <col style="width:14%">
-        </colgroup>
+    <div class="usuarios-desktop-table">
+      <div class="usuarios-table-shell">
+        <table class="usuarios-table" role="table" aria-label="Listado de usuarios">
+          <colgroup>
+            <col style="width:30%;">
+            <col style="width:10%;">
+            <col style="width:10%;">
+            <col style="width:10%;">
+            <col style="width:14%;">
+            <col style="width:10%;">
+            <col style="width:10%;">
+            <col style="width:16%;">
+          </colgroup>
 
-        <thead>
-          <tr
-            style="
-              background:var(--surface-2, var(--surface-glass));
-            "
-          >
-            <th
-              style="
-                padding:16px 18px;
-                text-align:left;
-                font-size:12px;
-                letter-spacing:.08em;
-                text-transform:uppercase;
-                color:var(--text-dim);
-                font-weight:var(--weight-bold);
-                border-bottom:1px solid var(--border-soft);
-                white-space:nowrap;
-              "
-            >
-              Usuario / detalle
-            </th>
+          <thead>
+            <tr>
+              <th>Usuario</th>
+              <th>Estado</th>
+              <th>Rol</th>
+              <th>Alta</th>
+              <th>Contacto</th>
+              <th>Equipo</th>
+              <th>Actividad</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
 
-            <th
-              style="
-                padding:16px 14px;
-                text-align:left;
-                font-size:12px;
-                letter-spacing:.08em;
-                text-transform:uppercase;
-                color:var(--text-dim);
-                font-weight:var(--weight-bold);
-                border-bottom:1px solid var(--border-soft);
-                white-space:nowrap;
-              "
-            >
-              Estado
-            </th>
-
-            <th
-              style="
-                padding:16px 14px;
-                text-align:left;
-                font-size:12px;
-                letter-spacing:.08em;
-                text-transform:uppercase;
-                color:var(--text-dim);
-                font-weight:var(--weight-bold);
-                border-bottom:1px solid var(--border-soft);
-                white-space:nowrap;
-              "
-            >
-              Rol
-            </th>
-
-            <th
-              style="
-                padding:16px 14px;
-                text-align:left;
-                font-size:12px;
-                letter-spacing:.08em;
-                text-transform:uppercase;
-                color:var(--text-dim);
-                font-weight:var(--weight-bold);
-                border-bottom:1px solid var(--border-soft);
-                white-space:nowrap;
-              "
-            >
-              Alta
-            </th>
-
-            <th
-              style="
-                padding:16px 14px;
-                text-align:left;
-                font-size:12px;
-                letter-spacing:.08em;
-                text-transform:uppercase;
-                color:var(--text-dim);
-                font-weight:var(--weight-bold);
-                border-bottom:1px solid var(--border-soft);
-                white-space:nowrap;
-              "
-            >
-              Contacto
-            </th>
-
-            <th
-              style="
-                padding:16px 14px;
-                text-align:left;
-                font-size:12px;
-                letter-spacing:.08em;
-                text-transform:uppercase;
-                color:var(--text-dim);
-                font-weight:var(--weight-bold);
-                border-bottom:1px solid var(--border-soft);
-                white-space:nowrap;
-              "
-            >
-              Equipo
-            </th>
-
-            <th
-              style="
-                padding:16px 14px;
-                text-align:left;
-                font-size:12px;
-                letter-spacing:.08em;
-                text-transform:uppercase;
-                color:var(--text-dim);
-                font-weight:var(--weight-bold);
-                border-bottom:1px solid var(--border-soft);
-                white-space:nowrap;
-              "
-            >
-              Actividad
-            </th>
-
-            <th
-              style="
-                padding:16px 18px;
-                text-align:right;
-                font-size:12px;
-                letter-spacing:.08em;
-                text-transform:uppercase;
-                color:var(--text-dim);
-                font-weight:var(--weight-bold);
-                border-bottom:1px solid var(--border-soft);
-                white-space:nowrap;
-              "
-            >
-              Acciones
-            </th>
-          </tr>
-        </thead>
-
-        <tbody>
-          ${safeArray(items)
-            .map((item) => renderUsuarioRow(item, state))
-            .join("")}
-        </tbody>
-      </table>
+          <tbody>
+            ${safeArray(items).map((item) => renderUsuarioRow(item, state)).join("")}
+          </tbody>
+        </table>
+      </div>
     </div>
   `;
 }
 
 function renderMobileCards(items = [], state = {}) {
   return `
-    <div
-      class="usuarios-mobile-list"
-      style="
-        display:none;
-        gap:14px;
-        padding:14px;
-      "
-    >
-      ${safeArray(items)
-        .map((item) => renderMobileUsuarioCard(item, state))
-        .join("")}
+    <div class="usuarios-mobile-list">
+      ${safeArray(items).map((item) => renderMobileUsuarioCard(item, state)).join("")}
     </div>
   `;
 }
 
 function renderTableLoadingOverlay(message = "Actualizando usuarios...") {
   return `
-    <div
-      class="usuarios-table-overlay"
-      aria-live="polite"
-      aria-busy="true"
-      style="
-        position:absolute;
-        inset:0;
-        display:grid;
-        place-items:center;
-        padding:18px;
-        background:color-mix(in srgb, var(--surface-1, #0f1115) 74%, transparent);
-        backdrop-filter:blur(4px);
-        z-index:4;
-      "
-    >
+    <div class="usuarios-table-overlay" aria-live="polite" aria-busy="true">
       <div
         style="
           display:grid;
@@ -2454,14 +1980,76 @@ function renderTableLoadingOverlay(message = "Actualizando usuarios...") {
 }
 
 /* =========================================================
-   MAIN
+   TABLE
 ========================================================= */
+
+function renderTableToolbar({
+  total = 0,
+  page = 1,
+  totalPages = 1,
+  from = 0,
+  to = 0,
+  refreshing = false,
+} = {}) {
+  return `
+    <div class="usuarios-history-head">
+      <div class="usuarios-history-copy">
+        <h2 class="usuarios-history-title">Historial de usuarios</h2>
+        <p class="usuarios-history-subtitle">
+          ${escapeHtml(`Mostrando ${from}-${to} de ${total} · página ${page} de ${totalPages}`)}
+        </p>
+      </div>
+
+      <div class="usuarios-pagination">
+        ${
+          refreshing
+            ? `
+              <span class="usuarios-meta-pill">
+                <span
+                  aria-hidden="true"
+                  style="
+                    width:8px;
+                    height:8px;
+                    border-radius:999px;
+                    background:var(--accent, #7c5cff);
+                    margin-right:8px;
+                    display:inline-block;
+                    animation:usuariosPulse 1.25s ease-in-out infinite;
+                  "
+                ></span>
+                Actualizando
+              </span>
+            `
+            : ""
+        }
+
+        <button
+          type="button"
+          class="usuarios-pagination-btn"
+          data-action="prev-page"
+          ${page <= 1 ? 'disabled aria-disabled="true"' : ""}
+        >
+          Anterior
+        </button>
+
+        <button
+          type="button"
+          class="usuarios-pagination-btn"
+          data-action="next-page"
+          ${page >= totalPages ? 'disabled aria-disabled="true"' : ""}
+        >
+          Siguiente
+        </button>
+      </div>
+    </div>
+  `;
+}
 
 export function renderTable({ items = [], state = {} } = {}) {
   const localState = state || usuariosState || {};
   const list = getResolvedItems(items);
-  const refreshing = Boolean(localState?.refreshing);
-  const loading = Boolean(localState?.loading);
+  const refreshing = Boolean(localState.refreshing);
+  const loading = Boolean(localState.loading);
 
   if (loading && !list.length) {
     return renderLoadingState();
@@ -2478,19 +2066,7 @@ export function renderTable({ items = [], state = {} } = {}) {
   const pagination = getPagination(list, localState);
 
   return `
-    <section
-      class="usuarios-table-wrap panel-surface"
-      style="
-        position:relative;
-        overflow:hidden;
-        border-radius:var(--panel-radius);
-        border:1px solid var(--border-soft);
-        background:
-          linear-gradient(180deg, color-mix(in srgb, var(--surface-2, transparent) 60%, transparent), transparent),
-          var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-sm);
-      "
-    >
+    <section class="usuarios-history">
       ${renderTableToolbar({
         total: pagination.totalItems,
         page: pagination.page,
@@ -2500,75 +2076,10 @@ export function renderTable({ items = [], state = {} } = {}) {
         refreshing,
       })}
 
-      <div class="usuarios-desktop-table">
-        ${renderDesktopTable(pagination.items, localState)}
-      </div>
-
+      ${renderDesktopTable(pagination.items, localState)}
       ${renderMobileCards(pagination.items, localState)}
 
       ${refreshing ? renderTableLoadingOverlay("Actualizando usuarios...") : ""}
-
-      <style>
-        @keyframes usuariosSpin {
-          to { transform:rotate(360deg); }
-        }
-
-        .usuarios-table tbody tr:hover {
-          background: color-mix(in srgb, var(--accent, #7c5cff) 4%, transparent);
-        }
-
-        .usuarios-table tbody tr:last-child td {
-          border-bottom: none;
-        }
-
-        .usuarios-table tbody tr.is-opening:hover {
-          background: color-mix(in srgb, var(--warning-strong, #ffbc42) 5%, transparent);
-        }
-
-        .usuarios-table-scroll::-webkit-scrollbar {
-          height: 10px;
-          width: 10px;
-        }
-
-        .usuarios-table-scroll::-webkit-scrollbar-thumb {
-          background: color-mix(in srgb, var(--accent, #7c5cff) 20%, var(--border-soft));
-          border-radius: 999px;
-        }
-
-        .usuarios-table-scroll::-webkit-scrollbar-track {
-          background: transparent;
-        }
-
-        .usuarios-table img + span {
-          display:none;
-        }
-
-        .usuarios-table [data-avatar-fallback="true"] > img {
-          display:none !important;
-        }
-
-        .usuarios-table [data-avatar-fallback="true"] > span {
-          display:grid !important;
-        }
-
-        .usuarios-mobile-list [data-avatar-fallback="true"] > img {
-          display:none !important;
-        }
-
-        .usuarios-mobile-list [data-avatar-fallback="true"] > span {
-          display:grid !important;
-        }
-
-        @media (max-width: 980px) {
-          .usuarios-desktop-table {
-            display: none !important;
-          }
-
-          .usuarios-mobile-list {
-            display: grid !important;
-          }
-        }
-      </style>
     </section>
   `;
 }
@@ -2576,3 +2087,20 @@ export function renderTable({ items = [], state = {} } = {}) {
 export function renderCards({ items = [], state = {} } = {}) {
   return renderTable({ items, state });
 }
+
+/* =========================================================
+   FULL TEMPLATE
+========================================================= */
+
+export function renderUsuariosTableTemplate(input = {}) {
+  const data = safeObject(input);
+
+  return `
+    <section class="usuarios-view-root">
+      ${renderHeader(data)}
+      ${renderTable(data)}
+    </section>
+  `;
+}
+
+export default renderUsuariosTableTemplate;

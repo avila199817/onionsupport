@@ -1,19 +1,8 @@
 /* =========================================================
-   Onion SPA - Incidencias Table Template
-   Archivo: src/views/incidencias/incidencias.table.template.js
+   Onion SPA - Facturas Template
+   Archivo: src/views/facturas/facturas.template.js
 
-   FINAL PRODUCTION TEMPLATE · LIST VIEW · SOFT APPLE MODE
-
-   RESPONSABILIDADES:
-   - render del hero/header de incidencias
-   - render de tabla productiva con paginación real
-   - compatibilidad con IncidenciasView.js
-   - estado loading visual en "Ver detalle"
-   - estado loading visual en "Crear nueva incidencia"
-   - título más compacto para caber en una línea
-   - fechas siempre en una sola línea
-   - botón "Ver detalle" ajustado al ancho del texto
-   - loading de tabla suave en carga / refresh
+   FINAL PRODUCTION TEMPLATE · FACTURAS 10/10 · VISUAL FIX
 ========================================================= */
 
 /* =========================================================
@@ -51,7 +40,6 @@ function first(...values) {
       return value;
     }
   }
-
   return null;
 }
 
@@ -136,102 +124,84 @@ function formatRelativeDate(value = null) {
   return formatDateTime(value);
 }
 
-function formatLastUpdate(value = null) {
-  if (!value) return "Sin fecha";
+/* =========================================================
+   DOMAIN HELPERS
+========================================================= */
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Sin fecha";
-
-  const diffHours = Math.abs(Date.now() - date.getTime()) / 3600000;
-
-  if (diffHours <= 72) {
-    return formatRelativeDate(value);
-  }
-
-  return formatDateTime(value);
-}
-
-function getTicketId(item = {}) {
+function getFacturaId(item = {}) {
   return safeText(
     first(
-      item.ticketId,
-      item.code,
-      item.numero,
       item.id,
-      item?.raw?.ticketId,
-      item?.raw?.code,
+      item._id,
+      item.facturaId,
+      item.numero,
+      item?.raw?.id,
+      item?.raw?._id,
+      item?.raw?.facturaId,
+      item?.raw?.numero
+    ),
+    "FAC-SIN-ID"
+  );
+}
+
+function getFacturaNumero(item = {}) {
+  return safeText(
+    first(
+      item.numero,
+      item.invoiceNumber,
+      item.code,
+      item.facturaId,
+      item.id,
       item?.raw?.numero,
+      item?.raw?.invoiceNumber,
+      item?.raw?.code,
+      item?.raw?.facturaId,
       item?.raw?.id
     ),
-    "INC-SIN-ID"
-  );
-}
-
-function getSubject(item = {}) {
-  return safeText(
-    first(
-      item.subject,
-      item.title,
-      item.asunto,
-      item.name,
-      item?.raw?.subject,
-      item?.raw?.title,
-      item?.raw?.asunto,
-      item?.raw?.name
-    ),
-    "Incidencia sin asunto"
-  );
-}
-
-function getDescription(item = {}) {
-  return safeText(
-    first(
-      item.description,
-      item.preview,
-      item.message,
-      item.descripcion,
-      item?.raw?.description,
-      item?.raw?.preview,
-      item?.raw?.message,
-      item?.raw?.descripcion
-    ),
-    "Sin descripción."
+    "Factura sin número"
   );
 }
 
 function getClientName(item = {}) {
   return safeText(
     first(
-      item.clientName,
-      item.name,
+      item.clienteNombre,
       item.cliente?.nombre,
-      item.cliente?.name,
+      item.clientName,
       item.client?.name,
-      item?.raw?.clientName,
-      item?.raw?.name,
+      item.name,
+      item.nombre,
+      item.clienteEmpresa,
+      item.cliente?.empresa,
+      item.company,
+      item?.raw?.clienteNombre,
       item?.raw?.cliente?.nombre,
-      item?.raw?.cliente?.name,
-      item?.raw?.client?.name
+      item?.raw?.clientName,
+      item?.raw?.client?.name,
+      item?.raw?.name,
+      item?.raw?.nombre,
+      item?.raw?.clienteEmpresa,
+      item?.raw?.cliente?.empresa
     ),
-    getSubject(item)
+    "Cliente"
   );
 }
 
-function getAvatarUrl(item = {}) {
+function getClientEmail(item = {}) {
   return safeText(
     first(
-      item.clientAvatar,
-      item.avatar,
-      item.avatarUrl,
-      item.cliente?.avatar,
-      item.cliente?.avatarUrl,
-      item.client?.avatar,
-      item.client?.avatarUrl,
-      item?.raw?.clientAvatar,
-      item?.raw?.avatar,
-      item?.raw?.avatarUrl
+      item.clienteEmail,
+      item.cliente?.email,
+      item.email,
+      item.clientEmail,
+      item.client?.email,
+      item?.raw?.clienteEmail,
+      item?.raw?.cliente?.email,
+      item?.raw?.email,
+      item?.raw?.clientEmail,
+      item?.raw?.client?.email
     ),
-    ""
+    "Sin email"
   );
 }
 
@@ -248,117 +218,163 @@ function getInitials(value = "") {
   return `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase();
 }
 
-function getStatusKey(value = "") {
+function getEstadoPagoKey(value = "") {
   const key = safeText(value, "").toLowerCase();
 
+  if (["paid", "pagada", "pagado", "cobrada"].includes(key)) return "paid";
   if (["pending", "pendiente"].includes(key)) return "pending";
-  if (["open", "abierta", "abierto"].includes(key)) return "open";
-  if (["progress", "in_progress", "in-progress", "en proceso", "en_proceso"].includes(key)) return "progress";
-  if (["resolved", "resuelta", "resuelto"].includes(key)) return "resolved";
-  if (["closed", "cerrada", "cerrado"].includes(key)) return "closed";
-  if (["cancelled", "cancelada", "cancelado"].includes(key)) return "closed";
+  if (["partial", "parcial"].includes(key)) return "partial";
+  if (["overdue", "vencida"].includes(key)) return "overdue";
+  if (["cancelled", "cancelada"].includes(key)) return "cancelled";
+  if (["draft", "borrador"].includes(key)) return "draft";
 
   return "pending";
 }
 
-function getStatusLabel(value = "") {
-  const key = getStatusKey(value);
+function getEstadoPagoLabel(value = "") {
+  const key = getEstadoPagoKey(value);
 
-  if (key === "open") return "Abierta";
+  if (key === "paid") return "Pagada";
   if (key === "pending") return "Pendiente";
-  if (key === "progress") return "En proceso";
-  if (key === "resolved") return "Resuelta";
-  if (key === "closed") return "Cerrada";
+  if (key === "partial") return "Pago parcial";
+  if (key === "overdue") return "Vencida";
+  if (key === "cancelled") return "Cancelada";
+  if (key === "draft") return "Borrador";
 
   return safeText(value, "Pendiente");
 }
 
-function getImporteLabel(item = {}) {
-  const amount = first(
-    item.total,
-    item.amount,
-    item.importe,
-    item.price,
-    item?.raw?.total,
-    item?.raw?.amount,
-    item?.raw?.importe
+function getEstadoPagoChipClass(value = "") {
+  const key = getEstadoPagoKey(value);
+
+  if (key === "paid") return "facturas-chip--paid";
+  if (key === "pending") return "facturas-chip--pending";
+  if (key === "partial") return "facturas-chip--partial";
+  if (key === "overdue") return "facturas-chip--overdue";
+  if (key === "cancelled") return "facturas-chip--cancelled";
+  if (key === "draft") return "facturas-chip--draft";
+
+  return "facturas-chip--pending";
+}
+
+function getIncidenciaId(item = {}) {
+  return safeText(
+    first(
+      item.ticketId,
+      item.incidenciaId,
+      item.incidencia?.id,
+      item.incidencia?.ticketId,
+      item.ticket?.id,
+      item.ticket?.ticketId,
+      item.relatedTicketId,
+      item.relatedIncidentId,
+      item.supportTicketId,
+      item.caseId,
+      item?.raw?.ticketId,
+      item?.raw?.incidenciaId,
+      item?.raw?.incidencia?.id,
+      item?.raw?.incidencia?.ticketId,
+      item?.raw?.ticket?.id,
+      item?.raw?.ticket?.ticketId,
+      item?.raw?.relatedTicketId,
+      item?.raw?.relatedIncidentId,
+      item?.raw?.supportTicketId,
+      item?.raw?.caseId
+    ),
+    "—"
+  );
+}
+
+function getTotalLabel(item = {}) {
+  return formatMoney(
+    first(
+      item.total,
+      item.amount,
+      item.importe,
+      item?.raw?.total,
+      item?.raw?.amount,
+      item?.raw?.importe,
+      0
+    ),
+    first(
+      item.moneda,
+      item.currency,
+      item?.raw?.moneda,
+      item?.raw?.currency,
+      "EUR"
+    )
+  );
+}
+
+function getTotalCaption(item = {}) {
+  const taxIncluded = first(
+    item.taxIncluded,
+    item.impuestosIncluidos,
+    item.ivaIncluido,
+    item?.raw?.taxIncluded,
+    item?.raw?.impuestosIncluidos,
+    item?.raw?.ivaIncluido
   );
 
-  if (amount !== null && amount !== undefined && amount !== "") {
-    const currency = first(
-      item.currency,
-      item.moneda,
-      item?.raw?.currency,
-      item?.raw?.moneda,
-      "EUR"
-    );
-
-    return formatMoney(amount, currency);
+  if (taxIncluded === false) {
+    return "Impuestos no incl.";
   }
 
-  const pago = safeText(
+  return "Impuestos incl.";
+}
+
+function getFormaPago(item = {}) {
+  return safeText(
     first(
-      item.paymentStatus,
-      item.estadoPago,
-      item?.raw?.paymentStatus,
-      item?.raw?.estadoPago
+      item.formaPago,
+      item.metodoPago,
+      item.paymentMethod,
+      item?.raw?.formaPago,
+      item?.raw?.metodoPago,
+      item?.raw?.paymentMethod
     ),
-    ""
-  ).toLowerCase();
-
-  if (["paid", "pagada", "pagado", "cobrada"].includes(pago)) return "Pagado";
-  if (["pending", "pendiente"].includes(pago)) return "Pendiente";
-  if (["partial", "parcial"].includes(pago)) return "Parcial";
-  if (["overdue", "vencida"].includes(pago)) return "Vencido";
-
-  return "Pendiente";
+    "—"
+  );
 }
 
 function getCreatedAt(item = {}) {
   return first(
+    item.fecha,
     item.createdAt,
     item.fechaCreacion,
-    item.date,
+    item.issueDate,
+    item?.raw?.fecha,
     item?.raw?.createdAt,
     item?.raw?.fechaCreacion,
-    item?.raw?.date
+    item?.raw?.issueDate
   );
 }
 
 function getUpdatedAt(item = {}) {
   return first(
     item.updatedAt,
+    item.fechaEnvio,
+    item.fechaActualizacion,
     item.lastUpdateAt,
-    item.ultimaNovedad,
     item?.raw?.updatedAt,
+    item?.raw?.fechaEnvio,
+    item?.raw?.fechaActualizacion,
     item?.raw?.lastUpdateAt,
-    item?.raw?.ultimaNovedad,
     item?.raw?.createdAt
   );
 }
 
-function isClosedLike(item = {}) {
-  return ["closed", "resolved"].includes(
-    getStatusKey(
-      first(
-        item.status,
-        item.estado,
-        item?.raw?.status,
-        item?.raw?.estado
-      )
-    )
-  );
-}
-
-function isOpenLike(item = {}) {
-  return ["open", "pending", "progress"].includes(
-    getStatusKey(
-      first(
-        item.status,
-        item.estado,
-        item?.raw?.status,
-        item?.raw?.estado
-      )
+function hasPdf(item = {}) {
+  return Boolean(
+    first(
+      item.pdfAvailable,
+      item.blobPath,
+      item.pdfUrl,
+      item.pdf,
+      item?.raw?.pdfAvailable,
+      item?.raw?.blobPath,
+      item?.raw?.pdfUrl,
+      item?.raw?.pdf
     )
   );
 }
@@ -368,60 +384,60 @@ function computeStats(items = []) {
 
   return {
     total: rows.length,
-    openCount: rows.filter((item) => isOpenLike(item)).length,
-    closedCount: rows.filter((item) => isClosedLike(item)).length,
+    pendingCount: rows.filter((item) =>
+      ["pending", "partial", "draft"].includes(
+        getEstadoPagoKey(first(item.estadoPago, item?.raw?.estadoPago))
+      )
+    ).length,
+    paidCount: rows.filter((item) =>
+      ["paid"].includes(
+        getEstadoPagoKey(first(item.estadoPago, item?.raw?.estadoPago))
+      )
+    ).length,
+    overdueCount: rows.filter((item) =>
+      ["overdue"].includes(
+        getEstadoPagoKey(first(item.estadoPago, item?.raw?.estadoPago))
+      )
+    ).length,
+    totalImporte: rows.reduce(
+      (acc, item) =>
+        acc +
+        safeNumber(
+          first(
+            item.total,
+            item.amount,
+            item.importe,
+            item?.raw?.total,
+            item?.raw?.amount,
+            item?.raw?.importe,
+            0
+          ),
+          0
+        ),
+      0
+    ),
   };
 }
 
-function getPagination(items = [], state = {}) {
-  const allItems = safeArray(items);
+/* =========================================================
+   STATE HELPERS
+========================================================= */
+
+function resolveBusyMeta(item = {}, state = {}) {
   const runtime = safeObject(state);
+  const facturaId = getFacturaId(item);
 
-  const pageSize = Math.max(
-    1,
-    safeNumber(first(runtime.pageSize, runtime.limit, 5), 5)
-  );
-
-  const reportedTotal = Math.max(
-    allItems.length,
-    safeNumber(
-      first(
-        runtime.totalCount,
-        runtime.remoteCount,
-        runtime.total,
-        allItems.length
-      ),
-      allItems.length
-    )
-  );
-
-  const totalPages = Math.max(
-    1,
-    Math.ceil((reportedTotal || 1) / pageSize)
-  );
-
-  const currentPage = Math.min(
-    Math.max(1, safeNumber(first(runtime.page, runtime.currentPage, 1), 1)),
-    totalPages
-  );
-
-  const startIndex = (currentPage - 1) * pageSize;
-  const pageItems = allItems.slice(startIndex, startIndex + pageSize);
-
-  const rangeStart = reportedTotal ? startIndex + 1 : 0;
-  const rangeEnd = reportedTotal
-    ? Math.min(startIndex + pageItems.length, reportedTotal)
-    : 0;
+  const openingFacturaId = safeText(runtime.openingFacturaId, "");
+  const viewingFacturaId = safeText(runtime.viewingFacturaId, "");
+  const downloadingFacturaId = safeText(runtime.downloadingFacturaId, "");
+  const sendingFacturaId = safeText(runtime.sendingFacturaId, "");
 
   return {
-    allItems,
-    pageItems,
-    pageSize,
-    currentPage,
-    totalPages,
-    totalCount: reportedTotal,
-    rangeStart,
-    rangeEnd,
+    facturaId,
+    isOpening: openingFacturaId === facturaId,
+    isViewingPdf: viewingFacturaId === facturaId,
+    isDownloading: downloadingFacturaId === facturaId,
+    isSending: sendingFacturaId === facturaId,
   };
 }
 
@@ -431,8 +447,8 @@ function getPagination(items = [], state = {}) {
 
 function renderSpinner(label = "") {
   return `
-    <span class="incidencias-inline-loading">
-      <span class="incidencias-inline-spinner" aria-hidden="true"></span>
+    <span class="facturas-inline-loading">
+      <span class="facturas-inline-spinner" aria-hidden="true"></span>
       <span>${escapeHtml(label)}</span>
     </span>
   `;
@@ -441,156 +457,192 @@ function renderSpinner(label = "") {
 function renderAvatar(item = {}) {
   const fullName = getClientName(item);
   const initials = getInitials(fullName);
-  const avatarUrl = getAvatarUrl(item);
-
-  if (avatarUrl) {
-    return `
-      <div
-        class="incidencias-avatar"
-        title="${escapeHtml(fullName)}"
-        aria-label="${escapeHtml(fullName)}"
-      >
-        <img
-          src="${escapeHtml(avatarUrl)}"
-          alt="${escapeHtml(fullName)}"
-          loading="lazy"
-          referrerpolicy="no-referrer"
-          onerror="this.style.display='none'; this.parentNode.setAttribute('data-fallback','true');"
-        />
-        <span class="incidencias-avatar-fallback">${escapeHtml(initials)}</span>
-      </div>
-    `;
-  }
 
   return `
     <div
-      class="incidencias-avatar incidencias-avatar--fallback"
+      class="facturas-avatar facturas-avatar--fallback"
       title="${escapeHtml(fullName)}"
       aria-label="${escapeHtml(fullName)}"
     >
-      <span class="incidencias-avatar-fallback">${escapeHtml(initials)}</span>
+      <span class="facturas-avatar-fallback">${escapeHtml(initials)}</span>
     </div>
   `;
 }
 
-function renderStatusChip(item = {}) {
+function renderEstadoPagoChip(item = {}) {
   const rawStatus = first(
-    item.status,
-    item.estado,
-    item?.raw?.status,
-    item?.raw?.estado
+    item.estadoPago,
+    item.paymentStatus,
+    item?.raw?.estadoPago,
+    item?.raw?.paymentStatus
   );
 
-  const key = getStatusKey(rawStatus);
-  const label = getStatusLabel(rawStatus);
+  const label = getEstadoPagoLabel(rawStatus);
+  const klass = getEstadoPagoChipClass(rawStatus);
 
   return `
-    <span class="incidencias-chip incidencias-chip--${escapeHtml(key)}">
+    <span class="facturas-chip ${klass}">
       ${escapeHtml(label)}
     </span>
   `;
 }
 
-function renderImporteChip(item = {}) {
-  const label = getImporteLabel(item);
-  const isMoney = /€|EUR|\$|USD/i.test(label);
+function renderIncidenciaLink(item = {}) {
+  const incidenciaId = getIncidenciaId(item);
 
-  if (isMoney) {
-    return `<span class="incidencias-importe incidencias-importe--money">${escapeHtml(label)}</span>`;
+  if (!incidenciaId || incidenciaId === "—") {
+    return `<span class="facturas-incidencia-empty">—</span>`;
   }
 
-  return `<span class="incidencias-importe incidencias-importe--status">${escapeHtml(label)}</span>`;
+  return `
+    <button
+      type="button"
+      class="facturas-incidencia-link"
+      data-action="open-incidencia"
+      data-ticket-id="${escapeHtml(incidenciaId)}"
+      data-incidencia-id="${escapeHtml(incidenciaId)}"
+      title="Abrir incidencia relacionada"
+    >
+      ${escapeHtml(incidenciaId)}
+    </button>
+  `;
 }
 
 function renderRow(item = {}, state = {}) {
-  const runtime = safeObject(state);
-  const ticketId = getTicketId(item);
-  const subject = getSubject(item);
-  const description = getDescription(item);
-  const createdAt = formatDateTime(getCreatedAt(item));
-  const updatedAt = formatLastUpdate(getUpdatedAt(item));
+  const busy = resolveBusyMeta(item, state);
 
-  const openingTicketId = safeText(runtime.openingTicketId, "");
-  const isOpening = openingTicketId === ticketId;
+  const facturaId = busy.facturaId;
+  const numero = getFacturaNumero(item);
+  const clientName = getClientName(item);
+  const clientEmail = getClientEmail(item);
+  const createdAt = formatDateTime(getCreatedAt(item));
+  const total = getTotalLabel(item);
+  const totalCaption = getTotalCaption(item);
+  const formaPago = getFormaPago(item);
+  const pdfAvailable = hasPdf(item);
 
   return `
-    <tr class="incidencias-row" data-ticket-id="${escapeHtml(ticketId)}">
-      <td class="incidencias-cell incidencias-cell--main">
-        <div class="incidencias-main">
+    <tr class="facturas-row" data-factura-id="${escapeHtml(facturaId)}">
+      <td class="facturas-cell facturas-cell--main">
+        <div class="facturas-main">
           ${renderAvatar(item)}
 
-          <div class="incidencias-main-copy">
-            <div class="incidencias-ticket-id">${escapeHtml(ticketId)}</div>
-            <div class="incidencias-ticket-subject">${escapeHtml(subject)}</div>
-            <div class="incidencias-ticket-description">${escapeHtml(description)}</div>
+          <div class="facturas-main-copy">
+            <div class="facturas-factura-id">${escapeHtml(numero)}</div>
+            <div class="facturas-factura-client">${escapeHtml(clientName)}</div>
+            <div class="facturas-factura-email">${escapeHtml(clientEmail)}</div>
           </div>
         </div>
       </td>
 
-      <td class="incidencias-cell incidencias-cell--status">
-        ${renderStatusChip(item)}
+      <td class="facturas-cell facturas-cell--status">
+        ${renderEstadoPagoChip(item)}
       </td>
 
-      <td class="incidencias-cell incidencias-cell--date">
-        <span class="incidencias-date-inline">${escapeHtml(createdAt)}</span>
+      <td class="facturas-cell facturas-cell--date">
+        <span class="facturas-date-inline">${escapeHtml(createdAt)}</span>
       </td>
 
-      <td class="incidencias-cell incidencias-cell--date">
-        <span class="incidencias-date-inline">${escapeHtml(updatedAt)}</span>
+      <td class="facturas-cell facturas-cell--amount">
+        <div class="facturas-total-stack">
+          <span class="facturas-total-value">${escapeHtml(total)}</span>
+          <span class="facturas-total-caption">${escapeHtml(totalCaption)}</span>
+          <span class="facturas-total-meta">${escapeHtml(formaPago)}</span>
+        </div>
       </td>
 
-      <td class="incidencias-cell incidencias-cell--importe">
-        ${renderImporteChip(item)}
+      <td class="facturas-cell facturas-cell--incidencia">
+        ${renderIncidenciaLink(item)}
       </td>
 
-      <td class="incidencias-cell incidencias-cell--actions">
-        <button
-          type="button"
-          class="incidencias-detail-btn${isOpening ? " is-loading" : ""}"
-          data-action="open-ticket"
-          data-ticket-id="${escapeHtml(ticketId)}"
-          ${isOpening ? 'disabled aria-busy="true"' : ""}
-        >
-          ${
-            isOpening
-              ? renderSpinner("Cargando...")
-              : '<span class="incidencias-btn-text">Ver detalle</span>'
-          }
-        </button>
+      <td class="facturas-cell facturas-cell--actions">
+        <div class="facturas-actions">
+          <button
+            type="button"
+            class="facturas-action-btn"
+            data-action="open-factura"
+            data-factura-id="${escapeHtml(facturaId)}"
+            ${busy.isOpening ? 'disabled aria-busy="true"' : ""}
+          >
+            ${
+              busy.isOpening
+                ? renderSpinner("Abriendo...")
+                : '<span class="facturas-btn-text">Detalle</span>'
+            }
+          </button>
+
+          <button
+            type="button"
+            class="facturas-action-btn"
+            data-action="view-factura-pdf"
+            data-factura-id="${escapeHtml(facturaId)}"
+            ${
+              pdfAvailable && !busy.isViewingPdf
+                ? ""
+                : 'disabled aria-disabled="true"'
+            }
+          >
+            ${
+              busy.isViewingPdf
+                ? renderSpinner("Abriendo...")
+                : '<span class="facturas-btn-text">Ver PDF</span>'
+            }
+          </button>
+
+          <button
+            type="button"
+            class="facturas-action-btn facturas-action-btn--primary"
+            data-action="download-factura"
+            data-factura-id="${escapeHtml(facturaId)}"
+            ${
+              pdfAvailable && !busy.isDownloading
+                ? ""
+                : 'disabled aria-disabled="true"'
+            }
+          >
+            ${
+              busy.isDownloading
+                ? renderSpinner("Bajando...")
+                : '<span class="facturas-btn-text">Descargar</span>'
+            }
+          </button>
+
+          <button
+            type="button"
+            class="facturas-action-btn facturas-action-btn--success"
+            data-action="send-factura"
+            data-factura-id="${escapeHtml(facturaId)}"
+            ${busy.isSending ? 'disabled aria-busy="true"' : ""}
+          >
+            ${
+              busy.isSending
+                ? renderSpinner("Enviando...")
+                : '<span class="facturas-btn-text">Enviar</span>'
+            }
+          </button>
+        </div>
       </td>
     </tr>
   `;
 }
 
-function renderEmptyState() {
-  return `
-    <div class="incidencias-empty">
-      <h3 class="incidencias-empty-title">No hay incidencias para mostrar</h3>
-      <p class="incidencias-empty-text">
-        Cuando haya solicitudes registradas aparecerán aquí.
-      </p>
-    </div>
-  `;
-}
-
 function renderTableLoading(rows = 5) {
   return `
-    <div class="incidencias-table-loading" aria-hidden="true">
+    <div class="facturas-table-loading" aria-hidden="true">
       ${Array.from({ length: rows })
         .map(
           () => `
-            <div class="incidencias-table-loading-row">
-              <div class="incidencias-skeleton incidencias-skeleton--avatar"></div>
-              <div class="incidencias-table-loading-copy">
-                <div class="incidencias-skeleton incidencias-skeleton--xs"></div>
-                <div class="incidencias-skeleton incidencias-skeleton--lg"></div>
-                <div class="incidencias-skeleton incidencias-skeleton--md"></div>
+            <div class="facturas-table-loading-row">
+              <div class="facturas-skeleton facturas-skeleton--avatar"></div>
+              <div class="facturas-table-loading-copy">
+                <div class="facturas-skeleton facturas-skeleton--xs"></div>
+                <div class="facturas-skeleton facturas-skeleton--lg"></div>
+                <div class="facturas-skeleton facturas-skeleton--md"></div>
               </div>
-              <div class="incidencias-skeleton incidencias-skeleton--pill"></div>
-              <div class="incidencias-skeleton incidencias-skeleton--date"></div>
-              <div class="incidencias-skeleton incidencias-skeleton--date"></div>
-              <div class="incidencias-skeleton incidencias-skeleton--pill"></div>
-              <div class="incidencias-skeleton incidencias-skeleton--btn"></div>
+              <div class="facturas-skeleton facturas-skeleton--pill"></div>
+              <div class="facturas-skeleton facturas-skeleton--date"></div>
+              <div class="facturas-skeleton facturas-skeleton--pill"></div>
+              <div class="facturas-skeleton facturas-skeleton--actions"></div>
             </div>
           `
         )
@@ -599,15 +651,21 @@ function renderTableLoading(rows = 5) {
   `;
 }
 
+function renderEmptyState() {
+  return `
+    <div class="facturas-empty">
+      <h3 class="facturas-empty-title">No hay facturas para mostrar</h3>
+      <p class="facturas-empty-text">
+        Cuando haya documentos registrados aparecerán aquí.
+      </p>
+    </div>
+  `;
+}
+
 function renderStyles() {
   return `
     <style>
-      .incidencias-view-root{
-        display:grid;
-        gap:18px;
-      }
-
-      .incidencias-hero{
+      .facturas-hero{
         position:relative;
         overflow:hidden;
         border-radius:24px;
@@ -621,20 +679,20 @@ function renderStyles() {
         padding:22px 24px 22px;
       }
 
-      .incidencias-hero-top{
+      .facturas-hero-top{
         display:grid;
         grid-template-columns:minmax(0, 1fr) auto;
         gap:18px;
         align-items:start;
       }
 
-      .incidencias-hero-copy{
+      .facturas-hero-copy{
         min-width:0;
         display:grid;
         gap:10px;
       }
 
-      .incidencias-page-title{
+      .facturas-page-title{
         margin:0;
         max-width:100%;
         font-size:clamp(26px, 2.6vw, 42px);
@@ -645,7 +703,7 @@ function renderStyles() {
         white-space:nowrap;
       }
 
-      .incidencias-page-subtitle{
+      .facturas-page-subtitle{
         margin:0;
         max-width:860px;
         font-size:15px;
@@ -653,7 +711,7 @@ function renderStyles() {
         color:var(--text-dim, #6b7280);
       }
 
-      .incidencias-hero-actions{
+      .facturas-hero-actions{
         display:flex;
         align-items:flex-start;
         justify-content:flex-end;
@@ -661,7 +719,7 @@ function renderStyles() {
         flex-wrap:wrap;
       }
 
-      .incidencias-btn{
+      .facturas-btn{
         min-height:44px;
         padding:0 16px;
         border-radius:14px;
@@ -685,12 +743,12 @@ function renderStyles() {
           opacity .16s ease;
       }
 
-      .incidencias-btn:hover{
+      .facturas-btn:hover{
         transform:translateY(-1px);
         box-shadow:0 8px 18px rgba(15,23,42,.06);
       }
 
-      .incidencias-btn--primary{
+      .facturas-btn--primary{
         border-color:color-mix(in srgb, var(--accent, #7c5cff) 16%, rgba(15,23,42,.06));
         background:linear-gradient(
           180deg,
@@ -701,18 +759,18 @@ function renderStyles() {
         box-shadow:0 8px 20px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
       }
 
-      .incidencias-btn.is-loading,
-      .incidencias-detail-btn.is-loading{
+      .facturas-btn.is-loading,
+      .facturas-action-btn.is-loading{
         cursor:wait;
         opacity:.9;
       }
 
-      .incidencias-btn:disabled,
-      .incidencias-detail-btn:disabled{
+      .facturas-btn:disabled,
+      .facturas-action-btn:disabled{
         pointer-events:none;
       }
 
-      .incidencias-hero-meta{
+      .facturas-hero-meta{
         margin-top:14px;
         display:flex;
         align-items:center;
@@ -720,7 +778,7 @@ function renderStyles() {
         flex-wrap:wrap;
       }
 
-      .incidencias-meta-pill{
+      .facturas-meta-pill{
         min-height:30px;
         padding:0 12px;
         border-radius:999px;
@@ -736,14 +794,14 @@ function renderStyles() {
         white-space:nowrap;
       }
 
-      .incidencias-stats{
+      .facturas-stats{
         margin-top:16px;
         display:grid;
-        grid-template-columns:repeat(2, minmax(0, 280px));
+        grid-template-columns:repeat(4, minmax(0, 1fr));
         gap:12px;
       }
 
-      .incidencias-stat-card{
+      .facturas-stat-card{
         display:grid;
         gap:8px;
         min-height:124px;
@@ -756,15 +814,23 @@ function renderStyles() {
         box-shadow:0 6px 20px rgba(15,23,42,.03);
       }
 
-      .incidencias-stat-card--open{
+      .facturas-stat-card--accent{
         border-color:color-mix(in srgb, var(--accent, #7c5cff) 16%, rgba(15,23,42,.06));
       }
 
-      .incidencias-stat-card--closed{
+      .facturas-stat-card--success{
         border-color:color-mix(in srgb, var(--success-strong, #36c690) 18%, rgba(15,23,42,.06));
       }
 
-      .incidencias-stat-label{
+      .facturas-stat-card--warning{
+        border-color:color-mix(in srgb, var(--warning-strong, #ffbc42) 18%, rgba(15,23,42,.06));
+      }
+
+      .facturas-stat-card--danger{
+        border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 18%, rgba(15,23,42,.06));
+      }
+
+      .facturas-stat-label{
         font-size:11px;
         font-weight:760;
         letter-spacing:.08em;
@@ -772,7 +838,7 @@ function renderStyles() {
         color:#7b8494;
       }
 
-      .incidencias-stat-value{
+      .facturas-stat-value{
         font-size:42px;
         line-height:.92;
         letter-spacing:-.045em;
@@ -780,13 +846,13 @@ function renderStyles() {
         color:var(--text-strong, #111827);
       }
 
-      .incidencias-stat-text{
+      .facturas-stat-text{
         font-size:14px;
         line-height:1.45;
         color:var(--text-dim, #6b7280);
       }
 
-      .incidencias-history{
+      .facturas-history{
         overflow:hidden;
         border-radius:24px;
         border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 88%, transparent);
@@ -798,7 +864,7 @@ function renderStyles() {
           0 1px 0 rgba(255,255,255,.5) inset;
       }
 
-      .incidencias-history-head{
+      .facturas-history-head{
         display:grid;
         grid-template-columns:minmax(0, 1fr) auto;
         gap:14px;
@@ -807,13 +873,13 @@ function renderStyles() {
         border-bottom:1px solid rgba(15,23,42,.06);
       }
 
-      .incidencias-history-copy{
+      .facturas-history-copy{
         min-width:0;
         display:grid;
         gap:2px;
       }
 
-      .incidencias-history-title{
+      .facturas-history-title{
         margin:0;
         font-size:16px;
         line-height:1.2;
@@ -821,76 +887,39 @@ function renderStyles() {
         color:var(--text-strong, #111827);
       }
 
-      .incidencias-history-subtitle{
+      .facturas-history-subtitle{
         margin:0;
         font-size:12px;
         line-height:1.4;
         color:var(--text-dim, #7b8494);
       }
 
-      .incidencias-pagination{
-        display:flex;
-        gap:8px;
-        flex-wrap:wrap;
-      }
-
-      .incidencias-pagination-btn{
-        min-height:38px;
-        padding:0 14px;
-        border-radius:13px;
-        border:1px solid rgba(15,23,42,.06);
-        background:rgba(255,255,255,.66);
-        color:#273142;
-        font-size:12px;
-        font-weight:680;
-        cursor:pointer;
-        display:inline-flex;
-        align-items:center;
-        justify-content:center;
-        text-decoration:none;
-        transition:
-          background .16s ease,
-          border-color .16s ease,
-          opacity .16s ease;
-      }
-
-      .incidencias-pagination-btn:hover{
-        background:rgba(255,255,255,.9);
-        border-color:rgba(15,23,42,.10);
-      }
-
-      .incidencias-pagination-btn[disabled],
-      .incidencias-pagination-btn[aria-disabled="true"]{
-        opacity:.48;
-        cursor:not-allowed;
-      }
-
-      .incidencias-table-wrap{
+      .facturas-table-wrap{
         position:relative;
       }
 
-      .incidencias-table-wrap.is-refreshing .incidencias-table-shell{
+      .facturas-table-wrap.is-refreshing .facturas-table-shell{
         opacity:.58;
         filter:blur(.8px);
         transition:opacity .18s ease, filter .18s ease;
       }
 
-      .incidencias-table-shell{
+      .facturas-table-shell{
         width:100%;
         overflow-x:auto;
         overflow-y:hidden;
         transition:opacity .18s ease, filter .18s ease;
       }
 
-      .incidencias-table{
+      .facturas-table{
         width:100%;
         border-collapse:separate;
         border-spacing:0;
-        min-width:1120px;
+        min-width:980px;
       }
 
-      .incidencias-table thead th{
-        padding:12px 18px;
+      .facturas-table thead th{
+        padding:12px 16px;
         text-align:left;
         font-size:11px;
         font-weight:760;
@@ -902,25 +931,25 @@ function renderStyles() {
         white-space:nowrap;
       }
 
-      .incidencias-table tbody td{
-        padding:14px 18px;
+      .facturas-table tbody td{
+        padding:12px 16px;
         vertical-align:middle;
         border-bottom:1px solid rgba(15,23,42,.055);
       }
 
-      .incidencias-table tbody tr:last-child td{
+      .facturas-table tbody tr:last-child td{
         border-bottom:none;
       }
 
-      .incidencias-row{
+      .facturas-row{
         transition:background .16s ease;
       }
 
-      .incidencias-row:hover{
+      .facturas-row:hover{
         background:rgba(124,92,255,.018);
       }
 
-      .incidencias-main{
+      .facturas-main{
         display:grid;
         grid-template-columns:44px minmax(0, 1fr);
         gap:12px;
@@ -928,7 +957,7 @@ function renderStyles() {
         min-width:0;
       }
 
-      .incidencias-avatar{
+      .facturas-avatar{
         position:relative;
         width:44px;
         height:44px;
@@ -938,17 +967,10 @@ function renderStyles() {
         background:linear-gradient(135deg, rgba(124,92,255,.12), rgba(139,92,246,.24));
       }
 
-      .incidencias-avatar img{
-        display:block;
-        width:100%;
-        height:100%;
-        object-fit:cover;
-      }
-
-      .incidencias-avatar-fallback{
+      .facturas-avatar-fallback{
         position:absolute;
         inset:0;
-        display:none;
+        display:flex;
         align-items:center;
         justify-content:center;
         font-size:18px;
@@ -957,25 +979,13 @@ function renderStyles() {
         letter-spacing:-.03em;
       }
 
-      .incidencias-avatar[data-fallback="true"] .incidencias-avatar-fallback{
-        display:flex;
-      }
-
-      .incidencias-avatar[data-fallback="true"] img{
-        display:none !important;
-      }
-
-      .incidencias-avatar--fallback .incidencias-avatar-fallback{
-        display:flex;
-      }
-
-      .incidencias-main-copy{
+      .facturas-main-copy{
         min-width:0;
         display:grid;
         gap:3px;
       }
 
-      .incidencias-ticket-id{
+      .facturas-factura-id{
         font-size:12px;
         line-height:1.15;
         font-weight:760;
@@ -984,7 +994,7 @@ function renderStyles() {
         text-transform:uppercase;
       }
 
-      .incidencias-ticket-subject{
+      .facturas-factura-client{
         font-size:15px;
         line-height:1.14;
         font-weight:760;
@@ -997,7 +1007,7 @@ function renderStyles() {
         -webkit-box-orient:vertical;
       }
 
-      .incidencias-ticket-description{
+      .facturas-factura-email{
         font-size:13px;
         line-height:1.3;
         color:#8a93a3;
@@ -1006,7 +1016,7 @@ function renderStyles() {
         white-space:nowrap;
       }
 
-      .incidencias-chip{
+      .facturas-chip{
         min-height:32px;
         padding:0 12px;
         border-radius:999px;
@@ -1021,32 +1031,28 @@ function renderStyles() {
         border:1px solid transparent;
       }
 
-      .incidencias-chip--pending{
+      .facturas-chip--pending,
+      .facturas-chip--partial,
+      .facturas-chip--draft{
         color:#b7791f;
         background:rgba(255,188,66,.11);
         border-color:rgba(255,188,66,.22);
       }
 
-      .incidencias-chip--open{
-        color:#6d53d7;
-        background:rgba(124,92,255,.09);
-        border-color:rgba(124,92,255,.18);
-      }
-
-      .incidencias-chip--progress{
-        color:#1778ab;
-        background:rgba(125,211,252,.12);
-        border-color:rgba(125,211,252,.24);
-      }
-
-      .incidencias-chip--resolved,
-      .incidencias-chip--closed{
+      .facturas-chip--paid{
         color:#258a59;
         background:rgba(54,198,144,.10);
         border-color:rgba(54,198,144,.22);
       }
 
-      .incidencias-date-inline{
+      .facturas-chip--overdue,
+      .facturas-chip--cancelled{
+        color:#c24141;
+        background:rgba(255,107,107,.10);
+        border-color:rgba(255,107,107,.22);
+      }
+
+      .facturas-date-inline{
         display:inline-block;
         white-space:nowrap;
         font-size:13px;
@@ -1056,46 +1062,92 @@ function renderStyles() {
         color:#344054;
       }
 
-      .incidencias-importe{
+      .facturas-total-stack{
+        display:grid;
+        gap:2px;
+      }
+
+      .facturas-total-value{
+        font-size:14px;
+        line-height:1.15;
+        font-weight:760;
+        color:var(--text-strong, #111827);
+        white-space:nowrap;
+      }
+
+      .facturas-total-caption{
+        font-size:11px;
+        line-height:1.15;
+        color:#6b7280;
+        white-space:nowrap;
+        font-weight:700;
+      }
+
+      .facturas-total-meta{
+        font-size:11px;
+        line-height:1.15;
+        color:#98a2b3;
+        white-space:nowrap;
+      }
+
+      .facturas-incidencia-link{
+        min-height:30px;
+        padding:0 10px;
+        border-radius:999px;
+        border:1px solid rgba(124,92,255,.18);
+        background:rgba(124,92,255,.08);
+        color:#6d53d7;
+        font-size:11px;
+        font-weight:760;
+        letter-spacing:.045em;
+        text-transform:uppercase;
+        cursor:pointer;
         display:inline-flex;
         align-items:center;
         justify-content:center;
-        min-height:30px;
-        padding:0 12px;
-        border-radius:999px;
-        font-size:11px;
-        font-weight:760;
         white-space:nowrap;
-        border:1px solid transparent;
+        transition:
+          transform .16s ease,
+          background .16s ease,
+          border-color .16s ease;
       }
 
-      .incidencias-importe--money{
-        color:#374151;
-        background:rgba(15,23,42,.035);
-        border-color:rgba(15,23,42,.06);
+      .facturas-incidencia-link:hover{
+        transform:translateY(-1px);
+        background:rgba(124,92,255,.12);
+        border-color:rgba(124,92,255,.24);
       }
 
-      .incidencias-importe--status{
-        color:#8590a3;
-        background:rgba(15,23,42,.025);
-        border-color:rgba(15,23,42,.05);
+      .facturas-incidencia-empty{
+        color:#98a2b3;
+        font-size:13px;
+        font-weight:650;
       }
 
-      .incidencias-cell--actions{
+      .facturas-cell--actions{
         width:1%;
         white-space:nowrap;
       }
 
-      .incidencias-detail-btn{
-        width:auto;
+      .facturas-actions{
+        display:grid;
+        grid-template-columns:repeat(2, minmax(78px, 1fr));
+        gap:6px;
+        width:168px;
+        min-width:168px;
+        justify-content:end;
+      }
+
+      .facturas-action-btn{
+        width:100%;
         min-width:0;
-        min-height:34px;
-        padding:0 12px;
-        border-radius:12px;
+        min-height:30px;
+        padding:0 8px;
+        border-radius:10px;
         border:1px solid rgba(15,23,42,.07);
         background:rgba(255,255,255,.68);
         color:#1f2937;
-        font-size:13px;
+        font-size:11px;
         font-weight:700;
         line-height:1;
         cursor:pointer;
@@ -1111,61 +1163,81 @@ function renderStyles() {
           opacity .16s ease;
       }
 
-      .incidencias-detail-btn:hover{
+      .facturas-action-btn:hover{
         border-color:rgba(15,23,42,.11);
         background:rgba(255,255,255,.9);
         transform:translateY(-1px);
       }
 
-      .incidencias-inline-loading{
+      .facturas-action-btn--primary{
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 16%, rgba(15,23,42,.06));
+        background:linear-gradient(
+          180deg,
+          color-mix(in srgb, var(--accent, #7c5cff) 86%, white 14%),
+          color-mix(in srgb, var(--accent, #7c5cff) 92%, black 8%)
+        );
+        color:#fff;
+      }
+
+      .facturas-action-btn--success{
+        border-color:color-mix(in srgb, var(--success-strong, #36c690) 16%, rgba(15,23,42,.06));
+        background:linear-gradient(
+          180deg,
+          color-mix(in srgb, var(--success-strong, #36c690) 86%, white 14%),
+          color-mix(in srgb, var(--success-strong, #36c690) 92%, black 8%)
+        );
+        color:#fff;
+      }
+
+      .facturas-inline-loading{
         display:inline-flex;
         align-items:center;
         gap:7px;
         white-space:nowrap;
       }
 
-      .incidencias-inline-spinner{
+      .facturas-inline-spinner{
         width:13px;
         height:13px;
         border-radius:999px;
         border:2px solid rgba(255,255,255,.30);
         border-top-color:currentColor;
-        animation:incidenciasSpin .78s linear infinite;
+        animation:facturasSpin .78s linear infinite;
         flex:0 0 auto;
       }
 
-      .incidencias-btn:not(.incidencias-btn--primary) .incidencias-inline-spinner,
-      .incidencias-detail-btn .incidencias-inline-spinner{
+      .facturas-btn:not(.facturas-btn--primary) .facturas-inline-spinner,
+      .facturas-action-btn:not(.facturas-action-btn--primary):not(.facturas-action-btn--success) .facturas-inline-spinner{
         border-color:rgba(15,23,42,.16);
         border-top-color:currentColor;
       }
 
-      .incidencias-table-loading{
+      .facturas-table-loading{
         padding:12px 18px 16px;
         display:grid;
         gap:12px;
       }
 
-      .incidencias-table-loading-row{
+      .facturas-table-loading-row{
         display:grid;
-        grid-template-columns:44px minmax(220px, 1.5fr) 120px 140px 140px 90px 120px;
+        grid-template-columns:44px minmax(260px, 1.8fr) 120px 140px 110px 170px;
         gap:12px;
         align-items:center;
       }
 
-      .incidencias-table-loading-copy{
+      .facturas-table-loading-copy{
         display:grid;
         gap:7px;
       }
 
-      .incidencias-skeleton{
+      .facturas-skeleton{
         position:relative;
         overflow:hidden;
         border-radius:999px;
         background:rgba(148,163,184,.14);
       }
 
-      .incidencias-skeleton::after{
+      .facturas-skeleton::after{
         content:"";
         position:absolute;
         inset:0;
@@ -1176,46 +1248,47 @@ function renderStyles() {
           rgba(255,255,255,.55),
           transparent
         );
-        animation:incidenciasSkeleton 1.2s ease-in-out infinite;
+        animation:facturasSkeleton 1.2s ease-in-out infinite;
       }
 
-      .incidencias-skeleton--avatar{
+      .facturas-skeleton--avatar{
         width:44px;
         height:44px;
         border-radius:999px;
       }
 
-      .incidencias-skeleton--xs{
+      .facturas-skeleton--xs{
         width:120px;
         height:10px;
       }
 
-      .incidencias-skeleton--lg{
+      .facturas-skeleton--lg{
         width:74%;
         height:14px;
       }
 
-      .incidencias-skeleton--md{
+      .facturas-skeleton--md{
         width:56%;
         height:12px;
       }
 
-      .incidencias-skeleton--pill{
+      .facturas-skeleton--pill{
         width:86px;
         height:30px;
       }
 
-      .incidencias-skeleton--date{
+      .facturas-skeleton--date{
         width:124px;
         height:12px;
       }
 
-      .incidencias-skeleton--btn{
-        width:98px;
-        height:34px;
+      .facturas-skeleton--actions{
+        width:168px;
+        height:66px;
+        border-radius:12px;
       }
 
-      .incidencias-empty{
+      .facturas-empty{
         display:grid;
         justify-items:center;
         gap:8px;
@@ -1223,30 +1296,56 @@ function renderStyles() {
         text-align:center;
       }
 
-      .incidencias-empty-title{
+      .facturas-empty-title{
         margin:0;
         font-size:18px;
         font-weight:760;
         color:var(--text-strong, #111827);
       }
 
-      .incidencias-empty-text{
+      .facturas-empty-text{
         margin:0;
         font-size:13px;
         line-height:1.55;
         color:var(--text-dim, #6b7280);
       }
 
-      @keyframes incidenciasSpin{
+      .facturas-error{
+        display:grid;
+        justify-items:start;
+        gap:10px;
+        padding:24px 22px;
+        border-radius:20px;
+        border:1px solid rgba(255,107,107,.22);
+        background:
+          linear-gradient(180deg, rgba(255,107,107,.06), rgba(255,255,255,.5)),
+          rgba(255,255,255,.7);
+      }
+
+      .facturas-error-title{
+        margin:0;
+        font-size:18px;
+        font-weight:760;
+        color:var(--text-strong, #111827);
+      }
+
+      .facturas-error-text{
+        margin:0;
+        font-size:13px;
+        line-height:1.6;
+        color:var(--text-dim, #6b7280);
+      }
+
+      @keyframes facturasSpin{
         to{ transform:rotate(360deg); }
       }
 
-      @keyframes incidenciasSkeleton{
+      @keyframes facturasSkeleton{
         to{ transform:translateX(100%); }
       }
 
-      [data-theme="light"] .incidencias-hero,
-      [data-theme="light"] .incidencias-history{
+      [data-theme="light"] .facturas-hero,
+      [data-theme="light"] .facturas-history{
         background:
           linear-gradient(180deg, rgba(255,255,255,.82), rgba(248,250,252,.74)),
           rgba(255,255,255,.82);
@@ -1255,76 +1354,60 @@ function renderStyles() {
           0 0 0 1px rgba(255,255,255,.72) inset;
       }
 
-      [data-theme="light"] .incidencias-stat-card{
+      [data-theme="light"] .facturas-stat-card{
         background:
           linear-gradient(180deg, rgba(255,255,255,.78), rgba(255,255,255,.48)),
           rgba(255,255,255,.56);
       }
 
-      @media (max-width: 1240px){
-        .incidencias-page-title{
-          font-size:clamp(24px, 2.4vw, 36px);
-        }
-      }
-
       @media (max-width: 1180px){
-        .incidencias-hero{
+        .facturas-hero{
           padding:20px;
         }
 
-        .incidencias-hero-top{
+        .facturas-hero-top{
           grid-template-columns:1fr;
         }
 
-        .incidencias-hero-actions{
+        .facturas-hero-actions{
           justify-content:flex-start;
         }
 
-        .incidencias-page-title{
+        .facturas-page-title{
           white-space:normal;
         }
-      }
 
-      @media (max-width: 980px){
-        .incidencias-stats{
-          grid-template-columns:1fr 1fr;
+        .facturas-stats{
+          grid-template-columns:repeat(2, minmax(0, 1fr));
         }
       }
 
       @media (max-width: 760px){
-        .incidencias-view-root{
-          gap:16px;
-        }
-
-        .incidencias-hero{
+        .facturas-hero{
           padding:18px 16px;
           border-radius:20px;
         }
 
-        .incidencias-history{
+        .facturas-history{
           border-radius:20px;
         }
 
-        .incidencias-history-head{
+        .facturas-history-head{
           grid-template-columns:1fr;
           padding:14px 14px 12px;
         }
 
-        .incidencias-pagination{
-          justify-content:flex-start;
-        }
-
-        .incidencias-stats{
+        .facturas-stats{
           grid-template-columns:1fr;
         }
 
-        .incidencias-page-title{
+        .facturas-page-title{
           font-size:clamp(24px, 8vw, 34px);
           line-height:1;
           white-space:normal;
         }
 
-        .incidencias-page-subtitle{
+        .facturas-page-subtitle{
           font-size:14px;
         }
       }
@@ -1336,77 +1419,66 @@ function renderStyles() {
    HEADER
 ========================================================= */
 
-export function renderHeader(input = {}) {
-  const data = safeObject(input);
-  const items = safeArray(
-    first(data.items, data.rows, data.tickets, data.incidencias)
-  );
-  const state = safeObject(data.state);
+export function renderHeader({ items = [], state = {} } = {}) {
+  const rows = safeArray(items);
+  const runtime = safeObject(state);
 
-  const stats = computeStats(items);
+  const stats = computeStats(rows);
 
   const updatedAt = first(
-    state.lastSyncAt,
-    data.lastUpdatedAt,
-    data.updatedAt,
-    ...items.map((item) => getUpdatedAt(item))
+    runtime.lastSyncAt,
+    ...rows.map((item) => getUpdatedAt(item))
   );
 
-  const title = safeText(
-    first(data.title, "Tus incidencias y solicitudes"),
-    "Tus incidencias y solicitudes"
+  const remoteCount = safeNumber(
+    first(runtime.remoteCount, runtime.totalCount, rows.length),
+    rows.length
   );
 
-  const subtitle = safeText(
-    first(
-      data.subtitle,
-      "Consulta el estado de tus incidencias, revisa las actualizaciones más recientes y crea nuevas solicitudes desde una vista clara, cercana y fácil de seguir."
-    ),
-    ""
-  );
-
-  const creating = Boolean(state.creating);
+  const refreshing = Boolean(runtime.refreshing);
 
   return `
     ${renderStyles()}
 
-    <section class="incidencias-hero">
-      <div class="incidencias-hero-top">
-        <div class="incidencias-hero-copy">
-          <h1 class="incidencias-page-title">${escapeHtml(title)}</h1>
-          <p class="incidencias-page-subtitle">${escapeHtml(subtitle)}</p>
+    <section class="facturas-hero">
+      <div class="facturas-hero-top">
+        <div class="facturas-hero-copy">
+          <h1 class="facturas-page-title">Centro de control de facturas</h1>
+          <p class="facturas-page-subtitle">
+            Gestiona emisión, seguimiento, consulta y descarga de documentos fiscales desde una vista clara, premium y conectada con sus incidencias relacionadas.
+          </p>
         </div>
 
-        <div class="incidencias-hero-actions">
+        <div class="facturas-hero-actions">
           <button
             type="button"
-            id="incidencias-export-btn"
-            class="incidencias-btn"
+            id="facturas-export-btn"
+            class="facturas-btn"
           >
-            <span class="incidencias-btn-text">Exportar historial</span>
+            <span class="facturas-btn-text">Exportar CSV</span>
           </button>
 
           <button
             type="button"
-            id="incidencias-create-btn"
-            class="incidencias-btn incidencias-btn--primary${creating ? " is-loading" : ""}"
-            ${creating ? 'disabled aria-busy="true"' : ""}
+            id="facturas-refresh-btn"
+            class="facturas-btn facturas-btn--primary${refreshing ? " is-loading" : ""}"
+            ${refreshing ? 'disabled aria-busy="true"' : ""}
           >
             ${
-              creating
-                ? renderSpinner("Abriendo...")
-                : '<span class="incidencias-btn-text">Crear nueva incidencia</span>'
+              refreshing
+                ? renderSpinner("Actualizando...")
+                : '<span class="facturas-btn-text">Actualizar</span>'
             }
           </button>
         </div>
       </div>
 
-      <div class="incidencias-hero-meta">
-        <span class="incidencias-meta-pill">
-          ${escapeHtml(`${stats.total} solicitudes registradas`)}
+      <div class="facturas-hero-meta">
+        <span class="facturas-meta-pill">
+          ${escapeHtml(`${remoteCount} registros remotos`)}
         </span>
 
-        <span class="incidencias-meta-pill">
+        <span class="facturas-meta-pill">
           ${
             updatedAt
               ? escapeHtml(`Última actualización · ${formatRelativeDate(updatedAt)}`)
@@ -1415,17 +1487,29 @@ export function renderHeader(input = {}) {
         </span>
       </div>
 
-      <div class="incidencias-stats">
-        <article class="incidencias-stat-card incidencias-stat-card--open">
-          <div class="incidencias-stat-label">Incidencias abiertas</div>
-          <div class="incidencias-stat-value">${escapeHtml(String(stats.openCount))}</div>
-          <div class="incidencias-stat-text">Solicitudes activas o pendientes de revisión.</div>
+      <div class="facturas-stats">
+        <article class="facturas-stat-card facturas-stat-card--accent">
+          <div class="facturas-stat-label">Facturas visibles</div>
+          <div class="facturas-stat-value">${escapeHtml(String(stats.total))}</div>
+          <div class="facturas-stat-text">Documentos actualmente cargados en pantalla.</div>
         </article>
 
-        <article class="incidencias-stat-card incidencias-stat-card--closed">
-          <div class="incidencias-stat-label">Incidencias cerradas</div>
-          <div class="incidencias-stat-value">${escapeHtml(String(stats.closedCount))}</div>
-          <div class="incidencias-stat-text">Casos resueltos o ya cerrados.</div>
+        <article class="facturas-stat-card facturas-stat-card--success">
+          <div class="facturas-stat-label">Importe agregado</div>
+          <div class="facturas-stat-value">${escapeHtml(formatMoney(stats.totalImporte, "EUR"))}</div>
+          <div class="facturas-stat-text">Suma de la colección actualmente visible.</div>
+        </article>
+
+        <article class="facturas-stat-card facturas-stat-card--warning">
+          <div class="facturas-stat-label">Pendientes</div>
+          <div class="facturas-stat-value">${escapeHtml(String(stats.pendingCount))}</div>
+          <div class="facturas-stat-text">Facturas con cobro pendiente, parcial o en borrador.</div>
+        </article>
+
+        <article class="facturas-stat-card facturas-stat-card--danger">
+          <div class="facturas-stat-label">Vencidas / pagadas</div>
+          <div class="facturas-stat-value">${escapeHtml(`${stats.overdueCount} / ${stats.paidCount}`)}</div>
+          <div class="facturas-stat-text">Balance rápido entre deuda vencida y cobros cerrados.</div>
         </article>
       </div>
     </section>
@@ -1433,115 +1517,105 @@ export function renderHeader(input = {}) {
 }
 
 /* =========================================================
-   TABLE
+   LOADING / ERROR
 ========================================================= */
 
-export function renderTable(input = {}) {
-  const data = safeObject(input);
-  const items = safeArray(
-    first(data.items, data.rows, data.tickets, data.incidencias)
-  );
-  const state = safeObject(data.state);
+export function renderLoadingState() {
+  return `
+    ${renderStyles()}
 
-  const pagination = getPagination(items, state);
-  const loading = Boolean(state.loading);
-  const refreshing = Boolean(state.refreshing);
+    <section class="facturas-history">
+      ${renderTableLoading(6)}
+    </section>
+  `;
+}
+
+export function renderErrorState(message = "No se pudieron cargar las facturas.") {
+  return `
+    ${renderStyles()}
+
+    <section class="facturas-error">
+      <h3 class="facturas-error-title">No se pudo renderizar la vista de facturas</h3>
+      <p class="facturas-error-text">${escapeHtml(safeText(message, "Error desconocido al cargar la vista."))}</p>
+    </section>
+  `;
+}
+
+/* =========================================================
+   MAIN TABLE
+========================================================= */
+
+export function renderCards({ items = [], state = {} } = {}) {
+  const rows = safeArray(items);
+  const runtime = safeObject(state);
+  const refreshing = Boolean(runtime.refreshing);
+  const total = rows.length;
+
+  if (!rows.length) {
+    return `
+      ${renderStyles()}
+
+      <section class="facturas-history">
+        ${renderEmptyState()}
+      </section>
+    `;
+  }
 
   return `
-    <section class="incidencias-history">
-      <div class="incidencias-history-head">
-        <div class="incidencias-history-copy">
-          <h2 class="incidencias-history-title">Historial de incidencias</h2>
-          <p class="incidencias-history-subtitle">
-            ${escapeHtml(`Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · página ${pagination.currentPage} de ${pagination.totalPages}`)}
+    ${renderStyles()}
+
+    <section class="facturas-history">
+      <div class="facturas-history-head">
+        <div class="facturas-history-copy">
+          <h2 class="facturas-history-title">Historial de facturas</h2>
+          <p class="facturas-history-subtitle">
+            ${escapeHtml(`Mostrando ${total} registro${total === 1 ? "" : "s"} en pantalla`)}
           </p>
         </div>
-
-        <div class="incidencias-pagination">
-          <button
-            type="button"
-            class="incidencias-pagination-btn"
-            data-action="prev-page"
-            ${pagination.currentPage <= 1 || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
-          >
-            Anterior
-          </button>
-
-          <button
-            type="button"
-            class="incidencias-pagination-btn"
-            data-action="next-page"
-            ${pagination.currentPage >= pagination.totalPages || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
-          >
-            Siguiente
-          </button>
-        </div>
       </div>
 
-      ${
-        loading && !pagination.pageItems.length
-          ? renderTableLoading(Math.max(3, safeNumber(first(state.pageSize, 5), 5)))
-          : `
-            <div class="incidencias-table-wrap${refreshing ? " is-refreshing" : ""}">
-              ${
-                refreshing
-                  ? renderTableLoading(Math.min(4, Math.max(3, pagination.pageItems.length || 3)))
-                  : ""
-              }
+      <div class="facturas-table-wrap${refreshing ? " is-refreshing" : ""}">
+        ${
+          refreshing
+            ? renderTableLoading(Math.min(4, Math.max(3, rows.length || 3)))
+            : ""
+        }
 
-              ${
-                pagination.pageItems.length
-                  ? `
-                    <div class="incidencias-table-shell">
-                      <table class="incidencias-table" role="table" aria-label="Listado de incidencias">
-                        <colgroup>
-                          <col style="width:43%;">
-                          <col style="width:12%;">
-                          <col style="width:15%;">
-                          <col style="width:15%;">
-                          <col style="width:7%;">
-                          <col style="width:8%;">
-                        </colgroup>
+        <div class="facturas-table-shell">
+          <table class="facturas-table" role="table" aria-label="Listado de facturas">
+            <colgroup>
+              <col style="width:52%;">
+              <col style="width:10%;">
+              <col style="width:14%;">
+              <col style="width:12%;">
+              <col style="width:4%;">
+              <col style="width:8%;">
+            </colgroup>
 
-                        <thead>
-                          <tr>
-                            <th>Incidencia</th>
-                            <th>Estado</th>
-                            <th>Fecha de creación</th>
-                            <th>Última novedad</th>
-                            <th>Importe</th>
-                            <th>Acciones</th>
-                          </tr>
-                        </thead>
+            <thead>
+              <tr>
+                <th>Factura / cliente</th>
+                <th>Pago</th>
+                <th>Fecha de emisión</th>
+                <th>Total</th>
+                <th>Incidencia</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
 
-                        <tbody>
-                          ${pagination.pageItems.map((item) => renderRow(item, state)).join("")}
-                        </tbody>
-                      </table>
-                    </div>
-                  `
-                  : renderEmptyState()
-              }
-            </div>
-          `
-      }
+            <tbody>
+              ${rows.map((item) => renderRow(item, runtime)).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </section>
   `;
 }
 
-/* =========================================================
-   FULL TEMPLATE
-========================================================= */
-
-export function renderIncidenciasTableTemplate(input = {}) {
-  const data = safeObject(input);
-
-  return `
-    <section class="incidencias-view-root">
-      ${renderHeader(data)}
-      ${renderTable(data)}
-    </section>
-  `;
-}
-
-export default renderIncidenciasTableTemplate;
+export default {
+  renderHeader,
+  renderCards,
+  renderLoadingState,
+  renderErrorState,
+};

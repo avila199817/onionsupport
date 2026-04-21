@@ -733,12 +733,6 @@ export function loadPreferences({
      estado natural por defecto = abierto.
      Evitamos arrancar colapsado por residuos legacy de storage. */
 
-  const savedSidebarCollapsedRaw =
-    storage?.get?.(
-      "sidebar-collapsed",
-      null
-    );
-
   const hasCollapsedValue =
     savedSidebarCollapsedRaw ===
       true ||

@@ -2,7 +2,7 @@
    Onion SPA - Usuarios Create Modal
    Archivo: src/views/usuarios/usuarios.create.modal.js
 
-   USERS EXPERIENCE PRO · CREATE MODAL · EXTENDED REAL DATA
+   USERS EXPERIENCE PRO · CREATE MODAL · CLEAN 10/10
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -20,26 +20,12 @@ const CUSTOMER_TYPE_OPTIONS = Object.freeze([
   { value: "empresa", label: "Empresa" },
 ]);
 
-const ROLE_OPTIONS = Object.freeze([
-  { value: "admin", label: "Admin" },
-  { value: "support", label: "Support" },
-  { value: "manager", label: "Manager" },
-  { value: "user", label: "User" },
-]);
-
 const DEFAULT_FORM = Object.freeze({
   name: "",
-  username: "",
   email: "",
   phone: "",
-  role: "user",
-  active: true,
   customerType: "particular",
   nif: "",
-  clienteId: "",
-  password: "",
-  privacyMode: false,
-  darkMode: true,
   addressStreet: "",
   addressCp: "",
   addressCity: "",
@@ -199,6 +185,8 @@ function sanitizePhone(value = "") {
 function sanitizeUsername(value = "") {
   return safeText(value, "")
     .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/\s+/g, "")
     .replace(/[^a-z0-9._-]/g, "");
 }
@@ -221,21 +209,15 @@ function normalizeCustomerType(value = "") {
   return "particular";
 }
 
-function normalizeRole(value = "") {
-  const raw = safeText(value, "user").toLowerCase();
+function buildUsernameFromForm(form = {}) {
+  const current = safeObject(form);
+  const email = safeText(current.email, "").toLowerCase();
 
-  if (["admin", "support", "manager", "user"].includes(raw)) {
-    return raw;
+  if (email.includes("@")) {
+    return sanitizeUsername(email.split("@")[0]);
   }
 
-  return "user";
-}
-
-function toBoolean(value, fallback = false) {
-  if (typeof value === "boolean") return value;
-  if (value === "true") return true;
-  if (value === "false") return false;
-  return fallback;
+  return sanitizeUsername(current.name || "usuario");
 }
 
 /* =========================================================
@@ -248,17 +230,10 @@ function getInitialForm() {
 
   return {
     name: safeText(first(draft.name, draft.fullName), ""),
-    username: safeText(draft.username, ""),
     email: safeText(draft.email, ""),
     phone: safeText(draft.phone, ""),
-    role: normalizeRole(draft.role),
-    active: toBoolean(draft.active, true),
     customerType: normalizeCustomerType(first(draft.customerType, draft.tipo)),
     nif: safeText(draft.nif, ""),
-    clienteId: safeText(draft.clienteId, ""),
-    password: "",
-    privacyMode: toBoolean(draft.privacyMode, false),
-    darkMode: toBoolean(draft.darkMode, true),
     addressStreet: safeText(first(draft.addressStreet, direccion.calle), ""),
     addressCp: safeText(first(draft.addressCp, direccion.cp), ""),
     addressCity: safeText(first(draft.addressCity, direccion.ciudad), ""),
@@ -270,17 +245,11 @@ function getInitialForm() {
 function persistDraft() {
   usuariosState.createDraft = {
     name: safeText(modalState.form?.name, ""),
-    username: safeText(modalState.form?.username, ""),
     email: safeText(modalState.form?.email, ""),
     phone: safeText(modalState.form?.phone, ""),
-    role: normalizeRole(modalState.form?.role),
-    active: Boolean(modalState.form?.active),
     customerType: normalizeCustomerType(modalState.form?.customerType),
     tipo: normalizeCustomerType(modalState.form?.customerType),
     nif: safeText(modalState.form?.nif, ""),
-    clienteId: safeText(modalState.form?.clienteId, ""),
-    privacyMode: Boolean(modalState.form?.privacyMode),
-    darkMode: Boolean(modalState.form?.darkMode),
     direccion: {
       calle: safeText(modalState.form?.addressStreet, ""),
       cp: safeText(modalState.form?.addressCp, ""),
@@ -338,11 +307,9 @@ function validateForm(form = {}) {
   const errors = {};
 
   const name = safeText(current.name, "");
-  const username = sanitizeUsername(current.username);
   const phone = sanitizePhone(current.phone);
   const email = safeText(current.email, "");
   const nif = safeText(current.nif, "");
-  const password = safeText(current.password, "");
   const customerType = normalizeCustomerType(current.customerType);
   const addressStreet = safeText(current.addressStreet, "");
   const addressCp = safeText(current.addressCp, "");
@@ -356,12 +323,6 @@ function validateForm(form = {}) {
     errors.name = "El nombre debe tener al menos 3 caracteres.";
   }
 
-  if (!username) {
-    errors.username = "El username es obligatorio.";
-  } else if (username.length < 3) {
-    errors.username = "El username debe tener al menos 3 caracteres.";
-  }
-
   if (!email) {
     errors.email = "El email es obligatorio.";
   } else if (!isValidEmail(email)) {
@@ -372,12 +333,6 @@ function validateForm(form = {}) {
     errors.phone = "El teléfono es obligatorio.";
   } else if (!isValidPhone(phone)) {
     errors.phone = "Introduce un teléfono válido.";
-  }
-
-  if (!password) {
-    errors.password = "La contraseña es obligatoria.";
-  } else if (password.length < 8) {
-    errors.password = "La contraseña debe tener al menos 8 caracteres.";
   }
 
   if (!customerType) {
@@ -419,17 +374,15 @@ function buildPayload(form = {}) {
 
   return {
     name: normalizeWhitespace(current.name),
-    username: sanitizeUsername(current.username),
+    username: buildUsernameFromForm(current),
     email: safeText(current.email, "").toLowerCase(),
     phone: sanitizePhone(current.phone),
-    role: normalizeRole(current.role),
-    active: Boolean(current.active),
+    role: "user",
+    active: true,
     tipo: normalizeCustomerType(current.customerType),
     nif: safeText(current.nif, "").toUpperCase(),
-    clienteId: safeText(current.clienteId, ""),
-    password: safeText(current.password, ""),
-    privacyMode: Boolean(current.privacyMode),
-    darkMode: Boolean(current.darkMode),
+    privacyMode: false,
+    darkMode: true,
     direccion: {
       calle: normalizeWhitespace(current.addressStreet),
       cp: safeText(current.addressCp, ""),
@@ -642,66 +595,6 @@ function renderSelect({
   `;
 }
 
-function renderToggle({
-  label = "",
-  name = "",
-  checked = false,
-} = {}) {
-  return `
-    <label class="usr-create-toggle">
-      <input
-        type="checkbox"
-        data-field="${escapeHtml(name)}"
-        name="${escapeHtml(name)}"
-        ${checked ? "checked" : ""}
-      />
-      <span class="usr-create-toggle-ui"></span>
-      <span class="usr-create-toggle-label">${escapeHtml(label)}</span>
-    </label>
-  `;
-}
-
-function renderInfoCard(customerType = "particular") {
-  const isCompany = normalizeCustomerType(customerType) === "empresa";
-
-  return `
-    <section class="usr-create-side-card usr-create-side-note">
-      <strong class="usr-create-side-title">Antes de guardar</strong>
-
-      <div class="usr-create-note-list">
-        <span>Se crearán identidad, acceso y datos base del usuario.</span>
-        <span>${isCompany ? "Para empresa conviene registrar el NIF y la dirección fiscal completa." : "Para particular puedes dejar clienteId vacío si aún no está vinculado."}</span>
-        <span>El username y el email deberían ser únicos.</span>
-      </div>
-    </section>
-  `;
-}
-
-function renderTypeCard(customerType = "particular") {
-  const normalized = normalizeCustomerType(customerType);
-  const title =
-    normalized === "empresa" ? "Perfil empresa" : "Perfil particular";
-  const text =
-    normalized === "empresa"
-      ? "Pensado para cuentas con datos fiscales y posible vinculación con cliente."
-      : "Pensado para usuarios o clientes finales a título personal.";
-
-  return `
-    <section class="usr-create-side-card">
-      <div class="usr-create-side-head">
-        <div class="usr-create-side-head-copy">
-          <strong class="usr-create-side-title">${escapeHtml(title)}</strong>
-          <span class="usr-create-side-text">${escapeHtml(text)}</span>
-        </div>
-
-        <span class="usr-create-side-pill">
-          ${escapeHtml(normalized)}
-        </span>
-      </div>
-    </section>
-  `;
-}
-
 function renderAlert(type = "info", title = "", text = "", extra = "") {
   const safeTitle = safeText(title, "");
   const safeBody = safeText(text, "");
@@ -788,185 +681,114 @@ function renderModalInner() {
           }
 
           <form id="usuarios-create-form" novalidate class="usr-create-form">
-            <div class="usr-create-grid">
-              <div class="usr-create-main">
+            <div class="usr-create-main">
+              ${renderInput({
+                label: "Nombre completo",
+                name: "name",
+                value: form.name,
+                placeholder: "Ej. Cristian Ávila Luque",
+                required: true,
+                error: errors.name,
+                autocomplete: "name",
+              })}
+
+              <div class="usr-create-inline-grid">
                 ${renderInput({
-                  label: "Nombre completo",
-                  name: "name",
-                  value: form.name,
-                  placeholder: "Ej. Cristian Ávila Luque",
+                  label: "Email",
+                  name: "email",
+                  value: form.email,
+                  type: "email",
+                  placeholder: "Ej. usuario@correo.com",
                   required: true,
-                  error: errors.name,
-                  autocomplete: "name",
+                  error: errors.email,
+                  autocomplete: "email",
                 })}
 
-                <div class="usr-create-inline-grid">
-                  ${renderInput({
-                    label: "Username",
-                    name: "username",
-                    value: form.username,
-                    placeholder: "Ej. cristian",
-                    required: true,
-                    error: errors.username,
-                    autocomplete: "username",
-                  })}
-
-                  ${renderSelect({
-                    label: "Rol",
-                    name: "role",
-                    value: normalizeRole(form.role),
-                    required: true,
-                    error: errors.role,
-                    options: ROLE_OPTIONS,
-                  })}
-                </div>
-
-                <div class="usr-create-inline-grid">
-                  ${renderInput({
-                    label: "Email",
-                    name: "email",
-                    value: form.email,
-                    type: "email",
-                    placeholder: "Ej. usuario@correo.com",
-                    required: true,
-                    error: errors.email,
-                    autocomplete: "email",
-                  })}
-
-                  ${renderInput({
-                    label: "Teléfono",
-                    name: "phone",
-                    value: form.phone,
-                    placeholder: "Ej. +34 600 123 456",
-                    required: true,
-                    error: errors.phone,
-                    autocomplete: "tel",
-                  })}
-                </div>
-
-                <div class="usr-create-inline-grid">
-                  ${renderSelect({
-                    label: "Tipo",
-                    name: "customerType",
-                    value: normalizeCustomerType(form.customerType),
-                    required: true,
-                    error: errors.customerType,
-                    options: CUSTOMER_TYPE_OPTIONS,
-                  })}
-
-                  ${renderInput({
-                    label: "NIF / CIF",
-                    name: "nif",
-                    value: form.nif,
-                    placeholder: "Ej. 12345678Z / B12345678",
-                    required: normalizeCustomerType(form.customerType) === "empresa",
-                    error: errors.nif,
-                    autocomplete: "off",
-                  })}
-                </div>
-
-                <div class="usr-create-inline-grid">
-                  ${renderInput({
-                    label: "Cliente ID",
-                    name: "clienteId",
-                    value: form.clienteId,
-                    placeholder: "Ej. CON-20260316631627",
-                    required: false,
-                    error: errors.clienteId,
-                    autocomplete: "off",
-                  })}
-
-                  ${renderInput({
-                    label: "Contraseña",
-                    name: "password",
-                    value: form.password,
-                    type: "password",
-                    placeholder: "Mínimo 8 caracteres",
-                    required: true,
-                    error: errors.password,
-                    autocomplete: "new-password",
-                  })}
-                </div>
-
-                <div class="usr-create-inline-grid usr-create-inline-grid--3">
-                  ${renderInput({
-                    label: "Calle",
-                    name: "addressStreet",
-                    value: form.addressStreet,
-                    placeholder: "Ej. Calle Rafael de Casanova 54 1ro 3ra",
-                    required: true,
-                    error: errors.addressStreet,
-                    autocomplete: "street-address",
-                  })}
-
-                  ${renderInput({
-                    label: "CP",
-                    name: "addressCp",
-                    value: form.addressCp,
-                    placeholder: "Ej. 08295",
-                    required: true,
-                    error: errors.addressCp,
-                    autocomplete: "postal-code",
-                  })}
-
-                  ${renderInput({
-                    label: "Ciudad",
-                    name: "addressCity",
-                    value: form.addressCity,
-                    placeholder: "Ej. Sant Vicenç de Castellet",
-                    required: true,
-                    error: errors.addressCity,
-                    autocomplete: "address-level2",
-                  })}
-                </div>
-
-                <div class="usr-create-inline-grid">
-                  ${renderInput({
-                    label: "Provincia",
-                    name: "addressProvince",
-                    value: form.addressProvince,
-                    placeholder: "Ej. Barcelona",
-                    required: true,
-                    error: errors.addressProvince,
-                    autocomplete: "address-level1",
-                  })}
-
-                  ${renderInput({
-                    label: "País",
-                    name: "addressCountry",
-                    value: form.addressCountry,
-                    placeholder: "Ej. España",
-                    required: true,
-                    error: errors.addressCountry,
-                    autocomplete: "country-name",
-                  })}
-                </div>
-
-                <div class="usr-create-toggle-grid">
-                  ${renderToggle({
-                    label: "Usuario activo",
-                    name: "active",
-                    checked: Boolean(form.active),
-                  })}
-
-                  ${renderToggle({
-                    label: "Privacy mode",
-                    name: "privacyMode",
-                    checked: Boolean(form.privacyMode),
-                  })}
-
-                  ${renderToggle({
-                    label: "Dark mode",
-                    name: "darkMode",
-                    checked: Boolean(form.darkMode),
-                  })}
-                </div>
+                ${renderInput({
+                  label: "Teléfono",
+                  name: "phone",
+                  value: form.phone,
+                  placeholder: "Ej. +34 600 123 456",
+                  required: true,
+                  error: errors.phone,
+                  autocomplete: "tel",
+                })}
               </div>
 
-              <aside class="usr-create-side">
-                ${renderTypeCard(form.customerType)}
-                ${renderInfoCard(form.customerType)}
-              </aside>
+              <div class="usr-create-inline-grid">
+                ${renderSelect({
+                  label: "Tipo",
+                  name: "customerType",
+                  value: normalizeCustomerType(form.customerType),
+                  required: true,
+                  error: errors.customerType,
+                  options: CUSTOMER_TYPE_OPTIONS,
+                })}
+
+                ${renderInput({
+                  label: "NIF / CIF",
+                  name: "nif",
+                  value: form.nif,
+                  placeholder: "Ej. 12345678Z / B12345678",
+                  required: normalizeCustomerType(form.customerType) === "empresa",
+                  error: errors.nif,
+                  autocomplete: "off",
+                })}
+              </div>
+
+              <div class="usr-create-inline-grid usr-create-inline-grid--3">
+                ${renderInput({
+                  label: "Calle",
+                  name: "addressStreet",
+                  value: form.addressStreet,
+                  placeholder: "Ej. Calle Rafael de Casanova 54 1ro 3ra",
+                  required: true,
+                  error: errors.addressStreet,
+                  autocomplete: "street-address",
+                })}
+
+                ${renderInput({
+                  label: "CP",
+                  name: "addressCp",
+                  value: form.addressCp,
+                  placeholder: "Ej. 08295",
+                  required: true,
+                  error: errors.addressCp,
+                  autocomplete: "postal-code",
+                })}
+
+                ${renderInput({
+                  label: "Ciudad",
+                  name: "addressCity",
+                  value: form.addressCity,
+                  placeholder: "Ej. Sant Vicenç de Castellet",
+                  required: true,
+                  error: errors.addressCity,
+                  autocomplete: "address-level2",
+                })}
+              </div>
+
+              <div class="usr-create-inline-grid">
+                ${renderInput({
+                  label: "Provincia",
+                  name: "addressProvince",
+                  value: form.addressProvince,
+                  placeholder: "Ej. Barcelona",
+                  required: true,
+                  error: errors.addressProvince,
+                  autocomplete: "address-level1",
+                })}
+
+                ${renderInput({
+                  label: "País",
+                  name: "addressCountry",
+                  value: form.addressCountry,
+                  placeholder: "Ej. España",
+                  required: true,
+                  error: errors.addressCountry,
+                  autocomplete: "country-name",
+                })}
+              </div>
             </div>
 
             <div class="usr-create-actions">
@@ -1010,7 +832,7 @@ function renderModalInner() {
 
           .usr-create-panel{
             position:relative;
-            width:min(1080px, 100%);
+            width:min(1180px, 100%);
             max-height:90vh;
             overflow:auto;
             border-radius:24px;
@@ -1052,7 +874,7 @@ function renderModalInner() {
 
           .usr-create-header-text p{
             margin:0;
-            max-width:760px;
+            max-width:860px;
             color:var(--text-dim);
             font-size:13px;
             line-height:1.55;
@@ -1123,13 +945,6 @@ function renderModalInner() {
             gap:14px;
           }
 
-          .usr-create-grid{
-            display:grid;
-            grid-template-columns:minmax(0, 1.45fr) minmax(280px, .7fr);
-            gap:14px;
-            align-items:start;
-          }
-
           .usr-create-main{
             display:grid;
             gap:14px;
@@ -1143,20 +958,7 @@ function renderModalInner() {
           }
 
           .usr-create-inline-grid--3{
-            grid-template-columns:1.6fr .7fr 1fr;
-          }
-
-          .usr-create-toggle-grid{
-            display:grid;
-            grid-template-columns:repeat(3, minmax(0, 1fr));
-            gap:12px;
-            padding-top:2px;
-          }
-
-          .usr-create-side{
-            display:grid;
-            gap:12px;
-            min-width:0;
+            grid-template-columns:1.8fr .7fr 1fr;
           }
 
           .usr-create-field{
@@ -1232,132 +1034,11 @@ function renderModalInner() {
             font-weight:var(--weight-semibold, 600);
           }
 
-          .usr-create-side-card{
-            display:grid;
-            gap:10px;
-            padding:14px;
-            border-radius:16px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-1, var(--surface-glass));
-          }
-
-          .usr-create-side-head{
-            display:flex;
-            align-items:flex-start;
-            justify-content:space-between;
-            gap:10px;
-          }
-
-          .usr-create-side-head-copy{
-            display:grid;
-            gap:4px;
-            min-width:0;
-          }
-
-          .usr-create-side-title{
-            color:var(--text-strong);
-            font-size:13px;
-            line-height:1.3;
-          }
-
-          .usr-create-side-text{
-            color:var(--text-dim);
-            font-size:11px;
-            line-height:1.45;
-          }
-
-          .usr-create-side-pill{
-            display:inline-flex;
-            align-items:center;
-            min-height:24px;
-            padding:0 8px;
-            border-radius:999px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-            color:var(--text-dim);
-            font-size:10px;
-            font-weight:var(--weight-bold, 700);
-            letter-spacing:.04em;
-            text-transform:uppercase;
-            white-space:nowrap;
-          }
-
-          .usr-create-side-note{
-            gap:8px;
-          }
-
-          .usr-create-note-list{
-            display:grid;
-            gap:6px;
-          }
-
-          .usr-create-note-list span{
-            color:var(--text-dim);
-            font-size:11px;
-            line-height:1.45;
-          }
-
-          .usr-create-toggle{
-            display:flex;
-            align-items:center;
-            gap:10px;
-            min-height:46px;
-            padding:0 12px;
-            border-radius:14px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-1, var(--surface-glass));
-            cursor:pointer;
-          }
-
-          .usr-create-toggle input{
-            display:none;
-          }
-
-          .usr-create-toggle-ui{
-            position:relative;
-            width:44px;
-            height:24px;
-            border-radius:999px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-            flex:0 0 auto;
-          }
-
-          .usr-create-toggle-ui::after{
-            content:"";
-            position:absolute;
-            top:2px;
-            left:2px;
-            width:18px;
-            height:18px;
-            border-radius:999px;
-            background:#fff;
-            box-shadow:0 4px 10px rgba(0,0,0,.24);
-            transition:left .18s ease, background .18s ease;
-          }
-
-          .usr-create-toggle input:checked + .usr-create-toggle-ui{
-            background:color-mix(in srgb, var(--accent, #7c5cff) 20%, transparent);
-            border-color:color-mix(in srgb, var(--accent, #7c5cff) 34%, transparent);
-          }
-
-          .usr-create-toggle input:checked + .usr-create-toggle-ui::after{
-            left:22px;
-            background:var(--accent, #7c5cff);
-          }
-
-          .usr-create-toggle-label{
-            color:var(--text-soft);
-            font-size:13px;
-            font-weight:var(--weight-semibold, 600);
-            line-height:1.3;
-          }
-
           .usr-create-actions{
             display:flex;
             justify-content:flex-end;
             gap:12px;
-            padding-top:2px;
+            padding-top:8px;
           }
 
           .usr-create-submit{
@@ -1402,24 +1083,15 @@ function renderModalInner() {
               0 0 0 1px rgba(255,255,255,.65) inset;
           }
 
-          [data-theme="light"] .usr-create-side-card,
           [data-theme="light"] .usr-create-alert,
           [data-theme="light"] .usr-create-input,
-          [data-theme="light"] .usr-create-select,
-          [data-theme="light"] .usr-create-toggle{
+          [data-theme="light"] .usr-create-select{
             box-shadow:0 6px 16px rgba(15,23,42,.04);
-          }
-
-          @media (max-width: 980px){
-            .usr-create-grid{
-              grid-template-columns:1fr;
-            }
           }
 
           @media (max-width: 820px){
             .usr-create-inline-grid,
-            .usr-create-inline-grid--3,
-            .usr-create-toggle-grid{
+            .usr-create-inline-grid--3{
               grid-template-columns:1fr;
             }
           }
@@ -1576,10 +1248,6 @@ export function openUsuariosCreateModal(draft = {}) {
   modalState.form.customerType = normalizeCustomerType(
     first(modalState.form.customerType, modalState.form.tipo)
   );
-  modalState.form.role = normalizeRole(modalState.form.role);
-  modalState.form.active = toBoolean(modalState.form.active, true);
-  modalState.form.privacyMode = toBoolean(modalState.form.privacyMode, false);
-  modalState.form.darkMode = toBoolean(modalState.form.darkMode, true);
 
   persistDraft();
 
@@ -1636,7 +1304,6 @@ export function updateUsuariosCreateModal(draft = {}) {
   modalState.form.customerType = normalizeCustomerType(
     first(modalState.form.customerType, modalState.form.tipo)
   );
-  modalState.form.role = normalizeRole(modalState.form.role);
 
   persistDraft();
   renderModal();
@@ -1742,12 +1409,6 @@ function handleFieldChange(target) {
 
   if (field === "customerType") {
     value = normalizeCustomerType(value);
-  } else if (field === "role") {
-    value = normalizeRole(value);
-  } else if (field === "username") {
-    value = sanitizeUsername(value);
-  } else if (target?.type === "checkbox") {
-    value = Boolean(target.checked);
   }
 
   setFormPatch({
@@ -1792,7 +1453,7 @@ function attachRootBindings() {
   const onInput = (event) => {
     const field = event.target.closest("[data-field]");
     if (!field) return;
-    if (field.tagName === "SELECT" || field.type === "checkbox") return;
+    if (field.tagName === "SELECT") return;
 
     handleFieldChange(field);
   };

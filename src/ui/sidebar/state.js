@@ -169,15 +169,10 @@ function getDesktopDesiredOpenState(AppCore) {
     return state.sidebarDesktopOpen;
   }
 
-  const fromDom = resolveDomSidebarOpenState(AppCore);
-  if (typeof fromDom === "boolean") {
-    setDesktopMemory(AppCore, fromDom);
-    return fromDom;
-  }
-
-  const fromStorage = !getSavedSidebarCollapsed();
-  setDesktopMemory(AppCore, fromStorage);
-  return fromStorage;
+  /* estado natural desktop: abierto.
+     no heredamos collapsed desde DOM/storage en cold start */
+  setDesktopMemory(AppCore, true);
+  return true;
 }
 
 function getMobileDesiredOpenState(AppCore) {

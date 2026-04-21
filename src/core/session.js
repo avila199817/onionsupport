@@ -729,12 +729,9 @@ export function loadPreferences({
       config.defaultLang
     );
 
-  const savedSidebar =
-    storage?.get?.(
-      config.storageKeys
-        .sidebarOpen,
-      true
-    );
+  /* Regla UX:
+     estado natural por defecto = abierto.
+     Evitamos arrancar colapsado por residuos legacy de storage. */
 
   const savedSidebarCollapsedRaw =
     storage?.get?.(
@@ -765,22 +762,7 @@ export function loadPreferences({
     ).trim() ||
     config.defaultLang;
 
-  if (hasCollapsedValue) {
-    const collapsed =
-      savedSidebarCollapsedRaw ===
-        true ||
-      savedSidebarCollapsedRaw ===
-        "true";
-
-    state.sidebarOpen =
-      !collapsed;
-  } else {
-    state.sidebarOpen =
-      typeof savedSidebar ===
-      "boolean"
-        ? savedSidebar
-        : true;
-  }
+  state.sidebarOpen = true;
 
   if (dom?.html) {
     dom.html.setAttribute(

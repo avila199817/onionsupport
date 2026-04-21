@@ -23,7 +23,7 @@
 ========================================================= */
 
 import UsuariosView from "./usuariosView.js";
-import UsuariosCreateView from "./usuariosCreateView.js";
+import UsuariosCreateView from "./usuarios.create.modal.js";
 import UsuariosModal from "./usuarios.modal.js";
 
 /* =========================================================

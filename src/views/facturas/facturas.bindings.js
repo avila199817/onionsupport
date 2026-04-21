@@ -3,11 +3,13 @@
    Archivo: src/views/facturas/facturas.bindings.js
 
    FINAL PRO SYSTEM · BINDINGS REAL · 10/10
+   PATCH · OPEN INCIDENCIA SUPPORT
 
    RESPONSABILIDADES:
    - registrar eventos UI del módulo de facturas
    - bind de refresh / retry / export
    - delegación de eventos sobre cards y acciones de colección
+   - soportar click en incidencia relacionada
    - evitar dobles listeners por re-render
    - re-evaluar estado vivo en cada interacción
    - mantener facturasView.js limpio
@@ -122,6 +124,17 @@ function getFacturaId(element) {
   );
 }
 
+function getIncidenciaId(element) {
+  return safeText(
+    element?.dataset?.ticketId ||
+      element?.dataset?.incidenciaId ||
+      element?.getAttribute?.("data-ticket-id") ||
+      element?.getAttribute?.("data-incidencia-id") ||
+      "",
+    ""
+  );
+}
+
 function isBusyState(state = {}) {
   return Boolean(state?.loading || state?.refreshing);
 }
@@ -165,6 +178,72 @@ async function safeRefresh({
   });
 
   return true;
+}
+
+async function tryNavigateWith(candidatePath = "") {
+  const path = safeText(candidatePath, "");
+  if (!path) return false;
+
+  try {
+    if (typeof AppCore?.router?.navigate === "function") {
+      await AppCore.router.navigate(path);
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (typeof AppCore?.Router?.navigate === "function") {
+      await AppCore.Router.navigate(path);
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (typeof AppCore?.modules?.Router?.navigate === "function") {
+      await AppCore.modules.Router.navigate(path);
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (typeof AppCore?.services?.router?.navigate === "function") {
+      await AppCore.services.router.navigate(path);
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (typeof AppCore?.navigate === "function") {
+      await AppCore.navigate(path);
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+async function openIncidenciaById(incidenciaId = "") {
+  const id = safeText(incidenciaId, "");
+  if (!id) return false;
+
+  const candidates = [
+    `/incidencias/${id}`,
+    `/tickets/${id}`,
+  ];
+
+  for (const path of candidates) {
+    const ok = await tryNavigateWith(path);
+    if (ok) return true;
+  }
+
+  try {
+    AppCore?.events?.emit?.("facturas:open-incidencia", {
+      incidenciaId: id,
+      ticketId: id,
+    });
+  } catch {}
+
+  return false;
 }
 
 /* =========================================================
@@ -322,6 +401,7 @@ export function bindFacturasView({
         );
 
         const facturaId = getFacturaId(actionEl);
+        const incidenciaId = getIncidenciaId(actionEl);
 
         if (action === "open-factura") {
           event.preventDefault();
@@ -368,6 +448,26 @@ export function bindFacturasView({
           }
 
           await sendFacturaToClient?.(facturaId);
+          return;
+        }
+
+        if (action === "open-incidencia") {
+          event.preventDefault();
+          event.stopPropagation();
+
+          if (!incidenciaId || isBusyState(state)) {
+            return;
+          }
+
+          const opened = await openIncidenciaById(incidenciaId);
+
+          if (!opened) {
+            showBindingToast(
+              "No se pudo abrir la incidencia relacionada.",
+              "error"
+            );
+          }
+
           return;
         }
 

@@ -2,11 +2,11 @@
    Onion SPA - Facturas Template
    Archivo: src/views/facturas/facturas.template.js
 
-   FINAL PRODUCTION TEMPLATE · DEFINITIVO · FACTURAS MODE
+   FINAL PRODUCTION TEMPLATE · DEFINITIVO 10/10 · FACTURAS MODE
 
    RESPONSABILIDADES:
    - render del hero/header de facturas
-   - render de tabla productiva compacta
+   - render de tabla productiva compacta y densa
    - compatibilidad directa con facturasView.js
    - exportar renderHeader
    - exportar renderCards
@@ -18,6 +18,7 @@
    - quitar columna PDF
    - añadir columna Incidencia clicable para abrir incidencia relacionada
    - optimizar espacio visual de tabla
+   - acciones 2x2 compactas
 ========================================================= */
 
 /* =========================================================
@@ -898,7 +899,7 @@ function renderStyles() {
         grid-template-columns:minmax(0, 1fr) auto;
         gap:14px;
         align-items:start;
-        padding:14px 18px 12px;
+        padding:14px 20px 12px;
         border-bottom:1px solid rgba(15,23,42,.06);
       }
 
@@ -944,11 +945,12 @@ function renderStyles() {
         width:100%;
         border-collapse:separate;
         border-spacing:0;
-        min-width:1080px;
+        min-width:1160px;
+        table-layout:fixed;
       }
 
       .facturas-table thead th{
-        padding:12px 16px;
+        padding:12px 20px;
         text-align:left;
         font-size:11px;
         font-weight:760;
@@ -961,7 +963,7 @@ function renderStyles() {
       }
 
       .facturas-table tbody td{
-        padding:16px 16px;
+        padding:14px 20px;
         vertical-align:middle;
         border-bottom:1px solid rgba(15,23,42,.055);
       }
@@ -978,21 +980,25 @@ function renderStyles() {
         background:rgba(124,92,255,.014);
       }
 
+      .facturas-cell--main{
+        min-width:0;
+      }
+
       .facturas-main{
         display:grid;
-        grid-template-columns:40px minmax(0, 1fr);
-        gap:12px;
+        grid-template-columns:42px minmax(0, 1fr);
+        gap:14px;
         align-items:center;
         min-width:0;
       }
 
       .facturas-avatar{
         position:relative;
-        width:40px;
-        height:40px;
+        width:42px;
+        height:42px;
         border-radius:999px;
         overflow:hidden;
-        flex:0 0 40px;
+        flex:0 0 42px;
         background:linear-gradient(135deg, rgba(124,92,255,.12), rgba(139,92,246,.24));
       }
 
@@ -1015,30 +1021,28 @@ function renderStyles() {
       }
 
       .facturas-factura-id{
-        font-size:11px;
-        line-height:1.15;
-        font-weight:760;
+        font-size:12px;
+        line-height:1.1;
+        font-weight:780;
         letter-spacing:.055em;
         color:#667084;
         text-transform:uppercase;
       }
 
       .facturas-factura-client{
-        font-size:14px;
-        line-height:1.16;
-        font-weight:760;
+        font-size:15px;
+        line-height:1.14;
+        font-weight:780;
         letter-spacing:-.022em;
         color:var(--text-strong, #111827);
         overflow:hidden;
         text-overflow:ellipsis;
-        display:-webkit-box;
-        -webkit-line-clamp:2;
-        -webkit-box-orient:vertical;
+        white-space:nowrap;
       }
 
       .facturas-factura-email{
         font-size:12px;
-        line-height:1.25;
+        line-height:1.2;
         color:#8a93a3;
         overflow:hidden;
         text-overflow:ellipsis;
@@ -1085,28 +1089,28 @@ function renderStyles() {
         display:inline-block;
         white-space:nowrap;
         font-size:13px;
-        line-height:1.2;
-        font-weight:650;
+        line-height:1.15;
+        font-weight:680;
         font-variant-numeric:tabular-nums;
         color:#344054;
       }
 
       .facturas-total-stack{
         display:grid;
-        gap:2px;
+        gap:1px;
       }
 
       .facturas-total-value{
-        font-size:14px;
-        line-height:1.15;
-        font-weight:780;
+        font-size:15px;
+        line-height:1.1;
+        font-weight:800;
         color:var(--text-strong, #111827);
         white-space:nowrap;
       }
 
       .facturas-total-caption{
         font-size:11px;
-        line-height:1.15;
+        line-height:1.1;
         color:#6b7280;
         white-space:nowrap;
         font-weight:700;
@@ -1114,7 +1118,7 @@ function renderStyles() {
 
       .facturas-total-meta{
         font-size:11px;
-        line-height:1.15;
+        line-height:1.1;
         color:#98a2b3;
         white-space:nowrap;
       }
@@ -1161,21 +1165,21 @@ function renderStyles() {
       }
 
       .facturas-actions{
-        display:flex;
-        align-items:center;
+        display:grid;
+        grid-template-columns:repeat(2, minmax(92px, 1fr));
         gap:6px;
-        flex-wrap:wrap;
-        justify-content:flex-end;
+        justify-content:end;
+        min-width:196px;
       }
 
       .facturas-action-btn{
-        width:auto;
+        width:100%;
         min-width:0;
-        min-height:32px;
-        padding:0 11px;
-        border-radius:11px;
+        min-height:34px;
+        padding:0 10px;
+        border-radius:12px;
         border:1px solid rgba(15,23,42,.065);
-        background:rgba(255,255,255,.78);
+        background:rgba(255,255,255,.82);
         color:#1f2937;
         font-size:12px;
         font-weight:760;
@@ -1184,6 +1188,7 @@ function renderStyles() {
         display:inline-flex;
         align-items:center;
         justify-content:center;
+        text-align:center;
         white-space:nowrap;
         box-shadow:0 2px 8px rgba(15,23,42,.02);
         transition:
@@ -1191,13 +1196,12 @@ function renderStyles() {
           background .16s ease,
           transform .16s ease,
           opacity .16s ease,
-          box-shadow .16s ease,
-          filter .16s ease;
+          box-shadow .16s ease;
       }
 
       .facturas-action-btn:hover{
         transform:translateY(-1px);
-        background:rgba(255,255,255,.96);
+        background:rgba(255,255,255,.98);
         border-color:rgba(15,23,42,.10);
         box-shadow:0 6px 14px rgba(15,23,42,.05);
       }
@@ -1268,14 +1272,14 @@ function renderStyles() {
       }
 
       .facturas-table-loading{
-        padding:12px 18px 16px;
+        padding:12px 20px 16px;
         display:grid;
-        gap:12px;
+        gap:10px;
       }
 
       .facturas-table-loading-row{
         display:grid;
-        grid-template-columns:40px minmax(220px, 1.7fr) 110px 130px 110px 250px;
+        grid-template-columns:42px minmax(280px, 2.2fr) 110px 150px 110px 210px;
         gap:12px;
         align-items:center;
       }
@@ -1307,8 +1311,8 @@ function renderStyles() {
       }
 
       .facturas-skeleton--avatar{
-        width:40px;
-        height:40px;
+        width:42px;
+        height:42px;
         border-radius:999px;
       }
 
@@ -1318,12 +1322,12 @@ function renderStyles() {
       }
 
       .facturas-skeleton--lg{
-        width:74%;
+        width:80%;
         height:14px;
       }
 
       .facturas-skeleton--md{
-        width:56%;
+        width:62%;
         height:12px;
       }
 
@@ -1333,13 +1337,14 @@ function renderStyles() {
       }
 
       .facturas-skeleton--date{
-        width:118px;
+        width:128px;
         height:12px;
       }
 
       .facturas-skeleton--actions{
-        width:230px;
-        height:32px;
+        width:200px;
+        height:74px;
+        border-radius:16px;
       }
 
       .facturas-empty{
@@ -1433,6 +1438,10 @@ function renderStyles() {
 
         .facturas-stats{
           grid-template-columns:repeat(2, minmax(0, 1fr));
+        }
+
+        .facturas-table{
+          min-width:1100px;
         }
       }
 
@@ -1638,12 +1647,12 @@ export function renderCards({ items = [], state = {} } = {}) {
         <div class="facturas-table-shell">
           <table class="facturas-table" role="table" aria-label="Listado de facturas">
             <colgroup>
-              <col style="width:39%;">
-              <col style="width:11%;">
+              <col style="width:43%;">
+              <col style="width:12%;">
+              <col style="width:16%;">
               <col style="width:15%;">
-              <col style="width:15%;">
-              <col style="width:10%;">
-              <col style="width:10%;">
+              <col style="width:8%;">
+              <col style="width:16%;">
             </colgroup>
 
             <thead>

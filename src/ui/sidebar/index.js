@@ -2,7 +2,12 @@
    Onion SPA - Sidebar UI
    Archivo: src/ui/sidebar/index.js
 
-   FINAL FIX · MANUAL SIDEBAR ONLY · STABLE MODE
+   FINAL PRO FIX · DESKTOP STABLE MODE
+   FIX:
+   - desktop y mobile separados
+   - sin auto-collapse fantasma al cambiar de ruta
+   - restore robusto del estado
+   - dropdown estable
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -33,11 +38,12 @@ import {
 } from "./user.js";
 
 import {
-  saveSidebarCollapsed,
+  getSavedSidebarCollapsed,
   isMobileViewport,
   updateToggleLabel,
   syncSidebarState as syncSidebarStateBase,
   getDesiredSidebarOpenState,
+  setSidebarOpen as setSidebarOpenBase,
 } from "./state.js";
 
 import {
@@ -197,7 +203,7 @@ export const SidebarUI = (() => {
   }
 
   function ensureSidebarOpenForUserMenu() {
-    if (!AppCore?.state?.sidebarOpen) {
+    if (!getDesiredSidebarOpenState(AppCore)) {
       openSidebar();
       return true;
     }
@@ -241,18 +247,11 @@ export const SidebarUI = (() => {
   }
 
   function setSidebarOpen(open) {
-    const nextOpen = Boolean(open);
-    const mobile = isMobileViewport(MOBILE_BREAKPOINT);
-
-    if (typeof AppCore?.setSidebarOpen === "function") {
-      AppCore.setSidebarOpen(nextOpen);
-    } else {
-      AppCore.state.sidebarOpen = nextOpen;
-    }
-
-    if (!mobile) {
-      saveSidebarCollapsed(!nextOpen);
-    }
+    setSidebarOpenBase(
+      AppCore,
+      Boolean(open),
+      closeDropdown
+    );
 
     syncSidebarState();
   }
@@ -269,9 +268,7 @@ export const SidebarUI = (() => {
   function toggleSidebar() {
     if (isShellHidden(AppCore)) return;
 
-    const nextOpen = !Boolean(
-      AppCore?.state?.sidebarOpen
-    );
+    const nextOpen = !getDesiredSidebarOpenState(AppCore);
 
     setSidebarOpen(nextOpen);
 
@@ -281,35 +278,42 @@ export const SidebarUI = (() => {
   }
 
   function getSidebarSnapshot() {
-    const { sidebar } = getElements(AppCore);
-
     const mobile = isMobileViewport(MOBILE_BREAKPOINT);
-
-    const domOpen =
-      sidebar &&
-      !sidebar.classList.contains("collapsed") &&
-      !sidebar.classList.contains("is-collapsed");
+    const open = getDesiredSidebarOpenState(AppCore);
 
     return {
       mobile,
-      open:
-        typeof AppCore?.state?.sidebarOpen === "boolean"
-          ? Boolean(AppCore.state.sidebarOpen)
-          : Boolean(domOpen),
+      open,
+      desktopOpen:
+        typeof AppCore?.state?.sidebarDesktopOpen === "boolean"
+          ? Boolean(AppCore.state.sidebarDesktopOpen)
+          : open,
     };
   }
 
   function restoreSidebarState(snapshot) {
-    if (!snapshot || snapshot.mobile) return;
+    if (!snapshot) return;
 
-    if (
-      Boolean(AppCore?.state?.sidebarOpen) ===
-      Boolean(snapshot.open)
-    ) {
+    const mobileNow = isMobileViewport(MOBILE_BREAKPOINT);
+    if (mobileNow) return;
+
+    const desiredOpen = Boolean(
+      typeof snapshot.desktopOpen === "boolean"
+        ? snapshot.desktopOpen
+        : snapshot.open
+    );
+
+    if (AppCore?.state && typeof AppCore.state === "object") {
+      AppCore.state.sidebarDesktopOpen = desiredOpen;
+      AppCore.state.sidebarOpen = desiredOpen;
+    }
+
+    if (getDesiredSidebarOpenState(AppCore) === desiredOpen) {
+      syncSidebarState();
       return;
     }
 
-    setSidebarOpen(snapshot.open);
+    setSidebarOpen(desiredOpen);
   }
 
   function closeSidebarOnMobileAfterNavigation() {
@@ -372,8 +376,19 @@ export const SidebarUI = (() => {
 
     sanitizeFooterTooltipState(AppCore);
 
-    if (typeof AppCore.state.sidebarOpen !== "boolean") {
-      AppCore.state.sidebarOpen = true;
+    const mobile = isMobileViewport(MOBILE_BREAKPOINT);
+    const desktopOpen = !getSavedSidebarCollapsed();
+
+    if (typeof AppCore?.state?.sidebarDesktopOpen !== "boolean") {
+      AppCore.state.sidebarDesktopOpen = desktopOpen;
+    }
+
+    if (typeof AppCore?.state?.sidebarOpen !== "boolean") {
+      AppCore.state.sidebarOpen = mobile
+        ? false
+        : AppCore.state.sidebarDesktopOpen;
+    } else if (!mobile) {
+      AppCore.state.sidebarOpen = AppCore.state.sidebarDesktopOpen;
     }
 
     syncSidebarState();
@@ -421,6 +436,7 @@ export const SidebarUI = (() => {
       closeSidebarOnMobileAfterNavigation,
       getSidebarSnapshot,
       restoreSidebarState,
+      getElements: () => getElements(AppCore),
     });
 
     initialized = true;

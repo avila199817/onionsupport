@@ -1,47 +1,15 @@
 /* =========================================================
-   Onion SPA - Incidencias Template (CLIENT EXPERIENCE MODE)
+   Onion SPA - Incidencias Table Template
    Archivo: src/views/incidencias/incidencias.table.template.js
 
-   DEFINITIVE PRO / AIR MODE / CLIENT FIRST / POLISHED
-
-   Objetivo:
-   - hero superior fino y bien alineado
-   - botones arriba derecha
-   - título ancho real y sin caída rara
-   - resumen con 2 cajas: abiertas / cerradas
-   - avatares limpios sin box feo detrás
-   - light mode más vivo
-   - tabla más aireada y mejor proporcionada
-   - orden incidencia: número -> asunto -> descripción
-   - columnas:
-     incidencia / estado / fecha de creación / última novedad / importe / acciones
-   - última novedad solo relativa
-   - acciones: solo ver detalle
-   - tooltip en avatar con nombre completo
-   - paginación a 5 incidencias por vista
+   FINAL PRODUCTION TEMPLATE · LIST VIEW · 10/10
 ========================================================= */
-
-import { incidenciasState } from "./incidencias.state.js";
-
-import {
-  getIncidencias,
-  sortIncidenciasByUpdatedDesc,
-} from "./incidencias.store.js";
-
-import {
-  escapeHtml,
-  formatDate,
-  formatRelativeDate,
-  truncate,
-} from "./incidencias.utils.js";
 
 /* =========================================================
-   SAFE
+   HELPERS
 ========================================================= */
 
-const PAGE_SIZE = 5;
-
-function safeText(value, fallback = "—") {
+function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
   const text = String(value).trim();
   return text || fallback;
@@ -76,1986 +44,1178 @@ function first(...values) {
   return null;
 }
 
-function firstFiniteNumber(...values) {
-  for (const value of values) {
-    const n = Number(value);
-    if (Number.isFinite(n)) return n;
+function escapeHtml(value = "") {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function normalizeWhitespace(value = "") {
+  return safeText(value, "").replace(/\s+/g, " ").trim();
+}
+
+function formatMoney(value = 0, currency = "EUR") {
+  const amount = Number(value);
+
+  if (!Number.isFinite(amount)) {
+    return "—";
   }
-
-  return null;
-}
-
-/* =========================================================
-   SCOPED STYLES
-========================================================= */
-
-function renderScopedStyles() {
-  return `
-    <style>
-      @keyframes incidenciasPulse {
-        0% { transform: scale(.92); opacity: .72; }
-        50% { transform: scale(1.06); opacity: 1; }
-        100% { transform: scale(.92); opacity: .72; }
-      }
-
-      @keyframes incidenciasSpin {
-        to { transform: rotate(360deg); }
-      }
-
-      @keyframes incidenciasSkeleton {
-        0% { background-position: 200% 0; }
-        100% { background-position: -200% 0; }
-      }
-
-      .incidencias-hero{
-        position:relative;
-        overflow:hidden;
-        border-radius:calc(var(--panel-radius) + 4px);
-        border:1px solid var(--border-soft);
-        background:
-          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 9%, transparent), transparent 34%),
-          linear-gradient(180deg, rgba(255,255,255,.014), transparent 28%),
-          var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-soft);
-      }
-
-      .incidencias-hero::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        pointer-events:none;
-        background:linear-gradient(180deg, rgba(255,255,255,.024), transparent 34%);
-        opacity:.88;
-      }
-
-      .incidencias-hero > *{
-        position:relative;
-        z-index:1;
-      }
-
-      .incidencias-hero-inner{
-        display:grid;
-        gap:var(--space-lg);
-        padding:clamp(18px, 2.2vw, 28px);
-      }
-
-      .incidencias-hero-head{
-        display:flex;
-        align-items:flex-start;
-        justify-content:space-between;
-        gap:20px;
-        flex-wrap:wrap;
-      }
-
-      .incidencias-hero-copy{
-        flex:1 1 760px;
-        min-inline-size:0;
-        display:grid;
-        gap:10px;
-      }
-
-      .incidencias-hero-actions{
-        flex:0 0 auto;
-        display:flex;
-        align-items:center;
-        justify-content:flex-end;
-        gap:10px;
-        flex-wrap:wrap;
-      }
-
-      .incidencias-eyebrow{
-        display:inline-flex;
-        align-items:center;
-        width:max-content;
-        min-block-size:30px;
-        padding-inline:12px;
-        border-radius:999px;
-        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft));
-        background:color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent);
-        color:var(--text-soft);
-        font-size:11px;
-        font-weight:var(--weight-bold);
-        letter-spacing:.06em;
-        text-transform:uppercase;
-      }
-
-      .incidencias-hero-title{
-        margin:0;
-        inline-size:100%;
-        max-inline-size:none;
-        font-size:clamp(28px, 5vw, 58px);
-        line-height:.98;
-        letter-spacing:-.055em;
-        color:var(--text-strong);
-        text-wrap:balance;
-      }
-
-      .incidencias-hero-subtitle{
-        margin:0;
-        max-inline-size:1120px;
-        color:var(--text-dim);
-        font-size:var(--font-lg);
-        line-height:1.58;
-      }
-
-      .incidencias-meta{
-        display:flex;
-        align-items:center;
-        gap:8px;
-        flex-wrap:wrap;
-      }
-
-      .incidencias-meta-pill{
-        display:inline-flex;
-        align-items:center;
-        min-block-size:28px;
-        padding-inline:10px;
-        border-radius:999px;
-        border:1px solid var(--border-soft);
-        background:var(--surface-glass);
-        color:var(--text-dim);
-        font-size:11px;
-        font-weight:var(--weight-bold);
-        letter-spacing:.04em;
-        text-transform:uppercase;
-      }
-
-      .incidencias-meta-pill.is-live{
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 20%, var(--border-soft));
-        background:color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent);
-        color:var(--text-soft);
-        gap:8px;
-      }
-
-      .incidencias-live-dot{
-        inline-size:8px;
-        block-size:8px;
-        border-radius:999px;
-        background:var(--accent, #7c5cff);
-        animation:incidenciasPulse 1.2s ease-in-out infinite;
-      }
-
-      .incidencias-summary-grid{
-        display:grid;
-        grid-template-columns:repeat(2, minmax(0, 280px));
-        gap:var(--space-md);
-      }
-
-      .incidencias-summary-card{
-        position:relative;
-        overflow:hidden;
-        display:grid;
-        gap:8px;
-        min-block-size:116px;
-        padding:18px;
-        border-radius:calc(var(--panel-radius) + 1px);
-        border:1px solid var(--border-soft);
-        background:
-          linear-gradient(180deg, rgba(255,255,255,.018), transparent 70%),
-          var(--surface-2, var(--surface-glass));
-        box-shadow:var(--shadow-xs);
-      }
-
-      .incidencias-summary-card::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        pointer-events:none;
-        background:linear-gradient(180deg, rgba(255,255,255,.022), transparent 30%);
-      }
-
-      .incidencias-summary-card > *{
-        position:relative;
-        z-index:1;
-      }
-
-      .incidencias-summary-card.is-open{
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 20%, var(--border-soft));
-        background:
-          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 9%, transparent), transparent 70%),
-          var(--surface-2, var(--surface-glass));
-      }
-
-      .incidencias-summary-card.is-closed{
-        border-color:color-mix(in srgb, var(--success, #22c55e) 20%, var(--border-soft));
-        background:
-          linear-gradient(180deg, color-mix(in srgb, var(--success, #22c55e) 8%, transparent), transparent 70%),
-          var(--surface-2, var(--surface-glass));
-      }
-
-      .incidencias-summary-label{
-        color:var(--text-dim);
-        font-size:11px;
-        line-height:1;
-        font-weight:var(--weight-bold);
-        letter-spacing:.08em;
-        text-transform:uppercase;
-      }
-
-      .incidencias-summary-value{
-        color:var(--text-strong);
-        font-size:clamp(30px, 4vw, 42px);
-        line-height:1;
-        font-weight:var(--weight-black);
-        letter-spacing:-.05em;
-      }
-
-      .incidencias-summary-caption{
-        margin:0;
-        color:var(--text-dim);
-        font-size:var(--font-sm);
-        line-height:1.5;
-      }
-
-      .incidencias-state{
-        display:grid;
-        gap:16px;
-        padding:22px;
-        border-radius:var(--panel-radius);
-        border:1px solid var(--border-soft);
-        background:var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-xs);
-      }
-
-      .incidencias-state.is-error{
-        border-color:color-mix(in srgb, var(--error, #ef4444) 18%, var(--border-soft));
-        background:
-          linear-gradient(180deg, color-mix(in srgb, var(--error, #ef4444) 8%, transparent), transparent 74%),
-          var(--surface-1, var(--surface-glass));
-      }
-
-      .incidencias-state-header{
-        display:grid;
-        gap:8px;
-      }
-
-      .incidencias-state-title{
-        margin:0;
-        color:var(--text-strong);
-        font-size:clamp(22px, 3vw, 30px);
-        line-height:1.08;
-        letter-spacing:-.04em;
-      }
-
-      .incidencias-state-text{
-        margin:0;
-        max-inline-size:760px;
-        color:var(--text-dim);
-        font-size:var(--font-base);
-        line-height:1.6;
-      }
-
-      .incidencias-state-actions{
-        display:flex;
-        gap:10px;
-        flex-wrap:wrap;
-      }
-
-      .incidencias-table-wrap{
-        position:relative;
-        overflow:hidden;
-        border-radius:var(--panel-radius);
-        border:1px solid var(--border-soft);
-        background:
-          linear-gradient(180deg, rgba(255,255,255,.012), transparent 28%),
-          var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-xs);
-      }
-
-      .incidencias-table-toolbar{
-        display:flex;
-        align-items:center;
-        justify-content:space-between;
-        gap:12px;
-        flex-wrap:wrap;
-        padding:14px 16px;
-        border-bottom:1px solid var(--border-soft);
-        background:
-          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 4%, transparent), transparent),
-          var(--surface-2, var(--surface-glass));
-      }
-
-      .incidencias-table-toolbar-main{
-        display:grid;
-        gap:4px;
-      }
-
-      .incidencias-table-toolbar-title{
-        color:var(--text-strong);
-        font-size:var(--font-base);
-        line-height:1.2;
-        font-weight:var(--weight-bold);
-      }
-
-      .incidencias-table-toolbar-subtitle{
-        color:var(--text-dim);
-        font-size:var(--font-sm);
-        line-height:1.35;
-      }
-
-      .incidencias-table-toolbar-actions{
-        display:flex;
-        align-items:center;
-        gap:8px;
-        flex-wrap:wrap;
-      }
-
-      .incidencias-table-scroll{
-        inline-size:100%;
-        overflow:auto;
-      }
-
-      .incidencias-table-scroll::-webkit-scrollbar{
-        inline-size:10px;
-        block-size:10px;
-      }
-
-      .incidencias-table-scroll::-webkit-scrollbar-thumb{
-        background:color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft));
-        border-radius:999px;
-      }
-
-      .incidencias-table-scroll::-webkit-scrollbar-track{
-        background:transparent;
-      }
-
-      .incidencias-table{
-        inline-size:100%;
-        min-inline-size:1120px;
-        border-collapse:separate;
-        border-spacing:0;
-        table-layout:fixed;
-      }
-
-      .incidencias-table thead th{
-        padding:12px 16px;
-        text-align:left;
-        font-size:11px;
-        line-height:1;
-        letter-spacing:.08em;
-        text-transform:uppercase;
-        color:var(--text-dim);
-        font-weight:var(--weight-bold);
-        border-bottom:1px solid var(--border-soft);
-        background:var(--surface-2, var(--surface-glass));
-        white-space:nowrap;
-      }
-
-      .incidencias-table thead th.is-right{
-        text-align:right;
-      }
-
-      .incidencias-table thead th.is-amount,
-      .incidencias-table tbody td.is-amount{
-        padding-inline:18px 28px;
-      }
-
-      .incidencias-table thead th.is-actions,
-      .incidencias-table tbody td.is-actions{
-        padding-inline:24px 20px;
-      }
-
-      .incidencias-table tbody td{
-        padding:14px 16px;
-        vertical-align:middle;
-        border-bottom:1px solid var(--border-soft);
-      }
-
-      .incidencias-table tbody tr{
-        transition:
-          background var(--duration-fast) var(--ease-standard),
-          opacity var(--duration-fast) var(--ease-standard);
-      }
-
-      .incidencias-table tbody tr:hover{
-        background:color-mix(in srgb, var(--accent, #7c5cff) 4%, transparent);
-      }
-
-      .incidencias-table tbody tr:last-child td{
-        border-bottom:none;
-      }
-
-      .incidencias-row.is-opening{
-        opacity:.72;
-      }
-
-      .incidencias-row.is-opening:hover{
-        background:color-mix(in srgb, var(--warning, #f59e0b) 5%, transparent);
-      }
-
-      .incidencias-cell-identity{
-        display:flex;
-        gap:12px;
-        align-items:center;
-        min-inline-size:0;
-      }
-
-      .incidencias-avatar{
-        position:relative;
-        flex:0 0 auto;
-        overflow:hidden;
-        border-radius:999px;
-        border:1px solid color-mix(in srgb, var(--border-soft) 76%, transparent);
-        background:transparent;
-        box-shadow:none;
-      }
-
-      .incidencias-avatar img{
-        display:block;
-        inline-size:100%;
-        block-size:100%;
-        object-fit:cover;
-      }
-
-      .incidencias-avatar-fallback{
-        position:absolute;
-        inset:0;
-        display:none;
-        place-items:center;
-        font-weight:var(--weight-black);
-        letter-spacing:.03em;
-      }
-
-      .incidencias-avatar[data-avatar-fallback="true"] img{
-        display:none !important;
-      }
-
-      .incidencias-avatar[data-avatar-fallback="true"] .incidencias-avatar-fallback{
-        display:grid !important;
-      }
-
-      .incidencias-identity-copy{
-        display:grid;
-        gap:2px;
-        min-inline-size:0;
-      }
-
-      .incidencias-ticket-code{
-        color:var(--text-soft);
-        font-size:12px;
-        line-height:1.2;
-        font-weight:var(--weight-bold);
-        letter-spacing:.04em;
-        text-transform:uppercase;
-      }
-
-      .incidencias-title-btn{
-        margin:0;
-        padding:0;
-        border:none;
-        background:transparent;
-        text-align:left;
-        color:var(--text-strong);
-        font-size:var(--font-xl);
-        line-height:1.18;
-        font-weight:var(--weight-black);
-        letter-spacing:-.02em;
-        cursor:pointer;
-      }
-
-      .incidencias-title-btn[disabled]{
-        cursor:wait;
-      }
-
-      .incidencias-ticket-preview{
-        color:var(--text-dim);
-        font-size:12px;
-        line-height:1.4;
-        word-break:break-word;
-      }
-
-      .incidencias-chip{
-        display:inline-flex;
-        align-items:center;
-        justify-content:center;
-        min-block-size:28px;
-        padding-inline:10px;
-        border-radius:999px;
-        font-size:11px;
-        font-weight:var(--weight-bold);
-        letter-spacing:.04em;
-        text-transform:uppercase;
-        white-space:nowrap;
-        border:1px solid var(--border-soft);
-        background:var(--surface-glass);
-        color:var(--text-soft);
-      }
-
-      .incidencias-chip.is-open{
-        color:var(--accent, #7c5cff);
-        background:color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent);
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent);
-      }
-
-      .incidencias-chip.is-pending{
-        color:var(--warning, #f59e0b);
-        background:color-mix(in srgb, var(--warning, #f59e0b) 12%, transparent);
-        border-color:color-mix(in srgb, var(--warning, #f59e0b) 28%, transparent);
-      }
-
-      .incidencias-chip.is-progress{
-        color:var(--info, #60a5fa);
-        background:color-mix(in srgb, var(--info, #60a5fa) 12%, transparent);
-        border-color:color-mix(in srgb, var(--info, #60a5fa) 28%, transparent);
-      }
-
-      .incidencias-chip.is-resolved{
-        color:var(--success, #22c55e);
-        background:color-mix(in srgb, var(--success, #22c55e) 12%, transparent);
-        border-color:color-mix(in srgb, var(--success, #22c55e) 28%, transparent);
-      }
-
-      .incidencias-chip.is-closed{
-        color:var(--text-dim);
-        background:var(--surface-glass);
-        border-color:var(--border-soft);
-      }
-
-      .incidencias-date-main{
-        color:var(--text-strong);
-        font-size:13px;
-        line-height:1.25;
-        font-weight:var(--weight-semibold);
-      }
-
-      .incidencias-update-relative{
-        color:var(--text-soft);
-        font-size:13px;
-        line-height:1.2;
-        font-weight:var(--weight-semibold);
-      }
-
-      .incidencias-amount{
-        display:inline-flex;
-        align-items:center;
-        justify-content:center;
-        min-block-size:34px;
-        padding-inline:12px;
-        border-radius:999px;
-        border:1px solid color-mix(in srgb, var(--success, #22c55e) 20%, var(--border-soft));
-        background:color-mix(in srgb, var(--success, #22c55e) 10%, transparent);
-        color:var(--text-strong);
-        font-size:12px;
-        line-height:1;
-        font-weight:var(--weight-bold);
-        letter-spacing:.01em;
-        white-space:nowrap;
-      }
-
-      .incidencias-amount.is-empty{
-        border-color:var(--border-soft);
-        background:var(--surface-glass);
-        color:var(--text-dim);
-      }
-
-      .incidencias-actions{
-        display:flex;
-        justify-content:flex-end;
-        gap:8px;
-        flex-wrap:wrap;
-      }
-
-      .incidencias-detail-btn{
-        min-inline-size:132px;
-      }
-
-      .incidencias-mobile-list{
-        display:none;
-        gap:12px;
-        padding:14px;
-      }
-
-      .incidencias-mobile-card{
-        display:grid;
-        gap:14px;
-        padding:16px;
-        border-radius:18px;
-        border:1px solid var(--border-soft);
-        background:var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-xs);
-      }
-
-      .incidencias-mobile-top{
-        display:flex;
-        align-items:flex-start;
-        justify-content:space-between;
-        gap:12px;
-      }
-
-      .incidencias-mobile-status{
-        display:grid;
-        justify-items:end;
-        gap:8px;
-      }
-
-      .incidencias-mobile-grid{
-        display:grid;
-        grid-template-columns:repeat(3, minmax(0, 1fr));
-        gap:10px;
-      }
-
-      .incidencias-mobile-box{
-        display:grid;
-        gap:4px;
-        padding:12px;
-        border-radius:14px;
-        border:1px solid var(--border-soft);
-        background:var(--surface-glass);
-      }
-
-      .incidencias-mobile-box-label{
-        font-size:11px;
-        line-height:1;
-        color:var(--text-faint);
-        font-weight:var(--weight-bold);
-        letter-spacing:.05em;
-        text-transform:uppercase;
-      }
-
-      .incidencias-mobile-box-value{
-        color:var(--text-strong);
-        font-size:var(--font-sm);
-        line-height:1.35;
-        font-weight:var(--weight-semibold);
-        word-break:break-word;
-      }
-
-      .incidencias-mobile-actions{
-        display:flex;
-        gap:8px;
-        flex-wrap:wrap;
-      }
-
-      .incidencias-table-overlay{
-        position:absolute;
-        inset:0;
-        display:grid;
-        place-items:center;
-        padding:18px;
-        background:color-mix(in srgb, var(--surface-1, #0f1115) 74%, transparent);
-        backdrop-filter:blur(4px);
-        -webkit-backdrop-filter:blur(4px);
-        z-index:4;
-      }
-
-      .incidencias-table-overlay-card{
-        display:grid;
-        justify-items:center;
-        gap:10px;
-        min-inline-size:min(100%, 220px);
-        padding:16px 18px;
-        border-radius:18px;
-        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft));
-        background:
-          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent),
-          var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-md);
-      }
-
-      .incidencias-table-overlay-spinner{
-        inline-size:26px;
-        block-size:26px;
-        border-radius:999px;
-        border:3px solid color-mix(in srgb, var(--accent, #7c5cff) 16%, transparent);
-        border-top-color:var(--accent, #7c5cff);
-        animation:incidenciasSpin .8s linear infinite;
-      }
-
-      .incidencias-loading-shell{
-        overflow:hidden;
-        border-radius:var(--panel-radius);
-        border:1px solid var(--border-soft);
-        background:var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-xs);
-      }
-
-      .incidencias-skeleton-head,
-      .incidencias-skeleton-row{
-        display:grid;
-        grid-template-columns: 2.9fr .9fr 1fr .8fr .9fr 1fr;
-        gap:0;
-      }
-
-      .incidencias-skeleton-head{
-        border-bottom:1px solid var(--border-soft);
-        background:var(--surface-2, var(--surface-glass));
-      }
-
-      .incidencias-skeleton-row{
-        border-bottom:1px solid var(--border-soft);
-      }
-
-      .incidencias-skeleton-row:last-child{
-        border-bottom:none;
-      }
-
-      .incidencias-skeleton-cell{
-        padding:14px 16px;
-      }
-
-      .incidencias-skeleton-bar{
-        border-radius:999px;
-        background:
-          linear-gradient(
-            90deg,
-            var(--surface-glass),
-            color-mix(in srgb, var(--accent, #7c5cff) 8%, var(--surface-glass)),
-            var(--surface-glass)
-          );
-        background-size:200% 100%;
-        animation:incidenciasSkeleton 1.2s linear infinite;
-      }
-
-      .incidencias-skeleton-id{
-        display:flex;
-        gap:12px;
-        align-items:center;
-      }
-
-      .incidencias-skeleton-avatar{
-        inline-size:40px;
-        block-size:40px;
-        border-radius:999px;
-      }
-
-      .incidencias-skeleton-stack{
-        display:grid;
-        gap:8px;
-        flex:1;
-      }
-
-      [data-theme="light"] .incidencias-hero{
-        background:
-          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent), transparent 34%),
-          linear-gradient(180deg, rgba(255,255,255,.52), rgba(255,255,255,.12) 34%, transparent 100%),
-          var(--surface-1, #ffffff);
-        box-shadow:
-          0 18px 42px rgba(15,23,42,.07),
-          inset 0 1px 0 rgba(255,255,255,.54);
-      }
-
-      [data-theme="light"] .incidencias-eyebrow{
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 26%, var(--border-soft));
-        background:color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent);
-        color:var(--text-strong);
-      }
-
-      [data-theme="light"] .incidencias-meta-pill{
-        background:rgba(255,255,255,.76);
-        border-color:rgba(15,23,42,.08);
-      }
-
-      [data-theme="light"] .incidencias-meta-pill.is-live{
-        background:color-mix(in srgb, var(--accent, #7c5cff) 12%, #ffffff);
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 24%, rgba(15,23,42,.08));
-        color:var(--text-strong);
-      }
-
-      [data-theme="light"] .incidencias-summary-card{
-        background:
-          linear-gradient(180deg, rgba(255,255,255,.88), rgba(255,255,255,.72)),
-          var(--surface-2, #ffffff);
-        box-shadow:
-          0 14px 30px rgba(15,23,42,.06),
-          inset 0 1px 0 rgba(255,255,255,.72);
-      }
-
-      [data-theme="light"] .incidencias-summary-card.is-open{
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 28%, rgba(15,23,42,.08));
-        background:
-          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 16%, #ffffff), rgba(255,255,255,.84) 72%),
-          var(--surface-2, #ffffff);
-      }
-
-      [data-theme="light"] .incidencias-summary-card.is-closed{
-        border-color:color-mix(in srgb, var(--success, #22c55e) 24%, rgba(15,23,42,.08));
-        background:
-          linear-gradient(180deg, color-mix(in srgb, var(--success, #22c55e) 12%, #ffffff), rgba(255,255,255,.84) 72%),
-          var(--surface-2, #ffffff);
-      }
-
-      [data-theme="light"] .incidencias-avatar{
-        border-color:rgba(15,23,42,.08);
-      }
-
-      [data-theme="light"] .incidencias-avatar[data-avatar-fallback="true"]{
-        box-shadow:0 8px 18px rgba(15,23,42,.06);
-      }
-
-      [data-theme="light"] .incidencias-chip.is-open{
-        background:color-mix(in srgb, var(--accent, #7c5cff) 16%, #ffffff);
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 32%, rgba(15,23,42,.08));
-      }
-
-      [data-theme="light"] .incidencias-chip.is-pending{
-        background:color-mix(in srgb, var(--warning, #f59e0b) 16%, #ffffff);
-        border-color:color-mix(in srgb, var(--warning, #f59e0b) 30%, rgba(15,23,42,.08));
-      }
-
-      [data-theme="light"] .incidencias-chip.is-progress{
-        background:color-mix(in srgb, var(--info, #60a5fa) 16%, #ffffff);
-        border-color:color-mix(in srgb, var(--info, #60a5fa) 30%, rgba(15,23,42,.08));
-      }
-
-      [data-theme="light"] .incidencias-chip.is-resolved{
-        background:color-mix(in srgb, var(--success, #22c55e) 16%, #ffffff);
-        border-color:color-mix(in srgb, var(--success, #22c55e) 30%, rgba(15,23,42,.08));
-      }
-
-      [data-theme="light"] .incidencias-table-wrap{
-        box-shadow:
-          0 14px 30px rgba(15,23,42,.05),
-          inset 0 1px 0 rgba(255,255,255,.58);
-      }
-
-      @media (max-width: 1120px){
-        .incidencias-summary-grid{
-          grid-template-columns:repeat(2, minmax(0, 1fr));
-        }
-      }
-
-      @media (max-width: 860px){
-        .incidencias-hero-head{
-          flex-direction:column;
-          align-items:stretch;
-        }
-
-        .incidencias-hero-actions{
-          justify-content:flex-start;
-        }
-      }
-
-      @media (max-width: 980px){
-        .incidencias-desktop-table{
-          display:none !important;
-        }
-
-        .incidencias-mobile-list{
-          display:grid !important;
-        }
-
-        .incidencias-mobile-grid{
-          grid-template-columns:repeat(2, minmax(0, 1fr));
-        }
-      }
-
-      @media (max-width: 760px){
-        .incidencias-hero-inner{
-          padding:16px;
-        }
-
-        .incidencias-hero-title{
-          font-size:clamp(24px, 8vw, 38px);
-        }
-
-        .incidencias-hero-subtitle{
-          font-size:var(--font-base);
-        }
-
-        .incidencias-summary-grid{
-          grid-template-columns:1fr;
-        }
-
-        .incidencias-table-toolbar{
-          padding:12px 14px;
-        }
-
-        .incidencias-mobile-grid{
-          grid-template-columns:1fr;
-        }
-      }
-    </style>
-  `;
-}
-
-/* =========================================================
-   BACKEND ENVELOPE / REAL DATA RESOLVE
-========================================================= */
-
-function looksLikeTicketsEnvelope(value) {
-  const obj = safeObject(value);
-
-  return Boolean(
-    Array.isArray(obj?.tickets) ||
-      Array.isArray(obj?.items) ||
-      Array.isArray(obj?.data) ||
-      Array.isArray(obj?.results)
-  );
-}
-
-function unwrapItemsEnvelope(value) {
-  const obj = safeObject(value);
-
-  if (Array.isArray(value)) return value;
-  if (Array.isArray(obj?.tickets)) return obj.tickets;
-  if (Array.isArray(obj?.items)) return obj.items;
-  if (Array.isArray(obj?.data)) return obj.data;
-  if (Array.isArray(obj?.results)) return obj.results;
-
-  if (looksLikeTicketsEnvelope(obj?.data)) {
-    return unwrapItemsEnvelope(obj.data);
-  }
-
-  return [];
-}
-
-function resolveRemoteCount(items, state = {}) {
-  const localState = safeObject(state);
-
-  return safeNumber(
-    first(
-      localState?.remoteCount,
-      localState?.count,
-      localState?.total,
-      safeObject(localState?.stats)?.total,
-      safeObject(localState?.response)?.count,
-      safeObject(localState?.payload)?.count,
-      safeObject(localState?.lastResponse)?.count,
-      safeObject(items)?.count
-    ),
-    safeArray(items).length
-  );
-}
-
-/* =========================================================
-   STATS
-========================================================= */
-
-function computeStats(items = []) {
-  const list = safeArray(items);
-
-  let openCount = 0;
-  let closedCount = 0;
-
-  list.forEach((item) => {
-    const status = safeText(first(item.status, item.estado), "open")
-      .trim()
-      .toLowerCase();
-
-    if (["resolved", "resuelta", "resuelto", "closed", "cerrada", "cerrado"].includes(status)) {
-      closedCount += 1;
-      return;
-    }
-
-    openCount += 1;
-  });
-
-  return {
-    openCount,
-    closedCount,
-  };
-}
-
-/* =========================================================
-   LABELS / TONES
-========================================================= */
-
-function getStatusLabel(value = "") {
-  const key = String(value || "").trim().toLowerCase();
-
-  switch (key) {
-    case "open":
-    case "abierta":
-    case "abierto":
-      return "Recibida";
-
-    case "pending":
-    case "pendiente":
-      return "Pendiente";
-
-    case "in_progress":
-    case "in-progress":
-    case "progress":
-    case "en_proceso":
-    case "en proceso":
-      return "En revisión";
-
-    case "resolved":
-    case "resuelta":
-    case "resuelto":
-      return "Resuelta";
-
-    case "closed":
-    case "cerrada":
-    case "cerrado":
-      return "Cerrada";
-
-    default:
-      return safeText(value, "Recibida");
-  }
-}
-
-function getStatusTone(value = "") {
-  const key = String(value || "").trim().toLowerCase();
-
-  if (["open", "abierta", "abierto"].includes(key)) return "is-open";
-  if (["pending", "pendiente"].includes(key)) return "is-pending";
-
-  if (
-    ["in_progress", "in-progress", "progress", "en_proceso", "en proceso"].includes(
-      key
-    )
-  ) {
-    return "is-progress";
-  }
-
-  if (["resolved", "resuelta", "resuelto"].includes(key)) return "is-resolved";
-  if (["closed", "cerrada", "cerrado"].includes(key)) return "is-closed";
-
-  return "";
-}
-
-function renderStatusChip(value = "") {
-  return `
-    <span class="incidencias-chip ${getStatusTone(value)}">
-      ${escapeHtml(getStatusLabel(value))}
-    </span>
-  `;
-}
-
-/* =========================================================
-   DATA RESOLVE
-========================================================= */
-
-function getResolvedItems(items) {
-  const direct = safeArray(items);
-
-  if (direct.length) {
-    return sortIncidenciasByUpdatedDesc(direct);
-  }
-
-  const fromEnvelope = unwrapItemsEnvelope(items);
-
-  if (fromEnvelope.length) {
-    return sortIncidenciasByUpdatedDesc(fromEnvelope);
-  }
-
-  try {
-    return sortIncidenciasByUpdatedDesc(getIncidencias());
-  } catch {
-    return [];
-  }
-}
-
-function getTicketId(item = {}) {
-  return safeText(first(item.ticketId, item.id, item.code), "");
-}
-
-function getTicketCode(item = {}) {
-  return safeText(
-    first(item.ticketId, item.id, item.code, item.ticketCode),
-    "—"
-  );
-}
-
-function getTitle(item = {}) {
-  return safeText(
-    first(item.subject, item.title, item.asunto, item.name),
-    "Incidencia sin asunto"
-  );
-}
-
-function getPreview(item = {}) {
-  return safeText(
-    first(item.preview, item.descripcion, item.description, item.message),
-    "Sin descripción"
-  );
-}
-
-function getStatusValue(item = {}) {
-  return safeText(first(item.status, item.estado), "open");
-}
-
-function getUpdatedAt(item = {}) {
-  return first(item.updatedAt, item.closedAt, item.createdAt);
-}
-
-function getCreatedAt(item = {}) {
-  return first(item.createdAt, item.createdAtES, item.updatedAt);
-}
-
-function resolveAmount(item = {}) {
-  return firstFiniteNumber(
-    item.amount,
-    item.total,
-    item.importe,
-    item.price,
-    item.cost,
-    item.coste,
-    safeObject(item?.meta)?.amount,
-    safeObject(item?.meta)?.importe
-  );
-}
-
-function getCurrency(item = {}) {
-  return safeText(
-    first(
-      item.currency,
-      item.moneda,
-      safeObject(item?.meta)?.currency,
-      safeObject(item?.meta)?.moneda
-    ),
-    "EUR"
-  );
-}
-
-function formatMoney(amount, currency = "EUR") {
-  const value = Number(amount);
-
-  if (!Number.isFinite(value)) return "Pendiente";
 
   try {
     return new Intl.NumberFormat("es-ES", {
       style: "currency",
-      currency: currency || "EUR",
+      currency: safeText(currency, "EUR"),
       maximumFractionDigits: 2,
-    }).format(value);
+    }).format(amount);
   } catch {
-    return `${value.toFixed(2)} ${currency || "EUR"}`;
+    return `${amount.toFixed(2)} ${safeText(currency, "EUR")}`;
   }
 }
 
-function renderAmountPill(item = {}) {
-  const amount = resolveAmount(item);
+function formatDateTime(value = null) {
+  if (!value) return "—";
 
-  if (!Number.isFinite(amount)) {
-    return `
-      <span class="incidencias-amount is-empty">
-        Pendiente
-      </span>
-    `;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+
+  try {
+    return new Intl.DateTimeFormat("es-ES", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date);
+  } catch {
+    return "—";
   }
-
-  return `
-    <span class="incidencias-amount">
-      ${escapeHtml(formatMoney(amount, getCurrency(item)))}
-    </span>
-  `;
 }
 
-function getClientDisplayName(item = {}) {
+function formatRelativeDate(value = null) {
+  if (!value) return "Sin fecha";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Sin fecha";
+
+  const diffMs = date.getTime() - Date.now();
+  const diffMin = Math.round(diffMs / 60000);
+  const absMin = Math.abs(diffMin);
+
+  if (absMin < 1) return "Ahora mismo";
+
+  if (absMin < 60) {
+    return diffMin > 0 ? `En ${absMin} min` : `Hace ${absMin} min`;
+  }
+
+  const diffHours = Math.round(absMin / 60);
+  if (diffHours < 24) {
+    return diffMin > 0 ? `En ${diffHours} h` : `Hace ${diffHours} h`;
+  }
+
+  const diffDays = Math.round(diffHours / 24);
+  if (diffDays <= 7) {
+    return diffMin > 0
+      ? `En ${diffDays} día${diffDays === 1 ? "" : "s"}`
+      : `Hace ${diffDays} día${diffDays === 1 ? "" : "s"}`;
+  }
+
+  return formatDateTime(value);
+}
+
+function formatLastUpdate(value = null) {
+  if (!value) return "Sin fecha";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Sin fecha";
+
+  const diffHours = Math.abs(Date.now() - date.getTime()) / 3600000;
+
+  if (diffHours <= 72) {
+    return formatRelativeDate(value);
+  }
+
+  return formatDateTime(value);
+}
+
+function getTicketId(item = {}) {
   return safeText(
     first(
-      item?.cliente?.nombre,
-      item?.cliente?.name,
-      item.client,
-      item.clientName,
-      item.cliente,
-      item.empresa,
-      item.company,
-      item.name,
-      item?.receptor?.name,
-      item?.createdBy?.name
+      item.ticketId,
+      item.code,
+      item.numero,
+      item.id,
+      item?.raw?.ticketId,
+      item?.raw?.code,
+      item?.raw?.numero,
+      item?.raw?.id
     ),
-    "Cliente"
+    "INC-SIN-ID"
   );
 }
 
-function getClientInitials(item = {}) {
-  const raw = getClientDisplayName(item);
-  const clean = String(raw).trim();
-
-  if (!clean) return "ON";
-
-  const parts = clean.split(/\s+/).filter(Boolean);
-  const initials = parts
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("");
-
-  return (initials || clean.slice(0, 2) || "ON").toUpperCase();
-}
-
-function getClientAvatarUrl(item = {}) {
+function getSubject(item = {}) {
   return safeText(
     first(
-      item?.cliente?.avatar,
-      item?.cliente?.avatarUrl,
-      item?.clientAvatar,
-      item?.clientAvatarUrl,
-      item?.avatar,
-      item?.avatarUrl,
-      item?.createdBy?.avatar,
-      item?.createdBy?.avatarUrl,
-      item?.receptor?.avatar,
-      item?.receptor?.avatarUrl
+      item.subject,
+      item.title,
+      item.asunto,
+      item.name,
+      item?.raw?.subject,
+      item?.raw?.title,
+      item?.raw?.asunto,
+      item?.raw?.name
+    ),
+    "Incidencia sin asunto"
+  );
+}
+
+function getDescription(item = {}) {
+  return safeText(
+    first(
+      item.description,
+      item.preview,
+      item.message,
+      item.descripcion,
+      item?.raw?.description,
+      item?.raw?.preview,
+      item?.raw?.message,
+      item?.raw?.descripcion
+    ),
+    "Sin descripción."
+  );
+}
+
+function getClientName(item = {}) {
+  return safeText(
+    first(
+      item.clientName,
+      item.name,
+      item.cliente?.nombre,
+      item.cliente?.name,
+      item.client?.name,
+      item?.raw?.clientName,
+      item?.raw?.name,
+      item?.raw?.cliente?.nombre,
+      item?.raw?.cliente?.name,
+      item?.raw?.client?.name
+    ),
+    getSubject(item)
+  );
+}
+
+function getAvatarUrl(item = {}) {
+  return safeText(
+    first(
+      item.clientAvatar,
+      item.avatar,
+      item.avatarUrl,
+      item.cliente?.avatar,
+      item.cliente?.avatarUrl,
+      item.client?.avatar,
+      item.client?.avatarUrl,
+      item?.raw?.clientAvatar,
+      item?.raw?.avatar,
+      item?.raw?.avatarUrl
     ),
     ""
   );
 }
 
-function getAvatarToneSeed(item = {}) {
-  return safeText(
+function getInitials(value = "") {
+  const text = normalizeWhitespace(value);
+  if (!text) return "ON";
+
+  const parts = text.split(" ").filter(Boolean);
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+
+  return `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase();
+}
+
+function getStatusKey(value = "") {
+  const key = safeText(value, "").toLowerCase();
+
+  if (["pending", "pendiente"].includes(key)) return "pending";
+  if (["open", "abierta", "abierto"].includes(key)) return "open";
+  if (["progress", "in_progress", "in-progress", "en proceso", "en_proceso"].includes(key)) return "progress";
+  if (["resolved", "resuelta", "resuelto"].includes(key)) return "resolved";
+  if (["closed", "cerrada", "cerrado"].includes(key)) return "closed";
+  if (["cancelled", "cancelada", "cancelado"].includes(key)) return "closed";
+
+  return "pending";
+}
+
+function getStatusLabel(value = "") {
+  const key = getStatusKey(value);
+
+  if (key === "open") return "Abierta";
+  if (key === "pending") return "Pendiente";
+  if (key === "progress") return "En proceso";
+  if (key === "resolved") return "Resuelta";
+  if (key === "closed") return "Cerrada";
+
+  return safeText(value, "Pendiente");
+}
+
+function getImporteLabel(item = {}) {
+  const amount = first(
+    item.total,
+    item.amount,
+    item.importe,
+    item.price,
+    item?.raw?.total,
+    item?.raw?.amount,
+    item?.raw?.importe
+  );
+
+  if (amount !== null && amount !== undefined && amount !== "") {
+    const currency = first(
+      item.currency,
+      item.moneda,
+      item?.raw?.currency,
+      item?.raw?.moneda,
+      "EUR"
+    );
+
+    return formatMoney(amount, currency);
+  }
+
+  const pago = safeText(
     first(
-      getTicketId(item),
-      getTitle(item),
-      getTicketCode(item)
+      item.paymentStatus,
+      item.estadoPago,
+      item?.raw?.paymentStatus,
+      item?.raw?.estadoPago
     ),
-    "onion"
+    ""
+  ).toLowerCase();
+
+  if (["paid", "pagada", "pagado", "cobrada"].includes(pago)) return "Pagado";
+  if (["pending", "pendiente"].includes(pago)) return "Pendiente";
+  if (["partial", "parcial"].includes(pago)) return "Parcial";
+  if (["overdue", "vencida"].includes(pago)) return "Vencido";
+
+  return "Pendiente";
+}
+
+function getCreatedAt(item = {}) {
+  return first(
+    item.createdAt,
+    item.fechaCreacion,
+    item.date,
+    item?.raw?.createdAt,
+    item?.raw?.fechaCreacion,
+    item?.raw?.date
   );
 }
 
-function getStableHash(value = "") {
-  const source = String(value || "onion");
-  let hash = 0;
-
-  for (let i = 0; i < source.length; i += 1) {
-    hash = (hash << 5) - hash + source.charCodeAt(i);
-    hash |= 0;
-  }
-
-  return Math.abs(hash);
+function getUpdatedAt(item = {}) {
+  return first(
+    item.updatedAt,
+    item.lastUpdateAt,
+    item.ultimaNovedad,
+    item?.raw?.updatedAt,
+    item?.raw?.lastUpdateAt,
+    item?.raw?.ultimaNovedad,
+    item?.raw?.createdAt
+  );
 }
 
-function getFallbackAvatarTheme(seed = "") {
-  const themes = [
-    {
-      bg: "linear-gradient(135deg, #8e7cff 0%, #c7b9ff 100%)",
-      text: "#ffffff",
-    },
-    {
-      bg: "linear-gradient(135deg, #43c694 0%, #97efd1 100%)",
-      text: "#ffffff",
-    },
-    {
-      bg: "linear-gradient(135deg, #5ea9ff 0%, #b7d8ff 100%)",
-      text: "#ffffff",
-    },
-    {
-      bg: "linear-gradient(135deg, #f3b457 0%, #ffdca3 100%)",
-      text: "#ffffff",
-    },
-    {
-      bg: "linear-gradient(135deg, #ef7d7d 0%, #ffc0c0 100%)",
-      text: "#ffffff",
-    },
-    {
-      bg: "linear-gradient(135deg, #b08cff 0%, #e0ccff 100%)",
-      text: "#ffffff",
-    },
-  ];
-
-  return themes[getStableHash(seed) % themes.length];
+function isClosedLike(item = {}) {
+  return ["closed", "resolved"].includes(
+    getStatusKey(first(item.status, item.estado, item?.raw?.status, item?.raw?.estado))
+  );
 }
 
-/* =========================================================
-   PAGINATION
-========================================================= */
-
-function clampPage(page = 1, totalPages = 1) {
-  const current = safeNumber(page, 1);
-  return Math.min(Math.max(current, 1), Math.max(totalPages, 1));
+function isOpenLike(item = {}) {
+  return ["open", "pending", "progress"].includes(
+    getStatusKey(first(item.status, item.estado, item?.raw?.status, item?.raw?.estado))
+  );
 }
 
-function getPagination(items = [], state = {}) {
-  const list = safeArray(items);
-  const localState = safeObject(state);
+function computeStats(items = []) {
+  const rows = safeArray(items);
 
-  const pageSize = Math.max(1, safeNumber(localState.pageSize, PAGE_SIZE));
-  const totalItems = list.length;
-  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
-  const page = clampPage(localState.page || 1, totalPages);
-  const start = (page - 1) * pageSize;
-  const end = start + pageSize;
+  const openCount = rows.filter((item) => isOpenLike(item)).length;
+  const closedCount = rows.filter((item) => isClosedLike(item)).length;
 
   return {
-    page,
-    pageSize,
-    totalItems,
-    totalPages,
-    start,
-    end,
-    items: list.slice(start, end),
-    from: totalItems ? start + 1 : 0,
-    to: Math.min(end, totalItems),
+    total: rows.length,
+    openCount,
+    closedCount,
   };
 }
 
-/* =========================================================
-   HEADER
-========================================================= */
+function renderAvatar(item = {}) {
+  const fullName = getClientName(item);
+  const initials = getInitials(fullName);
+  const avatarUrl = getAvatarUrl(item);
 
-function renderSummaryCard({ label = "", value = "0", caption = "", tone = "" } = {}) {
-  return `
-    <article class="incidencias-summary-card ${tone}">
-      <span class="incidencias-summary-label">
-        ${escapeHtml(label)}
-      </span>
-
-      <strong class="incidencias-summary-value">
-        ${escapeHtml(String(value))}
-      </strong>
-
-      <p class="incidencias-summary-caption">
-        ${escapeHtml(caption)}
-      </p>
-    </article>
-  `;
-}
-
-export function renderHeader({ items = [], state = {} } = {}) {
-  const list = getResolvedItems(items);
-  const localState = state || incidenciasState || {};
-  const loading = Boolean(localState?.loading);
-  const refreshing = Boolean(localState?.refreshing);
-  const creating = Boolean(localState?.creating);
-  const remoteCount = resolveRemoteCount(items, localState) || list.length;
-  const lastSyncText = localState?.lastSyncAt
-    ? formatRelativeDate(localState.lastSyncAt)
-    : "Sin sincronización reciente";
-
-  const stats = computeStats(list);
-
-  return `
-    ${renderScopedStyles()}
-
-    <section class="incidencias-hero">
-      <div class="incidencias-hero-inner">
-        <div class="incidencias-hero-head">
-          <div class="incidencias-hero-copy">
-            <span class="incidencias-eyebrow">
-              Ayuda y seguimiento
-            </span>
-
-            <div class="page-header-main">
-              <h1 class="incidencias-hero-title">
-                Tus incidencias y solicitudes
-              </h1>
-
-              <p class="incidencias-hero-subtitle">
-                Consulta el estado de tus incidencias, revisa las actualizaciones más recientes y crea nuevas solicitudes desde una vista clara, cercana y fácil de seguir.
-              </p>
-            </div>
-          </div>
-
-          <div class="incidencias-hero-actions">
-            <button
-              id="incidencias-export-btn"
-              type="button"
-              class="ui-btn ui-btn-secondary"
-            >
-              Exportar historial
-            </button>
-
-            <button
-              id="incidencias-create-btn"
-              type="button"
-              class="ui-btn ui-btn-primary"
-              ${creating ? "disabled" : ""}
-            >
-              ${creating ? "Abriendo..." : "Crear nueva incidencia"}
-            </button>
-          </div>
-        </div>
-
-        <div class="incidencias-meta">
-          <span class="incidencias-meta-pill">
-            ${escapeHtml(String(remoteCount))} solicitudes registradas
-          </span>
-
-          <span class="incidencias-meta-pill">
-            Última actualización · ${escapeHtml(lastSyncText)}
-          </span>
-
-          ${
-            refreshing || loading
-              ? `
-                <span class="incidencias-meta-pill is-live">
-                  <span class="incidencias-live-dot" aria-hidden="true"></span>
-                  Actualizando
-                </span>
-              `
-              : ""
-          }
-        </div>
-
-        <div class="incidencias-summary-grid">
-          ${renderSummaryCard({
-            label: "Incidencias abiertas",
-            value: stats.openCount,
-            caption: "Solicitudes activas o pendientes de revisión.",
-            tone: "is-open",
-          })}
-
-          ${renderSummaryCard({
-            label: "Incidencias cerradas",
-            value: stats.closedCount,
-            caption: "Casos resueltos o ya cerrados.",
-            tone: "is-closed",
-          })}
-        </div>
-      </div>
-    </section>
-  `;
-}
-
-/* =========================================================
-   STATES
-========================================================= */
-
-export function renderLoadingState() {
-  return `
-    ${renderScopedStyles()}
-
-    <section class="incidencias-loading-shell">
-      <div class="incidencias-skeleton-head">
-        ${Array.from({ length: 6 })
-          .map(
-            () => `
-              <div class="incidencias-skeleton-cell">
-                <div class="incidencias-skeleton-bar" style="height:11px; width:68%;"></div>
-              </div>
-            `
-          )
-          .join("")}
-      </div>
-
-      ${Array.from({ length: PAGE_SIZE })
-        .map(
-          () => `
-            <div class="incidencias-skeleton-row">
-              <div class="incidencias-skeleton-cell">
-                <div class="incidencias-skeleton-id">
-                  <div class="incidencias-skeleton-bar incidencias-skeleton-avatar"></div>
-                  <div class="incidencias-skeleton-stack">
-                    <div class="incidencias-skeleton-bar" style="height:11px; width:120px;"></div>
-                    <div class="incidencias-skeleton-bar" style="height:14px; width:220px;"></div>
-                    <div class="incidencias-skeleton-bar" style="height:11px; width:200px;"></div>
-                  </div>
-                </div>
-              </div>
-
-              <div class="incidencias-skeleton-cell">
-                <div class="incidencias-skeleton-bar" style="height:28px; width:96px;"></div>
-              </div>
-
-              <div class="incidencias-skeleton-cell">
-                <div class="incidencias-skeleton-bar" style="height:12px; width:110px;"></div>
-              </div>
-
-              <div class="incidencias-skeleton-cell">
-                <div class="incidencias-skeleton-bar" style="height:12px; width:86px;"></div>
-              </div>
-
-              <div class="incidencias-skeleton-cell">
-                <div class="incidencias-skeleton-bar" style="height:30px; width:96px;"></div>
-              </div>
-
-              <div class="incidencias-skeleton-cell" style="display:flex; justify-content:flex-end;">
-                <div class="incidencias-skeleton-bar" style="height:38px; width:128px; border-radius:12px;"></div>
-              </div>
-            </div>
-          `
-        )
-        .join("")}
-    </section>
-  `;
-}
-
-export function renderErrorState(message = "No se pudo cargar la colección.") {
-  return `
-    ${renderScopedStyles()}
-
-    <section class="incidencias-state is-error">
-      <div class="incidencias-state-header">
-        <span class="incidencias-meta-pill is-live" style="width:max-content;">
-          <span class="incidencias-live-dot" aria-hidden="true"></span>
-          No se ha podido cargar
-        </span>
-
-        <h3 class="incidencias-state-title">
-          No se ha podido mostrar tu historial de incidencias
-        </h3>
-
-        <p class="incidencias-state-text">
-          ${escapeHtml(safeText(message, "Ha ocurrido un error al cargar las incidencias."))}
-        </p>
-      </div>
-
-      <div class="incidencias-state-actions">
-        <button
-          id="incidencias-retry-btn"
-          type="button"
-          class="ui-btn ui-btn-primary"
-        >
-          Volver a intentar
-        </button>
-      </div>
-    </section>
-  `;
-}
-
-export function renderEmptyState() {
-  return `
-    ${renderScopedStyles()}
-
-    <section class="incidencias-state">
-      <div class="incidencias-state-header">
-        <span class="incidencias-meta-pill" style="width:max-content;">
-          Sin incidencias
-        </span>
-
-        <h3 class="incidencias-state-title">
-          Aún no tienes incidencias registradas
-        </h3>
-
-        <p class="incidencias-state-text">
-          Cuando envíes una nueva solicitud, podrás seguir aquí su estado y las actualizaciones del equipo.
-        </p>
-      </div>
-
-      <div class="incidencias-state-actions">
-        <button
-          id="incidencias-create-btn"
-          type="button"
-          class="ui-btn ui-btn-primary"
-        >
-          Crear incidencia
-        </button>
-      </div>
-    </section>
-  `;
-}
-
-function renderTableToolbar({
-  total = 0,
-  page = 1,
-  totalPages = 1,
-  from = 0,
-  to = 0,
-  refreshing = false,
-} = {}) {
-  return `
-    <div class="incidencias-table-toolbar">
-      <div class="incidencias-table-toolbar-main">
-        <strong class="incidencias-table-toolbar-title">
-          Historial de incidencias
-        </strong>
-
-        <span class="incidencias-table-toolbar-subtitle">
-          Mostrando ${escapeHtml(String(from))}-${escapeHtml(String(to))} de ${escapeHtml(String(total))} · página ${escapeHtml(String(page))} de ${escapeHtml(String(totalPages))}
-        </span>
-      </div>
-
-      <div class="incidencias-table-toolbar-actions">
-        ${
-          refreshing
-            ? `
-              <span class="incidencias-meta-pill is-live">
-                <span class="incidencias-live-dot" aria-hidden="true"></span>
-                Actualizando
-              </span>
-            `
-            : ""
-        }
-
-        <button
-          type="button"
-          data-action="prev-page"
-          class="ui-btn ui-btn-secondary ui-btn-sm"
-          ${page <= 1 ? "disabled" : ""}
-        >
-          Anterior
-        </button>
-
-        <button
-          type="button"
-          data-action="next-page"
-          class="ui-btn ui-btn-secondary ui-btn-sm"
-          ${page >= totalPages ? "disabled" : ""}
-        >
-          Siguiente
-        </button>
-      </div>
-    </div>
-  `;
-}
-
-/* =========================================================
-   AVATAR
-========================================================= */
-
-function renderIdentityAvatar({
-  avatarUrl = "",
-  initials = "ON",
-  seed = "onion",
-  size = 40,
-  title = "Cliente",
-} = {}) {
-  const theme = getFallbackAvatarTheme(seed);
-  const safeUrl = safeText(avatarUrl, "");
-  const safeTitle = escapeHtml(title);
-
-  if (safeUrl) {
+  if (avatarUrl) {
     return `
       <div
         class="incidencias-avatar"
-        title="${safeTitle}"
-        aria-label="${safeTitle}"
-        style="inline-size:${size}px; block-size:${size}px;"
+        title="${escapeHtml(fullName)}"
+        aria-label="${escapeHtml(fullName)}"
       >
         <img
-          src="${escapeHtml(safeUrl)}"
-          alt="${safeTitle}"
+          src="${escapeHtml(avatarUrl)}"
+          alt="${escapeHtml(fullName)}"
           loading="lazy"
           referrerpolicy="no-referrer"
-          onerror="this.parentNode.setAttribute('data-avatar-fallback','true');"
+          onerror="this.style.display='none'; this.parentNode.setAttribute('data-fallback','true');"
         />
-        <span
-          class="incidencias-avatar-fallback"
-          style="
-            background:${theme.bg};
-            color:${theme.text};
-          "
-        >
-          ${escapeHtml(initials)}
-        </span>
+        <span class="incidencias-avatar-fallback">${escapeHtml(initials)}</span>
       </div>
     `;
   }
 
   return `
     <div
-      class="incidencias-avatar"
-      data-avatar-fallback="true"
-      title="${safeTitle}"
-      aria-label="${safeTitle}"
-      style="
-        inline-size:${size}px;
-        block-size:${size}px;
-      "
+      class="incidencias-avatar incidencias-avatar--fallback"
+      title="${escapeHtml(fullName)}"
+      aria-label="${escapeHtml(fullName)}"
     >
-      <span
-        class="incidencias-avatar-fallback"
-        style="
-          display:grid;
-          background:${theme.bg};
-          color:${theme.text};
-        "
-      >
-        ${escapeHtml(initials)}
-      </span>
+      <span class="incidencias-avatar-fallback">${escapeHtml(initials)}</span>
     </div>
   `;
 }
 
-/* =========================================================
-   ROW / CARD
-========================================================= */
+function renderStatusChip(item = {}) {
+  const rawStatus = first(
+    item.status,
+    item.estado,
+    item?.raw?.status,
+    item?.raw?.estado
+  );
 
-function renderOpenTicketButton({ ticketId = "", isOpening = false } = {}) {
+  const key = getStatusKey(rawStatus);
+  const label = getStatusLabel(rawStatus);
+
   return `
-    <button
-      type="button"
-      data-action="open-ticket"
-      data-ticket-id="${escapeHtml(ticketId)}"
-      class="ui-btn ui-btn-secondary ui-btn-sm incidencias-detail-btn"
-      ${isOpening ? "disabled" : ""}
-    >
-      ${
-        isOpening
-          ? `
-            <span style="display:inline-flex; align-items:center; gap:8px;">
-              <span
-                aria-hidden="true"
-                style="
-                  inline-size:12px;
-                  block-size:12px;
-                  border-radius:999px;
-                  border:2px solid color-mix(in srgb, var(--text-soft) 22%, transparent);
-                  border-top-color:var(--text-soft);
-                  animation:incidenciasSpin .8s linear infinite;
-                "
-              ></span>
-              Abriendo...
-            </span>
-          `
-          : "Ver detalle"
-      }
-    </button>
+    <span class="incidencias-chip incidencias-chip--${escapeHtml(key)}">
+      ${escapeHtml(label)}
+    </span>
   `;
 }
 
-function renderIncidenciaRow(item = {}, state = {}) {
-  const localState = safeObject(state);
-  const openingTicketId = safeText(localState?.openingTicketId, "");
+function renderImporteChip(item = {}) {
+  const label = getImporteLabel(item);
+  const isMoney = /€|EUR|\$|USD/i.test(label);
+
+  if (isMoney) {
+    return `<span class="incidencias-importe incidencias-importe--money">${escapeHtml(label)}</span>`;
+  }
+
+  return `<span class="incidencias-importe incidencias-importe--status">${escapeHtml(label)}</span>`;
+}
+
+function renderRow(item = {}) {
   const ticketId = getTicketId(item);
-  const code = getTicketCode(item);
-  const title = getTitle(item);
-  const preview = truncate(getPreview(item), 88);
-  const statusValue = getStatusValue(item);
-  const createdAt = formatDate(getCreatedAt(item));
-  const updatedAtRelative = formatRelativeDate(getUpdatedAt(item));
-  const initials = getClientInitials(item);
-  const avatarUrl = getClientAvatarUrl(item);
-  const avatarSeed = getAvatarToneSeed(item);
-  const avatarTitle = getClientDisplayName(item);
-  const isOpening = Boolean(openingTicketId && openingTicketId === ticketId);
+  const subject = getSubject(item);
+  const description = getDescription(item);
+  const createdAt = formatDateTime(getCreatedAt(item));
+  const updatedAt = formatLastUpdate(getUpdatedAt(item));
 
   return `
-    <tr class="incidencias-row ${isOpening ? "is-opening" : ""}" data-ticket-id="${escapeHtml(ticketId)}">
-      <td>
-        <div class="incidencias-cell-identity">
-          ${renderIdentityAvatar({
-            avatarUrl,
-            initials,
-            seed: avatarSeed,
-            size: 40,
-            title: avatarTitle,
-          })}
+    <tr class="incidencias-row" data-ticket-id="${escapeHtml(ticketId)}">
+      <td class="incidencias-cell incidencias-cell--main">
+        <div class="incidencias-main">
+          ${renderAvatar(item)}
 
-          <div class="incidencias-identity-copy">
-            <span class="incidencias-ticket-code">
-              ${escapeHtml(code)}
-            </span>
-
-            <button
-              type="button"
-              data-action="open-ticket"
-              data-ticket-id="${escapeHtml(ticketId)}"
-              class="incidencias-title-btn"
-              ${isOpening ? "disabled" : ""}
-              title="Abrir detalle de la incidencia"
-            >
-              ${escapeHtml(title)}
-            </button>
-
-            <span class="incidencias-ticket-preview">
-              ${escapeHtml(preview)}
-            </span>
+          <div class="incidencias-main-copy">
+            <div class="incidencias-ticket-id">${escapeHtml(ticketId)}</div>
+            <div class="incidencias-ticket-subject">${escapeHtml(subject)}</div>
+            <div class="incidencias-ticket-description">${escapeHtml(description)}</div>
           </div>
         </div>
       </td>
 
-      <td>
-        ${renderStatusChip(statusValue)}
+      <td class="incidencias-cell incidencias-cell--status">
+        ${renderStatusChip(item)}
       </td>
 
-      <td>
-        <strong class="incidencias-date-main">
-          ${escapeHtml(createdAt)}
-        </strong>
+      <td class="incidencias-cell incidencias-cell--date">
+        <span class="incidencias-date-inline">${escapeHtml(createdAt)}</span>
       </td>
 
-      <td>
-        <span class="incidencias-update-relative">
-          ${escapeHtml(updatedAtRelative)}
-        </span>
+      <td class="incidencias-cell incidencias-cell--date">
+        <span class="incidencias-date-inline">${escapeHtml(updatedAt)}</span>
       </td>
 
-      <td class="is-amount">
-        ${renderAmountPill(item)}
+      <td class="incidencias-cell incidencias-cell--importe">
+        ${renderImporteChip(item)}
       </td>
 
-      <td class="is-actions">
-        <div class="incidencias-actions">
-          ${renderOpenTicketButton({ ticketId, isOpening })}
-        </div>
+      <td class="incidencias-cell incidencias-cell--actions">
+        <button
+          type="button"
+          class="incidencias-detail-btn"
+          data-incidencias-action="detail"
+          data-ticket-id="${escapeHtml(ticketId)}"
+        >
+          Ver detalle
+        </button>
       </td>
     </tr>
   `;
 }
 
-function renderMobileIncidenciaCard(item = {}, state = {}) {
-  const localState = safeObject(state);
-  const openingTicketId = safeText(localState?.openingTicketId, "");
-  const ticketId = getTicketId(item);
-  const code = getTicketCode(item);
-  const title = getTitle(item);
-  const preview = truncate(getPreview(item), 110);
-  const statusValue = getStatusValue(item);
-  const createdAt = formatDate(getCreatedAt(item));
-  const updatedAtRelative = formatRelativeDate(getUpdatedAt(item));
-  const initials = getClientInitials(item);
-  const avatarUrl = getClientAvatarUrl(item);
-  const avatarSeed = getAvatarToneSeed(item);
-  const avatarTitle = getClientDisplayName(item);
-  const isOpening = Boolean(openingTicketId && openingTicketId === ticketId);
-
+function renderEmptyState() {
   return `
-    <article
-      class="incidencias-mobile-card ${isOpening ? "is-opening" : ""}"
-      data-ticket-id="${escapeHtml(ticketId)}"
-      style="opacity:${isOpening ? ".72" : "1"};"
-    >
-      <div class="incidencias-mobile-top">
-        <div class="incidencias-cell-identity">
-          ${renderIdentityAvatar({
-            avatarUrl,
-            initials,
-            seed: avatarSeed,
-            size: 40,
-            title: avatarTitle,
-          })}
-
-          <div class="incidencias-identity-copy">
-            <span class="incidencias-ticket-code">
-              ${escapeHtml(code)}
-            </span>
-
-            <button
-              type="button"
-              data-action="open-ticket"
-              data-ticket-id="${escapeHtml(ticketId)}"
-              class="incidencias-title-btn"
-              ${isOpening ? "disabled" : ""}
-            >
-              ${escapeHtml(title)}
-            </button>
-
-            <span class="incidencias-ticket-preview">
-              ${escapeHtml(preview)}
-            </span>
-          </div>
-        </div>
-
-        <div class="incidencias-mobile-status">
-          ${renderStatusChip(statusValue)}
-          ${renderAmountPill(item)}
-        </div>
-      </div>
-
-      <div class="incidencias-mobile-grid">
-        <div class="incidencias-mobile-box">
-          <span class="incidencias-mobile-box-label">Fecha de creación</span>
-          <strong class="incidencias-mobile-box-value">${escapeHtml(createdAt)}</strong>
-        </div>
-
-        <div class="incidencias-mobile-box">
-          <span class="incidencias-mobile-box-label">Última novedad</span>
-          <strong class="incidencias-mobile-box-value">${escapeHtml(updatedAtRelative)}</strong>
-        </div>
-      </div>
-
-      <div class="incidencias-mobile-actions">
-        ${renderOpenTicketButton({ ticketId, isOpening })}
-      </div>
-    </article>
-  `;
-}
-
-function renderDesktopTable(items = [], state = {}) {
-  return `
-    <div class="incidencias-table-scroll">
-      <table class="incidencias-table">
-        <colgroup>
-          <col style="width:39%">
-          <col style="width:12%">
-          <col style="width:16%">
-          <col style="width:12%">
-          <col style="width:9%">
-          <col style="width:12%">
-        </colgroup>
-
-        <thead>
-          <tr>
-            <th>Incidencia</th>
-            <th>Estado</th>
-            <th>Fecha de creación</th>
-            <th>Última novedad</th>
-            <th class="is-amount">Importe</th>
-            <th class="is-right is-actions">Acciones</th>
-          </tr>
-        </thead>
-
-        <tbody>
-          ${safeArray(items)
-            .map((item) => renderIncidenciaRow(item, state))
-            .join("")}
-        </tbody>
-      </table>
-    </div>
-  `;
-}
-
-function renderMobileCards(items = [], state = {}) {
-  return `
-    <div class="incidencias-mobile-list">
-      ${safeArray(items)
-        .map((item) => renderMobileIncidenciaCard(item, state))
-        .join("")}
-    </div>
-  `;
-}
-
-function renderTableLoadingOverlay(message = "Actualizando incidencias...") {
-  return `
-    <div class="incidencias-table-overlay" aria-live="polite" aria-busy="true">
-      <div class="incidencias-table-overlay-card">
-        <span class="incidencias-table-overlay-spinner" aria-hidden="true"></span>
-
-        <strong
-          style="
-            color:var(--text-strong);
-            font-size:13px;
-            letter-spacing:-.02em;
-          "
-        >
-          ${escapeHtml(message)}
-        </strong>
-
-        <span
-          style="
-            color:var(--text-dim);
-            font-size:12px;
-            line-height:1.35;
-          "
-        >
-          Solo se está actualizando el historial
-        </span>
-      </div>
+    <div class="incidencias-empty">
+      <h3 class="incidencias-empty-title">No hay incidencias para mostrar</h3>
+      <p class="incidencias-empty-text">
+        Cuando haya solicitudes registradas aparecerán aquí.
+      </p>
     </div>
   `;
 }
 
 /* =========================================================
-   MAIN
+   TEMPLATE
 ========================================================= */
 
-export function renderTable({ items = [], state = {} } = {}) {
-  const localState = state || incidenciasState || {};
-  const list = getResolvedItems(items);
-  const refreshing = Boolean(localState?.refreshing);
-  const loading = Boolean(localState?.loading);
+export function renderIncidenciasTableTemplate(input = {}) {
+  const data = safeObject(input);
 
-  if (loading && !list.length) {
-    return renderLoadingState();
-  }
+  const items = safeArray(
+    first(
+      data.items,
+      data.rows,
+      data.tickets,
+      data.incidencias
+    )
+  );
 
-  if (localState.error && !list.length) {
-    return renderErrorState(localState.error);
-  }
+  const totalCount = safeNumber(
+    first(data.totalCount, data.remoteCount, data.total, items.length),
+    items.length
+  );
 
-  if (!list.length) {
-    return renderEmptyState();
-  }
+  const currentPage = Math.max(
+    1,
+    safeNumber(first(data.page, data.currentPage), 1)
+  );
 
-  const pagination = getPagination(list, localState);
+  const pageSize = Math.max(
+    1,
+    safeNumber(first(data.pageSize, data.limit, 5), 5)
+  );
+
+  const totalPages = Math.max(
+    1,
+    safeNumber(first(data.totalPages), Math.ceil((totalCount || 1) / pageSize))
+  );
+
+  const rangeStart = totalCount ? ((currentPage - 1) * pageSize) + 1 : 0;
+  const rangeEnd = totalCount
+    ? Math.min(rangeStart + Math.max(items.length - 1, 0), totalCount)
+    : items.length;
+
+  const stats = computeStats(items);
+
+  const updatedAt = first(
+    data.lastUpdatedAt,
+    data.updatedAt,
+    ...items.map((item) => getUpdatedAt(item))
+  );
+
+  const pageTitle = safeText(
+    first(data.title, "Tus incidencias y solicitudes"),
+    "Tus incidencias y solicitudes"
+  );
+
+  const pageSubtitle = safeText(
+    first(
+      data.subtitle,
+      "Consulta el estado de tus incidencias, revisa las actualizaciones más recientes y crea nuevas solicitudes desde una vista clara, cercana y fácil de seguir."
+    ),
+    ""
+  );
 
   return `
-    ${renderScopedStyles()}
+    <section class="incidencias-view-root">
+      <style>
+        .incidencias-view-root{
+          display:grid;
+          gap:24px;
+        }
 
-    <section class="incidencias-table-wrap">
-      ${renderTableToolbar({
-        total: pagination.totalItems,
-        page: pagination.page,
-        totalPages: pagination.totalPages,
-        from: pagination.from,
-        to: pagination.to,
-        refreshing,
-      })}
+        .incidencias-hero{
+          position:relative;
+          overflow:hidden;
+          border-radius:28px;
+          border:1px solid var(--panel-border, rgba(255,255,255,.08));
+          background:
+            radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 34%),
+            linear-gradient(180deg, var(--panel-bg, rgba(255,255,255,.84)), var(--panel-bg, rgba(255,255,255,.84)));
+          box-shadow:var(--shadow-soft, 0 20px 50px rgba(0,0,0,.08));
+          padding:30px 34px 34px;
+        }
 
-      <div class="incidencias-desktop-table">
-        ${renderDesktopTable(pagination.items, localState)}
-      </div>
+        .incidencias-hero-top{
+          display:grid;
+          grid-template-columns:minmax(0, 1fr) auto;
+          gap:20px;
+          align-items:start;
+        }
 
-      ${renderMobileCards(pagination.items, localState)}
+        .incidencias-hero-copy{
+          min-width:0;
+          display:grid;
+          gap:12px;
+        }
 
-      ${refreshing ? renderTableLoadingOverlay("Actualizando incidencias...") : ""}
+        .incidencias-page-title{
+          margin:0;
+          font-size:clamp(42px, 5.2vw, 76px);
+          line-height:.95;
+          letter-spacing:-.05em;
+          font-weight:800;
+          color:var(--text-strong, #0f172a);
+          text-wrap:balance;
+        }
+
+        .incidencias-page-subtitle{
+          margin:0;
+          max-width:1100px;
+          font-size:17px;
+          line-height:1.6;
+          color:var(--text-dim, #6b7280);
+        }
+
+        .incidencias-hero-actions{
+          display:flex;
+          align-items:flex-start;
+          justify-content:flex-end;
+          gap:12px;
+          flex-wrap:wrap;
+        }
+
+        .incidencias-btn{
+          min-height:52px;
+          padding:0 20px;
+          border-radius:16px;
+          border:1px solid var(--border-soft, rgba(15,23,42,.08));
+          background:var(--surface-1, rgba(255,255,255,.74));
+          color:var(--text-strong, #111827);
+          font-size:14px;
+          font-weight:700;
+          line-height:1;
+          cursor:pointer;
+          display:inline-flex;
+          align-items:center;
+          justify-content:center;
+          text-decoration:none;
+          box-shadow:0 10px 24px rgba(15,23,42,.04);
+          transition:
+            transform .18s ease,
+            box-shadow .18s ease,
+            border-color .18s ease,
+            background .18s ease;
+        }
+
+        .incidencias-btn:hover{
+          transform:translateY(-1px);
+          box-shadow:0 16px 32px rgba(15,23,42,.08);
+        }
+
+        .incidencias-btn--primary{
+          border-color:color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent);
+          background:var(--accent, #7c5cff);
+          color:#fff;
+          box-shadow:0 14px 30px color-mix(in srgb, var(--accent, #7c5cff) 24%, transparent);
+        }
+
+        .incidencias-hero-meta{
+          margin-top:20px;
+          display:flex;
+          align-items:center;
+          gap:10px;
+          flex-wrap:wrap;
+        }
+
+        .incidencias-meta-pill{
+          min-height:34px;
+          padding:0 14px;
+          border-radius:999px;
+          border:1px solid var(--border-soft, rgba(15,23,42,.08));
+          background:var(--surface-1, rgba(255,255,255,.72));
+          color:var(--text-dim, #6b7280);
+          font-size:12px;
+          font-weight:800;
+          letter-spacing:.05em;
+          text-transform:uppercase;
+          display:inline-flex;
+          align-items:center;
+          white-space:nowrap;
+        }
+
+        .incidencias-stats{
+          margin-top:22px;
+          display:grid;
+          grid-template-columns:repeat(2, minmax(0, 320px));
+          gap:16px;
+        }
+
+        .incidencias-stat-card{
+          display:grid;
+          gap:10px;
+          min-height:168px;
+          padding:22px 22px 20px;
+          border-radius:24px;
+          border:1px solid var(--border-soft, rgba(15,23,42,.08));
+          background:
+            linear-gradient(180deg, rgba(255,255,255,.26), rgba(255,255,255,.08)),
+            var(--surface-1, rgba(255,255,255,.68));
+        }
+
+        .incidencias-stat-card--open{
+          border-color:color-mix(in srgb, var(--accent, #7c5cff) 22%, var(--border-soft, rgba(15,23,42,.08)));
+        }
+
+        .incidencias-stat-card--closed{
+          border-color:color-mix(in srgb, var(--success-strong, #36c690) 22%, var(--border-soft, rgba(15,23,42,.08)));
+        }
+
+        .incidencias-stat-label{
+          font-size:12px;
+          font-weight:800;
+          letter-spacing:.08em;
+          text-transform:uppercase;
+          color:var(--text-dim, #6b7280);
+        }
+
+        .incidencias-stat-value{
+          font-size:54px;
+          line-height:.9;
+          letter-spacing:-.05em;
+          font-weight:800;
+          color:var(--text-strong, #111827);
+        }
+
+        .incidencias-stat-text{
+          font-size:15px;
+          line-height:1.5;
+          color:var(--text-dim, #6b7280);
+        }
+
+        .incidencias-history{
+          overflow:hidden;
+          border-radius:28px;
+          border:1px solid var(--panel-border, rgba(255,255,255,.08));
+          background:var(--panel-bg, rgba(255,255,255,.84));
+          box-shadow:var(--shadow-soft, 0 20px 50px rgba(0,0,0,.08));
+        }
+
+        .incidencias-history-head{
+          display:grid;
+          grid-template-columns:minmax(0, 1fr) auto;
+          gap:18px;
+          align-items:start;
+          padding:18px 20px 16px;
+          border-bottom:1px solid var(--border-soft, rgba(15,23,42,.08));
+        }
+
+        .incidencias-history-copy{
+          min-width:0;
+          display:grid;
+          gap:4px;
+        }
+
+        .incidencias-history-title{
+          margin:0;
+          font-size:18px;
+          line-height:1.2;
+          font-weight:800;
+          color:var(--text-strong, #111827);
+        }
+
+        .incidencias-history-subtitle{
+          margin:0;
+          font-size:13px;
+          line-height:1.45;
+          color:var(--text-dim, #6b7280);
+        }
+
+        .incidencias-pagination{
+          display:flex;
+          gap:10px;
+          flex-wrap:wrap;
+        }
+
+        .incidencias-pagination-btn{
+          min-height:42px;
+          padding:0 16px;
+          border-radius:14px;
+          border:1px solid var(--border-soft, rgba(15,23,42,.08));
+          background:var(--surface-1, rgba(255,255,255,.72));
+          color:var(--text-strong, #111827);
+          font-size:13px;
+          font-weight:700;
+          cursor:pointer;
+          display:inline-flex;
+          align-items:center;
+          justify-content:center;
+          text-decoration:none;
+        }
+
+        .incidencias-pagination-btn[disabled],
+        .incidencias-pagination-btn[aria-disabled="true"]{
+          opacity:.48;
+          cursor:not-allowed;
+        }
+
+        .incidencias-table-shell{
+          width:100%;
+          overflow-x:auto;
+          overflow-y:hidden;
+        }
+
+        .incidencias-table{
+          width:100%;
+          border-collapse:separate;
+          border-spacing:0;
+          min-width:1180px;
+        }
+
+        .incidencias-table thead th{
+          padding:15px 20px;
+          text-align:left;
+          font-size:12px;
+          font-weight:800;
+          letter-spacing:.08em;
+          text-transform:uppercase;
+          color:var(--text-faint, #8a91a0);
+          background:color-mix(in srgb, var(--surface-1, #fff) 88%, transparent);
+          border-bottom:1px solid var(--border-soft, rgba(15,23,42,.08));
+          white-space:nowrap;
+        }
+
+        .incidencias-table tbody td{
+          padding:18px 20px;
+          vertical-align:middle;
+          border-bottom:1px solid var(--border-soft, rgba(15,23,42,.08));
+        }
+
+        .incidencias-table tbody tr:last-child td{
+          border-bottom:none;
+        }
+
+        .incidencias-row{
+          transition:background .18s ease;
+        }
+
+        .incidencias-row:hover{
+          background:color-mix(in srgb, var(--accent, #7c5cff) 2.5%, transparent);
+        }
+
+        .incidencias-main{
+          display:grid;
+          grid-template-columns:52px minmax(0, 1fr);
+          gap:14px;
+          align-items:center;
+          min-width:0;
+        }
+
+        .incidencias-avatar{
+          position:relative;
+          width:52px;
+          height:52px;
+          border-radius:999px;
+          overflow:hidden;
+          flex:0 0 52px;
+          background:linear-gradient(135deg, rgba(124,92,255,.18), rgba(139,92,246,.34));
+        }
+
+        .incidencias-avatar img{
+          display:block;
+          width:100%;
+          height:100%;
+          object-fit:cover;
+        }
+
+        .incidencias-avatar-fallback{
+          position:absolute;
+          inset:0;
+          display:none;
+          align-items:center;
+          justify-content:center;
+          font-size:22px;
+          font-weight:800;
+          color:#fff;
+          letter-spacing:-.03em;
+        }
+
+        .incidencias-avatar[data-fallback="true"] .incidencias-avatar-fallback{
+          display:flex;
+        }
+
+        .incidencias-avatar[data-fallback="true"] img{
+          display:none !important;
+        }
+
+        .incidencias-avatar--fallback .incidencias-avatar-fallback{
+          display:flex;
+        }
+
+        .incidencias-main-copy{
+          min-width:0;
+          display:grid;
+          gap:4px;
+        }
+
+        .incidencias-ticket-id{
+          font-size:13px;
+          line-height:1.2;
+          font-weight:800;
+          letter-spacing:.06em;
+          color:#4b5563;
+          text-transform:uppercase;
+        }
+
+        .incidencias-ticket-subject{
+          font-size:18px;
+          line-height:1.12;
+          font-weight:800;
+          letter-spacing:-.03em;
+          color:var(--text-strong, #111827);
+          overflow:hidden;
+          text-overflow:ellipsis;
+          display:-webkit-box;
+          -webkit-line-clamp:2;
+          -webkit-box-orient:vertical;
+        }
+
+        .incidencias-ticket-description{
+          font-size:14px;
+          line-height:1.35;
+          color:var(--text-dim, #6b7280);
+          overflow:hidden;
+          text-overflow:ellipsis;
+          white-space:nowrap;
+        }
+
+        .incidencias-chip{
+          min-height:34px;
+          padding:0 14px;
+          border-radius:999px;
+          display:inline-flex;
+          align-items:center;
+          justify-content:center;
+          font-size:12px;
+          font-weight:800;
+          letter-spacing:.05em;
+          text-transform:uppercase;
+          white-space:nowrap;
+          border:1px solid transparent;
+        }
+
+        .incidencias-chip--pending{
+          color:#c57a13;
+          background:rgba(255,188,66,.14);
+          border-color:rgba(255,188,66,.32);
+        }
+
+        .incidencias-chip--open{
+          color:var(--accent, #7c5cff);
+          background:color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent);
+          border-color:color-mix(in srgb, var(--accent, #7c5cff) 24%, transparent);
+        }
+
+        .incidencias-chip--progress{
+          color:#0f8ec7;
+          background:rgba(125,211,252,.16);
+          border-color:rgba(125,211,252,.34);
+        }
+
+        .incidencias-chip--resolved,
+        .incidencias-chip--closed{
+          color:#1f7a4d;
+          background:rgba(54,198,144,.14);
+          border-color:rgba(54,198,144,.30);
+        }
+
+        .incidencias-date-inline{
+          display:inline-block;
+          white-space:nowrap;
+          font-size:14px;
+          line-height:1.2;
+          font-weight:700;
+          font-variant-numeric:tabular-nums;
+          color:#2f3747;
+        }
+
+        .incidencias-importe{
+          display:inline-flex;
+          align-items:center;
+          justify-content:center;
+          min-height:34px;
+          padding:0 14px;
+          border-radius:999px;
+          font-size:12px;
+          font-weight:800;
+          white-space:nowrap;
+          border:1px solid transparent;
+        }
+
+        .incidencias-importe--money{
+          color:#1f2937;
+          background:rgba(15,23,42,.04);
+          border-color:rgba(15,23,42,.08);
+        }
+
+        .incidencias-importe--status{
+          color:#7b8494;
+          background:rgba(15,23,42,.03);
+          border-color:rgba(15,23,42,.06);
+        }
+
+        .incidencias-detail-btn{
+          width:auto;
+          min-height:40px;
+          padding:0 16px;
+          border-radius:14px;
+          border:1px solid var(--border-soft, rgba(15,23,42,.08));
+          background:var(--surface-1, rgba(255,255,255,.74));
+          color:var(--text-strong, #111827);
+          font-size:14px;
+          font-weight:700;
+          line-height:1;
+          cursor:pointer;
+          display:inline-flex;
+          align-items:center;
+          justify-content:center;
+          white-space:nowrap;
+          box-shadow:none;
+        }
+
+        .incidencias-detail-btn:hover{
+          border-color:rgba(15,23,42,.14);
+          background:rgba(255,255,255,.96);
+        }
+
+        .incidencias-empty{
+          display:grid;
+          justify-items:center;
+          gap:8px;
+          padding:54px 24px 58px;
+          text-align:center;
+        }
+
+        .incidencias-empty-title{
+          margin:0;
+          font-size:20px;
+          font-weight:800;
+          color:var(--text-strong, #111827);
+        }
+
+        .incidencias-empty-text{
+          margin:0;
+          font-size:14px;
+          line-height:1.6;
+          color:var(--text-dim, #6b7280);
+        }
+
+        [data-theme="light"] .incidencias-hero,
+        [data-theme="light"] .incidencias-history{
+          background:
+            radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 34%),
+            linear-gradient(180deg, rgba(255,255,255,.96), rgba(249,250,252,.94));
+          box-shadow:
+            0 16px 38px rgba(15,23,42,.05),
+            0 0 0 1px rgba(255,255,255,.74) inset;
+        }
+
+        [data-theme="light"] .incidencias-stat-card{
+          background:
+            linear-gradient(180deg, rgba(255,255,255,.72), rgba(255,255,255,.42)),
+            rgba(255,255,255,.58);
+        }
+
+        @media (max-width: 1180px){
+          .incidencias-hero{
+            padding:26px 24px 26px;
+          }
+
+          .incidencias-hero-top{
+            grid-template-columns:1fr;
+          }
+
+          .incidencias-hero-actions{
+            justify-content:flex-start;
+          }
+        }
+
+        @media (max-width: 980px){
+          .incidencias-stats{
+            grid-template-columns:1fr 1fr;
+          }
+        }
+
+        @media (max-width: 760px){
+          .incidencias-view-root{
+            gap:18px;
+          }
+
+          .incidencias-hero{
+            padding:22px 18px 20px;
+            border-radius:22px;
+          }
+
+          .incidencias-history{
+            border-radius:22px;
+          }
+
+          .incidencias-history-head{
+            grid-template-columns:1fr;
+            padding:16px 16px 14px;
+          }
+
+          .incidencias-pagination{
+            justify-content:flex-start;
+          }
+
+          .incidencias-stats{
+            grid-template-columns:1fr;
+          }
+
+          .incidencias-page-title{
+            font-size:clamp(34px, 10vw, 54px);
+          }
+
+          .incidencias-page-subtitle{
+            font-size:15px;
+          }
+        }
+      </style>
+
+      <section class="incidencias-hero">
+        <div class="incidencias-hero-top">
+          <div class="incidencias-hero-copy">
+            <h1 class="incidencias-page-title">${escapeHtml(pageTitle)}</h1>
+            <p class="incidencias-page-subtitle">${escapeHtml(pageSubtitle)}</p>
+          </div>
+
+          <div class="incidencias-hero-actions">
+            <button
+              type="button"
+              class="incidencias-btn"
+              data-incidencias-action="export"
+            >
+              Exportar historial
+            </button>
+
+            <button
+              type="button"
+              class="incidencias-btn incidencias-btn--primary"
+              data-incidencias-action="create"
+            >
+              Crear nueva incidencia
+            </button>
+          </div>
+        </div>
+
+        <div class="incidencias-hero-meta">
+          <span class="incidencias-meta-pill">
+            ${escapeHtml(`${totalCount} solicitudes registradas`)}
+          </span>
+
+          <span class="incidencias-meta-pill">
+            ${
+              updatedAt
+                ? escapeHtml(`Última actualización · ${formatRelativeDate(updatedAt)}`)
+                : "Sin actualizaciones recientes"
+            }
+          </span>
+        </div>
+
+        <div class="incidencias-stats">
+          <article class="incidencias-stat-card incidencias-stat-card--open">
+            <div class="incidencias-stat-label">Incidencias abiertas</div>
+            <div class="incidencias-stat-value">${escapeHtml(String(stats.openCount))}</div>
+            <div class="incidencias-stat-text">Solicitudes activas o pendientes de revisión.</div>
+          </article>
+
+          <article class="incidencias-stat-card incidencias-stat-card--closed">
+            <div class="incidencias-stat-label">Incidencias cerradas</div>
+            <div class="incidencias-stat-value">${escapeHtml(String(stats.closedCount))}</div>
+            <div class="incidencias-stat-text">Casos resueltos o ya cerrados.</div>
+          </article>
+        </div>
+      </section>
+
+      <section class="incidencias-history">
+        <div class="incidencias-history-head">
+          <div class="incidencias-history-copy">
+            <h2 class="incidencias-history-title">Historial de incidencias</h2>
+            <p class="incidencias-history-subtitle">
+              ${escapeHtml(`Mostrando ${rangeStart}-${rangeEnd} de ${totalCount} · página ${currentPage} de ${totalPages}`)}
+            </p>
+          </div>
+
+          <div class="incidencias-pagination">
+            <button
+              type="button"
+              class="incidencias-pagination-btn"
+              data-incidencias-action="prev-page"
+              ${currentPage <= 1 ? 'disabled aria-disabled="true"' : ""}
+            >
+              Anterior
+            </button>
+
+            <button
+              type="button"
+              class="incidencias-pagination-btn"
+              data-incidencias-action="next-page"
+              ${currentPage >= totalPages ? 'disabled aria-disabled="true"' : ""}
+            >
+              Siguiente
+            </button>
+          </div>
+        </div>
+
+        ${
+          items.length
+            ? `
+              <div class="incidencias-table-shell">
+                <table class="incidencias-table" role="table" aria-label="Listado de incidencias">
+                  <colgroup>
+                    <col style="width:44%;">
+                    <col style="width:12%;">
+                    <col style="width:15%;">
+                    <col style="width:15%;">
+                    <col style="width:8%;">
+                    <col style="width:6%;">
+                  </colgroup>
+
+                  <thead>
+                    <tr>
+                      <th>Incidencia</th>
+                      <th>Estado</th>
+                      <th>Fecha de creación</th>
+                      <th>Última novedad</th>
+                      <th>Importe</th>
+                      <th>Acciones</th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    ${items.map((item) => renderRow(item)).join("")}
+                  </tbody>
+                </table>
+              </div>
+            `
+            : renderEmptyState()
+        }
+      </section>
     </section>
   `;
 }
 
-export function renderCards({ items = [], state = {} } = {}) {
-  return renderTable({ items, state });
-}
+export default renderIncidenciasTableTemplate;

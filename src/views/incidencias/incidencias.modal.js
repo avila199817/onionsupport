@@ -37,6 +37,8 @@ const modalState = {
   feedbackMessage: "",
   feedbackType: "info",
   pendingFiles: [],
+  openingAttachmentId: "",
+  downloadingAttachmentId: "",
 };
 
 /* =========================================================
@@ -147,6 +149,11 @@ function clearFeedback() {
   modalState.feedbackType = "info";
 }
 
+function clearAttachmentBusyState() {
+  modalState.openingAttachmentId = "";
+  modalState.downloadingAttachmentId = "";
+}
+
 function normalizeWhitespace(value = "") {
   return safeText(value, "").replace(/\s+/g, " ").trim();
 }
@@ -198,6 +205,151 @@ function joinApiPath(...parts) {
     .map((part) => safeText(part, "").replace(/^\/+|\/+$/g, ""))
     .filter(Boolean)
     .join("/");
+}
+
+function encodeUrlPathSegment(value = "") {
+  return encodeURIComponent(safeText(value, ""));
+}
+
+function getApiBase() {
+  return safeText(
+    first(
+      AppCore?.config?.apiBase,
+      AppCore?.config?.api?.baseUrl,
+      AppCore?.state?.apiBase
+    ),
+    ""
+  ).replace(/\/+$/, "");
+}
+
+function getAuthToken() {
+  return safeText(
+    first(
+      AppCore?.state?.token,
+      AppCore?.state?.accessToken,
+      AppCore?.auth?.getToken?.(),
+      AppCore?.Auth?.getToken?.(),
+      typeof localStorage !== "undefined" ? localStorage.getItem("token") : "",
+      typeof sessionStorage !== "undefined"
+        ? sessionStorage.getItem("token")
+        : ""
+    ),
+    ""
+  );
+}
+
+function isSameOriginUrl(value = "") {
+  try {
+    const url = new URL(value, window.location.origin);
+    return url.origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+function looksLikeProtectedApiUrl(value = "") {
+  const text = safeText(value, "").toLowerCase();
+  if (!text) return false;
+
+  return (
+    text.includes("/api/") ||
+    text.includes("/tickets/") ||
+    text.includes("/incidencias/") ||
+    text.includes("/attachments/") ||
+    isSameOriginUrl(text)
+  );
+}
+
+function getFilenameFromContentDisposition(value = "", fallback = "archivo") {
+  const text = safeText(value, "");
+  if (!text) return fallback;
+
+  const utf8Match = text.match(/filename\*\s*=\s*UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1].replace(/["']/g, ""));
+    } catch {}
+  }
+
+  const plainMatch = text.match(/filename\s*=\s*("?)([^";]+)\1/i);
+  if (plainMatch?.[2]) {
+    return safeText(plainMatch[2], fallback);
+  }
+
+  return fallback;
+}
+
+function downloadBlob(blob, filename = "archivo") {
+  const objectUrl = URL.createObjectURL(blob);
+
+  try {
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = safeText(filename, "archivo");
+    anchor.rel = "noopener";
+    anchor.style.display = "none";
+
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  } finally {
+    setTimeout(() => {
+      try {
+        URL.revokeObjectURL(objectUrl);
+      } catch {}
+    }, 60000);
+  }
+}
+
+function openBlob(blob) {
+  const objectUrl = URL.createObjectURL(blob);
+  const newWindow = window.open(objectUrl, "_blank", "noopener,noreferrer");
+
+  if (!newWindow) {
+    throw new Error("El navegador bloqueó la apertura del archivo.");
+  }
+
+  setTimeout(() => {
+    try {
+      URL.revokeObjectURL(objectUrl);
+    } catch {}
+  }, 60000);
+
+  return true;
+}
+
+function openUrlDirect(url = "") {
+  const finalUrl = safeText(url, "");
+  if (!finalUrl) {
+    throw new Error("No hay URL disponible para abrir el archivo.");
+  }
+
+  const newWindow = window.open(finalUrl, "_blank", "noopener,noreferrer");
+  if (!newWindow) {
+    throw new Error("El navegador bloqueó la apertura del archivo.");
+  }
+
+  return true;
+}
+
+function downloadUrlDirect(url = "", filename = "archivo") {
+  const finalUrl = safeText(url, "");
+  if (!finalUrl) {
+    throw new Error("No hay URL disponible para descargar el archivo.");
+  }
+
+  const anchor = document.createElement("a");
+  anchor.href = finalUrl;
+  anchor.download = safeText(filename, "archivo");
+  anchor.target = "_blank";
+  anchor.rel = "noopener noreferrer";
+  anchor.style.display = "none";
+
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+
+  return true;
 }
 
 /* =========================================================
@@ -262,13 +414,48 @@ function getDetail(detail = {}) {
   return normalizeIncidenciaModel(safeObject(detail));
 }
 
+function pickDetailPayload(response = null) {
+  const obj = safeObject(response);
+
+  return (
+    obj.detail ||
+    obj.ticket ||
+    obj.item ||
+    obj.data ||
+    obj.result ||
+    obj.payload ||
+    obj.incidencia ||
+    obj
+  );
+}
+
+function coerceDetailResponse(response = null, fallback = {}) {
+  const payload = safeObject(pickDetailPayload(response));
+  if (!Object.keys(payload).length) {
+    return getDetail(fallback);
+  }
+
+  return getDetail({
+    ...safeObject(fallback),
+    ...payload,
+    raw: {
+      ...safeObject(fallback?.raw || fallback),
+      ...safeObject(payload?.raw || payload),
+    },
+  });
+}
+
 function getTicketId(detail = {}) {
   return safeText(
     first(
       detail.ticketId,
       detail.id,
+      detail.code,
+      detail.ticketCode,
       detail?.raw?.ticketId,
-      detail?.raw?.id
+      detail?.raw?.id,
+      detail?.raw?.code,
+      detail?.raw?.ticketCode
     ),
     "—"
   );
@@ -368,7 +555,7 @@ function getFacturaRelacionada(detail = {}) {
 }
 
 /* =========================================================
-   ATTACHMENTS / BLOB URL RESOLVE
+   ATTACHMENTS / URL RESOLVE
 ========================================================= */
 
 function resolveAttachmentUrl(item = {}, detail = {}) {
@@ -393,7 +580,8 @@ function resolveAttachmentUrl(item = {}, detail = {}) {
       file?.raw?.url,
       file?.raw?.downloadUrl,
       file?.raw?.viewUrl,
-      file?.raw?.signedUrl
+      file?.raw?.signedUrl,
+      file?.raw?.publicUrl
     ),
     ""
   );
@@ -402,15 +590,7 @@ function resolveAttachmentUrl(item = {}, detail = {}) {
     return directUrl;
   }
 
-  const apiBase = safeText(
-    first(
-      AppCore?.config?.apiBase,
-      AppCore?.config?.api?.baseUrl,
-      AppCore?.state?.apiBase
-    ),
-    ""
-  );
-
+  const apiBase = getApiBase();
   const ticketId = getTicketId(detail);
 
   const candidatePath = safeText(
@@ -450,21 +630,24 @@ function resolveAttachmentUrl(item = {}, detail = {}) {
     return buildUrl(blobBaseUrl, candidatePath);
   }
 
-  if (apiBase && candidatePath) {
-    const normalized = candidatePath.replace(/^\/+/, "");
+  if (apiBase) {
+    const attachmentId = safeText(first(file.id, file.fileId), "");
+    const encodedTicketId = encodeUrlPathSegment(ticketId);
+    const encodedAttachmentId = encodeUrlPathSegment(attachmentId);
 
     const routeCandidates = [
-      joinApiPath("tickets", ticketId, "attachments", file.id, "download"),
-      joinApiPath("tickets", ticketId, "attachments", file.id),
-      joinApiPath("incidencias", ticketId, "attachments", file.id, "download"),
-      joinApiPath("incidencias", ticketId, "attachments", file.id),
-      joinApiPath("uploads", normalized),
-      normalized,
+      joinApiPath("api", "tickets", encodedTicketId, "attachments", encodedAttachmentId, "download"),
+      joinApiPath("api", "tickets", encodedTicketId, "attachments", encodedAttachmentId, "view"),
+      joinApiPath("api", "tickets", encodedTicketId, "attachments", encodedAttachmentId),
+      joinApiPath("api", "incidencias", encodedTicketId, "attachments", encodedAttachmentId, "download"),
+      joinApiPath("api", "incidencias", encodedTicketId, "attachments", encodedAttachmentId, "view"),
+      joinApiPath("api", "incidencias", encodedTicketId, "attachments", encodedAttachmentId),
+      candidatePath ? joinApiPath("api", "uploads", candidatePath) : "",
+      candidatePath ? joinApiPath("api", candidatePath) : "",
     ].filter(Boolean);
 
-    for (const candidate of routeCandidates) {
-      const built = buildUrl(apiBase, candidate);
-      if (built) return built;
+    if (routeCandidates.length) {
+      return buildUrl(apiBase, routeCandidates[0]);
     }
   }
 
@@ -484,7 +667,7 @@ function getAttachments(detail = {}) {
 
     const attachment = {
       id: safeText(
-        first(item.id, item.fileId, item.blobName),
+        first(item.id, item.fileId, item.blobName, item.key),
         `attachment-${index + 1}`
       ),
       name: safeText(
@@ -492,7 +675,7 @@ function getAttachments(detail = {}) {
         `archivo_${index + 1}`
       ),
       url: "",
-      path: safeText(first(item.path, item.storagePath, item.key), ""),
+      path: safeText(first(item.path, item.storagePath, item.key, item.blobName), ""),
       size: safeNumber(item.size, 0),
       type: safeText(
         first(item.type, item.contentType, item.mimeType, item.mime),
@@ -506,6 +689,510 @@ function getAttachments(detail = {}) {
 
     return attachment;
   });
+}
+
+function buildAttachmentCandidates(detail = {}, attachment = {}, mode = "open") {
+  const file = safeObject(attachment);
+  const raw = safeObject(file.raw);
+  const rawDetail = safeObject(detail?.raw);
+
+  const apiBase = getApiBase();
+  const ticketId = safeText(getTicketId(detail), "");
+  const attachmentId = safeText(file.id, "");
+  const path = safeText(first(file.path, raw.path, raw.storagePath, raw.key, raw.blobName), "");
+  const name = safeText(first(file.name, raw.name, raw.filename, raw.fileName), "archivo");
+
+  const blobBaseUrl = safeText(
+    first(
+      rawDetail.blobBaseUrl,
+      rawDetail.attachmentsBlobBaseUrl,
+      rawDetail.filesBlobBaseUrl,
+      rawDetail.storageBaseUrl,
+      rawDetail.cdnBaseUrl,
+      rawDetail.attachmentsBaseUrl
+    ),
+    ""
+  );
+
+  const direct = [
+    file.url,
+    raw.url,
+    raw.href,
+    raw.blobUrl,
+    raw.downloadUrl,
+    raw.viewUrl,
+    raw.signedUrl,
+    raw.publicUrl,
+    raw.previewUrl,
+    raw.openUrl,
+    raw?.links?.download,
+    raw?.links?.view,
+  ]
+    .map((value) => safeText(value, ""))
+    .filter(Boolean);
+
+  const absoluteCandidates = [];
+  const relativeCandidates = [];
+
+  direct.forEach((candidate) => {
+    if (isAbsoluteUrl(candidate)) {
+      absoluteCandidates.push(candidate);
+    } else {
+      relativeCandidates.push(candidate);
+    }
+  });
+
+  if (blobBaseUrl && path) {
+    absoluteCandidates.push(buildUrl(blobBaseUrl, path));
+  }
+
+  if (apiBase && ticketId) {
+    const encodedTicketId = encodeUrlPathSegment(ticketId);
+    const encodedAttachmentId = encodeUrlPathSegment(attachmentId);
+    const encodedName = encodeUrlPathSegment(name);
+
+    const routes = [
+      joinApiPath("api", "tickets", encodedTicketId, "attachments", encodedAttachmentId, mode === "download" ? "download" : "view"),
+      joinApiPath("api", "tickets", encodedTicketId, "attachments", encodedAttachmentId),
+      joinApiPath("api", "tickets", encodedTicketId, "files", encodedAttachmentId, mode === "download" ? "download" : "view"),
+      joinApiPath("api", "tickets", encodedTicketId, "files", encodedAttachmentId),
+      joinApiPath("api", "incidencias", encodedTicketId, "attachments", encodedAttachmentId, mode === "download" ? "download" : "view"),
+      joinApiPath("api", "incidencias", encodedTicketId, "attachments", encodedAttachmentId),
+      joinApiPath("api", "incidencias", encodedTicketId, "files", encodedAttachmentId, mode === "download" ? "download" : "view"),
+      joinApiPath("api", "incidencias", encodedTicketId, "files", encodedAttachmentId),
+      joinApiPath("api", "tickets", encodedTicketId, "attachments", encodedName, mode === "download" ? "download" : "view"),
+      joinApiPath("api", "tickets", encodedTicketId, "attachments", encodedName),
+      path ? joinApiPath("api", "uploads", path) : "",
+      path ? joinApiPath("api", path) : "",
+      ...relativeCandidates.map((candidate) => joinApiPath("api", candidate)),
+      ...relativeCandidates,
+    ].filter(Boolean);
+
+    routes.forEach((route) => {
+      const built = buildUrl(apiBase, route);
+      if (built) {
+        absoluteCandidates.push(built);
+      }
+    });
+  }
+
+  const unique = [];
+  const seen = new Set();
+
+  absoluteCandidates
+    .map((value) => safeText(value, ""))
+    .filter(Boolean)
+    .forEach((candidate) => {
+      if (!seen.has(candidate)) {
+        seen.add(candidate);
+        unique.push(candidate);
+      }
+    });
+
+  return unique;
+}
+
+async function fetchBlobFromUrl(url = "", fallbackFilename = "archivo") {
+  const finalUrl = safeText(url, "");
+  const token = getAuthToken();
+
+  if (!finalUrl) {
+    throw new Error("No hay URL para obtener el adjunto.");
+  }
+
+  const response = await fetch(finalUrl, {
+    method: "GET",
+    headers: {
+      Accept: "*/*",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} al descargar el adjunto.`);
+  }
+
+  const blob = await response.blob();
+  const filename = getFilenameFromContentDisposition(
+    response.headers.get("content-disposition"),
+    fallbackFilename
+  );
+
+  return {
+    blob,
+    filename,
+    contentType: response.headers.get("content-type") || blob?.type || "",
+    responseUrl: safeText(response.url, finalUrl),
+  };
+}
+
+async function resolveAttachmentResponseAsBlob(response = null, fallbackFilename = "archivo") {
+  if (response instanceof Blob) {
+    return {
+      blob: response,
+      filename: fallbackFilename,
+      contentType: response.type || "",
+      responseUrl: "",
+    };
+  }
+
+  const obj = safeObject(response);
+
+  if (obj?.blob instanceof Blob) {
+    return {
+      blob: obj.blob,
+      filename: safeText(first(obj.filename, obj.name), fallbackFilename),
+      contentType: obj.blob.type || safeText(obj.contentType, ""),
+      responseUrl: safeText(obj.url, ""),
+    };
+  }
+
+  const maybeUrl = safeText(
+    first(
+      obj.url,
+      obj.blobUrl,
+      obj.downloadUrl,
+      obj.viewUrl,
+      obj.href,
+      obj.signedUrl,
+      obj.publicUrl
+    ),
+    ""
+  );
+
+  if (maybeUrl) {
+    return fetchBlobFromUrl(maybeUrl, fallbackFilename);
+  }
+
+  return null;
+}
+
+/* =========================================================
+   REQUEST HELPERS / FALLBACK ADAPTERS
+========================================================= */
+
+function safeErrorMessage(error = null, fallback = "No se pudo completar la acción.") {
+  return safeText(
+    first(
+      error?.message,
+      error?.response?.message,
+      error?.response?.data?.message,
+      error?.data?.message,
+      error?.error,
+      fallback
+    ),
+    fallback
+  );
+}
+
+async function requestViaAppCore(path = "", options = {}) {
+  if (typeof AppCore?.request !== "function") {
+    throw new Error("APP_CORE_REQUEST_UNAVAILABLE");
+  }
+
+  return AppCore.request(path, options);
+}
+
+async function requestViaHttp(path = "", options = {}) {
+  const Http = AppCore?.modules?.Http || AppCore?.Http || window?.Http || null;
+
+  if (!Http) {
+    throw new Error("HTTP_MODULE_UNAVAILABLE");
+  }
+
+  if (typeof Http.request === "function") {
+    return Http.request(path, options);
+  }
+
+  const method = safeText(options?.method, "GET").toUpperCase();
+
+  if (method === "POST" && typeof Http.post === "function") {
+    return Http.post(path, options?.body);
+  }
+
+  if (method === "PATCH" && typeof Http.patch === "function") {
+    return Http.patch(path, options?.body);
+  }
+
+  if (method === "PUT" && typeof Http.put === "function") {
+    return Http.put(path, options?.body);
+  }
+
+  if (method === "GET" && typeof Http.get === "function") {
+    return Http.get(path);
+  }
+
+  throw new Error("HTTP_REQUEST_UNAVAILABLE");
+}
+
+async function requestViaFetch(path = "", options = {}) {
+  const apiBase = getApiBase();
+  const token = getAuthToken();
+  const method = safeText(options?.method, "GET").toUpperCase();
+  const body = options?.body ?? null;
+  const isFormData = body instanceof FormData;
+  const headers = {
+    ...(safeObject(options?.headers)),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+
+  const url = isAbsoluteUrl(path)
+    ? path
+    : `${apiBase || ""}${path.startsWith("/") ? path : `/${path}`}`;
+
+  const finalOptions = {
+    method,
+    headers,
+    credentials: "include",
+  };
+
+  if (body !== null && body !== undefined) {
+    if (isFormData) {
+      finalOptions.body = body;
+    } else if (
+      typeof body === "string" ||
+      body instanceof Blob ||
+      body instanceof ArrayBuffer
+    ) {
+      finalOptions.body = body;
+    } else {
+      finalOptions.headers = {
+        "Content-Type": "application/json",
+        ...headers,
+      };
+      finalOptions.body = JSON.stringify(body);
+    }
+  }
+
+  const response = await fetch(url, finalOptions);
+  const contentType = safeText(response.headers.get("content-type"), "");
+
+  if (!response.ok) {
+    let errorPayload = null;
+
+    try {
+      errorPayload = contentType.includes("application/json")
+        ? await response.json()
+        : await response.text();
+    } catch {}
+
+    const message = safeText(
+      first(
+        safeObject(errorPayload)?.message,
+        typeof errorPayload === "string" ? errorPayload : "",
+        `HTTP ${response.status}`
+      ),
+      "Request failed."
+    );
+
+    const error = new Error(message);
+    error.status = response.status;
+    error.response = errorPayload;
+    throw error;
+  }
+
+  if (contentType.includes("application/json")) {
+    return response.json();
+  }
+
+  const text = await response.text();
+
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch {
+    return { raw: text };
+  }
+}
+
+async function requestWithAdapters(path = "", options = {}) {
+  const adapters = [requestViaAppCore, requestViaHttp, requestViaFetch];
+  let lastError = null;
+
+  for (const adapter of adapters) {
+    try {
+      return await adapter(path, options);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error("REQUEST_ADAPTERS_FAILED");
+}
+
+async function tryRequestCandidates(candidates = []) {
+  let lastError = null;
+
+  for (const candidate of safeArray(candidates)) {
+    const path = safeText(candidate?.path, "");
+    const method = safeText(candidate?.method, "GET").toUpperCase();
+    const body = candidate?.body ?? null;
+    const headers = safeObject(candidate?.headers);
+
+    if (!path) continue;
+
+    try {
+      return await requestWithAdapters(path, {
+        method,
+        body,
+        headers,
+      });
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error("REQUEST_CANDIDATES_FAILED");
+}
+
+async function uploadTicketAttachmentsInternal({ ticketId = "", files = [] } = {}) {
+  const id = safeText(ticketId, "");
+  const list = dedupeFiles(files);
+
+  if (!id || !list.length) {
+    throw new Error("Faltan ticketId o archivos para subir.");
+  }
+
+  const formData = new FormData();
+
+  list.forEach((file) => {
+    if (file instanceof File) {
+      formData.append("attachments", file, file.name);
+    }
+  });
+
+  const encodedTicketId = encodeUrlPathSegment(id);
+
+  return tryRequestCandidates([
+    {
+      method: "POST",
+      path: `/api/tickets/${encodedTicketId}/attachments`,
+      body: formData,
+    },
+    {
+      method: "POST",
+      path: `/api/incidencias/${encodedTicketId}/attachments`,
+      body: formData,
+    },
+    {
+      method: "POST",
+      path: `/api/tickets/${encodedTicketId}/files`,
+      body: formData,
+    },
+    {
+      method: "POST",
+      path: `/api/incidencias/${encodedTicketId}/files`,
+      body: formData,
+    },
+  ]);
+}
+
+async function commentTicketInternal({ ticketId = "", message = "" } = {}) {
+  const id = safeText(ticketId, "");
+  const text = normalizeWhitespace(message);
+
+  if (!id || !text) {
+    throw new Error("Faltan datos para comentar la incidencia.");
+  }
+
+  const encodedTicketId = encodeUrlPathSegment(id);
+  const payload = {
+    message: text,
+    comment: text,
+    body: text,
+    text,
+    status: "open",
+    estado: "open",
+  };
+
+  return tryRequestCandidates([
+    {
+      method: "POST",
+      path: `/api/tickets/${encodedTicketId}/comments`,
+      body: payload,
+    },
+    {
+      method: "POST",
+      path: `/api/incidencias/${encodedTicketId}/comments`,
+      body: payload,
+    },
+    {
+      method: "POST",
+      path: `/api/tickets/${encodedTicketId}/messages`,
+      body: payload,
+    },
+    {
+      method: "POST",
+      path: `/api/incidencias/${encodedTicketId}/messages`,
+      body: payload,
+    },
+    {
+      method: "PATCH",
+      path: `/api/tickets/${encodedTicketId}`,
+      body: payload,
+    },
+    {
+      method: "PATCH",
+      path: `/api/incidencias/${encodedTicketId}`,
+      body: payload,
+    },
+  ]);
+}
+
+async function reopenTicketInternal(ticketId = "") {
+  const id = safeText(ticketId, "");
+  if (!id) {
+    throw new Error("No se pudo identificar la incidencia.");
+  }
+
+  const encodedTicketId = encodeUrlPathSegment(id);
+  const payload = {
+    status: "open",
+    estado: "open",
+  };
+
+  return tryRequestCandidates([
+    {
+      method: "POST",
+      path: `/api/tickets/${encodedTicketId}/reopen`,
+      body: payload,
+    },
+    {
+      method: "POST",
+      path: `/api/incidencias/${encodedTicketId}/reopen`,
+      body: payload,
+    },
+    {
+      method: "PATCH",
+      path: `/api/tickets/${encodedTicketId}`,
+      body: payload,
+    },
+    {
+      method: "PATCH",
+      path: `/api/incidencias/${encodedTicketId}`,
+      body: payload,
+    },
+  ]);
+}
+
+async function fetchTicketDetailInternal(ticketId = "") {
+  const id = safeText(ticketId, "");
+  if (!id) {
+    throw new Error("No se pudo identificar la incidencia.");
+  }
+
+  const encodedTicketId = encodeUrlPathSegment(id);
+
+  return tryRequestCandidates([
+    {
+      method: "GET",
+      path: `/api/tickets/${encodedTicketId}`,
+    },
+    {
+      method: "GET",
+      path: `/api/incidencias/${encodedTicketId}`,
+    },
+  ]);
 }
 
 /* =========================================================
@@ -603,7 +1290,9 @@ function isNoiseTimelineEntry(entry = {}) {
 }
 
 function getTimeline(detail = {}) {
-  return normalizeTimelineEntries(detail).filter((entry) => !isNoiseTimelineEntry(entry));
+  return normalizeTimelineEntries(detail).filter(
+    (entry) => !isNoiseTimelineEntry(entry)
+  );
 }
 
 /* =========================================================
@@ -738,7 +1427,7 @@ function renderChip(label = "", style = "") {
         display:inline-flex;
         align-items:center;
         justify-content:center;
-        min-height:28px;
+        min-height:30px;
         padding:0 10px;
         border-radius:999px;
         font-size:11px;
@@ -755,7 +1444,11 @@ function renderChip(label = "", style = "") {
 }
 
 function renderAvatar(detail = {}) {
-  const initials = safeText(detail.initials, getInitials(getClientName(detail) || "ON"));
+  const initials = safeText(
+    detail.initials,
+    getInitials(getClientName(detail) || "ON")
+  );
+
   const avatarUrl = getClientAvatar(detail);
   const theme = getAvatarTheme(
     safeText(first(detail.ticketId, getClientName(detail)), "onion")
@@ -819,10 +1512,10 @@ function renderAvatar(detail = {}) {
       <div
         style="
           position:relative;
-          flex:0 0 56px;
-          width:56px;
-          height:56px;
-          border-radius:16px;
+          flex:0 0 60px;
+          width:60px;
+          height:60px;
+          border-radius:18px;
           overflow:hidden;
           border:1px solid var(--border-soft);
           background:transparent;
@@ -867,10 +1560,10 @@ function renderAvatar(detail = {}) {
     <div
       style="
         position:relative;
-        flex:0 0 56px;
-        width:56px;
-        height:56px;
-        border-radius:16px;
+        flex:0 0 60px;
+        width:60px;
+        height:60px;
+        border-radius:18px;
         display:grid;
         place-items:center;
         background:${palette.bg};
@@ -988,134 +1681,110 @@ function renderPendingFiles() {
   return `
     <div style="display:grid; gap:8px;">
       ${files
-        .map((file, index) => `
-          <div
-            style="
-              display:flex;
-              justify-content:space-between;
-              align-items:center;
-              gap:12px;
-              padding:10px 12px;
-              border-radius:12px;
-              border:1px solid var(--border-soft);
-              background:var(--surface-glass);
-            "
-          >
-            <div style="display:grid; gap:4px; min-width:0;">
-              <strong
-                style="
-                  color:var(--text-strong);
-                  font-size:12px;
-                  line-height:1.35;
-                  word-break:break-word;
-                "
-              >
-                ${escapeHtml(file.name || `archivo_${index + 1}`)}
-              </strong>
-
-              <span
-                style="
-                  color:var(--text-dim);
-                  font-size:11px;
-                "
-              >
-                ${escapeHtml(
-                  [
-                    safeText(file.type, ""),
-                    formatBytes(file.size),
-                  ].filter(Boolean).join(" · ") || "Archivo preparado"
-                )}
-              </span>
-            </div>
-
-            <button
-              type="button"
-              data-modal-action="remove-pending-file"
-              data-file-index="${index}"
+        .map(
+          (file, index) => `
+            <div
               style="
-                min-height:32px;
-                padding:0 10px;
-                border-radius:10px;
+                display:flex;
+                justify-content:space-between;
+                align-items:center;
+                gap:12px;
+                padding:10px 12px;
+                border-radius:12px;
                 border:1px solid var(--border-soft);
-                background:transparent;
-                color:var(--text-dim);
-                font-size:12px;
-                font-weight:var(--weight-bold, 700);
-                cursor:pointer;
-                flex:0 0 auto;
+                background:var(--surface-glass);
               "
             >
-              Quitar
-            </button>
-          </div>
-        `)
+              <div style="display:grid; gap:4px; min-width:0;">
+                <strong
+                  style="
+                    color:var(--text-strong);
+                    font-size:12px;
+                    line-height:1.35;
+                    word-break:break-word;
+                  "
+                >
+                  ${escapeHtml(file.name || `archivo_${index + 1}`)}
+                </strong>
+
+                <span
+                  style="
+                    color:var(--text-dim);
+                    font-size:11px;
+                  "
+                >
+                  ${escapeHtml(
+                    [
+                      safeText(file.type, ""),
+                      formatBytes(file.size),
+                    ]
+                      .filter(Boolean)
+                      .join(" · ") || "Archivo preparado"
+                  )}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                data-modal-action="remove-pending-file"
+                data-file-index="${index}"
+                style="
+                  min-height:32px;
+                  padding:0 10px;
+                  border-radius:10px;
+                  border:1px solid var(--border-soft);
+                  background:transparent;
+                  color:var(--text-dim);
+                  font-size:12px;
+                  font-weight:var(--weight-bold, 700);
+                  cursor:pointer;
+                  flex:0 0 auto;
+                "
+              >
+                Quitar
+              </button>
+            </div>
+          `
+        )
         .join("")}
     </div>
   `;
 }
 
-function renderAttachmentActionButtons(file = {}) {
-  const href = safeText(file.url, "");
-  const hasLink = isAbsoluteUrl(href);
+function getAttachmentBusyMeta(file = {}) {
+  const attachmentId = safeText(file.id, "");
+  return {
+    attachmentId,
+    isOpening: Boolean(
+      attachmentId && modalState.openingAttachmentId === attachmentId
+    ),
+    isDownloading: Boolean(
+      attachmentId && modalState.downloadingAttachmentId === attachmentId
+    ),
+  };
+}
 
-  if (hasLink) {
-    return `
-      <div
+function renderInlineSpinner(label = "") {
+  return `
+    <span style="display:inline-flex; align-items:center; gap:8px;">
+      <span
+        aria-hidden="true"
         style="
-          display:flex;
-          gap:8px;
-          flex-wrap:wrap;
-          justify-content:flex-end;
-          flex:0 0 auto;
+          width:14px;
+          height:14px;
+          border-radius:999px;
+          border:2px solid color-mix(in srgb, currentColor 22%, transparent);
+          border-top-color:currentColor;
+          animation:incidenciasModalSpin .8s linear infinite;
         "
-      >
-        <a
-          href="${escapeHtml(href)}"
-          target="_blank"
-          rel="noopener noreferrer"
-          style="
-            min-height:34px;
-            padding:0 12px;
-            border-radius:10px;
-            border:1px solid var(--border-soft);
-            background:transparent;
-            color:var(--text-soft);
-            font-size:12px;
-            font-weight:var(--weight-bold, 700);
-            cursor:pointer;
-            display:inline-flex;
-            align-items:center;
-            text-decoration:none;
-          "
-        >
-          Visualizar
-        </a>
+      ></span>
+      ${escapeHtml(label)}
+    </span>
+  `;
+}
 
-        <a
-          href="${escapeHtml(href)}"
-          target="_blank"
-          rel="noopener noreferrer"
-          download="${escapeHtml(file.name || "archivo")}"
-          style="
-            min-height:34px;
-            padding:0 12px;
-            border-radius:10px;
-            border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft));
-            background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-            color:var(--text-strong);
-            font-size:12px;
-            font-weight:var(--weight-bold, 700);
-            cursor:pointer;
-            display:inline-flex;
-            align-items:center;
-            text-decoration:none;
-          "
-        >
-          Descargar
-        </a>
-      </div>
-    `;
-  }
+function renderAttachmentActionButtons(file = {}) {
+  const busy = getAttachmentBusyMeta(file);
 
   return `
     <div
@@ -1131,6 +1800,7 @@ function renderAttachmentActionButtons(file = {}) {
         type="button"
         data-modal-action="open-attachment"
         data-attachment-id="${escapeHtml(file.id)}"
+        ${busy.isOpening || modalState.isSubmitting ? "disabled" : ""}
         style="
           min-height:34px;
           padding:0 12px;
@@ -1140,16 +1810,18 @@ function renderAttachmentActionButtons(file = {}) {
           color:var(--text-soft);
           font-size:12px;
           font-weight:var(--weight-bold, 700);
-          cursor:pointer;
+          cursor:${busy.isOpening || modalState.isSubmitting ? "wait" : "pointer"};
+          opacity:${busy.isOpening ? ".82" : "1"};
         "
       >
-        Abrir
+        ${busy.isOpening ? renderInlineSpinner("Abriendo...") : "Visualizar"}
       </button>
 
       <button
         type="button"
         data-modal-action="download-attachment"
         data-attachment-id="${escapeHtml(file.id)}"
+        ${busy.isDownloading || modalState.isSubmitting ? "disabled" : ""}
         style="
           min-height:34px;
           padding:0 12px;
@@ -1159,10 +1831,11 @@ function renderAttachmentActionButtons(file = {}) {
           color:var(--text-strong);
           font-size:12px;
           font-weight:var(--weight-bold, 700);
-          cursor:pointer;
+          cursor:${busy.isDownloading || modalState.isSubmitting ? "wait" : "pointer"};
+          opacity:${busy.isDownloading ? ".82" : "1"};
         "
       >
-        Descargar
+        ${busy.isDownloading ? renderInlineSpinner("Bajando...") : "Descargar"}
       </button>
     </div>
   `;
@@ -1304,7 +1977,9 @@ function renderAttachments(detail = {}) {
                                   file.type,
                                   formatBytes(file.size),
                                   file.uploadedAt ? formatDate(file.uploadedAt) : "",
-                                ].filter(Boolean).join(" · ") || "Archivo adjunto"
+                                ]
+                                  .filter(Boolean)
+                                  .join(" · ") || "Archivo adjunto"
                               )}
                             </span>
                           </div>
@@ -1653,8 +2328,15 @@ function renderModalInner(detail = {}) {
 
   const attachments = getAttachments(item);
 
-  const statusRaw = safeText(first(item.status, item?.raw?.status, item?.raw?.estado), "open");
-  const priorityRaw = safeText(first(item.priority, item?.raw?.priority, item?.raw?.prioridad), "medium");
+  const statusRaw = safeText(
+    first(item.status, item?.raw?.status, item?.raw?.estado),
+    "open"
+  );
+
+  const priorityRaw = safeText(
+    first(item.priority, item?.raw?.priority, item?.raw?.prioridad),
+    "medium"
+  );
 
   const statusLabel = getStatusLabel(statusRaw);
   const priorityLabel = getPriorityLabel(priorityRaw);
@@ -1708,6 +2390,7 @@ function renderModalInner(detail = {}) {
           "
         >
           <div
+            class="incidencias-modal-hero"
             style="
               display:flex;
               gap:14px;
@@ -1717,7 +2400,15 @@ function renderModalInner(detail = {}) {
           >
             ${renderAvatar(item)}
 
-            <div style="display:grid; gap:8px; min-width:0;">
+            <div
+              style="
+                display:grid;
+                gap:6px;
+                min-width:0;
+                flex:1 1 auto;
+                padding-top:1px;
+              "
+            >
               <div
                 style="
                   display:flex;
@@ -1734,7 +2425,7 @@ function renderModalInner(detail = {}) {
                   style="
                     display:inline-flex;
                     align-items:center;
-                    min-height:26px;
+                    min-height:28px;
                     padding:0 9px;
                     border-radius:999px;
                     border:1px solid var(--border-soft);
@@ -1760,7 +2451,7 @@ function renderModalInner(detail = {}) {
                   style="
                     margin:0;
                     color:var(--text-strong);
-                    font-size:clamp(24px, 3.8vw, 34px);
+                    font-size:clamp(20px, 3vw, 28px);
                     line-height:1.02;
                     letter-spacing:-.04em;
                     word-break:break-word;
@@ -1773,7 +2464,7 @@ function renderModalInner(detail = {}) {
                   style="
                     color:var(--text-dim);
                     font-size:12px;
-                    line-height:1.45;
+                    line-height:1.42;
                   "
                 >
                   Última actualización ${escapeHtml(updatedAgo)}
@@ -1794,16 +2485,18 @@ function renderModalInner(detail = {}) {
               type="button"
               data-modal-close="true"
               aria-label="Cerrar modal"
+              ${modalState.isSubmitting ? "disabled" : ""}
               style="
                 width:42px;
                 height:42px;
                 border:none;
                 border-radius:14px;
-                cursor:pointer;
+                cursor:${modalState.isSubmitting ? "not-allowed" : "pointer"};
                 font-size:18px;
                 background:var(--surface-glass);
                 color:var(--text-strong);
                 border:1px solid var(--border-soft);
+                opacity:${modalState.isSubmitting ? ".72" : "1"};
               "
             >
               ✕
@@ -1938,6 +2631,12 @@ function renderModalInner(detail = {}) {
             }
           }
 
+          @media (max-width: 720px) {
+            .incidencias-modal-hero {
+              align-items:flex-start !important;
+            }
+          }
+
           @media (max-width: 640px) {
             .incidencias-modal-meta-grid {
               grid-template-columns: 1fr !important;
@@ -2013,7 +2712,7 @@ function attachEscHandler() {
   detachEscHandler();
 
   modalState.escHandler = (event) => {
-    if (event.key === "Escape") {
+    if (event.key === "Escape" && !modalState.isSubmitting) {
       closeIncidenciasModal();
     }
   };
@@ -2092,6 +2791,7 @@ export function openIncidenciasModal(detail = {}) {
   modalState.commentDraft = "";
   modalState.pendingFiles = [];
   clearFeedback();
+  clearAttachmentBusyState();
 
   renderModal();
   lockBody();
@@ -2108,6 +2808,10 @@ export function openIncidenciasModal(detail = {}) {
 }
 
 export function closeIncidenciasModal() {
+  if (modalState.isSubmitting) {
+    return false;
+  }
+
   const root = getRoot();
 
   modalState.isOpen = false;
@@ -2116,6 +2820,7 @@ export function closeIncidenciasModal() {
   modalState.commentDraft = "";
   modalState.pendingFiles = [];
   clearFeedback();
+  clearAttachmentBusyState();
 
   detachRootBindings();
 
@@ -2139,6 +2844,7 @@ export function updateIncidenciasModal(detail = {}) {
 
   modalState.detail = getDetail(detail);
   modalState.isSubmitting = false;
+  clearAttachmentBusyState();
 
   renderModal();
   attachRootBindings();
@@ -2190,32 +2896,48 @@ async function handleCopy(ticketId = "") {
 
 function mergeDetailWithOpenStatus(detail = {}, response = null) {
   const currentDetail = getDetail(detail);
-  const raw = safeObject(currentDetail.raw);
-  const responseObject = safeObject(response);
-
-  if (Object.keys(responseObject).length) {
-    return getDetail({
-      ...currentDetail,
-      ...responseObject,
-      status: "open",
-      raw: {
-        ...raw,
-        ...(safeObject(responseObject?.raw || responseObject)),
-        status: "open",
-        estado: "open",
-      },
-    });
-  }
+  const responseDetail = coerceDetailResponse(response, currentDetail);
 
   return getDetail({
     ...currentDetail,
+    ...responseDetail,
     status: "open",
     raw: {
-      ...raw,
+      ...safeObject(currentDetail.raw),
+      ...safeObject(responseDetail?.raw || responseDetail),
       status: "open",
       estado: "open",
     },
   });
+}
+
+async function refreshCurrentDetail(ticketId = "", fallback = {}) {
+  const id = safeText(ticketId, "");
+  if (!id) return getDetail(fallback);
+
+  try {
+    const external =
+      (await callExternalAction("getTicketDetail", {
+        ticketId: id,
+        detail: fallback,
+      })) ||
+      (await callExternalAction("openTicket", {
+        ticketId: id,
+        silent: true,
+        detail: fallback,
+      }));
+
+    if (external && typeof external === "object") {
+      return coerceDetailResponse(external, fallback);
+    }
+  } catch {}
+
+  try {
+    const internal = await fetchTicketDetailInternal(id);
+    return coerceDetailResponse(internal, fallback);
+  } catch {}
+
+  return getDetail(fallback);
 }
 
 async function handleSubmitUpdate(ticketId = "") {
@@ -2231,14 +2953,20 @@ async function handleSubmitUpdate(ticketId = "") {
   }
 
   if (!message && !files.length) {
-    setFeedback("Añade una actualización o selecciona al menos un archivo antes de continuar.", "error");
+    setFeedback(
+      "Añade una actualización o selecciona al menos un archivo antes de continuar.",
+      "error"
+    );
     renderModal();
     attachRootBindings();
     return false;
   }
 
   if (message && message.length < 4) {
-    setFeedback("Añade un poco más de detalle antes de enviar la actualización.", "error");
+    setFeedback(
+      "Añade un poco más de detalle antes de enviar la actualización.",
+      "error"
+    );
     renderModal();
     attachRootBindings();
     return false;
@@ -2248,60 +2976,51 @@ async function handleSubmitUpdate(ticketId = "") {
   clearFeedback();
   renderModal();
   attachRootBindings();
+  focusPanel();
 
   try {
     let nextDetail = getDetail(modalState.detail);
 
     if (files.length) {
-      const uploadResponse = await callExternalAction("uploadTicketAttachments", {
-        ticketId: id,
-        files,
-        detail: nextDetail,
-      });
+      let uploadResponse = null;
+
+      try {
+        uploadResponse = await callExternalAction("uploadTicketAttachments", {
+          ticketId: id,
+          files,
+          detail: nextDetail,
+        });
+      } catch (error) {
+        uploadResponse = await uploadTicketAttachmentsInternal({
+          ticketId: id,
+          files,
+        });
+      }
 
       safeEmit("incidencias:modal:upload", {
         ticketId: id,
         files,
       });
 
-      if (uploadResponse && typeof uploadResponse === "object") {
-        nextDetail = getDetail(uploadResponse);
-      } else {
-        const raw = safeObject(nextDetail.raw);
-
-        const localAttachments = files.map((file, index) => ({
-          id: `local-file-${Date.now()}-${index}`,
-          name: file.name,
-          size: file.size,
-          type: file.type,
-          uploadedAt: new Date().toISOString(),
-          url: "",
-          path: "",
-        }));
-
-        const nextAttachments = [
-          ...safeArray(first(nextDetail.attachments, raw.attachments)),
-          ...localAttachments,
-        ];
-
-        nextDetail = getDetail({
-          ...nextDetail,
-          attachments: nextAttachments,
-          raw: {
-            ...raw,
-            attachments: nextAttachments,
-          },
-        });
-      }
+      nextDetail = coerceDetailResponse(uploadResponse, nextDetail);
     }
 
     if (message) {
-      const commentResponse = await callExternalAction("commentTicket", {
-        ticketId: id,
-        message,
-        detail: nextDetail,
-        status: "open",
-      });
+      let commentResponse = null;
+
+      try {
+        commentResponse = await callExternalAction("commentTicket", {
+          ticketId: id,
+          message,
+          detail: nextDetail,
+          status: "open",
+        });
+      } catch (error) {
+        commentResponse = await commentTicketInternal({
+          ticketId: id,
+          message,
+        });
+      }
 
       safeEmit("incidencias:modal:comment", {
         ticketId: id,
@@ -2309,63 +3028,51 @@ async function handleSubmitUpdate(ticketId = "") {
         status: "open",
       });
 
-      if (commentResponse && typeof commentResponse === "object") {
-        nextDetail = mergeDetailWithOpenStatus(nextDetail, commentResponse);
-      } else {
-        const currentDetail = getDetail(nextDetail);
-        const raw = safeObject(currentDetail.raw);
-
-        const nextComments = [
-          {
-            id: `local-${Date.now()}`,
-            message,
-            author: "Tú",
-            createdAt: new Date().toISOString(),
-          },
-          ...safeArray(first(currentDetail.comments, raw.comments)),
-        ];
-
-        nextDetail = getDetail({
-          ...currentDetail,
-          status: "open",
-          comments: nextComments,
-          raw: {
-            ...raw,
-            status: "open",
-            estado: "open",
-            comments: nextComments,
-          },
-        });
-      }
+      nextDetail = mergeDetailWithOpenStatus(nextDetail, commentResponse);
     } else {
+      try {
+        await callExternalAction("reopenTicket", {
+          ticketId: id,
+          detail: nextDetail,
+          status: "open",
+        });
+      } catch {
+        try {
+          await reopenTicketInternal(id);
+        } catch {}
+      }
+
       nextDetail = mergeDetailWithOpenStatus(nextDetail, null);
     }
+
+    nextDetail = await refreshCurrentDetail(id, nextDetail);
 
     modalState.detail = nextDetail;
     modalState.commentDraft = "";
     modalState.pendingFiles = [];
 
     if (message && files.length) {
-      setFeedback("La actualización y los documentos se han enviado correctamente. La incidencia vuelve a abierta.", "success");
+      setFeedback(
+        "La actualización y los documentos se han enviado correctamente. La incidencia vuelve a abierta.",
+        "success"
+      );
     } else if (message) {
-      setFeedback("Tu actualización se ha añadido correctamente y la incidencia vuelve a abierta.", "success");
+      setFeedback(
+        "Tu actualización se ha añadido correctamente y la incidencia vuelve a abierta.",
+        "success"
+      );
     } else {
-      setFeedback("Los documentos se han añadido correctamente y la incidencia permanece abierta.", "success");
+      setFeedback(
+        "Los documentos se han añadido correctamente y la incidencia permanece abierta.",
+        "success"
+      );
     }
 
     showToast("Incidencia actualizada", "success");
     return true;
   } catch (error) {
     setFeedback(
-      safeText(
-        first(
-          error?.message,
-          error?.response?.message,
-          error?.data?.message,
-          "No se pudo actualizar la incidencia."
-        ),
-        "No se pudo actualizar la incidencia."
-      ),
+      safeErrorMessage(error, "No se pudo actualizar la incidencia."),
       "error"
     );
 
@@ -2381,7 +3088,51 @@ async function handleSubmitUpdate(ticketId = "") {
 
 function getAttachmentById(attachmentId = "") {
   const files = getAttachments(modalState.detail);
-  return files.find((file) => safeText(file.id, "") === safeText(attachmentId, ""));
+  return files.find(
+    (file) => safeText(file.id, "") === safeText(attachmentId, "")
+  );
+}
+
+async function tryOpenOrDownloadAttachmentFromResponse(response, attachment, mode = "open") {
+  const blobPayload = await resolveAttachmentResponseAsBlob(
+    response,
+    safeText(attachment?.name, "archivo")
+  );
+
+  if (blobPayload?.blob instanceof Blob) {
+    if (mode === "download") {
+      downloadBlob(blobPayload.blob, blobPayload.filename);
+    } else {
+      openBlob(blobPayload.blob);
+    }
+
+    return true;
+  }
+
+  const obj = safeObject(response);
+  const directUrl = safeText(
+    first(
+      obj.url,
+      obj.blobUrl,
+      obj.downloadUrl,
+      obj.viewUrl,
+      obj.href,
+      obj.signedUrl,
+      obj.publicUrl
+    ),
+    ""
+  );
+
+  if (directUrl) {
+    if (mode === "download") {
+      downloadUrlDirect(directUrl, attachment?.name || "archivo");
+    } else {
+      openUrlDirect(directUrl);
+    }
+    return true;
+  }
+
+  return false;
 }
 
 async function handleAttachmentAction(attachmentId = "", mode = "open") {
@@ -2396,70 +3147,137 @@ async function handleAttachmentAction(attachmentId = "", mode = "open") {
     return false;
   }
 
-  const resolvedUrl = safeText(attachment.url, "");
-
-  if (resolvedUrl && isAbsoluteUrl(resolvedUrl)) {
-    try {
-      window.open(resolvedUrl, "_blank", "noopener,noreferrer");
-      showToast(
-        mode === "download" ? "Descarga iniciada." : "Abriendo documento.",
-        "success"
-      );
-      return true;
-    } catch {}
+  if (mode === "download") {
+    modalState.downloadingAttachmentId = safeText(attachment.id, "");
+  } else {
+    modalState.openingAttachmentId = safeText(attachment.id, "");
   }
 
+  renderModal();
+  attachRootBindings();
+
   try {
-    const response = await callExternalAction(
-      mode === "download" ? "downloadTicketAttachment" : "openTicketAttachment",
-      {
+    const externalActionName =
+      mode === "download" ? "downloadTicketAttachment" : "openTicketAttachment";
+
+    try {
+      const externalResponse = await callExternalAction(externalActionName, {
         ticketId,
         attachment,
         detail: modalState.detail,
-      }
-    );
+        mode,
+      });
 
-    if (typeof response === "string" && isAbsoluteUrl(response)) {
-      window.open(response, "_blank", "noopener,noreferrer");
-      showToast(
-        mode === "download" ? "Descarga iniciada." : "Abriendo documento.",
-        "success"
-      );
-      return true;
-    }
+      if (
+        externalResponse &&
+        (await tryOpenOrDownloadAttachmentFromResponse(
+          externalResponse,
+          attachment,
+          mode
+        ))
+      ) {
+        safeEmit("incidencias:modal:attachment", {
+          ticketId,
+          attachment,
+          mode,
+          source: "external",
+        });
 
-    if (response && typeof response === "object") {
-      const responseUrl = safeText(
-        first(
-          response.blobUrl,
-          response.url,
-          response.downloadUrl,
-          response.viewUrl,
-          response.href
-        ),
-        ""
-      );
-
-      if (isAbsoluteUrl(responseUrl)) {
-        window.open(responseUrl, "_blank", "noopener,noreferrer");
         showToast(
-          mode === "download" ? "Descarga iniciada." : "Abriendo documento.",
+          mode === "download"
+            ? "Descarga iniciada."
+            : "Abriendo documento.",
           "success"
         );
+
         return true;
       }
+    } catch (externalError) {
+      /* seguimos con fallback interno */
     }
+
+    const candidates = buildAttachmentCandidates(
+      modalState.detail,
+      attachment,
+      mode
+    );
+
+    if (!candidates.length) {
+      throw new Error(
+        "Este adjunto no tiene URL resoluble todavía. Falta blobUrl / signedUrl / path / key / endpoint de descarga."
+      );
+    }
+
+    let lastError = null;
+
+    for (const candidate of candidates) {
+      try {
+        const shouldFetchBlob =
+          Boolean(getAuthToken()) && looksLikeProtectedApiUrl(candidate);
+
+        if (shouldFetchBlob) {
+          const blobPayload = await fetchBlobFromUrl(
+            candidate,
+            safeText(attachment.name, "archivo")
+          );
+
+          if (mode === "download") {
+            downloadBlob(blobPayload.blob, blobPayload.filename);
+          } else {
+            openBlob(blobPayload.blob);
+          }
+
+          safeEmit("incidencias:modal:attachment", {
+            ticketId,
+            attachment,
+            mode,
+            source: "fetch-blob",
+            url: candidate,
+          });
+
+          showToast(
+            mode === "download"
+              ? "Descarga iniciada."
+              : "Abriendo documento.",
+            "success"
+          );
+
+          return true;
+        }
+
+        if (mode === "download") {
+          downloadUrlDirect(candidate, attachment.name || "archivo");
+        } else {
+          openUrlDirect(candidate);
+        }
+
+        safeEmit("incidencias:modal:attachment", {
+          ticketId,
+          attachment,
+          mode,
+          source: "direct-url",
+          url: candidate,
+        });
+
+        showToast(
+          mode === "download"
+            ? "Descarga iniciada."
+            : "Abriendo documento.",
+          "success"
+        );
+
+        return true;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw lastError || new Error("No se pudo resolver el adjunto.");
   } catch (error) {
     setFeedback(
-      safeText(
-        first(
-          error?.message,
-          error?.response?.message,
-          error?.data?.message,
-          "No se pudo abrir el adjunto."
-        ),
-        "No se pudo abrir el adjunto."
-      ),
+      safeErrorMessage(error, mode === "download"
+        ? "No se pudo descargar el adjunto."
+        : "No se pudo abrir el adjunto."),
       "error"
     );
 
@@ -2470,27 +3288,13 @@ async function handleAttachmentAction(attachmentId = "", mode = "open") {
       "error"
     );
 
+    return false;
+  } finally {
+    clearAttachmentBusyState();
     renderModal();
     attachRootBindings();
-    return false;
+    focusPanel();
   }
-
-  safeEmit("incidencias:modal:attachment", {
-    ticketId,
-    attachment,
-    mode,
-  });
-
-  setFeedback(
-    "Este adjunto todavía no tiene blob URL resuelta. Revisa blobUrl / url / path / blobName en el payload o el bridge externo.",
-    "info"
-  );
-
-  showToast("Este adjunto todavía no tiene enlace resuelto.", "info");
-
-  renderModal();
-  attachRootBindings();
-  return false;
 }
 
 /* =========================================================
@@ -2535,7 +3339,9 @@ function attachRootBindings() {
     const closeBtn = event.target.closest("[data-modal-close='true']");
     if (closeBtn) {
       event.preventDefault();
-      closeIncidenciasModal();
+      if (!modalState.isSubmitting) {
+        closeIncidenciasModal();
+      }
       return;
     }
 
@@ -2556,14 +3362,20 @@ function attachRootBindings() {
     const openAttachmentBtn = event.target.closest('[data-modal-action="open-attachment"]');
     if (openAttachmentBtn) {
       event.preventDefault();
-      await handleAttachmentAction(openAttachmentBtn.dataset.attachmentId || "", "open");
+      await handleAttachmentAction(
+        openAttachmentBtn.dataset.attachmentId || "",
+        "open"
+      );
       return;
     }
 
     const downloadAttachmentBtn = event.target.closest('[data-modal-action="download-attachment"]');
     if (downloadAttachmentBtn) {
       event.preventDefault();
-      await handleAttachmentAction(downloadAttachmentBtn.dataset.attachmentId || "", "download");
+      await handleAttachmentAction(
+        downloadAttachmentBtn.dataset.attachmentId || "",
+        "download"
+      );
       return;
     }
 
@@ -2574,7 +3386,9 @@ function attachRootBindings() {
       const index = safeNumber(removePendingBtn.dataset.fileIndex, -1);
 
       if (index >= 0) {
-        modalState.pendingFiles = safeArray(modalState.pendingFiles).filter((_, i) => i !== index);
+        modalState.pendingFiles = safeArray(modalState.pendingFiles).filter(
+          (_, i) => i !== index
+        );
         renderModal();
         attachRootBindings();
         focusPanel();
@@ -2586,7 +3400,7 @@ function attachRootBindings() {
     const overlay = event.target.closest("[data-incidencias-modal-overlay='true']");
     const panel = event.target.closest("[data-incidencias-modal-panel='true']");
 
-    if (overlay && !panel && event.target === overlay) {
+    if (overlay && !panel && event.target === overlay && !modalState.isSubmitting) {
       closeIncidenciasModal();
     }
   };
@@ -2677,7 +3491,10 @@ function handleCommentSuccess(event) {
     },
   });
 
-  setFeedback("Tu actualización se ha registrado correctamente y la incidencia vuelve a abierta.", "success");
+  setFeedback(
+    "Tu actualización se ha registrado correctamente y la incidencia vuelve a abierta.",
+    "success"
+  );
   renderModal();
   attachRootBindings();
   focusPanel();

@@ -733,16 +733,6 @@ export function loadPreferences({
      estado natural por defecto = abierto.
      Evitamos arrancar colapsado por residuos legacy de storage. */
 
-  const hasCollapsedValue =
-    savedSidebarCollapsedRaw ===
-      true ||
-    savedSidebarCollapsedRaw ===
-      false ||
-    savedSidebarCollapsedRaw ===
-      "true" ||
-    savedSidebarCollapsedRaw ===
-      "false";
-
   state.theme =
     savedTheme ===
     "light"

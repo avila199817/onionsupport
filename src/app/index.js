@@ -261,7 +261,15 @@ export const App = (() => {
       return api;
     } catch (e) {
       hideBootLoader();
-      renderBootError({ AppCore, error: e });
+      renderBootError({
+        AppCore,
+        Auth,
+        Toast,
+        error: e,
+        getViewContainer,
+        setShellVisibility,
+        hideLoader,
+      });
       return api;
     }
   }

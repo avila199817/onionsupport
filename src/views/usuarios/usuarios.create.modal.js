@@ -14,6 +14,7 @@ import { usuariosState } from "./usuarios.state.js";
 
 const MODAL_ID = "usuarios-create-modal-root";
 const PANEL_ID = "usuarios-create-modal-panel";
+const USERS_CREATE_ENDPOINT = "/api/users/create";
 
 const CUSTOMER_TYPE_OPTIONS = Object.freeze([
   { value: "particular", label: "Particular" },
@@ -378,7 +379,7 @@ function buildPayload(form = {}) {
     email: safeText(current.email, "").toLowerCase(),
     phone: sanitizePhone(current.phone),
     role: "user",
-    active: true,
+    active: false,
     tipo: normalizeCustomerType(current.customerType),
     nif: safeText(current.nif, "").toUpperCase(),
     privacyMode: false,
@@ -402,7 +403,7 @@ async function createViaAppCoreRequest(payload = null) {
     throw new Error("APP_CORE_REQUEST_UNAVAILABLE");
   }
 
-  return AppCore.request("/api/users", {
+  return AppCore.request(USERS_CREATE_ENDPOINT, {
     method: "POST",
     body: payload,
   });
@@ -416,11 +417,11 @@ async function createViaHttpModule(payload = null) {
   }
 
   if (typeof Http.post === "function") {
-    return Http.post("/api/users", payload);
+    return Http.post(USERS_CREATE_ENDPOINT, payload);
   }
 
   if (typeof Http.request === "function") {
-    return Http.request("/api/users", {
+    return Http.request(USERS_CREATE_ENDPOINT, {
       method: "POST",
       body: payload,
     });
@@ -432,7 +433,7 @@ async function createViaHttpModule(payload = null) {
 async function createViaFetch(payload = null) {
   const apiBase = getApiBase();
   const token = getAuthToken();
-  const url = `${apiBase || ""}/api/users`;
+  const url = `${apiBase || ""}${USERS_CREATE_ENDPOINT}`;
 
   const response = await fetch(url, {
     method: "POST",

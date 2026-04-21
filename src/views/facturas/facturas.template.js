@@ -1,5 +1,5 @@
 /* =========================================================
-   Onion SPA - Facturas Table Template
+   Onion SPA - Facturas Template
    Archivo: src/views/facturas/facturas.template.js
 
    FINAL PRODUCTION TEMPLATE · CLON 1:1 DE INCIDENCIAS · FACTURAS MODE
@@ -7,11 +7,11 @@
    RESPONSABILIDADES:
    - render del hero/header de facturas
    - render de tabla productiva con paginación real
-   - compatibilidad con facturasView.js
-   - estado loading visual en "Detalle"
-   - estado loading visual en "Descargar"
-   - estado loading visual en "Ver PDF"
-   - estado loading visual en "Enviar"
+   - compatibilidad directa con facturasView.js
+   - exportar renderHeader
+   - exportar renderCards
+   - exportar renderLoadingState
+   - exportar renderErrorState
    - evitar mostrar null en cliente
    - quitar columna Estado
    - quitar columna Actualización
@@ -70,10 +70,6 @@ function normalizeWhitespace(value = "") {
   return safeText(value, "").replace(/\s+/g, " ").trim();
 }
 
-function safeLower(value, fallback = "") {
-  return safeText(value, fallback).toLowerCase();
-}
-
 function formatMoney(value = 0, currency = "EUR") {
   const amount = Number(value);
 
@@ -92,6 +88,23 @@ function formatMoney(value = 0, currency = "EUR") {
   }
 }
 
+function formatDate(value = null) {
+  if (!value) return "—";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+
+  try {
+    return new Intl.DateTimeFormat("es-ES", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }).format(date);
+  } catch {
+    return "—";
+  }
+}
+
 function formatDateTime(value = null) {
   if (!value) return "—";
 
@@ -105,23 +118,6 @@ function formatDateTime(value = null) {
       year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
-    }).format(date);
-  } catch {
-    return "—";
-  }
-}
-
-function formatDate(value = null) {
-  if (!value) return "—";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-
-  try {
-    return new Intl.DateTimeFormat("es-ES", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
     }).format(date);
   } catch {
     return "—";
@@ -158,6 +154,10 @@ function formatRelativeDate(value = null) {
 
   return formatDateTime(value);
 }
+
+/* =========================================================
+   DOMAIN HELPERS
+========================================================= */
 
 function getFacturaId(item = {}) {
   return safeText(
@@ -433,55 +433,25 @@ function computeStats(items = []) {
   };
 }
 
-function getPagination(items = [], state = {}) {
-  const allItems = safeArray(items);
+/* =========================================================
+   STATE HELPERS
+========================================================= */
+
+function resolveBusyMeta(item = {}, state = {}) {
   const runtime = safeObject(state);
+  const facturaId = getFacturaId(item);
 
-  const pageSize = Math.max(
-    1,
-    safeNumber(first(runtime.pageSize, runtime.limit, 10), 10)
-  );
-
-  const reportedTotal = Math.max(
-    allItems.length,
-    safeNumber(
-      first(
-        runtime.totalCount,
-        runtime.remoteCount,
-        runtime.total,
-        allItems.length
-      ),
-      allItems.length
-    )
-  );
-
-  const totalPages = Math.max(
-    1,
-    Math.ceil((reportedTotal || 1) / pageSize)
-  );
-
-  const currentPage = Math.min(
-    Math.max(1, safeNumber(first(runtime.page, runtime.currentPage, 1), 1)),
-    totalPages
-  );
-
-  const startIndex = (currentPage - 1) * pageSize;
-  const pageItems = allItems.slice(startIndex, startIndex + pageSize);
-
-  const rangeStart = reportedTotal ? startIndex + 1 : 0;
-  const rangeEnd = reportedTotal
-    ? Math.min(startIndex + pageItems.length, reportedTotal)
-    : 0;
+  const openingFacturaId = safeText(runtime.openingFacturaId, "");
+  const viewingFacturaId = safeText(runtime.viewingFacturaId, "");
+  const downloadingFacturaId = safeText(runtime.downloadingFacturaId, "");
+  const sendingFacturaId = safeText(runtime.sendingFacturaId, "");
 
   return {
-    allItems,
-    pageItems,
-    pageSize,
-    currentPage,
-    totalPages,
-    totalCount: reportedTotal,
-    rangeStart,
-    rangeEnd,
+    facturaId,
+    isOpening: openingFacturaId === facturaId,
+    isViewingPdf: viewingFacturaId === facturaId,
+    isDownloading: downloadingFacturaId === facturaId,
+    isSending: sendingFacturaId === facturaId,
   };
 }
 
@@ -560,28 +530,10 @@ function renderIncidenciaLink(item = {}) {
   `;
 }
 
-function resolveBusyMeta(item = {}, state = {}) {
-  const runtime = safeObject(state);
-  const facturaId = getFacturaId(item);
-
-  const openingFacturaId = safeText(runtime.openingFacturaId, "");
-  const viewingFacturaId = safeText(runtime.viewingFacturaId, "");
-  const downloadingFacturaId = safeText(runtime.downloadingFacturaId, "");
-  const sendingFacturaId = safeText(runtime.sendingFacturaId, "");
-
-  return {
-    facturaId,
-    isOpening: openingFacturaId === facturaId,
-    isViewingPdf: viewingFacturaId === facturaId,
-    isDownloading: downloadingFacturaId === facturaId,
-    isSending: sendingFacturaId === facturaId,
-  };
-}
-
 function renderRow(item = {}, state = {}) {
   const busy = resolveBusyMeta(item, state);
 
-  const facturaId = getFacturaId(item);
+  const facturaId = busy.facturaId;
   const numero = getFacturaNumero(item);
   const clientName = getClientName(item);
   const clientEmail = getClientEmail(item);
@@ -698,17 +650,6 @@ function renderRow(item = {}, state = {}) {
   `;
 }
 
-function renderEmptyState() {
-  return `
-    <div class="facturas-empty">
-      <h3 class="facturas-empty-title">No hay facturas para mostrar</h3>
-      <p class="facturas-empty-text">
-        Cuando haya documentos registrados aparecerán aquí.
-      </p>
-    </div>
-  `;
-}
-
 function renderTableLoading(rows = 5) {
   return `
     <div class="facturas-table-loading" aria-hidden="true">
@@ -726,7 +667,6 @@ function renderTableLoading(rows = 5) {
               <div class="facturas-skeleton facturas-skeleton--date"></div>
               <div class="facturas-skeleton facturas-skeleton--pill"></div>
               <div class="facturas-skeleton facturas-skeleton--pill"></div>
-              <div class="facturas-skeleton facturas-skeleton--pill"></div>
               <div class="facturas-skeleton facturas-skeleton--actions"></div>
             </div>
           `
@@ -736,14 +676,20 @@ function renderTableLoading(rows = 5) {
   `;
 }
 
+function renderEmptyState() {
+  return `
+    <div class="facturas-empty">
+      <h3 class="facturas-empty-title">No hay facturas para mostrar</h3>
+      <p class="facturas-empty-text">
+        Cuando haya documentos registrados aparecerán aquí.
+      </p>
+    </div>
+  `;
+}
+
 function renderStyles() {
   return `
     <style>
-      .facturas-view-root{
-        display:grid;
-        gap:18px;
-      }
-
       .facturas-hero{
         position:relative;
         overflow:hidden;
@@ -973,43 +919,6 @@ function renderStyles() {
         color:var(--text-dim, #7b8494);
       }
 
-      .facturas-pagination{
-        display:flex;
-        gap:8px;
-        flex-wrap:wrap;
-      }
-
-      .facturas-pagination-btn{
-        min-height:38px;
-        padding:0 14px;
-        border-radius:13px;
-        border:1px solid rgba(15,23,42,.06);
-        background:rgba(255,255,255,.66);
-        color:#273142;
-        font-size:12px;
-        font-weight:680;
-        cursor:pointer;
-        display:inline-flex;
-        align-items:center;
-        justify-content:center;
-        text-decoration:none;
-        transition:
-          background .16s ease,
-          border-color .16s ease,
-          opacity .16s ease;
-      }
-
-      .facturas-pagination-btn:hover{
-        background:rgba(255,255,255,.9);
-        border-color:rgba(15,23,42,.10);
-      }
-
-      .facturas-pagination-btn[disabled],
-      .facturas-pagination-btn[aria-disabled="true"]{
-        opacity:.48;
-        cursor:not-allowed;
-      }
-
       .facturas-table-wrap{
         position:relative;
       }
@@ -1031,7 +940,7 @@ function renderStyles() {
         width:100%;
         border-collapse:separate;
         border-spacing:0;
-        min-width:1260px;
+        min-width:1220px;
       }
 
       .facturas-table thead th{
@@ -1352,7 +1261,7 @@ function renderStyles() {
 
       .facturas-table-loading-row{
         display:grid;
-        grid-template-columns:44px minmax(220px, 1.6fr) 120px 140px 120px 90px 90px 260px;
+        grid-template-columns:44px minmax(220px, 1.6fr) 120px 140px 120px 90px 240px;
         gap:12px;
         align-items:center;
       }
@@ -1415,7 +1324,7 @@ function renderStyles() {
       }
 
       .facturas-skeleton--actions{
-        width:240px;
+        width:220px;
         height:34px;
       }
 
@@ -1438,6 +1347,32 @@ function renderStyles() {
         margin:0;
         font-size:13px;
         line-height:1.55;
+        color:var(--text-dim, #6b7280);
+      }
+
+      .facturas-error{
+        display:grid;
+        justify-items:start;
+        gap:10px;
+        padding:24px 22px;
+        border-radius:20px;
+        border:1px solid rgba(255,107,107,.22);
+        background:
+          linear-gradient(180deg, rgba(255,107,107,.06), rgba(255,255,255,.5)),
+          rgba(255,255,255,.7);
+      }
+
+      .facturas-error-title{
+        margin:0;
+        font-size:18px;
+        font-weight:760;
+        color:var(--text-strong, #111827);
+      }
+
+      .facturas-error-text{
+        margin:0;
+        font-size:13px;
+        line-height:1.6;
         color:var(--text-dim, #6b7280);
       }
 
@@ -1465,12 +1400,6 @@ function renderStyles() {
           rgba(255,255,255,.56);
       }
 
-      @media (max-width: 1240px){
-        .facturas-page-title{
-          font-size:clamp(24px, 2.4vw, 36px);
-        }
-      }
-
       @media (max-width: 1180px){
         .facturas-hero{
           padding:20px;
@@ -1494,10 +1423,6 @@ function renderStyles() {
       }
 
       @media (max-width: 760px){
-        .facturas-view-root{
-          gap:16px;
-        }
-
         .facturas-hero{
           padding:18px 16px;
           border-radius:20px;
@@ -1510,10 +1435,6 @@ function renderStyles() {
         .facturas-history-head{
           grid-template-columns:1fr;
           padding:14px 14px 12px;
-        }
-
-        .facturas-pagination{
-          justify-content:flex-start;
         }
 
         .facturas-stats{
@@ -1538,41 +1459,23 @@ function renderStyles() {
    HEADER
 ========================================================= */
 
-export function renderHeader(input = {}) {
-  const data = safeObject(input);
-  const items = safeArray(
-    first(data.items, data.rows, data.facturas, data.invoices)
-  );
-  const state = safeObject(data.state);
+export function renderHeader({ items = [], state = {} } = {}) {
+  const rows = safeArray(items);
+  const runtime = safeObject(state);
 
-  const stats = computeStats(items);
+  const stats = computeStats(rows);
 
   const updatedAt = first(
-    state.lastSyncAt,
-    data.lastUpdatedAt,
-    data.updatedAt,
-    ...items.map((item) => getUpdatedAt(item))
+    runtime.lastSyncAt,
+    ...rows.map((item) => getUpdatedAt(item))
   );
 
   const remoteCount = safeNumber(
-    first(state.remoteCount, state.totalCount, items.length),
-    items.length
+    first(runtime.remoteCount, runtime.totalCount, rows.length),
+    rows.length
   );
 
-  const title = safeText(
-    first(data.title, "Centro de control de facturas"),
-    "Centro de control de facturas"
-  );
-
-  const subtitle = safeText(
-    first(
-      data.subtitle,
-      "Gestiona emisión, seguimiento, consulta y descarga de documentos fiscales desde una vista clara, premium y conectada con sus incidencias relacionadas."
-    ),
-    ""
-  );
-
-  const refreshing = Boolean(state.refreshing);
+  const refreshing = Boolean(runtime.refreshing);
 
   return `
     ${renderStyles()}
@@ -1580,8 +1483,10 @@ export function renderHeader(input = {}) {
     <section class="facturas-hero">
       <div class="facturas-hero-top">
         <div class="facturas-hero-copy">
-          <h1 class="facturas-page-title">${escapeHtml(title)}</h1>
-          <p class="facturas-page-subtitle">${escapeHtml(subtitle)}</p>
+          <h1 class="facturas-page-title">Centro de control de facturas</h1>
+          <p class="facturas-page-subtitle">
+            Gestiona emisión, seguimiento, consulta y descarga de documentos fiscales desde una vista clara, premium y conectada con sus incidencias relacionadas.
+          </p>
         </div>
 
         <div class="facturas-hero-actions">
@@ -1652,117 +1557,107 @@ export function renderHeader(input = {}) {
 }
 
 /* =========================================================
-   TABLE
+   LOADING / ERROR
 ========================================================= */
 
-export function renderTable(input = {}) {
-  const data = safeObject(input);
-  const items = safeArray(
-    first(data.items, data.rows, data.facturas, data.invoices)
-  );
-  const state = safeObject(data.state);
-
-  const pagination = getPagination(items, state);
-  const loading = Boolean(state.loading);
-  const refreshing = Boolean(state.refreshing);
-
+export function renderLoadingState() {
   return `
+    ${renderStyles()}
+
     <section class="facturas-history">
-      <div class="facturas-history-head">
-        <div class="facturas-history-copy">
-          <h2 class="facturas-history-title">Historial de facturas</h2>
-          <p class="facturas-history-subtitle">
-            ${escapeHtml(`Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · página ${pagination.currentPage} de ${pagination.totalPages}`)}
-          </p>
-        </div>
+      ${renderTableLoading(6)}
+    </section>
+  `;
+}
 
-        <div class="facturas-pagination">
-          <button
-            type="button"
-            class="facturas-pagination-btn"
-            data-action="prev-page"
-            ${pagination.currentPage <= 1 || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
-          >
-            Anterior
-          </button>
+export function renderErrorState(message = "No se pudieron cargar las facturas.") {
+  return `
+    ${renderStyles()}
 
-          <button
-            type="button"
-            class="facturas-pagination-btn"
-            data-action="next-page"
-            ${pagination.currentPage >= pagination.totalPages || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
-          >
-            Siguiente
-          </button>
-        </div>
-      </div>
-
-      ${
-        loading && !pagination.pageItems.length
-          ? renderTableLoading(Math.max(3, safeNumber(first(state.pageSize, 10), 10)))
-          : `
-            <div class="facturas-table-wrap${refreshing ? " is-refreshing" : ""}">
-              ${
-                refreshing
-                  ? renderTableLoading(Math.min(4, Math.max(3, pagination.pageItems.length || 3)))
-                  : ""
-              }
-
-              ${
-                pagination.pageItems.length
-                  ? `
-                    <div class="facturas-table-shell">
-                      <table class="facturas-table" role="table" aria-label="Listado de facturas">
-                        <colgroup>
-                          <col style="width:34%;">
-                          <col style="width:12%;">
-                          <col style="width:14%;">
-                          <col style="width:12%;">
-                          <col style="width:10%;">
-                          <col style="width:8%;">
-                          <col style="width:10%;">
-                        </colgroup>
-
-                        <thead>
-                          <tr>
-                            <th>Factura / cliente</th>
-                            <th>Pago</th>
-                            <th>Fecha de emisión</th>
-                            <th>Total</th>
-                            <th>Incidencia</th>
-                            <th>PDF</th>
-                            <th>Acciones</th>
-                          </tr>
-                        </thead>
-
-                        <tbody>
-                          ${pagination.pageItems.map((item) => renderRow(item, state)).join("")}
-                        </tbody>
-                      </table>
-                    </div>
-                  `
-                  : renderEmptyState()
-              }
-            </div>
-          `
-      }
+    <section class="facturas-error">
+      <h3 class="facturas-error-title">No se pudo renderizar la vista de facturas</h3>
+      <p class="facturas-error-text">${escapeHtml(safeText(message, "Error desconocido al cargar la vista."))}</p>
     </section>
   `;
 }
 
 /* =========================================================
-   FULL TEMPLATE
+   MAIN TABLE
 ========================================================= */
 
-export function renderFacturasTemplate(input = {}) {
-  const data = safeObject(input);
+export function renderCards({ items = [], state = {} } = {}) {
+  const rows = safeArray(items);
+  const runtime = safeObject(state);
+  const refreshing = Boolean(runtime.refreshing);
+  const total = rows.length;
+
+  if (!rows.length) {
+    return `
+      ${renderStyles()}
+
+      <section class="facturas-history">
+        ${renderEmptyState()}
+      </section>
+    `;
+  }
 
   return `
-    <section class="facturas-view-root">
-      ${renderHeader(data)}
-      ${renderTable(data)}
+    ${renderStyles()}
+
+    <section class="facturas-history">
+      <div class="facturas-history-head">
+        <div class="facturas-history-copy">
+          <h2 class="facturas-history-title">Historial de facturas</h2>
+          <p class="facturas-history-subtitle">
+            ${escapeHtml(`Mostrando ${total} registro${total === 1 ? "" : "s"} en pantalla`)}
+          </p>
+        </div>
+      </div>
+
+      <div class="facturas-table-wrap${refreshing ? " is-refreshing" : ""}">
+        ${
+          refreshing
+            ? renderTableLoading(Math.min(4, Math.max(3, rows.length || 3)))
+            : ""
+        }
+
+        <div class="facturas-table-shell">
+          <table class="facturas-table" role="table" aria-label="Listado de facturas">
+            <colgroup>
+              <col style="width:34%;">
+              <col style="width:12%;">
+              <col style="width:14%;">
+              <col style="width:12%;">
+              <col style="width:10%;">
+              <col style="width:8%;">
+              <col style="width:10%;">
+            </colgroup>
+
+            <thead>
+              <tr>
+                <th>Factura / cliente</th>
+                <th>Pago</th>
+                <th>Fecha de emisión</th>
+                <th>Total</th>
+                <th>Incidencia</th>
+                <th>PDF</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              ${rows.map((item) => renderRow(item, runtime)).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </section>
   `;
 }
 
-export default renderFacturasTemplate;
+export default {
+  renderHeader,
+  renderCards,
+  renderLoadingState,
+  renderErrorState,
+};

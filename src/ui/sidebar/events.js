@@ -2,7 +2,12 @@
    Onion SPA - Sidebar Events
    Archivo: src/ui/sidebar/events.js
 
-   FINAL FIXED SYSTEM · NO AUTO COLLAPSE DESKTOP
+   PRO HARDENED VERSION
+   FIX:
+   - desktop sin cierre/apertura fantasma
+   - freeze temporal de transiciones del shell en cambios de ruta
+   - snapshot y restore robustos
+   - sin route lock frágil
 ========================================================= */
 
 import { getElements } from "./dom.js";
@@ -10,6 +15,8 @@ import { getElements } from "./dom.js";
 /* ======================================================
    HELPERS
 ====================================================== */
+
+const transitionCache = new WeakMap();
 
 function safeWindowTimeout(fn, ms = 0) {
   try {
@@ -19,12 +26,59 @@ function safeWindowTimeout(fn, ms = 0) {
   }
 }
 
+function safeRaf(fn) {
+  try {
+    window.requestAnimationFrame(fn);
+  } catch {
+    safeWindowTimeout(fn, 0);
+  }
+}
+
 function resolveElements(AppCore, resolver) {
   if (typeof resolver === "function") {
     return resolver();
   }
 
   return getElements(AppCore);
+}
+
+function getShellNodes(AppCore, resolver) {
+  const { sidebar } = resolveElements(AppCore, resolver);
+
+  return [
+    sidebar || null,
+    document.querySelector(".topbar") || null,
+    document.querySelector(".table-head") || null,
+    document.getElementById("main-content") || null,
+  ].filter(Boolean);
+}
+
+function freezeNodeTransition(node) {
+  if (!node) return;
+
+  if (!transitionCache.has(node)) {
+    transitionCache.set(node, node.style.transition || "");
+  }
+
+  node.style.transition = "none";
+}
+
+function restoreNodeTransition(node) {
+  if (!node) return;
+
+  const previous = transitionCache.get(node);
+  node.style.transition = previous ?? "";
+  transitionCache.delete(node);
+}
+
+function freezeShellTransitions(AppCore, resolver) {
+  getShellNodes(AppCore, resolver).forEach(freezeNodeTransition);
+  document.body?.classList?.add?.("sidebar-route-freeze");
+}
+
+function unfreezeShellTransitions(AppCore, resolver) {
+  getShellNodes(AppCore, resolver).forEach(restoreNodeTransition);
+  document.body?.classList?.remove?.("sidebar-route-freeze");
 }
 
 /* ======================================================
@@ -93,10 +147,7 @@ export function handleSidebarMenuClick({
   closeDropdown,
   getElements: resolver,
 }) {
-  const { sidebarMenu } = resolveElements(
-    AppCore,
-    resolver
-  );
+  const { sidebarMenu } = resolveElements(AppCore, resolver);
 
   if (!sidebarMenu) return;
 
@@ -120,10 +171,7 @@ export function handleUserToggleKeydown({
   openDropdown,
   getElements: resolver,
 }) {
-  const { userToggle } = resolveElements(
-    AppCore,
-    resolver
-  );
+  const { userToggle } = resolveElements(AppCore, resolver);
 
   if (!userToggle) return;
   if (event?.target !== userToggle) return;
@@ -282,19 +330,10 @@ export function bindCoreEvents(ctx = {}) {
     closeDropdown,
     getSidebarSnapshot,
     restoreSidebarState,
+    getElements: resolver,
   } = ctx;
 
   let sidebarSnapshot = null;
-
-  function setRouteTransitionLock(value) {
-    if (
-      AppCore?.state &&
-      typeof AppCore.state === "object"
-    ) {
-      AppCore.state.sidebarRouteTransition =
-        Boolean(value);
-    }
-  }
 
   AppCore.cleanup.event(
     scope,
@@ -312,6 +351,7 @@ export function bindCoreEvents(ctx = {}) {
       renderUser?.();
       applyRoleVisibility?.();
       closeDropdown?.();
+      syncSidebarState?.();
     }
   );
 
@@ -327,11 +367,9 @@ export function bindCoreEvents(ctx = {}) {
     scope,
     "router:before-render",
     () => {
-      sidebarSnapshot =
-        getSidebarSnapshot?.() || null;
-
-      setRouteTransitionLock(true);
+      sidebarSnapshot = getSidebarSnapshot?.() || null;
       closeDropdown?.();
+      freezeShellTransitions(AppCore, resolver);
     }
   );
 
@@ -341,21 +379,23 @@ export function bindCoreEvents(ctx = {}) {
     () => {
       if (
         sidebarSnapshot &&
-        typeof restoreSidebarState ===
-          "function"
+        typeof restoreSidebarState === "function"
       ) {
         restoreSidebarState(sidebarSnapshot);
+      } else {
+        syncSidebarState?.();
       }
 
-      syncSidebarState?.();
       renderUser?.();
       applyRoleVisibility?.();
       closeDropdown?.();
 
-      safeWindowTimeout(() => {
-        setRouteTransitionLock(false);
-        syncSidebarState?.();
-      }, 0);
+      safeRaf(() => {
+        safeRaf(() => {
+          syncSidebarState?.();
+          unfreezeShellTransitions(AppCore, resolver);
+        });
+      });
     }
   );
 
@@ -365,6 +405,8 @@ export function bindCoreEvents(ctx = {}) {
     ({ detail } = {}) => {
       if (detail?.hidden) {
         closeDropdown?.();
+      } else {
+        syncSidebarState?.();
       }
     }
   );

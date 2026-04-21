@@ -38,7 +38,6 @@ import {
 } from "./user.js";
 
 import {
-  getSavedSidebarCollapsed,
   isMobileViewport,
   updateToggleLabel,
   syncSidebarState as syncSidebarStateBase,
@@ -377,7 +376,7 @@ export const SidebarUI = (() => {
     sanitizeFooterTooltipState(AppCore);
 
     const mobile = isMobileViewport(MOBILE_BREAKPOINT);
-    const desktopOpen = !getSavedSidebarCollapsed();
+    const desktopOpen = true;
 
     if (typeof AppCore?.state?.sidebarDesktopOpen !== "boolean") {
       AppCore.state.sidebarDesktopOpen = desktopOpen;

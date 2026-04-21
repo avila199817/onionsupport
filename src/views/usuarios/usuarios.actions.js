@@ -9,6 +9,7 @@
    - copiar id de usuario
    - exportar colección a CSV
    - refrescar detalle usuario (FIX IMPORT ERROR)
+   - abrir modal de creación de usuario
    - desacoplar la vista principal de la lógica operativa
    - mantener compatibilidad con usuariosView.js
 
@@ -19,6 +20,7 @@
    - export seguro con escape CSV
    - clipboard robusto con fallback legacy
    - eventos opcionales vía AppCore.events
+   - apertura híbrida de modal: event bus + global bridge
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -52,7 +54,10 @@ const CSV_FILENAME = "usuarios.csv";
 function safeEmit(event = "", payload = {}) {
   try {
     AppCore?.events?.emit?.(event, payload);
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function first(...values) {
@@ -626,46 +631,50 @@ export function exportUsuariosCsvAction({
 
 /* =========================================================
    CREATE
+   ABRE MODAL EN VEZ DE NAVEGAR
 ========================================================= */
 
 export async function createUsuarioAction({
-  route = "/usuarios/nuevo",
-  fallbackEvent = "usuarios:create",
+  draft = {},
   silent = false,
 } = {}) {
-  const targetRoute =
-    safeText(route, "/usuarios/nuevo");
+  const safeDraft = safeObject(draft);
+  let opened = false;
 
   try {
-    safeEmit(fallbackEvent, {
-      route: targetRoute,
+    safeEmit("usuarios:create-modal:open", {
+      draft: safeDraft,
+    });
+    opened = true;
+  } catch {}
+
+  try {
+    const modal =
+      window?.OnionUsuariosCreateModal ||
+      null;
+
+    if (typeof modal?.open === "function") {
+      modal.open(safeDraft);
+      opened = true;
+    }
+  } catch {}
+
+  if (opened) {
+    safeEmit("usuarios:create:open", {
+      draft: safeDraft,
     });
 
-    if (AppCore?.router?.navigate) {
-      await AppCore.router.navigate(
-        targetRoute
-      );
-      return true;
-    }
-
-    if (AppCore?.Router?.navigate) {
-      await AppCore.Router.navigate(
-        targetRoute
-      );
-      return true;
-    }
-
     return true;
-  } catch {
-    if (!silent) {
-      showToast(
-        "No se pudo abrir el flujo de creación.",
-        "error"
-      );
-    }
-
-    return false;
   }
+
+  if (!silent) {
+    showToast(
+      "No se pudo abrir el modal de creación. Revisa la carga de usuarios.create.modal.js",
+      "error"
+    );
+  }
+
+  return false;
 }
 
 /* =========================================================

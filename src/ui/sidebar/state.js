@@ -3,12 +3,13 @@
    Archivo: src/ui/sidebar/state.js
 
    PRO HARDENED VERSION
-   FIX:
+   FIX REAL:
    - separación real desktop / mobile
    - desktop no depende de sidebarOpen transitorio
    - persistencia robusta
    - sync visual estable
    - tooltips coherentes
+   - fallback a DOM / storage seguro
 ========================================================= */
 
 import {
@@ -21,6 +22,19 @@ import {
   isShellHidden,
   sanitizeFooterTooltipState,
 } from "./dom.js";
+
+/* =========================================================
+   INTERNAL SAFE HELPERS
+========================================================= */
+function ensureStateBag(AppCore) {
+  if (!AppCore || typeof AppCore !== "object") return null;
+
+  if (!AppCore.state || typeof AppCore.state !== "object") {
+    AppCore.state = {};
+  }
+
+  return AppCore.state;
+}
 
 /* =========================================================
    RESPONSIVE
@@ -56,30 +70,38 @@ export function saveSidebarCollapsed(value) {
 }
 
 /* =========================================================
-   INTERNAL HELPERS
+   INTERNAL MEMORY
 ========================================================= */
 function setDesktopMemory(AppCore, open) {
-  if (AppCore?.state && typeof AppCore.state === "object") {
-    AppCore.state.sidebarDesktopOpen = Boolean(open);
-  }
+  const state = ensureStateBag(AppCore);
+  if (!state) return;
+
+  state.sidebarDesktopOpen = Boolean(open);
 }
 
 function setMobileMemory(AppCore, open) {
-  if (AppCore?.state && typeof AppCore.state === "object") {
-    AppCore.state.sidebarOpen = Boolean(open);
-  }
+  const state = ensureStateBag(AppCore);
+  if (!state) return;
+
+  state.sidebarOpen = Boolean(open);
 }
 
 function syncSharedState(AppCore, open) {
-  if (AppCore?.state && typeof AppCore.state === "object") {
-    AppCore.state.sidebarOpen = Boolean(open);
-  }
+  const state = ensureStateBag(AppCore);
+  if (!state) return;
+
+  state.sidebarOpen = Boolean(open);
 }
 
+/* =========================================================
+   DOM FALLBACK STATE
+========================================================= */
 function resolveDomSidebarOpenState(AppCore) {
   const { sidebar, body } = getElements(AppCore);
 
-  if (!sidebar && !body) return null;
+  if (!sidebar && !body) {
+    return null;
+  }
 
   const mobile = isMobileViewport();
 
@@ -110,11 +132,14 @@ function resolveDomSidebarOpenState(AppCore) {
   return null;
 }
 
+/* =========================================================
+   DESIRED OPEN STATE
+========================================================= */
 function getDesktopDesiredOpenState(AppCore) {
-  const desktopMemory = AppCore?.state?.sidebarDesktopOpen;
+  const state = ensureStateBag(AppCore);
 
-  if (typeof desktopMemory === "boolean") {
-    return desktopMemory;
+  if (typeof state?.sidebarDesktopOpen === "boolean") {
+    return state.sidebarDesktopOpen;
   }
 
   const fromDom = resolveDomSidebarOpenState(AppCore);
@@ -129,10 +154,10 @@ function getDesktopDesiredOpenState(AppCore) {
 }
 
 function getMobileDesiredOpenState(AppCore) {
-  const explicit = AppCore?.state?.sidebarOpen;
+  const state = ensureStateBag(AppCore);
 
-  if (typeof explicit === "boolean") {
-    return explicit;
+  if (typeof state?.sidebarOpen === "boolean") {
+    return state.sidebarOpen;
   }
 
   const fromDom = resolveDomSidebarOpenState(AppCore);
@@ -242,7 +267,10 @@ export function syncSidebarState(AppCore, closeDropdown) {
       "is-collapsed"
     );
 
-    body?.classList.remove("sidebar-open", "sidebar-collapsed");
+    body?.classList.remove(
+      "sidebar-open",
+      "sidebar-collapsed"
+    );
 
     closeDropdown?.();
     syncTooltipMode(AppCore, true);
@@ -301,3 +329,15 @@ export function setSidebarOpen(AppCore, open, closeDropdown) {
 
   syncSidebarState(AppCore, closeDropdown);
 }
+
+export default {
+  isMobileViewport,
+  getSavedSidebarCollapsed,
+  saveSidebarCollapsed,
+  getDesiredSidebarOpenState,
+  isSidebarCollapsedDesktop,
+  syncTooltipMode,
+  updateToggleLabel,
+  syncSidebarState,
+  setSidebarOpen,
+};

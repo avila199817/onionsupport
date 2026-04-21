@@ -2,13 +2,13 @@
    Onion SPA - Cuenta Template
    Archivo: src/views/cuenta/cuenta.template.js
 
-   FINAL PRO SYSTEM · SIMPLE SETTINGS MODE
+   FINAL PRO SYSTEM · ACCOUNT SETTINGS MODE
 
    RESPONSABILIDADES:
    - render header limpio de cuenta
    - render loading / error / empty
-   - render panel simple con 2 cards
-   - soportar darkMode / privacyMode / idioma
+   - render panel simple con 3 cards
+   - soportar darkMode / idioma / cambio de contraseña
    - mantener compatibilidad con cuentaView.js
    - mantener compatibilidad con cuenta.bindings.js
 ========================================================= */
@@ -173,24 +173,20 @@ function getLangLabel(detail = {}) {
   return "Español";
 }
 
+function getThemeValue(detail = {}) {
+  return detail?.darkMode ? "dark" : "light";
+}
+
 function getThemeLabel(detail = {}) {
   return detail?.darkMode ? "Dark mode" : "Light mode";
 }
 
-function getPrivacyLabel(detail = {}) {
-  return detail?.privacyMode ? "Activada" : "Desactivada";
-}
-
-function getStatusLabel(detail = {}) {
-  if (detail?.darkMode && detail?.privacyMode) {
-    return "Protección reforzada";
+function getAccountStatusLabel(detail = {}) {
+  if (detail?.darkMode) {
+    return "Tema oscuro activo";
   }
 
-  if (detail?.privacyMode) {
-    return "Privacidad activa";
-  }
-
-  return "Configuración estándar";
+  return "Tema claro activo";
 }
 
 /* =========================================================
@@ -285,6 +281,8 @@ function renderSwitchRow({
   dataRole = "",
   action = "",
   disabled = false,
+  checkedLabel = "Activo",
+  uncheckedLabel = "Inactivo",
 } = {}) {
   return `
     <div
@@ -326,53 +324,73 @@ function renderSwitchRow({
           </span>
         </div>
 
-        <label
-          for="${escapeHtml(inputId)}"
+        <div
           style="
-            display:inline-flex;
-            align-items:center;
-            gap:10px;
-            cursor:${disabled ? "not-allowed" : "pointer"};
-            user-select:none;
+            display:grid;
+            gap:8px;
+            justify-items:end;
           "
         >
-          <span
+          <label
+            for="${escapeHtml(inputId)}"
             style="
-              position:relative;
               display:inline-flex;
               align-items:center;
-              width:58px;
-              height:32px;
-              border-radius:999px;
-              padding:4px;
-              border:1px solid ${
-                checked
-                  ? "color-mix(in srgb, var(--accent, #7c5cff) 30%, transparent)"
-                  : "var(--border-soft)"
-              };
-              background:${
-                checked
-                  ? "color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent)"
-                  : "var(--surface-glass)"
-              };
-              transition:all .18s ease;
+              gap:10px;
+              cursor:${disabled ? "not-allowed" : "pointer"};
+              user-select:none;
             "
           >
             <span
               style="
-                position:absolute;
-                top:4px;
-                left:${checked ? "30px" : "4px"};
-                width:22px;
-                height:22px;
+                position:relative;
+                display:inline-flex;
+                align-items:center;
+                width:58px;
+                height:32px;
                 border-radius:999px;
-                background:${checked ? "var(--accent, #7c5cff)" : "rgba(255,255,255,.88)"};
-                box-shadow:0 6px 14px rgba(0,0,0,.22);
-                transition:left .18s ease, background .18s ease;
+                padding:4px;
+                border:1px solid ${
+                  checked
+                    ? "color-mix(in srgb, var(--accent, #7c5cff) 30%, transparent)"
+                    : "var(--border-soft)"
+                };
+                background:${
+                  checked
+                    ? "color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent)"
+                    : "var(--surface-glass)"
+                };
+                transition:all .18s ease;
               "
-            ></span>
+            >
+              <span
+                style="
+                  position:absolute;
+                  top:4px;
+                  left:${checked ? "30px" : "4px"};
+                  width:22px;
+                  height:22px;
+                  border-radius:999px;
+                  background:${checked ? "var(--accent, #7c5cff)" : "rgba(255,255,255,.88)"};
+                  box-shadow:0 6px 14px rgba(0,0,0,.22);
+                  transition:left .18s ease, background .18s ease;
+                "
+              ></span>
+            </span>
+          </label>
+
+          <span
+            style="
+              color:var(--text-dim);
+              font-size:12px;
+              font-weight:var(--weight-bold, 700);
+              letter-spacing:.04em;
+              text-transform:uppercase;
+            "
+          >
+            ${escapeHtml(checked ? checkedLabel : uncheckedLabel)}
           </span>
-        </label>
+        </div>
 
         <input
           id="${escapeHtml(inputId)}"
@@ -401,9 +419,212 @@ function renderSwitchRow({
             opacity:${disabled ? ".72" : "1"};
           "
         >
-          ${checked ? "Desactivar" : "Activar"}
+          ${checked ? "Cambiar" : "Activar"}
         </button>
       </div>
+    </div>
+  `;
+}
+
+function renderSelectRow({
+  title = "",
+  description = "",
+  value = "es",
+  inputId = "",
+  dataRole = "",
+  action = "",
+  disabled = false,
+} = {}) {
+  return `
+    <div
+      style="
+        display:grid;
+        gap:12px;
+        padding:14px 0;
+        border-bottom:1px solid var(--border-soft);
+      "
+    >
+      <div style="display:grid; gap:6px;">
+        <strong
+          style="
+            color:var(--text-strong);
+            font-size:15px;
+            line-height:1.3;
+          "
+        >
+          ${escapeHtml(title)}
+        </strong>
+
+        <span
+          style="
+            color:var(--text-dim);
+            font-size:13px;
+            line-height:1.5;
+          "
+        >
+          ${escapeHtml(description)}
+        </span>
+      </div>
+
+      <div
+        style="
+          display:flex;
+          align-items:center;
+          gap:10px;
+          flex-wrap:wrap;
+        "
+      >
+        <select
+          id="${escapeHtml(inputId)}"
+          data-role="${escapeHtml(dataRole)}"
+          ${disabled ? "disabled" : ""}
+          style="
+            min-height:42px;
+            min-width:220px;
+            padding:0 12px;
+            border-radius:12px;
+            border:1px solid var(--border-soft);
+            background:var(--surface-glass);
+            color:var(--text-strong);
+            font-weight:var(--weight-semibold, 600);
+            outline:none;
+          "
+        >
+          <option value="es" ${value === "es" ? "selected" : ""}>Español</option>
+          <option value="en" ${value === "en" ? "selected" : ""}>English</option>
+          <option value="ca" ${value === "ca" ? "selected" : ""}>Català</option>
+        </select>
+
+        <button
+          type="button"
+          data-action="${escapeHtml(action)}"
+          ${disabled ? "disabled" : ""}
+          style="
+            min-height:40px;
+            padding:0 12px;
+            border-radius:12px;
+            border:1px solid var(--border-soft);
+            background:var(--surface-glass);
+            color:var(--text-soft);
+            font-weight:var(--weight-bold, 700);
+            cursor:${disabled ? "wait" : "pointer"};
+            opacity:${disabled ? ".72" : "1"};
+          "
+        >
+          Aplicar idioma
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function renderPasswordRow({
+  disabled = false,
+} = {}) {
+  return `
+    <div
+      style="
+        display:grid;
+        gap:12px;
+        padding:14px 0;
+      "
+    >
+      <div style="display:grid; gap:6px;">
+        <strong
+          style="
+            color:var(--text-strong);
+            font-size:15px;
+            line-height:1.3;
+          "
+        >
+          Cambiar contraseña
+        </strong>
+
+        <span
+          style="
+            color:var(--text-dim);
+            font-size:13px;
+            line-height:1.5;
+          "
+        >
+          Abre el flujo para actualizar la contraseña de tu cuenta.
+        </span>
+      </div>
+
+      <div
+        style="
+          display:grid;
+          grid-template-columns:repeat(2, minmax(0, 1fr));
+          gap:10px;
+        "
+        class="cuenta-password-grid"
+      >
+        <input
+          id="cuenta-current-password"
+          data-role="cuenta-current-password"
+          type="password"
+          placeholder="Contraseña actual"
+          ${disabled ? "disabled" : ""}
+          style="
+            width:100%;
+            min-height:42px;
+            padding:0 12px;
+            border-radius:12px;
+            border:1px solid var(--border-soft);
+            background:var(--surface-glass);
+            color:var(--text-strong);
+            outline:none;
+          "
+        />
+
+        <input
+          id="cuenta-new-password"
+          data-role="cuenta-new-password"
+          type="password"
+          placeholder="Nueva contraseña"
+          ${disabled ? "disabled" : ""}
+          style="
+            width:100%;
+            min-height:42px;
+            padding:0 12px;
+            border-radius:12px;
+            border:1px solid var(--border-soft);
+            background:var(--surface-glass);
+            color:var(--text-strong);
+            outline:none;
+          "
+        />
+      </div>
+
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button
+          id="cuenta-password-btn"
+          type="button"
+          data-action="change-password"
+          ${disabled ? "disabled" : ""}
+          style="
+            min-height:40px;
+            padding:0 12px;
+            border-radius:12px;
+            border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
+            background:var(--btn-primary-bg, var(--accent, #7c5cff));
+            color:var(--btn-primary-text, #fff);
+            font-weight:var(--weight-bold, 700);
+            cursor:${disabled ? "wait" : "pointer"};
+            opacity:${disabled ? ".72" : "1"};
+          "
+        >
+          Cambiar contraseña
+        </button>
+      </div>
+
+      <style>
+        @media (max-width: 760px) {
+          .cuenta-password-grid {
+            grid-template-columns: 1fr !important;
+          }
+        }
+      </style>
     </div>
   `;
 }
@@ -494,7 +715,7 @@ export function renderHeader({ item = null, state = {} } = {}) {
                 max-width:760px;
               "
             >
-              Cambia tema, idioma y privacidad desde un panel simple.
+              Gestiona tema, idioma y contraseña desde un panel simple.
             </p>
           </div>
 
@@ -539,7 +760,7 @@ export function renderHeader({ item = null, state = {} } = {}) {
                 opacity:${saving ? ".78" : "1"};
               "
             >
-              ${saving ? "Guardando..." : "Guardar"}
+              ${saving ? "Guardando..." : "Guardar cambios"}
             </button>
           </div>
         </div>
@@ -552,10 +773,9 @@ export function renderHeader({ item = null, state = {} } = {}) {
             flex-wrap:wrap;
           "
         >
-          ${renderChip(`Tema · ${detail ? getThemeLabel(detail) : "Dark mode"}`, "accent")}
+          ${renderChip(`Tema · ${detail ? getThemeLabel(detail) : "Light mode"}`, "accent")}
           ${renderChip(`Idioma · ${detail ? getLangLabel(detail) : "Español"}`, "default")}
-          ${renderChip(`Privacidad · ${detail ? getPrivacyLabel(detail) : "Desactivada"}`, detail?.privacyMode ? "warning" : "default")}
-          ${renderChip(`Estado · ${detail ? getStatusLabel(detail) : "Configuración estándar"}`, detail?.privacyMode ? "success" : "default")}
+          ${renderChip(`Estado · ${detail ? getAccountStatusLabel(detail) : "Configuración estándar"}`, detail?.darkMode ? "success" : "default")}
 
           ${
             refreshing || loading || saving
@@ -601,12 +821,12 @@ export function renderLoadingState() {
       <div
         style="
           display:grid;
-          grid-template-columns:1fr 1fr;
+          grid-template-columns:1fr 1fr 1fr;
           gap:18px;
         "
         class="cuenta-loading-grid"
       >
-        ${Array.from({ length: 2 })
+        ${Array.from({ length: 3 })
           .map(
             () => `
               <div
@@ -635,7 +855,7 @@ export function renderLoadingState() {
           100% { background-position: -200% 0; }
         }
 
-        @media (max-width: 980px) {
+        @media (max-width: 1100px) {
           .cuenta-loading-grid {
             grid-template-columns: 1fr !important;
           }
@@ -794,6 +1014,7 @@ export function renderPanel({ item = null, state = {} } = {}) {
 
   const langValue = getLangValue(detail);
   const langLabel = getLangLabel(detail);
+  const themeValue = getThemeValue(detail);
   const exactUpdatedAt = detail.updatedAt ? formatDate(detail.updatedAt) : "—";
 
   return `
@@ -818,7 +1039,7 @@ export function renderPanel({ item = null, state = {} } = {}) {
         <div
           style="
             display:grid;
-            grid-template-columns:1fr 1fr;
+            grid-template-columns:1fr 1fr 1fr;
             gap:18px;
           "
           class="cuenta-cards-grid"
@@ -842,7 +1063,7 @@ export function renderPanel({ item = null, state = {} } = {}) {
                   letter-spacing:-.03em;
                 "
               >
-                Apariencia e idioma
+                Tema
               </h3>
 
               <p
@@ -853,45 +1074,25 @@ export function renderPanel({ item = null, state = {} } = {}) {
                   line-height:1.6;
                 "
               >
-                Ajusta el tema de la interfaz y consulta el idioma actual del sistema.
+                Cambia entre modo claro y modo oscuro.
               </p>
             </div>
 
             ${renderSwitchRow({
-              title: "Modo de tema",
-              description: "Alterna entre light mode y dark mode.",
+              title: "Dark / Light mode",
+              description: "Aplica la preferencia visual principal del panel.",
               checked: Boolean(detail.darkMode),
               inputId: "cuenta-darkmode-input",
               dataRole: "cuenta-darkmode-input",
               action: "toggle-theme",
               disabled: saving || refreshing,
+              checkedLabel: "Dark",
+              uncheckedLabel: "Light",
             })}
 
-            ${renderMetaRow("Idioma actual", langLabel)}
-            ${renderMetaRow("Código idioma", langValue)}
+            ${renderMetaRow("Tema actual", getThemeLabel(detail))}
+            ${renderMetaRow("Valor", themeValue)}
             ${renderMetaRow("Última actualización", exactUpdatedAt)}
-
-            <div style="display:flex; gap:10px; flex-wrap:wrap; padding-top:6px;">
-              <button
-                id="cuenta-theme-btn"
-                type="button"
-                data-action="toggle-theme"
-                ${saving || refreshing ? "disabled" : ""}
-                style="
-                  min-height:40px;
-                  padding:0 12px;
-                  border-radius:12px;
-                  border:1px solid var(--border-soft);
-                  background:var(--surface-glass);
-                  color:var(--text-soft);
-                  font-weight:var(--weight-bold, 700);
-                  cursor:${saving || refreshing ? "wait" : "pointer"};
-                  opacity:${saving || refreshing ? ".72" : "1"};
-                "
-              >
-                ${detail.darkMode ? "Pasar a light mode" : "Pasar a dark mode"}
-              </button>
-            </div>
           </article>
 
           <article
@@ -913,7 +1114,7 @@ export function renderPanel({ item = null, state = {} } = {}) {
                   letter-spacing:-.03em;
                 "
               >
-                Privacidad
+                Idioma
               </h3>
 
               <p
@@ -924,63 +1125,65 @@ export function renderPanel({ item = null, state = {} } = {}) {
                   line-height:1.6;
                 "
               >
-                Controla la preferencia de privacidad persistida para el usuario autenticado.
+                Selecciona el idioma de la interfaz.
               </p>
             </div>
 
-            ${renderSwitchRow({
-              title: "Privacy mode",
-              description: "Activa o desactiva la preferencia de privacidad.",
-              checked: Boolean(detail.privacyMode),
-              inputId: "cuenta-privacymode-input",
-              dataRole: "cuenta-privacy-input",
-              action: "toggle-privacy",
+            ${renderSelectRow({
+              title: "Idioma del sistema",
+              description: "Elige entre Español, English o Català.",
+              value: langValue,
+              inputId: "cuenta-language-select",
+              dataRole: "cuenta-language-select",
+              action: "change-language",
               disabled: saving || refreshing,
             })}
 
-            ${renderMetaRow("Estado", getStatusLabel(detail))}
-            ${renderMetaRow("Privacidad", getPrivacyLabel(detail))}
-            ${renderMetaRow("Endpoint", safeText(detail.endpoint, "/api/user/preferences"))}
+            ${renderMetaRow("Idioma actual", langLabel)}
+            ${renderMetaRow("Código", langValue)}
+            ${renderMetaRow("Última actualización", exactUpdatedAt)}
+          </article>
 
-            <div style="display:flex; gap:10px; flex-wrap:wrap; padding-top:6px;">
-              <button
-                id="cuenta-privacy-btn"
-                type="button"
-                data-action="toggle-privacy"
-                ${saving || refreshing ? "disabled" : ""}
+          <article
+            style="
+              display:grid;
+              gap:14px;
+              padding:20px;
+              border-radius:18px;
+              border:1px solid var(--border-soft);
+              background:var(--surface-glass);
+            "
+          >
+            <div style="display:grid; gap:8px;">
+              <h3
                 style="
-                  min-height:40px;
-                  padding:0 12px;
-                  border-radius:12px;
-                  border:1px solid var(--border-soft);
-                  background:var(--surface-glass);
-                  color:var(--text-soft);
-                  font-weight:var(--weight-bold, 700);
-                  cursor:${saving || refreshing ? "wait" : "pointer"};
-                  opacity:${saving || refreshing ? ".72" : "1"};
+                  margin:0;
+                  color:var(--text-strong);
+                  font-size:22px;
+                  letter-spacing:-.03em;
                 "
               >
-                ${detail.privacyMode ? "Desactivar privacidad" : "Activar privacidad"}
-              </button>
+                Seguridad
+              </h3>
 
-              <button
-                type="button"
-                data-action="open-cuenta-modal"
-                id="cuenta-open-modal-btn"
+              <p
                 style="
-                  min-height:40px;
-                  padding:0 12px;
-                  border-radius:12px;
-                  border:1px solid var(--border-soft);
-                  background:var(--surface-glass);
-                  color:var(--text-soft);
-                  font-weight:var(--weight-bold, 700);
-                  cursor:pointer;
+                  margin:0;
+                  color:var(--text-dim);
+                  font-size:14px;
+                  line-height:1.6;
                 "
               >
-                Ver detalle
-              </button>
+                Actualiza tu contraseña desde este bloque.
+              </p>
             </div>
+
+            ${renderPasswordRow({
+              disabled: saving || refreshing,
+            })}
+
+            ${renderMetaRow("Acción", "Cambio de contraseña")}
+            ${renderMetaRow("Estado", saving ? "Procesando" : "Disponible")}
           </article>
         </div>
       </div>
@@ -1047,7 +1250,7 @@ export function renderPanel({ item = null, state = {} } = {}) {
           to { transform: rotate(360deg); }
         }
 
-        @media (max-width: 980px) {
+        @media (max-width: 1100px) {
           .cuenta-cards-grid {
             grid-template-columns: 1fr !important;
           }

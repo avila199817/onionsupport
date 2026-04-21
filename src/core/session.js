@@ -736,6 +736,22 @@ export function loadPreferences({
       true
     );
 
+  const savedSidebarCollapsedRaw =
+    storage?.get?.(
+      "sidebar-collapsed",
+      null
+    );
+
+  const hasCollapsedValue =
+    savedSidebarCollapsedRaw ===
+      true ||
+    savedSidebarCollapsedRaw ===
+      false ||
+    savedSidebarCollapsedRaw ===
+      "true" ||
+    savedSidebarCollapsedRaw ===
+      "false";
+
   state.theme =
     savedTheme ===
     "light"
@@ -749,11 +765,22 @@ export function loadPreferences({
     ).trim() ||
     config.defaultLang;
 
-  state.sidebarOpen =
-    typeof savedSidebar ===
-    "boolean"
-      ? savedSidebar
-      : true;
+  if (hasCollapsedValue) {
+    const collapsed =
+      savedSidebarCollapsedRaw ===
+        true ||
+      savedSidebarCollapsedRaw ===
+        "true";
+
+    state.sidebarOpen =
+      !collapsed;
+  } else {
+    state.sidebarOpen =
+      typeof savedSidebar ===
+      "boolean"
+        ? savedSidebar
+        : true;
+  }
 
   if (dom?.html) {
     dom.html.setAttribute(
@@ -1001,6 +1028,11 @@ export function setSidebarOpen({
     config.storageKeys
       .sidebarOpen,
     next
+  );
+
+  storage?.set?.(
+    "sidebar-collapsed",
+    !next
   );
 
   if (dom?.body) {

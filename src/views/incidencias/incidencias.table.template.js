@@ -2,7 +2,7 @@
    Onion SPA - Incidencias Table Template
    Archivo: src/views/incidencias/incidencias.table.template.js
 
-   FINAL PRODUCTION TEMPLATE · LIST VIEW · 10/10
+   FINAL PRODUCTION TEMPLATE · LIST VIEW · SOFT APPLE MODE
 
    RESPONSABILIDADES:
    - render del hero/header de incidencias
@@ -13,6 +13,7 @@
    - título más compacto para caber en una línea
    - fechas siempre en una sola línea
    - botón "Ver detalle" ajustado al ancho del texto
+   - loading de tabla suave en carga / refresh
 ========================================================= */
 
 /* =========================================================
@@ -508,6 +509,7 @@ function renderRow(item = {}, state = {}) {
   const description = getDescription(item);
   const createdAt = formatDateTime(getCreatedAt(item));
   const updatedAt = formatLastUpdate(getUpdatedAt(item));
+
   const openingTicketId = safeText(runtime.openingTicketId, "");
   const isOpening = openingTicketId === ticketId;
 
@@ -571,55 +573,83 @@ function renderEmptyState() {
   `;
 }
 
+function renderTableLoading(rows = 5) {
+  return `
+    <div class="incidencias-table-loading" aria-hidden="true">
+      ${Array.from({ length: rows })
+        .map(
+          () => `
+            <div class="incidencias-table-loading-row">
+              <div class="incidencias-skeleton incidencias-skeleton--avatar"></div>
+              <div class="incidencias-table-loading-copy">
+                <div class="incidencias-skeleton incidencias-skeleton--xs"></div>
+                <div class="incidencias-skeleton incidencias-skeleton--lg"></div>
+                <div class="incidencias-skeleton incidencias-skeleton--md"></div>
+              </div>
+              <div class="incidencias-skeleton incidencias-skeleton--pill"></div>
+              <div class="incidencias-skeleton incidencias-skeleton--date"></div>
+              <div class="incidencias-skeleton incidencias-skeleton--date"></div>
+              <div class="incidencias-skeleton incidencias-skeleton--pill"></div>
+              <div class="incidencias-skeleton incidencias-skeleton--btn"></div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
 function renderStyles() {
   return `
     <style>
       .incidencias-view-root{
         display:grid;
-        gap:24px;
+        gap:18px;
       }
 
       .incidencias-hero{
         position:relative;
         overflow:hidden;
-        border-radius:28px;
-        border:1px solid var(--panel-border, rgba(255,255,255,.08));
+        border-radius:24px;
+        border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 88%, transparent);
         background:
-          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 34%),
-          linear-gradient(180deg, var(--panel-bg, rgba(255,255,255,.84)), var(--panel-bg, rgba(255,255,255,.84)));
-        box-shadow:var(--shadow-soft, 0 20px 50px rgba(0,0,0,.08));
-        padding:28px 32px 30px;
+          linear-gradient(180deg, rgba(255,255,255,.58), rgba(255,255,255,.36)),
+          color-mix(in srgb, var(--panel-bg, #ffffff) 92%, transparent);
+        box-shadow:
+          0 10px 30px rgba(15,23,42,.04),
+          0 1px 0 rgba(255,255,255,.55) inset;
+        padding:22px 24px 22px;
       }
 
       .incidencias-hero-top{
         display:grid;
         grid-template-columns:minmax(0, 1fr) auto;
-        gap:20px;
+        gap:18px;
         align-items:start;
       }
 
       .incidencias-hero-copy{
         min-width:0;
         display:grid;
-        gap:12px;
+        gap:10px;
       }
 
       .incidencias-page-title{
         margin:0;
         max-width:100%;
-        font-size:clamp(34px, 4.4vw, 62px);
-        line-height:.94;
-        letter-spacing:-.055em;
-        font-weight:800;
+        font-size:clamp(26px, 2.6vw, 42px);
+        line-height:.98;
+        letter-spacing:-.05em;
+        font-weight:780;
         color:var(--text-strong, #0f172a);
         white-space:nowrap;
       }
 
       .incidencias-page-subtitle{
         margin:0;
-        max-width:1100px;
-        font-size:17px;
-        line-height:1.62;
+        max-width:860px;
+        font-size:15px;
+        line-height:1.58;
         color:var(--text-dim, #6b7280);
       }
 
@@ -627,70 +657,79 @@ function renderStyles() {
         display:flex;
         align-items:flex-start;
         justify-content:flex-end;
-        gap:12px;
+        gap:10px;
         flex-wrap:wrap;
       }
 
       .incidencias-btn{
-        min-height:52px;
-        padding:0 20px;
-        border-radius:16px;
-        border:1px solid var(--border-soft, rgba(15,23,42,.08));
-        background:var(--surface-1, rgba(255,255,255,.74));
+        min-height:44px;
+        padding:0 16px;
+        border-radius:14px;
+        border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 92%, transparent);
+        background:rgba(255,255,255,.72);
         color:var(--text-strong, #111827);
-        font-size:14px;
-        font-weight:700;
+        font-size:13px;
+        font-weight:680;
         line-height:1;
         cursor:pointer;
         display:inline-flex;
         align-items:center;
         justify-content:center;
         text-decoration:none;
-        box-shadow:0 10px 24px rgba(15,23,42,.04);
+        box-shadow:0 4px 14px rgba(15,23,42,.04);
         transition:
-          transform .18s ease,
-          box-shadow .18s ease,
-          border-color .18s ease,
-          background .18s ease,
-          opacity .18s ease;
+          transform .16s ease,
+          box-shadow .16s ease,
+          border-color .16s ease,
+          background .16s ease,
+          opacity .16s ease;
       }
 
       .incidencias-btn:hover{
         transform:translateY(-1px);
-        box-shadow:0 16px 32px rgba(15,23,42,.08);
+        box-shadow:0 8px 18px rgba(15,23,42,.06);
       }
 
       .incidencias-btn--primary{
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent);
-        background:var(--accent, #7c5cff);
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 16%, rgba(15,23,42,.06));
+        background:linear-gradient(
+          180deg,
+          color-mix(in srgb, var(--accent, #7c5cff) 86%, white 14%),
+          color-mix(in srgb, var(--accent, #7c5cff) 92%, black 8%)
+        );
         color:#fff;
-        box-shadow:0 14px 30px color-mix(in srgb, var(--accent, #7c5cff) 24%, transparent);
+        box-shadow:0 8px 20px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
       }
 
       .incidencias-btn.is-loading,
       .incidencias-detail-btn.is-loading{
         cursor:wait;
-        opacity:.92;
+        opacity:.9;
+      }
+
+      .incidencias-btn:disabled,
+      .incidencias-detail-btn:disabled{
+        pointer-events:none;
       }
 
       .incidencias-hero-meta{
-        margin-top:18px;
+        margin-top:14px;
         display:flex;
         align-items:center;
-        gap:10px;
+        gap:8px;
         flex-wrap:wrap;
       }
 
       .incidencias-meta-pill{
-        min-height:34px;
-        padding:0 14px;
+        min-height:30px;
+        padding:0 12px;
         border-radius:999px;
-        border:1px solid var(--border-soft, rgba(15,23,42,.08));
-        background:var(--surface-1, rgba(255,255,255,.72));
-        color:var(--text-dim, #6b7280);
-        font-size:12px;
-        font-weight:800;
-        letter-spacing:.05em;
+        border:1px solid rgba(15,23,42,.06);
+        background:rgba(255,255,255,.52);
+        color:#7a8392;
+        font-size:11px;
+        font-weight:760;
+        letter-spacing:.045em;
         text-transform:uppercase;
         display:inline-flex;
         align-items:center;
@@ -698,112 +737,126 @@ function renderStyles() {
       }
 
       .incidencias-stats{
-        margin-top:22px;
+        margin-top:16px;
         display:grid;
-        grid-template-columns:repeat(2, minmax(0, 380px));
-        gap:16px;
+        grid-template-columns:repeat(2, minmax(0, 280px));
+        gap:12px;
       }
 
       .incidencias-stat-card{
         display:grid;
-        gap:10px;
-        min-height:156px;
-        padding:22px 22px 20px;
-        border-radius:24px;
-        border:1px solid var(--border-soft, rgba(15,23,42,.08));
+        gap:8px;
+        min-height:124px;
+        padding:16px 18px;
+        border-radius:20px;
+        border:1px solid rgba(15,23,42,.06);
         background:
-          linear-gradient(180deg, rgba(255,255,255,.26), rgba(255,255,255,.08)),
-          var(--surface-1, rgba(255,255,255,.68));
+          linear-gradient(180deg, rgba(255,255,255,.58), rgba(255,255,255,.22)),
+          rgba(255,255,255,.46);
+        box-shadow:0 6px 20px rgba(15,23,42,.03);
       }
 
       .incidencias-stat-card--open{
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 22%, var(--border-soft, rgba(15,23,42,.08)));
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 16%, rgba(15,23,42,.06));
       }
 
       .incidencias-stat-card--closed{
-        border-color:color-mix(in srgb, var(--success-strong, #36c690) 22%, var(--border-soft, rgba(15,23,42,.08)));
+        border-color:color-mix(in srgb, var(--success-strong, #36c690) 18%, rgba(15,23,42,.06));
       }
 
       .incidencias-stat-label{
-        font-size:12px;
-        font-weight:800;
+        font-size:11px;
+        font-weight:760;
         letter-spacing:.08em;
         text-transform:uppercase;
-        color:var(--text-dim, #6b7280);
+        color:#7b8494;
       }
 
       .incidencias-stat-value{
-        font-size:54px;
-        line-height:.9;
-        letter-spacing:-.05em;
-        font-weight:800;
+        font-size:42px;
+        line-height:.92;
+        letter-spacing:-.045em;
+        font-weight:780;
         color:var(--text-strong, #111827);
       }
 
       .incidencias-stat-text{
-        font-size:15px;
-        line-height:1.5;
+        font-size:14px;
+        line-height:1.45;
         color:var(--text-dim, #6b7280);
       }
 
       .incidencias-history{
         overflow:hidden;
-        border-radius:28px;
-        border:1px solid var(--panel-border, rgba(255,255,255,.08));
-        background:var(--panel-bg, rgba(255,255,255,.84));
-        box-shadow:var(--shadow-soft, 0 20px 50px rgba(0,0,0,.08));
+        border-radius:24px;
+        border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 88%, transparent);
+        background:
+          linear-gradient(180deg, rgba(255,255,255,.6), rgba(255,255,255,.4)),
+          color-mix(in srgb, var(--panel-bg, #ffffff) 94%, transparent);
+        box-shadow:
+          0 10px 30px rgba(15,23,42,.04),
+          0 1px 0 rgba(255,255,255,.5) inset;
       }
 
       .incidencias-history-head{
         display:grid;
         grid-template-columns:minmax(0, 1fr) auto;
-        gap:18px;
+        gap:14px;
         align-items:start;
-        padding:18px 20px 16px;
-        border-bottom:1px solid var(--border-soft, rgba(15,23,42,.08));
+        padding:14px 18px 12px;
+        border-bottom:1px solid rgba(15,23,42,.06);
       }
 
       .incidencias-history-copy{
         min-width:0;
         display:grid;
-        gap:4px;
+        gap:2px;
       }
 
       .incidencias-history-title{
         margin:0;
-        font-size:18px;
+        font-size:16px;
         line-height:1.2;
-        font-weight:800;
+        font-weight:760;
         color:var(--text-strong, #111827);
       }
 
       .incidencias-history-subtitle{
         margin:0;
-        font-size:13px;
-        line-height:1.45;
-        color:var(--text-dim, #6b7280);
+        font-size:12px;
+        line-height:1.4;
+        color:var(--text-dim, #7b8494);
       }
 
       .incidencias-pagination{
         display:flex;
-        gap:10px;
+        gap:8px;
         flex-wrap:wrap;
       }
 
       .incidencias-pagination-btn{
-        min-height:42px;
-        padding:0 16px;
-        border-radius:14px;
-        border:1px solid var(--border-soft, rgba(15,23,42,.08));
-        background:var(--surface-1, rgba(255,255,255,.72));
-        color:var(--text-strong, #111827);
-        font-size:13px;
-        font-weight:700;
+        min-height:38px;
+        padding:0 14px;
+        border-radius:13px;
+        border:1px solid rgba(15,23,42,.06);
+        background:rgba(255,255,255,.66);
+        color:#273142;
+        font-size:12px;
+        font-weight:680;
         cursor:pointer;
         display:inline-flex;
         align-items:center;
         justify-content:center;
         text-decoration:none;
+        transition:
+          background .16s ease,
+          border-color .16s ease,
+          opacity .16s ease;
+      }
+
+      .incidencias-pagination-btn:hover{
+        background:rgba(255,255,255,.9);
+        border-color:rgba(15,23,42,.10);
       }
 
       .incidencias-pagination-btn[disabled],
@@ -812,36 +865,47 @@ function renderStyles() {
         cursor:not-allowed;
       }
 
+      .incidencias-table-wrap{
+        position:relative;
+      }
+
+      .incidencias-table-wrap.is-refreshing .incidencias-table-shell{
+        opacity:.58;
+        filter:blur(.8px);
+        transition:opacity .18s ease, filter .18s ease;
+      }
+
       .incidencias-table-shell{
         width:100%;
         overflow-x:auto;
         overflow-y:hidden;
+        transition:opacity .18s ease, filter .18s ease;
       }
 
       .incidencias-table{
         width:100%;
         border-collapse:separate;
         border-spacing:0;
-        min-width:1180px;
+        min-width:1120px;
       }
 
       .incidencias-table thead th{
-        padding:16px 20px;
+        padding:12px 18px;
         text-align:left;
-        font-size:12px;
-        font-weight:800;
+        font-size:11px;
+        font-weight:760;
         letter-spacing:.08em;
         text-transform:uppercase;
-        color:var(--text-faint, #8a91a0);
-        background:color-mix(in srgb, var(--surface-1, #fff) 88%, transparent);
-        border-bottom:1px solid var(--border-soft, rgba(15,23,42,.08));
+        color:#97a0af;
+        background:rgba(248,250,252,.62);
+        border-bottom:1px solid rgba(15,23,42,.06);
         white-space:nowrap;
       }
 
       .incidencias-table tbody td{
-        padding:20px 20px;
+        padding:14px 18px;
         vertical-align:middle;
-        border-bottom:1px solid var(--border-soft, rgba(15,23,42,.08));
+        border-bottom:1px solid rgba(15,23,42,.055);
       }
 
       .incidencias-table tbody tr:last-child td{
@@ -849,29 +913,29 @@ function renderStyles() {
       }
 
       .incidencias-row{
-        transition:background .18s ease;
+        transition:background .16s ease;
       }
 
       .incidencias-row:hover{
-        background:color-mix(in srgb, var(--accent, #7c5cff) 2.5%, transparent);
+        background:rgba(124,92,255,.018);
       }
 
       .incidencias-main{
         display:grid;
-        grid-template-columns:52px minmax(0, 1fr);
-        gap:14px;
+        grid-template-columns:44px minmax(0, 1fr);
+        gap:12px;
         align-items:center;
         min-width:0;
       }
 
       .incidencias-avatar{
         position:relative;
-        width:52px;
-        height:52px;
+        width:44px;
+        height:44px;
         border-radius:999px;
         overflow:hidden;
-        flex:0 0 52px;
-        background:linear-gradient(135deg, rgba(124,92,255,.18), rgba(139,92,246,.34));
+        flex:0 0 44px;
+        background:linear-gradient(135deg, rgba(124,92,255,.12), rgba(139,92,246,.24));
       }
 
       .incidencias-avatar img{
@@ -887,8 +951,8 @@ function renderStyles() {
         display:none;
         align-items:center;
         justify-content:center;
-        font-size:22px;
-        font-weight:800;
+        font-size:18px;
+        font-weight:780;
         color:#fff;
         letter-spacing:-.03em;
       }
@@ -908,23 +972,23 @@ function renderStyles() {
       .incidencias-main-copy{
         min-width:0;
         display:grid;
-        gap:4px;
+        gap:3px;
       }
 
       .incidencias-ticket-id{
-        font-size:13px;
-        line-height:1.2;
-        font-weight:800;
-        letter-spacing:.06em;
-        color:#4b5563;
+        font-size:12px;
+        line-height:1.15;
+        font-weight:760;
+        letter-spacing:.055em;
+        color:#667084;
         text-transform:uppercase;
       }
 
       .incidencias-ticket-subject{
-        font-size:18px;
-        line-height:1.12;
-        font-weight:800;
-        letter-spacing:-.03em;
+        font-size:15px;
+        line-height:1.14;
+        font-weight:760;
+        letter-spacing:-.025em;
         color:var(--text-strong, #111827);
         overflow:hidden;
         text-overflow:ellipsis;
@@ -934,87 +998,87 @@ function renderStyles() {
       }
 
       .incidencias-ticket-description{
-        font-size:14px;
-        line-height:1.35;
-        color:var(--text-dim, #6b7280);
+        font-size:13px;
+        line-height:1.3;
+        color:#8a93a3;
         overflow:hidden;
         text-overflow:ellipsis;
         white-space:nowrap;
       }
 
       .incidencias-chip{
-        min-height:40px;
-        padding:0 16px;
+        min-height:32px;
+        padding:0 12px;
         border-radius:999px;
         display:inline-flex;
         align-items:center;
         justify-content:center;
-        font-size:12px;
-        font-weight:800;
-        letter-spacing:.05em;
+        font-size:11px;
+        font-weight:760;
+        letter-spacing:.045em;
         text-transform:uppercase;
         white-space:nowrap;
         border:1px solid transparent;
       }
 
       .incidencias-chip--pending{
-        color:#c57a13;
-        background:rgba(255,188,66,.14);
-        border-color:rgba(255,188,66,.32);
+        color:#b7791f;
+        background:rgba(255,188,66,.11);
+        border-color:rgba(255,188,66,.22);
       }
 
       .incidencias-chip--open{
-        color:var(--accent, #7c5cff);
-        background:color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent);
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 24%, transparent);
+        color:#6d53d7;
+        background:rgba(124,92,255,.09);
+        border-color:rgba(124,92,255,.18);
       }
 
       .incidencias-chip--progress{
-        color:#0f8ec7;
-        background:rgba(125,211,252,.16);
-        border-color:rgba(125,211,252,.34);
+        color:#1778ab;
+        background:rgba(125,211,252,.12);
+        border-color:rgba(125,211,252,.24);
       }
 
       .incidencias-chip--resolved,
       .incidencias-chip--closed{
-        color:#1f7a4d;
-        background:rgba(54,198,144,.14);
-        border-color:rgba(54,198,144,.30);
+        color:#258a59;
+        background:rgba(54,198,144,.10);
+        border-color:rgba(54,198,144,.22);
       }
 
       .incidencias-date-inline{
         display:inline-block;
         white-space:nowrap;
-        font-size:14px;
+        font-size:13px;
         line-height:1.2;
-        font-weight:700;
+        font-weight:650;
         font-variant-numeric:tabular-nums;
-        color:#2f3747;
+        color:#344054;
       }
 
       .incidencias-importe{
         display:inline-flex;
         align-items:center;
         justify-content:center;
-        min-height:34px;
-        padding:0 14px;
+        min-height:30px;
+        padding:0 12px;
         border-radius:999px;
-        font-size:12px;
-        font-weight:800;
+        font-size:11px;
+        font-weight:760;
         white-space:nowrap;
         border:1px solid transparent;
       }
 
       .incidencias-importe--money{
-        color:#1f2937;
-        background:rgba(15,23,42,.04);
-        border-color:rgba(15,23,42,.08);
+        color:#374151;
+        background:rgba(15,23,42,.035);
+        border-color:rgba(15,23,42,.06);
       }
 
       .incidencias-importe--status{
-        color:#7b8494;
-        background:rgba(15,23,42,.03);
-        border-color:rgba(15,23,42,.06);
+        color:#8590a3;
+        background:rgba(15,23,42,.025);
+        border-color:rgba(15,23,42,.05);
       }
 
       .incidencias-cell--actions{
@@ -1025,13 +1089,13 @@ function renderStyles() {
       .incidencias-detail-btn{
         width:auto;
         min-width:0;
-        min-height:40px;
-        padding:0 14px;
-        border-radius:14px;
-        border:1px solid var(--border-soft, rgba(15,23,42,.08));
-        background:var(--surface-1, rgba(255,255,255,.74));
-        color:var(--text-strong, #111827);
-        font-size:14px;
+        min-height:34px;
+        padding:0 12px;
+        border-radius:12px;
+        border:1px solid rgba(15,23,42,.07);
+        background:rgba(255,255,255,.68);
+        color:#1f2937;
+        font-size:13px;
         font-weight:700;
         line-height:1;
         cursor:pointer;
@@ -1041,58 +1105,135 @@ function renderStyles() {
         white-space:nowrap;
         box-shadow:none;
         transition:
-          border-color .18s ease,
-          background .18s ease,
-          transform .18s ease,
-          opacity .18s ease;
+          border-color .16s ease,
+          background .16s ease,
+          transform .16s ease,
+          opacity .16s ease;
       }
 
       .incidencias-detail-btn:hover{
-        border-color:rgba(15,23,42,.14);
-        background:rgba(255,255,255,.96);
+        border-color:rgba(15,23,42,.11);
+        background:rgba(255,255,255,.9);
         transform:translateY(-1px);
       }
 
       .incidencias-inline-loading{
         display:inline-flex;
         align-items:center;
-        gap:8px;
+        gap:7px;
+        white-space:nowrap;
       }
 
       .incidencias-inline-spinner{
-        width:14px;
-        height:14px;
+        width:13px;
+        height:13px;
         border-radius:999px;
-        border:2px solid rgba(255,255,255,.28);
+        border:2px solid rgba(255,255,255,.30);
         border-top-color:currentColor;
         animation:incidenciasSpin .78s linear infinite;
+        flex:0 0 auto;
       }
 
       .incidencias-btn:not(.incidencias-btn--primary) .incidencias-inline-spinner,
       .incidencias-detail-btn .incidencias-inline-spinner{
-        border-color:rgba(15,23,42,.18);
+        border-color:rgba(15,23,42,.16);
         border-top-color:currentColor;
+      }
+
+      .incidencias-table-loading{
+        padding:12px 18px 16px;
+        display:grid;
+        gap:12px;
+      }
+
+      .incidencias-table-loading-row{
+        display:grid;
+        grid-template-columns:44px minmax(220px, 1.5fr) 120px 140px 140px 90px 120px;
+        gap:12px;
+        align-items:center;
+      }
+
+      .incidencias-table-loading-copy{
+        display:grid;
+        gap:7px;
+      }
+
+      .incidencias-skeleton{
+        position:relative;
+        overflow:hidden;
+        border-radius:999px;
+        background:rgba(148,163,184,.14);
+      }
+
+      .incidencias-skeleton::after{
+        content:"";
+        position:absolute;
+        inset:0;
+        transform:translateX(-100%);
+        background:linear-gradient(
+          90deg,
+          transparent,
+          rgba(255,255,255,.55),
+          transparent
+        );
+        animation:incidenciasSkeleton 1.2s ease-in-out infinite;
+      }
+
+      .incidencias-skeleton--avatar{
+        width:44px;
+        height:44px;
+        border-radius:999px;
+      }
+
+      .incidencias-skeleton--xs{
+        width:120px;
+        height:10px;
+      }
+
+      .incidencias-skeleton--lg{
+        width:74%;
+        height:14px;
+      }
+
+      .incidencias-skeleton--md{
+        width:56%;
+        height:12px;
+      }
+
+      .incidencias-skeleton--pill{
+        width:86px;
+        height:30px;
+      }
+
+      .incidencias-skeleton--date{
+        width:124px;
+        height:12px;
+      }
+
+      .incidencias-skeleton--btn{
+        width:98px;
+        height:34px;
       }
 
       .incidencias-empty{
         display:grid;
         justify-items:center;
         gap:8px;
-        padding:54px 24px 58px;
+        padding:44px 20px 48px;
         text-align:center;
       }
 
       .incidencias-empty-title{
         margin:0;
-        font-size:20px;
-        font-weight:800;
+        font-size:18px;
+        font-weight:760;
         color:var(--text-strong, #111827);
       }
 
       .incidencias-empty-text{
         margin:0;
-        font-size:14px;
-        line-height:1.6;
+        font-size:13px;
+        line-height:1.55;
         color:var(--text-dim, #6b7280);
       }
 
@@ -1100,33 +1241,37 @@ function renderStyles() {
         to{ transform:rotate(360deg); }
       }
 
+      @keyframes incidenciasSkeleton{
+        to{ transform:translateX(100%); }
+      }
+
       [data-theme="light"] .incidencias-hero,
       [data-theme="light"] .incidencias-history{
         background:
-          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 34%),
-          linear-gradient(180deg, rgba(255,255,255,.96), rgba(249,250,252,.94));
+          linear-gradient(180deg, rgba(255,255,255,.82), rgba(248,250,252,.74)),
+          rgba(255,255,255,.82);
         box-shadow:
-          0 16px 38px rgba(15,23,42,.05),
-          0 0 0 1px rgba(255,255,255,.74) inset;
+          0 12px 28px rgba(15,23,42,.035),
+          0 0 0 1px rgba(255,255,255,.72) inset;
       }
 
       [data-theme="light"] .incidencias-stat-card{
         background:
-          linear-gradient(180deg, rgba(255,255,255,.72), rgba(255,255,255,.42)),
-          rgba(255,255,255,.58);
+          linear-gradient(180deg, rgba(255,255,255,.78), rgba(255,255,255,.48)),
+          rgba(255,255,255,.56);
       }
 
       @media (max-width: 1240px){
-        .incidencias-hero{
-          padding:24px 24px 26px;
-        }
-
         .incidencias-page-title{
-          font-size:clamp(32px, 4vw, 54px);
+          font-size:clamp(24px, 2.4vw, 36px);
         }
       }
 
       @media (max-width: 1180px){
+        .incidencias-hero{
+          padding:20px;
+        }
+
         .incidencias-hero-top{
           grid-template-columns:1fr;
         }
@@ -1148,21 +1293,21 @@ function renderStyles() {
 
       @media (max-width: 760px){
         .incidencias-view-root{
-          gap:18px;
+          gap:16px;
         }
 
         .incidencias-hero{
-          padding:22px 18px 20px;
-          border-radius:22px;
+          padding:18px 16px;
+          border-radius:20px;
         }
 
         .incidencias-history{
-          border-radius:22px;
+          border-radius:20px;
         }
 
         .incidencias-history-head{
           grid-template-columns:1fr;
-          padding:16px 16px 14px;
+          padding:14px 14px 12px;
         }
 
         .incidencias-pagination{
@@ -1174,13 +1319,13 @@ function renderStyles() {
         }
 
         .incidencias-page-title{
-          font-size:clamp(30px, 9vw, 46px);
-          line-height:.98;
+          font-size:clamp(24px, 8vw, 34px);
+          line-height:1;
           white-space:normal;
         }
 
         .incidencias-page-subtitle{
-          font-size:15px;
+          font-size:14px;
         }
       }
     </style>
@@ -1193,7 +1338,9 @@ function renderStyles() {
 
 export function renderHeader(input = {}) {
   const data = safeObject(input);
-  const items = safeArray(first(data.items, data.rows, data.tickets, data.incidencias));
+  const items = safeArray(
+    first(data.items, data.rows, data.tickets, data.incidencias)
+  );
   const state = safeObject(data.state);
 
   const stats = computeStats(items);
@@ -1291,10 +1438,14 @@ export function renderHeader(input = {}) {
 
 export function renderTable(input = {}) {
   const data = safeObject(input);
-  const items = safeArray(first(data.items, data.rows, data.tickets, data.incidencias));
+  const items = safeArray(
+    first(data.items, data.rows, data.tickets, data.incidencias)
+  );
   const state = safeObject(data.state);
 
   const pagination = getPagination(items, state);
+  const loading = Boolean(state.loading);
+  const refreshing = Boolean(state.refreshing);
 
   return `
     <section class="incidencias-history">
@@ -1311,7 +1462,7 @@ export function renderTable(input = {}) {
             type="button"
             class="incidencias-pagination-btn"
             data-action="prev-page"
-            ${pagination.currentPage <= 1 ? 'disabled aria-disabled="true"' : ""}
+            ${pagination.currentPage <= 1 || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
           >
             Anterior
           </button>
@@ -1320,7 +1471,7 @@ export function renderTable(input = {}) {
             type="button"
             class="incidencias-pagination-btn"
             data-action="next-page"
-            ${pagination.currentPage >= pagination.totalPages ? 'disabled aria-disabled="true"' : ""}
+            ${pagination.currentPage >= pagination.totalPages || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
           >
             Siguiente
           </button>
@@ -1328,37 +1479,51 @@ export function renderTable(input = {}) {
       </div>
 
       ${
-        pagination.pageItems.length
-          ? `
-            <div class="incidencias-table-shell">
-              <table class="incidencias-table" role="table" aria-label="Listado de incidencias">
-                <colgroup>
-                  <col style="width:42%;">
-                  <col style="width:12%;">
-                  <col style="width:15%;">
-                  <col style="width:15%;">
-                  <col style="width:8%;">
-                  <col style="width:8%;">
-                </colgroup>
+        loading && !pagination.pageItems.length
+          ? renderTableLoading(Math.max(3, safeNumber(first(state.pageSize, 5), 5)))
+          : `
+            <div class="incidencias-table-wrap${refreshing ? " is-refreshing" : ""}">
+              ${
+                refreshing
+                  ? renderTableLoading(Math.min(4, Math.max(3, pagination.pageItems.length || 3)))
+                  : ""
+              }
 
-                <thead>
-                  <tr>
-                    <th>Incidencia</th>
-                    <th>Estado</th>
-                    <th>Fecha de creación</th>
-                    <th>Última novedad</th>
-                    <th>Importe</th>
-                    <th>Acciones</th>
-                  </tr>
-                </thead>
+              ${
+                pagination.pageItems.length
+                  ? `
+                    <div class="incidencias-table-shell">
+                      <table class="incidencias-table" role="table" aria-label="Listado de incidencias">
+                        <colgroup>
+                          <col style="width:43%;">
+                          <col style="width:12%;">
+                          <col style="width:15%;">
+                          <col style="width:15%;">
+                          <col style="width:7%;">
+                          <col style="width:8%;">
+                        </colgroup>
 
-                <tbody>
-                  ${pagination.pageItems.map((item) => renderRow(item, state)).join("")}
-                </tbody>
-              </table>
+                        <thead>
+                          <tr>
+                            <th>Incidencia</th>
+                            <th>Estado</th>
+                            <th>Fecha de creación</th>
+                            <th>Última novedad</th>
+                            <th>Importe</th>
+                            <th>Acciones</th>
+                          </tr>
+                        </thead>
+
+                        <tbody>
+                          ${pagination.pageItems.map((item) => renderRow(item, state)).join("")}
+                        </tbody>
+                      </table>
+                    </div>
+                  `
+                  : renderEmptyState()
+              }
             </div>
           `
-          : renderEmptyState()
       }
     </section>
   `;

@@ -1,12 +1,11 @@
 /* =========================================================
-   Onion SPA - Usuarios Template
+   Onion SPA - Usuarios Table Template
    Archivo: src/views/usuarios/usuarios.table.template.js
 
-   FINAL PRODUCTION TEMPLATE · USERS VIEW · 10/10
+   FINAL PRODUCTION TEMPLATE · USERS VIEW · CLON 1:1 INCIDENCIAS
 
    RESPONSABILIDADES:
    - render del hero/header de usuarios
-   - render de estados loading / error / empty
    - render de tabla productiva con paginación real
    - compatibilidad con usuariosView.js
    - estado loading visual en "Ver detalle"
@@ -15,6 +14,12 @@
    - soporte para envelope backend { ok, count, users }
    - lenguaje visual alineado con incidencias
    - versión desktop + cards mobile
+   - sin columna rol
+   - sin columna equipo
+   - sin columna contacto duplicada
+   - columna email dedicada
+   - columna ubicación solo ciudad
+   - actividad mostrando solo última conexión
 ========================================================= */
 
 import { usuariosState } from "./usuarios.state.js";
@@ -271,33 +276,6 @@ function getUsuarioStatusValue(item = {}) {
   );
 }
 
-function getUsuarioRoleValue(item = {}) {
-  return safeText(
-    first(
-      item.role,
-      item.rol,
-      item.userRole,
-      item.profile,
-      item.tipo
-    ),
-    "user"
-  );
-}
-
-function getDepartment(item = {}) {
-  return safeText(
-    first(
-      item?.department?.name,
-      item?.team?.name,
-      item?.area?.name,
-      item.department,
-      item.team,
-      item.area
-    ),
-    "Sin equipo"
-  );
-}
-
 function getCreatedAt(item = {}) {
   return first(
     item.createdAt,
@@ -325,7 +303,11 @@ function getLastLoginAt(item = {}) {
     item.lastLoginAt,
     item.last_login_at,
     item.lastAccessAt,
-    item.ultimoAcceso
+    item.ultimoAcceso,
+    item?.raw?.lastLoginAt,
+    item?.raw?.last_login_at,
+    item?.raw?.lastAccessAt,
+    item?.raw?.ultimoAcceso
   );
 }
 
@@ -375,15 +357,31 @@ function getUsuarioAvatarUrl(item = {}) {
   );
 }
 
-function getAvatarToneSeed(item = {}) {
+function getUsuarioLocation(item = {}) {
   return safeText(
     first(
-      getUsuarioId(item),
-      getUsuarioName(item),
-      getUsuarioEmail(item),
-      getUsuarioCode(item)
+      item.city,
+      item.ciudad,
+      item.locationCity,
+      item.ubicacion?.ciudad,
+      item.ubicacion?.city,
+      item.address?.city,
+      item.direccion?.ciudad,
+      item.profile?.city,
+      item.profile?.ciudad,
+      item.usuario?.city,
+      item.usuario?.ciudad,
+      item?.raw?.city,
+      item?.raw?.ciudad,
+      item?.raw?.locationCity,
+      item?.raw?.ubicacion?.ciudad,
+      item?.raw?.ubicacion?.city,
+      item?.raw?.address?.city,
+      item?.raw?.direccion?.ciudad,
+      item?.raw?.profile?.city,
+      item?.raw?.profile?.ciudad
     ),
-    "onion"
+    "Sin ciudad"
   );
 }
 
@@ -424,26 +422,6 @@ function getStatusLabel(value = "") {
   return safeText(value, "Activo");
 }
 
-function getRoleKey(value = "") {
-  const key = safeLower(value);
-
-  if (["superadmin", "super_admin", "root"].includes(key)) return "superadmin";
-  if (["admin", "administrator", "administrador"].includes(key)) return "admin";
-  if (["support", "soporte", "agent", "agente"].includes(key)) return "support";
-  if (["manager", "gestor", "gerente"].includes(key)) return "manager";
-  return "user";
-}
-
-function getRoleLabel(value = "") {
-  const key = getRoleKey(value);
-
-  if (key === "superadmin") return "Superadmin";
-  if (key === "admin") return "Admin";
-  if (key === "support") return "Soporte";
-  if (key === "manager") return "Manager";
-  return "Usuario";
-}
-
 /* =========================================================
    STATS
 ========================================================= */
@@ -462,16 +440,6 @@ function isBlockedLike(item = {}) {
   );
 }
 
-function isAdminLike(item = {}) {
-  return ["superadmin", "admin"].includes(
-    getRoleKey(getUsuarioRoleValue(item))
-  );
-}
-
-function hasDepartment(item = {}) {
-  return getDepartment(item) !== "Sin equipo";
-}
-
 function computeStats(items = []) {
   const list = safeArray(items);
 
@@ -479,8 +447,6 @@ function computeStats(items = []) {
     totalUsuarios: list.length,
     activeCount: list.filter((item) => isActiveLike(item)).length,
     pendingCount: list.filter((item) => isPendingLike(item)).length,
-    adminCount: list.filter((item) => isAdminLike(item)).length,
-    assignedCount: list.filter((item) => hasDepartment(item)).length,
     blockedCount: list.filter((item) => isBlockedLike(item)).length,
   };
 }
@@ -568,17 +534,7 @@ function getFallbackAvatarTheme(seed = "") {
     },
   ];
 
-  return themes[getStableHash(seed) % themes.length];
-}
-
-function getStatusChipClass(value = "") {
-  const key = getStatusKey(value);
-  return `usuarios-chip usuarios-chip--${key}`;
-}
-
-function getRoleChipClass(value = "") {
-  const key = getRoleKey(value);
-  return `usuarios-chip usuarios-chip--role usuarios-chip--role-${key}`;
+  return themes[getStableHash(value) % themes.length];
 }
 
 function renderSpinner(label = "") {
@@ -590,28 +546,29 @@ function renderSpinner(label = "") {
   `;
 }
 
-function renderAvatar(item = {}, { size = 48, radius = 16 } = {}) {
+function renderAvatar(item = {}) {
+  const fullName = getUsuarioName(item);
   const initials = getUsuarioInitials(item);
   const avatarUrl = getUsuarioAvatarUrl(item);
-  const theme = getFallbackAvatarTheme(getAvatarToneSeed(item));
+  const theme = getFallbackAvatarTheme(
+    first(getUsuarioId(item), fullName, getUsuarioEmail(item), getUsuarioCode(item))
+  );
 
   if (avatarUrl) {
     return `
       <div
         class="usuarios-avatar"
         style="
-          --avatar-size:${size}px;
-          --avatar-radius:${radius}px;
           --avatar-fallback-bg:${theme.bg};
           --avatar-fallback-border:${theme.border};
           --avatar-fallback-text:${theme.text};
         "
-        title="${escapeHtml(getUsuarioName(item))}"
-        aria-label="${escapeHtml(getUsuarioName(item))}"
+        title="${escapeHtml(fullName)}"
+        aria-label="${escapeHtml(fullName)}"
       >
         <img
           src="${escapeHtml(avatarUrl)}"
-          alt="${escapeHtml(getUsuarioName(item))}"
+          alt="${escapeHtml(fullName)}"
           loading="lazy"
           referrerpolicy="no-referrer"
           onerror="this.style.display='none'; this.parentNode.setAttribute('data-fallback','true');"
@@ -625,17 +582,40 @@ function renderAvatar(item = {}, { size = 48, radius = 16 } = {}) {
     <div
       class="usuarios-avatar usuarios-avatar--fallback"
       style="
-        --avatar-size:${size}px;
-        --avatar-radius:${radius}px;
         --avatar-fallback-bg:${theme.bg};
         --avatar-fallback-border:${theme.border};
         --avatar-fallback-text:${theme.text};
       "
-      title="${escapeHtml(getUsuarioName(item))}"
-      aria-label="${escapeHtml(getUsuarioName(item))}"
+      title="${escapeHtml(fullName)}"
+      aria-label="${escapeHtml(fullName)}"
     >
       <span class="usuarios-avatar-fallback">${escapeHtml(initials)}</span>
     </div>
+  `;
+}
+
+function renderStatusChip(item = {}) {
+  const rawStatus = first(
+    item.status,
+    item.estado,
+    item.state,
+    item?.raw?.status,
+    item?.raw?.estado,
+    item?.raw?.state,
+    typeof item.isActive === "boolean"
+      ? item.isActive
+        ? "active"
+        : "inactive"
+      : null
+  );
+
+  const key = getStatusKey(rawStatus);
+  const label = getStatusLabel(rawStatus);
+
+  return `
+    <span class="usuarios-chip usuarios-chip--${escapeHtml(key)}">
+      ${escapeHtml(label)}
+    </span>
   `;
 }
 
@@ -648,50 +628,52 @@ function renderStyles() {
     <style>
       .usuarios-view-root{
         display:grid;
-        gap:24px;
+        gap:18px;
       }
 
       .usuarios-hero{
         position:relative;
         overflow:hidden;
-        border-radius:28px;
-        border:1px solid var(--panel-border, rgba(255,255,255,.08));
+        border-radius:24px;
+        border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 88%, transparent);
         background:
-          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 34%),
-          linear-gradient(180deg, var(--panel-bg, rgba(255,255,255,.84)), var(--panel-bg, rgba(255,255,255,.84)));
-        box-shadow:var(--shadow-soft, 0 20px 50px rgba(0,0,0,.08));
-        padding:28px 32px 30px;
+          linear-gradient(180deg, rgba(255,255,255,.58), rgba(255,255,255,.36)),
+          color-mix(in srgb, var(--panel-bg, #ffffff) 92%, transparent);
+        box-shadow:
+          0 10px 30px rgba(15,23,42,.04),
+          0 1px 0 rgba(255,255,255,.55) inset;
+        padding:22px 24px 22px;
       }
 
       .usuarios-hero-top{
         display:grid;
         grid-template-columns:minmax(0, 1fr) auto;
-        gap:20px;
+        gap:18px;
         align-items:start;
       }
 
       .usuarios-hero-copy{
         min-width:0;
         display:grid;
-        gap:12px;
+        gap:10px;
       }
 
       .usuarios-page-title{
         margin:0;
         max-width:100%;
-        font-size:clamp(32px, 4.2vw, 58px);
-        line-height:.95;
-        letter-spacing:-.055em;
-        font-weight:800;
+        font-size:clamp(26px, 2.6vw, 42px);
+        line-height:.98;
+        letter-spacing:-.05em;
+        font-weight:780;
         color:var(--text-strong, #0f172a);
         white-space:nowrap;
       }
 
       .usuarios-page-subtitle{
         margin:0;
-        max-width:980px;
-        font-size:16px;
-        line-height:1.62;
+        max-width:860px;
+        font-size:15px;
+        line-height:1.58;
         color:var(--text-dim, #6b7280);
       }
 
@@ -699,70 +681,79 @@ function renderStyles() {
         display:flex;
         align-items:flex-start;
         justify-content:flex-end;
-        gap:12px;
+        gap:10px;
         flex-wrap:wrap;
       }
 
       .usuarios-btn{
-        min-height:50px;
-        padding:0 18px;
-        border-radius:16px;
-        border:1px solid var(--border-soft, rgba(15,23,42,.08));
-        background:var(--surface-1, rgba(255,255,255,.74));
+        min-height:44px;
+        padding:0 16px;
+        border-radius:14px;
+        border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 92%, transparent);
+        background:rgba(255,255,255,.72);
         color:var(--text-strong, #111827);
-        font-size:14px;
-        font-weight:700;
+        font-size:13px;
+        font-weight:680;
         line-height:1;
         cursor:pointer;
         display:inline-flex;
         align-items:center;
         justify-content:center;
         text-decoration:none;
-        box-shadow:0 10px 24px rgba(15,23,42,.04);
+        box-shadow:0 4px 14px rgba(15,23,42,.04);
         transition:
-          transform .18s ease,
-          box-shadow .18s ease,
-          border-color .18s ease,
-          background .18s ease,
-          opacity .18s ease;
+          transform .16s ease,
+          box-shadow .16s ease,
+          border-color .16s ease,
+          background .16s ease,
+          opacity .16s ease;
       }
 
       .usuarios-btn:hover{
         transform:translateY(-1px);
-        box-shadow:0 16px 32px rgba(15,23,42,.08);
+        box-shadow:0 8px 18px rgba(15,23,42,.06);
       }
 
       .usuarios-btn--primary{
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent);
-        background:var(--accent, #7c5cff);
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 16%, rgba(15,23,42,.06));
+        background:linear-gradient(
+          180deg,
+          color-mix(in srgb, var(--accent, #7c5cff) 86%, white 14%),
+          color-mix(in srgb, var(--accent, #7c5cff) 92%, black 8%)
+        );
         color:#fff;
-        box-shadow:0 14px 30px color-mix(in srgb, var(--accent, #7c5cff) 22%, transparent);
+        box-shadow:0 8px 20px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
       }
 
       .usuarios-btn.is-loading,
-      .usuarios-open-btn.is-loading{
+      .usuarios-detail-btn.is-loading{
         cursor:wait;
         opacity:.9;
       }
 
+      .usuarios-btn:disabled,
+      .usuarios-detail-btn:disabled{
+        pointer-events:none;
+      }
+
       .usuarios-hero-meta{
-        margin-top:18px;
+        margin-top:14px;
         display:flex;
         align-items:center;
-        gap:10px;
+        gap:8px;
         flex-wrap:wrap;
       }
 
       .usuarios-meta-pill{
-        min-height:34px;
-        padding:0 14px;
+        min-height:30px;
+        padding:0 12px;
         border-radius:999px;
-        border:1px solid var(--border-soft, rgba(15,23,42,.08));
-        background:var(--surface-1, rgba(255,255,255,.72));
-        color:var(--text-dim, #6b7280);
-        font-size:12px;
-        font-weight:800;
-        letter-spacing:.05em;
+        border:1px solid rgba(15,23,42,.06);
+        background:rgba(255,255,255,.52);
+        color:#7a8392;
+        font-size:11px;
+        font-weight:760;
+        letter-spacing:.045em;
         text-transform:uppercase;
         display:inline-flex;
         align-items:center;
@@ -770,108 +761,126 @@ function renderStyles() {
       }
 
       .usuarios-stats{
-        margin-top:22px;
+        margin-top:16px;
         display:grid;
-        grid-template-columns:repeat(4, minmax(0, 1fr));
-        gap:16px;
+        grid-template-columns:repeat(2, minmax(0, 280px));
+        gap:12px;
       }
 
       .usuarios-stat-card{
         display:grid;
-        gap:10px;
-        min-height:150px;
-        padding:22px 22px 20px;
-        border-radius:24px;
-        border:1px solid var(--border-soft, rgba(15,23,42,.08));
+        gap:8px;
+        min-height:124px;
+        padding:16px 18px;
+        border-radius:20px;
+        border:1px solid rgba(15,23,42,.06);
         background:
-          linear-gradient(180deg, rgba(255,255,255,.22), rgba(255,255,255,.08)),
-          var(--surface-1, rgba(255,255,255,.68));
+          linear-gradient(180deg, rgba(255,255,255,.58), rgba(255,255,255,.22)),
+          rgba(255,255,255,.46);
+        box-shadow:0 6px 20px rgba(15,23,42,.03);
       }
 
-      .usuarios-stat-card--accent{
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 22%, var(--border-soft, rgba(15,23,42,.08)));
+      .usuarios-stat-card--active{
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 16%, rgba(15,23,42,.06));
+      }
+
+      .usuarios-stat-card--blocked{
+        border-color:color-mix(in srgb, var(--success-strong, #36c690) 18%, rgba(15,23,42,.06));
       }
 
       .usuarios-stat-label{
-        font-size:12px;
-        font-weight:800;
+        font-size:11px;
+        font-weight:760;
         letter-spacing:.08em;
         text-transform:uppercase;
-        color:var(--text-dim, #6b7280);
+        color:#7b8494;
       }
 
       .usuarios-stat-value{
-        font-size:52px;
-        line-height:.9;
-        letter-spacing:-.05em;
-        font-weight:800;
+        font-size:42px;
+        line-height:.92;
+        letter-spacing:-.045em;
+        font-weight:780;
         color:var(--text-strong, #111827);
       }
 
       .usuarios-stat-text{
         font-size:14px;
-        line-height:1.5;
+        line-height:1.45;
         color:var(--text-dim, #6b7280);
       }
 
       .usuarios-history{
         overflow:hidden;
-        border-radius:28px;
-        border:1px solid var(--panel-border, rgba(255,255,255,.08));
-        background:var(--panel-bg, rgba(255,255,255,.84));
-        box-shadow:var(--shadow-soft, 0 20px 50px rgba(0,0,0,.08));
+        border-radius:24px;
+        border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 88%, transparent);
+        background:
+          linear-gradient(180deg, rgba(255,255,255,.6), rgba(255,255,255,.4)),
+          color-mix(in srgb, var(--panel-bg, #ffffff) 94%, transparent);
+        box-shadow:
+          0 10px 30px rgba(15,23,42,.04),
+          0 1px 0 rgba(255,255,255,.5) inset;
       }
 
       .usuarios-history-head{
         display:grid;
         grid-template-columns:minmax(0, 1fr) auto;
-        gap:18px;
+        gap:14px;
         align-items:start;
-        padding:18px 20px 16px;
-        border-bottom:1px solid var(--border-soft, rgba(15,23,42,.08));
+        padding:14px 18px 12px;
+        border-bottom:1px solid rgba(15,23,42,.06);
       }
 
       .usuarios-history-copy{
         min-width:0;
         display:grid;
-        gap:4px;
+        gap:2px;
       }
 
       .usuarios-history-title{
         margin:0;
-        font-size:18px;
+        font-size:16px;
         line-height:1.2;
-        font-weight:800;
+        font-weight:760;
         color:var(--text-strong, #111827);
       }
 
       .usuarios-history-subtitle{
         margin:0;
-        font-size:13px;
-        line-height:1.45;
-        color:var(--text-dim, #6b7280);
+        font-size:12px;
+        line-height:1.4;
+        color:var(--text-dim, #7b8494);
       }
 
       .usuarios-pagination{
         display:flex;
-        gap:10px;
+        gap:8px;
         flex-wrap:wrap;
       }
 
       .usuarios-pagination-btn{
-        min-height:42px;
-        padding:0 16px;
-        border-radius:14px;
-        border:1px solid var(--border-soft, rgba(15,23,42,.08));
-        background:var(--surface-1, rgba(255,255,255,.72));
-        color:var(--text-strong, #111827);
-        font-size:13px;
-        font-weight:700;
+        min-height:38px;
+        padding:0 14px;
+        border-radius:13px;
+        border:1px solid rgba(15,23,42,.06);
+        background:rgba(255,255,255,.66);
+        color:#273142;
+        font-size:12px;
+        font-weight:680;
         cursor:pointer;
         display:inline-flex;
         align-items:center;
         justify-content:center;
         text-decoration:none;
+        transition:
+          background .16s ease,
+          border-color .16s ease,
+          opacity .16s ease;
+      }
+
+      .usuarios-pagination-btn:hover{
+        background:rgba(255,255,255,.9);
+        border-color:rgba(15,23,42,.10);
       }
 
       .usuarios-pagination-btn[disabled],
@@ -880,37 +889,47 @@ function renderStyles() {
         cursor:not-allowed;
       }
 
-      .usuarios-table-shell{
+      .usuarios-table-wrap{
         position:relative;
+      }
+
+      .usuarios-table-wrap.is-refreshing .usuarios-table-shell{
+        opacity:.58;
+        filter:blur(.8px);
+        transition:opacity .18s ease, filter .18s ease;
+      }
+
+      .usuarios-table-shell{
         width:100%;
         overflow-x:auto;
         overflow-y:hidden;
+        transition:opacity .18s ease, filter .18s ease;
       }
 
       .usuarios-table{
         width:100%;
         border-collapse:separate;
         border-spacing:0;
-        min-width:1240px;
+        min-width:1120px;
       }
 
       .usuarios-table thead th{
-        padding:16px 18px;
+        padding:12px 18px;
         text-align:left;
-        font-size:12px;
-        font-weight:800;
+        font-size:11px;
+        font-weight:760;
         letter-spacing:.08em;
         text-transform:uppercase;
-        color:var(--text-faint, #8a91a0);
-        background:color-mix(in srgb, var(--surface-1, #fff) 88%, transparent);
-        border-bottom:1px solid var(--border-soft, rgba(15,23,42,.08));
+        color:#97a0af;
+        background:rgba(248,250,252,.62);
+        border-bottom:1px solid rgba(15,23,42,.06);
         white-space:nowrap;
       }
 
       .usuarios-table tbody td{
-        padding:18px 18px;
+        padding:14px 18px;
         vertical-align:middle;
-        border-bottom:1px solid var(--border-soft, rgba(15,23,42,.08));
+        border-bottom:1px solid rgba(15,23,42,.055);
       }
 
       .usuarios-table tbody tr:last-child td{
@@ -918,34 +937,30 @@ function renderStyles() {
       }
 
       .usuarios-row{
-        transition:background .18s ease, opacity .18s ease;
+        transition:background .16s ease;
       }
 
       .usuarios-row:hover{
-        background:color-mix(in srgb, var(--accent, #7c5cff) 2.5%, transparent);
-      }
-
-      .usuarios-row.is-opening:hover{
-        background:color-mix(in srgb, var(--warning-strong, #ffbc42) 3.5%, transparent);
+        background:rgba(124,92,255,.018);
       }
 
       .usuarios-main{
         display:grid;
-        grid-template-columns:48px minmax(0, 1fr);
-        gap:14px;
+        grid-template-columns:44px minmax(0, 1fr);
+        gap:12px;
         align-items:center;
         min-width:0;
       }
 
       .usuarios-avatar{
         position:relative;
-        width:var(--avatar-size, 48px);
-        height:var(--avatar-size, 48px);
-        border-radius:var(--avatar-radius, 16px);
+        width:44px;
+        height:44px;
+        border-radius:999px;
         overflow:hidden;
-        flex:0 0 var(--avatar-size, 48px);
-        background:var(--avatar-fallback-bg, rgba(124,92,255,.16));
-        border:1px solid var(--avatar-fallback-border, rgba(124,92,255,.20));
+        flex:0 0 44px;
+        background:var(--avatar-fallback-bg, linear-gradient(135deg, rgba(124,92,255,.12), rgba(139,92,246,.24)));
+        border:1px solid var(--avatar-fallback-border, rgba(124,92,255,.18));
       }
 
       .usuarios-avatar img{
@@ -962,7 +977,7 @@ function renderStyles() {
         align-items:center;
         justify-content:center;
         font-size:18px;
-        font-weight:800;
+        font-weight:780;
         color:var(--avatar-fallback-text, #fff);
         letter-spacing:-.03em;
       }
@@ -982,23 +997,23 @@ function renderStyles() {
       .usuarios-main-copy{
         min-width:0;
         display:grid;
-        gap:4px;
+        gap:3px;
       }
 
       .usuarios-user-id{
         font-size:12px;
-        line-height:1.2;
-        font-weight:800;
-        letter-spacing:.06em;
-        color:#4b5563;
+        line-height:1.15;
+        font-weight:760;
+        letter-spacing:.055em;
+        color:#667084;
         text-transform:uppercase;
       }
 
       .usuarios-user-subject{
-        font-size:16px;
-        line-height:1.18;
-        font-weight:800;
-        letter-spacing:-.03em;
+        font-size:15px;
+        line-height:1.14;
+        font-weight:760;
+        letter-spacing:-.025em;
         color:var(--text-strong, #111827);
         overflow:hidden;
         text-overflow:ellipsis;
@@ -1009,80 +1024,50 @@ function renderStyles() {
 
       .usuarios-user-description{
         font-size:13px;
-        line-height:1.35;
-        color:var(--text-dim, #6b7280);
+        line-height:1.3;
+        color:#8a93a3;
         overflow:hidden;
         text-overflow:ellipsis;
         white-space:nowrap;
       }
 
       .usuarios-chip{
-        min-height:34px;
-        padding:0 14px;
+        min-height:32px;
+        padding:0 12px;
         border-radius:999px;
         display:inline-flex;
         align-items:center;
         justify-content:center;
-        font-size:12px;
-        font-weight:800;
-        letter-spacing:.05em;
+        font-size:11px;
+        font-weight:760;
+        letter-spacing:.045em;
         text-transform:uppercase;
         white-space:nowrap;
         border:1px solid transparent;
       }
 
-      .usuarios-chip--active{
-        color:#1f7a4d;
-        background:rgba(54,198,144,.14);
-        border-color:rgba(54,198,144,.28);
+      .usuarios-chip--pending{
+        color:#b7791f;
+        background:rgba(255,188,66,.11);
+        border-color:rgba(255,188,66,.22);
       }
 
-      .usuarios-chip--pending{
-        color:#c57a13;
-        background:rgba(255,188,66,.14);
-        border-color:rgba(255,188,66,.30);
+      .usuarios-chip--active{
+        color:#6d53d7;
+        background:rgba(124,92,255,.09);
+        border-color:rgba(124,92,255,.18);
       }
 
       .usuarios-chip--blocked{
-        color:#c24a4a;
-        background:rgba(255,107,107,.14);
-        border-color:rgba(255,107,107,.28);
+        color:#1778ab;
+        background:rgba(125,211,252,.12);
+        border-color:rgba(125,211,252,.24);
       }
 
       .usuarios-chip--inactive{
-        color:#7b8494;
-        background:rgba(15,23,42,.03);
-        border-color:rgba(15,23,42,.08);
-      }
-
-      .usuarios-chip--role-superadmin{
-        color:#8f63ff;
-        background:rgba(179,136,255,.14);
-        border-color:rgba(179,136,255,.28);
-      }
-
-      .usuarios-chip--role-admin{
-        color:#c24a4a;
-        background:rgba(255,107,107,.12);
-        border-color:rgba(255,107,107,.24);
-      }
-
-      .usuarios-chip--role-support{
-        color:#2563eb;
-        background:rgba(96,165,250,.12);
-        border-color:rgba(96,165,250,.24);
-      }
-
-      .usuarios-chip--role-manager{
-        color:#b7791f;
-        background:rgba(255,188,66,.12);
-        border-color:rgba(255,188,66,.24);
-      }
-
-      .usuarios-chip--role-user{
-        color:#6b7280;
-        background:rgba(15,23,42,.03);
-        border-color:rgba(15,23,42,.08);
+        color:#258a59;
+        background:rgba(54,198,144,.10);
+        border-color:rgba(54,198,144,.22);
       }
 
       .usuarios-date-inline{
@@ -1090,33 +1075,23 @@ function renderStyles() {
         white-space:nowrap;
         font-size:13px;
         line-height:1.2;
-        font-weight:700;
+        font-weight:650;
         font-variant-numeric:tabular-nums;
-        color:#2f3747;
+        color:#344054;
       }
 
-      .usuarios-contact-block,
-      .usuarios-activity-block{
-        display:grid;
-        gap:4px;
-        min-width:0;
-      }
-
-      .usuarios-contact-primary,
-      .usuarios-activity-primary{
-        color:var(--text-strong, #111827);
+      .usuarios-email-inline,
+      .usuarios-location-inline,
+      .usuarios-activity-inline{
+        display:inline-block;
         font-size:13px;
-        line-height:1.3;
-        font-weight:700;
-        word-break:break-word;
-      }
-
-      .usuarios-contact-secondary,
-      .usuarios-activity-secondary{
-        color:var(--text-dim, #6b7280);
-        font-size:12px;
-        line-height:1.35;
-        word-break:break-word;
+        line-height:1.2;
+        font-weight:650;
+        color:#344054;
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        max-width:100%;
       }
 
       .usuarios-cell--actions{
@@ -1124,20 +1099,15 @@ function renderStyles() {
         white-space:nowrap;
       }
 
-      .usuarios-actions{
-        display:flex;
-        justify-content:flex-end;
-        gap:8px;
-        flex-wrap:wrap;
-      }
-
-      .usuarios-open-btn,
-      .usuarios-copy-btn{
+      .usuarios-detail-btn{
         width:auto;
         min-width:0;
-        min-height:40px;
-        padding:0 14px;
-        border-radius:14px;
+        min-height:34px;
+        padding:0 12px;
+        border-radius:12px;
+        border:1px solid rgba(15,23,42,.07);
+        background:rgba(255,255,255,.68);
+        color:#1f2937;
         font-size:13px;
         font-weight:700;
         line-height:1;
@@ -1146,92 +1116,167 @@ function renderStyles() {
         align-items:center;
         justify-content:center;
         white-space:nowrap;
+        box-shadow:none;
         transition:
-          border-color .18s ease,
-          background .18s ease,
-          transform .18s ease,
-          opacity .18s ease;
+          border-color .16s ease,
+          background .16s ease,
+          transform .16s ease,
+          opacity .16s ease;
       }
 
-      .usuarios-open-btn{
-        border:1px solid var(--border-soft, rgba(15,23,42,.08));
-        background:var(--surface-1, rgba(255,255,255,.74));
-        color:var(--text-strong, #111827);
-      }
-
-      .usuarios-copy-btn{
-        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent);
-        background:var(--accent, #7c5cff);
-        color:#fff;
-      }
-
-      .usuarios-open-btn:hover,
-      .usuarios-copy-btn:hover{
+      .usuarios-detail-btn:hover{
+        border-color:rgba(15,23,42,.11);
+        background:rgba(255,255,255,.9);
         transform:translateY(-1px);
       }
 
       .usuarios-inline-loading{
         display:inline-flex;
         align-items:center;
-        gap:8px;
+        gap:7px;
+        white-space:nowrap;
       }
 
       .usuarios-inline-spinner{
-        width:14px;
-        height:14px;
+        width:13px;
+        height:13px;
         border-radius:999px;
-        border:2px solid rgba(255,255,255,.28);
+        border:2px solid rgba(255,255,255,.30);
         border-top-color:currentColor;
         animation:usuariosSpin .78s linear infinite;
+        flex:0 0 auto;
       }
 
-      .usuarios-open-btn .usuarios-inline-spinner{
-        border-color:rgba(15,23,42,.18);
+      .usuarios-btn:not(.usuarios-btn--primary) .usuarios-inline-spinner,
+      .usuarios-detail-btn .usuarios-inline-spinner{
+        border-color:rgba(15,23,42,.16);
         border-top-color:currentColor;
+      }
+
+      .usuarios-table-loading{
+        padding:12px 18px 16px;
+        display:grid;
+        gap:12px;
+      }
+
+      .usuarios-table-loading-row{
+        display:grid;
+        grid-template-columns:44px minmax(220px, 1.5fr) 120px 140px 180px 130px 130px 120px;
+        gap:12px;
+        align-items:center;
+      }
+
+      .usuarios-table-loading-copy{
+        display:grid;
+        gap:7px;
+      }
+
+      .usuarios-skeleton{
+        position:relative;
+        overflow:hidden;
+        border-radius:999px;
+        background:rgba(148,163,184,.14);
+      }
+
+      .usuarios-skeleton::after{
+        content:"";
+        position:absolute;
+        inset:0;
+        transform:translateX(-100%);
+        background:linear-gradient(
+          90deg,
+          transparent,
+          rgba(255,255,255,.55),
+          transparent
+        );
+        animation:usuariosSkeleton 1.2s ease-in-out infinite;
+      }
+
+      .usuarios-skeleton--avatar{
+        width:44px;
+        height:44px;
+        border-radius:999px;
+      }
+
+      .usuarios-skeleton--xs{
+        width:120px;
+        height:10px;
+      }
+
+      .usuarios-skeleton--lg{
+        width:74%;
+        height:14px;
+      }
+
+      .usuarios-skeleton--md{
+        width:56%;
+        height:12px;
+      }
+
+      .usuarios-skeleton--pill{
+        width:86px;
+        height:30px;
+      }
+
+      .usuarios-skeleton--date{
+        width:124px;
+        height:12px;
+      }
+
+      .usuarios-skeleton--email{
+        width:160px;
+        height:12px;
+      }
+
+      .usuarios-skeleton--btn{
+        width:98px;
+        height:34px;
       }
 
       .usuarios-empty{
         display:grid;
         justify-items:center;
         gap:8px;
-        padding:54px 24px 58px;
+        padding:44px 20px 48px;
         text-align:center;
       }
 
       .usuarios-empty-title{
         margin:0;
-        font-size:20px;
-        font-weight:800;
+        font-size:18px;
+        font-weight:760;
         color:var(--text-strong, #111827);
       }
 
       .usuarios-empty-text{
         margin:0;
-        font-size:14px;
-        line-height:1.6;
+        font-size:13px;
+        line-height:1.55;
         color:var(--text-dim, #6b7280);
       }
 
       .usuarios-mobile-list{
         display:none;
-        gap:14px;
-        padding:14px;
+        gap:12px;
+        padding:12px;
       }
 
       .usuarios-mobile-card{
         display:grid;
-        gap:14px;
-        padding:18px;
+        gap:12px;
+        padding:16px;
         border-radius:18px;
-        border:1px solid var(--border-soft, rgba(15,23,42,.08));
-        background:var(--surface-1, rgba(255,255,255,.76));
+        border:1px solid rgba(15,23,42,.06);
+        background:
+          linear-gradient(180deg, rgba(255,255,255,.58), rgba(255,255,255,.22)),
+          rgba(255,255,255,.46);
       }
 
       .usuarios-mobile-top{
         display:flex;
+        gap:12px;
         align-items:flex-start;
         justify-content:space-between;
-        gap:12px;
       }
 
       .usuarios-mobile-meta{
@@ -1245,14 +1290,14 @@ function renderStyles() {
         gap:4px;
         padding:12px;
         border-radius:14px;
-        border:1px solid var(--border-soft, rgba(15,23,42,.08));
-        background:var(--surface-glass, rgba(255,255,255,.56));
+        border:1px solid rgba(15,23,42,.06);
+        background:rgba(255,255,255,.52);
       }
 
       .usuarios-mobile-meta-label{
         font-size:11px;
-        color:var(--text-faint, #8a91a0);
-        font-weight:800;
+        color:#97a0af;
+        font-weight:760;
         letter-spacing:.05em;
         text-transform:uppercase;
       }
@@ -1271,70 +1316,42 @@ function renderStyles() {
         flex-wrap:wrap;
       }
 
-      .usuarios-table-overlay{
-        position:absolute;
-        inset:0;
-        display:grid;
-        place-items:center;
-        padding:18px;
-        background:color-mix(in srgb, var(--surface-1, #fff) 74%, transparent);
-        backdrop-filter:blur(4px);
-        -webkit-backdrop-filter:blur(4px);
-        z-index:4;
-      }
-
-      .usuarios-table-shell::-webkit-scrollbar{
-        height:10px;
-        width:10px;
-      }
-
-      .usuarios-table-shell::-webkit-scrollbar-thumb{
-        background:color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft));
-        border-radius:999px;
-      }
-
-      .usuarios-table-shell::-webkit-scrollbar-track{
-        background:transparent;
-      }
-
       @keyframes usuariosSpin{
         to{ transform:rotate(360deg); }
       }
 
-      @keyframes usuariosPulse{
-        0% { transform:scale(.92); opacity:.75; }
-        50% { transform:scale(1.08); opacity:1; }
-        100% { transform:scale(.92); opacity:.75; }
+      @keyframes usuariosSkeleton{
+        to{ transform:translateX(100%); }
       }
 
       [data-theme="light"] .usuarios-hero,
       [data-theme="light"] .usuarios-history{
         background:
-          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 34%),
-          linear-gradient(180deg, rgba(255,255,255,.96), rgba(249,250,252,.94));
+          linear-gradient(180deg, rgba(255,255,255,.82), rgba(248,250,252,.74)),
+          rgba(255,255,255,.82);
         box-shadow:
-          0 16px 38px rgba(15,23,42,.05),
-          0 0 0 1px rgba(255,255,255,.74) inset;
+          0 12px 28px rgba(15,23,42,.035),
+          0 0 0 1px rgba(255,255,255,.72) inset;
       }
 
       [data-theme="light"] .usuarios-stat-card,
       [data-theme="light"] .usuarios-mobile-card{
         background:
-          linear-gradient(180deg, rgba(255,255,255,.72), rgba(255,255,255,.42)),
-          rgba(255,255,255,.58);
+          linear-gradient(180deg, rgba(255,255,255,.78), rgba(255,255,255,.48)),
+          rgba(255,255,255,.56);
       }
 
       @media (max-width: 1240px){
-        .usuarios-hero{
-          padding:24px 24px 26px;
-        }
-
         .usuarios-page-title{
-          font-size:clamp(30px, 4vw, 52px);
+          font-size:clamp(24px, 2.4vw, 36px);
         }
       }
 
       @media (max-width: 1180px){
+        .usuarios-hero{
+          padding:20px;
+        }
+
         .usuarios-hero-top{
           grid-template-columns:1fr;
         }
@@ -1346,13 +1363,13 @@ function renderStyles() {
         .usuarios-page-title{
           white-space:normal;
         }
-
-        .usuarios-stats{
-          grid-template-columns:repeat(2, minmax(0, 1fr));
-        }
       }
 
       @media (max-width: 980px){
+        .usuarios-stats{
+          grid-template-columns:1fr 1fr;
+        }
+
         .usuarios-desktop-table{
           display:none;
         }
@@ -1364,21 +1381,21 @@ function renderStyles() {
 
       @media (max-width: 760px){
         .usuarios-view-root{
-          gap:18px;
+          gap:16px;
         }
 
         .usuarios-hero{
-          padding:22px 18px 20px;
-          border-radius:22px;
+          padding:18px 16px;
+          border-radius:20px;
         }
 
         .usuarios-history{
-          border-radius:22px;
+          border-radius:20px;
         }
 
         .usuarios-history-head{
           grid-template-columns:1fr;
-          padding:16px 16px 14px;
+          padding:14px 14px 12px;
         }
 
         .usuarios-pagination{
@@ -1390,13 +1407,13 @@ function renderStyles() {
         }
 
         .usuarios-page-title{
-          font-size:clamp(28px, 8.5vw, 44px);
-          line-height:.98;
+          font-size:clamp(24px, 8vw, 34px);
+          line-height:1;
           white-space:normal;
         }
 
         .usuarios-page-subtitle{
-          font-size:15px;
+          font-size:14px;
         }
 
         .usuarios-mobile-meta{
@@ -1415,10 +1432,10 @@ function renderStatCard({
   label = "",
   value = "0",
   caption = "",
-  accent = false,
+  type = "active",
 } = {}) {
   return `
-    <article class="usuarios-stat-card ${accent ? "usuarios-stat-card--accent" : ""}">
+    <article class="usuarios-stat-card usuarios-stat-card--${escapeHtml(type)}">
       <div class="usuarios-stat-label">${escapeHtml(label)}</div>
       <div class="usuarios-stat-value">${escapeHtml(value)}</div>
       <div class="usuarios-stat-text">${escapeHtml(caption)}</div>
@@ -1432,9 +1449,6 @@ export function renderHeader({ items = [], state = {} } = {}) {
   const stats = computeStats(list);
 
   const creating = Boolean(localState.creating);
-  const loading = Boolean(localState.loading);
-  const refreshing = Boolean(localState.refreshing);
-
   const remoteCount = resolveRemoteCount(items, localState);
   const lastSyncText = localState.lastSyncAt
     ? formatRelativeDate(localState.lastSyncAt)
@@ -1448,7 +1462,7 @@ export function renderHeader({ items = [], state = {} } = {}) {
         <div class="usuarios-hero-copy">
           <h1 class="usuarios-page-title">Usuarios y accesos</h1>
           <p class="usuarios-page-subtitle">
-            Supervisa usuarios, estado de acceso, rol operativo, equipo y actividad reciente desde una vista limpia, clara y pensada para administración.
+            Consulta usuarios registrados, revisa su estado, ubicación y última conexión desde una vista clara, compacta y alineada con el sistema.
           </p>
         </div>
 
@@ -1458,7 +1472,7 @@ export function renderHeader({ items = [], state = {} } = {}) {
             type="button"
             class="usuarios-btn"
           >
-            <span>Exportar CSV</span>
+            <span class="usuarios-btn-text">Exportar historial</span>
           </button>
 
           <button
@@ -1470,7 +1484,7 @@ export function renderHeader({ items = [], state = {} } = {}) {
             ${
               creating
                 ? renderSpinner("Abriendo...")
-                : "<span>Nuevo usuario</span>"
+                : '<span class="usuarios-btn-text">Nuevo usuario</span>'
             }
           </button>
         </div>
@@ -1478,60 +1492,27 @@ export function renderHeader({ items = [], state = {} } = {}) {
 
       <div class="usuarios-hero-meta">
         <span class="usuarios-meta-pill">
-          ${escapeHtml(`${remoteCount} registros remotos`)}
+          ${escapeHtml(`${remoteCount} usuarios registrados`)}
         </span>
 
         <span class="usuarios-meta-pill">
-          ${escapeHtml(`Última sync · ${lastSyncText}`)}
+          ${escapeHtml(`Última actualización · ${lastSyncText}`)}
         </span>
-
-        ${
-          loading || refreshing
-            ? `
-              <span class="usuarios-meta-pill">
-                <span
-                  aria-hidden="true"
-                  style="
-                    width:8px;
-                    height:8px;
-                    border-radius:999px;
-                    background:var(--accent, #7c5cff);
-                    margin-right:8px;
-                    display:inline-block;
-                    animation:usuariosPulse 1.25s ease-in-out infinite;
-                  "
-                ></span>
-                Sincronizando
-              </span>
-            `
-            : ""
-        }
       </div>
 
       <div class="usuarios-stats">
         ${renderStatCard({
-          label: "Usuarios visibles",
-          value: String(stats.totalUsuarios),
-          caption: `${remoteCount} registros totales cargados en la colección.`,
-          accent: true,
-        })}
-
-        ${renderStatCard({
-          label: "Activos",
+          label: "Usuarios activos",
           value: String(stats.activeCount),
-          caption: "Cuentas habilitadas y operativas.",
+          caption: "Cuentas operativas o habilitadas actualmente.",
+          type: "active",
         })}
 
         ${renderStatCard({
-          label: "Pendientes / admins",
-          value: `${stats.pendingCount} / ${stats.adminCount}`,
-          caption: "Invitaciones pendientes y perfiles con privilegios elevados.",
-        })}
-
-        ${renderStatCard({
-          label: "Con equipo / bloqueados",
-          value: `${stats.assignedCount} / ${stats.blockedCount}`,
-          caption: "Cobertura organizativa y cuentas con acceso restringido.",
+          label: "Bloqueados / pendientes",
+          value: `${stats.blockedCount} / ${stats.pendingCount}`,
+          caption: "Usuarios restringidos y accesos pendientes.",
+          type: "blocked",
         })}
       </div>
     </section>
@@ -1542,105 +1523,40 @@ export function renderHeader({ items = [], state = {} } = {}) {
    LOADING / ERROR / EMPTY
 ========================================================= */
 
-export function renderLoadingState() {
+export function renderLoadingState(rows = PAGE_SIZE) {
   return `
     ${renderStyles()}
 
     <section class="usuarios-history">
       <div class="usuarios-history-head">
         <div class="usuarios-history-copy">
-          <h2 class="usuarios-history-title">Tabla de usuarios</h2>
+          <h2 class="usuarios-history-title">Historial de usuarios</h2>
           <p class="usuarios-history-subtitle">Cargando colección...</p>
         </div>
       </div>
 
-      <div style="min-width:1180px;">
-        <div
-          style="
-            display:grid;
-            grid-template-columns:2.4fr .9fr .9fr .95fr 1.2fr 1fr 1fr .95fr;
-            border-bottom:1px solid var(--border-soft);
-            background:color-mix(in srgb, var(--surface-1, #fff) 88%, transparent);
-          "
-        >
-          ${Array.from({ length: 8 })
-            .map(
-              () => `
-                <div style="padding:16px 18px;">
-                  <div
-                    style="
-                      height:12px;
-                      width:68%;
-                      border-radius:999px;
-                      background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 8%, var(--surface-glass)), var(--surface-glass));
-                      background-size:200% 100%;
-                      animation:usuariosSkeleton 1.2s linear infinite;
-                    "
-                  ></div>
-                </div>
-              `
-            )
-            .join("")}
-        </div>
-
-        ${Array.from({ length: PAGE_SIZE })
+      <div class="usuarios-table-loading" aria-hidden="true">
+        ${Array.from({ length: rows })
           .map(
             () => `
-              <div
-                style="
-                  display:grid;
-                  grid-template-columns:2.4fr .9fr .9fr .95fr 1.2fr 1fr 1fr .95fr;
-                  border-bottom:1px solid var(--border-soft);
-                "
-              >
-                <div style="padding:18px;">
-                  <div style="display:flex; gap:14px; align-items:center;">
-                    <div
-                      style="
-                        width:48px;
-                        height:48px;
-                        border-radius:16px;
-                        background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 8%, var(--surface-glass)), var(--surface-glass));
-                        background-size:200% 100%;
-                        animation:usuariosSkeleton 1.2s linear infinite;
-                      "
-                    ></div>
-
-                    <div style="display:grid; gap:8px; flex:1;">
-                      <div style="height:13px; width:120px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 8%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:usuariosSkeleton 1.2s linear infinite;"></div>
-                      <div style="height:14px; width:180px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 8%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:usuariosSkeleton 1.2s linear infinite;"></div>
-                      <div style="height:12px; width:150px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 8%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:usuariosSkeleton 1.2s linear infinite;"></div>
-                    </div>
-                  </div>
+              <div class="usuarios-table-loading-row">
+                <div class="usuarios-skeleton usuarios-skeleton--avatar"></div>
+                <div class="usuarios-table-loading-copy">
+                  <div class="usuarios-skeleton usuarios-skeleton--xs"></div>
+                  <div class="usuarios-skeleton usuarios-skeleton--lg"></div>
+                  <div class="usuarios-skeleton usuarios-skeleton--md"></div>
                 </div>
-
-                ${Array.from({ length: 6 })
-                  .map(
-                    () => `
-                      <div style="padding:18px;">
-                        <div style="height:34px; width:92px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 8%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:usuariosSkeleton 1.2s linear infinite;"></div>
-                      </div>
-                    `
-                  )
-                  .join("")}
-
-                <div style="padding:18px;">
-                  <div style="display:flex; gap:8px; justify-content:flex-end;">
-                    <div style="height:40px; width:88px; border-radius:14px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 8%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:usuariosSkeleton 1.2s linear infinite;"></div>
-                  </div>
-                </div>
+                <div class="usuarios-skeleton usuarios-skeleton--pill"></div>
+                <div class="usuarios-skeleton usuarios-skeleton--date"></div>
+                <div class="usuarios-skeleton usuarios-skeleton--email"></div>
+                <div class="usuarios-skeleton usuarios-skeleton--date"></div>
+                <div class="usuarios-skeleton usuarios-skeleton--date"></div>
+                <div class="usuarios-skeleton usuarios-skeleton--btn"></div>
               </div>
             `
           )
           .join("")}
       </div>
-
-      <style>
-        @keyframes usuariosSkeleton {
-          0% { background-position: 200% 0; }
-          100% { background-position: -200% 0; }
-        }
-      </style>
     </section>
   `;
 }
@@ -1699,30 +1615,16 @@ function renderOpenUsuarioButton({ userId = "", isOpening = false } = {}) {
   return `
     <button
       type="button"
-      class="usuarios-open-btn${isOpening ? " is-loading" : ""}"
+      class="usuarios-detail-btn${isOpening ? " is-loading" : ""}"
       data-action="open-user"
       data-user-id="${escapeHtml(userId)}"
       ${isOpening ? 'disabled aria-busy="true"' : ""}
     >
       ${
         isOpening
-          ? renderSpinner("Abriendo...")
-          : "<span>Ver detalle</span>"
+          ? renderSpinner("Cargando...")
+          : '<span class="usuarios-btn-text">Ver detalle</span>'
       }
-    </button>
-  `;
-}
-
-function renderCopyUsuarioButton({ userId = "", username = "" } = {}) {
-  return `
-    <button
-      type="button"
-      class="usuarios-copy-btn"
-      data-action="copy-user-id"
-      data-user-id="${escapeHtml(userId)}"
-      data-username="${escapeHtml(username)}"
-    >
-      Copiar ID
     </button>
   `;
 }
@@ -1735,11 +1637,8 @@ function renderUsuarioRow(item = {}, state = {}) {
   const name = getUsuarioName(item);
   const preview = truncate(getUsuarioPhone(item), 96);
   const email = getUsuarioEmail(item);
-  const statusValue = getUsuarioStatusValue(item);
-  const roleValue = getUsuarioRoleValue(item);
-  const department = getDepartment(item);
+  const city = getUsuarioLocation(item);
   const createdAt = formatDate(getCreatedAt(item));
-  const updatedAtDate = formatDate(getUpdatedAt(item));
   const lastLoginAtRaw = getLastLoginAt(item);
   const lastLoginAt = lastLoginAtRaw
     ? formatRelativeDate(lastLoginAtRaw)
@@ -1748,10 +1647,10 @@ function renderUsuarioRow(item = {}, state = {}) {
   const isOpening = Boolean(openingUserId && openingUserId === userId);
 
   return `
-    <tr class="usuarios-row ${isOpening ? "is-opening" : ""}" data-user-id="${escapeHtml(userId)}">
-      <td>
+    <tr class="usuarios-row" data-user-id="${escapeHtml(userId)}">
+      <td class="usuarios-cell usuarios-cell--main">
         <div class="usuarios-main">
-          ${renderAvatar(item, { size: 48, radius: 16 })}
+          ${renderAvatar(item)}
 
           <div class="usuarios-main-copy">
             <div class="usuarios-user-id">${escapeHtml(code)}</div>
@@ -1761,48 +1660,28 @@ function renderUsuarioRow(item = {}, state = {}) {
         </div>
       </td>
 
-      <td>
-        <span class="${getStatusChipClass(statusValue)}">
-          ${escapeHtml(getStatusLabel(statusValue))}
-        </span>
+      <td class="usuarios-cell usuarios-cell--status">
+        ${renderStatusChip(item)}
       </td>
 
-      <td>
-        <span class="${getRoleChipClass(roleValue)}">
-          ${escapeHtml(getRoleLabel(roleValue))}
-        </span>
-      </td>
-
-      <td>
+      <td class="usuarios-cell usuarios-cell--date">
         <span class="usuarios-date-inline">${escapeHtml(createdAt)}</span>
       </td>
 
-      <td>
-        <div class="usuarios-contact-block">
-          <span class="usuarios-contact-primary">${escapeHtml(email)}</span>
-          <span class="usuarios-contact-secondary">${escapeHtml(getUsuarioPhone(item))}</span>
-        </div>
+      <td class="usuarios-cell usuarios-cell--email">
+        <span class="usuarios-email-inline">${escapeHtml(email)}</span>
       </td>
 
-      <td>
-        <div class="usuarios-contact-block">
-          <span class="usuarios-contact-primary">${escapeHtml(department)}</span>
-          <span class="usuarios-contact-secondary">Equipo</span>
-        </div>
+      <td class="usuarios-cell usuarios-cell--location">
+        <span class="usuarios-location-inline">${escapeHtml(city)}</span>
       </td>
 
-      <td>
-        <div class="usuarios-activity-block">
-          <span class="usuarios-activity-primary">${escapeHtml(lastLoginAt)}</span>
-          <span class="usuarios-activity-secondary">${escapeHtml(updatedAtDate)}</span>
-        </div>
+      <td class="usuarios-cell usuarios-cell--activity">
+        <span class="usuarios-activity-inline">${escapeHtml(lastLoginAt)}</span>
       </td>
 
-      <td class="usuarios-cell--actions">
-        <div class="usuarios-actions">
-          ${renderOpenUsuarioButton({ userId, isOpening })}
-          ${renderCopyUsuarioButton({ userId, username: code })}
-        </div>
+      <td class="usuarios-cell usuarios-cell--actions">
+        ${renderOpenUsuarioButton({ userId, isOpening })}
       </td>
     </tr>
   `;
@@ -1816,9 +1695,7 @@ function renderMobileUsuarioCard(item = {}, state = {}) {
   const name = getUsuarioName(item);
   const preview = truncate(getUsuarioPhone(item), 120);
   const email = getUsuarioEmail(item);
-  const statusValue = getUsuarioStatusValue(item);
-  const roleValue = getUsuarioRoleValue(item);
-  const department = getDepartment(item);
+  const city = getUsuarioLocation(item);
   const createdAt = formatDate(getCreatedAt(item));
   const lastLoginAtRaw = getLastLoginAt(item);
   const lastLoginAt = lastLoginAtRaw
@@ -1828,10 +1705,10 @@ function renderMobileUsuarioCard(item = {}, state = {}) {
   const isOpening = Boolean(openingUserId && openingUserId === userId);
 
   return `
-    <article class="usuarios-mobile-card" data-user-id="${escapeHtml(userId)}" style="opacity:${isOpening ? ".72" : "1"};">
+    <article class="usuarios-mobile-card" data-user-id="${escapeHtml(userId)}">
       <div class="usuarios-mobile-top">
         <div style="display:flex; gap:12px; min-width:0; flex:1;">
-          ${renderAvatar(item, { size: 44, radius: 16 })}
+          ${renderAvatar(item)}
 
           <div class="usuarios-main-copy" style="flex:1;">
             <div class="usuarios-user-id">${escapeHtml(code)}</div>
@@ -1840,43 +1717,33 @@ function renderMobileUsuarioCard(item = {}, state = {}) {
           </div>
         </div>
 
-        <div style="display:grid; gap:8px; justify-items:end;">
-          <span class="${getStatusChipClass(statusValue)}">
-            ${escapeHtml(getStatusLabel(statusValue))}
-          </span>
-
-          <span class="${getRoleChipClass(roleValue)}">
-            ${escapeHtml(getRoleLabel(roleValue))}
-          </span>
-        </div>
+        ${renderStatusChip(item)}
       </div>
 
       <div class="usuarios-mobile-meta">
-        <div class="usuarios-mobile-meta-card">
-          <span class="usuarios-mobile-meta-label">Email</span>
-          <strong class="usuarios-mobile-meta-value">${escapeHtml(email)}</strong>
-          <span class="usuarios-contact-secondary">${escapeHtml(getUsuarioPhone(item))}</span>
-        </div>
-
-        <div class="usuarios-mobile-meta-card">
-          <span class="usuarios-mobile-meta-label">Equipo</span>
-          <strong class="usuarios-mobile-meta-value">${escapeHtml(department)}</strong>
-        </div>
-
         <div class="usuarios-mobile-meta-card">
           <span class="usuarios-mobile-meta-label">Alta</span>
           <strong class="usuarios-mobile-meta-value">${escapeHtml(createdAt)}</strong>
         </div>
 
         <div class="usuarios-mobile-meta-card">
-          <span class="usuarios-mobile-meta-label">Último acceso</span>
+          <span class="usuarios-mobile-meta-label">Email</span>
+          <strong class="usuarios-mobile-meta-value">${escapeHtml(email)}</strong>
+        </div>
+
+        <div class="usuarios-mobile-meta-card">
+          <span class="usuarios-mobile-meta-label">Ubicación</span>
+          <strong class="usuarios-mobile-meta-value">${escapeHtml(city)}</strong>
+        </div>
+
+        <div class="usuarios-mobile-meta-card">
+          <span class="usuarios-mobile-meta-label">Última conexión</span>
           <strong class="usuarios-mobile-meta-value">${escapeHtml(lastLoginAt)}</strong>
         </div>
       </div>
 
       <div class="usuarios-mobile-actions">
         ${renderOpenUsuarioButton({ userId, isOpening })}
-        ${renderCopyUsuarioButton({ userId, username: code })}
       </div>
     </article>
   `;
@@ -1888,25 +1755,23 @@ function renderDesktopTable(items = [], state = {}) {
       <div class="usuarios-table-shell">
         <table class="usuarios-table" role="table" aria-label="Listado de usuarios">
           <colgroup>
-            <col style="width:30%;">
-            <col style="width:10%;">
-            <col style="width:10%;">
-            <col style="width:10%;">
+            <col style="width:36%;">
+            <col style="width:12%;">
             <col style="width:14%;">
-            <col style="width:10%;">
-            <col style="width:10%;">
             <col style="width:16%;">
+            <col style="width:10%;">
+            <col style="width:12%;">
+            <col style="width:10%;">
           </colgroup>
 
           <thead>
             <tr>
               <th>Usuario</th>
               <th>Estado</th>
-              <th>Rol</th>
-              <th>Alta</th>
-              <th>Contacto</th>
-              <th>Equipo</th>
-              <th>Actividad</th>
+              <th>Fecha de creación</th>
+              <th>Email</th>
+              <th>Ubicación</th>
+              <th>Última conexión</th>
               <th>Acciones</th>
             </tr>
           </thead>
@@ -1930,51 +1795,27 @@ function renderMobileCards(items = [], state = {}) {
 
 function renderTableLoadingOverlay(message = "Actualizando usuarios...") {
   return `
-    <div class="usuarios-table-overlay" aria-live="polite" aria-busy="true">
-      <div
-        style="
-          display:grid;
-          justify-items:center;
-          gap:12px;
-          min-width:min(100%, 240px);
-          padding:18px 20px;
-          border-radius:18px;
-          border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 22%, var(--border-soft));
-          background:linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent), transparent), var(--surface-1, var(--surface-glass));
-          box-shadow:0 20px 40px rgba(0,0,0,.22);
-        "
-      >
-        <span
-          aria-hidden="true"
-          style="
-            width:28px;
-            height:28px;
-            border-radius:999px;
-            border:3px solid color-mix(in srgb, var(--accent, #7c5cff) 16%, transparent);
-            border-top-color:var(--accent, #7c5cff);
-            animation:usuariosSpin .8s linear infinite;
-          "
-        ></span>
-
-        <strong
-          style="
-            color:var(--text-strong);
-            font-size:14px;
-            letter-spacing:-.02em;
-          "
-        >
-          ${escapeHtml(message)}
-        </strong>
-
-        <span
-          style="
-            color:var(--text-dim);
-            font-size:12px;
-          "
-        >
-          Solo se está actualizando la tabla
-        </span>
-      </div>
+    <div class="usuarios-table-loading" aria-hidden="true">
+      ${Array.from({ length: 3 })
+        .map(
+          () => `
+            <div class="usuarios-table-loading-row">
+              <div class="usuarios-skeleton usuarios-skeleton--avatar"></div>
+              <div class="usuarios-table-loading-copy">
+                <div class="usuarios-skeleton usuarios-skeleton--xs"></div>
+                <div class="usuarios-skeleton usuarios-skeleton--lg"></div>
+                <div class="usuarios-skeleton usuarios-skeleton--md"></div>
+              </div>
+              <div class="usuarios-skeleton usuarios-skeleton--pill"></div>
+              <div class="usuarios-skeleton usuarios-skeleton--date"></div>
+              <div class="usuarios-skeleton usuarios-skeleton--email"></div>
+              <div class="usuarios-skeleton usuarios-skeleton--date"></div>
+              <div class="usuarios-skeleton usuarios-skeleton--date"></div>
+              <div class="usuarios-skeleton usuarios-skeleton--btn"></div>
+            </div>
+          `
+        )
+        .join("")}
     </div>
   `;
 }
@@ -2001,33 +1842,11 @@ function renderTableToolbar({
       </div>
 
       <div class="usuarios-pagination">
-        ${
-          refreshing
-            ? `
-              <span class="usuarios-meta-pill">
-                <span
-                  aria-hidden="true"
-                  style="
-                    width:8px;
-                    height:8px;
-                    border-radius:999px;
-                    background:var(--accent, #7c5cff);
-                    margin-right:8px;
-                    display:inline-block;
-                    animation:usuariosPulse 1.25s ease-in-out infinite;
-                  "
-                ></span>
-                Actualizando
-              </span>
-            `
-            : ""
-        }
-
         <button
           type="button"
           class="usuarios-pagination-btn"
           data-action="prev-page"
-          ${page <= 1 ? 'disabled aria-disabled="true"' : ""}
+          ${page <= 1 || refreshing ? 'disabled aria-disabled="true"' : ""}
         >
           Anterior
         </button>
@@ -2036,7 +1855,7 @@ function renderTableToolbar({
           type="button"
           class="usuarios-pagination-btn"
           data-action="next-page"
-          ${page >= totalPages ? 'disabled aria-disabled="true"' : ""}
+          ${page >= totalPages || refreshing ? 'disabled aria-disabled="true"' : ""}
         >
           Siguiente
         </button>
@@ -2052,7 +1871,7 @@ export function renderTable({ items = [], state = {} } = {}) {
   const loading = Boolean(localState.loading);
 
   if (loading && !list.length) {
-    return renderLoadingState();
+    return renderLoadingState(Math.max(3, safeNumber(localState.pageSize, PAGE_SIZE)));
   }
 
   if (localState.error && !list.length) {
@@ -2076,10 +1895,12 @@ export function renderTable({ items = [], state = {} } = {}) {
         refreshing,
       })}
 
-      ${renderDesktopTable(pagination.items, localState)}
-      ${renderMobileCards(pagination.items, localState)}
+      <div class="usuarios-table-wrap${refreshing ? " is-refreshing" : ""}">
+        ${refreshing ? renderTableLoadingOverlay("Actualizando usuarios...") : ""}
 
-      ${refreshing ? renderTableLoadingOverlay("Actualizando usuarios...") : ""}
+        ${renderDesktopTable(pagination.items, localState)}
+        ${renderMobileCards(pagination.items, localState)}
+      </div>
     </section>
   `;
 }

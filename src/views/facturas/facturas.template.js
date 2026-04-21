@@ -2,11 +2,11 @@
    Onion SPA - Facturas Template
    Archivo: src/views/facturas/facturas.template.js
 
-   FINAL PRODUCTION TEMPLATE · CLON 1:1 DE INCIDENCIAS · FACTURAS MODE
+   FINAL PRODUCTION TEMPLATE · DEFINITIVO · FACTURAS MODE
 
    RESPONSABILIDADES:
    - render del hero/header de facturas
-   - render de tabla productiva con paginación real
+   - render de tabla productiva compacta
    - compatibilidad directa con facturasView.js
    - exportar renderHeader
    - exportar renderCards
@@ -15,7 +15,9 @@
    - evitar mostrar null en cliente
    - quitar columna Estado
    - quitar columna Actualización
+   - quitar columna PDF
    - añadir columna Incidencia clicable para abrir incidencia relacionada
+   - optimizar espacio visual de tabla
 ========================================================= */
 
 /* =========================================================
@@ -85,23 +87,6 @@ function formatMoney(value = 0, currency = "EUR") {
     }).format(amount);
   } catch {
     return `${amount.toFixed(2)} ${safeText(currency, "EUR")}`;
-  }
-}
-
-function formatDate(value = null) {
-  if (!value) return "—";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-
-  try {
-    return new Intl.DateTimeFormat("es-ES", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    }).format(date);
-  } catch {
-    return "—";
   }
 }
 
@@ -337,6 +322,23 @@ function getTotalLabel(item = {}) {
   );
 }
 
+function getTotalCaption(item = {}) {
+  const taxIncluded = first(
+    item.taxIncluded,
+    item.impuestosIncluidos,
+    item.ivaIncluido,
+    item?.raw?.taxIncluded,
+    item?.raw?.impuestosIncluidos,
+    item?.raw?.ivaIncluido
+  );
+
+  if (taxIncluded === false) {
+    return "Impuestos no incl.";
+  }
+
+  return "Impuestos incl.";
+}
+
 function getFormaPago(item = {}) {
   return safeText(
     first(
@@ -501,14 +503,6 @@ function renderEstadoPagoChip(item = {}) {
   `;
 }
 
-function renderPdfChip(item = {}) {
-  if (hasPdf(item)) {
-    return `<span class="facturas-pdf-badge facturas-pdf-badge--ok">PDF</span>`;
-  }
-
-  return `<span class="facturas-pdf-badge facturas-pdf-badge--off">Sin PDF</span>`;
-}
-
 function renderIncidenciaLink(item = {}) {
   const incidenciaId = getIncidenciaId(item);
 
@@ -539,6 +533,7 @@ function renderRow(item = {}, state = {}) {
   const clientEmail = getClientEmail(item);
   const createdAt = formatDateTime(getCreatedAt(item));
   const total = getTotalLabel(item);
+  const totalCaption = getTotalCaption(item);
   const formaPago = getFormaPago(item);
   const pdfAvailable = hasPdf(item);
 
@@ -567,16 +562,13 @@ function renderRow(item = {}, state = {}) {
       <td class="facturas-cell facturas-cell--amount">
         <div class="facturas-total-stack">
           <span class="facturas-total-value">${escapeHtml(total)}</span>
+          <span class="facturas-total-caption">${escapeHtml(totalCaption)}</span>
           <span class="facturas-total-meta">${escapeHtml(formaPago)}</span>
         </div>
       </td>
 
       <td class="facturas-cell facturas-cell--incidencia">
         ${renderIncidenciaLink(item)}
-      </td>
-
-      <td class="facturas-cell facturas-cell--pdf">
-        ${renderPdfChip(item)}
       </td>
 
       <td class="facturas-cell facturas-cell--actions">
@@ -666,7 +658,6 @@ function renderTableLoading(rows = 5) {
               <div class="facturas-skeleton facturas-skeleton--pill"></div>
               <div class="facturas-skeleton facturas-skeleton--date"></div>
               <div class="facturas-skeleton facturas-skeleton--pill"></div>
-              <div class="facturas-skeleton facturas-skeleton--pill"></div>
               <div class="facturas-skeleton facturas-skeleton--actions"></div>
             </div>
           `
@@ -745,43 +736,56 @@ function renderStyles() {
       }
 
       .facturas-btn{
-        min-height:44px;
-        padding:0 16px;
+        min-height:42px;
+        padding:0 15px;
         border-radius:14px;
         border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 92%, transparent);
-        background:rgba(255,255,255,.72);
+        background:rgba(255,255,255,.74);
         color:var(--text-strong, #111827);
         font-size:13px;
-        font-weight:680;
+        font-weight:700;
         line-height:1;
         cursor:pointer;
         display:inline-flex;
         align-items:center;
         justify-content:center;
         text-decoration:none;
-        box-shadow:0 4px 14px rgba(15,23,42,.04);
+        box-shadow:0 4px 12px rgba(15,23,42,.035);
         transition:
           transform .16s ease,
           box-shadow .16s ease,
           border-color .16s ease,
           background .16s ease,
-          opacity .16s ease;
+          opacity .16s ease,
+          filter .16s ease;
       }
 
       .facturas-btn:hover{
         transform:translateY(-1px);
-        box-shadow:0 8px 18px rgba(15,23,42,.06);
+        box-shadow:0 8px 18px rgba(15,23,42,.05);
+        background:rgba(255,255,255,.92);
+        border-color:rgba(15,23,42,.10);
       }
 
       .facturas-btn--primary{
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 16%, rgba(15,23,42,.06));
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 14%, rgba(15,23,42,.06));
         background:linear-gradient(
           180deg,
-          color-mix(in srgb, var(--accent, #7c5cff) 86%, white 14%),
+          color-mix(in srgb, var(--accent, #7c5cff) 84%, white 16%),
           color-mix(in srgb, var(--accent, #7c5cff) 92%, black 8%)
         );
         color:#fff;
-        box-shadow:0 8px 20px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
+        box-shadow:0 8px 18px color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent);
+      }
+
+      .facturas-btn--primary:hover{
+        background:linear-gradient(
+          180deg,
+          color-mix(in srgb, var(--accent, #7c5cff) 88%, white 12%),
+          color-mix(in srgb, var(--accent, #7c5cff) 96%, black 4%)
+        );
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 20%, rgba(15,23,42,.06));
+        box-shadow:0 10px 22px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
       }
 
       .facturas-btn.is-loading,
@@ -940,11 +944,11 @@ function renderStyles() {
         width:100%;
         border-collapse:separate;
         border-spacing:0;
-        min-width:1220px;
+        min-width:1080px;
       }
 
       .facturas-table thead th{
-        padding:12px 18px;
+        padding:12px 16px;
         text-align:left;
         font-size:11px;
         font-weight:760;
@@ -957,7 +961,7 @@ function renderStyles() {
       }
 
       .facturas-table tbody td{
-        padding:14px 18px;
+        padding:16px 16px;
         vertical-align:middle;
         border-bottom:1px solid rgba(15,23,42,.055);
       }
@@ -971,12 +975,12 @@ function renderStyles() {
       }
 
       .facturas-row:hover{
-        background:rgba(124,92,255,.018);
+        background:rgba(124,92,255,.014);
       }
 
       .facturas-main{
         display:grid;
-        grid-template-columns:44px minmax(0, 1fr);
+        grid-template-columns:40px minmax(0, 1fr);
         gap:12px;
         align-items:center;
         min-width:0;
@@ -984,11 +988,11 @@ function renderStyles() {
 
       .facturas-avatar{
         position:relative;
-        width:44px;
-        height:44px;
+        width:40px;
+        height:40px;
         border-radius:999px;
         overflow:hidden;
-        flex:0 0 44px;
+        flex:0 0 40px;
         background:linear-gradient(135deg, rgba(124,92,255,.12), rgba(139,92,246,.24));
       }
 
@@ -998,7 +1002,7 @@ function renderStyles() {
         display:flex;
         align-items:center;
         justify-content:center;
-        font-size:18px;
+        font-size:17px;
         font-weight:780;
         color:#fff;
         letter-spacing:-.03em;
@@ -1007,11 +1011,11 @@ function renderStyles() {
       .facturas-main-copy{
         min-width:0;
         display:grid;
-        gap:3px;
+        gap:2px;
       }
 
       .facturas-factura-id{
-        font-size:12px;
+        font-size:11px;
         line-height:1.15;
         font-weight:760;
         letter-spacing:.055em;
@@ -1020,10 +1024,10 @@ function renderStyles() {
       }
 
       .facturas-factura-client{
-        font-size:15px;
-        line-height:1.14;
+        font-size:14px;
+        line-height:1.16;
         font-weight:760;
-        letter-spacing:-.025em;
+        letter-spacing:-.022em;
         color:var(--text-strong, #111827);
         overflow:hidden;
         text-overflow:ellipsis;
@@ -1033,8 +1037,8 @@ function renderStyles() {
       }
 
       .facturas-factura-email{
-        font-size:13px;
-        line-height:1.3;
+        font-size:12px;
+        line-height:1.25;
         color:#8a93a3;
         overflow:hidden;
         text-overflow:ellipsis;
@@ -1042,15 +1046,15 @@ function renderStyles() {
       }
 
       .facturas-chip{
-        min-height:32px;
-        padding:0 12px;
+        min-height:30px;
+        padding:0 11px;
         border-radius:999px;
         display:inline-flex;
         align-items:center;
         justify-content:center;
         font-size:11px;
         font-weight:760;
-        letter-spacing:.045em;
+        letter-spacing:.04em;
         text-transform:uppercase;
         white-space:nowrap;
         border:1px solid transparent;
@@ -1089,34 +1093,42 @@ function renderStyles() {
 
       .facturas-total-stack{
         display:grid;
-        gap:3px;
+        gap:2px;
       }
 
       .facturas-total-value{
         font-size:14px;
-        line-height:1.2;
-        font-weight:760;
+        line-height:1.15;
+        font-weight:780;
         color:var(--text-strong, #111827);
         white-space:nowrap;
       }
 
+      .facturas-total-caption{
+        font-size:11px;
+        line-height:1.15;
+        color:#6b7280;
+        white-space:nowrap;
+        font-weight:700;
+      }
+
       .facturas-total-meta{
-        font-size:12px;
-        line-height:1.2;
-        color:#8a93a3;
+        font-size:11px;
+        line-height:1.15;
+        color:#98a2b3;
         white-space:nowrap;
       }
 
       .facturas-incidencia-link{
-        min-height:32px;
-        padding:0 12px;
+        min-height:30px;
+        padding:0 10px;
         border-radius:999px;
-        border:1px solid rgba(124,92,255,.18);
-        background:rgba(124,92,255,.08);
+        border:1px solid rgba(124,92,255,.16);
+        background:rgba(124,92,255,.06);
         color:#6d53d7;
         font-size:11px;
         font-weight:760;
-        letter-spacing:.045em;
+        letter-spacing:.04em;
         text-transform:uppercase;
         cursor:pointer;
         display:inline-flex;
@@ -1126,44 +1138,21 @@ function renderStyles() {
         transition:
           transform .16s ease,
           background .16s ease,
-          border-color .16s ease;
+          border-color .16s ease,
+          box-shadow .16s ease;
       }
 
       .facturas-incidencia-link:hover{
         transform:translateY(-1px);
-        background:rgba(124,92,255,.12);
-        border-color:rgba(124,92,255,.24);
+        background:rgba(124,92,255,.10);
+        border-color:rgba(124,92,255,.22);
+        box-shadow:0 6px 14px rgba(124,92,255,.10);
       }
 
       .facturas-incidencia-empty{
         color:#98a2b3;
         font-size:13px;
         font-weight:650;
-      }
-
-      .facturas-pdf-badge{
-        display:inline-flex;
-        align-items:center;
-        justify-content:center;
-        min-height:30px;
-        padding:0 12px;
-        border-radius:999px;
-        font-size:11px;
-        font-weight:760;
-        white-space:nowrap;
-        border:1px solid transparent;
-      }
-
-      .facturas-pdf-badge--ok{
-        color:#6d53d7;
-        background:rgba(124,92,255,.09);
-        border-color:rgba(124,92,255,.18);
-      }
-
-      .facturas-pdf-badge--off{
-        color:#8590a3;
-        background:rgba(15,23,42,.025);
-        border-color:rgba(15,23,42,.05);
       }
 
       .facturas-cell--actions{
@@ -1174,7 +1163,7 @@ function renderStyles() {
       .facturas-actions{
         display:flex;
         align-items:center;
-        gap:8px;
+        gap:6px;
         flex-wrap:wrap;
         justify-content:flex-end;
       }
@@ -1182,52 +1171,77 @@ function renderStyles() {
       .facturas-action-btn{
         width:auto;
         min-width:0;
-        min-height:34px;
-        padding:0 12px;
-        border-radius:12px;
-        border:1px solid rgba(15,23,42,.07);
-        background:rgba(255,255,255,.68);
+        min-height:32px;
+        padding:0 11px;
+        border-radius:11px;
+        border:1px solid rgba(15,23,42,.065);
+        background:rgba(255,255,255,.78);
         color:#1f2937;
-        font-size:13px;
-        font-weight:700;
+        font-size:12px;
+        font-weight:760;
         line-height:1;
         cursor:pointer;
         display:inline-flex;
         align-items:center;
         justify-content:center;
         white-space:nowrap;
-        box-shadow:none;
+        box-shadow:0 2px 8px rgba(15,23,42,.02);
         transition:
           border-color .16s ease,
           background .16s ease,
           transform .16s ease,
-          opacity .16s ease;
+          opacity .16s ease,
+          box-shadow .16s ease,
+          filter .16s ease;
       }
 
       .facturas-action-btn:hover{
-        border-color:rgba(15,23,42,.11);
-        background:rgba(255,255,255,.9);
         transform:translateY(-1px);
+        background:rgba(255,255,255,.96);
+        border-color:rgba(15,23,42,.10);
+        box-shadow:0 6px 14px rgba(15,23,42,.05);
       }
 
       .facturas-action-btn--primary{
         border-color:color-mix(in srgb, var(--accent, #7c5cff) 16%, rgba(15,23,42,.06));
         background:linear-gradient(
           180deg,
-          color-mix(in srgb, var(--accent, #7c5cff) 86%, white 14%),
+          color-mix(in srgb, var(--accent, #7c5cff) 84%, white 16%),
           color-mix(in srgb, var(--accent, #7c5cff) 92%, black 8%)
         );
         color:#fff;
+        box-shadow:0 8px 16px color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent);
+      }
+
+      .facturas-action-btn--primary:hover{
+        background:linear-gradient(
+          180deg,
+          color-mix(in srgb, var(--accent, #7c5cff) 88%, white 12%),
+          color-mix(in srgb, var(--accent, #7c5cff) 96%, black 4%)
+        );
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 22%, rgba(15,23,42,.06));
+        box-shadow:0 10px 18px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
       }
 
       .facturas-action-btn--success{
         border-color:color-mix(in srgb, var(--success-strong, #36c690) 16%, rgba(15,23,42,.06));
         background:linear-gradient(
           180deg,
-          color-mix(in srgb, var(--success-strong, #36c690) 86%, white 14%),
+          color-mix(in srgb, var(--success-strong, #36c690) 84%, white 16%),
           color-mix(in srgb, var(--success-strong, #36c690) 92%, black 8%)
         );
         color:#fff;
+        box-shadow:0 8px 16px color-mix(in srgb, var(--success-strong, #36c690) 14%, transparent);
+      }
+
+      .facturas-action-btn--success:hover{
+        background:linear-gradient(
+          180deg,
+          color-mix(in srgb, var(--success-strong, #36c690) 88%, white 12%),
+          color-mix(in srgb, var(--success-strong, #36c690) 96%, black 4%)
+        );
+        border-color:color-mix(in srgb, var(--success-strong, #36c690) 22%, rgba(15,23,42,.06));
+        box-shadow:0 10px 18px color-mix(in srgb, var(--success-strong, #36c690) 18%, transparent);
       }
 
       .facturas-inline-loading{
@@ -1261,7 +1275,7 @@ function renderStyles() {
 
       .facturas-table-loading-row{
         display:grid;
-        grid-template-columns:44px minmax(220px, 1.6fr) 120px 140px 120px 90px 240px;
+        grid-template-columns:40px minmax(220px, 1.7fr) 110px 130px 110px 250px;
         gap:12px;
         align-items:center;
       }
@@ -1293,8 +1307,8 @@ function renderStyles() {
       }
 
       .facturas-skeleton--avatar{
-        width:44px;
-        height:44px;
+        width:40px;
+        height:40px;
         border-radius:999px;
       }
 
@@ -1319,13 +1333,13 @@ function renderStyles() {
       }
 
       .facturas-skeleton--date{
-        width:124px;
+        width:118px;
         height:12px;
       }
 
       .facturas-skeleton--actions{
-        width:220px;
-        height:34px;
+        width:230px;
+        height:32px;
       }
 
       .facturas-empty{
@@ -1624,12 +1638,11 @@ export function renderCards({ items = [], state = {} } = {}) {
         <div class="facturas-table-shell">
           <table class="facturas-table" role="table" aria-label="Listado de facturas">
             <colgroup>
-              <col style="width:34%;">
-              <col style="width:12%;">
-              <col style="width:14%;">
-              <col style="width:12%;">
+              <col style="width:39%;">
+              <col style="width:11%;">
+              <col style="width:15%;">
+              <col style="width:15%;">
               <col style="width:10%;">
-              <col style="width:8%;">
               <col style="width:10%;">
             </colgroup>
 
@@ -1640,7 +1653,6 @@ export function renderCards({ items = [], state = {} } = {}) {
                 <th>Fecha de emisión</th>
                 <th>Total</th>
                 <th>Incidencia</th>
-                <th>PDF</th>
                 <th>Acciones</th>
               </tr>
             </thead>

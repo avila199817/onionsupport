@@ -3,7 +3,7 @@
    Archivo: src/views/facturas/facturas.detail.template.js
 
    FACTURAS DETAIL MODAL · VISUAL 1:1 CON INCIDENCIAS MODE
-   FINAL PRO SYSTEM · DETAIL MODAL · COMPAT MODE
+   FINAL PRO SYSTEM · DETAIL MODAL · COMPACT VERSION
 
    RESPONSABILIDADES:
    - renderizar modal premium centrado de detalle de factura
@@ -11,9 +11,11 @@
    - soportar estado loading / sending / acciones del header
    - exponer exports legacy para imports antiguos
    - mantener data-action estables para bindings existentes
-   - separar visualmente resumen, cliente, metadata, líneas e impuestos
+   - reducir ruido visual en cliente y metadata
    - mostrar IVA / IRPF cuando existan
-   - no meter impuestos en la descripción de líneas
+   - renombrar "Servicio" a "Incidencia"
+   - quitar "Total línea"
+   - cerrar modal con botón aspa X
 ========================================================= */
 
 function safeText(value, fallback = "—") {
@@ -226,17 +228,6 @@ function getClienteDocumento(factura = {}) {
   );
 }
 
-function getClienteTelefono(factura = {}) {
-  return safeText(
-    first(
-      factura?.cliente?.telefono,
-      factura?.cliente?.phone,
-      factura?.telefonoCliente
-    ),
-    "—"
-  );
-}
-
 function getFacturaFecha(factura = {}) {
   return first(
     factura?.fecha,
@@ -279,7 +270,10 @@ function getFacturaEstadoLabel(factura = {}) {
 }
 
 function getFacturaFormaPago(factura = {}) {
-  return safeText(first(factura?.formaPago, factura?.metodoPago, factura?.paymentMethod), "—");
+  return safeText(
+    first(factura?.formaPago, factura?.metodoPago, factura?.paymentMethod),
+    "—"
+  );
 }
 
 function getFacturaMoneda(factura = {}) {
@@ -290,36 +284,20 @@ function getFacturaTotal(factura = {}) {
   return safeNumber(first(factura?.total, factura?.amount, factura?.importe), 0);
 }
 
-function getFacturaSubtotal(factura = {}) {
-  return safeNumber(first(factura?.subtotal, factura?.baseImponible), 0);
-}
-
 function getFacturaBase(factura = {}) {
   return safeNumber(first(factura?.baseImponible, factura?.subtotal), 0);
 }
 
 function getFacturaImpuestos(factura = {}) {
   return safeNumber(
-    first(
-      factura?.impuestosTotal,
-      factura?.tax,
-      factura?.iva
-    ),
+    first(factura?.impuestosTotal, factura?.tax, factura?.iva),
     0
   );
 }
 
-function getFacturaDescuentoTotal(factura = {}) {
-  return safeNumber(first(factura?.descuentoTotal, factura?.discountTotal), 0);
-}
-
 function getFacturaEnviadoA(factura = {}) {
   return safeText(
-    first(
-      factura?.enviadoA,
-      factura?.sentTo,
-      factura?.cliente?.email
-    ),
+    first(factura?.enviadoA, factura?.sentTo, factura?.cliente?.email),
     "—"
   );
 }
@@ -344,36 +322,6 @@ function getFacturaPreview(factura = {}) {
     ),
     "Factura disponible para consulta."
   );
-}
-
-function getFacturaDireccionCliente(factura = {}) {
-  const direccion = safeObject(factura?.cliente?.direccion);
-
-  const parts = [
-    safeText(direccion?.calle, ""),
-    safeText(direccion?.linea2, ""),
-    safeText(direccion?.cp, ""),
-    safeText(direccion?.ciudad, ""),
-    safeText(direccion?.provincia, ""),
-    safeText(direccion?.pais, ""),
-  ].filter(Boolean);
-
-  return parts.length ? parts.join(", ") : "—";
-}
-
-function getFacturaDireccionServicio(factura = {}) {
-  const direccion = safeObject(factura?.direccionServicio);
-
-  const parts = [
-    safeText(direccion?.calle, ""),
-    safeText(direccion?.linea2, ""),
-    safeText(direccion?.cp, ""),
-    safeText(direccion?.ciudad, ""),
-    safeText(direccion?.provincia, ""),
-    safeText(direccion?.pais, ""),
-  ].filter(Boolean);
-
-  return parts.length ? parts.join(", ") : "—";
 }
 
 function getLineaConcepto(linea = {}) {
@@ -563,7 +511,7 @@ function getImpuestosBreakdown(factura = {}) {
 
   let iva = null;
   let irpf = null;
-  let otros = [];
+  const otros = [];
 
   impuestos.forEach((item) => {
     const impuesto = safeObject(item);
@@ -572,7 +520,6 @@ function getImpuestosBreakdown(factura = {}) {
     const normalized = {
       tipo: safeText(first(impuesto?.tipo, impuesto?.nombre), "Impuesto"),
       porcentaje: safeNumber(impuesto?.porcentaje, 0),
-      base: safeNumber(impuesto?.base, 0),
       importe: safeNumber(impuesto?.importe, 0),
     };
 
@@ -901,19 +848,25 @@ export function renderHeaderActions({
       <button
         type="button"
         data-action="close-factura-detail"
+        aria-label="Cerrar modal"
+        title="Cerrar"
         style="
-          min-height:38px;
-          padding:0 12px;
+          width:38px;
+          height:38px;
+          padding:0;
           border-radius:12px;
           border:1px solid var(--border-soft);
           background:transparent;
           color:var(--text-dim);
-          font-size:12px;
+          font-size:18px;
           font-weight:700;
           cursor:pointer;
+          display:inline-flex;
+          align-items:center;
+          justify-content:center;
         "
       >
-        Cerrar
+        ✕
       </button>
     </div>
   `;
@@ -929,14 +882,13 @@ function renderHeroMeta(factura = {}) {
       class="facturas-detail-meta-grid"
       style="
         display:grid;
-        grid-template-columns:repeat(4, minmax(0, 1fr));
+        grid-template-columns:repeat(3, minmax(0, 1fr));
         gap:10px;
       "
     >
       ${mini("Número", getFacturaNumero(factura))}
-      ${mini("Creada", formatDate(getFacturaFecha(factura)))}
-      ${mini("Servicio", formatDate(getFacturaFechaServicio(factura)))}
-      ${mini("Enviada", formatDateTime(getFacturaFechaEnvio(factura)))}
+      ${mini("Fecha emisión", formatDate(getFacturaFecha(factura)))}
+      ${mini("Incidencia", formatDate(getFacturaFechaServicio(factura)))}
     </div>
   `;
 }
@@ -968,13 +920,12 @@ function renderResumenSection(factura = {}) {
 function renderImpuestosSection(factura = {}) {
   const moneda = getFacturaMoneda(factura);
   const breakdown = getImpuestosBreakdown(factura);
-
   const cards = [];
 
   if (breakdown.iva) {
     cards.push(
       stat(
-        `IVA ${breakdown.iva.porcentaje ? `(${breakdown.iva.porcentaje}%)` : ""}`.trim(),
+        `IVA${breakdown.iva.porcentaje ? ` (${breakdown.iva.porcentaje}%)` : ""}`,
         formatMoney(breakdown.iva.importe, moneda)
       )
     );
@@ -983,7 +934,7 @@ function renderImpuestosSection(factura = {}) {
   if (breakdown.irpf) {
     cards.push(
       stat(
-        `IRPF ${breakdown.irpf.porcentaje ? `(${breakdown.irpf.porcentaje}%)` : ""}`.trim(),
+        `IRPF${breakdown.irpf.porcentaje ? ` (${breakdown.irpf.porcentaje}%)` : ""}`,
         formatMoney(breakdown.irpf.importe, moneda)
       )
     );
@@ -999,17 +950,17 @@ function renderImpuestosSection(factura = {}) {
   });
 
   if (!cards.length) {
-    cards.push(mini("Impuestos", "Sin desglose de impuestos disponible"));
+    cards.push(mini("Impuestos", "Sin desglose disponible"));
   }
 
   return renderSectionCard({
     title: "Impuestos",
-    subtitle: "Desglose fiscal detectado en la factura. Se muestran IVA e IRPF cuando existen.",
+    subtitle: "Desglose fiscal detectado en la factura.",
     content: `
       <div
         style="
           display:grid;
-          grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));
+          grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));
           gap:12px;
         "
       >
@@ -1022,12 +973,12 @@ function renderImpuestosSection(factura = {}) {
 function renderClienteSection(factura = {}) {
   return renderSectionCard({
     title: "Cliente",
-    subtitle: "Información fiscal y de contacto asociada a la factura.",
+    subtitle: "",
     content: `
       <div
         style="
           display:grid;
-          grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+          grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
           gap:12px;
         "
       >
@@ -1035,10 +986,6 @@ function renderClienteSection(factura = {}) {
         ${mini("Empresa", getClienteEmpresa(factura))}
         ${mini("Email", getClienteEmail(factura))}
         ${mini("Documento fiscal", getClienteDocumento(factura))}
-        ${mini("Teléfono", getClienteTelefono(factura))}
-        ${mini("Dirección cliente", getFacturaDireccionCliente(factura))}
-        ${mini("Dirección servicio", getFacturaDireccionServicio(factura))}
-        ${mini("Enviado a", getFacturaEnviadoA(factura))}
       </div>
     `,
   });
@@ -1047,7 +994,7 @@ function renderClienteSection(factura = {}) {
 function renderMetaSection(factura = {}) {
   return renderSectionCard({
     title: "Metadata",
-    subtitle: "Trazabilidad operativa y datos de control del documento.",
+    subtitle: "",
     content: `
       <div
         style="
@@ -1056,16 +1003,10 @@ function renderMetaSection(factura = {}) {
           gap:12px;
         "
       >
-        ${mini("Número", getFacturaNumero(factura))}
         ${mini("Estado factura", getFacturaEstadoLabel(factura))}
         ${mini("Estado pago", getFacturaEstadoPagoLabel(factura))}
-        ${mini("Fecha emisión", formatDate(getFacturaFecha(factura)))}
-        ${mini("Actualizado", formatDateTime(getFacturaUpdatedAt(factura)))}
-        ${mini("Último cambio", formatRelativeDate(getFacturaUpdatedAt(factura)))}
         ${mini("Forma de pago", getFacturaFormaPago(factura))}
-        ${mini("Moneda", getFacturaMoneda(factura))}
-        ${mini("PDF", getFacturaPdfAvailable(factura) ? "Disponible" : "No disponible")}
-        ${mini("Descuento total", formatMoney(getFacturaDescuentoTotal(factura), getFacturaMoneda(factura)))}
+        ${mini("Enviado a", getFacturaEnviadoA(factura))}
       </div>
     `,
   });
@@ -1073,8 +1014,8 @@ function renderMetaSection(factura = {}) {
 
 function renderDescripcionSection(factura = {}) {
   return renderSectionCard({
-    title: "Descripción de la factura",
-    subtitle: "Resumen general del documento sin mezclar el bloque fiscal.",
+    title: "Incidencia",
+    subtitle: "",
     content: `
       <div
         style="
@@ -1171,7 +1112,6 @@ function renderLineaItem(linea = {}, moneda = "EUR") {
         ${mini("Cantidad", String(getLineaCantidad(item)))}
         ${mini("Unitario", formatMoney(getLineaUnitario(item), moneda))}
         ${mini("Subtotal", formatMoney(getLineaSubtotal(item), moneda))}
-        ${mini("Total línea", formatMoney(getLineaTotal(item), moneda))}
       </div>
     </article>
   `;
@@ -1182,8 +1122,8 @@ function renderLineasSection(factura = {}) {
   const moneda = getFacturaMoneda(factura);
 
   return renderSectionCard({
-    title: "Líneas de factura",
-    subtitle: "Desglose de conceptos, cantidades, precios unitarios y subtotales.",
+    title: "Conceptos",
+    subtitle: "",
     content: lineas.length
       ? `<div style="display:grid; gap:12px;">${lineas
           .map((linea) => renderLineaItem(linea, moneda))
@@ -1256,6 +1196,7 @@ export function renderFacturasDetailContent({
             justify-content:space-between;
             gap:16px;
             flex-wrap:wrap;
+            align-items:flex-start;
           "
         >
           <div
@@ -1263,7 +1204,8 @@ export function renderFacturasDetailContent({
               display:flex;
               gap:14px;
               align-items:flex-start;
-              min-width:min(100%, 520px);
+              min-width:0;
+              flex:1 1 520px;
             "
           >
             ${renderAvatar(factura)}
@@ -1375,16 +1317,16 @@ export function renderFacturasDetailContent({
             class="facturas-detail-grid"
             style="
               display:grid;
-              grid-template-columns:minmax(0, 1.15fr) minmax(320px, .85fr);
+              grid-template-columns:minmax(0, 1.25fr) minmax(300px, .75fr);
               gap:16px;
               align-items:start;
             "
           >
-            <section style="display:grid; gap:16px;">
+            <section style="display:grid; gap:16px; min-width:0;">
               ${renderLineasSection(factura)}
             </section>
 
-            <section style="display:grid; gap:16px;">
+            <section style="display:grid; gap:16px; min-width:0;">
               ${renderImpuestosSection(factura)}
               ${renderClienteSection(factura)}
               ${renderMetaSection(factura)}

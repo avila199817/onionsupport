@@ -28,6 +28,7 @@
    - bloqueo de acciones antes de app ready
    - anti spam click en apertura rápida
    - compatibilidad con template nuevo data-incidencias-action
+   - template controlado por state real
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -115,6 +116,28 @@ export const IncidenciasView = (() => {
     return Number.isFinite(n) ? n : fallback;
   }
 
+  function waitForPaint() {
+    return new Promise((resolve) => {
+      try {
+        if (typeof window === "undefined") {
+          resolve();
+          return;
+        }
+
+        if (typeof window.requestAnimationFrame !== "function") {
+          window.setTimeout(resolve, 0);
+          return;
+        }
+
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(resolve);
+        });
+      } catch {
+        resolve();
+      }
+    });
+  }
+
   function getContainer() {
     return (
       AppCore?.dom?.viewContainer ||
@@ -192,6 +215,10 @@ export const IncidenciasView = (() => {
       typeof incidenciasState.lastSyncAt === "string"
         ? incidenciasState.lastSyncAt
         : "";
+
+    if (typeof incidenciasState.totalCount !== "number") {
+      incidenciasState.totalCount = 0;
+    }
   }
 
   function getRawItems() {
@@ -305,13 +332,6 @@ export const IncidenciasView = (() => {
   function openTicketModalBridge(detail = null) {
     if (!detail) return false;
 
-    let handled = false;
-
-    try {
-      safeEmit("incidencias:modal:open", { detail });
-      handled = true;
-    } catch {}
-
     try {
       const hook =
         window?.OnionIncidenciasModal?.open ||
@@ -320,23 +340,21 @@ export const IncidenciasView = (() => {
 
       if (typeof hook === "function") {
         hook(detail);
-        handled = true;
+        return true;
       }
     } catch (error) {
-      safeWarn("ticket modal bridge falló:", error);
+      safeWarn("ticket modal hook falló:", error);
     }
 
-    return handled;
+    try {
+      safeEmit("incidencias:modal:open", { detail });
+      return true;
+    } catch {}
+
+    return false;
   }
 
   function openCreateModalBridge(draft = {}) {
-    let handled = false;
-
-    try {
-      safeEmit("incidencias:create-modal:open", { draft });
-      handled = true;
-    } catch {}
-
     try {
       const hook =
         window?.OnionIncidenciasCreateModal?.open ||
@@ -345,13 +363,18 @@ export const IncidenciasView = (() => {
 
       if (typeof hook === "function") {
         hook(draft);
-        handled = true;
+        return true;
       }
     } catch (error) {
-      safeWarn("create modal bridge falló:", error);
+      safeWarn("create modal hook falló:", error);
     }
 
-    return handled;
+    try {
+      safeEmit("incidencias:create-modal:open", { draft });
+      return true;
+    } catch {}
+
+    return false;
   }
 
   function flushPendingCreate() {
@@ -359,139 +382,14 @@ export const IncidenciasView = (() => {
     if (!canInteract()) return false;
 
     pendingCreateRequest = false;
-    handleCreateIncidencia();
+    void handleCreateIncidencia();
 
     return true;
   }
 
   /* =====================================================
-     DOM POST-RENDER HARDENING
+     DOM POST-RENDER
   ===================================================== */
-
-  function applyPaginationToDom(container, pagination) {
-    if (!container || !pagination) return;
-
-    const rows = Array.from(
-      container.querySelectorAll(".incidencias-table tbody .incidencias-row")
-    );
-
-    if (!rows.length) return;
-
-    const visibleIds = new Set(
-      safeArray(pagination.items).map((item) => {
-        const id =
-          item?.ticketId ||
-          item?.code ||
-          item?.numero ||
-          item?.id ||
-          item?.raw?.ticketId ||
-          item?.raw?.code ||
-          item?.raw?.numero ||
-          item?.raw?.id ||
-          "";
-
-        return String(id).trim();
-      })
-    );
-
-    rows.forEach((row) => {
-      const ticketId = safeText(row.dataset.ticketId, "");
-      row.hidden = !visibleIds.has(ticketId);
-      row.setAttribute("aria-hidden", row.hidden ? "true" : "false");
-    });
-  }
-
-  function ensureTableBusyLayer(historyEl) {
-    if (!historyEl) return null;
-
-    let layer = historyEl.querySelector("[data-incidencias-table-busy-layer='true']");
-
-    if (layer) return layer;
-
-    historyEl.style.position = historyEl.style.position || "relative";
-
-    layer = document.createElement("div");
-    layer.setAttribute("data-incidencias-table-busy-layer", "true");
-    layer.setAttribute("aria-hidden", "true");
-
-    Object.assign(layer.style, {
-      position: "absolute",
-      inset: "0",
-      display: "none",
-      alignItems: "center",
-      justifyContent: "center",
-      padding: "24px",
-      background: "color-mix(in srgb, var(--surface-1, #fff) 72%, transparent)",
-      backdropFilter: "blur(4px)",
-      WebkitBackdropFilter: "blur(4px)",
-      zIndex: "4",
-    });
-
-    const card = document.createElement("div");
-    Object.assign(card.style, {
-      display: "grid",
-      justifyItems: "center",
-      gap: "10px",
-      minWidth: "200px",
-      padding: "16px 18px",
-      borderRadius: "16px",
-      border: "1px solid color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft, rgba(15,23,42,.08)))",
-      background:
-        "linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent), var(--surface-1, rgba(255,255,255,.92))",
-      boxShadow: "0 14px 36px rgba(15,23,42,.10)",
-    });
-
-    const spinner = document.createElement("span");
-    Object.assign(spinner.style, {
-      width: "22px",
-      height: "22px",
-      borderRadius: "999px",
-      border: "3px solid color-mix(in srgb, var(--accent, #7c5cff) 16%, transparent)",
-      borderTopColor: "var(--accent, #7c5cff)",
-      animation: "incidenciasViewSpin .8s linear infinite",
-    });
-
-    const text = document.createElement("strong");
-    text.textContent = "Actualizando historial...";
-    Object.assign(text.style, {
-      fontSize: "13px",
-      lineHeight: "1.2",
-      color: "var(--text-strong, #111827)",
-      letterSpacing: "-.02em",
-    });
-
-    card.appendChild(spinner);
-    card.appendChild(text);
-    layer.appendChild(card);
-    historyEl.appendChild(layer);
-
-    if (!document.getElementById("incidencias-view-busy-style")) {
-      const style = document.createElement("style");
-      style.id = "incidencias-view-busy-style";
-      style.textContent = `
-        @keyframes incidenciasViewSpin {
-          to { transform: rotate(360deg); }
-        }
-      `;
-      document.head.appendChild(style);
-    }
-
-    return layer;
-  }
-
-  function applyBusyStateToDom(container) {
-    if (!container) return;
-
-    const historyEl = container.querySelector(".incidencias-history");
-    if (!historyEl) return;
-
-    const layer = ensureTableBusyLayer(historyEl);
-    if (!layer) return;
-
-    const busy = Boolean(incidenciasState.loading || incidenciasState.refreshing);
-
-    layer.style.display = busy ? "flex" : "none";
-  }
 
   function applyErrorStateToDom(container) {
     if (!container) return;
@@ -504,26 +402,25 @@ export const IncidenciasView = (() => {
       oldBanner.remove();
     }
 
-    if (!safeText(incidenciasState.error, "")) {
-      return;
-    }
+    const message = safeText(incidenciasState.error, "");
+    if (!message) return;
 
     const banner = document.createElement("div");
     banner.setAttribute("data-incidencias-error-banner", "true");
 
     Object.assign(banner.style, {
-      margin: "0 20px 16px",
-      padding: "12px 14px",
+      margin: "0 18px 14px",
+      padding: "11px 13px",
       borderRadius: "14px",
-      border: "1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 28%, var(--border-soft, rgba(15,23,42,.08)))",
+      border: "1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 22%, var(--border-soft, rgba(15,23,42,.08)))",
       background:
-        "linear-gradient(180deg, color-mix(in srgb, var(--danger-strong, #ff6b6b) 8%, transparent), transparent), var(--surface-1, rgba(255,255,255,.78))",
+        "linear-gradient(180deg, color-mix(in srgb, var(--danger-strong, #ff6b6b) 6%, transparent), transparent), var(--surface-1, rgba(255,255,255,.78))",
       color: "var(--text-soft, #4b5563)",
       fontSize: "12px",
-      lineHeight: "1.55",
+      lineHeight: "1.5",
     });
 
-    banner.textContent = incidenciasState.error;
+    banner.textContent = message;
     historyHead.insertAdjacentElement("afterend", banner);
   }
 
@@ -535,12 +432,23 @@ export const IncidenciasView = (() => {
     const allItems = getItems();
     const pagination = clampPageAgainstItems(allItems);
 
+    const totalCount = Math.max(
+      allItems.length,
+      safeNumber(
+        incidenciasState.totalCount ||
+        incidenciasState.remoteCount ||
+        allItems.length,
+        allItems.length
+      )
+    );
+
     return `
       <section class="panel-content dashboard ready">
         <div class="content-wrapper" style="display:grid;gap:var(--space-lg);">
           ${renderIncidenciasTableTemplate({
             items: allItems,
-            totalCount: allItems.length,
+            totalCount,
+            remoteCount: totalCount,
             page: pagination.page,
             pageSize: pagination.pageSize,
             totalPages: pagination.totalPages,
@@ -548,6 +456,7 @@ export const IncidenciasView = (() => {
             title: "Tus incidencias y solicitudes",
             subtitle:
               "Consulta el estado de tus incidencias, revisa las actualizaciones más recientes y crea nuevas solicitudes desde una vista clara, cercana y fácil de seguir.",
+            state: incidenciasState,
           })}
         </div>
       </section>
@@ -557,11 +466,6 @@ export const IncidenciasView = (() => {
   function decorateDom(container) {
     if (!container) return container;
 
-    const allItems = getItems();
-    const pagination = getPaginationMeta(allItems);
-
-    applyPaginationToDom(container, pagination);
-    applyBusyStateToDom(container);
     applyErrorStateToDom(container);
 
     return container;
@@ -626,14 +530,25 @@ export const IncidenciasView = (() => {
     try {
       await loadIncidencias({ force });
 
+      const itemsAfter = getItems();
+
       setState({
         loading: false,
         refreshing: false,
         error: "",
         lastSyncAt: new Date().toISOString(),
+        totalCount: Math.max(
+          itemsAfter.length,
+          safeNumber(
+            incidenciasState.totalCount ||
+            incidenciasState.remoteCount ||
+            itemsAfter.length,
+            itemsAfter.length
+          )
+        ),
       });
 
-      return getItems();
+      return itemsAfter;
     } catch (error) {
       const message = safeErrorMessage(error);
 
@@ -685,6 +600,10 @@ export const IncidenciasView = (() => {
   ===================================================== */
 
   function goToPage(page = 1) {
+    if (incidenciasState.loading || incidenciasState.refreshing) {
+      return incidenciasState.page || 1;
+    }
+
     const items = getItems();
 
     const pagination = paginateIncidencias(
@@ -714,11 +633,16 @@ export const IncidenciasView = (() => {
     const id = String(ticketId || "").trim();
     if (!id) return null;
 
+    if (incidenciasState.openingTicketId) {
+      return null;
+    }
+
     setState({
       openingTicketId: id,
     });
 
     rerender();
+    await waitForPaint();
 
     try {
       const detail = await openTicketAction({
@@ -798,6 +722,7 @@ export const IncidenciasView = (() => {
     });
 
     rerender();
+    await waitForPaint();
 
     try {
       const opened = openCreateModalBridge({});

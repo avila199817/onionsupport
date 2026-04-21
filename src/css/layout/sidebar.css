@@ -3,14 +3,15 @@
    HIGH LEVEL / PRO SAAS PANEL / FINAL / GOD TIER
    Archivo: src/css/layout/sidebar.css
 
-   REFINADO PRO:
+   REFINADO 10/10:
    - sidebar premium más limpio y operativo
-   - collapsed real sin residuos visuales
+   - collapsed desktop estable y sin teatrillo
+   - desktop sin transform innecesario
+   - mobile separado con transición dedicada
    - tooltip consistente y sin clipping
    - footer de usuario más sólido
-   - desktop / tablet / mobile bien separados
-   - menos brillo innecesario
-   - mejor densidad para panel de trabajo
+   - light mode más fino
+   - menos ruido visual en navegación SPA
 ========================================================= */
 
 
@@ -46,15 +47,16 @@
 
   transition:
     inline-size var(--duration-slow) var(--ease-emphasis),
-    transform var(--duration-slow) var(--ease-emphasis),
     background var(--duration-normal) var(--ease-standard),
     border-color var(--duration-normal) var(--ease-standard),
-    box-shadow var(--duration-normal) var(--ease-standard),
-    opacity var(--duration-fast) var(--ease-standard);
+    box-shadow var(--duration-normal) var(--ease-standard);
 
   overflow:visible;
   z-index:var(--z-sidebar);
   isolation:isolate;
+  transform:none;
+  opacity:1;
+  will-change:inline-size;
 }
 
 .sidebar[hidden]{
@@ -158,11 +160,12 @@
   text-decoration:none;
 
   transition:
-    opacity var(--duration-fast) var(--ease-standard),
-    transform var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-standard),
     background var(--duration-fast) var(--ease-standard),
     border-color var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard);
+    box-shadow var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-out),
+    opacity var(--duration-fast) var(--ease-standard);
 }
 
 .logo img{
@@ -226,12 +229,12 @@
   cursor:pointer;
 
   transition:
-    opacity var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard),
     background var(--duration-fast) var(--ease-standard),
     border-color var(--duration-fast) var(--ease-standard),
     transform var(--duration-fast) var(--ease-out),
-    box-shadow var(--duration-fast) var(--ease-standard);
+    box-shadow var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
 }
 
 .sidebar-toggle svg{
@@ -257,61 +260,29 @@
 
 
 /* =========================
-   COLLAPSED TOP BEHAVIOUR
+   COLLAPSED DESKTOP
+   estable y sin swap hover
 ========================= */
 .sidebar.collapsed .sidebar-top,
 .sidebar.is-collapsed .sidebar-top{
-  display:block;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:0;
   min-block-size:var(--sidebar-top-height);
   padding:12px 0;
 }
 
 .sidebar.collapsed .logo,
 .sidebar.is-collapsed .logo{
-  position:absolute;
-  inset-block-start:50%;
-  inset-inline-start:50%;
-  transform:translate(-50%, -50%);
-  opacity:1;
+  display:none;
 }
 
 .sidebar.collapsed .sidebar-toggle,
 .sidebar.is-collapsed .sidebar-toggle{
-  position:absolute;
-  inset-block-start:50%;
-  inset-inline-start:50%;
   margin-inline-start:0;
-  transform:translate(-50%, -50%);
-  inline-size:32px;
-  block-size:32px;
-  opacity:0;
-  pointer-events:none;
-  background:transparent;
-  border-color:transparent;
-  box-shadow:none;
-}
-
-.sidebar.collapsed .sidebar-top:hover .logo,
-.sidebar.is-collapsed .sidebar-top:hover .logo{
-  opacity:0;
-}
-
-.sidebar.collapsed .sidebar-top:hover .sidebar-toggle,
-.sidebar.is-collapsed .sidebar-top:hover .sidebar-toggle{
-  opacity:1;
-  pointer-events:auto;
-}
-
-.sidebar.collapsed .sidebar-toggle:hover,
-.sidebar.is-collapsed .sidebar-toggle:hover{
-  transform:translate(-50%, -50%) scale(1.02);
-  background:rgba(255,255,255,.020);
-  color:var(--text-strong);
-}
-
-.sidebar.collapsed .sidebar-toggle:active,
-.sidebar.is-collapsed .sidebar-toggle:active{
-  transform:translate(-50%, -50%) scale(.98);
+  inline-size:34px;
+  block-size:34px;
 }
 
 
@@ -450,26 +421,16 @@
   z-index:var(--z-tooltip);
 }
 
+.logo[data-tooltip]:hover::after,
+.logo[data-tooltip]:hover::before,
 .sidebar-toggle[data-tooltip]:hover::after,
 .sidebar-toggle[data-tooltip]:hover::before{
   opacity:1;
   visibility:visible;
 }
 
+.logo[data-tooltip]:hover::after,
 .sidebar-toggle[data-tooltip]:hover::after{
-  transform:translateY(0);
-}
-
-.sidebar.collapsed .logo[data-tooltip]:hover::after,
-.sidebar.collapsed .logo[data-tooltip]:hover::before,
-.sidebar.is-collapsed .logo[data-tooltip]:hover::after,
-.sidebar.is-collapsed .logo[data-tooltip]:hover::before{
-  opacity:1;
-  visibility:visible;
-}
-
-.sidebar.collapsed .logo[data-tooltip]:hover::after,
-.sidebar.is-collapsed .logo[data-tooltip]:hover::after{
   transform:translateY(0);
 }
 
@@ -478,6 +439,10 @@
   opacity:1;
   visibility:visible;
   transform:translateY(-50%) translateX(0);
+}
+
+.sidebar:not(.collapsed):not(.is-collapsed) .menu-item[data-tooltip]::after{
+  display:none;
 }
 
 .sidebar.collapsed .menu-item.active[data-tooltip]::after,
@@ -617,11 +582,6 @@
 .menu-item[aria-current="page"] > *{
   position:relative;
   z-index:1;
-}
-
-.menu-item.active::selection,
-.menu-item[aria-current="page"]::selection{
-  background:transparent;
 }
 
 .menu-item.active::before,
@@ -1192,15 +1152,25 @@
 ========================= */
 @media (max-width: 900px){
   .sidebar{
-    transform:translateX(-100%);
     inline-size:var(--sidebar-mobile-width);
     max-inline-size:320px;
+
     overflow-x:hidden;
     overflow-y:auto;
+
+    transform:translateX(-100%);
+
     box-shadow:
       0 24px 80px rgba(0,0,0,.34),
       0 0 0 1px rgba(255,255,255,.03);
+
     z-index:var(--z-overlay);
+
+    transition:
+      transform var(--duration-slow) var(--ease-emphasis),
+      background var(--duration-normal) var(--ease-standard),
+      border-color var(--duration-normal) var(--ease-standard),
+      box-shadow var(--duration-normal) var(--ease-standard);
   }
 
   .sidebar.open,
@@ -1217,10 +1187,12 @@
     display:flex;
     align-items:center;
     justify-content:space-between;
+    gap:var(--space-sm);
     padding:12px;
   }
 
   .sidebar .logo{
+    display:inline-flex !important;
     position:relative;
     inset:auto;
     transform:none;
@@ -1228,6 +1200,7 @@
   }
 
   .sidebar .sidebar-toggle{
+    display:inline-flex !important;
     position:relative;
     inset:auto;
     margin-inline-start:auto;

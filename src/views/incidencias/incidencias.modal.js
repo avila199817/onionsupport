@@ -338,6 +338,18 @@ function createTimeoutSignal(timeoutMs = REQUEST_TIMEOUT_MS) {
   };
 }
 
+function waitForPaint() {
+  return new Promise((resolve) => {
+    try {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(resolve);
+      });
+    } catch {
+      setTimeout(resolve, 0);
+    }
+  });
+}
+
 function getFilenameFromContentDisposition(value = "", fallback = "archivo") {
   const text = safeText(value, "");
   if (!text) return fallback;
@@ -1576,6 +1588,7 @@ async function commentTicketInternal({ ticketId = "", message = "" } = {}) {
       return await requestJson(candidate.path, {
         method: candidate.method,
         body: payload,
+        timeoutMs: REQUEST_TIMEOUT_MS,
       });
     } catch (error) {
       lastError = error;
@@ -1629,6 +1642,7 @@ async function reopenTicketInternal(ticketId = "") {
       return await requestJson(candidate.path, {
         method: candidate.method,
         body: payload,
+        timeoutMs: REQUEST_TIMEOUT_MS,
       });
     } catch (error) {
       lastError = error;
@@ -1662,6 +1676,7 @@ async function fetchTicketDetailInternal(ticketId = "") {
     try {
       return await requestJson(path, {
         method: "GET",
+        timeoutMs: REQUEST_TIMEOUT_MS,
       });
     } catch (error) {
       lastError = error;
@@ -1677,6 +1692,8 @@ async function fetchTicketDetailInternal(ticketId = "") {
 
 /* =========================================================
    EXTERNAL ACTION BRIDGE
+   Solo para apertura/descarga de adjuntos si existe bridge externo.
+   No se usa para submit para evitar recursión con actions.js.
 ========================================================= */
 
 async function callExternalAction(action = "", payload = {}) {
@@ -1706,23 +1723,6 @@ async function refreshCurrentDetail(ticketId = "", fallback = {}) {
   if (!id) {
     return getDetail(fallback);
   }
-
-  try {
-    const external =
-      (await callExternalAction("getTicketDetail", {
-        ticketId: id,
-        detail: fallback,
-      })) ||
-      (await callExternalAction("openTicket", {
-        ticketId: id,
-        silent: true,
-        detail: fallback,
-      }));
-
-    if (external && typeof external === "object") {
-      return coerceDetailResponse(external, fallback);
-    }
-  } catch {}
 
   try {
     const internal = await fetchTicketDetailInternal(id);
@@ -3561,28 +3561,16 @@ async function handleSubmitUpdate(ticketId = "") {
   attachRootBindings();
   focusPanel();
 
+  await waitForPaint();
+
   try {
     let nextDetail = getDetail(modalState.detail);
 
     if (files.length) {
-      let uploadResponse = null;
-
-      try {
-        uploadResponse = await callExternalAction("uploadTicketAttachments", {
-          ticketId: id,
-          files,
-          detail: nextDetail,
-        });
-      } catch {
-        uploadResponse = null;
-      }
-
-      if (!uploadResponse) {
-        uploadResponse = await uploadTicketAttachmentsInternal({
-          ticketId: id,
-          files,
-        });
-      }
+      const uploadResponse = await uploadTicketAttachmentsInternal({
+        ticketId: id,
+        files,
+      });
 
       safeEmit("incidencias:modal:upload", {
         ticketId: id,
@@ -3590,35 +3578,13 @@ async function handleSubmitUpdate(ticketId = "") {
       });
 
       nextDetail = coerceDetailResponse(uploadResponse, nextDetail);
-
-      try {
-        const reopenResponse = await reopenTicketInternal(id);
-        nextDetail = mergeDetailWithOpenStatus(nextDetail, reopenResponse);
-      } catch {
-        nextDetail = mergeDetailWithOpenStatus(nextDetail, null);
-      }
     }
 
     if (message) {
-      let commentResponse = null;
-
-      try {
-        commentResponse = await callExternalAction("commentTicket", {
-          ticketId: id,
-          message,
-          detail: nextDetail,
-          status: "open",
-        });
-      } catch {
-        commentResponse = null;
-      }
-
-      if (!commentResponse) {
-        commentResponse = await commentTicketInternal({
-          ticketId: id,
-          message,
-        });
-      }
+      const commentResponse = await commentTicketInternal({
+        ticketId: id,
+        message,
+      });
 
       safeEmit("incidencias:modal:comment", {
         ticketId: id,
@@ -3627,6 +3593,13 @@ async function handleSubmitUpdate(ticketId = "") {
       });
 
       nextDetail = mergeDetailWithOpenStatus(nextDetail, commentResponse);
+    } else if (files.length) {
+      try {
+        const reopenResponse = await reopenTicketInternal(id);
+        nextDetail = mergeDetailWithOpenStatus(nextDetail, reopenResponse);
+      } catch {
+        nextDetail = mergeDetailWithOpenStatus(nextDetail, null);
+      }
     }
 
     nextDetail = await refreshCurrentDetail(id, nextDetail);
@@ -4038,6 +4011,8 @@ function handleCloseEvent() {
 }
 
 function handleOpenedDetailEvent(event) {
+  if (modalState.isSubmitting) return;
+
   const detail = event?.detail?.detail || event?.detail || event || null;
   if (!detail) return;
 
@@ -4047,6 +4022,8 @@ function handleOpenedDetailEvent(event) {
 }
 
 function handleUpdateEvent(event) {
+  if (modalState.isSubmitting) return;
+
   const detail = event?.detail?.detail || event?.detail || event || null;
   if (!detail) return;
 
@@ -4054,6 +4031,8 @@ function handleUpdateEvent(event) {
 }
 
 function handleCommentSuccess(event) {
+  if (modalState.isSubmitting) return;
+
   const detail = event?.detail?.detail || event?.detail || event || null;
 
   if (!detail || !modalState.isOpen) return;
@@ -4080,6 +4059,8 @@ function handleCommentSuccess(event) {
 }
 
 function handleUploadSuccess(event) {
+  if (modalState.isSubmitting) return;
+
   const detail = event?.detail?.detail || event?.detail || event || null;
 
   if (!detail || !modalState.isOpen) return;

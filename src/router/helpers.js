@@ -11,9 +11,11 @@
    - hardening total contra inputs corruptos
    - preservar query/hash correctamente
    - cero degradación username/context path
+   - no destruir tokens públicos en rutas tipo /activate-account?token=...
 
    HARDENING EXTREMO 10/10:
-   - canonical determinista
+   - canonical determinista sin query/hash
+   - publicPath preserva query/hash
    - slug estricto enterprise
    - redirect interno seguro
    - soporte href relativo real
@@ -27,6 +29,15 @@ export const ROUTER_CONFIG = Object.freeze({
   maxUsernameLength: 64,
 });
 
+const PUBLIC_AUTH_PATHS = new Set([
+  "/login",
+  "/activate-account",
+  "/reset-password",
+  "/forgot-password",
+  "/recover-password",
+  "/password-reset",
+]);
+
 /* =========================================================
    ROUTE NAMES
 ========================================================= */
@@ -34,20 +45,20 @@ export const ROUTER_CONFIG = Object.freeze({
 export function getRouteNames(AppCore) {
   return {
     HOME:
-      AppCore?.config?.routes
-        ?.home || "/",
+      AppCore?.config?.routes?.home ||
+      "/",
 
     LOGIN:
-      AppCore?.config?.routes
-        ?.login || "/login",
+      AppCore?.config?.routes?.login ||
+      "/login",
 
     SERVER:
-      AppCore?.config?.routes
-        ?.server || "/servidor",
+      AppCore?.config?.routes?.server ||
+      "/servidor",
 
     USERS:
-      AppCore?.config?.routes
-        ?.users || "/usuarios",
+      AppCore?.config?.routes?.users ||
+      "/usuarios",
   };
 }
 
@@ -60,6 +71,23 @@ export function isBrowser() {
     typeof window !== "undefined" &&
     typeof document !== "undefined"
   );
+}
+
+function safeText(
+  value = "",
+  fallback = ""
+) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return fallback;
+  }
+
+  const text =
+    String(value).trim();
+
+  return text || fallback;
 }
 
 export function normalizeRouteInput(
@@ -105,11 +133,80 @@ export function escapeHtml(
    PATH CORE
 ========================================================= */
 
+function getBaseOrigin() {
+  if (
+    isBrowser() &&
+    window.location?.origin
+  ) {
+    return window.location.origin;
+  }
+
+  return "http://localhost";
+}
+
+function normalizeSearch(
+  search = ""
+) {
+  const value =
+    String(search || "").trim();
+
+  if (!value) {
+    return "";
+  }
+
+  return value.startsWith("?")
+    ? value
+    : `?${value.replace(/^\?+/, "")}`;
+}
+
+function normalizeHash(
+  hash = ""
+) {
+  const value =
+    String(hash || "").trim();
+
+  if (!value) {
+    return "";
+  }
+
+  return value.startsWith("#")
+    ? value
+    : `#${value.replace(/^#+/, "")}`;
+}
+
 function splitRawPath(
   path = "/"
 ) {
   const raw =
     normalizeRouteInput(path);
+
+  if (!raw) {
+    return {
+      pathname: "/",
+      search: "",
+      hash: "",
+    };
+  }
+
+  try {
+    if (
+      /^[a-z][a-z\d+.-]*:\/\//i.test(raw)
+    ) {
+      const url = new URL(
+        raw,
+        getBaseOrigin()
+      );
+
+      return {
+        pathname:
+          url.pathname || "/",
+        search:
+          url.search || "",
+        hash:
+          url.hash || "",
+      };
+    }
+  } catch {}
 
   let pathname = raw;
   let search = "";
@@ -146,8 +243,10 @@ function splitRawPath(
   return {
     pathname:
       pathname || "/",
-    search,
-    hash,
+    search:
+      normalizeSearch(search),
+    hash:
+      normalizeHash(hash),
   };
 }
 
@@ -157,8 +256,9 @@ function normalizePathnameOnly(
   let value = String(
     pathname || "/"
   )
-    .replace(/\/{2,}/g, "/")
-    .trim();
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
 
   if (!value) {
     value = "/";
@@ -184,6 +284,47 @@ function normalizePathnameOnly(
   return value;
 }
 
+function normalizePathnameWithCore(
+  AppCore,
+  pathname = "/"
+) {
+  let normalized =
+    normalizePathnameOnly(
+      pathname
+    );
+
+  try {
+    if (
+      AppCore?.utils?.normalizePath
+    ) {
+      const delegated =
+        AppCore.utils.normalizePath(
+          normalized
+        );
+
+      if (delegated) {
+        const parts =
+          splitRawPath(delegated);
+
+        normalized =
+          normalizePathnameOnly(
+            parts.pathname || "/"
+          );
+      }
+    }
+  } catch {}
+
+  return normalized;
+}
+
+/**
+ * Normaliza una URL interna conservando query/hash.
+ *
+ * IMPORTANTE:
+ * - NO delega la URL completa a AppCore.utils.normalizePath
+ * - delega solo el pathname
+ * - así evita que helpers externos borren ?token=...
+ */
 export function normalizePath(
   AppCore,
   path = "/"
@@ -197,45 +338,35 @@ export function normalizePath(
     return raw;
   }
 
-  try {
-    if (
-      AppCore?.utils
-        ?.normalizePath
-    ) {
-      const delegated =
-        AppCore.utils.normalizePath(
-          raw
-        );
-
-      if (delegated) {
-        return normalizePath(
-          null,
-          delegated
-        );
-      }
-    }
-  } catch {}
-
   const {
     pathname,
     search,
     hash,
   } = splitRawPath(raw);
 
-  return `${normalizePathnameOnly(
-    pathname
-  )}${search}${hash}`;
+  const cleanPathname =
+    normalizePathnameWithCore(
+      AppCore,
+      pathname
+    );
+
+  return `${cleanPathname}${search}${hash}`;
 }
 
 export function stripSearchAndHash(
   path = "/"
 ) {
-  return splitRawPath(
-    normalizePath(
-      null,
-      path
-    )
-  ).pathname;
+  const parts =
+    splitRawPath(
+      normalizePath(
+        null,
+        path
+      )
+    );
+
+  return normalizePathnameOnly(
+    parts.pathname || "/"
+  );
 }
 
 export function getSearchAndHash(
@@ -387,6 +518,13 @@ export function getCurrentResolvedUsername(
    CANONICAL
 ========================================================= */
 
+/**
+ * Quita /@username conservando query/hash.
+ *
+ * Ejemplo:
+ *   /@pepe/facturas?page=2
+ *   -> /facturas?page=2
+ */
 export function stripUsernamePrefix(
   AppCore,
   path = "/"
@@ -397,28 +535,35 @@ export function stripUsernamePrefix(
       path
     );
 
-  const pathname =
-    stripSearchAndHash(
-      normalized
-    );
-
-  const suffix =
-    getSearchAndHash(
-      normalized
-    );
+  const parts =
+    splitRawPath(normalized);
 
   const clean =
-    pathname.replace(
+    normalizePathnameOnly(
+      parts.pathname || "/"
+    ).replace(
       /^\/@[^/]+(?=\/|$)/i,
       ""
     ) || "/";
 
   return normalizePath(
     AppCore,
-    `${clean}${suffix}`
+    `${clean}${parts.search}${parts.hash}`
   );
 }
 
+/**
+ * Ruta canónica interna.
+ *
+ * IMPORTANTE:
+ * - NO devuelve query
+ * - NO devuelve hash
+ * - NO devuelve /@username
+ *
+ * Ejemplo:
+ *   /@pepe/activate-account?token=abc
+ *   -> /activate-account
+ */
 export function normalizeCanonicalPath(
   AppCore,
   path = "/"
@@ -434,14 +579,9 @@ export function normalizeCanonicalPath(
       stripped
     );
 
-  const suffix =
-    getSearchAndHash(
-      stripped
-    );
-
-  return `${normalizePathnameOnly(
+  return normalizePathnameOnly(
     pathname
-  )}${suffix}`;
+  );
 }
 
 export function isSameCanonicalPath(
@@ -450,17 +590,13 @@ export function isSameCanonicalPath(
   b = "/"
 ) {
   return (
-    stripSearchAndHash(
-      normalizeCanonicalPath(
-        AppCore,
-        a
-      )
+    normalizeCanonicalPath(
+      AppCore,
+      a
     ) ===
-    stripSearchAndHash(
-      normalizeCanonicalPath(
-        AppCore,
-        b
-      )
+    normalizeCanonicalPath(
+      AppCore,
+      b
     )
   );
 }
@@ -481,6 +617,13 @@ export function getCurrentUrl() {
   );
 }
 
+/**
+ * URL pública real actual.
+ *
+ * Esta función usa el navegador como fuente de verdad.
+ * Así no se pierde:
+ *   /activate-account?token=xxx
+ */
 export function getCurrentPath(
   AppCore
 ) {
@@ -500,6 +643,13 @@ export function getCurrentPath(
   );
 }
 
+/**
+ * Ruta canónica actual.
+ *
+ * Ejemplo:
+ *   /activate-account?token=xxx
+ *   -> /activate-account
+ */
 export function getCurrentCanonicalPath(
   AppCore
 ) {
@@ -511,25 +661,30 @@ export function getCurrentCanonicalPath(
   );
 }
 
+/**
+ * Public path actual.
+ *
+ * Prioridad:
+ * 1. navegador real
+ * 2. estado de app
+ *
+ * Esto evita que AppCore.state.publicPath antiguo borre query/hash.
+ */
 export function getCurrentPublicPath(
   AppCore
 ) {
-  const fromState =
-    normalizePath(
-      AppCore,
-      AppCore?.state
-        ?.publicPath || ""
+  if (isBrowser()) {
+    return getCurrentPath(
+      AppCore
     );
-
-  if (
-    fromState &&
-    fromState !== "/"
-  ) {
-    return fromState;
   }
 
-  return getCurrentPath(
-    AppCore
+  return normalizePath(
+    AppCore,
+    AppCore?.state
+      ?.publicPath ||
+      AppCore?.state?.route ||
+      "/"
   );
 }
 
@@ -597,9 +752,24 @@ export function canUsePublicSlugForRoute(
     return false;
   }
 
+  const routePath =
+    stripSearchAndHash(
+      normalizePath(
+        null,
+        route.path || "/"
+      )
+    );
+
   if (
-    route.path ===
-    routeNames.LOGIN
+    routePath === routeNames.LOGIN
+  ) {
+    return false;
+  }
+
+  if (
+    PUBLIC_AUTH_PATHS.has(
+      routePath
+    )
   ) {
     return false;
   }
@@ -640,13 +810,41 @@ export function resolveSpaHref(
   }
 
   if (
-    isExternalHref(raw)
+    isHashOnlyHref(raw)
   ) {
     return raw;
   }
 
   if (
-    isHashOnlyHref(raw)
+    /^https?:\/\//i.test(raw)
+  ) {
+    try {
+      const url =
+        new URL(
+          raw,
+          getBaseOrigin()
+        );
+
+      const currentOrigin =
+        getBaseOrigin();
+
+      if (
+        url.origin === currentOrigin
+      ) {
+        return normalizePath(
+          AppCore,
+          `${url.pathname}${url.search}${url.hash}`
+        );
+      }
+
+      return raw;
+    } catch {
+      return routeNames.HOME;
+    }
+  }
+
+  if (
+    isExternalHref(raw)
   ) {
     return raw;
   }
@@ -682,6 +880,18 @@ export function resolveSpaHref(
    BUILDERS
 ========================================================= */
 
+/**
+ * Construye URL pública visible.
+ *
+ * Entrada:
+ *   /activate-account?token=abc
+ *
+ * Salida si no hay slug:
+ *   /activate-account?token=abc
+ *
+ * Salida con slug permitido:
+ *   /@user/facturas?page=2
+ */
 export function buildPublicPath(
   AppCore,
   getRoute,
@@ -693,27 +903,34 @@ export function buildPublicPath(
       AppCore
     );
 
-  const canonical =
-    normalizeCanonicalPath(
+  const source =
+    normalizePath(
       AppCore,
       canonicalPath
     );
 
   const clean =
-    stripSearchAndHash(
-      canonical
+    normalizeCanonicalPath(
+      AppCore,
+      source
     );
 
   const suffix =
     getSearchAndHash(
-      canonical
+      source
     );
 
   const route =
     getRoute?.(clean);
 
+  const publicWithoutSlug =
+    normalizePath(
+      AppCore,
+      `${clean}${suffix}`
+    );
+
   if (!route) {
-    return canonical;
+    return publicWithoutSlug;
   }
 
   if (
@@ -722,7 +939,7 @@ export function buildPublicPath(
       routeNames
     )
   ) {
-    return canonical;
+    return publicWithoutSlug;
   }
 
   const username =
@@ -732,8 +949,7 @@ export function buildPublicPath(
         options.resolvedUsername ||
         extractUsernameFromPath(
           AppCore,
-          options.fromPath ||
-            ""
+          options.fromPath || ""
         ) ||
         getCurrentResolvedUsername(
           AppCore
@@ -744,16 +960,22 @@ export function buildPublicPath(
     );
 
   if (!username) {
-    return canonical;
+    return publicWithoutSlug;
   }
 
   if (
     clean === routeNames.HOME
   ) {
-    return `/@${username}${suffix}`;
+    return normalizePath(
+      AppCore,
+      `/@${username}${suffix}`
+    );
   }
 
-  return `/@${username}${clean}${suffix}`;
+  return normalizePath(
+    AppCore,
+    `/@${username}${clean}${suffix}`
+  );
 }
 
 export function getRedirectPath(
@@ -780,12 +1002,8 @@ export function getRedirectPath(
     );
 
   if (
-    isUnsafeHref(
-      resolved
-    ) ||
-    isExternalHref(
-      resolved
-    )
+    isUnsafeHref(resolved) ||
+    isExternalHref(resolved)
   ) {
     return null;
   }
@@ -797,14 +1015,19 @@ export function getRedirectPath(
     );
 
   if (
-    stripSearchAndHash(
-      canonical
-    ) === routeNames.LOGIN
+    canonical ===
+    normalizeCanonicalPath(
+      AppCore,
+      routeNames.LOGIN
+    )
   ) {
     return null;
   }
 
-  return canonical;
+  return stripUsernamePrefix(
+    AppCore,
+    resolved
+  );
 }
 
 export function buildLoginUrl(
@@ -826,17 +1049,33 @@ export function buildLoginUrl(
     return login;
   }
 
-  const redirect =
-    normalizeCanonicalPath(
+  const resolvedRedirect =
+    stripUsernamePrefix(
       AppCore,
-      redirectPath
+      resolveSpaHref(
+        AppCore,
+        redirectPath
+      )
     );
 
   if (
-    stripSearchAndHash(
-      redirect
+    isUnsafeHref(
+      resolvedRedirect
+    ) ||
+    isExternalHref(
+      resolvedRedirect
+    )
+  ) {
+    return login;
+  }
+
+  if (
+    normalizeCanonicalPath(
+      AppCore,
+      resolvedRedirect
     ) ===
-    stripSearchAndHash(
+    normalizeCanonicalPath(
+      AppCore,
       login
     )
   ) {
@@ -849,23 +1088,44 @@ export function buildLoginUrl(
 
   url.searchParams.set(
     "redirect",
-    redirect
+    resolvedRedirect
   );
 
   return `${url.pathname}${url.search}`;
 }
 
+/**
+ * URL que debe escribirse en history.
+ *
+ * Esta función es crítica:
+ * NO debe convertir:
+ *   /activate-account?token=abc
+ * en:
+ *   /activate-account
+ */
 export function buildHistoryUrl(
   AppCore,
   getRoute,
   pathname = "/",
   options = {}
 ) {
+  const routeNames =
+    getRouteNames(
+      AppCore
+    );
+
   const resolved =
     resolveSpaHref(
       AppCore,
       pathname
     );
+
+  if (
+    isUnsafeHref(resolved) ||
+    isExternalHref(resolved)
+  ) {
+    return routeNames.HOME;
+  }
 
   if (
     options.preservePath
@@ -876,22 +1136,17 @@ export function buildHistoryUrl(
     );
   }
 
-  const canonical =
-    normalizeCanonicalPath(
-      AppCore,
-      resolved
-    );
-
   return buildPublicPath(
     AppCore,
     getRoute,
-    canonical,
+    resolved,
     {
       username:
         options.username,
       resolvedUsername:
         options.resolvedUsername,
-      fromPath: resolved,
+      fromPath:
+        resolved,
     }
   );
 }
@@ -924,7 +1179,8 @@ export function buildStatePayload(
     null;
 
   return {
-    path: publicPath,
+    path:
+      publicPath,
     publicPath,
     canonicalPath:
       canonical,

@@ -13,6 +13,10 @@
    - guards de browser
    - sync robusto de aria-current
    - compatibilidad con mount dinámico
+   - cero throws accidentales
+   - no toca history
+   - no modifica query/hash
+   - no destruye /activate-account?token=...
 ========================================================= */
 
 import {
@@ -23,6 +27,7 @@ import {
 /* =========================================================
    INTERNAL
 ========================================================= */
+
 function isBrowser() {
   return (
     typeof window !== "undefined" &&
@@ -30,18 +35,100 @@ function isBrowser() {
   );
 }
 
-function safeToggleHidden(element, hidden) {
-  if (!element) return;
-  element.hidden = Boolean(hidden);
+function safeText(value, fallback = "") {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return fallback;
+  }
+
+  const text = String(value).trim();
+
+  return text || fallback;
 }
 
-function safeEmit(AppCore, eventName, payload) {
-  AppCore?.events?.emit?.(eventName, payload);
+function safeToggleHidden(element, hidden) {
+  if (!element) return false;
+
+  try {
+    element.hidden = Boolean(hidden);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function safeSetAttribute(element, name, value) {
+  if (!element || !name) return false;
+
+  try {
+    element.setAttribute(
+      name,
+      String(value)
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function safeRemoveAttribute(element, name) {
+  if (!element || !name) return false;
+
+  try {
+    element.removeAttribute(name);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function safeClassToggle(element, className, enabled) {
+  if (!element || !className) return false;
+
+  try {
+    element.classList.toggle(
+      className,
+      Boolean(enabled)
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function safeEmit(
+  AppCore,
+  eventName,
+  payload = {}
+) {
+  try {
+    AppCore?.events?.emit?.(
+      eventName,
+      payload
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function safeWarn(
+  AppCore,
+  ...args
+) {
+  try {
+    AppCore?.utils?.warn?.(
+      ...args
+    );
+  } catch {}
 }
 
 /* =========================================================
    ELEMENTS
 ========================================================= */
+
 export function getShellElements(AppCore) {
   if (!isBrowser()) {
     return {
@@ -50,34 +137,53 @@ export function getShellElements(AppCore) {
       tableheadContainer: null,
       body: null,
       mobileToggle: null,
+      shell: null,
+      viewContainer: null,
     };
   }
+
+  const body =
+    AppCore?.dom?.body ||
+    document.body ||
+    null;
 
   return {
     sidebar:
       AppCore?.dom?.sidebar ||
       document.querySelector(".sidebar") ||
+      document.getElementById("sidebar") ||
       null,
 
     topbar:
       AppCore?.dom?.topbar ||
       document.querySelector(".topbar") ||
+      document.getElementById("topbar") ||
       null,
 
     tableheadContainer:
       AppCore?.dom?.tableheadContainer ||
       document.getElementById("tablehead-container") ||
+      document.querySelector("[data-tablehead-container]") ||
       null,
 
-    body:
-      AppCore?.dom?.body ||
-      document.body ||
-      null,
+    body,
 
     mobileToggle:
       AppCore?.dom?.sidebarMobileToggle ||
       AppCore?.dom?.mobileSidebarToggle ||
       document.getElementById("toggleSidebarMobile") ||
+      document.querySelector("[data-sidebar-mobile-toggle]") ||
+      null,
+
+    shell:
+      AppCore?.dom?.shell ||
+      document.getElementById("app-shell") ||
+      document.querySelector("[data-app-shell]") ||
+      null,
+
+    viewContainer:
+      AppCore?.dom?.viewContainer ||
+      document.getElementById("view-container") ||
       null,
   };
 }
@@ -85,77 +191,195 @@ export function getShellElements(AppCore) {
 /* =========================================================
    CORE BRIDGES
 ========================================================= */
+
 export function clearDynamicContainers(AppCore) {
-  AppCore?.clearDynamicContainers?.();
+  try {
+    if (
+      typeof AppCore?.clearDynamicContainers === "function"
+    ) {
+      AppCore.clearDynamicContainers();
+      return true;
+    }
+  } catch (error) {
+    safeWarn(
+      AppCore,
+      "[Router Shell] clearDynamicContainers failed",
+      error
+    );
+  }
+
+  if (!isBrowser()) {
+    return false;
+  }
+
+  try {
+    const {
+      tableheadContainer,
+    } = getShellElements(AppCore);
+
+    if (tableheadContainer) {
+      tableheadContainer.innerHTML = "";
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function setDocumentTitle(
   AppCore,
   title = AppCore?.config?.appName
 ) {
-  AppCore?.setDocumentTitle?.(title);
+  const appName =
+    safeText(
+      AppCore?.config?.appName,
+      "Onion Support"
+    );
+
+  const finalTitle =
+    safeText(
+      title,
+      appName
+    );
+
+  try {
+    if (
+      typeof AppCore?.setDocumentTitle === "function"
+    ) {
+      AppCore.setDocumentTitle(finalTitle);
+      return true;
+    }
+  } catch (error) {
+    safeWarn(
+      AppCore,
+      "[Router Shell] setDocumentTitle failed",
+      error
+    );
+  }
+
+  if (!isBrowser()) {
+    return false;
+  }
+
+  try {
+    document.title =
+      finalTitle === appName
+        ? appName
+        : `${finalTitle} · ${appName}`;
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
    ACTIVE MENU
 ========================================================= */
+
+function getSpaLinks(AppCore) {
+  if (!isBrowser()) {
+    return [];
+  }
+
+  try {
+    const fromCore =
+      AppCore?.utils?.qsa?.(
+        "a[data-spa]"
+      );
+
+    if (fromCore) {
+      return Array.from(fromCore);
+    }
+  } catch {}
+
+  try {
+    return Array.from(
+      document.querySelectorAll("a[data-spa]")
+    );
+  } catch {
+    return [];
+  }
+}
+
 export function setActiveMenu(
   AppCore,
   pathname = "/"
 ) {
   if (!isBrowser()) {
-    return;
+    return false;
   }
 
-  const currentCanonical =
-    normalizeCanonicalPath(
-      AppCore,
-      pathname
-    );
+  let currentCanonical = "/";
 
-  const links =
-    AppCore?.utils?.qsa?.("a[data-spa]") ||
-    Array.from(
-      document.querySelectorAll("a[data-spa]")
-    );
-
-  links.forEach((link) => {
-    const href =
-      resolveSpaHref(
-        AppCore,
-        link.getAttribute("href") || "/"
-      );
-
-    const hrefCanonical =
+  try {
+    currentCanonical =
       normalizeCanonicalPath(
         AppCore,
-        href
+        pathname || "/"
       );
+  } catch {
+    currentCanonical = "/";
+  }
 
-    const active =
-      hrefCanonical === currentCanonical;
+  const links =
+    getSpaLinks(AppCore);
 
-    link.classList.toggle(
+  links.forEach((link) => {
+    if (!link) return;
+
+    let active = false;
+
+    try {
+      const href =
+        link.getAttribute("href") || "/";
+
+      const resolvedHref =
+        resolveSpaHref(
+          AppCore,
+          href
+        );
+
+      const hrefCanonical =
+        normalizeCanonicalPath(
+          AppCore,
+          resolvedHref
+        );
+
+      active =
+        hrefCanonical === currentCanonical;
+    } catch {
+      active = false;
+    }
+
+    safeClassToggle(
+      link,
       "active",
       active
     );
 
     if (active) {
-      link.setAttribute(
+      safeSetAttribute(
+        link,
         "aria-current",
         "page"
       );
     } else {
-      link.removeAttribute(
+      safeRemoveAttribute(
+        link,
         "aria-current"
       );
     }
   });
+
+  return true;
 }
 
 /* =========================================================
    SHELL MODE
 ========================================================= */
+
 export function setShellMode(
   AppCore,
   route = null
@@ -163,12 +387,19 @@ export function setShellMode(
   const hideShell =
     Boolean(route?.hideShell);
 
+  const routePath =
+    safeText(
+      route?.path,
+      null
+    );
+
   const {
     sidebar,
     topbar,
     tableheadContainer,
     body,
     mobileToggle,
+    shell,
   } = getShellElements(AppCore);
 
   safeToggleHidden(
@@ -186,31 +417,75 @@ export function setShellMode(
     hideShell
   );
 
-  if (mobileToggle) {
-    mobileToggle.hidden =
-      hideShell;
+  safeToggleHidden(
+    shell,
+    false
+  );
 
-    mobileToggle.setAttribute(
+  if (mobileToggle) {
+    safeToggleHidden(
+      mobileToggle,
+      hideShell
+    );
+
+    safeSetAttribute(
+      mobileToggle,
       "aria-expanded",
       String(!hideShell)
+    );
+
+    safeSetAttribute(
+      mobileToggle,
+      "aria-hidden",
+      String(hideShell)
     );
   }
 
   if (body) {
-    body.classList.toggle(
+    safeClassToggle(
+      body,
       "route-auth",
       hideShell
     );
 
-    body.classList.toggle(
+    safeClassToggle(
+      body,
       "route-shell-hidden",
       hideShell
     );
 
-    body.classList.toggle(
+    safeClassToggle(
+      body,
       "auth-screen",
       hideShell
     );
+
+    safeClassToggle(
+      body,
+      "shell-visible",
+      !hideShell
+    );
+
+    safeClassToggle(
+      body,
+      "shell-hidden",
+      hideShell
+    );
+
+    try {
+      body.dataset.shellHidden =
+        hideShell ? "true" : "false";
+
+      body.dataset.routeMode =
+        hideShell ? "auth" : "shell";
+
+      if (routePath) {
+        body.dataset.currentRoute =
+          routePath;
+      } else {
+        delete body.dataset.currentRoute;
+      }
+    } catch {}
   }
 
   safeEmit(
@@ -218,7 +493,12 @@ export function setShellMode(
     "router:shell:change",
     {
       hidden: hideShell,
-      route: route?.path || null,
+      route: routePath,
     }
   );
+
+  return {
+    hidden: hideShell,
+    route: routePath,
+  };
 }

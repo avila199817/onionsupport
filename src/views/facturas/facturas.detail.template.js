@@ -12,10 +12,15 @@
    - exponer exports legacy para imports antiguos
    - mantener data-action estables para bindings existentes
    - eliminar secciones Cliente y Metadata
-   - mostrar IVA / IRPF cuando existan
+   - mostrar IVA / IRPF / retenciones / otros impuestos cuando existan
    - mostrar incidencia vinculada como acción modal
+   - no usar navegación a URL inexistente para incidencia
    - quitar "Total línea"
    - cerrar modal con botón aspa X
+========================================================= */
+
+/* =========================================================
+   SAFE HELPERS
 ========================================================= */
 
 function safeText(value, fallback = "—") {
@@ -85,6 +90,7 @@ function formatMoney(value, currency = "EUR") {
     return new Intl.NumberFormat("es-ES", {
       style: "currency",
       currency: code,
+      maximumFractionDigits: 2,
     }).format(amount);
   } catch {
     return `${amount.toFixed(2)} ${code}`;
@@ -161,7 +167,7 @@ function formatRelativeDate(value) {
 }
 
 /* =========================================================
-   DOMAIN HELPERS
+   DOMAIN HELPERS · FACTURA
 ========================================================= */
 
 function getFacturaId(factura = {}) {
@@ -229,6 +235,7 @@ function getClienteNombre(factura = {}) {
       item.clienteEmpresa,
       item.clienteNombre,
       item.clientName,
+      item.customerName,
 
       raw.cliente?.nombreContacto,
       raw.cliente?.empresa,
@@ -238,7 +245,8 @@ function getClienteNombre(factura = {}) {
       raw.cliente?.name,
       raw.clienteEmpresa,
       raw.clienteNombre,
-      raw.clientName
+      raw.clientName,
+      raw.customerName
     ),
     "Cliente"
   );
@@ -256,13 +264,15 @@ function getClienteEmail(factura = {}) {
       item.emailCliente,
       item.email,
       item.clientEmail,
+      item.customerEmail,
 
       raw.cliente?.email,
       raw.cliente?.mail,
       raw.clienteEmail,
       raw.emailCliente,
       raw.email,
-      raw.clientEmail
+      raw.clientEmail,
+      raw.customerEmail
     ),
     ""
   );
@@ -345,7 +355,16 @@ function getFacturaMoneda(factura = {}) {
   const item = safeObject(factura);
   const raw = safeObject(item.raw);
 
-  return safeText(first(item.moneda, item.currency, raw.moneda, raw.currency), "EUR");
+  return safeText(
+    first(
+      item.moneda,
+      item.currency,
+
+      raw.moneda,
+      raw.currency
+    ),
+    "EUR"
+  );
 }
 
 function getFacturaTotal(factura = {}) {
@@ -393,12 +412,20 @@ function getFacturaImpuestos(factura = {}) {
   return safeNumber(
     first(
       item.impuestosTotal,
+      item.taxTotal,
+      item.totalImpuestos,
       item.tax,
       item.iva,
+      item.ivaImporte,
+      item.importeIva,
 
       raw.impuestosTotal,
+      raw.taxTotal,
+      raw.totalImpuestos,
       raw.tax,
-      raw.iva
+      raw.iva,
+      raw.ivaImporte,
+      raw.importeIva
     ),
     0
   );
@@ -434,6 +461,7 @@ function getFacturaPdfAvailable(factura = {}) {
       item.blobPath ||
       item.pdfUrl ||
       item.pdf ||
+
       raw.pdfAvailable ||
       raw.hasPdf ||
       raw.blobPath ||
@@ -451,17 +479,67 @@ function getFacturaPreview(factura = {}) {
       item.descripcion,
       item.concepto,
       item.preview,
+      item.description,
       item.lineas?.[0]?.descripcion,
       item.lineas?.[0]?.concepto,
 
       raw.descripcion,
       raw.concepto,
       raw.preview,
+      raw.description,
       raw.lineas?.[0]?.descripcion,
       raw.lineas?.[0]?.concepto
     ),
     "Factura disponible para consulta."
   );
+}
+
+/* =========================================================
+   DOMAIN HELPERS · INCIDENCIA
+========================================================= */
+
+function pickTicketIdFromArray(value = []) {
+  const items = safeArray(value);
+
+  for (const item of items) {
+    if (typeof item === "string" && item.trim()) {
+      return item.trim();
+    }
+
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+
+    const candidate = first(
+      item.ticketId,
+      item.incidenciaId,
+      item.id,
+      item.code,
+      item.numero,
+      item.relatedTicketId,
+      item.relatedIncidentId,
+      item.supportTicketId,
+      item.caseId,
+
+      item.ticket?.ticketId,
+      item.ticket?.incidenciaId,
+      item.ticket?.id,
+
+      item.incidencia?.ticketId,
+      item.incidencia?.incidenciaId,
+      item.incidencia?.id,
+
+      item.linkedTicket?.ticketId,
+      item.linkedTicket?.incidenciaId,
+      item.linkedTicket?.id
+    );
+
+    if (candidate) {
+      return safeText(candidate, "");
+    }
+  }
+
+  return "";
 }
 
 function getFacturaIncidenciaId(factura = {}) {
@@ -493,6 +571,18 @@ function getFacturaIncidenciaId(factura = {}) {
       item.meta?.ticketId,
       item.meta?.incidenciaId,
 
+      pickTicketIdFromArray(item.ticketIds),
+      pickTicketIdFromArray(item.incidenciaIds),
+      pickTicketIdFromArray(item.relatedTicketIds),
+      pickTicketIdFromArray(item.relatedIncidentIds),
+      pickTicketIdFromArray(item.linkedTickets),
+      pickTicketIdFromArray(item.incidencias),
+      pickTicketIdFromArray(item.tickets),
+      pickTicketIdFromArray(item.relatedTickets),
+      pickTicketIdFromArray(item.relations),
+      pickTicketIdFromArray(item.facturasRelacionadas),
+      pickTicketIdFromArray(item.linkedInvoices?.tickets),
+
       raw.ticketId,
       raw.incidenciaId,
 
@@ -514,30 +604,81 @@ function getFacturaIncidenciaId(factura = {}) {
       raw.caseId,
 
       raw.meta?.ticketId,
-      raw.meta?.incidenciaId
+      raw.meta?.incidenciaId,
+
+      pickTicketIdFromArray(raw.ticketIds),
+      pickTicketIdFromArray(raw.incidenciaIds),
+      pickTicketIdFromArray(raw.relatedTicketIds),
+      pickTicketIdFromArray(raw.relatedIncidentIds),
+      pickTicketIdFromArray(raw.linkedTickets),
+      pickTicketIdFromArray(raw.incidencias),
+      pickTicketIdFromArray(raw.tickets),
+      pickTicketIdFromArray(raw.relatedTickets),
+      pickTicketIdFromArray(raw.relations),
+      pickTicketIdFromArray(raw.facturasRelacionadas),
+      pickTicketIdFromArray(raw.linkedInvoices?.tickets)
     ),
     ""
   );
 }
 
+/* =========================================================
+   DOMAIN HELPERS · LÍNEAS
+========================================================= */
+
 function getLineaConcepto(linea = {}) {
-  return safeText(first(linea?.concepto, linea?.descripcion), "Línea");
+  return safeText(
+    first(
+      linea?.concepto,
+      linea?.descripcion,
+      linea?.description,
+      linea?.name
+    ),
+    "Línea"
+  );
 }
 
 function getLineaDescripcion(linea = {}) {
-  return safeText(first(linea?.descripcion, linea?.detalle), "");
+  return safeText(
+    first(
+      linea?.descripcion,
+      linea?.detalle,
+      linea?.description,
+      linea?.detail
+    ),
+    ""
+  );
 }
 
 function getLineaCantidad(linea = {}) {
-  return safeNumber(first(linea?.cantidad, linea?.qty, linea?.quantity), 0);
+  return safeNumber(
+    first(
+      linea?.cantidad,
+      linea?.qty,
+      linea?.quantity
+    ),
+    0
+  );
 }
 
 function getLineaUnitario(linea = {}) {
-  return safeNumber(first(linea?.precioUnitario, linea?.unitPrice, linea?.precio), 0);
+  return safeNumber(
+    first(
+      linea?.precioUnitario,
+      linea?.unitPrice,
+      linea?.precio,
+      linea?.price
+    ),
+    0
+  );
 }
 
 function getLineaSubtotal(linea = {}) {
-  const explicit = first(linea?.subtotal, linea?.base);
+  const explicit = first(
+    linea?.subtotal,
+    linea?.base,
+    linea?.importeBase
+  );
 
   if (explicit !== null && explicit !== undefined && explicit !== "") {
     return safeNumber(explicit, 0);
@@ -547,7 +688,11 @@ function getLineaSubtotal(linea = {}) {
 }
 
 function getLineaTotal(linea = {}) {
-  const explicit = first(linea?.totalLinea, linea?.total, linea?.importe);
+  const explicit = first(
+    linea?.totalLinea,
+    linea?.total,
+    linea?.importe
+  );
 
   if (explicit !== null && explicit !== undefined && explicit !== "") {
     return safeNumber(explicit, 0);
@@ -555,6 +700,10 @@ function getLineaTotal(linea = {}) {
 
   return getLineaSubtotal(linea);
 }
+
+/* =========================================================
+   STATUS HELPERS
+========================================================= */
 
 function getEstadoPagoLabel(value = "") {
   const key = String(value || "").trim().toLowerCase();
@@ -630,11 +779,25 @@ function getEstadoLabel(value = "") {
 }
 
 function getFacturaEstadoPagoLabel(factura = {}) {
-  return getEstadoPagoLabel(first(factura?.estadoPago, factura?.paymentStatus, factura?.raw?.estadoPago));
+  return getEstadoPagoLabel(
+    first(
+      factura?.estadoPago,
+      factura?.paymentStatus,
+      factura?.raw?.estadoPago,
+      factura?.raw?.paymentStatus
+    )
+  );
 }
 
 function getFacturaEstadoLabel(factura = {}) {
-  return getEstadoLabel(first(factura?.estado, factura?.status, factura?.raw?.estado));
+  return getEstadoLabel(
+    first(
+      factura?.estado,
+      factura?.status,
+      factura?.raw?.estado,
+      factura?.raw?.status
+    )
+  );
 }
 
 function getEstadoPagoChipStyle(value = "") {
@@ -729,29 +892,88 @@ function getEstadoChipStyle(value = "") {
   `;
 }
 
+/* =========================================================
+   IMPUESTOS
+========================================================= */
+
 function getImpuestosBreakdown(factura = {}) {
-  const impuestos = safeArray(first(factura?.impuestos, factura?.taxes, factura?.raw?.impuestos, factura?.raw?.taxes));
+  const item = safeObject(factura);
+  const raw = safeObject(item.raw);
+
+  const impuestos = safeArray(
+    first(
+      item.impuestos,
+      item.taxes,
+      item.taxLines,
+      item.desgloseImpuestos,
+
+      raw.impuestos,
+      raw.taxes,
+      raw.taxLines,
+      raw.desgloseImpuestos
+    )
+  );
 
   let iva = null;
   let irpf = null;
   const otros = [];
 
-  impuestos.forEach((item) => {
-    const impuesto = safeObject(item);
-    const tipo = normalizeText(first(impuesto.tipo, impuesto.nombre, impuesto.name));
+  impuestos.forEach((entry) => {
+    const impuesto = safeObject(entry);
+
+    const tipo = normalizeText(
+      first(
+        impuesto.tipo,
+        impuesto.nombre,
+        impuesto.name,
+        impuesto.code,
+        impuesto.label
+      )
+    );
 
     const normalized = {
-      tipo: safeText(first(impuesto.tipo, impuesto.nombre, impuesto.name), "Impuesto"),
-      porcentaje: safeNumber(first(impuesto.porcentaje, impuesto.percent, impuesto.rate), 0),
-      importe: safeNumber(first(impuesto.importe, impuesto.amount, impuesto.total), 0),
+      tipo: safeText(
+        first(
+          impuesto.tipo,
+          impuesto.nombre,
+          impuesto.name,
+          impuesto.label
+        ),
+        "Impuesto"
+      ),
+
+      porcentaje: safeNumber(
+        first(
+          impuesto.porcentaje,
+          impuesto.percent,
+          impuesto.rate,
+          impuesto.tipoPorcentaje
+        ),
+        0
+      ),
+
+      importe: safeNumber(
+        first(
+          impuesto.importe,
+          impuesto.amount,
+          impuesto.total,
+          impuesto.value
+        ),
+        0
+      ),
     };
 
-    if (tipo.includes("iva")) {
+    if (tipo.includes("iva") || tipo.includes("vat")) {
       iva = normalized;
       return;
     }
 
-    if (tipo.includes("irpf") || tipo.includes("retencion") || tipo.includes("retención")) {
+    if (
+      tipo.includes("irpf") ||
+      tipo.includes("retencion") ||
+      tipo.includes("retención") ||
+      tipo.includes("withholding")
+    ) {
       irpf = normalized;
       return;
     }
@@ -759,7 +981,130 @@ function getImpuestosBreakdown(factura = {}) {
     otros.push(normalized);
   });
 
-  return { iva, irpf, otros };
+  const ivaImporte = safeNumber(
+    first(
+      item.ivaImporte,
+      item.importeIva,
+      item.totalIva,
+      item.ivaTotal,
+      item.ivaAmount,
+      item.tax,
+      item.taxAmount,
+      item.iva,
+
+      raw.ivaImporte,
+      raw.importeIva,
+      raw.totalIva,
+      raw.ivaTotal,
+      raw.ivaAmount,
+      raw.tax,
+      raw.taxAmount,
+      raw.iva
+    ),
+    0
+  );
+
+  const ivaPorcentaje = safeNumber(
+    first(
+      item.ivaPorcentaje,
+      item.porcentajeIva,
+      item.ivaRate,
+      item.taxRate,
+
+      raw.ivaPorcentaje,
+      raw.porcentajeIva,
+      raw.ivaRate,
+      raw.taxRate
+    ),
+    0
+  );
+
+  if (!iva && ivaImporte) {
+    iva = {
+      tipo: "IVA",
+      porcentaje: ivaPorcentaje,
+      importe: ivaImporte,
+    };
+  }
+
+  const irpfImporte = safeNumber(
+    first(
+      item.irpfImporte,
+      item.importeIrpf,
+      item.totalIrpf,
+      item.irpfTotal,
+      item.irpfAmount,
+      item.retencion,
+      item.retencionIrpf,
+      item.withholding,
+      item.withholdingAmount,
+      item.irpf,
+
+      raw.irpfImporte,
+      raw.importeIrpf,
+      raw.totalIrpf,
+      raw.irpfTotal,
+      raw.irpfAmount,
+      raw.retencion,
+      raw.retencionIrpf,
+      raw.withholding,
+      raw.withholdingAmount,
+      raw.irpf
+    ),
+    0
+  );
+
+  const irpfPorcentaje = safeNumber(
+    first(
+      item.irpfPorcentaje,
+      item.porcentajeIrpf,
+      item.irpfRate,
+      item.retencionPorcentaje,
+      item.withholdingRate,
+
+      raw.irpfPorcentaje,
+      raw.porcentajeIrpf,
+      raw.irpfRate,
+      raw.retencionPorcentaje,
+      raw.withholdingRate
+    ),
+    0
+  );
+
+  if (!irpf && irpfImporte) {
+    irpf = {
+      tipo: "IRPF",
+      porcentaje: irpfPorcentaje,
+      importe: irpfImporte,
+    };
+  }
+
+  const impuestosTotal = safeNumber(
+    first(
+      item.impuestosTotal,
+      item.taxTotal,
+      item.totalImpuestos,
+
+      raw.impuestosTotal,
+      raw.taxTotal,
+      raw.totalImpuestos
+    ),
+    0
+  );
+
+  if (!iva && !irpf && !otros.length && impuestosTotal) {
+    otros.push({
+      tipo: "Impuestos",
+      porcentaje: 0,
+      importe: impuestosTotal,
+    });
+  }
+
+  return {
+    iva,
+    irpf,
+    otros,
+  };
 }
 
 /* =========================================================
@@ -973,7 +1318,7 @@ function renderIncidenciaMini(factura = {}) {
   const incidenciaId = getFacturaIncidenciaId(factura);
 
   if (!incidenciaId) {
-    return mini("Incidencia", "—");
+    return mini("Incidencia", "Sin vincular");
   }
 
   return `
@@ -1207,6 +1552,7 @@ function renderResumenSection(factura = {}) {
 function renderImpuestosSection(factura = {}) {
   const moneda = getFacturaMoneda(factura);
   const breakdown = getImpuestosBreakdown(factura);
+
   const cards = [];
 
   if (breakdown.iva) {
@@ -1236,24 +1582,23 @@ function renderImpuestosSection(factura = {}) {
     );
   });
 
-  if (!cards.length) {
-    cards.push(mini("Impuestos", "Sin desglose disponible"));
-  }
-
   return renderSectionCard({
     title: "Impuestos",
-    subtitle: "Desglose fiscal detectado en la factura.",
-    content: `
-      <div
-        style="
-          display:grid;
-          grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));
-          gap:12px;
-        "
-      >
-        ${cards.join("")}
-      </div>
-    `,
+    subtitle: "Desglose fiscal de IVA, IRPF y otros conceptos detectados en la factura.",
+    content: cards.length
+      ? `
+        <div
+          class="facturas-detail-tax-grid"
+          style="
+            display:grid;
+            grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));
+            gap:12px;
+          "
+        >
+          ${cards.join("")}
+        </div>
+      `
+      : mini("Desglose", "Sin desglose fiscal disponible"),
   });
 }
 
@@ -1368,6 +1713,7 @@ function renderLineasSection(factura = {}) {
       factura?.lineas,
       factura?.items,
       factura?.conceptos,
+
       factura?.raw?.lineas,
       factura?.raw?.items,
       factura?.raw?.conceptos
@@ -1537,12 +1883,26 @@ export function renderFacturasDetailContent({
 
                 ${chip(
                   getFacturaEstadoPagoLabel(factura),
-                  getEstadoPagoChipStyle(first(factura?.estadoPago, factura?.paymentStatus, factura?.raw?.estadoPago))
+                  getEstadoPagoChipStyle(
+                    first(
+                      factura?.estadoPago,
+                      factura?.paymentStatus,
+                      factura?.raw?.estadoPago,
+                      factura?.raw?.paymentStatus
+                    )
+                  )
                 )}
 
                 ${chip(
                   getFacturaEstadoLabel(factura),
-                  getEstadoChipStyle(first(factura?.estado, factura?.status, factura?.raw?.estado))
+                  getEstadoChipStyle(
+                    first(
+                      factura?.estado,
+                      factura?.status,
+                      factura?.raw?.estado,
+                      factura?.raw?.status
+                    )
+                  )
                 )}
               </div>
 
@@ -1766,6 +2126,10 @@ export function renderFacturasDetailModal({
     </div>
   `;
 }
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
 export default {
   renderMiniMeta,

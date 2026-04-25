@@ -3,7 +3,7 @@
    Archivo: src/views/facturas/facturasView.js
 
    FINAL PRO SYSTEM · VIEW REAL · FULL PATCH PORTAL MODAL
-   PATCH 3 · INCIDENCIA LINK PRESERVER
+   PATCH 4 · INCIDENCIA LINK PRESERVER · PAGINATION READY
 
    RESPONSABILIDADES:
    - render principal de facturas
@@ -14,6 +14,7 @@
    - performance pro
    - cleanup enterprise
    - preservar relación factura ↔ incidencia para columna Incidencia
+   - paginación visual real a 5 facturas por página
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -83,14 +84,20 @@ import {
 export const FacturasView = (() => {
   "use strict";
 
+  /* =====================================================
+     CONSTANTS
+  ===================================================== */
+
   const SCOPE = "view:facturas";
   const DETAIL_MODAL_ID = "facturas-detail-root";
+  const PAGE_SIZE = 5;
 
   const state = createFacturasState();
 
   let initialized = false;
   let destroyed = false;
   let inflightInit = null;
+  let inflightLoad = null;
   let bindingsCleanup = null;
   let modalBindingsCleanup = null;
   let renderToken = 0;
@@ -98,6 +105,11 @@ export const FacturasView = (() => {
   /* =====================================================
      LOCAL HELPERS
   ===================================================== */
+
+  function safeNumber(value, fallback = 0) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  }
 
   function safeObject(value) {
     return value && typeof value === "object" && !Array.isArray(value)
@@ -126,6 +138,11 @@ export const FacturasView = (() => {
         !Array.isArray(value) &&
         Object.keys(value).length
     );
+  }
+
+  function clampNumber(value, min = 1, max = Number.MAX_SAFE_INTEGER) {
+    const n = safeNumber(value, min);
+    return Math.min(Math.max(n, min), max);
   }
 
   function getStableFacturaId(item = {}) {
@@ -427,17 +444,25 @@ export const FacturasView = (() => {
   }
 
   function safeEmit(event = "", payload = {}) {
+    const eventName = safeText(event, "");
+    if (!eventName) return false;
+
     try {
-      AppCore?.events?.emit?.(event, payload);
+      AppCore?.events?.emit?.(eventName, payload);
+      return true;
     } catch {}
 
     try {
       window.dispatchEvent(
-        new CustomEvent(event, {
+        new CustomEvent(eventName, {
           detail: payload,
         })
       );
+
+      return true;
     } catch {}
+
+    return false;
   }
 
   function getContainer() {
@@ -478,10 +503,14 @@ export const FacturasView = (() => {
   }
 
   function safeErrorMessage(error = null) {
-    return (
-      error?.message ||
-      error?.response?.message ||
-      error?.response?.data?.message ||
+    return safeText(
+      first(
+        error?.message,
+        error?.response?.message,
+        error?.response?.data?.message,
+        error?.data?.message,
+        "No se pudieron cargar las facturas."
+      ),
       "No se pudieron cargar las facturas."
     );
   }
@@ -491,6 +520,38 @@ export const FacturasView = (() => {
     if (!state.detail) state.detail = {};
     if (!state.actions) state.actions = {};
     if (!state.inflight) state.inflight = {};
+
+    const pageSize = clampNumber(
+      first(
+        state.view.pageSize,
+        state.view.facturasPageSize,
+        PAGE_SIZE
+      ),
+      1,
+      100
+    );
+
+    const page = clampNumber(
+      first(
+        state.view.page,
+        state.view.currentPage,
+        state.view.facturasPage,
+        1
+      ),
+      1,
+      Number.MAX_SAFE_INTEGER
+    );
+
+    state.view.pageSize = pageSize;
+    state.view.facturasPageSize = pageSize;
+
+    state.view.page = page;
+    state.view.currentPage = page;
+    state.view.facturasPage = page;
+
+    if (typeof state.view.error !== "string") {
+      state.view.error = safeText(state.view.error, "");
+    }
   }
 
   function getItems() {
@@ -509,7 +570,12 @@ export const FacturasView = (() => {
 
       return storeItems.map((item, index) => {
         const id = getStableFacturaId(item);
-        const fallbackRaw = rawById.get(id) || storeItems[index]?.raw || storeItems[index] || {};
+
+        const fallbackRaw =
+          rawById.get(id) ||
+          storeItems[index]?.raw ||
+          storeItems[index] ||
+          {};
 
         return preserveIncidenciaFields(item, fallbackRaw);
       });
@@ -519,7 +585,118 @@ export const FacturasView = (() => {
     }
   }
 
+  /* =====================================================
+     PAGINATION
+  ===================================================== */
+
+  function getPageSize() {
+    ensureBaseState();
+
+    return clampNumber(
+      first(
+        state.view.pageSize,
+        state.view.facturasPageSize,
+        PAGE_SIZE
+      ),
+      1,
+      100
+    );
+  }
+
+  function getCurrentPage() {
+    ensureBaseState();
+
+    return clampNumber(
+      first(
+        state.view.page,
+        state.view.currentPage,
+        state.view.facturasPage,
+        1
+      ),
+      1,
+      Number.MAX_SAFE_INTEGER
+    );
+  }
+
+  function getTotalPages(items = []) {
+    const rows = safeArray(items);
+    const pageSize = getPageSize();
+
+    return Math.max(
+      1,
+      Math.ceil((rows.length || 1) / pageSize)
+    );
+  }
+
+  function setViewPage(page = 1) {
+    ensureBaseState();
+
+    const items = getItems();
+    const totalPages = getTotalPages(items);
+    const nextPage = clampNumber(page, 1, totalPages);
+
+    state.view.page = nextPage;
+    state.view.currentPage = nextPage;
+    state.view.facturasPage = nextPage;
+
+    state.view.pageSize = getPageSize();
+    state.view.facturasPageSize = getPageSize();
+
+    return nextPage;
+  }
+
+  function clampPageAgainstItems(items = []) {
+    ensureBaseState();
+
+    const totalPages = getTotalPages(items);
+    const currentPage = getCurrentPage();
+    const nextPage = clampNumber(currentPage, 1, totalPages);
+
+    state.view.page = nextPage;
+    state.view.currentPage = nextPage;
+    state.view.facturasPage = nextPage;
+
+    state.view.pageSize = getPageSize();
+    state.view.facturasPageSize = getPageSize();
+
+    return {
+      page: nextPage,
+      currentPage: nextPage,
+      facturasPage: nextPage,
+      pageSize: getPageSize(),
+      facturasPageSize: getPageSize(),
+      totalPages,
+      totalCount: safeArray(items).length,
+    };
+  }
+
+  function goToPage(page = 1) {
+    if (isFacturasLoading(state) || isFacturasRefreshing(state)) {
+      return getCurrentPage();
+    }
+
+    const nextPage = setViewPage(page);
+
+    rerender();
+
+    return nextPage;
+  }
+
+  function goPrevPage() {
+    return goToPage(getCurrentPage() - 1);
+  }
+
+  function goNextPage() {
+    return goToPage(getCurrentPage() + 1);
+  }
+
+  /* =====================================================
+     TEMPLATE STATE
+  ===================================================== */
+
   function getTemplateState() {
+    ensureBaseState();
+
     return {
       ...getFacturasTemplateState(state),
 
@@ -535,11 +712,82 @@ export const FacturasView = (() => {
         state?.view?.selectedFacturaId,
         ""
       ),
+
+      page: getCurrentPage(),
+      currentPage: getCurrentPage(),
+      facturasPage: getCurrentPage(),
+
+      pageSize: getPageSize(),
+      facturasPageSize: getPageSize(),
+
+      loading: isFacturasLoading(state),
+      refreshing: isFacturasRefreshing(state),
+
+      openingFacturaId: safeText(
+        state?.actions?.openingFacturaId,
+        ""
+      ),
+
+      viewingFacturaId: safeText(
+        state?.actions?.viewingFacturaId,
+        ""
+      ),
+
+      downloadingFacturaId: safeText(
+        state?.actions?.downloadingFacturaId,
+        ""
+      ),
+
+      sendingFacturaId: safeText(
+        state?.actions?.sendingFacturaId,
+        ""
+      ),
+
+      detailLoading: Boolean(
+        state?.detail?.loading
+      ),
+    };
+  }
+
+  function getBindingState() {
+    const templateState = getTemplateState();
+
+    return {
+      ...templateState,
+
+      detailOpen:
+        isFacturasDetailOpen(
+          state
+        ),
+
+      bootstrapped:
+        isFacturasBootstrapped(
+          state
+        ),
+
+      view: {
+        ...safeObject(state.view),
+        page: getCurrentPage(),
+        currentPage: getCurrentPage(),
+        facturasPage: getCurrentPage(),
+        pageSize: getPageSize(),
+        facturasPageSize: getPageSize(),
+      },
+
+      actions: {
+        ...safeObject(state.actions),
+      },
+
+      detail: {
+        ...safeObject(state.detail),
+      },
     };
   }
 
   function setDetail(data = null) {
-    const patchedDetail = data ? preserveIncidenciaFields(data, data?.raw || data) : null;
+    const patchedDetail = data
+      ? preserveIncidenciaFields(data, data?.raw || data)
+      : null;
 
     setFacturasDetailData(state, patchedDetail);
     setFacturasDetailOpen(state, Boolean(patchedDetail));
@@ -563,19 +811,15 @@ export const FacturasView = (() => {
       return false;
     }
 
-    try {
-      safeEmit("facturas:incidencia:open", {
-        ticketId: id,
-        incidenciaId: id,
-      });
-    } catch {}
+    safeEmit("facturas:incidencia:open", {
+      ticketId: id,
+      incidenciaId: id,
+    });
 
-    try {
-      safeEmit("incidencias:modal:open-request", {
-        ticketId: id,
-        incidenciaId: id,
-      });
-    } catch {}
+    safeEmit("incidencias:modal:open-request", {
+      ticketId: id,
+      incidenciaId: id,
+    });
 
     try {
       if (typeof window?.OnionIncidenciasModal?.openById === "function") {
@@ -587,6 +831,19 @@ export const FacturasView = (() => {
     try {
       if (typeof AppCore?.router?.navigate === "function") {
         AppCore.router.navigate("/incidencias", {
+          state: {
+            ticketId: id,
+            openTicketId: id,
+          },
+        });
+
+        return true;
+      }
+    } catch {}
+
+    try {
+      if (typeof AppCore?.Router?.navigate === "function") {
+        AppCore.Router.navigate("/incidencias", {
           state: {
             ticketId: id,
             openTicketId: id,
@@ -640,11 +897,12 @@ export const FacturasView = (() => {
   function renderDetailPortal() {
     const root = ensureDetailRoot();
 
-    const detail =
-      preserveIncidenciaFields(
-        getFacturasDetailData(state) || {},
-        getFacturasDetailData(state)?.raw || getFacturasDetailData(state) || {}
-      );
+    const rawDetail = getFacturasDetailData(state);
+
+    const detail = preserveIncidenciaFields(
+      rawDetail || {},
+      rawDetail?.raw || rawDetail || {}
+    );
 
     const detailOpen =
       isFacturasDetailOpen(state);
@@ -722,6 +980,7 @@ export const FacturasView = (() => {
 
       if (pdfBtn) {
         event.preventDefault();
+
         const facturaId = safeText(
           pdfBtn.dataset.facturaId,
           ""
@@ -739,6 +998,7 @@ export const FacturasView = (() => {
 
       if (downloadBtn) {
         event.preventDefault();
+
         const facturaId = safeText(
           downloadBtn.dataset.facturaId,
           ""
@@ -756,6 +1016,7 @@ export const FacturasView = (() => {
 
       if (sendBtn) {
         event.preventDefault();
+
         const facturaId = safeText(
           sendBtn.dataset.facturaId,
           ""
@@ -820,9 +1081,15 @@ export const FacturasView = (() => {
   }
 
   function buildHtml() {
+    ensureBaseState();
+
     const items = getItems();
-    const templateState =
-      getTemplateState();
+    const pagination = clampPageAgainstItems(items);
+
+    const templateState = {
+      ...getTemplateState(),
+      ...pagination,
+    };
 
     return `
       <section
@@ -908,73 +1175,95 @@ export const FacturasView = (() => {
     silent = false,
     asRefresh = false,
   } = {}) {
-    const hasData =
-      getItems().length > 0;
+    if (destroyed) return getItems();
 
-    clearFacturasError(state);
-
-    setFacturasLoading(
-      state,
-      !hasData && !silent
-    );
-
-    setFacturasRefreshing(
-      state,
-      hasData && asRefresh
-    );
-
-    render();
-
-    try {
-      await loadFacturasCollection({
-        state,
-        render: () => {},
-        silent,
-        force,
-      });
-
-      setFacturasLoading(
-        state,
-        false
-      );
-
-      setFacturasRefreshing(
-        state,
-        false
-      );
-
-      setFacturasLoaded(
-        state,
-        true
-      );
-
-      setFacturasLastSyncAt(
-        state,
-        new Date().toISOString()
-      );
-    } catch (error) {
-      setFacturasLoading(
-        state,
-        false
-      );
-
-      setFacturasRefreshing(
-        state,
-        false
-      );
-
-      state.view.error =
-        safeErrorMessage(error);
-
-      if (!silent) {
-        showToast(
-          safeErrorMessage(error),
-          "error"
-        );
-      }
+    if (inflightLoad) {
+      return inflightLoad;
     }
 
-    render();
+    inflightLoad = (async () => {
+      const hasData =
+        getItems().length > 0;
+
+      clearFacturasError(state);
+
+      setFacturasLoading(
+        state,
+        !hasData && !silent
+      );
+
+      setFacturasRefreshing(
+        state,
+        hasData && asRefresh
+      );
+
+      rerender();
+
+      try {
+        await loadFacturasCollection({
+          state,
+          render: () => {},
+          silent,
+          force,
+        });
+
+        setFacturasLoading(
+          state,
+          false
+        );
+
+        setFacturasRefreshing(
+          state,
+          false
+        );
+
+        setFacturasLoaded(
+          state,
+          true
+        );
+
+        setFacturasLastSyncAt(
+          state,
+          new Date().toISOString()
+        );
+
+        clampPageAgainstItems(getItems());
+
+        return getItems();
+      } catch (error) {
+        setFacturasLoading(
+          state,
+          false
+        );
+
+        setFacturasRefreshing(
+          state,
+          false
+        );
+
+        state.view.error =
+          safeErrorMessage(error);
+
+        if (!silent) {
+          showToast(
+            safeErrorMessage(error),
+            "error"
+          );
+        }
+
+        return getItems();
+      } finally {
+        if (!destroyed) {
+          rerender();
+        }
+      }
+    })();
+
+    try {
+      return await inflightLoad;
+    } finally {
+      inflightLoad = null;
+    }
   }
 
   async function loadFacturaDetail(
@@ -1114,6 +1403,7 @@ export const FacturasView = (() => {
       );
 
       renderDetailOnly();
+      rerender();
     }
   }
 
@@ -1128,7 +1418,9 @@ export const FacturasView = (() => {
           state,
           value
         );
+
         renderDetailOnly();
+        rerender();
       },
 
       onEnd() {
@@ -1136,7 +1428,9 @@ export const FacturasView = (() => {
           state,
           ""
         );
+
         renderDetailOnly();
+        rerender();
       },
     });
   }
@@ -1152,7 +1446,9 @@ export const FacturasView = (() => {
           state,
           value
         );
+
         renderDetailOnly();
+        rerender();
       },
 
       onEnd() {
@@ -1160,7 +1456,9 @@ export const FacturasView = (() => {
           state,
           ""
         );
+
         renderDetailOnly();
+        rerender();
       },
     });
   }
@@ -1178,7 +1476,9 @@ export const FacturasView = (() => {
           state,
           value
         );
+
         renderDetailOnly();
+        rerender();
       },
 
       onEnd() {
@@ -1186,7 +1486,9 @@ export const FacturasView = (() => {
           state,
           ""
         );
+
         renderDetailOnly();
+        rerender();
       },
     });
   }
@@ -1206,31 +1508,15 @@ export const FacturasView = (() => {
   function bind() {
     cleanupBindings();
 
+    if (destroyed) return;
+
     const cleanup =
       bindFacturasView({
         scopeName: SCOPE,
 
         getContainer,
 
-        getState: () => ({
-          loading:
-            isFacturasLoading(state),
-
-          refreshing:
-            isFacturasRefreshing(
-              state
-            ),
-
-          detailOpen:
-            isFacturasDetailOpen(
-              state
-            ),
-
-          bootstrapped:
-            isFacturasBootstrapped(
-              state
-            ),
-        }),
+        getState: getBindingState,
 
         render: rerender,
 
@@ -1244,6 +1530,15 @@ export const FacturasView = (() => {
 
         openIncidencia: openIncidenciaBridge,
         openRelatedIncidencia: openIncidenciaBridge,
+
+        goToPage,
+        goPrevPage,
+        goNextPage,
+
+        setPage(page = 1) {
+          setViewPage(page);
+          rerender();
+        },
 
         onBootstrap() {
           setFacturasBootstrapped(
@@ -1281,10 +1576,13 @@ export const FacturasView = (() => {
       (async () => {
         safeLog("init");
 
+        ensureBaseState();
+
         const token =
           nextRenderToken();
 
         render();
+        bind();
 
         await loadFacturas();
 
@@ -1308,6 +1606,8 @@ export const FacturasView = (() => {
     destroyed = true;
     initialized = false;
 
+    nextRenderToken();
+
     cleanupBindings();
     cleanupModalBindings();
 
@@ -1318,6 +1618,8 @@ export const FacturasView = (() => {
     );
 
     destroyDetailRoot();
+
+    inflightLoad = null;
 
     safeLog("destroy");
   }
@@ -1345,7 +1647,31 @@ export const FacturasView = (() => {
     openIncidencia: openIncidenciaBridge,
     openRelatedIncidencia: openIncidenciaBridge,
 
+    goToPage,
+    goPrevPage,
+    goNextPage,
+
     getItems,
+
+    getPagination() {
+      const items = getItems();
+      const pagination = clampPageAgainstItems(items);
+
+      return {
+        ...pagination,
+        items,
+      };
+    },
+
+    getState() {
+      return {
+        ...getBindingState(),
+        initialized,
+        destroyed,
+        hasInflightInit: Boolean(inflightInit),
+        hasInflightLoad: Boolean(inflightLoad),
+      };
+    },
 
     get initialized() {
       return initialized;

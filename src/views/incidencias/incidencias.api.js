@@ -22,8 +22,10 @@
    - soporta arrays / nested envelopes / payloads mixtos
    - fallback AppCore.apiClient -> AppCore.request -> Http -> fetch
    - fetch soporta JSON, FormData, Blob, texto
+   - FormData prioriza fetch nativo para no romper multipart
    - query params reales
    - Content-Type seguro para FormData
+   - comment / reopen tienen fallback PATCH real
    - persistencia coherente en store/state
    - errores con mensaje consistente
    - surface pública estable
@@ -105,10 +107,6 @@ function first(...values) {
   return null;
 }
 
-function isPlainObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
 function isFormData(value) {
   return typeof FormData !== "undefined" && value instanceof FormData;
 }
@@ -153,9 +151,11 @@ function normalizeStatus(value = "open") {
 
     in_progress: "in_progress",
     inprogress: "in_progress",
+    "in-progress": "in_progress",
     progress: "in_progress",
     proceso: "in_progress",
     en_proceso: "in_progress",
+    "en_proceso.": "in_progress",
 
     resolved: "resolved",
     resuelta: "resolved",
@@ -233,33 +233,36 @@ function appendQueryParams(url = "", query = {}) {
   const cleanUrl = safeText(url, "");
   const params = safeObject(query);
 
-  const entries = Object.entries(params).filter(([, value]) => {
-    if (value === undefined || value === null) return false;
-    if (typeof value === "string" && value.trim() === "") return false;
-    return true;
+  const pairs = [];
+
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null) return;
+    if (typeof value === "string" && value.trim() === "") return;
+
+    if (Array.isArray(value)) {
+      value.forEach((item) => {
+        if (item === undefined || item === null) return;
+        if (typeof item === "string" && item.trim() === "") return;
+
+        pairs.push(
+          `${encodeURIComponent(key)}=${encodeURIComponent(String(item))}`
+        );
+      });
+
+      return;
+    }
+
+    pairs.push(
+      `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`
+    );
   });
 
-  if (!entries.length) {
+  if (!pairs.length) {
     return cleanUrl;
   }
 
   const separator = cleanUrl.includes("?") ? "&" : "?";
-  const search = entries
-    .map(([key, value]) => {
-      if (Array.isArray(value)) {
-        return value
-          .map((item) => {
-            return `${encodeURIComponent(key)}=${encodeURIComponent(String(item))}`;
-          })
-          .join("&");
-      }
-
-      return `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`;
-    })
-    .filter(Boolean)
-    .join("&");
-
-  return search ? `${cleanUrl}${separator}${search}` : cleanUrl;
+  return `${cleanUrl}${separator}${pairs.join("&")}`;
 }
 
 function buildAbsoluteUrl(path = "", query = {}) {
@@ -289,11 +292,13 @@ function getStorageValue(key = "") {
   if (!cleanKey) return "";
 
   try {
-    return localStorage.getItem(cleanKey) || "";
+    const localValue = localStorage.getItem(cleanKey);
+    if (localValue) return localValue;
   } catch {}
 
   try {
-    return sessionStorage.getItem(cleanKey) || "";
+    const sessionValue = sessionStorage.getItem(cleanKey);
+    if (sessionValue) return sessionValue;
   } catch {}
 
   return "";
@@ -465,6 +470,7 @@ function normalizeAttachment(item = {}, index = 0) {
       raw.filename,
       raw.fileName,
       raw.originalname,
+      raw.originalName,
       raw.title
     ),
     `archivo_${index + 1}`
@@ -543,7 +549,18 @@ function normalizeAttachment(item = {}, index = 0) {
         raw.filename,
         raw.fileName,
         raw.name,
-        raw.originalname
+        raw.originalname,
+        raw.originalName
+      ),
+      name
+    ),
+
+    originalName: safeText(
+      first(
+        raw.originalName,
+        raw.originalname,
+        raw.name,
+        name
       ),
       name
     ),
@@ -585,6 +602,13 @@ function normalizeAttachment(item = {}, index = 0) {
       raw.date,
       null
     ),
+
+    uploadedAtES: first(
+      raw.uploadedAtES,
+      null
+    ),
+
+    uploadedBy: safeObject(raw.uploadedBy, null),
 
     raw,
   };
@@ -1424,12 +1448,19 @@ async function request(method = "GET", path = "", options = {}) {
     ),
   };
 
-  const adapters = [
-    requestViaApiClient,
-    requestViaAppCoreRequest,
-    requestViaHttpModule,
-    requestViaFetch,
-  ];
+  const adapters = isFormData(body)
+    ? [
+        requestViaFetch,
+        requestViaApiClient,
+        requestViaAppCoreRequest,
+        requestViaHttpModule,
+      ]
+    : [
+        requestViaApiClient,
+        requestViaAppCoreRequest,
+        requestViaHttpModule,
+        requestViaFetch,
+      ];
 
   let lastError = null;
 
@@ -1445,7 +1476,9 @@ async function request(method = "GET", path = "", options = {}) {
 }
 
 async function requestFirst(method = "GET", paths = [], options = {}) {
-  const candidates = safeArray(paths).map((path) => safeText(path, "")).filter(Boolean);
+  const candidates = safeArray(paths)
+    .map((path) => safeText(path, ""))
+    .filter(Boolean);
 
   let lastError = null;
 
@@ -1576,19 +1609,42 @@ export async function commentIncidenciaRequest(
     estado: finalStatus,
   };
 
-  const response = await requestFirst(
-    "POST",
-    [
-      getIncidenciaCommentsEndpoint(ticketId),
-      getIncidenciaMessagesEndpoint(ticketId),
-      `${getIncidenciaAltEndpoint(ticketId)}/comments`,
-      `${getIncidenciaAltEndpoint(ticketId)}/messages`,
-    ],
-    {
+  const postCandidates = [
+    getIncidenciaCommentsEndpoint(ticketId),
+    getIncidenciaMessagesEndpoint(ticketId),
+    `${getIncidenciaAltEndpoint(ticketId)}/comments`,
+    `${getIncidenciaAltEndpoint(ticketId)}/messages`,
+  ];
+
+  let response = null;
+  let postError = null;
+
+  try {
+    response = await requestFirst("POST", postCandidates, {
       timeout,
       body: payload,
+    });
+  } catch (error) {
+    postError = error;
+  }
+
+  if (!response) {
+    try {
+      response = await requestFirst(
+        "PATCH",
+        [
+          getIncidenciaEndpoint(ticketId),
+          getIncidenciaAltEndpoint(ticketId),
+        ],
+        {
+          timeout,
+          body: payload,
+        }
+      );
+    } catch (patchError) {
+      throw patchError || postError;
     }
-  );
+  }
 
   const detail = pickDetail(response);
 
@@ -1610,17 +1666,42 @@ export async function reopenIncidenciaRequest(
     estado: "open",
   };
 
-  const response = await requestFirst(
-    "POST",
-    [
-      getIncidenciaReopenEndpoint(ticketId),
-      `${getIncidenciaAltEndpoint(ticketId)}/reopen`,
-    ],
-    {
-      timeout,
-      body: payload,
+  let response = null;
+  let postError = null;
+
+  try {
+    response = await requestFirst(
+      "POST",
+      [
+        getIncidenciaReopenEndpoint(ticketId),
+        `${getIncidenciaAltEndpoint(ticketId)}/reopen`,
+      ],
+      {
+        timeout,
+        body: payload,
+      }
+    );
+  } catch (error) {
+    postError = error;
+  }
+
+  if (!response) {
+    try {
+      response = await requestFirst(
+        "PATCH",
+        [
+          getIncidenciaEndpoint(ticketId),
+          getIncidenciaAltEndpoint(ticketId),
+        ],
+        {
+          timeout,
+          body: payload,
+        }
+      );
+    } catch (patchError) {
+      throw patchError || postError;
     }
-  );
+  }
 
   const detail = pickDetail(response);
 
@@ -1650,9 +1731,11 @@ export async function uploadIncidenciaAttachmentsRequest(
   files = [],
   {
     timeout = INCIDENCIAS_UPLOAD_TIMEOUT,
+    status = "open",
   } = {}
 ) {
   const ticketId = normalizeIncidenciaId(id);
+
   const list = safeArray(files).filter((file) => {
     return typeof File !== "undefined" && file instanceof File;
   });
@@ -1660,6 +1743,12 @@ export async function uploadIncidenciaAttachmentsRequest(
   if (!list.length) {
     throw new Error("INCIDENCIA_ATTACHMENTS_REQUIRED");
   }
+
+  const formData = buildAttachmentsFormData(list);
+  const finalStatus = normalizeStatus(status || "open");
+
+  formData.append("status", finalStatus);
+  formData.append("estado", finalStatus);
 
   const response = await requestFirst(
     "POST",
@@ -1671,7 +1760,7 @@ export async function uploadIncidenciaAttachmentsRequest(
     ],
     {
       timeout,
-      body: buildAttachmentsFormData(list),
+      body: formData,
       headers: {},
     }
   );
@@ -1702,6 +1791,8 @@ export async function getIncidenciaAttachmentFileRequest(
   }
 
   const safeMode = mode === "download" ? "download" : "view";
+  const primaryKind = kind === "files" ? "files" : "attachments";
+  const secondaryKind = primaryKind === "files" ? "attachments" : "files";
 
   const response = await requestFirst(
     "GET",
@@ -1710,16 +1801,16 @@ export async function getIncidenciaAttachmentFileRequest(
         ticketId: id,
         attachmentId: attId,
         mode: safeMode,
-        kind,
+        kind: primaryKind,
       }),
       getIncidenciaAttachmentFileEndpoint({
         ticketId: id,
         attachmentId: attId,
         mode: safeMode,
-        kind: kind === "files" ? "attachments" : "files",
+        kind: secondaryKind,
       }),
-      `${getIncidenciaAltEndpoint(id)}/${kind === "files" ? "files" : "attachments"}/${encodeUrlPathSegment(attId)}/${safeMode}`,
-      `${getIncidenciaAltEndpoint(id)}/${kind === "files" ? "attachments" : "files"}/${encodeUrlPathSegment(attId)}/${safeMode}`,
+      `${getIncidenciaAltEndpoint(id)}/${primaryKind}/${encodeUrlPathSegment(attId)}/${safeMode}`,
+      `${getIncidenciaAltEndpoint(id)}/${secondaryKind}/${encodeUrlPathSegment(attId)}/${safeMode}`,
     ],
     {
       timeout,
@@ -1881,9 +1972,9 @@ export async function commentIncidencia(ticketId = "", message = "", options = {
   }
 }
 
-export async function reopenIncidencia(ticketId = "") {
+export async function reopenIncidencia(ticketId = "", options = {}) {
   try {
-    const updated = await reopenIncidenciaRequest(ticketId);
+    const updated = await reopenIncidenciaRequest(ticketId, options);
 
     return upsertLoadedDetail(updated);
   } catch (error) {
@@ -1892,9 +1983,17 @@ export async function reopenIncidencia(ticketId = "") {
   }
 }
 
-export async function uploadIncidenciaAttachments(ticketId = "", files = []) {
+export async function uploadIncidenciaAttachments(
+  ticketId = "",
+  files = [],
+  options = {}
+) {
   try {
-    const updated = await uploadIncidenciaAttachmentsRequest(ticketId, files);
+    const updated = await uploadIncidenciaAttachmentsRequest(
+      ticketId,
+      files,
+      options
+    );
 
     return upsertLoadedDetail(updated);
   } catch (error) {

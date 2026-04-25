@@ -17,6 +17,7 @@
    - soportar destroy limpio del router
    - permitir reload con rerender seguro
    - coordinar acciones y modales sin mezclar responsabilidades
+   - preservar importes de facturas asociadas para tabla
 
    HARDENING PRO:
    - render inicial inmediato
@@ -31,6 +32,7 @@
    - anti spam click en apertura rápida
    - compatibilidad con template nuevo data-incidencias-action
    - template controlado por state real
+   - blindaje contra normalizadores que descartan total/importe/linkedinvoices
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -178,6 +180,43 @@ export const IncidenciasView = (() => {
     return null;
   }
 
+  function hasOwnKeys(value = {}) {
+    return Boolean(
+      value &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        Object.keys(value).length
+    );
+  }
+
+  function getStableTicketId(item = {}) {
+    return safeText(
+      first(
+        item?.ticketId,
+        item?.id,
+        item?.code,
+        item?.numero,
+        item?.ticketCode,
+        item?.raw?.ticketId,
+        item?.raw?.id,
+        item?.raw?.code,
+        item?.raw?.numero,
+        item?.raw?.ticketCode
+      ),
+      ""
+    );
+  }
+
+  function roundMoney(value) {
+    const amount = Number(value);
+
+    if (!Number.isFinite(amount)) {
+      return null;
+    }
+
+    return Math.round((amount + Number.EPSILON) * 100) / 100;
+  }
+
   function getEventPayload(event = null) {
     return safeObject(
       first(
@@ -260,6 +299,234 @@ export const IncidenciasView = (() => {
       ),
       "No se pudo cargar el historial de incidencias."
     );
+  }
+
+  /* =========================================================
+     INVOICE AMOUNT PRESERVER
+     Evita que normalizeIncidenciasCollection pierda:
+     - total / amount / importe
+     - facturasTotal / invoicesTotal
+     - linkedInvoices.total
+     - meta.invoicesTotal
+  ========================================================= */
+
+  function preserveInvoiceAmountFields(item = {}, fallbackRaw = {}) {
+    const source = safeObject(item);
+
+    const embeddedRaw = safeObject(source.raw);
+    const externalRaw = safeObject(fallbackRaw);
+    const raw = hasOwnKeys(embeddedRaw) ? embeddedRaw : externalRaw;
+
+    const sourceMeta = safeObject(source.meta);
+    const rawMeta = safeObject(raw.meta);
+
+    const sourceLinkedInvoices = safeObject(source.linkedInvoices);
+    const rawLinkedInvoices = safeObject(raw.linkedInvoices);
+
+    const linkedInvoices = hasOwnKeys(sourceLinkedInvoices)
+      ? sourceLinkedInvoices
+      : rawLinkedInvoices;
+
+    const rawAmount = first(
+      source.total,
+      source.amount,
+      source.importe,
+      source.price,
+
+      source.facturasTotal,
+      source.invoicesTotal,
+      source.importeFacturas,
+      source.invoiceTotal,
+
+      linkedInvoices.total,
+      linkedInvoices.amount,
+      linkedInvoices.importe,
+
+      sourceMeta.invoicesTotal,
+      sourceMeta.invoiceTotal,
+
+      raw.total,
+      raw.amount,
+      raw.importe,
+      raw.price,
+
+      raw.facturasTotal,
+      raw.invoicesTotal,
+      raw.importeFacturas,
+      raw.invoiceTotal,
+
+      rawLinkedInvoices.total,
+      rawLinkedInvoices.amount,
+      rawLinkedInvoices.importe,
+
+      rawMeta.invoicesTotal,
+      rawMeta.invoiceTotal
+    );
+
+    const normalizedAmount =
+      rawAmount === null || rawAmount === undefined || rawAmount === ""
+        ? null
+        : roundMoney(rawAmount);
+
+    const currency = safeText(
+      first(
+        source.currency,
+        source.moneda,
+
+        linkedInvoices.currency,
+        linkedInvoices.moneda,
+
+        sourceMeta.invoiceCurrency,
+        sourceMeta.currency,
+        sourceMeta.moneda,
+
+        raw.currency,
+        raw.moneda,
+
+        rawLinkedInvoices.currency,
+        rawLinkedInvoices.moneda,
+
+        rawMeta.invoiceCurrency,
+        rawMeta.currency,
+        rawMeta.moneda,
+
+        "EUR"
+      ),
+      "EUR"
+    );
+
+    const facturaIds = safeArray(
+      first(
+        source.facturaIds,
+        source.invoiceIds,
+        linkedInvoices.ids,
+        raw.facturaIds,
+        raw.invoiceIds,
+        rawLinkedInvoices.ids
+      )
+    );
+
+    const facturasCount = safeNumber(
+      first(
+        source.facturasCount,
+        source.invoicesCount,
+        linkedInvoices.count,
+        raw.facturasCount,
+        raw.invoicesCount,
+        rawLinkedInvoices.count,
+        facturaIds.length
+      ),
+      facturaIds.length
+    );
+
+    const nextLinkedInvoices = {
+      ...linkedInvoices,
+
+      count: Math.max(
+        facturasCount,
+        safeNumber(linkedInvoices.count, 0),
+        safeNumber(rawLinkedInvoices.count, 0),
+        facturaIds.length
+      ),
+
+      ids: safeArray(first(linkedInvoices.ids, rawLinkedInvoices.ids, facturaIds)),
+
+      total: first(linkedInvoices.total, rawLinkedInvoices.total, normalizedAmount),
+      amount: first(linkedInvoices.amount, rawLinkedInvoices.amount, normalizedAmount),
+      importe: first(linkedInvoices.importe, rawLinkedInvoices.importe, normalizedAmount),
+
+      currency: safeText(first(linkedInvoices.currency, rawLinkedInvoices.currency, currency), currency),
+      moneda: safeText(first(linkedInvoices.moneda, rawLinkedInvoices.moneda, currency), currency),
+    };
+
+    const nextMeta = {
+      ...sourceMeta,
+
+      hasLinkedInvoices: Boolean(
+        sourceMeta.hasLinkedInvoices ||
+          rawMeta.hasLinkedInvoices ||
+          facturasCount > 0 ||
+          facturaIds.length > 0
+      ),
+
+      linkedInvoiceCount: Math.max(
+        safeNumber(sourceMeta.linkedInvoiceCount, 0),
+        safeNumber(rawMeta.linkedInvoiceCount, 0),
+        facturasCount,
+        facturaIds.length
+      ),
+
+      invoicesTotal: first(
+        sourceMeta.invoicesTotal,
+        rawMeta.invoicesTotal,
+        normalizedAmount
+      ),
+
+      invoiceTotal: first(
+        sourceMeta.invoiceTotal,
+        rawMeta.invoiceTotal,
+        normalizedAmount
+      ),
+
+      invoiceCurrency: safeText(
+        first(
+          sourceMeta.invoiceCurrency,
+          rawMeta.invoiceCurrency,
+          currency
+        ),
+        currency
+      ),
+    };
+
+    return {
+      ...source,
+
+      raw: hasOwnKeys(source.raw) ? source.raw : raw,
+
+      facturaId: safeText(first(source.facturaId, raw.facturaId, source.invoiceId, raw.invoiceId), ""),
+      invoiceId: safeText(first(source.invoiceId, raw.invoiceId, source.facturaId, raw.facturaId), ""),
+
+      facturaIds: safeArray(first(source.facturaIds, raw.facturaIds, facturaIds)),
+      invoiceIds: safeArray(first(source.invoiceIds, raw.invoiceIds, facturaIds)),
+
+      facturaRelacionada: safeText(
+        first(
+          source.facturaRelacionada,
+          raw.facturaRelacionada,
+          facturasCount > 0
+            ? `${facturasCount} factura${facturasCount === 1 ? "" : "s"} vinculada${facturasCount === 1 ? "" : "s"}`
+            : ""
+        ),
+        ""
+      ),
+
+      facturasCount,
+      invoicesCount: Math.max(
+        facturasCount,
+        safeNumber(source.invoicesCount, 0),
+        safeNumber(raw.invoicesCount, 0)
+      ),
+
+      linkedInvoices: nextLinkedInvoices,
+
+      invoices: safeArray(first(source.invoices, raw.invoices, linkedInvoices.invoices, rawLinkedInvoices.invoices)),
+      facturas: safeArray(first(source.facturas, raw.facturas, linkedInvoices.invoices, rawLinkedInvoices.invoices)),
+
+      facturasTotal: first(source.facturasTotal, raw.facturasTotal, normalizedAmount),
+      invoicesTotal: first(source.invoicesTotal, raw.invoicesTotal, normalizedAmount),
+      importeFacturas: first(source.importeFacturas, raw.importeFacturas, normalizedAmount),
+      invoiceTotal: first(source.invoiceTotal, raw.invoiceTotal, normalizedAmount),
+
+      total: normalizedAmount,
+      amount: normalizedAmount,
+      importe: normalizedAmount,
+      price: normalizedAmount,
+
+      currency,
+      moneda: currency,
+
+      meta: nextMeta,
+    };
   }
 
   /* =========================================================
@@ -372,9 +639,30 @@ export const IncidenciasView = (() => {
 
   function getItems() {
     try {
-      return sortIncidenciasByUpdatedDesc(
-        normalizeIncidenciasCollection(getRawItems())
+      const rawItems = safeArray(getRawItems());
+
+      const rawById = new Map();
+
+      rawItems.forEach((rawItem) => {
+        const id = getStableTicketId(rawItem);
+
+        if (id && !rawById.has(id)) {
+          rawById.set(id, rawItem);
+        }
+      });
+
+      const normalizedItems = safeArray(
+        normalizeIncidenciasCollection(rawItems)
       );
+
+      const patchedItems = normalizedItems.map((item, index) => {
+        const id = getStableTicketId(item);
+        const matchingRaw = rawById.get(id) || rawItems[index] || {};
+
+        return preserveInvoiceAmountFields(item, matchingRaw);
+      });
+
+      return sortIncidenciasByUpdatedDesc(patchedItems);
     } catch (error) {
       safeWarn("getItems falló:", error);
       return [];

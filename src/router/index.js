@@ -20,6 +20,7 @@
    - no degrada /@slug
    - preserva query/hash públicos
    - no destruye /activate-account?token=...
+   - respeta skipHistory / preservePath / protectedInitialUrl
    - eventos ricos
    - cero throws accidentales
 ========================================================= */
@@ -93,6 +94,7 @@ export const Router = (() => {
       "/login",
       "/activate-account",
       "/reset-password",
+      "/reset-password/confirm",
       "/forgot-password",
       "/recover-password",
       "/password-reset",
@@ -118,6 +120,13 @@ export const Router = (() => {
      SAFE HELPERS
   ===================================================== */
 
+  function isBrowser() {
+    return (
+      typeof window !== "undefined" &&
+      typeof document !== "undefined"
+    );
+  }
+
   function safeLog(...args) {
     try {
       AppCore?.utils?.log?.(...args);
@@ -127,6 +136,10 @@ export const Router = (() => {
   function safeWarn(...args) {
     try {
       AppCore?.utils?.warn?.(...args);
+    } catch {}
+
+    try {
+      console.warn(...args);
     } catch {}
   }
 
@@ -153,9 +166,7 @@ export const Router = (() => {
   }
 
   function isFn(value) {
-    return (
-      typeof value === "function"
-    );
+    return typeof value === "function";
   }
 
   function nowMs() {
@@ -188,6 +199,59 @@ export const Router = (() => {
     return text || fallback;
   }
 
+  function safeOn(
+    target,
+    eventName,
+    handler,
+    options
+  ) {
+    if (
+      !target ||
+      !eventName ||
+      !isFn(handler)
+    ) {
+      return () => {};
+    }
+
+    try {
+      if (
+        isFn(AppCore?.utils?.on)
+      ) {
+        const off =
+          AppCore.utils.on(
+            target,
+            eventName,
+            handler,
+            options
+          );
+
+        if (isFn(off)) {
+          return off;
+        }
+      }
+    } catch {}
+
+    try {
+      target.addEventListener(
+        eventName,
+        handler,
+        options
+      );
+
+      return () => {
+        try {
+          target.removeEventListener(
+            eventName,
+            handler,
+            options
+          );
+        } catch {}
+      };
+    } catch {
+      return () => {};
+    }
+  }
+
   /**
    * Normaliza paths internos sin destruir query/hash.
    *
@@ -195,9 +259,7 @@ export const Router = (() => {
    *   /activate-account?token=abc
    *   -> /activate-account?token=abc
    */
-  function safePath(
-    path = "/"
-  ) {
+  function safePath(path = "/") {
     const raw =
       safeText(path, "/");
 
@@ -214,24 +276,64 @@ export const Router = (() => {
       return raw;
     }
 
-    const withSlash =
+    const normalized =
       raw.startsWith("/")
         ? raw
         : `/${raw}`;
 
     return normalizePath(
       AppCore,
-      withSlash
+      normalized
     );
+  }
+
+  function shouldSkipHistory(options = {}) {
+    return (
+      options.skipHistory === true ||
+      options.protectedInitialUrl === true
+    );
+  }
+
+  function getHistoryOptions(
+    options = {},
+    {
+      username = null,
+      canonicalPath = "/",
+      publicPath = "/",
+      requestedPath = "/",
+    } = {}
+  ) {
+    return {
+      ...options,
+
+      username,
+      resolvedUsername:
+        username,
+
+      canonicalPath,
+      publicPath,
+      requestedPath,
+      fromPath:
+        requestedPath || publicPath,
+
+      preservePath:
+        options.preservePath === true ||
+        options.protectedInitialUrl === true,
+
+      skipHistory:
+        options.skipHistory === true ||
+        options.protectedInitialUrl === true,
+
+      protectedInitialUrl:
+        options.protectedInitialUrl === true,
+    };
   }
 
   /* =====================================================
      ROUTE HELPERS
   ===================================================== */
 
-  function getCanonical(
-    path = "/"
-  ) {
+  function getCanonical(path = "/") {
     return safePath(
       normalizeCanonicalPath(
         AppCore,
@@ -240,9 +342,7 @@ export const Router = (() => {
     );
   }
 
-  function getRoute(
-    path = "/"
-  ) {
+  function getRoute(path = "/") {
     const canonical =
       getCanonical(path);
 
@@ -254,25 +354,19 @@ export const Router = (() => {
     );
   }
 
-  function routeExists(
-    path = "/"
-  ) {
+  function routeExists(path = "/") {
     return Boolean(
       getRoute(path)
     );
   }
 
-  function canUsePublicSlugForRoute(
-    route
-  ) {
+  function canUsePublicSlugForRoute(route) {
     if (!route) {
       return false;
     }
 
     const names =
-      getRouteNames(
-        AppCore
-      );
+      getRouteNames(AppCore);
 
     const routePath =
       getCanonical(
@@ -286,9 +380,7 @@ export const Router = (() => {
     }
 
     if (
-      PUBLIC_AUTH_PATHS.has(
-        routePath
-      )
+      PUBLIC_AUTH_PATHS.has(routePath)
     ) {
       return false;
     }
@@ -300,9 +392,7 @@ export const Router = (() => {
     return true;
   }
 
-  function resolveUsername(
-    requestedPath = "/"
-  ) {
+  function resolveUsername(requestedPath = "/") {
     return (
       extractUsernameFromPath(
         AppCore,
@@ -314,8 +404,7 @@ export const Router = (() => {
       getCurrentUsername(
         AppCore
       ) ||
-      AppCore?.state?.user
-        ?.username ||
+      AppCore?.state?.user?.username ||
       null
     );
   }
@@ -328,9 +417,7 @@ export const Router = (() => {
    * - canonicalPath NO tiene query/hash
    * - publicPath conserva query/hash
    */
-  function getRequestedData(
-    path = "/"
-  ) {
+  function getRequestedData(path = "/") {
     const resolvedHref =
       resolveSpaHref(
         AppCore,
@@ -377,6 +464,8 @@ export const Router = (() => {
                 username,
               fromPath:
                 requestedPath,
+              publicPath:
+                requestedPath,
             }
           ) ||
             requestedPath
@@ -407,8 +496,7 @@ export const Router = (() => {
         getCurrentPublicPath(
           AppCore
         ) ||
-          AppCore?.state
-            ?.publicPath ||
+          AppCore?.state?.publicPath ||
           canonical
       );
 
@@ -420,9 +508,7 @@ export const Router = (() => {
 
   function getDefaultHome() {
     const names =
-      getRouteNames(
-        AppCore
-      );
+      getRouteNames(AppCore);
 
     const username =
       resolveUsername("/");
@@ -508,8 +594,7 @@ export const Router = (() => {
         publicPath:
           safePublic,
         currentResolvedUsername:
-          username ||
-          null,
+          username || null,
       });
     } catch {}
 
@@ -519,8 +604,7 @@ export const Router = (() => {
       publicPath:
         safePublic,
       username:
-        username ||
-        null,
+        username || null,
     };
   }
 
@@ -528,23 +612,19 @@ export const Router = (() => {
      NAV BURST
   ===================================================== */
 
-  function rememberNav(
-    key = ""
-  ) {
+  function rememberNav(key = "") {
     lastNavKey =
       String(key);
+
     lastNavAt =
       Date.now();
   }
 
-  function isBurst(
-    key = ""
-  ) {
+  function isBurst(key = "") {
     return (
       key &&
       key === lastNavKey &&
-      Date.now() - lastNavAt <
-        NAV_BURST_MS
+      Date.now() - lastNavAt < NAV_BURST_MS
     );
   }
 
@@ -576,22 +656,22 @@ export const Router = (() => {
               AppCore
             ),
         setActiveMenu:
-          (p) =>
+          (path) =>
             setActiveMenu(
               AppCore,
-              p
+              path
             ),
         setShellMode:
-          (r) =>
+          (nextRoute) =>
             setShellMode(
               AppCore,
-              r
+              nextRoute
             ),
         setDocumentTitle:
-          (t) =>
+          (title) =>
             setDocumentTitle(
               AppCore,
-              t
+              title
             ),
       });
 
@@ -640,16 +720,16 @@ export const Router = (() => {
         requestedUsername:
           username,
         setShellMode:
-          (r) =>
+          (nextRoute) =>
             setShellMode(
               AppCore,
-              r
+              nextRoute
             ),
         setDocumentTitle:
-          (t) =>
+          (title) =>
             setDocumentTitle(
               AppCore,
-              t
+              title
             ),
       });
 
@@ -685,9 +765,18 @@ export const Router = (() => {
       publicPath,
       route,
       username,
-    } = getRequestedData(
-      path
-    );
+    } = getRequestedData(path);
+
+    const historyOptions =
+      getHistoryOptions(
+        options,
+        {
+          username,
+          canonicalPath,
+          publicPath,
+          requestedPath,
+        }
+      );
 
     emitBeforeRender(
       AppCore,
@@ -699,6 +788,8 @@ export const Router = (() => {
         publicPath,
         username,
         route,
+        options:
+          historyOptions,
       }
     );
 
@@ -732,16 +823,16 @@ export const Router = (() => {
         requestedUsername:
           username,
         setShellMode:
-          (r) =>
+          (nextRoute) =>
             setShellMode(
               AppCore,
-              r
+              nextRoute
             ),
         setDocumentTitle:
-          (t) =>
+          (title) =>
             setDocumentTitle(
               AppCore,
-              t
+              title
             ),
       });
 
@@ -801,19 +892,18 @@ export const Router = (() => {
 
     /* HISTORY */
 
-    updateHistory({
-      AppCore,
-      getRoute,
-      pathname:
-        publicPath,
-      options: {
-        ...options,
-        username,
-        resolvedUsername:
-          username,
-        canonicalPath,
-      },
-    });
+    if (
+      !shouldSkipHistory(historyOptions)
+    ) {
+      updateHistory({
+        AppCore,
+        getRoute,
+        pathname:
+          publicPath,
+        options:
+          historyOptions,
+      });
+    }
 
     /* SUCCESS */
 
@@ -832,16 +922,16 @@ export const Router = (() => {
               username,
             getRoute,
             setShellMode:
-              (r) =>
+              (nextRoute) =>
                 setShellMode(
                   AppCore,
-                  r
+                  nextRoute
                 ),
             setDocumentTitle:
-              (t) =>
+              (title) =>
                 setDocumentTitle(
                   AppCore,
-                  t
+                  title
                 ),
           })
         );
@@ -852,6 +942,7 @@ export const Router = (() => {
         try {
           view?.destroy?.();
         } catch {}
+
         return;
       }
 
@@ -881,8 +972,7 @@ export const Router = (() => {
             synced.username,
           durationMs:
             Math.round(
-              nowMs() -
-                startedAt
+              nowMs() - startedAt
             ),
         }
       );
@@ -905,16 +995,16 @@ export const Router = (() => {
         requestedUsername:
           username,
         setShellMode:
-          (r) =>
+          (nextRoute) =>
             setShellMode(
               AppCore,
-              r
+              nextRoute
             ),
         setDocumentTitle:
-          (t) =>
+          (title) =>
             setDocumentTitle(
               AppCore,
-              t
+              title
             ),
       });
 
@@ -957,9 +1047,7 @@ export const Router = (() => {
     options = {}
   ) {
     const data =
-      getRequestedData(
-        path
-      );
+      getRequestedData(path);
 
     const key =
       `${data.publicPath}|${data.canonicalPath}`;
@@ -977,10 +1065,8 @@ export const Router = (() => {
       getCurrentComparable();
 
     if (
-      current.canonical ===
-        data.canonicalPath &&
-      current.publicPath ===
-        data.publicPath &&
+      current.canonical === data.canonicalPath &&
+      current.publicPath === data.publicPath &&
       !options.force
     ) {
       return render(
@@ -1041,9 +1127,7 @@ export const Router = (() => {
      DOM EVENTS
   ===================================================== */
 
-  function onClick(
-    event
-  ) {
+  function onClick(event) {
     if (
       event.defaultPrevented ||
       event.button !== 0
@@ -1100,26 +1184,20 @@ export const Router = (() => {
     }
 
     if (
-      isHashOnlyHref(
-        href
-      )
+      isHashOnlyHref(href)
     ) {
       return;
     }
 
     if (
-      isUnsafeHref(
-        href
-      )
+      isUnsafeHref(href)
     ) {
       event.preventDefault();
       return;
     }
 
     if (
-      isExternalHref(
-        href
-      )
+      isExternalHref(href)
     ) {
       return;
     }
@@ -1140,11 +1218,14 @@ export const Router = (() => {
       window.location.pathname ||
       "/";
 
-    render(path, {
-      skipHistory: true,
-      replaceState: true,
-      force: true,
-    });
+    render(
+      path,
+      {
+        skipHistory: true,
+        replaceState: true,
+        force: true,
+      }
+    );
   }
 
   /* =====================================================
@@ -1164,24 +1245,26 @@ export const Router = (() => {
 
     bound = true;
 
-    const offClick =
-      AppCore.utils.on(
-        document,
-        "click",
-        onClick
-      );
+    if (isBrowser()) {
+      const offClick =
+        safeOn(
+          document,
+          "click",
+          onClick
+        );
 
-    const offPop =
-      AppCore.utils.on(
-        window,
-        "popstate",
-        onPopstate
-      );
+      const offPop =
+        safeOn(
+          window,
+          "popstate",
+          onPopstate
+        );
 
-    disposers.push(
-      offClick,
-      offPop
-    );
+      disposers.push(
+        offClick,
+        offPop
+      );
+    }
 
     ensureInitialHistoryState({
       AppCore,
@@ -1192,7 +1275,7 @@ export const Router = (() => {
       {
         routes:
           immutableRoutes.map(
-            (r) => r.path
+            (route) => route.path
           ),
       }
     );
@@ -1233,12 +1316,43 @@ export const Router = (() => {
   }
 
   /* =====================================================
+     CONFIG
+  ===================================================== */
+
+  function configure() {
+    return api;
+  }
+
+  /* =====================================================
+     DEBUG
+  ===================================================== */
+
+  function getSnapshot() {
+    return {
+      bound,
+      renderToken,
+      hasActiveView:
+        Boolean(activeView),
+      current:
+        getCurrentComparable(),
+      route:
+        AppCore?.state?.route || "/",
+      publicPath:
+        AppCore?.state?.publicPath || "/",
+      lastNavKey,
+      lastNavAt,
+    };
+  }
+
+  /* =====================================================
      API
   ===================================================== */
 
   const api = {
     routes:
       immutableRoutes,
+
+    configure,
 
     bind,
     unbind,
@@ -1255,6 +1369,12 @@ export const Router = (() => {
     getCurrentCanonicalPath:
       () =>
         getCurrentCanonicalPath(
+          AppCore
+        ),
+
+    getCurrentPublicPath:
+      () =>
+        getCurrentPublicPath(
           AppCore
         ),
 
@@ -1332,6 +1452,8 @@ export const Router = (() => {
         ),
 
     canUsePublicSlugForRoute,
+
+    getSnapshot,
   };
 
   return api;

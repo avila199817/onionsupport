@@ -3,12 +3,12 @@
    Archivo: src/views/facturas/facturas.bindings.js
 
    FINAL PRO SYSTEM · BINDINGS REAL · 10/10
-   PATCH · OPEN INCIDENCIA MODAL · NO ROUTE NAVIGATION
+   PATCH · CREATE FACTURA MODAL · OPEN INCIDENCIA MODAL · NO ROUTE NAVIGATION
    PATCH · PAGINATION SUPPORT
 
    RESPONSABILIDADES:
    - registrar eventos UI del módulo de facturas
-   - bind de refresh / retry / export
+   - bind de crear factura / refresh / retry / export
    - delegación de eventos sobre tabla/cards y acciones de colección
    - abrir incidencia relacionada mediante incidencias.modal.js
    - soportar paginación visual: prev / next / page
@@ -203,8 +203,8 @@ function getIncidenciaId(element) {
 
 function getActionName(element) {
   return safeText(
-    getDatasetValue(element, "action", "facturasAction") ||
-      getAttrValue(element, "data-action", "data-facturas-action") ||
+    getDatasetValue(element, "facturasAction", "action") ||
+      getAttrValue(element, "data-facturas-action", "data-action") ||
       "",
     ""
   );
@@ -250,6 +250,16 @@ function isActionBusyForFactura(state = {}, facturaId = "") {
       safeText(state?.downloadingFacturaId, "") === id ||
       safeText(state?.viewingFacturaId, "") === id ||
       safeText(state?.openingFacturaId, "") === id
+  );
+}
+
+function canCreateFacturaFromState(state = {}) {
+  return Boolean(
+    state?.canCreateFactura ||
+      state?.isAdmin ||
+      state?.role === "admin" ||
+      state?.view?.canCreateFactura ||
+      state?.view?.isAdmin
   );
 }
 
@@ -999,6 +1009,8 @@ async function openIncidenciaModalFromFacturas({
   incidenciaId = "",
   ticketId = "",
   facturaId = "",
+  openIncidencia = null,
+  openRelatedIncidencia = null,
 } = {}) {
   const finalFacturaId = safeText(facturaId, "");
   const factura = finalFacturaId ? getFacturaByIdStore(finalFacturaId) : null;
@@ -1019,6 +1031,18 @@ async function openIncidenciaModalFromFacturas({
     );
 
     return false;
+  }
+
+  const delegatedOpen = openIncidencia || openRelatedIncidencia;
+
+  if (typeof delegatedOpen === "function") {
+    try {
+      const result = await delegatedOpen(finalTicketId);
+
+      if (result !== false) {
+        return true;
+      }
+    } catch {}
   }
 
   let modal = null;
@@ -1252,6 +1276,11 @@ export function bindFacturasView({
   closeDetail,
   exportFacturasCsv,
 
+  createFactura,
+
+  openIncidencia,
+  openRelatedIncidencia,
+
   goToPage,
   goPrevPage,
   goNextPage,
@@ -1269,10 +1298,46 @@ export function bindFacturasView({
     return () => {};
   }
 
+  const createBtn = container.querySelector("#facturas-create-btn");
   const refreshBtn = container.querySelector("#facturas-refresh-btn");
   const retryBtn = container.querySelector("#facturas-retry-btn");
   const exportBtn = container.querySelector("#facturas-export-btn");
   const closeDetailBtn = container.querySelector("[data-action='close-detail']");
+
+  if (createBtn) {
+    AppCore?.cleanup?.on?.(
+      scope,
+      createBtn,
+      "click",
+      async (event) => {
+        event.preventDefault();
+
+        const state = getLiveState(getState);
+
+        if (isBusyState(state)) {
+          return;
+        }
+
+        if (!canCreateFacturaFromState(state)) {
+          showBindingToast(
+            "No tienes permisos para crear facturas.",
+            "error"
+          );
+          return;
+        }
+
+        if (typeof createFactura !== "function") {
+          showBindingToast(
+            "El modal de creación de facturas no está conectado.",
+            "error"
+          );
+          return;
+        }
+
+        await createFactura();
+      }
+    );
+  }
 
   if (refreshBtn) {
     AppCore?.cleanup?.on?.(
@@ -1411,6 +1476,39 @@ export function bindFacturasView({
         const incidenciaId = getIncidenciaId(actionEl);
 
         if (
+          action === "create-factura" ||
+          action === "new-factura" ||
+          action === "create-invoice" ||
+          action === "new-invoice"
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+
+          if (isBusyState(state)) {
+            return;
+          }
+
+          if (!canCreateFacturaFromState(state)) {
+            showBindingToast(
+              "No tienes permisos para crear facturas.",
+              "error"
+            );
+            return;
+          }
+
+          if (typeof createFactura !== "function") {
+            showBindingToast(
+              "El modal de creación de facturas no está conectado.",
+              "error"
+            );
+            return;
+          }
+
+          await createFactura();
+          return;
+        }
+
+        if (
           action === "prev-page" ||
           action === "pagination-prev" ||
           action === "next-page" ||
@@ -1527,6 +1625,8 @@ export function bindFacturasView({
             incidenciaId,
             ticketId: incidenciaId,
             facturaId,
+            openIncidencia,
+            openRelatedIncidencia,
           });
 
           if (!opened) {

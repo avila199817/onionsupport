@@ -18,6 +18,8 @@
    - destroy seguro de vistas
    - preserva username contextualizado
    - no degrada /@slug
+   - preserva query/hash públicos
+   - no destruye /activate-account?token=...
    - eventos ricos
    - cero throws accidentales
 ========================================================= */
@@ -28,6 +30,7 @@ import { Auth } from "../features/auth/index.js";
 import {
   getRouteNames,
   normalizeCanonicalPath,
+  normalizePath,
   getCurrentPath,
   getCurrentCanonicalPath,
   getCurrentResolvedUsername,
@@ -85,6 +88,16 @@ export const Router = (() => {
   const immutableRoutes =
     getImmutableRoutes();
 
+  const PUBLIC_AUTH_PATHS =
+    new Set([
+      "/login",
+      "/activate-account",
+      "/reset-password",
+      "/forgot-password",
+      "/recover-password",
+      "/password-reset",
+    ]);
+
   let bound = false;
 
   let renderChain =
@@ -121,7 +134,9 @@ export const Router = (() => {
     try {
       AppCore?.utils?.error?.(...args);
     } catch {
-      console.error(...args);
+      try {
+        console.error(...args);
+      } catch {}
     }
   }
 
@@ -139,19 +154,15 @@ export const Router = (() => {
 
   function isFn(value) {
     return (
-      typeof value ===
-      "function"
+      typeof value === "function"
     );
   }
 
   function nowMs() {
     try {
       if (
-        typeof performance !==
-          "undefined" &&
-        isFn(
-          performance.now
-        )
+        typeof performance !== "undefined" &&
+        isFn(performance.now)
       ) {
         return performance.now();
       }
@@ -160,17 +171,58 @@ export const Router = (() => {
     return Date.now();
   }
 
+  function safeText(
+    value,
+    fallback = ""
+  ) {
+    if (
+      value === null ||
+      value === undefined
+    ) {
+      return fallback;
+    }
+
+    const text =
+      String(value).trim();
+
+    return text || fallback;
+  }
+
+  /**
+   * Normaliza paths internos sin destruir query/hash.
+   *
+   * Ejemplo:
+   *   /activate-account?token=abc
+   *   -> /activate-account?token=abc
+   */
   function safePath(
     path = "/"
   ) {
     const raw =
-      String(
-        path || "/"
-      ).trim() || "/";
+      safeText(path, "/");
 
-    return raw.startsWith("/")
-      ? raw
-      : `/${raw}`;
+    if (
+      isUnsafeHref(raw) ||
+      isExternalHref(raw)
+    ) {
+      return "/";
+    }
+
+    if (
+      isHashOnlyHref(raw)
+    ) {
+      return raw;
+    }
+
+    const withSlash =
+      raw.startsWith("/")
+        ? raw
+        : `/${raw}`;
+
+    return normalizePath(
+      AppCore,
+      withSlash
+    );
   }
 
   /* =====================================================
@@ -197,8 +249,7 @@ export const Router = (() => {
     return (
       immutableRoutes.find(
         (route) =>
-          route.path ===
-          canonical
+          route.path === canonical
       ) || null
     );
   }
@@ -223,16 +274,26 @@ export const Router = (() => {
         AppCore
       );
 
+    const routePath =
+      getCanonical(
+        route.path || "/"
+      );
+
     if (
-      route.path ===
-      names.LOGIN
+      routePath === names.LOGIN
     ) {
       return false;
     }
 
     if (
-      route.hideShell
+      PUBLIC_AUTH_PATHS.has(
+        routePath
+      )
     ) {
+      return false;
+    }
+
+    if (route.hideShell) {
       return false;
     }
 
@@ -259,15 +320,26 @@ export const Router = (() => {
     );
   }
 
+  /**
+   * Resuelve datos de navegación.
+   *
+   * IMPORTANTE:
+   * - requestedPath conserva query/hash
+   * - canonicalPath NO tiene query/hash
+   * - publicPath conserva query/hash
+   */
   function getRequestedData(
     path = "/"
   ) {
+    const resolvedHref =
+      resolveSpaHref(
+        AppCore,
+        path
+      ) || path;
+
     const requestedPath =
       safePath(
-        resolveSpaHref(
-          AppCore,
-          path
-        ) || path
+        resolvedHref
       );
 
     const canonicalPath =
@@ -285,22 +357,31 @@ export const Router = (() => {
         requestedPath
       );
 
-    const publicPath =
-      safePath(
-        canUsePublicSlugForRoute(
-          route
-        )
-          ? buildPublicPath(
-              AppCore,
-              getRoute,
-              canonicalPath,
-              {
+    let publicPath =
+      requestedPath;
+
+    if (
+      canUsePublicSlugForRoute(
+        route
+      )
+    ) {
+      publicPath =
+        safePath(
+          buildPublicPath(
+            AppCore,
+            getRoute,
+            requestedPath,
+            {
+              username,
+              resolvedUsername:
                 username,
-              }
-            ) ||
-              requestedPath
-          : requestedPath
-      );
+              fromPath:
+                requestedPath,
+            }
+          ) ||
+            requestedPath
+        );
+    }
 
     return {
       requestedPath,
@@ -317,8 +398,7 @@ export const Router = (() => {
         getCurrentCanonicalPath(
           AppCore
         ) ||
-          AppCore?.state
-            ?.route ||
+          AppCore?.state?.route ||
           "/"
       );
 
@@ -354,6 +434,8 @@ export const Router = (() => {
         names.HOME,
         {
           username,
+          resolvedUsername:
+            username,
         }
       ) ||
       names.HOME
@@ -397,7 +479,7 @@ export const Router = (() => {
     username = null,
   } = {}) {
     const safeCanonical =
-      safePath(
+      getCanonical(
         canonicalPath
       );
 
@@ -407,23 +489,29 @@ export const Router = (() => {
           safeCanonical
       );
 
-    AppCore?.setRoute?.(
-      safeCanonical
-    );
+    try {
+      AppCore?.setRoute?.(
+        safeCanonical
+      );
+    } catch {}
 
-    AppCore?.setPublicPath?.(
-      safePublic
-    );
+    try {
+      AppCore?.setPublicPath?.(
+        safePublic
+      );
+    } catch {}
 
-    AppCore?.setState?.({
-      route:
-        safeCanonical,
-      publicPath:
-        safePublic,
-      currentResolvedUsername:
-        username ||
-        null,
-    });
+    try {
+      AppCore?.setState?.({
+        route:
+          safeCanonical,
+        publicPath:
+          safePublic,
+        currentResolvedUsername:
+          username ||
+          null,
+      });
+    } catch {}
 
     return {
       canonicalPath:
@@ -454,10 +542,8 @@ export const Router = (() => {
   ) {
     return (
       key &&
-      key ===
-        lastNavKey &&
-      Date.now() -
-        lastNavAt <
+      key === lastNavKey &&
+      Date.now() - lastNavAt <
         NAV_BURST_MS
     );
   }
@@ -479,7 +565,7 @@ export const Router = (() => {
     ) {
       destroyActiveView();
 
-      renderLoginRedirect({
+      await renderLoginRedirect({
         AppCore,
         getRoute,
         updateHistory,
@@ -594,6 +680,7 @@ export const Router = (() => {
       nowMs();
 
     const {
+      requestedPath,
       canonicalPath,
       publicPath,
       route,
@@ -607,6 +694,7 @@ export const Router = (() => {
       {
         path:
           publicPath,
+        requestedPath,
         canonicalPath,
         publicPath,
         username,
@@ -624,8 +712,7 @@ export const Router = (() => {
     );
 
     if (
-      token !==
-      renderToken
+      token !== renderToken
     ) {
       return;
     }
@@ -671,7 +758,9 @@ export const Router = (() => {
           forbidden: false,
           path:
             publicPath,
+          requestedPath,
           canonicalPath,
+          publicPath,
           username,
         }
       );
@@ -688,6 +777,8 @@ export const Router = (() => {
         route,
         requestedCanonicalPath:
           canonicalPath,
+        requestedPublicPath:
+          publicPath,
         getRoute,
       });
 
@@ -714,10 +805,13 @@ export const Router = (() => {
       AppCore,
       getRoute,
       pathname:
-        canonicalPath,
+        publicPath,
       options: {
         ...options,
         username,
+        resolvedUsername:
+          username,
+        canonicalPath,
       },
     });
 
@@ -736,6 +830,7 @@ export const Router = (() => {
             canonicalPath,
             requestedUsername:
               username,
+            getRoute,
             setShellMode:
               (r) =>
                 setShellMode(
@@ -752,8 +847,7 @@ export const Router = (() => {
         );
 
       if (
-        token !==
-        renderToken
+        token !== renderToken
       ) {
         try {
           view?.destroy?.();
@@ -778,6 +872,7 @@ export const Router = (() => {
           forbidden: false,
           path:
             synced.publicPath,
+          requestedPath,
           canonicalPath:
             synced.canonicalPath,
           publicPath:
@@ -999,8 +1094,7 @@ export const Router = (() => {
       ).toLowerCase();
 
     if (
-      target ===
-      "_blank"
+      target === "_blank"
     ) {
       return;
     }
@@ -1038,6 +1132,9 @@ export const Router = (() => {
   function onPopstate() {
     const path =
       getCurrentPublicPath(
+        AppCore
+      ) ||
+      getCurrentPath(
         AppCore
       ) ||
       window.location.pathname ||
@@ -1095,8 +1192,7 @@ export const Router = (() => {
       {
         routes:
           immutableRoutes.map(
-            (r) =>
-              r.path
+            (r) => r.path
           ),
       }
     );
@@ -1165,7 +1261,9 @@ export const Router = (() => {
     getCurrentResolvedUsername:
       () =>
         resolveUsername(
-          "/"
+          getCurrentPublicPath(
+            AppCore
+          ) || "/"
         ),
 
     navigate,

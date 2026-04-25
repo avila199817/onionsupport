@@ -8,7 +8,8 @@
    - mantener layout auth-screen alineado con login y password-reset
    - conservar bloque lateral izquierdo de estado
    - renderizar card principal a la derecha
-   - soportar activación automática por token o activación manual
+   - soportar activación automática por token capturado en memoria
+   - no exponer token real en DOM
    - incluir toast superior derecho desacoplado
    - usar logo real de empresa según tema activo
    - exponer ids estables para dom.js / activateAccountView.js
@@ -27,6 +28,22 @@ function safeText(value = "", fallback = "") {
   const text = String(value).trim();
 
   return text || fallback;
+}
+
+function safeBool(value, fallback = false) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (value === "true") {
+    return true;
+  }
+
+  if (value === "false") {
+    return false;
+  }
+
+  return fallback;
 }
 
 function safeArray(value) {
@@ -55,6 +72,12 @@ const ACTIVATE_ACCOUNT_STATUS = Object.freeze({
   INVALID: "invalid",
 });
 
+const CAPTURED_TOKEN_SENTINELS = new Set([
+  "__captured_activation_token__",
+  "__captured_token__",
+  "__token_captured__",
+]);
+
 function normalizeStatus(value = "") {
   const status = safeText(value, ACTIVATE_ACCOUNT_STATUS.IDLE).toLowerCase();
 
@@ -72,6 +95,40 @@ function normalizeStatus(value = "") {
   }
 
   return ACTIVATE_ACCOUNT_STATUS.IDLE;
+}
+
+function resolveHasCapturedToken(options = {}) {
+  const explicit =
+    options?.hasToken ??
+    options?.tokenCaptured ??
+    options?.hasActivationToken ??
+    null;
+
+  if (explicit !== null && explicit !== undefined) {
+    return safeBool(explicit, false);
+  }
+
+  const token = safeText(
+    options?.token ||
+      options?.activationToken ||
+      options?.activateToken,
+    ""
+  );
+
+  if (!token) {
+    return false;
+  }
+
+  if (CAPTURED_TOKEN_SENTINELS.has(token)) {
+    return true;
+  }
+
+  /*
+    Compatibilidad:
+    Si llega token legacy, solo se usa para decidir estado visual.
+    NO se renderiza en DOM.
+  */
+  return true;
 }
 
 function resolveStatusCopy(status = ACTIVATE_ACCOUNT_STATUS.IDLE, options = {}) {
@@ -256,6 +313,7 @@ function getLoadingIcon() {
 function getStatusIcon(status = ACTIVATE_ACCOUNT_STATUS.IDLE) {
   if (status === ACTIVATE_ACCOUNT_STATUS.LOADING) return getLoadingIcon();
   if (status === ACTIVATE_ACCOUNT_STATUS.SUCCESS) return getSuccessIcon();
+
   if (
     status === ACTIVATE_ACCOUNT_STATUS.ERROR ||
     status === ACTIVATE_ACCOUNT_STATUS.EXPIRED ||
@@ -674,155 +732,10 @@ function renderStatusCard({
   `;
 }
 
-function renderForm({
-  appName = "Onion Support",
-  status = ACTIVATE_ACCOUNT_STATUS.IDLE,
-  token = "",
-  title = "",
-  subtitle = "",
-  buttonLabel = "",
-  loginHref = "/login",
-  backLabel = "Volver al acceso",
-  logoDarkSrc = "/src/media/img/favicon_white.png",
-  logoLightSrc = "/src/media/img/favicon_black.png",
-  footerText = "",
-  autoSubmit = true,
-} = {}) {
-  const isLoading = status === ACTIVATE_ACCOUNT_STATUS.LOADING;
-  const isSuccess = status === ACTIVATE_ACCOUNT_STATUS.SUCCESS;
-  const isInvalid =
-    status === ACTIVATE_ACCOUNT_STATUS.INVALID ||
-    status === ACTIVATE_ACCOUNT_STATUS.EXPIRED;
-
-  const finalButtonLabel = isSuccess || isInvalid
-    ? backLabel
-    : buttonLabel;
-
-  const buttonAction = isSuccess || isInvalid
-    ? "go-login"
-    : "activate-account";
-
-  return `
-    <section
-      class="login-stage login-stage--right"
-      aria-label="Activación de cuenta"
-    >
-      <div class="login-card-shell login-card-shell--right">
-        <div
-          class="login-card login-card--offset login-card--clean"
-          id="activateAccountCard"
-        >
-          <header class="login-header">
-            <div class="logo-fade" aria-hidden="true">
-              ${renderThemeLogo({
-                darkSrc: logoDarkSrc,
-                lightSrc: logoLightSrc,
-                alt: appName,
-              })}
-            </div>
-
-            <h2 id="activateAccountTitle">
-              ${escapeHtml(title)}
-            </h2>
-
-            <p
-              class="login-subtitle"
-              id="activateAccountSubtitle"
-            >
-              ${escapeHtml(subtitle)}
-            </p>
-          </header>
-
-          <form
-            class="login-form"
-            id="activateAccountForm"
-            novalidate
-            data-auto-submit="${autoSubmit ? "true" : "false"}"
-          >
-            <input
-              type="hidden"
-              id="activateAccountToken"
-              name="token"
-              value="${escapeHtml(token)}"
-            />
-
-            <input
-              type="hidden"
-              id="activateAccountStatus"
-              name="status"
-              value="${escapeHtml(status)}"
-            />
-
-            ${renderStatusCard({
-              status,
-              copy: {
-                badge: buttonLabel ? "" : "",
-                title,
-              },
-            }).replace(
-              '<span\n            class="activate-account-badge"\n            id="activateAccountStatusBadge"\n          >\n            \n          </span>',
-              ""
-            )}
-
-            <div
-              class="login-error"
-              id="activateAccountError"
-              role="alert"
-              aria-live="polite"
-            ></div>
-
-            <button
-              class="login-button"
-              id="activateAccountButton"
-              type="submit"
-              data-action="${escapeHtml(buttonAction)}"
-              data-login-href="${escapeHtml(loginHref)}"
-              ${isLoading ? 'disabled aria-busy="true"' : ""}
-            >
-              <span class="login-submit-text">
-                ${escapeHtml(finalButtonLabel)}
-              </span>
-            </button>
-
-            <div class="login-reset">
-              <a
-                class="login-reset-link"
-                href="${escapeHtml(loginHref)}"
-                id="activateAccountBackToLoginLink"
-                data-spa
-              >
-                <span
-                  class="login-reset-link-icon"
-                  aria-hidden="true"
-                  style="display:inline-flex;align-items:center;justify-content:center;margin-right:8px;vertical-align:middle;"
-                >
-                  ${getBackArrowIcon()}
-                </span>
-                <span>${escapeHtml(backLabel)}</span>
-              </a>
-            </div>
-
-            <div
-              class="activate-account-token-note"
-              id="activateAccountTokenNote"
-            >
-              ${escapeHtml(footerText)}
-            </div>
-          </form>
-
-          <footer class="login-footer">
-            <span>${escapeHtml(footerText)}</span>
-          </footer>
-        </div>
-      </div>
-    </section>
-  `;
-}
-
 function renderFormClean({
   appName = "Onion Support",
   status = ACTIVATE_ACCOUNT_STATUS.IDLE,
-  token = "",
+  hasToken = false,
   copy = {},
   loginHref = "/login",
   backLabel = "Volver al acceso",
@@ -831,18 +744,23 @@ function renderFormClean({
   autoSubmit = true,
 } = {}) {
   const isLoading = status === ACTIVATE_ACCOUNT_STATUS.LOADING;
-  const isSuccess = status === ACTIVATE_ACCOUNT_STATUS.SUCCESS;
+
+  const isSuccess =
+    status === ACTIVATE_ACCOUNT_STATUS.SUCCESS;
+
   const isInvalid =
     status === ACTIVATE_ACCOUNT_STATUS.INVALID ||
     status === ACTIVATE_ACCOUNT_STATUS.EXPIRED;
 
-  const finalButtonLabel = isSuccess || isInvalid
-    ? backLabel
-    : copy.button;
+  const finalButtonLabel =
+    isSuccess || isInvalid
+      ? backLabel
+      : copy.button;
 
-  const buttonAction = isSuccess || isInvalid
-    ? "go-login"
-    : "activate-account";
+  const buttonAction =
+    isSuccess || isInvalid
+      ? "go-login"
+      : "activate-account";
 
   return `
     <section
@@ -880,12 +798,15 @@ function renderFormClean({
             id="activateAccountForm"
             novalidate
             data-auto-submit="${autoSubmit ? "true" : "false"}"
+            data-has-token="${hasToken ? "true" : "false"}"
           >
             <input
               type="hidden"
               id="activateAccountToken"
               name="token"
-              value="${escapeHtml(token)}"
+              value=""
+              autocomplete="off"
+              data-token-present="${hasToken ? "true" : "false"}"
             />
 
             <input
@@ -893,6 +814,7 @@ function renderFormClean({
               id="activateAccountStatus"
               name="status"
               value="${escapeHtml(status)}"
+              autocomplete="off"
             />
 
             ${renderStatusCard({
@@ -962,15 +884,11 @@ export function getActivateAccountTemplate(options = {}) {
     options?.status
   );
 
-  const token = safeText(
-    options?.token ||
-      options?.activationToken ||
-      options?.activateToken,
-    ""
-  );
+  const hasToken =
+    resolveHasCapturedToken(options);
 
   const computedStatus =
-    !token && status === ACTIVATE_ACCOUNT_STATUS.IDLE
+    !hasToken && status === ACTIVATE_ACCOUNT_STATUS.IDLE
       ? ACTIVATE_ACCOUNT_STATUS.INVALID
       : status;
 
@@ -1002,6 +920,7 @@ export function getActivateAccountTemplate(options = {}) {
       data-view="activate-account"
       data-activate-account-view="true"
       data-status="${escapeHtml(computedStatus)}"
+      data-has-token="${hasToken ? "true" : "false"}"
     >
       ${renderToast()}
 
@@ -1015,7 +934,7 @@ export function getActivateAccountTemplate(options = {}) {
           ${renderFormClean({
             appName,
             status: computedStatus,
-            token,
+            hasToken,
             copy,
             loginHref,
             backLabel,

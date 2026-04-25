@@ -3,7 +3,7 @@
    Archivo: src/views/facturas/facturasView.js
 
    FINAL PRO SYSTEM · VIEW REAL · FULL PATCH PORTAL MODAL
-   PATCH 2 · MODAL EVENTS FIX
+   PATCH 3 · INCIDENCIA LINK PRESERVER
 
    RESPONSABILIDADES:
    - render principal de facturas
@@ -13,6 +13,7 @@
    - cero conflicto con shell SPA
    - performance pro
    - cleanup enterprise
+   - preservar relación factura ↔ incidencia para columna Incidencia
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -95,6 +96,321 @@ export const FacturasView = (() => {
   let renderToken = 0;
 
   /* =====================================================
+     LOCAL HELPERS
+  ===================================================== */
+
+  function safeObject(value) {
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? value
+      : {};
+  }
+
+  function safeArray(value) {
+    return Array.isArray(value) ? value : [];
+  }
+
+  function first(...values) {
+    for (const value of values) {
+      if (value === undefined || value === null) continue;
+      if (typeof value === "string" && value.trim() === "") continue;
+      return value;
+    }
+
+    return null;
+  }
+
+  function hasOwnKeys(value = {}) {
+    return Boolean(
+      value &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        Object.keys(value).length
+    );
+  }
+
+  function getStableFacturaId(item = {}) {
+    return safeText(
+      first(
+        item?.id,
+        item?._id,
+        item?.facturaId,
+        item?.numero,
+        item?.numeroFacturaLegal,
+        item?.numeroFacturaSistema,
+        item?.raw?.id,
+        item?.raw?._id,
+        item?.raw?.facturaId,
+        item?.raw?.numero,
+        item?.raw?.numeroFacturaLegal,
+        item?.raw?.numeroFacturaSistema
+      ),
+      ""
+    );
+  }
+
+  function getRelatedIncidenciaId(item = {}) {
+    const source = safeObject(item);
+    const raw = safeObject(source.raw);
+
+    const incidencia = safeObject(
+      first(
+        source.incidencia,
+        raw.incidencia
+      )
+    );
+
+    const ticket = safeObject(
+      first(
+        source.ticket,
+        raw.ticket
+      )
+    );
+
+    const linkedTicket = safeObject(
+      first(
+        source.linkedTicket,
+        raw.linkedTicket
+      )
+    );
+
+    return safeText(
+      first(
+        source.ticketId,
+        source.incidenciaId,
+
+        incidencia.ticketId,
+        incidencia.id,
+        incidencia.incidenciaId,
+
+        ticket.ticketId,
+        ticket.id,
+        ticket.incidenciaId,
+
+        linkedTicket.ticketId,
+        linkedTicket.id,
+        linkedTicket.incidenciaId,
+
+        source.relatedTicketId,
+        source.relatedIncidentId,
+        source.supportTicketId,
+        source.caseId,
+
+        raw.ticketId,
+        raw.incidenciaId,
+
+        raw.incidencia?.ticketId,
+        raw.incidencia?.id,
+        raw.incidencia?.incidenciaId,
+
+        raw.ticket?.ticketId,
+        raw.ticket?.id,
+        raw.ticket?.incidenciaId,
+
+        raw.linkedTicket?.ticketId,
+        raw.linkedTicket?.id,
+        raw.linkedTicket?.incidenciaId,
+
+        raw.relatedTicketId,
+        raw.relatedIncidentId,
+        raw.supportTicketId,
+        raw.caseId
+      ),
+      ""
+    );
+  }
+
+  function buildIncidenciaPayload(item = {}) {
+    const source = safeObject(item);
+    const raw = safeObject(source.raw);
+
+    const incidencia = safeObject(
+      first(
+        source.incidencia,
+        raw.incidencia
+      )
+    );
+
+    const ticket = safeObject(
+      first(
+        source.ticket,
+        raw.ticket
+      )
+    );
+
+    const linkedTicket = safeObject(
+      first(
+        source.linkedTicket,
+        raw.linkedTicket
+      )
+    );
+
+    const incidenciaId = getRelatedIncidenciaId(source);
+
+    if (!incidenciaId) {
+      return null;
+    }
+
+    return {
+      ...incidencia,
+
+      id: incidenciaId,
+      ticketId: incidenciaId,
+      incidenciaId,
+
+      subject: safeText(
+        first(
+          incidencia.subject,
+          incidencia.asunto,
+          ticket.subject,
+          ticket.asunto,
+          linkedTicket.subject,
+          linkedTicket.asunto,
+          raw.subject,
+          raw.asunto,
+          ""
+        ),
+        ""
+      ),
+
+      asunto: safeText(
+        first(
+          incidencia.asunto,
+          incidencia.subject,
+          ticket.asunto,
+          ticket.subject,
+          linkedTicket.asunto,
+          linkedTicket.subject,
+          raw.asunto,
+          raw.subject,
+          ""
+        ),
+        ""
+      ),
+
+      clienteId: safeText(
+        first(
+          incidencia.clienteId,
+          ticket.clienteId,
+          linkedTicket.clienteId,
+          source.clienteId,
+          source.cliente?.id,
+          raw.clienteId,
+          raw.cliente?.id,
+          ""
+        ),
+        ""
+      ),
+
+      relationType: safeText(
+        first(
+          incidencia.relationType,
+          ticket.relationType,
+          linkedTicket.relationType,
+          source.relationType,
+          raw.relationType,
+          "linked_ticket"
+        ),
+        "linked_ticket"
+      ),
+
+      linkedAt: safeText(
+        first(
+          incidencia.linkedAt,
+          ticket.linkedAt,
+          linkedTicket.linkedAt,
+          raw.linkedAt,
+          ""
+        ),
+        ""
+      ),
+    };
+  }
+
+  function preserveIncidenciaFields(item = {}, fallbackRaw = {}) {
+    const source = safeObject(item);
+
+    const embeddedRaw = safeObject(source.raw);
+    const externalRaw = safeObject(fallbackRaw);
+    const raw = hasOwnKeys(embeddedRaw) ? embeddedRaw : externalRaw;
+
+    const merged = {
+      ...source,
+      raw: hasOwnKeys(source.raw) ? source.raw : raw,
+    };
+
+    const incidenciaId = getRelatedIncidenciaId(merged);
+    const incidenciaPayload = buildIncidenciaPayload(merged);
+
+    if (!incidenciaId) {
+      return merged;
+    }
+
+    return {
+      ...merged,
+
+      ticketId: incidenciaId,
+      incidenciaId,
+
+      relatedTicketId: safeText(
+        first(
+          merged.relatedTicketId,
+          raw.relatedTicketId,
+          incidenciaId
+        ),
+        incidenciaId
+      ),
+
+      relatedIncidentId: safeText(
+        first(
+          merged.relatedIncidentId,
+          raw.relatedIncidentId,
+          incidenciaId
+        ),
+        incidenciaId
+      ),
+
+      supportTicketId: safeText(
+        first(
+          merged.supportTicketId,
+          raw.supportTicketId,
+          incidenciaId
+        ),
+        incidenciaId
+      ),
+
+      caseId: safeText(
+        first(
+          merged.caseId,
+          raw.caseId,
+          incidenciaId
+        ),
+        incidenciaId
+      ),
+
+      incidencia: incidenciaPayload,
+      ticket: safeObject(first(merged.ticket, raw.ticket, incidenciaPayload)),
+      linkedTicket: safeObject(first(merged.linkedTicket, raw.linkedTicket, incidenciaPayload)),
+
+      relationType: safeText(
+        first(
+          merged.relationType,
+          raw.relationType,
+          incidenciaPayload?.relationType,
+          "linked_ticket"
+        ),
+        "linked_ticket"
+      ),
+
+      meta: {
+        ...safeObject(merged.meta),
+        hasIncidencia: true,
+        incidenciaId,
+        ticketId: incidenciaId,
+      },
+    };
+  }
+
+  /* =====================================================
      CORE HELPERS
   ===================================================== */
 
@@ -104,9 +420,23 @@ export const FacturasView = (() => {
     } catch {}
   }
 
+  function safeWarn(...args) {
+    try {
+      AppCore?.utils?.warn?.("[FacturasView]", ...args);
+    } catch {}
+  }
+
   function safeEmit(event = "", payload = {}) {
     try {
       AppCore?.events?.emit?.(event, payload);
+    } catch {}
+
+    try {
+      window.dispatchEvent(
+        new CustomEvent(event, {
+          detail: payload,
+        })
+      );
     } catch {}
   }
 
@@ -165,8 +495,26 @@ export const FacturasView = (() => {
 
   function getItems() {
     try {
-      return getSortedFacturasStore();
-    } catch {
+      const storeItems = safeArray(getSortedFacturasStore());
+
+      const rawById = new Map();
+
+      storeItems.forEach((item) => {
+        const id = getStableFacturaId(item);
+
+        if (id && !rawById.has(id)) {
+          rawById.set(id, safeObject(item.raw || item));
+        }
+      });
+
+      return storeItems.map((item, index) => {
+        const id = getStableFacturaId(item);
+        const fallbackRaw = rawById.get(id) || storeItems[index]?.raw || storeItems[index] || {};
+
+        return preserveIncidenciaFields(item, fallbackRaw);
+      });
+    } catch (error) {
+      safeWarn("getItems falló:", error);
       return [];
     }
   }
@@ -191,14 +539,73 @@ export const FacturasView = (() => {
   }
 
   function setDetail(data = null) {
-    setFacturasDetailData(state, data);
-    setFacturasDetailOpen(state, Boolean(data));
+    const patchedDetail = data ? preserveIncidenciaFields(data, data?.raw || data) : null;
+
+    setFacturasDetailData(state, patchedDetail);
+    setFacturasDetailOpen(state, Boolean(patchedDetail));
   }
 
   function closeDetail() {
     closeFacturasDetail(state);
     state.view.selectedFacturaId = "";
     renderDetailPortal();
+  }
+
+  /* =====================================================
+     INCIDENCIA BRIDGE
+  ===================================================== */
+
+  function openIncidenciaBridge(ticketId = "") {
+    const id = safeText(ticketId, "");
+
+    if (!id) {
+      showToast("No hay incidencia relacionada.", "error");
+      return false;
+    }
+
+    try {
+      safeEmit("facturas:incidencia:open", {
+        ticketId: id,
+        incidenciaId: id,
+      });
+    } catch {}
+
+    try {
+      safeEmit("incidencias:modal:open-request", {
+        ticketId: id,
+        incidenciaId: id,
+      });
+    } catch {}
+
+    try {
+      if (typeof window?.OnionIncidenciasModal?.openById === "function") {
+        window.OnionIncidenciasModal.openById(id);
+        return true;
+      }
+    } catch {}
+
+    try {
+      if (typeof AppCore?.router?.navigate === "function") {
+        AppCore.router.navigate("/incidencias", {
+          state: {
+            ticketId: id,
+            openTicketId: id,
+          },
+        });
+
+        return true;
+      }
+    } catch {}
+
+    try {
+      if (typeof window !== "undefined") {
+        window.location.hash = `#/incidencias?ticketId=${encodeURIComponent(id)}`;
+        return true;
+      }
+    } catch {}
+
+    showToast(`Incidencia relacionada: ${id}`, "info");
+    return true;
   }
 
   /* =====================================================
@@ -234,7 +641,10 @@ export const FacturasView = (() => {
     const root = ensureDetailRoot();
 
     const detail =
-      getFacturasDetailData(state);
+      preserveIncidenciaFields(
+        getFacturasDetailData(state) || {},
+        getFacturasDetailData(state)?.raw || getFacturasDetailData(state) || {}
+      );
 
     const detailOpen =
       isFacturasDetailOpen(state);
@@ -282,6 +692,27 @@ export const FacturasView = (() => {
       if (closeAction) {
         event.preventDefault();
         closeDetail();
+        return;
+      }
+
+      const incidenciaBtn = event.target.closest(
+        '[data-action="open-incidencia"]'
+      );
+
+      if (incidenciaBtn) {
+        event.preventDefault();
+
+        const ticketId = safeText(
+          first(
+            incidenciaBtn.dataset.ticketId,
+            incidenciaBtn.dataset.incidenciaId,
+            incidenciaBtn.getAttribute("data-ticket-id"),
+            incidenciaBtn.getAttribute("data-incidencia-id")
+          ),
+          ""
+        );
+
+        openIncidenciaBridge(ticketId);
         return;
       }
 
@@ -572,18 +1003,22 @@ export const FacturasView = (() => {
           force: true,
         });
 
+      const patchedDetail = detail
+        ? preserveIncidenciaFields(detail, detail?.raw || detail)
+        : null;
+
       setFacturasDetailLoading(
         state,
         false
       );
 
-      if (detail) {
-        setDetail(detail);
+      if (patchedDetail) {
+        setDetail(patchedDetail);
       }
 
       renderDetailOnly();
 
-      return detail;
+      return patchedDetail;
     } catch {
       setFacturasDetailLoading(
         state,
@@ -639,23 +1074,27 @@ export const FacturasView = (() => {
           silent: true,
         });
 
-      if (!detail) {
+      const patchedDetail = detail
+        ? preserveIncidenciaFields(detail, detail?.raw || detail)
+        : null;
+
+      if (!patchedDetail) {
         throw new Error();
       }
 
-      setDetail(detail);
+      setDetail(patchedDetail);
 
       safeEmit(
         "facturas:open:success",
         {
           facturaId,
-          detail,
+          detail: patchedDetail,
         }
       );
 
       renderDetailOnly();
 
-      return detail;
+      return patchedDetail;
     } catch {
       showToast(
         "No se pudo abrir la factura.",
@@ -803,6 +1242,9 @@ export const FacturasView = (() => {
         closeDetail,
         exportFacturasCsv,
 
+        openIncidencia: openIncidenciaBridge,
+        openRelatedIncidencia: openIncidenciaBridge,
+
         onBootstrap() {
           setFacturasBootstrapped(
             state,
@@ -899,6 +1341,9 @@ export const FacturasView = (() => {
     sendFacturaToClient,
     closeDetail,
     exportFacturasCsv,
+
+    openIncidencia: openIncidenciaBridge,
+    openRelatedIncidencia: openIncidenciaBridge,
 
     getItems,
 

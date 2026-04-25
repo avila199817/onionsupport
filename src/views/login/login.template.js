@@ -11,6 +11,7 @@
    - soportar usuario o email
    - usar logo real de empresa según tema activo
    - reutilizar el sistema compartido de password-field
+   - estabilizar visualmente el botón ojo del password-field compartido
 ========================================================= */
 
 import { escapeHtml } from "./login.helpers.js";
@@ -110,6 +111,149 @@ function renderScopedThemeLogoStyle() {
 }
 
 /* =========================================================
+   PASSWORD FIELD VISUAL PATCH
+
+   Nota:
+   - El comportamiento JS debe venir del shared:
+     bindPasswordFieldsInScope(container)
+   - Este bloque solo estabiliza layout/hover/focus.
+========================================================= */
+
+function renderScopedPasswordFieldStyle() {
+  return `
+    <style>
+      .login-view [data-password-field="true"]{
+        position:relative;
+      }
+
+      .login-view [data-password-field="true"] .password-wrapper{
+        position:relative;
+        display:block;
+        width:100%;
+      }
+
+      .login-view [data-password-field="true"] .input-text{
+        padding-right:58px;
+      }
+
+      .login-view [data-password-toggle="true"].password-toggle{
+        position:absolute;
+        top:50%;
+        right:12px;
+
+        width:36px;
+        height:36px;
+        min-width:36px;
+        min-height:36px;
+
+        padding:0;
+        margin:0;
+
+        border:0;
+        border-radius:12px;
+        outline:none;
+
+        background:transparent;
+        color:inherit;
+
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+
+        line-height:1;
+        cursor:pointer;
+
+        transform:translate3d(0, -50%, 0);
+
+        appearance:none;
+        -webkit-appearance:none;
+
+        box-shadow:none;
+
+        transition:
+          background .16s ease,
+          color .16s ease,
+          opacity .16s ease;
+      }
+
+      .login-view [data-password-toggle="true"].password-toggle:hover,
+      .login-view [data-password-toggle="true"].password-toggle:focus,
+      .login-view [data-password-toggle="true"].password-toggle:focus-visible,
+      .login-view [data-password-toggle="true"].password-toggle:active{
+        transform:translate3d(0, -50%, 0) !important;
+        box-shadow:none;
+      }
+
+      .login-view [data-password-toggle="true"].password-toggle:hover{
+        background:rgba(148,163,184,.12);
+      }
+
+      .login-view [data-password-toggle="true"].password-toggle svg{
+        display:block;
+        width:18px;
+        height:18px;
+        flex:0 0 auto;
+        pointer-events:none;
+      }
+
+      .login-view [data-password-caps="true"].caps-indicator{
+        position:absolute;
+        top:50%;
+        right:54px;
+
+        transform:translate3d(0, -50%, 0);
+
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        gap:5px;
+
+        min-height:24px;
+        padding:0 8px;
+
+        border-radius:999px;
+
+        font-size:11px;
+        font-weight:700;
+        line-height:1;
+
+        pointer-events:none;
+        white-space:nowrap;
+      }
+
+      .login-view [data-password-caps="true"].caps-indicator[hidden]{
+        display:none !important;
+      }
+
+      .login-view [data-password-caps="true"] .caps-icon{
+        display:block;
+        width:16px;
+        height:16px;
+        flex:0 0 auto;
+      }
+
+      @media (max-width: 520px){
+        .login-view [data-password-field="true"] .input-text{
+          padding-right:54px;
+        }
+
+        .login-view [data-password-toggle="true"].password-toggle{
+          right:10px;
+          width:34px;
+          height:34px;
+          min-width:34px;
+          min-height:34px;
+        }
+
+        .login-view [data-password-caps="true"].caps-indicator{
+          right:50px;
+        }
+      }
+    </style>
+  `;
+}
+
+/* =========================================================
    PARTIALS
 ========================================================= */
 
@@ -171,8 +315,9 @@ function renderForm({
   logoDarkSrc = "/src/media/img/favicon_white.png",
   logoLightSrc = "/src/media/img/favicon_black.png",
 } = {}) {
-  const hasIdentifier =
-    Boolean(String(identifier || "").trim());
+  const hasIdentifier = Boolean(
+    String(identifier || "").trim()
+  );
 
   const finalSubtitle = safeText(
     subtitle,
@@ -302,8 +447,13 @@ export function getLoginTemplate(options = {}) {
 
   return `
     ${renderScopedThemeLogoStyle()}
+    ${renderScopedPasswordFieldStyle()}
 
-    <section class="login-view" data-view="login" data-login-view="true">
+    <section
+      class="login-view"
+      data-view="login"
+      data-login-view="true"
+    >
       <div class="login-scene">
         <div class="login-grid">
           ${renderLeftPanel({

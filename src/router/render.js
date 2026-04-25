@@ -19,6 +19,8 @@
    - return explícito de view instance
    - fallbacks seguros si falta render
    - preserva username resuelto y slug público
+   - preserva query/hash públicos en render
+   - no destruye /activate-account?token=...
    - métricas internas por flujo
    - anti stale-render
    - cero throws accidentales
@@ -29,6 +31,7 @@ import {
   escapeHtml,
   normalizeCanonicalPath,
   normalizePath,
+  getSearchAndHash,
   getCurrentPublicPath,
   getCurrentResolvedUsername,
   getCurrentUsername,
@@ -139,8 +142,7 @@ function safeSetDocumentTitle(
 ) {
   try {
     if (
-      typeof setDocumentTitle ===
-      "function"
+      typeof setDocumentTitle === "function"
     ) {
       setDocumentTitle(title);
     }
@@ -153,8 +155,7 @@ function safeSetShellMode(
 ) {
   try {
     if (
-      typeof setShellMode ===
-      "function"
+      typeof setShellMode === "function"
     ) {
       setShellMode(route);
     }
@@ -166,8 +167,7 @@ function safeClearDynamicContainers(
 ) {
   try {
     if (
-      typeof clearDynamicContainers ===
-      "function"
+      typeof clearDynamicContainers === "function"
     ) {
       clearDynamicContainers();
     }
@@ -180,8 +180,7 @@ function safeSetActiveMenu(
 ) {
   try {
     if (
-      typeof setActiveMenu ===
-      "function"
+      typeof setActiveMenu === "function"
     ) {
       setActiveMenu(path);
     }
@@ -251,6 +250,139 @@ export function getViewContainer(
 }
 
 /* =========================================================
+   URL CONTEXT HELPERS
+========================================================= */
+
+function getBrowserPublicPath(
+  AppCore
+) {
+  if (!isBrowser()) {
+    return "";
+  }
+
+  try {
+    return normalizePath(
+      AppCore,
+      `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`
+    );
+  } catch {
+    return "";
+  }
+}
+
+function sameCanonicalRoute(
+  AppCore,
+  a = "/",
+  b = "/"
+) {
+  return (
+    normalizeCanonicalPath(
+      AppCore,
+      a
+    ) ===
+    normalizeCanonicalPath(
+      AppCore,
+      b
+    )
+  );
+}
+
+/**
+ * Protege query/hash del navegador si el render intenta
+ * sincronizar la misma ruta sin query.
+ *
+ * Ejemplo:
+ *   browser:   /activate-account?token=abc
+ *   candidate: /activate-account
+ *   resultado: /activate-account?token=abc
+ */
+function preserveBrowserContextForSameRoute(
+  AppCore,
+  candidatePath = "/"
+) {
+  const candidate =
+    normalizePath(
+      AppCore,
+      candidatePath || "/"
+    );
+
+  const browserPath =
+    getBrowserPublicPath(
+      AppCore
+    );
+
+  if (!browserPath) {
+    return candidate;
+  }
+
+  const candidateSuffix =
+    getSearchAndHash(
+      candidate
+    );
+
+  const browserSuffix =
+    getSearchAndHash(
+      browserPath
+    );
+
+  if (
+    browserSuffix &&
+    !candidateSuffix &&
+    sameCanonicalRoute(
+      AppCore,
+      browserPath,
+      candidate
+    )
+  ) {
+    return browserPath;
+  }
+
+  return candidate;
+}
+
+function buildCanonicalSourceWithSuffix(
+  AppCore,
+  canonicalPath = "/",
+  requestedPath = "/"
+) {
+  const finalCanonical =
+    normalizeCanonicalPath(
+      AppCore,
+      canonicalPath ||
+        requestedPath ||
+        "/"
+    );
+
+  const normalizedRequested =
+    normalizePath(
+      AppCore,
+      requestedPath ||
+        canonicalPath ||
+        finalCanonical
+    );
+
+  const requestedSuffix =
+    getSearchAndHash(
+      normalizedRequested
+    );
+
+  const canonicalSuffix =
+    getSearchAndHash(
+      canonicalPath || ""
+    );
+
+  const suffix =
+    requestedSuffix ||
+    canonicalSuffix ||
+    "";
+
+  return normalizePath(
+    AppCore,
+    `${finalCanonical}${suffix}`
+  );
+}
+
+/* =========================================================
    RESOLVERS
 ========================================================= */
 
@@ -287,17 +419,25 @@ function resolvePublicPathForRoute({
   requestedUsername = null,
   route = null,
 } = {}) {
+  const sourceForPublic =
+    buildCanonicalSourceWithSuffix(
+      AppCore,
+      canonicalPath,
+      requestedPath
+    );
+
   const finalCanonical =
     normalizeCanonicalPath(
       AppCore,
-      canonicalPath
+      sourceForPublic
     );
 
   const username =
     resolveUsernameForPayload(
       AppCore,
       requestedUsername,
-      requestedPath
+      requestedPath ||
+        sourceForPublic
     );
 
   const built =
@@ -305,18 +445,20 @@ function resolvePublicPathForRoute({
       AppCore,
       getRoute ||
         (() => route),
-      finalCanonical,
+      sourceForPublic,
       {
         username,
         fromPath:
-          requestedPath,
+          requestedPath ||
+          sourceForPublic,
       }
     );
 
   const finalPublic =
-    normalizePath(
+    preserveBrowserContextForSameRoute(
       AppCore,
       built ||
+        sourceForPublic ||
         requestedPath ||
         finalCanonical
     );
@@ -402,19 +544,22 @@ export function syncRouteState(
     );
 
   const browserPath =
-    isBrowser()
-      ? normalizePath(
-          AppCore,
-          `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`
-        )
-      : finalCanonical;
+    getBrowserPublicPath(
+      AppCore
+    ) || finalCanonical;
 
-  const finalPublic =
+  const candidatePublic =
     normalizePath(
       AppCore,
       publicPath ||
         browserPath ||
         finalCanonical
+    );
+
+  const finalPublic =
+    preserveBrowserContextForSameRoute(
+      AppCore,
+      candidatePublic
     );
 
   const username =
@@ -488,22 +633,37 @@ export function buildRouteRenderContext({
   found = true,
   forbidden = false,
 } = {}) {
+  const finalPublicPath =
+    preserveBrowserContextForSameRoute(
+      AppCore,
+      publicPath ||
+        requestedPath ||
+        canonicalPath ||
+        "/"
+    );
+
   const username =
     resolveUsernameForPayload(
       AppCore,
       requestedUsername,
-      publicPath ||
-        requestedPath
+      finalPublicPath
     );
 
   return Object.freeze({
     AppCore,
     route,
     path:
-      requestedPath,
-    requestedPath,
-    canonicalPath,
-    publicPath,
+      finalPublicPath,
+    requestedPath:
+      finalPublicPath,
+    canonicalPath:
+      normalizeCanonicalPath(
+        AppCore,
+        canonicalPath ||
+          finalPublicPath
+      ),
+    publicPath:
+      finalPublicPath,
     username,
     requestedUsername:
       username,
@@ -761,11 +921,11 @@ export async function renderRouteSuccess({
       AppCore,
       route,
       requestedPath:
-        resolved.publicPath,
+        synced.publicPath,
       canonicalPath:
-        resolved.canonicalPath,
+        synced.canonicalPath,
       requestedUsername:
-        resolved.username,
+        synced.username,
       publicPath:
         synced.publicPath,
     });
@@ -941,7 +1101,7 @@ export async function renderLoginRedirect(
           args.AppCore,
         route,
         requestedPath:
-          loginUrl,
+          synced.publicPath,
         canonicalPath:
           routeNames.LOGIN,
         publicPath:
@@ -955,7 +1115,8 @@ export async function renderLoginRedirect(
   emitRendered(
     args.AppCore,
     {
-      path: loginUrl,
+      path:
+        synced.publicPath,
       canonicalPath:
         routeNames.LOGIN,
       publicPath:

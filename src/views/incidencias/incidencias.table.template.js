@@ -16,6 +16,7 @@
    - botón "Ver detalle" ajustado al ancho del texto
    - loading de tabla suave en carga / refresh
    - acciones compatibles con data-incidencias-action y data-action
+   - pintar importe total de facturas asociadas al ticket
 
    HARDENING PRO:
    - no depende de imports externos
@@ -25,6 +26,7 @@
    - estilos encapsulados
    - responsive robusto
    - columna prioridad eliminada de tabla
+   - importe blindado contra normalizadores intermedios
 ========================================================= */
 
 /* =========================================================
@@ -349,36 +351,94 @@ function getPriorityKey(item = {}) {
   );
 }
 
-function getImporteLabel(item = {}) {
-  const amount = first(
+function getImporteAmount(item = {}) {
+  return first(
     item.total,
     item.amount,
     item.importe,
     item.price,
+
+    item.facturasTotal,
+    item.invoicesTotal,
+    item.importeFacturas,
+    item.invoiceTotal,
+
+    item.linkedInvoices?.total,
+    item.linkedInvoices?.amount,
+    item.linkedInvoices?.importe,
+
+    item.meta?.invoicesTotal,
+    item.meta?.invoiceTotal,
+
     item?.raw?.total,
     item?.raw?.amount,
     item?.raw?.importe,
-    item?.raw?.price
-  );
+    item?.raw?.price,
 
-  if (amount !== null && amount !== undefined && amount !== "") {
-    const currency = first(
+    item?.raw?.facturasTotal,
+    item?.raw?.invoicesTotal,
+    item?.raw?.importeFacturas,
+    item?.raw?.invoiceTotal,
+
+    item?.raw?.linkedInvoices?.total,
+    item?.raw?.linkedInvoices?.amount,
+    item?.raw?.linkedInvoices?.importe,
+
+    item?.raw?.meta?.invoicesTotal,
+    item?.raw?.meta?.invoiceTotal
+  );
+}
+
+function getImporteCurrency(item = {}) {
+  return safeText(
+    first(
       item.currency,
       item.moneda,
+
+      item.linkedInvoices?.currency,
+      item.linkedInvoices?.moneda,
+
+      item.meta?.invoiceCurrency,
+      item.meta?.currency,
+      item.meta?.moneda,
+
       item?.raw?.currency,
       item?.raw?.moneda,
-      "EUR"
-    );
 
-    return formatMoney(amount, currency);
+      item?.raw?.linkedInvoices?.currency,
+      item?.raw?.linkedInvoices?.moneda,
+
+      item?.raw?.meta?.invoiceCurrency,
+      item?.raw?.meta?.currency,
+      item?.raw?.meta?.moneda,
+
+      "EUR"
+    ),
+    "EUR"
+  );
+}
+
+function getImporteLabel(item = {}) {
+  const amount = getImporteAmount(item);
+
+  if (amount !== null && amount !== undefined && amount !== "") {
+    const numericAmount = Number(amount);
+
+    if (Number.isFinite(numericAmount)) {
+      return formatMoney(numericAmount, getImporteCurrency(item));
+    }
   }
 
   const pago = normalizeKey(
     first(
       item.paymentStatus,
       item.estadoPago,
+      item.linkedInvoices?.paymentStatus,
+      item.linkedInvoices?.estadoPago,
       item?.raw?.paymentStatus,
-      item?.raw?.estadoPago
+      item?.raw?.estadoPago,
+      item?.raw?.linkedInvoices?.paymentStatus,
+      item?.raw?.linkedInvoices?.estadoPago
     )
   );
 

@@ -17,6 +17,12 @@
    - no usar navegación a URL inexistente para incidencia
    - quitar "Total línea"
    - cerrar modal con botón aspa X
+
+   PATCH:
+   - extracción de incidencia alineada con facturas.template.js
+   - soporte para payloads detail más pobres que el listado
+   - soporte raw.raw / data / payload / result / factura / invoice
+   - cards fiscales dedicadas para IVA e IRPF
 ========================================================= */
 
 /* =========================================================
@@ -97,6 +103,16 @@ function formatMoney(value, currency = "EUR") {
   }
 }
 
+function formatPercent(value = 0) {
+  const n = safeNumber(value, 0);
+
+  if (!n) return "";
+
+  const clean = Number.isInteger(n) ? String(n) : String(n).replace(".", ",");
+
+  return `${clean}%`;
+}
+
 function formatDate(value) {
   if (!value) return "—";
 
@@ -166,330 +182,333 @@ function formatRelativeDate(value) {
   return formatDate(value);
 }
 
+function readPath(source = {}, path = "") {
+  const obj = safeObject(source);
+  const parts = safeText(path, "")
+    .split(".")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (!parts.length) return undefined;
+
+  let current = obj;
+
+  for (const part of parts) {
+    if (current === null || current === undefined) {
+      return undefined;
+    }
+
+    current = current?.[part];
+  }
+
+  return current;
+}
+
+function uniqueObjects(items = []) {
+  const output = [];
+  const seen = new Set();
+
+  safeArray(items).forEach((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return;
+
+    if (seen.has(item)) return;
+
+    seen.add(item);
+    output.push(item);
+  });
+
+  return output;
+}
+
+function getPayloadSources(payload = {}) {
+  const item = safeObject(payload);
+  const raw = safeObject(item.raw);
+  const rawRaw = safeObject(raw.raw);
+
+  return uniqueObjects([
+    item,
+    raw,
+    rawRaw,
+
+    safeObject(item.data),
+    safeObject(item.payload),
+    safeObject(item.result),
+    safeObject(item.item),
+    safeObject(item.factura),
+    safeObject(item.invoice),
+
+    safeObject(raw.data),
+    safeObject(raw.payload),
+    safeObject(raw.result),
+    safeObject(raw.item),
+    safeObject(raw.factura),
+    safeObject(raw.invoice),
+
+    safeObject(rawRaw.data),
+    safeObject(rawRaw.payload),
+    safeObject(rawRaw.result),
+    safeObject(rawRaw.item),
+    safeObject(rawRaw.factura),
+    safeObject(rawRaw.invoice),
+  ]);
+}
+
+function firstFromSources(sources = [], paths = []) {
+  for (const source of safeArray(sources)) {
+    for (const path of safeArray(paths)) {
+      const value = readPath(source, path);
+
+      if (value !== undefined && value !== null) {
+        if (typeof value === "string" && value.trim() === "") continue;
+        if (Array.isArray(value) && value.length === 0) continue;
+
+        return value;
+      }
+    }
+  }
+
+  return null;
+}
+
 /* =========================================================
    DOMAIN HELPERS · FACTURA
 ========================================================= */
 
 function getFacturaId(factura = {}) {
-  const item = safeObject(factura);
-  const raw = safeObject(item.raw);
+  const sources = getPayloadSources(factura);
 
   return safeText(
-    first(
-      item.id,
-      item._id,
-      item.facturaId,
-      item.invoiceId,
-      item.numero,
-      item.numeroFacturaLegal,
-      item.numeroFacturaSistema,
-
-      raw.id,
-      raw._id,
-      raw.facturaId,
-      raw.invoiceId,
-      raw.numero,
-      raw.numeroFacturaLegal,
-      raw.numeroFacturaSistema
-    ),
+    firstFromSources(sources, [
+      "id",
+      "_id",
+      "facturaId",
+      "invoiceId",
+      "numero",
+      "numeroFacturaLegal",
+      "numeroFacturaSistema",
+    ]),
     ""
   );
 }
 
 function getFacturaNumero(factura = {}) {
-  const item = safeObject(factura);
-  const raw = safeObject(item.raw);
+  const sources = getPayloadSources(factura);
 
   return safeText(
-    first(
-      item.numero,
-      item.numeroFacturaLegal,
-      item.numeroFacturaSistema,
-      item.code,
-      item.facturaCode,
-      item.invoiceNumber,
-
-      raw.numero,
-      raw.numeroFacturaLegal,
-      raw.numeroFacturaSistema,
-      raw.code,
-      raw.facturaCode,
-      raw.invoiceNumber
-    ),
+    firstFromSources(sources, [
+      "numero",
+      "numeroFacturaLegal",
+      "numeroFacturaSistema",
+      "code",
+      "facturaCode",
+      "invoiceNumber",
+      "facturaId",
+      "invoiceId",
+      "id",
+    ]),
     "—"
   );
 }
 
 function getClienteNombre(factura = {}) {
-  const item = safeObject(factura);
-  const raw = safeObject(item.raw);
+  const sources = getPayloadSources(factura);
 
   return safeText(
-    first(
-      item.cliente?.nombreContacto,
-      item.cliente?.empresa,
-      item.cliente?.razonSocial,
-      item.cliente?.nombreCompleto,
-      item.cliente?.nombre,
-      item.cliente?.name,
-      item.clienteEmpresa,
-      item.clienteNombre,
-      item.clientName,
-      item.customerName,
-
-      raw.cliente?.nombreContacto,
-      raw.cliente?.empresa,
-      raw.cliente?.razonSocial,
-      raw.cliente?.nombreCompleto,
-      raw.cliente?.nombre,
-      raw.cliente?.name,
-      raw.clienteEmpresa,
-      raw.clienteNombre,
-      raw.clientName,
-      raw.customerName
-    ),
+    firstFromSources(sources, [
+      "cliente.nombreContacto",
+      "cliente.empresa",
+      "cliente.razonSocial",
+      "cliente.nombreCompleto",
+      "cliente.nombre",
+      "cliente.name",
+      "client.name",
+      "customer.name",
+      "clienteEmpresa",
+      "clienteNombre",
+      "clientName",
+      "customerName",
+      "name",
+      "nombre",
+    ]),
     "Cliente"
   );
 }
 
 function getClienteEmail(factura = {}) {
-  const item = safeObject(factura);
-  const raw = safeObject(item.raw);
+  const sources = getPayloadSources(factura);
 
   return safeText(
-    first(
-      item.cliente?.email,
-      item.cliente?.mail,
-      item.clienteEmail,
-      item.emailCliente,
-      item.email,
-      item.clientEmail,
-      item.customerEmail,
-
-      raw.cliente?.email,
-      raw.cliente?.mail,
-      raw.clienteEmail,
-      raw.emailCliente,
-      raw.email,
-      raw.clientEmail,
-      raw.customerEmail
-    ),
+    firstFromSources(sources, [
+      "cliente.email",
+      "cliente.mail",
+      "client.email",
+      "customer.email",
+      "clienteEmail",
+      "emailCliente",
+      "email",
+      "clientEmail",
+      "customerEmail",
+    ]),
     ""
   );
 }
 
 function getFacturaFecha(factura = {}) {
-  const item = safeObject(factura);
-  const raw = safeObject(item.raw);
+  const sources = getPayloadSources(factura);
 
-  return first(
-    item.fecha,
-    item.fechaFactura,
-    item.date,
-    item.issueDate,
-    item.createdAt,
-    item.updatedAt,
-
-    raw.fecha,
-    raw.fechaFactura,
-    raw.date,
-    raw.issueDate,
-    raw.createdAt,
-    raw.updatedAt
-  );
+  return firstFromSources(sources, [
+    "fecha",
+    "fechaFactura",
+    "date",
+    "issueDate",
+    "createdAt",
+    "updatedAt",
+  ]);
 }
 
 function getFacturaUpdatedAt(factura = {}) {
-  const item = safeObject(factura);
-  const raw = safeObject(item.raw);
+  const sources = getPayloadSources(factura);
 
-  return first(
-    item.updatedAt,
-    item.fechaEnvio,
-    item.sentAt,
-    item.fecha,
-    item.createdAt,
-
-    raw.updatedAt,
-    raw.fechaEnvio,
-    raw.sentAt,
-    raw.fecha,
-    raw.createdAt
-  );
+  return firstFromSources(sources, [
+    "updatedAt",
+    "fechaEnvio",
+    "sentAt",
+    "fecha",
+    "createdAt",
+  ]);
 }
 
 function getFacturaFechaEnvio(factura = {}) {
-  const item = safeObject(factura);
-  const raw = safeObject(item.raw);
+  const sources = getPayloadSources(factura);
 
-  return first(
-    item.fechaEnvio,
-    item.sentAt,
-    item.mailSentAt,
-
-    raw.fechaEnvio,
-    raw.sentAt,
-    raw.mailSentAt
-  );
+  return firstFromSources(sources, [
+    "fechaEnvio",
+    "sentAt",
+    "mailSentAt",
+  ]);
 }
 
 function getFacturaFormaPago(factura = {}) {
-  const item = safeObject(factura);
-  const raw = safeObject(item.raw);
+  const sources = getPayloadSources(factura);
 
   return safeText(
-    first(
-      item.formaPago,
-      item.metodoPago,
-      item.paymentMethod,
-
-      raw.formaPago,
-      raw.metodoPago,
-      raw.paymentMethod
-    ),
+    firstFromSources(sources, [
+      "formaPago",
+      "metodoPago",
+      "paymentMethod",
+    ]),
     "—"
   );
 }
 
 function getFacturaMoneda(factura = {}) {
-  const item = safeObject(factura);
-  const raw = safeObject(item.raw);
+  const sources = getPayloadSources(factura);
 
   return safeText(
-    first(
-      item.moneda,
-      item.currency,
-
-      raw.moneda,
-      raw.currency
-    ),
+    firstFromSources(sources, [
+      "moneda",
+      "currency",
+    ]),
     "EUR"
   );
 }
 
 function getFacturaTotal(factura = {}) {
-  const item = safeObject(factura);
-  const raw = safeObject(item.raw);
+  const sources = getPayloadSources(factura);
 
   return safeNumber(
-    first(
-      item.total,
-      item.amount,
-      item.importe,
-      item.importeTotal,
-
-      raw.total,
-      raw.amount,
-      raw.importe,
-      raw.importeTotal
-    ),
+    firstFromSources(sources, [
+      "total",
+      "amount",
+      "importe",
+      "importeTotal",
+    ]),
     0
   );
 }
 
 function getFacturaBase(factura = {}) {
-  const item = safeObject(factura);
-  const raw = safeObject(item.raw);
+  const sources = getPayloadSources(factura);
 
   return safeNumber(
-    first(
-      item.baseImponible,
-      item.subtotal,
-      item.base,
-
-      raw.baseImponible,
-      raw.subtotal,
-      raw.base
-    ),
+    firstFromSources(sources, [
+      "baseImponible",
+      "subtotal",
+      "base",
+      "taxBase",
+      "baseAmount",
+    ]),
     0
   );
 }
 
 function getFacturaImpuestos(factura = {}) {
-  const item = safeObject(factura);
-  const raw = safeObject(item.raw);
+  const sources = getPayloadSources(factura);
 
   return safeNumber(
-    first(
-      item.impuestosTotal,
-      item.taxTotal,
-      item.totalImpuestos,
-      item.tax,
-      item.iva,
-      item.ivaImporte,
-      item.importeIva,
-
-      raw.impuestosTotal,
-      raw.taxTotal,
-      raw.totalImpuestos,
-      raw.tax,
-      raw.iva,
-      raw.ivaImporte,
-      raw.importeIva
-    ),
+    firstFromSources(sources, [
+      "impuestosTotal",
+      "taxTotal",
+      "totalImpuestos",
+      "tax",
+      "taxAmount",
+      "iva",
+      "ivaImporte",
+      "importeIva",
+      "totalIva",
+      "ivaTotal",
+    ]),
     0
   );
 }
 
 function getFacturaEnviadoA(factura = {}) {
-  const item = safeObject(factura);
-  const raw = safeObject(item.raw);
+  const sources = getPayloadSources(factura);
 
   return safeText(
-    first(
-      item.enviadoA,
-      item.sentTo,
-      item.cliente?.email,
-      item.emailCliente,
-
-      raw.enviadoA,
-      raw.sentTo,
-      raw.cliente?.email,
-      raw.emailCliente
-    ),
+    firstFromSources(sources, [
+      "enviadoA",
+      "sentTo",
+      "cliente.email",
+      "client.email",
+      "customer.email",
+      "emailCliente",
+      "clienteEmail",
+    ]),
     "—"
   );
 }
 
 function getFacturaPdfAvailable(factura = {}) {
-  const item = safeObject(factura);
-  const raw = safeObject(item.raw);
+  const sources = getPayloadSources(factura);
 
   return Boolean(
-    item.pdfAvailable ||
-      item.hasPdf ||
-      item.blobPath ||
-      item.pdfUrl ||
-      item.pdf ||
-
-      raw.pdfAvailable ||
-      raw.hasPdf ||
-      raw.blobPath ||
-      raw.pdfUrl ||
-      raw.pdf
+    firstFromSources(sources, [
+      "pdfAvailable",
+      "hasPdf",
+      "blobPath",
+      "pdfUrl",
+      "pdf",
+    ])
   );
 }
 
 function getFacturaPreview(factura = {}) {
-  const item = safeObject(factura);
-  const raw = safeObject(item.raw);
+  const sources = getPayloadSources(factura);
 
   return safeText(
-    first(
-      item.descripcion,
-      item.concepto,
-      item.preview,
-      item.description,
-      item.lineas?.[0]?.descripcion,
-      item.lineas?.[0]?.concepto,
-
-      raw.descripcion,
-      raw.concepto,
-      raw.preview,
-      raw.description,
-      raw.lineas?.[0]?.descripcion,
-      raw.lineas?.[0]?.concepto
-    ),
+    firstFromSources(sources, [
+      "descripcion",
+      "concepto",
+      "preview",
+      "description",
+      "lineas.0.descripcion",
+      "lineas.0.concepto",
+      "items.0.descripcion",
+      "items.0.concepto",
+      "conceptos.0.descripcion",
+      "conceptos.0.concepto",
+    ]),
     "Factura disponible para consulta."
   );
 }
@@ -542,89 +561,118 @@ function pickTicketIdFromArray(value = []) {
   return "";
 }
 
+function getRelationSources(factura = {}) {
+  const sources = getPayloadSources(factura);
+  const relationSources = [];
+
+  sources.forEach((source) => {
+    relationSources.push(
+      safeObject(source.incidencia),
+      safeObject(source.ticket),
+      safeObject(source.linkedTicket),
+      safeObject(source.relatedTicket),
+      safeObject(source.relatedIncident),
+      safeObject(source.supportTicket),
+      safeObject(source.case),
+      safeObject(source.meta)
+    );
+  });
+
+  return uniqueObjects([
+    ...sources,
+    ...relationSources,
+  ]);
+}
+
 function getFacturaIncidenciaId(factura = {}) {
-  const item = safeObject(factura);
-  const raw = safeObject(item.raw);
+  const sources = getRelationSources(factura);
 
-  return safeText(
-    first(
-      item.ticketId,
-      item.incidenciaId,
+  const direct = safeText(
+    firstFromSources(sources, [
+      "ticketId",
+      "incidenciaId",
 
-      item.incidencia?.ticketId,
-      item.incidencia?.id,
-      item.incidencia?.incidenciaId,
+      "incidencia.ticketId",
+      "incidencia.id",
+      "incidencia.incidenciaId",
 
-      item.ticket?.ticketId,
-      item.ticket?.id,
-      item.ticket?.incidenciaId,
+      "ticket.ticketId",
+      "ticket.id",
+      "ticket.incidenciaId",
 
-      item.linkedTicket?.ticketId,
-      item.linkedTicket?.id,
-      item.linkedTicket?.incidenciaId,
+      "linkedTicket.ticketId",
+      "linkedTicket.id",
+      "linkedTicket.incidenciaId",
 
-      item.relatedTicketId,
-      item.relatedIncidentId,
-      item.supportTicketId,
-      item.caseId,
+      "relatedTicket.ticketId",
+      "relatedTicket.id",
+      "relatedTicket.incidenciaId",
 
-      item.meta?.ticketId,
-      item.meta?.incidenciaId,
+      "relatedIncident.ticketId",
+      "relatedIncident.id",
+      "relatedIncident.incidenciaId",
 
-      pickTicketIdFromArray(item.ticketIds),
-      pickTicketIdFromArray(item.incidenciaIds),
-      pickTicketIdFromArray(item.relatedTicketIds),
-      pickTicketIdFromArray(item.relatedIncidentIds),
-      pickTicketIdFromArray(item.linkedTickets),
-      pickTicketIdFromArray(item.incidencias),
-      pickTicketIdFromArray(item.tickets),
-      pickTicketIdFromArray(item.relatedTickets),
-      pickTicketIdFromArray(item.relations),
-      pickTicketIdFromArray(item.facturasRelacionadas),
-      pickTicketIdFromArray(item.linkedInvoices?.tickets),
+      "supportTicket.ticketId",
+      "supportTicket.id",
+      "supportTicket.incidenciaId",
 
-      raw.ticketId,
-      raw.incidenciaId,
+      "relatedTicketId",
+      "relatedIncidentId",
+      "supportTicketId",
+      "caseId",
 
-      raw.incidencia?.ticketId,
-      raw.incidencia?.id,
-      raw.incidencia?.incidenciaId,
-
-      raw.ticket?.ticketId,
-      raw.ticket?.id,
-      raw.ticket?.incidenciaId,
-
-      raw.linkedTicket?.ticketId,
-      raw.linkedTicket?.id,
-      raw.linkedTicket?.incidenciaId,
-
-      raw.relatedTicketId,
-      raw.relatedIncidentId,
-      raw.supportTicketId,
-      raw.caseId,
-
-      raw.meta?.ticketId,
-      raw.meta?.incidenciaId,
-
-      pickTicketIdFromArray(raw.ticketIds),
-      pickTicketIdFromArray(raw.incidenciaIds),
-      pickTicketIdFromArray(raw.relatedTicketIds),
-      pickTicketIdFromArray(raw.relatedIncidentIds),
-      pickTicketIdFromArray(raw.linkedTickets),
-      pickTicketIdFromArray(raw.incidencias),
-      pickTicketIdFromArray(raw.tickets),
-      pickTicketIdFromArray(raw.relatedTickets),
-      pickTicketIdFromArray(raw.relations),
-      pickTicketIdFromArray(raw.facturasRelacionadas),
-      pickTicketIdFromArray(raw.linkedInvoices?.tickets)
-    ),
+      "meta.ticketId",
+      "meta.incidenciaId",
+    ]),
     ""
   );
+
+  if (direct) {
+    return direct;
+  }
+
+  for (const source of sources) {
+    const arrayCandidate = first(
+      pickTicketIdFromArray(source.ticketIds),
+      pickTicketIdFromArray(source.incidenciaIds),
+      pickTicketIdFromArray(source.relatedTicketIds),
+      pickTicketIdFromArray(source.relatedIncidentIds),
+      pickTicketIdFromArray(source.linkedTickets),
+      pickTicketIdFromArray(source.incidencias),
+      pickTicketIdFromArray(source.tickets),
+      pickTicketIdFromArray(source.relatedTickets),
+      pickTicketIdFromArray(source.relations),
+      pickTicketIdFromArray(source.facturasRelacionadas),
+      pickTicketIdFromArray(source.linkedInvoices?.tickets),
+      pickTicketIdFromArray(source.invoiceLinks),
+      pickTicketIdFromArray(source.invoiceRelations)
+    );
+
+    if (arrayCandidate) {
+      return safeText(arrayCandidate, "");
+    }
+  }
+
+  return "";
 }
 
 /* =========================================================
    DOMAIN HELPERS · LÍNEAS
 ========================================================= */
+
+function getLineas(factura = {}) {
+  const sources = getPayloadSources(factura);
+
+  const value = firstFromSources(sources, [
+    "lineas",
+    "items",
+    "conceptos",
+    "lines",
+    "invoiceLines",
+  ]);
+
+  return safeArray(value);
+}
 
 function getLineaConcepto(linea = {}) {
   return safeText(
@@ -632,7 +680,8 @@ function getLineaConcepto(linea = {}) {
       linea?.concepto,
       linea?.descripcion,
       linea?.description,
-      linea?.name
+      linea?.name,
+      linea?.title
     ),
     "Línea"
   );
@@ -778,26 +827,30 @@ function getEstadoLabel(value = "") {
   }
 }
 
+function getFacturaEstadoPagoRaw(factura = {}) {
+  const sources = getPayloadSources(factura);
+
+  return firstFromSources(sources, [
+    "estadoPago",
+    "paymentStatus",
+  ]);
+}
+
+function getFacturaEstadoRaw(factura = {}) {
+  const sources = getPayloadSources(factura);
+
+  return firstFromSources(sources, [
+    "estado",
+    "status",
+  ]);
+}
+
 function getFacturaEstadoPagoLabel(factura = {}) {
-  return getEstadoPagoLabel(
-    first(
-      factura?.estadoPago,
-      factura?.paymentStatus,
-      factura?.raw?.estadoPago,
-      factura?.raw?.paymentStatus
-    )
-  );
+  return getEstadoPagoLabel(getFacturaEstadoPagoRaw(factura));
 }
 
 function getFacturaEstadoLabel(factura = {}) {
-  return getEstadoLabel(
-    first(
-      factura?.estado,
-      factura?.status,
-      factura?.raw?.estado,
-      factura?.raw?.status
-    )
-  );
+  return getEstadoLabel(getFacturaEstadoRaw(factura));
 }
 
 function getEstadoPagoChipStyle(value = "") {
@@ -896,72 +949,154 @@ function getEstadoChipStyle(value = "") {
    IMPUESTOS
 ========================================================= */
 
-function getImpuestosBreakdown(factura = {}) {
-  const item = safeObject(factura);
-  const raw = safeObject(item.raw);
+function getTaxLines(factura = {}) {
+  const sources = getPayloadSources(factura);
 
-  const impuestos = safeArray(
-    first(
-      item.impuestos,
-      item.taxes,
-      item.taxLines,
-      item.desgloseImpuestos,
+  const value = firstFromSources(sources, [
+    "impuestos",
+    "taxes",
+    "taxLines",
+    "desgloseImpuestos",
+    "taxBreakdown",
+  ]);
 
-      raw.impuestos,
-      raw.taxes,
-      raw.taxLines,
-      raw.desgloseImpuestos
-    )
+  return safeArray(value);
+}
+
+function normalizeTaxLine(entry = {}) {
+  const impuesto = safeObject(entry);
+
+  return {
+    tipo: safeText(
+      first(
+        impuesto.tipo,
+        impuesto.nombre,
+        impuesto.name,
+        impuesto.label,
+        impuesto.code
+      ),
+      "Impuesto"
+    ),
+
+    key: normalizeText(
+      first(
+        impuesto.tipo,
+        impuesto.nombre,
+        impuesto.name,
+        impuesto.label,
+        impuesto.code
+      )
+    ),
+
+    porcentaje: safeNumber(
+      first(
+        impuesto.porcentaje,
+        impuesto.percent,
+        impuesto.rate,
+        impuesto.tipoPorcentaje
+      ),
+      0
+    ),
+
+    importe: safeNumber(
+      first(
+        impuesto.importe,
+        impuesto.amount,
+        impuesto.total,
+        impuesto.value
+      ),
+      0
+    ),
+  };
+}
+
+function getExplicitTax(factura = {}, type = "iva") {
+  const sources = getPayloadSources(factura);
+
+  if (type === "iva") {
+    const importe = safeNumber(
+      firstFromSources(sources, [
+        "ivaImporte",
+        "importeIva",
+        "totalIva",
+        "ivaTotal",
+        "ivaAmount",
+        "tax",
+        "taxAmount",
+        "iva",
+      ]),
+      0
+    );
+
+    const porcentaje = safeNumber(
+      firstFromSources(sources, [
+        "ivaPorcentaje",
+        "porcentajeIva",
+        "ivaRate",
+        "taxRate",
+      ]),
+      0
+    );
+
+    if (importe || porcentaje) {
+      return {
+        tipo: "IVA",
+        porcentaje,
+        importe,
+      };
+    }
+
+    return null;
+  }
+
+  const importe = safeNumber(
+    firstFromSources(sources, [
+      "irpfImporte",
+      "importeIrpf",
+      "totalIrpf",
+      "irpfTotal",
+      "irpfAmount",
+      "retencion",
+      "retencionIrpf",
+      "withholding",
+      "withholdingAmount",
+      "irpf",
+    ]),
+    0
   );
+
+  const porcentaje = safeNumber(
+    firstFromSources(sources, [
+      "irpfPorcentaje",
+      "porcentajeIrpf",
+      "irpfRate",
+      "retencionPorcentaje",
+      "withholdingRate",
+    ]),
+    0
+  );
+
+  if (importe || porcentaje) {
+    return {
+      tipo: "IRPF",
+      porcentaje,
+      importe,
+    };
+  }
+
+  return null;
+}
+
+function getImpuestosBreakdown(factura = {}) {
+  const impuestos = getTaxLines(factura);
 
   let iva = null;
   let irpf = null;
   const otros = [];
 
   impuestos.forEach((entry) => {
-    const impuesto = safeObject(entry);
-
-    const tipo = normalizeText(
-      first(
-        impuesto.tipo,
-        impuesto.nombre,
-        impuesto.name,
-        impuesto.code,
-        impuesto.label
-      )
-    );
-
-    const normalized = {
-      tipo: safeText(
-        first(
-          impuesto.tipo,
-          impuesto.nombre,
-          impuesto.name,
-          impuesto.label
-        ),
-        "Impuesto"
-      ),
-
-      porcentaje: safeNumber(
-        first(
-          impuesto.porcentaje,
-          impuesto.percent,
-          impuesto.rate,
-          impuesto.tipoPorcentaje
-        ),
-        0
-      ),
-
-      importe: safeNumber(
-        first(
-          impuesto.importe,
-          impuesto.amount,
-          impuesto.total,
-          impuesto.value
-        ),
-        0
-      ),
-    };
+    const normalized = normalizeTaxLine(entry);
+    const tipo = normalized.key;
 
     if (tipo.includes("iva") || tipo.includes("vat")) {
       iva = normalized;
@@ -981,122 +1116,21 @@ function getImpuestosBreakdown(factura = {}) {
     otros.push(normalized);
   });
 
-  const ivaImporte = safeNumber(
-    first(
-      item.ivaImporte,
-      item.importeIva,
-      item.totalIva,
-      item.ivaTotal,
-      item.ivaAmount,
-      item.tax,
-      item.taxAmount,
-      item.iva,
-
-      raw.ivaImporte,
-      raw.importeIva,
-      raw.totalIva,
-      raw.ivaTotal,
-      raw.ivaAmount,
-      raw.tax,
-      raw.taxAmount,
-      raw.iva
-    ),
-    0
-  );
-
-  const ivaPorcentaje = safeNumber(
-    first(
-      item.ivaPorcentaje,
-      item.porcentajeIva,
-      item.ivaRate,
-      item.taxRate,
-
-      raw.ivaPorcentaje,
-      raw.porcentajeIva,
-      raw.ivaRate,
-      raw.taxRate
-    ),
-    0
-  );
-
-  if (!iva && ivaImporte) {
-    iva = {
-      tipo: "IVA",
-      porcentaje: ivaPorcentaje,
-      importe: ivaImporte,
-    };
+  if (!iva) {
+    iva = getExplicitTax(factura, "iva");
   }
 
-  const irpfImporte = safeNumber(
-    first(
-      item.irpfImporte,
-      item.importeIrpf,
-      item.totalIrpf,
-      item.irpfTotal,
-      item.irpfAmount,
-      item.retencion,
-      item.retencionIrpf,
-      item.withholding,
-      item.withholdingAmount,
-      item.irpf,
-
-      raw.irpfImporte,
-      raw.importeIrpf,
-      raw.totalIrpf,
-      raw.irpfTotal,
-      raw.irpfAmount,
-      raw.retencion,
-      raw.retencionIrpf,
-      raw.withholding,
-      raw.withholdingAmount,
-      raw.irpf
-    ),
-    0
-  );
-
-  const irpfPorcentaje = safeNumber(
-    first(
-      item.irpfPorcentaje,
-      item.porcentajeIrpf,
-      item.irpfRate,
-      item.retencionPorcentaje,
-      item.withholdingRate,
-
-      raw.irpfPorcentaje,
-      raw.porcentajeIrpf,
-      raw.irpfRate,
-      raw.retencionPorcentaje,
-      raw.withholdingRate
-    ),
-    0
-  );
-
-  if (!irpf && irpfImporte) {
-    irpf = {
-      tipo: "IRPF",
-      porcentaje: irpfPorcentaje,
-      importe: irpfImporte,
-    };
+  if (!irpf) {
+    irpf = getExplicitTax(factura, "irpf");
   }
 
-  const impuestosTotal = safeNumber(
-    first(
-      item.impuestosTotal,
-      item.taxTotal,
-      item.totalImpuestos,
+  const totalFallback = getFacturaImpuestos(factura);
 
-      raw.impuestosTotal,
-      raw.taxTotal,
-      raw.totalImpuestos
-    ),
-    0
-  );
-
-  if (!iva && !irpf && !otros.length && impuestosTotal) {
+  if (!iva && !irpf && !otros.length && totalFallback) {
     otros.push({
       tipo: "Impuestos",
       porcentaje: 0,
-      importe: impuestosTotal,
+      importe: totalFallback,
     });
   }
 
@@ -1188,6 +1222,67 @@ function stat(label = "", value = "") {
       >
         ${escapeHtml(value)}
       </strong>
+    </article>
+  `;
+}
+
+function taxCard(label = "", tax = null, moneda = "EUR") {
+  const item = safeObject(tax);
+  const porcentaje = formatPercent(item.porcentaje);
+  const caption = porcentaje ? `${label} · ${porcentaje}` : label;
+
+  return `
+    <article
+      style="
+        display:grid;
+        gap:8px;
+        min-height:104px;
+        padding:16px;
+        border-radius:18px;
+        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft));
+        background:
+          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 7%, transparent), transparent),
+          var(--surface-1, var(--surface-glass));
+      "
+    >
+      <span
+        style="
+          font-size:11px;
+          color:var(--text-faint);
+          text-transform:uppercase;
+          letter-spacing:.05em;
+          font-weight:800;
+        "
+      >
+        ${escapeHtml(caption)}
+      </span>
+
+      <strong
+        style="
+          font-size:25px;
+          line-height:1.05;
+          color:var(--text-strong);
+          word-break:break-word;
+        "
+      >
+        ${escapeHtml(formatMoney(item.importe, moneda))}
+      </strong>
+
+      ${
+        porcentaje
+          ? `
+            <span
+              style="
+                color:var(--text-dim);
+                font-size:12px;
+                line-height:1.35;
+              "
+            >
+              Tipo aplicado: ${escapeHtml(porcentaje)}
+            </span>
+          `
+          : ""
+      }
     </article>
   `;
 }
@@ -1316,6 +1411,7 @@ function renderAvatar(factura = {}) {
 
 function renderIncidenciaMini(factura = {}) {
   const incidenciaId = getFacturaIncidenciaId(factura);
+  const facturaId = getFacturaId(factura);
 
   if (!incidenciaId) {
     return mini("Incidencia", "Sin vincular");
@@ -1349,6 +1445,7 @@ function renderIncidenciaMini(factura = {}) {
         data-action="open-incidencia"
         data-ticket-id="${escapeHtml(incidenciaId)}"
         data-incidencia-id="${escapeHtml(incidenciaId)}"
+        data-factura-id="${escapeHtml(facturaId)}"
         style="
           justify-self:start;
           max-width:100%;
@@ -1556,30 +1653,15 @@ function renderImpuestosSection(factura = {}) {
   const cards = [];
 
   if (breakdown.iva) {
-    cards.push(
-      stat(
-        `IVA${breakdown.iva.porcentaje ? ` (${breakdown.iva.porcentaje}%)` : ""}`,
-        formatMoney(breakdown.iva.importe, moneda)
-      )
-    );
+    cards.push(taxCard("IVA", breakdown.iva, moneda));
   }
 
   if (breakdown.irpf) {
-    cards.push(
-      stat(
-        `IRPF${breakdown.irpf.porcentaje ? ` (${breakdown.irpf.porcentaje}%)` : ""}`,
-        formatMoney(breakdown.irpf.importe, moneda)
-      )
-    );
+    cards.push(taxCard("IRPF / Retención", breakdown.irpf, moneda));
   }
 
   breakdown.otros.forEach((item) => {
-    cards.push(
-      stat(
-        `${item.tipo}${item.porcentaje ? ` (${item.porcentaje}%)` : ""}`,
-        formatMoney(item.importe, moneda)
-      )
-    );
+    cards.push(taxCard(item.tipo, item, moneda));
   });
 
   return renderSectionCard({
@@ -1591,7 +1673,7 @@ function renderImpuestosSection(factura = {}) {
           class="facturas-detail-tax-grid"
           style="
             display:grid;
-            grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));
+            grid-template-columns:repeat(auto-fit, minmax(190px, 1fr));
             gap:12px;
           "
         >
@@ -1708,18 +1790,7 @@ function renderLineaItem(linea = {}, moneda = "EUR") {
 }
 
 function renderLineasSection(factura = {}) {
-  const lineas = safeArray(
-    first(
-      factura?.lineas,
-      factura?.items,
-      factura?.conceptos,
-
-      factura?.raw?.lineas,
-      factura?.raw?.items,
-      factura?.raw?.conceptos
-    )
-  );
-
+  const lineas = getLineas(factura);
   const moneda = getFacturaMoneda(factura);
 
   return renderSectionCard({
@@ -1883,26 +1954,12 @@ export function renderFacturasDetailContent({
 
                 ${chip(
                   getFacturaEstadoPagoLabel(factura),
-                  getEstadoPagoChipStyle(
-                    first(
-                      factura?.estadoPago,
-                      factura?.paymentStatus,
-                      factura?.raw?.estadoPago,
-                      factura?.raw?.paymentStatus
-                    )
-                  )
+                  getEstadoPagoChipStyle(getFacturaEstadoPagoRaw(factura))
                 )}
 
                 ${chip(
                   getFacturaEstadoLabel(factura),
-                  getEstadoChipStyle(
-                    first(
-                      factura?.estado,
-                      factura?.status,
-                      factura?.raw?.estado,
-                      factura?.raw?.status
-                    )
-                  )
+                  getEstadoChipStyle(getFacturaEstadoRaw(factura))
                 )}
               </div>
 

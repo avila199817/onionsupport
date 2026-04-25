@@ -20,13 +20,16 @@
    - priorizar init() sobre render() en vistas objeto
    - canonical paths estrictos
    - meta auth consistente con guards
+   - soporte público para activación de cuenta
 ========================================================= */
 
 import { I18n } from "../i18n/index.js";
 
 import { LoginView } from "../views/login/index.js";
+import { ActivateAccountView } from "../views/activate-account/index.js";
 import { ResetPasswordView } from "../views/password-reset/index.js";
 import { ConfirmResetPasswordView } from "../views/password-reset/confirm/index.js";
+
 import { HomeView } from "../views/home/index.js";
 import { IncidenciasView } from "../views/incidencias/index.js";
 import { FacturasView } from "../views/facturas/index.js";
@@ -77,6 +80,7 @@ function safeRun(fn) {
         "[Router Route Error]",
         error
       );
+
       throw error;
     }
   };
@@ -173,12 +177,15 @@ function normalizeMeta(
   const publicRoute =
     definition.public === true;
 
+  const normalizedPath =
+    normalizeRoutePath(
+      definition.path || "/"
+    );
+
   const guestOnly =
     publicRoute &&
     definition.hideShell === true &&
-    normalizeRoutePath(
-      definition.path || "/"
-    ) === "/login";
+    normalizedPath === "/login";
 
   const roles =
     normalizeRoles(
@@ -192,19 +199,26 @@ function normalizeMeta(
     order: Number(
       definition.order || 0
     ),
+
     source:
       definition.source ||
       "router:routes",
+
     requiresAuth,
+
     private:
       requiresAuth,
+
     guestOnly:
       definition.guestOnly === true ||
       guestOnly,
+
     publicOnly:
       definition.guestOnly === true ||
       guestOnly,
+
     roles,
+
     allowRoles: roles,
   });
 }
@@ -283,6 +297,7 @@ function createRoute(
     {
       enumerable: true,
       configurable: false,
+
       get() {
         return resolveRouteTitle(
           route
@@ -384,6 +399,11 @@ const renderServidorView =
 const renderLoginView =
   createViewAdapter(
     LoginView
+  );
+
+const renderActivateAccountView =
+  createViewAdapter(
+    ActivateAccountView
   );
 
 const renderResetPasswordView =
@@ -539,7 +559,8 @@ export function createRoutes() {
     createRoute({
       path:
         "/login",
-      name: "login",
+      name:
+        "login",
       titleKey:
         "routes.login",
       titleFallback:
@@ -555,6 +576,24 @@ export function createRoutes() {
 
     createRoute({
       path:
+        "/activate-account",
+      name:
+        "activate-account",
+      titleKey:
+        "routes.activateAccount",
+      titleFallback:
+        "Activar cuenta",
+      public: true,
+      roles: [],
+      hideShell: true,
+      guestOnly: false,
+      order: 1005,
+      render:
+        renderActivateAccountView,
+    }),
+
+    createRoute({
+      path:
         "/reset-password",
       name:
         "reset-password",
@@ -565,6 +604,7 @@ export function createRoutes() {
       public: true,
       roles: [],
       hideShell: true,
+      guestOnly: false,
       order: 1010,
       render:
         renderResetPasswordView,
@@ -582,6 +622,7 @@ export function createRoutes() {
       public: true,
       roles: [],
       hideShell: true,
+      guestOnly: false,
       order: 1020,
       render:
         renderConfirmResetPasswordView,
@@ -627,11 +668,14 @@ export function validateRoutesTable(
 
   const seen =
     new Set();
+
   const seenNames =
     new Set();
+
   const allowedPublicAuthRoutes =
     new Set([
       "/login",
+      "/activate-account",
       "/reset-password",
       "/reset-password/confirm",
     ]);
@@ -793,6 +837,7 @@ export function validateRoutesTable(
       seen.add(
         normalizedPath
       );
+
       seenNames.add(
         normalizedName
       );
@@ -801,6 +846,10 @@ export function validateRoutesTable(
 
   return true;
 }
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
 export default {
   createRoutes,

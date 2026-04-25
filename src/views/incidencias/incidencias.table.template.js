@@ -2,7 +2,7 @@
    Onion SPA - Incidencias Table Template
    Archivo: src/views/incidencias/incidencias.table.template.js
 
-   FINAL PRODUCTION TEMPLATE · LIST VIEW · SOFT APPLE MODE
+   FINAL PRODUCTION TEMPLATE · LIST VIEW · SOFT APPLE MODE · 10/10
 
    RESPONSABILIDADES:
    - render del hero/header de incidencias
@@ -10,10 +10,20 @@
    - compatibilidad con IncidenciasView.js
    - estado loading visual en "Ver detalle"
    - estado loading visual en "Crear nueva incidencia"
-   - título más compacto para caber en una línea
+   - estado loading visual en refresh / retry / export
+   - título compacto y responsive
    - fechas siempre en una sola línea
    - botón "Ver detalle" ajustado al ancho del texto
    - loading de tabla suave en carga / refresh
+   - acciones compatibles con data-incidencias-action y data-action
+
+   HARDENING PRO:
+   - no depende de imports externos
+   - tolera payload heterogéneo
+   - soporta state + props directas
+   - paginación defensiva
+   - estilos encapsulados
+   - responsive robusto
 ========================================================= */
 
 /* =========================================================
@@ -22,7 +32,9 @@
 
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
+
   const text = String(value).trim();
+
   return text || fallback;
 }
 
@@ -43,13 +55,13 @@ function safeObject(value) {
 
 function first(...values) {
   for (const value of values) {
-    if (
-      value !== undefined &&
-      value !== null &&
-      String(value).trim() !== ""
-    ) {
-      return value;
+    if (value === undefined || value === null) continue;
+
+    if (typeof value === "string" && value.trim() === "") {
+      continue;
     }
+
+    return value;
   }
 
   return null;
@@ -66,6 +78,15 @@ function escapeHtml(value = "") {
 
 function normalizeWhitespace(value = "") {
   return safeText(value, "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeKey(value = "") {
+  return safeText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .trim();
 }
 
 function formatMoney(value = 0, currency = "EUR") {
@@ -122,11 +143,13 @@ function formatRelativeDate(value = null) {
   }
 
   const diffHours = Math.round(absMin / 60);
+
   if (diffHours < 24) {
     return diffMin > 0 ? `En ${diffHours} h` : `Hace ${diffHours} h`;
   }
 
   const diffDays = Math.round(diffHours / 24);
+
   if (diffDays <= 7) {
     return diffMin > 0
       ? `En ${diffDays} día${diffDays === 1 ? "" : "s"}`
@@ -151,16 +174,22 @@ function formatLastUpdate(value = null) {
   return formatDateTime(value);
 }
 
+/* =========================================================
+   DATA PICKERS
+========================================================= */
+
 function getTicketId(item = {}) {
   return safeText(
     first(
       item.ticketId,
       item.code,
       item.numero,
+      item.ticketCode,
       item.id,
       item?.raw?.ticketId,
       item?.raw?.code,
       item?.raw?.numero,
+      item?.raw?.ticketCode,
       item?.raw?.id
     ),
     "INC-SIN-ID"
@@ -190,10 +219,12 @@ function getDescription(item = {}) {
       item.preview,
       item.message,
       item.descripcion,
+      item.body,
       item?.raw?.description,
       item?.raw?.preview,
       item?.raw?.message,
-      item?.raw?.descripcion
+      item?.raw?.descripcion,
+      item?.raw?.body
     ),
     "Sin descripción."
   );
@@ -207,11 +238,17 @@ function getClientName(item = {}) {
       item.cliente?.nombre,
       item.cliente?.name,
       item.client?.name,
+      item.customer?.name,
+      item.receptor?.name,
+      item.createdBy?.name,
       item?.raw?.clientName,
       item?.raw?.name,
       item?.raw?.cliente?.nombre,
       item?.raw?.cliente?.name,
-      item?.raw?.client?.name
+      item?.raw?.client?.name,
+      item?.raw?.customer?.name,
+      item?.raw?.receptor?.name,
+      item?.raw?.createdBy?.name
     ),
     getSubject(item)
   );
@@ -227,9 +264,15 @@ function getAvatarUrl(item = {}) {
       item.cliente?.avatarUrl,
       item.client?.avatar,
       item.client?.avatarUrl,
+      item.customer?.avatar,
+      item.customer?.avatarUrl,
       item?.raw?.clientAvatar,
       item?.raw?.avatar,
-      item?.raw?.avatarUrl
+      item?.raw?.avatarUrl,
+      item?.raw?.cliente?.avatar,
+      item?.raw?.cliente?.avatarUrl,
+      item?.raw?.client?.avatar,
+      item?.raw?.client?.avatarUrl
     ),
     ""
   );
@@ -237,6 +280,7 @@ function getAvatarUrl(item = {}) {
 
 function getInitials(value = "") {
   const text = normalizeWhitespace(value);
+
   if (!text) return "ON";
 
   const parts = text.split(" ").filter(Boolean);
@@ -245,18 +289,33 @@ function getInitials(value = "") {
     return parts[0].slice(0, 2).toUpperCase();
   }
 
-  return `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase();
+  return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || "ON";
 }
 
 function getStatusKey(value = "") {
-  const key = safeText(value, "").toLowerCase();
+  const key = normalizeKey(value);
 
   if (["pending", "pendiente"].includes(key)) return "pending";
   if (["open", "abierta", "abierto"].includes(key)) return "open";
-  if (["progress", "in_progress", "in-progress", "en proceso", "en_proceso"].includes(key)) return "progress";
+
+  if (
+    [
+      "progress",
+      "in_progress",
+      "inprogress",
+      "en_proceso",
+      "proceso",
+    ].includes(key)
+  ) {
+    return "progress";
+  }
+
   if (["resolved", "resuelta", "resuelto"].includes(key)) return "resolved";
   if (["closed", "cerrada", "cerrado"].includes(key)) return "closed";
-  if (["cancelled", "cancelada", "cancelado"].includes(key)) return "closed";
+
+  if (["cancelled", "cancelada", "cancelado"].includes(key)) {
+    return "closed";
+  }
 
   return "pending";
 }
@@ -273,6 +332,31 @@ function getStatusLabel(value = "") {
   return safeText(value, "Pendiente");
 }
 
+function getPriorityKey(item = {}) {
+  return normalizeKey(
+    first(
+      item.priority,
+      item.prioridad,
+      item?.raw?.priority,
+      item?.raw?.prioridad,
+      "medium"
+    )
+  );
+}
+
+function getPriorityLabel(item = {}) {
+  const key = getPriorityKey(item);
+
+  if (["low", "baja"].includes(key)) return "Baja";
+  if (["high", "alta"].includes(key)) return "Alta";
+
+  if (["urgent", "urgente", "critical", "critica"].includes(key)) {
+    return "Urgente";
+  }
+
+  return "Media";
+}
+
 function getImporteLabel(item = {}) {
   const amount = first(
     item.total,
@@ -281,7 +365,8 @@ function getImporteLabel(item = {}) {
     item.price,
     item?.raw?.total,
     item?.raw?.amount,
-    item?.raw?.importe
+    item?.raw?.importe,
+    item?.raw?.price
   );
 
   if (amount !== null && amount !== undefined && amount !== "") {
@@ -296,31 +381,32 @@ function getImporteLabel(item = {}) {
     return formatMoney(amount, currency);
   }
 
-  const pago = safeText(
+  const pago = normalizeKey(
     first(
       item.paymentStatus,
       item.estadoPago,
       item?.raw?.paymentStatus,
       item?.raw?.estadoPago
-    ),
-    ""
-  ).toLowerCase();
+    )
+  );
 
   if (["paid", "pagada", "pagado", "cobrada"].includes(pago)) return "Pagado";
   if (["pending", "pendiente"].includes(pago)) return "Pendiente";
   if (["partial", "parcial"].includes(pago)) return "Parcial";
   if (["overdue", "vencida"].includes(pago)) return "Vencido";
 
-  return "Pendiente";
+  return "—";
 }
 
 function getCreatedAt(item = {}) {
   return first(
     item.createdAt,
     item.fechaCreacion,
+    item.createdAtES,
     item.date,
     item?.raw?.createdAt,
     item?.raw?.fechaCreacion,
+    item?.raw?.createdAtES,
     item?.raw?.date
   );
 }
@@ -330,10 +416,39 @@ function getUpdatedAt(item = {}) {
     item.updatedAt,
     item.lastUpdateAt,
     item.ultimaNovedad,
+    item.modifiedAt,
+    item.closedAt,
+    item.createdAt,
     item?.raw?.updatedAt,
     item?.raw?.lastUpdateAt,
     item?.raw?.ultimaNovedad,
+    item?.raw?.modifiedAt,
+    item?.raw?.closedAt,
     item?.raw?.createdAt
+  );
+}
+
+function getAttachmentsCount(item = {}) {
+  const attachments = first(
+    item.attachments,
+    item.files,
+    item.adjuntos,
+    item?.raw?.attachments,
+    item?.raw?.files,
+    item?.raw?.adjuntos
+  );
+
+  if (Array.isArray(attachments)) return attachments.length;
+
+  return safeNumber(
+    first(
+      item.attachmentsCount,
+      item.filesCount,
+      item?.raw?.attachmentsCount,
+      item?.raw?.filesCount,
+      0
+    ),
+    0
   );
 }
 
@@ -363,6 +478,16 @@ function isOpenLike(item = {}) {
   );
 }
 
+function isUrgentLike(item = {}) {
+  return ["urgent", "urgente", "critical", "critica"].includes(
+    getPriorityKey(item)
+  );
+}
+
+/* =========================================================
+   STATS / PAGINATION
+========================================================= */
+
 function computeStats(items = []) {
   const rows = safeArray(items);
 
@@ -370,22 +495,38 @@ function computeStats(items = []) {
     total: rows.length,
     openCount: rows.filter((item) => isOpenLike(item)).length,
     closedCount: rows.filter((item) => isClosedLike(item)).length,
+    urgentCount: rows.filter((item) => isUrgentLike(item)).length,
+    attachmentsCount: rows.reduce(
+      (sum, item) => sum + getAttachmentsCount(item),
+      0
+    ),
   };
 }
 
-function getPagination(items = [], state = {}) {
+function getPagination(items = [], input = {}) {
   const allItems = safeArray(items);
-  const runtime = safeObject(state);
+  const data = safeObject(input);
+  const runtime = safeObject(data.state);
 
   const pageSize = Math.max(
     1,
-    safeNumber(first(runtime.pageSize, runtime.limit, 5), 5)
+    safeNumber(
+      first(
+        data.pageSize,
+        runtime.pageSize,
+        runtime.limit,
+        5
+      ),
+      5
+    )
   );
 
   const reportedTotal = Math.max(
     allItems.length,
     safeNumber(
       first(
+        data.totalCount,
+        data.remoteCount,
         runtime.totalCount,
         runtime.remoteCount,
         runtime.total,
@@ -395,20 +536,31 @@ function getPagination(items = [], state = {}) {
     )
   );
 
+  const totalPagesFromProps = safeNumber(
+    first(data.totalPages, runtime.totalPages),
+    0
+  );
+
   const totalPages = Math.max(
     1,
-    Math.ceil((reportedTotal || 1) / pageSize)
+    totalPagesFromProps || Math.ceil((reportedTotal || 1) / pageSize)
   );
 
   const currentPage = Math.min(
-    Math.max(1, safeNumber(first(runtime.page, runtime.currentPage, 1), 1)),
+    Math.max(
+      1,
+      safeNumber(
+        first(data.page, runtime.page, runtime.currentPage, 1),
+        1
+      )
+    ),
     totalPages
   );
 
   const startIndex = (currentPage - 1) * pageSize;
   const pageItems = allItems.slice(startIndex, startIndex + pageSize);
 
-  const rangeStart = reportedTotal ? startIndex + 1 : 0;
+  const rangeStart = reportedTotal && pageItems.length ? startIndex + 1 : 0;
   const rangeEnd = reportedTotal
     ? Math.min(startIndex + pageItems.length, reportedTotal)
     : 0;
@@ -422,6 +574,8 @@ function getPagination(items = [], state = {}) {
     totalCount: reportedTotal,
     rangeStart,
     rangeEnd,
+    hasPrev: currentPage > 1,
+    hasNext: currentPage < totalPages,
   };
 }
 
@@ -491,6 +645,17 @@ function renderStatusChip(item = {}) {
   `;
 }
 
+function renderPriorityChip(item = {}) {
+  const key = getPriorityKey(item);
+  const label = getPriorityLabel(item);
+
+  return `
+    <span class="incidencias-priority incidencias-priority--${escapeHtml(key)}">
+      ${escapeHtml(label)}
+    </span>
+  `;
+}
+
 function renderImporteChip(item = {}) {
   const label = getImporteLabel(item);
   const isMoney = /€|EUR|\$|USD/i.test(label);
@@ -509,6 +674,7 @@ function renderRow(item = {}, state = {}) {
   const description = getDescription(item);
   const createdAt = formatDateTime(getCreatedAt(item));
   const updatedAt = formatLastUpdate(getUpdatedAt(item));
+  const attachmentsCount = getAttachmentsCount(item);
 
   const openingTicketId = safeText(runtime.openingTicketId, "");
   const isOpening = openingTicketId === ticketId;
@@ -531,6 +697,10 @@ function renderRow(item = {}, state = {}) {
         ${renderStatusChip(item)}
       </td>
 
+      <td class="incidencias-cell incidencias-cell--priority">
+        ${renderPriorityChip(item)}
+      </td>
+
       <td class="incidencias-cell incidencias-cell--date">
         <span class="incidencias-date-inline">${escapeHtml(createdAt)}</span>
       </td>
@@ -543,10 +713,17 @@ function renderRow(item = {}, state = {}) {
         ${renderImporteChip(item)}
       </td>
 
+      <td class="incidencias-cell incidencias-cell--attachments">
+        <span class="incidencias-attachments-pill">
+          ${escapeHtml(String(attachmentsCount))}
+        </span>
+      </td>
+
       <td class="incidencias-cell incidencias-cell--actions">
         <button
           type="button"
           class="incidencias-detail-btn${isOpening ? " is-loading" : ""}"
+          data-incidencias-action="detail"
           data-action="open-ticket"
           data-ticket-id="${escapeHtml(ticketId)}"
           ${isOpening ? 'disabled aria-busy="true"' : ""}
@@ -562,13 +739,38 @@ function renderRow(item = {}, state = {}) {
   `;
 }
 
-function renderEmptyState() {
+function renderEmptyState({ hasError = false } = {}) {
   return `
     <div class="incidencias-empty">
-      <h3 class="incidencias-empty-title">No hay incidencias para mostrar</h3>
+      <h3 class="incidencias-empty-title">
+        ${
+          hasError
+            ? "No se pudieron cargar las incidencias"
+            : "No hay incidencias para mostrar"
+        }
+      </h3>
       <p class="incidencias-empty-text">
-        Cuando haya solicitudes registradas aparecerán aquí.
+        ${
+          hasError
+            ? "Puedes reintentar la carga desde el botón de actualizar."
+            : "Cuando haya solicitudes registradas aparecerán aquí."
+        }
       </p>
+
+      ${
+        hasError
+          ? `
+            <button
+              type="button"
+              class="incidencias-btn"
+              data-incidencias-action="retry"
+              data-action="retry"
+            >
+              Reintentar
+            </button>
+          `
+          : ""
+      }
     </div>
   `;
 }
@@ -587,8 +789,10 @@ function renderTableLoading(rows = 5) {
                 <div class="incidencias-skeleton incidencias-skeleton--md"></div>
               </div>
               <div class="incidencias-skeleton incidencias-skeleton--pill"></div>
+              <div class="incidencias-skeleton incidencias-skeleton--pill"></div>
               <div class="incidencias-skeleton incidencias-skeleton--date"></div>
               <div class="incidencias-skeleton incidencias-skeleton--date"></div>
+              <div class="incidencias-skeleton incidencias-skeleton--pill"></div>
               <div class="incidencias-skeleton incidencias-skeleton--pill"></div>
               <div class="incidencias-skeleton incidencias-skeleton--btn"></div>
             </div>
@@ -598,6 +802,20 @@ function renderTableLoading(rows = 5) {
     </div>
   `;
 }
+
+function renderRefreshOverlay() {
+  return `
+    <div class="incidencias-refresh-overlay" aria-live="polite">
+      <div class="incidencias-refresh-card">
+        ${renderSpinner("Actualizando historial...")}
+      </div>
+    </div>
+  `;
+}
+
+/* =========================================================
+   STYLES
+========================================================= */
 
 function renderStyles() {
   return `
@@ -710,6 +928,7 @@ function renderStyles() {
       .incidencias-btn:disabled,
       .incidencias-detail-btn:disabled{
         pointer-events:none;
+        opacity:.72;
       }
 
       .incidencias-hero-meta{
@@ -739,14 +958,14 @@ function renderStyles() {
       .incidencias-stats{
         margin-top:16px;
         display:grid;
-        grid-template-columns:repeat(2, minmax(0, 280px));
+        grid-template-columns:repeat(4, minmax(0, 1fr));
         gap:12px;
       }
 
       .incidencias-stat-card{
         display:grid;
         gap:8px;
-        min-height:124px;
+        min-height:122px;
         padding:16px 18px;
         border-radius:20px;
         border:1px solid rgba(15,23,42,.06);
@@ -764,6 +983,10 @@ function renderStyles() {
         border-color:color-mix(in srgb, var(--success-strong, #36c690) 18%, rgba(15,23,42,.06));
       }
 
+      .incidencias-stat-card--urgent{
+        border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 18%, rgba(15,23,42,.06));
+      }
+
       .incidencias-stat-label{
         font-size:11px;
         font-weight:760;
@@ -773,7 +996,7 @@ function renderStyles() {
       }
 
       .incidencias-stat-value{
-        font-size:42px;
+        font-size:40px;
         line-height:.92;
         letter-spacing:-.045em;
         font-weight:780;
@@ -781,7 +1004,7 @@ function renderStyles() {
       }
 
       .incidencias-stat-text{
-        font-size:14px;
+        font-size:13px;
         line-height:1.45;
         color:var(--text-dim, #6b7280);
       }
@@ -863,15 +1086,17 @@ function renderStyles() {
       .incidencias-pagination-btn[aria-disabled="true"]{
         opacity:.48;
         cursor:not-allowed;
+        pointer-events:none;
       }
 
       .incidencias-table-wrap{
         position:relative;
+        min-height:120px;
       }
 
       .incidencias-table-wrap.is-refreshing .incidencias-table-shell{
-        opacity:.58;
-        filter:blur(.8px);
+        opacity:.56;
+        filter:blur(.7px);
         transition:opacity .18s ease, filter .18s ease;
       }
 
@@ -886,7 +1111,7 @@ function renderStyles() {
         width:100%;
         border-collapse:separate;
         border-spacing:0;
-        min-width:1120px;
+        min-width:1240px;
       }
 
       .incidencias-table thead th{
@@ -1006,7 +1231,8 @@ function renderStyles() {
         white-space:nowrap;
       }
 
-      .incidencias-chip{
+      .incidencias-chip,
+      .incidencias-priority{
         min-height:32px;
         padding:0 12px;
         border-radius:999px;
@@ -1046,6 +1272,28 @@ function renderStyles() {
         border-color:rgba(54,198,144,.22);
       }
 
+      .incidencias-priority{
+        color:#64748b;
+        background:rgba(15,23,42,.035);
+        border-color:rgba(15,23,42,.06);
+      }
+
+      .incidencias-priority--high,
+      .incidencias-priority--alta{
+        color:#a16207;
+        background:rgba(255,188,66,.10);
+        border-color:rgba(255,188,66,.22);
+      }
+
+      .incidencias-priority--urgent,
+      .incidencias-priority--urgente,
+      .incidencias-priority--critical,
+      .incidencias-priority--critica{
+        color:#b42318;
+        background:rgba(255,107,107,.10);
+        border-color:rgba(255,107,107,.22);
+      }
+
       .incidencias-date-inline{
         display:inline-block;
         white-space:nowrap;
@@ -1056,7 +1304,8 @@ function renderStyles() {
         color:#344054;
       }
 
-      .incidencias-importe{
+      .incidencias-importe,
+      .incidencias-attachments-pill{
         display:inline-flex;
         align-items:center;
         justify-content:center;
@@ -1079,6 +1328,13 @@ function renderStyles() {
         color:#8590a3;
         background:rgba(15,23,42,.025);
         border-color:rgba(15,23,42,.05);
+      }
+
+      .incidencias-attachments-pill{
+        min-width:32px;
+        color:#64748b;
+        background:rgba(15,23,42,.035);
+        border-color:rgba(15,23,42,.06);
       }
 
       .incidencias-cell--actions{
@@ -1140,6 +1396,32 @@ function renderStyles() {
         border-top-color:currentColor;
       }
 
+      .incidencias-refresh-overlay{
+        position:absolute;
+        inset:0;
+        z-index:3;
+        display:grid;
+        place-items:center;
+        pointer-events:none;
+        background:linear-gradient(180deg, rgba(255,255,255,.24), rgba(255,255,255,.12));
+        backdrop-filter:blur(2px);
+      }
+
+      .incidencias-refresh-card{
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        min-height:42px;
+        padding:0 16px;
+        border-radius:14px;
+        border:1px solid rgba(15,23,42,.07);
+        background:rgba(255,255,255,.82);
+        color:#344054;
+        font-size:13px;
+        font-weight:720;
+        box-shadow:0 10px 26px rgba(15,23,42,.08);
+      }
+
       .incidencias-table-loading{
         padding:12px 18px 16px;
         display:grid;
@@ -1148,7 +1430,7 @@ function renderStyles() {
 
       .incidencias-table-loading-row{
         display:grid;
-        grid-template-columns:44px minmax(220px, 1.5fr) 120px 140px 140px 90px 120px;
+        grid-template-columns:44px minmax(220px, 1.45fr) 112px 112px 140px 140px 86px 70px 112px;
         gap:12px;
         align-items:center;
       }
@@ -1261,9 +1543,57 @@ function renderStyles() {
           rgba(255,255,255,.56);
       }
 
+      [data-theme="dark"] .incidencias-hero,
+      [data-theme="dark"] .incidencias-history{
+        background:
+          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 7%, transparent), transparent 34%),
+          linear-gradient(180deg, var(--surface-2, #171922), var(--surface-1, #10121a));
+        border-color:var(--border-soft, rgba(255,255,255,.08));
+      }
+
+      [data-theme="dark"] .incidencias-page-title,
+      [data-theme="dark"] .incidencias-history-title,
+      [data-theme="dark"] .incidencias-stat-value,
+      [data-theme="dark"] .incidencias-ticket-subject{
+        color:var(--text-strong, #f8fafc);
+      }
+
+      [data-theme="dark"] .incidencias-page-subtitle,
+      [data-theme="dark"] .incidencias-history-subtitle,
+      [data-theme="dark"] .incidencias-stat-text,
+      [data-theme="dark"] .incidencias-ticket-description{
+        color:var(--text-dim, #94a3b8);
+      }
+
+      [data-theme="dark"] .incidencias-btn,
+      [data-theme="dark"] .incidencias-pagination-btn,
+      [data-theme="dark"] .incidencias-detail-btn,
+      [data-theme="dark"] .incidencias-refresh-card{
+        background:rgba(255,255,255,.06);
+        border-color:rgba(255,255,255,.08);
+        color:var(--text-strong, #f8fafc);
+      }
+
+      [data-theme="dark"] .incidencias-table thead th{
+        background:rgba(255,255,255,.035);
+        border-bottom-color:rgba(255,255,255,.07);
+      }
+
+      [data-theme="dark"] .incidencias-table tbody td{
+        border-bottom-color:rgba(255,255,255,.055);
+      }
+
+      [data-theme="dark"] .incidencias-date-inline{
+        color:var(--text-soft, #cbd5e1);
+      }
+
       @media (max-width: 1240px){
         .incidencias-page-title{
           font-size:clamp(24px, 2.4vw, 36px);
+        }
+
+        .incidencias-stats{
+          grid-template-columns:repeat(2, minmax(0, 1fr));
         }
       }
 
@@ -1282,12 +1612,6 @@ function renderStyles() {
 
         .incidencias-page-title{
           white-space:normal;
-        }
-      }
-
-      @media (max-width: 980px){
-        .incidencias-stats{
-          grid-template-columns:1fr 1fr;
         }
       }
 
@@ -1327,6 +1651,14 @@ function renderStyles() {
         .incidencias-page-subtitle{
           font-size:14px;
         }
+
+        .incidencias-hero-actions{
+          width:100%;
+        }
+
+        .incidencias-btn{
+          flex:1 1 auto;
+        }
       }
     </style>
   `;
@@ -1338,16 +1670,32 @@ function renderStyles() {
 
 export function renderHeader(input = {}) {
   const data = safeObject(input);
+
   const items = safeArray(
     first(data.items, data.rows, data.tickets, data.incidencias)
   );
+
   const state = safeObject(data.state);
 
   const stats = computeStats(items);
 
+  const remoteCount = Math.max(
+    stats.total,
+    safeNumber(
+      first(
+        data.remoteCount,
+        data.totalCount,
+        state.remoteCount,
+        state.totalCount,
+        stats.total
+      ),
+      stats.total
+    )
+  );
+
   const updatedAt = first(
-    state.lastSyncAt,
     data.lastUpdatedAt,
+    state.lastSyncAt,
     data.updatedAt,
     ...items.map((item) => getUpdatedAt(item))
   );
@@ -1366,6 +1714,8 @@ export function renderHeader(input = {}) {
   );
 
   const creating = Boolean(state.creating);
+  const refreshing = Boolean(state.refreshing);
+  const loading = Boolean(state.loading);
 
   return `
     ${renderStyles()}
@@ -1380,8 +1730,26 @@ export function renderHeader(input = {}) {
         <div class="incidencias-hero-actions">
           <button
             type="button"
+            id="incidencias-refresh-btn"
+            class="incidencias-btn${refreshing ? " is-loading" : ""}"
+            data-incidencias-action="refresh"
+            data-action="refresh"
+            ${refreshing || loading ? 'disabled aria-busy="true"' : ""}
+          >
+            ${
+              refreshing
+                ? renderSpinner("Actualizando...")
+                : '<span class="incidencias-btn-text">Actualizar</span>'
+            }
+          </button>
+
+          <button
+            type="button"
             id="incidencias-export-btn"
             class="incidencias-btn"
+            data-incidencias-action="export"
+            data-action="export-csv"
+            ${loading || refreshing || !items.length ? "disabled" : ""}
           >
             <span class="incidencias-btn-text">Exportar historial</span>
           </button>
@@ -1390,6 +1758,8 @@ export function renderHeader(input = {}) {
             type="button"
             id="incidencias-create-btn"
             class="incidencias-btn incidencias-btn--primary${creating ? " is-loading" : ""}"
+            data-incidencias-action="create"
+            data-action="create-incidencia"
             ${creating ? 'disabled aria-busy="true"' : ""}
           >
             ${
@@ -1403,7 +1773,7 @@ export function renderHeader(input = {}) {
 
       <div class="incidencias-hero-meta">
         <span class="incidencias-meta-pill">
-          ${escapeHtml(`${stats.total} solicitudes registradas`)}
+          ${escapeHtml(`${remoteCount} solicitudes registradas`)}
         </span>
 
         <span class="incidencias-meta-pill">
@@ -1417,15 +1787,27 @@ export function renderHeader(input = {}) {
 
       <div class="incidencias-stats">
         <article class="incidencias-stat-card incidencias-stat-card--open">
-          <div class="incidencias-stat-label">Incidencias abiertas</div>
+          <div class="incidencias-stat-label">Abiertas</div>
           <div class="incidencias-stat-value">${escapeHtml(String(stats.openCount))}</div>
           <div class="incidencias-stat-text">Solicitudes activas o pendientes de revisión.</div>
         </article>
 
         <article class="incidencias-stat-card incidencias-stat-card--closed">
-          <div class="incidencias-stat-label">Incidencias cerradas</div>
+          <div class="incidencias-stat-label">Cerradas</div>
           <div class="incidencias-stat-value">${escapeHtml(String(stats.closedCount))}</div>
           <div class="incidencias-stat-text">Casos resueltos o ya cerrados.</div>
+        </article>
+
+        <article class="incidencias-stat-card incidencias-stat-card--urgent">
+          <div class="incidencias-stat-label">Urgentes</div>
+          <div class="incidencias-stat-value">${escapeHtml(String(stats.urgentCount))}</div>
+          <div class="incidencias-stat-text">Incidencias marcadas con prioridad alta o crítica.</div>
+        </article>
+
+        <article class="incidencias-stat-card">
+          <div class="incidencias-stat-label">Adjuntos</div>
+          <div class="incidencias-stat-value">${escapeHtml(String(stats.attachmentsCount))}</div>
+          <div class="incidencias-stat-text">Documentos vinculados al historial visible.</div>
         </article>
       </div>
     </section>
@@ -1438,14 +1820,20 @@ export function renderHeader(input = {}) {
 
 export function renderTable(input = {}) {
   const data = safeObject(input);
+
   const items = safeArray(
     first(data.items, data.rows, data.tickets, data.incidencias)
   );
-  const state = safeObject(data.state);
 
-  const pagination = getPagination(items, state);
+  const state = safeObject(data.state);
+  const pagination = getPagination(items, data);
+
   const loading = Boolean(state.loading);
   const refreshing = Boolean(state.refreshing);
+  const hasError = Boolean(safeText(state.error, ""));
+
+  const showInitialLoading = loading && !pagination.pageItems.length;
+  const showRefreshOverlay = refreshing && pagination.pageItems.length;
 
   return `
     <section class="incidencias-history">
@@ -1453,7 +1841,13 @@ export function renderTable(input = {}) {
         <div class="incidencias-history-copy">
           <h2 class="incidencias-history-title">Historial de incidencias</h2>
           <p class="incidencias-history-subtitle">
-            ${escapeHtml(`Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · página ${pagination.currentPage} de ${pagination.totalPages}`)}
+            ${
+              showInitialLoading
+                ? "Cargando incidencias..."
+                : escapeHtml(
+                    `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · página ${pagination.currentPage} de ${pagination.totalPages}`
+                  )
+            }
           </p>
         </div>
 
@@ -1461,8 +1855,10 @@ export function renderTable(input = {}) {
           <button
             type="button"
             class="incidencias-pagination-btn"
+            data-incidencias-action="prev-page"
             data-action="prev-page"
-            ${pagination.currentPage <= 1 || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
+            data-page="${escapeHtml(String(Math.max(1, pagination.currentPage - 1)))}"
+            ${!pagination.hasPrev || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
           >
             Anterior
           </button>
@@ -1470,8 +1866,10 @@ export function renderTable(input = {}) {
           <button
             type="button"
             class="incidencias-pagination-btn"
+            data-incidencias-action="next-page"
             data-action="next-page"
-            ${pagination.currentPage >= pagination.totalPages || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
+            data-page="${escapeHtml(String(Math.min(pagination.totalPages, pagination.currentPage + 1)))}"
+            ${!pagination.hasNext || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
           >
             Siguiente
           </button>
@@ -1479,15 +1877,11 @@ export function renderTable(input = {}) {
       </div>
 
       ${
-        loading && !pagination.pageItems.length
-          ? renderTableLoading(Math.max(3, safeNumber(first(state.pageSize, 5), 5)))
+        showInitialLoading
+          ? renderTableLoading(Math.max(3, pagination.pageSize || 5))
           : `
             <div class="incidencias-table-wrap${refreshing ? " is-refreshing" : ""}">
-              ${
-                refreshing
-                  ? renderTableLoading(Math.min(4, Math.max(3, pagination.pageItems.length || 3)))
-                  : ""
-              }
+              ${showRefreshOverlay ? renderRefreshOverlay() : ""}
 
               ${
                 pagination.pageItems.length
@@ -1495,21 +1889,25 @@ export function renderTable(input = {}) {
                     <div class="incidencias-table-shell">
                       <table class="incidencias-table" role="table" aria-label="Listado de incidencias">
                         <colgroup>
-                          <col style="width:43%;">
-                          <col style="width:12%;">
-                          <col style="width:15%;">
-                          <col style="width:15%;">
-                          <col style="width:7%;">
+                          <col style="width:34%;">
+                          <col style="width:10%;">
+                          <col style="width:10%;">
+                          <col style="width:13%;">
+                          <col style="width:13%;">
                           <col style="width:8%;">
+                          <col style="width:5%;">
+                          <col style="width:7%;">
                         </colgroup>
 
                         <thead>
                           <tr>
                             <th>Incidencia</th>
                             <th>Estado</th>
-                            <th>Fecha de creación</th>
+                            <th>Prioridad</th>
+                            <th>Creación</th>
                             <th>Última novedad</th>
                             <th>Importe</th>
+                            <th>Adj.</th>
                             <th>Acciones</th>
                           </tr>
                         </thead>
@@ -1520,7 +1918,7 @@ export function renderTable(input = {}) {
                       </table>
                     </div>
                   `
-                  : renderEmptyState()
+                  : renderEmptyState({ hasError })
               }
             </div>
           `

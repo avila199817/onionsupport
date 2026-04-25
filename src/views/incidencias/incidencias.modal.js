@@ -2,7 +2,7 @@
    Onion SPA - Incidencias Modal
    Archivo: src/views/incidencias/incidencias.modal.js
 
-   CLIENT EXPERIENCE PRO · DETAIL MODAL · 10/10
+   CLIENT EXPERIENCE PRO · DETAIL MODAL · FINAL GOD MODE
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -36,12 +36,19 @@ const modalState = {
   bindingsAttached: false,
   lastActiveElement: null,
   escHandler: null,
+
   commentDraft: "",
   feedbackMessage: "",
   feedbackType: "info",
+
   pendingFiles: [],
+
   openingAttachmentId: "",
   downloadingAttachmentId: "",
+  attachmentActionKey: "",
+
+  previewFile: null,
+  previewObjectUrl: "",
 };
 
 /* =========================================================
@@ -49,14 +56,17 @@ const modalState = {
 ========================================================= */
 
 function safeEmit(event = "", payload = {}) {
+  const eventName = safeText(event, "");
+  if (!eventName) return false;
+
   try {
-    AppCore?.events?.emit?.(event, payload);
+    AppCore?.events?.emit?.(eventName, payload);
     return true;
   } catch {}
 
   try {
     window.dispatchEvent(
-      new CustomEvent(event, {
+      new CustomEvent(eventName, {
         detail: payload,
       })
     );
@@ -67,15 +77,16 @@ function safeEmit(event = "", payload = {}) {
 }
 
 function safeOn(event = "", handler = null) {
-  if (!event || typeof handler !== "function") return false;
+  const eventName = safeText(event, "");
+  if (!eventName || typeof handler !== "function") return false;
 
   try {
-    AppCore?.events?.on?.(event, handler);
+    AppCore?.events?.on?.(eventName, handler);
     return true;
   } catch {}
 
   try {
-    window.addEventListener(event, handler);
+    window.addEventListener(eventName, handler);
     return true;
   } catch {}
 
@@ -83,14 +94,15 @@ function safeOn(event = "", handler = null) {
 }
 
 function safeOff(event = "", handler = null) {
-  if (!event || typeof handler !== "function") return false;
+  const eventName = safeText(event, "");
+  if (!eventName || typeof handler !== "function") return false;
 
   try {
-    AppCore?.events?.off?.(event, handler);
+    AppCore?.events?.off?.(eventName, handler);
   } catch {}
 
   try {
-    window.removeEventListener(event, handler);
+    window.removeEventListener(eventName, handler);
   } catch {}
 
   return true;
@@ -147,23 +159,26 @@ function normalizeWhitespace(value = "") {
 
 function showToast(message = "", type = "info") {
   const text = safeText(message, "");
-  if (!text) return;
+  if (!text) return false;
 
   try {
     if (typeof AppCore?.toast?.[type] === "function") {
       AppCore.toast[type](text);
-      return;
+      return true;
     }
   } catch {}
 
   try {
     AppCore?.toast?.show?.(text, type);
-    return;
+    return true;
   } catch {}
 
   try {
     AppCore?.ui?.toast?.[type]?.(text);
+    return true;
   } catch {}
+
+  return false;
 }
 
 function setFeedback(message = "", type = "info") {
@@ -179,6 +194,46 @@ function clearFeedback() {
 function clearAttachmentBusyState() {
   modalState.openingAttachmentId = "";
   modalState.downloadingAttachmentId = "";
+}
+
+function clearAttachmentActionKey() {
+  modalState.attachmentActionKey = "";
+}
+
+function revokePreviewObjectUrl() {
+  const url = safeText(modalState.previewObjectUrl, "");
+
+  if (!url) return;
+
+  try {
+    URL.revokeObjectURL(url);
+  } catch {}
+
+  modalState.previewObjectUrl = "";
+}
+
+function clearAttachmentPreview() {
+  revokePreviewObjectUrl();
+  modalState.previewFile = null;
+}
+
+function setAttachmentPreview(file = {}) {
+  const next = safeObject(file);
+
+  if (!safeText(next.url, "")) {
+    clearAttachmentPreview();
+    return false;
+  }
+
+  revokePreviewObjectUrl();
+
+  modalState.previewFile = next;
+
+  if (next.managedObjectUrl) {
+    modalState.previewObjectUrl = safeText(next.url, "");
+  }
+
+  return true;
 }
 
 function formatBytes(bytes = 0) {
@@ -638,7 +693,7 @@ async function fetchAttachmentResource(url = "", fallbackFilename = "archivo") {
 }
 
 /* =========================================================
-   BLOB OPEN / DOWNLOAD
+   BLOB / DOWNLOAD / PREVIEW NORMALIZATION
 ========================================================= */
 
 function downloadBlob(blob, filename = "archivo") {
@@ -654,6 +709,8 @@ function downloadBlob(blob, filename = "archivo") {
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
+
+    return true;
   } finally {
     setTimeout(() => {
       try {
@@ -661,39 +718,6 @@ function downloadBlob(blob, filename = "archivo") {
       } catch {}
     }, 60000);
   }
-}
-
-function openBlob(blob) {
-  const objectUrl = URL.createObjectURL(blob);
-  const newWindow = window.open(objectUrl, "_blank", "noopener,noreferrer");
-
-  if (!newWindow) {
-    throw new Error("El navegador bloqueó la apertura del archivo.");
-  }
-
-  setTimeout(() => {
-    try {
-      URL.revokeObjectURL(objectUrl);
-    } catch {}
-  }, 60000);
-
-  return true;
-}
-
-function openUrlDirect(url = "") {
-  const finalUrl = safeText(url, "");
-
-  if (!finalUrl) {
-    throw new Error("No hay URL disponible para abrir el archivo.");
-  }
-
-  const newWindow = window.open(finalUrl, "_blank", "noopener,noreferrer");
-
-  if (!newWindow) {
-    throw new Error("El navegador bloqueó la apertura del archivo.");
-  }
-
-  return true;
 }
 
 function downloadUrlDirect(url = "", filename = "archivo") {
@@ -706,7 +730,6 @@ function downloadUrlDirect(url = "", filename = "archivo") {
   const anchor = document.createElement("a");
   anchor.href = finalUrl;
   anchor.download = safeText(filename, "archivo");
-  anchor.target = "_blank";
   anchor.rel = "noopener noreferrer";
   anchor.style.display = "none";
 
@@ -776,62 +799,162 @@ function extractFilenameFromPayload(payload = {}, fallback = "archivo") {
   );
 }
 
-async function openOrDownloadPayload(payload, attachment = {}, mode = "open") {
+function extractContentTypeFromPayload(payload = {}, fallback = "") {
+  const obj = safeObject(payload);
+  const file = safeObject(obj.file);
+  const data = safeObject(obj.data);
+
+  return safeText(
+    first(
+      file.contentType,
+      file.mimeType,
+      file.mimetype,
+      file.type,
+      data.contentType,
+      data.mimeType,
+      data.mimetype,
+      data.type,
+      obj.contentType,
+      obj.mimeType,
+      obj.mimetype,
+      obj.type,
+      fallback
+    ),
+    fallback
+  );
+}
+
+function normalizeAttachmentActionFile(payload = null, attachment = {}, mode = "open") {
   const fallbackFilename = safeText(
     first(attachment?.filename, attachment?.name),
     "archivo"
   );
 
-  if (payload?.blob instanceof Blob) {
-    if (mode === "download") {
-      downloadBlob(payload.blob, payload.filename || fallbackFilename);
-    } else {
-      openBlob(payload.blob);
-    }
+  const blob =
+    isBlob(payload?.blob)
+      ? payload.blob
+      : payload?.kind === "blob" && isBlob(payload?.blob)
+        ? payload.blob
+        : null;
 
-    return true;
+  if (blob) {
+    const objectUrl = URL.createObjectURL(blob);
+
+    return {
+      ...safeObject(attachment),
+      url: objectUrl,
+      filename: safeText(payload?.filename, fallbackFilename),
+      name: safeText(payload?.filename, fallbackFilename),
+      contentType: safeText(
+        first(payload?.contentType, blob.type, attachment?.contentType, attachment?.type),
+        ""
+      ),
+      size: safeNumber(first(blob.size, attachment?.size), 0),
+      blob,
+      managedObjectUrl: true,
+      source: "blob",
+    };
   }
 
-  if (payload?.kind === "blob" && payload?.blob instanceof Blob) {
-    if (mode === "download") {
-      downloadBlob(payload.blob, payload.filename || fallbackFilename);
-    } else {
-      openBlob(payload.blob);
-    }
+  const source =
+    payload?.kind === "json"
+      ? payload.payload
+      : payload;
 
-    return true;
+  const sourceObj = safeObject(source);
+
+  const url = safeText(
+    first(
+      extractFileUrlFromPayload(sourceObj, mode),
+      sourceObj.url,
+      sourceObj.viewUrl,
+      sourceObj.openUrl,
+      sourceObj.downloadUrl,
+      sourceObj.signedUrl
+    ),
+    ""
+  );
+
+  if (!url) return null;
+
+  const filename = extractFilenameFromPayload(sourceObj, fallbackFilename);
+
+  return {
+    ...safeObject(attachment),
+    ...sourceObj,
+    url,
+    viewUrl: safeText(first(sourceObj.viewUrl, sourceObj.openUrl, url), url),
+    openUrl: safeText(first(sourceObj.openUrl, sourceObj.viewUrl, url), url),
+    downloadUrl: safeText(first(sourceObj.downloadUrl, url), url),
+    signedUrl: safeText(first(sourceObj.signedUrl, url), url),
+    filename,
+    name: safeText(first(sourceObj.name, filename), filename),
+    contentType: extractContentTypeFromPayload(
+      sourceObj,
+      safeText(first(attachment?.contentType, attachment?.type), "")
+    ),
+    size: safeNumber(first(sourceObj.size, attachment?.size), 0),
+    managedObjectUrl: false,
+    source: "url",
+  };
+}
+
+function downloadResolvedAttachmentFile(file = {}) {
+  const item = safeObject(file);
+  const filename = safeText(first(item.filename, item.name), "archivo");
+
+  if (isBlob(item.blob)) {
+    return downloadBlob(item.blob, filename);
   }
 
-  if (payload?.kind === "json") {
-    const url = extractFileUrlFromPayload(payload.payload, mode);
-    const filename = extractFilenameFromPayload(payload.payload, fallbackFilename);
+  return downloadUrlDirect(item.downloadUrl || item.url, filename);
+}
 
-    if (url) {
-      if (mode === "download") {
-        downloadUrlDirect(url, filename);
-      } else {
-        openUrlDirect(url);
-      }
+async function openOrDownloadPayload(payload, attachment = {}, mode = "open") {
+  const finalMode = mode === "download" ? "download" : "open";
 
-      return true;
-    }
+  const file = normalizeAttachmentActionFile(
+    payload,
+    attachment,
+    finalMode
+  );
+
+  if (!file?.url) {
+    return false;
   }
 
-  const obj = safeObject(payload);
-  const directUrl = extractFileUrlFromPayload(obj, mode);
-  const filename = extractFilenameFromPayload(obj, fallbackFilename);
-
-  if (directUrl) {
-    if (mode === "download") {
-      downloadUrlDirect(directUrl, filename);
-    } else {
-      openUrlDirect(directUrl);
-    }
-
-    return true;
+  if (finalMode === "download") {
+    return downloadResolvedAttachmentFile(file);
   }
 
-  return false;
+  return setAttachmentPreview(file);
+}
+
+function getAttachmentPreviewType(file = {}) {
+  return safeText(
+    first(
+      file.contentType,
+      file.type,
+      file.mimeType,
+      file.mimetype,
+      file.raw?.contentType,
+      file.raw?.type,
+      file.raw?.mimeType,
+      file.raw?.mimetype
+    ),
+    ""
+  ).toLowerCase();
+}
+
+function isPreviewImage(file = {}) {
+  return getAttachmentPreviewType(file).startsWith("image/");
+}
+
+function isPreviewPdf(file = {}) {
+  const type = getAttachmentPreviewType(file);
+  const name = safeText(first(file.filename, file.name), "").toLowerCase();
+
+  return type.includes("application/pdf") || name.endsWith(".pdf");
 }
 
 /* =========================================================
@@ -1746,8 +1869,6 @@ async function fetchTicketDetailInternal(ticketId = "") {
 
 /* =========================================================
    EXTERNAL ACTION BRIDGE
-   Solo para apertura/descarga de adjuntos si existe bridge externo.
-   No se usa para submit para evitar recursión con actions.js.
 ========================================================= */
 
 async function callExternalAction(action = "", payload = {}) {
@@ -1812,6 +1933,19 @@ function formatChange(change = {}) {
   const item = safeObject(change);
   const field = safeText(item.field, "").toLowerCase();
   const action = safeText(item.action, "").toLowerCase();
+
+  if (
+    [
+      "comments",
+      "comment",
+      "messages",
+      "message",
+      "notes",
+      "note",
+    ].includes(field)
+  ) {
+    return "";
+  }
 
   if (field === "attachments") {
     const added = safeNumber(item.added, 0);
@@ -1930,11 +2064,25 @@ function normalizeTimelineEntries(detail = {}) {
     })
     .filter((entry) => {
       const title = safeText(entry.title, "").toLowerCase();
-      const body = safeText(entry.body, "").toLowerCase();
+      const body = normalizeWhitespace(entry.body).toLowerCase();
 
       if (entry.type === "update" && !body) return false;
       if (title === "update" && body === "update") return false;
       if (title === "actualización" && body === "update") return false;
+
+      if (
+        entry.type === "update" &&
+        /^(comments|comment|messages|message|notes|note)\s+actualizado\.?$/i.test(body)
+      ) {
+        return false;
+      }
+
+      if (
+        entry.type === "update" &&
+        ["comments actualizado.", "messages actualizado.", "notes actualizado."].includes(body)
+      ) {
+        return false;
+      }
 
       return true;
     });
@@ -2104,13 +2252,14 @@ function getFeedbackStyle(type = "info") {
 function renderChip(label = "", style = "") {
   return `
     <span
+      class="incidencias-modal-chip"
       style="
         display:inline-flex;
         align-items:center;
         justify-content:center;
         flex:0 0 auto;
-        height:24px;
-        min-height:24px;
+        min-height:26px;
+        height:26px;
         padding:0 10px;
         border-radius:999px;
         font-size:11px;
@@ -2128,15 +2277,17 @@ function renderChip(label = "", style = "") {
 }
 
 function renderAvatar(detail = {}) {
+  const clientName = getClientName(detail);
+
   const initials = safeText(
     detail.initials,
-    getInitials(getClientName(detail) || "ON")
+    getInitials(clientName || "ON")
   );
 
   const avatarUrl = getClientAvatar(detail);
 
   const theme = getAvatarTheme(
-    safeText(first(detail.ticketId, getClientName(detail)), "onion")
+    safeText(first(detail.ticketId, clientName), "onion")
   );
 
   const themeMap = {
@@ -2196,48 +2347,61 @@ function renderAvatar(detail = {}) {
     return `
       <div
         class="incidencias-modal-avatar"
+        data-tooltip="${escapeHtml(clientName)}"
+        aria-label="${escapeHtml(clientName)}"
         style="
           position:relative;
           flex:0 0 76px;
           width:76px;
           height:76px;
-          border-radius:22px;
-          overflow:hidden;
-          border:1px solid var(--border-soft);
-          background:transparent;
-          box-shadow:none;
+          overflow:visible;
+          cursor:default;
         "
       >
-        <img
-          src="${escapeHtml(avatarUrl)}"
-          alt=""
-          loading="lazy"
-          referrerpolicy="no-referrer"
+        <div
+          class="incidencias-modal-avatar-frame"
           style="
-            display:block;
-            width:100%;
-            height:100%;
-            object-fit:cover;
-          "
-          onerror="this.style.display='none'; this.parentNode.setAttribute('data-modal-avatar-fallback','true');"
-        />
-        <span
-          style="
-            position:absolute;
-            inset:0;
-            display:none;
-            place-items:center;
-            background:${palette.bg};
-            border:1px solid ${palette.border};
-            color:${palette.text};
-            font-size:22px;
-            font-weight:var(--weight-black, 800);
-            letter-spacing:.03em;
-            box-shadow:0 12px 28px ${palette.glow};
+            position:relative;
+            width:76px;
+            height:76px;
+            border-radius:22px;
+            overflow:hidden;
+            border:1px solid var(--border-soft);
+            background:transparent;
+            box-shadow:none;
           "
         >
-          ${escapeHtml(initials)}
-        </span>
+          <img
+            src="${escapeHtml(avatarUrl)}"
+            alt="${escapeHtml(clientName)}"
+            loading="lazy"
+            referrerpolicy="no-referrer"
+            style="
+              display:block;
+              width:100%;
+              height:100%;
+              object-fit:cover;
+            "
+            onerror="this.style.display='none'; this.parentNode.setAttribute('data-modal-avatar-fallback','true');"
+          />
+          <span
+            style="
+              position:absolute;
+              inset:0;
+              display:none;
+              place-items:center;
+              background:${palette.bg};
+              border:1px solid ${palette.border};
+              color:${palette.text};
+              font-size:22px;
+              font-weight:var(--weight-black, 800);
+              letter-spacing:.03em;
+              box-shadow:0 12px 28px ${palette.glow};
+            "
+          >
+            ${escapeHtml(initials)}
+          </span>
+        </div>
       </div>
     `;
   }
@@ -2245,24 +2409,38 @@ function renderAvatar(detail = {}) {
   return `
     <div
       class="incidencias-modal-avatar"
+      data-tooltip="${escapeHtml(clientName)}"
+      aria-label="${escapeHtml(clientName)}"
       style="
         position:relative;
         flex:0 0 76px;
         width:76px;
         height:76px;
-        border-radius:22px;
-        display:grid;
-        place-items:center;
-        background:${palette.bg};
-        border:1px solid ${palette.border};
-        color:${palette.text};
-        font-size:22px;
-        font-weight:var(--weight-black, 800);
-        letter-spacing:.03em;
-        box-shadow:0 12px 28px ${palette.glow};
+        overflow:visible;
+        cursor:default;
       "
     >
-      ${escapeHtml(initials)}
+      <div
+        class="incidencias-modal-avatar-frame"
+        style="
+          position:relative;
+          width:76px;
+          height:76px;
+          border-radius:22px;
+          display:grid;
+          place-items:center;
+          background:${palette.bg};
+          border:1px solid ${palette.border};
+          color:${palette.text};
+          font-size:22px;
+          font-weight:var(--weight-black, 800);
+          letter-spacing:.03em;
+          box-shadow:0 12px 28px ${palette.glow};
+          overflow:hidden;
+        "
+      >
+        ${escapeHtml(initials)}
+      </div>
     </div>
   `;
 }
@@ -2502,7 +2680,7 @@ function renderAttachmentActionButtons(file = {}) {
           opacity:${busy.isOpening ? ".82" : "1"};
         "
       >
-        ${busy.isOpening ? renderInlineSpinner("Abriendo...") : "Visualizar"}
+        ${busy.isOpening ? renderInlineSpinner("Cargando...") : "Visualizar"}
       </button>
 
       <button
@@ -2681,113 +2859,142 @@ function renderAttachments(detail = {}) {
   `;
 }
 
+function renderAttachmentPreview() {
+  const file = safeObject(modalState.previewFile);
+  const url = safeText(file.url, "");
+
+  if (!url) return "";
+
+  const filename = safeText(
+    first(file.filename, file.name),
+    "Documento"
+  );
+
+  const type = getAttachmentPreviewType(file);
+  const size = formatBytes(file.size);
+
+  const meta = [
+    type || "Vista previa",
+    size,
+  ].filter(Boolean).join(" · ");
+
+  return `
+    <section class="incidencias-modal-preview">
+      <div class="incidencias-modal-preview-head">
+        <div class="incidencias-modal-preview-copy">
+          <strong>${escapeHtml(filename)}</strong>
+          <span>${escapeHtml(meta || "Documento preparado")}</span>
+        </div>
+
+        <div class="incidencias-modal-preview-actions">
+          <button
+            type="button"
+            data-modal-action="download-preview"
+            class="incidencias-modal-preview-btn"
+          >
+            Descargar
+          </button>
+
+          <button
+            type="button"
+            data-modal-action="close-preview"
+            class="incidencias-modal-preview-btn"
+            aria-label="Cerrar vista previa"
+          >
+            Cerrar vista
+          </button>
+        </div>
+      </div>
+
+      <div class="incidencias-modal-preview-frame">
+        ${
+          isPreviewImage(file)
+            ? `
+              <img
+                src="${escapeHtml(url)}"
+                alt="${escapeHtml(filename)}"
+                class="incidencias-modal-preview-image"
+              />
+            `
+            : `
+              <iframe
+                src="${escapeHtml(url)}"
+                title="${escapeHtml(filename)}"
+                class="incidencias-modal-preview-iframe"
+                loading="lazy"
+                referrerpolicy="no-referrer"
+              ></iframe>
+            `
+        }
+      </div>
+
+      ${
+        !isPreviewImage(file) && !isPreviewPdf(file)
+          ? `
+            <p class="incidencias-modal-preview-note">
+              Si el navegador no puede previsualizar este tipo de archivo, usa “Descargar”.
+            </p>
+          `
+          : ""
+      }
+    </section>
+  `;
+}
+
 function renderTimeline(detail = {}) {
   const timeline = getTimeline(detail);
 
   if (!timeline.length) {
     return `
-      <div
-        style="
-          padding:12px 14px;
-          border-radius:14px;
-          border:1px solid var(--border-soft);
-          background:var(--surface-glass);
-          color:var(--text-dim);
-          font-size:12px;
-        "
-      >
+      <div class="incidencias-timeline-empty">
         Sin actividad
       </div>
     `;
   }
 
   return `
-    <div style="display:grid; gap:8px;">
+    <div class="incidencias-timeline-list">
       ${timeline
         .map((entry) => {
           const kind = safeText(entry.kind, "event");
+          const type = safeText(entry.type, "update");
           const rawTitle = safeText(entry.title, "");
           const rawBody = safeText(entry.body, "");
 
+          const isComment = kind === "comment";
+          const isCreated = type === "created";
+
+          const title =
+            rawTitle ||
+            (isComment
+              ? "Comentario"
+              : isCreated
+                ? "Incidencia creada"
+                : "Actualización");
+
           return `
-            <article
-              style="
-                display:grid;
-                gap:8px;
-                padding:12px 14px;
-                border-radius:14px;
-                border:1px solid var(--border-soft);
-                background:var(--surface-glass);
-              "
-            >
-              <div
-                style="
-                  display:flex;
-                  justify-content:space-between;
-                  gap:10px;
-                  align-items:flex-start;
-                  flex-wrap:wrap;
-                "
-              >
-                <div style="display:grid; gap:4px; min-width:0; flex:1 1 240px;">
-                  ${
-                    rawTitle
-                      ? `
-                        <strong
-                          style="
-                            color:var(--text-strong);
-                            font-size:13px;
-                            line-height:1.35;
-                            word-break:break-word;
-                          "
-                        >
-                          ${escapeHtml(rawTitle)}
-                        </strong>
-                      `
-                      : ""
-                  }
+            <article class="incidencias-timeline-card ${isComment ? "is-comment" : ""} ${isCreated ? "is-created" : ""}">
+              <div class="incidencias-timeline-accent"></div>
 
-                  <p
-                    style="
-                      margin:0;
-                      color:${kind === "comment" ? "var(--text-soft)" : "var(--text-dim)"};
-                      font-size:12px;
-                      line-height:1.55;
-                      white-space:pre-wrap;
-                      word-break:break-word;
-                    "
-                  >
-                    ${escapeHtml(rawBody || "Actualización registrada.")}
-                  </p>
-                </div>
+              <div class="incidencias-timeline-main">
+                <div class="incidencias-timeline-title-row">
+                  <strong class="incidencias-timeline-title">
+                    ${escapeHtml(title)}
+                  </strong>
 
-                <div
-                  style="
-                    display:grid;
-                    gap:3px;
-                    justify-items:end;
-                    flex:0 0 auto;
-                  "
-                >
-                  <span
-                    style="
-                      color:var(--text-soft);
-                      font-size:11px;
-                      font-weight:var(--weight-semibold, 600);
-                    "
-                  >
-                    ${escapeHtml(safeText(entry.author, "Sistema"))}
-                  </span>
-
-                  <span
-                    style="
-                      color:var(--text-dim);
-                      font-size:11px;
-                    "
-                  >
-                    ${escapeHtml(formatDate(entry.createdAt))}
+                  <span class="incidencias-timeline-kind">
+                    ${escapeHtml(isComment ? "Comentario" : isCreated ? "Sistema" : "Cambio")}
                   </span>
                 </div>
+
+                <p class="incidencias-timeline-body">
+                  ${escapeHtml(rawBody || "Actualización registrada.")}
+                </p>
+              </div>
+
+              <div class="incidencias-timeline-meta">
+                <strong>${escapeHtml(safeText(entry.author, "Sistema"))}</strong>
+                <span>${escapeHtml(formatDate(entry.createdAt))}</span>
               </div>
             </article>
           `;
@@ -3059,6 +3266,7 @@ function renderModalInner(detail = {}) {
             justify-content:space-between;
             gap:16px;
             flex-wrap:wrap;
+            overflow:visible;
           "
         >
           <div
@@ -3068,6 +3276,7 @@ function renderModalInner(detail = {}) {
               gap:16px;
               align-items:center;
               min-width:min(100%, 620px);
+              overflow:visible;
             "
           >
             ${renderAvatar(item)}
@@ -3082,8 +3291,7 @@ function renderModalInner(detail = {}) {
                 min-width:0;
                 flex:1 1 auto;
                 min-height:76px;
-                max-height:76px;
-                overflow:hidden;
+                overflow:visible;
               "
             >
               <div
@@ -3094,8 +3302,9 @@ function renderModalInner(detail = {}) {
                   gap:8px;
                   flex-wrap:nowrap;
                   min-width:0;
-                  overflow:hidden;
-                  height:24px;
+                  overflow:visible;
+                  min-height:30px;
+                  padding:2px 0 1px;
                 "
               >
                 <button
@@ -3110,7 +3319,8 @@ function renderModalInner(detail = {}) {
                     flex:0 1 auto;
                     min-width:0;
                     max-width:220px;
-                    height:24px;
+                    min-height:26px;
+                    height:26px;
                     padding:0 10px;
                     border-radius:999px;
                     border:1px solid var(--border-soft);
@@ -3211,6 +3421,8 @@ function renderModalInner(detail = {}) {
         >
           ${renderFeedbackBox()}
 
+          ${renderAttachmentPreview()}
+
           <div
             class="incidencias-modal-meta-grid"
             style="
@@ -3283,12 +3495,41 @@ function renderModalInner(detail = {}) {
             to { transform: rotate(360deg); }
           }
 
+          .incidencias-modal-hero,
+          .incidencias-modal-hero-content,
+          .incidencias-modal-hero-chips {
+            overflow:visible !important;
+          }
+
           .incidencias-modal-hero {
             min-height:76px;
           }
 
           .incidencias-modal-hero-content {
             transform:translateY(-1px);
+            max-height:none !important;
+            min-height:76px !important;
+          }
+
+          .incidencias-modal-hero-chips {
+            height:auto !important;
+            min-height:30px !important;
+            padding:2px 0 1px !important;
+            align-items:center !important;
+          }
+
+          .incidencias-modal-hero-chips > * {
+            min-height:26px !important;
+            height:26px !important;
+          }
+
+          .incidencias-modal-avatar {
+            cursor:default;
+            overflow:visible !important;
+          }
+
+          .incidencias-modal-avatar-frame {
+            overflow:hidden;
           }
 
           #${PANEL_ID} [data-modal-avatar-fallback="true"] > img {
@@ -3297,6 +3538,222 @@ function renderModalInner(detail = {}) {
 
           #${PANEL_ID} [data-modal-avatar-fallback="true"] > span {
             display:grid !important;
+          }
+
+          .incidencias-modal-preview {
+            display:grid;
+            gap:10px;
+            padding:14px;
+            border-radius:18px;
+            border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 22%, var(--border-soft));
+            background:
+              linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 7%, transparent), transparent 90%),
+              var(--surface-1, var(--surface-glass));
+          }
+
+          .incidencias-modal-preview-head {
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap:12px;
+            flex-wrap:wrap;
+          }
+
+          .incidencias-modal-preview-copy {
+            display:grid;
+            gap:3px;
+            min-width:0;
+          }
+
+          .incidencias-modal-preview-copy strong {
+            color:var(--text-strong);
+            font-size:13px;
+            line-height:1.35;
+            word-break:break-word;
+          }
+
+          .incidencias-modal-preview-copy span {
+            color:var(--text-dim);
+            font-size:11px;
+            line-height:1.35;
+          }
+
+          .incidencias-modal-preview-actions {
+            display:flex;
+            gap:8px;
+            flex-wrap:wrap;
+          }
+
+          .incidencias-modal-preview-btn {
+            min-height:34px;
+            padding:0 12px;
+            border-radius:11px;
+            border:1px solid var(--border-soft);
+            background:var(--surface-glass);
+            color:var(--text-soft);
+            font-size:12px;
+            font-weight:var(--weight-bold, 700);
+            cursor:pointer;
+          }
+
+          .incidencias-modal-preview-frame {
+            width:100%;
+            height:min(58vh, 640px);
+            min-height:360px;
+            overflow:hidden;
+            border-radius:15px;
+            border:1px solid var(--border-soft);
+            background:rgba(0,0,0,.08);
+          }
+
+          .incidencias-modal-preview-iframe {
+            display:block;
+            width:100%;
+            height:100%;
+            border:0;
+            background:#fff;
+          }
+
+          .incidencias-modal-preview-image {
+            display:block;
+            width:100%;
+            height:100%;
+            object-fit:contain;
+            background:rgba(0,0,0,.08);
+          }
+
+          .incidencias-modal-preview-note {
+            margin:0;
+            color:var(--text-dim);
+            font-size:11px;
+            line-height:1.45;
+          }
+
+          .incidencias-timeline-empty {
+            padding:14px 16px;
+            border-radius:16px;
+            border:1px solid var(--border-soft);
+            background:var(--surface-glass);
+            color:var(--text-dim);
+            font-size:12px;
+          }
+
+          .incidencias-timeline-list {
+            display:grid;
+            gap:10px;
+          }
+
+          .incidencias-timeline-card {
+            position:relative;
+            display:grid;
+            grid-template-columns:4px minmax(0, 1fr) auto;
+            gap:14px;
+            align-items:start;
+            padding:14px 16px 14px 0;
+            border-radius:18px;
+            border:1px solid var(--border-soft);
+            background:
+              linear-gradient(180deg, rgba(255,255,255,.035), transparent 95%),
+              var(--surface-glass);
+            box-shadow:0 10px 24px rgba(0,0,0,.035);
+            transition:
+              transform .16s ease,
+              border-color .16s ease,
+              box-shadow .16s ease,
+              background .16s ease;
+          }
+
+          .incidencias-timeline-card:hover {
+            transform:translateY(-1px);
+            border-color:color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft));
+            box-shadow:0 14px 30px rgba(0,0,0,.055);
+          }
+
+          .incidencias-timeline-accent {
+            width:4px;
+            min-height:100%;
+            border-radius:999px;
+            background:color-mix(in srgb, var(--accent, #7c5cff) 72%, transparent);
+          }
+
+          .incidencias-timeline-card.is-comment .incidencias-timeline-accent {
+            background:color-mix(in srgb, var(--success-strong, #36c690) 72%, transparent);
+          }
+
+          .incidencias-timeline-card.is-created .incidencias-timeline-accent {
+            background:color-mix(in srgb, var(--text-dim) 42%, transparent);
+          }
+
+          .incidencias-timeline-main {
+            display:grid;
+            gap:7px;
+            min-width:0;
+            padding-top:1px;
+          }
+
+          .incidencias-timeline-title-row {
+            display:flex;
+            align-items:center;
+            gap:8px;
+            flex-wrap:wrap;
+            min-width:0;
+          }
+
+          .incidencias-timeline-title {
+            color:var(--text-strong);
+            font-size:13px;
+            line-height:1.3;
+            font-weight:var(--weight-bold, 700);
+            word-break:break-word;
+          }
+
+          .incidencias-timeline-kind {
+            display:inline-flex;
+            align-items:center;
+            min-height:22px;
+            padding:0 8px;
+            border-radius:999px;
+            border:1px solid var(--border-soft);
+            background:var(--surface-1, var(--surface-glass));
+            color:var(--text-dim);
+            font-size:10px;
+            line-height:1;
+            font-weight:var(--weight-bold, 700);
+            letter-spacing:.045em;
+            text-transform:uppercase;
+          }
+
+          .incidencias-timeline-body {
+            margin:0;
+            color:var(--text-soft);
+            font-size:13px;
+            line-height:1.58;
+            white-space:pre-wrap;
+            word-break:break-word;
+          }
+
+          .incidencias-timeline-meta {
+            display:grid;
+            gap:4px;
+            justify-items:end;
+            min-width:150px;
+            padding-top:1px;
+          }
+
+          .incidencias-timeline-meta strong {
+            color:var(--text-soft);
+            font-size:11px;
+            line-height:1.25;
+            font-weight:var(--weight-semibold, 600);
+            text-align:right;
+          }
+
+          .incidencias-timeline-meta span {
+            color:var(--text-dim);
+            font-size:11px;
+            line-height:1.25;
+            text-align:right;
+            font-variant-numeric:tabular-nums;
           }
 
           [data-theme="light"] #${PANEL_ID}{
@@ -3323,7 +3780,8 @@ function renderModalInner(detail = {}) {
           }
 
           @media (max-width: 720px) {
-            .incidencias-modal-avatar {
+            .incidencias-modal-avatar,
+            .incidencias-modal-avatar-frame {
               flex-basis:64px !important;
               width:64px !important;
               height:64px !important;
@@ -3338,12 +3796,14 @@ function renderModalInner(detail = {}) {
 
             .incidencias-modal-hero-content {
               min-height:64px !important;
-              max-height:64px !important;
+              max-height:none !important;
+              overflow:visible !important;
               gap:4px !important;
             }
 
             .incidencias-modal-hero-chips {
-              height:22px !important;
+              height:auto !important;
+              min-height:28px !important;
             }
 
             .incidencias-modal-title {
@@ -3353,6 +3813,26 @@ function renderModalInner(detail = {}) {
 
             .incidencias-modal-updated {
               font-size:12px !important;
+            }
+
+            .incidencias-timeline-card {
+              grid-template-columns:4px minmax(0, 1fr) !important;
+            }
+
+            .incidencias-timeline-meta {
+              grid-column:2;
+              justify-items:start;
+              min-width:0;
+            }
+
+            .incidencias-timeline-meta strong,
+            .incidencias-timeline-meta span {
+              text-align:left;
+            }
+
+            .incidencias-modal-preview-frame {
+              height:52vh;
+              min-height:280px;
             }
           }
 
@@ -3476,8 +3956,10 @@ export function openIncidenciasModal(detail = {}) {
   modalState.commentDraft = "";
   modalState.pendingFiles = [];
 
+  clearAttachmentPreview();
   clearFeedback();
   clearAttachmentBusyState();
+  clearAttachmentActionKey();
 
   renderModal();
   lockBody();
@@ -3506,8 +3988,10 @@ export function closeIncidenciasModal() {
   modalState.commentDraft = "";
   modalState.pendingFiles = [];
 
+  clearAttachmentPreview();
   clearFeedback();
   clearAttachmentBusyState();
+  clearAttachmentActionKey();
 
   detachRootBindings();
 
@@ -3533,6 +4017,7 @@ export function updateIncidenciasModal(detail = {}) {
   modalState.isSubmitting = false;
 
   clearAttachmentBusyState();
+  clearAttachmentActionKey();
 
   renderModal();
   attachRootBindings();
@@ -3723,6 +4208,7 @@ function getAttachmentById(attachmentId = "") {
 }
 
 async function handleAttachmentAction(attachmentId = "", mode = "open") {
+  const finalMode = mode === "download" ? "download" : "open";
   const attachment = getAttachmentById(attachmentId);
   const ticketId = getTicketId(modalState.detail);
 
@@ -3734,7 +4220,19 @@ async function handleAttachmentAction(attachmentId = "", mode = "open") {
     return false;
   }
 
-  if (mode === "download") {
+  const actionKey = [
+    safeText(ticketId, ""),
+    safeText(attachment.id, ""),
+    finalMode,
+  ].join("::");
+
+  if (modalState.attachmentActionKey === actionKey) {
+    return false;
+  }
+
+  modalState.attachmentActionKey = actionKey;
+
+  if (finalMode === "download") {
     modalState.downloadingAttachmentId = safeText(attachment.id, "");
   } else {
     modalState.openingAttachmentId = safeText(attachment.id, "");
@@ -3745,31 +4243,33 @@ async function handleAttachmentAction(attachmentId = "", mode = "open") {
 
   try {
     const externalActionName =
-      mode === "download" ? "downloadTicketAttachment" : "openTicketAttachment";
+      finalMode === "download"
+        ? "downloadTicketAttachment"
+        : "openTicketAttachment";
 
     try {
       const externalResponse = await callExternalAction(externalActionName, {
         ticketId,
         attachment,
         detail: modalState.detail,
-        mode,
+        mode: finalMode,
       });
 
       if (
         externalResponse &&
-        (await openOrDownloadPayload(externalResponse, attachment, mode))
+        (await openOrDownloadPayload(externalResponse, attachment, finalMode))
       ) {
         safeEmit("incidencias:modal:attachment", {
           ticketId,
           attachment,
-          mode,
+          mode: finalMode,
           source: "external",
         });
 
         showToast(
-          mode === "download"
+          finalMode === "download"
             ? "Descarga iniciada."
-            : "Abriendo documento.",
+            : "Documento cargado en la vista.",
           "success"
         );
 
@@ -3780,7 +4280,7 @@ async function handleAttachmentAction(attachmentId = "", mode = "open") {
     const candidates = buildAttachmentCandidates(
       modalState.detail,
       attachment,
-      mode
+      finalMode
     );
 
     if (!candidates.length) {
@@ -3799,43 +4299,62 @@ async function handleAttachmentAction(attachmentId = "", mode = "open") {
             safeText(attachment.name, "archivo")
           );
 
-          if (await openOrDownloadPayload(payload, attachment, mode)) {
+          if (await openOrDownloadPayload(payload, attachment, finalMode)) {
             safeEmit("incidencias:modal:attachment", {
               ticketId,
               attachment,
-              mode,
+              mode: finalMode,
               source: "api-json-or-blob",
               url: candidate,
             });
 
             showToast(
-              mode === "download"
+              finalMode === "download"
                 ? "Descarga iniciada."
-                : "Abriendo documento.",
+                : "Documento cargado en la vista.",
               "success"
             );
 
             return true;
           }
         } else {
-          if (mode === "download") {
-            downloadUrlDirect(candidate, attachment.name || "archivo");
+          const file = normalizeAttachmentActionFile(
+            {
+              url: candidate,
+              viewUrl: candidate,
+              openUrl: candidate,
+              downloadUrl: candidate,
+              filename: attachment.name || attachment.filename,
+              name: attachment.name || attachment.filename,
+              contentType: attachment.contentType || attachment.type,
+              size: attachment.size,
+            },
+            attachment,
+            finalMode
+          );
+
+          if (!file?.url) {
+            throw new Error("ATTACHMENT_URL_EMPTY");
+          }
+
+          if (finalMode === "download") {
+            downloadResolvedAttachmentFile(file);
           } else {
-            openUrlDirect(candidate);
+            setAttachmentPreview(file);
           }
 
           safeEmit("incidencias:modal:attachment", {
             ticketId,
             attachment,
-            mode,
+            mode: finalMode,
             source: "direct-url",
             url: candidate,
           });
 
           showToast(
-            mode === "download"
+            finalMode === "download"
               ? "Descarga iniciada."
-              : "Abriendo documento.",
+              : "Documento cargado en la vista.",
             "success"
           );
 
@@ -3851,23 +4370,24 @@ async function handleAttachmentAction(attachmentId = "", mode = "open") {
     setFeedback(
       safeErrorMessage(
         error,
-        mode === "download"
+        finalMode === "download"
           ? "No se pudo descargar el adjunto."
-          : "No se pudo abrir el adjunto."
+          : "No se pudo cargar el adjunto en la vista."
       ),
       "error"
     );
 
     showToast(
-      mode === "download"
+      finalMode === "download"
         ? "No se pudo descargar el adjunto."
-        : "No se pudo abrir el adjunto.",
+        : "No se pudo cargar el adjunto.",
       "error"
     );
 
     return false;
   } finally {
     clearAttachmentBusyState();
+    clearAttachmentActionKey();
     renderModal();
     attachRootBindings();
     focusPanel();
@@ -3969,6 +4489,44 @@ function attachRootBindings() {
         downloadAttachmentBtn.dataset.attachmentId || "",
         "download"
       );
+
+      return;
+    }
+
+    const closePreviewBtn = event.target.closest(
+      '[data-modal-action="close-preview"]'
+    );
+
+    if (closePreviewBtn) {
+      event.preventDefault();
+
+      clearAttachmentPreview();
+      renderModal();
+      attachRootBindings();
+      focusPanel();
+
+      return;
+    }
+
+    const downloadPreviewBtn = event.target.closest(
+      '[data-modal-action="download-preview"]'
+    );
+
+    if (downloadPreviewBtn) {
+      event.preventDefault();
+
+      try {
+        const file = safeObject(modalState.previewFile);
+
+        if (!file?.url) {
+          throw new Error("PREVIEW_FILE_EMPTY");
+        }
+
+        downloadResolvedAttachmentFile(file);
+        showToast("Descarga iniciada.", "success");
+      } catch {
+        showToast("No se pudo descargar el documento.", "error");
+      }
 
       return;
     }
@@ -4204,11 +4762,13 @@ export const OnionIncidenciasModal = {
       ...modalState,
       detail: modalState.detail ? { ...modalState.detail } : null,
       pendingFiles: [...safeArray(modalState.pendingFiles)],
+      previewFile: modalState.previewFile ? { ...modalState.previewFile } : null,
     };
   },
 
   destroy() {
     closeIncidenciasModal();
+    clearAttachmentPreview();
     detachEscHandler();
     detachRootBindings();
     detachBus();

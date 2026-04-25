@@ -101,10 +101,12 @@ export const ActivateAccountView = (() => {
     return text || fallback;
   }
 
-  function safeObject(value) {
-    return value && typeof value === "object" && !Array.isArray(value)
-      ? value
-      : {};
+  function stringValue(value, fallback = "") {
+    if (value === null || value === undefined) {
+      return fallback;
+    }
+
+    return String(value);
   }
 
   function safeLog(...args) {
@@ -572,8 +574,8 @@ export const ActivateAccountView = (() => {
       document.getElementById("activateAccountPasswordConfirm");
 
     return {
-      password: safeText(passwordEl?.value, ""),
-      confirmPassword: safeText(confirmEl?.value, ""),
+      password: stringValue(passwordEl?.value, ""),
+      confirmPassword: stringValue(confirmEl?.value, ""),
     };
   }
 
@@ -581,7 +583,7 @@ export const ActivateAccountView = (() => {
     password = "",
     confirmPassword = "",
   } = {}) {
-    if (!password) {
+    if (!String(password || "").trim()) {
       return {
         ok: false,
         fieldId: "activateAccountPassword",
@@ -589,7 +591,7 @@ export const ActivateAccountView = (() => {
       };
     }
 
-    if (password.length < PASSWORD_MIN_LENGTH) {
+    if (String(password).length < PASSWORD_MIN_LENGTH) {
       return {
         ok: false,
         fieldId: "activateAccountPassword",
@@ -597,7 +599,7 @@ export const ActivateAccountView = (() => {
       };
     }
 
-    if (!confirmPassword) {
+    if (!String(confirmPassword || "").trim()) {
       return {
         ok: false,
         fieldId: "activateAccountPasswordConfirm",
@@ -662,7 +664,12 @@ export const ActivateAccountView = (() => {
 
   function resolveErrorStatus(error = null) {
     const code = normalizeBackendErrorCode(error);
-    const message = safeText(error?.message || error?.data?.message, "").toLowerCase();
+
+    const message = safeText(
+      error?.message ||
+        error?.data?.message,
+      ""
+    ).toLowerCase();
 
     if (
       code.includes("EXPIRED") ||
@@ -758,7 +765,10 @@ export const ActivateAccountView = (() => {
       toast.dataset.state = type;
 
       if (toastTitle) {
-        toastTitle.textContent = safeText(title, type === "error" ? "Error" : "Aviso");
+        toastTitle.textContent = safeText(
+          title,
+          type === "error" ? "Error" : "Aviso"
+        );
       }
 
       toastText.textContent = text;
@@ -875,8 +885,8 @@ export const ActivateAccountView = (() => {
     } = {}
   ) {
     const cleanToken = safeText(token, "");
-    const cleanPassword = safeText(password, "");
-    const cleanConfirmPassword = safeText(confirmPassword, "");
+    const cleanPassword = stringValue(password, "");
+    const cleanConfirmPassword = stringValue(confirmPassword, "");
 
     if (!cleanToken) {
       const err = new Error("Falta el token de activación.");
@@ -884,7 +894,7 @@ export const ActivateAccountView = (() => {
       throw err;
     }
 
-    if (!cleanPassword) {
+    if (!cleanPassword.trim()) {
       const err = new Error("Falta la contraseña.");
       err.code = "ACTIVATION_PASSWORD_MISSING";
       throw err;
@@ -1030,6 +1040,7 @@ export const ActivateAccountView = (() => {
       if (typeof AppCore?.router?.navigate === "function") {
         await AppCore.router.navigate(target, {
           replaceState: true,
+          force: true,
         });
         return true;
       }
@@ -1039,6 +1050,7 @@ export const ActivateAccountView = (() => {
       if (typeof AppCore?.Router?.navigate === "function") {
         await AppCore.Router.navigate(target, {
           replaceState: true,
+          force: true,
         });
         return true;
       }
@@ -1048,14 +1060,32 @@ export const ActivateAccountView = (() => {
       if (typeof AppCore?.modules?.Router?.navigate === "function") {
         await AppCore.modules.Router.navigate(target, {
           replaceState: true,
+          force: true,
         });
         return true;
       }
     } catch {}
 
     try {
-      window.history.pushState({}, "", target);
-      window.dispatchEvent(new PopStateEvent("popstate"));
+      window.history.replaceState(
+        {
+          path: target,
+          publicPath: target,
+          canonicalPath: target,
+        },
+        "",
+        target
+      );
+
+      window.dispatchEvent(
+        new PopStateEvent("popstate")
+      );
+
+      return true;
+    } catch {}
+
+    try {
+      window.location.assign(target);
       return true;
     } catch {}
 
@@ -1199,17 +1229,19 @@ export const ActivateAccountView = (() => {
 
     const form = container.querySelector("#activateAccountForm");
     const button = container.querySelector("#activateAccountButton");
-    const backLink = container.querySelector("#activateAccountBackToLoginLink");
     const toastClose = container.querySelector("#activateAccountToastClose");
 
-    const onSubmit = async (event) => {
-      event.preventDefault();
-
-      const action = safeText(
+    const getButtonAction = () =>
+      safeText(
         button?.dataset?.action ||
           button?.getAttribute?.("data-action"),
         ""
       );
+
+    const handlePrimaryAction = async (event) => {
+      event?.preventDefault?.();
+
+      const action = getButtonAction();
 
       if (action === "go-login") {
         await navigateToLogin();
@@ -1221,9 +1253,16 @@ export const ActivateAccountView = (() => {
       });
     };
 
-    const onBackClick = async (event) => {
-      event.preventDefault();
-      await navigateToLogin();
+    const onSubmit = async (event) => {
+      await handlePrimaryAction(event);
+    };
+
+    const onButtonClick = async (event) => {
+      const action = getButtonAction();
+
+      if (action === "go-login") {
+        await handlePrimaryAction(event);
+      }
     };
 
     const onToastClose = () => {
@@ -1237,7 +1276,7 @@ export const ActivateAccountView = (() => {
 
     try {
       form?.addEventListener?.("submit", onSubmit);
-      backLink?.addEventListener?.("click", onBackClick);
+      button?.addEventListener?.("click", onButtonClick);
       toastClose?.addEventListener?.("click", onToastClose);
     } catch {}
 
@@ -1247,7 +1286,7 @@ export const ActivateAccountView = (() => {
       } catch {}
 
       try {
-        backLink?.removeEventListener?.("click", onBackClick);
+        button?.removeEventListener?.("click", onButtonClick);
       } catch {}
 
       try {

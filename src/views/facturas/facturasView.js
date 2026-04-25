@@ -3,6 +3,7 @@
    Archivo: src/views/facturas/facturasView.js
 
    FINAL PRO SYSTEM · VIEW REAL · FULL PATCH PORTAL MODAL
+   PATCH 6 · OVERLAY SAFE CLOSE · CREATE MODAL · INCIDENCIA MODAL BRIDGE
    PATCH 5 · CREATE MODAL READY · INCIDENCIA MODAL BRIDGE
    PATCH 4 · INCIDENCIA LINK PRESERVER · PAGINATION READY
 
@@ -17,6 +18,7 @@
    - cleanup enterprise
    - preservar relación factura ↔ incidencia para columna Incidencia
    - abrir incidencia relacionada en modal real, no en URL inexistente
+   - cerrar modal detalle por X, Escape y overlay sin cerrar clicks internos
    - paginación visual real a 5 facturas por página
 ========================================================= */
 
@@ -503,7 +505,11 @@ export const FacturasView = (() => {
       ),
 
       incidencia: incidenciaPayload,
-      ticket: safeObject(first(merged.ticket, raw.ticket, incidenciaPayload)),
+
+      ticket: safeObject(
+        first(merged.ticket, raw.ticket, incidenciaPayload)
+      ),
+
       linkedTicket: safeObject(
         first(merged.linkedTicket, raw.linkedTicket, incidenciaPayload)
       ),
@@ -583,6 +589,7 @@ export const FacturasView = (() => {
 
   function safeEmit(event = "", payload = {}) {
     const eventName = safeText(event, "");
+
     if (!eventName) return false;
 
     try {
@@ -602,7 +609,10 @@ export const FacturasView = (() => {
 
   function safeOn(event = "", handler = null) {
     const eventName = safeText(event, "");
-    if (!eventName || typeof handler !== "function") return () => {};
+
+    if (!eventName || typeof handler !== "function") {
+      return () => {};
+    }
 
     let busAttached = false;
     let windowAttached = false;
@@ -822,6 +832,7 @@ export const FacturasView = (() => {
 
   async function fetchIncidenciaDetail(ticketId = "") {
     const id = safeText(ticketId, "");
+
     if (!id) return null;
 
     const encodedId = encodeURIComponent(id);
@@ -864,6 +875,7 @@ export const FacturasView = (() => {
 
   function findFacturaByIncidenciaId(ticketId = "") {
     const id = safeText(ticketId, "");
+
     if (!id) return null;
 
     return (
@@ -876,7 +888,6 @@ export const FacturasView = (() => {
     const id = safeText(ticketId, "");
     const factura = findFacturaByIncidenciaId(id);
     const incidenciaPayload = factura ? buildIncidenciaPayload(factura) : null;
-
     const facturaId = factura ? getStableFacturaId(factura) : "";
 
     return {
@@ -885,8 +896,19 @@ export const FacturasView = (() => {
       id,
       ticketId: id,
       incidenciaId: id,
+      code: id,
+      ticketCode: id,
 
       subject: safeText(
+        first(
+          incidenciaPayload?.subject,
+          incidenciaPayload?.asunto,
+          "Incidencia relacionada"
+        ),
+        "Incidencia relacionada"
+      ),
+
+      title: safeText(
         first(
           incidenciaPayload?.subject,
           incidenciaPayload?.asunto,
@@ -904,9 +926,57 @@ export const FacturasView = (() => {
         "Incidencia relacionada"
       ),
 
+      status: safeText(
+        first(
+          incidenciaPayload?.status,
+          incidenciaPayload?.estado,
+          "open"
+        ),
+        "open"
+      ),
+
+      estado: safeText(
+        first(
+          incidenciaPayload?.estado,
+          incidenciaPayload?.status,
+          "open"
+        ),
+        "open"
+      ),
+
+      priority: safeText(
+        first(
+          incidenciaPayload?.priority,
+          incidenciaPayload?.prioridad,
+          "medium"
+        ),
+        "medium"
+      ),
+
+      prioridad: safeText(
+        first(
+          incidenciaPayload?.prioridad,
+          incidenciaPayload?.priority,
+          "medium"
+        ),
+        "medium"
+      ),
+
+      description: safeText(
+        first(
+          incidenciaPayload?.description,
+          incidenciaPayload?.descripcion,
+          incidenciaPayload?.message,
+          facturaId ? `Incidencia vinculada a la factura ${facturaId}.` : ""
+        ),
+        "Incidencia vinculada a una factura."
+      ),
+
       facturaId,
       invoiceId: facturaId,
       factura: facturaId,
+      facturaRelacionada: facturaId,
+      invoiceCode: facturaId,
 
       clienteId: safeText(
         first(
@@ -941,6 +1011,77 @@ export const FacturasView = (() => {
     };
   }
 
+  function mergeIncidenciaDetail(fallback = {}, remote = {}) {
+    const base = safeObject(fallback);
+    const next = safeObject(remote);
+
+    const id = safeText(
+      first(
+        next.ticketId,
+        next.id,
+        next.code,
+        next.ticketCode,
+        next.incidenciaId,
+        base.ticketId,
+        base.id
+      ),
+      ""
+    );
+
+    const facturaId = safeText(
+      first(
+        next.facturaId,
+        next.invoiceId,
+        base.facturaId,
+        base.invoiceId
+      ),
+      ""
+    );
+
+    const facturaLabel = safeText(
+      first(
+        next.factura,
+        next.facturaRelacionada,
+        next.invoiceCode,
+        base.factura,
+        base.facturaRelacionada,
+        base.invoiceCode,
+        facturaId
+      ),
+      ""
+    );
+
+    return {
+      ...base,
+      ...next,
+
+      id,
+      ticketId: id,
+      incidenciaId: safeText(first(next.incidenciaId, id), id),
+      code: safeText(first(next.code, next.ticketCode, id), id),
+      ticketCode: safeText(first(next.ticketCode, next.code, id), id),
+
+      facturaId,
+      invoiceId: safeText(first(next.invoiceId, next.facturaId, facturaId), facturaId),
+      factura: facturaLabel,
+      facturaRelacionada: facturaLabel,
+      invoiceCode: safeText(first(next.invoiceCode, facturaLabel), facturaLabel),
+
+      raw: {
+        ...safeObject(base.raw),
+        ...safeObject(next.raw || next),
+
+        id,
+        ticketId: id,
+        incidenciaId: safeText(first(next.incidenciaId, id), id),
+
+        facturaId,
+        invoiceId: safeText(first(next.invoiceId, next.facturaId, facturaId), facturaId),
+        facturaRelacionada: facturaLabel,
+      },
+    };
+  }
+
   async function ensureIncidenciasModal() {
     try {
       if (typeof window?.OnionIncidenciasModal?.open === "function") {
@@ -952,8 +1093,8 @@ export const FacturasView = (() => {
       const mod = await import("../incidencias/incidencias.modal.js");
 
       return (
-        mod?.default ||
         mod?.OnionIncidenciasModal ||
+        mod?.default ||
         window?.OnionIncidenciasModal ||
         null
       );
@@ -969,7 +1110,7 @@ export const FacturasView = (() => {
     try {
       if (typeof modal?.open === "function") {
         modal.open(payload);
-        return true;
+        return modal;
       }
     } catch {}
 
@@ -979,7 +1120,48 @@ export const FacturasView = (() => {
       incidenciaId: safeText(first(payload.incidenciaId, payload.id), ""),
     });
 
+    return modal || true;
+  }
+
+  async function updateIncidenciaModal(modal = null, detail = {}) {
+    const payload = safeObject(detail);
+
+    try {
+      if (modal && typeof modal.update === "function") {
+        modal.update(payload);
+        return true;
+      }
+    } catch {}
+
+    try {
+      if (modal && typeof modal.open === "function") {
+        modal.open(payload);
+        return true;
+      }
+    } catch {}
+
+    safeEmit("incidencias:modal:update", {
+      detail: payload,
+      ticketId: safeText(first(payload.ticketId, payload.id), ""),
+      incidenciaId: safeText(first(payload.incidenciaId, payload.id), ""),
+    });
+
     return true;
+  }
+
+  function setIncidenciaModalFeedback(modal = null, message = "", type = "info") {
+    const text = safeText(message, "");
+
+    if (!text) return false;
+
+    try {
+      if (modal && typeof modal.setFeedback === "function") {
+        modal.setFeedback(text, type);
+        return true;
+      }
+    } catch {}
+
+    return false;
   }
 
   /* =====================================================
@@ -1201,7 +1383,10 @@ export const FacturasView = (() => {
           asRefresh: true,
         });
       } catch {
-        showToast("Factura creada, pero no se pudo refrescar el listado.", "warning");
+        showToast(
+          "Factura creada, pero no se pudo refrescar el listado.",
+          "warning"
+        );
       }
     };
 
@@ -1227,34 +1412,47 @@ export const FacturasView = (() => {
 
     const fallback = buildIncidenciaFallback(id);
 
+    const modal = await openIncidenciaModal(fallback);
+
     try {
       const fetchedDetail = await fetchIncidenciaDetail(id);
 
-      const finalDetail = fetchedDetail
-        ? {
-            ...fallback,
-            ...safeObject(fetchedDetail),
+      if (!fetchedDetail) {
+        setIncidenciaModalFeedback(
+          modal,
+          "La incidencia se ha abierto con la información vinculada a la factura. No se encontró detalle remoto adicional.",
+          "info"
+        );
 
-            id: safeText(first(fetchedDetail.id, fetchedDetail.ticketId, id), id),
-            ticketId: safeText(first(fetchedDetail.ticketId, fetchedDetail.id, id), id),
-            incidenciaId: safeText(
-              first(fetchedDetail.incidenciaId, fetchedDetail.ticketId, fetchedDetail.id, id),
-              id
-            ),
+        return true;
+      }
 
-            raw: {
-              ...safeObject(fallback.raw),
-              ...safeObject(fetchedDetail.raw || fetchedDetail),
-            },
-          }
-        : fallback;
+      const finalDetail = mergeIncidenciaDetail(fallback, fetchedDetail);
 
-      await openIncidenciaModal(finalDetail);
+      await updateIncidenciaModal(modal, finalDetail);
+
+      safeEmit("incidencias:open:success", {
+        ticketId: id,
+        incidenciaId: id,
+        detail: finalDetail,
+      });
+
       return true;
     } catch (error) {
       safeWarn("openIncidenciaBridge fallback:", error);
 
-      await openIncidenciaModal(fallback);
+      setIncidenciaModalFeedback(
+        modal,
+        "La incidencia se ha abierto con la información vinculada a la factura, pero no se pudo cargar el detalle completo desde la API.",
+        "info"
+      );
+
+      safeEmit("facturas:incidencia:open:fallback", {
+        ticketId: id,
+        incidenciaId: id,
+        error,
+      });
+
       return true;
     }
   }
@@ -1320,6 +1518,20 @@ export const FacturasView = (() => {
     if (!root) return;
 
     const onClick = async (event) => {
+      const overlay = event.target.closest(
+        "[data-facturas-detail-overlay='true']"
+      );
+
+      const modal = event.target.closest(
+        "[data-role='facturas-detail-modal']"
+      );
+
+      if (overlay && !modal && event.target === overlay) {
+        event.preventDefault();
+        closeDetail();
+        return;
+      }
+
       const closeAction = event.target.closest(
         '[data-action="close-factura-detail"]'
       );

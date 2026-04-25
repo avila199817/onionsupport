@@ -35,6 +35,7 @@ const DEFAULT_FORM = Object.freeze({
   targetUserName: "",
   targetUserEmail: "",
   subject: "",
+  description: "",
   attachments: [],
 });
 
@@ -461,6 +462,7 @@ function getInitialForm() {
     targetUserName: safeText(first(draft.targetUserName, draft.userName), ""),
     targetUserEmail: safeText(first(draft.targetUserEmail, draft.userEmail), ""),
     subject: safeText(draft.subject, ""),
+    description: safeText(draft.description, ""),
     attachments: [],
   };
 }
@@ -474,6 +476,7 @@ function persistDraft() {
     userName: safeText(modalState.form?.targetUserName, ""),
     userEmail: safeText(modalState.form?.targetUserEmail, ""),
     subject: safeText(modalState.form?.subject, ""),
+    description: safeText(modalState.form?.description, ""),
   };
 }
 
@@ -486,6 +489,7 @@ function clearDraft() {
     userName: "",
     userEmail: "",
     subject: "",
+    description: "",
   };
 }
 
@@ -561,6 +565,7 @@ function validateForm(form = {}) {
 
   const targetUserId = safeText(current.targetUserId, "");
   const subject = normalizeWhitespace(current.subject);
+  const description = normalizeWhitespace(current.description);
 
   if (canSelectTargetUser() && !targetUserId) {
     errors.targetUserId = "Selecciona un usuario.";
@@ -572,18 +577,16 @@ function validateForm(form = {}) {
     errors.subject = "Mínimo 4 caracteres.";
   }
 
+  if (!description) {
+    errors.description = "La descripción es obligatoria.";
+  } else if (description.length < 8) {
+    errors.description = "Mínimo 8 caracteres.";
+  }
+
   return {
     valid: Object.keys(errors).length === 0,
     errors,
   };
-}
-
-function buildAutoDescription(form = {}) {
-  const subject = normalizeWhitespace(form?.subject);
-
-  return normalizeWhitespace(
-    `Incidencia creada desde el panel admin. Asunto: ${subject}`
-  );
 }
 
 function buildPayload(form = {}) {
@@ -591,7 +594,7 @@ function buildPayload(form = {}) {
   const fd = new FormData();
 
   const subject = normalizeWhitespace(current.subject);
-  const description = buildAutoDescription(current);
+  const description = normalizeWhitespace(current.description);
 
   fd.append("subject", subject);
   fd.append("description", description);
@@ -735,11 +738,6 @@ function buildUserSearchUrls(query = "") {
   params.set("mode", "incidencias");
   params.set("limit", String(USER_SEARCH_LIMIT));
 
-  /*
-    Endpoint correcto:
-    - /api/search/users si tu servidor monta la API completa en /api.
-    - /search/users como fallback si AppCore.config.apiBase ya incluye /api.
-  */
   return [
     `${USER_SEARCH_ENDPOINT}?${params.toString()}`,
     `/search/users?${params.toString()}`,
@@ -1049,6 +1047,34 @@ function renderInput({
   `;
 }
 
+function renderTextarea({
+  label = "",
+  name = "",
+  value = "",
+  placeholder = "",
+  required = false,
+  error = "",
+  rows = 5,
+} = {}) {
+  return `
+    <label class="inc-create-field">
+      <span class="inc-create-label">
+        ${escapeHtml(label)}${required ? " *" : ""}
+      </span>
+
+      <textarea
+        class="inc-create-textarea ${error ? "is-error" : ""}"
+        data-field="${escapeHtml(name)}"
+        name="${escapeHtml(name)}"
+        rows="${Number(rows) || 5}"
+        placeholder="${escapeHtml(placeholder)}"
+      >${escapeHtml(value)}</textarea>
+
+      ${renderFieldError(error)}
+    </label>
+  `;
+}
+
 function renderFilesSummary(files = []) {
   const items = safeArray(files);
 
@@ -1248,8 +1274,6 @@ function renderAdminTargetUserBlock() {
         Usuario
       </div>
 
-      ${targetUserId ? renderSelectedUserCard() : ""}
-
       <label class="inc-create-field">
         <input
           class="inc-create-input ${error ? "is-error" : ""}"
@@ -1269,6 +1293,8 @@ function renderAdminTargetUserBlock() {
       </label>
 
       ${renderUserSearchResults()}
+
+      ${renderSelectedUserCard()}
     </section>
   `;
 }
@@ -1318,7 +1344,7 @@ function renderModalInner() {
             <h2 id="incidencias-create-modal-title">
               Crear incidencia
             </h2>
-            <p>Usuario, asunto, adjuntos y enviar.</p>
+            <p>Usuario, asunto, descripción, adjuntos y enviar.</p>
           </div>
 
           <button
@@ -1363,6 +1389,16 @@ function renderModalInner() {
               placeholder: "Ej. Error al pagar, acceso bloqueado, factura incorrecta...",
               required: true,
               error: errors.subject,
+            })}
+
+            ${renderTextarea({
+              label: "Descripción",
+              name: "description",
+              value: form.description,
+              placeholder: "Describe qué ocurre, desde cuándo pasa y qué necesita soporte revisar.",
+              required: true,
+              error: errors.description,
+              rows: 5,
             })}
 
             ${renderFileInput({
@@ -1410,7 +1446,7 @@ function renderModalInner() {
           }
 
           .inc-create-panel{
-            width:min(760px, 100%);
+            width:min(800px, 100%);
             max-height:92vh;
             overflow:auto;
             border-radius:22px;
@@ -1546,11 +1582,9 @@ function renderModalInner() {
             text-transform:uppercase;
           }
 
-          .inc-create-input{
+          .inc-create-input,
+          .inc-create-textarea{
             width:100%;
-            min-height:46px;
-            padding:0 14px;
-            border-radius:14px;
             outline:none;
             color:var(--text-strong, #fff);
             background:var(--surface-1, rgba(255,255,255,.04));
@@ -1562,16 +1596,33 @@ function renderModalInner() {
               background .18s ease;
           }
 
-          .inc-create-input::placeholder{
+          .inc-create-input{
+            min-height:46px;
+            padding:0 14px;
+            border-radius:14px;
+          }
+
+          .inc-create-textarea{
+            min-height:132px;
+            padding:12px 14px;
+            border-radius:14px;
+            resize:vertical;
+            line-height:1.55;
+          }
+
+          .inc-create-input::placeholder,
+          .inc-create-textarea::placeholder{
             color:var(--text-faint, rgba(255,255,255,.36));
           }
 
-          .inc-create-input:focus{
+          .inc-create-input:focus,
+          .inc-create-textarea:focus{
             border-color:color-mix(in srgb, var(--accent, #7c5cff) 34%, var(--border-soft, rgba(255,255,255,.12)));
             box-shadow:0 0 0 4px color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
           }
 
-          .inc-create-input.is-error{
+          .inc-create-input.is-error,
+          .inc-create-textarea.is-error{
             border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 42%, var(--border-soft, rgba(255,255,255,.12)));
             box-shadow:0 0 0 4px color-mix(in srgb, var(--danger-strong, #ff6b6b) 10%, transparent);
           }
@@ -1860,6 +1911,7 @@ function renderModalInner() {
           [data-theme="light"] .inc-create-files-card,
           [data-theme="light"] .inc-create-alert,
           [data-theme="light"] .inc-create-input,
+          [data-theme="light"] .inc-create-textarea,
           [data-theme="light"] .inc-create-file-row,
           [data-theme="light"] .inc-create-search-item,
           [data-theme="light"] .inc-create-target-user-card,
@@ -2040,12 +2092,36 @@ function focusUserSearchInput() {
   return focusField("targetUserSearch");
 }
 
+function focusFirstInvalidField() {
+  const errors = safeObject(modalState.errors);
+
+  if (errors.targetUserId) {
+    if (focusUserSearchInput()) return true;
+  }
+
+  if (errors.subject) {
+    if (focusField("subject")) return true;
+  }
+
+  if (errors.description) {
+    if (focusField("description")) return true;
+  }
+
+  return false;
+}
+
 function focusPreferredField() {
   if (canSelectTargetUser() && !safeText(modalState.form?.targetUserId, "")) {
     if (focusUserSearchInput()) return true;
   }
 
-  if (focusField("subject")) return true;
+  if (!safeText(modalState.form?.subject, "")) {
+    if (focusField("subject")) return true;
+  }
+
+  if (!safeText(modalState.form?.description, "")) {
+    if (focusField("description")) return true;
+  }
 
   focusPanel();
   return true;
@@ -2084,6 +2160,7 @@ export function openIncidenciasCreateModal(draft = {}) {
       targetUserName: modalState.form.targetUserName,
       targetUserEmail: modalState.form.targetUserEmail,
       subject: modalState.form.subject,
+      description: modalState.form.description,
     },
     adminMode: canSelectTargetUser(),
   });
@@ -2159,7 +2236,7 @@ async function handleSubmit() {
   if (!validation.valid) {
     renderModal();
     attachRootBindings();
-    focusPreferredField();
+    focusFirstInvalidField();
     showToast("Revisa los campos obligatorios.", "warning");
     return false;
   }
@@ -2175,6 +2252,7 @@ async function handleSubmit() {
     userId: safeText(modalState.form.targetUserId, ""),
     userName: safeText(modalState.form.targetUserName, ""),
     subject: safeText(modalState.form.subject, ""),
+    description: safeText(modalState.form.description, ""),
     attachmentsCount: safeArray(modalState.form.attachments).length,
     adminMode: canSelectTargetUser(),
   });

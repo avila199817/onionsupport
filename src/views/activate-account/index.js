@@ -5,6 +5,9 @@
    Responsabilidades:
    - montar la vista pública de activación de cuenta
    - leer token desde URL normal o hash-router
+   - capturar token antes de limpiar la URL
+   - limpiar token visible de la barra del navegador
+   - no exponer token real en DOM
    - renderizar template premium alineado con login/reset-password
    - ejecutar activación contra backend
    - manejar estados idle/loading/success/error/expired/invalid
@@ -37,6 +40,10 @@ export const ActivateAccountView = (() => {
 
   const DEFAULT_ACTIVATION_ENDPOINT = "/auth/activate-account";
 
+  const CLEAN_ACTIVATION_PUBLIC_PATH = "/activate-account";
+  const SCRUB_TOKEN_FROM_URL_AFTER_CAPTURE = true;
+  const TEMPLATE_CAPTURED_TOKEN_SENTINEL = "__captured_activation_token__";
+
   const TOKEN_PARAM_NAMES = [
     "token",
     "activationToken",
@@ -68,6 +75,13 @@ export const ActivateAccountView = (() => {
   /* =========================================================
      SAFE HELPERS
   ========================================================= */
+
+  function isBrowser() {
+    return (
+      typeof window !== "undefined" &&
+      typeof document !== "undefined"
+    );
+  }
 
   function safeText(value, fallback = "") {
     if (value === null || value === undefined) {
@@ -111,7 +125,49 @@ export const ActivateAccountView = (() => {
     } catch {}
   }
 
+  function getBaseOrigin() {
+    if (isBrowser() && window.location?.origin) {
+      return window.location.origin;
+    }
+
+    return "http://localhost";
+  }
+
+  function normalizePathnameOnly(pathname = "/") {
+    let value = String(pathname || "/")
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
+
+    if (!value) {
+      value = "/";
+    }
+
+    if (!value.startsWith("/")) {
+      value = `/${value}`;
+    }
+
+    if (value.length > 1 && value.endsWith("/")) {
+      value = value.replace(/\/+$/g, "") || "/";
+    }
+
+    return value;
+  }
+
+  function isActivationPathname(pathname = "") {
+    const normalized = normalizePathnameOnly(pathname);
+
+    return (
+      normalized === CLEAN_ACTIVATION_PUBLIC_PATH ||
+      normalized.startsWith(`${CLEAN_ACTIVATION_PUBLIC_PATH}/`)
+    );
+  }
+
   function getContainer() {
+    if (!isBrowser()) {
+      return null;
+    }
+
     return (
       AppCore?.dom?.viewContainer ||
       document.getElementById("view-container") ||
@@ -131,11 +187,16 @@ export const ActivateAccountView = (() => {
   }
 
   function getActivationEndpoint() {
+    const globalEndpoint =
+      isBrowser()
+        ? window.ONION_ACTIVATE_ACCOUNT_ENDPOINT
+        : "";
+
     return safeText(
       AppCore?.config?.activateAccountEndpoint ||
         AppCore?.config?.activationEndpoint ||
         AppCore?.config?.authActivateEndpoint ||
-        window?.ONION_ACTIVATE_ACCOUNT_ENDPOINT ||
+        globalEndpoint ||
         DEFAULT_ACTIVATION_ENDPOINT,
       DEFAULT_ACTIVATION_ENDPOINT
     );
@@ -176,76 +237,211 @@ export const ActivateAccountView = (() => {
     return joinUrl("/api", value);
   }
 
-  function getLocationSearchParams() {
-    const params = new URLSearchParams();
+  /* =========================================================
+     TOKEN EXTRACTION + URL SCRUB
+  ========================================================= */
 
+  function getTokenFromSearchParams(search = "") {
     try {
-      const directParams = new URLSearchParams(window.location.search || "");
+      const params = new URLSearchParams(search || "");
 
-      for (const [key, value] of directParams.entries()) {
-        params.set(key, value);
-      }
-    } catch {}
+      for (const key of TOKEN_PARAM_NAMES) {
+        const value = safeText(params.get(key), "");
 
-    try {
-      const hash = safeText(window.location.hash, "");
-      const query = hash.includes("?") ? hash.split("?").slice(1).join("?") : "";
-
-      if (query) {
-        const hashParams = new URLSearchParams(query);
-
-        for (const [key, value] of hashParams.entries()) {
-          if (!params.has(key)) {
-            params.set(key, value);
-          }
+        if (value) {
+          return value;
         }
-      }
-    } catch {}
-
-    return params;
-  }
-
-  function extractTokenFromPath() {
-    try {
-      const pathname = safeText(window.location.pathname, "");
-      const parts = pathname.split("/").filter(Boolean);
-
-      const index = parts.findIndex((part) => part === "activate-account");
-
-      if (index >= 0 && parts[index + 1]) {
-        return decodeURIComponent(parts[index + 1]);
-      }
-    } catch {}
-
-    try {
-      const hash = safeText(window.location.hash, "");
-      const cleanHash = hash.replace(/^#\/?/, "");
-      const pathOnly = cleanHash.split("?")[0] || "";
-      const parts = pathOnly.split("/").filter(Boolean);
-
-      const index = parts.findIndex((part) => part === "activate-account");
-
-      if (index >= 0 && parts[index + 1]) {
-        return decodeURIComponent(parts[index + 1]);
       }
     } catch {}
 
     return "";
   }
 
+  function extractTokenFromRoutePath(pathname = "") {
+    try {
+      const normalized = normalizePathnameOnly(pathname);
+      const parts = normalized.split("/").filter(Boolean);
+
+      const index = parts.findIndex((part) => part === "activate-account");
+
+      if (index >= 0 && parts[index + 1]) {
+        return safeText(decodeURIComponent(parts[index + 1]), "");
+      }
+    } catch {}
+
+    return "";
+  }
+
+  function extractTokenFromHash(hash = "") {
+    const rawHash = safeText(hash, "");
+
+    if (!rawHash) {
+      return "";
+    }
+
+    try {
+      const cleanHash = rawHash.replace(/^#\/?/, "/");
+      const query = cleanHash.includes("?")
+        ? cleanHash.split("?").slice(1).join("?")
+        : "";
+
+      const fromQuery = getTokenFromSearchParams(query ? `?${query}` : "");
+
+      if (fromQuery) {
+        return fromQuery;
+      }
+
+      const pathOnly = cleanHash.split("?")[0] || "";
+
+      return extractTokenFromRoutePath(pathOnly);
+    } catch {
+      return "";
+    }
+  }
+
+  function extractTokenFromUrlLike(value = "") {
+    const raw = safeText(value, "");
+
+    if (!raw) {
+      return "";
+    }
+
+    try {
+      const parsed = new URL(raw, getBaseOrigin());
+
+      const fromSearch = getTokenFromSearchParams(parsed.search);
+
+      if (fromSearch) {
+        return fromSearch;
+      }
+
+      const fromHash = extractTokenFromHash(parsed.hash);
+
+      if (fromHash) {
+        return fromHash;
+      }
+
+      return extractTokenFromRoutePath(parsed.pathname);
+    } catch {
+      return "";
+    }
+  }
+
+  function getInitialActivationUrlCandidates() {
+    const urls = [];
+
+    if (isBrowser()) {
+      try {
+        urls.push(window.location.href);
+      } catch {}
+
+      try {
+        urls.push(window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__);
+      } catch {}
+
+      try {
+        urls.push(window.__ONION_INITIAL_URL__);
+      } catch {}
+    }
+
+    return urls
+      .map((url) => safeText(url, ""))
+      .filter(Boolean);
+  }
+
   function extractTokenFromUrl() {
-    const params = getLocationSearchParams();
+    const candidates = getInitialActivationUrlCandidates();
 
-    for (const key of TOKEN_PARAM_NAMES) {
-      const value = safeText(params.get(key), "");
+    for (const candidate of candidates) {
+      const token = extractTokenFromUrlLike(candidate);
 
-      if (value) {
-        return value;
+      if (token) {
+        return token;
       }
     }
 
-    return extractTokenFromPath();
+    return "";
   }
+
+  function scrubActivationTokenFromUrl() {
+    if (!SCRUB_TOKEN_FROM_URL_AFTER_CAPTURE) {
+      return false;
+    }
+
+    if (!isBrowser()) {
+      return false;
+    }
+
+    try {
+      if (
+        !window.history ||
+        typeof window.history.replaceState !== "function"
+      ) {
+        return false;
+      }
+
+      const currentUrl = new URL(window.location.href);
+      const hashPath = safeText(currentUrl.hash, "").replace(/^#\/?/, "/");
+
+      const isActivateUrl =
+        isActivationPathname(currentUrl.pathname) ||
+        isActivationPathname(hashPath);
+
+      if (!isActivateUrl) {
+        return false;
+      }
+
+      const cleanPath = CLEAN_ACTIVATION_PUBLIC_PATH;
+
+      const currentState =
+        window.history.state &&
+        typeof window.history.state === "object"
+          ? {
+              ...window.history.state,
+              path: cleanPath,
+              publicPath: cleanPath,
+              canonicalPath: cleanPath,
+              searchAndHash: "",
+              scrubbedActivationToken: true,
+            }
+          : {
+              path: cleanPath,
+              publicPath: cleanPath,
+              canonicalPath: cleanPath,
+              searchAndHash: "",
+              scrubbedActivationToken: true,
+            };
+
+      window.history.replaceState(
+        currentState,
+        "",
+        cleanPath
+      );
+
+      try {
+        AppCore?.setRoute?.(cleanPath);
+      } catch {}
+
+      try {
+        AppCore?.setPublicPath?.(cleanPath);
+      } catch {}
+
+      try {
+        AppCore?.setState?.({
+          route: cleanPath,
+          publicPath: cleanPath,
+        });
+      } catch {}
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /* =========================================================
+     DOCUMENT / LAYOUT
+  ========================================================= */
 
   function setDocumentTitle(status = state.status) {
     try {
@@ -265,16 +461,20 @@ export const ActivateAccountView = (() => {
         return;
       }
 
-      document.title = `${title} · ${DEFAULT_APP_NAME}`;
+      if (isBrowser()) {
+        document.title = `${title} · ${DEFAULT_APP_NAME}`;
+      }
     } catch {}
   }
 
   function applyAuthLayoutMode(enabled = true) {
-    try {
-      document.body.classList.toggle("auth-view-active", enabled);
-      document.body.classList.toggle("login-view-active", enabled);
-      document.body.dataset.authView = enabled ? "activate-account" : "";
-    } catch {}
+    if (isBrowser()) {
+      try {
+        document.body.classList.toggle("auth-view-active", enabled);
+        document.body.classList.toggle("login-view-active", enabled);
+        document.body.dataset.authView = enabled ? "activate-account" : "";
+      } catch {}
+    }
 
     try {
       if (typeof AppCore?.setShellVisibility === "function") {
@@ -298,6 +498,10 @@ export const ActivateAccountView = (() => {
 
     autoSubmitTimer = null;
   }
+
+  /* =========================================================
+     RESPONSE HELPERS
+  ========================================================= */
 
   function normalizeBackendErrorCode(error = null) {
     return safeText(
@@ -360,6 +564,18 @@ export const ActivateAccountView = (() => {
     );
   }
 
+  function shouldClearTokenForStatus(status = "") {
+    return (
+      status === ACTIVATE_ACCOUNT_STATUS.SUCCESS ||
+      status === ACTIVATE_ACCOUNT_STATUS.INVALID ||
+      status === ACTIVATE_ACCOUNT_STATUS.EXPIRED
+    );
+  }
+
+  /* =========================================================
+     TOAST
+  ========================================================= */
+
   function showToast(message = "", type = "info", title = "") {
     const text = safeText(message, "");
 
@@ -378,6 +594,10 @@ export const ActivateAccountView = (() => {
         return true;
       }
     } catch {}
+
+    if (!isBrowser()) {
+      return false;
+    }
 
     const toast = document.getElementById("activateAccountToast");
     const toastTitle = document.getElementById("activateAccountToastTitle");
@@ -417,7 +637,7 @@ export const ActivateAccountView = (() => {
   }
 
   /* =========================================================
-     API
+     API REQUEST
   ========================================================= */
 
   async function requestWithAppHttp(endpoint = "", payload = {}) {
@@ -551,11 +771,17 @@ export const ActivateAccountView = (() => {
      RENDER
   ========================================================= */
 
+  function getTemplateToken() {
+    return state.token
+      ? TEMPLATE_CAPTURED_TOKEN_SENTINEL
+      : "";
+  }
+
   function getTemplateOptions() {
     return {
       appName: DEFAULT_APP_NAME,
       status: state.status,
-      token: state.token,
+      token: getTemplateToken(),
       loginHref: DEFAULT_LOGIN_PATH,
       backHref: DEFAULT_LOGIN_PATH,
       autoSubmit: true,
@@ -604,6 +830,10 @@ export const ActivateAccountView = (() => {
     state.message = safeText(patch.message, state.message);
     state.error = safeText(patch.error, "");
     state.response = patch.response || state.response || null;
+
+    if (shouldClearTokenForStatus(nextStatus)) {
+      state.token = "";
+    }
 
     rerender();
   }
@@ -725,6 +955,7 @@ export const ActivateAccountView = (() => {
   function scheduleAutoSubmit() {
     clearAutoSubmitTimer();
 
+    if (!isBrowser()) return;
     if (!state.token) return;
     if (state.status !== ACTIVATE_ACCOUNT_STATUS.IDLE) return;
 
@@ -832,11 +1063,18 @@ export const ActivateAccountView = (() => {
 
   async function init() {
     state.destroyed = false;
-    state.token = extractTokenFromUrl();
+
+    const capturedToken = extractTokenFromUrl();
+
+    state.token = capturedToken;
     state.message = "";
     state.error = "";
     state.response = null;
     state.submitting = false;
+
+    const urlScrubbed = capturedToken
+      ? scrubActivationTokenFromUrl()
+      : false;
 
     state.status = state.token
       ? ACTIVATE_ACCOUNT_STATUS.IDLE
@@ -844,6 +1082,7 @@ export const ActivateAccountView = (() => {
 
     safeLog("init", {
       hasToken: Boolean(state.token),
+      urlScrubbed,
     });
 
     render();
@@ -857,6 +1096,7 @@ export const ActivateAccountView = (() => {
     state.destroyed = true;
     state.mounted = false;
     state.submitting = false;
+    state.token = "";
 
     clearAutoSubmitTimer();
     cleanupBindings();

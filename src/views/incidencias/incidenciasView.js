@@ -20,12 +20,14 @@
 
    HARDENING PRO:
    - render inicial inmediato
+   - bind inmediato tras primer render para evitar pérdida de clicks
+   - cola segura para crear incidencia antes de app ready
    - carga posterior segura
    - anti-race token
    - cleanup total
    - click delegation sólida
    - fallback elegante si los modales aún no existen
-   - bloqueo de acciones antes de app ready
+   - bloqueo de acciones antes de app ready sin perder intención del usuario
    - anti spam click en apertura rápida
    - compatibilidad con template nuevo data-incidencias-action
    - template controlado por state real
@@ -552,7 +554,18 @@ export const IncidenciasView = (() => {
     if (!canInteract()) return false;
 
     pendingCreateRequest = false;
-    void handleCreateIncidencia();
+    lastCreateClickAt = 0;
+
+    try {
+      setCreating(false);
+    } catch {
+      incidenciasState.creating = false;
+    }
+
+    void handleCreateIncidencia({
+      skipThrottle: true,
+      fromPending: true,
+    });
 
     return true;
   }
@@ -717,6 +730,11 @@ export const IncidenciasView = (() => {
       incidenciasState.refreshing = hasVisibleData && asRefresh;
     }
 
+    /*
+      Importante:
+      - el listener está en el contenedor, no en los botones.
+      - aunque se haga innerHTML aquí, el listener sigue vivo.
+    */
     render();
 
     try {
@@ -727,7 +745,16 @@ export const IncidenciasView = (() => {
       const itemsAfter = getItems();
 
       markLoadedOk(itemsAfter);
-      touchLastSyncAt();
+
+      try {
+        touchLastSyncAt();
+      } catch {
+        try {
+          setLastSyncAt(Date.now());
+        } catch {
+          incidenciasState.lastSyncAt = Date.now();
+        }
+      }
 
       persistCacheBestEffort();
 
@@ -764,7 +791,22 @@ export const IncidenciasView = (() => {
 
     hydrateBestEffort();
     ensureBaseState();
+
+    /*
+      FIX CRÍTICO DE CARRERA:
+      1. Pintamos la pantalla.
+      2. Bindeamos inmediatamente el contenedor.
+      3. Después cargamos datos.
+      Antes el usuario podía ver el botón "Crear nueva incidencia"
+      antes de que existiera el listener.
+    */
     render();
+
+    if (!destroyed) {
+      bind();
+    }
+
+    flushPendingCreate();
 
     await loadData({
       force,
@@ -777,6 +819,11 @@ export const IncidenciasView = (() => {
     }
 
     render();
+
+    if (!destroyed) {
+      bind();
+    }
+
     flushPendingCreate();
 
     return api;
@@ -935,20 +982,35 @@ export const IncidenciasView = (() => {
     }
   }
 
-  async function handleCreateIncidencia() {
-    if (incidenciasState.creating) {
+  async function handleCreateIncidencia(options = {}) {
+    const opts = safeObject(options);
+    const skipThrottle = Boolean(opts.skipThrottle);
+
+    if (incidenciasState.creating && !pendingCreateRequest) {
       return false;
     }
 
-    if (!throttleCreateClick()) {
+    if (!skipThrottle && !throttleCreateClick()) {
       return false;
     }
 
     if (!canInteract()) {
       pendingCreateRequest = true;
-      showToast("La pantalla aún se está preparando.", "info");
+
+      try {
+        setCreating(true);
+      } catch {
+        incidenciasState.creating = true;
+      }
+
+      rerender();
+
+      showToast("Preparando formulario...", "info");
+
       return false;
     }
+
+    pendingCreateRequest = false;
 
     try {
       setCreating(true);
@@ -1115,6 +1177,8 @@ export const IncidenciasView = (() => {
 
       if (createBtn) {
         event.preventDefault();
+        event.stopPropagation();
+
         await handleCreateIncidencia();
         return;
       }
@@ -1228,6 +1292,8 @@ export const IncidenciasView = (() => {
       bus.on("incidencias:reopen:success", onMutated);
 
       bus.on("app:ready", onReady);
+      bus.on("app:boot:ready", onReady);
+      bus.on("app:boot:complete", onReady);
       bus.on("router:rendered", onReady);
     } catch {}
 
@@ -1242,16 +1308,22 @@ export const IncidenciasView = (() => {
       try { bus.off("incidencias:reopen:success", onMutated); } catch {}
 
       try { bus.off("app:ready", onReady); } catch {}
+      try { bus.off("app:boot:ready", onReady); } catch {}
+      try { bus.off("app:boot:complete", onReady); } catch {}
       try { bus.off("router:rendered", onReady); } catch {}
     };
   }
 
   function bindWindowEvents() {
-    const onCreated = async (event) => {
-      const payload = getEventPayload(event);
+    const onCreated = async () => {
+      await reload({
+        force: true,
+        asRefresh: true,
+        silent: true,
+      });
+    };
 
-      safeEmit("incidencias:create:success", payload);
-
+    const onMutated = async () => {
       await reload({
         force: true,
         asRefresh: true,
@@ -1265,13 +1337,29 @@ export const IncidenciasView = (() => {
 
     try {
       window.addEventListener("incidencias:create:success", onCreated);
+      window.addEventListener("incidencias:modal:updated", onMutated);
+      window.addEventListener("incidencias:upload:success", onMutated);
+      window.addEventListener("incidencias:comment:success", onMutated);
+      window.addEventListener("incidencias:reopen:success", onMutated);
+
       window.addEventListener("app:ready", onReady);
+      window.addEventListener("app:boot:ready", onReady);
+      window.addEventListener("app:boot:complete", onReady);
+      window.addEventListener("router:rendered", onReady);
     } catch {}
 
     return () => {
       try {
         window.removeEventListener("incidencias:create:success", onCreated);
+        window.removeEventListener("incidencias:modal:updated", onMutated);
+        window.removeEventListener("incidencias:upload:success", onMutated);
+        window.removeEventListener("incidencias:comment:success", onMutated);
+        window.removeEventListener("incidencias:reopen:success", onMutated);
+
         window.removeEventListener("app:ready", onReady);
+        window.removeEventListener("app:boot:ready", onReady);
+        window.removeEventListener("app:boot:complete", onReady);
+        window.removeEventListener("router:rendered", onReady);
       } catch {}
     };
   }
@@ -1358,6 +1446,8 @@ export const IncidenciasView = (() => {
         bind();
       }
 
+      flushPendingCreate();
+
       return api;
     })();
 
@@ -1425,6 +1515,7 @@ export const IncidenciasView = (() => {
       destroyed,
       hasInflightInit: Boolean(inflightInit),
       hasInflightReload: Boolean(inflightReload),
+      pendingCreateRequest,
     }),
 
     get initialized() {

@@ -3,7 +3,8 @@
    Archivo: src/views/facturas/facturas.template.js
 
    FINAL PRODUCTION TEMPLATE · FACTURAS 10/10 · VISUAL FIX
-   PATCH · PAGINATION 5 ITEMS · INCIDENCIA READY · NO ROW CLICK
+   PATCH · PAGINATION 5 ITEMS · INCIDENCIA MODAL READY
+   PATCH · ADMIN CREATE BUTTON · COMPACT TABLE · BUTTON HOVER FIX
 ========================================================= */
 
 /* =========================================================
@@ -11,6 +12,15 @@
 ========================================================= */
 
 const DEFAULT_PAGE_SIZE = 5;
+
+const ADMIN_ROLES = new Set([
+  "admin",
+  "administrator",
+  "superadmin",
+  "super_admin",
+  "root",
+  "owner",
+]);
 
 /* =========================================================
    HELPERS
@@ -69,6 +79,32 @@ function escapeHtml(value = "") {
 
 function normalizeWhitespace(value = "") {
   return safeText(value, "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeRole(value = "") {
+  return safeText(value, "").toLowerCase();
+}
+
+function isAdminState(state = {}) {
+  const runtime = safeObject(state);
+
+  const role = normalizeRole(
+    first(
+      runtime.role,
+      runtime.rol,
+      runtime.user?.role,
+      runtime.user?.rol,
+      runtime.currentUser?.role,
+      runtime.currentUser?.rol,
+      runtime.session?.user?.role,
+      runtime.session?.user?.rol,
+      runtime.auth?.role,
+      runtime.auth?.user?.role,
+      runtime.auth?.user?.rol
+    )
+  );
+
+  return ADMIN_ROLES.has(role);
 }
 
 function formatMoney(value = 0, currency = "EUR") {
@@ -698,6 +734,7 @@ function renderEstadoPagoChip(item = {}) {
 
 function renderIncidenciaLink(item = {}) {
   const incidenciaId = getIncidenciaId(item);
+  const facturaId = getFacturaId(item);
 
   if (!incidenciaId || incidenciaId === "—") {
     return `<span class="facturas-incidencia-empty">—</span>`;
@@ -711,6 +748,7 @@ function renderIncidenciaLink(item = {}) {
       data-facturas-action="open-incidencia"
       data-ticket-id="${escapeHtml(incidenciaId)}"
       data-incidencia-id="${escapeHtml(incidenciaId)}"
+      data-factura-id="${escapeHtml(facturaId)}"
       title="Abrir incidencia relacionada"
     >
       ${escapeHtml(incidenciaId)}
@@ -807,6 +845,7 @@ function renderRow(item = {}, state = {}) {
             type="button"
             class="facturas-action-btn"
             data-action="open-factura"
+            data-facturas-action="open-factura"
             data-factura-id="${escapeHtml(facturaId)}"
             ${busy.isOpening ? 'disabled aria-busy="true"' : ""}
           >
@@ -821,6 +860,7 @@ function renderRow(item = {}, state = {}) {
             type="button"
             class="facturas-action-btn"
             data-action="view-factura-pdf"
+            data-facturas-action="view-factura-pdf"
             data-factura-id="${escapeHtml(facturaId)}"
             ${
               pdfAvailable && !busy.isViewingPdf
@@ -839,6 +879,7 @@ function renderRow(item = {}, state = {}) {
             type="button"
             class="facturas-action-btn facturas-action-btn--primary"
             data-action="download-factura"
+            data-facturas-action="download-factura"
             data-factura-id="${escapeHtml(facturaId)}"
             ${
               pdfAvailable && !busy.isDownloading
@@ -857,6 +898,7 @@ function renderRow(item = {}, state = {}) {
             type="button"
             class="facturas-action-btn facturas-action-btn--success"
             data-action="send-factura"
+            data-facturas-action="send-factura"
             data-factura-id="${escapeHtml(facturaId)}"
             ${busy.isSending ? 'disabled aria-busy="true"' : ""}
           >
@@ -999,9 +1041,11 @@ function renderStyles() {
       .facturas-btn:hover{
         transform:translateY(-1px);
         box-shadow:0 8px 18px rgba(15,23,42,.06);
+        background:rgba(255,255,255,.9);
       }
 
-      .facturas-btn--primary{
+      .facturas-btn--primary,
+      .facturas-btn--create{
         border-color:color-mix(in srgb, var(--accent, #7c5cff) 16%, rgba(15,23,42,.06));
         background:linear-gradient(
           180deg,
@@ -1010,6 +1054,44 @@ function renderStyles() {
         );
         color:#fff;
         box-shadow:0 8px 20px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
+      }
+
+      .facturas-btn--create{
+        background:
+          linear-gradient(180deg, rgba(255,255,255,.16), rgba(255,255,255,0)),
+          linear-gradient(
+            180deg,
+            color-mix(in srgb, var(--success-strong, #36c690) 86%, white 14%),
+            color-mix(in srgb, var(--success-strong, #36c690) 92%, black 8%)
+          );
+        border-color:color-mix(in srgb, var(--success-strong, #36c690) 18%, rgba(15,23,42,.06));
+        box-shadow:0 8px 20px color-mix(in srgb, var(--success-strong, #36c690) 16%, transparent);
+      }
+
+      .facturas-btn--primary:hover,
+      .facturas-btn--create:hover{
+        color:#fff;
+        transform:translateY(-1px);
+        box-shadow:0 12px 24px color-mix(in srgb, var(--accent, #7c5cff) 22%, transparent);
+      }
+
+      .facturas-btn--primary:hover{
+        background:linear-gradient(
+          180deg,
+          color-mix(in srgb, var(--accent, #7c5cff) 90%, white 10%),
+          color-mix(in srgb, var(--accent, #7c5cff) 96%, black 4%)
+        );
+      }
+
+      .facturas-btn--create:hover{
+        background:
+          linear-gradient(180deg, rgba(255,255,255,.18), rgba(255,255,255,0)),
+          linear-gradient(
+            180deg,
+            color-mix(in srgb, var(--success-strong, #36c690) 90%, white 10%),
+            color-mix(in srgb, var(--success-strong, #36c690) 96%, black 4%)
+          );
+        box-shadow:0 12px 24px color-mix(in srgb, var(--success-strong, #36c690) 22%, transparent);
       }
 
       .facturas-btn.is-loading,
@@ -1207,11 +1289,12 @@ function renderStyles() {
         width:100%;
         border-collapse:separate;
         border-spacing:0;
-        min-width:1120px;
+        min-width:1040px;
+        table-layout:fixed;
       }
 
       .facturas-table thead th{
-        padding:12px 16px;
+        padding:12px 12px;
         text-align:left;
         font-size:11px;
         font-weight:760;
@@ -1224,7 +1307,7 @@ function renderStyles() {
       }
 
       .facturas-table tbody td{
-        padding:12px 16px;
+        padding:12px 12px;
         vertical-align:middle;
         border-bottom:1px solid rgba(15,23,42,.055);
       }
@@ -1357,6 +1440,7 @@ function renderStyles() {
       .facturas-total-stack{
         display:grid;
         gap:2px;
+        min-width:0;
       }
 
       .facturas-total-value{
@@ -1380,10 +1464,12 @@ function renderStyles() {
         line-height:1.15;
         color:#98a2b3;
         white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
       }
 
       .facturas-incidencia-link{
-        max-width:178px;
+        max-width:100%;
         min-height:30px;
         padding:0 10px;
         border-radius:999px;
@@ -1426,10 +1512,10 @@ function renderStyles() {
 
       .facturas-actions{
         display:grid;
-        grid-template-columns:repeat(2, minmax(78px, 1fr));
+        grid-template-columns:repeat(2, minmax(76px, 1fr));
         gap:6px;
-        width:178px;
-        min-width:178px;
+        width:100%;
+        min-width:172px;
         justify-content:end;
       }
 
@@ -1455,12 +1541,14 @@ function renderStyles() {
           border-color .16s ease,
           background .16s ease,
           transform .16s ease,
-          opacity .16s ease;
+          opacity .16s ease,
+          box-shadow .16s ease;
       }
 
       .facturas-action-btn:hover{
         border-color:rgba(15,23,42,.11);
         background:rgba(255,255,255,.9);
+        color:#1f2937;
         transform:translateY(-1px);
       }
 
@@ -1474,6 +1562,17 @@ function renderStyles() {
         color:#fff;
       }
 
+      .facturas-action-btn--primary:hover{
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 22%, rgba(15,23,42,.06));
+        background:linear-gradient(
+          180deg,
+          color-mix(in srgb, var(--accent, #7c5cff) 90%, white 10%),
+          color-mix(in srgb, var(--accent, #7c5cff) 96%, black 4%)
+        );
+        color:#fff;
+        box-shadow:0 8px 18px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
+      }
+
       .facturas-action-btn--success{
         border-color:color-mix(in srgb, var(--success-strong, #36c690) 16%, rgba(15,23,42,.06));
         background:linear-gradient(
@@ -1482,6 +1581,17 @@ function renderStyles() {
           color-mix(in srgb, var(--success-strong, #36c690) 92%, black 8%)
         );
         color:#fff;
+      }
+
+      .facturas-action-btn--success:hover{
+        border-color:color-mix(in srgb, var(--success-strong, #36c690) 22%, rgba(15,23,42,.06));
+        background:linear-gradient(
+          180deg,
+          color-mix(in srgb, var(--success-strong, #36c690) 90%, white 10%),
+          color-mix(in srgb, var(--success-strong, #36c690) 96%, black 4%)
+        );
+        color:#fff;
+        box-shadow:0 8px 18px color-mix(in srgb, var(--success-strong, #36c690) 18%, transparent);
       }
 
       .facturas-inline-loading{
@@ -1501,7 +1611,7 @@ function renderStyles() {
         flex:0 0 auto;
       }
 
-      .facturas-btn:not(.facturas-btn--primary) .facturas-inline-spinner,
+      .facturas-btn:not(.facturas-btn--primary):not(.facturas-btn--create) .facturas-inline-spinner,
       .facturas-action-btn:not(.facturas-action-btn--primary):not(.facturas-action-btn--success) .facturas-inline-spinner{
         border-color:rgba(15,23,42,.16);
         border-top-color:currentColor;
@@ -1515,8 +1625,8 @@ function renderStyles() {
 
       .facturas-table-loading-row{
         display:grid;
-        grid-template-columns:44px minmax(220px, 1.25fr) 110px 140px 112px 156px 178px;
-        gap:12px;
+        grid-template-columns:44px minmax(190px, 1.1fr) 102px 130px 108px 150px 172px;
+        gap:10px;
         align-items:center;
       }
 
@@ -1588,7 +1698,7 @@ function renderStyles() {
       }
 
       .facturas-skeleton--actions{
-        width:178px;
+        width:172px;
         height:66px;
         border-radius:12px;
       }
@@ -1733,6 +1843,7 @@ export function renderHeader({ items = [], state = {} } = {}) {
   const runtime = safeObject(state);
 
   const stats = computeStats(rows);
+  const canCreateFactura = isAdminState(runtime);
 
   const updatedAt = first(
     runtime.lastSyncAt,
@@ -1768,6 +1879,23 @@ export function renderHeader({ items = [], state = {} } = {}) {
           >
             <span class="facturas-btn-text">Exportar CSV</span>
           </button>
+
+          ${
+            canCreateFactura
+              ? `
+                <button
+                  type="button"
+                  id="facturas-create-btn"
+                  class="facturas-btn facturas-btn--create"
+                  data-action="create-factura"
+                  data-facturas-action="create-factura"
+                  aria-label="Crear nueva factura"
+                >
+                  <span class="facturas-btn-text">Crear factura</span>
+                </button>
+              `
+              : ""
+          }
 
           <button
             type="button"
@@ -1902,12 +2030,12 @@ export function renderCards({ items = [], state = {} } = {}) {
         <div class="facturas-table-shell">
           <table class="facturas-table" role="table" aria-label="Listado de facturas">
             <colgroup>
-              <col style="width:36%;">
+              <col style="width:31%;">
               <col style="width:10%;">
               <col style="width:14%;">
               <col style="width:12%;">
-              <col style="width:14%;">
-              <col style="width:14%;">
+              <col style="width:16%;">
+              <col style="width:17%;">
             </colgroup>
 
             <thead>

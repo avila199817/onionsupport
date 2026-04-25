@@ -15,6 +15,11 @@
    - emitir incidencias:create:success para refrescar la vista
    - persistir draft mínimo mientras el modal está abierto
    - evitar doble submit y doble binding
+
+   AJUSTE FINAL:
+   - eliminado badge visual "Modo administrador"
+   - header más limpio
+   - conserva la lógica admin sin exponer esa etiqueta en UI
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -1802,7 +1807,7 @@ function renderModalInner() {
   const serverError = safeText(modalState.serverError, "");
   const successMessage = safeText(modalState.successMessage, "");
   const createdTicketId = safeText(modalState.createdTicketId, "");
-  const adminMode = canSelectTargetUser();
+  const hasUserSelector = canSelectTargetUser();
 
   return `
     <div
@@ -1820,17 +1825,13 @@ function renderModalInner() {
       >
         <div class="inc-create-header">
           <div class="inc-create-header-copy">
-            <span class="inc-create-eyebrow">
-              ${adminMode ? "Modo administrador" : "Nueva solicitud"}
-            </span>
-
             <h2 id="incidencias-create-modal-title">
               Crear incidencia
             </h2>
 
             <p>
               ${
-                adminMode
+                hasUserSelector
                   ? "Selecciona usuario, define el asunto, describe el caso y adjunta documentos si hace falta."
                   : "Define el asunto, describe el caso y adjunta documentos si hace falta."
               }
@@ -1953,64 +1954,61 @@ function renderModalInner() {
             align-items:flex-start;
             justify-content:space-between;
             gap:14px;
-            padding:18px 18px 14px;
+            padding:20px 20px 16px;
             border-bottom:1px solid var(--border-soft, rgba(255,255,255,.10));
           }
 
           .inc-create-header-copy{
             display:grid;
-            gap:5px;
+            gap:7px;
             min-width:0;
-          }
-
-          .inc-create-eyebrow{
-            width:max-content;
-            max-width:100%;
-            min-height:24px;
-            display:inline-flex;
-            align-items:center;
-            padding:0 9px;
-            border-radius:999px;
-            border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft, rgba(255,255,255,.12)));
-            background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-            color:var(--text-soft, rgba(255,255,255,.74));
-            font-size:10px;
-            line-height:1;
-            font-weight:var(--weight-bold, 700);
-            letter-spacing:.06em;
-            text-transform:uppercase;
           }
 
           .inc-create-header-copy h2{
             margin:0;
             color:var(--text-strong, #fff);
-            font-size:clamp(24px, 3.6vw, 32px);
-            line-height:1;
-            letter-spacing:-.045em;
+            font-size:clamp(29px, 4vw, 42px);
+            line-height:.96;
+            letter-spacing:-.055em;
+            font-weight:var(--weight-black, 850);
           }
 
           .inc-create-header-copy p{
             margin:0;
+            max-width:680px;
             color:var(--text-dim, rgba(255,255,255,.62));
-            font-size:12px;
+            font-size:13px;
             line-height:1.45;
           }
 
           .inc-create-close{
-            width:40px;
-            height:40px;
+            width:42px;
+            height:42px;
             flex:0 0 auto;
             border-radius:14px;
             border:1px solid var(--border-soft, rgba(255,255,255,.12));
             background:var(--surface-glass, rgba(255,255,255,.05));
             color:var(--text-strong, #fff);
             cursor:pointer;
-            font-size:17px;
+            font-size:18px;
+            box-shadow:0 12px 26px rgba(0,0,0,.08);
+            transition:
+              transform .16s ease,
+              background .16s ease,
+              border-color .16s ease,
+              opacity .16s ease;
+          }
+
+          .inc-create-close:hover{
+            transform:translateY(-1px);
+            border-color:color-mix(in srgb, var(--accent, #7c5cff) 22%, var(--border-soft, rgba(255,255,255,.12)));
+            background:color-mix(in srgb, var(--accent, #7c5cff) 8%, var(--surface-glass, rgba(255,255,255,.05)));
           }
 
           .inc-create-close:disabled{
             opacity:.7;
             cursor:not-allowed;
+            transform:none;
           }
 
           .inc-create-body{
@@ -2489,7 +2487,7 @@ function renderModalInner() {
             }
 
             .inc-create-header{
-              padding:14px 14px 12px;
+              padding:16px 14px 13px;
             }
 
             .inc-create-body{
@@ -2497,7 +2495,7 @@ function renderModalInner() {
             }
 
             .inc-create-header-copy h2{
-              font-size:27px;
+              font-size:30px;
             }
 
             .inc-create-target-user-card,

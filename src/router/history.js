@@ -16,6 +16,8 @@
    - no duplicar estados innecesarios
    - preservar publicPath/canonicalPath/username
    - no degradar URL contextualizada /@username
+   - preservar query/hash públicos en rutas públicas con token
+   - no destruir /activate-account?token=...
    - timestamps estables
 ========================================================= */
 
@@ -39,15 +41,23 @@ function canUseHistory() {
     isBrowser() &&
     typeof window !== "undefined" &&
     typeof window.history !== "undefined" &&
-    typeof window.history.pushState ===
-      "function" &&
-    typeof window.history.replaceState ===
-      "function"
+    typeof window.history.pushState === "function" &&
+    typeof window.history.replaceState === "function"
   );
 }
 
 function nowTs() {
   return Date.now();
+}
+
+function safeText(value, fallback = "") {
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+
+  const text = String(value).trim();
+
+  return text || fallback;
 }
 
 function safeHistoryCall(
@@ -72,32 +82,184 @@ function safeHistoryCall(
   }
 }
 
-function normalizeUrl(
+function normalizePathname(
   AppCore,
-  url = "/"
+  pathname = "/"
 ) {
   try {
     return normalizePath(
       AppCore,
-      url || "/"
+      pathname || "/"
     );
   } catch {
     return "/";
   }
 }
 
+function getBrowserPublicUrl() {
+  if (
+    !isBrowser() ||
+    typeof window === "undefined" ||
+    !window.location
+  ) {
+    return "";
+  }
+
+  try {
+    return [
+      window.location.pathname || "/",
+      window.location.search || "",
+      window.location.hash || "",
+    ].join("");
+  } catch {
+    return "";
+  }
+}
+
+function parseUrlParts(value = "/") {
+  const raw = safeText(value, "/");
+
+  try {
+    const parsed = new URL(
+      raw,
+      isBrowser() && window.location?.origin
+        ? window.location.origin
+        : "http://onion.local"
+    );
+
+    return {
+      pathname: parsed.pathname || "/",
+      search: parsed.search || "",
+      hash: parsed.hash || "",
+    };
+  } catch {
+    const [pathAndSearch = "/", hashPart = ""] = raw.split("#");
+    const [pathname = "/", searchPart = ""] = pathAndSearch.split("?");
+
+    return {
+      pathname: pathname || "/",
+      search: searchPart ? `?${searchPart}` : "",
+      hash: hashPart ? `#${hashPart}` : "",
+    };
+  }
+}
+
+function buildUrlFromParts({
+  pathname = "/",
+  search = "",
+  hash = "",
+} = {}) {
+  return `${pathname || "/"}${search || ""}${hash || ""}`;
+}
+
+/**
+ * URL pública para History API.
+ *
+ * IMPORTANTE:
+ * - normaliza SOLO el pathname
+ * - conserva search/hash
+ * - si el router intenta escribir la misma ruta sin query,
+ *   conserva el query actual del navegador
+ *
+ * Esto evita que:
+ *   /activate-account?token=abc
+ * se convierta en:
+ *   /activate-account
+ */
+function normalizePublicUrl(
+  AppCore,
+  url = "/",
+  {
+    preserveCurrentContext = true,
+  } = {}
+) {
+  const target = parseUrlParts(url);
+  const current = parseUrlParts(
+    getBrowserPublicUrl() || "/"
+  );
+
+  const normalizedTargetPathname =
+    normalizePathname(
+      AppCore,
+      target.pathname || "/"
+    );
+
+  const normalizedCurrentPathname =
+    normalizePathname(
+      AppCore,
+      current.pathname || "/"
+    );
+
+  const sameRoute =
+    normalizedTargetPathname === normalizedCurrentPathname;
+
+  const shouldPreserveSearch =
+    preserveCurrentContext &&
+    sameRoute &&
+    !target.search &&
+    Boolean(current.search);
+
+  const shouldPreserveHash =
+    preserveCurrentContext &&
+    sameRoute &&
+    !target.hash &&
+    Boolean(current.hash);
+
+  return buildUrlFromParts({
+    pathname: normalizedTargetPathname,
+    search: shouldPreserveSearch
+      ? current.search
+      : target.search,
+    hash: shouldPreserveHash
+      ? current.hash
+      : target.hash,
+  });
+}
+
+/**
+ * Ruta canónica interna.
+ *
+ * IMPORTANTE:
+ * - sin query
+ * - sin hash
+ * - usada para resolver vistas/guards/routes
+ */
+function normalizeCanonicalUrl(
+  AppCore,
+  url = "/"
+) {
+  const parts = parseUrlParts(url);
+
+  return normalizePathname(
+    AppCore,
+    parts.pathname || "/"
+  );
+}
+
 function getComparableCurrentUrl(
   AppCore
 ) {
-  return normalizeUrl(
+  const browserUrl =
+    getBrowserPublicUrl();
+
+  if (browserUrl) {
+    return normalizePublicUrl(
+      AppCore,
+      browserUrl,
+      {
+        preserveCurrentContext: false,
+      }
+    );
+  }
+
+  return normalizePublicUrl(
     AppCore,
-    getCurrentPublicPath(
-      AppCore
-    ) ||
-      getCurrentPath(
-        AppCore
-      ) ||
-      "/"
+    getCurrentPublicPath(AppCore) ||
+      getCurrentPath(AppCore) ||
+      "/",
+    {
+      preserveCurrentContext: false,
+    }
   );
 }
 
@@ -110,15 +272,22 @@ function getResolvedHistoryContext(
   pathname = "/",
   options = {}
 ) {
-  const publicPath =
-    normalizeUrl(
+  const rawPublicPath =
+    buildHistoryUrl(
       AppCore,
-      buildHistoryUrl(
-        AppCore,
-        options.getRoute,
-        pathname,
-        options
-      ) || pathname
+      options.getRoute,
+      pathname,
+      options
+    ) || pathname || "/";
+
+  const publicPath =
+    normalizePublicUrl(
+      AppCore,
+      rawPublicPath,
+      {
+        preserveCurrentContext:
+          options.preserveCurrentContext !== false,
+      }
     );
 
   const payload =
@@ -128,11 +297,12 @@ function getResolvedHistoryContext(
     ) || {};
 
   const canonicalPath =
-    normalizeUrl(
+    normalizeCanonicalUrl(
       AppCore,
       options.canonicalPath ||
         payload.canonicalPath ||
         pathname ||
+        publicPath ||
         "/"
     );
 
@@ -301,8 +471,7 @@ export function updateHistory({
     ...finalOptions,
     canonicalPath,
     username,
-    resolvedUsername:
-      username,
+    resolvedUsername: username,
   };
 
   if (
@@ -341,11 +510,11 @@ export function ensureInitialHistoryState({
       );
 
     const currentCanonicalPath =
-      normalizeUrl(
+      normalizeCanonicalUrl(
         AppCore,
-        getCurrentCanonicalPath(
-          AppCore
-        ) || "/"
+        getCurrentCanonicalPath(AppCore) ||
+          getBrowserPublicUrl() ||
+          "/"
       );
 
     const currentUsername =
@@ -358,29 +527,29 @@ export function ensureInitialHistoryState({
 
     if (
       currentState &&
-      typeof currentState ===
-        "object"
+      typeof currentState === "object"
     ) {
       const statePublicPath =
-        normalizeUrl(
+        normalizePublicUrl(
           AppCore,
           currentState.publicPath ||
             currentState.path ||
-            "/"
+            "/",
+          {
+            preserveCurrentContext: false,
+          }
         );
 
       const stateCanonicalPath =
-        normalizeUrl(
+        normalizeCanonicalUrl(
           AppCore,
           currentState.canonicalPath ||
             "/"
         );
 
       if (
-        statePublicPath ===
-          currentUrl &&
-        stateCanonicalPath ===
-          currentCanonicalPath
+        statePublicPath === currentUrl &&
+        stateCanonicalPath === currentCanonicalPath
       ) {
         return true;
       }
@@ -392,12 +561,9 @@ export function ensureInitialHistoryState({
         pathname: currentUrl,
         extras: {
           mode: "initial",
-          canonicalPath:
-            currentCanonicalPath,
-          publicPath:
-            currentUrl,
-          username:
-            currentUsername,
+          canonicalPath: currentCanonicalPath,
+          publicPath: currentUrl,
+          username: currentUsername,
         },
       });
 

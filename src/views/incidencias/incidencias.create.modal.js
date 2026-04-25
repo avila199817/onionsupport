@@ -3,6 +3,18 @@
    Archivo: src/views/incidencias/incidencias.create.modal.js
 
    INCIDENCIAS EXPERIENCE PRO · CREATE MODAL · CLEAN ADMIN 10/10
+
+   RESPONSABILIDADES:
+   - abrir/cerrar modal de creación de incidencia
+   - crear incidencia normal para usuario autenticado
+   - crear incidencia para usuario objetivo en modo admin
+   - buscar usuarios de forma segura y desacoplada
+   - validar campos obligatorios
+   - validar adjuntos iniciales
+   - enviar multipart/form-data real
+   - emitir incidencias:create:success para refrescar la vista
+   - persistir draft mínimo mientras el modal está abierto
+   - evitar doble submit y doble binding
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -16,10 +28,19 @@ const MODAL_ID = "incidencias-create-modal-root";
 const PANEL_ID = "incidencias-create-modal-panel";
 
 const TICKETS_CREATE_ENDPOINT = "/api/tickets";
+const TICKETS_ADMIN_CREATE_ENDPOINT = "/api/tickets/admin";
+const INCIDENCIAS_CREATE_ENDPOINT = "/api/incidencias";
+
 const USER_SEARCH_ENDPOINT = "/api/search/users";
 
 const USER_SEARCH_LIMIT = 8;
 const USER_SEARCH_DEBOUNCE = 240;
+
+const CREATE_TIMEOUT_MS = 90000;
+const USER_SEARCH_TIMEOUT_MS = 15000;
+
+const MAX_FILES = 10;
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
 const ADMIN_ROLE_KEYS = Object.freeze([
   "admin",
@@ -30,12 +51,40 @@ const ADMIN_ROLE_KEYS = Object.freeze([
   "owner",
 ]);
 
+const ALLOWED_MIME_TYPES = Object.freeze([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+
+  "application/pdf",
+
+  "text/plain",
+  "text/csv",
+
+  "application/zip",
+  "application/x-zip-compressed",
+
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+]);
+
 const DEFAULT_FORM = Object.freeze({
   targetUserId: "",
   targetUserName: "",
   targetUserEmail: "",
   subject: "",
   description: "",
+  priority: "medium",
+  status: "open",
+  category: "general",
+  source: "panel",
   attachments: [],
 });
 
@@ -75,55 +124,95 @@ const modalState = {
 ========================================================= */
 
 function safeEmit(event = "", payload = {}) {
+  const eventName = safeText(event, "");
+  if (!eventName) return false;
+
   try {
-    AppCore?.events?.emit?.(event, payload);
+    AppCore?.events?.emit?.(eventName, payload);
+    return true;
   } catch {}
+
+  try {
+    window.dispatchEvent(
+      new CustomEvent(eventName, {
+        detail: payload,
+      })
+    );
+    return true;
+  } catch {}
+
+  return false;
 }
 
 function safeOn(event = "", handler = null) {
-  if (!event || typeof handler !== "function") return false;
+  const eventName = safeText(event, "");
+  if (!eventName || typeof handler !== "function") return false;
+
+  let attached = false;
 
   try {
-    AppCore?.events?.on?.(event, handler);
-    return true;
-  } catch {
-    return false;
-  }
+    AppCore?.events?.on?.(eventName, handler);
+    attached = true;
+  } catch {}
+
+  try {
+    window.addEventListener(eventName, handler);
+    attached = true;
+  } catch {}
+
+  return attached;
 }
 
 function safeOff(event = "", handler = null) {
-  if (!event || typeof handler !== "function") return false;
+  const eventName = safeText(event, "");
+  if (!eventName || typeof handler !== "function") return false;
+
+  let detached = false;
 
   try {
-    AppCore?.events?.off?.(event, handler);
-    return true;
-  } catch {
-    return false;
-  }
+    AppCore?.events?.off?.(eventName, handler);
+    detached = true;
+  } catch {}
+
+  try {
+    window.removeEventListener(eventName, handler);
+    detached = true;
+  } catch {}
+
+  return detached;
 }
 
 function showToast(message = "", type = "info") {
+  const text = safeText(message, "");
+  if (!text) return;
+
   try {
     if (typeof AppCore?.toast?.[type] === "function") {
-      AppCore.toast[type](message);
+      AppCore.toast[type](text);
       return;
     }
   } catch {}
 
   try {
-    AppCore?.toast?.show?.(message, type);
+    AppCore?.toast?.show?.(text, type);
     return;
   } catch {}
 
   try {
-    AppCore?.ui?.toast?.[type]?.(message);
+    AppCore?.ui?.toast?.[type]?.(text);
   } catch {}
 }
 
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
+
   const text = String(value).trim();
+
   return text || fallback;
+}
+
+function safeLower(value, fallback = "") {
+  return safeText(value, fallback).toLowerCase();
 }
 
 function safeObject(value) {
@@ -136,15 +225,20 @@ function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function safeNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 function first(...values) {
   for (const value of values) {
-    if (
-      value !== undefined &&
-      value !== null &&
-      String(value).trim() !== ""
-    ) {
-      return value;
+    if (value === undefined || value === null) continue;
+
+    if (typeof value === "string" && value.trim() === "") {
+      continue;
     }
+
+    return value;
   }
 
   return null;
@@ -163,28 +257,44 @@ function normalizeWhitespace(value = "") {
   return safeText(value, "").replace(/\s+/g, " ").trim();
 }
 
+function isAbsoluteUrl(value = "") {
+  return /^https?:\/\//i.test(safeText(value, ""));
+}
+
 function getApiBase() {
-  const apiBase = safeText(AppCore?.config?.apiBase, "");
+  const apiBase = safeText(
+    first(
+      AppCore?.config?.apiBase,
+      AppCore?.config?.api?.baseUrl,
+      AppCore?.state?.apiBase,
+      window?.ONION_API_BASE,
+      window?.API_BASE
+    ),
+    ""
+  );
+
   return apiBase.replace(/\/+$/, "");
 }
 
 function buildFetchUrl(endpoint = "") {
-  const apiBase = getApiBase();
   const path = safeText(endpoint, "");
+  if (!path) return "";
 
-  if (!apiBase) {
+  if (isAbsoluteUrl(path)) {
     return path;
   }
 
-  /*
-    Si AppCore.config.apiBase ya termina en /api y el endpoint empieza por /api,
-    evitamos URLs tipo /api/api/search/users en fetch directo.
-  */
+  const apiBase = getApiBase();
+
+  if (!apiBase) {
+    return path.startsWith("/") ? path : `/${path}`;
+  }
+
   if (apiBase.endsWith("/api") && path.startsWith("/api/")) {
     return `${apiBase}${path.slice(4)}`;
   }
 
-  return `${apiBase}${path}`;
+  return `${apiBase}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
 function getAuthToken() {
@@ -194,17 +304,21 @@ function getAuthToken() {
       AppCore?.state?.accessToken,
       AppCore?.auth?.getToken?.(),
       AppCore?.Auth?.getToken?.(),
+      window?.Auth?.getToken?.(),
       typeof localStorage !== "undefined" ? localStorage.getItem("token") : "",
-      typeof sessionStorage !== "undefined" ? sessionStorage.getItem("token") : ""
+      typeof localStorage !== "undefined" ? localStorage.getItem("accessToken") : "",
+      typeof sessionStorage !== "undefined" ? sessionStorage.getItem("token") : "",
+      typeof sessionStorage !== "undefined" ? sessionStorage.getItem("accessToken") : ""
     ),
     ""
   );
 }
 
-function safeErrorMessage(error = null, fallback = "No se pudo completar la operación.") {
-  if (!error) {
-    return fallback;
-  }
+function safeErrorMessage(
+  error = null,
+  fallback = "No se pudo completar la operación."
+) {
+  if (!error) return fallback;
 
   return safeText(
     first(
@@ -212,11 +326,34 @@ function safeErrorMessage(error = null, fallback = "No se pudo completar la oper
       error?.response?.message,
       error?.response?.data?.message,
       error?.data?.message,
+      error?.data?.error,
+      error?.response?.error,
       error?.error,
+      error?.detail,
       fallback
     ),
     fallback
   );
+}
+
+function getHttpStatus(error = null) {
+  return safeNumber(
+    first(
+      error?.status,
+      error?.statusCode,
+      error?.response?.status,
+      error?.data?.status
+    ),
+    0
+  );
+}
+
+function shouldTryNextCandidate(error = null) {
+  const status = getHttpStatus(error);
+
+  if (!status) return true;
+
+  return [404, 405, 409, 415, 422, 500, 502, 503, 504].includes(status);
 }
 
 function getFileListFromInput(target) {
@@ -233,9 +370,16 @@ function formatFileSize(bytes = 0) {
   if (!Number.isFinite(size) || size <= 0) return "0 B";
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+
+  if (size < 1024 * 1024 * 1024) {
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  }
 
   return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+function isFile(value) {
+  return typeof File !== "undefined" && value instanceof File;
 }
 
 function dedupeFiles(files = []) {
@@ -243,7 +387,7 @@ function dedupeFiles(files = []) {
   const map = new Map();
 
   input.forEach((file) => {
-    if (!(file instanceof File)) return;
+    if (!isFile(file)) return;
 
     const key = [
       safeText(file.name, ""),
@@ -260,6 +404,89 @@ function dedupeFiles(files = []) {
   return Array.from(map.values());
 }
 
+function getFileExtension(filename = "") {
+  const clean = safeLower(filename);
+  const index = clean.lastIndexOf(".");
+
+  if (index === -1) return "";
+
+  return clean.slice(index + 1);
+}
+
+function isAllowedFile(file = null) {
+  if (!isFile(file)) return false;
+
+  const mimetype = safeLower(file.type, "");
+  const ext = getFileExtension(file.name);
+
+  if (mimetype && ALLOWED_MIME_TYPES.includes(mimetype)) {
+    return true;
+  }
+
+  return [
+    "jpg",
+    "jpeg",
+    "png",
+    "webp",
+    "gif",
+    "pdf",
+    "txt",
+    "csv",
+    "zip",
+    "doc",
+    "docx",
+    "xls",
+    "xlsx",
+    "ppt",
+    "pptx",
+  ].includes(ext);
+}
+
+function validateFiles(files = []) {
+  const list = dedupeFiles(files);
+  const errors = [];
+
+  if (list.length > MAX_FILES) {
+    errors.push(`No puedes adjuntar más de ${MAX_FILES} archivos.`);
+  }
+
+  for (const file of list) {
+    if (!isAllowedFile(file)) {
+      errors.push(`Tipo de archivo no permitido: ${safeText(file.name, "archivo")}.`);
+      continue;
+    }
+
+    if (safeNumber(file.size, 0) > MAX_FILE_SIZE) {
+      errors.push(
+        `El archivo ${safeText(file.name, "archivo")} supera el máximo de ${formatFileSize(MAX_FILE_SIZE)}.`
+      );
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    files: list.slice(0, MAX_FILES),
+  };
+}
+
+function createTimeoutController(timeoutMs = 15000) {
+  const controller = new AbortController();
+
+  const timer = setTimeout(() => {
+    try {
+      controller.abort();
+    } catch {}
+  }, timeoutMs);
+
+  return {
+    signal: controller.signal,
+    clear() {
+      clearTimeout(timer);
+    },
+  };
+}
+
 /* =========================================================
    PERMISSIONS / TARGET USER
 ========================================================= */
@@ -267,21 +494,21 @@ function dedupeFiles(files = []) {
 function normalizeTokenList(value) {
   if (Array.isArray(value)) {
     return value
-      .map((item) => safeText(item, "").toLowerCase())
+      .map((item) => safeLower(item, ""))
       .filter(Boolean);
   }
 
   if (value && typeof value === "object") {
     return Object.entries(value)
       .filter(([, enabled]) => Boolean(enabled))
-      .map(([key]) => safeText(key, "").toLowerCase())
+      .map(([key]) => safeLower(key, ""))
       .filter(Boolean);
   }
 
   if (typeof value === "string") {
     return value
       .split(/[,\s|;]+/g)
-      .map((item) => safeText(item, "").toLowerCase())
+      .map((item) => safeLower(item, ""))
       .filter(Boolean);
   }
 
@@ -289,15 +516,17 @@ function normalizeTokenList(value) {
 }
 
 function getCurrentRole() {
-  return safeText(
+  return safeLower(
     first(
       AppCore?.state?.user?.role,
+      AppCore?.state?.user?.rol,
       AppCore?.state?.role,
+      AppCore?.state?.rol,
       AppCore?.auth?.getRole?.(),
       AppCore?.Auth?.getRole?.()
     ),
     ""
-  ).toLowerCase();
+  );
 }
 
 function canSelectTargetUser() {
@@ -390,9 +619,11 @@ function normalizeUserCandidate(raw = null) {
   const name = safeText(
     first(
       obj.name,
+      obj.nombre,
       obj.fullName,
       obj.displayName,
       nestedUser.name,
+      nestedUser.nombre,
       nestedUser.fullName,
       nestedUser.displayName,
       nestedProfile.name,
@@ -417,7 +648,8 @@ function normalizeUserCandidate(raw = null) {
       obj.subtitle,
       email,
       username ? `@${username}` : "",
-      phone
+      phone,
+      id
     ),
     ""
   );
@@ -461,23 +693,55 @@ function getInitialForm() {
     targetUserId: safeText(first(draft.targetUserId, draft.userId), ""),
     targetUserName: safeText(first(draft.targetUserName, draft.userName), ""),
     targetUserEmail: safeText(first(draft.targetUserEmail, draft.userEmail), ""),
+
     subject: safeText(draft.subject, ""),
-    description: safeText(draft.description, ""),
+    description: safeText(first(draft.description, draft.descripcion, draft.message), ""),
+
+    priority: safeText(first(draft.priority, draft.prioridad, "medium"), "medium"),
+    status: safeText(first(draft.status, draft.estado, "open"), "open"),
+    category: safeText(first(draft.category, draft.categoria, "general"), "general"),
+    source: safeText(first(draft.source, draft.origen, "panel"), "panel"),
+
     attachments: [],
   };
 }
 
+function syncCreateViewState(patch = {}) {
+  try {
+    incidenciasState.createView = {
+      ...safeObject(incidenciasState.createView),
+      ...safeObject(patch),
+      form: {
+        ...safeObject(incidenciasState.createView?.form),
+        ...safeObject(patch.form),
+      },
+    };
+  } catch {}
+}
+
 function persistDraft() {
+  const form = safeObject(modalState.form);
+
   incidenciasState.createDraft = {
-    targetUserId: safeText(modalState.form?.targetUserId, ""),
-    targetUserName: safeText(modalState.form?.targetUserName, ""),
-    targetUserEmail: safeText(modalState.form?.targetUserEmail, ""),
-    userId: safeText(modalState.form?.targetUserId, ""),
-    userName: safeText(modalState.form?.targetUserName, ""),
-    userEmail: safeText(modalState.form?.targetUserEmail, ""),
-    subject: safeText(modalState.form?.subject, ""),
-    description: safeText(modalState.form?.description, ""),
+    targetUserId: safeText(form.targetUserId, ""),
+    targetUserName: safeText(form.targetUserName, ""),
+    targetUserEmail: safeText(form.targetUserEmail, ""),
+
+    userId: safeText(form.targetUserId, ""),
+    userName: safeText(form.targetUserName, ""),
+    userEmail: safeText(form.targetUserEmail, ""),
+
+    subject: safeText(form.subject, ""),
+    description: safeText(form.description, ""),
+    priority: safeText(form.priority, "medium"),
+    status: safeText(form.status, "open"),
+    category: safeText(form.category, "general"),
+    source: safeText(form.source, "panel"),
   };
+
+  syncCreateViewState({
+    form: incidenciasState.createDraft,
+  });
 }
 
 function clearDraft() {
@@ -490,7 +754,15 @@ function clearDraft() {
     userEmail: "",
     subject: "",
     description: "",
+    priority: "medium",
+    status: "open",
+    category: "general",
+    source: "panel",
   };
+
+  syncCreateViewState({
+    form: incidenciasState.createDraft,
+  });
 }
 
 function setFormPatch(patch = {}) {
@@ -498,6 +770,8 @@ function setFormPatch(patch = {}) {
     ...safeObject(modalState.form),
     ...safeObject(patch),
   };
+
+  modalState.form.attachments = dedupeFiles(modalState.form.attachments);
 
   persistDraft();
 
@@ -509,6 +783,13 @@ function resetFeedbackState() {
   modalState.serverError = "";
   modalState.successMessage = "";
   modalState.createdTicketId = "";
+
+  syncCreateViewState({
+    errors: {},
+    serverError: "",
+    createdTicketId: "",
+    successMessage: "",
+  });
 }
 
 function resetFormState() {
@@ -583,10 +864,24 @@ function validateForm(form = {}) {
     errors.description = "Mínimo 8 caracteres.";
   }
 
+  const fileValidation = validateFiles(current.attachments);
+
+  if (!fileValidation.valid) {
+    errors.attachments = fileValidation.errors[0] || "Adjuntos no válidos.";
+  }
+
   return {
     valid: Object.keys(errors).length === 0,
     errors,
+    files: fileValidation.files,
   };
+}
+
+function appendIfValue(fd, key, value) {
+  const text = safeText(value, "");
+  if (!text) return;
+
+  fd.append(key, text);
 }
 
 function buildPayload(form = {}) {
@@ -596,19 +891,54 @@ function buildPayload(form = {}) {
   const subject = normalizeWhitespace(current.subject);
   const description = normalizeWhitespace(current.description);
 
+  const priority = safeText(current.priority, "medium");
+  const status = safeText(current.status, "open");
+  const category = safeText(current.category, "general");
+  const source = safeText(current.source, "panel");
+
   fd.append("subject", subject);
+  fd.append("asunto", subject);
+  fd.append("title", subject);
+
   fd.append("description", description);
+  fd.append("descripcion", description);
+  fd.append("message", description);
+  fd.append("body", description);
+
+  fd.append("priority", priority);
+  fd.append("prioridad", priority);
+
+  fd.append("status", status);
+  fd.append("estado", status);
+
+  fd.append("category", category);
+  fd.append("categoria", category);
+
+  fd.append("source", source);
+  fd.append("origen", source);
 
   if (canSelectTargetUser()) {
     const targetUserId = safeText(current.targetUserId, "");
+    const targetUserName = safeText(current.targetUserName, "");
+    const targetUserEmail = safeText(current.targetUserEmail, "");
+
     if (targetUserId) {
       fd.append("userId", targetUserId);
+      fd.append("clienteId", targetUserId);
       fd.append("targetUserId", targetUserId);
+      fd.append("receptorUserId", targetUserId);
     }
+
+    appendIfValue(fd, "targetUserName", targetUserName);
+    appendIfValue(fd, "targetUserEmail", targetUserEmail);
+    appendIfValue(fd, "clienteNombre", targetUserName);
+    appendIfValue(fd, "clienteEmail", targetUserEmail);
+    appendIfValue(fd, "name", targetUserName);
+    appendIfValue(fd, "email", targetUserEmail);
   }
 
-  safeArray(current.attachments).forEach((file) => {
-    if (file instanceof File) {
+  dedupeFiles(current.attachments).forEach((file) => {
+    if (isFile(file)) {
       fd.append("attachments", file, file.name);
     }
   });
@@ -616,22 +946,71 @@ function buildPayload(form = {}) {
   return fd;
 }
 
+function shouldUseAdminEndpoint() {
+  return canSelectTargetUser() && Boolean(safeText(modalState.form?.targetUserId, ""));
+}
+
 /* =========================================================
    CREATE ADAPTERS
 ========================================================= */
 
-async function createViaAppCoreRequest(payload = null) {
+function buildCreateEndpoints() {
+  if (shouldUseAdminEndpoint()) {
+    return [
+      TICKETS_ADMIN_CREATE_ENDPOINT,
+      TICKETS_CREATE_ENDPOINT,
+      INCIDENCIAS_CREATE_ENDPOINT,
+    ];
+  }
+
+  return [
+    TICKETS_CREATE_ENDPOINT,
+    INCIDENCIAS_CREATE_ENDPOINT,
+  ];
+}
+
+async function createViaApiClient(endpoint = "", payload = null) {
+  const client = AppCore?.apiClient || null;
+
+  if (!client) {
+    throw new Error("API_CLIENT_UNAVAILABLE");
+  }
+
+  if (typeof client.post === "function") {
+    return client.post(endpoint, payload, {
+      timeout: CREATE_TIMEOUT_MS,
+      auth: true,
+      headers: {},
+    });
+  }
+
+  if (typeof client.request === "function") {
+    return client.request(endpoint, {
+      method: "POST",
+      timeout: CREATE_TIMEOUT_MS,
+      auth: true,
+      headers: {},
+      body: payload,
+    });
+  }
+
+  throw new Error("API_CLIENT_POST_UNAVAILABLE");
+}
+
+async function createViaAppCoreRequest(endpoint = "", payload = null) {
   if (typeof AppCore?.request !== "function") {
     throw new Error("APP_CORE_REQUEST_UNAVAILABLE");
   }
 
-  return AppCore.request(TICKETS_CREATE_ENDPOINT, {
+  return AppCore.request(endpoint, {
     method: "POST",
+    timeout: CREATE_TIMEOUT_MS,
     body: payload,
+    headers: {},
   });
 }
 
-async function createViaHttpModule(payload = null) {
+async function createViaHttpModule(endpoint = "", payload = null) {
   const Http = AppCore?.modules?.Http || AppCore?.Http || window?.Http || null;
 
   if (!Http) {
@@ -639,76 +1018,125 @@ async function createViaHttpModule(payload = null) {
   }
 
   if (typeof Http.post === "function") {
-    return Http.post(TICKETS_CREATE_ENDPOINT, payload);
+    return Http.post(endpoint, payload, {
+      timeout: CREATE_TIMEOUT_MS,
+      headers: {},
+    });
   }
 
   if (typeof Http.request === "function") {
-    return Http.request(TICKETS_CREATE_ENDPOINT, {
+    return Http.request(endpoint, {
       method: "POST",
+      timeout: CREATE_TIMEOUT_MS,
       body: payload,
+      headers: {},
     });
   }
 
   throw new Error("HTTP_POST_UNAVAILABLE");
 }
 
-async function createViaFetch(payload = null) {
+async function createViaFetch(endpoint = "", payload = null) {
   const token = getAuthToken();
-  const url = buildFetchUrl(TICKETS_CREATE_ENDPOINT);
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: payload,
-  });
-
-  const text = await response.text();
-  let data = null;
+  const url = buildFetchUrl(endpoint);
+  const timeout = createTimeoutController(CREATE_TIMEOUT_MS);
 
   try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = { raw: text };
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      credentials: "include",
+      body: payload,
+      signal: timeout.signal,
+    });
+
+    const text = await response.text();
+    let data = null;
+
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = { raw: text };
+    }
+
+    if (!response.ok) {
+      const error = new Error(
+        safeText(
+          first(
+            data?.message,
+            data?.error,
+            `HTTP ${response.status} al crear incidencia.`
+          ),
+          "No se pudo crear la incidencia."
+        )
+      );
+
+      error.response = data;
+      error.status = response.status;
+      error.statusCode = response.status;
+      error.url = url;
+
+      throw error;
+    }
+
+    return data;
+  } finally {
+    timeout.clear();
   }
-
-  if (!response.ok) {
-    const error = new Error(
-      safeText(
-        first(
-          data?.message,
-          data?.error,
-          `HTTP ${response.status} al crear incidencia.`
-        ),
-        "No se pudo crear la incidencia."
-      )
-    );
-
-    error.response = data;
-    throw error;
-  }
-
-  return data;
 }
 
 function pickCreatedTicket(response = null) {
+  if (!response) return null;
+
+  if (Array.isArray(response)) {
+    return response[0] || null;
+  }
+
   const obj = safeObject(response);
 
-  return obj.ticket || obj.item || obj.data || obj.result || obj.payload || obj;
+  return (
+    obj.ticket ||
+    obj.item ||
+    obj.data?.ticket ||
+    obj.data?.item ||
+    obj.data ||
+    obj.result?.ticket ||
+    obj.result?.item ||
+    obj.result ||
+    obj.payload?.ticket ||
+    obj.payload?.item ||
+    obj.payload ||
+    obj.incidencia ||
+    obj
+  );
 }
 
 function resolveCreatedTicketId(response = null) {
   const ticket = safeObject(pickCreatedTicket(response));
 
   return safeText(
-    first(ticket.ticketId, ticket.id, ticket.code, ticket.ticketCode),
+    first(
+      ticket.ticketId,
+      ticket.id,
+      ticket.code,
+      ticket.ticketCode,
+      response?.ticketId,
+      response?.id,
+      response?.code,
+      response?.ticketCode
+    ),
     ""
   );
 }
 
 async function createIncidenciaRequest(payload = null) {
+  const endpoints = buildCreateEndpoints();
+
   const adapters = [
+    createViaApiClient,
     createViaAppCoreRequest,
     createViaHttpModule,
     createViaFetch,
@@ -716,11 +1144,17 @@ async function createIncidenciaRequest(payload = null) {
 
   let lastError = null;
 
-  for (const adapter of adapters) {
-    try {
-      return await adapter(payload);
-    } catch (error) {
-      lastError = error;
+  for (const endpoint of endpoints) {
+    for (const adapter of adapters) {
+      try {
+        return await adapter(endpoint, payload);
+      } catch (error) {
+        lastError = error;
+
+        if (!shouldTryNextCandidate(error)) {
+          throw error;
+        }
+      }
     }
   }
 
@@ -740,6 +1174,8 @@ function buildUserSearchUrls(query = "") {
 
   return [
     `${USER_SEARCH_ENDPOINT}?${params.toString()}`,
+    `/api/users/search?${params.toString()}`,
+    `/api/usuarios/search?${params.toString()}`,
     `/search/users?${params.toString()}`,
   ];
 }
@@ -759,6 +1195,7 @@ function readUsersCollection(response = null) {
 
   const candidates = [
     obj.users,
+    obj.usuarios,
     obj.items,
     obj.results,
     obj.list,
@@ -766,6 +1203,7 @@ function readUsersCollection(response = null) {
     obj.records,
 
     data.users,
+    data.usuarios,
     data.items,
     data.results,
     data.list,
@@ -773,6 +1211,7 @@ function readUsersCollection(response = null) {
     data.records,
 
     payload.users,
+    payload.usuarios,
     payload.items,
     payload.results,
     payload.list,
@@ -780,6 +1219,7 @@ function readUsersCollection(response = null) {
     payload.records,
 
     result.users,
+    result.usuarios,
     result.items,
     result.results,
     result.list,
@@ -825,6 +1265,7 @@ async function searchUsersViaAppCore(url = "") {
 
   return AppCore.request(url, {
     method: "GET",
+    timeout: USER_SEARCH_TIMEOUT_MS,
   });
 }
 
@@ -836,12 +1277,15 @@ async function searchUsersViaHttpModule(url = "") {
   }
 
   if (typeof Http.get === "function") {
-    return Http.get(url);
+    return Http.get(url, {
+      timeout: USER_SEARCH_TIMEOUT_MS,
+    });
   }
 
   if (typeof Http.request === "function") {
     return Http.request(url, {
       method: "GET",
+      timeout: USER_SEARCH_TIMEOUT_MS,
     });
   }
 
@@ -851,44 +1295,56 @@ async function searchUsersViaHttpModule(url = "") {
 async function searchUsersViaFetch(url = "") {
   const token = getAuthToken();
   const finalUrl = buildFetchUrl(url);
-
-  const response = await fetch(finalUrl, {
-    method: "GET",
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-
-  const text = await response.text();
-  let data = null;
+  const timeout = createTimeoutController(USER_SEARCH_TIMEOUT_MS);
 
   try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = { raw: text };
+    const response = await fetch(finalUrl, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      credentials: "include",
+      signal: timeout.signal,
+    });
+
+    const text = await response.text();
+    let data = null;
+
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = { raw: text };
+    }
+
+    if (!response.ok) {
+      const error = new Error(
+        safeText(
+          first(
+            data?.message,
+            data?.error,
+            `HTTP ${response.status} al buscar usuarios.`
+          ),
+          "No se pudieron cargar usuarios."
+        )
+      );
+
+      error.response = data;
+      error.status = response.status;
+      error.statusCode = response.status;
+
+      throw error;
+    }
+
+    return data;
+  } finally {
+    timeout.clear();
   }
-
-  if (!response.ok) {
-    const error = new Error(
-      safeText(
-        first(
-          data?.message,
-          data?.error,
-          `HTTP ${response.status} al buscar usuarios.`
-        ),
-        "No se pudieron cargar usuarios."
-      )
-    );
-
-    error.response = data;
-    throw error;
-  }
-
-  return data;
 }
 
 async function searchUsersRequest(query = "") {
   const urls = buildUserSearchUrls(query);
+
   const adapters = [
     searchUsersViaAppCore,
     searchUsersViaHttpModule,
@@ -908,6 +1364,10 @@ async function searchUsersRequest(query = "") {
         }
       } catch (error) {
         lastError = error;
+
+        if (!shouldTryNextCandidate(error)) {
+          throw error;
+        }
       }
     }
   }
@@ -1040,6 +1500,7 @@ function renderInput({
         value="${escapeHtml(value)}"
         placeholder="${escapeHtml(placeholder)}"
         autocomplete="${escapeHtml(autocomplete)}"
+        ${modalState.submitting ? "disabled" : ""}
       />
 
       ${renderFieldError(error)}
@@ -1068,6 +1529,7 @@ function renderTextarea({
         name="${escapeHtml(name)}"
         rows="${Number(rows) || 5}"
         placeholder="${escapeHtml(placeholder)}"
+        ${modalState.submitting ? "disabled" : ""}
       >${escapeHtml(value)}</textarea>
 
       ${renderFieldError(error)}
@@ -1091,7 +1553,14 @@ function renderFilesSummary(files = []) {
                   ${escapeHtml(safeText(file?.name, `Adjunto ${index + 1}`))}
                 </strong>
                 <span class="inc-create-file-size">
-                  ${escapeHtml(formatFileSize(file?.size))}
+                  ${escapeHtml(
+                    [
+                      safeText(file?.type, ""),
+                      formatFileSize(file?.size),
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
+                  )}
                 </span>
               </div>
 
@@ -1099,6 +1568,7 @@ function renderFilesSummary(files = []) {
                 type="button"
                 data-remove-attachment="${index}"
                 class="inc-create-file-remove"
+                ${modalState.submitting ? "disabled" : ""}
               >
                 Quitar
               </button>
@@ -1110,8 +1580,9 @@ function renderFilesSummary(files = []) {
   `;
 }
 
-function renderFileInput({ files = [], dragActive = false } = {}) {
+function renderFileInput({ files = [], dragActive = false, error = "" } = {}) {
   const items = safeArray(files);
+
   const countText =
     items.length === 0
       ? "Opcional"
@@ -1128,7 +1599,7 @@ function renderFileInput({ files = [], dragActive = false } = {}) {
 
       <label
         data-dropzone="attachments"
-        class="inc-create-dropzone ${dragActive ? "is-active" : ""}"
+        class="inc-create-dropzone ${dragActive ? "is-active" : ""} ${error ? "is-error" : ""}"
       >
         <input
           id="incidencias-create-attachments-input"
@@ -1136,14 +1607,18 @@ function renderFileInput({ files = [], dragActive = false } = {}) {
           name="attachments"
           type="file"
           multiple
+          accept=".jpg,.jpeg,.png,.webp,.gif,.pdf,.txt,.csv,.zip,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
           class="inc-create-hidden-input"
+          ${modalState.submitting ? "disabled" : ""}
         />
 
         <div class="inc-create-dropzone-copy">
           <strong>Arrastra o pulsa</strong>
-          <span>Capturas, PDF o documentos.</span>
+          <span>Máximo ${MAX_FILES} archivos · ${formatFileSize(MAX_FILE_SIZE)} por archivo.</span>
         </div>
       </label>
+
+      ${renderFieldError(error)}
 
       ${renderFilesSummary(items)}
     </section>
@@ -1176,6 +1651,7 @@ function renderSelectedUserCard() {
         type="button"
         data-clear-selected-user="true"
         class="inc-create-target-user-clear"
+        ${modalState.submitting ? "disabled" : ""}
       >
         Cambiar
       </button>
@@ -1232,6 +1708,7 @@ function renderUserSearchResults() {
               type="button"
               data-select-target-user="${index}"
               class="inc-create-search-item"
+              ${modalState.submitting ? "disabled" : ""}
             >
               <div class="inc-create-search-item-copy">
                 <strong>
@@ -1287,6 +1764,7 @@ function renderAdminTargetUserBlock() {
               : "Buscar por nombre, email, username, teléfono..."
           }"
           autocomplete="off"
+          ${modalState.submitting ? "disabled" : ""}
         />
 
         ${renderFieldError(error)}
@@ -1324,6 +1802,7 @@ function renderModalInner() {
   const serverError = safeText(modalState.serverError, "");
   const successMessage = safeText(modalState.successMessage, "");
   const createdTicketId = safeText(modalState.createdTicketId, "");
+  const adminMode = canSelectTargetUser();
 
   return `
     <div
@@ -1341,10 +1820,21 @@ function renderModalInner() {
       >
         <div class="inc-create-header">
           <div class="inc-create-header-copy">
+            <span class="inc-create-eyebrow">
+              ${adminMode ? "Modo administrador" : "Nueva solicitud"}
+            </span>
+
             <h2 id="incidencias-create-modal-title">
               Crear incidencia
             </h2>
-            <p>Usuario, asunto, descripción, adjuntos y enviar.</p>
+
+            <p>
+              ${
+                adminMode
+                  ? "Selecciona usuario, define el asunto, describe el caso y adjunta documentos si hace falta."
+                  : "Define el asunto, describe el caso y adjunta documentos si hace falta."
+              }
+            </p>
           </div>
 
           <button
@@ -1364,7 +1854,7 @@ function renderModalInner() {
               ? renderAlert(
                   "success",
                   "Incidencia creada.",
-                  createdTicketId ? `Referencia: ${createdTicketId}` : ""
+                  createdTicketId ? `Referencia: ${createdTicketId}` : successMessage
                 )
               : ""
           }
@@ -1404,6 +1894,7 @@ function renderModalInner() {
             ${renderFileInput({
               files: safeArray(form.attachments),
               dragActive: Boolean(modalState.dragActive),
+              error: errors.attachments,
             })}
 
             <div class="inc-create-actions">
@@ -1470,6 +1961,24 @@ function renderModalInner() {
             display:grid;
             gap:5px;
             min-width:0;
+          }
+
+          .inc-create-eyebrow{
+            width:max-content;
+            max-width:100%;
+            min-height:24px;
+            display:inline-flex;
+            align-items:center;
+            padding:0 9px;
+            border-radius:999px;
+            border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft, rgba(255,255,255,.12)));
+            background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
+            color:var(--text-soft, rgba(255,255,255,.74));
+            font-size:10px;
+            line-height:1;
+            font-weight:var(--weight-bold, 700);
+            letter-spacing:.06em;
+            text-transform:uppercase;
           }
 
           .inc-create-header-copy h2{
@@ -1627,6 +2136,12 @@ function renderModalInner() {
             box-shadow:0 0 0 4px color-mix(in srgb, var(--danger-strong, #ff6b6b) 10%, transparent);
           }
 
+          .inc-create-input:disabled,
+          .inc-create-textarea:disabled{
+            opacity:.78;
+            cursor:not-allowed;
+          }
+
           .inc-create-error{
             color:var(--danger-strong, #ff6b6b);
             font-size:11px;
@@ -1680,6 +2195,11 @@ function renderModalInner() {
             flex:0 0 auto;
           }
 
+          .inc-create-target-user-clear:disabled{
+            opacity:.7;
+            cursor:not-allowed;
+          }
+
           .inc-create-search-state{
             padding:10px 12px;
             border-radius:13px;
@@ -1718,6 +2238,11 @@ function renderModalInner() {
           .inc-create-search-item:hover{
             transform:translateY(-1px);
             border-color:color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft, rgba(255,255,255,.12)));
+          }
+
+          .inc-create-search-item:disabled{
+            opacity:.7;
+            cursor:not-allowed;
           }
 
           .inc-create-search-item-copy{
@@ -1790,6 +2315,10 @@ function renderModalInner() {
               var(--surface-glass, rgba(255,255,255,.05));
           }
 
+          .inc-create-dropzone.is-error{
+            border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 42%, var(--border-soft, rgba(255,255,255,.12)));
+          }
+
           .inc-create-dropzone-copy{
             display:grid;
             gap:4px;
@@ -1859,6 +2388,11 @@ function renderModalInner() {
             flex:0 0 auto;
           }
 
+          .inc-create-file-remove:disabled{
+            opacity:.7;
+            cursor:not-allowed;
+          }
+
           .inc-create-actions{
             display:flex;
             justify-content:flex-end;
@@ -1907,6 +2441,29 @@ function renderModalInner() {
               0 0 0 1px rgba(255,255,255,.68) inset;
           }
 
+          [data-theme="light"] .inc-create-header-copy h2,
+          [data-theme="light"] .inc-create-alert strong,
+          [data-theme="light"] .inc-create-files-head strong,
+          [data-theme="light"] .inc-create-input,
+          [data-theme="light"] .inc-create-textarea,
+          [data-theme="light"] .inc-create-file-name,
+          [data-theme="light"] .inc-create-search-item-copy strong,
+          [data-theme="light"] .inc-create-target-user-copy strong{
+            color:var(--text-strong, #111827);
+          }
+
+          [data-theme="light"] .inc-create-header-copy p,
+          [data-theme="light"] .inc-create-alert span,
+          [data-theme="light"] .inc-create-label,
+          [data-theme="light"] .inc-create-mini-title,
+          [data-theme="light"] .inc-create-file-size,
+          [data-theme="light"] .inc-create-search-state,
+          [data-theme="light"] .inc-create-search-item-copy span,
+          [data-theme="light"] .inc-create-target-user-copy span{
+            color:var(--text-dim, #6b7280);
+          }
+
+          [data-theme="light"] .inc-create-close,
           [data-theme="light"] .inc-create-block,
           [data-theme="light"] .inc-create-files-card,
           [data-theme="light"] .inc-create-alert,
@@ -1916,6 +2473,8 @@ function renderModalInner() {
           [data-theme="light"] .inc-create-search-item,
           [data-theme="light"] .inc-create-target-user-card,
           [data-theme="light"] .inc-create-search-state{
+            background:rgba(255,255,255,.64);
+            border-color:rgba(15,23,42,.08);
             box-shadow:0 6px 16px rgba(15,23,42,.04);
           }
 
@@ -2146,6 +2705,8 @@ export function openIncidenciasCreateModal(draft = {}) {
     attachments: [],
   };
 
+  modalState.form.attachments = [];
+
   persistDraft();
 
   renderModal();
@@ -2231,19 +2792,31 @@ async function handleSubmit() {
   modalState.serverError = "";
 
   const validation = validateForm(modalState.form);
+
   modalState.errors = validation.errors;
 
   if (!validation.valid) {
     renderModal();
     attachRootBindings();
     focusFirstInvalidField();
+
     showToast("Revisa los campos obligatorios.", "warning");
+
     return false;
   }
+
+  modalState.form.attachments = validation.files;
 
   const payload = buildPayload(modalState.form);
 
   modalState.submitting = true;
+
+  syncCreateViewState({
+    submitting: true,
+    serverError: "",
+    errors: {},
+  });
+
   renderModal();
   attachRootBindings();
   focusPanel();
@@ -2268,6 +2841,14 @@ async function handleSubmit() {
     modalState.successMessage = "Incidencia creada.";
     modalState.createdTicketId = createdTicketId;
 
+    syncCreateViewState({
+      submitting: false,
+      errors: {},
+      serverError: "",
+      createdTicketId,
+      successMessage: "Incidencia creada.",
+    });
+
     clearDraft();
     resetFormState();
     resetUserSearchState();
@@ -2285,7 +2866,9 @@ async function handleSubmit() {
     });
 
     setTimeout(() => {
-      closeIncidenciasCreateModal();
+      if (modalState.isOpen && !modalState.submitting) {
+        closeIncidenciasCreateModal();
+      }
     }, 380);
 
     return true;
@@ -2296,8 +2879,14 @@ async function handleSubmit() {
       "No se pudo crear la incidencia."
     );
 
+    syncCreateViewState({
+      submitting: false,
+      serverError: modalState.serverError,
+    });
+
     safeEmit("incidencias:create:error", {
       error,
+      message: modalState.serverError,
     });
 
     renderModal();
@@ -2320,11 +2909,18 @@ function addAttachments(files = []) {
     ...safeArray(files),
   ]);
 
+  const validation = validateFiles(merged);
+
   setFormPatch({
-    attachments: merged,
+    attachments: validation.files,
   });
 
-  if (modalState.errors.attachments) {
+  if (!validation.valid) {
+    modalState.errors = {
+      ...safeObject(modalState.errors),
+      attachments: validation.errors[0] || "Adjuntos no válidos.",
+    };
+  } else if (modalState.errors.attachments) {
     const nextErrors = { ...modalState.errors };
     delete nextErrors.attachments;
     modalState.errors = nextErrors;
@@ -2365,6 +2961,11 @@ function handleTargetUserSearchInput(target) {
 function handleFieldChange(target) {
   const field = safeText(target?.dataset?.field, "");
   if (!field) return;
+
+  if (field === "targetUserSearch") {
+    handleTargetUserSearchInput(target);
+    return;
+  }
 
   if (field === "attachments") {
     const files = getFileListFromInput(target);
@@ -2453,13 +3054,6 @@ function attachRootBindings() {
     const field = event.target.closest("[data-field]");
     if (!field) return;
 
-    const fieldName = safeText(field.dataset.field, "");
-
-    if (fieldName === "targetUserSearch") {
-      handleTargetUserSearchInput(field);
-      return;
-    }
-
     handleFieldChange(field);
   };
 
@@ -2473,17 +3067,19 @@ function attachRootBindings() {
 
   const onDragEnter = (event) => {
     const dropzone = event.target.closest("[data-dropzone='attachments']");
-    if (!dropzone) return;
+    if (!dropzone || modalState.submitting) return;
 
     event.preventDefault();
+
     modalState.dragActive = true;
+
     renderModal();
     attachRootBindings();
   };
 
   const onDragOver = (event) => {
     const dropzone = event.target.closest("[data-dropzone='attachments']");
-    if (!dropzone) return;
+    if (!dropzone || modalState.submitting) return;
 
     event.preventDefault();
 
@@ -2496,24 +3092,28 @@ function attachRootBindings() {
 
   const onDragLeave = (event) => {
     const dropzone = event.target.closest("[data-dropzone='attachments']");
-    if (!dropzone) return;
+    if (!dropzone || modalState.submitting) return;
 
     const related = event.relatedTarget;
+
     if (related && dropzone.contains(related)) {
       return;
     }
 
     event.preventDefault();
+
     modalState.dragActive = false;
+
     renderModal();
     attachRootBindings();
   };
 
   const onDrop = (event) => {
     const dropzone = event.target.closest("[data-dropzone='attachments']");
-    if (!dropzone) return;
+    if (!dropzone || modalState.submitting) return;
 
     event.preventDefault();
+
     modalState.dragActive = false;
 
     const files = Array.from(event.dataTransfer?.files || []);
@@ -2526,30 +3126,53 @@ function attachRootBindings() {
 
   const onClick = (event) => {
     const closeBtn = event.target.closest("[data-modal-close='true']");
+
     if (closeBtn) {
       event.preventDefault();
       closeIncidenciasCreateModal();
       return;
     }
 
-    const overlay = event.target.closest("[data-incidencias-create-modal-overlay='true']");
-    const panel = event.target.closest("[data-incidencias-create-modal-panel='true']");
+    const overlay = event.target.closest(
+      "[data-incidencias-create-modal-overlay='true']"
+    );
 
-    if (overlay && !panel && event.target === overlay) {
+    const panel = event.target.closest(
+      "[data-incidencias-create-modal-panel='true']"
+    );
+
+    if (
+      overlay &&
+      !panel &&
+      event.target === overlay &&
+      !modalState.submitting
+    ) {
       closeIncidenciasCreateModal();
       return;
     }
 
     const removeAttachmentBtn = event.target.closest("[data-remove-attachment]");
+
     if (removeAttachmentBtn) {
       event.preventDefault();
 
+      if (modalState.submitting) return;
+
       const index = Number(removeAttachmentBtn.dataset.removeAttachment);
-      const files = safeArray(modalState.form.attachments).filter((_, i) => i !== index);
+
+      const files = safeArray(modalState.form.attachments).filter(
+        (_, i) => i !== index
+      );
 
       setFormPatch({
         attachments: files,
       });
+
+      if (modalState.errors.attachments) {
+        const nextErrors = { ...modalState.errors };
+        delete nextErrors.attachments;
+        modalState.errors = nextErrors;
+      }
 
       renderModal();
       attachRootBindings();
@@ -2558,17 +3181,25 @@ function attachRootBindings() {
     }
 
     const selectUserBtn = event.target.closest("[data-select-target-user]");
+
     if (selectUserBtn) {
       event.preventDefault();
+
+      if (modalState.submitting) return;
+
       selectTargetUserByIndex(selectUserBtn.dataset.selectTargetUser);
       return;
     }
 
     const clearUserBtn = event.target.closest("[data-clear-selected-user='true']");
+
     if (clearUserBtn) {
       event.preventDefault();
 
+      if (modalState.submitting) return;
+
       clearTargetUserSelection();
+
       modalState.userSearchQuery = "";
       modalState.userSearchResults = [];
       modalState.userSearchLoading = false;
@@ -2613,6 +3244,7 @@ function detachRootBindings() {
     try {
       root.removeEventListener("input", root.__incidenciasCreateModalInputHandler);
     } catch {}
+
     delete root.__incidenciasCreateModalInputHandler;
   }
 
@@ -2620,6 +3252,7 @@ function detachRootBindings() {
     try {
       root.removeEventListener("change", root.__incidenciasCreateModalChangeHandler);
     } catch {}
+
     delete root.__incidenciasCreateModalChangeHandler;
   }
 
@@ -2627,6 +3260,7 @@ function detachRootBindings() {
     try {
       root.removeEventListener("submit", root.__incidenciasCreateModalSubmitHandler);
     } catch {}
+
     delete root.__incidenciasCreateModalSubmitHandler;
   }
 
@@ -2634,6 +3268,7 @@ function detachRootBindings() {
     try {
       root.removeEventListener("dragenter", root.__incidenciasCreateModalDragEnterHandler);
     } catch {}
+
     delete root.__incidenciasCreateModalDragEnterHandler;
   }
 
@@ -2641,6 +3276,7 @@ function detachRootBindings() {
     try {
       root.removeEventListener("dragover", root.__incidenciasCreateModalDragOverHandler);
     } catch {}
+
     delete root.__incidenciasCreateModalDragOverHandler;
   }
 
@@ -2648,6 +3284,7 @@ function detachRootBindings() {
     try {
       root.removeEventListener("dragleave", root.__incidenciasCreateModalDragLeaveHandler);
     } catch {}
+
     delete root.__incidenciasCreateModalDragLeaveHandler;
   }
 
@@ -2655,6 +3292,7 @@ function detachRootBindings() {
     try {
       root.removeEventListener("drop", root.__incidenciasCreateModalDropHandler);
     } catch {}
+
     delete root.__incidenciasCreateModalDropHandler;
   }
 
@@ -2662,6 +3300,7 @@ function detachRootBindings() {
     try {
       root.removeEventListener("click", root.__incidenciasCreateModalClickHandler);
     } catch {}
+
     delete root.__incidenciasCreateModalClickHandler;
   }
 
@@ -2672,8 +3311,12 @@ function detachRootBindings() {
    EVENT BUS BRIDGE
 ========================================================= */
 
+function unwrapEventDetail(event) {
+  return event?.detail?.draft || event?.detail || event || {};
+}
+
 function handleOpenEvent(event) {
-  const draft = event?.detail?.draft || event?.detail || event || {};
+  const draft = unwrapEventDetail(event);
   openIncidenciasCreateModal(safeObject(draft));
 }
 
@@ -2682,7 +3325,7 @@ function handleCloseEvent() {
 }
 
 function handleUpdateEvent(event) {
-  const draft = event?.detail?.draft || event?.detail || event || {};
+  const draft = unwrapEventDetail(event);
   updateIncidenciasCreateModal(safeObject(draft));
 }
 
@@ -2756,7 +3399,9 @@ export const OnionIncidenciasCreateModal = {
 
 try {
   window.OnionIncidenciasCreateModal = OnionIncidenciasCreateModal;
+
   window.renderIncidenciasCreateModal = OnionIncidenciasCreateModal.open;
+  window.renderIncidenciaCreateModal = OnionIncidenciasCreateModal.open;
 } catch {}
 
 /* =========================================================

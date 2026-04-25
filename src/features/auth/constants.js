@@ -4,6 +4,7 @@
 
    Responsabilidades:
    - centralizar endpoints auth
+   - centralizar endpoint de activación de cuenta
    - centralizar claves storage auxiliar
    - centralizar límites y constantes sesión
    - exponer endpoints password-reset request / confirm
@@ -14,8 +15,23 @@
 ========================================================= */
 
 /* =========================================================
-   ENDPOINTS
+   ENDPOINTS BASE
 ========================================================= */
+
+const LOGIN_ENDPOINT =
+  "/api/auth/login";
+
+const LOGOUT_ENDPOINT =
+  "/api/auth/logout";
+
+const ME_ENDPOINT =
+  "/api/auth/me";
+
+const REFRESH_ENDPOINT =
+  "/api/auth/refresh";
+
+const ACTIVATE_ACCOUNT_ENDPOINT =
+  "/api/auth/activate-account";
 
 const REQUEST_RESET_ENDPOINT =
   "/api/auth/reset-password-request";
@@ -26,14 +42,46 @@ const CONFIRM_RESET_ENDPOINT =
 const VALIDATE_RESET_ENDPOINT =
   "/api/auth/reset-password/validate";
 
+/* =========================================================
+   ENDPOINTS
+========================================================= */
+
 export const AUTH_ENDPOINTS = Object.freeze({
   /* =======================================================
      SESIÓN
   ======================================================= */
-  login: "/api/auth/login",
-  logout: "/api/auth/logout",
-  me: "/api/auth/me",
-  refresh: "/api/auth/refresh",
+  login:
+    LOGIN_ENDPOINT,
+
+  logout:
+    LOGOUT_ENDPOINT,
+
+  me:
+    ME_ENDPOINT,
+
+  refresh:
+    REFRESH_ENDPOINT,
+
+  /* =======================================================
+     ACTIVACIÓN DE CUENTA
+  ======================================================= */
+  activateAccount:
+    ACTIVATE_ACCOUNT_ENDPOINT,
+
+  activation:
+    ACTIVATE_ACCOUNT_ENDPOINT,
+
+  accountActivation:
+    ACTIVATE_ACCOUNT_ENDPOINT,
+
+  createUserActivation:
+    ACTIVATE_ACCOUNT_ENDPOINT,
+
+  confirmActivation:
+    ACTIVATE_ACCOUNT_ENDPOINT,
+
+  activate:
+    ACTIVATE_ACCOUNT_ENDPOINT,
 
   /* =======================================================
      PASSWORD RESET REQUEST
@@ -81,6 +129,12 @@ export const AUTH_ENDPOINTS = Object.freeze({
      VALIDATE TOKEN
   ======================================================= */
   validateResetToken:
+    VALIDATE_RESET_ENDPOINT,
+
+  resetPasswordValidate:
+    VALIDATE_RESET_ENDPOINT,
+
+  validatePasswordReset:
     VALIDATE_RESET_ENDPOINT,
 });
 
@@ -140,13 +194,22 @@ export const AUTH_CONSTANTS = Object.freeze({
     160,
 
   passwordMinLength:
-    6,
+    8,
 
   passwordMaxLength:
     1024,
 
   /* TOKENS */
+  tokenMinLength:
+    16,
+
   tokenMaxLength:
+    4096,
+
+  activationTokenMinLength:
+    16,
+
+  activationTokenMaxLength:
     4096,
 
   sessionValueMaxLength:
@@ -163,6 +226,16 @@ export const AUTH_CONSTANTS = Object.freeze({
   requestTimeout:
     15000,
 
+  /* ACTIVATION */
+  activationPasswordMinLength:
+    8,
+
+  activationRedirectDelayMs:
+    0,
+
+  activationSuccessRedirectDelayMs:
+    0,
+
   /* RESET PASSWORD */
   resetIdentifierMaxLength:
     160,
@@ -175,6 +248,12 @@ export const AUTH_CONSTANTS = Object.freeze({
 
   resetTokenMaxLength:
     4096,
+
+  resetPasswordMinLength:
+    8,
+
+  resetPasswordMaxLength:
+    1024,
 
   /* UI */
   loginRedirectDelayMs:
@@ -213,8 +292,7 @@ export function getAuthEndpoint(
     AUTH_ENDPOINTS[key];
 
   if (
-    typeof endpoint ===
-      "string" &&
+    typeof endpoint === "string" &&
     endpoint.trim()
   ) {
     return endpoint.trim();
@@ -234,8 +312,7 @@ export function getAuthStorageKey(
     AUTH_STORAGE_KEYS[key];
 
   if (
-    typeof storageKey ===
-      "string" &&
+    typeof storageKey === "string" &&
     storageKey.trim()
   ) {
     return storageKey.trim();
@@ -264,36 +341,59 @@ export function getAuthConstant(
 }
 
 /* =========================================================
-   SPECIALIZED HELPERS
+   SPECIALIZED HELPERS · SESSION
 ========================================================= */
 
 export function getLoginEndpoint() {
   return getAuthEndpoint(
     "login",
-    "/api/auth/login"
+    LOGIN_ENDPOINT
   );
 }
 
 export function getLogoutEndpoint() {
   return getAuthEndpoint(
     "logout",
-    "/api/auth/logout"
+    LOGOUT_ENDPOINT
   );
 }
 
 export function getMeEndpoint() {
   return getAuthEndpoint(
     "me",
-    "/api/auth/me"
+    ME_ENDPOINT
   );
 }
 
 export function getRefreshEndpoint() {
   return getAuthEndpoint(
     "refresh",
-    "/api/auth/refresh"
+    REFRESH_ENDPOINT
   );
 }
+
+/* =========================================================
+   SPECIALIZED HELPERS · ACTIVATION
+========================================================= */
+
+export function getActivateAccountEndpoint() {
+  return getAuthEndpoint(
+    "activateAccount",
+    ACTIVATE_ACCOUNT_ENDPOINT
+  );
+}
+
+export function getActivationEndpoint() {
+  return getActivateAccountEndpoint();
+}
+
+export function getAccountActivationEndpoint() {
+  return getActivateAccountEndpoint();
+}
+
+/* =========================================================
+   SPECIALIZED HELPERS · PASSWORD RESET
+========================================================= */
 
 export function getRequestPasswordResetEndpoint() {
   return getAuthEndpoint(
@@ -315,3 +415,87 @@ export function getValidateResetTokenEndpoint() {
     VALIDATE_RESET_ENDPOINT
   );
 }
+
+/* =========================================================
+   SPECIALIZED HELPERS · LIMITS
+========================================================= */
+
+export function getPasswordMinLength() {
+  return Number(
+    getAuthConstant(
+      "passwordMinLength",
+      8
+    )
+  ) || 8;
+}
+
+export function getActivationPasswordMinLength() {
+  return Number(
+    getAuthConstant(
+      "activationPasswordMinLength",
+      getPasswordMinLength()
+    )
+  ) || getPasswordMinLength();
+}
+
+export function getPasswordMaxLength() {
+  return Number(
+    getAuthConstant(
+      "passwordMaxLength",
+      1024
+    )
+  ) || 1024;
+}
+
+export function getTokenMaxLength() {
+  return Number(
+    getAuthConstant(
+      "tokenMaxLength",
+      4096
+    )
+  ) || 4096;
+}
+
+export function getActivationTokenMaxLength() {
+  return Number(
+    getAuthConstant(
+      "activationTokenMaxLength",
+      getTokenMaxLength()
+    )
+  ) || getTokenMaxLength();
+}
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
+export default {
+  AUTH_ENDPOINTS,
+  AUTH_STORAGE_KEYS,
+  AUTH_CONSTANTS,
+
+  safeText,
+
+  getAuthEndpoint,
+  getAuthStorageKey,
+  getAuthConstant,
+
+  getLoginEndpoint,
+  getLogoutEndpoint,
+  getMeEndpoint,
+  getRefreshEndpoint,
+
+  getActivateAccountEndpoint,
+  getActivationEndpoint,
+  getAccountActivationEndpoint,
+
+  getRequestPasswordResetEndpoint,
+  getConfirmPasswordResetEndpoint,
+  getValidateResetTokenEndpoint,
+
+  getPasswordMinLength,
+  getActivationPasswordMinLength,
+  getPasswordMaxLength,
+  getTokenMaxLength,
+  getActivationTokenMaxLength,
+};

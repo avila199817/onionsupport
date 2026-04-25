@@ -7,6 +7,7 @@
    - normalizar public path y canonical path
    - preservar query/hash en rutas públicas sensibles
    - preservar token de activación antes del primer render
+   - NO resucitar token tras scrub oficial
    - escapar HTML seguro para render inline
    - gestionar scope global de cleanup
    - registrar módulos en AppCore sin duplicados
@@ -18,7 +19,10 @@
    - cero throws accidentales
    - prioridad al browser/initial URL para activation token
    - soporte slug /@username robusto
-   - no perder search/hash accidentalmente
+   - canonical sin query/hash
+   - publicPath con query/hash
+   - soporte hash-router /#/activate-account?token=...
+   - soporte hashbang #!/activate-account?token=...
 ========================================================= */
 
 import { APP_SCOPE } from "./constants.js";
@@ -70,6 +74,29 @@ function getBaseOrigin() {
   }
 
   return "http://localhost";
+}
+
+function isHashRouterPath(value = "") {
+  const raw = String(value || "").trim();
+
+  return (
+    raw.startsWith("#/") ||
+    raw.startsWith("#!")
+  );
+}
+
+function normalizeHashRouterPath(value = "") {
+  const raw = String(value || "").trim();
+
+  if (!raw) {
+    return "/";
+  }
+
+  if (raw.startsWith("#!")) {
+    return raw.replace(/^#!\/?/, "/");
+  }
+
+  return raw.replace(/^#\/?/, "/");
 }
 
 /* =========================================================
@@ -142,10 +169,10 @@ function fallbackNormalizePath(path = "/") {
 
       if (
         parsed.hash &&
-        /^#\/[^/]/.test(parsed.hash)
+        isHashRouterPath(parsed.hash)
       ) {
         return fallbackNormalizePath(
-          parsed.hash.replace(/^#/, "")
+          normalizeHashRouterPath(parsed.hash)
         );
       }
 
@@ -155,12 +182,9 @@ function fallbackNormalizePath(path = "/") {
     }
   } catch {}
 
-  if (
-    raw.startsWith("#/") ||
-    raw.startsWith("#!")
-  ) {
+  if (isHashRouterPath(raw)) {
     return fallbackNormalizePath(
-      raw.replace(/^#\/?/, "/")
+      normalizeHashRouterPath(raw)
     );
   }
 
@@ -196,8 +220,7 @@ function normalizePath(AppCore, path = "/") {
 
   try {
     if (
-      typeof AppCore?.utils?.normalizePath ===
-      "function"
+      typeof AppCore?.utils?.normalizePath === "function"
     ) {
       const delegated =
         AppCore.utils.normalizePath(raw);
@@ -247,6 +270,12 @@ function stripUsernamePrefix(path = "/") {
   );
 }
 
+/*
+  Canonical interno:
+  - sin /@username
+  - sin query
+  - sin hash
+*/
 function fallbackNormalizeCanonicalPath(path = "/") {
   const stripped =
     stripUsernamePrefix(path);
@@ -254,10 +283,7 @@ function fallbackNormalizeCanonicalPath(path = "/") {
   const pathname =
     stripSearchAndHash(stripped);
 
-  const suffix =
-    getSearchAndHash(stripped);
-
-  return `${normalizePathnameOnly(pathname)}${suffix}`;
+  return normalizePathnameOnly(pathname);
 }
 
 function normalizeCanonicalPath(AppCore, path = "/") {
@@ -267,6 +293,9 @@ function normalizeCanonicalPath(AppCore, path = "/") {
   const fallback =
     fallbackNormalizeCanonicalPath(raw);
 
+  /*
+    Si hay suffix, canonical siempre debe limpiarlo.
+  */
   const hasSuffix =
     raw.includes("?") ||
     raw.includes("#");
@@ -277,8 +306,7 @@ function normalizeCanonicalPath(AppCore, path = "/") {
 
   try {
     if (
-      typeof AppCore?.utils?.normalizeCanonicalPath ===
-      "function"
+      typeof AppCore?.utils?.normalizeCanonicalPath === "function"
     ) {
       const delegated =
         AppCore.utils.normalizeCanonicalPath(raw);
@@ -319,10 +347,10 @@ function buildBrowserPath() {
     */
     if (
       hash &&
-      /^#\/[^/]/.test(hash)
+      isHashRouterPath(hash)
     ) {
       return fallbackNormalizePath(
-        hash.replace(/^#/, "")
+        normalizeHashRouterPath(hash)
       );
     }
 
@@ -342,16 +370,22 @@ function pathFromUrlLike(value = "") {
     return "";
   }
 
+  if (isHashRouterPath(raw)) {
+    return fallbackNormalizePath(
+      normalizeHashRouterPath(raw)
+    );
+  }
+
   try {
     const parsed =
       new URL(raw, getBaseOrigin());
 
     if (
       parsed.hash &&
-      /^#\/[^/]/.test(parsed.hash)
+      isHashRouterPath(parsed.hash)
     ) {
       return fallbackNormalizePath(
-        parsed.hash.replace(/^#/, "")
+        normalizeHashRouterPath(parsed.hash)
       );
     }
 
@@ -431,6 +465,38 @@ function isActivationPath(path = "") {
   );
 }
 
+function extractActivationPathToken(path = "") {
+  const normalized =
+    fallbackNormalizePath(path);
+
+  const pathname =
+    stripSearchAndHash(normalized);
+
+  const parts =
+    pathname.split("/").filter(Boolean);
+
+  const index =
+    parts.findIndex(
+      (part) => part === "activate-account"
+    );
+
+  if (
+    index >= 0 &&
+    parts[index + 1]
+  ) {
+    try {
+      return safeText(
+        decodeURIComponent(parts[index + 1]),
+        ""
+      );
+    } catch {
+      return safeText(parts[index + 1], "");
+    }
+  }
+
+  return "";
+}
+
 function hasTokenInSearch(search = "") {
   try {
     const params =
@@ -462,6 +528,16 @@ function hasActivationToken(pathOrUrl = "") {
     const parsed =
       new URL(raw, getBaseOrigin());
 
+    const parsedPath =
+      pathFromUrlLike(raw);
+
+    if (
+      isActivationPath(parsedPath) &&
+      extractActivationPathToken(parsedPath)
+    ) {
+      return true;
+    }
+
     if (
       hasTokenInSearch(parsed.search)
     ) {
@@ -482,8 +558,18 @@ function hasActivationToken(pathOrUrl = "") {
 
     return false;
   } catch {
+    const normalized =
+      fallbackNormalizePath(raw);
+
+    if (
+      isActivationPath(normalized) &&
+      extractActivationPathToken(normalized)
+    ) {
+      return true;
+    }
+
     const parts =
-      splitRawPath(raw);
+      splitRawPath(normalized);
 
     if (
       hasTokenInSearch(parts.search)
@@ -507,8 +593,31 @@ function hasActivationToken(pathOrUrl = "") {
   }
 }
 
+function isActivationTokenScrubbed() {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  try {
+    return Boolean(
+      window.history?.state?.scrubbedActivationToken
+    );
+  } catch {
+    return false;
+  }
+}
+
 function getProtectedActivationPath() {
   captureInitialUrl();
+
+  /*
+    CRÍTICO:
+    Si ActivateAccountView ya capturó y limpió la URL,
+    NO debemos resucitar el token desde la URL inicial.
+  */
+  if (isActivationTokenScrubbed()) {
+    return "";
+  }
 
   const activationInitialUrl =
     getActivationInitialUrl();
@@ -577,10 +686,11 @@ function shouldPreferBrowserPathOverState(AppCore) {
     );
 
   /*
-    Si el browser está en activation con query/hash y el estado
-    solo tiene /activate-account, preferimos browser.
+    Si el browser está en activation con token y todavía no se ha
+    hecho scrub oficial, preferimos browser.
   */
   if (
+    !isActivationTokenScrubbed() &&
     isActivationPath(browserPath) &&
     hasActivationToken(browserPath)
   ) {
@@ -588,9 +698,25 @@ function shouldPreferBrowserPathOverState(AppCore) {
   }
 
   /*
-    Si el estado está vacío, naturalmente usamos browser.
+    Si el estado está vacío, usamos browser.
   */
   if (!statePublicPath && !stateRoute) {
+    return true;
+  }
+
+  /*
+    Caso típico de boot:
+      browser: /activate-account?token=XXX
+      state:   /
+    */
+  if (
+    browserPath &&
+    browserPath !== "/" &&
+    (
+      statePublicPath === "/" ||
+      stateRoute === "/"
+    )
+  ) {
     return true;
   }
 
@@ -691,15 +817,30 @@ export function getCurrentCanonicalPath(
   AppCore,
   Router
 ) {
-  /*
-    Canonical puede quitar el token, pero solo después de que
-    getCurrentPath/getCurrentPublicPath hayan podido preservar
-    el public path inicial.
-  */
+  captureInitialUrl();
+
+  const protectedActivationPath =
+    getProtectedActivationPath();
+
+  if (protectedActivationPath) {
+    return normalizeCanonicalPath(
+      AppCore,
+      protectedActivationPath
+    );
+  }
+
+  if (
+    shouldPreferBrowserPathOverState(AppCore)
+  ) {
+    return normalizeCanonicalPath(
+      AppCore,
+      buildBrowserPath()
+    );
+  }
+
   try {
     if (
-      typeof Router?.getCurrentCanonicalPath ===
-      "function"
+      typeof Router?.getCurrentCanonicalPath === "function"
     ) {
       const value =
         Router.getCurrentCanonicalPath();
@@ -742,8 +883,7 @@ export function escapeHtml(
 ) {
   try {
     if (
-      typeof AppCore?.utils?.escapeHtml ===
-      "function"
+      typeof AppCore?.utils?.escapeHtml === "function"
     ) {
       return AppCore.utils.escapeHtml(
         String(value ?? "")
@@ -766,8 +906,7 @@ export function escapeHtml(
 export function ensureScope(AppCore) {
   try {
     if (
-      typeof AppCore?.cleanup?.scope ===
-      "function"
+      typeof AppCore?.cleanup?.scope === "function"
     ) {
       return AppCore.cleanup.scope(
         APP_SCOPE
@@ -783,8 +922,7 @@ export function ensureScope(AppCore) {
 export function clearScope(AppCore) {
   try {
     if (
-      typeof AppCore?.cleanup?.run ===
-      "function"
+      typeof AppCore?.cleanup?.run === "function"
     ) {
       AppCore.cleanup.run(APP_SCOPE);
     }
@@ -815,16 +953,14 @@ export function registerModule(
     }
 
     if (
-      typeof AppCore.modules.has ===
-        "function" &&
+      typeof AppCore.modules.has === "function" &&
       AppCore.modules.has(moduleName)
     ) {
       return true;
     }
 
     if (
-      typeof AppCore.modules.register ===
-      "function"
+      typeof AppCore.modules.register === "function"
     ) {
       AppCore.modules.register(
         moduleName,
@@ -869,6 +1005,9 @@ export function getHelpersSnapshot(
 
     protectedActivationPath:
       getProtectedActivationPath(),
+
+    activationTokenScrubbed:
+      isActivationTokenScrubbed(),
 
     hasCleanup:
       Boolean(

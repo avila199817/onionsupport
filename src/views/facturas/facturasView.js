@@ -3,6 +3,7 @@
    Archivo: src/views/facturas/facturasView.js
 
    FINAL PRO SYSTEM · VIEW REAL · FULL PATCH PORTAL MODAL
+   PATCH 7 · DETAIL STORE RELATION MERGE · INCIDENCIA FIX
    PATCH 6 · OVERLAY SAFE CLOSE · CREATE MODAL · INCIDENCIA MODAL BRIDGE
    PATCH 5 · CREATE MODAL READY · INCIDENCIA MODAL BRIDGE
    PATCH 4 · INCIDENCIA LINK PRESERVER · PAGINATION READY
@@ -17,9 +18,16 @@
    - performance pro
    - cleanup enterprise
    - preservar relación factura ↔ incidencia para columna Incidencia
+   - preservar relación factura ↔ incidencia también en modal detalle
    - abrir incidencia relacionada en modal real, no en URL inexistente
    - cerrar modal detalle por X, Escape y overlay sin cerrar clicks internos
    - paginación visual real a 5 facturas por página
+
+   FIX CLAVE:
+   - El listado recibe facturas enriquecidas desde store.
+   - El detalle remoto puede venir sin ticketId/incidenciaId.
+   - Antes de renderizar detalle se fusiona el payload remoto con la
+     factura enriquecida del store por facturaId/numero.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -226,11 +234,23 @@ export const FacturasView = (() => {
         item.relatedTicketId,
         item.relatedIncidentId,
         item.supportTicketId,
-        item.caseId
+        item.caseId,
+
+        item.ticket?.ticketId,
+        item.ticket?.incidenciaId,
+        item.ticket?.id,
+
+        item.incidencia?.ticketId,
+        item.incidencia?.incidenciaId,
+        item.incidencia?.id,
+
+        item.linkedTicket?.ticketId,
+        item.linkedTicket?.incidenciaId,
+        item.linkedTicket?.id
       );
 
       if (candidate) {
-        return candidate;
+        return safeText(candidate, "");
       }
     }
 
@@ -254,10 +274,61 @@ export const FacturasView = (() => {
         item?.raw?.invoiceId,
         item?.raw?.numero,
         item?.raw?.numeroFacturaLegal,
-        item?.raw?.numeroFacturaSistema
+        item?.raw?.numeroFacturaSistema,
+
+        item?.data?.id,
+        item?.data?.facturaId,
+        item?.data?.invoiceId,
+        item?.data?.numero,
+
+        item?.payload?.id,
+        item?.payload?.facturaId,
+        item?.payload?.invoiceId,
+        item?.payload?.numero,
+
+        item?.result?.id,
+        item?.result?.facturaId,
+        item?.result?.invoiceId,
+        item?.result?.numero
       ),
       ""
     );
+  }
+
+  function getFacturaIdentityList(item = {}) {
+    const source = safeObject(item);
+    const raw = safeObject(source.raw);
+
+    return [
+      source.id,
+      source._id,
+      source.facturaId,
+      source.invoiceId,
+      source.numero,
+      source.numeroFacturaLegal,
+      source.numeroFacturaSistema,
+      source.invoiceNumber,
+      source.code,
+
+      raw.id,
+      raw._id,
+      raw.facturaId,
+      raw.invoiceId,
+      raw.numero,
+      raw.numeroFacturaLegal,
+      raw.numeroFacturaSistema,
+      raw.invoiceNumber,
+      raw.code,
+    ]
+      .map((value) => safeText(value, ""))
+      .filter(Boolean);
+  }
+
+  function sameFacturaIdentity(a = "", b = "") {
+    const left = normalizeText(a);
+    const right = normalizeText(b);
+
+    return Boolean(left && right && left === right);
   }
 
   function getRelatedIncidenciaId(item = {}) {
@@ -267,6 +338,8 @@ export const FacturasView = (() => {
     const incidencia = safeObject(first(source.incidencia, raw.incidencia));
     const ticket = safeObject(first(source.ticket, raw.ticket));
     const linkedTicket = safeObject(first(source.linkedTicket, raw.linkedTicket));
+    const relatedTicket = safeObject(first(source.relatedTicket, raw.relatedTicket));
+    const relatedIncident = safeObject(first(source.relatedIncident, raw.relatedIncident));
 
     return safeText(
       first(
@@ -285,6 +358,14 @@ export const FacturasView = (() => {
         linkedTicket.id,
         linkedTicket.incidenciaId,
 
+        relatedTicket.ticketId,
+        relatedTicket.id,
+        relatedTicket.incidenciaId,
+
+        relatedIncident.ticketId,
+        relatedIncident.id,
+        relatedIncident.incidenciaId,
+
         source.relatedTicketId,
         source.relatedIncidentId,
         source.supportTicketId,
@@ -302,6 +383,10 @@ export const FacturasView = (() => {
         pickTicketIdFromArray(source.tickets),
         pickTicketIdFromArray(source.relatedTickets),
         pickTicketIdFromArray(source.relations),
+        pickTicketIdFromArray(source.facturasRelacionadas),
+        pickTicketIdFromArray(source.linkedInvoices?.tickets),
+        pickTicketIdFromArray(source.invoiceLinks),
+        pickTicketIdFromArray(source.invoiceRelations),
 
         raw.ticketId,
         raw.incidenciaId,
@@ -317,6 +402,14 @@ export const FacturasView = (() => {
         raw.linkedTicket?.ticketId,
         raw.linkedTicket?.id,
         raw.linkedTicket?.incidenciaId,
+
+        raw.relatedTicket?.ticketId,
+        raw.relatedTicket?.id,
+        raw.relatedTicket?.incidenciaId,
+
+        raw.relatedIncident?.ticketId,
+        raw.relatedIncident?.id,
+        raw.relatedIncident?.incidenciaId,
 
         raw.relatedTicketId,
         raw.relatedIncidentId,
@@ -334,7 +427,11 @@ export const FacturasView = (() => {
         pickTicketIdFromArray(raw.incidencias),
         pickTicketIdFromArray(raw.tickets),
         pickTicketIdFromArray(raw.relatedTickets),
-        pickTicketIdFromArray(raw.relations)
+        pickTicketIdFromArray(raw.relations),
+        pickTicketIdFromArray(raw.facturasRelacionadas),
+        pickTicketIdFromArray(raw.linkedInvoices?.tickets),
+        pickTicketIdFromArray(raw.invoiceLinks),
+        pickTicketIdFromArray(raw.invoiceRelations)
       ),
       ""
     );
@@ -347,6 +444,7 @@ export const FacturasView = (() => {
     const incidencia = safeObject(first(source.incidencia, raw.incidencia));
     const ticket = safeObject(first(source.ticket, raw.ticket));
     const linkedTicket = safeObject(first(source.linkedTicket, raw.linkedTicket));
+    const relatedTicket = safeObject(first(source.relatedTicket, raw.relatedTicket));
 
     const incidenciaId = getRelatedIncidenciaId(source);
 
@@ -360,15 +458,23 @@ export const FacturasView = (() => {
       id: incidenciaId,
       ticketId: incidenciaId,
       incidenciaId,
+      code: safeText(first(incidencia.code, ticket.code, linkedTicket.code, incidenciaId), incidenciaId),
+      ticketCode: safeText(first(incidencia.ticketCode, ticket.ticketCode, linkedTicket.ticketCode, incidenciaId), incidenciaId),
 
       subject: safeText(
         first(
           incidencia.subject,
           incidencia.asunto,
+          incidencia.title,
           ticket.subject,
           ticket.asunto,
+          ticket.title,
           linkedTicket.subject,
           linkedTicket.asunto,
+          linkedTicket.title,
+          relatedTicket.subject,
+          relatedTicket.asunto,
+          relatedTicket.title,
           raw.subject,
           raw.asunto,
           "Incidencia relacionada"
@@ -380,12 +486,34 @@ export const FacturasView = (() => {
         first(
           incidencia.asunto,
           incidencia.subject,
+          incidencia.title,
           ticket.asunto,
           ticket.subject,
+          ticket.title,
           linkedTicket.asunto,
           linkedTicket.subject,
+          linkedTicket.title,
+          relatedTicket.asunto,
+          relatedTicket.subject,
+          relatedTicket.title,
           raw.asunto,
           raw.subject,
+          "Incidencia relacionada"
+        ),
+        "Incidencia relacionada"
+      ),
+
+      title: safeText(
+        first(
+          incidencia.title,
+          incidencia.subject,
+          incidencia.asunto,
+          ticket.title,
+          ticket.subject,
+          ticket.asunto,
+          linkedTicket.title,
+          linkedTicket.subject,
+          linkedTicket.asunto,
           "Incidencia relacionada"
         ),
         "Incidencia relacionada"
@@ -396,6 +524,7 @@ export const FacturasView = (() => {
           incidencia.clienteId,
           ticket.clienteId,
           linkedTicket.clienteId,
+          relatedTicket.clienteId,
           source.clienteId,
           source.cliente?.id,
           raw.clienteId,
@@ -411,11 +540,18 @@ export const FacturasView = (() => {
           incidencia.name,
           incidencia.nombre,
           ticket.clienteNombre,
+          ticket.name,
+          ticket.nombre,
           linkedTicket.clienteNombre,
+          linkedTicket.name,
+          linkedTicket.nombre,
+          relatedTicket.clienteNombre,
           source.cliente?.nombre,
           source.cliente?.name,
+          source.clienteNombre,
           raw.cliente?.nombre,
           raw.cliente?.name,
+          raw.clienteNombre,
           ""
         ),
         ""
@@ -426,6 +562,7 @@ export const FacturasView = (() => {
           incidencia.relationType,
           ticket.relationType,
           linkedTicket.relationType,
+          relatedTicket.relationType,
           source.relationType,
           raw.relationType,
           "linked_ticket"
@@ -438,6 +575,7 @@ export const FacturasView = (() => {
           incidencia.linkedAt,
           ticket.linkedAt,
           linkedTicket.linkedAt,
+          relatedTicket.linkedAt,
           source.linkedAt,
           raw.linkedAt,
           ""
@@ -450,12 +588,93 @@ export const FacturasView = (() => {
           incidencia.linkedAtES,
           ticket.linkedAtES,
           linkedTicket.linkedAtES,
+          relatedTicket.linkedAtES,
           source.linkedAtES,
           raw.linkedAtES,
           ""
         ),
         ""
       ),
+    };
+  }
+
+  function buildRelationPatch(item = {}) {
+    const source = safeObject(item);
+    const raw = safeObject(source.raw);
+
+    const incidenciaId = getRelatedIncidenciaId(source);
+    const incidenciaPayload = buildIncidenciaPayload(source);
+
+    if (!incidenciaId) {
+      return {};
+    }
+
+    return {
+      ticketId: incidenciaId,
+      incidenciaId,
+
+      relatedTicketId: safeText(
+        first(source.relatedTicketId, raw.relatedTicketId, incidenciaId),
+        incidenciaId
+      ),
+
+      relatedIncidentId: safeText(
+        first(source.relatedIncidentId, raw.relatedIncidentId, incidenciaId),
+        incidenciaId
+      ),
+
+      supportTicketId: safeText(
+        first(source.supportTicketId, raw.supportTicketId, incidenciaId),
+        incidenciaId
+      ),
+
+      caseId: safeText(
+        first(source.caseId, raw.caseId, incidenciaId),
+        incidenciaId
+      ),
+
+      incidencia: incidenciaPayload,
+      ticket: safeObject(first(source.ticket, raw.ticket, incidenciaPayload)),
+      linkedTicket: safeObject(first(source.linkedTicket, raw.linkedTicket, incidenciaPayload)),
+      relatedTicket: safeObject(first(source.relatedTicket, raw.relatedTicket, incidenciaPayload)),
+
+      relationType: safeText(
+        first(
+          source.relationType,
+          raw.relationType,
+          incidenciaPayload?.relationType,
+          "linked_ticket"
+        ),
+        "linked_ticket"
+      ),
+
+      meta: {
+        ...safeObject(source.meta),
+        hasIncidencia: true,
+        incidenciaId,
+        ticketId: incidenciaId,
+      },
+
+      raw: {
+        ...raw,
+        ticketId: safeText(first(raw.ticketId, incidenciaId), incidenciaId),
+        incidenciaId: safeText(first(raw.incidenciaId, incidenciaId), incidenciaId),
+        relatedTicketId: safeText(first(raw.relatedTicketId, incidenciaId), incidenciaId),
+        relatedIncidentId: safeText(first(raw.relatedIncidentId, incidenciaId), incidenciaId),
+        supportTicketId: safeText(first(raw.supportTicketId, incidenciaId), incidenciaId),
+        caseId: safeText(first(raw.caseId, incidenciaId), incidenciaId),
+
+        incidencia: safeObject(first(raw.incidencia, incidenciaPayload)),
+        ticket: safeObject(first(raw.ticket, incidenciaPayload)),
+        linkedTicket: safeObject(first(raw.linkedTicket, incidenciaPayload)),
+
+        meta: {
+          ...safeObject(raw.meta),
+          hasIncidencia: true,
+          incidenciaId,
+          ticketId: incidenciaId,
+        },
+      },
     };
   }
 
@@ -471,66 +690,145 @@ export const FacturasView = (() => {
       raw: hasOwnKeys(source.raw) ? source.raw : raw,
     };
 
-    const incidenciaId = getRelatedIncidenciaId(merged);
-    const incidenciaPayload = buildIncidenciaPayload(merged);
+    const relationPatch = buildRelationPatch(merged);
 
-    if (!incidenciaId) {
+    if (!hasOwnKeys(relationPatch)) {
       return merged;
     }
 
     return {
       ...merged,
+      ...relationPatch,
 
-      ticketId: incidenciaId,
-      incidenciaId,
-
-      relatedTicketId: safeText(
-        first(merged.relatedTicketId, raw.relatedTicketId, incidenciaId),
-        incidenciaId
-      ),
-
-      relatedIncidentId: safeText(
-        first(merged.relatedIncidentId, raw.relatedIncidentId, incidenciaId),
-        incidenciaId
-      ),
-
-      supportTicketId: safeText(
-        first(merged.supportTicketId, raw.supportTicketId, incidenciaId),
-        incidenciaId
-      ),
-
-      caseId: safeText(
-        first(merged.caseId, raw.caseId, incidenciaId),
-        incidenciaId
-      ),
-
-      incidencia: incidenciaPayload,
-
-      ticket: safeObject(
-        first(merged.ticket, raw.ticket, incidenciaPayload)
-      ),
-
-      linkedTicket: safeObject(
-        first(merged.linkedTicket, raw.linkedTicket, incidenciaPayload)
-      ),
-
-      relationType: safeText(
-        first(
-          merged.relationType,
-          raw.relationType,
-          incidenciaPayload?.relationType,
-          "linked_ticket"
-        ),
-        "linked_ticket"
-      ),
+      raw: {
+        ...safeObject(merged.raw),
+        ...safeObject(relationPatch.raw),
+      },
 
       meta: {
         ...safeObject(merged.meta),
-        hasIncidencia: true,
-        incidenciaId,
-        ticketId: incidenciaId,
+        ...safeObject(relationPatch.meta),
       },
     };
+  }
+
+  /* =====================================================
+     STORE / DETAIL MERGE HELPERS
+  ===================================================== */
+
+  function findFacturaById(facturaId = "") {
+    const id = safeText(facturaId, "");
+
+    if (!id) return null;
+
+    const items = getItems();
+
+    return (
+      items.find((item) =>
+        getFacturaIdentityList(item).some((candidate) =>
+          sameFacturaIdentity(candidate, id)
+        )
+      ) || null
+    );
+  }
+
+  function findFacturaForDetail(detail = {}, preferredId = "") {
+    const remote = safeObject(detail);
+
+    const preferred = safeText(preferredId, "");
+    if (preferred) {
+      const byPreferred = findFacturaById(preferred);
+      if (byPreferred) return byPreferred;
+    }
+
+    const remoteIds = getFacturaIdentityList(remote);
+
+    for (const id of remoteIds) {
+      const found = findFacturaById(id);
+      if (found) return found;
+    }
+
+    const remoteIncidenciaId = getRelatedIncidenciaId(remote);
+
+    if (remoteIncidenciaId) {
+      const byIncidencia = getItems().find(
+        (item) => getRelatedIncidenciaId(item) === remoteIncidenciaId
+      );
+
+      if (byIncidencia) return byIncidencia;
+    }
+
+    return null;
+  }
+
+  function mergeFacturaDetailWithStoreSnapshot(detail = {}, preferredFacturaId = "") {
+    const remote = safeObject(detail);
+
+    if (!hasOwnKeys(remote)) {
+      return null;
+    }
+
+    const storeItem = findFacturaForDetail(remote, preferredFacturaId);
+
+    if (!storeItem) {
+      return preserveIncidenciaFields(remote, remote.raw || remote);
+    }
+
+    const storeEnriched = preserveIncidenciaFields(
+      storeItem,
+      storeItem?.raw || storeItem
+    );
+
+    const preliminary = {
+      ...storeEnriched,
+      ...remote,
+
+      raw: {
+        ...safeObject(storeEnriched.raw),
+        ...safeObject(remote.raw),
+      },
+
+      meta: {
+        ...safeObject(storeEnriched.meta),
+        ...safeObject(remote.meta),
+      },
+    };
+
+    const preliminaryWithRemoteRelation = preserveIncidenciaFields(
+      preliminary,
+      preliminary.raw || preliminary
+    );
+
+    if (getRelatedIncidenciaId(preliminaryWithRemoteRelation)) {
+      return preliminaryWithRemoteRelation;
+    }
+
+    const forcedRelationPatch = buildRelationPatch(storeEnriched);
+
+    if (!hasOwnKeys(forcedRelationPatch)) {
+      return preliminaryWithRemoteRelation;
+    }
+
+    return preserveIncidenciaFields(
+      {
+        ...preliminary,
+        ...forcedRelationPatch,
+
+        raw: {
+          ...safeObject(preliminary.raw),
+          ...safeObject(forcedRelationPatch.raw),
+        },
+
+        meta: {
+          ...safeObject(preliminary.meta),
+          ...safeObject(forcedRelationPatch.meta),
+        },
+      },
+      {
+        ...safeObject(preliminary.raw),
+        ...safeObject(forcedRelationPatch.raw),
+      }
+    );
   }
 
   /* =====================================================
@@ -910,6 +1208,7 @@ export const FacturasView = (() => {
 
       title: safeText(
         first(
+          incidenciaPayload?.title,
           incidenciaPayload?.subject,
           incidenciaPayload?.asunto,
           "Incidencia relacionada"
@@ -1324,9 +1623,16 @@ export const FacturasView = (() => {
     };
   }
 
-  function setDetail(data = null) {
+  function setDetail(data = null, preferredFacturaId = "") {
     const patchedDetail = data
-      ? preserveIncidenciaFields(data, data?.raw || data)
+      ? mergeFacturaDetailWithStoreSnapshot(
+          data,
+          first(
+            preferredFacturaId,
+            state?.view?.selectedFacturaId,
+            getStableFacturaId(data)
+          )
+        )
       : null;
 
     setFacturasDetailData(state, patchedDetail);
@@ -1489,10 +1795,15 @@ export const FacturasView = (() => {
 
     const rawDetail = getFacturasDetailData(state);
 
-    const detail = preserveIncidenciaFields(
-      rawDetail || {},
-      rawDetail?.raw || rawDetail || {}
-    );
+    const detail = rawDetail
+      ? mergeFacturaDetailWithStoreSnapshot(
+          rawDetail,
+          first(
+            state?.view?.selectedFacturaId,
+            getStableFacturaId(rawDetail)
+          )
+        )
+      : null;
 
     const detailOpen = isFacturasDetailOpen(state);
 
@@ -1795,7 +2106,11 @@ export const FacturasView = (() => {
   }
 
   async function loadFacturaDetail(id = "") {
-    if (!id) return null;
+    const facturaId = safeText(id, "");
+
+    if (!facturaId) return null;
+
+    state.view.selectedFacturaId = facturaId;
 
     setFacturasDetailOpen(state, true);
     setFacturasDetailLoading(state, true);
@@ -1806,18 +2121,18 @@ export const FacturasView = (() => {
       const detail = await loadFacturaDetailById({
         state,
         render: () => {},
-        facturaId: id,
+        facturaId,
         force: true,
       });
 
       const patchedDetail = detail
-        ? preserveIncidenciaFields(detail, detail?.raw || detail)
+        ? mergeFacturaDetailWithStoreSnapshot(detail, facturaId)
         : null;
 
       setFacturasDetailLoading(state, false);
 
       if (patchedDetail) {
-        setDetail(patchedDetail);
+        setDetail(patchedDetail, facturaId);
       }
 
       renderDetailOnly();
@@ -1843,9 +2158,20 @@ export const FacturasView = (() => {
 
     if (!facturaId) return null;
 
+    state.view.selectedFacturaId = facturaId;
+
     setFacturasOpeningFacturaId(state, facturaId);
     setFacturasDetailOpen(state, true);
     setFacturasDetailLoading(state, true);
+
+    const storeSnapshot = findFacturaById(facturaId);
+
+    if (storeSnapshot) {
+      setFacturasDetailData(
+        state,
+        mergeFacturaDetailWithStoreSnapshot(storeSnapshot, facturaId)
+      );
+    }
 
     renderDetailOnly();
 
@@ -1858,14 +2184,14 @@ export const FacturasView = (() => {
       });
 
       const patchedDetail = detail
-        ? preserveIncidenciaFields(detail, detail?.raw || detail)
-        : null;
+        ? mergeFacturaDetailWithStoreSnapshot(detail, facturaId)
+        : mergeFacturaDetailWithStoreSnapshot(storeSnapshot || {}, facturaId);
 
       if (!patchedDetail) {
         throw new Error("EMPTY_FACTURA_DETAIL");
       }
 
-      setDetail(patchedDetail);
+      setDetail(patchedDetail, facturaId);
 
       safeEmit("facturas:open:success", {
         facturaId,

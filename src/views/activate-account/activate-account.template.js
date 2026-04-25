@@ -8,13 +8,17 @@
    - mantener layout auth-screen alineado con login y password-reset
    - conservar bloque lateral izquierdo de estado
    - renderizar card principal a la derecha
-   - soportar activación automática por token capturado en memoria
+   - soportar activación por token capturado en memoria
+   - pedir contraseña nueva antes de activar la cuenta
+   - reutilizar el sistema compartido de password-field
    - no exponer token real en DOM
    - incluir toast superior derecho desacoplado
    - usar logo real de empresa según tema activo
    - exponer ids estables para dom.js / activateAccountView.js
    - mantener compatibilidad total con flujo SPA público
 ========================================================= */
+
+import { renderPasswordField } from "../../shared/password-field/index.js";
 
 /* =========================================================
    BASICS
@@ -123,12 +127,17 @@ function resolveHasCapturedToken(options = {}) {
     return true;
   }
 
-  /*
-    Compatibilidad:
-    Si llega token legacy, solo se usa para decidir estado visual.
-    NO se renderiza en DOM.
-  */
   return true;
+}
+
+function shouldRenderPasswordFields(status, hasToken) {
+  return (
+    hasToken === true &&
+    (
+      status === ACTIVATE_ACCOUNT_STATUS.IDLE ||
+      status === ACTIVATE_ACCOUNT_STATUS.ERROR
+    )
+  );
 }
 
 function resolveStatusCopy(status = ACTIVATE_ACCOUNT_STATUS.IDLE, options = {}) {
@@ -139,20 +148,20 @@ function resolveStatusCopy(status = ACTIVATE_ACCOUNT_STATUS.IDLE, options = {}) 
       eyebrow: "ACTIVACIÓN DE CUENTA",
       title: "Activa tu cuenta",
       subtitle:
-        "Verifica el enlace recibido por correo para habilitar tu acceso al panel.",
+        "Define una contraseña segura para habilitar tu acceso al panel.",
       body:
-        "Pulsa el botón para completar la activación. Este proceso valida tu enlace y habilita el acceso asociado a tu cuenta.",
+        "Introduce tu nueva contraseña y confirma la activación. El enlace ya ha sido validado y no se mostrará en pantalla.",
       button: "Activar cuenta",
       badge: "Pendiente",
       footer:
-        "Entorno protegido. El enlace de activación es personal y puede caducar.",
+        "Entorno protegido. Usa una contraseña segura y personal.",
     },
 
     [ACTIVATE_ACCOUNT_STATUS.LOADING]: {
-      eyebrow: "VALIDANDO ENLACE",
+      eyebrow: "VALIDANDO ACTIVACIÓN",
       title: "Activando tu cuenta",
       subtitle:
-        "Estamos verificando tu enlace de activación. Este proceso puede tardar unos segundos.",
+        "Estamos guardando tu contraseña y activando tu acceso.",
       body:
         "No cierres esta ventana hasta que confirmemos el resultado de la activación.",
       button: "Activando...",
@@ -167,7 +176,7 @@ function resolveStatusCopy(status = ACTIVATE_ACCOUNT_STATUS.IDLE, options = {}) 
       subtitle:
         `Tu cuenta de ${appName} ya está lista para iniciar sesión.`,
       body:
-        "Ya puedes acceder al panel con tus credenciales. Si el inicio de sesión no se abre automáticamente, usa el botón inferior.",
+        "Ya puedes acceder al panel con la contraseña que acabas de configurar.",
       button: "Ir al acceso",
       badge: "Activada",
       footer:
@@ -178,13 +187,13 @@ function resolveStatusCopy(status = ACTIVATE_ACCOUNT_STATUS.IDLE, options = {}) 
       eyebrow: "NO SE PUDO ACTIVAR",
       title: "No se pudo activar la cuenta",
       subtitle:
-        "Ha ocurrido un problema al validar el enlace de activación.",
+        "Ha ocurrido un problema al guardar la contraseña o validar la activación.",
       body:
-        "Puedes reintentar la activación. Si el problema continúa, solicita un nuevo enlace o contacta con soporte.",
+        "Revisa la contraseña e inténtalo de nuevo. Si el problema continúa, solicita un nuevo enlace o contacta con soporte.",
       button: "Reintentar activación",
       badge: "Error",
       footer:
-        "El enlace puede haber caducado o ya haber sido utilizado.",
+        "El enlace puede haber caducado, haber sido utilizado o la contraseña no cumplir los requisitos.",
     },
 
     [ACTIVATE_ACCOUNT_STATUS.EXPIRED]: {
@@ -402,6 +411,149 @@ function renderScopedThemeLogoStyle() {
 }
 
 /* =========================================================
+   PASSWORD FIELD VISUAL PATCH
+
+   Nota:
+   - El comportamiento JS debe venir del shared:
+     bindPasswordFieldsInScope(container)
+   - Este bloque solo estabiliza layout/hover/focus.
+========================================================= */
+
+function renderScopedPasswordFieldStyle() {
+  return `
+    <style>
+      .login-view [data-password-field="true"]{
+        position:relative;
+      }
+
+      .login-view [data-password-field="true"] .password-wrapper{
+        position:relative;
+        display:block;
+        width:100%;
+      }
+
+      .login-view [data-password-field="true"] .input-text{
+        padding-right:58px;
+      }
+
+      .login-view [data-password-toggle="true"].password-toggle{
+        position:absolute;
+        top:50%;
+        right:12px;
+
+        width:36px;
+        height:36px;
+        min-width:36px;
+        min-height:36px;
+
+        padding:0;
+        margin:0;
+
+        border:0;
+        border-radius:12px;
+        outline:none;
+
+        background:transparent;
+        color:inherit;
+
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+
+        line-height:1;
+        cursor:pointer;
+
+        transform:translate3d(0, -50%, 0);
+
+        appearance:none;
+        -webkit-appearance:none;
+
+        box-shadow:none;
+
+        transition:
+          background .16s ease,
+          color .16s ease,
+          opacity .16s ease;
+      }
+
+      .login-view [data-password-toggle="true"].password-toggle:hover,
+      .login-view [data-password-toggle="true"].password-toggle:focus,
+      .login-view [data-password-toggle="true"].password-toggle:focus-visible,
+      .login-view [data-password-toggle="true"].password-toggle:active{
+        transform:translate3d(0, -50%, 0) !important;
+        box-shadow:none;
+      }
+
+      .login-view [data-password-toggle="true"].password-toggle:hover{
+        background:rgba(148,163,184,.12);
+      }
+
+      .login-view [data-password-toggle="true"].password-toggle svg{
+        display:block;
+        width:18px;
+        height:18px;
+        flex:0 0 auto;
+        pointer-events:none;
+      }
+
+      .login-view [data-password-caps="true"].caps-indicator{
+        position:absolute;
+        top:50%;
+        right:54px;
+
+        transform:translate3d(0, -50%, 0);
+
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        gap:5px;
+
+        min-height:24px;
+        padding:0 8px;
+
+        border-radius:999px;
+
+        font-size:11px;
+        font-weight:700;
+        line-height:1;
+
+        pointer-events:none;
+        white-space:nowrap;
+      }
+
+      .login-view [data-password-caps="true"].caps-indicator[hidden]{
+        display:none !important;
+      }
+
+      .login-view [data-password-caps="true"] .caps-icon{
+        display:block;
+        width:16px;
+        height:16px;
+        flex:0 0 auto;
+      }
+
+      @media (max-width: 520px){
+        .login-view [data-password-field="true"] .input-text{
+          padding-right:54px;
+        }
+
+        .login-view [data-password-toggle="true"].password-toggle{
+          right:10px;
+          width:34px;
+          height:34px;
+          min-width:34px;
+          min-height:34px;
+        }
+
+        .login-view [data-password-caps="true"].caps-indicator{
+          right:50px;
+        }
+      }
+    </style>
+  `;
+}
+
+/* =========================================================
    SCOPED STYLES
 ========================================================= */
 
@@ -516,13 +668,15 @@ function renderActivateAccountScopedStyle() {
         color:#c24141;
       }
 
-      .activate-account-view .activate-account-token-note{
-        margin-top:12px;
-        padding:12px 13px;
-        border-radius:16px;
-        border:1px solid rgba(15,23,42,.06);
-        background:rgba(248,250,252,.68);
-        color:#7b8494;
+      .activate-account-view .activate-account-password-fields{
+        display:grid;
+        gap:14px;
+        margin-top:16px;
+      }
+
+      .activate-account-view .activate-account-password-help{
+        margin:0;
+        color:var(--text-dim, #6b7280);
         font-size:12px;
         line-height:1.55;
       }
@@ -553,13 +707,8 @@ function renderActivateAccountScopedStyle() {
         color:var(--text-strong, #f8fafc);
       }
 
-      [data-theme="dark"] .activate-account-view .activate-account-status-text{
-        color:var(--text-dim, #94a3b8);
-      }
-
-      [data-theme="dark"] .activate-account-view .activate-account-token-note{
-        border-color:rgba(255,255,255,.07);
-        background:rgba(255,255,255,.045);
+      [data-theme="dark"] .activate-account-view .activate-account-status-text,
+      [data-theme="dark"] .activate-account-view .activate-account-password-help{
         color:var(--text-dim, #94a3b8);
       }
 
@@ -654,7 +803,7 @@ function renderLeftPanel({
       ? safeArray(bullets).filter(Boolean)
       : [
           "Validación segura del enlace recibido por correo",
-          "Activación controlada antes del primer acceso",
+          "Contraseña creada antes del primer acceso",
           "Flujo público desacoplado del panel privado",
         ];
 
@@ -732,6 +881,65 @@ function renderStatusCard({
   `;
 }
 
+function renderActivationPasswordFields({
+  passwordPlaceholder = "Nueva contraseña",
+  confirmPasswordPlaceholder = "Repetir contraseña",
+  passwordAriaLabel = "Nueva contraseña",
+  confirmPasswordAriaLabel = "Repetir contraseña",
+  passwordHelp = "La contraseña debe cumplir los requisitos de seguridad configurados para la plataforma.",
+} = {}) {
+  return `
+    <div
+      class="activate-account-password-fields"
+      id="activateAccountPasswordFields"
+      data-activate-password-fields="true"
+    >
+      ${renderPasswordField({
+        escapeHtml,
+        fieldId: "activateAccountPassword",
+        fieldName: "password",
+        placeholder: passwordPlaceholder,
+        ariaLabel: passwordAriaLabel,
+        autocomplete: "new-password",
+        fieldClass: "login-field",
+        fieldDataName: "password",
+        wrapperClass: "password-wrapper",
+        inputClass: "input-text",
+        required: true,
+        showCapsIndicator: true,
+        capsLabel: "Bloq Mayús",
+        toggleLabelShow: "Mostrar contraseña",
+        toggleLabelHide: "Ocultar contraseña",
+      })}
+
+      ${renderPasswordField({
+        escapeHtml,
+        fieldId: "activateAccountPasswordConfirm",
+        fieldName: "confirmPassword",
+        placeholder: confirmPasswordPlaceholder,
+        ariaLabel: confirmPasswordAriaLabel,
+        autocomplete: "new-password",
+        fieldClass: "login-field",
+        fieldDataName: "confirmPassword",
+        wrapperClass: "password-wrapper",
+        inputClass: "input-text",
+        required: true,
+        showCapsIndicator: true,
+        capsLabel: "Bloq Mayús",
+        toggleLabelShow: "Mostrar contraseña",
+        toggleLabelHide: "Ocultar contraseña",
+      })}
+
+      <p
+        class="activate-account-password-help"
+        id="activateAccountPasswordHelp"
+      >
+        ${escapeHtml(passwordHelp)}
+      </p>
+    </div>
+  `;
+}
+
 function renderFormClean({
   appName = "Onion Support",
   status = ACTIVATE_ACCOUNT_STATUS.IDLE,
@@ -741,7 +949,10 @@ function renderFormClean({
   backLabel = "Volver al acceso",
   logoDarkSrc = "/src/media/img/favicon_white.png",
   logoLightSrc = "/src/media/img/favicon_black.png",
-  autoSubmit = true,
+  autoSubmit = false,
+  passwordPlaceholder = "Nueva contraseña",
+  confirmPasswordPlaceholder = "Repetir contraseña",
+  passwordHelp = "La contraseña debe cumplir los requisitos de seguridad configurados para la plataforma.",
 } = {}) {
   const isLoading = status === ACTIVATE_ACCOUNT_STATUS.LOADING;
 
@@ -751,6 +962,12 @@ function renderFormClean({
   const isInvalid =
     status === ACTIVATE_ACCOUNT_STATUS.INVALID ||
     status === ACTIVATE_ACCOUNT_STATUS.EXPIRED;
+
+  const renderPasswords =
+    shouldRenderPasswordFields(status, hasToken);
+
+  const effectiveAutoSubmit =
+    renderPasswords ? false : autoSubmit;
 
   const finalButtonLabel =
     isSuccess || isInvalid
@@ -797,8 +1014,9 @@ function renderFormClean({
             class="login-form"
             id="activateAccountForm"
             novalidate
-            data-auto-submit="${autoSubmit ? "true" : "false"}"
+            data-auto-submit="${effectiveAutoSubmit ? "true" : "false"}"
             data-has-token="${hasToken ? "true" : "false"}"
+            data-requires-password="${renderPasswords ? "true" : "false"}"
           >
             <input
               type="hidden"
@@ -821,6 +1039,16 @@ function renderFormClean({
               status,
               copy,
             })}
+
+            ${
+              renderPasswords
+                ? renderActivationPasswordFields({
+                    passwordPlaceholder,
+                    confirmPasswordPlaceholder,
+                    passwordHelp,
+                  })
+                : ""
+            }
 
             <div
               class="login-error"
@@ -913,6 +1141,7 @@ export function getActivateAccountTemplate(options = {}) {
 
   return `
     ${renderScopedThemeLogoStyle()}
+    ${renderScopedPasswordFieldStyle()}
     ${renderActivateAccountScopedStyle()}
 
     <section
@@ -946,7 +1175,19 @@ export function getActivateAccountTemplate(options = {}) {
               options?.logoLightSrc,
               "/src/media/img/favicon_black.png"
             ),
-            autoSubmit: options?.autoSubmit !== false,
+            autoSubmit: options?.autoSubmit === true,
+            passwordPlaceholder: safeText(
+              options?.passwordPlaceholder,
+              "Nueva contraseña"
+            ),
+            confirmPasswordPlaceholder: safeText(
+              options?.confirmPasswordPlaceholder,
+              "Repetir contraseña"
+            ),
+            passwordHelp: safeText(
+              options?.passwordHelp,
+              "La contraseña debe cumplir los requisitos de seguridad configurados para la plataforma."
+            ),
           })}
         </div>
       </div>

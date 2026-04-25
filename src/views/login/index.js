@@ -12,11 +12,14 @@
    - mantener cleanup de listeners
    - exponer compatibilidad default + named export
    - soportar login con usuario o email
+   - conectar password-field compartido para eye / caps lock
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 import { Auth } from "../../features/auth/index.js";
 import Toast from "../../ui/toast/index.js";
+
+import { bindPasswordFieldsInScope } from "../../shared/password-field/index.js";
 
 import {
   loadRememberedIdentifier,
@@ -39,11 +42,9 @@ import {
   applyLoginErrors,
   setGlobalLoginError,
   setLoginLoading,
-  togglePasswordVisibility,
   focusLoginPrimaryField,
   readLoginFormState,
   bindLoginInputClearers,
-  bindPasswordToggle,
   bindThemeToggle,
   bindLoginSubmit,
 } from "./login.dom.js";
@@ -55,10 +56,7 @@ import {
 function resolveToastApi(deps = {}) {
   const customToast = deps.toast;
 
-  if (
-    customToast &&
-    typeof customToast === "object"
-  ) {
+  if (customToast && typeof customToast === "object") {
     return customToast;
   }
 
@@ -93,9 +91,7 @@ function resolveAppName() {
   );
 }
 
-function resolveForgotPasswordHref(
-  deps = {}
-) {
+function resolveForgotPasswordHref(deps = {}) {
   return (
     safeText(
       deps?.forgotPasswordHref,
@@ -105,75 +101,44 @@ function resolveForgotPasswordHref(
 }
 
 function navigateTo(path = "/") {
-  const finalPath =
-    safeText(path, "/") || "/";
+  const finalPath = safeText(path, "/") || "/";
 
-  if (
-    typeof AppCore?.navigate ===
-    "function"
-  ) {
+  if (typeof AppCore?.navigate === "function") {
     AppCore.navigate(finalPath);
     return;
   }
 
-  if (
-    typeof AppCore?.router?.navigate ===
-    "function"
-  ) {
-    AppCore.router.navigate(
-      finalPath
-    );
+  if (typeof AppCore?.router?.navigate === "function") {
+    AppCore.router.navigate(finalPath);
     return;
   }
 
-  window.location.assign(
-    finalPath
-  );
+  window.location.assign(finalPath);
 }
 
 function toggleTheme() {
   const current =
-    document.documentElement.getAttribute(
-      "data-theme"
-    ) || "dark";
+    document.documentElement.getAttribute("data-theme") || "dark";
 
-  const next =
-    current === "light"
-      ? "dark"
-      : "light";
+  const next = current === "light" ? "dark" : "light";
 
-  document.documentElement.setAttribute(
-    "data-theme",
-    next
-  );
+  document.documentElement.setAttribute("data-theme", next);
 
   try {
     AppCore?.setTheme?.(next);
   } catch {}
 
   try {
-    AppCore?.events?.emit?.(
-      "app:theme:change",
-      next
-    );
+    AppCore?.events?.emit?.("app:theme:change", next);
   } catch {}
 
   return next;
 }
 
-function safeToastCall(
-  toast,
-  method,
-  ...args
-) {
+function safeToastCall(toast, method, ...args) {
   try {
-    if (
-      typeof toast?.[method] ===
-      "function"
-    ) {
-      return toast[method](
-        ...args
-      );
+    if (typeof toast?.[method] === "function") {
+      return toast[method](...args);
     }
   } catch {}
 
@@ -182,196 +147,90 @@ function safeToastCall(
 
 function emitRouteRendered() {
   try {
-    AppCore?.events?.emit?.(
-      "app:route:rendered",
-      {
-        route: "/login",
-        view: "login",
-      }
-    );
+    AppCore?.events?.emit?.("app:route:rendered", {
+      route: "/login",
+      view: "login",
+    });
   } catch {}
 }
 
 function enableAuthScreenMode() {
   try {
-    document.body.classList.add(
-      "auth-screen"
-    );
-
-    document.body.classList.add(
-      "login-no-scroll"
-    );
-
-    document.body.classList.add(
-      "route-auth"
-    );
+    document.body.classList.add("auth-screen");
+    document.body.classList.add("login-no-scroll");
+    document.body.classList.add("route-auth");
   } catch {}
 }
 
 function disableAuthScreenMode() {
   try {
-    document.body.classList.remove(
-      "auth-screen"
-    );
-
-    document.body.classList.remove(
-      "login-no-scroll"
-    );
-
-    document.body.classList.remove(
-      "route-auth"
-    );
+    document.body.classList.remove("auth-screen");
+    document.body.classList.remove("login-no-scroll");
+    document.body.classList.remove("route-auth");
   } catch {}
 }
 
-function syncCapsIndicator(
-  refs = {}
-) {
-  const passwordInput =
-    refs?.passwordInput;
+function safeUnbind(unbind) {
+  try {
+    if (typeof unbind === "function") {
+      unbind();
+    }
+  } catch {}
+}
 
-  const capsIndicator =
-    refs?.capsIndicator;
+function bindSharedPasswordFields(container = document) {
+  try {
+    return bindPasswordFieldsInScope(container);
+  } catch (error) {
+    try {
+      AppCore?.utils?.warn?.("[LoginView] password-field bind error", error);
+    } catch {}
 
-  if (
-    !passwordInput ||
-    !capsIndicator
-  ) {
-    return () => {};
+    return [];
   }
-
-  const updateState = (
-    event
-  ) => {
-    const active =
-      Boolean(
-        event?.getModifierState?.(
-          "CapsLock"
-        )
-      );
-
-    capsIndicator.classList.toggle(
-      "is-visible",
-      active
-    );
-  };
-
-  const hide = () => {
-    capsIndicator.classList.remove(
-      "is-visible"
-    );
-  };
-
-  passwordInput.addEventListener(
-    "keydown",
-    updateState
-  );
-
-  passwordInput.addEventListener(
-    "keyup",
-    updateState
-  );
-
-  passwordInput.addEventListener(
-    "focus",
-    updateState
-  );
-
-  passwordInput.addEventListener(
-    "blur",
-    hide
-  );
-
-  return () => {
-    passwordInput.removeEventListener(
-      "keydown",
-      updateState
-    );
-
-    passwordInput.removeEventListener(
-      "keyup",
-      updateState
-    );
-
-    passwordInput.removeEventListener(
-      "focus",
-      updateState
-    );
-
-    passwordInput.removeEventListener(
-      "blur",
-      hide
-    );
-  };
 }
 
 /* =========================================================
    VIEW
 ========================================================= */
 
-function renderLoginView(
-  container,
-  deps = {}
-) {
+function renderLoginView(container, deps = {}) {
   if (!container) {
-    throw new Error(
-      "[LoginView] container es obligatorio."
-    );
+    throw new Error("[LoginView] container es obligatorio.");
   }
 
   enableAuthScreenMode();
 
-  const rememberedIdentifier =
-    loadRememberedIdentifier();
+  const rememberedIdentifier = loadRememberedIdentifier();
+  const appName = resolveAppName();
+  const forgotPasswordHref = resolveForgotPasswordHref(deps);
 
-  const appName =
-    resolveAppName();
+  container.innerHTML = getLoginTemplate({
+    appName,
+    identifier: rememberedIdentifier,
+    forgotPasswordHref,
+    ...deps,
+  });
 
-  const forgotPasswordHref =
-    resolveForgotPasswordHref(
-      deps
-    );
+  /*
+    CRÍTICO:
+    El template usa src/shared/password-field.
+    Por tanto el binding correcto del ojo/CapsLock también debe ser el shared.
+    No se usa bindPasswordToggle() de login.dom.js para evitar doble listener.
+  */
+  bindSharedPasswordFields(container);
 
-  container.innerHTML =
-    getLoginTemplate({
-      appName,
-      identifier:
-        rememberedIdentifier,
-      forgotPasswordHref,
-      ...deps,
-    });
+  const refs = getLoginRefs(container);
+  const toast = resolveToastApi(deps);
+  const executeLogin = resolveLoginExecutor(deps);
 
-  const refs =
-    getLoginRefs(container);
-
-  const toast =
-    resolveToastApi(deps);
-
-  const executeLogin =
-    resolveLoginExecutor(
-      deps
-    );
-
-  safeToastCall(
-    toast,
-    "init"
-  );
+  safeToastCall(toast, "init");
 
   if (!executeLogin) {
-    const message =
-      "No se encontró un executor de login.";
+    const message = "No se encontró un executor de login.";
 
-    setGlobalLoginError(
-      refs,
-      message
-    );
-
-    safeToastCall(
-      toast,
-      "error",
-      message
-    );
-
+    setGlobalLoginError(refs, message);
+    safeToastCall(toast, "error", message);
     emitRouteRendered();
 
     return {
@@ -385,245 +244,127 @@ function renderLoginView(
     safeText(
       deps.submitLabel,
       ""
-    ) ||
-    "Entrar al panel";
+    ) || "Entrar al panel";
 
   const loadingLabel =
     safeText(
       deps.loadingLabel,
       ""
-    ) ||
-    "Accediendo...";
+    ) || "Accediendo...";
 
-  const onClearErrors =
-    () => {
-      clearLoginErrors(
-        refs
-      );
-    };
+  const onClearErrors = () => {
+    clearLoginErrors(refs);
+  };
 
-  const onTogglePassword =
-    () => {
-      togglePasswordVisibility(
-        refs
-      );
-    };
+  const onThemeToggle = () => {
+    const next = toggleTheme();
 
-  const onThemeToggle =
-    () => {
-      const next =
-        toggleTheme();
+    safeToastCall(
+      toast,
+      "info",
+      `Tema ${next} activado.`
+    );
+  };
+
+  const onSubmit = async (event) => {
+    event.preventDefault();
+
+    clearLoginErrors(refs);
+
+    const formState = readLoginFormState(refs);
+    const payload = createLoginPayload(formState);
+    const errors = validateLoginPayload(payload);
+
+    if (Object.keys(errors).length > 0) {
+      applyLoginErrors(refs, errors);
 
       safeToastCall(
         toast,
-        "info",
-        `Tema ${next} activado.`
-      );
-    };
-
-  const onSubmit =
-    async (event) => {
-      event.preventDefault();
-
-      clearLoginErrors(
-        refs
+        "error",
+        getFirstLoginError(errors) || "Revisa el formulario."
       );
 
-      const formState =
-        readLoginFormState(
-          refs
-        );
+      return;
+    }
 
-      const payload =
-        createLoginPayload(
-          formState
-        );
+    persistRememberedIdentifier(payload);
 
-      const errors =
-        validateLoginPayload(
-          payload
-        );
+    let loadingToastId = null;
 
-      if (
-        Object.keys(errors)
-          .length > 0
-      ) {
-        applyLoginErrors(
-          refs,
-          errors
-        );
+    try {
+      setLoginLoading(refs, true, {
+        submitLabel,
+        loadingLabel,
+      });
 
-        safeToastCall(
-          toast,
-          "error",
-          getFirstLoginError(
-            errors
-          ) ||
-            "Revisa el formulario."
-        );
-
-        return;
-      }
-
-      persistRememberedIdentifier(
-        payload
+      loadingToastId = safeToastCall(
+        toast,
+        "loading",
+        "Validando credenciales...",
+        {
+          persist: true,
+        }
       );
 
-      let loadingToastId =
-        null;
+      const rawResult = await executeLogin(payload);
+      const auth = normalizeAuthResult(rawResult);
+
+      syncSession(auth);
+
+      safeToastCall(toast, "dismiss", loadingToastId);
+
+      safeToastCall(
+        toast,
+        "success",
+        auth.message || "Sesión iniciada correctamente."
+      );
+
+      disableAuthScreenMode();
+
+      const redirectTo = resolveLoginRedirect(auth, deps);
+
+      navigateTo(redirectTo);
+    } catch (error) {
+      safeToastCall(toast, "dismiss", loadingToastId);
+
+      const message = resolveAuthErrorMessage(error);
+
+      setGlobalLoginError(refs, message);
+      safeToastCall(toast, "error", message);
 
       try {
-        setLoginLoading(
-          refs,
-          true,
-          {
-            submitLabel,
-            loadingLabel,
-          }
-        );
+        AppCore?.events?.emit?.("auth:login:error", {
+          message,
+          error,
+        });
+      } catch {}
 
-        loadingToastId =
-          safeToastCall(
-            toast,
-            "loading",
-            "Validando credenciales...",
-            {
-              persist: true,
-            }
-          );
-
-        const rawResult =
-          await executeLogin(
-            payload
-          );
-
-        const auth =
-          normalizeAuthResult(
-            rawResult
-          );
-
-        syncSession(auth);
-
-        safeToastCall(
-          toast,
-          "dismiss",
-          loadingToastId
-        );
-
-        safeToastCall(
-          toast,
-          "success",
-          auth.message ||
-            "Sesión iniciada correctamente."
-        );
-
-        disableAuthScreenMode();
-
-        const redirectTo =
-          resolveLoginRedirect(
-            auth,
-            deps
-          );
-
-        navigateTo(
-          redirectTo
-        );
-      } catch (error) {
-        safeToastCall(
-          toast,
-          "dismiss",
-          loadingToastId
-        );
-
-        const message =
-          resolveAuthErrorMessage(
-            error
-          );
-
-        setGlobalLoginError(
-          refs,
-          message
-        );
-
-        safeToastCall(
-          toast,
-          "error",
-          message
-        );
-
-        try {
-          AppCore?.events?.emit?.(
-            "auth:login:error",
-            {
-              message,
-              error,
-            }
-          );
-        } catch {}
-
-        try {
-          AppCore?.utils?.error?.(
-            "[LoginView] login error",
-            error
-          );
-        } catch {}
-      } finally {
-        setLoginLoading(
-          refs,
-          false,
-          {
-            submitLabel,
-            loadingLabel,
-          }
-        );
-      }
-    };
-
-  const unbindInputs =
-    bindLoginInputClearers(
-      refs,
-      onClearErrors
-    );
-
-  const unbindToggle =
-    bindPasswordToggle(
-      refs,
-      onTogglePassword
-    );
-
-  const unbindTheme =
-    bindThemeToggle(
-      refs,
-      onThemeToggle
-    );
-
-  const unbindSubmit =
-    bindLoginSubmit(
-      refs,
-      onSubmit
-    );
-
-  const unbindCaps =
-    syncCapsIndicator(
-      refs
-    );
-
-  focusLoginPrimaryField(
-    refs,
-    {
-      rememberedIdentifier,
+      try {
+        AppCore?.utils?.error?.("[LoginView] login error", error);
+      } catch {}
+    } finally {
+      setLoginLoading(refs, false, {
+        submitLabel,
+        loadingLabel,
+      });
     }
-  );
+  };
+
+  const unbindInputs = bindLoginInputClearers(refs, onClearErrors);
+  const unbindTheme = bindThemeToggle(refs, onThemeToggle);
+  const unbindSubmit = bindLoginSubmit(refs, onSubmit);
+
+  focusLoginPrimaryField(refs, {
+    rememberedIdentifier,
+  });
 
   emitRouteRendered();
 
   return {
     destroy() {
-      unbindInputs();
-      unbindToggle();
-      unbindTheme();
-      unbindSubmit();
-      unbindCaps();
+      safeUnbind(unbindInputs);
+      safeUnbind(unbindTheme);
+      safeUnbind(unbindSubmit);
 
       disableAuthScreenMode();
     },

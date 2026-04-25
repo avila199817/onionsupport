@@ -21,6 +21,8 @@
    - preserva username resuelto y slug público
    - preserva query/hash públicos en render
    - no destruye /activate-account?token=...
+   - no resucita token tras scrubbedActivationToken
+   - soporte hash-router /#/activate-account?token=...
    - métricas internas por flujo
    - anti stale-render
    - cero throws accidentales
@@ -41,6 +43,20 @@ import {
   getDefaultHomeTarget,
   getResolvedPublicPath,
 } from "./helpers.js";
+
+/* =========================================================
+   CONSTANTS
+========================================================= */
+
+const ACTIVATION_PATH = "/activate-account";
+
+const ACTIVATION_TOKEN_PARAM_NAMES = [
+  "token",
+  "activationToken",
+  "activateToken",
+  "code",
+  "t",
+];
 
 /* =========================================================
    BASICS
@@ -70,10 +86,7 @@ function nowMs() {
   return Date.now();
 }
 
-function safeText(
-  value,
-  fallback = ""
-) {
+function safeText(value, fallback = "") {
   if (
     value === null ||
     value === undefined
@@ -84,6 +97,17 @@ function safeText(
   const text = String(value).trim();
 
   return text || fallback;
+}
+
+function getBaseOrigin() {
+  if (
+    isBrowser() &&
+    window.location?.origin
+  ) {
+    return window.location.origin;
+  }
+
+  return "http://localhost";
 }
 
 /* =========================================================
@@ -108,9 +132,11 @@ function safeWarn(
   ...args
 ) {
   try {
-    AppCore?.utils?.warn?.(
-      ...args
-    );
+    AppCore?.utils?.warn?.(...args);
+  } catch {}
+
+  try {
+    console.warn(...args);
   } catch {}
 }
 
@@ -119,9 +145,11 @@ function safeError(
   ...args
 ) {
   try {
-    AppCore?.utils?.error?.(
-      ...args
-    );
+    AppCore?.utils?.error?.(...args);
+  } catch {}
+
+  try {
+    console.error(...args);
   } catch {}
 }
 
@@ -130,9 +158,7 @@ function safeLog(
   ...args
 ) {
   try {
-    AppCore?.utils?.log?.(
-      ...args
-    );
+    AppCore?.utils?.log?.(...args);
   } catch {}
 }
 
@@ -210,9 +236,7 @@ function emitFlowMetric(
    VIEW CONTAINER
 ========================================================= */
 
-export function getViewContainer(
-  AppCore
-) {
+export function getViewContainer(AppCore) {
   if (!isBrowser()) {
     return null;
   }
@@ -229,12 +253,8 @@ export function getViewContainer(
   } catch {}
 
   const el =
-    document.getElementById(
-      "view-container"
-    ) ||
-    document.querySelector(
-      "#view-container"
-    ) ||
+    document.getElementById("view-container") ||
+    document.querySelector("#view-container") ||
     null;
 
   try {
@@ -253,20 +273,93 @@ export function getViewContainer(
    URL CONTEXT HELPERS
 ========================================================= */
 
-function getBrowserPublicPath(
-  AppCore
-) {
+function isHashRouterPath(value = "") {
+  const raw = String(value || "").trim();
+
+  return (
+    raw.startsWith("#/") ||
+    raw.startsWith("#!")
+  );
+}
+
+function normalizeHashRouterPath(value = "") {
+  const raw = String(value || "").trim();
+
+  if (!raw) {
+    return "/";
+  }
+
+  if (raw.startsWith("#!")) {
+    return raw.replace(/^#!\/?/, "/");
+  }
+
+  return raw.replace(/^#\/?/, "/");
+}
+
+function getBrowserPublicPath(AppCore) {
   if (!isBrowser()) {
     return "";
   }
 
   try {
+    const pathname =
+      window.location.pathname || "/";
+
+    const search =
+      window.location.search || "";
+
+    const hash =
+      window.location.hash || "";
+
+    if (
+      hash &&
+      isHashRouterPath(hash)
+    ) {
+      return normalizePath(
+        AppCore,
+        normalizeHashRouterPath(hash)
+      );
+    }
+
     return normalizePath(
       AppCore,
-      `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`
+      `${pathname}${search}${hash}`
     );
   } catch {
     return "";
+  }
+}
+
+function pathFromUrlLike(AppCore, value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  try {
+    const parsed =
+      new URL(raw, getBaseOrigin());
+
+    if (
+      parsed.hash &&
+      isHashRouterPath(parsed.hash)
+    ) {
+      return normalizePath(
+        AppCore,
+        normalizeHashRouterPath(parsed.hash)
+      );
+    }
+
+    return normalizePath(
+      AppCore,
+      `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`
+    );
+  } catch {
+    return normalizePath(
+      AppCore,
+      raw
+    );
   }
 }
 
@@ -287,16 +380,246 @@ function sameCanonicalRoute(
   );
 }
 
+function isActivationPath(
+  AppCore,
+  path = ""
+) {
+  const canonical =
+    normalizeCanonicalPath(
+      AppCore,
+      path || "/"
+    );
+
+  return (
+    canonical === ACTIVATION_PATH ||
+    canonical.startsWith(`${ACTIVATION_PATH}/`)
+  );
+}
+
+function hasTokenInSearch(search = "") {
+  try {
+    const params =
+      new URLSearchParams(search || "");
+
+    return ACTIVATION_TOKEN_PARAM_NAMES.some(
+      (name) =>
+        Boolean(
+          safeText(
+            params.get(name),
+            ""
+          )
+        )
+    );
+  } catch {
+    return false;
+  }
+}
+
+function hasActivationToken(pathOrUrl = "") {
+  const raw = safeText(pathOrUrl, "");
+
+  if (!raw) {
+    return false;
+  }
+
+  try {
+    const parsed =
+      new URL(raw, getBaseOrigin());
+
+    if (
+      hasTokenInSearch(parsed.search)
+    ) {
+      return true;
+    }
+
+    if (
+      parsed.hash &&
+      parsed.hash.includes("?")
+    ) {
+      const query =
+        parsed.hash.split("?").slice(1).join("?");
+
+      return hasTokenInSearch(
+        query ? `?${query}` : ""
+      );
+    }
+
+    return false;
+  } catch {
+    const suffix =
+      getSearchAndHash(raw);
+
+    if (
+      suffix &&
+      suffix.includes("?")
+    ) {
+      const query =
+        suffix.split("#")[0];
+
+      if (hasTokenInSearch(query)) {
+        return true;
+      }
+    }
+
+    if (
+      suffix &&
+      suffix.includes("#") &&
+      suffix.includes("?")
+    ) {
+      const query =
+        suffix.split("?").slice(1).join("?");
+
+      return hasTokenInSearch(
+        query ? `?${query}` : ""
+      );
+    }
+
+    return false;
+  }
+}
+
+function isActivationTokenScrubbed() {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  try {
+    return Boolean(
+      window.history?.state?.scrubbedActivationToken
+    );
+  } catch {
+    return false;
+  }
+}
+
+function getInitialUrl() {
+  if (!isBrowser()) {
+    return "";
+  }
+
+  return safeText(
+    window.__ONION_INITIAL_URL__,
+    ""
+  );
+}
+
+function getActivationInitialUrl() {
+  if (!isBrowser()) {
+    return "";
+  }
+
+  return safeText(
+    window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__,
+    ""
+  );
+}
+
+function captureInitialUrl(AppCore) {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  try {
+    const href =
+      window.location.href;
+
+    if (!window.__ONION_INITIAL_URL__) {
+      window.__ONION_INITIAL_URL__ = href;
+    }
+
+    const path =
+      pathFromUrlLike(
+        AppCore,
+        href
+      );
+
+    if (
+      isActivationPath(AppCore, path) &&
+      !window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__
+    ) {
+      window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__ = href;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getProtectedActivationPath(AppCore) {
+  if (isActivationTokenScrubbed()) {
+    return "";
+  }
+
+  captureInitialUrl(AppCore);
+
+  const activationInitialUrl =
+    getActivationInitialUrl();
+
+  if (
+    activationInitialUrl &&
+    isActivationPath(
+      AppCore,
+      pathFromUrlLike(
+        AppCore,
+        activationInitialUrl
+      )
+    ) &&
+    hasActivationToken(activationInitialUrl)
+  ) {
+    return pathFromUrlLike(
+      AppCore,
+      activationInitialUrl
+    );
+  }
+
+  const initialUrl =
+    getInitialUrl();
+
+  if (
+    initialUrl &&
+    isActivationPath(
+      AppCore,
+      pathFromUrlLike(
+        AppCore,
+        initialUrl
+      )
+    ) &&
+    hasActivationToken(initialUrl)
+  ) {
+    return pathFromUrlLike(
+      AppCore,
+      initialUrl
+    );
+  }
+
+  const browserPath =
+    getBrowserPublicPath(AppCore);
+
+  if (
+    browserPath &&
+    isActivationPath(
+      AppCore,
+      browserPath
+    ) &&
+    hasActivationToken(browserPath)
+  ) {
+    return browserPath;
+  }
+
+  return "";
+}
+
 /**
- * Protege query/hash del navegador si el render intenta
+ * Protege query/hash del navegador o URL inicial si el render intenta
  * sincronizar la misma ruta sin query.
  *
  * Ejemplo:
- *   browser:   /activate-account?token=abc
+ *   initial:   /activate-account?token=abc
  *   candidate: /activate-account
  *   resultado: /activate-account?token=abc
  */
-function preserveBrowserContextForSameRoute(
+function preservePublicContextForSameRoute(
   AppCore,
   candidatePath = "/"
 ) {
@@ -306,24 +629,36 @@ function preserveBrowserContextForSameRoute(
       candidatePath || "/"
     );
 
+  const protectedActivationPath =
+    getProtectedActivationPath(AppCore);
+
+  if (
+    protectedActivationPath &&
+    isActivationPath(
+      AppCore,
+      candidate
+    ) &&
+    sameCanonicalRoute(
+      AppCore,
+      protectedActivationPath,
+      candidate
+    )
+  ) {
+    return protectedActivationPath;
+  }
+
   const browserPath =
-    getBrowserPublicPath(
-      AppCore
-    );
+    getBrowserPublicPath(AppCore);
 
   if (!browserPath) {
     return candidate;
   }
 
   const candidateSuffix =
-    getSearchAndHash(
-      candidate
-    );
+    getSearchAndHash(candidate);
 
   const browserSuffix =
-    getSearchAndHash(
-      browserPath
-    );
+    getSearchAndHash(browserPath);
 
   if (
     browserSuffix &&
@@ -392,21 +727,14 @@ function resolveUsernameForPayload(
   publicPath = null
 ) {
   return (
-    safeText(
-      requestedUsername
-    ) ||
+    safeText(requestedUsername) ||
     extractUsernameFromPath(
       AppCore,
       publicPath || ""
     ) ||
-    getCurrentResolvedUsername(
-      AppCore
-    ) ||
-    getCurrentUsername(
-      AppCore
-    ) ||
-    AppCore?.state?.user
-      ?.username ||
+    getCurrentResolvedUsername(AppCore) ||
+    getCurrentUsername(AppCore) ||
+    AppCore?.state?.user?.username ||
     null
   );
 }
@@ -443,19 +771,23 @@ function resolvePublicPathForRoute({
   const built =
     buildPublicPath(
       AppCore,
-      getRoute ||
-        (() => route),
+      getRoute || (() => route),
       sourceForPublic,
       {
         username,
+        resolvedUsername:
+          username,
         fromPath:
+          requestedPath ||
+          sourceForPublic,
+        publicPath:
           requestedPath ||
           sourceForPublic,
       }
     );
 
   const finalPublic =
-    preserveBrowserContextForSameRoute(
+    preservePublicContextForSameRoute(
       AppCore,
       built ||
         sourceForPublic ||
@@ -479,6 +811,7 @@ function resolvePublicPathForRoute({
 
 export function buildRenderPayload({
   path = null,
+  requestedPath = null,
   canonicalPath = null,
   publicPath = null,
   username = null,
@@ -486,9 +819,11 @@ export function buildRenderPayload({
   found = false,
   forbidden = false,
   redirectedFrom = null,
+  options = null,
 } = {}) {
   return {
     path,
+    requestedPath,
     canonicalPath,
     publicPath,
     username,
@@ -498,6 +833,7 @@ export function buildRenderPayload({
     forbidden:
       Boolean(forbidden),
     redirectedFrom,
+    options,
     ts: Date.now(),
   };
 }
@@ -509,9 +845,7 @@ export function emitBeforeRender(
   safeEmit(
     AppCore,
     "router:before-render",
-    buildRenderPayload(
-      payload
-    )
+    buildRenderPayload(payload)
   );
 }
 
@@ -522,9 +856,7 @@ export function emitRendered(
   safeEmit(
     AppCore,
     "router:rendered",
-    buildRenderPayload(
-      payload
-    )
+    buildRenderPayload(payload)
   );
 }
 
@@ -543,21 +875,15 @@ export function syncRouteState(
       canonicalPath
     );
 
-  const browserPath =
-    getBrowserPublicPath(
-      AppCore
-    ) || finalCanonical;
-
   const candidatePublic =
     normalizePath(
       AppCore,
       publicPath ||
-        browserPath ||
         finalCanonical
     );
 
   const finalPublic =
-    preserveBrowserContextForSameRoute(
+    preservePublicContextForSameRoute(
       AppCore,
       candidatePublic
     );
@@ -606,7 +932,11 @@ export function applyResolvedRouteState(
   canonicalPath,
   fallbackPublicPath
 ) {
+  const protectedActivationPath =
+    getProtectedActivationPath(AppCore);
+
   const publicPath =
+    protectedActivationPath ||
     getResolvedPublicPath(
       fallbackPublicPath
     );
@@ -634,12 +964,19 @@ export function buildRouteRenderContext({
   forbidden = false,
 } = {}) {
   const finalPublicPath =
-    preserveBrowserContextForSameRoute(
+    preservePublicContextForSameRoute(
       AppCore,
       publicPath ||
         requestedPath ||
         canonicalPath ||
         "/"
+    );
+
+  const finalCanonicalPath =
+    normalizeCanonicalPath(
+      AppCore,
+      canonicalPath ||
+        finalPublicPath
     );
 
   const username =
@@ -652,30 +989,34 @@ export function buildRouteRenderContext({
   return Object.freeze({
     AppCore,
     route,
+
     path:
       finalPublicPath,
+
     requestedPath:
       finalPublicPath,
+
     canonicalPath:
-      normalizeCanonicalPath(
-        AppCore,
-        canonicalPath ||
-          finalPublicPath
-      ),
+      finalCanonicalPath,
+
     publicPath:
       finalPublicPath,
+
     username,
+
     requestedUsername:
       username,
+
     redirectedFrom,
+
     found:
       Boolean(found),
+
     forbidden:
       Boolean(forbidden),
+
     viewContainer:
-      getViewContainer(
-        AppCore
-      ),
+      getViewContainer(AppCore),
   });
 }
 
@@ -698,9 +1039,7 @@ async function runRouteRender(
   }
 
   if (
-    !isFunction(
-      route?.render
-    )
+    !isFunction(route?.render)
   ) {
     safeWarn(
       AppCore,
@@ -727,27 +1066,20 @@ export function renderGenericView(
   route
 ) {
   const view =
-    getViewContainer(
-      AppCore
-    );
+    getViewContainer(AppCore);
 
   if (!view) {
     return null;
   }
 
   const canonical =
-    AppCore?.state?.route ||
-    "/";
+    AppCore?.state?.route || "/";
 
   const publicPath =
-    getCurrentPublicPath(
-      AppCore
-    );
+    getCurrentPublicPath(AppCore);
 
   const username =
-    getCurrentResolvedUsername(
-      AppCore
-    );
+    getCurrentResolvedUsername(AppCore);
 
   view.innerHTML = `
 <section class="content-wrapper">
@@ -772,9 +1104,7 @@ export function renderForbiddenView(
   getRoute
 ) {
   const view =
-    getViewContainer(
-      AppCore
-    );
+    getViewContainer(AppCore);
 
   if (!view) {
     return null;
@@ -806,9 +1136,7 @@ export function renderNotFoundView(
   getRoute
 ) {
   const view =
-    getViewContainer(
-      AppCore
-    );
+    getViewContainer(AppCore);
 
   if (!view) {
     return null;
@@ -841,9 +1169,7 @@ export function renderRuntimeErrorView(
   getRoute
 ) {
   const view =
-    getViewContainer(
-      AppCore
-    );
+    getViewContainer(AppCore);
 
   if (!view) {
     return null;
@@ -911,8 +1237,7 @@ export async function renderRouteSuccess({
   safeSetDocumentTitle(
     setDocumentTitle,
     route?.title ||
-      AppCore?.config
-        ?.appName ||
+      AppCore?.config?.appName ||
       "Onion"
   );
 
@@ -933,9 +1258,7 @@ export async function renderRouteSuccess({
   let view = null;
 
   if (
-    isFunction(
-      route?.render
-    )
+    isFunction(route?.render)
   ) {
     view =
       await runRouteRender(
@@ -957,6 +1280,8 @@ export async function renderRouteSuccess({
     {
       path:
         synced.publicPath,
+      requestedPath:
+        ctx.requestedPath,
       canonicalPath:
         synced.canonicalPath,
       publicPath:
@@ -973,13 +1298,24 @@ export async function renderRouteSuccess({
     "success",
     {
       route:
-        route?.path ||
-        null,
+        route?.path || null,
       durationMs:
         Math.round(
-          nowMs() -
-            startedAt
+          nowMs() - startedAt
         ),
+    }
+  );
+
+  safeLog(
+    AppCore,
+    "[RouterRender] success",
+    {
+      route:
+        route?.path || null,
+      canonicalPath:
+        synced.canonicalPath,
+      publicPath:
+        synced.publicPath,
     }
   );
 
@@ -1003,8 +1339,7 @@ export function renderRouteForbidden(
     {
       durationMs:
         Math.round(
-          nowMs() -
-            startedAt
+          nowMs() - startedAt
         ),
     }
   );
@@ -1030,8 +1365,7 @@ export function renderRouteNotFound(
     {
       durationMs:
         Math.round(
-          nowMs() -
-            startedAt
+          nowMs() - startedAt
         ),
     }
   );
@@ -1043,9 +1377,7 @@ export async function renderLoginRedirect(
   args = {}
 ) {
   const routeNames =
-    getRouteNames(
-      args.AppCore
-    );
+    getRouteNames(args.AppCore);
 
   const loginUrl =
     buildLoginUrl(
@@ -1074,8 +1406,7 @@ export async function renderLoginRedirect(
 
   safeSetDocumentTitle(
     args.setDocumentTitle,
-    route?.title ||
-      "Login"
+    route?.title || "Login"
   );
 
   const synced =
@@ -1086,16 +1417,12 @@ export async function renderLoginRedirect(
     );
 
   if (
-    isFunction(
-      route?.render
-    )
+    isFunction(route?.render)
   ) {
     await runRouteRender(
       args.AppCore,
       route,
-      getViewContainer(
-        args.AppCore
-      ),
+      getViewContainer(args.AppCore),
       buildRouteRenderContext({
         AppCore:
           args.AppCore,
@@ -1116,6 +1443,8 @@ export async function renderLoginRedirect(
     args.AppCore,
     {
       path:
+        synced.publicPath,
+      requestedPath:
         synced.publicPath,
       canonicalPath:
         routeNames.LOGIN,
@@ -1142,11 +1471,38 @@ export function renderRouteRuntimeError(
     args.AppCore,
     "runtime-error",
     {
-      error: safeText(
-        args.error?.message
-      ),
+      error:
+        safeText(
+          args.error?.message
+        ),
     }
   );
 
   return null;
+}
+
+/* =========================================================
+   DEBUG
+========================================================= */
+
+export function getRenderSnapshot(AppCore) {
+  return {
+    browserPublicPath:
+      getBrowserPublicPath(AppCore),
+
+    currentPublicPath:
+      getCurrentPublicPath(AppCore),
+
+    protectedActivationPath:
+      getProtectedActivationPath(AppCore),
+
+    initialUrl:
+      getInitialUrl(),
+
+    activationInitialUrl:
+      getActivationInitialUrl(),
+
+    activationTokenScrubbed:
+      isActivationTokenScrubbed(),
+  };
 }

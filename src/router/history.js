@@ -16,8 +16,10 @@
    - no duplicar estados innecesarios
    - preservar publicPath/canonicalPath/username
    - no degradar URL contextualizada /@username
-   - preservar query/hash públicos en rutas públicas con token
-   - no destruir /activate-account?token=...
+   - preservar query/hash públicos cuando procede
+   - no destruir /activate-account?token=... antes de capturarlo
+   - respetar skipHistory / preservePath / protectedInitialUrl
+   - soporte hash-router /#/activate-account?token=...
    - timestamps estables
 ========================================================= */
 
@@ -31,6 +33,20 @@ import {
   buildHistoryUrl,
   buildStatePayload,
 } from "./helpers.js";
+
+/* =========================================================
+   CONSTANTS
+========================================================= */
+
+const ACTIVATION_PATH = "/activate-account";
+
+const ACTIVATION_TOKEN_PARAM_NAMES = [
+  "token",
+  "activationToken",
+  "activateToken",
+  "code",
+  "t",
+];
 
 /* =========================================================
    BASICS
@@ -58,6 +74,17 @@ function safeText(value, fallback = "") {
   const text = String(value).trim();
 
   return text || fallback;
+}
+
+function getBaseOrigin() {
+  if (
+    isBrowser() &&
+    window.location?.origin
+  ) {
+    return window.location.origin;
+  }
+
+  return "http://onion.local";
 }
 
 function safeHistoryCall(
@@ -96,6 +123,31 @@ function normalizePathname(
   }
 }
 
+function isHashRouterPath(value = "") {
+  const raw =
+    String(value || "").trim();
+
+  return (
+    raw.startsWith("#/") ||
+    raw.startsWith("#!")
+  );
+}
+
+function normalizeHashRouterPath(value = "") {
+  const raw =
+    String(value || "").trim();
+
+  if (!raw) {
+    return "/";
+  }
+
+  if (raw.startsWith("#!")) {
+    return raw.replace(/^#!\/?/, "/");
+  }
+
+  return raw.replace(/^#\/?/, "/");
+}
+
 function getBrowserPublicUrl() {
   if (
     !isBrowser() ||
@@ -106,11 +158,26 @@ function getBrowserPublicUrl() {
   }
 
   try {
-    return [
-      window.location.pathname || "/",
-      window.location.search || "",
-      window.location.hash || "",
-    ].join("");
+    const pathname =
+      window.location.pathname || "/";
+
+    const search =
+      window.location.search || "";
+
+    const hash =
+      window.location.hash || "";
+
+    if (
+      hash &&
+      isHashRouterPath(hash)
+    ) {
+      return normalizePath(
+        null,
+        normalizeHashRouterPath(hash)
+      );
+    }
+
+    return `${pathname}${search}${hash}`;
   } catch {
     return "";
   }
@@ -119,13 +186,26 @@ function getBrowserPublicUrl() {
 function parseUrlParts(value = "/") {
   const raw = safeText(value, "/");
 
+  if (isHashRouterPath(raw)) {
+    return parseUrlParts(
+      normalizeHashRouterPath(raw)
+    );
+  }
+
   try {
     const parsed = new URL(
       raw,
-      isBrowser() && window.location?.origin
-        ? window.location.origin
-        : "http://onion.local"
+      getBaseOrigin()
     );
+
+    if (
+      parsed.hash &&
+      isHashRouterPath(parsed.hash)
+    ) {
+      return parseUrlParts(
+        normalizeHashRouterPath(parsed.hash)
+      );
+    }
 
     return {
       pathname: parsed.pathname || "/",
@@ -152,31 +232,255 @@ function buildUrlFromParts({
   return `${pathname || "/"}${search || ""}${hash || ""}`;
 }
 
+function normalizeCanonicalUrl(
+  AppCore,
+  url = "/"
+) {
+  const parts = parseUrlParts(url);
+
+  return normalizePathname(
+    AppCore,
+    parts.pathname || "/"
+  );
+}
+
+/* =========================================================
+   ACTIVATION TOKEN PROTECTION
+========================================================= */
+
+function isActivationPath(url = "") {
+  const canonical =
+    normalizeCanonicalUrl(
+      null,
+      url || "/"
+    );
+
+  return (
+    canonical === ACTIVATION_PATH ||
+    canonical.startsWith(`${ACTIVATION_PATH}/`)
+  );
+}
+
+function hasTokenInSearch(search = "") {
+  try {
+    const params =
+      new URLSearchParams(search || "");
+
+    return ACTIVATION_TOKEN_PARAM_NAMES.some(
+      (name) =>
+        Boolean(
+          safeText(
+            params.get(name),
+            ""
+          )
+        )
+    );
+  } catch {
+    return false;
+  }
+}
+
+function hasActivationToken(url = "") {
+  const raw =
+    safeText(url, "");
+
+  if (!raw) {
+    return false;
+  }
+
+  const parts =
+    parseUrlParts(raw);
+
+  if (
+    hasTokenInSearch(parts.search)
+  ) {
+    return true;
+  }
+
+  if (
+    parts.hash &&
+    parts.hash.includes("?")
+  ) {
+    const query =
+      parts.hash.split("?").slice(1).join("?");
+
+    return hasTokenInSearch(
+      query ? `?${query}` : ""
+    );
+  }
+
+  return false;
+}
+
+function isActivationTokenScrubbed() {
+  if (!canUseHistory()) {
+    return false;
+  }
+
+  try {
+    return Boolean(
+      window.history?.state?.scrubbedActivationToken
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isProtectedActivationUrl(url = "") {
+  if (isActivationTokenScrubbed()) {
+    return false;
+  }
+
+  return (
+    isActivationPath(url) &&
+    hasActivationToken(url)
+  );
+}
+
+function getInitialUrl() {
+  if (!isBrowser()) {
+    return "";
+  }
+
+  return safeText(
+    window.__ONION_INITIAL_URL__,
+    ""
+  );
+}
+
+function getActivationInitialUrl() {
+  if (!isBrowser()) {
+    return "";
+  }
+
+  return safeText(
+    window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__,
+    ""
+  );
+}
+
+function captureInitialUrl() {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  try {
+    const href =
+      window.location.href;
+
+    if (!window.__ONION_INITIAL_URL__) {
+      window.__ONION_INITIAL_URL__ = href;
+    }
+
+    if (
+      isActivationPath(href) &&
+      !window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__
+    ) {
+      window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__ = href;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getProtectedActivationUrl() {
+  if (isActivationTokenScrubbed()) {
+    return "";
+  }
+
+  captureInitialUrl();
+
+  const activationInitialUrl =
+    getActivationInitialUrl();
+
+  if (
+    activationInitialUrl &&
+    isProtectedActivationUrl(activationInitialUrl)
+  ) {
+    const parts =
+      parseUrlParts(activationInitialUrl);
+
+    return buildUrlFromParts(parts);
+  }
+
+  const initialUrl =
+    getInitialUrl();
+
+  if (
+    initialUrl &&
+    isProtectedActivationUrl(initialUrl)
+  ) {
+    const parts =
+      parseUrlParts(initialUrl);
+
+    return buildUrlFromParts(parts);
+  }
+
+  const browserUrl =
+    getBrowserPublicUrl();
+
+  if (
+    browserUrl &&
+    isProtectedActivationUrl(browserUrl)
+  ) {
+    const parts =
+      parseUrlParts(browserUrl);
+
+    return buildUrlFromParts(parts);
+  }
+
+  return "";
+}
+
+function shouldNeverWriteHistory(options = {}) {
+  return (
+    options.skipHistory === true ||
+    options.protectedInitialUrl === true
+  );
+}
+
+/* =========================================================
+   PUBLIC URL NORMALIZATION
+========================================================= */
+
 /**
  * URL pública para History API.
  *
  * IMPORTANTE:
- * - normaliza SOLO el pathname
- * - conserva search/hash
- * - si el router intenta escribir la misma ruta sin query,
- *   conserva el query actual del navegador
- *
- * Esto evita que:
- *   /activate-account?token=abc
- * se convierta en:
- *   /activate-account
+ * - normaliza SOLO pathname
+ * - conserva search/hash del target
+ * - solo conserva search/hash actuales si se solicita expresamente
+ * - nunca limpia /activate-account?token=... antes de que la vista lo capture
  */
 function normalizePublicUrl(
   AppCore,
   url = "/",
   {
-    preserveCurrentContext = true,
+    preserveCurrentContext = false,
   } = {}
 ) {
-  const target = parseUrlParts(url);
-  const current = parseUrlParts(
-    getBrowserPublicUrl() || "/"
-  );
+  const protectedUrl =
+    getProtectedActivationUrl();
+
+  if (
+    protectedUrl &&
+    isActivationPath(url)
+  ) {
+    return normalizePath(
+      AppCore,
+      protectedUrl
+    );
+  }
+
+  const target =
+    parseUrlParts(url);
+
+  const current =
+    parseUrlParts(
+      getBrowserPublicUrl() || "/"
+    );
 
   const normalizedTargetPathname =
     normalizePathname(
@@ -216,29 +520,22 @@ function normalizePublicUrl(
   });
 }
 
-/**
- * Ruta canónica interna.
- *
- * IMPORTANTE:
- * - sin query
- * - sin hash
- * - usada para resolver vistas/guards/routes
- */
-function normalizeCanonicalUrl(
-  AppCore,
-  url = "/"
-) {
-  const parts = parseUrlParts(url);
-
-  return normalizePathname(
-    AppCore,
-    parts.pathname || "/"
-  );
-}
-
 function getComparableCurrentUrl(
   AppCore
 ) {
+  const protectedUrl =
+    getProtectedActivationUrl();
+
+  if (protectedUrl) {
+    return normalizePublicUrl(
+      AppCore,
+      protectedUrl,
+      {
+        preserveCurrentContext: false,
+      }
+    );
+  }
+
   const browserUrl =
     getBrowserPublicUrl();
 
@@ -286,7 +583,7 @@ function getResolvedHistoryContext(
       rawPublicPath,
       {
         preserveCurrentContext:
-          options.preserveCurrentContext !== false,
+          options.preserveCurrentContext === true,
       }
     );
 
@@ -350,6 +647,12 @@ export function pushState({
   pathname = "/",
   options = {},
 } = {}) {
+  if (
+    shouldNeverWriteHistory(options)
+  ) {
+    return false;
+  }
+
   const {
     publicPath,
     canonicalPath,
@@ -387,6 +690,12 @@ export function replaceState({
   pathname = "/",
   options = {},
 } = {}) {
+  if (
+    shouldNeverWriteHistory(options)
+  ) {
+    return false;
+  }
+
   const {
     publicPath,
     canonicalPath,
@@ -431,7 +740,7 @@ export function updateHistory({
 } = {}) {
   if (
     !canUseHistory() ||
-    options.skipHistory === true
+    shouldNeverWriteHistory(options)
   ) {
     return false;
   }
@@ -504,7 +813,13 @@ export function ensureInitialHistoryState({
   }
 
   try {
+    captureInitialUrl();
+
+    const protectedUrl =
+      getProtectedActivationUrl();
+
     const currentUrl =
+      protectedUrl ||
       getComparableCurrentUrl(
         AppCore
       );
@@ -512,7 +827,8 @@ export function ensureInitialHistoryState({
     const currentCanonicalPath =
       normalizeCanonicalUrl(
         AppCore,
-        getCurrentCanonicalPath(AppCore) ||
+        currentUrl ||
+          getCurrentCanonicalPath(AppCore) ||
           getBrowserPublicUrl() ||
           "/"
       );
@@ -564,6 +880,8 @@ export function ensureInitialHistoryState({
           canonicalPath: currentCanonicalPath,
           publicPath: currentUrl,
           username: currentUsername,
+          protectedActivationToken:
+            Boolean(protectedUrl),
         },
       });
 
@@ -594,4 +912,38 @@ export function back() {
   } catch {
     return false;
   }
+}
+
+/* =========================================================
+   DEBUG
+========================================================= */
+
+export function getHistorySnapshot(AppCore) {
+  return {
+    canUseHistory:
+      canUseHistory(),
+
+    browserPublicUrl:
+      getBrowserPublicUrl(),
+
+    currentComparableUrl:
+      getComparableCurrentUrl(AppCore),
+
+    protectedActivationUrl:
+      getProtectedActivationUrl(),
+
+    activationInitialUrl:
+      getActivationInitialUrl(),
+
+    initialUrl:
+      getInitialUrl(),
+
+    activationTokenScrubbed:
+      isActivationTokenScrubbed(),
+
+    state:
+      canUseHistory()
+        ? window.history.state
+        : null,
+  };
 }

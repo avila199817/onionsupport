@@ -51,7 +51,19 @@ const modalState = {
 function safeEmit(event = "", payload = {}) {
   try {
     AppCore?.events?.emit?.(event, payload);
+    return true;
   } catch {}
+
+  try {
+    window.dispatchEvent(
+      new CustomEvent(event, {
+        detail: payload,
+      })
+    );
+    return true;
+  } catch {}
+
+  return false;
 }
 
 function safeOn(event = "", handler = null) {
@@ -60,9 +72,14 @@ function safeOn(event = "", handler = null) {
   try {
     AppCore?.events?.on?.(event, handler);
     return true;
-  } catch {
-    return false;
-  }
+  } catch {}
+
+  try {
+    window.addEventListener(event, handler);
+    return true;
+  } catch {}
+
+  return false;
 }
 
 function safeOff(event = "", handler = null) {
@@ -70,10 +87,13 @@ function safeOff(event = "", handler = null) {
 
   try {
     AppCore?.events?.off?.(event, handler);
-    return true;
-  } catch {
-    return false;
-  }
+  } catch {}
+
+  try {
+    window.removeEventListener(event, handler);
+  } catch {}
+
+  return true;
 }
 
 function safeText(value, fallback = "") {
@@ -100,13 +120,13 @@ function safeObject(value) {
 
 function first(...values) {
   for (const value of values) {
-    if (
-      value !== undefined &&
-      value !== null &&
-      String(value).trim() !== ""
-    ) {
-      return value;
+    if (value === undefined || value === null) continue;
+
+    if (typeof value === "string" && value.trim() === "") {
+      continue;
     }
+
+    return value;
   }
 
   return null;
@@ -126,20 +146,23 @@ function normalizeWhitespace(value = "") {
 }
 
 function showToast(message = "", type = "info") {
+  const text = safeText(message, "");
+  if (!text) return;
+
   try {
     if (typeof AppCore?.toast?.[type] === "function") {
-      AppCore.toast[type](message);
+      AppCore.toast[type](text);
       return;
     }
   } catch {}
 
   try {
-    AppCore?.toast?.show?.(message, type);
+    AppCore?.toast?.show?.(text, type);
     return;
   } catch {}
 
   try {
-    AppCore?.ui?.toast?.[type]?.(message);
+    AppCore?.ui?.toast?.[type]?.(text);
   } catch {}
 }
 
@@ -173,11 +196,27 @@ function formatBytes(bytes = 0) {
   return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
+function isFile(value) {
+  return typeof File !== "undefined" && value instanceof File;
+}
+
+function isBlob(value) {
+  return typeof Blob !== "undefined" && value instanceof Blob;
+}
+
+function isFormData(value) {
+  return typeof FormData !== "undefined" && value instanceof FormData;
+}
+
+function isArrayBuffer(value) {
+  return typeof ArrayBuffer !== "undefined" && value instanceof ArrayBuffer;
+}
+
 function dedupeFiles(files = []) {
   const map = new Map();
 
   safeArray(files).forEach((file) => {
-    if (!(file instanceof File)) return;
+    if (!isFile(file)) return;
 
     const key = [
       safeText(file.name, ""),
@@ -226,7 +265,9 @@ function getApiBase() {
     first(
       AppCore?.config?.apiBase,
       AppCore?.config?.api?.baseUrl,
-      AppCore?.state?.apiBase
+      AppCore?.state?.apiBase,
+      window?.ONION_API_BASE,
+      window?.API_BASE
     ),
     ""
   ).replace(/\/+$/, "");
@@ -244,7 +285,17 @@ function resolveApiUrl(path = "") {
     return value.startsWith("/") ? value : `/${value}`;
   }
 
-  return `${apiBase}${value.startsWith("/") ? value : `/${value}`}`;
+  const normalizedPath = value.startsWith("/") ? value : `/${value}`;
+
+  if (apiBase.endsWith("/api") && normalizedPath.startsWith("/api/")) {
+    return `${apiBase}${normalizedPath.slice(4)}`;
+  }
+
+  return `${apiBase}${normalizedPath}`;
+}
+
+function buildApiUrl(path = "") {
+  return resolveApiUrl(path);
 }
 
 function getAuthToken() {
@@ -254,6 +305,7 @@ function getAuthToken() {
       AppCore?.state?.accessToken,
       AppCore?.auth?.getToken?.(),
       AppCore?.Auth?.getToken?.(),
+      window?.Auth?.getToken?.(),
       typeof localStorage !== "undefined" ? localStorage.getItem("token") : "",
       typeof localStorage !== "undefined"
         ? localStorage.getItem("accessToken")
@@ -375,7 +427,7 @@ function safeErrorMessage(
   error = null,
   fallback = "No se pudo completar la acción."
 ) {
-  return safeText(
+  const rawMessage = safeText(
     first(
       error?.message,
       error?.response?.message,
@@ -386,6 +438,16 @@ function safeErrorMessage(
     ),
     fallback
   );
+
+  if (
+    rawMessage === "AbortError" ||
+    rawMessage.toLowerCase().includes("aborted") ||
+    rawMessage.toLowerCase().includes("abort")
+  ) {
+    return "La operación ha tardado demasiado y se ha cancelado. Revisa si el archivo es muy pesado o si el servidor sigue procesando la subida.";
+  }
+
+  return rawMessage;
 }
 
 /* =========================================================
@@ -457,7 +519,7 @@ async function requestJson(path = "", options = {}) {
 
   const method = safeText(options?.method, "GET").toUpperCase();
   const body = options?.body ?? null;
-  const isFormData = body instanceof FormData;
+  const formDataBody = isFormData(body);
 
   const timeout = createTimeoutSignal(
     safeNumber(options?.timeoutMs, REQUEST_TIMEOUT_MS)
@@ -468,8 +530,13 @@ async function requestJson(path = "", options = {}) {
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 
-  if (body !== null && body !== undefined && !isFormData) {
+  if (body !== null && body !== undefined && !formDataBody) {
     headers["Content-Type"] = headers["Content-Type"] || "application/json";
+  }
+
+  if (formDataBody) {
+    delete headers["Content-Type"];
+    delete headers["content-type"];
   }
 
   try {
@@ -480,11 +547,9 @@ async function requestJson(path = "", options = {}) {
       signal: timeout.signal,
       ...(body !== null && body !== undefined
         ? {
-            body: isFormData
+            body: formDataBody
               ? body
-              : typeof body === "string" ||
-                  body instanceof Blob ||
-                  body instanceof ArrayBuffer
+              : typeof body === "string" || isBlob(body) || isArrayBuffer(body)
                 ? body
                 : JSON.stringify(body),
           }
@@ -506,6 +571,7 @@ async function requestJson(path = "", options = {}) {
 
       const error = new Error(message);
       error.status = response.status;
+      error.statusCode = response.status;
       error.response = parsed?.payload || parsed?.text || null;
       throw error;
     }
@@ -560,6 +626,7 @@ async function fetchAttachmentResource(url = "", fallbackFilename = "archivo") {
 
       const error = new Error(message);
       error.status = response.status;
+      error.statusCode = response.status;
       error.response = parsed?.payload || parsed?.text || null;
       throw error;
     }
@@ -1045,7 +1112,6 @@ function resolveAttachmentUrl(item = {}, detail = {}, mode = "open") {
     return directUrl;
   }
 
-  const apiBase = getApiBase();
   const ticketId = getTicketId(detail);
 
   const candidatePath = safeText(
@@ -1089,43 +1155,30 @@ function resolveAttachmentUrl(item = {}, detail = {}, mode = "open") {
     return buildUrl(blobBaseUrl, candidatePath);
   }
 
-  if (apiBase) {
-    const attachmentId = safeText(
-      first(
-        file.id,
-        file.fileId,
-        file.attachmentId,
-        file.storageKey,
-        file.path
-      ),
-      ""
-    );
+  const attachmentId = safeText(
+    first(
+      file.id,
+      file.fileId,
+      file.attachmentId,
+      file.storageKey,
+      file.path,
+      file.blobName,
+      file.key
+    ),
+    ""
+  );
 
-    const encodedTicketId = encodeUrlPathSegment(ticketId);
-    const encodedAttachmentId = encodeUrlPathSegment(attachmentId);
-
-    const routeCandidates = [
+  if (ticketId && attachmentId) {
+    return buildApiUrl(
       joinApiPath(
         "api",
         "tickets",
-        encodedTicketId,
+        encodeUrlPathSegment(ticketId),
         "attachments",
-        encodedAttachmentId,
+        encodeUrlPathSegment(attachmentId),
         mode === "download" ? "download" : "view"
-      ),
-      joinApiPath(
-        "api",
-        "incidencias",
-        encodedTicketId,
-        "attachments",
-        encodedAttachmentId,
-        mode === "download" ? "download" : "view"
-      ),
-    ].filter(Boolean);
-
-    if (routeCandidates.length) {
-      return buildUrl(apiBase, routeCandidates[0]);
-    }
+      )
+    );
   }
 
   return "";
@@ -1266,9 +1319,9 @@ function getAttachments(detail = {}) {
       },
     };
 
-    attachment.viewUrl = resolveAttachmentUrl(item, detail, "open");
+    attachment.viewUrl = resolveAttachmentUrl(attachment, detail, "open");
     attachment.openUrl = attachment.viewUrl;
-    attachment.downloadUrl = resolveAttachmentUrl(item, detail, "download");
+    attachment.downloadUrl = resolveAttachmentUrl(attachment, detail, "download");
 
     attachment.signedUrl = safeText(
       first(item.signedUrl, raw.signedUrl, attachment.viewUrl),
@@ -1298,7 +1351,6 @@ function buildAttachmentCandidates(detail = {}, attachment = {}, mode = "open") 
   const raw = safeObject(file.raw);
   const rawDetail = safeObject(detail?.raw);
 
-  const apiBase = getApiBase();
   const ticketId = safeText(getTicketId(detail), "");
 
   const attachmentId = safeText(
@@ -1308,7 +1360,9 @@ function buildAttachmentCandidates(detail = {}, attachment = {}, mode = "open") 
       raw.attachmentId,
       raw.fileId,
       raw.storageKey,
-      raw.path
+      raw.path,
+      raw.blobName,
+      raw.key
     ),
     ""
   );
@@ -1408,7 +1462,7 @@ function buildAttachmentCandidates(detail = {}, attachment = {}, mode = "open") 
     absoluteCandidates.push(buildUrl(blobBaseUrl, path));
   }
 
-  if (apiBase && ticketId) {
+  if (ticketId) {
     const encodedTicketId = encodeUrlPathSegment(ticketId);
     const encodedAttachmentId = encodeUrlPathSegment(attachmentId);
     const encodedName = encodeUrlPathSegment(name);
@@ -1459,7 +1513,7 @@ function buildAttachmentCandidates(detail = {}, attachment = {}, mode = "open") 
     ].filter(Boolean);
 
     routes.forEach((route) => {
-      const built = buildUrl(apiBase, route);
+      const built = buildApiUrl(route);
       if (built) {
         absoluteCandidates.push(built);
       }
@@ -1500,7 +1554,7 @@ async function uploadTicketAttachmentsInternal({
   const formData = new FormData();
 
   list.forEach((file) => {
-    if (file instanceof File) {
+    if (isFile(file)) {
       formData.append("attachments", file, file.name);
     }
   });
@@ -1526,7 +1580,7 @@ async function uploadTicketAttachmentsInternal({
     } catch (error) {
       lastError = error;
 
-      if (![404, 405].includes(Number(error?.status))) {
+      if (![404, 405].includes(Number(error?.status || error?.statusCode))) {
         throw error;
       }
     }
@@ -1593,7 +1647,7 @@ async function commentTicketInternal({ ticketId = "", message = "" } = {}) {
     } catch (error) {
       lastError = error;
 
-      if (![404, 405].includes(Number(error?.status))) {
+      if (![404, 405].includes(Number(error?.status || error?.statusCode))) {
         throw error;
       }
     }
@@ -1647,7 +1701,7 @@ async function reopenTicketInternal(ticketId = "") {
     } catch (error) {
       lastError = error;
 
-      if (![404, 405].includes(Number(error?.status))) {
+      if (![404, 405].includes(Number(error?.status || error?.statusCode))) {
         throw error;
       }
     }
@@ -1681,7 +1735,7 @@ async function fetchTicketDetailInternal(ticketId = "") {
     } catch (error) {
       lastError = error;
 
-      if (![404, 405].includes(Number(error?.status))) {
+      if (![404, 405].includes(Number(error?.status || error?.statusCode))) {
         throw error;
       }
     }
@@ -1846,6 +1900,12 @@ function normalizeTimelineEntries(detail = {}) {
       if (type === "created") {
         title = "Incidencia creada";
         body = safeText(body, "La incidencia fue registrada.");
+      }
+
+      if (type === "attachments_added") {
+        title = "Adjuntos añadidos";
+        const changeLines = changes.map(formatChange).filter(Boolean);
+        body = safeText(body || changeLines.join("\n"), "Se añadieron adjuntos.");
       }
 
       if (type === "update") {
@@ -3523,6 +3583,10 @@ async function handleCopy(ticketId = "") {
 }
 
 async function handleSubmitUpdate(ticketId = "") {
+  if (modalState.isSubmitting) {
+    return false;
+  }
+
   const id = safeText(ticketId, "");
   const message = normalizeWhitespace(modalState.commentDraft);
   const files = dedupeFiles(modalState.pendingFiles);
@@ -3999,8 +4063,12 @@ function detachRootBindings() {
    EVENT BUS BRIDGE
 ========================================================= */
 
+function extractEventDetail(event) {
+  return event?.detail?.detail || event?.detail || event || null;
+}
+
 function handleOpenEvent(event) {
-  const detail = event?.detail?.detail || event?.detail || event || null;
+  const detail = extractEventDetail(event);
   if (!detail) return;
 
   openIncidenciasModal(detail);
@@ -4013,7 +4081,7 @@ function handleCloseEvent() {
 function handleOpenedDetailEvent(event) {
   if (modalState.isSubmitting) return;
 
-  const detail = event?.detail?.detail || event?.detail || event || null;
+  const detail = extractEventDetail(event);
   if (!detail) return;
 
   if (modalState.isOpen) {
@@ -4024,7 +4092,7 @@ function handleOpenedDetailEvent(event) {
 function handleUpdateEvent(event) {
   if (modalState.isSubmitting) return;
 
-  const detail = event?.detail?.detail || event?.detail || event || null;
+  const detail = extractEventDetail(event);
   if (!detail) return;
 
   updateIncidenciasModal(detail);
@@ -4033,7 +4101,7 @@ function handleUpdateEvent(event) {
 function handleCommentSuccess(event) {
   if (modalState.isSubmitting) return;
 
-  const detail = event?.detail?.detail || event?.detail || event || null;
+  const detail = extractEventDetail(event);
 
   if (!detail || !modalState.isOpen) return;
 
@@ -4061,7 +4129,7 @@ function handleCommentSuccess(event) {
 function handleUploadSuccess(event) {
   if (modalState.isSubmitting) return;
 
-  const detail = event?.detail?.detail || event?.detail || event || null;
+  const detail = extractEventDetail(event);
 
   if (!detail || !modalState.isOpen) return;
 

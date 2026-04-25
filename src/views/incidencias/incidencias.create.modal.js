@@ -2,7 +2,7 @@
    Onion SPA - Incidencias Create Modal
    Archivo: src/views/incidencias/incidencias.create.modal.js
 
-   INCIDENCIAS EXPERIENCE PRO · CREATE MODAL · ADMIN READY 10/10
+   INCIDENCIAS EXPERIENCE PRO · CREATE MODAL · CLEAN ADMIN 10/10
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -16,8 +16,10 @@ const MODAL_ID = "incidencias-create-modal-root";
 const PANEL_ID = "incidencias-create-modal-panel";
 
 const TICKETS_CREATE_ENDPOINT = "/api/tickets";
+const USER_SEARCH_ENDPOINT = "/api/search/users";
+
 const USER_SEARCH_LIMIT = 8;
-const USER_SEARCH_DEBOUNCE = 260;
+const USER_SEARCH_DEBOUNCE = 240;
 
 const ADMIN_ROLE_KEYS = Object.freeze([
   "admin",
@@ -25,6 +27,7 @@ const ADMIN_ROLE_KEYS = Object.freeze([
   "superadmin",
   "super_admin",
   "root",
+  "owner",
 ]);
 
 const DEFAULT_FORM = Object.freeze({
@@ -32,7 +35,6 @@ const DEFAULT_FORM = Object.freeze({
   targetUserName: "",
   targetUserEmail: "",
   subject: "",
-  description: "",
   attachments: [],
 });
 
@@ -45,6 +47,7 @@ const modalState = {
   bindingsAttached: false,
   escHandler: null,
   lastActiveElement: null,
+
   submitting: false,
   dragActive: false,
 
@@ -164,6 +167,25 @@ function getApiBase() {
   return apiBase.replace(/\/+$/, "");
 }
 
+function buildFetchUrl(endpoint = "") {
+  const apiBase = getApiBase();
+  const path = safeText(endpoint, "");
+
+  if (!apiBase) {
+    return path;
+  }
+
+  /*
+    Si AppCore.config.apiBase ya termina en /api y el endpoint empieza por /api,
+    evitamos URLs tipo /api/api/search/users en fetch directo.
+  */
+  if (apiBase.endsWith("/api") && path.startsWith("/api/")) {
+    return `${apiBase}${path.slice(4)}`;
+  }
+
+  return `${apiBase}${path}`;
+}
+
 function getAuthToken() {
   return safeText(
     first(
@@ -211,6 +233,7 @@ function formatFileSize(bytes = 0) {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
   if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+
   return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
@@ -325,21 +348,6 @@ function normalizeUserCandidate(raw = null) {
 
   if (!id) return null;
 
-  const name = safeText(
-    first(
-      obj.name,
-      obj.fullName,
-      obj.displayName,
-      obj.username,
-      nestedUser.name,
-      nestedUser.fullName,
-      nestedUser.displayName,
-      nestedUser.username,
-      nestedProfile.name
-    ),
-    ""
-  );
-
   const email = safeText(
     first(
       obj.email,
@@ -352,7 +360,8 @@ function normalizeUserCandidate(raw = null) {
   const username = safeText(
     first(
       obj.username,
-      nestedUser.username
+      nestedUser.username,
+      nestedProfile.username
     ),
     ""
   );
@@ -370,20 +379,58 @@ function normalizeUserCandidate(raw = null) {
   const role = safeText(
     first(
       obj.role,
-      nestedUser.role
+      obj.rol,
+      nestedUser.role,
+      nestedUser.rol
     ),
     ""
   );
 
-  const title = safeText(first(name, username, email, `Usuario ${id}`), `Usuario ${id}`);
+  const name = safeText(
+    first(
+      obj.name,
+      obj.fullName,
+      obj.displayName,
+      nestedUser.name,
+      nestedUser.fullName,
+      nestedUser.displayName,
+      nestedProfile.name,
+      username,
+      email,
+      obj.label,
+      `Usuario ${id}`
+    ),
+    `Usuario ${id}`
+  );
+
+  const label = safeText(
+    first(
+      obj.label,
+      `${name}${email ? ` · ${email}` : ""}`
+    ),
+    name
+  );
+
+  const subtitle = safeText(
+    first(
+      obj.subtitle,
+      email,
+      username ? `@${username}` : "",
+      phone
+    ),
+    ""
+  );
 
   return {
     id,
-    name: title,
+    userId: id,
+    name,
     email,
     username,
     phone,
     role,
+    label,
+    subtitle,
   };
 }
 
@@ -414,7 +461,6 @@ function getInitialForm() {
     targetUserName: safeText(first(draft.targetUserName, draft.userName), ""),
     targetUserEmail: safeText(first(draft.targetUserEmail, draft.userEmail), ""),
     subject: safeText(draft.subject, ""),
-    description: safeText(draft.description, ""),
     attachments: [],
   };
 }
@@ -428,7 +474,6 @@ function persistDraft() {
     userName: safeText(modalState.form?.targetUserName, ""),
     userEmail: safeText(modalState.form?.targetUserEmail, ""),
     subject: safeText(modalState.form?.subject, ""),
-    description: safeText(modalState.form?.description, ""),
   };
 }
 
@@ -441,7 +486,6 @@ function clearDraft() {
     userName: "",
     userEmail: "",
     subject: "",
-    description: "",
   };
 }
 
@@ -516,23 +560,16 @@ function validateForm(form = {}) {
   const errors = {};
 
   const targetUserId = safeText(current.targetUserId, "");
-  const subject = safeText(current.subject, "");
-  const description = safeText(current.description, "");
+  const subject = normalizeWhitespace(current.subject);
 
   if (canSelectTargetUser() && !targetUserId) {
-    errors.targetUserId = "Selecciona el usuario para el que se va a crear la incidencia.";
+    errors.targetUserId = "Selecciona un usuario.";
   }
 
   if (!subject) {
     errors.subject = "El asunto es obligatorio.";
   } else if (subject.length < 4) {
-    errors.subject = "El asunto debe tener al menos 4 caracteres.";
-  }
-
-  if (!description) {
-    errors.description = "La descripción es obligatoria.";
-  } else if (description.length < 12) {
-    errors.description = "La descripción debe tener al menos 12 caracteres.";
+    errors.subject = "Mínimo 4 caracteres.";
   }
 
   return {
@@ -541,17 +578,29 @@ function validateForm(form = {}) {
   };
 }
 
+function buildAutoDescription(form = {}) {
+  const subject = normalizeWhitespace(form?.subject);
+
+  return normalizeWhitespace(
+    `Incidencia creada desde el panel admin. Asunto: ${subject}`
+  );
+}
+
 function buildPayload(form = {}) {
   const current = safeObject(form);
   const fd = new FormData();
 
-  fd.append("subject", normalizeWhitespace(current.subject));
-  fd.append("description", normalizeWhitespace(current.description));
+  const subject = normalizeWhitespace(current.subject);
+  const description = buildAutoDescription(current);
+
+  fd.append("subject", subject);
+  fd.append("description", description);
 
   if (canSelectTargetUser()) {
     const targetUserId = safeText(current.targetUserId, "");
     if (targetUserId) {
       fd.append("userId", targetUserId);
+      fd.append("targetUserId", targetUserId);
     }
   }
 
@@ -601,9 +650,8 @@ async function createViaHttpModule(payload = null) {
 }
 
 async function createViaFetch(payload = null) {
-  const apiBase = getApiBase();
   const token = getAuthToken();
-  const url = `${apiBase || ""}${TICKETS_CREATE_ENDPOINT}`;
+  const url = buildFetchUrl(TICKETS_CREATE_ENDPOINT);
 
   const response = await fetch(url, {
     method: "POST",
@@ -630,9 +678,10 @@ async function createViaFetch(payload = null) {
           data?.error,
           `HTTP ${response.status} al crear incidencia.`
         ),
-        "No se pudo enviar la incidencia."
+        "No se pudo crear la incidencia."
       )
     );
+
     error.response = data;
     throw error;
   }
@@ -680,19 +729,21 @@ async function createIncidenciaRequest(payload = null) {
 ========================================================= */
 
 function buildUserSearchUrls(query = "") {
-  const q = encodeURIComponent(safeText(query, ""));
-  const limit = USER_SEARCH_LIMIT;
+  const params = new URLSearchParams();
 
+  params.set("q", safeText(query, ""));
+  params.set("mode", "incidencias");
+  params.set("limit", String(USER_SEARCH_LIMIT));
+
+  /*
+    Endpoint correcto:
+    - /api/search/users si tu servidor monta la API completa en /api.
+    - /search/users como fallback si AppCore.config.apiBase ya incluye /api.
+  */
   return [
-    `/api/users/search?q=${q}&limit=${limit}`,
-    `/api/users/search?search=${q}&limit=${limit}`,
-    `/api/users?q=${q}&limit=${limit}`,
-    `/api/users?search=${q}&limit=${limit}`,
-    `/api/usuarios/search?q=${q}&limit=${limit}`,
-    `/api/usuarios/search?search=${q}&limit=${limit}`,
-    `/api/usuarios?q=${q}&limit=${limit}`,
-    `/api/usuarios?search=${q}&limit=${limit}`,
-  ].filter(Boolean);
+    `${USER_SEARCH_ENDPOINT}?${params.toString()}`,
+    `/search/users?${params.toString()}`,
+  ];
 }
 
 function readUsersCollection(response = null) {
@@ -800,10 +851,10 @@ async function searchUsersViaHttpModule(url = "") {
 }
 
 async function searchUsersViaFetch(url = "") {
-  const apiBase = getApiBase();
   const token = getAuthToken();
+  const finalUrl = buildFetchUrl(url);
 
-  const response = await fetch(`${apiBase || ""}${url}`, {
+  const response = await fetch(finalUrl, {
     method: "GET",
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -830,6 +881,7 @@ async function searchUsersViaFetch(url = "") {
         "No se pudieron cargar usuarios."
       )
     );
+
     error.response = data;
     throw error;
   }
@@ -997,44 +1049,10 @@ function renderInput({
   `;
 }
 
-function renderTextarea({
-  label = "",
-  name = "",
-  value = "",
-  placeholder = "",
-  required = false,
-  error = "",
-  rows = 6,
-} = {}) {
-  return `
-    <label class="inc-create-field">
-      <span class="inc-create-label">
-        ${escapeHtml(label)}${required ? " *" : ""}
-      </span>
-
-      <textarea
-        class="inc-create-textarea ${error ? "is-error" : ""}"
-        data-field="${escapeHtml(name)}"
-        name="${escapeHtml(name)}"
-        rows="${Number(rows) || 6}"
-        placeholder="${escapeHtml(placeholder)}"
-      >${escapeHtml(value)}</textarea>
-
-      ${renderFieldError(error)}
-    </label>
-  `;
-}
-
 function renderFilesSummary(files = []) {
   const items = safeArray(files);
 
-  if (!items.length) {
-    return `
-      <div class="inc-create-files-empty">
-        No has añadido archivos todavía.
-      </div>
-    `;
-  }
+  if (!items.length) return "";
 
   return `
     <div class="inc-create-files-list">
@@ -1076,18 +1094,10 @@ function renderFileInput({ files = [], dragActive = false } = {}) {
         : `${items.length} archivos`;
 
   return `
-    <section class="inc-create-side-card">
-      <div class="inc-create-side-head">
-        <div class="inc-create-side-head-copy">
-          <strong class="inc-create-side-title">Adjuntos</strong>
-          <span class="inc-create-side-text">
-            Añade capturas, PDFs u otros documentos útiles.
-          </span>
-        </div>
-
-        <span class="inc-create-side-pill">
-          ${escapeHtml(countText)}
-        </span>
+    <section class="inc-create-files-card">
+      <div class="inc-create-files-head">
+        <strong>Adjuntos</strong>
+        <span>${escapeHtml(countText)}</span>
       </div>
 
       <label
@@ -1104,31 +1114,12 @@ function renderFileInput({ files = [], dragActive = false } = {}) {
         />
 
         <div class="inc-create-dropzone-copy">
-          <strong>Arrastra archivos aquí</strong>
-          <span>o pulsa para seleccionarlos</span>
+          <strong>Arrastra o pulsa</strong>
+          <span>Capturas, PDF o documentos.</span>
         </div>
       </label>
 
       ${renderFilesSummary(items)}
-    </section>
-  `;
-}
-
-function renderInfoCard() {
-  return `
-    <section class="inc-create-side-card inc-create-side-note">
-      <strong class="inc-create-side-title">Antes de enviar</strong>
-
-      <div class="inc-create-note-list">
-        <span>Se generará una referencia automáticamente.</span>
-        <span>Cuanto más claro sea el asunto, mejor.</span>
-        <span>Los adjuntos se enviarán junto con la incidencia.</span>
-        ${
-          canSelectTargetUser()
-            ? `<span>Como admin puedes crear incidencias para cualquier usuario existente.</span>`
-            : `<span>La incidencia quedará vinculada a tu usuario actual.</span>`
-        }
-      </div>
     </section>
   `;
 }
@@ -1145,16 +1136,13 @@ function renderSelectedUserCard() {
   return `
     <div class="inc-create-target-user-card">
       <div class="inc-create-target-user-copy">
-        <strong class="inc-create-target-user-name">
-          ${escapeHtml(targetUserName)}
-        </strong>
-
-        <span class="inc-create-target-user-meta">
+        <strong>${escapeHtml(targetUserName)}</strong>
+        <span>
           ${
             targetUserEmail
-              ? `${escapeHtml(targetUserEmail)} · `
-              : ""
-          }ID ${escapeHtml(targetUserId)}
+              ? escapeHtml(targetUserEmail)
+              : `ID ${escapeHtml(targetUserId)}`
+          }
         </span>
       </div>
 
@@ -1175,10 +1163,12 @@ function renderUserSearchResults() {
   const loading = Boolean(modalState.userSearchLoading);
   const error = safeText(modalState.userSearchError, "");
 
+  if (!query) return "";
+
   if (loading) {
     return `
       <div class="inc-create-search-state">
-        Buscando usuarios...
+        Buscando...
       </div>
     `;
   }
@@ -1194,7 +1184,7 @@ function renderUserSearchResults() {
   if (query.length < 2) {
     return `
       <div class="inc-create-search-state">
-        Escribe al menos 2 caracteres para buscar por nombre, email o username.
+        Mínimo 2 caracteres.
       </div>
     `;
   }
@@ -1202,7 +1192,7 @@ function renderUserSearchResults() {
   if (!results.length) {
     return `
       <div class="inc-create-search-state">
-        No hemos encontrado usuarios con ese criterio.
+        Sin resultados.
       </div>
     `;
   }
@@ -1218,32 +1208,25 @@ function renderUserSearchResults() {
               class="inc-create-search-item"
             >
               <div class="inc-create-search-item-copy">
-                <strong class="inc-create-search-item-name">
+                <strong>
                   ${escapeHtml(safeText(user?.name, `Usuario ${index + 1}`))}
                 </strong>
 
-                <span class="inc-create-search-item-meta">
-                  ${
-                    safeText(user?.email, "")
-                      ? `${escapeHtml(user.email)}`
-                      : "Sin email"
-                  }
-                  ${
-                    safeText(user?.username, "")
-                      ? ` · @${escapeHtml(user.username)}`
-                      : ""
-                  }
-                  ${
-                    safeText(user?.phone, "")
-                      ? ` · ${escapeHtml(user.phone)}`
-                      : ""
-                  }
+                <span>
+                  ${escapeHtml(
+                    safeText(
+                      first(
+                        user?.subtitle,
+                        user?.email,
+                        user?.username ? `@${user.username}` : "",
+                        user?.phone,
+                        user?.id
+                      ),
+                      "Sin datos secundarios"
+                    )
+                  )}
                 </span>
               </div>
-
-              <span class="inc-create-search-item-pill">
-                ID ${escapeHtml(safeText(user?.id, ""))}
-              </span>
             </button>
           `
         )
@@ -1261,20 +1244,13 @@ function renderAdminTargetUserBlock() {
 
   return `
     <section class="inc-create-block">
-      <div class="inc-create-block-head">
-        <div class="inc-create-block-copy">
-          <strong class="inc-create-block-title">Usuario destino</strong>
-          <span class="inc-create-block-text">
-            Busca un usuario existente y crea la incidencia directamente para él.
-          </span>
-        </div>
+      <div class="inc-create-mini-title">
+        Usuario
       </div>
 
       ${targetUserId ? renderSelectedUserCard() : ""}
 
       <label class="inc-create-field">
-        <span class="inc-create-label">Buscar usuario *</span>
-
         <input
           class="inc-create-input ${error ? "is-error" : ""}"
           data-field="targetUserSearch"
@@ -1284,7 +1260,7 @@ function renderAdminTargetUserBlock() {
           placeholder="${
             targetUserId
               ? "Buscar otro usuario..."
-              : "Ej. Cristian, cristian@email.com, cavila..."
+              : "Buscar por nombre, email, username, teléfono..."
           }"
           autocomplete="off"
         />
@@ -1297,16 +1273,16 @@ function renderAdminTargetUserBlock() {
   `;
 }
 
-function renderAlert(type = "info", title = "", text = "", extra = "") {
+function renderAlert(type = "info", title = "", text = "") {
   const safeTitle = safeText(title, "");
   const safeBody = safeText(text, "");
+
   if (!safeTitle && !safeBody) return "";
 
   return `
     <div class="inc-create-alert is-${escapeHtml(type)}">
       ${safeTitle ? `<strong>${escapeHtml(safeTitle)}</strong>` : ""}
       ${safeBody ? `<span>${escapeHtml(safeBody)}</span>` : ""}
-      ${extra || ""}
     </div>
   `;
 }
@@ -1339,20 +1315,10 @@ function renderModalInner() {
       >
         <div class="inc-create-header">
           <div class="inc-create-header-copy">
-            <div class="inc-create-header-text">
-              <h2 id="incidencias-create-modal-title">
-                Crear incidencia
-              </h2>
-
-              <p>
-                Registra una nueva incidencia con el mismo nivel visual del sistema pro.
-                ${
-                  canSelectTargetUser()
-                    ? " Como admin puedes localizar cualquier usuario y abrirla directamente para él."
-                    : " Añade toda la información necesaria para que soporte pueda actuar rápido."
-                }
-              </p>
-            </div>
+            <h2 id="incidencias-create-modal-title">
+              Crear incidencia
+            </h2>
+            <p>Usuario, asunto, adjuntos y enviar.</p>
           </div>
 
           <button
@@ -1371,8 +1337,8 @@ function renderModalInner() {
             successMessage
               ? renderAlert(
                   "success",
-                  "La incidencia se ha creado correctamente.",
-                  createdTicketId ? `Referencia generada: ${createdTicketId}` : ""
+                  "Incidencia creada.",
+                  createdTicketId ? `Referencia: ${createdTicketId}` : ""
                 )
               : ""
           }
@@ -1381,45 +1347,28 @@ function renderModalInner() {
             serverError
               ? renderAlert(
                   "error",
-                  "No se pudo crear la incidencia",
+                  "No se pudo crear la incidencia.",
                   serverError
                 )
               : ""
           }
 
           <form id="incidencias-create-form" novalidate class="inc-create-form">
-            <div class="inc-create-main">
-              ${renderAdminTargetUserBlock()}
+            ${renderAdminTargetUserBlock()}
 
-              ${renderInput({
-                label: "Asunto",
-                name: "subject",
-                value: form.subject,
-                placeholder: "Ej. Error al pagar, acceso bloqueado, incidencia en factura...",
-                required: true,
-                error: errors.subject,
-              })}
+            ${renderInput({
+              label: "Asunto",
+              name: "subject",
+              value: form.subject,
+              placeholder: "Ej. Error al pagar, acceso bloqueado, factura incorrecta...",
+              required: true,
+              error: errors.subject,
+            })}
 
-              ${renderTextarea({
-                label: "Descripción",
-                name: "description",
-                value: form.description,
-                placeholder:
-                  "Describe qué está ocurriendo, desde cuándo pasa, a qué usuario afecta y qué pruebas o pasos previos ya se han hecho.",
-                required: true,
-                error: errors.description,
-                rows: 8,
-              })}
-
-              <div class="inc-create-inline-grid">
-                ${renderFileInput({
-                  files: safeArray(form.attachments),
-                  dragActive: Boolean(modalState.dragActive),
-                })}
-
-                ${renderInfoCard()}
-              </div>
-            </div>
+            ${renderFileInput({
+              files: safeArray(form.attachments),
+              dragActive: Boolean(modalState.dragActive),
+            })}
 
             <div class="inc-create-actions">
               <button
@@ -1452,25 +1401,24 @@ function renderModalInner() {
             position:fixed;
             inset:0;
             z-index:9999;
-            padding:18px;
             display:grid;
             place-items:center;
-            background:rgba(0,0,0,.66);
+            padding:16px;
+            background:rgba(0,0,0,.62);
             backdrop-filter:blur(10px);
             -webkit-backdrop-filter:blur(10px);
           }
 
           .inc-create-panel{
-            position:relative;
-            width:min(1180px, 100%);
-            max-height:90vh;
+            width:min(760px, 100%);
+            max-height:92vh;
             overflow:auto;
-            border-radius:24px;
-            border:1px solid var(--border-soft, #2b2b2b);
+            border-radius:22px;
+            border:1px solid var(--border-soft, rgba(255,255,255,.12));
             background:
               radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 34%),
-              linear-gradient(180deg, var(--surface-2, #151515), var(--surface-1, #121212));
-            box-shadow:0 34px 84px rgba(0,0,0,.42);
+              linear-gradient(180deg, var(--surface-2, #171717), var(--surface-1, #111));
+            box-shadow:0 34px 84px rgba(0,0,0,.45);
           }
 
           .inc-create-header{
@@ -1479,49 +1427,40 @@ function renderModalInner() {
             justify-content:space-between;
             gap:14px;
             padding:18px 18px 14px;
-            border-bottom:1px solid var(--border-soft);
+            border-bottom:1px solid var(--border-soft, rgba(255,255,255,.10));
           }
 
           .inc-create-header-copy{
             display:grid;
-            gap:10px;
+            gap:5px;
             min-width:0;
-            flex:1 1 auto;
           }
 
-          .inc-create-header-text{
-            display:grid;
-            gap:6px;
-          }
-
-          .inc-create-header-text h2{
+          .inc-create-header-copy h2{
             margin:0;
-            color:var(--text-strong);
-            font-size:clamp(24px, 3.6vw, 34px);
+            color:var(--text-strong, #fff);
+            font-size:clamp(24px, 3.6vw, 32px);
             line-height:1;
             letter-spacing:-.045em;
           }
 
-          .inc-create-header-text p{
+          .inc-create-header-copy p{
             margin:0;
-            max-width:900px;
-            color:var(--text-dim);
-            font-size:13px;
-            line-height:1.55;
+            color:var(--text-dim, rgba(255,255,255,.62));
+            font-size:12px;
+            line-height:1.45;
           }
 
           .inc-create-close{
-            width:42px;
-            height:42px;
+            width:40px;
+            height:40px;
             flex:0 0 auto;
-            border:none;
             border-radius:14px;
+            border:1px solid var(--border-soft, rgba(255,255,255,.12));
+            background:var(--surface-glass, rgba(255,255,255,.05));
+            color:var(--text-strong, #fff);
             cursor:pointer;
-            font-size:18px;
-            background:var(--surface-glass);
-            color:var(--text-strong);
-            border:1px solid var(--border-soft);
-            opacity:1;
+            font-size:17px;
           }
 
           .inc-create-close:disabled{
@@ -1530,44 +1469,44 @@ function renderModalInner() {
           }
 
           .inc-create-body{
-            padding:16px 18px 18px;
             display:grid;
             gap:14px;
+            padding:16px 18px 18px;
           }
 
           .inc-create-alert{
             display:grid;
             gap:4px;
-            padding:12px 14px;
+            padding:11px 13px;
             border-radius:14px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-1, var(--surface-glass));
+            border:1px solid var(--border-soft, rgba(255,255,255,.12));
+            background:var(--surface-glass, rgba(255,255,255,.05));
           }
 
           .inc-create-alert strong{
-            color:var(--text-strong);
+            color:var(--text-strong, #fff);
             font-size:13px;
             line-height:1.35;
           }
 
           .inc-create-alert span{
-            color:var(--text-dim);
+            color:var(--text-dim, rgba(255,255,255,.62));
             font-size:12px;
-            line-height:1.5;
+            line-height:1.45;
           }
 
           .inc-create-alert.is-success{
-            border-color:color-mix(in srgb, var(--success-strong, #36c690) 28%, var(--border-soft));
+            border-color:color-mix(in srgb, var(--success-strong, #36c690) 30%, var(--border-soft, rgba(255,255,255,.12)));
             background:
-              linear-gradient(180deg, color-mix(in srgb, var(--success-strong, #36c690) 10%, transparent), transparent 85%),
-              var(--surface-1, var(--surface-glass));
+              linear-gradient(180deg, color-mix(in srgb, var(--success-strong, #36c690) 11%, transparent), transparent 90%),
+              var(--surface-glass, rgba(255,255,255,.05));
           }
 
           .inc-create-alert.is-error{
-            border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 28%, var(--border-soft));
+            border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 34%, var(--border-soft, rgba(255,255,255,.12)));
             background:
-              linear-gradient(180deg, color-mix(in srgb, var(--danger-strong, #ff6b6b) 10%, transparent), transparent 85%),
-              var(--surface-1, var(--surface-glass));
+              linear-gradient(180deg, color-mix(in srgb, var(--danger-strong, #ff6b6b) 11%, transparent), transparent 90%),
+              var(--surface-glass, rgba(255,255,255,.05));
           }
 
           .inc-create-form{
@@ -1575,155 +1514,65 @@ function renderModalInner() {
             gap:14px;
           }
 
-          .inc-create-main{
+          .inc-create-block,
+          .inc-create-files-card{
             display:grid;
-            gap:14px;
-            min-width:0;
+            gap:10px;
+            padding:13px;
+            border-radius:17px;
+            border:1px solid var(--border-soft, rgba(255,255,255,.12));
+            background:var(--surface-1, rgba(255,255,255,.04));
           }
 
-          .inc-create-inline-grid{
-            display:grid;
-            grid-template-columns:repeat(2, minmax(0, 1fr));
-            gap:14px;
-            align-items:start;
-          }
-
-          .inc-create-block{
-            display:grid;
-            gap:12px;
-            padding:14px;
-            border-radius:18px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-1, var(--surface-glass));
-          }
-
-          .inc-create-block-head{
-            display:flex;
-            align-items:flex-start;
-            justify-content:space-between;
-            gap:12px;
-          }
-
-          .inc-create-block-copy{
-            display:grid;
-            gap:4px;
-          }
-
-          .inc-create-block-title{
-            color:var(--text-strong);
-            font-size:14px;
-            line-height:1.3;
-          }
-
-          .inc-create-block-text{
-            color:var(--text-dim);
-            font-size:12px;
-            line-height:1.45;
-          }
-
-          .inc-create-target-user-card{
-            display:flex;
-            align-items:center;
-            justify-content:space-between;
-            gap:12px;
-            padding:12px 14px;
-            border-radius:14px;
-            border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft));
-            background:
-              linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 120%),
-              var(--surface-glass);
-          }
-
-          .inc-create-target-user-copy{
-            display:grid;
-            gap:4px;
-            min-width:0;
-          }
-
-          .inc-create-target-user-name{
-            color:var(--text-strong);
-            font-size:13px;
-            line-height:1.35;
-            word-break:break-word;
-          }
-
-          .inc-create-target-user-meta{
-            color:var(--text-dim);
-            font-size:11px;
-            line-height:1.4;
-            word-break:break-word;
-          }
-
-          .inc-create-target-user-clear{
-            min-height:34px;
-            padding:0 12px;
-            border-radius:10px;
-            border:1px solid var(--border-soft);
-            background:transparent;
-            color:var(--text-dim);
-            font-size:12px;
-            font-weight:var(--weight-bold, 700);
-            cursor:pointer;
-            flex:0 0 auto;
-          }
-
-          .inc-create-field{
-            display:grid;
-            gap:8px;
-            min-width:0;
-          }
-
-          .inc-create-label{
-            color:var(--text-soft);
+          .inc-create-mini-title{
+            color:var(--text-soft, rgba(255,255,255,.74));
             font-size:11px;
             font-weight:var(--weight-bold, 700);
             letter-spacing:.05em;
             text-transform:uppercase;
           }
 
-          .inc-create-input,
-          .inc-create-textarea{
+          .inc-create-field{
+            display:grid;
+            gap:7px;
+            min-width:0;
+          }
+
+          .inc-create-label{
+            color:var(--text-soft, rgba(255,255,255,.74));
+            font-size:11px;
+            font-weight:var(--weight-bold, 700);
+            letter-spacing:.05em;
+            text-transform:uppercase;
+          }
+
+          .inc-create-input{
             width:100%;
+            min-height:46px;
+            padding:0 14px;
+            border-radius:14px;
             outline:none;
-            color:var(--text-strong);
-            background:var(--surface-1, var(--surface-glass));
-            border:1px solid var(--border-soft);
+            color:var(--text-strong, #fff);
+            background:var(--surface-1, rgba(255,255,255,.04));
+            border:1px solid var(--border-soft, rgba(255,255,255,.12));
+            font-size:14px;
             transition:
               border-color .18s ease,
               box-shadow .18s ease,
               background .18s ease;
           }
 
-          .inc-create-input{
-            min-height:46px;
-            padding:0 14px;
-            border-radius:14px;
-            font-size:14px;
+          .inc-create-input::placeholder{
+            color:var(--text-faint, rgba(255,255,255,.36));
           }
 
-          .inc-create-textarea{
-            min-height:188px;
-            padding:12px 14px;
-            border-radius:16px;
-            resize:vertical;
-            line-height:1.55;
-            font-size:13px;
-          }
-
-          .inc-create-input::placeholder,
-          .inc-create-textarea::placeholder{
-            color:var(--text-faint);
-          }
-
-          .inc-create-input:focus,
-          .inc-create-textarea:focus{
-            border-color:color-mix(in srgb, var(--accent, #7c5cff) 30%, var(--border-soft));
+          .inc-create-input:focus{
+            border-color:color-mix(in srgb, var(--accent, #7c5cff) 34%, var(--border-soft, rgba(255,255,255,.12)));
             box-shadow:0 0 0 4px color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
           }
 
-          .inc-create-input.is-error,
-          .inc-create-textarea.is-error{
-            border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 38%, var(--border-soft));
+          .inc-create-input.is-error{
+            border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 42%, var(--border-soft, rgba(255,255,255,.12)));
             box-shadow:0 0 0 4px color-mix(in srgb, var(--danger-strong, #ff6b6b) 10%, transparent);
           }
 
@@ -1734,38 +1583,79 @@ function renderModalInner() {
             font-weight:var(--weight-semibold, 600);
           }
 
-          .inc-create-search-state{
-            display:grid;
-            gap:4px;
-            padding:12px 14px;
+          .inc-create-target-user-card{
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap:12px;
+            padding:11px 13px;
             border-radius:14px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-            color:var(--text-dim);
+            border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 28%, var(--border-soft, rgba(255,255,255,.12)));
+            background:
+              linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 120%),
+              var(--surface-glass, rgba(255,255,255,.05));
+          }
+
+          .inc-create-target-user-copy{
+            display:grid;
+            gap:3px;
+            min-width:0;
+          }
+
+          .inc-create-target-user-copy strong{
+            color:var(--text-strong, #fff);
+            font-size:13px;
+            line-height:1.35;
+            word-break:break-word;
+          }
+
+          .inc-create-target-user-copy span{
+            color:var(--text-dim, rgba(255,255,255,.62));
+            font-size:11px;
+            line-height:1.35;
+            word-break:break-word;
+          }
+
+          .inc-create-target-user-clear{
+            min-height:32px;
+            padding:0 11px;
+            border-radius:10px;
+            border:1px solid var(--border-soft, rgba(255,255,255,.12));
+            background:transparent;
+            color:var(--text-dim, rgba(255,255,255,.62));
             font-size:12px;
-            line-height:1.45;
+            font-weight:var(--weight-bold, 700);
+            cursor:pointer;
+            flex:0 0 auto;
+          }
+
+          .inc-create-search-state{
+            padding:10px 12px;
+            border-radius:13px;
+            border:1px solid var(--border-soft, rgba(255,255,255,.12));
+            background:var(--surface-glass, rgba(255,255,255,.05));
+            color:var(--text-dim, rgba(255,255,255,.62));
+            font-size:12px;
+            line-height:1.4;
           }
 
           .inc-create-search-state.is-error{
-            border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 28%, var(--border-soft));
+            border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 30%, var(--border-soft, rgba(255,255,255,.12)));
             color:var(--danger-strong, #ff6b6b);
           }
 
           .inc-create-search-results{
             display:grid;
-            gap:8px;
+            gap:7px;
           }
 
           .inc-create-search-item{
             display:flex;
-            align-items:flex-start;
-            justify-content:space-between;
-            gap:12px;
             width:100%;
-            padding:12px 14px;
-            border-radius:14px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
+            padding:11px 13px;
+            border-radius:13px;
+            border:1px solid var(--border-soft, rgba(255,255,255,.12));
+            background:var(--surface-glass, rgba(255,255,255,.05));
             text-align:left;
             cursor:pointer;
             transition:
@@ -1776,89 +1666,51 @@ function renderModalInner() {
 
           .inc-create-search-item:hover{
             transform:translateY(-1px);
-            border-color:color-mix(in srgb, var(--accent, #7c5cff) 22%, var(--border-soft));
+            border-color:color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft, rgba(255,255,255,.12)));
           }
 
           .inc-create-search-item-copy{
             display:grid;
-            gap:4px;
+            gap:3px;
             min-width:0;
           }
 
-          .inc-create-search-item-name{
-            color:var(--text-strong);
+          .inc-create-search-item-copy strong{
+            color:var(--text-strong, #fff);
             font-size:13px;
             line-height:1.35;
             word-break:break-word;
           }
 
-          .inc-create-search-item-meta{
-            color:var(--text-dim);
+          .inc-create-search-item-copy span{
+            color:var(--text-dim, rgba(255,255,255,.62));
             font-size:11px;
-            line-height:1.45;
+            line-height:1.4;
             word-break:break-word;
           }
 
-          .inc-create-search-item-pill{
-            display:inline-flex;
-            align-items:center;
-            min-height:24px;
-            padding:0 8px;
-            border-radius:999px;
-            border:1px solid var(--border-soft);
-            background:transparent;
-            color:var(--text-dim);
-            font-size:10px;
-            font-weight:var(--weight-bold, 700);
-            letter-spacing:.04em;
-            text-transform:uppercase;
-            white-space:nowrap;
-          }
-
-          .inc-create-side-card{
-            display:grid;
-            gap:10px;
-            padding:14px;
-            border-radius:16px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-1, var(--surface-glass));
-            min-width:0;
-          }
-
-          .inc-create-side-head{
+          .inc-create-files-head{
             display:flex;
-            align-items:flex-start;
+            align-items:center;
             justify-content:space-between;
             gap:10px;
           }
 
-          .inc-create-side-head-copy{
-            display:grid;
-            gap:4px;
-            min-width:0;
-          }
-
-          .inc-create-side-title{
-            color:var(--text-strong);
+          .inc-create-files-head strong{
+            color:var(--text-strong, #fff);
             font-size:13px;
             line-height:1.3;
           }
 
-          .inc-create-side-text{
-            color:var(--text-dim);
-            font-size:11px;
-            line-height:1.45;
-          }
-
-          .inc-create-side-pill{
+          .inc-create-files-head span{
             display:inline-flex;
             align-items:center;
-            min-height:24px;
+            min-height:23px;
             padding:0 8px;
             border-radius:999px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-            color:var(--text-dim);
+            border:1px solid var(--border-soft, rgba(255,255,255,.12));
+            background:var(--surface-glass, rgba(255,255,255,.05));
+            color:var(--text-dim, rgba(255,255,255,.62));
             font-size:10px;
             font-weight:var(--weight-bold, 700);
             letter-spacing:.04em;
@@ -1868,25 +1720,23 @@ function renderModalInner() {
 
           .inc-create-dropzone{
             display:grid;
-            gap:8px;
-            min-height:118px;
+            min-height:104px;
             align-content:center;
             padding:14px;
             border-radius:14px;
-            border:1px dashed var(--border-soft);
+            border:1px dashed var(--border-soft, rgba(255,255,255,.16));
             background:transparent;
             cursor:pointer;
             transition:
               border-color .18s ease,
-              background .18s ease,
-              transform .18s ease;
+              background .18s ease;
           }
 
           .inc-create-dropzone.is-active{
-            border-color:color-mix(in srgb, var(--accent, #7c5cff) 32%, var(--border-soft));
+            border-color:color-mix(in srgb, var(--accent, #7c5cff) 36%, var(--border-soft, rgba(255,255,255,.12)));
             background:
               linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent),
-              var(--surface-glass);
+              var(--surface-glass, rgba(255,255,255,.05));
           }
 
           .inc-create-dropzone-copy{
@@ -1895,25 +1745,19 @@ function renderModalInner() {
           }
 
           .inc-create-dropzone-copy strong{
-            color:var(--text-strong);
+            color:var(--text-strong, #fff);
             font-size:13px;
             line-height:1.35;
           }
 
           .inc-create-dropzone-copy span{
-            color:var(--text-dim);
+            color:var(--text-dim, rgba(255,255,255,.62));
             font-size:11px;
             line-height:1.45;
           }
 
           .inc-create-hidden-input{
             display:none;
-          }
-
-          .inc-create-files-empty{
-            color:var(--text-dim);
-            font-size:12px;
-            line-height:1.45;
           }
 
           .inc-create-files-list{
@@ -1923,13 +1767,13 @@ function renderModalInner() {
 
           .inc-create-file-row{
             display:flex;
-            justify-content:space-between;
             align-items:center;
+            justify-content:space-between;
             gap:10px;
             padding:10px 12px;
             border-radius:12px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
+            border:1px solid var(--border-soft, rgba(255,255,255,.12));
+            background:var(--surface-glass, rgba(255,255,255,.05));
           }
 
           .inc-create-file-meta{
@@ -1939,58 +1783,42 @@ function renderModalInner() {
           }
 
           .inc-create-file-name{
-            color:var(--text-strong);
+            color:var(--text-strong, #fff);
             font-size:12px;
             line-height:1.35;
             word-break:break-word;
           }
 
           .inc-create-file-size{
-            color:var(--text-dim);
+            color:var(--text-dim, rgba(255,255,255,.62));
             font-size:11px;
             line-height:1.3;
           }
 
           .inc-create-file-remove{
-            min-height:32px;
+            min-height:31px;
             padding:0 10px;
             border-radius:10px;
-            border:1px solid var(--border-soft);
+            border:1px solid var(--border-soft, rgba(255,255,255,.12));
             background:transparent;
-            color:var(--text-dim);
+            color:var(--text-dim, rgba(255,255,255,.62));
             font-size:12px;
             font-weight:var(--weight-bold, 700);
             cursor:pointer;
             flex:0 0 auto;
           }
 
-          .inc-create-side-note{
-            gap:8px;
-          }
-
-          .inc-create-note-list{
-            display:grid;
-            gap:6px;
-          }
-
-          .inc-create-note-list span{
-            color:var(--text-dim);
-            font-size:11px;
-            line-height:1.45;
-          }
-
           .inc-create-actions{
             display:flex;
             justify-content:flex-end;
-            gap:12px;
-            padding-top:8px;
+            padding-top:2px;
           }
 
           .inc-create-submit{
-            min-height:42px;
-            padding:0 16px;
-            border-radius:12px;
-            border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
+            min-height:43px;
+            padding:0 18px;
+            border-radius:13px;
+            border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 30%, transparent));
             background:var(--btn-primary-bg, var(--accent, #7c5cff));
             color:var(--btn-primary-text, #fff);
             font-size:13px;
@@ -2000,7 +1828,7 @@ function renderModalInner() {
           }
 
           .inc-create-submit:disabled{
-            opacity:.8;
+            opacity:.82;
             cursor:wait;
           }
 
@@ -2022,28 +1850,21 @@ function renderModalInner() {
           [data-theme="light"] .inc-create-panel{
             background:
               radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 34%),
-              linear-gradient(180deg, rgba(255,255,255,.96), rgba(248,250,255,.94));
+              linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,250,255,.96));
             box-shadow:
               0 28px 70px rgba(15,23,42,.14),
-              0 0 0 1px rgba(255,255,255,.65) inset;
+              0 0 0 1px rgba(255,255,255,.68) inset;
           }
 
           [data-theme="light"] .inc-create-block,
-          [data-theme="light"] .inc-create-side-card,
+          [data-theme="light"] .inc-create-files-card,
           [data-theme="light"] .inc-create-alert,
           [data-theme="light"] .inc-create-input,
-          [data-theme="light"] .inc-create-textarea,
           [data-theme="light"] .inc-create-file-row,
           [data-theme="light"] .inc-create-search-item,
           [data-theme="light"] .inc-create-target-user-card,
           [data-theme="light"] .inc-create-search-state{
             box-shadow:0 6px 16px rgba(15,23,42,.04);
-          }
-
-          @media (max-width: 920px){
-            .inc-create-inline-grid{
-              grid-template-columns:1fr;
-            }
           }
 
           @media (max-width: 640px){
@@ -2052,7 +1873,6 @@ function renderModalInner() {
             }
 
             .inc-create-panel{
-              width:100%;
               max-height:94vh;
               border-radius:18px;
             }
@@ -2065,19 +1885,22 @@ function renderModalInner() {
               padding:14px;
             }
 
-            .inc-create-header-text h2{
-              font-size:28px;
-            }
-
-            .inc-create-textarea{
-              min-height:156px;
+            .inc-create-header-copy h2{
+              font-size:27px;
             }
 
             .inc-create-target-user-card,
-            .inc-create-search-item,
             .inc-create-file-row{
               flex-direction:column;
               align-items:flex-start;
+            }
+
+            .inc-create-actions{
+              justify-content:stretch;
+            }
+
+            .inc-create-submit{
+              width:100%;
             }
           }
         </style>
@@ -2196,6 +2019,16 @@ function focusField(fieldName = "") {
     const root = getRoot();
     const field = root?.querySelector?.(`[data-field="${fieldName}"]`);
     field?.focus?.();
+
+    if (
+      field &&
+      typeof field.setSelectionRange === "function" &&
+      typeof field.value === "string"
+    ) {
+      const end = field.value.length;
+      field.setSelectionRange(end, end);
+    }
+
     return Boolean(field);
   } catch {
     return false;
@@ -2212,11 +2045,7 @@ function focusPreferredField() {
     if (focusUserSearchInput()) return true;
   }
 
-  if (!safeText(modalState.form?.subject, "")) {
-    if (focusField("subject")) return true;
-  }
-
-  if (focusField("description")) return true;
+  if (focusField("subject")) return true;
 
   focusPanel();
   return true;
@@ -2255,7 +2084,6 @@ export function openIncidenciasCreateModal(draft = {}) {
       targetUserName: modalState.form.targetUserName,
       targetUserEmail: modalState.form.targetUserEmail,
       subject: modalState.form.subject,
-      description: modalState.form.description,
     },
     adminMode: canSelectTargetUser(),
   });
@@ -2347,7 +2175,6 @@ async function handleSubmit() {
     userId: safeText(modalState.form.targetUserId, ""),
     userName: safeText(modalState.form.targetUserName, ""),
     subject: safeText(modalState.form.subject, ""),
-    description: safeText(modalState.form.description, ""),
     attachmentsCount: safeArray(modalState.form.attachments).length,
     adminMode: canSelectTargetUser(),
   });
@@ -2360,7 +2187,7 @@ async function handleSubmit() {
     modalState.submitting = false;
     modalState.errors = {};
     modalState.serverError = "";
-    modalState.successMessage = "La incidencia se ha creado correctamente.";
+    modalState.successMessage = "Incidencia creada.";
     modalState.createdTicketId = createdTicketId;
 
     clearDraft();
@@ -2381,7 +2208,7 @@ async function handleSubmit() {
 
     setTimeout(() => {
       closeIncidenciasCreateModal();
-    }, 450);
+    }, 380);
 
     return true;
   } catch (error) {
@@ -2488,7 +2315,7 @@ function handleFieldChange(target) {
   if (field === "attachments") {
     renderModal();
     attachRootBindings();
-    focusPreferredField();
+    focusPanel();
   }
 }
 
@@ -2616,7 +2443,7 @@ function attachRootBindings() {
 
     renderModal();
     attachRootBindings();
-    focusPreferredField();
+    focusPanel();
   };
 
   const onClick = (event) => {
@@ -2648,7 +2475,7 @@ function attachRootBindings() {
 
       renderModal();
       attachRootBindings();
-      focusPreferredField();
+      focusPanel();
       return;
     }
 
@@ -2698,6 +2525,7 @@ function attachRootBindings() {
 
 function detachRootBindings() {
   const root = getRoot();
+
   if (!root) {
     modalState.bindingsAttached = false;
     return;
@@ -2839,6 +2667,7 @@ export const OnionIncidenciasCreateModal = {
     clearUserSearchTimer();
 
     const root = getRoot();
+
     try {
       root?.remove?.();
     } catch {}

@@ -3,7 +3,7 @@
    Archivo: src/views/facturas/facturas.template.js
 
    FINAL PRODUCTION TEMPLATE · FACTURAS 10/10 · VISUAL FIX
-   PATCH · PAGINATION 5 ITEMS · INCIDENCIA READY
+   PATCH · PAGINATION 5 ITEMS · INCIDENCIA READY · NO ROW CLICK
 ========================================================= */
 
 /* =========================================================
@@ -45,6 +45,10 @@ function first(...values) {
     if (value === undefined || value === null) continue;
 
     if (typeof value === "string" && value.trim() === "") {
+      continue;
+    }
+
+    if (Array.isArray(value) && value.length === 0) {
       continue;
     }
 
@@ -137,6 +141,38 @@ function formatRelativeDate(value = null) {
   return formatDateTime(value);
 }
 
+function pickTicketIdFromArray(value = []) {
+  const items = safeArray(value);
+
+  for (const item of items) {
+    if (typeof item === "string" && item.trim()) {
+      return item.trim();
+    }
+
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+
+    const candidate = first(
+      item.ticketId,
+      item.incidenciaId,
+      item.id,
+      item.code,
+      item.numero,
+      item.relatedTicketId,
+      item.relatedIncidentId,
+      item.supportTicketId,
+      item.caseId
+    );
+
+    if (candidate) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
 /* =========================================================
    DOMAIN HELPERS
 ========================================================= */
@@ -147,11 +183,18 @@ function getFacturaId(item = {}) {
       item.id,
       item._id,
       item.facturaId,
+      item.invoiceId,
       item.numero,
+      item.numeroFacturaLegal,
+      item.numeroFacturaSistema,
+
       item?.raw?.id,
       item?.raw?._id,
       item?.raw?.facturaId,
-      item?.raw?.numero
+      item?.raw?.invoiceId,
+      item?.raw?.numero,
+      item?.raw?.numeroFacturaLegal,
+      item?.raw?.numeroFacturaSistema
     ),
     "FAC-SIN-ID"
   );
@@ -164,11 +207,18 @@ function getFacturaNumero(item = {}) {
       item.invoiceNumber,
       item.code,
       item.facturaId,
+      item.invoiceId,
+      item.numeroFacturaLegal,
+      item.numeroFacturaSistema,
       item.id,
+
       item?.raw?.numero,
       item?.raw?.invoiceNumber,
       item?.raw?.code,
       item?.raw?.facturaId,
+      item?.raw?.invoiceId,
+      item?.raw?.numeroFacturaLegal,
+      item?.raw?.numeroFacturaSistema,
       item?.raw?.id
     ),
     "Factura sin número"
@@ -180,6 +230,7 @@ function getClientName(item = {}) {
     first(
       item.clienteNombre,
       item.cliente?.nombre,
+      item.cliente?.nombreContacto,
       item.clientName,
       item.client?.name,
       item.name,
@@ -209,6 +260,7 @@ function getClientEmail(item = {}) {
       item.clienteEmail,
       item.cliente?.email,
       item.email,
+      item.emailCliente,
       item.clientEmail,
       item.client?.email,
 
@@ -294,6 +346,8 @@ function getEstadoPagoChipClass(value = "") {
 }
 
 function getIncidenciaId(item = {}) {
+  const raw = safeObject(item?.raw);
+
   return safeText(
     first(
       item.ticketId,
@@ -319,28 +373,52 @@ function getIncidenciaId(item = {}) {
       item.meta?.ticketId,
       item.meta?.incidenciaId,
 
-      item?.raw?.ticketId,
-      item?.raw?.incidenciaId,
+      pickTicketIdFromArray(item.ticketIds),
+      pickTicketIdFromArray(item.incidenciaIds),
+      pickTicketIdFromArray(item.relatedTicketIds),
+      pickTicketIdFromArray(item.relatedIncidentIds),
+      pickTicketIdFromArray(item.linkedTickets),
+      pickTicketIdFromArray(item.incidencias),
+      pickTicketIdFromArray(item.tickets),
+      pickTicketIdFromArray(item.relatedTickets),
+      pickTicketIdFromArray(item.facturasRelacionadas),
+      pickTicketIdFromArray(item.linkedInvoices?.tickets),
+      pickTicketIdFromArray(item.relations),
 
-      item?.raw?.incidencia?.id,
-      item?.raw?.incidencia?.ticketId,
-      item?.raw?.incidencia?.incidenciaId,
+      raw.ticketId,
+      raw.incidenciaId,
 
-      item?.raw?.ticket?.id,
-      item?.raw?.ticket?.ticketId,
-      item?.raw?.ticket?.incidenciaId,
+      raw.incidencia?.id,
+      raw.incidencia?.ticketId,
+      raw.incidencia?.incidenciaId,
 
-      item?.raw?.linkedTicket?.id,
-      item?.raw?.linkedTicket?.ticketId,
-      item?.raw?.linkedTicket?.incidenciaId,
+      raw.ticket?.id,
+      raw.ticket?.ticketId,
+      raw.ticket?.incidenciaId,
 
-      item?.raw?.relatedTicketId,
-      item?.raw?.relatedIncidentId,
-      item?.raw?.supportTicketId,
-      item?.raw?.caseId,
+      raw.linkedTicket?.id,
+      raw.linkedTicket?.ticketId,
+      raw.linkedTicket?.incidenciaId,
 
-      item?.raw?.meta?.ticketId,
-      item?.raw?.meta?.incidenciaId
+      raw.relatedTicketId,
+      raw.relatedIncidentId,
+      raw.supportTicketId,
+      raw.caseId,
+
+      raw.meta?.ticketId,
+      raw.meta?.incidenciaId,
+
+      pickTicketIdFromArray(raw.ticketIds),
+      pickTicketIdFromArray(raw.incidenciaIds),
+      pickTicketIdFromArray(raw.relatedTicketIds),
+      pickTicketIdFromArray(raw.relatedIncidentIds),
+      pickTicketIdFromArray(raw.linkedTickets),
+      pickTicketIdFromArray(raw.incidencias),
+      pickTicketIdFromArray(raw.tickets),
+      pickTicketIdFromArray(raw.relatedTickets),
+      pickTicketIdFromArray(raw.facturasRelacionadas),
+      pickTicketIdFromArray(raw.linkedInvoices?.tickets),
+      pickTicketIdFromArray(raw.relations)
     ),
     "—"
   );
@@ -422,6 +500,7 @@ function getUpdatedAt(item = {}) {
     item.fechaEnvio,
     item.fechaActualizacion,
     item.lastUpdateAt,
+
     item?.raw?.updatedAt,
     item?.raw?.fechaEnvio,
     item?.raw?.fechaActualizacion,
@@ -438,6 +517,7 @@ function hasPdf(item = {}) {
       item.pdfUrl,
       item.pdf,
       item.hasPdf,
+
       item?.raw?.pdfAvailable,
       item?.raw?.blobPath,
       item?.raw?.pdfUrl,
@@ -501,18 +581,7 @@ function getPagination(items = [], state = {}) {
   const allItems = safeArray(items);
   const runtime = safeObject(state);
 
-  const pageSize = Math.max(
-    1,
-    safeNumber(
-      first(
-        runtime.pageSize,
-        runtime.limit,
-        runtime.facturasPageSize,
-        DEFAULT_PAGE_SIZE
-      ),
-      DEFAULT_PAGE_SIZE
-    )
-  );
+  const pageSize = DEFAULT_PAGE_SIZE;
 
   const totalCount = allItems.length;
 
@@ -695,7 +764,11 @@ function renderRow(item = {}, state = {}) {
   const pdfAvailable = hasPdf(item);
 
   return `
-    <tr class="facturas-row" data-factura-id="${escapeHtml(facturaId)}">
+    <tr
+      class="facturas-table-row"
+      data-factura-id="${escapeHtml(facturaId)}"
+      data-row-click-disabled="true"
+    >
       <td class="facturas-cell facturas-cell--main">
         <div class="facturas-main">
           ${renderAvatar(item)}
@@ -799,7 +872,7 @@ function renderRow(item = {}, state = {}) {
   `;
 }
 
-function renderTableLoading(rows = 5) {
+function renderTableLoading(rows = DEFAULT_PAGE_SIZE) {
   return `
     <div class="facturas-table-loading" aria-hidden="true">
       ${Array.from({ length: rows })
@@ -1160,11 +1233,11 @@ function renderStyles() {
         border-bottom:none;
       }
 
-      .facturas-row{
+      .facturas-table-row{
         transition:background .16s ease;
       }
 
-      .facturas-row:hover{
+      .facturas-table-row:hover{
         background:rgba(124,92,255,.018);
       }
 

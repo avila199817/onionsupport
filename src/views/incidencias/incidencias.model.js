@@ -11,6 +11,8 @@
    - flags computados
    - avatars / initials
    - fechas base
+   - adjuntos normalizados para modal/API/actions
+   - historial limpio sin updates fantasma
    - collections helpers
    - sorting helpers
    - stats helpers
@@ -51,8 +53,13 @@ export const PRIORITY = Object.freeze({
 
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
+
   const text = String(value).trim();
   return text || fallback;
+}
+
+function safeLower(value, fallback = "") {
+  return safeText(value, fallback).toLowerCase();
 }
 
 function safeNumber(value, fallback = 0) {
@@ -64,28 +71,42 @@ function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function safeObject(value) {
+function safeObject(value, fallback = {}) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value
-    : {};
+    : fallback;
 }
 
 function first(...values) {
   for (const value of values) {
-    if (
-      value !== undefined &&
-      value !== null &&
-      String(value).trim() !== ""
-    ) {
-      return value;
+    if (value === undefined || value === null) continue;
+
+    if (typeof value === "string" && value.trim() === "") {
+      continue;
     }
+
+    return value;
   }
 
   return null;
 }
 
 function uniqueStrings(values = []) {
-  return [...new Set(safeArray(values).map((v) => safeText(v, "")).filter(Boolean))];
+  return [
+    ...new Set(
+      safeArray(values)
+        .map((value) => safeText(value, ""))
+        .filter(Boolean)
+    ),
+  ];
+}
+
+function normalizeWhitespace(value = "") {
+  return safeText(value, "").replace(/\s+/g, " ").trim();
+}
+
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 /* =========================================================
@@ -109,10 +130,13 @@ function hashString(value = "") {
 ========================================================= */
 
 export function normalizeStatus(value = "") {
-  const key = safeText(value).toLowerCase();
+  const key = safeLower(value, "open")
+    .replace(/\s+/g, "_")
+    .replace(/-+/g, "_");
 
   switch (key) {
     case "open":
+    case "opened":
     case "abierta":
     case "abierto":
       return STATUS.OPEN;
@@ -123,9 +147,10 @@ export function normalizeStatus(value = "") {
 
     case "progress":
     case "in_progress":
-    case "in-progress":
+    case "inprogress":
     case "en_proceso":
-    case "en proceso":
+    case "en_curso":
+    case "proceso":
       return STATUS.IN_PROGRESS;
 
     case "resolved":
@@ -144,7 +169,9 @@ export function normalizeStatus(value = "") {
 }
 
 export function normalizePriority(value = "") {
-  const key = safeText(value).toLowerCase();
+  const key = safeLower(value, "medium")
+    .replace(/\s+/g, "_")
+    .replace(/-+/g, "_");
 
   switch (key) {
     case "low":
@@ -248,10 +275,10 @@ export function getInitials(value = "") {
 
   const initials = parts
     .slice(0, 2)
-    .map((part) => part[0])
+    .map((part) => safeText(part[0], ""))
     .join("");
 
-  return (initials || "ON").toUpperCase();
+  return safeText(initials, "ON").toUpperCase();
 }
 
 export function getAvatarTheme(seed = "") {
@@ -273,68 +300,222 @@ export function getAvatarTheme(seed = "") {
    ATTACHMENTS
 ========================================================= */
 
-function normalizeAttachment(file = {}) {
-  const item = safeObject(file);
-
-  return {
-    id: safeText(
-      first(
-        item.id,
-        item.fileId,
-        item.blobName,
-        item.name
-      ),
-      ""
+function getAttachmentPath(item = {}) {
+  return safeText(
+    first(
+      item.path,
+      item.storageKey,
+      item.storagePath,
+      item.blobPath,
+      item.blobName,
+      item.key
     ),
+    ""
+  );
+}
 
-    name: safeText(
+function normalizeAttachment(file = {}, index = 0) {
+  const item = safeObject(file);
+  const raw = safeObject(item.raw);
+
+  const name = safeText(
+    first(
+      item.name,
+      item.filename,
+      item.fileName,
+      item.originalname,
+      item.originalName,
+      item.title,
+      raw.name,
+      raw.filename,
+      raw.fileName,
+      raw.originalname,
+      raw.originalName,
+      raw.title
+    ),
+    `archivo_${index + 1}`
+  );
+
+  const path = safeText(
+    first(
+      item.path,
+      item.storageKey,
+      item.storagePath,
+      item.blobPath,
+      item.blobName,
+      item.key,
+      raw.path,
+      raw.storageKey,
+      raw.storagePath,
+      raw.blobPath,
+      raw.blobName,
+      raw.key
+    ),
+    ""
+  );
+
+  const id = safeText(
+    first(
+      item.id,
+      item.fileId,
+      item.attachmentId,
+      item.blobName,
+      item.storageKey,
+      item.path,
+      item.key,
+      raw.id,
+      raw.fileId,
+      raw.attachmentId,
+      raw.blobName,
+      raw.storageKey,
+      raw.path,
+      raw.key
+    ),
+    path || `attachment-${index + 1}`
+  );
+
+  const viewUrl = safeText(
+    first(
+      item.viewUrl,
+      item.openUrl,
+      item.signedUrl,
+      item.url,
+      item.blobUrl,
+      item.publicUrl,
+      item.href,
+      raw.viewUrl,
+      raw.openUrl,
+      raw.signedUrl,
+      raw.url,
+      raw.blobUrl,
+      raw.publicUrl,
+      raw.href
+    ),
+    ""
+  );
+
+  const downloadUrl = safeText(
+    first(
+      item.downloadUrl,
+      item.signedUrl,
+      item.url,
+      item.blobUrl,
+      item.publicUrl,
+      item.href,
+      raw.downloadUrl,
+      raw.signedUrl,
+      raw.url,
+      raw.blobUrl,
+      raw.publicUrl,
+      raw.href
+    ),
+    ""
+  );
+
+  const contentType = safeText(
+    first(
+      item.contentType,
+      item.mimetype,
+      item.mimeType,
+      item.mime,
+      item.type,
+      raw.contentType,
+      raw.mimetype,
+      raw.mimeType,
+      raw.mime,
+      raw.type
+    ),
+    ""
+  );
+
+  const normalized = {
+    ...item,
+
+    id,
+    attachmentId: id,
+
+    name,
+    filename: safeText(
       first(
-        item.name,
         item.filename,
         item.fileName,
+        item.name,
         item.originalname,
-        item.title
+        item.originalName,
+        raw.filename,
+        raw.fileName,
+        raw.name,
+        raw.originalname,
+        raw.originalName
       ),
-      "archivo"
+      name
+    ),
+
+    originalName: safeText(
+      first(item.originalName, item.originalname, raw.originalName, raw.originalname),
+      name
     ),
 
     url: safeText(
       first(
         item.url,
-        item.href,
-        item.downloadUrl
+        viewUrl,
+        downloadUrl,
+        item.signedUrl,
+        item.blobUrl,
+        item.publicUrl,
+        raw.url,
+        raw.signedUrl,
+        raw.blobUrl,
+        raw.publicUrl
       ),
       ""
     ),
 
-    path: safeText(
-      first(
-        item.path
-      ),
-      ""
-    ),
+    viewUrl,
+    openUrl: safeText(first(item.openUrl, raw.openUrl, viewUrl), viewUrl),
+    downloadUrl,
 
-    size: safeNumber(item.size, 0),
+    signedUrl: safeText(first(item.signedUrl, raw.signedUrl), ""),
+    blobUrl: safeText(first(item.blobUrl, raw.blobUrl), ""),
+    publicUrl: safeText(first(item.publicUrl, raw.publicUrl), ""),
 
-    type: safeText(
-      first(
-        item.type,
-        item.contentType,
-        item.mimeType,
-        item.mime
-      ),
-      ""
-    ),
+    path,
+    storageKey: safeText(first(item.storageKey, raw.storageKey, path), path),
+    storagePath: safeText(first(item.storagePath, raw.storagePath, path), path),
+    blobPath: safeText(first(item.blobPath, raw.blobPath, path), path),
+    blobName: safeText(first(item.blobName, raw.blobName, path), path),
+    key: safeText(first(item.key, raw.key, path), path),
 
+    size: safeNumber(first(item.size, raw.size), 0),
+
+    type: safeText(first(item.type, contentType), contentType),
+    contentType,
+    mimetype: safeText(first(item.mimetype, raw.mimetype, contentType), contentType),
+    mimeType: safeText(first(item.mimeType, raw.mimeType, contentType), contentType),
+
+    source: safeText(first(item.source, raw.source), ""),
     uploadedAt: first(
       item.uploadedAt,
       item.createdAt,
       item.date,
-      item.timestamp
+      item.timestamp,
+      raw.uploadedAt,
+      raw.createdAt,
+      raw.date,
+      raw.timestamp,
+      null
     ),
+    uploadedAtES: first(item.uploadedAtES, raw.uploadedAtES, null),
+    uploadedBy: first(item.uploadedBy, raw.uploadedBy, null),
 
-    raw: item,
+    raw: {
+      ...raw,
+      ...item,
+    },
   };
+
+  return normalized;
 }
 
 function normalizeAttachments(value) {
@@ -345,44 +526,184 @@ function normalizeAttachments(value) {
    HISTORY / COMMENTS
 ========================================================= */
 
-function normalizeHistoryEntry(row = {}) {
+function formatChange(change = {}) {
+  const item = safeObject(change);
+  const field = safeLower(item.field, "");
+  const action = safeLower(item.action, "");
+
+  if (field === "attachments" || field === "adjuntos" || field === "files") {
+    const added = safeNumber(item.added, 0);
+    const removed = safeNumber(item.removed, 0);
+
+    if (action === "remove" || removed > 0) {
+      return removed === 1
+        ? "Se eliminó 1 adjunto."
+        : `Se eliminaron ${removed} adjuntos.`;
+    }
+
+    if (added > 0) {
+      return added === 1
+        ? "Se añadió 1 adjunto."
+        : `Se añadieron ${added} adjuntos.`;
+    }
+
+    return "Adjuntos actualizados.";
+  }
+
+  if (field === "status" || field === "estado") {
+    const from = safeText(item.from, "—");
+    const to = safeText(item.to, "—");
+
+    if (from === to) return "";
+
+    return `Estado actualizado: ${from} → ${to}.`;
+  }
+
+  if (field === "priority" || field === "prioridad") {
+    const from = safeText(item.from, "—");
+    const to = safeText(item.to, "—");
+
+    if (from === to) return "";
+
+    return `Prioridad actualizada: ${from} → ${to}.`;
+  }
+
+  if (
+    field === "message" ||
+    field === "descripcion" ||
+    field === "description" ||
+    field === "body"
+  ) {
+    const from = normalizeWhitespace(item.from);
+    const to = normalizeWhitespace(item.to);
+
+    if (from && to && from === to) {
+      return "";
+    }
+
+    return "Descripción actualizada.";
+  }
+
+  if (field === "categoria" || field === "category" || field === "tipo") {
+    const from = safeText(item.from, "—");
+    const to = safeText(item.to, "—");
+
+    if (from === to) return "";
+
+    return `Categoría actualizada: ${from} → ${to}.`;
+  }
+
+  if (field) {
+    const from = safeText(item.from, "");
+    const to = safeText(item.to, "");
+
+    if (from && to && from === to) return "";
+
+    return `${field} actualizado.`;
+  }
+
+  return "";
+}
+
+function normalizeHistoryEntry(row = {}, index = 0) {
   const item = safeObject(row);
+
+  const type = safeText(first(item.type, item.action), "event");
+  const normalizedType = safeLower(type, "event");
+  const changes = safeArray(item.changes);
+
+  let title = safeText(
+    first(
+      item.title,
+      item.action,
+      item.type,
+      item.message,
+      item.text
+    ),
+    "Evento"
+  );
+
+  let body = safeText(
+    first(
+      item.description,
+      item.detail,
+      item.body
+    ),
+    ""
+  );
+
+  if (normalizedType === "created" || normalizedType === "creation") {
+    title = "Incidencia creada";
+    body = safeText(
+      first(
+        item.body,
+        item.description,
+        item.detail,
+        item.message
+      ),
+      "La incidencia fue registrada."
+    );
+  }
+
+  if (normalizedType === "update") {
+    const changeLines = changes.map(formatChange).filter(Boolean);
+
+    title = "Actualización";
+    body = changeLines.join("\n");
+  }
+
+  if (normalizedType === "attachments_added") {
+    title = "Adjuntos añadidos";
+    body = safeText(
+      first(
+        item.body,
+        item.description,
+        item.detail,
+        item.message,
+        changes.map(formatChange).filter(Boolean).join("\n")
+      ),
+      "Se añadieron adjuntos."
+    );
+  }
+
+  if (normalizedType === "comment") {
+    title = "Comentario";
+    body = safeText(
+      first(
+        item.message,
+        item.text,
+        item.body,
+        item.comment,
+        body
+      ),
+      ""
+    );
+  }
 
   return {
     id: safeText(
       first(
         item.id,
-        item.eventId
+        item.eventId,
+        item.historyId
       ),
-      ""
+      `h-${index + 1}`
     ),
 
     kind: "event",
+    type: normalizedType,
+    action: safeText(first(item.action, item.type), normalizedType),
 
-    title: safeText(
-      first(
-        item.title,
-        item.action,
-        item.type,
-        item.message,
-        item.text
-      ),
-      "Evento"
-    ),
+    title,
+    body,
 
-    body: safeText(
-      first(
-        item.description,
-        item.detail,
-        item.body
-      ),
-      ""
-    ),
+    changes,
 
     createdAt: first(
       item.createdAt,
       item.date,
-      item.timestamp
+      item.timestamp,
+      null
     ),
 
     author: safeText(
@@ -390,28 +711,34 @@ function normalizeHistoryEntry(row = {}) {
         item.byName,
         item.user,
         item.author,
-        item.name
+        item.name,
+        item.by
       ),
-      ""
+      "Sistema"
     ),
+
+    by: safeText(first(item.by, item.userId), ""),
+    role: safeText(item.role, ""),
 
     raw: item,
   };
 }
 
-function normalizeCommentEntry(row = {}) {
+function normalizeCommentEntry(row = {}, index = 0) {
   const item = safeObject(row);
 
   return {
     id: safeText(
       first(
         item.id,
-        item.commentId
+        item.commentId,
+        item.messageId
       ),
-      ""
+      `c-${index + 1}`
     ),
 
     kind: "comment",
+    type: "comment",
 
     title: "Comentario",
 
@@ -428,7 +755,8 @@ function normalizeCommentEntry(row = {}) {
     createdAt: first(
       item.createdAt,
       item.date,
-      item.timestamp
+      item.timestamp,
+      null
     ),
 
     author: safeText(
@@ -436,21 +764,94 @@ function normalizeCommentEntry(row = {}) {
         item.byName,
         item.user,
         item.author,
-        item.name
+        item.name,
+        item.by
       ),
-      ""
+      "Usuario"
     ),
+
+    by: safeText(first(item.by, item.userId), ""),
+    role: safeText(item.role, ""),
 
     raw: item,
   };
 }
 
+function isNoiseHistoryEntry(entry = {}) {
+  const title = safeLower(entry.title, "");
+  const body = safeLower(entry.body, "");
+  const type = safeLower(entry.type, "");
+
+  if (type === "update" && !safeText(entry.body, "")) return true;
+  if (title === "update" && body === "update") return true;
+  if (title === "actualización" && body === "update") return true;
+  if (title === "actualizacion" && body === "update") return true;
+
+  return false;
+}
+
 function normalizeHistory(value) {
-  return safeArray(value).map(normalizeHistoryEntry);
+  return safeArray(value)
+    .map(normalizeHistoryEntry)
+    .filter((entry) => !isNoiseHistoryEntry(entry));
 }
 
 function normalizeComments(value) {
-  return safeArray(value).map(normalizeCommentEntry);
+  return safeArray(value)
+    .map(normalizeCommentEntry)
+    .filter((entry) => Boolean(safeText(entry.body, "")));
+}
+
+/* =========================================================
+   PAYLOAD UNWRAP
+========================================================= */
+
+function unwrapDetailPayload(payload = {}) {
+  const source = safeObject(payload);
+
+  if (!Object.keys(source).length) {
+    return {};
+  }
+
+  const candidates = [
+    source.ticket,
+    source.detail,
+    source.item,
+    source.incidencia,
+    source.result,
+    source.payload,
+    source.data,
+    source,
+  ];
+
+  for (const candidate of candidates) {
+    if (!isObject(candidate)) continue;
+
+    if (
+      candidate.ticketId ||
+      candidate.id ||
+      candidate.code ||
+      candidate.ticketCode ||
+      candidate.subject ||
+      candidate.asunto ||
+      candidate.title ||
+      candidate.message ||
+      candidate.descripcion ||
+      candidate.description
+    ) {
+      return candidate;
+    }
+  }
+
+  if (isObject(source.data)) {
+    return unwrapDetailPayload(source.data);
+  }
+
+  if (isObject(source.payload)) {
+    return unwrapDetailPayload(source.payload);
+  }
+
+  return source;
 }
 
 /* =========================================================
@@ -459,24 +860,13 @@ function normalizeComments(value) {
 
 export function normalizeIncidenciaModel(payload = {}) {
   const source = safeObject(payload);
-  const item = safeObject(
-    first(
-      source.ticket,
-      source.item,
-      source.data,
-      source.result,
-      source.payload,
-      source
-    )
-  );
+  const item = safeObject(unwrapDetailPayload(source));
 
   const clienteObject = safeObject(
     first(
       item.cliente,
       item.client,
-      item.customer,
-      item.receptor,
-      item.createdBy
+      item.customer
     )
   );
 
@@ -495,10 +885,31 @@ export function normalizeIncidenciaModel(payload = {}) {
     first(
       item.ticketId,
       item.id,
+      item._id,
       item.code,
       item.ticketCode
     ),
     ""
+  );
+
+  const id = safeText(
+    first(
+      item.id,
+      item.ticketId,
+      item._id,
+      ticketId
+    ),
+    ticketId
+  );
+
+  const ticketCode = safeText(
+    first(
+      item.ticketCode,
+      item.code,
+      ticketId,
+      id
+    ),
+    ticketId || id
   );
 
   const title = safeText(
@@ -506,9 +917,21 @@ export function normalizeIncidenciaModel(payload = {}) {
       item.title,
       item.subject,
       item.asunto,
+      item.tipo,
       item.name
     ),
     "Incidencia"
+  );
+
+  const message = safeText(
+    first(
+      item.message,
+      item.descripcion,
+      item.description,
+      item.body,
+      item.preview
+    ),
+    ""
   );
 
   const description = safeText(
@@ -522,26 +945,15 @@ export function normalizeIncidenciaModel(payload = {}) {
     "Sin descripción."
   );
 
-  const message = safeText(
-    first(
-      item.message,
-      item.descripcion,
-      item.description,
-      item.preview,
-      item.body
-    ),
-    ""
-  );
-
   const clientName = safeText(
     first(
+      item.clientName,
+      item.clienteNombre,
+      item.name,
       clienteObject.nombre,
       clienteObject.name,
       clienteObject.company,
-      item.clientName,
-      item.company,
-      item.clienteNombre,
-      item.name,
+      clienteObject.empresa,
       receptorObject.name,
       createdByObject.name
     ),
@@ -550,9 +962,10 @@ export function normalizeIncidenciaModel(payload = {}) {
 
   const clientEmail = safeText(
     first(
-      clienteObject.email,
       item.clientEmail,
+      item.clienteEmail,
       item.email,
+      clienteObject.email,
       receptorObject.email,
       createdByObject.email
     ),
@@ -561,11 +974,11 @@ export function normalizeIncidenciaModel(payload = {}) {
 
   const clientAvatar = safeText(
     first(
-      clienteObject.avatar,
-      clienteObject.avatarUrl,
       item.clientAvatar,
       item.avatar,
-      item.avatarUrl
+      item.avatarUrl,
+      clienteObject.avatar,
+      clienteObject.avatarUrl
     ),
     ""
   );
@@ -575,9 +988,9 @@ export function normalizeIncidenciaModel(payload = {}) {
       tecnicoObject.name,
       tecnicoObject.nombre,
       item.assignedToName,
-      item.assignedTo,
-      item.assignee,
-      item.tecnico
+      typeof item.assignedTo === "string" ? item.assignedTo : null,
+      typeof item.assignee === "string" ? item.assignee : null,
+      typeof item.tecnico === "string" ? item.tecnico : null
     ),
     "No asignado"
   );
@@ -596,7 +1009,7 @@ export function normalizeIncidenciaModel(payload = {}) {
     )
   );
 
-  const category = safeText(
+  const category = safeLower(
     first(
       item.category,
       item.categoria,
@@ -616,17 +1029,41 @@ export function normalizeIncidenciaModel(payload = {}) {
 
   const createdAt = first(
     item.createdAt,
+    item.fechaCreacion,
+    item.created_at,
+    null
+  );
+
+  const createdAtES = first(
     item.createdAtES,
-    item.date,
-    item.fechaCreacion
+    null
   );
 
   const updatedAt = first(
     item.updatedAt,
-    item.closedAt,
+    item.fechaActualizacion,
+    item.updated_at,
     item.modifiedAt,
     item.lastUpdate,
-    createdAt
+    item.closedAt,
+    createdAt,
+    null
+  );
+
+  const updatedAtES = first(
+    item.updatedAtES,
+    null
+  );
+
+  const closedAt = first(
+    item.closedAt,
+    item.closed_at,
+    null
+  );
+
+  const closedAtES = first(
+    item.closedAtES,
+    null
   );
 
   const attachments = normalizeAttachments(
@@ -667,7 +1104,13 @@ export function normalizeIncidenciaModel(payload = {}) {
   const initials = getInitials(clientName);
   const avatarTheme = getAvatarTheme(ticketId || clientName || clientEmail);
 
-  const isAssigned = safeText(assignedToName).toLowerCase() !== "no asignado";
+  const assignedLower = safeLower(assignedToName);
+  const isAssigned = Boolean(
+    assignedLower &&
+      assignedLower !== "no asignado" &&
+      assignedLower !== "sin asignar"
+  );
+
   const isOpen = status === STATUS.OPEN;
   const isPending = status === STATUS.PENDING;
   const isInProgress = status === STATUS.IN_PROGRESS;
@@ -678,21 +1121,64 @@ export function normalizeIncidenciaModel(payload = {}) {
 
   const createdAtTs = toTimestamp(createdAt);
   const updatedAtTs = toTimestamp(updatedAt);
+  const closedAtTs = toTimestamp(closedAt);
 
   const timeline = [...history, ...comments].sort(
     (a, b) => safeNumber(toTimestamp(b.createdAt)) - safeNumber(toTimestamp(a.createdAt))
   );
 
-  return {
+  const clienteId = safeText(
+    first(
+      item.clienteId,
+      item.userId,
+      clienteObject.id,
+      clienteObject.userId,
+      receptorObject.clienteId,
+      receptorObject.userId,
+      createdByObject.userId
+    ),
+    ""
+  );
+
+  const userId = safeText(
+    first(
+      item.userId,
+      item.clienteId,
+      receptorObject.userId,
+      receptorObject.id,
+      clienteObject.userId,
+      clienteObject.id,
+      createdByObject.userId
+    ),
+    ""
+  );
+
+  const normalized = {
+    ...item,
+
     /* identity */
+    id,
     ticketId,
-    id: safeText(first(item.id, ticketId), ticketId),
-    ticketCode: safeText(first(item.ticketCode, item.code, ticketId), ticketId),
+    code: safeText(first(item.code, item.ticketCode, ticketCode), ticketCode),
+    ticketCode,
+
+    tipoDocumento: safeText(item.tipoDocumento, "ticket"),
 
     /* content */
     title,
     subject: safeText(first(item.subject, item.asunto, title), title),
+    asunto: safeText(first(item.asunto, item.subject, title), title),
+
     description,
+    descripcion: safeText(
+      first(
+        item.descripcion,
+        item.message,
+        item.description,
+        description
+      ),
+      description
+    ),
     message,
     preview: safeText(first(item.preview, message, description), description),
 
@@ -703,52 +1189,84 @@ export function normalizeIncidenciaModel(payload = {}) {
     assignedToName,
 
     cliente: {
-      id: safeText(first(clienteObject.id, item.clienteId, item.userId), ""),
-      nombre: clientName,
-      email: clientEmail,
-      avatar: clientAvatar,
+      ...clienteObject,
+      id: safeText(first(clienteObject.id, clienteObject.userId, clienteId), clienteId),
+      userId: safeText(first(clienteObject.userId, clienteObject.id, userId), userId),
+      nombre: safeText(first(clienteObject.nombre, clienteObject.name, clientName), clientName),
+      name: safeText(first(clienteObject.name, clienteObject.nombre, clientName), clientName),
+      email: safeText(first(clienteObject.email, clientEmail), clientEmail),
+      avatar: safeText(first(clienteObject.avatar, clienteObject.avatarUrl, clientAvatar), clientAvatar),
+      avatarUrl: safeText(first(clienteObject.avatarUrl, clienteObject.avatar, clientAvatar), clientAvatar),
       raw: clienteObject,
     },
 
     tecnico: {
-      name: safeText(first(tecnicoObject.name, tecnicoObject.nombre), "No asignado"),
+      ...tecnicoObject,
+      name: safeText(first(tecnicoObject.name, tecnicoObject.nombre, assignedToName), assignedToName),
+      nombre: safeText(first(tecnicoObject.nombre, tecnicoObject.name, assignedToName), assignedToName),
       email: safeText(first(tecnicoObject.email), ""),
       raw: tecnicoObject,
     },
 
     createdBy: {
-      userId: safeText(first(createdByObject.userId, createdByObject.id, item.userId, item.clienteId), ""),
-      name: safeText(first(createdByObject.name, item.name), ""),
+      ...createdByObject,
+      userId: safeText(first(createdByObject.userId, createdByObject.id, item.createdByUserId, userId), ""),
+      id: safeText(first(createdByObject.id, createdByObject.userId, item.createdByUserId, userId), ""),
+      name: safeText(first(createdByObject.name, createdByObject.nombre, item.name), ""),
       email: safeText(first(createdByObject.email, item.email), ""),
       raw: createdByObject,
     },
 
     receptor: {
-      userId: safeText(first(receptorObject.userId, receptorObject.id, item.userId, item.clienteId), ""),
-      name: safeText(first(receptorObject.name, item.name), ""),
-      email: safeText(first(receptorObject.email, item.email), ""),
+      ...receptorObject,
+      userId: safeText(first(receptorObject.userId, receptorObject.id, userId), userId),
+      id: safeText(first(receptorObject.id, receptorObject.userId, userId), userId),
+      clienteId: safeText(first(receptorObject.clienteId, clienteId), clienteId),
+      name: safeText(first(receptorObject.name, receptorObject.nombre, item.name, clientName), clientName),
+      nombre: safeText(first(receptorObject.nombre, receptorObject.name, item.name, clientName), clientName),
+      email: safeText(first(receptorObject.email, item.email, clientEmail), clientEmail),
       raw: receptorObject,
     },
 
+    requester: first(
+      item.requester,
+      item.user,
+      item.usuario,
+      receptorObject,
+      clienteObject,
+      createdByObject,
+      null
+    ),
+
     /* enums */
     status,
+    estado: status,
     statusLabel: getStatusLabel(status),
 
     priority,
+    prioridad: priority,
     priorityLabel: getPriorityLabel(priority),
 
     /* semantic fields */
     category,
     categoria: category,
-    tipo: safeText(first(item.tipo, item.categoria, category), category),
+    tipo: safeText(first(item.tipo, item.categoria, item.category, category), category),
     source: sourceLabel,
+    origen: safeText(first(item.origen, sourceLabel), sourceLabel),
 
     /* dates */
     createdAt,
+    createdAtES,
     updatedAt,
+    updatedAtES,
+    closedAt,
+    closedAtES,
+
     createdAtTs,
     updatedAtTs,
-    closedAt: first(item.closedAt, null),
+    closedAtTs,
+
+    fechaProgramada: first(item.fechaProgramada, null),
 
     /* visuals */
     initials,
@@ -756,13 +1274,31 @@ export function normalizeIncidenciaModel(payload = {}) {
 
     /* collections */
     attachments,
-    attachmentsCount: attachments.length,
+    attachmentsCount: safeNumber(
+      first(
+        item.attachmentsCount,
+        attachments.length
+      ),
+      attachments.length
+    ),
 
     history,
-    historyCount: history.length,
+    historyCount: safeNumber(
+      first(
+        item.historyCount,
+        history.length
+      ),
+      history.length
+    ),
 
     comments,
-    commentsCount: comments.length,
+    commentsCount: safeNumber(
+      first(
+        item.commentsCount,
+        comments.length
+      ),
+      comments.length
+    ),
 
     timeline,
     timelineCount: timeline.length,
@@ -778,18 +1314,22 @@ export function normalizeIncidenciaModel(payload = {}) {
     isClosed,
     isUrgent,
     isHigh,
+    hasAttachments: attachments.length > 0,
+    hasComments: comments.length > 0,
+    hasHistory: history.length > 0,
 
     /* misc */
-    email: safeText(item.email, clientEmail),
-    name: safeText(item.name, clientName),
-    userId: safeText(first(item.userId, item.clienteId, createdByObject.userId), ""),
-    clienteId: safeText(first(item.clienteId, item.userId, createdByObject.userId), ""),
-    fechaProgramada: first(item.fechaProgramada, null),
+    email: safeText(first(item.email, clientEmail), clientEmail),
+    name: safeText(first(item.name, clientName), clientName),
+    userId,
+    clienteId,
     ip: safeText(item.ip, ""),
 
     /* raw */
     raw: item,
   };
+
+  return normalized;
 }
 
 /* =========================================================
@@ -805,24 +1345,23 @@ export function unwrapIncidenciasPayload(payload = null) {
 
   const obj = safeObject(payload);
 
-  if (Array.isArray(obj.tickets)) {
-    return obj.tickets;
-  }
+  if (Array.isArray(obj.tickets)) return obj.tickets;
+  if (Array.isArray(obj.items)) return obj.items;
+  if (Array.isArray(obj.data)) return obj.data;
+  if (Array.isArray(obj.results)) return obj.results;
+  if (Array.isArray(obj.rows)) return obj.rows;
 
-  if (Array.isArray(obj.items)) {
-    return obj.items;
-  }
-
-  if (Array.isArray(obj.data)) {
-    return obj.data;
-  }
-
-  if (Array.isArray(obj.results)) {
-    return obj.results;
-  }
+  if (Array.isArray(obj?.payload?.tickets)) return obj.payload.tickets;
+  if (Array.isArray(obj?.payload?.items)) return obj.payload.items;
+  if (Array.isArray(obj?.data?.tickets)) return obj.data.tickets;
+  if (Array.isArray(obj?.data?.items)) return obj.data.items;
 
   if (obj.data && typeof obj.data === "object") {
     return unwrapIncidenciasPayload(obj.data);
+  }
+
+  if (obj.payload && typeof obj.payload === "object") {
+    return unwrapIncidenciasPayload(obj.payload);
   }
 
   return [];
@@ -850,9 +1389,18 @@ export function sortIncidenciasByPriorityDesc(items = []) {
     low: 1,
   };
 
-  return [...safeArray(items)].sort(
-    (a, b) => safeNumber(weight[b.priority]) - safeNumber(weight[a.priority])
-  );
+  return [...safeArray(items)].sort((a, b) => {
+    const priorityDiff =
+      safeNumber(weight[b.priority]) - safeNumber(weight[a.priority]);
+
+    if (priorityDiff !== 0) return priorityDiff;
+
+    return safeNumber(b.updatedAtTs) - safeNumber(a.updatedAtTs);
+  });
+}
+
+export function sortIncidenciasDefault(items = []) {
+  return sortIncidenciasByUpdatedDesc(sortIncidenciasByPriorityDesc(items));
 }
 
 /* =========================================================
@@ -904,15 +1452,34 @@ export function paginateIncidencias(
 export function computeIncidenciasStats(items = []) {
   const list = safeArray(items);
 
+  const total = list.length;
+  const open = list.filter((x) => x.isOpen).length;
+  const pending = list.filter((x) => x.isPending).length;
+  const inProgress = list.filter((x) => x.isInProgress).length;
+  const resolved = list.filter((x) => x.isResolved).length;
+  const closed = list.filter((x) => x.isClosed).length;
+  const urgent = list.filter((x) => x.isUrgent).length;
+  const high = list.filter((x) => x.isHigh).length;
+  const assigned = list.filter((x) => x.isAssigned).length;
+  const withAttachments = list.filter((x) => x.hasAttachments).length;
+
   return {
-    total: list.length,
-    open: list.filter((x) => x.isOpen).length,
-    pending: list.filter((x) => x.isPending).length,
-    inProgress: list.filter((x) => x.isInProgress).length,
-    resolved: list.filter((x) => x.isResolved).length,
-    closed: list.filter((x) => x.isClosed).length,
-    urgent: list.filter((x) => x.isUrgent).length,
-    assigned: list.filter((x) => x.isAssigned).length,
+    total,
+    active: Math.max(total - closed, 0),
+
+    open,
+    pending,
+    inProgress,
+    resolved,
+    closed,
+
+    urgent,
+    high,
+
+    assigned,
+    unassigned: Math.max(total - assigned, 0),
+
+    withAttachments,
   };
 }
 
@@ -931,6 +1498,11 @@ export function findIncidenciaById(items = [], ticketId = "") {
         item?.ticketId,
         item?.id,
         item?.ticketCode,
+        item?.code,
+        item?.raw?.ticketId,
+        item?.raw?.id,
+        item?.raw?.ticketCode,
+        item?.raw?.code,
       ]);
 
       return candidates.includes(id);
@@ -944,18 +1516,30 @@ export function findIncidenciaById(items = [], ticketId = "") {
 
 export default {
   DEFAULT_PAGE_SIZE,
+
+  STATUS,
+  PRIORITY,
+
   normalizeIncidenciaModel,
   normalizeIncidenciasCollection,
   unwrapIncidenciasPayload,
+
   sortIncidenciasByUpdatedDesc,
   sortIncidenciasByPriorityDesc,
+  sortIncidenciasDefault,
+
   paginateIncidencias,
   computeIncidenciasStats,
   findIncidenciaById,
+
   getStatusLabel,
   getPriorityLabel,
   normalizeStatus,
   normalizePriority,
+
+  toDate,
+  toTimestamp,
+
   getInitials,
   getAvatarTheme,
 };

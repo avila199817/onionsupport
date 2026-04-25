@@ -2,12 +2,12 @@
    Onion SPA - Incidencias Create Modal
    Archivo: src/views/incidencias/incidencias.create.modal.js
 
-   INCIDENCIAS EXPERIENCE PRO · CREATE MODAL · CLEAN ADMIN 10/10
+   INCIDENCIAS EXPERIENCE PRO · CREATE MODAL · FINAL DEFINITIVO
 
    RESPONSABILIDADES:
    - abrir/cerrar modal de creación de incidencia
    - crear incidencia normal para usuario autenticado
-   - crear incidencia para usuario objetivo en modo admin
+   - crear incidencia para usuario objetivo si el usuario tiene permisos
    - buscar usuarios de forma segura y desacoplada
    - validar campos obligatorios
    - validar adjuntos iniciales
@@ -15,11 +15,7 @@
    - emitir incidencias:create:success para refrescar la vista
    - persistir draft mínimo mientras el modal está abierto
    - evitar doble submit y doble binding
-
-   AJUSTE FINAL:
-   - eliminado badge visual "Modo administrador"
-   - header más limpio
-   - conserva la lógica admin sin exponer esa etiqueta en UI
+   - mostrar loader overlay premium al crear incidencia
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -128,6 +124,60 @@ const modalState = {
    HELPERS CORE
 ========================================================= */
 
+function safeText(value, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+
+  const text = String(value).trim();
+
+  return text || fallback;
+}
+
+function safeLower(value, fallback = "") {
+  return safeText(value, fallback).toLowerCase();
+}
+
+function safeObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
+}
+
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function safeNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function first(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+
+    if (typeof value === "string" && value.trim() === "") {
+      continue;
+    }
+
+    return value;
+  }
+
+  return null;
+}
+
+function escapeHtml(value = "") {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function normalizeWhitespace(value = "") {
+  return safeText(value, "").replace(/\s+/g, " ").trim();
+}
+
 function safeEmit(event = "", payload = {}) {
   const eventName = safeText(event, "");
   if (!eventName) return false;
@@ -208,60 +258,6 @@ function showToast(message = "", type = "info") {
   } catch {}
 }
 
-function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
-
-  const text = String(value).trim();
-
-  return text || fallback;
-}
-
-function safeLower(value, fallback = "") {
-  return safeText(value, fallback).toLowerCase();
-}
-
-function safeObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : {};
-}
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function safeNumber(value, fallback = 0) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-function first(...values) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-
-    if (typeof value === "string" && value.trim() === "") {
-      continue;
-    }
-
-    return value;
-  }
-
-  return null;
-}
-
-function escapeHtml(value = "") {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function normalizeWhitespace(value = "") {
-  return safeText(value, "").replace(/\s+/g, " ").trim();
-}
-
 function isAbsoluteUrl(value = "") {
   return /^https?:\/\//i.test(safeText(value, ""));
 }
@@ -311,9 +307,13 @@ function getAuthToken() {
       AppCore?.Auth?.getToken?.(),
       window?.Auth?.getToken?.(),
       typeof localStorage !== "undefined" ? localStorage.getItem("token") : "",
-      typeof localStorage !== "undefined" ? localStorage.getItem("accessToken") : "",
+      typeof localStorage !== "undefined"
+        ? localStorage.getItem("accessToken")
+        : "",
       typeof sessionStorage !== "undefined" ? sessionStorage.getItem("token") : "",
-      typeof sessionStorage !== "undefined" ? sessionStorage.getItem("accessToken") : ""
+      typeof sessionStorage !== "undefined"
+        ? sessionStorage.getItem("accessToken")
+        : ""
     ),
     ""
   );
@@ -929,7 +929,6 @@ function buildPayload(form = {}) {
 
     if (targetUserId) {
       fd.append("userId", targetUserId);
-      fd.append("clienteId", targetUserId);
       fd.append("targetUserId", targetUserId);
       fd.append("receptorUserId", targetUserId);
     }
@@ -1743,7 +1742,7 @@ function renderUserSearchResults() {
   `;
 }
 
-function renderAdminTargetUserBlock() {
+function renderTargetUserBlock() {
   if (!canSelectTargetUser()) return "";
 
   const targetUserId = safeText(modalState.form?.targetUserId, "");
@@ -1796,6 +1795,17 @@ function renderAlert(type = "info", title = "", text = "") {
   `;
 }
 
+function renderCreateLoadingOverlay(label = "Creando incidencia...") {
+  return `
+    <div class="inc-create-loading-overlay" aria-live="polite" aria-busy="true">
+      <div class="inc-create-loading-card">
+        <span class="inc-create-loading-spinner" aria-hidden="true"></span>
+        <strong>${escapeHtml(label)}</strong>
+      </div>
+    </div>
+  `;
+}
+
 /* =========================================================
    MODAL TEMPLATE
 ========================================================= */
@@ -1807,7 +1817,7 @@ function renderModalInner() {
   const serverError = safeText(modalState.serverError, "");
   const successMessage = safeText(modalState.successMessage, "");
   const createdTicketId = safeText(modalState.createdTicketId, "");
-  const hasUserSelector = canSelectTargetUser();
+  const targetMode = canSelectTargetUser();
 
   return `
     <div
@@ -1821,8 +1831,10 @@ function renderModalInner() {
         aria-modal="true"
         aria-labelledby="incidencias-create-modal-title"
         tabindex="-1"
-        class="inc-create-panel"
+        class="inc-create-panel${submitting ? " is-submitting" : ""}"
       >
+        ${submitting ? renderCreateLoadingOverlay("Creando incidencia...") : ""}
+
         <div class="inc-create-header">
           <div class="inc-create-header-copy">
             <h2 id="incidencias-create-modal-title">
@@ -1831,7 +1843,7 @@ function renderModalInner() {
 
             <p>
               ${
-                hasUserSelector
+                targetMode
                   ? "Selecciona usuario, define el asunto, describe el caso y adjunta documentos si hace falta."
                   : "Define el asunto, describe el caso y adjunta documentos si hace falta."
               }
@@ -1871,7 +1883,7 @@ function renderModalInner() {
           }
 
           <form id="incidencias-create-form" novalidate class="inc-create-form">
-            ${renderAdminTargetUserBlock()}
+            ${renderTargetUserBlock()}
 
             ${renderInput({
               label: "Asunto",
@@ -1938,6 +1950,7 @@ function renderModalInner() {
           }
 
           .inc-create-panel{
+            position:relative;
             width:min(800px, 100%);
             max-height:92vh;
             overflow:auto;
@@ -1949,66 +1962,100 @@ function renderModalInner() {
             box-shadow:0 34px 84px rgba(0,0,0,.45);
           }
 
+          .inc-create-panel.is-submitting{
+            overflow:hidden;
+          }
+
+          .inc-create-loading-overlay{
+            position:absolute;
+            inset:0;
+            z-index:30;
+            display:grid;
+            place-items:center;
+            padding:22px;
+            background:color-mix(in srgb, var(--surface-1, #f8fafc) 74%, transparent);
+            backdrop-filter:blur(5px);
+            -webkit-backdrop-filter:blur(5px);
+          }
+
+          .inc-create-loading-card{
+            display:grid;
+            justify-items:center;
+            gap:12px;
+            min-width:min(100%, 275px);
+            padding:24px 28px;
+            border-radius:18px;
+            border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 26%, rgba(15,23,42,.08));
+            background:
+              linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 100%),
+              rgba(255,255,255,.78);
+            box-shadow:
+              0 30px 70px rgba(15,23,42,.18),
+              0 1px 0 rgba(255,255,255,.72) inset;
+          }
+
+          .inc-create-loading-card strong{
+            color:var(--text-strong, #111827);
+            font-size:14px;
+            line-height:1.35;
+            font-weight:var(--weight-bold, 700);
+            letter-spacing:-.015em;
+          }
+
+          .inc-create-loading-spinner{
+            width:30px;
+            height:30px;
+            border-radius:999px;
+            border:3px solid color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
+            border-top-color:var(--accent, #7c5cff);
+            animation:incidenciasCreateSpin .78s linear infinite;
+          }
+
           .inc-create-header{
             display:flex;
             align-items:flex-start;
             justify-content:space-between;
             gap:14px;
-            padding:20px 20px 16px;
+            padding:18px 18px 14px;
             border-bottom:1px solid var(--border-soft, rgba(255,255,255,.10));
           }
 
           .inc-create-header-copy{
             display:grid;
-            gap:7px;
+            gap:5px;
             min-width:0;
           }
 
           .inc-create-header-copy h2{
             margin:0;
             color:var(--text-strong, #fff);
-            font-size:clamp(29px, 4vw, 42px);
-            line-height:.96;
-            letter-spacing:-.055em;
-            font-weight:var(--weight-black, 850);
+            font-size:clamp(24px, 3.6vw, 32px);
+            line-height:1;
+            letter-spacing:-.045em;
           }
 
           .inc-create-header-copy p{
             margin:0;
-            max-width:680px;
             color:var(--text-dim, rgba(255,255,255,.62));
-            font-size:13px;
+            font-size:12px;
             line-height:1.45;
           }
 
           .inc-create-close{
-            width:42px;
-            height:42px;
+            width:40px;
+            height:40px;
             flex:0 0 auto;
             border-radius:14px;
             border:1px solid var(--border-soft, rgba(255,255,255,.12));
             background:var(--surface-glass, rgba(255,255,255,.05));
             color:var(--text-strong, #fff);
             cursor:pointer;
-            font-size:18px;
-            box-shadow:0 12px 26px rgba(0,0,0,.08);
-            transition:
-              transform .16s ease,
-              background .16s ease,
-              border-color .16s ease,
-              opacity .16s ease;
-          }
-
-          .inc-create-close:hover{
-            transform:translateY(-1px);
-            border-color:color-mix(in srgb, var(--accent, #7c5cff) 22%, var(--border-soft, rgba(255,255,255,.12)));
-            background:color-mix(in srgb, var(--accent, #7c5cff) 8%, var(--surface-glass, rgba(255,255,255,.05)));
+            font-size:17px;
           }
 
           .inc-create-close:disabled{
             opacity:.7;
             cursor:not-allowed;
-            transform:none;
           }
 
           .inc-create-body{
@@ -2430,6 +2477,23 @@ function renderModalInner() {
             animation:incidenciasCreateSpin .8s linear infinite;
           }
 
+          [data-theme="dark"] .inc-create-loading-overlay{
+            background:color-mix(in srgb, var(--surface-1, #111) 78%, transparent);
+          }
+
+          [data-theme="dark"] .inc-create-loading-card{
+            background:
+              linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent), transparent 100%),
+              color-mix(in srgb, var(--surface-2, #171717) 92%, transparent);
+            box-shadow:
+              0 30px 70px rgba(0,0,0,.36),
+              0 1px 0 rgba(255,255,255,.06) inset;
+          }
+
+          [data-theme="dark"] .inc-create-loading-card strong{
+            color:var(--text-strong, #fff);
+          }
+
           [data-theme="light"] .inc-create-panel{
             background:
               radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 34%),
@@ -2487,7 +2551,7 @@ function renderModalInner() {
             }
 
             .inc-create-header{
-              padding:16px 14px 13px;
+              padding:14px 14px 12px;
             }
 
             .inc-create-body{
@@ -2495,7 +2559,7 @@ function renderModalInner() {
             }
 
             .inc-create-header-copy h2{
-              font-size:30px;
+              font-size:27px;
             }
 
             .inc-create-target-user-card,
@@ -2721,7 +2785,7 @@ export function openIncidenciasCreateModal(draft = {}) {
       subject: modalState.form.subject,
       description: modalState.form.description,
     },
-    adminMode: canSelectTargetUser(),
+    targetMode: canSelectTargetUser(),
   });
 
   return true;
@@ -2825,7 +2889,7 @@ async function handleSubmit() {
     subject: safeText(modalState.form.subject, ""),
     description: safeText(modalState.form.description, ""),
     attachmentsCount: safeArray(modalState.form.attachments).length,
-    adminMode: canSelectTargetUser(),
+    targetMode: canSelectTargetUser(),
   });
 
   try {

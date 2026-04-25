@@ -8,6 +8,8 @@
    - capturar token antes de limpiar la URL
    - limpiar token visible de la barra del navegador
    - no exponer token real en DOM
+   - pedir contraseña nueva y confirmación antes de activar
+   - reutilizar bindings compartidos de password-field
    - renderizar template premium alineado con login/reset-password
    - ejecutar activación contra backend
    - manejar estados idle/loading/success/error/expired/invalid
@@ -22,6 +24,10 @@ import {
 } from "./activate-account.template.js";
 
 import { AppCore } from "../../core/index.js";
+
+import {
+  bindPasswordFieldsInScope,
+} from "../../shared/password-field/index.js";
 
 /* =========================================================
    VIEW
@@ -43,6 +49,8 @@ export const ActivateAccountView = (() => {
   const CLEAN_ACTIVATION_PUBLIC_PATH = "/activate-account";
   const SCRUB_TOKEN_FROM_URL_AFTER_CAPTURE = true;
   const TEMPLATE_CAPTURED_TOKEN_SENTINEL = "__captured_activation_token__";
+
+  const PASSWORD_MIN_LENGTH = 8;
 
   const TOKEN_PARAM_NAMES = [
     "token",
@@ -281,6 +289,7 @@ export const ActivateAccountView = (() => {
 
     try {
       const cleanHash = rawHash.replace(/^#\/?/, "/");
+
       const query = cleanHash.includes("?")
         ? cleanHash.split("?").slice(1).join("?")
         : "";
@@ -497,6 +506,141 @@ export const ActivateAccountView = (() => {
     } catch {}
 
     autoSubmitTimer = null;
+  }
+
+  /* =========================================================
+     DOM FORM HELPERS
+  ========================================================= */
+
+  function getErrorElement() {
+    if (!isBrowser()) {
+      return null;
+    }
+
+    return document.getElementById("activateAccountError");
+  }
+
+  function setInlineError(message = "") {
+    const text = safeText(message, "");
+    const el = getErrorElement();
+
+    state.error = text;
+
+    if (!el) {
+      return false;
+    }
+
+    try {
+      el.textContent = text;
+      el.hidden = !text;
+      el.dataset.visible = text ? "true" : "false";
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function clearInlineError() {
+    setInlineError("");
+  }
+
+  function focusElementById(id = "") {
+    if (!isBrowser() || !id) {
+      return false;
+    }
+
+    try {
+      document.getElementById(id)?.focus?.();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function getPasswordInputValues() {
+    if (!isBrowser()) {
+      return {
+        password: "",
+        confirmPassword: "",
+      };
+    }
+
+    const passwordEl =
+      document.getElementById("activateAccountPassword");
+
+    const confirmEl =
+      document.getElementById("activateAccountPasswordConfirm");
+
+    return {
+      password: safeText(passwordEl?.value, ""),
+      confirmPassword: safeText(confirmEl?.value, ""),
+    };
+  }
+
+  function validatePasswordInput({
+    password = "",
+    confirmPassword = "",
+  } = {}) {
+    if (!password) {
+      return {
+        ok: false,
+        fieldId: "activateAccountPassword",
+        message: "Introduce una contraseña nueva.",
+      };
+    }
+
+    if (password.length < PASSWORD_MIN_LENGTH) {
+      return {
+        ok: false,
+        fieldId: "activateAccountPassword",
+        message: `La contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres.`,
+      };
+    }
+
+    if (!confirmPassword) {
+      return {
+        ok: false,
+        fieldId: "activateAccountPasswordConfirm",
+        message: "Repite la contraseña nueva.",
+      };
+    }
+
+    if (password !== confirmPassword) {
+      return {
+        ok: false,
+        fieldId: "activateAccountPasswordConfirm",
+        message: "Las contraseñas no coinciden.",
+      };
+    }
+
+    return {
+      ok: true,
+      fieldId: "",
+      message: "",
+    };
+  }
+
+  function getActivationCredentials() {
+    const values = getPasswordInputValues();
+    const validation = validatePasswordInput(values);
+
+    return {
+      ...values,
+      validation,
+    };
+  }
+
+  function bindSharedPasswordFields(container) {
+    try {
+      if (typeof bindPasswordFieldsInScope === "function") {
+        bindPasswordFieldsInScope(container);
+        return true;
+      }
+    } catch (error) {
+      safeWarn("No se pudieron inicializar los password-fields.", error);
+    }
+
+    return false;
   }
 
   /* =========================================================
@@ -723,12 +867,32 @@ export const ActivateAccountView = (() => {
     };
   }
 
-  async function activateAccountRequest(token = "") {
+  async function activateAccountRequest(
+    token = "",
+    {
+      password = "",
+      confirmPassword = "",
+    } = {}
+  ) {
     const cleanToken = safeText(token, "");
+    const cleanPassword = safeText(password, "");
+    const cleanConfirmPassword = safeText(confirmPassword, "");
 
     if (!cleanToken) {
       const err = new Error("Falta el token de activación.");
       err.code = "ACTIVATION_TOKEN_MISSING";
+      throw err;
+    }
+
+    if (!cleanPassword) {
+      const err = new Error("Falta la contraseña.");
+      err.code = "ACTIVATION_PASSWORD_MISSING";
+      throw err;
+    }
+
+    if (cleanPassword !== cleanConfirmPassword) {
+      const err = new Error("Las contraseñas no coinciden.");
+      err.code = "ACTIVATION_PASSWORD_MISMATCH";
       throw err;
     }
 
@@ -738,6 +902,11 @@ export const ActivateAccountView = (() => {
       token: cleanToken,
       activationToken: cleanToken,
       activateToken: cleanToken,
+
+      password: cleanPassword,
+      newPassword: cleanPassword,
+      confirmPassword: cleanConfirmPassword,
+      passwordConfirm: cleanConfirmPassword,
     };
 
     try {
@@ -781,10 +950,22 @@ export const ActivateAccountView = (() => {
     return {
       appName: DEFAULT_APP_NAME,
       status: state.status,
+
       token: getTemplateToken(),
+      hasToken: Boolean(state.token),
+      tokenCaptured: Boolean(state.token),
+
       loginHref: DEFAULT_LOGIN_PATH,
       backHref: DEFAULT_LOGIN_PATH,
-      autoSubmit: true,
+
+      /*
+        Importante:
+        con password manual NO hay autosubmit.
+      */
+      autoSubmit: false,
+
+      passwordHelp:
+        `La contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres.`,
 
       copy: state.message
         ? {
@@ -895,6 +1076,8 @@ export const ActivateAccountView = (() => {
       return null;
     }
 
+    clearInlineError();
+
     const token = safeText(state.token, "");
 
     if (!token) {
@@ -910,14 +1093,33 @@ export const ActivateAccountView = (() => {
       return null;
     }
 
+    const credentials = getActivationCredentials();
+
+    if (!credentials.validation.ok) {
+      setInlineError(credentials.validation.message);
+      focusElementById(credentials.validation.fieldId);
+
+      if (!silent) {
+        showToast(credentials.validation.message, "error", "Revisa la contraseña");
+      }
+
+      return null;
+    }
+
     state.submitting = true;
 
     setStatus(ACTIVATE_ACCOUNT_STATUS.LOADING, {
-      message: "Estamos validando tu enlace de activación.",
+      message: "Estamos guardando tu contraseña y activando tu cuenta.",
     });
 
     try {
-      const response = await activateAccountRequest(token);
+      const response = await activateAccountRequest(
+        token,
+        {
+          password: credentials.password,
+          confirmPassword: credentials.confirmPassword,
+        }
+      );
 
       const message = resolveSuccessMessage(response);
 
@@ -955,15 +1157,12 @@ export const ActivateAccountView = (() => {
   function scheduleAutoSubmit() {
     clearAutoSubmitTimer();
 
-    if (!isBrowser()) return;
-    if (!state.token) return;
-    if (state.status !== ACTIVATE_ACCOUNT_STATUS.IDLE) return;
-
-    autoSubmitTimer = window.setTimeout(() => {
-      void handleActivate({
-        silent: true,
-      });
-    }, 250);
+    /*
+      Activación con contraseña:
+      NO debe autosubmit. El usuario tiene que introducir
+      contraseña y confirmar.
+    */
+    return false;
   }
 
   /* =========================================================
@@ -995,6 +1194,8 @@ export const ActivateAccountView = (() => {
     if (!container) {
       return;
     }
+
+    bindSharedPasswordFields(container);
 
     const form = container.querySelector("#activateAccountForm");
     const button = container.querySelector("#activateAccountButton");

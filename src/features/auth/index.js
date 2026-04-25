@@ -12,6 +12,8 @@
    - integrar reset-password / forgot-password
    - integrar confirmación de reset-password
    - ofrecer api pública coherente y endurecida
+   - preservar rutas públicas técnicas durante restore
+   - no romper /activate-account?token=...
 
    HARDENING EXTREMO:
    - singleton inmutable
@@ -22,7 +24,10 @@
    - métricas auth enriquecidas
    - no race conditions restore/refresh/me
    - estado runtime consistente
+   - restoreSession no pierde options
 ========================================================= */
+
+import { AppCore } from "../../core/index.js";
 
 import {
   AUTH_ENDPOINTS,
@@ -75,7 +80,7 @@ import * as PasswordResetApi from "./password-reset.js";
 import {
   fetchMe,
   refreshSession,
-  restoreSession,
+  restoreSession as restoreSessionCore,
 } from "./restore.js";
 
 import {
@@ -86,6 +91,29 @@ import {
   guardAuthenticated,
   guardRole,
 } from "./guards.js";
+
+/* =========================================================
+   PUBLIC TECHNICAL ROUTES
+========================================================= */
+
+const PUBLIC_TECHNICAL_ROUTES = new Set([
+  "/activate-account",
+  "/reset-password",
+  "/reset-password/confirm",
+  "/forgot-password",
+  "/recover-password",
+  "/password-reset",
+]);
+
+const ACTIVATION_PATH = "/activate-account";
+
+const ACTIVATION_TOKEN_PARAM_NAMES = [
+  "token",
+  "activationToken",
+  "activateToken",
+  "code",
+  "t",
+];
 
 /* =========================================================
    PASSWORD RESET RESOLUTION
@@ -142,8 +170,7 @@ function resolveConfirmResetPasswordHandler() {
 
   for (const candidate of candidates) {
     if (
-      typeof candidate ===
-      "function"
+      typeof candidate === "function"
     ) {
       return candidate;
     }
@@ -159,8 +186,7 @@ async function confirmResetPassword(
     resolveConfirmResetPasswordHandler();
 
   if (
-    typeof executor !==
-    "function"
+    typeof executor !== "function"
   ) {
     throw new Error(
       "Auth: falta implementar confirmResetPassword en ./password-reset.js"
@@ -230,14 +256,10 @@ function safeCloneSessionState(
       source.restorePromise || null,
 
     refreshFailCount:
-      Number(
-        source.refreshFailCount || 0
-      ),
+      Number(source.refreshFailCount || 0),
 
     refreshBlockedUntil:
-      Number(
-        source.refreshBlockedUntil || 0
-      ),
+      Number(source.refreshBlockedUntil || 0),
 
     lastError:
       source.lastError || null,
@@ -245,17 +267,74 @@ function safeCloneSessionState(
 }
 
 /* =========================================================
-   HELPERS
+   BASICS
 ========================================================= */
+
+function isBrowser() {
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
+}
 
 function nowMs() {
   return Date.now();
+}
+
+function safeText(
+  value,
+  fallback = ""
+) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return fallback;
+  }
+
+  const text =
+    String(value).trim();
+
+  return text || fallback;
+}
+
+function safeObject(value) {
+  return value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+    ? value
+    : {};
+}
+
+function safeCall(
+  fn,
+  fallback,
+  ...args
+) {
+  try {
+    if (
+      typeof fn !== "function"
+    ) {
+      return fallback;
+    }
+
+    return fn(...args);
+  } catch {
+    return fallback;
+  }
 }
 
 function emit(
   eventName,
   payload = {}
 ) {
+  try {
+    AppCore?.events?.emit?.(
+      eventName,
+      payload
+    );
+  } catch {}
+
   try {
     globalThis?.window?.AppCore
       ?.events?.emit?.(
@@ -273,6 +352,22 @@ function emit(
   } catch {}
 }
 
+function safeWarn(...args) {
+  try {
+    AppCore?.utils?.warn?.(
+      "[Auth]",
+      ...args
+    );
+  } catch {}
+
+  try {
+    console.warn(
+      "[Auth]",
+      ...args
+    );
+  } catch {}
+}
+
 function safeRun(
   fn,
   fallback
@@ -280,8 +375,7 @@ function safeRun(
   return async (...args) => {
     try {
       if (
-        typeof fn !==
-        "function"
+        typeof fn !== "function"
       ) {
         return fallback;
       }
@@ -290,41 +384,560 @@ function safeRun(
         fn(...args)
       );
     } catch (error) {
-      console.warn(
-        "[Auth]",
-        error
-      );
+      safeWarn(error);
 
       return {
         ...(fallback || {}),
         ok: false,
         error,
         message:
-          extractMessage?.(
-            error
-          ) ||
+          extractMessage?.(error) ||
           String(error),
       };
     }
   };
 }
 
-function safeCall(
-  fn,
-  fallback,
-  ...args
-) {
+/* =========================================================
+   PATH HELPERS
+========================================================= */
+
+function getBaseOrigin() {
+  if (
+    isBrowser() &&
+    window.location?.origin
+  ) {
+    return window.location.origin;
+  }
+
+  return "http://localhost";
+}
+
+function normalizePathnameOnly(pathname = "/") {
+  let value =
+    String(pathname || "/")
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
+
+  if (!value) {
+    value = "/";
+  }
+
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
+
+  if (
+    value.length > 1 &&
+    value.endsWith("/")
+  ) {
+    value =
+      value.replace(/\/+$/g, "") || "/";
+  }
+
+  return value;
+}
+
+function stripSearchAndHash(path = "/") {
+  const raw =
+    safeText(path, "/");
+
+  return normalizePathnameOnly(
+    raw.split("?")[0].split("#")[0] || "/"
+  );
+}
+
+function isHashRouterPath(value = "") {
+  const raw =
+    String(value || "").trim();
+
+  return (
+    raw.startsWith("#/") ||
+    raw.startsWith("#!")
+  );
+}
+
+function normalizeHashRouterPath(value = "") {
+  const raw =
+    String(value || "").trim();
+
+  if (!raw) {
+    return "/";
+  }
+
+  if (raw.startsWith("#!")) {
+    return raw.replace(/^#!\/?/, "/");
+  }
+
+  return raw.replace(/^#\/?/, "/");
+}
+
+function pathFromUrlLike(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  if (isHashRouterPath(raw)) {
+    return normalizeHashRouterPath(raw);
+  }
+
   try {
+    const parsed =
+      new URL(raw, getBaseOrigin());
+
     if (
-      typeof fn !==
-      "function"
+      parsed.hash &&
+      isHashRouterPath(parsed.hash)
     ) {
-      return fallback;
+      return normalizeHashRouterPath(
+        parsed.hash
+      );
     }
 
-    return fn(...args);
+    return `${normalizePathnameOnly(
+      parsed.pathname || "/"
+    )}${parsed.search || ""}${parsed.hash || ""}`;
   } catch {
-    return fallback;
+    const hashIndex =
+      raw.indexOf("#");
+
+    if (hashIndex >= 0) {
+      const hash =
+        raw.slice(hashIndex);
+
+      if (isHashRouterPath(hash)) {
+        return normalizeHashRouterPath(hash);
+      }
+    }
+
+    return raw.startsWith("/")
+      ? raw
+      : `/${raw}`;
+  }
+}
+
+function getBrowserPublicPath() {
+  if (!isBrowser()) {
+    return "";
+  }
+
+  try {
+    const pathname =
+      window.location.pathname || "/";
+
+    const search =
+      window.location.search || "";
+
+    const hash =
+      window.location.hash || "";
+
+    if (
+      hash &&
+      isHashRouterPath(hash)
+    ) {
+      return normalizeHashRouterPath(hash);
+    }
+
+    return `${pathname}${search}${hash}`;
+  } catch {
+    return "";
+  }
+}
+
+function getInitialUrl() {
+  if (!isBrowser()) {
+    return "";
+  }
+
+  return safeText(
+    window.__ONION_INITIAL_URL__,
+    ""
+  );
+}
+
+function getActivationInitialUrl() {
+  if (!isBrowser()) {
+    return "";
+  }
+
+  return safeText(
+    window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__,
+    ""
+  );
+}
+
+function hasTokenInSearch(search = "") {
+  try {
+    const params =
+      new URLSearchParams(search || "");
+
+    return ACTIVATION_TOKEN_PARAM_NAMES.some(
+      (name) =>
+        Boolean(
+          safeText(
+            params.get(name),
+            ""
+          )
+        )
+    );
+  } catch {
+    return false;
+  }
+}
+
+function extractActivationPathToken(path = "") {
+  const normalized =
+    pathFromUrlLike(path) || path || "";
+
+  const pathname =
+    stripSearchAndHash(normalized);
+
+  const parts =
+    pathname.split("/").filter(Boolean);
+
+  const index =
+    parts.findIndex(
+      (part) => part === "activate-account"
+    );
+
+  if (
+    index >= 0 &&
+    parts[index + 1]
+  ) {
+    try {
+      return safeText(
+        decodeURIComponent(parts[index + 1]),
+        ""
+      );
+    } catch {
+      return safeText(
+        parts[index + 1],
+        ""
+      );
+    }
+  }
+
+  return "";
+}
+
+function isPublicTechnicalRoute(path = "/") {
+  return PUBLIC_TECHNICAL_ROUTES.has(
+    stripSearchAndHash(path)
+  );
+}
+
+function isActivationRoute(path = "/") {
+  const clean =
+    stripSearchAndHash(path);
+
+  return (
+    clean === ACTIVATION_PATH ||
+    clean.startsWith(`${ACTIVATION_PATH}/`)
+  );
+}
+
+function hasActivationToken(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return false;
+  }
+
+  const path =
+    pathFromUrlLike(raw) || raw;
+
+  if (
+    isActivationRoute(path) &&
+    extractActivationPathToken(path)
+  ) {
+    return true;
+  }
+
+  try {
+    const parsed =
+      new URL(raw, getBaseOrigin());
+
+    if (hasTokenInSearch(parsed.search)) {
+      return true;
+    }
+
+    if (
+      parsed.hash &&
+      parsed.hash.includes("?")
+    ) {
+      const query =
+        parsed.hash.split("?").slice(1).join("?");
+
+      return hasTokenInSearch(
+        query ? `?${query}` : ""
+      );
+    }
+  } catch {
+    if (path.includes("?")) {
+      const query =
+        path.split("?").slice(1).join("?").split("#")[0];
+
+      if (
+        hasTokenInSearch(
+          query ? `?${query}` : ""
+        )
+      ) {
+        return true;
+      }
+    }
+
+    if (
+      path.includes("#") &&
+      path.includes("?")
+    ) {
+      const query =
+        path.split("?").slice(1).join("?");
+
+      if (
+        hasTokenInSearch(
+          query ? `?${query}` : ""
+        )
+      ) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function isActivationTokenScrubbed() {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  try {
+    return Boolean(
+      window.history?.state?.scrubbedActivationToken
+    );
+  } catch {
+    return false;
+  }
+}
+
+function getCurrentRouteContext() {
+  const state =
+    AppCore?.state || {};
+
+  const browserPath =
+    getBrowserPublicPath();
+
+  const publicPath =
+    safeText(
+      state.publicPath,
+      ""
+    ) ||
+    browserPath ||
+    "/";
+
+  const route =
+    safeText(
+      state.route,
+      ""
+    ) ||
+    stripSearchAndHash(publicPath);
+
+  const initialUrl =
+    getInitialUrl();
+
+  const activationInitialUrl =
+    getActivationInitialUrl();
+
+  const candidates = [
+    state.bootActivationInitialUrl,
+    activationInitialUrl,
+    state.bootInitialUrl,
+    initialUrl,
+    browserPath,
+    publicPath,
+    route,
+  ]
+    .map((value) => safeText(value, ""))
+    .filter(Boolean);
+
+  const activationBoot =
+    !isActivationTokenScrubbed() &&
+    candidates.some((candidate) => {
+      const path =
+        pathFromUrlLike(candidate);
+
+      return (
+        isActivationRoute(path) &&
+        hasActivationToken(candidate)
+      );
+    });
+
+  const canonical =
+    stripSearchAndHash(publicPath || route || "/");
+
+  const publicTechnical =
+    isPublicTechnicalRoute(canonical) ||
+    isPublicTechnicalRoute(publicPath) ||
+    activationBoot;
+
+  return {
+    route:
+      canonical || "/",
+
+    publicPath:
+      publicPath || "/",
+
+    browserPath,
+    initialUrl,
+    activationInitialUrl,
+
+    activationBoot,
+    publicTechnical,
+    activationTokenScrubbed:
+      isActivationTokenScrubbed(),
+  };
+}
+
+function normalizeRestoreOptions(
+  ...args
+) {
+  /*
+    Compatibilidad legacy:
+    - Auth.restoreSession()
+    - Auth.restoreSession(options)
+    - Auth.restoreSession(session, options)
+    
+    IMPORTANTE:
+    No pasamos el runtime session como primer argumento a restore.js,
+    porque restore.js espera options como primer argumento en el flujo nuevo.
+  */
+
+  const first =
+    args[0];
+
+  const second =
+    args[1];
+
+  const firstLooksRuntimeSession =
+    Boolean(
+      first &&
+      typeof first === "object" &&
+      (
+        Object.prototype.hasOwnProperty.call(first, "checking") ||
+        Object.prototype.hasOwnProperty.call(first, "refreshing") ||
+        Object.prototype.hasOwnProperty.call(first, "restoring") ||
+        Object.prototype.hasOwnProperty.call(first, "restorePromise") ||
+        Object.prototype.hasOwnProperty.call(first, "refreshPromise") ||
+        Object.prototype.hasOwnProperty.call(first, "mePromise")
+      )
+    );
+
+  const baseOptions =
+    firstLooksRuntimeSession
+      ? safeObject(second)
+      : safeObject(first);
+
+  const routeContext =
+    getCurrentRouteContext();
+
+  const preserve =
+    Boolean(
+      baseOptions.preserveRoute ||
+      baseOptions.preserveCurrentRoute ||
+      baseOptions.publicRoute ||
+      routeContext.publicTechnical ||
+      routeContext.activationBoot
+    );
+
+  return {
+    ...baseOptions,
+
+    publicRoute:
+      Boolean(
+        baseOptions.publicRoute ||
+        routeContext.publicTechnical
+      ),
+
+    preserveRoute:
+      Boolean(
+        baseOptions.preserveRoute ||
+        preserve
+      ),
+
+    preserveCurrentRoute:
+      Boolean(
+        baseOptions.preserveCurrentRoute ||
+        preserve
+      ),
+
+    activationBoot:
+      Boolean(
+        baseOptions.activationBoot ||
+        routeContext.activationBoot
+      ),
+
+    route:
+      baseOptions.route ||
+      routeContext.route,
+
+    publicPath:
+      baseOptions.publicPath ||
+      routeContext.publicPath,
+  };
+}
+
+/* =========================================================
+   METRICS
+========================================================= */
+
+function setRuntimeFlag(
+  session,
+  type,
+  value
+) {
+  if (!session) {
+    return;
+  }
+
+  if (type === "restore") {
+    session.restoring = Boolean(value);
+  }
+
+  if (type === "refresh") {
+    session.refreshing = Boolean(value);
+  }
+
+  if (type === "me") {
+    session.checking = Boolean(value);
+  }
+}
+
+function markRuntimeSuccess(
+  session,
+  type
+) {
+  if (!session) {
+    return;
+  }
+
+  const now =
+    nowMs();
+
+  if (type === "restore") {
+    session.lastRestoreAt = now;
+  }
+
+  if (type === "refresh") {
+    session.lastRefreshAt = now;
+  }
+
+  if (type === "me") {
+    session.lastCheckAt = now;
   }
 }
 
@@ -337,6 +950,12 @@ function withMetric(
     const startedAt =
       nowMs();
 
+    setRuntimeFlag(
+      session,
+      type,
+      true
+    );
+
     emit(
       `auth:${type}:start`,
       {}
@@ -346,33 +965,16 @@ function withMetric(
       const result =
         await executor(...args);
 
-      if (
-        type === "restore"
-      ) {
-        session.lastRestoreAt =
-          nowMs();
-      }
-
-      if (
-        type === "refresh"
-      ) {
-        session.lastRefreshAt =
-          nowMs();
-      }
-
-      if (
-        type === "me"
-      ) {
-        session.lastCheckAt =
-          nowMs();
-      }
+      markRuntimeSuccess(
+        session,
+        type
+      );
 
       emit(
         `auth:${type}:success`,
         {
           durationMs:
-            nowMs() -
-            startedAt,
+            nowMs() - startedAt,
           ok:
             result?.ok !== false,
         }
@@ -383,9 +985,7 @@ function withMetric(
       session.lastError = {
         type,
         message:
-          extractMessage?.(
-            error
-          ) ||
+          extractMessage?.(error) ||
           String(error),
         at:
           new Date().toISOString(),
@@ -395,14 +995,19 @@ function withMetric(
         `auth:${type}:error`,
         {
           durationMs:
-            nowMs() -
-            startedAt,
+            nowMs() - startedAt,
           error:
             session.lastError,
         }
       );
 
       throw error;
+    } finally {
+      setRuntimeFlag(
+        session,
+        type,
+        false
+      );
     }
   };
 }
@@ -425,10 +1030,14 @@ export const Auth = (() => {
     withMetric(
       session,
       "me",
-      safeRun(fetchMe, {
-        ok: false,
-        user: null,
-      })
+      safeRun(
+        (sessionArg = session) =>
+          fetchMe(sessionArg),
+        {
+          ok: false,
+          user: null,
+        }
+      )
     );
 
   const runRefreshSession =
@@ -436,7 +1045,8 @@ export const Auth = (() => {
       session,
       "refresh",
       safeRun(
-        refreshSession,
+        (sessionArg = session) =>
+          refreshSession(sessionArg),
         {
           ok: false,
         }
@@ -448,7 +1058,8 @@ export const Auth = (() => {
       session,
       "restore",
       safeRun(
-        restoreSession,
+        (options = {}) =>
+          restoreSessionCore(options),
         {
           ok: false,
           user: null,
@@ -461,6 +1072,9 @@ export const Auth = (() => {
   ======================================================= */
 
   function getAuthModuleSnapshot() {
+    const routeContext =
+      getCurrentRouteContext();
+
     return {
       endpoints:
         AUTH_ENDPOINTS,
@@ -496,20 +1110,27 @@ export const Auth = (() => {
           null
         ),
 
+      routeContext,
+
       storage: {
         hasRefreshToken:
           hasRefreshToken(),
+
         hasRefreshContext:
           hasRefreshContext(),
+
         refreshToken:
           getStoredRefreshToken() ||
           null,
+
         tempToken:
           getStoredTempToken() ||
           null,
+
         sessionId:
           getStoredSessionId() ||
           null,
+
         sessionUserId:
           getStoredSessionUserId() ||
           null,
@@ -517,14 +1138,41 @@ export const Auth = (() => {
 
       passwordReset: {
         hasRequestPasswordReset:
-          typeof requestPasswordReset ===
-          "function",
+          typeof requestPasswordReset === "function",
 
         hasConfirmResetPassword:
-          typeof resolveConfirmResetPasswordHandler() ===
-          "function",
+          typeof resolveConfirmResetPasswordHandler() === "function",
       },
     };
+  }
+
+  function restoreSessionPublic(
+    ...args
+  ) {
+    const options =
+      normalizeRestoreOptions(
+        ...args
+      );
+
+    return runRestoreSession(
+      options
+    );
+  }
+
+  function fetchMePublic(
+    sessionArg = session
+  ) {
+    return runFetchMe(
+      sessionArg || session
+    );
+  }
+
+  function refreshSessionPublic(
+    sessionArg = session
+  ) {
+    return runRefreshSession(
+      sessionArg || session
+    );
   }
 
   /* =======================================================
@@ -559,25 +1207,13 @@ export const Auth = (() => {
 
     /* SESSION */
     fetchMe:
-      (...args) =>
-        runFetchMe(
-          session,
-          ...args
-        ),
+      fetchMePublic,
 
     refreshSession:
-      (...args) =>
-        runRefreshSession(
-          session,
-          ...args
-        ),
+      refreshSessionPublic,
 
     restoreSession:
-      (...args) =>
-        runRestoreSession(
-          session,
-          ...args
-        ),
+      restoreSessionPublic,
 
     /* STATE */
     isAuthenticated,

@@ -19,7 +19,9 @@ import { AppCore } from "../../core/index.js";
 import { Auth } from "../../features/auth/index.js";
 import Toast from "../../ui/toast/index.js";
 
-import { bindPasswordFieldsInScope } from "../../shared/password-field/index.js";
+import {
+  bindPasswordFieldsInScope,
+} from "../../shared/password-field/index.js";
 
 import {
   loadRememberedIdentifier,
@@ -103,33 +105,55 @@ function resolveForgotPasswordHref(deps = {}) {
 function navigateTo(path = "/") {
   const finalPath = safeText(path, "/") || "/";
 
-  if (typeof AppCore?.navigate === "function") {
-    AppCore.navigate(finalPath);
-    return;
-  }
+  try {
+    if (typeof AppCore?.navigate === "function") {
+      AppCore.navigate(finalPath);
+      return;
+    }
+  } catch {}
 
-  if (typeof AppCore?.router?.navigate === "function") {
-    AppCore.router.navigate(finalPath);
-    return;
-  }
+  try {
+    if (typeof AppCore?.router?.navigate === "function") {
+      AppCore.router.navigate(finalPath);
+      return;
+    }
+  } catch {}
 
-  window.location.assign(finalPath);
+  try {
+    if (typeof AppCore?.Router?.navigate === "function") {
+      AppCore.Router.navigate(finalPath);
+      return;
+    }
+  } catch {}
+
+  try {
+    window.location.assign(finalPath);
+  } catch {}
 }
 
 function toggleTheme() {
   const current =
     document.documentElement.getAttribute("data-theme") || "dark";
 
-  const next = current === "light" ? "dark" : "light";
+  const next =
+    current === "light"
+      ? "dark"
+      : "light";
 
-  document.documentElement.setAttribute("data-theme", next);
+  document.documentElement.setAttribute(
+    "data-theme",
+    next
+  );
 
   try {
     AppCore?.setTheme?.(next);
   } catch {}
 
   try {
-    AppCore?.events?.emit?.("app:theme:change", next);
+    AppCore?.events?.emit?.(
+      "app:theme:change",
+      next
+    );
   } catch {}
 
   return next;
@@ -143,6 +167,18 @@ function safeToastCall(toast, method, ...args) {
   } catch {}
 
   return null;
+}
+
+function safeLog(...args) {
+  try {
+    AppCore?.utils?.log?.("[LoginView]", ...args);
+  } catch {}
+}
+
+function safeWarn(...args) {
+  try {
+    AppCore?.utils?.warn?.("[LoginView]", ...args);
+  } catch {}
 }
 
 function emitRouteRendered() {
@@ -180,12 +216,16 @@ function safeUnbind(unbind) {
 
 function bindSharedPasswordFields(container = document) {
   try {
-    return bindPasswordFieldsInScope(container);
-  } catch (error) {
-    try {
-      AppCore?.utils?.warn?.("[LoginView] password-field bind error", error);
-    } catch {}
+    const bindings = bindPasswordFieldsInScope(container);
 
+    safeLog(
+      "password fields bound:",
+      Array.isArray(bindings) ? bindings.length : 0
+    );
+
+    return bindings;
+  } catch (error) {
+    safeWarn("password-field bind error", error);
     return [];
   }
 }
@@ -215,7 +255,7 @@ function renderLoginView(container, deps = {}) {
   /*
     CRÍTICO:
     El template usa src/shared/password-field.
-    Por tanto el binding correcto del ojo/CapsLock también debe ser el shared.
+    El binding correcto del ojo/CapsLock debe ser el shared.
     No se usa bindPasswordToggle() de login.dom.js para evitar doble listener.
   */
   bindSharedPasswordFields(container);
@@ -330,7 +370,12 @@ function renderLoginView(container, deps = {}) {
       const message = resolveAuthErrorMessage(error);
 
       setGlobalLoginError(refs, message);
-      safeToastCall(toast, "error", message);
+
+      safeToastCall(
+        toast,
+        "error",
+        message
+      );
 
       try {
         AppCore?.events?.emit?.("auth:login:error", {
@@ -350,9 +395,20 @@ function renderLoginView(container, deps = {}) {
     }
   };
 
-  const unbindInputs = bindLoginInputClearers(refs, onClearErrors);
-  const unbindTheme = bindThemeToggle(refs, onThemeToggle);
-  const unbindSubmit = bindLoginSubmit(refs, onSubmit);
+  const unbindInputs = bindLoginInputClearers(
+    refs,
+    onClearErrors
+  );
+
+  const unbindTheme = bindThemeToggle(
+    refs,
+    onThemeToggle
+  );
+
+  const unbindSubmit = bindLoginSubmit(
+    refs,
+    onSubmit
+  );
 
   focusLoginPrimaryField(refs, {
     rememberedIdentifier,

@@ -10,12 +10,16 @@
    - evitar carreras concurrentes
    - priorizar refresh cuando exista contexto válido
    - endurecer errores y limpieza de sesión
+   - respetar rutas públicas técnicas durante boot
+   - no romper /activate-account?token=...
+   - no confundir opciones restore con runtimeSession
 
    HARDENING EXTREMO:
    - promises únicas anti race-condition
    - cooldown anti refresh-loop
    - fallback refresh -> token -> /me
-   - limpieza total garantizada
+   - limpieza auth protegida
+   - preservación route/publicPath en activation/reset
    - eventos enterprise
    - tolerancia backend heterogéneo
    - snapshot consistente
@@ -75,8 +79,38 @@ const runtimeSession = {
 };
 
 /* =========================================================
+   CONSTANTS
+========================================================= */
+
+const ACTIVATION_PATH = "/activate-account";
+
+const PUBLIC_TECHNICAL_ROUTES = new Set([
+  "/activate-account",
+  "/reset-password",
+  "/reset-password/confirm",
+  "/forgot-password",
+  "/recover-password",
+  "/password-reset",
+]);
+
+const ACTIVATION_TOKEN_PARAM_NAMES = [
+  "token",
+  "activationToken",
+  "activateToken",
+  "code",
+  "t",
+];
+
+/* =========================================================
    BASICS
 ========================================================= */
+
+function isBrowser() {
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
+}
 
 function safeNumber(
   value,
@@ -89,14 +123,44 @@ function safeNumber(
     : fallback;
 }
 
-function getSession(
-  session
+function safeText(
+  value,
+  fallback = ""
 ) {
-  return session &&
-    typeof session ===
-      "object"
-    ? session
-    : runtimeSession;
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return fallback;
+  }
+
+  const text =
+    String(value).trim();
+
+  return text || fallback;
+}
+
+function safeBool(value) {
+  return value === true;
+}
+
+function getBaseOrigin() {
+  if (
+    isBrowser() &&
+    window.location?.origin
+  ) {
+    return window.location.origin;
+  }
+
+  return "http://localhost";
+}
+
+function getState() {
+  try {
+    return AppCore?.state || {};
+  } catch {
+    return {};
+  }
 }
 
 function emit(
@@ -113,13 +177,26 @@ function emit(
 
 function log(...args) {
   try {
-    AppCore?.utils?.log?.(...args);
+    AppCore?.utils?.log?.(
+      "[AuthRestore]",
+      ...args
+    );
   } catch {}
 }
 
 function warn(...args) {
   try {
-    AppCore?.utils?.warn?.(...args);
+    AppCore?.utils?.warn?.(
+      "[AuthRestore]",
+      ...args
+    );
+  } catch {}
+
+  try {
+    console.warn(
+      "[AuthRestore]",
+      ...args
+    );
   } catch {}
 }
 
@@ -137,9 +214,75 @@ function getRefreshRetryCooldownMs() {
   );
 }
 
-function clearRuntimeFlags(
-  session
-) {
+function hasApiGet() {
+  return (
+    typeof AppCore?.apiClient?.get === "function"
+  );
+}
+
+function hasApiPost() {
+  return (
+    typeof AppCore?.apiClient?.post === "function"
+  );
+}
+
+/* =========================================================
+   SESSION / OPTIONS RESOLUTION
+========================================================= */
+
+function looksLikeRuntimeSession(value) {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    (
+      Object.prototype.hasOwnProperty.call(value, "checking") ||
+      Object.prototype.hasOwnProperty.call(value, "refreshing") ||
+      Object.prototype.hasOwnProperty.call(value, "restoring") ||
+      Object.prototype.hasOwnProperty.call(value, "mePromise") ||
+      Object.prototype.hasOwnProperty.call(value, "refreshPromise") ||
+      Object.prototype.hasOwnProperty.call(value, "restorePromise")
+    )
+  );
+}
+
+function getSession(session) {
+  return looksLikeRuntimeSession(session)
+    ? session
+    : runtimeSession;
+}
+
+function resolveRestoreArgs(input = {}) {
+  const value =
+    input &&
+    typeof input === "object"
+      ? input
+      : {};
+
+  if (looksLikeRuntimeSession(value)) {
+    return {
+      session: value,
+      options: {},
+    };
+  }
+
+  return {
+    session: runtimeSession,
+    options: {
+      silent:
+        Boolean(value.silent),
+      skipNavigation:
+        Boolean(value.skipNavigation),
+      publicRoute:
+        Boolean(value.publicRoute),
+      preserveCurrentRoute:
+        Boolean(value.preserveCurrentRoute),
+      preserveRoute:
+        Boolean(value.preserveRoute),
+    },
+  };
+}
+
+function clearRuntimeFlags(session) {
   if (!session) {
     return;
   }
@@ -153,28 +296,530 @@ function clearRuntimeFlags(
   session.restorePromise = null;
 }
 
+/* =========================================================
+   PATH / ROUTE PROTECTION
+========================================================= */
+
+function isHashRouterPath(value = "") {
+  const raw =
+    String(value || "").trim();
+
+  return (
+    raw.startsWith("#/") ||
+    raw.startsWith("#!")
+  );
+}
+
+function normalizeHashRouterPath(value = "") {
+  const raw =
+    String(value || "").trim();
+
+  if (!raw) {
+    return "/";
+  }
+
+  if (raw.startsWith("#!")) {
+    return raw.replace(/^#!\/?/, "/");
+  }
+
+  return raw.replace(/^#\/?/, "/");
+}
+
+function normalizePathnameOnly(pathname = "/") {
+  let value =
+    String(pathname || "/")
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
+
+  if (!value) {
+    value = "/";
+  }
+
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
+
+  if (
+    value.length > 1 &&
+    value.endsWith("/")
+  ) {
+    value =
+      value.replace(/\/+$/g, "") || "/";
+  }
+
+  return value;
+}
+
+function stripSearchAndHash(path = "/") {
+  const raw =
+    safeText(path, "/");
+
+  return normalizePathnameOnly(
+    raw.split("?")[0].split("#")[0] || "/"
+  );
+}
+
+function pathFromUrlLike(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  if (isHashRouterPath(raw)) {
+    return normalizeHashRouterPath(raw);
+  }
+
+  try {
+    const parsed =
+      new URL(raw, getBaseOrigin());
+
+    if (
+      parsed.hash &&
+      isHashRouterPath(parsed.hash)
+    ) {
+      return normalizeHashRouterPath(
+        parsed.hash
+      );
+    }
+
+    return `${normalizePathnameOnly(
+      parsed.pathname || "/"
+    )}${parsed.search || ""}${parsed.hash || ""}`;
+  } catch {
+    const hashIndex =
+      raw.indexOf("#");
+
+    if (hashIndex >= 0) {
+      const hash =
+        raw.slice(hashIndex);
+
+      if (isHashRouterPath(hash)) {
+        return normalizeHashRouterPath(hash);
+      }
+    }
+
+    return raw.startsWith("/")
+      ? raw
+      : `/${raw}`;
+  }
+}
+
+function getBrowserPublicPath() {
+  if (!isBrowser()) {
+    return "";
+  }
+
+  try {
+    const pathname =
+      window.location.pathname || "/";
+
+    const search =
+      window.location.search || "";
+
+    const hash =
+      window.location.hash || "";
+
+    if (
+      hash &&
+      isHashRouterPath(hash)
+    ) {
+      return normalizeHashRouterPath(hash);
+    }
+
+    return `${pathname}${search}${hash}`;
+  } catch {
+    return "";
+  }
+}
+
+function getInitialUrl() {
+  if (!isBrowser()) {
+    return "";
+  }
+
+  return safeText(
+    window.__ONION_INITIAL_URL__,
+    ""
+  );
+}
+
+function getActivationInitialUrl() {
+  if (!isBrowser()) {
+    return "";
+  }
+
+  return safeText(
+    window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__,
+    ""
+  );
+}
+
+function hasTokenInSearch(search = "") {
+  try {
+    const params =
+      new URLSearchParams(search || "");
+
+    return ACTIVATION_TOKEN_PARAM_NAMES.some(
+      (name) =>
+        Boolean(
+          safeText(params.get(name), "")
+        )
+    );
+  } catch {
+    return false;
+  }
+}
+
+function extractActivationPathToken(path = "") {
+  const normalized =
+    pathFromUrlLike(path) || path || "";
+
+  const pathname =
+    stripSearchAndHash(normalized);
+
+  const parts =
+    pathname.split("/").filter(Boolean);
+
+  const index =
+    parts.findIndex(
+      (part) => part === "activate-account"
+    );
+
+  if (
+    index >= 0 &&
+    parts[index + 1]
+  ) {
+    try {
+      return safeText(
+        decodeURIComponent(parts[index + 1]),
+        ""
+      );
+    } catch {
+      return safeText(parts[index + 1], "");
+    }
+  }
+
+  return "";
+}
+
+function hasActivationToken(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return false;
+  }
+
+  try {
+    const parsed =
+      new URL(raw, getBaseOrigin());
+
+    const path =
+      pathFromUrlLike(raw);
+
+    if (
+      isActivationCanonical(
+        getCanonicalPathFromAny(path)
+      ) &&
+      extractActivationPathToken(path)
+    ) {
+      return true;
+    }
+
+    if (hasTokenInSearch(parsed.search)) {
+      return true;
+    }
+
+    if (
+      parsed.hash &&
+      parsed.hash.includes("?")
+    ) {
+      const query =
+        parsed.hash.split("?").slice(1).join("?");
+
+      return hasTokenInSearch(
+        query ? `?${query}` : ""
+      );
+    }
+  } catch {
+    const path =
+      pathFromUrlLike(raw) || raw;
+
+    if (
+      isActivationCanonical(
+        getCanonicalPathFromAny(path)
+      ) &&
+      extractActivationPathToken(path)
+    ) {
+      return true;
+    }
+
+    if (path.includes("?")) {
+      const query =
+        path.split("?").slice(1).join("?").split("#")[0];
+
+      if (
+        hasTokenInSearch(
+          query ? `?${query}` : ""
+        )
+      ) {
+        return true;
+      }
+    }
+
+    if (
+      path.includes("#") &&
+      path.includes("?")
+    ) {
+      const query =
+        path.split("?").slice(1).join("?");
+
+      if (
+        hasTokenInSearch(
+          query ? `?${query}` : ""
+        )
+      ) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function getCanonicalPathFromAny(value = "/") {
+  return stripSearchAndHash(
+    pathFromUrlLike(value) || value || "/"
+  );
+}
+
+function isPublicTechnicalCanonical(path = "/") {
+  return PUBLIC_TECHNICAL_ROUTES.has(
+    stripSearchAndHash(path)
+  );
+}
+
+function isActivationCanonical(path = "/") {
+  const clean =
+    stripSearchAndHash(path);
+
+  return (
+    clean === ACTIVATION_PATH ||
+    clean.startsWith(`${ACTIVATION_PATH}/`)
+  );
+}
+
+function isActivationTokenScrubbed() {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  try {
+    return Boolean(
+      window.history?.state?.scrubbedActivationToken
+    );
+  } catch {
+    return false;
+  }
+}
+
+function detectActivationBoot() {
+  const state =
+    getState();
+
+  if (
+    state.bootIsActivation === true &&
+    state.bootHasActivationToken === true
+  ) {
+    return true;
+  }
+
+  if (isActivationTokenScrubbed()) {
+    return false;
+  }
+
+  const candidates = [
+    state.bootActivationInitialUrl,
+    getActivationInitialUrl(),
+    state.bootInitialUrl,
+    getInitialUrl(),
+    getBrowserPublicPath(),
+    state.publicPath,
+    state.route,
+  ]
+    .map((value) => safeText(value, ""))
+    .filter(Boolean);
+
+  return candidates.some((candidate) => {
+    const canonical =
+      getCanonicalPathFromAny(candidate);
+
+    return (
+      isActivationCanonical(canonical) &&
+      hasActivationToken(candidate)
+    );
+  });
+}
+
+function captureRouteContext(options = {}) {
+  const state =
+    getState();
+
+  const browserPath =
+    getBrowserPublicPath();
+
+  const publicPath =
+    safeText(
+      state.publicPath,
+      ""
+    ) ||
+    browserPath ||
+    "/";
+
+  const route =
+    safeText(
+      state.route,
+      ""
+    ) ||
+    getCanonicalPathFromAny(publicPath);
+
+  const initialUrl =
+    getInitialUrl();
+
+  const activationInitialUrl =
+    getActivationInitialUrl();
+
+  const canonical =
+    getCanonicalPathFromAny(
+      publicPath || route || browserPath || "/"
+    );
+
+  const activationBoot =
+    detectActivationBoot();
+
+  const publicTechnical =
+    isPublicTechnicalCanonical(canonical);
+
+  const shouldProtect =
+    Boolean(
+      options.publicRoute ||
+      options.preserveCurrentRoute ||
+      options.preserveRoute ||
+      activationBoot ||
+      publicTechnical
+    );
+
+  return {
+    shouldProtect,
+    activationBoot,
+    publicTechnical,
+    route:
+      getCanonicalPathFromAny(route || canonical || "/"),
+    publicPath:
+      publicPath || browserPath || route || "/",
+    browserPath,
+    initialUrl,
+    activationInitialUrl,
+    canonical,
+  };
+}
+
+function restoreRouteContext(routeContext = {}) {
+  if (!routeContext?.shouldProtect) {
+    return false;
+  }
+
+  const route =
+    routeContext.route ||
+    routeContext.canonical ||
+    "/";
+
+  const publicPath =
+    routeContext.publicPath ||
+    routeContext.browserPath ||
+    route;
+
+  try {
+    AppCore?.setRoute?.(route);
+  } catch {}
+
+  try {
+    AppCore?.setPublicPath?.(publicPath);
+  } catch {}
+
+  try {
+    AppCore?.setState?.({
+      route,
+      publicPath,
+      bootIsActivation:
+        routeContext.activationBoot ||
+        getState().bootIsActivation ||
+        false,
+      bootHasActivationToken:
+        routeContext.activationBoot ||
+        getState().bootHasActivationToken ||
+        false,
+    });
+  } catch {}
+
+  return true;
+}
+
+function clearSessionLocalProtected({
+  options = {},
+  routeContext = null,
+  reason = "",
+} = {}) {
+  const ctx =
+    routeContext ||
+    captureRouteContext(options);
+
+  try {
+    clearSessionLocal({
+      silent: true,
+      preserveRoute:
+        ctx.shouldProtect,
+      preserveCurrentRoute:
+        ctx.shouldProtect,
+      reason,
+    });
+  } catch {
+    try {
+      clearSessionLocal({
+        silent: true,
+      });
+    } catch {}
+  }
+
+  restoreRouteContext(ctx);
+
+  return true;
+}
+
+/* =========================================================
+   STORAGE PAYLOAD
+========================================================= */
+
 function getStoredRefreshPayload() {
   return {
     refreshToken: String(
-      getStoredRefreshToken() ||
-        ""
+      getStoredRefreshToken() || ""
     ).trim(),
 
     sessionId: String(
-      getStoredSessionId() ||
-        ""
+      getStoredSessionId() || ""
     ).trim(),
 
     userId: String(
-      getStoredSessionUserId() ||
-        ""
+      getStoredSessionUserId() || ""
     ).trim(),
   };
 }
 
-function shouldClearForError(
-  error
-) {
+function shouldClearForError(error) {
   const status =
     error?.status ||
     error?.response?.status ||
@@ -186,22 +831,6 @@ function shouldClearForError(
   );
 }
 
-function hasApiGet() {
-  return (
-    typeof AppCore
-      ?.apiClient?.get ===
-    "function"
-  );
-}
-
-function hasApiPost() {
-  return (
-    typeof AppCore
-      ?.apiClient?.post ===
-    "function"
-  );
-}
-
 /* =========================================================
    /ME
 ========================================================= */
@@ -210,9 +839,7 @@ export async function fetchMe(
   sessionArg = {}
 ) {
   const session =
-    getSession(
-      sessionArg
-    );
+    getSession(sessionArg);
 
   if (!hasValidToken()) {
     throw new Error(
@@ -246,12 +873,8 @@ export async function fetchMe(
           );
 
         const user =
-          extractUser(
-            response
-          ) ||
-          extractUser(
-            response?.data
-          ) ||
+          extractUser(response) ||
+          extractUser(response?.data) ||
           response?.user ||
           null;
 
@@ -288,9 +911,7 @@ export async function fetchMe(
           {
             error,
             message:
-              extractMessage(
-                error
-              ),
+              extractMessage(error),
           }
         );
 
@@ -312,9 +933,7 @@ export async function refreshSession(
   sessionArg = {}
 ) {
   const session =
-    getSession(
-      sessionArg
-    );
+    getSession(sessionArg);
 
   if (!hasRefreshContext()) {
     throw new Error(
@@ -328,9 +947,7 @@ export async function refreshSession(
     );
   }
 
-  if (
-    session.refreshPromise
-  ) {
+  if (session.refreshPromise) {
     return session.refreshPromise;
   }
 
@@ -350,9 +967,7 @@ export async function refreshSession(
 
   session.refreshing = true;
 
-  emit(
-    "auth:refresh:start"
-  );
+  emit("auth:refresh:start");
 
   session.refreshPromise =
     (async () => {
@@ -370,24 +985,16 @@ export async function refreshSession(
           );
 
         const nextToken =
-          extractToken(
-            response
-          );
+          extractToken(response);
 
         const nextUser =
-          extractUser(
-            response
-          );
+          extractUser(response);
 
         const nextRefreshToken =
-          extractRefreshToken(
-            response
-          );
+          extractRefreshToken(response);
 
         const nextSessionData =
-          normalizeSessionPayload(
-            response
-          );
+          normalizeSessionPayload(response);
 
         if (
           !nextToken &&
@@ -402,13 +1009,11 @@ export async function refreshSession(
           applySession({
             token:
               nextToken ??
-              AppCore?.state
-                ?.token,
+              AppCore?.state?.token,
 
             user:
               nextUser ??
-              AppCore?.state
-                ?.user,
+              AppCore?.state?.user,
 
             refreshToken:
               nextRefreshToken ??
@@ -471,9 +1076,7 @@ export async function refreshSession(
           {
             error,
             message:
-              extractMessage(
-                error
-              ),
+              extractMessage(error),
             refreshFailCount:
               session.refreshFailCount,
             refreshBlockedUntil:
@@ -484,11 +1087,8 @@ export async function refreshSession(
 
         throw error;
       } finally {
-        session.refreshing =
-          false;
-
-        session.refreshPromise =
-          null;
+        session.refreshing = false;
+        session.refreshPromise = null;
       }
     })();
 
@@ -503,9 +1103,7 @@ export async function restoreUsingMe(
   session = {}
 ) {
   const user =
-    await fetchMe(
-      session
-    );
+    await fetchMe(session);
 
   emit(
     "auth:restore:success",
@@ -526,38 +1124,30 @@ export async function restoreUsingRefreshOnly(
   session = {}
 ) {
   const refreshed =
-    await refreshSession(
-      session
-    );
+    await refreshSession(session);
 
   if (
     !AppCore?.state?.user &&
     hasValidToken()
   ) {
-    await fetchMe(
-      session
-    );
+    await fetchMe(session);
   }
 
   emit(
     "auth:restore:success",
     {
-      source:
-        "refresh-only",
+      source: "refresh-only",
       user:
-        AppCore?.state
-          ?.user ||
+        AppCore?.state?.user ||
         null,
     }
   );
 
   return {
     ok: true,
-    source:
-      "refresh-only",
+    source: "refresh-only",
     user:
-      AppCore?.state
-        ?.user ||
+      AppCore?.state?.user ||
       null,
     refreshed,
   };
@@ -566,25 +1156,25 @@ export async function restoreUsingRefreshOnly(
 export async function restoreUsingRefreshPreferred(
   session = {}
 ) {
-  return restoreUsingRefreshOnly(
-    session
-  );
+  return restoreUsingRefreshOnly(session);
 }
 
 export async function restoreAfterMeFailure(
   session = {},
-  meError
+  meError,
+  options = {},
+  routeContext = null
 ) {
   warn(
     "fetchMe() falló durante restore.",
     meError
   );
 
-  if (
-    !hasRefreshContext()
-  ) {
-    clearSessionLocal({
-      silent: true,
+  if (!hasRefreshContext()) {
+    clearSessionLocalProtected({
+      options,
+      routeContext,
+      reason: "me-failed-no-refresh-context",
     });
 
     emit(
@@ -592,9 +1182,7 @@ export async function restoreAfterMeFailure(
       {
         error: meError,
         message:
-          extractMessage(
-            meError
-          ),
+          extractMessage(meError),
       }
     );
 
@@ -610,27 +1198,25 @@ export async function restoreAfterMeFailure(
       session
     );
   } catch (refreshError) {
-    clearSessionLocal({
-      silent: true,
+    clearSessionLocalProtected({
+      options,
+      routeContext,
+      reason: "refresh-after-me-failed",
     });
 
     emit(
       "auth:restore:error",
       {
-        error:
-          refreshError,
+        error: refreshError,
         message:
-          extractMessage(
-            refreshError
-          ),
+          extractMessage(refreshError),
       }
     );
 
     return {
       ok: false,
       user: null,
-      error:
-        refreshError,
+      error: refreshError,
     };
   }
 }
@@ -640,16 +1226,17 @@ export async function restoreAfterMeFailure(
 ========================================================= */
 
 export async function restoreSession(
-  sessionArg = {}
+  input = {}
 ) {
-  const session =
-    getSession(
-      sessionArg
-    );
+  const {
+    session,
+    options,
+  } = resolveRestoreArgs(input);
 
-  if (
-    session.restorePromise
-  ) {
+  const routeContext =
+    captureRouteContext(options);
+
+  if (session.restorePromise) {
     return session.restorePromise;
   }
 
@@ -662,11 +1249,22 @@ export async function restoreSession(
         hasValidToken(),
       hasUser:
         Boolean(
-          AppCore?.state
-            ?.user
+          AppCore?.state?.user
         ),
       hasRefreshContext:
         hasRefreshContext(),
+      publicRoute:
+        Boolean(options.publicRoute),
+      preserveCurrentRoute:
+        Boolean(options.preserveCurrentRoute),
+      activationBoot:
+        routeContext.activationBoot,
+      protectedRoute:
+        routeContext.shouldProtect,
+      route:
+        routeContext.route,
+      publicPath:
+        routeContext.publicPath,
     }
   );
 
@@ -683,8 +1281,10 @@ export async function restoreSession(
           !tokenAvailable &&
           !refreshAvailable
         ) {
-          clearSessionLocal({
-            silent: true,
+          clearSessionLocalProtected({
+            options,
+            routeContext,
+            reason: "missing-token-and-refresh",
           });
 
           emit(
@@ -692,73 +1292,103 @@ export async function restoreSession(
             {
               reason:
                 "missing-token-and-refresh",
+              protectedRoute:
+                routeContext.shouldProtect,
             }
           );
 
           return {
             ok: false,
             user: null,
+            protectedRoute:
+              routeContext.shouldProtect,
           };
         }
 
-        /* Prefer refresh */
-        if (
-          refreshAvailable
-        ) {
+        /*
+          Prefer refresh cuando existe contexto.
+        */
+        if (refreshAvailable) {
           try {
             log(
-              "restoreSession(): refresh preferente."
+              "restoreSession(): refresh preferente.",
+              {
+                protectedRoute:
+                  routeContext.shouldProtect,
+                publicPath:
+                  routeContext.publicPath,
+              }
             );
 
-            return await restoreUsingRefreshPreferred(
-              session
-            );
+            const result =
+              await restoreUsingRefreshPreferred(
+                session
+              );
+
+            restoreRouteContext(routeContext);
+
+            return result;
           } catch (refreshError) {
             warn(
               "Refresh preferente falló.",
               refreshError
             );
 
-            if (
-              hasValidToken()
-            ) {
-              return await restoreAfterMeFailure(
-                session,
-                refreshError
-              );
+            if (hasValidToken()) {
+              const result =
+                await restoreAfterMeFailure(
+                  session,
+                  refreshError,
+                  options,
+                  routeContext
+                );
+
+              restoreRouteContext(routeContext);
+
+              return result;
             }
 
             if (
-              shouldClearForError(
-                refreshError
-              )
+              shouldClearForError(refreshError)
             ) {
-              clearSessionLocal({
-                silent: true,
+              clearSessionLocalProtected({
+                options,
+                routeContext,
+                reason: "refresh-error-clearable",
               });
+            } else {
+              restoreRouteContext(routeContext);
             }
 
             return {
               ok: false,
               user: null,
-              error:
-                refreshError,
+              error: refreshError,
+              protectedRoute:
+                routeContext.shouldProtect,
             };
           }
         }
 
-        /* Solo token */
-        return await restoreUsingMe(
-          session
-        );
+        /*
+          Solo token.
+        */
+        const result =
+          await restoreUsingMe(session);
+
+        restoreRouteContext(routeContext);
+
+        return result;
       } catch (error) {
         warn(
           "restoreSession() fatal:",
           error
         );
 
-        clearSessionLocal({
-          silent: true,
+        clearSessionLocalProtected({
+          options,
+          routeContext,
+          reason: "restore-fatal",
         });
 
         emit(
@@ -766,9 +1396,9 @@ export async function restoreSession(
           {
             error,
             message:
-              extractMessage(
-                error
-              ),
+              extractMessage(error),
+            protectedRoute:
+              routeContext.shouldProtect,
           }
         );
 
@@ -776,11 +1406,12 @@ export async function restoreSession(
           ok: false,
           user: null,
           error,
+          protectedRoute:
+            routeContext.shouldProtect,
         };
       } finally {
-        clearRuntimeFlags(
-          session
-        );
+        restoreRouteContext(routeContext);
+        clearRuntimeFlags(session);
       }
     })();
 
@@ -795,44 +1426,73 @@ export function getRestoreSnapshot(
   sessionArg = {}
 ) {
   const session =
-    getSession(
-      sessionArg
-    );
+    getSession(sessionArg);
+
+  const routeContext =
+    captureRouteContext({
+      publicRoute: false,
+      preserveCurrentRoute: false,
+    });
 
   return {
     ...buildSessionSnapshot(),
+
     checking:
-      Boolean(
-        session.checking
-      ),
+      Boolean(session.checking),
+
     refreshing:
-      Boolean(
-        session.refreshing
-      ),
+      Boolean(session.refreshing),
+
     restoring:
-      Boolean(
-        session.restoring
-      ),
+      Boolean(session.restoring),
+
     refreshFailCount:
       safeNumber(
         session.refreshFailCount,
         0
       ),
+
     refreshBlockedUntil:
       safeNumber(
         session.refreshBlockedUntil,
         0
       ),
+
     lastCheckAt:
       safeNumber(
         session.lastCheckAt,
         0
       ),
+
     lastRefreshAt:
       safeNumber(
         session.lastRefreshAt,
         0
       ),
+
+    protectedRoute:
+      routeContext.shouldProtect,
+
+    activationBoot:
+      routeContext.activationBoot,
+
+    route:
+      routeContext.route,
+
+    publicPath:
+      routeContext.publicPath,
+
+    browserPath:
+      routeContext.browserPath,
+
+    initialUrl:
+      routeContext.initialUrl,
+
+    activationInitialUrl:
+      routeContext.activationInitialUrl,
+
+    activationTokenScrubbed:
+      isActivationTokenScrubbed(),
   };
 }
 

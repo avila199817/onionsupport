@@ -3,7 +3,14 @@
    Archivo: src/views/facturas/facturas.template.js
 
    FINAL PRODUCTION TEMPLATE · FACTURAS 10/10 · VISUAL FIX
+   PATCH · PAGINATION 5 ITEMS · INCIDENCIA READY
 ========================================================= */
+
+/* =========================================================
+   CONSTANTS
+========================================================= */
+
+const DEFAULT_PAGE_SIZE = 5;
 
 /* =========================================================
    HELPERS
@@ -11,12 +18,15 @@
 
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
+
   const text = String(value).trim();
+
   return text || fallback;
 }
 
 function safeNumber(value, fallback = 0) {
   const n = Number(value);
+
   return Number.isFinite(n) ? n : fallback;
 }
 
@@ -32,14 +42,15 @@ function safeObject(value) {
 
 function first(...values) {
   for (const value of values) {
-    if (
-      value !== undefined &&
-      value !== null &&
-      String(value).trim() !== ""
-    ) {
-      return value;
+    if (value === undefined || value === null) continue;
+
+    if (typeof value === "string" && value.trim() === "") {
+      continue;
     }
+
+    return value;
   }
+
   return null;
 }
 
@@ -110,11 +121,13 @@ function formatRelativeDate(value = null) {
   }
 
   const diffHours = Math.round(absMin / 60);
+
   if (diffHours < 24) {
     return diffMin > 0 ? `En ${diffHours} h` : `Hace ${diffHours} h`;
   }
 
   const diffDays = Math.round(diffHours / 24);
+
   if (diffDays <= 7) {
     return diffMin > 0
       ? `En ${diffDays} día${diffDays === 1 ? "" : "s"}`
@@ -174,14 +187,17 @@ function getClientName(item = {}) {
       item.clienteEmpresa,
       item.cliente?.empresa,
       item.company,
+
       item?.raw?.clienteNombre,
       item?.raw?.cliente?.nombre,
+      item?.raw?.cliente?.nombreContacto,
       item?.raw?.clientName,
       item?.raw?.client?.name,
       item?.raw?.name,
       item?.raw?.nombre,
       item?.raw?.clienteEmpresa,
-      item?.raw?.cliente?.empresa
+      item?.raw?.cliente?.empresa,
+      item?.raw?.cliente?.razonSocial
     ),
     "Cliente"
   );
@@ -195,7 +211,9 @@ function getClientEmail(item = {}) {
       item.email,
       item.clientEmail,
       item.client?.email,
+
       item?.raw?.clienteEmail,
+      item?.raw?.emailCliente,
       item?.raw?.cliente?.email,
       item?.raw?.email,
       item?.raw?.clientEmail,
@@ -207,6 +225,7 @@ function getClientEmail(item = {}) {
 
 function getInitials(value = "") {
   const text = normalizeWhitespace(value);
+
   if (!text) return "ON";
 
   const parts = text.split(" ").filter(Boolean);
@@ -215,18 +234,35 @@ function getInitials(value = "") {
     return parts[0].slice(0, 2).toUpperCase();
   }
 
-  return `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase();
+  return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || "ON";
 }
 
 function getEstadoPagoKey(value = "") {
   const key = safeText(value, "").toLowerCase();
 
-  if (["paid", "pagada", "pagado", "cobrada"].includes(key)) return "paid";
-  if (["pending", "pendiente"].includes(key)) return "pending";
-  if (["partial", "parcial"].includes(key)) return "partial";
-  if (["overdue", "vencida"].includes(key)) return "overdue";
-  if (["cancelled", "cancelada"].includes(key)) return "cancelled";
-  if (["draft", "borrador"].includes(key)) return "draft";
+  if (["paid", "pagada", "pagado", "cobrada", "abonada"].includes(key)) {
+    return "paid";
+  }
+
+  if (["pending", "pendiente", "unpaid"].includes(key)) {
+    return "pending";
+  }
+
+  if (["partial", "parcial"].includes(key)) {
+    return "partial";
+  }
+
+  if (["overdue", "vencida"].includes(key)) {
+    return "overdue";
+  }
+
+  if (["cancelled", "canceled", "cancelada", "cancelado"].includes(key)) {
+    return "cancelled";
+  }
+
+  if (["draft", "borrador"].includes(key)) {
+    return "draft";
+  }
 
   return "pending";
 }
@@ -262,24 +298,49 @@ function getIncidenciaId(item = {}) {
     first(
       item.ticketId,
       item.incidenciaId,
+
       item.incidencia?.id,
       item.incidencia?.ticketId,
+      item.incidencia?.incidenciaId,
+
       item.ticket?.id,
       item.ticket?.ticketId,
+      item.ticket?.incidenciaId,
+
+      item.linkedTicket?.id,
+      item.linkedTicket?.ticketId,
+      item.linkedTicket?.incidenciaId,
+
       item.relatedTicketId,
       item.relatedIncidentId,
       item.supportTicketId,
       item.caseId,
+
+      item.meta?.ticketId,
+      item.meta?.incidenciaId,
+
       item?.raw?.ticketId,
       item?.raw?.incidenciaId,
+
       item?.raw?.incidencia?.id,
       item?.raw?.incidencia?.ticketId,
+      item?.raw?.incidencia?.incidenciaId,
+
       item?.raw?.ticket?.id,
       item?.raw?.ticket?.ticketId,
+      item?.raw?.ticket?.incidenciaId,
+
+      item?.raw?.linkedTicket?.id,
+      item?.raw?.linkedTicket?.ticketId,
+      item?.raw?.linkedTicket?.incidenciaId,
+
       item?.raw?.relatedTicketId,
       item?.raw?.relatedIncidentId,
       item?.raw?.supportTicketId,
-      item?.raw?.caseId
+      item?.raw?.caseId,
+
+      item?.raw?.meta?.ticketId,
+      item?.raw?.meta?.incidenciaId
     ),
     "—"
   );
@@ -291,9 +352,11 @@ function getTotalLabel(item = {}) {
       item.total,
       item.amount,
       item.importe,
+      item.importeTotal,
       item?.raw?.total,
       item?.raw?.amount,
       item?.raw?.importe,
+      item?.raw?.importeTotal,
       0
     ),
     first(
@@ -343,10 +406,13 @@ function getCreatedAt(item = {}) {
     item.createdAt,
     item.fechaCreacion,
     item.issueDate,
+    item.fechaFactura,
+
     item?.raw?.fecha,
     item?.raw?.createdAt,
     item?.raw?.fechaCreacion,
-    item?.raw?.issueDate
+    item?.raw?.issueDate,
+    item?.raw?.fechaFactura
   );
 }
 
@@ -371,34 +437,44 @@ function hasPdf(item = {}) {
       item.blobPath,
       item.pdfUrl,
       item.pdf,
+      item.hasPdf,
       item?.raw?.pdfAvailable,
       item?.raw?.blobPath,
       item?.raw?.pdfUrl,
-      item?.raw?.pdf
+      item?.raw?.pdf,
+      item?.raw?.hasPdf
     )
   );
 }
+
+/* =========================================================
+   STATS / PAGINATION
+========================================================= */
 
 function computeStats(items = []) {
   const rows = safeArray(items);
 
   return {
     total: rows.length,
+
     pendingCount: rows.filter((item) =>
       ["pending", "partial", "draft"].includes(
         getEstadoPagoKey(first(item.estadoPago, item?.raw?.estadoPago))
       )
     ).length,
+
     paidCount: rows.filter((item) =>
       ["paid"].includes(
         getEstadoPagoKey(first(item.estadoPago, item?.raw?.estadoPago))
       )
     ).length,
+
     overdueCount: rows.filter((item) =>
       ["overdue"].includes(
         getEstadoPagoKey(first(item.estadoPago, item?.raw?.estadoPago))
       )
     ).length,
+
     totalImporte: rows.reduce(
       (acc, item) =>
         acc +
@@ -407,15 +483,79 @@ function computeStats(items = []) {
             item.total,
             item.amount,
             item.importe,
+            item.importeTotal,
             item?.raw?.total,
             item?.raw?.amount,
             item?.raw?.importe,
+            item?.raw?.importeTotal,
             0
           ),
           0
         ),
       0
     ),
+  };
+}
+
+function getPagination(items = [], state = {}) {
+  const allItems = safeArray(items);
+  const runtime = safeObject(state);
+
+  const pageSize = Math.max(
+    1,
+    safeNumber(
+      first(
+        runtime.pageSize,
+        runtime.limit,
+        runtime.facturasPageSize,
+        DEFAULT_PAGE_SIZE
+      ),
+      DEFAULT_PAGE_SIZE
+    )
+  );
+
+  const totalCount = allItems.length;
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil((totalCount || 1) / pageSize)
+  );
+
+  const currentPage = Math.min(
+    Math.max(
+      1,
+      safeNumber(
+        first(
+          runtime.page,
+          runtime.currentPage,
+          runtime.facturasPage,
+          1
+        ),
+        1
+      )
+    ),
+    totalPages
+  );
+
+  const startIndex = (currentPage - 1) * pageSize;
+  const pageItems = allItems.slice(startIndex, startIndex + pageSize);
+
+  const rangeStart = totalCount && pageItems.length ? startIndex + 1 : 0;
+  const rangeEnd = totalCount
+    ? Math.min(startIndex + pageItems.length, totalCount)
+    : 0;
+
+  return {
+    allItems,
+    pageItems,
+    pageSize,
+    currentPage,
+    totalPages,
+    totalCount,
+    rangeStart,
+    rangeEnd,
+    hasPrev: currentPage > 1,
+    hasNext: currentPage < totalPages,
   };
 }
 
@@ -499,12 +639,45 @@ function renderIncidenciaLink(item = {}) {
       type="button"
       class="facturas-incidencia-link"
       data-action="open-incidencia"
+      data-facturas-action="open-incidencia"
       data-ticket-id="${escapeHtml(incidenciaId)}"
       data-incidencia-id="${escapeHtml(incidenciaId)}"
       title="Abrir incidencia relacionada"
     >
       ${escapeHtml(incidenciaId)}
     </button>
+  `;
+}
+
+function renderPagination(pagination = {}, state = {}) {
+  const runtime = safeObject(state);
+  const loading = Boolean(runtime.loading);
+  const refreshing = Boolean(runtime.refreshing);
+
+  return `
+    <div class="facturas-pagination" aria-label="Paginación de facturas">
+      <button
+        type="button"
+        class="facturas-pagination-btn"
+        data-action="prev-page"
+        data-facturas-action="prev-page"
+        data-page="${escapeHtml(String(Math.max(1, pagination.currentPage - 1)))}"
+        ${!pagination.hasPrev || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
+      >
+        Anterior
+      </button>
+
+      <button
+        type="button"
+        class="facturas-pagination-btn"
+        data-action="next-page"
+        data-facturas-action="next-page"
+        data-page="${escapeHtml(String(Math.min(pagination.totalPages, pagination.currentPage + 1)))}"
+        ${!pagination.hasNext || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
+      >
+        Siguiente
+      </button>
+    </div>
   `;
 }
 
@@ -634,14 +807,17 @@ function renderTableLoading(rows = 5) {
           () => `
             <div class="facturas-table-loading-row">
               <div class="facturas-skeleton facturas-skeleton--avatar"></div>
+
               <div class="facturas-table-loading-copy">
                 <div class="facturas-skeleton facturas-skeleton--xs"></div>
                 <div class="facturas-skeleton facturas-skeleton--lg"></div>
                 <div class="facturas-skeleton facturas-skeleton--md"></div>
               </div>
+
               <div class="facturas-skeleton facturas-skeleton--pill"></div>
               <div class="facturas-skeleton facturas-skeleton--date"></div>
-              <div class="facturas-skeleton facturas-skeleton--pill"></div>
+              <div class="facturas-skeleton facturas-skeleton--amount"></div>
+              <div class="facturas-skeleton facturas-skeleton--ticket"></div>
               <div class="facturas-skeleton facturas-skeleton--actions"></div>
             </div>
           `
@@ -661,6 +837,10 @@ function renderEmptyState() {
     </div>
   `;
 }
+
+/* =========================================================
+   STYLES
+========================================================= */
 
 function renderStyles() {
   return `
@@ -894,6 +1074,45 @@ function renderStyles() {
         color:var(--text-dim, #7b8494);
       }
 
+      .facturas-pagination{
+        display:flex;
+        gap:8px;
+        flex-wrap:wrap;
+        justify-content:flex-end;
+      }
+
+      .facturas-pagination-btn{
+        min-height:38px;
+        padding:0 14px;
+        border-radius:13px;
+        border:1px solid rgba(15,23,42,.06);
+        background:rgba(255,255,255,.66);
+        color:#273142;
+        font-size:12px;
+        font-weight:680;
+        cursor:pointer;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        text-decoration:none;
+        transition:
+          background .16s ease,
+          border-color .16s ease,
+          opacity .16s ease;
+      }
+
+      .facturas-pagination-btn:hover{
+        background:rgba(255,255,255,.9);
+        border-color:rgba(15,23,42,.10);
+      }
+
+      .facturas-pagination-btn[disabled],
+      .facturas-pagination-btn[aria-disabled="true"]{
+        opacity:.48;
+        cursor:not-allowed;
+        pointer-events:none;
+      }
+
       .facturas-table-wrap{
         position:relative;
       }
@@ -915,7 +1134,7 @@ function renderStyles() {
         width:100%;
         border-collapse:separate;
         border-spacing:0;
-        min-width:980px;
+        min-width:1120px;
       }
 
       .facturas-table thead th{
@@ -1091,6 +1310,7 @@ function renderStyles() {
       }
 
       .facturas-incidencia-link{
+        max-width:178px;
         min-height:30px;
         padding:0 10px;
         border-radius:999px;
@@ -1099,13 +1319,15 @@ function renderStyles() {
         color:#6d53d7;
         font-size:11px;
         font-weight:760;
-        letter-spacing:.045em;
+        letter-spacing:.025em;
         text-transform:uppercase;
         cursor:pointer;
         display:inline-flex;
         align-items:center;
         justify-content:center;
         white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
         transition:
           transform .16s ease,
           background .16s ease,
@@ -1133,8 +1355,8 @@ function renderStyles() {
         display:grid;
         grid-template-columns:repeat(2, minmax(78px, 1fr));
         gap:6px;
-        width:168px;
-        min-width:168px;
+        width:178px;
+        min-width:178px;
         justify-content:end;
       }
 
@@ -1220,7 +1442,7 @@ function renderStyles() {
 
       .facturas-table-loading-row{
         display:grid;
-        grid-template-columns:44px minmax(260px, 1.8fr) 120px 140px 110px 170px;
+        grid-template-columns:44px minmax(220px, 1.25fr) 110px 140px 112px 156px 178px;
         gap:12px;
         align-items:center;
       }
@@ -1282,8 +1504,18 @@ function renderStyles() {
         height:12px;
       }
 
+      .facturas-skeleton--amount{
+        width:92px;
+        height:30px;
+      }
+
+      .facturas-skeleton--ticket{
+        width:148px;
+        height:30px;
+      }
+
       .facturas-skeleton--actions{
-        width:168px;
+        width:178px;
         height:66px;
         border-radius:12px;
       }
@@ -1397,6 +1629,10 @@ function renderStyles() {
           padding:14px 14px 12px;
         }
 
+        .facturas-pagination{
+          justify-content:flex-start;
+        }
+
         .facturas-stats{
           grid-template-columns:1fr;
         }
@@ -1454,6 +1690,8 @@ export function renderHeader({ items = [], state = {} } = {}) {
             type="button"
             id="facturas-export-btn"
             class="facturas-btn"
+            data-action="export"
+            data-facturas-action="export"
           >
             <span class="facturas-btn-text">Exportar CSV</span>
           </button>
@@ -1462,6 +1700,8 @@ export function renderHeader({ items = [], state = {} } = {}) {
             type="button"
             id="facturas-refresh-btn"
             class="facturas-btn facturas-btn--primary${refreshing ? " is-loading" : ""}"
+            data-action="refresh"
+            data-facturas-action="refresh"
             ${refreshing ? 'disabled aria-busy="true"' : ""}
           >
             ${
@@ -1525,7 +1765,7 @@ export function renderLoadingState() {
     ${renderStyles()}
 
     <section class="facturas-history">
-      ${renderTableLoading(6)}
+      ${renderTableLoading(DEFAULT_PAGE_SIZE)}
     </section>
   `;
 }
@@ -1549,7 +1789,8 @@ export function renderCards({ items = [], state = {} } = {}) {
   const rows = safeArray(items);
   const runtime = safeObject(state);
   const refreshing = Boolean(runtime.refreshing);
-  const total = rows.length;
+
+  const pagination = getPagination(rows, runtime);
 
   if (!rows.length) {
     return `
@@ -1569,27 +1810,31 @@ export function renderCards({ items = [], state = {} } = {}) {
         <div class="facturas-history-copy">
           <h2 class="facturas-history-title">Historial de facturas</h2>
           <p class="facturas-history-subtitle">
-            ${escapeHtml(`Mostrando ${total} registro${total === 1 ? "" : "s"} en pantalla`)}
+            ${escapeHtml(
+              `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · página ${pagination.currentPage} de ${pagination.totalPages}`
+            )}
           </p>
         </div>
+
+        ${renderPagination(pagination, runtime)}
       </div>
 
       <div class="facturas-table-wrap${refreshing ? " is-refreshing" : ""}">
         ${
           refreshing
-            ? renderTableLoading(Math.min(4, Math.max(3, rows.length || 3)))
+            ? renderTableLoading(Math.min(DEFAULT_PAGE_SIZE, Math.max(3, pagination.pageItems.length || 3)))
             : ""
         }
 
         <div class="facturas-table-shell">
           <table class="facturas-table" role="table" aria-label="Listado de facturas">
             <colgroup>
-              <col style="width:52%;">
+              <col style="width:36%;">
               <col style="width:10%;">
               <col style="width:14%;">
               <col style="width:12%;">
-              <col style="width:4%;">
-              <col style="width:8%;">
+              <col style="width:14%;">
+              <col style="width:14%;">
             </colgroup>
 
             <thead>
@@ -1604,7 +1849,7 @@ export function renderCards({ items = [], state = {} } = {}) {
             </thead>
 
             <tbody>
-              ${rows.map((item) => renderRow(item, runtime)).join("")}
+              ${pagination.pageItems.map((item) => renderRow(item, runtime)).join("")}
             </tbody>
           </table>
         </div>

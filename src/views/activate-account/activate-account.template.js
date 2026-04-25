@@ -16,6 +16,7 @@
    - usar logo real de empresa según tema activo
    - exponer ids estables para dom.js / activateAccountView.js
    - mantener compatibilidad total con flujo SPA público
+   - evitar botones duplicados de retorno
 ========================================================= */
 
 import { renderPasswordField } from "../../shared/password-field/index.js";
@@ -269,17 +270,6 @@ function getToastCloseIcon() {
   `;
 }
 
-function getBackArrowIcon() {
-  return `
-    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M14.71 6.29a1 1 0 0 1 0 1.41L11.41 11H20a1 1 0 1 1 0 2h-8.59l3.3 3.29a1 1 0 0 1-1.41 1.42l-5-5a1 1 0 0 1 0-1.42l5-5a1 1 0 0 1 1.41 0Z"
-      />
-    </svg>
-  `;
-}
-
 function getShieldIcon() {
   return `
     <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
@@ -412,11 +402,6 @@ function renderScopedThemeLogoStyle() {
 
 /* =========================================================
    PASSWORD FIELD VISUAL PATCH
-
-   Nota:
-   - El comportamiento JS debe venir del shared:
-     bindPasswordFieldsInScope(container)
-   - Este bloque solo estabiliza layout/hover/focus.
 ========================================================= */
 
 function renderScopedPasswordFieldStyle() {
@@ -560,8 +545,24 @@ function renderScopedPasswordFieldStyle() {
 function renderActivateAccountScopedStyle() {
   return `
     <style>
+      .activate-account-view .login-card{
+        overflow:hidden;
+      }
+
+      .activate-account-view .login-header{
+        margin-bottom:18px;
+      }
+
+      .activate-account-view .login-header h2{
+        max-width:440px;
+      }
+
+      .activate-account-view .login-form{
+        gap:16px;
+      }
+
       .activate-account-view .activate-account-status-box{
-        margin:18px 0 0;
+        margin:6px 0 0;
         display:grid;
         gap:14px;
       }
@@ -569,71 +570,90 @@ function renderActivateAccountScopedStyle() {
       .activate-account-view .activate-account-status-card{
         position:relative;
         overflow:hidden;
-        border-radius:20px;
-        border:1px solid rgba(148,163,184,.22);
+        border-radius:22px;
+        border:1px solid rgba(148,163,184,.24);
         background:
-          radial-gradient(circle at top left, rgba(124,92,255,.10), transparent 36%),
-          rgba(255,255,255,.62);
-        padding:18px 18px 17px;
+          radial-gradient(circle at top left, rgba(124,92,255,.12), transparent 34%),
+          linear-gradient(180deg, rgba(255,255,255,.82), rgba(248,250,252,.64));
+        padding:18px;
         display:grid;
-        grid-template-columns:44px minmax(0, 1fr);
-        gap:14px;
+        grid-template-columns:46px minmax(0, 1fr);
+        gap:15px;
         align-items:start;
+        box-shadow:
+          0 18px 44px rgba(15,23,42,.055),
+          inset 0 1px 0 rgba(255,255,255,.64);
+      }
+
+      .activate-account-view .activate-account-status-card::after{
+        content:"";
+        position:absolute;
+        inset:auto 18px 0 18px;
+        height:1px;
+        background:linear-gradient(
+          90deg,
+          transparent,
+          rgba(124,92,255,.22),
+          transparent
+        );
+        opacity:.9;
       }
 
       .activate-account-view .activate-account-status-icon{
-        width:44px;
-        height:44px;
-        border-radius:16px;
+        width:46px;
+        height:46px;
+        border-radius:17px;
         display:grid;
         place-items:center;
         color:#6d53d7;
-        background:rgba(124,92,255,.10);
-        border:1px solid rgba(124,92,255,.16);
+        background:rgba(124,92,255,.11);
+        border:1px solid rgba(124,92,255,.18);
+        box-shadow:inset 0 1px 0 rgba(255,255,255,.48);
       }
 
       .activate-account-view[data-status="success"] .activate-account-status-icon{
         color:#258a59;
-        background:rgba(54,198,144,.10);
-        border-color:rgba(54,198,144,.22);
+        background:rgba(54,198,144,.11);
+        border-color:rgba(54,198,144,.24);
       }
 
       .activate-account-view[data-status="error"] .activate-account-status-icon,
       .activate-account-view[data-status="expired"] .activate-account-status-icon,
       .activate-account-view[data-status="invalid"] .activate-account-status-icon{
         color:#c24141;
-        background:rgba(255,107,107,.10);
-        border-color:rgba(255,107,107,.22);
+        background:rgba(255,107,107,.11);
+        border-color:rgba(255,107,107,.24);
       }
 
       .activate-account-view .activate-account-status-copy{
         min-width:0;
         display:grid;
-        gap:5px;
+        gap:6px;
       }
 
       .activate-account-view .activate-account-status-eyebrow{
         font-size:11px;
         line-height:1.1;
-        font-weight:760;
-        letter-spacing:.085em;
+        font-weight:780;
+        letter-spacing:.09em;
         text-transform:uppercase;
         color:#7b8494;
       }
 
       .activate-account-view .activate-account-status-title{
         margin:0;
-        font-size:17px;
-        line-height:1.22;
-        font-weight:760;
-        letter-spacing:-.025em;
+        font-size:18px;
+        line-height:1.2;
+        font-weight:790;
+        letter-spacing:-.03em;
         color:var(--text-strong, #111827);
       }
 
       .activate-account-view .activate-account-status-text{
         margin:0;
+        max-width:420px;
         font-size:13px;
-        line-height:1.55;
+        line-height:1.58;
         color:var(--text-dim, #6b7280);
       }
 
@@ -642,43 +662,55 @@ function renderActivateAccountScopedStyle() {
         min-height:28px;
         padding:0 11px;
         border-radius:999px;
-        border:1px solid rgba(124,92,255,.18);
-        background:rgba(124,92,255,.08);
+        border:1px solid rgba(124,92,255,.2);
+        background:rgba(124,92,255,.09);
         color:#6d53d7;
         display:inline-flex;
         align-items:center;
         justify-content:center;
         font-size:11px;
-        font-weight:760;
-        letter-spacing:.055em;
+        font-weight:780;
+        letter-spacing:.06em;
         text-transform:uppercase;
       }
 
       .activate-account-view[data-status="success"] .activate-account-badge{
-        border-color:rgba(54,198,144,.22);
-        background:rgba(54,198,144,.10);
+        border-color:rgba(54,198,144,.24);
+        background:rgba(54,198,144,.11);
         color:#258a59;
       }
 
       .activate-account-view[data-status="error"] .activate-account-badge,
       .activate-account-view[data-status="expired"] .activate-account-badge,
       .activate-account-view[data-status="invalid"] .activate-account-badge{
-        border-color:rgba(255,107,107,.22);
-        background:rgba(255,107,107,.10);
+        border-color:rgba(255,107,107,.24);
+        background:rgba(255,107,107,.11);
         color:#c24141;
       }
 
       .activate-account-view .activate-account-password-fields{
         display:grid;
-        gap:14px;
-        margin-top:16px;
+        gap:13px;
+        margin-top:2px;
       }
 
       .activate-account-view .activate-account-password-help{
-        margin:0;
+        margin:1px 0 0;
+        padding:12px 13px;
+        border-radius:16px;
+        border:1px solid rgba(148,163,184,.18);
+        background:rgba(248,250,252,.72);
         color:var(--text-dim, #6b7280);
         font-size:12px;
         line-height:1.55;
+      }
+
+      .activate-account-view .login-error{
+        margin-top:0;
+      }
+
+      .activate-account-view .login-button{
+        margin-top:2px;
       }
 
       .activate-account-view .activate-account-status-spinner{
@@ -697,10 +729,13 @@ function renderActivateAccountScopedStyle() {
       }
 
       [data-theme="dark"] .activate-account-view .activate-account-status-card{
-        border-color:rgba(255,255,255,.08);
+        border-color:rgba(255,255,255,.085);
         background:
-          radial-gradient(circle at top left, rgba(124,92,255,.13), transparent 38%),
-          rgba(255,255,255,.045);
+          radial-gradient(circle at top left, rgba(124,92,255,.14), transparent 38%),
+          linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.035));
+        box-shadow:
+          0 18px 44px rgba(0,0,0,.18),
+          inset 0 1px 0 rgba(255,255,255,.05);
       }
 
       [data-theme="dark"] .activate-account-view .activate-account-status-title{
@@ -710,6 +745,23 @@ function renderActivateAccountScopedStyle() {
       [data-theme="dark"] .activate-account-view .activate-account-status-text,
       [data-theme="dark"] .activate-account-view .activate-account-password-help{
         color:var(--text-dim, #94a3b8);
+      }
+
+      [data-theme="dark"] .activate-account-view .activate-account-password-help{
+        border-color:rgba(255,255,255,.075);
+        background:rgba(255,255,255,.045);
+      }
+
+      @media (max-width: 720px){
+        .activate-account-view .activate-account-status-card{
+          grid-template-columns:1fr;
+          gap:13px;
+        }
+
+        .activate-account-view .activate-account-status-icon{
+          width:44px;
+          height:44px;
+        }
       }
 
       @keyframes activateAccountSpin{
@@ -954,7 +1006,8 @@ function renderFormClean({
   confirmPasswordPlaceholder = "Repetir contraseña",
   passwordHelp = "La contraseña debe cumplir los requisitos de seguridad configurados para la plataforma.",
 } = {}) {
-  const isLoading = status === ACTIVATE_ACCOUNT_STATUS.LOADING;
+  const isLoading =
+    status === ACTIVATE_ACCOUNT_STATUS.LOADING;
 
   const isSuccess =
     status === ACTIVATE_ACCOUNT_STATUS.SUCCESS;
@@ -1055,6 +1108,7 @@ function renderFormClean({
               id="activateAccountError"
               role="alert"
               aria-live="polite"
+              hidden
             ></div>
 
             <button
@@ -1069,24 +1123,6 @@ function renderFormClean({
                 ${escapeHtml(finalButtonLabel)}
               </span>
             </button>
-
-            <div class="login-reset">
-              <a
-                class="login-reset-link"
-                href="${escapeHtml(loginHref)}"
-                id="activateAccountBackToLoginLink"
-                data-spa
-              >
-                <span
-                  class="login-reset-link-icon"
-                  aria-hidden="true"
-                  style="display:inline-flex;align-items:center;justify-content:center;margin-right:8px;vertical-align:middle;"
-                >
-                  ${getBackArrowIcon()}
-                </span>
-                <span>${escapeHtml(backLabel)}</span>
-              </a>
-            </div>
           </form>
 
           <footer class="login-footer">
@@ -1186,7 +1222,7 @@ export function getActivateAccountTemplate(options = {}) {
             ),
             passwordHelp: safeText(
               options?.passwordHelp,
-              "La contraseña debe cumplir los requisitos de seguridad configurados para la plataforma."
+              "La contraseña debe tener al menos 8 caracteres."
             ),
           })}
         </div>

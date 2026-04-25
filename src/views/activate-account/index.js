@@ -4,7 +4,7 @@
 
    Responsabilidades:
    - montar la vista pública de activación de cuenta
-   - leer token desde URL normal o hash-router
+   - leer token desde URL normal, hash-router, history.state o contexto router
    - capturar token antes de limpiar la URL
    - limpiar token visible de la barra del navegador
    - no exponer token real en DOM
@@ -16,6 +16,14 @@
    - soportar navegación SPA de vuelta a login
    - limpiar listeners al destruir la vista
    - evitar doble submit y doble bind
+
+   HARDENING EXTREMO:
+   - endpoint alineado con AUTH_ENDPOINTS.activateAccount
+   - token capturado desde contexto router aunque window.location ya esté limpio
+   - password manual obligatorio
+   - sin autosubmit
+   - sin token real en inputs hidden
+   - navegación login robusta
 ========================================================= */
 
 import {
@@ -28,6 +36,12 @@ import { AppCore } from "../../core/index.js";
 import {
   bindPasswordFieldsInScope,
 } from "../../shared/password-field/index.js";
+
+import {
+  AUTH_ENDPOINTS,
+  getActivateAccountEndpoint,
+  getActivationPasswordMinLength,
+} from "../../features/auth/constants.js";
 
 /* =========================================================
    VIEW
@@ -44,13 +58,18 @@ export const ActivateAccountView = (() => {
   const DEFAULT_APP_NAME = "Onion Support";
   const DEFAULT_LOGIN_PATH = "/login";
 
-  const DEFAULT_ACTIVATION_ENDPOINT = "/auth/activate-account";
+  const DEFAULT_ACTIVATION_ENDPOINT =
+    AUTH_ENDPOINTS?.activateAccount ||
+    getActivateAccountEndpoint?.() ||
+    "/api/auth/activate-account";
 
   const CLEAN_ACTIVATION_PUBLIC_PATH = "/activate-account";
   const SCRUB_TOKEN_FROM_URL_AFTER_CAPTURE = true;
   const TEMPLATE_CAPTURED_TOKEN_SENTINEL = "__captured_activation_token__";
 
-  const PASSWORD_MIN_LENGTH = 8;
+  const PASSWORD_MIN_LENGTH =
+    Number(getActivationPasswordMinLength?.()) ||
+    8;
 
   const TOKEN_PARAM_NAMES = [
     "token",
@@ -75,9 +94,12 @@ export const ActivateAccountView = (() => {
     message: "",
     error: "",
     response: null,
+
+    lastContext: null,
   };
 
   let cleanupBinding = null;
+  let cleanupPasswordFields = null;
   let autoSubmitTimer = null;
 
   /* =========================================================
@@ -107,6 +129,12 @@ export const ActivateAccountView = (() => {
     }
 
     return String(value);
+  }
+
+  function safeObject(value) {
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? value
+      : {};
   }
 
   function safeLog(...args) {
@@ -234,21 +262,21 @@ export const ActivateAccountView = (() => {
       return value;
     }
 
+    if (value.startsWith("/api/")) {
+      return value;
+    }
+
     const apiBase = getApiBase();
 
     if (apiBase) {
       return joinUrl(apiBase, value);
     }
 
-    if (value.startsWith("/api/")) {
-      return value;
-    }
-
     return joinUrl("/api", value);
   }
 
   /* =========================================================
-     TOKEN EXTRACTION + URL SCRUB
+     TOKEN EXTRACTION
   ========================================================= */
 
   function getTokenFromSearchParams(search = "") {
@@ -334,34 +362,106 @@ export const ActivateAccountView = (() => {
 
       return extractTokenFromRoutePath(parsed.pathname);
     } catch {
-      return "";
+      try {
+        const query = raw.includes("?")
+          ? raw.split("?").slice(1).join("?")
+          : "";
+
+        const fromQuery = getTokenFromSearchParams(query ? `?${query}` : "");
+
+        if (fromQuery) {
+          return fromQuery;
+        }
+
+        return extractTokenFromRoutePath(raw.split("?")[0] || raw);
+      } catch {
+        return "";
+      }
     }
   }
 
-  function getInitialActivationUrlCandidates() {
+  function getContextUrlCandidates(context = null) {
+    const ctx = safeObject(context);
+
+    return [
+      ctx.publicPath,
+      ctx.requestedPath,
+      ctx.path,
+      ctx.href,
+      ctx.url,
+      ctx.redirectedFrom,
+      ctx.route?.publicPath,
+      ctx.route?.path,
+    ]
+      .map((value) => safeText(value, ""))
+      .filter(Boolean);
+  }
+
+  function getHistoryUrlCandidates() {
+    if (!isBrowser()) {
+      return [];
+    }
+
+    try {
+      const historyState =
+        window.history?.state &&
+        typeof window.history.state === "object"
+          ? window.history.state
+          : null;
+
+      if (!historyState) {
+        return [];
+      }
+
+      return [
+        historyState.publicPath,
+        historyState.path,
+        historyState.requestedPath,
+        historyState.url,
+      ]
+        .map((value) => safeText(value, ""))
+        .filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  function getWindowUrlCandidates() {
     const urls = [];
 
-    if (isBrowser()) {
-      try {
-        urls.push(window.location.href);
-      } catch {}
-
-      try {
-        urls.push(window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__);
-      } catch {}
-
-      try {
-        urls.push(window.__ONION_INITIAL_URL__);
-      } catch {}
+    if (!isBrowser()) {
+      return urls;
     }
+
+    try {
+      urls.push(window.location.href);
+    } catch {}
+
+    try {
+      urls.push(window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__);
+    } catch {}
+
+    try {
+      urls.push(window.__ONION_INITIAL_URL__);
+    } catch {}
 
     return urls
       .map((url) => safeText(url, ""))
       .filter(Boolean);
   }
 
-  function extractTokenFromUrl() {
-    const candidates = getInitialActivationUrlCandidates();
+  function getInitialActivationUrlCandidates(context = null) {
+    return [
+      ...getContextUrlCandidates(context),
+      ...getHistoryUrlCandidates(),
+      ...getWindowUrlCandidates(),
+    ]
+      .map((url) => safeText(url, ""))
+      .filter(Boolean);
+  }
+
+  function extractTokenFromUrl(context = null) {
+    const candidates = getInitialActivationUrlCandidates(context);
 
     for (const candidate of candidates) {
       const token = extractTokenFromUrlLike(candidate);
@@ -634,8 +734,21 @@ export const ActivateAccountView = (() => {
 
   function bindSharedPasswordFields(container) {
     try {
+      if (typeof cleanupPasswordFields === "function") {
+        cleanupPasswordFields();
+      }
+    } catch {}
+
+    cleanupPasswordFields = null;
+
+    try {
       if (typeof bindPasswordFieldsInScope === "function") {
-        bindPasswordFieldsInScope(container);
+        const result = bindPasswordFieldsInScope(container);
+
+        if (typeof result === "function") {
+          cleanupPasswordFields = result;
+        }
+
         return true;
       }
     } catch (error) {
@@ -912,6 +1025,8 @@ export const ActivateAccountView = (() => {
       token: cleanToken,
       activationToken: cleanToken,
       activateToken: cleanToken,
+      code: cleanToken,
+      t: cleanToken,
 
       password: cleanPassword,
       newPassword: cleanPassword,
@@ -968,10 +1083,6 @@ export const ActivateAccountView = (() => {
       loginHref: DEFAULT_LOGIN_PATH,
       backHref: DEFAULT_LOGIN_PATH,
 
-      /*
-        Importante:
-        con password manual NO hay autosubmit.
-      */
       autoSubmit: false,
 
       passwordHelp:
@@ -1186,12 +1297,6 @@ export const ActivateAccountView = (() => {
 
   function scheduleAutoSubmit() {
     clearAutoSubmitTimer();
-
-    /*
-      Activación con contraseña:
-      NO debe autosubmit. El usuario tiene que introducir
-      contraseña y confirmar.
-    */
     return false;
   }
 
@@ -1205,6 +1310,13 @@ export const ActivateAccountView = (() => {
     } catch {}
 
     cleanupBinding = null;
+
+    try {
+      cleanupPasswordFields?.();
+    } catch {}
+
+    cleanupPasswordFields = null;
+
     state.bindingsAttached = false;
 
     try {
@@ -1301,10 +1413,11 @@ export const ActivateAccountView = (() => {
      LIFECYCLE
   ========================================================= */
 
-  async function init() {
+  async function init(viewContainer = null, context = null) {
     state.destroyed = false;
+    state.lastContext = safeObject(context);
 
-    const capturedToken = extractTokenFromUrl();
+    const capturedToken = extractTokenFromUrl(context);
 
     state.token = capturedToken;
     state.message = "";
@@ -1323,6 +1436,8 @@ export const ActivateAccountView = (() => {
     safeLog("init", {
       hasToken: Boolean(state.token),
       urlScrubbed,
+      contextPublicPath: safeText(context?.publicPath, ""),
+      contextRequestedPath: safeText(context?.requestedPath, ""),
     });
 
     render();
@@ -1337,6 +1452,7 @@ export const ActivateAccountView = (() => {
     state.mounted = false;
     state.submitting = false;
     state.token = "";
+    state.lastContext = null;
 
     clearAutoSubmitTimer();
     cleanupBindings();

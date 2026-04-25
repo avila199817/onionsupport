@@ -11,20 +11,24 @@
    - copiar referencia de ticket
    - exportar colección a CSV
    - abrir modal de creación
-   - añadir comentarios al ticket
+   - añadir comentarios / actualizaciones al ticket
+   - subir adjuntos a tickets existentes
+   - abrir / descargar adjuntos mediante endpoint seguro
    - reabrir incidencias cerradas o resueltas
    - desacoplar la vista principal de la lógica operativa
    - mantener compatibilidad con incidenciasView.js y incidencias.modal.js
 
    HARDENING PRO:
+   - evita recursión entre modal/actions
    - tolerancia a payloads heterogéneos
-   - fallback store -> backend
+   - fallback store -> backend en lecturas
+   - sin fallback local falso en escrituras
    - soporte envelope backend
    - export seguro con escape CSV
    - clipboard robusto con fallback legacy
    - eventos opcionales vía AppCore.events
    - create modal bridge multi-entorno
-   - comment / reopen bridge con fallback elegante
+   - upload / comment / reopen / download con fetch directo
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -52,28 +56,55 @@ import {
 
 const CSV_FILENAME = "incidencias.csv";
 
+const REQUEST_TIMEOUT_MS = 25000;
+const UPLOAD_TIMEOUT_MS = 90000;
+
+const TICKET_API_PREFIXES = [
+  "/api/tickets",
+  "/api/incidencias",
+];
+
 /* =========================================================
-   HELPERS
+   CORE HELPERS
 ========================================================= */
 
 function safeEmit(event = "", payload = {}) {
+  const eventName = safeText(event, "");
+  if (!eventName) return false;
+
   try {
-    AppCore?.events?.emit?.(event, payload);
+    AppCore?.events?.emit?.(eventName, payload);
+    return true;
   } catch {}
+
+  try {
+    window.dispatchEvent(
+      new CustomEvent(eventName, {
+        detail: payload,
+      })
+    );
+    return true;
+  } catch {}
+
+  return false;
 }
 
 function first(...values) {
   for (const value of values) {
-    if (
-      value !== undefined &&
-      value !== null &&
-      String(value).trim() !== ""
-    ) {
-      return value;
+    if (value === undefined || value === null) continue;
+
+    if (typeof value === "string" && value.trim() === "") {
+      continue;
     }
+
+    return value;
   }
 
   return null;
+}
+
+function isObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value);
 }
 
 function normalizeTicketId(value = "") {
@@ -84,9 +115,289 @@ function normalizeCommentMessage(value = "") {
   return safeText(value, "").replace(/\s+/g, " ").trim();
 }
 
-function isObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value);
+function normalizeLower(value = "", fallback = "") {
+  return safeText(value, fallback).toLowerCase();
 }
+
+function normalizePathPart(value = "") {
+  return safeText(value, "").replace(/^\/+|\/+$/g, "");
+}
+
+function joinApiPath(...parts) {
+  return parts
+    .map((part) => normalizePathPart(part))
+    .filter(Boolean)
+    .join("/");
+}
+
+function encodeUrlPathSegment(value = "") {
+  return encodeURIComponent(safeText(value, ""));
+}
+
+function isAbsoluteUrl(value = "") {
+  return /^https?:\/\//i.test(safeText(value, ""));
+}
+
+function buildUrl(base = "", path = "") {
+  const cleanBase = safeText(base, "").replace(/\/+$/, "");
+  const cleanPath = safeText(path, "").replace(/^\/+/, "");
+
+  if (!cleanBase && cleanPath) return `/${cleanPath}`;
+  if (!cleanPath) return cleanBase;
+
+  return `${cleanBase}/${cleanPath}`;
+}
+
+function getApiBase() {
+  return safeText(
+    first(
+      AppCore?.config?.apiBase,
+      AppCore?.config?.api?.baseUrl,
+      AppCore?.state?.apiBase,
+      window?.ONION_API_BASE,
+      window?.API_BASE
+    ),
+    ""
+  ).replace(/\/+$/, "");
+}
+
+function getAuthToken() {
+  return safeText(
+    first(
+      AppCore?.state?.token,
+      AppCore?.state?.accessToken,
+      AppCore?.auth?.getToken?.(),
+      AppCore?.Auth?.getToken?.(),
+      window?.Auth?.getToken?.(),
+      typeof localStorage !== "undefined" ? localStorage.getItem("token") : "",
+      typeof localStorage !== "undefined" ? localStorage.getItem("accessToken") : "",
+      typeof sessionStorage !== "undefined" ? sessionStorage.getItem("token") : "",
+      typeof sessionStorage !== "undefined" ? sessionStorage.getItem("accessToken") : ""
+    ),
+    ""
+  );
+}
+
+function createAbortController(timeoutMs = REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+
+  const timer = setTimeout(() => {
+    try {
+      controller.abort();
+    } catch {}
+  }, timeoutMs);
+
+  return {
+    controller,
+    clear() {
+      clearTimeout(timer);
+    },
+  };
+}
+
+function getUrl(path = "") {
+  const target = safeText(path, "");
+
+  if (isAbsoluteUrl(target)) {
+    return target;
+  }
+
+  const apiBase = getApiBase();
+
+  if (!apiBase) {
+    return target.startsWith("/") ? target : `/${target}`;
+  }
+
+  return buildUrl(apiBase, target);
+}
+
+function getHttpStatus(error = null) {
+  return Number(
+    first(
+      error?.status,
+      error?.statusCode,
+      error?.response?.status,
+      error?.data?.status
+    )
+  ) || 0;
+}
+
+function getErrorMessage(error = null, fallback = "No se pudo completar la acción.") {
+  return safeText(
+    first(
+      error?.message,
+      error?.response?.message,
+      error?.response?.data?.message,
+      error?.data?.message,
+      error?.data?.error,
+      error?.error,
+      fallback
+    ),
+    fallback
+  );
+}
+
+function shouldTryNextCandidate(error = null) {
+  const status = getHttpStatus(error);
+
+  if (!status) return true;
+
+  return [
+    404,
+    405,
+    409,
+    415,
+    422,
+    500,
+    502,
+    503,
+    504,
+  ].includes(status);
+}
+
+/* =========================================================
+   FETCH HELPERS
+========================================================= */
+
+async function parseResponsePayload(response) {
+  const contentType = safeText(response.headers.get("content-type"), "");
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  if (contentType.includes("application/json")) {
+    return response.json();
+  }
+
+  const text = await response.text();
+
+  if (!text) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {
+      raw: text,
+    };
+  }
+}
+
+async function requestJson(path = "", options = {}) {
+  const url = getUrl(path);
+  const method = safeText(options.method, "GET").toUpperCase();
+  const token = getAuthToken();
+
+  const body = options.body ?? null;
+  const isFormData = body instanceof FormData;
+
+  const timeoutMs = safeNumber(
+    options.timeoutMs,
+    isFormData ? UPLOAD_TIMEOUT_MS : REQUEST_TIMEOUT_MS
+  );
+
+  const { controller, clear } = createAbortController(timeoutMs);
+
+  const headers = {
+    Accept: "application/json",
+    ...(safeObject(options.headers)),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+
+  const fetchOptions = {
+    method,
+    headers,
+    credentials: "include",
+    signal: controller.signal,
+  };
+
+  if (body !== null && body !== undefined) {
+    if (isFormData) {
+      fetchOptions.body = body;
+    } else if (
+      typeof body === "string" ||
+      body instanceof Blob ||
+      body instanceof ArrayBuffer
+    ) {
+      fetchOptions.body = body;
+    } else {
+      fetchOptions.headers = {
+        "Content-Type": "application/json",
+        ...headers,
+      };
+
+      fetchOptions.body = JSON.stringify(body);
+    }
+  }
+
+  try {
+    const response = await fetch(url, fetchOptions);
+    const payload = await parseResponsePayload(response);
+
+    if (!response.ok) {
+      const error = new Error(
+        safeText(
+          first(
+            safeObject(payload)?.message,
+            safeObject(payload)?.error,
+            `HTTP ${response.status}`
+          ),
+          `HTTP ${response.status}`
+        )
+      );
+
+      error.status = response.status;
+      error.statusCode = response.status;
+      error.response = payload;
+      error.url = url;
+
+      throw error;
+    }
+
+    return payload;
+  } finally {
+    clear();
+  }
+}
+
+async function requestFirstJsonCandidate(candidates = [], options = {}) {
+  let lastError = null;
+
+  for (const candidate of safeArray(candidates)) {
+    const path = safeText(candidate?.path || candidate, "");
+    if (!path) continue;
+
+    try {
+      const body =
+        typeof candidate?.bodyFactory === "function"
+          ? candidate.bodyFactory()
+          : candidate?.body ?? options.body ?? null;
+
+      return await requestJson(path, {
+        ...options,
+        ...safeObject(candidate),
+        path: undefined,
+        bodyFactory: undefined,
+        body,
+        method: safeText(candidate?.method || options.method, "GET"),
+      });
+    } catch (error) {
+      lastError = error;
+
+      if (!shouldTryNextCandidate(error)) {
+        break;
+      }
+    }
+  }
+
+  throw lastError || new Error("REQUEST_CANDIDATES_FAILED");
+}
+
+/* =========================================================
+   ENVELOPE / DETAIL PICKERS
+========================================================= */
 
 function isLikelyTicket(value) {
   if (!isObject(value)) return false;
@@ -98,7 +409,9 @@ function isLikelyTicket(value) {
       value.ticketCode ||
       value.title ||
       value.subject ||
-      value.asunto
+      value.asunto ||
+      value.message ||
+      value.descripcion
   );
 }
 
@@ -110,7 +423,9 @@ function looksLikeEnvelope(value) {
       obj.item ||
       obj.data ||
       obj.result ||
-      obj.payload
+      obj.payload ||
+      obj.incidencia ||
+      obj.detail
   );
 }
 
@@ -124,9 +439,11 @@ function pickDetail(payload = null) {
   const obj = safeObject(payload);
 
   if (isLikelyTicket(obj.ticket)) return obj.ticket;
+  if (isLikelyTicket(obj.detail)) return obj.detail;
   if (isLikelyTicket(obj.item)) return obj.item;
   if (isLikelyTicket(obj.result)) return obj.result;
   if (isLikelyTicket(obj.payload)) return obj.payload;
+  if (isLikelyTicket(obj.incidencia)) return obj.incidencia;
   if (isLikelyTicket(obj.data)) return obj.data;
 
   if (looksLikeEnvelope(obj.data)) {
@@ -136,70 +453,27 @@ function pickDetail(payload = null) {
   return null;
 }
 
-function tryResolveCallable(...candidates) {
-  for (const candidate of candidates) {
-    if (typeof candidate === "function") {
-      return candidate;
-    }
-  }
+function pickFilePayload(payload = null) {
+  const obj = safeObject(payload);
 
-  return null;
-}
-
-async function callExternalAction(actionName = "", payload = {}) {
-  const action = safeText(actionName, "");
-  if (!action) {
-    throw new Error("INVALID_EXTERNAL_ACTION");
-  }
-
-  const fn = tryResolveCallable(
-    AppCore?.modules?.IncidenciasModalActions?.[action],
-    AppCore?.modules?.IncidenciasActions?.[action],
-    AppCore?.modules?.Incidencias?.[action],
-    window?.OnionIncidenciasModalActions?.[action],
-    window?.OnionIncidenciasActions?.[action],
-    window?.IncidenciasActions?.[action]
+  const file = safeObject(
+    first(
+      obj.file,
+      obj.attachment,
+      obj.data?.file,
+      obj.data?.attachment,
+      obj.payload?.file,
+      obj.payload?.attachment,
+      obj.result?.file,
+      obj.result?.attachment
+    )
   );
 
-  if (!fn) {
-    return null;
+  if (Object.keys(file).length) {
+    return file;
   }
 
-  return await fn(payload);
-}
-
-function buildLocalCommentEntry({
-  ticketId = "",
-  message = "",
-  author = "Tú",
-} = {}) {
-  return {
-    id: `local-comment-${Date.now()}`,
-    ticketId,
-    commentId: `local-comment-${Date.now()}`,
-    title: "Nuevo comentario",
-    action: "comment",
-    kind: "comment",
-    message,
-    text: message,
-    body: message,
-    author,
-    user: author,
-    createdAt: new Date().toISOString(),
-  };
-}
-
-function canReopenStatus(value = "") {
-  const key = safeText(value, "").toLowerCase();
-
-  return [
-    "resolved",
-    "resuelta",
-    "resuelto",
-    "closed",
-    "cerrada",
-    "cerrado",
-  ].includes(key);
+  return obj;
 }
 
 /* =========================================================
@@ -212,7 +486,9 @@ function getId(item = {}) {
       item.ticketId,
       item.id,
       item.code,
-      item.ticketCode
+      item.ticketCode,
+      item.raw?.ticketId,
+      item.raw?.id
     ),
     ""
   );
@@ -224,7 +500,10 @@ function getTitle(item = {}) {
       item.title,
       item.subject,
       item.asunto,
-      item.name
+      item.name,
+      item.raw?.title,
+      item.raw?.subject,
+      item.raw?.asunto
     ),
     "Incidencia"
   );
@@ -237,7 +516,11 @@ function getDescription(item = {}) {
       item.descripcion,
       item.message,
       item.preview,
-      item.body
+      item.body,
+      item.raw?.description,
+      item.raw?.descripcion,
+      item.raw?.message,
+      item.raw?.preview
     ),
     "Sin descripción."
   );
@@ -249,7 +532,12 @@ function getClient(item = {}) {
     item.cliente,
     item.customer,
     item.receptor,
-    item.createdBy
+    item.createdBy,
+    item.raw?.client,
+    item.raw?.cliente,
+    item.raw?.customer,
+    item.raw?.receptor,
+    item.raw?.createdBy
   );
 
   if (isObject(clientObject)) {
@@ -271,6 +559,7 @@ function getClient(item = {}) {
       item.clienteNombre,
       item.company,
       item.empresa,
+      item.name,
       clientObject
     ),
     "Cliente"
@@ -283,7 +572,12 @@ function getEmail(item = {}) {
     item.cliente,
     item.customer,
     item.receptor,
-    item.createdBy
+    item.createdBy,
+    item.raw?.client,
+    item.raw?.cliente,
+    item.raw?.customer,
+    item.raw?.receptor,
+    item.raw?.createdBy
   );
 
   if (isObject(clientObject)) {
@@ -292,7 +586,7 @@ function getEmail(item = {}) {
         clientObject.email,
         clientObject.mail
       ),
-      "Sin email"
+      ""
     );
   }
 
@@ -300,9 +594,12 @@ function getEmail(item = {}) {
     first(
       item.clientEmail,
       item.clienteEmail,
-      item.email
+      item.email,
+      item.raw?.clientEmail,
+      item.raw?.clienteEmail,
+      item.raw?.email
     ),
-    "Sin email"
+    ""
   );
 }
 
@@ -310,7 +607,10 @@ function getAssigned(item = {}) {
   const assignedObject = first(
     item.assignedTo,
     item.assignee,
-    item.tecnico
+    item.tecnico,
+    item.raw?.assignedTo,
+    item.raw?.assignee,
+    item.raw?.tecnico
   );
 
   if (isObject(assignedObject)) {
@@ -329,14 +629,24 @@ function getAssigned(item = {}) {
 
 function getStatus(item = {}) {
   return safeText(
-    first(item.status, item.estado),
+    first(
+      item.status,
+      item.estado,
+      item.raw?.status,
+      item.raw?.estado
+    ),
     "open"
   );
 }
 
 function getPriority(item = {}) {
   return safeText(
-    first(item.priority, item.prioridad),
+    first(
+      item.priority,
+      item.prioridad,
+      item.raw?.priority,
+      item.raw?.prioridad
+    ),
     "medium"
   );
 }
@@ -346,7 +656,9 @@ function getCreatedAt(item = {}) {
     item.createdAt,
     item.createdAtES,
     item.fechaCreacion,
-    item.date
+    item.date,
+    item.raw?.createdAt,
+    item.raw?.createdAtES
   );
 }
 
@@ -356,7 +668,26 @@ function getUpdatedAt(item = {}) {
     item.closedAt,
     item.lastUpdate,
     item.modifiedAt,
-    item.createdAt
+    item.createdAt,
+    item.raw?.updatedAt,
+    item.raw?.closedAt,
+    item.raw?.createdAt
+  );
+}
+
+function getAttachmentUrl(entry = {}) {
+  return safeText(
+    first(
+      entry.viewUrl,
+      entry.openUrl,
+      entry.downloadUrl,
+      entry.signedUrl,
+      entry.url,
+      entry.blobUrl,
+      entry.publicUrl,
+      entry.href
+    ),
+    ""
   );
 }
 
@@ -365,33 +696,104 @@ function getAttachments(item = {}) {
     first(
       item.attachments,
       item.files,
-      item.adjuntos
+      item.adjuntos,
+      item.raw?.attachments,
+      item.raw?.files,
+      item.raw?.adjuntos
     )
-  ).map((file) => {
+  ).map((file, index) => {
     const entry = safeObject(file);
 
+    const name = safeText(
+      first(
+        entry.name,
+        entry.filename,
+        entry.fileName,
+        entry.originalname,
+        entry.title
+      ),
+      `archivo_${index + 1}`
+    );
+
     return {
-      id: safeText(first(entry.id, entry.fileId), ""),
-      name: safeText(
+      ...entry,
+      id: safeText(
         first(
-          entry.name,
+          entry.id,
+          entry.fileId,
+          entry.attachmentId,
+          entry.storageKey,
+          entry.path,
+          entry.blobName,
+          entry.key
+        ),
+        `attachment-${index + 1}`
+      ),
+      name,
+      filename: safeText(
+        first(
           entry.filename,
           entry.fileName,
+          entry.name,
           entry.originalname
         ),
-        "archivo"
+        name
       ),
-      url: safeText(
+      url: getAttachmentUrl(entry),
+      viewUrl: safeText(first(entry.viewUrl, entry.openUrl, entry.url), ""),
+      openUrl: safeText(first(entry.openUrl, entry.viewUrl, entry.url), ""),
+      downloadUrl: safeText(first(entry.downloadUrl, entry.url), ""),
+      signedUrl: safeText(entry.signedUrl, ""),
+      blobUrl: safeText(entry.blobUrl, ""),
+      publicUrl: safeText(entry.publicUrl, ""),
+      path: safeText(
         first(
-          entry.url,
-          entry.href,
           entry.path,
-          entry.downloadUrl
+          entry.storageKey,
+          entry.storagePath,
+          entry.blobPath,
+          entry.blobName,
+          entry.key
         ),
-        "#"
+        ""
+      ),
+      storageKey: safeText(
+        first(
+          entry.storageKey,
+          entry.path,
+          entry.storagePath,
+          entry.blobPath,
+          entry.blobName,
+          entry.key
+        ),
+        ""
       ),
       size: safeNumber(entry.size, 0),
-      type: safeText(first(entry.type, entry.mimeType, entry.mime), ""),
+      type: safeText(
+        first(
+          entry.type,
+          entry.contentType,
+          entry.mimetype,
+          entry.mimeType,
+          entry.mime
+        ),
+        ""
+      ),
+      contentType: safeText(
+        first(
+          entry.contentType,
+          entry.mimetype,
+          entry.mimeType,
+          entry.mime
+        ),
+        ""
+      ),
+      uploadedAt: first(
+        entry.uploadedAt,
+        entry.createdAt,
+        entry.date,
+        null
+      ),
       raw: entry,
     };
   });
@@ -403,7 +805,9 @@ function getHistory(item = {}) {
       item.history,
       item.timeline,
       item.logs,
-      item.comments
+      item.raw?.history,
+      item.raw?.timeline,
+      item.raw?.logs
     )
   ).map((row) => safeObject(row));
 }
@@ -413,34 +817,57 @@ function getComments(item = {}) {
     first(
       item.comments,
       item.notes,
-      item.messages
+      item.messages,
+      item.raw?.comments,
+      item.raw?.notes,
+      item.raw?.messages
     )
   ).map((row) => safeObject(row));
 }
 
 function getCategory(item = {}) {
   return safeText(
-    first(item.category, item.categoria),
+    first(
+      item.category,
+      item.categoria,
+      item.raw?.category,
+      item.raw?.categoria
+    ),
     "General"
   );
 }
 
 function getSource(item = {}) {
   return safeText(
-    first(item.source, item.origen, item.channel),
+    first(
+      item.source,
+      item.origen,
+      item.channel,
+      item.raw?.source,
+      item.raw?.origen,
+      item.raw?.channel
+    ),
     "panel"
   );
 }
 
 function getTags(item = {}) {
-  const raw = first(item.tags, item.labels);
+  const raw = first(
+    item.tags,
+    item.labels,
+    item.raw?.tags,
+    item.raw?.labels
+  );
 
   if (Array.isArray(raw)) {
     return raw.map((tag) => safeText(tag, "")).filter(Boolean);
   }
 
   if (typeof raw === "string") {
-    return raw.split(",").map((tag) => safeText(tag, "")).filter(Boolean);
+    return raw
+      .split(",")
+      .map((tag) => safeText(tag, ""))
+      .filter(Boolean);
   }
 
   return [];
@@ -449,27 +876,175 @@ function getTags(item = {}) {
 function normalizeTicketDetail(detail = {}) {
   const raw = safeObject(detail);
 
+  const ticketId = getId(raw);
+  const attachments = getAttachments(raw);
+  const history = getHistory(raw);
+  const comments = getComments(raw);
+
   return {
     ...raw,
+
     raw,
-    ticketId: getId(raw),
-    ticketCode: safeText(first(raw.ticketCode, raw.code, getId(raw)), ""),
+
+    id: safeText(first(raw.id, ticketId), ticketId),
+    ticketId,
+    ticketCode: safeText(first(raw.ticketCode, raw.code, ticketId), ticketId),
+
     title: getTitle(raw),
+    subject: safeText(first(raw.subject, raw.asunto, getTitle(raw)), getTitle(raw)),
     description: getDescription(raw),
+    message: safeText(first(raw.message, raw.descripcion, getDescription(raw)), ""),
+
     clientName: getClient(raw),
     clientEmail: getEmail(raw),
+
     assignedToName: getAssigned(raw),
+
     status: getStatus(raw),
+    estado: getStatus(raw),
+
     priority: getPriority(raw),
+    prioridad: getPriority(raw),
+
     createdAt: getCreatedAt(raw),
     updatedAt: getUpdatedAt(raw),
-    attachments: getAttachments(raw),
-    history: getHistory(raw),
-    comments: getComments(raw),
+
+    attachments,
+    attachmentsCount: attachments.length,
+
+    history,
+    historyCount: history.length,
+
+    comments,
+    commentsCount: comments.length,
+
     category: getCategory(raw),
+    categoria: safeText(first(raw.categoria, getCategory(raw)), "general"),
+
     source: getSource(raw),
     tags: getTags(raw),
   };
+}
+
+/* =========================================================
+   API ROUTE BUILDERS
+========================================================= */
+
+function buildTicketPath(prefix = "/api/tickets", ticketId = "") {
+  return `/${joinApiPath(prefix, encodeUrlPathSegment(ticketId))}`;
+}
+
+function buildAttachmentPath({
+  prefix = "/api/tickets",
+  ticketId = "",
+  attachmentId = "",
+  mode = "view",
+} = {}) {
+  return `/${joinApiPath(
+    prefix,
+    encodeUrlPathSegment(ticketId),
+    "attachments",
+    encodeUrlPathSegment(attachmentId),
+    mode
+  )}`;
+}
+
+function buildFilePath({
+  prefix = "/api/tickets",
+  ticketId = "",
+  attachmentId = "",
+  mode = "view",
+} = {}) {
+  return `/${joinApiPath(
+    prefix,
+    encodeUrlPathSegment(ticketId),
+    "files",
+    encodeUrlPathSegment(attachmentId),
+    mode
+  )}`;
+}
+
+function buildCommentCandidates(ticketId = "", payload = {}) {
+  const id = normalizeTicketId(ticketId);
+
+  return [
+    ...TICKET_API_PREFIXES.flatMap((prefix) => [
+      {
+        method: "POST",
+        path: `/${joinApiPath(prefix, encodeUrlPathSegment(id), "comments")}`,
+        body: payload,
+      },
+      {
+        method: "POST",
+        path: `/${joinApiPath(prefix, encodeUrlPathSegment(id), "messages")}`,
+        body: payload,
+      },
+      {
+        method: "PATCH",
+        path: buildTicketPath(prefix, id),
+        body: payload,
+      },
+    ]),
+  ];
+}
+
+function buildReopenCandidates(ticketId = "", payload = {}) {
+  const id = normalizeTicketId(ticketId);
+
+  return [
+    ...TICKET_API_PREFIXES.flatMap((prefix) => [
+      {
+        method: "POST",
+        path: `/${joinApiPath(prefix, encodeUrlPathSegment(id), "reopen")}`,
+        body: payload,
+      },
+      {
+        method: "PATCH",
+        path: buildTicketPath(prefix, id),
+        body: payload,
+      },
+    ]),
+  ];
+}
+
+function buildDetailCandidates(ticketId = "") {
+  const id = normalizeTicketId(ticketId);
+
+  return TICKET_API_PREFIXES.map((prefix) => ({
+    method: "GET",
+    path: buildTicketPath(prefix, id),
+  }));
+}
+
+function buildAttachmentCandidates({
+  ticketId = "",
+  attachmentId = "",
+  mode = "view",
+} = {}) {
+  const id = normalizeTicketId(ticketId);
+  const attId = safeText(attachmentId, "");
+  const finalMode = mode === "download" ? "download" : "view";
+
+  return TICKET_API_PREFIXES.flatMap((prefix) => [
+    {
+      method: "GET",
+      path: buildAttachmentPath({
+        prefix,
+        ticketId: id,
+        attachmentId: attId,
+        mode: finalMode,
+      }),
+    },
+    {
+      method: "GET",
+      path: buildFilePath({
+        prefix,
+        ticketId: id,
+        attachmentId: attId,
+        mode: finalMode,
+      }),
+    },
+  ]);
 }
 
 /* =========================================================
@@ -535,6 +1110,8 @@ async function writeClipboardText(text = "") {
     textarea.value = value;
     textarea.style.position = "fixed";
     textarea.style.opacity = "0";
+    textarea.style.pointerEvents = "none";
+
     document.body.appendChild(textarea);
     textarea.select();
 
@@ -562,12 +1139,18 @@ function downloadTextFile({
 
   anchor.href = url;
   anchor.download = filename;
+  anchor.rel = "noopener";
+  anchor.style.display = "none";
 
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
 
-  URL.revokeObjectURL(url);
+  setTimeout(() => {
+    try {
+      URL.revokeObjectURL(url);
+    } catch {}
+  }, 30000);
 
   return true;
 }
@@ -603,14 +1186,16 @@ export async function getTicketDetailAction({
   const id = normalizeTicketId(ticketId);
 
   if (!id) {
-    if (!silent) showToast("No se pudo resolver la incidencia.", "error");
+    if (!silent) {
+      showToast("No se pudo resolver la incidencia.", "error");
+    }
+
     return null;
   }
 
-  const fallbackStoreDetail =
-    getTicketDetailFromStoreAction({
-      ticketId: id,
-    });
+  const fallbackStoreDetail = getTicketDetailFromStoreAction({
+    ticketId: id,
+  });
 
   if (!preferFresh && fallbackStoreDetail) {
     return fallbackStoreDetail;
@@ -622,8 +1207,15 @@ export async function getTicketDetailAction({
       source: "backend",
     });
 
-    const response =
-      await getIncidenciaByIdRequest(id);
+    let response = null;
+
+    try {
+      response = await getIncidenciaByIdRequest(id);
+    } catch {
+      response = await requestFirstJsonCandidate(buildDetailCandidates(id), {
+        timeoutMs: REQUEST_TIMEOUT_MS,
+      });
+    }
 
     const detail = pickDetail(response);
 
@@ -633,6 +1225,7 @@ export async function getTicketDetailAction({
           ticketId: id,
           source: "store",
         });
+
         return fallbackStoreDetail;
       }
 
@@ -665,10 +1258,7 @@ export async function getTicketDetailAction({
     });
 
     if (!silent) {
-      showToast(
-        "No se pudo cargar el detalle de la incidencia.",
-        "error"
-      );
+      showToast("No se pudo cargar el detalle de la incidencia.", "error");
     }
 
     return null;
@@ -683,7 +1273,10 @@ export async function openTicketAction({
   const id = normalizeTicketId(ticketId);
 
   if (!id) {
-    if (!silent) showToast("Incidencia inválida.", "error");
+    if (!silent) {
+      showToast("Incidencia inválida.", "error");
+    }
+
     return null;
   }
 
@@ -711,8 +1304,10 @@ export async function refreshTicketDetailAction({
   ticketId = "",
   silent = true,
 } = {}) {
+  const id = normalizeTicketId(ticketId);
+
   const detail = await getTicketDetailAction({
-    ticketId,
+    ticketId: id,
     preferFresh: true,
     silent,
   });
@@ -720,7 +1315,7 @@ export async function refreshTicketDetailAction({
   if (detail) {
     safeEmit("incidencias:modal:update", {
       detail,
-      ticketId: normalizeTicketId(ticketId),
+      ticketId: id,
     });
   }
 
@@ -731,24 +1326,55 @@ export async function refreshTicketDetailAction({
    COMMENT / REOPEN
 ========================================================= */
 
+function canReopenStatus(value = "") {
+  const key = normalizeLower(value);
+
+  return [
+    "resolved",
+    "resuelta",
+    "resuelto",
+    "closed",
+    "cerrada",
+    "cerrado",
+  ].includes(key);
+}
+
 export async function commentTicketAction({
   ticketId = "",
   message = "",
   detail = null,
+  status = "open",
   silent = false,
 } = {}) {
   const id = normalizeTicketId(ticketId);
   const normalizedMessage = normalizeCommentMessage(message);
 
   if (!id) {
-    if (!silent) showToast("No se pudo identificar la incidencia.", "error");
+    if (!silent) {
+      showToast("No se pudo identificar la incidencia.", "error");
+    }
+
     return null;
   }
 
   if (!normalizedMessage) {
-    if (!silent) showToast("Escribe un comentario antes de enviarlo.", "error");
+    if (!silent) {
+      showToast("Escribe un comentario antes de enviarlo.", "error");
+    }
+
     return null;
   }
+
+  const finalStatus = safeText(status, "open") || "open";
+
+  const payload = {
+    message: normalizedMessage,
+    comment: normalizedMessage,
+    body: normalizedMessage,
+    text: normalizedMessage,
+    status: finalStatus,
+    estado: finalStatus,
+  };
 
   safeEmit("incidencias:comment:start", {
     ticketId: id,
@@ -756,63 +1382,40 @@ export async function commentTicketAction({
   });
 
   try {
-    const response = await callExternalAction("commentTicket", {
-      ticketId: id,
-      message: normalizedMessage,
-      detail,
-    });
+    const response = await requestFirstJsonCandidate(
+      buildCommentCandidates(id, payload),
+      {
+        timeoutMs: REQUEST_TIMEOUT_MS,
+      }
+    );
 
-    const picked = pickDetail(response);
+    let picked = pickDetail(response);
 
-    if (picked) {
-      const normalized = normalizeTicketDetail(picked);
-
-      safeEmit("incidencias:comment:success", {
+    if (!picked) {
+      const fresh = await getTicketDetailAction({
         ticketId: id,
-        message: normalizedMessage,
-        detail: normalized,
-        source: "external",
+        preferFresh: true,
+        silent: true,
       });
 
-      if (!silent) {
-        showToast("Comentario añadido.", "success");
-      }
-
-      return normalized;
+      picked = fresh;
     }
 
-    const current =
-      normalizeTicketDetail(detail || getTicketDetailFromStoreAction({ ticketId: id }) || { ticketId: id });
+    if (!picked) {
+      throw new Error("COMMENT_RESPONSE_EMPTY");
+    }
 
-    const localComment = buildLocalCommentEntry({
-      ticketId: id,
-      message: normalizedMessage,
-      author: "Tú",
-    });
-
-    const normalized = normalizeTicketDetail({
-      ...current.raw,
-      ...current,
-      comments: [localComment, ...safeArray(first(current.comments, current.raw?.comments))],
-      history: [localComment, ...safeArray(first(current.history, current.raw?.history))],
-      updatedAt: new Date().toISOString(),
-      raw: {
-        ...safeObject(current.raw),
-        comments: [localComment, ...safeArray(first(current.comments, current.raw?.comments))],
-        history: [localComment, ...safeArray(first(current.history, current.raw?.history))],
-        updatedAt: new Date().toISOString(),
-      },
-    });
+    const normalized = normalizeTicketDetail(picked);
 
     safeEmit("incidencias:comment:success", {
       ticketId: id,
       message: normalizedMessage,
       detail: normalized,
-      source: "local-fallback",
+      source: "backend",
     });
 
     if (!silent) {
-      showToast("Comentario añadido.", "success");
+      showToast("Actualización añadida.", "success");
     }
 
     return normalized;
@@ -824,7 +1427,7 @@ export async function commentTicketAction({
     });
 
     if (!silent) {
-      showToast("No se pudo añadir el comentario.", "error");
+      showToast("No se pudo añadir la actualización.", "error");
     }
 
     return null;
@@ -839,77 +1442,67 @@ export async function reopenTicketAction({
   const id = normalizeTicketId(ticketId);
 
   if (!id) {
-    if (!silent) showToast("No se pudo identificar la incidencia.", "error");
+    if (!silent) {
+      showToast("No se pudo identificar la incidencia.", "error");
+    }
+
     return null;
   }
 
   const current =
-    normalizeTicketDetail(detail || getTicketDetailFromStoreAction({ ticketId: id }) || { ticketId: id });
+    normalizeTicketDetail(
+      detail ||
+        getTicketDetailFromStoreAction({
+          ticketId: id,
+        }) ||
+        {
+          ticketId: id,
+        }
+    );
 
   if (!canReopenStatus(current.status)) {
-    if (!silent) {
-      showToast("La incidencia ya está abierta o en curso.", "info");
-    }
-
     return current;
   }
+
+  const payload = {
+    status: "open",
+    estado: "open",
+  };
 
   safeEmit("incidencias:reopen:start", {
     ticketId: id,
   });
 
   try {
-    const response = await callExternalAction("reopenTicket", {
-      ticketId: id,
-      detail: current,
-    });
+    const response = await requestFirstJsonCandidate(
+      buildReopenCandidates(id, payload),
+      {
+        timeoutMs: REQUEST_TIMEOUT_MS,
+      }
+    );
 
-    const picked = pickDetail(response);
+    let picked = pickDetail(response);
 
-    if (picked) {
-      const normalized = normalizeTicketDetail(picked);
-
-      safeEmit("incidencias:reopen:success", {
+    if (!picked) {
+      const fresh = await getTicketDetailAction({
         ticketId: id,
-        detail: normalized,
-        source: "external",
+        preferFresh: true,
+        silent: true,
       });
 
-      if (!silent) {
-        showToast("Incidencia reabierta.", "success");
-      }
-
-      return normalized;
+      picked = fresh;
     }
 
-    const reopenEvent = {
-      id: `local-reopen-${Date.now()}`,
-      title: "Incidencia reabierta",
-      action: "reopen",
-      kind: "event",
-      user: "Sistema",
-      createdAt: new Date().toISOString(),
-    };
+    if (!picked) {
+      throw new Error("REOPEN_RESPONSE_EMPTY");
+    }
 
-    const normalized = normalizeTicketDetail({
-      ...current.raw,
-      ...current,
-      status: "open",
-      updatedAt: new Date().toISOString(),
-      history: [reopenEvent, ...safeArray(first(current.history, current.raw?.history))],
-      raw: {
-        ...safeObject(current.raw),
-        status: "open",
-        estado: "open",
-        updatedAt: new Date().toISOString(),
-        history: [reopenEvent, ...safeArray(first(current.history, current.raw?.history))],
-      },
-    });
+    const normalized = normalizeTicketDetail(picked);
 
     safeEmit("incidencias:reopen:success", {
       ticketId: id,
       detail: normalized,
-      source: "local-fallback",
+      source: "backend",
     });
 
     if (!silent) {
@@ -932,6 +1525,463 @@ export async function reopenTicketAction({
 }
 
 /* =========================================================
+   ATTACHMENTS UPLOAD
+========================================================= */
+
+function dedupeFiles(files = []) {
+  const map = new Map();
+
+  safeArray(files).forEach((file) => {
+    if (!(file instanceof File)) return;
+
+    const key = [
+      safeText(file.name, ""),
+      safeNumber(file.size, 0),
+      safeNumber(file.lastModified, 0),
+      safeText(file.type, ""),
+    ].join("::");
+
+    if (!map.has(key)) {
+      map.set(key, file);
+    }
+  });
+
+  return Array.from(map.values());
+}
+
+function buildUploadFormData(files = []) {
+  const formData = new FormData();
+
+  dedupeFiles(files).forEach((file) => {
+    formData.append("attachments", file, file.name);
+  });
+
+  return formData;
+}
+
+function buildUploadCandidates(ticketId = "", files = []) {
+  const id = normalizeTicketId(ticketId);
+
+  return TICKET_API_PREFIXES.flatMap((prefix) => [
+    {
+      method: "POST",
+      path: `/${joinApiPath(prefix, encodeUrlPathSegment(id), "attachments")}`,
+      bodyFactory: () => buildUploadFormData(files),
+    },
+    {
+      method: "POST",
+      path: `/${joinApiPath(prefix, encodeUrlPathSegment(id), "files")}`,
+      bodyFactory: () => buildUploadFormData(files),
+    },
+  ]);
+}
+
+export async function uploadTicketAttachmentsAction({
+  ticketId = "",
+  files = [],
+  detail = null,
+  silent = false,
+} = {}) {
+  const id = normalizeTicketId(ticketId);
+  const finalFiles = dedupeFiles(files);
+
+  if (!id) {
+    if (!silent) {
+      showToast("No se pudo identificar la incidencia.", "error");
+    }
+
+    return null;
+  }
+
+  if (!finalFiles.length) {
+    if (!silent) {
+      showToast("Selecciona al menos un archivo.", "info");
+    }
+
+    return normalizeTicketDetail(
+      detail ||
+        getTicketDetailFromStoreAction({
+          ticketId: id,
+        }) ||
+        {
+          ticketId: id,
+        }
+    );
+  }
+
+  safeEmit("incidencias:upload:start", {
+    ticketId: id,
+    files: finalFiles,
+    total: finalFiles.length,
+  });
+
+  try {
+    const response = await requestFirstJsonCandidate(
+      buildUploadCandidates(id, finalFiles),
+      {
+        timeoutMs: UPLOAD_TIMEOUT_MS,
+      }
+    );
+
+    let picked = pickDetail(response);
+
+    if (!picked) {
+      const fresh = await getTicketDetailAction({
+        ticketId: id,
+        preferFresh: true,
+        silent: true,
+      });
+
+      picked = fresh;
+    }
+
+    if (!picked) {
+      throw new Error("UPLOAD_RESPONSE_EMPTY");
+    }
+
+    const normalized = normalizeTicketDetail(picked);
+
+    safeEmit("incidencias:upload:success", {
+      ticketId: id,
+      files: finalFiles,
+      detail: normalized,
+      response,
+    });
+
+    if (!silent) {
+      showToast("Archivos añadidos.", "success");
+    }
+
+    return normalized;
+  } catch (error) {
+    safeEmit("incidencias:upload:error", {
+      ticketId: id,
+      files: finalFiles,
+      error,
+    });
+
+    if (!silent) {
+      showToast(
+        getErrorMessage(error, "No se pudieron subir los archivos."),
+        "error"
+      );
+    }
+
+    return null;
+  }
+}
+
+/* =========================================================
+   ATTACHMENTS OPEN / DOWNLOAD
+========================================================= */
+
+function getAttachmentId(attachment = {}) {
+  const item = safeObject(attachment);
+
+  return safeText(
+    first(
+      item.id,
+      item.fileId,
+      item.attachmentId,
+      item.storageKey,
+      item.path,
+      item.blobName,
+      item.key,
+      item.raw?.id,
+      item.raw?.fileId,
+      item.raw?.attachmentId,
+      item.raw?.storageKey,
+      item.raw?.path,
+      item.raw?.blobName,
+      item.raw?.key
+    ),
+    ""
+  );
+}
+
+function getAttachmentName(attachment = {}) {
+  const item = safeObject(attachment);
+
+  return safeText(
+    first(
+      item.name,
+      item.filename,
+      item.fileName,
+      item.originalname,
+      item.raw?.name,
+      item.raw?.filename,
+      item.raw?.fileName,
+      item.raw?.originalname
+    ),
+    "archivo"
+  );
+}
+
+function getDirectAttachmentUrl(attachment = {}, mode = "view") {
+  const item = safeObject(attachment);
+  const raw = safeObject(item.raw);
+
+  if (mode === "download") {
+    return safeText(
+      first(
+        item.downloadUrl,
+        item.signedUrl,
+        item.url,
+        item.viewUrl,
+        item.openUrl,
+        item.blobUrl,
+        item.publicUrl,
+        raw.downloadUrl,
+        raw.signedUrl,
+        raw.url,
+        raw.viewUrl,
+        raw.openUrl,
+        raw.blobUrl,
+        raw.publicUrl
+      ),
+      ""
+    );
+  }
+
+  return safeText(
+    first(
+      item.viewUrl,
+      item.openUrl,
+      item.signedUrl,
+      item.url,
+      item.downloadUrl,
+      item.blobUrl,
+      item.publicUrl,
+      raw.viewUrl,
+      raw.openUrl,
+      raw.signedUrl,
+      raw.url,
+      raw.downloadUrl,
+      raw.blobUrl,
+      raw.publicUrl
+    ),
+    ""
+  );
+}
+
+function normalizeAttachmentFileResponse(payload = {}, fallback = {}) {
+  const file = pickFilePayload(payload);
+  const fallbackObj = safeObject(fallback);
+
+  const url = safeText(
+    first(
+      file.url,
+      file.viewUrl,
+      file.openUrl,
+      file.downloadUrl,
+      file.signedUrl,
+      file.blobUrl,
+      file.publicUrl,
+      fallbackObj.url,
+      fallbackObj.viewUrl,
+      fallbackObj.openUrl,
+      fallbackObj.downloadUrl,
+      fallbackObj.signedUrl,
+      fallbackObj.blobUrl,
+      fallbackObj.publicUrl
+    ),
+    ""
+  );
+
+  return {
+    ...fallbackObj,
+    ...file,
+    url,
+    viewUrl: safeText(first(file.viewUrl, file.openUrl, url), url),
+    openUrl: safeText(first(file.openUrl, file.viewUrl, url), url),
+    downloadUrl: safeText(first(file.downloadUrl, url), url),
+    signedUrl: safeText(first(file.signedUrl, url), url),
+    filename: safeText(
+      first(
+        file.filename,
+        file.fileName,
+        file.name,
+        fallbackObj.filename,
+        fallbackObj.fileName,
+        fallbackObj.name
+      ),
+      getAttachmentName(fallbackObj)
+    ),
+    name: safeText(
+      first(
+        file.name,
+        file.filename,
+        file.fileName,
+        fallbackObj.name,
+        fallbackObj.filename,
+        fallbackObj.fileName
+      ),
+      getAttachmentName(fallbackObj)
+    ),
+    contentType: safeText(
+      first(
+        file.contentType,
+        file.mimeType,
+        file.mimetype,
+        fallbackObj.contentType,
+        fallbackObj.mimeType,
+        fallbackObj.mimetype
+      ),
+      ""
+    ),
+  };
+}
+
+export async function getTicketAttachmentFileAction({
+  ticketId = "",
+  attachment = {},
+  attachmentId = "",
+  mode = "view",
+  silent = true,
+} = {}) {
+  const id = normalizeTicketId(ticketId);
+  const finalAttachmentId = safeText(
+    first(
+      attachmentId,
+      getAttachmentId(attachment)
+    ),
+    ""
+  );
+
+  const finalMode = mode === "download" ? "download" : "view";
+  const directUrl = getDirectAttachmentUrl(attachment, finalMode);
+
+  if (!id || !finalAttachmentId) {
+    if (directUrl) {
+      return normalizeAttachmentFileResponse(
+        {
+          url: directUrl,
+        },
+        attachment
+      );
+    }
+
+    if (!silent) {
+      showToast("No se pudo identificar el adjunto.", "error");
+    }
+
+    return null;
+  }
+
+  try {
+    const response = await requestFirstJsonCandidate(
+      buildAttachmentCandidates({
+        ticketId: id,
+        attachmentId: finalAttachmentId,
+        mode: finalMode,
+      }),
+      {
+        timeoutMs: REQUEST_TIMEOUT_MS,
+      }
+    );
+
+    const file = normalizeAttachmentFileResponse(response, attachment);
+
+    if (!file.url) {
+      throw new Error("ATTACHMENT_URL_EMPTY");
+    }
+
+    safeEmit("incidencias:attachment:file", {
+      ticketId: id,
+      attachmentId: finalAttachmentId,
+      mode: finalMode,
+      file,
+    });
+
+    return file;
+  } catch (error) {
+    if (directUrl) {
+      return normalizeAttachmentFileResponse(
+        {
+          url: directUrl,
+        },
+        attachment
+      );
+    }
+
+    safeEmit("incidencias:attachment:file:error", {
+      ticketId: id,
+      attachmentId: finalAttachmentId,
+      mode: finalMode,
+      error,
+    });
+
+    if (!silent) {
+      showToast("No se pudo resolver el adjunto.", "error");
+    }
+
+    return null;
+  }
+}
+
+export async function openTicketAttachmentAction({
+  ticketId = "",
+  attachment = {},
+  attachmentId = "",
+  detail = null,
+  mode = "view",
+  silent = true,
+} = {}) {
+  const file = await getTicketAttachmentFileAction({
+    ticketId,
+    attachment,
+    attachmentId,
+    mode: "view",
+    silent,
+  });
+
+  if (!file?.url) {
+    return null;
+  }
+
+  safeEmit("incidencias:attachment:open", {
+    ticketId: normalizeTicketId(ticketId),
+    attachment,
+    detail,
+    file,
+    mode,
+  });
+
+  return file;
+}
+
+export async function downloadTicketAttachmentAction({
+  ticketId = "",
+  attachment = {},
+  attachmentId = "",
+  detail = null,
+  mode = "download",
+  silent = true,
+} = {}) {
+  const file = await getTicketAttachmentFileAction({
+    ticketId,
+    attachment,
+    attachmentId,
+    mode: "download",
+    silent,
+  });
+
+  if (!file?.url) {
+    return null;
+  }
+
+  safeEmit("incidencias:attachment:download", {
+    ticketId: normalizeTicketId(ticketId),
+    attachment,
+    detail,
+    file,
+    mode,
+  });
+
+  return file;
+}
+
+/* =========================================================
    COPY ID
 ========================================================= */
 
@@ -942,14 +1992,20 @@ export async function copyTicketIdAction({
   const id = normalizeTicketId(ticketId);
 
   if (!id) {
-    if (!silent) showToast("No hay referencia para copiar.", "error");
+    if (!silent) {
+      showToast("No hay referencia para copiar.", "error");
+    }
+
     return false;
   }
 
   const copied = await writeClipboardText(id);
 
   if (!copied) {
-    if (!silent) showToast("No se pudo copiar la referencia.", "error");
+    if (!silent) {
+      showToast("No se pudo copiar la referencia.", "error");
+    }
+
     return false;
   }
 
@@ -957,7 +2013,9 @@ export async function copyTicketIdAction({
     ticketId: id,
   });
 
-  if (!silent) showToast("Referencia copiada", "success");
+  if (!silent) {
+    showToast("Referencia copiada", "success");
+  }
 
   return true;
 }
@@ -978,7 +2036,10 @@ export function exportIncidenciasCsvAction({
   const list = safeArray(sourceItems);
 
   if (!list.length) {
-    if (!silent) showToast("No hay incidencias para exportar.", "info");
+    if (!silent) {
+      showToast("No hay incidencias para exportar.", "info");
+    }
+
     return false;
   }
 
@@ -996,7 +2057,9 @@ export function exportIncidenciasCsvAction({
       filename: safeText(filename, CSV_FILENAME),
     });
 
-    if (!silent) showToast("Historial exportado", "success");
+    if (!silent) {
+      showToast("Historial exportado", "success");
+    }
 
     return true;
   } catch (error) {
@@ -1005,7 +2068,9 @@ export function exportIncidenciasCsvAction({
       error,
     });
 
-    if (!silent) showToast("No se pudo exportar el historial.", "error");
+    if (!silent) {
+      showToast("No se pudo exportar el historial.", "error");
+    }
 
     return false;
   }
@@ -1075,10 +2140,7 @@ export async function createIncidenciaAction({
     });
 
     if (!silent) {
-      showToast(
-        "No se pudo abrir el formulario de nueva incidencia.",
-        "error"
-      );
+      showToast("No se pudo abrir el formulario de nueva incidencia.", "error");
     }
 
     return false;
@@ -1090,9 +2152,22 @@ export async function createIncidenciaAction({
 ========================================================= */
 
 export const OnionIncidenciasActions = {
+  getTicketDetail: getTicketDetailAction,
+  openTicket: openTicketAction,
   refreshTicketDetail: refreshTicketDetailAction,
+
+  uploadTicketAttachments: uploadTicketAttachmentsAction,
+
   commentTicket: commentTicketAction,
   reopenTicket: reopenTicketAction,
+
+  getTicketAttachmentFile: getTicketAttachmentFileAction,
+  openTicketAttachment: openTicketAttachmentAction,
+  downloadTicketAttachment: downloadTicketAttachmentAction,
+
+  copyTicketId: copyTicketIdAction,
+  exportCsv: exportIncidenciasCsvAction,
+  createIncidencia: createIncidenciaAction,
 };
 
 try {
@@ -1125,3 +2200,9 @@ export {
   getTags as getIncidenciaTagsAction,
   normalizeTicketDetail as normalizeIncidenciaDetailAction,
 };
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
+export default OnionIncidenciasActions;

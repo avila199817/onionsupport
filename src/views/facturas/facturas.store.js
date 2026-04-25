@@ -8,6 +8,7 @@
    - exponer helpers de consulta por id y ordenación
    - aislar la vista del shape interno del Store
    - mantener paridad operativa con facturasView / facturas.model
+   - preservar relación factura ↔ incidencia para columna Incidencia
 
    HARDENING PRO:
    - lectura tolerante a múltiples shapes del Store
@@ -16,6 +17,7 @@
    - upsert por id / _id / facturaId
    - deduplicación defensiva al append
    - compat con colección normalizada actual
+   - no pierde ticketId / incidenciaId / incidencia / ticket / linkedTicket
 ========================================================= */
 
 import { Store } from "../../store/index.js";
@@ -87,26 +89,52 @@ function safeObject(value, fallback = {}) {
 
 function first(...values) {
   for (const value of values) {
-    if (
-      value !== undefined &&
-      value !== null &&
-      String(value).trim() !== ""
-    ) {
-      return value;
+    if (value === undefined || value === null) continue;
+
+    if (typeof value === "string" && value.trim() === "") {
+      continue;
     }
+
+    if (Array.isArray(value) && value.length === 0) {
+      continue;
+    }
+
+    return value;
   }
 
   return null;
 }
 
+function hasOwnKeys(value = {}) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value).length
+  );
+}
+
 function getFacturaStoreId(item = {}) {
   const source = safeObject(item);
+  const raw = safeObject(source.raw);
 
   return safeText(
     first(
       source.id,
       source._id,
-      source.facturaId
+      source.facturaId,
+      source.invoiceId,
+      source.numero,
+      source.numeroFacturaLegal,
+      source.numeroFacturaSistema,
+
+      raw.id,
+      raw._id,
+      raw.facturaId,
+      raw.invoiceId,
+      raw.numero,
+      raw.numeroFacturaLegal,
+      raw.numeroFacturaSistema
     ),
     ""
   );
@@ -114,21 +142,448 @@ function getFacturaStoreId(item = {}) {
 
 function getFacturaStoreNumber(item = {}) {
   const source = safeObject(item);
+  const raw = safeObject(source.raw);
 
   return safeText(
     first(
       source.numero,
       source.code,
       source.facturaNumero,
-      source.facturaCode
+      source.facturaCode,
+      source.numeroFacturaLegal,
+      source.numeroFacturaSistema,
+
+      raw.numero,
+      raw.code,
+      raw.facturaNumero,
+      raw.facturaCode,
+      raw.numeroFacturaLegal,
+      raw.numeroFacturaSistema
     ),
     ""
   );
 }
 
+function pickTicketIdFromArray(value = []) {
+  const items = safeArray(value);
+
+  for (const item of items) {
+    if (typeof item === "string" && item.trim()) {
+      return item.trim();
+    }
+
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+
+    const candidate = first(
+      item.ticketId,
+      item.incidenciaId,
+      item.id,
+      item.code,
+      item.numero,
+      item.relatedTicketId,
+      item.relatedIncidentId,
+      item.supportTicketId,
+      item.caseId
+    );
+
+    if (candidate) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+/* =========================================================
+   INCIDENCIA / TICKET PRESERVER
+========================================================= */
+
+function getRelatedIncidenciaId(item = {}) {
+  const source = safeObject(item);
+  const raw = safeObject(source.raw);
+
+  const incidencia = safeObject(
+    first(
+      source.incidencia,
+      raw.incidencia
+    )
+  );
+
+  const ticket = safeObject(
+    first(
+      source.ticket,
+      raw.ticket
+    )
+  );
+
+  const linkedTicket = safeObject(
+    first(
+      source.linkedTicket,
+      raw.linkedTicket
+    )
+  );
+
+  return safeText(
+    first(
+      source.ticketId,
+      source.incidenciaId,
+
+      incidencia.ticketId,
+      incidencia.id,
+      incidencia.incidenciaId,
+
+      ticket.ticketId,
+      ticket.id,
+      ticket.incidenciaId,
+
+      linkedTicket.ticketId,
+      linkedTicket.id,
+      linkedTicket.incidenciaId,
+
+      source.relatedTicketId,
+      source.relatedIncidentId,
+      source.supportTicketId,
+      source.caseId,
+
+      source.meta?.ticketId,
+      source.meta?.incidenciaId,
+
+      pickTicketIdFromArray(source.ticketIds),
+      pickTicketIdFromArray(source.incidenciaIds),
+      pickTicketIdFromArray(source.relatedTicketIds),
+      pickTicketIdFromArray(source.relatedIncidentIds),
+      pickTicketIdFromArray(source.linkedTickets),
+      pickTicketIdFromArray(source.incidencias),
+      pickTicketIdFromArray(source.tickets),
+      pickTicketIdFromArray(source.relatedTickets),
+      pickTicketIdFromArray(source.relations),
+
+      raw.ticketId,
+      raw.incidenciaId,
+
+      raw.incidencia?.ticketId,
+      raw.incidencia?.id,
+      raw.incidencia?.incidenciaId,
+
+      raw.ticket?.ticketId,
+      raw.ticket?.id,
+      raw.ticket?.incidenciaId,
+
+      raw.linkedTicket?.ticketId,
+      raw.linkedTicket?.id,
+      raw.linkedTicket?.incidenciaId,
+
+      raw.relatedTicketId,
+      raw.relatedIncidentId,
+      raw.supportTicketId,
+      raw.caseId,
+
+      raw.meta?.ticketId,
+      raw.meta?.incidenciaId,
+
+      pickTicketIdFromArray(raw.ticketIds),
+      pickTicketIdFromArray(raw.incidenciaIds),
+      pickTicketIdFromArray(raw.relatedTicketIds),
+      pickTicketIdFromArray(raw.relatedIncidentIds),
+      pickTicketIdFromArray(raw.linkedTickets),
+      pickTicketIdFromArray(raw.incidencias),
+      pickTicketIdFromArray(raw.tickets),
+      pickTicketIdFromArray(raw.relatedTickets),
+      pickTicketIdFromArray(raw.relations)
+    ),
+    ""
+  );
+}
+
+function buildIncidenciaPayload(item = {}) {
+  const source = safeObject(item);
+  const raw = safeObject(source.raw);
+
+  const incidencia = safeObject(
+    first(
+      source.incidencia,
+      raw.incidencia
+    )
+  );
+
+  const ticket = safeObject(
+    first(
+      source.ticket,
+      raw.ticket
+    )
+  );
+
+  const linkedTicket = safeObject(
+    first(
+      source.linkedTicket,
+      raw.linkedTicket
+    )
+  );
+
+  const incidenciaId = getRelatedIncidenciaId(source);
+
+  if (!incidenciaId) {
+    return null;
+  }
+
+  return {
+    ...incidencia,
+
+    id: incidenciaId,
+    ticketId: incidenciaId,
+    incidenciaId,
+
+    subject: safeText(
+      first(
+        incidencia.subject,
+        incidencia.asunto,
+        ticket.subject,
+        ticket.asunto,
+        linkedTicket.subject,
+        linkedTicket.asunto,
+        source.subject,
+        source.asunto,
+        raw.subject,
+        raw.asunto,
+        ""
+      ),
+      ""
+    ),
+
+    asunto: safeText(
+      first(
+        incidencia.asunto,
+        incidencia.subject,
+        ticket.asunto,
+        ticket.subject,
+        linkedTicket.asunto,
+        linkedTicket.subject,
+        source.asunto,
+        source.subject,
+        raw.asunto,
+        raw.subject,
+        ""
+      ),
+      ""
+    ),
+
+    clienteId: safeText(
+      first(
+        incidencia.clienteId,
+        ticket.clienteId,
+        linkedTicket.clienteId,
+        source.clienteId,
+        source.cliente?.id,
+        raw.clienteId,
+        raw.cliente?.id,
+        ""
+      ),
+      ""
+    ),
+
+    clienteNombre: safeText(
+      first(
+        incidencia.clienteNombre,
+        incidencia.name,
+        incidencia.nombre,
+        ticket.clienteNombre,
+        linkedTicket.clienteNombre,
+        source.cliente?.nombre,
+        source.cliente?.name,
+        raw.cliente?.nombre,
+        raw.cliente?.name,
+        ""
+      ),
+      ""
+    ),
+
+    relationType: safeText(
+      first(
+        incidencia.relationType,
+        ticket.relationType,
+        linkedTicket.relationType,
+        source.relationType,
+        raw.relationType,
+        "linked_ticket"
+      ),
+      "linked_ticket"
+    ),
+
+    linkedAt: safeText(
+      first(
+        incidencia.linkedAt,
+        ticket.linkedAt,
+        linkedTicket.linkedAt,
+        source.linkedAt,
+        raw.linkedAt,
+        ""
+      ),
+      ""
+    ),
+
+    linkedAtES: safeText(
+      first(
+        incidencia.linkedAtES,
+        ticket.linkedAtES,
+        linkedTicket.linkedAtES,
+        source.linkedAtES,
+        raw.linkedAtES,
+        ""
+      ),
+      ""
+    ),
+  };
+}
+
+function preserveIncidenciaFields(normalized = {}, original = {}) {
+  const base = safeObject(normalized);
+  const source = safeObject(original);
+  const embeddedRaw = safeObject(base.raw);
+  const sourceRaw = safeObject(source.raw);
+
+  const raw = hasOwnKeys(embeddedRaw)
+    ? embeddedRaw
+    : hasOwnKeys(sourceRaw)
+      ? sourceRaw
+      : source;
+
+  const mergedProbe = {
+    ...source,
+    ...base,
+    raw,
+  };
+
+  const incidenciaId = getRelatedIncidenciaId(mergedProbe);
+  const incidenciaPayload = buildIncidenciaPayload(mergedProbe);
+
+  if (!incidenciaId) {
+    return {
+      ...base,
+      raw,
+    };
+  }
+
+  return {
+    ...base,
+
+    raw,
+
+    ticketId: incidenciaId,
+    incidenciaId,
+
+    relatedTicketId: safeText(
+      first(
+        base.relatedTicketId,
+        source.relatedTicketId,
+        raw.relatedTicketId,
+        incidenciaId
+      ),
+      incidenciaId
+    ),
+
+    relatedIncidentId: safeText(
+      first(
+        base.relatedIncidentId,
+        source.relatedIncidentId,
+        raw.relatedIncidentId,
+        incidenciaId
+      ),
+      incidenciaId
+    ),
+
+    supportTicketId: safeText(
+      first(
+        base.supportTicketId,
+        source.supportTicketId,
+        raw.supportTicketId,
+        incidenciaId
+      ),
+      incidenciaId
+    ),
+
+    caseId: safeText(
+      first(
+        base.caseId,
+        source.caseId,
+        raw.caseId,
+        incidenciaId
+      ),
+      incidenciaId
+    ),
+
+    incidencia: incidenciaPayload,
+    ticket: safeObject(first(base.ticket, source.ticket, raw.ticket, incidenciaPayload)),
+    linkedTicket: safeObject(first(base.linkedTicket, source.linkedTicket, raw.linkedTicket, incidenciaPayload)),
+
+    relationType: safeText(
+      first(
+        base.relationType,
+        source.relationType,
+        raw.relationType,
+        incidenciaPayload?.relationType,
+        "linked_ticket"
+      ),
+      "linked_ticket"
+    ),
+
+    meta: {
+      ...safeObject(base.meta),
+      hasIncidencia: true,
+      incidenciaId,
+      ticketId: incidenciaId,
+    },
+  };
+}
+
+function normalizeFacturaPreservingLinks(item = {}) {
+  const original = safeObject(item);
+
+  let normalized = {};
+
+  try {
+    normalized = normalizeFactura(original);
+  } catch {
+    normalized = original;
+  }
+
+  return preserveIncidenciaFields(normalized, original);
+}
+
+function mergeFacturaPreservingLinks(current = {}, incoming = {}) {
+  const currentSafe = safeObject(current);
+  const incomingSafe = safeObject(incoming);
+
+  const merged = {
+    ...currentSafe,
+    ...incomingSafe,
+
+    raw: {
+      ...safeObject(currentSafe.raw),
+      ...safeObject(incomingSafe.raw),
+    },
+
+    meta: {
+      ...safeObject(currentSafe.meta),
+      ...safeObject(incomingSafe.meta),
+    },
+  };
+
+  return preserveIncidenciaFields(merged, {
+    ...currentSafe,
+    ...incomingSafe,
+    raw: merged.raw,
+  });
+}
+
+/* =========================================================
+   COLLECTION NORMALIZATION
+========================================================= */
+
 function normalizeFacturaCollection(items = []) {
   return safeArray(items)
-    .map((item) => normalizeFactura(item))
+    .map((item) => normalizeFacturaPreservingLinks(item))
     .filter((item) => Boolean(getFacturaStoreId(item)));
 }
 
@@ -136,7 +591,7 @@ function dedupeFacturas(items = []) {
   const map = new Map();
 
   for (const item of safeArray(items)) {
-    const normalized = normalizeFactura(item);
+    const normalized = normalizeFacturaPreservingLinks(item);
     const id = getFacturaStoreId(normalized);
 
     if (!id) {
@@ -145,10 +600,10 @@ function dedupeFacturas(items = []) {
 
     const current = map.get(id) || {};
 
-    map.set(id, {
-      ...current,
-      ...normalized,
-    });
+    map.set(
+      id,
+      mergeFacturaPreservingLinks(current, normalized)
+    );
   }
 
   return Array.from(map.values());
@@ -351,7 +806,7 @@ export function appendFacturasStore(items = []) {
 }
 
 export function upsertFacturaStore(factura = null) {
-  const normalized = normalizeFactura(factura);
+  const normalized = normalizeFacturaPreservingLinks(factura);
   const facturaId = getFacturaStoreId(normalized);
 
   if (!facturaId) {
@@ -366,10 +821,10 @@ export function upsertFacturaStore(factura = null) {
   if (index === -1) {
     current.unshift(normalized);
   } else {
-    current[index] = {
-      ...current[index],
-      ...normalized,
-    };
+    current[index] = mergeFacturaPreservingLinks(
+      current[index],
+      normalized
+    );
   }
 
   return persistFacturasStore(current);
@@ -397,6 +852,22 @@ export function clearFacturasStore() {
 }
 
 /* =========================================================
+   DEBUG HELPERS
+========================================================= */
+
+export function debugFacturasIncidenciasStore() {
+  return getFacturasStore().map((item) => ({
+    id: getFacturaStoreId(item),
+    numero: getFacturaStoreNumber(item),
+    ticketId: item.ticketId || null,
+    incidenciaId: item.incidenciaId || null,
+    rawTicketId: item.raw?.ticketId || null,
+    rawIncidenciaId: item.raw?.incidenciaId || null,
+    hasIncidencia: Boolean(item.meta?.hasIncidencia),
+  }));
+}
+
+/* =========================================================
    DEFAULT EXPORT
 ========================================================= */
 
@@ -406,9 +877,12 @@ export default {
   getFacturaByIdStore,
   hasFacturasStore,
   countFacturasStore,
+
   setFacturasStore,
   appendFacturasStore,
   upsertFacturaStore,
   removeFacturaByIdStore,
   clearFacturasStore,
+
+  debugFacturasIncidenciasStore,
 };

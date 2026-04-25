@@ -24,6 +24,7 @@
    - paginación defensiva
    - estilos encapsulados
    - responsive robusto
+   - columna prioridad eliminada de tabla
 ========================================================= */
 
 /* =========================================================
@@ -58,6 +59,10 @@ function first(...values) {
     if (value === undefined || value === null) continue;
 
     if (typeof value === "string" && value.trim() === "") {
+      continue;
+    }
+
+    if (Array.isArray(value) && value.length === 0) {
       continue;
     }
 
@@ -344,19 +349,6 @@ function getPriorityKey(item = {}) {
   );
 }
 
-function getPriorityLabel(item = {}) {
-  const key = getPriorityKey(item);
-
-  if (["low", "baja"].includes(key)) return "Baja";
-  if (["high", "alta"].includes(key)) return "Alta";
-
-  if (["urgent", "urgente", "critical", "critica"].includes(key)) {
-    return "Urgente";
-  }
-
-  return "Media";
-}
-
 function getImporteLabel(item = {}) {
   const amount = first(
     item.total,
@@ -603,6 +595,7 @@ function renderAvatar(item = {}) {
         class="incidencias-avatar"
         title="${escapeHtml(fullName)}"
         aria-label="${escapeHtml(fullName)}"
+        data-tooltip="${escapeHtml(fullName)}"
       >
         <img
           src="${escapeHtml(avatarUrl)}"
@@ -621,6 +614,7 @@ function renderAvatar(item = {}) {
       class="incidencias-avatar incidencias-avatar--fallback"
       title="${escapeHtml(fullName)}"
       aria-label="${escapeHtml(fullName)}"
+      data-tooltip="${escapeHtml(fullName)}"
     >
       <span class="incidencias-avatar-fallback">${escapeHtml(initials)}</span>
     </div>
@@ -640,17 +634,6 @@ function renderStatusChip(item = {}) {
 
   return `
     <span class="incidencias-chip incidencias-chip--${escapeHtml(key)}">
-      ${escapeHtml(label)}
-    </span>
-  `;
-}
-
-function renderPriorityChip(item = {}) {
-  const key = getPriorityKey(item);
-  const label = getPriorityLabel(item);
-
-  return `
-    <span class="incidencias-priority incidencias-priority--${escapeHtml(key)}">
       ${escapeHtml(label)}
     </span>
   `;
@@ -695,10 +678,6 @@ function renderRow(item = {}, state = {}) {
 
       <td class="incidencias-cell incidencias-cell--status">
         ${renderStatusChip(item)}
-      </td>
-
-      <td class="incidencias-cell incidencias-cell--priority">
-        ${renderPriorityChip(item)}
       </td>
 
       <td class="incidencias-cell incidencias-cell--date">
@@ -788,7 +767,6 @@ function renderTableLoading(rows = 5) {
                 <div class="incidencias-skeleton incidencias-skeleton--lg"></div>
                 <div class="incidencias-skeleton incidencias-skeleton--md"></div>
               </div>
-              <div class="incidencias-skeleton incidencias-skeleton--pill"></div>
               <div class="incidencias-skeleton incidencias-skeleton--pill"></div>
               <div class="incidencias-skeleton incidencias-skeleton--date"></div>
               <div class="incidencias-skeleton incidencias-skeleton--date"></div>
@@ -1111,7 +1089,7 @@ function renderStyles() {
         width:100%;
         border-collapse:separate;
         border-spacing:0;
-        min-width:1240px;
+        min-width:1120px;
       }
 
       .incidencias-table thead th{
@@ -1231,8 +1209,7 @@ function renderStyles() {
         white-space:nowrap;
       }
 
-      .incidencias-chip,
-      .incidencias-priority{
+      .incidencias-chip{
         min-height:32px;
         padding:0 12px;
         border-radius:999px;
@@ -1270,28 +1247,6 @@ function renderStyles() {
         color:#258a59;
         background:rgba(54,198,144,.10);
         border-color:rgba(54,198,144,.22);
-      }
-
-      .incidencias-priority{
-        color:#64748b;
-        background:rgba(15,23,42,.035);
-        border-color:rgba(15,23,42,.06);
-      }
-
-      .incidencias-priority--high,
-      .incidencias-priority--alta{
-        color:#a16207;
-        background:rgba(255,188,66,.10);
-        border-color:rgba(255,188,66,.22);
-      }
-
-      .incidencias-priority--urgent,
-      .incidencias-priority--urgente,
-      .incidencias-priority--critical,
-      .incidencias-priority--critica{
-        color:#b42318;
-        background:rgba(255,107,107,.10);
-        border-color:rgba(255,107,107,.22);
       }
 
       .incidencias-date-inline{
@@ -1430,7 +1385,7 @@ function renderStyles() {
 
       .incidencias-table-loading-row{
         display:grid;
-        grid-template-columns:44px minmax(220px, 1.45fr) 112px 112px 140px 140px 86px 70px 112px;
+        grid-template-columns:44px minmax(220px, 1.45fr) 112px 140px 140px 86px 70px 112px;
         gap:12px;
         align-items:center;
       }
@@ -1889,11 +1844,10 @@ export function renderTable(input = {}) {
                     <div class="incidencias-table-shell">
                       <table class="incidencias-table" role="table" aria-label="Listado de incidencias">
                         <colgroup>
-                          <col style="width:34%;">
-                          <col style="width:10%;">
-                          <col style="width:10%;">
-                          <col style="width:13%;">
-                          <col style="width:13%;">
+                          <col style="width:39%;">
+                          <col style="width:11%;">
+                          <col style="width:15%;">
+                          <col style="width:15%;">
                           <col style="width:8%;">
                           <col style="width:5%;">
                           <col style="width:7%;">
@@ -1903,7 +1857,6 @@ export function renderTable(input = {}) {
                           <tr>
                             <th>Incidencia</th>
                             <th>Estado</th>
-                            <th>Prioridad</th>
                             <th>Creación</th>
                             <th>Última novedad</th>
                             <th>Importe</th>

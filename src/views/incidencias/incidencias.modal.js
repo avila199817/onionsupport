@@ -238,6 +238,15 @@ function getAuthToken() {
   );
 }
 
+function isAzureBlobUrl(value = "") {
+  try {
+    const url = new URL(value);
+    return /\.blob\.core\.windows\.net$/i.test(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
 function isSameOriginUrl(value = "") {
   try {
     const url = new URL(value, window.location.origin);
@@ -247,17 +256,47 @@ function isSameOriginUrl(value = "") {
   }
 }
 
+function getApiOrigin() {
+  const apiBase = getApiBase();
+
+  if (!apiBase) {
+    return window.location.origin;
+  }
+
+  try {
+    return new URL(apiBase, window.location.origin).origin;
+  } catch {
+    return window.location.origin;
+  }
+}
+
 function looksLikeProtectedApiUrl(value = "") {
-  const text = safeText(value, "").toLowerCase();
+  const text = safeText(value, "");
   if (!text) return false;
 
-  return (
-    text.includes("/api/") ||
-    text.includes("/tickets/") ||
-    text.includes("/incidencias/") ||
-    text.includes("/attachments/") ||
-    isSameOriginUrl(text)
-  );
+  if (isAzureBlobUrl(text)) {
+    return false;
+  }
+
+  try {
+    const url = new URL(text, window.location.origin);
+    const pathname = safeText(url.pathname, "").toLowerCase();
+    const apiOrigin = getApiOrigin();
+
+    const sameAppOrigin = url.origin === window.location.origin;
+    const sameApiOrigin = url.origin === apiOrigin;
+
+    return (
+      (sameAppOrigin || sameApiOrigin) &&
+      (
+        pathname.startsWith("/api/") ||
+        pathname.startsWith("/tickets/") ||
+        pathname.startsWith("/incidencias/")
+      )
+    );
+  } catch {
+    return text.startsWith("/api/");
+  }
 }
 
 function getFilenameFromContentDisposition(value = "", fallback = "archivo") {
@@ -558,33 +597,70 @@ function getFacturaRelacionada(detail = {}) {
    ATTACHMENTS / URL RESOLVE
 ========================================================= */
 
-function resolveAttachmentUrl(item = {}, detail = {}) {
+function pickAttachmentUrlByMode(item = {}, mode = "open") {
   const file = safeObject(item);
-  const raw = safeObject(detail?.raw);
+  const raw = safeObject(file.raw);
 
-  const directUrl = safeText(
+  if (mode === "download") {
+    return safeText(
+      first(
+        file.downloadUrl,
+        file.signedUrl,
+        file.url,
+        file.blobUrl,
+        file.publicUrl,
+        file.viewUrl,
+        file.openUrl,
+
+        raw.downloadUrl,
+        raw.signedUrl,
+        raw.url,
+        raw.blobUrl,
+        raw.publicUrl,
+        raw.viewUrl,
+        raw.openUrl,
+
+        file?.links?.download,
+        raw?.links?.download,
+        file?.links?.view,
+        raw?.links?.view
+      ),
+      ""
+    );
+  }
+
+  return safeText(
     first(
-      file.blobUrl,
-      file.blobURL,
-      file.url,
-      file.href,
-      file.downloadUrl,
       file.viewUrl,
-      file.signedUrl,
-      file.publicUrl,
-      file.previewUrl,
       file.openUrl,
-      file?.links?.download,
+      file.signedUrl,
+      file.url,
+      file.blobUrl,
+      file.publicUrl,
+      file.downloadUrl,
+
+      raw.viewUrl,
+      raw.openUrl,
+      raw.signedUrl,
+      raw.url,
+      raw.blobUrl,
+      raw.publicUrl,
+      raw.downloadUrl,
+
       file?.links?.view,
-      file?.raw?.blobUrl,
-      file?.raw?.url,
-      file?.raw?.downloadUrl,
-      file?.raw?.viewUrl,
-      file?.raw?.signedUrl,
-      file?.raw?.publicUrl
+      raw?.links?.view,
+      file?.links?.download,
+      raw?.links?.download
     ),
     ""
   );
+}
+
+function resolveAttachmentUrl(item = {}, detail = {}, mode = "open") {
+  const file = safeObject(item);
+  const raw = safeObject(detail?.raw);
+
+  const directUrl = pickAttachmentUrlByMode(file, mode);
 
   if (isAbsoluteUrl(directUrl)) {
     return directUrl;
@@ -596,14 +672,18 @@ function resolveAttachmentUrl(item = {}, detail = {}) {
   const candidatePath = safeText(
     first(
       file.path,
+      file.storageKey,
       file.storagePath,
+      file.blobPath,
       file.blobName,
       file.key,
       file.filename,
       file.fileName,
       file.name,
       file?.raw?.path,
+      file?.raw?.storageKey,
       file?.raw?.storagePath,
+      file?.raw?.blobPath,
       file?.raw?.blobName,
       file?.raw?.key
     ),
@@ -636,14 +716,36 @@ function resolveAttachmentUrl(item = {}, detail = {}) {
     const encodedAttachmentId = encodeUrlPathSegment(attachmentId);
 
     const routeCandidates = [
-      joinApiPath("api", "tickets", encodedTicketId, "attachments", encodedAttachmentId, "download"),
-      joinApiPath("api", "tickets", encodedTicketId, "attachments", encodedAttachmentId, "view"),
-      joinApiPath("api", "tickets", encodedTicketId, "attachments", encodedAttachmentId),
-      joinApiPath("api", "incidencias", encodedTicketId, "attachments", encodedAttachmentId, "download"),
-      joinApiPath("api", "incidencias", encodedTicketId, "attachments", encodedAttachmentId, "view"),
-      joinApiPath("api", "incidencias", encodedTicketId, "attachments", encodedAttachmentId),
-      candidatePath ? joinApiPath("api", "uploads", candidatePath) : "",
-      candidatePath ? joinApiPath("api", candidatePath) : "",
+      joinApiPath(
+        "api",
+        "tickets",
+        encodedTicketId,
+        "attachments",
+        encodedAttachmentId,
+        mode === "download" ? "download" : "view"
+      ),
+      joinApiPath(
+        "api",
+        "tickets",
+        encodedTicketId,
+        "attachments",
+        encodedAttachmentId
+      ),
+      joinApiPath(
+        "api",
+        "incidencias",
+        encodedTicketId,
+        "attachments",
+        encodedAttachmentId,
+        mode === "download" ? "download" : "view"
+      ),
+      joinApiPath(
+        "api",
+        "incidencias",
+        encodedTicketId,
+        "attachments",
+        encodedAttachmentId
+      ),
     ].filter(Boolean);
 
     if (routeCandidates.length) {
@@ -664,28 +766,150 @@ function getAttachments(detail = {}) {
 
   return safeArray(attachments).map((file, index) => {
     const item = safeObject(file);
+    const raw = safeObject(item.raw);
+
+    const name = safeText(
+      first(
+        item.name,
+        item.filename,
+        item.fileName,
+        item.title,
+        raw.name,
+        raw.filename,
+        raw.fileName,
+        raw.title
+      ),
+      `archivo_${index + 1}`
+    );
 
     const attachment = {
       id: safeText(
-        first(item.id, item.fileId, item.blobName, item.key),
+        first(
+          item.id,
+          item.fileId,
+          item.attachmentId,
+          item.blobName,
+          item.storageKey,
+          item.path,
+          item.key,
+          raw.id,
+          raw.fileId,
+          raw.attachmentId,
+          raw.blobName,
+          raw.storageKey,
+          raw.path,
+          raw.key
+        ),
         `attachment-${index + 1}`
       ),
-      name: safeText(
-        first(item.name, item.filename, item.fileName, item.title),
-        `archivo_${index + 1}`
+
+      name,
+
+      filename: safeText(
+        first(
+          item.filename,
+          item.fileName,
+          item.name,
+          raw.filename,
+          raw.fileName,
+          raw.name
+        ),
+        name
       ),
+
       url: "",
-      path: safeText(first(item.path, item.storagePath, item.key, item.blobName), ""),
-      size: safeNumber(item.size, 0),
-      type: safeText(
-        first(item.type, item.contentType, item.mimeType, item.mime),
+      viewUrl: "",
+      openUrl: "",
+      downloadUrl: "",
+      signedUrl: "",
+      blobUrl: "",
+      publicUrl: "",
+
+      path: safeText(
+        first(
+          item.path,
+          item.storageKey,
+          item.storagePath,
+          item.blobPath,
+          item.blobName,
+          item.key,
+          raw.path,
+          raw.storageKey,
+          raw.storagePath,
+          raw.blobPath,
+          raw.blobName,
+          raw.key
+        ),
         ""
       ),
-      uploadedAt: first(item.uploadedAt, item.createdAt, item.date, null),
-      raw: item,
+
+      size: safeNumber(first(item.size, raw.size), 0),
+
+      type: safeText(
+        first(
+          item.type,
+          item.contentType,
+          item.mimetype,
+          item.mimeType,
+          item.mime,
+          raw.type,
+          raw.contentType,
+          raw.mimetype,
+          raw.mimeType,
+          raw.mime
+        ),
+        ""
+      ),
+
+      contentType: safeText(
+        first(
+          item.contentType,
+          item.mimetype,
+          item.mimeType,
+          item.mime,
+          raw.contentType,
+          raw.mimetype,
+          raw.mimeType,
+          raw.mime
+        ),
+        ""
+      ),
+
+      uploadedAt: first(
+        item.uploadedAt,
+        item.createdAt,
+        item.date,
+        raw.uploadedAt,
+        raw.createdAt,
+        raw.date,
+        null
+      ),
+
+      raw: {
+        ...raw,
+        ...item,
+      },
     };
 
-    attachment.url = resolveAttachmentUrl(item, detail);
+    attachment.viewUrl = resolveAttachmentUrl(item, detail, "open");
+    attachment.openUrl = attachment.viewUrl;
+    attachment.downloadUrl = resolveAttachmentUrl(item, detail, "download");
+    attachment.signedUrl = safeText(
+      first(item.signedUrl, raw.signedUrl, attachment.viewUrl),
+      ""
+    );
+    attachment.blobUrl = safeText(first(item.blobUrl, raw.blobUrl), "");
+    attachment.publicUrl = safeText(first(item.publicUrl, raw.publicUrl), "");
+    attachment.url = safeText(
+      first(
+        attachment.viewUrl,
+        attachment.signedUrl,
+        attachment.downloadUrl,
+        attachment.blobUrl,
+        attachment.publicUrl
+      ),
+      ""
+    );
 
     return attachment;
   });
@@ -699,8 +923,22 @@ function buildAttachmentCandidates(detail = {}, attachment = {}, mode = "open") 
   const apiBase = getApiBase();
   const ticketId = safeText(getTicketId(detail), "");
   const attachmentId = safeText(file.id, "");
-  const path = safeText(first(file.path, raw.path, raw.storagePath, raw.key, raw.blobName), "");
-  const name = safeText(first(file.name, raw.name, raw.filename, raw.fileName), "archivo");
+  const path = safeText(
+    first(
+      file.path,
+      raw.path,
+      raw.storageKey,
+      raw.storagePath,
+      raw.blobPath,
+      raw.blobName,
+      raw.key
+    ),
+    ""
+  );
+  const name = safeText(
+    first(file.name, raw.name, raw.filename, raw.fileName),
+    "archivo"
+  );
 
   const blobBaseUrl = safeText(
     first(
@@ -714,33 +952,66 @@ function buildAttachmentCandidates(detail = {}, attachment = {}, mode = "open") 
     ""
   );
 
-  const direct = [
-    file.url,
-    raw.url,
-    raw.href,
-    raw.blobUrl,
-    raw.downloadUrl,
-    raw.viewUrl,
-    raw.signedUrl,
-    raw.publicUrl,
-    raw.previewUrl,
-    raw.openUrl,
-    raw?.links?.download,
-    raw?.links?.view,
-  ]
-    .map((value) => safeText(value, ""))
-    .filter(Boolean);
+  const direct =
+    mode === "download"
+      ? [
+          file.downloadUrl,
+          file.signedUrl,
+          file.url,
+          file.viewUrl,
+          file.openUrl,
+          file.blobUrl,
+          file.publicUrl,
+
+          raw.downloadUrl,
+          raw.signedUrl,
+          raw.url,
+          raw.viewUrl,
+          raw.openUrl,
+          raw.blobUrl,
+          raw.publicUrl,
+          raw.href,
+          raw.previewUrl,
+
+          raw?.links?.download,
+          raw?.links?.view,
+        ]
+      : [
+          file.viewUrl,
+          file.openUrl,
+          file.signedUrl,
+          file.url,
+          file.blobUrl,
+          file.publicUrl,
+          file.downloadUrl,
+
+          raw.viewUrl,
+          raw.openUrl,
+          raw.signedUrl,
+          raw.url,
+          raw.blobUrl,
+          raw.publicUrl,
+          raw.downloadUrl,
+          raw.href,
+          raw.previewUrl,
+
+          raw?.links?.view,
+          raw?.links?.download,
+        ];
 
   const absoluteCandidates = [];
   const relativeCandidates = [];
 
-  direct.forEach((candidate) => {
-    if (isAbsoluteUrl(candidate)) {
-      absoluteCandidates.push(candidate);
-    } else {
-      relativeCandidates.push(candidate);
-    }
-  });
+  direct
+    .map((value) => safeText(value, ""))
+    .filter(Boolean)
+    .forEach((candidate) => {
+      if (isAbsoluteUrl(candidate)) {
+        absoluteCandidates.push(candidate);
+      } else {
+        relativeCandidates.push(candidate);
+      }
+    });
 
   if (blobBaseUrl && path) {
     absoluteCandidates.push(buildUrl(blobBaseUrl, path));
@@ -752,18 +1023,56 @@ function buildAttachmentCandidates(detail = {}, attachment = {}, mode = "open") 
     const encodedName = encodeUrlPathSegment(name);
 
     const routes = [
-      joinApiPath("api", "tickets", encodedTicketId, "attachments", encodedAttachmentId, mode === "download" ? "download" : "view"),
+      joinApiPath(
+        "api",
+        "tickets",
+        encodedTicketId,
+        "attachments",
+        encodedAttachmentId,
+        mode === "download" ? "download" : "view"
+      ),
       joinApiPath("api", "tickets", encodedTicketId, "attachments", encodedAttachmentId),
-      joinApiPath("api", "tickets", encodedTicketId, "files", encodedAttachmentId, mode === "download" ? "download" : "view"),
+
+      joinApiPath(
+        "api",
+        "tickets",
+        encodedTicketId,
+        "files",
+        encodedAttachmentId,
+        mode === "download" ? "download" : "view"
+      ),
       joinApiPath("api", "tickets", encodedTicketId, "files", encodedAttachmentId),
-      joinApiPath("api", "incidencias", encodedTicketId, "attachments", encodedAttachmentId, mode === "download" ? "download" : "view"),
+
+      joinApiPath(
+        "api",
+        "incidencias",
+        encodedTicketId,
+        "attachments",
+        encodedAttachmentId,
+        mode === "download" ? "download" : "view"
+      ),
       joinApiPath("api", "incidencias", encodedTicketId, "attachments", encodedAttachmentId),
-      joinApiPath("api", "incidencias", encodedTicketId, "files", encodedAttachmentId, mode === "download" ? "download" : "view"),
+
+      joinApiPath(
+        "api",
+        "incidencias",
+        encodedTicketId,
+        "files",
+        encodedAttachmentId,
+        mode === "download" ? "download" : "view"
+      ),
       joinApiPath("api", "incidencias", encodedTicketId, "files", encodedAttachmentId),
-      joinApiPath("api", "tickets", encodedTicketId, "attachments", encodedName, mode === "download" ? "download" : "view"),
+
+      joinApiPath(
+        "api",
+        "tickets",
+        encodedTicketId,
+        "attachments",
+        encodedName,
+        mode === "download" ? "download" : "view"
+      ),
       joinApiPath("api", "tickets", encodedTicketId, "attachments", encodedName),
-      path ? joinApiPath("api", "uploads", path) : "",
-      path ? joinApiPath("api", path) : "",
+
       ...relativeCandidates.map((candidate) => joinApiPath("api", candidate)),
       ...relativeCandidates,
     ].filter(Boolean);
@@ -794,11 +1103,13 @@ function buildAttachmentCandidates(detail = {}, attachment = {}, mode = "open") 
 
 async function fetchBlobFromUrl(url = "", fallbackFilename = "archivo") {
   const finalUrl = safeText(url, "");
-  const token = getAuthToken();
 
   if (!finalUrl) {
     throw new Error("No hay URL para obtener el adjunto.");
   }
+
+  const protectedApiUrl = looksLikeProtectedApiUrl(finalUrl);
+  const token = protectedApiUrl ? getAuthToken() : "";
 
   const response = await fetch(finalUrl, {
     method: "GET",
@@ -806,7 +1117,7 @@ async function fetchBlobFromUrl(url = "", fallbackFilename = "archivo") {
       Accept: "*/*",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    credentials: "include",
+    ...(protectedApiUrl ? { credentials: "include" } : {}),
   });
 
   if (!response.ok) {
@@ -827,7 +1138,10 @@ async function fetchBlobFromUrl(url = "", fallbackFilename = "archivo") {
   };
 }
 
-async function resolveAttachmentResponseAsBlob(response = null, fallbackFilename = "archivo") {
+async function resolveAttachmentResponseAsBlob(
+  response = null,
+  fallbackFilename = "archivo"
+) {
   if (response instanceof Blob) {
     return {
       blob: response,
@@ -850,12 +1164,13 @@ async function resolveAttachmentResponseAsBlob(response = null, fallbackFilename
 
   const maybeUrl = safeText(
     first(
+      obj.viewUrl,
+      obj.openUrl,
+      obj.signedUrl,
       obj.url,
       obj.blobUrl,
       obj.downloadUrl,
-      obj.viewUrl,
       obj.href,
-      obj.signedUrl,
       obj.publicUrl
     ),
     ""
@@ -1974,7 +2289,7 @@ function renderAttachments(detail = {}) {
                             >
                               ${escapeHtml(
                                 [
-                                  file.type,
+                                  file.contentType || file.type,
                                   formatBytes(file.size),
                                   file.uploadedAt ? formatDate(file.uploadedAt) : "",
                                 ]
@@ -3111,15 +3426,26 @@ async function tryOpenOrDownloadAttachmentFromResponse(response, attachment, mod
 
   const obj = safeObject(response);
   const directUrl = safeText(
-    first(
-      obj.url,
-      obj.blobUrl,
-      obj.downloadUrl,
-      obj.viewUrl,
-      obj.href,
-      obj.signedUrl,
-      obj.publicUrl
-    ),
+    mode === "download"
+      ? first(
+          obj.downloadUrl,
+          obj.signedUrl,
+          obj.url,
+          obj.viewUrl,
+          obj.blobUrl,
+          obj.href,
+          obj.publicUrl
+        )
+      : first(
+          obj.viewUrl,
+          obj.openUrl,
+          obj.signedUrl,
+          obj.url,
+          obj.blobUrl,
+          obj.downloadUrl,
+          obj.href,
+          obj.publicUrl
+        ),
     ""
   );
 
@@ -3204,7 +3530,7 @@ async function handleAttachmentAction(attachmentId = "", mode = "open") {
 
     if (!candidates.length) {
       throw new Error(
-        "Este adjunto no tiene URL resoluble todavía. Falta blobUrl / signedUrl / path / key / endpoint de descarga."
+        "Este adjunto no tiene URL resoluble todavía. Falta viewUrl / downloadUrl / signedUrl / blobUrl."
       );
     }
 
@@ -3212,8 +3538,7 @@ async function handleAttachmentAction(attachmentId = "", mode = "open") {
 
     for (const candidate of candidates) {
       try {
-        const shouldFetchBlob =
-          Boolean(getAuthToken()) && looksLikeProtectedApiUrl(candidate);
+        const shouldFetchBlob = looksLikeProtectedApiUrl(candidate);
 
         if (shouldFetchBlob) {
           const blobPayload = await fetchBlobFromUrl(
@@ -3275,9 +3600,12 @@ async function handleAttachmentAction(attachmentId = "", mode = "open") {
     throw lastError || new Error("No se pudo resolver el adjunto.");
   } catch (error) {
     setFeedback(
-      safeErrorMessage(error, mode === "download"
-        ? "No se pudo descargar el adjunto."
-        : "No se pudo abrir el adjunto."),
+      safeErrorMessage(
+        error,
+        mode === "download"
+          ? "No se pudo descargar el adjunto."
+          : "No se pudo abrir el adjunto."
+      ),
       "error"
     );
 

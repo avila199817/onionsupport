@@ -13,6 +13,8 @@
    - separar textos estáticos i18n de valores dinámicos de sesión
    - incluir la vista Servidor en el menú lateral
    - mantener compatibilidad total con AppCore.syncUserUI()
+   - no pintar tooltip en el logo
+   - marcar rutas admin para filtrado visual posterior
 ========================================================= */
 
 import { I18n } from "../../i18n/index.js";
@@ -28,48 +30,21 @@ import {
   SIDEBAR_NAME_ID,
 } from "./constants.js";
 
-function t(
-  key,
-  fallback = "",
-  params = {}
-) {
+function t(key, fallback = "", params = {}) {
   try {
-    return I18n.t(
-      key,
-      params,
-      fallback
-    );
+    return I18n.t(key, params, fallback);
   } catch {
     return fallback || key;
   }
 }
 
-function escapeHtml(
-  value = ""
-) {
-  return String(
-    value ?? ""
-  )
-    .replaceAll(
-      "&",
-      "&amp;"
-    )
-    .replaceAll(
-      "<",
-      "&lt;"
-    )
-    .replaceAll(
-      ">",
-      "&gt;"
-    )
-    .replaceAll(
-      '"',
-      "&quot;"
-    )
-    .replaceAll(
-      "'",
-      "&#39;"
-    );
+function escapeHtml(value = "") {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function renderMenuItem({
@@ -126,11 +101,6 @@ export function getSidebarTemplate() {
     logoLink: t(
       "sidebar.logo.ariaLabel",
       "Ir al inicio"
-    ),
-
-    logoTooltip: t(
-      "sidebar.logo.tooltip",
-      "Inicio"
     ),
 
     logoAlt: t(
@@ -259,8 +229,6 @@ export function getSidebarTemplate() {
           id="homeLink"
           aria-label="${escapeHtml(labels.logoLink)}"
           data-i18n-aria-label="sidebar.logo.ariaLabel"
-          data-tooltip="${escapeHtml(labels.logoTooltip)}"
-          data-i18n-data-tooltip="sidebar.logo.tooltip"
         >
           <img
             class="logo-dark"
@@ -383,7 +351,7 @@ export function getSidebarTemplate() {
           href: "/usuarios",
           label: labels.users,
           i18nKey: "sidebar.menu.users",
-          extraAttrs: `data-role="admin"`,
+          extraAttrs: `data-role="admin" data-admin-only="true"`,
           icon: `
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
               <circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.6"/>
@@ -396,7 +364,7 @@ export function getSidebarTemplate() {
           href: "/clientes",
           label: labels.clients,
           i18nKey: "sidebar.menu.clients",
-          extraAttrs: `data-role="admin"`,
+          extraAttrs: `data-role="admin" data-admin-only="true"`,
           icon: `
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
               <circle cx="12" cy="8" r="3.2" stroke="currentColor" stroke-width="1.6"/>
@@ -439,7 +407,7 @@ export function getSidebarTemplate() {
           href: "/servidor",
           label: labels.server,
           i18nKey: "sidebar.menu.server",
-          extraAttrs: `data-role="admin"`,
+          extraAttrs: `data-role="admin" data-admin-only="true"`,
           icon: `
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
               <rect
@@ -503,34 +471,33 @@ export function getSidebarTemplate() {
           aria-label="${escapeHtml(labels.userToggle)}"
           data-i18n-aria-label="sidebar.user.toggleAriaLabel"
         >
-        
-      <div
-        class="avatar"
-        id="${SIDEBAR_AVATAR_ID}"
-        aria-label="${escapeHtml(labels.userAvatar)}"
-        data-i18n-aria-label="sidebar.user.avatarAriaLabel"
-        title="${escapeHtml(labels.userDefaultName)}"
-        data-default-avatar="ON"
-        data-avatar-root="true"
-      >
-        <img
-          class="avatar-image"
-          id="sidebarAvatarImage"
-          src=""
-          alt="${escapeHtml(labels.userDefaultName)}"
-          draggable="false"
-          decoding="async"
-          hidden
-        >
-      
-        <span
-          class="avatar-fallback"
-          id="sidebarAvatarFallback"
-          aria-hidden="true"
-        >
-          ON
-        </span>
-      </div>
+          <div
+            class="avatar"
+            id="${SIDEBAR_AVATAR_ID}"
+            aria-label="${escapeHtml(labels.userAvatar)}"
+            data-i18n-aria-label="sidebar.user.avatarAriaLabel"
+            title="${escapeHtml(labels.userDefaultName)}"
+            data-default-avatar="ON"
+            data-avatar-root="true"
+          >
+            <img
+              class="avatar-image"
+              id="sidebarAvatarImage"
+              src=""
+              alt="${escapeHtml(labels.userDefaultName)}"
+              draggable="false"
+              decoding="async"
+              hidden
+            >
+
+            <span
+              class="avatar-fallback"
+              id="sidebarAvatarFallback"
+              aria-hidden="true"
+            >
+              ON
+            </span>
+          </div>
 
           <div class="user-info">
             <span

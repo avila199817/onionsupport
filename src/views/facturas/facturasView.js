@@ -3,6 +3,7 @@
    Archivo: src/views/facturas/facturasView.js
 
    FINAL PRO SYSTEM · VIEW REAL · FULL PATCH PORTAL MODAL
+   PATCH 8 · SEARCH BRIDGE + URL AUTOPEN · TOPBAR COMPAT
    PATCH 7 · DETAIL STORE RELATION MERGE · INCIDENCIA FIX
    PATCH 6 · OVERLAY SAFE CLOSE · CREATE MODAL · INCIDENCIA MODAL BRIDGE
    PATCH 5 · CREATE MODAL READY · INCIDENCIA MODAL BRIDGE
@@ -22,12 +23,17 @@
    - abrir incidencia relacionada en modal real, no en URL inexistente
    - cerrar modal detalle por X, Escape y overlay sin cerrar clicks internos
    - paginación visual real a 5 facturas por página
+   - abrir factura desde topbar search por bridge directo
+   - abrir factura desde URL /facturas?factura=... / ?id=...
+   - registrar bridge público window/AppCore.modules para search
 
    FIX CLAVE:
    - El listado recibe facturas enriquecidas desde store.
    - El detalle remoto puede venir sin ticketId/incidenciaId.
    - Antes de renderizar detalle se fusiona el payload remoto con la
      factura enriquecida del store por facturaId/numero.
+   - El search puede pasar detail completo, payload de evento o solo ID.
+   - openFactura() sigue esperando ID; el bridge externo normaliza payload.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -128,6 +134,23 @@ export const FacturasView = (() => {
     "billing:write",
   ]);
 
+  const FACTURA_QUERY_KEYS = Object.freeze([
+    "factura",
+    "facturaId",
+    "invoiceId",
+    "id",
+    "openFactura",
+  ]);
+
+  const FACTURA_OPEN_EVENTS = Object.freeze([
+    "facturas:modal:open",
+    "factura:modal:open",
+    "facturas:detail:open",
+    "factura:ficha:open",
+    "invoice:detail:open",
+    "topbar:search:open-factura",
+  ]);
+
   const state = createFacturasState();
 
   let initialized = false;
@@ -137,7 +160,12 @@ export const FacturasView = (() => {
   let bindingsCleanup = null;
   let modalBindingsCleanup = null;
   let createSuccessCleanup = null;
+  let searchOpenCleanup = null;
   let renderToken = 0;
+
+  let lastAutoOpenedFacturaId = "";
+  let inflightExternalOpen = null;
+  let inflightExternalOpenFacturaId = "";
 
   /* =====================================================
      LOCAL HELPERS
@@ -293,6 +321,123 @@ export const FacturasView = (() => {
       ),
       ""
     );
+  }
+
+  function getFacturaIdFromSearchPayload(payload = {}) {
+    const source = safeObject(payload);
+    const item = safeObject(source.item);
+    const detail = safeObject(source.detail);
+    const factura = safeObject(source.factura);
+    const invoice = safeObject(source.invoice);
+    const raw = safeObject(item.raw);
+
+    return safeText(
+      first(
+        source.facturaId,
+        source.invoiceId,
+        source.id,
+        source.entityId,
+
+        detail.facturaId,
+        detail.invoiceId,
+        detail.id,
+        detail._id,
+        detail.numero,
+        detail.numeroFacturaLegal,
+        detail.numeroFacturaSistema,
+
+        factura.facturaId,
+        factura.invoiceId,
+        factura.id,
+        factura._id,
+        factura.numero,
+        factura.numeroFacturaLegal,
+        factura.numeroFacturaSistema,
+
+        invoice.facturaId,
+        invoice.invoiceId,
+        invoice.id,
+        invoice._id,
+        invoice.numero,
+        invoice.numeroFacturaLegal,
+        invoice.numeroFacturaSistema,
+
+        item.entityId,
+        item.facturaId,
+        item.invoiceId,
+        item.id,
+        item._id,
+
+        raw.facturaId,
+        raw.invoiceId,
+        raw.id,
+        raw._id,
+        raw.numero,
+        raw.numeroFacturaLegal,
+        raw.numeroFacturaSistema
+      ),
+      ""
+    );
+  }
+
+  function getFacturaIdFromLocation() {
+    try {
+      const params = new URLSearchParams(window.location.search || "");
+
+      for (const key of FACTURA_QUERY_KEYS) {
+        const value = safeText(params.get(key), "");
+        if (value) return value;
+      }
+
+      return "";
+    } catch {
+      return "";
+    }
+  }
+
+  function clearFacturaIdFromLocation() {
+    try {
+      const url = new URL(window.location.href);
+      const params = url.searchParams;
+
+      FACTURA_QUERY_KEYS.forEach((key) => {
+        params.delete(key);
+      });
+
+      const nextSearch = params.toString();
+
+      const nextUrl = [
+        url.pathname,
+        nextSearch ? `?${nextSearch}` : "",
+        url.hash || "",
+      ].join("");
+
+      window.history.replaceState(
+        window.history.state || {},
+        "",
+        nextUrl
+      );
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function extractExternalOpenPayload(eventOrPayload = {}) {
+    const value = eventOrPayload;
+
+    if (value?.detail?.payload) return safeObject(value.detail.payload);
+
+    if (value?.detail?.detail || value?.detail?.factura || value?.detail?.item) {
+      return safeObject(value.detail);
+    }
+
+    if (value?.detail && typeof value.detail === "object") {
+      return safeObject(value.detail);
+    }
+
+    return safeObject(value);
   }
 
   function getFacturaIdentityList(item = {}) {
@@ -967,6 +1112,14 @@ export const FacturasView = (() => {
     createSuccessCleanup = null;
   }
 
+  function cleanupSearchOpenListener() {
+    try {
+      searchOpenCleanup?.();
+    } catch {}
+
+    searchOpenCleanup = null;
+  }
+
   function cleanupBindings() {
     try {
       bindingsCleanup?.();
@@ -975,6 +1128,7 @@ export const FacturasView = (() => {
     bindingsCleanup = null;
 
     cleanupCreateSuccessListener();
+    cleanupSearchOpenListener();
 
     try {
       AppCore?.cleanup?.run?.(SCOPE);
@@ -2073,7 +2227,9 @@ export const FacturasView = (() => {
 
         setFacturasLoading(state, false);
         setFacturasRefreshing(state, false);
+
         setFacturasLoaded(state, true);
+        setFacturasBootstrapped(state, true);
 
         setFacturasLastSyncAt(state, new Date().toISOString());
 
@@ -2282,6 +2438,164 @@ export const FacturasView = (() => {
   }
 
   /* =====================================================
+     SEARCH / GLOBAL OPEN BRIDGE
+  ===================================================== */
+
+  async function openFacturaFromExternalRequest(payload = {}) {
+    const source = safeObject(payload);
+    const facturaId = getFacturaIdFromSearchPayload(source);
+
+    if (!facturaId) {
+      showToast("No se pudo identificar la factura.", "error");
+      return null;
+    }
+
+    if (
+      inflightExternalOpen &&
+      inflightExternalOpenFacturaId &&
+      sameFacturaIdentity(inflightExternalOpenFacturaId, facturaId)
+    ) {
+      return inflightExternalOpen;
+    }
+
+    inflightExternalOpenFacturaId = facturaId;
+
+    inflightExternalOpen = (async () => {
+      if (!isFacturasBootstrapped(state) && !getItems().length) {
+        await loadFacturas({
+          force: false,
+          silent: true,
+          asRefresh: false,
+        });
+      }
+
+      const result = await openFactura(facturaId);
+
+      if (result) {
+        safeEmit("facturas:opened-from-external", {
+          source: safeText(source.source, "external"),
+          facturaId,
+          detail: result,
+          payload: source,
+        });
+      }
+
+      return result;
+    })();
+
+    try {
+      return await inflightExternalOpen;
+    } finally {
+      inflightExternalOpen = null;
+      inflightExternalOpenFacturaId = "";
+    }
+  }
+
+  async function openFacturaFromLocationOnce() {
+    const facturaId = getFacturaIdFromLocation();
+
+    if (!facturaId) return null;
+
+    if (lastAutoOpenedFacturaId === facturaId && isFacturasDetailOpen(state)) {
+      clearFacturaIdFromLocation();
+      return getFacturasDetailData(state);
+    }
+
+    lastAutoOpenedFacturaId = facturaId;
+
+    const result = await openFacturaFromExternalRequest({
+      source: "location",
+      facturaId,
+    });
+
+    clearFacturaIdFromLocation();
+
+    return result;
+  }
+
+  function attachSearchOpenListener() {
+    cleanupSearchOpenListener();
+
+    const cleanups = FACTURA_OPEN_EVENTS.map((eventName) =>
+      safeOn(eventName, async (event) => {
+        if (destroyed) return;
+
+        const payload = extractExternalOpenPayload(event);
+
+        await openFacturaFromExternalRequest({
+          ...payload,
+          source: safeText(payload.source, eventName),
+        });
+      })
+    );
+
+    searchOpenCleanup = () => {
+      cleanups.forEach((cleanup) => {
+        try {
+          cleanup?.();
+        } catch {}
+      });
+    };
+  }
+
+  function registerFacturasBridge() {
+    try {
+      if (!AppCore.modules || typeof AppCore.modules !== "object") {
+        AppCore.modules = {};
+      }
+
+      AppCore.modules.Facturas = api;
+      AppCore.modules.FacturasView = api;
+      AppCore.modules.OnionFacturasUI = api;
+      AppCore.modules.OnionFacturasModal = {
+        open(payload = {}) {
+          return openFacturaFromExternalRequest(payload);
+        },
+
+        close() {
+          closeDetail();
+          return true;
+        },
+      };
+    } catch {}
+
+    try {
+      window.OnionFacturasUI = api;
+      window.OnionFacturasView = api;
+
+      window.OnionFacturasModal = {
+        open(payload = {}) {
+          return openFacturaFromExternalRequest(payload);
+        },
+
+        close() {
+          closeDetail();
+          return true;
+        },
+
+        getState() {
+          return api.getState();
+        },
+      };
+
+      window.OnionFacturaModal = window.OnionFacturasModal;
+      window.FacturasModal = window.OnionFacturasModal;
+      window.FacturaModal = window.OnionFacturasModal;
+
+      window.openFacturaModal = (payload = {}) =>
+        openFacturaFromExternalRequest(payload);
+
+      window.renderFacturaModal = (payload = {}) =>
+        openFacturaFromExternalRequest(payload);
+
+      window.openFacturaFicha = (payload = {}) =>
+        openFacturaFromExternalRequest(payload);
+    } catch {}
+
+    return true;
+  }
+
+  /* =====================================================
      BINDINGS
   ===================================================== */
 
@@ -2289,6 +2603,8 @@ export const FacturasView = (() => {
     cleanupBindings();
 
     if (destroyed) return;
+
+    registerFacturasBridge();
 
     const cleanup = bindFacturasView({
       scopeName: SCOPE,
@@ -2330,6 +2646,7 @@ export const FacturasView = (() => {
     bindingsCleanup = typeof cleanup === "function" ? cleanup : null;
 
     attachCreateSuccessListener();
+    attachSearchOpenListener();
   }
 
   /* =====================================================
@@ -2343,6 +2660,8 @@ export const FacturasView = (() => {
 
     destroyed = false;
     initialized = true;
+
+    registerFacturasBridge();
 
     inflightInit = (async () => {
       safeLog("init");
@@ -2358,6 +2677,7 @@ export const FacturasView = (() => {
 
       if (isActiveToken(token)) {
         bind();
+        await openFacturaFromLocationOnce();
       }
 
       return api;
@@ -2379,6 +2699,7 @@ export const FacturasView = (() => {
     cleanupBindings();
     cleanupModalBindings();
     cleanupCreateSuccessListener();
+    cleanupSearchOpenListener();
 
     closeFacturasDetail(state);
     clearFacturasActionIds(state);
@@ -2390,6 +2711,8 @@ export const FacturasView = (() => {
     destroyDetailRoot();
 
     inflightLoad = null;
+    inflightExternalOpen = null;
+    inflightExternalOpenFacturaId = "";
 
     safeLog("destroy");
   }
@@ -2408,6 +2731,10 @@ export const FacturasView = (() => {
 
     loadFacturas,
     openFactura,
+    openFacturaFromExternalRequest,
+    openFacturaFromLocationOnce,
+    registerFacturasBridge,
+
     openFacturaPdf,
     downloadFacturaPdf,
     sendFacturaToClient,
@@ -2442,6 +2769,8 @@ export const FacturasView = (() => {
         destroyed,
         hasInflightInit: Boolean(inflightInit),
         hasInflightLoad: Boolean(inflightLoad),
+        hasInflightExternalOpen: Boolean(inflightExternalOpen),
+        lastAutoOpenedFacturaId,
       };
     },
 
@@ -2453,6 +2782,8 @@ export const FacturasView = (() => {
       return destroyed;
     },
   };
+
+  registerFacturasBridge();
 
   return api;
 })();

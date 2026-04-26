@@ -445,6 +445,16 @@ export const ActivateAccountView = (() => {
       urls.push(window.__ONION_INITIAL_URL__);
     } catch {}
 
+    /*
+      Fallback defensivo:
+      si hubo una redirección previa antes de montar la SPA,
+      en algunos navegadores el referrer puede conservar
+      la URL original con query/hash.
+    */
+    try {
+      urls.push(document.referrer);
+    } catch {}
+
     return urls
       .map((url) => safeText(url, ""))
       .filter(Boolean);
@@ -1432,6 +1442,12 @@ export const ActivateAccountView = (() => {
     state.status = state.token
       ? ACTIVATE_ACCOUNT_STATUS.IDLE
       : ACTIVATE_ACCOUNT_STATUS.INVALID;
+
+    if (!state.token) {
+      state.message =
+        "No se ha detectado token en la URL. Si el enlace abre /activate-account sin ?token=..., revisa la redirección de dominio (onionsupport.com ↔ www.onionsupport.com) o abre el enlace completo desde el correo.";
+      state.error = state.message;
+    }
 
     safeLog("init", {
       hasToken: Boolean(state.token),

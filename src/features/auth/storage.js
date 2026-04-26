@@ -11,6 +11,7 @@
    - namespacing consistente con AppCore
    - no tocar window.__ONION_INITIAL_URL__
    - no tocar window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__
+   - no tocar window.__ONION_RESET_CONFIRM_INITIAL_URL__
    - no hacer localStorage.clear()
 
    HARDENING EXTREMO:
@@ -21,11 +22,14 @@
    - normalización estricta de valores de sesión
    - hasRefreshContext robusto
    - limpieza legacy completa de restos de login fallido
+   - protección contra valores corruptos "undefined" / "null"
+   - soporte JSON-string values desde AppCore.storage
 
    FIX 10/10:
    - clearAuthStorage elimina refresh/temp/session context
-   - clearAuthStorage elimina tokens legacy no namespaced
-   - clearAuthStorage elimina tokens legacy namespaced
+   - clearAuthStorage elimina access/token/user/role legacy
+   - clearAuthStorage elimina claves legacy no namespaced
+   - clearAuthStorage elimina claves legacy namespaced
    - clearAuthStorage elimina localStorage + sessionStorage
    - no elimina lang/theme/rutas/initial URLs
 ========================================================= */
@@ -52,10 +56,7 @@ function isBrowser() {
   );
 }
 
-function safeText(
-  value,
-  fallback = ""
-) {
+function safeText(value, fallback = "") {
   if (
     value === null ||
     value === undefined
@@ -69,19 +70,70 @@ function safeText(
   return text || fallback;
 }
 
-function safeBool(value) {
-  return value === true;
+function safeBool(value, fallback = false) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+
+  if (typeof value === "string") {
+    const normalized =
+      value.trim().toLowerCase();
+
+    if (
+      [
+        "true",
+        "1",
+        "yes",
+        "si",
+        "sí",
+        "ok",
+        "on",
+      ].includes(normalized)
+    ) {
+      return true;
+    }
+
+    if (
+      [
+        "false",
+        "0",
+        "no",
+        "off",
+      ].includes(normalized)
+    ) {
+      return false;
+    }
+  }
+
+  return Boolean(fallback);
 }
 
-function safeNumber(
-  value,
-  fallback = 0
-) {
-  const n = Number(value);
+function safeNumber(value, fallback = 0) {
+  const n =
+    Number(value);
 
   return Number.isFinite(n)
     ? n
     : fallback;
+}
+
+function isPlainObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  );
+}
+
+function safeObject(value) {
+  return isPlainObject(value)
+    ? value
+    : {};
 }
 
 function safeWarn(...args) {
@@ -100,10 +152,7 @@ function safeWarn(...args) {
   } catch {}
 }
 
-function safeEmit(
-  eventName,
-  payload = {}
-) {
+function safeEmit(eventName, payload = {}) {
   try {
     AppCore?.events?.emit?.(
       eventName,
@@ -143,44 +192,112 @@ function getMaxLen() {
   );
 }
 
+function getTokenMaxLen() {
+  return Math.max(
+    getMaxLen(),
+    safeNumber(
+      AUTH_CONSTANTS?.tokenMaxLength,
+      4096
+    ) || 4096
+  );
+}
+
 function getStorageKeys() {
   return {
     refreshToken:
       safeText(
         AUTH_STORAGE_KEYS?.refreshToken,
-        "auth.refreshToken"
+        "refresh_token"
       ),
 
     tempToken:
       safeText(
         AUTH_STORAGE_KEYS?.tempToken,
-        "auth.tempToken"
+        "temp_token"
+      ),
+
+    accessToken:
+      safeText(
+        AUTH_STORAGE_KEYS?.accessToken,
+        "access_token"
       ),
 
     sessionId:
       safeText(
         AUTH_STORAGE_KEYS?.sessionId,
-        "auth.sessionId"
+        "session_id"
       ),
 
     sessionUserId:
       safeText(
         AUTH_STORAGE_KEYS?.sessionUserId,
-        "auth.sessionUserId"
+        "session_user_id"
+      ),
+
+    userSlug:
+      safeText(
+        AUTH_STORAGE_KEYS?.userSlug,
+        "user_slug"
+      ),
+
+    userName:
+      safeText(
+        AUTH_STORAGE_KEYS?.userName,
+        "user_name"
+      ),
+
+    role:
+      safeText(
+        AUTH_STORAGE_KEYS?.role,
+        "role"
+      ),
+
+    lastUsername:
+      safeText(
+        AUTH_STORAGE_KEYS?.lastUsername,
+        "last_username"
+      ),
+
+    lastLoginIdentifier:
+      safeText(
+        AUTH_STORAGE_KEYS?.lastLoginIdentifier,
+        "last_login_identifier"
+      ),
+
+    lastResetIdentifier:
+      safeText(
+        AUTH_STORAGE_KEYS?.lastResetIdentifier,
+        "last_reset_identifier"
+      ),
+
+    redirectAfterLogin:
+      safeText(
+        AUTH_STORAGE_KEYS?.redirectAfterLogin,
+        "redirect_after_login"
       ),
   };
 }
 
-function getAllowedAuthKeys() {
+function getKnownAuthKeys() {
   const keys =
     getStorageKeys();
 
+  return Object.values(keys)
+    .map((value) =>
+      safeText(value, "")
+    )
+    .filter(Boolean);
+}
+
+function getCoreAuthStorageKeys() {
   return [
-    keys.refreshToken,
-    keys.tempToken,
-    keys.sessionId,
-    keys.sessionUserId,
-  ].filter(Boolean);
+    AppCore?.config?.storageKeys?.token,
+    AppCore?.config?.storageKeys?.user,
+  ]
+    .map((value) =>
+      safeText(value, "")
+    )
+    .filter(Boolean);
 }
 
 function getLegacyAuthKeys() {
@@ -189,46 +306,233 @@ function getLegacyAuthKeys() {
     "onion_access_token",
     "onion_refresh_token",
     "onion_temp_token",
+    "onion_temporary_token",
+    "onion_two_factor_token",
+    "onion_mfa_token",
     "onion_session_id",
     "onion_session_user_id",
     "onion_user_id",
     "onion_user_name",
+    "onion_user_slug",
     "onion_role",
 
     "auth_token",
+    "authToken",
     "access_token",
+    "accessToken",
     "refresh_token",
+    "refreshToken",
     "temp_token",
+    "tempToken",
+    "temporary_token",
+    "temporaryToken",
+    "two_factor_token",
+    "twoFactorToken",
+    "mfa_token",
+    "mfaToken",
+
     "token",
     "session",
+    "session_id",
+    "sessionId",
+    "session_user_id",
+    "sessionUserId",
     "user",
+    "user_id",
+    "userId",
+    "user_name",
+    "userName",
+    "user_slug",
+    "userSlug",
     "role",
 
     "auth.token",
     "auth.accessToken",
+    "auth.access_token",
     "auth.refreshToken",
+    "auth.refresh_token",
     "auth.tempToken",
+    "auth.temp_token",
     "auth.sessionId",
+    "auth.session_id",
     "auth.sessionUserId",
+    "auth.session_user_id",
 
     "session.token",
     "session.accessToken",
+    "session.access_token",
     "session.refreshToken",
+    "session.refresh_token",
     "session.user",
+    "session.role",
   ];
 }
 
 function getAllAuthClearKeys() {
   return Array.from(
     new Set([
-      ...getAllowedAuthKeys(),
+      ...getKnownAuthKeys(),
+      ...getCoreAuthStorageKeys(),
       ...getLegacyAuthKeys(),
     ].filter(Boolean))
   );
 }
 
 /* =========================================================
-   STORAGE ADAPTER
+   VALUE NORMALIZATION
+========================================================= */
+
+function isCorruptedValue(value) {
+  const text =
+    safeText(value, "").toLowerCase();
+
+  return (
+    !text ||
+    text === "undefined" ||
+    text === "null" ||
+    text === "\"undefined\"" ||
+    text === "\"null\"" ||
+    text === "{}" ||
+    text === "[]"
+  );
+}
+
+function safeJsonUnwrap(value) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return "";
+  }
+
+  if (typeof value === "string") {
+    const raw =
+      value.trim();
+
+    if (!raw) {
+      return "";
+    }
+
+    if (isCorruptedValue(raw)) {
+      return "";
+    }
+
+    try {
+      const parsed =
+        JSON.parse(raw);
+
+      if (
+        typeof parsed === "string" ||
+        typeof parsed === "number" ||
+        typeof parsed === "boolean"
+      ) {
+        return safeText(parsed, "");
+      }
+
+      if (
+        parsed === null ||
+        parsed === undefined
+      ) {
+        return "";
+      }
+
+      return raw;
+    } catch {
+      return raw;
+    }
+  }
+
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return safeText(value, "");
+  }
+
+  return "";
+}
+
+function normalizeStoredValue(value = "") {
+  const unwrapped =
+    safeJsonUnwrap(value);
+
+  if (isCorruptedValue(unwrapped)) {
+    return "";
+  }
+
+  return (
+    normalizeSessionValue(
+      unwrapped,
+      getMaxLen()
+    ) || ""
+  );
+}
+
+function normalizeStoredToken(value = "") {
+  const unwrapped =
+    safeJsonUnwrap(value);
+
+  if (isCorruptedValue(unwrapped)) {
+    return "";
+  }
+
+  return (
+    normalizeSessionValue(
+      unwrapped,
+      getTokenMaxLen()
+    ) || ""
+  );
+}
+
+function normalizeSessionData(sessionData = null, user = null) {
+  const raw =
+    safeObject(sessionData);
+
+  const safeUser =
+    safeObject(user);
+
+  const sessionId =
+    normalizeStoredValue(
+      raw.sessionId ??
+        raw.session_id ??
+        raw.sid ??
+        raw.id ??
+        raw.session?.id ??
+        ""
+    );
+
+  const userId =
+    normalizeStoredValue(
+      raw.userId ??
+        raw.user_id ??
+        raw.uid ??
+        raw.sessionUserId ??
+        raw.session_user_id ??
+        raw.user?.userId ??
+        raw.user?.user_id ??
+        raw.user?.id ??
+        safeUser.userId ??
+        safeUser.user_id ??
+        safeUser.id ??
+        safeUser._id ??
+        safeUser.uid ??
+        safeUser.email ??
+        safeUser.username ??
+        safeUser.userName ??
+        ""
+    );
+
+  return {
+    sessionId:
+      sessionId || "",
+
+    userId:
+      userId || "",
+  };
+}
+
+/* =========================================================
+   STORAGE ADAPTERS
 ========================================================= */
 
 function getStorageApi() {
@@ -240,7 +544,9 @@ function getStorageApi() {
       storage &&
       (
         typeof storage.get === "function" ||
+        typeof storage.getRaw === "function" ||
         typeof storage.set === "function" ||
+        typeof storage.setRaw === "function" ||
         typeof storage.remove === "function" ||
         typeof storage.delete === "function"
       )
@@ -268,14 +574,8 @@ function canUseWebStorage(kind = "localStorage") {
     const key =
       `__onion_${kind}_probe__`;
 
-    storage.setItem(
-      key,
-      "1"
-    );
-
-    storage.removeItem(
-      key
-    );
+    storage.setItem(key, "1");
+    storage.removeItem(key);
 
     return true;
   } catch {
@@ -319,27 +619,51 @@ function getKeyCandidates(key = "") {
     return [];
   }
 
+  const prefix =
+    getPrefix();
+
   const prefixed =
     buildKey(cleanKey);
+
+  const colonToDot =
+    cleanKey.replace(/:/g, ".");
+
+  const dotToColon =
+    cleanKey.replace(/\./g, ":");
+
+  const snakeLike =
+    cleanKey
+      .replace(/\./g, "_")
+      .replace(/:/g, "_");
+
+  const prefixedSnake =
+    `${prefix}_${snakeLike}`;
 
   return Array.from(
     new Set([
       cleanKey,
       prefixed,
 
-      /*
-        Compatibilidad con claves antiguas donde se usaban
-        separadores alternativos.
-      */
-      cleanKey.replace(/\./g, ":"),
-      cleanKey.replace(/:/g, "."),
+      colonToDot,
+      dotToColon,
+
+      prefixed
+        ? prefixed.replace(/:/g, ".")
+        : "",
 
       prefixed
         ? prefixed.replace(/\./g, ":")
         : "",
 
-      prefixed
-        ? prefixed.replace(/:/g, ".")
+      snakeLike,
+      prefixedSnake,
+
+      cleanKey.startsWith(`${prefix}:`)
+        ? cleanKey.slice(prefix.length + 1)
+        : "",
+
+      cleanKey.startsWith(`${prefix}_`)
+        ? cleanKey.slice(prefix.length + 1)
         : "",
     ].filter(Boolean))
   );
@@ -349,14 +673,11 @@ function getKeyCandidates(key = "") {
    RAW READ / WRITE / REMOVE - APPCORE
 ========================================================= */
 
-function readFromAppStorage(
-  key,
-  fallback = ""
-) {
+function readFromAppStorage(key, fallback = "") {
   const storage =
     getStorageApi();
 
-  if (!storage || typeof storage.get !== "function") {
+  if (!storage) {
     return fallback;
   }
 
@@ -365,14 +686,30 @@ function readFromAppStorage(
 
   for (const candidate of candidates) {
     try {
-      const value =
-        storage.get(candidate);
+      if (typeof storage.getRaw === "function") {
+        const raw =
+          storage.getRaw(candidate, "");
 
-      const text =
-        safeText(value, "");
+        const text =
+          safeJsonUnwrap(raw);
 
-      if (text) {
-        return text;
+        if (text) {
+          return text;
+        }
+      }
+    } catch {}
+
+    try {
+      if (typeof storage.get === "function") {
+        const value =
+          storage.get(candidate, "");
+
+        const text =
+          safeJsonUnwrap(value);
+
+        if (text) {
+          return text;
+        }
       }
     } catch {}
   }
@@ -380,14 +717,11 @@ function readFromAppStorage(
   return fallback;
 }
 
-function writeToAppStorage(
-  key,
-  value
-) {
+function writeToAppStorage(key, value) {
   const storage =
     getStorageApi();
 
-  if (!storage || typeof storage.set !== "function") {
+  if (!storage) {
     return false;
   }
 
@@ -402,16 +736,28 @@ function writeToAppStorage(
   }
 
   try {
-    /*
-      Escribimos la clave lógica, no sólo la prefijada.
-      AppCore.storage normalmente ya aplica namespace interno.
-    */
-    storage.set(
-      cleanKey,
-      finalValue
-    );
+    if (typeof storage.setRaw === "function") {
+      storage.setRaw(
+        cleanKey,
+        finalValue
+      );
 
-    return true;
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (typeof storage.set === "function") {
+      /*
+        Clave lógica. AppCore.storage aplica namespace internamente.
+      */
+      storage.set(
+        cleanKey,
+        finalValue
+      );
+
+      return true;
+    }
   } catch (error) {
     safeWarn(
       "AppCore.storage.set() falló.",
@@ -420,9 +766,9 @@ function writeToAppStorage(
         error,
       }
     );
-
-    return false;
   }
+
+  return false;
 }
 
 function removeFromAppStorage(key) {
@@ -440,19 +786,31 @@ function removeFromAppStorage(key) {
 
   for (const candidate of candidates) {
     try {
-      if (
-        typeof storage.remove === "function"
-      ) {
+      if (typeof storage.remove === "function") {
         storage.remove(candidate);
         removed = true;
-      } else if (
-        typeof storage.delete === "function"
-      ) {
+        continue;
+      }
+    } catch {}
+
+    try {
+      if (typeof storage.delete === "function") {
         storage.delete(candidate);
         removed = true;
-      } else if (
-        typeof storage.set === "function"
-      ) {
+        continue;
+      }
+    } catch {}
+
+    try {
+      if (typeof storage.setRaw === "function") {
+        storage.setRaw(candidate, "");
+        removed = true;
+        continue;
+      }
+    } catch {}
+
+    try {
+      if (typeof storage.set === "function") {
         storage.set(candidate, "");
         removed = true;
       }
@@ -466,11 +824,7 @@ function removeFromAppStorage(key) {
    RAW READ / WRITE / REMOVE - WEB STORAGE
 ========================================================= */
 
-function readFromWebStorage(
-  storage,
-  key,
-  fallback = ""
-) {
+function readFromWebStorage(storage, key, fallback = "") {
   if (!storage) {
     return fallback;
   }
@@ -484,7 +838,7 @@ function readFromWebStorage(
         storage.getItem(candidate);
 
       const text =
-        safeText(value, "");
+        safeJsonUnwrap(value);
 
       if (text) {
         return text;
@@ -495,11 +849,7 @@ function readFromWebStorage(
   return fallback;
 }
 
-function writeToWebStorage(
-  storage,
-  key,
-  value
-) {
+function writeToWebStorage(storage, key, value) {
   if (!storage) {
     return false;
   }
@@ -510,14 +860,17 @@ function writeToWebStorage(
   const finalKey =
     buildKey(cleanKey);
 
-  if (!finalKey) {
+  const finalValue =
+    safeText(value, "");
+
+  if (!finalKey || !finalValue) {
     return false;
   }
 
   try {
     storage.setItem(
       finalKey,
-      safeText(value, "")
+      finalValue
     );
 
     return true;
@@ -534,10 +887,7 @@ function writeToWebStorage(
   }
 }
 
-function removeFromWebStorage(
-  storage,
-  key
-) {
+function removeFromWebStorage(storage, key) {
   if (!storage) {
     return false;
   }
@@ -561,10 +911,7 @@ function removeFromWebStorage(
    RAW READ / WRITE / REMOVE
 ========================================================= */
 
-function readRaw(
-  key,
-  fallback = ""
-) {
+function readRaw(key, fallback = "") {
   const cleanKey =
     safeText(key, "");
 
@@ -573,10 +920,7 @@ function readRaw(
   }
 
   const fromAppStorage =
-    readFromAppStorage(
-      cleanKey,
-      ""
-    );
+    readFromAppStorage(cleanKey, "");
 
   if (fromAppStorage) {
     return fromAppStorage;
@@ -607,11 +951,7 @@ function readRaw(
   return fallback;
 }
 
-function writeRaw(
-  key,
-  value,
-  options = {}
-) {
+function writeRaw(key, value, options = {}) {
   const cleanKey =
     safeText(key, "");
 
@@ -629,9 +969,13 @@ function writeRaw(
   const {
     sessionOnly = false,
     localOnly = false,
+    appStorage = true,
+    localStorage = true,
+    sessionStorage = true,
   } = options;
 
   const appOk =
+    appStorage !== false &&
     !sessionOnly
       ? writeToAppStorage(
           cleanKey,
@@ -640,6 +984,7 @@ function writeRaw(
       : false;
 
   const localOk =
+    localStorage !== false &&
     !sessionOnly
       ? writeToWebStorage(
           getLocalStorage(),
@@ -649,6 +994,7 @@ function writeRaw(
       : false;
 
   const sessionOk =
+    sessionStorage !== false &&
     !localOnly
       ? writeToWebStorage(
           getSessionStorage(),
@@ -657,23 +1003,30 @@ function writeRaw(
         )
       : false;
 
+  const ok =
+    Boolean(
+      appOk ||
+      localOk ||
+      sessionOk
+    );
+
   safeEmit(
     "auth:storage:write",
     {
       key: cleanKey,
-      ok:
-        Boolean(appOk || localOk || sessionOk),
+      ok,
       targets: {
-        appStorage: Boolean(appOk),
-        localStorage: Boolean(localOk),
-        sessionStorage: Boolean(sessionOk),
+        appStorage:
+          Boolean(appOk),
+        localStorage:
+          Boolean(localOk),
+        sessionStorage:
+          Boolean(sessionOk),
       },
     }
   );
 
-  return Boolean(
-    appOk || localOk || sessionOk
-  );
+  return ok;
 }
 
 function removeRaw(key) {
@@ -699,30 +1052,33 @@ function removeRaw(key) {
       cleanKey
     );
 
+  const ok =
+    Boolean(
+      appOk ||
+      localOk ||
+      sessionOk
+    );
+
   safeEmit(
     "auth:storage:remove",
     {
       key: cleanKey,
-      ok:
-        Boolean(appOk || localOk || sessionOk),
+      ok,
       targets: {
-        appStorage: Boolean(appOk),
-        localStorage: Boolean(localOk),
-        sessionStorage: Boolean(sessionOk),
+        appStorage:
+          Boolean(appOk),
+        localStorage:
+          Boolean(localOk),
+        sessionStorage:
+          Boolean(sessionOk),
       },
     }
   );
 
-  return Boolean(
-    appOk || localOk || sessionOk
-  );
+  return ok;
 }
 
-function writeNullable(
-  key,
-  value,
-  options = {}
-) {
+function writeNullable(key, value, options = {}) {
   const finalValue =
     safeText(value, "");
 
@@ -739,78 +1095,10 @@ function writeNullable(
 }
 
 /* =========================================================
-   NORMALIZATION
-========================================================= */
-
-function normalizeStoredValue(value = "") {
-  return normalizeSessionValue(
-    value,
-    getMaxLen()
-  );
-}
-
-function normalizeStoredToken(value = "") {
-  return normalizeSessionValue(
-    value,
-    Math.max(
-      getMaxLen(),
-      4096
-    )
-  );
-}
-
-function normalizeSessionData(
-  sessionData = null,
-  user = null
-) {
-  const raw =
-    sessionData &&
-    typeof sessionData === "object"
-      ? sessionData
-      : {};
-
-  const sessionId =
-    normalizeStoredValue(
-      raw.sessionId ??
-        raw.session_id ??
-        raw.sid ??
-        raw.id ??
-        ""
-    );
-
-  const userId =
-    normalizeStoredValue(
-      raw.userId ??
-        raw.user_id ??
-        raw.uid ??
-        raw.sessionUserId ??
-        raw.session_user_id ??
-        user?.userId ??
-        user?.user_id ??
-        user?.id ??
-        user?._id ??
-        user?.uid ??
-        user?.email ??
-        user?.username ??
-        ""
-    );
-
-  return {
-    sessionId:
-      sessionId || "",
-
-    userId:
-      userId || "",
-  };
-}
-
-/* =========================================================
    TOKENS
 ========================================================= */
 
-export function persistRefreshToken(
-  token = null
-) {
+export function persistRefreshToken(token = null) {
   const keys =
     getStorageKeys();
 
@@ -842,16 +1130,14 @@ export function hasRefreshToken() {
   );
 }
 
-export function persistTempToken(
-  token = null
-) {
+export function persistTempToken(token = null) {
   const keys =
     getStorageKeys();
 
   /*
-    Temp token puede vivir en sessionStorage también.
-    Lo escribimos en ambos para compatibilidad, pero clearAuthStorage
-    lo elimina siempre.
+    Temp token:
+    - se escribe en local + session para compatibilidad.
+    - clearAuthStorage lo elimina siempre.
   */
   return writeNullable(
     keys.tempToken,
@@ -885,10 +1171,7 @@ export function hasTempToken() {
    SESSION CONTEXT
 ========================================================= */
 
-export function persistSessionContext(
-  sessionData = null,
-  user = null
-) {
+export function persistSessionContext(sessionData = null, user = null) {
   const keys =
     getStorageKeys();
 
@@ -929,21 +1212,51 @@ export function persistSessionContext(
   };
 }
 
-export function persistAuxSessionData(
-  user = null
-) {
+export function persistAuxSessionData(user = null) {
   const keys =
     getStorageKeys();
 
+  const safeUser =
+    safeObject(user);
+
   const userId =
     normalizeStoredValue(
-      user?.userId ??
-        user?.user_id ??
-        user?.id ??
-        user?._id ??
-        user?.uid ??
-        user?.email ??
-        user?.username ??
+      safeUser.userId ??
+        safeUser.user_id ??
+        safeUser.id ??
+        safeUser._id ??
+        safeUser.uid ??
+        safeUser.email ??
+        safeUser.username ??
+        safeUser.userName ??
+        ""
+    );
+
+  const username =
+    normalizeStoredValue(
+      safeUser.username ??
+        safeUser.userName ??
+        safeUser.user_name ??
+        safeUser.email ??
+        safeUser.name ??
+        safeUser.nombre ??
+        ""
+    );
+
+  const slug =
+    normalizeStoredValue(
+      safeUser.slug ??
+        safeUser.username ??
+        safeUser.userName ??
+        safeUser.email ??
+        ""
+    );
+
+  const role =
+    normalizeStoredValue(
+      safeUser.role ??
+        safeUser.rol ??
+        safeUser.userRole ??
         ""
     );
 
@@ -957,6 +1270,58 @@ export function persistAuxSessionData(
       keys.sessionUserId
     );
   }
+
+  if (username) {
+    writeRaw(
+      keys.userName,
+      username
+    );
+
+    writeRaw(
+      keys.lastUsername,
+      username
+    );
+  } else {
+    removeRaw(
+      keys.userName
+    );
+  }
+
+  if (slug) {
+    writeRaw(
+      keys.userSlug,
+      slug
+    );
+  } else {
+    removeRaw(
+      keys.userSlug
+    );
+  }
+
+  if (role) {
+    writeRaw(
+      keys.role,
+      role
+    );
+  } else {
+    removeRaw(
+      keys.role
+    );
+  }
+
+  safeEmit(
+    "auth:storage:aux-session",
+    {
+      hasUserId:
+        Boolean(userId),
+      hasUsername:
+        Boolean(username),
+      hasSlug:
+        Boolean(slug),
+      hasRole:
+        Boolean(role),
+    }
+  );
 
   return true;
 }
@@ -985,20 +1350,74 @@ export function getStoredSessionUserId() {
   );
 }
 
+/*
+  Robusto:
+  - refreshToken solo ya es contexto suficiente para intentar refresh.
+  - sessionId/sessionUserId enriquecen backend legacy, pero no bloquean.
+*/
 export function hasRefreshContext() {
-  const refreshToken =
-    getStoredRefreshToken();
-
-  const sessionId =
-    getStoredSessionId();
-
-  const sessionUserId =
-    getStoredSessionUserId();
-
   return Boolean(
-    refreshToken &&
-      sessionId &&
-      sessionUserId
+    getStoredRefreshToken()
+  );
+}
+
+export function hasCompleteRefreshContext() {
+  return Boolean(
+    getStoredRefreshToken() &&
+      getStoredSessionId() &&
+      getStoredSessionUserId()
+  );
+}
+
+/* =========================================================
+   AUX READERS
+========================================================= */
+
+export function getStoredUserSlug() {
+  const keys =
+    getStorageKeys();
+
+  return normalizeStoredValue(
+    readRaw(
+      keys.userSlug,
+      ""
+    )
+  );
+}
+
+export function getStoredUserName() {
+  const keys =
+    getStorageKeys();
+
+  return normalizeStoredValue(
+    readRaw(
+      keys.userName,
+      ""
+    )
+  );
+}
+
+export function getStoredRole() {
+  const keys =
+    getStorageKeys();
+
+  return normalizeStoredValue(
+    readRaw(
+      keys.role,
+      ""
+    )
+  );
+}
+
+export function getStoredLastUsername() {
+  const keys =
+    getStorageKeys();
+
+  return normalizeStoredValue(
+    readRaw(
+      keys.lastUsername,
+      ""
+    )
   );
 }
 
@@ -1006,9 +1425,7 @@ export function hasRefreshContext() {
    CLEAR
 ========================================================= */
 
-export function clearAuthStorage(
-  options = {}
-) {
+export function clearAuthStorage(options = {}) {
   const {
     silent = true,
     includeLegacy = true,
@@ -1017,7 +1434,7 @@ export function clearAuthStorage(
   const keys =
     includeLegacy
       ? getAllAuthClearKeys()
-      : getAllowedAuthKeys();
+      : getKnownAuthKeys();
 
   let removed = 0;
 
@@ -1033,16 +1450,19 @@ export function clearAuthStorage(
       localStorage.clear()
       sessionStorage.clear()
 
-    Y no tocamos:
+    No tocamos:
       lang
       theme
+      sidebarOpen
+      lastPublicPath
       route
       publicPath
-      __ONION_INITIAL_URL__
-      __ONION_ACTIVATE_ACCOUNT_INITIAL_URL__
+      window.__ONION_INITIAL_URL__
+      window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__
+      window.__ONION_RESET_CONFIRM_INITIAL_URL__
   */
 
-  if (!safeBool(silent)) {
+  if (!safeBool(silent, true)) {
     safeEmit(
       "auth:storage:cleared",
       {
@@ -1103,8 +1523,27 @@ export function getAuthStorageSnapshot() {
       getStoredSessionUserId() ||
       null,
 
+    userSlug:
+      getStoredUserSlug() ||
+      null,
+
+    userName:
+      getStoredUserName() ||
+      null,
+
+    role:
+      getStoredRole() ||
+      null,
+
+    lastUsername:
+      getStoredLastUsername() ||
+      null,
+
     hasRefreshContext:
       hasRefreshContext(),
+
+    hasCompleteRefreshContext:
+      hasCompleteRefreshContext(),
   };
 }
 
@@ -1123,9 +1562,17 @@ export default {
 
   persistSessionContext,
   persistAuxSessionData,
+
   getStoredSessionId,
   getStoredSessionUserId,
+
   hasRefreshContext,
+  hasCompleteRefreshContext,
+
+  getStoredUserSlug,
+  getStoredUserName,
+  getStoredRole,
+  getStoredLastUsername,
 
   clearAuthStorage,
   getAuthStorageSnapshot,

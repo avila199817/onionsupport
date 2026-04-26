@@ -10,7 +10,11 @@
    - diagnóstico robusto de sesión
    - no romper rutas contextualizadas
    - no pisar /activate-account?token=...
+   - no pisar /activate-account/<token>
+   - no pisar /reset-password/confirm/<token>
    - no redirigir activation/reset aunque exista sesión previa
+   - evitar doble navegación después de login
+   - evitar repaint fantasma desde /login
 
    HARDENING EXTREMO:
    - restore serializado real
@@ -21,6 +25,8 @@
    - no contaminar publicPath/canonicalPath
    - warmup aislado
    - snapshot consistente
+   - rutas públicas técnicas con soporte path-token
+   - activation boot compatible con query, hash y path-token
 ========================================================= */
 
 import {
@@ -32,7 +38,9 @@ import {
    CONSTANTS
 ========================================================= */
 
+const LOGIN_PATH = "/login";
 const ACTIVATION_PATH = "/activate-account";
+const RESET_CONFIRM_PATH = "/reset-password/confirm";
 
 const PUBLIC_TECHNICAL_ROUTES = new Set([
   "/activate-account",
@@ -42,6 +50,11 @@ const PUBLIC_TECHNICAL_ROUTES = new Set([
   "/recover-password",
   "/password-reset",
 ]);
+
+const PUBLIC_TECHNICAL_PREFIXES = [
+  "/activate-account/",
+  "/reset-password/confirm/",
+];
 
 const ACTIVATION_TOKEN_PARAM_NAMES = [
   "token",
@@ -185,6 +198,20 @@ function stripSearchAndHash(path = "/") {
   );
 }
 
+function normalizeInternalPath(path = "/") {
+  const raw =
+    safeText(path, "/") || "/";
+
+  const clean =
+    raw.startsWith("/")
+      ? raw
+      : `/${raw}`;
+
+  return clean
+    .replace(/\/{2,}/g, "/")
+    .replace(/\/+$/g, "") || "/";
+}
+
 function getBaseOrigin() {
   if (
     isBrowser() &&
@@ -316,6 +343,10 @@ function getActivationInitialUrl() {
   );
 }
 
+/* =========================================================
+   TOKEN / PUBLIC ROUTE HELPERS
+========================================================= */
+
 function hasTokenInSearch(search = "") {
   try {
     const params =
@@ -335,6 +366,53 @@ function hasTokenInSearch(search = "") {
   }
 }
 
+function extractPathToken(pathOrUrl = "", basePath = ACTIVATION_PATH) {
+  const normalized =
+    pathFromUrlLike(pathOrUrl) || pathOrUrl || "";
+
+  const pathname =
+    stripSearchAndHash(normalized);
+
+  const parts =
+    pathname.split("/").filter(Boolean);
+
+  const baseParts =
+    basePath.split("/").filter(Boolean);
+
+  if (!baseParts.length) {
+    return "";
+  }
+
+  for (let i = 0; i <= parts.length - baseParts.length; i += 1) {
+    const matches =
+      baseParts.every((part, index) => {
+        return parts[i + index] === part;
+      });
+
+    if (!matches) {
+      continue;
+    }
+
+    const token =
+      parts[i + baseParts.length];
+
+    if (!token) {
+      return "";
+    }
+
+    try {
+      return safeText(
+        decodeURIComponent(token),
+        ""
+      );
+    } catch {
+      return safeText(token, "");
+    }
+  }
+
+  return "";
+}
+
 function hasActivationToken(value = "") {
   const raw =
     safeText(value, "");
@@ -343,9 +421,34 @@ function hasActivationToken(value = "") {
     return false;
   }
 
+  /*
+    Formato nuevo:
+    /activate-account/<token>
+  */
+  if (
+    extractPathToken(
+      raw,
+      ACTIVATION_PATH
+    )
+  ) {
+    return true;
+  }
+
   try {
     const parsed =
       new URL(raw, getBaseOrigin());
+
+    const parsedPath =
+      `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`;
+
+    if (
+      extractPathToken(
+        parsedPath,
+        ACTIVATION_PATH
+      )
+    ) {
+      return true;
+    }
 
     if (
       hasTokenInSearch(parsed.search)
@@ -365,6 +468,18 @@ function hasActivationToken(value = "") {
       );
     }
   } catch {
+    const path =
+      pathFromUrlLike(raw) || raw;
+
+    if (
+      extractPathToken(
+        path,
+        ACTIVATION_PATH
+      )
+    ) {
+      return true;
+    }
+
     if (raw.includes("?")) {
       const query =
         raw.split("?").slice(1).join("?").split("#")[0];
@@ -452,8 +567,19 @@ function getCanonicalFromAnyPath(path = "/") {
 }
 
 function isPublicTechnicalCanonicalPath(canonicalPath = "/") {
-  return PUBLIC_TECHNICAL_ROUTES.has(
-    stripSearchAndHash(canonicalPath)
+  const clean =
+    stripSearchAndHash(
+      canonicalPath || "/"
+    );
+
+  if (
+    PUBLIC_TECHNICAL_ROUTES.has(clean)
+  ) {
+    return true;
+  }
+
+  return PUBLIC_TECHNICAL_PREFIXES.some(
+    (prefix) => clean.startsWith(prefix)
   );
 }
 
@@ -464,6 +590,16 @@ function isActivationCanonicalPath(canonicalPath = "/") {
   return (
     clean === ACTIVATION_PATH ||
     clean.startsWith(`${ACTIVATION_PATH}/`)
+  );
+}
+
+function isResetConfirmCanonicalPath(canonicalPath = "/") {
+  const clean =
+    stripSearchAndHash(canonicalPath);
+
+  return (
+    clean === RESET_CONFIRM_PATH ||
+    clean.startsWith(`${RESET_CONFIRM_PATH}/`)
   );
 }
 
@@ -521,6 +657,21 @@ function isActivationBoot(AppCore) {
   );
 }
 
+function isPublicTechnicalBoot(AppCore) {
+  const bootPath =
+    getBootInitialPath(AppCore);
+
+  const canonical =
+    getCanonicalFromAnyPath(
+      bootPath || "/"
+    );
+
+  return (
+    isPublicTechnicalCanonicalPath(canonical) ||
+    isActivationBoot(AppCore)
+  );
+}
+
 function getCurrentCanonicalSafe(AppCore, Router) {
   try {
     const value =
@@ -561,10 +712,16 @@ function getCurrentPublicSafe(AppCore, Router) {
   );
 }
 
+/* =========================================================
+   NAVIGATION GUARDS
+========================================================= */
+
 function shouldSkipNavigation(state) {
   return Boolean(
     state?.bootNavigationHandled ||
-    state?.initialRouteRendered
+    state?.initialRouteRendered ||
+    state?.loginNavigationHandled ||
+    state?.loginInProgress
   );
 }
 
@@ -581,6 +738,30 @@ function markNavigationHandled(
         Boolean(value);
     }
   } catch {}
+}
+
+function markNavigationHandledTrue(state) {
+  markNavigationHandled(state, true);
+}
+
+function normalizeTargetPath(path = "/") {
+  const target =
+    normalizeInternalPath(
+      safeText(path, "/") || "/"
+    );
+
+  if (!target.startsWith("/")) {
+    return "/";
+  }
+
+  return target;
+}
+
+function samePath(a = "/", b = "/") {
+  return (
+    stripSearchAndHash(a) ===
+    stripSearchAndHash(b)
+  );
 }
 
 function buildSnapshot(
@@ -646,14 +827,15 @@ function resolvePostLoginTarget({
     ) {
       const next =
         Auth.getPostLoginTarget(
-          getState(AppCore).user
+          getState(AppCore).user,
+          {}
         );
 
       if (
         next &&
         typeof next === "string"
       ) {
-        return next;
+        return normalizeTargetPath(next);
       }
     }
   } catch {}
@@ -696,23 +878,33 @@ export function navigateAfterSessionRestore({
       Router
     );
 
-  /*
-    CRÍTICO:
-    No navegar nunca desde rutas públicas técnicas.
-    Ejemplo:
-      /activate-account?token=...
-    Aunque el usuario tenga sesión previa, la activación debe seguir.
-  */
-  if (
+  const publicTechnical =
     isPublicTechnicalCanonicalPath(
       currentCanonicalPath
     ) ||
-    isActivationBoot(AppCore)
-  ) {
-    markNavigationHandled(
-      state,
-      true
+    isPublicTechnicalCanonicalPath(
+      currentPublicPath
+    ) ||
+    isActivationBoot(AppCore) ||
+    isResetConfirmCanonicalPath(
+      currentCanonicalPath
+    ) ||
+    isResetConfirmCanonicalPath(
+      currentPublicPath
     );
+
+  /*
+    CRÍTICO:
+    No navegar nunca desde rutas públicas técnicas.
+    Ejemplos:
+      /activate-account?token=...
+      /activate-account/<token>
+      /reset-password/confirm/<token>
+
+    Aunque el usuario tenga sesión previa, estas vistas públicas deben seguir.
+  */
+  if (publicTechnical) {
+    markNavigationHandledTrue(state);
 
     safeLog(
       AppCore,
@@ -741,34 +933,26 @@ export function navigateAfterSessionRestore({
           currentCanonicalPath,
         publicPath:
           currentPublicPath,
+        bootNavigationHandled:
+          Boolean(state?.bootNavigationHandled),
+        initialRouteRendered:
+          Boolean(state?.initialRouteRendered),
+        loginNavigationHandled:
+          Boolean(state?.loginNavigationHandled),
+        loginInProgress:
+          Boolean(state?.loginInProgress),
       }
     );
 
     return false;
   }
 
-  safeLog(
-    AppCore,
-    "navigateAfterSessionRestore()",
-    {
-      canonical:
-        currentCanonicalPath,
-      publicPath:
-        currentPublicPath,
-      authenticated:
-        true,
-      user:
-        getResolvedSessionUser(AppCore),
-      role:
-        getResolvedSessionRole(AppCore),
-    }
-  );
-
   /*
     Solo redirigir desde login.
+    Si ya estamos fuera de /login, no tocar nada.
   */
   if (
-    currentCanonicalPath !== "/login"
+    currentCanonicalPath !== LOGIN_PATH
   ) {
     return false;
   }
@@ -779,10 +963,58 @@ export function navigateAfterSessionRestore({
       Auth,
     });
 
-  markNavigationHandled(
-    state,
-    true
+  if (
+    !target ||
+    samePath(target, currentCanonicalPath)
+  ) {
+    return false;
+  }
+
+  markNavigationHandledTrue(state);
+
+  safeLog(
+    AppCore,
+    "navigateAfterSessionRestore(): redirigiendo desde login.",
+    {
+      canonical:
+        currentCanonicalPath,
+      publicPath:
+        currentPublicPath,
+      target,
+      authenticated:
+        true,
+      user:
+        getResolvedSessionUser(AppCore),
+      role:
+        getResolvedSessionRole(AppCore),
+    }
   );
+
+  /*
+    Preferimos Router.navigate directo con force:false.
+    Evita que goAfterLogin aplique lógica extra o fuerce segundo render.
+  */
+  try {
+    if (
+      isFunction(Router.navigate)
+    ) {
+      Router.navigate(
+        target,
+        {
+          replaceState: true,
+          force: false,
+        }
+      );
+
+      return true;
+    }
+  } catch (error) {
+    safeWarn(
+      AppCore,
+      "Router.navigate() falló:",
+      error
+    );
+  }
 
   try {
     if (
@@ -795,28 +1027,6 @@ export function navigateAfterSessionRestore({
     safeWarn(
       AppCore,
       "Router.goAfterLogin() falló:",
-      error
-    );
-  }
-
-  try {
-    if (
-      isFunction(Router.navigate)
-    ) {
-      Router.navigate(
-        target,
-        {
-          replaceState: true,
-          force: true,
-        }
-      );
-
-      return true;
-    }
-  } catch (error) {
-    safeWarn(
-      AppCore,
-      "Router.navigate() falló:",
       error
     );
   }
@@ -865,24 +1075,31 @@ export async function restoreAuthSession({
         const activationBoot =
           isActivationBoot(AppCore);
 
+        const publicTechnicalBoot =
+          isPublicTechnicalBoot(AppCore);
+
         safeLog(
           AppCore,
           "Restore session iniciado...",
           {
             activationBoot,
+            publicTechnicalBoot,
           }
         );
 
         /*
-          Intentamos pasar flags de navegación silenciosa.
-          Si Auth.restoreSession no los usa, no rompe.
+          Flags de navegación silenciosa.
+          Auth.restoreSession debe restaurar sesión, no decidir navegación final.
         */
         const result =
           await Auth.restoreSession({
             silent: true,
             skipNavigation: true,
-            publicRoute: activationBoot,
-            preserveCurrentRoute: activationBoot,
+            publicRoute:
+              publicTechnicalBoot,
+            preserveCurrentRoute:
+              publicTechnicalBoot,
+            activationBoot,
           });
 
         await Promise.resolve(
@@ -896,6 +1113,7 @@ export async function restoreAuthSession({
               ok:
                 Boolean(result?.ok),
               activationBoot,
+              publicTechnicalBoot,
             }
           );
 
@@ -959,16 +1177,27 @@ export async function restoreSessionInBackground({
     const activationBoot =
       isActivationBoot(AppCore);
 
+    const publicTechnicalBoot =
+      isPublicTechnicalBoot(AppCore);
+
     /*
       CRÍTICO:
-      No resetear bootNavigationHandled a false durante activation boot.
-      Si el render inicial ya protegió /activate-account?token=...,
-      no queremos que restore lo pise.
+      No resetear bootNavigationHandled a false.
+      Antes se hacía:
+        markNavigationHandled(state, activationBoot || skipPostRestoreNavigation)
+
+      Eso podía convertir un true previo en false y abrir la puerta
+      a una navegación extra durante/paralela al login.
+
+      Ahora solo marcamos true cuando hay motivo real para bloquear navegación.
     */
-    markNavigationHandled(
-      state,
-      activationBoot || skipPostRestoreNavigation
-    );
+    if (
+      activationBoot ||
+      publicTechnicalBoot ||
+      skipPostRestoreNavigation
+    ) {
+      markNavigationHandledTrue(state);
+    }
 
     const result =
       await restoreAuthSession({
@@ -992,6 +1221,7 @@ export async function restoreSessionInBackground({
 
     if (
       !activationBoot &&
+      !publicTechnicalBoot &&
       !skipPostRestoreNavigation
     ) {
       navigateAfterSessionRestore({
@@ -1006,6 +1236,7 @@ export async function restoreSessionInBackground({
         "Post-restore navigation omitida.",
         {
           activationBoot,
+          publicTechnicalBoot,
           skipPostRestoreNavigation,
         }
       );
@@ -1019,6 +1250,7 @@ export async function restoreSessionInBackground({
             safeBool(result?.ok) ||
             Boolean(result?.ok),
           activationBoot,
+          publicTechnicalBoot,
           skipPostRestoreNavigation,
         }
       );
@@ -1066,25 +1298,44 @@ export function getSessionBootstrapSnapshot({
 } = {}) {
   return {
     ...buildSnapshot(AppCore),
+
     restoring:
       Boolean(
         state?.sessionRestorePromise
       ),
+
     bootNavigationHandled:
       Boolean(
         state?.bootNavigationHandled
       ),
+
     initialRouteRendered:
       Boolean(
         state?.initialRouteRendered
       ),
+
+    loginNavigationHandled:
+      Boolean(
+        state?.loginNavigationHandled
+      ),
+
+    loginInProgress:
+      Boolean(
+        state?.loginInProgress
+      ),
+
     activationBoot:
       isActivationBoot(AppCore),
+
+    publicTechnicalBoot:
+      isPublicTechnicalBoot(AppCore),
+
     currentCanonicalPath:
       getCurrentCanonicalSafe(
         AppCore,
         null
       ),
+
     currentPublicPath:
       getCurrentPublicSafe(
         AppCore,

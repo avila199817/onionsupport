@@ -290,6 +290,34 @@ export const ActivateAccountView = (() => {
           return value;
         }
       }
+
+      /*
+        Fallback para enlaces envueltos por trackers/mail clients:
+        algunos proveedores meten la URL real dentro de otro query param
+        (ej: ?redirect=https%3A%2F%2F...%3Ftoken%3Dxxx).
+      */
+      for (const [, rawValue] of params.entries()) {
+        const value = safeText(rawValue, "");
+
+        if (!value || !value.includes("token")) {
+          continue;
+        }
+
+        const nestedToken = extractTokenFromUrlLike(value);
+
+        if (nestedToken) {
+          return nestedToken;
+        }
+
+        try {
+          const decoded = decodeURIComponent(value);
+          const decodedToken = extractTokenFromUrlLike(decoded);
+
+          if (decodedToken) {
+            return decodedToken;
+          }
+        } catch {}
+      }
     } catch {}
 
     return "";
@@ -443,6 +471,16 @@ export const ActivateAccountView = (() => {
 
     try {
       urls.push(window.__ONION_INITIAL_URL__);
+    } catch {}
+
+    /*
+      Fallback defensivo:
+      si hubo una redirección previa antes de montar la SPA,
+      en algunos navegadores el referrer puede conservar
+      la URL original con query/hash.
+    */
+    try {
+      urls.push(document.referrer);
     } catch {}
 
     return urls
@@ -1432,6 +1470,12 @@ export const ActivateAccountView = (() => {
     state.status = state.token
       ? ACTIVATE_ACCOUNT_STATUS.IDLE
       : ACTIVATE_ACCOUNT_STATUS.INVALID;
+
+    if (!state.token) {
+      state.message =
+        "No se ha detectado token en la URL. Si el enlace abre /activate-account sin ?token=..., revisa la redirección de dominio (onionsupport.com ↔ www.onionsupport.com) o abre el enlace completo desde el correo.";
+      state.error = state.message;
+    }
 
     safeLog("init", {
       hasToken: Boolean(state.token),

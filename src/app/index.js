@@ -21,6 +21,13 @@
    - renderizar rutas públicas con token antes de restoreSession
    - no permitir que restore/auth/history limpien el token antes de la vista
    - si restoreSession navega post-login, NO ejecutar renderInitialRoute() otra vez
+
+   FIX UI LIFECYCLE:
+   - repara/rebindea SidebarUI y TopbarUI después de restore
+   - repara/rebindea SidebarUI y TopbarUI después del primer render
+   - repara/rebindea SidebarUI y TopbarUI antes de app:ready
+   - repara/rebindea SidebarUI y TopbarUI en router:rendered
+   - corrige casos donde collapse/dropdown solo funcionan tras refrescar
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -738,6 +745,7 @@ export const App = (() => {
 
     handlersBound: false,
     appEventsBound: false,
+    uiRepairEventsBound: false,
 
     bootPromise: null,
     restorePromise: null,
@@ -831,6 +839,205 @@ export const App = (() => {
       topbarSnapshot:
         getTopbarSnapshot(),
     });
+  }
+
+  function safeCallUIMethod(target, names = [], ...args) {
+    for (const name of names) {
+      try {
+        const fn = target?.[name];
+
+        if (typeof fn === "function") {
+          fn.apply(target, args);
+          return true;
+        }
+      } catch (error) {
+        safeWarn(
+          `UI method falló: ${name}`,
+          error
+        );
+      }
+    }
+
+    return false;
+  }
+
+  function repairUISystems(reason = "unknown") {
+    /*
+      Este bloque corrige un race típico:
+
+      1. El shell/sidebar se monta durante boot.
+      2. restore/session/router/syncUserUI pueden repintar sidebar/topbar.
+      3. Los listeners de collapse, dropdown, logout o menú quedan perdidos.
+      4. Al refrescar funciona porque el DOM ya arranca estable.
+
+      Solución:
+      - ejecutar syncUserUI en puntos críticos;
+      - llamar APIs flexibles del componente sin asumir nombre único;
+      - forzar una segunda fase bind/rebind/bindEvents.
+    */
+
+    try {
+      syncUserUI?.({
+        AppCore,
+        Auth,
+        SidebarUI,
+        TopbarUI,
+        Toast,
+        I18n,
+      });
+    } catch (error) {
+      safeWarn(
+        "syncUserUI repair falló.",
+        {
+          reason,
+          error,
+        }
+      );
+    }
+
+    safeCallUIMethod(
+      SidebarUI,
+      [
+        "repair",
+        "refresh",
+        "sync",
+        "render",
+        "mount",
+        "bind",
+        "rebind",
+        "bindEvents",
+      ],
+      {
+        AppCore,
+        Auth,
+        Router,
+        Store,
+        Toast,
+        I18n,
+        reason,
+      }
+    );
+
+    safeCallUIMethod(
+      SidebarUI,
+      [
+        "bind",
+        "rebind",
+        "bindEvents",
+      ],
+      {
+        AppCore,
+        Auth,
+        Router,
+        Store,
+        Toast,
+        I18n,
+        reason,
+      }
+    );
+
+    safeCallUIMethod(
+      TopbarUI,
+      [
+        "repair",
+        "refresh",
+        "sync",
+        "render",
+        "mount",
+        "bind",
+        "rebind",
+        "bindEvents",
+      ],
+      {
+        AppCore,
+        Auth,
+        Router,
+        Store,
+        Toast,
+        I18n,
+        reason,
+      }
+    );
+
+    safeCallUIMethod(
+      TopbarUI,
+      [
+        "bind",
+        "rebind",
+        "bindEvents",
+      ],
+      {
+        AppCore,
+        Auth,
+        Router,
+        Store,
+        Toast,
+        I18n,
+        reason,
+      }
+    );
+
+    safeEmit("app:ui:repair", {
+      reason,
+      sidebarSnapshot:
+        getSidebarSnapshot(),
+      topbarSnapshot:
+        getTopbarSnapshot(),
+    });
+  }
+
+  function bindUIRepairEvents() {
+    if (state.uiRepairEventsBound) {
+      return;
+    }
+
+    const bus = AppCore?.events;
+
+    if (!bus?.on) {
+      return;
+    }
+
+    const onRepair = (payload = {}) => {
+      const data = safeObject(
+        payload?.detail ||
+          payload?.payload ||
+          payload
+      );
+
+      const reason =
+        safeText(
+          data.reason ||
+            data.type ||
+            data.event ||
+            "event"
+        );
+
+      repairUISystems(reason);
+    };
+
+    try {
+      bus.on("router:rendered", onRepair);
+      bus.on("router:render:async-complete", onRepair);
+
+      bus.on("app:ready", onRepair);
+      bus.on("app:ui:ready", onRepair);
+      bus.on("app:route:change", onRepair);
+
+      bus.on("app:session:restored", onRepair);
+      bus.on("auth:session:restored", onRepair);
+      bus.on("auth:login:success", onRepair);
+      bus.on("auth:logout", onRepair);
+
+      bus.on("app:user:change", onRepair);
+      bus.on("app:lang:change", onRepair);
+
+      state.uiRepairEventsBound = true;
+    } catch (error) {
+      safeWarn(
+        "No se pudieron bindear eventos de reparación UI.",
+        error
+      );
+    }
   }
 
   function refreshBootUrlContext() {
@@ -1014,6 +1221,7 @@ export const App = (() => {
 
   function bindAppEventsBlock() {
     if (state.appEventsBound) {
+      bindUIRepairEvents();
       return;
     }
 
@@ -1029,6 +1237,8 @@ export const App = (() => {
         I18n,
       });
     } catch {}
+
+    bindUIRepairEvents();
 
     state.appEventsBound = true;
   }
@@ -1110,6 +1320,7 @@ export const App = (() => {
 
   function initUIBlock() {
     if (state.uiReady) {
+      repairUISystems("init-ui-already-ready");
       return;
     }
 
@@ -1123,6 +1334,8 @@ export const App = (() => {
 
     state.uiReady = true;
     state.uiMounted = true;
+
+    repairUISystems("init-ui");
 
     safeEmitUIReady();
   }
@@ -1151,6 +1364,10 @@ export const App = (() => {
 
     if (!isStale(cycleId)) {
       state.initialRouteRendered = true;
+
+      repairUISystems(
+        `render-initial-route:${reason}`
+      );
     }
 
     return result;
@@ -1181,13 +1398,25 @@ export const App = (() => {
       });
 
     try {
-      return await state.restorePromise;
+      const result =
+        await state.restorePromise;
+
+      if (!isStale(cycleId)) {
+        repairUISystems("restore-session");
+      }
+
+      return result;
     } catch (error) {
       if (nonBlocking) {
         safeWarn(
           "Restore session no bloqueante falló.",
           error
         );
+
+        if (!isStale(cycleId)) {
+          repairUISystems("restore-session-error-non-blocking");
+        }
+
         return null;
       }
 
@@ -1234,6 +1463,8 @@ export const App = (() => {
         Router
       );
     } catch {}
+
+    repairUISystems("finalize-boot");
 
     const remaining =
       Math.max(
@@ -1360,6 +1591,10 @@ export const App = (() => {
                 AppCore?.state?.publicPath || "/",
             }
           );
+
+          repairUISystems(
+            "restore-navigation-handled"
+          );
         } else {
           await renderInitialRouteBlock({
             cycleId,
@@ -1382,6 +1617,10 @@ export const App = (() => {
       );
 
       try {
+        repairUISystems("boot-error");
+      } catch {}
+
+      try {
         renderBootError({
           AppCore,
           Auth,
@@ -1399,6 +1638,7 @@ export const App = (() => {
 
   function boot() {
     if (state.booted) {
+      repairUISystems("boot-already-booted");
       return Promise.resolve(api);
     }
 
@@ -1468,6 +1708,9 @@ export const App = (() => {
     boot,
     reboot,
     getState,
+
+    repairUI:
+      repairUISystems,
   };
 
   return api;

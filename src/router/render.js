@@ -31,6 +31,13 @@
    - soporte hash-router /#/reset-password/confirm?token=...
    - métricas internas por flujo
    - cero throws accidentales
+
+   FIX UX / PERFORMANCE:
+   - el flujo success ya no bloquea la navegación esperando
+     a que route.render() termine si la ruta no pide modo blocking.
+   - pinta transición inmediata.
+   - deja que la vista cargue datos en segundo plano.
+   - evita sensación de sidebar congelado.
 ========================================================= */
 
 import {
@@ -101,6 +108,17 @@ function isBrowser() {
 
 function isFunction(value) {
   return typeof value === "function";
+}
+
+function isPromiseLike(value) {
+  return Boolean(
+    value &&
+      (
+        typeof value === "object" ||
+        typeof value === "function"
+      ) &&
+      typeof value.then === "function"
+  );
 }
 
 function nowMs() {
@@ -1024,7 +1042,7 @@ export function buildRouteRenderContext({
    ROUTE EXECUTION
 ========================================================= */
 
-async function runRouteRender(
+function runRouteRender(
   AppCore,
   route,
   viewContainer,
@@ -1047,12 +1065,14 @@ async function runRouteRender(
     return null;
   }
 
-  return await Promise.resolve(
-    route.render(
+  try {
+    return route.render(
       viewContainer,
       context
-    )
-  );
+    );
+  } catch (error) {
+    return Promise.reject(error);
+  }
 }
 
 /* =========================================================
@@ -1085,7 +1105,7 @@ export function renderGenericView(AppCore, route) {
   </div>
 </section>`;
 
-  return null;
+  return view;
 }
 
 export function renderForbiddenView(AppCore, getRoute) {
@@ -1111,7 +1131,7 @@ export function renderForbiddenView(AppCore, getRoute) {
   </div>
 </section>`;
 
-  return null;
+  return view;
 }
 
 export function renderNotFoundView(AppCore, requestedPath, getRoute) {
@@ -1138,7 +1158,7 @@ export function renderNotFoundView(AppCore, requestedPath, getRoute) {
   </div>
 </section>`;
 
-  return null;
+  return view;
 }
 
 export function renderRuntimeErrorView(AppCore, error, getRoute) {
@@ -1164,7 +1184,154 @@ export function renderRuntimeErrorView(AppCore, error, getRoute) {
   </div>
 </section>`;
 
-  return null;
+  return view;
+}
+
+/* =========================================================
+   SUCCESS RENDER CONTROL
+========================================================= */
+
+let successRenderSequence = 0;
+
+function shouldAwaitRouteRender(
+  AppCore,
+  route = null
+) {
+  if (
+    route?.awaitRender === true ||
+    route?.renderMode === "blocking" ||
+    route?.blockingRender === true
+  ) {
+    return true;
+  }
+
+  if (
+    route?.awaitRender === false ||
+    route?.renderMode === "non-blocking" ||
+    route?.nonBlockingRender === true
+  ) {
+    return false;
+  }
+
+  return Boolean(
+    AppCore?.config?.routerAwaitRouteRender === true ||
+      AppCore?.config?.awaitRouteRender === true
+  );
+}
+
+function renderRouteTransitionView(
+  AppCore,
+  route = null
+) {
+  const view = getViewContainer(AppCore);
+
+  if (!view) {
+    return null;
+  }
+
+  if (
+    route?.transitionView === false ||
+    route?.skipTransitionView === true
+  ) {
+    return view;
+  }
+
+  const title =
+    route?.title ||
+    route?.label ||
+    "Cargando vista";
+
+  view.innerHTML = `
+<section class="content-wrapper">
+  <div class="panel-block" style="padding:24px;">
+    <div style="display:grid;gap:14px;">
+      <div
+        aria-hidden="true"
+        style="
+          width:42px;
+          height:42px;
+          border-radius:16px;
+          background:var(--surface-2, rgba(148,163,184,.14));
+          box-shadow:inset 0 0 0 1px var(--border-soft, rgba(148,163,184,.2));
+        "
+      ></div>
+
+      <div style="display:grid;gap:8px;">
+        <h2 style="margin:0;font-size:18px;">
+          ${escapeHtml(AppCore, title)}
+        </h2>
+
+        <p style="margin:0;color:var(--text-dim);font-size:13px;">
+          Preparando contenido...
+        </p>
+      </div>
+
+      <div style="display:grid;gap:8px;max-width:520px;">
+        <div style="height:10px;border-radius:999px;background:var(--surface-2, rgba(148,163,184,.16));"></div>
+        <div style="height:10px;width:76%;border-radius:999px;background:var(--surface-2, rgba(148,163,184,.12));"></div>
+        <div style="height:10px;width:54%;border-radius:999px;background:var(--surface-2, rgba(148,163,184,.10));"></div>
+      </div>
+    </div>
+  </div>
+</section>`;
+
+  return view;
+}
+
+function handleAsyncRouteRenderFailure({
+  AppCore,
+  error,
+  route,
+  requestedPath,
+  canonicalPath,
+  publicPath,
+  requestedUsername,
+  getRoute,
+  renderId,
+} = {}) {
+  if (renderId !== successRenderSequence) {
+    return;
+  }
+
+  const currentCanonical =
+    AppCore?.state?.route || canonicalPath || "/";
+
+  if (
+    !sameCanonicalRoute(
+      AppCore,
+      currentCanonical,
+      canonicalPath
+    )
+  ) {
+    return;
+  }
+
+  safeError(
+    AppCore,
+    "[RouterRender] async route render error",
+    error
+  );
+
+  safeEmit(
+    AppCore,
+    "router:render:error",
+    {
+      error,
+      message: safeText(error?.message, "Error de navegación"),
+      route: route || null,
+      requestedPath,
+      canonicalPath,
+      publicPath,
+      username: requestedUsername || null,
+      ts: Date.now(),
+    }
+  );
+
+  renderRuntimeErrorView(
+    AppCore,
+    error,
+    getRoute
+  );
 }
 
 /* =========================================================
@@ -1183,6 +1350,9 @@ export async function renderRouteSuccess({
 } = {}) {
   const startedAt = nowMs();
 
+  const renderId =
+    ++successRenderSequence;
+
   const resolved = resolvePublicPathForRoute({
     AppCore,
     getRoute,
@@ -1196,7 +1366,19 @@ export async function renderRouteSuccess({
     IMPORTANTE:
     No hacemos syncRouteState() aquí.
     El Router principal ya sincroniza route/publicPath después de recibir la view.
-    Esto evita doble app:route:change y microparpadeos post-login.
+
+    FIX UX:
+    No bloqueamos la navegación esperando a que route.render() termine,
+    salvo que la ruta lo pida explícitamente con:
+      - route.renderMode = "blocking"
+      - route.awaitRender = true
+      - route.blockingRender = true
+
+    Flujo normal:
+      1. pintar transición inmediata
+      2. lanzar route.render()
+      3. devolver control al router principal
+      4. la vista termina su init/carga después
   */
 
   safeSetShellMode(
@@ -1220,15 +1402,73 @@ export async function renderRouteSuccess({
     publicPath: resolved.publicPath,
   });
 
+  const shouldBlock =
+    shouldAwaitRouteRender(
+      AppCore,
+      route
+    );
+
   let view = null;
 
   if (isFunction(route?.render)) {
-    view = await runRouteRender(
+    const transitionView =
+      shouldBlock
+        ? null
+        : renderRouteTransitionView(
+            AppCore,
+            route
+          );
+
+    const result = runRouteRender(
       AppCore,
       route,
       ctx.viewContainer,
       ctx
     );
+
+    if (shouldBlock) {
+      view = await Promise.resolve(result);
+    } else if (isPromiseLike(result)) {
+      result
+        .then((resolvedView) => {
+          safeEmit(
+            AppCore,
+            "router:render:async-complete",
+            {
+              route: route?.path || null,
+              canonicalPath: resolved.canonicalPath,
+              publicPath: resolved.publicPath,
+              hasView: Boolean(resolvedView),
+              renderId,
+              durationMs: Math.round(nowMs() - startedAt),
+            }
+          );
+        })
+        .catch((error) => {
+          handleAsyncRouteRenderFailure({
+            AppCore,
+            error,
+            route,
+            requestedPath,
+            canonicalPath: resolved.canonicalPath,
+            publicPath: resolved.publicPath,
+            requestedUsername: resolved.username,
+            getRoute,
+            renderId,
+          });
+        });
+
+      view =
+        transitionView ||
+        ctx.viewContainer ||
+        null;
+    } else {
+      view =
+        result ||
+        transitionView ||
+        ctx.viewContainer ||
+        null;
+    }
   } else {
     view = renderGenericView(
       AppCore,
@@ -1250,6 +1490,7 @@ export async function renderRouteSuccess({
       route: route?.path || null,
       canonicalPath: resolved.canonicalPath,
       publicPath: resolved.publicPath,
+      renderMode: shouldBlock ? "blocking" : "non-blocking",
       durationMs: Math.round(nowMs() - startedAt),
     }
   );
@@ -1261,6 +1502,7 @@ export async function renderRouteSuccess({
       route: route?.path || null,
       canonicalPath: resolved.canonicalPath,
       publicPath: resolved.publicPath,
+      renderMode: shouldBlock ? "blocking" : "non-blocking",
     }
   );
 
@@ -1364,18 +1606,20 @@ export async function renderLoginRedirect(args = {}) {
   );
 
   if (isFunction(route?.render)) {
-    await runRouteRender(
-      args.AppCore,
-      route,
-      getViewContainer(args.AppCore),
-      buildRouteRenderContext({
-        AppCore: args.AppCore,
+    await Promise.resolve(
+      runRouteRender(
+        args.AppCore,
         route,
-        requestedPath: publicPath,
-        canonicalPath: routeNames.LOGIN,
-        publicPath,
-        redirectedFrom: args.canonicalPath,
-      })
+        getViewContainer(args.AppCore),
+        buildRouteRenderContext({
+          AppCore: args.AppCore,
+          route,
+          requestedPath: publicPath,
+          canonicalPath: routeNames.LOGIN,
+          publicPath,
+          redirectedFrom: args.canonicalPath,
+        })
+      )
     );
   }
 

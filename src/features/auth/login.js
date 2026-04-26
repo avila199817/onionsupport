@@ -14,6 +14,8 @@
    - anti race conditions concurrentes
    - cero estados auth fantasma
    - evitar doble navegación / doble render post-login
+   - limpiar auth-screen antes/después de navegar
+   - reparar Sidebar/Topbar tras login real
 
    HARDENING EXTREMO:
    - mutex real de login concurrente
@@ -25,7 +27,7 @@
    - errores normalizados
    - fallback post-login siempre a home "/"
    - sin home por rol
-   - navegación deduplicada
+   - navegación deduplicada pero render-safe
    - no aceptar payloads 401/403/ok:false/success:false como éxito
 
    FIX 10/10:
@@ -35,6 +37,10 @@
    - no reutiliza usuario antiguo de AppCore como fallback
    - limpia sesión vieja en fallo real o payload inválido
    - preserva flujo 2FA sin marcar authenticated
+   - espera Router.navigate si devuelve Promise
+   - no usa popstate como primera opción
+   - elimina body.auth-screen/login-no-scroll tras login OK
+   - emite app:ui:repair-request después de navegación
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -105,14 +111,31 @@ const AUTH_FAILURE_CODES = new Set([
   "INVALID_LOGIN_SESSION",
 ]);
 
+const KNOWN_AUTH_STORAGE_KEYS = [
+  "onion_token",
+  "onion_access_token",
+  "onion_refresh_token",
+  "onion_temp_token",
+  "onion_session_id",
+  "onion_session_user_id",
+  "onion_user_id",
+  "onion_user_name",
+  "onion_role",
+
+  "auth_token",
+  "access_token",
+  "refresh_token",
+  "temp_token",
+  "token",
+  "session",
+  "user",
+];
+
 /* =========================================================
    BASICS
 ========================================================= */
 
-function safeText(
-  value,
-  fallback = ""
-) {
+function safeText(value, fallback = "") {
   if (
     value === null ||
     value === undefined
@@ -144,6 +167,10 @@ function isPlainObject(value) {
     typeof value === "object" &&
     !Array.isArray(value)
   );
+}
+
+function isFunction(value) {
+  return typeof value === "function";
 }
 
 function pickFirstText(...values) {
@@ -183,10 +210,7 @@ function pickFirstObject(...values) {
   return null;
 }
 
-function normalizeBoolean(
-  value,
-  fallback = false
-) {
+function normalizeBoolean(value, fallback = false) {
   if (typeof value === "boolean") {
     return value;
   }
@@ -224,12 +248,60 @@ function normalizeBoolean(
   return Boolean(fallback);
 }
 
-function safeEmit(
-  eventName,
-  payload = {}
-) {
+function wait(ms = 0) {
+  return new Promise((resolve) => {
+    try {
+      setTimeout(resolve, ms);
+    } catch {
+      resolve();
+    }
+  });
+}
+
+function afterPaint(callback) {
+  if (!isFunction(callback)) {
+    return;
+  }
+
+  if (!isBrowser()) {
+    try {
+      callback();
+    } catch {}
+
+    return;
+  }
+
+  try {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        try {
+          callback();
+        } catch {}
+      });
+    });
+
+    return;
+  } catch {}
+
+  try {
+    window.setTimeout(() => {
+      try {
+        callback();
+      } catch {}
+    }, 0);
+  } catch {}
+}
+
+function safeEmit(eventName, payload = {}) {
   try {
     AppCore?.events?.emit?.(
+      eventName,
+      payload
+    );
+  } catch {}
+
+  try {
+    window?.AppCore?.events?.emit?.(
       eventName,
       payload
     );
@@ -244,10 +316,34 @@ function safeSetError(error) {
   } catch {}
 }
 
-function safeSyncUserUI() {
+function safeLog(...args) {
   try {
-    AppCore?.syncUserUI?.();
+    AppCore?.utils?.log?.(
+      "[AuthLogin]",
+      ...args
+    );
   } catch {}
+}
+
+function safeWarn(...args) {
+  try {
+    AppCore?.utils?.warn?.(
+      "[AuthLogin]",
+      ...args
+    );
+  } catch {}
+
+  try {
+    console.warn("[AuthLogin]", ...args);
+  } catch {}
+}
+
+function getState() {
+  try {
+    return AppCore?.state || {};
+  } catch {
+    return {};
+  }
 }
 
 function getApiClient() {
@@ -268,6 +364,10 @@ function resolveLoginEndpoint() {
     "/api/auth/login"
   );
 }
+
+/* =========================================================
+   ROUTE HELPERS
+========================================================= */
 
 function normalizeCleanRoute(path = "/") {
   try {
@@ -369,10 +469,7 @@ function getBrowserCanonicalPath() {
   }
 }
 
-function sameCanonicalPath(
-  a = "/",
-  b = "/"
-) {
+function sameCanonicalPath(a = "/", b = "/") {
   try {
     return (
       configLikeRoute(
@@ -411,10 +508,309 @@ function buildPopStateEvent() {
   }
 }
 
-function safeNavigate(
-  path = "/",
-  options = {}
-) {
+/* =========================================================
+   DOM / UI REPAIR
+========================================================= */
+
+function setDocumentAuthFlags({
+  authenticated = false,
+  loading = false,
+  ready = false,
+} = {}) {
+  if (!isBrowser()) {
+    return;
+  }
+
+  try {
+    document.documentElement?.classList?.toggle(
+      "app-loading",
+      Boolean(loading)
+    );
+
+    document.documentElement?.classList?.toggle(
+      "app-ready",
+      Boolean(ready)
+    );
+
+    document.body?.classList?.toggle(
+      "app-loading",
+      Boolean(loading)
+    );
+
+    document.body?.classList?.toggle(
+      "app-ready",
+      Boolean(ready)
+    );
+
+    document.body?.setAttribute(
+      "data-authenticated",
+      authenticated ? "true" : "false"
+    );
+  } catch {}
+}
+
+function clearAuthScreenDomState(reason = "login-success") {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  try {
+    document.body?.classList?.remove?.(
+      "auth-screen",
+      "login-no-scroll"
+    );
+
+    document.body?.removeAttribute?.(
+      "data-auth-screen"
+    );
+
+    document.body?.setAttribute?.(
+      "data-authenticated",
+      "true"
+    );
+  } catch {}
+
+  try {
+    const shell =
+      document.getElementById("app-shell");
+
+    if (shell) {
+      shell.hidden = false;
+      shell.setAttribute(
+        "aria-busy",
+        "false"
+      );
+      shell.setAttribute(
+        "aria-hidden",
+        "false"
+      );
+    }
+  } catch {}
+
+  try {
+    const main =
+      document.getElementById("main-content");
+
+    if (main) {
+      main.setAttribute(
+        "aria-busy",
+        "false"
+      );
+      main.setAttribute(
+        "aria-hidden",
+        "false"
+      );
+    }
+  } catch {}
+
+  try {
+    const view =
+      document.getElementById("view-container");
+
+    if (view) {
+      view.setAttribute(
+        "aria-busy",
+        "false"
+      );
+    }
+  } catch {}
+
+  setDocumentAuthFlags({
+    authenticated: true,
+    loading: false,
+    ready: true,
+  });
+
+  safeEmit(
+    "app:shell:auth-screen-cleared",
+    {
+      reason,
+      source: "auth.login",
+    }
+  );
+
+  return true;
+}
+
+function safeSyncUserUI(reason = "login-sync-user-ui") {
+  try {
+    AppCore?.syncUserUI?.({
+      AppCore,
+      reason,
+      source: "auth.login",
+    });
+  } catch {}
+
+  try {
+    AppCore?.syncUserUI?.();
+  } catch {}
+
+  safeEmit(
+    "app:ui:repair-request",
+    {
+      reason,
+      source: "auth.login",
+      authenticated:
+        Boolean(getState().authenticated),
+      user:
+        getState().user || null,
+      role:
+        getState().role || null,
+    }
+  );
+}
+
+function emitAuthenticatedEvents(reason = "login-success", extra = {}) {
+  const payload = {
+    reason,
+    source: "auth.login",
+    authenticated:
+      Boolean(getState().authenticated),
+    user:
+      getState().user || null,
+    role:
+      getState().role || null,
+    route:
+      getState().route || "/",
+    publicPath:
+      getState().publicPath || "/",
+    ...extra,
+  };
+
+  safeEmit(
+    "auth:session:applied",
+    payload
+  );
+
+  safeEmit(
+    "auth:login:session-ready",
+    payload
+  );
+
+  safeEmit(
+    "app:session:restored",
+    payload
+  );
+
+  safeEmit(
+    "app:user:change",
+    payload
+  );
+
+  safeEmit(
+    "app:ui:repair-request",
+    payload
+  );
+}
+
+/* =========================================================
+   ROUTER RESOLUTION / NAVIGATION
+========================================================= */
+
+async function resolveRouter() {
+  const candidates = [
+    AppCore?.Router,
+    AppCore?.router,
+    AppCore?.modules?.Router,
+    AppCore?.modules?.router,
+    isFunction(AppCore?.modules?.get)
+      ? AppCore.modules.get("router")
+      : null,
+    isFunction(AppCore?.modules?.get)
+      ? AppCore.modules.get("Router")
+      : null,
+    isBrowser()
+      ? window.Router
+      : null,
+    isBrowser()
+      ? window.AppRouter
+      : null,
+  ];
+
+  for (const candidate of candidates) {
+    if (
+      candidate &&
+      isFunction(candidate.navigate)
+    ) {
+      return candidate;
+    }
+  }
+
+  /*
+    Import dinámico para evitar depender de AppCore.Router.
+    Esto corrige el caso en el que login navega por history/popstate
+    y el panel queda montado a medias hasta refresh.
+  */
+  try {
+    const module =
+      await import("../../router/index.js");
+
+    const router =
+      module?.Router ||
+      module?.default ||
+      null;
+
+    if (
+      router &&
+      isFunction(router.navigate)
+    ) {
+      return router;
+    }
+  } catch {}
+
+  return null;
+}
+
+function updateCoreRouteState(target = "/") {
+  const cleanTarget =
+    normalizePath(
+      target || "/"
+    ) || "/";
+
+  try {
+    if (
+      isFunction(AppCore?.setRoute)
+    ) {
+      AppCore.setRoute(
+        configLikeRoute(cleanTarget)
+      );
+    }
+  } catch {}
+
+  try {
+    if (
+      isFunction(AppCore?.setPublicPath)
+    ) {
+      AppCore.setPublicPath(
+        cleanTarget
+      );
+    }
+  } catch {}
+
+  try {
+    AppCore?.setState?.({
+      route:
+        configLikeRoute(cleanTarget),
+      publicPath:
+        cleanTarget,
+      lastRoute:
+        configLikeRoute(cleanTarget),
+    });
+  } catch {
+    try {
+      if (AppCore?.state) {
+        AppCore.state.route =
+          configLikeRoute(cleanTarget);
+        AppCore.state.publicPath =
+          cleanTarget;
+        AppCore.state.lastRoute =
+          configLikeRoute(cleanTarget);
+      }
+    } catch {}
+  }
+}
+
+async function safeNavigate(path = "/", options = {}) {
   const target =
     normalizePath(
       safeText(path, getHomeRoute())
@@ -428,10 +824,21 @@ function safeNavigate(
       target
     );
 
+  const replaceState =
+    options.replaceState !== false;
+
+  const force =
+    options.force === true;
+
+  const reason =
+    safeText(
+      options.reason,
+      "login-navigation"
+    );
+
   /*
-    Deduplicación:
-    Si ya estamos en destino, no forzamos render.
-    Esto elimina parte del parpadeo post-login.
+    Si ya estamos en destino, actualizamos estado y pedimos reparación UI.
+    No disparamos doble render.
   */
   if (
     isBrowser() &&
@@ -440,40 +847,88 @@ function safeNavigate(
       targetCanonical
     )
   ) {
-    return true;
+    updateCoreRouteState(target);
+
+    clearAuthScreenDomState(
+      `${reason}:same-route`
+    );
+
+    safeSyncUserUI(
+      `${reason}:same-route`
+    );
+
+    return {
+      ok: true,
+      skipped: true,
+      reason: "same-route",
+      target,
+    };
   }
 
-  try {
-    const router =
-      AppCore?.Router ||
-      AppCore?.router ||
-      AppCore?.modules?.Router ||
-      null;
+  const router =
+    await resolveRouter();
 
-    if (
-      router &&
-      typeof router.navigate === "function"
-    ) {
-      router.navigate(
-        target,
-        {
-          replaceState:
-            options.replaceState !== false,
-          force:
-            options.force === true,
-        }
+  if (
+    router &&
+    isFunction(router.navigate)
+  ) {
+    try {
+      const result =
+        router.navigate(
+          target,
+          {
+            replaceState,
+            force,
+          }
+        );
+
+      if (
+        result &&
+        isFunction(result.then)
+      ) {
+        await result;
+      }
+
+      clearAuthScreenDomState(
+        `${reason}:router`
       );
 
-      return true;
-    }
-  } catch {}
+      safeSyncUserUI(
+        `${reason}:router`
+      );
 
+      afterPaint(() => {
+        clearAuthScreenDomState(
+          `${reason}:router-after-paint`
+        );
+
+        safeSyncUserUI(
+          `${reason}:router-after-paint`
+        );
+      });
+
+      return {
+        ok: true,
+        skipped: false,
+        reason: "router",
+        target,
+      };
+    } catch (error) {
+      safeWarn(
+        "Router.navigate falló.",
+        error
+      );
+    }
+  }
+
+  /*
+    Fallback controlado.
+    Solo si no tenemos Router real.
+  */
   try {
     if (
       isBrowser() &&
-      typeof window.history
-        ?.replaceState ===
-        "function"
+      typeof window.history?.replaceState === "function"
     ) {
       window.history.replaceState(
         {
@@ -481,40 +936,73 @@ function safeNavigate(
           publicPath: target,
           canonicalPath:
             configLikeRoute(target),
+          source:
+            "auth.login",
         },
         "",
         target
+      );
+
+      updateCoreRouteState(target);
+
+      clearAuthScreenDomState(
+        `${reason}:history`
       );
 
       window.dispatchEvent(
         buildPopStateEvent()
       );
 
-      return true;
+      safeSyncUserUI(
+        `${reason}:history`
+      );
+
+      return {
+        ok: true,
+        skipped: false,
+        reason: "history",
+        target,
+      };
     }
-  } catch {}
+  } catch (error) {
+    safeWarn(
+      "history fallback falló.",
+      error
+    );
+  }
 
   try {
     if (isBrowser()) {
       window.location.assign(target);
-      return true;
+
+      return {
+        ok: true,
+        skipped: false,
+        reason: "location",
+        target,
+      };
     }
   } catch {}
 
-  return false;
+  return {
+    ok: false,
+    skipped: false,
+    reason: "navigation-failed",
+    target,
+  };
 }
 
-function looksLikeEmail(
-  value = ""
-) {
+/* =========================================================
+   IDENTIFIER / PAYLOAD
+========================================================= */
+
+function looksLikeEmail(value = "") {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
     String(value).trim()
   );
 }
 
-function looksLikePhone(
-  value = ""
-) {
+function looksLikePhone(value = "") {
   const clean =
     String(value)
       .replace(/[^\d+]/g, "")
@@ -525,21 +1013,13 @@ function looksLikePhone(
   );
 }
 
-function normalizePhone(
-  value = ""
-) {
+function normalizePhone(value = "") {
   return String(value)
     .replace(/[^\d+]/g, "")
     .trim();
 }
 
-/* =========================================================
-   IDENTIFIER / PAYLOAD
-========================================================= */
-
-export function resolveLoginIdentifier(
-  credentials = {}
-) {
+export function resolveLoginIdentifier(credentials = {}) {
   return safeText(
     credentials.identifier ??
       credentials.username ??
@@ -551,9 +1031,7 @@ export function resolveLoginIdentifier(
   );
 }
 
-export function normalizeLoginPayload(
-  credentials = {}
-) {
+export function normalizeLoginPayload(credentials = {}) {
   const rawIdentifier =
     resolveLoginIdentifier(
       credentials
@@ -599,9 +1077,7 @@ export function normalizeLoginPayload(
   };
 }
 
-export function buildLoginRequestBody(
-  credentials = {}
-) {
+export function buildLoginRequestBody(credentials = {}) {
   const {
     identifier,
     password,
@@ -676,6 +1152,14 @@ function normalizeRedirectCandidate(value = "") {
     return "";
   }
 
+  if (
+    isRoleDefaultRedirect(
+      candidate
+    )
+  ) {
+    return "";
+  }
+
   return candidate;
 }
 
@@ -712,9 +1196,7 @@ function getRedirectFromOptions(options = {}) {
   );
 }
 
-export function buildLoginRedirectPath(
-  targetPath = null
-) {
+export function buildLoginRedirectPath(targetPath = null) {
   const loginPath =
     getLoginRoute();
 
@@ -777,9 +1259,9 @@ export function buildLoginRedirectPath(
  * 3. Home configurado saneado
  *
  * Importante:
- * - ya NO manda admin a /usuarios por defecto
- * - ya NO manda user a /@slug por defecto
- * - el fallback universal es /
+ * - no manda admin a /usuarios por defecto
+ * - no manda user a /@slug por defecto
+ * - fallback universal: /
  */
 export function getPostLoginTarget(
   user = AppCore?.state?.user,
@@ -1716,10 +2198,6 @@ function tryValidateAuthResponse(response) {
       response
     );
   } catch (error) {
-    /*
-      validateAuthResponse puede lanzar correctamente ante 401.
-      Propagamos el error para que login() limpie sesión y no navegue.
-    */
     throw error;
   }
 }
@@ -1945,26 +2423,7 @@ function clearKnownAuthStorage() {
     return;
   }
 
-  const keys = [
-    "onion_token",
-    "onion_access_token",
-    "onion_refresh_token",
-    "onion_temp_token",
-    "onion_session_id",
-    "onion_session_user_id",
-    "onion_user_id",
-    "onion_user_name",
-    "onion_role",
-
-    "auth_token",
-    "access_token",
-    "refresh_token",
-    "token",
-    "session",
-    "user",
-  ];
-
-  keys.forEach((key) => {
+  KNOWN_AUTH_STORAGE_KEYS.forEach((key) => {
     try {
       window.localStorage?.removeItem?.(key);
     } catch {}
@@ -1975,14 +2434,46 @@ function clearKnownAuthStorage() {
   });
 }
 
-function clearAuthRuntimeState(
-  reason = "login_cleanup"
-) {
+function clearTempTokenSafe() {
+  try {
+    persistTempToken(null);
+  } catch {}
+
+  try {
+    persistTempToken("");
+  } catch {}
+
+  if (!isBrowser()) {
+    return;
+  }
+
+  [
+    "onion_temp_token",
+    "temp_token",
+    "temporary_token",
+    "two_factor_token",
+    "mfa_token",
+  ].forEach((key) => {
+    try {
+      window.localStorage?.removeItem?.(key);
+    } catch {}
+
+    try {
+      window.sessionStorage?.removeItem?.(key);
+    } catch {}
+  });
+}
+
+function clearAuthRuntimeState(reason = "login_cleanup") {
   try {
     clearSessionLocal({
       silent: true,
     });
-  } catch {}
+  } catch {
+    try {
+      clearSessionLocal();
+    } catch {}
+  }
 
   try {
     AppCore?.clearSession?.();
@@ -2001,6 +2492,7 @@ function clearAuthRuntimeState(
       accessToken: null,
       session: null,
       sessionId: null,
+      loginInProgress: false,
     });
   } catch {
     try {
@@ -2012,6 +2504,7 @@ function clearAuthRuntimeState(
         AppCore.state.accessToken = null;
         AppCore.state.session = null;
         AppCore.state.sessionId = null;
+        AppCore.state.loginInProgress = false;
       }
     } catch {}
   }
@@ -2025,6 +2518,88 @@ function clearAuthRuntimeState(
       source: "auth.login",
     }
   );
+}
+
+function markLoginInProgress(value = false) {
+  try {
+    AppCore?.setState?.({
+      loginInProgress:
+        Boolean(value),
+    });
+  } catch {
+    try {
+      if (AppCore?.state) {
+        AppCore.state.loginInProgress =
+          Boolean(value);
+      }
+    } catch {}
+  }
+}
+
+/* =========================================================
+   SESSION APPLY
+========================================================= */
+
+function enforceAuthenticatedCoreState(snapshot = {}) {
+  const user =
+    snapshot.user || null;
+
+  const token =
+    snapshot.token ||
+    snapshot.accessToken ||
+    "";
+
+  const role =
+    snapshot.role ||
+    user?.role ||
+    user?.rol ||
+    "";
+
+  try {
+    AppCore?.setState?.({
+      authenticated: true,
+      user,
+      currentUser: user,
+      authUser: user,
+      role,
+      token,
+      accessToken: token,
+      session: {
+        ...(safeObject(getState().session)),
+        user,
+        role,
+        token,
+        accessToken: token,
+        authenticated: true,
+      },
+    });
+  } catch {
+    try {
+      if (AppCore?.state) {
+        AppCore.state.authenticated = true;
+        AppCore.state.user = user;
+        AppCore.state.currentUser = user;
+        AppCore.state.authUser = user;
+        AppCore.state.role = role;
+        AppCore.state.token = token;
+        AppCore.state.accessToken = token;
+        AppCore.state.session = {
+          ...(safeObject(AppCore.state.session)),
+          user,
+          role,
+          token,
+          accessToken: token,
+          authenticated: true,
+        };
+      }
+    } catch {}
+  }
+
+  return {
+    user,
+    token,
+    role,
+  };
 }
 
 /* =========================================================
@@ -2059,8 +2634,7 @@ async function executeLogin(
 
   if (
     !apiClient ||
-    typeof apiClient.post !==
-      "function"
+    typeof apiClient.post !== "function"
   ) {
     throw createAuthError(
       "No hay cliente API disponible para login.",
@@ -2075,6 +2649,7 @@ async function executeLogin(
     resolveLoginEndpoint();
 
   safeSetError(null);
+  markLoginInProgress(true);
 
   safeEmit(
     "auth:login:start",
@@ -2083,6 +2658,8 @@ async function executeLogin(
         payload.identifier,
       endpoint,
       sequence,
+      source:
+        "auth.login",
     }
   );
 
@@ -2135,9 +2712,11 @@ async function executeLogin(
     authData.requires2FA &&
     authData.tempToken
   ) {
-    persistTempToken(
-      authData.tempToken
-    );
+    try {
+      persistTempToken(
+        authData.tempToken
+      );
+    } catch {}
 
     const result = {
       ok: true,
@@ -2158,7 +2737,11 @@ async function executeLogin(
 
     safeEmit(
       "auth:login:2fa-required",
-      result
+      {
+        ...result,
+        source:
+          "auth.login",
+      }
     );
 
     if (
@@ -2166,13 +2749,15 @@ async function executeLogin(
         options
       )
     ) {
-      safeNavigate(
-        result.redirectTo,
-        {
-          replaceState: true,
-          force: false,
-        }
-      );
+      result.navigation =
+        await safeNavigate(
+          result.redirectTo,
+          {
+            replaceState: true,
+            force: false,
+            reason: "login-2fa",
+          }
+        );
     }
 
     return result;
@@ -2200,7 +2785,7 @@ async function executeLogin(
     authData
   );
 
-  persistTempToken(null);
+  clearTempTokenSafe();
 
   const snapshot =
     applySession({
@@ -2245,7 +2830,30 @@ async function executeLogin(
     );
   }
 
-  safeSyncUserUI();
+  enforceAuthenticatedCoreState(
+    snapshot
+  );
+
+  clearAuthScreenDomState(
+    "login-session-applied"
+  );
+
+  safeSyncUserUI(
+    "login-session-applied"
+  );
+
+  emitAuthenticatedEvents(
+    "login-session-applied",
+    {
+      sequence,
+    }
+  );
+
+  /*
+    Pequeño yield para que AppCore/Auth/UI reciban el estado antes del render.
+    Evita que Router pinte la vista privada con shell todavía en modo login.
+  */
+  await wait(0);
 
   const redirectTo =
     getPostLoginTarget(
@@ -2275,11 +2883,17 @@ async function executeLogin(
       authData.sessionData || null,
     redirectTo,
     response,
+    navigation:
+      null,
   };
 
   safeEmit(
     "auth:login:success",
-    result
+    {
+      ...result,
+      source:
+        "auth.login",
+    }
   );
 
   if (
@@ -2287,14 +2901,62 @@ async function executeLogin(
       options
     )
   ) {
-    safeNavigate(
+    result.navigation =
+      await safeNavigate(
+        redirectTo,
+        {
+          replaceState: true,
+          force:
+            options.forceNavigate === true,
+          reason:
+            "login-success",
+        }
+      );
+  }
+
+  clearAuthScreenDomState(
+    "login-success-after-navigation"
+  );
+
+  safeSyncUserUI(
+    "login-success-after-navigation"
+  );
+
+  emitAuthenticatedEvents(
+    "login-success-after-navigation",
+    {
+      sequence,
       redirectTo,
+      navigation:
+        result.navigation,
+    }
+  );
+
+  afterPaint(() => {
+    clearAuthScreenDomState(
+      "login-success-after-paint"
+    );
+
+    safeSyncUserUI(
+      "login-success-after-paint"
+    );
+
+    safeEmit(
+      "app:ui:repair-request",
       {
-        replaceState: true,
-        force: false,
+        reason:
+          "login-success-after-paint",
+        source:
+          "auth.login",
+        authenticated:
+          true,
+        user:
+          getState().user || null,
+        role:
+          getState().role || null,
       }
     );
-  }
+  });
 
   return result;
 }
@@ -2325,6 +2987,8 @@ export async function login(
           "before_login"
         );
 
+        markLoginInProgress(true);
+
         return await executeLogin(
           credentials,
           sequence,
@@ -2346,11 +3010,14 @@ export async function login(
               extractMessage(
                 error
               ),
+            source:
+              "auth.login",
           }
         );
 
         throw error;
       } finally {
+        markLoginInProgress(false);
         loginPromise = null;
       }
     })();
@@ -2366,11 +3033,14 @@ export async function handleLoginFormSubmit(
   formElement,
   options = {}
 ) {
+  const HTMLForm =
+    isBrowser()
+      ? window.HTMLFormElement
+      : null;
+
   if (
-    !(
-      formElement instanceof
-      HTMLFormElement
-    )
+    !HTMLForm ||
+    !(formElement instanceof HTMLForm)
   ) {
     throw new Error(
       "Se esperaba un formulario HTML válido."
@@ -2425,8 +3095,7 @@ export async function handleLoginFormSubmit(
     safeBool(
       options.resetOnSuccess
     ) &&
-    result?.status ===
-      "authenticated"
+    result?.status === "authenticated"
   ) {
     formElement.reset();
   }

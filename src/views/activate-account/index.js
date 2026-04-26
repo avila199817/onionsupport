@@ -4,10 +4,11 @@
 
    Responsabilidades:
    - montar la vista pública de activación de cuenta
-   - leer token desde URL normal, hash-router, history.state o contexto router
+   - leer token desde URL normal, path-token, hash-router, history.state o contexto router
    - capturar token antes de limpiar la URL
    - limpiar token visible de la barra del navegador
    - no exponer token real en DOM
+   - no exponer token real en logs/getState/contexto público
    - pedir contraseña nueva y confirmación antes de activar
    - reutilizar bindings compartidos de password-field
    - renderizar template premium alineado con login/reset-password
@@ -20,8 +21,10 @@
    HARDENING EXTREMO:
    - endpoint alineado con AUTH_ENDPOINTS.activateAccount
    - token capturado desde contexto router aunque window.location ya esté limpio
+   - soporte /activate-account/<token>
    - password manual obligatorio
    - sin autosubmit
+   - sin recuperación manual de token en UI
    - sin token real en inputs hidden
    - navegación login robusta
 ========================================================= */
@@ -135,6 +138,42 @@ export const ActivateAccountView = (() => {
     return value && typeof value === "object" && !Array.isArray(value)
       ? value
       : {};
+  }
+
+  function redactActivationTokenInText(value = "") {
+    const raw = safeText(value, "");
+
+    if (!raw) {
+      return "";
+    }
+
+    return raw
+      .replace(
+        /\/activate-account\/([^/?#\s]+)/gi,
+        "/activate-account/***"
+      )
+      .replace(
+        /([?&](?:token|activationToken|activateToken|code|t)=)([^&#\s]+)/gi,
+        "$1***"
+      );
+  }
+
+  function sanitizeContextForState(context = null) {
+    const ctx = safeObject(context);
+
+    if (!Object.keys(ctx).length) {
+      return null;
+    }
+
+    return {
+      publicPath: redactActivationTokenInText(ctx.publicPath),
+      requestedPath: redactActivationTokenInText(ctx.requestedPath),
+      path: redactActivationTokenInText(ctx.path),
+      href: redactActivationTokenInText(ctx.href),
+      url: redactActivationTokenInText(ctx.url),
+      redirectedFrom: redactActivationTokenInText(ctx.redirectedFrom),
+      hasContext: true,
+    };
   }
 
   function safeLog(...args) {
@@ -293,13 +332,12 @@ export const ActivateAccountView = (() => {
 
       /*
         Fallback para enlaces envueltos por trackers/mail clients:
-        algunos proveedores meten la URL real dentro de otro query param
-        (ej: ?redirect=https%3A%2F%2F...%3Ftoken%3Dxxx).
+        algunos proveedores meten la URL real dentro de otro query param.
       */
       for (const [, rawValue] of params.entries()) {
         const value = safeText(rawValue, "");
 
-        if (!value || !value.includes("token")) {
+        if (!value || !value.toLowerCase().includes("token")) {
           continue;
         }
 
@@ -328,7 +366,9 @@ export const ActivateAccountView = (() => {
       const normalized = normalizePathnameOnly(pathname);
       const parts = normalized.split("/").filter(Boolean);
 
-      const index = parts.findIndex((part) => part === "activate-account");
+      const index = parts.findIndex((part) => {
+        return String(part || "").toLowerCase() === "activate-account";
+      });
 
       if (index >= 0 && parts[index + 1]) {
         return safeText(decodeURIComponent(parts[index + 1]), "");
@@ -401,7 +441,9 @@ export const ActivateAccountView = (() => {
           return fromQuery;
         }
 
-        return extractTokenFromRoutePath(raw.split("?")[0] || raw);
+        const pathOnly = raw.split("?")[0]?.split("#")[0] || raw;
+
+        return extractTokenFromRoutePath(pathOnly);
       } catch {
         return "";
       }
@@ -512,6 +554,33 @@ export const ActivateAccountView = (() => {
     return "";
   }
 
+  function clearSensitiveInitialUrlCache() {
+    if (!isBrowser()) {
+      return false;
+    }
+
+    try {
+      if (window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__) {
+        window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__ = "";
+      }
+
+      if (
+        window.__ONION_INITIAL_URL__ &&
+        isActivationPathname(new URL(window.__ONION_INITIAL_URL__, getBaseOrigin()).pathname)
+      ) {
+        window.__ONION_INITIAL_URL__ = `${window.location.origin}${CLEAN_ACTIVATION_PUBLIC_PATH}`;
+      }
+
+      return true;
+    } catch {
+      try {
+        window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__ = "";
+      } catch {}
+
+      return false;
+    }
+  }
+
   function scrubActivationTokenFromUrl() {
     if (!SCRUB_TOKEN_FROM_URL_AFTER_CAPTURE) {
       return false;
@@ -581,6 +650,8 @@ export const ActivateAccountView = (() => {
           publicPath: cleanPath,
         });
       } catch {}
+
+      clearSensitiveInitialUrlCache();
 
       return true;
     } catch {
@@ -768,39 +839,6 @@ export const ActivateAccountView = (() => {
       ...values,
       validation,
     };
-  }
-
-  function getTokenRecoveryInputValue() {
-    if (!isBrowser()) {
-      return "";
-    }
-
-    try {
-      const input = document.getElementById("activateAccountTokenRecovery");
-      return safeText(input?.value, "");
-    } catch {
-      return "";
-    }
-  }
-
-  function recoverTokenFromManualInput() {
-    const raw = getTokenRecoveryInputValue();
-
-    if (!raw) {
-      return "";
-    }
-
-    const direct = extractTokenFromUrlLike(raw);
-
-    if (direct) {
-      return direct;
-    }
-
-    try {
-      return safeText(decodeURIComponent(raw), "");
-    } catch {
-      return safeText(raw, "");
-    }
   }
 
   function bindSharedPasswordFields(container) {
@@ -1259,9 +1297,11 @@ export const ActivateAccountView = (() => {
         target
       );
 
-      window.dispatchEvent(
-        new PopStateEvent("popstate")
-      );
+      try {
+        window.dispatchEvent(new PopStateEvent("popstate"));
+      } catch {
+        window.dispatchEvent(new Event("popstate"));
+      }
 
       return true;
     } catch {}
@@ -1294,12 +1334,17 @@ export const ActivateAccountView = (() => {
 
     if (!token) {
       setStatus(ACTIVATE_ACCOUNT_STATUS.INVALID, {
-        message: "No se ha encontrado un token de activación válido.",
-        error: "No se ha encontrado un token de activación válido.",
+        message:
+          "No se ha encontrado un token de activación válido. Abre el enlace completo recibido por correo.",
+        error:
+          "No se ha encontrado un token de activación válido.",
       });
 
       if (!silent) {
-        showToast("No se ha encontrado un token de activación válido.", "error");
+        showToast(
+          "No se ha encontrado un token de activación válido.",
+          "error"
+        );
       }
 
       return null;
@@ -1312,7 +1357,11 @@ export const ActivateAccountView = (() => {
       focusElementById(credentials.validation.fieldId);
 
       if (!silent) {
-        showToast(credentials.validation.message, "error", "Revisa la contraseña");
+        showToast(
+          credentials.validation.message,
+          "error",
+          "Revisa la contraseña"
+        );
       }
 
       return null;
@@ -1360,7 +1409,11 @@ export const ActivateAccountView = (() => {
         showToast(message, "error", "No se pudo activar");
       }
 
-      safeError("Activation failed:", error);
+      safeError("Activation failed:", {
+        code: error?.code || error?.error || "",
+        status: error?.status || "",
+        message: error?.message || "",
+      });
 
       return null;
     }
@@ -1431,25 +1484,6 @@ export const ActivateAccountView = (() => {
         return;
       }
 
-      if (action === "recover-token") {
-        const recoveredToken = recoverTokenFromManualInput();
-
-        if (!recoveredToken) {
-          setInlineError("Pega el enlace completo de activación o el token.");
-          showToast("No se ha podido recuperar un token válido.", "error");
-          return;
-        }
-
-        state.token = recoveredToken;
-        setStatus(ACTIVATE_ACCOUNT_STATUS.IDLE, {
-          message: "Token recuperado. Ya puedes definir la contraseña y activar la cuenta.",
-          error: "",
-        });
-
-        showToast("Token recuperado correctamente.", "success");
-        return;
-      }
-
       await handleActivate({
         silent: false,
       });
@@ -1505,7 +1539,7 @@ export const ActivateAccountView = (() => {
 
   async function init(viewContainer = null, context = null) {
     state.destroyed = false;
-    state.lastContext = safeObject(context);
+    state.lastContext = sanitizeContextForState(context);
 
     const capturedToken = extractTokenFromUrl(context);
 
@@ -1525,15 +1559,14 @@ export const ActivateAccountView = (() => {
 
     if (!state.token) {
       state.message =
-        "No se ha detectado token en la URL. Si el enlace abre /activate-account sin ?token=..., revisa la redirección de dominio (onionsupport.com ↔ www.onionsupport.com) o abre el enlace completo desde el correo.";
+        "No se ha detectado token en la URL. El enlace esperado debe incluir el token, por ejemplo /activate-account/<token>.";
       state.error = state.message;
     }
 
     safeLog("init", {
       hasToken: Boolean(state.token),
       urlScrubbed,
-      contextPublicPath: safeText(context?.publicPath, ""),
-      contextRequestedPath: safeText(context?.requestedPath, ""),
+      context: state.lastContext,
     });
 
     render();
@@ -1575,6 +1608,7 @@ export const ActivateAccountView = (() => {
       ...state,
       token: state.token ? "***" : "",
       hasToken: Boolean(state.token),
+      lastContext: state.lastContext,
     }),
 
     get mounted() {

@@ -11,10 +11,12 @@
    - no romper rutas contextualizadas
    - no pisar /activate-account?token=...
    - no pisar /activate-account/<token>
+   - no pisar /reset-password/confirm?token=...
    - no pisar /reset-password/confirm/<token>
    - no redirigir activation/reset aunque exista sesión previa
    - evitar doble navegación después de login
    - evitar repaint fantasma desde /login
+   - reparar shell/auth-screen tras navegación autenticada
 
    HARDENING EXTREMO:
    - restore serializado real
@@ -27,6 +29,14 @@
    - snapshot consistente
    - rutas públicas técnicas con soporte path-token
    - activation boot compatible con query, hash y path-token
+   - reset confirm boot compatible con query, hash y path-token
+
+   FIX CRÍTICO:
+   - bootNavigationHandled solo se marca cuando Router navega/renderiza
+   - las rutas públicas técnicas bloquean navegación, pero NO bloquean render inicial
+   - Router.navigate se espera con await si devuelve Promise
+   - syncUserUI se ejecuta en modo moderno y legacy
+   - emite eventos de sesión/restauración para reparar Sidebar/Topbar
 ========================================================= */
 
 import {
@@ -40,6 +50,7 @@ import {
 
 const LOGIN_PATH = "/login";
 const ACTIVATION_PATH = "/activate-account";
+const RESET_PASSWORD_PATH = "/reset-password";
 const RESET_CONFIRM_PATH = "/reset-password/confirm";
 
 const PUBLIC_TECHNICAL_ROUTES = new Set([
@@ -56,10 +67,28 @@ const PUBLIC_TECHNICAL_PREFIXES = [
   "/reset-password/confirm/",
 ];
 
+const AUTH_LIKE_ROUTES = new Set([
+  "/login",
+  "/reset-password",
+  "/reset-password/confirm",
+  "/forgot-password",
+  "/recover-password",
+  "/password-reset",
+  "/activate-account",
+]);
+
 const ACTIVATION_TOKEN_PARAM_NAMES = [
   "token",
   "activationToken",
   "activateToken",
+  "code",
+  "t",
+];
+
+const RESET_TOKEN_PARAM_NAMES = [
+  "token",
+  "resetToken",
+  "passwordResetToken",
   "code",
   "t",
 ];
@@ -132,6 +161,14 @@ function safeText(value, fallback = "") {
   return text || fallback;
 }
 
+function safeObject(value) {
+  return value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+    ? value
+    : {};
+}
+
 function getState(AppCore) {
   try {
     return AppCore?.state || {};
@@ -148,13 +185,24 @@ function getResolvedSessionUser(AppCore) {
     state?.user?.username ||
     state?.user?.email ||
     state?.user?.id ||
+    state?.currentUser?.username ||
+    state?.currentUser?.email ||
+    state?.currentUser?.id ||
     null
   );
 }
 
 function getResolvedSessionRole(AppCore) {
+  const state =
+    getState(AppCore);
+
   return (
-    getState(AppCore)?.role || null
+    state?.role ||
+    state?.rol ||
+    state?.userRole ||
+    state?.session?.role ||
+    state?.session?.rol ||
+    null
   );
 }
 
@@ -163,6 +211,60 @@ function isAuthenticated(AppCore) {
     getState(AppCore)?.authenticated
   );
 }
+
+function emit(AppCore, eventName, payload = {}) {
+  try {
+    AppCore?.events?.emit?.(
+      eventName,
+      payload
+    );
+  } catch {}
+
+  try {
+    window?.AppCore?.events?.emit?.(
+      eventName,
+      payload
+    );
+  } catch {}
+}
+
+function afterPaint(callback) {
+  if (!isFunction(callback)) {
+    return;
+  }
+
+  if (!isBrowser()) {
+    try {
+      callback();
+    } catch {}
+
+    return;
+  }
+
+  try {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        try {
+          callback();
+        } catch {}
+      });
+    });
+
+    return;
+  } catch {}
+
+  try {
+    window.setTimeout(() => {
+      try {
+        callback();
+      } catch {}
+    }, 0);
+  } catch {}
+}
+
+/* =========================================================
+   PATH HELPERS
+========================================================= */
 
 function normalizePathnameOnly(pathname = "/") {
   let value = String(pathname || "/")
@@ -343,16 +445,30 @@ function getActivationInitialUrl() {
   );
 }
 
+function getResetConfirmInitialUrl() {
+  if (!isBrowser()) {
+    return "";
+  }
+
+  return safeText(
+    window.__ONION_RESET_CONFIRM_INITIAL_URL__,
+    ""
+  );
+}
+
 /* =========================================================
    TOKEN / PUBLIC ROUTE HELPERS
 ========================================================= */
 
-function hasTokenInSearch(search = "") {
+function hasTokenInSearch(
+  search = "",
+  names = ACTIVATION_TOKEN_PARAM_NAMES
+) {
   try {
     const params =
       new URLSearchParams(search || "");
 
-    return ACTIVATION_TOKEN_PARAM_NAMES.some(
+    return names.some(
       (name) =>
         Boolean(
           safeText(
@@ -413,22 +529,22 @@ function extractPathToken(pathOrUrl = "", basePath = ACTIVATION_PATH) {
   return "";
 }
 
-function hasActivationToken(value = "") {
+function hasRouteToken({
+  value = "",
+  basePath = "",
+  tokenParamNames = [],
+} = {}) {
   const raw =
     safeText(value, "");
 
-  if (!raw) {
+  if (!raw || !basePath) {
     return false;
   }
 
-  /*
-    Formato nuevo:
-    /activate-account/<token>
-  */
   if (
     extractPathToken(
       raw,
-      ACTIVATION_PATH
+      basePath
     )
   ) {
     return true;
@@ -444,14 +560,17 @@ function hasActivationToken(value = "") {
     if (
       extractPathToken(
         parsedPath,
-        ACTIVATION_PATH
+        basePath
       )
     ) {
       return true;
     }
 
     if (
-      hasTokenInSearch(parsed.search)
+      hasTokenInSearch(
+        parsed.search,
+        tokenParamNames
+      )
     ) {
       return true;
     }
@@ -464,7 +583,8 @@ function hasActivationToken(value = "") {
         parsed.hash.split("?").slice(1).join("?");
 
       return hasTokenInSearch(
-        query ? `?${query}` : ""
+        query ? `?${query}` : "",
+        tokenParamNames
       );
     }
   } catch {
@@ -474,7 +594,7 @@ function hasActivationToken(value = "") {
     if (
       extractPathToken(
         path,
-        ACTIVATION_PATH
+        basePath
       )
     ) {
       return true;
@@ -486,7 +606,8 @@ function hasActivationToken(value = "") {
 
       if (
         hasTokenInSearch(
-          query ? `?${query}` : ""
+          query ? `?${query}` : "",
+          tokenParamNames
         )
       ) {
         return true;
@@ -502,7 +623,8 @@ function hasActivationToken(value = "") {
 
       if (
         hasTokenInSearch(
-          query ? `?${query}` : ""
+          query ? `?${query}` : "",
+          tokenParamNames
         )
       ) {
         return true;
@@ -513,18 +635,46 @@ function hasActivationToken(value = "") {
   return false;
 }
 
-function isActivationTokenScrubbed() {
-  if (!isBrowser()) {
+function hasActivationToken(value = "") {
+  return hasRouteToken({
+    value,
+    basePath: ACTIVATION_PATH,
+    tokenParamNames: ACTIVATION_TOKEN_PARAM_NAMES,
+  });
+}
+
+function hasResetConfirmToken(value = "") {
+  return hasRouteToken({
+    value,
+    basePath: RESET_CONFIRM_PATH,
+    tokenParamNames: RESET_TOKEN_PARAM_NAMES,
+  });
+}
+
+function isHistoryStateFlagEnabled(flag = "") {
+  if (!isBrowser() || !flag) {
     return false;
   }
 
   try {
     return Boolean(
-      window.history?.state?.scrubbedActivationToken
+      window.history?.state?.[flag]
     );
   } catch {
     return false;
   }
+}
+
+function isActivationTokenScrubbed() {
+  return isHistoryStateFlagEnabled(
+    "scrubbedActivationToken"
+  );
+}
+
+function isResetConfirmTokenScrubbed() {
+  return isHistoryStateFlagEnabled(
+    "scrubbedResetToken"
+  );
 }
 
 function getBootInitialPath(AppCore) {
@@ -533,11 +683,28 @@ function getBootInitialPath(AppCore) {
 
   return (
     safeText(
+      state.bootProtectedInitialPath,
+      ""
+    ) ||
+    safeText(
       state.bootActivationInitialPath,
+      ""
+    ) ||
+    safeText(
+      state.bootResetConfirmInitialPath,
       ""
     ) ||
     pathFromUrlLike(
       getActivationInitialUrl()
+    ) ||
+    pathFromUrlLike(
+      getResetConfirmInitialUrl()
+    ) ||
+    pathFromUrlLike(
+      safeText(
+        state.bootProtectedInitialUrl,
+        ""
+      )
     ) ||
     pathFromUrlLike(
       safeText(
@@ -603,6 +770,24 @@ function isResetConfirmCanonicalPath(canonicalPath = "/") {
   );
 }
 
+function isLoginCanonicalPath(canonicalPath = "/") {
+  return stripSearchAndHash(canonicalPath) === LOGIN_PATH;
+}
+
+function isAuthLikeCanonicalPath(canonicalPath = "/") {
+  const clean =
+    stripSearchAndHash(canonicalPath);
+
+  if (AUTH_LIKE_ROUTES.has(clean)) {
+    return true;
+  }
+
+  return (
+    clean.startsWith(`${ACTIVATION_PATH}/`) ||
+    clean.startsWith(`${RESET_CONFIRM_PATH}/`)
+  );
+}
+
 function isActivationBoot(AppCore) {
   const state =
     getState(AppCore);
@@ -618,43 +803,75 @@ function isActivationBoot(AppCore) {
     return false;
   }
 
-  const activationInitialUrl =
-    getActivationInitialUrl();
+  const candidates = [
+    state.bootActivationInitialUrl,
+    state.bootProtectedInitialUrl,
+    getActivationInitialUrl(),
+    state.bootInitialUrl,
+    getInitialUrl(),
+    getBrowserPublicPath(),
+    state.publicPath,
+    state.route,
+  ];
+
+  return candidates.some((candidate) => {
+    const value =
+      safeText(candidate, "");
+
+    if (!value) {
+      return false;
+    }
+
+    return (
+      isActivationCanonicalPath(
+        getCanonicalFromAnyPath(value)
+      ) &&
+      hasActivationToken(value)
+    );
+  });
+}
+
+function isResetConfirmBoot(AppCore) {
+  const state =
+    getState(AppCore);
 
   if (
-    activationInitialUrl &&
-    isActivationCanonicalPath(
-      getCanonicalFromAnyPath(
-        activationInitialUrl
-      )
-    ) &&
-    hasActivationToken(activationInitialUrl)
+    state.bootIsResetConfirm === true &&
+    state.bootHasResetToken === true
   ) {
     return true;
   }
 
-  const initialUrl =
-    getInitialUrl();
-
-  if (
-    initialUrl &&
-    isActivationCanonicalPath(
-      getCanonicalFromAnyPath(initialUrl)
-    ) &&
-    hasActivationToken(initialUrl)
-  ) {
-    return true;
+  if (isResetConfirmTokenScrubbed()) {
+    return false;
   }
 
-  const bootPath =
-    getBootInitialPath(AppCore);
+  const candidates = [
+    state.bootResetConfirmInitialUrl,
+    state.bootProtectedInitialUrl,
+    getResetConfirmInitialUrl(),
+    state.bootInitialUrl,
+    getInitialUrl(),
+    getBrowserPublicPath(),
+    state.publicPath,
+    state.route,
+  ];
 
-  return (
-    isActivationCanonicalPath(
-      getCanonicalFromAnyPath(bootPath)
-    ) &&
-    hasActivationToken(bootPath)
-  );
+  return candidates.some((candidate) => {
+    const value =
+      safeText(candidate, "");
+
+    if (!value) {
+      return false;
+    }
+
+    return (
+      isResetConfirmCanonicalPath(
+        getCanonicalFromAnyPath(value)
+      ) &&
+      hasResetConfirmToken(value)
+    );
+  });
 }
 
 function isPublicTechnicalBoot(AppCore) {
@@ -668,7 +885,8 @@ function isPublicTechnicalBoot(AppCore) {
 
   return (
     isPublicTechnicalCanonicalPath(canonical) ||
-    isActivationBoot(AppCore)
+    isActivationBoot(AppCore) ||
+    isResetConfirmBoot(AppCore)
   );
 }
 
@@ -684,6 +902,26 @@ function getCurrentCanonicalSafe(AppCore, Router) {
       return stripSearchAndHash(value);
     }
   } catch {}
+
+  const publicPath =
+    safeText(
+      getState(AppCore).publicPath,
+      ""
+    );
+
+  if (publicPath) {
+    return stripSearchAndHash(publicPath);
+  }
+
+  const route =
+    safeText(
+      getState(AppCore).route,
+      ""
+    );
+
+  if (route) {
+    return stripSearchAndHash(route);
+  }
 
   const bootPath =
     getBootInitialPath(AppCore);
@@ -707,9 +945,240 @@ function getCurrentPublicSafe(AppCore, Router) {
   } catch {}
 
   return (
+    safeText(
+      getState(AppCore).publicPath,
+      ""
+    ) ||
     getBootInitialPath(AppCore) ||
     "/"
   );
+}
+
+/* =========================================================
+   UI / SHELL REPAIR
+========================================================= */
+
+async function runSyncUserUI({
+  AppCore,
+  Auth,
+  Router,
+  syncUserUI,
+  reason = "session-sync",
+} = {}) {
+  if (!isFunction(syncUserUI)) {
+    return false;
+  }
+
+  let synced = false;
+
+  const context = {
+    AppCore,
+    Auth,
+    Router,
+    reason,
+  };
+
+  /*
+    Modo moderno:
+    syncUserUI({ AppCore, Auth, Router, reason })
+  */
+  try {
+    await Promise.resolve(
+      syncUserUI(context)
+    );
+
+    synced = true;
+  } catch (error) {
+    safeWarn(
+      AppCore,
+      "syncUserUI(context) falló.",
+      error
+    );
+  }
+
+  /*
+    Compat legacy:
+    syncUserUI(AppCore)
+  */
+  try {
+    await Promise.resolve(
+      syncUserUI(AppCore)
+    );
+
+    synced = true;
+  } catch {}
+
+  emit(
+    AppCore,
+    "app:ui:repair-request",
+    {
+      reason,
+      authenticated:
+        isAuthenticated(AppCore),
+      user:
+        getState(AppCore).user || null,
+      role:
+        getResolvedSessionRole(AppCore),
+      source:
+        "AppSession",
+    }
+  );
+
+  return synced;
+}
+
+function clearAuthScreenDomState({
+  AppCore,
+  Router,
+  reason = "authenticated-route",
+  force = false,
+} = {}) {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  const authenticated =
+    isAuthenticated(AppCore);
+
+  const canonical =
+    getCurrentCanonicalSafe(
+      AppCore,
+      Router
+    );
+
+  const authLike =
+    isAuthLikeCanonicalPath(canonical);
+
+  /*
+    Solo quitamos auth-screen si:
+    - ya hay sesión, y
+    - estamos fuera de login/reset/activation, o
+    - se fuerza tras navegación a ruta privada.
+  */
+  if (
+    !authenticated ||
+    (!force && authLike)
+  ) {
+    return false;
+  }
+
+  try {
+    document.body?.classList?.remove?.(
+      "auth-screen",
+      "login-no-scroll"
+    );
+
+    document.body?.removeAttribute?.(
+      "data-auth-screen"
+    );
+
+    document.body?.setAttribute?.(
+      "data-authenticated",
+      "true"
+    );
+  } catch {}
+
+  try {
+    const shell =
+      document.getElementById("app-shell");
+
+    if (shell) {
+      shell.setAttribute(
+        "aria-busy",
+        "false"
+      );
+    }
+  } catch {}
+
+  try {
+    const main =
+      document.getElementById("main-content");
+
+    if (main) {
+      main.setAttribute(
+        "aria-busy",
+        "false"
+      );
+    }
+  } catch {}
+
+  try {
+    const view =
+      document.getElementById("view-container");
+
+    if (view) {
+      view.setAttribute(
+        "aria-busy",
+        "false"
+      );
+    }
+  } catch {}
+
+  emit(
+    AppCore,
+    "app:shell:auth-screen-cleared",
+    {
+      reason,
+      canonical,
+      authenticated,
+      source: "AppSession",
+    }
+  );
+
+  return true;
+}
+
+function emitSessionReadyEvents({
+  AppCore,
+  reason = "session-ready",
+  result = {},
+} = {}) {
+  const payload = {
+    reason,
+    ok:
+      Boolean(result?.ok) ||
+      isAuthenticated(AppCore),
+    authenticated:
+      isAuthenticated(AppCore),
+    user:
+      getState(AppCore).user || null,
+    username:
+      getResolvedSessionUser(AppCore),
+    role:
+      getResolvedSessionRole(AppCore),
+    route:
+      getState(AppCore).route || "/",
+    publicPath:
+      getState(AppCore).publicPath || "/",
+    source:
+      "AppSession",
+  };
+
+  emit(
+    AppCore,
+    "auth:session:restored",
+    payload
+  );
+
+  emit(
+    AppCore,
+    "app:session:restored",
+    payload
+  );
+
+  emit(
+    AppCore,
+    "app:user:change",
+    payload
+  );
+
+  emit(
+    AppCore,
+    "app:ui:repair-request",
+    payload
+  );
+
+  return payload;
 }
 
 /* =========================================================
@@ -719,7 +1188,6 @@ function getCurrentPublicSafe(AppCore, Router) {
 function shouldSkipNavigation(state) {
   return Boolean(
     state?.bootNavigationHandled ||
-    state?.initialRouteRendered ||
     state?.loginNavigationHandled ||
     state?.loginInProgress
   );
@@ -740,8 +1208,19 @@ function markNavigationHandled(
   } catch {}
 }
 
-function markNavigationHandledTrue(state) {
-  markNavigationHandled(state, true);
+function markNavigationSkipped(
+  state,
+  reason = "unknown"
+) {
+  try {
+    if (
+      state &&
+      typeof state === "object"
+    ) {
+      state.postRestoreNavigationSkipped = true;
+      state.postRestoreNavigationSkippedReason = reason;
+    }
+  } catch {}
 }
 
 function normalizeTargetPath(path = "/") {
@@ -795,9 +1274,18 @@ function buildSnapshot(
       getInitialUrl() ||
       null,
 
+    bootProtectedInitialUrl:
+      state.bootProtectedInitialUrl ||
+      null,
+
     bootActivationInitialUrl:
       state.bootActivationInitialUrl ||
       getActivationInitialUrl() ||
+      null,
+
+    bootResetConfirmInitialUrl:
+      state.bootResetConfirmInitialUrl ||
+      getResetConfirmInitialUrl() ||
       null,
 
     bootIsActivation:
@@ -806,8 +1294,17 @@ function buildSnapshot(
     bootHasActivationToken:
       Boolean(state.bootHasActivationToken),
 
+    bootIsResetConfirm:
+      Boolean(state.bootIsResetConfirm),
+
+    bootHasResetToken:
+      Boolean(state.bootHasResetToken),
+
     activationTokenScrubbed:
       isActivationTokenScrubbed(),
+
+    resetConfirmTokenScrubbed:
+      isResetConfirmTokenScrubbed(),
 
     ...extras,
   };
@@ -821,13 +1318,16 @@ function resolvePostLoginTarget({
   AppCore,
   Auth,
 } = {}) {
+  const user =
+    getState(AppCore).user || null;
+
   try {
     if (
       isFunction(Auth?.getPostLoginTarget)
     ) {
       const next =
         Auth.getPostLoginTarget(
-          getState(AppCore).user,
+          user,
           {}
         );
 
@@ -835,19 +1335,129 @@ function resolvePostLoginTarget({
         next &&
         typeof next === "string"
       ) {
-        return normalizeTargetPath(next);
+        const normalized =
+          normalizeTargetPath(next);
+
+        if (
+          normalized &&
+          normalized !== LOGIN_PATH
+        ) {
+          return normalized;
+        }
       }
     }
   } catch {}
 
+  const state =
+    getState(AppCore);
+
+  const candidates = [
+    state.postLoginTarget,
+    state.redirectAfterLogin,
+    state.returnTo,
+    state.lastPrivatePath,
+  ];
+
+  for (const candidate of candidates) {
+    const value =
+      safeText(candidate, "");
+
+    if (!value) {
+      continue;
+    }
+
+    const normalized =
+      normalizeTargetPath(value);
+
+    if (
+      normalized &&
+      normalized !== LOGIN_PATH &&
+      !isAuthLikeCanonicalPath(normalized)
+    ) {
+      return normalized;
+    }
+  }
+
   return "/";
+}
+
+/* =========================================================
+   ROUTER NAVIGATION
+========================================================= */
+
+async function runRouterNavigation({
+  AppCore,
+  Router,
+  target = "/",
+  replaceState = true,
+  force = false,
+} = {}) {
+  if (!Router) {
+    return false;
+  }
+
+  try {
+    if (
+      isFunction(Router.navigate)
+    ) {
+      const result =
+        Router.navigate(
+          target,
+          {
+            replaceState,
+            force,
+          }
+        );
+
+      if (
+        result &&
+        isFunction(result.then)
+      ) {
+        await result;
+      }
+
+      return true;
+    }
+  } catch (error) {
+    safeWarn(
+      AppCore,
+      "Router.navigate() falló:",
+      error
+    );
+  }
+
+  try {
+    if (
+      isFunction(Router.goAfterLogin)
+    ) {
+      const result =
+        Router.goAfterLogin(target);
+
+      if (
+        result &&
+        isFunction(result.then)
+      ) {
+        await result;
+      }
+
+      return true;
+    }
+  } catch (error) {
+    safeWarn(
+      AppCore,
+      "Router.goAfterLogin() falló:",
+      error
+    );
+  }
+
+  return false;
 }
 
 /* =========================================================
    NAVEGACIÓN POST RESTORE
 ========================================================= */
 
-export function navigateAfterSessionRestore({
+export async function navigateAfterSessionRestore({
   AppCore,
   Auth,
   Router,
@@ -886,6 +1496,7 @@ export function navigateAfterSessionRestore({
       currentPublicPath
     ) ||
     isActivationBoot(AppCore) ||
+    isResetConfirmBoot(AppCore) ||
     isResetConfirmCanonicalPath(
       currentCanonicalPath
     ) ||
@@ -896,15 +1507,18 @@ export function navigateAfterSessionRestore({
   /*
     CRÍTICO:
     No navegar nunca desde rutas públicas técnicas.
-    Ejemplos:
-      /activate-account?token=...
-      /activate-account/<token>
-      /reset-password/confirm/<token>
 
-    Aunque el usuario tenga sesión previa, estas vistas públicas deben seguir.
+    IMPORTANTE:
+    Aquí NO se marca bootNavigationHandled.
+    Bloquear navegación no significa que Router ya haya renderizado.
+    Si marcamos bootNavigationHandled aquí, App.index puede saltarse
+    renderInitialRoute() y dejar pantalla rota/blanca.
   */
   if (publicTechnical) {
-    markNavigationHandledTrue(state);
+    markNavigationSkipped(
+      state,
+      "public-technical-route"
+    );
 
     safeLog(
       AppCore,
@@ -916,6 +1530,8 @@ export function navigateAfterSessionRestore({
           currentPublicPath,
         activationBoot:
           isActivationBoot(AppCore),
+        resetConfirmBoot:
+          isResetConfirmBoot(AppCore),
       }
     );
 
@@ -925,6 +1541,11 @@ export function navigateAfterSessionRestore({
   if (
     shouldSkipNavigation(state)
   ) {
+    markNavigationSkipped(
+      state,
+      "already-handled"
+    );
+
     safeLog(
       AppCore,
       "navigateAfterSessionRestore(): omitido porque ya hay navegación resuelta.",
@@ -935,8 +1556,6 @@ export function navigateAfterSessionRestore({
           currentPublicPath,
         bootNavigationHandled:
           Boolean(state?.bootNavigationHandled),
-        initialRouteRendered:
-          Boolean(state?.initialRouteRendered),
         loginNavigationHandled:
           Boolean(state?.loginNavigationHandled),
         loginInProgress:
@@ -949,11 +1568,22 @@ export function navigateAfterSessionRestore({
 
   /*
     Solo redirigir desde login.
-    Si ya estamos fuera de /login, no tocar nada.
+    Si ya estamos fuera de /login, no tocar navegación.
   */
   if (
-    currentCanonicalPath !== LOGIN_PATH
+    !isLoginCanonicalPath(
+      currentCanonicalPath
+    )
   ) {
+    clearAuthScreenDomState({
+      AppCore,
+      Router,
+      reason:
+        "already-authenticated-private-route",
+      force:
+        false,
+    });
+
     return false;
   }
 
@@ -967,10 +1597,13 @@ export function navigateAfterSessionRestore({
     !target ||
     samePath(target, currentCanonicalPath)
   ) {
+    markNavigationSkipped(
+      state,
+      "target-empty-or-same"
+    );
+
     return false;
   }
-
-  markNavigationHandledTrue(state);
 
   safeLog(
     AppCore,
@@ -990,46 +1623,76 @@ export function navigateAfterSessionRestore({
     }
   );
 
-  /*
-    Preferimos Router.navigate directo con force:false.
-    Evita que goAfterLogin aplique lógica extra o fuerce segundo render.
-  */
-  try {
-    if (
-      isFunction(Router.navigate)
-    ) {
-      Router.navigate(
-        target,
+  const navigated =
+    await runRouterNavigation({
+      AppCore,
+      Router,
+      target,
+      replaceState: true,
+      force: false,
+    });
+
+  if (navigated) {
+    /*
+      Solo aquí se marca como handled:
+      significa que Router ya recibió navegación real.
+    */
+    markNavigationHandled(
+      state,
+      true
+    );
+
+    clearAuthScreenDomState({
+      AppCore,
+      Router,
+      reason:
+        "post-restore-login-navigation",
+      force:
+        true,
+    });
+
+    afterPaint(() => {
+      clearAuthScreenDomState({
+        AppCore,
+        Router,
+        reason:
+          "post-restore-login-navigation-after-paint",
+        force:
+          true,
+      });
+
+      emit(
+        AppCore,
+        "app:ui:repair-request",
         {
-          replaceState: true,
-          force: false,
+          reason:
+            "post-restore-navigation-after-paint",
+          target,
+          authenticated: true,
+          source: "AppSession",
         }
       );
+    });
 
-      return true;
-    }
-  } catch (error) {
-    safeWarn(
+    emit(
       AppCore,
-      "Router.navigate() falló:",
-      error
+      "app:auth:navigation",
+      {
+        reason:
+          "post-restore-login-navigation",
+        target,
+        authenticated: true,
+        source: "AppSession",
+      }
     );
+
+    return true;
   }
 
-  try {
-    if (
-      isFunction(Router.goAfterLogin)
-    ) {
-      Router.goAfterLogin(target);
-      return true;
-    }
-  } catch (error) {
-    safeWarn(
-      AppCore,
-      "Router.goAfterLogin() falló:",
-      error
-    );
-  }
+  markNavigationSkipped(
+    state,
+    "router-navigation-failed"
+  );
 
   return false;
 }
@@ -1041,6 +1704,7 @@ export function navigateAfterSessionRestore({
 export async function restoreAuthSession({
   AppCore,
   Auth,
+  Router,
   syncUserUI,
   state,
 } = {}) {
@@ -1054,11 +1718,14 @@ export async function restoreAuthSession({
     !Auth ||
     !isFunction(Auth.restoreSession)
   ) {
-    try {
-      await Promise.resolve(
-        syncUserUI?.(AppCore)
-      );
-    } catch {}
+    await runSyncUserUI({
+      AppCore,
+      Auth,
+      Router,
+      syncUserUI,
+      reason:
+        "auth-module-missing",
+    });
 
     return buildSnapshot(
       AppCore,
@@ -1075,6 +1742,9 @@ export async function restoreAuthSession({
         const activationBoot =
           isActivationBoot(AppCore);
 
+        const resetConfirmBoot =
+          isResetConfirmBoot(AppCore);
+
         const publicTechnicalBoot =
           isPublicTechnicalBoot(AppCore);
 
@@ -1083,6 +1753,7 @@ export async function restoreAuthSession({
           "Restore session iniciado...",
           {
             activationBoot,
+            resetConfirmBoot,
             publicTechnicalBoot,
           }
         );
@@ -1095,16 +1766,39 @@ export async function restoreAuthSession({
           await Auth.restoreSession({
             silent: true,
             skipNavigation: true,
+
             publicRoute:
               publicTechnicalBoot,
+
             preserveCurrentRoute:
               publicTechnicalBoot,
+
+            preserveRoute:
+              publicTechnicalBoot,
+
             activationBoot,
+            resetConfirmBoot,
           });
 
-        await Promise.resolve(
-          syncUserUI?.(AppCore)
-        );
+        await runSyncUserUI({
+          AppCore,
+          Auth,
+          Router,
+          syncUserUI,
+          reason:
+            "restore-auth-session",
+        });
+
+        if (
+          isAuthenticated(AppCore)
+        ) {
+          emitSessionReadyEvents({
+            AppCore,
+            reason:
+              "restore-auth-session",
+            result,
+          });
+        }
 
         const snapshot =
           buildSnapshot(
@@ -1113,6 +1807,7 @@ export async function restoreAuthSession({
               ok:
                 Boolean(result?.ok),
               activationBoot,
+              resetConfirmBoot,
               publicTechnicalBoot,
             }
           );
@@ -1134,11 +1829,14 @@ export async function restoreAuthSession({
           error
         );
 
-        try {
-          await Promise.resolve(
-            syncUserUI?.(AppCore)
-          );
-        } catch {}
+        await runSyncUserUI({
+          AppCore,
+          Auth,
+          Router,
+          syncUserUI,
+          reason:
+            "restore-auth-session-error",
+        });
 
         return buildSnapshot(
           AppCore,
@@ -1177,32 +1875,41 @@ export async function restoreSessionInBackground({
     const activationBoot =
       isActivationBoot(AppCore);
 
+    const resetConfirmBoot =
+      isResetConfirmBoot(AppCore);
+
     const publicTechnicalBoot =
       isPublicTechnicalBoot(AppCore);
 
     /*
       CRÍTICO:
-      No resetear bootNavigationHandled a false.
-      Antes se hacía:
-        markNavigationHandled(state, activationBoot || skipPostRestoreNavigation)
-
-      Eso podía convertir un true previo en false y abrir la puerta
-      a una navegación extra durante/paralela al login.
-
-      Ahora solo marcamos true cuando hay motivo real para bloquear navegación.
+      No marcar bootNavigationHandled aquí.
+      Las rutas públicas técnicas solo bloquean navegación,
+      pero App.index debe poder renderizar la ruta inicial si aún no lo hizo.
     */
     if (
       activationBoot ||
+      resetConfirmBoot ||
       publicTechnicalBoot ||
       skipPostRestoreNavigation
     ) {
-      markNavigationHandledTrue(state);
+      markNavigationSkipped(
+        state,
+        activationBoot
+          ? "activation-boot"
+          : resetConfirmBoot
+            ? "reset-confirm-boot"
+            : publicTechnicalBoot
+              ? "public-technical-boot"
+              : "skip-post-restore-navigation"
+      );
     }
 
     const result =
       await restoreAuthSession({
         AppCore,
         Auth,
+        Router,
         syncUserUI,
         state,
       });
@@ -1221,10 +1928,11 @@ export async function restoreSessionInBackground({
 
     if (
       !activationBoot &&
+      !resetConfirmBoot &&
       !publicTechnicalBoot &&
       !skipPostRestoreNavigation
     ) {
-      navigateAfterSessionRestore({
+      await navigateAfterSessionRestore({
         AppCore,
         Auth,
         Router,
@@ -1236,10 +1944,40 @@ export async function restoreSessionInBackground({
         "Post-restore navigation omitida.",
         {
           activationBoot,
+          resetConfirmBoot,
           publicTechnicalBoot,
           skipPostRestoreNavigation,
         }
       );
+    }
+
+    await runSyncUserUI({
+      AppCore,
+      Auth,
+      Router,
+      syncUserUI,
+      reason:
+        "restore-session-background-final",
+    });
+
+    if (
+      isAuthenticated(AppCore)
+    ) {
+      clearAuthScreenDomState({
+        AppCore,
+        Router,
+        reason:
+          "restore-session-background-final",
+        force:
+          false,
+      });
+
+      emitSessionReadyEvents({
+        AppCore,
+        reason:
+          "restore-session-background-final",
+        result,
+      });
     }
 
     const snapshot =
@@ -1250,6 +1988,7 @@ export async function restoreSessionInBackground({
             safeBool(result?.ok) ||
             Boolean(result?.ok),
           activationBoot,
+          resetConfirmBoot,
           publicTechnicalBoot,
           skipPostRestoreNavigation,
         }
@@ -1266,17 +2005,20 @@ export async function restoreSessionInBackground({
       ...snapshot,
     };
   } catch (error) {
-    safeWarn(
+    safeError(
       AppCore,
       "restoreSessionInBackground() falló:",
       error
     );
 
-    try {
-      await Promise.resolve(
-        syncUserUI?.(AppCore)
-      );
-    } catch {}
+    await runSyncUserUI({
+      AppCore,
+      Auth,
+      Router,
+      syncUserUI,
+      reason:
+        "restore-session-background-error",
+    });
 
     return buildSnapshot(
       AppCore,
@@ -1294,6 +2036,7 @@ export async function restoreSessionInBackground({
 
 export function getSessionBootstrapSnapshot({
   AppCore,
+  Router = null,
   state,
 } = {}) {
   return {
@@ -1308,6 +2051,15 @@ export function getSessionBootstrapSnapshot({
       Boolean(
         state?.bootNavigationHandled
       ),
+
+    postRestoreNavigationSkipped:
+      Boolean(
+        state?.postRestoreNavigationSkipped
+      ),
+
+    postRestoreNavigationSkippedReason:
+      state?.postRestoreNavigationSkippedReason ||
+      null,
 
     initialRouteRendered:
       Boolean(
@@ -1327,19 +2079,22 @@ export function getSessionBootstrapSnapshot({
     activationBoot:
       isActivationBoot(AppCore),
 
+    resetConfirmBoot:
+      isResetConfirmBoot(AppCore),
+
     publicTechnicalBoot:
       isPublicTechnicalBoot(AppCore),
 
     currentCanonicalPath:
       getCurrentCanonicalSafe(
         AppCore,
-        null
+        Router
       ),
 
     currentPublicPath:
       getCurrentPublicSafe(
         AppCore,
-        null
+        Router
       ),
   };
 }

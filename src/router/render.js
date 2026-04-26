@@ -5,14 +5,15 @@
    RESPONSABILIDADES:
    - renderizar vistas internas del router
    - construir payloads de navegación
-   - emitir before-render / rendered
-   - sincronizar route/publicPath
+   - emitir before-render / rendered cuando el flujo lo requiere
+   - preparar contextos de render
    - flujos success / forbidden / 404 / login / runtime
    - soportar route.render async
 
    HARDENING EXTREMO:
    - guards browser / DOM total safe
-   - sync de estado consistente y única
+   - evita doble router:rendered en success
+   - evita doble sync route/publicPath en success
    - payloads estables y enriquecidos
    - paso explícito de viewContainer al render
    - compatibilidad función / objeto / adapters
@@ -21,10 +22,14 @@
    - preserva username resuelto y slug público
    - preserva query/hash públicos en render
    - no destruye /activate-account?token=...
+   - no destruye /activate-account/<token>
+   - no destruye /reset-password/confirm?token=...
+   - no destruye /reset-password/confirm/<token>
    - no resucita token tras scrubbedActivationToken
+   - no resucita token tras scrubbedResetToken
    - soporte hash-router /#/activate-account?token=...
+   - soporte hash-router /#/reset-password/confirm?token=...
    - métricas internas por flujo
-   - anti stale-render
    - cero throws accidentales
 ========================================================= */
 
@@ -49,6 +54,7 @@ import {
 ========================================================= */
 
 const ACTIVATION_PATH = "/activate-account";
+const RESET_CONFIRM_PATH = "/reset-password/confirm";
 
 const ACTIVATION_TOKEN_PARAM_NAMES = [
   "token",
@@ -57,6 +63,30 @@ const ACTIVATION_TOKEN_PARAM_NAMES = [
   "code",
   "t",
 ];
+
+const RESET_TOKEN_PARAM_NAMES = [
+  "token",
+  "resetToken",
+  "passwordResetToken",
+  "code",
+  "t",
+];
+
+const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
+  Object.freeze({
+    path: ACTIVATION_PATH,
+    stateScrubFlag: "scrubbedActivationToken",
+    windowKey: "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+    tokenNames: ACTIVATION_TOKEN_PARAM_NAMES,
+  }),
+
+  Object.freeze({
+    path: RESET_CONFIRM_PATH,
+    stateScrubFlag: "scrubbedResetToken",
+    windowKey: "__ONION_RESET_CONFIRM_INITIAL_URL__",
+    tokenNames: RESET_TOKEN_PARAM_NAMES,
+  }),
+]);
 
 /* =========================================================
    BASICS
@@ -110,15 +140,32 @@ function getBaseOrigin() {
   return "http://localhost";
 }
 
+function normalizePathnameOnly(pathname = "/") {
+  let value = String(pathname || "/")
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
+
+  if (!value) {
+    value = "/";
+  }
+
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
+
+  if (value.length > 1) {
+    value = value.replace(/\/+$/g, "") || "/";
+  }
+
+  return value;
+}
+
 /* =========================================================
    SAFE OPS
 ========================================================= */
 
-function safeEmit(
-  AppCore,
-  eventName,
-  payload = {}
-) {
+function safeEmit(AppCore, eventName, payload = {}) {
   try {
     AppCore?.events?.emit?.(
       eventName,
@@ -127,10 +174,7 @@ function safeEmit(
   } catch {}
 }
 
-function safeWarn(
-  AppCore,
-  ...args
-) {
+function safeWarn(AppCore, ...args) {
   try {
     AppCore?.utils?.warn?.(...args);
   } catch {}
@@ -140,10 +184,7 @@ function safeWarn(
   } catch {}
 }
 
-function safeError(
-  AppCore,
-  ...args
-) {
+function safeError(AppCore, ...args) {
   try {
     AppCore?.utils?.error?.(...args);
   } catch {}
@@ -153,61 +194,39 @@ function safeError(
   } catch {}
 }
 
-function safeLog(
-  AppCore,
-  ...args
-) {
+function safeLog(AppCore, ...args) {
   try {
     AppCore?.utils?.log?.(...args);
   } catch {}
 }
 
-function safeSetDocumentTitle(
-  setDocumentTitle,
-  title
-) {
+function safeSetDocumentTitle(setDocumentTitle, title) {
   try {
-    if (
-      typeof setDocumentTitle === "function"
-    ) {
+    if (typeof setDocumentTitle === "function") {
       setDocumentTitle(title);
     }
   } catch {}
 }
 
-function safeSetShellMode(
-  setShellMode,
-  route
-) {
+function safeSetShellMode(setShellMode, route) {
   try {
-    if (
-      typeof setShellMode === "function"
-    ) {
+    if (typeof setShellMode === "function") {
       setShellMode(route);
     }
   } catch {}
 }
 
-function safeClearDynamicContainers(
-  clearDynamicContainers
-) {
+function safeClearDynamicContainers(clearDynamicContainers) {
   try {
-    if (
-      typeof clearDynamicContainers === "function"
-    ) {
+    if (typeof clearDynamicContainers === "function") {
       clearDynamicContainers();
     }
   } catch {}
 }
 
-function safeSetActiveMenu(
-  setActiveMenu,
-  path
-) {
+function safeSetActiveMenu(setActiveMenu, path) {
   try {
-    if (
-      typeof setActiveMenu === "function"
-    ) {
+    if (typeof setActiveMenu === "function") {
       setActiveMenu(path);
     }
   } catch {}
@@ -217,11 +236,7 @@ function safeSetActiveMenu(
    FLOW METRICS
 ========================================================= */
 
-function emitFlowMetric(
-  AppCore,
-  flow = "unknown",
-  payload = {}
-) {
+function emitFlowMetric(AppCore, flow = "unknown", payload = {}) {
   safeEmit(
     AppCore,
     "router:render:flow",
@@ -244,9 +259,7 @@ export function getViewContainer(AppCore) {
   try {
     if (
       AppCore?.dom?.viewContainer &&
-      document.contains(
-        AppCore.dom.viewContainer
-      )
+      document.contains(AppCore.dom.viewContainer)
     ) {
       return AppCore.dom.viewContainer;
     }
@@ -258,10 +271,7 @@ export function getViewContainer(AppCore) {
     null;
 
   try {
-    if (
-      el &&
-      AppCore?.dom
-    ) {
+    if (el && AppCore?.dom) {
       AppCore.dom.viewContainer = el;
     }
   } catch {}
@@ -302,14 +312,9 @@ function getBrowserPublicPath(AppCore) {
   }
 
   try {
-    const pathname =
-      window.location.pathname || "/";
-
-    const search =
-      window.location.search || "";
-
-    const hash =
-      window.location.hash || "";
+    const pathname = window.location.pathname || "/";
+    const search = window.location.search || "";
+    const hash = window.location.hash || "";
 
     if (
       hash &&
@@ -337,9 +342,15 @@ function pathFromUrlLike(AppCore, value = "") {
     return "";
   }
 
+  if (isHashRouterPath(raw)) {
+    return normalizePath(
+      AppCore,
+      normalizeHashRouterPath(raw)
+    );
+  }
+
   try {
-    const parsed =
-      new URL(raw, getBaseOrigin());
+    const parsed = new URL(raw, getBaseOrigin());
 
     if (
       parsed.hash &&
@@ -358,76 +369,114 @@ function pathFromUrlLike(AppCore, value = "") {
   } catch {
     return normalizePath(
       AppCore,
-      raw
+      raw.startsWith("/") ? raw : `/${raw}`
     );
   }
 }
 
-function sameCanonicalRoute(
-  AppCore,
-  a = "/",
-  b = "/"
-) {
+function sameCanonicalRoute(AppCore, a = "/", b = "/") {
   return (
-    normalizeCanonicalPath(
-      AppCore,
-      a
-    ) ===
-    normalizeCanonicalPath(
-      AppCore,
-      b
-    )
+    normalizeCanonicalPath(AppCore, a) ===
+    normalizeCanonicalPath(AppCore, b)
   );
 }
 
-function isActivationPath(
-  AppCore,
-  path = ""
-) {
-  const canonical =
-    normalizeCanonicalPath(
-      AppCore,
-      path || "/"
+function getRouteConfigByPath(path = "") {
+  const clean = normalizePathnameOnly(path);
+
+  return PROTECTED_PUBLIC_TOKEN_ROUTES.find((item) => {
+    return (
+      clean === item.path ||
+      clean.startsWith(`${item.path}/`)
     );
+  }) || null;
+}
 
-  return (
-    canonical === ACTIVATION_PATH ||
-    canonical.startsWith(`${ACTIVATION_PATH}/`)
+function getRouteConfigFromUrl(AppCore, pathOrUrl = "") {
+  const path = pathFromUrlLike(AppCore, pathOrUrl);
+  const canonical = normalizeCanonicalPath(AppCore, path || "/");
+
+  return getRouteConfigByPath(canonical);
+}
+
+function isProtectedPublicTokenPath(AppCore, path = "") {
+  return Boolean(
+    getRouteConfigFromUrl(AppCore, path)
   );
 }
 
-function hasTokenInSearch(search = "") {
+function hasTokenInSearch(search = "", tokenNames = []) {
   try {
-    const params =
-      new URLSearchParams(search || "");
+    const params = new URLSearchParams(search || "");
 
-    return ACTIVATION_TOKEN_PARAM_NAMES.some(
-      (name) =>
-        Boolean(
-          safeText(
-            params.get(name),
-            ""
-          )
+    return tokenNames.some((name) => {
+      return Boolean(
+        safeText(
+          params.get(name),
+          ""
         )
-    );
+      );
+    });
   } catch {
     return false;
   }
 }
 
-function hasActivationToken(pathOrUrl = "") {
+function getPathToken(AppCore, pathOrUrl = "") {
+  const path = pathFromUrlLike(AppCore, pathOrUrl);
+
+  if (!path) {
+    return "";
+  }
+
+  const pathname = normalizePathnameOnly(
+    path.split("?")[0].split("#")[0] || "/"
+  );
+
+  for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
+    if (!pathname.startsWith(`${config.path}/`)) {
+      continue;
+    }
+
+    const token = pathname
+      .slice(`${config.path}/`.length)
+      .split("/")[0];
+
+    try {
+      return safeText(
+        decodeURIComponent(token || ""),
+        ""
+      );
+    } catch {
+      return safeText(token, "");
+    }
+  }
+
+  return "";
+}
+
+function hasProtectedToken(AppCore, pathOrUrl = "") {
   const raw = safeText(pathOrUrl, "");
 
   if (!raw) {
     return false;
   }
 
+  const config = getRouteConfigFromUrl(AppCore, raw);
+
+  if (!config) {
+    return false;
+  }
+
+  if (getPathToken(AppCore, raw)) {
+    return true;
+  }
+
   try {
-    const parsed =
-      new URL(raw, getBaseOrigin());
+    const parsed = new URL(raw, getBaseOrigin());
 
     if (
-      hasTokenInSearch(parsed.search)
+      hasTokenInSearch(parsed.search, config.tokenNames)
     ) {
       return true;
     }
@@ -436,27 +485,25 @@ function hasActivationToken(pathOrUrl = "") {
       parsed.hash &&
       parsed.hash.includes("?")
     ) {
-      const query =
-        parsed.hash.split("?").slice(1).join("?");
+      const query = parsed.hash.split("?").slice(1).join("?");
 
       return hasTokenInSearch(
-        query ? `?${query}` : ""
+        query ? `?${query}` : "",
+        config.tokenNames
       );
     }
 
     return false;
   } catch {
-    const suffix =
-      getSearchAndHash(raw);
+    const suffix = getSearchAndHash(raw);
 
     if (
       suffix &&
       suffix.includes("?")
     ) {
-      const query =
-        suffix.split("#")[0];
+      const query = suffix.split("#")[0];
 
-      if (hasTokenInSearch(query)) {
+      if (hasTokenInSearch(query, config.tokenNames)) {
         return true;
       }
     }
@@ -466,11 +513,11 @@ function hasActivationToken(pathOrUrl = "") {
       suffix.includes("#") &&
       suffix.includes("?")
     ) {
-      const query =
-        suffix.split("?").slice(1).join("?");
+      const query = suffix.split("?").slice(1).join("?");
 
       return hasTokenInSearch(
-        query ? `?${query}` : ""
+        query ? `?${query}` : "",
+        config.tokenNames
       );
     }
 
@@ -478,14 +525,14 @@ function hasActivationToken(pathOrUrl = "") {
   }
 }
 
-function isActivationTokenScrubbed() {
-  if (!isBrowser()) {
+function isTokenScrubbedForConfig(config = null) {
+  if (!isBrowser() || !config) {
     return false;
   }
 
   try {
     return Boolean(
-      window.history?.state?.scrubbedActivationToken
+      window.history?.state?.[config.stateScrubFlag]
     );
   } catch {
     return false;
@@ -503,6 +550,34 @@ function getInitialUrl() {
   );
 }
 
+function getStoredInitialUrlByConfig(config = null) {
+  if (!isBrowser() || !config?.windowKey) {
+    return "";
+  }
+
+  try {
+    return safeText(
+      window[config.windowKey],
+      ""
+    );
+  } catch {
+    return "";
+  }
+}
+
+function setStoredInitialUrlByConfig(config = null, value = "") {
+  if (!isBrowser() || !config?.windowKey) {
+    return false;
+  }
+
+  try {
+    window[config.windowKey] = value;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function getActivationInitialUrl() {
   if (!isBrowser()) {
     return "";
@@ -514,30 +589,43 @@ function getActivationInitialUrl() {
   );
 }
 
+function getResetConfirmInitialUrl() {
+  if (!isBrowser()) {
+    return "";
+  }
+
+  return safeText(
+    window.__ONION_RESET_CONFIRM_INITIAL_URL__,
+    ""
+  );
+}
+
 function captureInitialUrl(AppCore) {
   if (!isBrowser()) {
     return false;
   }
 
   try {
-    const href =
-      window.location.href;
+    const href = window.location.href;
 
     if (!window.__ONION_INITIAL_URL__) {
       window.__ONION_INITIAL_URL__ = href;
     }
 
-    const path =
-      pathFromUrlLike(
-        AppCore,
-        href
-      );
+    for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
+      const path = pathFromUrlLike(AppCore, href);
 
-    if (
-      isActivationPath(AppCore, path) &&
-      !window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__
-    ) {
-      window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__ = href;
+      const matchesRoute =
+        sameCanonicalRoute(AppCore, path, config.path) ||
+        normalizeCanonicalPath(AppCore, path).startsWith(`${config.path}/`);
+
+      if (
+        matchesRoute &&
+        hasProtectedToken(AppCore, href) &&
+        !getStoredInitialUrlByConfig(config)
+      ) {
+        setStoredInitialUrlByConfig(config, href);
+      }
     }
 
     return true;
@@ -546,128 +634,98 @@ function captureInitialUrl(AppCore) {
   }
 }
 
-function getProtectedActivationPath(AppCore) {
-  if (isActivationTokenScrubbed()) {
-    return "";
-  }
-
+function getProtectedPublicPath(AppCore) {
   captureInitialUrl(AppCore);
 
-  const activationInitialUrl =
-    getActivationInitialUrl();
+  const candidates = [];
 
-  if (
-    activationInitialUrl &&
-    isActivationPath(
-      AppCore,
-      pathFromUrlLike(
-        AppCore,
-        activationInitialUrl
-      )
-    ) &&
-    hasActivationToken(activationInitialUrl)
-  ) {
-    return pathFromUrlLike(
-      AppCore,
-      activationInitialUrl
-    );
+  for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
+    if (isTokenScrubbedForConfig(config)) {
+      continue;
+    }
+
+    const stored = getStoredInitialUrlByConfig(config);
+
+    if (stored) {
+      candidates.push(stored);
+    }
   }
 
-  const initialUrl =
-    getInitialUrl();
+  const initialUrl = getInitialUrl();
 
-  if (
-    initialUrl &&
-    isActivationPath(
-      AppCore,
-      pathFromUrlLike(
-        AppCore,
-        initialUrl
-      )
-    ) &&
-    hasActivationToken(initialUrl)
-  ) {
-    return pathFromUrlLike(
-      AppCore,
-      initialUrl
-    );
+  if (initialUrl) {
+    candidates.push(initialUrl);
   }
 
-  const browserPath =
-    getBrowserPublicPath(AppCore);
+  const browserPath = getBrowserPublicPath(AppCore);
 
-  if (
-    browserPath &&
-    isActivationPath(
-      AppCore,
-      browserPath
-    ) &&
-    hasActivationToken(browserPath)
-  ) {
-    return browserPath;
+  if (browserPath) {
+    candidates.push(browserPath);
+  }
+
+  for (const candidate of candidates) {
+    const config = getRouteConfigFromUrl(AppCore, candidate);
+
+    if (!config) {
+      continue;
+    }
+
+    if (isTokenScrubbedForConfig(config)) {
+      continue;
+    }
+
+    if (!hasProtectedToken(AppCore, candidate)) {
+      continue;
+    }
+
+    return pathFromUrlLike(AppCore, candidate);
   }
 
   return "";
 }
 
 /**
- * Protege query/hash del navegador o URL inicial si el render intenta
- * sincronizar la misma ruta sin query.
+ * Protege query/hash/path-token del navegador o URL inicial si el render intenta
+ * sincronizar la misma ruta sin token.
  *
- * Ejemplo:
+ * Ejemplos:
  *   initial:   /activate-account?token=abc
  *   candidate: /activate-account
  *   resultado: /activate-account?token=abc
+ *
+ *   initial:   /reset-password/confirm/abc
+ *   candidate: /reset-password/confirm
+ *   resultado: /reset-password/confirm/abc
  */
-function preservePublicContextForSameRoute(
-  AppCore,
-  candidatePath = "/"
-) {
-  const candidate =
-    normalizePath(
-      AppCore,
-      candidatePath || "/"
-    );
+function preservePublicContextForSameRoute(AppCore, candidatePath = "/") {
+  const candidate = normalizePath(
+    AppCore,
+    candidatePath || "/"
+  );
 
-  const protectedActivationPath =
-    getProtectedActivationPath(AppCore);
+  const protectedPath = getProtectedPublicPath(AppCore);
 
   if (
-    protectedActivationPath &&
-    isActivationPath(
-      AppCore,
-      candidate
-    ) &&
-    sameCanonicalRoute(
-      AppCore,
-      protectedActivationPath,
-      candidate
-    )
+    protectedPath &&
+    isProtectedPublicTokenPath(AppCore, candidate) &&
+    sameCanonicalRoute(AppCore, protectedPath, candidate)
   ) {
-    return protectedActivationPath;
+    return protectedPath;
   }
 
-  const browserPath =
-    getBrowserPublicPath(AppCore);
+  const browserPath = getBrowserPublicPath(AppCore);
 
   if (!browserPath) {
     return candidate;
   }
 
-  const candidateSuffix =
-    getSearchAndHash(candidate);
-
-  const browserSuffix =
-    getSearchAndHash(browserPath);
+  const candidateSuffix = getSearchAndHash(candidate);
+  const browserSuffix = getSearchAndHash(browserPath);
 
   if (
     browserSuffix &&
     !candidateSuffix &&
-    sameCanonicalRoute(
-      AppCore,
-      browserPath,
-      candidate
-    )
+    sameCanonicalRoute(AppCore, browserPath, candidate)
   ) {
     return browserPath;
   }
@@ -680,31 +738,27 @@ function buildCanonicalSourceWithSuffix(
   canonicalPath = "/",
   requestedPath = "/"
 ) {
-  const finalCanonical =
-    normalizeCanonicalPath(
-      AppCore,
-      canonicalPath ||
-        requestedPath ||
-        "/"
-    );
-
-  const normalizedRequested =
-    normalizePath(
-      AppCore,
+  const finalCanonical = normalizeCanonicalPath(
+    AppCore,
+    canonicalPath ||
       requestedPath ||
-        canonicalPath ||
-        finalCanonical
-    );
+      "/"
+  );
 
-  const requestedSuffix =
-    getSearchAndHash(
-      normalizedRequested
-    );
+  const normalizedRequested = normalizePath(
+    AppCore,
+    requestedPath ||
+      canonicalPath ||
+      finalCanonical
+  );
 
-  const canonicalSuffix =
-    getSearchAndHash(
-      canonicalPath || ""
-    );
+  const requestedSuffix = getSearchAndHash(
+    normalizedRequested
+  );
+
+  const canonicalSuffix = getSearchAndHash(
+    canonicalPath || ""
+  );
 
   const suffix =
     requestedSuffix ||
@@ -728,10 +782,7 @@ function resolveUsernameForPayload(
 ) {
   return (
     safeText(requestedUsername) ||
-    extractUsernameFromPath(
-      AppCore,
-      publicPath || ""
-    ) ||
+    extractUsernameFromPath(AppCore, publicPath || "") ||
     getCurrentResolvedUsername(AppCore) ||
     getCurrentUsername(AppCore) ||
     AppCore?.state?.user?.username ||
@@ -747,61 +798,47 @@ function resolvePublicPathForRoute({
   requestedUsername = null,
   route = null,
 } = {}) {
-  const sourceForPublic =
-    buildCanonicalSourceWithSuffix(
-      AppCore,
-      canonicalPath,
-      requestedPath
-    );
+  const sourceForPublic = buildCanonicalSourceWithSuffix(
+    AppCore,
+    canonicalPath,
+    requestedPath
+  );
 
-  const finalCanonical =
-    normalizeCanonicalPath(
-      AppCore,
-      sourceForPublic
-    );
+  const finalCanonical = normalizeCanonicalPath(
+    AppCore,
+    sourceForPublic
+  );
 
-  const username =
-    resolveUsernameForPayload(
-      AppCore,
-      requestedUsername,
+  const username = resolveUsernameForPayload(
+    AppCore,
+    requestedUsername,
+    requestedPath || sourceForPublic
+  );
+
+  const built = buildPublicPath(
+    AppCore,
+    getRoute || (() => route),
+    sourceForPublic,
+    {
+      username,
+      resolvedUsername: username,
+      fromPath: requestedPath || sourceForPublic,
+      publicPath: requestedPath || sourceForPublic,
+    }
+  );
+
+  const finalPublic = preservePublicContextForSameRoute(
+    AppCore,
+    built ||
+      sourceForPublic ||
       requestedPath ||
-        sourceForPublic
-    );
-
-  const built =
-    buildPublicPath(
-      AppCore,
-      getRoute || (() => route),
-      sourceForPublic,
-      {
-        username,
-        resolvedUsername:
-          username,
-        fromPath:
-          requestedPath ||
-          sourceForPublic,
-        publicPath:
-          requestedPath ||
-          sourceForPublic,
-      }
-    );
-
-  const finalPublic =
-    preservePublicContextForSameRoute(
-      AppCore,
-      built ||
-        sourceForPublic ||
-        requestedPath ||
-        finalCanonical
-    );
+      finalCanonical
+  );
 
   return {
-    canonicalPath:
-      finalCanonical,
-    publicPath:
-      finalPublic,
-    username:
-      username || null,
+    canonicalPath: finalCanonical,
+    publicPath: finalPublic,
+    username: username || null,
   };
 }
 
@@ -828,20 +865,15 @@ export function buildRenderPayload({
     publicPath,
     username,
     route,
-    found:
-      Boolean(found),
-    forbidden:
-      Boolean(forbidden),
+    found: Boolean(found),
+    forbidden: Boolean(forbidden),
     redirectedFrom,
     options,
     ts: Date.now(),
   };
 }
 
-export function emitBeforeRender(
-  AppCore,
-  payload = {}
-) {
+export function emitBeforeRender(AppCore, payload = {}) {
   safeEmit(
     AppCore,
     "router:before-render",
@@ -849,10 +881,7 @@ export function emitBeforeRender(
   );
 }
 
-export function emitRendered(
-  AppCore,
-  payload = {}
-) {
+export function emitRendered(AppCore, payload = {}) {
   safeEmit(
     AppCore,
     "router:rendered",
@@ -869,31 +898,26 @@ export function syncRouteState(
   canonicalPath = "/",
   publicPath = null
 ) {
-  const finalCanonical =
-    normalizeCanonicalPath(
-      AppCore,
-      canonicalPath
-    );
+  const finalCanonical = normalizeCanonicalPath(
+    AppCore,
+    canonicalPath
+  );
 
-  const candidatePublic =
-    normalizePath(
-      AppCore,
-      publicPath ||
-        finalCanonical
-    );
+  const candidatePublic = normalizePath(
+    AppCore,
+    publicPath || finalCanonical
+  );
 
-  const finalPublic =
-    preservePublicContextForSameRoute(
-      AppCore,
-      candidatePublic
-    );
+  const finalPublic = preservePublicContextForSameRoute(
+    AppCore,
+    candidatePublic
+  );
 
-  const username =
-    resolveUsernameForPayload(
-      AppCore,
-      null,
-      finalPublic
-    );
+  const username = resolveUsernameForPayload(
+    AppCore,
+    null,
+    finalPublic
+  );
 
   try {
     AppCore?.setRoute?.(
@@ -909,20 +933,15 @@ export function syncRouteState(
 
   try {
     AppCore?.setState?.({
-      route:
-        finalCanonical,
-      publicPath:
-        finalPublic,
-      currentResolvedUsername:
-        username,
+      route: finalCanonical,
+      publicPath: finalPublic,
+      currentResolvedUsername: username,
     });
   } catch {}
 
   return {
-    canonicalPath:
-      finalCanonical,
-    publicPath:
-      finalPublic,
+    canonicalPath: finalCanonical,
+    publicPath: finalPublic,
     username,
   };
 }
@@ -932,14 +951,11 @@ export function applyResolvedRouteState(
   canonicalPath,
   fallbackPublicPath
 ) {
-  const protectedActivationPath =
-    getProtectedActivationPath(AppCore);
+  const protectedPublicPath = getProtectedPublicPath(AppCore);
 
   const publicPath =
-    protectedActivationPath ||
-    getResolvedPublicPath(
-      fallbackPublicPath
-    );
+    protectedPublicPath ||
+    getResolvedPublicPath(fallbackPublicPath);
 
   return syncRouteState(
     AppCore,
@@ -963,60 +979,44 @@ export function buildRouteRenderContext({
   found = true,
   forbidden = false,
 } = {}) {
-  const finalPublicPath =
-    preservePublicContextForSameRoute(
-      AppCore,
-      publicPath ||
-        requestedPath ||
-        canonicalPath ||
-        "/"
-    );
-
-  const finalCanonicalPath =
-    normalizeCanonicalPath(
-      AppCore,
+  const finalPublicPath = preservePublicContextForSameRoute(
+    AppCore,
+    publicPath ||
+      requestedPath ||
       canonicalPath ||
-        finalPublicPath
-    );
+      "/"
+  );
 
-  const username =
-    resolveUsernameForPayload(
-      AppCore,
-      requestedUsername,
+  const finalCanonicalPath = normalizeCanonicalPath(
+    AppCore,
+    canonicalPath ||
       finalPublicPath
-    );
+  );
+
+  const username = resolveUsernameForPayload(
+    AppCore,
+    requestedUsername,
+    finalPublicPath
+  );
 
   return Object.freeze({
     AppCore,
     route,
 
-    path:
-      finalPublicPath,
-
-    requestedPath:
-      finalPublicPath,
-
-    canonicalPath:
-      finalCanonicalPath,
-
-    publicPath:
-      finalPublicPath,
+    path: finalPublicPath,
+    requestedPath: finalPublicPath,
+    canonicalPath: finalCanonicalPath,
+    publicPath: finalPublicPath,
 
     username,
-
-    requestedUsername:
-      username,
+    requestedUsername: username,
 
     redirectedFrom,
 
-    found:
-      Boolean(found),
+    found: Boolean(found),
+    forbidden: Boolean(forbidden),
 
-    forbidden:
-      Boolean(forbidden),
-
-    viewContainer:
-      getViewContainer(AppCore),
+    viewContainer: getViewContainer(AppCore),
   });
 }
 
@@ -1038,9 +1038,7 @@ async function runRouteRender(
     return null;
   }
 
-  if (
-    !isFunction(route?.render)
-  ) {
+  if (!isFunction(route?.render)) {
     safeWarn(
       AppCore,
       "[Router] ruta sin render():",
@@ -1061,135 +1059,109 @@ async function runRouteRender(
    INTERNAL VIEWS
 ========================================================= */
 
-export function renderGenericView(
-  AppCore,
-  route
-) {
-  const view =
-    getViewContainer(AppCore);
+export function renderGenericView(AppCore, route) {
+  const view = getViewContainer(AppCore);
 
   if (!view) {
     return null;
   }
 
-  const canonical =
-    AppCore?.state?.route || "/";
-
-  const publicPath =
-    getCurrentPublicPath(AppCore);
-
-  const username =
-    getCurrentResolvedUsername(AppCore);
+  const canonical = AppCore?.state?.route || "/";
+  const publicPath = getCurrentPublicPath(AppCore);
+  const username = getCurrentResolvedUsername(AppCore);
 
   view.innerHTML = `
 <section class="content-wrapper">
-<div class="panel-block" style="padding:24px;">
-<div style="display:grid;gap:14px;">
-<h2 style="margin:0;">${escapeHtml(AppCore, route?.title || "Vista")}</h2>
-<p style="margin:0;color:var(--text-dim);">
-Vista conectada al router.
-</p>
-<div><strong>Canonical:</strong> ${escapeHtml(AppCore, canonical)}</div>
-<div><strong>Public:</strong> ${escapeHtml(AppCore, publicPath)}</div>
-<div><strong>User:</strong> ${escapeHtml(AppCore, username || "—")}</div>
-</div>
-</div>
+  <div class="panel-block" style="padding:24px;">
+    <div style="display:grid;gap:14px;">
+      <h2 style="margin:0;">${escapeHtml(AppCore, route?.title || "Vista")}</h2>
+      <p style="margin:0;color:var(--text-dim);">
+        Vista conectada al router.
+      </p>
+      <div><strong>Canonical:</strong> ${escapeHtml(AppCore, canonical)}</div>
+      <div><strong>Public:</strong> ${escapeHtml(AppCore, publicPath)}</div>
+      <div><strong>User:</strong> ${escapeHtml(AppCore, username || "—")}</div>
+    </div>
+  </div>
 </section>`;
 
   return null;
 }
 
-export function renderForbiddenView(
-  AppCore,
-  getRoute
-) {
-  const view =
-    getViewContainer(AppCore);
+export function renderForbiddenView(AppCore, getRoute) {
+  const view = getViewContainer(AppCore);
 
   if (!view) {
     return null;
   }
 
-  const href =
-    getDefaultHomeTarget(
-      AppCore,
-      getRoute
-    );
+  const href = getDefaultHomeTarget(
+    AppCore,
+    getRoute
+  );
 
   view.innerHTML = `
 <section class="content-wrapper">
-<div class="panel-block" style="padding:24px;">
-<h2 style="margin:0 0 12px 0;">Acceso denegado</h2>
-<p style="margin:0 0 14px 0;color:var(--text-dim);">
-No tienes permisos para acceder.
-</p>
-<a href="${escapeHtml(AppCore, href)}" data-spa>Volver</a>
-</div>
+  <div class="panel-block" style="padding:24px;">
+    <h2 style="margin:0 0 12px 0;">Acceso denegado</h2>
+    <p style="margin:0 0 14px 0;color:var(--text-dim);">
+      No tienes permisos para acceder.
+    </p>
+    <a href="${escapeHtml(AppCore, href)}" data-spa>Volver</a>
+  </div>
 </section>`;
 
   return null;
 }
 
-export function renderNotFoundView(
-  AppCore,
-  requestedPath,
-  getRoute
-) {
-  const view =
-    getViewContainer(AppCore);
+export function renderNotFoundView(AppCore, requestedPath, getRoute) {
+  const view = getViewContainer(AppCore);
 
   if (!view) {
     return null;
   }
 
-  const href =
-    getDefaultHomeTarget(
-      AppCore,
-      getRoute
-    );
+  const href = getDefaultHomeTarget(
+    AppCore,
+    getRoute
+  );
 
   view.innerHTML = `
 <section class="content-wrapper">
-<div class="panel-block" style="padding:24px;">
-<h2 style="margin:0 0 12px 0;">404</h2>
-<p style="margin:0 0 14px 0;color:var(--text-dim);">
-Ruta no encontrada:
-${escapeHtml(AppCore, requestedPath)}
-</p>
-<a href="${escapeHtml(AppCore, href)}" data-spa>Inicio</a>
-</div>
+  <div class="panel-block" style="padding:24px;">
+    <h2 style="margin:0 0 12px 0;">404</h2>
+    <p style="margin:0 0 14px 0;color:var(--text-dim);">
+      Ruta no encontrada:
+      ${escapeHtml(AppCore, requestedPath)}
+    </p>
+    <a href="${escapeHtml(AppCore, href)}" data-spa>Inicio</a>
+  </div>
 </section>`;
 
   return null;
 }
 
-export function renderRuntimeErrorView(
-  AppCore,
-  error,
-  getRoute
-) {
-  const view =
-    getViewContainer(AppCore);
+export function renderRuntimeErrorView(AppCore, error, getRoute) {
+  const view = getViewContainer(AppCore);
 
   if (!view) {
     return null;
   }
 
-  const href =
-    getDefaultHomeTarget(
-      AppCore,
-      getRoute
-    );
+  const href = getDefaultHomeTarget(
+    AppCore,
+    getRoute
+  );
 
   view.innerHTML = `
 <section class="content-wrapper">
-<div class="panel-block" style="padding:24px;">
-<h2 style="margin:0 0 12px 0;">Error de navegación</h2>
-<p style="margin:0 0 14px 0;color:var(--text-dim);">
-${escapeHtml(AppCore, error?.message || "Error inesperado")}
-</p>
-<a href="${escapeHtml(AppCore, href)}" data-spa>Recuperar</a>
-</div>
+  <div class="panel-block" style="padding:24px;">
+    <h2 style="margin:0 0 12px 0;">Error de navegación</h2>
+    <p style="margin:0 0 14px 0;color:var(--text-dim);">
+      ${escapeHtml(AppCore, error?.message || "Error inesperado")}
+    </p>
+    <a href="${escapeHtml(AppCore, href)}" data-spa>Recuperar</a>
+  </div>
 </section>`;
 
   return null;
@@ -1209,25 +1181,23 @@ export async function renderRouteSuccess({
   setDocumentTitle,
   getRoute,
 } = {}) {
-  const startedAt =
-    nowMs();
+  const startedAt = nowMs();
 
-  const resolved =
-    resolvePublicPathForRoute({
-      AppCore,
-      getRoute,
-      route,
-      canonicalPath,
-      requestedPath,
-      requestedUsername,
-    });
+  const resolved = resolvePublicPathForRoute({
+    AppCore,
+    getRoute,
+    route,
+    canonicalPath,
+    requestedPath,
+    requestedUsername,
+  });
 
-  const synced =
-    syncRouteState(
-      AppCore,
-      resolved.canonicalPath,
-      resolved.publicPath
-    );
+  /*
+    IMPORTANTE:
+    No hacemos syncRouteState() aquí.
+    El Router principal ya sincroniza route/publicPath después de recibir la view.
+    Esto evita doble app:route:change y microparpadeos post-login.
+  */
 
   safeSetShellMode(
     setShellMode,
@@ -1241,68 +1211,46 @@ export async function renderRouteSuccess({
       "Onion"
   );
 
-  const ctx =
-    buildRouteRenderContext({
-      AppCore,
-      route,
-      requestedPath:
-        synced.publicPath,
-      canonicalPath:
-        synced.canonicalPath,
-      requestedUsername:
-        synced.username,
-      publicPath:
-        synced.publicPath,
-    });
+  const ctx = buildRouteRenderContext({
+    AppCore,
+    route,
+    requestedPath: resolved.publicPath,
+    canonicalPath: resolved.canonicalPath,
+    requestedUsername: resolved.username,
+    publicPath: resolved.publicPath,
+  });
 
   let view = null;
 
-  if (
-    isFunction(route?.render)
-  ) {
-    view =
-      await runRouteRender(
-        AppCore,
-        route,
-        ctx.viewContainer,
-        ctx
-      );
+  if (isFunction(route?.render)) {
+    view = await runRouteRender(
+      AppCore,
+      route,
+      ctx.viewContainer,
+      ctx
+    );
   } else {
-    view =
-      renderGenericView(
-        AppCore,
-        route
-      );
+    view = renderGenericView(
+      AppCore,
+      route
+    );
   }
 
-  emitRendered(
-    AppCore,
-    {
-      path:
-        synced.publicPath,
-      requestedPath:
-        ctx.requestedPath,
-      canonicalPath:
-        synced.canonicalPath,
-      publicPath:
-        synced.publicPath,
-      username:
-        synced.username,
-      found: true,
-      route,
-    }
-  );
+  /*
+    IMPORTANTE:
+    No emitimos router:rendered aquí en success.
+    Lo emite src/router/index.js cuando termina de syncar estado.
+    Esto evita doble evento rendered.
+  */
 
   emitFlowMetric(
     AppCore,
     "success",
     {
-      route:
-        route?.path || null,
-      durationMs:
-        Math.round(
-          nowMs() - startedAt
-        ),
+      route: route?.path || null,
+      canonicalPath: resolved.canonicalPath,
+      publicPath: resolved.publicPath,
+      durationMs: Math.round(nowMs() - startedAt),
     }
   );
 
@@ -1310,48 +1258,50 @@ export async function renderRouteSuccess({
     AppCore,
     "[RouterRender] success",
     {
-      route:
-        route?.path || null,
-      canonicalPath:
-        synced.canonicalPath,
-      publicPath:
-        synced.publicPath,
+      route: route?.path || null,
+      canonicalPath: resolved.canonicalPath,
+      publicPath: resolved.publicPath,
     }
   );
 
   return view || null;
 }
 
-export function renderRouteForbidden(
-  args = {}
-) {
-  const startedAt =
-    nowMs();
+export function renderRouteForbidden(args = {}) {
+  const startedAt = nowMs();
 
   renderForbiddenView(
     args.AppCore,
     args.getRoute
   );
 
+  emitRendered(
+    args.AppCore,
+    {
+      path: args.requestedPath,
+      requestedPath: args.requestedPath,
+      canonicalPath: args.canonicalPath,
+      publicPath: args.requestedPath,
+      username: args.requestedUsername || null,
+      found: true,
+      forbidden: true,
+      route: args.route || null,
+    }
+  );
+
   emitFlowMetric(
     args.AppCore,
     "forbidden",
     {
-      durationMs:
-        Math.round(
-          nowMs() - startedAt
-        ),
+      durationMs: Math.round(nowMs() - startedAt),
     }
   );
 
   return null;
 }
 
-export function renderRouteNotFound(
-  args = {}
-) {
-  const startedAt =
-    nowMs();
+export function renderRouteNotFound(args = {}) {
+  const startedAt = nowMs();
 
   renderNotFoundView(
     args.AppCore,
@@ -1359,36 +1309,35 @@ export function renderRouteNotFound(
     args.getRoute
   );
 
+  /*
+    No emitimos router:rendered aquí.
+    src/router/index.js ya lo emite en flujo 404.
+  */
+
   emitFlowMetric(
     args.AppCore,
     "not-found",
     {
-      durationMs:
-        Math.round(
-          nowMs() - startedAt
-        ),
+      durationMs: Math.round(nowMs() - startedAt),
     }
   );
 
   return null;
 }
 
-export async function renderLoginRedirect(
-  args = {}
-) {
-  const routeNames =
-    getRouteNames(args.AppCore);
+export async function renderLoginRedirect(args = {}) {
+  const startedAt = nowMs();
 
-  const loginUrl =
-    buildLoginUrl(
-      args.AppCore,
-      args.canonicalPath
-    );
+  const routeNames = getRouteNames(args.AppCore);
 
-  const route =
-    args.getRoute?.(
-      routeNames.LOGIN
-    );
+  const loginUrl = buildLoginUrl(
+    args.AppCore,
+    args.canonicalPath
+  );
+
+  const route = args.getRoute?.(
+    routeNames.LOGIN
+  );
 
   safeClearDynamicContainers(
     args.clearDynamicContainers
@@ -1409,32 +1358,23 @@ export async function renderLoginRedirect(
     route?.title || "Login"
   );
 
-  const synced =
-    syncRouteState(
-      args.AppCore,
-      routeNames.LOGIN,
-      loginUrl
-    );
+  const publicPath = preservePublicContextForSameRoute(
+    args.AppCore,
+    loginUrl
+  );
 
-  if (
-    isFunction(route?.render)
-  ) {
+  if (isFunction(route?.render)) {
     await runRouteRender(
       args.AppCore,
       route,
       getViewContainer(args.AppCore),
       buildRouteRenderContext({
-        AppCore:
-          args.AppCore,
+        AppCore: args.AppCore,
         route,
-        requestedPath:
-          synced.publicPath,
-        canonicalPath:
-          routeNames.LOGIN,
-        publicPath:
-          synced.publicPath,
-        redirectedFrom:
-          args.canonicalPath,
+        requestedPath: publicPath,
+        canonicalPath: routeNames.LOGIN,
+        publicPath,
+        redirectedFrom: args.canonicalPath,
       })
     );
   }
@@ -1442,40 +1382,63 @@ export async function renderLoginRedirect(
   emitRendered(
     args.AppCore,
     {
-      path:
-        synced.publicPath,
-      requestedPath:
-        synced.publicPath,
-      canonicalPath:
-        routeNames.LOGIN,
-      publicPath:
-        synced.publicPath,
+      path: publicPath,
+      requestedPath: publicPath,
+      canonicalPath: routeNames.LOGIN,
+      publicPath,
       found: true,
       route,
+      redirectedFrom: args.canonicalPath || null,
+    }
+  );
+
+  emitFlowMetric(
+    args.AppCore,
+    "login-redirect",
+    {
+      durationMs: Math.round(nowMs() - startedAt),
     }
   );
 
   return null;
 }
 
-export function renderRouteRuntimeError(
-  args = {}
-) {
+export function renderRouteRuntimeError(args = {}) {
+  const startedAt = nowMs();
+
   renderRuntimeErrorView(
     args.AppCore,
     args.error,
     args.getRoute
   );
 
+  emitRendered(
+    args.AppCore,
+    {
+      path: args.requestedPath,
+      requestedPath: args.requestedPath,
+      canonicalPath: args.canonicalPath,
+      publicPath: args.requestedPath,
+      username: args.requestedUsername || null,
+      found: true,
+      forbidden: false,
+      route: args.route || null,
+    }
+  );
+
   emitFlowMetric(
     args.AppCore,
     "runtime-error",
     {
-      error:
-        safeText(
-          args.error?.message
-        ),
+      error: safeText(args.error?.message),
+      durationMs: Math.round(nowMs() - startedAt),
     }
+  );
+
+  safeError(
+    args.AppCore,
+    "[RouterRender] runtime-error",
+    args.error
   );
 
   return null;
@@ -1487,22 +1450,26 @@ export function renderRouteRuntimeError(
 
 export function getRenderSnapshot(AppCore) {
   return {
-    browserPublicPath:
-      getBrowserPublicPath(AppCore),
+    browserPublicPath: getBrowserPublicPath(AppCore),
 
-    currentPublicPath:
-      getCurrentPublicPath(AppCore),
+    currentPublicPath: getCurrentPublicPath(AppCore),
 
-    protectedActivationPath:
-      getProtectedActivationPath(AppCore),
+    protectedPublicPath: getProtectedPublicPath(AppCore),
 
-    initialUrl:
-      getInitialUrl(),
+    initialUrl: getInitialUrl(),
 
-    activationInitialUrl:
-      getActivationInitialUrl(),
+    activationInitialUrl: getActivationInitialUrl(),
+
+    resetConfirmInitialUrl: getResetConfirmInitialUrl(),
 
     activationTokenScrubbed:
-      isActivationTokenScrubbed(),
+      isBrowser()
+        ? Boolean(window.history?.state?.scrubbedActivationToken)
+        : false,
+
+    resetTokenScrubbed:
+      isBrowser()
+        ? Boolean(window.history?.state?.scrubbedResetToken)
+        : false,
   };
 }

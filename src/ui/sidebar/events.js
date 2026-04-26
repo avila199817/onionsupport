@@ -295,6 +295,14 @@ function shouldIgnoreHiddenTarget(target = null) {
     interactiveParent &&
     interactiveParent.contains(ariaHidden)
   ) {
+    /*
+      Si el propio control interactivo está aria-hidden,
+      NO debemos dejar pasar el click.
+    */
+    if (ariaHidden === interactiveParent) {
+      return true;
+    }
+
     return false;
   }
 

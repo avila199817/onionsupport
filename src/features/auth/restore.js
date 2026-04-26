@@ -24,6 +24,14 @@
    - tolerancia backend heterogéneo
    - snapshot consistente
    - no romper boot aunque backend falle
+
+   FIX 10/10:
+   - restore no marca sesión autenticada sin token + user válido
+   - refresh token-only queda como token provisional y fuerza /me
+   - refresh user-only sólo se acepta si ya hay token válido
+   - no reutiliza AppCore.state.user como fallback tras refresh fallido
+   - limpia sesión fantasma preservando rutas públicas técnicas
+   - evita avatar/dashboard cacheado después de 401/403
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -73,6 +81,7 @@ const runtimeSession = {
 
   lastCheckAt: 0,
   lastRefreshAt: 0,
+  lastRestoreAt: 0,
 
   refreshFailCount: 0,
   refreshBlockedUntil: 0,
@@ -101,6 +110,20 @@ const ACTIVATION_TOKEN_PARAM_NAMES = [
   "t",
 ];
 
+const AUTH_FAILURE_CODES = new Set([
+  "INVALID_CREDENTIALS",
+  "MISSING_CREDENTIALS",
+  "ACCOUNT_TEMPORARILY_LOCKED",
+  "ACCOUNT_DISABLED",
+  "USER_DISABLED",
+  "UNAUTHORIZED",
+  "FORBIDDEN",
+  "TOKEN_INVALID",
+  "INVALID_TOKEN",
+  "SESSION_EXPIRED",
+  "INVALID_LOGIN_SESSION",
+]);
+
 /* =========================================================
    BASICS
 ========================================================= */
@@ -110,6 +133,18 @@ function isBrowser() {
     typeof window !== "undefined" &&
     typeof document !== "undefined"
   );
+}
+
+function isPlainObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  );
+}
+
+function safeObject(value) {
+  return isPlainObject(value) ? value : {};
 }
 
 function safeNumber(
@@ -142,6 +177,32 @@ function safeText(
 
 function safeBool(value) {
   return value === true;
+}
+
+function pickFirst(...values) {
+  for (const value of values) {
+    if (value === null || value === undefined) {
+      continue;
+    }
+
+    if (
+      typeof value === "string" &&
+      value.trim() === ""
+    ) {
+      continue;
+    }
+
+    return value;
+  }
+
+  return null;
+}
+
+function pickFirstText(...values) {
+  return safeText(
+    pickFirst(...values),
+    ""
+  );
 }
 
 function getBaseOrigin() {
@@ -227,6 +288,446 @@ function hasApiPost() {
 }
 
 /* =========================================================
+   SESSION VALIDATION
+========================================================= */
+
+function hasUsableToken(token = "") {
+  return Boolean(
+    safeText(token, "")
+  );
+}
+
+function hasUsableUser(user = {}) {
+  if (!isPlainObject(user)) {
+    return false;
+  }
+
+  return Boolean(
+    safeText(user.id, "") ||
+      safeText(user.userId, "") ||
+      safeText(user.user_id, "") ||
+      safeText(user._id, "") ||
+      safeText(user.uid, "") ||
+      safeText(user.username, "") ||
+      safeText(user.userName, "") ||
+      safeText(user.user_name, "") ||
+      safeText(user.email, "") ||
+      safeText(user.mail, "") ||
+      safeText(user.phone, "") ||
+      safeText(user.telefono, "")
+  );
+}
+
+function getCurrentToken() {
+  const state =
+    getState();
+
+  return safeText(
+    pickFirst(
+      state.token,
+      state.accessToken,
+      state.session?.token,
+      state.session?.accessToken
+    ),
+    ""
+  );
+}
+
+function getCurrentUser() {
+  const state =
+    getState();
+
+  return (
+    state.user ||
+    state.session?.user ||
+    null
+  );
+}
+
+function hasCompleteAuthState() {
+  return Boolean(
+    hasUsableToken(getCurrentToken()) &&
+      hasUsableUser(getCurrentUser())
+  );
+}
+
+function getResponseStatus(response = null) {
+  const raw =
+    safeObject(response);
+
+  const data =
+    safeObject(raw.data);
+
+  const payload =
+    safeObject(raw.payload);
+
+  const result =
+    safeObject(raw.result);
+
+  const body =
+    safeObject(raw.body);
+
+  const nestedResponse =
+    safeObject(raw.response);
+
+  const responseData =
+    safeObject(nestedResponse.data);
+
+  return pickFirst(
+    raw.status,
+    raw.statusCode,
+    raw.status_code,
+
+    data.status,
+    data.statusCode,
+    data.status_code,
+
+    payload.status,
+    payload.statusCode,
+    payload.status_code,
+
+    result.status,
+    result.statusCode,
+    result.status_code,
+
+    body.status,
+    body.statusCode,
+    body.status_code,
+
+    nestedResponse.status,
+    nestedResponse.statusCode,
+    nestedResponse.status_code,
+
+    responseData.status,
+    responseData.statusCode,
+    responseData.status_code
+  );
+}
+
+function getResponseCode(response = null) {
+  const raw =
+    safeObject(response);
+
+  const data =
+    safeObject(raw.data);
+
+  const payload =
+    safeObject(raw.payload);
+
+  const result =
+    safeObject(raw.result);
+
+  const body =
+    safeObject(raw.body);
+
+  const nestedResponse =
+    safeObject(raw.response);
+
+  const responseData =
+    safeObject(nestedResponse.data);
+
+  return pickFirstText(
+    raw.code,
+    raw.error,
+    raw.errorCode,
+    raw.error_code,
+
+    data.code,
+    data.error,
+    data.errorCode,
+    data.error_code,
+
+    payload.code,
+    payload.error,
+    payload.errorCode,
+    payload.error_code,
+
+    result.code,
+    result.error,
+    result.errorCode,
+    result.error_code,
+
+    body.code,
+    body.error,
+    body.errorCode,
+    body.error_code,
+
+    nestedResponse.code,
+    nestedResponse.error,
+    nestedResponse.errorCode,
+    nestedResponse.error_code,
+
+    responseData.code,
+    responseData.error,
+    responseData.errorCode,
+    responseData.error_code
+  );
+}
+
+function getResponseMessage(response = null) {
+  const raw =
+    safeObject(response);
+
+  const data =
+    safeObject(raw.data);
+
+  const payload =
+    safeObject(raw.payload);
+
+  const result =
+    safeObject(raw.result);
+
+  const body =
+    safeObject(raw.body);
+
+  const nestedResponse =
+    safeObject(raw.response);
+
+  const responseData =
+    safeObject(nestedResponse.data);
+
+  return pickFirstText(
+    raw.message,
+    raw.mensaje,
+    raw.errorMessage,
+    raw.error_message,
+
+    data.message,
+    data.mensaje,
+    data.errorMessage,
+    data.error_message,
+
+    payload.message,
+    payload.mensaje,
+    payload.errorMessage,
+    payload.error_message,
+
+    result.message,
+    result.mensaje,
+    result.errorMessage,
+    result.error_message,
+
+    body.message,
+    body.mensaje,
+    body.errorMessage,
+    body.error_message,
+
+    nestedResponse.message,
+    nestedResponse.mensaje,
+    nestedResponse.errorMessage,
+    nestedResponse.error_message,
+
+    responseData.message,
+    responseData.mensaje,
+    responseData.errorMessage,
+    responseData.error_message
+  );
+}
+
+function isExplicitAuthFailure(response = null) {
+  if (!response || !isPlainObject(response)) {
+    return false;
+  }
+
+  const raw =
+    safeObject(response);
+
+  const data =
+    safeObject(raw.data);
+
+  const payload =
+    safeObject(raw.payload);
+
+  const result =
+    safeObject(raw.result);
+
+  const body =
+    safeObject(raw.body);
+
+  const nestedResponse =
+    safeObject(raw.response);
+
+  const responseData =
+    safeObject(nestedResponse.data);
+
+  const status =
+    Number(getResponseStatus(response) || 0);
+
+  if (
+    Number.isFinite(status) &&
+    status >= 400
+  ) {
+    return true;
+  }
+
+  const code =
+    safeText(
+      getResponseCode(response),
+      ""
+    ).toUpperCase();
+
+  if (
+    code &&
+    AUTH_FAILURE_CODES.has(code)
+  ) {
+    return true;
+  }
+
+  if (
+    raw.ok === false ||
+    raw.success === false ||
+    data.ok === false ||
+    data.success === false ||
+    payload.ok === false ||
+    payload.success === false ||
+    result.ok === false ||
+    result.success === false ||
+    body.ok === false ||
+    body.success === false ||
+    nestedResponse.ok === false ||
+    nestedResponse.success === false ||
+    responseData.ok === false ||
+    responseData.success === false
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function createRestoreError(
+  message = "No se pudo restaurar la sesión.",
+  {
+    status = 401,
+    code = "INVALID_RESTORE_SESSION",
+    response = null,
+  } = {}
+) {
+  const error =
+    new Error(message);
+
+  error.status =
+    status;
+
+  error.data = {
+    code,
+    message,
+    status,
+  };
+
+  error.response =
+    response;
+
+  error.raw =
+    response;
+
+  return error;
+}
+
+function normalizeAuthResponse(response = null) {
+  if (
+    isExplicitAuthFailure(response)
+  ) {
+    return {
+      ok: false,
+      explicitFailure: true,
+      token: "",
+      user: null,
+      refreshToken: "",
+      sessionData: null,
+      status:
+        getResponseStatus(response) ||
+        "auth_failed",
+      code:
+        getResponseCode(response) ||
+        "AUTH_FAILED",
+      message:
+        getResponseMessage(response) ||
+        "No se pudo restaurar la sesión.",
+      response,
+    };
+  }
+
+  const token =
+    safeText(
+      extractToken(response),
+      ""
+    );
+
+  const user =
+    extractUser(response);
+
+  const refreshToken =
+    safeText(
+      extractRefreshToken(response),
+      ""
+    );
+
+  const sessionData =
+    normalizeSessionPayload(response);
+
+  return {
+    ok:
+      Boolean(
+        hasUsableToken(token) ||
+          hasUsableUser(user)
+      ),
+
+    explicitFailure: false,
+
+    token,
+    user:
+      hasUsableUser(user)
+        ? user
+        : null,
+
+    refreshToken,
+    sessionData,
+
+    status:
+      getResponseStatus(response) ||
+      (
+        token && user
+          ? "authenticated"
+          : token
+            ? "token_only"
+            : user
+              ? "user_only"
+              : ""
+      ),
+
+    code:
+      getResponseCode(response) || "",
+
+    message:
+      getResponseMessage(response) || "",
+
+    response,
+  };
+}
+
+function assertNoExplicitFailure(auth = {}) {
+  if (
+    auth.explicitFailure ||
+    auth.ok === false
+  ) {
+    throw createRestoreError(
+      auth.message ||
+        "No se pudo restaurar la sesión.",
+      {
+        status:
+          Number(auth.status) || 401,
+        code:
+          auth.code ||
+          "AUTH_RESTORE_FAILED",
+        response:
+          auth.response,
+      }
+    );
+  }
+}
+
+/* =========================================================
    SESSION / OPTIONS RESOLUTION
 ========================================================= */
 
@@ -268,16 +769,31 @@ function resolveRestoreArgs(input = {}) {
   return {
     session: runtimeSession,
     options: {
+      ...value,
+
       silent:
         Boolean(value.silent),
+
       skipNavigation:
         Boolean(value.skipNavigation),
+
       publicRoute:
         Boolean(value.publicRoute),
+
       preserveCurrentRoute:
         Boolean(value.preserveCurrentRoute),
+
       preserveRoute:
         Boolean(value.preserveRoute),
+
+      route:
+        value.route,
+
+      publicPath:
+        value.publicPath,
+
+      activationBoot:
+        Boolean(value.activationBoot),
     },
   };
 }
@@ -473,6 +989,28 @@ function hasTokenInSearch(search = "") {
   }
 }
 
+function getCanonicalPathFromAny(value = "/") {
+  return stripSearchAndHash(
+    pathFromUrlLike(value) || value || "/"
+  );
+}
+
+function isPublicTechnicalCanonical(path = "/") {
+  return PUBLIC_TECHNICAL_ROUTES.has(
+    stripSearchAndHash(path)
+  );
+}
+
+function isActivationCanonical(path = "/") {
+  const clean =
+    stripSearchAndHash(path);
+
+  return (
+    clean === ACTIVATION_PATH ||
+    clean.startsWith(`${ACTIVATION_PATH}/`)
+  );
+}
+
 function extractActivationPathToken(path = "") {
   const normalized =
     pathFromUrlLike(path) || path || "";
@@ -590,28 +1128,6 @@ function hasActivationToken(value = "") {
   return false;
 }
 
-function getCanonicalPathFromAny(value = "/") {
-  return stripSearchAndHash(
-    pathFromUrlLike(value) || value || "/"
-  );
-}
-
-function isPublicTechnicalCanonical(path = "/") {
-  return PUBLIC_TECHNICAL_ROUTES.has(
-    stripSearchAndHash(path)
-  );
-}
-
-function isActivationCanonical(path = "/") {
-  const clean =
-    stripSearchAndHash(path);
-
-  return (
-    clean === ACTIVATION_PATH ||
-    clean.startsWith(`${ACTIVATION_PATH}/`)
-  );
-}
-
 function isActivationTokenScrubbed() {
   if (!isBrowser()) {
     return false;
@@ -673,7 +1189,8 @@ function captureRouteContext(options = {}) {
 
   const publicPath =
     safeText(
-      state.publicPath,
+      options.publicPath ||
+        state.publicPath,
       ""
     ) ||
     browserPath ||
@@ -681,7 +1198,8 @@ function captureRouteContext(options = {}) {
 
   const route =
     safeText(
-      state.route,
+      options.route ||
+        state.route,
       ""
     ) ||
     getCanonicalPathFromAny(publicPath);
@@ -698,7 +1216,10 @@ function captureRouteContext(options = {}) {
     );
 
   const activationBoot =
-    detectActivationBoot();
+    Boolean(
+      options.activationBoot ||
+      detectActivationBoot()
+    );
 
   const publicTechnical =
     isPublicTechnicalCanonical(canonical);
@@ -716,10 +1237,13 @@ function captureRouteContext(options = {}) {
     shouldProtect,
     activationBoot,
     publicTechnical,
+
     route:
       getCanonicalPathFromAny(route || canonical || "/"),
+
     publicPath:
       publicPath || browserPath || route || "/",
+
     browserPath,
     initialUrl,
     activationInitialUrl,
@@ -784,6 +1308,10 @@ function clearSessionLocalProtected({
         ctx.shouldProtect,
       preserveCurrentRoute:
         ctx.shouldProtect,
+      route:
+        ctx.route,
+      publicPath:
+        ctx.publicPath,
       reason,
     });
   } catch {
@@ -821,13 +1349,33 @@ function getStoredRefreshPayload() {
 
 function shouldClearForError(error) {
   const status =
-    error?.status ||
-    error?.response?.status ||
-    0;
+    Number(
+      error?.status ||
+        error?.response?.status ||
+        error?.data?.status ||
+        0
+    );
 
-  return (
+  if (
     status === 401 ||
     status === 403
+  ) {
+    return true;
+  }
+
+  const code =
+    safeText(
+      error?.data?.code ||
+        error?.code ||
+        error?.response?.data?.code ||
+        error?.response?.data?.error ||
+        "",
+      ""
+    ).toUpperCase();
+
+  return Boolean(
+    code &&
+      AUTH_FAILURE_CODES.has(code)
   );
 }
 
@@ -842,14 +1390,22 @@ export async function fetchMe(
     getSession(sessionArg);
 
   if (!hasValidToken()) {
-    throw new Error(
-      "No hay token disponible para /me."
+    throw createRestoreError(
+      "No hay token disponible para /me.",
+      {
+        status: 401,
+        code: "TOKEN_MISSING",
+      }
     );
   }
 
   if (!hasApiGet()) {
-    throw new Error(
-      "apiClient.get no disponible."
+    throw createRestoreError(
+      "apiClient.get no disponible.",
+      {
+        status: 500,
+        code: "API_CLIENT_GET_MISSING",
+      }
     );
   }
 
@@ -872,22 +1428,58 @@ export async function fetchMe(
             }
           );
 
+        const auth =
+          normalizeAuthResponse(response);
+
+        assertNoExplicitFailure(auth);
+
         const user =
-          extractUser(response) ||
+          auth.user ||
           extractUser(response?.data) ||
-          response?.user ||
           null;
 
-        if (!user) {
-          throw new Error(
-            "No se pudo resolver usuario desde /me."
+        if (!hasUsableUser(user)) {
+          throw createRestoreError(
+            "No se pudo resolver usuario válido desde /me.",
+            {
+              status: 401,
+              code: "ME_USER_MISSING",
+              response,
+            }
           );
         }
 
+        const nextToken =
+          auth.token ||
+          getCurrentToken();
+
         const snapshot =
           applySession({
+            token:
+              nextToken || undefined,
             user,
+            refreshToken:
+              auth.refreshToken || undefined,
+            sessionData:
+              auth.sessionData || undefined,
+            authenticated:
+              true,
           });
+
+        if (
+          !snapshot?.authenticated ||
+          !hasUsableToken(snapshot.token) ||
+          !hasUsableUser(snapshot.user)
+        ) {
+          throw createRestoreError(
+            "La restauración desde /me no produjo sesión válida.",
+            {
+              status: 401,
+              code: "ME_INVALID_SESSION",
+              response,
+            }
+          );
+        }
 
         session.lastCheckAt =
           Date.now();
@@ -896,15 +1488,11 @@ export async function fetchMe(
           "auth:me:success",
           {
             user:
-              snapshot?.user ||
-              user,
+              snapshot.user,
           }
         );
 
-        return (
-          snapshot?.user ||
-          user
-        );
+        return snapshot.user;
       } catch (error) {
         emit(
           "auth:me:error",
@@ -936,14 +1524,22 @@ export async function refreshSession(
     getSession(sessionArg);
 
   if (!hasRefreshContext()) {
-    throw new Error(
-      "No hay contexto refresh."
+    throw createRestoreError(
+      "No hay contexto refresh.",
+      {
+        status: 401,
+        code: "REFRESH_CONTEXT_MISSING",
+      }
     );
   }
 
   if (!hasApiPost()) {
-    throw new Error(
-      "apiClient.post no disponible."
+    throw createRestoreError(
+      "apiClient.post no disponible.",
+      {
+        status: 500,
+        code: "API_CLIENT_POST_MISSING",
+      }
     );
   }
 
@@ -960,8 +1556,12 @@ export async function refreshSession(
       0
     ) > now
   ) {
-    throw new Error(
-      "Refresh temporalmente bloqueado."
+    throw createRestoreError(
+      "Refresh temporalmente bloqueado.",
+      {
+        status: 429,
+        code: "REFRESH_BLOCKED",
+      }
     );
   }
 
@@ -984,77 +1584,258 @@ export async function refreshSession(
             }
           );
 
-        const nextToken =
-          extractToken(response);
+        const auth =
+          normalizeAuthResponse(response);
 
-        const nextUser =
-          extractUser(response);
-
-        const nextRefreshToken =
-          extractRefreshToken(response);
-
-        const nextSessionData =
-          normalizeSessionPayload(response);
+        assertNoExplicitFailure(auth);
 
         if (
-          !nextToken &&
-          !nextUser
+          !hasUsableToken(auth.token) &&
+          !hasUsableUser(auth.user)
         ) {
-          throw new Error(
-            "Refresh sin datos de sesión."
+          throw createRestoreError(
+            "Refresh sin datos de sesión.",
+            {
+              status: 401,
+              code: "REFRESH_EMPTY_RESPONSE",
+              response,
+            }
           );
         }
 
-        const snapshot =
+        /*
+          Caso A:
+          Refresh devuelve token + user.
+          Sesión completa directa.
+        */
+        if (
+          hasUsableToken(auth.token) &&
+          hasUsableUser(auth.user)
+        ) {
+          const snapshot =
+            applySession({
+              token:
+                auth.token,
+              user:
+                auth.user,
+              refreshToken:
+                auth.refreshToken ||
+                requestBody.refreshToken,
+              sessionData:
+                auth.sessionData || {
+                  sessionId:
+                    requestBody.sessionId,
+                  userId:
+                    requestBody.userId,
+                },
+              authenticated:
+                true,
+            });
+
+          if (
+            !snapshot?.authenticated ||
+            !hasUsableToken(snapshot.token) ||
+            !hasUsableUser(snapshot.user)
+          ) {
+            throw createRestoreError(
+              "Refresh produjo sesión inválida.",
+              {
+                status: 401,
+                code: "REFRESH_INVALID_SESSION",
+                response,
+              }
+            );
+          }
+
+          session.lastRefreshAt =
+            Date.now();
+
+          session.refreshFailCount = 0;
+          session.refreshBlockedUntil = 0;
+
+          emit(
+            "auth:refresh:success",
+            {
+              ...snapshot,
+              source:
+                "refresh:token-user",
+            }
+          );
+
+          return {
+            ok: true,
+            ...snapshot,
+            source:
+              "refresh:token-user",
+            response,
+          };
+        }
+
+        /*
+          Caso B:
+          Refresh devuelve token pero no user.
+          Se aplica token provisional, se limpia user viejo, y se fuerza /me.
+        */
+        if (
+          hasUsableToken(auth.token) &&
+          !hasUsableUser(auth.user)
+        ) {
           applySession({
             token:
-              nextToken ??
-              AppCore?.state?.token,
-
+              auth.token,
             user:
-              nextUser ??
-              AppCore?.state?.user,
-
+              null,
             refreshToken:
-              nextRefreshToken ??
+              auth.refreshToken ||
               requestBody.refreshToken,
-
             sessionData:
-              nextSessionData || {
+              auth.sessionData || {
                 sessionId:
                   requestBody.sessionId,
                 userId:
                   requestBody.userId,
               },
+            authenticated:
+              false,
           });
 
-        if (
-          !snapshot?.token &&
-          !hasValidToken()
-        ) {
-          throw new Error(
-            "Refresh completado sin token."
+          const user =
+            await fetchMe(session);
+
+          const snapshot =
+            buildSessionSnapshot();
+
+          if (
+            !snapshot?.authenticated ||
+            !hasUsableToken(snapshot.token) ||
+            !hasUsableUser(snapshot.user)
+          ) {
+            throw createRestoreError(
+              "Refresh token-only no pudo validar usuario con /me.",
+              {
+                status: 401,
+                code: "REFRESH_TOKEN_ONLY_ME_FAILED",
+                response,
+              }
+            );
+          }
+
+          session.lastRefreshAt =
+            Date.now();
+
+          session.refreshFailCount = 0;
+          session.refreshBlockedUntil = 0;
+
+          emit(
+            "auth:refresh:success",
+            {
+              ...snapshot,
+              user,
+              source:
+                "refresh:token-only+me",
+            }
           );
+
+          return {
+            ok: true,
+            ...snapshot,
+            user,
+            source:
+              "refresh:token-only+me",
+            response,
+          };
         }
 
-        session.lastRefreshAt =
-          Date.now();
+        /*
+          Caso C:
+          Refresh devuelve user pero no token.
+          Sólo aceptable si ya existe token válido.
+        */
+        if (
+          !hasUsableToken(auth.token) &&
+          hasUsableUser(auth.user)
+        ) {
+          const currentToken =
+            getCurrentToken();
 
-        session.refreshFailCount = 0;
-        session.refreshBlockedUntil = 0;
+          if (!hasUsableToken(currentToken)) {
+            throw createRestoreError(
+              "Refresh devolvió usuario sin token disponible.",
+              {
+                status: 401,
+                code: "REFRESH_USER_WITHOUT_TOKEN",
+                response,
+              }
+            );
+          }
 
-        emit(
-          "auth:refresh:success",
-          {
+          const snapshot =
+            applySession({
+              token:
+                currentToken,
+              user:
+                auth.user,
+              refreshToken:
+                auth.refreshToken ||
+                requestBody.refreshToken,
+              sessionData:
+                auth.sessionData || {
+                  sessionId:
+                    requestBody.sessionId,
+                  userId:
+                    requestBody.userId,
+                },
+              authenticated:
+                true,
+            });
+
+          if (
+            !snapshot?.authenticated ||
+            !hasUsableToken(snapshot.token) ||
+            !hasUsableUser(snapshot.user)
+          ) {
+            throw createRestoreError(
+              "Refresh user-only produjo sesión inválida.",
+              {
+                status: 401,
+                code: "REFRESH_USER_ONLY_INVALID_SESSION",
+                response,
+              }
+            );
+          }
+
+          session.lastRefreshAt =
+            Date.now();
+
+          session.refreshFailCount = 0;
+          session.refreshBlockedUntil = 0;
+
+          emit(
+            "auth:refresh:success",
+            {
+              ...snapshot,
+              source:
+                "refresh:user-only",
+            }
+          );
+
+          return {
+            ok: true,
             ...snapshot,
+            source:
+              "refresh:user-only",
+            response,
+          };
+        }
+
+        throw createRestoreError(
+          "Refresh no produjo sesión recuperable.",
+          {
+            status: 401,
+            code: "REFRESH_UNUSABLE_RESPONSE",
+            response,
           }
         );
-
-        return {
-          ok: true,
-          ...snapshot,
-          response,
-        };
       } catch (error) {
         session.refreshFailCount =
           safeNumber(
@@ -1105,6 +1886,23 @@ export async function restoreUsingMe(
   const user =
     await fetchMe(session);
 
+  const snapshot =
+    buildSessionSnapshot();
+
+  if (
+    !snapshot?.authenticated ||
+    !hasUsableToken(snapshot.token) ||
+    !hasUsableUser(snapshot.user)
+  ) {
+    throw createRestoreError(
+      "restoreUsingMe no produjo sesión válida.",
+      {
+        status: 401,
+        code: "RESTORE_ME_INVALID_SESSION",
+      }
+    );
+  }
+
   emit(
     "auth:restore:success",
     {
@@ -1127,10 +1925,27 @@ export async function restoreUsingRefreshOnly(
     await refreshSession(session);
 
   if (
-    !AppCore?.state?.user &&
+    !hasCompleteAuthState() &&
     hasValidToken()
   ) {
     await fetchMe(session);
+  }
+
+  const snapshot =
+    buildSessionSnapshot();
+
+  if (
+    !snapshot?.authenticated ||
+    !hasUsableToken(snapshot.token) ||
+    !hasUsableUser(snapshot.user)
+  ) {
+    throw createRestoreError(
+      "restoreUsingRefreshOnly no produjo sesión válida.",
+      {
+        status: 401,
+        code: "RESTORE_REFRESH_INVALID_SESSION",
+      }
+    );
   }
 
   emit(
@@ -1138,7 +1953,7 @@ export async function restoreUsingRefreshOnly(
     {
       source: "refresh-only",
       user:
-        AppCore?.state?.user ||
+        snapshot.user ||
         null,
     }
   );
@@ -1147,7 +1962,7 @@ export async function restoreUsingRefreshOnly(
     ok: true,
     source: "refresh-only",
     user:
-      AppCore?.state?.user ||
+      snapshot.user ||
       null,
     refreshed,
   };
@@ -1248,9 +2063,11 @@ export async function restoreSession(
       hasToken:
         hasValidToken(),
       hasUser:
-        Boolean(
-          AppCore?.state?.user
+        hasUsableUser(
+          getCurrentUser()
         ),
+      hasCompleteAuthState:
+        hasCompleteAuthState(),
       hasRefreshContext:
         hasRefreshContext(),
       publicRoute:
@@ -1307,6 +2124,7 @@ export async function restoreSession(
 
         /*
           Prefer refresh cuando existe contexto.
+          Evita confiar ciegamente en token/user antiguos.
         */
         if (refreshAvailable) {
           try {
@@ -1327,6 +2145,9 @@ export async function restoreSession(
 
             restoreRouteContext(routeContext);
 
+            session.lastRestoreAt =
+              Date.now();
+
             return result;
           } catch (refreshError) {
             warn(
@@ -1334,6 +2155,31 @@ export async function restoreSession(
               refreshError
             );
 
+            /*
+              Si refresh falla por auth real, no intentamos conservar
+              avatar/user antiguo. Limpiamos.
+            */
+            if (
+              shouldClearForError(refreshError)
+            ) {
+              clearSessionLocalProtected({
+                options,
+                routeContext,
+                reason: "refresh-error-clearable",
+              });
+
+              return {
+                ok: false,
+                user: null,
+                error: refreshError,
+                protectedRoute:
+                  routeContext.shouldProtect,
+              };
+            }
+
+            /*
+              Si fue red/API temporal y hay token, intentamos /me.
+            */
             if (hasValidToken()) {
               const result =
                 await restoreAfterMeFailure(
@@ -1348,17 +2194,7 @@ export async function restoreSession(
               return result;
             }
 
-            if (
-              shouldClearForError(refreshError)
-            ) {
-              clearSessionLocalProtected({
-                options,
-                routeContext,
-                reason: "refresh-error-clearable",
-              });
-            } else {
-              restoreRouteContext(routeContext);
-            }
+            restoreRouteContext(routeContext);
 
             return {
               ok: false,
@@ -1371,14 +2207,32 @@ export async function restoreSession(
         }
 
         /*
-          Solo token.
+          Sólo token.
+          No se acepta sesión completa hasta validar /me.
         */
-        const result =
-          await restoreUsingMe(session);
+        try {
+          const result =
+            await restoreUsingMe(session);
 
-        restoreRouteContext(routeContext);
+          restoreRouteContext(routeContext);
 
-        return result;
+          session.lastRestoreAt =
+            Date.now();
+
+          return result;
+        } catch (meError) {
+          const result =
+            await restoreAfterMeFailure(
+              session,
+              meError,
+              options,
+              routeContext
+            );
+
+          restoreRouteContext(routeContext);
+
+          return result;
+        }
       } catch (error) {
         warn(
           "restoreSession() fatal:",
@@ -1469,6 +2323,18 @@ export function getRestoreSnapshot(
         session.lastRefreshAt,
         0
       ),
+
+    lastRestoreAt:
+      safeNumber(
+        session.lastRestoreAt,
+        0
+      ),
+
+    hasValidToken:
+      hasValidToken(),
+
+    hasCompleteAuthState:
+      hasCompleteAuthState(),
 
     protectedRoute:
       routeContext.shouldProtect,

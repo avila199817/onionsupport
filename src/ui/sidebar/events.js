@@ -622,7 +622,12 @@ export function bindCoreEvents(ctx = {}) {
     "auth:restore:success",
     "auth:session:restored",
   ].forEach((eventName) => {
-    bindCoreEvent(scopeName, eventName, syncIdentity);
+    bindCoreEvent(
+      AppCore,
+      scopeName,
+      eventName,
+      syncIdentity
+    );
   });
 
   /*
@@ -633,7 +638,12 @@ export function bindCoreEvents(ctx = {}) {
     "auth:login:success",
     "app:login:success",
   ].forEach((eventName) => {
-    bindCoreEvent(scopeName, eventName, syncIdentityAndState);
+    bindCoreEvent(
+      AppCore,
+      scopeName,
+      eventName,
+      syncIdentityAndState
+    );
   });
 
   /*
@@ -645,7 +655,12 @@ export function bindCoreEvents(ctx = {}) {
     "auth:logout:success",
     "logout:success",
   ].forEach((eventName) => {
-    bindCoreEvent(scopeName, eventName, syncAfterSessionCleared);
+    bindCoreEvent(
+      AppCore,
+      scopeName,
+      eventName,
+      syncAfterSessionCleared
+    );
   });
 
   /*
@@ -730,7 +745,12 @@ export function bindCoreEvents(ctx = {}) {
     "app:boot:complete",
     "router:bound",
   ].forEach((eventName) => {
-    bindCoreEvent(scopeName, eventName, syncIdentityAndState);
+    bindCoreEvent(
+      AppCore,
+      scopeName,
+      eventName,
+      syncIdentityAndState
+    );
   });
 
   return () => {

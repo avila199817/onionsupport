@@ -2,7 +2,21 @@
    Onion SPA - Usuarios Create Modal
    Archivo: src/views/usuarios/usuarios.create.modal.js
 
-   USERS EXPERIENCE PRO · CREATE MODAL · CLEAN 10/10
+   USERS EXPERIENCE PRO · CREATE MODAL · INCIDENCIAS 1:1 LOADER · FINAL 10/10
+
+   RESPONSABILIDADES:
+   - abrir/cerrar modal de creación de usuario
+   - crear ficha de usuario / cliente desde panel admin
+   - validar campos obligatorios
+   - teléfono español con prefijo fijo +34
+   - formatear teléfono visualmente como +34 629 946 615
+   - limitar teléfono a 9 dígitos nacionales
+   - enviar payload JSON limpio
+   - emitir usuarios:create:success / usuarios:created para refrescar la vista
+   - persistir draft mínimo mientras el modal está abierto
+   - evitar doble submit y doble binding
+   - mostrar loader overlay premium al crear usuario
+   - puente global compatible con usuariosView.js
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -14,7 +28,14 @@ import { usuariosState } from "./usuarios.state.js";
 
 const MODAL_ID = "usuarios-create-modal-root";
 const PANEL_ID = "usuarios-create-modal-panel";
+
 const USERS_CREATE_ENDPOINT = "/api/users/create";
+const USERS_FALLBACK_CREATE_ENDPOINT = "/api/users";
+
+const CREATE_TIMEOUT_MS = 90000;
+
+const PHONE_PREFIX = "+34";
+const PHONE_NATIONAL_DIGITS = 9;
 
 const CUSTOMER_TYPE_OPTIONS = Object.freeze([
   { value: "particular", label: "Particular" },
@@ -24,7 +45,7 @@ const CUSTOMER_TYPE_OPTIONS = Object.freeze([
 const DEFAULT_FORM = Object.freeze({
   name: "",
   email: "",
-  phone: "",
+  phone: `${PHONE_PREFIX} `,
   customerType: "particular",
   nif: "",
   addressStreet: "",
@@ -43,11 +64,14 @@ const modalState = {
   bindingsAttached: false,
   escHandler: null,
   lastActiveElement: null,
+
   submitting: false,
+
   errors: {},
   serverError: "",
   successMessage: "",
   createdUserId: "",
+
   form: {
     ...DEFAULT_FORM,
   },
@@ -57,56 +81,16 @@ const modalState = {
    HELPERS CORE
 ========================================================= */
 
-function safeEmit(event = "", payload = {}) {
-  try {
-    AppCore?.events?.emit?.(event, payload);
-  } catch {}
-}
-
-function safeOn(event = "", handler = null) {
-  if (!event || typeof handler !== "function") return false;
-
-  try {
-    AppCore?.events?.on?.(event, handler);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function safeOff(event = "", handler = null) {
-  if (!event || typeof handler !== "function") return false;
-
-  try {
-    AppCore?.events?.off?.(event, handler);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function showToast(message = "", type = "info") {
-  try {
-    if (typeof AppCore?.toast?.[type] === "function") {
-      AppCore.toast[type](message);
-      return;
-    }
-  } catch {}
-
-  try {
-    AppCore?.toast?.show?.(message, type);
-    return;
-  } catch {}
-
-  try {
-    AppCore?.ui?.toast?.[type]?.(message);
-  } catch {}
-}
-
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
+
   const text = String(value).trim();
+
   return text || fallback;
+}
+
+function safeLower(value, fallback = "") {
+  return safeText(value, fallback).toLowerCase();
 }
 
 function safeObject(value) {
@@ -115,15 +99,20 @@ function safeObject(value) {
     : {};
 }
 
+function safeNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 function first(...values) {
   for (const value of values) {
-    if (
-      value !== undefined &&
-      value !== null &&
-      String(value).trim() !== ""
-    ) {
-      return value;
+    if (value === undefined || value === null) continue;
+
+    if (typeof value === "string" && value.trim() === "") {
+      continue;
     }
+
+    return value;
   }
 
   return null;
@@ -142,9 +131,124 @@ function normalizeWhitespace(value = "") {
   return safeText(value, "").replace(/\s+/g, " ").trim();
 }
 
+function safeEmit(event = "", payload = {}) {
+  const eventName = safeText(event, "");
+  if (!eventName) return false;
+
+  try {
+    AppCore?.events?.emit?.(eventName, payload);
+    return true;
+  } catch {}
+
+  try {
+    window.dispatchEvent(
+      new CustomEvent(eventName, {
+        detail: payload,
+      })
+    );
+    return true;
+  } catch {}
+
+  return false;
+}
+
+function safeOn(event = "", handler = null) {
+  const eventName = safeText(event, "");
+  if (!eventName || typeof handler !== "function") return false;
+
+  let attached = false;
+
+  try {
+    AppCore?.events?.on?.(eventName, handler);
+    attached = true;
+  } catch {}
+
+  try {
+    window.addEventListener(eventName, handler);
+    attached = true;
+  } catch {}
+
+  return attached;
+}
+
+function safeOff(event = "", handler = null) {
+  const eventName = safeText(event, "");
+  if (!eventName || typeof handler !== "function") return false;
+
+  let detached = false;
+
+  try {
+    AppCore?.events?.off?.(eventName, handler);
+    detached = true;
+  } catch {}
+
+  try {
+    window.removeEventListener(eventName, handler);
+    detached = true;
+  } catch {}
+
+  return detached;
+}
+
+function showToast(message = "", type = "info") {
+  const text = safeText(message, "");
+  if (!text) return;
+
+  try {
+    if (typeof AppCore?.toast?.[type] === "function") {
+      AppCore.toast[type](text);
+      return;
+    }
+  } catch {}
+
+  try {
+    AppCore?.toast?.show?.(text, type);
+    return;
+  } catch {}
+
+  try {
+    AppCore?.ui?.toast?.[type]?.(text);
+  } catch {}
+}
+
+function isAbsoluteUrl(value = "") {
+  return /^https?:\/\//i.test(safeText(value, ""));
+}
+
 function getApiBase() {
-  const apiBase = safeText(AppCore?.config?.apiBase, "");
+  const apiBase = safeText(
+    first(
+      AppCore?.config?.apiBase,
+      AppCore?.config?.api?.baseUrl,
+      AppCore?.state?.apiBase,
+      window?.ONION_API_BASE,
+      window?.API_BASE
+    ),
+    ""
+  );
+
   return apiBase.replace(/\/+$/, "");
+}
+
+function buildFetchUrl(endpoint = "") {
+  const path = safeText(endpoint, "");
+  if (!path) return "";
+
+  if (isAbsoluteUrl(path)) {
+    return path;
+  }
+
+  const apiBase = getApiBase();
+
+  if (!apiBase) {
+    return path.startsWith("/") ? path : `/${path}`;
+  }
+
+  if (apiBase.endsWith("/api") && path.startsWith("/api/")) {
+    return `${apiBase}${path.slice(4)}`;
+  }
+
+  return `${apiBase}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
 function getAuthToken() {
@@ -154,17 +258,21 @@ function getAuthToken() {
       AppCore?.state?.accessToken,
       AppCore?.auth?.getToken?.(),
       AppCore?.Auth?.getToken?.(),
+      window?.Auth?.getToken?.(),
       typeof localStorage !== "undefined" ? localStorage.getItem("token") : "",
-      typeof sessionStorage !== "undefined" ? sessionStorage.getItem("token") : ""
+      typeof localStorage !== "undefined" ? localStorage.getItem("accessToken") : "",
+      typeof sessionStorage !== "undefined" ? sessionStorage.getItem("token") : "",
+      typeof sessionStorage !== "undefined" ? sessionStorage.getItem("accessToken") : ""
     ),
     ""
   );
 }
 
-function safeErrorMessage(error = null) {
-  if (!error) {
-    return "No se pudo crear el usuario.";
-  }
+function safeErrorMessage(
+  error = null,
+  fallback = "No se pudo crear el usuario."
+) {
+  if (!error) return fallback;
 
   return safeText(
     first(
@@ -172,15 +280,100 @@ function safeErrorMessage(error = null) {
       error?.response?.message,
       error?.response?.data?.message,
       error?.data?.message,
+      error?.data?.error,
+      error?.response?.error,
       error?.error,
-      "No se pudo crear el usuario."
+      error?.detail,
+      fallback
     ),
-    "No se pudo crear el usuario."
+    fallback
   );
 }
 
-function sanitizePhone(value = "") {
-  return safeText(value, "").replace(/[^\d+()\-\s]/g, "").trim();
+function getHttpStatus(error = null) {
+  return safeNumber(
+    first(
+      error?.status,
+      error?.statusCode,
+      error?.response?.status,
+      error?.data?.status
+    ),
+    0
+  );
+}
+
+function shouldTryNextCandidate(error = null) {
+  const status = getHttpStatus(error);
+
+  if (!status) return true;
+
+  return [404, 405, 409, 415, 422, 500, 502, 503, 504].includes(status);
+}
+
+function createTimeoutController(timeoutMs = 15000) {
+  const controller = new AbortController();
+
+  const timer = setTimeout(() => {
+    try {
+      controller.abort();
+    } catch {}
+  }, timeoutMs);
+
+  return {
+    signal: controller.signal,
+    clear() {
+      clearTimeout(timer);
+    },
+  };
+}
+
+/* =========================================================
+   PHONE HELPERS
+========================================================= */
+
+function extractSpanishPhoneDigits(value = "") {
+  const raw = String(value ?? "");
+  const trimmed = raw.trim();
+
+  let digits = raw.replace(/\D/g, "");
+
+  const startsWithPrefix =
+    /^\+?34(?:\s|$)/.test(trimmed) ||
+    /^\+?34/.test(trimmed) ||
+    (digits.startsWith("34") && digits.length > PHONE_NATIONAL_DIGITS);
+
+  if (startsWithPrefix && digits.startsWith("34")) {
+    digits = digits.slice(2);
+  }
+
+  return digits.slice(0, PHONE_NATIONAL_DIGITS);
+}
+
+function groupSpanishPhoneDigits(digits = "") {
+  const clean = String(digits || "").replace(/\D/g, "").slice(0, PHONE_NATIONAL_DIGITS);
+
+  return clean
+    .replace(/(\d{3})(?=\d)/g, "$1 ")
+    .trim();
+}
+
+function formatSpanishPhoneForInput(value = "") {
+  const digits = extractSpanishPhoneDigits(value);
+  const grouped = groupSpanishPhoneDigits(digits);
+
+  return grouped ? `${PHONE_PREFIX} ${grouped}` : `${PHONE_PREFIX} `;
+}
+
+function normalizePhoneForPayload(value = "") {
+  const digits = extractSpanishPhoneDigits(value);
+
+  return digits.length === PHONE_NATIONAL_DIGITS
+    ? `${PHONE_PREFIX}${digits}`
+    : "";
+}
+
+function isValidSpanishPhone(value = "") {
+  return extractSpanishPhoneDigits(value).length === PHONE_NATIONAL_DIGITS;
 }
 
 function sanitizeUsername(value = "") {
@@ -194,17 +387,13 @@ function sanitizeUsername(value = "") {
 
 function isValidEmail(value = "") {
   const text = safeText(value, "");
-  if (!text) return true;
+  if (!text) return false;
+
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text);
 }
 
-function isValidPhone(value = "") {
-  const normalized = safeText(value, "").replace(/[^\d]/g, "");
-  return normalized.length >= 7;
-}
-
 function normalizeCustomerType(value = "") {
-  const raw = safeText(value, "particular").toLowerCase();
+  const raw = safeLower(value, "particular");
 
   if (raw === "empresa" || raw === "company") return "empresa";
   return "particular";
@@ -212,7 +401,7 @@ function normalizeCustomerType(value = "") {
 
 function buildUsernameFromForm(form = {}) {
   const current = safeObject(form);
-  const email = safeText(current.email, "").toLowerCase();
+  const email = safeLower(current.email, "");
 
   if (email.includes("@")) {
     return sanitizeUsername(email.split("@")[0]);
@@ -232,9 +421,11 @@ function getInitialForm() {
   return {
     name: safeText(first(draft.name, draft.fullName), ""),
     email: safeText(draft.email, ""),
-    phone: safeText(draft.phone, ""),
-    customerType: normalizeCustomerType(first(draft.customerType, draft.tipo)),
+    phone: formatSpanishPhoneForInput(first(draft.phone, `${PHONE_PREFIX} `)),
+
+    customerType: normalizeCustomerType(first(draft.customerType, draft.tipo, "particular")),
     nif: safeText(draft.nif, ""),
+
     addressStreet: safeText(first(draft.addressStreet, direccion.calle), ""),
     addressCp: safeText(first(draft.addressCp, direccion.cp), ""),
     addressCity: safeText(first(draft.addressCity, direccion.ciudad), ""),
@@ -243,27 +434,50 @@ function getInitialForm() {
   };
 }
 
+function syncCreateViewState(patch = {}) {
+  try {
+    usuariosState.createView = {
+      ...safeObject(usuariosState.createView),
+      ...safeObject(patch),
+      form: {
+        ...safeObject(usuariosState.createView?.form),
+        ...safeObject(patch.form),
+      },
+    };
+  } catch {}
+}
+
 function persistDraft() {
+  const form = safeObject(modalState.form);
+
   usuariosState.createDraft = {
-    name: safeText(modalState.form?.name, ""),
-    email: safeText(modalState.form?.email, ""),
-    phone: safeText(modalState.form?.phone, ""),
-    customerType: normalizeCustomerType(modalState.form?.customerType),
-    tipo: normalizeCustomerType(modalState.form?.customerType),
-    nif: safeText(modalState.form?.nif, ""),
+    name: safeText(form.name, ""),
+    email: safeLower(form.email, ""),
+    phone: formatSpanishPhoneForInput(form.phone),
+
+    customerType: normalizeCustomerType(form.customerType),
+    tipo: normalizeCustomerType(form.customerType),
+
+    nif: safeText(form.nif, "").toUpperCase(),
+
     direccion: {
-      calle: safeText(modalState.form?.addressStreet, ""),
-      cp: safeText(modalState.form?.addressCp, ""),
-      ciudad: safeText(modalState.form?.addressCity, ""),
-      provincia: safeText(modalState.form?.addressProvince, ""),
-      pais: safeText(modalState.form?.addressCountry, ""),
+      calle: safeText(form.addressStreet, ""),
+      cp: safeText(form.addressCp, ""),
+      ciudad: safeText(form.addressCity, ""),
+      provincia: safeText(form.addressProvince, ""),
+      pais: safeText(form.addressCountry, "España"),
     },
   };
+
+  syncCreateViewState({
+    form: usuariosState.createDraft,
+  });
 }
 
 function clearDraft() {
   usuariosState.createDraft = {
     ...DEFAULT_FORM,
+    phone: `${PHONE_PREFIX} `,
     tipo: "particular",
     direccion: {
       calle: "",
@@ -273,12 +487,26 @@ function clearDraft() {
       pais: "España",
     },
   };
+
+  syncCreateViewState({
+    form: usuariosState.createDraft,
+  });
 }
 
 function setFormPatch(patch = {}) {
+  const nextPatch = safeObject(patch);
+
+  if (Object.prototype.hasOwnProperty.call(nextPatch, "phone")) {
+    nextPatch.phone = formatSpanishPhoneForInput(nextPatch.phone);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(nextPatch, "customerType")) {
+    nextPatch.customerType = normalizeCustomerType(nextPatch.customerType);
+  }
+
   modalState.form = {
     ...safeObject(modalState.form),
-    ...safeObject(patch),
+    ...nextPatch,
   };
 
   persistDraft();
@@ -291,11 +519,19 @@ function resetFeedbackState() {
   modalState.serverError = "";
   modalState.successMessage = "";
   modalState.createdUserId = "";
+
+  syncCreateViewState({
+    errors: {},
+    serverError: "",
+    createdUserId: "",
+    successMessage: "",
+  });
 }
 
 function resetFormState() {
   modalState.form = {
     ...DEFAULT_FORM,
+    phone: `${PHONE_PREFIX} `,
   };
 }
 
@@ -307,16 +543,17 @@ function validateForm(form = {}) {
   const current = safeObject(form);
   const errors = {};
 
-  const name = safeText(current.name, "");
-  const phone = sanitizePhone(current.phone);
-  const email = safeText(current.email, "");
+  const name = normalizeWhitespace(current.name);
+  const email = safeLower(current.email, "");
+  const phone = safeText(current.phone, "");
   const nif = safeText(current.nif, "");
   const customerType = normalizeCustomerType(current.customerType);
-  const addressStreet = safeText(current.addressStreet, "");
+
+  const addressStreet = normalizeWhitespace(current.addressStreet);
   const addressCp = safeText(current.addressCp, "");
-  const addressCity = safeText(current.addressCity, "");
-  const addressProvince = safeText(current.addressProvince, "");
-  const addressCountry = safeText(current.addressCountry, "");
+  const addressCity = normalizeWhitespace(current.addressCity);
+  const addressProvince = normalizeWhitespace(current.addressProvince);
+  const addressCountry = normalizeWhitespace(current.addressCountry);
 
   if (!name) {
     errors.name = "El nombre completo es obligatorio.";
@@ -330,10 +567,10 @@ function validateForm(form = {}) {
     errors.email = "Introduce un email válido.";
   }
 
-  if (!phone) {
+  if (!extractSpanishPhoneDigits(phone)) {
     errors.phone = "El teléfono es obligatorio.";
-  } else if (!isValidPhone(phone)) {
-    errors.phone = "Introduce un teléfono válido.";
+  } else if (!isValidSpanishPhone(phone)) {
+    errors.phone = "El teléfono debe tener 9 números.";
   }
 
   if (!customerType) {
@@ -372,18 +609,26 @@ function validateForm(form = {}) {
 
 function buildPayload(form = {}) {
   const current = safeObject(form);
+  const customerType = normalizeCustomerType(current.customerType);
+  const phone = normalizePhoneForPayload(current.phone);
 
   return {
     name: normalizeWhitespace(current.name),
     username: buildUsernameFromForm(current),
-    email: safeText(current.email, "").toLowerCase(),
-    phone: sanitizePhone(current.phone),
+    email: safeLower(current.email, ""),
+    phone,
+
     role: "user",
     active: false,
-    tipo: normalizeCustomerType(current.customerType),
+
+    tipo: customerType,
+    customerType,
+
     nif: safeText(current.nif, "").toUpperCase(),
+
     privacyMode: false,
     darkMode: true,
+
     direccion: {
       calle: normalizeWhitespace(current.addressStreet),
       cp: safeText(current.addressCp, ""),
@@ -398,18 +643,61 @@ function buildPayload(form = {}) {
    CREATE ADAPTERS
 ========================================================= */
 
-async function createViaAppCoreRequest(payload = null) {
+function buildCreateEndpoints() {
+  return [
+    USERS_CREATE_ENDPOINT,
+    USERS_FALLBACK_CREATE_ENDPOINT,
+  ];
+}
+
+async function createViaApiClient(endpoint = "", payload = null) {
+  const client = AppCore?.apiClient || null;
+
+  if (!client) {
+    throw new Error("API_CLIENT_UNAVAILABLE");
+  }
+
+  if (typeof client.post === "function") {
+    return client.post(endpoint, payload, {
+      timeout: CREATE_TIMEOUT_MS,
+      auth: true,
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+  }
+
+  if (typeof client.request === "function") {
+    return client.request(endpoint, {
+      method: "POST",
+      timeout: CREATE_TIMEOUT_MS,
+      auth: true,
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: payload,
+    });
+  }
+
+  throw new Error("API_CLIENT_POST_UNAVAILABLE");
+}
+
+async function createViaAppCoreRequest(endpoint = "", payload = null) {
   if (typeof AppCore?.request !== "function") {
     throw new Error("APP_CORE_REQUEST_UNAVAILABLE");
   }
 
-  return AppCore.request(USERS_CREATE_ENDPOINT, {
+  return AppCore.request(endpoint, {
     method: "POST",
+    timeout: CREATE_TIMEOUT_MS,
+    headers: {
+      "Content-Type": "application/json",
+    },
     body: payload,
   });
 }
 
-async function createViaHttpModule(payload = null) {
+async function createViaHttpModule(endpoint = "", payload = null) {
   const Http = AppCore?.modules?.Http || AppCore?.Http || window?.Http || null;
 
   if (!Http) {
@@ -417,12 +705,21 @@ async function createViaHttpModule(payload = null) {
   }
 
   if (typeof Http.post === "function") {
-    return Http.post(USERS_CREATE_ENDPOINT, payload);
+    return Http.post(endpoint, payload, {
+      timeout: CREATE_TIMEOUT_MS,
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
   }
 
   if (typeof Http.request === "function") {
-    return Http.request(USERS_CREATE_ENDPOINT, {
+    return Http.request(endpoint, {
       method: "POST",
+      timeout: CREATE_TIMEOUT_MS,
+      headers: {
+        "Content-Type": "application/json",
+      },
       body: payload,
     });
   }
@@ -430,51 +727,86 @@ async function createViaHttpModule(payload = null) {
   throw new Error("HTTP_POST_UNAVAILABLE");
 }
 
-async function createViaFetch(payload = null) {
-  const apiBase = getApiBase();
+async function createViaFetch(endpoint = "", payload = null) {
   const token = getAuthToken();
-  const url = `${apiBase || ""}${USERS_CREATE_ENDPOINT}`;
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(payload || {}),
-  });
-
-  const text = await response.text();
-  let data = null;
+  const url = buildFetchUrl(endpoint);
+  const timeout = createTimeoutController(CREATE_TIMEOUT_MS);
 
   try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = { raw: text };
-  }
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      credentials: "include",
+      body: JSON.stringify(payload || {}),
+      signal: timeout.signal,
+    });
 
-  if (!response.ok) {
-    const error = new Error(
-      safeText(
-        first(
-          data?.message,
-          data?.error,
-          `HTTP ${response.status} al crear usuario.`
-        ),
-        "No se pudo crear el usuario."
-      )
-    );
-    error.response = data;
-    throw error;
-  }
+    const text = await response.text();
+    let data = null;
 
-  return data;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = { raw: text };
+    }
+
+    if (!response.ok) {
+      const error = new Error(
+        safeText(
+          first(
+            data?.message,
+            data?.error,
+            `HTTP ${response.status} al crear usuario.`
+          ),
+          "No se pudo crear el usuario."
+        )
+      );
+
+      error.response = data;
+      error.status = response.status;
+      error.statusCode = response.status;
+      error.url = url;
+
+      throw error;
+    }
+
+    return data;
+  } finally {
+    timeout.clear();
+  }
 }
 
 function pickCreatedUser(response = null) {
+  if (!response) return null;
+
+  if (Array.isArray(response)) {
+    return response[0] || null;
+  }
+
   const obj = safeObject(response);
 
-  return obj.user || obj.item || obj.data || obj.result || obj.payload || obj;
+  return (
+    obj.user ||
+    obj.usuario ||
+    obj.item ||
+    obj.data?.user ||
+    obj.data?.usuario ||
+    obj.data?.item ||
+    obj.data ||
+    obj.result?.user ||
+    obj.result?.usuario ||
+    obj.result?.item ||
+    obj.result ||
+    obj.payload?.user ||
+    obj.payload?.usuario ||
+    obj.payload?.item ||
+    obj.payload ||
+    obj
+  );
 }
 
 function resolveCreatedUserId(response = null) {
@@ -483,18 +815,29 @@ function resolveCreatedUserId(response = null) {
   return safeText(
     first(
       user.userId,
+      user.usuarioId,
       user.id,
       user.code,
       user.uid,
       user.username,
-      user.email
+      user.email,
+      response?.userId,
+      response?.usuarioId,
+      response?.id,
+      response?.code,
+      response?.uid,
+      response?.username,
+      response?.email
     ),
     ""
   );
 }
 
 async function createUsuarioRequest(payload = null) {
+  const endpoints = buildCreateEndpoints();
+
   const adapters = [
+    createViaApiClient,
     createViaAppCoreRequest,
     createViaHttpModule,
     createViaFetch,
@@ -502,11 +845,17 @@ async function createUsuarioRequest(payload = null) {
 
   let lastError = null;
 
-  for (const adapter of adapters) {
-    try {
-      return await adapter(payload);
-    } catch (error) {
-      lastError = error;
+  for (const endpoint of endpoints) {
+    for (const adapter of adapters) {
+      try {
+        return await adapter(endpoint, payload);
+      } catch (error) {
+        lastError = error;
+
+        if (!shouldTryNextCandidate(error)) {
+          throw error;
+        }
+      }
     }
   }
 
@@ -533,6 +882,8 @@ function renderInput({
   required = false,
   error = "",
   autocomplete = "off",
+  inputmode = "",
+  maxlength = "",
 } = {}) {
   return `
     <label class="usr-create-field">
@@ -548,6 +899,9 @@ function renderInput({
         value="${escapeHtml(value)}"
         placeholder="${escapeHtml(placeholder)}"
         autocomplete="${escapeHtml(autocomplete)}"
+        ${inputmode ? `inputmode="${escapeHtml(inputmode)}"` : ""}
+        ${maxlength ? `maxlength="${escapeHtml(maxlength)}"` : ""}
+        ${modalState.submitting ? "disabled" : ""}
       />
 
       ${renderFieldError(error)}
@@ -575,6 +929,7 @@ function renderSelect({
         class="usr-create-select ${error ? "is-error" : ""}"
         data-field="${escapeHtml(name)}"
         name="${escapeHtml(name)}"
+        ${modalState.submitting ? "disabled" : ""}
       >
         ${items
           .map((option) => {
@@ -596,16 +951,27 @@ function renderSelect({
   `;
 }
 
-function renderAlert(type = "info", title = "", text = "", extra = "") {
+function renderAlert(type = "info", title = "", text = "") {
   const safeTitle = safeText(title, "");
   const safeBody = safeText(text, "");
+
   if (!safeTitle && !safeBody) return "";
 
   return `
     <div class="usr-create-alert is-${escapeHtml(type)}">
       ${safeTitle ? `<strong>${escapeHtml(safeTitle)}</strong>` : ""}
       ${safeBody ? `<span>${escapeHtml(safeBody)}</span>` : ""}
-      ${extra || ""}
+    </div>
+  `;
+}
+
+function renderCreateLoadingOverlay(label = "Creando usuario...") {
+  return `
+    <div class="usr-create-loading-overlay" aria-live="polite" aria-busy="true">
+      <div class="usr-create-loading-card">
+        <span class="usr-create-loading-spinner" aria-hidden="true"></span>
+        <strong>${escapeHtml(label)}</strong>
+      </div>
     </div>
   `;
 }
@@ -622,6 +988,9 @@ function renderModalInner() {
   const successMessage = safeText(modalState.successMessage, "");
   const createdUserId = safeText(modalState.createdUserId, "");
 
+  const normalizedCustomerType = normalizeCustomerType(form.customerType);
+  const phoneValue = formatSpanishPhoneForInput(form.phone);
+
   return `
     <div
       data-usuarios-create-modal-overlay="true"
@@ -634,8 +1003,10 @@ function renderModalInner() {
         aria-modal="true"
         aria-labelledby="usuarios-create-modal-title"
         tabindex="-1"
-        class="usr-create-panel"
+        class="usr-create-panel${submitting ? " is-submitting" : ""}"
       >
+        ${submitting ? renderCreateLoadingOverlay("Creando usuario...") : ""}
+
         <div class="usr-create-header">
           <div class="usr-create-header-copy">
             <div class="usr-create-header-text">
@@ -666,7 +1037,7 @@ function renderModalInner() {
               ? renderAlert(
                   "success",
                   "El usuario se ha creado correctamente.",
-                  createdUserId ? `Referencia generada: ${createdUserId}` : ""
+                  createdUserId ? `Referencia generada: ${createdUserId}` : successMessage
                 )
               : ""
           }
@@ -675,7 +1046,7 @@ function renderModalInner() {
             serverError
               ? renderAlert(
                   "error",
-                  "No se pudo crear el usuario",
+                  "No se pudo crear el usuario.",
                   serverError
                 )
               : ""
@@ -708,11 +1079,14 @@ function renderModalInner() {
                 ${renderInput({
                   label: "Teléfono",
                   name: "phone",
-                  value: form.phone,
-                  placeholder: "Ej. +34 600 123 456",
+                  value: phoneValue,
+                  type: "tel",
+                  placeholder: "+34 629 946 615",
                   required: true,
                   error: errors.phone,
                   autocomplete: "tel",
+                  inputmode: "numeric",
+                  maxlength: "15",
                 })}
               </div>
 
@@ -720,7 +1094,7 @@ function renderModalInner() {
                 ${renderSelect({
                   label: "Tipo",
                   name: "customerType",
-                  value: normalizeCustomerType(form.customerType),
+                  value: normalizedCustomerType,
                   required: true,
                   error: errors.customerType,
                   options: CUSTOMER_TYPE_OPTIONS,
@@ -731,7 +1105,7 @@ function renderModalInner() {
                   name: "nif",
                   value: form.nif,
                   placeholder: "Ej. 12345678Z / B12345678",
-                  required: normalizeCustomerType(form.customerType) === "empresa",
+                  required: normalizedCustomerType === "empresa",
                   error: errors.nif,
                   autocomplete: "off",
                 })}
@@ -842,6 +1216,55 @@ function renderModalInner() {
               radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 34%),
               linear-gradient(180deg, var(--surface-2, #151515), var(--surface-1, #121212));
             box-shadow:0 34px 84px rgba(0,0,0,.42);
+          }
+
+          .usr-create-panel.is-submitting{
+            overflow:hidden;
+          }
+
+          .usr-create-loading-overlay{
+            position:absolute;
+            inset:0;
+            z-index:30;
+            display:grid;
+            place-items:center;
+            padding:22px;
+            background:color-mix(in srgb, var(--surface-1, #f8fafc) 74%, transparent);
+            backdrop-filter:blur(5px);
+            -webkit-backdrop-filter:blur(5px);
+          }
+
+          .usr-create-loading-card{
+            display:grid;
+            justify-items:center;
+            gap:12px;
+            min-width:min(100%, 275px);
+            padding:24px 28px;
+            border-radius:18px;
+            border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 26%, rgba(15,23,42,.08));
+            background:
+              linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 100%),
+              rgba(255,255,255,.78);
+            box-shadow:
+              0 30px 70px rgba(15,23,42,.18),
+              0 1px 0 rgba(255,255,255,.72) inset;
+          }
+
+          .usr-create-loading-card strong{
+            color:var(--text-strong, #111827);
+            font-size:14px;
+            line-height:1.35;
+            font-weight:var(--weight-bold, 700);
+            letter-spacing:-.015em;
+          }
+
+          .usr-create-loading-spinner{
+            width:30px;
+            height:30px;
+            border-radius:999px;
+            border:3px solid color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
+            border-top-color:var(--accent, #7c5cff);
+            animation:usuariosCreateSpin .78s linear infinite;
           }
 
           .usr-create-header{
@@ -1028,6 +1451,12 @@ function renderModalInner() {
             box-shadow:0 0 0 4px color-mix(in srgb, var(--danger-strong, #ff6b6b) 10%, transparent);
           }
 
+          .usr-create-input:disabled,
+          .usr-create-select:disabled{
+            opacity:.78;
+            cursor:not-allowed;
+          }
+
           .usr-create-error{
             color:var(--danger-strong, #ff6b6b);
             font-size:11px;
@@ -1075,6 +1504,23 @@ function renderModalInner() {
             animation:usuariosCreateSpin .8s linear infinite;
           }
 
+          [data-theme="dark"] .usr-create-loading-overlay{
+            background:color-mix(in srgb, var(--surface-1, #111) 78%, transparent);
+          }
+
+          [data-theme="dark"] .usr-create-loading-card{
+            background:
+              linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent), transparent 100%),
+              color-mix(in srgb, var(--surface-2, #171717) 92%, transparent);
+            box-shadow:
+              0 30px 70px rgba(0,0,0,.36),
+              0 1px 0 rgba(255,255,255,.06) inset;
+          }
+
+          [data-theme="dark"] .usr-create-loading-card strong{
+            color:var(--text-strong, #fff);
+          }
+
           [data-theme="light"] .usr-create-panel{
             background:
               radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 34%),
@@ -1118,6 +1564,14 @@ function renderModalInner() {
 
             .usr-create-header-text h2{
               font-size:28px;
+            }
+
+            .usr-create-actions{
+              justify-content:stretch;
+            }
+
+            .usr-create-submit{
+              width:100%;
             }
           }
         </style>
@@ -1231,6 +1685,57 @@ function focusPanel() {
   } catch {}
 }
 
+function focusField(fieldName = "") {
+  try {
+    const root = getRoot();
+    const field = root?.querySelector?.(`[data-field="${fieldName}"]`);
+
+    field?.focus?.();
+
+    if (
+      field &&
+      typeof field.setSelectionRange === "function" &&
+      typeof field.value === "string"
+    ) {
+      const end = field.value.length;
+      field.setSelectionRange(end, end);
+    }
+
+    return Boolean(field);
+  } catch {
+    return false;
+  }
+}
+
+function focusFirstInvalidField() {
+  const errors = safeObject(modalState.errors);
+
+  if (errors.name && focusField("name")) return true;
+  if (errors.email && focusField("email")) return true;
+  if (errors.phone && focusField("phone")) return true;
+  if (errors.customerType && focusField("customerType")) return true;
+  if (errors.nif && focusField("nif")) return true;
+  if (errors.addressStreet && focusField("addressStreet")) return true;
+  if (errors.addressCp && focusField("addressCp")) return true;
+  if (errors.addressCity && focusField("addressCity")) return true;
+  if (errors.addressProvince && focusField("addressProvince")) return true;
+  if (errors.addressCountry && focusField("addressCountry")) return true;
+
+  focusPanel();
+  return false;
+}
+
+function focusPreferredField() {
+  const form = safeObject(modalState.form);
+
+  if (!safeText(form.name, "") && focusField("name")) return true;
+  if (!safeText(form.email, "") && focusField("email")) return true;
+  if (!isValidSpanishPhone(form.phone) && focusField("phone")) return true;
+
+  focusPanel();
+  return true;
+}
+
 /* =========================================================
    OPEN / CLOSE / UPDATE
 ========================================================= */
@@ -1239,6 +1744,7 @@ export function openUsuariosCreateModal(draft = {}) {
   modalState.lastActiveElement = document.activeElement || null;
   modalState.isOpen = true;
   modalState.submitting = false;
+
   resetFeedbackState();
 
   modalState.form = {
@@ -1250,13 +1756,17 @@ export function openUsuariosCreateModal(draft = {}) {
     first(modalState.form.customerType, modalState.form.tipo)
   );
 
+  modalState.form.phone = formatSpanishPhoneForInput(
+    first(modalState.form.phone, `${PHONE_PREFIX} `)
+  );
+
   persistDraft();
 
   renderModal();
   lockBody();
   attachEscHandler();
   attachRootBindings();
-  focusPanel();
+  focusPreferredField();
 
   safeEmit("usuarios:create-modal:opened", {
     draft: { ...modalState.form },
@@ -1274,6 +1784,7 @@ export function closeUsuariosCreateModal() {
 
   modalState.isOpen = false;
   modalState.submitting = false;
+
   resetFeedbackState();
   resetFormState();
 
@@ -1306,10 +1817,14 @@ export function updateUsuariosCreateModal(draft = {}) {
     first(modalState.form.customerType, modalState.form.tipo)
   );
 
+  modalState.form.phone = formatSpanishPhoneForInput(
+    first(modalState.form.phone, `${PHONE_PREFIX} `)
+  );
+
   persistDraft();
   renderModal();
   attachRootBindings();
-  focusPanel();
+  focusPreferredField();
 
   return true;
 }
@@ -1327,20 +1842,31 @@ async function handleSubmit() {
   modalState.createdUserId = "";
   modalState.serverError = "";
 
+  modalState.form.phone = formatSpanishPhoneForInput(modalState.form.phone);
+
   const validation = validateForm(modalState.form);
   modalState.errors = validation.errors;
 
   if (!validation.valid) {
     renderModal();
     attachRootBindings();
-    focusPanel();
+    focusFirstInvalidField();
+
     showToast("Revisa los campos obligatorios.", "warning");
+
     return false;
   }
 
   const payload = buildPayload(modalState.form);
 
   modalState.submitting = true;
+
+  syncCreateViewState({
+    submitting: true,
+    serverError: "",
+    errors: {},
+  });
+
   renderModal();
   attachRootBindings();
   focusPanel();
@@ -1360,6 +1886,14 @@ async function handleSubmit() {
     modalState.successMessage = "El usuario se ha creado correctamente.";
     modalState.createdUserId = createdUserId;
 
+    syncCreateViewState({
+      submitting: false,
+      errors: {},
+      serverError: "",
+      createdUserId,
+      successMessage: "El usuario se ha creado correctamente.",
+    });
+
     clearDraft();
     resetFormState();
 
@@ -1375,22 +1909,36 @@ async function handleSubmit() {
       detail,
     });
 
+    safeEmit("usuarios:created", {
+      userId: createdUserId,
+      response,
+      detail,
+    });
+
     setTimeout(() => {
-      closeUsuariosCreateModal();
-    }, 450);
+      if (modalState.isOpen && !modalState.submitting) {
+        closeUsuariosCreateModal();
+      }
+    }, 380);
 
     return true;
   } catch (error) {
     modalState.submitting = false;
     modalState.serverError = safeErrorMessage(error);
 
+    syncCreateViewState({
+      submitting: false,
+      serverError: modalState.serverError,
+    });
+
     safeEmit("usuarios:create:error", {
       error,
+      message: modalState.serverError,
     });
 
     renderModal();
     attachRootBindings();
-    focusPanel();
+    focusPreferredField();
 
     showToast(modalState.serverError, "error");
 
@@ -1402,11 +1950,41 @@ async function handleSubmit() {
    ROOT BINDINGS
 ========================================================= */
 
+function clearFieldError(field = "") {
+  const key = safeText(field, "");
+
+  if (!key || !modalState.errors[key]) return;
+
+  const nextErrors = { ...safeObject(modalState.errors) };
+  delete nextErrors[key];
+
+  modalState.errors = nextErrors;
+}
+
+function clearTransientFeedback() {
+  if (modalState.serverError) {
+    modalState.serverError = "";
+  }
+
+  if (modalState.successMessage || modalState.createdUserId) {
+    modalState.successMessage = "";
+    modalState.createdUserId = "";
+  }
+}
+
 function handleFieldChange(target) {
   const field = safeText(target?.dataset?.field, "");
   if (!field) return;
 
   let value = target?.value;
+
+  if (field === "phone") {
+    value = formatSpanishPhoneForInput(value);
+
+    try {
+      target.value = value;
+    } catch {}
+  }
 
   if (field === "customerType") {
     value = normalizeCustomerType(value);
@@ -1416,31 +1994,22 @@ function handleFieldChange(target) {
     [field]: value,
   });
 
-  if (modalState.errors[field]) {
-    const nextErrors = { ...modalState.errors };
-    delete nextErrors[field];
-    modalState.errors = nextErrors;
+  clearFieldError(field);
+
+  if (
+    field === "customerType" &&
+    value === "particular" &&
+    modalState.errors.nif
+  ) {
+    clearFieldError("nif");
   }
 
-  if (field === "customerType" && value === "particular" && modalState.errors.nif) {
-    const nextErrors = { ...modalState.errors };
-    delete nextErrors.nif;
-    modalState.errors = nextErrors;
-  }
-
-  if (modalState.serverError) {
-    modalState.serverError = "";
-  }
-
-  if (modalState.successMessage || modalState.createdUserId) {
-    modalState.successMessage = "";
-    modalState.createdUserId = "";
-  }
+  clearTransientFeedback();
 
   if (field === "customerType") {
     renderModal();
     attachRootBindings();
-    focusPanel();
+    focusField("customerType");
   }
 }
 
@@ -1471,21 +2040,32 @@ function attachRootBindings() {
     if (!form) return;
 
     event.preventDefault();
+
     await handleSubmit();
   };
 
   const onClick = (event) => {
     const closeBtn = event.target.closest("[data-modal-close='true']");
+
     if (closeBtn) {
       event.preventDefault();
-      closeUsuariosCreateModal();
+
+      if (!modalState.submitting) {
+        closeUsuariosCreateModal();
+      }
+
       return;
     }
 
     const overlay = event.target.closest("[data-usuarios-create-modal-overlay='true']");
     const panel = event.target.closest("[data-usuarios-create-modal-panel='true']");
 
-    if (overlay && !panel && event.target === overlay) {
+    if (
+      overlay &&
+      !panel &&
+      event.target === overlay &&
+      !modalState.submitting
+    ) {
       closeUsuariosCreateModal();
     }
   };
@@ -1505,6 +2085,7 @@ function attachRootBindings() {
 
 function detachRootBindings() {
   const root = getRoot();
+
   if (!root) {
     modalState.bindingsAttached = false;
     return;
@@ -1514,6 +2095,7 @@ function detachRootBindings() {
     try {
       root.removeEventListener("input", root.__usuariosCreateModalInputHandler);
     } catch {}
+
     delete root.__usuariosCreateModalInputHandler;
   }
 
@@ -1521,6 +2103,7 @@ function detachRootBindings() {
     try {
       root.removeEventListener("change", root.__usuariosCreateModalChangeHandler);
     } catch {}
+
     delete root.__usuariosCreateModalChangeHandler;
   }
 
@@ -1528,6 +2111,7 @@ function detachRootBindings() {
     try {
       root.removeEventListener("submit", root.__usuariosCreateModalSubmitHandler);
     } catch {}
+
     delete root.__usuariosCreateModalSubmitHandler;
   }
 
@@ -1535,6 +2119,7 @@ function detachRootBindings() {
     try {
       root.removeEventListener("click", root.__usuariosCreateModalClickHandler);
     } catch {}
+
     delete root.__usuariosCreateModalClickHandler;
   }
 
@@ -1545,9 +2130,14 @@ function detachRootBindings() {
    EVENT BUS BRIDGE
 ========================================================= */
 
+function unwrapEventDraft(event) {
+  const payload = event?.detail ?? event ?? {};
+  return safeObject(payload?.draft ?? payload);
+}
+
 function handleOpenEvent(event) {
-  const draft = event?.detail?.draft || event?.detail || event || {};
-  openUsuariosCreateModal(safeObject(draft));
+  const draft = unwrapEventDraft(event);
+  openUsuariosCreateModal(draft);
 }
 
 function handleCloseEvent() {
@@ -1555,8 +2145,8 @@ function handleCloseEvent() {
 }
 
 function handleUpdateEvent(event) {
-  const draft = event?.detail?.draft || event?.detail || event || {};
-  updateUsuariosCreateModal(safeObject(draft));
+  const draft = unwrapEventDraft(event);
+  updateUsuariosCreateModal(draft);
 }
 
 let busAttached = false;
@@ -1615,6 +2205,7 @@ export const OnionUsuariosCreateModal = {
     detachBus();
 
     const root = getRoot();
+
     try {
       root?.remove?.();
     } catch {}
@@ -1625,7 +2216,10 @@ export const OnionUsuariosCreateModal = {
 
 try {
   window.OnionUsuariosCreateModal = OnionUsuariosCreateModal;
+
   window.renderUsuariosCreateModal = OnionUsuariosCreateModal.open;
+  window.renderUsuarioCreateModal = OnionUsuariosCreateModal.open;
+  window.openUsuarioCreateModal = OnionUsuariosCreateModal.open;
 } catch {}
 
 /* =========================================================

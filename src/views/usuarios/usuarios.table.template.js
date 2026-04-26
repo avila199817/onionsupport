@@ -21,8 +21,7 @@
    - columna email dedicada
    - columna ubicación solo ciudad
    - actividad mostrando solo última conexión
-   - límite de 5 usuarios por hoja
-   - fail-safe visual para vista solo admin
+   - límite fijo de 5 usuarios por hoja
 
    HARDENING PRO:
    - no depende de imports externos
@@ -32,6 +31,7 @@
    - estilos encapsulados
    - responsive robusto
    - acciones compatibles con data-usuarios-action y data-action
+   - restricción admin no duplicada: la controla la View
 ========================================================= */
 
 /* =========================================================
@@ -104,6 +104,7 @@ function normalizeKey(value = "") {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[\s-]+/g, "_")
+    .replace(/[^a-z0-9_:.]/g, "")
     .trim();
 }
 
@@ -208,45 +209,28 @@ function formatLastUpdate(value = null) {
 ========================================================= */
 
 function unwrapItemsEnvelope(value) {
-  const obj = safeObject(value);
-
   if (Array.isArray(value)) {
     return value;
   }
 
-  if (Array.isArray(obj?.usuarios)) {
-    return obj.usuarios;
-  }
+  const obj = safeObject(value);
 
-  if (Array.isArray(obj?.users)) {
-    return obj.users;
-  }
+  if (Array.isArray(obj.usuarios)) return obj.usuarios;
+  if (Array.isArray(obj.users)) return obj.users;
+  if (Array.isArray(obj.items)) return obj.items;
+  if (Array.isArray(obj.rows)) return obj.rows;
+  if (Array.isArray(obj.data)) return obj.data;
+  if (Array.isArray(obj.results)) return obj.results;
 
-  if (Array.isArray(obj?.items)) {
-    return obj.items;
-  }
-
-  if (Array.isArray(obj?.rows)) {
-    return obj.rows;
-  }
-
-  if (Array.isArray(obj?.data)) {
-    return obj.data;
-  }
-
-  if (Array.isArray(obj?.results)) {
-    return obj.results;
-  }
-
-  if (obj?.data && typeof obj.data === "object") {
+  if (obj.data && typeof obj.data === "object") {
     return unwrapItemsEnvelope(obj.data);
   }
 
-  if (obj?.payload && typeof obj.payload === "object") {
+  if (obj.payload && typeof obj.payload === "object") {
     return unwrapItemsEnvelope(obj.payload);
   }
 
-  if (obj?.response && typeof obj.response === "object") {
+  if (obj.response && typeof obj.response === "object") {
     return unwrapItemsEnvelope(obj.response);
   }
 
@@ -266,6 +250,7 @@ function getResolvedItems(input = {}) {
     data.results,
     data.payload,
     data.response,
+
     state.items,
     state.rows,
     state.users,
@@ -274,6 +259,7 @@ function getResolvedItems(input = {}) {
     state.results,
     state.payload,
     state.response,
+
     input,
   ];
 
@@ -291,6 +277,7 @@ function getResolvedItems(input = {}) {
 function resolveRemoteCount(input = {}, items = []) {
   const data = safeObject(input);
   const state = safeObject(data.state);
+
   const payload = safeObject(first(data.payload, state.payload));
   const response = safeObject(first(data.response, state.response));
   const lastResponse = safeObject(first(data.lastResponse, state.lastResponse));
@@ -304,10 +291,12 @@ function resolveRemoteCount(input = {}, items = []) {
         data.totalCount,
         data.count,
         data.total,
+
         state.remoteCount,
         state.totalCount,
         state.count,
         state.total,
+
         stats.total,
         payload.count,
         payload.total,
@@ -315,6 +304,7 @@ function resolveRemoteCount(input = {}, items = []) {
         response.total,
         lastResponse.count,
         lastResponse.total,
+
         safeArray(items).length
       ),
       safeArray(items).length
@@ -322,102 +312,16 @@ function resolveRemoteCount(input = {}, items = []) {
   );
 }
 
-/* =========================================================
-   ADMIN FAIL-SAFE
-========================================================= */
-
-function isAdminRole(value = "") {
-  const key = normalizeKey(value);
-
-  return [
-    "admin",
-    "administrator",
-    "administrador",
-    "super_admin",
-    "superadmin",
-    "owner",
-    "root",
-  ].includes(key);
-}
-
-function isAdminAccessAllowed(input = {}) {
+function shouldRenderRestricted(input = {}) {
   const data = safeObject(input);
   const state = safeObject(data.state);
-  const user = safeObject(
-    first(
-      data.user,
-      data.currentUser,
-      data.sessionUser,
-      state.user,
-      state.currentUser,
-      state.sessionUser,
-      state.authUser
-    )
-  );
 
-  if (
+  return Boolean(
     data.forbidden === true ||
-    state.forbidden === true ||
-    data.accessDenied === true ||
-    state.accessDenied === true
-  ) {
-    return false;
-  }
-
-  const explicitAdmin = first(
-    data.isAdmin,
-    data.admin,
-    data.canManageUsers,
-    data.canAccessUsers,
-    state.isAdmin,
-    state.admin,
-    state.canManageUsers,
-    state.canAccessUsers,
-    user.isAdmin,
-    user.admin,
-    user.canManageUsers,
-    user.canAccessUsers
+      data.accessDenied === true ||
+      state.forbidden === true ||
+      state.accessDenied === true
   );
-
-  if (typeof explicitAdmin === "boolean") {
-    return explicitAdmin;
-  }
-
-  const role = first(
-    data.role,
-    data.rol,
-    data.userRole,
-    state.role,
-    state.rol,
-    state.userRole,
-    user.role,
-    user.rol,
-    user.type,
-    user.userType
-  );
-
-  if (role) {
-    return isAdminRole(role);
-  }
-
-  const roles = first(
-    data.roles,
-    state.roles,
-    user.roles,
-    user.permissions,
-    state.permissions
-  );
-
-  if (Array.isArray(roles) && roles.length) {
-    return roles.some((item) => isAdminRole(item));
-  }
-
-  /*
-    Fail-open intencionado:
-    el bloqueo real debe estar en router/guards.
-    Aquí solo se pinta denegado si el state/props lo indica.
-  */
-  return true;
 }
 
 /* =========================================================
@@ -434,6 +338,7 @@ function getUsuarioId(item = {}) {
       item.username,
       item.userName,
       item.email,
+
       item?.raw?.userId,
       item?.raw?.usuarioId,
       item?.raw?.id,
@@ -456,6 +361,7 @@ function getUsuarioCode(item = {}) {
       item.id,
       item.code,
       item.email,
+
       item?.raw?.username,
       item?.raw?.userName,
       item?.raw?.userId,
@@ -490,6 +396,7 @@ function getUsuarioName(item = {}) {
       item.username,
       item.userName,
       item.email,
+
       item?.raw?.fullName,
       item?.raw?.displayName,
       item?.raw?.name,
@@ -518,6 +425,7 @@ function getUsuarioDescription(item = {}) {
       item.description,
       item.descripcion,
       item.notes,
+
       item?.raw?.phone,
       item?.raw?.telefono,
       item?.raw?.mobile,
@@ -541,6 +449,7 @@ function getUsuarioEmail(item = {}) {
       item.usuario?.email,
       item.profile?.email,
       item.contact?.email,
+
       item?.raw?.email,
       item?.raw?.mail,
       item?.raw?.userEmail,
@@ -570,6 +479,7 @@ function getUsuarioLocation(item = {}) {
       item.profile?.ciudad,
       item.usuario?.city,
       item.usuario?.ciudad,
+
       item?.raw?.city,
       item?.raw?.ciudad,
       item?.raw?.locationCity,
@@ -605,6 +515,7 @@ function getUsuarioAvatarUrl(item = {}) {
       item.usuario?.avatarUrl,
       item.profile?.avatar,
       item.profile?.avatarUrl,
+
       item?.raw?.avatar,
       item?.raw?.avatarUrl,
       item?.raw?.userAvatar,
@@ -651,31 +562,37 @@ function getStatusValue(item = {}) {
     item.state,
     item.accountStatus,
     item.userStatus,
+
     item?.raw?.status,
     item?.raw?.estado,
     item?.raw?.state,
     item?.raw?.accountStatus,
     item?.raw?.userStatus,
+
     typeof item.isActive === "boolean"
       ? item.isActive
         ? "active"
         : "inactive"
       : null,
+
     typeof item.enabled === "boolean"
       ? item.enabled
         ? "active"
         : "inactive"
       : null,
+
     typeof item?.raw?.isActive === "boolean"
       ? item.raw.isActive
         ? "active"
         : "inactive"
       : null,
+
     typeof item?.raw?.enabled === "boolean"
       ? item.raw.enabled
         ? "active"
         : "inactive"
       : null,
+
     "active"
   );
 }
@@ -741,6 +658,7 @@ function getCreatedAt(item = {}) {
     item.created,
     item.date,
     item.updatedAt,
+
     item?.raw?.createdAt,
     item?.raw?.created_at,
     item?.raw?.fechaCreacion,
@@ -763,6 +681,7 @@ function getUpdatedAt(item = {}) {
     item.ultimoAcceso,
     item.createdAt,
     item.created_at,
+
     item?.raw?.updatedAt,
     item?.raw?.updated_at,
     item?.raw?.modifiedAt,
@@ -784,6 +703,7 @@ function getLastLoginAt(item = {}) {
     item.ultimoAcceso,
     item.lastSeenAt,
     item.lastActivityAt,
+
     item?.raw?.lastLoginAt,
     item?.raw?.last_login_at,
     item?.raw?.lastAccessAt,
@@ -793,18 +713,18 @@ function getLastLoginAt(item = {}) {
   );
 }
 
+function getSortTimestamp(item = {}) {
+  const value = first(getUpdatedAt(item), getCreatedAt(item), 0);
+  const date = new Date(value);
+  const time = date.getTime();
+
+  return Number.isFinite(time) ? time : 0;
+}
+
 function sortUsuariosByUpdatedDesc(items = []) {
   return safeArray(items)
     .slice()
-    .sort((a, b) => {
-      const aTime = new Date(first(getUpdatedAt(a), getCreatedAt(a), 0)).getTime();
-      const bTime = new Date(first(getUpdatedAt(b), getCreatedAt(b), 0)).getTime();
-
-      const safeA = Number.isFinite(aTime) ? aTime : 0;
-      const safeB = Number.isFinite(bTime) ? bTime : 0;
-
-      return safeB - safeA;
-    });
+    .sort((a, b) => getSortTimestamp(b) - getSortTimestamp(a));
 }
 
 /* =========================================================
@@ -839,10 +759,7 @@ function getPagination(items = [], input = {}) {
   const data = safeObject(input);
   const runtime = safeObject(data.state);
 
-  const pageSize = Math.max(
-    1,
-    safeNumber(first(data.pageSize, runtime.pageSize, runtime.limit, PAGE_SIZE), PAGE_SIZE)
-  );
+  const pageSize = PAGE_SIZE;
 
   const reportedTotal = Math.max(
     allItems.length,
@@ -981,7 +898,6 @@ function renderAvatar(item = {}) {
           --avatar-fallback-border:${theme.border};
           --avatar-fallback-text:${theme.text};
         "
-        title="${escapeHtml(fullName)}"
         aria-label="${escapeHtml(fullName)}"
         data-tooltip="${escapeHtml(fullName)}"
       >
@@ -1005,7 +921,6 @@ function renderAvatar(item = {}) {
         --avatar-fallback-border:${theme.border};
         --avatar-fallback-text:${theme.text};
       "
-      title="${escapeHtml(fullName)}"
       aria-label="${escapeHtml(fullName)}"
       data-tooltip="${escapeHtml(fullName)}"
     >
@@ -1167,7 +1082,7 @@ function renderMobileUsuarioCard(item = {}, state = {}) {
   `;
 }
 
-function renderEmptyState({ hasError = false, message = "" } = {}) {
+function renderEmptyContent({ hasError = false, message = "" } = {}) {
   return `
     <div class="usuarios-empty">
       <h3 class="usuarios-empty-title">
@@ -1220,7 +1135,7 @@ function renderEmptyState({ hasError = false, message = "" } = {}) {
   `;
 }
 
-function renderAccessDeniedState() {
+function renderAccessDeniedContent() {
   return `
     <div class="usuarios-empty usuarios-empty--forbidden">
       <h3 class="usuarios-empty-title">Acceso restringido</h3>
@@ -1707,9 +1622,9 @@ function renderStyles() {
       }
 
       .usuarios-chip--active{
-        color:#6d53d7;
-        background:rgba(124,92,255,.09);
-        border-color:rgba(124,92,255,.18);
+        color:#258a59;
+        background:rgba(54,198,144,.10);
+        border-color:rgba(54,198,144,.22);
       }
 
       .usuarios-chip--pending{
@@ -1725,9 +1640,9 @@ function renderStyles() {
       }
 
       .usuarios-chip--inactive{
-        color:#258a59;
-        background:rgba(54,198,144,.10);
-        border-color:rgba(54,198,144,.22);
+        color:#64748b;
+        background:rgba(100,116,139,.10);
+        border-color:rgba(100,116,139,.18);
       }
 
       .usuarios-date-inline,
@@ -2188,17 +2103,6 @@ function renderStyles() {
 
 export function renderHeader(input = {}) {
   const data = safeObject(input);
-
-  if (!isAdminAccessAllowed(data)) {
-    return `
-      ${renderStyles()}
-
-      <section class="usuarios-history">
-        ${renderAccessDeniedState()}
-      </section>
-    `;
-  }
-
   const items = getResolvedItems(data);
   const state = safeObject(data.state);
   const stats = computeStats(items);
@@ -2285,9 +2189,7 @@ export function renderHeader(input = {}) {
       </div>
 
       <div class="usuarios-hero-meta">
-        <span class="usuarios-meta-pill">
-          Panel admin
-        </span>
+        <span class="usuarios-meta-pill">Panel admin</span>
 
         <span class="usuarios-meta-pill">
           ${escapeHtml(`${remoteCount} usuarios registrados`)}
@@ -2381,25 +2283,18 @@ function renderMobileCards(items = [], state = {}) {
 
 export function renderTable(input = {}) {
   const data = safeObject(input);
-
-  if (!isAdminAccessAllowed(data)) {
-    return `
-      <section class="usuarios-history">
-        ${renderAccessDeniedState()}
-      </section>
-    `;
-  }
-
   const items = getResolvedItems(data);
   const state = safeObject(data.state);
+
   const pagination = getPagination(items, {
     ...data,
     remoteCount: resolveRemoteCount(data, items),
+    pageSize: PAGE_SIZE,
   });
 
   const loading = Boolean(state.loading);
   const refreshing = Boolean(state.refreshing);
-  const hasError = Boolean(safeText(state.error, data.error || ""));
+  const hasError = Boolean(safeText(first(state.error, data.error), ""));
   const errorMessage = safeText(first(state.error, data.error), "");
 
   const showInitialLoading = loading && !pagination.pageItems.length;
@@ -2459,7 +2354,7 @@ export function renderTable(input = {}) {
                     ${renderDesktopTable(pagination.pageItems, state)}
                     ${renderMobileCards(pagination.pageItems, state)}
                   `
-                  : renderEmptyState({ hasError, message: errorMessage })
+                  : renderEmptyContent({ hasError, message: errorMessage })
               }
             </div>
           `
@@ -2494,7 +2389,7 @@ export function renderErrorState(message = "No se pudo cargar la colección.") {
     ${renderStyles()}
 
     <section class="usuarios-history">
-      ${renderEmptyState({
+      ${renderEmptyContent({
         hasError: true,
         message: safeText(message, "Error desconocido al cargar la vista."),
       })}
@@ -2502,12 +2397,31 @@ export function renderErrorState(message = "No se pudo cargar la colección.") {
   `;
 }
 
-export function renderEmptyUsuariosState() {
+export function renderEmptyState(options = {}) {
   return `
     ${renderStyles()}
 
     <section class="usuarios-history">
-      ${renderEmptyState({ hasError: false })}
+      ${renderEmptyContent({
+        hasError: Boolean(options?.hasError),
+        message: safeText(options?.message, ""),
+      })}
+    </section>
+  `;
+}
+
+export function renderEmptyUsuariosState() {
+  return renderEmptyState({
+    hasError: false,
+  });
+}
+
+export function renderAccessDeniedState() {
+  return `
+    ${renderStyles()}
+
+    <section class="usuarios-history">
+      ${renderAccessDeniedContent()}
     </section>
   `;
 }
@@ -2522,6 +2436,14 @@ export function renderCards(input = {}) {
 
 export function renderUsuariosTableTemplate(input = {}) {
   const data = safeObject(input);
+
+  if (shouldRenderRestricted(data)) {
+    return `
+      <section class="usuarios-view-root">
+        ${renderAccessDeniedState()}
+      </section>
+    `;
+  }
 
   return `
     <section class="usuarios-view-root">

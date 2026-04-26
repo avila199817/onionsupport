@@ -770,6 +770,39 @@ export const ActivateAccountView = (() => {
     };
   }
 
+  function getTokenRecoveryInputValue() {
+    if (!isBrowser()) {
+      return "";
+    }
+
+    try {
+      const input = document.getElementById("activateAccountTokenRecovery");
+      return safeText(input?.value, "");
+    } catch {
+      return "";
+    }
+  }
+
+  function recoverTokenFromManualInput() {
+    const raw = getTokenRecoveryInputValue();
+
+    if (!raw) {
+      return "";
+    }
+
+    const direct = extractTokenFromUrlLike(raw);
+
+    if (direct) {
+      return direct;
+    }
+
+    try {
+      return safeText(decodeURIComponent(raw), "");
+    } catch {
+      return safeText(raw, "");
+    }
+  }
+
   function bindSharedPasswordFields(container) {
     try {
       if (typeof cleanupPasswordFields === "function") {
@@ -1395,6 +1428,25 @@ export const ActivateAccountView = (() => {
 
       if (action === "go-login") {
         await navigateToLogin();
+        return;
+      }
+
+      if (action === "recover-token") {
+        const recoveredToken = recoverTokenFromManualInput();
+
+        if (!recoveredToken) {
+          setInlineError("Pega el enlace completo de activación o el token.");
+          showToast("No se ha podido recuperar un token válido.", "error");
+          return;
+        }
+
+        state.token = recoveredToken;
+        setStatus(ACTIVATE_ACCOUNT_STATUS.IDLE, {
+          message: "Token recuperado. Ya puedes definir la contraseña y activar la cuenta.",
+          error: "",
+        });
+
+        showToast("Token recuperado correctamente.", "success");
         return;
       }
 

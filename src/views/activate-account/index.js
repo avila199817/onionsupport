@@ -290,6 +290,34 @@ export const ActivateAccountView = (() => {
           return value;
         }
       }
+
+      /*
+        Fallback para enlaces envueltos por trackers/mail clients:
+        algunos proveedores meten la URL real dentro de otro query param
+        (ej: ?redirect=https%3A%2F%2F...%3Ftoken%3Dxxx).
+      */
+      for (const [, rawValue] of params.entries()) {
+        const value = safeText(rawValue, "");
+
+        if (!value || !value.includes("token")) {
+          continue;
+        }
+
+        const nestedToken = extractTokenFromUrlLike(value);
+
+        if (nestedToken) {
+          return nestedToken;
+        }
+
+        try {
+          const decoded = decodeURIComponent(value);
+          const decodedToken = extractTokenFromUrlLike(decoded);
+
+          if (decodedToken) {
+            return decodedToken;
+          }
+        } catch {}
+      }
     } catch {}
 
     return "";

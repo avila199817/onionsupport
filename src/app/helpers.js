@@ -7,6 +7,7 @@
    - normalizar public path y canonical path
    - preservar query/hash en rutas públicas sensibles
    - preservar token de activación antes del primer render
+   - preservar token de reset antes del primer render
    - NO resucitar token tras scrub oficial
    - escapar HTML seguro para render inline
    - gestionar scope global de cleanup
@@ -17,12 +18,14 @@
    - fallback browser/server safe
    - helpers puros e idempotentes
    - cero throws accidentales
-   - prioridad al browser/initial URL para activation token
+   - prioridad al browser/initial URL para rutas públicas con token
    - soporte slug /@username robusto
    - canonical sin query/hash
    - publicPath con query/hash
    - soporte hash-router /#/activate-account?token=...
    - soporte hashbang #!/activate-account?token=...
+   - soporte reset-password confirm con token en query o path
+   - snapshots debug sin tokens reales
 ========================================================= */
 
 import { APP_SCOPE } from "./constants.js";
@@ -31,15 +34,119 @@ import { APP_SCOPE } from "./constants.js";
    CONSTANTS
 ========================================================= */
 
-const ACTIVATION_PATH = "/activate-account";
+const DEFAULT_ROUTE =
+  "/";
 
-const ACTIVATION_TOKEN_PARAM_NAMES = [
-  "token",
-  "activationToken",
-  "activateToken",
-  "code",
-  "t",
-];
+const INITIAL_URL_KEY =
+  "__ONION_INITIAL_URL__";
+
+const ACTIVATION_PATH =
+  "/activate-account";
+
+const RESET_CONFIRM_PATH =
+  "/reset-password/confirm";
+
+const ACTIVATION_TOKEN_PARAM_NAMES =
+  Object.freeze([
+    "token",
+    "activationToken",
+    "activateToken",
+    "code",
+    "t",
+  ]);
+
+const RESET_TOKEN_PARAM_NAMES =
+  Object.freeze([
+    "token",
+    "resetToken",
+    "passwordResetToken",
+    "code",
+    "t",
+  ]);
+
+const GENERIC_TOKEN_PARAM_NAMES =
+  Object.freeze([
+    "token",
+    "activationToken",
+    "activateToken",
+    "resetToken",
+    "passwordResetToken",
+    "code",
+    "t",
+    "access_token",
+    "refresh_token",
+    "id_token",
+  ]);
+
+const PROTECTED_PUBLIC_TOKEN_ROUTES =
+  Object.freeze([
+    Object.freeze({
+      key:
+        "activation",
+
+      path:
+        ACTIVATION_PATH,
+
+      windowKey:
+        "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+
+      stateUrlKey:
+        "bootActivationInitialUrl",
+
+      statePathKey:
+        "bootActivationInitialPath",
+
+      stateIsRouteKey:
+        "bootIsActivation",
+
+      stateHasTokenKey:
+        "bootHasActivationToken",
+
+      scrubbedStateKeys:
+        Object.freeze([
+          "scrubbedActivationToken",
+          "activationTokenScrubbed",
+          "scrubbedActivateAccountToken",
+        ]),
+
+      tokenParamNames:
+        ACTIVATION_TOKEN_PARAM_NAMES,
+    }),
+
+    Object.freeze({
+      key:
+        "resetConfirm",
+
+      path:
+        RESET_CONFIRM_PATH,
+
+      windowKey:
+        "__ONION_RESET_CONFIRM_INITIAL_URL__",
+
+      stateUrlKey:
+        "bootResetConfirmInitialUrl",
+
+      statePathKey:
+        "bootResetConfirmInitialPath",
+
+      stateIsRouteKey:
+        "bootIsResetConfirm",
+
+      stateHasTokenKey:
+        "bootHasResetToken",
+
+      scrubbedStateKeys:
+        Object.freeze([
+          "scrubbedResetToken",
+          "resetTokenScrubbed",
+          "scrubbedResetConfirmToken",
+          "scrubbedPasswordResetToken",
+        ]),
+
+      tokenParamNames:
+        RESET_TOKEN_PARAM_NAMES,
+    }),
+  ]);
 
 /* =========================================================
    BASICS
@@ -52,6 +159,27 @@ function isBrowser() {
   );
 }
 
+function isObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object"
+  );
+}
+
+function safeObject(value) {
+  return (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  )
+    ? value
+    : {};
+}
+
+function isFunction(value) {
+  return typeof value === "function";
+}
+
 function safeText(value, fallback = "") {
   if (
     value === null ||
@@ -60,9 +188,28 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text =
+    String(value).trim();
 
   return text || fallback;
+}
+
+function safeBool(value, fallback = false) {
+  if (value === true) {
+    return true;
+  }
+
+  if (value === false) {
+    return false;
+  }
+
+  return Boolean(fallback);
+}
+
+function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
 }
 
 function getBaseOrigin() {
@@ -76,8 +223,24 @@ function getBaseOrigin() {
   return "http://localhost";
 }
 
+function hasOwn(object, key) {
+  try {
+    return Object.prototype.hasOwnProperty.call(
+      object,
+      key
+    );
+  } catch {
+    return false;
+  }
+}
+
+/* =========================================================
+   HASH ROUTER
+========================================================= */
+
 function isHashRouterPath(value = "") {
-  const raw = String(value || "").trim();
+  const raw =
+    String(value || "").trim();
 
   return (
     raw.startsWith("#/") ||
@@ -86,10 +249,11 @@ function isHashRouterPath(value = "") {
 }
 
 function normalizeHashRouterPath(value = "") {
-  const raw = String(value || "").trim();
+  const raw =
+    String(value || "").trim();
 
   if (!raw) {
-    return "/";
+    return DEFAULT_ROUTE;
   }
 
   if (raw.startsWith("#!")) {
@@ -103,28 +267,42 @@ function normalizeHashRouterPath(value = "") {
    PATH NORMALIZATION
 ========================================================= */
 
-function splitRawPath(path = "/") {
+function splitRawPath(path = DEFAULT_ROUTE) {
   const raw =
-    safeText(path, "/") || "/";
+    safeText(path, DEFAULT_ROUTE) ||
+    DEFAULT_ROUTE;
 
-  let pathname = raw;
-  let search = "";
-  let hash = "";
+  let pathname =
+    raw;
+
+  let search =
+    "";
+
+  let hash =
+    "";
 
   const hashIndex =
     pathname.indexOf("#");
 
   if (hashIndex >= 0) {
-    hash = pathname.slice(hashIndex);
-    pathname = pathname.slice(0, hashIndex) || "/";
+    hash =
+      pathname.slice(hashIndex);
+
+    pathname =
+      pathname.slice(0, hashIndex) ||
+      DEFAULT_ROUTE;
   }
 
   const searchIndex =
     pathname.indexOf("?");
 
   if (searchIndex >= 0) {
-    search = pathname.slice(searchIndex);
-    pathname = pathname.slice(0, searchIndex) || "/";
+    search =
+      pathname.slice(searchIndex);
+
+    pathname =
+      pathname.slice(0, searchIndex) ||
+      DEFAULT_ROUTE;
   }
 
   return {
@@ -134,14 +312,41 @@ function splitRawPath(path = "/") {
   };
 }
 
-function normalizePathnameOnly(pathname = "/") {
-  let value = String(pathname || "/")
-    .trim()
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
+function normalizeSearch(search = "") {
+  const raw =
+    safeText(search, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  return raw.startsWith("?")
+    ? raw
+    : `?${raw.replace(/^\?+/, "")}`;
+}
+
+function normalizeHash(hash = "") {
+  const raw =
+    safeText(hash, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  return raw.startsWith("#")
+    ? raw
+    : `#${raw.replace(/^#+/, "")}`;
+}
+
+function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
+  let value =
+    String(pathname || DEFAULT_ROUTE)
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
 
   if (!value) {
-    value = "/";
+    value = DEFAULT_ROUTE;
   }
 
   if (!value.startsWith("/")) {
@@ -152,20 +357,32 @@ function normalizePathnameOnly(pathname = "/") {
     value.length > 1 &&
     value.endsWith("/")
   ) {
-    value = value.replace(/\/+$/g, "") || "/";
+    value =
+      value.replace(/\/+$/g, "") ||
+      DEFAULT_ROUTE;
   }
 
   return value;
 }
 
-function fallbackNormalizePath(path = "/") {
+function fallbackNormalizePath(path = DEFAULT_ROUTE) {
   const raw =
-    safeText(path, "/") || "/";
+    safeText(path, DEFAULT_ROUTE) ||
+    DEFAULT_ROUTE;
+
+  if (isHashRouterPath(raw)) {
+    return fallbackNormalizePath(
+      normalizeHashRouterPath(raw)
+    );
+  }
 
   try {
-    if (/^https?:\/\//i.test(raw)) {
+    if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
       const parsed =
-        new URL(raw, getBaseOrigin());
+        new URL(
+          raw,
+          getBaseOrigin()
+        );
 
       if (
         parsed.hash &&
@@ -177,16 +394,10 @@ function fallbackNormalizePath(path = "/") {
       }
 
       return fallbackNormalizePath(
-        `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`
+        `${parsed.pathname || DEFAULT_ROUTE}${parsed.search || ""}${parsed.hash || ""}`
       );
     }
   } catch {}
-
-  if (isHashRouterPath(raw)) {
-    return fallbackNormalizePath(
-      normalizeHashRouterPath(raw)
-    );
-  }
 
   const {
     pathname,
@@ -194,21 +405,20 @@ function fallbackNormalizePath(path = "/") {
     hash,
   } = splitRawPath(raw);
 
-  return `${normalizePathnameOnly(pathname)}${search}${hash}`;
+  return `${normalizePathnameOnly(pathname)}${normalizeSearch(search)}${normalizeHash(hash)}`;
 }
 
-function normalizePath(AppCore, path = "/") {
+export function normalizePublicPath(AppCore, path = DEFAULT_ROUTE) {
   const raw =
-    safeText(path, "/") || "/";
+    safeText(path, DEFAULT_ROUTE) ||
+    DEFAULT_ROUTE;
 
   const fallback =
     fallbackNormalizePath(raw);
 
   /*
-    Importante:
-    No confiamos ciegamente en AppCore.utils.normalizePath
-    si el path trae query/hash. Algunos normalizadores internos
-    pueden devolver solo pathname y comerse ?token=...
+    No delegamos a AppCore.utils.normalizePath si hay query/hash.
+    Algunos normalizadores internos devuelven solo pathname y se comen tokens.
   */
   const hasSuffix =
     raw.includes("?") ||
@@ -219,9 +429,7 @@ function normalizePath(AppCore, path = "/") {
   }
 
   try {
-    if (
-      typeof AppCore?.utils?.normalizePath === "function"
-    ) {
+    if (isFunction(AppCore?.utils?.normalizePath)) {
       const delegated =
         AppCore.utils.normalizePath(raw);
 
@@ -234,13 +442,13 @@ function normalizePath(AppCore, path = "/") {
   return fallback;
 }
 
-function stripSearchAndHash(path = "/") {
+function stripSearchAndHash(path = DEFAULT_ROUTE) {
   return splitRawPath(
     fallbackNormalizePath(path)
   ).pathname;
 }
 
-function getSearchAndHash(path = "/") {
+function getSearchAndHash(path = DEFAULT_ROUTE) {
   const parts =
     splitRawPath(
       fallbackNormalizePath(path)
@@ -249,7 +457,7 @@ function getSearchAndHash(path = "/") {
   return `${parts.search}${parts.hash}`;
 }
 
-function stripUsernamePrefix(path = "/") {
+export function stripUsernamePrefix(path = DEFAULT_ROUTE) {
   const normalized =
     fallbackNormalizePath(path);
 
@@ -263,20 +471,14 @@ function stripUsernamePrefix(path = "/") {
     pathname.replace(
       /^\/@[^/]+(?=\/|$)/i,
       ""
-    ) || "/";
+    ) || DEFAULT_ROUTE;
 
   return fallbackNormalizePath(
     `${clean}${suffix}`
   );
 }
 
-/*
-  Canonical interno:
-  - sin /@username
-  - sin query
-  - sin hash
-*/
-function fallbackNormalizeCanonicalPath(path = "/") {
+function fallbackNormalizeCanonicalPath(path = DEFAULT_ROUTE) {
   const stripped =
     stripUsernamePrefix(path);
 
@@ -286,16 +488,14 @@ function fallbackNormalizeCanonicalPath(path = "/") {
   return normalizePathnameOnly(pathname);
 }
 
-function normalizeCanonicalPath(AppCore, path = "/") {
+export function normalizeCanonicalPath(AppCore, path = DEFAULT_ROUTE) {
   const raw =
-    safeText(path, "/") || "/";
+    safeText(path, DEFAULT_ROUTE) ||
+    DEFAULT_ROUTE;
 
   const fallback =
     fallbackNormalizeCanonicalPath(raw);
 
-  /*
-    Si hay suffix, canonical siempre debe limpiarlo.
-  */
   const hasSuffix =
     raw.includes("?") ||
     raw.includes("#");
@@ -305,9 +505,7 @@ function normalizeCanonicalPath(AppCore, path = "/") {
   }
 
   try {
-    if (
-      typeof AppCore?.utils?.normalizeCanonicalPath === "function"
-    ) {
+    if (isFunction(AppCore?.utils?.normalizeCanonicalPath)) {
       const delegated =
         AppCore.utils.normalizeCanonicalPath(raw);
 
@@ -321,29 +519,32 @@ function normalizeCanonicalPath(AppCore, path = "/") {
 }
 
 /* =========================================================
-   BROWSER / INITIAL URL
+   URL CONVERSION
 ========================================================= */
 
 function buildBrowserPath() {
   if (!isBrowser()) {
-    return "/";
+    return DEFAULT_ROUTE;
   }
 
   try {
     const pathname =
-      window.location.pathname || "/";
+      window.location.pathname ||
+      DEFAULT_ROUTE;
 
     const search =
-      window.location.search || "";
+      window.location.search ||
+      "";
 
     const hash =
-      window.location.hash || "";
+      window.location.hash ||
+      "";
 
     /*
-      Soporte hash-router:
-      /#/activate-account?token=XXX
-      debe resolverse como:
-      /activate-account?token=XXX
+      Hash-router:
+        /#/activate-account?token=XXX
+        /#!/reset-password/confirm?token=XXX
+      se resuelve como ruta pública real.
     */
     if (
       hash &&
@@ -358,7 +559,7 @@ function buildBrowserPath() {
       `${pathname}${search}${hash}`
     );
   } catch {
-    return "/";
+    return DEFAULT_ROUTE;
   }
 }
 
@@ -378,7 +579,10 @@ function pathFromUrlLike(value = "") {
 
   try {
     const parsed =
-      new URL(raw, getBaseOrigin());
+      new URL(
+        raw,
+        getBaseOrigin()
+      );
 
     if (
       parsed.hash &&
@@ -390,133 +594,144 @@ function pathFromUrlLike(value = "") {
     }
 
     return fallbackNormalizePath(
-      `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`
+      `${parsed.pathname || DEFAULT_ROUTE}${parsed.search || ""}${parsed.hash || ""}`
     );
   } catch {
     return fallbackNormalizePath(raw);
   }
 }
 
-function captureInitialUrl() {
-  if (!isBrowser()) {
-    return false;
+/* =========================================================
+   TOKEN REDACTION
+========================================================= */
+
+export function redactTokenInText(value = "") {
+  let output =
+    safeText(value, "");
+
+  if (!output) {
+    return "";
+  }
+
+  for (const name of GENERIC_TOKEN_PARAM_NAMES) {
+    try {
+      output = output.replace(
+        new RegExp(`([?&#]${name}=)([^&#\\s]+)`, "gi"),
+        "$1***"
+      );
+    } catch {}
+  }
+
+  for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
+    try {
+      const escapedPath =
+        config.path.replace(/\//g, "\\/");
+
+      output = output.replace(
+        new RegExp(`(${escapedPath})\\/([^/?#\\s]+)`, "gi"),
+        "$1/***"
+      );
+    } catch {}
   }
 
   try {
-    const href =
-      window.location.href;
+    output = output.replace(
+      /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+      "$1***"
+    );
+  } catch {}
 
-    if (!window.__ONION_INITIAL_URL__) {
-      window.__ONION_INITIAL_URL__ = href;
-    }
-
-    const browserPath =
-      pathFromUrlLike(href);
-
-    if (
-      isActivationPath(browserPath) &&
-      !window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__
-    ) {
-      window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__ = href;
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function getInitialUrl() {
-  if (!isBrowser()) {
-    return "";
-  }
-
-  return safeText(
-    window.__ONION_INITIAL_URL__,
-    ""
-  );
-}
-
-function getActivationInitialUrl() {
-  if (!isBrowser()) {
-    return "";
-  }
-
-  return safeText(
-    window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__,
-    ""
-  );
+  return output;
 }
 
 /* =========================================================
-   ACTIVATION TOKEN DETECTION
+   PROTECTED PUBLIC TOKEN ROUTES
 ========================================================= */
 
-function isActivationPath(path = "") {
-  const normalized =
-    fallbackNormalizePath(path);
+function matchesProtectedRoute(config, pathOrUrl = "") {
+  if (!config?.path) {
+    return false;
+  }
+
+  const path =
+    pathFromUrlLike(pathOrUrl);
 
   const pathname =
-    stripSearchAndHash(normalized);
+    stripSearchAndHash(path);
 
   return (
-    pathname === ACTIVATION_PATH ||
-    pathname.startsWith(`${ACTIVATION_PATH}/`)
+    pathname === config.path ||
+    pathname.startsWith(`${config.path}/`)
   );
 }
 
-function extractActivationPathToken(path = "") {
-  const normalized =
-    fallbackNormalizePath(path);
-
-  const pathname =
-    stripSearchAndHash(normalized);
-
-  const parts =
-    pathname.split("/").filter(Boolean);
-
-  const index =
-    parts.findIndex(
-      (part) => part === "activate-account"
-    );
-
-  if (
-    index >= 0 &&
-    parts[index + 1]
-  ) {
-    try {
-      return safeText(
-        decodeURIComponent(parts[index + 1]),
-        ""
-      );
-    } catch {
-      return safeText(parts[index + 1], "");
-    }
-  }
-
-  return "";
+function getProtectedRouteConfig(value = "") {
+  return (
+    PROTECTED_PUBLIC_TOKEN_ROUTES.find((config) =>
+      matchesProtectedRoute(
+        config,
+        value
+      )
+    ) || null
+  );
 }
 
-function hasTokenInSearch(search = "") {
+function extractPathToken(config, pathOrUrl = "") {
+  if (!config?.path) {
+    return "";
+  }
+
+  const path =
+    pathFromUrlLike(pathOrUrl);
+
+  const pathname =
+    stripSearchAndHash(path);
+
+  if (!pathname.startsWith(`${config.path}/`)) {
+    return "";
+  }
+
+  const token =
+    pathname
+      .slice(`${config.path}/`.length)
+      .split("/")[0];
+
+  try {
+    return safeText(
+      decodeURIComponent(token || ""),
+      ""
+    );
+  } catch {
+    return safeText(
+      token,
+      ""
+    );
+  }
+}
+
+function hasTokenInSearch(search = "", names = []) {
   try {
     const params =
       new URLSearchParams(search || "");
 
-    return ACTIVATION_TOKEN_PARAM_NAMES.some(
-      (name) =>
-        Boolean(
-          safeText(
-            params.get(name),
-            ""
-          )
+    return names.some((name) =>
+      Boolean(
+        safeText(
+          params.get(name),
+          ""
         )
+      )
     );
   } catch {
     return false;
   }
 }
 
-function hasActivationToken(pathOrUrl = "") {
+function hasProtectedRouteToken(config, pathOrUrl = "") {
+  if (!config) {
+    return false;
+  }
+
   const raw =
     safeText(pathOrUrl, "");
 
@@ -524,22 +739,27 @@ function hasActivationToken(pathOrUrl = "") {
     return false;
   }
 
+  if (
+    extractPathToken(
+      config,
+      raw
+    )
+  ) {
+    return true;
+  }
+
   try {
     const parsed =
-      new URL(raw, getBaseOrigin());
-
-    const parsedPath =
-      pathFromUrlLike(raw);
-
-    if (
-      isActivationPath(parsedPath) &&
-      extractActivationPathToken(parsedPath)
-    ) {
-      return true;
-    }
+      new URL(
+        raw,
+        getBaseOrigin()
+      );
 
     if (
-      hasTokenInSearch(parsed.search)
+      hasTokenInSearch(
+        parsed.search,
+        config.tokenParamNames || []
+      )
     ) {
       return true;
     }
@@ -549,10 +769,14 @@ function hasActivationToken(pathOrUrl = "") {
       parsed.hash.includes("?")
     ) {
       const query =
-        parsed.hash.split("?").slice(1).join("?");
+        parsed.hash
+          .split("?")
+          .slice(1)
+          .join("?");
 
       return hasTokenInSearch(
-        query ? `?${query}` : ""
+        query ? `?${query}` : "",
+        config.tokenParamNames || []
       );
     }
 
@@ -562,8 +786,10 @@ function hasActivationToken(pathOrUrl = "") {
       fallbackNormalizePath(raw);
 
     if (
-      isActivationPath(normalized) &&
-      extractActivationPathToken(normalized)
+      extractPathToken(
+        config,
+        normalized
+      )
     ) {
       return true;
     }
@@ -572,7 +798,10 @@ function hasActivationToken(pathOrUrl = "") {
       splitRawPath(normalized);
 
     if (
-      hasTokenInSearch(parts.search)
+      hasTokenInSearch(
+        parts.search,
+        config.tokenParamNames || []
+      )
     ) {
       return true;
     }
@@ -582,10 +811,14 @@ function hasActivationToken(pathOrUrl = "") {
       parts.hash.includes("?")
     ) {
       const query =
-        parts.hash.split("?").slice(1).join("?");
+        parts.hash
+          .split("?")
+          .slice(1)
+          .join("?");
 
       return hasTokenInSearch(
-        query ? `?${query}` : ""
+        query ? `?${query}` : "",
+        config.tokenParamNames || []
       );
     }
 
@@ -593,80 +826,360 @@ function hasActivationToken(pathOrUrl = "") {
   }
 }
 
-function isActivationTokenScrubbed() {
-  if (!isBrowser()) {
+export function isProtectedPublicTokenPath(pathOrUrl = "") {
+  const config =
+    getProtectedRouteConfig(pathOrUrl);
+
+  return Boolean(
+    config &&
+    hasProtectedRouteToken(
+      config,
+      pathOrUrl
+    )
+  );
+}
+
+export function isActivationPath(path = "") {
+  return matchesProtectedRoute(
+    PROTECTED_PUBLIC_TOKEN_ROUTES[0],
+    path
+  );
+}
+
+export function isResetConfirmPath(path = "") {
+  return matchesProtectedRoute(
+    PROTECTED_PUBLIC_TOKEN_ROUTES[1],
+    path
+  );
+}
+
+/* =========================================================
+   INITIAL URL STORAGE
+========================================================= */
+
+function getWindowValue(key = "") {
+  if (
+    !isBrowser() ||
+    !key
+  ) {
+    return "";
+  }
+
+  try {
+    return safeText(
+      window[key],
+      ""
+    );
+  } catch {
+    return "";
+  }
+}
+
+function setWindowValue(key = "", value = "", onlyIfMissing = true) {
+  if (
+    !isBrowser() ||
+    !key
+  ) {
     return false;
   }
 
   try {
-    return Boolean(
-      window.history?.state?.scrubbedActivationToken
-    );
+    if (
+      onlyIfMissing &&
+      window[key]
+    ) {
+      return true;
+    }
+
+    window[key] =
+      value;
+
+    return true;
   } catch {
     return false;
   }
 }
 
-function getProtectedActivationPath() {
+function getInitialUrl() {
+  return getWindowValue(
+    INITIAL_URL_KEY
+  );
+}
+
+function setInitialUrl(value = "") {
+  return setWindowValue(
+    INITIAL_URL_KEY,
+    value,
+    true
+  );
+}
+
+function getStoredInitialUrl(config) {
+  return getWindowValue(
+    config?.windowKey || ""
+  );
+}
+
+function setStoredInitialUrl(config, value = "") {
+  return setWindowValue(
+    config?.windowKey || "",
+    value,
+    true
+  );
+}
+
+function captureInitialUrl() {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  try {
+    const href =
+      safeText(
+        window.location?.href,
+        ""
+      );
+
+    if (!href) {
+      return false;
+    }
+
+    setInitialUrl(href);
+
+    for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
+      if (
+        matchesProtectedRoute(
+          config,
+          href
+        ) &&
+        hasProtectedRouteToken(
+          config,
+          href
+        ) &&
+        !getStoredInitialUrl(config)
+      ) {
+        setStoredInitialUrl(
+          config,
+          href
+        );
+      }
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getProtectedStoredUrlCandidates() {
+  return PROTECTED_PUBLIC_TOKEN_ROUTES
+    .map((config) =>
+      getStoredInitialUrl(config)
+    )
+    .filter(Boolean);
+}
+
+function getStateProtectedUrlCandidates(AppCore) {
+  const state =
+    safeObject(
+      AppCore?.state
+    );
+
+  const values = [];
+
+  for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
+    values.push(
+      state[config.stateUrlKey],
+      state[config.statePathKey]
+    );
+  }
+
+  values.push(
+    state.bootProtectedInitialUrl,
+    state.bootProtectedInitialPath
+  );
+
+  return values
+    .map((value) =>
+      safeText(value, "")
+    )
+    .filter(Boolean);
+}
+
+/* =========================================================
+   SCRUB DETECTION
+========================================================= */
+
+function isProtectedTokenScrubbed(config = null) {
+  if (
+    !isBrowser() ||
+    !config
+  ) {
+    return false;
+  }
+
+  try {
+    const historyState =
+      safeObject(
+        window.history?.state
+      );
+
+    for (const key of config.scrubbedStateKeys || []) {
+      if (historyState[key]) {
+        return true;
+      }
+    }
+
+    if (
+      historyState.scrubbedPublicTokenRoute === config.key ||
+      historyState.scrubbedTokenRoute === config.key
+    ) {
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+function isAnyProtectedTokenScrubbed() {
+  return PROTECTED_PUBLIC_TOKEN_ROUTES.some((config) =>
+    isProtectedTokenScrubbed(config)
+  );
+}
+
+/* =========================================================
+   PROTECTED INITIAL CONTEXT
+========================================================= */
+
+function resolveProtectedInitialContext(AppCore = null) {
   captureInitialUrl();
 
-  /*
-    CRÍTICO:
-    Si ActivateAccountView ya capturó y limpió la URL,
-    NO debemos resucitar el token desde la URL inicial.
-  */
-  if (isActivationTokenScrubbed()) {
-    return "";
+  const candidates = [
+    ...getProtectedStoredUrlCandidates(),
+    ...getStateProtectedUrlCandidates(AppCore),
+    getInitialUrl(),
+    isBrowser()
+      ? safeText(window.location?.href, "")
+      : "",
+    buildBrowserPath(),
+  ]
+    .map((value) =>
+      safeText(value, "")
+    )
+    .filter(Boolean);
+
+  for (const candidate of candidates) {
+    const config =
+      getProtectedRouteConfig(candidate);
+
+    if (!config) {
+      continue;
+    }
+
+    /*
+      CRÍTICO:
+      Si la vista ya capturó el token y marcó scrub oficial,
+      no resucitamos el token desde initialUrl/window.
+    */
+    if (isProtectedTokenScrubbed(config)) {
+      continue;
+    }
+
+    if (
+      !hasProtectedRouteToken(
+        config,
+        candidate
+      )
+    ) {
+      continue;
+    }
+
+    const path =
+      pathFromUrlLike(candidate);
+
+    return {
+      config,
+
+      key:
+        config.key || "",
+
+      path,
+
+      canonicalPath:
+        fallbackNormalizeCanonicalPath(path),
+
+      publicPath:
+        fallbackNormalizePath(path),
+
+      url:
+        candidate,
+
+      hasToken:
+        true,
+
+      tokenInPath:
+        Boolean(
+          extractPathToken(
+            config,
+            candidate
+          )
+        ),
+
+      redactedPath:
+        redactTokenInText(path),
+
+      redactedUrl:
+        redactTokenInText(candidate),
+    };
   }
 
-  const activationInitialUrl =
-    getActivationInitialUrl();
+  return {
+    config:
+      null,
 
-  if (
-    activationInitialUrl &&
-    isActivationPath(
-      pathFromUrlLike(activationInitialUrl)
-    ) &&
-    hasActivationToken(activationInitialUrl)
-  ) {
-    return pathFromUrlLike(
-      activationInitialUrl
-    );
-  }
+    key:
+      "",
 
-  const initialUrl =
-    getInitialUrl();
+    path:
+      "",
 
-  if (
-    initialUrl &&
-    isActivationPath(
-      pathFromUrlLike(initialUrl)
-    ) &&
-    hasActivationToken(initialUrl)
-  ) {
-    return pathFromUrlLike(
-      initialUrl
-    );
-  }
+    canonicalPath:
+      "",
 
-  const browserPath =
-    buildBrowserPath();
+    publicPath:
+      "",
 
-  if (
-    isActivationPath(browserPath) &&
-    hasActivationToken(browserPath)
-  ) {
-    return browserPath;
-  }
+    url:
+      "",
 
-  return "";
+    hasToken:
+      false,
+
+    tokenInPath:
+      false,
+
+    redactedPath:
+      "",
+
+    redactedUrl:
+      "",
+  };
+}
+
+export function getProtectedInitialPublicPath(AppCore = null) {
+  const context =
+    resolveProtectedInitialContext(AppCore);
+
+  return context.hasToken
+    ? context.publicPath
+    : "";
 }
 
 function shouldPreferBrowserPathOverState(AppCore) {
-  const protectedActivationPath =
-    getProtectedActivationPath();
+  const protectedPath =
+    getProtectedInitialPublicPath(AppCore);
 
-  if (protectedActivationPath) {
+  if (protectedPath) {
     return true;
   }
 
@@ -685,22 +1198,17 @@ function shouldPreferBrowserPathOverState(AppCore) {
       ""
     );
 
-  /*
-    Si el browser está en activation con token y todavía no se ha
-    hecho scrub oficial, preferimos browser.
-  */
   if (
-    !isActivationTokenScrubbed() &&
-    isActivationPath(browserPath) &&
-    hasActivationToken(browserPath)
+    !isAnyProtectedTokenScrubbed() &&
+    isProtectedPublicTokenPath(browserPath)
   ) {
     return true;
   }
 
-  /*
-    Si el estado está vacío, usamos browser.
-  */
-  if (!statePublicPath && !stateRoute) {
+  if (
+    !statePublicPath &&
+    !stateRoute
+  ) {
     return true;
   }
 
@@ -708,13 +1216,13 @@ function shouldPreferBrowserPathOverState(AppCore) {
     Caso típico de boot:
       browser: /activate-account?token=XXX
       state:   /
-    */
+  */
   if (
     browserPath &&
-    browserPath !== "/" &&
+    browserPath !== DEFAULT_ROUTE &&
     (
-      statePublicPath === "/" ||
-      stateRoute === "/"
+      statePublicPath === DEFAULT_ROUTE ||
+      stateRoute === DEFAULT_ROUTE
     )
   ) {
     return true;
@@ -730,20 +1238,20 @@ function shouldPreferBrowserPathOverState(AppCore) {
 export function getCurrentPath(AppCore) {
   captureInitialUrl();
 
-  const protectedActivationPath =
-    getProtectedActivationPath();
+  const protectedPath =
+    getProtectedInitialPublicPath(AppCore);
 
-  if (protectedActivationPath) {
-    return normalizePath(
+  if (protectedPath) {
+    return normalizePublicPath(
       AppCore,
-      protectedActivationPath
+      protectedPath
     );
   }
 
   if (
     shouldPreferBrowserPathOverState(AppCore)
   ) {
-    return normalizePath(
+    return normalizePublicPath(
       AppCore,
       buildBrowserPath()
     );
@@ -760,39 +1268,53 @@ export function getCurrentPath(AppCore) {
     );
 
   if (statePath) {
-    return normalizePath(
+    return normalizePublicPath(
       AppCore,
       statePath
     );
   }
 
-  return normalizePath(
+  return normalizePublicPath(
     AppCore,
     buildBrowserPath()
   );
 }
 
-export function getCurrentPublicPath(AppCore) {
+export function getCurrentPublicPath(AppCore, Router = null) {
   captureInitialUrl();
 
-  const protectedActivationPath =
-    getProtectedActivationPath();
+  const protectedPath =
+    getProtectedInitialPublicPath(AppCore);
 
-  if (protectedActivationPath) {
-    return normalizePath(
+  if (protectedPath) {
+    return normalizePublicPath(
       AppCore,
-      protectedActivationPath
+      protectedPath
     );
   }
 
   if (
     shouldPreferBrowserPathOverState(AppCore)
   ) {
-    return normalizePath(
+    return normalizePublicPath(
       AppCore,
       buildBrowserPath()
     );
   }
+
+  try {
+    if (isFunction(Router?.getCurrentPublicPath)) {
+      const routerPublicPath =
+        Router.getCurrentPublicPath();
+
+      if (routerPublicPath) {
+        return normalizePublicPath(
+          AppCore,
+          routerPublicPath
+        );
+      }
+    }
+  } catch {}
 
   const statePublicPath =
     safeText(
@@ -801,31 +1323,28 @@ export function getCurrentPublicPath(AppCore) {
     );
 
   if (statePublicPath) {
-    return normalizePath(
+    return normalizePublicPath(
       AppCore,
       statePublicPath
     );
   }
 
-  return normalizePath(
+  return normalizePublicPath(
     AppCore,
     buildBrowserPath()
   );
 }
 
-export function getCurrentCanonicalPath(
-  AppCore,
-  Router
-) {
+export function getCurrentCanonicalPath(AppCore, Router = null) {
   captureInitialUrl();
 
-  const protectedActivationPath =
-    getProtectedActivationPath();
+  const protectedContext =
+    resolveProtectedInitialContext(AppCore);
 
-  if (protectedActivationPath) {
+  if (protectedContext.hasToken) {
     return normalizeCanonicalPath(
       AppCore,
-      protectedActivationPath
+      protectedContext.publicPath
     );
   }
 
@@ -839,9 +1358,7 @@ export function getCurrentCanonicalPath(
   }
 
   try {
-    if (
-      typeof Router?.getCurrentCanonicalPath === "function"
-    ) {
+    if (isFunction(Router?.getCurrentCanonicalPath)) {
       const value =
         Router.getCurrentCanonicalPath();
 
@@ -869,7 +1386,10 @@ export function getCurrentCanonicalPath(
 
   return normalizeCanonicalPath(
     AppCore,
-    getCurrentPublicPath(AppCore)
+    getCurrentPublicPath(
+      AppCore,
+      Router
+    )
   );
 }
 
@@ -877,21 +1397,38 @@ export function getCurrentCanonicalPath(
    HTML
 ========================================================= */
 
-export function escapeHtml(
-  AppCore,
-  value = ""
-) {
+export function escapeHtml(AppCore, value = "") {
+  /*
+    Compatibilidad:
+    - escapeHtml(AppCore, value)
+    - escapeHtml(value)
+  */
+  let core =
+    AppCore;
+
+  let input =
+    value;
+
+  if (
+    arguments.length === 1 &&
+    !isObject(AppCore)
+  ) {
+    core =
+      null;
+
+    input =
+      AppCore;
+  }
+
   try {
-    if (
-      typeof AppCore?.utils?.escapeHtml === "function"
-    ) {
-      return AppCore.utils.escapeHtml(
-        String(value ?? "")
+    if (isFunction(core?.utils?.escapeHtml)) {
+      return core.utils.escapeHtml(
+        String(input ?? "")
       );
     }
   } catch {}
 
-  return String(value ?? "")
+  return String(input ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -903,28 +1440,72 @@ export function escapeHtml(
    CLEANUP SCOPE
 ========================================================= */
 
-export function ensureScope(AppCore) {
+export function ensureScope(AppCore, scope = APP_SCOPE) {
+  const finalScope =
+    safeText(
+      scope,
+      APP_SCOPE
+    );
+
+  try {
+    if (isFunction(AppCore?.cleanup?.scope)) {
+      return AppCore.cleanup.scope(
+        finalScope
+      );
+    }
+  } catch {}
+
   try {
     if (
-      typeof AppCore?.cleanup?.scope === "function"
+      AppCore?.cleanup &&
+      isFunction(AppCore.cleanup.ensureScope)
     ) {
-      return AppCore.cleanup.scope(
-        APP_SCOPE
+      return AppCore.cleanup.ensureScope(
+        finalScope
       );
     }
   } catch {}
 
   return {
-    name: APP_SCOPE,
+    name:
+      finalScope,
   };
 }
 
-export function clearScope(AppCore) {
+export function clearScope(AppCore, scope = APP_SCOPE) {
+  const finalScope =
+    safeText(
+      scope,
+      APP_SCOPE
+    );
+
   try {
-    if (
-      typeof AppCore?.cleanup?.run === "function"
-    ) {
-      AppCore.cleanup.run(APP_SCOPE);
+    if (isFunction(AppCore?.cleanup?.run)) {
+      AppCore.cleanup.run(
+        finalScope
+      );
+
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (isFunction(AppCore?.cleanup?.clear)) {
+      AppCore.cleanup.clear(
+        finalScope
+      );
+
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (isFunction(AppCore?.cleanup?.dispose)) {
+      AppCore.cleanup.dispose(
+        finalScope
+      );
+
+      return true;
     }
   } catch {}
 
@@ -935,79 +1516,202 @@ export function clearScope(AppCore) {
    MODULES
 ========================================================= */
 
-export function registerModule(
-  AppCore,
-  name,
-  moduleRef
-) {
+export function registerModule(AppCore, name, moduleRef) {
   const moduleName =
     safeText(name, "");
 
-  if (!moduleName || !moduleRef) {
+  if (
+    !AppCore ||
+    !moduleName ||
+    !moduleRef
+  ) {
+    return false;
+  }
+
+  let registered =
+    false;
+
+  try {
+    if (!AppCore.modules) {
+      if (
+        Object.isExtensible?.(AppCore)
+      ) {
+        AppCore.modules = {};
+      }
+    }
+  } catch {}
+
+  const modules =
+    AppCore?.modules;
+
+  if (!modules) {
     return false;
   }
 
   try {
-    if (!AppCore?.modules) {
-      return false;
-    }
-
     if (
-      typeof AppCore.modules.has === "function" &&
-      AppCore.modules.has(moduleName)
+      isFunction(modules.has) &&
+      modules.has(moduleName)
     ) {
-      return true;
-    }
-
-    if (
-      typeof AppCore.modules.register === "function"
-    ) {
-      AppCore.modules.register(
-        moduleName,
-        moduleRef
-      );
       return true;
     }
   } catch {}
 
-  return false;
+  try {
+    if (isFunction(modules.register)) {
+      modules.register(
+        moduleName,
+        moduleRef
+      );
+
+      registered =
+        true;
+    }
+  } catch {}
+
+  if (!registered) {
+    try {
+      if (isFunction(modules.set)) {
+        modules.set(
+          moduleName,
+          moduleRef
+        );
+
+        registered =
+          true;
+      }
+    } catch {}
+  }
+
+  if (!registered) {
+    try {
+      if (
+        isObject(modules) &&
+        Object.isExtensible(modules)
+      ) {
+        modules[moduleName] =
+          moduleRef;
+
+        registered =
+          true;
+      }
+    } catch {}
+  }
+
+  try {
+    AppCore?.events?.emit?.(
+      "app:module:registered",
+      {
+        name:
+          moduleName,
+      }
+    );
+  } catch {}
+
+  return registered;
 }
 
 /* =========================================================
-   DEBUG
+   EXTRA DEBUG HELPERS
 ========================================================= */
 
-export function getHelpersSnapshot(
-  AppCore,
-  Router
-) {
+function getInitialUrlSnapshot() {
+  const protectedRoutes =
+    PROTECTED_PUBLIC_TOKEN_ROUTES.map((config) => {
+      const stored =
+        getStoredInitialUrl(config);
+
+      return {
+        key:
+          config.key,
+
+        path:
+          config.path,
+
+        windowKey:
+          config.windowKey,
+
+        hasStoredInitialUrl:
+          Boolean(stored),
+
+        storedInitialUrl:
+          redactTokenInText(stored),
+
+        scrubbed:
+          isProtectedTokenScrubbed(config),
+      };
+    });
+
+  return {
+    initialUrl:
+      redactTokenInText(
+        getInitialUrl()
+      ),
+
+    protectedRoutes,
+  };
+}
+
+export function getHelpersSnapshot(AppCore, Router = null) {
+  const protectedContext =
+    resolveProtectedInitialContext(AppCore);
+
   return {
     path:
-      getCurrentPath(AppCore),
+      redactTokenInText(
+        getCurrentPath(AppCore)
+      ),
 
     publicPath:
-      getCurrentPublicPath(AppCore),
+      redactTokenInText(
+        getCurrentPublicPath(
+          AppCore,
+          Router
+        )
+      ),
 
     canonicalPath:
-      getCurrentCanonicalPath(
-        AppCore,
-        Router
+      redactTokenInText(
+        getCurrentCanonicalPath(
+          AppCore,
+          Router
+        )
       ),
 
     browserPath:
-      buildBrowserPath(),
+      redactTokenInText(
+        buildBrowserPath()
+      ),
 
-    initialUrl:
-      getInitialUrl(),
+    initial:
+      getInitialUrlSnapshot(),
 
-    activationInitialUrl:
-      getActivationInitialUrl(),
+    protectedInitial: {
+      key:
+        protectedContext.key,
 
-    protectedActivationPath:
-      getProtectedActivationPath(),
+      hasToken:
+        Boolean(protectedContext.hasToken),
 
-    activationTokenScrubbed:
-      isActivationTokenScrubbed(),
+      tokenInPath:
+        Boolean(protectedContext.tokenInPath),
+
+      path:
+        protectedContext.redactedPath,
+
+      url:
+        protectedContext.redactedUrl,
+
+      canonicalPath:
+        redactTokenInText(
+          protectedContext.canonicalPath
+        ),
+
+      publicPath:
+        redactTokenInText(
+          protectedContext.publicPath
+        ),
+    },
 
     hasCleanup:
       Boolean(
@@ -1018,16 +1722,46 @@ export function getHelpersSnapshot(
       Boolean(
         AppCore?.modules
       ),
+
+    hasRouter:
+      Boolean(Router),
+
+    routerHasCanonicalGetter:
+      Boolean(
+        Router?.getCurrentCanonicalPath
+      ),
+
+    routerHasPublicGetter:
+      Boolean(
+        Router?.getCurrentPublicPath
+      ),
   };
 }
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
 export default {
   getCurrentPath,
   getCurrentPublicPath,
   getCurrentCanonicalPath,
+
+  normalizePublicPath,
+  normalizeCanonicalPath,
+  stripUsernamePrefix,
+
+  isActivationPath,
+  isResetConfirmPath,
+  isProtectedPublicTokenPath,
+  getProtectedInitialPublicPath,
+
+  redactTokenInText,
   escapeHtml,
+
   ensureScope,
   clearScope,
   registerModule,
+
   getHelpersSnapshot,
 };

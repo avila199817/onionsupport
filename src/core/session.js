@@ -9,6 +9,8 @@
    - aplicar usuario/token
    - limpiar sesión local
    - mantener auth consistente
+   - preservar currentResolvedUsername cuando procede
+   - sincronizar UI base
 
    HARDENING PRO:
    - zero ghost auth
@@ -16,20 +18,28 @@
    - setters idempotentes
    - sync UI estable
    - eventos consistentes
+   - no emitir token real en eventos/snapshots
    - preserve currentResolvedUsername
    - route/publicPath sync sin degradar contexto
+   - canonical sin query/hash
+   - publicPath con query/hash
 ========================================================= */
 
 import { config } from "./config.js";
 
 import {
   normalizePath,
+  normalizePublicPath,
   normalizeCanonicalPath,
   normalizeUser,
   hasValidToken,
   getUserUsername,
+  getUserDisplayName,
+  getUserAvatarUrl,
   getThemeColor,
   sanitizeUsername,
+  safeText,
+  redactTokenInText,
 } from "./helpers.js";
 
 import {
@@ -41,47 +51,312 @@ import {
 } from "./storage.js";
 
 /* =========================================================
-   INTERNAL
+   CONSTANTS
 ========================================================= */
 
-function resolveRole(user = null) {
+const DEFAULT_ROUTE =
+  "/";
+
+const VALID_THEMES =
+  Object.freeze([
+    "dark",
+    "light",
+  ]);
+
+const VALID_LANG_RE =
+  /^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/i;
+
+const SESSION_EVENTS =
+  Object.freeze({
+    routeChange:
+      "app:route:change",
+
+    publicPathChange:
+      "app:public-path:change",
+
+    userChange:
+      "app:user:change",
+
+    tokenChange:
+      "app:token:change",
+
+    sessionState:
+      "app:session:state",
+
+    sessionApplied:
+      "app:session:applied",
+
+    sessionLoaded:
+      "app:session:loaded",
+
+    sessionCleared:
+      "app:session:cleared",
+
+    themeChange:
+      "app:theme:change",
+
+    langChange:
+      "app:lang:change",
+
+    sidebarChange:
+      "app:sidebar:change",
+
+    loadingChange:
+      "app:loading:change",
+
+    error:
+      "app:error",
+  });
+
+/* =========================================================
+   BASICS
+========================================================= */
+
+function isObject(value) {
   return (
-    user?.role ||
-    user?.rol ||
-    null
+    value !== null &&
+    typeof value === "object"
   );
 }
 
-function resolveResolvedUsername(
-  state = {},
-  user = null
-) {
-  return (
+function isFunction(value) {
+  return typeof value === "function";
+}
+
+function localSafeText(value, fallback = "") {
+  try {
+    if (typeof safeText === "function") {
+      return safeText(value, fallback);
+    }
+  } catch {}
+
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return fallback;
+  }
+
+  const text =
+    String(value).trim();
+
+  return text || fallback;
+}
+
+function safeBool(value, fallback = false) {
+  if (value === true) return true;
+  if (value === false) return false;
+
+  return Boolean(fallback);
+}
+
+function safeObject(value, fallback = {}) {
+  return isObject(value)
+    ? value
+    : fallback;
+}
+
+function safeEmit(events, name, payload = {}) {
+  try {
+    events?.emit?.(
+      name,
+      payload
+    );
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
+function safeSetState(setState, patch = {}) {
+  if (!isFunction(setState)) {
+    return false;
+  }
+
+  try {
+    setState(
+      safeObject(patch)
+    );
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
+function safeStorageGet(storage, key, fallback = null) {
+  try {
+    return storage?.get?.(
+      key,
+      fallback
+    );
+  } catch {
+    return fallback;
+  }
+}
+
+function safeStorageSet(storage, key, value) {
+  try {
+    storage?.set?.(
+      key,
+      value
+    );
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
+function safeStorageRemove(storage, key) {
+  try {
+    if (isFunction(storage?.remove)) {
+      storage.remove(key);
+      return true;
+    }
+
+    if (isFunction(storage?.delete)) {
+      storage.delete(key);
+      return true;
+    }
+
+    if (isFunction(storage?.del)) {
+      storage.del(key);
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+function safeCloneError(cloneError, error = null) {
+  try {
+    if (isFunction(cloneError)) {
+      return cloneError(error);
+    }
+  } catch {}
+
+  if (!error) {
+    return null;
+  }
+
+  if (error instanceof Error) {
+    return {
+      name:
+        error.name,
+      message:
+        error.message,
+      stack:
+        error.stack || null,
+    };
+  }
+
+  return error;
+}
+
+function safeRedact(value = "") {
+  try {
+    return redactTokenInText(value);
+  } catch {
+    return localSafeText(value, "");
+  }
+}
+
+/* =========================================================
+   AUTH DERIVED STATE
+========================================================= */
+
+function resolveRole(user = null) {
+  return localSafeText(
+    user?.role ||
+      user?.rol ||
+      user?.type ||
+      user?.userType ||
+      user?.user_type ||
+      "",
+    ""
+  ).toLowerCase() || null;
+}
+
+function resolveResolvedUsername(state = {}, user = null) {
+  const candidate =
     sanitizeUsername(
       state?.currentResolvedUsername ||
         state?.resolvedUsername ||
         getUserUsername(user) ||
         getUserUsername(state?.user) ||
         ""
-    ) || null
+    );
+
+  return candidate || null;
+}
+
+function hasUsableUser(user = null) {
+  if (!user || !isObject(user)) {
+    return false;
+  }
+
+  return Boolean(
+    localSafeText(user.id, "") ||
+    localSafeText(user.userId, "") ||
+    localSafeText(user.username, "") ||
+    localSafeText(user.email, "") ||
+    localSafeText(user.name, "")
   );
 }
 
-function syncAuthState(state) {
+function computeAuthSafe(user = null, token = null) {
+  try {
+    return Boolean(
+      computeAuthenticated(
+        user,
+        token
+      )
+    );
+  } catch {}
+
+  return Boolean(
+    hasUsableUser(user) &&
+    hasValidToken(token)
+  );
+}
+
+function syncAuthState(state, options = {}) {
+  if (!state || !isObject(state)) {
+    return state;
+  }
+
+  const forceUnauthenticated =
+    options.forceUnauthenticated === true;
+
+  const authenticated =
+    forceUnauthenticated
+      ? false
+      : computeAuthSafe(
+          state.user,
+          state.token
+        );
+
   state.authenticated =
-    computeAuthenticated(
-      state.user,
+    authenticated;
+
+  state.hasToken =
+    hasValidToken(
       state.token
     );
 
   state.role =
-    state.authenticated
-      ? resolveRole(
-          state.user
-        )
+    authenticated
+      ? resolveRole(state.user)
       : null;
 
-  if (!state.authenticated) {
+  state.username =
+    authenticated
+      ? getUserUsername(state.user) || null
+      : null;
+
+  if (!authenticated) {
     state.currentResolvedUsername =
       null;
   } else {
@@ -95,22 +370,75 @@ function syncAuthState(state) {
   return state;
 }
 
-function setAriaExpanded(
-  el,
-  value
-) {
-  if (!el) return;
+/* =========================================================
+   DOM HELPERS
+========================================================= */
 
-  el.setAttribute(
-    "aria-expanded",
-    String(Boolean(value))
-  );
+function setAriaExpanded(el, value) {
+  if (!el) {
+    return false;
+  }
+
+  try {
+    el.setAttribute(
+      "aria-expanded",
+      String(Boolean(value))
+    );
+
+    return true;
+  } catch {}
+
+  return false;
 }
 
-function hasOwn(
-  obj,
-  key
-) {
+function toggleClass(el, className, force) {
+  if (
+    !el ||
+    !className
+  ) {
+    return false;
+  }
+
+  try {
+    el.classList.toggle(
+      className,
+      Boolean(force)
+    );
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
+function setAttribute(el, name, value) {
+  if (
+    !el ||
+    !name
+  ) {
+    return false;
+  }
+
+  try {
+    if (
+      value === null ||
+      value === undefined
+    ) {
+      el.removeAttribute(name);
+    } else {
+      el.setAttribute(
+        name,
+        String(value)
+      );
+    }
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
+function hasOwn(obj, key) {
   return Boolean(
     obj &&
       typeof obj === "object" &&
@@ -121,122 +449,191 @@ function hasOwn(
   );
 }
 
-function resolveThemeFromUser(
-  user = null
-) {
-  if (
-    !user ||
-    typeof user !== "object"
-  ) {
+/* =========================================================
+   THEME / LANG
+========================================================= */
+
+function normalizeTheme(theme = config.defaultTheme) {
+  const value =
+    localSafeText(
+      theme,
+      config.defaultTheme || "dark"
+    ).toLowerCase();
+
+  return VALID_THEMES.includes(value)
+    ? value
+    : "dark";
+}
+
+function normalizeLang(lang = config.defaultLang) {
+  const value =
+    localSafeText(
+      lang,
+      config.defaultLang || "es"
+    ).toLowerCase();
+
+  return VALID_LANG_RE.test(value)
+    ? value
+    : config.defaultLang || "es";
+}
+
+function resolveThemeFromUser(user = null) {
+  if (!user || !isObject(user)) {
     return null;
   }
 
   const explicitTheme =
-    String(
+    localSafeText(
       user.theme ??
         user?.preferences?.theme ??
         user?.settings?.theme ??
         user?.raw?.theme ??
-        user?.raw?.preferences
-          ?.theme ??
-        user?.raw?.settings
-          ?.theme ??
-        ""
-    )
-      .trim()
-      .toLowerCase();
+        user?.raw?.preferences?.theme ??
+        user?.raw?.settings?.theme ??
+        "",
+      ""
+    ).toLowerCase();
 
-  if (
-    explicitTheme === "light" ||
-    explicitTheme === "dark"
-  ) {
+  if (VALID_THEMES.includes(explicitTheme)) {
     return explicitTheme;
   }
+
+  const candidates = [
+    user.darkMode,
+    user.dark_mode,
+    user?.raw?.darkMode,
+    user?.raw?.dark_mode,
+    user?.preferences?.darkMode,
+    user?.preferences?.dark_mode,
+    user?.settings?.darkMode,
+    user?.settings?.dark_mode,
+    user?.raw?.preferences?.darkMode,
+    user?.raw?.preferences?.dark_mode,
+    user?.raw?.settings?.darkMode,
+    user?.raw?.settings?.dark_mode,
+  ];
 
   const hasExplicitDarkMode =
     hasOwn(user, "darkMode") ||
     hasOwn(user, "dark_mode") ||
     hasOwn(user?.raw, "darkMode") ||
     hasOwn(user?.raw, "dark_mode") ||
-    hasOwn(
-      user?.preferences,
-      "darkMode"
-    ) ||
-    hasOwn(
-      user?.settings,
-      "darkMode"
-    ) ||
-    hasOwn(
-      user?.raw?.preferences,
-      "darkMode"
-    ) ||
-    hasOwn(
-      user?.raw?.settings,
-      "darkMode"
-    );
+    hasOwn(user?.preferences, "darkMode") ||
+    hasOwn(user?.preferences, "dark_mode") ||
+    hasOwn(user?.settings, "darkMode") ||
+    hasOwn(user?.settings, "dark_mode") ||
+    hasOwn(user?.raw?.preferences, "darkMode") ||
+    hasOwn(user?.raw?.preferences, "dark_mode") ||
+    hasOwn(user?.raw?.settings, "darkMode") ||
+    hasOwn(user?.raw?.settings, "dark_mode");
 
-  if (
-    hasExplicitDarkMode &&
-    typeof user.darkMode ===
-      "boolean"
-  ) {
-    return user.darkMode
-      ? "dark"
-      : "light";
+  if (hasExplicitDarkMode) {
+    const darkValue =
+      candidates.find((item) =>
+        typeof item === "boolean"
+      );
+
+    if (typeof darkValue === "boolean") {
+      return darkValue
+        ? "dark"
+        : "light";
+    }
   }
 
   return null;
 }
 
-function createSessionSnapshot(
-  state,
-  cause = "unknown"
-) {
+/* =========================================================
+   SNAPSHOTS / FINGERPRINTS
+========================================================= */
+
+function createSessionSnapshot(state, cause = "unknown") {
   return {
     authenticated:
+      Boolean(state?.authenticated),
+
+    hasToken:
       Boolean(
-        state?.authenticated
+        hasValidToken(state?.token)
       ),
+
     token:
-      state?.token || null,
+      null,
+
     user:
       state?.user || null,
+
     role:
       state?.role || null,
+
     username:
-      getUserUsername(
-        state?.user
-      ) || null,
+      getUserUsername(state?.user) || null,
+
+    displayName:
+      getUserDisplayName(state?.user) || null,
+
+    avatarUrl:
+      getUserAvatarUrl(state?.user) || null,
+
     currentResolvedUsername:
-      state?.currentResolvedUsername ||
-      null,
+      state?.currentResolvedUsername || null,
+
+    route:
+      state?.route || DEFAULT_ROUTE,
+
+    publicPath:
+      state?.publicPath ||
+      state?.route ||
+      DEFAULT_ROUTE,
+
     cause,
+
     changedAt:
       new Date().toISOString(),
   };
 }
 
-function userFingerprint(
-  user = null
-) {
-  if (!user) return "";
+function userFingerprint(user = null) {
+  if (!user) {
+    return "";
+  }
 
-  return JSON.stringify({
-    id:
-      user.id ||
-      user.userId ||
-      null,
-    username:
-      user.username || null,
-    email:
-      user.email || null,
-    role:
-      user.role ||
-      user.rol ||
-      null,
-    avatar:
-      user.avatar || null,
-  });
+  const normalized =
+    normalizeUser(user);
+
+  try {
+    return JSON.stringify({
+      id:
+        normalized?.id ||
+        normalized?.userId ||
+        null,
+
+      username:
+        normalized?.username || null,
+
+      email:
+        normalized?.email || null,
+
+      role:
+        normalized?.role ||
+        normalized?.rol ||
+        null,
+
+      avatar:
+        normalized?.avatar ||
+        normalized?.avatarUrl ||
+        null,
+
+      avatarUpdatedAt:
+        normalized?.avatarUpdatedAt ||
+        null,
+
+      active:
+        normalized?.active ?? null,
+    });
+  } catch {
+    return String(user);
+  }
 }
 
 function syncRouteFields({
@@ -245,45 +642,75 @@ function syncRouteFields({
   route,
   publicPath,
 } = {}) {
+  if (!state) {
+    return {
+      route:
+        DEFAULT_ROUTE,
+      publicPath:
+        DEFAULT_ROUTE,
+      currentResolvedUsername:
+        null,
+    };
+  }
+
   const nextCanonical =
     normalizeCanonicalPath(
       route ||
         state?.route ||
-        "/"
+        DEFAULT_ROUTE
     );
 
   const nextPublicPath =
-    normalizePath(
-      publicPath ||
-        state?.publicPath ||
-        nextCanonical
-    );
+    normalizePublicPath
+      ? normalizePublicPath(
+          publicPath ||
+            state?.publicPath ||
+            nextCanonical
+        )
+      : normalizePath(
+          publicPath ||
+            state?.publicPath ||
+            nextCanonical
+        );
 
   const resolvedUsername =
-    sanitizeUsername(
-      state?.currentResolvedUsername ||
-        getUserUsername(
-          state?.user
-        ) ||
-        ""
-    ) || null;
+    state.authenticated
+      ? resolveResolvedUsername(
+          state,
+          state.user
+        )
+      : null;
 
-  setState({
-    route: nextCanonical,
-    publicPath: nextPublicPath,
-    currentResolvedUsername:
-      resolvedUsername,
-  });
+  safeSetState(
+    setState,
+    {
+      route:
+        nextCanonical,
 
-  state.route = nextCanonical;
+      publicPath:
+        nextPublicPath,
+
+      currentResolvedUsername:
+        resolvedUsername,
+    }
+  );
+
+  state.route =
+    nextCanonical;
+
   state.publicPath =
     nextPublicPath;
+
   state.currentResolvedUsername =
     resolvedUsername;
 
   return {
-    route: nextCanonical,
-    publicPath: nextPublicPath,
+    route:
+      nextCanonical,
+
+    publicPath:
+      nextPublicPath,
+
     currentResolvedUsername:
       resolvedUsername,
   };
@@ -297,41 +724,52 @@ export function setRoute({
   state,
   setState,
   events,
-  route = "/",
+  route = DEFAULT_ROUTE,
 } = {}) {
   const previousRoute =
-    state.route || "/";
+    state?.route || DEFAULT_ROUTE;
 
   const normalized =
     normalizeCanonicalPath(
-      route
+      route || DEFAULT_ROUTE
     );
 
   if (
-    previousRoute ===
-    normalized
+    previousRoute === normalized
   ) {
     return normalized;
   }
 
-  setState({
-    lastRoute:
-      previousRoute,
-    route: normalized,
-  });
-
-  state.lastRoute =
-    previousRoute;
-  state.route = normalized;
-
-  events?.emit?.(
-    "app:route:change",
+  safeSetState(
+    setState,
     {
-      route: normalized,
-      previousRoute,
-      publicPath:
-        state?.publicPath ||
+      lastRoute:
+        previousRoute,
+
+      route:
         normalized,
+    }
+  );
+
+  if (state) {
+    state.lastRoute =
+      previousRoute;
+
+    state.route =
+      normalized;
+  }
+
+  safeEmit(
+    events,
+    SESSION_EVENTS.routeChange,
+    {
+      route:
+        normalized,
+
+      previousRoute,
+
+      publicPath:
+        state?.publicPath || normalized,
     }
   );
 
@@ -343,43 +781,53 @@ export function setPublicPath({
   storage,
   setState,
   events,
-  path = "/",
+  path = DEFAULT_ROUTE,
 } = {}) {
   const previousPublicPath =
-    state?.publicPath || "/";
+    state?.publicPath || DEFAULT_ROUTE;
 
   const normalized =
-    normalizePath(path);
+    normalizePublicPath
+      ? normalizePublicPath(path || DEFAULT_ROUTE)
+      : normalizePath(path || DEFAULT_ROUTE);
 
   if (
-    previousPublicPath ===
-    normalized
+    previousPublicPath === normalized
   ) {
     return normalized;
   }
 
-  setState({
-    publicPath:
-      normalized,
-  });
-
-  state.publicPath =
-    normalized;
-
-  storage?.set?.(
-    config.storageKeys
-      .lastPublicPath,
-    normalized
-  );
-
-  events?.emit?.(
-    "app:public-path:change",
+  safeSetState(
+    setState,
     {
       publicPath:
         normalized,
-      previousPublicPath,
+    }
+  );
+
+  if (state) {
+    state.publicPath =
+      normalized;
+  }
+
+  safeStorageSet(
+    storage,
+    config.storageKeys.lastPublicPath,
+    normalized
+  );
+
+  safeEmit(
+    events,
+    SESSION_EVENTS.publicPathChange,
+    {
+      publicPath:
+        safeRedact(normalized),
+
+      previousPublicPath:
+        safeRedact(previousPublicPath),
+
       route:
-        state?.route || "/",
+        state?.route || DEFAULT_ROUTE,
     }
   );
 
@@ -403,7 +851,7 @@ export function setUser({
 
   const previousUserFingerprint =
     userFingerprint(
-      state.user
+      state?.user
     );
 
   const nextUserFingerprint =
@@ -412,68 +860,93 @@ export function setUser({
     );
 
   if (
-    previousUserFingerprint ===
-    nextUserFingerprint
+    previousUserFingerprint === nextUserFingerprint
   ) {
     return normalizedUser;
   }
 
-  setState({
-    user:
-      normalizedUser,
-  });
+  safeSetState(
+    setState,
+    {
+      user:
+        normalizedUser,
+    }
+  );
 
-  state.user =
-    normalizedUser;
+  if (state) {
+    state.user =
+      normalizedUser;
+  }
 
   syncAuthState(state);
 
-  setState({
-    role: state.role,
-    authenticated:
-      state.authenticated,
-    currentResolvedUsername:
-      state.currentResolvedUsername,
-  });
+  safeSetState(
+    setState,
+    {
+      role:
+        state?.role || null,
 
-  if (
-    normalizedUser
-  ) {
-    storage?.set?.(
+      authenticated:
+        Boolean(state?.authenticated),
+
+      hasToken:
+        Boolean(state?.hasToken),
+
+      username:
+        state?.username || null,
+
+      currentResolvedUsername:
+        state?.currentResolvedUsername || null,
+    }
+  );
+
+  if (normalizedUser) {
+    safeStorageSet(
+      storage,
       config.storageKeys.user,
       normalizedUser
     );
   } else {
-    storage?.remove?.(
+    safeStorageRemove(
+      storage,
       config.storageKeys.user
     );
   }
 
-  syncUserUI?.();
+  try {
+    syncUserUI?.();
+  } catch {}
 
-  events?.emit?.(
-    "app:user:change",
+  safeEmit(
+    events,
+    SESSION_EVENTS.userChange,
     {
       user:
         normalizedUser,
+
       authenticated:
-        state.authenticated,
+        Boolean(state?.authenticated),
+
+      hasToken:
+        Boolean(state?.hasToken),
+
       username:
-        normalizedUser
-          ?.username ||
-        null,
+        normalizedUser?.username || null,
+
+      displayName:
+        getUserDisplayName(normalizedUser),
+
       currentResolvedUsername:
-        state.currentResolvedUsername ||
-        null,
+        state?.currentResolvedUsername || null,
+
       avatarUrl:
-        normalizedUser
-          ?.avatar ||
-        null,
+        getUserAvatarUrl(normalizedUser) || null,
     }
   );
 
-  events?.emit?.(
-    "app:session:state",
+  safeEmit(
+    events,
+    SESSION_EVENTS.sessionState,
     createSessionSnapshot(
       state,
       "setUser"
@@ -496,56 +969,86 @@ export function setToken({
       : null;
 
   if (
-    state.token ===
-    normalized
+    state?.token === normalized
   ) {
     return normalized;
   }
 
-  setState({
-    token:
-      normalized,
-  });
+  safeSetState(
+    setState,
+    {
+      token:
+        normalized,
+    }
+  );
 
-  state.token =
-    normalized;
+  if (state) {
+    state.token =
+      normalized;
+  }
 
-  syncAuthState(state);
+  syncAuthState(
+    state,
+    {
+      forceUnauthenticated:
+        !normalized,
+    }
+  );
 
-  setState({
-    role: state.role,
-    authenticated:
-      state.authenticated,
-    currentResolvedUsername:
-      state.currentResolvedUsername,
-  });
+  safeSetState(
+    setState,
+    {
+      role:
+        state?.role || null,
+
+      authenticated:
+        Boolean(state?.authenticated),
+
+      hasToken:
+        Boolean(state?.hasToken),
+
+      username:
+        state?.username || null,
+
+      currentResolvedUsername:
+        state?.currentResolvedUsername || null,
+    }
+  );
 
   if (normalized) {
-    storage?.set?.(
+    safeStorageSet(
+      storage,
       config.storageKeys.token,
       normalized
     );
   } else {
-    storage?.remove?.(
+    safeStorageRemove(
+      storage,
       config.storageKeys.token
     );
   }
 
-  events?.emit?.(
-    "app:token:change",
+  safeEmit(
+    events,
+    SESSION_EVENTS.tokenChange,
     {
       token:
-        normalized,
-      authenticated:
-        state.authenticated,
-      currentResolvedUsername:
-        state.currentResolvedUsername ||
         null,
+
+      hasToken:
+        Boolean(normalized),
+
+      authenticated:
+        Boolean(state?.authenticated),
+
+      currentResolvedUsername:
+        state?.currentResolvedUsername || null,
     }
   );
 
-  events?.emit?.(
-    "app:session:state",
+  safeEmit(
+    events,
+    SESSION_EVENTS.sessionState,
     createSessionSnapshot(
       state,
       "setToken"
@@ -559,6 +1062,29 @@ export function setToken({
    APPLY SESSION
 ========================================================= */
 
+function callFlexibleSetter(fn, objectArg, directValue, key) {
+  if (!isFunction(fn)) {
+    return null;
+  }
+
+  try {
+    return fn(objectArg);
+  } catch {}
+
+  try {
+    return fn(directValue);
+  } catch {}
+
+  try {
+    return fn({
+      [key]:
+        directValue,
+    });
+  } catch {}
+
+  return null;
+}
+
 export function applySession({
   state,
   events,
@@ -570,30 +1096,37 @@ export function applySession({
   route = undefined,
   publicPath = undefined,
 } = {}) {
-  if (
-    token !==
-    undefined
-  ) {
-    setToken({
+  if (token !== undefined) {
+    callFlexibleSetter(
+      setToken,
+      {
+        token,
+      },
       token,
-    });
+      "token"
+    );
   }
 
-  if (
-    user !==
-    undefined
-  ) {
-    setUser({
+  if (user !== undefined) {
+    callFlexibleSetter(
+      setUser,
+      {
+        user,
+      },
       user,
-    });
+      "user"
+    );
   }
 
-  syncAuthState(state);
+  syncAuthState(
+    state,
+    {
+      forceUnauthenticated:
+        token === null
+    }
+  );
 
-  if (
-    typeof setState ===
-    "function"
-  ) {
+  if (isFunction(setState)) {
     syncRouteFields({
       state,
       setState,
@@ -607,16 +1140,27 @@ export function applySession({
       state,
       "applySession"
     ),
+
     route:
-      state?.route || "/",
+      state?.route || DEFAULT_ROUTE,
+
     publicPath:
-      state?.publicPath ||
-      state?.route ||
-      "/",
+      safeRedact(
+        state?.publicPath ||
+          state?.route ||
+          DEFAULT_ROUTE
+      ),
   };
 
-  events?.emit?.(
-    "app:session:applied",
+  safeEmit(
+    events,
+    SESSION_EVENTS.sessionApplied,
+    snapshot
+  );
+
+  safeEmit(
+    events,
+    SESSION_EVENTS.sessionState,
     snapshot
   );
 
@@ -634,52 +1178,152 @@ export function clearSession({
   setState,
   syncUserUI,
   utils,
+  options = {},
 } = {}) {
-  storage?.remove?.(
+  const opts =
+    safeObject(options);
+
+  safeStorageRemove(
+    storage,
     config.storageKeys.user
   );
 
-  storage?.remove?.(
+  safeStorageRemove(
+    storage,
     config.storageKeys.token
   );
 
-  removeLegacySessionKeys(
-    utils
+  safeStorageRemove(
+    storage,
+    config.storageKeys.refreshToken
   );
 
-  setState({
-    user: null,
-    token: null,
-    role: null,
-    authenticated: false,
-    currentResolvedUsername:
-      null,
-  });
+  safeStorageRemove(
+    storage,
+    config.storageKeys.tempToken
+  );
 
-  state.user = null;
-  state.token = null;
-  state.currentResolvedUsername =
-    null;
+  safeStorageRemove(
+    storage,
+    config.storageKeys.sessionId
+  );
 
-  syncAuthState(state);
+  safeStorageRemove(
+    storage,
+    config.storageKeys.sessionUserId
+  );
 
-  syncUserUI?.();
+  try {
+    removeLegacySessionKeys(
+      utils
+    );
+  } catch {}
 
-  events?.emit?.(
-    "app:session:cleared",
+  safeSetState(
+    setState,
     {
+      user:
+        null,
+
+      token:
+        null,
+
+      role:
+        null,
+
+      username:
+        null,
+
       authenticated:
         false,
-      token: null,
-      user: null,
-      role: null,
+
+      hasToken:
+        false,
+
       currentResolvedUsername:
+        null,
+
+      resolvedUsername:
         null,
     }
   );
 
-  events?.emit?.(
-    "app:session:state",
+  if (state) {
+    state.user =
+      null;
+
+    state.token =
+      null;
+
+    state.role =
+      null;
+
+    state.username =
+      null;
+
+    state.authenticated =
+      false;
+
+    state.hasToken =
+      false;
+
+    state.currentResolvedUsername =
+      null;
+
+    state.resolvedUsername =
+      null;
+  }
+
+  syncAuthState(
+    state,
+    {
+      forceUnauthenticated:
+        true,
+    }
+  );
+
+  try {
+    syncUserUI?.();
+  } catch {}
+
+  const payload = {
+    authenticated:
+      false,
+
+    hasToken:
+      false,
+
+    token:
+      null,
+
+    user:
+      null,
+
+    role:
+      null,
+
+    username:
+      null,
+
+    currentResolvedUsername:
+      null,
+
+    silent:
+      Boolean(opts.silent),
+
+    reason:
+      opts.reason || "clearSession",
+  };
+
+  safeEmit(
+    events,
+    SESSION_EVENTS.sessionCleared,
+    payload
+  );
+
+  safeEmit(
+    events,
+    SESSION_EVENTS.sessionState,
     createSessionSnapshot(
       state,
       "clearSession"
@@ -695,19 +1339,22 @@ export function clearSession({
 
 export function syncThemeMetaColor({
   dom,
-  theme =
-    config.defaultTheme,
+  theme = config.defaultTheme,
 } = {}) {
-  if (
-    !dom?.themeColorMeta
-  ) {
-    return;
+  if (!dom?.themeColorMeta) {
+    return false;
   }
 
-  dom.themeColorMeta.setAttribute(
-    "content",
-    getThemeColor(theme)
-  );
+  try {
+    dom.themeColorMeta.setAttribute(
+      "content",
+      getThemeColor(theme)
+    );
+
+    return true;
+  } catch {}
+
+  return false;
 }
 
 export function loadPreferences({
@@ -716,99 +1363,110 @@ export function loadPreferences({
   dom,
 } = {}) {
   const savedTheme =
-    storage?.get?.(
-      config.storageKeys
-        .theme,
+    safeStorageGet(
+      storage,
+      config.storageKeys.theme,
       config.defaultTheme
     );
 
   const savedLang =
-    storage?.get?.(
-      config.storageKeys
-        .lang,
+    safeStorageGet(
+      storage,
+      config.storageKeys.lang,
       config.defaultLang
     );
 
-  /* Regla UX:
-     estado natural por defecto = abierto.
-     Evitamos arrancar colapsado por residuos legacy de storage. */
+  const theme =
+    normalizeTheme(savedTheme);
 
-  state.theme =
-    savedTheme ===
-    "light"
-      ? "light"
-      : "dark";
+  const lang =
+    normalizeLang(savedLang);
 
-  state.lang =
-    String(
-      savedLang ||
-        config.defaultLang
-    ).trim() ||
-    config.defaultLang;
+  if (state) {
+    state.theme =
+      theme;
 
-  state.sidebarOpen = true;
+    state.lang =
+      lang;
 
-  if (dom?.html) {
-    dom.html.setAttribute(
-      "data-theme",
-      state.theme
-    );
-
-    dom.html.setAttribute(
-      "lang",
-      state.lang
-    );
+    /*
+      Regla UX:
+      estado natural por defecto = abierto.
+      Evitamos arrancar colapsado por residuos legacy de storage.
+    */
+    state.sidebarOpen =
+      true;
   }
+
+  setAttribute(
+    dom?.html,
+    "data-theme",
+    theme
+  );
+
+  setAttribute(
+    dom?.html,
+    "lang",
+    lang
+  );
 
   syncThemeMetaColor({
     dom,
-    theme:
-      state.theme,
+    theme,
   });
 
-  if (dom?.body) {
-    dom.body.classList.toggle(
-      "sidebar-open",
-      state.sidebarOpen
-    );
+  toggleClass(
+    dom?.body,
+    "sidebar-open",
+    true
+  );
 
-    dom.body.classList.toggle(
-      "sidebar-collapsed",
-      !state.sidebarOpen
-    );
-  }
+  toggleClass(
+    dom?.body,
+    "sidebar-collapsed",
+    false
+  );
 
-  if (dom?.sidebar) {
-    dom.sidebar.classList.toggle(
-      "open",
-      state.sidebarOpen
-    );
+  toggleClass(
+    dom?.sidebar,
+    "open",
+    true
+  );
 
-    dom.sidebar.classList.toggle(
-      "collapsed",
-      !state.sidebarOpen
-    );
+  toggleClass(
+    dom?.sidebar,
+    "collapsed",
+    false
+  );
 
-    dom.sidebar.classList.toggle(
-      "is-open",
-      state.sidebarOpen
-    );
+  toggleClass(
+    dom?.sidebar,
+    "is-open",
+    true
+  );
 
-    dom.sidebar.classList.toggle(
-      "is-collapsed",
-      !state.sidebarOpen
-    );
-  }
+  toggleClass(
+    dom?.sidebar,
+    "is-collapsed",
+    false
+  );
 
   setAriaExpanded(
     dom?.sidebarToggle,
-    state.sidebarOpen
+    true
   );
 
   setAriaExpanded(
     dom?.sidebarMobileToggle,
-    state.sidebarOpen
+    true
   );
+
+  return {
+    theme,
+    lang,
+    sidebarOpen:
+      true,
+  };
 }
 
 /* =========================================================
@@ -819,40 +1477,54 @@ export function loadSession({
   state,
   storage,
   dom,
+  events,
 } = {}) {
   const savedUser =
     normalizeUser(
-      storage?.get?.(
+      safeStorageGet(
+        storage,
         config.storageKeys.user,
         null
       )
     );
 
-  const savedToken =
-    storage?.get?.(
+  const savedTokenRaw =
+    safeStorageGet(
+      storage,
       config.storageKeys.token,
       null
     );
 
-  state.user =
-    savedUser;
-
-  state.token =
-    hasValidToken(
-      savedToken
-    )
-      ? String(
-          savedToken
-        ).trim()
+  const savedToken =
+    hasValidToken(savedTokenRaw)
+      ? String(savedTokenRaw).trim()
       : null;
 
-  syncAuthState(state);
+  if (state) {
+    state.user =
+      savedUser;
 
-  state.currentResolvedUsername =
-    resolveResolvedUsername(
-      state,
-      savedUser
-    );
+    state.token =
+      savedToken;
+  }
+
+  syncAuthState(
+    state,
+    {
+      forceUnauthenticated:
+        !savedToken,
+    }
+  );
+
+  if (state) {
+    state.currentResolvedUsername =
+      state.authenticated
+        ? resolveResolvedUsername(
+            state,
+            savedUser
+          )
+        : null;
+  }
 
   const userTheme =
     resolveThemeFromUser(
@@ -863,23 +1535,38 @@ export function loadSession({
     userTheme === "light" ||
     userTheme === "dark"
   ) {
-    state.theme = userTheme;
+    if (state) {
+      state.theme =
+        userTheme;
+    }
 
-    storage?.set?.(
+    safeStorageSet(
+      storage,
       config.storageKeys.theme,
       userTheme
     );
 
-    dom?.html?.setAttribute(
+    setAttribute(
+      dom?.html,
       "data-theme",
       userTheme
     );
 
     syncThemeMetaColor({
       dom,
-      theme: userTheme,
+      theme:
+        userTheme,
     });
   }
+
+  safeEmit(
+    events,
+    SESSION_EVENTS.sessionLoaded,
+    createSessionSnapshot(
+      state,
+      "loadSession"
+    )
+  );
 
   return state;
 }
@@ -893,26 +1580,27 @@ export function setTheme({
   storage,
   events,
   setState,
-  theme =
-    config.defaultTheme,
+  theme = config.defaultTheme,
 } = {}) {
   const normalized =
-    theme ===
-    "light"
-      ? "light"
-      : "dark";
+    normalizeTheme(theme);
 
-  setState({
-    theme:
-      normalized,
-  });
+  safeSetState(
+    setState,
+    {
+      theme:
+        normalized,
+    }
+  );
 
-  storage?.set?.(
+  safeStorageSet(
+    storage,
     config.storageKeys.theme,
     normalized
   );
 
-  dom?.html?.setAttribute(
+  setAttribute(
+    dom?.html,
     "data-theme",
     normalized
   );
@@ -923,8 +1611,9 @@ export function setTheme({
       normalized,
   });
 
-  events?.emit?.(
-    "app:theme:change",
+  safeEmit(
+    events,
+    SESSION_EVENTS.themeChange,
     {
       theme:
         normalized,
@@ -939,33 +1628,34 @@ export function setLang({
   storage,
   events,
   setState,
-  lang =
-    config.defaultLang,
+  lang = config.defaultLang,
 } = {}) {
   const normalized =
-    String(
-      lang ||
-        config.defaultLang
-    ).trim() ||
-    config.defaultLang;
+    normalizeLang(lang);
 
-  setState({
-    lang:
-      normalized,
-  });
+  safeSetState(
+    setState,
+    {
+      lang:
+        normalized,
+    }
+  );
 
-  storage?.set?.(
+  safeStorageSet(
+    storage,
     config.storageKeys.lang,
     normalized
   );
 
-  dom?.html?.setAttribute(
+  setAttribute(
+    dom?.html,
     "lang",
     normalized
   );
 
-  events?.emit?.(
-    "app:lang:change",
+  safeEmit(
+    events,
+    SESSION_EVENTS.langChange,
     {
       lang:
         normalized,
@@ -985,55 +1675,61 @@ export function setSidebarOpen({
   const next =
     Boolean(value);
 
-  setState({
-    sidebarOpen:
-      next,
-  });
+  safeSetState(
+    setState,
+    {
+      sidebarOpen:
+        next,
+    }
+  );
 
-  storage?.set?.(
-    config.storageKeys
-      .sidebarOpen,
+  safeStorageSet(
+    storage,
+    config.storageKeys.sidebarOpen,
     next
   );
 
-  storage?.set?.(
+  safeStorageSet(
+    storage,
     "sidebar-collapsed",
     !next
   );
 
-  if (dom?.body) {
-    dom.body.classList.toggle(
-      "sidebar-open",
-      next
-    );
+  toggleClass(
+    dom?.body,
+    "sidebar-open",
+    next
+  );
 
-    dom.body.classList.toggle(
-      "sidebar-collapsed",
-      !next
-    );
-  }
+  toggleClass(
+    dom?.body,
+    "sidebar-collapsed",
+    !next
+  );
 
-  if (dom?.sidebar) {
-    dom.sidebar.classList.toggle(
-      "open",
-      next
-    );
+  toggleClass(
+    dom?.sidebar,
+    "open",
+    next
+  );
 
-    dom.sidebar.classList.toggle(
-      "collapsed",
-      !next
-    );
+  toggleClass(
+    dom?.sidebar,
+    "collapsed",
+    !next
+  );
 
-    dom.sidebar.classList.toggle(
-      "is-open",
-      next
-    );
+  toggleClass(
+    dom?.sidebar,
+    "is-open",
+    next
+  );
 
-    dom.sidebar.classList.toggle(
-      "is-collapsed",
-      !next
-    );
-  }
+  toggleClass(
+    dom?.sidebar,
+    "is-collapsed",
+    !next
+  );
 
   setAriaExpanded(
     dom?.sidebarToggle,
@@ -1045,10 +1741,12 @@ export function setSidebarOpen({
     next
   );
 
-  events?.emit?.(
-    "app:sidebar:change",
+  safeEmit(
+    events,
+    SESSION_EVENTS.sidebarChange,
     {
-      open: next,
+      open:
+        next,
     }
   );
 
@@ -1064,29 +1762,50 @@ export function setLoading({
   const next =
     Boolean(value);
 
-  setState({
-    loading: next,
-  });
+  safeSetState(
+    setState,
+    {
+      loading:
+        next,
+    }
+  );
 
-  dom?.body?.classList.toggle(
+  toggleClass(
+    dom?.body,
     "loading",
     next
   );
 
-  if (dom?.loader) {
-    dom.loader.hidden =
-      !next;
+  toggleClass(
+    dom?.body,
+    "app-loading",
+    next
+  );
 
-    dom.loader.setAttribute(
+  if (dom?.loader) {
+    try {
+      dom.loader.hidden =
+        !next;
+    } catch {}
+
+    setAttribute(
+      dom.loader,
       "aria-hidden",
       String(!next)
     );
+
+    try {
+      dom.loader.dataset.loaderVisible =
+        next ? "true" : "false";
+    } catch {}
   }
 
-  events?.emit?.(
-    "app:loading:change",
+  safeEmit(
+    events,
+    SESSION_EVENTS.loadingChange,
     {
-      loading: next,
+      loading:
+        next,
     }
   );
 
@@ -1101,18 +1820,29 @@ export function setError({
 } = {}) {
   const normalized =
     error
-      ? cloneError(
+      ? safeCloneError(
+          cloneError,
           error
         ) || error
       : null;
 
-  setState({
-    lastError:
-      normalized,
-  });
+  safeSetState(
+    setState,
+    {
+      lastError:
+        normalized,
 
-  events?.emit?.(
-    "app:error",
+      error:
+        normalized,
+
+      hasError:
+        Boolean(normalized),
+    }
+  );
+
+  safeEmit(
+    events,
+    SESSION_EVENTS.error,
     {
       error:
         normalized,
@@ -1130,39 +1860,92 @@ export function syncBaseUI({
   setDocumentTitle,
   syncUserUI,
 } = {}) {
-  setDocumentTitle?.(
-    config.appName
-  );
+  try {
+    setDocumentTitle?.(
+      config.appName
+    );
+  } catch {}
 
-  syncUserUI?.();
+  try {
+    syncUserUI?.();
+  } catch {}
+
+  return true;
 }
 
-export function getSessionDebugSnapshot(
-  state
-) {
+/* =========================================================
+   DEBUG
+========================================================= */
+
+export function getSessionDebugSnapshot(state) {
   return {
     authenticated:
-      Boolean(
-        state?.authenticated
-      ),
-    role:
-      state?.role ||
-      null,
-    username:
-      getUserUsername(
-        state?.user
-      ) || null,
-    currentResolvedUsername:
-      state?.currentResolvedUsername ||
-      null,
+      Boolean(state?.authenticated),
+
     hasToken:
       Boolean(
-        state?.token
+        hasValidToken(state?.token)
       ),
-    route:
-      state?.route || "/",
-    publicPath:
-      state?.publicPath ||
+
+    token:
       null,
+
+    role:
+      state?.role || null,
+
+    username:
+      getUserUsername(state?.user) || null,
+
+    displayName:
+      getUserDisplayName(state?.user) || null,
+
+    avatarUrl:
+      getUserAvatarUrl(state?.user) || null,
+
+    currentResolvedUsername:
+      state?.currentResolvedUsername || null,
+
+    route:
+      state?.route || DEFAULT_ROUTE,
+
+    publicPath:
+      safeRedact(
+        state?.publicPath || null
+      ),
+
+    theme:
+      state?.theme || config.defaultTheme,
+
+    lang:
+      state?.lang || config.defaultLang,
+
+    sidebarOpen:
+      typeof state?.sidebarOpen === "boolean"
+        ? state.sidebarOpen
+        : null,
   };
 }
+
+export default {
+  setRoute,
+  setPublicPath,
+
+  setUser,
+  setToken,
+  applySession,
+  clearSession,
+
+  loadPreferences,
+  loadSession,
+
+  syncThemeMetaColor,
+
+  setTheme,
+  setLang,
+  setSidebarOpen,
+  setLoading,
+  setError,
+
+  syncBaseUI,
+  getSessionDebugSnapshot,
+};

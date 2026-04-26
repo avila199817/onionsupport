@@ -10,7 +10,10 @@
    - salida estable para Router
    - permitir rutas públicas técnicas aunque exista sesión
    - no bloquear /activate-account, /reset-password, confirm reset
+   - no bloquear /activate-account/<token>
+   - no bloquear /reset-password/confirm/<token>
    - bloquear vistas admin aunque el rol venga como alias
+   - evitar redirects agresivos durante transición de login
 
    HARDENING EXTREMO:
    - rutas públicas por defecto
@@ -24,17 +27,21 @@
    - compatibilidad route.public / route.private / meta.public
    - fallback seguro si Auth falla
    - bypass seguro para rutas públicas técnicas
+   - preserva redirect al mandar a login
 ========================================================= */
 
 import {
   getRouteNames,
   normalizeCanonicalPath,
   getDefaultHomeTarget,
+  buildLoginUrl,
 } from "./helpers.js";
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
+
+const LOGIN_PATH = "/login";
 
 const PUBLIC_TECHNICAL_ROUTES = new Set([
   "/activate-account",
@@ -44,6 +51,11 @@ const PUBLIC_TECHNICAL_ROUTES = new Set([
   "/recover-password",
   "/password-reset",
 ]);
+
+const PUBLIC_TECHNICAL_PREFIXES = [
+  "/activate-account/",
+  "/reset-password/confirm/",
+];
 
 const ADMIN_ROLE_KEYS = new Set([
   "admin",
@@ -118,7 +130,9 @@ function first(...values) {
 }
 
 function safeBoolean(value, fallback = false) {
-  if (typeof value === "boolean") return value;
+  if (typeof value === "boolean") {
+    return value;
+  }
 
   if (typeof value === "string") {
     const key = value.trim().toLowerCase();
@@ -133,6 +147,79 @@ function safeBoolean(value, fallback = false) {
   }
 
   return fallback;
+}
+
+function stripSearchAndHash(path = "/") {
+  const raw = safeText(path, "/") || "/";
+
+  let value = raw.split("?")[0].split("#")[0] || "/";
+
+  value = value
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
+
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
+
+  if (value.length > 1) {
+    value = value.replace(/\/+$/g, "") || "/";
+  }
+
+  return value;
+}
+
+function normalizePublicPath(path = "/") {
+  const raw = safeText(path, "/") || "/";
+
+  if (!raw.startsWith("/")) {
+    return `/${raw}`;
+  }
+
+  return raw;
+}
+
+function sameCanonicalPath(a = "/", b = "/") {
+  return stripSearchAndHash(a) === stripSearchAndHash(b);
+}
+
+/* =========================================================
+   RUNTIME FLAGS
+========================================================= */
+
+function getRuntimeFlags(AppCore = null) {
+  const state = safeObject(AppCore?.state);
+
+  return {
+    loginInProgress: Boolean(
+      state.loginInProgress ||
+        state.authLoginInProgress ||
+        state.isLoggingIn
+    ),
+
+    loginNavigationHandled: Boolean(
+      state.loginNavigationHandled ||
+        state.authLoginNavigationHandled
+    ),
+
+    bootNavigationHandled: Boolean(
+      state.bootNavigationHandled
+    ),
+
+    initialRouteRendered: Boolean(
+      state.initialRouteRendered
+    ),
+  };
+}
+
+function isLoginTransitionActive(AppCore = null) {
+  const flags = getRuntimeFlags(AppCore);
+
+  return Boolean(
+    flags.loginInProgress ||
+      flags.loginNavigationHandled
+  );
 }
 
 /* =========================================================
@@ -177,9 +264,6 @@ function expandRoleAliases(roles = []) {
       result.add(role);
     }
 
-    /*
-      Canonical mínimo para rutas declaradas como roles: ["admin"].
-    */
     result.add("admin");
   }
 
@@ -266,11 +350,6 @@ function routeRequiresAuth(route) {
     return false;
   }
 
-  /*
-    Mantiene el comportamiento original:
-    las rutas no declaradas como privadas no se bloquean aquí.
-    En tu tabla real createRoute() ya mete requiresAuth para privadas.
-  */
   return false;
 }
 
@@ -286,20 +365,47 @@ function routeGuestOnly(route) {
   );
 }
 
-function isPublicTechnicalRoute(route, canonicalPath = "/") {
-  if (!route) {
-    return false;
+function isPublicTechnicalPath(path = "/") {
+  const clean = stripSearchAndHash(path);
+
+  if (PUBLIC_TECHNICAL_ROUTES.has(clean)) {
+    return true;
   }
 
-  if (!isRouteExplicitlyPublic(route)) {
-    return false;
+  return PUBLIC_TECHNICAL_PREFIXES.some((prefix) => {
+    return clean.startsWith(prefix);
+  });
+}
+
+function isPublicTechnicalRoute(route, canonicalPath = "/", publicPath = null) {
+  const canonical = stripSearchAndHash(canonicalPath);
+  const visible = stripSearchAndHash(publicPath || canonicalPath);
+
+  if (
+    isPublicTechnicalPath(canonical) ||
+    isPublicTechnicalPath(visible)
+  ) {
+    return true;
   }
 
-  if (routeGuestOnly(route)) {
-    return false;
+  /*
+    Fallback adicional:
+    Si la tabla de rutas declara explícitamente pública una ruta técnica,
+    también se permite. Pero ya no dependemos de route.public para proteger
+    activation/reset.
+  */
+  if (
+    route &&
+    isRouteExplicitlyPublic(route) &&
+    (
+      isPublicTechnicalPath(route.path) ||
+      isPublicTechnicalPath(route.canonicalPath)
+    )
+  ) {
+    return true;
   }
 
-  return PUBLIC_TECHNICAL_ROUTES.has(canonicalPath);
+  return false;
 }
 
 /* =========================================================
@@ -399,10 +505,6 @@ function getUserRoleCandidates(AppCore = null, Auth = null) {
     ...roleArrays.flatMap((value) => toArray(value)),
   ];
 
-  /*
-    Flags booleanos: útil cuando backend no manda role textual
-    pero sí capacidades.
-  */
   const adminFlag = [
     AppCore?.state?.isAdmin,
     AppCore?.state?.admin,
@@ -432,9 +534,14 @@ function getUserRole(AppCore = null, Auth = null) {
 
 function hasAnyAllowedRole(AppCore = null, Auth = null, allowedRoles = []) {
   const allowed = expandRoleAliases(allowedRoles);
-  if (!allowed.length) return true;
 
-  const userRoles = new Set(getUserRoleCandidates(AppCore, Auth));
+  if (!allowed.length) {
+    return true;
+  }
+
+  const userRoles = new Set(
+    getUserRoleCandidates(AppCore, Auth)
+  );
 
   return allowed.some((role) => userRoles.has(role));
 }
@@ -456,10 +563,6 @@ function isAuthenticated(AppCore, Auth) {
     return stateAuthenticated;
   }
 
-  /*
-    Fallback tolerante: si hay usuario o token, asumimos sesión.
-    El Auth real sigue teniendo prioridad arriba.
-  */
   return Boolean(
     AppCore?.state?.token ||
       AppCore?.state?.accessToken ||
@@ -475,11 +578,38 @@ function isAuthenticated(AppCore, Auth) {
 ========================================================= */
 
 function getAuthenticatedRedirectTarget(AppCore, route, getRoute) {
-  return (
+  const explicit = safeText(
     route?.redirectAuthenticated ||
-    route?.redirectIfAuth ||
-    getDefaultHomeTarget(AppCore, getRoute)
+      route?.redirectIfAuth ||
+      route?.meta?.redirectAuthenticated ||
+      route?.meta?.redirectIfAuth ||
+      "",
+    ""
   );
+
+  if (explicit) {
+    return explicit;
+  }
+
+  return getDefaultHomeTarget(AppCore, getRoute);
+}
+
+function buildLoginRedirectTarget(AppCore, routeNames, publicPath = "/") {
+  const loginPath = routeNames.LOGIN || LOGIN_PATH;
+  const cleanPublicPath = normalizePublicPath(publicPath || "/");
+
+  if (
+    sameCanonicalPath(cleanPublicPath, loginPath) ||
+    isPublicTechnicalPath(cleanPublicPath)
+  ) {
+    return loginPath;
+  }
+
+  try {
+    return buildLoginUrl(AppCore, cleanPublicPath);
+  } catch {
+    return loginPath;
+  }
 }
 
 function buildAllowResult({
@@ -487,6 +617,7 @@ function buildAllowResult({
   canonicalPath,
   publicPath = null,
   getRoute,
+  details = {},
 } = {}) {
   return {
     allowed: true,
@@ -496,6 +627,7 @@ function buildAllowResult({
     canonicalPath,
     publicPath,
     getRoute: typeof getRoute === "function" ? getRoute : null,
+    details: safeObject(details),
   };
 }
 
@@ -537,11 +669,13 @@ export function shouldAllowRoute({
     requestedCanonicalPath
   );
 
-  const publicPath = requestedPublicPath || canonicalPath;
+  const publicPath =
+    requestedPublicPath ||
+    canonicalPath;
 
   /*
     Ruta inexistente:
-    no bloquear aquí. El Router debe resolver 404.
+    No bloquear aquí. El Router debe resolver 404.
   */
   if (!route) {
     return buildAllowResult({
@@ -549,22 +683,36 @@ export function shouldAllowRoute({
       canonicalPath,
       publicPath,
       getRoute,
+      details: {
+        reason: "route-not-found-delegated-to-router",
+      },
     });
   }
 
   /*
     CRÍTICO:
-    Rutas públicas técnicas deben pasar siempre.
-    Ejemplo:
+    Rutas públicas técnicas deben pasar siempre, aunque haya sesión.
+    Ejemplos:
       /activate-account?token=XXX
-    No deben redirigirse aunque exista sesión previa.
+      /activate-account/XXX
+      /reset-password/confirm/XXX
+      /reset-password
   */
-  if (isPublicTechnicalRoute(route, canonicalPath)) {
+  if (
+    isPublicTechnicalRoute(
+      route,
+      canonicalPath,
+      publicPath
+    )
+  ) {
     return buildAllowResult({
       route,
       canonicalPath,
       publicPath,
       getRoute,
+      details: {
+        publicTechnical: true,
+      },
     });
   }
 
@@ -578,9 +726,26 @@ export function shouldAllowRoute({
 
   /*
     Guest-only:
-    normalmente solo /login.
+    normalmente /login.
+    
+    Durante transición de login no forzamos un redirect extra desde el guard.
+    Auth.login / LoginView ya están gestionando la navegación.
   */
   if (guestOnly && logged) {
+    if (isLoginTransitionActive(AppCore)) {
+      return buildAllowResult({
+        route,
+        canonicalPath,
+        publicPath,
+        getRoute,
+        details: {
+          guestOnly,
+          logged,
+          loginTransitionActive: true,
+        },
+      });
+    }
+
     return buildDenyResult({
       reason: "already-authenticated",
       route,
@@ -603,7 +768,11 @@ export function shouldAllowRoute({
     return buildDenyResult({
       reason: "not-authenticated",
       route,
-      redirectTo: routeNames.LOGIN,
+      redirectTo: buildLoginRedirectTarget(
+        AppCore,
+        routeNames,
+        publicPath
+      ),
       canonicalPath,
       publicPath,
       details: {
@@ -619,7 +788,11 @@ export function shouldAllowRoute({
     return buildDenyResult({
       reason: "not-authenticated",
       route,
-      redirectTo: routeNames.LOGIN,
+      redirectTo: buildLoginRedirectTarget(
+        AppCore,
+        routeNames,
+        publicPath
+      ),
       canonicalPath,
       publicPath,
       details: {
@@ -630,7 +803,7 @@ export function shouldAllowRoute({
 
   /*
     Roles y logueado.
-    Aquí está el candado real para /usuarios admin.
+    Candado real para /usuarios admin.
   */
   if (allowedRoles.length > 0 && logged) {
     const hasAllowedRole = hasAnyAllowedRole(
@@ -643,7 +816,10 @@ export function shouldAllowRoute({
       return buildDenyResult({
         reason: "insufficient-role",
         route,
-        redirectTo: route.redirectForbidden || null,
+        redirectTo:
+          route.redirectForbidden ||
+          route.meta?.redirectForbidden ||
+          null,
         canonicalPath,
         publicPath,
         details: {
@@ -660,6 +836,14 @@ export function shouldAllowRoute({
     canonicalPath,
     publicPath,
     getRoute,
+    details: {
+      logged,
+      currentRole,
+      userRoles,
+      guestOnly,
+      requiresAuth,
+      allowedRoles,
+    },
   });
 }
 

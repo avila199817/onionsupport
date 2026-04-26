@@ -9,24 +9,28 @@
    - accesibilidad reforzada
    - helpers premium reutilizables
    - convivencia limpia con layout / shell / vistas
+   - soporte app boot / ready / fatal
+   - error fatal de arranque sin inline styles
    - menos overrides agresivos
+   - compatible con loader.css y shell.js
 ========================================================= */
 
 
 /* =========================
    DOCUMENT / BODY BASE
-   Nota:
-   - layout.css ya controla parte del shell
-   - aquí solo reforzamos defaults globales
 ========================= */
+
 html{
   -webkit-text-size-adjust:100%;
   text-size-adjust:100%;
   scroll-behavior:smooth;
+  min-inline-size:320px;
+  min-block-size:100%;
 }
 
 body{
   min-inline-size:320px;
+  min-block-size:100%;
 
   font-family:var(--font-family);
   font-size:var(--font-base);
@@ -36,16 +40,58 @@ body{
   color:var(--text);
   background-color:var(--main-bg);
   background-image:var(--body-bg);
+  background-attachment:fixed;
 
   text-rendering:optimizeLegibility;
   -webkit-font-smoothing:antialiased;
   -moz-osx-font-smoothing:grayscale;
+
+  accent-color:var(--accent);
+  -webkit-tap-highlight-color:transparent;
+}
+
+
+/* =========================
+   APP STATE BRIDGE
+========================= */
+
+html.app-booting,
+html.app-loading,
+body.app-booting,
+body.app-loading{
+  cursor:wait;
+}
+
+body.app-booting,
+body.app-loading,
+body.loading{
+  overflow:hidden;
+  overscroll-behavior:none;
+}
+
+html.app-ready,
+body.app-ready{
+  cursor:auto;
+}
+
+html.app-fatal,
+body.app-fatal{
+  min-block-size:100%;
+}
+
+body.app-fatal{
+  overflow:auto;
+  background:
+    radial-gradient(circle at 20% 10%, color-mix(in srgb, var(--error, #ef4444), transparent 86%), transparent 34%),
+    radial-gradient(circle at 82% 18%, color-mix(in srgb, var(--accent, #6366f1), transparent 88%), transparent 32%),
+    var(--main-bg);
 }
 
 
 /* =========================
    TYPOGRAPHY DEFAULTS
 ========================= */
+
 h1,
 h2,
 h3,
@@ -91,15 +137,23 @@ pre{
   font-family:var(--font-family-mono);
 }
 
+code,
+kbd,
+samp{
+  font-size:.94em;
+}
+
 pre{
   margin:0;
   overflow:auto;
+  max-inline-size:100%;
 }
 
 
 /* =========================
    MEDIA DEFAULTS
 ========================= */
+
 img,
 svg,
 video,
@@ -112,10 +166,15 @@ img{
   block-size:auto;
 }
 
+picture{
+  display:block;
+}
+
 
 /* =========================
    SELECTION
 ========================= */
+
 ::selection{
   background:var(--selection-bg);
   color:var(--selection-text);
@@ -123,9 +182,45 @@ img{
 
 
 /* =========================
+   SCROLLBAR
+========================= */
+
+*{
+  scrollbar-width:thin;
+  scrollbar-color:
+    color-mix(in srgb, var(--text-dim), transparent 48%)
+    transparent;
+}
+
+*::-webkit-scrollbar{
+  inline-size:10px;
+  block-size:10px;
+}
+
+*::-webkit-scrollbar-track{
+  background:transparent;
+}
+
+*::-webkit-scrollbar-thumb{
+  border:3px solid transparent;
+  border-radius:999px;
+  background:
+    color-mix(in srgb, var(--text-dim), transparent 54%);
+  background-clip:content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover{
+  background:
+    color-mix(in srgb, var(--text-dim), transparent 38%);
+  background-clip:content-box;
+}
+
+
+/* =========================
    THEME COLOR BRIDGE
    SOLO ELEMENTOS SHELL / UI COMPARTIDA
 ========================= */
+
 body,
 .layout,
 .sidebar,
@@ -144,6 +239,7 @@ body,
 /* =========================
    LOGO SWITCH
 ========================= */
+
 .logo-dark{
   display:block;
 }
@@ -165,6 +261,7 @@ body,
    THEME TRANSITIONS
    Moderadas y no invasivas
 ========================= */
+
 .layout,
 .sidebar,
 .topbar,
@@ -197,8 +294,7 @@ a{
     transform var(--duration-fast) var(--ease-out);
 }
 
-/* ojo:
-   evitamos aplicar transition a TODOS los path del sistema
+/* Evitamos aplicar transition a TODOS los path del sistema
    porque puede contaminar iconografía compleja / charts / loaders */
 svg{
   transition:
@@ -213,6 +309,7 @@ svg{
 /* =========================
    FOCUS VISIBLE SYSTEM
 ========================= */
+
 :focus-visible{
   outline:none;
 }
@@ -240,6 +337,7 @@ textarea:focus-visible,
 /* =========================
    LINK SYSTEM
 ========================= */
+
 a{
   color:inherit;
   text-decoration:none;
@@ -273,6 +371,7 @@ a:hover{
    BUTTON SYSTEM
    Base neutra y no destructiva
 ========================= */
+
 button{
   appearance:none;
   -webkit-appearance:none;
@@ -295,6 +394,7 @@ button[aria-disabled="true"]{
 /* =========================
    INTERACTIVE HELPERS
 ========================= */
+
 .interactive{
   cursor:pointer;
   transition:
@@ -324,8 +424,8 @@ button[aria-disabled="true"]{
 
 /* =========================
    FORM ELEMENTS
-   Solo defaults base
 ========================= */
+
 input,
 select,
 textarea{
@@ -356,6 +456,7 @@ label{
    SHARED TRANSITIONS FOR
    COMMON INTERACTIVE ITEMS
 ========================= */
+
 .menu-item,
 .search-result,
 .dropdown-item,
@@ -373,6 +474,7 @@ label{
 /* =========================
    DISABLED STATE
 ========================= */
+
 .disabled{
   opacity:.5;
   user-select:none;
@@ -393,6 +495,7 @@ a.disabled,
 /* =========================
    SCROLL AREA
 ========================= */
+
 .scroll-area{
   overflow:auto;
   min-inline-size:0;
@@ -405,6 +508,7 @@ a.disabled,
 /* =========================
    GLASS EFFECT
 ========================= */
+
 .glass{
   background:var(--surface-glass);
   backdrop-filter:blur(12px) saturate(160%);
@@ -419,6 +523,7 @@ a.disabled,
 /* =========================
    HAIRLINE BORDER
 ========================= */
+
 .hairline{
   border:1px solid rgba(255,255,255,.06);
 }
@@ -431,6 +536,7 @@ a.disabled,
 /* =========================
    ELEVATION HELPERS
 ========================= */
+
 .elevated-sm{
   box-shadow:var(--shadow-sm);
 }
@@ -451,6 +557,7 @@ a.disabled,
 /* =========================
    SURFACE HELPERS
 ========================= */
+
 .surface-1{
   background:var(--surface-1);
 }
@@ -481,6 +588,7 @@ a.disabled,
 /* =========================
    RADIUS HELPERS
 ========================= */
+
 .radius-sm{ border-radius:var(--radius-sm); }
 .radius-md{ border-radius:var(--radius-md); }
 .radius-lg{ border-radius:var(--radius-lg); }
@@ -491,6 +599,7 @@ a.disabled,
 /* =========================
    BORDER HELPERS
 ========================= */
+
 .border-soft{
   border:1px solid var(--border-soft);
 }
@@ -507,6 +616,7 @@ a.disabled,
 /* =========================
    TEXT UTILITIES
 ========================= */
+
 .text-strong{ color:var(--text-strong); }
 .text-muted{ color:var(--text-muted); }
 .text-dim{ color:var(--text-dim); }
@@ -521,6 +631,7 @@ a.disabled,
 /* =========================
    BACKGROUND UTILITIES
 ========================= */
+
 .bg-success-soft{ background:var(--success-soft); }
 .bg-warning-soft{ background:var(--warning-soft); }
 .bg-error-soft{ background:var(--error-soft); }
@@ -534,6 +645,7 @@ a.disabled,
 /* =========================
    STATUS RINGS
 ========================= */
+
 .ring-success{ box-shadow:0 0 0 1px var(--success-soft); }
 .ring-warning{ box-shadow:0 0 0 1px var(--warning-soft); }
 .ring-error{ box-shadow:0 0 0 1px var(--error-soft); }
@@ -543,6 +655,7 @@ a.disabled,
 /* =========================
    OPACITY HELPERS
 ========================= */
+
 .opacity-0{ opacity:0; }
 .opacity-25{ opacity:.25; }
 .opacity-50{ opacity:.5; }
@@ -553,6 +666,7 @@ a.disabled,
 /* =========================
    VISIBILITY UTILITIES
 ========================= */
+
 .hidden{
   display:none !important;
 }
@@ -577,6 +691,7 @@ a.disabled,
 /* =========================
    TRUNCATION
 ========================= */
+
 .truncate{
   overflow:hidden;
   text-overflow:ellipsis;
@@ -598,9 +713,8 @@ a.disabled,
 
 /* =========================
    LAYOUT HELPERS
-   Nota:
-   - NO redefinimos .grid completo del layout
 ========================= */
+
 .w-full{ inline-size:100%; }
 .h-full{ block-size:100%; }
 
@@ -634,6 +748,7 @@ a.disabled,
 /* =========================
    SPACING HELPERS
 ========================= */
+
 .p-0{ padding:0; }
 .p-sm{ padding:var(--space-sm); }
 .p-md{ padding:var(--space-md); }
@@ -677,6 +792,7 @@ a.disabled,
 /* =========================
    SAFE AREAS
 ========================= */
+
 .safe-top{
   padding-block-start:env(safe-area-inset-top);
 }
@@ -697,6 +813,7 @@ a.disabled,
 /* =========================
    Z-INDEX UTILITIES
 ========================= */
+
 .z-sidebar{ z-index:var(--z-sidebar); }
 .z-topbar{ z-index:var(--z-topbar); }
 .z-dropdown{ z-index:var(--z-dropdown); }
@@ -708,6 +825,7 @@ a.disabled,
 /* =========================
    SHARED POLISH
 ========================= */
+
 hr{
   border:0;
   border-block-start:1px solid var(--border-soft);
@@ -722,15 +840,176 @@ hr{
 /* =========================
    CURSOR HELPERS
 ========================= */
+
 .cursor-pointer{ cursor:pointer; }
 .cursor-default{ cursor:default; }
 .cursor-not-allowed{ cursor:not-allowed; }
 
 
 /* =========================
-   LIGHT MODE TUNING
-   Solo helpers compartidos
+   FATAL BOOT VIEW
+   Usado por src/main.js
 ========================= */
+
+.fatal-boot{
+  min-block-size:100dvh;
+  inline-size:100%;
+
+  display:grid;
+  place-items:center;
+
+  padding:
+    max(24px, env(safe-area-inset-top))
+    max(20px, env(safe-area-inset-right))
+    max(24px, env(safe-area-inset-bottom))
+    max(20px, env(safe-area-inset-left));
+
+  color:var(--text);
+}
+
+.fatal-boot-card{
+  inline-size:min(100%, 680px);
+
+  display:grid;
+  gap:16px;
+
+  padding:28px;
+
+  border:1px solid var(--border-soft);
+  border-radius:28px;
+
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-1), white 4%), var(--surface-1)),
+    var(--surface-1);
+
+  box-shadow:
+    0 28px 80px rgba(0,0,0,.30),
+    inset 0 1px 0 rgba(255,255,255,.06);
+
+  backdrop-filter:blur(18px);
+  -webkit-backdrop-filter:blur(18px);
+}
+
+[data-theme="light"] .fatal-boot-card{
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.96), rgba(248,250,252,.94)),
+    var(--surface-1);
+
+  box-shadow:
+    0 28px 80px rgba(15,23,42,.12),
+    inset 0 1px 0 rgba(255,255,255,.74);
+}
+
+.fatal-boot-eyebrow{
+  margin:0;
+
+  font-size:12px;
+  line-height:1;
+  font-weight:800;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+
+  color:var(--text-dim);
+}
+
+.fatal-boot-title{
+  margin:0;
+
+  font-size:clamp(28px, 4vw, 42px);
+  line-height:.98;
+  letter-spacing:-.055em;
+
+  color:var(--text-strong);
+}
+
+.fatal-boot-message{
+  max-inline-size:62ch;
+
+  margin:0;
+
+  font-size:15px;
+  line-height:1.65;
+  font-weight:500;
+
+  color:var(--text);
+}
+
+.fatal-boot-hint{
+  max-inline-size:66ch;
+
+  margin:0;
+
+  font-size:13px;
+  line-height:1.55;
+
+  color:var(--text-dim);
+}
+
+.fatal-boot-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+
+  margin-block-start:6px;
+}
+
+.fatal-boot-button{
+  min-block-size:42px;
+
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+
+  padding:0 16px;
+
+  border:1px solid color-mix(in srgb, var(--accent), transparent 34%);
+  border-radius:14px;
+
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent), white 12%), var(--accent));
+
+  color:var(--accent-contrast, #fff);
+
+  font-size:13px;
+  font-weight:700;
+
+  box-shadow:
+    0 12px 30px color-mix(in srgb, var(--accent), transparent 72%);
+
+  cursor:pointer;
+}
+
+.fatal-boot-button:hover{
+  transform:translateY(-1px);
+  box-shadow:
+    0 16px 36px color-mix(in srgb, var(--accent), transparent 68%);
+}
+
+.fatal-boot-button:active{
+  transform:scale(.985);
+}
+
+.fatal-boot-button-secondary{
+  border-color:var(--border-soft);
+
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-2), white 3%), var(--surface-2));
+
+  color:var(--text-strong);
+
+  box-shadow:none;
+}
+
+.fatal-boot-button-secondary:hover{
+  box-shadow:var(--shadow-sm);
+}
+
+
+/* =========================
+   LIGHT MODE TUNING
+========================= */
+
 [data-theme="light"] .user-dropdown{
   border:1px solid rgba(23,32,51,.08);
   box-shadow:
@@ -742,6 +1021,7 @@ hr{
 /* =========================
    REDUCED MOTION
 ========================= */
+
 @media (prefers-reduced-motion: reduce){
   html{
     scroll-behavior:auto;
@@ -758,7 +1038,46 @@ hr{
 
   button:hover,
   .interactive:hover,
-  .interactive:active{
+  .interactive:active,
+  .fatal-boot-button:hover,
+  .fatal-boot-button:active{
     transform:none !important;
+  }
+}
+
+
+/* =========================
+   MOBILE TUNING
+========================= */
+
+@media (max-width: 640px){
+  .fatal-boot-card{
+    padding:22px;
+    border-radius:24px;
+  }
+
+  .fatal-boot-actions{
+    display:grid;
+    grid-template-columns:1fr;
+  }
+
+  .fatal-boot-button{
+    inline-size:100%;
+  }
+}
+
+
+/* =========================
+   PRINT
+========================= */
+
+@media print{
+  body{
+    background:#fff !important;
+    color:#000 !important;
+  }
+
+  .fatal-boot-actions{
+    display:none !important;
   }
 }

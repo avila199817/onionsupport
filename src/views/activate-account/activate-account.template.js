@@ -18,6 +18,7 @@
    - mantener compatibilidad total con flujo SPA público
    - evitar botones duplicados de retorno
    - sin recuperación manual de token en UI
+   - ajuste responsive anti-corte de card/botón/footer
 ========================================================= */
 
 import { renderPasswordField } from "../../shared/password-field/index.js";
@@ -554,6 +555,53 @@ function renderScopedPasswordFieldStyle() {
 function renderActivateAccountScopedStyle() {
   return `
     <style>
+      .activate-account-view{
+        min-height:100svh;
+        overflow-x:hidden;
+        overflow-y:auto;
+        overscroll-behavior:contain;
+      }
+
+      .activate-account-view,
+      .activate-account-view *{
+        box-sizing:border-box;
+      }
+
+      .activate-account-view .login-scene{
+        min-height:100svh;
+        height:auto;
+        padding-top:max(22px, env(safe-area-inset-top));
+        padding-bottom:max(34px, env(safe-area-inset-bottom));
+        overflow:visible;
+      }
+
+      .activate-account-view .login-grid{
+        min-height:calc(100svh - 56px);
+        height:auto;
+        align-items:center;
+      }
+
+      .activate-account-view .login-stage,
+      .activate-account-view .login-stage--right,
+      .activate-account-view .login-card-shell,
+      .activate-account-view .login-card-shell--right{
+        min-height:0;
+      }
+
+      .activate-account-view .login-card.login-card--clean{
+        max-height:calc(100svh - 54px);
+        overflow-x:hidden;
+        overflow-y:auto;
+        overscroll-behavior:contain;
+        scrollbar-width:none;
+        padding-bottom:clamp(30px, 4vh, 44px);
+      }
+
+      .activate-account-view .login-card.login-card--clean::-webkit-scrollbar{
+        width:0;
+        height:0;
+      }
+
       .activate-account-view .login-card{
         overflow:hidden;
       }
@@ -568,6 +616,7 @@ function renderActivateAccountScopedStyle() {
 
       .activate-account-view .login-form{
         gap:16px;
+        padding-bottom:4px;
       }
 
       .activate-account-view .activate-account-status-box{
@@ -718,8 +767,17 @@ function renderActivateAccountScopedStyle() {
         margin-top:0;
       }
 
-      .activate-account-view .login-button{
+      .activate-account-view .login-button,
+      .activate-account-view #activateAccountButton{
         margin-top:2px;
+        margin-bottom:2px;
+        min-height:54px;
+        flex:0 0 auto;
+      }
+
+      .activate-account-view .login-footer{
+        margin-top:12px;
+        padding-bottom:2px;
       }
 
       .activate-account-view .activate-account-status-spinner{
@@ -761,7 +819,102 @@ function renderActivateAccountScopedStyle() {
         background:rgba(255,255,255,.045);
       }
 
+      @media (max-height: 820px){
+        .activate-account-view .login-scene{
+          padding-top:18px;
+          padding-bottom:28px;
+        }
+
+        .activate-account-view .login-grid{
+          min-height:calc(100svh - 46px);
+        }
+
+        .activate-account-view .login-card.login-card--clean{
+          max-height:calc(100svh - 38px);
+          padding-bottom:34px;
+        }
+
+        .activate-account-view .login-header{
+          margin-bottom:14px;
+        }
+
+        .activate-account-view .login-form{
+          gap:13px;
+        }
+
+        .activate-account-view .activate-account-status-card{
+          padding:16px;
+          gap:13px;
+          border-radius:20px;
+        }
+
+        .activate-account-view .activate-account-password-fields{
+          gap:11px;
+        }
+
+        .activate-account-view .activate-account-password-help{
+          padding:10px 12px;
+        }
+
+        .activate-account-view .login-footer{
+          margin-top:10px;
+        }
+      }
+
+      @media (max-height: 720px){
+        .activate-account-view .login-scene{
+          align-items:flex-start;
+          padding-top:16px;
+          padding-bottom:24px;
+        }
+
+        .activate-account-view .login-grid{
+          align-items:flex-start;
+        }
+
+        .activate-account-view .login-card.login-card--clean{
+          max-height:none;
+          overflow:visible;
+        }
+
+        .activate-account-view .login-header{
+          margin-bottom:12px;
+        }
+
+        .activate-account-view .login-header h2{
+          font-size:clamp(30px, 4.4vh, 42px);
+        }
+
+        .activate-account-view .activate-account-status-card{
+          padding:15px;
+        }
+
+        .activate-account-view .activate-account-status-text{
+          line-height:1.5;
+        }
+
+        .activate-account-view .login-button,
+        .activate-account-view #activateAccountButton{
+          min-height:52px;
+        }
+      }
+
       @media (max-width: 720px){
+        .activate-account-view .login-scene{
+          padding-top:18px;
+          padding-bottom:28px;
+        }
+
+        .activate-account-view .login-grid{
+          min-height:auto;
+        }
+
+        .activate-account-view .login-card.login-card--clean{
+          max-height:none;
+          overflow:visible;
+          padding-bottom:30px;
+        }
+
         .activate-account-view .activate-account-status-card{
           grid-template-columns:1fr;
           gap:13px;

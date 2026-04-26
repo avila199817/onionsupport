@@ -259,7 +259,6 @@
   --link: #d4d4d8;
   --link-hover: #f4f4f5;
 
-  /* compat legacy */
   --muted: var(--text-muted);
   --dim: var(--text-dim);
 
@@ -705,6 +704,7 @@
 /* =========================================================
    LIGHT THEME
 ========================================================= */
+
 [data-theme="light"]{
   /* =========================
      BRAND
@@ -757,7 +757,6 @@
   --link: var(--accent);
   --link-hover: var(--accent-hover);
 
-  /* compat legacy */
   --muted: var(--text-muted);
   --dim: var(--text-dim);
 
@@ -835,7 +834,6 @@
   --modal-bg: rgba(255,255,255,.94);
   --backdrop-bg: rgba(15,23,42,.24);
 
-  /* compat legacy */
   --sb-bg: rgba(255,255,255,.90);
   --dropdown-bg-legacy: var(--dropdown-bg);
 
@@ -972,7 +970,6 @@
   --sidebar-icon: rgba(23,32,51,.54);
   --sidebar-icon-active: var(--accent);
 
-  /* compat legacy */
   --sb-bg: var(--sidebar-bg);
   --sb-hover: var(--sidebar-hover);
   --sb-active: var(--sidebar-active);
@@ -1021,7 +1018,6 @@
   --info-soft: rgba(59,130,166,.12);
   --info-bg: rgba(59,130,166,.09);
 
-  /* compat legacy */
   --warning-bg-legacy: var(--warning-soft);
   --info-bg-legacy: var(--info-soft);
 
@@ -1128,8 +1124,8 @@
 
 /* =========================================================
    DENSITY PRESETS OPCIONALES
-   Usa uno si quieres más control por atributo
 ========================================================= */
+
 :root[data-density="compact"]{
   --ui-scale: .95;
   --density-factor: .91;
@@ -1143,4 +1139,663 @@
 :root[data-density="comfortable"]{
   --ui-scale: 1.02;
   --density-factor: 1;
+}
+
+
+/* =========================================================
+   ONION SUPPORT — DESIGN TOKENS LEVEL UP
+   BLOQUE FINAL DE OVERRIDES / ALIASES / HARDENING
+========================================================= */
+
+
+/* =========================================================
+   SEMANTIC ALIASES — COMPAT TOTAL
+========================================================= */
+
+:root {
+  --accent-contrast: var(--text-on-accent, #ffffff);
+  --brand: var(--accent);
+  --brand-hover: var(--accent-hover);
+  --brand-active: var(--accent-active);
+  --brand-soft: var(--accent-soft);
+  --brand-ring: var(--accent-ring);
+  --brand-border: var(--accent-border);
+
+  --danger: var(--error);
+  --danger-hover: var(--error-hover);
+  --danger-soft: var(--error-soft);
+  --danger-bg: var(--error-bg);
+  --danger-border: var(--border-error);
+  --danger-strong: var(--error);
+
+  --positive: var(--success);
+  --positive-hover: var(--success-hover);
+  --positive-soft: var(--success-soft);
+  --positive-bg: var(--success-bg);
+  --positive-border: var(--border-success);
+  --success-strong: var(--success);
+
+  --warning-strong: var(--warning);
+  --warning-border: var(--border-warning);
+
+  --info-strong: var(--info);
+  --info-border: var(--border-info);
+
+  --neutral: var(--accent-3);
+  --neutral-soft: rgba(148, 163, 184, .14);
+  --neutral-bg: rgba(148, 163, 184, .10);
+  --neutral-border: rgba(148, 163, 184, .24);
+
+  --text-primary: var(--text);
+  --text-secondary: var(--text-muted);
+  --text-tertiary: var(--text-dim);
+  --text-quaternary: var(--text-faint);
+
+  --surface: var(--surface-1);
+  --surface-soft: var(--surface-2);
+  --surface-strong: var(--surface-3);
+  --surface-raised: var(--surface-elevated);
+  --surface-raised-strong: var(--surface-elevated-strong);
+
+  --shadow-card: var(--card-shadow);
+  --shadow-panel: var(--panel-shadow);
+  --shadow-dropdown: var(--shadow-lg);
+  --shadow-modal: var(--shadow-xl);
+}
+
+
+/* =========================================================
+   APP LOGOS / ASSET PATH TOKENS
+========================================================= */
+
+:root {
+  --asset-logo-dark: url("/src/media/img/favicon_white.png");
+  --asset-logo-light: url("/src/media/img/favicon_black.png");
+  --asset-favicon-ico: url("/src/media/img/Logo_Intro.ico");
+
+  --loader-logo-dark: var(--asset-logo-dark);
+  --loader-logo-light: var(--asset-logo-light);
+}
+
+
+/* =========================================================
+   SHELL TOKENS — APP BOOT / READY / ROUTE MODES
+========================================================= */
+
+:root {
+  --shell-transition:
+    opacity var(--duration-normal) var(--ease-standard),
+    visibility var(--duration-normal) var(--ease-standard),
+    transform var(--duration-normal) var(--ease-standard);
+
+  --shell-auth-max-width: 1180px;
+  --shell-auth-padding: clamp(18px, 3vw, 42px);
+
+  --shell-app-bg: var(--body-bg);
+  --shell-app-color: var(--text);
+
+  --shell-main-padding-inline: var(--content-padding-inline);
+  --shell-main-padding-block: var(--content-padding-block);
+
+  --shell-content-radius: var(--view-radius);
+  --shell-content-max: var(--content-max);
+
+  --shell-route-auth-bg:
+    radial-gradient(circle at 18% 14%, color-mix(in srgb, var(--accent), transparent 88%), transparent 30%),
+    radial-gradient(circle at 82% 18%, color-mix(in srgb, var(--info), transparent 90%), transparent 30%),
+    var(--body-bg);
+
+  --shell-route-app-bg: var(--body-bg);
+
+  --shell-busy-opacity: .72;
+  --shell-disabled-opacity: .48;
+}
+
+
+/* =========================================================
+   LOADER TOKENS — CENTRALIZADOS
+========================================================= */
+
+:root {
+  --loader-card-width: min(360px, calc(100vw - 48px));
+  --loader-card-padding: 28px 26px 24px;
+  --loader-card-radius: 28px;
+
+  --loader-brand-size: 74px;
+  --loader-logo-size: 52px;
+  --loader-logo-radius: 18px;
+
+  --loader-progress-height: 7px;
+  --loader-progress-radius: 999px;
+
+  --loader-title-size: 18px;
+  --loader-text-size: 13px;
+  --loader-subtext-size: 11px;
+
+  --loader-backdrop-blur: blur(20px);
+  --loader-card-blur: blur(18px);
+
+  --loader-duration-fade: 220ms;
+  --loader-duration-bar: 1.08s;
+  --loader-duration-orbit: 2.2s;
+
+  --loader-dark-bg:
+    radial-gradient(circle at 18% 14%, rgba(99, 102, 241, .15), transparent 28%),
+    radial-gradient(circle at 82% 20%, rgba(14, 165, 233, .10), transparent 26%),
+    radial-gradient(circle at 50% 100%, rgba(168, 85, 247, .08), transparent 28%),
+    linear-gradient(180deg, rgba(2, 6, 23, .975), rgba(3, 7, 18, .985));
+
+  --loader-dark-card:
+    linear-gradient(180deg, rgba(255,255,255,.085), rgba(255,255,255,.035)),
+    rgba(15,23,42,.72);
+
+  --loader-dark-card-strong:
+    linear-gradient(180deg, rgba(255,255,255,.11), rgba(255,255,255,.045)),
+    rgba(15,23,42,.82);
+
+  --loader-light-bg:
+    radial-gradient(circle at 18% 14%, rgba(111, 89, 217, .12), transparent 28%),
+    radial-gradient(circle at 82% 20%, rgba(59, 130, 166, .09), transparent 26%),
+    radial-gradient(circle at 50% 100%, rgba(196, 90, 134, .07), transparent 28%),
+    linear-gradient(180deg, rgba(248,250,252,.96), rgba(241,245,249,.98));
+
+  --loader-light-card:
+    linear-gradient(180deg, rgba(255,255,255,.96), rgba(248,250,252,.92)),
+    rgba(255,255,255,.90);
+
+  --loader-light-card-strong:
+    linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,250,252,.96)),
+    rgba(255,255,255,.94);
+}
+
+
+/* =========================================================
+   SIDEBAR LEVEL UP
+========================================================= */
+
+:root {
+  --sidebar-radius: 0;
+  --sidebar-logo-size: calc(34px * var(--ui-scale));
+  --sidebar-logo-radius: calc(12px * var(--ui-scale));
+
+  --sidebar-item-radius: calc(12px * var(--ui-scale));
+  --sidebar-item-gap: calc(10px * var(--ui-scale));
+
+  --sidebar-item-font-size: var(--font-md);
+  --sidebar-item-font-weight: var(--weight-medium);
+
+  --sidebar-group-title-size: var(--font-xs);
+  --sidebar-group-title-color: var(--text-faint);
+  --sidebar-group-title-letter: .08em;
+
+  --sidebar-footer-height: calc(68px * var(--ui-scale));
+  --sidebar-footer-border: var(--sidebar-border);
+  --sidebar-footer-bg: rgba(255,255,255,.018);
+
+  --sidebar-user-avatar-size: calc(34px * var(--ui-scale));
+  --sidebar-user-name-size: var(--font-md);
+  --sidebar-user-role-size: var(--font-xs);
+
+  --sidebar-tooltip-bg: var(--tooltip-bg);
+  --sidebar-tooltip-text: var(--tooltip-text);
+  --sidebar-tooltip-shadow: var(--shadow-lg);
+
+  --sidebar-mobile-backdrop: rgba(0,0,0,.46);
+}
+
+[data-theme="light"] {
+  --sidebar-footer-bg: rgba(23,32,51,.020);
+  --sidebar-mobile-backdrop: rgba(15,23,42,.22);
+}
+
+
+/* =========================================================
+   TOPBAR LEVEL UP
+========================================================= */
+
+:root {
+  --topbar-button-size: calc(36px * var(--ui-scale));
+  --topbar-button-radius: calc(12px * var(--ui-scale));
+  --topbar-button-bg: rgba(255,255,255,.026);
+  --topbar-button-bg-hover: rgba(255,255,255,.048);
+  --topbar-button-border: rgba(255,255,255,.060);
+
+  --topbar-title-size: var(--font-lg);
+  --topbar-title-weight: var(--weight-bold);
+  --topbar-subtitle-size: var(--font-xs);
+
+  --topbar-search-bg: rgba(255,255,255,.030);
+  --topbar-search-bg-hover: rgba(255,255,255,.044);
+  --topbar-search-bg-focus: rgba(255,255,255,.052);
+  --topbar-search-border: rgba(255,255,255,.075);
+
+  --topbar-search-result-bg: var(--dropdown-bg);
+  --topbar-search-result-border: var(--border-default);
+  --topbar-search-result-shadow: var(--shadow-xl);
+}
+
+[data-theme="light"] {
+  --topbar-button-bg: rgba(23,32,51,.026);
+  --topbar-button-bg-hover: rgba(23,32,51,.046);
+  --topbar-button-border: rgba(23,32,51,.070);
+
+  --topbar-search-bg: rgba(255,255,255,.72);
+  --topbar-search-bg-hover: rgba(255,255,255,.88);
+  --topbar-search-bg-focus: #ffffff;
+  --topbar-search-border: rgba(23,32,51,.080);
+}
+
+
+/* =========================================================
+   VIEW / DASHBOARD TOKENS
+========================================================= */
+
+:root {
+  --view-bg: transparent;
+  --view-header-gap: var(--space-md);
+  --view-section-gap: var(--space-lg);
+
+  --view-hero-bg:
+    linear-gradient(180deg, rgba(255,255,255,.024), rgba(255,255,255,.008)),
+    var(--surface-elevated);
+
+  --view-hero-border: var(--border-default);
+  --view-hero-radius: var(--card-radius-lg);
+  --view-hero-shadow: var(--shadow-md);
+
+  --view-title-size: var(--font-3xl);
+  --view-title-weight: var(--weight-black);
+  --view-title-letter: -.045em;
+
+  --view-subtitle-size: var(--font-md);
+  --view-subtitle-color: var(--text-muted);
+
+  --section-title-size: var(--font-xl);
+  --section-title-weight: var(--weight-bold);
+  --section-title-color: var(--text-strong);
+
+  --section-subtitle-size: var(--font-sm);
+  --section-subtitle-color: var(--text-dim);
+}
+
+[data-theme="light"] {
+  --view-hero-bg:
+    linear-gradient(180deg, rgba(255,255,255,.96), rgba(248,250,252,.98)),
+    var(--surface-elevated);
+}
+
+
+/* =========================================================
+   TABLE / DATA GRID LEVEL UP
+========================================================= */
+
+:root {
+  --data-table-radius: var(--card-radius);
+  --data-table-bg: var(--card-bg);
+  --data-table-border: var(--card-border);
+  --data-table-shadow: var(--shadow-sm);
+
+  --data-table-head-bg: var(--table-head-bg);
+  --data-table-head-text: var(--text-dim);
+  --data-table-head-font-size: var(--font-xs);
+  --data-table-head-font-weight: var(--weight-bold);
+  --data-table-head-letter: .075em;
+
+  --data-table-row-height: calc(54px * var(--ui-scale));
+  --data-table-row-border: var(--table-border);
+  --data-table-row-hover: var(--table-row-hover);
+  --data-table-row-selected: var(--table-row-selected);
+
+  --data-table-cell-text: var(--text-soft);
+  --data-table-cell-muted: var(--text-dim);
+
+  --data-table-action-size: calc(32px * var(--ui-scale));
+  --data-table-action-radius: calc(10px * var(--ui-scale));
+}
+
+
+/* =========================================================
+   SKELETON / LOADING CONTENT
+========================================================= */
+
+:root {
+  --skeleton-bg: rgba(255,255,255,.050);
+  --skeleton-bg-strong: rgba(255,255,255,.070);
+  --skeleton-shine: rgba(255,255,255,.095);
+
+  --skeleton-radius: var(--radius-md);
+  --skeleton-height-sm: calc(10px * var(--ui-scale));
+  --skeleton-height-md: calc(14px * var(--ui-scale));
+  --skeleton-height-lg: calc(20px * var(--ui-scale));
+
+  --skeleton-animation:
+    skeletonShimmer 1.35s var(--ease-standard) infinite;
+}
+
+[data-theme="light"] {
+  --skeleton-bg: rgba(23,32,51,.055);
+  --skeleton-bg-strong: rgba(23,32,51,.075);
+  --skeleton-shine: rgba(255,255,255,.72);
+}
+
+
+/* =========================================================
+   EMPTY / ERROR / SUCCESS STATES
+========================================================= */
+
+:root {
+  --state-card-bg: var(--card-bg);
+  --state-card-border: var(--card-border);
+  --state-card-radius: var(--card-radius-lg);
+  --state-card-shadow: var(--shadow-sm);
+
+  --state-icon-size: calc(42px * var(--ui-scale));
+  --state-icon-radius: calc(16px * var(--ui-scale));
+
+  --state-empty-bg: rgba(148,163,184,.10);
+  --state-empty-border: rgba(148,163,184,.20);
+  --state-empty-icon: var(--info);
+
+  --state-error-bg: var(--error-bg);
+  --state-error-border: var(--border-error);
+  --state-error-icon: var(--error);
+
+  --state-success-bg: var(--success-bg);
+  --state-success-border: var(--border-success);
+  --state-success-icon: var(--success);
+
+  --state-warning-bg: var(--warning-bg);
+  --state-warning-border: var(--border-warning);
+  --state-warning-icon: var(--warning);
+}
+
+
+/* =========================================================
+   MODAL / DRAWER / OVERLAY
+========================================================= */
+
+:root {
+  --overlay-bg: var(--backdrop-bg);
+  --overlay-blur: blur(10px);
+  --overlay-enter-duration: var(--duration-normal);
+  --overlay-exit-duration: var(--duration-fast);
+
+  --modal-width-sm: min(420px, calc(100vw - 32px));
+  --modal-width-md: min(640px, calc(100vw - 32px));
+  --modal-width-lg: min(860px, calc(100vw - 32px));
+  --modal-width-xl: min(1120px, calc(100vw - 32px));
+
+  --modal-padding: var(--space-xl);
+  --modal-header-gap: var(--space-sm);
+  --modal-body-gap: var(--space-md);
+  --modal-footer-gap: var(--space-sm);
+
+  --drawer-width: min(420px, 92vw);
+  --drawer-width-lg: min(560px, 94vw);
+}
+
+
+/* =========================================================
+   TOOLTIP / POPOVER / DROPDOWN
+========================================================= */
+
+:root {
+  --tooltip-radius: calc(10px * var(--ui-scale));
+  --tooltip-padding-y: calc(7px * var(--ui-scale));
+  --tooltip-padding-x: calc(9px * var(--ui-scale));
+  --tooltip-font-size: var(--font-xs);
+  --tooltip-shadow: var(--shadow-lg);
+
+  --dropdown-min-width: calc(220px * var(--ui-scale));
+  --dropdown-padding: calc(6px * var(--ui-scale));
+  --dropdown-item-height: calc(34px * var(--ui-scale));
+  --dropdown-item-radius: calc(10px * var(--ui-scale));
+  --dropdown-item-padding-x: calc(10px * var(--ui-scale));
+  --dropdown-item-gap: calc(9px * var(--ui-scale));
+}
+
+
+/* =========================================================
+   FORMS EXTENDED
+========================================================= */
+
+:root {
+  --form-label-size: var(--font-sm);
+  --form-label-weight: var(--weight-semibold);
+  --form-label-color: var(--text-soft);
+
+  --form-help-size: var(--font-xs);
+  --form-help-color: var(--text-dim);
+
+  --form-error-size: var(--font-xs);
+  --form-error-color: var(--error);
+
+  --form-group-gap: var(--space-xs);
+  --form-section-gap: var(--space-lg);
+
+  --switch-width: calc(42px * var(--ui-scale));
+  --switch-height: calc(24px * var(--ui-scale));
+  --switch-thumb: calc(18px * var(--ui-scale));
+  --switch-bg: rgba(255,255,255,.12);
+  --switch-bg-checked: var(--accent);
+  --switch-border: var(--border-default);
+}
+
+[data-theme="light"] {
+  --switch-bg: rgba(23,32,51,.12);
+}
+
+
+/* =========================================================
+   CHART / VISUALIZATION TOKENS
+========================================================= */
+
+:root {
+  --chart-1: var(--accent);
+  --chart-2: var(--info);
+  --chart-3: var(--success);
+  --chart-4: var(--warning);
+  --chart-5: var(--error);
+  --chart-6: var(--accent-5);
+
+  --chart-grid: var(--border-soft);
+  --chart-axis: var(--text-faint);
+  --chart-label: var(--text-dim);
+  --chart-tooltip-bg: var(--popover-bg);
+  --chart-tooltip-border: var(--border-default);
+}
+
+
+/* =========================================================
+   APP STATUS / NETWORK / BADGES
+========================================================= */
+
+:root {
+  --status-online: var(--success);
+  --status-online-bg: var(--success-bg);
+  --status-online-border: var(--border-success);
+
+  --status-offline: var(--error);
+  --status-offline-bg: var(--error-bg);
+  --status-offline-border: var(--border-error);
+
+  --status-syncing: var(--info);
+  --status-syncing-bg: var(--info-bg);
+  --status-syncing-border: var(--border-info);
+
+  --status-idle: var(--text-faint);
+  --status-idle-bg: rgba(148,163,184,.08);
+  --status-idle-border: rgba(148,163,184,.16);
+}
+
+
+/* =========================================================
+   RESPONSIVE TOKENS
+========================================================= */
+
+:root {
+  --breakpoint-xs: 390px;
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+  --breakpoint-2xl: 1536px;
+
+  --mobile-bottom-nav-height: 0px;
+  --mobile-shell-padding: var(--space-sm);
+  --mobile-content-padding: var(--space-sm);
+
+  --tablet-content-padding: var(--space-md);
+  --desktop-content-padding: var(--content-padding);
+}
+
+
+/* =========================================================
+   DENSITY PRESETS — FIX REAL
+   Tu HTML usa body[data-density="default"].
+========================================================= */
+
+html[data-density="compact"],
+body[data-density="compact"],
+[data-density="compact"] {
+  --ui-scale: .95;
+  --density-factor: .90;
+  --content-padding: calc(20px * var(--ui-scale));
+  --topbar-height: calc(52px * var(--ui-scale));
+  --sidebar-item-height: calc(38px * var(--ui-scale));
+  --tablehead-height: calc(40px * var(--ui-scale));
+}
+
+html[data-density="default"],
+body[data-density="default"],
+html[data-density="normal"],
+body[data-density="normal"],
+[data-density="default"],
+[data-density="normal"] {
+  --ui-scale: .97;
+  --density-factor: .93;
+}
+
+html[data-density="comfortable"],
+body[data-density="comfortable"],
+[data-density="comfortable"] {
+  --ui-scale: 1.02;
+  --density-factor: 1;
+  --content-padding: calc(26px * var(--ui-scale));
+  --topbar-height: calc(58px * var(--ui-scale));
+  --sidebar-item-height: calc(42px * var(--ui-scale));
+  --tablehead-height: calc(46px * var(--ui-scale));
+}
+
+
+/* =========================================================
+   ROUTE MODE TOKENS
+========================================================= */
+
+html[data-route-mode="auth"],
+body[data-route-mode="auth"],
+[data-route-mode="auth"] {
+  --app-sidebar-current-width: 0px;
+  --content-padding-inline: var(--shell-auth-padding);
+  --content-padding-block: var(--shell-auth-padding);
+}
+
+html[data-route-mode="app"],
+body[data-route-mode="app"],
+[data-route-mode="app"] {
+  --content-padding-inline: var(--content-padding);
+  --content-padding-block: var(--space-md);
+}
+
+
+/* =========================================================
+   MOBILE OVERRIDES
+========================================================= */
+
+@media (max-width: 768px) {
+  :root {
+    --ui-scale: .96;
+
+    --content-padding: var(--mobile-content-padding);
+    --content-padding-lg: var(--space-md);
+    --content-padding-xl: var(--space-lg);
+
+    --sidebar-width: var(--sidebar-mobile-width);
+    --app-sidebar-current-width: 0px;
+
+    --topbar-height: calc(52px * var(--ui-scale));
+    --tablehead-height: 0px;
+
+    --view-radius: calc(18px * var(--ui-scale));
+    --panel-radius: calc(16px * var(--ui-scale));
+    --card-radius: calc(16px * var(--ui-scale));
+
+    --modal-width-md: min(100vw - 24px, 640px);
+    --modal-width-lg: min(100vw - 24px, 860px);
+    --modal-padding: var(--space-lg);
+
+    --loader-card-width: min(304px, calc(100vw - 32px));
+    --loader-card-padding: 24px 18px 20px;
+    --loader-brand-size: 66px;
+    --loader-logo-size: 48px;
+  }
+}
+
+@media (max-width: 420px) {
+  :root {
+    --ui-scale: .94;
+    --density-factor: .90;
+
+    --content-padding: var(--space-sm);
+    --sidebar-mobile-width: min(92vw, 300px);
+
+    --font-4xl: calc(28px * var(--ui-scale));
+    --font-5xl: calc(34px * var(--ui-scale));
+  }
+}
+
+
+/* =========================================================
+   HIGH CONTRAST / REDUCED TRANSPARENCY SAFETY
+========================================================= */
+
+@media (prefers-contrast: more) {
+  :root {
+    --border-soft: color-mix(in srgb, var(--text), transparent 78%);
+    --border-default: color-mix(in srgb, var(--text), transparent 66%);
+    --border-strong: color-mix(in srgb, var(--text), transparent 54%);
+
+    --text-muted: color-mix(in srgb, var(--text), transparent 18%);
+    --text-dim: color-mix(in srgb, var(--text), transparent 30%);
+
+    --focus-ring: 0 0 0 4px color-mix(in srgb, var(--accent), transparent 50%);
+    --focus-ring-strong: 0 0 0 4px color-mix(in srgb, var(--accent), transparent 34%);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --surface-glass: var(--surface-2);
+    --surface-glass-strong: var(--surface-3);
+    --dropdown-bg: var(--surface-2);
+    --popover-bg: var(--surface-2);
+    --modal-bg: var(--surface-2);
+    --topbar-bg: var(--surface-1);
+    --sidebar-bg: var(--surface-1);
+  }
+}
+
+
+/* =========================================================
+   TOKENIZED KEYFRAMES SUPPORT
+========================================================= */
+
+@keyframes skeletonShimmer {
+  0% {
+    background-position: 120% 0;
+  }
+
+  100% {
+    background-position: -120% 0;
+  }
 }

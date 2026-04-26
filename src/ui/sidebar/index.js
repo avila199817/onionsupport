@@ -2,12 +2,17 @@
    Onion SPA - Sidebar UI
    Archivo: src/ui/sidebar/index.js
 
-   FINAL PRO FIX · DESKTOP STABLE MODE
+   FINAL PRO FIX · DESKTOP STABLE MODE · ADMIN VISIBILITY HARDENED
+
    FIX:
    - desktop y mobile separados
    - sin auto-collapse fantasma al cambiar de ruta
    - restore robusto del estado
    - dropdown estable
+   - detección admin robusta para ocultar/mostrar items admin
+   - soporte roles alias: admin / superadmin / administrator / owner / root
+   - soporte flags: isAdmin / admin / canManageUsers / canAccessUsers
+   - cleanup scope defensivo
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -75,6 +80,235 @@ export const SidebarUI = (() => {
   };
 
   /* ======================================================
+     SAFE HELPERS
+  ====================================================== */
+
+  function safeText(value, fallback = "") {
+    if (value === null || value === undefined) {
+      return fallback;
+    }
+
+    const text = String(value).trim();
+
+    return text || fallback;
+  }
+
+  function safeObject(value) {
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? value
+      : {};
+  }
+
+  function toArray(value) {
+    if (Array.isArray(value)) return value;
+    if (value === null || value === undefined) return [];
+    return [value];
+  }
+
+  function first(...values) {
+    for (const value of values) {
+      if (value === undefined || value === null) continue;
+      if (typeof value === "string" && value.trim() === "") continue;
+      if (Array.isArray(value) && value.length === 0) continue;
+
+      return value;
+    }
+
+    return null;
+  }
+
+  function safeBoolean(value, fallback = false) {
+    if (typeof value === "boolean") return value;
+
+    if (typeof value === "string") {
+      const key = value.trim().toLowerCase();
+
+      if (["true", "1", "yes", "si", "sí"].includes(key)) return true;
+      if (["false", "0", "no"].includes(key)) return false;
+    }
+
+    if (typeof value === "number") {
+      if (value === 1) return true;
+      if (value === 0) return false;
+    }
+
+    return fallback;
+  }
+
+  function safeWarn(...args) {
+    try {
+      AppCore?.utils?.warn?.("[SidebarUI]", ...args);
+    } catch {}
+  }
+
+  function normalizeRole(value = "") {
+    return safeText(value, "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[\s-]+/g, "_")
+      .replace(/[^a-z0-9_:.]/g, "")
+      .trim();
+  }
+
+  function normalizeRoles(value) {
+    return toArray(value)
+      .flat(Infinity)
+      .map(normalizeRole)
+      .filter(Boolean);
+  }
+
+  /* ======================================================
+     ADMIN ROLE RESOLUTION
+  ====================================================== */
+
+  const ADMIN_ROLE_KEYS = new Set([
+    "admin",
+    "administrator",
+    "administrador",
+    "superadmin",
+    "super_admin",
+    "super_administrador",
+    "owner",
+    "root",
+  ]);
+
+  function getAuthUser() {
+    try {
+      if (typeof Auth?.getUser === "function") {
+        return safeObject(Auth.getUser());
+      }
+    } catch {}
+
+    try {
+      if (typeof Auth?.getCurrentUser === "function") {
+        return safeObject(Auth.getCurrentUser());
+      }
+    } catch {}
+
+    try {
+      if (typeof Auth?.currentUser === "function") {
+        return safeObject(Auth.currentUser());
+      }
+    } catch {}
+
+    return {};
+  }
+
+  function getCurrentUser() {
+    return safeObject(
+      first(
+        AppCore?.state?.user,
+        AppCore?.state?.currentUser,
+        AppCore?.state?.sessionUser,
+        AppCore?.state?.authUser,
+        AppCore?.state?.session?.user,
+        getAuthUser()
+      )
+    );
+  }
+
+  function getRoleCandidates() {
+    const user = getCurrentUser();
+
+    const roleCandidates = [
+      AppCore?.state?.role,
+      AppCore?.state?.rol,
+      AppCore?.state?.userRole,
+      AppCore?.state?.type,
+
+      AppCore?.state?.session?.role,
+      AppCore?.state?.session?.rol,
+      AppCore?.state?.session?.userRole,
+
+      user?.role,
+      user?.rol,
+      user?.userRole,
+      user?.type,
+      user?.userType,
+
+      Auth?.role,
+      Auth?.userRole,
+    ];
+
+    try {
+      if (typeof Auth?.getRole === "function") {
+        roleCandidates.push(Auth.getRole());
+      }
+    } catch {}
+
+    try {
+      if (typeof Auth?.getCurrentRole === "function") {
+        roleCandidates.push(Auth.getCurrentRole());
+      }
+    } catch {}
+
+    const roleArrays = [
+      AppCore?.state?.roles,
+      AppCore?.state?.permissions,
+      AppCore?.state?.scopes,
+
+      AppCore?.state?.session?.roles,
+      AppCore?.state?.session?.permissions,
+      AppCore?.state?.session?.scopes,
+
+      user?.roles,
+      user?.permissions,
+      user?.scopes,
+
+      Auth?.roles,
+      Auth?.permissions,
+      Auth?.scopes,
+    ];
+
+    return [
+      ...roleCandidates,
+      ...roleArrays.flatMap((value) => toArray(value)),
+    ];
+  }
+
+  function hasAdminFlag() {
+    const user = getCurrentUser();
+
+    return [
+      AppCore?.state?.isAdmin,
+      AppCore?.state?.admin,
+      AppCore?.state?.isSuperAdmin,
+      AppCore?.state?.superAdmin,
+      AppCore?.state?.canManageUsers,
+      AppCore?.state?.canAccessUsers,
+
+      AppCore?.state?.session?.isAdmin,
+      AppCore?.state?.session?.admin,
+      AppCore?.state?.session?.isSuperAdmin,
+      AppCore?.state?.session?.superAdmin,
+      AppCore?.state?.session?.canManageUsers,
+      AppCore?.state?.session?.canAccessUsers,
+
+      user?.isAdmin,
+      user?.admin,
+      user?.isSuperAdmin,
+      user?.superAdmin,
+      user?.canManageUsers,
+      user?.canAccessUsers,
+    ].some((value) => safeBoolean(value, false));
+  }
+
+  function isAdminRole(value = "") {
+    return ADMIN_ROLE_KEYS.has(normalizeRole(value));
+  }
+
+  function isAdmin() {
+    if (hasAdminFlag()) {
+      return true;
+    }
+
+    const roles = normalizeRoles(getRoleCandidates());
+
+    return roles.some(isAdminRole);
+  }
+
+  /* ======================================================
      FLAGS
   ====================================================== */
 
@@ -93,6 +327,10 @@ export const SidebarUI = (() => {
   function syncSidebarDomIntoAppCore() {
     const el = getElements(AppCore);
 
+    if (!AppCore.dom || typeof AppCore.dom !== "object") {
+      AppCore.dom = {};
+    }
+
     AppCore.dom.sidebar = el.sidebar || null;
     AppCore.dom.sidebarMenu = el.sidebarMenu || null;
     AppCore.dom.sidebarAvatar = el.avatarEl || null;
@@ -107,20 +345,6 @@ export const SidebarUI = (() => {
   function refreshSidebarDomRefs() {
     cacheDomRefs(AppCore);
     syncSidebarDomIntoAppCore();
-  }
-
-  /* ======================================================
-     ROLE
-  ====================================================== */
-
-  function isAdmin() {
-    const role =
-      AppCore?.state?.role ||
-      AppCore?.state?.user?.role ||
-      AppCore?.state?.user?.rol ||
-      "";
-
-    return String(role).trim().toLowerCase() === "admin";
   }
 
   /* ======================================================
@@ -175,6 +399,12 @@ export const SidebarUI = (() => {
       } else {
         delete avatarEl.dataset.username;
       }
+
+      /*
+        Evita tooltip nativo/custom en avatar footer.
+      */
+      avatarEl.removeAttribute("title");
+      avatarEl.removeAttribute("data-tooltip");
     }
 
     userToggle?.setAttribute(
@@ -183,14 +413,20 @@ export const SidebarUI = (() => {
     );
 
     userToggle?.removeAttribute("title");
+    userToggle?.removeAttribute("data-tooltip");
     userDropdown?.removeAttribute("title");
+    userDropdown?.removeAttribute("data-tooltip");
 
     sanitizeFooterTooltipState(AppCore);
 
-    AppCore?.events?.emit?.("sidebar:user:rendered", {
-      user,
-      displayName,
-    });
+    try {
+      AppCore?.events?.emit?.("sidebar:user:rendered", {
+        user,
+        displayName,
+        username,
+        isAdmin: isAdmin(),
+      });
+    } catch {}
   }
 
   /* ======================================================
@@ -334,6 +570,28 @@ export const SidebarUI = (() => {
   }
 
   /* ======================================================
+     CLEANUP SCOPE
+  ====================================================== */
+
+  function getCleanupScope() {
+    try {
+      if (typeof AppCore?.cleanup?.scope === "function") {
+        return AppCore.cleanup.scope(SCOPE);
+      }
+    } catch {}
+
+    return SCOPE;
+  }
+
+  function cleanup() {
+    try {
+      AppCore?.cleanup?.run?.(SCOPE);
+    } catch {}
+
+    closeDropdown();
+  }
+
+  /* ======================================================
      ACTIONS
   ====================================================== */
 
@@ -362,6 +620,7 @@ export const SidebarUI = (() => {
       syncSidebarState();
       renderUser();
       applyRoleVisibility();
+      sanitizeFooterTooltipState(AppCore);
       return api;
     }
 
@@ -369,7 +628,7 @@ export const SidebarUI = (() => {
     refreshSidebarDomRefs();
 
     if (!hasSidebarShell(AppCore)) {
-      AppCore?.utils?.warn?.("No se pudo montar sidebar.");
+      safeWarn("No se pudo montar sidebar.");
       return api;
     }
 
@@ -378,11 +637,15 @@ export const SidebarUI = (() => {
     const mobile = isMobileViewport(MOBILE_BREAKPOINT);
     const desktopOpen = true;
 
-    if (typeof AppCore?.state?.sidebarDesktopOpen !== "boolean") {
+    if (!AppCore.state || typeof AppCore.state !== "object") {
+      AppCore.state = {};
+    }
+
+    if (typeof AppCore.state.sidebarDesktopOpen !== "boolean") {
       AppCore.state.sidebarDesktopOpen = desktopOpen;
     }
 
-    if (typeof AppCore?.state?.sidebarOpen !== "boolean") {
+    if (typeof AppCore.state.sidebarOpen !== "boolean") {
       AppCore.state.sidebarOpen = mobile
         ? false
         : AppCore.state.sidebarDesktopOpen;
@@ -395,9 +658,11 @@ export const SidebarUI = (() => {
     applyRoleVisibility();
     closeDropdown();
 
-    AppCore?.syncUserUI?.();
+    try {
+      AppCore?.syncUserUI?.();
+    } catch {}
 
-    const scope = AppCore.cleanup.scope(SCOPE);
+    const scope = getCleanupScope();
 
     bindDomEvents({
       AppCore,
@@ -440,13 +705,37 @@ export const SidebarUI = (() => {
 
     initialized = true;
 
-    if (!AppCore.modules.has("sidebar")) {
-      AppCore.modules.register("sidebar", api);
+    try {
+      if (!AppCore.modules.has("sidebar")) {
+        AppCore.modules.register("sidebar", api);
+      }
+    } catch {
+      try {
+        AppCore.modules.register("sidebar", api);
+      } catch {}
     }
 
-    AppCore?.events?.emit?.("sidebar:ready", {
-      initialized: true,
-    });
+    try {
+      AppCore?.events?.emit?.("sidebar:ready", {
+        initialized: true,
+        isAdmin: isAdmin(),
+      });
+    } catch {}
+
+    return api;
+  }
+
+  function destroy() {
+    cleanup();
+    initialized = false;
+    logoutInFlight = false;
+    state.dropdownOpen = false;
+
+    try {
+      AppCore?.events?.emit?.("sidebar:destroyed", {
+        initialized: false,
+      });
+    } catch {}
 
     return api;
   }
@@ -457,6 +746,9 @@ export const SidebarUI = (() => {
 
   const api = {
     init,
+    destroy,
+    cleanup,
+
     renderUser,
     applyRoleVisibility,
     syncSidebarState,
@@ -473,6 +765,10 @@ export const SidebarUI = (() => {
       updateToggleLabel(AppCore),
 
     handleLogout,
+
+    isAdmin,
+
+    getSnapshot: getSidebarSnapshot,
   };
 
   return api;

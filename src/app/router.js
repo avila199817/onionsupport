@@ -8,6 +8,7 @@
    - render inicial robusto
    - capturar URL inicial antes de que Router/History puedan tocarla
    - preservar token de activación hasta que ActivateAccountView lo lea
+   - preservar token de reset hasta que ConfirmResetPasswordView lo lea
    - sincronizar route/publicPath tras primer paint
    - integrarse con loader boot
    - tolerar fallos sin romper SPA
@@ -15,6 +16,7 @@
    HARDENING EXTREMO:
    - idempotencia total
    - safe logs
+   - logs sin tokens reales
    - fallback route "/"
    - render serializado
    - no doble initial render
@@ -22,6 +24,9 @@
    - anti stale boot calls
    - snapshot debug enterprise
    - protección de /activate-account?token=...
+   - protección de /activate-account/<token>
+   - protección de /reset-password/confirm?token=...
+   - protección de /reset-password/confirm/<token>
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -53,6 +58,7 @@ let renderCycle = 0;
 ========================================================= */
 
 const ACTIVATION_PATH = "/activate-account";
+const RESET_CONFIRM_PATH = "/reset-password/confirm";
 
 const ACTIVATION_TOKEN_PARAM_NAMES = [
   "token",
@@ -62,28 +68,56 @@ const ACTIVATION_TOKEN_PARAM_NAMES = [
   "t",
 ];
 
+const RESET_TOKEN_PARAM_NAMES = [
+  "token",
+  "resetToken",
+  "passwordResetToken",
+  "code",
+  "t",
+];
+
+const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
+  Object.freeze({
+    key: "activation",
+    path: ACTIVATION_PATH,
+    windowKey: "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+    tokenParamNames: ACTIVATION_TOKEN_PARAM_NAMES,
+  }),
+
+  Object.freeze({
+    key: "resetConfirm",
+    path: RESET_CONFIRM_PATH,
+    windowKey: "__ONION_RESET_CONFIRM_INITIAL_URL__",
+    tokenParamNames: RESET_TOKEN_PARAM_NAMES,
+  }),
+]);
+
 /* =========================================================
    HELPERS
 ========================================================= */
 
 function safeLog(...args) {
   try {
-    AppCore?.utils?.log?.(...args);
+    AppCore?.utils?.log?.("[AppRouter]", ...args);
   } catch {}
 }
 
 function safeWarn(...args) {
   try {
-    AppCore?.utils?.warn?.(...args);
+    AppCore?.utils?.warn?.("[AppRouter]", ...args);
+  } catch {}
+
+  try {
+    console.warn("[AppRouter]", ...args);
   } catch {}
 }
 
 function safeError(...args) {
   try {
-    AppCore?.utils?.error?.(...args);
+    AppCore?.utils?.error?.("[AppRouter]", ...args);
   } catch {
     try {
-      console.error(...args);
+      console.error("[AppRouter]", ...args);
     } catch {}
   }
 }
@@ -112,6 +146,17 @@ function safeText(value, fallback = "") {
   return text || fallback;
 }
 
+function getBaseOrigin() {
+  if (
+    isBrowser() &&
+    window.location?.origin
+  ) {
+    return window.location.origin;
+  }
+
+  return "http://localhost";
+}
+
 function normalizePathnameOnly(pathname = "/") {
   let value = String(pathname || "/")
     .trim()
@@ -136,24 +181,74 @@ function normalizePathnameOnly(pathname = "/") {
   return value;
 }
 
+function normalizeSearch(search = "") {
+  const value = String(search || "").trim();
+
+  if (!value) {
+    return "";
+  }
+
+  return value.startsWith("?")
+    ? value
+    : `?${value.replace(/^\?+/, "")}`;
+}
+
+function normalizeHash(hash = "") {
+  const value = String(hash || "").trim();
+
+  if (!value) {
+    return "";
+  }
+
+  return value.startsWith("#")
+    ? value
+    : `#${value.replace(/^#+/, "")}`;
+}
+
+function isHashRouterPath(value = "") {
+  const raw = String(value || "").trim();
+
+  return (
+    raw.startsWith("#/") ||
+    raw.startsWith("#!")
+  );
+}
+
+function normalizeHashRouterPath(value = "") {
+  const raw = String(value || "").trim();
+
+  if (!raw) {
+    return "/";
+  }
+
+  if (raw.startsWith("#!")) {
+    return raw.replace(/^#!\/?/, "/");
+  }
+
+  return raw.replace(/^#\/?/, "/");
+}
+
 function splitPath(value = "/") {
-  const raw =
-    safeText(value, "/");
+  const raw = safeText(value, "/");
+
+  if (isHashRouterPath(raw)) {
+    return splitPath(
+      normalizeHashRouterPath(raw)
+    );
+  }
 
   let pathname = raw;
   let search = "";
   let hash = "";
 
-  const hashIndex =
-    pathname.indexOf("#");
+  const hashIndex = pathname.indexOf("#");
 
   if (hashIndex >= 0) {
     hash = pathname.slice(hashIndex);
     pathname = pathname.slice(0, hashIndex) || "/";
   }
 
-  const searchIndex =
-    pathname.indexOf("?");
+  const searchIndex = pathname.indexOf("?");
 
   if (searchIndex >= 0) {
     search = pathname.slice(searchIndex);
@@ -161,10 +256,9 @@ function splitPath(value = "/") {
   }
 
   return {
-    pathname:
-      normalizePathnameOnly(pathname),
-    search,
-    hash,
+    pathname: normalizePathnameOnly(pathname),
+    search: normalizeSearch(search),
+    hash: normalizeHash(hash),
   };
 }
 
@@ -178,16 +272,25 @@ function normalizePath(path = "/") {
     return "/";
   }
 
+  if (isHashRouterPath(raw)) {
+    return normalizePath(
+      normalizeHashRouterPath(raw)
+    );
+  }
+
   try {
-    if (/^https?:\/\//i.test(raw)) {
-      const parsed = new URL(raw);
+    if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
+      const parsed = new URL(
+        raw,
+        getBaseOrigin()
+      );
 
       if (
         parsed.hash &&
-        /^#\/[^/]/.test(parsed.hash)
+        isHashRouterPath(parsed.hash)
       ) {
         return normalizePath(
-          parsed.hash.replace(/^#/, "")
+          normalizeHashRouterPath(parsed.hash)
         );
       }
 
@@ -196,15 +299,6 @@ function normalizePath(path = "/") {
       );
     }
   } catch {}
-
-  if (
-    raw.startsWith("#/") ||
-    raw.startsWith("#!")
-  ) {
-    return normalizePath(
-      raw.replace(/^#\/?/, "/")
-    );
-  }
 
   const {
     pathname,
@@ -232,10 +326,10 @@ function getBrowserPath() {
 
     if (
       hash &&
-      /^#\/[^/]/.test(hash)
+      isHashRouterPath(hash)
     ) {
       return normalizePath(
-        hash.replace(/^#/, "")
+        normalizeHashRouterPath(hash)
       );
     }
 
@@ -247,29 +341,47 @@ function getBrowserPath() {
   }
 }
 
+function getBrowserHref() {
+  if (!isBrowser()) {
+    return "";
+  }
+
+  try {
+    return safeText(
+      window.location.href,
+      ""
+    );
+  } catch {
+    return "";
+  }
+}
+
 function getPathFromUrlLike(value = "") {
-  const raw =
-    safeText(value, "");
+  const raw = safeText(value, "");
 
   if (!raw) {
     return "";
+  }
+
+  if (isHashRouterPath(raw)) {
+    return normalizePath(
+      normalizeHashRouterPath(raw)
+    );
   }
 
   try {
     const parsed =
       new URL(
         raw,
-        isBrowser()
-          ? window.location.origin
-          : "http://localhost"
+        getBaseOrigin()
       );
 
     if (
       parsed.hash &&
-      /^#\/[^/]/.test(parsed.hash)
+      isHashRouterPath(parsed.hash)
     ) {
       return normalizePath(
-        parsed.hash.replace(/^#/, "")
+        normalizeHashRouterPath(parsed.hash)
       );
     }
 
@@ -281,57 +393,109 @@ function getPathFromUrlLike(value = "") {
   }
 }
 
-function isActivationPath(path = "") {
-  const normalized =
-    normalizePath(path);
+/* =========================================================
+   PROTECTED TOKEN ROUTES
+========================================================= */
 
-  const cleanPath =
-    splitPath(normalized).pathname;
+function getCleanPath(path = "/") {
+  return splitPath(
+    normalizePath(path)
+  ).pathname;
+}
+
+function matchesProtectedRoute(config, pathOrUrl = "") {
+  if (!config) {
+    return false;
+  }
+
+  const path = getPathFromUrlLike(pathOrUrl);
+  const cleanPath = getCleanPath(path);
 
   return (
-    cleanPath === ACTIVATION_PATH ||
-    cleanPath.startsWith(`${ACTIVATION_PATH}/`)
+    cleanPath === config.path ||
+    cleanPath.startsWith(`${config.path}/`)
   );
 }
 
-function hasActivationTokenInSearch(search = "") {
+function getProtectedRouteConfig(value = "") {
+  return (
+    PROTECTED_PUBLIC_TOKEN_ROUTES.find((config) =>
+      matchesProtectedRoute(config, value)
+    ) || null
+  );
+}
+
+function getPathToken(config, value = "") {
+  if (!config) {
+    return "";
+  }
+
+  const path = getPathFromUrlLike(value);
+  const cleanPath = getCleanPath(path);
+
+  if (!cleanPath.startsWith(`${config.path}/`)) {
+    return "";
+  }
+
+  const token = cleanPath
+    .slice(`${config.path}/`.length)
+    .split("/")[0];
+
+  try {
+    return safeText(
+      decodeURIComponent(token || ""),
+      ""
+    );
+  } catch {
+    return safeText(token, "");
+  }
+}
+
+function hasTokenInSearch(search = "", names = []) {
   try {
     const params =
       new URLSearchParams(search || "");
 
-    return ACTIVATION_TOKEN_PARAM_NAMES.some(
-      (name) =>
-        Boolean(
-          safeText(
-            params.get(name),
-            ""
-          )
+    return names.some((name) =>
+      Boolean(
+        safeText(
+          params.get(name),
+          ""
         )
+      )
     );
   } catch {
     return false;
   }
 }
 
-function hasActivationTokenInUrlLike(value = "") {
-  const raw =
-    safeText(value, "");
+function hasProtectedTokenInUrlLike(config, value = "") {
+  if (!config) {
+    return false;
+  }
+
+  const raw = safeText(value, "");
 
   if (!raw) {
     return false;
+  }
+
+  if (getPathToken(config, raw)) {
+    return true;
   }
 
   try {
     const parsed =
       new URL(
         raw,
-        isBrowser()
-          ? window.location.origin
-          : "http://localhost"
+        getBaseOrigin()
       );
 
     if (
-      hasActivationTokenInSearch(parsed.search)
+      hasTokenInSearch(
+        parsed.search,
+        config.tokenParamNames
+      )
     ) {
       return true;
     }
@@ -343,16 +507,22 @@ function hasActivationTokenInUrlLike(value = "") {
       const query =
         parsed.hash.split("?").slice(1).join("?");
 
-      return hasActivationTokenInSearch(
-        query ? `?${query}` : ""
+      return hasTokenInSearch(
+        query ? `?${query}` : "",
+        config.tokenParamNames
       );
     }
+
+    return false;
   } catch {
     const parts =
       splitPath(raw);
 
     if (
-      hasActivationTokenInSearch(parts.search)
+      hasTokenInSearch(
+        parts.search,
+        config.tokenParamNames
+      )
     ) {
       return true;
     }
@@ -364,24 +534,89 @@ function hasActivationTokenInUrlLike(value = "") {
       const query =
         parts.hash.split("?").slice(1).join("?");
 
-      return hasActivationTokenInSearch(
-        query ? `?${query}` : ""
+      return hasTokenInSearch(
+        query ? `?${query}` : "",
+        config.tokenParamNames
+      );
+    }
+
+    return false;
+  }
+}
+
+function isProtectedPublicTokenPath(path = "") {
+  const config =
+    getProtectedRouteConfig(path);
+
+  if (!config) {
+    return false;
+  }
+
+  return hasProtectedTokenInUrlLike(
+    config,
+    path
+  );
+}
+
+function redactTokenInText(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  let output = raw;
+
+  for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
+    const escapedPath =
+      config.path.replace(/\//g, "\\/");
+
+    output = output.replace(
+      new RegExp(`(${escapedPath})\\/([^/?#\\s]+)`, "gi"),
+      "$1/***"
+    );
+
+    for (const name of config.tokenParamNames) {
+      output = output.replace(
+        new RegExp(`([?&]${name}=)([^&#\\s]+)`, "gi"),
+        "$1***"
       );
     }
   }
 
-  return false;
+  return output;
 }
 
-function getActivationInitialUrl() {
-  if (!isBrowser()) {
+/* =========================================================
+   INITIAL URL STORAGE
+========================================================= */
+
+function getStoredInitialUrl(config) {
+  if (!isBrowser() || !config?.windowKey) {
     return "";
   }
 
-  return safeText(
-    window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__,
-    ""
-  );
+  try {
+    return safeText(
+      window[config.windowKey],
+      ""
+    );
+  } catch {
+    return "";
+  }
+}
+
+function setStoredInitialUrl(config, value = "") {
+  if (!isBrowser() || !config?.windowKey) {
+    return false;
+  }
+
+  try {
+    window[config.windowKey] = value;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function getGlobalInitialUrl() {
@@ -389,9 +624,41 @@ function getGlobalInitialUrl() {
     return "";
   }
 
-  return safeText(
-    window.__ONION_INITIAL_URL__,
-    ""
+  try {
+    return safeText(
+      window.__ONION_INITIAL_URL__,
+      ""
+    );
+  } catch {
+    return "";
+  }
+}
+
+function setGlobalInitialUrl(value = "") {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  try {
+    if (!window.__ONION_INITIAL_URL__) {
+      window.__ONION_INITIAL_URL__ = value;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getActivationInitialUrl() {
+  return getStoredInitialUrl(
+    PROTECTED_PUBLIC_TOKEN_ROUTES[0]
+  );
+}
+
+function getResetConfirmInitialUrl() {
+  return getStoredInitialUrl(
+    PROTECTED_PUBLIC_TOKEN_ROUTES[1]
   );
 }
 
@@ -402,17 +669,22 @@ function captureInitialBrowserUrl() {
 
   try {
     const href =
-      window.location.href;
+      getBrowserHref();
 
-    if (!window.__ONION_INITIAL_URL__) {
-      window.__ONION_INITIAL_URL__ = href;
+    if (!href) {
+      return false;
     }
 
-    if (
-      isActivationPath(getPathFromUrlLike(href)) &&
-      !window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__
-    ) {
-      window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__ = href;
+    setGlobalInitialUrl(href);
+
+    for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
+      if (
+        matchesProtectedRoute(config, href) &&
+        hasProtectedTokenInUrlLike(config, href) &&
+        !getStoredInitialUrl(config)
+      ) {
+        setStoredInitialUrl(config, href);
+      }
     }
 
     return true;
@@ -421,84 +693,89 @@ function captureInitialBrowserUrl() {
   }
 }
 
-function getSafeInitialPath() {
+function resolveProtectedInitialPath() {
   captureInitialBrowserUrl();
 
-  const activationInitialUrl =
-    getActivationInitialUrl();
+  const candidates = [
+    ...PROTECTED_PUBLIC_TOKEN_ROUTES.map((config) =>
+      getStoredInitialUrl(config)
+    ),
+    getGlobalInitialUrl(),
+    getBrowserHref(),
+    getBrowserPath(),
+  ]
+    .map((value) => safeText(value, ""))
+    .filter(Boolean);
 
-  if (
-    activationInitialUrl &&
-    hasActivationTokenInUrlLike(activationInitialUrl)
-  ) {
-    return getPathFromUrlLike(
-      activationInitialUrl
-    );
+  for (const candidate of candidates) {
+    const config =
+      getProtectedRouteConfig(candidate);
+
+    if (!config) {
+      continue;
+    }
+
+    if (
+      !hasProtectedTokenInUrlLike(
+        config,
+        candidate
+      )
+    ) {
+      continue;
+    }
+
+    return {
+      config,
+      path:
+        getPathFromUrlLike(candidate),
+      url:
+        candidate,
+    };
   }
 
-  const globalInitialUrl =
-    getGlobalInitialUrl();
+  return {
+    config: null,
+    path: "",
+    url: "",
+  };
+}
+
+function getSafeInitialPath() {
+  const protectedInitial =
+    resolveProtectedInitialPath();
 
   if (
-    globalInitialUrl &&
-    isActivationPath(
-      getPathFromUrlLike(globalInitialUrl)
-    ) &&
-    hasActivationTokenInUrlLike(globalInitialUrl)
+    protectedInitial.config &&
+    protectedInitial.path
   ) {
-    return getPathFromUrlLike(
-      globalInitialUrl
-    );
+    return protectedInitial.path;
   }
 
   const browserPath =
     getBrowserPath();
 
-  if (
-    isActivationPath(browserPath)
-  ) {
+  if (browserPath) {
     return browserPath;
   }
 
   return normalizePath(
     getCurrentPath(AppCore) ||
-      browserPath ||
       "/"
   );
 }
 
 function shouldProtectInitialHistory(path = "/") {
-  if (
-    isActivationPath(path)
-  ) {
+  if (isProtectedPublicTokenPath(path)) {
     return true;
   }
 
-  const activationInitialUrl =
-    getActivationInitialUrl();
+  const protectedInitial =
+    resolveProtectedInitialPath();
 
-  if (
-    activationInitialUrl &&
-    isActivationPath(
-      getPathFromUrlLike(activationInitialUrl)
-    )
-  ) {
-    return true;
-  }
-
-  const globalInitialUrl =
-    getGlobalInitialUrl();
-
-  if (
-    globalInitialUrl &&
-    isActivationPath(
-      getPathFromUrlLike(globalInitialUrl)
-    )
-  ) {
-    return true;
-  }
-
-  return false;
+  return Boolean(
+    protectedInitial.config &&
+    protectedInitial.path
+  );
 }
 
 function shouldUsePath(value) {
@@ -507,6 +784,10 @@ function shouldUsePath(value) {
     value.trim()
   );
 }
+
+/* =========================================================
+   STATE SYNC
+========================================================= */
 
 function syncResolvedRouteState(
   fallbackPath = "/"
@@ -716,9 +997,15 @@ async function runInitialRender(
   safeLog(
     "Render inicial completado.",
     {
-      target,
+      target:
+        redactTokenInText(target),
       options,
-      resolved,
+      resolved: {
+        canonicalPath:
+          redactTokenInText(resolved.canonicalPath),
+        publicPath:
+          redactTokenInText(resolved.publicPath),
+      },
     }
   );
 
@@ -768,13 +1055,16 @@ export async function renderInitialRoute() {
         safeLog(
           "Render inicial:",
           {
-            path,
+            path:
+              redactTokenInText(path),
             protectedInitialUrl:
               shouldProtectInitialHistory(path),
             initialUrl:
-              getGlobalInitialUrl(),
+              redactTokenInText(getGlobalInitialUrl()),
             activationInitialUrl:
-              getActivationInitialUrl(),
+              redactTokenInText(getActivationInitialUrl()),
+            resetConfirmInitialUrl:
+              redactTokenInText(getResetConfirmInitialUrl()),
           }
         );
 
@@ -844,10 +1134,19 @@ export function resetRouterBootstrap() {
   initialRenderPromise = null;
   renderCycle = 0;
 
+  try {
+    AppCore?.setState?.({
+      initialRouteRendered: false,
+    });
+  } catch {}
+
   return true;
 }
 
 export function getRouterBootstrapState() {
+  const protectedInitial =
+    resolveProtectedInitialPath();
+
   return {
     configured,
     bound,
@@ -857,19 +1156,40 @@ export function getRouterBootstrapState() {
         initialRenderPromise
       ),
     renderCycle,
+
     route:
       AppCore?.state?.route || "/",
+
     publicPath:
       AppCore?.state?.publicPath || "/",
 
     initialUrl:
-      getGlobalInitialUrl(),
+      redactTokenInText(
+        getGlobalInitialUrl()
+      ),
 
     activationInitialUrl:
-      getActivationInitialUrl(),
+      redactTokenInText(
+        getActivationInitialUrl()
+      ),
+
+    resetConfirmInitialUrl:
+      redactTokenInText(
+        getResetConfirmInitialUrl()
+      ),
+
+    protectedInitialPath:
+      redactTokenInText(
+        protectedInitial.path
+      ),
+
+    protectedInitialRouteKey:
+      protectedInitial.config?.key || "",
 
     currentBrowserPath:
-      getBrowserPath(),
+      redactTokenInText(
+        getBrowserPath()
+      ),
   };
 }
 

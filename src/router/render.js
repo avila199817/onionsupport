@@ -9,6 +9,8 @@
    - preparar contextos de render
    - flujos success / forbidden / 404 / login / runtime
    - soportar route.render async
+   - reparar shell tras login / restore / navegación privada
+   - evitar que auth-screen deje el panel debajo del sidebar
 
    HARDENING EXTREMO:
    - guards browser / DOM total safe
@@ -38,6 +40,8 @@
    - pinta transición inmediata.
    - deja que la vista cargue datos en segundo plano.
    - evita sensación de sidebar congelado.
+   - repara el shell antes y después del render.
+   - evita panel privado desplazado bajo sidebar tras login.
 ========================================================= */
 
 import {
@@ -78,6 +82,16 @@ const RESET_TOKEN_PARAM_NAMES = [
   "code",
   "t",
 ];
+
+const AUTH_SCREEN_CANONICAL_PATHS = new Set([
+  "/login",
+  "/forgot-password",
+  "/recover-password",
+  "/password-reset",
+  "/reset-password",
+  "/reset-password/confirm",
+  "/activate-account",
+]);
 
 const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
   Object.freeze({
@@ -147,6 +161,14 @@ function safeText(value, fallback = "") {
   return text || fallback;
 }
 
+function safeObject(value) {
+  return value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+    ? value
+    : {};
+}
+
 function getBaseOrigin() {
   if (
     isBrowser() &&
@@ -179,6 +201,40 @@ function normalizePathnameOnly(pathname = "/") {
   return value;
 }
 
+function afterPaint(callback) {
+  if (!isFunction(callback)) {
+    return;
+  }
+
+  if (!isBrowser()) {
+    try {
+      callback();
+    } catch {}
+
+    return;
+  }
+
+  try {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        try {
+          callback();
+        } catch {}
+      });
+    });
+
+    return;
+  } catch {}
+
+  try {
+    window.setTimeout(() => {
+      try {
+        callback();
+      } catch {}
+    }, 0);
+  } catch {}
+}
+
 /* =========================================================
    SAFE OPS
 ========================================================= */
@@ -186,6 +242,13 @@ function normalizePathnameOnly(pathname = "/") {
 function safeEmit(AppCore, eventName, payload = {}) {
   try {
     AppCore?.events?.emit?.(
+      eventName,
+      payload
+    );
+  } catch {}
+
+  try {
+    window?.AppCore?.events?.emit?.(
       eventName,
       payload
     );
@@ -705,15 +768,6 @@ function getProtectedPublicPath(AppCore) {
 /**
  * Protege query/hash/path-token del navegador o URL inicial si el render intenta
  * sincronizar la misma ruta sin token.
- *
- * Ejemplos:
- *   initial:   /activate-account?token=abc
- *   candidate: /activate-account
- *   resultado: /activate-account?token=abc
- *
- *   initial:   /reset-password/confirm/abc
- *   candidate: /reset-password/confirm
- *   resultado: /reset-password/confirm/abc
  */
 function preservePublicContextForSameRoute(AppCore, candidatePath = "/") {
   const candidate = normalizePath(
@@ -787,6 +841,483 @@ function buildCanonicalSourceWithSuffix(
     AppCore,
     `${finalCanonical}${suffix}`
   );
+}
+
+/* =========================================================
+   SHELL / AUTH-SCREEN REPAIR
+========================================================= */
+
+function getShellElements(AppCore) {
+  if (!isBrowser()) {
+    return {
+      html: null,
+      body: null,
+      shell: null,
+      main: null,
+      appContent: null,
+      view: null,
+      sidebar: null,
+      topbar: null,
+      tablehead: null,
+      tableheadContainer: null,
+      loader: null,
+    };
+  }
+
+  const html =
+    document.documentElement || null;
+
+  const body =
+    document.body || null;
+
+  const shell =
+    document.getElementById("app-shell") ||
+    document.querySelector("[data-app-shell='true']") ||
+    null;
+
+  const main =
+    document.getElementById("main-content") ||
+    document.querySelector(".main-content") ||
+    null;
+
+  const appContent =
+    document.getElementById("app-content") ||
+    document.querySelector("[data-app-content]") ||
+    null;
+
+  const view =
+    getViewContainer(AppCore);
+
+  const sidebar =
+    AppCore?.dom?.sidebar ||
+    document.querySelector(".sidebar") ||
+    null;
+
+  const topbar =
+    AppCore?.dom?.topbar ||
+    document.querySelector(".topbar") ||
+    null;
+
+  const tablehead =
+    document.getElementById("table-head") ||
+    document.querySelector(".table-head") ||
+    null;
+
+  const tableheadContainer =
+    AppCore?.dom?.tableheadContainer ||
+    document.getElementById("tablehead-container") ||
+    null;
+
+  const loader =
+    AppCore?.dom?.loader ||
+    document.getElementById("app-loader") ||
+    document.querySelector(".app-loader") ||
+    null;
+
+  return {
+    html,
+    body,
+    shell,
+    main,
+    appContent,
+    view,
+    sidebar,
+    topbar,
+    tablehead,
+    tableheadContainer,
+    loader,
+  };
+}
+
+function setElementHidden(el, hidden = false) {
+  if (!el) {
+    return;
+  }
+
+  try {
+    el.hidden = Boolean(hidden);
+  } catch {}
+
+  try {
+    el.setAttribute(
+      "aria-hidden",
+      hidden ? "true" : "false"
+    );
+  } catch {}
+}
+
+function setElementBusy(el, busy = false) {
+  if (!el) {
+    return;
+  }
+
+  try {
+    el.setAttribute(
+      "aria-busy",
+      busy ? "true" : "false"
+    );
+  } catch {}
+}
+
+function setDataset(el, key, value) {
+  if (!el) {
+    return;
+  }
+
+  try {
+    if (
+      value === null ||
+      value === undefined ||
+      value === ""
+    ) {
+      delete el.dataset[key];
+      return;
+    }
+
+    el.dataset[key] = String(value);
+  } catch {}
+}
+
+function routeRequestsShellHidden(AppCore, route = null, canonicalPath = "/") {
+  const canonical =
+    normalizeCanonicalPath(
+      AppCore,
+      canonicalPath || route?.path || "/"
+    );
+
+  if (
+    route?.shell === false ||
+    route?.hideShell === true ||
+    route?.showShell === false ||
+    route?.layout === "auth" ||
+    route?.layout === "public" ||
+    route?.meta?.shell === false ||
+    route?.meta?.hideShell === true ||
+    route?.meta?.layout === "auth" ||
+    route?.meta?.layout === "public"
+  ) {
+    return true;
+  }
+
+  if (AUTH_SCREEN_CANONICAL_PATHS.has(canonical)) {
+    return true;
+  }
+
+  if (
+    canonical.startsWith(`${ACTIVATION_PATH}/`) ||
+    canonical.startsWith(`${RESET_CONFIRM_PATH}/`)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function shouldUseAuthScreenClass(AppCore, route = null, canonicalPath = "/") {
+  const canonical =
+    normalizeCanonicalPath(
+      AppCore,
+      canonicalPath || route?.path || "/"
+    );
+
+  if (
+    route?.layout === "auth" ||
+    route?.meta?.layout === "auth" ||
+    route?.authScreen === true ||
+    route?.meta?.authScreen === true
+  ) {
+    return true;
+  }
+
+  if (AUTH_SCREEN_CANONICAL_PATHS.has(canonical)) {
+    return true;
+  }
+
+  if (
+    canonical.startsWith(`${ACTIVATION_PATH}/`) ||
+    canonical.startsWith(`${RESET_CONFIRM_PATH}/`)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function setCoreShellVisible(AppCore, visible = true) {
+  try {
+    AppCore?.setState?.({
+      shellVisible: Boolean(visible),
+    });
+  } catch {
+    try {
+      if (AppCore?.state) {
+        AppCore.state.shellVisible =
+          Boolean(visible);
+      }
+    } catch {}
+  }
+}
+
+function hideLoaderSafe(AppCore, reason = "router-render") {
+  const { loader, body, html } =
+    getShellElements(AppCore);
+
+  try {
+    body?.classList?.remove?.("loading");
+    body?.classList?.remove?.("app-loading");
+    html?.classList?.remove?.("app-loading");
+  } catch {}
+
+  if (!loader) {
+    return false;
+  }
+
+  try {
+    loader.classList.remove(
+      "is-visible",
+      "app-loader--visible"
+    );
+
+    loader.classList.add(
+      "is-hidden",
+      "has-hidden"
+    );
+
+    loader.setAttribute(
+      "aria-hidden",
+      "true"
+    );
+
+    loader.setAttribute(
+      "aria-busy",
+      "false"
+    );
+
+    loader.dataset.loaderVisible = "false";
+
+    loader.hidden = true;
+  } catch {}
+
+  safeEmit(
+    AppCore,
+    "app:loader:hidden",
+    {
+      reason,
+      source: "router.render",
+    }
+  );
+
+  return true;
+}
+
+function applyRenderShellRepair({
+  AppCore,
+  route = null,
+  canonicalPath = "/",
+  publicPath = "/",
+  phase = "render",
+  hideLoader = false,
+} = {}) {
+  if (!isBrowser()) {
+    return {
+      applied: false,
+      shellHidden: false,
+      reason: "not-browser",
+    };
+  }
+
+  const canonical =
+    normalizeCanonicalPath(
+      AppCore,
+      canonicalPath || route?.path || "/"
+    );
+
+  const publicRoute =
+    normalizePath(
+      AppCore,
+      publicPath || canonical || "/"
+    );
+
+  const shellHidden =
+    routeRequestsShellHidden(
+      AppCore,
+      route,
+      canonical
+    );
+
+  const useAuthScreen =
+    shouldUseAuthScreenClass(
+      AppCore,
+      route,
+      canonical
+    );
+
+  const {
+    html,
+    body,
+    shell,
+    main,
+    appContent,
+    view,
+    sidebar,
+    topbar,
+    tablehead,
+    tableheadContainer,
+  } = getShellElements(AppCore);
+
+  if (!html || !body) {
+    return {
+      applied: false,
+      shellHidden,
+      reason: "missing-document",
+    };
+  }
+
+  try {
+    html.classList.remove(
+      "app-booting",
+      "app-loading"
+    );
+
+    body.classList.remove(
+      "app-booting",
+      "app-loading",
+      "loading"
+    );
+
+    html.classList.add("app-ready");
+    body.classList.add("app-ready");
+  } catch {}
+
+  if (shellHidden) {
+    try {
+      body.classList.add("route-shell-hidden");
+      body.classList.remove("route-shell-visible");
+
+      if (useAuthScreen) {
+        body.classList.add("auth-screen");
+      }
+    } catch {}
+
+    setDataset(body, "shell", "hidden");
+    setDataset(html, "shell", "hidden");
+
+    setCoreShellVisible(AppCore, false);
+
+    setElementHidden(sidebar, true);
+    setElementHidden(topbar, true);
+    setElementHidden(tablehead, true);
+
+    setElementBusy(shell, false);
+    setElementBusy(main, false);
+    setElementBusy(appContent, false);
+    setElementBusy(view, false);
+
+    try {
+      if (shell) {
+        shell.setAttribute(
+          "aria-hidden",
+          "false"
+        );
+      }
+    } catch {}
+  } else {
+    try {
+      body.classList.remove(
+        "auth-screen",
+        "login-no-scroll",
+        "route-shell-hidden"
+      );
+
+      body.classList.add("route-shell-visible");
+    } catch {}
+
+    setDataset(body, "shell", "visible");
+    setDataset(html, "shell", "visible");
+
+    setCoreShellVisible(AppCore, true);
+
+    setElementHidden(shell, false);
+    setElementHidden(main, false);
+    setElementHidden(appContent, false);
+    setElementHidden(view, false);
+
+    setElementHidden(sidebar, false);
+    setElementHidden(topbar, false);
+
+    const tableheadHasContent =
+      Boolean(
+        tableheadContainer &&
+          safeText(tableheadContainer.innerHTML, "")
+      );
+
+    if (tablehead) {
+      setElementHidden(
+        tablehead,
+        !tableheadHasContent
+      );
+    }
+
+    setElementBusy(shell, false);
+    setElementBusy(main, false);
+    setElementBusy(appContent, false);
+    setElementBusy(view, false);
+
+    try {
+      shell?.setAttribute?.(
+        "aria-hidden",
+        "false"
+      );
+
+      main?.setAttribute?.(
+        "aria-hidden",
+        "false"
+      );
+    } catch {}
+  }
+
+  if (hideLoader || !shellHidden) {
+    hideLoaderSafe(
+      AppCore,
+      `router-render:${phase}`
+    );
+  }
+
+  safeEmit(
+    AppCore,
+    "router:shell:repair",
+    {
+      phase,
+      shellHidden,
+      useAuthScreen,
+      canonicalPath: canonical,
+      publicPath: publicRoute,
+      hasSidebar: Boolean(sidebar),
+      hasTopbar: Boolean(topbar),
+      hasShell: Boolean(shell),
+      source: "router.render",
+    }
+  );
+
+  safeEmit(
+    AppCore,
+    "app:ui:repair-request",
+    {
+      phase,
+      shellHidden,
+      canonicalPath: canonical,
+      publicPath: publicRoute,
+      source: "router.render",
+    }
+  );
+
+  return {
+    applied: true,
+    shellHidden,
+    useAuthScreen,
+    canonicalPath: canonical,
+    publicPath: publicRoute,
+  };
 }
 
 /* =========================================================
@@ -1332,6 +1863,15 @@ function handleAsyncRouteRenderFailure({
     error,
     getRoute
   );
+
+  applyRenderShellRepair({
+    AppCore,
+    route,
+    canonicalPath,
+    publicPath,
+    phase: "async-error",
+    hideLoader: true,
+  });
 }
 
 /* =========================================================
@@ -1363,23 +1903,18 @@ export async function renderRouteSuccess({
   });
 
   /*
-    IMPORTANTE:
-    No hacemos syncRouteState() aquí.
-    El Router principal ya sincroniza route/publicPath después de recibir la view.
-
-    FIX UX:
-    No bloqueamos la navegación esperando a que route.render() termine,
-    salvo que la ruta lo pida explícitamente con:
-      - route.renderMode = "blocking"
-      - route.awaitRender = true
-      - route.blockingRender = true
-
-    Flujo normal:
-      1. pintar transición inmediata
-      2. lanzar route.render()
-      3. devolver control al router principal
-      4. la vista termina su init/carga después
+    Reparación temprana:
+    si venimos de /login, aquí se quita auth-screen antes de que la vista privada pinte.
+    Esto evita que .main-content siga a 0px y quede debajo del sidebar.
   */
+  applyRenderShellRepair({
+    AppCore,
+    route,
+    canonicalPath: resolved.canonicalPath,
+    publicPath: resolved.publicPath,
+    phase: "before-success-render",
+    hideLoader: false,
+  });
 
   safeSetShellMode(
     setShellMode,
@@ -1428,9 +1963,38 @@ export async function renderRouteSuccess({
 
     if (shouldBlock) {
       view = await Promise.resolve(result);
+
+      applyRenderShellRepair({
+        AppCore,
+        route,
+        canonicalPath: resolved.canonicalPath,
+        publicPath: resolved.publicPath,
+        phase: "after-blocking-render",
+        hideLoader: true,
+      });
     } else if (isPromiseLike(result)) {
       result
         .then((resolvedView) => {
+          applyRenderShellRepair({
+            AppCore,
+            route,
+            canonicalPath: resolved.canonicalPath,
+            publicPath: resolved.publicPath,
+            phase: "async-complete",
+            hideLoader: true,
+          });
+
+          afterPaint(() => {
+            applyRenderShellRepair({
+              AppCore,
+              route,
+              canonicalPath: resolved.canonicalPath,
+              publicPath: resolved.publicPath,
+              phase: "async-complete-after-paint",
+              hideLoader: true,
+            });
+          });
+
           safeEmit(
             AppCore,
             "router:render:async-complete",
@@ -1462,25 +2026,66 @@ export async function renderRouteSuccess({
         transitionView ||
         ctx.viewContainer ||
         null;
+
+      applyRenderShellRepair({
+        AppCore,
+        route,
+        canonicalPath: resolved.canonicalPath,
+        publicPath: resolved.publicPath,
+        phase: "after-non-blocking-dispatch",
+        hideLoader: true,
+      });
     } else {
       view =
         result ||
         transitionView ||
         ctx.viewContainer ||
         null;
+
+      applyRenderShellRepair({
+        AppCore,
+        route,
+        canonicalPath: resolved.canonicalPath,
+        publicPath: resolved.publicPath,
+        phase: "after-sync-render",
+        hideLoader: true,
+      });
     }
   } else {
     view = renderGenericView(
       AppCore,
       route
     );
+
+    applyRenderShellRepair({
+      AppCore,
+      route,
+      canonicalPath: resolved.canonicalPath,
+      publicPath: resolved.publicPath,
+      phase: "after-generic-render",
+      hideLoader: true,
+    });
   }
+
+  /*
+    Reparación después del paint:
+    cubre casos donde topbar/sidebar se montan tarde o AppCore.syncUserUI llega después.
+  */
+  afterPaint(() => {
+    applyRenderShellRepair({
+      AppCore,
+      route,
+      canonicalPath: resolved.canonicalPath,
+      publicPath: resolved.publicPath,
+      phase: "success-after-paint",
+      hideLoader: true,
+    });
+  });
 
   /*
     IMPORTANTE:
     No emitimos router:rendered aquí en success.
     Lo emite src/router/index.js cuando termina de syncar estado.
-    Esto evita doble evento rendered.
   */
 
   emitFlowMetric(
@@ -1517,6 +2122,15 @@ export function renderRouteForbidden(args = {}) {
     args.getRoute
   );
 
+  applyRenderShellRepair({
+    AppCore: args.AppCore,
+    route: args.route || null,
+    canonicalPath: args.canonicalPath || args.requestedPath || "/",
+    publicPath: args.requestedPath || args.canonicalPath || "/",
+    phase: "forbidden",
+    hideLoader: true,
+  });
+
   emitRendered(
     args.AppCore,
     {
@@ -1550,6 +2164,15 @@ export function renderRouteNotFound(args = {}) {
     args.requestedPath,
     args.getRoute
   );
+
+  applyRenderShellRepair({
+    AppCore: args.AppCore,
+    route: args.route || null,
+    canonicalPath: args.canonicalPath || args.requestedPath || "/",
+    publicPath: args.requestedPath || args.canonicalPath || "/",
+    phase: "not-found",
+    hideLoader: true,
+  });
 
   /*
     No emitimos router:rendered aquí.
@@ -1605,6 +2228,15 @@ export async function renderLoginRedirect(args = {}) {
     loginUrl
   );
 
+  applyRenderShellRepair({
+    AppCore: args.AppCore,
+    route,
+    canonicalPath: routeNames.LOGIN,
+    publicPath,
+    phase: "login-redirect-before-render",
+    hideLoader: false,
+  });
+
   if (isFunction(route?.render)) {
     await Promise.resolve(
       runRouteRender(
@@ -1622,6 +2254,15 @@ export async function renderLoginRedirect(args = {}) {
       )
     );
   }
+
+  applyRenderShellRepair({
+    AppCore: args.AppCore,
+    route,
+    canonicalPath: routeNames.LOGIN,
+    publicPath,
+    phase: "login-redirect-after-render",
+    hideLoader: true,
+  });
 
   emitRendered(
     args.AppCore,
@@ -1655,6 +2296,15 @@ export function renderRouteRuntimeError(args = {}) {
     args.error,
     args.getRoute
   );
+
+  applyRenderShellRepair({
+    AppCore: args.AppCore,
+    route: args.route || null,
+    canonicalPath: args.canonicalPath || args.requestedPath || "/",
+    publicPath: args.requestedPath || args.canonicalPath || "/",
+    phase: "runtime-error",
+    hideLoader: true,
+  });
 
   emitRendered(
     args.AppCore,
@@ -1693,6 +2343,17 @@ export function renderRouteRuntimeError(args = {}) {
 ========================================================= */
 
 export function getRenderSnapshot(AppCore) {
+  const {
+    body,
+    html,
+    shell,
+    main,
+    sidebar,
+    topbar,
+    tablehead,
+    loader,
+  } = getShellElements(AppCore);
+
   return {
     browserPublicPath: getBrowserPublicPath(AppCore),
 
@@ -1715,5 +2376,74 @@ export function getRenderSnapshot(AppCore) {
       isBrowser()
         ? Boolean(window.history?.state?.scrubbedResetToken)
         : false,
+
+    dom: {
+      bodyClasses:
+        body?.className || "",
+
+      htmlClasses:
+        html?.className || "",
+
+      bodyShell:
+        body?.dataset?.shell || null,
+
+      htmlShell:
+        html?.dataset?.shell || null,
+
+      hasShell:
+        Boolean(shell),
+
+      hasMain:
+        Boolean(main),
+
+      hasSidebar:
+        Boolean(sidebar),
+
+      hasTopbar:
+        Boolean(topbar),
+
+      hasTablehead:
+        Boolean(tablehead),
+
+      hasLoader:
+        Boolean(loader),
+
+      shellHidden:
+        Boolean(shell?.hidden),
+
+      sidebarHidden:
+        Boolean(sidebar?.hidden),
+
+      topbarHidden:
+        Boolean(topbar?.hidden),
+
+      loaderHidden:
+        Boolean(loader?.hidden),
+    },
   };
 }
+
+export default {
+  getViewContainer,
+
+  buildRenderPayload,
+  emitBeforeRender,
+  emitRendered,
+
+  syncRouteState,
+  applyResolvedRouteState,
+  buildRouteRenderContext,
+
+  renderGenericView,
+  renderForbiddenView,
+  renderNotFoundView,
+  renderRuntimeErrorView,
+
+  renderRouteSuccess,
+  renderRouteForbidden,
+  renderRouteNotFound,
+  renderLoginRedirect,
+  renderRouteRuntimeError,
+
+  getRenderSnapshot,
+};

@@ -2,6 +2,8 @@
    Onion SPA - Sidebar DOM
    Archivo: src/ui/sidebar/dom.js
 
+   FINAL PRO SYSTEM · SIDEBAR DOM · 10/10
+
    Responsabilidades:
    - montar el HTML del sidebar en el shell
    - cachear referencias DOM en AppCore
@@ -9,11 +11,21 @@
    - detectar shell / main content
    - helpers de foco
    - sanear tooltips del footer del sidebar
+   - sanear tooltip del logo del sidebar
    - rehidratar refs tras mount dinámico
    - mantener compatibilidad con AppCore.dom
+
+   HARDENING:
+   - no duplica sidebar si ya existe
+   - tolera AppCore.dom inexistente
+   - tolera document inexistente
+   - fallback robusto de shell/main
+   - limpieza de title/data-tooltip/aria-describedby en footer y logo
+   - evita tooltips fantasma tras re-render/i18n/live refresh
 ========================================================= */
 
 import { getSidebarTemplate } from "./template.js";
+
 import {
   SIDEBAR_ROOT_ID,
   SIDEBAR_MENU_ID,
@@ -26,62 +38,220 @@ import {
 } from "./constants.js";
 
 /* =========================================================
+   SAFE HELPERS
+========================================================= */
+
+function hasDocument() {
+  return typeof document !== "undefined";
+}
+
+function safeText(value, fallback = "") {
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+
+  const text = String(value).trim();
+
+  return text || fallback;
+}
+
+function ensureDomBag(AppCore) {
+  if (!AppCore) return null;
+
+  if (!AppCore.dom || typeof AppCore.dom !== "object") {
+    AppCore.dom = {};
+  }
+
+  return AppCore.dom;
+}
+
+function byId(id = "") {
+  if (!hasDocument()) return null;
+
+  const cleanId = safeText(id, "");
+  if (!cleanId) return null;
+
+  return document.getElementById(cleanId);
+}
+
+function query(selector = "", root = null) {
+  if (!hasDocument()) return null;
+
+  const cleanSelector = safeText(selector, "");
+  if (!cleanSelector) return null;
+
+  try {
+    return (root || document).querySelector(cleanSelector);
+  } catch {
+    return null;
+  }
+}
+
+function queryAll(selector = "", root = null) {
+  if (!hasDocument()) return [];
+
+  const cleanSelector = safeText(selector, "");
+  if (!cleanSelector) return [];
+
+  try {
+    return Array.from((root || document).querySelectorAll(cleanSelector));
+  } catch {
+    return [];
+  }
+}
+
+function removeTooltipAttributes(element = null) {
+  if (!element) return;
+
+  try {
+    element.removeAttribute("title");
+    element.removeAttribute("data-tooltip");
+    element.removeAttribute("data-i18n-data-tooltip");
+    element.removeAttribute("aria-describedby");
+  } catch {}
+}
+
+/* =========================================================
    SHELL HELPERS
 ========================================================= */
+
 export function getMainContentEl(AppCore) {
+  if (!hasDocument()) return null;
+
   return (
     AppCore?.dom?.mainContent ||
-    document.getElementById("app-content") ||
-    document.getElementById("main-content") ||
-    document.querySelector("#app-content") ||
-    document.querySelector(".main-content")
+    AppCore?.dom?.viewContainer ||
+    byId("app-content") ||
+    byId("main-content") ||
+    byId("view-container") ||
+    query("#app-content") ||
+    query("#main-content") ||
+    query(".main-content") ||
+    query("main") ||
+    null
   );
 }
 
 export function getAppShellEl(AppCore) {
+  if (!hasDocument()) return null;
+
   return (
     AppCore?.dom?.layout ||
     AppCore?.dom?.appShell ||
-    document.getElementById("app-shell") ||
-    document.querySelector(".layout") ||
-    document.body
+    byId("app-shell") ||
+    byId("layout") ||
+    query(".layout") ||
+    query(".app-shell") ||
+    document.body ||
+    null
   );
+}
+
+/* =========================================================
+   TOOLTIP SANITIZE
+========================================================= */
+
+export function sanitizeLogoTooltipState(AppCore) {
+  const { sidebar } = getElements(AppCore);
+
+  if (!sidebar) return false;
+
+  const logo =
+    byId("homeLink") ||
+    query(".logo", sidebar) ||
+    query("a.logo", sidebar);
+
+  if (!logo) return false;
+
+  removeTooltipAttributes(logo);
+
+  /*
+    Defensa extra:
+    si algún refresh i18n/tooltip volvió a inyectar atributos
+    en imágenes internas del logo, los limpiamos también.
+  */
+  queryAll("[data-tooltip], [title], [aria-describedby]", logo).forEach(
+    (element) => {
+      removeTooltipAttributes(element);
+    }
+  );
+
+  return true;
+}
+
+export function sanitizeFooterTooltipState(AppCore) {
+  const {
+    sidebar,
+    userToggle,
+    userDropdown,
+    avatarEl,
+    nameEl,
+  } = getElements(AppCore);
+
+  if (!sidebar) return false;
+
+  [userToggle, userDropdown, avatarEl, nameEl].forEach((element) => {
+    removeTooltipAttributes(element);
+  });
+
+  queryAll(
+    ".sidebar-footer [data-tooltip], .sidebar-footer [title], .sidebar-footer [aria-describedby]",
+    sidebar
+  ).forEach((element) => {
+    removeTooltipAttributes(element);
+  });
+
+  return true;
+}
+
+export function sanitizeSidebarTooltipState(AppCore) {
+  const logoOk = sanitizeLogoTooltipState(AppCore);
+  const footerOk = sanitizeFooterTooltipState(AppCore);
+
+  return Boolean(logoOk || footerOk);
 }
 
 /* =========================================================
    MOUNT
 ========================================================= */
+
 export function mountSidebar(AppCore) {
-  if (typeof document === "undefined") {
+  if (!hasDocument()) {
     return null;
   }
 
-  let sidebar = document.getElementById(SIDEBAR_ROOT_ID);
+  ensureDomBag(AppCore);
+
+  let sidebar = byId(SIDEBAR_ROOT_ID);
+
   if (sidebar) {
+    cacheDomRefs(AppCore);
+    sanitizeSidebarTooltipState(AppCore);
     return sidebar;
   }
 
   const mainContent = getMainContentEl(AppCore);
   const appShell = getAppShellEl(AppCore);
+  const html = getSidebarTemplate();
 
-  if (mainContent?.parentElement) {
-    mainContent.insertAdjacentHTML(
-      "beforebegin",
-      getSidebarTemplate()
-    );
-  } else if (appShell) {
-    appShell.insertAdjacentHTML(
-      "afterbegin",
-      getSidebarTemplate()
-    );
-  } else if (document.body) {
-    document.body.insertAdjacentHTML(
-      "afterbegin",
-      getSidebarTemplate()
-    );
+  try {
+    if (mainContent?.parentElement) {
+      mainContent.insertAdjacentHTML("beforebegin", html);
+    } else if (appShell) {
+      appShell.insertAdjacentHTML("afterbegin", html);
+    } else if (document.body) {
+      document.body.insertAdjacentHTML("afterbegin", html);
+    }
+  } catch {
+    try {
+      document.body?.insertAdjacentHTML?.("afterbegin", html);
+    } catch {}
   }
 
-  sidebar = document.getElementById(SIDEBAR_ROOT_ID);
+  sidebar = byId(SIDEBAR_ROOT_ID);
+
+  cacheDomRefs(AppCore);
+  sanitizeSidebarTooltipState(AppCore);
 
   return sidebar || null;
 }
@@ -89,168 +259,219 @@ export function mountSidebar(AppCore) {
 /* =========================================================
    CACHE DOM REFS
 ========================================================= */
+
 export function cacheDomRefs(AppCore) {
-  if (!AppCore?.dom || typeof document === "undefined") {
+  if (!hasDocument()) {
     return null;
   }
 
+  const dom = ensureDomBag(AppCore);
+  if (!dom) return null;
+
   const sidebar =
-    document.getElementById(SIDEBAR_ROOT_ID) ||
-    document.querySelector(".sidebar");
+    byId(SIDEBAR_ROOT_ID) ||
+    query(".sidebar");
 
   const sidebarMenu =
-    document.getElementById(SIDEBAR_MENU_ID) ||
-    sidebar?.querySelector?.(".sidebar-menu") ||
-    document.querySelector(".sidebar-menu");
+    byId(SIDEBAR_MENU_ID) ||
+    query(".sidebar-menu", sidebar) ||
+    query(".sidebar-menu");
 
   const sidebarRecents =
-    document.getElementById(SIDEBAR_RECENTS_ID) ||
-    sidebar?.querySelector?.(`#${SIDEBAR_RECENTS_ID}`) ||
+    byId(SIDEBAR_RECENTS_ID) ||
+    query(`#${SIDEBAR_RECENTS_ID}`, sidebar) ||
     null;
 
   const sidebarToggle =
-    document.getElementById("toggleSidebar") ||
-    sidebar?.querySelector?.("#toggleSidebar") ||
+    byId("toggleSidebar") ||
+    query("#toggleSidebar", sidebar) ||
     null;
 
   const mobileToggleBtn =
-    document.getElementById("toggleSidebarMobile") ||
-    sidebar?.querySelector?.("#toggleSidebarMobile") ||
+    byId("toggleSidebarMobile") ||
+    query("#toggleSidebarMobile", sidebar) ||
     null;
 
   const userToggle =
-    document.getElementById(USER_TOGGLE_ID) ||
-    sidebar?.querySelector?.(`#${USER_TOGGLE_ID}`) ||
+    byId(USER_TOGGLE_ID) ||
+    query(`#${USER_TOGGLE_ID}`, sidebar) ||
     null;
 
   const userDropdown =
-    document.getElementById(USER_DROPDOWN_ID) ||
-    sidebar?.querySelector?.(`#${USER_DROPDOWN_ID}`) ||
+    byId(USER_DROPDOWN_ID) ||
+    query(`#${USER_DROPDOWN_ID}`, sidebar) ||
     null;
 
   const logoutBtn =
-    document.getElementById(LOGOUT_BUTTON_ID) ||
-    sidebar?.querySelector?.(`#${LOGOUT_BUTTON_ID}`) ||
+    byId(LOGOUT_BUTTON_ID) ||
+    query(`#${LOGOUT_BUTTON_ID}`, sidebar) ||
     null;
 
   const avatarEl =
-    document.getElementById(SIDEBAR_AVATAR_ID) ||
-    sidebar?.querySelector?.(`#${SIDEBAR_AVATAR_ID}`) ||
+    byId(SIDEBAR_AVATAR_ID) ||
+    query(`#${SIDEBAR_AVATAR_ID}`, sidebar) ||
     null;
 
   const nameEl =
-    document.getElementById(SIDEBAR_NAME_ID) ||
-    sidebar?.querySelector?.(`#${SIDEBAR_NAME_ID}`) ||
+    byId(SIDEBAR_NAME_ID) ||
+    query(`#${SIDEBAR_NAME_ID}`, sidebar) ||
+    null;
+
+  const logoEl =
+    byId("homeLink") ||
+    query(".logo", sidebar) ||
+    query("a.logo", sidebar) ||
     null;
 
   const body = document.body || null;
 
-  AppCore.dom.body = body;
-  AppCore.dom.sidebar = sidebar || null;
-  AppCore.dom.sidebarMenu = sidebarMenu || null;
-  AppCore.dom.sidebarRecents = sidebarRecents || null;
-  AppCore.dom.sidebarToggle = sidebarToggle || null;
+  dom.body = body;
+  dom.sidebar = sidebar || null;
+  dom.sidebarMenu = sidebarMenu || null;
+  dom.sidebarRecents = sidebarRecents || null;
+  dom.sidebarToggle = sidebarToggle || null;
+  dom.sidebarLogo = logoEl || null;
 
-  /* compatibilidad doble naming */
-  AppCore.dom.mobileSidebarToggle =
-    mobileToggleBtn || null;
-  AppCore.dom.sidebarMobileToggle =
-    mobileToggleBtn || null;
+  /*
+    Compatibilidad doble naming.
+  */
+  dom.mobileSidebarToggle = mobileToggleBtn || null;
+  dom.sidebarMobileToggle = mobileToggleBtn || null;
 
-  AppCore.dom.userToggle = userToggle || null;
-  AppCore.dom.userDropdown = userDropdown || null;
-  AppCore.dom.logoutBtn = logoutBtn || null;
-  AppCore.dom.sidebarAvatar = avatarEl || null;
-  AppCore.dom.sidebarName = nameEl || null;
+  dom.userToggle = userToggle || null;
+  dom.userDropdown = userDropdown || null;
+  dom.logoutBtn = logoutBtn || null;
+  dom.sidebarAvatar = avatarEl || null;
+  dom.sidebarName = nameEl || null;
 
   return {
-    sidebar: AppCore.dom.sidebar,
-    sidebarMenu: AppCore.dom.sidebarMenu,
-    sidebarRecents: AppCore.dom.sidebarRecents,
-    sidebarToggle: AppCore.dom.sidebarToggle,
-    mobileToggleBtn:
-      AppCore.dom.sidebarMobileToggle,
-    userToggle: AppCore.dom.userToggle,
-    userDropdown: AppCore.dom.userDropdown,
-    logoutBtn: AppCore.dom.logoutBtn,
-    avatarEl: AppCore.dom.sidebarAvatar,
-    nameEl: AppCore.dom.sidebarName,
+    body: dom.body,
+    sidebar: dom.sidebar,
+    sidebarMenu: dom.sidebarMenu,
+    sidebarRecents: dom.sidebarRecents,
+    sidebarToggle: dom.sidebarToggle,
+    mobileToggleBtn: dom.sidebarMobileToggle,
+    userToggle: dom.userToggle,
+    userDropdown: dom.userDropdown,
+    logoutBtn: dom.logoutBtn,
+    avatarEl: dom.sidebarAvatar,
+    nameEl: dom.sidebarName,
+    logoEl: dom.sidebarLogo,
   };
 }
 
 /* =========================================================
    ELEMENT RESOLUTION
 ========================================================= */
+
 export function getElements(AppCore) {
+  if (!hasDocument()) {
+    return {
+      body: null,
+      sidebar: null,
+      sidebarMenu: null,
+      sidebarRecents: null,
+      toggleBtn: null,
+      mobileToggleBtn: null,
+      userToggle: null,
+      userDropdown: null,
+      logoutBtn: null,
+      avatarEl: null,
+      nameEl: null,
+      logoEl: null,
+    };
+  }
+
   const cached = cacheDomRefs(AppCore) || {};
+  const dom = AppCore?.dom || {};
+
+  const sidebar =
+    cached.sidebar ||
+    dom.sidebar ||
+    byId(SIDEBAR_ROOT_ID) ||
+    query(".sidebar") ||
+    null;
 
   return {
     body:
-      AppCore?.dom?.body ||
+      cached.body ||
+      dom.body ||
       document.body ||
       null,
 
-    sidebar:
-      cached.sidebar ||
-      AppCore?.dom?.sidebar ||
-      document.getElementById(SIDEBAR_ROOT_ID) ||
-      document.querySelector(".sidebar") ||
-      null,
+    sidebar,
 
     sidebarMenu:
       cached.sidebarMenu ||
-      AppCore?.dom?.sidebarMenu ||
-      document.getElementById(SIDEBAR_MENU_ID) ||
-      document.querySelector(".sidebar-menu") ||
+      dom.sidebarMenu ||
+      byId(SIDEBAR_MENU_ID) ||
+      query(".sidebar-menu", sidebar) ||
+      query(".sidebar-menu") ||
       null,
 
     sidebarRecents:
       cached.sidebarRecents ||
-      AppCore?.dom?.sidebarRecents ||
-      document.getElementById(SIDEBAR_RECENTS_ID) ||
+      dom.sidebarRecents ||
+      byId(SIDEBAR_RECENTS_ID) ||
+      query(`#${SIDEBAR_RECENTS_ID}`, sidebar) ||
       null,
 
     toggleBtn:
       cached.sidebarToggle ||
-      AppCore?.dom?.sidebarToggle ||
-      document.getElementById("toggleSidebar") ||
+      dom.sidebarToggle ||
+      byId("toggleSidebar") ||
+      query("#toggleSidebar", sidebar) ||
       null,
 
     mobileToggleBtn:
       cached.mobileToggleBtn ||
-      AppCore?.dom?.sidebarMobileToggle ||
-      AppCore?.dom?.mobileSidebarToggle ||
-      document.getElementById("toggleSidebarMobile") ||
+      dom.sidebarMobileToggle ||
+      dom.mobileSidebarToggle ||
+      byId("toggleSidebarMobile") ||
+      query("#toggleSidebarMobile", sidebar) ||
       null,
 
     userToggle:
       cached.userToggle ||
-      AppCore?.dom?.userToggle ||
-      document.getElementById(USER_TOGGLE_ID) ||
+      dom.userToggle ||
+      byId(USER_TOGGLE_ID) ||
+      query(`#${USER_TOGGLE_ID}`, sidebar) ||
       null,
 
     userDropdown:
       cached.userDropdown ||
-      AppCore?.dom?.userDropdown ||
-      document.getElementById(USER_DROPDOWN_ID) ||
+      dom.userDropdown ||
+      byId(USER_DROPDOWN_ID) ||
+      query(`#${USER_DROPDOWN_ID}`, sidebar) ||
       null,
 
     logoutBtn:
       cached.logoutBtn ||
-      AppCore?.dom?.logoutBtn ||
-      document.getElementById(LOGOUT_BUTTON_ID) ||
+      dom.logoutBtn ||
+      byId(LOGOUT_BUTTON_ID) ||
+      query(`#${LOGOUT_BUTTON_ID}`, sidebar) ||
       null,
 
     avatarEl:
       cached.avatarEl ||
-      AppCore?.dom?.sidebarAvatar ||
-      document.getElementById(SIDEBAR_AVATAR_ID) ||
+      dom.sidebarAvatar ||
+      byId(SIDEBAR_AVATAR_ID) ||
+      query(`#${SIDEBAR_AVATAR_ID}`, sidebar) ||
       null,
 
     nameEl:
       cached.nameEl ||
-      AppCore?.dom?.sidebarName ||
-      document.getElementById(SIDEBAR_NAME_ID) ||
+      dom.sidebarName ||
+      byId(SIDEBAR_NAME_ID) ||
+      query(`#${SIDEBAR_NAME_ID}`, sidebar) ||
+      null,
+
+    logoEl:
+      cached.logoEl ||
+      dom.sidebarLogo ||
+      byId("homeLink") ||
+      query(".logo", sidebar) ||
+      query("a.logo", sidebar) ||
       null,
   };
 }
@@ -261,59 +482,73 @@ export function hasSidebarShell(AppCore) {
 }
 
 export function isShellHidden(AppCore) {
+  if (!hasDocument()) return false;
+
   return Boolean(
     document.body?.classList.contains("route-shell-hidden") ||
-      AppCore?.dom?.body?.classList.contains("route-shell-hidden")
+      AppCore?.dom?.body?.classList.contains("route-shell-hidden") ||
+      AppCore?.dom?.layout?.classList?.contains?.("route-shell-hidden") ||
+      AppCore?.dom?.appShell?.classList?.contains?.("route-shell-hidden")
   );
 }
 
 /* =========================================================
    FOCUS / A11Y HELPERS
 ========================================================= */
+
 export function blurIfInside(element) {
   try {
     const activeEl = document.activeElement;
 
-    if (
-      element &&
-      activeEl &&
-      element.contains(activeEl)
-    ) {
+    if (element && activeEl && element.contains(activeEl)) {
       activeEl.blur?.();
+      return true;
     }
-  } catch {
-    /* noop */
-  }
+  } catch {}
+
+  return false;
+}
+
+export function focusFirstInteractive(root = null) {
+  if (!root) return false;
+
+  try {
+    const target = root.querySelector(
+      [
+        "a[href]:not([hidden]):not([aria-hidden='true'])",
+        "button:not([disabled]):not([hidden]):not([aria-hidden='true'])",
+        "[tabindex]:not([tabindex='-1']):not([hidden]):not([aria-hidden='true'])",
+      ].join(",")
+    );
+
+    if (target && typeof target.focus === "function") {
+      target.focus();
+      return true;
+    }
+  } catch {}
+
+  return false;
 }
 
 /* =========================================================
-   TOOLTIP SANITIZE
+   DEFAULT EXPORT
 ========================================================= */
-export function sanitizeFooterTooltipState(AppCore) {
-  const {
-    sidebar,
-    userToggle,
-    userDropdown,
-    avatarEl,
-    nameEl,
-  } = getElements(AppCore);
 
-  if (!sidebar) return;
+export default {
+  getMainContentEl,
+  getAppShellEl,
 
-  [userToggle, userDropdown, avatarEl, nameEl].forEach(
-    (element) => {
-      if (!element) return;
-      element.removeAttribute("data-tooltip");
-      element.removeAttribute("title");
-    }
-  );
+  mountSidebar,
+  cacheDomRefs,
+  getElements,
 
-  sidebar
-    .querySelectorAll(
-      ".sidebar-footer [data-tooltip], .sidebar-footer [title]"
-    )
-    .forEach((element) => {
-      element.removeAttribute("data-tooltip");
-      element.removeAttribute("title");
-    });
-}
+  hasSidebarShell,
+  isShellHidden,
+
+  blurIfInside,
+  focusFirstInteractive,
+
+  sanitizeLogoTooltipState,
+  sanitizeFooterTooltipState,
+  sanitizeSidebarTooltipState,
+};

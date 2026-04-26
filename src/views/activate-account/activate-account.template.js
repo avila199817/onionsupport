@@ -992,6 +992,41 @@ function renderActivationPasswordFields({
   `;
 }
 
+function renderTokenRecoveryField() {
+  return `
+    <div
+      class="activate-account-password-fields"
+      id="activateAccountTokenRecoveryWrap"
+      data-activate-token-recovery="true"
+    >
+      <label
+        class="login-field"
+        for="activateAccountTokenRecovery"
+      >
+        <span class="sr-only">Enlace o token de activación</span>
+        <input
+          class="input-text"
+          id="activateAccountTokenRecovery"
+          name="tokenRecovery"
+          type="text"
+          inputmode="text"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="Pega aquí el enlace completo o el token"
+          aria-label="Enlace o token de activación"
+        />
+      </label>
+
+      <p
+        class="activate-account-password-help"
+        id="activateAccountTokenRecoveryHelp"
+      >
+        Si tu correo abrió /activate-account sin token, pega aquí el enlace completo que recibiste.
+      </p>
+    </div>
+  `;
+}
+
 function renderFormClean({
   appName = "Onion Support",
   status = ACTIVATE_ACCOUNT_STATUS.IDLE,
@@ -1018,18 +1053,29 @@ function renderFormClean({
 
   const renderPasswords =
     shouldRenderPasswordFields(status, hasToken);
+  const allowTokenRecovery =
+    hasToken !== true &&
+    isInvalid === true;
 
   const effectiveAutoSubmit =
     renderPasswords ? false : autoSubmit;
 
   const finalButtonLabel =
-    isSuccess || isInvalid
+    isSuccess
       ? backLabel
+      : allowTokenRecovery
+        ? "Usar enlace de activación"
+        : isInvalid
+          ? backLabel
       : copy.button;
 
   const buttonAction =
-    isSuccess || isInvalid
+    isSuccess
       ? "go-login"
+      : allowTokenRecovery
+        ? "recover-token"
+        : isInvalid
+          ? "go-login"
       : "activate-account";
 
   return `
@@ -1100,6 +1146,8 @@ function renderFormClean({
                     confirmPasswordPlaceholder,
                     passwordHelp,
                   })
+                : allowTokenRecovery
+                  ? renderTokenRecoveryField()
                 : ""
             }
 

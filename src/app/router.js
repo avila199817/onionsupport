@@ -20,6 +20,7 @@
    - fallback route "/"
    - render serializado
    - no doble initial render
+   - no bindRouter() dentro de renderInitialRoute()
    - no sobrescribir route/publicPath inconsistentes
    - anti stale boot calls
    - snapshot debug enterprise
@@ -43,6 +44,15 @@ import {
   applyPostRenderLoaderPolicy,
 } from "./shell.js";
 
+import {
+  APP_RUNTIME_KEYS,
+  APP_STATE_KEYS,
+  APP_ROUTES,
+  APP_EVENTS,
+  ROUTER_EVENTS,
+  PROTECTED_PUBLIC_TOKEN_ROUTES,
+} from "./constants.js";
+
 /* =========================================================
    STATE
 ========================================================= */
@@ -53,80 +63,86 @@ let firstRenderDone = false;
 let initialRenderPromise = null;
 let renderCycle = 0;
 
+const routerBootState = {
+  lastInitialPath: "",
+  lastRenderedPath: "",
+  lastResolvedCanonicalPath: "",
+  lastResolvedPublicPath: "",
+  lastRenderAt: 0,
+  lastRenderOk: false,
+  lastRenderError: null,
+  lastProtectedRouteKey: "",
+  capturedInitialUrlAt: 0,
+};
+
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
-const ACTIVATION_PATH = "/activate-account";
-const RESET_CONFIRM_PATH = "/reset-password/confirm";
+const DEFAULT_ROUTE =
+  APP_ROUTES?.home || "/";
 
-const ACTIVATION_TOKEN_PARAM_NAMES = [
-  "token",
-  "activationToken",
-  "activateToken",
-  "code",
-  "t",
-];
+const LOGIN_ROUTE =
+  APP_ROUTES?.login || "/login";
 
-const RESET_TOKEN_PARAM_NAMES = [
-  "token",
-  "resetToken",
-  "passwordResetToken",
-  "code",
-  "t",
-];
+const INITIAL_URL_KEY =
+  APP_RUNTIME_KEYS?.initialUrl ||
+  "__ONION_INITIAL_URL__";
 
-const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
+const PROTECTED_ROUTES =
+  Array.isArray(PROTECTED_PUBLIC_TOKEN_ROUTES)
+    ? PROTECTED_PUBLIC_TOKEN_ROUTES
+    : [];
+
+const ROUTER_BOOT_EVENTS =
   Object.freeze({
-    key: "activation",
-    path: ACTIVATION_PATH,
-    windowKey: "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
-    tokenParamNames: ACTIVATION_TOKEN_PARAM_NAMES,
-  }),
+    configured:
+      "app:router:configured",
 
-  Object.freeze({
-    key: "resetConfirm",
-    path: RESET_CONFIRM_PATH,
-    windowKey: "__ONION_RESET_CONFIRM_INITIAL_URL__",
-    tokenParamNames: RESET_TOKEN_PARAM_NAMES,
-  }),
-]);
+    bound:
+      "app:router:bound",
+
+    initialUrlCaptured:
+      "app:router:initial-url:captured",
+
+    initialRenderStart:
+      "app:router:initial-render:start",
+
+    initialRenderDone:
+      "app:router:initial-render:done",
+
+    initialRenderError:
+      "app:router:initial-render:error",
+
+    initialRenderFallback:
+      "app:router:initial-render:fallback",
+
+    stateSynced:
+      "app:router:state-synced",
+  });
 
 /* =========================================================
-   HELPERS
+   BASICS
 ========================================================= */
-
-function safeLog(...args) {
-  try {
-    AppCore?.utils?.log?.("[AppRouter]", ...args);
-  } catch {}
-}
-
-function safeWarn(...args) {
-  try {
-    AppCore?.utils?.warn?.("[AppRouter]", ...args);
-  } catch {}
-
-  try {
-    console.warn("[AppRouter]", ...args);
-  } catch {}
-}
-
-function safeError(...args) {
-  try {
-    AppCore?.utils?.error?.("[AppRouter]", ...args);
-  } catch {
-    try {
-      console.error("[AppRouter]", ...args);
-    } catch {}
-  }
-}
 
 function isBrowser() {
   return (
     typeof window !== "undefined" &&
     typeof document !== "undefined"
   );
+}
+
+function isObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object"
+  );
+}
+
+function ensureObject(value) {
+  return isObject(value)
+    ? value
+    : {};
 }
 
 function isFunction(value) {
@@ -141,10 +157,155 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text =
+    String(value).trim();
 
   return text || fallback;
 }
+
+function safeNumber(value, fallback = 0) {
+  const number =
+    Number(value);
+
+  return Number.isFinite(number)
+    ? number
+    : fallback;
+}
+
+function safeIsoDate(ms = Date.now()) {
+  try {
+    return new Date(ms).toISOString();
+  } catch {
+    return "";
+  }
+}
+
+function normalizeError(error = null) {
+  if (!error) {
+    return null;
+  }
+
+  return {
+    name:
+      safeText(
+        error?.name,
+        "RouterBootstrapError"
+      ),
+
+    message:
+      safeText(
+        error?.message || error,
+        "Error en bootstrap Router."
+      ),
+
+    code:
+      safeText(
+        error?.code ||
+          error?.status ||
+          error?.statusCode,
+        ""
+      ),
+  };
+}
+
+/* =========================================================
+   LOG / EMIT
+========================================================= */
+
+function safeLog(...args) {
+  try {
+    AppCore?.utils?.log?.(
+      "[AppRouter]",
+      ...args
+    );
+  } catch {}
+}
+
+function safeWarn(...args) {
+  try {
+    AppCore?.utils?.warn?.(
+      "[AppRouter]",
+      ...args
+    );
+  } catch {}
+
+  try {
+    console.warn(
+      "[AppRouter]",
+      ...args
+    );
+  } catch {}
+}
+
+function safeError(...args) {
+  try {
+    AppCore?.utils?.error?.(
+      "[AppRouter]",
+      ...args
+    );
+  } catch {}
+
+  try {
+    console.error(
+      "[AppRouter]",
+      ...args
+    );
+  } catch {}
+}
+
+function safeWindowDispatch(eventName, payload = {}) {
+  if (
+    !isBrowser() ||
+    !eventName
+  ) {
+    return false;
+  }
+
+  try {
+    window.dispatchEvent(
+      new CustomEvent(eventName, {
+        detail:
+          payload,
+      })
+    );
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
+function safeEmit(eventName, payload = {}) {
+  if (!eventName) {
+    return false;
+  }
+
+  let emitted = false;
+
+  try {
+    AppCore?.events?.emit?.(
+      eventName,
+      payload
+    );
+
+    emitted = true;
+  } catch {}
+
+  if (
+    safeWindowDispatch(
+      eventName,
+      payload
+    )
+  ) {
+    emitted = true;
+  }
+
+  return emitted;
+}
+
+/* =========================================================
+   PATH UTILS
+========================================================= */
 
 function getBaseOrigin() {
   if (
@@ -158,10 +319,11 @@ function getBaseOrigin() {
 }
 
 function normalizePathnameOnly(pathname = "/") {
-  let value = String(pathname || "/")
-    .trim()
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
+  let value =
+    String(pathname || "/")
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
 
   if (!value) {
     value = "/";
@@ -175,14 +337,17 @@ function normalizePathnameOnly(pathname = "/") {
     value.length > 1 &&
     value.endsWith("/")
   ) {
-    value = value.replace(/\/+$/g, "") || "/";
+    value =
+      value.replace(/\/+$/g, "") ||
+      "/";
   }
 
   return value;
 }
 
 function normalizeSearch(search = "") {
-  const value = String(search || "").trim();
+  const value =
+    String(search || "").trim();
 
   if (!value) {
     return "";
@@ -194,7 +359,8 @@ function normalizeSearch(search = "") {
 }
 
 function normalizeHash(hash = "") {
-  const value = String(hash || "").trim();
+  const value =
+    String(hash || "").trim();
 
   if (!value) {
     return "";
@@ -206,7 +372,8 @@ function normalizeHash(hash = "") {
 }
 
 function isHashRouterPath(value = "") {
-  const raw = String(value || "").trim();
+  const raw =
+    String(value || "").trim();
 
   return (
     raw.startsWith("#/") ||
@@ -215,7 +382,8 @@ function isHashRouterPath(value = "") {
 }
 
 function normalizeHashRouterPath(value = "") {
-  const raw = String(value || "").trim();
+  const raw =
+    String(value || "").trim();
 
   if (!raw) {
     return "/";
@@ -229,7 +397,8 @@ function normalizeHashRouterPath(value = "") {
 }
 
 function splitPath(value = "/") {
-  const raw = safeText(value, "/");
+  const raw =
+    safeText(value, "/");
 
   if (isHashRouterPath(raw)) {
     return splitPath(
@@ -241,24 +410,39 @@ function splitPath(value = "/") {
   let search = "";
   let hash = "";
 
-  const hashIndex = pathname.indexOf("#");
+  const hashIndex =
+    pathname.indexOf("#");
 
   if (hashIndex >= 0) {
-    hash = pathname.slice(hashIndex);
-    pathname = pathname.slice(0, hashIndex) || "/";
+    hash =
+      pathname.slice(hashIndex);
+
+    pathname =
+      pathname.slice(0, hashIndex) ||
+      "/";
   }
 
-  const searchIndex = pathname.indexOf("?");
+  const searchIndex =
+    pathname.indexOf("?");
 
   if (searchIndex >= 0) {
-    search = pathname.slice(searchIndex);
-    pathname = pathname.slice(0, searchIndex) || "/";
+    search =
+      pathname.slice(searchIndex);
+
+    pathname =
+      pathname.slice(0, searchIndex) ||
+      "/";
   }
 
   return {
-    pathname: normalizePathnameOnly(pathname),
-    search: normalizeSearch(search),
-    hash: normalizeHash(hash),
+    pathname:
+      normalizePathnameOnly(pathname),
+
+    search:
+      normalizeSearch(search),
+
+    hash:
+      normalizeHash(hash),
   };
 }
 
@@ -280,10 +464,11 @@ function normalizePath(path = "/") {
 
   try {
     if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
-      const parsed = new URL(
-        raw,
-        getBaseOrigin()
-      );
+      const parsed =
+        new URL(
+          raw,
+          getBaseOrigin()
+        );
 
       if (
         parsed.hash &&
@@ -309,14 +494,35 @@ function normalizePath(path = "/") {
   return `${pathname}${search}${hash}`;
 }
 
+function getCleanPath(path = "/") {
+  return splitPath(
+    normalizePath(path)
+  ).pathname;
+}
+
+function getBrowserHref() {
+  if (!isBrowser()) {
+    return "";
+  }
+
+  try {
+    return safeText(
+      window.location.href,
+      ""
+    );
+  } catch {
+    return "";
+  }
+}
+
 function getBrowserPath() {
   if (!isBrowser()) {
-    return "/";
+    return DEFAULT_ROUTE;
   }
 
   try {
     const pathname =
-      window.location.pathname || "/";
+      window.location.pathname || DEFAULT_ROUTE;
 
     const search =
       window.location.search || "";
@@ -337,27 +543,13 @@ function getBrowserPath() {
       `${pathname}${search}${hash}`
     );
   } catch {
-    return "/";
-  }
-}
-
-function getBrowserHref() {
-  if (!isBrowser()) {
-    return "";
-  }
-
-  try {
-    return safeText(
-      window.location.href,
-      ""
-    );
-  } catch {
-    return "";
+    return DEFAULT_ROUTE;
   }
 }
 
 function getPathFromUrlLike(value = "") {
-  const raw = safeText(value, "");
+  const raw =
+    safeText(value, "");
 
   if (!raw) {
     return "";
@@ -393,23 +585,80 @@ function getPathFromUrlLike(value = "") {
   }
 }
 
+function shouldUsePath(value) {
+  return (
+    typeof value === "string" &&
+    Boolean(value.trim())
+  );
+}
+
+/* =========================================================
+   TOKEN REDACTION
+========================================================= */
+
+function redactTokenInText(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  let output =
+    raw;
+
+  for (const config of PROTECTED_ROUTES) {
+    const path =
+      safeText(config?.path, "");
+
+    if (!path) {
+      continue;
+    }
+
+    const escapedPath =
+      path.replace(/\//g, "\\/");
+
+    try {
+      output = output.replace(
+        new RegExp(`(${escapedPath})\\/([^/?#\\s]+)`, "gi"),
+        "$1/***"
+      );
+    } catch {}
+
+    for (const name of config.tokenParamNames || []) {
+      try {
+        output = output.replace(
+          new RegExp(`([?&#]${name}=)([^&#\\s]+)`, "gi"),
+          "$1***"
+        );
+      } catch {}
+    }
+  }
+
+  try {
+    output = output.replace(
+      /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+      "$1***"
+    );
+  } catch {}
+
+  return output;
+}
+
 /* =========================================================
    PROTECTED TOKEN ROUTES
 ========================================================= */
 
-function getCleanPath(path = "/") {
-  return splitPath(
-    normalizePath(path)
-  ).pathname;
-}
-
 function matchesProtectedRoute(config, pathOrUrl = "") {
-  if (!config) {
+  if (!config?.path) {
     return false;
   }
 
-  const path = getPathFromUrlLike(pathOrUrl);
-  const cleanPath = getCleanPath(path);
+  const path =
+    getPathFromUrlLike(pathOrUrl);
+
+  const cleanPath =
+    getCleanPath(path);
 
   return (
     cleanPath === config.path ||
@@ -419,27 +668,34 @@ function matchesProtectedRoute(config, pathOrUrl = "") {
 
 function getProtectedRouteConfig(value = "") {
   return (
-    PROTECTED_PUBLIC_TOKEN_ROUTES.find((config) =>
-      matchesProtectedRoute(config, value)
+    PROTECTED_ROUTES.find((config) =>
+      matchesProtectedRoute(
+        config,
+        value
+      )
     ) || null
   );
 }
 
 function getPathToken(config, value = "") {
-  if (!config) {
+  if (!config?.path) {
     return "";
   }
 
-  const path = getPathFromUrlLike(value);
-  const cleanPath = getCleanPath(path);
+  const path =
+    getPathFromUrlLike(value);
+
+  const cleanPath =
+    getCleanPath(path);
 
   if (!cleanPath.startsWith(`${config.path}/`)) {
     return "";
   }
 
-  const token = cleanPath
-    .slice(`${config.path}/`.length)
-    .split("/")[0];
+  const token =
+    cleanPath
+      .slice(`${config.path}/`.length)
+      .split("/")[0];
 
   try {
     return safeText(
@@ -447,7 +703,10 @@ function getPathToken(config, value = "") {
       ""
     );
   } catch {
-    return safeText(token, "");
+    return safeText(
+      token,
+      ""
+    );
   }
 }
 
@@ -474,13 +733,19 @@ function hasProtectedTokenInUrlLike(config, value = "") {
     return false;
   }
 
-  const raw = safeText(value, "");
+  const raw =
+    safeText(value, "");
 
   if (!raw) {
     return false;
   }
 
-  if (getPathToken(config, raw)) {
+  if (
+    getPathToken(
+      config,
+      raw
+    )
+  ) {
     return true;
   }
 
@@ -494,7 +759,7 @@ function hasProtectedTokenInUrlLike(config, value = "") {
     if (
       hasTokenInSearch(
         parsed.search,
-        config.tokenParamNames
+        config.tokenParamNames || []
       )
     ) {
       return true;
@@ -505,11 +770,14 @@ function hasProtectedTokenInUrlLike(config, value = "") {
       parsed.hash.includes("?")
     ) {
       const query =
-        parsed.hash.split("?").slice(1).join("?");
+        parsed.hash
+          .split("?")
+          .slice(1)
+          .join("?");
 
       return hasTokenInSearch(
         query ? `?${query}` : "",
-        config.tokenParamNames
+        config.tokenParamNames || []
       );
     }
 
@@ -521,7 +789,7 @@ function hasProtectedTokenInUrlLike(config, value = "") {
     if (
       hasTokenInSearch(
         parts.search,
-        config.tokenParamNames
+        config.tokenParamNames || []
       )
     ) {
       return true;
@@ -532,11 +800,14 @@ function hasProtectedTokenInUrlLike(config, value = "") {
       parts.hash.includes("?")
     ) {
       const query =
-        parts.hash.split("?").slice(1).join("?");
+        parts.hash
+          .split("?")
+          .slice(1)
+          .join("?");
 
       return hasTokenInSearch(
         query ? `?${query}` : "",
-        config.tokenParamNames
+        config.tokenParamNames || []
       );
     }
 
@@ -548,118 +819,96 @@ function isProtectedPublicTokenPath(path = "") {
   const config =
     getProtectedRouteConfig(path);
 
-  if (!config) {
-    return false;
-  }
-
-  return hasProtectedTokenInUrlLike(
-    config,
-    path
+  return Boolean(
+    config &&
+    hasProtectedTokenInUrlLike(
+      config,
+      path
+    )
   );
-}
-
-function redactTokenInText(value = "") {
-  const raw = safeText(value, "");
-
-  if (!raw) {
-    return "";
-  }
-
-  let output = raw;
-
-  for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
-    const escapedPath =
-      config.path.replace(/\//g, "\\/");
-
-    output = output.replace(
-      new RegExp(`(${escapedPath})\\/([^/?#\\s]+)`, "gi"),
-      "$1/***"
-    );
-
-    for (const name of config.tokenParamNames) {
-      output = output.replace(
-        new RegExp(`([?&]${name}=)([^&#\\s]+)`, "gi"),
-        "$1***"
-      );
-    }
-  }
-
-  return output;
 }
 
 /* =========================================================
    INITIAL URL STORAGE
 ========================================================= */
 
-function getStoredInitialUrl(config) {
-  if (!isBrowser() || !config?.windowKey) {
+function getWindowValue(key = "") {
+  if (
+    !isBrowser() ||
+    !key
+  ) {
     return "";
   }
 
   try {
     return safeText(
-      window[config.windowKey],
+      window[key],
       ""
     );
   } catch {
     return "";
   }
+}
+
+function setWindowValue(key = "", value = "", onlyIfMissing = false) {
+  if (
+    !isBrowser() ||
+    !key
+  ) {
+    return false;
+  }
+
+  try {
+    if (
+      onlyIfMissing &&
+      window[key]
+    ) {
+      return true;
+    }
+
+    window[key] =
+      value;
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getStoredInitialUrl(config) {
+  return getWindowValue(
+    config?.windowKey || ""
+  );
 }
 
 function setStoredInitialUrl(config, value = "") {
-  if (!isBrowser() || !config?.windowKey) {
-    return false;
-  }
-
-  try {
-    window[config.windowKey] = value;
-    return true;
-  } catch {
-    return false;
-  }
+  return setWindowValue(
+    config?.windowKey || "",
+    value,
+    true
+  );
 }
 
 function getGlobalInitialUrl() {
-  if (!isBrowser()) {
-    return "";
-  }
-
-  try {
-    return safeText(
-      window.__ONION_INITIAL_URL__,
-      ""
-    );
-  } catch {
-    return "";
-  }
+  return getWindowValue(
+    INITIAL_URL_KEY
+  );
 }
 
 function setGlobalInitialUrl(value = "") {
-  if (!isBrowser()) {
-    return false;
-  }
-
-  try {
-    if (!window.__ONION_INITIAL_URL__) {
-      window.__ONION_INITIAL_URL__ = value;
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function getActivationInitialUrl() {
-  return getStoredInitialUrl(
-    PROTECTED_PUBLIC_TOKEN_ROUTES[0]
+  return setWindowValue(
+    INITIAL_URL_KEY,
+    value,
+    true
   );
 }
 
-function getResetConfirmInitialUrl() {
-  return getStoredInitialUrl(
-    PROTECTED_PUBLIC_TOKEN_ROUTES[1]
-  );
+function getProtectedStoredUrls() {
+  return PROTECTED_ROUTES
+    .map((config) =>
+      getStoredInitialUrl(config)
+    )
+    .filter(Boolean);
 }
 
 function captureInitialBrowserUrl() {
@@ -677,15 +926,48 @@ function captureInitialBrowserUrl() {
 
     setGlobalInitialUrl(href);
 
-    for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
+    let protectedCaptured =
+      false;
+
+    for (const config of PROTECTED_ROUTES) {
       if (
-        matchesProtectedRoute(config, href) &&
-        hasProtectedTokenInUrlLike(config, href) &&
+        matchesProtectedRoute(
+          config,
+          href
+        ) &&
+        hasProtectedTokenInUrlLike(
+          config,
+          href
+        ) &&
         !getStoredInitialUrl(config)
       ) {
-        setStoredInitialUrl(config, href);
+        setStoredInitialUrl(
+          config,
+          href
+        );
+
+        protectedCaptured =
+          true;
       }
     }
+
+    routerBootState.capturedInitialUrlAt =
+      Date.now();
+
+    safeEmit(
+      ROUTER_BOOT_EVENTS.initialUrlCaptured,
+      {
+        href:
+          redactTokenInText(href),
+
+        protectedCaptured,
+
+        at:
+          safeIsoDate(
+            routerBootState.capturedInitialUrlAt
+          ),
+      }
+    );
 
     return true;
   } catch {
@@ -693,18 +975,43 @@ function captureInitialBrowserUrl() {
   }
 }
 
-function resolveProtectedInitialPath() {
+function getStateInitialUrlCandidates() {
+  const state =
+    ensureObject(
+      AppCore?.state
+    );
+
+  return [
+    state[APP_STATE_KEYS?.bootProtectedInitialUrl],
+    state[APP_STATE_KEYS?.bootActivationInitialUrl],
+    state[APP_STATE_KEYS?.bootResetConfirmInitialUrl],
+    state.bootProtectedInitialUrl,
+    state.bootActivationInitialUrl,
+    state.bootResetConfirmInitialUrl,
+  ]
+    .map((value) =>
+      safeText(value, "")
+    )
+    .filter(Boolean);
+}
+
+function resolveProtectedInitialContext(value = "") {
   captureInitialBrowserUrl();
 
+  const explicit =
+    safeText(value, "");
+
   const candidates = [
-    ...PROTECTED_PUBLIC_TOKEN_ROUTES.map((config) =>
-      getStoredInitialUrl(config)
-    ),
+    explicit,
+    ...getProtectedStoredUrls(),
+    ...getStateInitialUrlCandidates(),
     getGlobalInitialUrl(),
     getBrowserHref(),
     getBrowserPath(),
   ]
-    .map((value) => safeText(value, ""))
+    .map((candidate) =>
+      safeText(candidate, "")
+    )
     .filter(Boolean);
 
   for (const candidate of candidates) {
@@ -724,30 +1031,99 @@ function resolveProtectedInitialPath() {
       continue;
     }
 
+    const path =
+      getPathFromUrlLike(candidate);
+
     return {
       config,
-      path:
-        getPathFromUrlLike(candidate),
+      key:
+        config.key || "",
+      path,
+      cleanPath:
+        getCleanPath(path),
       url:
         candidate,
+      hasToken:
+        true,
+      redactedPath:
+        redactTokenInText(path),
+      redactedUrl:
+        redactTokenInText(candidate),
     };
   }
 
   return {
-    config: null,
-    path: "",
-    url: "",
+    config:
+      null,
+    key:
+      "",
+    path:
+      "",
+    cleanPath:
+      "",
+    url:
+      "",
+    hasToken:
+      false,
+    redactedPath:
+      "",
+    redactedUrl:
+      "",
   };
+}
+
+function exposeInitialContextToCore(context = {}) {
+  const data =
+    ensureObject(context);
+
+  const payload = {
+    bootProtectedInitialUrl:
+      data.url || "",
+
+    bootProtectedInitialPath:
+      data.path || "",
+
+    bootIsPublicTokenRoute:
+      Boolean(data.config),
+
+    bootHasPublicToken:
+      Boolean(data.hasToken),
+
+    bootProtectedRouteKey:
+      data.key || "",
+  };
+
+  try {
+    AppCore?.setState?.(payload);
+  } catch {}
+
+  try {
+    if (
+      AppCore?.state &&
+      typeof AppCore.state === "object"
+    ) {
+      Object.assign(
+        AppCore.state,
+        payload
+      );
+    }
+  } catch {}
+
+  return payload;
 }
 
 function getSafeInitialPath() {
   const protectedInitial =
-    resolveProtectedInitialPath();
+    resolveProtectedInitialContext();
 
   if (
     protectedInitial.config &&
     protectedInitial.path
   ) {
+    exposeInitialContextToCore(
+      protectedInitial
+    );
+
     return protectedInitial.path;
   }
 
@@ -759,18 +1135,26 @@ function getSafeInitialPath() {
   }
 
   return normalizePath(
-    getCurrentPath(AppCore) ||
-      "/"
+    getCurrentPublicPath(
+      AppCore,
+      Router
+    ) ||
+      getCurrentPath(
+        AppCore
+      ) ||
+      DEFAULT_ROUTE
   );
 }
 
 function shouldProtectInitialHistory(path = "/") {
-  if (isProtectedPublicTokenPath(path)) {
+  if (
+    isProtectedPublicTokenPath(path)
+  ) {
     return true;
   }
 
   const protectedInitial =
-    resolveProtectedInitialPath();
+    resolveProtectedInitialContext(path);
 
   return Boolean(
     protectedInitial.config &&
@@ -778,101 +1162,261 @@ function shouldProtectInitialHistory(path = "/") {
   );
 }
 
-function shouldUsePath(value) {
-  return (
-    typeof value === "string" &&
-    value.trim()
-  );
-}
-
 /* =========================================================
    STATE SYNC
 ========================================================= */
 
-function syncResolvedRouteState(
-  fallbackPath = "/"
-) {
-  const resolvedCanonicalPath =
+function safeSetState(payload = {}) {
+  const cleanPayload =
+    ensureObject(payload);
+
+  try {
+    AppCore?.setState?.(
+      cleanPayload
+    );
+  } catch {}
+
+  try {
+    if (
+      AppCore?.state &&
+      typeof AppCore.state === "object"
+    ) {
+      Object.assign(
+        AppCore.state,
+        cleanPayload
+      );
+    }
+  } catch {}
+}
+
+function safeSetRoute(route = DEFAULT_ROUTE) {
+  const cleanRoute =
+    normalizePath(route || DEFAULT_ROUTE);
+
+  try {
+    AppCore?.setRoute?.(
+      cleanRoute
+    );
+  } catch {}
+
+  safeSetState({
+    route:
+      cleanRoute,
+  });
+
+  return cleanRoute;
+}
+
+function safeSetPublicPath(publicPath = DEFAULT_ROUTE) {
+  const cleanPublicPath =
+    normalizePath(publicPath || DEFAULT_ROUTE);
+
+  try {
+    AppCore?.setPublicPath?.(
+      cleanPublicPath
+    );
+  } catch {}
+
+  safeSetState({
+    publicPath:
+      cleanPublicPath,
+  });
+
+  return cleanPublicPath;
+}
+
+function syncResolvedRouteState(fallbackPath = DEFAULT_ROUTE, meta = {}) {
+  const target =
+    normalizePath(
+      fallbackPath || DEFAULT_ROUTE
+    );
+
+  const protectedContext =
+    meta.protectedContext?.config
+      ? meta.protectedContext
+      : resolveProtectedInitialContext(target);
+
+  let resolvedCanonicalPath =
     normalizePath(
       getCurrentCanonicalPath(
         AppCore,
         Router
       ) ||
-        fallbackPath ||
-        "/"
+        target ||
+        DEFAULT_ROUTE
     );
 
-  const resolvedPublicPath =
+  let resolvedPublicPath =
     normalizePath(
       getCurrentPublicPath(
         AppCore,
         Router
       ) ||
-        fallbackPath ||
-        resolvedCanonicalPath
+        target ||
+        resolvedCanonicalPath ||
+        DEFAULT_ROUTE
     );
 
-  try {
-    AppCore?.setRoute?.(
+  if (
+    protectedContext.config &&
+    protectedContext.path
+  ) {
+    const publicHasToken =
+      hasProtectedTokenInUrlLike(
+        protectedContext.config,
+        resolvedPublicPath
+      );
+
+    if (!publicHasToken) {
+      resolvedPublicPath =
+        normalizePath(
+          protectedContext.path
+        );
+    }
+
+    if (
+      !matchesProtectedRoute(
+        protectedContext.config,
+        resolvedCanonicalPath
+      )
+    ) {
+      resolvedCanonicalPath =
+        normalizePath(
+          protectedContext.cleanPath ||
+            getCleanPath(protectedContext.path) ||
+            protectedContext.config.path
+        );
+    }
+  }
+
+  const route =
+    safeSetRoute(
       resolvedCanonicalPath
     );
-  } catch {}
 
-  try {
-    AppCore?.setPublicPath?.(
+  const publicPath =
+    safeSetPublicPath(
       resolvedPublicPath
     );
-  } catch {}
 
-  try {
-    AppCore?.setState?.({
-      route:
-        resolvedCanonicalPath,
-      publicPath:
-        resolvedPublicPath,
-    });
-  } catch {}
-
-  return {
+  const payload = {
     canonicalPath:
-      resolvedCanonicalPath,
-    publicPath:
-      resolvedPublicPath,
+      route,
+
+    publicPath,
+
+    protectedRouteKey:
+      protectedContext.key || "",
+
+    protectedInitialUrl:
+      protectedContext.url || "",
+
+    protectedInitialPath:
+      protectedContext.path || "",
   };
+
+  routerBootState.lastResolvedCanonicalPath =
+    route;
+
+  routerBootState.lastResolvedPublicPath =
+    publicPath;
+
+  safeEmit(
+    ROUTER_BOOT_EVENTS.stateSynced,
+    {
+      ...payload,
+      canonicalPath:
+        redactTokenInText(route),
+      publicPath:
+        redactTokenInText(publicPath),
+      protectedInitialUrl:
+        redactTokenInText(payload.protectedInitialUrl),
+      protectedInitialPath:
+        redactTokenInText(payload.protectedInitialPath),
+    }
+  );
+
+  return payload;
 }
 
-function markInitialRenderDone(
-  value = true
-) {
+function markInitialRenderDone(value = true) {
   firstRenderDone =
     Boolean(value);
 
-  try {
-    AppCore?.setState?.({
-      initialRouteRendered:
-        Boolean(value),
-    });
-  } catch {}
+  safeSetState({
+    initialRouteRendered:
+      Boolean(value),
+  });
 }
 
-function getRenderOptions(path = "/") {
+/* =========================================================
+   RENDER OPTIONS
+========================================================= */
+
+function getRenderOptions(path = DEFAULT_ROUTE, meta = {}) {
+  const protectedContext =
+    meta.protectedContext?.config
+      ? meta.protectedContext
+      : resolveProtectedInitialContext(path);
+
   if (
-    shouldProtectInitialHistory(path)
+    protectedContext.config &&
+    protectedContext.hasToken
   ) {
     return {
-      skipHistory: true,
-      preservePath: true,
-      replaceState: false,
-      force: true,
-      initialRender: true,
-      protectedInitialUrl: true,
+      skipHistory:
+        true,
+
+      preservePath:
+        true,
+
+      preserveUrl:
+        true,
+
+      preserveSearch:
+        true,
+
+      preserveHash:
+        true,
+
+      replaceState:
+        false,
+
+      force:
+        true,
+
+      initialRender:
+        true,
+
+      protectedInitialUrl:
+        true,
+
+      protectedRouteKey:
+        protectedContext.key || "",
+
+      protectedInitialPath:
+        protectedContext.path || "",
+
+      protectedInitialUrlValue:
+        protectedContext.url || "",
+
+      source:
+        "app-router-bootstrap",
     };
   }
 
   return {
-    replaceState: true,
-    force: true,
-    initialRender: true,
+    replaceState:
+      true,
+
+    force:
+      true,
+
+    initialRender:
+      true,
+
+    source:
+      "app-router-bootstrap",
   };
 }
 
@@ -886,10 +1430,40 @@ captureInitialBrowserUrl();
    CONFIGURE
 ========================================================= */
 
+function exposeRouterToCore() {
+  try {
+    AppCore.Router =
+      Router;
+  } catch {}
+
+  try {
+    AppCore.router =
+      Router;
+  } catch {}
+
+  try {
+    AppCore.modules =
+      AppCore.modules || {};
+
+    AppCore.modules.Router =
+      Router;
+
+    AppCore.modules.router =
+      Router;
+  } catch {}
+
+  return true;
+}
+
 export function configureRouter() {
+  captureInitialBrowserUrl();
+
   if (configured) {
+    exposeRouterToCore();
     return Router;
   }
+
+  exposeRouterToCore();
 
   try {
     if (
@@ -898,22 +1472,49 @@ export function configureRouter() {
       )
     ) {
       Router.configure({
-        core: AppCore,
-        auth: Auth,
+        core:
+          AppCore,
+
+        AppCore,
+
+        auth:
+          Auth,
+
+        Auth,
+
+        source:
+          "app-router-bootstrap",
       });
     }
 
-    configured = true;
+    configured =
+      true;
+
+    safeEmit(
+      ROUTER_BOOT_EVENTS.configured,
+      {
+        configured:
+          true,
+
+        at:
+          safeIsoDate(),
+      }
+    );
 
     safeLog(
       "Router configurado."
     );
   } catch (error) {
+    routerBootState.lastRenderError =
+      normalizeError(error);
+
     safeError(
       "Error configurando Router:",
       error
     );
   }
+
+  exposeRouterToCore();
 
   return Router;
 }
@@ -923,11 +1524,15 @@ export function configureRouter() {
 ========================================================= */
 
 export function bindRouter() {
+  captureInitialBrowserUrl();
   configureRouter();
 
   if (bound) {
     return Router;
   }
+
+  const protectedInitial =
+    resolveProtectedInitialContext();
 
   try {
     if (
@@ -935,15 +1540,73 @@ export function bindRouter() {
         Router?.bind
       )
     ) {
-      Router.bind();
+      Router.bind({
+        core:
+          AppCore,
+
+        auth:
+          Auth,
+
+        initialRenderDone:
+          Boolean(firstRenderDone),
+
+        protectedInitialUrl:
+          Boolean(protectedInitial.config),
+
+        protectedRouteKey:
+          protectedInitial.key || "",
+
+        protectedInitialPath:
+          protectedInitial.path || "",
+
+        preserveInitialUrl:
+          Boolean(protectedInitial.config),
+
+        source:
+          "app-router-bootstrap",
+      });
     }
 
-    bound = true;
+    bound =
+      true;
+
+    safeEmit(
+      ROUTER_BOOT_EVENTS.bound,
+      {
+        bound:
+          true,
+
+        initialRenderDone:
+          Boolean(firstRenderDone),
+
+        protectedInitialUrl:
+          Boolean(protectedInitial.config),
+
+        protectedRouteKey:
+          protectedInitial.key || "",
+
+        at:
+          safeIsoDate(),
+      }
+    );
 
     safeLog(
-      "Router listeners activos."
+      "Router listeners activos.",
+      {
+        initialRenderDone:
+          Boolean(firstRenderDone),
+
+        protectedInitialUrl:
+          Boolean(protectedInitial.config),
+
+        protectedRouteKey:
+          protectedInitial.key || "",
+      }
     );
   } catch (error) {
+    routerBootState.lastRenderError =
+      normalizeError(error);
+
     safeError(
       "Error bind Router:",
       error
@@ -957,15 +1620,81 @@ export function bindRouter() {
    INTERNAL RENDER
 ========================================================= */
 
-async function runInitialRender(
-  path = "/",
-  cycleId = 0
-) {
+async function runInitialRender(path = DEFAULT_ROUTE, cycleId = 0, meta = {}) {
   const target =
-    normalizePath(path);
+    normalizePath(path || DEFAULT_ROUTE);
+
+  const protectedContext =
+    meta.protectedContext?.config
+      ? meta.protectedContext
+      : resolveProtectedInitialContext(target);
 
   const options =
-    getRenderOptions(target);
+    getRenderOptions(
+      target,
+      {
+        protectedContext,
+      }
+    );
+
+  routerBootState.lastInitialPath =
+    target;
+
+  routerBootState.lastProtectedRouteKey =
+    protectedContext.key || "";
+
+  safeEmit(
+    ROUTER_BOOT_EVENTS.initialRenderStart,
+    {
+      target:
+        redactTokenInText(target),
+
+      options:
+        {
+          ...options,
+          protectedInitialPath:
+            redactTokenInText(
+              options.protectedInitialPath || ""
+            ),
+          protectedInitialUrlValue:
+            redactTokenInText(
+              options.protectedInitialUrlValue || ""
+            ),
+        },
+
+      cycleId,
+
+      protectedRouteKey:
+        protectedContext.key || "",
+
+      at:
+        safeIsoDate(),
+    }
+  );
+
+  if (
+    !isFunction(
+      Router?.render
+    )
+  ) {
+    safeWarn(
+      "Router.render no disponible. Se sincroniza estado mínimo."
+    );
+
+    syncResolvedRouteState(
+      target,
+      {
+        protectedContext,
+      }
+    );
+
+    applyPostRenderLoaderPolicy({
+      AppCore,
+      Router,
+    });
+
+    return false;
+  }
 
   await Promise.resolve(
     Router.render(
@@ -977,21 +1706,86 @@ async function runInitialRender(
   if (
     cycleId !== renderCycle
   ) {
+    safeWarn(
+      "Render inicial stale omitido.",
+      {
+        cycleId,
+        activeCycle:
+          renderCycle,
+      }
+    );
+
     return false;
   }
 
   const resolved =
     syncResolvedRouteState(
-      target
+      target,
+      {
+        protectedContext,
+      }
     );
 
-  applyPostRenderLoaderPolicy({
-    AppCore,
-    Router,
-  });
+  try {
+    applyPostRenderLoaderPolicy({
+      AppCore,
+      Router,
+    });
+  } catch (error) {
+    safeWarn(
+      "applyPostRenderLoaderPolicy() falló.",
+      error
+    );
+  }
 
   markInitialRenderDone(
     true
+  );
+
+  routerBootState.lastRenderedPath =
+    target;
+
+  routerBootState.lastRenderAt =
+    Date.now();
+
+  routerBootState.lastRenderOk =
+    true;
+
+  routerBootState.lastRenderError =
+    null;
+
+  safeEmit(
+    ROUTER_BOOT_EVENTS.initialRenderDone,
+    {
+      ok:
+        true,
+
+      target:
+        redactTokenInText(target),
+
+      resolved:
+        {
+          canonicalPath:
+            redactTokenInText(
+              resolved.canonicalPath
+            ),
+
+          publicPath:
+            redactTokenInText(
+              resolved.publicPath
+            ),
+        },
+
+      cycleId,
+
+      protectedRouteKey:
+        protectedContext.key || "",
+
+      at:
+        safeIsoDate(
+          routerBootState.lastRenderAt
+        ),
+    }
   );
 
   safeLog(
@@ -999,13 +1793,32 @@ async function runInitialRender(
     {
       target:
         redactTokenInText(target),
-      options,
-      resolved: {
-        canonicalPath:
-          redactTokenInText(resolved.canonicalPath),
-        publicPath:
-          redactTokenInText(resolved.publicPath),
-      },
+
+      options:
+        {
+          ...options,
+          protectedInitialPath:
+            redactTokenInText(
+              options.protectedInitialPath || ""
+            ),
+          protectedInitialUrlValue:
+            redactTokenInText(
+              options.protectedInitialUrlValue || ""
+            ),
+        },
+
+      resolved:
+        {
+          canonicalPath:
+            redactTokenInText(
+              resolved.canonicalPath
+            ),
+
+          publicPath:
+            redactTokenInText(
+              resolved.publicPath
+            ),
+        },
     }
   );
 
@@ -1019,23 +1832,43 @@ async function runInitialRender(
 export async function renderInitialRoute() {
   /*
     CRÍTICO:
-    Capturamos el path ANTES de bindRouter().
-    Router.bind() puede inicializar History y tocar replaceState.
+    NO llamar bindRouter() aquí.
+
+    El orden correcto en src/app/index.js es:
+    1. configureRouter()
+    2. renderInitialRoute()
+    3. bindRouter()
+
+    Router.bind() puede inicializar History/popstate y tocar replaceState.
+    Por eso el primer render debe decidirse con la URL capturada antes.
   */
+
+  captureInitialBrowserUrl();
+  configureRouter();
+
   const initialPathBeforeBind =
     getSafeInitialPath();
 
-  bindRouter();
+  if (firstRenderDone) {
+    safeLog(
+      "renderInitialRoute omitido: primer render ya completado.",
+      {
+        route:
+          redactTokenInText(
+            AppCore?.state?.route || DEFAULT_ROUTE
+          ),
 
-  if (
-    firstRenderDone
-  ) {
+        publicPath:
+          redactTokenInText(
+            AppCore?.state?.publicPath || DEFAULT_ROUTE
+          ),
+      }
+    );
+
     return true;
   }
 
-  if (
-    initialRenderPromise
-  ) {
+  if (initialRenderPromise) {
     return initialRenderPromise;
   }
 
@@ -1048,8 +1881,11 @@ export async function renderInitialRoute() {
         normalizePath(
           initialPathBeforeBind ||
             getSafeInitialPath() ||
-            "/"
+            DEFAULT_ROUTE
         );
+
+      const protectedContext =
+        resolveProtectedInitialContext(path);
 
       try {
         safeLog(
@@ -1057,54 +1893,135 @@ export async function renderInitialRoute() {
           {
             path:
               redactTokenInText(path),
+
             protectedInitialUrl:
-              shouldProtectInitialHistory(path),
+              Boolean(protectedContext.config),
+
+            protectedRouteKey:
+              protectedContext.key || "",
+
             initialUrl:
-              redactTokenInText(getGlobalInitialUrl()),
-            activationInitialUrl:
-              redactTokenInText(getActivationInitialUrl()),
-            resetConfirmInitialUrl:
-              redactTokenInText(getResetConfirmInitialUrl()),
+              redactTokenInText(
+                getGlobalInitialUrl()
+              ),
+
+            protectedInitialPath:
+              redactTokenInText(
+                protectedContext.path || ""
+              ),
           }
         );
 
         const ok =
           await runInitialRender(
             path,
-            cycleId
+            cycleId,
+            {
+              protectedContext,
+            }
           );
 
-        if (ok) {
-          return true;
-        }
-
-        return false;
+        return Boolean(ok);
       } catch (error) {
+        routerBootState.lastRenderOk =
+          false;
+
+        routerBootState.lastRenderError =
+          normalizeError(error);
+
+        safeEmit(
+          ROUTER_BOOT_EVENTS.initialRenderError,
+          {
+            path:
+              redactTokenInText(path),
+
+            protectedInitialUrl:
+              Boolean(protectedContext.config),
+
+            protectedRouteKey:
+              protectedContext.key || "",
+
+            error:
+              routerBootState.lastRenderError,
+
+            at:
+              safeIsoDate(),
+          }
+        );
+
         safeWarn(
-          "Fallo render inicial. Fallback '/'.",
-          error
+          "Fallo render inicial.",
+          {
+            path:
+              redactTokenInText(path),
+
+            protectedInitialUrl:
+              Boolean(protectedContext.config),
+
+            protectedRouteKey:
+              protectedContext.key || "",
+
+            error,
+          }
         );
 
         try {
           const fallback =
-            shouldUsePath("/")
-              ? "/"
-              : path;
+            protectedContext.config?.path
+              ? protectedContext.config.path
+              : shouldUsePath(DEFAULT_ROUTE)
+                ? DEFAULT_ROUTE
+                : LOGIN_ROUTE;
+
+          safeEmit(
+            ROUTER_BOOT_EVENTS.initialRenderFallback,
+            {
+              from:
+                redactTokenInText(path),
+
+              to:
+                redactTokenInText(fallback),
+
+              protectedInitialUrl:
+                Boolean(protectedContext.config),
+
+              protectedRouteKey:
+                protectedContext.key || "",
+
+              at:
+                safeIsoDate(),
+            }
+          );
 
           const ok =
             await runInitialRender(
               fallback,
-              cycleId
+              cycleId,
+              {
+                protectedContext,
+                fallbackFor:
+                  path,
+              }
             );
 
           if (ok) {
             safeLog(
-              "Fallback render inicial completado."
+              "Fallback render inicial completado.",
+              {
+                fallback:
+                  redactTokenInText(fallback),
+              }
             );
           }
 
-          return ok;
+          return Boolean(ok);
         } catch (fatal) {
+          routerBootState.lastRenderOk =
+            false;
+
+          routerBootState.lastRenderError =
+            normalizeError(fatal);
+
           safeError(
             "Render inicial fatal:",
             fatal
@@ -1129,74 +2046,194 @@ export async function renderInitialRoute() {
    RESET / DEBUG
 ========================================================= */
 
-export function resetRouterBootstrap() {
-  firstRenderDone = false;
-  initialRenderPromise = null;
-  renderCycle = 0;
+export function resetRouterBootstrap(options = {}) {
+  const {
+    resetConfigured = false,
+    resetBound = false,
+  } = ensureObject(options);
 
-  try {
-    AppCore?.setState?.({
-      initialRouteRendered: false,
-    });
-  } catch {}
+  firstRenderDone =
+    false;
+
+  initialRenderPromise =
+    null;
+
+  renderCycle =
+    0;
+
+  if (resetConfigured) {
+    configured =
+      false;
+  }
+
+  if (resetBound) {
+    bound =
+      false;
+  }
+
+  routerBootState.lastInitialPath =
+    "";
+
+  routerBootState.lastRenderedPath =
+    "";
+
+  routerBootState.lastResolvedCanonicalPath =
+    "";
+
+  routerBootState.lastResolvedPublicPath =
+    "";
+
+  routerBootState.lastRenderAt =
+    0;
+
+  routerBootState.lastRenderOk =
+    false;
+
+  routerBootState.lastRenderError =
+    null;
+
+  routerBootState.lastProtectedRouteKey =
+    "";
+
+  safeSetState({
+    initialRouteRendered:
+      false,
+  });
 
   return true;
 }
 
 export function getRouterBootstrapState() {
   const protectedInitial =
-    resolveProtectedInitialPath();
+    resolveProtectedInitialContext();
+
+  let routerSnapshot =
+    null;
+
+  try {
+    routerSnapshot =
+      Router?.getSnapshot?.() ||
+      null;
+  } catch {}
 
   return {
-    configured,
-    bound,
-    firstRenderDone,
+    configured:
+      Boolean(configured),
+
+    bound:
+      Boolean(bound),
+
+    firstRenderDone:
+      Boolean(firstRenderDone),
+
     initialRenderInFlight:
-      Boolean(
-        initialRenderPromise
-      ),
-    renderCycle,
+      Boolean(initialRenderPromise),
+
+    renderCycle:
+      safeNumber(renderCycle, 0),
 
     route:
-      AppCore?.state?.route || "/",
+      redactTokenInText(
+        AppCore?.state?.route || DEFAULT_ROUTE
+      ),
 
     publicPath:
-      AppCore?.state?.publicPath || "/",
+      redactTokenInText(
+        AppCore?.state?.publicPath || DEFAULT_ROUTE
+      ),
 
     initialUrl:
       redactTokenInText(
         getGlobalInitialUrl()
       ),
 
-    activationInitialUrl:
+    protectedInitialUrl:
       redactTokenInText(
-        getActivationInitialUrl()
-      ),
-
-    resetConfirmInitialUrl:
-      redactTokenInText(
-        getResetConfirmInitialUrl()
+        protectedInitial.url || ""
       ),
 
     protectedInitialPath:
       redactTokenInText(
-        protectedInitial.path
+        protectedInitial.path || ""
       ),
 
     protectedInitialRouteKey:
-      protectedInitial.config?.key || "",
+      protectedInitial.key || "",
+
+    hasProtectedInitialToken:
+      Boolean(
+        protectedInitial.config &&
+        protectedInitial.hasToken
+      ),
 
     currentBrowserPath:
       redactTokenInText(
         getBrowserPath()
       ),
+
+    browserHref:
+      redactTokenInText(
+        getBrowserHref()
+      ),
+
+    lastInitialPath:
+      redactTokenInText(
+        routerBootState.lastInitialPath
+      ),
+
+    lastRenderedPath:
+      redactTokenInText(
+        routerBootState.lastRenderedPath
+      ),
+
+    lastResolvedCanonicalPath:
+      redactTokenInText(
+        routerBootState.lastResolvedCanonicalPath
+      ),
+
+    lastResolvedPublicPath:
+      redactTokenInText(
+        routerBootState.lastResolvedPublicPath
+      ),
+
+    lastRenderAt:
+      routerBootState.lastRenderAt,
+
+    lastRenderAtIso:
+      routerBootState.lastRenderAt
+        ? safeIsoDate(routerBootState.lastRenderAt)
+        : "",
+
+    lastRenderOk:
+      Boolean(routerBootState.lastRenderOk),
+
+    lastRenderError:
+      routerBootState.lastRenderError,
+
+    lastProtectedRouteKey:
+      routerBootState.lastProtectedRouteKey,
+
+    capturedInitialUrlAt:
+      routerBootState.capturedInitialUrlAt,
+
+    capturedInitialUrlAtIso:
+      routerBootState.capturedInitialUrlAt
+        ? safeIsoDate(routerBootState.capturedInitialUrlAt)
+        : "",
+
+    routerSnapshot,
   };
 }
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
 export default {
   configureRouter,
   bindRouter,
   renderInitialRoute,
+
   resetRouterBootstrap,
   getRouterBootstrapState,
 };
